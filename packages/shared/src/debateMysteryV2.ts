@@ -401,6 +401,9 @@ export interface DebateMysteryDialogueGraphV2 {
   repeatResponseNodeIdsByTopic?: Record<string, string[]>;
   presentNodeIdsBySuspect: Record<string, string[]>;
   prosecutorStrategyNodeId?: string;
+  /** Compatibility-only nodes retained by cases compiled before Court
+   * argument ownership moved entirely to Defense Counsel. Current runtime
+   * never inserts these generic defendant interjections. */
   defendantReactionNodeIdsBySeat?: Record<
     string,
     { testimony: string; objection: string; evidence: string }
@@ -536,6 +539,192 @@ export type DebateMysteryRoomIntroductionPhaseV2 =
   | "casekeeper"
   | "persona"
   | "complete";
+
+export interface DebateMysteryRoomNarrationAppearanceV2 {
+  description?: string | null;
+  style?: string | null;
+  presence?: string | null;
+  pronouns?: string | null;
+}
+
+const MYSTERY_NARRATION_NAME_TOKEN_STOPWORDS_V2 = new Set([
+  "a", "an", "captain", "doctor", "dr", "lady", "lord", "mr", "mrs", "ms", "sir", "the",
+]);
+
+function mysteryNarrationNamePartsV2(
+  personaName: string | null | undefined,
+): string[] {
+  const name = personaName?.replace(/\s+/gu, " ").trim() ?? "";
+  if (!name) return [];
+  const tokens = name.match(/[\p{L}\p{N}][\p{L}\p{N}'’.-]*/gu) ?? [];
+  return [
+    name,
+    ...tokens.filter((token) =>
+      !MYSTERY_NARRATION_NAME_TOKEN_STOPWORDS_V2.has(token.toLocaleLowerCase())),
+  ].sort((left, right) => right.length - left.length);
+}
+
+export function debateMysteryRoomNarrationNamesPersonaV2(
+  value: string | null | undefined,
+  personaName: string | null | undefined,
+): boolean {
+  const text = value?.replace(/\s+/gu, " ").trim() ?? "";
+  return Boolean(text) && mysteryNarrationNamePartsV2(personaName).some((part) => {
+    const escaped = part.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?:['’]s)?(?![\\p{L}\\p{N}])`, "iu").test(text);
+  });
+}
+
+function cleanMysteryNarrationFragmentV2(
+  value: string | null | undefined,
+  personaName: string | null | undefined,
+  maxLength = 240,
+): string {
+  let text = (value ?? "")
+    .replace(/[\r\n]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .replace(/^[-–—\s]+/u, "")
+    .trim();
+  for (const part of mysteryNarrationNamePartsV2(personaName)) {
+    const escaped = part.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    text = text.replace(
+      new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?:['’]s)?(?![\\p{L}\\p{N}])`, "giu"),
+      "",
+    );
+  }
+  text = text
+    .replace(/\s+([,.;:!?])/gu, "$1")
+    .replace(/^(?:has|had|wears?|wore)\s+/iu, "")
+    .replace(/^(?:is|was)\s+(?:an?\s+)?/iu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return text
+    .slice(0, maxLength)
+    .replace(/[.!?;:\s]+$/u, "")
+    .trim();
+}
+
+function mysteryNarrationDescriptionV2(
+  appearance: DebateMysteryRoomNarrationAppearanceV2 | null | undefined,
+  personaName: string | null | undefined,
+): string {
+  const description = cleanMysteryNarrationFragmentV2(
+    appearance?.description,
+    personaName,
+  ).split(/[.;]/u)[0]?.trim() ?? "";
+  if (!description) return "A solitary figure";
+
+  const details = description
+    .split(",")
+    .map((detail) => detail.trim())
+    .filter((detail, index) => Boolean(detail) && (
+      index === 0 || !/^(?:always|commonly|often|typically|usually)\b/iu.test(detail)
+    ))
+    .slice(0, 3)
+    .join(", ");
+  if (!details) return "A solitary figure";
+  if (/^(?:a|an|the)\b/iu.test(details)) {
+    return `${details.charAt(0).toLocaleUpperCase()}${details.slice(1)}`;
+  }
+  if (
+    /\b(?:android|animal|artist|attorney|being|boy|cat|child|creature|detective|doctor|dog|engineer|figure|ghost|girl|human|inventor|lawyer|man|person|professor|raccoon|robot|scientist|spirit|sponge|teacher|woman)\b/iu.test(details)
+  ) {
+    const article = /^[aeiou]/iu.test(details) ? "An" : "A";
+    const trailingModifier = details.split(",").at(-1)?.trim() ?? "";
+    const closingComma = /^(?:aged|clad|dressed|marked|scarred|weathered|worn)\b/iu.test(trailingModifier)
+      ? ","
+      : "";
+    return `${article} ${details}${closingComma}`;
+  }
+  return `A figure with ${details.charAt(0).toLocaleLowerCase()}${details.slice(1)}`;
+}
+
+type MysteryNarrationPresenceV2 = "focused" | "restless" | "solemn" | "unreadable" | "watchful";
+
+function mysteryNarrationPresenceV2(
+  appearance: DebateMysteryRoomNarrationAppearanceV2 | null | undefined,
+): MysteryNarrationPresenceV2 {
+  const cues = `${appearance?.presence ?? ""} ${appearance?.description ?? ""}`.toLocaleLowerCase();
+  if (/\b(?:animated|energetic|fidget|nervous|playful|quick|restless)\b/u.test(cues)) return "restless";
+  if (/\b(?:distant|enigmatic|haunting|mysterious|shadowed|unreadable)\b/u.test(cues)) return "unreadable";
+  if (/\b(?:calm|composed|gentle|patient|quiet|reserved|soft|solemn|steady)\b/u.test(cues)) return "solemn";
+  if (/\b(?:authoritative|commanding|confident|formidable|intense|severe|sharp|uncompromising)\b/u.test(cues)) return "focused";
+  return "watchful";
+}
+
+function mysteryNarrationActionV2(
+  fixtureLabels: readonly string[],
+  presence: MysteryNarrationPresenceV2,
+): string {
+  const fixtures = fixtureLabels.join(" ").toLocaleLowerCase();
+  if (/\bwindow\b/u.test(fixtures)) {
+    if (presence === "restless") return "watches the window's reflection, never quite holding still";
+    if (presence === "unreadable") return "watches the dark beyond the window without moving";
+    if (presence === "focused") return "stands framed by the window, surveying the room in silence";
+    if (presence === "solemn") return "stares solemnly through the window";
+    return "looks out through the window in thoughtful silence";
+  }
+  if (/\bmirror\b/u.test(fixtures)) {
+    if (presence === "restless") return "catches the mirror's reflection, then looks quickly away";
+    if (presence === "unreadable") return "studies the mirror with an unreadable expression";
+    if (presence === "focused") return "meets the mirror's reflection without flinching";
+    if (presence === "solemn") return "studies the mirror in grave silence";
+    return "pauses before the mirror, lost in thought";
+  }
+  if (/\b(?:fireplace|mantel|hearth)\b/u.test(fixtures)) {
+    if (presence === "restless") return "paces once before the fireplace, then turns sharply back";
+    if (presence === "focused") return "holds their ground beside the fireplace";
+    return "waits beside the fireplace as the room settles around them";
+  }
+  if (/\b(?:desk|table|workbench)\b/u.test(fixtures)) {
+    if (presence === "restless") return "traces the edge of the nearest table, attention moving everywhere at once";
+    if (presence === "focused") return "stands at the nearest table, posture fixed and deliberate";
+    if (presence === "unreadable") return "rests one hand near the table and gives nothing away";
+    return "waits beside the nearest table in measured silence";
+  }
+  if (/\b(?:bookcase|bookshelf|shelf|stacks)\b/u.test(fixtures)) {
+    if (presence === "restless") return "moves between the shelves, then stops at the sound of your approach";
+    if (presence === "focused") return "stands motionless between the shelves, already watching you";
+    return "lingers among the shelves in quiet contemplation";
+  }
+  if (/\bdoor\b/u.test(fixtures)) {
+    if (presence === "restless") return "keeps close to the door, listening for movement beyond it";
+    if (presence === "focused") return "stands between you and the door, perfectly composed";
+    return "waits near the closed door, listening to the house breathe";
+  }
+  if (presence === "restless") return "turns at your approach, restless attention snapping into focus";
+  if (presence === "unreadable") return "lingers at the room's edge in unreadable silence";
+  if (presence === "focused") return "stands perfectly still, watching your approach";
+  if (presence === "solemn") return "waits in composed silence";
+  return "turns slowly to acknowledge your arrival";
+}
+
+/**
+ * A stable, name-free Casekeeper tableau assembled only from the frozen/public
+ * appearance profile and visible room fixtures. It contains no case facts and
+ * is safe to persist in the replay graph before the persona speaks.
+ */
+export function debateMysteryRoomNarrationTextV2(args: {
+  appearance?: DebateMysteryRoomNarrationAppearanceV2 | null;
+  fixtureLabels?: readonly string[];
+  personaName?: string | null;
+}): string {
+  const subject = mysteryNarrationDescriptionV2(args.appearance, args.personaName);
+  const presence = mysteryNarrationPresenceV2(args.appearance);
+  const action = mysteryNarrationActionV2(args.fixtureLabels ?? [], presence);
+  const presenceDetail = cleanMysteryNarrationFragmentV2(
+    args.appearance?.presence,
+    args.personaName,
+    100,
+  ).split(/[.;]/u)[0]?.trim() ?? "";
+  const adjectivePresence = /^(?:authoritative|calm|commanding|composed|confident|distant|enigmatic|formidable|gentle|intense|mysterious|patient|quiet|reserved|severe|sharp|soft|solemn|steady|uncompromising|unreadable)\b/iu.test(presenceDetail)
+    ? presenceDetail
+    : "";
+  const ending = adjectivePresence
+    ? `—${adjectivePresence.charAt(0).toLocaleLowerCase()}${adjectivePresence.slice(1)}.`
+    : ".";
+  return `${subject} ${action}${ending}`.slice(0, 420);
+}
 
 export interface DebateMysteryPublicRecordItemV2 {
   reference: DebateMysteryRecordReferenceV2;
@@ -1095,11 +1284,15 @@ export function validateDebateMysteryDialogueGraphV2(args: {
     if (
       casekeeper?.kind !== "room_introduction" ||
       casekeeperLine?.mode !== "text_only" ||
-      casekeeperLine.visibleText !== "..." ||
+      casekeeperLine.speakerKind !== "narrator" ||
+      casekeeperLine.speakerBotId !== null ||
+      !casekeeperLine.visibleText.trim() ||
+      casekeeperLine.visibleText !== casekeeperLine.spokenText ||
+      Boolean(casekeeperLine.stageActionText?.trim()) ||
       casekeeper.nextNodeIds.length !== 1 ||
       casekeeper.nextNodeIds[0] !== introduction.personaNodeId
     ) {
-      errors.push(`Room introduction ${roomId} has no exact silent Casekeeper beat.`);
+      errors.push(`Room introduction ${roomId} has no exact text-only Casekeeper tableau.`);
     }
     if (
       persona?.kind !== "room_introduction" ||

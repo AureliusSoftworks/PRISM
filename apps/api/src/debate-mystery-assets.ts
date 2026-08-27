@@ -51,6 +51,33 @@ export interface DebateMysteryAssetVisionReviewV1 {
   reviewer: string;
 }
 
+const SPECULATIVE_MYSTERY_ASSET_REVIEW_REASON =
+  /\b(?:could(?!\s+not\b)|may|might|perhaps|possib(?:le|ly)|potential(?:ly)?|seem(?:s|ed)?|suggest(?:s|ed)?|uncertain(?:ty)?)\b/iu;
+const CONCRETE_MYSTERY_ASSET_REVIEW_FINDING =
+  /\b(?:appear(?:s|ed)?|cannot|can['’]t|could\s+not|couldn['’]t|did\s+not|does\s+not|do\s+not|fail(?:s|ed)?\s+to|contain(?:s|ed)?|include(?:s|d)?|show(?:s|ed)?|depict(?:s|ed)?|has|visible|cropped|rotated|misaligned|distorted|duplicated|pixelated)\b/iu;
+
+/**
+ * Vision reviewers sometimes contradict the validation contract by returning a
+ * negative decision whose only reasons are hedged possibilities. Treat those
+ * as non-findings while preserving every concrete, observable defect.
+ */
+export function normalizeDebateMysteryAssetVisionReviewV1(
+  review: DebateMysteryAssetVisionReviewV1,
+): DebateMysteryAssetVisionReviewV1 {
+  if (review.approved) {
+    return { ...review, approved: true, reasons: [] };
+  }
+  const reasons = review.reasons.filter(
+    (reason) =>
+      !SPECULATIVE_MYSTERY_ASSET_REVIEW_REASON.test(reason) ||
+      CONCRETE_MYSTERY_ASSET_REVIEW_FINDING.test(reason),
+  );
+  if (review.reasons.length > 0 && reasons.length === 0) {
+    return { ...review, approved: true, reasons: [] };
+  }
+  return { ...review, approved: false, reasons };
+}
+
 export interface DebateMysteryAssetVaultBackupV1 {
   version: 1;
   assets: Array<{

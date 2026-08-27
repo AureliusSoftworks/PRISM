@@ -13,6 +13,7 @@ import {
   exportDebateMysteryAssetVaultBackupV1,
   getRevealedDebateMysteryAssetFileV1,
   importDebateMysteryAssetVaultBackupV1,
+  normalizeDebateMysteryAssetVisionReviewV1,
   requeueRetryableDebateMysteryAssetFallbacksV1,
   resetDebateMysteryAssetRevealsV1,
   revealDebateMysteryAssetV1,
@@ -22,6 +23,90 @@ import {
   setDebateMysteryAssetPendingV1,
   validateDebateMysteryAssetPixelsV1,
 } from "../debate-mystery-assets.ts";
+
+describe("sealed mystery asset vision review", () => {
+  it("discards speculative objections but preserves concrete visual defects", () => {
+    assert.deepEqual(
+      normalizeDebateMysteryAssetVisionReviewV1({
+        approved: false,
+        reasons: [
+          "The statues may violate the normal environmental dressing rule.",
+          "The camera angle does not match the source template.",
+        ],
+        reviewer: "test",
+      }),
+      {
+        approved: false,
+        reasons: ["The camera angle does not match the source template."],
+        reviewer: "test",
+      },
+    );
+    assert.deepEqual(
+      normalizeDebateMysteryAssetVisionReviewV1({
+        approved: false,
+        reasons: ["The template couldn't be removed and the composition may be affected."],
+        reviewer: "test",
+      }),
+      {
+        approved: false,
+        reasons: ["The template couldn't be removed and the composition may be affected."],
+        reviewer: "test",
+      },
+    );
+    assert.deepEqual(
+      normalizeDebateMysteryAssetVisionReviewV1({
+        approved: false,
+        reasons: ["The image contains readable text and may also be too busy."],
+        reviewer: "test",
+      }),
+      {
+        approved: false,
+        reasons: ["The image contains readable text and may also be too busy."],
+        reviewer: "test",
+      },
+    );
+    assert.deepEqual(
+      normalizeDebateMysteryAssetVisionReviewV1({
+        approved: false,
+        reasons: ["The isolated exhibit might not match the mansion theme."],
+        reviewer: "test",
+      }),
+      { approved: true, reasons: [], reviewer: "test" },
+    );
+    assert.deepEqual(
+      normalizeDebateMysteryAssetVisionReviewV1({
+        approved: false,
+        reasons: ["A human figure appears in the doorway."],
+        reviewer: "test",
+      }),
+      {
+        approved: false,
+        reasons: ["A human figure appears in the doorway."],
+        reviewer: "test",
+      },
+    );
+    assert.deepEqual(
+      normalizeDebateMysteryAssetVisionReviewV1({
+        approved: false,
+        reasons: ["The source template overlay could not be removed."],
+        reviewer: "test",
+      }),
+      {
+        approved: false,
+        reasons: ["The source template overlay could not be removed."],
+        reviewer: "test",
+      },
+    );
+    assert.deepEqual(
+      normalizeDebateMysteryAssetVisionReviewV1({
+        approved: false,
+        reasons: [],
+        reviewer: "test",
+      }),
+      { approved: false, reasons: [], reviewer: "test" },
+    );
+  });
+});
 
 const NOW = "2026-08-26T12:00:00.000Z";
 const dataRoot = mkdtempSync(join(tmpdir(), "prism-sealed-mystery-assets-"));

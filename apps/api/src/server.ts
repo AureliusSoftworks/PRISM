@@ -300,6 +300,7 @@ import {
 import {
   activeDebateMysteryCompilationV2,
   applyDebateMysteryActionV2,
+  applyDebateMysteryActionWithPersonaV2,
   attachDebateMysteryEvidenceAssetV2,
   attachDebateMysteryRoomAssetV2,
   claimDebateMysteryAssetBackgroundLeaseV2,
@@ -324,6 +325,7 @@ import {
 import {
   getDebateMysterySealedAssetRefV1,
   getRevealedDebateMysteryAssetFileV1,
+  normalizeDebateMysteryAssetVisionReviewV1,
   requeueRetryableDebateMysteryAssetFallbacksV1,
   saveRevealedDebateMysteryAssetV1,
   sealDebateMysteryAssetBytesV1,
@@ -9393,11 +9395,11 @@ async function reviewDebateMysteryAssetWithVision(args: {
       .filter(Boolean)
       .slice(0, 8)
     : [];
-  return {
+  return normalizeDebateMysteryAssetVisionReviewV1({
     approved: parsed.approved === true,
     reasons,
     reviewer: "openai:gpt-4o-mini",
-  };
+  });
 }
 
 async function generateRawDebateMysteryCandidate(args: {
@@ -9512,6 +9514,7 @@ async function prepareDebateMysteryV2EvidenceAssets(
     }
     let prepared: import("@localai/shared").DebateMysterySealedAssetRefV1 | null = null;
     let failure = online && apiKey ? "generation failed" : "ONLINE synthesis was not authorized";
+    let reviewRepairFeedback: string | null = null;
     if (online && apiKey) {
       for (let attempt = 1; attempt <= 2 && !prepared; attempt += 1) {
         try {
@@ -9524,6 +9527,9 @@ async function prepareDebateMysteryV2EvidenceAssets(
                 args.houseStyle.promptContract,
                 "Express the shared house style through this object's materials, palette, patina, and lighting while keeping it isolated on transparency.",
                 "The object remains presentation-only: do not add clues, labels, symbols, surroundings, people, bodies, gore, text, UI, or facts beyond its frozen title.",
+                ...(attempt === 2 && reviewRepairFeedback
+                  ? [`Second-pass repair feedback: ${reviewRepairFeedback}`]
+                  : []),
               ].join(" "),
               apiKey,
               model: selection.provider === "openai" ? selection.model : undefined,
@@ -9564,6 +9570,9 @@ async function prepareDebateMysteryV2EvidenceAssets(
         } catch (error) {
           if (signal.aborted) throw error;
           failure = spoilerSafeMysteryAssetFailure(error);
+          reviewRepairFeedback = failure.startsWith("Vision review rejected")
+            ? failure
+            : null;
           console.warn("[debate-mystery-v2] sealed visual attempt failed", {
             sessionId: args.sessionId,
             kind: "evidence",
@@ -9643,6 +9652,7 @@ async function prepareDebateMysteryV2RoomAssets(
     }
     let prepared: import("@localai/shared").DebateMysterySealedAssetRefV1 | null = null;
     let failure = online && apiKey ? "generation failed" : "LOCAL uses the bundled room fallback";
+    let reviewRepairFeedback: string | null = null;
     if (online && apiKey && room.templateId) {
       for (let attempt = 1; attempt <= 2 && !prepared; attempt += 1) {
         try {
@@ -9660,6 +9670,9 @@ async function prepareDebateMysteryV2RoomAssets(
                 "This is presentation-only atmosphere. Do not imply any case fact.",
                 ...(attempt === 2
                   ? ["Second-pass repair: keep the composition clean and navigable while retaining convincing room-specific furnishings and environmental character."]
+                  : []),
+                ...(attempt === 2 && reviewRepairFeedback
+                  ? [`Correct these concrete first-pass review findings: ${reviewRepairFeedback}`]
                   : []),
               ].join(" "),
               sourceImageBytes: templateBytes,
@@ -9700,6 +9713,9 @@ async function prepareDebateMysteryV2RoomAssets(
         } catch (error) {
           if (signal.aborted) throw error;
           failure = spoilerSafeMysteryAssetFailure(error);
+          reviewRepairFeedback = failure.startsWith("Vision review rejected")
+            ? failure
+            : null;
           console.warn("[debate-mystery-v2] sealed visual attempt failed", {
             sessionId: args.sessionId,
             kind: "room",
@@ -18400,11 +18416,38 @@ function buildRoutes(): RouteDefinition[] {
       const body = (ctx.body ?? {}) as Record<string, unknown>;
       const frozen = getDebateSession(db, userId, ctx.params.id);
       if (frozen.formatState.format === "whodunnit" && frozen.formatState.version === 2) {
-        const session = applyDebateMysteryActionV2(
-          db,
-          userId,
-          ctx.params.id,
-          body as unknown as Parameters<typeof applyDebateMysteryActionV2>[3],
+        let runtime: DebateAiRuntime | null = null;
+        if (body.action === "advance_room_introduction") {
+          try {
+            runtime = await debateAiRuntimeForUser(
+              userId,
+              frozen.provider,
+              frozenDebateModelOverride(frozen),
+              frozen.responseMode,
+              frozen.generationChain,
+              frozen.autoCandidateAllowlist,
+              debateAutoRoutingContext(frozen),
+            );
+          } catch {
+            // The first room line is optional polish. Provider configuration
+            // or availability must never block the frozen canonical line.
+          }
+        }
+        const session = await runWithUsageSession(
+          {
+            db,
+            userId,
+            privacyScope: "private",
+            mode: "debate",
+            surface: "debate",
+          },
+          () => applyDebateMysteryActionWithPersonaV2(
+            db,
+            userId,
+            ctx.params.id,
+            body as unknown as Parameters<typeof applyDebateMysteryActionV2>[3],
+            runtime,
+          ),
         );
         queueDebateMysteryV2RoomAssetBackground(userId, session.id);
         json(ctx.res, 200, {
