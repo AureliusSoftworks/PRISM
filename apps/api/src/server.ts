@@ -9348,6 +9348,7 @@ async function reviewDebateMysteryAssetWithVision(args: {
         `Review this isolated evidence sprite for exactly: ${args.requestedSubject}.`,
         "Approve only if it shows exactly the requested evidence subject clearly and in full, with no people, bodies, unrelated evidence subjects, surrounding scene, gore, readable text, captions, logos, borders, or UI.",
         "Count subjects, not physical pieces: a named set, collection, pair, assembled object, or container with its contents is exactly one requested evidence subject. Its component pieces are required parts of that exhibit, never unrelated additional objects.",
+        "Ordinary supports, hinges, clasps, handles, settings, mounts, box lining, shadows, and a container's plausible contents are integral presentation details, not separate evidence subjects.",
         "Judge the shared house style only from the object's visible materials, palette, and finish. Do not reject an otherwise correct isolated object merely because it has no room, architecture, surroundings, or broader venue cues.",
         "Reject style only for a clear visual contradiction, not uncertainty about whether the isolated object depicts the entire mansion theme.",
       ].join(" ");
@@ -9355,6 +9356,8 @@ async function reviewDebateMysteryAssetWithVision(args: {
     content,
     `Shared house style: ${args.houseStyle}`,
     "Judge only the supplied visual specification. Do not infer story significance, culprit, location logic, or relationships.",
+    "This is a concrete validation gate, not an aesthetic critique. Approve when the image plausibly satisfies the request and no clearly visible prohibited element exists.",
+    "Never reject for speculation, possibility, uncertainty, minor aesthetic preference, or incomplete thematic cues. A rejection reason must identify a specific observable violation; words such as may, might, could, perhaps, appears, or uncertain are not grounds to reject.",
   ].join(" ");
   const response = await provider.generateResponse(
     [{
