@@ -437,6 +437,8 @@ import {
 } from "./replayAudioMasterCapture";
 import {
   signalFaithfulReplayCameraState,
+  signalReplayCameraClockFrame,
+  signalReplayClockCrossedBoundary,
   signalReplayBookendAt,
   signalReplayDefaultIntroDurationMs,
   SIGNAL_REPLAY_INTRO_LANDING_FADE_MS,
@@ -449,6 +451,7 @@ import {
 } from "./signalReplayVideoFrame";
 import { REPLAY_RECORDING_CHANGED_EVENT } from "./ReplayRenderCoordinator";
 import { ReplayMouthPresentationCapture } from "./ReplayMouthPresentationCapture";
+import { SpeechIntentReveal } from "./SpeechIntentReveal";
 import { signalAvatarPresentation } from "./sessionAvatarPresentationPolicy";
 import {
   BotPickerGrid,
@@ -723,6 +726,12 @@ async function waitForSignalTurnPreparation(
 }
 /** Discrete mouths and captions stay fluid without rerendering Signal at 60 fps. */
 const SIGNAL_LIVE_SPEECH_RENDER_INTERVAL_MS = 50;
+/**
+ * Reconcile the full archived Signal surface sparingly. Audio, camera, and the
+ * small avatar sampler still follow the media element directly; this cadence
+ * is only for continuous low-frequency stage state such as cups and labels.
+ */
+const SIGNAL_REPLAY_STAGE_RENDER_INTERVAL_MS = 250;
 const SIGNAL_USER_INPUT_QUIET_WINDOW_MS = 160;
 /** Decode crosstalk ahead of its cue, then enter on the exact audio-clock beat. */
 const SIGNAL_LISTENER_REACTION_SCHEDULE_LEAD_MS = 500;
@@ -2512,6 +2521,10 @@ export function BotcastExperience({
     useState<ReplayStudioCutEligibilityV1 | null>(null);
   const premiumAutoSelectionRef = useRef<string | null>(null);
   const replayAudioRef = useRef<HTMLAudioElement | null>(null);
+  const replayPublishedElapsedMsRef = useRef(0);
+  const replayTransportRef = useRef<HTMLDivElement | null>(null);
+  const replayTimeRef = useRef<HTMLElement | null>(null);
+  const replayRangeRef = useRef<HTMLInputElement | null>(null);
   const signalCaptureSourceIdRef = useRef<string | null>(null);
   const selectedShowRef = useRef<BotcastShow | null>(null);
   const finalizedSignalRecordingIdsRef = useRef(new Set<string>());
@@ -5950,6 +5963,7 @@ export function BotcastExperience({
     setReplayIntroRevealed(false);
     setReplayVoicePending(false);
     setReplaySpeechActive(false);
+    replayPublishedElapsedMsRef.current = 0;
     setReplayElapsedMs(0);
     replayVoiceMessageIdRef.current = null;
   };
@@ -8963,15 +8977,12 @@ export function BotcastExperience({
       producerGuestThinkingMs?: number,
       producerGuestHostInterruption?: BotcastHostRedirectContext,
       interruptionCrosstalkPlan?: ListenerReactionPlanV1,
-      resolveGuestInterruptionAtHandoff?: () =>
-        | BotcastGuestInterruptionContext
-        | undefined,
     ): Promise<boolean> => {
       if (
         !episode ||
         episode.status !== "live" ||
         episode.playbackMode === "watch" ||
-        advanceInFlightRef.current
+        (advanceInFlightRef.current && cueDelivery !== "interrupt_guest")
       )
         return false;
       const queuedCue =
@@ -9006,16 +9017,12 @@ export function BotcastExperience({
         setBusy(true);
       });
       setError(null);
-      let resolvedGuestInterruption = guestInterruption;
-      let resolveInterruptionHandoffStarted: (() => void) | null = null;
-      const interruptionHandoffStarted = interruptionBridgeMessage
-        ? new Promise<void>((resolve) => {
-            resolveInterruptionHandoffStarted = resolve;
-          })
-        : Promise.resolve();
       let interruptionCrosstalkPlayback: Promise<boolean> | null = null;
-      const interruptionBridgePlayback = interruptionBridgeMessage
-        ? (() => {
+      let interruptionBridgePlayback: Promise<void> | null = null;
+      const playAcceptedInterruptionBridge = (): Promise<void> => {
+        if (!interruptionBridgeMessage) return Promise.resolve();
+        if (interruptionBridgePlayback) return interruptionBridgePlayback;
+        interruptionBridgePlayback = (async () => {
             const interrupter = interruptionCrosstalkPlan
               ? botsById.get(interruptionCrosstalkPlan.listenerBotId)
               : null;
@@ -9029,7 +9036,7 @@ export function BotcastExperience({
               interruptionCrosstalkPlan && interruptedMessage
                 ? botsById.get(interruptionCrosstalkPlan.speakerBotId)
                 : null;
-            return playPreparedEpisodeMessage(
+            await playPreparedEpisodeMessage(
               interruptionBridgeMessage,
               episode,
               controller,
@@ -9091,19 +9098,14 @@ export function BotcastExperience({
               {
                 voiceChannel: "handoff",
                 deferPresentationUntilPlaybackStart: true,
-                onHandoffStart: () => {
-                  resolvedGuestInterruption =
-                    resolveGuestInterruptionAtHandoff?.() ??
-                    resolvedGuestInterruption;
-                  onReleaseUtterance?.(SIGNAL_AUDIBLE_HANDOFF_RELEASE_MS);
-                  audibleHandoffOutgoingMessageIdRef.current = null;
-                  resolveInterruptionHandoffStarted?.();
-                  resolveInterruptionHandoffStarted = null;
-                },
               },
             );
-          })()
-        : null;
+            if (interruptionCrosstalkPlayback) {
+              await interruptionCrosstalkPlayback;
+            }
+          })();
+        return interruptionBridgePlayback;
+      };
       const foregroundFloorAvailableAtMs = (async (): Promise<number> => {
         if (interruptionBridgePlayback) await interruptionBridgePlayback;
         if (interruptionCrosstalkPlayback) {
@@ -9218,7 +9220,6 @@ export function BotcastExperience({
             queuedCue: queuedProducerCueRef.current,
           });
         const requestForegroundAdvance = async (): Promise<BotcastEpisodeAdvanceResponse> => {
-          await interruptionHandoffStarted;
           return request<BotcastEpisodeAdvanceResponse>(
             `/api/botcast/episodes/${encodeURIComponent(episode.id)}/advance`,
             {
@@ -9231,8 +9232,8 @@ export function BotcastExperience({
                   : {}),
                 ...(requestedCue ? { cueDelivery } : {}),
                 ...(hostRedirect ? { hostRedirect } : {}),
-                ...(resolvedGuestInterruption
-                  ? { guestInterruption: resolvedGuestInterruption }
+                ...(guestInterruption
+                  ? { guestInterruption }
                   : {}),
                 ...(producerGuestMessage
                   ? { guestMessage: producerGuestMessage }
@@ -9280,6 +9281,13 @@ export function BotcastExperience({
                 return requestForegroundAdvance();
               })
           : await requestForegroundAdvance();
+        if (!episodeOperationIsCurrent(controller, runId)) return false;
+        // The saved bridge is an acknowledgement of a real server transition,
+        // not optimistic UI. Keep it silent until the interrupting advance has
+        // durably accepted and resolved the queued cue.
+        if (interruptionBridgeMessage) {
+          await playAcceptedInterruptionBridge();
+        }
         const committedProvisional =
           readyPreparation?.provisionalUtterances[0] ?? null;
         if (
@@ -9315,12 +9323,6 @@ export function BotcastExperience({
         if (requestedCue) {
           await finishResponseCue?.();
           finishResponseCue = null;
-        }
-        if (interruptionBridgePlayback) {
-          await interruptionBridgePlayback;
-        }
-        if (interruptionCrosstalkPlayback) {
-          await interruptionCrosstalkPlayback;
         }
         if (!episodeOperationIsCurrent(controller, runId)) return false;
         // The returned event log owns the cue outcome. Do not optimistically
@@ -9509,6 +9511,7 @@ export function BotcastExperience({
       }
     },
     [
+      audibleHandoffAudienceHeardContent,
       beginEpisodeOperation,
       botsById,
       episode,
@@ -9952,108 +9955,72 @@ export function BotcastExperience({
       !nextHostInterruptionBridge ||
       (Boolean(spokenContent) && !interruptedContent) ||
       (!activeGuestOnMic &&
-        (busy || speakingMessageId !== null || !guestIsNext))
+        (speakingMessageId !== null || !guestIsNext))
     )
       return;
+    let resolvedGuestInterruption: BotcastGuestInterruptionContext = {
+      bridgeLine: nextHostInterruptionBridge.content,
+    };
     if (activeGuestOnMic) {
+      const audienceHeard = audibleHandoffAudienceHeardContent(
+        activeGuestMessage!,
+      );
+      const audienceCut = botcastInterruptedGuestContent(
+        activeGuestMessage!.content,
+        audienceHeard,
+      );
+      resolvedGuestInterruption = {
+        bridgeLine: nextHostInterruptionBridge.content,
+        messageId: activeGuestMessage!.id,
+        spokenContent: audienceHeard,
+        ...(audienceCut &&
+        nextHostInterruptionCrosstalkPlan?.publicInterruptedSpeakerCue
+          ? {
+              publicInterruptedSpeakerCue:
+                nextHostInterruptionCrosstalkPlan.publicInterruptedSpeakerCue,
+              interruptedSpeakerCueSpeechEffect:
+                "speech_obfuscation" as const,
+            }
+          : audienceCut && nextHostInterruptionCrosstalkPlan?.interruptedSpeakerCue
+            ? {
+                interruptedSpeakerCue:
+                  nextHostInterruptionCrosstalkPlan.interruptedSpeakerCue,
+              }
+            : {}),
+      };
       audibleHandoffOutgoingMessageIdRef.current = activeGuestMessage!.id;
       invalidateEpisodeOperation({ preserveAudibleUtterance: true });
+      onReleaseUtterance?.(SIGNAL_AUDIBLE_HANDOFF_RELEASE_MS);
+      audibleHandoffOutgoingMessageIdRef.current = null;
+    } else if (busy) {
+      // A queued guest generation may ignore AbortSignal. Replace its client
+      // run now; the server's run-scoped boundary independently preempts the
+      // provider promise before accepting this interrupting advance.
+      invalidateEpisodeOperation();
     }
     // Cancelling an active guest deliberately disables auto-run. The queued
     // interruption is still a live handoff, so resume the normal turn loop
     // after the host bridge and cue response finish.
     setAutoRun(true);
-    setHostInterruptionOrdinal((current) => current + 1);
     onPrepareUtterance?.();
-    setNotice("Interrupting the guest…");
+    setNotice("Requesting the host interruption…");
     const interrupted = await advanceEpisode(
       undefined,
       "interrupt_guest",
       undefined,
-      {
-        bridgeLine: nextHostInterruptionBridge.content,
-        ...(activeGuestMessage
-          ? {
-              messageId: activeGuestMessage.id,
-              spokenContent,
-              ...(nextHostInterruptionCrosstalkPlan?.publicInterruptedSpeakerCue
-                ? {
-                    publicInterruptedSpeakerCue:
-                      nextHostInterruptionCrosstalkPlan.publicInterruptedSpeakerCue,
-                    interruptedSpeakerCueSpeechEffect:
-                      "speech_obfuscation" as const,
-                  }
-                : nextHostInterruptionCrosstalkPlan?.interruptedSpeakerCue
-                ? {
-                    interruptedSpeakerCue:
-                      nextHostInterruptionCrosstalkPlan.interruptedSpeakerCue,
-                  }
-                : {}),
-            }
-          : {}),
-      },
+      resolvedGuestInterruption,
       nextHostInterruptionBridge,
       undefined,
       undefined,
       undefined,
       nextHostInterruptionCrosstalkPlan ?? undefined,
-      activeGuestMessage
-        ? () => {
-            const audienceHeard =
-              audibleHandoffAudienceHeardContent(activeGuestMessage);
-            const audienceCut = botcastInterruptedGuestContent(
-              activeGuestMessage.content,
-              audienceHeard,
-            );
-            setEpisode((current) =>
-              current?.id === episode.id
-                ? {
-                    ...current,
-                    messages: [
-                      ...current.messages.map((message) =>
-                        message.id === activeGuestMessage.id && audienceCut
-                          ? {
-                              ...message,
-                              content: audienceCut,
-                              voicePerformanceText: null,
-                            }
-                          : message,
-                      ),
-                      nextHostInterruptionBridge,
-                    ],
-                  }
-                : current,
-            );
-            return {
-              bridgeLine: nextHostInterruptionBridge.content,
-              // The active message remains the interruption target even when
-              // the handoff lands before its first revealed word. The API uses
-              // that identity plus an empty prefix to remove an unheard prepared
-              // line; dropping it here makes the live cut look like a queued one.
-              messageId: activeGuestMessage.id,
-              spokenContent: audienceHeard,
-              ...(audienceCut &&
-              nextHostInterruptionCrosstalkPlan?.publicInterruptedSpeakerCue
-                ? {
-                    publicInterruptedSpeakerCue:
-                      nextHostInterruptionCrosstalkPlan.publicInterruptedSpeakerCue,
-                    interruptedSpeakerCueSpeechEffect:
-                      "speech_obfuscation" as const,
-                  }
-                : audienceCut &&
-                    nextHostInterruptionCrosstalkPlan?.interruptedSpeakerCue
-                  ? {
-                      interruptedSpeakerCue:
-                        nextHostInterruptionCrosstalkPlan.interruptedSpeakerCue,
-                    }
-                  : {}),
-            };
-          }
-        : undefined,
     );
-    if (!interrupted && queuedProducerCueRef.current === cue) {
+    if (interrupted) {
+      setHostInterruptionOrdinal((current) => current + 1);
+      setNotice("The host took the floor.");
+    } else if (queuedProducerCueRef.current === cue) {
       setNotice(
-        "The interruption did not dispatch. The cue is still queued; try again when the guest is visibly on mic.",
+        "The interruption was not accepted. The cue is still queued; try again.",
       );
     }
   };
@@ -10123,6 +10090,7 @@ export function BotcastExperience({
         recordingDetail?.recording.manifest ?? recording?.manifest ?? null;
       setReplayManifestV2(savedManifest?.v === 2 ? savedManifest : null);
       setEpisode(null);
+      replayPublishedElapsedMsRef.current = 0;
       setReplayElapsedMs(0);
       setReplayPlaying(false);
       setReplayIntroRevealed(false);
@@ -10183,9 +10151,12 @@ export function BotcastExperience({
       return;
     }
     if (replayAudioRef.current) {
-      void releaseAudibleAudioElement(replayAudioRef.current);
+      void releaseAudibleAudioElement(replayAudioRef.current, {
+        durationMs: 0,
+      });
     }
     setReplayPlaying(false);
+    replayPublishedElapsedMsRef.current = 0;
     setReplayElapsedMs(0);
     setReplayPlaybackSource("studio-cut");
     premiumAutoSelectionRef.current = replayRecordingId;
@@ -10317,6 +10288,26 @@ export function BotcastExperience({
       elapsedMs: replayElapsedMs,
       fadeMs: replayIntroAutomaticFadeMs,
     });
+  const replayStageBoundaryTimesMs = useMemo(() => {
+    const boundaries = new Set<number>();
+    for (const beat of replayActiveTimeline?.beats ?? []) {
+      boundaries.add(Math.max(0, Math.round(beat.startMs)));
+      boundaries.add(Math.max(0, Math.round(beat.endMs)));
+    }
+    for (const event of replayPresentationManifestV2?.direction ?? []) {
+      boundaries.add(Math.max(0, Math.round(event.atMs)));
+      if (event.endMs !== undefined) {
+        boundaries.add(Math.max(0, Math.round(event.endMs)));
+      }
+    }
+    for (const track of
+      replayPresentationManifestV2?.presentation?.speechActivityTracks ?? []) {
+      for (const cue of track.cues) {
+        boundaries.add(Math.max(0, Math.round(cue.atMs)));
+      }
+    }
+    return [...boundaries].sort((left, right) => left - right);
+  }, [replayActiveTimeline, replayPresentationManifestV2]);
   useEffect(() => {
     if (
       !replayEpisode ||
@@ -10348,7 +10339,45 @@ export function BotcastExperience({
     let cancelled = false;
     const sync = (): void => {
       if (cancelled) return;
-      setReplayElapsedMs(Math.round(audio.currentTime * 1_000));
+      animationFrame = 0;
+      const elapsedMs = Math.max(
+        0,
+        Math.min(replayDurationMs, Math.round(audio.currentTime * 1_000)),
+      );
+      const progress = `${
+        replayDurationMs > 0
+          ? Math.min(100, Math.max(0, (elapsedMs / replayDurationMs) * 100))
+          : 0
+      }%`;
+      replayTransportRef.current?.style.setProperty(
+        "--replay-progress",
+        progress,
+      );
+      if (replayTimeRef.current) {
+        const label = runtimeLabel(elapsedMs);
+        if (replayTimeRef.current.textContent !== label) {
+          replayTimeRef.current.textContent = label;
+        }
+      }
+      if (replayRangeRef.current) {
+        replayRangeRef.current.value = String(elapsedMs);
+      }
+      const previousPublishedMs = replayPublishedElapsedMsRef.current;
+      const cadenceElapsed =
+        elapsedMs - previousPublishedMs >=
+        SIGNAL_REPLAY_STAGE_RENDER_INTERVAL_MS;
+      if (
+        audio.ended ||
+        cadenceElapsed ||
+        signalReplayClockCrossedBoundary({
+          previousElapsedMs: previousPublishedMs,
+          elapsedMs,
+          boundaryTimesMs: replayStageBoundaryTimesMs,
+        })
+      ) {
+        replayPublishedElapsedMsRef.current = elapsedMs;
+        setReplayElapsedMs(elapsedMs);
+      }
       if (audio.ended) {
         setReplayPlaying(false);
         return;
@@ -10359,13 +10388,13 @@ export function BotcastExperience({
       if (cancelled) return;
       audio.playbackRate = 1;
       if (!audio.paused) {
-        sync();
+        if (animationFrame === 0) sync();
         return;
       }
       // Click already tried play(); retry once the master can decode.
       void audio.play().then(
         () => {
-          if (!cancelled) sync();
+          if (!cancelled && animationFrame === 0) sync();
         },
         () => undefined,
       );
@@ -10376,9 +10405,15 @@ export function BotcastExperience({
       cancelled = true;
       window.cancelAnimationFrame(animationFrame);
       audio.removeEventListener("canplay", ensurePlaying);
-      void releaseAudibleAudioElement(audio);
+      void releaseAudibleAudioElement(audio, { durationMs: 0 });
     };
-  }, [replayActiveAudioUrl, replayFaithful, replayPlaying]);
+  }, [
+    replayActiveAudioUrl,
+    replayDurationMs,
+    replayFaithful,
+    replayPlaying,
+    replayStageBoundaryTimesMs,
+  ]);
 
   const replaySceneCheckpoints = useMemo(
     () =>
@@ -10644,6 +10679,79 @@ export function BotcastExperience({
         : replayBaseShot === "auto"
           ? "wide"
           : replayBaseShot;
+  useEffect(() => {
+    const stage = signalStageRef.current;
+    const audio = replayAudioRef.current;
+    if (
+      !stage ||
+      !audio ||
+      !replayPlaying ||
+      !replayFaithful ||
+      !replayPresentationManifestV2 ||
+      !selectedShow
+    ) {
+      return;
+    }
+    const visualMetadata = replayPresentationManifestV2.visual.metadata;
+    const studioLayout = normalizeBotcastStudioLayout(
+      visualMetadata?.studioLayout ?? selectedShow.studioLayout,
+    );
+    const cameraFraming = normalizeBotcastCameraFraming(
+      visualMetadata?.cameraFraming ?? selectedShow.cameraFraming,
+    );
+    const cameraFrame = (shot: SignalDirectedCameraShot) => {
+      const frame = cameraFraming[shot];
+      return {
+        offsetX:
+          botcastCameraOffsetXPercent(shot, studioLayout, frame.zoom) +
+          frame.panX,
+        offsetY:
+          botcastCameraOffsetYPercent(shot, studioLayout, frame.zoom) +
+          frame.panY,
+        zoom: frame.zoom,
+      };
+    };
+    let animationFrame = 0;
+    const syncCamera = (): void => {
+      const elapsedMs = Math.max(0, audio.currentTime * 1_000);
+      const projected = signalReplayCameraClockFrame({
+        manifest: replayPresentationManifestV2,
+        replayElapsedMs: elapsedMs,
+      });
+      const holdWide =
+        replayBookend?.kind === "intro" || replayIntroLandingActive;
+      const from = cameraFrame(
+        holdWide ? "wide" : (projected?.fromShot ?? replayShot),
+      );
+      const to = cameraFrame(
+        holdWide ? "wide" : (projected?.toShot ?? replayShot),
+      );
+      const progress = holdWide ? 1 : (projected?.progress ?? 1);
+      stage.style.setProperty(
+        "--botcast-camera-offset-x",
+        `${from.offsetX + (to.offsetX - from.offsetX) * progress}%`,
+      );
+      stage.style.setProperty(
+        "--botcast-camera-offset-y",
+        `${from.offsetY + (to.offsetY - from.offsetY) * progress}%`,
+      );
+      stage.style.setProperty(
+        "--botcast-camera-zoom",
+        String(from.zoom + (to.zoom - from.zoom) * progress),
+      );
+      animationFrame = window.requestAnimationFrame(syncCamera);
+    };
+    syncCamera();
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [
+    replayBookend?.kind,
+    replayFaithful,
+    replayIntroLandingActive,
+    replayPlaying,
+    replayPresentationManifestV2,
+    replayShot,
+    selectedShow,
+  ]);
   useEffect(() => {
     if (!replayProceduralAudioEnabled) return;
     if (!replayEpisode || !replayActiveMessage) return;
@@ -10978,12 +11086,22 @@ export function BotcastExperience({
   const stopReplayPlayback = (): void => {
     replayVoiceRunIdRef.current += 1;
     replayVoiceMessageIdRef.current = null;
+    const replayAudio = replayAudioRef.current;
+    if (replayAudio) {
+      void releaseAudibleAudioElement(replayAudio, { durationMs: 0 });
+      const stoppedAtMs = Math.max(
+        0,
+        Math.min(replayDurationMs, Math.round(replayAudio.currentTime * 1_000)),
+      );
+      replayPublishedElapsedMsRef.current = stoppedAtMs;
+      setReplayElapsedMs(stoppedAtMs);
+      // Pause is a transport boundary, not a state-exit tail. Halting the
+      // media synchronously prevents a busy archive frame from letting audio
+      // run ahead while the last CRT speaking/glow state remains frozen.
+    }
     setReplayPlaying(false);
     setReplayVoicePending(false);
     setReplaySpeechActive(false);
-    if (replayAudioRef.current) {
-      void releaseAudibleAudioElement(replayAudioRef.current);
-    }
     onStopUtterance?.();
   };
 
@@ -10991,6 +11109,7 @@ export function BotcastExperience({
     if (!replayFaithful) return;
     stopReplayPlayback();
     const boundedMs = Math.max(0, Math.min(replayDurationMs, nextMs));
+    replayPublishedElapsedMsRef.current = boundedMs;
     setReplayElapsedMs(boundedMs);
     const audio = replayAudioRef.current;
     if (!audio) return;
@@ -11014,7 +11133,10 @@ export function BotcastExperience({
           ? 0
           : replayElapsedMs
         : Math.max(0, Math.min(replayDurationMs, startAtMs));
-    if (restartFromBeginning) setReplayElapsedMs(nextMs);
+    if (restartFromBeginning) {
+      replayPublishedElapsedMsRef.current = nextMs;
+      setReplayElapsedMs(nextMs);
+    }
     const audio = replayAudioRef.current;
     if (audio) {
       cancelAudibleAudioRelease(audio, 1);
@@ -11223,8 +11345,10 @@ export function BotcastExperience({
       speakingMessageId,
     });
     const stageCameraTransitionMode =
-      args.replay && replayFaithful
-        ? replayCameraTransitionModeV2(replayCameraDirectedScene)
+      args.replay && replayFaithful && replayPresentationManifestV2
+        ? "instant"
+        : args.replay && replayFaithful
+          ? replayCameraTransitionModeV2(replayCameraDirectedScene)
         : liveCameraTransitionMode;
     const recordedGuestDeparture =
       args.guestDeparted ?? guestHasDeparted(args.currentEpisode);
@@ -11329,6 +11453,65 @@ export function BotcastExperience({
             ) ?? args.show.cameraFraming,
     );
     const activeCameraFrame = cameraFraming[args.shot];
+    const replayCameraClockFrame =
+      args.replay && replayFaithful && replayPresentationManifestV2
+        ? signalReplayCameraClockFrame({
+            manifest: replayPresentationManifestV2,
+            replayElapsedMs,
+          })
+        : null;
+    const replayCameraProjection =
+      replayCameraClockFrame?.toShot === args.shot &&
+      replayBookend?.kind !== "intro" &&
+      !replayIntroLandingActive
+        ? replayCameraClockFrame
+        : null;
+    const cameraFrameForShot = (
+      shot: SignalDirectedCameraShot,
+    ): { offsetX: number; offsetY: number; zoom: number } => {
+      const frame = cameraFraming[shot];
+      return {
+        offsetX:
+          botcastCameraOffsetXPercent(shot, studioLayout, frame.zoom) +
+          frame.panX,
+        offsetY:
+          botcastCameraOffsetYPercent(shot, studioLayout, frame.zoom) +
+          frame.panY,
+        zoom: frame.zoom,
+      };
+    };
+    const targetCameraFrame = {
+      offsetX:
+        botcastCameraOffsetXPercent(
+          args.shot,
+          studioLayout,
+          activeCameraFrame.zoom,
+        ) + activeCameraFrame.panX,
+      offsetY:
+        botcastCameraOffsetYPercent(
+          args.shot,
+          studioLayout,
+          activeCameraFrame.zoom,
+        ) + activeCameraFrame.panY,
+      zoom: activeCameraFrame.zoom,
+    };
+    const projectedCameraFrame = replayCameraProjection
+      ? (() => {
+          const from = cameraFrameForShot(replayCameraProjection.fromShot);
+          const progress = replayCameraProjection.progress;
+          return {
+            offsetX:
+              from.offsetX +
+              (targetCameraFrame.offsetX - from.offsetX) * progress,
+            offsetY:
+              from.offsetY +
+              (targetCameraFrame.offsetY - from.offsetY) * progress,
+            zoom:
+              from.zoom +
+              (targetCameraFrame.zoom - from.zoom) * progress,
+          };
+        })()
+      : targetCameraFrame;
     const stageVisualShow: BotcastShow =
       args.replay && replayPresentationManifestV2
         ? {
@@ -11977,21 +12160,9 @@ export function BotcastExperience({
             ),
           }
         : {}),
-      ["--botcast-camera-offset-x" as string]: `${
-        botcastCameraOffsetXPercent(
-        args.shot,
-        studioLayout,
-        activeCameraFrame.zoom,
-        ) + activeCameraFrame.panX
-      }%`,
-      ["--botcast-camera-offset-y" as string]: `${
-        botcastCameraOffsetYPercent(
-        args.shot,
-        studioLayout,
-        activeCameraFrame.zoom,
-        ) + activeCameraFrame.panY
-      }%`,
-      ["--botcast-camera-zoom" as string]: activeCameraFrame.zoom,
+      ["--botcast-camera-offset-x" as string]: `${projectedCameraFrame.offsetX}%`,
+      ["--botcast-camera-offset-y" as string]: `${projectedCameraFrame.offsetY}%`,
+      ["--botcast-camera-zoom" as string]: projectedCameraFrame.zoom,
       ...(studioLightingStyle ?? {}),
     } as CSSProperties;
     const floorGlow = (
@@ -12096,6 +12267,8 @@ export function BotcastExperience({
           : 0;
       const renderMouthFrame = (
         mouthShape: ZenLiveBotMouthShape,
+        sampledReplayElapsedMs = replayCapturedPresentationElapsedMs,
+        sampledReplayVoiceLightLevel = replayVoiceLightLevel,
       ): ReactNode => {
         const mouthCapture = (
           <ReplayMouthPresentationCapture
@@ -12136,9 +12309,9 @@ export function BotcastExperience({
                   args.currentEpisode.id,
                   participantId,
                 ),
-          voiceLightLevel: replayVoiceLightLevel,
+          voiceLightLevel: sampledReplayVoiceLightLevel,
           eyeTimelineMs: args.replay
-            ? replayCapturedPresentationElapsedMs
+            ? sampledReplayElapsedMs
             : undefined,
           eyeStateStartedAtMs:
             args.replay && talking ? replayMessageStartMs : undefined,
@@ -12176,6 +12349,67 @@ export function BotcastExperience({
           </>
         );
       };
+      if (
+        args.replay &&
+        replayFaithful &&
+        replayActiveTimeline &&
+        replayPresentationManifestV2
+      ) {
+        return (
+          <SignalLiveVisualSampler
+            active={replayPlaying}
+            sample={() => {
+              const mediaElapsedMs = signalReplayCapturedPresentationElapsedMs({
+                timeline: replayActiveTimeline,
+                replayElapsedMs:
+                  replayAudioRef.current?.currentTime !== undefined
+                    ? replayAudioRef.current.currentTime * 1_000
+                    : replayCapturedPresentationElapsedMs,
+              });
+              const sampledMouthShape =
+                replayMouthShapeAtV2(
+                  replayPresentationManifestV2,
+                  participantId,
+                  mediaElapsedMs,
+                ) ??
+                (talking && args.activeMessage && speechDurationMs > 0
+                  ? crtSpeechMouthShapeAtAlignedElapsedMs({
+                      text: args.activeMessage.content,
+                      elapsedMs: Math.max(
+                        0,
+                        mediaElapsedMs - replayMessageStartMs,
+                      ),
+                      durationMs: speechDurationMs,
+                      alignment: speechReveal?.alignment,
+                    })
+                  : "closed");
+              const sampledVoiceLightLevel =
+                replayVoiceLightLevelAtV2(
+                  replayPresentationManifestV2,
+                  participantId,
+                  mediaElapsedMs,
+                ) ?? (roleSpeechActive(role) ? 0.22 : 0);
+              return {
+                key: `${Math.floor(
+                  mediaElapsedMs / SIGNAL_LIVE_SPEECH_RENDER_INTERVAL_MS,
+                )}:${sampledMouthShape}:${sampledVoiceLightLevel}`,
+                value: {
+                  elapsedMs: mediaElapsedMs,
+                  mouthShape: sampledMouthShape,
+                  voiceLightLevel: sampledVoiceLightLevel,
+                },
+              };
+            }}
+            render={(sample) =>
+              renderMouthFrame(
+                sample.mouthShape,
+                sample.elapsedMs,
+                sample.voiceLightLevel,
+              )
+            }
+          />
+        );
+      }
       if (args.replay) return renderMouthFrame(replayMouthShape);
       return (
         <SignalLiveVisualSampler
@@ -12791,6 +13025,17 @@ export function BotcastExperience({
               </span>
             </div>
           </div>
+        ) : null}
+        {!args.replay &&
+        args.activeMessage?.speechIntentRevealAvailable === true &&
+        speechReveal?.phase === "ended" ? (
+          <SpeechIntentReveal
+            available
+            mode="signal"
+            scopeId={args.currentEpisode.id}
+            recordId={args.activeMessage.id}
+            request={request}
+          />
         ) : null}
         {args.replay &&
         muteElapsedStageCueVisible &&
@@ -16112,8 +16357,7 @@ export function BotcastExperience({
     episode !== null &&
     (episode.messages.find((message) => message.id === speakingMessageId)
       ?.speakerRole === "guest" ||
-      (!busy &&
-        speakingMessageId === null &&
+      (speakingMessageId === null &&
         botcastNextSpeakerRole({
           messages: episode.messages,
           segment: episode.segment,
@@ -16123,9 +16367,7 @@ export function BotcastExperience({
     ? null
     : !nextHostInterruptionBridge
       ? "The host is not available to take the mic in this episode state."
-      : busy && speakingMessageId === null
-        ? "The guest is still being prepared. Interrupt becomes available when the guest reaches the mic."
-        : "Interrupt is available while the guest is on mic or is the next scheduled speaker.";
+      : "Interrupt is available while the guest is on mic or is the next scheduled speaker.";
   function producerCueDraftSnapshot(): {
     detail: string;
     directQuote: string;
@@ -17777,7 +18019,18 @@ export function BotcastExperience({
                   ref={replayAudioRef}
                   src={replayActiveAudioUrl}
                   preload="auto"
-                  onEnded={() => setReplayPlaying(false)}
+                  onEnded={(event) => {
+                    const elapsedMs = Math.max(
+                      0,
+                      Math.min(
+                        replayDurationMs,
+                        Math.round(event.currentTarget.currentTime * 1_000),
+                      ),
+                    );
+                    replayPublishedElapsedMsRef.current = elapsedMs;
+                    setReplayElapsedMs(elapsedMs);
+                    setReplayPlaying(false);
+                  }}
                   onError={() => setReplayPlaying(false)}
                 />
               ) : null}
@@ -17808,6 +18061,7 @@ export function BotcastExperience({
                           aria-checked={replayPlaybackSource === "studio-cut"}
                           onClick={(event) => {
                             stopReplayPlayback();
+                            replayPublishedElapsedMsRef.current = 0;
                             setReplayElapsedMs(0);
                             setReplayPlaybackSource("studio-cut");
                             event.currentTarget
@@ -17831,6 +18085,7 @@ export function BotcastExperience({
                           aria-checked={replayPlaybackSource === "on-air"}
                           onClick={(event) => {
                             stopReplayPlayback();
+                            replayPublishedElapsedMsRef.current = 0;
                             setReplayElapsedMs(0);
                             setReplayPlaybackSource("on-air");
                             event.currentTarget
@@ -17869,6 +18124,7 @@ export function BotcastExperience({
                 </header>
 
                 <div
+                  ref={replayTransportRef}
                   className={styles.replayTransport}
                   style={
                     {
@@ -17920,7 +18176,9 @@ export function BotcastExperience({
                     )}
                   </button>
                   <span className={styles.replayTime}>
-                    <strong>{runtimeLabel(replayElapsedMs)}</strong>
+                    <strong ref={replayTimeRef}>
+                      {runtimeLabel(replayElapsedMs)}
+                    </strong>
                     <span aria-hidden="true">/</span>
                     <span>{runtimeLabel(replayDurationMs)}</span>
                   </span>
@@ -17929,6 +18187,7 @@ export function BotcastExperience({
                       <span className={styles.replayProgressFill} />
                     </span>
                     <input
+                      ref={replayRangeRef}
                       type="range"
                       min={0}
                       max={replayDurationMs}
@@ -17937,6 +18196,7 @@ export function BotcastExperience({
                       onChange={(event) => {
                         stopReplayPlayback();
                         const nextMs = Number(event.target.value);
+                        replayPublishedElapsedMsRef.current = nextMs;
                         setReplayElapsedMs(nextMs);
                         if (replayAudioRef.current) {
                           replayAudioRef.current.currentTime = nextMs / 1_000;
@@ -18097,6 +18357,15 @@ export function BotcastExperience({
                         {signalVoicePerformanceTranscriptText(message)}
                       </span>
                     </button>
+                    <SpeechIntentReveal
+                      available={
+                        message.speechIntentRevealAvailable === true
+                      }
+                      mode="signal"
+                      scopeId={replayEpisode.id}
+                      recordId={message.id}
+                      request={request}
+                    />
                     {publicReactionSpeech.map((speech, reactionIndex) => (
                       <div
                         key={`${message.id}:reaction:${reactionIndex}`}

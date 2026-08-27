@@ -32,6 +32,109 @@ import {
   readGlobalBotMood,
   setGlobalBotMood,
 } from "../bot-global-mood.ts";
+import {
+  createBotcastEpisode,
+  createBotcastShow,
+  forceEndBotcastEpisode,
+} from "../botcast.ts";
+
+describe("backup Signal listener reviews", () => {
+  it("round-trips public review provenance and accepts legacy reviews without it", () => {
+    withBackupDatabase((db, userKey) => {
+      const createdAt = "2026-08-26T00:00:00.000Z";
+      for (const [id, name] of [
+        ["signal-host", "Signal Host"],
+        ["signal-guest", "Signal Guest"],
+        ["signal-reviewer", "Signal Reviewer"],
+      ] as const) {
+        db.prepare(
+          `INSERT INTO bots
+            (id, user_id, name, system_prompt, color, glyph,
+             chat_enabled, created_at, updated_at)
+           VALUES (?, 'user-1', ?, 'A careful listener.', '#445566',
+                   'spark', 1, ?, ?)`,
+        ).run(id, name, createdAt, createdAt);
+      }
+      const show = createBotcastShow(db, "user-1", {
+        hostBotId: "signal-host",
+      });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "signal-guest",
+        topic: "What makes a review trustworthy?",
+      });
+      forceEndBotcastEpisode(db, "user-1", episode.id);
+      const provenance = {
+        version: 1,
+        artifactHash: "artifact-hash",
+        reviewerSnapshotHash: "reviewer-hash",
+        reviewerSnapshot: {
+          version: 1,
+          reviewerId: "signal-reviewer",
+          reviewerName: "Signal Reviewer",
+        },
+        rubricId: "signal.audience-pulse",
+        rubricVersion: 1,
+        provider: "openai",
+        model: "review-model",
+        acceptedAt: "2026-08-26T00:05:00.000Z",
+        output: {
+          rating: 3.5,
+          comment: "I wanted one more concrete question.",
+        },
+      } as const;
+      db.prepare(
+        `UPDATE botcast_episodes
+            SET persona_reviewer_bot_id = 'signal-reviewer',
+                persona_reviewer_name = 'Signal Reviewer',
+                persona_rating = 3.5,
+                persona_comment = 'I wanted one more concrete question.',
+                persona_reviewed_at = ?,
+                persona_review_provenance_json = ?
+          WHERE id = ?`,
+      ).run(provenance.acceptedAt, JSON.stringify(provenance), episode.id);
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.deepEqual(
+        snapshot.botcast?.episodes[0]?.personaReview?.provenance,
+        provenance,
+      );
+      db.prepare("DELETE FROM botcast_shows WHERE id = ?").run(show.id);
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.deepEqual(
+        JSON.parse(
+          (
+            db
+              .prepare(
+                `SELECT persona_review_provenance_json AS provenance
+                   FROM botcast_episodes WHERE id = ?`,
+              )
+              .get(episode.id) as { provenance: string }
+          ).provenance,
+        ),
+        provenance,
+      );
+
+      const legacySnapshot = structuredClone(snapshot);
+      const legacyReview = legacySnapshot.botcast?.episodes[0]?.personaReview;
+      if (legacyReview) delete legacyReview.provenance;
+      db.prepare("DELETE FROM botcast_shows WHERE id = ?").run(show.id);
+      assert.doesNotThrow(() =>
+        importUserSnapshot(db, "user-1", legacySnapshot, userKey),
+      );
+      assert.equal(
+        (
+          db
+            .prepare(
+              `SELECT persona_review_provenance_json AS provenance
+                 FROM botcast_episodes WHERE id = ?`,
+            )
+            .get(episode.id) as { provenance: string | null }
+        ).provenance,
+        null,
+      );
+    });
+  });
+});
 
 describe("backup Whodunnit private state", () => {
   it("round-trips the Case Bible, replay actions, notebook, and revisions", () => {
@@ -1138,6 +1241,56 @@ describe("backup living shell revelations", () => {
         restored.settings?.capabilityRevelations?.signal.revealed,
         true,
       );
+    });
+  });
+});
+
+describe("backup model picker visibility", () => {
+  it("round-trips picker visibility and defaults legacy snapshots to visible", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        "UPDATE users SET hidden_bot_model_ids = ?, hidden_global_picker_model_ids = ? WHERE id = ?",
+      ).run('["disabled-model"]', '["picker-hidden-model"]', "user-1");
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.deepEqual(snapshot.settings?.hiddenBotModelIds, ["disabled-model"]);
+      assert.deepEqual(snapshot.settings?.hiddenGlobalPickerModelIds, [
+        "picker-hidden-model",
+      ]);
+
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      let stored = db
+        .prepare(
+          "SELECT hidden_bot_model_ids, hidden_global_picker_model_ids FROM users WHERE id = ?",
+        )
+        .get("user-1") as {
+        hidden_bot_model_ids: string;
+        hidden_global_picker_model_ids: string;
+      };
+      assert.equal(stored.hidden_bot_model_ids, '["disabled-model"]');
+      assert.equal(
+        stored.hidden_global_picker_model_ids,
+        '["picker-hidden-model"]',
+      );
+
+      const legacySettings = { ...snapshot.settings };
+      delete legacySettings.hiddenGlobalPickerModelIds;
+      importUserSnapshot(
+        db,
+        "user-1",
+        { ...snapshot, settings: legacySettings },
+        userKey,
+      );
+      stored = db
+        .prepare(
+          "SELECT hidden_bot_model_ids, hidden_global_picker_model_ids FROM users WHERE id = ?",
+        )
+        .get("user-1") as {
+        hidden_bot_model_ids: string;
+        hidden_global_picker_model_ids: string;
+      };
+      assert.equal(stored.hidden_bot_model_ids, '["disabled-model"]');
+      assert.equal(stored.hidden_global_picker_model_ids, "[]");
     });
   });
 });

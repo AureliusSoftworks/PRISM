@@ -31,7 +31,7 @@ import {
 } from "./reasoningEffort.ts";
 
 describe("reasoning effort helpers", () => {
-  it("gates Turbo to online models with OpenAI Priority processing", () => {
+  it("gates Turbo to OpenAI Priority and eligible Anthropic Fast models", () => {
     for (const modelId of [
       "gpt-5.6",
       "gpt-5.6-sol",
@@ -54,7 +54,22 @@ describe("reasoning effort helpers", () => {
     ]) {
       assert.equal(modelSupportsTurboMode("openai", modelId), false, modelId);
     }
-    assert.equal(modelSupportsTurboMode("anthropic", "claude-opus-4-8"), false);
+    for (const modelId of [
+      "claude-opus-4-8",
+      "claude-opus-4-8-20260201",
+      "claude-opus-5",
+      "claude-opus-5-20260801",
+    ]) {
+      assert.equal(modelSupportsTurboMode("anthropic", modelId), true, modelId);
+    }
+    for (const modelId of [
+      "claude-opus-4-7",
+      "claude-sonnet-5",
+      "claude-fable-5",
+      "claude-mythos-5",
+    ]) {
+      assert.equal(modelSupportsTurboMode("anthropic", modelId), false, modelId);
+    }
     assert.equal(modelSupportsTurboMode("local", "gpt-5.6-sol"), false);
   });
 
@@ -261,11 +276,48 @@ describe("reasoning effort helpers", () => {
     assert.equal(anthropicReasoningEffortForRequest("claude-opus-4-8", "minimal"), "low");
     assert.equal(anthropicReasoningEffortForRequest("claude-opus-4-8", "medium"), "medium");
     assert.equal(anthropicReasoningEffortForRequest("claude-opus-4-8", "xhigh"), "xhigh");
+    assert.equal(anthropicReasoningEffortForRequest("claude-opus-4-8", "max"), "max");
     assert.equal(anthropicReasoningEffortForRequest("claude-sonnet-4-6", "xhigh"), "max");
+    assert.equal(anthropicReasoningEffortForRequest("claude-sonnet-4-6", "max"), "max");
     assert.equal(anthropicReasoningEffortForRequest("claude-opus-4-5", "xhigh"), "high");
+    assert.equal(anthropicReasoningEffortForRequest("claude-opus-4-5", "max"), null);
     assert.equal(anthropicReasoningEffortForRequest("claude-sonnet-4-6", "auto"), null);
     assert.equal(anthropicReasoningEffortForRequest("claude-sonnet-4-6", "none"), null);
     assert.equal(anthropicReasoningEffortForRequest("claude-haiku-4-5", "high"), null);
+  });
+
+  it("aliases provider Max to XHigh only when Claude has no native XHigh", () => {
+    for (const modelId of [
+      "claude-opus-4-6",
+      "claude-sonnet-4-6",
+      "claude-mythos-preview",
+    ]) {
+      const capability = resolveModelReasoningEffortCapability({
+        provider: "anthropic",
+        modelId,
+      });
+      assert.deepEqual(capability.levels, ["low", "medium", "high", "xhigh"]);
+      assert.equal(capability.supportsMax, false, modelId);
+      assert.equal(anthropicReasoningEffortForRequest(modelId, "xhigh"), "max");
+    }
+
+    for (const modelId of [
+      "claude-opus-4-7",
+      "claude-opus-4-8",
+      "claude-opus-5",
+      "claude-sonnet-5",
+      "claude-fable-5",
+      "claude-mythos-5",
+    ]) {
+      const capability = resolveModelReasoningEffortCapability({
+        provider: "anthropic",
+        modelId,
+      });
+      assert.deepEqual(capability.levels, ["low", "medium", "high", "xhigh"]);
+      assert.equal(capability.supportsMax, true, modelId);
+      assert.equal(anthropicReasoningEffortForRequest(modelId, "xhigh"), "xhigh");
+      assert.equal(anthropicReasoningEffortForRequest(modelId, "max"), "max");
+    }
   });
 
   it("exposes one provider-aware native effort capability", () => {

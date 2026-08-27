@@ -1,7 +1,9 @@
 import {
   DEBATE_SCHEMA_VERSION,
+  applyBotIdentityMirrorFaceV1,
   botDirectlyAddressesBotV1,
   botIdentityMirrorQuotedTargetNameV1,
+  type BotFaceStyle,
   type DebateBotSnapshotV1,
   type DebateMysteryIdentityMirrorTargetSnapshotV1,
   type DebateMysteryPublicDialogueEntryV2,
@@ -50,6 +52,14 @@ export function debateMysteryIdentityMirrorTargetBotSnapshotV1(
 
 export const debateMysteryQuotedIdentityNameV1 =
   botIdentityMirrorQuotedTargetNameV1;
+
+/** Complete frozen public face for live, saved, and replayed Whodunnit forms. */
+export function debateMysteryIdentityMirrorFaceV1(
+  holder: DebateMysteryIdentityMirrorTargetSnapshotV1,
+  target: DebateMysteryIdentityMirrorTargetSnapshotV1,
+): BotFaceStyle {
+  return applyBotIdentityMirrorFaceV1(holder.faceStyle, target.faceStyle);
+}
 
 function dialogueKey(entry: DebateMysteryPublicDialogueEntryV2): string {
   return `${entry.nodeId}:${entry.lineId ?? "text"}:${entry.occurredAt}`;
@@ -142,16 +152,12 @@ export function debateMysteryIdentityMirrorPresentationsV1(args: {
         args.state.identityMirrorTargetSnapshots[speakerBotId]?.name ??
         args.botNamesById.get(speakerBotId) ??
         speakerBotId;
+      // In Participant cases the selected Prosecutor is the embodied player's
+      // public identity even when a frozen authored line retained bot-kind
+      // provenance. Spectator cases keep the Prosecutor as an ordinary bot.
       const targetKind =
         args.state.config.playerRole !== "spectator" &&
-        speakerBotId === args.state.config.prosecutorBotId &&
-        (
-          entry.speakerKind === "player" ||
-          // Compatibility for frozen V2 dialogue written before speaker-kind
-          // provenance was persisted. The selected Prosecutor bot is the
-          // public player proxy in Participant cases.
-          entry.speakerKind === undefined
-        )
+        speakerBotId === args.state.config.prosecutorBotId
           ? "player"
           : "bot";
       presentationByHolder.set(holderBotId, {

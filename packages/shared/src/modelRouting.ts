@@ -80,7 +80,7 @@ export function normalizeAutoRouteDecisionV1(
   if (!model) return undefined;
   const reasoningEffort =
     typeof record.reasoningEffort === "string" &&
-    ["none", "minimal", "low", "medium", "high"].includes(
+    ["none", "minimal", "low", "medium", "high", "xhigh"].includes(
       record.reasoningEffort,
     )
       ? (record.reasoningEffort as ModelReasoningEffortPreference)
@@ -120,7 +120,7 @@ export interface AutoModelPriceV1 {
   outputUsdPerMillion: number;
 }
 
-export const MODEL_VISIBILITY_DEFAULTS_VERSION = 5;
+export const MODEL_VISIBILITY_DEFAULTS_VERSION = 6;
 
 /** ONLINE Auto: -1 max OpenAI lean, 0 balanced, +1 max Anthropic lean. */
 export const ONLINE_AUTO_PROVIDER_BIAS_MIN = -1;
@@ -389,6 +389,7 @@ const ROUTING_EFFORT_ORDER = [
   "low",
   "medium",
   "high",
+  "xhigh",
 ] as const satisfies readonly ModelReasoningEffortPreference[];
 
 function estimatedInputTokens(context: AutoRoutingContextV1 | undefined): number {
@@ -467,6 +468,9 @@ function routingProfile(provider: AutoModelProvider, modelId: string): {
   if (/mini|luna/u.test(id)) {
     return { capability: 2, latency: 2, known: true };
   }
+  if (/fable|mythos/u.test(id)) {
+    return { capability: 4, latency: 5, known: true };
+  }
   if (/opus|pro|sol|(?:^|-)o[345](?:-|$)/u.test(id)) {
     return { capability: 4, latency: 4, known: true };
   }
@@ -501,7 +505,9 @@ function clampAutoEffort(args: {
   );
   const supported = capability.levels.filter(
     (level): level is (typeof ROUTING_EFFORT_ORDER)[number] =>
-      level !== "xhigh",
+      ROUTING_EFFORT_ORDER.includes(
+        level as (typeof ROUTING_EFFORT_ORDER)[number],
+      ),
   );
   const atOrBelow = supported.filter(
     (level) => ROUTING_EFFORT_ORDER.indexOf(level) <= targetIndex,
@@ -573,7 +579,9 @@ function contextualAutoRoute(input: ResolveAutoModelInput): AutoRouteDecisionV1 
         ? "low"
         : complexity.score <= 4
           ? "medium"
-          : "high";
+          : complexity.score <= 6
+            ? "high"
+            : "xhigh";
   const reasonCodes = [...complexity.reasons];
   if (selected.price) reasonCodes.push("known_cost_preferred");
   if (ranked.length === 1) reasonCodes.push("only_viable_candidate");

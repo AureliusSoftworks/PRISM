@@ -41,6 +41,29 @@ describe("native Max effort overdrive", () => {
     assert.equal(modelEffortRequestValue(olderNative, "xhigh", true), "xhigh");
   });
 
+  it("aliases Claude 4.6 Max to XHigh but keeps newer Claude Max transient", () => {
+    const aliased = resolveModelReasoningEffortCapability({
+      provider: "anthropic",
+      modelId: "claude-sonnet-4-6",
+    });
+    const distinct = resolveModelReasoningEffortCapability({
+      provider: "anthropic",
+      modelId: "claude-opus-4-8",
+    });
+
+    assert.deepEqual(modelEffortSliderLevels(aliased), [
+      "auto",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+    assert.equal(aliased.supportsMax, false);
+    assert.equal(modelEffortRequestValue(aliased, "xhigh", true), "xhigh");
+    assert.equal(distinct.supportsMax, true);
+    assert.equal(modelEffortRequestValue(distinct, "xhigh", true), "max");
+  });
+
   it("wires transient clearing, request transport, provenance, and accessible UI", () => {
     const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     const css = readFileSync(new URL("./page.module.css", import.meta.url), "utf8");

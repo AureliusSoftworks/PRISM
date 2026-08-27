@@ -4,6 +4,7 @@ import {
   ANTHROPIC_DEFAULT_MODEL,
   anthropicModelUsesFixedDefaultSampling,
   buildModelCatalog,
+  refreshModelCatalog,
   checkAnthropicApiKeyStatus,
   checkDualOllamaWorkloadStatus,
   checkLocalModelHostStatus,
@@ -14,6 +15,7 @@ import {
   LocalModelRequestError,
   LocalOllamaProvider,
   OpenAiProvider,
+  ProviderTurboUnavailableError,
   openAiModelUsesMaxCompletionTokens,
   openAiModelUsesFixedDefaultTemperature,
   openAiReasoningAwareCompletionTokenLimit,
@@ -373,6 +375,25 @@ describe("buildModelCatalog", () => {
     assert.equal(second, first);
   });
 
+  it("re-discovers models when explicitly refreshed", async () => {
+    let fetchCount = 0;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const isCatalogProbe = String(input).includes("/api/tags");
+      if (isCatalogProbe) fetchCount += 1;
+      return new Response(JSON.stringify({ models: [{ name: `model-${fetchCount}` }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const first = await buildModelCatalog(undefined);
+    const refreshed = await refreshModelCatalog(undefined);
+
+    assert.ok(first.local.some((model) => model.id === "model-1"));
+    assert.ok(refreshed.local.some((model) => model.id === "model-2"));
+    assert.equal(fetchCount, 2);
+  });
+
   it("keeps fallback defaults available when keyed discovery is unavailable", async () => {
     globalThis.fetch = (async () =>
       new Response("offline", { status: 503 })) as typeof fetch;
@@ -406,6 +427,10 @@ describe("buildModelCatalog", () => {
     assert.equal(
       catalog.online.find((model) => model.id === "claude-haiku-4-5")?.label,
       "Haiku 4.5"
+    );
+    assert.equal(
+      catalog.online.find((model) => model.id === "claude-mythos-5")?.label,
+      "Mythos 5",
     );
     assert.ok(!catalog.online.some((model) => model.id === "claude-3-5-haiku-latest"));
   });
@@ -1946,12 +1971,114 @@ describe("AnthropicProvider request shape", () => {
       model: "claude-sonnet-4-6",
       reasoningEffort: "xhigh",
     });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "claude-opus-4-8",
+      reasoningEffort: "max",
+    });
 
     assert.deepEqual(bodies.map((body) => body.output_config), [
       { effort: "xhigh" },
       { effort: "low" },
       { effort: "max" },
+      { effort: "max" },
     ]);
+  });
+
+  it("sends Anthropic Fast mode and requires provider confirmation", async () => {
+    let body: Record<string, unknown> = {};
+    let headers = new Headers();
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      headers = new Headers(init?.headers);
+      return new Response(
+        JSON.stringify({
+          content: [{ type: "text", text: "fast ok" }],
+          usage: { input_tokens: 3, output_tokens: 2, speed: "fast" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const response = await new AnthropicProvider({ apiKey: "sk-ant-test" }).generateResponse(
+      [{ role: "user", content: "hi" }],
+      { model: "claude-opus-4-8", turbo: true },
+    );
+
+    assert.equal(response, "fast ok");
+    assert.equal(body.speed, "fast");
+    assert.equal(headers.get("anthropic-beta"), "fast-mode-2026-02-01");
+  });
+
+  it("does not send Fast mode to ineligible Claude models", async () => {
+    let body: Record<string, unknown> = {};
+    let headers = new Headers();
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      headers = new Headers(init?.headers);
+      return new Response(
+        JSON.stringify({ content: [{ type: "text", text: "standard ok" }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    await new AnthropicProvider({ apiKey: "sk-ant-test" }).generateResponse(
+      [{ role: "user", content: "hi" }],
+      { model: "claude-sonnet-5", turbo: true },
+    );
+
+    assert.equal("speed" in body, false);
+    assert.equal(headers.has("anthropic-beta"), false);
+  });
+
+  it("surfaces unconfirmed Fast responses without standard or local fallback", async () => {
+    const requestedUrls: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      requestedUrls.push(String(input));
+      return new Response(
+        JSON.stringify({
+          content: [{ type: "text", text: "not confirmed" }],
+          usage: { input_tokens: 3, output_tokens: 2, speed: "standard" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    await assert.rejects(
+      () => new AnthropicProvider({ apiKey: "sk-ant-test" }).generateResponse(
+        [{ role: "user", content: "hi" }],
+        { model: "claude-opus-5", turbo: true },
+      ),
+      (error: unknown) =>
+        error instanceof ProviderTurboUnavailableError &&
+        error.kind === "unverified_response",
+    );
+    assert.deepEqual(requestedUrls, ["https://api.anthropic.com/v1/messages"]);
+  });
+
+  it("surfaces Fast access and capacity failures without local fallback", async () => {
+    for (const [status, kind] of [
+      [403, "access_or_model"],
+      [529, "capacity"],
+    ] as const) {
+      const requestedUrls: string[] = [];
+      globalThis.fetch = (async (input: string | URL | Request) => {
+        requestedUrls.push(String(input));
+        return new Response(
+          JSON.stringify({ error: { message: `Fast failure ${status}` } }),
+          { status, headers: { "content-type": "application/json" } },
+        );
+      }) as typeof fetch;
+
+      await assert.rejects(
+        () => new AnthropicProvider({ apiKey: "sk-ant-test" }).generateResponse(
+          [{ role: "user", content: "hi" }],
+          { model: "claude-opus-4-8", turbo: true },
+        ),
+        (error: unknown) =>
+          error instanceof ProviderTurboUnavailableError && error.kind === kind,
+      );
+      assert.deepEqual(requestedUrls, ["https://api.anthropic.com/v1/messages"]);
+    }
   });
 
   it("omits Anthropic effort for auto and unsupported models", async () => {

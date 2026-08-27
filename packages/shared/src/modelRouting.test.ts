@@ -7,6 +7,7 @@ import {
   formatOnlineAutoProviderBiasLabel,
   defaultHiddenModelIdsForCatalog,
   isCommonOnlineChatModel,
+  normalizeAutoRouteDecisionV1,
   reconcileHiddenModelIdsForCatalog,
   resolveAutoModel,
 } from "./modelRouting.ts";
@@ -54,6 +55,7 @@ describe("default online model visibility", () => {
         { id: "claude-sonnet-4-5-20250929", provider: "anthropic" as const },
         { id: "claude-3-5-haiku-latest", provider: "anthropic" as const },
         { id: "claude-test-model", provider: "anthropic" as const },
+        { id: "claude-mythos-5", provider: "anthropic" as const },
       ],
     };
 
@@ -69,7 +71,40 @@ describe("default online model visibility", () => {
       "claude-sonnet-4-5-20250929",
       "claude-3-5-haiku-latest",
       "claude-test-model",
+      "claude-mythos-5",
     ]);
+  });
+
+  it("keeps optional Mythos hidden until it is manually enabled", () => {
+    const catalog = {
+      local: [],
+      online: [
+        { id: "claude-sonnet-4-6", provider: "anthropic" as const },
+        { id: "claude-mythos-5", provider: "anthropic" as const },
+      ],
+    };
+    const hidden = defaultHiddenModelIdsForCatalog(catalog);
+    assert.deepEqual(hidden, ["claude-mythos-5"]);
+    assert.notEqual(
+      resolveAutoModel({
+        provider: "anthropic",
+        lane: "online",
+        hiddenModelIds: hidden,
+        catalog,
+        routingContext: { research: true, highStakes: true },
+      }).model,
+      "claude-mythos-5",
+    );
+    assert.equal(
+      resolveAutoModel({
+        provider: "anthropic",
+        lane: "online",
+        explicitModelOverride: "claude-mythos-5",
+        hiddenModelIds: [],
+        catalog,
+      }).model,
+      "claude-mythos-5",
+    );
   });
 
   it("unhides stale default-hidden chat aliases after visibility rules change", () => {
@@ -216,7 +251,47 @@ describe("resolveAutoModel", () => {
     assert.deepEqual(second, first);
     assert.ok(first.autoRoute?.reasonCodes.includes("research"));
     assert.ok(first.autoRoute?.reasonCodes.includes("long_context"));
-    assert.notEqual(first.autoRoute?.reasoningEffort, "xhigh");
+    assert.equal(first.autoRoute?.reasoningEffort, "xhigh");
+  });
+
+  it("reserves XHigh for score 7+ and clamps to each model capability", () => {
+    const route = (modelId: string, toolUse: boolean) =>
+      resolveAutoModel({
+        provider: "anthropic",
+        lane: "online",
+        hiddenModelIds: [],
+        catalog: {
+          local: [],
+          online: [{ id: modelId, provider: "anthropic" as const }],
+        },
+        routingContext: {
+          surface: "signal",
+          structuredOutput: true,
+          research: true,
+          highStakes: true,
+          toolUse,
+        },
+        priceForModel: () => ({ inputUsdPerMillion: 1, outputUsdPerMillion: 1 }),
+      });
+
+    assert.equal(route("claude-opus-4-8", false).autoRoute?.reasoningEffort, "high");
+    assert.equal(route("claude-opus-4-8", true).autoRoute?.reasoningEffort, "xhigh");
+    assert.equal(route("claude-opus-4-5", true).autoRoute?.reasoningEffort, "high");
+    assert.equal(route("claude-sonnet-4-6", true).autoRoute?.reasoningEffort, "xhigh");
+  });
+
+  it("accepts serialized Auto XHigh decisions", () => {
+    assert.equal(
+      normalizeAutoRouteDecisionV1({
+        v: 1,
+        lane: "online",
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        reasoningEffort: "xhigh",
+        reasonCodes: ["deep_request"],
+      })?.reasoningEffort,
+      "xhigh",
+    );
   });
 
   it("can escalate model and effort as one frozen Debate record grows", () => {

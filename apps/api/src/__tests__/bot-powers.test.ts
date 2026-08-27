@@ -782,24 +782,19 @@ test("Identity Crisis deterministically compiles player-aware bounded identity m
   ]);
   assert.match(
     result.powers[0]?.compiled?.selfCue ?? "",
-    /presentation-only.*exact eyes.*resting\/live mouth package.*Custom Speech poses.*Avatar Details Ink.*lower glyph.*double-quoted/iu,
+    /become absolutely convinced.*original is an impostor.*public name, persona, exact eyes.*resting\/live mouth package.*Custom Speech poses.*Avatar Details Ink.*lower glyph.*active public Power consequences/iu,
   );
   assert.match(
     result.powers[0]?.compiled?.selfCue ?? "",
-    /Keep your own color, chassis\/frame, complete voice, Accent Map location, pronunciation, Speechprint, provider voice identity, Powers, behavior, memories, role/iu,
-  );
-  assert.doesNotMatch(
-    result.powers[0]?.compiled?.selfCue ?? "",
-    /become absolutely convinced|impostor|active public Power consequences/iu,
+    /Keep your own color, chassis\/frame, complete frozen voice, exact Accent Map location, pronunciation, Speechprint, provider voice identity, bot ID, role, seat, provider, private memories, relationship state, perception permissions/iu,
   );
   assert.match(
     result.powers[0]?.compiled?.selfCue ?? "",
-    /knowingly masquerade.*appropriate.*double-quoted.*Defensively behave.*suspicious imitator.*mild concern.*Keep your own color.*complete voice.*Whodunnit V2.*player-controlled Prosecutor/iu,
+    /Never target the human player/iu,
   );
-  assert.doesNotMatch(result.powers[0]?.compiled?.selfCue ?? "", /player is never a target/iu);
   assert.match(
     result.powers[0]?.compiled?.observerCue ?? "",
-    /exact eyes.*resting\/live mouth package.*Custom Speech poses.*Avatar Details Ink.*lower glyph.*double-quoted.*color, chassis\/frame, complete voice and Accent Map, pronunciation, Speechprint, provider voice identity/iu,
+    /steals the latest eligible direct addresser's public person.*active public Power consequences.*convinced the original is an impostor.*material shell.*complete frozen voice and exact Accent Map.*accused original.*grows naturally more offended/iu,
   );
 });
 

@@ -74,6 +74,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     autoFallbackChain: null,
     onlineAutoProviderBias: 0,
     hiddenBotModelIds: "[]",
+    hiddenGlobalPickerModelIds: "[]",
     hiddenComfyUiWorkflowIds: "[]",
     preferredLocalModel: null,
     preferredOnlineModel: null,
@@ -957,6 +958,40 @@ describe("resolveNextSettings — hiddenBotModelIds", () => {
     assert.deepEqual(
       resolveNextSettings({ hiddenBotModelIds: "nope" }, current).hiddenBotModelIds,
       ["gpt-3.5-turbo"]
+    );
+  });
+});
+
+describe("resolveNextSettings — hiddenGlobalPickerModelIds", () => {
+  it("persists picker visibility independently from model availability", () => {
+    const next = resolveNextSettings(
+      {
+        hiddenBotModelIds: [],
+        hiddenGlobalPickerModelIds: [" gpt-4o-mini ", "gpt-4o-mini"],
+      },
+      baseline(),
+    );
+    assert.deepEqual(next.hiddenBotModelIds, []);
+    assert.deepEqual(next.hiddenGlobalPickerModelIds, ["gpt-4o-mini"]);
+  });
+
+  it("allows the required local fallback to stay enabled but leave pickers", () => {
+    const next = resolveNextSettings(
+      {
+        hiddenBotModelIds: ["llama3.2"],
+        hiddenGlobalPickerModelIds: ["llama3.2"],
+      },
+      baseline(),
+    );
+    assert.deepEqual(next.hiddenBotModelIds, []);
+    assert.deepEqual(next.hiddenGlobalPickerModelIds, ["llama3.2"]);
+  });
+
+  it("defaults missing legacy state to picker-visible", () => {
+    const current = baseline({ hiddenGlobalPickerModelIds: undefined });
+    assert.deepEqual(
+      resolveNextSettings({}, current).hiddenGlobalPickerModelIds,
+      [],
     );
   });
 });

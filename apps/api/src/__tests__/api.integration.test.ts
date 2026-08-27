@@ -615,7 +615,7 @@ describe("API request integration", () => {
     assert.equal(warmBody.keep_alive, -1);
   });
 
-  it("migrates GPT-5.6 tier models out of stale default-hidden settings", async () => {
+  it("migrates stale visibility defaults while adding optional Mythos hidden", async () => {
     const client = createClient();
     const registered = await client.request(
       "/api/auth/register",
@@ -639,7 +639,9 @@ describe("API request integration", () => {
       userId,
     );
     const previousOpenAiKey = config.openAiApiKey;
+    const previousAnthropicKey = config.anthropicApiKey;
     config.openAiApiKey = "sk-model-visibility-test";
+    config.anthropicApiKey = "sk-ant-model-visibility-test";
     try {
       const response = await client.request("/api/models");
       assert.equal(response.status, 200);
@@ -650,10 +652,24 @@ describe("API request integration", () => {
       assert.ok(onlineIds.includes("gpt-5.6-sol"));
       assert.ok(onlineIds.includes("gpt-5.6-terra"));
       assert.ok(onlineIds.includes("gpt-5.6-luna"));
+      assert.ok(onlineIds.includes("claude-mythos-5"));
       assert.equal(payload.hiddenBotModelIds.includes("gpt-5.6-sol"), false);
       assert.equal(payload.hiddenBotModelIds.includes("gpt-5.6-terra"), false);
       assert.equal(payload.hiddenBotModelIds.includes("gpt-5.6-luna"), false);
       assert.equal(payload.hiddenBotModelIds.includes("gpt-5.5-pro"), true);
+      assert.equal(payload.hiddenBotModelIds.includes("claude-mythos-5"), true);
+      assert.equal(
+        payload.catalog.online.find(
+          (model: { id: string }) => model.id === "gpt-5.6-luna",
+        )?.showInGlobalPicker,
+        true,
+      );
+      assert.equal(
+        payload.catalog.online.find(
+          (model: { id: string }) => model.id === "gpt-5.5-pro",
+        )?.showInGlobalPicker,
+        true,
+      );
       const stored = db
         .prepare(
           "SELECT model_visibility_defaults_version FROM users WHERE id = ?",
@@ -665,6 +681,140 @@ describe("API request integration", () => {
       );
     } finally {
       config.openAiApiKey = previousOpenAiKey;
+      config.anthropicApiKey = previousAnthropicKey;
+    }
+  });
+
+  it("seeds Mythos hidden for a new account", async () => {
+    const client = createClient();
+    const registered = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "mythos-visibility-new@example.com",
+        password: "mythos-visibility-new-password",
+      }),
+    );
+    assert.equal(registered.status, 201);
+    const previousAnthropicKey = config.anthropicApiKey;
+    config.anthropicApiKey = "sk-ant-mythos-visibility-test";
+    try {
+      const payload = await json(await client.request("/api/models"));
+      assert.ok(
+        payload.catalog.online.some(
+          (model: { id: string }) => model.id === "claude-mythos-5",
+        ),
+      );
+      assert.equal(payload.hiddenBotModelIds.includes("claude-mythos-5"), true);
+      assert.deepEqual(payload.hiddenGlobalPickerModelIds, []);
+      assert.equal(
+        payload.catalog.online.find(
+          (model: { id: string }) => model.id === "claude-mythos-5",
+        )?.showInGlobalPicker,
+        true,
+      );
+    } finally {
+      config.anthropicApiKey = previousAnthropicKey;
+    }
+  });
+
+  it("persists manual picker visibility without disabling Auto eligibility", async () => {
+    const client = createClient();
+    const registered = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "picker-visibility@example.com",
+        password: "picker-visibility-password",
+      }),
+    );
+    assert.equal(registered.status, 201);
+    const saved = await client.request("/api/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        hiddenBotModelIds: [],
+        hiddenGlobalPickerModelIds: ["gpt-5.6-luna"],
+      }),
+    });
+    assert.equal(saved.status, 200);
+
+    const settings = (await json(await client.request("/api/settings"))).settings;
+    assert.deepEqual(settings.hiddenBotModelIds, []);
+    assert.deepEqual(settings.hiddenGlobalPickerModelIds, ["gpt-5.6-luna"]);
+
+    const previousOpenAiKey = config.openAiApiKey;
+    config.openAiApiKey = "sk-picker-visibility-test";
+    try {
+      const payload = await json(await client.request("/api/models"));
+      assert.equal(payload.hiddenBotModelIds.includes("gpt-5.6-luna"), false);
+      assert.deepEqual(payload.hiddenGlobalPickerModelIds, ["gpt-5.6-luna"]);
+      assert.equal(
+        payload.catalog.online.find(
+          (model: { id: string }) => model.id === "gpt-5.6-luna",
+        )?.showInGlobalPicker,
+        false,
+      );
+    } finally {
+      config.openAiApiKey = previousOpenAiKey;
+    }
+  });
+
+  it("re-discovers models when the catalog refresh query is requested", async () => {
+    const client = createClient();
+    const registered = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "runtime-model-refresh@example.com",
+        password: "runtime-model-refresh-password",
+      }),
+    );
+    assert.equal(registered.status, 201);
+    resetModelCatalogCacheForTests();
+    fetchRecorder.setResponse(
+      new Response(JSON.stringify({ models: [{ name: "runtime-before" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    try {
+      const first = await client.request("/api/models");
+      assert.equal(first.status, 200);
+      assert.ok(
+        (await json(first)).catalog.local.some(
+          (model: { id: string }) => model.id === "runtime-before",
+        ),
+      );
+
+      fetchRecorder.setResponse(
+        new Response(JSON.stringify({ models: [{ name: "runtime-after" }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      const cached = await client.request("/api/models");
+      assert.equal(cached.status, 200);
+      assert.ok(
+        (await json(cached)).catalog.local.some(
+          (model: { id: string }) => model.id === "runtime-before",
+        ),
+      );
+
+      const refreshed = await client.request("/api/models?refresh=1");
+      assert.equal(refreshed.status, 200);
+      const refreshedPayload = await json(refreshed);
+      assert.ok(
+        refreshedPayload.catalog.local.some(
+          (model: { id: string }) => model.id === "runtime-after",
+        ),
+      );
+      assert.equal(
+        refreshedPayload.catalog.local.some(
+          (model: { id: string }) => model.id === "runtime-before",
+        ),
+        false,
+      );
+    } finally {
+      resetModelCatalogCacheForTests();
+      fetchRecorder.setResponse(new Response("{}", { status: 200 }));
     }
   });
 
@@ -1878,7 +2028,7 @@ describe("API request integration", () => {
     const loaded = await json(await client.request("/api/settings"));
     assert.equal(loaded.settings.modelTurboPreferences[0]?.turbo, true);
 
-    const rejected = await client.request("/api/model-turbo-preferences", {
+    const anthropicEnabled = await client.request("/api/model-turbo-preferences", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -1887,7 +2037,29 @@ describe("API request integration", () => {
         turbo: true,
       }),
     });
+    assert.equal(anthropicEnabled.status, 200);
+
+    const rejected = await client.request("/api/model-turbo-preferences", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "anthropic",
+        modelId: "claude-sonnet-5",
+        turbo: true,
+      }),
+    });
     assert.equal(rejected.status, 400);
+
+    const anthropicDisabled = await client.request("/api/model-turbo-preferences", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "anthropic",
+        modelId: "claude-opus-4-8",
+        turbo: false,
+      }),
+    });
+    assert.equal(anthropicDisabled.status, 200);
 
     const disabled = await client.request("/api/model-turbo-preferences", {
       method: "PUT",

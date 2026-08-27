@@ -12,6 +12,8 @@ import {
 } from "@localai/shared";
 import {
   signalFaithfulReplayCameraState,
+  signalReplayCameraClockFrame,
+  signalReplayClockCrossedBoundary,
   signalReplayBookendAt,
   signalReplayDefaultIntroDurationMs,
   signalReplayEventElapsedMs,
@@ -269,6 +271,99 @@ const v2BookendManifest = {
     metadata: { introPresentationDurationMs: 2_000 },
   },
 } as unknown as ReplayManifestV2;
+
+describe("signalReplayCameraClockFrame", () => {
+  const cameraManifest: ReplayManifestV2 = {
+    ...v2BookendManifest,
+    initialScene: {
+      ...v2BookendManifest.initialScene,
+      camera: "wide",
+    },
+    direction: [
+      {
+        sequence: 1,
+        atMs: 2_000,
+        kind: "camera",
+        payload: { shot: "left", transitionMode: "animated" },
+      },
+      {
+        sequence: 2,
+        atMs: 5_000,
+        kind: "camera",
+        payload: { shot: "right", transitionMode: "animated" },
+      },
+    ],
+  };
+
+  it("reconstructs transition progress from the media timestamp after a stall", () => {
+    const beforeStall = signalReplayCameraClockFrame({
+      manifest: cameraManifest,
+      replayElapsedMs: 5_180,
+    });
+    const afterTwoSecondStall = signalReplayCameraClockFrame({
+      manifest: cameraManifest,
+      replayElapsedMs: 7_180,
+    });
+
+    assert.equal(beforeStall?.fromShot, "left");
+    assert.equal(beforeStall?.toShot, "right");
+    assert.equal(beforeStall?.transitionStartedAtMs, 5_000);
+    assert.ok((beforeStall?.progress ?? 0) > 0.2);
+    assert.ok((beforeStall?.progress ?? 1) < 1);
+    assert.deepEqual(afterTwoSecondStall, {
+      fromShot: "left",
+      toShot: "right",
+      progress: 1,
+      transitionStartedAtMs: 5_000,
+    });
+  });
+
+  it("reconstructs the same frame for seek and pause-resume reads", () => {
+    const seeked = signalReplayCameraClockFrame({
+      manifest: cameraManifest,
+      replayElapsedMs: 5_450,
+    });
+    const paused = signalReplayCameraClockFrame({
+      manifest: cameraManifest,
+      replayElapsedMs: 5_450,
+    });
+
+    assert.deepEqual(seeked, paused);
+    assert.ok((seeked?.progress ?? 0) > 0.5);
+  });
+});
+
+describe("signalReplayClockCrossedBoundary", () => {
+  it("publishes a delayed media sample once when it crosses saved cues", () => {
+    assert.equal(
+      signalReplayClockCrossedBoundary({
+        previousElapsedMs: 27_900,
+        elapsedMs: 31_900,
+        boundaryTimesMs: [28_200, 30_311, 31_576],
+      }),
+      true,
+    );
+    assert.equal(
+      signalReplayClockCrossedBoundary({
+        previousElapsedMs: 31_900,
+        elapsedMs: 31_950,
+        boundaryTimesMs: [28_200, 30_311, 31_576],
+      }),
+      false,
+    );
+  });
+
+  it("always republishes after a seek backwards", () => {
+    assert.equal(
+      signalReplayClockCrossedBoundary({
+        previousElapsedMs: 31_900,
+        elapsedMs: 28_000,
+        boundaryTimesMs: [],
+      }),
+      true,
+    );
+  });
+});
 
 function participantScene(
   overrides: Partial<ReplayParticipantSceneV2> = {},

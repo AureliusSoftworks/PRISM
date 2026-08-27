@@ -140,7 +140,11 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /botIdentityPresentationTransitionActiveV1/u);
     assert.match(experienceSource, /BOT_IDENTITY_PRESENTATION_TRANSITION_MS/u);
     assert.match(experienceSource, /state\.identityMirrorTargetSnapshots\[mirror\.targetBotId\]/u);
+    assert.match(experienceSource, /state\.identityMirrorTargetSnapshots\[bot\.id\]/u);
     assert.match(experienceSource, /debateMysteryIdentityMirrorTargetBotSnapshotV1/u);
+    assert.match(experienceSource, /debateMysteryIdentityMirrorFaceV1\(frozenHolder, frozenTarget\)/u);
+    assert.match(experienceSource, /faceStyleOverride/u);
+    assert.match(setupSource, /faceStyleOverride: bot\.faceStyleOverride \?\? null/u);
     assert.match(experienceSource, /debateMysteryQuotedIdentityNameV1\(copiedName\)/u);
     assert.doesNotMatch(
       experienceSource,

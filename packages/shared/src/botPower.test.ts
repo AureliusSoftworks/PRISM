@@ -2678,7 +2678,7 @@ test("power immunity removes only another bot's active Power layer", () => {
   );
 });
 
-test("identity mirror keeps holder Powers without borrowing target mechanics", () => {
+test("identity mirror borrows public target mechanics but excludes recursive and private access", () => {
   const power = (id: string, effects: Parameters<typeof normalizeBotPowerEffectV1>[0][]) => ({
     version: 1 as const,
     id,
@@ -2716,12 +2716,18 @@ test("identity mirror keeps holder Powers without borrowing target mechanics", (
 
   assert.deepEqual(
     composed.map((candidate) => candidate.id),
-    ["holder"],
+    ["holder", "identity-mirror:forgetful"],
   );
-  assert.equal(botPowerEternallyIntroducesV1(composed), false);
-  assert.equal(botPowerBelievesFalseNameV1(composed), false);
+  assert.equal(botPowerEternallyIntroducesV1(composed), true);
+  assert.equal(botPowerBelievesFalseNameV1(composed), true);
   assert.deepEqual(activeBotPowerEffectsV1(composed), [
     { type: "response_budget", mode: "brief", enforcement: "hard" },
+    { type: "eternal_introduction", memory: "current_other_speaker_message" },
+    {
+      type: "false_name",
+      continuity: "session_sticky_until_amnesia",
+      pool: "mixed_persona_names",
+    },
   ]);
   assert.deepEqual(
     normalizeBotPowerEffectV1({

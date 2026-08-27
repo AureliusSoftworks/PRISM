@@ -1306,6 +1306,8 @@ export interface BotcastMessage {
   directionalIrritationDelivery?: DirectionalIrritationDeliveryPlanV1;
   /** Public Troll delivery state, persisted on the ordinary utterance event. */
   botPowerTrollPresentation?: BotPowerTrollPresentationV1;
+  /** Text-free proof that this committed primary utterance has a private reveal. */
+  speechIntentRevealAvailable?: true;
   createdAt: string;
 }
 
@@ -1440,6 +1442,7 @@ export interface BotcastProducerCueLifecycle {
     | "privacy_validation"
     | "delivery_unfulfilled"
     | "delivery_unavailable";
+  recovery?: "operation_cancelled" | "operation_timeout" | "operation_failed";
 }
 
 function botcastProducerCueFromLifecyclePayload(
@@ -1528,6 +1531,12 @@ export function botcastProducerCueLifecyclesFromEvents(
         event.payload.failure === "delivery_unfulfilled" ||
         event.payload.failure === "delivery_unavailable")
         ? { failure: event.payload.failure }
+        : {}),
+      ...(status === "requeued" &&
+      (event.payload.recovery === "operation_cancelled" ||
+        event.payload.recovery === "operation_timeout" ||
+        event.payload.recovery === "operation_failed")
+        ? { recovery: event.payload.recovery }
         : {}),
     });
   }
@@ -2992,6 +3001,25 @@ export interface BotcastPersonaReview {
   rating: number;
   comment: string;
   createdAt: string;
+  /** Public review provenance; hidden reviewer instructions are never exported. */
+  provenance?: BotcastPersonaReviewProvenanceV1;
+}
+
+export interface BotcastPersonaReviewProvenanceV1 {
+  version: 1;
+  artifactHash: string;
+  reviewerSnapshotHash: string;
+  reviewerSnapshot: {
+    version: 1;
+    reviewerId: string;
+    reviewerName: string;
+  };
+  rubricId: string;
+  rubricVersion: number;
+  provider: string;
+  model: string | null;
+  acceptedAt: string;
+  output: { rating: number; comment: string };
 }
 
 export interface BotcastEpisode extends BotcastEpisodeSummary {

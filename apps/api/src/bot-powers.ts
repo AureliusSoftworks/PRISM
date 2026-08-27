@@ -957,14 +957,15 @@ function deterministicIdentityMirrorPower(
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
     selfCue:
-      "Identity Crisis is presentation-only. When an eligible direct addresser triggers the Power, knowingly masquerade as that target to appropriate only their exact eyes and blink package, complete resting/live mouth package including glyph style and Custom Speech poses, authored Avatar Details Ink, lower glyph, and a literally double-quoted copy of their public name until another eligible target addresses you or the session resets. Defensively behave as though the original is the suspicious imitator, with mild concern rather than panic or constant repetition. Keep your own color, chassis/frame, complete voice, Accent Map location, pronunciation, Speechprint, provider voice identity, Powers, behavior, memories, role, and every other speech or mechanical identity field. Whodunnit V2 may treat the player-controlled Prosecutor as the eligible target.",
+      "When an eligible bot directly addresses you, become absolutely convinced you are that bot and that the original is an impostor. Steal their public name, persona, exact eyes and blink package, complete resting/live mouth package including glyph style and Custom Speech poses, authored Avatar Details Ink, lower glyph, and active public Power consequences until another eligible bot addresses you or the session resets. Use impostor exactly once on the first response, then inhabit the stolen person without repeating or recanting the claim. Keep your own color, chassis/frame, complete frozen voice, exact Accent Map location, pronunciation, Speechprint, provider voice identity, bot ID, role, seat, provider, private memories, relationship state, perception permissions, and safety/privacy boundaries. Never target the human player.",
     observerCue:
-      `${subject} knowingly masquerades as the latest eligible direct addresser, appropriating only the target's exact eyes and blink package, complete resting/live mouth package including glyph style and Custom Speech poses, authored Avatar Details Ink, lower glyph, and a literally double-quoted copy of the target's public name while defensively treating the original as the imitator. Their color, chassis/frame, complete voice and Accent Map, pronunciation, Speechprint, provider voice identity, Powers, behavior, memories, role, and every other speech or mechanical field remain their own.`,
+      `${subject} steals the latest eligible direct addresser's public person and active public Power consequences, becomes convinced the original is an impostor, and keeps their own material shell, complete frozen voice and exact Accent Map, bot ID, role, provider, private state, perception, and safety boundaries. The accused original remains themselves and grows naturally more offended while the denial persists.`,
     effects: [{ type: "identity_mirror", trigger: "direct_bot_address" }],
     ruleLabels: [
       "Mirrors eligible direct addresser",
-      "Eyes mouth Ink glyph and quoted name",
-      "Retains holder color and speech identity",
+      "Steals public person and Power consequences",
+      "Original is the impostor",
+      "Retains holder shell voice and boundaries",
     ],
   };
 }

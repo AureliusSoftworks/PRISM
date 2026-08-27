@@ -9,6 +9,7 @@ import {
   ensureCoffeeContextSparks,
   fallbackCoffeeContextSparkPrompt,
   normalizeCoffeeContextSparkPrompt,
+  resolveCoffeeContextSparkForSession,
   resolveCoffeeContextSparkForTurn,
   synthesizeCoffeeContextSparkPrompts,
   updateCoffeeContextSparkState,
@@ -20,6 +21,7 @@ import type {
   LlmProvider,
   ProviderMessage,
 } from "../providers.ts";
+import { botPowerSourceHashV1 } from "@localai/shared";
 
 const NOW = "2026-08-15T16:00:00.000Z";
 const coffeeSource = readFileSync(new URL("../coffee.ts", import.meta.url), "utf8");
@@ -127,6 +129,19 @@ function seedSignalSources(db: DatabaseSync): void {
        'The bridge nobody trusted', 'Trust under pressure', 'A concrete disagreement about the bridge.',
        'completed', 'closing', ?, ?, ?, ?)`,
   ).run(NOW, NOW, NOW, NOW);
+  const signalExchange = [
+    ["signal-a-1", "host", "bot-a", "Bex, when did the bridge stop being a problem and become part of your design?"],
+    ["signal-a-2", "guest", "bot-b", "When repairing it was no longer enough; I had to decide what the crossing was for."],
+    ["signal-a-3", "host", "bot-a", "That is annoyingly useful. So the argument changed the destination, not just the bridge."],
+  ] as const;
+  const insertSignalMessage = db.prepare(
+    `INSERT INTO botcast_messages
+      (id, user_id, episode_id, speaker_role, bot_id, content, created_at)
+     VALUES (?, 'user-1', 'signal-a', ?, ?, ?, ?)`,
+  );
+  for (const [id, role, botId, content] of signalExchange) {
+    insertSignalMessage.run(id, role, botId, content, NOW);
+  }
 
   db.prepare(
     `INSERT INTO botcast_shows
@@ -235,6 +250,7 @@ describe("Coffee Context Sparks", () => {
       /PATCH",\s*"\/api\/coffee\/sessions\/:id\/context-sparks\/:sparkId/u,
     );
     assert.match(serverSource, /resolveCoffeeContextSparkForTurn\(\{/u);
+    assert.match(serverSource, /resolveCoffeeContextSparkForSession\(\{/u);
     assert.match(
       serverSource,
       /if \(contextSpark && result\.speakerBotId && !result\.stale\) \{\s*consumeCoffeeContextSpark/u,
@@ -246,6 +262,10 @@ describe("Coffee Context Sparks", () => {
     assert.match(
       coffeeSource,
       /directedSpeakerPrivateContext && explicitDirectedSpeaker\?\.id === speaker\.id/u,
+    );
+    assert.match(
+      coffeeSource,
+      /sourceParticipantPrivateContextByBotId\?\.\[speaker\.id\]/u,
     );
     assert.doesNotMatch(
       coffeeSource,
@@ -296,7 +316,10 @@ describe("Coffee Context Sparks", () => {
   it("rejects vague model copy and retains a deterministic grounded fallback", async () => {
     const source = candidate({});
     assert.equal(normalizeCoffeeContextSparkPrompt("Ask Ari something", source), null);
-    assert.match(fallbackCoffeeContextSparkPrompt(source), /^Ask Ari\b/u);
+    assert.match(
+      fallbackCoffeeContextSparkPrompt(source),
+      /^Ask Ari what still lingers from\b/u,
+    );
 
     const failingProvider: LlmProvider = {
       name: "local",
@@ -366,6 +389,57 @@ describe("Coffee Context Sparks", () => {
       state: "armed",
     });
     assert.equal(armed.find((entry) => entry.id === spark.id)?.state, "armed");
+    const hiddenName = "Out of Earshot";
+    const hiddenIntent = "Nobody in the audience can see or hear this bot.";
+    db.prepare(
+      `INSERT INTO botcast_events
+        (id, user_id, episode_id, sequence, kind, payload_json, occurred_at)
+       VALUES ('signal-a-opening', 'user-1', 'signal-a', 1, 'segment', ?, ?)`,
+    ).run(
+      JSON.stringify({
+        segment: "opening",
+        ordinal: 0,
+        powerSnapshot: {
+          v: 1,
+          hostBotId: "bot-a",
+          guestBotId: "bot-b",
+          hostPowers: [{
+            version: 1,
+            id: "out-of-earshot",
+            name: hiddenName,
+            intent: hiddenIntent,
+            enabled: true,
+            compileStatus: "ready",
+            compiled: {
+              version: 1,
+              sourceHash: botPowerSourceHashV1(hiddenName, hiddenIntent),
+              selfCue: "Remain beyond ordinary perception.",
+              observerCue: "A participant cannot be perceived.",
+              effects: [
+                { type: "avatar_visibility", mode: "hidden" },
+                {
+                  type: "speech_audience",
+                  allowed: [{ kind: "bot", name: "Somebody Else" }],
+                },
+              ],
+              ruleLabels: ["Hidden from the audience"],
+            },
+          }],
+          guestPowers: [],
+          hostIdentity: {
+            id: "bot-a",
+            name: "Ari Vale",
+            systemPrompt: "Ari is a precise conversational persona.",
+          },
+          guestIdentity: {
+            id: "bot-b",
+            name: "Bex North",
+            systemPrompt: "Bex is a precise conversational persona.",
+          },
+        },
+      }),
+      NOW,
+    );
     const resolved = resolveCoffeeContextSparkForTurn({
       db,
       userId: "user-1",
@@ -374,6 +448,20 @@ describe("Coffee Context Sparks", () => {
     });
     assert.equal(resolved?.inspiredBotId, spark.inspiredBotId);
     assert.match(resolved?.privateContext ?? "", /actually participated/u);
+    assert.match(resolved?.privateContext ?? "", /When repairing it was no longer enough/u);
+    assert.doesNotMatch(
+      resolved?.privateContext ?? "",
+      /Bex, when did the bridge stop|That is annoyingly useful/u,
+      "audience-inaudible Signal turns must not cross into Coffee context",
+    );
+    assert.deepEqual(
+      Object.keys(resolved?.participantPrivateContextByBotId ?? {}).sort(),
+      ["bot-a", "bot-b"],
+    );
+    assert.doesNotMatch(
+      resolved?.publicContinuationCue ?? "",
+      /Bex, when did the bridge|That is annoyingly useful/u,
+    );
     assert.equal(
       db.prepare("SELECT state FROM coffee_context_sparks WHERE id = ?").get(spark.id)?.state,
       "armed",
@@ -388,6 +476,21 @@ describe("Coffee Context Sparks", () => {
     assert.equal(
       db.prepare("SELECT state FROM coffee_context_sparks WHERE id = ?").get(spark.id)?.state,
       "used",
+    );
+    const continuing = resolveCoffeeContextSparkForSession({
+      db,
+      userId: "user-1",
+      conversationId: "coffee-current",
+    });
+    assert.equal(continuing?.state, "used");
+    assert.match(
+      continuing?.participantPrivateContextByBotId["bot-a"] ?? "",
+      /Continue the relationship and ideas/u,
+    );
+    assert.equal(
+      continuing?.participantPrivateContextByBotId["bot-c"],
+      undefined,
+      "a seated outsider must not receive Signal transcript context",
     );
     assert.ok(
       !(await ensureCoffeeContextSparks({

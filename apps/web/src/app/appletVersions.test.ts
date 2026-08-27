@@ -31,6 +31,7 @@ import {
   BOT_POWER_THEME_COMPOUND_MODE_POLICY,
   BOT_POWER_RESPONSE_BUDGET_MODE_POLICY,
   BOT_POWER_SPEECH_OBFUSCATION_MODE_POLICY,
+  BOT_POWER_SPEECH_INTENT_REVEAL_MODE_POLICY,
   BOT_POWER_SPEECH_COPY_MODE_POLICY,
   BOT_POWER_CURSED_TONGUE_MODE_POLICY,
   BOT_POWER_SPECTRAL_PERCEPTION_MODE_POLICY,
@@ -91,23 +92,23 @@ describe("applet version helpers", () => {
   });
 
   it("tracks the current visual applet versions for release provenance", () => {
-    assert.equal(PRISM_APPLETS.chat.version, "1.48");
-    assert.equal(PRISM_APPLETS.zen.version, "1.47");
-    assert.equal(PRISM_APPLETS.coffee.version, "2.69");
-    assert.equal(PRISM_APPLETS.debate.version, "0.53");
+    assert.equal(PRISM_APPLETS.chat.version, "1.49");
+    assert.equal(PRISM_APPLETS.zen.version, "1.48");
+    assert.equal(PRISM_APPLETS.coffee.version, "2.71");
+    assert.equal(PRISM_APPLETS.debate.version, "0.54");
     assert.equal(PRISM_APPLETS.debate.status, "preview");
-    assert.equal(PRISM_APPLETS.botcast.version, "1.88");
+    assert.equal(PRISM_APPLETS.botcast.version, "1.89");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
-    assert.equal(PRISM_APPLETS.story.version, "0.41");
+    assert.equal(PRISM_APPLETS.story.version, "0.42");
     assert.equal(PRISM_APPLETS.story.status, "planned");
     assert.equal(PRISM_APPLETS.slate.version, "0.9");
     assert.equal(PRISM_APPLETS.slate.status, "preview");
-    assert.equal(prismAppletVersionLabel("chat"), "v1.48");
-    assert.equal(prismAppletVersionLabel("zen"), "v1.47");
-    assert.equal(prismAppletVersionLabel("coffee"), "v2.69");
-    assert.equal(prismAppletVersionLabel("debate"), "v0.53");
-    assert.equal(prismAppletVersionLabel("botcast"), "v1.88");
-    assert.equal(prismAppletVersionLabel("story"), "v0.41");
+    assert.equal(prismAppletVersionLabel("chat"), "v1.49");
+    assert.equal(prismAppletVersionLabel("zen"), "v1.48");
+    assert.equal(prismAppletVersionLabel("coffee"), "v2.71");
+    assert.equal(prismAppletVersionLabel("debate"), "v0.54");
+    assert.equal(prismAppletVersionLabel("botcast"), "v1.89");
+    assert.equal(prismAppletVersionLabel("story"), "v0.42");
     assert.equal(prismAppletVersionLabel("slate"), "v0.9");
   });
 
@@ -572,6 +573,13 @@ describe("applet version helpers", () => {
       pseudo: "deferred",
       surf: "deferred",
     });
+  });
+
+  it("declares an exhaustive private speech-intent reveal policy", () => {
+    assert.deepEqual(
+      BOT_POWER_SPEECH_INTENT_REVEAL_MODE_POLICY,
+      BOT_POWER_SPEECH_OBFUSCATION_MODE_POLICY,
+    );
   });
 
   it("declares an exhaustive Cursed Tongue policy for every applet", () => {

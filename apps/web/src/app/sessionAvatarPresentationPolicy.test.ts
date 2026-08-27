@@ -127,6 +127,7 @@ describe("session avatar presentation policy", () => {
       signalRenderer,
       /runtimeEffectsEnabled: !signalLivePerformanceAvatar/u,
     );
+    assert.match(signalRenderer, /semanticFaceMotionEnabled: true/u);
     assert.doesNotMatch(pageSource, /runtimeEffectsEnabled:\s*coffeeReplayActive/u);
     assert.match(
       pageSource,

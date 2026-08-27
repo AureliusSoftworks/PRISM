@@ -201,6 +201,7 @@ export interface CurrentSettings {
   /** Soft ONLINE Auto lean: -1 OpenAI … 0 balanced … +1 Anthropic. */
   onlineAutoProviderBias: number;
   hiddenBotModelIds: string;
+  hiddenGlobalPickerModelIds?: string;
   hiddenComfyUiWorkflowIds: string;
   /** @deprecated Import/backup compatibility only; runtime routing ignores it. */
   preferredLocalModel: string | null;
@@ -282,6 +283,7 @@ export interface NextSettings {
   autoFallbackChain: string | null;
   onlineAutoProviderBias: number;
   hiddenBotModelIds: string[];
+  hiddenGlobalPickerModelIds: string[];
   hiddenComfyUiWorkflowIds: string[];
   preferredLocalModel: string | null;
   preferredOnlineModel: string | null;
@@ -526,6 +528,26 @@ export function parseHiddenBotModelIds(raw: string | null | undefined): string[]
   }
 }
 
+export function parseHiddenGlobalPickerModelIds(
+  raw: string | null | undefined,
+): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return Array.from(
+      new Set(
+        parsed
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim())
+          .filter(Boolean),
+      ),
+    );
+  } catch {
+    return [];
+  }
+}
+
 function sanitizeHiddenComfyUiWorkflowIds(ids: string[]): string[] {
   return sanitizeHiddenModelIds(ids).filter(
     (id) => isComfyUiRemoteWorkflowModelId(id) || isComfyUiWorkflowModelId(id)
@@ -550,7 +572,10 @@ export function parseHiddenComfyUiWorkflowIds(raw: string | null | undefined): s
   }
 }
 
-function readHiddenBotModelIds(value: unknown, fallback: string): string[] {
+function readHiddenBotModelIds(
+  value: unknown,
+  fallback: string | null | undefined,
+): string[] {
   if (!Array.isArray(value)) return parseHiddenBotModelIds(fallback);
   return sanitizeHiddenModelIds(Array.from(
     new Set(
@@ -560,6 +585,21 @@ function readHiddenBotModelIds(value: unknown, fallback: string): string[] {
         .filter(Boolean)
     )
   ));
+}
+
+function readHiddenGlobalPickerModelIds(
+  value: unknown,
+  fallback: string | null | undefined,
+): string[] {
+  if (!Array.isArray(value)) return parseHiddenGlobalPickerModelIds(fallback);
+  return Array.from(
+    new Set(
+      value
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  );
 }
 
 function readHiddenComfyUiWorkflowIds(value: unknown, fallback: string): string[] {
@@ -1015,6 +1055,10 @@ export function resolveNextSettings(
     body.hiddenBotModelIds,
     current.hiddenBotModelIds
   );
+  const hiddenGlobalPickerModelIds = readHiddenGlobalPickerModelIds(
+    body.hiddenGlobalPickerModelIds,
+    current.hiddenGlobalPickerModelIds
+  );
   const hiddenComfyUiWorkflowIds = readHiddenComfyUiWorkflowIds(
     body.hiddenComfyUiWorkflowIds,
     current.hiddenComfyUiWorkflowIds
@@ -1385,6 +1429,7 @@ export function resolveNextSettings(
     autoFallbackChain,
     onlineAutoProviderBias,
     hiddenBotModelIds,
+    hiddenGlobalPickerModelIds,
     hiddenComfyUiWorkflowIds,
     preferredLocalModel,
     preferredOnlineModel,

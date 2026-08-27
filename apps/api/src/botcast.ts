@@ -543,6 +543,27 @@ export class SignalLocalTurnTimeoutError extends Error {
   }
 }
 
+function signalAbortFailure(signal: AbortSignal): {
+  promise: Promise<never>;
+  dispose: () => void;
+} {
+  let rejectAbort!: (reason?: unknown) => void;
+  const promise = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject;
+  });
+  const onAbort = (): void => {
+    rejectAbort(
+      signal.reason ?? new DOMException("Signal generation cancelled.", "AbortError"),
+    );
+  };
+  if (signal.aborted) onAbort();
+  else signal.addEventListener("abort", onAbort, { once: true });
+  return {
+    promise,
+    dispose: () => signal.removeEventListener("abort", onAbort),
+  };
+}
+
 /**
  * Keeps a LOCAL Signal turn private while bounding a single slow generation.
  * The caller can then use Signal's deterministic, transcript-safe repair
@@ -575,6 +596,7 @@ export async function runSignalLocalTurn(args: {
   const signal = args.options.signal
     ? AbortSignal.any([args.options.signal, timeoutController.signal])
     : timeoutController.signal;
+  const abortFailure = signalAbortFailure(signal);
 
   try {
     const value = await Promise.race([
@@ -583,6 +605,7 @@ export async function runSignalLocalTurn(args: {
         signal,
       }),
       timeout,
+      abortFailure.promise,
     ]);
     return {
       value,
@@ -594,6 +617,7 @@ export async function runSignalLocalTurn(args: {
     throw error;
   } finally {
     if (timeoutHandle !== null) clearTimeout(timeoutHandle);
+    abortFailure.dispose();
   }
 }
 
@@ -759,6 +783,7 @@ export async function runSignalOnlineTurn(args: {
     const signal = args.options.signal
       ? AbortSignal.any([args.options.signal, controller.signal])
       : controller.signal;
+    const abortFailure = signalAbortFailure(signal);
     try {
       const value = await Promise.race([
         args.provider.generateResponse(attemptMessages, {
@@ -766,6 +791,7 @@ export async function runSignalOnlineTurn(args: {
           signal,
         }),
         timeout,
+        abortFailure.promise,
       ]);
       const validation = args.validate?.(value);
       if (validation && !validation.ok) {
@@ -837,6 +863,7 @@ export async function runSignalOnlineTurn(args: {
       }
     } finally {
       if (timeoutHandle !== null) clearTimeout(timeoutHandle);
+      abortFailure.dispose();
     }
   }
 
@@ -1034,6 +1061,7 @@ type BotcastEpisodeRow = {
   persona_rating: number | null;
   persona_comment: string | null;
   persona_reviewed_at: string | null;
+  persona_review_provenance_json: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -3253,6 +3281,7 @@ function mapMessage(
     crosstalkReclaim?: CrosstalkReclaimPlanV1;
     directionalIrritationDelivery?: DirectionalIrritationDeliveryPlanV1;
     botPowerTrollPresentation?: BotPowerTrollPresentationV1;
+    speechIntentRevealAvailable?: true;
   } = {},
 ): BotcastMessage {
   const silentResponse = botPowerResponseIsSilentV1(row.content);
@@ -3288,6 +3317,9 @@ function mapMessage(
       : {}),
     ...(metadata.botPowerTrollPresentation
       ? { botPowerTrollPresentation: metadata.botPowerTrollPresentation }
+      : {}),
+    ...(metadata.speechIntentRevealAvailable
+      ? { speechIntentRevealAvailable: true as const }
       : {}),
     createdAt: row.created_at,
   };
@@ -3327,6 +3359,9 @@ function mapEvent(row: BotcastEventRow): BotcastReplayEvent {
 }
 
 function mapEpisodeSummary(row: BotcastEpisodeRow): BotcastEpisodeSummary {
+  const personaReviewProvenance = parseBotcastPersonaReviewProvenance(
+    row.persona_review_provenance_json,
+  );
   return {
     id: row.id,
     showId: row.show_id,
@@ -3374,6 +3409,9 @@ function mapEpisodeSummary(row: BotcastEpisodeRow): BotcastEpisodeSummary {
             rating: row.persona_rating,
             comment: row.persona_comment,
             createdAt: row.persona_reviewed_at,
+            ...(personaReviewProvenance
+              ? { provenance: personaReviewProvenance }
+              : {}),
           }
         : null,
     createdAt: row.created_at,
@@ -8007,6 +8045,7 @@ export function getBotcastEpisode(
       crosstalkReclaim?: CrosstalkReclaimPlanV1;
       directionalIrritationDelivery?: DirectionalIrritationDeliveryPlanV1;
       botPowerTrollPresentation?: BotPowerTrollPresentationV1;
+      speechIntentRevealAvailable?: true;
     }
   >();
   const mergeMessageMetadata = (
@@ -8017,6 +8056,7 @@ export function getBotcastEpisode(
       crosstalkReclaim?: CrosstalkReclaimPlanV1;
       directionalIrritationDelivery?: DirectionalIrritationDeliveryPlanV1;
       botPowerTrollPresentation?: BotPowerTrollPresentationV1;
+      speechIntentRevealAvailable?: true;
     },
   ) => {
     if (!messageId) return;
@@ -8048,12 +8088,21 @@ export function getBotcastEpisode(
         normalizeBotPowerTrollPresentationV1(
           event.payload.botPowerTrollPresentation,
         ) ?? undefined;
+      const speechIntentRevealAvailable = Boolean(
+        event.payload.publicSpeechEffect === "speech_obfuscation" &&
+          (event as BotcastInternalReplayEvent)[BOTCAST_POWER_INTENDED_SPEECH] &&
+          !event.payload.mutePerformance &&
+          !event.payload.socialSilence &&
+          !event.payload.producerQuoteStance &&
+          !event.payload.producerDirectQuote,
+      );
       if (
         socialSilence ||
         mutePerformance ||
         crosstalkReclaim ||
         directionalIrritationDelivery ||
         botPowerTrollPresentation
+        || speechIntentRevealAvailable
       ) {
         mergeMessageMetadata(messageId, {
           ...(socialSilence ? { socialSilence } : {}),
@@ -8064,6 +8113,9 @@ export function getBotcastEpisode(
             : {}),
           ...(botPowerTrollPresentation
             ? { botPowerTrollPresentation }
+            : {}),
+          ...(speechIntentRevealAvailable
+            ? { speechIntentRevealAvailable: true as const }
             : {}),
         });
       }
@@ -9541,6 +9593,32 @@ export function clearBotcastProducerCue(
   return getBotcastEpisode(db, userId, episodeId);
 }
 
+/**
+ * Restores only the cue still owned by an interrupted dispatch. Callers must
+ * additionally verify their operation run still owns the episode before using
+ * this helper; a delivered or replacement cue is never rewritten.
+ */
+export function recoverBotcastProducerCueDispatch(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+  recovery: "operation_cancelled" | "operation_timeout" | "operation_failed",
+): BotcastEpisode {
+  const episode = getBotcastEpisode(db, userId, episodeId);
+  const active = botcastActiveProducerCueFromEvents(episode.events);
+  if (active?.status !== "dispatching") return episode;
+  const now = new Date().toISOString();
+  recordEvent(db, userId, episodeId, "producer_cue", {
+    cueId: active.cueId,
+    lifecycle: "requeued",
+    recovery,
+  }, now);
+  db.prepare(
+    "UPDATE botcast_episodes SET updated_at = ? WHERE id = ? AND user_id = ?",
+  ).run(now, episodeId, userId);
+  return getBotcastEpisode(db, userId, episodeId);
+}
+
 function botcastInterruptedSpeakerCueProjection(
   profile: BotcastBotProfile,
   powers: unknown,
@@ -9908,6 +9986,37 @@ function botcastPairInterruptionCount(args: {
   }).length;
 }
 
+/**
+ * Returns a public Identity Crisis encounter for this exact pair even when the
+ * active holder state was correctly reset before the host's closing line.
+ */
+function botcastIdentityMirrorEncounterForPairV1(args: {
+  episode: Pick<BotcastEpisode, "events">;
+  firstBotId: string;
+  secondBotId: string;
+}) {
+  for (let index = args.episode.events.length - 1; index >= 0; index -= 1) {
+    const event = args.episode.events[index];
+    if (
+      event?.kind !== "power_effect" ||
+      event.payload.effect !== "identity_mirror"
+    ) {
+      continue;
+    }
+    const state = normalizeBotIdentityMirrorStateV1(event.payload.state);
+    if (
+      state &&
+      ((state.holderBotId === args.firstBotId &&
+        state.targetBotId === args.secondBotId) ||
+        (state.holderBotId === args.secondBotId &&
+          state.targetBotId === args.firstBotId))
+    ) {
+      return state;
+    }
+  }
+  return null;
+}
+
 function botcastPairNarrative(args: {
   episode: Pick<BotcastEpisode, "topic" | "events">;
   sourceBotId: string;
@@ -9936,6 +10045,20 @@ function botcastPairNarrative(args: {
     interruptedBotId: args.sourceBotId,
     interrupterBotId: args.targetBotId,
   });
+  const identityMirror = botcastIdentityMirrorEncounterForPairV1({
+    episode: args.episode,
+    firstBotId: args.sourceBotId,
+    secondBotId: args.targetBotId,
+  });
+  if (identityMirror) {
+    const holderName = identityMirror.holderBotId === args.sourceBotId
+      ? args.sourceName
+      : args.targetName;
+    const originalName = identityMirror.targetBotId === args.sourceBotId
+      ? args.sourceName
+      : args.targetName;
+    return `On Signal, ${holderName} stole ${originalName}'s public identity and treated ${originalName} as an impostor throughout their completed episode.`;
+  }
   return interruptionCount >= 2
     ? `On Signal, ${args.sourceName} completed an episode with ${args.targetName} about "${args.episode.topic}" after ${args.targetName} repeatedly interrupted ${args.sourceName}.`
     : `${args.sourceName} and ${args.targetName} completed a Signal episode together about "${args.episode.topic}".`;
@@ -9954,6 +10077,13 @@ function botcastPairNarrativeIsSalient(args: {
       event.payload.cause === "repeated_power_interruptions",
   );
   if (repeatedInterruptionDeparture) return true;
+  if (botcastIdentityMirrorEncounterForPairV1({
+    episode: args.episode,
+    firstBotId: args.sourceBotId,
+    secondBotId: args.targetBotId,
+  })) {
+    return true;
+  }
   return botcastPairInterruptionCount({
     episode: args.episode,
     interruptedBotId: args.sourceBotId,
@@ -9995,6 +10125,14 @@ function botcastPairRelationshipUpdate(args: {
     departure?.payload.cause === "repeated_power_interruptions";
   const targetWalkedAfterInterruptions =
     targetDeparture?.payload.cause === "repeated_power_interruptions";
+  const identityMirror = botcastIdentityMirrorEncounterForPairV1({
+    episode: args.episode,
+    firstBotId: args.sourceBotId,
+    secondBotId: args.targetBotId,
+  });
+  const sourceWasAccusedOriginal =
+    identityMirror?.holderBotId === args.targetBotId &&
+    identityMirror.targetBotId === args.sourceBotId;
   let nextScore = previousScore;
   if (sourceWalkedAfterInterruptions && irritation >= DIRECTIONAL_IRRITATION_MAX) {
     nextScore = Math.min(previousScore - 30, 18);
@@ -10007,11 +10145,15 @@ function botcastPairRelationshipUpdate(args: {
   } else if (targetWalkedAfterInterruptions) {
     // The interrupter's perspective can stay milder than the bot who left.
     nextScore = previousScore - 4;
+  } else if (sourceWasAccusedOriginal) {
+    nextScore = previousScore - 12;
   }
   const reason = sourceWalkedAfterInterruptions
     ? `${args.sourceName} left a completed Signal episode after repeated interruptions by ${args.targetName}.`
     : targetWalkedAfterInterruptions
       ? `${args.targetName} left the completed Signal episode after repeated interruptions from ${args.sourceName}.`
+      : sourceWasAccusedOriginal
+        ? `${args.targetName} stole ${args.sourceName}'s public identity on Signal and treated ${args.sourceName} as an impostor.`
       : `${args.sourceName} and ${args.targetName} completed a Signal episode about "${args.episode.topic}".`;
   upsertBotRelationship({
     db: args.db,
@@ -10212,11 +10354,61 @@ export function botcastIdentityMirrorStatesV1(
   return states;
 }
 
+function botcastIdentityMirrorOriginalPressureV1(args: {
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[];
+  originalBotId: string;
+}): {
+  state: BotIdentityMirrorStateV1;
+  exposureCount: number;
+  pressureLevel: "new" | "continued" | "entrenched";
+  moodKey: "guarded" | "strained";
+} | null {
+  const state = [...botcastIdentityMirrorStatesV1(args.events).values()]
+    .find((candidate) => candidate.targetBotId === args.originalBotId) ?? null;
+  if (!state) return null;
+  let transitionIndex = -1;
+  for (let index = args.events.length - 1; index >= 0; index -= 1) {
+    const event = args.events[index];
+    const candidate = event?.kind === "power_effect"
+      ? normalizeBotIdentityMirrorStateV1(event.payload.state)
+      : null;
+    if (
+      candidate?.holderBotId === state.holderBotId &&
+      candidate.targetBotId === state.targetBotId &&
+      candidate.sourceMessageId === state.sourceMessageId
+    ) {
+      transitionIndex = index;
+      break;
+    }
+  }
+  const exposureCount = transitionIndex < 0
+    ? 0
+    : args.events.slice(transitionIndex + 1).filter(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.botId === state.holderBotId,
+      ).length;
+  return {
+    state,
+    exposureCount,
+    pressureLevel: exposureCount >= 2
+      ? "entrenched"
+      : exposureCount >= 1
+        ? "continued"
+        : "new",
+    moodKey: exposureCount >= 2 ? "strained" : "guarded",
+  };
+}
+
 export function botcastIdentityMirrorPromptV1(args: {
   events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[];
   speaker: Pick<BotcastBotProfile, "id" | "name">;
   speakerRole: BotcastSpeakerRole;
 }): string {
+  const originalPressure = botcastIdentityMirrorOriginalPressureV1({
+    events: args.events,
+    originalBotId: args.speaker.id,
+  });
   return [...botcastIdentityMirrorStatesV1(args.events).values()]
     .map((state) =>
       state.holderBotId === args.speaker.id
@@ -10228,6 +10420,9 @@ export function botcastIdentityMirrorPromptV1(args: {
         : botIdentityMirrorObserverPromptV1({
             observerBotId: args.speaker.id,
             state,
+            ...(originalPressure?.state.holderBotId === state.holderBotId
+              ? { pressureLevel: originalPressure.pressureLevel }
+              : {}),
           }),
     )
     .join("\n\n");
@@ -11339,7 +11534,8 @@ export function buildBotcastSpeakerPrompt(
   const annoyanceCue = speakerTrollActive
     ? null
     : botcastLatestAnnoyanceCueV1(args.episode.events, speaker.id);
-  // Identity Mirror is a visual-only overlay and contributes no persona cue.
+  // Identity Crisis changes the public person and lived Power consequences,
+  // while the holder's shell, complete voice, and system boundaries stay put.
   const identityMirrorPrompt = botcastIdentityMirrorPromptV1({
     events: args.episode.events,
     speaker,
@@ -11378,12 +11574,14 @@ export function buildBotcastSpeakerPrompt(
     speaker,
     activeHolderState: activeFalseNameState,
   });
-  /** Identity Crisis never replaces the speaker's authored persona. */
+  /** Identity Crisis steals the public person; Shapeshifter steals the form. */
   const effectivePersonaName =
     activeIdentityShapeshiftState?.targetBotName ??
+    activeIdentityMirrorState?.targetBotName ??
     speaker.name;
   const effectivePersonaPrompt =
     activeIdentityShapeshiftState?.targetPersonaPrompt ??
+    activeIdentityMirrorState?.targetPersonaPrompt ??
     speaker.systemPrompt;
   const shapeshiftIsActivePersonaSource = Boolean(activeIdentityShapeshiftState);
   // Identity Crisis retains the holder voice; Shapeshifter copies the form.
@@ -12099,6 +12297,7 @@ function botcastCompactPersonaSource(
 export function botcastCompactLocalPromptEligible(
   args: BotcastPromptBuildArgs,
 ): boolean {
+  const speaker = args.speakerRole === "host" ? args.host : args.guest;
   const simpleCue = !args.cue || args.cue.kind === "wrap_up";
   return (
     args.episode.guestKind === "bot" &&
@@ -12109,6 +12308,7 @@ export function botcastCompactLocalPromptEligible(
     !args.interruptionBridgeLine &&
     args.departureRequired !== true &&
     args.producerCut !== true &&
+    !botcastIdentityMirrorStatesV1(args.episode.events).has(speaker.id) &&
     !args.activeIdentityShapeshiftState &&
     !args.activeFalseNameState
   );
@@ -13614,6 +13814,29 @@ type BotcastParsedPersonaReview = Pick<
 const BOTCAST_PERSONA_REVIEW_COMMENT_MAX_CHARACTERS = 180;
 const BOTCAST_PERSONA_REVIEW_RECENT_GUEST_WINDOW = 3;
 
+function parseBotcastPersonaReviewProvenance(
+  raw: string | null,
+): BotcastPersonaReview["provenance"] | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    const snapshot = value.reviewerSnapshot as Record<string, unknown> | undefined;
+    const output = value.output as Record<string, unknown> | undefined;
+    if (
+      value.version !== 1 || typeof value.artifactHash !== "string" ||
+      typeof value.reviewerSnapshotHash !== "string" || snapshot?.version !== 1 ||
+      typeof snapshot.reviewerId !== "string" || typeof snapshot.reviewerName !== "string" ||
+      typeof value.rubricId !== "string" || typeof value.rubricVersion !== "number" ||
+      typeof value.provider !== "string" || !(typeof value.model === "string" || value.model === null) ||
+      typeof value.acceptedAt !== "string" || typeof output?.rating !== "number" ||
+      typeof output.comment !== "string"
+    ) return null;
+    return value as unknown as BotcastPersonaReview["provenance"];
+  } catch {
+    return null;
+  }
+}
+
 function normalizeBotcastPersonaReviewComment(value: string): string {
   const normalized = value
     .replace(/^\s*["“]|["”]\s*$/gu, "")
@@ -13654,11 +13877,69 @@ export function parseBotcastPersonaReviewResponse(
   }
 }
 
+/** A narrow persistence gate: reactions may be subjective, claims may not invent persona lore. */
+export function isGroundedBotcastPersonaReviewComment(args: {
+  comment: string;
+  reviewerName: string;
+  artifact: PrismReviewArtifactV1;
+}): boolean {
+  const namesReviewer = botAddressFormsV1(args.reviewerName).some(
+    (addressForm) => {
+      const pattern = botNameBoundaryPatternV1(addressForm);
+      return pattern.length > 0 && new RegExp(pattern, "iu").test(args.comment);
+    },
+  );
+  if (namesReviewer) return false;
+
+  const comment = args.comment.toLowerCase();
+  const evidence = [
+    args.artifact.subjectTitle,
+    ...Object.values(args.artifact.context).map(String),
+    ...args.artifact.evidence.map((item) =>
+      item.channel === "audio"
+        ? item.transcript
+        : item.channel === "text"
+          ? item.content
+          : item.description,
+    ),
+  ]
+    .join(" ")
+    .toLowerCase();
+  const evidenceRequiredVisualTerms = [
+    "red",
+    "orange",
+    "yellow",
+    "green",
+    "blue",
+    "purple",
+    "violet",
+    "magenta",
+    "cyan",
+    "pink",
+    "brown",
+    "black",
+    "white",
+    "gray",
+    "grey",
+    "phosphor",
+    "casing",
+    "circuit",
+    "circuits",
+  ];
+  return evidenceRequiredVisualTerms.every((term) => {
+    const pattern = botNameBoundaryPatternV1(term);
+    if (!pattern) return true;
+    const mentionsTerm = new RegExp(pattern, "iu").test(comment);
+    return !mentionsTerm || new RegExp(pattern, "iu").test(evidence);
+  });
+}
+
 const BOTCAST_AUDIENCE_PULSE_RUBRIC_V1: PrismReviewRubricV1<BotcastParsedPersonaReview> = {
   id: "signal.audience-pulse",
   version: 1,
   instructions: [
-    "Privately judge this podcast episode as yourself, not as a generic critic or a claim about audience consensus.",
+    "Write a short first-person reaction or a direct reaction to the supplied broadcast, never a third-person description of yourself or your persona.",
+    "Ground every factual detail in the supplied public artifact; do not add private persona lore, bot colors, motives, or unseen events.",
     "Use the full 1-5 scale. Do not default to praise; base the score on what this audience perspective actually experienced.",
   ],
   outputInstruction: [
@@ -13815,18 +14096,20 @@ export async function ensureBotcastEpisodePersonaReview(
       : episode.model,
   );
   try {
-    const result = await runPrismReviewV1({
-      artifact: buildBotcastAudienceReviewArtifactV1({
-        episode,
-        hostName: host.name,
-        guestName: guest.name,
-      }),
-      reviewer: {
-        version: 1,
-        reviewerId: reviewer.id,
-        reviewerName: reviewer.name,
-        systemPrompt: reviewer.systemPrompt,
-      },
+    const artifact = buildBotcastAudienceReviewArtifactV1({
+      episode,
+      hostName: host.name,
+      guestName: guest.name,
+    });
+    const reviewerSnapshot = {
+      version: 1,
+      reviewerId: reviewer.id,
+      reviewerName: reviewer.name,
+      systemPrompt: reviewer.systemPrompt,
+    } as const;
+    const reviewArgs = {
+      artifact,
+      reviewer: reviewerSnapshot,
       rubric: BOTCAST_AUDIENCE_PULSE_RUBRIC_V1,
       provider: selected.provider,
       ...(selected.model ? { model: selected.model } : {}),
@@ -13838,17 +14121,48 @@ export async function ensureBotcastEpisodePersonaReview(
         )
           ? BOTCAST_REASONING_MIN_COMPLETION_TOKENS
           : 160,
-        reasoningEffort: "minimal",
+        reasoningEffort: "minimal" as const,
         jsonMode: true,
         usagePurpose: "botcast_review",
       },
-    });
+    } satisfies Parameters<typeof runPrismReviewV1<BotcastParsedPersonaReview>>[0];
+    let result = await runPrismReviewV1(reviewArgs);
+    if (result && !isGroundedBotcastPersonaReviewComment({
+      comment: result.output.comment, reviewerName: reviewer.name, artifact,
+    })) {
+      result = await runPrismReviewV1({
+        ...reviewArgs,
+        rubric: {
+          ...BOTCAST_AUDIENCE_PULSE_RUBRIC_V1,
+          instructions: [
+            ...BOTCAST_AUDIENCE_PULSE_RUBRIC_V1.instructions,
+            "Repair the prior answer: omit self-description and unsupported details; return a grounded first-person or direct reaction only.",
+          ],
+        },
+      });
+    }
     if (!result) return null;
+    if (!isGroundedBotcastPersonaReviewComment({
+      comment: result.output.comment, reviewerName: reviewer.name, artifact,
+    })) return null;
     const reviewedAt = result.createdAt;
+    const provenance = {
+      version: 1 as const,
+      artifactHash: result.artifactHash,
+      reviewerSnapshotHash: result.reviewerSnapshotHash,
+      reviewerSnapshot: { version: 1 as const, reviewerId: reviewer.id, reviewerName: reviewer.name },
+      rubricId: result.rubricId,
+      rubricVersion: result.rubricVersion,
+      provider: result.provider,
+      model: result.model,
+      acceptedAt: reviewedAt,
+      output: result.output,
+    };
     db.prepare(
       `UPDATE botcast_episodes
           SET persona_reviewer_bot_id = ?, persona_reviewer_name = ?,
-              persona_rating = ?, persona_comment = ?, persona_reviewed_at = ?
+              persona_rating = ?, persona_comment = ?, persona_reviewed_at = ?,
+              persona_review_provenance_json = ?
         WHERE id = ? AND user_id = ? AND persona_reviewed_at IS NULL`,
     ).run(
       reviewer.id,
@@ -13856,6 +14170,7 @@ export async function ensureBotcastEpisodePersonaReview(
       result.output.rating,
       result.output.comment,
       reviewedAt,
+      JSON.stringify(provenance),
       episode.id,
       userId,
     );
@@ -16104,6 +16419,11 @@ export async function advanceBotcastEpisode(
   const originalIdentityMirrorState = [
     ...botcastIdentityMirrorStatesV1(episode.events).values(),
   ].find((state) => state.targetBotId === speaker.id) ?? null;
+  const originalIdentityMirrorPressure =
+    botcastIdentityMirrorOriginalPressureV1({
+      events: episode.events,
+      originalBotId: speaker.id,
+    });
   const originalIdentityCorrectionRequired = Boolean(
     originalIdentityMirrorState &&
       latestOnAirMessage &&
@@ -18645,7 +18965,7 @@ export async function advanceBotcastEpisode(
             unansweredSilentPeerTurnCount >= 12)
         ? "guarded"
         : null;
-  const messageMoodKey = speakerQuietIgnored
+  const unpressuredMessageMoodKey = speakerQuietIgnored
     ? lowerVoiceMoodForHearingRepeat(tensionMoodKey)
     : speakerRepeatsForHearingPower
     ? lowerVoiceMoodForHearingRepeat(hearingRepeatDirective!.sourceMood)
@@ -18671,6 +18991,11 @@ export async function advanceBotcastEpisode(
           tensionMoodKey === "neutral"
         ? "guarded"
       : tensionMoodKey;
+  const messageMoodKey = originalIdentityMirrorPressure &&
+      BOTCAST_MOOD_ORDER.indexOf(originalIdentityMirrorPressure.moodKey) <
+        BOTCAST_MOOD_ORDER.indexOf(unpressuredMessageMoodKey)
+    ? originalIdentityMirrorPressure.moodKey
+    : unpressuredMessageMoodKey;
   // Episode-scoped directed irritation: bias reclaim and plan transitions before
   // the utterance event so delivery metadata can ride on that payload.
   let irritationEdges = irritationEdgesAtTurnStart;
@@ -18815,6 +19140,18 @@ export async function advanceBotcastEpisode(
       ? { crosstalkReclaim: activeCrosstalkReclaim }
       : {}),
     moodKey: utteranceMoodKey,
+    ...(originalIdentityMirrorPressure
+      ? {
+          identityMirrorPressure: {
+            v: 1,
+            holderBotId: originalIdentityMirrorPressure.state.holderBotId,
+            originalBotId: originalIdentityMirrorPressure.state.targetBotId,
+            exposureCount: originalIdentityMirrorPressure.exposureCount,
+            pressureLevel: originalIdentityMirrorPressure.pressureLevel,
+            moodKey: originalIdentityMirrorPressure.moodKey,
+          },
+        }
+      : {}),
     ...(trollTurn.presentation
       ? { botPowerTrollPresentation: trollTurn.presentation }
       : {}),
@@ -19058,6 +19395,13 @@ export async function advanceBotcastEpisode(
       {
         v: 1,
         effect: "identity_mirror",
+        identityClaim: {
+          v: 1,
+          holderBotId: identityMirrorState.holderBotId,
+          believedSelfName: identityMirrorState.targetBotName,
+          accusedBotId: identityMirrorState.targetBotId,
+          accusation: "impostor",
+        },
         ...(mutePublicSocialAction
           ? {
               trigger: "public_social_action",
@@ -19487,6 +19831,13 @@ export async function advanceBotcastEpisode(
       {
         v: 1,
         effect: "identity_mirror",
+        identityClaim: {
+          v: 1,
+          holderBotId: listenerActionIdentityMirrorState.holderBotId,
+          believedSelfName: listenerActionIdentityMirrorState.targetBotName,
+          accusedBotId: listenerActionIdentityMirrorState.targetBotId,
+          accusation: "impostor",
+        },
         trigger: "public_social_action",
         sourceAction: listenerPublicSocialAction,
         state: listenerActionIdentityMirrorState,
@@ -20059,6 +20410,13 @@ export async function advanceBotcastEpisode(
         : {}),
       ...(trollTurn.presentation
         ? { botPowerTrollPresentation: trollTurn.presentation }
+        : {}),
+      ...(speakerMumblesSpeech &&
+      !speakerCursesSpeech &&
+      !speakerIsMutedForTurn &&
+      !speakerEchoesForTurn &&
+      intendedContent.trim() !== deliveredContent.trim()
+        ? { speechIntentRevealAvailable: true as const }
         : {}),
     },
   );

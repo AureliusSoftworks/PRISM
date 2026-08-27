@@ -275,6 +275,43 @@ describe("Signal review transcript", () => {
     assert.match(transcript, /No production events were recorded\./u);
   });
 
+  it("exports accepted review provenance without hidden reviewer instructions", () => {
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        personaReview: {
+          reviewerBotId: "reviewer-1",
+          reviewerName: "Nia Cross",
+          rating: 3.5,
+          comment: "I wanted one more question about the cost.",
+          createdAt: "2026-07-17T17:02:00.000Z",
+          provenance: {
+            version: 1,
+            artifactHash: "artifact-hash",
+            reviewerSnapshotHash: "reviewer-hash",
+            reviewerSnapshot: { version: 1, reviewerId: "reviewer-1", reviewerName: "Nia Cross" },
+            rubricId: "signal.audience-pulse",
+            rubricVersion: 1,
+            provider: "local",
+            model: "review-model",
+            acceptedAt: "2026-07-17T17:02:00.000Z",
+            output: { rating: 3.5, comment: "I wanted one more question about the cost." },
+          },
+        },
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: "guest-1", name: "Grace" },
+    });
+
+    assert.match(transcript, /## Accepted Listener Review/u);
+    assert.match(transcript, /- Artifact hash: artifact-hash/u);
+    assert.match(transcript, /- Frozen reviewer: Nia Cross \(reviewer-1\); hash reviewer-hash/u);
+    assert.match(transcript, /- Rubric: signal\.audience-pulse v1/u);
+    assert.match(transcript, /- Review route: local -> review-model/u);
+    assert.doesNotMatch(transcript, /systemPrompt|skeptical listener/u);
+  });
+
   it("records cue lifecycle without leaking private cue wording into review output", () => {
     const privateDirection = "Say this exact private sentence to the guest.";
     const transcript = buildSignalReviewTranscript({

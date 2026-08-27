@@ -838,3 +838,36 @@ export function coffeeSocialSnapshotToPrismMoodState(
   });
   return state;
 }
+
+/**
+ * Ordinary automatic Coffee cut-ins require a legible current mood, not just
+ * a busy crosstalk setting. Irritated cut-ins need active engagement; joyful
+ * cut-ins need unusually eager, low-restraint energy. Warm/neutral/unknown or
+ * withdrawing states never create an automatic interruption. Power-authored
+ * and explicit player interruptions are evaluated by their own contracts.
+ */
+export function coffeeOrdinaryAutomaticCutInMoodSupportsInterruption(
+  social: CoffeeSocialLikeSnapshot | null | undefined,
+): boolean {
+  if (!social) return false;
+  const mood = coffeeSocialSnapshotToPrismMoodState(social);
+  const engagement = clampPrismMoodValue(social.engagement);
+  const restraint = clampPrismMoodValue(social.restraint);
+  const friction = clampPrismMoodValue(social.valuesFriction);
+  const disposition = clampPrismMoodValue(social.disposition);
+  const leavePressure = clampPrismMoodValue(social.leavePressure);
+  if (leavePressure > 0.5) return false;
+  if (mood.moodKey === "strained" || mood.moodKey === "guarded") {
+    return engagement >= 0.72 && friction >= 0.58 && restraint <= 0.48;
+  }
+  if (mood.moodKey === "joyful") {
+    return (
+      engagement >= 0.82 &&
+      disposition >= 0.78 &&
+      friction <= 0.22 &&
+      restraint <= 0.36 &&
+      leavePressure <= 0.18
+    );
+  }
+  return false;
+}

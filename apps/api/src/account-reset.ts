@@ -151,6 +151,7 @@ export function restoreFactoryDefaultsInDatabase(
           auto_fallback_chain = NULL,
           online_auto_provider_bias = 0,
           hidden_bot_model_ids = '[]',
+          hidden_global_picker_model_ids = '[]',
           hidden_comfyui_workflow_ids = '[]',
           model_visibility_defaults_version = 0,
           preferred_local_model = NULL,

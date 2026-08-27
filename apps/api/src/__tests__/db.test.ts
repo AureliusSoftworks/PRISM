@@ -457,6 +457,13 @@ describe("createDatabase bot export hash migration", () => {
       assert.ok(
         userColumns.some(
           (column) =>
+            column.name === "hidden_global_picker_model_ids" &&
+            column.dflt_value === "'[]'",
+        ),
+      );
+      assert.ok(
+        userColumns.some(
+          (column) =>
             column.name === "graphics_quality" &&
             column.dflt_value === "'high'",
         ),

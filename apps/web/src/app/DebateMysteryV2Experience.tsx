@@ -26,11 +26,13 @@ import {
   type DebateBotSnapshotV1,
   type DebateSessionV1,
   type DebateWhodunnitFormatStateV2,
+  type BotFaceStyle,
 } from "@localai/shared";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
 import IdentityPresentationBlackout from "./IdentityPresentationBlackout";
 import { debateIdentityAppearanceBotV1 } from "./debateIdentityPresentation";
 import {
+  debateMysteryIdentityMirrorFaceV1,
   debateMysteryIdentityMirrorPresentationsV1,
   debateMysteryIdentityMirrorTargetBotSnapshotV1,
   debateMysteryQuotedIdentityNameV1,
@@ -307,6 +309,7 @@ function mysteryIdentityMirrorAppearance(
   holder: MysteryBotSummary | null,
   target: DebateBotSnapshotV1 | null,
   copiedName: string,
+  faceStyleOverride: BotFaceStyle | null,
 ): MysteryBotSummary | null {
   if (!holder || !target) return holder;
   const appearance = debateIdentityAppearanceBotV1({
@@ -321,6 +324,8 @@ function mysteryIdentityMirrorAppearance(
     avatarDetails: appearance.avatarDetails,
     voiceProfile: appearance.voiceProfile,
     replayVisualSnapshot: appearance.replayVisualSnapshot,
+    faceStyleOverride:
+      faceStyleOverride ?? appearance.replayVisualSnapshot?.faceStyle ?? null,
     powers: appearance.powers,
     systemPrompt: appearance.systemPrompt,
   };
@@ -851,13 +856,22 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     const mirror = identityMirrors.get(bot.id);
     if (!mirror) return bot;
     const frozenTarget = state.identityMirrorTargetSnapshots[mirror.targetBotId];
+    const frozenHolder = state.identityMirrorTargetSnapshots[bot.id];
     const target = frozenTarget
       ? debateMysteryIdentityMirrorTargetBotSnapshotV1(frozenTarget)
       : (() => {
           const liveTarget = botById.get(mirror.targetBotId) ?? null;
           return liveTarget ? mysteryBotSnapshot(liveTarget) : null;
         })();
-    return mysteryIdentityMirrorAppearance(bot, target, mirror.targetName);
+    const faceStyleOverride = frozenHolder && frozenTarget
+      ? debateMysteryIdentityMirrorFaceV1(frozenHolder, frozenTarget)
+      : null;
+    return mysteryIdentityMirrorAppearance(
+      bot,
+      target,
+      mirror.targetName,
+      faceStyleOverride,
+    );
   }, [botById, identityMirrors, state.identityMirrorTargetSnapshots]);
   const identityPresentationBlackout = (
     <IdentityPresentationBlackout

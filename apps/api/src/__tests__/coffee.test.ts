@@ -82,6 +82,7 @@ import {
   consecutiveCoffeeSocialSilenceTurns,
   computePlayerInterruptionConsequences,
   computeNextCoffeeSocialState,
+  coffeeAutomaticBotInterruptionAllowedV1,
   createCoffeeGroup,
   createCoffeeGroupWithGeneratedName,
   createCoffeeConversation,
@@ -6838,6 +6839,8 @@ describe("Coffee group foundation", () => {
     const publicMessage = first.conversation.messages.at(-1);
     assert.equal(publicMessage?.content, expectedPublic);
     assert.equal(publicMessage?.botPowerExactResponse, "speech_obfuscation");
+    assert.equal(publicMessage?.speechIntentRevealAvailable, true);
+    assert.doesNotMatch(JSON.stringify(publicMessage), /rational plan/iu);
 
     const chatBodies: unknown[] = [];
     await withMockedCoffeeFetch(
@@ -8041,6 +8044,94 @@ describe("Coffee group foundation", () => {
       transcript.map((message) => message.content).join("\n"),
       /process that cannot admit error|rule that punishes the person/i,
     );
+  });
+
+  it("server-authorizes ordinary automatic cut-ins only for a compatible current mood", async () => {
+    const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+    const routeStart = serverSource.indexOf(
+      'route("POST", "/api/coffee/turn-jobs/:id/interrupt"',
+    );
+    const routeEnd = serverSource.indexOf(
+      'route(\n      "POST",\n      "/api/coffee/sessions/:id/interruption-pause"',
+      routeStart,
+    );
+    assert.ok(routeStart >= 0 && routeEnd > routeStart);
+    const routeSource = serverSource.slice(routeStart, routeEnd);
+    assert.match(routeSource, /body\.automatic === true/u);
+    assert.ok(
+      routeSource.indexOf("coffeeAutomaticBotInterruptionAllowedV1") <
+        routeSource.indexOf("interruptCoffeeTurnJob"),
+      "the server must reject an incompatible mood before aborting the turn job",
+    );
+
+    const db = createCoffeeTestDb();
+    const userId = "user-auto-cutin-mood";
+    const conversationId = "conv-auto-cutin-mood";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    await createCoffeeConversationWithId(db, userId, conversationId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      durationMinutes: 10,
+    });
+
+    setCoffeeBotSocialForTest(db, userId, conversationId, BORIS.id, {
+      disposition: 0.67,
+      engagement: 0.765,
+      valuesFriction: 0.365,
+      restraint: 0.65,
+      leavePressure: 0.04,
+    });
+    assert.equal(
+      coffeeAutomaticBotInterruptionAllowedV1({
+        db,
+        userId,
+        conversationId,
+        interruptedBotId: ALICE.id,
+        interrupterBotId: BORIS.id,
+      }),
+      false,
+    );
+    assert.throws(
+      () =>
+        recordCoffeeInterruptionPause({
+          db,
+          userId,
+          conversationId,
+          interruptedBotId: ALICE.id,
+          interrupterBotId: BORIS.id,
+          automatic: true,
+          targetPhase: "speaking",
+        }),
+      /current mood does not support/u,
+    );
+
+    setCoffeeBotSocialForTest(db, userId, conversationId, BORIS.id, {
+      disposition: 0.42,
+      engagement: 0.86,
+      valuesFriction: 0.78,
+      restraint: 0.28,
+      leavePressure: 0.12,
+    });
+    assert.equal(
+      coffeeAutomaticBotInterruptionAllowedV1({
+        db,
+        userId,
+        conversationId,
+        interruptedBotId: ALICE.id,
+        interrupterBotId: BORIS.id,
+      }),
+      true,
+    );
+    const accepted = recordCoffeeInterruptionPause({
+      db,
+      userId,
+      conversationId,
+      interruptedBotId: ALICE.id,
+      interrupterBotId: BORIS.id,
+      automatic: true,
+      targetPhase: "speaking",
+    });
+    assert.equal(accepted.interruption.kind, "botInterruptsBot");
   });
 
   it("keeps a cut-off Copycat fragment but replaces its follow-on retort with an ellipsis", async () => {

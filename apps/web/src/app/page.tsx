@@ -113,6 +113,7 @@ import {
   ABOUT_CREDIT_MAINTENANCE_NOTE,
 } from "./aboutCredits";
 import { MODE_TUTORIALS, type TutorialMode } from "./modeTutorials";
+import { MODEL_CATALOG_REFRESHED_EVENT } from "./modelCatalogRefresh";
 import PrismFirstRunLivingLayer, {
   type PrismFirstRunChoice,
 } from "./PrismFirstRunLivingLayer";
@@ -959,6 +960,7 @@ import {
   X,
 } from "lucide-react";
 import styles from "./page.module.css";
+import { SpeechIntentReveal } from "./SpeechIntentReveal";
 import { resolveAtmosphereSurface } from "./resolveAtmosphereSurface";
 import {
   BotcastExperience,
@@ -7949,6 +7951,7 @@ interface Message {
   botName?: string;
   botColor?: string;
   botGlyph?: string;
+  speechIntentRevealAvailable?: true;
   moodKey?: "joyful" | "warm" | "neutral" | "guarded" | "strained";
   moodConfidence?: number;
   /** Display-only Zen layout hint; ignored outside Zen surfaces. */
@@ -10553,6 +10556,7 @@ interface UserSettings {
   onlineAutoProviderBias: number;
   legacyAutoFallbackModelSuggestion?: string;
   hiddenBotModelIds: string[];
+  hiddenGlobalPickerModelIds: string[];
   hiddenComfyUiWorkflowIds: string[];
   textModelDisplayNames: TextModelDisplayNames;
   hasOpenAiApiKey: boolean;
@@ -11251,6 +11255,8 @@ interface ModelCatalogEntry {
   supportsImageInput?: boolean;
   /** Present for image-only catalog rows (ComfyUI workflows). */
   imageSource?: "ollama" | "comfyui" | "comfyui-workflow" | "comfyui-remote";
+  /** False when the enabled model is intentionally hidden from manual pickers. */
+  showInGlobalPicker?: boolean;
 }
 interface ModelCatalog {
   local: ModelCatalogEntry[];
@@ -11261,6 +11267,7 @@ interface ModelCatalog {
   };
 }
 type ModelCatalogRefreshStatus = "idle" | "checking" | "ready" | "error";
+type ModelCatalogRefreshFeedback = "idle" | "success" | "error";
 
 /** Used when `/api/models` fails so dropdowns fall back instead of crashing the client. */
 const FALLBACK_EMPTY_MODEL_CATALOG: ModelCatalog = {
@@ -15974,7 +15981,7 @@ function anthropicTextModelLabelFromId(id: string): string | null {
   if (latest)
     return `${latest[1]}.${latest[2]} ${titleCaseModelToken(latest[3]!)}`;
   const named = normalized.match(
-    /^claude-(opus|sonnet|haiku)-(\d+)(?:-(\d+))?(?:-(\d{8}))?$/,
+    /^claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d+))?(?:-(\d{8}))?$/,
   );
   if (named) {
     const version = named[3] ? `${named[2]}.${named[3]}` : named[2]!;
@@ -16166,6 +16173,24 @@ function isHiddenBotModelId(
   return (settings?.hiddenBotModelIds ?? []).includes(normalized);
 }
 
+function isHiddenGlobalPickerModelId(
+  settings: UserSettings | null,
+  modelId: string | null | undefined,
+): boolean {
+  const normalized = modelId?.trim() ?? "";
+  if (!normalized) return false;
+  return (settings?.hiddenGlobalPickerModelIds ?? []).includes(normalized);
+}
+
+function hiddenManualModelIds(settings: UserSettings | null): string[] {
+  return Array.from(
+    new Set([
+      ...(settings?.hiddenBotModelIds ?? []),
+      ...(settings?.hiddenGlobalPickerModelIds ?? []),
+    ]),
+  );
+}
+
 function modelOptionsForProvider(
   catalog: ModelCatalog | null,
   settings: UserSettings | null,
@@ -16248,14 +16273,14 @@ function chatModelOptionsForProvider(
 ): ModelCatalogEntry[] {
   const visibleCatalogOptions = filterVisibleModelOptions(
     textModelOptionsForProvider(catalog, settings, provider),
-    settings?.hiddenBotModelIds ?? [],
+    hiddenManualModelIds(settings),
   );
   if (visibleCatalogOptions.length > 0 || provider === "local") {
     return visibleCatalogOptions;
   }
   return filterVisibleModelOptions(
     fallbackChatModelOptionsForProvider(settings, provider),
-    settings?.hiddenBotModelIds ?? [],
+    hiddenManualModelIds(settings),
   );
 }
 
@@ -16483,9 +16508,16 @@ function visibleConcreteModelChoiceForProvider(
   if (visibleChoice === AUTO_MODEL_CHOICE) {
     return defaultModelChoiceForProvider(catalog, settings, provider);
   }
+  if (isHiddenBotModelId(settings, visibleChoice)) {
+    return defaultModelChoiceForProvider(catalog, settings, provider);
+  }
   return chatModelOptionsForProvider(catalog, settings, provider).some(
     (model) => model.id === visibleChoice,
-  )
+  ) ||
+    (isHiddenGlobalPickerModelId(settings, visibleChoice) &&
+      availableModelOptionsForProvider(catalog, settings, provider).some(
+        (model) => model.id === visibleChoice,
+      ))
     ? visibleChoice
     : defaultModelChoiceForProvider(catalog, settings, provider);
 }
@@ -16538,11 +16570,17 @@ function visibleModelChoiceForProvider(
   if (visibleChoice === AUTO_MODEL_CHOICE) {
     return visibleChoice;
   }
+  if (isHiddenBotModelId(settings, visibleChoice)) {
+    return AUTO_MODEL_CHOICE;
+  }
   return chatModelOptionsForProvider(catalog, settings, provider).some(
     (model) => model.id === visibleChoice,
   ) ||
+    (isHiddenGlobalPickerModelId(settings, visibleChoice) &&
+      availableModelOptionsForProvider(catalog, settings, provider).some(
+        (model) => model.id === visibleChoice,
+      )) ||
     (provider !== "local" &&
-      !isHiddenBotModelId(settings, visibleChoice) &&
       onlineProviderCanPreserveModelChoice(catalog, settings, provider))
     ? visibleChoice
     : AUTO_MODEL_CHOICE;
@@ -16556,11 +16594,15 @@ function visibleOptionalModelChoiceForProvider(
 ): string {
   const visibleChoice = choice?.trim() ?? "";
   if (!visibleChoice) return "";
+  if (isHiddenBotModelId(settings, visibleChoice)) return "";
   return chatModelOptionsForProvider(catalog, settings, provider).some(
     (model) => model.id === visibleChoice,
   ) ||
+    (isHiddenGlobalPickerModelId(settings, visibleChoice) &&
+      availableModelOptionsForProvider(catalog, settings, provider).some(
+        (model) => model.id === visibleChoice,
+      )) ||
     (provider !== "local" &&
-      !isHiddenBotModelId(settings, visibleChoice) &&
       onlineProviderCanPreserveModelChoice(catalog, settings, provider))
     ? visibleChoice
     : "";
@@ -16680,7 +16722,12 @@ function includeSelectedOnlineModelOption(
   ) {
     return options;
   }
-  if (isHiddenBotModelId(settings, normalizedChoice)) return options;
+  if (
+    isHiddenBotModelId(settings, normalizedChoice) ||
+    isHiddenGlobalPickerModelId(settings, normalizedChoice)
+  ) {
+    return options;
+  }
   const provider = inferOnlineProviderForModelId(normalizedChoice);
   return onlineProviderCanPreserveModelChoice(catalog, settings, provider)
     ? includeSelectedModelOption(options, normalizedChoice, provider)
@@ -16697,7 +16744,8 @@ function includeSelectedResponseModeModelOption(
 ): ModelCatalogEntry[] {
   return responseMode === "online"
     ? includeSelectedOnlineModelOption(catalog, settings, options, choice)
-    : isHiddenBotModelId(settings, choice)
+    : isHiddenBotModelId(settings, choice) ||
+        isHiddenGlobalPickerModelId(settings, choice)
       ? options
       : includeSelectedModelOption(options, choice, provider);
 }
@@ -24346,10 +24394,12 @@ function ComposerModelPicker({
     (!autoSelected || autoOnlineTurboToggleAvailable);
   const mixedSelected =
     mixedOptionValue !== undefined && normalizedValue === mixedOptionValue;
-  const selectedModel =
+  const matchedSelectedModel =
     (autoSelected || mixedSelected
       ? null
-      : options.find((model) => model.id === normalizedValue)) ??
+      : options.find((model) => model.id === normalizedValue)) ?? null;
+  const selectedModel =
+    matchedSelectedModel ??
     options.find((model) => model.isDefault) ??
     options[0] ??
     null;
@@ -24359,7 +24409,7 @@ function ComposerModelPicker({
       ? mixedOptionLabel
       : autoSelected
         ? autoLabelShown
-        : (selectedModel?.label ?? normalizedValue);
+        : (matchedSelectedModel?.label ?? modelLabelFromId(normalizedValue));
   const visualProvider =
     selectedProvider ?? selectedModel?.provider ?? provider;
   const menuOpen = open && !interactionDisabled;
@@ -31816,6 +31866,8 @@ interface ZenLiveBotMannequinProps {
   eyeStateStartedAtMs?: number | null;
   /** Enables occasional nearby-pointer attention on opted-in full-size surfaces. */
   cursorAttention?: boolean;
+  /** Keeps authored gaze and blink motion independent of decorative runtime effects. */
+  semanticFaceMotionEnabled?: boolean;
   runtimeEffectsEnabled?: boolean;
   /**
    * Generates quantized canvas masks for face text and the buckle glyph.
@@ -32218,6 +32270,7 @@ function ZenLiveBotMannequin({
   eyeTimelineMs,
   eyeStateStartedAtMs,
   cursorAttention = false,
+  semanticFaceMotionEnabled,
   runtimeEffectsEnabled = true,
   pixelRasterizationEnabled = true,
   screenMode = "live",
@@ -32232,6 +32285,8 @@ function ZenLiveBotMannequin({
   minimumRenderedSizeTier = "micro",
   forcedRenderedSizeTier,
 }: ZenLiveBotMannequinProps): React.JSX.Element {
+  const resolvedSemanticFaceMotionEnabled =
+    semanticFaceMotionEnabled ?? runtimeEffectsEnabled;
   const inkAuthoringActive = screenMode === "editing";
   const resolvedFrameLightsActive =
     avatarLightMode === "alive" && !inkAuthoringActive;
@@ -32770,7 +32825,9 @@ function ZenLiveBotMannequin({
               >
                 <CoffeeSeatPlateEmoji
                   enabled={optimizedFaceEnabled}
-                  motionMode={runtimeEffectsEnabled ? "full" : "speech"}
+                  motionMode={
+                    resolvedSemanticFaceMotionEnabled ? "full" : "speech"
+                  }
                   pixelated={pixelRasterizationEnabled}
                   isTalking={isTalking}
                   mouthShape={displayedMouthShape}
@@ -32974,7 +33031,9 @@ function ZenLiveBotMannequin({
                 >
                   <CoffeeSeatPlateEmoji
                     enabled={renderDetailLevel === "full" || blinkEnabled}
-                    motionMode={runtimeEffectsEnabled ? "full" : "speech"}
+                    motionMode={
+                      resolvedSemanticFaceMotionEnabled ? "full" : "speech"
+                    }
                     pixelated={pixelRasterizationEnabled}
                     isTalking={isTalking}
                     mouthShape={displayedMouthShape}
@@ -51002,6 +51061,8 @@ function HomeContent(): React.JSX.Element {
   const [modelCatalog, setModelCatalog] = useState<ModelCatalog | null>(null);
   const [modelCatalogStatus, setModelCatalogStatus] =
     useState<ModelCatalogRefreshStatus>("idle");
+  const [modelCatalogRefreshFeedback, setModelCatalogRefreshFeedback] =
+    useState<ModelCatalogRefreshFeedback>("idle");
   const modelCatalogLoading =
     modelCatalogStatus === "checking" ||
     (modelCatalogStatus === "idle" && modelCatalog === null);
@@ -51186,11 +51247,14 @@ function HomeContent(): React.JSX.Element {
         return;
       }
 
-      const onlineOptions = modelOptionsForResponseMode(
-        modelCatalog,
-        settings,
-        "online",
-      ).filter((option) => option.provider !== "local");
+      // This is an Auto-only calculation, so it intentionally keeps models
+      // hidden from manual pickers in the candidate pool.
+      const onlineOptions = withOnlineProviderHostLabels(
+        combinedOnlineModelOptions(
+          textModelOptionsForProvider(modelCatalog, settings, "openai"),
+          textModelOptionsForProvider(modelCatalog, settings, "anthropic"),
+        ),
+      );
       // Rank only Fast-capable ONLINE options through the existing Auto
       // policy, so this fallback continues to respect its rate/lean rules.
       const turboEligibleOnlineOptions = onlineOptions.filter((option) =>
@@ -51199,7 +51263,7 @@ function HomeContent(): React.JSX.Element {
       const onlineTurboAutoPrimary = autoFallbackPrimaryForSelection({
         provider: "openai",
         modelChoice: AUTO_MODEL_CHOICE,
-        hiddenModelIds: settings.hiddenBotModelIds,
+        hiddenModelIds: [],
         catalog: { local: [], online: turboEligibleOnlineOptions },
         onlineAutoProviderBias: settings.onlineAutoProviderBias,
       });
@@ -51208,7 +51272,7 @@ function HomeContent(): React.JSX.Element {
           ? autoFallbackPrimaryForSelection({
               provider: target.provider,
               modelChoice: AUTO_MODEL_CHOICE,
-              hiddenModelIds: settings.hiddenBotModelIds,
+              hiddenModelIds: [],
               catalog: {
                 local: [],
                 online: turboEligibleOnlineOptions.filter(
@@ -58963,9 +59027,9 @@ function HomeContent(): React.JSX.Element {
     () =>
       filterVisibleModelOptions(
         openAiImageModelCatalogEntries,
-        settings?.hiddenBotModelIds ?? [],
+        hiddenManualModelIds(settings),
       ),
-    [openAiImageModelCatalogEntries, settings?.hiddenBotModelIds],
+    [openAiImageModelCatalogEntries, settings],
   );
   const availableOpenAiImageModelCatalogEntries = useMemo<ModelCatalogEntry[]>(
     () =>
@@ -58980,9 +59044,9 @@ function HomeContent(): React.JSX.Element {
     () =>
       filterVisibleModelOptions(
         elevenLabsImageModelCatalogEntries,
-        settings?.hiddenBotModelIds ?? [],
+        hiddenManualModelIds(settings),
       ),
-    [elevenLabsImageModelCatalogEntries, settings?.hiddenBotModelIds],
+    [elevenLabsImageModelCatalogEntries, settings],
   );
   const onlineImageModelCatalogEntries = useMemo<ModelCatalogEntry[]>(
     () => [
@@ -59027,7 +59091,7 @@ function HomeContent(): React.JSX.Element {
     );
     const ollamaImage = filterVisibleModelOptions(
       catalogEntriesMatchingLocalImageHeuristic(base),
-      settings?.hiddenBotModelIds ?? [],
+      hiddenManualModelIds(settings),
     );
     return [...ollamaImage, ...allComfyUiWorkflowCatalogEntries];
   }, [allComfyUiWorkflowCatalogEntries, modelCatalog, settings]);
@@ -70841,6 +70905,17 @@ function HomeContent(): React.JSX.Element {
             .join("");
           const visibleTokens = tokenizeMessageReveal(latestVisibleText);
           if (visibleTokens.length === 0) return;
+          await api(
+            `/api/coffee/turn-jobs/${encodeURIComponent(turnJobId)}/interrupt`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                automatic: true,
+                interruptedBotId,
+                interrupterBotId: candidate.botId,
+              }),
+            },
+          );
           coffeeLastAutomaticCutInAssistantCountRef.current = assistantCount;
           const cutoffSnippet = interruptedMidWordSnippet(
             pendingMessage.content,
@@ -70974,12 +71049,6 @@ function HomeContent(): React.JSX.Element {
             },
             () => scheduleInterruptedVoiceRelease(0),
           );
-          await api(
-            `/api/coffee/turn-jobs/${encodeURIComponent(turnJobId)}/interrupt`,
-            {
-              method: "POST",
-            },
-          );
           const pause = await api<{
             ok: true;
             conversation: CoffeeConversationState;
@@ -70993,6 +71062,7 @@ function HomeContent(): React.JSX.Element {
                 interruptedMessageId: pendingMessage.id,
                 visibleTokenCount: Math.max(1, visibleTokens.length),
                 interrupterBotId: candidate.botId,
+                automatic: true,
                 activeTurnId: turnJobId,
                 targetPhase: "speaking",
               }),
@@ -80431,6 +80501,11 @@ function HomeContent(): React.JSX.Element {
       hiddenBotModelIds: Array.isArray(d.settings.hiddenBotModelIds)
         ? d.settings.hiddenBotModelIds
         : [],
+      hiddenGlobalPickerModelIds: Array.isArray(
+        d.settings.hiddenGlobalPickerModelIds,
+      )
+        ? d.settings.hiddenGlobalPickerModelIds
+        : [],
       hiddenComfyUiWorkflowIds: Array.isArray(
         d.settings.hiddenComfyUiWorkflowIds,
       )
@@ -80794,16 +80869,23 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function refreshModels(comfyUiHostOverride?: string) {
+  async function refreshModels(
+    comfyUiHostOverride?: string,
+    forceDiscovery = false,
+  ) {
     const refreshToken = modelCatalogRefreshTokenRef.current + 1;
     modelCatalogRefreshTokenRef.current = refreshToken;
     setModelCatalogStatus("checking");
+    setModelCatalogRefreshFeedback("idle");
     const trimmed =
       comfyUiHostOverride !== undefined
         ? comfyUiHostOverride.trim()
         : (settings?.comfyUiHost?.trim() ?? "");
     const qs =
       trimmed.length > 0 ? `?comfyUiHost=${encodeURIComponent(trimmed)}` : "";
+    const modelsUrl = forceDiscovery
+      ? `/api/models${qs}${qs ? "&" : "?"}refresh=1`
+      : `/api/models${qs}`;
     try {
       const d = await api<{
         catalog: ModelCatalog;
@@ -80814,23 +80896,40 @@ function HomeContent(): React.JSX.Element {
           allCheckpoints?: ModelCatalogEntry[];
         };
         hiddenBotModelIds?: string[];
+        hiddenGlobalPickerModelIds?: string[];
         hiddenComfyUiWorkflowIds?: string[];
-      }>(`/api/models${qs}`);
+      }>(modelsUrl);
       if (modelCatalogRefreshTokenRef.current !== refreshToken) return;
       setModelCatalog(d.catalog);
       setModelCatalogStatus("ready");
+      if (forceDiscovery) {
+        setModelCatalogRefreshFeedback("success");
+        window.dispatchEvent(new Event(MODEL_CATALOG_REFRESHED_EVENT));
+      }
       const hiddenBotModelIds = Array.isArray(d.hiddenBotModelIds)
         ? d.hiddenBotModelIds
+        : null;
+      const hiddenGlobalPickerModelIds = Array.isArray(
+        d.hiddenGlobalPickerModelIds,
+      )
+        ? d.hiddenGlobalPickerModelIds
         : null;
       const hiddenComfyUiWorkflowIds = Array.isArray(d.hiddenComfyUiWorkflowIds)
         ? d.hiddenComfyUiWorkflowIds
         : null;
-      if (hiddenBotModelIds || hiddenComfyUiWorkflowIds) {
+      if (
+        hiddenBotModelIds ||
+        hiddenGlobalPickerModelIds ||
+        hiddenComfyUiWorkflowIds
+      ) {
         setSettings((previous) =>
           previous
             ? {
                 ...previous,
                 ...(hiddenBotModelIds ? { hiddenBotModelIds } : {}),
+                ...(hiddenGlobalPickerModelIds
+                  ? { hiddenGlobalPickerModelIds }
+                  : {}),
                 ...(hiddenComfyUiWorkflowIds
                   ? { hiddenComfyUiWorkflowIds }
                   : {}),
@@ -80850,6 +80949,7 @@ function HomeContent(): React.JSX.Element {
       console.warn("[refreshModels]", err);
       if (modelCatalogRefreshTokenRef.current !== refreshToken) return;
       setModelCatalogStatus("error");
+      if (forceDiscovery) setModelCatalogRefreshFeedback("error");
       setModelCatalog((previous) => previous ?? FALLBACK_EMPTY_MODEL_CATALOG);
       setComfyUiModelsPayload({
         configured: Boolean(trimmed.length > 0),
@@ -92706,11 +92806,11 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  function setBotCustomizerModelVisible(modelId: string, visible: boolean) {
+  function setBotModelEnabled(modelId: string, enabled: boolean) {
     if (modelId === REQUIRED_PRIMARY_LOCAL_MODEL_ID) {
       return;
     }
-    if (!visible) {
+    if (!enabled) {
       setNewBotLocalModel((current) =>
         current === modelId ? AUTO_MODEL_CHOICE : current,
       );
@@ -92750,17 +92850,17 @@ function HomeContent(): React.JSX.Element {
     setSettings((previous) => {
       if (!previous) return previous;
       const current = new Set(previous.hiddenBotModelIds ?? []);
-      if (visible) {
+      if (enabled) {
         current.delete(modelId);
       } else {
         current.add(modelId);
       }
       const clearIfHidden = (value: string | null | undefined): string => {
         const trimmed = value?.trim() ?? "";
-        return !visible && trimmed === modelId ? "" : trimmed;
+        return !enabled && trimmed === modelId ? "" : trimmed;
       };
       const autoFallbackChain =
-        !visible &&
+        !enabled &&
         previous.autoFallbackChain?.fallbacks.some(
           (fallback) => fallback.model === modelId,
         )
@@ -92769,6 +92869,7 @@ function HomeContent(): React.JSX.Element {
       return {
         ...previous,
         hiddenBotModelIds: Array.from(current),
+        autoFallbackChain,
         preferredLocalModel: clearIfHidden(previous.preferredLocalModel),
         preferredOnlineModel: clearIfHidden(previous.preferredOnlineModel),
         preferredLocalImageModel: clearIfHidden(
@@ -92783,10 +92884,22 @@ function HomeContent(): React.JSX.Element {
         preferredZenWallpaperOpenAiImageModel: clearIfHidden(
           previous.preferredZenWallpaperOpenAiImageModel,
         ),
-        autoFallbackChain,
         lenientLocalImageFallbackModel: clearIfHidden(
           previous.lenientLocalImageFallbackModel,
         ),
+      };
+    });
+  }
+
+  function setGlobalPickerModelVisible(modelId: string, visible: boolean) {
+    setSettings((previous) => {
+      if (!previous) return previous;
+      const hidden = new Set(previous.hiddenGlobalPickerModelIds ?? []);
+      if (visible) hidden.delete(modelId);
+      else hidden.add(modelId);
+      return {
+        ...previous,
+        hiddenGlobalPickerModelIds: Array.from(hidden),
       };
     });
   }
@@ -121993,6 +122106,32 @@ function HomeContent(): React.JSX.Element {
                                 </PanelSectionInfo>
                               </div>
                             </header>
+                            <div className={styles.settingsModelRefreshRow}>
+                              <button
+                                type="button"
+                                className={styles.settingsModelRefreshButton}
+                                disabled={modelCatalogStatus === "checking"}
+                                onClick={() =>
+                                  void refreshModels(undefined, true)
+                                }
+                              >
+                                {modelCatalogStatus === "checking"
+                                  ? "Refreshing models…"
+                                  : "Refresh models"}
+                              </button>
+                              {modelCatalogStatus === "checking" ? (
+                                <small role="status">
+                                  Checking current providers…
+                                </small>
+                              ) : modelCatalogRefreshFeedback === "success" ? (
+                                <small role="status">Models refreshed.</small>
+                              ) : modelCatalogRefreshFeedback === "error" ? (
+                                <small role="alert">
+                                  Could not refresh models. Saved choices remain
+                                  available.
+                                </small>
+                              ) : null}
+                            </div>
                             {renderDefaultsAndFallbacksControls("settings")}
                             <details className={styles.settingsModelDropdown}>
                               <summary>
@@ -122044,25 +122183,31 @@ function HomeContent(): React.JSX.Element {
                             ) : null}
                             <div
                               className={styles.settingsModelProviderStack}
-                              aria-label="Bot customizer model visibility"
+                              aria-label="Model availability and picker visibility"
                             >
                               {settingsModelGroups.map((group) => {
-                                const hiddenInGroup = group.models.filter(
+                                const disabledInGroup = group.models.filter(
                                   (model) =>
                                     !isRequiredPrimaryLocalModel(model) &&
                                     settings.hiddenBotModelIds.includes(
                                       model.id,
                                     ),
                                 ).length;
-                                const visibleInGroup =
-                                  group.models.length - hiddenInGroup;
+                                const enabledInGroup =
+                                  group.models.length - disabledInGroup;
+                                const visibleInPicker = group.models.filter(
+                                  (model) =>
+                                    (isRequiredPrimaryLocalModel(model) ||
+                                      !settings.hiddenBotModelIds.includes(
+                                        model.id,
+                                      )) &&
+                                    !settings.hiddenGlobalPickerModelIds.includes(
+                                      model.id,
+                                    ),
+                                ).length;
                                 const providerVisibilityMeta =
                                   group.models.length > 0
-                                    ? `${group.meta} - ${visibleInGroup}/${group.models.length} visible${
-                                        hiddenInGroup > 0
-                                          ? ` - ${hiddenInGroup} hidden`
-                                          : ""
-                                      }`
+                                    ? `${group.meta} - ${enabledInGroup}/${group.models.length} enabled - ${visibleInPicker} in picker`
                                     : group.meta;
                                 return (
                                   <details
@@ -122097,9 +122242,9 @@ function HomeContent(): React.JSX.Element {
                                           label={`About ${group.label} model visibility`}
                                           variant="control"
                                         >
-                                          Controls which models from this
-                                              provider appear in bot customizers
-                                              and model pickers.
+                                          Enabled controls availability and
+                                          Auto eligibility. Show in picker only
+                                          controls manual model pickers.
                                         </PanelSectionInfo>
                                       </span>
                                           <small>
@@ -122128,9 +122273,13 @@ function HomeContent(): React.JSX.Element {
                                               isRequiredPrimaryLocalModel(
                                                 model,
                                               );
-                                        const visible =
+                                        const enabled =
                                           required ||
                                           !settings.hiddenBotModelIds.includes(
+                                            model.id,
+                                          );
+                                        const pickerVisible =
+                                          !settings.hiddenGlobalPickerModelIds.includes(
                                             model.id,
                                           );
                                         const isTextModel =
@@ -122162,11 +122311,11 @@ function HomeContent(): React.JSX.Element {
                                           >
                                             <input
                                               type="checkbox"
-                                              aria-label={`Show ${model.label} in model pickers`}
-                                              checked={visible}
+                                              aria-label={`Enable ${model.label}`}
+                                              checked={enabled}
                                               disabled={required}
                                               onChange={(event) =>
-                                                setBotCustomizerModelVisible(
+                                                setBotModelEnabled(
                                                   model.id,
                                                       event.currentTarget
                                                         .checked,
@@ -122207,12 +122356,42 @@ function HomeContent(): React.JSX.Element {
                                               <span>{model.label}</span>
                                             )}
                                             <small>
-                                              {settingsModelToggleMeta(
-                                                group.id,
-                                                model,
-                                                required,
-                                              )}
+                                              {required
+                                                ? `Required · ${settingsModelToggleMeta(
+                                                    group.id,
+                                                    model,
+                                                    required,
+                                                  )}`
+                                                : `${enabled ? "Enabled" : "Disabled"} · ${settingsModelToggleMeta(
+                                                    group.id,
+                                                    model,
+                                                    required,
+                                                  )}`}
                                             </small>
+                                            <label
+                                              className={
+                                                styles.settingsModelPickerToggle
+                                              }
+                                              title={
+                                                enabled
+                                                  ? "Show this enabled model in manual model pickers"
+                                                  : "Enable this model to change picker visibility"
+                                              }
+                                            >
+                                              <input
+                                                type="checkbox"
+                                                aria-label={`Show ${model.label} in picker`}
+                                                checked={pickerVisible}
+                                                disabled={!enabled}
+                                                onChange={(event) =>
+                                                  setGlobalPickerModelVisible(
+                                                    model.id,
+                                                    event.currentTarget.checked,
+                                                  )
+                                                }
+                                              />
+                                              <span>Show in picker</span>
+                                            </label>
                                             {isTextModel ? (
                                               editing ? (
                                                 <span className={styles.settingsModelDisplayNameActions}>
@@ -123970,15 +124149,22 @@ function HomeContent(): React.JSX.Element {
                 } as React.CSSProperties;
               })()
             : undefined;
-          const localModelOptions = includeSelectedModelOption(
+          const visibleLocalModelOptions =
             botCustomizerModelOptionsForProvider(
               modelCatalog,
               settings,
               "local",
-            ),
+            );
+          const localModelOptions = isHiddenGlobalPickerModelId(
+            settings,
             visibleLocalModelChoice,
-            "local",
-          );
+          )
+            ? visibleLocalModelOptions
+            : includeSelectedModelOption(
+                visibleLocalModelOptions,
+                visibleLocalModelChoice,
+                "local",
+              );
           const onlineModelOptions = includeSelectedOnlineModelOption(
             modelCatalog,
             settings,
@@ -137592,6 +137778,13 @@ function HomeContent(): React.JSX.Element {
                           )}
                         </span>
                       ) : null}
+                      <SpeechIntentReveal
+                        available={message.speechIntentRevealAvailable === true}
+                        mode="coffee"
+                        scopeId={coffeeConversation.id}
+                        recordId={message.id}
+                        request={api}
+                      />
                     </div>
                   </li>
                 );
@@ -144726,6 +144919,17 @@ function HomeContent(): React.JSX.Element {
               </button>
             ) : null}
           </div>
+          <SpeechIntentReveal
+            available={
+              dialogState.isComplete &&
+              hasNpcSpeaker &&
+              scene.speechIntentRevealAvailable === true
+            }
+            mode="story"
+            scopeId={session.id}
+            recordId={scene.id}
+            request={api}
+          />
           {dialogState.isComplete && complete ? (
             <div className={styles.storyCompleteActions}>
               <span>Episode complete</span>
@@ -145433,11 +145637,13 @@ function HomeContent(): React.JSX.Element {
                   : resolveCustomBotGlyph(botSnapshot.glyph);
                 const faceStyle = playerJudgePrism
                   ? zenDefaultPrismFaceStyle
-                  : generatedAudienceBot
-                    ? randomBotFaceStyle(
-                        debateAudienceRandom(`face:${botSnapshot.id}`),
-                      )
-                    : resolveBotFaceStyleForBot(debateIdentityBot);
+                  : avatarState.faceStyleOverride
+                    ? avatarState.faceStyleOverride
+                    : generatedAudienceBot
+                      ? randomBotFaceStyle(
+                          debateAudienceRandom(`face:${botSnapshot.id}`),
+                        )
+                      : resolveBotFaceStyleForBot(debateIdentityBot);
                 const moderatorLookAtRole =
                   avatarState.role === "moderator"
                     ? avatarState.lookAtRole
@@ -146687,6 +146893,7 @@ function HomeContent(): React.JSX.Element {
               avatarDetails: signalMannequinAvatarDetails,
               avatarDetailsColor: color,
               leadershipGroupCount: signalMannequinLeadershipGroupCount,
+              semanticFaceMotionEnabled: true,
               pixelRasterizationEnabled: !signalLivePerformanceAvatar,
               runtimeEffectsEnabled: !signalLivePerformanceAvatar,
             };
@@ -148949,6 +149156,17 @@ function HomeContent(): React.JSX.Element {
                             : undefined
                         }
                       />
+                      <SpeechIntentReveal
+                        available={
+                          msg.speechIntentRevealAvailable === true &&
+                          (msg.id !== latestAssistantMessageId ||
+                            messageRevealAlreadyCompleted)
+                        }
+                        mode={detail?.mode === "chat" ? "chat" : "zen"}
+                        scopeId={detail?.id}
+                        recordId={msg.id}
+                        request={api}
+                      />
                       {renderMessageGenerationMetadata(
                         msg,
                         psychicSourceMessage,
@@ -151162,6 +151380,17 @@ function HomeContent(): React.JSX.Element {
                               collapseExpandedPromptShortcutsForMessage(msg.id)
                           : undefined
                       }
+                    />
+                    <SpeechIntentReveal
+                      available={
+                        msg.speechIntentRevealAvailable === true &&
+                        (msg.id !== latestAssistantMessageId ||
+                          messageRevealAlreadyCompleted)
+                      }
+                      mode={detail?.mode === "chat" ? "chat" : "zen"}
+                      scopeId={detail?.id}
+                      recordId={msg.id}
+                      request={api}
                     />
                     {renderMessageGenerationMetadata(msg, psychicSourceMessage)}
                     {renderAssistantPsychicDisclosure(

@@ -2,6 +2,10 @@ import type { DatabaseSync } from "node:sqlite";
 import { getAppConfig } from "@localai/config";
 import { randomId } from "./security.ts";
 import {
+  readEphemeralSpeechIntentRevealV1,
+  registerEphemeralSpeechIntentRevealV1,
+} from "./speech-intent-reveal.ts";
+import {
   bindConversationHub,
   getConversationHubMetadata,
   getHubConversationId,
@@ -150,6 +154,7 @@ import {
   botPowerBotNamingCueV1,
   botPowerAddressedInsultPrimaryCueV1,
   botPowerCursesSpeechV1,
+  botPowerIntendedSpeechLooksGibberishV1,
   botPowerFalseNamePoolV1,
   botPowerRequiresAddressedInsultV1,
   buildBotPowersPromptBlock,
@@ -7017,6 +7022,12 @@ function hydrateMessages(
       ...(assembled.botPowerExactResponse
         ? { botPowerExactResponse: assembled.botPowerExactResponse }
         : {}),
+      ...(assembled.botPowerExactResponse === "speech_obfuscation" &&
+      row.bot_id &&
+      botPowerIntendedSpeechLooksGibberishV1(assembled.content) &&
+      chatPrivatePowerIntendedSpeech(row.tool_payload)
+        ? { speechIntentRevealAvailable: true as const }
+        : {}),
       ...(assembled.botPowerMutePerformance
         ? { botPowerMutePerformance: assembled.botPowerMutePerformance }
         : {}),
@@ -7082,6 +7093,7 @@ export function chatCursedTongueHolderHistoryV1(args: {
 export function chatCursedTongueEphemeralHolderHistoryV1(args: {
   history: readonly ChatMessage[];
   holderBotId: string | null;
+  resolveIntendedSpeech?: (message: ChatMessage) => string | null;
 }): ChatMessage[] {
   const holderBotId = args.holderBotId?.trim() || "";
   if (!holderBotId) return [...args.history];
@@ -7089,7 +7101,10 @@ export function chatCursedTongueEphemeralHolderHistoryV1(args: {
     if (message.role !== "assistant" || message.botId !== holderBotId) {
       return message;
     }
-    const intended = message.botPowerPrivateIntendedSpeech?.trim().slice(0, 6_000) || "";
+    const intended =
+      args.resolveIntendedSpeech?.(message)?.trim().slice(0, 6_000) ||
+      message.botPowerPrivateIntendedSpeech?.trim().slice(0, 6_000) ||
+      "";
     return intended ? { ...message, content: intended } : message;
   });
 }
@@ -8751,10 +8766,19 @@ export async function processChatMessage(
   if (incognitoForTurn) {
     throwIfChatRequestCancelled(settings.signal);
     const history = sanitizeEphemeralMessages(settings.ephemeralMessages);
-    const cursedTongueHolderHistory = botPowerCursedTongueTurn
+    const cursedTongueHolderHistory =
+      botPowerCursedTongueTurn || botPowerMumblingTurn
       ? chatCursedTongueEphemeralHolderHistoryV1({
           history,
           holderBotId: assistantMemoryBotId,
+          resolveIntendedSpeech: (message) =>
+            conversationId
+              ? readEphemeralSpeechIntentRevealV1(userId, {
+                  mode: mode === "zen" ? "zen" : "chat",
+                  scopeId: conversationId,
+                  recordId: message.id,
+                })
+              : null,
         })
       : history;
     const holderPromptHistory = botPowerEternalIntroductionTurn
@@ -9132,12 +9156,15 @@ export async function processChatMessage(
         `${conversationId}:${assistantDisplay.length}`,
       );
     }
+    let botPowerPrivateIntendedSpeechForTurn: string | undefined;
     if (
       botPowerMumblingTurn &&
       !botPowerMutedTurn &&
       !botPowerEternalIntroductionTurn &&
       !botPowerEchoEnforcedTurn
     ) {
+      botPowerPrivateIntendedSpeechForTurn =
+        assistantDisplay.trim().slice(0, 6_000) || undefined;
       assistantDisplay = applyBotPowerMumbledResponseV1(assistantDisplay, {
         pronunciationMapPoint: settings.botPowerMumbleMapPoint,
         variationSeed: `${conversationId}:stream`,
@@ -9222,7 +9249,6 @@ export async function processChatMessage(
         botPowerMutePerformanceForTurn,
       );
     }
-    let botPowerPrivateIntendedSpeechForTurn: string | undefined;
     if (botPowerCursedTongueTurn && !botPowerMutedTurn) {
       botPowerPrivateIntendedSpeechForTurn = assistantDisplay.trim().slice(0, 6_000) || undefined;
       assistantDisplay = applyBotPowerCursedTongueResponseV1(
@@ -9402,8 +9428,18 @@ export async function processChatMessage(
         ? { turbo: true }
         : {}),
       botId: assistantBotId ?? null,
-      ...(botPowerPrivateIntendedSpeechForTurn
-        ? { botPowerPrivateIntendedSpeech: botPowerPrivateIntendedSpeechForTurn }
+      ...(botPowerCursedTongueTurn &&
+      !botPowerMumblingTurn &&
+      botPowerPrivateIntendedSpeechForTurn
+        ? {
+            botPowerPrivateIntendedSpeech:
+              botPowerPrivateIntendedSpeechForTurn,
+          }
+        : {}),
+      ...(botPowerMumblingTurn &&
+      botPowerPrivateIntendedSpeechForTurn &&
+      botPowerIntendedSpeechLooksGibberishV1(assistantDisplay)
+        ? { speechIntentRevealAvailable: true as const }
         : {}),
       moodKey: assistantMood.key,
       moodConfidence: assistantMood.confidence,
@@ -9477,6 +9513,22 @@ export async function processChatMessage(
       updatedAt: assistantCreatedAt,
       messages: nextMessages,
     };
+    if (
+      botPowerMumblingTurn &&
+      botPowerPrivateIntendedSpeechForTurn &&
+      botPowerIntendedSpeechLooksGibberishV1(assistantDisplay)
+    ) {
+      registerEphemeralSpeechIntentRevealV1({
+        userId,
+        request: {
+          mode: mode === "zen" ? "zen" : "chat",
+          scopeId: conversationIncognito.id,
+          recordId: assistantMessageId,
+        },
+        intendedSpeech: botPowerPrivateIntendedSpeechForTurn,
+        publicSpeech: assistantDisplay,
+      });
+    }
 
     const incognitoOpinion = isStarterPrompt || assistantOnlyCompanionTurn
       ? buildOpinion(
@@ -9821,7 +9873,8 @@ export async function processChatMessage(
       recentContextMessageLimit
     ) as MessageRow[];
   const history = hydrateMessages(historyRowsDesc.slice().reverse());
-  const cursedTongueHolderHistory = botPowerCursedTongueTurn || botPowerMutedTurn
+  const cursedTongueHolderHistory =
+    botPowerCursedTongueTurn || botPowerMumblingTurn || botPowerMutedTurn
     ? chatCursedTongueHolderHistoryV1({
         history,
         rows: historyRowsDesc,
@@ -10860,12 +10913,14 @@ export async function processChatMessage(
       `${conversationId}:${assistantDisplay.length}`,
     );
   }
+  let botPowerCleanSpeechForTurn: string | undefined;
   if (
     botPowerMumblingTurn &&
     !botPowerMutedTurn &&
     !botPowerEternalIntroductionTurn &&
     !botPowerEchoEnforcedTurn
   ) {
+    botPowerCleanSpeechForTurn = assistantDisplay;
     assistantDisplay = applyBotPowerMumbledResponseV1(assistantDisplay, {
       pronunciationMapPoint: settings.botPowerMumbleMapPoint,
       variationSeed: `${conversationId}:turn`,
@@ -10961,7 +11016,6 @@ export async function processChatMessage(
           : undefined;
       })()
     : undefined;
-  let botPowerCleanSpeechForTurn: string | undefined;
   let botPowerMutePerformanceForTurn: BotPowerMutePerformanceV1 | undefined;
   if (botPowerMutedTurn) {
     botPowerCleanSpeechForTurn = assistantDisplay;

@@ -233,8 +233,45 @@ test("a targeted interruption Power does not cut off a different bot", () => {
     crossTalk: "normal",
   });
 
-  assert.equal(result?.powerEffect, null);
-  assert.equal(result?.chance, 0.05);
+  assert.equal(result, null);
+});
+
+test("ordinary automatic cut-ins reject neutral moods and accept only compatible moods", () => {
+  const neutral = coffeeAutomaticCutInCandidateV1({
+    candidateBotIds: ["krabs"],
+    interruptedBotId: "plankton",
+    socialByBotId: {
+      krabs: {
+        disposition: 0.67,
+        engagement: 0.765,
+        valuesFriction: 0.365,
+        restraint: 0.65,
+        leavePressure: 0.04,
+      },
+    },
+    powerPlan: null,
+    crossTalk: "pileup",
+  });
+  assert.equal(neutral, null);
+
+  const irritated = coffeeAutomaticCutInCandidateV1({
+    candidateBotIds: ["krabs"],
+    interruptedBotId: "plankton",
+    socialByBotId: {
+      krabs: {
+        disposition: 0.42,
+        engagement: 0.86,
+        valuesFriction: 0.78,
+        restraint: 0.28,
+        leavePressure: 0.12,
+      },
+    },
+    powerPlan: null,
+    crossTalk: "pileup",
+  });
+  assert.equal(irritated?.botId, "krabs");
+  assert.ok((irritated?.chance ?? 0) > 0);
+  assert.ok((irritated?.chance ?? 1) <= 0.18);
 });
 
 test("Coffee plays the interrupter lead before an authoritative yield tail", () => {
@@ -296,6 +333,15 @@ test("Coffee plays the interrupter lead before an authoritative yield tail", () 
   assert.match(
     interruption,
     /coffeeCutOffRevealMessageIdRef\.current = pendingMessage\.id/u,
+  );
+  assert.match(
+    interruption,
+    /turn-jobs\/\$\{encodeURIComponent\(turnJobId\)\}\/interrupt[\s\S]{0,280}automatic: true[\s\S]{0,100}interruptedBotId[\s\S]{0,100}interrupterBotId: candidate\.botId/u,
+  );
+  assert.ok(
+    interruption.indexOf("/interrupt`,") <
+      interruption.indexOf("coffeeCutOffRevealMessageIdRef.current = pendingMessage.id"),
+    "server mood authorization must happen before the browser cuts off the line",
   );
   assert.match(
     interruption,

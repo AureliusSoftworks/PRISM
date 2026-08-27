@@ -102,13 +102,14 @@ describe("mode tutorials", () => {
     assert.match(step.body, /truth\/proof grade and juror breakdown/u);
     assert.match(step.body, /Reduced Motion/u);
     assert.match(step.body, /No gameplay action calls an LLM or synthesizes a voice/u);
-    assert.match(step.body, /Identity Crisis lets the holder knowingly masquerade as the latest eligible direct addresser/u);
+    assert.match(step.body, /Identity Crisis makes the holder sincerely become the latest eligible direct addresser and treat the original as an impostor/u);
     assert.match(step.body, /complete resting and speaking mouth package/u);
     assert.match(step.body, /literally double-quoted public name/u);
     assert.match(step.body, /player-controlled Prosecutor is eligible/u);
-    assert.match(step.body, /defensively treats the original as the suspicious imitator/u);
-    assert.match(step.body, /mild concern rather than panic or constant repetition/u);
-    assert.match(step.body, /color, complete voice and Accent Map location, pronunciation, Speechprint, provider voice identity/u);
+    assert.match(step.body, /witness holder retargets to whoever is currently speaking directly to that witness/u);
+    assert.match(step.body, /accused original treats that claim as real pressure/u);
+    assert.match(step.body, /concern that can deepen naturally instead of panic or constant repetition/u);
+    assert.match(step.body, /color, material shell, complete frozen voice and exact Accent Map location, pronunciation, Speechprint, provider voice identity/u);
     assert.match(step.body, /target form, direct-address event, and timing are frozen for replay/u);
     assert.match(step.body, /one case card with every immutable playthrough nested beneath it/u);
     assert.match(step.body, /same mystery/u);
@@ -193,8 +194,11 @@ describe("mode tutorials", () => {
   it("explains transient native Max without changing the ordinary ladder", () => {
     const copy = readFileSync(new URL("./modeTutorials.ts", import.meta.url), "utf8");
     assert.match(copy, /Extra High unlocks a separate Max overdrive toggle/u);
-    assert.match(copy, /Auto and simulated Effort never use it/u);
+    assert.match(copy, /Opus 4\.6, Sonnet 4\.6, and Mythos Preview.*alias for provider Max/u);
+    assert.match(copy, /hardest-route Auto turn may select Extra High/u);
     assert.match(copy, /Turbo remains an independent toggle.*combined with Max/u);
+    assert.match(copy, /Claude Opus 4\.8\/5 Fast processing/u);
+    assert.match(copy, /Mythos 5 is an optional Anthropic model.*begins unchecked/u);
   });
 
   it("teaches vertical keyboard navigation for the model and effort pickers", () => {
@@ -1131,6 +1135,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /ONLINE ends with one bundled local attempt/u);
     assert.match(copy, /LOCAL evaluates only local Ollama models/u);
     assert.match(copy, /ONLINE evaluates only configured OpenAI and Anthropic models/u);
+    assert.match(copy, /Refresh models re-runs discovery at runtime/u);
     assert.match(
       copy,
       /ONLINE Auto provider lean slider: middle is Balanced \(pure cost and speed\)/u,
@@ -1631,6 +1636,8 @@ describe("mode tutorials", () => {
     assert.match(joinCopy, /brief spoken acknowledgement/u);
     assert.match(joinCopy, /Cross-talk setting/u);
     assert.match(joinCopy, /audible overlaps/u);
+    assert.match(joinCopy, /ordinary automatic turn-stealing cut-in is rare/u);
+    assert.match(joinCopy, /Pile-up alone never authorizes one/u);
     assert.match(
       joinCopy,
       /prerecorded throat-clear, swallow, lip smack, sigh, or inhale/u,
@@ -2128,6 +2135,8 @@ describe("mode tutorials", () => {
     assert.match(topicStep?.body ?? "", /short branded Coffee curtain/);
     assert.match(topicStep?.body ?? "", /short cleaned title for that topic/);
     assert.match(topicStep?.body ?? "", /Hover the title to reread the original prompt/);
+    assert.match(topicStep?.body ?? "", /only the seated bots who were actually there/u);
+    assert.match(topicStep?.body ?? "", /never coached to fake a memory/u);
     assert.match(
       topicStep?.body ?? "",
       /End session lives in that table chrome from this waiting screen onward/,
@@ -3113,7 +3122,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalControlRoomStep.body,
-      /Interrupt guest now plays one of that host’s saved short interjections immediately[\s\S]*An echo-bound host instead cuts in by repeating the last audience-heard on-air phrase[\s\S]*at least 85 percent of the guest’s line has been heard[\s\S]*omits that annoyed follow-on[\s\S]*unheard remainder of the guest’s line is discarded/u,
+      /Interrupt guest now cancels that owned run[\s\S]*saved short interjection never plays until the server accepts[\s\S]*cue remains queued and no success acknowledgment plays[\s\S]*An echo-bound host instead cuts in by repeating the last audience-heard on-air phrase[\s\S]*at least 85 percent of the guest’s line has been heard[\s\S]*omits that annoyed follow-on[\s\S]*unheard remainder of the guest’s line is discarded/u,
     );
     assert.match(
       signalControlRoomStep.body,

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   REQUIRED_LOCAL_MODELS,
   REQUIRED_PRIMARY_LOCAL_MODEL_ID,
+  catalogWithGlobalPickerVisibility,
   resolveAutoModel,
   sanitizeHiddenModelIds,
 } from "../model-routing.ts";
@@ -65,6 +66,22 @@ describe("resolveAutoModel", () => {
     });
   });
 
+  it("preserves an already-selected picker-hidden fixed model", () => {
+    const resolved = resolveAutoModel({
+      provider: "openai",
+      explicitModelOverride: "gpt-4o",
+      hiddenModelIds: [],
+      catalog: catalog({
+        online: [{ id: "gpt-4o", label: "GPT 4o", provider: "openai", showInGlobalPicker: false }],
+      }),
+    });
+    assert.deepEqual(resolved, {
+      provider: "openai",
+      model: "gpt-4o",
+      usedRequiredLocalFallback: false,
+    });
+  });
+
   it("routes a light request to the cheapest suitable visible model", () => {
     const resolved = resolveAutoModel({
       provider: "openai",
@@ -74,6 +91,73 @@ describe("resolveAutoModel", () => {
     });
 
     assertAutoRoute(resolved, "openai", "gpt-4o-mini", "online");
+  });
+
+  it("keeps an enabled picker-hidden model in Auto's candidate pool", () => {
+    const resolved = resolveAutoModel({
+      provider: "openai",
+      lane: "online",
+      hiddenModelIds: [],
+      catalog: catalog({
+        online: [
+          {
+            id: "gpt-4o-mini",
+            label: "GPT 4o Mini",
+            provider: "openai",
+            isDefault: true,
+            showInGlobalPicker: false,
+          },
+        ],
+      }),
+    });
+
+    assertAutoRoute(resolved, "openai", "gpt-4o-mini", "online");
+  });
+
+  it("keeps picker-hidden enabled models eligible for Turbo Auto", () => {
+    const resolved = resolveAutoModel({
+      provider: "openai",
+      lane: "online",
+      hiddenModelIds: [],
+      catalog: catalog({
+        online: [
+          {
+            id: "gpt-4o-mini",
+            label: "GPT 4o Mini",
+            provider: "openai",
+            isDefault: true,
+            showInGlobalPicker: false,
+          },
+          { id: "gpt-4o", label: "GPT 4o", provider: "openai" },
+        ],
+      }),
+      turboOnly: true,
+    });
+
+    assertAutoRoute(resolved, "openai", "gpt-4o-mini", "online");
+  });
+
+  it("excludes disabled models even when their picker annotation is visible", () => {
+    const resolved = resolveAutoModel({
+      provider: "openai",
+      lane: "online",
+      hiddenModelIds: ["gpt-4o-mini"],
+      catalog: catalog({
+        online: [
+          {
+            id: "gpt-4o-mini",
+            label: "GPT 4o Mini",
+            provider: "openai",
+            isDefault: true,
+            showInGlobalPicker: true,
+          },
+          { id: "gpt-4o", label: "GPT 4o", provider: "openai" },
+        ],
+      }),
+      turboOnly: true,
+    });
+
+    assert.equal(resolved.model, "gpt-4o");
   });
 
   it("skips hidden saved preferences before contextual Auto chooses the next visible model", () => {
@@ -182,6 +266,48 @@ describe("resolveAutoModel", () => {
 
     assertAutoRoute(resolved, "openai", "gpt-4o-mini", "online");
     assert.notEqual(resolved.provider, "anthropic");
+  });
+
+  it("can route Auto Turbo through eligible Claude Opus Fast models", () => {
+    const resolved = resolveAutoModel({
+      provider: "anthropic",
+      lane: "online",
+      hiddenModelIds: [],
+      catalog: catalog({
+        online: [
+          { id: "claude-opus-4-8", label: "Opus 4.8", provider: "anthropic" },
+          { id: "claude-sonnet-5", label: "Sonnet 5", provider: "anthropic" },
+        ],
+      }),
+      turboOnly: true,
+    });
+
+    assertAutoRoute(resolved, "anthropic", "claude-opus-4-8", "online");
+  });
+});
+
+describe("catalogWithGlobalPickerVisibility", () => {
+  it("defaults old settings to visible and annotates only picker-hidden ids", () => {
+    const allVisible = catalogWithGlobalPickerVisibility(catalog(), []);
+    assert.ok(
+      [...allVisible.local, ...allVisible.online].every(
+        (model) => model.showInGlobalPicker,
+      ),
+    );
+
+    const hiddenFromPicker = catalogWithGlobalPickerVisibility(catalog(), [
+      "gpt-4o-mini",
+    ]);
+    assert.equal(
+      hiddenFromPicker.online.find((model) => model.id === "gpt-4o-mini")
+        ?.showInGlobalPicker,
+      false,
+    );
+    assert.equal(
+      hiddenFromPicker.online.find((model) => model.id === "gpt-4o")
+        ?.showInGlobalPicker,
+      true,
+    );
   });
 });
 

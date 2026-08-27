@@ -457,17 +457,20 @@ function openAiPriorityModelFamily(
 }
 
 /**
- * Models currently eligible for OpenAI Priority processing. Keep this list
- * conservative: an unknown catalog entry should never receive a premium tier
- * request merely because its name resembles a supported family.
+ * Models currently eligible for provider-native Turbo processing. Keep these
+ * lists conservative: an unknown catalog entry should never receive a premium
+ * tier request merely because its name resembles a supported family.
  */
 export function modelSupportsTurboMode(
   provider: NativeReasoningEffortProvider,
   rawModelId: string,
 ): boolean {
-  if (provider !== "openai") return false;
   const modelId = rawModelId.trim().toLowerCase();
   if (!modelId) return false;
+  if (provider === "anthropic") {
+    return anthropicModelSupportsFastMode(modelId);
+  }
+  if (provider !== "openai") return false;
   return [
     "gpt-5.6",
     "gpt-5.6-sol",
@@ -664,13 +667,17 @@ type AnthropicModelVersion = {
 function anthropicModelVersion(modelId: string): AnthropicModelVersion | null {
   const normalized = modelId.trim().toLowerCase();
   const match = normalized.match(
-    /^claude-([a-z0-9]+)-(\d+)(?:-(\d+))?(?:-\d{8})?$/
+    /^claude-([a-z0-9]+)-(\d+)(?:-(\d+))?(?:-(\d{8}))?$/
   );
   if (!match) return null;
+  const trailingNumber = match[3] ?? "";
+  const minor = trailingNumber.length === 8 && !match[4]
+    ? 0
+    : Number(trailingNumber || 0);
   return {
     family: match[1] ?? "",
     major: Number(match[2]),
-    minor: Number(match[3] ?? 0),
+    minor,
   };
 }
 
@@ -711,6 +718,16 @@ function anthropicModelSupportsMaxReasoningEffort(modelId: string): boolean {
     model?.family === "opus" &&
     model.major === 4 &&
     model.minor === 5
+  );
+}
+
+/** Claude Fast mode is deliberately limited to exact Opus 4.8/5 aliases and snapshots. */
+export function anthropicModelSupportsFastMode(modelId: string): boolean {
+  const model = anthropicModelVersion(modelId);
+  return (
+    model?.family === "opus" &&
+    ((model.major === 4 && model.minor === 8) ||
+      (model.major === 5 && model.minor === 0))
   );
 }
 
@@ -793,14 +810,20 @@ export function resolveModelReasoningEffortCapability(args: {
             };
   }
   if (anthropicModelSupportsReasoningEffort(args.modelId)) {
-    const levels = anthropicModelSupportsXHighReasoningEffort(args.modelId)
+    const supportsNativeXHigh = anthropicModelSupportsXHighReasoningEffort(
+      args.modelId,
+    );
+    const supportsNativeMax = anthropicModelSupportsMaxReasoningEffort(
+      args.modelId,
+    );
+    const levels = supportsNativeXHigh || supportsNativeMax
       ? ANTHROPIC_XHIGH_REASONING_LEVELS
       : ANTHROPIC_REASONING_LEVELS;
     return {
       mode: "native",
       levels,
       supportsNone: false,
-      supportsMax: false,
+      supportsMax: supportsNativeXHigh && supportsNativeMax,
     };
   }
   return simulatedEnabled
@@ -839,6 +862,9 @@ export function anthropicReasoningEffortForRequest(
   value: unknown
 ): AnthropicRequestReasoningEffort | null {
   if (!anthropicModelSupportsReasoningEffort(modelId)) return null;
+  if (normalizeProviderReasoningEffort(value) === "max") {
+    return anthropicModelSupportsMaxReasoningEffort(modelId) ? "max" : null;
+  }
   const effort = reasoningEffortForRequest(value);
   if (!effort || effort === "none") return null;
   if (effort === "minimal") return "low";

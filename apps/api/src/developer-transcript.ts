@@ -45,6 +45,14 @@ export interface BuildDeveloperTranscriptInput {
 
 type JsonRecord = Record<string, unknown>;
 
+const PRIVATE_SPEECH_INTENT_FIELDS = new Set([
+  "botPowerIntendedSpeech",
+  "powerIntendedSpeech",
+  "powerIntendedContent",
+  "powerIntendedReason",
+  "privatePowerIntendedNarrationBySceneId",
+]);
+
 const SENSITIVE_FIELD_PATTERN =
   /(?:api[_-]?key|authorization|credential|password|secret|subscription[_-]?token|token)/iu;
 
@@ -119,6 +127,79 @@ function sortedJsonValue(value: unknown): unknown {
       .sort((left, right) => left.localeCompare(right))
       .map((key) => [key, sortedJsonValue(value[key])]),
   );
+}
+
+function withoutPrivateSpeechIntentFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutPrivateSpeechIntentFields);
+  if (!isJsonRecord(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !PRIVATE_SPEECH_INTENT_FIELDS.has(key))
+      .map(([key, child]) => [key, withoutPrivateSpeechIntentFields(child)]),
+  );
+}
+
+function collectPrivateSpeechIntentValues(
+  value: unknown,
+  output: Set<string>,
+): void {
+  if (Array.isArray(value)) {
+    value.forEach((child) => collectPrivateSpeechIntentValues(child, output));
+    return;
+  }
+  if (!isJsonRecord(value)) return;
+  for (const [key, child] of Object.entries(value)) {
+    if (PRIVATE_SPEECH_INTENT_FIELDS.has(key)) {
+      const collectPrivateStrings = (privateValue: unknown): void => {
+        if (typeof privateValue === "string") {
+          if (privateValue) output.add(privateValue);
+          return;
+        }
+        if (Array.isArray(privateValue)) {
+          privateValue.forEach(collectPrivateStrings);
+          return;
+        }
+        if (isJsonRecord(privateValue)) {
+          Object.values(privateValue).forEach(collectPrivateStrings);
+        }
+      };
+      collectPrivateStrings(child);
+      continue;
+    }
+    collectPrivateSpeechIntentValues(child, output);
+  }
+}
+
+function privateSpeechIntentValues(
+  input: BuildDeveloperTranscriptInput,
+): string[] {
+  const values = new Set<string>();
+  for (const message of input.messages) {
+    collectPrivateSpeechIntentValues(parseJsonRecord(message.toolPayload), values);
+  }
+  for (const event of input.events) {
+    collectPrivateSpeechIntentValues(parseJsonRecord(event.payloadJson), values);
+  }
+  return [...values].sort(
+    (left, right) => right.length - left.length || left.localeCompare(right),
+  );
+}
+
+function redactPrivateSpeechIntentValues(
+  text: string,
+  values: readonly string[],
+): string {
+  let redacted = text;
+  for (const value of values) {
+    const escaped = JSON.stringify(value).slice(1, -1);
+    redacted = redacted.split(value).join("[PRIVATE_SPEECH_INTENT_REDACTED]");
+    if (escaped !== value) {
+      redacted = redacted
+        .split(escaped)
+        .join("[PRIVATE_SPEECH_INTENT_REDACTED]");
+    }
+  }
+  return redacted;
 }
 
 function stableJson(value: unknown): string {
@@ -469,7 +550,11 @@ export function buildDeveloperTranscript(input: BuildDeveloperTranscriptInput): 
       const parsedToolPayload = parseJsonRecord(message.toolPayload);
       lines.push(
         "Tool calls, search results, routing metadata, and retry state:",
-        ...fenced(parsedToolPayload ?? message.toolPayload),
+        ...fenced(
+          parsedToolPayload
+            ? withoutPrivateSpeechIntentFields(parsedToolPayload)
+            : message.toolPayload,
+        ),
         "",
       );
     }
@@ -495,7 +580,13 @@ export function buildDeveloperTranscript(input: BuildDeveloperTranscriptInput): 
   }
 
   const rendered = lines.join("\n").trimEnd() + "\n";
-  return redactDeveloperTranscript(rendered, { secretValues: input.secretValues });
+  return redactDeveloperTranscript(
+    redactPrivateSpeechIntentValues(
+      rendered,
+      privateSpeechIntentValues(input),
+    ),
+    { secretValues: input.secretValues },
+  );
 }
 
 export function sensitiveEnvironmentValues(

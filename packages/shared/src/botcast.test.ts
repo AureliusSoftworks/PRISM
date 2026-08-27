@@ -116,11 +116,19 @@ describe("Signal public cadence speech", () => {
         episodeId: "episode",
         sequence: 2,
         kind: "producer_cue",
-        payload: { cueId: "cue-1", lifecycle: "requeued" },
+        payload: {
+          cueId: "cue-1",
+          lifecycle: "requeued",
+          recovery: "operation_timeout",
+        },
         occurredAt: "2026-08-25T00:00:01.000Z",
       },
     ];
     assert.equal(botcastActiveProducerCueFromEvents(events)?.status, "requeued");
+    assert.equal(
+      botcastActiveProducerCueFromEvents(events)?.recovery,
+      "operation_timeout",
+    );
     events.push({
       id: "cue-failed",
       episodeId: "episode",

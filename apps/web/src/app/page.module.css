@@ -7959,6 +7959,49 @@
   min-width: 0;
 }
 
+.settingsModelRefreshRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+
+.settingsModelRefreshButton {
+  min-height: 32px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 52%, var(--line));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg-surface) 94%, var(--bg) 6%);
+  color: var(--fg-muted);
+  cursor: pointer;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.settingsModelRefreshButton:hover:not(:disabled),
+.settingsModelRefreshButton:focus-visible {
+  border-color: color-mix(
+    in srgb,
+    var(--settings-section-color) 42%,
+    var(--line-strong)
+  );
+  background: color-mix(
+    in srgb,
+    var(--settings-section-color) 8%,
+    var(--bg-surface)
+  );
+  color: var(--fg);
+}
+
+.settingsModelRefreshButton:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.settingsModelRefreshRow small {
+  color: var(--settings-section-quiet);
+}
+
 .settingsSectionHeader small {
   color: var(--settings-section-quiet);
   font-size: var(--prism-type-caption);
@@ -47867,11 +47910,29 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .settingsModelToggle {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 8px;
   padding: 7px 8px;
   border-radius: 9px;
+  color: var(--fg);
+}
+
+.settingsModelPickerToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.settingsModelPickerToggle span {
+  overflow: visible;
+  color: inherit;
+  font-size: 11px;
+}
+
+.settingsModelPickerToggle:has(input:checked) {
   color: var(--fg);
 }
 

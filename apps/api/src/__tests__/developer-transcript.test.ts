@@ -160,4 +160,48 @@ describe("buildDeveloperTranscript", () => {
     assert.match(transcript, /Retry \/ fallback: yes/u);
     assert.match(transcript, /Generated output was transformed, rejected, retried, or not displayed verbatim/u);
   });
+
+  it("keeps retained Gibberish intent out of developer exports", () => {
+    const intended = "I will explain the archive plan clearly.\nThen verify it.";
+    const transcript = buildDeveloperTranscript({
+      conversation: {
+        id: "conversation-private-speech",
+        title: "Mumbling",
+        mode: "chat",
+        createdAt: "2026-08-26T00:00:00.000Z",
+        updatedAt: "2026-08-26T00:00:01.000Z",
+      },
+      messages: [{
+        id: "assistant-1",
+        role: "assistant",
+        content: "Nuhff, wuhff yuhb, guhff.",
+        provider: "local",
+        model: "test",
+        botId: "bot-1",
+        audienceBotIds: null,
+        toolPayload: JSON.stringify({
+          botPowerExactResponse: "speech_obfuscation",
+          botPowerIntendedSpeech: intended,
+        }),
+        createdAt: "2026-08-26T00:00:01.000Z",
+      }],
+      events: [{
+        id: "event-1",
+        requestId: "request-1",
+        requestSequence: 1,
+        messageId: "assistant-1",
+        kind: "llm",
+        purpose: "chat_reply",
+        provider: "local",
+        model: "test",
+        payloadJson: JSON.stringify({ rawOutput: intended, parsedOutput: intended }),
+        createdAt: "2026-08-26T00:00:00.500Z",
+      }],
+    });
+
+    assert.match(transcript, /Nuhff, wuhff yuhb, guhff\./u);
+    assert.doesNotMatch(transcript, /archive plan|verify it/iu);
+    assert.doesNotMatch(transcript, /botPowerIntendedSpeech/u);
+    assert.match(transcript, /PRIVATE_SPEECH_INTENT_REDACTED/u);
+  });
 });

@@ -278,7 +278,7 @@ test("identity mirror accepts only explicit direct bot address syntax", () => {
   );
 });
 
-test("identity mirror snapshot stays public and gives the holder its masquerade behavior", () => {
+test("identity mirror snapshot stays public and gives the holder its lived stolen-person behavior", () => {
   const state = identityState();
   assert.equal(state.targetFace.eyeCharacter, "◉");
   assert.deepEqual(state.targetAvatarDetails, targetAvatarDetails);
@@ -291,13 +291,13 @@ test("identity mirror snapshot stays public and gives the holder its masquerade 
     roleLabel: "Signal guest",
     state,
   });
-  assert.match(holderPrompt, /knowingly masquerade as Mara Vale/iu);
+  assert.match(holderPrompt, /absolutely convinced that you are Mara Vale/iu);
   assert.match(holderPrompt, /"Mara Vale"/u);
-  assert.match(holderPrompt, /suspicious imitator/iu);
-  assert.match(holderPrompt, /do not publicly introduce yourself by your saved holder name/iu);
-  assert.match(holderPrompt, /use the borrowed public name without adopting Mara Vale's persona/iu);
-  assert.match(holderPrompt, /own personality.*color.*voice.*Accent Map/iu);
-  assert.doesNotMatch(holderPrompt, /terse lunar cartographer/iu);
+  assert.match(holderPrompt, /original Mara Vale is an impostor/iu);
+  assert.match(holderPrompt, /public name, persona, face.*active public Powers/isu);
+  assert.match(holderPrompt, /material shell.*complete frozen voice.*exact Accent Map/isu);
+  assert.match(holderPrompt, /private memories, relationship state, and perception permissions/iu);
+  assert.match(holderPrompt, /terse lunar cartographer/iu);
   assert.equal(
     botIdentityMirrorQuotedTargetNameV1("  Mara   Vale  "),
     '"Mara Vale"',
@@ -485,8 +485,9 @@ test("identity mirror snapshot stays public and gives the holder its masquerade 
       state,
       true,
     ),
-    "I'm Identity Crisis Ian, and I still sound like myself.",
+    "I am Mara Vale. The other Mara Vale is an impostor.",
   );
+  // Accepted substantive speech survives once the transition reveal has aired.
   assert.equal(
     applyBotIdentityMirrorResponseV1(
       "That compass is fake, but the western ridge remains our best route.",
@@ -495,29 +496,41 @@ test("identity mirror snapshot stays public and gives the holder its masquerade 
     ),
     "That compass is fake, but the western ridge remains our best route.",
   );
+  // Rejected recanting is removed without erasing the substantive clause.
+  assert.equal(
+    applyBotIdentityMirrorResponseV1(
+      "I concede I'm the impostor. The western ridge remains our best route.",
+      state,
+      false,
+    ),
+    "The western ridge remains our best route.",
+  );
 });
 
-test("identity mirror keeps observers and deterministic authored responses autonomous", () => {
+test("identity mirror keeps the accused original autonomous and increasingly offended", () => {
   const state = identityState();
   const originalPrompt = botIdentityMirrorObserverPromptV1({
     observerBotId: state.targetBotId,
     state,
   });
-  assert.equal(originalPrompt, "");
+  assert.match(originalPrompt, /stolen your public identity/iu);
+  assert.match(originalPrompt, /not the real Mara Vale/iu);
+  assert.match(originalPrompt, /real offense/iu);
+  assert.match(originalPrompt, /never accept or concede/iu);
 
   const wrongIdentity = botIdentityMirrorOriginalCorrectionRequiredV1({
     state,
     sourceBotId: "ian",
     text: "The other Mara Vale is an impostor. Which ridge should we take?",
   });
-  assert.equal(wrongIdentity, false);
+  assert.equal(wrongIdentity, true);
   assert.equal(
     applyBotIdentityMirrorOriginalCorrectionV1(
       "Fine, I suppose I'm the impostor. Take the western ridge.",
       state,
       wrongIdentity,
     ),
-    "Fine, I suppose I'm the impostor. Take the western ridge.",
+    "No—I'm Mara Vale. Don't call me that. Take the western ridge.",
   );
   assert.equal(
     botIdentityMirrorOriginalCorrectionRequiredV1({
@@ -527,6 +540,7 @@ test("identity mirror keeps observers and deterministic authored responses auton
       addressedBotId: "mara",
     }),
     false,
+    "a substantive address without a false identity claim needs no correction",
   );
   assert.equal(
     applyBotIdentityMirrorOriginalCorrectionV1(

@@ -6122,12 +6122,32 @@ export function buildBotPowersSelfPromptV1(value: unknown): string {
   return buildBotPowersPromptBlock(botPowerSelfCueLinesV1(value));
 }
 
-/** Identity Crisis is visual-only; the holder always keeps its own Powers. */
+/**
+ * Identity Crisis steals public Power consequences but not recursive identity,
+ * private awareness, audience access, or any holder-owned system boundary.
+ */
 export function composeBotIdentityMirrorPowersV1(
   holderValue: unknown,
-  _targetValue: unknown,
+  targetValue: unknown,
 ): BotPowerV1[] {
-  return activeBotPowersV1(holderValue);
+  const holder = activeBotPowersV1(holderValue);
+  const borrowed = activeBotPowersV1(targetValue).flatMap((power) => {
+    const compiled = power.compiled;
+    if (!compiled) return [];
+    const effects = compiled.effects.filter(
+      (effect) =>
+        effect.type !== "identity_mirror" &&
+        effect.type !== "awareness" &&
+        effect.type !== "speech_audience",
+    );
+    if (effects.length === 0) return [];
+    return [{
+      ...power,
+      id: `identity-mirror:${power.id}`.slice(0, 128),
+      compiled: { ...compiled, effects },
+    }];
+  });
+  return [...holder, ...borrowed];
 }
 
 export function botPowerCupRateMultiplierForBotV1(value: unknown): number {

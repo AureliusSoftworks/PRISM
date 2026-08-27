@@ -64,6 +64,7 @@ export interface CoffeeReplayMessageLike {
   botId?: string | null;
   botColor?: string;
   botGlyph?: string;
+  speechIntentRevealAvailable?: true;
   createdAt?: string;
   provider?: string | null;
   model?: string | null;

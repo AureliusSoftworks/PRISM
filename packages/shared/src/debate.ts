@@ -900,6 +900,8 @@ export interface DebateEventV1 {
   content: string;
   /** Private clear speech retained only so a Power-immune bot can understand an obfuscated speaker. */
   powerIntendedContent?: string;
+  /** Text-free public provenance for an owner-only primary-utterance reveal. */
+  speechIntentRevealAvailable?: true;
   /** Public replay-stable timed-silence presentation; contains no intended speech. */
   mutePerformance?: BotPowerMutePerformanceV1;
   /** Public, replay-safe Troll delivery projection. */

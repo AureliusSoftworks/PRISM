@@ -50,6 +50,7 @@ export type BotPowerAvatarColorCycleModePolicy = BotPowerGhostModePolicy;
 export type BotPowerAvatarVisibilityModePolicy = BotPowerGhostModePolicy;
 export type BotPowerVoicePresenceModePolicy = BotPowerGhostModePolicy;
 export type BotPowerSpeechObfuscationModePolicy = BotPowerGhostModePolicy;
+export type BotPowerSpeechIntentRevealModePolicy = BotPowerGhostModePolicy;
 export type BotPowerCursedTongueModePolicy = BotPowerGhostModePolicy;
 export type BotPowerAddressedFandomModePolicy = BotPowerGhostModePolicy;
 export type BotPowerChromaticBiasModePolicy = BotPowerGhostModePolicy;
@@ -85,19 +86,19 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.48",
+    version: "1.49",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.47",
+    version: "1.48",
     status: "active",
   },
   debate: {
     id: "debate",
     name: "Debate",
-    version: "0.53",
+    version: "0.54",
     status: "preview",
   },
   polling: {
@@ -109,13 +110,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.69",
+    version: "2.71",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.88",
+    version: "1.89",
     status: "active",
   },
   feed: {
@@ -133,7 +134,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   story: {
     id: "story",
     name: "Story",
-    version: "0.41",
+    version: "0.42",
     status: "planned",
   },
   gym: {
@@ -726,6 +727,26 @@ export const BOT_POWER_ANNOYANCE_MODE_POLICY: Record<
 export const BOT_POWER_SPEECH_OBFUSCATION_MODE_POLICY: Record<
   PrismAppletId,
   BotPowerSpeechObfuscationModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  debate: "direct",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "adapted",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Player-only exact intent reveal for committed primary Gibberish speech. */
+export const BOT_POWER_SPEECH_INTENT_REVEAL_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerSpeechIntentRevealModePolicy
 > = {
   chat: "direct",
   zen: "direct",

@@ -39,6 +39,7 @@ import {
   botPowerIsBreathlessV1,
   botPowerMuteExemptsPlayerV1,
   botPowerMumblesSpeechV1,
+  botPowerIntendedSpeechLooksGibberishV1,
   resolveBotPronunciationMapPointV1,
   botPowerIgnoresOtherPowersV1,
   botPowerTrollsV1,
@@ -1324,7 +1325,9 @@ async function applyStoryHardResponsePowers(
   model: string,
   reasoningEffort?: ReasoningEffort,
   turbo?: boolean,
-): Promise<StoryEpisodeManifest> {
+): Promise<StoryEpisodeManifest & {
+  privatePowerIntendedNarrationBySceneId?: Record<string, string>;
+}> {
   const mutedBotIds = new Set(
     bots.filter((bot) => botPowerIsMutedV1(bot.powers)).map((bot) => bot.id),
   );
@@ -1408,6 +1411,7 @@ async function applyStoryHardResponsePowers(
     return episode;
   }
   const scenes: StoryEpisodeManifest["scenes"] = [];
+  const privatePowerIntendedNarrationBySceneId: Record<string, string> = {};
   const botsById = new Map(bots.map((bot) => [bot.id, bot] as const));
   const lastInterruptionSceneByBotId = new Map<string, number>();
   let priorBotSpeech: { botId: string; narration: string } | null = null;
@@ -1470,9 +1474,11 @@ async function applyStoryHardResponsePowers(
         interruption.certainty,
       );
       if (interruptedNarration !== priorScene.narration) {
+        delete privatePowerIntendedNarrationBySceneId[priorScene.id];
         scenes[scenes.length - 1] = {
           ...priorScene,
           narration: interruptedNarration,
+          speechIntentRevealAvailable: undefined,
         };
         priorBotSpeech = {
           botId: priorScene.speakerBotId!,
@@ -1572,6 +1578,7 @@ async function applyStoryHardResponsePowers(
       !echoBotIds.has(scene.speakerBotId) &&
       !intermittentMuteIgnored
     ) {
+      const intendedNarration = nextScene.narration.trim().slice(0, 6_000);
       nextScene = {
         ...nextScene,
         narration: applyBotPowerMumbledResponseV1(nextScene.narration, {
@@ -1583,7 +1590,13 @@ async function applyStoryHardResponsePowers(
             : null,
           variationSeed: `${episode.id}:${scene.id}:${sceneIndex}:turn`,
         }),
+        ...(intendedNarration
+          ? { speechIntentRevealAvailable: true as const }
+          : {}),
       };
+      if (intendedNarration) {
+        privatePowerIntendedNarrationBySceneId[scene.id] = intendedNarration;
+      }
     }
     if (
       scene.speakerBotId &&
@@ -1733,6 +1746,13 @@ async function applyStoryHardResponsePowers(
         };
       }
     }
+    if (
+      nextScene.speechIntentRevealAvailable === true &&
+      !botPowerIntendedSpeechLooksGibberishV1(nextScene.narration)
+    ) {
+      delete privatePowerIntendedNarrationBySceneId[scene.id];
+      nextScene = { ...nextScene, speechIntentRevealAvailable: undefined };
+    }
     scenes.push(nextScene);
     if (nextScene.speakerBotId) {
       priorBotSpeech = {
@@ -1744,6 +1764,9 @@ async function applyStoryHardResponsePowers(
   return {
     ...episode,
     scenes,
+    ...(Object.keys(privatePowerIntendedNarrationBySceneId).length > 0
+      ? { privatePowerIntendedNarrationBySceneId }
+      : {}),
   };
 }
 

@@ -490,7 +490,7 @@ describe("Story API helpers", () => {
       model: "test-model",
     });
     const generatedEpisode = JSON.parse(episodeJson()) as {
-      scenes: Array<{ speakerBotId?: string; narration: string }>;
+      scenes: Array<{ id: string; speakerBotId?: string; narration: string }>;
     };
     generatedEpisode.scenes[1]!.speakerBotId = "bot-a";
     generatedEpisode.scenes[1]!.narration =
@@ -1139,8 +1139,27 @@ describe("Story API helpers", () => {
       (scene) => scene.speakerBotId === "bot-b",
     );
     assert.equal(publicScene?.narration, applyBotPowerMumbledResponseV1(intended));
+    assert.equal(publicScene?.speechIntentRevealAvailable, true);
     assert.notEqual(publicScene?.narration, intended);
     assert.doesNotMatch(publicScene?.narration ?? "", /archive|key|glass/iu);
+    const persisted = db.prepare(
+      "SELECT episode_json FROM story_sessions WHERE id = ? AND user_id = ?",
+    ).get(created.id, "user-1") as { episode_json: string };
+    const privateEpisode = JSON.parse(persisted.episode_json) as {
+      privatePowerIntendedNarrationBySceneId?: Record<string, string>;
+    };
+    assert.equal(
+      privateEpisode.privatePowerIntendedNarrationBySceneId?.[jimScene.id],
+      intended,
+    );
+    assert.doesNotMatch(JSON.stringify(generated.episode), /archive key/iu);
+    const hydrated = getStorySessionDetail(db, "user-1", created.id);
+    assert.equal(
+      hydrated.episode?.scenes.find((scene) => scene.id === jimScene.id)
+        ?.speechIntentRevealAvailable,
+      true,
+    );
+    assert.doesNotMatch(JSON.stringify(hydrated), /archive key/iu);
   });
 
   it("retains Cursed Tongue as a post-generation Story speech seam", async () => {

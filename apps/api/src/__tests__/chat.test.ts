@@ -29,6 +29,7 @@ import {
   userMessageSuggestsInChatImageRequest,
 } from "../chat.ts";
 import { rewindConversation } from "../conversations.ts";
+import { resolveSpeechIntentRevealV1 } from "../speech-intent-reveal.ts";
 import { resetPrismGenerationWorkForTests } from "../generation-work.ts";
 import { persistMemoryCandidates, restoreMemory } from "../memory.ts";
 import { RECENT_WINDOW_SIZE, summarizeThreadCompact } from "../memory-summarizer.ts";
@@ -1247,32 +1248,111 @@ describe("bot-locked Chat lane", () => {
 
   it("persists and replays only Mumbling Jim's normal-volume gibberish", async () => {
     const db = createChatTestDb();
-    installChatFetchStub("*frowns slightly* I explained the rational plan clearly, and I expect it to work.");
+    const intended =
+      "*frowns slightly* I explained the rational plan clearly, and I expect it to work.";
+    const chatCalls = installChatFetchStub(intended);
+    const settings = {
+      preferredProvider: "local" as const,
+      autoMemory: false,
+      botId: "bot-1",
+      incognito: false,
+      mode: "chat" as const,
+      botSystemPrompt: "You are Mumbling Jim.",
+      botPowerMumbling: true,
+    };
 
     const result = await processChatMessage(
       db,
       "user-1",
       "What is your plan?",
       CHAT_TEST_USER_KEY,
-      {
-        preferredProvider: "local",
-        autoMemory: false,
-        botId: "bot-1",
-        incognito: false,
-        mode: "chat",
-        botSystemPrompt: "You are Mumbling Jim.",
-        botPowerMumbling: true,
-      },
+      settings,
     );
 
     const saved = result.conversation.messages.at(-1);
     assert.match(saved?.content ?? "", /^\*frowns slightly\* /u);
     assert.doesNotMatch(saved?.content ?? "", /explained|rational|plan|expect|work/iu);
     assert.equal(saved?.botPowerExactResponse, "speech_obfuscation");
+    assert.equal(saved?.speechIntentRevealAvailable, true);
     const row = db.prepare(
-      "SELECT content FROM messages WHERE role = 'assistant' ORDER BY rowid DESC LIMIT 1",
-    ).get() as { content: string };
+      "SELECT content, tool_payload FROM messages WHERE role = 'assistant' ORDER BY rowid DESC LIMIT 1",
+    ).get() as { content: string; tool_payload: string | null };
     assert.equal(row.content, saved?.content);
+    assert.equal(
+      (JSON.parse(row.tool_payload ?? "{}") as Record<string, unknown>)
+        .botPowerIntendedSpeech,
+      intended,
+    );
+    assert.doesNotMatch(JSON.stringify(saved), /rational plan clearly/iu);
+
+    const followUp = "What did you just say?";
+    await processChatMessage(
+      db,
+      "user-1",
+      followUp,
+      CHAT_TEST_USER_KEY,
+      settings,
+      result.conversation.id,
+    );
+    const followUpPrompt = chatCalls.find(
+      (messages) => messages.at(-1)?.content === followUp,
+    );
+    assert.ok(followUpPrompt?.some((message) => message.content === intended));
+    assert.ok(
+      followUpPrompt?.every((message) => message.content !== saved?.content),
+    );
+  });
+
+  it("keeps private-chat Mumbling intent server-side until owner reveal", async () => {
+    const db = createChatTestDb();
+    const intended = "I will explain the archive plan clearly.";
+    const chatCalls = installChatFetchStub(intended);
+    const settings = {
+      preferredProvider: "local" as const,
+      autoMemory: false,
+      botId: "bot-1",
+      incognito: true,
+      mode: "zen" as const,
+      botSystemPrompt: "You are Mumbling Jim.",
+      botPowerMumbling: true,
+    };
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "What is your plan?",
+      CHAT_TEST_USER_KEY,
+      settings,
+      "private-mumble",
+    );
+    const saved = result.conversation.messages.at(-1);
+    assert.equal(saved?.speechIntentRevealAvailable, true);
+    assert.equal(saved?.botPowerPrivateIntendedSpeech, undefined);
+    assert.doesNotMatch(JSON.stringify(saved), /archive plan clearly/iu);
+    assert.deepEqual(
+      resolveSpeechIntentRevealV1(db, "user-1", {
+        mode: "zen",
+        scopeId: result.conversation.id,
+        recordId: saved?.id ?? "",
+      }),
+      { ok: true, intendedSpeech: intended },
+    );
+
+    const followUp = "What did you just say?";
+    await processChatMessage(
+      db,
+      "user-1",
+      followUp,
+      CHAT_TEST_USER_KEY,
+      { ...settings, ephemeralMessages: result.conversation.messages },
+      result.conversation.id,
+    );
+    const followUpPrompt = chatCalls.find(
+      (messages) => messages.at(-1)?.content === followUp,
+    );
+    assert.ok(followUpPrompt?.some((message) => message.content === intended));
+    assert.ok(
+      followUpPrompt?.every((message) => message.content !== saved?.content),
+    );
   });
 
   for (const mode of ["chat", "zen"] as const) {

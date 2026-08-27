@@ -204,6 +204,7 @@ import {
   botPowerRequiresAddressedInsultFromEffectsV1,
   botPowerTargetNameFromEffectsV1,
   botPowerPerceptionOverlapStartRatioV1,
+  botPowerIntendedSpeechLooksGibberishV1,
   botPowerResponseIsSilentV1,
   listenerReactionHasAudio,
   botNaturalAddressAliasesV1,
@@ -247,6 +248,7 @@ import {
   coffeeCupTopOffSnapshotForProgress,
   coffeeDepartureChanceFromSocial,
   coffeeMoodSaturationFromSocial,
+  coffeeOrdinaryAutomaticCutInMoodSupportsInterruption,
   coffeeSocialSnapshotToPrismMoodState,
   derivePrismMoodKey,
   coffeeEffectiveHistoryLimit,
@@ -5575,6 +5577,51 @@ export function coffeeSessionBotIsTrollV1(
   );
 }
 
+/**
+ * Authorize an ordinary bot-scheduled cut-in against the current table state.
+ * Power-authored interruptions remain unconditional; otherwise the bot's
+ * current mood must independently support talking over this speaker.
+ */
+export function coffeeAutomaticBotInterruptionAllowedV1(args: {
+  db: DatabaseSync;
+  userId: string;
+  conversationId: string;
+  interruptedBotId: string;
+  interrupterBotId: string;
+}): boolean {
+  const { group } = loadCoffeeConversationGroup(
+    args.db,
+    args.userId,
+    args.conversationId,
+  );
+  const interruptedBot = group.find((bot) => bot.id === args.interruptedBotId);
+  const interrupterBot = group.find((bot) => bot.id === args.interrupterBotId);
+  if (!interruptedBot || !interrupterBot || interruptedBot.id === interrupterBot.id) {
+    return false;
+  }
+  const interruptionPower = resolveCoffeePowersForSession(
+    args.db,
+    args.userId,
+    args.conversationId,
+  )?.bots[interrupterBot.id]?.effects.some(
+    (effect) =>
+      effect.type === "interruption" &&
+      effect.targets.some(
+        (target) =>
+          target.kind === "all" ||
+          (target.kind === "bot" && target.botId === interruptedBot.id),
+      ),
+  );
+  if (interruptionPower) return true;
+  const social = loadCoffeeBotSocialState(
+    args.db,
+    args.userId,
+    args.conversationId,
+    [interrupterBot.id],
+  )[interrupterBot.id];
+  return coffeeOrdinaryAutomaticCutInMoodSupportsInterruption(social);
+}
+
 /** Persist the visible pause beat for a thinking/speaking Coffee interruption. */
 export function recordCoffeeInterruptionPause(args: {
   db: DatabaseSync;
@@ -5584,6 +5631,8 @@ export function recordCoffeeInterruptionPause(args: {
   interruptedMessageId?: string;
   visibleTokenCount?: number;
   interrupterBotId?: string;
+  /** Ordinary UI-scheduled bot cut-in; explicit player and trail-off paths omit it. */
+  automatic?: boolean;
   activeTurnId?: string;
   targetPhase?: "thinking" | "speaking";
   /** The line trailed off because the awaited answer landed mid-mutter: no
@@ -5619,6 +5668,21 @@ export function recordCoffeeInterruptionPause(args: {
   const interrupterBot = args.interrupterBotId
     ? group.find((bot) => bot.id === args.interrupterBotId) ?? null
     : null;
+  if (
+    args.automatic &&
+    interrupterBot &&
+    !coffeeAutomaticBotInterruptionAllowedV1({
+      db: args.db,
+      userId: args.userId,
+      conversationId: args.conversationId,
+      interruptedBotId: interruptedBot.id,
+      interrupterBotId: interrupterBot.id,
+    })
+  ) {
+    throw new Error(
+      "That bot's current mood does not support an automatic interruption.",
+    );
+  }
   const crosstalkSeed = [
     "coffee-bot-crosstalk-v1",
     row.id,
@@ -15310,6 +15374,19 @@ function attachCoffeePrivateIntendedSpeech(
       ? parsed.botPowerIntendedSpeech.trim().slice(0, 6_000)
       : "";
     if (intended) {
+      if (
+        message.role === "assistant" &&
+        message.botId &&
+        message.botPowerExactResponse === "speech_obfuscation" &&
+        botPowerIntendedSpeechLooksGibberishV1(message.content) &&
+        !message.coffeeAside &&
+        !message.coffeeInterruption &&
+        !message.crosstalkReclaim &&
+        !message.socialSilence &&
+        !message.botPowerMutePerformance
+      ) {
+        message.speechIntentRevealAvailable = true;
+      }
       Object.defineProperty(message, COFFEE_BOT_POWER_INTENDED_SPEECH, {
         value: intended,
         enumerable: false,
@@ -18880,6 +18957,10 @@ async function generateCoffeeBotReply(args: {
   tableFocus: string;
   /** Private source metadata visible only after the directed speaker is fixed. */
   directedSpeakerPrivateContext?: string;
+  /** Session-authorized source context stays private to actual participants. */
+  sourceParticipantPrivateContextByBotId?: Readonly<Record<string, string>>;
+  /** Public behavioral stance contains no source transcript or private fields. */
+  sourceContinuationCue?: string;
   settings: CoffeeTurnSettings;
   turnKind: CoffeeTurnKind;
   playerInterruption?: CoffeePlayerInterruptionInput;
@@ -18908,6 +18989,8 @@ async function generateCoffeeBotReply(args: {
     group,
     tableFocus,
     directedSpeakerPrivateContext,
+    sourceParticipantPrivateContextByBotId,
+    sourceContinuationCue,
     settings,
     turnKind,
     playerInterruption,
@@ -19255,7 +19338,9 @@ async function generateCoffeeBotReply(args: {
       const routerMessages = buildRouterPrompt({
         group: routableTurnGroup,
         history,
-        userMessage: tableFocus,
+        userMessage: sourceContinuationCue
+          ? `${tableFocus}\n\n${sourceContinuationCue}`
+          : tableFocus,
         userActionOnly,
         userAddressedBotId: null,
         lastSpeakerBotId,
@@ -19948,6 +20033,9 @@ async function generateCoffeeBotReply(args: {
           !safeAutonomousTableFocus.startsWith("The user directly addressed")
         ? "The latest participant visibly spoke, but you heard no words. Continue from visible action only; do not infer or answer their hidden speech."
       : safeAutonomousTableFocus;
+  const sourceAwarePublicSpeakerTableFocus = sourceContinuationCue
+    ? `${publicSpeakerTableFocus}\n\n${sourceContinuationCue}`
+    : publicSpeakerTableFocus;
   // A trailed-off stew aside is unfinished business: a speaker on decent
   // terms with its author may invite them to finish; a speaker with rough
   // history toward them simply moves on (review request: courtesy follows
@@ -19984,10 +20072,14 @@ async function generateCoffeeBotReply(args: {
     if (irritationTowardAuthor >= 0.2) return "";
     return `\n\n${author.name}'s aside just trailed off mid-thought. If it suits your character, you may briefly invite them to finish; otherwise continue naturally.`;
   })();
+  const participantSourcePrivateContext =
+    sourceParticipantPrivateContextByBotId?.[speaker.id];
   const speakerTableFocus =
-    (directedSpeakerPrivateContext && explicitDirectedSpeaker?.id === speaker.id
-      ? `${publicSpeakerTableFocus}\n\n${directedSpeakerPrivateContext}`
-      : publicSpeakerTableFocus) + trailedOffAsideCourtesy;
+    (participantSourcePrivateContext
+      ? `${sourceAwarePublicSpeakerTableFocus}\n\n${participantSourcePrivateContext}`
+      : directedSpeakerPrivateContext && explicitDirectedSpeaker?.id === speaker.id
+        ? `${sourceAwarePublicSpeakerTableFocus}\n\n${directedSpeakerPrivateContext}`
+        : sourceAwarePublicSpeakerTableFocus) + trailedOffAsideCourtesy;
   const addressedInsultTargetName =
     turnKind === "user"
       ? settings.userDisplayName?.trim() || "you"
@@ -23401,6 +23493,10 @@ export async function processCoffeeAutonomousTurn(
   autonomousFocus?: string,
   excludedSpeakerBotId?: string,
   thinkingAsideAboutBotId?: string,
+  sourceContinuation?: {
+    participantPrivateContextByBotId: Readonly<Record<string, string>>;
+    publicContinuationCue: string;
+  },
 ): Promise<CoffeeTurnResponse> {
   const { row, group } = loadCoffeeConversationGroup(db, userId, conversationId);
   if (
@@ -23483,6 +23579,9 @@ export async function processCoffeeAutonomousTurn(
     row,
     group,
     tableFocus,
+    sourceParticipantPrivateContextByBotId:
+      sourceContinuation?.participantPrivateContextByBotId,
+    sourceContinuationCue: sourceContinuation?.publicContinuationCue,
     settings,
     turnKind: "autonomous",
     userIsComposing,

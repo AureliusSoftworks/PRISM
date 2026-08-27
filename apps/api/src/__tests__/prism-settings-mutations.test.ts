@@ -31,6 +31,19 @@ describe("prism settings journal allowlist", () => {
     assert.deepEqual(validatePrismSettingsPatch(patch), patch);
   });
 
+  it("keeps picker visibility separate on the journaled save path", () => {
+    const patch = {
+      hiddenBotModelIds: [],
+      hiddenGlobalPickerModelIds: ["gpt-5.6-luna"],
+    };
+    assert.equal(
+      PRISM_JOURNALED_SETTING_KEYS.has("hiddenGlobalPickerModelIds"),
+      true,
+    );
+    assert.equal(prismSettingsPatchIsJournalable(patch), true);
+    assert.deepEqual(validatePrismSettingsPatch(patch), patch);
+  });
+
   it("keeps typography scale on the persisted journal path", () => {
     const patch = { typographyScale: "extra-large" };
     assert.equal(PRISM_JOURNALED_SETTING_KEYS.has("typographyScale"), true);

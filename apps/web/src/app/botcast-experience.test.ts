@@ -1564,6 +1564,31 @@ describe("Signal experience shell", () => {
       /signalFaithfulReplayCameraState\(\{[\s\S]{0,180}replayElapsedMs,[\s\S]{0,80}scene: replayCameraDirectedScene/u,
     );
     assert.match(source, /audio\.playbackRate = 1/u);
+    assert.match(source, /SIGNAL_REPLAY_STAGE_RENDER_INTERVAL_MS = 250/u);
+    assert.match(
+      source,
+      /cadenceElapsed[\s\S]{0,220}signalReplayClockCrossedBoundary\(\{/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /const sync = \(\): void => \{[\s\S]{0,160}setReplayElapsedMs\(Math\.round\(audio\.currentTime/u,
+    );
+    assert.match(
+      source,
+      /const stopReplayPlayback = \(\): void => \{[\s\S]{0,420}releaseAudibleAudioElement\(replayAudio, \{ durationMs: 0 \}\)[\s\S]{0,280}setReplayElapsedMs\(stoppedAtMs\)/u,
+    );
+    assert.match(
+      source,
+      /replayTransportRef\.current\?\.style\.setProperty\([\s\S]{0,120}"--replay-progress"/u,
+    );
+    assert.match(
+      source,
+      /<SignalLiveVisualSampler[\s\S]{0,120}active=\{replayPlaying\}[\s\S]{0,520}replayAudioRef\.current\?\.currentTime/u,
+    );
+    assert.match(
+      source,
+      /stage\.style\.setProperty\([\s\S]{0,100}"--botcast-camera-offset-x"/u,
+    );
     assert.doesNotMatch(source, /data-signal-replay-puppeteering-calibration/u);
     assert.doesNotMatch(source, /Transcript puppeteering offset/u);
     assert.doesNotMatch(source, /Copy timing report/u);
@@ -1970,7 +1995,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /Interrupt guest now/u);
     assert.match(source, /interruptGuestWithQueuedCue/u);
     assert.match(source, /const interrupted = await advanceEpisode/u);
-    assert.match(source, /The interruption did not dispatch/u);
+    assert.match(source, /The interruption was not accepted/u);
     assert.match(source, /queuedCueInterruptUnavailableReason/u);
     assert.match(source, /botcastEchoHostInterruptPhrase/u);
     assert.match(source, /applyBotPowerEchoResponseV1/u);
@@ -1988,7 +2013,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /botcastInterruptedGuestContent/u);
     assert.match(
       source,
-      /resolvedGuestInterruption[\s\S]{0,80}\? \{ guestInterruption: resolvedGuestInterruption \}/u,
+      /guestInterruption[\s\S]{0,80}\? \{ guestInterruption \}/u,
     );
     assert.match(source, /interruptionBridgePlayback/u);
     assert.match(source, /playPreparedEpisodeMessage\([\s\S]{0,180}false,/u);
@@ -2008,7 +2033,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /const interruptGuestWithQueuedCue = async \(\): Promise<void> => \{[\s\S]{0,1800}invalidateEpisodeOperation\(\{ preserveAudibleUtterance: true \}\)[\s\S]{0,500}setAutoRun\(true\)[\s\S]{0,500}const interrupted = await advanceEpisode\(/u,
+      /const interruptGuestWithQueuedCue = async \(\): Promise<void> => \{[\s\S]{0,2600}invalidateEpisodeOperation\(\{ preserveAudibleUtterance: true \}\)[\s\S]{0,700}setAutoRun\(true\)[\s\S]{0,500}const interrupted = await advanceEpisode\(/u,
     );
     assert.match(
       source,
@@ -2041,7 +2066,7 @@ describe("Signal experience shell", () => {
   it("keeps the outgoing clock and guest identity through an audible handoff", () => {
     assert.match(
       source,
-      /const audienceCut = botcastInterruptedGuestContent\([\s\S]{0,1200}return \{\s*bridgeLine: nextHostInterruptionBridge\.content,[\s\S]{0,500}messageId: activeGuestMessage\.id,\s*spokenContent: audienceHeard,/u,
+      /const audienceHeard = audibleHandoffAudienceHeardContent\([\s\S]{0,180}const audienceCut = botcastInterruptedGuestContent\([\s\S]{0,500}resolvedGuestInterruption = \{[\s\S]{0,180}messageId: activeGuestMessage!\.id,[\s\S]{0,80}spokenContent: audienceHeard/u,
     );
     assert.doesNotMatch(
       source,
@@ -2050,6 +2075,10 @@ describe("Signal experience shell", () => {
     assert.match(
       source,
       /if \(presentationDeferred\) \{[\s\S]{0,300}notifyPlaybackStart\(\);[\s\S]{0,300}signalLiveSpeechPlaybackClockRef\.current = \{\s*messageId: message\.id,[\s\S]{0,500}if \(!presentationDeferred\) notifyPlaybackStart\(\);/u,
+    );
+    assert.match(
+      source,
+      /const response = readyPreparation[\s\S]*?if \(!episodeOperationIsCurrent\(controller, runId\)\) return false;[\s\S]{0,420}if \(interruptionBridgeMessage\) \{\s*await playAcceptedInterruptionBridge\(\);/u,
     );
   });
 

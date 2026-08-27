@@ -214,6 +214,8 @@ export interface ModelCatalogEntry {
   supportsImageInput?: boolean;
   /** When set, this entry is only for the Images panel (not chat text models). */
   imageSource?: "ollama" | "comfyui" | "comfyui-workflow" | "comfyui-remote";
+  /** False when an enabled model is intentionally omitted from manual pickers. */
+  showInGlobalPicker?: boolean;
 }
 
 export interface ModelCatalog {
@@ -302,6 +304,28 @@ export class LocalModelRequestError extends Error {
         : LOCAL_MODEL_REQUEST_ERROR_MESSAGES[kind]
     );
     this.name = "LocalModelRequestError";
+    this.kind = kind;
+    this.status = status;
+  }
+}
+
+export type ProviderTurboUnavailableKind =
+  | "access_or_model"
+  | "capacity"
+  | "unverified_response";
+
+/** Provider-native Turbo failed without silently changing speed or provider. */
+export class ProviderTurboUnavailableError extends Error {
+  public readonly kind: ProviderTurboUnavailableKind;
+  public readonly status?: number;
+
+  public constructor(
+    kind: ProviderTurboUnavailableKind,
+    message: string,
+    status?: number,
+  ) {
+    super(message);
+    this.name = "ProviderTurboUnavailableError";
     this.kind = kind;
     this.status = status;
   }
@@ -452,6 +476,7 @@ const ANTHROPIC_FALLBACK_MODELS = [
   ANTHROPIC_DEFAULT_MODEL,
   "claude-opus-4-8",
   "claude-opus-4-7",
+  "claude-mythos-5",
   "claude-haiku-4-5",
   "claude-sonnet-4-5-20250929",
 ] as const;
@@ -464,6 +489,7 @@ const OPENAI_CHAT_MODEL_PREFIXES = [
   "o5",
 ] as const;
 const ANTHROPIC_API_VERSION = "2023-06-01";
+const ANTHROPIC_FAST_MODE_BETA = "fast-mode-2026-02-01";
 const ANTHROPIC_CHAT_MODEL_PREFIXES = ["claude-"] as const;
 
 /**
@@ -667,11 +693,13 @@ function titleCaseModelToken(token: string): string {
     instruct: "Instruct",
     llama: "Llama",
     llava: "LLaVA",
+    mythos: "Mythos",
     mini: "Mini",
     mistral: "Mistral",
     mixtral: "Mixtral",
     nano: "Nano",
     opus: "Opus",
+    fable: "Fable",
     phi: "Phi",
     pro: "Pro",
     qwen: "Qwen",
@@ -758,7 +786,7 @@ function anthropicModelLabelFromId(id: string): string | null {
     return `${latest[1]}.${latest[2]} ${titleCaseModelToken(latest[3]!)}`;
   }
   const named = normalized.match(
-    /^claude-(opus|sonnet|haiku)-(\d+)(?:-(\d+))?(?:-(\d{8}))?$/
+    /^claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d+))?(?:-(\d{8}))?$/
   );
   if (named) {
     const version = named[3] ? `${named[2]}.${named[3]}` : named[2]!;
@@ -1581,6 +1609,18 @@ export async function buildModelCatalog(
   }
 }
 
+/** Re-probe model providers after the user explicitly requests a refresh. */
+export async function refreshModelCatalog(
+  openAiApiKey?: string,
+  secondaryOllamaHost?: string | null,
+  anthropicApiKey?: string,
+): Promise<ModelCatalog> {
+  modelCatalogCache.delete(
+    modelCatalogCacheKey(openAiApiKey, secondaryOllamaHost, anthropicApiKey),
+  );
+  return buildModelCatalog(openAiApiKey, secondaryOllamaHost, anthropicApiKey);
+}
+
 async function buildUncachedModelCatalog(
   openAiApiKey?: string,
   secondaryOllamaHost?: string | null,
@@ -2092,6 +2132,7 @@ async function generateWithFinalLocalOllamaFallback(args: {
     if (
       args.skipFinalLocalFallback ||
       args.options?.allowFinalLocalFallback === false ||
+      primaryError instanceof ProviderTurboUnavailableError ||
       isAbortFailure(primaryError, args.options?.signal)
     ) {
       throw primaryError;
@@ -2410,6 +2451,11 @@ export class AnthropicProvider implements LlmProvider {
     if (reasoningEffort) {
       requestBody.output_config = { effort: reasoningEffort };
     }
+    const anthropicFastRequested =
+      options?.turbo === true && modelSupportsTurboMode("anthropic", modelId);
+    if (anthropicFastRequested) {
+      requestBody.speed = "fast";
+    }
     if (options?.jsonSchema || options?.jsonMode) {
       const jsonInstruction = options.jsonSchema
         ? `Return only a JSON object matching this JSON Schema: ${JSON.stringify(options.jsonSchema)}`
@@ -2427,13 +2473,17 @@ export class AnthropicProvider implements LlmProvider {
     const startedAt = Date.now();
     let response: Response;
     try {
+      const requestHeaders: Record<string, string> = {
+        "content-type": "application/json",
+        "x-api-key": this.anthropicConfig.apiKey,
+        "anthropic-version": ANTHROPIC_API_VERSION,
+      };
+      if (anthropicFastRequested) {
+        requestHeaders["anthropic-beta"] = ANTHROPIC_FAST_MODE_BETA;
+      }
       response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": this.anthropicConfig.apiKey,
-          "anthropic-version": ANTHROPIC_API_VERSION,
-        },
+        headers: requestHeaders,
         body: JSON.stringify(requestBody),
         signal: options?.signal,
       });
@@ -2467,6 +2517,26 @@ export class AnthropicProvider implements LlmProvider {
         error: `Anthropic request failed with HTTP ${response.status}.`,
         durationMs: Date.now() - startedAt,
       });
+      if (
+        anthropicFastRequested &&
+        [400, 403, 404].includes(response.status)
+      ) {
+        throw new ProviderTurboUnavailableError(
+          "access_or_model",
+          "Anthropic Fast mode is unavailable for this model or account. Turn off Turbo or choose another Turbo-capable model.",
+          response.status,
+        );
+      }
+      if (
+        anthropicFastRequested &&
+        [429, 529].includes(response.status)
+      ) {
+        throw new ProviderTurboUnavailableError(
+          "capacity",
+          "Anthropic Fast mode is temporarily unavailable due to capacity. Try another Turbo-capable model or try again later.",
+          response.status,
+        );
+      }
       throw new Error(formatOpenAiError("Anthropic request failed", response.status, detail));
     }
     const payload = (await response.json()) as {
@@ -2477,6 +2547,7 @@ export class AnthropicProvider implements LlmProvider {
         output_tokens?: number;
         cache_read_input_tokens?: number;
         cache_creation_input_tokens?: number;
+        speed?: string;
       };
     };
     const content = (payload.content ?? [])
@@ -2485,6 +2556,10 @@ export class AnthropicProvider implements LlmProvider {
       .trim();
     const parsedOutput =
       content || (payload.stop_reason === "refusal" ? "I cannot help with that request." : null);
+    const turboVerificationError =
+      anthropicFastRequested && payload.usage?.speed !== "fast"
+        ? "Anthropic did not confirm Fast processing for this Turbo request."
+        : null;
     const durationMs = Date.now() - startedAt;
     recordTextUsage({
       provider: "anthropic",
@@ -2506,10 +2581,20 @@ export class AnthropicProvider implements LlmProvider {
         parsedOutput,
         stopReason: payload.stop_reason ?? null,
         streaming: false,
-        ...(!parsedOutput ? { error: "Anthropic returned an empty response." } : {}),
+        ...(turboVerificationError
+          ? { error: turboVerificationError }
+          : !parsedOutput
+            ? { error: "Anthropic returned an empty response." }
+            : {}),
         durationMs,
       },
     });
+    if (turboVerificationError) {
+      throw new ProviderTurboUnavailableError(
+        "unverified_response",
+        `${turboVerificationError} No standard-speed or local fallback was used.`,
+      );
+    }
     if (content) return content;
     if (payload.stop_reason === "refusal") {
       return "I cannot help with that request.";

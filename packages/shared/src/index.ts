@@ -484,6 +484,7 @@ export {
   COFFEE_NEAR_DESATURATED_SATURATION,
   coffeeDepartureChanceFromSocial,
   coffeeMoodSaturationFromSocial,
+  coffeeOrdinaryAutomaticCutInMoodSupportsInterruption,
   coffeeSocialSnapshotToPrismMoodState,
   coffeeSocialSnapshotIsNearDesaturated,
   createDefaultPrismMoodState,
@@ -1859,6 +1860,8 @@ export interface ChatMessage {
   coffeeTurnRoute?: CoffeeTurnRouteV1;
   /** Saved deterministic hard-response branch from a Ready Power. */
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
+  /** Text-free proof that this committed line has an owner-only meaning reveal. */
+  speechIntentRevealAvailable?: true;
   /** Public replay-stable timed Mute presentation; private intent is never here. */
   botPowerMutePerformance?: BotPowerMutePerformanceV1;
   /** Session-sticky Shapeshifter public form for Chat/Zen (and Coffee/Signal envelopes). */

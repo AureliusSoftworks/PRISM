@@ -91,6 +91,7 @@ import type {
 import { shouldSubmitComposerOnEnter } from "./composerKeyPolicy";
 import { PrismOrb } from "./PrismOrb";
 import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
+import { MODEL_CATALOG_REFRESHED_EVENT } from "./modelCatalogRefresh";
 import { SlateDirectionQuestion } from "./SlateDirectionQuestion";
 import { SlateDirectorBar } from "./SlateDirectorBar";
 import { SlateCreativeStudiosDesk } from "./SlateCreativeStudiosDesk";
@@ -276,6 +277,7 @@ interface SlateModelCatalogEntry {
   provider: SlateAiProvider;
   disabledReason?: string;
   imageSource?: string;
+  showInGlobalPicker?: boolean;
 }
 
 interface SlateModelCatalog {
@@ -287,6 +289,7 @@ interface SlateModelCatalog {
 interface SlateModelCatalogResponse {
   ok: true;
   catalog: SlateModelCatalog;
+  hiddenBotModelIds?: string[];
 }
 
 interface SlateCompanionPosition {
@@ -1103,10 +1106,21 @@ export default function SlateWorkspace({
   const loadModelCatalog = useCallback(async (): Promise<void> => {
     try {
       const response = await slateApi<SlateModelCatalogResponse>("/api/models");
+      const disabled = new Set(response.hiddenBotModelIds ?? []);
       setModelCatalog({
         ...response.catalog,
-        local: response.catalog.local.filter((model) => !model.imageSource),
-        online: response.catalog.online.filter((model) => !model.imageSource),
+        local: response.catalog.local.filter(
+          (model) =>
+            !model.imageSource &&
+            !disabled.has(model.id) &&
+            model.showInGlobalPicker !== false,
+        ),
+        online: response.catalog.online.filter(
+          (model) =>
+            !model.imageSource &&
+            !disabled.has(model.id) &&
+            model.showInGlobalPicker !== false,
+        ),
       });
     } catch {
       setModelCatalog(null);
@@ -1168,6 +1182,13 @@ export default function SlateWorkspace({
 
   useEffect(() => {
     void loadModelCatalog();
+    const refreshCatalog = () => {
+      void loadModelCatalog();
+    };
+    window.addEventListener(MODEL_CATALOG_REFRESHED_EVENT, refreshCatalog);
+    return () => {
+      window.removeEventListener(MODEL_CATALOG_REFRESHED_EVENT, refreshCatalog);
+    };
   }, [loadModelCatalog]);
 
   const loadRecoveryStatus = useCallback(async (projectId: string): Promise<void> => {

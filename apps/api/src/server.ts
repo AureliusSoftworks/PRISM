@@ -107,6 +107,10 @@ import {
 } from "./conversation-hubs.ts";
 import { buildConversationHistoryEntry } from "./conversation-history.ts";
 import {
+  normalizeSpeechIntentRevealRequestV1,
+  resolveSpeechIntentRevealV1,
+} from "./speech-intent-reveal.ts";
+import {
   generateZenLiveActionReaction,
   normalizeZenLiveActionContextInput,
   normalizeZenLiveActionInterruptInput,
@@ -177,6 +181,7 @@ import {
   parseStoredCoffeeSessionSettings,
   processCoffeeAutonomousTurn,
   processCoffeeTurn,
+  coffeeAutomaticBotInterruptionAllowedV1,
   recordCoffeePlayerDeparture,
   recordCoffeeUserAction,
   recordCoffeeReplayEvents,
@@ -202,6 +207,7 @@ import {
 import {
   consumeCoffeeContextSpark,
   ensureCoffeeContextSparks,
+  resolveCoffeeContextSparkForSession,
   resolveCoffeeContextSparkForTurn,
   updateCoffeeContextSparkState,
 } from "./coffee-context-sparks.ts";
@@ -404,6 +410,7 @@ import {
   recordBotcastAudioCue,
   queueBotcastEpisodeImageContext,
   queueBotcastProducerCue,
+  recoverBotcastProducerCueDispatch,
   recordBotcastSessionClockHold,
   recordBotcastSoundboardCue,
   resolveBotcastProducerGuestName,
@@ -419,6 +426,12 @@ import {
   applyBotcastStagePreset,
   updateBotcastShow,
 } from "./botcast.ts";
+import {
+  SignalAdvanceOperationBusyError,
+  SignalAdvanceOperationRegistry,
+  SignalAdvanceOperationSupersededError,
+  SignalAdvanceOperationTimeoutError,
+} from "./signal-advance-operation.ts";
 import {
   ElevenLabsMusicError,
   SIGNAL_ELEVENLABS_MUSIC_MODEL,
@@ -843,6 +856,7 @@ import {
   normalizeZenWallpaperStyleNotes,
   normalizeZenWallpaperTextMaskEnabled,
   parseHiddenBotModelIds,
+  parseHiddenGlobalPickerModelIds,
   parseHiddenComfyUiWorkflowIds,
   parseStoredElevenLabsVoiceBank,
   resolveNextSettings,
@@ -854,6 +868,7 @@ import {
 import { normalizeMemoryDisplayText } from "./memory-validation.ts";
 import {
   buildModelCatalog,
+  refreshModelCatalog,
   checkDualOllamaWorkloadStatus,
   checkLocalModelHostStatus,
   checkOpenAiApiKeyStatus,
@@ -894,6 +909,7 @@ import {
 } from "./prompt-wildcards.ts";
 import {
   defaultHiddenModelIdsForCatalog,
+  catalogWithGlobalPickerVisibility,
   MODEL_VISIBILITY_DEFAULTS_VERSION,
   reconcileHiddenModelIdsForCatalog,
   resolveAutoModel,
@@ -1595,6 +1611,8 @@ let builtinVoiceWaveGeneratorOverride: typeof generateBuiltinEnglishWave =
   generateBuiltinEnglishWave;
 let slateRecoveryCoordinator: SlateRecoveryCoordinator | null = null;
 const activeCoffeeDepartureEpilogues = new Map<string, Promise<void>>();
+const signalAdvanceOperations = new SignalAdvanceOperationRegistry();
+const SIGNAL_ADVANCE_OPERATION_TIMEOUT_MS = 90_000;
 /**
  * Runtime view of local-network access. `boundLanActive` reflects what the
  * process actually bound at startup (immutable for the process lifetime);
@@ -1644,6 +1662,7 @@ async function startPrismStorySession(
     responseLane === "online" ? anthropicApiKey : undefined,
   );
   const hiddenModelIds = parseHiddenBotModelIds(user.hidden_bot_model_ids);
+  const hiddenModels = new Set(hiddenModelIds);
   const autoTurboEnabled =
     responseLane === "online" &&
     storyModelOverride === null &&
@@ -1671,7 +1690,6 @@ async function startPrismStorySession(
     provider: resolvedAuto.provider,
     modelId: resolvedAuto.model,
   });
-  const hiddenModels = new Set(hiddenModelIds);
   const candidateAllowlist = (
     responseLane === "local" ? catalog.local : catalog.online
   )
@@ -1710,7 +1728,7 @@ async function startPrismStorySession(
         v: 1,
         fallbacks: configuredFallbacks?.fallbacks ?? [],
         eligibleCandidates: candidateAllowlist,
-        ...(responseLane === "online"
+        ...(responseLane === "online" && !autoTurboEnabled
           ? {
               finalLocalRecovery: {
                 provider: "local" as const,
@@ -2958,6 +2976,7 @@ interface UserDbRow {
   auto_fallback_chain: string | null;
   online_auto_provider_bias: number;
   hidden_bot_model_ids: string;
+  hidden_global_picker_model_ids: string;
   hidden_comfyui_workflow_ids: string;
   model_visibility_defaults_version: number;
   preferred_local_model: string | null;
@@ -3396,7 +3415,7 @@ function liveBakePlannedSynthesisEngineForUser(
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, memory_learn_about_player, memory_learn_about_bots, memory_acquisition_sensitivity, memory_short_term_days, memory_long_term_threshold, memory_inferred_min_evidence, memory_inferred_threshold, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, debate_whodunnit_reuse_synthesized_exhibits, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, online_auto_provider_bias, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, preferred_home_atmosphere_image_model, preferred_home_atmosphere_image_provider, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_count, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_face_thinking_scale, prism_default_bot_face_thinking_offset_x, prism_default_bot_face_thinking_offset_y, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, prism_refract_local_model, prism_refract_online_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, zen_player_voice_enabled, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, memory_learn_about_player, memory_learn_about_bots, memory_acquisition_sensitivity, memory_short_term_days, memory_long_term_threshold, memory_inferred_min_evidence, memory_inferred_threshold, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, debate_whodunnit_reuse_synthesized_exhibits, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, online_auto_provider_bias, hidden_bot_model_ids, hidden_global_picker_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, preferred_home_atmosphere_image_model, preferred_home_atmosphere_image_provider, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_count, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_face_thinking_scale, prism_default_bot_face_thinking_offset_x, prism_default_bot_face_thinking_offset_y, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, prism_refract_local_model, prism_refract_online_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, zen_player_voice_enabled, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -6213,6 +6232,7 @@ async function debateAiRuntimeForUser(
           ),
         };
   const hiddenModelIds = parseHiddenBotModelIds(user.hidden_bot_model_ids);
+  const hiddenModels = new Set(hiddenModelIds);
   const frozenReasoningEffort = normalizeProviderReasoningEffort(
     requestedRoutingContext?.frozenReasoningEffort,
   );
@@ -6349,7 +6369,7 @@ async function debateAiRuntimeForUser(
         }))
   ).filter(
     (entry) =>
-      !hiddenModelIds.includes(entry.model) &&
+      !hiddenModels.has(entry.model) &&
       (!autoTurboEnabled || modelSupportsTurboMode(entry.provider, entry.model)),
   );
   const primaryRef: AutoFallbackModelRef = {
@@ -6374,7 +6394,7 @@ async function debateAiRuntimeForUser(
           v: 1,
           fallbacks: configuredChain?.fallbacks ?? [],
           eligibleCandidates: candidateAllowlist,
-          ...(responseLane === "online"
+          ...(responseLane === "online" && !autoTurboEnabled
             ? {
                 finalLocalRecovery: {
                   provider: "local" as const,
@@ -6763,18 +6783,6 @@ async function contextualTextRuntimeForUser<
     explicitModelOverride === null &&
     !args.requiresImageInput &&
     resolveUserAutoTurboMode(db, args.userId);
-  if (
-    args.requiresImageInput &&
-    (responseMode === "local"
-      ? capabilityRoutingCatalog.local
-      : capabilityRoutingCatalog.online
-    ).every((entry) => hiddenModels.has(entry.id))
-  ) {
-    throw new HttpError(
-      409,
-      "No image-capable model is available in Signal's current model pool.",
-    );
-  }
   const resolved = resolveAutoModel({
     provider: primaryProvider,
     lane: responseMode,
@@ -6890,11 +6898,12 @@ async function contextualTextRuntimeForUser<
       ? {
           v: 1,
           // Settings entries are ordering hints. Every other eligible model is
-          // appended by the shared resolver, then ONLINE receives one explicit
-          // bundled-local recovery attempt.
+          // appended by the shared resolver. Ordinary ONLINE Auto receives one
+          // explicit bundled-local recovery; Turbo remains on eligible online
+          // candidates so Fast never degrades silently.
           fallbacks: runtimeAutoPriorities,
           eligibleCandidates: candidateAllowlist,
-          ...(responseMode === "online" && !args.requiresImageInput
+          ...(responseMode === "online" && !args.requiresImageInput && !autoTurboEnabled
             ? {
                 finalLocalRecovery: {
                   provider: "local" as const,
@@ -10208,6 +10217,19 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         conversations: listConversationSummaries(db, userId),
       });
+    }),
+    route("POST", "/api/speech-intent/reveal", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const request = normalizeSpeechIntentRevealRequestV1(ctx.body);
+      const reveal = request
+        ? resolveSpeechIntentRevealV1(db, userId, request)
+        : null;
+      ctx.res.setHeader("cache-control", "private, no-store");
+      ctx.res.setHeader("pragma", "no-cache");
+      if (!reveal) {
+        throw new HttpError(404, "Speech meaning is unavailable.");
+      }
+      json(ctx.res, 200, { ...reveal });
     }),
     route("GET", "/api/story/sessions", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -15866,6 +15888,7 @@ function buildRoutes(): RouteDefinition[] {
       const chatHiddenModelIds = parseHiddenBotModelIds(
         user.hidden_bot_model_ids,
       );
+      const chatHiddenModels = new Set(chatHiddenModelIds);
       const resolvedAuto = prismHomeTurn
         ? {
             provider: "local" as const,
@@ -15909,7 +15932,7 @@ function buildRoutes(): RouteDefinition[] {
               )
                 .filter(
                   (entry) =>
-                    !chatHiddenModelIds.includes(entry.id) &&
+                    !chatHiddenModels.has(entry.id) &&
                     (!autoTurboEnabled ||
                       modelSupportsTurboMode(
                         entry.provider === "anthropic"
@@ -15929,7 +15952,7 @@ function buildRoutes(): RouteDefinition[] {
                         : ("openai" as const),
                   model: entry.id,
                 })),
-              ...(responseLane === "online"
+              ...(responseLane === "online" && !autoTurboEnabled
                 ? {
                     finalLocalRecovery: {
                       provider: "local" as const,
@@ -22451,83 +22474,134 @@ function buildRoutes(): RouteDefinition[] {
         });
       }
       const signalUserKey = decryptUserKey(userId);
-      const signalAdvanceAbort = new AbortController();
+      const operationKey = `${userId}:${ctx.params.id}`;
+      let signalAdvanceOperation;
+      try {
+        signalAdvanceOperation = signalAdvanceOperations.begin(operationKey, {
+          preempt: cueDelivery === "interrupt_guest",
+        });
+      } catch (error) {
+        if (error instanceof SignalAdvanceOperationBusyError) {
+          throw new HttpError(
+            409,
+            "Signal is already preparing this floor. Interrupt the guest to preempt it.",
+          );
+        }
+        throw error;
+      }
       const onSignalAdvanceClientClose = () => {
-        if (!ctx.res.writableEnded) signalAdvanceAbort.abort();
+        if (
+          !ctx.res.writableEnded &&
+          signalAdvanceOperations.isCurrent(signalAdvanceOperation)
+        ) {
+          signalAdvanceOperation.controller.abort(
+            new DOMException("Signal client disconnected.", "AbortError"),
+          );
+        }
       };
       ctx.req.once("close", onSignalAdvanceClientClose);
       ctx.req.once("aborted", onSignalAdvanceClientClose);
       ctx.res.once("close", onSignalAdvanceClientClose);
       let result: Awaited<ReturnType<typeof advanceBotcastEpisode>>;
       try {
-        result = await runWithUsageSession(
-          {
-            db,
-            userId,
-            privacyScope: "normal",
-            mode: "signal",
-            surface: "signal",
-          },
-          () =>
-            advanceBotcastEpisode(
+        result = await signalAdvanceOperations.run(
+          signalAdvanceOperation,
+          (signal) => Promise.resolve(runWithUsageSession(
+            {
               db,
               userId,
-              ctx.params.id,
-              typeof body.guestMessage === "string"
-                  ? {
-                    guestMessage: body.guestMessage,
-                    ...(typeof body.guestThinkingMs === "number"
-                      ? { guestThinkingMs: body.guestThinkingMs }
-                      : {}),
-                    ...(producerGuestHostInterruption
-                      ? { producerGuestHostInterruption }
-                      : {}),
-                  }
-                : cue || cueDelivery
-                  ? {
-                      ...(cue ? { cue } : {}),
-                      ...(cueDelivery ? { cueDelivery } : {}),
-                      ...(hostRedirect ? { hostRedirect } : {}),
-                      ...(guestInterruption ? { guestInterruption } : {}),
+              privacyScope: "normal",
+              mode: "signal",
+              surface: "signal",
+            },
+            () =>
+              advanceBotcastEpisode(
+                db,
+                userId,
+                ctx.params.id,
+                typeof body.guestMessage === "string"
+                    ? {
+                      guestMessage: body.guestMessage,
+                      ...(typeof body.guestThinkingMs === "number"
+                        ? { guestThinkingMs: body.guestThinkingMs }
+                        : {}),
+                      ...(producerGuestHostInterruption
+                        ? { producerGuestHostInterruption }
+                        : {}),
                     }
-                  : {},
-              {
-                preferredProvider: runtime.provider,
-                responseMode: runtime.responseMode,
-                openAiApiKey: runtime.openAiApiKey,
-                anthropicApiKey: runtime.anthropicApiKey,
-                userKey: signalUserKey,
-                secondaryOllamaHost: user.secondary_ollama_host,
-                contextualModel: runtime.model,
-                contextualReasoningEffort: runtime.reasoningEffort,
-                autoRouteDecision: runtime.autoRoute,
-                autoFallbackChain: runtime.autoFallbackChain,
-                experimentalAllModelEffortEnabled:
-                  user.experimental_all_model_effort_enabled === 1,
-                prismDefaultLlmModel: user.prism_default_llm_model,
-                signal: signalAdvanceAbort.signal,
-                ...(powerTheme ? { theme: powerTheme } : {}),
-                providerFactory: providerFactoryOverride,
-                auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
-                ...(signalEpisodeImage
-                  ? {
-                      signalEpisodeImage: {
-                        imageId: signalEpisodeImage.imageId,
-                        input: signalEpisodeImage.input,
-                        ...(signalEpisodeImage.presentationReason
-                          ? {
-                              presentationReason:
-                                signalEpisodeImage.presentationReason,
-                            }
-                          : {}),
-                      },
-                    }
-                  : {}),
-              },
-            ),
+                  : cue || cueDelivery
+                    ? {
+                        ...(cue ? { cue } : {}),
+                        ...(cueDelivery ? { cueDelivery } : {}),
+                        ...(hostRedirect ? { hostRedirect } : {}),
+                        ...(guestInterruption ? { guestInterruption } : {}),
+                      }
+                    : {},
+                {
+                  preferredProvider: runtime.provider,
+                  responseMode: runtime.responseMode,
+                  openAiApiKey: runtime.openAiApiKey,
+                  anthropicApiKey: runtime.anthropicApiKey,
+                  userKey: signalUserKey,
+                  secondaryOllamaHost: user.secondary_ollama_host,
+                  contextualModel: runtime.model,
+                  contextualReasoningEffort: runtime.reasoningEffort,
+                  autoRouteDecision: runtime.autoRoute,
+                  autoFallbackChain: runtime.autoFallbackChain,
+                  experimentalAllModelEffortEnabled:
+                    user.experimental_all_model_effort_enabled === 1,
+                  prismDefaultLlmModel: user.prism_default_llm_model,
+                  signal,
+                  ...(powerTheme ? { theme: powerTheme } : {}),
+                  providerFactory: providerFactoryOverride,
+                  auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
+                  ...(signalEpisodeImage
+                    ? {
+                        signalEpisodeImage: {
+                          imageId: signalEpisodeImage.imageId,
+                          input: signalEpisodeImage.input,
+                          ...(signalEpisodeImage.presentationReason
+                            ? {
+                                presentationReason:
+                                  signalEpisodeImage.presentationReason,
+                              }
+                            : {}),
+                        },
+                      }
+                    : {}),
+                },
+              ),
+          )),
+          SIGNAL_ADVANCE_OPERATION_TIMEOUT_MS,
         );
       } catch (error) {
-        if (signalAdvanceAbort.signal.aborted) return;
+        const operationStillOwnsEpisode =
+          signalAdvanceOperations.isCurrent(signalAdvanceOperation);
+        if (operationStillOwnsEpisode) {
+          recoverBotcastProducerCueDispatch(
+            db,
+            userId,
+            ctx.params.id,
+            error instanceof SignalAdvanceOperationTimeoutError
+              ? "operation_timeout"
+              : signalAdvanceOperation.controller.signal.aborted
+                ? "operation_cancelled"
+                : "operation_failed",
+          );
+        }
+        if (error instanceof SignalAdvanceOperationSupersededError) {
+          throw new HttpError(409, "Signal moved to a newer interruption run.");
+        }
+        if (error instanceof SignalAdvanceOperationTimeoutError) {
+          throw new HttpError(
+            504,
+            "Signal could not finish this handoff in time. The Producer cue is still queued.",
+          );
+        }
+        if (
+          signalAdvanceOperation.controller.signal.aborted &&
+          operationStillOwnsEpisode
+        ) return;
         if (error instanceof AutoFallbackExhaustedError) {
           const httpStatus = signalAutoFallbackHttpStatus(error);
           throw new HttpError(
@@ -22543,8 +22617,9 @@ function buildRoutes(): RouteDefinition[] {
         ctx.req.off("close", onSignalAdvanceClientClose);
         ctx.req.off("aborted", onSignalAdvanceClientClose);
         ctx.res.off("close", onSignalAdvanceClientClose);
+        signalAdvanceOperations.finish(signalAdvanceOperation);
       }
-      if (signalAdvanceAbort.signal.aborted) return;
+      if (signalAdvanceOperation.controller.signal.aborted) return;
       if (result.episode.status !== "live") {
         await releaseLiveLocalModelLane(`signal:${userId}:${ctx.params.id}`);
       }
@@ -24393,6 +24468,14 @@ function buildRoutes(): RouteDefinition[] {
         conversationId,
         sparkId: contextSparkId,
       });
+      const sessionContextSpark =
+        kind === "autonomous"
+          ? resolveCoffeeContextSparkForSession({
+              db,
+              userId,
+              conversationId,
+            })
+          : null;
       const effectiveDirectedSpeakerBotId =
         contextSpark?.inspiredBotId ?? directedSpeakerBotId;
       const directedUserMessage =
@@ -24626,7 +24709,7 @@ function buildRoutes(): RouteDefinition[] {
                 }
                 return result;
               }
-              return processCoffeeAutonomousTurn(
+              const result = await processCoffeeAutonomousTurn(
                 jobDb,
                 userId,
                 conversationId,
@@ -24639,7 +24722,28 @@ function buildRoutes(): RouteDefinition[] {
                 autonomousFocus,
                 excludedSpeakerBotId || undefined,
                 thinkingAsideAboutBotId,
+                sessionContextSpark
+                  ? {
+                      participantPrivateContextByBotId:
+                        sessionContextSpark.participantPrivateContextByBotId,
+                      publicContinuationCue:
+                        sessionContextSpark.publicContinuationCue,
+                    }
+                  : undefined,
               );
+              if (
+                sessionContextSpark?.state === "armed" &&
+                result.speakerBotId &&
+                !result.stale
+              ) {
+                consumeCoffeeContextSpark({
+                  db: jobDb,
+                  userId,
+                  conversationId,
+                  sparkId: sessionContextSpark.id,
+                });
+              }
+              return result;
             },
           ),
       });
@@ -24668,9 +24772,11 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/coffee/turn-jobs/:id/interrupt", async (ctx) => {
       const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
       const current = getCoffeeTurnJob(userId, ctx.params.id);
+      if (!current) throw new HttpError(404, "Coffee turn job not found.");
       if (
-        current?.conversationId &&
+        current.conversationId &&
         current.speakerBotId &&
         coffeeSessionBotIsTrollV1(
           db,
@@ -24683,6 +24789,35 @@ function buildRoutes(): RouteDefinition[] {
           409,
           "This in-fiction Troll delivery ignores ordinary Shh; leave Coffee, mute audio, disable the Power, or end the session.",
         );
+      }
+      if (body.automatic === true) {
+        const interruptedBotId =
+          typeof body.interruptedBotId === "string"
+            ? body.interruptedBotId.trim()
+            : "";
+        const interrupterBotId =
+          typeof body.interrupterBotId === "string"
+            ? body.interrupterBotId.trim()
+            : "";
+        if (
+          !current.conversationId ||
+          !current.speakerBotId ||
+          !interruptedBotId ||
+          !interrupterBotId ||
+          interruptedBotId !== current.speakerBotId ||
+          !coffeeAutomaticBotInterruptionAllowedV1({
+            db,
+            userId,
+            conversationId: current.conversationId,
+            interruptedBotId,
+            interrupterBotId,
+          })
+        ) {
+          throw new HttpError(
+            409,
+            "That bot's current mood does not support an automatic interruption.",
+          );
+        }
       }
       const job = interruptCoffeeTurnJob(userId, ctx.params.id);
       if (!job) throw new HttpError(404, "Coffee turn job not found.");
@@ -24714,6 +24849,7 @@ function buildRoutes(): RouteDefinition[] {
           ...(typeof body.interrupterBotId === "string"
             ? { interrupterBotId: body.interrupterBotId }
             : {}),
+          ...(body.automatic === true ? { automatic: true } : {}),
           ...(typeof body.activeTurnId === "string"
             ? { activeTurnId: body.activeTurnId }
             : {}),
@@ -29259,6 +29395,9 @@ function buildRoutes(): RouteDefinition[] {
             user.online_auto_provider_bias,
           ),
           hiddenBotModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
+          hiddenGlobalPickerModelIds: parseHiddenGlobalPickerModelIds(
+            user.hidden_global_picker_model_ids,
+          ),
           hiddenComfyUiWorkflowIds: parseHiddenComfyUiWorkflowIds(
             user.hidden_comfyui_workflow_ids,
           ),
@@ -29628,7 +29767,11 @@ function buildRoutes(): RouteDefinition[] {
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
       const anthropicApiKey =
         getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
-      const catalog = await buildModelCatalog(
+      const buildCatalog =
+        ctx.query.get("refresh") === "1"
+          ? refreshModelCatalog
+          : buildModelCatalog;
+      const catalog = await buildCatalog(
         openAiApiKey,
         user.secondary_ollama_host,
         anthropicApiKey,
@@ -29701,9 +29844,17 @@ function buildRoutes(): RouteDefinition[] {
       }
       json(ctx.res, 200, {
         ok: true,
-        catalog,
+        catalog: catalogWithGlobalPickerVisibility(
+          catalog,
+          parseHiddenGlobalPickerModelIds(
+            user.hidden_global_picker_model_ids,
+          ),
+        ),
         comfyUi,
         hiddenBotModelIds,
+        hiddenGlobalPickerModelIds: parseHiddenGlobalPickerModelIds(
+          user.hidden_global_picker_model_ids,
+        ),
         hiddenComfyUiWorkflowIds: parseHiddenComfyUiWorkflowIds(
           user.hidden_comfyui_workflow_ids,
         ),
@@ -30029,6 +30180,7 @@ function buildRoutes(): RouteDefinition[] {
         autoFallbackChain: user.auto_fallback_chain,
         onlineAutoProviderBias: user.online_auto_provider_bias,
         hiddenBotModelIds: user.hidden_bot_model_ids,
+        hiddenGlobalPickerModelIds: user.hidden_global_picker_model_ids,
         hiddenComfyUiWorkflowIds: user.hidden_comfyui_workflow_ids,
         preferredLocalModel: user.preferred_local_model,
         preferredOnlineModel: user.preferred_online_model,
@@ -30153,7 +30305,7 @@ function buildRoutes(): RouteDefinition[] {
       db.prepare(
         `
         UPDATE users
-        SET display_name = ?, theme = ?, graphics_quality = ?, crt_focus = ?, typography_scale = ?, atmosphere_style = ?, hub_atmosphere_enabled = ?, startup_preference = ?, preferred_provider = ?, ephemeral_chat_provider_preferences = ?, preferred_image_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
+        SET display_name = ?, theme = ?, graphics_quality = ?, crt_focus = ?, typography_scale = ?, atmosphere_style = ?, hub_atmosphere_enabled = ?, startup_preference = ?, preferred_provider = ?, ephemeral_chat_provider_preferences = ?, preferred_image_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?, hidden_global_picker_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
             experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, debate_whodunnit_reuse_synthesized_exhibits = ?, psychic_mode_enabled = ?, auto_switch_model = ?, auto_fallback_chain = ?, online_auto_provider_bias = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, preferred_home_atmosphere_image_model = ?, preferred_home_atmosphere_image_provider = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
@@ -30182,6 +30334,7 @@ function buildRoutes(): RouteDefinition[] {
         next.autoMemory,
         next.composerWritingAssist,
         JSON.stringify(next.hiddenBotModelIds),
+        JSON.stringify(next.hiddenGlobalPickerModelIds),
         JSON.stringify(next.hiddenComfyUiWorkflowIds),
         modelVisibilityDefaultsVersion,
         next.experimentalDualOllamaEnabled,

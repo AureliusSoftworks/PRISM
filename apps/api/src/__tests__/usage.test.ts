@@ -17,9 +17,19 @@ import {
   recordTextUsage,
   registerUsageDiagnosticRedaction,
   repairMisnormalizedUsagePurposes,
+  routingTextPriceForModel,
   runWithUsageSession,
   setUsageTripEnabled,
 } from "../usage.ts";
+
+describe("routing text prices", () => {
+  it("prices optional Mythos 5 at its explicit Anthropic rate", () => {
+    assert.deepEqual(routingTextPriceForModel("anthropic", "claude-mythos-5"), {
+      inputUsdPerMillion: 10,
+      outputUsdPerMillion: 50,
+    });
+  });
+});
 
 function restoreEnv(name: string, previous: string | undefined): void {
   if (previous === undefined) {

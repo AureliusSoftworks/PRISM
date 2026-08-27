@@ -13,6 +13,8 @@ export interface ProviderModeModelOption {
   id: string;
   provider: Provider;
   disabledReason?: string;
+  /** False only when Settings hides this enabled model from manual pickers. */
+  showInGlobalPicker?: boolean;
 }
 
 export type ModelChoiceByProvider = Partial<Record<Provider, string>>;
@@ -103,7 +105,9 @@ export function filterVisibleModelOptions<T extends ProviderModeModelOption>(
   hiddenModelIds: readonly string[]
 ): T[] {
   const hidden = new Set(hiddenModelIds.map((id) => id.trim()).filter(Boolean));
-  return options.filter((model) => !hidden.has(model.id));
+  return options.filter(
+    (model) => !hidden.has(model.id) && model.showInGlobalPicker !== false,
+  );
 }
 
 export function filterVisibleOnlineModelOptions<T extends ProviderModeModelOption>(

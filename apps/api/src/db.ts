@@ -223,6 +223,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       auto_fallback_chain TEXT,
       online_auto_provider_bias REAL NOT NULL DEFAULT 0,
       hidden_bot_model_ids TEXT NOT NULL DEFAULT '[]',
+      hidden_global_picker_model_ids TEXT NOT NULL DEFAULT '[]',
       hidden_comfyui_workflow_ids TEXT NOT NULL DEFAULT '[]',
       model_visibility_defaults_version INTEGER NOT NULL DEFAULT 0,
       preferred_local_model TEXT,
@@ -2194,6 +2195,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       persona_rating REAL CHECK (persona_rating IS NULL OR (persona_rating >= 1 AND persona_rating <= 5)),
       persona_comment TEXT,
       persona_reviewed_at TEXT,
+      persona_review_provenance_json TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -3378,6 +3380,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasHiddenBotModelIds) {
     db.exec(
       "ALTER TABLE users ADD COLUMN hidden_bot_model_ids TEXT NOT NULL DEFAULT '[]';",
+    );
+  }
+  const hasHiddenGlobalPickerModelIds = userColumns.some(
+    (column) => column.name === "hidden_global_picker_model_ids",
+  );
+  if (!hasHiddenGlobalPickerModelIds) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN hidden_global_picker_model_ids TEXT NOT NULL DEFAULT '[]';",
     );
   }
   const hasHiddenComfyUiWorkflowIds = userColumns.some(
@@ -5132,6 +5142,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     ["persona_rating", "REAL"],
     ["persona_comment", "TEXT"],
     ["persona_reviewed_at", "TEXT"],
+    ["persona_review_provenance_json", "TEXT"],
   ] as const;
   for (const [column, declaration] of personaReviewColumns) {
     if (!botcastEpisodeColumns.some((candidate) => candidate.name === column)) {

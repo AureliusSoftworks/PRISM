@@ -81,17 +81,31 @@ describe("model effort preferences", () => {
       ),
       [{ provider: "openai", modelId: "gpt-5.6-sol", turbo: true }],
     );
+    setModelTurboPreference(db, {
+      userId: "user-1",
+      provider: "anthropic",
+      modelId: "claude-opus-4-8",
+      turbo: true,
+    });
+    assert.equal(
+      findModelTurboPreference(
+        db,
+        "user-1",
+        "anthropic",
+        "claude-opus-4-8",
+      ),
+      true,
+    );
     assert.throws(
-      () =>
-        setModelTurboPreference(db, {
-          userId: "user-1",
-          provider: "anthropic",
-          modelId: "claude-opus-4-8",
-          turbo: true,
-        }),
+      () => setModelTurboPreference(db, {
+        userId: "user-1",
+        provider: "anthropic",
+        modelId: "claude-sonnet-5",
+        turbo: true,
+      }),
       /Turbo is unavailable/u,
     );
-    assert.equal(resetModelTurboPreferences(db, "user-1"), 1);
+    assert.equal(resetModelTurboPreferences(db, "user-1"), 2);
     assert.deepEqual(listModelTurboPreferences(db, "user-1"), []);
   });
 

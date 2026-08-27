@@ -116,6 +116,7 @@ import {
   type MemoryLifecycle,
   type PrismStartupPreference,
   type PrismCapabilityRevelations,
+  type BotcastPersonaReviewProvenanceV1,
   parseStoredAutoFallbackChain,
   clampOnlineAutoProviderBias,
   normalizeEphemeralChatProviderPreferences,
@@ -213,6 +214,8 @@ export interface BackupUserSettings {
   /** Legacy import only. New backups no longer export this display preference. */
   fallbackModelMessageStripe?: boolean;
   hiddenBotModelIds: string[];
+  /** Models hidden only from manual/global pickers; absent in legacy backups. */
+  hiddenGlobalPickerModelIds?: string[];
   hiddenComfyUiWorkflowIds: string[];
   preferredLocalModel: string;
   preferredOnlineModel: string;
@@ -564,6 +567,7 @@ export interface BackupSnapshot {
         rating: number;
         comment: string;
         createdAt: string;
+        provenance?: BotcastPersonaReviewProvenanceV1;
       } | null;
       createdAt: string;
       updatedAt: string;
@@ -1892,6 +1896,7 @@ export function exportUserSnapshot(
          online_auto_provider_bias,
          fallback_model_message_stripe,
          hidden_bot_model_ids,
+         hidden_global_picker_model_ids,
          hidden_comfyui_workflow_ids,
          preferred_local_model,
          preferred_online_model,
@@ -1974,6 +1979,7 @@ export function exportUserSnapshot(
         online_auto_provider_bias: number;
         fallback_model_message_stripe: number;
         hidden_bot_model_ids: string | null;
+        hidden_global_picker_model_ids: string | null;
         hidden_comfyui_workflow_ids: string | null;
         preferred_local_model: string | null;
         preferred_online_model: string | null;
@@ -2080,6 +2086,9 @@ export function exportUserSnapshot(
           user.online_auto_provider_bias,
         ),
         hiddenBotModelIds: safeParseStringArray(user.hidden_bot_model_ids),
+        hiddenGlobalPickerModelIds: safeParseStringArray(
+          user.hidden_global_picker_model_ids,
+        ),
         hiddenComfyUiWorkflowIds: safeParseStringArray(
           user.hidden_comfyui_workflow_ids,
         ),
@@ -3149,6 +3158,13 @@ export function exportUserSnapshot(
                 rating: row.persona_rating,
                 comment: row.persona_comment,
                 createdAt: row.persona_reviewed_at,
+                ...(typeof row.persona_review_provenance_json === "string"
+                  ? {
+                      provenance: parseBackupJsonObject(
+                        row.persona_review_provenance_json,
+                      ) as unknown as BotcastPersonaReviewProvenanceV1,
+                    }
+                  : {}),
               }
             : null,
         createdAt: String(row.created_at),
@@ -3880,6 +3896,7 @@ function importUserSnapshotWithinTransaction(
         online_auto_provider_bias = ?,
         fallback_model_message_stripe = ?,
         hidden_bot_model_ids = ?,
+        hidden_global_picker_model_ids = ?,
         hidden_comfyui_workflow_ids = ?,
         preferred_local_model = ?,
         preferred_online_model = ?,
@@ -3981,6 +3998,14 @@ function importUserSnapshotWithinTransaction(
       JSON.stringify(
         Array.isArray(settings.hiddenBotModelIds)
           ? settings.hiddenBotModelIds.filter(
+              (value): value is string =>
+                typeof value === "string" && value.trim().length > 0,
+            )
+          : [],
+      ),
+      JSON.stringify(
+        Array.isArray(settings.hiddenGlobalPickerModelIds)
+          ? settings.hiddenGlobalPickerModelIds.filter(
               (value): value is string =>
                 typeof value === "string" && value.trim().length > 0,
             )
@@ -4642,8 +4667,8 @@ function importUserSnapshotWithinTransaction(
            tension_level, warning_count, started_at, completed_at, runtime_ms,
            model_warmup_hold_duration_ms, model_warmup_hold_started_at,
            persona_reviewer_bot_id, persona_reviewer_name, persona_rating,
-           persona_comment, persona_reviewed_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           persona_comment, persona_reviewed_at, persona_review_provenance_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         episode.id,
         userId,
@@ -4692,6 +4717,9 @@ function importUserSnapshotWithinTransaction(
           : null,
         episode.personaReview?.comment ?? null,
         episode.personaReview?.createdAt ?? null,
+        episode.personaReview?.provenance
+          ? JSON.stringify(episode.personaReview.provenance)
+          : null,
         episode.createdAt,
         episode.updatedAt,
       );

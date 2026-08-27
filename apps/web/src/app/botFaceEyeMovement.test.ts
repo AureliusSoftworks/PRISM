@@ -278,6 +278,11 @@ describe("bot eye movement modes", () => {
       page,
       /renderDetailLevel === "full"\s*\? registeredFaceEyeMovement\s*:\s*"still"/,
     );
+    assert.match(
+      page,
+      /resolvedSemanticFaceMotionEnabled\s*\?\s*"full"\s*:\s*"speech"/,
+    );
+    assert.match(page, /semanticFaceMotionEnabled: true/);
     assert.match(page, /eyeTargetDirection:\s*seatEyeTargetDirection/);
     assert.match(page, /avatarState\.role === "host" \? 1 : -1/);
     assert.match(

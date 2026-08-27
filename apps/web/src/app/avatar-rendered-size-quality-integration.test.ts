@@ -79,9 +79,9 @@ test("Signal keeps authored full mannequins live while shedding only runtime eff
   assert.doesNotMatch(signalAvatarRenderer, /data-signal-live-compact-avatar/u);
   assert.equal(signalStageMannequins.length, 2);
   // Signal spends its two-bot budget on the authored full CRT, static CSS
-  // phosphor bloom, and faithful mouth state. The renderer now shares typed
-  // prop objects rather than repeating the complete prop list in both JSX
-  // branches.
+  // phosphor bloom, faithful mouth state, and semantic gaze/blinks. The
+  // renderer shares typed prop objects rather than repeating the complete prop
+  // list in both JSX branches.
   assert.match(signalAvatarRenderer, /detailLevel: "full"/u);
   assert.match(signalAvatarRenderer, /minimumRenderedSizeTier: "full"/u);
   assert.match(
@@ -92,6 +92,7 @@ test("Signal keeps authored full mannequins live while shedding only runtime eff
     signalAvatarRenderer,
     /runtimeEffectsEnabled: !signalLivePerformanceAvatar/u,
   );
+  assert.match(signalAvatarRenderer, /semanticFaceMotionEnabled: true/u);
   assert.match(signalAvatarRenderer, /isTalking: signalMannequinTalking/u);
   assert.match(signalAvatarRenderer, /mouthShape: avatarState\.mouthShape/u);
   assert.match(pageSource, /data-prism-priority-phosphor="true"/u);

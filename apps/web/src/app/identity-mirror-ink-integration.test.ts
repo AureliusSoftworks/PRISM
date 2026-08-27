@@ -37,11 +37,11 @@ describe("Identity Crisis avatar ink integration", () => {
   it("describes the exact visual and quoted-name handoff in current mode guidance", () => {
     assert.match(
       tutorialSource,
-      /visually borrows the latest eligible direct addresser’s exact eyes and blink package, complete resting and speaking mouth package including glyph style and Custom Speech poses, authored Avatar Details Ink, lower glyph, and a literally double-quoted copy of the target’s public name/u,
+      /steals the latest eligible direct addresser’s public person: it sincerely becomes that name and persona, treats the original as an impostor/u,
     );
     assert.match(
       tutorialSource,
-      /Its color, complete authored voice and Accent Map location, pronunciation, Speechprint, provider voice identity, chassis\/frame, Powers and consequences, thinking spinner, bot ID, seat, role, private perception, safety, provider, and every other speech or mechanical field remain its own/u,
+      /holder’s color, material shell, complete frozen voice and exact Accent Map location, pronunciation, Speechprint, provider voice identity, chassis\/frame, thinking spinner, bot ID, seat, role, private memories and relationships/u,
     );
     assert.match(
       tutorialSource,
@@ -49,15 +49,15 @@ describe("Identity Crisis avatar ink integration", () => {
     );
     assert.match(
       tutorialSource,
-      /latest eligible direct addresser by taking their exact eyes and blink package, complete resting and speaking mouth package including glyph style and Custom Speech poses, Avatar Details Ink, lower glyph, and literally double-quoted public name/u,
+      /sincerely become the latest eligible direct addresser and treat the original as an impostor, taking their exact eyes and blink package, complete resting and speaking mouth package including glyph style and Custom Speech poses, Avatar Details Ink, lower glyph, and literally double-quoted public name/u,
     );
     assert.match(
       tutorialSource,
-      /holder’s color, complete voice and Accent Map location, pronunciation, Speechprint, provider voice identity, chassis\/frame, Powers, thinking spinner, and every other speech or mechanical field remain unchanged/u,
+      /holder’s color, material shell, complete frozen voice and exact Accent Map location, pronunciation, Speechprint, provider voice identity, chassis\/frame, Powers, thinking spinner, and every other private or mechanical field remain unchanged/u,
     );
     assert.match(
       tutorialSource,
-      /holder defensively treats the original as the suspicious imitator, with mild concern rather than panic or constant repetition/u,
+      /accused original treats that claim as real pressure, with concern that can deepen naturally instead of panic or constant repetition/u,
     );
     assert.match(
       tutorialSource,

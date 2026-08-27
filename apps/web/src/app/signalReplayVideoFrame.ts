@@ -37,6 +37,13 @@ export interface SignalFaithfulReplayCameraState {
   shot: SignalDirectedCameraShot;
 }
 
+export interface SignalReplayCameraClockFrame {
+  fromShot: SignalDirectedCameraShot;
+  toShot: SignalDirectedCameraShot;
+  progress: number;
+  transitionStartedAtMs: number;
+}
+
 const SIGNAL_REPLAY_FALLBACK_END_CARD_MS = 2_000;
 /** Reveal the studio before speech so the wide establishing shot can land. */
 const SIGNAL_REPLAY_INTRO_TO_STUDIO_LEAD_MS = 1_800;
@@ -44,6 +51,119 @@ const SIGNAL_REPLAY_INTRO_MIN_VISIBLE_MS = 1_000;
 export const SIGNAL_REPLAY_DEFAULT_INTRO_DURATION_MS = 8_750;
 /** Logo dissolves into the studio over this window when the pad is long enough. */
 export const SIGNAL_REPLAY_INTRO_LANDING_FADE_MS = 650;
+/** Must match the live Signal camera move in botcast.module.css. */
+export const SIGNAL_REPLAY_CAMERA_TRANSITION_MS = 900;
+
+/**
+ * True when a media-clock sample passed a saved semantic boundary. The replay
+ * owner uses this to render immediately for cuts and speaker handoffs while
+ * avoiding a full React reconciliation on every animation frame.
+ */
+export function signalReplayClockCrossedBoundary(args: {
+  previousElapsedMs: number;
+  elapsedMs: number;
+  boundaryTimesMs: readonly number[];
+}): boolean {
+  const previous = Math.max(0, Math.round(args.previousElapsedMs));
+  const elapsed = Math.max(0, Math.round(args.elapsedMs));
+  if (elapsed < previous) return true;
+  return args.boundaryTimesMs.some(
+    (boundary) => boundary > previous && boundary <= elapsed,
+  );
+}
+
+function signalDirectedCameraShot(
+  value: unknown,
+): SignalDirectedCameraShot | null {
+  return value === "left" || value === "right" || value === "wide"
+    ? value
+    : null;
+}
+
+function cubicBezierCoordinate(
+  t: number,
+  firstControl: number,
+  secondControl: number,
+): number {
+  const inverse = 1 - t;
+  return (
+    3 * inverse * inverse * t * firstControl +
+    3 * inverse * t * t * secondControl +
+    t * t * t
+  );
+}
+
+/** Matches stageScene's cubic-bezier(.22, .72, .2, 1) camera easing. */
+function signalReplayCameraEasedProgress(linearProgress: number): number {
+  const targetX = Math.max(0, Math.min(1, linearProgress));
+  let low = 0;
+  let high = 1;
+  let parameter = targetX;
+  for (let iteration = 0; iteration < 16; iteration += 1) {
+    parameter = (low + high) / 2;
+    const sampledX = cubicBezierCoordinate(parameter, 0.22, 0.2);
+    if (sampledX < targetX) low = parameter;
+    else high = parameter;
+  }
+  return cubicBezierCoordinate(parameter, 0.72, 1);
+}
+
+/**
+ * Reconstructs an animated camera move from the saved director timestamp.
+ * The result is a pure function of the master clock, so a delayed render jumps
+ * to the correct point in the move instead of starting a fresh 900 ms CSS
+ * transition and permanently trailing the audio.
+ */
+export function signalReplayCameraClockFrame(args: {
+  manifest: ReplayManifestV2;
+  replayElapsedMs: number;
+  transitionDurationMs?: number;
+}): SignalReplayCameraClockFrame | null {
+  const targetMs = Math.max(
+    0,
+    Number.isFinite(args.replayElapsedMs) ? args.replayElapsedMs : 0,
+  );
+  let current: ReplayManifestV2["direction"][number] | null = null;
+  let previous: ReplayManifestV2["direction"][number] | null = null;
+  const isAfter = (
+    candidate: ReplayManifestV2["direction"][number],
+    reference: ReplayManifestV2["direction"][number],
+  ): boolean =>
+    candidate.atMs > reference.atMs ||
+    (candidate.atMs === reference.atMs && candidate.sequence > reference.sequence);
+  for (const event of args.manifest.direction) {
+    if (event.kind !== "camera" || event.atMs > targetMs) continue;
+    if (!current || isAfter(event, current)) {
+      previous = current;
+      current = event;
+    } else if (!previous || isAfter(event, previous)) {
+      previous = event;
+    }
+  }
+  const toShot = signalDirectedCameraShot(current?.payload.shot);
+  if (!current || !toShot) return null;
+  const fromShot =
+    signalDirectedCameraShot(previous?.payload.shot) ??
+    signalDirectedCameraShot(args.manifest.initialScene.camera) ??
+    toShot;
+  const durationMs = Math.max(
+    1,
+    Math.round(args.transitionDurationMs ?? SIGNAL_REPLAY_CAMERA_TRANSITION_MS),
+  );
+  const linearProgress =
+    current.payload.transitionMode === "instant" || fromShot === toShot
+      ? 1
+      : Math.max(0, Math.min(1, (targetMs - current.atMs) / durationMs));
+  return {
+    fromShot,
+    toShot,
+    progress:
+      linearProgress === 1
+        ? 1
+        : signalReplayCameraEasedProgress(linearProgress),
+    transitionStartedAtMs: current.atMs,
+  };
+}
 
 export type SignalReplayBookendState =
   | { kind: "intro"; startMs: number; endMs: number }

@@ -141,6 +141,21 @@ describe("provider mode helpers", () => {
     );
   });
 
+  it("omits picker-hidden enabled models from manual options", () => {
+    const visible = filterVisibleModelOptions(
+      [
+        { id: "gpt-4o-mini", provider: "openai" as const },
+        {
+          id: "gpt-4o",
+          provider: "openai" as const,
+          showInGlobalPicker: false,
+        },
+      ],
+      [],
+    );
+    assert.deepEqual(visible.map((model) => model.id), ["gpt-4o-mini"]);
+  });
+
   it("resolves legacy state with both online provider slots populated", () => {
     const combined = combinedOnlineModelOptions(openAiModels, anthropicModels);
     assert.deepEqual(

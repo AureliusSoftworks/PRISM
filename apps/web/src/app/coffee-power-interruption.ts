@@ -6,6 +6,7 @@ import type {
   DirectionalIrritationDeliveryPlanV1,
   ListenerReactionPlanV1,
 } from "@localai/shared";
+import { coffeeOrdinaryAutomaticCutInMoodSupportsInterruption } from "@localai/shared";
 
 type CoffeeInterruptionEffect = Extract<
   BotPowerEffectV1,
@@ -264,10 +265,10 @@ export function coffeeAutomaticCutInCandidateV1(args: {
     args.crossTalk === "rare"
       ? 0
       : args.crossTalk === "normal"
-        ? 0.05
+        ? 0.02
         : args.crossTalk === "chatty"
-          ? 0.12
-          : 0.28;
+          ? 0.05
+          : 0.1;
   const candidates = args.candidateBotIds
     .map((botId) => ({
       botId,
@@ -279,6 +280,11 @@ export function coffeeAutomaticCutInCandidateV1(args: {
         args.interruptedBotId,
       ),
     }))
+    .filter(
+      (candidate) =>
+        candidate.powerEffect !== null ||
+        coffeeOrdinaryAutomaticCutInMoodSupportsInterruption(candidate.social),
+    )
     .sort((left, right) => {
       if (left.directlyAddressed !== right.directlyAddressed) {
         return right.directlyAddressed ? 1 : -1;

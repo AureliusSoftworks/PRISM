@@ -165,6 +165,28 @@ export function buildSignalReviewTranscript(
     "",
   ];
 
+  if (episode.personaReview) {
+    const provenance = episode.personaReview.provenance;
+    lines.push(
+      "",
+      "## Accepted Listener Review",
+      "",
+      `- Reviewer: ${episode.personaReview.reviewerName} (${episode.personaReview.reviewerBotId})`,
+      `- Rating: ${episode.personaReview.rating}`,
+      `- Comment: ${episode.personaReview.comment}`,
+      `- Accepted: ${formatTimestamp(provenance?.acceptedAt ?? episode.personaReview.createdAt)}`,
+      ...(provenance
+        ? [
+            `- Artifact hash: ${provenance.artifactHash}`,
+            `- Frozen reviewer: ${provenance.reviewerSnapshot.reviewerName} (${provenance.reviewerSnapshot.reviewerId}); hash ${provenance.reviewerSnapshotHash}`,
+            `- Rubric: ${provenance.rubricId} v${provenance.rubricVersion}`,
+            `- Review route: ${provenance.provider} -> ${provenance.model ?? "provider default"}`,
+            `- Accepted output: ${sessionReviewStableJson(provenance.output)}`,
+          ]
+        : ["- Provenance: not recorded (legacy review)."]),
+    );
+  }
+
   if (episode.segments.length === 0) {
     lines.push("- None recorded");
   } else {

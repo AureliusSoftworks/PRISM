@@ -343,6 +343,12 @@ const TEXT_PRICING: Record<string, TextPrice> = {
     source: "builtin",
     note: "Estimated Anthropic API text pricing catalog.",
   },
+  "claude-mythos-5": {
+    inputUsdPerMillion: 10,
+    outputUsdPerMillion: 50,
+    source: "builtin",
+    note: "Estimated Anthropic API text pricing catalog.",
+  },
   "claude-haiku-4-5": {
     inputUsdPerMillion: 1,
     outputUsdPerMillion: 5,

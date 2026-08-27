@@ -77,6 +77,8 @@ export interface StoryScene {
   title: string;
   locationId: string;
   narration: string;
+  /** Text-free proof that this committed bot narration has a private reveal. */
+  speechIntentRevealAvailable?: true;
   speakerBotId?: string | null;
   /** Bot characters that actually received this spoken line; the player always does. */
   audienceBotIds?: string[];
@@ -352,6 +354,8 @@ function parseScenes(raw: unknown): StoryScene[] {
       normalizeBotPowerTrollPresentationV1(
         row.botPowerTrollPresentation,
       ) ?? undefined;
+    const speechIntentRevealAvailable =
+      row.speechIntentRevealAvailable === true ? true : undefined;
     if (spritePose && !STORY_SPRITE_POSE_SET.has(spritePose)) {
       throw new Error(`Unknown story sprite pose "${spritePose}".`);
     }
@@ -360,6 +364,7 @@ function parseScenes(raw: unknown): StoryScene[] {
       title: readString(row.title, `${field}.title`),
       locationId: readString(row.locationId, `${field}.locationId`),
       narration: readString(row.narration, `${field}.narration`),
+      ...(speechIntentRevealAvailable ? { speechIntentRevealAvailable } : {}),
       speakerBotId:
         typeof row.speakerBotId === "string" && row.speakerBotId.trim().length > 0
           ? row.speakerBotId.trim()

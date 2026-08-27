@@ -15,6 +15,7 @@ import {
 } from "@localai/shared";
 import { debateIdentityAppearanceBotV1 } from "./debateIdentityPresentation.ts";
 import {
+  debateMysteryIdentityMirrorFaceV1,
   debateMysteryIdentityMirrorPresentationsV1,
   debateMysteryIdentityMirrorTargetBotSnapshotV1,
   debateMysteryQuotedIdentityNameV1,
@@ -95,7 +96,7 @@ function entry(overrides: Partial<DebateMysteryPublicDialogueEntryV2>): DebateMy
   };
 }
 
-test("Whodunnit Identity Crisis follows a sealed direct recipient and does not restart for the same bot", () => {
+test("Whodunnit Identity Crisis treats the Participant Prosecutor as the embodied player even with bot provenance", () => {
   const presentations = debateMysteryIdentityMirrorPresentationsV1({
     session: session(),
     state: state([
@@ -113,7 +114,7 @@ test("Whodunnit Identity Crisis follows a sealed direct recipient and does not r
   assert.deepEqual(presentations.get(holder), {
     holderBotId: holder,
     targetBotId: prosecutor,
-    targetKind: "bot",
+    targetKind: "player",
     targetName: "Megan",
     sourceDialogueKey: "talk-holder-seat-alibi:line-1:2026-08-25T10:00:00.000Z",
     occurredAt: "2026-08-25T10:00:00.000Z",
@@ -133,28 +134,119 @@ test("Whodunnit Identity Crisis supports existing sealed talk nodes without inve
   assert.equal(presentations.get(holder)?.targetBotId, prosecutor);
 });
 
-test("Whodunnit Identity Crisis can switch only when another bot directly addresses the holder", () => {
+test("court Identity Crisis follows the current direct speaker across persisted exchanges", () => {
+  const defense = "defense";
+  const savedDialogue = JSON.parse(JSON.stringify([
+    entry({ intendedRecipientSeatId: "holder-seat" }),
+    entry({
+      nodeId: "court-defense-cross",
+      lineId: "line-2",
+      visibleText: "Collin, answer the defense directly.",
+      speakerBotId: defense,
+      speakerKind: "bot",
+      intendedRecipientSeatId: "holder-seat",
+      occurredAt: "2026-08-25T10:00:01.000Z",
+    }),
+    entry({
+      nodeId: "court-witness-followup",
+      lineId: "line-3",
+      visibleText: "Collin, that version leaves too much out.",
+      speakerSeatId: "witness-seat",
+      speakerBotId: witness,
+      speakerKind: "bot",
+      intendedRecipientBotId: holder,
+      occurredAt: "2026-08-25T10:00:02.000Z",
+    }),
+  ])) as DebateMysteryPublicDialogueEntryV2[];
   const presentations = debateMysteryIdentityMirrorPresentationsV1({
     session: session(),
-    state: state([
-      entry({ intendedRecipientSeatId: "holder-seat" }),
-      entry({
-        nodeId: "court-defendant-reaction",
-        lineId: "line-3",
-        visibleText: "Collin, that version leaves too much out.",
-        speakerSeatId: "witness-seat",
-        speakerBotId: witness,
-        occurredAt: "2026-08-25T10:00:02.000Z",
-      }),
-    ]),
+    state: state(savedDialogue),
     botNamesById: new Map([
       [holder, "Collin"],
       [prosecutor, "Megan"],
+      [defense, "Franziska"],
       [witness, "Miles"],
     ]),
   });
 
-  assert.equal(presentations.get(holder)?.targetBotId, witness);
+  assert.deepEqual(presentations.get(holder), {
+    holderBotId: holder,
+    targetBotId: witness,
+    targetKind: "bot",
+    targetName: "Miles",
+    sourceDialogueKey: "court-witness-followup:line-3:2026-08-25T10:00:02.000Z",
+    occurredAt: "2026-08-25T10:00:02.000Z",
+  });
+});
+
+test("Whodunnit copies complete non-default one-eye and two-eye player faces atomically", () => {
+  const holderSnapshot: DebateMysteryIdentityMirrorTargetSnapshotV1 = {
+    version: 1,
+    botId: holder,
+    name: "Collin",
+    faceStyle: resolveBotFaceStyle({
+      faceEyeCharacter: "?",
+      faceMouthCharacter: "|",
+      faceThinkingFrames: ["I", "?", "I", "!"],
+    }),
+    avatarDetails: null,
+    glyph: "lucideScanFace",
+  };
+  for (const eyeCount of [1, 2] as const) {
+    const targetFace = resolveBotFaceStyle({
+      faceEyesFont: eyeCount === 1 ? "formal" : "concise",
+      faceEyeCharacter: eyeCount === 1 ? "◉" : "⌁",
+      faceEyeCount: eyeCount,
+      faceEyeSpacing: eyeCount === 1 ? 0.19 : 0.53,
+      faceEyeAnimation: "wobble",
+      faceEyeScale: eyeCount === 1 ? 1.31 : 0.83,
+      faceEyeOffsetX: eyeCount === 1 ? -0.16 : 0.14,
+      faceEyeOffsetY: 0.12,
+      faceEyeRotationDeg: eyeCount === 1 ? -21 : 17,
+      faceBlinkBar: eyeCount === 1 ? "─" : "¦",
+      faceBlinkCount: eyeCount,
+      faceBlinkScale: 0.79,
+      faceBlinkOffsetX: 0.08,
+      faceBlinkOffsetY: -0.11,
+      faceBlinkRotationDeg: 13,
+      faceMouthFont: "formal",
+      faceMouthCharacter: eyeCount === 1 ? "⌣" : "▽",
+      faceMouthAnimation: "custom",
+      faceMouthSpeechPoses: eyeCount === 1
+        ? ["⌣", "·", "◡", "○"]
+        : ["▽", "_", "△", "□"],
+      faceMouthCoffeePucker: eyeCount === 1,
+      faceMouthScale: 1.24,
+      faceMouthOffsetX: -0.09,
+      faceMouthOffsetY: 0.13,
+      faceMouthRotationDeg: -15,
+      faceFontWeight: eyeCount === 1 ? 725 : 575,
+      faceThinkingFrames: ["T", "A", "R", "G"],
+    });
+    const targetSnapshot: DebateMysteryIdentityMirrorTargetSnapshotV1 = {
+      version: 1,
+      botId: prosecutor,
+      name: eyeCount === 1 ? "One Eye Player" : "Two Eye Player",
+      faceStyle: targetFace,
+      avatarDetails: null,
+      glyph: "lucideScale",
+    };
+    const copiedFace = debateMysteryIdentityMirrorFaceV1(
+      holderSnapshot,
+      JSON.parse(JSON.stringify(targetSnapshot)) as DebateMysteryIdentityMirrorTargetSnapshotV1,
+    );
+    for (const key of [
+      "eyesFont", "eyeCharacter", "eyeCount", "eyeSpacing", "eyeAnimation",
+      "eyeScale", "eyeOffsetX", "eyeOffsetY", "eyeRotationDeg", "blinkBar",
+      "blinkCount", "blinkScale", "blinkOffsetX", "blinkOffsetY",
+      "blinkRotationDeg", "mouthFont", "mouthCharacter", "mouthAnimation",
+      "mouthSpeechPoses", "mouthCoffeePucker", "mouthScale", "mouthOffsetX",
+      "mouthOffsetY", "mouthRotationDeg", "weight",
+    ] as const) {
+      assert.deepEqual(copiedFace[key], targetFace[key], `${eyeCount}-eye copied ${key}`);
+    }
+    assert.deepEqual(copiedFace.thinkingFrames, holderSnapshot.faceStyle.thinkingFrames);
+  }
 });
 
 test("Whodunnit Identity Crisis freezes an exact player target and quotes the copied name", () => {

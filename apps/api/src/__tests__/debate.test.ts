@@ -12843,6 +12843,7 @@ describe("Debate engine", () => {
       );
       assert.equal(publicIntro?.content, intro.content);
       assert.equal(publicIntro?.powerIntendedContent, undefined);
+      assert.equal(publicIntro?.speechIntentRevealAvailable, true);
       assert.doesNotMatch(JSON.stringify(publicSession), /called to order/iu);
     } finally {
       db.close();

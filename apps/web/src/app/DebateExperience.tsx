@@ -130,6 +130,7 @@ import {
   type PreparedTurnV1,
   type PreparedTurnUtteranceV1,
   type BotPresenceBeatV1,
+  type BotFaceStyle,
   type ResponseMode,
   type LiveBakeArtifactV1,
   type ProviderReasoningEffort,
@@ -208,6 +209,7 @@ import {
 } from "./DebateExhibitMagentaControls";
 import { DebateEvidenceMentionPopover } from "./DebateEvidenceMentionPopover";
 import { DebateEvidenceDocument } from "./DebateEvidenceDocument";
+import { SpeechIntentReveal } from "./SpeechIntentReveal";
 import styles from "./DebateExperience.module.css";
 import mysteryStyles from "./debateMystery.module.css";
 import { debateLiveCaptionPage } from "./debateLiveCaption";
@@ -675,6 +677,8 @@ export interface DebateBotSummary {
   avatarDetails?: DebateBotSnapshotV1["avatarDetails"];
   voiceProfile?: DebateBotSnapshotV1["voiceProfile"];
   replayVisualSnapshot?: DebateBotSnapshotV1["replayVisualSnapshot"];
+  /** Whodunnit-only public face override; shell/material rendering stays live. */
+  faceStyleOverride?: BotFaceStyle | null;
   powers?: DebateBotSnapshotV1["powers"];
   systemPrompt?: string;
   hardMuted: boolean;
@@ -732,6 +736,8 @@ export interface DebateBotAvatarState {
   blinkEnabled?: boolean;
   /** Visible screen direction; face and authored Ink turn as one plane. */
   facing?: BotAvatarFacing;
+  /** Public person override that must not replace holder-owned materials. */
+  faceStyleOverride?: BotFaceStyle | null;
   /** Surface-scoped visibility for authored Avatar Details Speech ink. */
   speechInkVisible?: boolean;
 }
@@ -4081,6 +4087,7 @@ const DebateCompletedTranscriptArticle = memo(
     event: DebateEventV1;
     playerName: string;
     onSource: (id: string) => void;
+    request: DebateExperienceProps["request"];
   }): React.JSX.Element {
     return (
       <article
@@ -4108,6 +4115,13 @@ const DebateCompletedTranscriptArticle = memo(
             onSource={props.onSource}
           />
         ) : null}
+        <SpeechIntentReveal
+          available={props.event.speechIntentRevealAvailable === true}
+          mode="debate"
+          scopeId={props.session.id}
+          recordId={props.event.id}
+          request={props.request}
+        />
       </article>
     );
   },
@@ -4117,7 +4131,10 @@ const DebateCompletedTranscriptArticle = memo(
     previous.event.id === next.event.id &&
     previous.event.content === next.event.content &&
     previous.event.interrupted === next.event.interrupted &&
+    previous.event.speechIntentRevealAvailable ===
+      next.event.speechIntentRevealAvailable &&
     previous.playerName === next.playerName &&
+    previous.request === next.request &&
     previous.onSource === next.onSource,
 );
 
@@ -23410,6 +23427,7 @@ export function DebateExperience(
                   event={event}
                   playerName={playerName}
                   onSource={setSourceDrawerId}
+                  request={request}
                 />
               );
             })}
@@ -29435,6 +29453,7 @@ export function DebateExperience(
           listenerReaction: performance?.demeanor === "suspect" ? "divided" : "attentive",
           blinkEnabled: performance?.blinkEnabled === true,
           facing: performance?.facing,
+          faceStyleOverride: bot.faceStyleOverride ?? null,
         },
       ) ?? props.renderBotGlyph(bot.glyph, { size: presentation === "full" ? 132 : 36, strokeWidth: 1.2 }),
     playMysteryVoice: async (

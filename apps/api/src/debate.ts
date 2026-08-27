@@ -58,6 +58,7 @@ import {
   botPowerSpeechObfuscationAuthoringCueV1,
   botPowerCursedTongueAuthoringCueV1,
   botPowerCursesSpeechFromEffectsV1,
+  botPowerIntendedSpeechLooksGibberishV1,
   botPowerResponseIsSilentV1,
   botPowerSubjectEffectsForObserverFromEffectsV1,
   botPowerTargetNameFromEffectsV1,
@@ -5834,7 +5835,30 @@ function projectDebateEventForObserver(
   event: DebateEventV1,
   perspective: "live" | "replay",
 ): DebateEventV1 {
-  const publicEvent = withoutDebatePowerIntendedContent(event);
+  const publicEvent = {
+    ...withoutDebatePowerIntendedContent(event),
+    ...(event.powerIntendedContent &&
+    event.speakerBotId &&
+    event.speakerKind !== "player" &&
+    event.speakerKind !== "system" &&
+    event.interrupted !== true &&
+    !event.mutePerformance &&
+    botPowerIntendedSpeechLooksGibberishV1(event.content) &&
+    [
+      "intro",
+      "speech",
+      "testimony",
+      "press",
+      "objection",
+      "interjection",
+      "moderator_ruling",
+      "jury_deliberation",
+      "jury_verdict",
+      "verdict",
+    ].includes(event.kind)
+      ? { speechIntentRevealAvailable: true as const }
+      : {}),
+  };
   if (!event.speakerBotId || event.speakerKind === "player") return publicEvent;
   const projection = debateBotObserverProjection(
     session,

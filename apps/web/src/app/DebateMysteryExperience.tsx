@@ -27,6 +27,7 @@ import {
   type DebateBotSnapshotV1,
   type DebateSessionV1,
   type DebateWhodunnitFormatStateV1,
+  type BotFaceStyle,
   type ProviderReasoningEffort,
   type ResponseMode,
 } from "@localai/shared";
@@ -90,6 +91,8 @@ export interface MysteryBotSummary {
   avatarDetails?: DebateBotSnapshotV1["avatarDetails"];
   voiceProfile?: DebateBotSnapshotV1["voiceProfile"];
   replayVisualSnapshot?: DebateBotSnapshotV1["replayVisualSnapshot"];
+  /** Whodunnit-only public face override; shell/material rendering stays live. */
+  faceStyleOverride?: BotFaceStyle | null;
   powers?: DebateBotSnapshotV1["powers"];
   systemPrompt?: string;
   hardMuted: boolean;

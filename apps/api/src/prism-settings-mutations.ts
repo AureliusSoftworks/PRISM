@@ -46,6 +46,7 @@ export const PRISM_JOURNALED_SETTING_KEYS = new Set([
   "preferredLocalModel",
   "preferredOnlineModel",
   "hiddenBotModelIds",
+  "hiddenGlobalPickerModelIds",
   "hiddenComfyUiWorkflowIds",
   "lenientLocalImageFallbackModel",
   "secondaryOllamaHost",
@@ -108,6 +109,7 @@ const PERSISTED_SETTING_COLUMNS = [
   "auto_memory",
   "composer_writing_assist",
   "hidden_bot_model_ids",
+  "hidden_global_picker_model_ids",
   "hidden_comfyui_workflow_ids",
   "model_visibility_defaults_version",
   "experimental_dual_ollama_enabled",
@@ -245,6 +247,9 @@ function currentSettings(
         ? row.online_auto_provider_bias
         : 0,
     hiddenBotModelIds: String(row.hidden_bot_model_ids ?? "[]"),
+    hiddenGlobalPickerModelIds: String(
+      row.hidden_global_picker_model_ids ?? "[]",
+    ),
     hiddenComfyUiWorkflowIds: String(
       row.hidden_comfyui_workflow_ids ?? "[]",
     ),
@@ -387,6 +392,9 @@ function persistedValues(
     auto_memory: next.autoMemory,
     composer_writing_assist: next.composerWritingAssist,
     hidden_bot_model_ids: stringifyJson(next.hiddenBotModelIds),
+    hidden_global_picker_model_ids: stringifyJson(
+      next.hiddenGlobalPickerModelIds,
+    ),
     hidden_comfyui_workflow_ids: stringifyJson(
       next.hiddenComfyUiWorkflowIds,
     ),
