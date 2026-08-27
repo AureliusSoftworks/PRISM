@@ -4125,6 +4125,6 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.match(sealedRoutes, /saveRevealedDebateMysteryAssetV1/u);
     assert.match(serverSource, /mystery-assets\/retry/u);
     assert.match(serverSource, /requeueRetryableDebateMysteryAssetFallbacksV1/u);
-    assert.match(serverSource, /session\.id,\s*2,\s*enabledKinds/u);
+    assert.match(serverSource, /session\.id,\s*3,\s*enabledKinds/u);
   });
 });

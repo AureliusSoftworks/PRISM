@@ -18202,7 +18202,7 @@ function buildRoutes(): RouteDefinition[] {
         db,
         userId,
         session.id,
-        2,
+        3,
         enabledKinds,
       );
       for (const item of retried) {

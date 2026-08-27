@@ -372,6 +372,29 @@ describe("sealed Whodunnit asset vault", () => {
       ).length,
       0,
     );
+    const third = requeueRetryableDebateMysteryAssetFallbacksV1(
+      db,
+      "user-1",
+      "case-1",
+      3,
+    );
+    assert.equal(third.length, 1);
+    setDebateMysteryAssetFallbackV1(db, {
+      userId: "user-1",
+      sessionId: "case-1",
+      kind: "room",
+      subjectId: "room-1",
+      reason: "Sealed case visual attempt timed out.",
+    });
+    assert.equal(
+      requeueRetryableDebateMysteryAssetFallbacksV1(
+        db,
+        "user-1",
+        "case-1",
+        3,
+      ).length,
+      0,
+    );
     db.close();
   });
 
