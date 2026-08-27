@@ -9339,6 +9339,8 @@ async function reviewDebateMysteryAssetWithVision(args: {
         "Approve only if image 2 is one coherent, unoccupied furnished interior and preserves image 1's camera, floor line, major architectural divisions, and the broad spatial regions marked by its interaction overlays.",
         "The source overlays are annotations rather than furniture. Image 2 must remove those overlays while keeping their underlying spatial layout usable.",
         "Ordinary room-appropriate furniture, plants, tableware, books, art, and decorative objects are welcome. Reject only a visually isolated object that reads as case evidence or a clue, not normal environmental dressing.",
+        "Do not speculate that ordinary containers, statues, vessels, books, table settings, tools, luggage, plants, art, or signs of everyday use could become clues. They are environmental dressing unless the image explicitly marks them as forensic evidence with blood, an evidence marker, a weapon, a label, readable text, or conspicuous clue framing.",
+        "An unoccupied room may still look lived-in. Normal food, drink, open books, and other non-forensic signs of use are acceptable and do not imply a case fact.",
         "Image 2 must contain no people, human bodies, evidence objects, clues, unrequested gore, readable text, captions, logos, borders, or UI.",
         "Reject any visible electric-magenta matte or obvious template annotation.",
       ].join(" ")
@@ -9651,6 +9653,7 @@ async function prepareDebateMysteryV2RoomAssets(
                 args.houseStyle.promptContract,
                 "Preserve the 1536×1024 dimensions, room geometry, camera, major architectural divisions, and broad interaction anchors.",
                 "Remove every annotation shape. Do not add electric magenta, people, human figures, bodies, evidence, clues, weapons, blood, gore, readable text, signs, captions, logos, borders, or UI.",
+                "Use ordinary room-specific furniture, vessels, statues, books, plants, table settings, and lived-in environmental dressing freely; these are atmosphere, not evidence.",
                 "This is presentation-only atmosphere. Do not imply any case fact.",
                 ...(attempt === 2
                   ? ["Second-pass repair: keep the composition clean and navigable while retaining convincing room-specific furnishings and environmental character."]
