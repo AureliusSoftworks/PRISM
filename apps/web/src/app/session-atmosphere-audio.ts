@@ -17,6 +17,7 @@ import {
   decodeLiveVoicePcm,
   type LiveVoicePcm,
 } from "./liveVoiceDecode.ts";
+import { audioContextNeedsResume } from "./audioContextRecovery.ts";
 
 export const DEFAULT_STUDIO_ATMOSPHERE_URL =
   "/audio/session-atmosphere/default-studio-room-loop.mp3";
@@ -334,7 +335,7 @@ function sessionAtmosphereContext(): AudioContext | null {
   }
   const context = sessionAtmosphereAudioContext;
   if (!context) return null;
-  if (context.state === "suspended") {
+  if (audioContextNeedsResume(context)) {
     void context.resume().catch(() => undefined);
   }
   return context;

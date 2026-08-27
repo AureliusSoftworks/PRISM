@@ -57,6 +57,7 @@ import {
   coffeeReplyBreaksCharacterImmersion,
   coffeeReplySignalsPoliteDeparture,
   coffeeReplySignalsSessionWrap,
+  coffeeSessionLifecycleState,
   coffeeMeetingSummarySourceMessages,
   coffeeSessionSynopsisSourceMessages,
   coffeeStageActionFitsSeatSnapshot,
@@ -87,11 +88,13 @@ import {
   createCoffeeGroupWithGeneratedName,
   createCoffeeConversation,
   createCoffeeConversationFromGroup,
+  beginCoffeeSessionClosing,
   beginCoffeeBarDelivery,
   claimCoffeeDrinkReaction,
   chooseCoffeeBarRole,
   chooseCoffeeHouseDrink,
   completeCoffeeSpecialOrder,
+  completeCoffeeSession,
   deliverCoffeeBarOrder,
   createCoffeePoll,
   createCoffeePreset,
@@ -142,7 +145,7 @@ import {
   processCoffeeAutonomousTurn,
   prepareCoffeeSpecialOrder,
   pickFallbackSpeaker,
-  processCoffeeTurn,
+  processCoffeeTurn as processCoffeeTurnRaw,
   randomizeCoffeeSeatBotIdsForSession,
   coffeePlayerDepartureEpilogueFocus,
   coffeePlayerDepartureEpilogueShouldStop,
@@ -187,6 +190,8 @@ import {
   updateCoffeeGroupWithGeneratedTopics,
   updateCoffeePreset,
   type CoffeeBotProfile,
+  type CoffeeTurnInput,
+  type CoffeeTurnSettings,
 } from "../coffee.ts";
 import { encryptJson } from "../security.ts";
 import {
@@ -239,6 +244,18 @@ import {
   coffeePowersPromptForSpeaker,
   parseCoffeePowerPlan,
 } from "../coffee-powers.ts";
+
+const processCoffeeTurn = (
+  db: DatabaseSync,
+  userId: string,
+  input: CoffeeTurnInput,
+  settings: CoffeeTurnSettings,
+) => processCoffeeTurnRaw(
+  db,
+  userId,
+  { ...input, consumeJoinSip: input.consumeJoinSip ?? true },
+  settings,
+);
 
 describe("Coffee assistant persistence provenance", () => {
   it("repairs unmarked punctuation but preserves recognized silent beats", () => {
@@ -1889,6 +1906,7 @@ function createCoffeeTestDb(): DatabaseSync {
       conversation_mode TEXT NOT NULL DEFAULT 'sandbox',
       bot_id TEXT,
       bot_group_ids TEXT,
+      coffee_session_state TEXT NOT NULL DEFAULT 'active',
       coffee_settings TEXT,
       coffee_group_id TEXT,
       coffee_duration_minutes INTEGER,
@@ -2183,7 +2201,10 @@ async function createCoffeeConversationWithId(
   conversationId: string,
   input: Parameters<typeof createCoffeeConversation>[2]
 ): Promise<Awaited<ReturnType<typeof createCoffeeConversation>>> {
-  const created = await createCoffeeConversation(db, userId, input);
+  const created = await createCoffeeConversation(db, userId, {
+    ...input,
+    experienceMode: input.experienceMode ?? "join",
+  });
   db.prepare("UPDATE conversations SET id = ? WHERE id = ?").run(
     conversationId,
     created.conversation.id
@@ -2548,6 +2569,73 @@ async function withMockedCoffeeFetch<T>(
 }
 
 describe("createCoffeeConversation", () => {
+  it("locks a closing table, preserves the authored roster, and records silent walk-aways", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "closing-user";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const created = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      experienceMode: "join",
+      initialTopic: "Closing time",
+    });
+
+    const closing = beginCoffeeSessionClosing(
+      db,
+      userId,
+      created.conversation.id,
+    );
+    assert.equal(coffeeSessionLifecycleState(db, userId, closing.id), "closing");
+    assert.deepEqual(closing.botGroupIds, [ALICE.id, BORIS.id]);
+    assert.deepEqual(
+      [...(closing.coffeeAbsentBotIds ?? [])].sort(),
+      [ALICE.id, BORIS.id].sort(),
+    );
+    assert.deepEqual(
+      closing.messages
+        .flatMap((message) => message.coffeeReplayEvents ?? [])
+        .filter((event) => event.kind === "botDeparture")
+        .map((event) => event.kind === "botDeparture" ? event.botId : "")
+        .sort(),
+      [ALICE.id, BORIS.id].sort(),
+    );
+
+    assert.throws(
+      () => recordCoffeeUserAction(
+        db,
+        userId,
+        closing.id,
+        "*sets the mug down*",
+      ),
+      /ended/i,
+    );
+    assert.throws(
+      () => sipCoffeeJoinPlayerCup(db, userId, closing.id),
+      /ended/i,
+    );
+    await assert.rejects(
+      processCoffeeTurn(
+        db,
+        userId,
+        { conversationId: closing.id, message: "One more thing." },
+        { preferredProvider: "local" },
+      ),
+      /ended/i,
+    );
+    await assert.rejects(
+      processCoffeeAutonomousTurn(
+        db,
+        userId,
+        closing.id,
+        { preferredProvider: "local" },
+      ),
+      /ended/i,
+    );
+
+    completeCoffeeSession(db, userId, closing.id);
+    assert.equal(coffeeSessionLifecycleState(db, userId, closing.id), "complete");
+  });
+
   it("creates an empty Coffee session with frozen bot group ids", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
@@ -7631,26 +7719,29 @@ describe("Coffee group foundation", () => {
     const result = await withMockedCoffeeFetch(
       "*stands and pushes chair back with a grateful nod* Thank you for the coffee and the company; I should get going.",
       () =>
-        processCoffeeTurn(
+        processCoffeeAutonomousTurn(
           db,
           userId,
-          {
-            conversationId,
-            message: "Keep going.",
-            directedSpeakerBotId: ALICE.id,
-          },
+          conversationId,
           {
             preferredProvider: "local",
             sessionRemainingMs: 1,
-          }
+          },
+          false,
+          ALICE.id,
+          "Keep going.",
         )
     );
 
     assert.equal(result.speakerBotId, ALICE.id);
-    assert.equal(result.conversation.botGroupIds?.includes(ALICE.id), false);
-    assert.equal(result.conversation.botGroupIds?.length, 2);
+    assert.equal(result.conversation.botGroupIds?.includes(ALICE.id), true);
+    assert.equal(result.conversation.botGroupIds?.length, 3);
     assert.deepEqual(result.conversation.coffeeAbsentBotIds, [ALICE.id]);
     assert.equal(result.conversation.messages.at(-1)?.botName, ALICE.name);
+    assert.equal(
+      result.conversation.messages.at(-1)?.coffeeMessageKind,
+      "departure",
+    );
     assert.deepEqual(
       result.conversation.messages.at(-1)?.coffeeReplayEvents?.find(
         (event) => event.kind === "botDeparture"
@@ -7670,7 +7761,7 @@ describe("Coffee group foundation", () => {
       bot_group_ids: string;
       coffee_absent_bot_ids: string;
     };
-    assert.equal(JSON.parse(row.bot_group_ids).includes(ALICE.id), false);
+    assert.equal(JSON.parse(row.bot_group_ids).includes(ALICE.id), true);
     assert.deepEqual(JSON.parse(row.coffee_absent_bot_ids), [ALICE.id]);
   });
 
@@ -7685,24 +7776,30 @@ describe("Coffee group foundation", () => {
       createCoffeeConversationWithId(db, userId, conversationId, {
         groupBotIds: [ALICE.id, BORIS.id, CARA.id],
         durationMinutes: 3,
+        experienceMode: "serve",
       }),
+    );
+    await setCoffeeConversationTopic(
+      db,
+      userId,
+      conversationId,
+      "Knowing when a table should call it a night",
     );
 
     const result = await withMockedCoffeeFetch(
       "The argument still has another angle worth exploring.",
       () =>
-        processCoffeeTurn(
+        processCoffeeAutonomousTurn(
           db,
           userId,
-          {
-            conversationId,
-            message: "Keep going.",
-            directedSpeakerBotId: ALICE.id,
-          },
+          conversationId,
           {
             preferredProvider: "local",
             sessionRemainingMs: 1,
           },
+          false,
+          ALICE.id,
+          "Keep going.",
         ),
     );
     const latest = result.conversation.messages.at(-1);
@@ -7710,7 +7807,17 @@ describe("Coffee group foundation", () => {
     assert.equal(result.shouldEndSession, true);
     assert.equal(coffeeReplySignalsSessionWrap(latest?.content ?? ""), true);
     assert.equal(result.conversation.botGroupIds?.length, 3);
-    assert.deepEqual(result.conversation.coffeeAbsentBotIds ?? [], []);
+    assert.deepEqual(
+      [...(result.conversation.coffeeAbsentBotIds ?? [])].sort(),
+      [ALICE.id, BORIS.id, CARA.id].sort(),
+    );
+    assert.equal(result.conversation.coffeeSessionState, "closing");
+    assert.equal(latest?.coffeeMessageKind, "departure");
+    assert.ok(
+      (latest?.coffeeReplayEvents ?? []).some(
+        (event) => event.kind === "botDeparture" && event.botId === ALICE.id,
+      ),
+    );
     assert.ok(
       (latest?.coffeeReplayEvents ?? []).filter(
         (event) => event.kind === "emptyCupAttempt",
@@ -7758,7 +7865,7 @@ describe("Coffee group foundation", () => {
     const latest = result.conversation.messages.at(-1);
 
     assert.equal(result.speakerBotId, ALICE.id);
-    assert.equal(result.conversation.botGroupIds?.includes(ALICE.id), false);
+    assert.equal(result.conversation.botGroupIds?.includes(ALICE.id), true);
     assert.deepEqual(result.conversation.coffeeAbsentBotIds, [ALICE.id]);
     assert.equal(latest?.botName, ALICE.name);
     assert.equal(/Krabby Patty/i.test(latest?.content ?? ""), false);
@@ -9601,6 +9708,42 @@ describe("buildRouterPrompt", () => {
     assert.match(system, /Quiet relevant candidates: Cara, Dante, Elena/);
     assert.match(system, /Dominant duo detected: Alice \+ Boris/);
     assert.match(system, /redirect back to the truth\/art question using one table object/);
+  });
+
+  it("keeps departure beats out of floor counts and continuity anchors", () => {
+    const createdAt = "2026-01-01T00:00:00.000Z";
+    const history: ChatMessage[] = [
+      {
+        id: "floor-1",
+        role: "assistant",
+        botName: "Alice",
+        content: "The lighthouse matters because its upkeep has a real cost.",
+        createdAt,
+      },
+      ...Array.from({ length: 5 }, (_, index) => ({
+        id: `departure-${index}`,
+        role: "assistant" as const,
+        botName: "Boris",
+        content: "Good night, everyone.",
+        coffeeMessageKind: "departure" as const,
+        createdAt,
+      })),
+    ];
+
+    const quality = buildCoffeeConversationQualityState({
+      group: [ALICE, BORIS, CARA],
+      history,
+      coffeeTopic: "What makes a lighthouse worth maintaining?",
+    });
+
+    assert.equal(quality.phase, "opening");
+    assert.equal(
+      coffeeReplyNeedsConversationContinuityRepair(
+        "The lighthouse cost matters because abandoning it has consequences.",
+        history,
+      ),
+      false,
+    );
   });
 
   it("can deterministically override an overexposed router pick with a quiet seated bot", () => {
@@ -12411,7 +12554,7 @@ describe("buildSpeakerPrompt", () => {
     assert.doesNotMatch(joined, /coffee progress|frameIndex|frame index/i);
   });
 
-  it("omits all vessel narration for a bot that refuses coffee", () => {
+  it("omits all vessel narration when the bot physically has no vessel", () => {
     const messages = buildSpeakerPrompt({
       speaker: ALICE,
       group: [ALICE, BORIS],
@@ -16138,6 +16281,23 @@ describe("Coffee stale autonomous guard helpers", () => {
       false,
       "interrupted cutoff fragments must not seed later bot replies",
     );
+    assert.equal(
+      coffeeMessageBelongsInBotPromptHistory({
+        role: "assistant",
+        content: "Good night, everyone.",
+        coffeeMessageKind: "departure",
+      }),
+      false,
+      "a voiced departure beat must not acquire the conversational floor",
+    );
+    assert.equal(
+      coffeeMessageBelongsInBotPromptHistory({
+        role: "assistant",
+        content: "An older unclassified message remains ordinary table talk.",
+      }),
+      true,
+      "legacy messages default to floor semantics",
+    );
   });
 
   it("detects when a newer message lands after an autonomous turn starts", () => {
@@ -16744,6 +16904,67 @@ describe("coffee social state helpers", () => {
     assert.equal(conversation.coffeeSettings?.joinPlayerCup?.sipCount, 6);
   });
 
+  it("consumes exactly one replay-stable sip with each accepted Join line", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "join-composer-user";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const created = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      experienceMode: "join",
+      initialTopic: "Small rituals",
+    });
+
+    const result = await withMockedCoffeeFetch(
+      "A ritual matters when it changes what we notice.",
+      () =>
+        processCoffeeTurnRaw(
+          db,
+          userId,
+          {
+            conversationId: created.conversation.id,
+            message: "What makes a ritual meaningful?",
+            directedSpeakerBotId: ALICE.id,
+            consumeJoinSip: true,
+          },
+          { preferredProvider: "local" },
+        ),
+    );
+
+    assert.equal(result.conversation.coffeeSettings?.joinPlayerCup?.sipCount, 1);
+    const userLine = result.conversation.messages.find(
+      (message) => message.role === "user",
+    );
+    const sip = userLine?.coffeeReplayEvents?.find(
+      (event) => event.kind === "playerSip",
+    );
+    assert.equal(sip?.kind, "playerSip");
+    if (sip?.kind === "playerSip") {
+      assert.equal(sip.sipCount, 1);
+      assert.equal(sip.source, "composer");
+      assert.ok(sip.timing === "before" || sip.timing === "after");
+    }
+
+    await assert.rejects(
+      processCoffeeTurnRaw(
+        db,
+        userId,
+        {
+          conversationId: created.conversation.id,
+          message: "This bypasses the mug.",
+          consumeJoinSip: false,
+        },
+        { preferredProvider: "local" },
+      ),
+      /mug-gated composer/i,
+    );
+    assert.equal(
+      getCoffeeConversationTranscript(db, userId, created.conversation.id)
+        .filter((message) => message.role === "user").length,
+      1,
+    );
+  });
+
   it("Serve mode forces a timed session and skips top-off mood boosts", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
@@ -16826,7 +17047,7 @@ describe("coffee social state helpers", () => {
     );
   });
 
-  it("never exposes a refill target for a coffee-refusing bot", async () => {
+  it("serves and refills water for a coffee-refusing bot", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
     seedCoffeeBot(db, userId, ALICE);
@@ -16861,22 +17082,21 @@ describe("coffee social state helpers", () => {
       userId,
     );
 
-    assert.throws(
-      () => topOffCoffeeCupForBot(
-        db,
-        userId,
-        created.conversation.id,
-        ALICE.id,
-        0.62,
-      ),
-      /does not take coffee/i,
+    const toppedOff = topOffCoffeeCupForBot(
+      db,
+      userId,
+      created.conversation.id,
+      ALICE.id,
+      0.62,
+      0.18,
     );
     assert.equal(
       db.prepare(
         "SELECT COUNT(*) AS count FROM coffee_cup_top_offs WHERE conversation_id = ? AND bot_id = ?",
       ).get(created.conversation.id, ALICE.id)?.count,
-      0,
+      1,
     );
+    assert.equal(toppedOff.coffeeCupTopOffsByBotId?.[ALICE.id]?.progressAfter, 0.18);
   });
 
   it("never lets a legacy ambient waiter top off an eligible bot", async () => {

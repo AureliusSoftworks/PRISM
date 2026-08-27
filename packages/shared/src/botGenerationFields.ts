@@ -1,6 +1,5 @@
 import { BOT_PROFILE_PURPOSE_STATEMENT_MAX_LENGTH } from "./botProfile.ts";
 import { BOT_POWER_NAME_MAX_LENGTH } from "./botPower.ts";
-import { BOT_NAME_PRONUNCIATION_MAX_LENGTH } from "./audioVoice.ts";
 
 export const BOT_GENERATION_FIELD_REGISTRY_VERSION = 1 as const;
 
@@ -42,7 +41,9 @@ const excluded = (reason: string): BotGenerationFieldDefinitionV1 => ({
 /** Single source of truth for every stored creative value in Avatar Studio. */
 export const BOT_GENERATION_FIELD_REGISTRY_V1 = {
   "identity.name": prose(80),
-  "identity.namePronunciation": prose(BOT_NAME_PRONUNCIATION_MAX_LENGTH),
+  "identity.namePronunciation": excluded(
+    "Name pronunciation is player-authored only when speech needs correction.",
+  ),
   "identity.selfReferral": excluded(
     "Spoken-name authoring was removed; bots use their display name when speaking.",
   ),

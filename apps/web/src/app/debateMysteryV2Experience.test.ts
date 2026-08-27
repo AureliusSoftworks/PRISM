@@ -74,7 +74,9 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /styles\.mansionDoor/u);
     assert.match(experienceSource, /mysteryMapOccupantPosition/u);
     assert.match(experienceSource, /renderBotGlyph/u);
-    assert.match(experienceSource, /Choose where to descend\. Movement is free\./u);
+    assert.match(experienceSource, /Move through one connected doorway at a time\./u);
+    assert.match(experienceSource, /mansionSelectedRoomAdjacent/u);
+    assert.match(experienceSource, /Not adjacent/u);
     assert.doesNotMatch(experienceSource, /styles\.floorStack/u);
     assert.doesNotMatch(experienceSource, /--mansion-room-image/u);
     assert.doesNotMatch(experienceSource, /room\.bundledAssetPath \? `url/u);
@@ -88,7 +90,7 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(cssSource, /animation:\s*roomDescend[^;]+backwards/u);
   });
 
-  it("keeps the title card silent, then stages the frozen Casekeeper briefing before the map", () => {
+  it("keeps the title card silent, then opens the frozen Casekeeper briefing in the crime scene", () => {
     assert.match(experienceSource, /openingOrMapPlaybackSuppressed = state\.playPhase === "title_card"/u);
     assert.match(experienceSource, /if \(state\.playPhase === "case_opening"\)/u);
     assert.match(experienceSource, /nodeId === "briefing-opening"/u);
@@ -98,10 +100,14 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.doesNotMatch(experienceSource, /className=\{styles\.caseOpeningDialogue\}[\s\S]{0,280}onClick=\{\(\) => void dismissOpening\(\)\}/u);
     assert.match(experienceSource, /action: "dismiss_case_opening"/u);
     assert.match(experienceSource, /data-opening-map-reveal=\{openingMapReveal \? "true" : undefined\}/u);
-    assert.match(cssSource, /\.caseOpeningStage\s*\{[\s\S]*background:\s*#000/u);
+    assert.match(experienceSource, /--opening-room-image/u);
+    assert.match(experienceSource, /Enter the crime scene/u);
+    assert.match(cssSource, /\.caseOpeningStage\s*\{[\s\S]*var\(--opening-room-image\)/u);
     assert.match(cssSource, /\.caseOpeningStage\s*\{[\s\S]*cursor:\s*pointer/u);
     assert.match(cssSource, /\.investigation\[data-opening-map-reveal="true"\]::after[\s\S]*background:\s*#000/u);
     assert.match(cssSource, /@keyframes caseOpeningReveal/u);
+    assert.match(experienceSource, /caseOpeningPlayerAvatar/u);
+    assert.match(experienceSource, /player character/u);
   });
 
   it("keeps unseen occupants off the mansion and stages the finite first-visit reveal", () => {
@@ -350,12 +356,28 @@ describe("Whodunnit V2 prosecution experience", () => {
       assert.ok(experienceSource.includes(callout));
     }
     assert.match(experienceSource, /aria-live="assertive"/u);
+    assert.match(experienceSource, /Continue in background/u);
+    assert.match(experienceSource, /Only one Whodunnit can cook at a time/u);
     assert.match(cssSource, /prefers-reduced-motion: reduce/u);
     assert.match(cssSource, /\.callout span/u);
     assert.doesNotMatch(
       cssSource,
       /\.theoryBoard,\s*\.callout\s*\{/u,
     );
+  });
+
+  it("groups only the Spectator Forge into three calm phases with expandable details", () => {
+    assert.match(experienceSource, /spectatorForge = state\.config\.playerRole === "spectator"/u);
+    assert.match(experienceSource, /Preparing your mystery to watch\./u);
+    for (const phase of ["Writing the trial", "Checking the case", "Recording the cast"]) {
+      assert.match(experienceSource, new RegExp(phase, "u"));
+    }
+    assert.match(experienceSource, /<summary>Preparation details<\/summary>/u);
+    assert.match(experienceSource, /open=\{needsAttention \|\| undefined\}/u);
+    assert.match(experienceSource, /Preparation attempt \{compilation\.attempt\}/u);
+    assert.match(experienceSource, /spectatorForge \? SPECTATOR_FORGE_STAGES : FORGE_STAGES/u);
+    assert.match(experienceSource, /!spectatorForge && compilationActive/u);
+    assert.match(cssSource, /\.forgeDetails/u);
   });
 
   it("resumes and polls durable preparation until completion or actionable recovery", () => {
@@ -479,18 +501,30 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(setupSource, /Theme \/ Spark/u);
     assert.match(setupSource, /placeholder="Surprise me/u);
     assert.match(setupSource, /Synthesize assets in Case Forge/u);
-    assert.match(setupSource, /Create exhibit images with Debate’s existing asset pipeline/u);
-    assert.match(setupSource, /Coming later · available only during Case Forge/u);
+    assert.match(setupSource, /Create sealed exhibit images/u);
+    assert.match(setupSource, /ONLINE only · LOCAL keeps the bundled room pack/u);
     assert.match(setupSource, /Coming later · investigation music remains unchanged/u);
     assert.match(setupSource, /mysteryEvidenceAssetSynthesis/u);
+    assert.match(setupSource, /mysteryRoomAssetSynthesis/u);
+    assert.match(setupSource, /setMysteryEvidenceAssetSynthesis\] =\s*useState\(false\)/u);
+    assert.match(setupSource, /setMysteryRoomAssetSynthesis\] =\s*useState\(false\)/u);
+    assert.match(setupSource, /props\.responseMode !== "local"/u);
+    assert.match(setupSource, /Generated case art stays outside Images and the Library/u);
     assert.match(setupSource, /mysteryMansionBundleId/u);
     assert.match(setupSource, /mystery-mansion\/save/u);
     assert.match(experienceSource, /Save mansion level/u);
     assert.match(setupSource, /session\.format === "whodunnit"/u);
     assert.match(setupSource, /Open evidence assets/u);
     assert.match(setupSource, /Skip investigation/u);
+    assert.match(setupSource, /Start directly in court/u);
+    assert.match(setupSource, /Bypass conclusion review and begin the watch-only trial/u);
     assert.match(setupSource, /investigationMode: mysterySkipInvestigation \? "court_only" : "full"/u);
     assert.match(setupSource, /court-only cases exclude room assets/u);
+    assert.match(experienceSource, /The Casekeeper is still securing this room/u);
+    assert.match(experienceSource, /sealedMysteryAssetObjectUrl/u);
+    assert.match(experienceSource, /Save evidence image/u);
+    assert.match(experienceSource, /Save room image/u);
+    assert.match(experienceSource, /Finish the finite visible sweep/u);
     assert.match(experienceSource, /state\.config\.investigationMode === "court_only" \? "Begin Trial"/u);
   });
 

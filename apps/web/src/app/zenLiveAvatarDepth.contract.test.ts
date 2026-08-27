@@ -23,7 +23,7 @@ describe("Zen live avatar sizing contract", () => {
     assert.doesNotMatch(pageSource, /data-depth-scaled="true"/);
   });
 
-  it("restores the authored full-size default and mini/full handoff", () => {
+  it("restores the authored full-size default and shared lowered mini/full handoff", () => {
     assert.match(pageSource, /const ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX = 380;/);
     assert.match(pageSource, /const ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX = 380;/);
     assert.match(
@@ -33,6 +33,10 @@ describe("Zen live avatar sizing contract", () => {
     assert.match(
       pageSource,
       /const ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX = BOT_AVATAR_COMPACT_EXIT_MIN_PX - ZEN_LIVE_BOT_AVATAR_HD_HOLD_PX;/,
+    );
+    assert.match(
+      pageSource,
+      /const ZEN_LIVE_BOT_AVATAR_HD_HOLD_PX = 60;/,
     );
     assert.match(pageSource, /avatarSizePx=\{zenLiveBotAvatarSizePx\}/);
     assert.match(

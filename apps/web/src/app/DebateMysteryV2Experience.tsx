@@ -22,6 +22,7 @@ import {
   type DebateMysteryPublicTopicV2,
   type DebateMysteryRecordReferenceV2,
   type DebateMysteryRoomV2,
+  type DebateMysterySealedAssetRefV1,
   type DebateMysteryTheoryV1,
   type DebateBotSnapshotV1,
   type DebateSessionV1,
@@ -84,6 +85,7 @@ import styles from "./debateMysteryV2.module.css";
 
 interface V2SharedProps {
   bots: MysteryBotSummary[];
+  playerName: string;
   theme: "light" | "dark";
   audioEnabled: boolean;
   audioVolume: number;
@@ -217,6 +219,12 @@ const FORGE_STAGES: Array<{
   { id: "begin_case", label: "Begin Case" },
 ];
 
+const SPECTATOR_FORGE_STAGES = [
+  { id: "writing_trial", label: "Writing the trial" },
+  { id: "checking_case", label: "Checking the case" },
+  { id: "recording_cast", label: "Recording the cast" },
+] as const;
+
 const FORGE_TIPS = [
   "Every checkpoint saves safely, so you can return to Archive whenever you need to.",
   "The Forge is preparing a finite case pack; nothing during play will call a model.",
@@ -333,6 +341,31 @@ function mysteryIdentityMirrorAppearance(
 
 function recordKey(reference: DebateMysteryRecordReferenceV2): string {
   return `${reference.kind}:${reference.id}`;
+}
+
+function sealedMysteryAssetKey(
+  kind: "evidence" | "room",
+  subjectId: string,
+): string {
+  return `${kind}:${subjectId}`;
+}
+
+function sealedMysteryAssetApiUrl(
+  sessionId: string,
+  kind: "evidence" | "room",
+  subjectId: string,
+): string {
+  return `/api/debates/${encodeURIComponent(sessionId)}/mystery-assets/${kind}/${encodeURIComponent(subjectId)}/file`;
+}
+
+function sealedMysteryAssetObjectUrl(
+  objectUrls: Readonly<Record<string, string>>,
+  kind: "evidence" | "room",
+  subjectId: string,
+  asset: DebateMysterySealedAssetRefV1 | null | undefined,
+): string | null {
+  if (!asset?.revealed || asset.status !== "ready") return null;
+  return objectUrls[sealedMysteryAssetKey(kind, subjectId)] ?? null;
 }
 
 interface MansionRoomPlacement {
@@ -543,6 +576,7 @@ export function DebateMysteryV2CompilationResume(
   const compilation = liveCompilation;
   const needsAttention = compilation.stage === "needs_attention";
   const compilationActive = debateMysteryForgeStageIsActive(compilation.stage);
+  const spectatorForge = state.config.playerRole === "spectator";
   useEffect(() => {
     if (!compilationActive) return;
     setClockNowMs(Date.now());
@@ -564,9 +598,18 @@ export function DebateMysteryV2CompilationResume(
     compilation.totalPasses,
     Math.max(0, compilation.completedPasses),
   );
-  const currentIndex = compilation.stage === "complete"
-    ? FORGE_STAGES.length - 1
-    : Math.min(completedPasses, FORGE_STAGES.length - 1);
+  const forgeStages = spectatorForge ? SPECTATOR_FORGE_STAGES : FORGE_STAGES;
+  const currentIndex = spectatorForge
+    ? compilation.stage === "complete"
+      ? SPECTATOR_FORGE_STAGES.length
+      : completedPasses <= 0
+        ? 0
+        : completedPasses <= 2
+          ? 1
+          : 2
+    : compilation.stage === "complete"
+      ? FORGE_STAGES.length - 1
+      : Math.min(completedPasses, FORGE_STAGES.length - 1);
   const percent = debateMysteryForgeAuthoritativePercent(
     completedPasses,
     compilation.totalPasses,
@@ -629,12 +672,17 @@ export function DebateMysteryV2CompilationResume(
 
   return (
     <main className={styles.forge} data-theme={props.theme} data-tutorial-target="mystery-v2-case-forge">
-      <button type="button" className={styles.archiveButton} onClick={props.onExit}>← Archive</button>
+      <button type="button" className={styles.archiveButton} onClick={props.onExit}>← Continue in background</button>
       <section className={styles.forgeCard}>
         <div className={styles.forgePrism} aria-hidden="true"><i /><i /><i /></div>
         <p className={styles.eyebrow}>PRISM / Case Forge</p>
-        <h1>{needsAttention ? "Case preparation stopped" : "Preparing a prosecution turnabout"}</h1>
-        <p className={styles.forgeMessage}>{compilation.spoilerSafeMessage}</p>
+        <h1>{needsAttention ? "Case preparation stopped" : spectatorForge ? "Preparing your mystery to watch." : "Preparing a prosecution turnabout"}</h1>
+        {!spectatorForge ? <p className={styles.forgeMessage}>{compilation.spoilerSafeMessage}</p> : null}
+        {compilationActive ? (
+          <p className={styles.forgeBackgroundNote}>
+            Safe to leave. Case Forge keeps working while you use other parts of PRISM. Only one Whodunnit can cook at a time.
+          </p>
+        ) : null}
         {needsAttention ? (
           <p className={styles.forgeRecovery}>
             The Forge is not still running. Your setup and every completed draft section are safe. Retry will resume from the last durable checkpoint.
@@ -656,37 +704,65 @@ export function DebateMysteryV2CompilationResume(
           {etaLabel ? <span>{etaLabel}</span> : <span>ETA appears after two durable passes</span>}
         </div>
         <ol className={styles.forgeStages}>
-          {FORGE_STAGES.map((entry, index) => (
+          {forgeStages.map((entry, index) => (
             <li key={entry.id} data-state={index < currentIndex ? "complete" : index === currentIndex ? (needsAttention ? "error" : "active") : "waiting"}>
               <span aria-hidden="true">{index < currentIndex ? "✓" : index === currentIndex && needsAttention ? "!" : index + 1}</span>
               <strong>{entry.label}</strong>
             </li>
           ))}
         </ol>
-        <section className={styles.forgeSubsteps} aria-label="Current Case Forge work">
-          <p>Current work</p>
-          <ol>
-            {(compilation.substeps ?? []).map((substep) => (
-              <li key={substep.id} data-state={substep.state}>
-                <span aria-hidden="true">
-                  {substep.state === "complete" ? "✓" : substep.state === "attention" ? "!" : "·"}
-                </span>
-                {substep.label}
-              </li>
-            ))}
-          </ol>
-        </section>
-        {compilationActive ? (
+        {spectatorForge ? (
+          <details className={styles.forgeDetails} open={needsAttention || undefined}>
+            <summary>Preparation details</summary>
+            <div>
+              <p className={styles.forgeMessage}>{compilation.spoilerSafeMessage}</p>
+              <section className={styles.forgeSubsteps} aria-label="Current Case Forge work">
+                <p>Current work</p>
+                <ol>
+                  {(compilation.substeps ?? []).map((substep) => (
+                    <li key={substep.id} data-state={substep.state}>
+                      <span aria-hidden="true">
+                        {substep.state === "complete" ? "✓" : substep.state === "attention" ? "!" : "·"}
+                      </span>
+                      {substep.label}
+                    </li>
+                  ))}
+                </ol>
+              </section>
+              <div className={styles.localVoiceNotice}>
+                <span aria-hidden="true">◈</span>
+                <div><strong>Local English performance</strong><small>Premium voices are unavailable in Whodunnit V2. No ElevenLabs request will be made.</small></div>
+              </div>
+              <small>{compilation.preparedAudioCount} / {compilation.requiredAudioCount} unique recordings verified</small>
+              <small>Preparation attempt {compilation.attempt}{needsAttention ? " · stopped safely" : ""}</small>
+            </div>
+          </details>
+        ) : (
+          <section className={styles.forgeSubsteps} aria-label="Current Case Forge work">
+            <p>Current work</p>
+            <ol>
+              {(compilation.substeps ?? []).map((substep) => (
+                <li key={substep.id} data-state={substep.state}>
+                  <span aria-hidden="true">
+                    {substep.state === "complete" ? "✓" : substep.state === "attention" ? "!" : "·"}
+                  </span>
+                  {substep.label}
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
+        {!spectatorForge && compilationActive ? (
           <aside className={styles.forgeTip} aria-label="Case Forge tip">
             <span aria-hidden="true">Forge note</span>
             <p key={forgeTipIndex}>{FORGE_TIPS[forgeTipIndex]}</p>
           </aside>
         ) : null}
-        <div className={styles.localVoiceNotice}>
+        {!spectatorForge ? <div className={styles.localVoiceNotice}>
           <span aria-hidden="true">◈</span>
           <div><strong>Local English performance</strong><small>Premium voices are unavailable in Whodunnit V2. No ElevenLabs request will be made.</small></div>
-        </div>
-        {compilation.requiredAudioCount > 0 ? (
+        </div> : null}
+        {!spectatorForge && compilation.requiredAudioCount > 0 ? (
           <small>{compilation.preparedAudioCount} / {compilation.requiredAudioCount} unique recordings verified</small>
         ) : null}
         {needsAttention ? (
@@ -708,7 +784,7 @@ export function DebateMysteryV2CompilationResume(
         {needsAttention && errorDetailsCopyState !== "idle" ? (
           <p role="status">{errorDetailsCopyState === "copied" ? "Error details copied to clipboard." : errorDetailsCopyState === "failed" ? "Could not copy error details. Try again." : "Copying error details…"}</p>
         ) : null}
-        {needsAttention ? <small>Preparation attempt {compilation.attempt} · stopped safely</small> : null}
+        {!spectatorForge && needsAttention ? <small>Preparation attempt {compilation.attempt} · stopped safely</small> : null}
         {error ? <p className={styles.error}>{error}</p> : null}
       </section>
     </main>
@@ -780,6 +856,11 @@ export function DebateMysteryV2Readiness(
 
 export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const state = props.session.formatState as DebateWhodunnitFormatStateV2;
+  const pendingRoomKey = state.rooms
+    .filter((room) => room.sealedAsset?.status === "pending")
+    .map((room) => room.id)
+    .sort()
+    .join("|");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [command, setCommand] = useState<"move" | "examine" | "talk" | "present" | null>(null);
@@ -802,6 +883,11 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const [mansionSaveState, setMansionSaveState] = useState<
     "idle" | "saving" | "saved" | "failed"
   >("idle");
+  const [sealedAssetSaveState, setSealedAssetSaveState] = useState<
+    Record<string, "saving" | "saved" | "failed">
+  >({});
+  const [sealedAssetObjectUrls, setSealedAssetObjectUrls] = useState<Record<string, string>>({});
+  const sealedAssetObjectUrlRef = useRef(new Map<string, string>());
   const [openingMapReveal, setOpeningMapReveal] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [roomParallax, setRoomParallax] = useState({ x: 0, y: 0 });
@@ -816,7 +902,107 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const mutationIndexRef = useRef(0);
   const lastPlayedPerformanceKeyRef = useRef<string | null>(null);
   const lastCalloutIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pendingRoomKey) return;
+    let cancelled = false;
+    let timer: number | null = null;
+    let inFlight = false;
+    const refreshSecuredRooms = async (): Promise<void> => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      try {
+        const result = await props.request<{ session: DebateSessionV1 }>(
+          `/api/debates/${encodeURIComponent(props.session.id)}?perspective=live`,
+        );
+        if (!cancelled && result.session.revision > props.session.revision) {
+          props.onSessionChange(result.session);
+        }
+      } catch {
+        // This is a soft doorway poll; the next interval retries.
+      } finally {
+        inFlight = false;
+        if (!cancelled) timer = window.setTimeout(() => void refreshSecuredRooms(), 1_500);
+      }
+    };
+    void refreshSecuredRooms();
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [pendingRoomKey, props.onSessionChange, props.request, props.session.id, props.session.revision]);
   const botById = useMemo(() => new Map(props.bots.map((bot) => [bot.id, bot])), [props.bots]);
+  const revealedAssetRequests = useMemo(() => {
+    const requests = new Map<string, { kind: "evidence" | "room"; subjectId: string }>();
+    for (const room of state.rooms) {
+      if (room.sealedAsset?.revealed && room.sealedAsset.status === "ready") {
+        requests.set(sealedMysteryAssetKey("room", room.id), {
+          kind: "room",
+          subjectId: room.id,
+        });
+      }
+    }
+    for (const item of state.record) {
+      if (
+        item.reference.kind === "evidence" &&
+        item.sealedAsset?.revealed &&
+        item.sealedAsset.status === "ready"
+      ) {
+        requests.set(sealedMysteryAssetKey("evidence", item.reference.id), {
+          kind: "evidence",
+          subjectId: item.reference.id,
+        });
+      }
+    }
+    return Array.from(requests.entries()).sort(([left], [right]) => left.localeCompare(right));
+  }, [state.record, state.rooms]);
+  const revealedAssetRequestKey = revealedAssetRequests.map(([key]) => key).join("|");
+
+  useEffect(() => {
+    const desired = new Map(revealedAssetRequests);
+    const controller = new AbortController();
+    let cancelled = false;
+    for (const [key, objectUrl] of sealedAssetObjectUrlRef.current) {
+      if (desired.has(key)) continue;
+      URL.revokeObjectURL(objectUrl);
+      sealedAssetObjectUrlRef.current.delete(key);
+    }
+    setSealedAssetObjectUrls(Object.fromEntries(sealedAssetObjectUrlRef.current));
+    for (const [key, request] of desired) {
+      if (sealedAssetObjectUrlRef.current.has(key)) continue;
+      void fetch(
+        sealedMysteryAssetApiUrl(props.session.id, request.kind, request.subjectId),
+        {
+          credentials: "same-origin",
+          cache: "no-store",
+          signal: controller.signal,
+        },
+      ).then(async (response) => {
+        if (!response.ok) return;
+        const objectUrl = URL.createObjectURL(await response.blob());
+        if (cancelled || !desired.has(key)) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        sealedAssetObjectUrlRef.current.set(key, objectUrl);
+        setSealedAssetObjectUrls(Object.fromEntries(sealedAssetObjectUrlRef.current));
+      }).catch(() => {
+        // A reveal may race a session refresh; the next public-state change retries it.
+      });
+    }
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+    // The compact key prevents re-fetches for unrelated session revisions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.session.id, revealedAssetRequestKey]);
+
+  useEffect(() => () => {
+    for (const objectUrl of sealedAssetObjectUrlRef.current.values()) {
+      URL.revokeObjectURL(objectUrl);
+    }
+    sealedAssetObjectUrlRef.current.clear();
+  }, []);
   const botNamesById = useMemo(() => new Map([
     ...props.bots.map((bot) => [bot.id, bot.name] as const),
     ...state.suspects.map((suspect) => [suspect.botId, suspect.name] as const),
@@ -952,6 +1138,32 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const admittedRecord = state.record.filter((item) => item.admitted);
   const mansionCanBeSaved = debateMysteryMansionBundleEligibleV2(state);
 
+  const saveSealedAsset = async (
+    asset: DebateMysterySealedAssetRefV1,
+    subjectId: string,
+    title: string,
+  ): Promise<void> => {
+    const assetKey = sealedMysteryAssetKey(asset.kind, subjectId);
+    if (
+      !asset.revealed ||
+      asset.status !== "ready" ||
+      sealedAssetSaveState[assetKey] === "saving" ||
+      sealedAssetSaveState[assetKey] === "saved"
+    ) return;
+    setSealedAssetSaveState((current) => ({ ...current, [assetKey]: "saving" }));
+    setError(null);
+    try {
+      await props.request(
+        `/api/debates/${encodeURIComponent(props.session.id)}/mystery-assets/${asset.kind}/${encodeURIComponent(subjectId)}/save`,
+        mutationBody({ title }),
+      );
+      setSealedAssetSaveState((current) => ({ ...current, [assetKey]: "saved" }));
+    } catch (caught) {
+      setSealedAssetSaveState((current) => ({ ...current, [assetKey]: "failed" }));
+      setError(caught instanceof Error ? caught.message : "The revealed visual could not be saved.");
+    }
+  };
+
   const saveMansion = async (): Promise<void> => {
     if (!mansionCanBeSaved || mansionSaveState === "saving") return;
     setMansionSaveState("saving");
@@ -1049,6 +1261,14 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     ?? mansionPlacements[0]?.room
     ?? null;
   const mansionSelectedSuspect = state.suspects.find((suspect) => suspect.roomId === mansionSelectedRoom?.id) ?? null;
+  const mansionSelectedRoomPending = mansionSelectedRoom?.sealedAsset?.status === "pending";
+  const mansionSelectedRoomAdjacent = Boolean(
+    mansionSelectedRoom &&
+      (!currentRoom ||
+        mansionSelectedRoom.id === currentRoom.id ||
+        (currentRoom.neighborIds ?? []).includes(mansionSelectedRoom.id) ||
+        (mansionSelectedRoom.neighborIds ?? []).includes(currentRoom.id)),
+  );
   const mansionMinX = mansionPlacements.length ? Math.min(...mansionPlacements.map((placement) => placement.x)) : 0;
   const mansionMinY = mansionPlacements.length ? Math.min(...mansionPlacements.map((placement) => placement.y)) : 0;
   const mansionMaxX = Math.max(1, ...mansionPlacements.map((placement) => placement.x + placement.width));
@@ -1472,11 +1692,28 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
 
   const renderRecordButtons = (onChoose: (reference: DebateMysteryRecordReferenceV2) => void): React.JSX.Element => (
     <div className={styles.recordGrid}>
-      {admittedRecord.map((item) => (
-        <button key={recordKey(item.reference)} type="button" disabled={busy} onClick={() => onChoose(item.reference)}>
-          <span aria-hidden="true">{item.emoji}</span><strong>{item.title}</strong><small>{item.description}</small>
-        </button>
-      ))}
+      {admittedRecord.map((item) => {
+        const assetUrl = item.reference.kind === "evidence"
+          ? sealedMysteryAssetObjectUrl(
+              sealedAssetObjectUrls,
+              "evidence",
+              item.reference.id,
+              item.sealedAsset,
+            )
+          : null;
+        return (
+          <button key={recordKey(item.reference)} type="button" disabled={busy} onClick={() => onChoose(item.reference)}>
+            {assetUrl
+              ? <>
+                  {/* Direct delivery preserves the sealed route's no-store boundary. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img className={styles.recordAssetImage} src={assetUrl} alt="" />
+                </>
+              : <span aria-hidden="true">{item.emoji}</span>}
+            <strong>{item.title}</strong><small>{item.description}</small>
+          </button>
+        );
+      })}
       {admittedRecord.length === 0 ? <p>No admitted record items yet.</p> : null}
     </div>
   );
@@ -1497,8 +1734,21 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       !caseFileOpen &&
       !theoryOpen,
   );
+  const currentRoomAssetUrl = currentRoom ? sealedMysteryAssetObjectUrl(
+    sealedAssetObjectUrls,
+    "room",
+    currentRoom.id,
+    currentRoom?.sealedAsset,
+  ) : null;
+  const currentRoomAssetKey = currentRoom
+    ? sealedMysteryAssetKey("room", currentRoom.id)
+    : null;
   const roomSceneStyle = {
-    "--room-image": currentRoom?.bundledAssetPath ? `url(${currentRoom.bundledAssetPath})` : "none",
+    "--room-image": currentRoomAssetUrl
+      ? `url(${currentRoomAssetUrl})`
+      : currentRoom?.bundledAssetPath
+        ? `url(${currentRoom.bundledAssetPath})`
+        : "none",
     "--room-parallax-x": `${roomParallax.x}px`,
     "--room-parallax-y": `${roomParallax.y}px`,
   } as CSSProperties;
@@ -1614,24 +1864,45 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         void dismissOpening();
       }
     };
+    const openingRoomImage = currentRoom ? sealedMysteryAssetObjectUrl(
+      sealedAssetObjectUrls,
+      "room",
+      currentRoom.id,
+      currentRoom?.sealedAsset,
+    ) ?? currentRoom?.bundledAssetPath ?? null : null;
     return (
       <main className={styles.caseOpening} data-theme={props.theme}>
         <button type="button" className={styles.archiveButton} onClick={props.onExit}>← Archive</button>
         <section
           className={styles.caseOpeningStage}
-          aria-label="Casekeeper briefing. Click anywhere to reveal the mansion map."
+          aria-label="Casekeeper briefing in the crime scene. Click anywhere to begin the visible sweep."
           aria-busy={busy || undefined}
           role="button"
           tabIndex={0}
+          style={{
+            "--opening-room-image": openingRoomImage
+              ? `url(${openingRoomImage})`
+              : "none",
+          } as CSSProperties}
           onClick={() => void dismissOpening()}
           onKeyDown={handleOpeningKeyDown}
         >
+          <div
+            className={styles.caseOpeningPlayerAvatar}
+            role="img"
+            aria-label={`${props.playerName || "Investigator"}, player character`}
+          >
+            <i aria-hidden="true">
+              {props.renderBotGlyph("lucideTriangle", { size: 54, strokeWidth: 1.35 })}
+            </i>
+            <strong>{props.playerName || "Investigator"}</strong>
+          </div>
           <div
             className={styles.caseOpeningDialogue}
           >
             <small>Casekeeper</small>
             <p>{revealedSpeechText(whodunnitCaptionSpeechText(openingText), captionSpeechTiming)}</p>
-            <span className={styles.dialogueContinueHint} role="status">{busy ? "Opening the map…" : "Click to continue"}</span>
+            <span className={styles.dialogueContinueHint} role="status">{busy ? "Opening the crime scene…" : "Enter the crime scene"}</span>
           </div>
         </section>
         {error ? <p className={styles.errorBanner}>{error}</p> : null}
@@ -1785,7 +2056,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         </nav>}
         {!spectator && command === "present" ? <div className={styles.choiceTray}><header><h2>Object with evidence</h2><button type="button" onClick={() => setCommand(null)}>Close</button></header>{renderRecordButtons((record) => { setCommand(null); void sendAction({ action: "object_statement", statementId: activeStatement.statementId, record }); })}</div> : null}
         {!spectator && state.pendingProsecutionChoice ? <div className={styles.prosecutionChoice} role="dialog" aria-modal="true" aria-labelledby="prosecution-choice-title"><p className={styles.eyebrow}>Your response</p><h2 id="prosecution-choice-title">{state.pendingProsecutionChoice.prompt}</h2>{state.pendingProsecutionChoice.options.map((option) => <button key={option.id} type="button" disabled={busy} onClick={() => void sendAction({ action: "choose_prosecution_response", choiceId: state.pendingProsecutionChoice!.id, optionId: option.id })}>{option.text}</button>)}</div> : null}
-        {caseFileOpen ? <CaseFile state={state} onClose={() => setCaseFileOpen(false)} /> : null}
+        {caseFileOpen ? <CaseFile state={state} objectUrls={sealedAssetObjectUrls} saveState={sealedAssetSaveState} onSaveAsset={saveSealedAsset} onClose={() => setCaseFileOpen(false)} /> : null}
         {error ? <p className={styles.errorBanner}>{error}</p> : null}
       </main>
     );
@@ -1882,14 +2153,14 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                     type="button"
                     className={styles.mansionRoom}
                     disabled={busy}
-                    data-discovered={room.unlocked ? "true" : undefined}
+                    data-discovered={room.visited ? "true" : undefined}
                     data-current={room.id === currentRoom?.id ? "true" : undefined}
                     data-selected={room.id === mansionSelectedRoom?.id ? "true" : undefined}
                     data-visited={room.visited ? "true" : undefined}
                     data-searched={room.hotspots.length > 0 && examinedHotspots === room.hotspots.length ? "true" : undefined}
-                    data-locked={!room.unlocked ? "true" : undefined}
+                    data-locked={!room.visited ? "true" : undefined}
                     aria-pressed={room.id === mansionSelectedRoom?.id}
-                    aria-label={`${room.unlocked ? room.name : "Locked location"}${room.visited ? ", visited" : ""}${roomSuspects.length ? `, ${roomSuspects.map((suspect) => suspect.name).join(" and ")} known to be here` : ""}`}
+                    aria-label={`${room.visited ? room.name : "Unknown room"}${room.sealedAsset?.status === "pending" ? ", being secured" : ""}${room.visited ? ", visited" : ""}${roomSuspects.length ? `, ${roomSuspects.map((suspect) => suspect.name).join(" and ")} known to be here` : ""}`}
                     onClick={() => setSelectedMansionRoomId(room.id)}
                     style={{
                       left: `${mansionX(placement.x)}%`,
@@ -1898,7 +2169,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                       height: `${mansionHeight(placement.height)}%`,
                     }}
                   >
-                    {room.unlocked ? <strong>{room.name}</strong> : null}
+                    {room.visited ? <strong>{room.name}</strong> : null}
                     {roomSuspects.map((suspect) => {
                       const bot = presentMysteryBot(botById.get(suspect.botId) ?? null);
                       const position = mysteryMapOccupantPosition(props.session.id, room.id, suspect.seatId);
@@ -1924,19 +2195,28 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
             <section className={styles.mansionRoomDetails} aria-live="polite" data-locked={!mansionSelectedRoom.unlocked ? "true" : undefined}>
               <div>
                 <small>Selected room</small>
-                <strong>{mansionSelectedRoom.unlocked ? mansionSelectedRoom.name : "Locked location"}</strong>
-                <span>{mansionFloorDisplayName} · {mansionSelectedRoom.unlocked ? (mansionSelectedRoom.visited ? "Visited" : "Not yet visited") : "Locked"}</span>
+                <strong>{mansionSelectedRoom.visited ? mansionSelectedRoom.name : "Unknown room"}</strong>
+                <span>{mansionFloorDisplayName} · {mansionSelectedRoomPending ? "Being secured" : mansionSelectedRoom.unlocked ? (mansionSelectedRoom.visited ? "Visited" : "Not yet visited") : "Locked"}</span>
               </div>
               <dl>
                 <div><dt>Known occupant</dt><dd>{mansionSelectedRoom.visited ? mansionSelectedSuspect?.name ?? "Unknown" : "Unknown"}</dd></div>
-                <div><dt>Details reviewed</dt><dd>{mansionSelectedRoom.hotspots.filter((hotspot) => hotspot.examined).length} / {mansionSelectedRoom.hotspots.length}</dd></div>
+                <div><dt>Details reviewed</dt><dd>{mansionSelectedRoom.visited ? `${mansionSelectedRoom.hotspots.filter((hotspot) => hotspot.examined).length} / ${mansionSelectedRoom.hotspots.length}` : "Unknown"}</dd></div>
               </dl>
-              <button type="button" disabled={busy || !mansionSelectedRoom.unlocked} onClick={() => void sendAction({ action: "move", roomId: mansionSelectedRoom.id })}>
-                {mansionSelectedRoom.unlocked ? `Enter ${mansionSelectedRoom.name}` : "Locked"}
+              {mansionSelectedRoomPending ? <p className={styles.securedRoomStatus} role="status" aria-live="polite">The Casekeeper is still securing this room. Try again shortly.</p> : null}
+              <button type="button" disabled={busy || !mansionSelectedRoom.unlocked || mansionSelectedRoomPending || !mansionSelectedRoomAdjacent} onClick={() => void sendAction({ action: "move", roomId: mansionSelectedRoom.id })}>
+                {mansionSelectedRoomPending
+                  ? "Being secured"
+                  : !mansionSelectedRoom.unlocked
+                    ? "Locked"
+                    : !mansionSelectedRoomAdjacent
+                      ? "Not adjacent"
+                      : mansionSelectedRoom.visited
+                        ? `Enter ${mansionSelectedRoom.name}`
+                        : "Enter room"}
               </button>
             </section>
           ) : null}
-          <small className={styles.mansionHint}>Choose where to descend. Movement is free.</small>
+          <small className={styles.mansionHint}>Move through one connected doorway at a time.</small>
         </section>
       ) : currentRoom ? (
         <section
@@ -1949,13 +2229,19 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           onPointerLeave={handleRoomPointerLeave}
           onClick={handleRoomInvestigationClick}
         >
+          {currentRoom.sealedAsset?.status === "pending" ? (
+            <div className={styles.roomSecuring} role="status" aria-live="polite">
+              <strong>The Casekeeper is still securing this room.</strong>
+              <span>Try again shortly.</span>
+            </div>
+          ) : null}
           <div className={styles.roomParallaxLayer}>
             <div className={styles.roomBackdrop} data-blurred={roomActorVisible ? "true" : undefined} />
             {command === "examine" && !roomComplete ? <div className={styles.hotspots} aria-label="Examination points">{currentRoomUnexaminedHotspots.map((hotspot) => <button key={hotspot.id} type="button" aria-label={`Examine ${hotspot.label}`} disabled={!lensActive} data-examining={examiningHotspotId === hotspot.id ? "true" : undefined} style={hotspotSpotStyle(hotspot.polygon)} onFocus={() => { const center = debateMysteryV2HotspotCenter(hotspot.polygon); setInvestigationLens(resolveDebateMysteryV2Lens(center.x, center.y, currentRoom.hotspots)); }} onClick={(event) => { if (event.detail === 0) { event.stopPropagation(); void examineHotspot(hotspot.id); } }} />)}</div> : null}
           </div>
           {command === "examine" && !roomComplete ? <i className={styles.investigationLens} aria-hidden="true" data-visible={lensActive ? "true" : undefined} data-targeted={debateMysteryV2LensClickTarget(investigationLens) ? "true" : undefined} style={{ left: `${investigationLens.x}%`, top: `${investigationLens.y}%`, "--lens-proximity": investigationLens.proximity } as CSSProperties} /> : null}
           {roomIntroductionPhase !== "casekeeper" ? <div className={styles.roomShade} /> : null}
-          {!roomIntroductionActive ? <div className={styles.roomTitle}><small>Floor {currentRoom.floor}</small><h1>{currentRoom.name}</h1></div> : null}
+          {!roomIntroductionActive ? <div className={styles.roomTitle}><small>Floor {currentRoom.floor}</small><h1>{currentRoom.name}</h1>{currentRoomAssetUrl && currentRoom.sealedAsset && currentRoomAssetKey ? <button type="button" className={styles.saveSealedAssetButton} disabled={sealedAssetSaveState[currentRoomAssetKey] === "saving" || sealedAssetSaveState[currentRoomAssetKey] === "saved"} onClick={(event) => { event.stopPropagation(); void saveSealedAsset(currentRoom.sealedAsset!, currentRoom.id, `${currentRoom.name} · Whodunnit room`); }}>{sealedAssetSaveState[currentRoomAssetKey] === "saving" ? "Saving…" : sealedAssetSaveState[currentRoomAssetKey] === "saved" ? "Saved to Images" : sealedAssetSaveState[currentRoomAssetKey] === "failed" ? "Retry save" : "Save room image"}</button> : null}</div> : null}
           {roomActorVisible && currentBot ? <div className={styles.roomActor} data-interrogation-phase={interrogationPhase ?? undefined} style={{ "--actor-color": currentBot.color ?? "#a98cff" } as CSSProperties}><div className={styles.roomActorDrift} style={mysteryRoomActorDriftStyle(`${props.session.id}:${currentBot.id}:suspect`)}>{props.renderMysteryBotAvatar(currentBot, "full", { demeanor: "suspect", talking: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId, speechTiming: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId ? speechTiming : null, blinkEnabled: true, facing: "left", speechInkVisible: roomSpeechInkVisible })}<strong>{currentBot.name}</strong>{roomSuspectStageActionText && roomActionPresentation ? <SignalVoiceActionText key={`suspect:${roomDisplayedDialogue?.nodeId ?? ""}:${roomDisplayedDialogue?.occurredAt ?? ""}`} {...roomActionPresentation} accent={currentBot.color} /> : null}</div></div> : null}
           {roomProsecutorActive && prosecutorBot ? <aside className={`${styles.roomActor} ${styles.roomProsecutorActor}`} data-prosecutor-speaking="true" data-interrogation-phase={interrogationPhase ?? undefined} style={{ "--actor-color": prosecutorBot.color ?? "#72d7ff" } as CSSProperties}>
             <div className={styles.roomActorDrift} style={mysteryRoomActorDriftStyle(`${props.session.id}:${prosecutorBot.id}:prosecutor`)}>
@@ -1969,15 +2255,16 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         </section>
       ) : null}
       {!spectatorTheory && !roomIntroductionActive ? <nav className={styles.investigationCommands} aria-label="Investigation commands">
-        <button type="button" data-active={state.roomView === "mansion" ? "true" : undefined} disabled={busy || dialoguePerformanceActive} onClick={() => { setCommand("move"); void sendAction({ action: "move" }); }} data-tutorial-target="mystery-v2-move"><span>⌂</span>Move</button>
+        <button type="button" data-active={state.roomView === "mansion" ? "true" : undefined} disabled={busy || dialoguePerformanceActive || !state.openingSweepComplete} title={!state.openingSweepComplete ? "Examine every visible point in the crime scene first." : undefined} onClick={() => { setCommand("move"); void sendAction({ action: "move" }); }} data-tutorial-target="mystery-v2-move"><span>⌂</span>Move</button>
         <button type="button" data-active={command === "examine" ? "true" : undefined} disabled={busy || dialoguePerformanceActive || state.roomView !== "room"} onClick={() => setCommand("examine")} data-tutorial-target="mystery-v2-examine"><span>⌕</span>Examine</button>
         <button type="button" data-active={command === "talk" ? "true" : undefined} disabled={busy || dialoguePerformanceActive || !currentSuspect} onClick={() => setCommand("talk")} data-tutorial-target="mystery-v2-talk"><span>“”</span>Talk</button>
         <button type="button" data-active={command === "present" ? "true" : undefined} disabled={busy || dialoguePerformanceActive || !currentSuspect || admittedRecord.length === 0} onClick={() => setCommand("present")} data-tutorial-target="mystery-v2-present"><span>◇</span>Present</button>
       </nav> : null}
+      {!spectatorTheory && !roomIntroductionActive && !state.openingSweepComplete ? <small className={styles.sweepHint} role="status">Finish the finite visible sweep before leaving the crime scene.</small> : null}
       {!spectatorTheory && !roomIntroductionActive && command === "talk" && currentSuspect && !dialoguePerformanceActive ? <div className={styles.choiceTray}><header><div><p className={styles.eyebrow}>Talk</p><h2>{currentSuspect.name}</h2></div><button type="button" onClick={() => setCommand(null)}>Close</button></header><p className={styles.topicHelp}>Ask about people, motives, alibis, or rooms. Evidence and testimony stay in Present.</p><div className={styles.topicGroups}>{groupDebateMysteryTalkTopicsV2(state.topics.filter((topic) => topic.suspectSeatId === currentSuspect.seatId)).map((group) => <section key={group.category} className={styles.topicGroup} aria-labelledby={`talk-${currentSuspect.seatId}-${group.category}`}><h3 id={`talk-${currentSuspect.seatId}-${group.category}`}>{group.label}</h3><div className={styles.topicList}>{group.topics.map((topic) => <button key={topic.nodeId} type="button" disabled={busy || dialoguePerformanceActive || !topic.unlocked} data-complete={topic.completed ? "true" : undefined} data-blocked={!topic.unlocked ? "true" : undefined} onClick={() => void sendAction({ action: "talk", suspectSeatId: currentSuspect.seatId, topicNodeId: topic.nodeId })}><span className={styles.topicIcon} aria-hidden="true">{topic.completed ? "✓" : topic.unlocked ? "?" : "×"}</span><span className={styles.topicCopy}><strong>{debateMysteryTalkTopicDisplayLabelV2(topic, state.rooms)}</strong>{!topic.unlocked ? <small>Blocked</small> : null}</span></button>)}</div></section>)}</div></div> : null}
       {!spectatorTheory && !roomIntroductionActive && command === "present" && currentSuspect ? <div className={styles.choiceTray}><header><div><p className={styles.eyebrow}>Present</p><h2>Show {currentSuspect.name}</h2></div><button type="button" onClick={() => setCommand(null)}>Close</button></header>{renderRecordButtons((record) => void sendAction({ action: "present_to_suspect", suspectSeatId: currentSuspect.seatId, record }))}</div> : null}
       {!spectatorTheory && !roomIntroductionActive && state.theoryAvailable ? <button type="button" className={styles.fileChargesButton} onClick={() => setTheoryOpen(true)} data-tutorial-target="mystery-v2-file-theory">File Charges</button> : !spectatorTheory && !roomIntroductionActive ? <small className={styles.theoryHint}>The Theory Board opens after the briefing, one interview, and one admitted record item.</small> : null}
-      {caseFileOpen ? <CaseFile state={state} onClose={() => setCaseFileOpen(false)} /> : null}
+      {caseFileOpen ? <CaseFile state={state} objectUrls={sealedAssetObjectUrls} saveState={sealedAssetSaveState} onSaveAsset={saveSealedAsset} onClose={() => setCaseFileOpen(false)} /> : null}
       {theoryOpen || spectatorTheory ? <div className={styles.theoryBoard} role="dialog" aria-modal="true" aria-labelledby="theory-v2-title"><header><div><p className={styles.eyebrow}>{spectatorTheory ? "Prosecutor research · editable" : "Theory Board"}</p><h2 id="theory-v2-title">{spectatorTheory ? "Review the Prosecutor conclusion" : "File the prosecution's case"}</h2></div>{spectatorTheory ? null : <button type="button" onClick={() => setTheoryOpen(false)}>Close</button>}</header>{spectatorTheory ? <p>The selected Prosecutor&apos;s conclusion is a public hypothesis built from the admitted physical findings. You may revise every field before filing it.</p> : null}<label>Accused<select value={theory.culpritSeatId ?? ""} onChange={(event) => setTheory((current) => ({ ...current, culpritSeatId: event.target.value || null }))}>{state.suspects.map((suspect) => <option key={suspect.seatId} value={suspect.seatId}>{suspect.name}</option>)}</select></label><label>Method<textarea value={theory.method} onChange={(event) => setTheory((current) => ({ ...current, method: event.target.value }))} placeholder="How was the crime committed?" /></label><label>Motive<textarea value={theory.motive} onChange={(event) => setTheory((current) => ({ ...current, motive: event.target.value }))} placeholder="Why would the accused do it?" /></label><label>Opportunity<textarea value={theory.opportunity} onChange={(event) => setTheory((current) => ({ ...current, opportunity: event.target.value }))} placeholder="When and where was the opportunity?" /></label><fieldset><legend>Evidence to admit</legend>{admittedRecord.filter((item) => item.reference.kind === "evidence").map((item) => <label key={item.reference.id}><input type="checkbox" checked={theory.evidenceIds.includes(item.reference.id)} onChange={(event) => setTheory((current) => ({ ...current, evidenceIds: event.target.checked ? [...current.evidenceIds, item.reference.id] : current.evidenceIds.filter((id) => id !== item.reference.id) }))} />{item.emoji} {item.title}</label>)}</fieldset><p>Incomplete method, motive, or opportunity will weaken the case, but will not block trial.</p><button type="button" className={styles.primaryAction} disabled={busy || !theory.culpritSeatId} onClick={() => { if (!spectatorTheory) setTheoryOpen(false); void sendAction({ action: "file_theory", theory }); }}>{spectatorTheory ? "File conclusion and watch court" : "File charges and open court"}</button></div> : null}
       {callout ? <div key={callout.id} className={styles.callout} style={calloutStyle} role="status" aria-live="assertive"><span>{CALLOUT_COPY[callout.callout]}</span></div> : null}
       {error ? <p className={styles.errorBanner}>{error}</p> : null}
@@ -1987,12 +2274,69 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
 
 function CaseFile(props: {
   state: DebateWhodunnitFormatStateV2;
+  objectUrls: Readonly<Record<string, string>>;
+  saveState: Record<string, "saving" | "saved" | "failed">;
+  onSaveAsset: (
+    asset: DebateMysterySealedAssetRefV1,
+    subjectId: string,
+    title: string,
+  ) => Promise<void>;
   onClose: () => void;
 }): React.JSX.Element {
   return (
     <aside className={styles.caseFile} role="dialog" aria-modal="true" aria-labelledby="mystery-v2-case-file-title">
       <header><div><p className={styles.eyebrow}>Prosecution record</p><h2 id="mystery-v2-case-file-title">Case File</h2></div><button type="button" onClick={props.onClose}>Close</button></header>
-      <section><h3>Evidence &amp; sworn testimony</h3>{props.state.record.filter((item) => item.admitted).map((item) => <article key={recordKey(item.reference)}><span aria-hidden="true">{item.emoji}</span><div><strong>{item.title}</strong><small>{item.reference.kind}</small><p>{item.description}</p></div></article>)}</section>
+      <section>
+        <h3>Evidence &amp; sworn testimony</h3>
+        {props.state.record.filter((item) => item.admitted).map((item) => {
+          const assetKey = item.reference.kind === "evidence"
+            ? sealedMysteryAssetKey("evidence", item.reference.id)
+            : null;
+          const assetUrl = item.reference.kind === "evidence"
+            ? sealedMysteryAssetObjectUrl(
+                props.objectUrls,
+                "evidence",
+                item.reference.id,
+                item.sealedAsset,
+              )
+            : null;
+          const assetSaveState = assetKey
+            ? props.saveState[assetKey]
+            : undefined;
+          return (
+            <article key={recordKey(item.reference)}>
+              {assetUrl
+                ? <>
+                    {/* A short-lived object URL keeps authenticated bytes out of durable browser storage. */}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img className={styles.caseFileAssetImage} src={assetUrl} alt={`${item.title} evidence`} />
+                  </>
+                : <span aria-hidden="true">{item.emoji}</span>}
+              <div>
+                <strong>{item.title}</strong>
+                <small>{item.reference.kind}</small>
+                <p>{item.description}</p>
+                {assetUrl && item.sealedAsset ? (
+                  <button
+                    type="button"
+                    className={styles.saveSealedAssetButton}
+                    disabled={assetSaveState === "saving" || assetSaveState === "saved"}
+                    onClick={() => void props.onSaveAsset(item.sealedAsset!, item.reference.id, `${item.title} · Whodunnit evidence`)}
+                  >
+                    {assetSaveState === "saving"
+                      ? "Saving…"
+                      : assetSaveState === "saved"
+                        ? "Saved to Images"
+                        : assetSaveState === "failed"
+                          ? "Retry save"
+                          : "Save evidence image"}
+                  </button>
+                ) : null}
+              </div>
+            </article>
+          );
+        })}
+      </section>
       <section><h3>Witnesses</h3>{props.state.suspects.map((suspect) => <article key={suspect.seatId}><span aria-hidden="true" style={{ color: suspect.color ?? undefined }}>●</span><div><strong>{suspect.name}</strong><small>{props.state.metSuspectSeatIds.includes(suspect.seatId) ? "Interviewed" : "Not yet interviewed"}</small></div></article>)}</section>
       <small>{props.state.voicesEnabled ? "Complete local English audio pack ready" : "Playing as a validated text case"}</small>
     </aside>

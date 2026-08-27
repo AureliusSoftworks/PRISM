@@ -81,6 +81,7 @@ const KIND_SEED_TAGS: Record<ImageAssetKind, readonly string[]> = {
   general_image: ["gallery", "image", "library"],
   item: ["item", "object", "library"],
   debate_exhibit: ["debate", "exhibit", "evidence"],
+  whodunnit_room: ["whodunnit", "mystery", "room", "saved"],
   signal_studio: ["signal", "studio", "set"],
   signal_logo: ["signal", "logo", "brand"],
   slate_cover: ["slate", "cover", "story"],

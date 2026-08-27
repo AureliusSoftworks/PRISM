@@ -1393,6 +1393,180 @@ function recordMysteryMutation(
   ).run(userId, prior.id, key, prior.revision, next.revision, JSON.stringify(next), new Date().toISOString());
 }
 
+type DebateMysteryRestartRequest = {
+  expectedRevision: number;
+  idempotencyKey: string;
+};
+
+function requireMysteryRestartRequest(
+  session: DebateSessionV1,
+  request: DebateMysteryRestartRequest,
+): string {
+  const key = normalizeDebateIdempotencyKey(request.idempotencyKey);
+  if (!key) throw new HttpError(400, "A stable restart idempotency key is required.");
+  if (!Number.isInteger(request.expectedRevision) || request.expectedRevision < 1) {
+    throw new HttpError(400, "expectedRevision must be a positive integer.");
+  }
+  if (session.revision !== request.expectedRevision) {
+    throw new HttpError(409, "This case changed in another window. Refresh and try again.");
+  }
+  if (session.status === "completed" || session.status === "cancelled" || session.status === "failed") {
+    throw new HttpError(409, "Completed, cancelled, and failed cases remain immutable.");
+  }
+  return key;
+}
+
+/** Restore a V1 case to its sealed investigation opening without re-authoring it. */
+export function restartDebateMysteryInvestigation(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  request: DebateMysteryRestartRequest,
+): DebateSessionV1 {
+  const replay = replayMysteryMutation(db, userId, sessionId, request.idempotencyKey);
+  if (replay) return replay;
+  const session = getDebateSession(db, userId, sessionId);
+  const key = requireMysteryRestartRequest(session, request);
+  const state = requireMysteryState(session);
+  const bible = getDebateMysteryCaseBible(db, userId, sessionId);
+  const resetState: DebateWhodunnitFormatStateV1 = {
+    ...projectDebateMysteryCase(bible, state.config),
+    botSpeechProjectionVersion: MYSTERY_BOT_SPEECH_PROJECTION_VERSION,
+  };
+  const reset: DebateSessionV1 = {
+    ...session,
+    status: "waiting_for_player",
+    phase: "challenge",
+    stepKey: "mystery_investigation",
+    formatState: resetState,
+    caseBoard: [],
+    ballots: [],
+    playerVerdict: null,
+    winnerSideId: null,
+    judgeGavel: null,
+    judgeGavelCooldownUntil: null,
+    objectionRuling: null,
+    participantObjection: null,
+    participantFloorBreak: null,
+    participantFloorBreakPreparation: null,
+    preparedResumeEventId: null,
+    archiveReturnBuffer: null,
+    events: [],
+    error: null,
+    endedEarlyAt: null,
+    completedAt: null,
+    synopsis: null,
+    liveBake: null,
+    pausedAt: null,
+    pausedPresentationEventId: null,
+    pausedDurationMs: 0,
+  };
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare("DELETE FROM debate_events WHERE user_id = ? AND session_id = ?").run(userId, sessionId);
+    db.prepare("DELETE FROM debate_mystery_actions WHERE user_id = ? AND session_id = ?").run(userId, sessionId);
+    db.prepare("DELETE FROM debate_mystery_spatial_action_reservations WHERE user_id = ? AND session_id = ?").run(userId, sessionId);
+    db.prepare("DELETE FROM debate_mutations WHERE user_id = ? AND session_id = ?").run(userId, sessionId);
+    db.prepare("DELETE FROM debate_mystery_notebooks WHERE user_id = ? AND session_id = ?").run(userId, sessionId);
+    db.prepare("DELETE FROM debate_mystery_notebook_revisions WHERE user_id = ? AND session_id = ?").run(userId, sessionId);
+    createInitialNotebook(db, userId, sessionId);
+    const restarted = persistMysterySession(db, userId, reset, session.revision);
+    recordMysteryMutation(db, userId, session, restarted, key);
+    appendMysteryAction(db, userId, sessionId, "restart_investigation", {});
+    db.exec("COMMIT");
+    return restarted;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+/** Reopen only the mutable courtroom while retaining its filed case record. */
+export function restartDebateMysteryCourt(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  request: DebateMysteryRestartRequest,
+): DebateSessionV1 {
+  const replay = replayMysteryMutation(db, userId, sessionId, request.idempotencyKey);
+  if (replay) return replay;
+  const session = getDebateSession(db, userId, sessionId);
+  const key = requireMysteryRestartRequest(session, request);
+  if (session.format !== "turnabout" || session.formatState.format !== "turnabout" || !session.formatState.mysteryTrial) {
+    throw new HttpError(409, "Restart court is available only after this case has entered court.");
+  }
+  const trial = session.formatState.mysteryTrial;
+  const reset: DebateSessionV1 = {
+    ...session,
+    status: "live",
+    phase: "opening",
+    stepKey: "turnabout_intro",
+    formatState: {
+      ...session.formatState,
+      phase: "testimony",
+      round: 1,
+      activeStatementId: null,
+      floorOwnerBotId: null,
+      statements: [],
+      contradictions: [],
+      mysteryTrial: {
+        ...trial,
+        credibilityRemaining: DEBATE_MYSTERY_CREDIBILITY_STRIKES,
+        failedActions: 0,
+        sustainedTestimonyIds: [],
+        sustainedEvidenceIds: [],
+        verdict: null,
+      },
+    },
+    caseBoard: [],
+    ballots: [],
+    playerVerdict: null,
+    winnerSideId: null,
+    judgeGavel: null,
+    judgeGavelCooldownUntil: null,
+    objectionRuling: null,
+    participantObjection: null,
+    participantFloorBreak: null,
+    participantFloorBreakPreparation: null,
+    preparedResumeEventId: null,
+    archiveReturnBuffer: null,
+    events: [],
+    error: null,
+    endedEarlyAt: null,
+    completedAt: null,
+    synopsis: null,
+    liveBake: null,
+    pausedAt: null,
+    pausedPresentationEventId: null,
+    pausedDurationMs: 0,
+  };
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare("DELETE FROM debate_events WHERE user_id = ? AND session_id = ?").run(userId, sessionId);
+    db.prepare("DELETE FROM debate_mutations WHERE user_id = ? AND session_id = ?").run(userId, sessionId);
+    const now = new Date().toISOString();
+    const restarted = { ...reset, revision: session.revision + 1, updatedAt: now };
+    const result = db.prepare(
+      `UPDATE debate_sessions
+          SET revision = ?, status = ?, phase = ?, step_key = ?, winner_side_id = ?,
+              session_json = ?, error = ?, updated_at = ?, completed_at = ?
+        WHERE id = ? AND user_id = ? AND revision = ?`,
+    ).run(
+      restarted.revision, restarted.status, restarted.phase, restarted.stepKey,
+      restarted.winnerSideId, publicSessionJson(restarted), restarted.error,
+      now, restarted.completedAt, restarted.id, userId, session.revision,
+    );
+    if (Number(result.changes) !== 1) throw new HttpError(409, "This court changed in another window. Refresh and try again.");
+    recordMysteryMutation(db, userId, session, restarted, key);
+    appendMysteryAction(db, userId, sessionId, "restart_court", {});
+    db.exec("COMMIT");
+    return restarted;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 async function projectedActorReply(args: {
   session: DebateSessionV1;
   bible: DebateMysteryCaseBibleV1;

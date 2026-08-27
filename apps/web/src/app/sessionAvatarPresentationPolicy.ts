@@ -1,5 +1,8 @@
 export type SessionAvatarPresentation = "full" | "mini";
 
+/** Four bot seats is where Coffee's intimate table composition becomes crowded. */
+export const COFFEE_CROWDED_MINI_AVATAR_THRESHOLD = 4;
+
 export type DebateAvatarConsumer = "forum" | "jury" | "gallery";
 export type DebateAvatarCameraView =
   | "wide"
@@ -21,14 +24,19 @@ export function signalAvatarPresentation(args: {
 }
 
 /**
- * Coffee keeps the complete authored body live and in replay. Performance
- * shedding is limited to peripheral rendering work around that identity.
+ * Coffee keeps the complete authored body through setup and replay. A live
+ * table of four or more bots switches every bot seat to the shared mini
+ * chassis, preserving its face, ink, alloy, and phosphor identity without
+ * crowding the table.
  */
 export function coffeeAvatarPresentation(args: {
   live: boolean;
+  botParticipantCount?: number;
 }): SessionAvatarPresentation {
-  void args.live;
-  return "full";
+  return args.live &&
+    (args.botParticipantCount ?? 0) >= COFFEE_CROWDED_MINI_AVATAR_THRESHOLD
+    ? "mini"
+    : "full";
 }
 
 /**

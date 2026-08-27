@@ -550,8 +550,8 @@ describe("backup Coffee service state", () => {
       db.prepare(
         `INSERT INTO conversations
            (id, user_id, title, conversation_mode, bot_group_ids, coffee_settings,
-            coffee_duration_minutes, created_at, updated_at)
-         VALUES ('coffee-backup', 'user-1', 'Coffee Backup', 'coffee', '[]', ?, NULL, ?, ?)`,
+            coffee_session_state, coffee_duration_minutes, created_at, updated_at)
+         VALUES ('coffee-backup', 'user-1', 'Coffee Backup', 'coffee', '[]', ?, 'closing', NULL, ?, ?)`,
       ).run(JSON.stringify(settings), now, now);
 
       const snapshot = exportUserSnapshot(db, "user-1", userKey);
@@ -560,17 +560,19 @@ describe("backup Coffee service state", () => {
       )?.coffee;
       assert.equal(coffee?.settings.barRitual?.serviceBot.name, "Casey");
       assert.equal(coffee?.settings.barRitual?.playerCup?.sipCount, 2);
+      assert.equal(coffee?.sessionState, "closing");
 
       db.prepare("DELETE FROM conversations WHERE id = 'coffee-backup'").run();
       importUserSnapshot(db, "user-1", snapshot, userKey);
       const restored = db.prepare(
-        "SELECT coffee_settings FROM conversations WHERE id = 'coffee-backup' AND user_id = 'user-1'",
-      ).get() as { coffee_settings: string };
+        "SELECT coffee_settings, coffee_session_state FROM conversations WHERE id = 'coffee-backup' AND user_id = 'user-1'",
+      ).get() as { coffee_settings: string; coffee_session_state: string };
       assert.equal(
         normalizeCoffeeSessionSettings(JSON.parse(restored.coffee_settings))
           .barRitual?.serviceBot.name,
         "Casey",
       );
+      assert.equal(restored.coffee_session_state, "closing");
 
       const specialSnapshot = structuredClone(snapshot);
       const specialRitual = specialSnapshot.conversations.find(

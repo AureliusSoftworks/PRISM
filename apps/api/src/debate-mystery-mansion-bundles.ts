@@ -150,6 +150,7 @@ export function listDebateMysteryMansionBundlesV2(
 
 function bundleRoomsFromState(
   state: DebateWhodunnitFormatStateV2,
+  roomImageIdById: Readonly<Record<string, string>> = {},
 ): DebateMysteryMansionBundleRoomV1[] {
   return state.rooms.map((room) => ({
     id: room.id,
@@ -164,7 +165,7 @@ function bundleRoomsFromState(
     assignedSuspectSeatId:
       state.suspects.find((suspect) => suspect.roomId === room.id)?.seatId ?? null,
     emoji: room.emoji,
-    imageId: room.imageId,
+    imageId: roomImageIdById[room.id] ?? room.imageId,
     bundledAssetPath: room.bundledAssetPath,
   }));
 }
@@ -177,6 +178,7 @@ export function saveDebateMysteryMansionBundleV2(
   db: DatabaseSync,
   userId: string,
   sessionId: string,
+  roomImageIdById: Readonly<Record<string, string>> = {},
 ): DebateMysteryMansionBundleSummaryV1 {
   const session = getDebateSession(db, userId, sessionId);
   if (session.status === "cancelled") {
@@ -192,7 +194,7 @@ export function saveDebateMysteryMansionBundleV2(
       "Visit every room and review every examination point before saving this mansion.",
     );
   }
-  const rooms = bundleRoomsFromState(state);
+  const rooms = bundleRoomsFromState(state, roomImageIdById);
   const imageIds = [...new Set(rooms.flatMap((room) => room.imageId ? [room.imageId] : []))];
   if (imageIds.length > 0) {
     const owned = db.prepare(

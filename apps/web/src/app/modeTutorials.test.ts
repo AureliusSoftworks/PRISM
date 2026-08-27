@@ -57,19 +57,30 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Unused clues, sealed case fields, graph internals/u);
     assert.match(step.body, /Participant keeps the full mansion/u);
     assert.match(step.body, /Theme \/ Spark/u);
-    assert.match(step.body, /Skip investigation is an optional frozen setup choice/u);
+    assert.match(step.body, /Participant setup offers Skip investigation/u);
+    assert.match(step.body, /Spectator setup calls the same direct-court choice Start directly in court/u);
     assert.match(step.body, /leaves Evidence synthesis optional/u);
-    assert.match(step.body, /Evidence can also be synthesized or replaced later through Assets in Archive/u);
-    assert.match(step.body, /approximate ETA appears after enough completed sections/u);
-    assert.match(step.body, /Current work list restores the saved foundation/u);
-    assert.match(step.body, /Court-only cases omit room-detail work and use court chapters instead/u);
-    assert.match(step.body, /without being repeatedly announced to assistive technology/u);
-    assert.match(step.body, /last lit durable checkpoint/u);
+    assert.match(step.body, /Evidence and Rooms are opt-in/u);
+    assert.match(step.body, /Rooms is ONLINE-only and LOCAL always keeps the bundled room pack/u);
+    assert.match(step.body, /encrypted case vault—not Images, Generated Images, or the Library/u);
+    assert.match(step.body, /Save image is the explicit action/u);
+    assert.match(step.body, /opens directly inside the murder scene/u);
+    assert.match(step.body, /one finite visible sweep/u);
+    assert.match(step.body, /one connected doorway at a time/u);
+    assert.match(step.body, /Preparing your mystery to watch/u);
+    assert.match(step.body, /Writing the trial, Checking the case, and Recording the cast/u);
+    assert.match(step.body, /collapsed Preparation details/u);
+    assert.match(step.body, /Participant Case Forge retains its detailed six stages/u);
+    assert.match(step.body, /last durable checkpoint/u);
+    assert.match(step.body, /Choose Continue in background/u);
+    assert.match(step.body, /other PRISM synthesis or start another Debate/u);
+    assert.match(step.body, /only one Whodunnit at a time/u);
+    assert.match(step.body, /completion, safe failure, or cancellation releases the Forge/u);
+    assert.match(step.body, /Archive shows its spoiler-safe durable progress/u);
     assert.match(step.body, /Save mansion level preserves the layout/u);
     assert.match(step.body, /Writing the Case/u);
     assert.match(step.body, /Testing Contradictions/u);
     assert.match(step.body, /Preparing Local Voices/u);
-    assert.match(step.body, /Archive during preparation/u);
     assert.match(step.body, /Continue without voices/u);
     assert.match(step.body, /no Actions or token economy/u);
     assert.match(step.body, /Move returns to PRISM’s shallow-isometric mansion/u);
@@ -1564,6 +1575,8 @@ describe("mode tutorials", () => {
           step.targetSelector === '[data-tutorial-target="debate-cast"]',
     )?.body ?? "";
     assert.match(castCopy, /Surprise me/u);
+    assert.match(castCopy, /Every unselected Debate seat already rests on Surprise me/u);
+    assert.match(castCopy, /resolves during the willingness check/u);
     assert.match(castCopy, /role is the only required choice/u);
     assert.match(castCopy, /left on Surprise me is randomly assigned when you press Compile the case/u);
     assert.match(castCopy, /every manual choice stays put/u);
@@ -1585,6 +1598,9 @@ describe("mode tutorials", () => {
     assert.match(whodunnitCopy, /Every suspect, including the accused, testifies/u);
     assert.match(whodunnitCopy, /Press for free/u);
     assert.match(whodunnitCopy, /Present an admitted evidence item/u);
+    assert.match(whodunnitCopy, /Restart investigation/u);
+    assert.match(whodunnitCopy, /Restart court/u);
+    assert.match(whodunnitCopy, /Court-only cases offer only the court restart/u);
     assert.match(
       castCopy,
       /Your seat & the Jury reveals Participant and Spectator roles/u,
@@ -1681,7 +1697,8 @@ describe("mode tutorials", () => {
     assert.match(copy, /Drag the pot/u);
     assert.match(copy, /no waiter, barista, or service bot/u);
     assert.match(copy, /two or three table replies/u);
-    assert.match(copy, /invisible visit clock/u);
+    assert.match(copy, /visible water glass with normal depletion and refill/u);
+    assert.match(copy, /water carafe/u);
     assert.match(copy, /clock measures active table presentation/u);
     assert.match(copy, /background lookahead beneath an audible line still counts/u);
     assert.match(copy, /foreground generation leaves the floor waiting/u);
@@ -2039,6 +2056,13 @@ describe("mode tutorials", () => {
     );
   });
 
+  it("explains frozen server-authoritative Auto provenance", () => {
+    const copy = MODE_TUTORIALS.zen.steps.map((step) => step.body).join(" ");
+    assert.match(copy, /Auto → Awaiting first turn/u);
+    assert.match(copy, /it never substitutes a preview/u);
+    assert.match(copy, /later route cannot rewrite history/u);
+  });
+
   it("explains that ready Powers can change a bot's lived Coffee context", () => {
     const [table] = MODE_TUTORIALS.coffee.steps;
     assert.match(
@@ -2069,7 +2093,7 @@ describe("mode tutorials", () => {
     assert.match(routing?.body ?? "", /Voice remains independent from text routing/u);
     assert.match(
       routing?.body ?? "",
-      /Chat and Zen share your saved Mute, English, Premium, Babble, or Bottish choice, while LOCAL hides Premium from the picker/u,
+      /Chat and Zen share your saved English, Premium, Babble, or Bottish choice, while LOCAL hides Premium from the picker/u,
     );
     assert.match(
       routing?.body ?? "",
@@ -2180,11 +2204,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       joinStep?.body ?? "",
-      /creates Review without recording that the player left their chair/u,
+      /closes the table without adding player dialogue/u,
     );
     assert.match(
       joinStep?.body ?? "",
-      /only actually leaving the live table creates departure direction/u,
+      /final farewell is visible, voiced, and replayed without becoming a new floor turn/u,
     );
     assert.match(
       joinStep?.body ?? "",
@@ -2882,15 +2906,19 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalPowersTutorialBody(),
-      /Watch prepares ahead with a progressive bake/u,
+      /Watch finishes the complete episode before playback/u,
     );
     assert.match(
       signalPowersTutorialBody(),
-      /shorter opening runway/u,
+      /waits for every requested Premium voice/u,
     );
     assert.match(
       signalPowersTutorialBody(),
-      /keeps its booking in Latest episodes for a clean retry/u,
+      /enters Replay instead of the live production shell/u,
+    );
+    assert.match(
+      signalPowersTutorialBody(),
+      /keeps the completed booking in Latest episodes for a clean retry/u,
     );
     assert.match(
       signalPowersTutorialBody(),
@@ -3270,12 +3298,15 @@ describe("mode tutorials", () => {
     );
   });
 
-  it("teaches Signal spectators that the opening buffer waits for them", () => {
+  it("teaches Signal spectators that complete preparation enters Replay", () => {
     const copy = signalPowersTutorialBody();
-    assert.match(copy, /same intro card opens and waits/u);
-    assert.match(copy, /Press Start show whenever you want/u);
-    assert.match(copy, /enable Start automatically in setup/u);
-    assert.match(copy, /Prism keeps baking ahead/u);
+    assert.match(copy, /finishes the complete episode before playback/u);
+    assert.match(copy, /waits for every requested Premium voice/u);
+    assert.match(copy, /enters Replay instead of the live production shell/u);
+    assert.match(copy, /Start automatically begins from the opening frame/u);
+    assert.match(copy, /title card until you press Start show/u);
+    assert.match(copy, /full play, pause, scrub, and transcript seeking unlock/u);
+    assert.doesNotMatch(copy, /progressive bake|keeps baking ahead/u);
   });
 
   it("teaches the persistent host prompt for an interviewed Producer", () => {

@@ -54,10 +54,9 @@ describe("Coffee and Signal live visual fidelity", () => {
       pageSource,
       /resolveCoffeeSeatSipFacePresentation\(\{\s*sipInProgress:\s*visualSeatSipInProgress/u,
     );
-    assert.match(
-      pageSource,
-      /className=\{styles\.coffeePlayerCupButton\}[\s\S]{0,100}onClick=\{sipCoffeePlayerCup\}[\s\S]{0,760}data-cup-sipping=\{/u,
-    );
+    assert.match(pageSource, /className=\{styles\.coffeePlayerCupButton\}/u);
+    assert.match(pageSource, /onClick=\{toggleCoffeeMugComposer\}/u);
+    assert.match(pageSource, /consumeJoinSip: true/u);
   });
 
   it("keeps live table copy to one bounded utterance and one action label", () => {
@@ -67,10 +66,14 @@ describe("Coffee and Signal live visual fidelity", () => {
     assert.match(pageSource, /data-coffee-player-action-text="true"/u);
   });
 
-  it("keeps full thinking and speech motion on the authored phosphor face", () => {
+  it("keeps full semantic motion and the authored Mini LED motion", () => {
     assert.match(
       pageSource,
-      /motionMode=\{runtimeEffectsEnabled \? "full" : "speech"\}/u,
+      /motionMode=\{\s*resolvedSemanticFaceMotionEnabled \? "full" : "speech"\s*\}/u,
+    );
+    assert.match(
+      pageSource,
+      /motionMode=\{runtimeEffectsEnabled \? "mini-led" : "static"\}/u,
     );
     assert.match(pageSource, /showThinkingSpinner:\s*seatThinkingVisualActive/u);
     assert.match(pageSource, /showThinkingSpinner:\s*signalPrismThinking/u);

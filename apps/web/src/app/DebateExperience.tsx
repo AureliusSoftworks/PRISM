@@ -165,6 +165,10 @@ import {
   type LiveSessionRoutingChipLabels,
 } from "./liveSessionChrome";
 import {
+  latestActualAppletRoute,
+  type ActualAppletRoute,
+} from "./autoRoutePresentation";
+import {
   createBotDirectedSetupRefractTarget,
   PrismRefractTarget,
   type PrismRefractMagicTarget,
@@ -233,6 +237,7 @@ import {
   mergeDebateEvidenceSources,
   randomDebateCast,
   randomDebatePlayerJudgeCast,
+  resolveDebateSurpriseCast,
   type DebateCastSelection,
 } from "./debateExperienceState";
 import { useDebateEvidenceMentionTextarea } from "./useDebateEvidenceMentionTextarea";
@@ -832,6 +837,13 @@ export interface DebateExperienceProps {
     active: boolean,
     sessionId: string | null,
   ) => void;
+  /** Publishes the newest server-observed Auto completion to applet chrome. */
+  onActualAutoRouteChange?: (route: ActualAppletRoute | null) => void;
+  /** Resolves a concrete route to the account-facing catalogue label. */
+  modelLabelForRoute?: (
+    provider: ActualAppletRoute["provider"],
+    model: string,
+  ) => string;
   onCompanionContextChange?: (context: DebateCompanionContext | null) => void;
   onCreateSlateStory?: (source: {
     sessionId: string;
@@ -3002,6 +3014,45 @@ function debateResolvedRoutingLabel(session: DebateSessionV1): string {
   return `${provider}/${model}${automatic ? " [auto]" : ""}`;
 }
 
+export function latestDebateActualAutoRoute(
+  session: DebateSessionV1,
+): ActualAppletRoute | null {
+  if (session.modelSelectionKind !== "auto") return null;
+  return latestActualAppletRoute(
+    session.events.map((event) => ({
+      role: event.provider && event.model ? "assistant" : undefined,
+      provider: event.provider,
+      model: event.model,
+      reasoningEffort: event.autoRoute?.reasoningEffort,
+      turbo: event.turbo,
+      autoRoute: event.autoRoute,
+      autoRecovery: event.autoRecovery,
+    })),
+    session.responseMode === "local" ? "local" : "online",
+  );
+}
+
+function debateEventGenerationAnnotation(
+  event: DebateEventV1,
+  fallbackEffort: ProviderReasoningEffort,
+): string {
+  if (!event.provider || !event.model) return "Not model-generated";
+  const provider = event.autoRecovery?.finalProvider ?? event.provider;
+  const model = event.autoRecovery?.finalModel ?? event.model;
+  const effort = event.autoRecovery
+    ? "none"
+    : (event.autoRoute?.reasoningEffort ?? fallbackEffort);
+  const details = [`Effort ${DEBATE_ARCHIVE_EFFORT_LABELS[effort]}`];
+  if (!event.autoRecovery && event.turbo) details.push("Turbo");
+  if (event.autoRecovery) {
+    const attempts = event.autoRecovery.attempts.length;
+    details.push(
+      `Recovered after ${attempts} ${attempts === 1 ? "attempt" : "attempts"}`,
+    );
+  }
+  return `${event.autoRoute ? "Auto → " : ""}${provider}/${model} · ${details.join(" · ")}`;
+}
+
 function debateArchiveMetaChips(
   session: DebateSessionListItemV1,
 ): string[] {
@@ -3680,7 +3731,7 @@ export function formatDebateVerboseTranscript(
           `- Ruling: ${event.ruling ?? "None"}`,
           `- At: ${event.createdAt}`,
           `- Evidence IDs: ${event.sourceIds.length > 0 ? event.sourceIds.join(", ") : "None"}`,
-          `- Generation: ${event.provider && event.model ? `${event.provider}/${event.model}${event.autoRoute ? " [auto]" : ""}${event.turbo ? " 🔥 Turbo" : ""}${event.autoRecovery ? ` after ${event.autoRecovery.attempts.length} attempts` : ""}` : "Not model-generated"}`,
+          `- Generation: ${debateEventGenerationAnnotation(event, session.lastReasoningEffort ?? "auto")}`,
           `- Voice performance: ${voicePerformanceCue ? `[${voicePerformanceCue}]` : "None"}`,
           `- Delivery: ${
             event.interrupted
@@ -4933,7 +4984,9 @@ export function DebateExperience(
     useState<DebateMysteryArtMode>("bundled");
   const [mysteryInspiration, setMysteryInspiration] = useState("");
   const [mysteryEvidenceAssetSynthesis, setMysteryEvidenceAssetSynthesis] =
-    useState(true);
+    useState(false);
+  const [mysteryRoomAssetSynthesis, setMysteryRoomAssetSynthesis] =
+    useState(false);
   const [mysterySkipInvestigation, setMysterySkipInvestigation] = useState(false);
   const [mysteryMansionBundles, setMysteryMansionBundles] = useState<
     DebateMysteryMansionBundleSummaryV1[]
@@ -5243,6 +5296,10 @@ export function DebateExperience(
   const [pendingMysteryPlayAgain, setPendingMysteryPlayAgain] = useState<{
     source: DebateSessionListItemV1;
     audioUnavailable: boolean;
+  } | null>(null);
+  const [pendingMysteryRestart, setPendingMysteryRestart] = useState<{
+    source: DebateSessionListItemV1;
+    kind: "investigation" | "court";
   } | null>(null);
   const [earlyEndOpen, setEarlyEndOpen] = useState(false);
   const [exhaustedExitOpen, setExhaustedExitOpen] = useState(false);
@@ -6375,6 +6432,7 @@ export function DebateExperience(
   const transcriptContentRef = useRef<HTMLDivElement | null>(null);
   const deleteConfirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const mysteryPlayAgainConfirmButtonRef = useRef<HTMLButtonElement | null>(null);
+  const mysteryRestartConfirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const earlyEndConfirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const exhaustedExitContinueButtonRef = useRef<HTMLButtonElement | null>(
     null,
@@ -6531,6 +6589,36 @@ export function DebateExperience(
       }
     }
   }, [request]);
+
+  const activeCaseForgeSession = sessions.find(
+    (session) =>
+      session.format === "whodunnit" &&
+      session.mysteryVersion === 2 &&
+      session.mysteryForge?.state === "active",
+  ) ?? null;
+  const activeCaseForgeSessionId = activeCaseForgeSession?.id ?? null;
+  const previousActiveCaseForgeSessionIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!activeCaseForgeSessionId) return;
+    const timer = window.setInterval(() => {
+      void loadSessions();
+    }, 2_000);
+    return () => window.clearInterval(timer);
+  }, [activeCaseForgeSessionId, loadSessions]);
+
+  useEffect(() => {
+    const previousId = previousActiveCaseForgeSessionIdRef.current;
+    if (previousId && !activeCaseForgeSession) {
+      const settled = sessions.find((session) => session.id === previousId);
+      setSetupRestoreNotice(
+        settled?.mysteryForge?.state === "attention"
+          ? "Case Forge stopped safely. Open it from Archive to review recovery options."
+          : "Your Whodunnit is ready in Archive.",
+      );
+    }
+    previousActiveCaseForgeSessionIdRef.current = activeCaseForgeSession?.id ?? null;
+  }, [activeCaseForgeSession, sessions]);
 
   const loadMysteryMansionBundles = useCallback(async (): Promise<void> => {
     try {
@@ -6749,6 +6837,10 @@ export function DebateExperience(
   const liveSessionActive =
     view === "baking" ||
     ((view === "live" || view === "mystery") && activeSession !== null);
+  const activeActualAutoRoute = useMemo(
+    () => (activeSession ? latestDebateActualAutoRoute(activeSession) : null),
+    [activeSession],
+  );
   useEffect(() => {
     onLiveSessionActiveChange?.(
       liveSessionActive,
@@ -6758,6 +6850,15 @@ export function DebateExperience(
   useEffect(
     () => () => onLiveSessionActiveChange?.(false, null),
     [onLiveSessionActiveChange],
+  );
+  useEffect(() => {
+    props.onActualAutoRouteChange?.(
+      liveSessionActive ? activeActualAutoRoute : null,
+    );
+  }, [activeActualAutoRoute, liveSessionActive, props.onActualAutoRouteChange]);
+  useEffect(
+    () => () => props.onActualAutoRouteChange?.(null),
+    [props.onActualAutoRouteChange],
   );
 
   const botById = useMemo(
@@ -7158,6 +7259,22 @@ export function DebateExperience(
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [pendingMysteryPlayAgain]);
+  useEffect(() => {
+    if (!pendingMysteryRestart) return;
+    const frameId = window.requestAnimationFrame(() => {
+      mysteryRestartConfirmButtonRef.current?.focus();
+    });
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setPendingMysteryRestart(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [pendingMysteryRestart]);
   useEffect(() => {
     if (!earlyEndOpen) return;
     const frameId = window.requestAnimationFrame(() => {
@@ -7650,7 +7767,10 @@ export function DebateExperience(
     spark: mysteryInspiration,
     assetSynthesis: {
       evidence: mysteryEvidenceAssetSynthesis,
-      rooms: false,
+      rooms:
+        mysteryRoomAssetSynthesis &&
+        !mysterySkipInvestigation &&
+        props.responseMode !== "local",
       music: false,
     },
     investigationMode: mysterySkipInvestigation ? "court_only" : "full",
@@ -7810,6 +7930,20 @@ export function DebateExperience(
     format === "whodunnit"
       ? mysteryRoleSelected
       : castIds.every(Boolean) && new Set(castIds).size === castIds.length;
+  const debateSurpriseCastPreview =
+    format === "whodunnit"
+      ? null
+      : resolveDebateSurpriseCast(
+          bots.map((bot) => bot.id),
+          cast,
+          selectableCastSlots,
+          preferredJurorBotIds.filter((botId): botId is string => Boolean(botId)),
+          () => 0,
+        );
+  const castReady =
+    format === "whodunnit"
+      ? mysteryRoleSelected
+      : debateSurpriseCastPreview !== null;
   const motionComplete = Boolean(
     format === "whodunnit" ||
     (motion.motion.trim() &&
@@ -7947,7 +8081,7 @@ export function DebateExperience(
   const readinessCount = (
     format === "whodunnit"
       ? [mysterySetupValidated, castComplete]
-      : [motionComplete, castComplete, roleChecksComplete, evidenceDecisionMade]
+      : [motionComplete, castReady, roleChecksComplete, evidenceDecisionMade]
   ).filter(Boolean).length;
   const debateCompanionBotIds = useMemo(
     () =>
@@ -8148,7 +8282,8 @@ export function DebateExperience(
     setMysteryDifficulty("classic");
     setMysteryArtMode("bundled");
     setMysteryInspiration("");
-    setMysteryEvidenceAssetSynthesis(true);
+    setMysteryEvidenceAssetSynthesis(false);
+    setMysteryRoomAssetSynthesis(false);
     setMysterySkipInvestigation(false);
     setMysteryMansionBundleId("");
     setMysteryNonce(nextMysteryRecipeNonce());
@@ -9788,7 +9923,20 @@ export function DebateExperience(
     // stale decline cannot survive a reroll. Launch still requires every
     // advocate to accept (validateConsents), so rerolling can never override a
     // standing refusal; it only asks the question again.
-    if (!castComplete) return;
+    if (!castReady) return;
+    const resolvedCast = resolveDebateSurpriseCast(
+      bots.map((bot) => bot.id),
+      cast,
+      selectableCastSlots,
+      preferredJurorBotIds.filter((botId): botId is string => Boolean(botId)),
+    );
+    if (!resolvedCast) {
+      setError(
+        `Debate needs ${selectableCastSlots.length} distinct Library bots outside any pinned Jury seats to resolve every Surprise me seat.`,
+      );
+      return;
+    }
+    setCast(resolvedCast);
     setBusy(true);
     setError(null);
     try {
@@ -9803,11 +9951,11 @@ export function DebateExperience(
           forAdvocateBotId:
             playerRole === "participant" && playerSideId === "for"
               ? undefined
-              : cast.forAdvocate,
+              : resolvedCast.forAdvocate,
           againstAdvocateBotId:
             playerRole === "participant" && playerSideId === "against"
               ? undefined
-              : cast.againstAdvocate,
+              : resolvedCast.againstAdvocate,
           preferredProvider:
             props.modelOverride?.provider ?? props.preferredProvider,
           modelOverride: props.modelOverride?.model,
@@ -13797,6 +13945,53 @@ export function DebateExperience(
     }
   };
 
+  const restartArchivedMystery = async (
+    archived: DebateSessionListItemV1,
+    kind: "investigation" | "court",
+  ): Promise<void> => {
+    if (archived.status === "completed" || archived.status === "cancelled" || archived.status === "failed") return;
+    setBusy(true);
+    setError(null);
+    try {
+      const restart = (session: DebateSessionV1) =>
+        props.request<{ session: DebateSessionV1 }>(
+          `/api/debates/${encodeURIComponent(session.id)}/mystery-restart-${kind}`,
+          requestBody({
+            expectedRevision: session.revision,
+            idempotencyKey: nextMutationKey(`mystery-restart-${kind}`),
+          }),
+        );
+      let current = await props.request<{ session: DebateSessionV1 }>(
+        `/api/debates/${encodeURIComponent(archived.id)}?perspective=live`,
+      );
+      let restarted: { session: DebateSessionV1 };
+      try {
+        restarted = await restart(current.session);
+      } catch (caught) {
+        if (!debateRequestIsRevisionConflict(caught)) throw caught;
+        current = await props.request<{ session: DebateSessionV1 }>(
+          `/api/debates/${encodeURIComponent(archived.id)}?perspective=live`,
+        );
+        restarted = await restart(current.session);
+      }
+      setPendingMysteryRestart(null);
+      await loadSessions();
+      activeSessionIdRef.current = restarted.session.id;
+      activeSessionRef.current = restarted.session;
+      setActiveSession(restarted.session);
+      setObserverPerspective("live");
+      setView(restarted.session.format === "whodunnit" ? "mystery" : "live");
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : `This ${kind} could not restart.`,
+      );
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+  };
+
   const playMysteryCaseAgain = async (
     source: DebateSessionListItemV1,
     audioMode: "reuse" | "silent",
@@ -14025,6 +14220,14 @@ export function DebateExperience(
 
   const startMystery = async (): Promise<void> => {
     if (!mysterySetupValidated || busy) return;
+    if (activeCaseForgeSession) {
+      setError(null);
+      setSetupRestoreNotice(
+        `${activeCaseForgeSession.title} is already cooking in Case Forge. You can keep using PRISM and return to it from Archive.`,
+      );
+      setStudioPanel("archive");
+      return;
+    }
     const resolvedCast = resolveWhodunnitSurpriseCast(
       bots,
       {
@@ -14153,11 +14356,19 @@ export function DebateExperience(
       setView("mystery");
       void loadSessions();
     } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "PRISM could not compile the case.",
-      );
+      const message = caught instanceof Error
+        ? caught.message
+        : "PRISM could not compile the case.";
+      if (message.includes("Another Case Forge is already preparing a Whodunnit")) {
+        setError(null);
+        setSetupRestoreNotice(
+          "Another Whodunnit is already cooking. You can keep using PRISM and return to Case Forge from Archive.",
+        );
+        setStudioPanel("archive");
+        void loadSessions();
+      } else {
+        setError(message);
+      }
     } finally {
       setBusy(false);
     }
@@ -17771,6 +17982,17 @@ export function DebateExperience(
       session.status === "live" ||
       session.status === "paused" ||
       session.status === "waiting_for_player";
+    const canRestartMysteryInvestigation =
+      canRestartArchivedProceeding &&
+      session.format === "whodunnit" &&
+      session.mysteryProgress !== "case_forge" &&
+      (session.mysteryVersion === 1 ||
+        (session.mysteryVersion === 2 &&
+          session.mysteryInvestigationMode === "full"));
+    const canRestartMysteryCourt =
+      canRestartArchivedProceeding &&
+      session.mysteryProgress === "trial" &&
+      (session.format === "turnabout" || session.mysteryVersion === 2);
     const archiveDetailsId = `debate-archive-details-${session.id}`;
     const proceedingActionLabel =
       familyRuns
@@ -17797,6 +18019,10 @@ export function DebateExperience(
         ? openFamilyRun
           ? `Run ${openFamilyRun.mysteryRunOrdinal ?? familyRuns.length} in progress`
           : `${familyRuns.length} run${familyRuns.length === 1 ? "" : "s"}`
+        : session.mysteryForge?.state === "active"
+        ? `Forging in background · ${session.mysteryForge.progressPercent}%`
+        : session.mysteryForge?.state === "attention"
+        ? "Case Forge needs attention"
         : session.format === "whodunnit" && session.mysteryRouteGrade
         ? gradeLabelForMysteryArchive(session.mysteryRouteGrade)
         : session.status === "completed"
@@ -18011,6 +18237,35 @@ export function DebateExperience(
                 <p>{session.synopsisText}</p>
               </div>
             ) : null}
+            {session.mysteryForge ? (
+              <div
+                className={styles.archiveForgeProgress}
+                data-state={session.mysteryForge.state}
+                data-tutorial-target="debate-mystery-background-forge"
+              >
+                <div>
+                  <strong>
+                    {session.mysteryForge.state === "active"
+                      ? "Case Forge is working in the background"
+                      : session.mysteryForge.state === "attention"
+                        ? "Case Forge stopped safely"
+                        : "Case Forge complete"}
+                  </strong>
+                  <span>{session.mysteryForge.progressPercent}%</span>
+                </div>
+                <span
+                  className={styles.archiveForgeProgressTrack}
+                  role="progressbar"
+                  aria-label={`Case Forge for ${session.title}`}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={session.mysteryForge.progressPercent}
+                >
+                  <i style={{ width: `${session.mysteryForge.progressPercent}%` }} />
+                </span>
+                <small>{session.mysteryForge.message}</small>
+              </div>
+            ) : null}
             {familyRuns ? (
               <ol
                 className={styles.archiveRunList}
@@ -18103,6 +18358,30 @@ export function DebateExperience(
               >
                 {proceedingActionLabel}
               </button>
+              {canRestartMysteryInvestigation ? (
+                <button
+                  type="button"
+                  className={styles.archiveReuseButton}
+                  onClick={() => setPendingMysteryRestart({ source: session, kind: "investigation" })}
+                  disabled={busy}
+                  aria-label={`Restart investigation for ${session.title}`}
+                  title="Restart this sealed case from the investigation opening."
+                >
+                  Restart investigation
+                </button>
+              ) : null}
+              {canRestartMysteryCourt ? (
+                <button
+                  type="button"
+                  className={styles.archiveReuseButton}
+                  onClick={() => setPendingMysteryRestart({ source: session, kind: "court" })}
+                  disabled={busy}
+                  aria-label={`Restart court for ${session.title}`}
+                  title="Restart this filed case from the courtroom opening."
+                >
+                  Restart court
+                </button>
+              ) : null}
               {session.format !== "whodunnit" ? (
                 <>
                   <button
@@ -18510,8 +18789,10 @@ export function DebateExperience(
                     : "Seat the proceeding"
                   : roleChecksComplete
                     ? "Consent secured"
-                    : castComplete
-                      ? "Check willingness"
+                    : castReady
+                      ? castComplete
+                        ? "Check willingness"
+                        : "Surprise seats ready"
                       : "Seat the proceeding",
                 complete: castComplete && roleChecksComplete,
                 tutorial: "debate-cast",
@@ -18710,6 +18991,62 @@ export function DebateExperience(
                   : pendingMysteryPlayAgain.audioUnavailable
                     ? "Play without voices"
                     : "Play again"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {pendingMysteryRestart ? (
+        <div
+          className={styles.confirmBackdrop}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !busy) {
+              setPendingMysteryRestart(null);
+            }
+          }}
+        >
+          <section
+            className={styles.confirmDialog}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="debate-mystery-restart-title"
+            aria-describedby="debate-mystery-restart-description"
+          >
+            <p className={styles.eyebrow}>Sealed case · fresh proceedings</p>
+            <h2 id="debate-mystery-restart-title">
+              {pendingMysteryRestart.kind === "investigation"
+                ? "Restart investigation?"
+                : "Restart court?"}
+            </h2>
+            <p id="debate-mystery-restart-description">
+              {pendingMysteryRestart.kind === "investigation"
+                ? "The same sealed case returns to its investigation opening. Existing investigation progress and notes clear; no case, cast, evidence, dialogue, voice, or AI generation changes."
+                : "The filed accusation and frozen case record stay exactly as filed. Court testimony, rulings, and verdict progress reset to the courtroom opening."}
+            </p>
+            <div>
+              <button
+                type="button"
+                className={styles.confirmKeepButton}
+                onClick={() => setPendingMysteryRestart(null)}
+                disabled={busy}
+              >
+                Cancel
+              </button>
+              <button
+                ref={mysteryRestartConfirmButtonRef}
+                type="button"
+                className={styles.confirmDeleteButton}
+                onClick={() => void restartArchivedMystery(
+                  pendingMysteryRestart.source,
+                  pendingMysteryRestart.kind,
+                )}
+                disabled={busy}
+              >
+                {busy
+                  ? "Restarting…"
+                  : pendingMysteryRestart.kind === "investigation"
+                    ? "Restart investigation"
+                    : "Restart court"}
               </button>
             </div>
           </section>
@@ -18988,10 +19325,18 @@ export function DebateExperience(
             checked={mysterySkipInvestigation}
             onChange={(event) => {
               setMysterySkipInvestigation(event.currentTarget.checked);
+              if (event.currentTarget.checked) setMysteryRoomAssetSynthesis(false);
               setMysteryNonce(nextMysteryRecipeNonce());
             }}
           />
-          <span><strong>Skip investigation</strong><small>Prepare only the second act and enter court directly after the title card.</small></span>
+          <span>
+            <strong>{playerRole === "spectator" ? "Start directly in court" : "Skip investigation"}</strong>
+            <small>
+              {playerRole === "spectator"
+                ? "Bypass conclusion review and begin the watch-only trial after the title card."
+                : "Prepare only the second act and enter court directly after the title card."}
+            </small>
+          </span>
         </label>
         <fieldset className={mysteryStyles.assetForgeChoices} data-tutorial-target="whodunnit-v2-assets">
           <legend>Synthesize assets in Case Forge</legend>
@@ -19004,17 +19349,28 @@ export function DebateExperience(
                 setMysteryNonce(nextMysteryRecipeNonce());
               }}
             />
-            <span><strong>Evidence</strong><small>Create exhibit images with Debate’s existing asset pipeline.</small></span>
+            <span><strong>Evidence</strong><small>Create sealed exhibit images. They appear only when the evidence is discovered.</small></span>
           </label>
-          <label aria-disabled="true">
-            <input type="checkbox" checked={false} disabled readOnly />
-            <span><strong>Rooms</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude room assets." : "Coming later · available only during Case Forge."}</small></span>
+          <label
+            data-enabled={!mysterySkipInvestigation && props.responseMode !== "local" ? "true" : undefined}
+            aria-disabled={mysterySkipInvestigation || props.responseMode === "local"}
+          >
+            <input
+              type="checkbox"
+              checked={mysteryRoomAssetSynthesis && !mysterySkipInvestigation && props.responseMode !== "local"}
+              disabled={mysterySkipInvestigation || props.responseMode === "local"}
+              onChange={(event) => {
+                setMysteryRoomAssetSynthesis(event.currentTarget.checked);
+                setMysteryNonce(nextMysteryRecipeNonce());
+              }}
+            />
+            <span><strong>Rooms</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude room assets." : props.responseMode === "local" ? "ONLINE only · LOCAL keeps the bundled room pack." : "Create sealed room edits in Case Forge; each one opens only when visited."}</small></span>
           </label>
           <label aria-disabled="true">
             <input type="checkbox" checked={false} disabled readOnly />
             <span><strong>Music</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude investigation music." : "Coming later · investigation music remains unchanged."}</small></span>
           </label>
-          <p>Evidence can also be synthesized later from Assets in the Archive.</p>
+          <p>Generated case art stays outside Images and the Library unless you explicitly save a revealed visual.</p>
         </fieldset>
         <button type="button" className={mysteryStyles.seedButton} onClick={() => setMysteryNonce(nextMysteryRecipeNonce())}><span>Recipe Seed</span><code>{mysteryRecipeSeed}</code><small>Change the recipe</small></button>
       </div>
@@ -19699,10 +20055,10 @@ export function DebateExperience(
                 ? "Choose any voices you care about, or leave seats on Surprise me. The selected Prosecutor investigates offstage; you review and file the editable conclusion before watching court."
                 : "Choose any voices you care about, or leave seats on Surprise me. You control every legal choice through the selected Prosecutor; the Judge, Defense Counsel, and jurors keep their own roles."
               : playerRole === "participant"
-              ? "PRISM holds your side. Cast one opposing bot and one Moderator/Judge; every turn on your side belongs to you."
+              ? "PRISM holds your side. Pin an opposing bot or Moderator/Judge when you care who fills the role; every unselected seat rests on Surprise me until the willingness check."
               : playerRole === "spectator"
-                ? "Cast every seat, then watch the proceeding from the Gallery."
-                : "Pick one advocate for each side. You preside, and Prism quietly handles the room."}
+                ? "Pin any voices you care about, or leave seats on Surprise me. Prism fills the open roles during the willingness check, then you watch from the Gallery."
+                : "Pin either advocate when you care who argues that side, or leave the seat on Surprise me. You preside, and Prism fills open roles during the willingness check."}
           </p>
         </div>
         <button
@@ -19902,7 +20258,7 @@ export function DebateExperience(
                   </span>
                   <span>
                     <small>{label}</small>
-                    <strong>{bot?.name ?? "Choose a bot"}</strong>
+                    <strong>{bot?.name ?? "Surprise me"}</strong>
                     {fixedSeat ? <em>Player voice · Fixed</em> : null}
                     {bot?.hardMuted ? <em>Hard-muted</em> : null}
                   </span>
@@ -19911,7 +20267,7 @@ export function DebateExperience(
                   <button
                     type="button"
                     className={styles.castSlotClear}
-                    aria-label={`Clear ${label}`}
+                    aria-label={`Remove ${bot.name} from ${label}; leave seat on Surprise me`}
                     onClick={() => clearCastSlot(key)}
                   >
                     ×
@@ -20710,7 +21066,7 @@ export function DebateExperience(
             busy ||
             (format === "whodunnit"
               ? mysteryDistinctLibraryBotCount < mysteryFullCastRequirement
-              : !castComplete)
+              : !castReady)
           }
           onClick={() => {
             if (format === "whodunnit") {
@@ -21701,14 +22057,16 @@ export function DebateExperience(
     <section
       className={`${styles.setupPanel} ${styles.readinessPanel}`}
       data-tutorial-target="debate-readiness"
-      data-ready={debateCanStart ? "true" : undefined}
+      data-ready={debateCanStart && !activeCaseForgeSession ? "true" : undefined}
       data-ready-count={readinessCount}
     >
       <div className={styles.setupCopy}>
         <p className={styles.eyebrow}>Proceeding card</p>
         <h2>
           {format === "whodunnit"
-            ? debateCanStart
+            ? activeCaseForgeSession
+              ? "One case is already cooking"
+              : debateCanStart
               ? "Ready to compile"
               : "Shape the case"
             : debateCanStart
@@ -21746,9 +22104,11 @@ export function DebateExperience(
         >
           <span>Cast</span>
           <strong>
-            {castComplete
+            {castReady
               ? format === "whodunnit" && mysteryHasSurpriseSeats
                 ? `${playerRole.charAt(0).toUpperCase() + playerRole.slice(1)} · Surprise seats ready`
+                : !castComplete
+                  ? `${playerRole.charAt(0).toUpperCase() + playerRole.slice(1)} · Surprise seats ready`
                 : `${playerRole.charAt(0).toUpperCase() + playerRole.slice(1)} · ${visibleModeratorTitle}`
               : "Seats still open"}
           </strong>
@@ -21759,7 +22119,9 @@ export function DebateExperience(
               ? "Advocacy consent secured"
               : castComplete
                 ? "Willingness check remains"
-                : "Choose every active voice"}
+                : castReady
+                  ? "Unfilled voices resolve during the willingness check"
+                  : "Add enough distinct Library voices"}
           </p>
         </article>
         <article data-ready="true">
@@ -21819,7 +22181,9 @@ export function DebateExperience(
       ) : null}
       <div className={styles.setupActions}>
         <span className={styles.launchThreshold}>
-          {debateCanStart
+          {format === "whodunnit" && activeCaseForgeSession
+            ? `${activeCaseForgeSession.title} is continuing in the background. Other Debate formats and synthesis remain available.`
+            : debateCanStart
             ? format === "whodunnit"
               ? mysteryHasSurpriseSeats
                 ? `Compile randomly assigns every Surprise me seat, then freezes the ${mysterySkipInvestigation ? "court act" : "case"}.`
@@ -21829,8 +22193,10 @@ export function DebateExperience(
               : `Start freezes the ${debatePublicMaterialName(formality).toLowerCase()}.`
             : !motionComplete
               ? "Shape the motion to continue."
-              : !castComplete
-                ? "Seat every active voice."
+              : !castReady
+                ? "Add enough distinct Library voices for every active seat."
+                : !castComplete
+                  ? "Surprise seats will resolve during the willingness check."
                 : !roleChecksComplete
                   ? "Secure advocacy consent."
                   : "Choose evidence or continue without it."}
@@ -21846,23 +22212,35 @@ export function DebateExperience(
             {busy ? "Saving…" : "Save Debate"}
           </button>
         ) : null}
-        <button
-          type="button"
-          className={styles.primaryButton}
-          disabled={busy || !debateCanStart}
-          onClick={() => void startDebate()}
-          data-tutorial-target="debate-start"
-        >
-          {busy
-            ? format === "whodunnit"
-              ? "Compiling…"
-              : "Opening…"
-            : format === "whodunnit"
-              ? inspectedMysterySeed
-                ? "Compile imported case"
-                : "Compile the case"
-              : "Start Debate"}
-        </button>
+        {format === "whodunnit" && activeCaseForgeSession ? (
+          <button
+            type="button"
+            className={styles.primaryButton}
+            disabled={busy}
+            onClick={() => void openSession(activeCaseForgeSession)}
+            data-tutorial-target="debate-mystery-background-forge"
+          >
+            Return to Case Forge
+          </button>
+        ) : (
+          <button
+            type="button"
+            className={styles.primaryButton}
+            disabled={busy || !debateCanStart}
+            onClick={() => void startDebate()}
+            data-tutorial-target="debate-start"
+          >
+            {busy
+              ? format === "whodunnit"
+                ? "Compiling…"
+                : "Opening…"
+              : format === "whodunnit"
+                ? inspectedMysterySeed
+                  ? "Compile imported case"
+                  : "Compile the case"
+                : "Start Debate"}
+          </button>
+        )}
       </div>
     </section>
   );
@@ -26046,11 +26424,20 @@ export function DebateExperience(
       formality: session.formality,
     });
     const participationRecess = debateParticipantRecessState(session);
+    const actualAutoRoute = latestDebateActualAutoRoute(session);
     const resolvedSessionRoutingChip = liveSessionRoutingChipLabels({
       modelIsAuto: session.modelSelectionKind === "auto",
-      modelLabel: session.latestAutoRoute?.model ?? session.model,
+      modelLabel: actualAutoRoute
+        ? (props.modelLabelForRoute?.(
+            actualAutoRoute.provider,
+            actualAutoRoute.model,
+          ) ?? actualAutoRoute.model)
+        : session.model,
       effort: session.lastReasoningEffort ?? "auto",
       turbo: session.lastTurbo,
+      lane: session.responseMode === "local" ? "local" : "online",
+      actualRoute: actualAutoRoute,
+      choosing: busy && !actualAutoRoute,
     });
     const liveTurboSupported = modelSupportsTurboMode(
       session.provider,
@@ -29415,6 +29802,7 @@ export function DebateExperience(
 
   const mysterySharedProps = {
     bots,
+    playerName: props.playerName,
     theme: props.theme,
     audioEnabled: props.audioEnabled,
     audioVolume: props.audioVolume,
@@ -29546,6 +29934,9 @@ export function DebateExperience(
           setActiveSession(null);
           setView("dashboard");
           setStudioPanel("archive");
+          setSetupRestoreNotice(
+            "Case Forge is continuing in the background. You can start another Debate or use other PRISM synthesis while it cooks.",
+          );
           void loadSessions();
         }}
       /> : activeSession.formatState.playPhase !== "verdict" &&

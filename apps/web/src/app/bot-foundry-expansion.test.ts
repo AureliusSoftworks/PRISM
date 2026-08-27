@@ -125,7 +125,7 @@ describe("Bot Foundry expansion integration", () => {
     assert.match(pageSource, /Created \$\{working\.createdBotIds\.length\} of \$\{working\.total\}/u);
     assert.match(pageSource, /retry continues only the missing members/u);
     assert.match(pageSource, /generatedBotDraftCreatePayload\(generated\.draft\)/u);
-    assert.match(pageSource, /setNewBotNamePronunciation\([\s\S]*?draft\.namePronunciation/u);
+    assert.match(pageSource, /setNewBotNamePronunciation\(""\)/u);
     assert.match(pageSource, /await persistBotFoundryBatchGroup\(working\)/u);
     assert.match(pageSource, /focusBotFoundryBatchGroup\(working\.groupId\)/u);
     assert.match(pageSource, /includeBatchGroupIdentity/u);

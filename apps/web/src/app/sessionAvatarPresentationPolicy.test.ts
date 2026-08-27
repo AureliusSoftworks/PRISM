@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import {
+  COFFEE_CROWDED_MINI_AVATAR_THRESHOLD,
   coffeeAvatarPresentation,
   debateAvatarPresentation,
   debateForumModeratorUsesMini,
@@ -18,6 +19,10 @@ const debateSource = readFileSync(
   new URL("./DebateExperience.tsx", import.meta.url),
   "utf8",
 );
+const pageStylesSource = readFileSync(
+  new URL("./page.module.css", import.meta.url),
+  "utf8",
+);
 
 describe("session avatar presentation policy", () => {
   it("marks wide, left, and right as compact Moderator shots", () => {
@@ -28,10 +33,38 @@ describe("session avatar presentation policy", () => {
     assert.equal(debateForumModeratorUsesMini("jury"), false);
   });
 
-  it("keeps authored Coffee and Signal mannequins live and in replay", () => {
+  it("keeps Coffee full below its live crowded-table threshold and in replay", () => {
     assert.equal(signalAvatarPresentation({ live: true }), "full");
     assert.equal(signalAvatarPresentation({ live: false }), "full");
-    assert.equal(coffeeAvatarPresentation({ live: true }), "full");
+    assert.equal(COFFEE_CROWDED_MINI_AVATAR_THRESHOLD, 4);
+    assert.equal(
+      coffeeAvatarPresentation({
+        live: true,
+        botParticipantCount: COFFEE_CROWDED_MINI_AVATAR_THRESHOLD - 1,
+      }),
+      "full",
+    );
+    assert.equal(
+      coffeeAvatarPresentation({
+        live: true,
+        botParticipantCount: COFFEE_CROWDED_MINI_AVATAR_THRESHOLD,
+      }),
+      "mini",
+    );
+    assert.equal(
+      coffeeAvatarPresentation({
+        live: true,
+        botParticipantCount: COFFEE_CROWDED_MINI_AVATAR_THRESHOLD + 1,
+      }),
+      "mini",
+    );
+    assert.equal(
+      coffeeAvatarPresentation({
+        live: false,
+        botParticipantCount: COFFEE_CROWDED_MINI_AVATAR_THRESHOLD + 1,
+      }),
+      "full",
+    );
     assert.equal(coffeeAvatarPresentation({ live: false }), "full");
   });
 
@@ -91,14 +124,14 @@ describe("session avatar presentation policy", () => {
     );
   });
 
-  it("keeps authored Coffee and Signal bodies while shedding only peripheral live effects", () => {
+  it("uses shared mini Coffee avatars only for crowded live tables", () => {
     assert.match(
       signalSource,
       /signalAvatarPresentation\(\{[\s\S]{0,100}live: !args\.replay/u,
     );
     assert.match(
       pageSource,
-      /coffeeAvatarPresentation\(\{[\s\S]{0,100}live: conversationActive && !coffeeReplayActive/u,
+      /coffeeAvatarPresentation\(\{[\s\S]{0,240}conversationActive &&[\s\S]{0,120}!coffeeReplayActive[\s\S]{0,160}coffeeSessionPhase === "live"[\s\S]{0,160}botParticipantCount: visibleCoffeeSeats\.length/u,
     );
     assert.doesNotMatch(pageSource, /data-signal-live-compact-avatar/u);
     const coffeeRenderer = pageSource.slice(
@@ -131,7 +164,15 @@ describe("session avatar presentation policy", () => {
     assert.doesNotMatch(pageSource, /runtimeEffectsEnabled:\s*coffeeReplayActive/u);
     assert.match(
       pageSource,
-      /coffee-live-\$\{bot\.id\}[\s\S]{0,1200}showThinkingSpinner:\s*seatThinkingVisualActive[\s\S]{0,300}detailLevel:\s*"full"/u,
+      /coffee-live-\$\{bot\.id\}[\s\S]{0,1200}showThinkingSpinner:\s*seatThinkingVisualActive[\s\S]{0,300}detailLevel:\s*"full"[\s\S]{0,300}forcedRenderedSizeTier:[\s\S]{0,180}coffeeSeatAvatarPresentation === "mini"[\s\S]{0,120}"compact"/u,
+    );
+    assert.match(
+      pageSource,
+      /className=\{`\$\{styles\.zenLiveBotPresencePlate\} \$\{styles\.coffeeReplayPlayerAvatar\}`\}[\s\S]{0,500}data-avatar-presentation=\{coffeeSeatAvatarPresentation\}[\s\S]{0,5000}forcedRenderedSizeTier=\{[\s\S]{0,180}coffeeSeatAvatarPresentation === "mini"[\s\S]{0,120}"compact"/u,
+    );
+    assert.match(
+      pageStylesSource,
+      /\.coffeeSeatPlate\[data-avatar-presentation="mini"\] \.coffeeSeatMiniAvatar,[\s\S]{0,120}\.coffeeReplayPlayerAvatar\[data-avatar-presentation="mini"\][\s\S]{0,100}\.coffeeSeatMiniAvatar \{[\s\S]{0,140}--chat-mini-bot-render-size:\s*var\(--zen-live-bot-avatar-size\)/u,
     );
     assert.match(
       pageSource,

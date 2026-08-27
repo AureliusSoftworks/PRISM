@@ -15,7 +15,6 @@ import {
 describe("global voice selector", () => {
   it("offers explicit modes in the intended continuum order", () => {
     assert.deepEqual(VOICE_PLAYBACK_CHOICES, [
-      "mute",
       "english",
       "premium",
       "babble",
@@ -23,7 +22,7 @@ describe("global voice selector", () => {
     ]);
   });
 
-  it("derives all five visible choices from persisted synthesis settings", () => {
+  it("keeps legacy Mute readable without offering it in the picker", () => {
     assert.equal(voicePlaybackChoice("mute", "builtin"), "mute");
     assert.equal(voicePlaybackChoice("english", "builtin"), "english");
     assert.equal(voicePlaybackChoice("english", "elevenlabs"), "premium");

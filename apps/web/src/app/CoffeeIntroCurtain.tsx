@@ -6,8 +6,13 @@ import styles from "./CoffeeIntroCurtain.module.css";
 
 /** Short branded curtain before Coffee seat arrivals. */
 export const COFFEE_INTRO_CURTAIN_MS = 2200;
+export const COFFEE_OUTRO_EMPTY_TABLE_MS = 400;
+export const COFFEE_OUTRO_FADE_MS = 760;
+export const COFFEE_OUTRO_CARD_MS = 1800;
+export const COFFEE_OUTRO_CURTAIN_MS = COFFEE_OUTRO_FADE_MS + COFFEE_OUTRO_CARD_MS;
 
 export function CoffeeIntroCurtain(props: {
+  kind?: "intro" | "outro";
   tableName?: string | null;
   topic?: string | null;
   onSkip?: () => void;
@@ -21,17 +26,21 @@ export function CoffeeIntroCurtain(props: {
 
   const tableLabel = props.tableName?.trim() || "Coffee";
   const topicLabel = props.topic?.trim() || null;
+  const kind = props.kind ?? "intro";
+  const durationMs = kind === "outro" ? COFFEE_OUTRO_CURTAIN_MS : COFFEE_INTRO_CURTAIN_MS;
 
   return createPortal(
     <section
       className={styles.curtain}
       data-coffee-intro-curtain="true"
+      data-coffee-bookend={kind}
       role="status"
       aria-live="polite"
-      aria-label={`${tableLabel} table introduction`}
+      aria-label={`${tableLabel} table ${kind}`}
       style={
         {
-          "--coffee-intro-duration": `${COFFEE_INTRO_CURTAIN_MS}ms`,
+          "--coffee-intro-duration": `${durationMs}ms`,
+          "--coffee-outro-fade-duration": `${COFFEE_OUTRO_FADE_MS}ms`,
         } as CSSProperties
       }
     >
@@ -41,15 +50,15 @@ export function CoffeeIntroCurtain(props: {
         <i />
       </div>
       <div className={styles.lockup}>
-        <p className={styles.eyebrow}>PRISM presents</p>
+        <p className={styles.eyebrow}>{kind === "outro" ? "COFFEE" : "PRISM presents"}</p>
         <div className={styles.mark} aria-hidden="true">
           <span />
         </div>
         <h1>{tableLabel}</h1>
-        {topicLabel ? <strong>{topicLabel}</strong> : null}
-        <small>Pull up a seat</small>
+        {kind === "outro" ? <strong>The table is empty.</strong> : topicLabel ? <strong>{topicLabel}</strong> : null}
+        {kind === "intro" ? <small>Pull up a seat</small> : null}
       </div>
-      {props.onSkip ? (
+      {kind === "intro" && props.onSkip ? (
         <button type="button" className={styles.skip} onClick={props.onSkip}>
           Skip
         </button>

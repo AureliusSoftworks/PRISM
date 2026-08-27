@@ -143,10 +143,10 @@ test("review seats Default Prism for replay and restores bot seats", () => {
   );
 });
 
-test("Coffee gives the joined player one explicit mug and sip path", () => {
+test("Coffee gives the joined player one explicit mug-gated floor path", () => {
   assert.match(cssSource, /\.coffeePlayerCupButton\s*\{/u);
-  assert.match(pageSource, /coffeePlayerCupSipping/u);
-  assert.match(pageSource, /const sipCoffeePlayerCup = \(\): void =>/u);
-  assert.match(pageSource, /\/join-cup\/sip/u);
-  assert.match(pageSource, /aria-label="Sip from your mug"/u);
+  assert.match(pageSource, /const toggleCoffeeMugComposer = \(\): void =>/u);
+  assert.match(pageSource, /onClick=\{toggleCoffeeMugComposer\}/u);
+  assert.match(pageSource, /coffeePlayerComposerOpen/u);
+  assert.match(pageSource, /consumeJoinSip: true/u);
 });

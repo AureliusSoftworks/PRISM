@@ -160,11 +160,11 @@ function completeDraft(): Record<string, unknown> {
 }
 
 describe("normalizeBotGeneratedDraftV1", () => {
-  it("normalizes a complete generated bot while dropping deprecated accessory stamps", () => {
+  it("normalizes a complete generated bot while dropping model-authored pronunciation and deprecated accessory stamps", () => {
     const draft = normalizeBotGeneratedDraftV1(completeDraft());
     assert.ok(draft);
     assert.equal(draft.name, "Nyx");
-    assert.equal(draft.namePronunciation, "nicks");
+    assert.equal(draft.namePronunciation, "");
     assert.equal(draft.selfReferral, "");
     assert.equal(draft.profile.core.communicationStyle, "warm");
     assert.deepEqual(draft.profile.core.responseCues?.waiting, [
@@ -842,7 +842,7 @@ describe("normalizeLeanBotGeneratedDraftV1", () => {
     const draft = normalizeLeanBotGeneratedDraftV1(rich);
     assert.ok(draft);
     assert.equal(draft.name, "Nyx");
-    assert.equal(draft.namePronunciation, "nicks");
+    assert.equal(draft.namePronunciation, "");
     assert.equal(draft.profile.core.traits, "patient, sly, observant");
     assert.equal(draft.color, "#2f00ff");
     assert.equal(draft.glyph, "moon");

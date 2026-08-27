@@ -2501,10 +2501,10 @@ test("resolved cup-rate powers return shared multipliers", () => {
     },
   };
   assert.equal(coffeePowerCupRateMultiplierV1(plan, "voltaire"), 2.5);
-  assert.equal(coffeePowerCupRateMultiplierV1(plan, "theodore"), 0);
+  assert.equal(coffeePowerCupRateMultiplierV1(plan, "theodore"), 1);
   assert.equal(coffeePowerCupRateMultiplierV1(plan, "slowpoke"), 0.55);
   assert.equal(coffeePowerCupRateMultiplierV1(plan, "other"), 1);
-  assert.equal(coffeePowerVesselModeV1(plan, "theodore"), "none");
+  assert.equal(coffeePowerVesselModeV1(plan, "theodore"), "water");
   assert.equal(coffeePowerVesselModeV1(plan, "voltaire"), "coffee");
   assert.equal(coffeePowerStayRateMultiplierV1(plan, "theodore"), 1);
   assert.equal(coffeePowerStayRateMultiplierV1(plan, "voltaire"), 2.5);

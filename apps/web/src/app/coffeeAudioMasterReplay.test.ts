@@ -61,6 +61,21 @@ test("Coffee uses authenticated master currentTime as the sole procedural replay
   );
 });
 
+test("Coffee faithful replay restores both recorded bookends", () => {
+  assert.match(
+    pageSource,
+    /directedScene\?\.outroActive[\s\S]{0,120}\? "outro"[\s\S]{0,120}directedScene\?\.introActive[\s\S]{0,120}\? "intro"/u,
+  );
+  assert.match(
+    pageSource,
+    /coffeeReplayActive && coffeeReplayBookend[\s\S]{0,180}<CoffeeIntroCurtain[\s\S]{0,120}kind=\{coffeeReplayBookend\}/u,
+  );
+  assert.match(
+    pageSource,
+    /phase: "outro_start"[\s\S]{0,180}setCoffeeOutroPlaying\(true\)/u,
+  );
+});
+
 test("Coffee faithful replay drives seated mouths and gaze from V2 speaking", () => {
   assert.match(
     pageSource,

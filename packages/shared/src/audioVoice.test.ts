@@ -38,6 +38,7 @@ import {
   normalizeElevenLabsVoiceEffect,
   normalizeVoiceEffect,
   normalizeOptionalBotAudioVoiceProfileV1,
+  normalizeSpeechTypeVoiceMode,
   resolveBotAudioVoiceProfileV1,
   resolveBotPronunciationMapPointV1,
   resolveLocalVoicePronunciationLocale,
@@ -191,6 +192,9 @@ describe("audio voice normalization", () => {
     assert.equal(normalizeVoiceMode("babble"), "babble");
     assert.equal(normalizeVoiceMode("bottish"), "bottish");
     assert.equal(normalizeVoiceMode("robot"), "mute");
+    assert.equal(normalizeSpeechTypeVoiceMode("mute"), "english");
+    assert.equal(normalizeSpeechTypeVoiceMode("babble"), "babble");
+    assert.equal(normalizeSpeechTypeVoiceMode("robot", "bottish"), "bottish");
     assert.equal(normalizeEnglishVoiceEngine("elevenlabs"), "elevenlabs");
     assert.equal(normalizeEnglishVoiceEngine("remote"), "builtin");
   });

@@ -167,6 +167,10 @@ interface SlateWorkspaceProps {
   foregroundModelProvider?: SlateAiProvider;
   foregroundModelOverride?: string | null;
   foregroundReasoningEffort?: ProviderReasoningEffort;
+  /** Publishes the latest durable writing-operation route to applet chrome. */
+  onForegroundRouteChange?: (
+    route: { provider: SlateAiProvider; model: string } | null,
+  ) => void;
   assetRailGeneration?: (
     kind: "slate_cover" | "slate_visual_study",
   ) => AssetRailGenerationControl;
@@ -547,6 +551,7 @@ export default function SlateWorkspace({
   foregroundModelProvider,
   foregroundModelOverride,
   foregroundReasoningEffort,
+  onForegroundRouteChange,
   assetRailGeneration,
 }: SlateWorkspaceProps): React.JSX.Element {
   slateForegroundModelProvider = foregroundModelProvider;
@@ -849,6 +854,25 @@ export default function SlateWorkspace({
   useEffect(() => {
     projectRef.current = project;
   }, [project]);
+
+  useEffect(() => {
+    onForegroundRouteChange?.(
+      writingOperation?.provider && writingOperation.model
+        ? {
+            provider: writingOperation.provider,
+            model: writingOperation.model,
+          }
+        : null,
+    );
+  }, [
+    onForegroundRouteChange,
+    writingOperation?.model,
+    writingOperation?.provider,
+  ]);
+  useEffect(
+    () => () => onForegroundRouteChange?.(null),
+    [onForegroundRouteChange],
+  );
 
   useEffect(() => {
     setMirrorOpen(false);

@@ -84,6 +84,16 @@
 }
 
 .forgeMessage { margin: 0.9rem 0 1.25rem; color: #d5d1e1; }
+.forgeBackgroundNote {
+  margin: 0.2rem 0 1.2rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgba(101, 219, 255, 0.2);
+  border-radius: 0.8rem;
+  color: #c9c4da;
+  background: rgba(24, 43, 66, 0.34);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
 .forgeRecovery {
   margin: -0.65rem 0 1.2rem;
   padding: 0.75rem 0.85rem;
@@ -212,6 +222,27 @@
 .forgeSubsteps li[data-state="attention"] { color: #ffd1dc; font-weight: 700; }
 .forgeSubsteps li[data-state="attention"] > span { color: #ff9ab6; }
 
+.forgeDetails {
+  margin: 0.25rem 0 1rem;
+  border: 1px solid rgba(184, 153, 255, 0.18);
+  border-radius: 0.8rem;
+  background: rgba(6, 7, 17, 0.24);
+}
+
+.forgeDetails > summary {
+  padding: 0.8rem 0.9rem;
+  color: #c8c1da;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.forgeDetails > div { padding: 0 0.9rem 0.9rem; }
+.forgeDetails .forgeMessage { margin: 0 0 0.85rem; font-size: 0.85rem; }
+.forgeDetails .forgeSubsteps { margin: 0 0 0.85rem; }
+.forgeDetails .localVoiceNotice { margin-top: 0; }
+.forgeDetails small { display: block; margin-top: 0.45rem; color: var(--v2-muted); }
+
 .forgeTip {
   display: grid;
   gap: 0.18rem;
@@ -275,11 +306,45 @@
 .caseOpeningStage {
   position: relative;
   min-height: 100dvh;
-  background: #000;
+  background-color: #000;
+  background-image:
+    linear-gradient(180deg, rgba(3, 4, 9, 0.08), rgba(3, 4, 9, 0.48)),
+    var(--opening-room-image);
+  background-position: center;
+  background-size: cover;
   cursor: pointer;
 }
 
 .caseOpeningStage:focus-visible { outline: 3px solid #fff; outline-offset: -3px; }
+
+.caseOpeningPlayerAvatar {
+  position: absolute;
+  z-index: 7;
+  left: clamp(1rem, 5vw, 5rem);
+  bottom: clamp(9.5rem, 22vh, 15rem);
+  display: grid;
+  justify-items: center;
+  gap: 0.35rem;
+  color: #f2edff;
+  filter: drop-shadow(0 1rem 1.5rem rgba(0, 0, 0, 0.66));
+  pointer-events: none;
+}
+.caseOpeningPlayerAvatar i {
+  display: grid;
+  width: 5rem;
+  aspect-ratio: 1;
+  place-items: center;
+  border: 1px solid rgba(190, 171, 255, 0.58);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(86, 67, 133, 0.92), rgba(9, 11, 22, 0.96));
+  box-shadow: 0 0 2rem rgba(163, 128, 255, 0.34);
+}
+.caseOpeningPlayerAvatar strong {
+  padding: 0.28rem 0.48rem;
+  border-bottom: 2px solid #ae8cff;
+  background: rgba(6, 7, 14, 0.82);
+  font-size: 0.72rem;
+}
 
 .caseOpeningDialogue {
   position: absolute;
@@ -591,6 +656,8 @@
 .mansionRoomDetails dl div { display: flex; align-items: baseline; gap: 0.28rem; }
 .mansionRoomDetails dd { margin: 0; font-size: 0.78rem; }
 .mansionRoomDetails button { grid-column: 3; grid-row: 1; min-width: 8.5rem; min-height: 2.6rem; padding: 0.6rem 0.85rem; color: #17110a; font-weight: 760; border: 1px solid #f0d091; border-radius: 0.65rem; background: linear-gradient(180deg, #f0d091, #c89c50); box-shadow: 0 0.7rem 1.8rem rgba(0, 0, 0, 0.28); cursor: pointer; }
+.mansionRoomDetails button:disabled { color: #a59c90; border-color: rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.07); box-shadow: none; cursor: not-allowed; }
+.securedRoomStatus { grid-column: 1 / 3; margin: 0.2rem 0 0; color: #d5c8aa; font-size: 0.74rem; }
 .saveMansionButton {
   justify-self: end;
   min-height: 2.2rem;
@@ -624,6 +691,9 @@
   animation: roomDescend 420ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
 }
 .roomScene[data-room-introduction] { min-height: 100dvh; }
+.roomSecuring { position: absolute; z-index: 20; inset: 0; display: grid; place-content: center; justify-items: center; gap: 0.35rem; padding: 2rem; text-align: center; background: radial-gradient(circle, rgba(38, 32, 55, 0.9), rgba(7, 9, 16, 0.98)); }
+.roomSecuring strong { font-size: clamp(1.35rem, 4vw, 2.4rem); }
+.roomSecuring span { color: #b9b1c8; }
 
 @keyframes roomDescend {
   from { opacity: 0; transform: scale(1.04) translateY(-1.5rem); }
@@ -656,6 +726,8 @@
 .roomTitle { position: absolute; z-index: 2; top: 1.4rem; left: 1.4rem; padding: 0.65rem 0.85rem; border-left: 2px solid #ae8cff; background: rgba(6, 8, 15, 0.63); backdrop-filter: blur(12px); }
 .roomTitle h1 { margin: 0.1rem 0 0; }
 .roomTitle small { color: #bbb2ce; }
+.saveSealedAssetButton { width: fit-content; margin-top: 0.5rem; padding: 0.38rem 0.55rem; color: #dffcf4; border: 1px solid rgba(107, 231, 201, 0.42); border-radius: 0.5rem; background: rgba(25, 93, 78, 0.42); font-size: 0.7rem; cursor: pointer; }
+.saveSealedAssetButton:disabled { opacity: 0.68; cursor: default; }
 
 .roomActor {
   --actor-color: #a98cff;
@@ -823,6 +895,7 @@
 .investigationCommands button:hover:not(:disabled),
 .investigationCommands button[data-active="true"],
 .courtActions button:hover:not(:disabled) { border-color: rgba(176, 142, 255, 0.38); background: rgba(137, 103, 224, 0.15); }
+.sweepHint { position: fixed; z-index: 14; left: 50%; bottom: 5.75rem; width: min(29rem, calc(100vw - 2rem)); padding: 0.45rem 0.7rem; color: #d9d0e7; border: 1px solid rgba(176, 142, 255, 0.28); border-radius: 0.55rem; background: rgba(8, 10, 19, 0.88); font-size: 0.72rem; text-align: center; transform: translateX(-50%); backdrop-filter: blur(14px); }
 
 .choiceTray {
   position: fixed;
@@ -863,6 +936,7 @@
 .recordGrid button:hover { border-color: #a98cff; }
 .recordGrid button > span { font-size: 1.5rem; }
 .recordGrid button small { color: #aaa5b6; line-height: 1.3; }
+.recordAssetImage { width: 3.5rem; height: 3.5rem; object-fit: contain; }
 
 .fileChargesButton { position: fixed; z-index: 15; right: 1rem; bottom: 1rem; padding: 0.8rem 1rem; border: 1px solid rgba(255, 132, 189, 0.45); border-radius: 0.75rem; background: rgba(133, 38, 90, 0.72); font-weight: 800; cursor: pointer; }
 .theoryHint { position: fixed; z-index: 10; right: 1rem; bottom: 1.2rem; max-width: 18rem; color: #85808f; font-size: 0.65rem; text-align: right; }
@@ -888,6 +962,7 @@
 .caseFile h3 { margin: 0; color: #a59dbb; font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; }
 .caseFile article { display: flex; gap: 0.7rem; padding: 0.75rem; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 0.7rem; background: rgba(255, 255, 255, 0.03); }
 .caseFile article > span { font-size: 1.4rem; }
+.caseFileAssetImage { width: 5rem; height: 5rem; flex: 0 0 auto; object-fit: contain; border-radius: 0.5rem; background: rgba(255, 255, 255, 0.035); }
 .caseFile article div { display: grid; gap: 0.15rem; }
 .caseFile article small, .caseFile > small { color: #9994a6; text-transform: capitalize; }
 .caseFile article p { margin: 0.25rem 0 0; color: #c5c1cd; font-size: 0.82rem; }

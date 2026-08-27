@@ -1,5 +1,4 @@
 import {
-  normalizeBotNamePronunciation,
   serializeStoredBotPrompt,
   type BotGeneratedDraftV1,
 } from "@localai/shared";
@@ -74,6 +73,7 @@ export interface BotFoundryBatchPreview {
   color: string;
   glyph: BotGeneratedDraftV1["glyph"];
   face: BotGeneratedDraftV1["face"] | null;
+  avatarDetails: BotGeneratedDraftV1["avatarDetails"] | null;
 }
 
 export interface BotFoundryBatchSlot {
@@ -94,6 +94,7 @@ export function botFoundryBatchPreviewForDraft(
     color: draft.color,
     glyph: draft.glyph,
     face: draft.face,
+    avatarDetails: draft.avatarDetails,
   };
 }
 
@@ -133,7 +134,7 @@ export function generatedBotDraftCreatePayload(
 ): Record<string, unknown> {
   return {
     name: draft.name,
-    namePronunciation: normalizeBotNamePronunciation(draft.namePronunciation),
+    namePronunciation: "",
     selfReferral: "",
     systemPrompt: serializeStoredBotPrompt(draft.profile, draft.name),
     onlineEnabled: true,

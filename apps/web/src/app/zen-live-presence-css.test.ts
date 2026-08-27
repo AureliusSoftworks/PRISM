@@ -336,10 +336,10 @@ describe("Zen live presence CSS", () => {
     assert.match(plateRule, /cursor:\s*default\s*;/);
     assert.match(plateRule, /touch-action:\s*none\s*;/);
     assert.match(plateRule, /user-select:\s*none\s*;/);
-    assert.match(plateRule, /--zen-live-bot-eye-local-x:\s*-0\.2\s*;/);
-    assert.match(
+    assert.doesNotMatch(plateRule, /--zen-live-bot-eye-local-x:/);
+    assert.doesNotMatch(
       plateRule,
-      /--coffee-plate-emoji-nudge-y:\s*clamp\(-5px,\s*-2\.6%,\s*-2px\)\s*;/,
+      /--coffee-plate-emoji-nudge-y:/,
     );
     assert.match(
       plateRule,
@@ -418,7 +418,7 @@ describe("Zen live presence CSS", () => {
       pageSource,
       /const ZEN_LIVE_BOT_LOCKED_BODY_PLACEMENT:[\s\S]*?xPct:\s*50,[\s\S]*?yPct:\s*50,/,
     );
-    assert.match(pageSource, /BOT_AVATAR_CANONICAL_FACE_REGISTRATION_STYLE/);
+    assert.match(pageSource, /botAvatarFaceRegistrationStyle/);
     assert.match(
       pageSource,
       /"--zen-live-bot-avatar-size":\s*`\$\{bodySize\}px`/,
@@ -446,7 +446,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       pageSource,
-      /const avatarFaceRegistrationStyle = hasAvatarDetailsVisuals[\s\S]*BOT_AVATAR_CANONICAL_FACE_REGISTRATION_STYLE/,
+      /const avatarFaceRegistrationStyle = botAvatarFaceRegistrationStyle\(\s*hasAvatarDetailsVisuals,\s*\)/,
     );
     assert.doesNotMatch(pageSource, /ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT/);
     assert.match(
@@ -481,7 +481,7 @@ describe("Zen live presence CSS", () => {
       pageSource,
       /const ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX =\s+ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX - 1;/,
     );
-    // Zen holds the HD chassis a little below the shared Full HD floor.
+    // Zen holds the HD chassis below the shared lowered Full HD floor.
     assert.match(pageSource, /const ZEN_LIVE_BOT_AVATAR_HD_HOLD_PX = 60;/);
     assert.match(
       pageSource,
@@ -3560,6 +3560,11 @@ describe("Zen live presence CSS", () => {
       phosphorPixelGlyphSource,
       /data-crt-pixel-mask-pending=\{enabled && !maskUrl \? "true" : undefined\}/,
     );
+    assert.doesNotMatch(
+      phosphorPixelGlyphSource,
+      /data-crt-raster-emission-surface/,
+      "The HD face must not depend on a nested emission-only child.",
+    );
     assert.match(css, /data-crt-pixel-mask-ready="true"/);
     assert.match(css, /data-crt-pixel-mask-pending="true"/);
     assert.match(css, /visibility:\s*hidden\s*;/);
@@ -3585,6 +3590,18 @@ describe("Zen live presence CSS", () => {
       focusedFaceRule,
       /--crt-glyph-core-paint-bleed:\s*0\.14em\s*;/,
     );
+    const facePendingMaskRule = ruleForSelectorNeedlesWithBody(
+      [
+        ".zenLiveBotPresenceFaceGlyph",
+        '[data-crt-glyph-layer="true"][data-crt-pixel-mask-pending="true"]',
+      ],
+      "visibility: visible",
+    );
+    assert.match(
+      facePendingMaskRule,
+      /visibility:\s*visible\s*;/,
+      "A stalled font or raster request must not erase a full-size face.",
+    );
     const thinkingPendingMaskRule = ruleForNormalizedSelector(
       '.zenLiveBotPresenceThinkingGlyph [data-crt-glyph-layer="true"][data-crt-pixel-mask-pending="true"]',
     );
@@ -3597,6 +3614,45 @@ describe("Zen live presence CSS", () => {
       /mask-image:\s*var\(--crt-phosphor-pixel-mask\)/,
     );
     assert.match(thinkingReadyMaskRule, /image-rendering:\s*pixelated/);
+    const readyFaceGlyphRule = ruleForNormalizedSelector(
+      '.zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]',
+    );
+    assert.match(
+      readyFaceGlyphRule,
+      /var\(--crt-face-glow-filter\)/,
+      "Full-size faces must retain the proven compositor-level phosphor halo.",
+    );
+    const readyFaceBloomRule = ruleForSelectorNeedlesWithBody(
+      [
+        ".zenLiveBotPresenceFaceGlyph",
+        '[data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]::before',
+      ],
+      "background: var(--crt-face-edge-color, currentColor)",
+    );
+    const readyFaceMaskRule = ruleForNormalizedSelector(
+      '.zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]::before',
+    );
+    assert.match(
+      readyFaceMaskRule,
+      /mask-image:\s*var\(--crt-phosphor-pixel-mask\)/,
+    );
+    assert.match(
+      readyFaceBloomRule,
+      /background:\s*var\(--crt-face-edge-color,\s*currentColor\)\s*;/,
+    );
+    assert.match(
+      readyFaceBloomRule,
+      /filter:\s*blur\(var\(--crt-glyph-beam-softness\)\)\s*;/,
+      "The masked bloom keeps beam softness while the reliable parent surface owns the broad halo.",
+    );
+    assert.doesNotMatch(readyFaceBloomRule, /content:\s*none\s*;/);
+    const readyFaceCoreRule = ruleForNormalizedSelector(
+      '.zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]::after',
+    );
+    assert.match(
+      readyFaceCoreRule,
+      /mask-image:\s*var\(--crt-phosphor-pixel-mask\)/,
+    );
   });
 
   it("lets the pull-quote action text drift away from the fixed body", () => {

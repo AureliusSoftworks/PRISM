@@ -22,6 +22,7 @@ import {
   phosphorCanonicalPresentationScale,
   phosphorCanonicalRasterDimension,
   phosphorCanvasFontShorthand,
+  phosphorPrimaryFontFamily,
   phosphorTextAlphabeticBaseline,
   samplePhosphorAlphaCells,
   thresholdPhosphorPixelAlpha,
@@ -361,6 +362,8 @@ export const CrtPixelTextGlyph = forwardRef<
     let frameId: number | null = null;
     let fontRevision = 0;
     const requestedFontProbes = new Set<string>();
+    const loadedFontProbes = new Set<string>();
+    const unavailableFontProbes = new Set<string>();
     const render = (): void => {
       if (frameId !== null) cancelAnimationFrame(frameId);
       frameId = requestAnimationFrame(() => {
@@ -374,32 +377,48 @@ export const CrtPixelTextGlyph = forwardRef<
       render();
     };
     const renderMask = (): void => {
-      // The raster cache key otherwise looks identical before and after the
-      // authored webfont finishes loading (the family list does not change),
-      // so a cold-load fallback raster would be replayed by every later
-      // mount. Fold loadedness into the raster identity and kick the lazy
-      // face load with a parseable probe — `computed.font` serializes to ""
-      // for these glyphs, which silently skipped the old reload path.
+      // Kick the authored primary family directly, but never wait for that
+      // promise before painting. Some packaged browser runtimes can leave a
+      // FontFaceSet.load request unsettled indefinitely; the current computed
+      // fallback still gives us a visible mask, and a successful authored-font
+      // load replaces it through a distinct cache revision below.
       const computed = window.getComputedStyle(node);
-      const fontProbe = `${computed.fontStyle} ${computed.fontWeight} ${computed.fontSize} ${computed.fontFamily}`;
-      let fontReady = true;
-      try {
-        fontReady = document.fonts?.check(fontProbe, content) ?? true;
-      } catch {
-        // Unparseable probe (e.g., transient zero font size): raster anyway.
-      }
-      if (!fontReady && !requestedFontProbes.has(fontProbe)) {
+      const primaryFontFamily = phosphorPrimaryFontFamily(computed.fontFamily);
+      const fontProbe = phosphorCanvasFontShorthand(
+        { ...computed, fontFamily: primaryFontFamily },
+        1,
+      );
+      if (
+        document.fonts &&
+        !loadedFontProbes.has(fontProbe) &&
+        !unavailableFontProbes.has(fontProbe) &&
+        !requestedFontProbes.has(fontProbe)
+      ) {
         requestedFontProbes.add(fontProbe);
         void document.fonts
-          ?.load(fontProbe, content)
-          .then(handleFontsLoaded, () => undefined);
+          .load(fontProbe, content)
+          .then(
+            () => {
+              loadedFontProbes.add(fontProbe);
+              handleFontsLoaded();
+            },
+            () => {
+              unavailableFontProbes.add(fontProbe);
+              handleFontsLoaded();
+            },
+          );
       }
+      const fontLoadState = !document.fonts
+        ? "font-set-unavailable"
+        : loadedFontProbes.has(fontProbe)
+          ? "authored-font-loaded"
+          : unavailableFontProbes.has(fontProbe)
+            ? "authored-font-unavailable"
+            : "authored-font-pending";
       const nextMask = rasterizeTextMask(
         node,
         content,
-        `${rasterKey ?? ""}:${
-          fontReady ? "font-ready" : `font-pending-${fontRevision}`
-        }`,
+        `${rasterKey ?? ""}:${fontLoadState}:${primaryFontFamily}:font-revision-${fontRevision}`,
         binaryAlpha,
       );
       if (!cancelled && nextMask) {

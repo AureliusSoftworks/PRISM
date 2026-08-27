@@ -9,14 +9,10 @@ const pageCss = readFileSync(
 );
 
 describe("Signal face alignment", () => {
-  it("keeps the complete face and Ink plane raised while a Signal bot talks", () => {
-    assert.match(
-      pageCss,
-      /\.signalBotPresencePlate\[data-signal-surface="stage"\]\s*\.zenLiveBotPresenceScreenContentRig\s*\{[^}]*translate:\s*0 clamp\(-6px, -0\.42vw, -4px\)/iu,
-    );
+  it("keeps Signal presentation outside the canonical face and Ink plane", () => {
     assert.doesNotMatch(
       pageCss,
-      /\.signalBotPresencePlate\[data-signal-surface="stage"\]:not\(\[data-talking="true"\]\)[^{]*\.zenLiveBotPresenceScreenContentRig/iu,
+      /\.signalBotPresencePlate[^{}]*\.zenLiveBotPresenceScreenContentRig\s*\{[^}]*translate:/iu,
     );
     assert.doesNotMatch(
       pageCss,

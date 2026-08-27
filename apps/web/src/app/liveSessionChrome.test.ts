@@ -6,21 +6,63 @@ import {
   LIVE_SESSION_EFFORT_LABELS,
 } from "./liveSessionChromeLabels.ts";
 
-test("live session routing chip resolves Auto while preserving provenance", () => {
+test("live session routing chip shows the server-observed Auto route", () => {
   assert.deepEqual(
     liveSessionRoutingChipLabels({
       modelIsAuto: true,
-      modelLabel: "gpt-4o",
+      modelLabel: "GPT-4o",
       effort: "high",
       turbo: true,
+      lane: "online",
+      actualRoute: {
+        provider: "openai",
+        model: "gpt-4o",
+        effort: "high",
+        turbo: true,
+      },
     }),
     {
-      modelLabel: "gpt-4o [auto]",
+      modelLabel: "Auto → GPT-4o",
       effortLabel: "High",
       effortKey: "high",
       automatic: true,
       turbo: true,
     },
+  );
+});
+
+test("live Auto waits or chooses without substituting a client preview", () => {
+  assert.equal(
+    liveSessionRoutingChipLabels({
+      modelIsAuto: true,
+      modelLabel: "preview-model",
+      effort: "medium",
+      lane: "online",
+    }).modelLabel,
+    "Auto → Awaiting first turn",
+  );
+  assert.equal(
+    liveSessionRoutingChipLabels({
+      modelIsAuto: true,
+      modelLabel: "preview-model",
+      effort: "medium",
+      lane: "online",
+      choosing: true,
+    }).modelLabel,
+    "Auto → Choosing…",
+  );
+});
+
+test("LOCAL ignores stale online routes", () => {
+  assert.equal(
+    liveSessionRoutingChipLabels({
+      modelIsAuto: true,
+      modelLabel: "preview-model",
+      effort: "medium",
+      lane: "local",
+      actualRoute: { provider: "openai", model: "gpt-5.6" },
+    }).modelLabel,
+    "Auto → Awaiting first turn",
   );
 });
 
@@ -102,14 +144,21 @@ test("live session chrome mounts model chip and theme-aware watermark", () => {
   assert.match(pageSource, /LiveSessionPrismWatermark/u);
   assert.match(
     pageSource,
-    /function latestConversationAutoRoute\([\s\S]{0,900}message\?\.role !== "assistant"[\s\S]{0,500}return \{ provider, model \}/u,
+    /function latestConversationAutoRoute\([\s\S]{0,1800}latestActualAppletRoute/u,
   );
   assert.match(
     pageSource,
-    /const coffeeLatestAutoRoute =[\s\S]{0,1200}primaryForAuto:[\s\S]{0,160}coffeeLatestAutoRoute \?\?/u,
+    /const coffeeLatestAutoRoute =[\s\S]{0,1200}actualAutoRoute: coffeeLatestAutoRoute/u,
   );
   assert.match(debateSource, /lockedRoutingChip/u);
-  assert.match(debateSource, /session\.latestAutoRoute\?\.model \?\? session\.model/u);
+  assert.match(
+    debateSource,
+    /latestDebateActualAutoRoute\(session\)[\s\S]{0,900}actualRoute: actualAutoRoute/u,
+  );
+  assert.match(
+    pageSource,
+    /autoRouteLabel=\{[\s\S]{0,180}debateLiveRoutingChip\?\.modelLabel/u,
+  );
   assert.match(
     signalSource,
     /resolveLockedRoutingChip\?\.\(\{[\s\S]{0,220}activeAutoRoute,/u,

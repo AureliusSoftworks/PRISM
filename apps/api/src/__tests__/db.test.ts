@@ -269,6 +269,58 @@ describe("createDatabase English voice engine compatibility", () => {
   });
 });
 
+describe("createDatabase Speech Type compatibility", () => {
+  it("defaults new accounts to English and migrates the retired Mute preference", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "prism-speech-type-"));
+    const previousDbPath = process.env.DB_PATH;
+    const previousDataDir = process.env.LOCALAI_DATA_DIR;
+    process.env.DB_PATH = join(tempDir, "speech-type.db");
+    delete process.env.LOCALAI_DATA_DIR;
+    try {
+      const db = createDatabase();
+      db.prepare(
+        "INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(
+        "speech-user",
+        "speech-user@example.com",
+        "Speech User",
+        "hash",
+        "salt",
+        "cipher",
+        "iv",
+        "tag",
+        "2026-08-26T00:00:00.000Z",
+        "2026-08-26T00:00:00.000Z",
+      );
+
+      const readVoiceMode = (): string =>
+        (
+          db
+            .prepare("SELECT voice_mode FROM users WHERE id = ?")
+            .get("speech-user") as { voice_mode: string }
+        ).voice_mode;
+      assert.equal(readVoiceMode(), "english");
+
+      db.prepare("UPDATE users SET voice_mode = 'mute' WHERE id = ?").run(
+        "speech-user",
+      );
+      initializeDatabase(db);
+      assert.equal(readVoiceMode(), "english");
+
+      db.prepare("UPDATE users SET voice_mode = 'babble' WHERE id = ?").run(
+        "speech-user",
+      );
+      initializeDatabase(db);
+      assert.equal(readVoiceMode(), "babble");
+      db.close();
+    } finally {
+      restoreEnv("DB_PATH", previousDbPath);
+      restoreEnv("LOCALAI_DATA_DIR", previousDataDir);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("createDatabase living shell startup preference", () => {
   it("adds a privacy-neutral Home default without rewriting saved choices", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "prism-startup-preference-"));

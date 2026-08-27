@@ -325,6 +325,48 @@ export function randomDebatePlayerJudgeCast(
   };
 }
 
+/**
+ * Resolve only the ordinary Debate floor seats the player left on Surprise me.
+ * Existing valid selections stay pinned; explicit Jury pins are excluded from
+ * automatic floor assignment so one random fill cannot dislodge another
+ * authored seat when the server freezes the room.
+ */
+export function resolveDebateSurpriseCast(
+  availableBotIds: readonly string[],
+  current: DebateCastSelection,
+  selectableSlots: readonly (keyof DebateCastSelection)[],
+  excludedBotIds: readonly string[] = [],
+  random: () => number = Math.random,
+): DebateCastSelection | null {
+  const available = new Set(availableBotIds.filter(Boolean));
+  const next = { ...current };
+  const pinned = new Set<string>();
+
+  for (const slot of selectableSlots) {
+    const botId = current[slot];
+    if (botId && available.has(botId) && !pinned.has(botId)) {
+      pinned.add(botId);
+      continue;
+    }
+    next[slot] = "";
+  }
+
+  const surpriseSlots = selectableSlots.filter((slot) => !next[slot]);
+  if (surpriseSlots.length === 0) return next;
+
+  const excluded = new Set(excludedBotIds.filter(Boolean));
+  const candidates = shuffledUniqueBotIds(availableBotIds, random).filter(
+    (botId) => !pinned.has(botId) && !excluded.has(botId),
+  );
+  for (const slot of surpriseSlots) {
+    const botId = candidates.shift();
+    if (!botId) return null;
+    next[slot] = botId;
+    pinned.add(botId);
+  }
+  return next;
+}
+
 /** Stage alignment always uses a fresh random three-bot Library cast. */
 export function debateAlignmentPreviewCast(
   availableBotIds: readonly string[],

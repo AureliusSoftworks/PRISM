@@ -901,7 +901,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       pageSource,
-      /const hasAvatarDetailsVisuals = avatarDetailsHasVisuals\(avatarDetails\);[\s\S]*hasAvatarDetailsVisuals[\s\S]*BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE/,
+      /const hasAvatarDetailsVisuals = avatarDetailsHasVisuals\(avatarDetails\);[\s\S]*botAvatarFaceRegistrationStyle\(\s*hasAvatarDetailsVisuals,\s*\)/,
     );
     assert.match(
       pageSource,

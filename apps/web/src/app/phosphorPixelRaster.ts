@@ -95,6 +95,40 @@ export function phosphorCanvasFontShorthand(
     .join(" ");
 }
 
+/**
+ * Return the authored first family from a computed CSS font-family list.
+ * FontFaceSet.check/load accepts a fallback list as soon as any later family
+ * can paint the glyph, so the complete list cannot prove that the selected
+ * Avatar Studio face is available.
+ */
+export function phosphorPrimaryFontFamily(fontFamily: string): string {
+  const source = fontFamily.trim();
+  if (!source) return source;
+  let quote: '"' | "'" | null = null;
+  let escaped = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) quote = null;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === ",") return source.slice(0, index).trim();
+  }
+  return source;
+}
+
 export function thresholdPhosphorPixelAlpha(
   rgba: Uint8ClampedArray,
   threshold = PHOSPHOR_PIXEL_ALPHA_THRESHOLD,

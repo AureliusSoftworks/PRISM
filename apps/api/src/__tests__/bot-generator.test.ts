@@ -340,7 +340,7 @@ describe("PRISM bot generator", () => {
     });
     assert.equal(richResult.draft.audioVoiceProfile.elevenLabsVoiceId, "allotted-voice");
     assert.equal(richResult.draft.audioVoiceProfile.accentDefinitionId, "irish-english");
-    assert.equal(richResult.draft.namePronunciation, "MAH-ruh VAYL");
+    assert.equal(richResult.draft.namePronunciation, "");
     assert.equal(leanResult.draft.audioVoiceProfile.systemVoiceName, "Alex");
     assert.equal(
       leanResult.draft.audioVoiceProfile.accentDefinitionId,
@@ -348,7 +348,7 @@ describe("PRISM bot generator", () => {
     );
     assert.ok(leanResult.draft.audioVoiceProfile.pronunciationMapPoint);
     assert.equal(leanResult.draft.audioVoiceProfile.pace, -0.15);
-    assert.equal(leanResult.draft.namePronunciation, "MAH-ruh VAYL");
+    assert.equal(leanResult.draft.namePronunciation, "");
     const prompts = [...richProvider.calls, ...leanProvider.calls]
       .map((call) => call[0]?.content ?? "").join("\n");
     assert.match(prompts, /portable:voice-28/u);
@@ -626,6 +626,23 @@ describe("PRISM bot generator", () => {
       }),
       (error: unknown) => error instanceof BotGenerationError && error.kind === "invalid_output",
     );
+    await assert.rejects(
+      generateBotField({
+        fieldKey: "identity.namePronunciation",
+        currentValue: "",
+        context: { name: "Mara Vale" },
+        provider: createDeterministicProvider([
+          JSON.stringify({ value: "MAH-ruh VAYL" }),
+        ]),
+        providerName: "local",
+        model: "llama-local",
+        responseMode: "local",
+      }),
+      (error: unknown) =>
+        error instanceof BotGenerationError &&
+        error.kind === "invalid_prompt" &&
+        /player-authored only/u.test(error.message),
+    );
   });
 
   it("rerolls a concise Power name from the original Power prompt", async () => {
@@ -691,7 +708,7 @@ describe("PRISM bot generator", () => {
     assert.ok(parsed);
     assert.equal(parsed.name, "Mara Vale");
     assert.equal(parsed.accentColor, "#22b5ff");
-    assert.equal(parsed.namePronunciation, "MAH-ruh VAYL");
+    assert.equal(parsed.namePronunciation, "");
     assert.equal(parsed.selfReferral, "");
     assert.equal(parsed.audioVoiceProfile.elevenLabsVoiceId, undefined);
     assert.equal(parsed.audioVoiceProfile.elevenLabsVoiceInitialized, true);
@@ -831,7 +848,10 @@ describe("PRISM bot generator", () => {
     assert.match(JSON.stringify(capturedOptions?.jsonSchema), /"openness"/u);
     assert.match(JSON.stringify(capturedOptions?.jsonSchema), /"resonance"/u);
     assert.match(JSON.stringify(capturedOptions?.jsonSchema), /faceThinkingScale/u);
-    assert.match(JSON.stringify(capturedOptions?.jsonSchema), /namePronunciation/u);
+    assert.doesNotMatch(
+      JSON.stringify(capturedOptions?.jsonSchema),
+      /namePronunciation/u,
+    );
     assert.match(
       JSON.stringify(capturedOptions?.jsonSchema),
       /"accentPronunciationEnabled":\{"type":"boolean"\}/u,
@@ -853,7 +873,14 @@ describe("PRISM bot generator", () => {
       provider.calls[0]?.[0]?.content ?? "",
       /false for every fictional character and original persona/u,
     );
-    assert.match(provider.calls[0]?.[0]?.content ?? "", /Always set namePronunciation/u);
+    assert.match(
+      provider.calls[0]?.[0]?.content ?? "",
+      /Name pronunciation is player-authored only/u,
+    );
+    assert.doesNotMatch(
+      provider.calls[0]?.[0]?.content ?? "",
+      /Always set namePronunciation/u,
+    );
     assert.match(provider.calls[0]?.[0]?.content ?? "", /response cues/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /vocal weight/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /avatarSfxPrompt/u);

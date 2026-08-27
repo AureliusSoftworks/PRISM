@@ -1,3 +1,5 @@
+import { BOTCAST_TIMED_MAX_UTTERANCES } from "./botcast.js";
+
 /**
  * Live full-bake artifacts for Debate spectator and Signal "Watch a show".
  *
@@ -116,7 +118,12 @@ export interface LiveBakeArtifactV1 {
 }
 
 export const LIVE_BAKE_MAX_STEPS_DEBATE = 240;
-export const LIVE_BAKE_MAX_STEPS_SIGNAL = 120;
+/**
+ * A timed Signal interview may use all 120 public interview utterances, then
+ * needs one final host turn to persist its formal closing. Keep that terminal
+ * allowance explicit rather than treating it as unbounded extra runway.
+ */
+export const LIVE_BAKE_MAX_STEPS_SIGNAL = BOTCAST_TIMED_MAX_UTTERANCES + 1;
 export const LIVE_BAKE_DEFAULT_TIMEOUT_MS = 12 * 60_000;
 /** Debate keeps a long runway because its procedural floor can fan out. */
 export const LIVE_BAKE_UNLOCK_BUFFER_MS = 150_000;

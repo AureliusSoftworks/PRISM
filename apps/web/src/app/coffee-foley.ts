@@ -14,6 +14,7 @@ import {
   prismAudioContext,
   prismAudioOutputNode,
 } from "./replayAudioMasterCapture.ts";
+import { audioContextNeedsResume } from "./audioContextRecovery.ts";
 
 export type CoffeeFoleyTableEvent =
   | "turnStart"
@@ -397,7 +398,7 @@ export function createCoffeeFoleyEngine(options: {
     }
     const activeBus = ensureBus();
     if (!activeBus) return;
-    if (activeBus.context.state === "suspended") {
+    if (audioContextNeedsResume(activeBus.context)) {
       void activeBus.context.resume().catch(() => undefined);
     }
     const cleanup = synthesizeCoffeeFoleyCue(

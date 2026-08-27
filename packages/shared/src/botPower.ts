@@ -6211,7 +6211,9 @@ export function coffeePowerCupRateMultiplierV1(
   plan: CoffeePowerPlanV1 | null | undefined,
   botId: string
 ): number {
-  if (coffeePowerVesselModeV1(plan, botId) === "none") return 0;
+  const vesselMode = coffeePowerVesselModeV1(plan, botId);
+  if (vesselMode === "none") return 0;
+  if (vesselMode === "water") return 1;
   const effect = plan?.bots[botId]?.effects.find((candidate) => candidate.type === "cup_rate");
   if (!effect || effect.type !== "cup_rate") return 1;
   return effect.rate === "none"
@@ -6223,7 +6225,7 @@ export function coffeePowerCupRateMultiplierV1(
         : 1.65;
 }
 
-export type CoffeePowerVesselModeV1 = "coffee" | "none";
+export type CoffeePowerVesselModeV1 = "coffee" | "water" | "none";
 
 /** Physical vessel presentation is categorical and independent from visit pacing. */
 export function coffeePowerVesselModeV1(
@@ -6241,7 +6243,7 @@ export function coffeePowerVesselModeV1(
   }
   const effect = effects.find((candidate) => candidate.type === "cup_rate");
   return effect?.type === "cup_rate" && effect.rate === "none"
-    ? "none"
+    ? "water"
     : "coffee";
 }
 

@@ -13,6 +13,9 @@ export const BOT_AVATAR_CANONICAL_FACE_PLACEMENT: BotAvatarFacePlacement = {
 
 /** Matches the full-avatar glyph size derived from the body frame. */
 export const BOT_AVATAR_FACE_GLYPH_FRAME_RATIO = 0.217;
+export const BOT_AVATAR_CANONICAL_EYE_LOCAL_X = -0.2;
+export const BOT_AVATAR_CANONICAL_FACE_NUDGE_Y =
+  "clamp(-5px, -2.6%, -2px)";
 
 /**
  * Avatar Studio's canonical ink-free face registration. Apply this at the
@@ -24,6 +27,8 @@ export const BOT_AVATAR_CANONICAL_FACE_REGISTRATION_STYLE = {
   "--zen-live-bot-face-y": `${BOT_AVATAR_CANONICAL_FACE_PLACEMENT.yPct}%`,
   "--zen-live-bot-face-scale": BOT_AVATAR_CANONICAL_FACE_PLACEMENT.scale,
   "--zen-live-bot-avatar-face-glyph-size": `${BOT_AVATAR_FACE_GLYPH_FRAME_RATIO * 100}cqw`,
+  "--zen-live-bot-eye-local-x": BOT_AVATAR_CANONICAL_EYE_LOCAL_X,
+  "--coffee-plate-emoji-nudge-y": BOT_AVATAR_CANONICAL_FACE_NUDGE_Y,
 } as const;
 
 /**
@@ -44,7 +49,7 @@ export const BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO = 0.2337;
  * because Ink is authored against this exact glyph baseline.
  */
 export const BOT_AVATAR_DETAILS_FACE_NUDGE_Y =
-  "clamp(-5px, -2.6%, -2px)";
+  BOT_AVATAR_CANONICAL_FACE_NUDGE_Y;
 
 /**
  * The writable 128px mask is already sampled from the physical CRT aperture,
@@ -59,8 +64,16 @@ export const BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE = {
   "--zen-live-bot-face-y": `${BOT_AVATAR_DETAILS_FACE_PLACEMENT.yPct}%`,
   "--zen-live-bot-face-scale": BOT_AVATAR_DETAILS_FACE_PLACEMENT.scale,
   "--zen-live-bot-avatar-face-glyph-size": `${BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO * 100}cqw`,
+  "--zen-live-bot-eye-local-x": BOT_AVATAR_CANONICAL_EYE_LOCAL_X,
   "--coffee-plate-emoji-nudge-y": BOT_AVATAR_DETAILS_FACE_NUDGE_Y,
 } as const;
+
+/** One Studio-owned registration selector for Full and Mini consumers. */
+export function botAvatarFaceRegistrationStyle(hasAvatarDetailsVisuals: boolean) {
+  return hasAvatarDetailsVisuals
+    ? BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE
+    : BOT_AVATAR_CANONICAL_FACE_REGISTRATION_STYLE;
+}
 
 /** Authored punctuation faces read normally with this post-rotation flip. */
 export const BOT_AVATAR_CANONICAL_FACE_SCALE_Y = "-1";

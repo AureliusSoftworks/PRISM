@@ -31,6 +31,8 @@ import {
   patchDebateMysteryNotebook,
   patchDebateMysteryNotebookV2,
   parseDebateMysteryEvidenceConfrontation,
+  restartDebateMysteryCourt,
+  restartDebateMysteryInvestigation,
   proposeDebateMysteryNotebookCleanup,
   resolveDebateMysteryEvidenceVisuals,
   reuseDebateMysteryExhibitEvidence,
@@ -258,6 +260,69 @@ async function bakeMysteryCourtToPlayerAction(
 }
 
 describe("Debate Whodunnit private/public boundary", () => {
+  it("restarts only open sealed investigations and courts at their respective openings", async () => {
+    const db = testDb();
+    const provider = new MysteryProviderStub();
+    const config = setup(db);
+    let investigation = await createDebateMysterySession(
+      db, "user-1", config, "restart-investigation-create", runtime(provider),
+    );
+    const bibleJson = JSON.stringify(getDebateMysteryCaseBible(db, "user-1", investigation.id));
+    investigation = await applyDebateMysteryAction(db, "user-1", investigation.id, {
+      expectedRevision: investigation.revision,
+      idempotencyKey: "restart-investigation-progress",
+      action: "choose_investigation_path",
+      path: "player",
+    }, runtime(provider));
+    const restartedInvestigation = restartDebateMysteryInvestigation(
+      db, "user-1", investigation.id,
+      { expectedRevision: investigation.revision, idempotencyKey: "restart-investigation" },
+    );
+    assert.equal(restartedInvestigation.format, "whodunnit");
+    assert.equal(restartedInvestigation.status, "waiting_for_player");
+    assert.equal(restartedInvestigation.stepKey, "mystery_investigation");
+    assert.equal(restartedInvestigation.formatState.format, "whodunnit");
+    assert.equal(restartedInvestigation.formatState.investigationApproach, "undecided");
+    assert.deepEqual(restartedInvestigation.events, []);
+    assert.deepEqual(listDebateMysteryActions(db, "user-1", investigation.id).map((entry) => entry.action), ["restart_investigation"]);
+    assert.equal(JSON.stringify(getDebateMysteryCaseBible(db, "user-1", investigation.id)), bibleJson);
+    assert.equal(
+      restartDebateMysteryInvestigation(db, "user-1", investigation.id,
+        { expectedRevision: investigation.revision, idempotencyKey: "restart-investigation" }).revision,
+      restartedInvestigation.revision,
+    );
+
+    let court = await createDebateMysterySession(
+      db, "user-1", config, "restart-court-create", runtime(provider),
+    );
+    court = await applyDebateMysteryAction(db, "user-1", court.id, {
+      expectedRevision: court.revision,
+      idempotencyKey: "restart-court-progress",
+      action: "choose_investigation_path",
+      path: "partner",
+    }, runtime(provider));
+    assert.equal(court.formatState.format, "turnabout");
+    const trial = court.formatState.mysteryTrial!;
+    const restartedCourt = restartDebateMysteryCourt(
+      db, "user-1", court.id,
+      { expectedRevision: court.revision, idempotencyKey: "restart-court" },
+    );
+    assert.equal(restartedCourt.format, "turnabout");
+    assert.equal(restartedCourt.stepKey, "turnabout_intro");
+    assert.equal(restartedCourt.formatState.format, "turnabout");
+    assert.deepEqual(restartedCourt.formatState.mysteryTrial?.frozenInvestigation, trial.frozenInvestigation);
+    assert.deepEqual(restartedCourt.formatState.mysteryTrial?.evidenceSourceMap, trial.evidenceSourceMap);
+    assert.deepEqual(restartedCourt.formatState.mysteryTrial?.testimonySourceMap, trial.testimonySourceMap);
+    assert.deepEqual(restartedCourt.formatState.mysteryTrial?.courtroomComposition, trial.courtroomComposition);
+    assert.equal(restartedCourt.formatState.mysteryTrial?.verdict, null);
+    assert.deepEqual(restartedCourt.events, []);
+    assert.throws(
+      () => restartDebateMysteryInvestigation(db, "user-1", court.id,
+        { expectedRevision: restartedCourt.revision, idempotencyKey: "wrong-format" }),
+      /not a legacy Whodunnit/u,
+    );
+  });
+
   it("uses courtroom party language and a deterministic public Judge verdict", () => {
     assert.match(
       debateMysterySource,

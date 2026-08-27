@@ -118,6 +118,8 @@ import {
   normalizeBotcastStudioLayout,
   normalizeBotcastVoiceLevel,
   normalizeBotcastVoiceLevelsByBotId,
+  normalizeAutoRecoveryTrace,
+  normalizeAutoRouteDecisionV1,
   swapBotcastStudioLayoutSeats,
   listenerReactionActionLabel,
   listenerReactionHasCrosstalkAudio,
@@ -184,6 +186,8 @@ import {
   type PreparedTurnV1,
   type BotPresenceBeatV1,
   type SignalPersonaTemperament,
+  type AutoRecoveryTraceV1,
+  type AutoRouteDecisionV1,
 } from "@localai/shared";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
 import {
@@ -230,8 +234,6 @@ import {
 } from "./liveBakeLoading";
 import {
   LIVE_BAKE_POLL_INTERVAL_MS,
-  liveBakeMayStartWatch,
-  liveBakeProgressRatio,
 } from "./liveBakeClient";
 import { AssetRail, type AssetGenerationSelection, type AssetRailGenerationControl } from "./AssetLibrary";
 import {
@@ -646,6 +648,10 @@ export function signalEpisodeModelChoiceSupportsImageInput(
 export type SignalActiveAutoRoute = {
   provider: "local" | "openai" | "anthropic";
   model: string;
+  effort?: "auto" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+  turbo?: boolean;
+  autoRoute?: AutoRouteDecisionV1;
+  autoRecovery?: AutoRecoveryTraceV1;
 };
 
 /** Latest concrete route Auto actually used, including an active image pin. */
@@ -659,21 +665,54 @@ export function signalActiveAutoRoute(
   for (let index = episode.events.length - 1; index >= 0; index -= 1) {
     const event = episode.events[index];
     if (event?.kind !== "utterance") continue;
-    const provider = event.payload.provider;
-    const model =
-      typeof event.payload.model === "string" ? event.payload.model.trim() : "";
+    const recovery = event.payload.autoRecovery;
+    const autoRoute = normalizeAutoRouteDecisionV1(event.payload.autoRoute);
+    const autoRecovery = normalizeAutoRecoveryTrace(recovery);
+    const recoveryRecord =
+      recovery && typeof recovery === "object" && !Array.isArray(recovery)
+        ? (recovery as Record<string, unknown>)
+        : null;
+    const recoveredProvider =
+      typeof recoveryRecord?.finalProvider === "string"
+        ? recoveryRecord.finalProvider
+        : undefined;
+    const recoveredModel =
+      typeof recoveryRecord?.finalModel === "string"
+        ? recoveryRecord.finalModel
+        : undefined;
+    const provider = recoveredProvider ?? event.payload.provider;
+    const rawModel = recoveredModel ?? event.payload.model;
+    const model = typeof rawModel === "string" ? rawModel.trim() : "";
     if (
       (provider === "local" ||
         provider === "openai" ||
         provider === "anthropic") &&
       model
     ) {
-      return { provider, model };
+      const effort = event.payload.reasoningEffort;
+      return {
+        provider,
+        model,
+        ...(autoRoute ? { autoRoute } : {}),
+        ...(autoRecovery ? { autoRecovery } : {}),
+        ...(effort === "auto" ||
+        effort === "none" ||
+        effort === "minimal" ||
+        effort === "low" ||
+        effort === "medium" ||
+        effort === "high" ||
+        effort === "xhigh" ||
+        effort === "max"
+          ? { effort }
+          : {}),
+        ...(event.payload.turbo === true ? { turbo: true } : {}),
+      };
     }
   }
-  return episode.model
-    ? { provider: episode.provider, model: episode.model }
-    : null;
+  // The configured episode model is a request preference, not proof that a
+  // turn completed. Auto must remain Awaiting first turn until persisted event
+  // provenance arrives from the server.
+  return null;
 }
 
 export interface BotcastApiRequest {
@@ -1012,6 +1051,8 @@ export interface BotcastExperienceProps {
           disabled: boolean;
           disabledReason?: string;
         };
+        /** Latest server-persisted Auto completion for this exact episode. */
+        activeAutoRoute: SignalActiveAutoRoute | null;
       }) => ReactNode);
   onCreateSlateStory?: (source: {
     episodeId: string;
@@ -1072,6 +1113,11 @@ type SignalEpisodeOutro = {
   phase: "curtain" | "holding" | "complete";
   forced: boolean;
   discarded: boolean;
+};
+
+type SignalReplayOpenOptions = {
+  preserveEpisodeOperation?: boolean;
+  initialPosition?: "start" | "end";
 };
 
 const SIGNAL_EPISODE_OUTRO_DEAD_AIR_MS = 2_000;
@@ -2582,13 +2628,17 @@ export function BotcastExperience({
     null,
   );
   const [watchPlaybackReady, setWatchPlaybackReady] = useState(false);
-  // Once the show is on air the fullscreen bake loader must never come back:
-  // reopening it reads as the broadcast restarting from scratch. A starved
-  // buffer is an in-scene intermission instead, so the studio stays on screen.
-  const [watchIntermission, setWatchIntermission] = useState<string | null>(
-    null,
-  );
+  const [watchReplayPresentationEpisodeId, setWatchReplayPresentationEpisodeId] =
+    useState<string | null>(null);
+  const [watchReplayFinalizingEpisodeId, setWatchReplayFinalizingEpisodeId] =
+    useState<string | null>(null);
   const watchPlaybackStartResolveRef = useRef<(() => void) | null>(null);
+  const openReplayRef = useRef<
+    (
+      summary: BotcastEpisodeSummary,
+      options?: SignalReplayOpenOptions,
+    ) => Promise<void>
+  >(async () => undefined);
   const [episodeSetupLoadingId, setEpisodeSetupLoadingId] = useState<
     string | null
   >(null);
@@ -3512,9 +3562,11 @@ export function BotcastExperience({
     async (
       completedEpisode: BotcastEpisode,
       show: BotcastShow,
-    ): Promise<void> => {
+    ): Promise<ReplayRecordingV1 | null> => {
       if (finalizedSignalRecordingIdsRef.current.has(completedEpisode.id)) {
-        return;
+        return replayRecordingForSource("signal", completedEpisode.id).catch(
+          () => null,
+        );
       }
       finalizedSignalRecordingIdsRef.current.add(completedEpisode.id);
       if (signalCaptureSourceIdRef.current === completedEpisode.id) {
@@ -3556,16 +3608,18 @@ export function BotcastExperience({
         voiceSelection: capture?.voiceSelection ?? recordingVoiceSelection,
       });
       try {
-        await saveFaithfulReplaySession({
+        const recording = await saveFaithfulReplaySession({
           surface: "signal",
           sourceId: completedEpisode.id,
           manifest,
           capture,
         });
         window.dispatchEvent(new Event(REPLAY_RECORDING_CHANGED_EVENT));
+        return recording;
       } catch {
         // The locally retained master retries on the next authenticated load.
         finalizedSignalRecordingIdsRef.current.delete(completedEpisode.id);
+        return null;
       }
     },
     [
@@ -3586,8 +3640,8 @@ export function BotcastExperience({
       show: BotcastShow;
       forced: boolean;
       discarded?: boolean;
-    }): Promise<void> => {
-      if (presentedEpisodeOutroIdsRef.current.has(args.episode.id)) return;
+    }): Promise<ReplayRecordingV1 | null> => {
+      if (presentedEpisodeOutroIdsRef.current.has(args.episode.id)) return null;
       presentedEpisodeOutroIdsRef.current.add(args.episode.id);
       setEpisodeOutroSfxMutedId(args.episode.id);
       const runId = outroRunIdRef.current + 1;
@@ -3597,7 +3651,7 @@ export function BotcastExperience({
       await new Promise<void>((resolve) =>
         window.setTimeout(resolve, SIGNAL_EPISODE_OUTRO_DEAD_AIR_MS),
       );
-      if (outroRunIdRef.current !== runId) return;
+      if (outroRunIdRef.current !== runId) return null;
       setEpisodeOutro({
         episodeId: args.episode.id,
         episode: args.episode,
@@ -3629,7 +3683,7 @@ export function BotcastExperience({
       await new Promise<void>((resolve) =>
         window.setTimeout(resolve, reducedMotion ? 160 : 760),
       );
-      if (outroRunIdRef.current !== runId) return;
+      if (outroRunIdRef.current !== runId) return null;
       setEpisodeOutro((current) =>
         current?.episodeId === args.episode.id
           ? { ...current, phase: "holding" }
@@ -3639,16 +3693,29 @@ export function BotcastExperience({
         window.setTimeout(resolve, reducedMotion ? 620 : 1_800),
       );
       await Promise.all([playback.finished, visualMinimum]);
-      if (outroRunIdRef.current !== runId) return;
+      if (outroRunIdRef.current !== runId) return null;
       setEpisodeOutro((current) =>
         current?.episodeId === args.episode.id
           ? { ...current, phase: "complete" }
           : current,
       );
       releaseSignalIntroAudio();
+      let recording: ReplayRecordingV1 | null = null;
       if (!args.discarded) {
-        await finalizeSignalRecording(args.episode, args.show);
+        if (args.episode.playbackMode === "watch") {
+          setWatchReplayFinalizingEpisodeId(args.episode.id);
+        }
+        try {
+          recording = await finalizeSignalRecording(args.episode, args.show);
+        } finally {
+          if (args.episode.playbackMode === "watch") {
+            setWatchReplayFinalizingEpisodeId((current) =>
+              current === args.episode.id ? null : current,
+            );
+          }
+        }
       }
+      return recording;
     },
     [finalizeSignalRecording, introAudioEnabled, introAudioVolume],
   );
@@ -3891,12 +3958,14 @@ export function BotcastExperience({
         `/api/botcast/episodes/${encodeURIComponent(episodeId)}/bake/cancel`,
         { method: "POST", body: JSON.stringify({}) },
       )
-        .then(() => {
+        .then(({ episode: stoppedEpisode }) => {
           if (selectedShowId) {
             void loadEpisodes(selectedShowId).catch(() => undefined);
           }
           setNotice(
-            "Stopped preparing. The booking is ready to reuse from Latest episodes.",
+            stoppedEpisode.status === "completed"
+              ? "Closed the first presentation. The completed episode remains in Latest episodes."
+              : "Stopped preparing. The booking is ready to reuse from Latest episodes.",
           );
         })
         .catch((cancelError) => {
@@ -3905,10 +3974,11 @@ export function BotcastExperience({
     }
     setEpisode(null);
     setWatchBakeLabel(null);
-    setWatchIntermission(null);
     setWatchBakeArtifact(null);
     setWatchBakeStartedAt(null);
     setWatchPlaybackReady(false);
+    setWatchReplayPresentationEpisodeId(null);
+    setWatchReplayFinalizingEpisodeId(null);
     setBusy(false);
   };
 
@@ -6937,7 +7007,6 @@ export function BotcastExperience({
     stopIntroPreview();
     onPrepareUtterance?.();
     setWatchBakeLabel(null);
-    setWatchIntermission(null);
     setWatchPlaybackReady(false);
     watchPlaybackStartResolveRef.current = null;
     const { controller, runId } = beginEpisodeOperation();
@@ -7241,9 +7310,9 @@ export function BotcastExperience({
         while (
           episodeOperationIsCurrent(controller, runId) &&
           artifact &&
-          !liveBakeMayStartWatch(artifact, 0) &&
           artifact.status !== "ready" &&
-          artifact.status !== "failed"
+          artifact.status !== "failed" &&
+          artifact.status !== "cancelled"
         ) {
           await new Promise((resolve) =>
             window.setTimeout(resolve, LIVE_BAKE_POLL_INTERVAL_MS),
@@ -7274,6 +7343,15 @@ export function BotcastExperience({
           }
         }
         if (!episodeOperationIsCurrent(controller, runId) || !artifact) return;
+        if (artifact.status === "cancelled") {
+          throw new DOMException("Bake cancelled", "AbortError");
+        }
+        if (artifact.status === "failed") {
+          throw new Error(artifact.error || "Signal bake failed.");
+        }
+        if (artifact.status !== "ready" || bakedEpisode.status !== "completed") {
+          throw new Error("Signal preparation ended before the episode was ready.");
+        }
         await prefetchKnownWatchEpisodeVoices(bakedEpisode);
         if (!episodeOperationIsCurrent(controller, runId)) return;
         latestCaptureEpisode = bakedEpisode;
@@ -7289,18 +7367,18 @@ export function BotcastExperience({
         // card during intro and truncate faithful capture to a few seconds.
         suppressCompletedOutroFallbackRef.current = true;
         try {
-          let presentationEpisode = bakedEpisode;
-          let presentationArtifact = artifact;
-          setEpisode(bakedEpisode);
+          const presentationEpisode = bakedEpisode;
+          setEpisode(presentationEpisode);
+          setWatchReplayPresentationEpisodeId(presentationEpisode.id);
           setAutoRun(false);
-          await releaseSignalModelWarmup(bakedEpisode.id);
+          await releaseSignalModelWarmup(presentationEpisode.id);
           if (!episodeOperationIsCurrent(controller, runId)) return;
           setWatchBakeLabel(null);
           const watchBookend: SignalEpisodePreRoll = {
             ...preRoll,
             guestName:
-              bakedEpisode.guestName ?? guest?.name ?? preRoll.guestName,
-            topic: bakedEpisode.topic.trim() || preRoll.topic,
+              presentationEpisode.guestName ?? guest?.name ?? preRoll.guestName,
+            topic: presentationEpisode.topic.trim() || preRoll.topic,
             phase: "preparing",
           };
           if (!launchWatchAutoStart) {
@@ -7311,201 +7389,47 @@ export function BotcastExperience({
             // faithful-master clock until the spectator chooses Start show.
             setEpisodePreRoll(watchBookend);
             setWatchPlaybackReady(true);
-            while (episodeOperationIsCurrent(controller, runId)) {
-              if (
-                presentationEpisode.status === "completed" ||
-                presentationArtifact.status === "ready"
-              ) {
-                await watchPlaybackStart;
-                break;
-              }
-              const nextAction = await Promise.race([
-                watchPlaybackStart.then(() => "start" as const),
-                new Promise<"poll">((resolve) =>
-                  window.setTimeout(
-                    () => resolve("poll"),
-                    LIVE_BAKE_POLL_INTERVAL_MS,
-                  ),
-                ),
-              ]);
-              if (nextAction === "start") break;
-              if (!episodeOperationIsCurrent(controller, runId)) return;
-              const polled = await request<{
-                episode: BotcastEpisode;
-                liveBake: LiveBakeArtifactV1;
-                baking?: boolean;
-              }>(
-                `/api/botcast/episodes/${encodeURIComponent(bakedEpisode.id)}/bake`,
-                {
-                  method: "POST",
-                  signal: controller.signal,
-                  body: JSON.stringify(watchBakeRequestBody),
-                },
-              );
-              presentationEpisode = polled.episode;
-              presentationArtifact = polled.liveBake;
-              latestCaptureEpisode = presentationEpisode;
-              openingMessageReceived =
-                openingMessageReceived || presentationEpisode.messages.length > 0;
-              setEpisode(presentationEpisode);
-              setWatchBakeArtifact(presentationArtifact);
-              void prefetchKnownWatchEpisodeVoices(presentationEpisode);
-              if (presentationArtifact.status === "cancelled") {
-                throw new DOMException("Bake cancelled", "AbortError");
-              }
-              if (presentationArtifact.status === "failed") {
-                throw new Error(
-                  presentationArtifact.error || "Signal bake failed.",
-                );
-              }
-            }
+            await watchPlaybackStart;
             watchPlaybackStartResolveRef.current = null;
             setWatchPlaybackReady(false);
             if (!episodeOperationIsCurrent(controller, runId)) return;
-            await prefetchKnownWatchEpisodeVoices(presentationEpisode);
-            if (!episodeOperationIsCurrent(controller, runId)) return;
           }
-          // The branded ident runs for at least SIGNAL_EPISODE_PRE_ROLL_MIN_MS
-          // and usually the full show intro, and the baker keeps working right
-          // through it. Nothing used to re-poll between the unlock gate and the
-          // first playback iteration, so an auto-started Watch entered the loop
-          // holding the snapshot captured at unlock — one line — and starved on
-          // the very first gap. Poll alongside the intro so those seconds are
-          // real buffer instead of a wasted head start.
-          let introBufferPollRunning = true;
-          const introBufferPoll = (async () => {
-            while (
-              introBufferPollRunning &&
-              episodeOperationIsCurrent(controller, runId) &&
-              presentationArtifact.status !== "ready" &&
-              presentationEpisode.status !== "completed"
-            ) {
-              await new Promise((resolve) =>
-                window.setTimeout(resolve, LIVE_BAKE_POLL_INTERVAL_MS),
-              );
-              if (!introBufferPollRunning) return;
-              if (!episodeOperationIsCurrent(controller, runId)) return;
-              const polled = await request<{
-                episode: BotcastEpisode;
-                liveBake: LiveBakeArtifactV1;
-                baking?: boolean;
-              }>(
-                `/api/botcast/episodes/${encodeURIComponent(bakedEpisode.id)}/bake`,
-                {
-                  method: "POST",
-                  signal: controller.signal,
-                  body: JSON.stringify(watchBakeRequestBody),
-                },
-              );
-              if (!introBufferPollRunning) return;
-              if (!episodeOperationIsCurrent(controller, runId)) return;
-              presentationEpisode = polled.episode;
-              presentationArtifact = polled.liveBake;
-              latestCaptureEpisode = presentationEpisode;
-              openingMessageReceived =
-                openingMessageReceived ||
-                presentationEpisode.messages.length > 0;
-              // Locals only. The ident is priming the master capture and the
-              // title card is down, so this is the wrong moment to advance
-              // render state — and the playback loop reads the locals anyway,
-              // which is the entire point of polling here.
-              setWatchBakeArtifact(presentationArtifact);
-              void prefetchKnownWatchEpisodeVoices(presentationEpisode);
-            }
-          })();
-          await beginEpisodeIntroBookend(watchBookend, bakedEpisode.id);
+          // Watch enters Replay only after the complete episode and requested
+          // voice package are ready. This first presentation still captures the
+          // faithful master; the durable transport replaces it after the outro.
+          await beginEpisodeIntroBookend(watchBookend, presentationEpisode.id);
           await Promise.all([introPlayback.finished, visualMinimum]);
-          introBufferPollRunning = false;
-          // A poll failure here is not fatal: the playback loop re-polls with
-          // its own error handling and the buffer simply stays where it was.
-          await introBufferPoll.catch(() => undefined);
-          if (!episodeOperationIsCurrent(controller, runId)) return;
-          await prefetchKnownWatchEpisodeVoices(presentationEpisode);
           if (!episodeOperationIsCurrent(controller, runId)) return;
           setEpisodePreRoll(null);
-          const presentedWatchMessageIds = new Set<string>();
-          while (episodeOperationIsCurrent(controller, runId)) {
-            const bufferedMessages = presentationEpisode.messages.filter(
-              (message) => !presentedWatchMessageIds.has(message.id),
-            );
-            if (bufferedMessages.length > 0) {
-              setWatchBakeLabel(null);
-              setWatchIntermission(null);
-              for (const message of bufferedMessages) {
-                if (!episodeOperationIsCurrent(controller, runId)) return;
-                prepareEpisodeMessage(message, presentationEpisode);
-                await playPreparedEpisodeMessage(
-                  message,
-                  presentationEpisode,
-                  controller,
-                  runId,
-                  true,
-                );
-                presentedWatchMessageIds.add(message.id);
-              }
-            }
-            if (
-              presentationEpisode.status === "completed" ||
-              presentationArtifact.status === "ready"
-            ) {
-              setEpisode(presentationEpisode);
-              setWatchBakeLabel(null);
-              setWatchIntermission(null);
-              setWatchBakeArtifact(null);
-              setWatchBakeStartedAt(null);
-              if (launchShow) {
-                void playEpisodeOutro({
-                  episode: presentationEpisode,
-                  show: launchShow,
-                  forced: false,
-                });
-              }
-              break;
-            }
-
-            // If playback catches the baker, keep the spectator out of the
-            // producer shell and show a short intermission until the next line.
-            // This used to route through setWatchBakeLabel, which is the same
-            // state that opens PrismBlockingLoader — so the "intermission" was
-            // the fullscreen bake splash coming back over a live show. The
-            // studio stays on screen now and only a corner notice changes.
-            setWatchBakeArtifact(presentationArtifact);
-            setWatchIntermission("Preparing the next stretch");
-            await new Promise((resolve) =>
-              window.setTimeout(resolve, LIVE_BAKE_POLL_INTERVAL_MS),
-            );
+          for (const message of presentationEpisode.messages) {
             if (!episodeOperationIsCurrent(controller, runId)) return;
-            const polled = await request<{
-              episode: BotcastEpisode;
-              liveBake: LiveBakeArtifactV1;
-              baking?: boolean;
-            }>(
-              `/api/botcast/episodes/${encodeURIComponent(bakedEpisode.id)}/bake`,
-              {
-                method: "POST",
-                signal: controller.signal,
-                body: JSON.stringify(watchBakeRequestBody),
-              },
+            prepareEpisodeMessage(message, presentationEpisode);
+            await playPreparedEpisodeMessage(
+              message,
+              presentationEpisode,
+              controller,
+              runId,
+              true,
             );
-            presentationEpisode = polled.episode;
-            presentationArtifact = polled.liveBake;
-            latestCaptureEpisode = presentationEpisode;
-            await prefetchKnownWatchEpisodeVoices(presentationEpisode);
-            if (!episodeOperationIsCurrent(controller, runId)) return;
-            setEpisode(presentationEpisode);
-            setWatchBakeArtifact(presentationArtifact);
-            // Deliberately not liveBakeStatusCopy here: for a baking artifact
-            // that resolves to the segment word ("Interview"), which mid-show
-            // reads as a label rather than as something being waited on. The
-            // wait copy set above stands until the next line actually lands.
-            if (presentationArtifact.status === "cancelled") {
-              throw new DOMException("Bake cancelled", "AbortError");
-            }
-            if (presentationArtifact.status === "failed") {
-              throw new Error(
-                presentationArtifact.error || "Signal bake failed.",
-              );
-            }
+          }
+          setEpisode(presentationEpisode);
+          setWatchBakeLabel(null);
+          setWatchBakeArtifact(null);
+          setWatchBakeStartedAt(null);
+          const recording = await playEpisodeOutro({
+            episode: presentationEpisode,
+            show: launchShow,
+            forced: false,
+          });
+          if (!episodeOperationIsCurrent(controller, runId)) return;
+          const keepItemDecisionRequired =
+            setupImageUpload?.descriptor.kind === "item";
+          if (recording && !keepItemDecisionRequired) {
+            stopEpisodeOutro();
+            await openReplayRef.current(presentationEpisode, {
+              preserveEpisodeOperation: true,
+              initialPosition: "end",
+            });
           }
         } finally {
           suppressCompletedOutroFallbackRef.current = false;
@@ -7590,9 +7514,10 @@ export function BotcastExperience({
         preRollGateResolveRef.current = null;
         releaseSignalIntroAudio();
         setWatchBakeLabel(null);
-        setWatchIntermission(null);
         setEpisodePreRoll(null);
         setWatchPlaybackReady(false);
+        setWatchReplayPresentationEpisodeId(null);
+        setWatchReplayFinalizingEpisodeId(null);
         watchPlaybackStartResolveRef.current = null;
         setAutoRun(false);
         if (unstartedEpisodeId && signalModelWarmupRef.current) {
@@ -7625,7 +7550,6 @@ export function BotcastExperience({
         preRollGateResolveRef.current = null;
         episodeOperationAbortRef.current = null;
         setWatchBakeLabel(null);
-        setWatchIntermission(null);
         setWatchPlaybackReady(false);
         watchPlaybackStartResolveRef.current = null;
         setBusy(false);
@@ -10025,8 +9949,11 @@ export function BotcastExperience({
     }
   };
 
-  const openReplay = async (summary: BotcastEpisodeSummary): Promise<void> => {
-    invalidateEpisodeOperation();
+  const openReplay = async (
+    summary: BotcastEpisodeSummary,
+    options: SignalReplayOpenOptions = {},
+  ): Promise<void> => {
+    if (!options.preserveEpisodeOperation) invalidateEpisodeOperation();
     const replayRunId = replayVoiceRunIdRef.current + 1;
     replayVoiceRunIdRef.current = replayRunId;
     replayVoiceMessageIdRef.current = null;
@@ -10090,10 +10017,7 @@ export function BotcastExperience({
         recordingDetail?.recording.manifest ?? recording?.manifest ?? null;
       setReplayManifestV2(savedManifest?.v === 2 ? savedManifest : null);
       setEpisode(null);
-      replayPublishedElapsedMsRef.current = 0;
-      setReplayElapsedMs(0);
       setReplayPlaying(false);
-      setReplayIntroRevealed(false);
       setStudioCutEligibilityState(null);
       const loadedRecording = recordingDetail?.recording ?? recording;
       const loadedPremiumReady = Boolean(
@@ -10105,10 +10029,28 @@ export function BotcastExperience({
       const selectPremium =
         loadedPremiumReady &&
         (loadedQuality === "repairable" || loadedQuality === "upgradeable");
+      const initialElapsedMs =
+        options.initialPosition === "end"
+          ? Math.max(
+              0,
+              Math.round(
+                (selectPremium
+                  ? loadedRecording?.studioCutProduction?.timeline?.durationMs
+                  : loadedRecording?.audioDurationMs) ??
+                  loadedRecording?.timeline?.durationMs ??
+                  botcastReplayTimeline(detail.messages, detail.events).durationMs,
+              ),
+            )
+          : 0;
+      replayPublishedElapsedMsRef.current = initialElapsedMs;
+      setReplayElapsedMs(initialElapsedMs);
+      setReplayIntroRevealed(initialElapsedMs > 0);
       setReplayPlaybackSource(selectPremium ? "studio-cut" : "on-air");
       premiumAutoSelectionRef.current = selectPremium
         ? (loadedRecording?.id ?? null)
         : null;
+      setWatchReplayPresentationEpisodeId(null);
+      setWatchReplayFinalizingEpisodeId(null);
     } catch (replayError) {
       if (replayVoiceRunIdRef.current === replayRunId) {
         setError(signalErrorToast("Load Signal replay", replayError));
@@ -10117,6 +10059,7 @@ export function BotcastExperience({
       if (replayVoiceRunIdRef.current === replayRunId) setLoading(false);
     }
   };
+  openReplayRef.current = openReplay;
 
   const replayTimeline = useMemo(
     () =>
@@ -12476,17 +12419,6 @@ export function BotcastExperience({
             role="status"
           >
             {replayCompactThinkingNotice.label}
-          </div>
-        ) : null}
-        {!args.replay && watchIntermission ? (
-          <div
-            className={styles.watchIntermissionNotice}
-            data-watch-intermission="true"
-            role="status"
-            aria-live="polite"
-          >
-            <span aria-hidden="true" />
-            {watchIntermission}
           </div>
         ) : null}
         <div className={styles.stageScene} data-signal-stage-scene="true">
@@ -15503,8 +15435,8 @@ export function BotcastExperience({
                 <strong>Start automatically</strong>
                 <small>
                   {watchAutoStartDraft
-                    ? "Play as soon as the opening runway is ready"
-                    : "Wait on the title card while more bakes ahead"}
+                    ? "Open Replay as soon as the episode and voices are ready"
+                    : "Wait on the title card after preparation finishes"}
                 </small>
               </span>
             </label>
@@ -16600,17 +16532,23 @@ export function BotcastExperience({
   // Model/effort stay locked while paused or baking so routing cannot change mid-sit.
   const showLiveExit = episode?.status === "live" || episodePreRoll !== null;
   const watchBakeActive = watchBakeLabel !== null;
-  // An intermission is a live show waiting on its next line, so the rail and
-  // the routing pickers stay locked exactly as they are while a line is airing.
   const liveSessionActive =
     showLiveExit ||
     watchBakeActive ||
-    watchIntermission !== null ||
     episodeOutro !== null ||
     episode?.status === "completed" ||
     episode?.status === "cancelled";
   const returnFromEpisodeOutro = async (): Promise<void> => {
-    if (!episodeOutro || keepSignalItemSaving) return;
+    if (
+      !episodeOutro ||
+      keepSignalItemSaving ||
+      watchReplayFinalizingEpisodeId === episodeOutro.episodeId
+    ) {
+      return;
+    }
+    const preparedWatchReplay =
+      episodeOutro.episode.playbackMode === "watch" &&
+      watchReplayPresentationEpisodeId === episodeOutro.episodeId;
     const uploadedItem =
       signalEpisodeImage?.episodeId === episodeOutro.episodeId &&
       signalEpisodeImage.descriptor.kind === "item"
@@ -16639,6 +16577,12 @@ export function BotcastExperience({
       }
     }
     stopEpisodeOutro();
+    if (preparedWatchReplay) {
+      await openReplayRef.current(episodeOutro.episode, {
+        initialPosition: "end",
+      });
+      return;
+    }
     setEpisode(null);
     if (selectedShowId) {
       void loadEpisodes(selectedShowId).catch(() => undefined);
@@ -16698,6 +16642,10 @@ export function BotcastExperience({
   const episodeSelectedModelProvider =
     modelOptions.find((option) => option.id === episodeModelControlValue)
       ?.provider ?? preferredProvider;
+  const watchReplayPresentation = Boolean(
+    episode?.playbackMode === "watch" &&
+      watchReplayPresentationEpisodeId === episode.id,
+  );
   const activeAutoRoute =
     episode && botcastEpisodeModelSelectionKind(episode) === "auto"
       ? signalActiveAutoRoute(episode)
@@ -16714,7 +16662,7 @@ export function BotcastExperience({
     typeof navigationHeader === "function"
       ? navigationHeader({
           liveSessionActive,
-          replayActive: replayEpisode !== null,
+          replayActive: replayEpisode !== null || watchReplayPresentation,
           showLiveExit,
           cuttingShow,
           onCutShow: () => {
@@ -16726,6 +16674,7 @@ export function BotcastExperience({
             disabled: episodeModelControlDisabled,
             disabledReason: episodeModelControlDisabledReason,
           },
+          activeAutoRoute,
         })
       : navigationHeader;
   const copySignalErrorToast = async (): Promise<void> => {
@@ -17065,10 +17014,7 @@ export function BotcastExperience({
             </div>
             <small>
               {watchPlaybackReady
-                ? watchBakeArtifact?.status === "ready" ||
-                  episode?.status === "completed"
-                  ? "Fully buffered · ready when you are"
-                  : `${liveBakeStatusCopy(watchBakeArtifact) ?? "Opening buffered"} · buffering ahead`
+                ? "Episode and voices ready · Replay is standing by"
                 : episodePreRoll.source === "elevenlabs"
                   ? "Original ElevenLabs show ident"
                   : "Signal Synth · generated locally"}
@@ -17180,13 +17126,20 @@ export function BotcastExperience({
             <button
               type="button"
               onClick={() => void returnFromEpisodeOutro()}
-              disabled={keepSignalItemSaving}
+              disabled={
+                keepSignalItemSaving ||
+                watchReplayFinalizingEpisodeId === episodeOutro.episodeId
+              }
             >
               {keepSignalItemSaving
                 ? "Saving item…"
+                : watchReplayFinalizingEpisodeId === episodeOutro.episodeId
+                  ? "Finalizing replay…"
+                  : episodeOutro.episode.playbackMode === "watch"
+                    ? "Open replay"
                 : episodeOutro.phase === "holding"
-                ? "Skip outro"
-                : "Return to show"}
+                  ? "Skip outro"
+                  : "Return to show"}
             </button>
           </div>
         </section>
@@ -17280,15 +17233,43 @@ export function BotcastExperience({
           </header>
         ) : null}
         {episode && selectedShow ? (
-          <div className={styles.liveLayout}>
-            <div className={styles.liveTopline}>
+          <div
+            className={
+              watchReplayPresentation
+                ? styles.replayLayout
+                : styles.liveLayout
+            }
+            data-signal-watch-replay={
+              watchReplayPresentation ? "true" : undefined
+            }
+          >
+            {watchReplayPresentation ? (
+              <div className={styles.replayHeader}>
+                <div>
+                  <span className={styles.eyebrow}>From the archive</span>
+                  <h2>{episode.title}</h2>
+                  <p>
+                    {new Date(episode.startedAt).toLocaleString()} ·{" "}
+                    {episodeModeLabel(episode)} ·{" "}
+                    {episode.model
+                      ? (modelLabels.get(episode.model) ?? episode.model)
+                      : "Auto"}{" "}
+                    · {episodeOutcomeLabel(episode)}
+                  </p>
+                </div>
+                <div className={styles.replayHeaderActions}>
+                  <button type="button" onClick={cancelWatchBake}>
+                    Close replay
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className={styles.liveTopline}>
                 <span
                   data-live={episode.status === "live" ? "true" : undefined}
                 >
                   {episode.status === "live"
-                    ? episode.playbackMode === "watch"
-                      ? "● WATCHING"
-                      : "● ON AIR"
+                    ? "● ON AIR"
                     : episodeOutcomeLabel(episode)}
               </span>
               <SignalEpisodeRuntimeClock
@@ -17335,24 +17316,12 @@ export function BotcastExperience({
                 />
               )}
                 <span>
-                  {episode.playbackMode === "watch"
-                    ? "Prism directing"
-                    : episode.guestKind === "producer"
+                  {episode.guestKind === "producer"
                     ? "Producer on mic"
                     : episode.tensionStage === "calm"
                     ? "Guest settled"
                     : `Guest: ${episode.tensionStage}`}
               </span>
-              {episode.playbackMode === "watch" ? (
-                <button
-                  type="button"
-                  className={styles.cutShowButton}
-                  onClick={cancelWatchBake}
-                  disabled={episode.status !== "live"}
-                >
-                  ■ Stop watching
-                </button>
-              ) : (
                 <>
                   <button
                     type="button"
@@ -17374,7 +17343,6 @@ export function BotcastExperience({
                     {cuttingShow ? "■ Cut now" : "■ Cut show"}
                   </button>
                 </>
-              )}
               <button
                 type="button"
                 className={styles.dangerButton}
@@ -17387,7 +17355,8 @@ export function BotcastExperience({
                     ? "Discard episode"
                     : "Delete episode"}
               </button>
-            </div>
+              </div>
+            )}
             {renderStage({
               show: selectedShow,
               currentEpisode: episode,
@@ -17407,6 +17376,34 @@ export function BotcastExperience({
                   }
                 : {}),
             })}
+            {watchReplayPresentation ? (
+              <section
+                className={styles.replayPlayer}
+                aria-label="Signal replay playback"
+                data-playing="true"
+                data-source="on-air"
+                data-signal-watch-first-play="true"
+              >
+                <header className={styles.replayPlayerHeader}>
+                  <div className={styles.replayPlayerIdentity}>
+                    <span>Now playing</span>
+                    <div>
+                      <strong>Original broadcast</strong>
+                      <small>
+                        Prepared episode · faithful replay is recording
+                      </small>
+                    </div>
+                  </div>
+                  <span className={styles.replaySourceBadge}>Replay</span>
+                </header>
+                <footer className={styles.replayPlayerFooter}>
+                  <span className={styles.replayStatus} role="status">
+                    Full playback controls unlock when this first presentation
+                    finishes.
+                  </span>
+                </footer>
+              </section>
+            ) : null}
             {episode.status === "live" &&
             episode.playbackMode !== "watch" ? (
               <div
@@ -17844,7 +17841,7 @@ export function BotcastExperience({
                 {signalMemoryReceiptDetail}
               </section>
             ) : null}
-            {episode.status === "completed" ? (
+            {episode.status === "completed" && !watchReplayPresentation ? (
               <button
                 type="button"
                 className={styles.returnButton}
@@ -19342,7 +19339,7 @@ export function BotcastExperience({
       }
       detail={
         blockingOperation?.detail ??
-        "Prism is preparing the opening stretch so watching can begin once enough of the broadcast is ready. You can stop anytime — the booking stays available to reuse."
+        "Prism is finishing the complete episode and its voice package before opening Replay. You can stop anytime — the booking stays available to reuse."
       }
       stepLabel={
         blockingOperation?.stepLabel ??
@@ -19351,7 +19348,8 @@ export function BotcastExperience({
         "Working"
       }
       progress={
-        blockingOperation?.progress ?? liveBakeProgressRatio(watchBakeArtifact)
+        blockingOperation?.progress ??
+        (watchBakeArtifact?.status === "ready" ? 1 : null)
       }
       startedAt={
         blockingOperation ? null : watchBakeStartedAt
@@ -19360,7 +19358,7 @@ export function BotcastExperience({
       footer={
         blockingOperation
           ? "Keep this window open while the light takes shape."
-          : "Watching unlocks when the opening buffer is ready. Model thinking can stretch the wait."
+          : "Replay opens only when the full episode is ready. Model thinking and Premium synthesis can stretch the wait."
       }
       onCancel={
         blockingOperation?.cancellable

@@ -58,8 +58,8 @@ test("exact size-tier boundaries remain stable across the previous tier", () => 
   );
   assert.equal(
     avatarRenderedSizeTierForMeasurements(
-      121,
-      121,
+      BOT_AVATAR_COMPACT_ENTER_MAX_PX - 1,
+      BOT_AVATAR_COMPACT_ENTER_MAX_PX - 1,
       "compact",
     ),
     "compact",

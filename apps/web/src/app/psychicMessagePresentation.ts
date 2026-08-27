@@ -4,15 +4,23 @@ import type {
   PsychicThoughtPayload,
   ProviderReasoningEffort,
 } from "@localai/shared";
+import {
+  finalActualAppletRoute,
+  providerDisplayName,
+  type ActualAppletRoute,
+} from "./autoRoutePresentation.ts";
 
 export interface PsychicPresentationMessageLike {
   role: string;
+  provider?: "local" | "openai" | "anthropic";
   model?: string;
   psychicThought?: PsychicThoughtPayload;
   autoRecovery?: AutoRecoveryTraceV1;
   autoRoute?: AutoRouteDecisionV1;
   reasoningEffort?: ProviderReasoningEffort;
   turbo?: boolean;
+  /** A Ready Power supplied the response rather than a language model. */
+  botPowerExactResponse?: unknown;
 }
 
 export interface AssistantGenerationMetadata {
@@ -20,6 +28,8 @@ export interface AssistantGenerationMetadata {
   effort: ProviderReasoningEffort;
   automatic: boolean;
   turbo: boolean;
+  recovered: boolean;
+  recoveryAttemptCount: number;
 }
 
 export function psychicSourceForAssistantMessage<
@@ -45,14 +55,42 @@ export function assistantGenerationMetadata(
   psychicSource: PsychicPresentationMessageLike | null,
 ): AssistantGenerationMetadata | null {
   if (assistant.role !== "assistant") return null;
-  const concreteModel =
-    assistant.model?.trim() ||
-    assistant.autoRoute?.model.trim() ||
-    psychicSource?.psychicThought?.model?.trim() ||
-    "Model not recorded";
+  // Deterministic/power authored replies are assistant-shaped but not model
+  // generations. Do not invent provenance for them.
+  if ("botPowerExactResponse" in assistant && assistant.botPowerExactResponse) {
+    return null;
+  }
+  const provider =
+    assistant.autoRecovery?.finalProvider ??
+    assistant.provider ??
+    assistant.autoRoute?.provider ??
+    psychicSource?.psychicThought?.provider;
+  if (
+    provider !== "local" &&
+    provider !== "openai" &&
+    provider !== "anthropic"
+  ) {
+    return null;
+  }
+  const route = finalActualAppletRoute({
+    provider,
+    model:
+      assistant.autoRecovery?.finalModel ??
+      assistant.model ??
+      assistant.autoRoute?.model ??
+      psychicSource?.psychicThought?.model ??
+      "",
+    autoRoute: assistant.autoRoute,
+    autoRecovery: assistant.autoRecovery,
+    turbo: assistant.turbo,
+  } satisfies ActualAppletRoute);
+  if (!route) return null;
   const automatic = assistant.autoRoute !== undefined;
   return {
-    model: automatic ? `${concreteModel} [auto]` : concreteModel,
+    model: `${automatic ? "Auto → " : ""}${providerDisplayName(route.provider)} · ${route.model}`,
+    // Recovery attempts intentionally use the fast no-reasoning fallback.
+    // This annotation is frozen with the turn, never inferred from a later
+    // route preference.
     effort: assistant.autoRecovery
       ? "none"
       : (assistant.autoRoute?.reasoningEffort ??
@@ -60,6 +98,8 @@ export function assistantGenerationMetadata(
         psychicSource?.psychicThought?.effort ??
         "auto"),
     automatic,
-    turbo: assistant.turbo === true,
+    turbo: route.turbo === true,
+    recovered: assistant.autoRecovery !== undefined,
+    recoveryAttemptCount: assistant.autoRecovery?.attempts.length ?? 0,
   };
 }

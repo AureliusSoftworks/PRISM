@@ -161,8 +161,13 @@ test("lets Model, Effort, and Speech Type select values from the wheel", () => {
   );
   assert.match(
     pageSource,
-    /const closedPicker = closeOpenPrismShortcutPicker\(\);\s*if \(closedPicker === "speech"\)[\s\S]{0,700}dispatchEvent\(new Event\(SPEECH_TYPE_QUICK_OPEN_EVENT\)\)/u,
+    /const closedPicker = closeOpenPrismShortcutPicker\(\);\s*if \(closedPicker === "speech"\)[\s\S]{0,800}dispatchEvent\([\s\S]{0,80}new Event\(SPEECH_TYPE_QUICK_OPEN_EVENT, \{ bubbles: true \}\)/u,
   );
+  assert.match(
+    pageSource,
+    /document\.addEventListener\(\s*SPEECH_TYPE_QUICK_OPEN_EVENT,[\s\S]{0,80}openQuickVoicePicker/u,
+  );
+  assert.match(pageSource, /voiceModeSelectorButtonRef\.current = trigger/u);
   assert.match(
     pageSource,
     /Opening another navbar picker is an explicit "keep this" gesture/u,

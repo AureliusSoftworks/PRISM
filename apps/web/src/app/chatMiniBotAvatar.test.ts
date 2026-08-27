@@ -43,10 +43,14 @@ function pngHeader(fileName: string): {
 }
 
 describe("chatMiniBotAvatar", () => {
-  it("owns the Mini band through 299 rendered pixels", () => {
+  it("owns the shared Mini band through 299 rendered pixels", () => {
     assert.match(
       componentSource,
-      /CHAT_MINI_BOT_AVATAR_MAX_RENDER_SIZE = 299/u,
+      /CHAT_MINI_BOT_AVATAR_MAX_RENDER_SIZE =\s*BOT_AVATAR_COMPACT_ENTER_MAX_PX - 1/u,
+    );
+    assert.match(
+      componentSource,
+      /import \{ BOT_AVATAR_COMPACT_ENTER_MAX_PX \} from "\.\/avatarRenderedSizeQuality"/u,
     );
   });
 
@@ -285,15 +289,15 @@ describe("chatMiniBotAvatar", () => {
           /className=\{`\$\{styles\.coffeeSeatPlateEmoji\} \$\{styles\.emptyStateHeroMiniFace\}`\}/g,
         ),
       ].length,
-      3,
-      "Chat/Zen, Debate, and Avatar Studio mini portraits must share Avatar Studio's face paint-box geometry",
+      4,
+      "Batch Foundry, Chat/Zen, Debate, and Avatar Studio mini portraits must share Avatar Studio's face paint-box geometry",
     );
     const miniFaceCalls = [
       ...pageSource.matchAll(
         /<CoffeeSeatPlateEmoji(?:(?!<CoffeeSeatPlateEmoji)[\s\S])*?className=\{`\$\{styles\.coffeeSeatPlateEmoji\} \$\{styles\.emptyStateHeroMiniFace\}`\}(?:(?!<CoffeeSeatPlateEmoji)[\s\S])*?\/>/g,
       ),
     ];
-    assert.equal(miniFaceCalls.length, 3);
+    assert.equal(miniFaceCalls.length, 4);
     for (const [index, [miniFaceCall]] of miniFaceCalls.entries()) {
       assert.match(
         miniFaceCall,
@@ -312,7 +316,7 @@ describe("chatMiniBotAvatar", () => {
       );
       assert.match(miniFaceCall, /\bhardPixels\b/);
       assert.match(miniFaceCall, /motionMode="mini-led"/);
-      if (index < 2) {
+      if (index < 3) {
         assert.doesNotMatch(miniFaceCall, /showThinkingSpinner|showQuestionMark/);
       } else {
         assert.match(miniFaceCall, /showThinkingSpinner/);
@@ -326,7 +330,7 @@ describe("chatMiniBotAvatar", () => {
       "shared Mini faces must retain the live viseme when one is available",
     );
     assert.match(pageSource, /style=\{miniFaceRegistrationStyle\}/);
-    assert.match(pageSource, /BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE/);
+    assert.match(pageSource, /botAvatarFaceRegistrationStyle\(hasAvatarArt\)/);
     assert.match(
       pageCssSource,
       /\.coffeeSeatPlateEmoji\.emptyStateHeroMiniFace\s*\{[^}]*display:\s*inline-grid/,
@@ -400,7 +404,7 @@ describe("chatMiniBotAvatar", () => {
     assert.match(pageSource, /import \{ MiniAvatarDetailsInk \} from "\.\/MiniAvatarDetailsInk"/);
     assert.equal(
       [...pageSource.matchAll(/<MiniAvatarDetailsInk\b/g)].length,
-      4,
+      5,
       "every Mini face surface must share the semantic Ink wrapper",
     );
     assert.match(
@@ -423,7 +427,7 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.equal(
       [...pageSource.matchAll(/onBlinkPhaseChange=\{onBlinkPhaseChange\}/g)].length,
-      4,
+      5,
       "each Mini face must feed its displayed blink phase back to Ink",
     );
     assert.match(

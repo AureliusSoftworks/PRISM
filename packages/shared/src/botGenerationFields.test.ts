@@ -42,7 +42,11 @@ test("Avatar Studio field registry covers every creative surface and explicit sa
   }
   assert.equal(
     botGenerationFieldDefinitionV1("identity.namePronunciation").policy,
-    "semantic",
+    "excluded",
+  );
+  assert.match(
+    botGenerationFieldDefinitionV1("identity.namePronunciation").reason ?? "",
+    /player-authored only/u,
   );
   assert.equal(
     botGenerationFieldDefinitionV1("identity.selfReferral").policy,

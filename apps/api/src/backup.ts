@@ -15,6 +15,11 @@ import {
   type DebateMysteryV2BackupV1,
 } from "./debate-mystery-v2.ts";
 import {
+  exportDebateMysteryAssetVaultBackupV1,
+  importDebateMysteryAssetVaultBackupV1,
+  type DebateMysteryAssetVaultBackupV1,
+} from "./debate-mystery-assets.ts";
+import {
   APPLET_SESSION_NOTE_ENTRY_MAX_CHARACTERS,
   APPLET_SESSION_NOTE_MAX_CHARACTERS,
   appletSessionBelongsToUser,
@@ -77,6 +82,7 @@ import {
   normalizeBotSelfReferral,
   normalizeBotVoiceVolume,
   normalizeEnglishVoiceEngine,
+  normalizeSpeechTypeVoiceMode,
   normalizeGraphicsQuality,
   normalizeCrtFocus,
   normalizePrismTypographyScale,
@@ -86,7 +92,6 @@ import {
   normalizePrismCapabilityRevelations,
   PRISM_CAPABILITY_IDS,
   normalizeOptionalBotAudioVoiceProfileV1,
-  normalizeVoiceMode,
   parseStoredBotAudioVoiceProfileV1,
   serializeBotAudioVoiceProfileV1,
   parseStoredBotPowersV1,
@@ -100,6 +105,7 @@ import {
   type BotcastFallbackStudioAccentVariant,
   type BotPowerV1,
   type CoffeePowerPlanV1,
+  type CoffeeSessionLifecycleState,
   type CoffeeSessionSettings,
   normalizeCoffeeSessionSettings,
   type EnglishVoiceEngine,
@@ -423,6 +429,8 @@ export interface BackupSnapshot {
     updatedAt: string;
     coffeePowerPlan?: CoffeePowerPlanV1;
     coffee?: {
+      /** Optional in older v1 snapshots; legacy Coffee sessions restore active. */
+      sessionState?: CoffeeSessionLifecycleState;
       settings: CoffeeSessionSettings;
       botGroupIds: Array<string | null>;
       groupId: string | null;
@@ -673,6 +681,8 @@ export interface BackupSnapshot {
     }>;
     /** Complete V2 case compiler state and referenced local performance bytes. */
     mysteryV2?: DebateMysteryV2BackupV1;
+    /** Decrypted only inside the encrypted account archive, then re-sealed on import. */
+    mysteryAssets?: DebateMysteryAssetVaultBackupV1;
   };
   /** One player-authored note attached to an applet session transcript. */
   sessionNotes?: Array<{
@@ -2150,7 +2160,7 @@ export function exportUserSnapshot(
         prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
         prismRefractLocalModel: user.prism_refract_local_model ?? "",
         prismRefractOnlineModel: user.prism_refract_online_model ?? "",
-        voiceMode: normalizeVoiceMode(user.voice_mode),
+        voiceMode: normalizeSpeechTypeVoiceMode(user.voice_mode),
         voiceEffectsEnabled: user.voice_effects_enabled !== 0,
         voiceVolume: normalizeBotVoiceVolume(user.voice_volume),
         operatingSystemVoicesEnabled:
@@ -2481,6 +2491,7 @@ export function exportUserSnapshot(
   const conversations = db
     .prepare(
       `SELECT id, title, conversation_mode, bot_group_ids, coffee_settings,
+              coffee_session_state,
               coffee_group_id, coffee_duration_minutes, coffee_preset_id,
               coffee_topic, coffee_absent_bot_ids, coffee_team_mode_json,
               coffee_power_plan_json, created_at, updated_at
@@ -2494,6 +2505,7 @@ export function exportUserSnapshot(
     conversation_mode: string;
     bot_group_ids: string | null;
     coffee_settings: string | null;
+    coffee_session_state: string | null;
     coffee_group_id: string | null;
     coffee_duration_minutes: number | null;
     coffee_preset_id: string | null;
@@ -2545,6 +2557,11 @@ export function exportUserSnapshot(
       ...(conversation.conversation_mode === "coffee"
         ? {
             coffee: {
+              sessionState:
+                conversation.coffee_session_state === "closing" ||
+                conversation.coffee_session_state === "complete"
+                  ? (conversation.coffee_session_state as CoffeeSessionLifecycleState)
+                  : ("active" as CoffeeSessionLifecycleState),
               settings: normalizeCoffeeSessionSettings(
                 conversation.coffee_settings
                   ? JSON.parse(conversation.coffee_settings) as unknown
@@ -2885,6 +2902,11 @@ export function exportUserSnapshot(
     )
     .all(userId) as Array<Record<string, string | number | null>>;
   const debateMysteryV2 = exportDebateMysteryV2BackupV1(db, userId);
+  const debateMysteryAssets = exportDebateMysteryAssetVaultBackupV1(
+    db,
+    userId,
+    userKey,
+  );
 
   return {
     version: 1,
@@ -3287,6 +3309,7 @@ export function exportUserSnapshot(
         createdAt: String(row.created_at),
       })),
       mysteryV2: debateMysteryV2,
+      mysteryAssets: debateMysteryAssets,
     },
     sessionNotes: sessionNotes.map((row) => ({
       surface: String(row.surface) as NonNullable<
@@ -3446,6 +3469,7 @@ function assertSnapshotIdsStayWithinTenant(
       | "debate_mystery_notebook_revisions"
       | "debate_mystery_v2_cases"
       | "debate_mystery_v2_jobs"
+      | "debate_mystery_asset_vault"
       | "debate_mystery_audio_manifests"
       | "debate_mystery_audio_cache"
       | "replay_recordings"
@@ -3640,6 +3664,18 @@ function assertSnapshotIdsStayWithinTenant(
         (mysteryV2.clips ?? []).map((item) => item.cacheKey),
         "cache_key",
       );
+    }
+    if (snapshot.debates.mysteryAssets) {
+      const semanticOwners = new Set<string>();
+      for (const item of snapshot.debates.mysteryAssets.assets) {
+        const owner = `${item.sessionId}:${item.kind}:${item.subjectId}`;
+        if (semanticOwners.has(owner)) {
+          throw new Error(
+            "Account backup contains a duplicate sealed mystery asset owner.",
+          );
+        }
+        semanticOwners.add(owner);
+      }
     }
   }
   if (snapshot.presenceBeats) {
@@ -4079,7 +4115,7 @@ function importUserSnapshotWithinTransaction(
       encryptedElevenLabsKey?.ciphertext ?? null,
       encryptedElevenLabsKey?.iv ?? null,
       encryptedElevenLabsKey?.tag ?? null,
-      normalizeVoiceMode(settings.voiceMode),
+      normalizeSpeechTypeVoiceMode(settings.voiceMode),
       settings.voiceEffectsEnabled === false ? 0 : 1,
       normalizeBotVoiceVolume(settings.voiceVolume),
       settings.operatingSystemVoicesEnabled === true ? 1 : 0,
@@ -4788,9 +4824,10 @@ function importUserSnapshotWithinTransaction(
   const insertConversation = db.prepare(`
     INSERT OR REPLACE INTO conversations
       (id, user_id, title, conversation_mode, bot_group_ids, coffee_settings,
+       coffee_session_state,
        coffee_group_id, coffee_duration_minutes, coffee_preset_id, coffee_topic,
        coffee_absent_bot_ids, coffee_team_mode_json, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertMessage = db.prepare(`
     INSERT OR REPLACE INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
@@ -4816,6 +4853,9 @@ function importUserSnapshotWithinTransaction(
       coffee
         ? JSON.stringify(normalizeCoffeeSessionSettings(coffee.settings))
         : null,
+      coffee?.sessionState === "closing" || coffee?.sessionState === "complete"
+        ? coffee.sessionState
+        : "active",
       coffee?.groupId && ownedCoffeeGroupIds.has(coffee.groupId)
         ? coffee.groupId
         : null,
@@ -5097,6 +5137,15 @@ function importUserSnapshotWithinTransaction(
         db,
         userId,
         snapshot.debates.mysteryV2,
+        sessionIds,
+      );
+    }
+    if (snapshot.debates.mysteryAssets) {
+      importDebateMysteryAssetVaultBackupV1(
+        db,
+        userId,
+        userKey,
+        snapshot.debates.mysteryAssets,
         sessionIds,
       );
     }

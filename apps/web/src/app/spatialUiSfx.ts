@@ -1,3 +1,9 @@
+import {
+  audioContextNeedsResume,
+  resumeAudioContextIfNeeded,
+} from "./audioContextRecovery.ts";
+import { ensurePrismAudioContextRunning } from "./replayAudioMasterCapture.ts";
+
 export const SPATIAL_UI_SFX_SOURCES = {
   "bot-hover": [
     "/audio/ui-asmr/bot-hover-02.mp3",
@@ -304,10 +310,7 @@ export async function playSpatialUiSfx(
 
   const context = contextForSpatialUiSfx();
   if (!context) return false;
-  if (context.state === "suspended") {
-    await context.resume().catch(() => undefined);
-  }
-  if (context.state !== "running") return false;
+  if (!(await resumeAudioContextIfNeeded(context))) return false;
 
   const sources = SPATIAL_UI_SFX_SOURCES[cue];
   const previousVariant = previousVariantByCue.get(cue) ?? -1;
@@ -420,11 +423,13 @@ export function registerSpatialUiSfx(
   preloadSpatialUiSfxAssets();
 
   const unlock = (): void => {
+    ensurePrismAudioContextRunning();
     const context = contextForSpatialUiSfx();
-    if (context?.state === "suspended") {
+    if (context && audioContextNeedsResume(context)) {
       void context.resume().catch(() => undefined);
     }
   };
+  const view = root.defaultView;
   const handlePointerOver = (event: PointerEvent): void => {
     if (event.pointerType !== "mouse") return;
     const card = botCardForEvent(event);
@@ -450,12 +455,18 @@ export function registerSpatialUiSfx(
 
   root.addEventListener("pointerdown", unlock, true);
   root.addEventListener("keydown", unlock, true);
+  root.addEventListener("visibilitychange", unlock);
+  view?.addEventListener("focus", unlock);
+  view?.addEventListener("pageshow", unlock);
   root.addEventListener("pointerover", handlePointerOver);
   root.addEventListener("click", handleClick);
   root.addEventListener("change", handleChange);
   return () => {
     root.removeEventListener("pointerdown", unlock, true);
     root.removeEventListener("keydown", unlock, true);
+    root.removeEventListener("visibilitychange", unlock);
+    view?.removeEventListener("focus", unlock);
+    view?.removeEventListener("pageshow", unlock);
     root.removeEventListener("pointerover", handlePointerOver);
     root.removeEventListener("click", handleClick);
     root.removeEventListener("change", handleChange);

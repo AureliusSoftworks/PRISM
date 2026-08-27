@@ -9,21 +9,23 @@ export type CoffeeSessionClockPhase =
 
 export type CoffeeSessionClockHoldReason =
   | "model_warmup"
-  | "foreground_generation";
+  | "foreground_generation"
+  | "player_composing";
 
 /**
- * A composing player no longer holds the countdown: bots keep talking while
- * the player types, so session time keeps flowing with them.
+ * Canonical Coffee time pauses while the player is actively composing.
  */
 export function coffeeSessionClockHoldReasons(args: {
   /** Retained for call-site compatibility; a paused table still uses active time. */
   autoplayPaused: boolean;
   modelWarmup: boolean;
   foregroundGeneration: boolean;
+  playerComposing?: boolean;
 }): CoffeeSessionClockHoldReason[] {
   const reasons: CoffeeSessionClockHoldReason[] = [];
   if (args.modelWarmup) reasons.push("model_warmup");
   if (args.foregroundGeneration) reasons.push("foreground_generation");
+  if (args.playerComposing) reasons.push("player_composing");
   return reasons;
 }
 

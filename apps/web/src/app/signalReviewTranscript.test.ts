@@ -218,6 +218,10 @@ describe("Signal review transcript", () => {
     );
     assert.match(
       transcript,
+      /- Generation: Auto → local\/fallback-model · Effort None · Recovered after 2 attempts/u,
+    );
+    assert.match(
+      transcript,
       /- AUTO recovery: \{"attempts":2,"recoveredFrom":"primary-model"\}/u,
     );
     assert.match(transcript, /- ONLINE retry: None recorded/u);
@@ -387,6 +391,10 @@ describe("Signal review transcript", () => {
     assert.match(
       transcript,
       /- Turn routing: human-authored -> no provider -> no model/u,
+    );
+    assert.match(
+      transcript,
+      /- Generation: Not model-generated \(human-authored\)\./u,
     );
     assert.match(
       transcript,

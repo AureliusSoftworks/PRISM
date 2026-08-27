@@ -161,6 +161,67 @@ describe("buildDeveloperTranscript", () => {
     assert.match(transcript, /Generated output was transformed, rejected, retried, or not displayed verbatim/u);
   });
 
+  it("annotates each generated Auto turn with its final route and execution state", () => {
+    const transcript = buildDeveloperTranscript({
+      exportedAt: "2026-08-26T20:00:00.000Z",
+      conversation: {
+        id: "conversation-auto-route",
+        title: "Changing routes",
+        mode: "chat",
+        createdAt: "2026-08-26T19:00:00.000Z",
+        updatedAt: "2026-08-26T19:05:00.000Z",
+      },
+      events: [],
+      messages: [
+        {
+          id: "assistant-auto",
+          role: "assistant",
+          content: "Recovered answer",
+          provider: "openai",
+          model: "gpt-primary",
+          botId: null,
+          audienceBotIds: null,
+          createdAt: "2026-08-26T19:04:01.000Z",
+          toolPayload: JSON.stringify({
+            reasoningEffort: "high",
+            turbo: true,
+            autoRoute: {
+              provider: "openai",
+              model: "gpt-primary",
+              reasoningEffort: "high",
+            },
+            autoRecovery: {
+              attempts: [{ provider: "openai", model: "gpt-primary" }],
+              finalProvider: "anthropic",
+              finalModel: "claude-recovered",
+            },
+          }),
+        },
+        {
+          id: "assistant-deterministic",
+          role: "assistant",
+          content: "A fixed Power response",
+          provider: null,
+          model: null,
+          botId: null,
+          audienceBotIds: null,
+          createdAt: "2026-08-26T19:04:02.000Z",
+          toolPayload: JSON.stringify({ botPowerExactResponse: "silence" }),
+        },
+      ],
+    });
+
+    assert.match(
+      transcript,
+      /Generation: Auto → anthropic\/claude-recovered · Effort None · Recovered after 1 attempt/u,
+    );
+    assert.doesNotMatch(transcript, /Generation: [^\n]*Turbo[^\n]*Recovered/u);
+    assert.match(
+      transcript,
+      /Generation: Not model-generated \(deterministic response\)\./u,
+    );
+  });
+
   it("keeps retained Gibberish intent out of developer exports", () => {
     const intended = "I will explain the archive plan clearly.\nThen verify it.";
     const transcript = buildDeveloperTranscript({

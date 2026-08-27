@@ -3639,7 +3639,9 @@
   bottom: 176px;
   width: min(28vw, 250px);
   min-width: 150px;
-  aspect-ratio: 2 / 3;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
   color: var(--bot-color, #ffffff);
   transform-origin: 50% 86%;
   transition:
@@ -3767,158 +3769,11 @@
   transform: translate(3px, -4px) rotate(2deg) scale(1.025);
 }
 
-.storySprite {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+.storySpriteAvatar {
   filter: drop-shadow(0 24px 28px rgba(0, 0, 0, 0.45));
 }
 
-.storySpriteFacePlate {
-  position: absolute;
-  left: 50.55%;
-  top: 33.82%;
-  transform: translate(-50%, -50%);
-  width: 34px;
-  height: 28px;
-  display: grid;
-  grid-template-rows: 6px 20px;
-  align-content: center;
-  justify-items: center;
-  gap: 0;
-  color: var(--bot-color, #ffffff);
-  filter: drop-shadow(
-    0 0 8px color-mix(in srgb, var(--bot-color, #ffffff) 52%, transparent)
-  );
-}
-
-.storySpriteBrows {
-  width: 24px;
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 6px;
-  align-items: center;
-}
-
-.storySpriteBrows i {
-  display: block;
-  width: 8px;
-  height: 2px;
-  border-radius: 999px;
-  background: currentColor;
-  opacity: 0.72;
-  transform-origin: center;
-  box-shadow: 0 0 7px currentColor;
-}
-
-.storySpriteAsciiFace {
-  position: relative;
-  top: -2px;
-  left: 2px;
-  display: block;
-  font-family: var(--font-ui-sans), system-ui, sans-serif;
-  font-size: 1.28rem;
-  line-height: 1;
-  font-weight: 750;
-  letter-spacing: 0;
-  font-variant-ligatures: none;
-  font-feature-settings:
-    "liga" 0,
-    "calt" 0;
-  opacity: 0.9;
-  text-shadow: 0 0 8px currentColor;
-  transform: rotate(90deg) translateX(1px);
-  transform-origin: center center;
-}
-
-.storySpriteWrap[data-expression="joyful"] .storySpriteBrows i:first-child,
-.storySpriteWrap[data-expression="warm"] .storySpriteBrows i:first-child {
-  transform: rotate(-8deg) translateY(1px);
-}
-
-.storySpriteWrap[data-expression="joyful"] .storySpriteBrows i:last-child,
-.storySpriteWrap[data-expression="warm"] .storySpriteBrows i:last-child {
-  transform: rotate(8deg) translateY(1px);
-}
-
-.storySpriteWrap[data-expression="guarded"] .storySpriteBrows i:first-child {
-  transform: rotate(18deg);
-}
-
-.storySpriteWrap[data-expression="guarded"] .storySpriteBrows i:last-child {
-  transform: rotate(-18deg);
-}
-
-.storySpriteWrap[data-expression="strained"] .storySpriteBrows i:first-child {
-  transform: rotate(-13deg) translateY(1px);
-}
-
-.storySpriteWrap[data-expression="strained"] .storySpriteBrows i:last-child {
-  transform: rotate(13deg) translateY(1px);
-}
-
-.storySpriteWrap[data-speaking="true"] .storySpriteAsciiFace {
-  animation: storyNpcAsciiTalk 0.56s ease-in-out infinite;
-}
-
-@keyframes storyNpcAsciiTalk {
-  0%,
-  100% {
-    transform: rotate(90deg) translateX(1px) scaleX(0.94);
-    opacity: 0.72;
-  }
-  50% {
-    transform: rotate(90deg) translateX(1px) scaleX(1.08);
-    opacity: 0.94;
-  }
-}
-
-.storySpriteChestGlyph {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: 30px;
-  height: 30px;
-  border-radius: 999px;
-  border: 1px solid
-    color-mix(in srgb, var(--bot-color, #ffffff) 54%, rgba(255, 255, 255, 0.3));
-  background: #050505;
-  box-shadow:
-    0 8px 18px rgba(0, 0, 0, 0.28),
-    0 0 18px color-mix(in srgb, var(--bot-color, #ffffff) 32%, transparent);
-  display: grid;
-  place-items: center;
-  color: var(--bot-color, #ffffff);
-  opacity: 0.95;
-}
-
-.storySpriteWrap[data-speaking="true"] .storySpriteChestGlyph {
-  animation: storyNpcChestPulse 1.15s ease-in-out infinite;
-}
-
-@keyframes storyNpcChestPulse {
-  0%,
-  100% {
-    transform: translate(-50%, -50%) scale(1);
-    box-shadow:
-      0 8px 18px rgba(0, 0, 0, 0.24),
-      0 0 18px color-mix(in srgb, var(--bot-color, #ffffff) 28%, transparent);
-  }
-  50% {
-    transform: translate(-50%, -50%) scale(1.06);
-    box-shadow:
-      0 8px 18px rgba(0, 0, 0, 0.24),
-      0 0 28px color-mix(in srgb, var(--bot-color, #ffffff) 48%, transparent);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .storySpriteWrap[data-speaking="true"] .storySpriteAsciiFace,
-  .storySpriteWrap[data-speaking="true"] .storySpriteChestGlyph {
-    animation: none;
-  }
-
   .zenInitialCeremonyAvatar[data-visible="true"] {
     opacity: 1;
   }
@@ -17557,9 +17412,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-live-bot-avatar-body-size: var(--zen-live-bot-avatar-size);
   --zen-live-bot-body-x: 50%;
   --zen-live-bot-body-y: 50%;
-  --zen-live-bot-face-x: 50%;
-  --zen-live-bot-face-y: 43.8%;
-  --zen-live-bot-face-scale: 1.68;
   --zen-live-bot-glyph-x-anchor: 0px;
   --zen-live-bot-glyph-y-anchor: calc(
     var(--zen-live-bot-avatar-body-size) * 0.37
@@ -17578,8 +17430,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-live-bot-glyph-ink: var(--zen-live-bot-face-phosphor-ink);
   --bot-face-crt-screen-texture-blend-mode: luminosity;
   --coffee-seat-emotion-face-scale: 1;
-  --zen-live-bot-eye-local-x: -0.2;
-  --coffee-plate-emoji-nudge-y: clamp(-5px, -2.6%, -2px);
   --bot-ambient-hover-amplitude: 1px;
   --bot-ambient-underglow-rest-opacity: 0.28;
   --bot-ambient-underglow-rise-opacity: 0.34;
@@ -19056,6 +18906,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   align-self: center;
   justify-self: center;
   z-index: 4;
+}
+
+/* Mini is Coffee's chassis language, not a smaller seat. Forced live Mini
+   avatars skip measurement, so bind both bot and player chassis to the same
+   authored 148–196px seat footprint used by the full mannequin. */
+.coffeeSeatPlate[data-avatar-presentation="mini"] .coffeeSeatMiniAvatar,
+.coffeeReplayPlayerAvatar[data-avatar-presentation="mini"]
+  .coffeeSeatMiniAvatar {
+  --chat-mini-bot-render-size: var(--zen-live-bot-avatar-size);
+  --chat-mini-bot-glyph-size: max(
+    7px,
+    calc(var(--zen-live-bot-avatar-size) * 0.12)
+  );
 }
 
 .coffeeSeatMiniAvatarArt {
@@ -28379,8 +28242,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   );
   --zen-live-bot-face-ink: var(--coffee-bot-color);
   --zen-live-bot-glyph-ink: var(--zen-live-bot-face-phosphor-ink);
-  --zen-live-bot-eye-local-x: -0.2;
-  --coffee-plate-emoji-nudge-y: clamp(-5px, -2.6%, -2px);
   --coffee-plate-emoji-face-scale-y: 1;
   --zen-presence-face-bg:
     radial-gradient(
@@ -28561,9 +28422,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-live-bot-avatar-body-size: clamp(140px, 14.5vw, 218px);
   --zen-live-bot-body-x: 50%;
   --zen-live-bot-body-y: 50%;
-  --zen-live-bot-face-x: 50%;
-  --zen-live-bot-face-y: 43.8%;
-  --zen-live-bot-face-scale: 1.68;
   --zen-live-bot-glyph-x-anchor: 0px;
   --zen-live-bot-glyph-y-anchor: calc(
     var(--zen-live-bot-avatar-body-size) * 0.37
@@ -28634,22 +28492,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   display: none;
 }
 
-/* Signal's face reads lower as the interview avatar grows. Move the complete
-   face + authored Ink plane together by a bounded responsive amount so Speech
-   ink does not drop when the bot starts talking. */
-.signalBotPresencePlate[data-signal-surface="stage"]
-  .zenLiveBotPresenceScreenContentRig {
-  translate: 0 clamp(-6px, -0.42vw, -4px);
-}
-
 .debateBotPresencePlate {
   --zen-live-bot-avatar-size: 100%;
   --zen-live-bot-avatar-body-size: 92%;
   --zen-live-bot-body-x: 50%;
   --zen-live-bot-body-y: 50%;
-  --zen-live-bot-face-x: 50%;
-  --zen-live-bot-face-y: 43.8%;
-  --zen-live-bot-face-scale: 1.68;
   --zen-live-bot-glyph-x-anchor: 0px;
   --zen-live-bot-glyph-y-anchor: calc(
     var(--zen-live-bot-avatar-body-size) * 0.37
@@ -28662,15 +28509,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   align-items: center;
   pointer-events: none;
   animation: none;
-}
-
-/* Keep the Moderator close-up eye mark centered so speaking glances can
-   address both podiums instead of reading permanently right-biased. */
-.debateBotPresencePlate[data-debate-role="moderator"]:not(
-    [data-debate-compact="true"]
-  )
-  .coffeeSeatPlateEmoji:not([data-face-eye-character]) {
-  --zen-live-bot-eye-local-x: 0;
 }
 
 .debateBotPresencePlate[data-debate-compact="true"] {
@@ -29070,7 +28908,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
    `.botAmbientUnderglow::after` is a blurred (up to 22px), blend-mode
    composited surface roughly 2.4x the seat's own width, and
    `.botAmbientSpeakingPulse` blends too. Blend modes force the backdrop to be
-   rasterized and read back, so five seats' worth of them dominate the frame
+   rasterized and read back, so four or five seats dominate the frame
    budget on a crowded table — which is why dropping to Mini materials alone
    never recovered the frame rate. Under the shed the wide halo goes away and
    the remaining glow composites normally; the small contact shadow stays, so
@@ -33142,7 +32980,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       --zen-live-bot-avatar-body-size,
       var(--zen-live-bot-avatar-face-size, 74px)
     );
-    --coffee-plate-emoji-nudge-y: clamp(1px, 1%, 4px);
   }
 
   .coffeeSeatPlateEmoji.zenLiveBotPresenceFaceGlyph {
@@ -46025,12 +45862,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botPanelHubAvatarPlate .zenLiveBotPresenceBody {
-  /* Avatar Studio is the source of truth: its face is 21.7% of the frame.
-     The shared live-avatar rule caps at 4.08rem, which makes the face look
-     progressively smaller when this audition body grows beyond editor size. */
-  --zen-live-bot-avatar-face-glyph-size: calc(
-    var(--zen-live-bot-body-frame-size) * 0.217
-  );
   /* Preserve the editor's 14.5% buckle-to-chassis ratio without the shared
      48px cap shrinking this oversized audition view. */
   --zen-live-bot-body-glyph-size: calc(
@@ -72942,9 +72773,6 @@ a.settingsCreditItem:focus-visible {
   --zen-live-bot-avatar-body-size: var(--zen-live-bot-avatar-size);
   --zen-live-bot-body-x: 50%;
   --zen-live-bot-body-y: 50%;
-  --zen-live-bot-face-x: 50%;
-  --zen-live-bot-face-y: 43.8%;
-  --zen-live-bot-face-scale: 1.68;
   --zen-live-bot-glyph-x-anchor: 0px;
   --zen-live-bot-glyph-y-anchor: calc(
     var(--zen-live-bot-avatar-body-size) * 0.37
@@ -72999,6 +72827,15 @@ a.settingsCreditItem:focus-visible {
 
 .coffeePlayerCupButton:disabled {
   cursor: default;
+  opacity: 0.56;
+}
+
+.coffeePlayerCupButton[data-composer-open="true"] .coffeeCup {
+  transform: translateY(-3px) scale(1.08);
+  filter: drop-shadow(
+    0 0 11px color-mix(in srgb, var(--accent) 74%, transparent)
+  );
+  animation: none;
 }
 
 .coffeePlayerCupButton .coffeeCup {
@@ -73636,6 +73473,18 @@ a.settingsCreditItem:focus-visible {
   opacity: 0.32;
   filter: saturate(0.66) contrast(0.88) brightness(0.74);
   transform: scale(1.025);
+}
+
+/* Crowded live tables use shared mini avatars. Give only the distant room a
+ * low-resolution phosphor texture; the table and all readable UI stay outside
+ * this backdrop layer. */
+.coffeeGroupAtmosphereBackdrop[data-crowded-mini-avatar="true"] img {
+  position: absolute;
+  inset: 25%;
+  width: 50%;
+  height: 50%;
+  image-rendering: pixelated;
+  transform: scale(2.06);
 }
 
 .coffeeGroupAtmosphereBackdrop::after {
@@ -75122,9 +74971,6 @@ a.settingsCreditItem:focus-visible {
   --zen-live-bot-avatar-body-size: var(--zen-live-bot-avatar-size);
   --zen-live-bot-body-x: 50%;
   --zen-live-bot-body-y: 50%;
-  --zen-live-bot-face-x: 50%;
-  --zen-live-bot-face-y: 43.8%;
-  --zen-live-bot-face-scale: 1.68;
   --zen-live-bot-glyph-x-anchor: 0px;
   --zen-live-bot-glyph-y-anchor: calc(
     var(--zen-live-bot-avatar-body-size) * 0.37
@@ -75143,8 +74989,6 @@ a.settingsCreditItem:focus-visible {
   --zen-live-bot-glyph-ink: var(--zen-live-bot-face-phosphor-ink);
   --bot-face-crt-screen-texture-blend-mode: luminosity;
   --coffee-seat-emotion-face-scale: 1;
-  --zen-live-bot-eye-local-x: -0.2;
-  --coffee-plate-emoji-nudge-y: clamp(-5px, -2.6%, -2px);
   place-items: center;
   padding-top: 0;
   box-shadow: none;
@@ -75204,13 +75048,6 @@ a.settingsCreditItem:focus-visible {
   .coffeeSeatPlate[data-live-body-style="zen"]
   .zenLiveBotPresenceFace {
   --bot-face-ambient-glow-opacity: 0.6;
-}
-
-.coffeeStage[data-phase="arriving"]
-  .coffeeSeatPlate[data-live-body-style="zen"],
-.coffeeStage[data-phase="live"] .coffeeSeatPlate[data-live-body-style="zen"],
-.coffeeStage[data-compact="true"] .coffeeSeatPlate[data-live-body-style="zen"] {
-  --coffee-plate-emoji-nudge-y: clamp(-5px, -2.6%, -2px);
 }
 
 .coffeeSeatTeamBadge {
@@ -76516,12 +76353,17 @@ a.settingsCreditItem:focus-visible {
    finished alpha silhouette to the shared phosphor cell grid. Overscan
    prevents edge pixels from clipping without changing layout or transforms. */
 .zenLiveBotPresenceFaceGlyph
-  [data-crt-glyph-layer="true"][data-crt-pixel-mask-pending="true"],
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-pending="true"] {
+  /* A font or raster request must never erase a full-size face. The native
+     contour remains visible until the quantized mask is ready. */
+  visibility: visible;
+}
+
 .zenLiveBotPresenceThinkingGlyph
   [data-crt-glyph-layer="true"][data-crt-pixel-mask-pending="true"] {
   /* Never expose a single raw-font frame while a thinking glyph swaps masks.
-     The layout-phase raster normally makes this state unpainted; this guard
-     keeps slow font loads from flashing at a different apparent resolution. */
+     Thinking frames change rapidly enough that a native-font flash is more
+     distracting than one temporarily unpainted frame. */
   visibility: hidden;
 }
 
@@ -76532,10 +76374,10 @@ a.settingsCreditItem:focus-visible {
   background: none;
   -webkit-text-fill-color: transparent;
   text-shadow: none;
-  /* Apply the color halo after the coverage mask has composited. WebKit can
-     suppress broad drop-shadows when the filter lives on the same pseudo
-     element as an alpha mask; filtering the finished glyph layer preserves
-     the production glow without changing the authored silhouette. */
+  /* Keep the proven compositor-level halo for full-size CRT faces. Some
+     packaged renderers suppress broad drop-shadows when the filter lives on
+     the same pseudo-element as an alpha mask; preserving the rich phosphor
+     bloom takes precedence over eliminating a faint rectangular artifact. */
   --zen-live-bot-crt-flicker-base-filter: var(--crt-face-glow-filter);
   filter: brightness(
       calc(
@@ -76615,6 +76457,7 @@ a.settingsCreditItem:focus-visible {
 .zenLiveBotPresenceThinkingGlyph
   [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]::before {
   background: var(--crt-face-edge-color, currentColor);
+  opacity: var(--crt-glyph-emission-opacity, 1);
   filter: blur(var(--crt-glyph-beam-softness));
 }
 
@@ -89431,4 +89274,12 @@ a.settingsCreditItem:focus-visible {
     opacity: calc(0.62 + var(--bot-voice-light-level) * var(--bot-voice-light-core-lift));
     animation: none !important;
   }
+}
+.coffeeCup[data-coffee-vessel="water"] {
+  filter: hue-rotate(145deg) saturate(0.72) brightness(1.08);
+}
+
+.coffeePotLayer[data-serving-vessel="water"] .coffeePotDragImage,
+.coffeePotLayer[data-serving-vessel="water"] .coffeePotPourStream {
+  filter: hue-rotate(145deg) saturate(0.7) brightness(1.14);
 }

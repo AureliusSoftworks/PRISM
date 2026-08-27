@@ -9,6 +9,7 @@ import {
   prismAudioContext,
   prismAudioOutputNode,
 } from "./replayAudioMasterCapture.ts";
+import { resumeAudioContextIfNeeded } from "./audioContextRecovery.ts";
 
 const COFFEE_PLAYER_SHUSH_BASE_DURATION_MS = 440;
 const COFFEE_PLAYER_SHUSH_EXTRA_H_DURATION_MS = 110;
@@ -94,13 +95,7 @@ export async function playCoffeePlayerStaticShush(args: {
   );
   const volume = Math.max(0, Math.min(1, args.volume));
   if (!context || volume <= 0 || args.signal.aborted) return false;
-  if (context.state === "suspended") {
-    try {
-      await context.resume();
-    } catch {
-      return false;
-    }
-  }
+  if (!(await resumeAudioContextIfNeeded(context))) return false;
   if (args.signal.aborted) return false;
 
   const durationSeconds = durationMs / 1_000;

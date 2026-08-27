@@ -17,7 +17,7 @@ import {
   normalizeBotAudioVoiceProfileV1,
   normalizeBotNamePronunciation,
   normalizeEnglishVoiceEngine,
-  normalizeVoiceMode,
+  normalizeSpeechTypeVoiceMode,
   parseStoredAutoFallbackChain,
   parseStoredBotAudioVoiceProfileV1,
   normalizeAutoFallbackChain,
@@ -1306,7 +1306,10 @@ export function resolveNextSettings(
     body.textModelDisplayNames === undefined
       ? parseStoredTextModelDisplayNames(current.textModelDisplayNames)
       : normalizeTextModelDisplayNames(body.textModelDisplayNames);
-  const voiceMode = normalizeVoiceMode(body.voiceMode, normalizeVoiceMode(current.voiceMode));
+  const voiceMode = normalizeSpeechTypeVoiceMode(
+    body.voiceMode,
+    normalizeSpeechTypeVoiceMode(current.voiceMode),
+  );
   const voiceEffectsEnabled = typeof body.voiceEffectsEnabled === "boolean"
     ? body.voiceEffectsEnabled
     : current.voiceEffectsEnabled !== 0;

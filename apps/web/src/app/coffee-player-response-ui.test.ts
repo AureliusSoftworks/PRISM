@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const coffeeReplaySource = readFileSync(
+  new URL("./coffee-replay.ts", import.meta.url),
+  "utf8",
+);
 
 describe("Coffee player response UI wiring", () => {
   it("routes table composition through the shared latency-critical input", () => {
@@ -403,6 +407,33 @@ describe("Coffee player response UI wiring", () => {
       pageSource,
       /function mergeCoffeeTranscriptMessageSources[\s\S]*?\{\s*\.\.\.historyMessage,\s*\.\.\.liveMessage\s*\}/,
     );
+  });
+
+  it("keeps generation provenance in copied transcripts, not Table talk cards", () => {
+    const tableTalkStart = pageSource.indexOf(
+      '<ul className={styles.coffeeMessages}>',
+    );
+    const tableTalkEnd = pageSource.indexOf("</ul>", tableTalkStart);
+    assert.ok(tableTalkStart >= 0 && tableTalkEnd > tableTalkStart);
+    const tableTalk = pageSource.slice(tableTalkStart, tableTalkEnd);
+    assert.doesNotMatch(
+      tableTalk,
+      /assistantGenerationMetadata|messageGenerationMetadata|data-message-generation-metadata/u,
+    );
+
+    const copyStart = pageSource.indexOf("const coffeeTranscriptText = async");
+    const copyEnd = pageSource.indexOf(
+      "const copyCoffeeTranscriptToClipboard",
+      copyStart,
+    );
+    assert.ok(copyStart >= 0 && copyEnd > copyStart);
+    assert.match(
+      pageSource.slice(copyStart, copyEnd),
+      /formatCoffeeReviewClipboardText\(\{[\s\S]*?messages,/u,
+    );
+    assert.match(coffeeReplaySource, /`- Turn routing: \$\{/u);
+    assert.match(coffeeReplaySource, /`- Generation: \$\{/u);
+    assert.match(coffeeReplaySource, /`- AUTO recovery: \$\{/u);
   });
 
   it("freezes Shh at the heard fragment and shares it with table and Table talk", () => {

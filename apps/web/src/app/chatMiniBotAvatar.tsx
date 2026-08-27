@@ -6,6 +6,7 @@ import {
   botAvatarScreenFacingScaleX,
   type BotAvatarFacing,
 } from "./bot-avatar-render-geometry";
+import { BOT_AVATAR_COMPACT_ENTER_MAX_PX } from "./avatarRenderedSizeQuality";
 import styles from "./chatMiniBotAvatar.module.css";
 
 export const CHAT_MINI_BOT_AVATAR_CANONICAL_SCREEN_SIZE = 128;
@@ -14,7 +15,8 @@ export const CHAT_MINI_BOT_AVATAR_DARK_BASE_SRC =
 export const CHAT_MINI_BOT_AVATAR_LIGHT_BASE_SRC =
   "/bot-frame/bot-frame-mini-light.png?v=2";
 export const CHAT_MINI_BOT_AVATAR_MIN_RENDER_SIZE = 1;
-export const CHAT_MINI_BOT_AVATAR_MAX_RENDER_SIZE = 299;
+export const CHAT_MINI_BOT_AVATAR_MAX_RENDER_SIZE =
+  BOT_AVATAR_COMPACT_ENTER_MAX_PX - 1;
 
 export function clampChatMiniBotAvatarRenderSize(size: number): number {
   if (!Number.isFinite(size)) return CHAT_MINI_BOT_AVATAR_MIN_RENDER_SIZE;

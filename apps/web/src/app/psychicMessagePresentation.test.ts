@@ -43,10 +43,12 @@ describe("Psychic message presentation", () => {
         { role: "user", psychicThought },
       ),
       {
-        model: "qwen3.5:9b",
+        model: "LOCAL · qwen3.5:9b",
         effort: "high",
         automatic: false,
         turbo: false,
+        recovered: false,
+        recoveryAttemptCount: 0,
       },
     );
   });
@@ -70,28 +72,25 @@ describe("Psychic message presentation", () => {
         null,
       ),
       {
-        model: "gpt-5.6-sol [auto]",
+        model: "Auto → OpenAI · gpt-5.6-sol",
         effort: "medium",
         automatic: true,
         turbo: true,
+        recovered: false,
+        recoveryAttemptCount: 0,
       },
     );
 
-    assert.deepEqual(
+    assert.equal(
       assistantGenerationMetadata(
         { role: "assistant", model: "claude-fable-5" },
         null,
       ),
-      {
-        model: "claude-fable-5",
-        effort: "auto",
-        automatic: false,
-        turbo: false,
-      },
+      null,
     );
   });
 
-  it("uses the hollow None glyph contract after an Auto recovery", () => {
+  it("freezes recovery metadata to the final successful route", () => {
     const metadata = assistantGenerationMetadata(
       {
         role: "assistant",
@@ -115,7 +114,19 @@ describe("Psychic message presentation", () => {
       null,
     );
 
-    assert.equal(metadata?.model, "gpt-5-mini [auto]");
+    assert.equal(metadata?.model, "Auto → OpenAI · gpt-5-mini");
     assert.equal(metadata?.effort, "none");
+    assert.equal(metadata?.recovered, true);
+  });
+
+  it("does not annotate deterministic or unrecorded assistant turns", () => {
+    assert.equal(
+      assistantGenerationMetadata(
+        { role: "assistant", botPowerExactResponse: "speech_copy" },
+        null,
+      ),
+      null,
+    );
+    assert.equal(assistantGenerationMetadata({ role: "assistant" }, null), null);
   });
 });

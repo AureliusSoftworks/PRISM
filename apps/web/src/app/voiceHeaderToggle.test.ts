@@ -172,7 +172,7 @@ describe("universal voice selector", () => {
     );
   });
 
-  it("snapshots the five-choice selection when each spoken surface starts an utterance", () => {
+  it("snapshots the four-choice selection when each spoken surface starts an utterance", () => {
     assert.match(
       pageSource,
       /const voiceSelection = voicePlaybackSelectionRef\.current; if \(!detail\)/,

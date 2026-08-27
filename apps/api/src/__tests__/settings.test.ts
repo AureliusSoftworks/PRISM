@@ -255,6 +255,14 @@ describe("resolveNextSettings — ephemeral chat providers", () => {
 });
 
 describe("resolveNextSettings — voice foundation", () => {
+  it("retires Mute from the account Speech Type setting", () => {
+    assert.equal(
+      resolveNextSettings({ voiceMode: "mute" }, baseline({ voiceMode: "mute" }))
+        .voiceMode,
+      "english",
+    );
+  });
+
   it("persists the selected English engine while preserving the legacy five-slot provider bank", () => {
     const next = resolveNextSettings(
       {

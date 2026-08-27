@@ -25,7 +25,6 @@ import {
   BOT_AUDIO_VOICE_IDS,
   VOICE_EFFECTS,
   normalizeLocalVoicePronunciationMapPoint,
-  normalizeBotNamePronunciation,
   normalizeVoiceAccentDefinitionId,
   normalizeBotAudioVoiceProfileV1,
   type BotAudioVoiceProfileV2,
@@ -1041,8 +1040,10 @@ export function normalizeBotGeneratedDraftV1(
   return {
     v: BOT_GENERATION_DRAFT_VERSION,
     name,
-    namePronunciation:
-      normalizeBotNamePronunciation(value.namePronunciation) || name,
+    // Name pronunciation is an exception field for the player to author only
+    // when a speech engine gets the visible name wrong. Generated drafts must
+    // not guess one, including when a legacy provider still returns it.
+    namePronunciation: "",
     selfReferral: "",
     profile,
     color: normalizeGeneratedBotHueColor(value.color),
@@ -1078,7 +1079,6 @@ export function normalizeLeanBotGeneratedDraftV1(
   const faceInput = recordAt(value, "face");
   const hydrated = normalizeBotGeneratedDraftV1({
     name: value.name,
-    namePronunciation: value.namePronunciation,
     profile: value.profile,
     color: value.color,
     accentColor: null,

@@ -885,25 +885,43 @@ describe("Coffee seat arrival CSS", () => {
       /<CrtPixelTextGlyph[\s\S]{0,260}rasterKey=\{partFaceFont \?\? "default"\}/,
     );
     assert.match(phosphorPixelGlyphSource, /rasterKey\?: string \| number \| null/);
-    // Loadedness is part of the raster identity: a fallback-font raster baked
-    // before the authored webfont arrives can never be replayed as final.
+    // Kick the authored primary family directly, but paint the current
+    // computed fallback immediately so an unsettled FontFaceSet promise can
+    // never leave the full-size face blank.
+    assert.match(phosphorPixelGlyphSource, /phosphorPrimaryFontFamily/);
     assert.match(
       phosphorPixelGlyphSource,
-      /document\.fonts\?\.check\(fontProbe, content\)/,
+      /font-revision-\$\{fontRevision\}/,
     );
     assert.match(
       phosphorPixelGlyphSource,
-      /rasterizeTextMask\([\s\S]{0,220}fontReady \? "font-ready" : `font-pending-\$\{fontRevision\}`/,
-    );
-    // The probe is built from longhands because `computed.font` serializes to
-    // an empty string for these glyphs, which silently skipped the reload.
-    assert.match(
-      phosphorPixelGlyphSource,
-      /const fontProbe = `\$\{computed\.fontStyle\} \$\{computed\.fontWeight\} \$\{computed\.fontSize\} \$\{computed\.fontFamily\}`/,
+      /const fontProbe = phosphorCanvasFontShorthand\([\s\S]{0,120}fontFamily: primaryFontFamily/,
     );
     assert.match(
       phosphorPixelGlyphSource,
-      /document\.fonts[\s\S]{0,80}\.load\(fontProbe, content\)[\s\S]{0,80}\.then\(handleFontsLoaded/,
+      /document\.fonts[\s\S]{0,260}\.load\(fontProbe, content\)[\s\S]{0,220}loadedFontProbes\.add\(fontProbe\)[\s\S]{0,80}handleFontsLoaded\(\)[\s\S]{0,180}unavailableFontProbes\.add\(fontProbe\)[\s\S]{0,80}handleFontsLoaded\(\)/,
+    );
+    assert.doesNotMatch(
+      phosphorPixelGlyphSource,
+      /document\.fonts\?\.check|document\.fonts\.check/,
+      "fallback-capable FontFaceSet.check must not decide authored readiness",
+    );
+    const renderMaskStart = phosphorPixelGlyphSource.indexOf(
+      "const renderMask = (): void =>",
+    );
+    const rasterizeMaskStart = phosphorPixelGlyphSource.indexOf(
+      "const nextMask = rasterizeTextMask",
+      renderMaskStart,
+    );
+    assert.ok(renderMaskStart >= 0 && rasterizeMaskStart > renderMaskStart);
+    assert.doesNotMatch(
+      phosphorPixelGlyphSource.slice(renderMaskStart, rasterizeMaskStart),
+      /\breturn\s*;/,
+      "Font readiness may schedule a reraster, but must not block the current mask.",
+    );
+    assert.match(
+      phosphorPixelGlyphSource,
+      /const fontLoadState =[\s\S]{0,360}"authored-font-pending"[\s\S]{0,180}rasterizeTextMask/,
     );
     assert.match(
       phosphorPixelGlyphSource,
@@ -1447,9 +1465,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(livePlateRule, /--zen-live-bot-body-x:\s*50%\s*;/);
     assert.match(livePlateRule, /--zen-live-bot-body-y:\s*50%\s*;/);
-    assert.match(livePlateRule, /--zen-live-bot-face-x:\s*50%\s*;/);
-    assert.match(livePlateRule, /--zen-live-bot-face-y:\s*43\.8%\s*;/);
-    assert.match(livePlateRule, /--zen-live-bot-face-scale:\s*1\.68\s*;/);
+    assert.doesNotMatch(livePlateRule, /--zen-live-bot-face-(?:x|y|scale):/);
     assert.match(livePlateRule, /--zen-live-bot-glyph-x-anchor:\s*0px\s*;/);
     assert.match(
       livePlateRule,
@@ -1472,10 +1488,10 @@ describe("Coffee seat arrival CSS", () => {
       /--bot-face-crt-screen-texture-blend-mode:\s*luminosity\s*;/,
     );
     assert.match(livePlateRule, /--coffee-seat-emotion-face-scale:\s*1\s*;/);
-    assert.match(livePlateRule, /--zen-live-bot-eye-local-x:\s*-0\.2\s*;/);
-    assert.match(
+    assert.doesNotMatch(livePlateRule, /--zen-live-bot-eye-local-x:/);
+    assert.doesNotMatch(
       livePlateRule,
-      /--coffee-plate-emoji-nudge-y:\s*clamp\(-5px,\s*-2\.6%,\s*-2px\)\s*;/,
+      /--coffee-plate-emoji-nudge-y:/,
     );
     const sharedEyeTransformRule = ruleForSelectorNeedlesWithBody(
       ['[data-coffee-plate-emoji-part="eyes"]'],
@@ -1803,13 +1819,9 @@ describe("Coffee seat arrival CSS", () => {
       /@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*\.botFaceCrtNoiseLayer[\s\S]*animation:\s*none\s*;/,
     );
 
-    const liveStageFaceNudgeRule = ruleForSelectorNeedles(
-      '.coffeeStage[data-phase="live"]',
-      '.coffeeSeatPlate[data-live-body-style="zen"]',
-    );
-    assert.match(
-      liveStageFaceNudgeRule,
-      /--coffee-plate-emoji-nudge-y:\s*clamp\(-5px,\s*-2\.6%,\s*-2px\)\s*;/,
+    assert.doesNotMatch(
+      css,
+      /\.coffeeStage[^{}]*\.coffeeSeatPlate\[data-live-body-style="zen"\]\s*\{[^}]*--coffee-plate-emoji-nudge-y:/,
     );
 
     const frameRule = ruleForExactSelector(".botFaceFrame");

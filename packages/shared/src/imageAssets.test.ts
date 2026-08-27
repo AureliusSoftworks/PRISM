@@ -24,6 +24,20 @@ describe("image asset classification", () => {
       "debate_exhibit",
     );
     assert.equal(
+      imageAssetKindForImage({
+        origin: "debate_mystery_saved",
+        purpose: "debate_exhibit",
+      }),
+      "debate_exhibit",
+    );
+    assert.equal(
+      imageAssetKindForImage({
+        origin: "debate_mystery_saved",
+        purpose: "whodunnit_room",
+      }),
+      "whodunnit_room",
+    );
+    assert.equal(
       imageAssetKindForImage({ origin: "botcast", purpose: "signal_studio_day" }),
       "signal_studio",
     );
@@ -70,6 +84,7 @@ describe("image asset classification", () => {
     assert.equal(imageAssetMemberRoleForImage({ purpose: "signal_logo" }), "primary");
     assert.equal(isImageAssetKind("signal_studio"), true);
     assert.equal(isImageAssetKind("item"), true);
+    assert.equal(isImageAssetKind("whodunnit_room"), true);
     assert.equal(isImageAssetKind("signal_studio_day"), false);
     assert.equal(isImageAssetStorageTier("hot"), true);
     assert.equal(isImageAssetStorageTier("cold"), true);

@@ -49,7 +49,25 @@ test("normalizes a frozen pre-substep Case Forge payload without crashing Archiv
       updatedAt: "2026-08-25T00:00:00.000Z",
     },
     suspects: [],
-    rooms: [],
+    rooms: [{
+      id: "legacy-room",
+      name: "Legacy room",
+      floor: 1,
+      emoji: "□",
+      imageId: null,
+      bundledAssetPath: null,
+      unlocked: true,
+      visited: false,
+      hotspots: [],
+      sealedAsset: {
+        version: 1,
+        kind: "room",
+        status: "pending",
+        source: "synthesized",
+        revealed: false,
+        mimeType: "image/png",
+      },
+    }],
     record: [],
     topics: [],
     dialogueHistory: [{
@@ -110,6 +128,7 @@ test("normalizes a frozen pre-substep Case Forge payload without crashing Archiv
     "wobble",
   );
   assert.equal(normalized.identityMirrorTargetSnapshots["prosecutor-1"]?.glyph, "lucideScale");
+  assert.equal(normalized.rooms[0]?.accessState, "being_secured");
 });
 
 function line(id: string, nodeId: string, visibleText = id): DebateMysterySpokenLineV2 {
@@ -358,6 +377,57 @@ test("V2 graph validation proves every suspect has a reachable statement-level p
   assert.equal(result.reachableSpokenLineIds.length, graph.lines.length - 2);
 });
 
+test("V2 graph validation permits one automated Spectator prosecution option only", () => {
+  const graph = validGraph();
+  const prompt = node("spectator-choice-prompt", "prosecution_choice", {
+    speakerSeatId: null,
+  });
+  const response = node("spectator-choice-response", "choice_reaction", {
+    requirements: {
+      ...emptyDebateMysteryRequirementsV2(),
+      choices: [{ choiceId: "spectator-choice", optionId: "automatic" }],
+    },
+  });
+  const optionLine = {
+    ...line("line-spectator-choice-option", response.id, "The automated prosecution proceeds."),
+    mode: "player_selected" as const,
+  };
+  graph.nodes.push(prompt, response);
+  graph.lines.push(
+    line(prompt.lineId!, prompt.id),
+    line(response.lineId!, response.id),
+    optionLine,
+  );
+  graph.interactionRootNodeIds.push(prompt.id, response.id);
+  graph.prosecutionChoices = [{
+    id: "spectator-choice",
+    promptLineId: prompt.lineId!,
+    options: [{
+      id: "automatic",
+      lineId: optionLine.id,
+      responseNodeId: response.id,
+    }],
+  }];
+  const common = {
+    graph,
+    suspectSeatIds: ["seat-1", "seat-2"],
+    recordReferences: validationRecordReferences,
+  };
+
+  const spectator = validateDebateMysteryDialogueGraphV2({
+    ...common,
+    playerRole: "spectator",
+  });
+  assert.equal(spectator.valid, true, spectator.errors.join("\n"));
+
+  const participant = validateDebateMysteryDialogueGraphV2({
+    ...common,
+    playerRole: "participant",
+  });
+  assert.equal(participant.valid, false);
+  assert.ok(participant.errors.some((error) => error.includes("at least two authored options")));
+});
+
 test("V2 graph validation rejects a suspect without cross-examination", () => {
   const graph = validGraph();
   graph.witnessChapters = graph.witnessChapters.filter((entry) => entry.witnessSeatId !== "seat-2");
@@ -514,7 +584,7 @@ test("Theme, asset synthesis, and reusable mansion eligibility freeze determinis
     trialType: "bench",
     inspiration: "",
     spark: "Rainy art-deco observatory",
-    assetSynthesis: { evidence: true, rooms: true as never, music: true as never },
+    assetSynthesis: { evidence: true, rooms: true, music: true as never },
     mansionBundleId: "mansion-1",
     nonce: "theme-contract",
     suspectBotIds: ["suspect-1", "suspect-2", "suspect-3", "suspect-4"],
@@ -525,14 +595,14 @@ test("Theme, asset synthesis, and reusable mansion eligibility freeze determinis
   assert.equal(resolved.spark, "Rainy art-deco observatory");
   assert.deepEqual(resolved.assetSynthesis, {
     evidence: true,
-    rooms: false,
+    rooms: true,
     music: false,
   });
   assert.equal(resolved.investigationMode, "full");
   const courtOnly = resolveDebateMysteryConfigV2({
     ...resolved,
     investigationMode: "court_only",
-    assetSynthesis: { evidence: true, rooms: true as never, music: true as never },
+    assetSynthesis: { evidence: true, rooms: true, music: true as never },
   });
   assert.equal(courtOnly.investigationMode, "court_only");
   assert.deepEqual(courtOnly.assetSynthesis, { evidence: true, rooms: false, music: false });

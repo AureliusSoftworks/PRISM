@@ -122,6 +122,16 @@ test("a generated Power enters Avatar Studio as the normal removable draft", () 
   assert.match(pageSource, /powers: drafts/u);
 });
 
+test("generated drafts leave name pronunciation for the player", () => {
+  const applyDraft = functionSource(
+    "applyGeneratedBotDraft",
+    "generateBotDraftFromPrompt",
+  );
+
+  assert.match(applyDraft, /setNewBotNamePronunciation\(""\)/u);
+  assert.doesNotMatch(applyDraft, /draft\.namePronunciation/u);
+});
+
 test("Avatar Studio exposes atomic semantic and bounded local field dice", () => {
   const reroll = functionSource(
     "randomizeSemanticBotField",

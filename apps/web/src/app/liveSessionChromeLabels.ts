@@ -1,3 +1,9 @@
+import {
+  presentAppletModelRoute,
+  type ActualAppletRoute,
+  type AppletResponseLane,
+} from "./autoRoutePresentation.ts";
+
 export const LIVE_SESSION_EFFORT_LABELS = {
   auto: "Default",
   none: "None",
@@ -28,16 +34,25 @@ export function liveSessionRoutingChipLabels(args: {
   modelLabel: string;
   effort: LiveSessionEffortKey | null | undefined;
   turbo?: boolean;
+  /** Persisted/session route observed from the server; never a client preview. */
+  actualRoute?: ActualAppletRoute | null;
+  lane?: AppletResponseLane;
+  choosing?: boolean;
 }): LiveSessionRoutingChipLabels {
-  const effortKey = args.effort ?? "auto";
-  const concreteModelLabel = args.modelLabel.trim() || "Model";
+  const route = presentAppletModelRoute({
+    modelIsAuto: args.modelIsAuto,
+    fixedModelLabel: args.modelLabel,
+    actualModelLabel: args.modelLabel,
+    lane: args.lane ?? "local",
+    actualRoute: args.actualRoute,
+    choosing: args.choosing,
+  });
+  const effortKey = route.actualRoute?.effort ?? args.effort ?? "auto";
   return {
-    modelLabel: args.modelIsAuto
-      ? `${concreteModelLabel} [auto]`
-      : concreteModelLabel,
+    modelLabel: route.modelLabel,
     effortLabel: LIVE_SESSION_EFFORT_LABELS[effortKey],
     effortKey,
-    automatic: args.modelIsAuto,
-    turbo: args.turbo === true,
+    automatic: route.automatic,
+    turbo: route.actualRoute?.turbo ?? args.turbo === true,
   };
 }

@@ -5,6 +5,8 @@ export const BOT_AVATAR_MICRO_EXIT_MIN_PX = 81;
 export const BOT_AVATAR_MICRO_FEATURES_HIDE_MAX_PX = 28;
 export const BOT_AVATAR_MICRO_BLOCK_MAX_PX = 8;
 export const BOT_AVATAR_MICRO_PIXEL_MAX_PX = 1;
+// Avatar Studio owns the exact tier boundary: Full starts at 300px, Mini
+// spans 81-299px, and Micro begins at 80px.
 export const BOT_AVATAR_COMPACT_ENTER_MAX_PX = 300;
 export const BOT_AVATAR_COMPACT_EXIT_MIN_PX = 300;
 

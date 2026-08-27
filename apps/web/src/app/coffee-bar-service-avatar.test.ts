@@ -126,6 +126,15 @@ describe("Coffee Join and Serve presentation", () => {
       pageSource,
       /const coffeeExperienceAllowsPot = coffeeLiveExperienceMode === "serve"/u,
     );
+    assert.match(pageSource, /const toggleCoffeeMugComposer = \(\): void =>/u);
+    assert.match(pageSource, /onClick=\{toggleCoffeeMugComposer\}/u);
+    assert.match(pageSource, /aria-pressed=\{coffeePlayerComposerOpen\}/u);
+    assert.match(
+      pageSource,
+      /const coffeeComposerVisible =[\s\S]{0,240}coffeePlayerComposerOpen/u,
+    );
+    assert.match(pageSource, /consumeJoinSip: true/u);
+    assert.match(pageSource, /cancelCoffeeMugFloorClaim/u);
   });
 
   it("teaches pot-only play without barista, waiter, mug, or video steps", () => {
@@ -138,6 +147,14 @@ describe("Coffee Join and Serve presentation", () => {
     assert.match(coffeeTutorial, /Join for Coffee/u);
     assert.match(coffeeTutorial, /Serve Coffee/u);
     assert.match(coffeeTutorial, /faithful audio master/u);
+    assert.match(coffeeTutorial, /your mug gates the composer/u);
+    assert.match(coffeeTutorial, /water glass/u);
+    assert.match(coffeeTutorial, /final farewell is visible, voiced, and replayed/u);
+    assert.match(coffeeTutorial, /fades to a COFFEE card/u);
+    assert.match(
+      coffeeTutorial,
+      /data-tutorial-target="coffee-participation-control"/u,
+    );
     assert.doesNotMatch(coffeeTutorial, /Stop at the bar|Receive your drink/u);
     assert.doesNotMatch(coffeeTutorial, /Choose Video|video download/u);
   });

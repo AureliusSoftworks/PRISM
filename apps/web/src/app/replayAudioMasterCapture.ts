@@ -11,6 +11,10 @@ import type {
   ReplayThinkingDirectionPayloadV2,
   ReplayVoiceSelectionSnapshotV2,
 } from "@localai/shared";
+import {
+  audioContextNeedsResume,
+  resumeAudioContextIfNeeded,
+} from "./audioContextRecovery.ts";
 import { createVoiceLightMeter } from "./voiceLightEnvelope.ts";
 
 export type ReplayAudioMasterCaptureResult = {
@@ -190,7 +194,7 @@ export function routeAudioElementToPrismOutput(
     return null;
   }
   try {
-    if (context.state === "suspended") {
+    if (audioContextNeedsResume(context)) {
       void context.resume().catch(() => undefined);
     }
     const source = context.createMediaElementSource(audio);
@@ -259,7 +263,7 @@ export function primeReplayAudioMasterCapture(): void {
 /** Nudge the shared mixer awake if the browser suspended it while minimized. */
 export function ensurePrismAudioContextRunning(): void {
   const context = prismAudioContext();
-  if (!context || context.state !== "suspended") return;
+  if (!context || !audioContextNeedsResume(context)) return;
   void context.resume().catch(() => undefined);
 }
 
@@ -271,16 +275,7 @@ export function ensurePrismAudioContextRunning(): void {
 export async function resumePrismAudioContext(): Promise<boolean> {
   const context = prismAudioContext();
   if (!context) return false;
-  if (context.state === "running") return true;
-  try {
-    await context.resume();
-  } catch {
-    return false;
-  }
-  // `resume()` changes state asynchronously; TypeScript keeps the pre-await
-  // control-flow narrowing, so re-read it through the platform state type.
-  const resumedState = context.state as AudioContextState;
-  return resumedState === "running";
+  return resumeAudioContextIfNeeded(context);
 }
 
 let audioContextKeepAliveOwners = 0;
@@ -430,6 +425,10 @@ export async function startReplayAudioMasterCapture(
   const output = worldOutputForSharedContext();
   if (!context || !output) return false;
   const releaseKeepAlive = acquirePrismAudioContextKeepAlive();
+  if (!(await resumeAudioContextIfNeeded(context))) {
+    releaseKeepAlive();
+    return false;
+  }
   try {
     const destination = context.createMediaStreamDestination();
     const recorderMimeType = mimeType;
@@ -470,7 +469,6 @@ export async function startReplayAudioMasterCapture(
     attachRecorderDataHandler(capture, recorder);
     activeCapture = capture;
     output.connect(destination);
-    if (context.state === "suspended") await context.resume();
     recorder.start(250);
     if (options.markIntro !== false) {
       markReplayDirectionEvent({

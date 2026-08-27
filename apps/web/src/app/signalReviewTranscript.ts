@@ -61,6 +61,61 @@ function payloadString(
   return typeof value === "string" && value.trim() ? value : null;
 }
 
+function payloadRecord(
+  event: BotcastReplayEvent | undefined,
+  key: string,
+): Record<string, unknown> | null {
+  const value = event?.payload[key];
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function signalGenerationAnnotation(
+  event: BotcastReplayEvent | undefined,
+  humanAuthored: boolean,
+): string {
+  if (humanAuthored) return "Not model-generated (human-authored).";
+  const autoRoute = payloadRecord(event, "autoRoute");
+  const autoRecovery = payloadRecord(event, "autoRecovery");
+  const provider =
+    (typeof autoRecovery?.finalProvider === "string"
+      ? autoRecovery.finalProvider
+      : null) ?? payloadString(event, "provider");
+  const model =
+    (typeof autoRecovery?.finalModel === "string"
+      ? autoRecovery.finalModel
+      : null) ?? payloadString(event, "model");
+  if (!provider || !model) return "Model route not recorded.";
+  const automatic =
+    autoRoute !== null || payloadString(event, "responseMode") === "auto";
+  const effortValue = autoRecovery
+    ? "none"
+    : (event?.payload.reasoningEffort ?? autoRoute?.reasoningEffort);
+  const effort =
+    typeof effortValue === "string" && effortValue.trim()
+      ? effortValue === "xhigh"
+        ? "XHigh"
+        : effortValue.charAt(0).toUpperCase() + effortValue.slice(1)
+      : "Unrecorded";
+  const details = [`Effort ${effort}`];
+  if (!autoRecovery && event?.payload.turbo === true) details.push("Turbo");
+  if (autoRecovery) {
+    const attemptsValue = autoRecovery.attempts;
+    const attempts = Array.isArray(attemptsValue)
+      ? attemptsValue.length
+      : typeof attemptsValue === "number"
+        ? attemptsValue
+        : null;
+    details.push(
+      attempts === null
+        ? "Recovered"
+        : `Recovered after ${attempts} ${attempts === 1 ? "attempt" : "attempts"}`,
+    );
+  }
+  return `${automatic ? "Auto → " : ""}${provider}/${model} · ${details.join(" · ")}`;
+}
+
 function episodeModelLabel(args: SignalReviewTranscriptInput): string {
   if (!args.episode.model) return args.modelLabel?.trim() || "Auto";
   const label = args.modelLabel?.trim();
@@ -263,6 +318,7 @@ export function buildSignalReviewTranscript(
         `- Segment: ${segment}`,
         `- Delivery mood: ${message.moodKey}`,
         `- Turn routing: ${responseMode} -> ${provider} -> ${model}`,
+        `- Generation: ${signalGenerationAnnotation(event, humanProducerGuest)}`,
         `- AUTO recovery: ${humanProducerGuest ? "Not applicable (human-authored)" : autoRecovery === undefined ? "None recorded" : sessionReviewStableJson(autoRecovery)}`,
         `- ONLINE retry: ${humanProducerGuest ? "Not applicable (human-authored)" : providerRecovery === undefined ? "None recorded" : sessionReviewStableJson(providerRecovery)}`,
         `- Utterance repair: ${

@@ -182,3 +182,18 @@ test("ready Coffee Group atmosphere renders beneath the procedural scene with so
     /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*\.coffeeGroupAtmosphereBackdrop \{[\s\S]*transition: none;/,
   );
 });
+
+test("crowded live Coffee pixelates only the atmosphere backdrop", () => {
+  assert.match(
+    pageSource,
+    /data-coffee-group-atmosphere-backdrop="true"[\s\S]{0,180}data-crowded-mini-avatar=\{[\s\S]{0,100}coffeeSeatAvatarPresentation === "mini"/,
+  );
+  assert.match(
+    css,
+    /\.coffeeGroupAtmosphereBackdrop\[data-crowded-mini-avatar="true"\] img \{[\s\S]*position: absolute;[\s\S]*inset: 25%;[\s\S]*width: 50%;[\s\S]*height: 50%;[\s\S]*image-rendering: pixelated;[\s\S]*transform: scale\(2\.06\);/,
+  );
+  assert.doesNotMatch(
+    css,
+    /\.coffeeTableScene\[data-crowded-mini-avatar="true"\]/,
+  );
+});

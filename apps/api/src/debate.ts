@@ -284,6 +284,7 @@ import {
   type ProviderName,
 } from "./providers.ts";
 import { getImageAssetSetForImage } from "./image-asset-library.ts";
+import { deleteDebateMysterySealedAssetsV1 } from "./debate-mystery-assets.ts";
 import { HttpError } from "./utils.http.ts";
 import { deleteMemoriesAcquiredDuringAppletSessions } from "./memory.ts";
 import type {
@@ -4122,6 +4123,8 @@ export function listDebateSessions(
     let mysteryFictionLabel: DebateSessionListItemV1["mysteryFictionLabel"];
     let mysterySpoilersRevealed: boolean | undefined;
     let mysteryVersion: 1 | 2 | undefined;
+    let mysteryForge: DebateSessionListItemV1["mysteryForge"];
+    let mysteryInvestigationMode: DebateSessionListItemV1["mysteryInvestigationMode"];
     let mysteryMissingEvidenceAssetCount: number | undefined;
     let mysteryMansionSaveEligible: boolean | undefined;
     let mysteryMansionBundleId: string | null | undefined;
@@ -4180,6 +4183,27 @@ export function listDebateSessions(
         const mysteryV2 = normalizeDebateMysteryFormatStateV2(parsed.formatState);
         if (mysteryV2) {
           mysteryVersion = 2;
+          if (mysteryV2.playPhase === "case_forge") {
+            const compilation = mysteryV2.compilation;
+            const totalPasses = Math.max(1, compilation.totalPasses);
+            const completedPasses = Math.min(
+              totalPasses,
+              Math.max(0, compilation.completedPasses),
+            );
+            mysteryForge = {
+              state:
+                compilation.stage === "complete"
+                  ? "complete"
+                  : compilation.stage === "needs_attention" || compilation.stage === "cancelled"
+                    ? "attention"
+                    : "active",
+              completedPasses,
+              totalPasses,
+              progressPercent: Math.round((completedPasses / totalPasses) * 100),
+              message: compilation.spoilerSafeMessage,
+            };
+          }
+          mysteryInvestigationMode = mysteryV2.config.investigationMode;
           if (mysteryV2.caseTitle?.trim()) title = mysteryV2.caseTitle;
           mysteryProgress = mysteryV2.playPhase;
           mysteryRouteGrade = mysteryV2.verdict?.classification ?? null;
@@ -4368,6 +4392,8 @@ export function listDebateSessions(
         ? { mysterySpoilersRevealed }
         : {}),
       ...(mysteryVersion ? { mysteryVersion } : {}),
+      ...(mysteryForge ? { mysteryForge } : {}),
+      ...(mysteryInvestigationMode ? { mysteryInvestigationMode } : {}),
       ...(mysteryVersion === 2 && row.mystery_case_family_id
         ? { mysteryCaseFamilyId: row.mystery_case_family_id }
         : {}),
@@ -21397,6 +21423,15 @@ export function deleteDebateSession(
     checked.idempotencyKey,
     [],
   );
+  db.prepare(
+    `UPDATE debate_mystery_v2_jobs
+        SET cancellation_requested = 1,
+            status = CASE WHEN status = 'running' THEN status ELSE 'cancelled' END,
+            stage = CASE WHEN status = 'running' THEN stage ELSE 'cancelled' END,
+            updated_at = ?
+      WHERE user_id = ? AND session_id = ? AND status != 'complete'`,
+  ).run(new Date().toISOString(), userId, sessionId);
+  deleteDebateMysterySealedAssetsV1(db, userId, sessionId);
 }
 
 export interface DebateExhibitAssetRowV1 {

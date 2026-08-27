@@ -91,7 +91,15 @@ test("every active applet consumes the Debate PRISM navbar contract", () => {
   assert.doesNotMatch(signalCss, /\.signalGlobalProviderControl/u);
   assert.match(
     pageSource,
-    /navigationHeader=\{renderSharedAppletNavbar\("Slate tools", \{[\s\S]*showVoiceSelector: true,[\s\S]*modelControls: renderSharedAccountRoutingControls\("Slate"\),[\s\S]*\}\)\}/u,
+    /navigationHeader=\{renderSharedAppletNavbar\("Slate tools", \{[\s\S]*showVoiceSelector: true,[\s\S]*modelControls: renderSharedAccountRoutingControls\([\s\S]{0,120}"Slate",[\s\S]{0,120}slateActualAutoRoute,[\s\S]{0,120}\),[\s\S]*\}\)\}/u,
+  );
+  assert.match(
+    slateSource,
+    /onForegroundRouteChange\?\.\([\s\S]{0,180}writingOperation\?\.provider[\s\S]{0,180}writingOperation\.model/u,
+  );
+  assert.match(
+    pageSource,
+    /autoRouteLabel=\{[\s\S]{0,160}autoPresentation\.modelLabel/u,
   );
   assert.match(
     pageSource,

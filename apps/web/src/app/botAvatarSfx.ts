@@ -12,6 +12,7 @@ import {
   prismAudioContext,
   prismAudioOutputNode,
 } from "./replayAudioMasterCapture.ts";
+import { audioContextNeedsResume } from "./audioContextRecovery.ts";
 import {
   isPrismFullscreenBlockingAudioMuted,
   setPrismFullscreenBlockingAudioStopHandler,
@@ -712,7 +713,7 @@ function startBotAvatarSfxSpatialPlayback(
   updateBotAvatarSfxLoopTime(audio);
   startBotAvatarSfxSpatialTracking(engine, audio);
   const fromGain = holdBotAvatarSfxSpatialGain(engine);
-  if (engine.context.state === "suspended") {
+  if (audioContextNeedsResume(engine.context)) {
     void engine.context.resume().catch(() => undefined);
   }
   if (!audio.paused) {

@@ -11,6 +11,7 @@ import {
   phosphorCanonicalPresentationScale,
   phosphorCanonicalRasterDimension,
   phosphorCanvasFontShorthand,
+  phosphorPrimaryFontFamily,
   phosphorTextAlphabeticBaseline,
   resamplePhosphorRgbaCoverage,
   resamplePhosphorRgbaForPresentation,
@@ -78,6 +79,20 @@ describe("phosphor pixel raster", () => {
       'normal 640 268.96px "Cormorant Garamond", Georgia, serif',
     );
     assert.doesNotMatch(font, /lining-nums/);
+  });
+
+  it("isolates the authored primary family from fallback-capable font lists", () => {
+    assert.equal(
+      phosphorPrimaryFontFamily(
+        '"__Macondo_abc", "__Macondo_Fallback_abc", monospace',
+      ),
+      '"__Macondo_abc"',
+    );
+    assert.equal(
+      phosphorPrimaryFontFamily('"Avatar, Display", system-ui, sans-serif'),
+      '"Avatar, Display"',
+    );
+    assert.equal(phosphorPrimaryFontFamily("system-ui"), "system-ui");
   });
 
   it("keeps compact mouths and tall eyes on the browser font baseline", () => {

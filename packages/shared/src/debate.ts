@@ -32,6 +32,7 @@ import {
 import {
   debateMysteryMansionBundleEligibleV2,
   normalizeDebateMysteryFormatStateV2,
+  type DebateMysteryInvestigationModeV2,
   type DebateMysteryPlayPhaseV2,
   type DebateMysteryVerdictClassificationV2,
   type DebateWhodunnitCreateConfigV2,
@@ -1912,6 +1913,16 @@ export interface DebateSessionListItemV1 {
   mysterySpoilersRevealed?: boolean;
   /** Whodunnit schema metadata used only for safe Archive/setup actions. */
   mysteryVersion?: 1 | 2;
+  /** Spoiler-safe Case Forge status for background Archive presentation. */
+  mysteryForge?: {
+    state: "active" | "attention" | "complete";
+    completedPasses: number;
+    totalPasses: number;
+    progressPercent: number;
+    message: string;
+  };
+  /** Whether this V2 run includes the mansion or begins directly in court. */
+  mysteryInvestigationMode?: DebateMysteryInvestigationModeV2;
   /** Stable identity shared by every immutable playthrough of one V2 case. */
   mysteryCaseFamilyId?: string;
   /** One-based playthrough number within a V2 case family. */

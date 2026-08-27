@@ -6,6 +6,7 @@ import {
   BOT_FOUNDRY_AUTOMATIC_CONCURRENCY,
   botFoundryAutomaticConcurrencyForLane,
   botFoundryBatchAvatarTier,
+  botFoundryBatchPreviewForDraft,
   createLatestBotFoundryBatchPersistence,
   generatedBotDraftCreatePayload,
   projectBotFoundryBatchSlots,
@@ -13,7 +14,7 @@ import {
 } from "./botFoundryBatch.ts";
 
 describe("automatic Bot Foundry batch jobs", () => {
-  it("preserves generated pronunciation and Accent Map casting in automatic saves", () => {
+  it("keeps generated pronunciation blank while preserving Accent Map casting", () => {
     const draft = normalizeBotGeneratedDraftV1({
       name: "Ron Weasley",
       namePronunciation: "RON WEEZ-lee",
@@ -27,7 +28,8 @@ describe("automatic Bot Foundry batch jobs", () => {
     }, undefined, () => 0);
     assert.ok(draft);
     const payload = generatedBotDraftCreatePayload(draft);
-    assert.equal(payload.namePronunciation, "RON WEEZ-lee");
+    assert.equal(draft.namePronunciation, "");
+    assert.equal(payload.namePronunciation, "");
     assert.equal(
       (payload.authoredAudioVoiceProfile as { accentDefinitionId?: string })
         .accentDefinitionId,
@@ -163,8 +165,8 @@ describe("automatic Bot Foundry batch jobs", () => {
       total: 4,
       // Deliberately supplied out of completion order.
       previews: {
-        3: { name: "Third", color: "#35c7ff", glyph: "sparkles", face: null },
-        1: { name: "First", color: "#ff4da6", glyph: "heart", face: null },
+        3: { name: "Third", color: "#35c7ff", glyph: "sparkles", face: null, avatarDetails: null },
+        1: { name: "First", color: "#ff4da6", glyph: "heart", face: null, avatarDetails: null },
       },
       completedIndices: [3, 1],
       failedIndices: [2],
@@ -178,6 +180,31 @@ describe("automatic Bot Foundry batch jobs", () => {
         [4, "pending", null],
       ],
     );
+  });
+
+  it("keeps the complete authored Mini identity in live batch previews", () => {
+    const draft = normalizeBotGeneratedDraftV1({
+      name: "Macondo Mini",
+      face: {
+        eyesFont: "concise",
+        eyeCharacter: "T",
+        eyeOffsetX: 0.18,
+        eyeOffsetY: 0.24,
+        blinkBar: "_",
+        blinkOffsetY: -0.12,
+        mouthCharacter: "W",
+        mouthOffsetY: 0.2,
+      },
+      avatarDetails: {
+        version: 1,
+        resolution: 128,
+        pixels: [{ x: 64, y: 48, color: "#ffffff", depth: "above-face" }],
+      },
+    }, undefined, () => 0);
+    assert.ok(draft);
+    const preview = botFoundryBatchPreviewForDraft(draft);
+    assert.deepEqual(preview.face, draft.face);
+    assert.deepEqual(preview.avatarDetails, draft.avatarDetails);
   });
 
   it("keeps mini previews through 20 and switches to static micro at 21", () => {

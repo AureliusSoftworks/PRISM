@@ -29,6 +29,9 @@ import {
   type ListenerReactionPlanV1,
   type SocialSilenceMarkerV1,
   type BotPowerMutePerformanceV1,
+  type AutoRecoveryTraceV1,
+  type AutoRouteDecisionV1,
+  type ProviderReasoningEffort,
 } from "@localai/shared";
 import {
   formatSessionReviewDuration,
@@ -39,6 +42,8 @@ import {
   sessionReviewStableJson,
   type SessionReviewRecordingEvidence,
 } from "./sessionReviewEvidence.ts";
+import { LIVE_SESSION_EFFORT_LABELS } from "./liveSessionChromeLabels.ts";
+import { assistantGenerationMetadata } from "./psychicMessagePresentation.ts";
 
 const COFFEE_SESSION_SYNOPSIS_PREFIX = "Session synopsis:";
 
@@ -77,7 +82,15 @@ export interface CoffeeReplayMessageLike {
   botPowerMutePerformance?: BotPowerMutePerformanceV1;
   socialSilence?: SocialSilenceMarkerV1;
   moodKey?: string;
-  autoRecovery?: unknown;
+  autoRecovery?: AutoRecoveryTraceV1;
+  autoRoute?: AutoRouteDecisionV1;
+  reasoningEffort?: ProviderReasoningEffort;
+  turbo?: boolean;
+  botPowerExactResponse?:
+    | "speech_copy"
+    | "hearing_repeat"
+    | "intermittent_mute"
+    | "speech_obfuscation";
   coffeeTurnRoute?: unknown;
   coffeeObserverProjection?: unknown;
   crosstalkReclaim?: unknown;
@@ -1091,6 +1104,49 @@ function coffeeReviewInterruptionEvidence(
   return sessionReviewStableJson(reviewEvidence);
 }
 
+function coffeeReviewGenerationEvidence(
+  message: CoffeeReplayMessageLike,
+): string {
+  if (message.role === "user") return "Not applicable (human-authored)";
+  if (message.transcriptInterruptionSegment) {
+    return "Not applicable (persisted interruption projection)";
+  }
+  const provider =
+    message.provider === "local" ||
+    message.provider === "openai" ||
+    message.provider === "anthropic"
+      ? message.provider
+      : undefined;
+  const metadata = assistantGenerationMetadata(
+    {
+      role: message.role,
+      provider,
+      model: message.model ?? undefined,
+      autoRoute: message.autoRoute,
+      autoRecovery: message.autoRecovery,
+      reasoningEffort: message.reasoningEffort,
+      turbo: message.turbo,
+      botPowerExactResponse: message.botPowerExactResponse,
+    },
+    null,
+  );
+  if (!metadata) {
+    return message.botPowerExactResponse
+      ? "Deterministic Power response (no model generation)"
+      : "Unknown (legacy or unrecorded)";
+  }
+  return [
+    metadata.model,
+    `Effort ${LIVE_SESSION_EFFORT_LABELS[metadata.effort]}`,
+    metadata.turbo ? "Turbo" : null,
+    metadata.recovered
+      ? `Recovered after ${metadata.recoveryAttemptCount} attempt${metadata.recoveryAttemptCount === 1 ? "" : "s"}`
+      : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(" · ");
+}
+
 function coffeeReviewEventSourceMessageId(
   event: CoffeeReplayEventPayload,
   carrierMessageId: string | undefined,
@@ -1229,6 +1285,7 @@ export function formatCoffeeReviewClipboardText(args: {
             ? "persisted interruption projection"
             : `${provider} -> ${model}`
       }`,
+      `- Generation: ${coffeeReviewGenerationEvidence(message)}`,
       `- Speaker selection: ${
         humanAuthored || projected
           ? "Not applicable"

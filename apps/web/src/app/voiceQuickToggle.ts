@@ -8,7 +8,6 @@ export type VoicePlaybackChoice =
   | "bottish";
 
 export const VOICE_PLAYBACK_CHOICES: readonly VoicePlaybackChoice[] = [
-  "mute",
   "english",
   "premium",
   "babble",

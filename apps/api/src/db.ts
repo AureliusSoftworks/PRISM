@@ -316,7 +316,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       brave_search_key_ciphertext TEXT,
       brave_search_key_iv TEXT,
       brave_search_key_tag TEXT,
-      voice_mode TEXT NOT NULL DEFAULT 'mute',
+      voice_mode TEXT NOT NULL DEFAULT 'english',
       voice_effects_enabled INTEGER NOT NULL DEFAULT 1,
       voice_volume REAL NOT NULL DEFAULT 1,
       operating_system_voices_enabled INTEGER NOT NULL DEFAULT 0,
@@ -581,6 +581,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       conversation_mode TEXT NOT NULL DEFAULT 'sandbox',
       bot_id TEXT,
       bot_group_ids TEXT,
+      coffee_session_state TEXT NOT NULL DEFAULT 'active',
       parent_id TEXT,
       fork_message_id TEXT,
       archived_at TEXT,
@@ -2313,6 +2314,34 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     );
     CREATE INDEX IF NOT EXISTS idx_debate_mystery_v2_cases_user_updated
       ON debate_mystery_v2_cases(user_id, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS debate_mystery_asset_vault (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('evidence', 'room')),
+      subject_id TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('pending', 'ready', 'fallback')),
+      source TEXT NOT NULL CHECK(source IN ('synthesized', 'bundled')),
+      mime_type TEXT NOT NULL CHECK(mime_type IN ('image/png', 'image/webp')),
+      ciphertext BLOB,
+      cipher_iv BLOB,
+      cipher_tag BLOB,
+      sha256 TEXT,
+      byte_size INTEGER CHECK(byte_size IS NULL OR byte_size > 0),
+      provider TEXT,
+      model TEXT,
+      review_json TEXT NOT NULL DEFAULT '{}',
+      revealed_at TEXT,
+      saved_image_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(user_id, session_id, kind, subject_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(session_id) REFERENCES debate_sessions(id) ON DELETE CASCADE,
+      FOREIGN KEY(saved_image_id) REFERENCES images(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_debate_mystery_asset_vault_case
+      ON debate_mystery_asset_vault(user_id, session_id, kind, subject_id);
     CREATE TABLE IF NOT EXISTS debate_mystery_v2_jobs (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -3249,8 +3278,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasVoiceMode)
     db.exec(
-      "ALTER TABLE users ADD COLUMN voice_mode TEXT NOT NULL DEFAULT 'mute';",
+      "ALTER TABLE users ADD COLUMN voice_mode TEXT NOT NULL DEFAULT 'english';",
     );
+  db.exec("UPDATE users SET voice_mode = 'english' WHERE voice_mode = 'mute';");
   const hasVoiceEffectsEnabled = userColumns.some(
     (column) => column.name === "voice_effects_enabled",
   );
@@ -4029,6 +4059,26 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasConversationCoffeeSettingsColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN coffee_settings TEXT;");
+  }
+  const hasConversationCoffeeSessionStateColumn = conversationColumns.some(
+    (column) => column.name === "coffee_session_state",
+  );
+  if (!hasConversationCoffeeSessionStateColumn) {
+    db.exec(
+      "ALTER TABLE conversations ADD COLUMN coffee_session_state TEXT NOT NULL DEFAULT 'active';",
+    );
+    db.exec(`
+      UPDATE conversations
+         SET coffee_session_state = 'complete'
+       WHERE conversation_mode = 'coffee'
+         AND EXISTS (
+           SELECT 1
+             FROM messages
+            WHERE messages.conversation_id = conversations.id
+              AND messages.user_id = conversations.user_id
+              AND messages.tool_payload LIKE '%"coffeeSynopsis":true%'
+         );
+    `);
   }
   const hasConversationCoffeeGroupIdColumn = conversationColumns.some(
     (column) => column.name === "coffee_group_id",

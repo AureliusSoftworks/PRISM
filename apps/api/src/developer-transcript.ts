@@ -341,6 +341,56 @@ function ambientPayloads(messages: readonly DeveloperTranscriptMessage[]): Array
   return ambient;
 }
 
+function transcriptEffortLabel(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const normalized = value.trim();
+  return normalized === "xhigh"
+    ? "XHigh"
+    : normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+/** Human-readable per-turn provenance; the full payload remains below it. */
+function canonicalMessageGeneration(
+  message: DeveloperTranscriptMessage,
+  payload: JsonRecord | null,
+): string | null {
+  if (message.role !== "assistant") return null;
+  if (payload?.botPowerExactResponse !== undefined) {
+    return "Not model-generated (deterministic response).";
+  }
+  const autoRoute = isJsonRecord(payload?.autoRoute) ? payload.autoRoute : null;
+  const autoRecovery = isJsonRecord(payload?.autoRecovery)
+    ? payload.autoRecovery
+    : null;
+  const provider =
+    nullableText(autoRecovery?.finalProvider) ??
+    message.provider ??
+    nullableText(autoRoute?.provider);
+  const model =
+    nullableText(autoRecovery?.finalModel) ??
+    message.model ??
+    nullableText(autoRoute?.model);
+  if (!provider || !model) return "Not recorded as model-generated.";
+
+  const details: string[] = [];
+  const effort = transcriptEffortLabel(
+    autoRecovery ? "none" : (payload?.reasoningEffort ?? autoRoute?.reasoningEffort),
+  );
+  if (effort) details.push(`Effort ${effort}`);
+  if (!autoRecovery && payload?.turbo === true) details.push("Turbo");
+  if (autoRecovery) {
+    const attempts = Array.isArray(autoRecovery.attempts)
+      ? autoRecovery.attempts.length
+      : null;
+    details.push(
+      attempts === null
+        ? "Recovered"
+        : `Recovered after ${attempts} ${attempts === 1 ? "attempt" : "attempts"}`,
+    );
+  }
+  return `${autoRoute ? "Auto → " : ""}${provider}/${model}${details.length > 0 ? ` · ${details.join(" · ")}` : ""}`;
+}
+
 function coffeeDeveloperTranscriptCounts(
   messages: readonly DeveloperTranscriptMessage[],
 ): {
@@ -534,6 +584,8 @@ export function buildDeveloperTranscript(input: BuildDeveloperTranscriptInput): 
   lines.push("## Canonical Message Records", "");
   if (input.messages.length === 0) lines.push("(No stored messages.)", "");
   input.messages.forEach((message, index) => {
+    const parsedToolPayload = parseJsonRecord(message.toolPayload);
+    const generation = canonicalMessageGeneration(message, parsedToolPayload);
     lines.push(`### Message ${index + 1}`);
     lines.push("");
     lines.push(`- ID: ${message.id}`);
@@ -541,13 +593,13 @@ export function buildDeveloperTranscript(input: BuildDeveloperTranscriptInput): 
     lines.push(`- Role: ${message.role}`);
     lines.push(`- Provider: ${message.provider ?? "unavailable"}`);
     lines.push(`- Model: ${message.model ?? "unavailable"}`);
+    if (generation) lines.push(`- Generation: ${generation}`);
     lines.push(`- Bot ID: ${message.botId ?? "none"}`);
     lines.push(
       `- Mention resolution / audience bot IDs: ${message.audienceBotIds ?? "none recorded"}`,
     );
     lines.push("", "Content / parsed visible output:", ...fenced(message.content), "");
     if (message.toolPayload) {
-      const parsedToolPayload = parseJsonRecord(message.toolPayload);
       lines.push(
         "Tool calls, search results, routing metadata, and retry state:",
         ...fenced(

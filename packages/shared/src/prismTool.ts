@@ -468,6 +468,9 @@ export interface CoffeeReplayPlayerSipEventPayload {
   sipCount: number;
   drinkName: string;
   imageId: string | null;
+  /** Composer sends deterministically stage the sip immediately before or after speech. */
+  timing?: "before" | "after";
+  source?: "composer" | "manual";
 }
 
 export interface CoffeeReplayDirectionalIrritationEventPayload {
@@ -1465,6 +1468,12 @@ export function normalizeCoffeeReplayEventPayload(
       sipCount,
       drinkName,
       imageId,
+      ...(row.timing === "before" || row.timing === "after"
+        ? { timing: row.timing }
+        : {}),
+      ...(row.source === "composer" || row.source === "manual"
+        ? { source: row.source }
+        : {}),
     };
   }
   if (row.kind === "baristaDelivery") {

@@ -700,6 +700,7 @@ export {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V3,
   DEFAULT_ENGLISH_VOICE_ENGINE,
+  DEFAULT_SPEECH_TYPE_VOICE_MODE,
   DEFAULT_VOICE_EFFECT,
   DEFAULT_VOICE_MODE,
   VOICE_EFFECTS,
@@ -747,6 +748,7 @@ export {
   normalizeElevenLabsVoiceStability,
   normalizeVoiceEffect,
   normalizeOptionalBotAudioVoiceProfileV1,
+  normalizeSpeechTypeVoiceMode,
   normalizeLocalVoiceAccentLocale,
   normalizeLocalVoiceAccentMode,
   normalizeLocalVoicePronunciationBase,
@@ -825,6 +827,7 @@ export {
   type NormalizedBotAudioVoiceProfileV1,
   type BotNamePronunciationEntry,
   type EnglishVoiceEngine,
+  type SpeechTypeVoiceMode,
   type ElevenLabsVoiceEffect,
   type VoiceEffect,
   type VoiceMode,
@@ -1858,6 +1861,8 @@ export interface ChatMessage {
   autoRecovery?: AutoRecoveryTraceV1;
   /** Privacy-safe reason the Coffee floor selected this bot. */
   coffeeTurnRoute?: CoffeeTurnRouteV1;
+  /** Coffee-only semantic lane. Departures are presented, but never own the floor. */
+  coffeeMessageKind?: CoffeeMessageKind;
   /** Saved deterministic hard-response branch from a Ready Power. */
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
   /** Text-free proof that this committed line has an owner-only meaning reveal. */
@@ -1883,6 +1888,9 @@ export interface ChatMessage {
   /** Concise visible summary from Psychic mode for this user turn. */
   psychicThought?: PsychicThoughtPayload;
 }
+
+export type CoffeeMessageKind = "floor" | "departure";
+export type CoffeeSessionLifecycleState = "active" | "closing" | "complete";
 
 /**
  * Coffee-only hidden social metrics tracked per bot for a single session.
@@ -2984,6 +2992,8 @@ export interface Conversation {
    * Always undefined for `chat` and `sandbox` mode rows.
    */
   botGroupIds?: string[];
+  /** Coffee-only durable lifecycle. Closing and complete sessions reject new work. */
+  coffeeSessionState?: CoffeeSessionLifecycleState;
   /** Coffee-only — durable parent group for recurring table sessions. */
   coffeeGroupId?: string | null;
   /**

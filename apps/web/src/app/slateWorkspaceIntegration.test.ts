@@ -346,7 +346,7 @@ describe("Slate workspace integration", () => {
     );
     assert.match(
       slateBranch,
-      /navigationHeader=\{renderSharedAppletNavbar\("Slate tools", \{[\s\S]*brandAppletId: "slate",[\s\S]*modelControls: renderSharedAccountRoutingControls\("Slate"\),[\s\S]*\}\)\}/u,
+      /navigationHeader=\{renderSharedAppletNavbar\("Slate tools", \{[\s\S]*brandAppletId: "slate",[\s\S]*modelControls: renderSharedAccountRoutingControls\([\s\S]{0,120}"Slate",[\s\S]{0,120}slateActualAutoRoute,[\s\S]{0,120}\),[\s\S]*\}\)\}/u,
     );
     assert.match(
       slateBranch,

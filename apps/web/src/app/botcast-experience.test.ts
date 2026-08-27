@@ -797,9 +797,9 @@ describe("Signal experience shell", () => {
       pageSource,
       /data-cup-mirrored=\{\s*cupSide === "right" \? "true" : undefined\s*\}/u,
     );
-    assert.match(
+    assert.doesNotMatch(
       pageCss,
-      /\.signalBotPresencePlate\s*\{[^}]*--zen-live-bot-face-scale:\s*1\.68/iu,
+      /\.signalBotPresencePlate\s*\{[^}]*--zen-live-bot-face-scale:/iu,
     );
     assert.match(
       pageCss,
@@ -1436,7 +1436,11 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /function signalActiveAutoRoute\([\s\S]{0,900}event\?\.kind !== "utterance"[\s\S]{0,500}return \{ provider, model \}/u,
+      /function signalActiveAutoRoute\([\s\S]{0,900}event\?\.kind !== "utterance"[\s\S]{0,900}normalizeAutoRecoveryTrace\(recovery\)[\s\S]{0,1300}return \{[\s\S]{0,260}provider,[\s\S]{0,260}model,/u,
+    );
+    assert.match(
+      source,
+      /Auto must remain Awaiting first turn until persisted event/u,
     );
     assert.match(
       source,
@@ -1697,11 +1701,11 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /suppressCompletedOutroFallbackRef\.current = true;[\s\S]{0,500}setEpisode\(bakedEpisode\)/u,
+      /suppressCompletedOutroFallbackRef\.current = true;[\s\S]{0,500}setEpisode\(presentationEpisode\)/u,
     );
     assert.match(
       source,
-      /presentationEpisode\.status === "completed"[\s\S]{0,560}playEpisodeOutro\(\{[\s\S]{0,120}episode: presentationEpisode/u,
+      /const recording = await playEpisodeOutro\([\s\S]{0,500}openReplayRef\.current\(presentationEpisode, \{[\s\S]{0,120}initialPosition: "end"/u,
     );
     assert.match(
       source,
@@ -1783,7 +1787,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       outroSource,
-      /if \(!args\.discarded\)[\s\S]{0,120}finalizeSignalRecording/u,
+      /if \(!args\.discarded\)[\s\S]{0,420}finalizeSignalRecording/u,
     );
     assert.match(css, /\.episodeOutro \.preRollLogo\s*\{[^}]*width:\s*118px/u);
     assert.match(css, /\.liveTopline \.cutShowButton/u);
@@ -2912,7 +2916,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /function SignalFallbackStudio/u);
   });
 
-  it("blocks only for identity handoff, then exposes honest persistent background progress", () => {
+  it("blocks for complete Watch preparation, then enters Replay honestly", () => {
     const studioRefreshSource = source.slice(
       source.indexOf("const regenerateStudio"),
       source.indexOf("const regenerateLogo"),
@@ -2930,7 +2934,7 @@ describe("Signal experience shell", () => {
       source,
       /open=\{blockingOperation !== null \|\| watchBakeLabel !== null\}/u,
     );
-    assert.match(source, /liveBakeMayStartWatch/u);
+    assert.doesNotMatch(source, /liveBakeMayStartWatch/u);
     assert.match(source, /\/bake\/cancel/u);
     assert.match(source, /LIVE_BAKE_POLL_INTERVAL_MS/u);
     assert.match(
@@ -2939,7 +2943,11 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /setWatchBakeLabel\(null\);[\s\S]{0,900}setEpisodePreRoll\(watchBookend\);[\s\S]{0,120}setWatchPlaybackReady\(true\)/u,
+      /artifact\.status !== "ready" \|\| bakedEpisode\.status !== "completed"/u,
+    );
+    assert.match(
+      source,
+      /await prefetchKnownWatchEpisodeVoices\(bakedEpisode\);[\s\S]{0,900}setWatchReplayPresentationEpisodeId\(presentationEpisode\.id\)/u,
     );
     assert.match(
       source,
@@ -2947,7 +2955,7 @@ describe("Signal experience shell", () => {
     );
     const watchReadyHoldStart = source.indexOf("if (!launchWatchAutoStart)");
     const watchIntroStart = source.indexOf(
-      "await beginEpisodeIntroBookend(watchBookend, bakedEpisode.id)",
+      "await beginEpisodeIntroBookend(watchBookend, presentationEpisode.id)",
       watchReadyHoldStart,
     );
     assert.ok(watchReadyHoldStart >= 0 && watchIntroStart > watchReadyHoldStart);
@@ -2955,35 +2963,22 @@ describe("Signal experience shell", () => {
       source.slice(watchReadyHoldStart, watchIntroStart),
       /await watchPlaybackStart/u,
     );
-    // The baker keeps working through the branded ident. Poll alongside it so
-    // the intro's seconds become real buffer: without this the playback loop
-    // opened on the snapshot captured at unlock and starved on the first gap.
     assert.match(
       source,
-      /let introBufferPollRunning = true;[\s\S]{0,4000}?await beginEpisodeIntroBookend\(watchBookend, bakedEpisode\.id\);[\s\S]{0,240}?introBufferPollRunning = false;[\s\S]{0,300}?await introBufferPoll/u,
-    );
-    // A starved buffer mid-show is an in-scene intermission, never the
-    // fullscreen bake loader reopening over a live broadcast.
-    assert.match(
-      source,
-      /const \[watchIntermission, setWatchIntermission\] = useState<string \| null>/u,
-    );
-    assert.match(
-      source,
-      /setWatchIntermission\("Preparing the next stretch"\)/u,
+      /for \(const message of presentationEpisode\.messages\) \{[\s\S]{0,500}playPreparedEpisodeMessage/u,
     );
     assert.doesNotMatch(
       source,
-      /setWatchBakeLabel\("Preparing the next stretch"\)/u,
+      /watchIntermission|Preparing the next stretch|introBufferPoll/u,
     );
     assert.match(
       source,
-      /className=\{styles\.watchIntermissionNotice\}[\s\S]{0,200}?data-watch-intermission="true"/u,
+      /data-signal-watch-replay=\{[\s\S]{0,100}watchReplayPresentation \? "true"/u,
     );
-    assert.match(css, /\.watchIntermissionNotice \{/u);
+    assert.doesNotMatch(css, /\.watchIntermissionNotice \{/u);
     assert.match(
       source,
-      /watchBakeActive \|\|\s*watchIntermission !== null \|\|/u,
+      /From the archive[\s\S]{0,800}Close replay/u,
     );
     assert.match(
       source,
@@ -2991,7 +2986,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /data-action="start-watch"/u);
     assert.match(source, />\s*Start show\s*</u);
-    assert.match(source, /Fully buffered · ready when you are/u);
+    assert.match(source, /Episode and voices ready · Replay is standing by/u);
     assert.doesNotMatch(
       source,
       /topic:\s*"Baking the broadcast"/u,
@@ -3014,17 +3009,20 @@ describe("Signal experience shell", () => {
       source,
       /episode\.playbackMode === "watch"[\s\S]{0,120}?advanceInFlightRef\.current/u,
     );
-    assert.match(source, /const presentedWatchMessageIds = new Set<string>\(\)/u);
-    assert.match(
-      source,
-      /presentationEpisode\.messages\.filter\([\s\S]{0,900}?playPreparedEpisodeMessage\([\s\S]{0,1800}?Preparing the next stretch/u,
-    );
+    assert.doesNotMatch(source, /presentedWatchMessageIds/u);
     assert.match(
       source,
       /episode\.playbackMode !== "watch" &&[\s\S]{0,100}?episode\.guestKind !== "producer"/u,
     );
-    assert.match(source, /episode\.playbackMode === "watch"[\s\S]{0,80}?● WATCHING/u);
-    assert.match(source, /episode\.playbackMode === "watch"[\s\S]{0,80}?Prism directing/u);
+    assert.match(
+      source,
+      /Original broadcast[\s\S]{0,160}faithful replay is recording/u,
+    );
+    assert.match(
+      source,
+      /Full playback controls unlock[\s\S]{0,80}when this first presentation[\s\S]{0,40}finishes/u,
+    );
+    assert.doesNotMatch(source, /● WATCHING|Prism directing/u);
     assert.match(
       source,
       /cancelLabel=\{\s*watchBakeLabel !== null \? "Stop preparing" : "Cancel synthesis"\s*\}/u,

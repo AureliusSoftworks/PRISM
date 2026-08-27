@@ -154,6 +154,9 @@ import {
   assertCoffeeSessionAttendeeCount,
   coffeeConversationHasPlayerDeparture,
   coffeePreparedTurnCursor,
+  coffeeSessionLifecycleState,
+  beginCoffeeSessionClosing,
+  completeCoffeeSession,
   buildCoffeeTeamExportLines,
   buildCoffeeGroupAtmospherePrompt,
   createCoffeePoll,
@@ -198,7 +201,6 @@ import {
   saveSynthesizedCoffeeGroupName,
   shouldGenerateCoffeeGroupNameFromInput,
   topOffCoffeeCupForBot,
-  sipCoffeeJoinPlayerCup,
   updateCoffeeGroup,
   updateCoffeePreset,
   updateCoffeeGroupWithGeneratedTopics,
@@ -291,10 +293,16 @@ import {
   inspectDebateMysteryCaseCode,
   listDebateMysteryActions,
   patchDebateMysteryNotebookV2,
+  restartDebateMysteryCourt,
+  restartDebateMysteryInvestigation,
   resumeDebateMysteryCompilation,
 } from "./debate-mystery.ts";
 import {
+  activeDebateMysteryCompilationV2,
   applyDebateMysteryActionV2,
+  attachDebateMysteryEvidenceAssetV2,
+  attachDebateMysteryRoomAssetV2,
+  claimDebateMysteryAssetBackgroundLeaseV2,
   cancelDebateMysteryCompilationV2,
   continueDebateMysteryV2WithoutVoices,
   createDebateMysterySessionV2,
@@ -303,11 +311,26 @@ import {
   getDebateMysteryAudioClipV2,
   getDebateMysteryAudioStorageSummaryV2,
   getDebateMysteryCompilationStatusV2,
+  pendingDebateMysteryEvidenceAssetsForRoomV2,
   playDebateMysteryV2Again,
+  releaseDebateMysteryAssetBackgroundLeaseV2,
+  restartDebateMysteryCourtV2,
+  restartDebateMysteryInvestigationV2,
   retryDebateMysteryCompilationV2,
   runDebateMysteryCompilationV2,
   type DebateMysteryEvidenceAssetPreparationV2,
+  type DebateMysteryRoomAssetPreparationV2,
 } from "./debate-mystery-v2.ts";
+import {
+  getDebateMysterySealedAssetRefV1,
+  getRevealedDebateMysteryAssetFileV1,
+  saveRevealedDebateMysteryAssetV1,
+  sealDebateMysteryAssetBytesV1,
+  setDebateMysteryAssetFallbackV1,
+  setDebateMysteryAssetPendingV1,
+  validateDebateMysteryAssetPixelsV1,
+  type DebateMysteryAssetVisionReviewV1,
+} from "./debate-mystery-assets.ts";
 import {
   listDebateMysteryMansionBundlesV2,
   saveDebateMysteryMansionBundleV2,
@@ -874,6 +897,7 @@ import {
   checkOpenAiApiKeyStatus,
   defaultModelIdForProvider,
   getAuxiliaryProvider,
+  OpenAiProvider,
   resolveAuxiliaryOllamaModel,
   providerModelSupportsImageInput,
   selectProvider,
@@ -1047,6 +1071,7 @@ import {
   LOCAL_VOICE_SPEECHPRINT_CAPABILITIES,
   normalizeBotGenerationPrompt,
   normalizeEnglishVoiceEngine,
+  normalizeSpeechTypeVoiceMode,
   applyBotNamePronunciations,
   applyPlayerNamePronunciation,
   expandSpeechAbbreviations,
@@ -1390,6 +1415,7 @@ import {
 } from "./memory-ecology.ts";
 let config: AppConfig = getAppConfig();
 let db: DatabaseSync = createDatabase();
+let detachedBackgroundJobsAllowed = true;
 const signalArtworkJobs = new SignalArtworkJobManager();
 const softAssetJobs = new SoftAssetJobManager();
 const replayStudioCutJobs = new Map<string, Promise<void>>();
@@ -3369,8 +3395,8 @@ function getOrCreateLocalOwnerUser(): string {
       wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
       theme, preferred_provider, auto_memory,
       prism_default_bot_face_mouth_coffee_pucker,
-      english_voice_engine, created_at, last_active_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'system', 'local', 1, ?, 'builtin', ?, ?)
+      voice_mode, english_voice_engine, created_at, last_active_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'system', 'local', 1, ?, 'english', 'builtin', ?, ?)
   `,
   ).run(
     userId,
@@ -9242,11 +9268,179 @@ async function generateDebateMysteryAssetWithSlot(args: {
   }
 }
 
-/** Canonical Debate exhibit synthesis for Whodunnit V2. The frozen house
- * contract adds case-specific continuity without changing evidence facts. */
+const MYSTERY_ASSET_REVIEW_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["approved", "reasons"],
+  properties: {
+    approved: { type: "boolean" },
+    reasons: {
+      type: "array",
+      maxItems: 8,
+      items: { type: "string" },
+    },
+  },
+} as const;
+
+const MYSTERY_ASSET_ATTEMPT_TIMEOUT_MS = 120_000;
+
+async function runMysteryAssetAttempt<T>(
+  outerSignal: AbortSignal,
+  operation: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  const onOuterAbort = (): void => controller.abort(outerSignal.reason);
+  outerSignal.addEventListener("abort", onOuterAbort, { once: true });
+  const timeout = setTimeout(
+    () => controller.abort(new Error("Sealed case visual attempt timed out.")),
+    MYSTERY_ASSET_ATTEMPT_TIMEOUT_MS,
+  );
+  const abortBoundary = new Promise<never>((_resolve, reject) => {
+    controller.signal.addEventListener("abort", () => {
+      reject(controller.signal.reason instanceof Error
+        ? controller.signal.reason
+        : new Error("Sealed case visual attempt was aborted."));
+    }, { once: true });
+  });
+  try {
+    if (outerSignal.aborted) throw outerSignal.reason;
+    return await Promise.race([operation(controller.signal), abortBoundary]);
+  } finally {
+    clearTimeout(timeout);
+    outerSignal.removeEventListener("abort", onOuterAbort);
+  }
+}
+
+async function reviewDebateMysteryAssetWithVision(args: {
+  apiKey: string;
+  bytes: Buffer;
+  sourceBytes?: Buffer;
+  kind: "evidence" | "room";
+  requestedSubject: string;
+  houseStyle: string;
+  signal: AbortSignal;
+}): Promise<DebateMysteryAssetVisionReviewV1> {
+  const provider = new OpenAiProvider({ apiKey: args.apiKey });
+  const content = args.kind === "room"
+    ? [
+        `Compare image 1, the frozen annotated source template, with image 2, the generated ${args.requestedSubject} room edit.`,
+        "Approve only if image 2 is one coherent empty interior and preserves image 1's camera, floor line, major architectural divisions, furniture silhouettes, and broad interaction anchors.",
+        "Image 2 must contain no people, human bodies, evidence objects, clues, unrequested gore, readable text, captions, logos, borders, or UI.",
+        "Reject any visible electric-magenta matte or obvious template annotation.",
+      ].join(" ")
+    : [
+        `Review this isolated evidence sprite for exactly: ${args.requestedSubject}.`,
+        "Approve only if it shows one complete, legible object and contains no people, bodies, extra evidence, scene, gore, readable text, captions, logos, borders, or UI.",
+      ].join(" ");
+  const spoilerSafeContent = [
+    content,
+    `Shared house style: ${args.houseStyle}`,
+    "Judge only the supplied visual specification. Do not infer story significance, culprit, location logic, or relationships.",
+  ].join(" ");
+  const response = await provider.generateResponse(
+    [{
+      role: "user",
+      content: spoilerSafeContent,
+      images: [
+        ...(args.sourceBytes
+          ? [{ mimeType: "image/png" as const, data: args.sourceBytes.toString("base64") }]
+          : []),
+        { mimeType: "image/png" as const, data: args.bytes.toString("base64") },
+      ],
+    }],
+    {
+      model: "gpt-4o-mini",
+      maxTokens: 300,
+      jsonSchema: MYSTERY_ASSET_REVIEW_SCHEMA,
+      jsonSchemaName: "mystery_asset_review",
+      usagePurpose: "image_generation",
+      allowFinalLocalFallback: false,
+      signal: args.signal,
+      generationWork: {
+        workflow: "debate_mystery_asset_review",
+        stage: `review_${args.kind}`,
+        privacyMode: "online",
+        outputClass: "critical",
+      },
+    },
+  );
+  const parsed = JSON.parse(response) as { approved?: unknown; reasons?: unknown };
+  const reasons = Array.isArray(parsed.reasons)
+    ? parsed.reasons.filter((value): value is string => typeof value === "string")
+      .map((value) => value.trim().slice(0, 240))
+      .filter(Boolean)
+      .slice(0, 8)
+    : [];
+  return {
+    approved: parsed.approved === true,
+    reasons,
+    reviewer: "openai:gpt-4o-mini",
+  };
+}
+
+async function generateRawDebateMysteryCandidate(args: {
+  userId: string;
+  title: string;
+  prompt: string;
+  sourceImageBytes?: Buffer;
+  apiKey: string;
+  model?: string;
+  size: "1536x1024" | "1024x1024";
+  signal: AbortSignal;
+}): Promise<{ bytes: Buffer; model: string }> {
+  const requestId = randomId(16);
+  const controller = new AbortController();
+  const abort = (): void => controller.abort();
+  args.signal.addEventListener("abort", abort, { once: true });
+  let ownedJobId: string | null = null;
+  try {
+    const acquired = await waitForImageSlot({
+      userId: args.userId,
+      conversationId: null,
+      botId: null,
+      mode: "sandbox",
+      incognito: false,
+      captionPrompt: args.title,
+      userMessage: `[Sealed Whodunnit art] ${args.title}`,
+      source: "debate_exhibit",
+      requestedSize: args.size,
+      clientRequestId: requestId,
+      abortController: controller,
+      signal: controller.signal,
+    });
+    ownedJobId = acquired.id;
+    const result = args.sourceImageBytes
+      ? await editImage(args.prompt, args.sourceImageBytes, args.apiKey, {
+          model: args.model,
+          size: args.size,
+          quality: "hd",
+          signal: acquired.abortController.signal,
+        })
+      : await generateImage(args.prompt, args.apiKey, {
+          model: args.model,
+          size: args.size,
+          quality: "hd",
+          background: "opaque",
+          signal: acquired.abortController.signal,
+        });
+    return {
+      bytes: await readOpenAiGeneratedImageBytes(
+        result,
+        acquired.abortController.signal,
+      ),
+      model: result.model,
+    };
+  } finally {
+    args.signal.removeEventListener("abort", abort);
+    if (ownedJobId) await releaseImageSlotIfOwned(args.userId, ownedJobId);
+  }
+}
+
+/** Canonical sealed evidence synthesis. No candidate enters `images`; the
+ * encrypted case vault is the only durable destination before discovery. */
 async function prepareDebateMysteryV2EvidenceAssets(
   args: DebateMysteryEvidenceAssetPreparationV2,
-): Promise<Record<string, string>> {
+): Promise<Record<string, import("@localai/shared").DebateMysterySealedAssetRefV1>> {
   const session = getDebateSession(db, args.userId, args.sessionId);
   if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
     throw new HttpError(409, "Evidence preparation requires a Whodunnit V2 case.");
@@ -9260,53 +9454,410 @@ async function prepareDebateMysteryV2EvidenceAssets(
     "debate_exhibit",
     {},
   );
-  const offlineOnly =
-    session.responseMode === "local" || userBlocksOnlineCapabilities(user);
-  const preferredProvider: ImageProviderName = offlineOnly
-    ? "local"
-    : selection.provider;
-  const relatedBotIds = [
-    ...session.formatState.config.suspectBotIds,
-    session.formatState.config.prosecutorBotId,
-    session.formatState.config.rivalDefenseBotId,
-  ];
+  const online =
+    session.responseMode !== "local" && !userBlocksOnlineCapabilities(user);
+  const userKey = decryptUserKey(args.userId);
+  const apiKey = online
+    ? getOpenAiApiKeyForUser(args.userId, userKey) ?? config.openAiApiKey
+    : undefined;
   const fallbackController = new AbortController();
   const signal = args.signal ?? fallbackController.signal;
-  const imageByExhibitId: Record<string, string> = {};
+  const assetByExhibitId: Record<string, import("@localai/shared").DebateMysterySealedAssetRefV1> = {};
   for (const exhibit of args.exhibits) {
-    if (exhibit.imageId) continue;
-    try {
-      const imageId = await generateDebateMysteryAssetWithSlot({
-        userId: args.userId,
-        sessionId: args.sessionId,
-        title: exhibit.title,
-        prompt: [
-          buildDebateExhibitSpritePrompt(exhibit),
-          args.houseStyle.promptContract,
-          "The object remains presentation-only: do not add clues, labels, symbols, surroundings, or facts beyond its frozen title.",
-        ].join(" "),
-        preferredProvider,
-        requestedImageModel: selection.model,
-        offlineOnly,
-        size: "1024x1024",
-        purpose: DEBATE_EXHIBIT_IMAGE_PURPOSE,
-        relatedBotIds,
-        signal,
-        normalizeImageBytes: async (imageBytes) =>
-          (await normalizeGeneratedDebateExhibitImage(imageBytes)).pngBytes,
-      });
-      imageByExhibitId[exhibit.id] = imageId;
-      await args.onPrepared?.(exhibit.id, imageId);
-    } catch (error) {
-      if (signal.aborted) throw error;
-      console.warn("[debate-mystery-v2] evidence art retained emoji fallback", {
-        sessionId: args.sessionId,
-        exhibitId: exhibit.id,
-        reason: error instanceof Error ? error.message : "generation failed",
-      });
+    const existing = getDebateMysterySealedAssetRefV1(
+      db,
+      args.userId,
+      args.sessionId,
+      "evidence",
+      exhibit.id,
+    );
+    if (existing?.status === "ready" || existing?.status === "fallback") {
+      assetByExhibitId[exhibit.id] = existing;
+      await args.onPrepared?.(exhibit.id, existing);
+      continue;
+    }
+    const pending = setDebateMysteryAssetPendingV1(db, {
+      userId: args.userId,
+      sessionId: args.sessionId,
+      kind: "evidence",
+      subjectId: exhibit.id,
+      mimeType: "image/png",
+    });
+    await args.onPrepared?.(exhibit.id, pending);
+    if (args.mode === "initial" && exhibit.roomId !== args.crimeSceneRoomId) {
+      assetByExhibitId[exhibit.id] = pending;
+      continue;
+    }
+    let prepared: import("@localai/shared").DebateMysterySealedAssetRefV1 | null = null;
+    let failure = online && apiKey ? "generation failed" : "ONLINE synthesis was not authorized";
+    if (online && apiKey) {
+      for (let attempt = 1; attempt <= 2 && !prepared; attempt += 1) {
+        try {
+          prepared = await runMysteryAssetAttempt(signal, async (attemptSignal) => {
+            const generated = await generateRawDebateMysteryCandidate({
+              userId: args.userId,
+              title: exhibit.title,
+              prompt: [
+                buildDebateExhibitSpritePrompt(exhibit),
+                args.houseStyle.promptContract,
+                "The object remains presentation-only: do not add clues, labels, symbols, surroundings, people, bodies, gore, text, UI, or facts beyond its frozen title.",
+              ].join(" "),
+              apiKey,
+              model: selection.provider === "openai" ? selection.model : undefined,
+              size: "1024x1024",
+              signal: attemptSignal,
+            });
+            const normalized = await normalizeGeneratedDebateExhibitImage(generated.bytes);
+            const pixels = await validateDebateMysteryAssetPixelsV1(
+              "evidence",
+              normalized.pngBytes,
+            );
+            const review = await reviewDebateMysteryAssetWithVision({
+              apiKey,
+              bytes: normalized.pngBytes,
+              kind: "evidence",
+              requestedSubject: exhibit.title,
+              houseStyle: args.houseStyle.promptContract,
+              signal: attemptSignal,
+            });
+            if (!review.approved) {
+              throw new Error(review.reasons.join("; ") || "Vision review rejected the exhibit.");
+            }
+            return sealDebateMysteryAssetBytesV1(db, userKey, {
+              userId: args.userId,
+              sessionId: args.sessionId,
+              kind: "evidence",
+              subjectId: exhibit.id,
+              bytes: normalized.pngBytes,
+              provider: "openai",
+              model: generated.model,
+              review: { attempt, pixels, vision: review },
+            });
+          });
+        } catch (error) {
+          if (signal.aborted) throw error;
+          failure = error instanceof Error ? error.message : "generation failed";
+        }
+      }
+    }
+    prepared ??= setDebateMysteryAssetFallbackV1(db, {
+      userId: args.userId,
+      sessionId: args.sessionId,
+      kind: "evidence",
+      subjectId: exhibit.id,
+      mimeType: "image/png",
+      reason: failure,
+    });
+    assetByExhibitId[exhibit.id] = prepared;
+    await args.onPrepared?.(exhibit.id, prepared);
+  }
+  return assetByExhibitId;
+}
+
+async function prepareDebateMysteryV2RoomAssets(
+  args: DebateMysteryRoomAssetPreparationV2,
+): Promise<Record<string, import("@localai/shared").DebateMysterySealedAssetRefV1>> {
+  const session = getDebateSession(db, args.userId, args.sessionId);
+  if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
+    throw new HttpError(409, "Room preparation requires a Whodunnit V2 case.");
+  }
+  const user = getUserRow(args.userId);
+  const online =
+    session.responseMode !== "local" && !userBlocksOnlineCapabilities(user);
+  const userKey = decryptUserKey(args.userId);
+  const apiKey = online
+    ? getOpenAiApiKeyForUser(args.userId, userKey) ?? config.openAiApiKey
+    : undefined;
+  const selection = resolveTypedAssetGenerationSelection(
+    args.userId,
+    "debate_exhibit",
+    { provider: "openai" },
+  );
+  const fallbackController = new AbortController();
+  const signal = args.signal ?? fallbackController.signal;
+  const results: Record<string, import("@localai/shared").DebateMysterySealedAssetRefV1> = {};
+  const orderedRooms = [...args.rooms].sort((left, right) =>
+    left.id === args.crimeSceneRoomId
+      ? -1
+      : right.id === args.crimeSceneRoomId
+        ? 1
+        : left.id.localeCompare(right.id));
+  for (const room of orderedRooms) {
+    const existing = getDebateMysterySealedAssetRefV1(
+      db,
+      args.userId,
+      args.sessionId,
+      "room",
+      room.id,
+    );
+    if (existing?.status === "ready" || existing?.status === "fallback") {
+      results[room.id] = existing;
+      await args.onPrepared?.(room.id, existing);
+      continue;
+    }
+    const pending = setDebateMysteryAssetPendingV1(db, {
+      userId: args.userId,
+      sessionId: args.sessionId,
+      kind: "room",
+      subjectId: room.id,
+      mimeType: "image/png",
+    });
+    await args.onPrepared?.(room.id, pending);
+    if (args.mode === "initial" && room.id !== args.crimeSceneRoomId) {
+      results[room.id] = pending;
+      continue;
+    }
+    let prepared: import("@localai/shared").DebateMysterySealedAssetRefV1 | null = null;
+    let failure = online && apiKey ? "generation failed" : "LOCAL uses the bundled room fallback";
+    if (online && apiKey && room.templateId) {
+      const templateBytes = await debateMysteryRoomTemplatePng(room.templateId);
+      for (let attempt = 1; attempt <= 2 && !prepared; attempt += 1) {
+        try {
+          prepared = await runMysteryAssetAttempt(signal, async (attemptSignal) => {
+            const generated = await generateRawDebateMysteryCandidate({
+              userId: args.userId,
+              title: `${room.name} room`,
+              prompt: [
+                `Edit this exact annotated room template into an empty ${room.name} interior in the same mansion.`,
+                args.houseStyle.promptContract,
+                "Preserve the 1536×1024 dimensions, room geometry, camera, major architectural divisions, and broad interaction anchors.",
+                "Remove every annotation shape. Do not add electric magenta, people, human figures, bodies, evidence, clues, weapons, blood, gore, readable text, signs, captions, logos, borders, or UI.",
+                "This is presentation-only atmosphere. Do not imply any case fact.",
+              ].join(" "),
+              sourceImageBytes: templateBytes,
+              apiKey,
+              model: selection.model,
+              size: "1536x1024",
+              signal: attemptSignal,
+            });
+            const normalized = await normalizeDebateMysteryRoomReskin(generated.bytes);
+            const pixels = await validateDebateMysteryAssetPixelsV1("room", normalized);
+            const review = await reviewDebateMysteryAssetWithVision({
+              apiKey,
+              bytes: normalized,
+              sourceBytes: templateBytes,
+              kind: "room",
+              requestedSubject: room.name,
+              houseStyle: args.houseStyle.promptContract,
+              signal: attemptSignal,
+            });
+            if (!review.approved) {
+              throw new Error(review.reasons.join("; ") || "Vision review rejected the room.");
+            }
+            return sealDebateMysteryAssetBytesV1(db, userKey, {
+              userId: args.userId,
+              sessionId: args.sessionId,
+              kind: "room",
+              subjectId: room.id,
+              bytes: normalized,
+              provider: "openai",
+              model: generated.model,
+              review: { attempt, pixels, vision: review },
+            });
+          });
+        } catch (error) {
+          if (signal.aborted) throw error;
+          failure = error instanceof Error ? error.message : "generation failed";
+        }
+      }
+    }
+    prepared ??= setDebateMysteryAssetFallbackV1(db, {
+      userId: args.userId,
+      sessionId: args.sessionId,
+      kind: "room",
+      subjectId: room.id,
+      mimeType: "image/webp",
+      reason: failure,
+    });
+    results[room.id] = prepared;
+    await args.onPrepared?.(room.id, prepared);
+  }
+  return results;
+}
+
+const mysteryRoomAssetBackgroundRuns = new Map<
+  string,
+  { controller: AbortController; promise: Promise<void> }
+>();
+
+const mysteryCompilationBackgroundRuns = new Map<string, Promise<void>>();
+
+function queueActiveDebateMysteryV2Compilation(userId: string): void {
+  if (!detachedBackgroundJobsAllowed) return;
+  const active = activeDebateMysteryCompilationV2(db, userId);
+  if (active) queueDebateMysteryV2CompilationInBackground(userId, active.sessionId);
+}
+
+function queueDebateMysteryV2CompilationInBackground(
+  userId: string,
+  sessionId: string,
+  suppliedRuntime?: DebateAiRuntime,
+): void {
+  if (!detachedBackgroundJobsAllowed) return;
+  const active = activeDebateMysteryCompilationV2(db, userId);
+  if (!active || active.sessionId !== sessionId) return;
+  const key = `${userId}:${sessionId}`;
+  if (mysteryCompilationBackgroundRuns.has(key)) return;
+  const promise = Promise.resolve().then(async () => {
+    const frozen = getDebateSession(db, userId, sessionId);
+    if (
+      frozen.formatState.format !== "whodunnit" ||
+      frozen.formatState.version !== 2 ||
+      frozen.formatState.playPhase !== "case_forge"
+    ) return;
+    const runtime = suppliedRuntime ?? await debateAiRuntimeForUser(
+      userId,
+      frozen.provider,
+      frozenDebateModelOverride(frozen),
+      frozen.responseMode,
+      frozen.generationChain,
+      frozen.autoCandidateAllowlist,
+      debateAutoRoutingContext(frozen),
+    );
+    await runWithUsageSession(
+      {
+        db,
+        userId,
+        privacyScope: "private",
+        mode: "debate",
+        surface: "debate",
+      },
+      () => runDebateMysteryCompilationV2(db, userId, sessionId, runtime, {
+        prepareEvidenceAssets: prepareDebateMysteryV2EvidenceAssets,
+        prepareRoomAssets: prepareDebateMysteryV2RoomAssets,
+        onCompilationReady: (ready) =>
+          queueDebateMysteryV2RoomAssetBackground(userId, ready.id),
+      }),
+    );
+  }).catch(() => {
+    // The durable job owns spoiler-safe failure and retry state.
+  }).finally(() => {
+    mysteryCompilationBackgroundRuns.delete(key);
+  });
+  mysteryCompilationBackgroundRuns.set(key, promise);
+}
+
+function mysteryRoomAssetBackgroundKey(userId: string, sessionId: string): string {
+  return `${userId}:${sessionId}`;
+}
+
+function abortDebateMysteryRoomAssetBackground(userId: string, sessionId: string): void {
+  mysteryRoomAssetBackgroundRuns
+    .get(mysteryRoomAssetBackgroundKey(userId, sessionId))
+    ?.controller.abort();
+}
+
+function prioritizedPendingMysteryRooms(
+  session: ReturnType<typeof getDebateSession>,
+) {
+  if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) return [];
+  const state = session.formatState;
+  const byId = new Map(state.rooms.map((room) => [room.id, room]));
+  const startId = state.currentRoomId ?? state.crimeSceneRoomId ?? state.rooms[0]?.id ?? null;
+  const distance = new Map<string, number>();
+  const queue = startId ? [startId] : [];
+  if (startId) distance.set(startId, 0);
+  for (let index = 0; index < queue.length; index += 1) {
+    const roomId = queue[index]!;
+    const room = byId.get(roomId);
+    const nextDistance = (distance.get(roomId) ?? 0) + 1;
+    for (const neighborId of room?.neighborIds ?? []) {
+      if (!byId.has(neighborId) || distance.has(neighborId)) continue;
+      distance.set(neighborId, nextDistance);
+      queue.push(neighborId);
     }
   }
-  return imageByExhibitId;
+  return state.rooms
+    .filter((room) => room.sealedAsset?.status === "pending")
+    .sort((left, right) =>
+      (distance.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+        (distance.get(right.id) ?? Number.MAX_SAFE_INTEGER) ||
+      left.id.localeCompare(right.id));
+}
+
+function queueDebateMysteryV2RoomAssetBackground(
+  userId: string,
+  sessionId: string,
+): void {
+  const key = mysteryRoomAssetBackgroundKey(userId, sessionId);
+  if (mysteryRoomAssetBackgroundRuns.has(key)) return;
+  const controller = new AbortController();
+  const leaseOwner = `mystery-assets:${randomId(12)}`;
+  const promise = (async () => {
+    if (!claimDebateMysteryAssetBackgroundLeaseV2(
+      db,
+      userId,
+      sessionId,
+      leaseOwner,
+    )) return;
+    while (!controller.signal.aborted) {
+      const session = getDebateSession(db, userId, sessionId);
+      if (
+        session.status === "cancelled" ||
+        session.formatState.format !== "whodunnit" ||
+        session.formatState.version !== 2 ||
+        session.formatState.compilation.stage !== "complete" ||
+        !session.formatState.config.assetSynthesis.rooms
+      ) return;
+      const nextRoom = prioritizedPendingMysteryRooms(session)[0];
+      if (!nextRoom) return;
+      const exhibits = pendingDebateMysteryEvidenceAssetsForRoomV2(
+        db,
+        userId,
+        sessionId,
+        nextRoom.id,
+      );
+      if (exhibits.length > 0) {
+        await prepareDebateMysteryV2EvidenceAssets({
+          userId,
+          sessionId,
+          exhibits,
+          crimeSceneRoomId:
+            session.formatState.crimeSceneRoomId ?? nextRoom.id,
+          mode: "background",
+          houseStyle: session.formatState.config.houseStyle,
+          signal: controller.signal,
+          onPrepared: (exhibitId, asset) => {
+            if (controller.signal.aborted) return;
+            attachDebateMysteryEvidenceAssetV2(
+              db,
+              userId,
+              sessionId,
+              exhibitId,
+              asset,
+            );
+          },
+        });
+      }
+      await prepareDebateMysteryV2RoomAssets({
+        userId,
+        sessionId,
+        rooms: [nextRoom],
+        crimeSceneRoomId:
+          session.formatState.crimeSceneRoomId ?? nextRoom.id,
+        mode: "background",
+        houseStyle: session.formatState.config.houseStyle,
+        signal: controller.signal,
+        onPrepared: (roomId, asset) => {
+          if (controller.signal.aborted) return;
+          attachDebateMysteryRoomAssetV2(db, userId, sessionId, roomId, asset);
+        },
+      });
+    }
+  })().catch((error) => {
+    if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) return;
+    // Pending vault rows are durable; opening the case retries the frontier.
+  }).finally(() => {
+    releaseDebateMysteryAssetBackgroundLeaseV2(
+      db,
+      userId,
+      sessionId,
+      leaseOwner,
+    );
+    const active = mysteryRoomAssetBackgroundRuns.get(key);
+    if (active?.controller === controller) mysteryRoomAssetBackgroundRuns.delete(key);
+  });
+  mysteryRoomAssetBackgroundRuns.set(key, { controller, promise });
 }
 
 async function prepareDebateMysteryGeneratedAssets(args: {
@@ -9317,27 +9868,11 @@ async function prepareDebateMysteryGeneratedAssets(args: {
   const session = getDebateSession(db, args.userId, args.sessionId);
   if (session.formatState.format !== "whodunnit") return session;
   if (session.formatState.version === 2) {
-    const state = session.formatState;
-    const exhibits = (session.evidence.exhibits ?? []).filter((exhibit) => !exhibit.imageId);
-    if (exhibits.length === 0) return session;
-    const imageByExhibitId = await prepareDebateMysteryV2EvidenceAssets({
-      userId: args.userId,
-      sessionId: args.sessionId,
-      exhibits,
-      houseStyle: state.config.houseStyle,
-      signal: args.signal,
-    });
-    let updated = session;
-    for (const [exhibitId, imageId] of Object.entries(imageByExhibitId)) {
-      updated = attachDebateExhibitSprite(
-        db,
-        args.userId,
-        args.sessionId,
-        exhibitId,
-        imageId,
-      );
-    }
-    return updated;
+    // V2's sealed pack is prepared inside the resumable compiler so each
+    // private reference and public reveal handle land atomically in its
+    // checkpoint. The legacy Archive command must never promote those bytes
+    // into the normal Images table.
+    return session;
   }
   if (session.formatState.config.artMode !== "generated") return session;
   const bible = getDebateMysteryCaseBible(db, args.userId, args.sessionId);
@@ -10018,8 +10553,8 @@ function buildRoutes(): RouteDefinition[] {
             wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
             theme, preferred_provider, auto_memory,
             prism_default_bot_face_mouth_coffee_pucker,
-            english_voice_engine, created_at, last_active_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', 1, ?, 'builtin', ?, ?)
+            voice_mode, english_voice_engine, created_at, last_active_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', 1, ?, 'english', 'builtin', ?, ?)
         `,
         ).run(
           userId,
@@ -17485,7 +18020,13 @@ function buildRoutes(): RouteDefinition[] {
               body.whodunnit as Parameters<typeof createDebateMysterySessionV2>[2],
               body.idempotencyKey,
               runtime,
-              { prepareEvidenceAssets: prepareDebateMysteryV2EvidenceAssets },
+              {
+                deferBackgroundStart: true,
+                prepareEvidenceAssets: prepareDebateMysteryV2EvidenceAssets,
+                prepareRoomAssets: prepareDebateMysteryV2RoomAssets,
+                onCompilationReady: (ready) =>
+                  queueDebateMysteryV2RoomAssetBackground(userId, ready.id),
+              },
             ),
           )
         : body.format === "whodunnit"
@@ -17518,6 +18059,13 @@ function buildRoutes(): RouteDefinition[] {
             body as unknown as Parameters<typeof createDebateSession>[2],
             runtime,
           );
+      if (
+        session.formatState.format === "whodunnit" &&
+        session.formatState.version === 2 &&
+        session.formatState.playPhase === "case_forge"
+      ) {
+        queueDebateMysteryV2CompilationInBackground(userId, session.id, runtime);
+      }
       json(ctx.res, 201, {
         ok: true,
         session: debateSessionForPlayer(session),
@@ -17542,6 +18090,52 @@ function buildRoutes(): RouteDefinition[] {
         ctx.req.off("aborted", onAborted);
       }
     }),
+    route("GET", "/api/debates/:id/mystery-assets/:kind/:subjectId/file", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const kind = ctx.params.kind === "room"
+        ? "room"
+        : ctx.params.kind === "evidence"
+          ? "evidence"
+          : null;
+      if (!kind) throw new HttpError(404, "That sealed case visual was not found.");
+      const file = getRevealedDebateMysteryAssetFileV1(
+        db,
+        decryptUserKey(userId),
+        userId,
+        ctx.params.id,
+        kind,
+        ctx.params.subjectId,
+      );
+      ctx.res.statusCode = 200;
+      ctx.res.setHeader("content-type", file.mimeType);
+      ctx.res.setHeader("content-length", String(file.bytes.byteLength));
+      ctx.res.setHeader("cache-control", "private, no-store, max-age=0");
+      ctx.res.setHeader("pragma", "no-cache");
+      ctx.res.setHeader("x-content-type-options", "nosniff");
+      ctx.res.setHeader("content-security-policy", "default-src 'none'; sandbox");
+      ctx.res.end(file.bytes);
+    }),
+    route("POST", "/api/debates/:id/mystery-assets/:kind/:subjectId/save", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const kind = ctx.params.kind === "room"
+        ? "room"
+        : ctx.params.kind === "evidence"
+          ? "evidence"
+          : null;
+      if (!kind) throw new HttpError(404, "That sealed case visual was not found.");
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const saved = saveRevealedDebateMysteryAssetV1(
+        db,
+        decryptUserKey(userId),
+        userId,
+        ctx.params.id,
+        kind,
+        ctx.params.subjectId,
+        typeof body.title === "string" ? body.title : "Saved Whodunnit visual",
+      );
+      ctx.res.setHeader("cache-control", "private, no-store");
+      json(ctx.res, 201, { ok: true, image: saved });
+    }),
     route("GET", "/api/debates/mystery-mansions", async (ctx) => {
       const userId = requireAuth(ctx);
       json(ctx.res, 200, {
@@ -17551,10 +18145,40 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/debates/:id/mystery-mansion/save", async (ctx) => {
       const userId = requireAuth(ctx);
+      const session = getDebateSession(db, userId, ctx.params.id);
+      if (
+        session.status === "cancelled" ||
+        session.formatState.format !== "whodunnit" ||
+        session.formatState.version !== 2 ||
+        session.formatState.rooms.length === 0 ||
+        !session.formatState.rooms.every(
+          (room) => room.unlocked && room.visited && room.hotspots.every((hotspot) => hotspot.examined),
+        )
+      ) {
+        throw new HttpError(
+          409,
+          "Visit every room and review every examination point before saving this mansion.",
+        );
+      }
+      const roomImageIdById: Record<string, string> = {};
+      for (const room of session.formatState.rooms) {
+        if (room.sealedAsset?.status !== "ready" || !room.sealedAsset.revealed) continue;
+        const saved = saveRevealedDebateMysteryAssetV1(
+          db,
+          decryptUserKey(userId),
+          userId,
+          session.id,
+          "room",
+          room.id,
+          `${room.name} · Whodunnit room`,
+        );
+        roomImageIdById[room.id] = saved.imageId;
+      }
       const mansion = saveDebateMysteryMansionBundleV2(
         db,
         userId,
         ctx.params.id,
+        roomImageIdById,
       );
       json(ctx.res, 201, { ok: true, mansion });
     }),
@@ -17636,6 +18260,7 @@ function buildRoutes(): RouteDefinition[] {
           ctx.params.id,
           body as unknown as Parameters<typeof applyDebateMysteryActionV2>[3],
         );
+        queueDebateMysteryV2RoomAssetBackground(userId, session.id);
         json(ctx.res, 200, {
           ok: true,
           session: debateSessionForPlayer(session),
@@ -17698,9 +18323,66 @@ function buildRoutes(): RouteDefinition[] {
         reusedExistingOpenRun: result.reusedExistingOpenRun,
       });
     }),
+    route("POST", "/api/debates/:id/mystery-restart-investigation", async (ctx) => {
+      const userId = requireAuth(ctx);
+      invalidateTurnPreparation(
+        userId,
+        "debate",
+        ctx.params.id,
+        "The Whodunnit investigation restarted from its sealed opening case.",
+      );
+      const current = getDebateSession(db, userId, ctx.params.id);
+      const session =
+        current.formatState.format === "whodunnit" &&
+        current.formatState.version === 2
+          ? restartDebateMysteryInvestigationV2(
+              db,
+              userId,
+              ctx.params.id,
+              ctx.body as Parameters<typeof restartDebateMysteryInvestigationV2>[3],
+            )
+          : restartDebateMysteryInvestigation(
+              db,
+              userId,
+              ctx.params.id,
+              ctx.body as Parameters<typeof restartDebateMysteryInvestigation>[3],
+            );
+      json(ctx.res, 200, { ok: true, session: debateSessionForPlayer(session) });
+    }),
+    route("POST", "/api/debates/:id/mystery-restart-court", async (ctx) => {
+      const userId = requireAuth(ctx);
+      invalidateTurnPreparation(
+        userId,
+        "debate",
+        ctx.params.id,
+        "The Whodunnit court restarted from its filed record.",
+      );
+      const current = getDebateSession(db, userId, ctx.params.id);
+      const session =
+        current.formatState.format === "whodunnit" &&
+        current.formatState.version === 2
+          ? restartDebateMysteryCourtV2(
+              db,
+              userId,
+              ctx.params.id,
+              ctx.body as Parameters<typeof restartDebateMysteryCourtV2>[3],
+            )
+          : restartDebateMysteryCourt(
+              db,
+              userId,
+              ctx.params.id,
+              ctx.body as Parameters<typeof restartDebateMysteryCourt>[3],
+            );
+      json(ctx.res, 200, { ok: true, session: debateSessionForPlayer(session) });
+    }),
     route("POST", "/api/debates/:id/mystery-resume-compilation", async (ctx) => {
       const userId = requireAuth(ctx);
       const frozen = getDebateSession(db, userId, ctx.params.id);
+      if (frozen.formatState.format === "whodunnit" && frozen.formatState.version === 2) {
+        queueDebateMysteryV2CompilationInBackground(userId, ctx.params.id);
+        json(ctx.res, 202, { ok: true, session: debateSessionForPlayer(frozen) });
+        return;
+      }
       const runtime = await debateAiRuntimeForUser(
         userId,
         frozen.provider,
@@ -17710,20 +18392,7 @@ function buildRoutes(): RouteDefinition[] {
         frozen.autoCandidateAllowlist,
         debateAutoRoutingContext(frozen),
       );
-      const session = frozen.formatState.format === "whodunnit" && frozen.formatState.version === 2
-        ? await runWithUsageSession(
-            {
-              db,
-              userId,
-              privacyScope: "private",
-              mode: "debate",
-              surface: "debate",
-            },
-            () => runDebateMysteryCompilationV2(db, userId, ctx.params.id, runtime, {
-              prepareEvidenceAssets: prepareDebateMysteryV2EvidenceAssets,
-            }),
-          )
-        : await runWithUsageSession(
+      const session = await runWithUsageSession(
         {
           db,
           userId,
@@ -17732,11 +18401,12 @@ function buildRoutes(): RouteDefinition[] {
           surface: "debate",
         },
         () => resumeDebateMysteryCompilation(db, userId, ctx.params.id, runtime),
-          );
+      );
       json(ctx.res, 200, { ok: true, session: debateSessionForPlayer(session) });
     }),
     route("GET", "/api/debates/:id/mystery-compilation", async (ctx) => {
       const userId = requireAuth(ctx);
+      queueDebateMysteryV2CompilationInBackground(userId, ctx.params.id);
       json(ctx.res, 200, {
         ok: true,
         compilation: getDebateMysteryCompilationStatusV2(
@@ -17770,13 +18440,19 @@ function buildRoutes(): RouteDefinition[] {
           surface: "debate",
         },
         () => retryDebateMysteryCompilationV2(db, userId, ctx.params.id, runtime, {
+          deferBackgroundStart: true,
           prepareEvidenceAssets: prepareDebateMysteryV2EvidenceAssets,
+          prepareRoomAssets: prepareDebateMysteryV2RoomAssets,
+          onCompilationReady: (ready) =>
+            queueDebateMysteryV2RoomAssetBackground(userId, ready.id),
         }),
       );
+      queueDebateMysteryV2CompilationInBackground(userId, ctx.params.id, runtime);
       json(ctx.res, 200, { ok: true, session: debateSessionForPlayer(session) });
     }),
     route("POST", "/api/debates/:id/mystery-compilation/cancel", async (ctx) => {
       const userId = requireAuth(ctx);
+      abortDebateMysteryRoomAssetBackground(userId, ctx.params.id);
       json(ctx.res, 200, {
         ok: true,
         compilation: cancelDebateMysteryCompilationV2(db, userId, ctx.params.id),
@@ -17858,6 +18534,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("GET", "/api/debates", async (ctx) => {
       const userId = requireAuth(ctx);
+      queueActiveDebateMysteryV2Compilation(userId);
       json(ctx.res, 200, {
         ok: true,
         sessions: listDebateSessions(db, userId).map((session) => ({
@@ -17873,10 +18550,12 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("GET", "/api/debates/:id", async (ctx) => {
       const userId = requireAuth(ctx);
+      const session = getDebateSession(db, userId, ctx.params.id);
+      queueDebateMysteryV2RoomAssetBackground(userId, session.id);
       json(ctx.res, 200, {
         ok: true,
         session: debateSessionForPlayer(
-          getDebateSession(db, userId, ctx.params.id),
+          session,
           ctx.query.get("perspective") === "replay" ? "replay" : "live",
         ),
       });
@@ -18460,6 +19139,15 @@ function buildRoutes(): RouteDefinition[] {
           return;
         }
         if (publicPreparation.surface === "coffee") {
+          if (
+            coffeeSessionLifecycleState(
+              db,
+              userId,
+              publicPreparation.sessionId,
+            ) !== "active"
+          ) {
+            throw new HttpError(409, "This Coffee session has ended.");
+          }
           const result = await turnPreparationRegistry.commit({
             userId,
             preparationId: publicPreparation.id,
@@ -19505,6 +20193,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("DELETE", "/api/debates/:id", async (ctx) => {
       const userId = requireAuth(ctx);
+      abortDebateMysteryRoomAssetBackground(userId, ctx.params.id);
       invalidateTurnPreparation(userId, "debate", ctx.params.id, "The Debate session exited.");
       const body = ctx.body as Record<string, unknown>;
       if (
@@ -23342,12 +24031,11 @@ function buildRoutes(): RouteDefinition[] {
       );
     }),
     route("POST", "/api/coffee/sessions/:id/join-cup/sip", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const conversation = sipCoffeeJoinPlayerCup(db, userId, ctx.params.id);
-      json(ctx.res, 200, {
-        ok: true,
-        conversation,
-      });
+      requireAuth(ctx);
+      throw new HttpError(
+        410,
+        "Click the Join mug to compose; an accepted line consumes its sip atomically.",
+      );
     }),
     route(
       "POST",
@@ -24078,6 +24766,40 @@ function buildRoutes(): RouteDefinition[] {
         conversation,
       });
     }),
+    route("POST", "/api/coffee/sessions/:id/close", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversationId = ctx.params.id;
+      const conversation = beginCoffeeSessionClosing(
+        db,
+        userId,
+        conversationId,
+      );
+      cancelCoffeeTurnJobsForConversation(userId, conversationId);
+      invalidateTurnPreparation(
+        userId,
+        "coffee",
+        conversationId,
+        "Coffee entered its closing bookend.",
+      );
+      json(ctx.res, 200, { ok: true, conversation });
+    }),
+    route("POST", "/api/coffee/sessions/:id/complete", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversationId = ctx.params.id;
+      cancelCoffeeTurnJobsForConversation(userId, conversationId);
+      invalidateTurnPreparation(
+        userId,
+        "coffee",
+        conversationId,
+        "Coffee completed.",
+      );
+      const conversation = completeCoffeeSession(
+        db,
+        userId,
+        conversationId,
+      );
+      json(ctx.res, 200, { ok: true, conversation });
+    }),
     route("GET", "/api/coffee/sessions/:id/context-sparks", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
@@ -24227,6 +24949,7 @@ function buildRoutes(): RouteDefinition[] {
               directedSpeakerBotId: effectiveDirectedSpeakerBotId,
               contextSparkPrivateContext: contextSpark?.privateContext,
               presentBotIds,
+              consumeJoinSip: body.consumeJoinSip === true,
             },
             {
               preferredProvider: runtime.provider,
@@ -24286,6 +25009,9 @@ function buildRoutes(): RouteDefinition[] {
           userId,
           conversationId,
         );
+        if (coffeeSessionLifecycleState(db, userId, conversationId) !== "active") {
+          throw new HttpError(409, "This Coffee session has ended.");
+        }
         if (coffeeConversationHasPlayerDeparture(db, userId, conversationId)) {
           throw new HttpError(409, "This Coffee session has ended.");
         }
@@ -24296,6 +25022,14 @@ function buildRoutes(): RouteDefinition[] {
         const directedUserMessage =
           typeof body.directedUserMessage === "string"
             ? body.directedUserMessage
+            : undefined;
+        const autonomousFocus =
+          typeof body.autonomousFocus === "string"
+            ? body.autonomousFocus
+            : undefined;
+        const thinkingAsideAboutBotId =
+          typeof body.thinkingAsideAboutBotId === "string"
+            ? body.thinkingAsideAboutBotId.trim() || undefined
             : undefined;
         const presentBotIds = Array.isArray(body.presentBotIds)
           ? body.presentBotIds.filter(
@@ -24395,6 +25129,10 @@ function buildRoutes(): RouteDefinition[] {
                     directedSpeakerBotId,
                     directedUserMessage,
                     presentBotIds,
+                    undefined,
+                    autonomousFocus,
+                    undefined,
+                    thinkingAsideAboutBotId,
                   ),
               );
               if (signal.aborted) throw new Error("Coffee preparation was cancelled.");
@@ -24696,6 +25434,7 @@ function buildRoutes(): RouteDefinition[] {
                     directedSpeakerBotId: effectiveDirectedSpeakerBotId,
                     contextSparkPrivateContext: contextSpark?.privateContext,
                     presentBotIds,
+                    consumeJoinSip: body.consumeJoinSip === true,
                   },
                   settings,
                 );
@@ -29422,12 +30161,7 @@ function buildRoutes(): RouteDefinition[] {
           hasAnthropicApiKey: Boolean(user.anthropic_key_ciphertext),
           hasElevenLabsApiKey: Boolean(user.elevenlabs_key_ciphertext),
           hasBraveSearchApiKey: Boolean(user.brave_search_key_ciphertext),
-          voiceMode:
-            user.voice_mode === "bottish" ||
-            user.voice_mode === "babble" ||
-            user.voice_mode === "english"
-              ? user.voice_mode
-              : "mute",
+          voiceMode: normalizeSpeechTypeVoiceMode(user.voice_mode),
           voiceEffectsEnabled: user.voice_effects_enabled !== 0,
           voiceVolume: normalizeBotVoiceVolume(user.voice_volume),
           operatingSystemVoicesEnabled:
@@ -31595,6 +32329,10 @@ function buildRoutes(): RouteDefinition[] {
         debate_exhibit: {
           origin: "debate_exhibit",
           purpose: DEBATE_EXHIBIT_IMAGE_PURPOSE,
+        },
+        whodunnit_room: {
+          origin: "debate_mystery_saved",
+          purpose: "whodunnit_room",
         },
         signal_logo: { origin: "botcast", purpose: SIGNAL_LOGO_IMAGE_PURPOSE },
         slate_cover: { origin: "slate_cover", purpose: "slate_cover" },
@@ -35230,7 +35968,9 @@ export function createPrismRequestHandler(
     const previousProviderFactory = providerFactoryOverride;
     const previousAuxiliaryProviderFactory = auxiliaryProviderFactoryOverride;
     const previousBuiltinVoiceWaveGenerator = builtinVoiceWaveGeneratorOverride;
+    const previousDetachedBackgroundJobsAllowed = detachedBackgroundJobsAllowed;
     if (options.db) db = options.db;
+    if (options.db) detachedBackgroundJobsAllowed = false;
     if (options.config) {
       config = options.config;
       masterKey = deriveMasterKey(config.encryptionMasterKey);
@@ -35254,6 +35994,7 @@ export function createPrismRequestHandler(
       providerFactoryOverride = previousProviderFactory;
       auxiliaryProviderFactoryOverride = previousAuxiliaryProviderFactory;
       builtinVoiceWaveGeneratorOverride = previousBuiltinVoiceWaveGenerator;
+      detachedBackgroundJobsAllowed = previousDetachedBackgroundJobsAllowed;
     }
   };
 }
@@ -35310,6 +36051,7 @@ if (process.env.PRISM_API_DISABLE_AUTOSTART !== "1") {
         error,
       );
     }
+    queueActiveDebateMysteryV2Compilation(user.id);
   }
   slateRecoveryCoordinator = new SlateRecoveryCoordinator({
     db,

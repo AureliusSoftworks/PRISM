@@ -26,6 +26,7 @@ import {
   mergeDebateEvidenceSources,
   randomDebateCast,
   randomDebatePlayerJudgeCast,
+  resolveDebateSurpriseCast,
 } from "./debateExperienceState.ts";
 
 const source = readFileSync(
@@ -56,6 +57,18 @@ const page = readFileSync(
   fileURLToPath(new URL("./page.tsx", import.meta.url)),
   "utf8",
 );
+
+it("annotates routed Debate turns and publishes the newest Auto route", () => {
+  assert.match(
+    source,
+    /Generation: \$\{debateEventGenerationAnnotation\(event, session\.lastReasoningEffort \?\? "auto"\)\}/u,
+  );
+  assert.match(source, /Auto → /u);
+  assert.match(source, /Effort \$\{DEBATE_ARCHIVE_EFFORT_LABELS\[effort\]\}/u);
+  assert.match(source, /Recovered after \$\{attempts\}/u);
+  assert.match(source, /latestDebateActualAutoRoute\(activeSession\)/u);
+  assert.match(source, /onActualAutoRouteChange\?\.\(/u);
+});
 const pageCss = readFileSync(
   fileURLToPath(new URL("./page.module.css", import.meta.url)),
   "utf8",
@@ -489,6 +502,62 @@ describe("Debate experience", () => {
       randomDebatePlayerJudgeCast(["f"], () => 0.5),
       null,
     );
+  });
+
+  it("defaults empty Debate seats to Surprise me without replacing manual cast", () => {
+    assert.deepEqual(
+      resolveDebateSurpriseCast(
+        ["a", "b", "c", "d"],
+        { moderator: "", forAdvocate: "", againstAdvocate: "" },
+        ["moderator", "forAdvocate", "againstAdvocate"],
+        [],
+        () => 0,
+      ),
+      { moderator: "b", forAdvocate: "c", againstAdvocate: "d" },
+    );
+    assert.deepEqual(
+      resolveDebateSurpriseCast(
+        ["a", "b", "c", "d"],
+        { moderator: "a", forAdvocate: "", againstAdvocate: "" },
+        ["moderator", "forAdvocate", "againstAdvocate"],
+        ["d"],
+        () => 0,
+      ),
+      { moderator: "a", forAdvocate: "b", againstAdvocate: "c" },
+    );
+    assert.deepEqual(
+      resolveDebateSurpriseCast(
+        ["a", "b", "c"],
+        { moderator: "a", forAdvocate: "b", againstAdvocate: "c" },
+        ["moderator", "forAdvocate", "againstAdvocate"],
+        [],
+        () => {
+          throw new Error("A complete explicit cast must not reroll");
+        },
+      ),
+      { moderator: "a", forAdvocate: "b", againstAdvocate: "c" },
+    );
+    assert.equal(
+      resolveDebateSurpriseCast(
+        ["a", "b"],
+        { moderator: "a", forAdvocate: "", againstAdvocate: "" },
+        ["moderator", "forAdvocate", "againstAdvocate"],
+        [],
+        () => 0,
+      ),
+      null,
+    );
+  });
+
+  it("resolves ordinary Surprise seats before checking willingness", () => {
+    assert.match(source, /bot\?\.name \?\? "Surprise me"/u);
+    assert.match(
+      source,
+      /const checkRoles = async \(\): Promise<void> => \{[\s\S]{0,900}resolveDebateSurpriseCast\([\s\S]{0,700}setCast\(resolvedCast\)/u,
+    );
+    assert.match(source, /every unselected seat rests on Surprise me/u);
+    assert.match(source, /: !castReady\)/u);
+    assert.match(source, /leave seat on Surprise me/u);
   });
 
   it("gives stage alignment a fresh random three-bot Library cast", () => {
@@ -1356,6 +1425,21 @@ describe("Debate experience", () => {
     assert.match(css, /data-debate-format="turnabout"/u);
   });
 
+  it("lets one Whodunnit cook in the background without blocking other Debate work", () => {
+    assert.match(source, /session\.mysteryForge\?\.state === "active"/u);
+    assert.match(source, /window\.setInterval\([\s\S]{0,120}loadSessions\(\)[\s\S]{0,120}2_000/u);
+    assert.match(source, /Case Forge is continuing in the background/u);
+    assert.match(source, /You can start another Debate or use other PRISM synthesis while it cooks/u);
+    assert.match(source, /Another Case Forge is already preparing a Whodunnit/u);
+    assert.match(source, /Another Whodunnit is already cooking/u);
+    assert.match(source, /Return to Case Forge/u);
+    assert.match(source, /Forging in background/u);
+    assert.match(source, /data-tutorial-target="debate-mystery-background-forge"/u);
+    assert.match(source, /role="progressbar"/u);
+    assert.match(css, /\.archiveForgeProgress/u);
+    assert.match(css, /\.archiveForgeProgressTrack/u);
+  });
+
   it("applies built-in presets without touching proceeding content and derives Custom from manual differences", () => {
     const consent = [
       {
@@ -1623,10 +1707,10 @@ describe("Debate experience", () => {
     // accept server-side.
     assert.match(
       source,
-      /format === "whodunnit"[\s\S]{0,100}\? mysteryDistinctLibraryBotCount < mysteryFullCastRequirement[\s\S]{0,100}: !castComplete/u,
+      /format === "whodunnit"[\s\S]{0,100}\? mysteryDistinctLibraryBotCount < mysteryFullCastRequirement[\s\S]{0,100}: !castReady/u,
     );
     assert.doesNotMatch(source, /Resolve declined role/u);
-    assert.match(source, /if \(!castComplete\) return/u);
+    assert.match(source, /if \(!castReady\) return/u);
     assert.match(source, /asking again is always allowed/u);
     assert.match(source, /stickyDeclinedConsentForCast/u);
     assert.match(
@@ -2031,6 +2115,29 @@ describe("Debate experience", () => {
       source,
       /Restart with this proceeding's sealed model, effort, cast, rules, and evidence/u,
     );
+    assert.match(archiveRows, /canRestartMysteryInvestigation[\s\S]{0,300}session\.mysteryVersion === 1/u);
+    assert.match(
+      archiveRows,
+      /session\.mysteryVersion === 2[\s\S]{0,120}session\.mysteryInvestigationMode === "full"/u,
+    );
+    assert.match(archiveRows, /canRestartMysteryCourt[\s\S]{0,220}session\.mysteryProgress === "trial"/u);
+    assert.match(
+      archiveRows,
+      /session\.format === "turnabout" \|\| session\.mysteryVersion === 2/u,
+    );
+    assert.match(archiveRows, />\s*Restart investigation\s*</u);
+    assert.match(archiveRows, />\s*Restart court\s*</u);
+    assert.match(
+      source,
+      /const restartArchivedMystery = async \([\s\S]{0,1000}mystery-restart-\$\{kind\}/u,
+    );
+    assert.match(
+      source,
+      /setView\(restarted\.session\.format === "whodunnit" \? "mystery" : "live"\)/u,
+    );
+    assert.match(source, /Restart investigation\?[\s\S]{0,600}Restart court\?/u);
+    assert.match(source, /Existing investigation progress and notes clear/u);
+    assert.match(source, /frozen case record stay exactly as filed/u);
     assert.match(
       archiveRows,
       /className=\{styles\.archiveOpenButton\}[\s\S]{0,700}openSession\(openFamilyRun \?\? session\)/u,
@@ -3901,13 +4008,13 @@ describe("Debate experience", () => {
       page,
       /avatarDetails=\{\s*playerJudgePrism\s*\?\s*null\s*:\s*botSnapshot\.avatarDetails\s*\}/u,
     );
-    assert.match(
+    assert.doesNotMatch(
       pageCss,
-      /\.debateBotPresencePlate\s*\{[^}]*--zen-live-bot-avatar-size:\s*100%[^}]*--zen-live-bot-face-y:\s*43\.8%[^}]*--zen-live-bot-face-scale:\s*1\.68/u,
+      /\.debateBotPresencePlate\s*\{[^}]*(?:--zen-live-bot-face-y|--zen-live-bot-face-scale):/u,
     );
-    assert.match(
+    assert.doesNotMatch(
       pageCss,
-      /\.debateBotPresencePlate\[data-debate-role="moderator"\]:not\(\s*\[data-debate-compact="true"\]\s*\)\s*\.coffeeSeatPlateEmoji:not\(\[data-face-eye-character\]\)\s*\{[^}]*--zen-live-bot-eye-local-x:\s*0\b/u,
+      /\.debateBotPresencePlate[^{}]*\.coffeeSeatPlateEmoji[^{}]*\{[^}]*--zen-live-bot-eye-local-x:/u,
     );
     assert.match(
       pageCss,

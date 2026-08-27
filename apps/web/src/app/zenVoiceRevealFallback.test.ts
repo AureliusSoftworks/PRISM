@@ -165,7 +165,7 @@ describe("Zen voice reveal fallback", () => {
     );
   });
 
-  it("advances immersive Zen prose on a visual clock independent from speech", () => {
+  it("starts immersive Zen prose with audible speech and falls back to text only on synthesis failure", () => {
     const resolverStart = pageSource.indexOf(
       "function resolveAssistantRevealVisibleTokenCount",
     );
@@ -194,14 +194,31 @@ describe("Zen voice reveal fallback", () => {
       progressiveStart,
       progressiveEnd,
     );
-    assert.match(
-      progressiveSource,
-      /startDisplay\(\);[\s\S]*?const prepared = await preparedVoice;/,
+    const voiceReady = progressiveSource.indexOf(
+      "const prepared = await preparedVoice;",
     );
+    const audioStart = progressiveSource.indexOf("onStart: (durationMs, playbackAlignment)");
+    assert.ok(voiceReady >= 0 && audioStart > voiceReady);
     assert.match(
       progressiveSource,
       /onStart:[\s\S]*?startAudioTimeline\(/,
     );
+    const audioTimelineStart = progressiveSource.indexOf(
+      "const startAudioTimeline =",
+    );
+    const voiceTryStart = progressiveSource.indexOf("try {", audioTimelineStart);
+    const audioTimelineSource = progressiveSource.slice(
+      audioTimelineStart,
+      voiceTryStart,
+    );
+    assert.match(audioTimelineSource, /if \(!displayStarted\) startDisplay\(\);/u);
+    const successfulSpeechPath = progressiveSource.slice(
+      voiceTryStart,
+      progressiveSource.indexOf("} catch (error)", voiceTryStart),
+    );
+    assert.doesNotMatch(successfulSpeechPath, /\n\s*startDisplay\(\);/u);
+    const failurePath = progressiveSource.slice(progressiveSource.indexOf("} catch (error)"));
+    assert.match(failurePath, /startDisplay\(\);[\s\S]*?Progressive synthesis failed/u);
     assert.match(
       pageSource,
       /const textRevealInProgress =[\s\S]*?const speechInProgress =[\s\S]*?return textRevealInProgress \|\| speechInProgress;/,
@@ -477,7 +494,7 @@ describe("Zen voice reveal fallback", () => {
       "Progressive synthesis failed — allow the settled-message path";
     const catchStart = pageSource.indexOf(catchMarker, prepareStart);
     assert.ok(catchStart > prepareStart);
-    const catchWindow = pageSource.slice(catchStart - 480, catchStart + 420);
+    const catchWindow = pageSource.slice(catchStart - 700, catchStart + 420);
     assert.match(
       catchWindow,
       /chatRequestController\.signal\.aborted[\s\S]*?isAbortLikeError\(error\)[\s\S]*?throw error/,

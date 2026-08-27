@@ -2,6 +2,7 @@ export const IMAGE_ASSET_KINDS = [
   "general_image",
   "item",
   "debate_exhibit",
+  "whodunnit_room",
   "signal_studio",
   "signal_logo",
   "slate_cover",
@@ -20,6 +21,7 @@ export const BOT_IMAGE_ASSET_LIBRARY_KIND_ORDER = [
   "signal_studio",
   "signal_logo",
   "debate_exhibit",
+  "whodunnit_room",
   "home_atmosphere",
   "zen_atmosphere",
   "group_room_atmosphere",
@@ -172,6 +174,7 @@ export const IMAGE_ASSET_KIND_LABELS: Record<ImageAssetKind, string> = {
   general_image: "Images",
   item: "Items",
   debate_exhibit: "Debate exhibits",
+  whodunnit_room: "Whodunnit rooms",
   signal_studio: "Signal studios",
   signal_logo: "Signal logos",
   slate_cover: "Slate covers",
@@ -209,6 +212,7 @@ export function imageAssetKindForImage(
   const purpose = input.purpose?.trim() || "gallery";
 
   if (purpose === "debate_exhibit") return "debate_exhibit";
+  if (purpose === "whodunnit_room") return "whodunnit_room";
   if (purpose === "signal_item") return "item";
   if (purpose === "signal_studio_day" || purpose === "signal_studio_night") {
     return "signal_studio";

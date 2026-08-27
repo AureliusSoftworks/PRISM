@@ -19084,6 +19084,21 @@ export async function advanceBotcastEpisode(
     provider: providerUsed,
     model: modelUsed,
     responseMode: episode.responseMode,
+    ...(providerUsed !== "deterministic"
+      ? {
+          // These values belong to this committed utterance, not the current
+          // picker preference. Recovery deliberately clears Turbo and uses
+          // the fallback's no-reasoning route.
+          reasoningEffort: autoRecovery
+            ? "none"
+            : (generation.contextualReasoningEffort ??
+              generationOptions.reasoningEffort ??
+              "auto"),
+          turbo: autoRecovery
+            ? false
+            : (generation.contextualTurbo ?? generationOptions.turbo) === true,
+        }
+      : {}),
     ...(generation.autoRouteDecision
       ? { autoRoute: generation.autoRouteDecision }
       : {}),

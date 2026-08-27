@@ -63,6 +63,8 @@ import {
   type DebateMysteryRecordReferenceV2,
   type DebateMysteryResolvedConfigV1,
   type DebateMysteryResolvedConfigV2,
+  type DebateMysteryRoomV2,
+  type DebateMysterySealedAssetRefV1,
   type DebateMysterySpokenLineV2,
   type DebateMysteryStatementVersionV2,
   type DebateMysteryTalkSubjectV2,
@@ -89,6 +91,12 @@ import type { PrismGenerationWorkReceipt } from "./generation-work.ts";
 import { PRISM_INSTANT_VOICE_MODEL_ID, pcmWaveDurationMs } from "./local-voice-engine.ts";
 import { resolveAbsoluteUnderDataRoot } from "./image-storage.ts";
 import { getDebateMysteryMansionBundleV2 } from "./debate-mystery-mansion-bundles.ts";
+import {
+  cloneDebateMysterySealedAssetsForReplayV1,
+  deleteDebateMysterySealedAssetsV1,
+  resetDebateMysteryAssetRevealsV1,
+  revealDebateMysteryAssetV1,
+} from "./debate-mystery-assets.ts";
 import { HttpError } from "./utils.http.ts";
 
 const V2_JOB_LEASE_MS = 90_000;
@@ -96,6 +104,27 @@ const V2_TOTAL_PASSES = 5;
 const V2_MAX_AUTHOR_ATTEMPTS = 3;
 const V2_AUDIO_SUBDIR = "debate-mystery-audio-v2";
 const V2_STAGING_RECLAIM_AGE_MS = V2_JOB_LEASE_MS * 2;
+
+type MysteryV2CompilationScope =
+  | "participant_full"
+  | "spectator_review"
+  | "court_only";
+
+function resolveMysteryCompilationScopeV2(
+  config: Pick<DebateMysteryResolvedConfigV2, "investigationMode" | "playerRole">,
+): MysteryV2CompilationScope {
+  if (config.investigationMode === "court_only") return "court_only";
+  return config.playerRole === "spectator"
+    ? "spectator_review"
+    : "participant_full";
+}
+
+function mysteryCompilationOmitsInvestigationV2(
+  scope: MysteryV2CompilationScope,
+): boolean {
+  return scope !== "participant_full";
+}
+
 const V2_SPOILER_SAFE_MESSAGES: Record<DebateMysteryCompilationStageV2, string> = {
   writing_case: "Writing the Case",
   testing_contradictions: "Testing Contradictions",
@@ -188,20 +217,50 @@ interface MysteryV2CaseRow {
 export interface DebateMysteryEvidenceAssetPreparationV2 {
   userId: string;
   sessionId: string;
-  exhibits: DebateEvidenceExhibitV1[];
+  exhibits: Array<DebateEvidenceExhibitV1 & { roomId: string | null }>;
+  crimeSceneRoomId: string;
+  /** Room-enabled Forge settles only the opening pack; background settles one room pack. */
+  mode: "all" | "initial" | "background";
   houseStyle: DebateMysteryHouseStyleV2;
   signal?: AbortSignal;
-  /** Called after one generated image is durable so a restarted Forge can skip it. */
-  onPrepared?: (exhibitId: string, imageId: string) => void | Promise<void>;
+  /** Called after one encrypted asset is durable so a restarted Forge can skip it. */
+  onPrepared?: (
+    exhibitId: string,
+    asset: DebateMysterySealedAssetRefV1,
+  ) => void | Promise<void>;
 }
 
 export type DebateMysteryEvidenceAssetPreparerV2 = (
   args: DebateMysteryEvidenceAssetPreparationV2,
-) => Promise<Record<string, string>>;
+) => Promise<Record<string, DebateMysterySealedAssetRefV1>>;
+
+export interface DebateMysteryRoomAssetPreparationV2 {
+  userId: string;
+  sessionId: string;
+  rooms: Array<Pick<
+    DebateMysteryRoomV2,
+    "id" | "templateId" | "name" | "bundledAssetPath"
+  >>;
+  crimeSceneRoomId: string;
+  /** Initial Forge prepares only the murder scene; background resolves the frontier. */
+  mode: "initial" | "background";
+  houseStyle: DebateMysteryHouseStyleV2;
+  signal?: AbortSignal;
+  onPrepared?: (
+    roomId: string,
+    asset: DebateMysterySealedAssetRefV1,
+  ) => void | Promise<void>;
+}
+
+export type DebateMysteryRoomAssetPreparerV2 = (
+  args: DebateMysteryRoomAssetPreparationV2,
+) => Promise<Record<string, DebateMysterySealedAssetRefV1>>;
 
 interface DebateMysteryCompilationOptionsV2 {
   generateWave?: typeof generateBuiltinEnglishWave;
   prepareEvidenceAssets?: DebateMysteryEvidenceAssetPreparerV2;
+  prepareRoomAssets?: DebateMysteryRoomAssetPreparerV2;
+  onCompilationReady?: (session: DebateSessionV1) => void;
 }
 
 interface AuthoredTopicV2 {
@@ -415,7 +474,10 @@ interface PrivateMysteryCaseV2 {
     /** Presentation-only art remains sealed here until this item is admitted. */
     visualKind?: "emoji" | "upload" | "synthesized";
     imageId?: string | null;
+    sealedAsset?: DebateMysterySealedAssetRefV1 | null;
   }>;
+  /** Private presentation routing only; never serialized into the public case state. */
+  evidenceRoomIdById?: Record<string, string>;
   examineNodeIdByHotspot: Record<string, string>;
   presentNodeIdBySuspectRecord: Record<string, string>;
   defaultPresentNodeIdBySuspect: Record<string, string>;
@@ -668,12 +730,14 @@ function compilationSubsteps(
   row: MysteryV2JobRow,
 ): DebateMysteryCompilationSubstepV2[] {
   const session = getDebateSession(db, row.user_id, row.session_id);
-  const courtOnly = session.formatState.format === "whodunnit" &&
-    session.formatState.version === 2 &&
-    session.formatState.config.investigationMode === "court_only";
   const frozenConfig = session.formatState.format === "whodunnit" && session.formatState.version === 2
     ? session.formatState.config
     : null;
+  const omitInvestigation = frozenConfig
+    ? mysteryCompilationOmitsInvestigationV2(
+        resolveMysteryCompilationScopeV2(frozenConfig),
+      )
+    : false;
   const attention = row.status === "needs_attention";
   const currentState: DebateMysteryCompilationSubstepV2["state"] = attention
     ? "attention"
@@ -712,12 +776,12 @@ function compilationSubsteps(
       if (!foundationCoreComplete) {
         return [
           forgeSubstep("foundation", "Case foundation", currentState),
-          ...(!courtOnly ? [forgeSubstep("room-details", "Room details", "upcoming" as const)] : []),
+          ...(!omitInvestigation ? [forgeSubstep("room-details", "Room details", "upcoming" as const)] : []),
           forgeSubstep("witness-chapters", "Witness chapters", "upcoming"),
           forgeSubstep("prosecution-responses", "Prosecution responses", "upcoming"),
         ];
       }
-      if (!courtOnly && !foundationComplete) {
+      if (!omitInvestigation && !foundationComplete) {
         return [
           forgeSubstep("foundation", "Case foundation", "complete"),
           forgeSubstep("room-details", "Room details", currentState),
@@ -728,7 +792,7 @@ function compilationSubsteps(
       if (!witnessesComplete) {
         return [
           forgeSubstep("foundation", "Case foundation", "complete"),
-          ...(!courtOnly ? [forgeSubstep("room-details", "Room details", "complete" as const)] : []),
+          ...(!omitInvestigation ? [forgeSubstep("room-details", "Room details", "complete" as const)] : []),
           forgeSubstep(
             "witness-chapters",
             totalWitnesses > 0 ? `Witness chapters · ${completedWitnesses} of ${totalWitnesses}` : "Witness chapters",
@@ -740,14 +804,14 @@ function compilationSubsteps(
       if (!draft?.prosecutionChoices) {
         return [
           forgeSubstep("foundation", "Case foundation", "complete"),
-          ...(!courtOnly ? [forgeSubstep("room-details", "Room details", "complete" as const)] : []),
+          ...(!omitInvestigation ? [forgeSubstep("room-details", "Room details", "complete" as const)] : []),
           forgeSubstep("witness-chapters", "Witness chapters", "complete"),
           forgeSubstep("prosecution-responses", "Prosecution responses", currentState),
         ];
       }
       return [
         forgeSubstep("foundation", "Case foundation", "complete"),
-        ...(!courtOnly ? [forgeSubstep("room-details", "Room details", "complete" as const)] : []),
+        ...(!omitInvestigation ? [forgeSubstep("room-details", "Room details", "complete" as const)] : []),
         forgeSubstep("witness-chapters", "Witness chapters", "complete"),
         forgeSubstep("prosecution-responses", "Prosecution responses", "complete"),
         forgeSubstep("assemble-case", "Assembling the case package", currentState),
@@ -1119,39 +1183,162 @@ function persistCompiledSectionCheckpoint(
 function withPreparedEvidenceAsset(
   checkpoint: MysteryV2Checkpoint,
   exhibitId: string,
-  imageId: string,
+  asset: DebateMysterySealedAssetRefV1,
 ): MysteryV2Checkpoint {
+  const visualKind = asset.status === "ready" ? "synthesized" as const : "emoji" as const;
   return {
     ...checkpoint,
     privateCase: {
       ...checkpoint.privateCase,
       recordItems: checkpoint.privateCase.recordItems.map((item) =>
         item.reference.kind === "evidence" && item.reference.id === exhibitId
-          ? { ...item, visualKind: "synthesized" as const, imageId }
+          ? { ...item, visualKind, sealedAsset: asset }
           : item),
     },
     publicState: {
       ...checkpoint.publicState,
       record: checkpoint.publicState.record.map((item) =>
         item.reference.kind === "evidence" && item.reference.id === exhibitId
-          ? { ...item, visualKind: "synthesized" as const, imageId }
+          ? { ...item, visualKind, sealedAsset: asset }
           : item),
     },
   };
 }
 
+function withPreparedRoomAsset(
+  checkpoint: MysteryV2Checkpoint,
+  roomId: string,
+  asset: DebateMysterySealedAssetRefV1,
+): MysteryV2Checkpoint {
+  return {
+    ...checkpoint,
+    publicState: {
+      ...checkpoint.publicState,
+      rooms: checkpoint.publicState.rooms.map((room) =>
+        room.id === roomId
+          ? {
+              ...room,
+              sealedAsset: asset,
+              accessState: room.visited
+                ? "visited"
+                : asset.status === "pending"
+                  ? "being_secured"
+                  : "ready_to_enter",
+            }
+          : room),
+    },
+  };
+}
+
+/**
+ * Publishes one spoiler-safe room asset state after the durable background
+ * worker settles it. Optimistic retries preserve simultaneous player actions.
+ */
+export function attachDebateMysteryRoomAssetV2(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  roomId: string,
+  asset: DebateMysterySealedAssetRefV1,
+): DebateSessionV1 {
+  let lastConflict: unknown = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const session = getDebateSession(db, userId, sessionId);
+    if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
+      throw new HttpError(409, "Room artwork requires a Whodunnit V2 case.");
+    }
+    if (session.status === "cancelled") {
+      throw new HttpError(409, "That case is no longer available.");
+    }
+    const room = session.formatState.rooms.find((entry) => entry.id === roomId);
+    if (!room) throw new HttpError(404, "That mystery room was not found.");
+    if (JSON.stringify(room.sealedAsset ?? null) === JSON.stringify(asset)) {
+      return session;
+    }
+    const state = structuredClone(session.formatState);
+    state.rooms = state.rooms.map((entry) =>
+      entry.id === roomId
+        ? {
+            ...entry,
+            sealedAsset: asset,
+            accessState: entry.visited
+              ? "visited"
+              : asset.status === "pending"
+                ? "being_secured"
+                : "ready_to_enter",
+          }
+        : entry);
+    try {
+      return persistV2Session(db, userId, session, state);
+    } catch (error) {
+      lastConflict = error;
+      if (!(error instanceof HttpError) || error.statusCode !== 409) throw error;
+    }
+  }
+  throw lastConflict;
+}
+
+/** Publishes one encrypted exhibit result into the private case and, only when
+ * already admitted, its public Case File row. */
+export function attachDebateMysteryEvidenceAssetV2(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  exhibitId: string,
+  asset: DebateMysterySealedAssetRefV1,
+): DebateSessionV1 {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const session = getDebateSession(db, userId, sessionId);
+    if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
+      throw new HttpError(409, "Evidence artwork requires a Whodunnit V2 case.");
+    }
+    if (session.status === "cancelled") {
+      throw new HttpError(409, "That case is no longer available.");
+    }
+    const stored = getDebateMysteryCaseV2(db, userId, sessionId);
+    const privateItem = stored.privateCase.recordItems.find(
+      (item) => item.reference.kind === "evidence" && item.reference.id === exhibitId,
+    );
+    if (!privateItem) throw new HttpError(404, "That mystery evidence was not found.");
+    const visualKind = asset.status === "ready" ? "synthesized" as const : "emoji" as const;
+    const privateCase: PrivateMysteryCaseV2 = {
+      ...stored.privateCase,
+      recordItems: stored.privateCase.recordItems.map((item) =>
+        item.reference.kind === "evidence" && item.reference.id === exhibitId
+          ? { ...item, visualKind, sealedAsset: asset }
+          : item),
+    };
+    const state = structuredClone(session.formatState);
+    state.record = state.record.map((item) =>
+      item.reference.kind === "evidence" && item.reference.id === exhibitId
+        ? { ...item, visualKind, sealedAsset: asset }
+        : item);
+    storeCompiledCaseV2(db, userId, sessionId, privateCase, stored.graph);
+    const updated = persistV2Session(db, userId, session, state);
+    db.exec("COMMIT");
+    return updated;
+  } catch (error) {
+    if (db.isTransaction) db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 function unpreparedMysteryV2EvidenceAssets(
   session: DebateSessionV1,
   checkpoint: MysteryV2Checkpoint,
-): DebateEvidenceExhibitV1[] {
+  roomId?: string,
+): Array<DebateEvidenceExhibitV1 & { roomId: string | null }> {
   const existingById = new Map(
     (session.evidence.exhibits ?? []).map((exhibit) => [exhibit.id, exhibit]),
   );
   return checkpoint.privateCase.recordItems.flatMap((item) => {
     if (item.reference.kind !== "evidence") return [];
+    const evidenceRoomId = checkpoint.privateCase.evidenceRoomIdById?.[item.reference.id] ?? null;
+    if (roomId !== undefined && evidenceRoomId !== roomId) return [];
     const existing = existingById.get(item.reference.id);
     const imageId = item.imageId ?? existing?.imageId ?? null;
-    if (imageId) return [];
+    if (imageId || item.sealedAsset?.status === "ready" || item.sealedAsset?.status === "fallback") return [];
     const descriptor = mysteryV2ExhibitDescriptor(item);
     return [{
       id: item.reference.id,
@@ -1163,8 +1350,27 @@ function unpreparedMysteryV2EvidenceAssets(
       visualKind: "emoji",
       imageId: null,
       createdBy: "prism",
+      roomId: evidenceRoomId,
     }];
   });
+}
+
+export function pendingDebateMysteryEvidenceAssetsForRoomV2(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  roomId: string,
+): Array<DebateEvidenceExhibitV1 & { roomId: string | null }> {
+  const session = getDebateSession(db, userId, sessionId);
+  if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
+    throw new HttpError(409, "Evidence artwork requires a Whodunnit V2 case.");
+  }
+  const stored = getDebateMysteryCaseV2(db, userId, sessionId);
+  return unpreparedMysteryV2EvidenceAssets(session, {
+    privateCase: stored.privateCase,
+    graph: stored.graph,
+    publicState: session.formatState,
+  }, roomId);
 }
 
 function completeCompilationPass(
@@ -1247,6 +1453,9 @@ function initialV2State(
   jobId: string,
   now: string,
 ): DebateWhodunnitFormatStateV2 {
+  const omitInvestigation = mysteryCompilationOmitsInvestigationV2(
+    resolveMysteryCompilationScopeV2(config),
+  );
   return {
     version: 2,
     format: "whodunnit",
@@ -1262,7 +1471,7 @@ function initialV2State(
       requiredAudioCount: 0,
       substeps: [
         forgeSubstep("foundation", "Case foundation", "active"),
-        ...(config.investigationMode === "full"
+        ...(!omitInvestigation
           ? [forgeSubstep("room-details", "Room details", "upcoming" as const)]
           : []),
         forgeSubstep("witness-chapters", "Witness chapters", "upcoming"),
@@ -1284,6 +1493,8 @@ function initialV2State(
     victim: null,
     suspects: [],
     rooms: [],
+    crimeSceneRoomId: null,
+    openingSweepComplete: omitInvestigation,
     roomIntroductions: {},
     currentRoomId: null,
     roomView: "mansion",
@@ -1361,6 +1572,88 @@ export function getDebateMysteryCompilationStatusV2(
   return compilationStatus(db, jobRow(db, userId, sessionId));
 }
 
+export function claimDebateMysteryAssetBackgroundLeaseV2(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  owner: string,
+  leaseMs = 15 * 60_000,
+): boolean {
+  const now = new Date();
+  const leasedUntil = new Date(now.getTime() + leaseMs).toISOString();
+  return Number(db.prepare(
+    `UPDATE debate_mystery_v2_jobs
+        SET lease_owner = ?, leased_until = ?, updated_at = ?
+      WHERE user_id = ? AND session_id = ? AND status = 'complete'
+        AND cancellation_requested = 0
+        AND (lease_owner IS NULL OR leased_until IS NULL OR leased_until < ? OR lease_owner = ?)`,
+  ).run(
+    owner,
+    leasedUntil,
+    now.toISOString(),
+    userId,
+    sessionId,
+    now.toISOString(),
+    owner,
+  ).changes) === 1;
+}
+
+export function releaseDebateMysteryAssetBackgroundLeaseV2(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  owner: string,
+): void {
+  db.prepare(
+    `UPDATE debate_mystery_v2_jobs
+        SET lease_owner = NULL, leased_until = NULL, updated_at = ?
+      WHERE user_id = ? AND session_id = ? AND lease_owner = ?`,
+  ).run(new Date().toISOString(), userId, sessionId, owner);
+}
+
+export interface DebateMysteryActiveCompilationV2 {
+  sessionId: string;
+  status: "queued" | "running";
+}
+
+/**
+ * One account owns one active Case Forge slot. Other Debate and synthesis
+ * work deliberately does not participate in this mutex.
+ */
+export function activeDebateMysteryCompilationV2(
+  db: DatabaseSync,
+  userId: string,
+  excludingSessionId?: string,
+): DebateMysteryActiveCompilationV2 | null {
+  const row = db.prepare(
+    `SELECT session_id, status
+       FROM debate_mystery_v2_jobs
+      WHERE user_id = ?
+        AND status IN ('queued', 'running')
+        AND (status = 'running' OR cancellation_requested = 0)
+        AND (? IS NULL OR session_id != ?)
+      ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END,
+               created_at ASC,
+               id ASC
+      LIMIT 1`,
+  ).get(
+    userId,
+    excludingSessionId ?? null,
+    excludingSessionId ?? null,
+  ) as { session_id: string; status: "queued" | "running" } | undefined;
+  return row
+    ? { sessionId: row.session_id, status: row.status }
+    : null;
+}
+
+function throwActiveCaseForgeConflict(): never {
+  throw new HttpError(
+    409,
+    "Another Case Forge is already preparing a Whodunnit. Let it finish or cancel it before compiling another.",
+    "MYSTERY_CASE_FORGE_ALREADY_ACTIVE",
+  );
+}
+
 export async function createDebateMysterySessionV2(
   db: DatabaseSync,
   userId: string,
@@ -1371,6 +1664,8 @@ export async function createDebateMysterySessionV2(
     deferBackgroundStart?: boolean;
     generateWave?: DebateMysteryCompilationOptionsV2["generateWave"];
     prepareEvidenceAssets?: DebateMysteryCompilationOptionsV2["prepareEvidenceAssets"];
+    prepareRoomAssets?: DebateMysteryCompilationOptionsV2["prepareRoomAssets"];
+    onCompilationReady?: DebateMysteryCompilationOptionsV2["onCompilationReady"];
   } = {},
 ): Promise<DebateSessionV1> {
   const idempotencyKey = compact(idempotencyKeyInput, 200);
@@ -1380,6 +1675,34 @@ export async function createDebateMysterySessionV2(
     config = resolveDebateMysteryConfigV2(configInput);
   } catch (error) {
     throw new HttpError(400, error instanceof Error ? error.message : "Invalid Whodunnit V2 setup.");
+  }
+  const existingForKey = db.prepare(
+    "SELECT id FROM debate_sessions WHERE user_id = ? AND create_idempotency_key = ?",
+  ).get(userId, idempotencyKey) as { id?: string } | undefined;
+  if (existingForKey?.id) return getDebateSession(db, userId, existingForKey.id);
+  if (activeDebateMysteryCompilationV2(db, userId)) {
+    throwActiveCaseForgeConflict();
+  }
+  if (mysteryCompilationOmitsInvestigationV2(resolveMysteryCompilationScopeV2(config))) {
+    config = {
+      ...config,
+      assetSynthesis: {
+        ...config.assetSynthesis,
+        rooms: false,
+        music: false,
+      },
+    };
+  }
+  if (
+    config.assetSynthesis.rooms &&
+    (runtime.responseMode === "local" ||
+      (runtime.responseMode === undefined && runtime.preferredProvider === "local"))
+  ) {
+    throw new HttpError(
+      400,
+      "Room synthesis is available in ONLINE or Auto mode. LOCAL uses bundled rooms.",
+      "MYSTERY_ROOM_SYNTHESIS_REQUIRES_ONLINE",
+    );
   }
   if (config.mansionBundleId) {
     const mansion = getDebateMysteryMansionBundleV2(
@@ -1460,6 +1783,8 @@ export async function createDebateMysterySessionV2(
       void runDebateMysteryCompilationV2(db, userId, session.id, runtime, {
         generateWave: options.generateWave,
         prepareEvidenceAssets: options.prepareEvidenceAssets,
+        prepareRoomAssets: options.prepareRoomAssets,
+        onCompilationReady: options.onCompilationReady,
       }).catch(() => {
         // The durable job records a spoiler-safe Needs Attention state.
       });
@@ -1866,6 +2191,7 @@ function authoredSuspectFromJson(args: {
 function authoredProsecutionChoicesFromJson(
   value: Record<string, unknown>,
   suspectSeatIds: readonly string[],
+  minimumOptions = 2,
 ): AuthoredProsecutionChoiceV2[] {
   const choiceRows = Array.isArray(value.prosecutionChoices) ? value.prosecutionChoices : [];
   const prosecutionChoices: AuthoredProsecutionChoiceV2[] = choiceRows.flatMap((value) => {
@@ -1906,7 +2232,7 @@ function authoredProsecutionChoicesFromJson(
           }]
         : [];
     });
-    return id && witnessSeatId && prompt && options.length >= 2
+    return id && witnessSeatId && prompt && options.length >= minimumOptions
       ? [{ id, witnessSeatId, prompt, options: options.slice(0, 4) }]
       : [];
   });
@@ -2342,7 +2668,9 @@ async function authorMysteryV2(args: {
   draft: MysteryV2AuthoringCheckpoint;
   onDraft: (draft: MysteryV2AuthoringCheckpoint, message: string) => void;
 }): Promise<AuthoredMysteryV2> {
-  const courtOnly = args.config.investigationMode === "court_only";
+  const compilationScope = resolveMysteryCompilationScopeV2(args.config);
+  const omitInvestigation = mysteryCompilationOmitsInvestigationV2(compilationScope);
+  const automatedSpectator = args.config.playerRole === "spectator";
   const botById = new Map(args.bots.map((bot) => [bot.id, bot]));
   const prosecutor = botById.get(args.config.prosecutorBotId);
   const defenseCounsel = botById.get(args.config.rivalDefenseBotId);
@@ -2397,9 +2725,9 @@ async function authorMysteryV2(args: {
     frozenIds: {
       victimId: args.scaffold.victim.id,
       suspectSeatIds: args.scaffold.suspects.map((suspect) => suspect.seatId),
-      roomIds: courtOnly ? [] : args.scaffold.rooms.map((room) => room.id),
+      roomIds: omitInvestigation ? [] : args.scaffold.rooms.map((room) => room.id),
       evidenceIds: args.scaffold.evidence.map((evidence) => evidence.id),
-      examinationIds: courtOnly ? [] : [...args.examinationIds],
+      examinationIds: omitInvestigation ? [] : [...args.examinationIds],
       statementIdsBySeat: Object.fromEntries(
         suspectRequirements.map((suspect) => [
           suspect.seatId,
@@ -2503,12 +2831,12 @@ async function authorMysteryV2(args: {
     eyewitnessSeatId: args.eyewitnessSeatId,
     victimId: args.scaffold.victim.id,
     timeline: args.scaffold.timeline,
-    roomNames: courtOnly ? [] : args.scaffold.rooms.map((room) => ({
+    roomNames: omitInvestigation ? [] : args.scaffold.rooms.map((room) => ({
       roomId: room.id,
       name: DEBATE_MYSTERY_ROOM_TEMPLATES.find((template) => template.id === room.templateId)?.name ?? room.templateId,
     })),
     evidenceIds: args.scaffold.evidence.map((item) => item.id),
-    examinationIds: courtOnly ? [] : args.examinationIds,
+    examinationIds: omitInvestigation ? [] : args.examinationIds,
     identityMirrorHolders: Object.entries(args.powerPlan.bots).flatMap(
       ([botId, plan]) => plan.effects.some(({ effect }) =>
         effect.type === "identity_mirror" && effect.trigger === "direct_bot_address")
@@ -2556,7 +2884,7 @@ async function authorMysteryV2(args: {
             title: "original spoiler-safe case title",
             victimName: "fictional name",
             victimDescription: "specific original identity and stakes",
-            publicOpening: courtOnly
+            publicOpening: omitInvestigation
               ? "spoiler-safe prosecution case summary suitable for a court title card"
               : "crime-scene briefing without naming the culprit",
             motive: "sealed motive",
@@ -2631,7 +2959,7 @@ async function authorMysteryV2(args: {
     for (let index = 0; index < setup.examinationIds.length; index += examinationChunkSize) {
       examinationChunks.push(setup.examinationIds.slice(index, index + examinationChunkSize));
     }
-    for (let index = 0; index < examinationChunks.length && !courtOnly; index += 1) {
+    for (let index = 0; index < examinationChunks.length && !omitInvestigation; index += 1) {
       const chunk = examinationChunks[index]!;
       const missingIds = chunk.filter((id) => !compact(examinationsById[id], 1_200));
       if (!missingIds.length) continue;
@@ -2788,7 +3116,7 @@ async function authorMysteryV2(args: {
     const suspect = await generateMysteryAuthoringSectionV2({
       runtime: args.runtime,
       label: `Witness chapter ${index + 1}`,
-      maxTokens: courtOnly ? 3_600 : 5_000,
+      maxTokens: omitInvestigation ? 3_600 : 5_000,
       onAttempt: (attempt) => args.onDraft(
         args.draft,
         `Writing the Case · Witness chapter ${index + 1} of ${suspectRequirements.length} · attempt ${attempt} of ${V2_MAX_AUTHOR_ATTEMPTS}`,
@@ -2807,7 +3135,7 @@ async function authorMysteryV2(args: {
         precedingSwornStatements: Object.values(args.draft.suspectsBySeatId).flatMap((entry) =>
           entry.testimony.map((statement) => ({ witnessSeatId: entry.seatId, id: statement.id, text: statement.text }))),
         outputContract: {
-          suspect: courtOnly ? {
+          suspect: omitInvestigation ? {
             seatId: requirement.seatId,
             relationship: "complete relationship to the victim",
             alibi: "specific authored alibi",
@@ -2858,8 +3186,8 @@ async function authorMysteryV2(args: {
           "The second statement must be exactly contradicted by the assigned record.",
           "Press answers add context without erasing the proof route.",
           "Revision text materially changes the sworn account.",
-          ...(courtOnly ? [
-            "This is a court-only case. Do not write room, mansion, investigation, Talk, or Present dialogue.",
+          ...(omitInvestigation ? [
+            "This compilation omits investigation. Do not write room, mansion, investigation, Talk, or Present dialogue.",
           ] : [
             "Each Talk question is a natural, specific way for the prosecution to ask about its typed person, general, motive, alibi, or room subject and stays under 25 words.",
           "Talk never contains a physical evidence or sworn-testimony record as its subject. A room topic names and references one exact setup roomId.",
@@ -2908,7 +3236,7 @@ async function authorMysteryV2(args: {
           { id: args.scaffold.victim.id, name: validatedFoundation.victimName },
           ...args.scaffold.suspects.map((suspect) => ({ id: suspect.seatId, name: suspect.name })),
         ],
-        courtOnly,
+        courtOnly: omitInvestigation,
       }),
     });
     args.draft.suspectsBySeatId[requirement.seatId] = suspect;
@@ -2967,7 +3295,7 @@ async function authorMysteryV2(args: {
         runtime: args.runtime,
         label: `Witness chapter ${index + 1} repair`,
         role: "repair",
-        maxTokens: courtOnly ? 3_600 : 5_000,
+        maxTokens: omitInvestigation ? 3_600 : 5_000,
         prompt: {
           section: "targeted_section_repair",
           targetSectionKey: suspectSectionKey,
@@ -3002,7 +3330,7 @@ async function authorMysteryV2(args: {
               name: entry.name,
             })),
           ],
-          courtOnly,
+          courtOnly: omitInvestigation,
         }),
         onReceipt: (receipt) =>
           recordMysterySectionReceipt(args.draft, suspectSectionKey, receipt),
@@ -3061,8 +3389,8 @@ async function authorMysteryV2(args: {
               witnessSeatId: "exact suspect seatId",
               prompt: "court prompt",
               options: {
-                minimumItems: 2,
-                maximumItems: 4,
+                minimumItems: automatedSpectator ? 1 : 2,
+                maximumItems: automatedSpectator ? 1 : 4,
                 itemShape: {
                   id: "stable option id",
                   text: "selected Prosecutor spoken line",
@@ -3075,7 +3403,9 @@ async function authorMysteryV2(args: {
           },
         },
         qualityRules: [
-          "The player chooses the option. Never choose or recommend an option in authored text.",
+          automatedSpectator
+            ? "Author exactly one complete response for each automated Spectator prosecution choice."
+            : "The player chooses the option. Never choose or recommend an option in authored text.",
           "Write each option in the frozen Prosecutor persona and keep every nonverbal beat out of spoken text.",
         ],
       },
@@ -3096,6 +3426,7 @@ async function authorMysteryV2(args: {
       validate: (value) => authoredProsecutionChoicesFromJson(
         value,
         suspectRequirements.map((entry) => entry.seatId),
+        automatedSpectator ? 1 : 2,
       ),
     });
     args.draft.prosecutionChoices = prosecutionChoices;
@@ -3131,6 +3462,7 @@ async function authorMysteryV2(args: {
         validate: (value) => authoredProsecutionChoicesFromJson(
           value,
           suspectRequirements.map((entry) => entry.seatId),
+          automatedSpectator ? 1 : 2,
         ),
         onReceipt: (receipt) =>
           recordMysterySectionReceipt(
@@ -3160,7 +3492,12 @@ async function authorMysteryV2(args: {
   const authored: AuthoredMysteryV2 = {
     ...foundation,
     suspects: suspectRequirements.map((entry) => args.draft.suspectsBySeatId[entry.seatId]!),
-    prosecutionChoices,
+    prosecutionChoices: automatedSpectator
+      ? prosecutionChoices.map((choice) => ({
+          ...choice,
+          options: choice.options.slice(0, 1),
+        }))
+      : prosecutionChoices,
   };
   if (authored.suspects.some((suspect) => !suspect)) {
     throw new Error("The resumable case draft is missing a witness chapter.");
@@ -3375,7 +3712,9 @@ function buildMysteryV2Graph(args: {
   contradictionBySeat: ReadonlyMap<string, DebateMysteryRecordReferenceV2>;
   personaVoiceCardsByBotId?: Record<string, MysteryV2VoiceCard>;
 }): { graph: DebateMysteryDialogueGraphV2; privateCase: PrivateMysteryCaseV2; publicState: DebateWhodunnitFormatStateV2 } {
-  const courtOnly = args.config.investigationMode === "court_only";
+  const compilationScope = resolveMysteryCompilationScopeV2(args.config);
+  const omitInvestigation = mysteryCompilationOmitsInvestigationV2(compilationScope);
+  const directToCourt = compilationScope === "court_only";
   const nodes: DebateMysteryDialogueNodeV2[] = [];
   const lines: DebateMysterySpokenLineV2[] = [];
   const interactionRoots: string[] = [];
@@ -3426,16 +3765,20 @@ function buildMysteryV2Graph(args: {
       subject: topic.subject,
       records: talkRecordItems,
     }));
-    if (!courtOnly && !talkTopics.length) throw new Error(`The authored chapter for ${suspect.seatId} has no valid Talk subjects.`);
+    if (!omitInvestigation && !talkTopics.length) throw new Error(`The authored chapter for ${suspect.seatId} has no valid Talk subjects.`);
     const candidateGate = (suspect as Partial<AuthoredSuspectV2>).presentationGate;
     const presentationGate = candidateGate &&
       talkTopics.some((topic) => topic.id === candidateGate.unlockTopicId)
       ? candidateGate
       : null;
-    return { ...suspect, talkTopics, presentationGate };
+    return {
+      ...suspect,
+      talkTopics: omitInvestigation ? [] : talkTopics,
+      presentationGate: omitInvestigation ? null : presentationGate,
+    };
   });
   const admittedEvidenceIds = new Set(
-    courtOnly
+    directToCourt
       ? args.authored.evidence.map((evidence) => evidence.id)
       : args.scaffold.activeRegions.flatMap((outcome) => outcome.evidenceId ? [outcome.evidenceId] : []),
   );
@@ -3538,7 +3881,7 @@ function buildMysteryV2Graph(args: {
     return node;
   };
 
-  const openingNode = courtOnly ? null : addLineNode({
+  const openingNode = omitInvestigation ? null : addLineNode({
     id: "briefing-opening",
     kind: "briefing",
     scene: "investigation",
@@ -3547,11 +3890,15 @@ function buildMysteryV2Graph(args: {
     mutations: { discoverIds: ["briefing:complete"] },
     terminal: "return_to_room",
   });
-  const initialDiscoveryIds = courtOnly ? ["court:ready"] : ["briefing:complete"];
-  const initialAdmittedRecordIds: string[] = courtOnly
+  const initialDiscoveryIds = directToCourt
+    ? ["court:ready"]
+    : omitInvestigation
+      ? []
+      : ["briefing:complete"];
+  const initialAdmittedRecordIds: string[] = omitInvestigation
     ? [...admittedEvidenceIds].map((id) => `evidence:${id}`)
     : [];
-  const publicRecord: DebateWhodunnitFormatStateV2["record"] = courtOnly
+  const publicRecord: DebateWhodunnitFormatStateV2["record"] = directToCourt
     ? args.authored.evidence
       .filter((evidence) => admittedEvidenceIds.has(evidence.id))
       .map((evidence) => ({
@@ -3565,7 +3912,7 @@ function buildMysteryV2Graph(args: {
     : [];
   const openingWeaponEvidenceId = args.scaffold.evidence.find((item) => item.isCanonicalWeapon)?.id ?? null;
 
-  if (!courtOnly) for (const room of args.scaffold.rooms) {
+  if (!omitInvestigation) for (const room of args.scaffold.rooms) {
     const activeOutcomes = args.scaffold.activeRegions.filter((outcome) => outcome.roomId === room.id);
     for (const outcome of activeOutcomes) {
       const key = `${room.id}:${outcome.regionId}`;
@@ -3605,7 +3952,7 @@ function buildMysteryV2Graph(args: {
 
   for (const suspect of authoredSuspects) {
     const suspectRoomId = args.scaffold.suspects.find((entry) => entry.seatId === suspect.seatId)?.roomId ?? null;
-    if (!courtOnly) {
+    if (!omitInvestigation) {
     if (suspectRoomId) {
       const personaNode = addLineNode({
         id: `room-introduction-${suspectRoomId}-persona`,
@@ -4010,7 +4357,7 @@ function buildMysteryV2Graph(args: {
   const prosecutorStrategy = addLineNode({
     id: "prosecutor-strategy-default",
     kind: "prosecutor_strategy",
-    scene: courtOnly ? "court" : "investigation",
+    scene: omitInvestigation ? "court" : "investigation",
     text: args.authored.prosecutorInternalReasoning,
     speakerKind: "player",
     speakerBotId: args.config.prosecutorBotId,
@@ -4056,9 +4403,10 @@ function buildMysteryV2Graph(args: {
     graph,
     suspectSeatIds: args.scaffold.suspects.map((suspect) => suspect.seatId),
     recordReferences,
-    roomIds: courtOnly ? [] : args.scaffold.rooms.map((room) => room.id),
-    personIds: courtOnly ? [] : [args.scaffold.victim.id, ...args.scaffold.suspects.map((suspect) => suspect.seatId)],
-    hotspotIdsByRoom: courtOnly ? {} : Object.fromEntries(args.scaffold.rooms.map((room) => [
+    playerRole: args.config.playerRole,
+    roomIds: omitInvestigation ? [] : args.scaffold.rooms.map((room) => room.id),
+    personIds: omitInvestigation ? [] : [args.scaffold.victim.id, ...args.scaffold.suspects.map((suspect) => suspect.seatId)],
+    hotspotIdsByRoom: omitInvestigation ? {} : Object.fromEntries(args.scaffold.rooms.map((room) => [
       room.id,
       args.scaffold.activeRegions
         .filter((outcome) => outcome.roomId === room.id)
@@ -4100,19 +4448,23 @@ function buildMysteryV2Graph(args: {
         emoji: "💬",
       };
     }),
+    evidenceRoomIdById: Object.fromEntries(
+      args.scaffold.activeRegions.flatMap((outcome) =>
+        outcome.evidenceId ? [[outcome.evidenceId, outcome.roomId] as const] : []),
+    ),
     examineNodeIdByHotspot,
     presentNodeIdBySuspectRecord,
     defaultPresentNodeIdBySuspect,
     prosecutorStrategyNodeId: prosecutorStrategy.id,
     crimeSceneRoomId: args.scaffold.crimeSceneRoomId,
-    investigationRoomIds: courtOnly ? [] : args.scaffold.rooms.map((room) => room.id),
-    investigationHotspotIdsByRoom: courtOnly ? {} : Object.fromEntries(args.scaffold.rooms.map((room) => [
+    investigationRoomIds: omitInvestigation ? [] : args.scaffold.rooms.map((room) => room.id),
+    investigationHotspotIdsByRoom: omitInvestigation ? {} : Object.fromEntries(args.scaffold.rooms.map((room) => [
       room.id,
       args.scaffold.activeRegions
         .filter((outcome) => outcome.roomId === room.id)
         .map((outcome) => outcome.regionId),
     ])),
-    investigationPersonIds: courtOnly ? [] : [
+    investigationPersonIds: omitInvestigation ? [] : [
       args.scaffold.victim.id,
       ...args.scaffold.suspects.map((suspect) => suspect.seatId),
     ],
@@ -4134,7 +4486,7 @@ function buildMysteryV2Graph(args: {
     caseTitle: args.authored.title,
     victim: { id: args.scaffold.victim.id, name: args.authored.victimName },
     suspects: args.scaffold.suspects.map(({ roomId: _roomId, ...suspect }) => ({ ...suspect, roomId: _roomId })),
-    rooms: courtOnly ? [] : args.scaffold.rooms.map((room) => {
+    rooms: omitInvestigation ? [] : args.scaffold.rooms.map((room) => {
       const template = DEBATE_MYSTERY_ROOM_TEMPLATES.find((entry) => entry.id === room.templateId)!;
       const activeRegionIds = new Set(
         args.scaffold.activeRegions.filter((outcome) => outcome.roomId === room.id).map((outcome) => outcome.regionId),
@@ -4153,7 +4505,8 @@ function buildMysteryV2Graph(args: {
         imageId: room.imageId,
         bundledAssetPath: template.bundledAssetPath ?? null,
         unlocked: true,
-        visited: room.id === args.scaffold.crimeSceneRoomId,
+        visited: false,
+        accessState: "hidden" as const,
         hotspots: template.regions.filter((region) => activeRegionIds.has(region.id)).map((region) => ({
           id: region.id,
           label: region.label,
@@ -4163,14 +4516,16 @@ function buildMysteryV2Graph(args: {
         })),
       };
     }),
-    roomIntroductions: courtOnly ? {} : Object.fromEntries(args.scaffold.rooms.map((room) => [
+    crimeSceneRoomId: omitInvestigation ? null : args.scaffold.crimeSceneRoomId,
+    openingSweepComplete: omitInvestigation,
+    roomIntroductions: omitInvestigation ? {} : Object.fromEntries(args.scaffold.rooms.map((room) => [
       room.id,
       roomIntroductionNodeIdsByRoom[room.id] ? "unseen" : "complete",
     ])),
-    currentRoomId: courtOnly ? null : args.scaffold.crimeSceneRoomId,
+    currentRoomId: omitInvestigation ? null : args.scaffold.crimeSceneRoomId,
     discoveryIds: initialDiscoveryIds,
     record: publicRecord,
-    topics: courtOnly ? [] : authoredSuspects.flatMap((suspect) =>
+    topics: omitInvestigation ? [] : authoredSuspects.flatMap((suspect) =>
       suspect.talkTopics.map((topic, index) => ({
         nodeId: `talk-${suspect.seatId}-${topic.id}`,
         suspectSeatId: suspect.seatId,
@@ -4207,6 +4562,7 @@ function validateMysteryV2CheckpointGraph(
     graph: checkpoint.graph,
     suspectSeatIds: checkpoint.privateCase.actorAccounts.map((account) => account.seatId),
     recordReferences: checkpoint.privateCase.recordItems.map((item) => item.reference),
+    playerRole: checkpoint.privateCase.config.playerRole,
     roomIds: checkpoint.privateCase.investigationRoomIds,
     personIds: checkpoint.privateCase.investigationPersonIds,
     hotspotIdsByRoom: checkpoint.privateCase.investigationHotspotIdsByRoom,
@@ -5246,6 +5602,7 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
     graph,
     suspectSeatIds: privateCase.actorAccounts.map((account) => account.seatId),
     recordReferences: privateCase.recordItems.map((item) => item.reference),
+    playerRole: privateCase.config.playerRole,
     roomIds: privateCase.investigationRoomIds,
     personIds: privateCase.investigationPersonIds,
     hotspotIdsByRoom: privateCase.investigationHotspotIdsByRoom,
@@ -5525,24 +5882,50 @@ function initialMysteryV2ReplayState(args: {
           ...item,
           imageId: current.imageId ?? null,
           visualKind: current.imageId ? current.visualKind ?? "synthesized" : "emoji",
+          sealedAsset: current.sealedAsset
+            ? { ...current.sealedAsset, revealed: false }
+            : item.sealedAsset
+              ? { ...item.sealedAsset, revealed: false }
+              : null,
         }
       : item;
   });
   state.rooms = state.rooms.map((room) => {
     const current = sourceRooms.get(room.id);
+    const sealedAsset = current?.sealedAsset
+      ? { ...current.sealedAsset, revealed: false }
+      : room.sealedAsset
+        ? { ...room.sealedAsset, revealed: false }
+        : null;
     return current
       ? {
           ...room,
           imageId: current.imageId ?? null,
           bundledAssetPath: current.bundledAssetPath ?? null,
+          sealedAsset,
+          accessState: sealedAsset?.status === "pending"
+            ? "being_secured"
+            : sealedAsset?.status === "ready" || sealedAsset?.status === "fallback"
+              ? "ready_to_enter"
+              : "hidden",
         }
-      : room;
+      : {
+          ...room,
+          accessState: room.sealedAsset?.status === "pending"
+            ? "being_secured"
+            : room.sealedAsset?.status === "ready" || room.sealedAsset?.status === "fallback"
+              ? "ready_to_enter"
+              : "hidden",
+        };
   });
   state.dialogueHistory = state.dialogueHistory.map((entry) => ({
     ...entry,
     occurredAt: args.now,
   }));
   state.playPhase = "title_card";
+  state.crimeSceneRoomId =
+    state.crimeSceneRoomId ?? state.currentRoomId ?? state.rooms[0]?.id ?? null;
+  state.openingSweepComplete = state.config.investigationMode === "court_only";
   state.compilation = {
     ...args.sourceState.compilation,
     jobId: args.jobId,
@@ -5680,6 +6063,7 @@ export function playDebateMysteryV2Again(
       graph,
       suspectSeatIds: privateCase.actorAccounts.map((account) => account.seatId),
       recordReferences: privateCase.recordItems.map((item) => item.reference),
+      playerRole: privateCase.config.playerRole,
       roomIds: privateCase.investigationRoomIds,
       personIds: privateCase.investigationPersonIds,
       hotspotIdsByRoom: privateCase.investigationHotspotIdsByRoom,
@@ -5876,6 +6260,12 @@ export function playDebateMysteryV2Again(
       JSON.stringify(replayCheckpoint),
       now,
       now,
+    );
+    cloneDebateMysterySealedAssetsForReplayV1(
+      db,
+      userId,
+      sourceSession.id,
+      sessionId,
     );
 
     if (voicesEnabled && copiedManifest) {
@@ -6185,6 +6575,8 @@ function claimCompilationJob(
 ): { row: MysteryV2JobRow; owner: string } | null {
   const current = jobRow(db, userId, sessionId);
   if (current.status === "complete" || current.status === "cancelled") return null;
+  const active = activeDebateMysteryCompilationV2(db, userId);
+  if (active && active.sessionId !== sessionId) return null;
   reclaimExpiredAudioStagingFiles(userId);
   const now = new Date();
   const stale = !current.leased_until || Date.parse(current.leased_until) <= now.getTime();
@@ -6225,6 +6617,22 @@ function renewCompilationLease(
     owner,
   );
   return Number(result.changes) === 1;
+}
+
+function finalizeCancelledMysteryV2Compilation(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+): MysteryV2JobRow {
+  const cancelled = updateJob(db, userId, sessionId, {
+    stage: "cancelled",
+    status: "cancelled",
+    publicMessage: V2_SPOILER_SAFE_MESSAGES.cancelled,
+    privateError: null,
+    clearLease: true,
+  });
+  deleteDebateMysterySealedAssetsV1(db, userId, sessionId);
+  return cancelled;
 }
 
 function deterministicEyewitnessSeat(
@@ -6277,8 +6685,13 @@ export async function runDebateMysteryCompilationV2(
   if (!claimed) return getDebateSession(db, userId, sessionId);
   let localAudioStage = false;
   let leaseLost = false;
+  const cancellationController = new AbortController();
   const heartbeat = setInterval(() => {
     try {
+      if (jobRow(db, userId, sessionId).cancellation_requested === 1) {
+        cancellationController.abort();
+        return;
+      }
       leaseLost = !renewCompilationLease(db, userId, sessionId, claimed.owner);
     } catch {
       leaseLost = true;
@@ -6286,6 +6699,10 @@ export async function runDebateMysteryCompilationV2(
   }, Math.floor(V2_JOB_LEASE_MS / 3));
   heartbeat.unref();
   const requireLease = (): void => {
+    if (jobRow(db, userId, sessionId).cancellation_requested === 1) {
+      cancellationController.abort();
+      throw new DOMException("Cancelled", "AbortError");
+    }
     if (leaseLost || !renewCompilationLease(db, userId, sessionId, claimed.owner)) {
       leaseLost = true;
       throw new Error("The durable compilation lease moved to another worker.");
@@ -6293,6 +6710,7 @@ export async function runDebateMysteryCompilationV2(
   };
   try {
     let currentJob = claimed.row;
+    requireLease();
     setPublicCompilationStatus(db, userId, sessionId, currentJob);
     const session = getDebateSession(db, userId, sessionId);
     if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
@@ -6467,26 +6885,65 @@ export async function runDebateMysteryCompilationV2(
         // with the evidence only when its authored discovery admits it.
         const prepared = unpreparedMysteryV2EvidenceAssets(session, checkpoint);
         if (prepared.length > 0) {
-          const imageByExhibitId = await options.prepareEvidenceAssets({
+          const assetByExhibitId = await options.prepareEvidenceAssets({
             userId,
             sessionId,
             exhibits: prepared,
+            crimeSceneRoomId: checkpoint.privateCase.crimeSceneRoomId,
+            mode: checkpoint.privateCase.config.assetSynthesis.rooms ? "initial" : "all",
             houseStyle: checkpoint.privateCase.config.houseStyle,
-            onPrepared: (exhibitId, imageId) => {
-              checkpoint = withPreparedEvidenceAsset(checkpoint!, exhibitId, imageId);
+            signal: cancellationController.signal,
+            onPrepared: (exhibitId, asset) => {
+              requireLease();
+              checkpoint = withPreparedEvidenceAsset(checkpoint!, exhibitId, asset);
               currentJob = persistCompiledSectionCheckpoint(db, userId, sessionId, {
                 key: `section:evidence-asset:${exhibitId}`,
                 stage: "directing_performances",
                 checkpoint: checkpoint!,
-                payload: JSON.stringify({ exhibitId, imageId }),
+                payload: JSON.stringify({ exhibitId, asset }),
               });
             },
           });
-          for (const [exhibitId, imageId] of Object.entries(imageByExhibitId)) {
-            checkpoint = withPreparedEvidenceAsset(checkpoint, exhibitId, imageId);
+          for (const [exhibitId, asset] of Object.entries(assetByExhibitId)) {
+            checkpoint = withPreparedEvidenceAsset(checkpoint, exhibitId, asset);
           }
         }
       }
+      if (
+        checkpoint.privateCase.config.assetSynthesis.rooms &&
+        options.prepareRoomAssets
+      ) {
+        const pendingRooms = checkpoint.publicState.rooms.filter(
+          (room) =>
+            room.sealedAsset?.status !== "ready" &&
+            room.sealedAsset?.status !== "fallback",
+        );
+        if (pendingRooms.length > 0) {
+          const assetByRoomId = await options.prepareRoomAssets({
+            userId,
+            sessionId,
+            rooms: pendingRooms,
+            crimeSceneRoomId: checkpoint.privateCase.crimeSceneRoomId,
+            mode: "initial",
+            houseStyle: checkpoint.privateCase.config.houseStyle,
+            signal: cancellationController.signal,
+            onPrepared: (roomId, asset) => {
+              requireLease();
+              checkpoint = withPreparedRoomAsset(checkpoint!, roomId, asset);
+              currentJob = persistCompiledSectionCheckpoint(db, userId, sessionId, {
+                key: `section:room-asset:${roomId}`,
+                stage: "directing_performances",
+                checkpoint: checkpoint!,
+                payload: JSON.stringify({ roomId, asset }),
+              });
+            },
+          });
+          for (const [roomId, asset] of Object.entries(assetByRoomId)) {
+            checkpoint = withPreparedRoomAsset(checkpoint, roomId, asset);
+          }
+        }
+      }
+      requireLease();
       // This is the final authored graph: persona delivery has been applied
       // and any optional evidence artwork is now attached. Persist it before
       // local voice preparation so the audio pack speaks exactly this text.
@@ -6497,8 +6954,12 @@ export async function runDebateMysteryCompilationV2(
         stage: "preparing_local_voices",
         payload: JSON.stringify({
           graphHash: sha256(JSON.stringify(checkpoint.graph)),
-          evidenceImageIds: checkpoint.publicState.record.flatMap((item) =>
-            item.reference.kind === "evidence" && item.imageId ? [item.imageId] : []),
+          evidenceAssetSubjects: checkpoint.publicState.record.flatMap((item) =>
+            item.reference.kind === "evidence" && item.sealedAsset
+              ? [item.reference.id]
+              : []),
+          roomAssetSubjects: checkpoint.publicState.rooms.flatMap((room) =>
+            room.sealedAsset ? [room.id] : []),
         }),
         checkpointJson: JSON.stringify(checkpoint),
       });
@@ -6534,7 +6995,7 @@ export async function runDebateMysteryCompilationV2(
       reachableSpokenLineIds: checkpoint.privateCase.graphValidation.reachableSpokenLineIds,
     });
     if (!audioValidation.valid) throw new Error(audioValidation.errors.join("\n"));
-    if (leaseLost) throw new Error("The durable compilation lease moved to another worker.");
+    requireLease();
     currentJob = completeCompilationPass(db, userId, sessionId, {
       passNumber: 5,
       key: "pass:verifying-case-audio",
@@ -6553,7 +7014,7 @@ export async function runDebateMysteryCompilationV2(
       privateCase: checkpoint.privateCase,
       botRows: bots,
     });
-    return setPublicCompilationStatus(db, userId, sessionId, currentJob, {
+    const readySession = setPublicCompilationStatus(db, userId, sessionId, currentJob, {
       ...checkpoint.publicState,
       compilation: compilationStatus(db, currentJob),
       playPhase: "title_card",
@@ -6569,15 +7030,18 @@ export async function runDebateMysteryCompilationV2(
       voicesEnabled: true,
       localAudioFailure: null,
     });
+    options.onCompilationReady?.(readySession);
+    return readySession;
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      const row = updateJob(db, userId, sessionId, {
-        stage: "cancelled",
-        status: "cancelled",
-        publicMessage: V2_SPOILER_SAFE_MESSAGES.cancelled,
-        privateError: null,
-        clearLease: true,
-      });
+    if (
+      (error instanceof DOMException || error instanceof Error) &&
+      error.name === "AbortError"
+    ) {
+      const row = finalizeCancelledMysteryV2Compilation(
+        db,
+        userId,
+        sessionId,
+      );
       return setPublicCompilationStatus(db, userId, sessionId, row);
     }
     if (!leaseLost && jobRow(db, userId, sessionId).lease_owner === claimed.owner) {
@@ -6597,6 +7061,8 @@ export async function retryDebateMysteryCompilationV2(
   options: {
     generateWave?: DebateMysteryCompilationOptionsV2["generateWave"];
     prepareEvidenceAssets?: DebateMysteryCompilationOptionsV2["prepareEvidenceAssets"];
+    prepareRoomAssets?: DebateMysteryCompilationOptionsV2["prepareRoomAssets"];
+    onCompilationReady?: DebateMysteryCompilationOptionsV2["onCompilationReady"];
     deferBackgroundStart?: boolean;
   } = {},
 ): Promise<DebateSessionV1> {
@@ -6605,6 +7071,9 @@ export async function retryDebateMysteryCompilationV2(
   if (row.status === "cancelled") throw new HttpError(409, "Cancelled case preparation cannot be retried.");
   if (row.status === "queued" || row.status === "running") {
     return getDebateSession(db, userId, sessionId);
+  }
+  if (activeDebateMysteryCompilationV2(db, userId, sessionId)) {
+    throwActiveCaseForgeConflict();
   }
   const storedCheckpoint = row.checkpoint_json ? JSON.parse(row.checkpoint_json) as unknown : null;
   const hasCompiledCheckpoint = isMysteryV2CompiledCheckpoint(storedCheckpoint);
@@ -6641,6 +7110,8 @@ export async function retryDebateMysteryCompilationV2(
       void runDebateMysteryCompilationV2(db, userId, sessionId, runtime, {
         generateWave: options.generateWave,
         prepareEvidenceAssets: options.prepareEvidenceAssets,
+        prepareRoomAssets: options.prepareRoomAssets,
+        onCompilationReady: options.onCompilationReady,
       }).catch(() => {
         // The durable job records its spoiler-safe failure state.
       });
@@ -6656,7 +7127,10 @@ export function cancelDebateMysteryCompilationV2(
 ): DebateMysteryCompilationStatusV2 {
   const row = jobRow(db, userId, sessionId);
   if (row.status === "complete") throw new HttpError(409, "A completed case cannot be cancelled.");
-  if (row.status === "cancelled") return compilationStatus(db, row);
+  if (row.status === "cancelled") {
+    deleteDebateMysterySealedAssetsV1(db, userId, sessionId);
+    return compilationStatus(db, row);
+  }
   db.prepare(
     `UPDATE debate_mystery_v2_jobs
         SET cancellation_requested = 1,
@@ -6666,7 +7140,12 @@ export function cancelDebateMysteryCompilationV2(
             updated_at = ?
       WHERE user_id = ? AND session_id = ?`,
   ).run(V2_SPOILER_SAFE_MESSAGES.cancelled, new Date().toISOString(), userId, sessionId);
-  return compilationStatus(db, jobRow(db, userId, sessionId));
+  let cancelled = jobRow(db, userId, sessionId);
+  if (cancelled.status === "cancelled") {
+    cancelled = finalizeCancelledMysteryV2Compilation(db, userId, sessionId);
+    setPublicCompilationStatus(db, userId, sessionId, cancelled);
+  }
+  return compilationStatus(db, cancelled);
 }
 
 export function continueDebateMysteryV2WithoutVoices(
@@ -7210,6 +7689,7 @@ export function importDebateMysteryV2BackupV1(
       graph,
       suspectSeatIds: privateCase.actorAccounts.map((account) => account.seatId),
       recordReferences: privateCase.recordItems.map((item) => item.reference),
+      playerRole: privateCase.config.playerRole,
       roomIds: privateCase.investigationRoomIds,
       personIds: privateCase.investigationPersonIds,
       hotspotIdsByRoom: privateCase.investigationHotspotIdsByRoom,
@@ -8182,6 +8662,260 @@ function advanceSpectatorTrialV2(args: {
       });
 }
 
+type DebateMysteryRestartRequestV2 = {
+  expectedRevision: number;
+  idempotencyKey: string;
+};
+
+function requireMysteryV2Restart(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  request: DebateMysteryRestartRequestV2,
+): { session: DebateSessionV1; state: DebateWhodunnitFormatStateV2; key: string } {
+  const key = compact(request.idempotencyKey, 200);
+  if (!key) throw new HttpError(400, "A stable restart idempotency key is required.");
+  const session = getDebateSession(db, userId, sessionId);
+  if (session.revision !== request.expectedRevision) {
+    throw new HttpError(409, "This case changed in another window. Refresh and try again.");
+  }
+  if (
+    session.status === "completed" ||
+    session.status === "cancelled" ||
+    session.status === "failed"
+  ) {
+    throw new HttpError(409, "Completed, cancelled, and failed cases remain immutable.");
+  }
+  if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
+    throw new HttpError(409, "This session is not a Whodunnit V2 case.");
+  }
+  if (
+    session.formatState.compilation.stage !== "complete" ||
+    session.formatState.readiness.status !== "ready"
+  ) {
+    throw new HttpError(409, "Finish preparing the sealed case before restarting it.");
+  }
+  return { session, state: session.formatState, key };
+}
+
+function mysteryV2RestartedSession(
+  session: DebateSessionV1,
+  state: DebateWhodunnitFormatStateV2,
+  kind: "investigation" | "court",
+): DebateSessionV1 {
+  return {
+    ...session,
+    status: "waiting_for_player",
+    phase: kind === "court" ? "challenge" : "opening",
+    stepKey: kind === "court" ? "mystery_v2_trial" : "mystery_v2_title",
+    formatState: state,
+    jury: resetMysteryV2JuryForReplay(session.jury),
+    caseBoard: [],
+    ballots: [],
+    playerVerdict: null,
+    winnerSideId: null,
+    judgeGavel: null,
+    judgeGavelCooldownUntil: null,
+    objectionRuling: null,
+    participantObjection: null,
+    participantFloorBreak: null,
+    participantFloorBreakPreparation: null,
+    preparedResumeEventId: null,
+    archiveReturnBuffer: null,
+    events: [],
+    error: null,
+    endedEarlyAt: null,
+    completedAt: null,
+    synopsis: null,
+    liveBake: null,
+    pausedAt: null,
+    pausedPresentationEventId: null,
+    pausedDurationMs: 0,
+  };
+}
+
+function recordMysteryV2Restart(
+  db: DatabaseSync,
+  userId: string,
+  prior: DebateSessionV1,
+  restarted: DebateSessionV1,
+  key: string,
+): void {
+  db.prepare(
+    `INSERT INTO debate_mutations
+       (user_id, session_id, idempotency_key, expected_revision,
+        result_revision, response_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    userId,
+    prior.id,
+    key,
+    prior.revision,
+    restarted.revision,
+    JSON.stringify(restarted),
+    new Date().toISOString(),
+  );
+}
+
+/** Rewind the open Run to its compiled title card without authoring a new case. */
+export function restartDebateMysteryInvestigationV2(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  request: DebateMysteryRestartRequestV2,
+): DebateSessionV1 {
+  const key = compact(request.idempotencyKey, 200);
+  const replay = key ? replayV2Mutation(db, userId, sessionId, key) : null;
+  if (replay) return replay;
+  const { session, state, key: restartKey } = requireMysteryV2Restart(
+    db,
+    userId,
+    sessionId,
+    request,
+  );
+  if (state.config.investigationMode !== "full") {
+    throw new HttpError(409, "This court-only case has no mansion investigation to restart.");
+  }
+  const row = jobRow(db, userId, sessionId);
+  const checkpoint = row.checkpoint_json
+    ? JSON.parse(row.checkpoint_json) as unknown
+    : null;
+  if (row.status !== "complete" || !isMysteryV2CompiledCheckpoint(checkpoint)) {
+    throw new HttpError(409, "The compiled Whodunnit checkpoint is unavailable.");
+  }
+  // Validate the sealed row before trusting the compiled checkpoint.
+  getDebateMysteryCaseV2(db, userId, sessionId);
+  const now = new Date().toISOString();
+  const resetState = initialMysteryV2ReplayState({
+    checkpoint,
+    sourceState: state,
+    jobId: state.compilation.jobId,
+    now,
+    voicesEnabled: state.voicesEnabled,
+    preparedAudioCount: state.compilation.preparedAudioCount,
+  });
+  const resetSession = mysteryV2RestartedSession(
+    session,
+    resetState,
+    "investigation",
+  );
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    resetDebateMysteryAssetRevealsV1(db, userId, sessionId);
+    db.prepare("DELETE FROM debate_events WHERE user_id = ? AND session_id = ?")
+      .run(userId, sessionId);
+    db.prepare("DELETE FROM debate_mutations WHERE user_id = ? AND session_id = ?")
+      .run(userId, sessionId);
+    db.prepare("DELETE FROM debate_mystery_actions WHERE user_id = ? AND session_id = ?")
+      .run(userId, sessionId);
+    const restarted = persistV2Session(
+      db,
+      userId,
+      resetSession,
+      resetState,
+      session.revision,
+    );
+    recordMysteryV2Restart(db, userId, session, restarted, restartKey);
+    appendV2Action(db, userId, sessionId, "restart_investigation", {});
+    db.exec("COMMIT");
+    return restarted;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+/** Rewind only the unlocked courtroom, retaining the filed public case record. */
+export function restartDebateMysteryCourtV2(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  request: DebateMysteryRestartRequestV2,
+): DebateSessionV1 {
+  const key = compact(request.idempotencyKey, 200);
+  const replay = key ? replayV2Mutation(db, userId, sessionId, key) : null;
+  if (replay) return replay;
+  const { session, state, key: restartKey } = requireMysteryV2Restart(
+    db,
+    userId,
+    sessionId,
+    request,
+  );
+  if (state.playPhase !== "trial" || !state.theory || !state.theoryFiledAt || !state.court) {
+    throw new HttpError(409, "Restart court is available only after this case has entered court.");
+  }
+  const { privateCase, graph } = getDebateMysteryCaseV2(db, userId, sessionId);
+  const firstChapter = [...graph.witnessChapters]
+    .sort((left, right) => left.ordinal - right.ordinal)[0];
+  if (!firstChapter) throw new HttpError(409, "The authored court has no witnesses.");
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const filedAtMs = Date.parse(state.theoryFiledAt);
+  const investigationDialogue = state.dialogueHistory.filter((entry) => {
+    const node = nodeById.get(entry.nodeId);
+    if (node) return node.scene === "investigation";
+    const occurredAtMs = Date.parse(entry.occurredAt);
+    return Number.isFinite(filedAtMs) && Number.isFinite(occurredAtMs)
+      ? occurredAtMs < filedAtMs
+      : false;
+  });
+  let resetState: DebateWhodunnitFormatStateV2 = {
+    ...structuredClone(state),
+    playPhase: "trial",
+    dialogueHistory: investigationDialogue,
+    activeDialogueNodeId: investigationDialogue.at(-1)?.nodeId ?? null,
+    court: null,
+    verdict: null,
+    calloutHistory: [],
+    pendingCallout: null,
+    pendingProsecutionChoice: null,
+  };
+  resetState = enterWitnessChapterV2({
+    state: resetState,
+    graph,
+    privateCase,
+    chapter: firstChapter,
+  });
+  resetState = addCallouts(resetState, ["order"], null);
+  const resetSession = mysteryV2RestartedSession(session, resetState, "court");
+  const courtStartAction = state.config.investigationMode === "court_only"
+    ? "move"
+    : "file_theory";
+  const courtStart = db.prepare(
+    `SELECT MIN(sequence) AS sequence
+       FROM debate_mystery_actions
+      WHERE user_id = ? AND session_id = ? AND action_kind = ?`,
+  ).get(userId, sessionId, courtStartAction) as { sequence: number | null };
+  if (!Number.isInteger(courtStart.sequence)) {
+    throw new HttpError(409, "The filed courtroom boundary is unavailable.");
+  }
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare("DELETE FROM debate_events WHERE user_id = ? AND session_id = ?")
+      .run(userId, sessionId);
+    db.prepare("DELETE FROM debate_mutations WHERE user_id = ? AND session_id = ?")
+      .run(userId, sessionId);
+    db.prepare(
+      "DELETE FROM debate_mystery_actions WHERE user_id = ? AND session_id = ? AND sequence > ?",
+    ).run(userId, sessionId, courtStart.sequence);
+    const restarted = persistV2Session(
+      db,
+      userId,
+      resetSession,
+      resetState,
+      session.revision,
+    );
+    recordMysteryV2Restart(db, userId, session, restarted, restartKey);
+    appendV2Action(db, userId, sessionId, "restart_court", {});
+    db.exec("COMMIT");
+    return restarted;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export function applyDebateMysteryActionV2(
   db: DatabaseSync,
   userId: string,
@@ -8208,6 +8942,29 @@ export function applyDebateMysteryActionV2(
   }
   const { privateCase, graph } = getDebateMysteryCaseV2(db, userId, sessionId);
   let state = structuredClone(session.formatState);
+  const assetRevealRequests: Array<{
+    kind: "evidence" | "room";
+    subjectId: string;
+  }> = [];
+  const authorizeAsset = (
+    kind: "evidence" | "room",
+    subjectId: string,
+  ): void => {
+    assetRevealRequests.push({ kind, subjectId });
+    if (kind === "room") {
+      state.rooms = state.rooms.map((room) =>
+        room.id === subjectId && room.sealedAsset
+          ? { ...room, sealedAsset: { ...room.sealedAsset, revealed: true } }
+          : room);
+    } else {
+      state.record = state.record.map((item) =>
+        item.reference.kind === "evidence" &&
+        item.reference.id === subjectId &&
+        item.sealedAsset
+          ? { ...item, sealedAsset: { ...item.sealedAsset, revealed: true } }
+          : item);
+    }
+  };
   const spectator = state.config.playerRole === "spectator";
   const courtOnly = state.config.investigationMode === "court_only";
   if (
@@ -8234,7 +8991,22 @@ export function applyDebateMysteryActionV2(
         throw new HttpError(409, "Dismiss the Casekeeper briefing before entering a room.");
       }
       state.playPhase = "case_opening";
-      state.roomView = "mansion";
+      const crimeScene = state.rooms.find(
+        (room) => room.id === (state.crimeSceneRoomId ?? privateCase.crimeSceneRoomId),
+      );
+      if (!crimeScene) throw new HttpError(409, "The authored crime scene is unavailable.");
+      if (crimeScene.sealedAsset?.status === "pending") {
+        throw new HttpError(
+          409,
+          "The Casekeeper is still securing this room. Try again shortly.",
+          "MYSTERY_ROOM_BEING_SECURED",
+        );
+      }
+      crimeScene.visited = true;
+      crimeScene.accessState = "visited";
+      state.currentRoomId = crimeScene.id;
+      state.roomView = "room";
+      if (crimeScene.sealedAsset) authorizeAsset("room", crimeScene.id);
     } else if (state.playPhase === "case_opening") {
       throw new HttpError(409, "Dismiss the Casekeeper briefing before moving through the mansion.");
     }
@@ -8246,13 +9018,49 @@ export function applyDebateMysteryActionV2(
           throw new HttpError(409, "Mansion movement is unavailable right now.");
         }
         if (!request.roomId) {
+          if (!state.openingSweepComplete) {
+            throw new HttpError(
+              409,
+              "Finish the finite visible sweep before opening the mansion map.",
+              "MYSTERY_OPENING_SWEEP_INCOMPLETE",
+            );
+          }
           state.roomView = "mansion";
         } else {
           const room = state.rooms.find((entry) => entry.id === request.roomId);
           if (!room?.unlocked) throw new HttpError(409, "That location has not unlocked.");
+          if (room.sealedAsset?.status === "pending") {
+            throw new HttpError(
+              409,
+              "The Casekeeper is still securing this room. Try again shortly.",
+              "MYSTERY_ROOM_BEING_SECURED",
+            );
+          }
+          if (!state.openingSweepComplete && room.id !== state.currentRoomId) {
+            throw new HttpError(
+              409,
+              "Finish the finite visible sweep before leaving the crime scene.",
+              "MYSTERY_OPENING_SWEEP_INCOMPLETE",
+            );
+          }
+          const currentRoom = state.rooms.find((entry) => entry.id === state.currentRoomId);
+          if (
+            currentRoom &&
+            currentRoom.id !== room.id &&
+            !(currentRoom.neighborIds ?? []).includes(room.id) &&
+            !(room.neighborIds ?? []).includes(currentRoom.id)
+          ) {
+            throw new HttpError(
+              409,
+              "Move through one adjacent doorway at a time.",
+              "MYSTERY_ROOM_NOT_ADJACENT",
+            );
+          }
           room.visited = true;
+          room.accessState = "visited";
           state.currentRoomId = room.id;
           state.roomView = "room";
+          if (room.sealedAsset) authorizeAsset("room", room.id);
           const introduction = graph.roomIntroductionNodeIdsByRoom?.[room.id];
           if (introduction && state.roomIntroductions[room.id] === "unseen") {
             state = executeDialogueNodeV2({
@@ -8271,10 +9079,30 @@ export function applyDebateMysteryActionV2(
       throw new HttpError(409, "The Casekeeper briefing is not awaiting dismissal.");
     }
     state.playPhase = "investigation";
-    state.roomView = "mansion";
+    state.roomView = "room";
     // Retain the immutable briefing in history, but prevent it from becoming
-    // ambient dialogue once the overhead map is visible.
+    // ambient dialogue once the crime-scene sweep begins.
     state.activeDialogueNodeId = null;
+    const crimeSceneId = state.currentRoomId;
+    const introduction = crimeSceneId
+      ? graph.roomIntroductionNodeIdsByRoom?.[crimeSceneId]
+      : null;
+    if (
+      crimeSceneId &&
+      introduction &&
+      state.roomIntroductions[crimeSceneId] === "unseen"
+    ) {
+      state = executeDialogueNodeV2({
+        state,
+        graph,
+        privateCase,
+        nodeId: introduction.casekeeperNodeId,
+      });
+      state.roomIntroductions = {
+        ...state.roomIntroductions,
+        [crimeSceneId]: "casekeeper",
+      };
+    }
   } else if (request.action === "advance_room_introduction") {
     if (state.playPhase !== "investigation" || state.roomView !== "room" || state.currentRoomId !== request.roomId) {
       throw new HttpError(409, "Enter this room before continuing its introduction.");
@@ -8298,16 +9126,20 @@ export function applyDebateMysteryActionV2(
       throw new HttpError(409, "Enter this room before examining it.");
     }
     const room = state.rooms.find((entry) => entry.id === request.roomId);
+    if (!room) throw new HttpError(404, "That room is not authored for this case.");
     if (state.roomIntroductions[request.roomId] && state.roomIntroductions[request.roomId] !== "complete") {
       throw new HttpError(409, "Let the room introduction finish before examining it.");
     }
-    const hotspot = room?.hotspots.find((entry) => entry.id === request.hotspotId);
+    const hotspot = room.hotspots.find((entry) => entry.id === request.hotspotId);
     if (!hotspot?.unlocked) throw new HttpError(409, "That examination point is locked.");
     if (hotspot.examined) throw new HttpError(409, "That examination point is already in the record.");
     const nodeId = privateCase.examineNodeIdByHotspot[`${request.roomId}:${request.hotspotId}`];
     if (!nodeId) throw new HttpError(404, "That examination point is not authored for this case.");
     state = executeDialogueNodeV2({ state, graph, privateCase, nodeId });
     hotspot.examined = true;
+    if (room.id === (state.crimeSceneRoomId ?? privateCase.crimeSceneRoomId)) {
+      state.openingSweepComplete = room.hotspots.every((entry) => entry.examined);
+    }
   } else if (request.action === "talk") {
     if (state.playPhase !== "investigation" || state.roomView !== "room") {
       throw new HttpError(409, "Enter the suspect's room before choosing a Talk topic.");
@@ -8569,6 +9401,17 @@ export function applyDebateMysteryActionV2(
     : state.discoveryIds.includes("briefing:complete") &&
       state.metSuspectSeatIds.length > 0 &&
       state.record.some((item) => item.admitted);
+  for (const item of state.record) {
+    if (
+      item.admitted &&
+      item.reference.kind === "evidence" &&
+      item.sealedAsset &&
+      !item.sealedAsset.revealed &&
+      item.sealedAsset.status !== "pending"
+    ) {
+      authorizeAsset("evidence", item.reference.id);
+    }
+  }
   let nextSession: DebateSessionV1 = {
     ...session,
     status: state.playPhase === "verdict" ? "completed" : "waiting_for_player",
@@ -8581,6 +9424,15 @@ export function applyDebateMysteryActionV2(
   };
   db.exec("BEGIN IMMEDIATE");
   try {
+    for (const reveal of assetRevealRequests) {
+      revealDebateMysteryAssetV1(
+        db,
+        userId,
+        sessionId,
+        reveal.kind,
+        reveal.subjectId,
+      );
+    }
     nextSession = persistV2Session(db, userId, nextSession, state, session.revision);
     db.prepare(
       `INSERT INTO debate_mutations

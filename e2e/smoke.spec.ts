@@ -4878,6 +4878,25 @@ test.describe("PRISM desktop smoke", () => {
         '[data-bot-showcase-context="true"] [data-avatar-details-mask="true"]',
       ),
     ).toBeVisible();
+    const fullHdFace = page.locator(
+      '[data-bot-showcase-context="true"] .zenLiveBotPresenceFaceGlyph',
+    );
+    const eyeEmission = fullHdFace
+      .locator(
+        '[data-coffee-plate-emoji-part="eyes"] [data-crt-raster-emission-surface="true"]',
+      )
+      .first();
+    const mouthEmission = fullHdFace.locator(
+      '[data-coffee-plate-emoji-part="mouth"] [data-crt-raster-emission-surface="true"]',
+    );
+    await expect(eyeEmission).toBeVisible();
+    await expect(mouthEmission).toBeVisible();
+    await expect(eyeEmission).toHaveCSS("visibility", "visible");
+    await expect(mouthEmission).toHaveCSS("visibility", "visible");
+    await fullHdFace.screenshot({
+      path: ".codex/output/full-hd-avatar-face-regression.png",
+      animations: "disabled",
+    });
     await activateNavigationControl(
       page.getByRole("button", { name: /^Avatar Studio/ }),
     );

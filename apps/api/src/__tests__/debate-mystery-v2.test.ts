@@ -7,6 +7,7 @@ import { after, describe, it } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import type {
   DebateMysteryActionRequestV2,
+  DebateMysterySealedAssetRefV1,
   DebateSessionV1,
   DebateWhodunnitCreateConfigV2,
   DebateWhodunnitFormatStateV2,
@@ -20,7 +21,9 @@ import {
 import { initializeDatabase } from "../db.ts";
 import { exportUserSnapshot, importUserSnapshot } from "../backup.ts";
 import {
+  activeDebateMysteryCompilationV2,
   applyDebateMysteryActionV2,
+  cancelDebateMysteryCompilationV2,
   cleanupUnreferencedDebateMysteryAudioV2,
   createDebateMysterySessionV2,
   ensureDebateMysteryPlayReadyV2,
@@ -29,6 +32,8 @@ import {
   getDebateMysteryCaseV2,
   getDebateMysteryCompilationStatusV2,
   playDebateMysteryV2Again,
+  restartDebateMysteryCourtV2,
+  restartDebateMysteryInvestigationV2,
   resolveDebateMysteryTalkExchangeV2,
   retryDebateMysteryCompilationV2,
   runDebateMysteryCompilationV2,
@@ -37,7 +42,19 @@ import {
   listDebateMysteryMansionBundlesV2,
   saveDebateMysteryMansionBundleV2,
 } from "../debate-mystery-mansion-bundles.ts";
-import { getDebateSession, listDebateSessions, type DebateAiRuntime } from "../debate.ts";
+import {
+  getRevealedDebateMysteryAssetFileV1,
+  revealDebateMysteryAssetV1,
+  sealDebateMysteryAssetBytesV1,
+  setDebateMysteryAssetFallbackV1,
+  setDebateMysteryAssetPendingV1,
+} from "../debate-mystery-assets.ts";
+import {
+  deleteDebateSession,
+  getDebateSession,
+  listDebateSessions,
+  type DebateAiRuntime,
+} from "../debate.ts";
 import type { GenerateOptions, LlmProvider, ProviderMessage } from "../providers.ts";
 
 const NOW = "2026-08-24T12:00:00.000Z";
@@ -57,6 +74,7 @@ class V2AuthorProvider implements LlmProvider {
   public readonly diagnosticModel = "mystery-v2-test";
   public calls = 0;
   public readonly sections: string[] = [];
+  public readonly requests: Array<Record<string, unknown>> = [];
   public readonly personaDialogueRequests: Array<{
     lines: Array<{ lineId: string; speakerBotId: string; canonicalText: string }>;
   }> = [];
@@ -84,6 +102,7 @@ class V2AuthorProvider implements LlmProvider {
         }>;
       };
     };
+    this.requests.push(request as unknown as Record<string, unknown>);
     this.sections.push(request.section === "suspect_chapter"
       ? `${request.section}:${request.suspect?.seatId ?? "unknown"}`
       : request.section);
@@ -217,6 +236,23 @@ class InterruptingV2AuthorProvider extends V2AuthorProvider {
     ) {
       this.calls += 1;
       this.sections.push("suspect_chapter:suspect-2");
+      return "{}";
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class InterruptingSpectatorChoicesV2AuthorProvider extends V2AuthorProvider {
+  public permitChoices = false;
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const request = JSON.parse(messages.at(-1)!.content) as { section?: string };
+    if (request.section === "prosecution_choices" && !this.permitChoices) {
+      this.calls += 1;
+      this.sections.push("prosecution_choices");
       return "{}";
     }
     return super.generateResponse(messages, options);
@@ -627,6 +663,156 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(index?.name, "idx_debate_mystery_v2_cases_family_run");
   });
 
+  it("restarts the open investigation and unlocked court without changing the sealed Run", async () => {
+    const db = testDb();
+    const provider = new V2AuthorProvider();
+    let investigation = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "restart-v2-investigation-create",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    investigation = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      investigation.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    const sealedInvestigation = db.prepare(
+      `SELECT private_case_json, dialogue_graph_json, case_hash, graph_hash,
+              case_family_id, run_ordinal
+         FROM debate_mystery_v2_cases
+        WHERE user_id = ? AND session_id = ?`,
+    ).get("user-1", investigation.id);
+    investigation = act(
+      db,
+      investigation,
+      { action: "move" },
+      "restart-v2-open-casekeeper",
+    );
+    investigation = act(
+      db,
+      investigation,
+      { action: "dismiss_case_opening" },
+      "restart-v2-dismiss-casekeeper",
+    );
+    assert.equal(v2State(investigation).playPhase, "investigation");
+    const restartedInvestigation = restartDebateMysteryInvestigationV2(
+      db,
+      "user-1",
+      investigation.id,
+      {
+        expectedRevision: investigation.revision,
+        idempotencyKey: "restart-v2-investigation",
+      },
+    );
+    assert.equal(v2State(restartedInvestigation).playPhase, "title_card");
+    assert.equal(restartedInvestigation.status, "waiting_for_player");
+    assert.equal(restartedInvestigation.stepKey, "mystery_v2_title");
+    assert.equal(v2State(restartedInvestigation).theory, null);
+    assert.equal(v2State(restartedInvestigation).court, null);
+    assert.equal(
+      listDebateSessions(db, "user-1").find((entry) => entry.id === investigation.id)
+        ?.mysteryInvestigationMode,
+      "full",
+    );
+    assert.ok(
+      v2State(restartedInvestigation).rooms.every((room) =>
+        room.hotspots.every((hotspot) => !hotspot.examined)),
+    );
+    assert.deepEqual(
+      db.prepare(
+        "SELECT action_kind FROM debate_mystery_actions WHERE user_id = ? AND session_id = ? ORDER BY sequence",
+      ).all("user-1", investigation.id).map((row) => (row as { action_kind: string }).action_kind),
+      ["restart_investigation"],
+    );
+    assert.deepEqual(
+      db.prepare(
+        `SELECT private_case_json, dialogue_graph_json, case_hash, graph_hash,
+                case_family_id, run_ordinal
+           FROM debate_mystery_v2_cases
+          WHERE user_id = ? AND session_id = ?`,
+      ).get("user-1", investigation.id),
+      sealedInvestigation,
+    );
+    assert.equal(
+      restartDebateMysteryInvestigationV2(db, "user-1", investigation.id, {
+        expectedRevision: investigation.revision,
+        idempotencyKey: "restart-v2-investigation",
+      }).revision,
+      restartedInvestigation.revision,
+    );
+
+    let court = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      { ...config(), investigationMode: "court_only" },
+      "restart-v2-court-create",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    court = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      court.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    court = act(db, court, { action: "move" }, "restart-v2-enter-court");
+    const filedTheory = structuredClone(v2State(court).theory);
+    const filedAt = v2State(court).theoryFiledAt;
+    const admittedRecord = structuredClone(v2State(court).record);
+    const firstChapterId = v2State(court).court?.activeChapterId;
+    const firstStatementId = v2State(court).court?.activeStatementId;
+    assert.ok(firstChapterId && firstStatementId);
+    court = act(
+      db,
+      court,
+      { action: "press_statement", statementId: firstStatementId },
+      "restart-v2-progress-court",
+    );
+    const restartedCourt = restartDebateMysteryCourtV2(db, "user-1", court.id, {
+      expectedRevision: court.revision,
+      idempotencyKey: "restart-v2-court",
+    });
+    const restartedCourtState = v2State(restartedCourt);
+    assert.equal(restartedCourtState.playPhase, "trial");
+    assert.equal(restartedCourt.status, "waiting_for_player");
+    assert.equal(restartedCourt.stepKey, "mystery_v2_trial");
+    assert.deepEqual(restartedCourtState.theory, filedTheory);
+    assert.equal(restartedCourtState.theoryFiledAt, filedAt);
+    assert.deepEqual(restartedCourtState.record, admittedRecord);
+    assert.equal(restartedCourtState.court?.activeChapterId, firstChapterId);
+    assert.equal(restartedCourtState.court?.activeStatementId, firstStatementId);
+    assert.deepEqual(restartedCourtState.court?.completedChapterIds, []);
+    assert.equal(
+      restartedCourtState.court?.credibilityRemaining,
+      restartedCourtState.court?.credibilityMaximum,
+    );
+    assert.deepEqual(restartedCourtState.calloutHistory.map((entry) => entry.callout), ["order"]);
+    assert.equal(
+      listDebateSessions(db, "user-1").find((entry) => entry.id === court.id)
+        ?.mysteryInvestigationMode,
+      "court_only",
+    );
+    assert.deepEqual(
+      db.prepare(
+        "SELECT action_kind FROM debate_mystery_actions WHERE user_id = ? AND session_id = ? ORDER BY sequence",
+      ).all("user-1", court.id).map((row) => (row as { action_kind: string }).action_kind),
+      ["move", "restart_court"],
+    );
+    assert.equal(
+      restartDebateMysteryCourtV2(db, "user-1", court.id, {
+        expectedRevision: court.revision,
+        idempotencyKey: "restart-v2-court",
+      }).revision,
+      restartedCourt.revision,
+    );
+  });
+
   it("freezes court-only cases without generating investigation content or assets", async () => {
     const db = testDb();
     const provider = new V2AuthorProvider();
@@ -671,6 +857,36 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(v2State(reloaded).playPhase, "trial");
   });
 
+  it("starts a direct-court Spectator after the title card without Theory Board review", async () => {
+    const db = testDb();
+    const provider = new V2AuthorProvider();
+    let session = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      { ...config(), playerRole: "spectator", investigationMode: "court_only" },
+      "create-v2-spectator-direct-court",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    session = await runDebateMysteryCompilationV2(db, "user-1", session.id, runtime(provider), {
+      generateWave: async () => playableWave(),
+    });
+    assert.equal(v2State(session).compilation.stage, "complete");
+    const compiled = getDebateMysteryCaseV2(db, "user-1", session.id);
+    assert.ok(compiled.graph.prosecutionChoices.every((choice) => choice.options.length === 1));
+
+    session = act(db, session, { action: "move" }, "spectator-direct-court-title");
+    const state = v2State(session);
+    assert.equal(state.playPhase, "trial");
+    assert.ok(state.theoryFiledAt);
+    assert.ok(state.court?.activeChapterId);
+    assert.deepEqual(state.rooms, []);
+    assert.throws(
+      () => act(db, session, { action: "file_theory", theory: state.theory! }, "spectator-direct-court-refile"),
+      /only allows/iu,
+    );
+  });
+
   it("returns a spoiler-safe durable Case Forge before authoring begins", async () => {
     const db = testDb();
     const provider = new V2AuthorProvider();
@@ -700,6 +916,103 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
         ["prosecution-responses", "upcoming"],
       ],
     );
+  });
+
+  it("allows one account-scoped Case Forge while leaving idempotent retries safe", async () => {
+    const db = testDb();
+    const provider = new V2AuthorProvider();
+    const first = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "one-forge-first",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    const idempotent = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "one-forge-first",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    assert.equal(idempotent.id, first.id);
+    assert.deepEqual(activeDebateMysteryCompilationV2(db, "user-1"), {
+      sessionId: first.id,
+      status: "queued",
+    });
+    await assert.rejects(
+      () => createDebateMysterySessionV2(
+        db,
+        "user-1",
+        config(),
+        "one-forge-second",
+        runtime(provider),
+        { deferBackgroundStart: true },
+      ),
+      (error: unknown) =>
+        (error as { code?: string }).code === "MYSTERY_CASE_FORGE_ALREADY_ACTIVE",
+    );
+    const listed = listDebateSessions(db, "user-1").find((entry) => entry.id === first.id);
+    assert.equal(listed?.mysteryForge?.state, "active");
+    assert.equal(listed?.mysteryForge?.progressPercent, 0);
+    db.prepare(
+      `UPDATE debate_mystery_v2_jobs
+          SET status = 'running', cancellation_requested = 1
+        WHERE user_id = ? AND session_id = ?`,
+    ).run("user-1", first.id);
+    assert.deepEqual(activeDebateMysteryCompilationV2(db, "user-1"), {
+      sessionId: first.id,
+      status: "running",
+    });
+  });
+
+  it("releases the Case Forge slot after attention or cancellation", async () => {
+    const db = testDb();
+    const provider = new V2AuthorProvider();
+    const stopped = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "forge-attention-first",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    db.prepare(
+      `UPDATE debate_mystery_v2_jobs
+          SET status = 'needs_attention', stage = 'needs_attention'
+        WHERE user_id = ? AND session_id = ?`,
+    ).run("user-1", stopped.id);
+    const replacement = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "forge-attention-replacement",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    await assert.rejects(
+      () => retryDebateMysteryCompilationV2(
+        db,
+        "user-1",
+        stopped.id,
+        runtime(provider),
+        { deferBackgroundStart: true },
+      ),
+      (error: unknown) =>
+        (error as { code?: string }).code === "MYSTERY_CASE_FORGE_ALREADY_ACTIVE",
+    );
+    cancelDebateMysteryCompilationV2(db, "user-1", replacement.id);
+    const third = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "forge-after-cancel",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    assert.equal(activeDebateMysteryCompilationV2(db, "user-1")?.sessionId, third.id);
   });
 
   it("advances an empty Terra author through the frozen Auto lane chain", async () => {
@@ -943,6 +1256,69 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(provider.sections.filter((section) => section === "suspect_chapter:suspect-1").length, 1);
   });
 
+  it("prunes legacy Spectator investigation work and extra prosecution options on authoring resume", async () => {
+    const db = testDb();
+    const provider = new InterruptingSpectatorChoicesV2AuthorProvider();
+    let session = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      { ...config(), playerRole: "spectator" },
+      "create-v2-spectator-legacy-resume",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    session = await runDebateMysteryCompilationV2(db, "user-1", session.id, runtime(provider), {
+      generateWave: async () => playableWave(),
+    });
+    assert.equal(v2State(session).compilation.stage, "needs_attention");
+    const row = db.prepare(
+      "SELECT checkpoint_json FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
+    ).get("user-1", session.id) as { checkpoint_json: string };
+    const legacyDraft = JSON.parse(row.checkpoint_json) as Record<string, unknown>;
+    legacyDraft.kind = "authoring-v1";
+    delete legacyDraft.contextCapsule;
+    delete legacyDraft.provenanceBySection;
+    legacyDraft.examinationsById = {
+      ...legacyDraft.examinationsById as Record<string, string>,
+      "legacy-room:legacy-hotspot": "Legacy investigation material that must not enter the Spectator graph.",
+    };
+    legacyDraft.prosecutionChoices = [{
+      id: "legacy-spectator-choice",
+      witnessSeatId: "suspect-1",
+      prompt: "Which prosecution response should proceed?",
+      options: [
+        { id: "automatic", text: "Proceed on the exact contradiction.", stageAction: null, reaction: "The witness answers the contradiction.", reactionStageAction: null },
+        { id: "unused", text: "Pursue an unused alternative.", stageAction: null, reaction: "This response must be pruned.", reactionStageAction: null },
+      ],
+    }];
+    db.prepare(
+      "UPDATE debate_mystery_v2_jobs SET checkpoint_json = ? WHERE user_id = ? AND session_id = ?",
+    ).run(JSON.stringify(legacyDraft), "user-1", session.id);
+    const foundationCalls = provider.sections.filter((section) => section === "case_foundation").length;
+    const witnessCalls = provider.sections.filter((section) => section.startsWith("suspect_chapter:")).length;
+
+    await retryDebateMysteryCompilationV2(db, "user-1", session.id, runtime(provider), {
+      deferBackgroundStart: true,
+    });
+    session = await runDebateMysteryCompilationV2(db, "user-1", session.id, runtime(provider), {
+      generateWave: async () => playableWave(),
+    });
+    const legacyResumeFailure = db.prepare(
+      "SELECT private_error FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
+    ).get("user-1", session.id) as { private_error: string | null };
+    assert.equal(v2State(session).compilation.stage, "complete", legacyResumeFailure.private_error ?? undefined);
+    assert.equal(provider.sections.filter((section) => section === "case_foundation").length, foundationCalls);
+    assert.equal(provider.sections.filter((section) => section.startsWith("suspect_chapter:")).length, witnessCalls);
+    const compiled = getDebateMysteryCaseV2(db, "user-1", session.id);
+    assert.equal(compiled.graph.nodes.some((node) => node.scene === "investigation"), false);
+    assert.deepEqual(compiled.privateCase.investigationRoomIds, []);
+    assert.deepEqual(
+      compiled.graph.prosecutionChoices.map((choice) => choice.options.map((option) => option.id)),
+      [["automatic"]],
+    );
+    assert.equal(compiled.graph.lines.some((line) => /unused alternative|must be pruned/iu.test(line.spokenText)), false);
+  });
+
   it("prepares opted-in evidence through checkpointed canonical assets before play", async () => {
     const db = testDb();
     const provider = new V2AuthorProvider();
@@ -968,12 +1344,20 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
         generateWave: async () => playableWave(),
         prepareEvidenceAssets: async ({ exhibits, houseStyle, onPrepared }) => {
           assert.match(houseStyle.promptContract, /same mansion/iu);
-          const result: Record<string, string> = {};
+          const result: Record<string, DebateMysterySealedAssetRefV1> = {};
           for (const exhibit of exhibits) {
-            const imageId = `image-${exhibit.id}`;
+            const asset: DebateMysterySealedAssetRefV1 = {
+              version: 1,
+              id: `sealed-${exhibit.id}`,
+              kind: "evidence",
+              status: "ready",
+              source: "synthesized",
+              revealed: false,
+              mimeType: "image/png",
+            };
             preparedIds.push(exhibit.id);
-            result[exhibit.id] = imageId;
-            await onPrepared?.(exhibit.id, imageId);
+            result[exhibit.id] = asset;
+            await onPrepared?.(exhibit.id, asset);
           }
           return result;
         },
@@ -993,6 +1377,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
           reference: { kind: string; id: string };
           visualKind?: string;
           imageId?: string | null;
+          sealedAsset?: DebateMysterySealedAssetRefV1 | null;
         }>;
       };
     };
@@ -1002,7 +1387,11 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       [...preparedIds].sort(),
       evidence.map((item) => item.reference.id).sort(),
     );
-    assert.ok(evidence.every((item) => item.visualKind === "synthesized" && item.imageId));
+    assert.ok(evidence.every((item) =>
+      item.visualKind === "synthesized" &&
+      !item.imageId &&
+      item.sealedAsset?.status === "ready" &&
+      item.sealedAsset.revealed === false));
     assert.ok(state.record.every((item) =>
       item.reference.kind !== "evidence" || preparedIds.includes(item.reference.id)));
     const assetCheckpoints = db.prepare(
@@ -1074,7 +1463,15 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
         prepareEvidenceAssets: async ({ exhibits, onPrepared }) => {
           assert.ok(exhibits.length > 1);
           completedBeforeInterruption = exhibits[0]!.id;
-          await onPrepared?.(exhibits[0]!.id, `image-${exhibits[0]!.id}`);
+          await onPrepared?.(exhibits[0]!.id, {
+            version: 1,
+            id: `sealed-${exhibits[0]!.id}`,
+            kind: "evidence",
+            status: "ready",
+            source: "synthesized",
+            revealed: false,
+            mimeType: "image/png",
+          });
           throw new Error("simulated evidence preparation interruption");
         },
       },
@@ -1095,10 +1492,18 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
         generateWave: async () => playableWave(),
         prepareEvidenceAssets: async ({ exhibits, onPrepared }) => {
           assert.ok(exhibits.every((exhibit) => exhibit.id !== completedBeforeInterruption));
-          const result: Record<string, string> = {};
+          const result: Record<string, DebateMysterySealedAssetRefV1> = {};
           for (const exhibit of exhibits) {
             preparedAfterResume.push(exhibit.id);
-            result[exhibit.id] = `image-${exhibit.id}`;
+            result[exhibit.id] = {
+              version: 1,
+              id: `sealed-${exhibit.id}`,
+              kind: "evidence",
+              status: "ready",
+              source: "synthesized",
+              revealed: false,
+              mimeType: "image/png",
+            };
             await onPrepared?.(exhibit.id, result[exhibit.id]!);
           }
           return result;
@@ -1116,6 +1521,226 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(
       checkpoints.filter((row) => row.checkpoint_key.endsWith(completedBeforeInterruption!)).length,
       1,
+    );
+  });
+
+  it("checkpoints the room pack before play and resets only reveal state on investigation restart", async () => {
+    const db = testDb();
+    const provider = new V2AuthorProvider();
+    const configured = {
+      ...config(),
+      assetSynthesis: { evidence: false, rooms: true, music: false as const },
+    };
+    const onlineRuntime: DebateAiRuntime = {
+      ...runtime(provider),
+      preferredProvider: "openai",
+      responseMode: "online",
+      online: { provider, providerName: "openai", model: "mystery-v2-test" },
+    };
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      configured,
+      "create-v2-room-assets",
+      onlineRuntime,
+      { deferBackgroundStart: true },
+    );
+    const preparedRoomIds: string[] = [];
+    let session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      onlineRuntime,
+      {
+        generateWave: async () => playableWave(),
+        prepareRoomAssets: async ({ rooms, crimeSceneRoomId, mode, onPrepared }) => {
+          assert.equal(mode, "initial");
+          assert.ok(rooms.some((room) => room.id === crimeSceneRoomId));
+          const ordered = [...rooms].sort((left, right) =>
+            left.id === crimeSceneRoomId ? -1 : right.id === crimeSceneRoomId ? 1 : 0);
+          const result: Record<string, DebateMysterySealedAssetRefV1> = {};
+          for (const room of ordered) {
+            preparedRoomIds.push(room.id);
+            const asset = room.id === crimeSceneRoomId
+              ? setDebateMysteryAssetFallbackV1(db, {
+                  userId: "user-1",
+                  sessionId: created.id,
+                  kind: "room",
+                  subjectId: room.id,
+                  reason: "test bundled fallback",
+                })
+              : setDebateMysteryAssetPendingV1(db, {
+                  userId: "user-1",
+                  sessionId: created.id,
+                  kind: "room",
+                  subjectId: room.id,
+                });
+            result[room.id] = asset;
+            await onPrepared?.(room.id, asset);
+          }
+          return result;
+        },
+      },
+    );
+    let state = v2State(session);
+    assert.equal(state.compilation.stage, "complete");
+    assert.equal(preparedRoomIds[0], state.crimeSceneRoomId);
+    assert.equal(
+      state.rooms.find((room) => room.id === state.crimeSceneRoomId)?.sealedAsset?.status,
+      "fallback",
+    );
+    assert.ok(state.rooms.filter((room) => room.id !== state.crimeSceneRoomId).every((room) =>
+      room.sealedAsset?.status === "pending" && room.accessState === "being_secured"));
+    const assetIds = state.rooms.map((room) =>
+      (db.prepare(
+        `SELECT id FROM debate_mystery_asset_vault
+          WHERE user_id = ? AND session_id = ? AND kind = 'room' AND subject_id = ?`,
+      ).get("user-1", session.id, room.id) as { id: string }).id);
+
+    session = act(db, session, { action: "move" }, "reveal-v2-crime-scene-room");
+    state = v2State(session);
+    const crimeScene = state.rooms.find((room) => room.id === state.crimeSceneRoomId)!;
+    assert.equal(crimeScene.sealedAsset?.revealed, true);
+    assert.ok((db.prepare(
+      `SELECT revealed_at FROM debate_mystery_asset_vault
+        WHERE user_id = ? AND session_id = ? AND kind = 'room' AND subject_id = ?`,
+    ).get("user-1", session.id, crimeScene.id) as { revealed_at: string | null }).revealed_at);
+
+    const restarted = restartDebateMysteryInvestigationV2(
+      db,
+      "user-1",
+      session.id,
+      {
+        expectedRevision: session.revision,
+        idempotencyKey: "restart-v2-room-asset-reveal",
+      },
+    );
+    state = v2State(restarted);
+    assert.equal(state.playPhase, "title_card");
+    assert.deepEqual(state.rooms.map((room) =>
+      (db.prepare(
+        `SELECT id FROM debate_mystery_asset_vault
+          WHERE user_id = ? AND session_id = ? AND kind = 'room' AND subject_id = ?`,
+      ).get("user-1", session.id, room.id) as { id: string }).id), assetIds);
+    assert.ok(state.rooms.every((room) => room.sealedAsset?.revealed === false));
+    assert.equal(
+      (db.prepare(
+        "SELECT COUNT(*) AS count FROM debate_mystery_asset_vault WHERE revealed_at IS NOT NULL",
+      ).get() as { count: number }).count,
+      0,
+    );
+  });
+
+  it("rejects room synthesis for a LOCAL V2 case before authoring begins", async () => {
+    const db = testDb();
+    const provider = new V2AuthorProvider();
+    await assert.rejects(
+      createDebateMysterySessionV2(
+        db,
+        "user-1",
+        {
+          ...config(),
+          assetSynthesis: { evidence: false, rooms: true, music: false },
+        },
+        "create-v2-local-room-assets",
+        runtime(provider),
+        { deferBackgroundStart: true },
+      ),
+      (error: unknown) =>
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "MYSTERY_ROOM_SYNTHESIS_REQUIRES_ONLINE",
+    );
+  });
+
+  it("deletes sealed assets when a running Forge cancellation is reclaimed", async () => {
+    const db = testDb();
+    const provider = new V2AuthorProvider();
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-cancel-sealed-assets",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    setDebateMysteryAssetFallbackV1(db, {
+      userId: "user-1",
+      sessionId: created.id,
+      kind: "room",
+      subjectId: "room-pending-cancel",
+      reason: "test fallback awaiting cancellation",
+    });
+    db.prepare(
+      `UPDATE debate_mystery_v2_jobs
+          SET status = 'running', lease_owner = 'abandoned-worker',
+              leased_until = '2000-01-01T00:00:00.000Z'
+        WHERE user_id = ? AND session_id = ?`,
+    ).run("user-1", created.id);
+
+    cancelDebateMysteryCompilationV2(db, "user-1", created.id);
+    const cancelled = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      runtime(provider),
+    );
+
+    assert.equal(provider.calls, 0, "a reclaimed cancellation must stop before authoring");
+    assert.equal(cancelled.status, "cancelled");
+    assert.equal(v2State(cancelled).compilation.stage, "cancelled");
+    assert.equal(
+      (db.prepare(
+        "SELECT COUNT(*) AS count FROM debate_mystery_asset_vault WHERE user_id = ? AND session_id = ?",
+      ).get("user-1", created.id) as { count: number }).count,
+      0,
+    );
+  });
+
+  it("prevents a deleted Debate worker from restoring sealed case assets", async () => {
+    const db = testDb();
+    const provider = new V2AuthorProvider();
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-delete-sealed-assets",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    setDebateMysteryAssetFallbackV1(db, {
+      userId: "user-1",
+      sessionId: created.id,
+      kind: "evidence",
+      subjectId: "evidence-before-delete",
+      reason: "test fallback awaiting Debate deletion",
+    });
+    db.prepare(
+      `UPDATE debate_mystery_v2_jobs
+          SET status = 'running', lease_owner = 'abandoned-delete-worker',
+              leased_until = '2000-01-01T00:00:00.000Z'
+        WHERE user_id = ? AND session_id = ?`,
+    ).run("user-1", created.id);
+
+    deleteDebateSession(db, "user-1", created.id, {
+      expectedRevision: created.revision,
+      idempotencyKey: "delete-v2-running-forge",
+    });
+    const settled = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      runtime(provider),
+    );
+
+    assert.equal(provider.calls, 0, "a deleted Debate must not resume authoring");
+    assert.equal(settled.status, "cancelled");
+    assert.equal(v2State(settled).compilation.stage, "cancelled");
+    assert.equal(
+      (db.prepare(
+        "SELECT COUNT(*) AS count FROM debate_mystery_asset_vault WHERE user_id = ? AND session_id = ?",
+      ).get("user-1", created.id) as { count: number }).count,
+      0,
     );
   });
 
@@ -1534,42 +2159,93 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     session = act(db, session, { action: "dismiss_case_opening" }, "dismiss-casekeeper-opening");
     state = v2State(session);
     assert.equal(state.playPhase, "investigation");
-    assert.equal(state.roomView, "mansion");
-    assert.equal(state.activeDialogueNodeId, null);
-    assert.deepEqual(state.dialogueHistory.at(-1), openingDialogue, "dismissing the briefing preserves the sealed transcript");
+    assert.equal(state.roomView, "room");
+    assert.equal(state.currentRoomId, privateCase.crimeSceneRoomId);
+    assert.throws(
+      () => act(db, session, { action: "move" }, "map-before-visible-sweep"),
+      /finite visible sweep/iu,
+    );
     assert.equal(provider.calls, providerCallsBeforeOpening, "opening the case only reuses the compiled briefing");
-    session = act(db, session, { action: "move", roomId: privateCase.crimeSceneRoomId }, "enter-crime-scene");
-    state = v2State(session);
-    for (const room of state.rooms) {
-      session = act(db, session, { action: "move", roomId: room.id }, `move-${room.id}`);
+    const finishRoom = (roomId: string): void => {
       const entered = v2State(session);
-      if (entered.roomIntroductions[room.id] === "casekeeper") {
+      if (entered.roomIntroductions[roomId] === "casekeeper") {
         const silentBeat = entered.dialogueHistory.at(-1)!;
         assert.equal(silentBeat.visibleText, "...");
         assert.equal(silentBeat.delivery, "text_only");
-        assert.equal(silentBeat.lineId, "line-room-introduction-" + room.id + "-casekeeper");
-        session = act(db, session, { action: "advance_room_introduction", roomId: room.id }, `intro-casekeeper-${room.id}`);
+        assert.equal(silentBeat.lineId, "line-room-introduction-" + roomId + "-casekeeper");
+        session = act(db, session, { action: "advance_room_introduction", roomId }, `intro-casekeeper-${roomId}`);
         const personaBeat = v2State(session).dialogueHistory.at(-1)!;
-        assert.equal(v2State(session).roomIntroductions[room.id], "persona");
+        assert.equal(v2State(session).roomIntroductions[roomId], "persona");
         assert.equal(personaBeat.delivery, "spoken");
-        assert.ok(personaBeat.lineId?.includes(`room-introduction-${room.id}-persona`));
-        assert.equal(personaBeat.speakerBotId, state.suspects.find((suspect) => suspect.roomId === room.id)?.botId);
+        assert.ok(personaBeat.lineId?.includes(`room-introduction-${roomId}-persona`));
+        assert.equal(personaBeat.speakerBotId, entered.suspects.find((suspect) => suspect.roomId === roomId)?.botId);
         assert.ok((manifest as { entries: Array<{ lineId: string }> }).entries.some(
           (entry) => entry.lineId === personaBeat.lineId,
         ));
         assert.equal((manifest as { entries: Array<{ lineId: string }> }).entries.some(
           (entry) => entry.lineId === silentBeat.lineId,
         ), false);
-        session = act(db, session, { action: "complete_room_introduction", roomId: room.id }, `intro-persona-${room.id}`);
-        assert.equal(v2State(session).roomIntroductions[room.id], "complete");
+        session = act(db, session, { action: "complete_room_introduction", roomId }, `intro-persona-${roomId}`);
+        assert.equal(v2State(session).roomIntroductions[roomId], "complete");
       }
-      for (const hotspot of v2State(session).rooms.find((entry) => entry.id === room.id)!.hotspots) {
-        session = act(db, session, { action: "examine", roomId: room.id, hotspotId: hotspot.id }, `examine-${room.id}-${hotspot.id}`);
+      for (const hotspot of v2State(session).rooms.find((entry) => entry.id === roomId)!.hotspots.filter((entry) => !entry.examined)) {
+        session = act(db, session, { action: "examine", roomId, hotspotId: hotspot.id }, `examine-${roomId}-${hotspot.id}`);
         const observation = v2State(session).dialogueHistory.at(-1)!;
         assert.equal(observation.delivery, "text_only");
         assert.equal(observation.lineId, null);
       }
-    }
+    };
+    finishRoom(privateCase.crimeSceneRoomId);
+    assert.equal(v2State(session).openingSweepComplete, true);
+    session = act(db, session, { action: "move" }, "open-map-after-visible-sweep");
+    assert.equal(v2State(session).roomView, "mansion");
+    session = act(db, session, { action: "move", roomId: privateCase.crimeSceneRoomId }, "return-to-crime-scene");
+
+    const visitedRooms = new Set<string>();
+    const walkConnectedRooms = (roomId: string): void => {
+      visitedRooms.add(roomId);
+      finishRoom(roomId);
+      const room = v2State(session).rooms.find((entry) => entry.id === roomId)!;
+      for (const neighborId of room.neighborIds ?? []) {
+        if (visitedRooms.has(neighborId)) continue;
+        session = act(db, session, { action: "move", roomId: neighborId }, `walk-${roomId}-${neighborId}`);
+        walkConnectedRooms(neighborId);
+        session = act(db, session, { action: "move", roomId }, `walk-return-${neighborId}-${roomId}`);
+      }
+    };
+    walkConnectedRooms(privateCase.crimeSceneRoomId);
+    assert.equal(visitedRooms.size, v2State(session).rooms.length);
+
+    const moveToRoom = (targetRoomId: string, keyPrefix: string): void => {
+      const movementState = v2State(session);
+      const startRoomId = movementState.currentRoomId!;
+      if (startRoomId === targetRoomId) return;
+      const roomsById = new Map(movementState.rooms.map((room) => [room.id, room]));
+      const queue: Array<{ roomId: string; path: string[] }> = [{ roomId: startRoomId, path: [] }];
+      const seen = new Set([startRoomId]);
+      let path: string[] | null = null;
+      while (queue.length > 0 && !path) {
+        const current = queue.shift()!;
+        const direct = roomsById.get(current.roomId)?.neighborIds ?? [];
+        const reverse = movementState.rooms
+          .filter((room) => (room.neighborIds ?? []).includes(current.roomId))
+          .map((room) => room.id);
+        for (const neighborId of [...new Set([...direct, ...reverse])]) {
+          if (seen.has(neighborId)) continue;
+          const nextPath = [...current.path, neighborId];
+          if (neighborId === targetRoomId) {
+            path = nextPath;
+            break;
+          }
+          seen.add(neighborId);
+          queue.push({ roomId: neighborId, path: nextPath });
+        }
+      }
+      assert.ok(path, `room ${targetRoomId} must be connected to ${startRoomId}`);
+      for (const [index, roomId] of path.entries()) {
+        session = act(db, session, { action: "move", roomId }, `${keyPrefix}-${index}-${roomId}`);
+      }
+    };
     state = v2State(session);
     const gateRecord = state.record.find((item) =>
       item.admitted && recordReferenceKey(item.reference) === recordReferenceKey(presentationGate.requiredRecord));
@@ -1580,7 +2256,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       item.admitted && recordReferenceKey(item.reference) !== recordReferenceKey(gateRecord.reference));
     assert.ok(wrongGateRecord, "the case should admit a distinct wrong record for the gate check");
 
-    session = act(db, session, { action: "move", roomId: wrongSuspect.roomId! }, "move-wrong-gate-recipient");
+    moveToRoom(wrongSuspect.roomId!, "move-wrong-gate-recipient");
     session = act(db, session, {
       action: "present_to_suspect",
       suspectSeatId: wrongSuspect.seatId,
@@ -1588,7 +2264,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     }, "present-gate-record-to-wrong-recipient");
     assert.equal(v2State(session).topics.find((topic) => topic.nodeId === gatedTopicTarget.topicNodeId)?.unlocked, false);
 
-    session = act(db, session, { action: "move", roomId: gateSuspect.roomId! }, "move-correct-gate-recipient");
+    moveToRoom(gateSuspect.roomId!, "move-correct-gate-recipient");
     session = act(db, session, {
       action: "present_to_suspect",
       suspectSeatId: gateSuspect.seatId,
@@ -1604,7 +2280,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(v2State(session).topics.find((topic) => topic.nodeId === gatedTopicTarget.topicNodeId)?.unlocked, true);
 
     const firstSuspect = state.suspects[0]!;
-    session = act(db, session, { action: "move", roomId: firstSuspect.roomId! }, "move-first-suspect");
+    moveToRoom(firstSuspect.roomId!, "move-first-suspect");
     assert.throws(
       () => act(db, session, {
         action: "present_to_suspect",
@@ -1747,19 +2423,50 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     const referencedStorage = getDebateMysteryAudioStorageSummaryV2(db, "user-1");
     assert.equal(referencedStorage.referencedClipCount, uniqueClipCount);
     assert.equal(referencedStorage.cleanupCandidateCount, 0);
-    const backup = exportUserSnapshot(db, "user-1", Buffer.alloc(32, 7));
+    const backupKey = Buffer.alloc(32, 7);
+    const sealedRoomBytes = Buffer.from("sealed-room-backup-bytes");
+    sealDebateMysteryAssetBytesV1(db, backupKey, {
+      userId: "user-1",
+      sessionId: session.id,
+      kind: "room",
+      subjectId: state.rooms[0]!.id,
+      bytes: sealedRoomBytes,
+      provider: "openai",
+      model: "gpt-image-test",
+      review: { attempt: 1, vision: { approved: true } },
+    });
+    revealDebateMysteryAssetV1(
+      db,
+      "user-1",
+      session.id,
+      "room",
+      state.rooms[0]!.id,
+    );
+    const backup = exportUserSnapshot(db, "user-1", backupKey);
     assert.equal(backup.debates?.mysteryV2?.cases.length, 1);
     assert.equal(backup.debates?.mysteryV2?.manifests[0]?.status, "complete");
     assert.equal(backup.debates?.mysteryV2?.clips.length, uniqueClipCount);
+    assert.equal(backup.debates?.mysteryAssets?.assets.length, 1);
     db.prepare("DELETE FROM debate_sessions WHERE user_id = 'user-1' AND id = ?").run(session.id);
     const releasedStorage = getDebateMysteryAudioStorageSummaryV2(db, "user-1");
     assert.equal(releasedStorage.referencedClipCount, 0);
     assert.equal(releasedStorage.cleanupCandidateCount, uniqueClipCount);
-    importUserSnapshot(db, "user-1", backup, Buffer.alloc(32, 7));
+    importUserSnapshot(db, "user-1", backup, backupKey);
     const restoredCase = getDebateMysteryCaseV2(db, "user-1", session.id);
     assert.equal(restoredCase.graph.caseId, graph.caseId);
     assert.ok(getDebateMysteryAudioClipV2(db, "user-1", session.id, firstManifestEntry.lineId).byteSize > 0);
     assert.equal(getDebateMysteryAudioStorageSummaryV2(db, "user-1").referencedClipCount, uniqueClipCount);
+    assert.deepEqual(
+      getRevealedDebateMysteryAssetFileV1(
+        db,
+        backupKey,
+        "user-1",
+        session.id,
+        "room",
+        state.rooms[0]!.id,
+      ).bytes,
+      sealedRoomBytes,
+    );
     db.prepare("DELETE FROM debate_sessions WHERE user_id = 'user-1' AND id = ?").run(session.id);
     const cleanup = cleanupUnreferencedDebateMysteryAudioV2(db, "user-1");
     assert.equal(cleanup.removedClipCount, uniqueClipCount);
@@ -2178,8 +2885,63 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     session = await runDebateMysteryCompilationV2(db, "user-1", session.id, runtime(provider), {
       generateWave: async () => playableWave(),
     });
+    const spectatorFailure = db.prepare(
+      "SELECT private_error FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
+    ).get("user-1", session.id) as { private_error: string | null };
+    assert.equal(v2State(session).compilation.stage, "complete", spectatorFailure.private_error ?? undefined);
     const callsAfterCompile = provider.calls;
     const compiled = getDebateMysteryCaseV2(db, "user-1", session.id);
+    const compiledState = v2State(session);
+    assert.equal(compiledState.compilation.substeps.some((substep) => substep.id === "room-details"), false);
+    assert.deepEqual(compiledState.rooms, []);
+    assert.deepEqual(compiledState.topics, []);
+    assert.deepEqual(compiled.privateCase.investigationRoomIds, []);
+    assert.deepEqual(compiled.privateCase.investigationHotspotIdsByRoom, {});
+    assert.deepEqual(compiled.privateCase.investigationPersonIds, []);
+    assert.equal(provider.sections.includes("room_examinations"), false);
+    assert.equal(compiled.graph.nodes.some((node) => node.scene === "investigation"), false);
+    assert.equal(compiled.graph.nodes.some((node) => [
+      "briefing",
+      "examination_result",
+      "room_introduction",
+      "talk_topic",
+      "present_reaction",
+    ].includes(node.kind)), false);
+    assert.ok(compiled.graph.prosecutionChoices.length > 0);
+    assert.ok(compiled.graph.prosecutionChoices.every((choice) => choice.options.length === 1));
+    const spectatorAuthoringRequests = provider.requests.filter((request) =>
+      request.section === "suspect_chapter");
+    assert.ok(spectatorAuthoringRequests.length > 0);
+    for (const request of spectatorAuthoringRequests) {
+      const setup = request.setup as { roomNames?: unknown[]; examinationIds?: unknown[] };
+      assert.deepEqual(setup.roomNames, []);
+      assert.deepEqual(setup.examinationIds, []);
+      assert.doesNotMatch(
+        JSON.stringify(request.outputContract),
+        /roomIntroduction|talkTopics|presentReactions|defaultPresent/iu,
+      );
+    }
+    const prosecutionRequest = provider.requests.find((request) =>
+      request.section === "prosecution_choices");
+    const prosecutionContract = prosecutionRequest?.outputContract as {
+      prosecutionChoices?: {
+        itemShape?: { options?: { minimumItems?: number; maximumItems?: number } };
+      };
+    };
+    assert.equal(prosecutionContract.prosecutionChoices?.itemShape?.options?.minimumItems, 1);
+    assert.equal(prosecutionContract.prosecutionChoices?.itemShape?.options?.maximumItems, 1);
+    const manifestRow = db.prepare(
+      "SELECT manifest_json FROM debate_mystery_audio_manifests WHERE user_id = ? AND session_id = ?",
+    ).get("user-1", session.id) as { manifest_json: string };
+    const manifest = JSON.parse(manifestRow.manifest_json) as { entries: Array<{ lineId: string }> };
+    assert.deepEqual(
+      new Set(manifest.entries.map((entry) => entry.lineId)),
+      new Set(compiled.privateCase.graphValidation.reachableSpokenLineIds),
+    );
+    assert.equal(
+      manifest.entries.some((entry) => entry.lineId === "line-choice-define-the-conflict-demeanor-option"),
+      false,
+    );
     const authorized = debateMysterySpectatorEvidenceReferencesV2(compiled.graph)
       .map((reference) => `${reference.kind}:${reference.id}`)
       .sort();
@@ -2625,5 +3387,77 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       replayRoute,
       /debateAiRuntimeForUser|runWithUsageSession|prepareDebateMysteryV2EvidenceAssets|generateWave/iu,
     );
+  });
+
+  it("owns V2 Case Forge work server-side and returns resume requests immediately", () => {
+    const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+    assert.match(serverSource, /const mysteryCompilationBackgroundRuns = new Map/u);
+    assert.match(serverSource, /function queueActiveDebateMysteryV2Compilation/u);
+    assert.match(serverSource, /function queueDebateMysteryV2CompilationInBackground/u);
+    assert.match(serverSource, /runDebateMysteryCompilationV2/u);
+    assert.match(serverSource, /queueActiveDebateMysteryV2Compilation\(user\.id\)/u);
+    assert.match(serverSource, /if \(options\.db\) detachedBackgroundJobsAllowed = false/u);
+
+    const resumeStart = serverSource.indexOf(
+      'route("POST", "/api/debates/:id/mystery-resume-compilation"',
+    );
+    const statusStart = serverSource.indexOf(
+      'route("GET", "/api/debates/:id/mystery-compilation"',
+      resumeStart,
+    );
+    assert.ok(resumeStart >= 0 && statusStart > resumeStart);
+    const resumeRoute = serverSource.slice(resumeStart, statusStart);
+    assert.match(resumeRoute, /queueDebateMysteryV2CompilationInBackground\(userId, ctx\.params\.id\)/u);
+    assert.match(resumeRoute, /json\(ctx\.res, 202/u);
+
+    const listStart = serverSource.indexOf('route("GET", "/api/debates",');
+    const listEnd = serverSource.indexOf('route("GET", "/api/debates/:id",', listStart);
+    assert.ok(listStart >= 0 && listEnd > listStart);
+    assert.match(
+      serverSource.slice(listStart, listEnd),
+      /queueActiveDebateMysteryV2Compilation\(userId\)/u,
+    );
+  });
+
+  it("pins sealed visual synthesis to ONLINE review, bounded retry, and semantic no-store delivery", () => {
+    const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+    const synthesisStart = serverSource.indexOf(
+      "async function prepareDebateMysteryV2EvidenceAssets",
+    );
+    const synthesisEnd = serverSource.indexOf(
+      "async function prepareDebateMysteryGeneratedAssets",
+      synthesisStart,
+    );
+    assert.ok(synthesisStart >= 0 && synthesisEnd > synthesisStart);
+    const synthesis = serverSource.slice(synthesisStart, synthesisEnd);
+    assert.match(synthesis, /session\.responseMode !== "local"/u);
+    assert.match(synthesis, /!userBlocksOnlineCapabilities\(user\)/u);
+    assert.match(synthesis, /attempt <= 2/u);
+    assert.match(synthesis, /runMysteryAssetAttempt/u);
+    assert.match(synthesis, /reviewDebateMysteryAssetWithVision/u);
+    assert.match(synthesis, /sealDebateMysteryAssetBytesV1/u);
+    assert.match(synthesis, /setDebateMysteryAssetFallbackV1/u);
+    assert.match(synthesis, /debateMysteryRoomTemplatePng/u);
+    assert.match(synthesis, /sourceImageBytes: templateBytes/u);
+    assert.match(synthesis, /sourceBytes: templateBytes/u);
+    assert.match(synthesis, /size: "1536x1024"/u);
+    assert.match(synthesis, /people, human figures, bodies, evidence, clues, weapons, blood, gore, readable text/u);
+    assert.doesNotMatch(synthesis, /generateAndPersistStandaloneImageAsset/u);
+    assert.match(serverSource, /const MYSTERY_ASSET_ATTEMPT_TIMEOUT_MS = 120_000/u);
+    assert.match(serverSource, /Promise\.race\(\[operation\(controller\.signal\), abortBoundary\]\)/u);
+
+    const routeStart = serverSource.indexOf(
+      'route("GET", "/api/debates/:id/mystery-assets/:kind/:subjectId/file"',
+    );
+    const routeEnd = serverSource.indexOf(
+      'route("GET", "/api/debates/mystery-mansions"',
+      routeStart,
+    );
+    assert.ok(routeStart >= 0 && routeEnd > routeStart);
+    const sealedRoutes = serverSource.slice(routeStart, routeEnd);
+    assert.match(sealedRoutes, /getRevealedDebateMysteryAssetFileV1/u);
+    assert.match(sealedRoutes, /private, no-store, max-age=0/u);
+    assert.match(sealedRoutes, /x-content-type-options/u);
+    assert.match(sealedRoutes, /saveRevealedDebateMysteryAssetV1/u);
   });
 });

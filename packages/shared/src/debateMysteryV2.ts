@@ -21,10 +21,30 @@ export const DEBATE_MYSTERY_V2_JUROR_COUNT = 4 as const;
 
 export interface DebateMysteryAssetSynthesisV2 {
   evidence: boolean;
-  /** Deliberately disabled in the first asset-synthesis release. */
-  rooms: false;
+  /** ONLINE-only template edits. LOCAL cases retain bundled room art. */
+  rooms: boolean;
   /** Deliberately disabled; existing investigation music remains unchanged. */
   music: false;
+}
+
+export type DebateMysterySealedAssetKindV1 = "evidence" | "room";
+export type DebateMysterySealedAssetStatusV1 =
+  | "pending"
+  | "ready"
+  | "fallback";
+
+/**
+ * Spoiler-safe public handle for a case-scoped encrypted visual. The binary is
+ * never embedded in the session or ordinary Images storage. Its semantic file
+ * route remains server-gated until `revealed` becomes true.
+ */
+export interface DebateMysterySealedAssetRefV1 {
+  version: 1;
+  kind: DebateMysterySealedAssetKindV1;
+  status: DebateMysterySealedAssetStatusV1;
+  source: "synthesized" | "bundled";
+  revealed: boolean;
+  mimeType: "image/png" | "image/webp";
 }
 
 /**
@@ -438,6 +458,9 @@ export interface DebateMysteryRoomV2 {
   emoji: string;
   imageId: string | null;
   bundledAssetPath: string | null;
+  sealedAsset?: DebateMysterySealedAssetRefV1 | null;
+  /** Spoiler-safe doorway state. Vault identity and review detail never appear here. */
+  accessState?: "hidden" | "being_secured" | "ready_to_enter" | "visited";
   unlocked: boolean;
   visited: boolean;
   hotspots: Array<{
@@ -464,6 +487,7 @@ export interface DebateMysteryPublicRecordItemV2 {
   emoji: string;
   visualKind?: "emoji" | "upload" | "synthesized";
   imageId?: string | null;
+  sealedAsset?: DebateMysterySealedAssetRefV1 | null;
   admitted: boolean;
   updatedAt: string;
 }
@@ -688,6 +712,10 @@ export interface DebateWhodunnitFormatStateV2 {
   victim: { id: string; name: string } | null;
   suspects: DebateMysteryPublicSuspectSnapshotV1[];
   rooms: DebateMysteryRoomV2[];
+  /** Public because the opening scene is visible; never derived from a clue. */
+  crimeSceneRoomId?: string | null;
+  /** Finite first-room sweep required before the mansion map unlocks. */
+  openingSweepComplete?: boolean;
   roomIntroductions: Record<string, DebateMysteryRoomIntroductionPhaseV2>;
   currentRoomId: string | null;
   roomView: "mansion" | "room";
@@ -938,6 +966,7 @@ export function validateDebateMysteryDialogueGraphV2(args: {
   graph: DebateMysteryDialogueGraphV2;
   suspectSeatIds: readonly string[];
   recordReferences: readonly DebateMysteryRecordReferenceV2[];
+  playerRole?: "participant" | "spectator";
   roomIds?: readonly string[];
   personIds?: readonly string[];
   hotspotIdsByRoom?: Readonly<Record<string, readonly string[]>>;
@@ -1427,14 +1456,21 @@ export function validateDebateMysteryDialogueGraphV2(args: {
   if (args.eyewitnessSeatId) {
     const chapter = graph.witnessChapters.find((entry) => entry.witnessSeatId === args.eyewitnessSeatId);
     if (!chapter) errors.push("The eyewitness has no exact statement-level resolution chapter.");
-    if ((args.accusedAlibiSupportDiscoveryIds?.length ?? 0) < 2) errors.push("An eyewitness case requires two outwardly independent alibi supports.");
-    for (const id of args.accusedAlibiSupportDiscoveryIds ?? []) {
-      if (!accumulated.discoveries.has(id)) errors.push(`Accused alibi support ${id} is not discoverable.`);
+    if (args.playerRole !== "spectator") {
+      if ((args.accusedAlibiSupportDiscoveryIds?.length ?? 0) < 2) errors.push("An eyewitness case requires two outwardly independent alibi supports.");
+      for (const id of args.accusedAlibiSupportDiscoveryIds ?? []) {
+        if (!accumulated.discoveries.has(id)) errors.push(`Accused alibi support ${id} is not discoverable.`);
+      }
     }
   }
   for (const choice of graph.prosecutionChoices) {
     if (!lineById.has(choice.promptLineId)) errors.push(`Prosecution choice ${choice.id} has no prompt line.`);
-    if (choice.options.length < 2) errors.push(`Prosecution choice ${choice.id} needs at least two authored options.`);
+    const minimumOptions = args.playerRole === "spectator" ? 1 : 2;
+    if (choice.options.length < minimumOptions) {
+      errors.push(
+        `Prosecution choice ${choice.id} needs at least ${minimumOptions === 1 ? "one" : "two"} authored option${minimumOptions === 1 ? "" : "s"}.`,
+      );
+    }
     for (const option of choice.options) {
       const optionId = option.id;
       const optionLine = lineById.get(option.lineId);
@@ -1564,7 +1600,9 @@ export function resolveDebateMysteryConfigV2(
     evidence: value.assetSynthesis?.evidence === true,
     // Court-only cases never prepare investigation-only assets. These remain
     // server-enforced even after their setup toggles become available.
-    rooms: false,
+    rooms:
+      investigationMode === "full" &&
+      value.assetSynthesis?.rooms === true,
     music: false,
   };
   return {
@@ -1804,6 +1842,16 @@ export function normalizeDebateMysteryFormatStateV2(
   );
   return {
     ...(source as DebateWhodunnitFormatStateV2),
+    rooms: source.rooms.map((room) => ({
+      ...room,
+      accessState: room.visited
+        ? "visited"
+        : room.sealedAsset?.status === "pending"
+          ? "being_secured"
+          : room.sealedAsset?.status === "ready" || room.sealedAsset?.status === "fallback"
+            ? "ready_to_enter"
+            : "hidden",
+    })),
     config: {
       ...config,
       prosecutorBotId,
@@ -1811,7 +1859,9 @@ export function normalizeDebateMysteryFormatStateV2(
       spark,
       assetSynthesis: {
         evidence: assetSynthesisSource.evidence === true,
-        rooms: false,
+        rooms:
+          configSource.investigationMode !== "court_only" &&
+          assetSynthesisSource.rooms === true,
         music: false,
       },
       investigationMode:
@@ -1847,6 +1897,15 @@ export function normalizeDebateMysteryFormatStateV2(
           : 0,
     },
     identityMirrorTargetSnapshots,
+    crimeSceneRoomId:
+      typeof source.crimeSceneRoomId === "string" &&
+      source.rooms.some((room) => room.id === source.crimeSceneRoomId)
+        ? source.crimeSceneRoomId
+        : source.currentRoomId ?? source.rooms[0]?.id ?? null,
+    openingSweepComplete:
+      typeof source.openingSweepComplete === "boolean"
+        ? source.openingSweepComplete
+        : true,
     record: source.record.map((item) => ({
       ...item,
       visualKind:

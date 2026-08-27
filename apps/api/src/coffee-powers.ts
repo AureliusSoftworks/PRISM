@@ -1364,7 +1364,7 @@ export function coffeePowerCupRateMultiplier(
 export function coffeePowerVesselMode(
   plan: CoffeePowerPlanV1 | null,
   botId: string
-): "coffee" | "none" {
+): "coffee" | "water" | "none" {
   return coffeePowerVesselModeV1(plan, botId);
 }
 

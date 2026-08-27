@@ -15,6 +15,7 @@ import {
   BOTCAST_PERSONA_REVIEW_VISIBILITY_DELAY_MS,
   BOTCAST_PRODUCER_GUEST_ID,
   BOTCAST_PRODUCER_GUEST_NAME,
+  BOTCAST_TIMED_MAX_UTTERANCES,
   DIRECTIONAL_IRRITATION_REBUFF_DELTA,
   DIRECTIONAL_IRRITATION_RECLAIM_CEILING,
   SIGNAL_PICKLES_SLOW_SIP_DURATION_MS,
@@ -155,6 +156,7 @@ import {
   updateBotcastShow,
 } from "../botcast.ts";
 import { AutoFallbackExhaustedError } from "../auto-fallback.ts";
+import { bakeBotcastWatchEpisode } from "../live-bake.ts";
 import { LiveBakeJobManager } from "../live-bake-jobs.ts";
 import { exportUserSnapshot, importUserSnapshot } from "../backup.ts";
 import { loadBotMemoryPanelPayload } from "../bot-memory-panel.ts";
@@ -1947,6 +1949,76 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(captures[0]?.some((message) => message.images?.length), false);
       assert.equal(captures[1]?.some((message) => message.images?.length), false);
       assert.equal(captures[2]?.some((message) => message.images?.length), true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reserves the bounded terminal Watch step after a timed Signal reaches its interview cap", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      Array.from({ length: BOTCAST_TIMED_MAX_UTTERANCES + 1 }, (_, index) =>
+        index === BOTCAST_TIMED_MAX_UTTERANCES
+          ? "Ivo Stone, thank you for joining us. And thank you for watching."
+          : index === 0
+            ? "Welcome to Signal. Ivo Stone joins us to ask what a finished signal preserves. Ivo, where should we begin?"
+            : index % 2 === 0
+              ? "What concrete consequence should listeners test in their own record?"
+              : "A finished record preserves the choices that let someone else test the claim.",
+      ),
+      captures,
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "What does a finished signal preserve?",
+        playbackMode: "watch",
+        preferredProvider: "anthropic",
+        modelOverride: "claude-fable-5",
+        durationMinutes: 30,
+      });
+
+      const baked = await bakeBotcastWatchEpisode({
+        db,
+        userId: "user-1",
+        episodeId: created.id,
+        plannedSynthesisEngine: "elevenlabs",
+        resolveGeneration: async () => ({
+          ...generation(provider),
+          preferredProvider: "anthropic",
+          responseMode: "online",
+          contextualModel: "claude-fable-5",
+          contextualReasoningEffort: "max",
+        }),
+      });
+
+      assert.equal(baked.episode.status, "completed");
+      assert.equal(baked.episode.messages.length, BOTCAST_TIMED_MAX_UTTERANCES + 1);
+      assert.equal(
+        baked.episode.messages[BOTCAST_TIMED_MAX_UTTERANCES - 1]?.speakerRole,
+        "guest",
+      );
+      assert.equal(baked.episode.messages.at(-1)?.speakerRole, "host");
+      assert.equal(baked.artifact.status, "ready");
+      assert.equal(baked.artifact.sessionSnapshot?.id, created.id);
+      assert.deepEqual(
+        baked.artifact.events.map((event) => event.sourceEventId),
+        baked.episode.events.map((event) => event.id),
+      );
+      assert.equal(
+        baked.episode.events.every((event, index) => event.sequence === index + 1),
+        true,
+      );
+      assert.equal(
+        projectBotcastEpisodeForObserverV2(baked.episode, "replay").messages.at(-1)
+          ?.content,
+        baked.episode.messages.at(-1)?.content,
+      );
+      // Provider validation may retry a draft, but it must never create extra
+      // durable turns or consume the one reserved terminal advance.
+      assert.ok(captures.length >= BOTCAST_TIMED_MAX_UTTERANCES + 1);
     } finally {
       db.close();
     }
@@ -20483,6 +20555,8 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(utterance?.payload.provider, "local");
       assert.equal(utterance?.payload.model, "qwen-signal-fallback");
       assert.equal(utterance?.payload.responseMode, "local");
+      assert.equal(utterance?.payload.reasoningEffort, "none");
+      assert.equal(utterance?.payload.turbo, false);
       assert.equal(
         (utterance?.payload.autoRecovery as { finalProvider?: unknown })
           ?.finalProvider,

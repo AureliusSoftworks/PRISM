@@ -248,7 +248,7 @@ test("the replay master captures the same shared output bus that reaches the dev
   }
 });
 
-test("a suspended shared mixer is resumed before media-element routing", async () => {
+test("a suspended or interrupted shared mixer is resumed before media-element routing", async () => {
   const originalWindow = globalThis.window;
   Object.defineProperty(globalThis, "window", {
     configurable: true,
@@ -257,9 +257,11 @@ test("a suspended shared mixer is resumed before media-element routing", async (
 
   try {
     const context = prismAudioContext() as unknown as FakeAudioContext;
-    context.state = "suspended";
-    assert.equal(await resumePrismAudioContext(), true);
-    assert.equal(context.state, "running");
+    for (const stalledState of ["suspended", "interrupted"] as const) {
+      context.state = stalledState;
+      assert.equal(await resumePrismAudioContext(), true);
+      assert.equal(context.state, "running");
+    }
   } finally {
     Object.defineProperty(globalThis, "window", {
       configurable: true,

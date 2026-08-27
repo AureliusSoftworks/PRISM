@@ -1159,6 +1159,10 @@ describe("coffee replay helpers", () => {
     assert.match(text, /- Turn routing: local -> gemma/u);
     assert.match(
       text,
+      /- Generation: LOCAL · gemma · Effort None · Recovered after 0 attempts/u,
+    );
+    assert.match(
+      text,
       /- Speaker selection: .*"source":"player_direct_address"/u,
     );
     assert.match(text, /- Speaker selection: .*"playerAddressKind":"plain_text"/u);
@@ -1177,6 +1181,34 @@ describe("coffee replay helpers", () => {
       /kind=thinking \| sourceMessageId=message-1 \| payload=.*"audible":false/u,
     );
     assert.match(text, /"endReason":"interrupted"/u);
+  });
+
+  it("keeps successful Auto model and effort provenance in copied text", () => {
+    const text = formatCoffeeReviewClipboardText({
+      messages: [
+        {
+          id: "auto-turn",
+          role: "assistant",
+          content: "A clean table line.",
+          provider: "openai",
+          model: "gpt-4.1-nano",
+          reasoningEffort: "minimal",
+          autoRoute: {
+            v: 1,
+            lane: "online",
+            provider: "openai",
+            model: "gpt-4.1-nano",
+            reasoningEffort: "minimal",
+            reasonCodes: ["light_request"],
+          },
+        },
+      ],
+    });
+
+    assert.match(
+      text,
+      /- Generation: Auto → OpenAI · gpt-4\.1-nano · Effort Minimal/u,
+    );
   });
 
   it("distinguishes attended departures from true Coffee no-shows", () => {

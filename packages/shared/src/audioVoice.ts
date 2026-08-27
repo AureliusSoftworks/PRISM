@@ -10,6 +10,7 @@ import {
 /** Account-wide voice mode. This is intentionally separate from BotVoicePreset,
  * which controls how a bot writes rather than how it sounds. */
 export type VoiceMode = "mute" | "english" | "babble" | "bottish";
+export type SpeechTypeVoiceMode = Exclude<VoiceMode, "mute">;
 export type EnglishVoiceEngine = "builtin" | "elevenlabs";
 
 export const VOICE_EFFECTS = [
@@ -1433,6 +1434,7 @@ export const BOT_VOICE_TEXTURE_RECIPES: Readonly<
 };
 
 export const DEFAULT_VOICE_MODE: VoiceMode = "mute";
+export const DEFAULT_SPEECH_TYPE_VOICE_MODE: SpeechTypeVoiceMode = "english";
 export const DEFAULT_ENGLISH_VOICE_ENGINE: EnglishVoiceEngine = "builtin";
 export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2: Readonly<BotAudioVoiceProfileV2> =
   {
@@ -1685,6 +1687,16 @@ export function normalizeVoiceMode(
     value === "bottish"
     ? value
     : fallback;
+}
+
+/** Account Speech Type is always audible; `mute` remains valid only for
+ * internal/replay silence contracts. */
+export function normalizeSpeechTypeVoiceMode(
+  value: unknown,
+  fallback: SpeechTypeVoiceMode = DEFAULT_SPEECH_TYPE_VOICE_MODE,
+): SpeechTypeVoiceMode {
+  const normalized = normalizeVoiceMode(value, fallback);
+  return normalized === "mute" ? fallback : normalized;
 }
 
 export function normalizeEnglishVoiceEngine(

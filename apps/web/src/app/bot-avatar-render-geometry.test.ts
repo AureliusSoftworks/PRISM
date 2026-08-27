@@ -4,6 +4,8 @@ import { describe, it } from "node:test";
 import {
   BOT_AVATAR_CANONICAL_FACE_FACING_STYLE,
   BOT_AVATAR_CANONICAL_FACING,
+  BOT_AVATAR_CANONICAL_EYE_LOCAL_X,
+  BOT_AVATAR_CANONICAL_FACE_NUDGE_Y,
   BOT_AVATAR_CANONICAL_FACE_PLACEMENT,
   BOT_AVATAR_CANONICAL_FACE_REGISTRATION_STYLE,
   BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
@@ -14,6 +16,7 @@ import {
   BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE,
   BOT_AVATAR_DETAILS_INK_APERTURE_SCALE,
   botAvatarFaceFacingStyle,
+  botAvatarFaceRegistrationStyle,
   botAvatarFaceScaleYForFacing,
   botAvatarFacingFromFaceScaleY,
   botAvatarDetailsFacingScaleX,
@@ -42,10 +45,16 @@ describe("Avatar Details face registration", () => {
       "--zen-live-bot-face-scale": BOT_AVATAR_CANONICAL_FACE_PLACEMENT.scale,
       "--zen-live-bot-avatar-face-glyph-size":
         `${BOT_AVATAR_FACE_GLYPH_FRAME_RATIO * 100}cqw`,
+      "--zen-live-bot-eye-local-x": BOT_AVATAR_CANONICAL_EYE_LOCAL_X,
+      "--coffee-plate-emoji-nudge-y": BOT_AVATAR_CANONICAL_FACE_NUDGE_Y,
     });
     assert.match(
       pageSource,
-      /const avatarFaceRegistrationStyle = hasAvatarDetailsVisuals\s*\? BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE\s*:\s*BOT_AVATAR_CANONICAL_FACE_REGISTRATION_STYLE;/,
+      /const avatarFaceRegistrationStyle = botAvatarFaceRegistrationStyle\(\s*hasAvatarDetailsVisuals,\s*\);/,
+    );
+    assert.strictEqual(
+      botAvatarFaceRegistrationStyle(false),
+      BOT_AVATAR_CANONICAL_FACE_REGISTRATION_STYLE,
     );
     assert.doesNotMatch(pageSource, /ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT/);
     assert.match(
@@ -67,9 +76,80 @@ describe("Avatar Details face registration", () => {
       "--zen-live-bot-face-scale": BOT_AVATAR_DETAILS_FACE_PLACEMENT.scale,
       "--zen-live-bot-avatar-face-glyph-size":
         `${BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO * 100}cqw`,
+      "--zen-live-bot-eye-local-x": BOT_AVATAR_CANONICAL_EYE_LOCAL_X,
       "--coffee-plate-emoji-nudge-y": BOT_AVATAR_DETAILS_FACE_NUDGE_Y,
     });
+    assert.strictEqual(
+      botAvatarFaceRegistrationStyle(true),
+      BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE,
+    );
     assert.equal(BOT_AVATAR_DETAILS_INK_APERTURE_SCALE, 1);
+  });
+
+  it("keeps Full and Mini registration inside the shared Studio contract", () => {
+    assert.equal(
+      [...pageSource.matchAll(/botAvatarFaceRegistrationStyle\(/g)].length,
+      6,
+      "Full plus every Mini consumer must resolve registration through one helper",
+    );
+    const protectedSurfaceSelectors = [
+      ".zenLiveBotPresencePlate",
+      ".signalBotPresencePlate",
+      ".debateBotPresencePlate",
+      '.coffeeSeatPlate[data-live-body-style="zen"]',
+      ".coffeeReplayPlayerAvatar",
+      ".botPanelHubAvatarPlate",
+    ];
+    const protectedProperties = /--zen-live-bot-(?:face-(?:x|y|scale)|avatar-face-glyph-size|eye-local-x)|--coffee-plate-emoji-nudge-y/;
+    for (const match of pageCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const selector = match[1] ?? "";
+      const body = match[2] ?? "";
+      if (protectedSurfaceSelectors.some((surface) => selector.includes(surface))) {
+        assert.doesNotMatch(body, protectedProperties, selector.trim());
+      }
+    }
+    assert.doesNotMatch(
+      pageCss,
+      /\.signalBotPresencePlate[^{}]*\.zenLiveBotPresenceScreenContentRig\s*\{[^}]*translate:/,
+      "Signal may place the chassis but not translate the internal screen rig",
+    );
+  });
+
+  it("uses the canonical Mini tier for Story and leaves Slate non-visual", () => {
+    const storyAvatar = pageSource.slice(
+      pageSource.indexOf("className={styles.storySpriteWrap}"),
+      pageSource.indexOf("className={styles.storyDialogueBox}"),
+    );
+    assert.match(storyAvatar, /<EmptyStateHeroMiniBot/);
+    assert.match(storyAvatar, /bot=\{npcActor\.bot\}/);
+    assert.match(storyAvatar, /isTalking=\{npcActor\.isSpeaking\}/);
+    assert.doesNotMatch(
+      storyAvatar,
+      /storySpriteFacePlate|storySpriteAsciiFace|storySpriteBrows/,
+    );
+    assert.doesNotMatch(
+      pageCss,
+      /\.storySprite(?:FacePlate|AsciiFace|Brows|ChestGlyph)\b/,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /data-slate[^\n]*(?:ZenLiveBotMannequin|ChatMiniBotAvatar|BotAvatarMicro)/,
+      "Slate does not currently present a bot avatar surface",
+    );
+  });
+
+  it("keeps Batch Foundry on the same registered Mini and Ink renderer", () => {
+    const batchAvatar = pageSource.slice(
+      pageSource.indexOf("function BotFoundryBatchSlotAvatar("),
+      pageSource.indexOf("const BotAvatarScreen ="),
+    );
+    assert.match(batchAvatar, /<MiniAvatarDetailsInk/);
+    assert.match(batchAvatar, /details=\{preview\.avatarDetails\}/);
+    assert.match(batchAvatar, /botAvatarFaceRegistrationStyle\(batchHasAvatarArt\)/);
+    assert.match(batchAvatar, /<ChatMiniBotAvatar/);
+    assert.match(batchAvatar, /faceEyeOffsetX=\{batchFaceStyle\.eyeOffsetX\}/);
+    assert.match(batchAvatar, /faceBlinkOffsetY=\{batchFaceStyle\.blinkOffsetY\}/);
+    assert.match(batchAvatar, /faceMouthOffsetY=\{batchFaceStyle\.mouthOffsetY\}/);
   });
 });
 
