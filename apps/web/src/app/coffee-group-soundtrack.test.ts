@@ -83,7 +83,10 @@ describe("Coffee group soundtrack UI", () => {
     assert.match(page, /backgroundRecordable=\{false\}/u);
     assert.match(player, /routeAudioElementToPrismOutput/u);
     assert.match(player, /SANCTUM_AUDIO_PLAYER_RELEASE_MS = 320/u);
-    assert.match(player, /Math\.cos\(progress \* Math\.PI \* 0\.5\)/u);
+    assert.match(
+      player,
+      /audibleAudioTransitionVolumeAt\(\s*startVolume,\s*0,\s*progress,?\s*\)/u,
+    );
   });
 
   it("documents creation and soundtrack behavior in both tutorial surfaces", () => {

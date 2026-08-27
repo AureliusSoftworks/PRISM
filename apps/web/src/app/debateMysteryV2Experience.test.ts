@@ -201,7 +201,10 @@ describe("Whodunnit V2 prosecution experience", () => {
     );
     assert.match(setupSource, /speechInkVisible: performance\?\.speechInkVisible/u);
     assert.match(experienceSource, /roomIntroductionAwaitingContinue && currentRoom[\s\S]*action: "advance_room_introduction"[\s\S]*finishCurrentDialogue/u);
-    assert.match(experienceSource, /activeAudioRef\.current\?\.pause\(\)/u);
+    assert.match(
+      experienceSource,
+      /releaseAudibleAudioElement\(activeAudioRef\.current\)/u,
+    );
     assert.match(experienceSource, /setHeldDialogue\(queuedDialogue\)/u);
     assert.match(experienceSource, /roomProsecutorActive/u);
     assert.match(experienceSource, /const roomActorVisible = Boolean\([\s\S]*roomIntroductionPersonaActive/u);

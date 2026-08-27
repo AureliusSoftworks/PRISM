@@ -1152,7 +1152,10 @@ describe("Coffee seat arrival CSS", () => {
       bloomRule,
       /color:\s*var\(--crt-face-edge-color,\s*currentColor\)\s*;/,
     );
-    assert.match(bloomRule, /opacity:\s*1\s*;/);
+    assert.match(
+      bloomRule,
+      /opacity:\s*var\(--crt-glyph-emission-opacity,\s*1\)\s*;/,
+    );
     assert.match(bloomRule, /--crt-glyph-bloom-narrow-radius/);
     assert.match(bloomRule, /--crt-glyph-bloom-wide-radius/);
     assert.match(
@@ -1357,7 +1360,11 @@ describe("Coffee seat arrival CSS", () => {
       talkingFacePartRule,
       /--crt-face-glow-filter:\s*var\(--zen-live-bot-talking-face-glow-filter-high\)\s*;/,
     );
-    assert.match(talkingFacePartRule, /filter:\s*none\s*;/);
+    assert.match(
+      talkingFacePartRule,
+      /--crt-glyph-emission-opacity:\s*1\s*;/,
+    );
+    assert.doesNotMatch(talkingFacePartRule, /(?:^|;)\s*filter\s*:/u);
     assert.doesNotMatch(talkingFacePartRule, /animation:/);
 
     const talkingFaceGlowCloneRule = ruleForSelectorNeedles(

@@ -514,7 +514,7 @@ test("Avatar Studio sample fades in, trims its start, and releases before pausin
   assert.equal(audio.currentTime, BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS);
   assert.equal(audio.loop, false);
   assert.equal(audio.paused, false);
-  assert.equal(audio.volume, 0);
+  assert.ok(audio.volume >= 0 && audio.volume < sfx.volume);
   await new Promise((resolve) => setTimeout(resolve, BOT_AVATAR_SFX_ATTACK_MS + 40));
   assert.ok(Math.abs(audio.volume - sfx.volume) < 1e-10);
 
