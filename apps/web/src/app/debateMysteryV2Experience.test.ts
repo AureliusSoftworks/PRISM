@@ -40,6 +40,10 @@ const storageSource = readFileSync(
   new URL("./StorageSettings.tsx", import.meta.url),
   "utf8",
 );
+const tutorialSource = readFileSync(
+  new URL("./modeTutorials.ts", import.meta.url),
+  "utf8",
+);
 
 describe("Whodunnit V2 prosecution experience", () => {
   it("never displays Case Forge progress above its declared attempt budget", () => {
@@ -79,7 +83,7 @@ describe("Whodunnit V2 prosecution experience", () => {
     }
     assert.match(experienceSource, /Previous statement/u);
     assert.match(experienceSource, /Next statement/u);
-    assert.match(experienceSource, /Object with evidence/u);
+    assert.match(experienceSource, /Object with evidence or sworn testimony/u);
     assert.match(experienceSource, /Incomplete method, motive, or opportunity will weaken the case/u);
     assert.doesNotMatch(experienceSource, /actionsRemaining|action token|freeform/iu);
   });
@@ -133,33 +137,139 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /input, textarea, select, button, a, label, \[contenteditable\]/u);
     assert.match(experienceSource, /const decision = whodunnitDialogueGestureDecision\(/u);
     assert.match(experienceSource, /const releaseActiveDialogueAudio = useCallback[\s\S]*onReleased: outputCleanup \?\? undefined/u);
-    assert.match(experienceSource, /audioGenerationRef\.current \+= 1;[\s\S]*releaseActiveDialogueAudio\(\);[\s\S]*setSpeechTiming\(settledSpeechTiming\(presentation\.fullText\)\)/u);
+    assert.match(experienceSource, /const cancelActiveDialogueAudio = useCallback[\s\S]*cancelWhodunnitDialogueAudioImmediately\(\{/u);
+    assert.match(experienceSource, /cancelSyntheticVoice: ownsSyntheticVoice[\s\S]*teardownBottishVoiceImmediately\(\{ preservePreparedMedia: true \}\)/u);
+    assert.match(experienceSource, /dialogueGestureAdvanceRef\.current = null;\s*cancelActiveDialogueAudio\(\);\s*setSpeechTiming\(settledSpeechTiming\(presentation\.fullText\)\)/u);
+    assert.match(experienceSource, /if \(decision === "ignore"\) return;\s*cancelActiveDialogueAudio\(\)/u);
+    assert.match(experienceSource, /if \(busy \|\| \(dialoguePerformanceActive && !dialogueInterruptingAction\)\) return false;\s*cancelActiveDialogueAudio\(\);\s*setBusy\(true\)/u);
     assert.match(experienceSource, /advanceArmed: dialogueGestureAdvanceRef\.current === presentation\.key/u);
     assert.match(experienceSource, /onClickCapture=\{handleInvestigationDialogueClickCapture\}/u);
     assert.match(experienceSource, /handleInvestigationDialogueClickCapture[\s\S]*mysteryDialogueGestureOriginIsInteractive\(event\.target\)[\s\S]*operateVisibleDialogueGesture\(event\.detail, advanceVisibleRoomDialogue\)[\s\S]*event\.preventDefault\(\);[\s\S]*event\.stopPropagation\(\)/u);
-    assert.match(experienceSource, /onKeyDown=\{\(event\) => \{ if \(event\.key === "Enter" \|\| event\.key === " "\)[\s\S]*operateVisibleDialogueGesture\(1, advanceVisibleRoomDialogue\)/u);
+    assert.match(experienceSource, /onKeyDown=\{\(event\) => \{[\s\S]*if \(event\.key === "Enter" \|\| event\.key === " "\)[\s\S]*operateVisibleDialogueGesture\(1, advanceVisibleRoomDialogue\)/u);
+  });
+
+  it("lets Court dialogue gestures cancel speech and advance its finite queue", () => {
+    assert.match(
+      experienceSource,
+      /const displayedDialogue = queuedDialogue \?\? heldDialogue \?\? \(\s*state\.playPhase === "trial" \? null : lastDialogue\s*\)/u,
+      "Court must not resurrect a prior Press response from global dialogue history after statement navigation",
+    );
+    assert.match(
+      experienceSource,
+      /const focusStatement = \(offset: number\): void => \{[\s\S]*!activeStatement[\s\S]*next\.statementId === activeStatement\.statementId[\s\S]*cancelActiveDialogueAudio\(\);\s*setHeldDialogue\(null\);\s*setSpeechTiming\(null\);[\s\S]*action: "focus_statement"/u,
+      "moving to another statement must dismiss the prior statement's held Press response",
+    );
+    assert.match(
+      experienceSource,
+      /const courtDialogue = courtPresentationActive;[\s\S]*whodunnitCourtDialogueFinishDecision\(\{ hasQueuedResponse \}\)[\s\S]*setDialoguePlaybackIndex\(\(index\) => index \+ 1\);[\s\S]*setInterrogationPhase\(courtDialogue \? null : "suspect_entrance"\)/u,
+    );
+    assert.match(
+      experienceSource,
+      /if \(decision === "clear"\) \{\s*setHeldDialogue\(null\);\s*setSpeechTiming\(null\);\s*setInterrogationPhase\(null\);\s*setDialoguePlaybackQueue\(\[\]\);\s*setDialoguePlaybackIndex\(0\);\s*return;\s*\}/u,
+      "the last Court beat must fully clear its presentation before actions or the verdict can appear",
+    );
+    assert.match(
+      experienceSource,
+      /const courtPresentedWitnessSeatId = whodunnitCourtPresentedWitnessSeatId\(\{[\s\S]*dialogueQueue: dialoguePlaybackQueue[\s\S]*\}\);[\s\S]*courtPresentedWitnessBot \? props\.renderMysteryBotAvatar/u,
+      "the witness stand must follow the queued Court speaker instead of switching early to the next chapter",
+    );
+    assert.match(
+      experienceSource,
+      /state\.playPhase === "verdict" && state\.verdict && !courtPresentationActive[\s\S]*if \(courtPresentationActive && state\.court && activeStatement\)/u,
+      "the final exchange must remain visible and interactive before the verdict replaces Court",
+    );
+    assert.match(
+      experienceSource,
+      /const handleCourtDialogueClick = \(event: React\.MouseEvent<HTMLElement>\): void => \{[\s\S]*whodunnitCourtDialogueGestureCrossedPresentation\(\{[\s\S]*presentationKey: dialogueSfxPresentation\?\.key \?\? null[\s\S]*operateVisibleDialogueGesture\(event\.detail, finishCurrentDialogue\)[\s\S]*event\.preventDefault\(\);[\s\S]*event\.stopPropagation\(\)/u,
+    );
+    assert.match(
+      experienceSource,
+      /className=\{styles\.courtReaction\}[\s\S]{0,260}onClick=\{handleCourtDialogueClick\}[\s\S]{0,180}onKeyDown=\{handleCourtDialogueKeyDown\}/u,
+    );
+    assert.match(
+      experienceSource,
+      /<p role="button" tabIndex=\{0\} onClick=\{handleCourtDialogueClick\} onKeyDown=\{handleCourtDialogueKeyDown\}/u,
+    );
+    assert.doesNotMatch(experienceSource, /onDoubleClick=\{finishCurrentDialogue\}/u);
+    assert.match(
+      experienceSource,
+      /data-tutorial-target="mystery-v2-press"[\s\S]{0,420}data-tutorial-target="mystery-v2-present-record"[\s\S]{0,520}data-tutorial-target="mystery-v2-think"/u,
+    );
+    assert.match(
+      experienceSource,
+      /disabled=\{busy \|\| dialoguePerformanceActive\}/u,
+    );
+    assert.match(cssSource, /\.courtReaction\[role="button"\][\s\S]*cursor:\s*pointer/u);
+  });
+
+  it("keeps a failed-verdict rebuttal visible while allowing retry to interrupt it", () => {
+    assert.match(
+      experienceSource,
+      /whodunnitCourtPresentationVisible\(\{\s*hasQueuedDialogue: queuedDialogue !== null,\s*playPhase: state\.playPhase,\s*\}\)/u,
+      "verdict-bound Court dialogue remains a visible presentation while its queue is active",
+    );
+    assert.match(
+      experienceSource,
+      /const dialogueInterruptingAction = introductionAction \|\| action\.action === "retry_witness_checkpoint";\s*if \(busy \|\| \(dialoguePerformanceActive && !dialogueInterruptingAction\)\) return false/u,
+      "the verdict retry must not be rejected by the dialogue-performance guard",
+    );
+    assert.match(
+      experienceSource,
+      /if \(action\.action === "retry_witness_checkpoint"\) \{\s*setCommand\(null\);\s*setHeldDialogue\(null\);\s*setSpeechTiming\(null\);\s*setDialoguePlaybackQueue\(\[\]\);\s*setDialoguePlaybackIndex\(0\);\s*setInterrogationPhase\(null\);\s*\}/u,
+      "restoring the witness must discard the failed objection's playback state",
+    );
+    assert.match(
+      experienceSource,
+      /disabled=\{busy\} onClick=\{\(\) => void sendAction\(\{ action: "retry_witness_checkpoint" \}\)\}>Retry current witness/u,
+      "the visible retry remains available while stale dialogue is being interrupted",
+    );
   });
 
   it("keeps unseen occupants off the mansion and stages the finite first-visit reveal", () => {
     assert.match(experienceSource, /const roomSuspects = room\.visited[\s\S]*\? state\.suspects\.filter[\s\S]*: \[\]/u);
     assert.match(experienceSource, /roomIntroductionPhase = currentRoom[\s\S]*state\.roomIntroductions\[currentRoom\.id\]/u);
     assert.match(experienceSource, /roomIntroductionAwaitingContinue = roomIntroductionPhase === "casekeeper"/u);
+    assert.match(experienceSource, /debateMysteryRoomIntroductionGestureV2\(\{/u);
+    assert.match(experienceSource, /roomIntroductionGesture === "reveal_casekeeper_narration"[\s\S]*setRevealedCasekeeperNarrationKey/u);
+    assert.match(experienceSource, /roomIntroductionGesture === "advance_to_persona"[\s\S]*action: "advance_room_introduction"/u);
     assert.match(experienceSource, /action: "advance_room_introduction"/u);
     assert.match(experienceSource, /action: "complete_room_introduction"/u);
-  assert.match(experienceSource, /roomIntroductionPersonaActive/u);
-  assert.match(
-    experienceSource,
-    /mysteryInvestigationMusicMix\(\{[\s\S]*roomIntroductionActive/u,
-  );
-  assert.match(experienceSource, /action\.action === "advance_room_introduction"[\s\S]*startWhodunnitInterrogation\(exchange/u);
+    assert.match(experienceSource, /roomIntroductionPersonaActive/u);
+    assert.match(
+      experienceSource,
+      /mysteryInvestigationMusicMix\(\{[\s\S]*roomIntroductionActive/u,
+    );
+    assert.match(experienceSource, /action\.action === "advance_room_introduction"[\s\S]*startWhodunnitInterrogation\(exchange/u);
     assert.match(experienceSource, /!roomIntroductionActive \? <nav className=\{styles\.investigationCommands\}/u);
     assert.match(experienceSource, /!roomIntroductionActive \? <header className=\{styles\.investigationHeader\}/u);
     assert.match(experienceSource, /!roomIntroductionActive \? <div className=\{styles\.roomTitle\}/u);
     assert.match(experienceSource, /roomIntroductionPhase !== "casekeeper" \? <div className=\{styles\.roomShade\}/u);
     assert.match(experienceSource, /data-blurred=\{roomActorVisible/u);
-    assert.match(experienceSource, /roomIntroductionAwaitingContinue \? "Casekeeper"/u);
-    assert.match(experienceSource, /activeAudioRef\.current \|\|/u);
+    assert.match(experienceSource, /roomIntroductionAwaitingContinue[\s\S]*\? "Casekeeper"/u);
+    assert.match(
+      experienceSource,
+      /debateMysteryRoomIntroductionShouldAutoCompleteV2\(\{\s*busy,\s*hasActiveAudio: activeAudioRef\.current !== null,\s*hasHeldDialogue: heldDialogue !== null,\s*hasQueuedDialogue: queuedDialogue !== null,\s*phase: roomIntroductionPhase/u,
+    );
+    assert.match(
+      experienceSource,
+      /setSpeechTiming\(null\);\s*void sendAction\(\{ action: "complete_room_introduction", roomId: currentRoom\.id \}\)/u,
+      "a naturally settled persona introduction must release its timing before completing the room reveal",
+    );
+    assert.match(experienceSource, /className=\{styles\.casekeeperThinkingDots\}[\s\S]*aria-label="The Casekeeper is taking in the room"/u);
+    assert.match(experienceSource, /debateMysteryRoomCasekeeperNarrationTextV2\(\{[\s\S]*roomNarrationAppearance[\s\S]*currentRoom\.hotspots[\s\S]*persistedNarration/u);
+    assert.doesNotMatch(experienceSource, /casekeeperIdentity|Room occupant:/u);
+    assert.match(experienceSource, /aria-busy=\{roomIntroductionAwaitingContinue && roomCasekeeperNarrationVisible && busy\}/u);
+    assert.match(experienceSource, /Bringing the occupant forward…/u);
+    assert.match(experienceSource, /className=\{styles\.dialogueSpeakerSignature\}[\s\S]*renderBotGlyph\(roomDialoguePersonaGlyph/u);
+    assert.match(experienceSource, /data-speaker=\{roomDialogueSpeakerKind\}/u);
     assert.match(cssSource, /\.roomScene\[data-room-introduction\]\s*\{\s*min-height:\s*100dvh/u);
+    assert.match(cssSource, /@keyframes casekeeperThinkingDots[\s\S]*width:\s*1ch[\s\S]*width:\s*2ch[\s\S]*width:\s*3ch/u);
+    assert.match(cssSource, /\.dialogueBox\[data-speaker="persona"\][\s\S]*var\(--dialogue-accent/u);
+    assert.match(cssSource, /\.dialogueBox\[data-casekeeper-stage="narration"\][\s\S]*rgba\(192, 168, 255/u);
+    assert.match(cssSource, /prefers-reduced-motion: reduce[\s\S]*\.casekeeperThinkingDots\s*\{\s*width:\s*3ch;\s*animation:\s*none/u);
+    assert.match(tutorialSource, /dot beat grows from \\"\.\\" to \\"\.\.\\" to \\"\.\.\.\\"/u);
+    assert.match(tutorialSource, /Their frozen persona introduction then plays/u);
+    assert.match(tutorialSource, /archived case keeps its existing replay-stable wording/u);
   });
 
   it("uses only the completed local pack during gameplay", () => {
@@ -193,12 +303,13 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /setDialoguePlaybackQueue\(exchange\)/u);
     assert.match(experienceSource, /command === "talk" && currentSuspect && !dialoguePerformanceActive/u);
     assert.match(experienceSource, /Prosecutor/u);
-    assert.match(experienceSource, /splitDebateMysteryStageActionTextV2\(roomDisplayedDialogue\.visibleText/u);
+    assert.match(experienceSource, /splitDebateMysteryStageActionTextV2\([\s\S]*roomDialoguePresentationText/u);
+    assert.match(experienceSource, /const roomDialoguePresentationText = roomIntroductionAwaitingContinue[\s\S]*: roomDisplayedDialogue\?\.visibleText \?\? ""/u);
     assert.match(experienceSource, /roomDisplayedDialogue\?\.stageActionText \?\? roomDialogueDelivery\.stageActionText/u);
     assert.match(experienceSource, /mysterySignalActionPresentation\([\s\S]*roomDisplayedDialogue/u);
     assert.match(experienceSource, /roomSuspectStageActionText && roomActionPresentation \? <SignalVoiceActionText/u);
     assert.match(experienceSource, /key=\{`suspect:\$\{roomDisplayedDialogue\?\.nodeId/u);
-    assert.match(experienceSource, /revealedSpeechText\(whodunnitCaptionSpeechText\(roomDialogueDelivery\.spokenText\), captionSpeechTiming\)/u);
+    assert.match(experienceSource, /revealedSpeechText\(\s*whodunnitCaptionSpeechText\(roomDialogueDelivery\.spokenText\),\s*captionSpeechTiming/u);
     assert.match(experienceSource, /whodunnitCaptionRevealIsPending\(\{/u);
     assert.match(experienceSource, /setSpeechTiming\(settledSpeechTiming\(playbackText\)\)/u);
     assert.match(experienceSource, /activeStatement\?\.stageActionText \?\? activeStatementDelivery\.stageActionText/u);
@@ -211,13 +322,14 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(signalActionCssSource, /\[data-phase="exiting"\][\s\S]*translateY\(-4px\)/u);
     assert.match(signalActionCssSource, /@media \(prefers-reduced-motion: reduce\)[\s\S]*transition:\s*none/u);
     assert.doesNotMatch(cssSource, /\.roomActorAction|\.counselAction|\.witnessAction/u);
-    assert.match(experienceSource, /window\.requestAnimationFrame\(updateSpeechTiming\)/u);
-    assert.match(experienceSource, /audio\.addEventListener\("playing", updateSpeechTiming, \{ once: true \}\)/u);
+    assert.match(experienceSource, /createWhodunnitSpeechTimingLoop\(\{/u);
+    assert.match(experienceSource, /audio\.addEventListener\("playing", startSpeechTimingLoop, \{ once: true \}\)/u);
     assert.match(experienceSource, /debateVoiceCompletionFallbackDurationMs\(playbackText\)/u);
-    assert.match(experienceSource, /audio\.addEventListener\("loadedmetadata", updateSpeechTiming\)/u);
-    assert.match(experienceSource, /audio\.addEventListener\("durationchange", updateSpeechTiming\)/u);
-    assert.match(experienceSource, /audio\.removeEventListener\("loadedmetadata", updateSpeechTiming\)/u);
-    assert.match(experienceSource, /audio\.removeEventListener\("durationchange", updateSpeechTiming\)/u);
+    assert.match(experienceSource, /audio\.addEventListener\("loadedmetadata", startSpeechTimingLoop\)/u);
+    assert.match(experienceSource, /audio\.addEventListener\("durationchange", startSpeechTimingLoop\)/u);
+    assert.match(experienceSource, /audio\.removeEventListener\("loadedmetadata", startSpeechTimingLoop\)/u);
+    assert.match(experienceSource, /audio\.removeEventListener\("durationchange", startSpeechTimingLoop\)/u);
+    assert.match(experienceSource, /mix=\{WHODUNNIT_COURT_ATMOSPHERE_MIX\}/u);
     assert.match(experienceSource, /audio\.addEventListener\("ended", completeBeat, \{ once: true \}\)/u);
     assert.match(experienceSource, /audio\.addEventListener\("error", completeBeat, \{ once: true \}\)/u);
     assert.match(experienceSource, /audio\.addEventListener\("pause", completeBeat, \{ once: true \}\)/u);
@@ -238,7 +350,7 @@ describe("Whodunnit V2 prosecution experience", () => {
       "ordinary Whodunnit cast must keep each bot's authored idle mouth",
     );
     assert.match(setupSource, /speechInkVisible: performance\?\.speechInkVisible/u);
-    assert.match(experienceSource, /roomIntroductionAwaitingContinue && currentRoom[\s\S]*action: "advance_room_introduction"[\s\S]*finishCurrentDialogue/u);
+    assert.match(experienceSource, /debateMysteryRoomIntroductionGestureV2\(\{[\s\S]*reveal_casekeeper_narration[\s\S]*advance_room_introduction[\s\S]*finishCurrentDialogue/u);
     assert.match(
       experienceSource,
       /releaseActiveDialogueAudio\(\)/u,
@@ -256,7 +368,7 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /roomContextKey = state\.roomView === "room" \? state\.currentRoomId : null/u);
     assert.match(experienceSource, /state\.dialogueHistory\.length > roomDialogueBaseline\.historyCount/u);
     assert.match(experienceSource, /setRoomDialogueBaseline\(\{[\s\S]*historyCount: state\.dialogueHistory\.length/u);
-    assert.match(experienceSource, /roomDisplayedDialogue \? <div className=\{styles\.dialogueBox\}/u);
+    assert.match(experienceSource, /roomDisplayedDialogue \? \([\s\S]*className=\{styles\.dialogueBox\}/u);
     assert.match(experienceSource, /function hotspotSpotStyle\(/u);
     assert.match(experienceSource, /style=\{hotspotSpotStyle\(hotspot\.polygon\)\}/u);
     assert.doesNotMatch(experienceSource, /clipPath: `polygon/u);
@@ -275,10 +387,27 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /className=\{styles\.roomActorDrift\}/u);
     assert.match(experienceSource, /mysteryRoomActorDriftStyle\(`\$\{props\.session\.id\}:\$\{currentBot\.id\}:suspect`\)/u);
     assert.match(experienceSource, /mysteryRoomActorDriftStyle\(`\$\{props\.session\.id\}:\$\{prosecutorBot\.id\}:prosecutor`\)/u);
-    assert.match(cssSource, /@keyframes roomActorIdleDrift[\s\S]*translate3d\(-4px, 1px, 0\)[\s\S]*translate3d\(7px, -2px, 0\)[\s\S]*translate3d\(-6px, 2px, 0\)/u);
     assert.match(cssSource, /\.roomActorDrift\s*\{[\s\S]*animation:\s*roomActorIdleDrift var\(--room-actor-drift-duration/u);
     assert.match(cssSource, /prefers-reduced-motion: reduce[\s\S]*\.roomActorDrift\s*\{\s*animation:\s*none/u);
     assert.match(cssSource, /prefers-reduced-motion: reduce/u);
+  });
+
+  it("loops suspect and prosecutor idle drift without a boundary snap or pause", () => {
+    assert.match(
+      cssSource,
+      /\.roomActorDrift\s*\{[\s\S]*animation:\s*roomActorIdleDrift var\(--room-actor-drift-duration, 7\.4s\) linear var\(--room-actor-drift-delay, 0ms\) infinite/u,
+    );
+    assert.match(
+      cssSource,
+      /@keyframes roomActorIdleDrift\s*\{[\s\S]*from\s*\{\s*transform:\s*scaleX\(0\.5\) rotate\(0turn\) translate3d\(6px, 0, 0\) rotate\(0turn\) scaleX\(2\);\s*\}[\s\S]*to\s*\{\s*transform:\s*scaleX\(0\.5\) rotate\(1turn\) translate3d\(6px, 0, 0\) rotate\(-1turn\) scaleX\(2\);\s*\}/u,
+    );
+    assert.doesNotMatch(
+      cssSource,
+      /animation:\s*roomActorIdleDrift[^;]*ease-in-out/u,
+    );
+    assert.match(cssSource, /\.roomActor\s*\{[\s\S]*transform:\s*translateX\(-50%\)/u);
+    assert.match(cssSource, /\.roomActor\[data-prosecutor-speaking="true"\][\s\S]*transform:\s*translateX\(-40%\) translateY\(0\.4rem\) scale\(0\.9\)/u);
+    assert.match(cssSource, /prefers-reduced-motion: reduce[\s\S]*\.roomActorDrift\s*\{\s*animation:\s*none;\s*transform:\s*none;\s*will-change:\s*auto/u);
   });
 
   it("groups typed Talk subjects, preserves room labels, and keeps records in Present", () => {
@@ -312,7 +441,7 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /const roomObservationAwaitingContinue = Boolean\(/u);
     assert.match(experienceSource, /if \(!queuedDialogue\) \{[\s\S]*if \(roomDisplayedDialogue\) \{[\s\S]*setRoomDialogueBaseline\(\{/u);
     assert.match(experienceSource, /data-awaiting-continue=\{roomObservationAwaitingContinue \|\| roomIntroductionAwaitingContinue \? "true" : undefined\}/u);
-    assert.match(experienceSource, /roomObservationAwaitingContinue \|\| roomIntroductionAwaitingContinue \? <span className=\{styles\.dialogueContinueHint\} role="status">Click to continue<\/span>/u);
+    assert.match(experienceSource, /roomObservationAwaitingContinue \|\| roomIntroductionAwaitingContinue[\s\S]*styles\.dialogueContinueHint[\s\S]*Click to continue/u);
     assert.match(experienceSource, /const advanceVisibleRoomDialogue = \(\): void => \{[\s\S]*advance_room_introduction[\s\S]*finishCurrentDialogue\(\)/u);
     assert.match(experienceSource, /const lensActive = Boolean\([\s\S]*!roomObservationAwaitingContinue/u);
     assert.match(experienceSource, /const completionCueVisible = Boolean\([\s\S]*!roomObservationAwaitingContinue/u);
@@ -562,6 +691,21 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /Save room image/u);
     assert.match(experienceSource, /Finish the finite visible sweep/u);
     assert.match(experienceSource, /state\.config\.investigationMode === "court_only" \? "Begin Trial"/u);
+  });
+
+  it("re-enables failed visual recovery after the soft poll settles", () => {
+    assert.match(
+      experienceSource,
+      /if \(visualRetryState !== "queued" \|\| pendingRoomKey\) return;/u,
+    );
+    assert.match(
+      experienceSource,
+      /setVisualRetryState\(failedVisualCount > 0 \? "failed" : "idle"\)/u,
+    );
+    assert.match(
+      experienceSource,
+      /\[failedVisualCount, pendingRoomKey, visualRetryState\]/u,
+    );
   });
 
   it("routes Spectator through editable Prosecutor findings before watch-only court", () => {

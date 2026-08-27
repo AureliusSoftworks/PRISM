@@ -111,6 +111,75 @@ export function whodunnitInterrogationFinishDecision(args: {
   }
 }
 
+/**
+ * Court exchanges are already ordered by the frozen server graph and do not
+ * use the room interrogation entrance/handoff choreography. A gesture settles
+ * exactly the visible line, then either advances one queued Court beat or
+ * releases the queue so the newly active witness remains authoritative.
+ */
+export type WhodunnitCourtDialogueFinishDecision = "advance_queue" | "clear";
+
+export function whodunnitCourtDialogueFinishDecision(args: {
+  hasQueuedResponse: boolean;
+}): WhodunnitCourtDialogueFinishDecision {
+  return args.hasQueuedResponse ? "advance_queue" : "clear";
+}
+
+export interface WhodunnitCourtDialogueEntry {
+  speakerSeatId: string | null;
+}
+
+/**
+ * Court mutations can author the retiring witness's last beats and enter the
+ * next chapter in one response. Keep the stand with the nearest real witness
+ * in the finite playback queue until that queue reaches the next witness.
+ */
+export function whodunnitCourtPresentedWitnessSeatId(args: {
+  activeWitnessSeatId: string | null;
+  dialogueIndex: number;
+  dialogueQueue: readonly WhodunnitCourtDialogueEntry[];
+  suspectSeatIds: ReadonlySet<string>;
+}): string | null {
+  const seatAt = (index: number): string | null => {
+    const seatId = args.dialogueQueue[index]?.speakerSeatId ?? null;
+    return seatId && args.suspectSeatIds.has(seatId) ? seatId : null;
+  };
+  const currentSeatId = seatAt(args.dialogueIndex);
+  if (currentSeatId) return currentSeatId;
+  for (let index = args.dialogueIndex + 1; index < args.dialogueQueue.length; index += 1) {
+    const seatId = seatAt(index);
+    if (seatId) return seatId;
+  }
+  for (let index = Math.min(args.dialogueIndex - 1, args.dialogueQueue.length - 1); index >= 0; index -= 1) {
+    const seatId = seatAt(index);
+    if (seatId) return seatId;
+  }
+  return args.activeWitnessSeatId;
+}
+
+/** A native double-click must never carry an old line's advance into a new line. */
+export function whodunnitCourtDialogueGestureCrossedPresentation(args: {
+  armedPresentationKey: string | null;
+  clickCount: number;
+  presentationKey: string | null;
+}): boolean {
+  return args.clickCount > 1 && Boolean(
+    args.armedPresentationKey &&
+    args.presentationKey &&
+    args.armedPresentationKey !== args.presentationKey,
+  );
+}
+
+/** Keep a verdict-bound exchange in Court until its last visible beat settles. */
+export function whodunnitCourtPresentationVisible(args: {
+  hasQueuedDialogue: boolean;
+  playPhase: string;
+}): boolean {
+  return args.playPhase === "trial" || (
+    args.playPhase === "verdict" && args.hasQueuedDialogue
+  );
+}
+
 export function whodunnitInterrogationMayStartAudio(
   phase: WhodunnitInterrogationPhase | null,
 ): boolean {

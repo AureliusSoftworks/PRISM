@@ -23,7 +23,7 @@ const APPLET_AUDIO_RELEASE_PATHS: readonly ReleasePath[] = [
   { owner: "Coffee player shush", file: "coffee-player-voice.ts", evidence: /const abort = \(\) => \{[\s\S]{0,420}linearRampToValueAtTime\(0, releaseEndsAt\)/u },
   { owner: "Coffee soundtrack audition", file: "coffeeSoundtrackSampleAudio.ts", evidence: /export async function stopCoffeeSoundtrackSampleAudio\([\s\S]{0,650}Math\.cos\(progress \* Math\.PI \* 0\.5\)/u },
   { owner: "Debate ident", file: "debateIdentAudio.ts", evidence: /async function stopActiveDebateIdent\([\s\S]{0,1100}debateIdentFadeVolume/u },
-  { owner: "Whodunnit dialogue", file: "DebateMysteryV2Experience.tsx", evidence: /finishCurrentDialogue[\s\S]{0,1100}releaseAudibleAudioElement/u },
+  { owner: "Whodunnit natural dialogue teardown", file: "DebateMysteryV2Experience.tsx", evidence: /const releaseActiveDialogueAudio = useCallback[\s\S]{0,700}releaseAudibleAudioElement/u },
   { owner: "Avatar performance SFX", file: "botAvatarSfx.ts", evidence: /export function stopBotAvatarSfxAudio\([\s\S]{0,520}releaseBotAvatarSfxSpatialPlayback/u },
   { owner: "Avatar SFX audition", file: "botAvatarSfx.ts", evidence: /export function stopBotAvatarSfxSampleAudio\([\s\S]{0,650}fadeBotAvatarSfxSampleVolume/u },
   { owner: "Sanctum player", file: "SanctumAudioPlayer.tsx", evidence: /const release = useCallback[\s\S]{0,900}audibleAudioTransitionVolumeAt/u },
@@ -48,6 +48,14 @@ describe("applet audio release inventory", () => {
       const source = readFileSync(new URL(file, import.meta.url), "utf8");
       assert.match(source, /teardown[A-Za-z]+Immediately/u);
     }
+    const whodunnitSource = readFileSync(
+      new URL("debateMysteryDialogueAudio.ts", import.meta.url),
+      "utf8",
+    );
+    assert.match(
+      whodunnitSource,
+      /export function cancelWhodunnitDialogueAudioImmediately[\s\S]{0,700}releaseAudibleAudioElement\(media, \{[\s\S]{0,120}durationMs: 0/u,
+    );
   });
 
   it("fades Sanctum mute state instead of snapping the media mute bit", () => {

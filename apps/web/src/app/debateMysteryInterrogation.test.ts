@@ -7,6 +7,10 @@ import {
   whodunnitActorDriftTiming,
   whodunnitCaptionRevealIsPending,
   whodunnitCaptionSpeechText,
+  whodunnitCourtDialogueGestureCrossedPresentation,
+  whodunnitCourtDialogueFinishDecision,
+  whodunnitCourtPresentationVisible,
+  whodunnitCourtPresentedWitnessSeatId,
   whodunnitDialogueGestureControlIsInteractive,
   whodunnitDialogueGestureDecision,
   whodunnitInterrogationAudioOwnsMouth,
@@ -192,6 +196,85 @@ test("finishing a line preserves the remaining interrogation beat", () => {
     whodunnitInterrogationFinishDecision({ phase: null, hasQueuedResponse: false }),
     "settle",
   );
+});
+
+test("finishing Court dialogue advances one frozen beat before releasing the queue", () => {
+  assert.equal(
+    whodunnitCourtDialogueFinishDecision({ hasQueuedResponse: true }),
+    "advance_queue",
+  );
+  assert.equal(
+    whodunnitCourtDialogueFinishDecision({ hasQueuedResponse: false }),
+    "clear",
+  );
+});
+
+test("keeps the retiring witness on the stand until playback reaches the next witness", () => {
+  const dialogueQueue = [
+    { speakerSeatId: null },
+    { speakerSeatId: "witness-old" },
+    { speakerSeatId: null },
+    { speakerSeatId: "witness-next" },
+  ];
+  const suspectSeatIds = new Set(["witness-old", "witness-next"]);
+
+  assert.equal(whodunnitCourtPresentedWitnessSeatId({
+    activeWitnessSeatId: "witness-next",
+    dialogueIndex: 0,
+    dialogueQueue,
+    suspectSeatIds,
+  }), "witness-old");
+  assert.equal(whodunnitCourtPresentedWitnessSeatId({
+    activeWitnessSeatId: "witness-next",
+    dialogueIndex: 1,
+    dialogueQueue,
+    suspectSeatIds,
+  }), "witness-old");
+  assert.equal(whodunnitCourtPresentedWitnessSeatId({
+    activeWitnessSeatId: "witness-next",
+    dialogueIndex: 2,
+    dialogueQueue,
+    suspectSeatIds,
+  }), "witness-next");
+  assert.equal(whodunnitCourtPresentedWitnessSeatId({
+    activeWitnessSeatId: "witness-next",
+    dialogueIndex: 0,
+    dialogueQueue: [{ speakerSeatId: null }],
+    suspectSeatIds,
+  }), "witness-next");
+});
+
+test("does not carry a double-click from an old Court key into the next beat", () => {
+  assert.equal(whodunnitCourtDialogueGestureCrossedPresentation({
+    armedPresentationKey: "court-line-old",
+    clickCount: 2,
+    presentationKey: "court-line-next",
+  }), true);
+  assert.equal(whodunnitCourtDialogueGestureCrossedPresentation({
+    armedPresentationKey: "court-line-old",
+    clickCount: 1,
+    presentationKey: "court-line-next",
+  }), false);
+  assert.equal(whodunnitCourtDialogueGestureCrossedPresentation({
+    armedPresentationKey: "court-line-old",
+    clickCount: 2,
+    presentationKey: "court-line-old",
+  }), false);
+});
+
+test("keeps a verdict-bound Court exchange visible until its queue clears", () => {
+  assert.equal(whodunnitCourtPresentationVisible({
+    hasQueuedDialogue: false,
+    playPhase: "trial",
+  }), true);
+  assert.equal(whodunnitCourtPresentationVisible({
+    hasQueuedDialogue: true,
+    playPhase: "verdict",
+  }), true);
+  assert.equal(whodunnitCourtPresentationVisible({
+    hasQueuedDialogue: false,
+    playPhase: "verdict",
+  }), false);
 });
 
 test("keeps legacy response-only Talk graphs playable", () => {

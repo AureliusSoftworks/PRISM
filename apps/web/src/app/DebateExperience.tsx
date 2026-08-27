@@ -103,6 +103,7 @@ import {
   type DebateMysteryDifficulty,
   type DebateMysteryMansionBundleSummaryV1,
   type DebateMysteryPresetId,
+  type DebateMysteryRoomNarrationAppearanceV2,
   type DebateForumRoundMode,
   type DebateFormatId,
   type DebateMotionSlateV1,
@@ -687,6 +688,8 @@ export interface DebateBotSummary {
   faceStyleOverride?: BotFaceStyle | null;
   powers?: DebateBotSnapshotV1["powers"];
   systemPrompt?: string;
+  /** Public profile cues used for the anonymous Casekeeper room tableau. */
+  roomNarrationAppearance?: DebateMysteryRoomNarrationAppearanceV2;
   hardMuted: boolean;
 }
 

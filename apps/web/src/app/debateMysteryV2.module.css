@@ -763,19 +763,18 @@
   display: grid;
   width: 100%;
   justify-items: center;
-  animation: roomActorIdleDrift var(--room-actor-drift-duration, 7.4s) ease-in-out var(--room-actor-drift-delay, 0ms) infinite;
+  animation: roomActorIdleDrift var(--room-actor-drift-duration, 7.4s) linear var(--room-actor-drift-delay, 0ms) infinite;
   will-change: transform;
 }
 .roomActorDrift > :not(strong):not([data-signal-voice-action]) { max-height: 56vh; }
 .roomActorDrift > strong { margin-top: -0.5rem; padding: 0.45rem 0.7rem; border-bottom: 2px solid var(--actor-color); background: rgba(6, 7, 14, 0.78); }
 @keyframes roomActorIdleDrift {
-  0% { transform: translate3d(-4px, 1px, 0); }
-  16% { transform: translate3d(3px, -5px, 0); }
-  34% { transform: translate3d(7px, -2px, 0); }
-  51% { transform: translate3d(1px, 4px, 0); }
-  69% { transform: translate3d(-6px, 2px, 0); }
-  84% { transform: translate3d(-2px, -4px, 0); }
-  100% { transform: translate3d(4px, 0, 0); }
+  /* Counter-rotation keeps the persona upright while the conjugated scale
+     turns the circular translation into a gentle vertical oval. One full
+     turn returns with the same matrix and velocity, so the loop never snaps
+     or brakes at its boundary. */
+  from { transform: scaleX(0.5) rotate(0turn) translate3d(6px, 0, 0) rotate(0turn) scaleX(2); }
+  to { transform: scaleX(0.5) rotate(1turn) translate3d(6px, 0, 0) rotate(-1turn) scaleX(2); }
 }
 .roomProsecutorCue {
   --actor-color: #72d7ff;
@@ -866,6 +865,53 @@
 .dialogueBox p, .courtReaction p { margin: 0.35rem 0 0; line-height: 1.45; }
 .dialogueBox[data-speaker="prosecutor"] { border-color: rgba(101, 211, 255, 0.42); }
 .dialogueBox[data-speaker="prosecutor"] small { color: #70d8ff; }
+.dialogueBox[data-speaker="persona"] {
+  border-color: color-mix(in srgb, var(--dialogue-accent, #a98cff), transparent 48%);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--dialogue-accent, #a98cff), transparent 91%), transparent 42%),
+    rgba(7, 9, 18, 0.94);
+  box-shadow:
+    inset 3px 0 0 color-mix(in srgb, var(--dialogue-accent, #a98cff), white 16%),
+    0 1rem 3rem rgba(0, 0, 0, 0.42),
+    0 0 2rem color-mix(in srgb, var(--dialogue-accent, #a98cff), transparent 86%);
+}
+.dialogueBox[data-speaker="persona"] small {
+  color: color-mix(in srgb, var(--dialogue-accent, #a98cff), white 28%);
+}
+.dialogueBox[data-casekeeper-stage="narration"] {
+  border-color: rgba(192, 168, 255, 0.46);
+  background:
+    linear-gradient(90deg, rgba(169, 140, 255, 0.08), transparent 48%),
+    rgba(7, 9, 18, 0.94);
+  animation: casekeeperNarrationDialogueIn 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.dialogueSpeakerSignature {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  letter-spacing: 0.02em;
+}
+.dialogueSpeakerSignature i {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: color-mix(in srgb, var(--dialogue-accent, #a98cff), white 24%);
+  border: 1px solid color-mix(in srgb, var(--dialogue-accent, #a98cff), transparent 44%);
+  background: color-mix(in srgb, var(--dialogue-accent, #a98cff), transparent 84%);
+}
+.dialogueSpeakerSignature i { width: 1.45rem; height: 1.45rem; border-radius: 50%; }
+.casekeeperThinkingDots {
+  display: inline-block;
+  width: 1ch;
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.12rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  white-space: nowrap;
+  animation: casekeeperThinkingDots 1.15s steps(1, end) infinite;
+}
+.casekeeperThinkingDots > span { display: block; width: 3ch; }
 .dialogueBox[data-examination="true"] { cursor: pointer; }
 .dialogueContinueHint {
   display: block;
@@ -880,6 +926,15 @@
   animation: observationContinuePulse 1.6s ease-in-out infinite;
 }
 @keyframes observationContinuePulse { 50% { opacity: 0.55; } }
+@keyframes casekeeperThinkingDots {
+  0%, 32% { width: 1ch; }
+  33%, 65% { width: 2ch; }
+  66%, 100% { width: 3ch; }
+}
+@keyframes casekeeperNarrationDialogueIn {
+  from { opacity: 0.35; transform: translateX(-50%) translateY(0.35rem); }
+  to { opacity: 1; transform: translateX(-50%); }
+}
 
 .investigationCommands,
 .courtActions {
@@ -1026,6 +1081,10 @@
 
 .testimony { position: fixed; z-index: 10; left: 50%; bottom: 6.5rem; width: min(52rem, calc(100vw - 2rem)); padding: 1rem 1.2rem; border: 1px solid rgba(176, 146, 255, 0.35); border-radius: 0.9rem; background: rgba(7, 9, 18, 0.93); box-shadow: 0 1.4rem 4rem rgba(0, 0, 0, 0.55); transform: translateX(-50%); backdrop-filter: blur(18px); }
 .testimony p { margin: 0.4rem 0; font-size: clamp(1rem, 2vw, 1.25rem); line-height: 1.45; }
+.testimony p[role="button"],
+.courtReaction[role="button"] { cursor: pointer; }
+.testimony p[role="button"]:focus-visible,
+.courtReaction[role="button"]:focus-visible { outline: 2px solid #c0a8ff; outline-offset: 0.2rem; }
 .testimony > small { color: #9b95aa; }
 .testimonyNav { display: flex; align-items: center; justify-content: space-between; color: #b4adbf; font-size: 0.74rem; }
 .testimonyNav button { width: 2.2rem; height: 2.2rem; border: 1px solid rgba(255, 255, 255, 0.13); border-radius: 50%; background: rgba(255, 255, 255, 0.04); cursor: pointer; }
@@ -1108,4 +1167,6 @@
   .roomActor[data-prosecutor-speaking="true"] { opacity: 1; transform: translateX(-50%); }
   .roomActorDrift { animation: none; transform: none; will-change: auto; }
   .dialogueContinueHint { animation: none; }
+  .dialogueBox[data-casekeeper-stage="narration"] { animation: none; }
+  .casekeeperThinkingDots { width: 3ch; animation: none; }
 }

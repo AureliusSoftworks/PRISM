@@ -23,6 +23,7 @@ import {
   type DebateMysteryCaseCodeV1,
   type DebateMysteryNotebookV2,
   type DebateMysteryRegionV1,
+  type DebateMysteryRoomNarrationAppearanceV2,
   type DebateMysteryTheoryV1,
   type DebateBotSnapshotV1,
   type DebateSessionV1,
@@ -98,6 +99,8 @@ export interface MysteryBotSummary {
   faceStyleOverride?: BotFaceStyle | null;
   powers?: DebateBotSnapshotV1["powers"];
   systemPrompt?: string;
+  /** Public profile cues used for the anonymous Casekeeper room tableau. */
+  roomNarrationAppearance?: DebateMysteryRoomNarrationAppearanceV2;
   hardMuted: boolean;
 }
 

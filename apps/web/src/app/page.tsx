@@ -145948,16 +145948,25 @@ function HomeContent(): React.JSX.Element {
       : activeBot?.id
         ? [activeBot.id]
         : [];
-    const debateBots = bots.map((bot) => ({
-      id: bot.id,
-      name: bot.name,
-      color: bot.color,
-      glyph: bot.glyph,
-      avatarDetails: bot.avatarDetails ?? null,
-      powers: bot.powers,
-      systemPrompt: bot.system_prompt,
-      hardMuted: botPowerIsMutedV1(bot.powers),
-    }));
+    const debateBots = bots.map((bot) => {
+      const profile = parseStoredBotPrompt(bot.system_prompt).fields;
+      return {
+        id: bot.id,
+        name: bot.name,
+        color: bot.color,
+        glyph: bot.glyph,
+        avatarDetails: bot.avatarDetails ?? null,
+        powers: bot.powers,
+        systemPrompt: bot.system_prompt,
+        roomNarrationAppearance: {
+          description: profile.appearance.description,
+          style: profile.appearance.style,
+          presence: profile.appearance.presence,
+          pronouns: profile.identity.pronouns,
+        },
+        hardMuted: botPowerIsMutedV1(bot.powers),
+      };
+    });
     const prepareDebateUtterance = async (
       utterance: DebateUtterance,
     ): Promise<void> => {
