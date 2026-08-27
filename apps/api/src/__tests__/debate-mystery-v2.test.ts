@@ -4098,6 +4098,9 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.match(synthesis, /size: "1536x1024"/u);
     assert.match(synthesis, /unoccupied, furnished/u);
     assert.match(serverSource, /Ordinary room-appropriate furniture/u);
+    assert.match(serverSource, /Do not reject an otherwise correct isolated object/u);
+    assert.match(serverSource, /treat that coherent grouping as one exhibit/u);
+    assert.match(synthesis, /materials, palette, patina, and lighting/u);
     assert.match(synthesis, /people, human figures, bodies, evidence, clues, weapons, blood, gore, readable text/u);
     assert.doesNotMatch(synthesis, /generateAndPersistStandaloneImageAsset/u);
     assert.match(serverSource, /const MYSTERY_ASSET_ATTEMPT_TIMEOUT_MS = 10 \* 60_000/u);
@@ -4120,5 +4123,6 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.match(sealedRoutes, /saveRevealedDebateMysteryAssetV1/u);
     assert.match(serverSource, /mystery-assets\/retry/u);
     assert.match(serverSource, /requeueRetryableDebateMysteryAssetFallbacksV1/u);
+    assert.match(serverSource, /session\.id,\s*2,\s*enabledKinds/u);
   });
 });

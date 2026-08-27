@@ -9345,6 +9345,9 @@ async function reviewDebateMysteryAssetWithVision(args: {
     : [
         `Review this isolated evidence sprite for exactly: ${args.requestedSubject}.`,
         "Approve only if it shows one complete, legible object and contains no people, bodies, extra evidence, scene, gore, readable text, captions, logos, borders, or UI.",
+        "If the requested subject is a named set, collection, pair, or container with its contents, treat that coherent grouping as one exhibit; reject only unrelated additional objects that read as separate evidence.",
+        "Judge the shared house style only from the object's visible materials, palette, and finish. Do not reject an otherwise correct isolated object merely because it has no room, architecture, surroundings, or broader venue cues.",
+        "Reject style only for a clear visual contradiction, not uncertainty about whether the isolated object depicts the entire mansion theme.",
       ].join(" ");
   const spoilerSafeContent = [
     content,
@@ -9514,6 +9517,7 @@ async function prepareDebateMysteryV2EvidenceAssets(
               prompt: [
                 buildDebateExhibitSpritePrompt(exhibit),
                 args.houseStyle.promptContract,
+                "Express the shared house style through this object's materials, palette, patina, and lighting while keeping it isolated on transparency.",
                 "The object remains presentation-only: do not add clues, labels, symbols, surroundings, people, bodies, gore, text, UI, or facts beyond its frozen title.",
               ].join(" "),
               apiKey,
@@ -18195,7 +18199,7 @@ function buildRoutes(): RouteDefinition[] {
         db,
         userId,
         session.id,
-        1,
+        2,
         enabledKinds,
       );
       for (const item of retried) {
