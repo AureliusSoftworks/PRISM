@@ -9346,8 +9346,8 @@ async function reviewDebateMysteryAssetWithVision(args: {
       ].join(" ")
     : [
         `Review this isolated evidence sprite for exactly: ${args.requestedSubject}.`,
-        "Approve only if it shows one complete, legible object and contains no people, bodies, extra evidence, scene, gore, readable text, captions, logos, borders, or UI.",
-        "If the requested subject is a named set, collection, pair, or container with its contents, treat that coherent grouping as one exhibit; reject only unrelated additional objects that read as separate evidence.",
+        "Approve only if it shows exactly the requested evidence subject clearly and in full, with no people, bodies, unrelated evidence subjects, surrounding scene, gore, readable text, captions, logos, borders, or UI.",
+        "Count subjects, not physical pieces: a named set, collection, pair, assembled object, or container with its contents is exactly one requested evidence subject. Its component pieces are required parts of that exhibit, never unrelated additional objects.",
         "Judge the shared house style only from the object's visible materials, palette, and finish. Do not reject an otherwise correct isolated object merely because it has no room, architecture, surroundings, or broader venue cues.",
         "Reject style only for a clear visual contradiction, not uncertainty about whether the isolated object depicts the entire mansion theme.",
       ].join(" ");

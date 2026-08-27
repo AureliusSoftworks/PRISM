@@ -4101,7 +4101,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.match(serverSource, /Do not speculate that ordinary containers/u);
     assert.match(synthesis, /these are atmosphere, not evidence/u);
     assert.match(serverSource, /Do not reject an otherwise correct isolated object/u);
-    assert.match(serverSource, /treat that coherent grouping as one exhibit/u);
+    assert.match(serverSource, /Count subjects, not physical pieces/u);
     assert.match(synthesis, /materials, palette, patina, and lighting/u);
     assert.match(synthesis, /people, human figures, bodies, evidence, clues, weapons, blood, gore, readable text/u);
     assert.doesNotMatch(synthesis, /generateAndPersistStandaloneImageAsset/u);
