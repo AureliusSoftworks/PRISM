@@ -10,6 +10,28 @@ export interface DebateArchiveSessionGroup {
   updatedAt: string;
 }
 
+export function debateArchiveProceedingActionLabel(
+  group: DebateArchiveSessionGroup,
+): string {
+  const session = group.representative;
+  if (session.mysteryForge) return "Open Case Forge";
+  if (group.isMysteryCaseFamily) {
+    return group.openRun
+      ? `Return to Run ${group.openRun.mysteryRunOrdinal ?? group.runs.length}`
+      : "Play again";
+  }
+  if (session.format === "whodunnit") {
+    if (session.status === "completed") return "Open case Archive";
+    if (session.mysteryProgress === "case_forge") return "Return to Case Forge";
+    if (session.mysteryProgress === "trial") return "Return to court";
+    return "Return to investigation";
+  }
+  if (session.status === "completed") return "Watch replay";
+  if (session.awaitingDeferredStart) return "Start debate";
+  if (session.status === "paused") return "Resume debate";
+  return "Return to debate";
+}
+
 /** Coalesces only Whodunnit V2 runs; every other archived proceeding stays flat. */
 export function groupDebateArchiveSessions(
   sessions: readonly DebateSessionListItemV1[],

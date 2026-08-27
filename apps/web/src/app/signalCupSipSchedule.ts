@@ -14,9 +14,9 @@
  * the schedule is derived from the turn structure itself: a bot drinks while
  * the other chair is talking.
  *
- * The level counts only opportunities that have already left the screen, and
- * the sprite shows the one currently on it, so every step of the level is a
- * sip the viewer has watched.
+ * Completed sips keep the durable level stable. The current sip is added to
+ * the visual count while its sprite is on screen, so the drain happens inside
+ * that physical action and the next turn merely preserves it.
  */
 
 /** Sips land at most once per this many turns, before the rate multiplier. */
@@ -32,6 +32,19 @@ export interface SignalCupSipScheduleV1 {
   sipCount: number;
   /** True when the turn on screen is this role's sip and they can take it. */
   sippingNow: boolean;
+}
+
+/**
+ * Fill-state count for the mug currently on screen.
+ *
+ * The active sip belongs to the level immediately, while the sip art is
+ * visible. On the next turn it moves into `sipCount`, leaving the same count
+ * behind instead of draining after the mug has returned to the table.
+ */
+export function signalCupVisualSipCountV1(
+  schedule: SignalCupSipScheduleV1,
+): number {
+  return schedule.sipCount + (schedule.sippingNow ? 1 : 0);
 }
 
 /**
@@ -127,8 +140,10 @@ export function signalCupSipScheduleV1(args: {
       continue;
     }
     previousSipIndex = index;
-    // The sip on screen has not been swallowed yet. It joins the level only
-    // once the turn advances, so the sprite always precedes the drop.
+    // The persisted count still represents completed sips. The visual helper
+    // adds this active sip while it is on screen, then hands the same count
+    // back here when the turn advances. The level therefore changes during
+    // the sip, never before or after it.
     if (index === presented) {
       sippingNow = args.sipAllowed !== false;
       continue;

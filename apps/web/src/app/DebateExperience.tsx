@@ -147,6 +147,7 @@ import {
 } from "./liveBakeClient";
 import { buildDebateArchiveChipVisualStyle } from "./debateArchiveChipGradient";
 import {
+  debateArchiveProceedingActionLabel,
   groupDebateArchiveSessions,
   type DebateArchiveSessionGroup,
 } from "./debateArchiveCaseFamilies";
@@ -5022,9 +5023,6 @@ export function DebateExperience(
   );
   const [activeMysteryCastSeat, setActiveMysteryCastSeat] =
     useState<DebateMysteryCastSeat>({ kind: "suspect", index: 0 });
-  const mysterySurpriseCompilePendingRef = useRef(false);
-  const [mysterySurpriseCompileRequest, setMysterySurpriseCompileRequest] =
-    useState(0);
   useEffect(() => {
     setMysteryNonce(nextMysteryRecipeNonce());
   }, []);
@@ -7807,8 +7805,6 @@ export function DebateExperience(
   const mysteryCastRequirement = minimumWhodunnitBotsForCast(
     mysteryTargetSuspects,
   );
-  const mysteryFullCastRequirement =
-    mysteryCastRequirement + DEBATE_JURY_SIZE;
   const mysteryDistinctLibraryBotCount =
     distinctWhodunnitCastBotIds(bots).length;
   const mysteryRoleSelected =
@@ -8688,12 +8684,6 @@ export function DebateExperience(
           : "moderator",
     );
     return true;
-  };
-
-  const surpriseAndCompileMystery = (): void => {
-    if (!randomizeCast()) return;
-    mysterySurpriseCompilePendingRef.current = true;
-    setMysterySurpriseCompileRequest((current) => current + 1);
   };
 
   const randomizeMysteryCastAroundBot = (anchor: {
@@ -14374,20 +14364,6 @@ export function DebateExperience(
     }
   };
 
-  useEffect(() => {
-    if (!mysterySurpriseCompilePendingRef.current) return;
-    if (format !== "whodunnit") {
-      mysterySurpriseCompilePendingRef.current = false;
-      return;
-    }
-    if (!debateCanStart || busy) return;
-    mysterySurpriseCompilePendingRef.current = false;
-    void startMystery();
-    // startMystery intentionally consumes the fully committed setup from this
-    // render after the cast and automatic juror effects have both settled.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [busy, debateCanStart, format, mysterySurpriseCompileRequest]);
-
   const saveDebate = async (): Promise<void> => {
     if (!debateCanStart) return;
     setBusy(true);
@@ -17994,26 +17970,7 @@ export function DebateExperience(
       session.mysteryProgress === "trial" &&
       (session.format === "turnabout" || session.mysteryVersion === 2);
     const archiveDetailsId = `debate-archive-details-${session.id}`;
-    const proceedingActionLabel =
-      familyRuns
-        ? openFamilyRun
-          ? `Return to Run ${openFamilyRun.mysteryRunOrdinal ?? familyRuns.length}`
-          : "Play again"
-        : session.format === "whodunnit"
-        ? session.status === "completed"
-          ? "Open case Archive"
-          : session.mysteryProgress === "case_forge"
-            ? "Return to Case Forge"
-            : session.mysteryProgress === "trial"
-              ? "Return to court"
-              : "Return to investigation"
-        : session.status === "completed"
-        ? "Watch replay"
-        : session.awaitingDeferredStart
-          ? "Start debate"
-          : session.status === "paused"
-            ? "Resume debate"
-            : "Return to debate";
+    const proceedingActionLabel = debateArchiveProceedingActionLabel(group);
     const proceedingStatusLabel =
       familyRuns
         ? openFamilyRun
@@ -20061,57 +20018,46 @@ export function DebateExperience(
                 : "Pin either advocate when you care who argues that side, or leave the seat on Surprise me. You preside, and Prism fills open roles during the willingness check."}
           </p>
         </div>
-        <button
-          type="button"
-          className={styles.castRandomizeButton}
-          onClick={
-            format === "whodunnit"
-              ? surpriseAndCompileMystery
-              : randomizeCast
-          }
-          disabled={
-            busy || mysteryDistinctLibraryBotCount <
-            (format === "whodunnit"
-              ? mysteryFullCastRequirement
-              : playerRole === "spectator"
-                ? 3
-                : 2)
-          }
-          aria-label={
-            format === "whodunnit"
-              ? "Randomly assign all Whodunnit cast roles and begin compiling"
-              : playerRole === "judge"
-              ? "Randomly select both advocates"
-              : playerRole === "participant"
-                ? "Randomly select a Judge and opposing bot"
-                : "Randomly select all three actors"
-          }
-          title={
-            format === "whodunnit"
-              ? mysteryDistinctLibraryBotCount < mysteryFullCastRequirement
-                ? `At least ${mysteryFullCastRequirement} distinct Library bots are required`
-                : "Randomly assign every role and begin compiling the case"
-              : bots.length < (playerRole === "spectator" ? 3 : 2)
-              ? playerRole === "spectator"
-                ? "At least three Library bots are required"
-                : "At least two Library bots are required"
-              : playerRole === "judge"
+        {format !== "whodunnit" ? (
+          <button
+            type="button"
+            className={styles.castRandomizeButton}
+            onClick={randomizeCast}
+            disabled={
+              busy ||
+              mysteryDistinctLibraryBotCount <
+                (playerRole === "spectator" ? 3 : 2)
+            }
+            aria-label={
+              playerRole === "judge"
                 ? "Randomly select both advocates"
                 : playerRole === "participant"
                   ? "Randomly select a Judge and opposing bot"
                   : "Randomly select all three actors"
-          }
-          data-glyph-tooltip="Random actors"
-          data-tutorial-target="debate-random-cast"
-        >
-          <span aria-hidden="true">
-            {props.renderBotGlyph("dice", {
-              size: 18,
-              strokeWidth: 1.8,
-            })}
-          </span>
-          <strong>Surprise me</strong>
-        </button>
+            }
+            title={
+              bots.length < (playerRole === "spectator" ? 3 : 2)
+                ? playerRole === "spectator"
+                  ? "At least three Library bots are required"
+                  : "At least two Library bots are required"
+                : playerRole === "judge"
+                  ? "Randomly select both advocates"
+                  : playerRole === "participant"
+                    ? "Randomly select a Judge and opposing bot"
+                    : "Randomly select all three actors"
+            }
+            data-glyph-tooltip="Random actors"
+            data-tutorial-target="debate-random-cast"
+          >
+            <span aria-hidden="true">
+              {props.renderBotGlyph("dice", {
+                size: 18,
+                strokeWidth: 1.8,
+              })}
+            </span>
+            <strong>Surprise me</strong>
+          </button>
+        ) : null}
       </div>
       {format === "whodunnit" ? (
         <div className={styles.mysteryCastGroups}>
@@ -21059,46 +21005,35 @@ export function DebateExperience(
             PRISM holds your side. Only the opposing bot gives advocacy consent.
           </span>
         )}
-        <button
-          type="button"
-          className={styles.primaryButton}
-          disabled={
-            busy ||
-            (format === "whodunnit"
-              ? mysteryDistinctLibraryBotCount < mysteryFullCastRequirement
-              : !castReady)
-          }
-          onClick={() => {
-            if (format === "whodunnit") {
-              surpriseAndCompileMystery();
-              return;
-            }
-            if (roleChecksComplete) {
-              // The judge has no Evidence step to advance into; the record is
-              // already being prepared out of view.
-              if (!judgeOwnsHiddenEvidence) setStudioPanel("evidence");
-              return;
-            }
-            void checkRoles();
-          }}
-          data-tutorial-target="debate-consent"
-        >
-          {format === "whodunnit"
-            ? busy
-              ? "Compiling…"
-              : "Surprise me · seat & compile"
-            : busy
-            ? consentNeedsReconfirmation
-              ? "Reconfirming privately…"
-              : "Checking privately…"
-            : declinedChecks.length > 0
-              ? "Ask again"
-            : roleChecksComplete
-              ? "Choose evidence →"
-              : consentNeedsReconfirmation
-                ? "Reconfirm willingness"
-              : "Make sure they’re willing"}
-        </button>
+        {format !== "whodunnit" ? (
+          <button
+            type="button"
+            className={styles.primaryButton}
+            disabled={busy || !castReady}
+            onClick={() => {
+              if (roleChecksComplete) {
+                // The judge has no Evidence step to advance into; the record is
+                // already being prepared out of view.
+                if (!judgeOwnsHiddenEvidence) setStudioPanel("evidence");
+                return;
+              }
+              void checkRoles();
+            }}
+            data-tutorial-target="debate-consent"
+          >
+            {busy
+              ? consentNeedsReconfirmation
+                ? "Reconfirming privately…"
+                : "Checking privately…"
+              : declinedChecks.length > 0
+                ? "Ask again"
+                : roleChecksComplete
+                  ? "Choose evidence →"
+                  : consentNeedsReconfirmation
+                    ? "Reconfirm willingness"
+                    : "Make sure they’re willing"}
+          </button>
+        ) : null}
       </div>
     </section>
   );

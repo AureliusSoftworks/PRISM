@@ -154,6 +154,13 @@ class FakeMediaRecorder {
   }
 }
 
+class StuckStopMediaRecorder extends FakeMediaRecorder {
+  override stop(): void {
+    this.state = "inactive";
+    // Reproduce a browser recorder that never dispatches its terminal event.
+  }
+}
+
 test("the replay master captures the same shared output bus that reaches the device", async () => {
   const originalWindow = globalThis.window;
   const originalMediaRecorder = globalThis.MediaRecorder;
@@ -236,6 +243,50 @@ test("the replay master captures the same shared output bus that reaches the dev
     });
     releaseElement?.();
     assert.equal(output.connections.size, 1);
+  } finally {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: originalWindow,
+    });
+    Object.defineProperty(globalThis, "MediaRecorder", {
+      configurable: true,
+      value: originalMediaRecorder,
+    });
+  }
+});
+
+test("a missing MediaRecorder stop event still releases and preserves the replay master", async () => {
+  const originalWindow = globalThis.window;
+  const originalMediaRecorder = globalThis.MediaRecorder;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { AudioContext: FakeAudioContext },
+  });
+  Object.defineProperty(globalThis, "MediaRecorder", {
+    configurable: true,
+    value: StuckStopMediaRecorder,
+  });
+
+  try {
+    primeReplayAudioMasterCapture();
+    assert.equal(
+      await startReplayAudioMasterCapture("signal-stuck-stop", {
+        markIntro: false,
+      }),
+      true,
+    );
+    const result = await stopReplayAudioMasterCapture("signal-stuck-stop", 5);
+    assert.equal(result?.sourceId, "signal-stuck-stop");
+    assert.ok(result && result.bytes.byteLength > 0);
+
+    primeReplayAudioMasterCapture();
+    assert.equal(
+      await startReplayAudioMasterCapture("signal-after-stuck-stop", {
+        markIntro: false,
+      }),
+      true,
+    );
+    await stopReplayAudioMasterCapture("signal-after-stuck-stop", 5);
   } finally {
     Object.defineProperty(globalThis, "window", {
       configurable: true,

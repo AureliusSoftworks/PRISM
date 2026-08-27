@@ -71,7 +71,10 @@ import {
 import { findAtMentionTokenPlain } from "./botMention";
 import type { BotPickerGlyphRenderer } from "./BotPicker";
 import type { VoicePlaybackCharacterAlignment } from "./voiceEffects";
-import { mysteryInterviewTranscriptVisibleText } from "./mysteryInterviewTranscriptReveal";
+import {
+  mysteryInterviewTranscriptShouldWithhold,
+  mysteryInterviewTranscriptVisibleText,
+} from "./mysteryInterviewTranscriptReveal";
 import {
   DEBATE_MYSTERY_DESK_DRAG_MIME,
   debateMysteryDeskPositionFromClient,
@@ -874,6 +877,10 @@ export function DebateMysteryPlay(
   const latestInterviewId = latestInterviewMessage?.id;
   const latestInterviewRole = latestInterviewMessage?.role;
   const latestInterviewSeatId = latestInterviewMessage?.suspectSeatId;
+  const latestInterviewAwaitingRevealId = latestInterviewMessage?.role === "suspect" &&
+    latestInterviewMessage.id !== playedInterviewMessageRef.current
+    ? latestInterviewMessage.id
+    : null;
 
   useEffect(() => {
     const latest = latestInterviewMessageRef.current;
@@ -2268,7 +2275,7 @@ export function DebateMysteryPlay(
                     <header><div><small>In the room</small><strong>{currentSuspect.name}</strong></div><button type="button" data-ui-sfx="none" disabled={busy} onClick={() => void finishActiveActivity()}>Return to room</button></header>
                     <div ref={interviewTranscriptRef} className={styles.interviewTranscript} aria-live="polite">
                       {interviewGenerating && streamingPlayerMessageId ? <p data-speaker="investigator" data-streaming="true"><strong>You · {playerSpeechTiming ? "voice" : "writing"}</strong><span>{streamedPlayerQuestion || "…"}</span></p> : null}
-                      {currentInterview.length ? currentInterview.map((message) => message.id === streamingMessageId && !streamedReply ? null : <p key={message.id} data-speaker={message.role} data-streaming={message.id === streamingMessageId ? "true" : undefined}><strong>{message.role === "investigator" ? "You" : currentSuspect.name}{message.id === streamingMessageId && interviewSpeechTiming ? " · voice" : ""}</strong><span>{message.id === streamingMessageId ? mysteryPublicText(streamedReply, state) : mysteryPublicText(message.content, state)}</span></p>) : <p className={styles.interviewPrompt}>Ask about the timeline, their relationship with the victim, or confront them with discovered evidence using @.</p>}
+                      {currentInterview.length ? currentInterview.map((message) => mysteryInterviewTranscriptShouldWithhold({ messageId: message.id, role: message.role, streamingMessageId, streamedReply, latestMessageId: latestInterviewAwaitingRevealId, claimedMessageId: playedInterviewMessageRef.current }) ? null : <p key={message.id} data-speaker={message.role} data-streaming={message.id === streamingMessageId ? "true" : undefined}><strong>{message.role === "investigator" ? "You" : currentSuspect.name}{message.id === streamingMessageId && interviewSpeechTiming ? " · voice" : ""}</strong><span>{message.id === streamingMessageId ? mysteryPublicText(streamedReply, state) : mysteryPublicText(message.content, state)}</span></p>) : <p className={styles.interviewPrompt}>Ask about the timeline, their relationship with the victim, or confront them with discovered evidence using @.</p>}
                       {interviewGenerating ? <p className={styles.interviewTurnState} role="status">{currentSuspect.name} is thinking…</p> : null}
                     </div>
                     <div className={styles.leadGrid}>{suggestedLeads.map((lead) => <button type="button" key={lead} disabled={busy} onClick={() => { setQuestion(lead); setQuestionCaret(lead.length); }}>{lead}</button>)}</div>

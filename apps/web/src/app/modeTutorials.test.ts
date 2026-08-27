@@ -75,6 +75,9 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Choose Continue in background/u);
     assert.match(step.body, /other PRISM synthesis or start another Debate/u);
     assert.match(step.body, /only one Whodunnit at a time/u);
+    assert.match(step.body, /a little after ten/u);
+    assert.match(step.body, /wrong place at the wrong time/u);
+    assert.match(step.body, /Accomplices are reserved for Mastermind/u);
     assert.match(step.body, /completion, safe failure, or cancellation releases the Forge/u);
     assert.match(step.body, /Archive shows its spoiler-safe durable progress/u);
     assert.match(step.body, /Save mansion level preserves the layout/u);
@@ -91,8 +94,10 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Examine is a silent room-art viewing mode/u);
     assert.match(step.body, /lens cursor and proximity glow/u);
     assert.match(step.body, /When the lens glows, select anywhere in the room scene/u);
-    assert.match(step.body, /Click once to finish the reveal/u);
-    assert.match(step.body, /click again to close the observation and resume searching/u);
+    assert.match(step.body, /click any non-interactive part of the screen/u);
+    assert.match(step.body, /double-click does both for silent text/u);
+    assert.match(step.body, /fades the voice and fills the caption without dismissing the line/u);
+    assert.match(step.body, /again to close or advance it/u);
     assert.match(step.body, /Talk groups finite authored subjects about people, motives, alibis, general questions, and rooms/u);
     assert.match(step.body, /room subjects name their location/u);
     assert.match(step.body, /evidence and testimony never appear in Talk/u);

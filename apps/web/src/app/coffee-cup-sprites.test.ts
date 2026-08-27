@@ -1239,7 +1239,7 @@ describe("coffee cup sprites", () => {
     assert.ok(sipDrain!.frameIndex > 0);
   });
 
-  it("only changes timed fill frames while sip art is active", () => {
+  it("only drains timed mugs while sip art is active", () => {
     const seed = "session:bot-alice";
     const durationMinutes = 10;
     const sessionStartedAtMs = 0;
@@ -1260,6 +1260,9 @@ describe("coffee cup sprites", () => {
         sessionEndsAtMs,
         durationMinutes,
       });
+      if (visual.progress > previous.progress) {
+        assert.equal(visual.sipping, true, `level drained at ${nowMs}ms`);
+      }
       if (visual.frameIndex !== previous.frameIndex) {
         assert.equal(visual.sipping, true, `frame changed at ${nowMs}ms`);
       }

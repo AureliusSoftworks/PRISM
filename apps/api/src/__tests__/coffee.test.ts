@@ -6812,16 +6812,28 @@ describe("Coffee group foundation", () => {
       mirroredHolderPrompt,
       /A brittle identity thief waiting for a bot to address him/iu,
     );
-    assert.doesNotMatch(
+    assert.match(
       mirroredHolderPrompt,
-      /Curious philosopher who loves Socratic questions/iu,
+      /absolutely convinced that you are Alice/iu,
+    );
+    assert.match(
+      mirroredHolderPrompt,
+      /original Alice is an impostor/iu,
+    );
+    assert.match(
+      mirroredHolderPrompt,
+      /Copied public persona:\\nCurious philosopher who loves Socratic questions/iu,
+    );
+    assert.match(
+      mirroredHolderPrompt,
+      /material shell.*complete frozen voice.*exact Accent Map/isu,
     );
     const mirroredHolderContent = (
       mirroredHolderTurn.conversation.messages.at(-1)?.content ?? ""
     ).replace(/\[([^\]]+)\]\(prism-bot:[^)]+\)/gu, "$1");
     assert.equal(
       mirroredHolderContent,
-      "I'm Identity Crisis Ian, and I still sound exactly like myself.",
+      "I am Alice. The other Alice is an impostor.",
     );
 
     const repeat = await withMockedCoffeeFetch(
@@ -12120,20 +12132,32 @@ describe("buildSpeakerPrompt", () => {
     });
     assert.match(
       holderPrompt,
-      /Identity Crisis behavior: you are still Identity Crisis Ian, the Coffee participant/iu,
+      /absolutely convinced that you are Mara Vale/iu,
     );
     assert.match(
       holderPrompt,
-      /knowingly masquerade as Mara Vale.*borrowed name as "Mara Vale"/isu,
+      /original Mara Vale is an impostor/iu,
     );
-    assert.match(holderPrompt, /Mara Vale is the suspicious imitator/iu);
-    assert.doesNotMatch(holderPrompt, /terse lunar cartographer/iu);
+    assert.match(
+      holderPrompt,
+      /Copied public persona:\s*A terse lunar cartographer/iu,
+    );
+    assert.match(
+      holderPrompt,
+      /material shell.*complete frozen voice.*exact Accent Map/isu,
+    );
 
     const originalPrompt = coffeeIdentityMirrorPromptForSpeaker({
       history,
       speaker: { id: "mara", name: "Mara Vale" },
     });
-    assert.equal(originalPrompt, "");
+    assert.match(originalPrompt, /stolen your public identity/iu);
+    assert.match(originalPrompt, /not the real Mara Vale/iu);
+    assert.match(originalPrompt, /real offense/iu);
+    assert.match(
+      originalPrompt,
+      /remain Mara Vale with your own personality, agency, role, material form, voice, Powers, and boundaries/iu,
+    );
 
     const reloaded = coffeeIdentityMirrorStatesFromHistory(
       JSON.parse(JSON.stringify(history)),

@@ -1,8 +1,38 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mysteryInterviewTranscriptVisibleText } from "./mysteryInterviewTranscriptReveal.ts";
+import {
+  mysteryInterviewTranscriptShouldWithhold,
+  mysteryInterviewTranscriptVisibleText,
+} from "./mysteryInterviewTranscriptReveal.ts";
 
 describe("Whodunnit interview transcript reveal", () => {
+  it("withholds a newly committed suspect reply before the playback effect claims it", () => {
+    assert.equal(mysteryInterviewTranscriptShouldWithhold({
+      messageId: "answer-2",
+      role: "suspect",
+      streamingMessageId: null,
+      streamedReply: "",
+      latestMessageId: "answer-2",
+      claimedMessageId: "answer-1",
+    }), true);
+    assert.equal(mysteryInterviewTranscriptShouldWithhold({
+      messageId: "answer-2",
+      role: "suspect",
+      streamingMessageId: "answer-2",
+      streamedReply: "I was",
+      latestMessageId: "answer-2",
+      claimedMessageId: "answer-2",
+    }), false);
+    assert.equal(mysteryInterviewTranscriptShouldWithhold({
+      messageId: "question-2",
+      role: "investigator",
+      streamingMessageId: null,
+      streamedReply: "",
+      latestMessageId: "answer-2",
+      claimedMessageId: "answer-1",
+    }), false);
+  });
+
   it("withholds every character until its exact audio-clock end mark", () => {
     const text = "Hi there";
     const alignment = {

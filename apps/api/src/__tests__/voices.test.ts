@@ -994,8 +994,8 @@ describe("voice Phase 1 boundary", () => {
     assert.equal(speech.alignment?.characters.join(""), "Hi there.");
   });
 
-  it("projects title abbreviations only into every Premium speech request", async () => {
-    const sourceText = "Ms. Rivera called Capt. Chen.";
+  it("projects titles and exact clock times only into every Premium speech request", async () => {
+    const sourceText = "Ms. Rivera called Capt. Chen at 10:09 AM";
     let providerText = "";
     await requestElevenLabsSpeech({
       apiKey: "secret-key",
@@ -1008,8 +1008,11 @@ describe("voice Phase 1 boundary", () => {
         return new Response("audio", { status: 200 });
       }) as typeof fetch,
     });
-    assert.equal(providerText, "Miss Rivera called Captain Chen.");
-    assert.equal(sourceText, "Ms. Rivera called Capt. Chen.");
+    assert.equal(
+      providerText,
+      "Miss Rivera called Captain Chen at ten oh nine in the morning",
+    );
+    assert.equal(sourceText, "Ms. Rivera called Capt. Chen at 10:09 AM");
   });
 
   it("maps expanded Premium titles back onto the authored transcript", async () => {

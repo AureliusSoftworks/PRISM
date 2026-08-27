@@ -1,5 +1,4 @@
 import type { DatabaseSync } from "node:sqlite";
-import { botPowerIntendedSpeechLooksGibberishV1 } from "@localai/shared";
 
 export const SPEECH_INTENT_REVEAL_MAX_LENGTH = 6_000;
 
@@ -98,12 +97,23 @@ function cleanIntent(value: unknown, publicText: unknown): string | null {
   const intended = value.trim();
   if (!intended || intended.length > SPEECH_INTENT_REVEAL_MAX_LENGTH) return null;
   const publicSpeech = typeof publicText === "string" ? publicText.trim() : "";
-  if (
-    !publicSpeech ||
-    intended === publicSpeech ||
-    !botPowerIntendedSpeechLooksGibberishV1(publicSpeech)
-  ) return null;
+  if (!publicSpeech || intended === publicSpeech) return null;
   return intended;
+}
+
+function storedDebateSpeakerObfuscatesSpeech(
+  session: Record<string, unknown> | null,
+  speakerBotId: string,
+): boolean {
+  const powerPlan = objectValue(session?.powerPlan);
+  const bots = objectValue(powerPlan?.bots);
+  const speakerPlan = objectValue(bots?.[speakerBotId]);
+  const effects = Array.isArray(speakerPlan?.effects)
+    ? speakerPlan.effects
+    : [];
+  return effects.some((entry) =>
+    objectValue(objectValue(entry)?.effect)?.type === "speech_obfuscation",
+  );
 }
 
 function revealFromChatFamily(
@@ -203,11 +213,13 @@ function revealFromDebate(
   request: SpeechIntentRevealRequestV1,
 ): string | null {
   const row = db.prepare(
-    `SELECT event_json
-       FROM debate_events
-      WHERE id = ? AND session_id = ? AND user_id = ?`,
+    `SELECT e.event_json, s.session_json
+       FROM debate_events e
+       JOIN debate_sessions s
+         ON s.id = e.session_id AND s.user_id = e.user_id
+      WHERE e.id = ? AND e.session_id = ? AND e.user_id = ?`,
   ).get(request.recordId, request.scopeId, userId) as
-    | { event_json: string }
+    | { event_json: string; session_json: string }
     | undefined;
   const event = jsonObject(row?.event_json);
   if (
@@ -218,7 +230,11 @@ function revealFromDebate(
     typeof event.speakerBotId !== "string" ||
     !event.speakerBotId.trim() ||
     event.interrupted === true ||
-    event.mutePerformance
+    event.mutePerformance ||
+    !storedDebateSpeakerObfuscatesSpeech(
+      jsonObject(row?.session_json),
+      event.speakerBotId,
+    )
   ) return null;
   return cleanIntent(event.powerIntendedContent, event.content);
 }

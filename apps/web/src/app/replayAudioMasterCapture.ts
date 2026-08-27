@@ -1100,6 +1100,7 @@ export function replayAudioMasterCaptureDirection(
 
 export function stopReplayAudioMasterCapture(
   sourceId: string,
+  stopFallbackMs = 4_000,
 ): Promise<ReplayAudioMasterCaptureResult | null> {
   const capture = activeCapture;
   if (!capture || capture.sourceId !== sourceId) return Promise.resolve(null);
@@ -1115,9 +1116,14 @@ export function stopReplayAudioMasterCapture(
   markReplayAudioMasterCapture({ sourceId, phase: "capture_end" });
   capture.stopPromise = new Promise((resolve) => {
     let settled = false;
+    let stopFallbackHandle: ReturnType<typeof setTimeout> | null = null;
     const finish = async (): Promise<void> => {
       if (settled) return;
       settled = true;
+      if (stopFallbackHandle !== null) {
+        clearTimeout(stopFallbackHandle);
+        stopFallbackHandle = null;
+      }
       if (activeCapture === capture) activeCapture = null;
       capture.releaseKeepAlive();
       try {
@@ -1159,6 +1165,9 @@ export function stopReplayAudioMasterCapture(
       } catch {
         // The destination is already released.
       }
+      for (const track of capture.destination.stream.getTracks?.() ?? []) {
+        track.stop();
+      }
       resolve(result);
     };
     capture.recorder.addEventListener("stop", () => void finish(), {
@@ -1167,6 +1176,13 @@ export function stopReplayAudioMasterCapture(
     capture.recorder.addEventListener("error", () => void finish(), {
       once: true,
     });
+    // WebKit and Chromium can occasionally leave MediaRecorder in an inactive
+    // state without dispatching its terminal event. Preserve any flushed
+    // chunks and release capture ownership instead of stranding the replay.
+    stopFallbackHandle = setTimeout(
+      () => void finish(),
+      Math.max(1, stopFallbackMs),
+    );
     try {
       if (capture.recorder.state === "inactive") {
         void finish();

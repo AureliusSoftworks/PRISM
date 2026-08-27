@@ -11,7 +11,9 @@ import {
   applyVoiceDeliveryMoodToProfile,
   applyBotNamePronunciations,
   expandSpeechAbbreviations,
+  expandSpeechText,
   projectSpeechAbbreviations,
+  projectSpeechText,
   builtinAccentRealizationBlend,
   builtinMelodicityRealizationBlend,
   builtinMoodRealizationBlend,
@@ -151,6 +153,46 @@ describe("audio voice normalization", () => {
       [
         { synthesisText: "Miss", sourceText: "Ms." },
         { synthesisText: "Captain", sourceText: "Capt" },
+      ],
+    );
+  });
+
+  it("speaks exact 12-hour clock times naturally without changing precision", () => {
+    assert.equal(
+      expandSpeechText(
+        "10:09 AM; 1:10 pm; 12:00 PM; 12:00 a.m.; 5:00 PM; 9:01 p.m.",
+      ),
+      "ten oh nine in the morning; one ten in the afternoon; noon; midnight; five in the evening; nine oh one at night",
+    );
+    assert.equal(
+      expandSpeechAbbreviations("Dr. Rivera arrived at 09:05 AM"),
+      "Doctor Rivera arrived at nine oh five in the morning",
+    );
+  });
+
+  it("keeps approximate testimony and non-time colon syntax untouched", () => {
+    const source =
+      "A little after ten in the morning; ratio 10:09; v10:09 AM; 25:09 AM; https://example.test/10:09.";
+    assert.equal(expandSpeechText(source), source);
+  });
+
+  it("keeps source clock text in alignment projection segments", () => {
+    const projection = projectSpeechText("Meet Ms. Rivera at 10:09 AM.");
+    assert.equal(
+      projection.synthesisText,
+      "Meet Miss Rivera at ten oh nine in the morning",
+    );
+    assert.equal(projection.sourceText, "Meet Ms. Rivera at 10:09 AM.");
+    assert.deepEqual(
+      projection.segments.filter(
+        (segment) => segment.synthesisText !== segment.sourceText,
+      ),
+      [
+        { synthesisText: "Miss", sourceText: "Ms." },
+        {
+          synthesisText: "ten oh nine in the morning",
+          sourceText: "10:09 AM.",
+        },
       ],
     );
   });

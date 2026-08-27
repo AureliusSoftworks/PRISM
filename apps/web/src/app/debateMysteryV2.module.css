@@ -810,22 +810,24 @@
 .investigationLens {
   position: absolute;
   z-index: 7;
-  width: 3.05rem;
-  height: 3.05rem;
+  width: 3.4rem;
+  height: 3.4rem;
   pointer-events: none;
   opacity: 0;
-  border: 2px solid rgba(238, 252, 255, 0.86);
+  border: 2px solid rgba(238, 252, 255, 0.96);
   border-radius: 50%;
   background: rgba(5, 13, 20, 0.18);
-  box-shadow: none;
+  box-shadow:
+    0 0 0.65rem rgba(102, 229, 234, 0.42),
+    inset 0 0 0.42rem rgba(169, 140, 255, 0.28);
   transform: translate(-50%, -50%) scale(1);
   transition: opacity 80ms ease, box-shadow 90ms linear, transform 90ms linear;
 }
 .investigationLens[data-visible="true"] { opacity: 1; }
 .investigationLens[data-targeted="true"] {
   box-shadow:
-    0 0 calc(0.45rem + var(--lens-proximity, 0) * 1.65rem) rgba(102, 229, 234, calc(0.14 + var(--lens-proximity, 0) * 0.58)),
-    inset 0 0 calc(0.3rem + var(--lens-proximity, 0) * 0.8rem) rgba(169, 140, 255, calc(0.08 + var(--lens-proximity, 0) * 0.34));
+    0 0 calc(0.7rem + var(--lens-proximity, 0) * 1.9rem) rgba(102, 229, 234, calc(0.3 + var(--lens-proximity, 0) * 0.7)),
+    inset 0 0 calc(0.42rem + var(--lens-proximity, 0) * 0.95rem) rgba(169, 140, 255, calc(0.16 + var(--lens-proximity, 0) * 0.44));
   transform: translate(-50%, -50%) scale(0.9);
 }
 

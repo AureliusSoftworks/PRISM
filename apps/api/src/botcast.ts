@@ -3847,7 +3847,9 @@ export function botcastObserverProjectionV2(
     perspective,
     participants,
     redactedMessageCount: episode.messages.filter(
-      (message) => !participants[message.speakerRole].audible,
+      (message) =>
+        !participants[message.speakerRole].audible ||
+        Boolean(message.mutePerformance),
     ).length,
   };
 }
@@ -3994,7 +3996,12 @@ export function projectBotcastEpisodeForObserverV2(
   const audienceDeliveryByMessageId = new Map(
     episode.messages.map((message) => [
       message.id,
-      observerProjection.participants[message.speakerRole],
+      {
+        ...observerProjection.participants[message.speakerRole],
+        audible:
+          observerProjection.participants[message.speakerRole].audible &&
+          !message.mutePerformance,
+      },
     ] as const),
   );
   const observerEvents = botcastEventsWithPerceptionOverlapFallbackV1(episode);
@@ -4003,8 +4010,7 @@ export function projectBotcastEpisodeForObserverV2(
     audienceExperience,
     observerProjection,
     messages: episode.messages.map((message) => {
-      const delivery =
-        observerProjection.participants[message.speakerRole];
+      const delivery = audienceDeliveryByMessageId.get(message.id)!;
       return {
         ...message,
         // Timed Mute is inaudible but not visually empty: preserve only its
@@ -14587,9 +14593,19 @@ function ensureBotcastFinalHostBeat(
       event.payload.messageId === latestMessage?.id &&
       event.payload.emergencyFallback === true,
   );
+  const latestIsClosingHostBeat = Boolean(
+    latestMessage?.speakerRole === "host" &&
+      episode.events.some(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === latestMessage.id &&
+          event.payload.speakerRole === "host" &&
+          event.payload.segment === "closing",
+      ),
+  );
   if (
     latestIsEmergencySignoff ||
-    (!force && latestMessage?.speakerRole === "host")
+    (!force && latestIsClosingHostBeat)
   ) {
     return episode;
   }
@@ -14778,6 +14794,25 @@ function completeEpisode(
     now,
     options.forceFinalHostBeat === true,
   );
+  const activeProducerCue = botcastActiveProducerCueFromEvents(episode.events);
+  if (activeProducerCue) {
+    const wrapCompleted = activeProducerCue.cue.kind === "wrap_up";
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "producer_cue",
+      {
+        cueId: activeProducerCue.cueId,
+        lifecycle: wrapCompleted ? "delivered" : "failed",
+        ...(wrapCompleted
+          ? { outcome: "episode_completed" }
+          : { failure: "delivery_unavailable" }),
+      },
+      now,
+    );
+    episode = getBotcastEpisode(db, userId, episode.id);
+  }
   closeActiveBotcastModelWarmupHold(db, userId, episode.id, now);
   const runtimeMs = botcastReplayTimeline(
     episode.messages,
@@ -16095,8 +16130,35 @@ export async function advanceBotcastEpisode(
     messages: episode.messages,
   });
   const episodePowerSnapshot = botcastEpisodePowerSnapshot(episode);
-  const guestPowerSnapshot = episodePowerSnapshot?.guestPowers;
-  const hostPowerSnapshot = episodePowerSnapshot?.hostPowers;
+  const currentHost = loadBotProfile(db, userId, episode.hostBotId);
+  const currentGuest =
+    episode.guestKind === "producer"
+      ? botcastProducerGuestProfile(
+          episode.guestName ?? "Producer",
+          episode.guestContext ?? "",
+        )
+      : loadBotProfile(db, userId, episode.guestBotId);
+  const baseHost = episodePowerSnapshot
+    ? { ...currentHost, powers: episodePowerSnapshot.hostPowers }
+    : currentHost;
+  const baseGuest = episodePowerSnapshot
+    ? { ...currentGuest, powers: episodePowerSnapshot.guestPowers }
+    : currentGuest;
+  const mirrorStatesForCompletion = botcastIdentityMirrorStatesV1(
+    episode.events,
+  );
+  const completionHost = botcastProfileWithBorrowedMirrorPowersV1(
+    baseHost,
+    baseGuest,
+    mirrorStatesForCompletion,
+  );
+  const completionGuest = botcastProfileWithBorrowedMirrorPowersV1(
+    baseGuest,
+    baseHost,
+    mirrorStatesForCompletion,
+  );
+  const guestPowerSnapshot = completionGuest.powers;
+  const hostPowerSnapshot = completionHost.powers;
   const unansweredMutedGuestTurnCount =
     episode.segment === "interview" &&
     episode.guestPresenceMode === "present" &&
@@ -16142,6 +16204,7 @@ export async function advanceBotcastEpisode(
     episode.messages.length >= 1;
   const mutuallyMutedEpisodeShouldClose =
     mutuallyMutedEpisode &&
+    !imageDiscussionPending &&
     episode.segment === "interview" &&
     episode.messages.length >= 2;
   const mutuallyConstrainedSilentEpisodeShouldClose =
@@ -16331,30 +16394,22 @@ export async function advanceBotcastEpisode(
     return { episode: getBotcastEpisode(db, userId, episodeId), message: null };
   }
   const show = getBotcastShow(db, userId, episode.showId);
-  const currentHost = loadBotProfile(db, userId, episode.hostBotId);
-  const currentGuest =
-    episode.guestKind === "producer"
-      ? botcastProducerGuestProfile(
-          episode.guestName ?? "Producer",
-          episode.guestContext ?? "",
-        )
-      : loadBotProfile(db, userId, episode.guestBotId);
   const powerSnapshot = botcastEpisodePowerSnapshot(episode);
-  const baseHost = powerSnapshot
+  const turnBaseHost = powerSnapshot
     ? { ...currentHost, powers: powerSnapshot.hostPowers }
     : currentHost;
-  const baseGuest = powerSnapshot
+  const turnBaseGuest = powerSnapshot
     ? { ...currentGuest, powers: powerSnapshot.guestPowers }
     : currentGuest;
   const mirrorStates = botcastIdentityMirrorStatesV1(episode.events);
   const host = botcastProfileWithBorrowedMirrorPowersV1(
-    baseHost,
-    baseGuest,
+    turnBaseHost,
+    turnBaseGuest,
     mirrorStates,
   );
   const guest = botcastProfileWithBorrowedMirrorPowersV1(
-    baseGuest,
-    baseHost,
+    turnBaseGuest,
+    turnBaseHost,
     mirrorStates,
   );
   const hostNamesGuest = botPowerTargetNameV1(guest.name, host.powers);

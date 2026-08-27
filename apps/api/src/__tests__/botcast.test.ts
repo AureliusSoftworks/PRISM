@@ -29,6 +29,7 @@ import {
   botcastDirectionalIrritationEdgesFromEvents,
   botcastPendingCrosstalkReclaimV1,
   botcastActiveProducerCueFromEvents,
+  botcastProducerCueLifecyclesFromEvents,
   botcastProducerGuestThinkingDiscountMs,
   botcastFallbackStudioAccentVariantForSeed,
   botcastImageContextForMessageV1,
@@ -8218,6 +8219,178 @@ describe("Botcast persistence and isolation", () => {
         captures[3]!.map((message) => message.content).join("\n"),
         /remaining the guest/u,
       );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("closes Quiet Tim plus Identity Crisis with a Power-safe host beat and terminal Wrap cue", async () => {
+    const db = fixture();
+    const provider = recordingProvider(
+      [
+        "We're live with Absolute Silence. Confusion Collin, what does a room learn from silence?",
+        "A private answer that borrowed Mute keeps off air.",
+        "Confusion Collin, thank you for joining me, and thank you all for listening.",
+      ],
+      [],
+    );
+    const identityName = "Identity Crisis";
+    const identityIntent =
+      "Copy the public identity of the latest bot that directly addresses this bot.";
+    db.prepare(
+      "UPDATE bots SET name = 'Quiet Tim', powers_json = ? WHERE id = 'host-1'",
+    ).run(mutedPowers());
+    db.prepare(
+      "UPDATE bots SET name = 'Confusion Collin', powers_json = ? WHERE id = 'guest-1'",
+    ).run(JSON.stringify([{
+      version: 1,
+      id: "identity-crisis",
+      name: identityName,
+      intent: identityIntent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(identityName, identityIntent),
+        selfCue: "Mirror the direct bot addresser's public identity.",
+        observerCue: "The holder steals the direct addresser's public identity.",
+        effects: [{ type: "identity_mirror", trigger: "direct_bot_address" }],
+        ruleLabels: ["Bot-only direct address"],
+      },
+    }]));
+    try {
+      const show = createBotcastShow(db, "user-1", {
+        hostBotId: "host-1",
+        name: "Absolute Silence",
+      });
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "What a room learns from silence",
+      });
+
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      const mirroredGuest = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      assert.ok(mirroredGuest.message?.mutePerformance);
+      assert.equal(
+        botcastIdentityMirrorStatesV1(mirroredGuest.episode.events).get("guest-1")
+          ?.targetBotId,
+        "host-1",
+      );
+      const audienceEpisode = projectBotcastEpisodeForAudienceV1(
+        mirroredGuest.episode,
+      );
+      const projectedGuest = audienceEpisode.messages.find(
+        (message) => message.id === mirroredGuest.message?.id,
+      );
+      assert.equal(projectedGuest?.audienceDelivery?.audible, false);
+      assert.equal(
+        audienceEpisode.observerProjection?.redactedMessageCount,
+        2,
+      );
+
+      queueBotcastProducerCue(db, "user-1", created.id, { kind: "wrap_up" });
+      let closed = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      if (closed.episode.status !== "completed") {
+        closed = await advanceBotcastEpisode(
+          db,
+          "user-1",
+          created.id,
+          {},
+          generation(provider),
+        );
+      }
+
+      assert.equal(closed.episode.status, "completed");
+      assert.ok(closed.episode.messages.length <= 3);
+      const finalHostMessage = closed.episode.messages.at(-1)!;
+      assert.equal(finalHostMessage.speakerRole, "host");
+      assert.ok(finalHostMessage.mutePerformance);
+      assert.equal(botPowerResponseIsSilentV1(finalHostMessage.content), true);
+      const closingEvent = closed.episode.events.find(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === finalHostMessage.id,
+      );
+      assert.equal(closingEvent?.payload.segment, "closing");
+      assert.notEqual(closingEvent?.payload.emergencyFallback, true);
+      assert.equal(
+        botcastProducerCueLifecyclesFromEvents(closed.episode.events).at(-1)
+          ?.status,
+        "delivered",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("adds an emergency closing when completion follows an interview host beat", async () => {
+    const db = fixture();
+    const provider = recordingProvider(
+      ["Welcome to Signal. Ivo, what makes evidence worth trusting?"],
+      [],
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Trustworthy evidence",
+      });
+      const opening = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      assert.equal(opening.message?.speakerRole, "host");
+
+      const queuedWrapEpisode = queueBotcastProducerCue(
+        db,
+        "user-1",
+        created.id,
+        { kind: "wrap_up" },
+      );
+      const wrapCueId = botcastProducerCueLifecyclesFromEvents(
+        queuedWrapEpisode.events,
+      ).at(-1)?.cueId;
+      assert.ok(wrapCueId);
+      const completed = forceEndBotcastEpisode(db, "user-1", created.id);
+      assert.equal(completed.status, "completed");
+      assert.equal(completed.messages.length, 2);
+      assert.equal(completed.messages.at(-1)?.speakerRole, "host");
+      assert.equal(
+        completed.events.findLast(
+          (event) =>
+            event.kind === "utterance" &&
+            event.payload.messageId === completed.messages.at(-1)?.id,
+        )?.payload.emergencyFallback,
+        true,
+      );
+      const completedWrap = completed.events.findLast(
+        (event) =>
+          event.kind === "producer_cue" &&
+          event.payload.cueId === wrapCueId &&
+          event.payload.lifecycle === "delivered",
+      );
+      assert.equal(completedWrap?.payload.outcome, "episode_completed");
     } finally {
       db.close();
     }

@@ -6,6 +6,7 @@ import {
   signalCupSipAllowedDuringSpeechV1,
   signalCupSipScheduleV1,
   signalCupSipTurnGapV1,
+  signalCupVisualSipCountV1,
   type SignalCupSipTurn,
 } from "./signalCupSipSchedule.ts";
 
@@ -65,36 +66,38 @@ function scheduleAt(
   });
 }
 
-test("the level never moves without a sip on screen first", () => {
+test("the visible level changes during the active sip, never before or after", () => {
   // This is the property review 12d3d47e's note was about: "Randy's coffee
   // drained without him drinking it." A fixture asserting a particular count
   // would pass while still permitting silent steps, so walk the whole episode
   // and require that every increase was preceded by a visible sip.
   const turns = interview(40);
-  let previousCount = 0;
-  let sippedSinceLastStep = false;
+  let previousVisualCount = 0;
   for (let index = 0; index < turns.length; index += 1) {
-    const { sipCount, sippingNow } = scheduleAt(turns, index);
+    const schedule = scheduleAt(turns, index);
+    const visualCount = signalCupVisualSipCountV1(schedule);
     assert.ok(
-      sipCount >= previousCount,
-      `level went backwards at turn ${index}: ${previousCount} -> ${sipCount}`,
+      visualCount >= previousVisualCount,
+      `level went backwards at turn ${index}: ${previousVisualCount} -> ${visualCount}`,
     );
-    if (sipCount > previousCount) {
-      assert.ok(
-        sippedSinceLastStep,
-        `turn ${index} drank ${sipCount - previousCount} sip(s) nobody saw`,
+    if (visualCount > previousVisualCount) {
+      assert.equal(
+        schedule.sippingNow,
+        true,
+        `turn ${index} changed the mug while no sip was active`,
       );
       assert.equal(
-        sipCount - previousCount,
+        visualCount - previousVisualCount,
         1,
-        `turn ${index} swallowed more than one sip at once`,
+        `turn ${index} drained more than one sip at once`,
       );
-      sippedSinceLastStep = false;
     }
-    if (sippingNow) sippedSinceLastStep = true;
-    previousCount = sipCount;
+    previousVisualCount = visualCount;
   }
-  assert.ok(previousCount > 0, "a 40-turn interview should drink something");
+  assert.ok(
+    previousVisualCount > 0,
+    "a 40-turn interview should drink something",
+  );
 });
 
 test("a gap between turns holds the level instead of snapping it", () => {

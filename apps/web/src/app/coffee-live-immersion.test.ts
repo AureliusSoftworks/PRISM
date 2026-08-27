@@ -52,7 +52,7 @@ describe("Coffee live immersion", () => {
   it("seats the player mug opposite the nameplate glyph", () => {
     assert.match(
       pageSource,
-      /className=\{styles\.coffeePlayerCupButton\}[\s\S]{0,700}data-cup-side="left"/u,
+      /className=\{styles\.coffeePlayerCupButton\}[\s\S]{0,3000}data-cup-side="left"/u,
     );
     assert.match(cssSource, /\.coffeePlayerCupButton \{[\s\S]{0,80}left: -14px;/u);
     // The seat is pointer-transparent; the button must opt back in or every
@@ -66,6 +66,25 @@ describe("Coffee live immersion", () => {
     assert.match(
       cssSource,
       /animation: coffeePlayerCupHint 900ms ease-in-out 1400ms 3;/u,
+    );
+  });
+
+  it("drains the player mug inside its sip pose and holds the settled level", () => {
+    assert.match(
+      pageSource,
+      /beginCoffeePlayerCupSipPresentation\(response\.conversation\)/u,
+    );
+    assert.match(
+      pageSource,
+      /const playerCupVisualSipCount = coffeeCupVisualSipCountForAnimation\([\s\S]{0,900}activePlayerCupSipPresentation\?\.sipping === true/u,
+    );
+    assert.match(
+      pageSource,
+      /className=\{styles\.coffeeCup\}[\s\S]{0,320}data-cup-sipping=\{[\s\S]{0,120}playerCupVisual\.sipping/u,
+    );
+    assert.match(
+      pageSource,
+      /levelCommitted: true,[\s\S]{0,100}sipping: false/u,
     );
   });
 

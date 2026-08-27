@@ -58,6 +58,35 @@ describe("PRISM generation broker", () => {
     assert.equal(result.receipt.fallbackReason, "empty");
   });
 
+  it("caps Auto lane traversal at an explicit all-route attempt budget", async () => {
+    const calls: string[] = [];
+    await assert.rejects(
+      runPrismStructuredGeneration({
+        work: work(),
+        lanes: [
+          lane("openai", "terra"),
+          lane("openai", "sol"),
+          lane("openai", "luna"),
+          lane("local", "llama3.2"),
+        ],
+        modelSelectionKind: "auto",
+        maxAttempts: 3,
+        perAttemptTimeoutMs: () => 100,
+        totalTimeoutMs: 500,
+        run: async ({ lane: selected }) => {
+          calls.push(selected.model);
+          return "{}";
+        },
+        validate: (raw) => {
+          const parsed = JSON.parse(raw) as { ok?: boolean };
+          assert.equal(parsed.ok, true);
+          return { ok: true as const };
+        },
+      }),
+    );
+    assert.deepEqual(calls, ["terra", "sol", "luna"]);
+  });
+
   it("preserves fixed selection while supplying distinct repair context", async () => {
     const priorErrors: Array<string | null> = [];
     const result = await runPrismStructuredGeneration({

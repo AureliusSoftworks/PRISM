@@ -15,6 +15,7 @@ import {
   LIVE_BAKE_UNLOCK_BUFFER_MS,
   applyBotPowerCursedTongueResponseV1,
   applyBotPowerMumbledResponseV1,
+  botPowerIntendedSpeechLooksGibberishV1,
   botPowerResponseIsSilentV1,
   debateParticipantGambitGradesV1,
   debateParticipantGambitOfferV1,
@@ -12845,6 +12846,41 @@ describe("Debate engine", () => {
       assert.equal(publicIntro?.powerIntendedContent, undefined);
       assert.equal(publicIntro?.speechIntentRevealAvailable, true);
       assert.doesNotMatch(JSON.stringify(publicSession), /called to order/iu);
+
+      for (const accentMap of [
+        { x: 0.12, y: 0.14 },
+        { x: 0.88, y: 0.84 },
+      ]) {
+        const accentMappedGibberish = applyBotPowerMumbledResponseV1(
+          intro.powerIntendedContent,
+          {
+            pronunciationMapPoint: accentMap,
+            variationSeed: `reveal:${accentMap.x}:${accentMap.y}`,
+          },
+        );
+        // The former surface-text heuristic does not recognize every Accent
+        // Map dialect, despite this being the same typed Gibberish Power.
+        assert.equal(
+          botPowerIntendedSpeechLooksGibberishV1(accentMappedGibberish),
+          false,
+        );
+        const accentMappedSession = {
+          ...session,
+          events: session.events.map((event) =>
+            event.id === intro.id
+              ? { ...event, content: accentMappedGibberish }
+              : event,
+          ),
+        };
+        const publicAccentMappedIntro = debateSessionForPlayer(
+          accentMappedSession,
+        ).events.find((event) => event.id === intro.id);
+        assert.equal(
+          publicAccentMappedIntro?.speechIntentRevealAvailable,
+          true,
+        );
+        assert.equal(publicAccentMappedIntro?.powerIntendedContent, undefined);
+      }
     } finally {
       db.close();
     }

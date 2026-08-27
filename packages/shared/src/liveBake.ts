@@ -1,4 +1,4 @@
-import { BOTCAST_TIMED_MAX_UTTERANCES } from "./botcast.js";
+import { BOTCAST_TIMED_MAX_UTTERANCES } from "./botcast.ts";
 
 /**
  * Live full-bake artifacts for Debate spectator and Signal "Watch a show".

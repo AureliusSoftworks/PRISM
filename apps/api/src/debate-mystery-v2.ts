@@ -18,6 +18,7 @@ import {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   DEBATE_MYSTERY_PLAY_READINESS_VERSION,
   DEBATE_MYSTERY_ROOM_TEMPLATES,
+  DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
   DEBATE_MYSTERY_V2_SCHEMA_VERSION,
   compileDeterministicDebateMystery,
   debateEvidenceExhibitTitle,
@@ -25,6 +26,7 @@ import {
   botPowerChromaticBiasEffectsFromEffectsV1,
   botPowerChromaticBiasResolvedHueV1,
   botIdentityMirrorFaceV1,
+  debateMysteryAccompliceChance,
   debateMysteryClassifyVerdictV2,
   debateMysteryCredibilityMaximumV2,
   debateMysteryPremiumAvailableV2,
@@ -37,6 +39,7 @@ import {
   normalizeDebateEvidenceExhibitObject,
   normalizeDebateEvidencePacketV1,
   normalizeDebateMysteryTalkSubjectV2,
+  normalizeDebateMysteryV2ForgeProgressMessage,
   parseStoredBotAvatarDetailsV1,
   parseStoredBotAudioVoiceProfileV1,
   resolveDebateMysteryLineDeliveryV2,
@@ -101,7 +104,7 @@ import { HttpError } from "./utils.http.ts";
 
 const V2_JOB_LEASE_MS = 90_000;
 const V2_TOTAL_PASSES = 5;
-const V2_MAX_AUTHOR_ATTEMPTS = 3;
+const V2_PERSONA_DIALOGUE_POLISH_TIMEOUT_MS = 75_000;
 const V2_AUDIO_SUBDIR = "debate-mystery-audio-v2";
 const V2_STAGING_RECLAIM_AGE_MS = V2_JOB_LEASE_MS * 2;
 
@@ -109,6 +112,101 @@ type MysteryV2CompilationScope =
   | "participant_full"
   | "spectator_review"
   | "court_only";
+
+export type MysteryV2SuspectAwareness = "involved" | "incidental" | "unaware";
+export type MysteryV2TemporalRecall = "exact" | "approximate" | "none";
+
+export interface MysteryV2SuspectKnowledge {
+  awareness: MysteryV2SuspectAwareness;
+  temporalRecall: MysteryV2TemporalRecall;
+}
+
+const MYSTERY_UNAWARE_SUSPECT_CHANCE = Object.freeze({
+  casual: 0.15,
+  classic: 0.28,
+  mastermind: 0.42,
+});
+
+function deterministicMysteryKnowledgeRoll(
+  caseSeed: string,
+  seatId: string,
+  dimension: string,
+): number {
+  return (
+    Number.parseInt(
+      sha256(`${caseSeed}:suspect-knowledge:${seatId}:${dimension}`).slice(0, 8),
+      16,
+    ) / 0xffffffff
+  );
+}
+
+/**
+ * Server-private epistemic casting. Culpability, awareness, and recall are
+ * separate axes: an innocent may merely work in the house or know nothing
+ * about the case, while a culprit can know the truth but speak imprecisely.
+ */
+export function resolveMysterySuspectKnowledgeV2(args: {
+  caseSeed: string;
+  difficulty: DebateMysteryResolvedConfigV2["difficulty"];
+  suspects: readonly { seatId: string }[];
+  culpritSeatId: string;
+  accompliceSeatId: string | null;
+  eyewitnessSeatId: string | null;
+}): Record<string, MysteryV2SuspectKnowledge> {
+  return Object.fromEntries(
+    args.suspects.map((suspect) => {
+      const involved =
+        suspect.seatId === args.culpritSeatId ||
+        suspect.seatId === args.accompliceSeatId;
+      const eyewitness = suspect.seatId === args.eyewitnessSeatId;
+      const awareness: MysteryV2SuspectAwareness = involved
+        ? "involved"
+        : eyewitness
+          ? "incidental"
+          : deterministicMysteryKnowledgeRoll(
+                args.caseSeed,
+                suspect.seatId,
+                "awareness",
+              ) < MYSTERY_UNAWARE_SUSPECT_CHANCE[args.difficulty]
+            ? "unaware"
+            : "incidental";
+      const recallRoll = deterministicMysteryKnowledgeRoll(
+        args.caseSeed,
+        suspect.seatId,
+        "temporal-recall",
+      );
+      let temporalRecall: MysteryV2TemporalRecall;
+      if (awareness === "unaware") {
+        temporalRecall = "none";
+      } else if (args.difficulty === "casual") {
+        temporalRecall = involved || eyewitness || recallRoll < 0.8
+          ? "exact"
+          : "approximate";
+      } else if (args.difficulty === "classic") {
+        temporalRecall = involved
+          ? recallRoll < 0.4 ? "exact" : "approximate"
+          : eyewitness
+            ? recallRoll < 0.55 ? "exact" : "approximate"
+            : recallRoll < 0.15
+              ? "none"
+              : recallRoll < 0.75
+                ? "approximate"
+                : "exact";
+      } else {
+        temporalRecall = involved
+          ? recallRoll < 0.15 ? "exact" : "approximate"
+          : eyewitness
+            ? "approximate"
+            : recallRoll < 0.3
+              ? "none"
+              : recallRoll < 0.9
+                ? "approximate"
+                : "exact";
+      }
+      return [suspect.seatId, { awareness, temporalRecall }];
+    }),
+  );
+}
 
 function resolveMysteryCompilationScopeV2(
   config: Pick<DebateMysteryResolvedConfigV2, "investigationMode" | "playerRole">,
@@ -382,6 +480,7 @@ interface MysteryV2FactLedger {
   culpritSeatId: string;
   accompliceSeatId: string | null;
   eyewitnessSeatId: string | null;
+  suspectKnowledgeBySeat: Record<string, MysteryV2SuspectKnowledge>;
   frozenIds: {
     victimId: string;
     suspectSeatIds: string[];
@@ -465,6 +564,9 @@ interface PrivateMysteryCaseV2 {
     seatId: string;
     relationship: string;
     alibi: string;
+    /** Additive private metadata; absent only on legacy compiled cases. */
+    awareness?: MysteryV2SuspectAwareness;
+    temporalRecall?: MysteryV2TemporalRecall;
   }>;
   recordItems: Array<{
     reference: DebateMysteryRecordReferenceV2;
@@ -679,7 +781,11 @@ function v1ScaffoldConfig(config: DebateMysteryResolvedConfigV2): DebateMysteryR
     prosecutorPartnerBotId: config.prosecutorBotId,
     rivalDefenseBotId: config.rivalDefenseBotId,
     actionBudget: 10_000,
-    accompliceChance: config.preset === "grand" ? 0.35 : config.preset === "standard" ? 0.25 : 0,
+    accompliceChance: debateMysteryAccompliceChance(
+      config.difficulty,
+      config.preset,
+      config.suspectBotIds.length,
+    ),
   };
 }
 
@@ -899,7 +1005,9 @@ function compilationStatus(
         ? "CASE_FORGE_LOCAL_AUDIO_FAILED"
         : "CASE_FORGE_COMPILATION_STOPPED",
     publicFailureStage,
-    spoilerSafeMessage: row.public_message,
+    spoilerSafeMessage: normalizeDebateMysteryV2ForgeProgressMessage(
+      row.public_message,
+    ),
     startedAt: row.created_at,
     elapsedMs: normalizedElapsedMs,
     approximateRemainingMs: timing.approximateRemainingMs,
@@ -1059,7 +1167,9 @@ function updateJob(
     values.completedPasses ?? current.completed_passes,
     values.preparedAudioCount ?? current.prepared_audio_count,
     values.requiredAudioCount ?? current.required_audio_count,
-    values.publicMessage ?? V2_SPOILER_SAFE_MESSAGES[stage],
+    normalizeDebateMysteryV2ForgeProgressMessage(
+      values.publicMessage ?? V2_SPOILER_SAFE_MESSAGES[stage],
+    ),
     values.privateError === undefined ? current.private_error : values.privateError,
     values.checkpointJson === undefined ? current.checkpoint_json : values.checkpointJson,
     values.clearLease ? null : current.lease_owner,
@@ -1440,7 +1550,9 @@ function setPublicCompilationStatus(
           ? "failed"
           : "live",
     stepKey: row.status === "complete" ? "mystery_v2_title" : `mystery_v2_${row.stage}`,
-    error: row.status === "needs_attention" ? row.public_message : null,
+    error: row.status === "needs_attention"
+      ? normalizeDebateMysteryV2ForgeProgressMessage(row.public_message)
+      : null,
   }, {
     ...session.formatState,
     ...extras,
@@ -1882,6 +1994,50 @@ function authoredExaminationsFromJson(args: {
 }
 
 const MYSTERY_INVESTIGATION_COURT_LANGUAGE_RE = /\b(?:(?:the|this|our)\s+court|courtroom|your\s+honou?r|the\s+bench|the\s+jury|witness\s+stand|sworn\s+testimony)\b/iu;
+const MYSTERY_EXACT_NUMERIC_CLOCK_RE =
+  /(?<![\p{L}\p{N}:])(?:[01]?\d|2[0-3]):[0-5]\d(?:\s*(?:a\.?\s*m\.?|p\.?\s*m\.?))?(?![\p{L}\p{N}:])/iu;
+const MYSTERY_EXACT_SPOKEN_CLOCK_RE = new RegExp(
+  String.raw`\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:(?:oh\s+)?(?:one|two|three|four|five|six|seven|eight|nine)|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|(?:twenty|thirty|forty|fifty)(?:[- ](?:one|two|three|four|five|six|seven|eight|nine))?)\s+(?:a\.?\s*m\.?|p\.?\s*m\.?|in\s+the\s+(?:morning|afternoon|evening)|at\s+night)\b`,
+  "iu",
+);
+
+function assertMysteryTemporalRecallV2(args: {
+  seatId: string;
+  suspect: AuthoredSuspectV2;
+  temporalRecall: MysteryV2TemporalRecall;
+}): void {
+  if (args.temporalRecall === "exact") return;
+  // Only constrain lines or private accounts owned by this suspect. The
+  // Prosecutor and Defense may still confront an imprecise witness with an
+  // exact timestamp from the admitted record.
+  const authoredText = [
+    args.suspect.relationship,
+    args.suspect.alibi,
+    args.suspect.roomIntroduction,
+    args.suspect.defaultPresentReaction,
+    args.suspect.defendantReactions.testimony,
+    args.suspect.defendantReactions.objection,
+    args.suspect.defendantReactions.evidence,
+    ...args.suspect.talkTopics.flatMap((topic) => [
+      topic.response,
+      ...topic.repeatResponses.map((repeat) => repeat.response),
+    ]),
+    ...args.suspect.presentReactions.map((reaction) => reaction.response),
+    ...args.suspect.testimony.flatMap((statement) => [
+      statement.text,
+      statement.press,
+      statement.revision,
+    ]),
+  ].join("\n");
+  const exactClock =
+    authoredText.match(MYSTERY_EXACT_NUMERIC_CLOCK_RE)?.[0] ??
+    authoredText.match(MYSTERY_EXACT_SPOKEN_CLOCK_RE)?.[0];
+  if (exactClock) {
+    throw new Error(
+      `The authored chapter for ${args.seatId} gives exact clock recall (${exactClock}) to a suspect with ${args.temporalRecall} temporal recall.`,
+    );
+  }
+}
 
 function assertMysteryInvestigationDialogueStaysInPhaseV2(args: {
   seatId: string;
@@ -1956,6 +2112,7 @@ function authoredSuspectFromJson(args: {
   recordItems: readonly { reference: DebateMysteryRecordReferenceV2; title: string }[];
   rooms: readonly { id: string; name: string }[];
   people: readonly { id: string; name: string }[];
+  knowledge: MysteryV2SuspectKnowledge;
   courtOnly?: boolean;
 }): AuthoredSuspectV2 {
   const row = args.value.suspect && typeof args.value.suspect === "object"
@@ -2185,6 +2342,11 @@ function authoredSuspectFromJson(args: {
       recordItems: args.recordItems,
     });
   }
+  assertMysteryTemporalRecallV2({
+    seatId: args.seatId,
+    suspect,
+    temporalRecall: args.knowledge.temporalRecall,
+  });
   return suspect;
 }
 
@@ -2476,6 +2638,7 @@ async function auditMysterySectionV2(args: {
     "frozen_id_mismatch",
     "proof_route_conflict",
     "culprit_role_conflict",
+    "knowledge_boundary_conflict",
     "cross_section_contradiction",
   ]);
   try {
@@ -2506,7 +2669,7 @@ async function auditMysterySectionV2(args: {
       run: ({ lane, signal, work }) => lane.provider.generateResponse([
         {
           role: "system",
-          content: "Audit one already schema-valid mystery section against only the supplied frozen ledger slice. Do not rewrite prose or invent facts. Return JSON only. Deterministic validators remain authoritative.",
+          content: "Audit one already schema-valid mystery section against only the supplied frozen ledger slice. Treat each suspect's awareness and temporal recall as hard knowledge boundaries: unaware suspects cannot possess case facts, and approximate or absent recall cannot become exact clock knowledge. Do not rewrite prose or invent facts. Return JSON only. Deterministic validators remain authoritative.",
         },
         {
           role: "user",
@@ -2516,6 +2679,7 @@ async function auditMysterySectionV2(args: {
               sourceHash: args.ledger.sourceHash,
               culpritSeatId: args.ledger.culpritSeatId,
               accompliceSeatId: args.ledger.accompliceSeatId,
+              suspectKnowledgeBySeat: args.ledger.suspectKnowledgeBySeat,
               proofRoutesBySeat: args.ledger.proofRoutesBySeat,
               relevantFrozenIds,
             },
@@ -2613,7 +2777,7 @@ async function generateMysteryAuthoringSectionV2<T>(args: {
     },
     lanes,
     modelSelectionKind: args.runtime.modelSelectionKind ?? "fixed",
-    maxFixedAttempts: V2_MAX_AUTHOR_ATTEMPTS,
+    maxAttempts: DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
     run: async ({ lane, attempt, priorError, signal, work }) => {
       args.onAttempt?.(attempt);
       return lane.provider.generateResponse([
@@ -2685,6 +2849,14 @@ async function authorMysteryV2(args: {
       evidence.isCanonicalWeapon && reachableEvidenceIds.has(evidence.id)) ??
     args.scaffold.evidence.find((evidence) => reachableEvidenceIds.has(evidence.id)) ??
     null;
+  const suspectKnowledgeBySeat = resolveMysterySuspectKnowledgeV2({
+    caseSeed: args.scaffold.caseSeed,
+    difficulty: args.config.difficulty,
+    suspects: args.scaffold.suspects,
+    culpritSeatId: args.scaffold.culpritSeatId,
+    accompliceSeatId: args.scaffold.accompliceSeatId,
+    eyewitnessSeatId: args.eyewitnessSeatId,
+  });
   const suspectRequirements = args.scaffold.suspects.map((suspect, index) => {
     const bot = botById.get(suspect.botId)!;
     const contradiction = args.requiredContradictionBySeat.get(suspect.seatId)!;
@@ -2707,6 +2879,7 @@ async function authorMysteryV2(args: {
         : suspect.seatId === args.scaffold.accompliceSeatId
           ? "accomplice"
           : "innocent",
+      ...suspectKnowledgeBySeat[suspect.seatId]!,
       requiredStatementIds: [1, 2, 3].map((ordinal) => `statement-${suspect.seatId}-${ordinal}`),
       requiredContradictionOnSecondStatement: `${contradiction.kind}:${contradiction.id}`,
       requiredPresentReactionRecordId: `${contradiction.kind}:${contradiction.id}`,
@@ -2722,6 +2895,7 @@ async function authorMysteryV2(args: {
     culpritSeatId: args.scaffold.culpritSeatId,
     accompliceSeatId: args.scaffold.accompliceSeatId,
     eyewitnessSeatId: args.eyewitnessSeatId,
+    suspectKnowledgeBySeat,
     frozenIds: {
       victimId: args.scaffold.victim.id,
       suspectSeatIds: args.scaffold.suspects.map((suspect) => suspect.seatId),
@@ -2873,7 +3047,7 @@ async function authorMysteryV2(args: {
         maxTokens: 4_500,
         onAttempt: (attempt) => args.onDraft(
           args.draft,
-          `Writing the Case · Drafting foundation · attempt ${attempt} of ${V2_MAX_AUTHOR_ATTEMPTS}`,
+          `Writing the Case · Drafting foundation · attempt ${attempt} of ${DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS}`,
         ),
         onReceipt: (receipt) =>
           recordMysterySectionReceipt(args.draft, "foundation", receipt),
@@ -2969,7 +3143,7 @@ async function authorMysteryV2(args: {
         maxTokens: 2_500,
         onAttempt: (attempt) => args.onDraft(
           args.draft,
-          `Writing the Case · Drafting room details ${index + 1} of ${examinationChunks.length} · attempt ${attempt} of ${V2_MAX_AUTHOR_ATTEMPTS}`,
+          `Writing the Case · Drafting room details ${index + 1} of ${examinationChunks.length} · attempt ${attempt} of ${DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS}`,
         ),
         onReceipt: (receipt) =>
           recordMysterySectionReceipt(
@@ -3119,7 +3293,7 @@ async function authorMysteryV2(args: {
       maxTokens: omitInvestigation ? 3_600 : 5_000,
       onAttempt: (attempt) => args.onDraft(
         args.draft,
-        `Writing the Case · Witness chapter ${index + 1} of ${suspectRequirements.length} · attempt ${attempt} of ${V2_MAX_AUTHOR_ATTEMPTS}`,
+        `Writing the Case · Witness chapter ${index + 1} of ${suspectRequirements.length} · attempt ${attempt} of ${DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS}`,
       ),
       onReceipt: (receipt) =>
         recordMysterySectionReceipt(
@@ -3186,6 +3360,16 @@ async function authorMysteryV2(args: {
           "The second statement must be exactly contradicted by the assigned record.",
           "Press answers add context without erasing the proof route.",
           "Revision text materially changes the sworn account.",
+          requirement.awareness === "involved"
+            ? "This suspect is privately involved in the crime. They may conceal or distort what they know, but their public account must stay coherent with the sealed role."
+            : requirement.awareness === "unaware"
+              ? "This innocent suspect is an unrelated worker, visitor, or bystander caught in the wrong place at the wrong time. They have no privileged case knowledge or hidden motive; an honest 'I don't know' is valid, and their contradiction must concern only their own routine, sequence, or mistaken impression."
+              : "This innocent suspect has only incidental knowledge from their own work, routine, or observations. Do not give them the sealed motive, method, culprit identity, or knowledge of events they could not personally perceive.",
+          requirement.temporalRecall === "exact"
+            ? "This suspect may use an exact clock time only where their role and personal observations plausibly support it."
+            : requirement.temporalRecall === "approximate"
+              ? "This suspect remembers time only approximately. Never give them an exact clock minute such as 10:13 or 'ten thirteen in the morning'; use natural uncertainty such as 'a little after ten', 'around ten', 'before the alarm', or 'not long after I arrived'."
+              : "This suspect has no clock-time recall. Never give them an exact or approximate clock reading; anchor their account only to events they noticed, or let them truthfully say they do not know when something happened.",
           ...(omitInvestigation ? [
             "This compilation omits investigation. Do not write room, mansion, investigation, Talk, or Present dialogue.",
           ] : [
@@ -3236,6 +3420,7 @@ async function authorMysteryV2(args: {
           { id: args.scaffold.victim.id, name: validatedFoundation.victimName },
           ...args.scaffold.suspects.map((suspect) => ({ id: suspect.seatId, name: suspect.name })),
         ],
+        knowledge: suspectKnowledgeBySeat[requirement.seatId]!,
         courtOnly: omitInvestigation,
       }),
     });
@@ -3303,6 +3488,8 @@ async function authorMysteryV2(args: {
             sourceHash: factLedger.sourceHash,
             culpritSeatId: factLedger.culpritSeatId,
             accompliceSeatId: factLedger.accompliceSeatId,
+            suspectKnowledge:
+              factLedger.suspectKnowledgeBySeat[requirement.seatId],
             proofRoute: factLedger.proofRoutesBySeat[requirement.seatId],
             relevantFrozenIds: suspectFrozenIds,
           },
@@ -3330,6 +3517,7 @@ async function authorMysteryV2(args: {
               name: entry.name,
             })),
           ],
+          knowledge: suspectKnowledgeBySeat[requirement.seatId]!,
           courtOnly: omitInvestigation,
         }),
         onReceipt: (receipt) =>
@@ -3351,7 +3539,7 @@ async function authorMysteryV2(args: {
       maxTokens: 2_500,
       onAttempt: (attempt) => args.onDraft(
         args.draft,
-        `Writing the Case · Prosecution responses · attempt ${attempt} of ${V2_MAX_AUTHOR_ATTEMPTS}`,
+        `Writing the Case · Prosecution responses · attempt ${attempt} of ${DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS}`,
       ),
       onReceipt: (receipt) =>
         recordMysterySectionReceipt(
@@ -3617,88 +3805,92 @@ async function polishMysteryPersonaDialogueGraphV2(args: {
   const lanes = args.runtime.lanes?.length
     ? args.runtime.lanes
     : [mysteryV2Lane(args.runtime)];
-  const result = await prismGenerationBroker.runStructured({
-    work: {
-      workflow: "case_forge",
-      operation: "polish_persona_dialogue",
-      stage: "directing_performances",
-      executionLane: "selected",
-      role: "author",
-      outputClass: "critical",
-      priority: "compilation",
-      privacyMode:
-        args.runtime.preferredProvider === "local"
-          ? "local"
-          : args.runtime.modelSelectionKind === "auto"
-            ? "auto"
-            : "online",
-      cacheKey: `case-forge-persona-dialogue-v1:${sha256(promptText)}`,
-      sourceTokenEstimate: estimatePrismTextTokens(promptText),
-      exportedTokenEstimate: estimatePrismTextTokens(promptText),
-    },
-    lanes,
-    modelSelectionKind: args.runtime.modelSelectionKind ?? "fixed",
-    maxFixedAttempts: V2_MAX_AUTHOR_ATTEMPTS,
-    run: ({ lane, signal, work }) => lane.provider.generateResponse([
-      {
-        role: "system",
-        content: "You are PRISM's final dialogue director. Select a compact verbal lead-in that makes each frozen persona sound distinct, especially the prosecutor. The canonical text is immutable: do not restate, revise, summarize, answer, add facts to, or omit it. Return JSON only. A lead-in is cadence only, never an independent claim: 1-10 words, no proper names, no case terms, no new facts, and it must end with a comma, colon, semicolon, or dash.",
+  try {
+    const result = await prismGenerationBroker.runStructured({
+      work: {
+        workflow: "case_forge",
+        operation: "polish_persona_dialogue",
+        stage: "directing_performances",
+        executionLane: "selected",
+        role: "author",
+        outputClass: "critical",
+        priority: "compilation",
+        privacyMode:
+          args.runtime.preferredProvider === "local"
+            ? "local"
+            : args.runtime.modelSelectionKind === "auto"
+              ? "auto"
+              : "online",
+        cacheKey: `case-forge-persona-dialogue-v1:${sha256(promptText)}`,
+        sourceTokenEstimate: estimatePrismTextTokens(promptText),
+        exportedTokenEstimate: estimatePrismTextTokens(promptText),
       },
-      { role: "user", content: promptText },
-    ], {
-      model: lane.model,
-      reasoningEffort: lane.reasoningEffort,
-      turbo: lane.turbo,
-      maxTokens: Math.min(6_000, Math.max(1_500, eligibleLines.length * 40)),
-      temperature: 0.45,
-      jsonMode: true,
-      usagePurpose: "debate_generation",
-      allowFinalLocalFallback: lane.providerName === "local",
-      generationWork: work,
-      signal,
-    }),
-    validate: (raw) => {
-      const parsed = parseJsonObject(raw);
-      const frames = Array.isArray(parsed.lineFrames) ? parsed.lineFrames : [];
-      const leadInByLineId = new Map<string, string>();
-      for (const value of frames) {
-        if (!value || typeof value !== "object") {
-          throw new Error("Persona dialogue polish returned an invalid line frame.");
+      lanes,
+      modelSelectionKind: args.runtime.modelSelectionKind ?? "fixed",
+      // Cadence is decorative. A slow or invalid response must never prevent
+      // the frozen case graph from proceeding to its reachable performances.
+      maxFixedAttempts: 1,
+      perAttemptTimeoutMs: () => V2_PERSONA_DIALOGUE_POLISH_TIMEOUT_MS,
+      run: ({ lane, signal, work }) => lane.provider.generateResponse([
+        {
+          role: "system",
+          content: "You are PRISM's final dialogue director. Select a compact verbal lead-in that makes each frozen persona sound distinct, especially the prosecutor. The canonical text is immutable: do not restate, revise, summarize, answer, add facts to, or omit it. Return JSON only. A lead-in is cadence only, never an independent claim: 1-10 words, no proper names, no case terms, no new facts, and it must end with a comma, colon, semicolon, or dash.",
+        },
+        { role: "user", content: promptText },
+      ], {
+        model: lane.model,
+        reasoningEffort: lane.reasoningEffort,
+        turbo: lane.turbo,
+        maxTokens: Math.min(6_000, Math.max(1_500, eligibleLines.length * 40)),
+        temperature: 0.45,
+        jsonMode: true,
+        usagePurpose: "debate_generation",
+        allowFinalLocalFallback: lane.providerName === "local",
+        generationWork: work,
+        signal,
+      }),
+      validate: (raw) => {
+        const parsed = parseJsonObject(raw);
+        const frames = Array.isArray(parsed.lineFrames) ? parsed.lineFrames : [];
+        const leadInByLineId = new Map<string, string>();
+        for (const value of frames) {
+          if (!value || typeof value !== "object") {
+            throw new Error("Persona dialogue polish returned an invalid line frame.");
+          }
+          const row = value as Record<string, unknown>;
+          const lineId = compact(row.lineId, 180);
+          if (!lineId || leadInByLineId.has(lineId)) {
+            throw new Error("Persona dialogue polish changed or repeated a line ID.");
+          }
+          leadInByLineId.set(lineId, normalizeMysteryPersonaDialogueLeadIn({
+            value: row.leadIn,
+            canonicalWords,
+          }));
         }
-        const row = value as Record<string, unknown>;
-        const lineId = compact(row.lineId, 180);
-        if (!lineId || leadInByLineId.has(lineId)) {
-          throw new Error("Persona dialogue polish changed or repeated a line ID.");
+        if (
+          leadInByLineId.size !== eligibleLines.length ||
+          eligibleLines.some((line) => !leadInByLineId.has(line.id))
+        ) {
+          throw new Error("Persona dialogue polish did not preserve the complete frozen line set.");
         }
-        leadInByLineId.set(lineId, normalizeMysteryPersonaDialogueLeadIn({
-          value: row.leadIn,
-          canonicalWords,
-        }));
-      }
-      if (
-        leadInByLineId.size !== eligibleLines.length ||
-        eligibleLines.some((line) => !leadInByLineId.has(line.id))
-      ) {
-        throw new Error("Persona dialogue polish did not preserve the complete frozen line set.");
-      }
-      return {
-        ...args.graph,
-        lines: args.graph.lines.map((line) => {
-          const leadIn = leadInByLineId.get(line.id);
-          if (!leadIn) return line;
-          return {
-            ...line,
-            visibleText: `${leadIn} ${line.visibleText}`,
-            spokenText: `${leadIn} ${line.spokenText}`,
-          };
-        }),
-      };
-    },
-  }).catch((error) => {
-    const detail = error instanceof Error ? error.message : "Unknown dialogue polish error";
-    throw new Error(`Persona dialogue polish could not satisfy validation after bounded generation. ${detail}`);
-  });
-  return result.value;
+        return {
+          ...args.graph,
+          lines: args.graph.lines.map((line) => {
+            const leadIn = leadInByLineId.get(line.id);
+            if (!leadIn) return line;
+            return {
+              ...line,
+              visibleText: `${leadIn} ${line.visibleText}`,
+              spokenText: `${leadIn} ${line.spokenText}`,
+            };
+          }),
+        };
+      },
+    });
+    return result.value;
+  } catch {
+    return args.graph;
+  }
 }
 
 function buildMysteryV2Graph(args: {
@@ -4418,6 +4610,14 @@ function buildMysteryV2Graph(args: {
     accusedAlibiSupportDiscoveryIds: args.alibiSupportDiscoveryIds,
   });
   if (!validation.valid) throw new Error(validation.errors.join("\n"));
+  const suspectKnowledgeBySeat = resolveMysterySuspectKnowledgeV2({
+    caseSeed: args.scaffold.caseSeed,
+    difficulty: args.config.difficulty,
+    suspects: args.scaffold.suspects,
+    culpritSeatId: args.scaffold.culpritSeatId,
+    accompliceSeatId: args.scaffold.accompliceSeatId,
+    eyewitnessSeatId: args.eyewitnessSeatId,
+  });
   const privateCase: PrivateMysteryCaseV2 = {
     version: 2,
     config: args.config,
@@ -4434,6 +4634,7 @@ function buildMysteryV2Graph(args: {
       seatId: suspect.seatId,
       relationship: suspect.relationship,
       alibi: suspect.alibi,
+      ...suspectKnowledgeBySeat[suspect.seatId]!,
     })),
     recordItems: recordReferences.map((reference) => {
       if (reference.kind === "evidence") {

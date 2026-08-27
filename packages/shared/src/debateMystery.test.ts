@@ -5,6 +5,7 @@ import {
   DEBATE_MYSTERY_ROOM_FOOTPRINTS,
   DEBATE_MYSTERY_ROOM_TEMPLATES,
   compileDeterministicDebateMystery,
+  debateMysteryAccompliceChance,
   debateMysteryRoomsShareEdge,
   debateMysteryNotebookCharacterCount,
   gradeDebateMysteryTheory,
@@ -50,6 +51,22 @@ function suspects(count: number) {
     glyph: null,
   }));
 }
+
+test("reserves accomplices for Mastermind mysteries", () => {
+  assert.equal(debateMysteryAccompliceChance("casual", "grand", 8), 0);
+  assert.equal(debateMysteryAccompliceChance("classic", "grand", 8), 0);
+  assert.equal(debateMysteryAccompliceChance("mastermind", "compact", 4), 0);
+  assert.equal(debateMysteryAccompliceChance("mastermind", "standard", 6), 0.25);
+  assert.equal(debateMysteryAccompliceChance("mastermind", "grand", 8), 0.35);
+  assert.equal(debateMysteryAccompliceChance("mastermind", "custom", 7), 0.35);
+
+  assert.equal(
+    resolveDebateMysteryConfig(
+      createConfig("grand", "classic", "no-lower-difficulty-accomplice"),
+    ).accompliceChance,
+    0,
+  );
+});
 
 test("bundles at least fifteen original semantic room templates with accessible regions", () => {
   assert.ok(DEBATE_MYSTERY_ROOM_TEMPLATES.length >= 15);

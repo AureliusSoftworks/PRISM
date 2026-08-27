@@ -7667,6 +7667,14 @@ type CoffeePendingRevealQueueArgs = {
   onReveal?: () => void;
 };
 
+type CoffeePlayerCupSipPresentation = {
+  conversationId: string;
+  targetSipCount: number;
+  durationMs: number;
+  levelCommitted: boolean;
+  sipping: boolean;
+};
+
 type PreparedCoffeeLookahead = {
   conversationId: string;
   afterMessageId: string;
@@ -66797,6 +66805,137 @@ function HomeContent(): React.JSX.Element {
   const [coffeeSessionClockMs, setCoffeeSessionClockMs] = useState(() =>
     Date.now(),
   );
+  const [coffeePlayerCupSipPresentation, setCoffeePlayerCupSipPresentation] =
+    useState<CoffeePlayerCupSipPresentation | null>(null);
+  const coffeePlayerCupSipPresentationRef =
+    useRef<CoffeePlayerCupSipPresentation | null>(null);
+  const coffeePlayerCupLevelCommitTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const coffeePlayerCupSipEndTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const clearCoffeePlayerCupSipTimers = useCallback((): void => {
+    if (coffeePlayerCupLevelCommitTimerRef.current) {
+      clearTimeout(coffeePlayerCupLevelCommitTimerRef.current);
+      coffeePlayerCupLevelCommitTimerRef.current = null;
+    }
+    if (coffeePlayerCupSipEndTimerRef.current) {
+      clearTimeout(coffeePlayerCupSipEndTimerRef.current);
+      coffeePlayerCupSipEndTimerRef.current = null;
+    }
+  }, []);
+  const commitCoffeePlayerCupSipPresentation = useCallback(
+    (next: CoffeePlayerCupSipPresentation | null): void => {
+      coffeePlayerCupSipPresentationRef.current = next;
+      setCoffeePlayerCupSipPresentation(next);
+    },
+    [],
+  );
+  const beginCoffeePlayerCupSipPresentation = useCallback(
+    (conversation: CoffeeConversationState): void => {
+      const targetSipCount = Math.max(
+        0,
+        Math.min(6, conversation.coffeeSettings?.joinPlayerCup?.sipCount ?? 0),
+      );
+      const currentConversation = coffeeConversationRef.current;
+      const activePresentation = coffeePlayerCupSipPresentationRef.current;
+      const currentSipCount =
+        activePresentation?.conversationId === conversation.id
+          ? activePresentation.targetSipCount
+          : currentConversation?.id === conversation.id
+            ? Math.max(
+                0,
+                Math.min(
+                  6,
+                  currentConversation.coffeeSettings?.joinPlayerCup?.sipCount ??
+                    0,
+                ),
+              )
+            : targetSipCount;
+      if (targetSipCount <= currentSipCount) return;
+
+      clearCoffeePlayerCupSipTimers();
+      const seed = `coffee-player-cup:${conversation.id}`;
+      const durationMs = coffeeCupSipAnimationTiming({
+        seed,
+        sipCount: targetSipCount,
+      }).durationMs;
+      const presentation: CoffeePlayerCupSipPresentation = {
+        conversationId: conversation.id,
+        // A user turn consumes one sip. If an imported or recovered response
+        // ever advances farther, keep the entire correction inside this active
+        // sip instead of allowing a silent post-sip level jump.
+        targetSipCount,
+        durationMs,
+        levelCommitted: false,
+        sipping: true,
+      };
+      commitCoffeePlayerCupSipPresentation(presentation);
+      coffeePlayerCupLevelCommitTimerRef.current = setTimeout(
+        () => {
+          const current = coffeePlayerCupSipPresentationRef.current;
+          if (
+            current?.conversationId !== conversation.id ||
+            current.targetSipCount !== targetSipCount
+          ) {
+            return;
+          }
+          commitCoffeePlayerCupSipPresentation({
+            ...current,
+            levelCommitted: true,
+          });
+          coffeePlayerCupLevelCommitTimerRef.current = null;
+        },
+        Math.round(durationMs * 0.82),
+      );
+      coffeePlayerCupSipEndTimerRef.current = setTimeout(() => {
+        const current = coffeePlayerCupSipPresentationRef.current;
+        if (
+          current?.conversationId !== conversation.id ||
+          current.targetSipCount !== targetSipCount
+        ) {
+          return;
+        }
+        commitCoffeePlayerCupSipPresentation({
+          ...current,
+          levelCommitted: true,
+          sipping: false,
+        });
+        coffeePlayerCupSipEndTimerRef.current = null;
+      }, durationMs);
+    },
+    [clearCoffeePlayerCupSipTimers, commitCoffeePlayerCupSipPresentation],
+  );
+  useEffect(
+    () => () => {
+      clearCoffeePlayerCupSipTimers();
+    },
+    [clearCoffeePlayerCupSipTimers],
+  );
+  useEffect(() => {
+    const presentation = coffeePlayerCupSipPresentationRef.current;
+    if (!presentation) return;
+    const conversationId = coffeeConversation?.id ?? null;
+    const persistedSipCount =
+      coffeeConversation?.coffeeSettings?.joinPlayerCup?.sipCount ?? 0;
+    if (conversationId !== presentation.conversationId) {
+      clearCoffeePlayerCupSipTimers();
+      commitCoffeePlayerCupSipPresentation(null);
+      return;
+    }
+    if (
+      !presentation.sipping &&
+      persistedSipCount >= presentation.targetSipCount
+    ) {
+      commitCoffeePlayerCupSipPresentation(null);
+    }
+  }, [
+    clearCoffeePlayerCupSipTimers,
+    coffeeConversation?.coffeeSettings?.joinPlayerCup?.sipCount,
+    coffeeConversation?.id,
+    commitCoffeePlayerCupSipPresentation,
+  ]);
   const {
     active: coffeeAmbientBotVocalization,
     start: startCoffeeAmbientBotVocalization,
@@ -135911,6 +136050,7 @@ function HomeContent(): React.JSX.Element {
       }
       const responseSpeakerBotId = response.speakerBotId;
       if (!responseSpeakerBotId) return;
+      beginCoffeePlayerCupSipPresentation(response.conversation);
       if (contextSparkIdForTurn) {
         setCoffeeContextSparks((current) =>
           current.filter((spark) => spark.id !== contextSparkIdForTurn),
@@ -138649,6 +138789,47 @@ function HomeContent(): React.JSX.Element {
       coffeeReplayActive && messages.length > 0
         ? coffeeReplayStateAt(messages, clampedReplayMessageIndex)
         : null;
+    const persistedPlayerCupSipCount = Math.max(
+      0,
+      Math.min(
+        6,
+        coffeeConversation?.coffeeSettings?.joinPlayerCup?.sipCount ?? 0,
+      ),
+    );
+    const activePlayerCupSipPresentation =
+      coffeePlayerCupSipPresentation?.conversationId === coffeeConversation?.id
+        ? coffeePlayerCupSipPresentation
+        : null;
+    const playerCupVisualSipCount = coffeeCupVisualSipCountForAnimation({
+      totalSipCount: activePlayerCupSipPresentation
+        ? Math.max(
+            persistedPlayerCupSipCount,
+            activePlayerCupSipPresentation.targetSipCount,
+          )
+        : persistedPlayerCupSipCount,
+      activeSipAnimationCount:
+        activePlayerCupSipPresentation?.sipping === true
+          ? activePlayerCupSipPresentation.targetSipCount
+          : null,
+      animationAgeMs:
+        activePlayerCupSipPresentation?.sipping === true
+          ? activePlayerCupSipPresentation.levelCommitted
+            ? activePlayerCupSipPresentation.durationMs * 0.82
+            : 0
+          : null,
+      animationDurationMs: activePlayerCupSipPresentation?.durationMs ?? null,
+    });
+    const playerCupVisual = buildCoffeeCupVisualState({
+      seed: `coffee-player-cup:${coffeeConversation?.id ?? "table"}`,
+      theme: resolvedTheme,
+      nowMs: coffeeSessionClockMs,
+      sessionStartedAtMs: coffeeSessionStartedAtRef.current,
+      sessionEndsAtMs: coffeeSessionEndsAtMs,
+      durationMinutes: coffeeConversation?.coffeeSessionDurationMinutes ?? null,
+      sipCount: playerCupVisualSipCount,
+      sippingOverride: activePlayerCupSipPresentation?.sipping ?? false,
+      ambientSipAllowed: false,
+    });
     const liveBorrowedIdentityState = (() => {
       if (coffeeReplayActive || messages.length === 0) {
         coffeeLiveBorrowedIdentityCacheRef.current = {
@@ -140743,27 +140924,17 @@ function HomeContent(): React.JSX.Element {
                   >
                     <span
                       className={styles.coffeeCup}
-                      data-cup-frame={Math.min(6, coffeeConversation?.coffeeSettings?.joinPlayerCup?.sipCount ?? 0)}
+                      data-cup-frame={playerCupVisual.frameIndex}
+                      data-cup-sipping={
+                        playerCupVisual.sipping ? "true" : undefined
+                      }
+                      data-cup-sip-duration-ms={playerCupVisual.sipAnimationMs}
+                      data-cup-progress={playerCupVisual.progress.toFixed(4)}
                       // Review f2647f86: the mug sits opposite the player's
                       // nameplate glyph (right), matching the split every bot
                       // seat gets from coffeeCupSideForSeat.
                       data-cup-side="left"
-                      style={coffeeCupSpriteStyle(
-                        buildCoffeeCupVisualState({
-                          seed: `coffee-player-cup:${coffeeConversation?.id ?? "table"}`,
-                          theme: resolvedTheme,
-                          nowMs: Date.now(),
-                          sessionStartedAtMs: coffeeSessionStartedAtRef.current,
-                          sessionEndsAtMs: coffeeSessionEndsAtMs,
-                          durationMinutes:
-                            coffeeConversation?.coffeeSessionDurationMinutes ??
-                            null,
-                          sipCount:
-                            coffeeConversation?.coffeeSettings?.joinPlayerCup?.sipCount ?? 0,
-                          sippingOverride: false,
-                          ambientSipAllowed: false,
-                        }),
-                      )}
+                      style={coffeeCupSpriteStyle(playerCupVisual)}
                       aria-hidden="true"
                     >
                       <span

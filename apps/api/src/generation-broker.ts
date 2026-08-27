@@ -45,6 +45,9 @@ export interface PrismStructuredGenerationRequest<T> {
     Pick<PrismGenerationWorkContext, "workflow" | "operation" | "stage">;
   lanes: readonly PrismGenerationLane[];
   modelSelectionKind: "auto" | "fixed";
+  /** Hard cap across both Auto lane fallback and fixed-lane repair attempts. */
+  maxAttempts?: number;
+  /** @deprecated Use maxAttempts when the budget must also constrain Auto. */
   maxFixedAttempts?: number;
   totalTimeoutMs?: number;
   perAttemptTimeoutMs?: (
@@ -231,7 +234,13 @@ export async function runPrismStructuredGeneration<T>(
   if (work.executionLane === "auxiliary" && work.outputClass === "critical") {
     throw new Error("Auxiliary generation cannot finalize critical output.");
   }
-  const lanes = eligibleLanes(work, request.lanes);
+  const requestedMaxAttempts = request.maxAttempts === undefined
+    ? null
+    : Math.max(1, Math.floor(request.maxAttempts));
+  const lanes = eligibleLanes(work, request.lanes).slice(
+    0,
+    requestedMaxAttempts ?? undefined,
+  );
   if (!lanes.length) {
     throw new Error(
       work.privacyMode === "local"
@@ -319,7 +328,10 @@ export async function runPrismStructuredGeneration<T>(
   }
 
   const lane = lanes[0]!;
-  const maxAttempts = Math.max(1, Math.min(3, request.maxFixedAttempts ?? 3));
+  const maxAttempts = Math.max(
+    1,
+    Math.min(3, requestedMaxAttempts ?? request.maxFixedAttempts ?? 3),
+  );
   const attempts: PrismStructuredGenerationResult<T>["attempts"] = [];
   let lastError: unknown = new Error("Generation work did not complete.");
   for (let index = 0; index < maxAttempts; index += 1) {

@@ -1,6 +1,25 @@
 import type { VoicePlaybackCharacterAlignment } from "./voiceEffects";
 
 /**
+ * The newest suspect reply must be withheld during the render immediately
+ * before the playback effect claims it. React effects run after paint, so
+ * checking only streamingMessageId would expose the committed full reply once.
+ */
+export function mysteryInterviewTranscriptShouldWithhold(args: {
+  messageId: string;
+  role: "investigator" | "suspect";
+  streamingMessageId: string | null;
+  streamedReply: string;
+  latestMessageId: string | null;
+  claimedMessageId: string | null;
+}): boolean {
+  if (args.messageId === args.streamingMessageId && !args.streamedReply) return true;
+  return args.role === "suspect" &&
+    args.messageId === args.latestMessageId &&
+    args.messageId !== args.claimedMessageId;
+}
+
+/**
  * Returns reply characters that have completed on the decoded playback clock.
  * Exact provider alignment wins when available. Engines without character
  * timing fall back to the same audible playback progress so interviews still

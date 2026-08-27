@@ -5226,7 +5226,8 @@ describe("API request integration", () => {
     );
     const spokenText = "This local reply must stay on the device.";
 
-    const abbreviationText = "Ms. Rivera asked Capt. Chen to wait.";
+    const abbreviationText =
+      "Ms. Rivera asked Capt. Chen to wait until 10:09 AM";
     const beforeAbbreviationCalls = builtinVoiceCalls.length;
     const abbreviationResponse = await client.request(
       "/api/voices/synthesize",
@@ -5242,9 +5243,12 @@ describe("API request integration", () => {
     assert.equal(builtinVoiceCalls.length, beforeAbbreviationCalls + 1);
     assert.equal(
       builtinVoiceCalls.at(-1)?.text,
-      "Miss Rivera asked Captain Chen to wait.",
+      "Miss Rivera asked Captain Chen to wait until ten oh nine in the morning",
     );
-    assert.equal(abbreviationText, "Ms. Rivera asked Capt. Chen to wait.");
+    assert.equal(
+      abbreviationText,
+      "Ms. Rivera asked Capt. Chen to wait until 10:09 AM",
+    );
 
     const beforeCalls = fetchRecorder.calls.length;
     const response = await client.request(

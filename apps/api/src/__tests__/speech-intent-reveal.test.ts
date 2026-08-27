@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
-import { applyBotPowerMumbledResponseV1 } from "@localai/shared";
+import {
+  applyBotPowerMumbledResponseV1,
+  botPowerIntendedSpeechLooksGibberishV1,
+} from "@localai/shared";
 import {
   normalizeSpeechIntentRevealRequestV1,
   registerEphemeralSpeechIntentRevealV1,
@@ -31,6 +34,9 @@ function revealDatabase(): DatabaseSync {
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, session_id TEXT NOT NULL,
       event_json TEXT NOT NULL
     );
+    CREATE TABLE debate_sessions (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, session_json TEXT NOT NULL
+    );
     CREATE TABLE story_sessions (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, episode_json TEXT
     );
@@ -40,10 +46,18 @@ function revealDatabase(): DatabaseSync {
 
 const clean = "I trust the map, but we should verify the northern passage.";
 const gibberish = applyBotPowerMumbledResponseV1(clean);
+const accentMappedGibberish = applyBotPowerMumbledResponseV1(clean, {
+  pronunciationMapPoint: { x: 0.12, y: 0.14 },
+  variationSeed: "speech-intent-reveal",
+});
 
 describe("private speech intent reveal", () => {
-  it("reveals only an owned, marked Chat primary utterance", () => {
+  it("reveals an owned, marked Chat primary utterance in any Gibberish dialect", () => {
     const db = revealDatabase();
+    assert.equal(
+      botPowerIntendedSpeechLooksGibberishV1(accentMappedGibberish),
+      false,
+    );
     db.prepare("INSERT INTO conversations VALUES (?, ?, ?)")
       .run("chat-1", "owner", "chat");
     db.prepare("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?)").run(
@@ -51,7 +65,7 @@ describe("private speech intent reveal", () => {
       "chat-1",
       "owner",
       "assistant",
-      gibberish,
+      accentMappedGibberish,
       "bot-1",
       JSON.stringify({
         botPowerExactResponse: "speech_obfuscation",
@@ -107,7 +121,7 @@ describe("private speech intent reveal", () => {
       clean,
       "bot-1",
       JSON.stringify({
-        botPowerExactResponse: "speech_obfuscation",
+        botPowerExactResponse: "speech_copy",
         botPowerIntendedSpeech: "A different clean draft.",
       }),
     );
@@ -165,6 +179,21 @@ describe("private speech intent reveal", () => {
         content: gibberish, powerIntendedContent: clean, interrupted: true,
       }),
     );
+    db.prepare("INSERT INTO debate_sessions VALUES (?, ?, ?)").run(
+      "debate-plain",
+      "owner",
+      JSON.stringify({
+        powerPlan: { bots: { "bot-1": { effects: [] } } },
+      }),
+    );
+    db.prepare("INSERT INTO debate_events VALUES (?, ?, ?, ?)").run(
+      "ordinary", "owner", "debate-plain",
+      JSON.stringify({
+        id: "ordinary", kind: "speech", speakerKind: "advocate",
+        speakerBotId: "bot-1", content: clean,
+        powerIntendedContent: "A separate private draft.",
+      }),
+    );
     db.prepare("INSERT INTO story_sessions VALUES (?, ?, ?)").run(
       "story-1", "owner", JSON.stringify({
         scenes: [{
@@ -179,6 +208,7 @@ describe("private speech intent reveal", () => {
       { mode: "coffee", scopeId: "coffee-1", recordId: "aside" },
       { mode: "signal", scopeId: "episode-1", recordId: "quote" },
       { mode: "debate", scopeId: "debate-1", recordId: "fragment" },
+      { mode: "debate", scopeId: "debate-plain", recordId: "ordinary" },
       { mode: "story", scopeId: "story-1", recordId: "mute" },
     ] as const) {
       assert.equal(resolveSpeechIntentRevealV1(db, "owner", request), null);
@@ -203,7 +233,21 @@ describe("private speech intent reveal", () => {
       "debate-line", "owner", "debate-1",
       JSON.stringify({
         id: "debate-line", kind: "speech", speakerKind: "advocate",
-        speakerBotId: "bot-1", content: gibberish, powerIntendedContent: clean,
+        speakerBotId: "bot-1", content: accentMappedGibberish,
+        powerIntendedContent: clean,
+      }),
+    );
+    db.prepare("INSERT INTO debate_sessions VALUES (?, ?, ?)").run(
+      "debate-1",
+      "owner",
+      JSON.stringify({
+        powerPlan: {
+          bots: {
+            "bot-1": {
+              effects: [{ effect: { type: "speech_obfuscation" } }],
+            },
+          },
+        },
       }),
     );
     db.prepare("INSERT INTO story_sessions VALUES (?, ?, ?)").run(

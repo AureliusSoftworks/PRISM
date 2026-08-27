@@ -6,7 +6,7 @@ import { join } from "node:path";
 import {
   BOT_AUDIO_VOICE_IDS,
   PRISM_BUILTIN_ENGLISH_VOICES,
-  expandSpeechAbbreviations,
+  expandSpeechText,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotAudioVoiceProfileForSynthesisV1,
   prismBuiltinEnglishVoice,
@@ -534,7 +534,7 @@ export async function generateBuiltinEnglishWave(args: {
   // speech projection, including direct callers outside the HTTP route.
   const speechArgs = {
     ...args,
-    text: expandSpeechAbbreviations(args.text),
+    text: expandSpeechText(args.text),
   };
   const profile =
     normalizeBotAudioVoiceProfileForSynthesisV1(speechArgs.profile);

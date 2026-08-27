@@ -771,6 +771,7 @@ describe("Signal experience shell", () => {
       "Signal sip keyframes must stay compositor-only",
     );
     assert.match(pageSource, /const cupVisual = mugState\.visual/u);
+    assert.match(source, /signalCupVisualSipCountV1\(sipSchedule\)/u);
     assert.match(
       pageSource,
       /data-cup-sipping=\{[\s\S]{0,80}cupVisual\.sipping/u,
@@ -1815,6 +1816,32 @@ describe("Signal experience shell", () => {
       source,
       /signalReviewCopyLabel\(reviewCopyState, replayEpisode\.id\)/u,
     );
+  });
+
+  it("bounds completed Return replay finalization and leaves it retryable", () => {
+    assert.match(
+      source,
+      /boundedSignalReplayFinalization\(\s*stopReplayAudioMasterCapture/u,
+    );
+    assert.match(
+      source,
+      /boundedSignalReplayFinalization\(\s*saveFaithfulReplaySession/u,
+    );
+    assert.match(
+      source,
+      /catch \{[\s\S]{0,140}finalizedSignalRecordingIdsRef\.current\.delete/u,
+    );
+    assert.match(
+      source,
+      /finally \{[\s\S]{0,180}signalCaptureSourceIdRef\.current = null/u,
+    );
+    const completedReturnSource = source.slice(
+      source.indexOf("const returnFromCompletedEpisode"),
+      source.indexOf("useEffect", source.indexOf("const returnFromCompletedEpisode")),
+    );
+    assert.match(completedReturnSource, /await finalizeSignalRecording/u);
+    assert.match(completedReturnSource, /finally \{[\s\S]{0,260}setEpisode\(null\)/u);
+    assert.match(source, /onClick=\{\(\) => void returnFromCompletedEpisode\(\)\}/u);
   });
 
   it("builds a coherent random booking around the selected guest", () => {

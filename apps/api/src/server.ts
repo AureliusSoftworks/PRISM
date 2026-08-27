@@ -1074,7 +1074,7 @@ import {
   normalizeSpeechTypeVoiceMode,
   applyBotNamePronunciations,
   applyPlayerNamePronunciation,
-  expandSpeechAbbreviations,
+  expandSpeechText,
   voicePerformanceTextFromActionCues,
   voicePerformancePlanFromText,
   VOICE_VOCAL_ACTIONS,
@@ -2577,7 +2577,7 @@ async function sendLocalVoiceWaveStream(args: {
   const normalizedProfile = normalizeBotAudioVoiceProfileV1(args.profile);
   const generate = (text: string) =>
     builtinVoiceWaveGeneratorOverride({
-      text: expandSpeechAbbreviations(
+      text: expandSpeechText(
         args.localLaughProjectionEnabled
           ? projectLocalWrittenLaughterForSynthesis(
               text,
@@ -29050,7 +29050,7 @@ function buildRoutes(): RouteDefinition[] {
         ctx.req.once("aborted", onClose);
         ctx.res.once("close", onClose);
         const babbleText = buildBabbleSpeechText({
-          text: expandSpeechAbbreviations(boundary.text),
+          text: expandSpeechText(boundary.text),
           seed: request.seed ?? request.messageId ?? boundary.text,
         });
         const babbleProfile = {
@@ -29163,7 +29163,7 @@ function buildRoutes(): RouteDefinition[] {
             return;
           }
           const wave = await builtinVoiceWaveGeneratorOverride({
-            text: expandSpeechAbbreviations(
+            text: expandSpeechText(
               localLaughProjectedText(
                 boundary.text,
                 boundary.profile,
@@ -29267,7 +29267,7 @@ function buildRoutes(): RouteDefinition[] {
             return;
           }
           const wave = await builtinVoiceWaveGeneratorOverride({
-            text: expandSpeechAbbreviations(
+            text: expandSpeechText(
               localLaughProjectedText(
                 boundary.text,
                 boundary.profile,
@@ -29476,7 +29476,7 @@ function buildRoutes(): RouteDefinition[] {
               return;
             }
             const wave = await builtinVoiceWaveGeneratorOverride({
-              text: expandSpeechAbbreviations(
+              text: expandSpeechText(
                 localLaughProjectedText(
                   boundary.text,
                   boundary.profile,

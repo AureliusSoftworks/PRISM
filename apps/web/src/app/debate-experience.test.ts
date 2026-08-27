@@ -1705,10 +1705,6 @@ describe("Debate experience", () => {
     // A decline never disables the consent button or blocks a re-check —
     // rerolling is always allowed; launch still requires every advocate to
     // accept server-side.
-    assert.match(
-      source,
-      /format === "whodunnit"[\s\S]{0,100}\? mysteryDistinctLibraryBotCount < mysteryFullCastRequirement[\s\S]{0,100}: !castReady/u,
-    );
     assert.doesNotMatch(source, /Resolve declined role/u);
     assert.match(source, /if \(!castReady\) return/u);
     assert.match(source, /asking again is always allowed/u);
@@ -1801,14 +1797,9 @@ describe("Debate experience", () => {
     assert.match(source, /assignBotToCastSlot/u);
     assert.match(source, /Already cast/u);
     assert.match(source, /"Randomly select all three actors"/u);
-    assert.match(
-      source,
-      /format === "whodunnit"[\s\S]{0,100}\? surpriseAndCompileMystery[\s\S]{0,100}: randomizeCast/u,
-    );
-    assert.match(
-      source,
-      /format === "whodunnit"[\s\S]{0,100}mysteryFullCastRequirement[\s\S]{0,100}playerRole === "spectator"/u,
-    );
+    assert.match(source, /\{format !== "whodunnit" \? \(/u);
+    assert.match(source, /onClick=\{randomizeCast\}/u);
+    assert.doesNotMatch(source, /surpriseAndCompileMystery/u);
     assert.match(
       source,
       /className=\{styles\.studioUtilityButton\}[\s\S]*?data-tutorial-target="debate-stage-layout"[\s\S]*?onClick=\{openStageAlignment\}/u,

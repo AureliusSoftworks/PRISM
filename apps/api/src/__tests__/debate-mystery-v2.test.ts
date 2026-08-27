@@ -34,6 +34,7 @@ import {
   playDebateMysteryV2Again,
   restartDebateMysteryCourtV2,
   restartDebateMysteryInvestigationV2,
+  resolveMysterySuspectKnowledgeV2,
   resolveDebateMysteryTalkExchangeV2,
   retryDebateMysteryCompilationV2,
   runDebateMysteryCompilationV2,
@@ -83,7 +84,11 @@ class V2AuthorProvider implements LlmProvider {
     this.calls += 1;
     const request = JSON.parse(messages.at(-1)!.content) as {
       section: "case_foundation" | "room_examinations" | "suspect_chapter" | "prosecution_choices" | "persona_dialogue_polish";
-      suspect?: { seatId: string };
+      suspect?: {
+        seatId: string;
+        awareness: "involved" | "incidental" | "unaware";
+        temporalRecall: "exact" | "approximate" | "none";
+      };
       lines?: Array<{ lineId: string; speakerBotId: string; canonicalText: string }>;
       setup: {
         eyewitnessSeatId: string | null;
@@ -99,6 +104,9 @@ class V2AuthorProvider implements LlmProvider {
           requiredPresentReactionRecordId: string;
           requiredPresentReactionRecordIds: string[];
           requiredPresentationGateRecordId: string | null;
+          privateRole: "culprit" | "accomplice" | "innocent";
+          awareness: "involved" | "incidental" | "unaware";
+          temporalRecall: "exact" | "approximate" | "none";
         }>;
       };
     };
@@ -242,6 +250,56 @@ class InterruptingV2AuthorProvider extends V2AuthorProvider {
   }
 }
 
+class ExhaustedWitnessV2AuthorProvider extends V2AuthorProvider {
+  public onWitnessAttempt: (() => void) | null = null;
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const request = JSON.parse(messages.at(-1)!.content) as {
+      section?: string;
+      suspect?: { seatId?: string };
+    };
+    if (
+      request.section === "suspect_chapter" &&
+      request.suspect?.seatId === "suspect-1"
+    ) {
+      this.calls += 1;
+      this.sections.push("suspect_chapter:suspect-1");
+      this.onWitnessAttempt?.();
+      return "{}";
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class ExactClockWithoutRecallV2AuthorProvider extends V2AuthorProvider {
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const request = JSON.parse(messages.at(-1)!.content) as {
+      section?: string;
+      suspect?: { temporalRecall?: string };
+    };
+    const response = await super.generateResponse(messages, options);
+    if (
+      request.section !== "suspect_chapter" ||
+      request.suspect?.temporalRecall === "exact"
+    ) {
+      return response;
+    }
+    const parsed = JSON.parse(response) as {
+      suspect?: { alibi?: string };
+    };
+    if (parsed.suspect) {
+      parsed.suspect.alibi = "I checked the clock at exactly 10:13 AM.";
+    }
+    return JSON.stringify(parsed);
+  }
+}
+
 class InterruptingSpectatorChoicesV2AuthorProvider extends V2AuthorProvider {
   public permitChoices = false;
 
@@ -295,6 +353,29 @@ class ContentBearingPersonaDialogueProvider extends V2AuthorProvider {
           leadIn: "Avery did it,",
         })),
       });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class HangingPersonaDialogueProvider extends V2AuthorProvider {
+  public personaDialogueSignal: AbortSignal | null = null;
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const request = JSON.parse(String(messages.at(-1)?.content ?? "{}")) as {
+      section?: string;
+      lines?: Array<{ lineId: string; speakerBotId: string; canonicalText: string }>;
+    };
+    if (request.section === "persona_dialogue_polish") {
+      this.calls += 1;
+      this.sections.push("persona_dialogue_polish");
+      this.personaDialogueRequests.push({ lines: request.lines ?? [] });
+      assert.ok(options?.signal, "persona polish must use a bounded generation signal");
+      this.personaDialogueSignal = options.signal;
+      return new Promise(() => undefined);
     }
     return super.generateResponse(messages, options);
   }
@@ -624,6 +705,65 @@ function finishSpectatorRun(
 }
 
 describe("Whodunnit V2 durable prosecution runtime", () => {
+  it("freezes difficulty-scaled suspect awareness and temporal recall", () => {
+    const suspects = Array.from({ length: 8 }, (_, index) => ({
+      seatId: `suspect-${index + 1}`,
+    }));
+    const resolved = resolveMysterySuspectKnowledgeV2({
+      caseSeed: "knowledge-contract",
+      difficulty: "mastermind",
+      suspects,
+      culpritSeatId: "suspect-1",
+      accompliceSeatId: "suspect-2",
+      eyewitnessSeatId: "suspect-3",
+    });
+    assert.deepEqual(
+      resolved,
+      resolveMysterySuspectKnowledgeV2({
+        caseSeed: "knowledge-contract",
+        difficulty: "mastermind",
+        suspects,
+        culpritSeatId: "suspect-1",
+        accompliceSeatId: "suspect-2",
+        eyewitnessSeatId: "suspect-3",
+      }),
+    );
+    assert.equal(resolved["suspect-1"]?.awareness, "involved");
+    assert.equal(resolved["suspect-2"]?.awareness, "involved");
+    assert.equal(resolved["suspect-3"]?.awareness, "incidental");
+    for (const knowledge of Object.values(resolved)) {
+      if (knowledge.awareness === "unaware") {
+        assert.equal(knowledge.temporalRecall, "none");
+      }
+    }
+
+    const unawareCounts = {
+      casual: 0,
+      classic: 0,
+      mastermind: 0,
+    };
+    for (let index = 0; index < 160; index += 1) {
+      for (const difficulty of ["casual", "classic", "mastermind"] as const) {
+        const knowledge = resolveMysterySuspectKnowledgeV2({
+          caseSeed: `knowledge-sample-${index}`,
+          difficulty,
+          suspects,
+          culpritSeatId: "suspect-1",
+          accompliceSeatId: null,
+          eyewitnessSeatId: "suspect-2",
+        });
+        unawareCounts[difficulty] += Object.values(knowledge).filter(
+          (entry) => entry.awareness === "unaware",
+        ).length;
+        assert.equal(knowledge["suspect-1"]?.awareness, "involved");
+        assert.equal(knowledge["suspect-2"]?.awareness, "incidental");
+      }
+    }
+    assert.ok(unawareCounts.casual > 0);
+    assert.ok(unawareCounts.casual < unawareCounts.classic);
+    assert.ok(unawareCounts.classic < unawareCounts.mastermind);
+  });
+
   it("migrates legacy compiled cases into independent Run 1 families", () => {
     const db = new DatabaseSync(":memory:");
     db.exec(`
@@ -918,6 +1058,42 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     );
   });
 
+  it("rejects exact clock testimony from a witness without exact recall", async () => {
+    const db = testDb();
+    const provider = new ExactClockWithoutRecallV2AuthorProvider();
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      { ...config(), difficulty: "mastermind" },
+      "create-v2-temporal-recall-gate",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    const session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    assert.equal(v2State(session).compilation.stage, "needs_attention");
+    const row = db.prepare(
+      "SELECT private_error FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
+    ).get("user-1", session.id) as { private_error: string | null };
+    assert.match(row.private_error ?? "", /exact clock recall.*10:13 AM/iu);
+    assert.ok(
+      provider.requests.some((request) => {
+        const suspect = request.suspect as
+          | { temporalRecall?: string }
+          | undefined;
+        return (
+          request.section === "suspect_chapter" &&
+          suspect?.temporalRecall !== "exact"
+        );
+      }),
+    );
+  });
+
   it("allows one account-scoped Case Forge while leaving idempotent retries safe", async () => {
     const db = testDb();
     const provider = new V2AuthorProvider();
@@ -1049,6 +1225,69 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(v2State(compiled).compilation.stage, "complete");
     assert.ok(terra.calls > 0);
     assert.equal(terra.calls, sol.calls);
+  });
+
+  it("stops an exhausted Auto witness chapter at three public attempts", async () => {
+    const db = testDb();
+    const provider = new ExhaustedWitnessV2AuthorProvider();
+    const autoRuntime: DebateAiRuntime = {
+      preferredProvider: "local",
+      responseMode: "local",
+      modelSelectionKind: "auto",
+      local: { provider, providerName: "local", model: "witness-primary" },
+      lanes: [
+        { provider, providerName: "local", model: "witness-primary" },
+        { provider, providerName: "local", model: "witness-repair-1" },
+        { provider, providerName: "local", model: "witness-repair-2" },
+        { provider, providerName: "local", model: "witness-over-budget" },
+      ],
+    };
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-auto-witness-exhaustion",
+      autoRuntime,
+      { deferBackgroundStart: true },
+    );
+    const publicAttemptMessages: string[] = [];
+    provider.onWitnessAttempt = () => {
+      publicAttemptMessages.push(
+        getDebateMysteryCompilationStatusV2(db, "user-1", created.id)
+          .spoilerSafeMessage,
+      );
+    };
+
+    const session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      autoRuntime,
+      { generateWave: async () => playableWave() },
+    );
+
+    assert.deepEqual(publicAttemptMessages, [
+      "Writing the Case · Witness chapter 1 of 4 · attempt 1 of 3",
+      "Writing the Case · Witness chapter 1 of 4 · attempt 2 of 3",
+      "Writing the Case · Witness chapter 1 of 4 · attempt 3 of 3",
+    ]);
+    assert.equal(
+      provider.sections.filter(
+        (section) => section === "suspect_chapter:suspect-1",
+      ).length,
+      3,
+    );
+    assert.equal(session.status, "failed");
+    assert.equal(v2State(session).compilation.stage, "needs_attention");
+    assert.equal(v2State(session).compilation.retryable, true);
+    assert.equal(
+      v2State(session).compilation.spoilerSafeMessage,
+      "Case preparation needs attention",
+    );
+    assert.doesNotMatch(
+      JSON.stringify(session),
+      /sealedCulpritSeatId|sealedAccompliceSeatId|actorAccounts|graphValidation|correctPresentations|privateCase/iu,
+    );
   });
 
   it("keeps auxiliary audits advisory until a targeted selected-lane repair", async () => {
@@ -1186,6 +1425,47 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(graph.prosecutionChoices[0]?.options.length, 2);
     assert.equal(privateCase.graphValidation.valid, true);
     assert.deepEqual(privateCase.graphValidation.errors, []);
+    assert.equal(privateCase.sealedAccompliceSeatId, null);
+    assert.ok(
+      privateCase.actorAccounts.every(
+        (account) =>
+          account.awareness === "involved" ||
+          account.awareness === "incidental" ||
+          account.awareness === "unaware",
+      ),
+    );
+    assert.ok(
+      privateCase.actorAccounts.every(
+        (account) =>
+          account.temporalRecall === "exact" ||
+          account.temporalRecall === "approximate" ||
+          account.temporalRecall === "none",
+      ),
+    );
+    const knowledgeBySeat = new Map(
+      privateCase.actorAccounts.map((account) => [account.seatId, account]),
+    );
+    for (const request of provider.requests.filter(
+      (entry) => entry.section === "suspect_chapter",
+    )) {
+      const suspect = request.suspect as {
+        seatId: string;
+        awareness: string;
+        temporalRecall: string;
+      };
+      assert.equal(
+        suspect.awareness,
+        knowledgeBySeat.get(suspect.seatId)?.awareness,
+      );
+      assert.equal(
+        suspect.temporalRecall,
+        knowledgeBySeat.get(suspect.seatId)?.temporalRecall,
+      );
+    }
+    assert.doesNotMatch(
+      JSON.stringify(state),
+      /actorAccounts|temporalRecall|suspectKnowledgeBySeat/iu,
+    );
   });
 
   it("resumes a stopped authored draft without regenerating completed sections", async () => {
@@ -1790,7 +2070,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       !canonicalByLineId.has(line.id) || line.visibleText.startsWith("Let’s be precise:")));
   });
 
-  it("rejects content-bearing persona polish before a case can be sealed", async () => {
+  it("keeps the canonical dialogue when persona polish introduces case content", async () => {
     const db = testDb();
     const provider = new ContentBearingPersonaDialogueProvider();
     const created = await createDebateMysterySessionV2(
@@ -1809,17 +2089,52 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       { generateWave: async () => playableWave() },
     );
     const state = v2State(session);
-    assert.equal(state.compilation.stage, "needs_attention");
+    assert.equal(state.compilation.stage, "complete");
     assert.equal(
       provider.sections.filter((section) => section === "persona_dialogue_polish").length,
-      3,
+      1,
     );
     const source = db.prepare(
       "SELECT private_error FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
     ).get("user-1", session.id) as { private_error: string | null };
-    assert.match(source.private_error ?? "", /content-bearing copy/iu);
+    assert.equal(source.private_error, null);
     const { graph } = getDebateMysteryCaseV2(db, "user-1", session.id);
     assert.equal(graph.lines.some((line) => /Avery did it,/u.test(line.visibleText)), false);
+  });
+
+  it("continues to local voice preparation when persona polish does not settle", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const db = testDb();
+    const provider = new HangingPersonaDialogueProvider();
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-stalled-persona-dialogue",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    const pending = runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    while (!provider.sections.includes("persona_dialogue_polish")) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    t.mock.timers.tick(75_000);
+
+    const session = await pending;
+    assert.equal(v2State(session).compilation.stage, "complete");
+    assert.equal(
+      provider.sections.filter((section) => section === "persona_dialogue_polish").length,
+      1,
+    );
+    assert.equal(provider.personaDialogueSignal?.aborted, true);
+    const { graph } = getDebateMysteryCaseV2(db, "user-1", session.id);
+    assert.equal(graph.lines.some((line) => /Let’s be precise:|Respectfully,|Quietly,/u.test(line.visibleText)), false);
   });
 
   it("rejects courtroom language in investigation dialogue before a case can be sealed", async () => {

@@ -22,6 +22,8 @@ export type WhodunnitInterrogationFinishDecision =
   | "settle"
   | "ignore";
 
+export type WhodunnitDialogueGestureDecision = "fill" | "advance" | "ignore";
+
 export interface WhodunnitActorDriftTiming {
   durationMs: number;
   delayMs: number;
@@ -123,6 +125,36 @@ export function whodunnitInterrogationAudioOwnsMouth(args: {
   return args.audible && whodunnitInterrogationMayStartAudio(args.phase);
 }
 
+/**
+ * Resolves one pointer/keyboard gesture without changing the authoritative
+ * dialogue queue. A repeated click may advance a line filled by its first
+ * click, except when that first click interrupted an automated bot beat.
+ */
+export function whodunnitDialogueGestureDecision(args: {
+  advanceArmed: boolean;
+  automatedBotPlayback: boolean;
+  botFillArmed: boolean;
+  clickCount: number;
+  filledByGesture: boolean;
+  streaming: boolean;
+}): WhodunnitDialogueGestureDecision {
+  if (args.clickCount > 1 && (args.advanceArmed || args.botFillArmed)) return "ignore";
+  if (args.filledByGesture) return "advance";
+  if (args.streaming || args.automatedBotPlayback) return "fill";
+  return "advance";
+}
+
+/** Keeps screen-wide dialogue gestures out of ordinary interactive controls. */
+export function whodunnitDialogueGestureControlIsInteractive(args: {
+  contentEditable: boolean;
+  tagName: string;
+}): boolean {
+  if (args.contentEditable) return true;
+  return ["INPUT", "TEXTAREA", "SELECT", "BUTTON", "A", "LABEL"].includes(
+    args.tagName.toUpperCase(),
+  );
+}
+
 /** Presentation-only caption cleanup for legacy/current frozen dialogue. */
 export function whodunnitCaptionSpeechText(value: string): string {
   const text = value.trim();
@@ -134,6 +166,23 @@ export function whodunnitCaptionSpeechText(value: string): string {
     (first === "“" && last === "”") ||
     (first === "‘" && last === "’");
   return matchedQuotes ? text.slice(1, -1).trim() : text;
+}
+
+/**
+ * Queued spoken dialogue owns its caption before playback begins. Treating a
+ * missing or previous line's clock as completed would expose the frozen full
+ * text for one paint before the progressive reveal starts.
+ */
+export function whodunnitCaptionRevealIsPending(args: {
+  queued: boolean;
+  revealExpected: boolean;
+  presentationText: string;
+  timingText: string | null | undefined;
+}): boolean {
+  if (!args.queued || !args.revealExpected) return false;
+  if (!args.timingText) return true;
+  return args.timingText !== args.presentationText &&
+    whodunnitCaptionSpeechText(args.timingText) !== args.presentationText;
 }
 
 /** Guards callbacks from an audio element that was cancelled or superseded. */

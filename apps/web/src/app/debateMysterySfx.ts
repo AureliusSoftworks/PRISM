@@ -10,6 +10,8 @@ export type DebateMysterySfxCue =
   | "navigate"
   | "enter"
   | "return"
+  | "dialogue-blip"
+  | "dialogue-dismiss"
   | "theory"
   | "evidence"
   | "paper"
@@ -24,6 +26,36 @@ export interface DebateMysterySfxVoice {
   gain: number;
   playbackRate: number;
   url: string;
+}
+
+export const DEBATE_MYSTERY_TEXT_BLIP_CHARACTER_INTERVAL = 3;
+
+export function debateMysteryTextBlipShouldPlay(args: {
+  audible: boolean;
+  previousVisibleText: string;
+  speakerBotId?: string | null;
+  speakerKind?: "bot" | "player" | "judge" | "narrator";
+  speakerSeatId?: string | null;
+  streaming: boolean;
+  visibleText: string;
+}): boolean {
+  if (!args.streaming || args.audible) return false;
+  if (args.speakerKind === "bot" || args.speakerKind === "player") return false;
+  if (args.speakerBotId || args.speakerSeatId) return false;
+  if (args.visibleText.length <= args.previousVisibleText.length) return false;
+  const newlyVisibleText = args.visibleText.slice(args.previousVisibleText.length);
+  if (!/\S/u.test(newlyVisibleText)) return false;
+  return (
+    Math.floor(args.visibleText.length / DEBATE_MYSTERY_TEXT_BLIP_CHARACTER_INTERVAL) >
+    Math.floor(args.previousVisibleText.length / DEBATE_MYSTERY_TEXT_BLIP_CHARACTER_INTERVAL)
+  );
+}
+
+export function debateMysteryDialoguePresentationDismissed(
+  previousKey: string | null,
+  nextKey: string | null,
+): boolean {
+  return Boolean(previousKey && previousKey !== nextKey);
 }
 
 export type DebateMysteryDeskItemSfxMoment = "pickup" | "place";
@@ -98,6 +130,18 @@ const SINGLE_VOICE_CUES = {
     playbackRate: 0.92,
     url: "/audio/ui-asmr/panel-close-02.mp3",
   },
+  "dialogue-blip": {
+    delayMs: 0,
+    gain: 0.035,
+    playbackRate: 1.85,
+    url: "/audio/ui-asmr/bot-hover-03.mp3",
+  },
+  "dialogue-dismiss": {
+    delayMs: 0,
+    gain: 0.14,
+    playbackRate: 1.08,
+    url: "/audio/ui-asmr/panel-close-01.mp3",
+  },
   theory: {
     delayMs: 0,
     gain: 0.2,
@@ -147,6 +191,9 @@ export const DEBATE_MYSTERY_SFX_COOLDOWN_MS = {
   navigate: 110,
   enter: 110,
   return: 110,
+  "dialogue-blip": 86,
+  // Each visible dialogue handoff is authored as a distinct dismissal.
+  "dialogue-dismiss": 0,
   theory: 180,
   evidence: 700,
   paper: 80,

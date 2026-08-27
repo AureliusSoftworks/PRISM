@@ -5,12 +5,69 @@ import test from "node:test";
 import {
   DEBATE_MYSTERY_DESK_ITEM_PICKUP_VOLUME_RATIO,
   DEBATE_MYSTERY_EVIDENCE_CHIME,
+  DEBATE_MYSTERY_SFX_COOLDOWN_MS,
+  DEBATE_MYSTERY_TEXT_BLIP_CHARACTER_INTERVAL,
+  debateMysteryDialoguePresentationDismissed,
   debateMysteryDeskItemSfxPlan,
   debateMysterySfxCueForAction,
   debateMysterySfxVoices,
+  debateMysteryTextBlipShouldPlay,
   playDebateMysteryDeskItemSfx,
   playDebateMysterySfx,
 } from "./debateMysterySfx.ts";
+
+test("blips only cadence-limited, silent non-character dialogue", () => {
+  assert.equal(DEBATE_MYSTERY_TEXT_BLIP_CHARACTER_INTERVAL, 3);
+  const narratorBeat = {
+    audible: false,
+    previousVisibleText: "The",
+    speakerBotId: null,
+    speakerKind: "narrator" as const,
+    speakerSeatId: null,
+    streaming: true,
+    visibleText: "The kn",
+  };
+  assert.equal(debateMysteryTextBlipShouldPlay(narratorBeat), true);
+  assert.equal(
+    debateMysteryTextBlipShouldPlay({ ...narratorBeat, visibleText: "The " }),
+    false,
+    "whitespace-only progress stays quiet",
+  );
+  assert.equal(
+    debateMysteryTextBlipShouldPlay({ ...narratorBeat, visibleText: "The k" }),
+    false,
+    "progress inside the same cadence bucket stays quiet",
+  );
+  assert.equal(
+    debateMysteryTextBlipShouldPlay({ ...narratorBeat, speakerKind: "bot" }),
+    false,
+  );
+  assert.equal(
+    debateMysteryTextBlipShouldPlay({ ...narratorBeat, speakerKind: "player" }),
+    false,
+  );
+  assert.equal(
+    debateMysteryTextBlipShouldPlay({ ...narratorBeat, speakerBotId: "bot-1" }),
+    false,
+  );
+  assert.equal(
+    debateMysteryTextBlipShouldPlay({ ...narratorBeat, audible: true }),
+    false,
+  );
+  assert.equal(
+    debateMysteryTextBlipShouldPlay({ ...narratorBeat, streaming: false }),
+    false,
+  );
+});
+
+test("dismisses every completed dialogue presentation without treating its first mount as a close", () => {
+  assert.equal(debateMysteryDialoguePresentationDismissed(null, "opening"), false);
+  assert.equal(debateMysteryDialoguePresentationDismissed("opening", "opening"), false);
+  assert.equal(debateMysteryDialoguePresentationDismissed("opening", "observation"), true);
+  assert.equal(debateMysteryDialoguePresentationDismissed("observation", null), true);
+  assert.equal(DEBATE_MYSTERY_SFX_COOLDOWN_MS["dialogue-dismiss"], 0);
+  assert.ok(DEBATE_MYSTERY_SFX_COOLDOWN_MS["dialogue-blip"] > 0);
+});
 
 test("builds the evidence discovery cue as a restrained descending chime", () => {
   assert.equal(DEBATE_MYSTERY_EVIDENCE_CHIME.length, 3);
@@ -80,6 +137,8 @@ test("gives newly acquired evidence priority over ordinary action navigation", (
   );
   assert.equal(debateMysterySfxVoices("evidence").length, 3);
   assert.equal(debateMysterySfxVoices("map").length, 1);
+  assert.equal(debateMysterySfxVoices("dialogue-blip").length, 1);
+  assert.equal(debateMysterySfxVoices("dialogue-dismiss").length, 1);
   assert.equal(debateMysterySfxVoices("paper").length, 1);
   assert.equal(debateMysterySfxVoices("paper-pickup").length, 1);
   assert.equal(debateMysterySfxVoices("paper-place").length, 1);

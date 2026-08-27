@@ -91,6 +91,32 @@ export interface DebateMysteryMansionBundleSummaryV1 {
 export type DebateMysteryTrialTypeV2 = "jury" | "bench";
 /** Frozen at compilation: full mansion investigation, or court from the title card. */
 export type DebateMysteryInvestigationModeV2 = "full" | "court_only";
+export const DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS = 3;
+
+/**
+ * Clamp stale or malformed public progress copy to its own declared budget.
+ * This operates only on spoiler-safe presentation text and never inspects
+ * sealed case state.
+ */
+export function normalizeDebateMysteryV2ForgeProgressMessage(
+  message: string,
+): string {
+  return message.replace(
+    /\battempt\s+(\d+)\s+of\s+(\d+)\b/giu,
+    (label, attemptText: string, maxText: string) => {
+      const attempt = Number.parseInt(attemptText, 10);
+      const maxAttempts = Number.parseInt(maxText, 10);
+      if (
+        !Number.isSafeInteger(attempt) ||
+        !Number.isSafeInteger(maxAttempts) ||
+        maxAttempts < 1 ||
+        attempt <= maxAttempts
+      ) return label;
+      return `attempt ${maxAttempts} of ${maxAttempts}`;
+    },
+  );
+}
+
 export type DebateMysteryCompilationStageV2 =
   | "writing_case"
   | "testing_contradictions"

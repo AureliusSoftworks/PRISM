@@ -82,6 +82,24 @@ export const DEBATE_MYSTERY_PRESETS: readonly DebateMysteryPresetV1[] = [
   { id: "grand", floors: 3, rooms: 15, suspects: 8, classicActions: 40, accompliceChance: 0.35 },
 ] as const;
 
+/**
+ * An accomplice adds a second sealed culpability relationship, so reserve it
+ * for the highest mystery difficulty. Mansion size still controls how often
+ * that extra relationship appears once Mastermind is selected.
+ */
+export function debateMysteryAccompliceChance(
+  difficulty: DebateMysteryDifficulty,
+  preset: DebateMysteryPresetId,
+  suspectCount: number,
+): number {
+  if (difficulty !== "mastermind") return 0;
+  const presetChance = DEBATE_MYSTERY_PRESETS.find(
+    (entry) => entry.id === preset,
+  )?.accompliceChance;
+  return presetChance ??
+    (suspectCount >= 7 ? 0.35 : suspectCount >= 6 ? 0.25 : 0);
+}
+
 export interface DebateWhodunnitCreateConfigV1 {
   version: typeof DEBATE_MYSTERY_SCHEMA_VERSION;
   preset: DebateMysteryPresetId;
@@ -1234,7 +1252,11 @@ export function resolveDebateMysteryConfig(
     prosecutorPartnerBotId,
     rivalDefenseBotId,
     actionBudget,
-    accompliceChance: preset?.accompliceChance ?? (suspectBotIds.length >= 7 ? 0.35 : suspectBotIds.length >= 6 ? 0.25 : 0),
+    accompliceChance: debateMysteryAccompliceChance(
+      difficulty,
+      preset?.id ?? "custom",
+      suspectBotIds.length,
+    ),
   };
 }
 

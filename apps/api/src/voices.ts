@@ -1,7 +1,7 @@
 import {
   applyPremiumRespelling,
   applyVoiceDeliveryMoodToProfile,
-  projectSpeechAbbreviations,
+  projectSpeechText,
   elevenLabsVoiceDirectionForMood,
   resolveLocalAccentFallback,
   resolvePremiumAccentDirection,
@@ -343,11 +343,11 @@ async function elevenLabsSpeechInput(
 ): Promise<ElevenLabsSpeechInput> {
   // Premium previews, replays, and Action SFX bypass the conversation route.
   // Normalize here as the shared provider boundary so every request speaks
-  // titles naturally without altering its persisted source text.
-  const abbreviationProjection = projectSpeechAbbreviations(args.text);
+  // titles and clock times naturally without altering persisted source text.
+  const speechProjection = projectSpeechText(args.text);
   const speechArgs = {
     ...args,
-    text: abbreviationProjection.synthesisText,
+    text: speechProjection.synthesisText,
   };
   const normalizedProfile =
     normalizeBotAudioVoiceProfileForSynthesisV1(speechArgs.profile);
@@ -418,13 +418,13 @@ async function elevenLabsSpeechInput(
     projectionSegments,
     alignmentProjected:
       Boolean(ipaProjection) || respelling?.respelled === true,
-    sourceProjectionSegments: abbreviationProjection.segments.map(
+    sourceProjectionSegments: speechProjection.segments.map(
       (segment) => ({
         providerText: segment.synthesisText,
         sourceText: segment.sourceText,
       }),
     ),
-    sourceAlignmentProjected: abbreviationProjection.changed,
+    sourceAlignmentProjected: speechProjection.changed,
   };
 }
 

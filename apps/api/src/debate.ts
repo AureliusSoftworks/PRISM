@@ -5869,7 +5869,7 @@ function projectDebateEventForObserver(
     event.speakerKind !== "system" &&
     event.interrupted !== true &&
     !event.mutePerformance &&
-    botPowerIntendedSpeechLooksGibberishV1(event.content) &&
+    debateSpeakerObfuscatesSpeech(session, event.speakerBotId) &&
     [
       "intro",
       "speech",

@@ -60,6 +60,7 @@ import {
   applyBotPowerEchoResponseV1,
   botPowerCupRateMultiplierForBotV1,
   botPowerIsMutedV1,
+  botPowerMirrorsIdentityV1,
   botPowerResponseIsSilentV1,
   botPowerVoiceGainMultiplierV1,
   botPowerVoicePresenceModeV1,
@@ -359,6 +360,7 @@ import {
 import {
   signalCupSipAllowedDuringSpeechV1,
   signalCupSipScheduleV1,
+  signalCupVisualSipCountV1,
 } from "./signalCupSipSchedule";
 import { buildSignalReviewTranscript } from "./signalReviewTranscript";
 import {
@@ -455,6 +457,11 @@ import { REPLAY_RECORDING_CHANGED_EVENT } from "./ReplayRenderCoordinator";
 import { ReplayMouthPresentationCapture } from "./ReplayMouthPresentationCapture";
 import { SpeechIntentReveal } from "./SpeechIntentReveal";
 import { signalAvatarPresentation } from "./sessionAvatarPresentationPolicy";
+import {
+  boundedSignalReplayFinalization,
+  signalMessageRequestsResponseCue,
+  signalResponseCueBotIsMuted,
+} from "./signalCompletionSafety";
 import {
   BotPickerGrid,
   BotPickerTile,
@@ -3564,62 +3571,78 @@ export function BotcastExperience({
       show: BotcastShow,
     ): Promise<ReplayRecordingV1 | null> => {
       if (finalizedSignalRecordingIdsRef.current.has(completedEpisode.id)) {
-        return replayRecordingForSource("signal", completedEpisode.id).catch(
-          () => null,
-        );
+        try {
+          const recording = await boundedSignalReplayFinalization(
+            replayRecordingForSource("signal", completedEpisode.id),
+          );
+          if (!recording) {
+            finalizedSignalRecordingIdsRef.current.delete(completedEpisode.id);
+          }
+          return recording;
+        } catch {
+          finalizedSignalRecordingIdsRef.current.delete(completedEpisode.id);
+          return null;
+        }
       }
       finalizedSignalRecordingIdsRef.current.add(completedEpisode.id);
-      if (signalCaptureSourceIdRef.current === completedEpisode.id) {
-        markReplayAudioMasterCapture({
-          sourceId: completedEpisode.id,
-          phase: "capture_end",
-        });
-      }
-      const capturedDirection = replayAudioMasterCaptureDirection(
-        completedEpisode.id,
-      );
-      const capturedMouthTracks = replayAudioMasterCaptureMouthTracks(
-        completedEpisode.id,
-      );
-      const capturedVoiceLightTracks = replayAudioMasterCaptureVoiceLightTracks(
-        completedEpisode.id,
-      );
-      const capture = await stopReplayAudioMasterCapture(completedEpisode.id);
-      if (signalCaptureSourceIdRef.current === completedEpisode.id) {
-        signalCaptureSourceIdRef.current = null;
-      }
-      const manifest = buildSignalReplayManifestV2({
-        episode: completedEpisode,
-        show,
-        cameraFraming:
-          signalEpisodeCameraFramingSnapshotRef.current.get(
-            completedEpisode.id,
-          ) ?? normalizeBotcastCameraFraming(show.cameraFraming),
-        bots,
-        producerName,
-        theme,
-        audioEnabled: introAudioEnabled,
-        audioVolume: introAudioVolume,
-        capturedDirection: capture?.direction ?? capturedDirection,
-        capturedMouthTracks: capture?.mouthTracks ?? capturedMouthTracks,
-        capturedVoiceLightTracks:
-          capture?.voiceLightTracks ?? capturedVoiceLightTracks,
-        capturedSpeechActivityTracks: capture?.speechActivityTracks ?? [],
-        voiceSelection: capture?.voiceSelection ?? recordingVoiceSelection,
-      });
       try {
-        const recording = await saveFaithfulReplaySession({
-          surface: "signal",
-          sourceId: completedEpisode.id,
-          manifest,
-          capture,
+        if (signalCaptureSourceIdRef.current === completedEpisode.id) {
+          markReplayAudioMasterCapture({
+            sourceId: completedEpisode.id,
+            phase: "capture_end",
+          });
+        }
+        const capturedDirection = replayAudioMasterCaptureDirection(
+          completedEpisode.id,
+        );
+        const capturedMouthTracks = replayAudioMasterCaptureMouthTracks(
+          completedEpisode.id,
+        );
+        const capturedVoiceLightTracks =
+          replayAudioMasterCaptureVoiceLightTracks(completedEpisode.id);
+        const capture = await boundedSignalReplayFinalization(
+          stopReplayAudioMasterCapture(completedEpisode.id),
+        );
+        if (signalCaptureSourceIdRef.current === completedEpisode.id) {
+          signalCaptureSourceIdRef.current = null;
+        }
+        const manifest = buildSignalReplayManifestV2({
+          episode: completedEpisode,
+          show,
+          cameraFraming:
+            signalEpisodeCameraFramingSnapshotRef.current.get(
+              completedEpisode.id,
+            ) ?? normalizeBotcastCameraFraming(show.cameraFraming),
+          bots,
+          producerName,
+          theme,
+          audioEnabled: introAudioEnabled,
+          audioVolume: introAudioVolume,
+          capturedDirection: capture?.direction ?? capturedDirection,
+          capturedMouthTracks: capture?.mouthTracks ?? capturedMouthTracks,
+          capturedVoiceLightTracks:
+            capture?.voiceLightTracks ?? capturedVoiceLightTracks,
+          capturedSpeechActivityTracks: capture?.speechActivityTracks ?? [],
+          voiceSelection: capture?.voiceSelection ?? recordingVoiceSelection,
         });
+        const recording = await boundedSignalReplayFinalization(
+          saveFaithfulReplaySession({
+            surface: "signal",
+            sourceId: completedEpisode.id,
+            manifest,
+            capture,
+          }),
+        );
         window.dispatchEvent(new Event(REPLAY_RECORDING_CHANGED_EVENT));
         return recording;
       } catch {
         // The locally retained master retries on the next authenticated load.
         finalizedSignalRecordingIdsRef.current.delete(completedEpisode.id);
         return null;
+      } finally {
+        if (signalCaptureSourceIdRef.current === completedEpisode.id) {
+          signalCaptureSourceIdRef.current = null;
+        }
       }
     },
     [
@@ -3702,17 +3725,13 @@ export function BotcastExperience({
       releaseSignalIntroAudio();
       let recording: ReplayRecordingV1 | null = null;
       if (!args.discarded) {
-        if (args.episode.playbackMode === "watch") {
-          setWatchReplayFinalizingEpisodeId(args.episode.id);
-        }
+        setWatchReplayFinalizingEpisodeId(args.episode.id);
         try {
           recording = await finalizeSignalRecording(args.episode, args.show);
         } finally {
-          if (args.episode.playbackMode === "watch") {
-            setWatchReplayFinalizingEpisodeId((current) =>
-              current === args.episode.id ? null : current,
-            );
-          }
+          setWatchReplayFinalizingEpisodeId((current) =>
+            current === args.episode.id ? null : current,
+          );
         }
       }
       return recording;
@@ -9089,13 +9108,29 @@ export function BotcastExperience({
             guestDeparted: guestHasDeparted(episode),
           });
           const responder = nextRole === "host" ? hostBot : liveGuestBot;
-            if (responder && !responder.producerGuest) {
-              finishResponseCue =
-                onResponseCueGeneration?.({
-                  botId: responder.id,
-                  trigger: requestedCue ? "redirect" : null,
-                  sessionId: episode.id,
-                }) ?? null;
+          const responderMayBorrowMute = Boolean(
+            nextRole &&
+              botPowerMirrorsIdentityV1(
+                botcastSnapshotPowersForRoleV1(episode, nextRole),
+              ) &&
+              (nextRole === "host" ? liveGuestBot?.muted : hostBot?.muted),
+          );
+          if (
+            responder &&
+            !responder.producerGuest &&
+            !signalResponseCueBotIsMuted(
+              responder,
+              botcastIdentityMirrorStatesAtV1(episode.events),
+              botsById,
+              responderMayBorrowMute,
+            )
+          ) {
+            finishResponseCue =
+              onResponseCueGeneration?.({
+                botId: responder.id,
+                trigger: requestedCue ? "redirect" : null,
+                sessionId: episode.id,
+              }) ?? null;
           }
         }
         if (
@@ -9347,7 +9382,11 @@ export function BotcastExperience({
             !producerGuestHostInterruption
           ) {
             const responder = botsById.get(message.botId);
-            if (responder && !responder.producerGuest) {
+            if (
+              responder &&
+              !responder.producerGuest &&
+              signalMessageRequestsResponseCue(message)
+            ) {
               finishResponseCue =
                 onResponseCueGeneration?.({
                   botId: responder.id,
@@ -12063,7 +12102,7 @@ export function BotcastExperience({
           args.currentEpisode.durationMinutes ??
           DEFAULT_COFFEE_SESSION_DURATION_MINUTES,
         powerRateMultiplier,
-        sipCount: sipSchedule.sipCount,
+        sipCount: signalCupVisualSipCountV1(sipSchedule),
         speaking: roleIsSpeaking(role),
         thinking: roleIsThinking(role),
         sippingOverride:
@@ -16588,6 +16627,24 @@ export function BotcastExperience({
       void loadEpisodes(selectedShowId).catch(() => undefined);
     }
   };
+  const returnFromCompletedEpisode = async (): Promise<void> => {
+    if (!episode || episode.status !== "completed") return;
+    const completedEpisode = episode;
+    setWatchReplayFinalizingEpisodeId(completedEpisode.id);
+    try {
+      if (selectedShow) {
+        await finalizeSignalRecording(completedEpisode, selectedShow);
+      }
+    } finally {
+      setWatchReplayFinalizingEpisodeId((current) =>
+        current === completedEpisode.id ? null : current,
+      );
+      setEpisode(null);
+      if (selectedShowId) {
+        void loadEpisodes(selectedShowId).catch(() => undefined);
+      }
+    }
+  };
   useEffect(() => {
     onLiveSessionActiveChange?.(
       liveSessionActive,
@@ -17845,13 +17902,13 @@ export function BotcastExperience({
               <button
                 type="button"
                 className={styles.returnButton}
-                onClick={() => {
-                  setEpisode(null);
-                  if (selectedShowId) void loadEpisodes(selectedShowId);
-                }}
-                >
-                  Return to show
-                </button>
+                onClick={() => void returnFromCompletedEpisode()}
+                disabled={watchReplayFinalizingEpisodeId === episode.id}
+              >
+                {watchReplayFinalizingEpisodeId === episode.id
+                  ? "Finalizing replay…"
+                  : "Return to show"}
+              </button>
             ) : null}
           </div>
         ) : replayEpisode && selectedShow ? (

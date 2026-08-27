@@ -650,7 +650,8 @@ describe("Debate Whodunnit experience", () => {
     assert.match(source, /onProgress: \(elapsedMs, durationMs\) =>[\s\S]*mysteryInterviewTranscriptVisibleText/u);
     assert.match(source, /\.then\(\(played\) => \{[\s\S]*if \(!played\) revealCompletedReply\(\)/u);
     assert.match(source, /onCancel: \(\) => \{[\s\S]*revealCompletedReply\(\)/u);
-    assert.match(source, /message\.id === streamingMessageId && !streamedReply \? null/u);
+    assert.match(source, /mysteryInterviewTranscriptShouldWithhold\(/u);
+    assert.match(source, /latestInterviewAwaitingRevealId/u);
   });
 
   it("keeps feedback and acquired-evidence detail inside the stage as one replacing line", () => {
@@ -703,21 +704,19 @@ describe("Debate Whodunnit experience", () => {
     assert.match(css, /\.theoryWorkspace/u);
   });
 
-  it("lets the main Surprise me shortcut cast every role and begin compilation", () => {
-    assert.match(shell, /data-tutorial-target="debate-random-cast"/u);
-    assert.match(shell, /"Randomly assign all Whodunnit cast roles and begin compiling"/u);
-    assert.match(shell, /className=\{styles\.castRandomizeButton\}/u);
-    assert.match(shell, /<strong>Surprise me<\/strong>/u);
+  it("keeps Whodunnit casting editable before Case Forge", () => {
+    assert.doesNotMatch(shell, /surpriseAndCompileMystery/u);
+    assert.doesNotMatch(shell, /mysterySurpriseCompilePendingRef/u);
+    assert.doesNotMatch(shell, /"Surprise me · seat & compile"/u);
+    assert.doesNotMatch(shell, /"Randomly assign all Whodunnit cast roles and begin compiling"/u);
     assert.match(shell, /if \(format === "whodunnit"\) \{[\s\S]{0,180}randomizeWhodunnitFullCast/u);
     assert.match(shell, /setJuryEnabled\(true\);[\s\S]{0,80}setPreferredJurorBotIds\(allocation\.jurorBotIds\)/u);
-    assert.match(shell, /const surpriseAndCompileMystery = \(\): void => \{/u);
-    assert.match(shell, /mysterySurpriseCompilePendingRef\.current = true/u);
-    assert.match(shell, /format === "whodunnit"[\s\S]{0,120}\? surpriseAndCompileMystery/u);
+    assert.match(shell, /\{format !== "whodunnit" \? \(/u);
+    assert.match(shell, /onClick=\{randomizeCast\}/u);
     assert.match(shell, /const mysterySetupValidated = mysteryRoleSelected/u);
     assert.match(shell, /format === "whodunnit"[\s\S]{0,80}\? mysteryRoleSelected/u);
     assert.match(shell, /if \(!mysterySetupValidated \|\| busy\) return;/u);
     assert.match(shell, /\? "Surprise seats ready"/u);
-    assert.match(shell, /if \(!debateCanStart \|\| busy\) return;[\s\S]{0,160}void startMystery\(\)/u);
   });
 
   it("treats every unfilled seat as a compile-time random choice while preserving manual cast", () => {
@@ -792,13 +791,11 @@ describe("Debate Whodunnit experience", () => {
     assert.doesNotMatch(shell, /const mysteryFloorBotSignature/u);
   });
 
-  it("keeps a visible one-click Surprise path at the foot of the Cast step", () => {
-    assert.match(
-      shell,
-      /if \(format === "whodunnit"\) \{\s*surpriseAndCompileMystery\(\);\s*return;/u,
-    );
-    assert.match(shell, /"Surprise me · seat & compile"/u);
-    assert.match(shell, /mysteryDistinctLibraryBotCount < mysteryFullCastRequirement/u);
+  it("leaves Case Forge compilation to the normal Compile the case action", () => {
+    assert.doesNotMatch(shell, /Surprise me · seat & compile/u);
+    assert.doesNotMatch(shell, /mysterySurpriseCompileRequest/u);
+    assert.match(shell, /Compile the case/u);
+    assert.match(shell, /leave seats on Surprise me/u);
   });
 
   it("produces distinct random Whodunnit casts with correct role counts", () => {

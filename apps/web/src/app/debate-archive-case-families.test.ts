@@ -3,7 +3,10 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import type { DebateSessionListItemV1 } from "@localai/shared";
-import { groupDebateArchiveSessions } from "./debateArchiveCaseFamilies.ts";
+import {
+  debateArchiveProceedingActionLabel,
+  groupDebateArchiveSessions,
+} from "./debateArchiveCaseFamilies.ts";
 
 function archiveRun(args: {
   id: string;
@@ -83,6 +86,39 @@ describe("Whodunnit V2 Archive families", () => {
     assert.deepEqual(family?.runs.map((run) => run.id), ["run-2"]);
     assert.equal(family?.representative.id, "run-2");
     assert.equal(family?.openRun, null);
+  });
+
+  it("opens the visible Case Forge instead of returning to an unfinished run", () => {
+    const forging = archiveRun({
+      id: "run-1",
+      status: "waiting_for_player",
+      updatedAt: "2026-08-26T10:00:00.000Z",
+      familyId: "case-family",
+      ordinal: 1,
+    });
+    forging.mysteryForge = {
+      state: "active",
+      completedPasses: 2,
+      totalPasses: 5,
+      progressPercent: 40,
+      message: "Directing performances",
+    };
+    const [family] = groupDebateArchiveSessions([forging]);
+    assert.ok(family);
+    assert.equal(debateArchiveProceedingActionLabel(family), "Open Case Forge");
+  });
+
+  it("restores run language once Case Forge is no longer present", () => {
+    const playable = archiveRun({
+      id: "run-2",
+      status: "waiting_for_player",
+      updatedAt: "2026-08-26T10:00:00.000Z",
+      familyId: "case-family",
+      ordinal: 2,
+    });
+    const [family] = groupDebateArchiveSessions([playable]);
+    assert.ok(family);
+    assert.equal(debateArchiveProceedingActionLabel(family), "Return to Run 2");
   });
 
   it("exposes nested Run actions and the same-mystery confirmation accessibly", () => {

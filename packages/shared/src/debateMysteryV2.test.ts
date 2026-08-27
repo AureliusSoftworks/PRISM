@@ -13,6 +13,7 @@ import {
   emptyDebateMysteryRequirementsV2,
   normalizeDebateMysteryFormatStateV2,
   normalizeDebateMysteryTalkSubjectV2,
+  normalizeDebateMysteryV2ForgeProgressMessage,
   validateDebateMysteryAudioManifestV1,
   validateDebateMysteryDialogueGraphV2,
   resolveDebateMysteryConfigV2,
@@ -25,6 +26,21 @@ import {
   type DebateMysterySpokenLineV2,
   type DebateMysteryWitnessChapterV2,
 } from "./debateMysteryV2.ts";
+
+test("clamps Case Forge progress copy to its declared authoring budget", () => {
+  assert.equal(
+    normalizeDebateMysteryV2ForgeProgressMessage(
+      "Writing the Case · Witness chapter 1 of 4 · attempt 4 of 3",
+    ),
+    "Writing the Case · Witness chapter 1 of 4 · attempt 3 of 3",
+  );
+  assert.equal(
+    normalizeDebateMysteryV2ForgeProgressMessage(
+      "Writing the Case · Witness chapter 1 of 4 · attempt 2 of 3",
+    ),
+    "Writing the Case · Witness chapter 1 of 4 · attempt 2 of 3",
+  );
+});
 
 test("normalizes a frozen pre-substep Case Forge payload without crashing Archive resume", () => {
   const normalized = normalizeDebateMysteryFormatStateV2({

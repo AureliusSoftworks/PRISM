@@ -1243,48 +1243,142 @@ const SPEECH_TITLE_ABBREVIATION_PATTERN = new RegExp(
   "gu",
 );
 
-export interface SpeechAbbreviationProjectionSegment {
+const SPEECH_CLOCK_TIME_PATTERN =
+  /(?<![\p{L}\p{N}:])(?:1[0-2]|0?[1-9]):[0-5]\d[ \t]*(?:a\.?[ \t]*m\.?|p\.?[ \t]*m\.?)(?![\p{L}\p{N}:])/giu;
+
+const SPEECH_CARDINALS_UNDER_TWENTY = [
+  "zero",
+  "one",
+  "two",
+  "three",
+  "four",
+  "five",
+  "six",
+  "seven",
+  "eight",
+  "nine",
+  "ten",
+  "eleven",
+  "twelve",
+  "thirteen",
+  "fourteen",
+  "fifteen",
+  "sixteen",
+  "seventeen",
+  "eighteen",
+  "nineteen",
+] as const;
+
+const SPEECH_MINUTE_TENS = Object.freeze({
+  20: "twenty",
+  30: "thirty",
+  40: "forty",
+  50: "fifty",
+} as const);
+
+function speechCardinalUnderSixty(value: number): string {
+  if (value < SPEECH_CARDINALS_UNDER_TWENTY.length) {
+    return SPEECH_CARDINALS_UNDER_TWENTY[value]!;
+  }
+  const tens = Math.floor(value / 10) * 10 as keyof typeof SPEECH_MINUTE_TENS;
+  const ones = value % 10;
+  return ones === 0
+    ? SPEECH_MINUTE_TENS[tens]
+    : `${SPEECH_MINUTE_TENS[tens]} ${SPEECH_CARDINALS_UNDER_TWENTY[ones]}`;
+}
+
+function speechClockPeriodPhrase(hour: number, period: "am" | "pm"): string {
+  if (period === "am") {
+    return hour === 12 || hour < 5 ? "at night" : "in the morning";
+  }
+  if (hour === 12 || hour < 5) return "in the afternoon";
+  return hour < 9 ? "in the evening" : "at night";
+}
+
+function speechClockTime(sourceText: string): string {
+  const match = sourceText.match(
+    /^(\d{1,2}):(\d{2})[ \t]*([ap])\.?[ \t]*m\.?$/iu,
+  );
+  if (!match) return sourceText;
+  const hour = Number.parseInt(match[1]!, 10);
+  const minute = Number.parseInt(match[2]!, 10);
+  const period = match[3]!.toLowerCase() === "a" ? "am" : "pm";
+  if (hour === 12 && minute === 0) {
+    return period === "am" ? "midnight" : "noon";
+  }
+  const minuteText = minute === 0
+    ? ""
+    : minute < 10
+      ? ` oh ${speechCardinalUnderSixty(minute)}`
+      : ` ${speechCardinalUnderSixty(minute)}`;
+  return `${speechCardinalUnderSixty(hour)}${minuteText} ${speechClockPeriodPhrase(hour, period)}`;
+}
+
+export interface SpeechTextProjectionSegment {
   /** Private text sent to a voice engine. */
   synthesisText: string;
   /** Corresponding text as authored and displayed. */
   sourceText: string;
 }
 
-export interface SpeechAbbreviationProjection {
+export interface SpeechTextProjection {
   sourceText: string;
   synthesisText: string;
-  segments: readonly SpeechAbbreviationProjectionSegment[];
+  segments: readonly SpeechTextProjectionSegment[];
   changed: boolean;
+}
+
+export type SpeechAbbreviationProjectionSegment = SpeechTextProjectionSegment;
+export type SpeechAbbreviationProjection = SpeechTextProjection;
+
+interface SpeechTextReplacement {
+  start: number;
+  sourceText: string;
+  synthesisText: string;
 }
 
 /**
  * Builds a private, alignment-safe speech projection for common name-led
- * English titles. Callers retain sourceText for captions, transcripts, and
- * stored messages while synthesisText is the only form sent to a voice.
+ * English titles and unambiguous 12-hour clock times. Callers retain
+ * sourceText for captions, transcripts, and stored messages while
+ * synthesisText is the only form sent to a voice.
  *
  * Deliberately avoid broad dictionary substitutions here. In particular,
  * abbreviations such as St. and in. need surrounding semantic context. Exact
  * title case plus a following capitalized name keeps MS., ms., and ordinary
  * prose untouched while covering civilian, professional, civic, and military
  * titles with or without a period.
+ *
+ * Exact authored times stay exact: 10:09 AM becomes "ten oh nine in the
+ * morning." Approximate case testimony must be authored approximately rather
+ * than introduced here, because changing precision could change a mystery.
  */
-export function projectSpeechAbbreviations(
-  text: string,
-): SpeechAbbreviationProjection {
-  const segments: SpeechAbbreviationProjectionSegment[] = [];
+export function projectSpeechText(text: string): SpeechTextProjection {
+  const replacements: SpeechTextReplacement[] = [
+    ...[...text.matchAll(SPEECH_TITLE_ABBREVIATION_PATTERN)].map((match) => ({
+      start: match.index,
+      sourceText: match[0],
+      synthesisText:
+        SPEECH_TITLE_ABBREVIATIONS[
+          match[1] as keyof typeof SPEECH_TITLE_ABBREVIATIONS
+        ],
+    })),
+    ...[...text.matchAll(SPEECH_CLOCK_TIME_PATTERN)].map((match) => ({
+      start: match.index,
+      sourceText: match[0],
+      synthesisText: speechClockTime(match[0]),
+    })),
+  ].sort((left, right) => left.start - right.start);
+  const segments: SpeechTextProjectionSegment[] = [];
   let cursor = 0;
-  for (const match of text.matchAll(SPEECH_TITLE_ABBREVIATION_PATTERN)) {
-    const start = match.index;
+  for (const replacement of replacements) {
+    const { start, sourceText, synthesisText } = replacement;
+    if (start < cursor) continue;
     if (start > cursor) {
       const sourceText = text.slice(cursor, start);
       segments.push({ synthesisText: sourceText, sourceText });
     }
-    const sourceText = match[0];
-    const title = match[1] as keyof typeof SPEECH_TITLE_ABBREVIATIONS;
-    segments.push({
-      synthesisText: SPEECH_TITLE_ABBREVIATIONS[title],
-      sourceText,
-    });
+    segments.push({ synthesisText, sourceText });
     cursor = start + sourceText.length;
   }
   if (cursor < text.length) {
@@ -1305,11 +1399,24 @@ export function projectSpeechAbbreviations(
   };
 }
 
+/** @deprecated Use projectSpeechText for the complete private TTS projection. */
+export function projectSpeechAbbreviations(
+  text: string,
+): SpeechAbbreviationProjection {
+  return projectSpeechText(text);
+}
+
+export function expandSpeechText(text: string): string;
+export function expandSpeechText(text: unknown): unknown;
+export function expandSpeechText(text: unknown): unknown {
+  if (typeof text !== "string") return text;
+  return projectSpeechText(text).synthesisText;
+}
+
 export function expandSpeechAbbreviations(text: string): string;
 export function expandSpeechAbbreviations(text: unknown): unknown;
 export function expandSpeechAbbreviations(text: unknown): unknown {
-  if (typeof text !== "string") return text;
-  return projectSpeechAbbreviations(text).synthesisText;
+  return expandSpeechText(text);
 }
 
 export function applyBotNamePronunciations(
