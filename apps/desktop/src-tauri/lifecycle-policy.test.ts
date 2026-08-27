@@ -8,6 +8,17 @@ const source = readFileSync(
 );
 
 describe("desktop lifecycle policy", () => {
+  it("launches Qdrant from its writable app-data directory", () => {
+    assert.match(
+      source,
+      /let qdrant_work_dir = localai_data_dir\.join\("Qdrant"\);\s*let qdrant_storage_dir = qdrant_work_dir\.join\("storage"\);/u,
+    );
+    assert.match(
+      source,
+      /let mut qdrant_child = Command::new\(&qdrant\)\s*\.current_dir\(&qdrant_work_dir\)\s*\.env\("QDRANT__STORAGE__STORAGE_PATH", qdrant_storage_dir/u,
+    );
+  });
+
   it("registers the single-instance guard before runtime startup", () => {
     const guardRegistration = source.indexOf(
       ".plugin(tauri_plugin_single_instance::init",

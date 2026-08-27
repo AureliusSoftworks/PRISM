@@ -624,7 +624,8 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
         .parent()
         .map(PathBuf::from)
         .unwrap_or_else(|| root.clone());
-    let qdrant_storage_dir = localai_data_dir.join("Qdrant").join("storage");
+    let qdrant_work_dir = localai_data_dir.join("Qdrant");
+    let qdrant_storage_dir = qdrant_work_dir.join("storage");
     fs::create_dir_all(&qdrant_storage_dir)
         .map_err(|error| io_error(format!("Failed to create Qdrant data directory: {error}")))?;
 
@@ -634,6 +635,7 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
     // ── Qdrant ──
     emit_status(app, "qdrant", "starting");
     let mut qdrant_child = Command::new(&qdrant)
+        .current_dir(&qdrant_work_dir)
         .env("QDRANT__STORAGE__STORAGE_PATH", qdrant_storage_dir.to_string_lossy().to_string())
         .env("QDRANT__SERVICE__HOST", "127.0.0.1")
         .stdin(Stdio::null())
