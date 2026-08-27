@@ -47,9 +47,11 @@ import {
 } from "./debateMysteryMusic";
 import {
   debateMysteryDialoguePresentationDismissed,
-  debateMysteryTextBlipShouldPlay,
+  debateMysteryTextBottishShouldStart,
   playDebateMysterySfx,
+  playDebateMysteryTextBottish,
 } from "./debateMysterySfx";
+import { stopBottishVoice } from "./bottishVoice";
 import { mysteryMapOccupantPosition } from "./debateMysteryRoomWalk";
 import {
   debateMysteryV2ExaminationCompletesRoom,
@@ -125,6 +127,7 @@ interface V2SpeechTiming {
 
 interface MysteryDialogueSfxPresentation {
   audible: boolean;
+  delivery: NonNullable<DebateMysteryPublicDialogueEntryV2["delivery"]>;
   fullText: string;
   key: string;
   speakerBotId: string | null;
@@ -489,6 +492,7 @@ function pendingSpeechTiming(text: string): V2SpeechTiming {
 }
 
 function mysteryDialogueSfxPresentation(args: {
+  delivery: NonNullable<DebateMysteryPublicDialogueEntryV2["delivery"]>;
   key: string;
   speakerBotId: string | null;
   speakerKind: DebateMysteryPublicDialogueEntryV2["speakerKind"];
@@ -505,6 +509,7 @@ function mysteryDialogueSfxPresentation(args: {
   );
   return {
     audible: args.timing?.audible === true,
+    delivery: args.delivery,
     fullText: captionText,
     key: args.key,
     speakerBotId: args.speakerBotId,
@@ -1000,6 +1005,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     key: string | null;
     visibleText: string;
   }>({ key: null, visibleText: "" });
+  const dialogueTextBottishKeyRef = useRef<string | null>(null);
   const dialogueGestureFillRef = useRef<{
     bot: boolean;
     key: string | null;
@@ -1406,6 +1412,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const dialogueSfxPresentation = (() => {
     if (caseOpeningDialogue) {
       return mysteryDialogueSfxPresentation({
+        delivery: caseOpeningDialogue.delivery ?? "spoken",
         key: `${caseOpeningDialogue.nodeId}:${caseOpeningDialogue.occurredAt}:${caseOpeningDialogue.lineId ?? "text-only"}`,
         speakerBotId: caseOpeningDialogue.speakerBotId,
         speakerKind: caseOpeningDialogue.speakerKind,
@@ -1416,6 +1423,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     }
     if (state.playPhase === "investigation" && state.roomView === "room" && roomDisplayedDialogue) {
       return mysteryDialogueSfxPresentation({
+        delivery: roomDialogueIsTextOnly ? "text_only" : roomDisplayedDialogue.delivery ?? "spoken",
         key: `${roomDisplayedDialogue.nodeId}:${roomDisplayedDialogue.occurredAt}:${roomDisplayedDialogue.lineId ?? "text-only"}`,
         speakerBotId: roomDisplayedDialogue.speakerBotId,
         speakerKind: roomDisplayedDialogue.speakerKind,
@@ -1427,6 +1435,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     if (state.playPhase !== "trial" || !activeStatement) return null;
     if (displayedDialogue && displayedDialogue.lineId !== activeStatement.lineId) {
       return mysteryDialogueSfxPresentation({
+        delivery: dialogueIsTextOnly ? "text_only" : displayedDialogue.delivery ?? "spoken",
         key: `${displayedDialogue.nodeId}:${displayedDialogue.occurredAt}:${displayedDialogue.lineId ?? "text-only"}`,
         speakerBotId: displayedDialogue.speakerBotId,
         speakerKind: displayedDialogue.speakerKind,
@@ -1436,6 +1445,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       });
     }
     return mysteryDialogueSfxPresentation({
+      delivery: "spoken",
       key: `statement:${activeStatement.statementId}:${activeStatement.version}:${activeStatement.lineId}`,
       speakerBotId: witnessBot?.id ?? null,
       speakerKind: "bot",
@@ -1566,10 +1576,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   }, [dialoguePlaybackIndex, dialoguePlaybackQueue.length]);
 
   const dialogueSfxAudible = dialogueSfxPresentation?.audible;
+  const dialogueSfxDelivery = dialogueSfxPresentation?.delivery;
+  const dialogueSfxFullText = dialogueSfxPresentation?.fullText ?? "";
   const dialogueSfxKey = dialogueSfxPresentation?.key ?? null;
-  const dialogueSfxSpeakerBotId = dialogueSfxPresentation?.speakerBotId ?? null;
-  const dialogueSfxSpeakerKind = dialogueSfxPresentation?.speakerKind;
-  const dialogueSfxSpeakerSeatId = dialogueSfxPresentation?.speakerSeatId ?? null;
   const dialogueSfxStreaming = dialogueSfxPresentation?.streaming;
   const dialogueSfxVisibleText = dialogueSfxPresentation?.visibleText ?? "";
   useEffect(() => {
@@ -1582,37 +1591,65 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         volume: props.audioVolume,
       });
     }
-    const previousVisibleText = previous.key === nextKey ? previous.visibleText : "";
-    if (dialogueSfxSpeakerKind && debateMysteryTextBlipShouldPlay({
-      audible: dialogueSfxAudible === true,
-      previousVisibleText,
-      speakerBotId: dialogueSfxSpeakerBotId,
-      speakerKind: dialogueSfxSpeakerKind,
-      speakerSeatId: dialogueSfxSpeakerSeatId,
-      streaming: dialogueSfxStreaming === true,
-      visibleText: dialogueSfxVisibleText,
-    })) {
-      void playDebateMysterySfx({
-        cue: "dialogue-blip",
-        enabled: props.audioEnabled,
-        volume: props.audioVolume,
-      });
-    }
     dialogueSfxPresentationRef.current = {
       key: nextKey,
       visibleText: dialogueSfxVisibleText,
     };
   }, [
-    dialogueSfxAudible,
     dialogueSfxKey,
-    dialogueSfxSpeakerBotId,
-    dialogueSfxSpeakerKind,
-    dialogueSfxSpeakerSeatId,
-    dialogueSfxStreaming,
     dialogueSfxVisibleText,
     props.audioEnabled,
     props.audioVolume,
   ]);
+
+  useEffect(() => {
+    const startedKey = dialogueTextBottishKeyRef.current;
+    if (
+      startedKey &&
+      (startedKey !== dialogueSfxKey || dialogueSfxDelivery !== "text_only")
+    ) {
+      stopBottishVoice({ preservePreparedMedia: true });
+      dialogueTextBottishKeyRef.current = null;
+    }
+    if (!props.audioEnabled || props.audioVolume <= 0) {
+      if (dialogueTextBottishKeyRef.current) {
+        stopBottishVoice({ preservePreparedMedia: true });
+        dialogueTextBottishKeyRef.current = null;
+      }
+      return;
+    }
+    if (!debateMysteryTextBottishShouldStart({
+      audible: dialogueSfxAudible === true,
+      delivery: dialogueSfxDelivery,
+      key: dialogueSfxKey,
+      startedKey: dialogueTextBottishKeyRef.current,
+      streaming: dialogueSfxStreaming === true,
+      visibleText: dialogueSfxVisibleText,
+    }) || !dialogueSfxKey) return;
+    dialogueTextBottishKeyRef.current = dialogueSfxKey;
+    void playDebateMysteryTextBottish({
+      enabled: true,
+      seed: `${props.session.id}:${dialogueSfxKey}`,
+      text: dialogueSfxFullText,
+      volume: props.audioVolume,
+    });
+  }, [
+    dialogueSfxAudible,
+    dialogueSfxDelivery,
+    dialogueSfxFullText,
+    dialogueSfxKey,
+    dialogueSfxStreaming,
+    dialogueSfxVisibleText,
+    props.audioEnabled,
+    props.audioVolume,
+    props.session.id,
+  ]);
+
+  useEffect(() => () => {
+    if (!dialogueTextBottishKeyRef.current) return;
+    dialogueTextBottishKeyRef.current = null;
+    stopBottishVoice();
+  }, []);
 
   useEffect(() => {
     const beatMs = whodunnitInterrogationBeatMs(interrogationPhase);

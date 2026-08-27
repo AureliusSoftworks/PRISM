@@ -1,3 +1,5 @@
+import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1 } from "@localai/shared";
+import { enqueueBottishVoice } from "./bottishVoice.ts";
 import { routeAudioElementToPrismOutput } from "./replayAudioMasterCapture.ts";
 import {
   debateExhibitImpactForExhibit,
@@ -10,7 +12,6 @@ export type DebateMysterySfxCue =
   | "navigate"
   | "enter"
   | "return"
-  | "dialogue-blip"
   | "dialogue-dismiss"
   | "theory"
   | "evidence"
@@ -28,27 +29,52 @@ export interface DebateMysterySfxVoice {
   url: string;
 }
 
-export const DEBATE_MYSTERY_TEXT_BLIP_CHARACTER_INTERVAL = 3;
+export const DEBATE_MYSTERY_TEXT_BOTTISH_VOLUME_RATIO = 0.28;
 
-export function debateMysteryTextBlipShouldPlay(args: {
+export function debateMysteryTextBottishShouldStart(args: {
   audible: boolean;
-  previousVisibleText: string;
-  speakerBotId?: string | null;
-  speakerKind?: "bot" | "player" | "judge" | "narrator";
-  speakerSeatId?: string | null;
+  delivery?: "spoken" | "text_only" | "anonymous_babble";
+  key: string | null;
+  startedKey: string | null;
   streaming: boolean;
   visibleText: string;
 }): boolean {
-  if (!args.streaming || args.audible) return false;
-  if (args.speakerKind === "bot" || args.speakerKind === "player") return false;
-  if (args.speakerBotId || args.speakerSeatId) return false;
-  if (args.visibleText.length <= args.previousVisibleText.length) return false;
-  const newlyVisibleText = args.visibleText.slice(args.previousVisibleText.length);
-  if (!/\S/u.test(newlyVisibleText)) return false;
-  return (
-    Math.floor(args.visibleText.length / DEBATE_MYSTERY_TEXT_BLIP_CHARACTER_INTERVAL) >
-    Math.floor(args.previousVisibleText.length / DEBATE_MYSTERY_TEXT_BLIP_CHARACTER_INTERVAL)
+  return Boolean(
+    args.key &&
+    args.startedKey !== args.key &&
+    args.delivery === "text_only" &&
+    args.streaming &&
+    !args.audible &&
+    /\S/u.test(args.visibleText),
   );
+}
+
+export function debateMysteryTextBottishDurationMs(text: string): number {
+  return Math.max(1_200, text.length * 34);
+}
+
+export async function playDebateMysteryTextBottish(args: {
+  enabled: boolean;
+  seed: string;
+  text: string;
+  volume: number;
+}): Promise<boolean> {
+  const volume = Math.max(0, Math.min(1, args.volume));
+  if (!args.enabled || volume <= 0 || !args.text.trim()) return false;
+  try {
+    await enqueueBottishVoice(
+      args.text,
+      DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      args.seed,
+      true,
+      volume * DEBATE_MYSTERY_TEXT_BOTTISH_VOLUME_RATIO,
+      undefined,
+      { targetDurationMs: debateMysteryTextBottishDurationMs(args.text) },
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function debateMysteryDialoguePresentationDismissed(
@@ -130,12 +156,6 @@ const SINGLE_VOICE_CUES = {
     playbackRate: 0.92,
     url: "/audio/ui-asmr/panel-close-02.mp3",
   },
-  "dialogue-blip": {
-    delayMs: 0,
-    gain: 0.035,
-    playbackRate: 1.85,
-    url: "/audio/ui-asmr/bot-hover-03.mp3",
-  },
   "dialogue-dismiss": {
     delayMs: 0,
     gain: 0.14,
@@ -191,7 +211,6 @@ export const DEBATE_MYSTERY_SFX_COOLDOWN_MS = {
   navigate: 110,
   enter: 110,
   return: 110,
-  "dialogue-blip": 86,
   // Each visible dialogue handoff is authored as a distinct dismissal.
   "dialogue-dismiss": 0,
   theory: 180,

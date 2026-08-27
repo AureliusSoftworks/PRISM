@@ -81,6 +81,7 @@ import {
   type DebateWhodunnitFormatStateV2,
 } from "@localai/shared";
 import { generateBuiltinEnglishWave, isPlayablePcmWave } from "./builtin-tts.ts";
+import { buildBabbleSpeechText } from "./babble-text.ts";
 import {
   createDebateSession,
   debatePowerPlanForBots,
@@ -667,6 +668,53 @@ function isMysteryV2CompiledCheckpoint(value: unknown): value is MysteryV2Checkp
 
 function sha256(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function mysteryCasekeeperVoiceBotIdV2(
+  config: DebateMysteryResolvedConfigV2,
+  bots: readonly Pick<MysteryV2BotRow, "id">[],
+): string {
+  const available = new Set(bots.map((bot) => bot.id));
+  const preferred = [
+    config.judgeBotId,
+    config.prosecutorBotId,
+    config.rivalDefenseBotId,
+    ...config.suspectBotIds,
+    ...config.jurorBotIds,
+  ].find((botId) => available.has(botId));
+  if (!preferred) throw new Error("The frozen Casekeeper has no bot voice carrier.");
+  return preferred;
+}
+
+function publicMysteryLineDeliveryV2(
+  line: DebateMysterySpokenLineV2,
+  nodeKind?: DebateMysteryDialogueNodeV2["kind"],
+): "spoken" | "text_only" | "anonymous_babble" {
+  if (nodeKind === "examination_result" || line.mode === "text_only") return "text_only";
+  return line.mode === "anonymous_babble" ? "anonymous_babble" : "spoken";
+}
+
+function publicMysteryLineSpeakerBotIdV2(
+  line: DebateMysterySpokenLineV2,
+): string | null {
+  return line.mode === "anonymous_babble" ? null : line.speakerBotId;
+}
+
+function mysteryLineVoiceTreatmentV2(
+  line: DebateMysterySpokenLineV2,
+): "english" | "babble" {
+  return line.mode === "anonymous_babble" ? "babble" : "english";
+}
+
+function mysteryLineSynthesisTextV2(
+  line: DebateMysterySpokenLineV2,
+  privateCase: PrivateMysteryCaseV2,
+): string {
+  if (line.mode !== "anonymous_babble") return line.spokenText;
+  return buildBabbleSpeechText({
+    text: line.spokenText,
+    seed: `${privateCase.config.nonce}:${line.id}:${line.speakerBotId ?? "casekeeper"}`,
+  });
 }
 
 function compact(value: unknown, max: number): string {
@@ -4074,6 +4122,7 @@ function buildMysteryV2Graph(args: {
     reference: { kind: "evidence" as const, id: evidence.id },
     title: evidence.title,
   }));
+  const casekeeperVoiceBotId = mysteryCasekeeperVoiceBotIdV2(args.config, args.bots);
   const authoredSuspects = args.authored.suspects.map((suspect) => {
     const talkTopics = suspect.talkTopics.map((topic) => ({
       ...topic,
@@ -4187,7 +4236,11 @@ function buildMysteryV2Graph(args: {
           : null,
       stableId: lineId,
       performance: resolvedPerformance,
-      materializeFallback: Boolean(speakerBotId && (options.mode ?? "spoken") !== "text_only"),
+      materializeFallback: Boolean(
+        speakerBotId &&
+        (options.mode ?? "spoken") !== "text_only" &&
+        (options.mode ?? "spoken") !== "anonymous_babble"
+      ),
     });
     const line: DebateMysterySpokenLineV2 = {
       id: lineId,
@@ -4213,6 +4266,8 @@ function buildMysteryV2Graph(args: {
     scene: "investigation",
     text: args.authored.publicOpening,
     speakerKind: "narrator",
+    speakerBotId: casekeeperVoiceBotId,
+    mode: "anonymous_babble",
     mutations: { discoverIds: ["briefing:complete"] },
     terminal: "return_to_room",
   });
@@ -4872,6 +4927,7 @@ function buildMysteryV2Graph(args: {
     dialogueHistory: openingNode ? [{
       nodeId: openingNode.id,
       lineId: openingNode.lineId,
+      delivery: "anonymous_babble",
       stageActionText: null,
       visibleText: args.authored.publicOpening,
       speakerSeatId: null,
@@ -5127,6 +5183,10 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
   rawPublicConfig.prosecutorBotId = prosecutorBotId;
 
   const botNameById = new Map(args.botRows.map((bot) => [bot.id, bot.name]));
+  const casekeeperVoiceBotId = mysteryCasekeeperVoiceBotIdV2(
+    privateCase.config,
+    args.botRows,
+  );
   const suspectBySeat = new Map(publicState.suspects.map((suspect) => [suspect.seatId, suspect]));
   const botIdBySeat = new Map(publicState.suspects.map((suspect) => [suspect.seatId, suspect.botId]));
   const subjectRooms = publicState.rooms.map((room) => ({ id: room.id, name: room.name }));
@@ -5164,10 +5224,26 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
     new Map(graph.nodes.map((node) => [node.id, node]));
   const lineById = (): Map<string, DebateMysterySpokenLineV2> =>
     new Map(graph.lines.map((line) => [line.id, line]));
+  const casekeeperOpening = graph.lines.find((line) => line.nodeId === "briefing-opening");
+  if (
+    casekeeperOpening &&
+    (
+      casekeeperOpening.mode !== "anonymous_babble" ||
+      casekeeperOpening.speakerKind !== "narrator" ||
+      casekeeperOpening.speakerBotId !== casekeeperVoiceBotId
+    )
+  ) {
+    casekeeperOpening.mode = "anonymous_babble";
+    casekeeperOpening.speakerKind = "narrator";
+    casekeeperOpening.speakerBotId = casekeeperVoiceBotId;
+    changed = true;
+  }
   const aliasesFor = (line: DebateMysterySpokenLineV2): string[] => {
     const node = nodeById().get(line.nodeId);
     const seatName = node?.speakerSeatId ? suspectBySeat.get(node.speakerSeatId)?.name : null;
-    const botName = line.speakerBotId ? botNameById.get(line.speakerBotId) : null;
+    const botName = line.mode !== "anonymous_babble" && line.speakerBotId
+      ? botNameById.get(line.speakerBotId)
+      : null;
     return [seatName, botName].filter((name): name is string => Boolean(name));
   };
   const materializeLine = (line: DebateMysterySpokenLineV2): void => {
@@ -5177,7 +5253,11 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
       speakerNames: aliasesFor(line),
       stableId: line.id,
       performance: line.performance,
-      materializeFallback: Boolean(line.speakerBotId && line.mode !== "text_only"),
+      materializeFallback: Boolean(
+        line.speakerBotId &&
+        line.mode !== "text_only" &&
+        line.mode !== "anonymous_babble"
+      ),
     });
     if (
       line.visibleText !== delivery.spokenText ||
@@ -5962,10 +6042,12 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
       ? {
           ...entry,
           nodeId: node.id,
+          delivery: publicMysteryLineDeliveryV2(line, node.kind),
           visibleText: line.visibleText,
           stageActionText: line.stageActionText,
           speakerSeatId: node.speakerSeatId,
-          speakerBotId: line.speakerBotId,
+          speakerBotId: publicMysteryLineSpeakerBotIdV2(line),
+          speakerKind: line.speakerKind,
         }
       : entry;
   });
@@ -6667,6 +6749,7 @@ function debateMysteryPlayContractHashV2(args: {
       return {
         lineId,
         spokenText: line.spokenText,
+        voiceTreatment: mysteryLineVoiceTreatmentV2(line),
         stageActionText: line.stageActionText,
         speakerBotId: line.speakerBotId,
         performance: line.performance,
@@ -6708,8 +6791,12 @@ function audioManifestMatchesCurrentContractV2(args: {
     const entry = entryByLine.get(lineId);
     if (!line || !entry || !audioFileValid(entry)) return false;
     const profile = audioProfileForLine(line, botById, prismVoiceProfile);
+    const voiceTreatment = mysteryLineVoiceTreatmentV2(line);
+    const synthesisTextHash = sha256(mysteryLineSynthesisTextV2(line, args.privateCase));
     return entry.textHash === sha256(line.spokenText) &&
+      (entry.synthesisTextHash ?? entry.textHash) === synthesisTextHash &&
       entry.botId === line.speakerBotId &&
+      (entry.voiceTreatment ?? "english") === voiceTreatment &&
       entry.voiceProfileHash === sha256(JSON.stringify(profile)) &&
       entry.performanceDirectionHash === sha256(JSON.stringify(line.performance));
   });
@@ -6754,7 +6841,7 @@ async function prepareLocalAudioPackV2(args: {
   const scriptHash = sha256(
     reachableLineIds.map((id) => {
       const line = lineById.get(id)!;
-      return `${line.id}\u0000${line.spokenText}\u0000${JSON.stringify(line.performance)}`;
+      return `${line.id}\u0000${mysteryLineVoiceTreatmentV2(line)}\u0000${mysteryLineSynthesisTextV2(line, args.privateCase)}\u0000${JSON.stringify(line.performance)}`;
     }).join("\u0001"),
   );
   const previous = loadAudioManifest(args.db, args.userId, args.sessionId);
@@ -6787,12 +6874,17 @@ async function prepareLocalAudioPackV2(args: {
     const line = lineById.get(lineId);
     if (!line) throw new Error(`Reachable line ${lineId} disappeared before audio preparation.`);
     const profile = audioProfileForLine(line, botById, prismVoiceProfile);
+    const voiceTreatment = mysteryLineVoiceTreatmentV2(line);
+    const synthesisText = mysteryLineSynthesisTextV2(line, args.privateCase);
     const textHash = sha256(line.spokenText);
+    const synthesisTextHash = sha256(synthesisText);
     const voiceProfileHash = sha256(JSON.stringify(profile));
     const performanceDirectionHash = sha256(JSON.stringify(line.performance));
     const cacheKey = sha256(JSON.stringify({
       textHash,
+      synthesisTextHash,
       botId: line.speakerBotId,
+      voiceTreatment,
       voiceProfileHash,
       model: PRISM_INSTANT_VOICE_MODEL_ID,
       performanceDirectionHash,
@@ -6801,7 +6893,9 @@ async function prepareLocalAudioPackV2(args: {
     if (
       reusable &&
       reusable.textHash === textHash &&
+      (reusable.synthesisTextHash ?? reusable.textHash) === synthesisTextHash &&
       reusable.botId === line.speakerBotId &&
+      (reusable.voiceTreatment ?? "english") === voiceTreatment &&
       reusable.voiceProfileHash === voiceProfileHash &&
       reusable.performanceDirectionHash === performanceDirectionHash
     ) {
@@ -6844,7 +6938,7 @@ async function prepareLocalAudioPackV2(args: {
         ).run(cacheKey, args.userId);
       }
       const wave = await (args.generateWave ?? generateBuiltinEnglishWave)({
-        text: line.spokenText,
+        text: synthesisText,
         profile,
         allowOperatingSystemVoices: false,
         deliveryMood: line.performance.mood,
@@ -6870,7 +6964,9 @@ async function prepareLocalAudioPackV2(args: {
     const entry: DebateMysteryAudioManifestEntryV1 = {
       lineId,
       textHash,
+      synthesisTextHash,
       botId: line.speakerBotId,
+      voiceTreatment,
       voiceProfileHash,
       performanceDirectionHash,
       clipPath,
@@ -8339,13 +8435,11 @@ function executeDialogueNodeV2(args: {
           // Examination is a written observation, never a performed line. Keep
           // this true for frozen V2 graphs too, without regenerating their packs.
           lineId: node.kind === "examination_result" ? null : line.id,
-          delivery: node.kind === "examination_result" || line.mode === "text_only"
-            ? "text_only"
-            : "spoken",
+          delivery: publicMysteryLineDeliveryV2(line, node.kind),
           stageActionText: line.stageActionText,
           visibleText: line.visibleText,
           speakerSeatId: node.speakerSeatId,
-          speakerBotId: line.speakerBotId,
+          speakerBotId: publicMysteryLineSpeakerBotIdV2(line),
           speakerKind: line.speakerKind,
           ...(node.intendedRecipientSeatId
             ? { intendedRecipientSeatId: node.intendedRecipientSeatId }

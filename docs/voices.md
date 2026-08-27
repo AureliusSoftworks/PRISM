@@ -220,6 +220,10 @@ directions.
 - Bottish is Prism's original procedural robot language. It does not call the
   synthesis API. Its deterministic beeps, chirps, and fitted timing are restored
   as the complete voice rather than mixed under synthesized speech.
+- Whodunnit uses those modes as authored story information: an anonymous
+  Casekeeper line is prepared as Babble with its frozen bot carrier kept private,
+  while text-only observations use client-procedural Bottish. Identified spoken
+  characters continue through their ordinary configured voice.
 - Local pitch, pace, lilt, brightness, resonance, Open–Nasal, and Light–Chest
   shape local English, Babble, and Bottish without changing the Premium Feel.
   Premium keeps its own pitch, pace, and lilt. Shared mood performance, effect,

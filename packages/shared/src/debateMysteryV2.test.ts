@@ -393,6 +393,28 @@ test("V2 graph validation proves every suspect has a reachable statement-level p
   assert.equal(result.reachableSpokenLineIds.length, graph.lines.length - 2);
 });
 
+test("V2 graph validation requires a private bot carrier for anonymous Babble", () => {
+  const graph = validGraph();
+  const anonymous = graph.lines[0]!;
+  anonymous.mode = "anonymous_babble";
+  anonymous.speakerKind = "narrator";
+  const valid = validateDebateMysteryDialogueGraphV2({
+    graph,
+    suspectSeatIds: ["seat-1", "seat-2"],
+    recordReferences: validationRecordReferences,
+  });
+  assert.equal(valid.valid, true, valid.errors.join("\n"));
+
+  anonymous.speakerBotId = null;
+  const missingCarrier = validateDebateMysteryDialogueGraphV2({
+    graph,
+    suspectSeatIds: ["seat-1", "seat-2"],
+    recordReferences: validationRecordReferences,
+  });
+  assert.equal(missingCarrier.valid, false);
+  assert.ok(missingCarrier.errors.some((error) => error.includes("no private bot carrier")));
+});
+
 test("V2 graph validation permits one automated Spectator prosecution option only", () => {
   const graph = validGraph();
   const prompt = node("spectator-choice-prompt", "prosecution_choice", {

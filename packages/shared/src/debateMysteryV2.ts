@@ -16,7 +16,7 @@ import {
 
 export const DEBATE_MYSTERY_V2_SCHEMA_VERSION = 2 as const;
 export const DEBATE_MYSTERY_AUDIO_MANIFEST_VERSION = 1 as const;
-export const DEBATE_MYSTERY_PLAY_READINESS_VERSION = 4 as const;
+export const DEBATE_MYSTERY_PLAY_READINESS_VERSION = 5 as const;
 export const DEBATE_MYSTERY_V2_JUROR_COUNT = 4 as const;
 
 export interface DebateMysteryAssetSynthesisV2 {
@@ -161,7 +161,13 @@ export type DebateMysteryPlayPhaseV2 =
   | "theory"
   | "trial"
   | "verdict";
-export type DebateMysteryLineModeV2 = "spoken" | "text_only" | "player_selected";
+export type DebateMysteryLineModeV2 =
+  | "spoken"
+  | "text_only"
+  | "player_selected"
+  /** A real frozen bot performs this line through Babble, while its identity
+   * remains absent from the public dialogue projection. */
+  | "anonymous_babble";
 export type DebateMysteryRecordKindV2 = "evidence" | "testimony";
 export type DebateMysteryCourtCalloutV2 =
   | "hold_it"
@@ -286,6 +292,8 @@ export interface DebateMysterySpokenLineV2 {
   id: string;
   nodeId: string;
   speakerKind: "bot" | "judge" | "player" | "narrator";
+  /** For anonymous_babble this private graph field owns the real carrier voice;
+   * public dialogue entries must project it as null. */
   speakerBotId: string | null;
   stageActionText: string | null;
   visibleText: string;
@@ -436,7 +444,11 @@ export interface DebateMysteryCompilationStatusV2 {
 export interface DebateMysteryAudioManifestEntryV1 {
   lineId: string;
   textHash: string;
+  /** Hash of the performed text; differs from textHash for Babble carriers. */
+  synthesisTextHash?: string;
   botId: string | null;
+  /** Additive for compatibility: legacy entries without this field are English. */
+  voiceTreatment?: "english" | "babble";
   voiceProfileHash: string;
   performanceDirectionHash: string;
   clipPath: string;
@@ -551,7 +563,7 @@ export interface DebateMysteryPublicDialogueEntryV2 {
   lineId: string | null;
   /** Text-only delivery is intentionally silent even when an older frozen case
    * still has a local audio clip for the authored line. */
-  delivery?: "spoken" | "text_only";
+  delivery?: "spoken" | "text_only" | "anonymous_babble";
   stageActionText?: string | null;
   visibleText: string;
   speakerSeatId: string | null;
@@ -1049,8 +1061,15 @@ export function validateDebateMysteryDialogueGraphV2(args: {
     if (!line.visibleText.trim()) errors.push(`Line ${line.id} has no visible text.`);
     if (line.mode !== "text_only" && !line.spokenText.trim()) errors.push(`Spoken line ${line.id} has no performance text.`);
     if (
+      line.mode === "anonymous_babble" &&
+      (line.speakerKind !== "narrator" || !line.speakerBotId)
+    ) {
+      errors.push(`Anonymous Babble line ${line.id} has no private bot carrier.`);
+    }
+    if (
       args.prosecutorBotId &&
       line.mode !== "text_only" &&
+      line.mode !== "anonymous_babble" &&
       line.speakerBotId &&
       !line.stageActionText?.trim()
     ) {

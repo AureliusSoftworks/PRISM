@@ -3,61 +3,60 @@ import { statSync } from "node:fs";
 import test from "node:test";
 
 import {
+  DEBATE_MYSTERY_TEXT_BOTTISH_VOLUME_RATIO,
   DEBATE_MYSTERY_DESK_ITEM_PICKUP_VOLUME_RATIO,
   DEBATE_MYSTERY_EVIDENCE_CHIME,
   DEBATE_MYSTERY_SFX_COOLDOWN_MS,
-  DEBATE_MYSTERY_TEXT_BLIP_CHARACTER_INTERVAL,
   debateMysteryDialoguePresentationDismissed,
   debateMysteryDeskItemSfxPlan,
   debateMysterySfxCueForAction,
   debateMysterySfxVoices,
-  debateMysteryTextBlipShouldPlay,
+  debateMysteryTextBottishDurationMs,
+  debateMysteryTextBottishShouldStart,
   playDebateMysteryDeskItemSfx,
   playDebateMysterySfx,
 } from "./debateMysterySfx.ts";
 
-test("blips only cadence-limited, silent non-character dialogue", () => {
-  assert.equal(DEBATE_MYSTERY_TEXT_BLIP_CHARACTER_INTERVAL, 3);
+test("starts Bottish once for streaming text-only delivery and never for anonymous Babble", () => {
   const narratorBeat = {
     audible: false,
-    previousVisibleText: "The",
-    speakerBotId: null,
-    speakerKind: "narrator" as const,
-    speakerSeatId: null,
+    delivery: "text_only" as const,
+    key: "observation:1",
+    startedKey: null,
     streaming: true,
     visibleText: "The kn",
   };
-  assert.equal(debateMysteryTextBlipShouldPlay(narratorBeat), true);
+  assert.equal(debateMysteryTextBottishShouldStart(narratorBeat), true);
   assert.equal(
-    debateMysteryTextBlipShouldPlay({ ...narratorBeat, visibleText: "The " }),
+    debateMysteryTextBottishShouldStart({ ...narratorBeat, visibleText: "   " }),
     false,
-    "whitespace-only progress stays quiet",
+    "whitespace-only text stays quiet",
   );
   assert.equal(
-    debateMysteryTextBlipShouldPlay({ ...narratorBeat, visibleText: "The k" }),
+    debateMysteryTextBottishShouldStart({ ...narratorBeat, startedKey: narratorBeat.key }),
     false,
-    "progress inside the same cadence bucket stays quiet",
+    "one text presentation starts only once",
   );
   assert.equal(
-    debateMysteryTextBlipShouldPlay({ ...narratorBeat, speakerKind: "bot" }),
+    debateMysteryTextBottishShouldStart({ ...narratorBeat, delivery: "anonymous_babble" }),
     false,
+    "anonymous speakers own a prepared Babble carrier instead",
   );
   assert.equal(
-    debateMysteryTextBlipShouldPlay({ ...narratorBeat, speakerKind: "player" }),
-    false,
-  );
-  assert.equal(
-    debateMysteryTextBlipShouldPlay({ ...narratorBeat, speakerBotId: "bot-1" }),
+    debateMysteryTextBottishShouldStart({ ...narratorBeat, delivery: "spoken" }),
     false,
   );
   assert.equal(
-    debateMysteryTextBlipShouldPlay({ ...narratorBeat, audible: true }),
+    debateMysteryTextBottishShouldStart({ ...narratorBeat, audible: true }),
     false,
   );
   assert.equal(
-    debateMysteryTextBlipShouldPlay({ ...narratorBeat, streaming: false }),
+    debateMysteryTextBottishShouldStart({ ...narratorBeat, streaming: false }),
     false,
   );
+  assert.equal(DEBATE_MYSTERY_TEXT_BOTTISH_VOLUME_RATIO, 0.28);
+  assert.equal(debateMysteryTextBottishDurationMs("short"), 1_200);
+  assert.equal(debateMysteryTextBottishDurationMs("x".repeat(100)), 3_400);
 });
 
 test("dismisses every completed dialogue presentation without treating its first mount as a close", () => {
@@ -66,7 +65,7 @@ test("dismisses every completed dialogue presentation without treating its first
   assert.equal(debateMysteryDialoguePresentationDismissed("opening", "observation"), true);
   assert.equal(debateMysteryDialoguePresentationDismissed("observation", null), true);
   assert.equal(DEBATE_MYSTERY_SFX_COOLDOWN_MS["dialogue-dismiss"], 0);
-  assert.ok(DEBATE_MYSTERY_SFX_COOLDOWN_MS["dialogue-blip"] > 0);
+  assert.equal("dialogue-blip" in DEBATE_MYSTERY_SFX_COOLDOWN_MS, false);
 });
 
 test("builds the evidence discovery cue as a restrained descending chime", () => {
@@ -137,7 +136,6 @@ test("gives newly acquired evidence priority over ordinary action navigation", (
   );
   assert.equal(debateMysterySfxVoices("evidence").length, 3);
   assert.equal(debateMysterySfxVoices("map").length, 1);
-  assert.equal(debateMysterySfxVoices("dialogue-blip").length, 1);
   assert.equal(debateMysterySfxVoices("dialogue-dismiss").length, 1);
   assert.equal(debateMysterySfxVoices("paper").length, 1);
   assert.equal(debateMysterySfxVoices("paper-pickup").length, 1);

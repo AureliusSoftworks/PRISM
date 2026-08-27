@@ -19,6 +19,7 @@ import {
   reasoningGenerationBudgetMs,
 } from "@localai/shared";
 import { initializeDatabase } from "../db.ts";
+import { buildBabbleSpeechText } from "../babble-text.ts";
 import { exportUserSnapshot, importUserSnapshot } from "../backup.ts";
 import {
   activeDebateMysteryCompilationV2,
@@ -2575,9 +2576,17 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       baseVoiceId: "voice-5" as const,
       pitch: 0.45,
     };
+    const casekeeperVoiceProfile = {
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      baseVoiceId: "voice-8" as const,
+      pitch: -0.3,
+    };
     db.prepare(
       "UPDATE users SET prism_default_bot_audio_voice_profile = ? WHERE id = 'user-1'",
     ).run(JSON.stringify(prismVoiceProfile));
+    db.prepare(
+      "UPDATE bots SET audio_voice_profile_override = ? WHERE user_id = 'user-1' AND id = 'bot-5'",
+    ).run(JSON.stringify(casekeeperVoiceProfile));
     const preparedProfilesByText = new Map<string, { baseVoiceId: string }>();
     let session = await createDebateMysterySessionV2(
       db,
@@ -2646,6 +2655,30 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     }
     const callsAfterCompile = provider.calls;
     const { privateCase, graph } = getDebateMysteryCaseV2(db, "user-1", session.id);
+    const casekeeperLine = graph.lines.find((line) => line.nodeId === "briefing-opening");
+    const publicCasekeeperLine = state.dialogueHistory.find((line) => line.nodeId === "briefing-opening");
+    assert.equal(casekeeperLine?.mode, "anonymous_babble");
+    assert.equal(casekeeperLine?.speakerKind, "narrator");
+    assert.equal(casekeeperLine?.speakerBotId, "bot-5");
+    assert.equal(publicCasekeeperLine?.delivery, "anonymous_babble");
+    assert.equal(publicCasekeeperLine?.speakerBotId, null, "the Babble carrier stays server-private");
+    const casekeeperBabbleText = buildBabbleSpeechText({
+      text: casekeeperLine!.spokenText,
+      seed: `${privateCase.config.nonce}:${casekeeperLine!.id}:${casekeeperLine!.speakerBotId}`,
+    });
+    assert.notEqual(casekeeperBabbleText, casekeeperLine?.spokenText);
+    assert.equal(preparedProfilesByText.has(casekeeperLine!.spokenText), false);
+    assert.equal(
+      preparedProfilesByText.get(casekeeperBabbleText)?.baseVoiceId,
+      casekeeperVoiceProfile.baseVoiceId,
+      "anonymous Babble retains the frozen carrier bot's authored voice",
+    );
+    assert.equal(
+      provider.personaDialogueRequests.flatMap((request) => request.lines)
+        .some((line) => line.lineId === casekeeperLine?.id),
+      false,
+      "anonymous Babble must not expose its carrier to persona text polishing",
+    );
     const presentationGate = graph.presentationGates?.[0];
     assert.ok(presentationGate, "a case with reachable evidence must compile a meaningful Present gate");
     assert.equal(presentationGate.requiredForProgression, true);
