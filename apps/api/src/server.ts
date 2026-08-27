@@ -9336,8 +9336,9 @@ async function reviewDebateMysteryAssetWithVision(args: {
   const content = args.kind === "room"
     ? [
         `Compare image 1, the frozen annotated source template, with image 2, the generated ${args.requestedSubject} room edit.`,
-        "Approve only if image 2 is one coherent empty interior and preserves image 1's camera, floor line, major architectural divisions, and the broad spatial regions marked by its interaction overlays.",
+        "Approve only if image 2 is one coherent, unoccupied furnished interior and preserves image 1's camera, floor line, major architectural divisions, and the broad spatial regions marked by its interaction overlays.",
         "The source overlays are annotations rather than furniture. Image 2 must remove those overlays while keeping their underlying spatial layout usable.",
+        "Ordinary room-appropriate furniture, plants, tableware, books, art, and decorative objects are welcome. Reject only a visually isolated object that reads as case evidence or a clue, not normal environmental dressing.",
         "Image 2 must contain no people, human bodies, evidence objects, clues, unrequested gore, readable text, captions, logos, borders, or UI.",
         "Reject any visible electric-magenta matte or obvious template annotation.",
       ].join(" ")
@@ -9642,11 +9643,14 @@ async function prepareDebateMysteryV2RoomAssets(
               userId: args.userId,
               title: `${room.name} room`,
               prompt: [
-                `Edit this exact annotated room template into an empty ${room.name} interior in the same mansion.`,
+                `Edit this exact annotated room template into an unoccupied, furnished ${room.name} interior in the same mansion.`,
                 args.houseStyle.promptContract,
                 "Preserve the 1536×1024 dimensions, room geometry, camera, major architectural divisions, and broad interaction anchors.",
                 "Remove every annotation shape. Do not add electric magenta, people, human figures, bodies, evidence, clues, weapons, blood, gore, readable text, signs, captions, logos, borders, or UI.",
                 "This is presentation-only atmosphere. Do not imply any case fact.",
+                ...(attempt === 2
+                  ? ["Second-pass repair: keep the composition clean and navigable while retaining convincing room-specific furnishings and environmental character."]
+                  : []),
               ].join(" "),
               sourceImageBytes: templateBytes,
               apiKey,

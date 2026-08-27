@@ -4096,6 +4096,8 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.match(synthesis, /sourceImageBytes: templateBytes/u);
     assert.match(synthesis, /sourceBytes: templateBytes/u);
     assert.match(synthesis, /size: "1536x1024"/u);
+    assert.match(synthesis, /unoccupied, furnished/u);
+    assert.match(serverSource, /Ordinary room-appropriate furniture/u);
     assert.match(synthesis, /people, human figures, bodies, evidence, clues, weapons, blood, gore, readable text/u);
     assert.doesNotMatch(synthesis, /generateAndPersistStandaloneImageAsset/u);
     assert.match(serverSource, /const MYSTERY_ASSET_ATTEMPT_TIMEOUT_MS = 10 \* 60_000/u);
