@@ -2419,6 +2419,36 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     );
     CREATE INDEX IF NOT EXISTS idx_debate_mystery_mansion_bundle_assets_image
       ON debate_mystery_mansion_bundle_assets(user_id, image_id);
+    CREATE TABLE IF NOT EXISTS debate_mystery_mansion_assets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      ciphertext BLOB NOT NULL,
+      cipher_iv BLOB NOT NULL,
+      cipher_tag BLOB NOT NULL,
+      sha256 TEXT NOT NULL,
+      byte_size INTEGER NOT NULL CHECK(byte_size > 0),
+      mime_type TEXT NOT NULL CHECK(mime_type IN ('image/png', 'image/webp', 'audio/mpeg')),
+      provider TEXT,
+      model TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(user_id, sha256),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS debate_mystery_mansion_asset_refs (
+      bundle_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      asset_id TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('room', 'prop', 'music', 'presentation')),
+      logical_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(bundle_id, role, logical_id),
+      FOREIGN KEY(bundle_id) REFERENCES debate_mystery_mansion_bundles(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(asset_id) REFERENCES debate_mystery_mansion_assets(id) ON DELETE RESTRICT
+    );
+    CREATE INDEX IF NOT EXISTS idx_debate_mystery_mansion_asset_refs_asset
+      ON debate_mystery_mansion_asset_refs(user_id, asset_id);
     CREATE TABLE IF NOT EXISTS debate_mystery_audio_manifests (
       session_id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,

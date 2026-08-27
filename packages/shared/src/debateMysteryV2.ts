@@ -74,6 +74,23 @@ export interface DebateMysteryMansionBundleRoomV1 {
   bundledAssetPath: string | null;
 }
 
+export type DebateMysteryMansionAssetRoleV1 =
+  | "room"
+  | "prop"
+  | "music"
+  | "presentation";
+
+/** Protected aggregate-owned bytes. `logicalId` is presentation-only: prop
+ * ids are anonymous and never preserve their source evidence identity. */
+export interface DebateMysteryMansionAssetV1 {
+  id: string;
+  role: DebateMysteryMansionAssetRoleV1;
+  logicalId: string;
+  mimeType: "image/png" | "image/webp" | "audio/mpeg";
+  sha256: string;
+  byteLength: number;
+}
+
 export interface DebateMysteryMansionBundleSummaryV1 {
   version: 1;
   id: string;
@@ -84,6 +101,8 @@ export interface DebateMysteryMansionBundleSummaryV1 {
   suspectCount: number;
   houseStyle: DebateMysteryHouseStyleV2;
   rooms: DebateMysteryMansionBundleRoomV1[];
+  /** Absent only on pre-aggregate API snapshots. */
+  assets?: DebateMysteryMansionAssetV1[];
   createdAt: string;
   updatedAt: string;
 }
