@@ -556,7 +556,7 @@ describe("Debate experience", () => {
       /const checkRoles = async \(\): Promise<void> => \{[\s\S]{0,900}resolveDebateSurpriseCast\([\s\S]{0,700}setCast\(resolvedCast\)/u,
     );
     assert.match(source, /every unselected seat rests on Surprise me/u);
-    assert.match(source, /: !castReady\)/u);
+    assert.match(source, /if \(!castReady\) return;/u);
     assert.match(source, /leave seat on Surprise me/u);
   });
 
@@ -2089,9 +2089,11 @@ describe("Debate experience", () => {
       archiveRows,
       /setExpandedArchiveSessionId\(\(current\) =>[\s\S]{0,140}current === group\.key \? null : group\.key/u,
     );
-    assert.match(archiveRows, /\? "Start debate"/u);
-    assert.match(archiveRows, /\? "Resume debate"/u);
-    assert.match(archiveRows, /\? "Watch replay"/u);
+    assert.match(
+      archiveRows,
+      /const proceedingActionLabel = debateArchiveProceedingActionLabel\(group\)/u,
+    );
+    assert.match(archiveRows, /\{proceedingActionLabel\}/u);
     assert.match(
       archiveRows,
       /const canRestartArchivedProceeding =[\s\S]{0,180}session\.status === "waiting_for_player"/u,

@@ -121,6 +121,40 @@ describe("Whodunnit V2 Archive families", () => {
     assert.equal(debateArchiveProceedingActionLabel(family), "Return to Run 2");
   });
 
+  it("keeps flat Debate Start, Resume, and Replay labels at the helper boundary", () => {
+    const deferred = {
+      ...archiveRun({
+        id: "deferred",
+        status: "waiting_for_player",
+        updatedAt: "2026-08-26T10:00:00.000Z",
+        version: 1,
+      }),
+      format: "forum" as const,
+      awaitingDeferredStart: true,
+      mysteryVersion: undefined,
+    };
+    const paused = {
+      ...deferred,
+      id: "paused",
+      status: "paused" as const,
+      awaitingDeferredStart: false,
+    };
+    const completed = {
+      ...deferred,
+      id: "completed",
+      status: "completed" as const,
+      awaitingDeferredStart: false,
+    };
+
+    const [deferredGroup] = groupDebateArchiveSessions([deferred]);
+    const [pausedGroup] = groupDebateArchiveSessions([paused]);
+    const [completedGroup] = groupDebateArchiveSessions([completed]);
+    assert.ok(deferredGroup && pausedGroup && completedGroup);
+    assert.equal(debateArchiveProceedingActionLabel(deferredGroup), "Start debate");
+    assert.equal(debateArchiveProceedingActionLabel(pausedGroup), "Resume debate");
+    assert.equal(debateArchiveProceedingActionLabel(completedGroup), "Watch replay");
+  });
+
   it("exposes nested Run actions and the same-mystery confirmation accessibly", () => {
     const source = readFileSync(new URL("./DebateExperience.tsx", import.meta.url), "utf8");
     assert.ok(source.includes('aria-label={`Open Run ${ordinal} of ${session.title}`}'));
