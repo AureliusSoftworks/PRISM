@@ -324,6 +324,7 @@ import {
 import {
   getDebateMysterySealedAssetRefV1,
   getRevealedDebateMysteryAssetFileV1,
+  requeueRetryableDebateMysteryAssetFallbacksV1,
   saveRevealedDebateMysteryAssetV1,
   sealDebateMysteryAssetBytesV1,
   setDebateMysteryAssetFallbackV1,
@@ -8512,7 +8513,8 @@ function resolveTypedAssetGenerationSelection(
     saved &&
     (saved.provider === "local" || saved.provider === "openai") &&
     saved.model.trim() &&
-    !isDisabledModelChoice(saved.model)
+    !isDisabledModelChoice(saved.model) &&
+    (!requestedProvider || saved.provider === requestedProvider)
   ) {
     return { provider: saved.provider, model: saved.model.trim() };
   }
@@ -9282,7 +9284,17 @@ const MYSTERY_ASSET_REVIEW_SCHEMA = {
   },
 } as const;
 
-const MYSTERY_ASSET_ATTEMPT_TIMEOUT_MS = 120_000;
+// GPT Image 2 high-quality edits routinely take several minutes. Keep the
+// boundary below the global 15-minute image-job wall while allowing a real
+// provider response instead of deterministically aborting healthy work.
+const MYSTERY_ASSET_ATTEMPT_TIMEOUT_MS = 10 * 60_000;
+
+function spoilerSafeMysteryAssetFailure(error: unknown): string {
+  return (error instanceof Error ? error.message : "generation failed")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 500) || "generation failed";
+}
 
 async function runMysteryAssetAttempt<T>(
   outerSignal: AbortSignal,
@@ -9324,7 +9336,8 @@ async function reviewDebateMysteryAssetWithVision(args: {
   const content = args.kind === "room"
     ? [
         `Compare image 1, the frozen annotated source template, with image 2, the generated ${args.requestedSubject} room edit.`,
-        "Approve only if image 2 is one coherent empty interior and preserves image 1's camera, floor line, major architectural divisions, furniture silhouettes, and broad interaction anchors.",
+        "Approve only if image 2 is one coherent empty interior and preserves image 1's camera, floor line, major architectural divisions, and the broad spatial regions marked by its interaction overlays.",
+        "The source overlays are annotations rather than furniture. Image 2 must remove those overlays while keeping their underlying spatial layout usable.",
         "Image 2 must contain no people, human bodies, evidence objects, clues, unrequested gore, readable text, captions, logos, borders, or UI.",
         "Reject any visible electric-magenta matte or obvious template annotation.",
       ].join(" ")
@@ -9452,7 +9465,7 @@ async function prepareDebateMysteryV2EvidenceAssets(
   const selection = resolveTypedAssetGenerationSelection(
     args.userId,
     "debate_exhibit",
-    {},
+    { provider: "openai" },
   );
   const online =
     session.responseMode !== "local" && !userBlocksOnlineCapabilities(user);
@@ -9521,7 +9534,11 @@ async function prepareDebateMysteryV2EvidenceAssets(
               signal: attemptSignal,
             });
             if (!review.approved) {
-              throw new Error(review.reasons.join("; ") || "Vision review rejected the exhibit.");
+              throw new Error(
+                `Vision review rejected the exhibit: ${
+                  review.reasons.join("; ") || "no reason supplied"
+                }`,
+              );
             }
             return sealDebateMysteryAssetBytesV1(db, userKey, {
               userId: args.userId,
@@ -9536,7 +9553,14 @@ async function prepareDebateMysteryV2EvidenceAssets(
           });
         } catch (error) {
           if (signal.aborted) throw error;
-          failure = error instanceof Error ? error.message : "generation failed";
+          failure = spoilerSafeMysteryAssetFailure(error);
+          console.warn("[debate-mystery-v2] sealed visual attempt failed", {
+            sessionId: args.sessionId,
+            kind: "evidence",
+            subjectId: exhibit.id,
+            attempt,
+            reason: failure,
+          });
         }
       }
     }
@@ -9610,10 +9634,10 @@ async function prepareDebateMysteryV2RoomAssets(
     let prepared: import("@localai/shared").DebateMysterySealedAssetRefV1 | null = null;
     let failure = online && apiKey ? "generation failed" : "LOCAL uses the bundled room fallback";
     if (online && apiKey && room.templateId) {
-      const templateBytes = await debateMysteryRoomTemplatePng(room.templateId);
       for (let attempt = 1; attempt <= 2 && !prepared; attempt += 1) {
         try {
           prepared = await runMysteryAssetAttempt(signal, async (attemptSignal) => {
+            const templateBytes = await debateMysteryRoomTemplatePng(room.templateId!);
             const generated = await generateRawDebateMysteryCandidate({
               userId: args.userId,
               title: `${room.name} room`,
@@ -9642,7 +9666,11 @@ async function prepareDebateMysteryV2RoomAssets(
               signal: attemptSignal,
             });
             if (!review.approved) {
-              throw new Error(review.reasons.join("; ") || "Vision review rejected the room.");
+              throw new Error(
+                `Vision review rejected the room: ${
+                  review.reasons.join("; ") || "no reason supplied"
+                }`,
+              );
             }
             return sealDebateMysteryAssetBytesV1(db, userKey, {
               userId: args.userId,
@@ -9657,7 +9685,14 @@ async function prepareDebateMysteryV2RoomAssets(
           });
         } catch (error) {
           if (signal.aborted) throw error;
-          failure = error instanceof Error ? error.message : "generation failed";
+          failure = spoilerSafeMysteryAssetFailure(error);
+          console.warn("[debate-mystery-v2] sealed visual attempt failed", {
+            sessionId: args.sessionId,
+            kind: "room",
+            subjectId: room.id,
+            attempt,
+            reason: failure,
+          });
         }
       }
     }
@@ -9748,6 +9783,7 @@ function abortDebateMysteryRoomAssetBackground(userId: string, sessionId: string
 }
 
 function prioritizedPendingMysteryRooms(
+  userId: string,
   session: ReturnType<typeof getDebateSession>,
 ) {
   if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) return [];
@@ -9768,7 +9804,14 @@ function prioritizedPendingMysteryRooms(
     }
   }
   return state.rooms
-    .filter((room) => room.sealedAsset?.status === "pending")
+    .filter((room) =>
+      room.sealedAsset?.status === "pending" ||
+      pendingDebateMysteryEvidenceAssetsForRoomV2(
+        db,
+        userId,
+        session.id,
+        room.id,
+      ).length > 0)
     .sort((left, right) =>
       (distance.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
         (distance.get(right.id) ?? Number.MAX_SAFE_INTEGER) ||
@@ -9783,6 +9826,7 @@ function queueDebateMysteryV2RoomAssetBackground(
   if (mysteryRoomAssetBackgroundRuns.has(key)) return;
   const controller = new AbortController();
   const leaseOwner = `mystery-assets:${randomId(12)}`;
+  let leaseHeartbeat: ReturnType<typeof setInterval> | null = null;
   const promise = (async () => {
     if (!claimDebateMysteryAssetBackgroundLeaseV2(
       db,
@@ -9790,6 +9834,14 @@ function queueDebateMysteryV2RoomAssetBackground(
       sessionId,
       leaseOwner,
     )) return;
+    leaseHeartbeat = setInterval(() => {
+      claimDebateMysteryAssetBackgroundLeaseV2(
+        db,
+        userId,
+        sessionId,
+        leaseOwner,
+      );
+    }, 5 * 60_000);
     while (!controller.signal.aborted) {
       const session = getDebateSession(db, userId, sessionId);
       if (
@@ -9797,9 +9849,12 @@ function queueDebateMysteryV2RoomAssetBackground(
         session.formatState.format !== "whodunnit" ||
         session.formatState.version !== 2 ||
         session.formatState.compilation.stage !== "complete" ||
-        !session.formatState.config.assetSynthesis.rooms
+        (
+          !session.formatState.config.assetSynthesis.rooms &&
+          !session.formatState.config.assetSynthesis.evidence
+        )
       ) return;
-      const nextRoom = prioritizedPendingMysteryRooms(session)[0];
+      const nextRoom = prioritizedPendingMysteryRooms(userId, session)[0];
       if (!nextRoom) return;
       const exhibits = pendingDebateMysteryEvidenceAssetsForRoomV2(
         db,
@@ -9807,7 +9862,10 @@ function queueDebateMysteryV2RoomAssetBackground(
         sessionId,
         nextRoom.id,
       );
-      if (exhibits.length > 0) {
+      if (
+        session.formatState.config.assetSynthesis.evidence &&
+        exhibits.length > 0
+      ) {
         await prepareDebateMysteryV2EvidenceAssets({
           userId,
           sessionId,
@@ -9829,25 +9887,35 @@ function queueDebateMysteryV2RoomAssetBackground(
           },
         });
       }
-      await prepareDebateMysteryV2RoomAssets({
-        userId,
-        sessionId,
-        rooms: [nextRoom],
-        crimeSceneRoomId:
-          session.formatState.crimeSceneRoomId ?? nextRoom.id,
-        mode: "background",
-        houseStyle: session.formatState.config.houseStyle,
-        signal: controller.signal,
-        onPrepared: (roomId, asset) => {
-          if (controller.signal.aborted) return;
-          attachDebateMysteryRoomAssetV2(db, userId, sessionId, roomId, asset);
-        },
-      });
+      if (
+        session.formatState.config.assetSynthesis.rooms &&
+        nextRoom.sealedAsset?.status === "pending"
+      ) {
+        await prepareDebateMysteryV2RoomAssets({
+          userId,
+          sessionId,
+          rooms: [nextRoom],
+          crimeSceneRoomId:
+            session.formatState.crimeSceneRoomId ?? nextRoom.id,
+          mode: "background",
+          houseStyle: session.formatState.config.houseStyle,
+          signal: controller.signal,
+          onPrepared: (roomId, asset) => {
+            if (controller.signal.aborted) return;
+            attachDebateMysteryRoomAssetV2(db, userId, sessionId, roomId, asset);
+          },
+        });
+      }
     }
   })().catch((error) => {
     if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) return;
+    console.warn("[debate-mystery-v2] sealed visual background run paused", {
+      sessionId,
+      reason: spoilerSafeMysteryAssetFailure(error),
+    });
     // Pending vault rows are durable; opening the case retries the frontier.
   }).finally(() => {
+    if (leaseHeartbeat) clearInterval(leaseHeartbeat);
     releaseDebateMysteryAssetBackgroundLeaseV2(
       db,
       userId,
@@ -18089,6 +18157,70 @@ function buildRoutes(): RouteDefinition[] {
       } finally {
         ctx.req.off("aborted", onAborted);
       }
+    }),
+    route("POST", "/api/debates/:id/mystery-assets/retry", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const session = getDebateSession(db, userId, ctx.params.id);
+      if (
+        session.formatState.format !== "whodunnit" ||
+        session.formatState.version !== 2 ||
+        session.formatState.compilation.stage !== "complete"
+      ) {
+        throw new HttpError(409, "Failed visuals can be retried after Case Forge completes.");
+      }
+      const user = getUserRow(userId);
+      if (session.responseMode === "local" || userBlocksOnlineCapabilities(user)) {
+        throw new HttpError(409, "Visual retries require an ONLINE Whodunnit case.");
+      }
+      const userKey = decryptUserKey(userId);
+      if (!(getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey)) {
+        throw new HttpError(409, "Connect OpenAI before retrying synthesized visuals.");
+      }
+      const enabledKinds = [
+        ...(session.formatState.config.assetSynthesis.evidence
+          ? ["evidence" as const]
+          : []),
+        ...(session.formatState.config.assetSynthesis.rooms
+          ? ["room" as const]
+          : []),
+      ];
+      if (enabledKinds.length === 0) {
+        throw new HttpError(409, "This case did not request synthesized visuals.");
+      }
+      const retried = requeueRetryableDebateMysteryAssetFallbacksV1(
+        db,
+        userId,
+        session.id,
+        1,
+        enabledKinds,
+      );
+      for (const item of retried) {
+        if (item.kind === "room") {
+          attachDebateMysteryRoomAssetV2(
+            db,
+            userId,
+            session.id,
+            item.subjectId,
+            item.asset,
+          );
+        } else {
+          attachDebateMysteryEvidenceAssetV2(
+            db,
+            userId,
+            session.id,
+            item.subjectId,
+            item.asset,
+          );
+        }
+      }
+      if (retried.length > 0) {
+        queueDebateMysteryV2RoomAssetBackground(userId, session.id);
+      }
+      json(ctx.res, 202, {
+        ok: true,
+        requeued: retried.length,
+        session: debateSessionForPlayer(getDebateSession(db, userId, session.id)),
+      });
     }),
     route("GET", "/api/debates/:id/mystery-assets/:kind/:subjectId/file", async (ctx) => {
       const userId = requireAuth(ctx);

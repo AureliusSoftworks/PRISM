@@ -941,9 +941,14 @@ export function DebateMysteryV2Readiness(
 
 export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const state = props.session.formatState as DebateWhodunnitFormatStateV2;
-  const pendingRoomKey = state.rooms
-    .filter((room) => room.sealedAsset?.status === "pending")
-    .map((room) => room.id)
+  const pendingRoomKey = [
+    ...state.rooms
+      .filter((room) => room.sealedAsset?.status === "pending")
+      .map((room) => `room:${room.id}`),
+    ...state.record
+      .filter((item) => item.sealedAsset?.status === "pending")
+      .map((item) => `evidence:${item.reference.id}`),
+  ]
     .sort()
     .join("|");
   const [busy, setBusy] = useState(false);
@@ -967,6 +972,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const [completionCueRoomId, setCompletionCueRoomId] = useState<string | null>(null);
   const [mansionSaveState, setMansionSaveState] = useState<
     "idle" | "saving" | "saved" | "failed"
+  >("idle");
+  const [visualRetryState, setVisualRetryState] = useState<
+    "idle" | "retrying" | "queued" | "failed"
   >("idle");
   const [sealedAssetSaveState, setSealedAssetSaveState] = useState<
     Record<string, "saving" | "saved" | "failed">
@@ -1245,6 +1253,13 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const roomSpeechInkVisible = !dialoguePerformanceActive || interrogationPhase === "handoff";
   const admittedRecord = state.record.filter((item) => item.admitted);
   const mansionCanBeSaved = debateMysteryMansionBundleEligibleV2(state);
+  const failedVisualCount = state.rooms.filter(
+    (room) => room.sealedAsset?.status === "fallback",
+  ).length + state.record.filter(
+    (item) => item.sealedAsset?.status === "fallback",
+  ).length;
+  const visualRetryAvailable =
+    props.session.responseMode !== "local" && failedVisualCount > 0;
 
   const saveSealedAsset = async (
     asset: DebateMysterySealedAssetRefV1,
@@ -1286,6 +1301,30 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           ? caught.message
           : "This mansion could not be saved.",
       );
+    }
+  };
+  const retryFailedVisuals = async (): Promise<void> => {
+    if (!visualRetryAvailable || visualRetryState === "retrying") return;
+    setVisualRetryState("retrying");
+    setError(null);
+    try {
+      const result = await props.request<{
+        requeued: number;
+        session: DebateSessionV1;
+      }>(
+        `/api/debates/${encodeURIComponent(props.session.id)}/mystery-assets/retry`,
+        mutationBody({}),
+      );
+      props.onSessionChange(result.session);
+      if (result.requeued > 0) {
+        setVisualRetryState("queued");
+      } else {
+        setVisualRetryState("failed");
+        setError("Those visuals have already used their bounded retry.");
+      }
+    } catch (caught) {
+      setVisualRetryState("failed");
+      setError(caught instanceof Error ? caught.message : "The failed visuals could not be retried.");
     }
   };
   const activeStatement = state.court?.statements.find(
@@ -2366,23 +2405,44 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         <section className={styles.mansionBoard} aria-label="Mansion Move map" data-tutorial-target="mystery-v2-mansion">
           <header className={styles.mansionHeading}>
             <div><p className={styles.eyebrow}>The mansion</p><strong>{mansionFloorDisplayName}</strong></div>
-            {mansionCanBeSaved ? (
-              <button
-                type="button"
-                className={styles.saveMansionButton}
-                disabled={mansionSaveState === "saving"}
-                onClick={() => void saveMansion()}
-                data-state={mansionSaveState}
-                data-tutorial-target="mystery-v2-save-mansion"
-              >
-                {mansionSaveState === "saving"
-                  ? "Saving mansion…"
-                  : mansionSaveState === "saved"
-                    ? "Mansion saved"
-                    : mansionSaveState === "failed"
-                      ? "Retry save"
-                      : "Save mansion level"}
-              </button>
+            {visualRetryAvailable || mansionCanBeSaved ? (
+              <div className={styles.mansionAssetActions}>
+                {visualRetryAvailable ? (
+                  <button
+                    type="button"
+                    className={styles.retryMansionAssetsButton}
+                    disabled={visualRetryState === "retrying" || visualRetryState === "queued"}
+                    onClick={() => void retryFailedVisuals()}
+                    data-state={visualRetryState}
+                  >
+                    {visualRetryState === "retrying"
+                      ? "Retrying visuals…"
+                      : visualRetryState === "queued"
+                        ? "Visuals queued"
+                        : visualRetryState === "failed"
+                          ? "Retry visuals again"
+                          : `Retry failed visual${failedVisualCount === 1 ? "" : "s"}`}
+                  </button>
+                ) : null}
+                {mansionCanBeSaved ? (
+                  <button
+                    type="button"
+                    className={styles.saveMansionButton}
+                    disabled={mansionSaveState === "saving"}
+                    onClick={() => void saveMansion()}
+                    data-state={mansionSaveState}
+                    data-tutorial-target="mystery-v2-save-mansion"
+                  >
+                    {mansionSaveState === "saving"
+                      ? "Saving mansion…"
+                      : mansionSaveState === "saved"
+                        ? "Mansion saved"
+                        : mansionSaveState === "failed"
+                          ? "Retry save"
+                          : "Save mansion level"}
+                  </button>
+                ) : null}
+              </div>
             ) : null}
             <nav className={styles.mansionFloorPicker} aria-label="Mansion floors">
               {mansionFloors.map((floor) => (

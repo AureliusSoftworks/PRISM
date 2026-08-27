@@ -547,6 +547,8 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(setupSource, /mysteryMansionBundleId/u);
     assert.match(setupSource, /mystery-mansion\/save/u);
     assert.match(experienceSource, /Save mansion level/u);
+    assert.match(experienceSource, /Retry failed visual/u);
+    assert.match(experienceSource, /mystery-assets\/retry/u);
     assert.match(setupSource, /session\.format === "whodunnit"/u);
     assert.match(setupSource, /Open evidence assets/u);
     assert.match(setupSource, /Skip investigation/u);

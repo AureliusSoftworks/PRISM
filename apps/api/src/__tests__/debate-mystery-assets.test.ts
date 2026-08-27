@@ -13,6 +13,7 @@ import {
   exportDebateMysteryAssetVaultBackupV1,
   getRevealedDebateMysteryAssetFileV1,
   importDebateMysteryAssetVaultBackupV1,
+  requeueRetryableDebateMysteryAssetFallbacksV1,
   resetDebateMysteryAssetRevealsV1,
   revealDebateMysteryAssetV1,
   saveRevealedDebateMysteryAssetV1,
@@ -278,6 +279,77 @@ describe("sealed Whodunnit asset vault", () => {
     );
     source.close();
     restored.close();
+  });
+
+  it("requeues transient fallbacks once and preserves the bounded retry count", () => {
+    const db = vaultDb();
+    setDebateMysteryAssetFallbackV1(db, {
+      userId: "user-1",
+      sessionId: "case-1",
+      kind: "room",
+      subjectId: "room-1",
+      reason: "Sealed case visual attempt timed out.",
+    });
+    assert.match(
+      String(db.prepare(
+        "SELECT review_json FROM debate_mystery_asset_vault WHERE subject_id = 'room-1'",
+      ).get()!.review_json),
+      /"reasonCode":"timed_out"/u,
+    );
+    revealDebateMysteryAssetV1(
+      db,
+      "user-1",
+      "case-1",
+      "room",
+      "room-1",
+    );
+
+    const first = requeueRetryableDebateMysteryAssetFallbacksV1(
+      db,
+      "user-1",
+      "case-1",
+    );
+    assert.equal(first.length, 1);
+    assert.equal(first[0]?.asset.status, "pending");
+    assert.equal(first[0]?.asset.revealed, true);
+    setDebateMysteryAssetPendingV1(db, {
+      userId: "user-1",
+      sessionId: "case-1",
+      kind: "room",
+      subjectId: "room-1",
+    });
+    setDebateMysteryAssetFallbackV1(db, {
+      userId: "user-1",
+      sessionId: "case-1",
+      kind: "room",
+      subjectId: "room-1",
+      reason: "Sealed case visual attempt timed out.",
+    });
+    assert.equal(
+      revealDebateMysteryAssetV1(
+        db,
+        "user-1",
+        "case-1",
+        "room",
+        "room-1",
+      )?.revealed,
+      true,
+    );
+    assert.equal(
+      requeueRetryableDebateMysteryAssetFallbacksV1(
+        db,
+        "user-1",
+        "case-1",
+      ).length,
+      0,
+    );
+    assert.match(
+      String(db.prepare(
+        "SELECT review_json FROM debate_mystery_asset_vault WHERE subject_id = 'room-1'",
+      ).get()!.review_json),
+      /"retryCount":1/u,
+    );
+    db.close();
   });
 
   it("reuses ciphertext for Play Again while resetting semantic authorization", async () => {

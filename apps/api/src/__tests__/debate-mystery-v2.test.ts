@@ -4098,8 +4098,10 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.match(synthesis, /size: "1536x1024"/u);
     assert.match(synthesis, /people, human figures, bodies, evidence, clues, weapons, blood, gore, readable text/u);
     assert.doesNotMatch(synthesis, /generateAndPersistStandaloneImageAsset/u);
-    assert.match(serverSource, /const MYSTERY_ASSET_ATTEMPT_TIMEOUT_MS = 120_000/u);
+    assert.match(serverSource, /const MYSTERY_ASSET_ATTEMPT_TIMEOUT_MS = 10 \* 60_000/u);
     assert.match(serverSource, /Promise\.race\(\[operation\(controller\.signal\), abortBoundary\]\)/u);
+    assert.match(synthesis, /sealed visual attempt failed/u);
+    assert.match(synthesis, /pendingDebateMysteryEvidenceAssetsForRoomV2/u);
 
     const routeStart = serverSource.indexOf(
       'route("GET", "/api/debates/:id/mystery-assets/:kind/:subjectId/file"',
@@ -4114,5 +4116,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.match(sealedRoutes, /private, no-store, max-age=0/u);
     assert.match(sealedRoutes, /x-content-type-options/u);
     assert.match(sealedRoutes, /saveRevealedDebateMysteryAssetV1/u);
+    assert.match(serverSource, /mystery-assets\/retry/u);
+    assert.match(serverSource, /requeueRetryableDebateMysteryAssetFallbacksV1/u);
   });
 });

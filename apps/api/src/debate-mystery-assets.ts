@@ -131,6 +131,17 @@ function compactReviewJson(review: Record<string, unknown>): string {
   });
 }
 
+function retryCountFromReviewJson(reviewJson: string): number {
+  try {
+    const parsed = JSON.parse(reviewJson) as { retryCount?: unknown };
+    return Number.isInteger(parsed.retryCount) && Number(parsed.retryCount) >= 0
+      ? Number(parsed.retryCount)
+      : 0;
+  } catch {
+    return 0;
+  }
+}
+
 function fallbackReasonCode(reason: string): string {
   const normalized = reason.toLocaleLowerCase();
   if (normalized.includes("local") || normalized.includes("authorized")) return "provider_unavailable";
@@ -143,8 +154,84 @@ function fallbackReasonCode(reason: string): string {
     normalized.includes("geometry") ||
     normalized.includes("subject")
   ) return "validation_failed";
-  if (normalized.includes("timeout") || normalized.includes("too long")) return "timed_out";
+  if (
+    normalized.includes("timeout") ||
+    normalized.includes("timed out") ||
+    normalized.includes("too long")
+  ) return "timed_out";
   return "generation_failed";
+}
+
+const RETRYABLE_FALLBACK_REASON_CODES = new Set([
+  "generation_failed",
+  "review_rejected",
+  "timed_out",
+  "validation_failed",
+]);
+
+export interface DebateMysteryRequeuedAssetV1 {
+  kind: DebateMysterySealedAssetKindV1;
+  subjectId: string;
+  asset: DebateMysterySealedAssetRefV1;
+}
+
+/**
+ * Gives transient ONLINE synthesis failures one durable recovery pass. The
+ * retry count lives in spoiler-safe review metadata so reopening a case cannot
+ * create an unbounded generation loop.
+ */
+export function requeueRetryableDebateMysteryAssetFallbacksV1(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  maxRetryCount = 1,
+  allowedKinds: readonly DebateMysterySealedAssetKindV1[] = ["evidence", "room"],
+): DebateMysteryRequeuedAssetV1[] {
+  const rows = db.prepare(
+    `SELECT * FROM debate_mystery_asset_vault
+      WHERE user_id = ? AND session_id = ? AND status = 'fallback'
+      ORDER BY kind, subject_id`,
+  ).all(userId, sessionId) as unknown as MysteryAssetVaultRow[];
+  const allowedKindSet = new Set(allowedKinds);
+  const requeued: DebateMysteryRequeuedAssetV1[] = [];
+  const update = db.prepare(
+    `UPDATE debate_mystery_asset_vault
+        SET status = 'pending', source = 'synthesized',
+            ciphertext = NULL, cipher_iv = NULL, cipher_tag = NULL,
+            sha256 = NULL, byte_size = NULL, provider = NULL, model = NULL,
+            review_json = ?, updated_at = ?
+      WHERE id = ? AND user_id = ? AND session_id = ? AND status = 'fallback'`,
+  );
+  for (const row of rows) {
+    let reasonCode = "generation_failed";
+    try {
+      const parsed = JSON.parse(row.review_json) as { reasonCode?: unknown };
+      if (typeof parsed.reasonCode === "string") reasonCode = parsed.reasonCode;
+    } catch {
+      // Old fallback rows predate structured spoiler-safe diagnostics.
+    }
+    const retryCount = retryCountFromReviewJson(row.review_json);
+    if (
+      !allowedKindSet.has(row.kind) ||
+      retryCount >= maxRetryCount ||
+      !RETRYABLE_FALLBACK_REASON_CODES.has(reasonCode)
+    ) continue;
+    const nextRetryCount = retryCount + 1;
+    const updated = update.run(
+      JSON.stringify({ retryCount: nextRetryCount }),
+      new Date().toISOString(),
+      row.id,
+      userId,
+      sessionId,
+    );
+    if (Number(updated.changes) !== 1) continue;
+    requeued.push({
+      kind: row.kind,
+      subjectId: row.subject_id,
+      asset: rowRef(assetRow(db, userId, sessionId, row.kind, row.subject_id)!),
+    });
+  }
+  return requeued;
 }
 
 export function getDebateMysterySealedAssetRefV1(
@@ -192,16 +279,21 @@ export function setDebateMysteryAssetPendingV1(
   }
   const now = new Date().toISOString();
   const id = existing?.id ?? randomUUID();
+  const retryCount = existing ? retryCountFromReviewJson(existing.review_json) : 0;
+  const pendingReviewJson = retryCount > 0
+    ? JSON.stringify({ retryCount })
+    : "{}";
   db.prepare(
     `INSERT INTO debate_mystery_asset_vault
        (id, user_id, session_id, kind, subject_id, status, source, mime_type,
         review_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'pending', 'synthesized', ?, '{}', ?, ?)
+     VALUES (?, ?, ?, ?, ?, 'pending', 'synthesized', ?, ?, ?, ?)
      ON CONFLICT(user_id, session_id, kind, subject_id) DO UPDATE SET
        status = 'pending', source = 'synthesized', mime_type = excluded.mime_type,
        ciphertext = NULL, cipher_iv = NULL, cipher_tag = NULL, sha256 = NULL,
-       byte_size = NULL, provider = NULL, model = NULL, review_json = '{}',
-       revealed_at = NULL, updated_at = excluded.updated_at`,
+       byte_size = NULL, provider = NULL, model = NULL,
+       review_json = excluded.review_json,
+       updated_at = excluded.updated_at`,
   ).run(
     id,
     args.userId,
@@ -209,6 +301,7 @@ export function setDebateMysteryAssetPendingV1(
     args.kind,
     args.subjectId,
     args.mimeType ?? "image/png",
+    pendingReviewJson,
     existing?.created_at ?? now,
     now,
   );
@@ -251,7 +344,7 @@ export function sealDebateMysteryAssetBytesV1(
        cipher_tag = excluded.cipher_tag, sha256 = excluded.sha256,
        byte_size = excluded.byte_size, provider = excluded.provider,
        model = excluded.model, review_json = excluded.review_json,
-       revealed_at = NULL, updated_at = excluded.updated_at`,
+       updated_at = excluded.updated_at`,
   ).run(
     id,
     args.userId,
@@ -287,6 +380,7 @@ export function setDebateMysteryAssetFallbackV1(
   const now = new Date().toISOString();
   const existing = assetRow(db, args.userId, args.sessionId, args.kind, args.subjectId);
   const id = existing?.id ?? randomUUID();
+  const retryCount = existing ? retryCountFromReviewJson(existing.review_json) : 0;
   db.prepare(
     `INSERT INTO debate_mystery_asset_vault
        (id, user_id, session_id, kind, subject_id, status, source, mime_type,
@@ -296,7 +390,7 @@ export function setDebateMysteryAssetFallbackV1(
        status = 'fallback', source = 'bundled', mime_type = excluded.mime_type,
        ciphertext = NULL, cipher_iv = NULL, cipher_tag = NULL, sha256 = NULL,
        byte_size = NULL, provider = NULL, model = NULL,
-       review_json = excluded.review_json, revealed_at = NULL,
+       review_json = excluded.review_json,
        updated_at = excluded.updated_at`,
   ).run(
     id,
@@ -305,7 +399,11 @@ export function setDebateMysteryAssetFallbackV1(
     args.kind,
     args.subjectId,
     args.mimeType ?? "image/webp",
-    JSON.stringify({ fallback: true, reasonCode: fallbackReasonCode(args.reason) }),
+    JSON.stringify({
+      fallback: true,
+      reasonCode: fallbackReasonCode(args.reason),
+      ...(retryCount > 0 ? { retryCount } : {}),
+    }),
     existing?.created_at ?? now,
     now,
   );
