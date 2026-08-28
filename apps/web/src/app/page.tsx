@@ -10636,9 +10636,6 @@ interface UserSettings {
   prismCloudLlmModel: string;
   /** Legacy compatibility only; image-intent routing now follows prismDefaultLlmModel. */
   prismImageToolLlmModel: string;
-  /** Independent Refract model selection restored whenever its LOCAL/ONLINE lane returns. */
-  prismRefractLocalModel: string;
-  prismRefractOnlineModel: string;
   /** Kept empty in the UI/API; the built-in Default assistant only exposes avatar customization. */
   prismDefaultBotName: string;
   prismDefaultBotSystemPrompt: string;
@@ -16401,6 +16398,32 @@ function resolvedAutoPrimaryForComposer(
   });
 }
 
+type AutoFallbackDragState = {
+  lane: "local" | "online";
+  fromIndex: number;
+  overIndex: number;
+  pointerId: number;
+};
+
+function autoFallbackDragTargetAtPoint(
+  clientX: number,
+  clientY: number,
+): { lane: "local" | "online"; index: number } | null {
+  const entry = document
+    .elementFromPoint(clientX, clientY)
+    ?.closest<HTMLElement>("[data-auto-fallback-entry]");
+  const lane = entry?.dataset.autoFallbackLane;
+  const index = Number(entry?.dataset.autoFallbackIndex);
+  if (
+    (lane !== "local" && lane !== "online") ||
+    !Number.isInteger(index) ||
+    index < 0
+  ) {
+    return null;
+  }
+  return { lane, index };
+}
+
 function latestConversationAutoRoute(
   messages: readonly Pick<
     CoffeeConversationMessage,
@@ -16539,7 +16562,7 @@ function modelEffortTargetForSelection(args: {
       provider: args.provider,
       modelId,
       simulatedEffortEnabled: args.simulatedEffortEnabled,
-      localNativeThinking: catalogEntry?.thinking === true,
+      ollamaNativeThinking: catalogEntry?.thinking === true,
     }),
     turboSupported: modelSupportsTurboMode(args.provider, modelId),
   };
@@ -24661,7 +24684,8 @@ function ComposerModelPicker({
   const effortProvenanceLabel =
     effortControl?.capability.mode === "simulated"
       ? "Prism simulated"
-      : effortControl?.capability.mode === "native"
+      : effortControl?.capability.mode === "native" ||
+          effortControl?.capability.mode === "native-thinking"
         ? "Native reasoning"
         : "Unavailable";
   const effortLevels = effortControl
@@ -25027,13 +25051,20 @@ function ComposerModelPicker({
       if (!effortControl || effortInteractionDisabled) return;
       moveEffortHighlight(direction);
     };
-    document.addEventListener("wheel", handleQuickWheel, {
-      capture: true,
-      passive: false,
-    });
+    // Compact navbar pickers intentionally turn a wheel gesture anywhere into
+    // the next value. Full pickers (Settings, editors, and modals) own real
+    // scrollable lists, so their wheel events must remain native.
+    if (navbarPicker) {
+      document.addEventListener("wheel", handleQuickWheel, {
+        capture: true,
+        passive: false,
+      });
+    }
     document.addEventListener("keydown", handleQuickArrows, true);
     return () => {
-      document.removeEventListener("wheel", handleQuickWheel, true);
+      if (navbarPicker) {
+        document.removeEventListener("wheel", handleQuickWheel, true);
+      }
       document.removeEventListener("keydown", handleQuickArrows, true);
     };
   }, [
@@ -25049,6 +25080,7 @@ function ComposerModelPicker({
     activeHighlightedModelValue,
     pickerOpenState.interactionMode,
     pickerOpenState.surface,
+    navbarPicker,
     onChange,
     selectableModelValues,
     setEffortValue,
@@ -25225,6 +25257,7 @@ function ComposerModelPicker({
 
   const handleModelWheel = (event: React.WheelEvent<HTMLElement>): void => {
     if (
+      !navbarPicker ||
       pickerOpenState.interactionMode !== "pointer" ||
       !menuOpen ||
       selectableModelValues.length <= 1 ||
@@ -25674,7 +25707,7 @@ function ComposerModelPicker({
                       provider: model.provider,
                       modelId: model.id,
                       simulatedEffortEnabled: true,
-                      localNativeThinking: model.thinking === true,
+                      ollamaNativeThinking: model.thinking === true,
                     })
                   : null;
                 return (
@@ -25769,7 +25802,7 @@ function ComposerModelPicker({
                   {effortControl.capability.mode === "simulated"
                     ? "Experimental · multi-call simulation"
                     : effortControl.capability.mode === "native-thinking"
-                      ? "Native thinking · simulated above Minimal"
+                      ? "Native thinking · simulated above Default"
                       : "Saved for this model"}
                 </small>
               </div>
@@ -50552,11 +50585,16 @@ function HomeContent(): React.JSX.Element {
     modelId: string;
     value: string;
   } | null>(null);
-  const [autoFallbackDrag, setAutoFallbackDrag] = useState<{
-    lane: "local" | "online";
-    fromIndex: number;
-    overIndex: number;
-  } | null>(null);
+  const [autoFallbackDrag, setAutoFallbackDrag] =
+    useState<AutoFallbackDragState | null>(null);
+  const autoFallbackDragRef = useRef<AutoFallbackDragState | null>(null);
+  const updateAutoFallbackDrag = useCallback(
+    (next: AutoFallbackDragState | null): void => {
+      autoFallbackDragRef.current = next;
+      setAutoFallbackDrag(next);
+    },
+    [],
+  );
   const [autoFallbackReorderAnnouncement, setAutoFallbackReorderAnnouncement] =
     useState("");
   const globalModelChoiceByProviderRef = useRef(globalModelChoiceByProvider);
@@ -50914,7 +50952,7 @@ function HomeContent(): React.JSX.Element {
             provider: model.provider,
             modelId: model.id,
             simulatedEffortEnabled: true,
-            localNativeThinking: model.thinking === true,
+            ollamaNativeThinking: model.thinking === true,
           });
           if (capability.mode === "unavailable") return undefined;
           return savedModelReasoningEffort(
@@ -58974,29 +59012,20 @@ function HomeContent(): React.JSX.Element {
     [clearMaxEffortOverdrive, resetAllModelTurboPreferences, settings],
   );
   const botGeneratorResponseMode = responseModeForProvider(
-    settings?.preferredProvider ?? "local",
+    effectivePreferredProvider,
   );
-  const botGeneratorSavedChoice =
-    botGeneratorResponseMode === "local"
-      ? settings?.prismRefractLocalModel
-      : settings?.prismRefractOnlineModel;
-  const botGeneratorModelChoice =
-    botGeneratorResponseMode === "local"
-      ? visibleModelChoiceForProvider(
-          modelCatalog,
-          settings,
-          "local",
-          botGeneratorSavedChoice,
-        )
-      : visiblePreferredOnlineModelChoice(
-          modelCatalog,
-          settings,
-          botGeneratorSavedChoice,
-        );
-  const botGeneratorSelectedProvider =
-    botGeneratorResponseMode === "local"
-      ? "local"
-      : inferOnlineProviderForModelId(botGeneratorModelChoice);
+  const botGeneratorResolvedChoice = resolveModelChoiceForResponseMode({
+    responseMode: botGeneratorResponseMode,
+    providerPreference: effectivePreferredProvider,
+    choices: visibleModelChoicesByProvider(
+      modelCatalog,
+      settings,
+      chatModelChoiceByProvider,
+    ),
+    onlineOptions: onlineChatModelOptions,
+  });
+  const botGeneratorModelChoice = botGeneratorResolvedChoice.modelChoice;
+  const botGeneratorSelectedProvider = botGeneratorResolvedChoice.provider;
   const botGeneratorModelOptions = includeSelectedResponseModeModelOption(
     modelCatalog,
     settings,
@@ -59034,106 +59063,6 @@ function HomeContent(): React.JSX.Element {
         botGeneratorEffortTarget.capability,
       )
     : "auto";
-  const refractResponseMode = responseModeForProvider(
-    settings?.preferredProvider ?? "local",
-  );
-  const refractSavedChoice =
-    refractResponseMode === "local"
-      ? settings?.prismRefractLocalModel
-      : settings?.prismRefractOnlineModel;
-  const refractModelChoice =
-    refractResponseMode === "local"
-      ? visibleModelChoiceForProvider(
-          modelCatalog,
-          settings,
-          "local",
-          refractSavedChoice,
-        )
-      : visiblePreferredOnlineModelChoice(
-          modelCatalog,
-          settings,
-          refractSavedChoice,
-        );
-  const refractModelOptions = modelOptionsForResponseMode(
-    modelCatalog,
-    settings,
-    refractResponseMode,
-  );
-  const refractSelectedProvider =
-    refractResponseMode === "local"
-      ? "local"
-      : inferOnlineProviderForModelId(refractModelChoice);
-  const refractModelSelectionMutationVersionRef = useRef(0);
-  const refractModelPicker = (
-    <ComposerModelPicker
-      value={refractModelChoice}
-      onChange={(nextChoice) => {
-        const nextModel =
-          nextChoice === AUTO_MODEL_CHOICE ? "" : nextChoice.trim();
-        const previousLocalModel = settings?.prismRefractLocalModel ?? "";
-        const previousOnlineModel = settings?.prismRefractOnlineModel ?? "";
-        const version = ++refractModelSelectionMutationVersionRef.current;
-        setSettings((current) =>
-          current
-            ? {
-                ...current,
-                ...(refractResponseMode === "local"
-                  ? { prismRefractLocalModel: nextModel }
-                  : { prismRefractOnlineModel: nextModel }),
-              }
-            : current,
-        );
-        void api<{
-          ok: true;
-          prismRefractLocalModel: string;
-          prismRefractOnlineModel: string;
-        }>("/api/settings/prism-refract-model", {
-          method: "PATCH",
-          body: JSON.stringify({
-            model: nextModel || null,
-            responseMode: refractResponseMode,
-          }),
-        })
-          .then((saved) => {
-            if (refractModelSelectionMutationVersionRef.current !== version) return;
-            setSettings((current) =>
-              current
-                ? {
-                    ...current,
-                    prismRefractLocalModel: saved.prismRefractLocalModel,
-                    prismRefractOnlineModel: saved.prismRefractOnlineModel,
-                  }
-                : current,
-            );
-          })
-          .catch((error) => {
-            if (refractModelSelectionMutationVersionRef.current !== version) return;
-            setSettings((current) =>
-              current
-                ? {
-                    ...current,
-                    prismRefractLocalModel: previousLocalModel,
-                    prismRefractOnlineModel: previousOnlineModel,
-                  }
-                : current,
-            );
-            console.warn("[prism] Refract model selection failed", error);
-          });
-      }}
-      options={refractModelOptions}
-      provider={refractResponseMode}
-      selectedProvider={refractSelectedProvider}
-      loading={modelCatalogLoading}
-      renderTheme={resolvedTheme}
-      ariaLabel={`Refract ${refractResponseMode.toUpperCase()} model`}
-      title="Refract model"
-      autoOptionMetaOverride="Let Prism choose in this lane"
-      placement="up"
-      minMenuWidthPx={260}
-      portalZIndex={861}
-      dismissPopoversSignal={composerPopoverDismissSignal}
-    />
-  );
   const botGeneratorModelLabel =
     botGeneratorModelChoice === AUTO_MODEL_CHOICE
       ? "Auto model"
@@ -59815,8 +59744,9 @@ function HomeContent(): React.JSX.Element {
               appends every other eligible model in the lane, and uses no
               thinking for recovery. ONLINE ends with one bundled local attempt.
           </p>
+          <div className={styles.settingsFallbackLaneColumns}>
             {(["local", "online"] as const).map((lane) => {
-              const laneLabel = lane === "local" ? "LOCAL" : "ONLINE";
+              const laneLabel = lane === "local" ? "OFFLINE" : "ONLINE";
               const rows = fallbackRowsForLane(lane);
               const laneCandidates = fallbackCandidatesForLane(lane);
               const canAdd =
@@ -59852,13 +59782,18 @@ function HomeContent(): React.JSX.Element {
                 );
               };
               return (
-                <div key={lane} className={styles.settingsFallbackLane}>
+                <section
+                  key={lane}
+                  className={styles.settingsFallbackLane}
+                  data-auto-fallback-lane={lane}
+                  aria-label={`${laneLabel} Auto priorities`}
+                >
           <div className={styles.settingsAutoPrimary}>
                     <span>{laneLabel} Auto priorities</span>
                     <small>
                       {lane === "local"
                         ? "Only local Ollama models can run here."
-                        : "Only runnable OpenAI and Anthropic models can run here."}
+                        : "Runnable Ollama Cloud, OpenAI, and Anthropic models can run here."}
                     </small>
           </div>
           <div className={styles.settingsFallbackGrid} role="list">
@@ -59885,6 +59820,9 @@ function HomeContent(): React.JSX.Element {
                 <div
                           key={encodeAutoFallbackPickerValue(fallback)}
                   className={styles.settingsFallbackEntry}
+                          data-auto-fallback-entry="true"
+                          data-auto-fallback-lane={lane}
+                          data-auto-fallback-index={index}
                           data-dragging={
                             autoFallbackDrag?.lane === lane &&
                             autoFallbackDrag.fromIndex === index
@@ -59898,60 +59836,91 @@ function HomeContent(): React.JSX.Element {
                               ? "true"
                               : undefined
                           }
-                          onDragOver={(event) => {
-                            if (autoFallbackDrag?.lane !== lane) return;
-                            event.preventDefault();
-                            event.dataTransfer.dropEffect = "move";
-                            if (autoFallbackDrag.overIndex !== index) {
-                              setAutoFallbackDrag({
-                                ...autoFallbackDrag,
-                                overIndex: index,
-                              });
-                            }
-                          }}
-                          onDrop={(event) => {
-                            event.preventDefault();
-                            if (
-                              autoFallbackDrag?.lane === lane &&
-                              autoFallbackDrag.fromIndex !== index
-                            ) {
-                              const fromLaneIndex = rows.findIndex(
-                                (row) =>
-                                  row.index === autoFallbackDrag.fromIndex,
-                              );
-                              if (fromLaneIndex >= 0) {
-                                moveFallback(
-                                  autoFallbackDrag.fromIndex,
-                                  index,
-                                  fromLaneIndex,
-                                  laneIndex,
-                                );
-                              }
-                            }
-                            setAutoFallbackDrag(null);
-                          }}
                           role="listitem"
                 >
                           <button
                             type="button"
                             className={styles.settingsFallbackDragHandle}
-                            draggable={rows.length > 1}
                             disabled={rows.length <= 1}
                             aria-label={`Reorder ${laneLabel} priority ${laneIndex + 1}. Use Up and Down arrow keys.`}
-                            title="Drag to reorder"
-                            onDragStart={(event) => {
-                              event.dataTransfer.effectAllowed = "move";
-                              event.dataTransfer.setData(
-                                "text/plain",
-                                encodeAutoFallbackPickerValue(fallback),
-                              );
-                              setAutoFallbackDrag({
+                            title="Drag chip to reorder"
+                            onPointerDown={(event) => {
+                              if (event.button !== 0 || rows.length <= 1) return;
+                              event.currentTarget.focus({ preventScroll: true });
+                              event.preventDefault();
+                              event.currentTarget.setPointerCapture(event.pointerId);
+                              updateAutoFallbackDrag({
                                 lane,
                                 fromIndex: index,
                                 overIndex: index,
+                                pointerId: event.pointerId,
                               });
                             }}
-                            onDragEnd={() => setAutoFallbackDrag(null)}
+                            onPointerMove={(event) => {
+                              const drag = autoFallbackDragRef.current;
+                              if (
+                                !drag ||
+                                drag.pointerId !== event.pointerId ||
+                                drag.lane !== lane
+                              ) {
+                                return;
+                              }
+                              const target = autoFallbackDragTargetAtPoint(
+                                event.clientX,
+                                event.clientY,
+                              );
+                              if (
+                                target?.lane === lane &&
+                                target.index !== drag.overIndex
+                              ) {
+                                updateAutoFallbackDrag({
+                                  ...drag,
+                                  overIndex: target.index,
+                                });
+                              }
+                            }}
+                            onPointerUp={(event) => {
+                              const drag = autoFallbackDragRef.current;
+                              const target = autoFallbackDragTargetAtPoint(
+                                event.clientX,
+                                event.clientY,
+                              );
+                              if (
+                                drag?.pointerId === event.pointerId &&
+                                drag.lane === lane &&
+                                target?.lane === lane &&
+                                drag.fromIndex !== target.index
+                              ) {
+                                const fromLaneIndex = rows.findIndex(
+                                  (row) => row.index === drag.fromIndex,
+                                );
+                                const toLaneIndex = rows.findIndex(
+                                  (row) => row.index === target.index,
+                                );
+                                if (fromLaneIndex >= 0 && toLaneIndex >= 0) {
+                                  moveFallback(
+                                    drag.fromIndex,
+                                    target.index,
+                                    fromLaneIndex,
+                                    toLaneIndex,
+                                  );
+                                }
+                              }
+                              updateAutoFallbackDrag(null);
+                              if (
+                                event.currentTarget.hasPointerCapture(
+                                  event.pointerId,
+                                )
+                              ) {
+                                event.currentTarget.releasePointerCapture(
+                                  event.pointerId,
+                                );
+                              }
+                            }}
+                            onPointerCancel={() => updateAutoFallbackDrag(null)}
+                            onLostPointerCapture={() =>
+                              updateAutoFallbackDrag(null)
+                            }
                             onKeyDown={(event) => {
                               if (
                                 event.key !== "ArrowUp" &&
@@ -60082,9 +60051,10 @@ function HomeContent(): React.JSX.Element {
               ? "Five priorities configured"
                       : `+ Add ${laneLabel} priority`}
           </button>
-        </div>
+        </section>
               );
             })}
+          </div>
             <span
               className={styles.srOnly}
               role="status"
@@ -112760,8 +112730,7 @@ function HomeContent(): React.JSX.Element {
           submerged={companionSubmergedByMainPanel}
           keyboardShortcut={keyboardShortcuts.prism}
           surface={prismCompanionSurfaceReference()}
-          refractModelPicker={refractModelPicker}
-          refractModelResponseMode={refractResponseMode}
+          refractResponseMode={botGeneratorResponseMode}
           presentation={view === "chat" ? chatPresentation : null}
           zenSessionIdleGapMs={settings.zenSessionIdleGapMs}
           chatHomeHeroDocked={
@@ -152803,7 +152772,7 @@ function HomeContent(): React.JSX.Element {
                 {modelEffortHudTarget.capability.mode === "simulated"
                   ? "none"
                   : modelEffortHudTarget.capability.mode === "native-thinking"
-                    ? "minimal"
+                    ? "default"
                     : "default"}
                 {modelEffortHudTarget.capability.mode === "simulated"
                   ? " · multi-call simulation"

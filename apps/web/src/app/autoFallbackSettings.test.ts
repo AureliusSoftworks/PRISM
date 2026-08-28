@@ -20,6 +20,7 @@ const local = { provider: "local" as const, model: "qwen3:8b" };
 const openai = { provider: "openai" as const, model: "gpt-5-mini" };
 const anthropic = { provider: "anthropic" as const, model: "claude-haiku-4-5" };
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const pageCss = readFileSync(new URL("./page.module.css", import.meta.url), "utf8");
 
 describe("Auto fallback settings", () => {
   const catalog = {
@@ -45,12 +46,34 @@ describe("Auto fallback settings", () => {
     assert.match(pageSource, /autoFallbackChainWithAddedEntry/);
     assert.match(pageSource, /autoFallbackChainWithoutEntry/);
     assert.match(pageSource, /autoFallbackChainWithMovedEntry/);
-    assert.match(pageSource, /Drag to reorder/u);
+    assert.match(pageSource, /Drag chip to reorder/u);
+    assert.match(pageSource, /onPointerDown=/u);
+    assert.match(pageSource, /setPointerCapture\(event\.pointerId\)/u);
+    assert.match(pageSource, /onPointerMove=/u);
+    assert.match(pageSource, /autoFallbackDragTargetAtPoint/u);
+    assert.match(pageSource, /onPointerUp=/u);
+    assert.match(pageSource, /onPointerCancel=/u);
+    assert.match(pageSource, /onLostPointerCapture=/u);
+    assert.doesNotMatch(pageSource, /draggable=\{rows\.length > 1\}/u);
     assert.match(pageSource, /event\.key === "ArrowUp"/u);
     assert.match(pageSource, /aria-live="polite"/u);
     assert.match(pageSource, /\+ Add \$\{laneLabel\} priority/);
     assert.match(pageSource, /appends every other eligible model in the lane/u);
     assert.match(pageSource, /ONLINE ends with one bundled local attempt/u);
+  });
+
+  it("presents Offline and Online priorities as draggable chip columns", () => {
+    assert.match(pageSource, /className=\{styles\.settingsFallbackLaneColumns\}/u);
+    assert.match(pageSource, /data-auto-fallback-lane=\{lane\}/u);
+    assert.match(pageSource, /lane === "local" \? "OFFLINE" : "ONLINE"/u);
+    assert.match(
+      pageCss,
+      /\.settingsFallbackLaneColumns \{[\s\S]*?grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/u,
+    );
+    assert.match(
+      pageCss,
+      /\.settingsFallbackEntry \{[\s\S]*?grid-template-columns: 30px minmax\(0, 1fr\) 30px;[\s\S]*?border-radius: 14px;/u,
+    );
   });
 
   it("keeps Auto inside the selected lane and lets fixed models override it", () => {

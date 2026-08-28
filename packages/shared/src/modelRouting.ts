@@ -218,10 +218,11 @@ export function formatOnlineAutoProviderWeightsLabel(value: unknown): string {
 
 /** Minimal catalog shape: only model ids are read. */
 export interface CatalogShapeForAuto {
-  local: readonly { id: string }[];
+  local: readonly { id: string; thinking?: boolean }[];
   online: readonly {
     id: string;
     provider?: AutoModelProvider;
+    thinking?: boolean;
     supportsStructuredOutput?: boolean;
   }[];
 }
@@ -419,14 +420,20 @@ function laneCatalogModels(
 ): Array<{
   id: string;
   provider: AutoModelProvider;
+  thinking?: boolean;
   supportsStructuredOutput?: boolean;
 }> {
   if (lane === "local") {
-    return catalog.local.map((model) => ({ id: model.id, provider: "local" }));
+    return catalog.local.map((model) => ({
+      id: model.id,
+      provider: "local",
+      thinking: model.thinking,
+    }));
   }
   return catalog.online.map((model) => ({
     id: model.id,
     provider: model.provider ?? "openai",
+    thinking: model.thinking,
     supportsStructuredOutput: model.supportsStructuredOutput,
   }));
 }
@@ -598,11 +605,13 @@ function clampAutoEffort(args: {
   modelId: string;
   target: ModelReasoningEffortPreference;
   simulatedEffortEnabled: boolean;
+  ollamaNativeThinking?: boolean;
 }): ModelReasoningEffortPreference {
   const capability = resolveModelReasoningEffortCapability({
     provider: args.provider,
     modelId: args.modelId,
     simulatedEffortEnabled: args.simulatedEffortEnabled,
+    ollamaNativeThinking: args.ollamaNativeThinking,
   });
   if (capability.mode === "unavailable" || capability.levels.length === 0) {
     return "none";
@@ -717,6 +726,7 @@ function contextualAutoRoute(input: ResolveAutoModelInput): AutoRouteDecisionV1 
       modelId: selected.id,
       target: targetEffort,
       simulatedEffortEnabled: input.routingContext?.simulatedEffortEnabled === true,
+      ollamaNativeThinking: selected.thinking === true,
     }),
     reasonCodes: Array.from(new Set(reasonCodes)),
   };

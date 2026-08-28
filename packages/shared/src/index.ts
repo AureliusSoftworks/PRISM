@@ -1327,6 +1327,8 @@ export {
   modelReasoningEffortPreferenceKey,
   modelSupportsNativeReasoningEffort,
   modelSupportsTurboMode,
+  ollamaModelIsKnownToSupportNativeThinking,
+  ollamaModelUsesTieredThinking,
   normalizeModelReasoningEffortPreference,
   normalizeProviderReasoningEffort,
   normalizeReasoningEffort,

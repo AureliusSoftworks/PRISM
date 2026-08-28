@@ -17693,17 +17693,17 @@ function buildRoutes(): RouteDefinition[] {
             : "A valid Prism Refract request is required.",
         );
       }
-      // Refract is foreground generation, but its model belongs to Prism —
-      // never to the navbar/chat picker or a client-supplied provider. The
-      // account's global LOCAL/ONLINE mode is the hard privacy boundary.
+      // Refract snapshots the account's global provider/model/Effort routing
+      // at request time. Client-supplied routing cannot weaken the account's
+      // LOCAL privacy boundary.
       const effectiveResponseMode =
         user.preferred_provider === "local" ? "local" : "online";
       const requestedProvider =
         effectiveResponseMode === "local" ? "local" : user.preferred_provider;
       const modelOverride =
         effectiveResponseMode === "local"
-          ? user.prism_refract_local_model
-          : user.prism_refract_online_model;
+          ? user.preferred_local_model
+          : user.preferred_online_model;
       const refractRuntime = await contextualTextRuntimeForUser({
         userId,
         user,
@@ -31236,8 +31236,6 @@ function buildRoutes(): RouteDefinition[] {
           prismDefaultLlmModel: user.prism_local_llm_model ?? "",
           prismCloudLlmModel: user.prism_cloud_llm_model ?? "",
           prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
-          prismRefractLocalModel: user.prism_refract_local_model ?? "",
-          prismRefractOnlineModel: user.prism_refract_online_model ?? "",
           textModelDisplayNames: parseStoredTextModelDisplayNames(
             user.text_model_display_names,
           ),
@@ -31847,53 +31845,6 @@ function buildRoutes(): RouteDefinition[] {
         }
         throw error;
       }
-    }),
-    route("PATCH", "/api/settings/prism-refract-model", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const user = getUserRow(userId);
-      const body = ctx.body as Record<string, unknown>;
-      if (body.model !== undefined && body.model !== null && typeof body.model !== "string") {
-        throw new HttpError(400, "A Prism Refract model must be text or Auto.");
-      }
-      if (
-        body.responseMode !== undefined &&
-        body.responseMode !== "local" &&
-        body.responseMode !== "online"
-      ) {
-        throw new HttpError(400, "A Prism Refract response mode must be LOCAL or ONLINE.");
-      }
-      const model = typeof body.model === "string" ? body.model.trim().slice(0, 200) : "";
-      // Persist the lane shown beside this picker. An in-flight global provider
-      // save must not write a concrete choice into the opposite slot and make
-      // the controlled picker snap back to Auto. Generation still resolves
-      // the current server-side privacy lane independently at request time.
-      const responseMode =
-        body.responseMode === "local" || body.responseMode === "online"
-          ? body.responseMode
-          : user.preferred_provider === "local"
-            ? "local"
-            : "online";
-      // Persist the visible picker choice without a second live catalog
-      // discovery. Refract revalidates this id against the active lane at
-      // request time and falls back to Auto if it is no longer runnable.
-      // A transiently empty save-time catalog must not snap a valid choice
-      // back to Auto.
-      const column =
-        responseMode === "local"
-          ? "prism_refract_local_model"
-          : "prism_refract_online_model";
-      db.prepare(`UPDATE users SET ${column} = ? WHERE id = ?`).run(
-        model || null,
-        userId,
-      );
-      json(ctx.res, 200, {
-        ok: true,
-        responseMode,
-        prismRefractLocalModel:
-          responseMode === "local" ? model : user.prism_refract_local_model ?? "",
-        prismRefractOnlineModel:
-          responseMode === "online" ? model : user.prism_refract_online_model ?? "",
-      });
     }),
     route("PATCH", "/api/default-bot", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -34601,9 +34552,9 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
-      // Avatar Studio sends routing:"refract" so compile follows Prism's
-      // Refract picker, never the navbar or Background helper. Archive import
-      // and other callers that omit routing keep the paired auxiliary path.
+      // Avatar Studio sends routing:"refract" so compile snapshots the global
+      // provider/model/Effort controls. Archive import and other callers that
+      // omit routing keep the paired auxiliary path.
       const useRefractRouting = body.routing === "refract";
       const hasClientRouting =
         useRefractRouting ||
@@ -34634,8 +34585,8 @@ function buildRoutes(): RouteDefinition[] {
           : readProvider(body.preferredProvider);
         const requestedModelOverride = useRefractRouting
           ? responseMode === "local"
-            ? user.prism_refract_local_model
-            : user.prism_refract_online_model
+            ? user.preferred_local_model
+            : user.preferred_online_model
           : readModelOverride(body.modelOverride);
         const trimmedModelOverride = requestedModelOverride?.trim() || "";
         const explicitModelOverride =

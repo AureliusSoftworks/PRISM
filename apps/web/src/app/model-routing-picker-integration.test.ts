@@ -607,18 +607,41 @@ describe("shared routing model picker integration", () => {
     assert.match(pageSource, /configured Ollama provider/u);
   });
 
-  it("uses None instead of Default for simulated non-thinking models", () => {
+  it("keeps None for simulated models and shifts Ollama thinking to Default", () => {
     assert.match(
       pageSource,
       /modelEffortValueForCapability\(capability, stored\)/u,
     );
     assert.match(
       pageSource,
-      /capability\.mode === "simulated"[\s\S]{0,80}\? "none"[\s\S]{0,120}capability\.mode === "native-thinking"[\s\S]{0,80}\? "minimal"[\s\S]{0,80}: "default"/u,
+      /capability\.mode === "simulated"[\s\S]{0,80}\? "none"[\s\S]{0,120}capability\.mode === "native-thinking"[\s\S]{0,80}\? "default"/u,
+    );
+    assert.match(
+      pageSource,
+      /capability\.mode === "native-thinking"[\s\S]{0,80}"Native thinking · simulated above Default"/u,
     );
     assert.match(
       tutorialSource,
       /Models without a built-in thinking dial always get Prism/u,
+    );
+    assert.match(
+      tutorialSource,
+      /Ollama thinking models use Default through High and never offer None or Extra High/u,
+    );
+  });
+
+  it("passes Ollama Cloud catalog thinking metadata into the shared effort capability", () => {
+    assert.match(
+      pageSource,
+      /provider: args\.provider,[\s\S]{0,220}ollamaNativeThinking: catalogEntry\?\.thinking === true/u,
+    );
+    assert.match(
+      pageSource,
+      /provider: model\.provider,[\s\S]{0,220}ollamaNativeThinking: model\.thinking === true/u,
+    );
+    assert.match(
+      reasoningEffortSource,
+      /args\.provider === "local" \|\| args\.provider === "ollama_cloud"/u,
     );
   });
 
@@ -656,8 +679,12 @@ describe("shared routing model picker integration", () => {
     );
   });
 
-  it("steps available Model choices from the wheel like Effort", () => {
+  it("steps navbar Model choices while leaving full picker lists scrollable", () => {
     assert.match(pageSource, /const handleModelWheel =/u);
+    assert.match(
+      pageSource,
+      /const handleModelWheel =[^]*?if \(\s*!navbarPicker \|\|/u,
+    );
     assert.match(pageSource, /modelPickerWheelDirection\(event\.deltaX, event\.deltaY\)/u);
     assert.match(pageSource, /modelPickerStepValue\([\s\S]{0,120}selectableModelValues/u);
     assert.match(
@@ -669,6 +696,10 @@ describe("shared routing model picker integration", () => {
       /const handleModelWheel =[\s\S]{0,1400}setHighlightedModelValue\(nextValue\)[\s\S]{0,240}onChange\(nextValue\)/u,
     );
     assert.match(pageSource, /onWheel=\{handleModelWheel\}/u);
+    assert.match(
+      pageSource,
+      /if \(navbarPicker\) \{\s*document\.addEventListener\("wheel", handleQuickWheel/u,
+    );
   });
 
   it("gives navbar picker wheels tactile feedback only when selection changes", () => {

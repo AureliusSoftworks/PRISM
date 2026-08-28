@@ -12,15 +12,16 @@ const botcastSource = readFileSync(
 );
 
 describe("Prism Refract API contract", () => {
-  it("requires auth and routes Refract through its own account-persisted, mode-bound runtime", () => {
+  it("requires auth and snapshots the global mode, model, and Effort runtime", () => {
     const route = serverSource.match(
       /route\("POST", "\/api\/prism\/refract"[\s\S]*?route\("GET", "\/api\/botcast\/shows"/u,
     )?.[0] ?? "";
     assert.match(route, /const userId = requireAuth\(ctx\)/u);
     assert.match(route, /normalizePrismRefractRequest\(ctx\.body\)/u);
     assert.match(route, /user\.preferred_provider === "local" \? "local" : "online"/u);
-    assert.match(route, /user\.prism_refract_local_model/u);
-    assert.match(route, /user\.prism_refract_online_model/u);
+    assert.match(route, /user\.preferred_local_model/u);
+    assert.match(route, /user\.preferred_online_model/u);
+    assert.doesNotMatch(route, /user\.prism_refract_(?:local|online)_model/u);
     assert.match(route, /fallbackWhenExplicitModelIsUnavailable: true/u);
     assert.doesNotMatch(route, /request\.preferredProvider/u);
     assert.doesNotMatch(route, /request\.modelOverride/u);
@@ -51,20 +52,15 @@ describe("Prism Refract API contract", () => {
     assert.match(route, /generateBotcastRefractDraft/u);
   });
 
-  it("saves Refract choices in the authenticated user's visible picker lane without a brittle catalog probe", () => {
-    const route = serverSource.match(
-      /route\("PATCH", "\/api\/settings\/prism-refract-model"[\s\S]*?route\("PATCH", "\/api\/default-bot"/u,
+  it("retires the dedicated Refract model settings endpoint", () => {
+    assert.doesNotMatch(serverSource, /\/api\/settings\/prism-refract-model/u);
+    const settingsResponse = serverSource.match(
+      /route\("GET", "\/api\/settings"[\s\S]*?route\("PUT", "\/api\/model-effort-preferences"/u,
     )?.[0] ?? "";
-    assert.match(route, /const userId = requireAuth\(ctx\)/u);
-    assert.match(
-      route,
-      /body\.responseMode === "local" \|\| body\.responseMode === "online"/u,
+    assert.doesNotMatch(
+      settingsResponse,
+      /prismRefractLocalModel|prismRefractOnlineModel/u,
     );
-    assert.match(route, /user\.preferred_provider === "local"/u);
-    assert.doesNotMatch(route, /buildModelCatalog/u);
-    assert.doesNotMatch(route, /That model is unavailable in Prism's/u);
-    assert.match(route, /prism_refract_local_model/u);
-    assert.match(route, /prism_refract_online_model/u);
   });
 
   it("keeps Prism Home and the floating companion on the same dedicated local model", () => {

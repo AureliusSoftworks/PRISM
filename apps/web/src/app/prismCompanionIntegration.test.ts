@@ -51,13 +51,11 @@ test("mounts the global companion on product shells and submerges it behind top-
     page,
     /companionSubmergedByMainPanel =\s*prismCompanionDisabledByMainPanel\([\s\S]*botAvatarCustomizerOpen \|\| botGeneratorOpen[\s\S]*submerged=\{companionSubmergedByMainPanel\}/u,
   );
-  assert.match(page, /const refractModelPicker = \(/u);
-  assert.match(page, /prismRefractLocalModel/u);
-  assert.match(page, /prismRefractOnlineModel/u);
-  assert.match(page, /refractModelPicker=\{refractModelPicker\}/u);
-  assert.match(page, /refractModelResponseMode=\{refractResponseMode\}/u);
-  assert.match(component, /refractModelPicker\?: ReactNode/u);
-  assert.match(component, /refractModelResponseMode\?:/u);
+  assert.doesNotMatch(page, /prismRefractLocalModel|prismRefractOnlineModel/u);
+  assert.doesNotMatch(page, /\/api\/settings\/prism-refract-model/u);
+  assert.match(page, /refractResponseMode=\{botGeneratorResponseMode\}/u);
+  assert.doesNotMatch(component, /refractModelPicker/u);
+  assert.match(component, /refractResponseMode\?:/u);
   assert.doesNotMatch(component, /refractRouting/u);
 });
 
@@ -720,21 +718,17 @@ test("switches the floating Prism panel among Synthesis, Chat, and Notes", () =>
   assert.match(component, /id="global-prism-synthesis"/u);
   assert.match(
     component,
-    /className=\{styles\.synthesisRefractRow\}[\s\S]*className=\{styles\.refractModelPicker\}/u,
+    /className=\{styles\.synthesisRefractRow\}[\s\S]*className=\{styles\.synthesisRefractGuidance\}/u,
   );
   assert.match(companionCss, /\.synthesisRefractRow\s*\{/u);
-  assert.match(
-    companionCss,
-    /\.refractModelPicker\s*>\s*:global\(\[data-provider\]\)[\s\S]*?height:\s*32px/u,
-  );
-  assert.match(
-    companionCss,
-    /\.refractModelPicker\s*\{[\s\S]*?width:\s*100%/u,
-  );
-  assert.match(component, /Refract model/u);
+  assert.doesNotMatch(companionCss, /\.refractModelPicker/u);
+  assert.match(component, /Refract routing/u);
   assert.match(component, /<span>App mode<\/span>/u);
   assert.match(component, /className=\{styles\.synthesisRefractGuidance\}/u);
-  assert.match(component, /Your chat and bot[\s\S]*model settings stay unchanged/u);
+  assert.match(
+    component,
+    /Refract uses the global Model and Effort settings active[\s\S]*when you begin refracting/u,
+  );
   assert.match(
     companionCss,
     /:global\(\[data-theme="light"\]\)[\s\S]*?\.synthesisRefractPrivacy\[data-lane="local"\][\s\S]*?color:\s*#0b5f6d/u,

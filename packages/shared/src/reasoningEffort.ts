@@ -501,9 +501,9 @@ export function modelSupportsTurboMode(
 
 export interface ModelReasoningEffortCapabilityV1 {
   /**
-   * `native-thinking` — LOCAL model with its own trained chain-of-thought
-   * (DeepSeek R1, Qwen3, …): Minimal runs pure native thinking, higher rungs
-   * layer the simulated ladder on top of it.
+   * `native-thinking` — Ollama model with its own trained chain-of-thought.
+   * Default owns the model's native baseline. Minimal through High add
+   * progressively more work without exposing an unreliable None state.
    */
   mode: "native" | "native-thinking" | "simulated" | "unavailable";
   levels: readonly ModelReasoningEffortPreference[];
@@ -558,11 +558,36 @@ const LOCAL_SIMULATED_REASONING_LEVELS = [
   "high",
   "xhigh",
 ] as const satisfies readonly ModelReasoningEffortPreference[];
-/** Native thinking is on/off; without simulation only those stops remain. */
-const LOCAL_NATIVE_THINKING_ONLY_LEVELS = [
-  "none",
+/** Player-facing Ollama ladder above the model's native Default baseline. */
+const OLLAMA_THINKING_LEVELS = [
   "minimal",
+  "low",
+  "medium",
+  "high",
 ] as const satisfies readonly ModelReasoningEffortPreference[];
+/** GPT-OSS has three provider-native tiers when simulation is unavailable. */
+const OLLAMA_TIERED_NATIVE_ONLY_LEVELS = [
+  "minimal",
+  "low",
+  "medium",
+] as const satisfies readonly ModelReasoningEffortPreference[];
+
+/**
+ * Models whose published Ollama integration supports the native `think` flag.
+ * Keep this deliberately narrow: daemon-discovered LOCAL models should use
+ * their reported capability instead of inheriting a family-name guess.
+ */
+export function ollamaModelUsesTieredThinking(modelId: string): boolean {
+  const normalized = modelId
+    .trim()
+    .toLowerCase()
+    .replace(/^ollama-cloud-direct:/u, "");
+  return normalized === "gpt-oss" || normalized.startsWith("gpt-oss:");
+}
+
+export function ollamaModelIsKnownToSupportNativeThinking(modelId: string): boolean {
+  return ollamaModelUsesTieredThinking(modelId);
+}
 
 export function normalizeReasoningEffort(value: unknown): ReasoningEffort {
   if (typeof value !== "string") return "auto";
@@ -741,6 +766,9 @@ export function modelSupportsNativeReasoningEffort(
 ): boolean {
   if (provider === "openai") return openAiModelSupportsReasoningEffort(modelId);
   if (provider === "anthropic") return anthropicModelSupportsReasoningEffort(modelId);
+  if (provider === "ollama_cloud") {
+    return ollamaModelIsKnownToSupportNativeThinking(modelId);
+  }
   return false;
 }
 
@@ -749,18 +777,29 @@ export function resolveModelReasoningEffortCapability(args: {
   modelId: string;
   /** Pass `false` to make simulated Effort unavailable for non-native models. */
   simulatedEffortEnabled?: boolean;
-  /** LOCAL model reports the Ollama `thinking` capability (DeepSeek R1, Qwen3, …). */
+  /** Ollama model reports its native `thinking` capability. */
+  ollamaNativeThinking?: boolean;
+  /** @deprecated Use `ollamaNativeThinking`; retained for persisted callers. */
   localNativeThinking?: boolean;
 }): ModelReasoningEffortCapabilityV1 {
   const simulatedEnabled = args.simulatedEffortEnabled !== false;
-  if (args.provider === "local") {
-    if (args.localNativeThinking === true) {
+  const reportedOllamaThinking =
+    args.ollamaNativeThinking ?? args.localNativeThinking;
+  const ollamaNativeThinking =
+    reportedOllamaThinking === true ||
+    (reportedOllamaThinking === undefined &&
+      args.provider === "ollama_cloud" &&
+      ollamaModelIsKnownToSupportNativeThinking(args.modelId));
+  if (args.provider === "local" || args.provider === "ollama_cloud") {
+    if (ollamaNativeThinking) {
       return {
         mode: "native-thinking",
         levels: simulatedEnabled
-          ? LOCAL_SIMULATED_REASONING_LEVELS
-          : LOCAL_NATIVE_THINKING_ONLY_LEVELS,
-        supportsNone: true,
+          ? OLLAMA_THINKING_LEVELS
+          : ollamaModelUsesTieredThinking(args.modelId)
+            ? OLLAMA_TIERED_NATIVE_ONLY_LEVELS
+            : [],
+        supportsNone: false,
         supportsMax: false,
       };
     }
@@ -852,7 +891,9 @@ export function effectiveModelReasoningEffort(args: {
   modelId: string;
   preference: unknown;
   simulatedEffortEnabled?: boolean;
-  /** LOCAL model reports the Ollama `thinking` capability. */
+  /** Ollama model reports the native `thinking` capability. */
+  ollamaNativeThinking?: boolean;
+  /** @deprecated Use `ollamaNativeThinking`; retained for persisted callers. */
   localNativeThinking?: boolean;
 }): ModelReasoningEffortPreference | null {
   const preference = normalizeModelReasoningEffortPreference(args.preference);

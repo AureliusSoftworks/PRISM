@@ -44,9 +44,11 @@
 
 .vertexLabels {
   position: absolute;
-  inset: 5px 4px auto;
-  width: calc(100% - 8px);
-  height: min(100%, 258px);
+  top: 8px;
+  left: 50%;
+  width: min(calc(100% - 24px), 340px);
+  aspect-ratio: 6 / 5;
+  transform: translateX(-50%);
   pointer-events: none;
   color: var(--fg-muted);
   font-size: .7rem;
@@ -55,8 +57,18 @@
 
 .vertexLabels span { position: absolute; }
 .cloudLabel { top: 0; left: 50%; transform: translateX(-50%); color: var(--provider-accent-ollama-cloud, #7de0bd); }
-.openAiLabel { left: 2px; bottom: 0; color: var(--provider-accent-openai); }
-.anthropicLabel { right: 2px; bottom: 0; color: var(--provider-accent-anthropic); }
+.openAiLabel {
+  top: 92.8%;
+  left: 8%;
+  transform: translate(calc(-100% - 8px), -50%);
+  color: var(--provider-accent-openai);
+}
+.anthropicLabel {
+  top: 92.8%;
+  right: 8%;
+  transform: translate(calc(100% + 8px), -50%);
+  color: var(--provider-accent-anthropic);
+}
 
 .summary {
   color: var(--fg-muted);
@@ -81,4 +93,16 @@
 @media (max-width: 540px) {
   .shell { padding-inline: 6px; }
   .pad { width: min(100%, 300px); }
+  .vertexLabels { width: min(calc(100% - 12px), 300px); }
+}
+
+@media (max-width: 420px) {
+  .openAiLabel {
+    left: 10%;
+    transform: translate(0, -50%);
+  }
+  .anthropicLabel {
+    right: 10%;
+    transform: translate(0, -50%);
+  }
 }

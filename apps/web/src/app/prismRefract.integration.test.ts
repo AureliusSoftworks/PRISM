@@ -487,24 +487,18 @@ describe("Prism Refract integration", () => {
     );
   });
 
-  it("keeps foreground Refract on Prism's dedicated mode-aware model contract", () => {
-    assert.match(
-      companionSource,
-      /refractModelPicker\?: ReactNode/u,
-    );
+  it("keeps foreground Refract on the global mode, model, and Effort contract", () => {
+    assert.doesNotMatch(companionSource, /refractModelPicker/u);
     assert.doesNotMatch(companionSource, /refractRouting/u);
-    assert.match(pageSource, /prismRefractLocalModel/u);
-    assert.match(pageSource, /prismRefractOnlineModel/u);
-    assert.match(pageSource, /api<\{[\s\S]*"\/api\/settings\/prism-refract-model"/u);
+    assert.doesNotMatch(pageSource, /prismRefractLocalModel|prismRefractOnlineModel/u);
+    assert.doesNotMatch(pageSource, /\/api\/settings\/prism-refract-model/u);
     assert.match(
       pageSource,
-      /body: JSON\.stringify\(\{[\s\S]{0,180}responseMode: refractResponseMode/u,
+      /const botGeneratorResolvedChoice = resolveModelChoiceForResponseMode\(\{[\s\S]*chatModelChoiceByProvider/u,
     );
-    assert.match(pageSource, /provider=\{refractResponseMode\}/u);
-    assert.match(pageSource, /portalZIndex=\{861\}/u);
     assert.match(
       companionSource,
-      /panelView === "synthesis"[\s\S]*?className=\{styles\.synthesisRefractRow\}[\s\S]*className=\{styles\.refractModelPicker\}/u,
+      /panelView === "synthesis"[\s\S]*?className=\{styles\.synthesisRefractRow\}[\s\S]*className=\{styles\.synthesisRefractGuidance\}/u,
     );
     assert.match(
       companionSource,
@@ -522,17 +516,17 @@ describe("Prism Refract integration", () => {
       chatPanelBranch,
       /refractModelPicker|styles\.refractModelPicker/u,
     );
-    assert.match(companionSource, /Refract model/u);
+    assert.match(companionSource, /Refract routing/u);
     assert.match(companionSource, /aria-label=\{`App mode /u);
     assert.match(companionSource, /className=\{styles\.refractLaneBadge\}/u);
-    assert.match(companionSource, /data-lane=\{refractModelResponseMode\}/u);
+    assert.match(companionSource, /data-lane=\{refractResponseMode\}/u);
     assert.match(
       companionSource,
       /title="Controlled by the global LOCAL\/ONLINE privacy toggle"/u,
     );
     assert.match(
       companionSource,
-      /This choice is used only by Refract\. Your chat and bot[\s\S]*model settings stay unchanged\./u,
+      /Refract uses the global Model and Effort settings active[\s\S]*when you begin refracting\./u,
     );
     assert.match(
       companionSource,

@@ -48,6 +48,7 @@ import {
 import {
   getAuxiliaryProvider,
   LocalOllamaProvider,
+  ollamaCloudModelSupportsNativeThinking,
   localModelSupportsNativeThinking,
   selectProvider,
   ANTHROPIC_DEFAULT_MODEL,
@@ -170,6 +171,7 @@ import {
   isDisabledModelChoice,
   isPrismMoodIgnoring,
   modelSupportsNativeReasoningEffort,
+  ollamaModelUsesTieredThinking,
   normalizeProviderReasoningEffort,
   normalizeReasoningEffort,
   reasoningGenerationBudgetMs,
@@ -1442,10 +1444,16 @@ function simulatedEffortNoticeDetail(args: {
   provider: LlmProvider;
   botOverrides: GenerateOptions | undefined;
   effort: ReasoningEffort;
+  simulated: boolean;
 }): string | null {
   if (args.effort === "auto" || args.effort === "none") return null;
   if (args.provider.name === "local") return null;
   const model = describeRequestedModel(args.provider, args.botOverrides);
+  if (args.provider.name === "ollama_cloud") {
+    return args.simulated
+      ? `simulated_effort; provider=${args.provider.name}; model=${model}; effort=${args.effort}; simulated=true`
+      : `native_reasoning_preserved; provider=${args.provider.name}; model=${model}; effort=${args.effort}; simulated=false`;
+  }
   if (providerModelSupportsNativeReasoningEffort(args.provider, args.botOverrides)) {
     return `native_reasoning_preserved; provider=${args.provider.name}; model=${model}; effort=${args.effort}; simulated=false`;
   }
@@ -1458,16 +1466,31 @@ function simulatedEffortNoticeMessage(detail: string): string {
     : "Simulated effort skipped";
 }
 
-function shouldSimulateReasoningEffort(args: {
+export function shouldSimulateReasoningEffort(args: {
   provider: LlmProvider;
   botOverrides: GenerateOptions | undefined;
   effort: ReasoningEffort;
-  /** LOCAL model natively thinks: Minimal is pure native reasoning. */
-  localNativeThinking?: boolean;
+  /** Ollama model natively thinks: its provider baseline is pure native reasoning. */
+  ollamaNativeThinking?: boolean;
 }): boolean {
   if (args.effort === "auto" || args.effort === "none") return false;
-  if (args.localNativeThinking === true && args.effort === "minimal") {
-    return false;
+  if (
+    (args.provider.name === "local" || args.provider.name === "ollama_cloud") &&
+    args.ollamaNativeThinking !== undefined
+  ) {
+    if (args.ollamaNativeThinking === false) return true;
+    if (
+      ollamaModelUsesTieredThinking(
+        describeRequestedModel(args.provider, args.botOverrides),
+      )
+    ) {
+      // GPT-OSS uses its three native tiers through Medium; High adds PRISM's
+      // top preparation pass above native High.
+      return args.effort === "high";
+    }
+    // Default leaves effort unset and keeps the model's native baseline;
+    // every explicit stop adds PRISM preparation above native thinking.
+    return true;
   }
   return !providerModelSupportsNativeReasoningEffort(
     args.provider,
@@ -3058,17 +3081,17 @@ async function generateChatResponse(args: {
     const requestedProviderEffort = normalizeProviderReasoningEffort(
       savedEffort ?? botOverrides?.reasoningEffort,
     );
-    const localNativeThinking =
-      provider.name === "local" &&
-      (await localModelSupportsNativeThinking(model, {
-        secondaryOllamaHost: args.secondaryOllamaHost ?? undefined,
-      }));
-    // A thinking-capable local model without a saved Effort defaults to
-    // Minimal: one native chain-of-thought, no simulated passes.
-    const providerEffort: ProviderReasoningEffort =
-      requestedProviderEffort === "auto" && localNativeThinking
-        ? "minimal"
-        : requestedProviderEffort;
+    const ollamaNativeThinking =
+      (provider.name === "local" &&
+        (await localModelSupportsNativeThinking(model, {
+          secondaryOllamaHost: args.secondaryOllamaHost ?? undefined,
+        }))) ||
+      (provider.name === "ollama_cloud" &&
+        (await ollamaCloudModelSupportsNativeThinking(
+          model,
+          args.ollamaCloudApiKey,
+        )));
+    const providerEffort: ProviderReasoningEffort = requestedProviderEffort;
     const effort: ReasoningEffort =
       providerEffort === "max" ? "xhigh" : providerEffort;
     effortForNativeThinking = effort;
@@ -3093,12 +3116,13 @@ async function generateChatResponse(args: {
       provider,
       botOverrides: overrides,
       effort,
-      localNativeThinking,
+      ollamaNativeThinking,
     });
     const simulatedEffortNotice = simulatedEffortNoticeDetail({
       provider,
       botOverrides: overrides,
       effort,
+      simulated: simulatedEffort,
     });
     if (simulatedEffortNotice) {
       args.onSimulatedEffortNotice?.(simulatedEffortNotice);

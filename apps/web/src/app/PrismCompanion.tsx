@@ -282,10 +282,8 @@ export interface PrismCompanionProps {
   submerged?: boolean;
   keyboardShortcut: string | null;
   surface: PrismCompanionSurfaceReference;
-  /** Parent-owned picker keeps Prism Refract model state separate from navbar chat routing. */
-  refractModelPicker?: ReactNode;
-  /** Global Refract lane for the read-only badge in Synthesis. */
-  refractModelResponseMode?: "local" | "online";
+  /** Global privacy lane shown beside Refract's shared Model/Effort contract. */
+  refractResponseMode?: "local" | "online";
   /** Chat and Zen share one route; this is the authoritative view boundary. */
   presentation?: PrismCompanionPresentation;
   /** The account's existing "Same session after idle" duration. */
@@ -619,8 +617,7 @@ export default function PrismCompanion({
   submerged = false,
   keyboardShortcut,
   surface,
-  refractModelPicker,
-  refractModelResponseMode = "local",
+  refractResponseMode = "local",
   presentation = null,
   zenSessionIdleGapMs = DEFAULT_PRISM_COMPANION_SESSION_IDLE_GAP_MS,
   chatHomeHeroDocked = false,
@@ -5925,46 +5922,37 @@ export default function PrismCompanion({
               className={`${styles.composer} ${styles.sessionNoteComposer} ${styles.synthesisPanel}`}
               aria-label="Prism Refract settings and recent synthesized images"
             >
-              {refractModelPicker ? (
-                <div className={styles.synthesisRefractRow}>
-                  <header className={styles.synthesisRefractHeader}>
-                    <span className={styles.synthesisRefractIdentity}>
-                      Refract model
-                    </span>
-                    <span
-                      className={styles.refractLaneBadge}
-                      data-lane={refractModelResponseMode}
-                      title="Controlled by the global LOCAL/ONLINE privacy toggle"
-                      aria-label={`App mode ${(
-                        refractModelResponseMode ?? "local"
-                      ).toUpperCase()}. Controlled by the global LOCAL/ONLINE privacy toggle.`}
-                    >
-                      <span>App mode</span>
-                      <span aria-hidden="true">·</span>
-                      <strong>
-                        {(refractModelResponseMode ?? "local").toUpperCase()}
-                      </strong>
-                    </span>
-                  </header>
-                  <div className={styles.refractModelPicker}>
-                    {refractModelPicker}
-                  </div>
-                  <div className={styles.synthesisRefractGuidance}>
-                    <p>
-                      This choice is used only by Refract. Your chat and bot
-                      model settings stay unchanged.
-                    </p>
-                    <p
-                      className={styles.synthesisRefractPrivacy}
-                      data-lane={refractModelResponseMode}
-                    >
-                      {refractModelResponseMode === "online"
-                        ? "ONLINE may send the item being refracted to an online provider."
-                        : "LOCAL keeps the item being refracted offline."}
-                    </p>
-                  </div>
+              <div className={styles.synthesisRefractRow}>
+                <header className={styles.synthesisRefractHeader}>
+                  <span className={styles.synthesisRefractIdentity}>
+                    Refract routing
+                  </span>
+                  <span
+                    className={styles.refractLaneBadge}
+                    data-lane={refractResponseMode}
+                    title="Controlled by the global LOCAL/ONLINE privacy toggle"
+                    aria-label={`App mode ${refractResponseMode.toUpperCase()}. Controlled by the global LOCAL/ONLINE privacy toggle.`}
+                  >
+                    <span>App mode</span>
+                    <span aria-hidden="true">·</span>
+                    <strong>{refractResponseMode.toUpperCase()}</strong>
+                  </span>
+                </header>
+                <div className={styles.synthesisRefractGuidance}>
+                  <p>
+                    Refract uses the global Model and Effort settings active
+                    when you begin refracting.
+                  </p>
+                  <p
+                    className={styles.synthesisRefractPrivacy}
+                    data-lane={refractResponseMode}
+                  >
+                    {refractResponseMode === "online"
+                      ? "ONLINE may send the item being refracted to an online provider."
+                      : "LOCAL keeps the item being refracted offline."}
+                  </p>
                 </div>
-              ) : null}
+              </div>
               <section
                 className={styles.synthesisRecentRail}
                 aria-label="Recently synthesized images"

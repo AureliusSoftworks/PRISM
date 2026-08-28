@@ -1244,35 +1244,6 @@
   letter-spacing: .09em;
   text-transform: uppercase;
 }
-.refractModelPicker {
-  width: 100%;
-  min-width: 0;
-}
-.refractModelPicker > :global([data-provider]) {
-  width: 100%;
-  height: 32px;
-  border-color: #9ceaff2f;
-  background: color-mix(in srgb, var(--bg-surface, #151311) 88%, transparent);
-  box-shadow: inset 0 1px 0 #ffffff0d;
-}
-.refractModelPicker :global([data-prism-model-picker-trigger="true"]) {
-  width: 100%;
-  max-width: none;
-  padding: 0 12px 0 10px;
-  border: 0;
-  border-radius: inherit;
-  color: var(--fg);
-  background: transparent;
-  font: inherit;
-}
-.refractModelPicker :global([data-prism-model-picker-trigger="true"]) > :first-child {
-  display: none;
-}
-.refractModelPicker :global([data-prism-model-picker-trigger="true"]) > :nth-child(2) {
-  flex: 1 1 auto;
-  max-width: none;
-  text-align: left;
-}
 .synthesisRefractGuidance {
   display: grid;
   gap: 3px;
@@ -1364,9 +1335,6 @@
   border-color: #d0a84f33;
   color: #ffd89f;
   background: #d0a84f12;
-}
-.refractModelPicker :global([data-prism-model-picker-trigger="true"]):disabled {
-  opacity: 1;
 }
 .composer footer { justify-content: flex-end; }
 .composer small { flex: 1 1 auto; color: var(--fg-subtle, #77716d); font: .56rem/1.3 system-ui, sans-serif; }
@@ -1649,11 +1617,6 @@
 :global([data-theme="light"]) .refractTutorial p,
 :global([data-theme="light"]) .refractPrompt small {
   color: #52677d;
-}
-
-:global([data-theme="light"]) .refractModelPicker > :global([data-provider]) {
-  border-color: #54708b2f;
-  background: #ffffffa8;
 }
 
 :global([data-theme="light"]) .refractLaneBadge {

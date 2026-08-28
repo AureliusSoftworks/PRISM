@@ -581,4 +581,29 @@ describe("ONLINE Auto provider weights", () => {
     });
     assert.equal(resolved.provider, "ollama_cloud");
   });
+
+  it("preserves discovered Cloud thinking metadata when Auto clamps effort", () => {
+    const resolved = resolveAutoModel({
+      provider: "ollama_cloud",
+      lane: "online",
+      hiddenModelIds: [],
+      catalog: {
+        local: [],
+        online: [
+          {
+            id: "future-thinking:cloud",
+            provider: "ollama_cloud",
+            thinking: true,
+          },
+        ],
+      },
+      routingContext: {
+        surface: "chat",
+        inputText: "Analyze this carefully.",
+        highStakes: true,
+        simulatedEffortEnabled: false,
+      },
+    });
+    assert.equal(resolved.autoRoute?.reasoningEffort, "minimal");
+  });
 });

@@ -196,11 +196,18 @@ describe("selectProvider", () => {
 
     it("sends bearer auth directly to the fixed Ollama Cloud API", async () => {
       const originalFetch = globalThis.fetch;
-      let requestedUrl = "";
-      let authorization = "";
+      const requestedUrls: string[] = [];
+      const authorizations: string[] = [];
+      let requestedBody: Record<string, unknown> = {};
       globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-        requestedUrl = String(input);
-        authorization = new Headers(init?.headers).get("authorization") ?? "";
+        const requestedUrl = String(input);
+        requestedUrls.push(requestedUrl);
+        authorizations.push(new Headers(init?.headers).get("authorization") ?? "");
+        if (requestedUrl.endsWith("/api/show")) {
+          assert.deepEqual(JSON.parse(String(init?.body)), { model: "gpt-oss" });
+          return Response.json({ capabilities: ["completion", "thinking"] });
+        }
+        requestedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
         return Response.json({ message: { content: "cloud ok" } });
       }) as typeof fetch;
       try {
@@ -214,13 +221,64 @@ describe("selectProvider", () => {
         const result = await provider.generateResponse(
           [{ role: "user", content: "hello" }],
           {
-            model: encodeDirectOllamaCloudModelId("qwen3.5"),
+            model: encodeDirectOllamaCloudModelId("gpt-oss"),
             allowFinalLocalFallback: false,
+            usagePurpose: "chat_reply",
+            maxTokens: 512,
           },
         );
         assert.equal(result, "cloud ok");
-        assert.equal(requestedUrl, "https://ollama.com/api/chat");
-        assert.equal(authorization, "Bearer ollama-test-key");
+        assert.deepEqual(requestedUrls, [
+          "https://ollama.com/api/show",
+          "https://ollama.com/api/chat",
+        ]);
+        assert.deepEqual(authorizations, [
+          "Bearer ollama-test-key",
+          "Bearer ollama-test-key",
+        ]);
+        assert.equal(requestedBody.think, "medium");
+        assert.equal(
+          (requestedBody.options as { num_predict?: number }).num_predict,
+          512 + 1_024,
+        );
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("sends a tiered GPT-OSS payload through the signed-in daemon", async () => {
+      const originalFetch = globalThis.fetch;
+      const requestedUrls: string[] = [];
+      let requestedBody: Record<string, unknown> = {};
+      globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        requestedUrls.push(url);
+        if (url.endsWith("/api/show")) {
+          assert.deepEqual(JSON.parse(String(init?.body)), {
+            model: "gpt-oss:120b-cloud",
+          });
+          return Response.json({ capabilities: ["completion", "thinking"] });
+        }
+        requestedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        return Response.json({ message: { content: "daemon cloud ok" } });
+      }) as typeof fetch;
+      try {
+        const result = await selectProvider("ollama_cloud").generateResponse(
+          [{ role: "user", content: "hello" }],
+          {
+            model: "gpt-oss:120b-cloud",
+            allowFinalLocalFallback: false,
+            usagePurpose: "chat_reply",
+            reasoningEffort: "xhigh",
+          },
+        );
+        assert.equal(result, "daemon cloud ok");
+        assert.equal(requestedUrls.length, 2);
+        assert.ok(requestedUrls[0]?.endsWith("/api/show"));
+        assert.ok(requestedUrls[1]?.endsWith("/api/chat"));
+        assert.equal(requestedBody.model, "gpt-oss:120b-cloud");
+        assert.equal(requestedBody.think, "high");
+        assert.equal(typeof requestedBody.think, "string");
       } finally {
         globalThis.fetch = originalFetch;
       }
@@ -414,6 +472,7 @@ describe("buildModelCatalog", () => {
 
   beforeEach(() => {
     resetModelCatalogCacheForTests();
+    resetLocalThinkingCapabilityCacheForTests();
   });
 
   afterEach(() => {
@@ -433,9 +492,9 @@ describe("buildModelCatalog", () => {
   });
 
   it("caches discovery for the API process lifetime", async () => {
-    let fetchCount = 0;
-    globalThis.fetch = (async () => {
-      fetchCount += 1;
+    let tagsFetchCount = 0;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      if (String(input).endsWith("/api/tags")) tagsFetchCount += 1;
       return new Response(JSON.stringify({ models: [{ name: "llama3.2" }] }), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -445,7 +504,7 @@ describe("buildModelCatalog", () => {
     const first = await buildModelCatalog(undefined);
     const second = await buildModelCatalog(undefined);
 
-    assert.equal(fetchCount, 1);
+    assert.equal(tagsFetchCount, 1);
     assert.equal(second, first);
   });
 
@@ -579,7 +638,7 @@ describe("buildModelCatalog", () => {
   });
 
   it("classifies Ollama Cloud ids as ONLINE instead of LOCAL", async () => {
-    globalThis.fetch = (async (input: string | URL | Request) => {
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/api/tags")) {
         return Response.json({
@@ -588,6 +647,16 @@ describe("buildModelCatalog", () => {
             { name: "minimax-m2.5:cloud" },
             { name: "gpt-oss:120b-cloud" },
           ],
+        });
+      }
+      if (url.endsWith("/api/show")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { model?: string };
+        return Response.json({
+          capabilities: ["minimax-m2.5:cloud", "gpt-oss:120b-cloud"].includes(
+            body.model ?? "",
+          )
+            ? ["completion", "thinking"]
+            : ["completion"],
         });
       }
       return new Response("unexpected", { status: 404 });
@@ -606,6 +675,14 @@ describe("buildModelCatalog", () => {
       cloud.map((model) => model.id),
       ["minimax-m2.5:cloud", "gpt-oss:120b-cloud"],
     );
+    assert.equal(
+      cloud.find((model) => model.id === "gpt-oss:120b-cloud")?.thinking,
+      true,
+    );
+    assert.equal(
+      cloud.find((model) => model.id === "minimax-m2.5:cloud")?.thinking,
+      true,
+    );
     assert.ok(cloud.every((model) => model.executionClass === "online"));
     assert.ok(cloud.every((model) => model.supportsStructuredOutput === false));
     assert.ok(cloud.every((model) => model.hostLabel === "Ollama Cloud"));
@@ -617,7 +694,12 @@ describe("buildModelCatalog", () => {
       const url = String(input);
       if (url === "https://ollama.com/api/tags") {
         authorizations.push(new Headers(init?.headers).get("authorization") ?? "");
-        return Response.json({ models: [{ name: "qwen3.5" }] });
+        return Response.json({ models: [{ name: "gpt-oss" }] });
+      }
+      if (url === "https://ollama.com/api/show") {
+        authorizations.push(new Headers(init?.headers).get("authorization") ?? "");
+        assert.deepEqual(JSON.parse(String(init?.body)), { model: "gpt-oss" });
+        return Response.json({ capabilities: ["completion", "thinking"] });
       }
       if (url.includes("/api/tags")) {
         return Response.json({ models: [{ name: "qwen3.5" }] });
@@ -631,15 +713,64 @@ describe("buildModelCatalog", () => {
       undefined,
       "ollama-test-key",
     );
-    const directId = encodeDirectOllamaCloudModelId("qwen3.5");
+    const directId = encodeDirectOllamaCloudModelId("gpt-oss");
     assert.ok(catalog.local.some((model) => model.id === "qwen3.5"));
     assert.ok(
       catalog.online.some(
         (model) => model.id === directId && model.provider === "ollama_cloud",
       ),
     );
+    assert.equal(
+      catalog.online.find((model) => model.id === directId)?.thinking,
+      true,
+    );
     assert.equal(isOllamaCloudModelReference(directId), true);
-    assert.deepEqual(authorizations, ["Bearer ollama-test-key"]);
+    assert.deepEqual(authorizations, [
+      "Bearer ollama-test-key",
+      "Bearer ollama-test-key",
+    ]);
+  });
+
+  it("uses the narrow Cloud family fallback only when show discovery fails", async () => {
+    let denyCapability = true;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/api/tags")) {
+        return Response.json({
+          models: [
+            { name: "gpt-oss:120b-cloud" },
+            { name: "unsupported:cloud" },
+          ],
+        });
+      }
+      if (url.endsWith("/api/show")) {
+        return denyCapability
+          ? Response.json({ capabilities: ["completion"] })
+          : new Response("unavailable", { status: 503 });
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const authoritative = await buildModelCatalog(undefined);
+    assert.equal(
+      authoritative.online.find((model) => model.id === "gpt-oss:120b-cloud")
+        ?.thinking,
+      undefined,
+    );
+    resetModelCatalogCacheForTests();
+    resetLocalThinkingCapabilityCacheForTests();
+    denyCapability = false;
+    const fallback = await buildModelCatalog(undefined);
+    assert.equal(
+      fallback.online.find((model) => model.id === "gpt-oss:120b-cloud")
+        ?.thinking,
+      true,
+    );
+    assert.equal(
+      fallback.online.find((model) => model.id === "unsupported:cloud")
+        ?.thinking,
+      undefined,
+    );
   });
 
   it("collapses Anthropic Haiku alias and snapshot ids into one picker entry", async () => {
@@ -920,6 +1051,42 @@ describe("LocalOllamaProvider secondary routing", () => {
     );
     assert.equal(response, "the answer");
     assert.deepEqual(collected, ["private chain of thought"]);
+  });
+
+  it("maps every GPT-OSS effort stop to a valid native think level", async () => {
+    resetLocalThinkingCapabilityCacheForTests();
+    const chatBodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/api/show")) {
+        return Response.json({ capabilities: ["completion", "thinking"] });
+      }
+      chatBodies.push(
+        JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+      );
+      return Response.json({ message: { content: "ok" } });
+    }) as typeof fetch;
+
+    const provider = new LocalOllamaProvider();
+    for (const reasoningEffort of [
+      undefined,
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ] as const) {
+      await provider.generateResponse([{ role: "user", content: "hi" }], {
+        model: "gpt-oss:latest",
+        usagePurpose: "chat_reply",
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+      });
+    }
+    assert.deepEqual(
+      chatBodies.map((body) => body.think),
+      ["medium", "low", "low", "medium", "high", "high", "high"],
+    );
+    assert.ok(chatBodies.every((body) => typeof body.think === "string"));
   });
 
   it("keeps think off for Effort None, private passes, and structured output", async () => {

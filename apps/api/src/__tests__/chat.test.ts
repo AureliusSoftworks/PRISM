@@ -26,6 +26,7 @@ import {
   resolvePrimaryChatProviderForPossibleImageToolTurn,
   sanitizeConversationTitle,
   shouldBypassSuppressionForImageIntent,
+  shouldSimulateReasoningEffort,
   userMessageSuggestsInChatImageRequest,
 } from "../chat.ts";
 import { rewindConversation } from "../conversations.ts";
@@ -43,6 +44,66 @@ const originalFetch = globalThis.fetch;
 
 /** 32 bytes for AES-256-GCM used by memory encryption in tests. */
 const CHAT_TEST_USER_KEY = Buffer.alloc(32, 7);
+
+describe("Ollama native-thinking effort", () => {
+  const provider = {
+    name: "ollama_cloud" as const,
+    async generateResponse() {
+      return "unused";
+    },
+    async embedText() {
+      return [];
+    },
+  } satisfies LlmProvider;
+
+  it("keeps Default native and simulates explicit boolean-thinking stops", () => {
+    assert.equal(
+      shouldSimulateReasoningEffort({
+        provider,
+        botOverrides: { model: "nemotron-3-super:cloud" },
+        effort: "auto",
+        ollamaNativeThinking: true,
+      }),
+      false,
+    );
+    for (const effort of ["minimal", "low", "medium", "high"] as const) {
+      assert.equal(
+        shouldSimulateReasoningEffort({
+          provider,
+          botOverrides: { model: "nemotron-3-super:cloud" },
+          effort,
+          ollamaNativeThinking: true,
+        }),
+        true,
+        effort,
+      );
+    }
+  });
+
+  it("uses GPT-OSS native tiers through Medium and simulates only High", () => {
+    for (const effort of ["minimal", "low", "medium"] as const) {
+      assert.equal(
+        shouldSimulateReasoningEffort({
+          provider,
+          botOverrides: { model: "gpt-oss:120b-cloud" },
+          effort,
+          ollamaNativeThinking: true,
+        }),
+        false,
+        effort,
+      );
+    }
+    assert.equal(
+      shouldSimulateReasoningEffort({
+        provider,
+        botOverrides: { model: "gpt-oss:120b-cloud" },
+        effort: "high",
+        ollamaNativeThinking: true,
+      }),
+      true,
+    );
+  });
+});
 
 describe("Cursed Tongue holder history", () => {
   it("projects clean intended speech only into the matching holder prompt", () => {

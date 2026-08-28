@@ -7,6 +7,7 @@ import {
   modelReasoningEffortPreferenceKey,
   modelSupportsNativeReasoningEffort,
   modelSupportsTurboMode,
+  ollamaModelIsKnownToSupportNativeThinking,
   normalizeModelReasoningEffortPreference,
   normalizeProviderReasoningEffort,
   normalizeReasoningEffort,
@@ -272,6 +273,73 @@ describe("reasoning effort helpers", () => {
     }
   });
 
+  it("keeps known Ollama Cloud GPT-OSS on the native-thinking ladder", () => {
+    for (const modelId of [
+      "gpt-oss",
+      "gpt-oss:120b-cloud",
+      "ollama-cloud-direct:gpt-oss",
+    ]) {
+      assert.equal(ollamaModelIsKnownToSupportNativeThinking(modelId), true, modelId);
+      assert.equal(modelSupportsNativeReasoningEffort("ollama_cloud", modelId), true);
+      assert.equal(
+        resolveModelReasoningEffortCapability({
+          provider: "ollama_cloud",
+          modelId,
+          simulatedEffortEnabled: true,
+        }).mode,
+        "native-thinking",
+      );
+    }
+    assert.deepEqual(
+      resolveModelReasoningEffortCapability({
+        provider: "ollama_cloud",
+        modelId: "gpt-oss:120b-cloud",
+        simulatedEffortEnabled: true,
+      }),
+      {
+        mode: "native-thinking",
+        levels: ["minimal", "low", "medium", "high"],
+        supportsNone: false,
+        supportsMax: false,
+      },
+    );
+    assert.deepEqual(
+      resolveModelReasoningEffortCapability({
+        provider: "ollama_cloud",
+        modelId: "gpt-oss:120b-cloud",
+        simulatedEffortEnabled: false,
+      }).levels,
+      ["minimal", "low", "medium"],
+    );
+    assert.equal(
+      resolveModelReasoningEffortCapability({
+        provider: "ollama_cloud",
+        modelId: "gpt-oss:120b-cloud",
+        ollamaNativeThinking: false,
+        simulatedEffortEnabled: true,
+      }).mode,
+      "simulated",
+    );
+    assert.equal(ollamaModelIsKnownToSupportNativeThinking("qwen3:8b"), false);
+    assert.deepEqual(
+      resolveModelReasoningEffortCapability({
+        provider: "ollama_cloud",
+        modelId: "future-thinking:cloud",
+        ollamaNativeThinking: true,
+        simulatedEffortEnabled: false,
+      }).levels,
+      [],
+    );
+    assert.equal(
+      resolveModelReasoningEffortCapability({
+        provider: "ollama_cloud",
+        modelId: "minimax-m2.5:cloud",
+        simulatedEffortEnabled: true,
+      }).mode,
+      "simulated",
+    );
+  });
+
   it("maps provider-neutral PRISM effort onto each Anthropic model capability", () => {
     assert.equal(anthropicReasoningEffortForRequest("claude-opus-4-8", "minimal"), "low");
     assert.equal(anthropicReasoningEffortForRequest("claude-opus-4-8", "medium"), "medium");
@@ -439,24 +507,22 @@ describe("reasoning effort helpers", () => {
     );
   });
 
-  it("marks thinking-capable local models native-thinking with the full ladder", () => {
+  it("shifts thinking-capable Ollama models from Default through High", () => {
     const thinkingLocal = resolveModelReasoningEffortCapability({
       provider: "local",
       modelId: "deepseek-r1:1.5b",
       localNativeThinking: true,
     });
     assert.equal(thinkingLocal.mode, "native-thinking");
-    assert.equal(thinkingLocal.supportsNone, true);
+    assert.equal(thinkingLocal.supportsNone, false);
     assert.equal(thinkingLocal.supportsMax, false);
     assert.deepEqual(thinkingLocal.levels, [
-      "none",
       "minimal",
       "low",
       "medium",
       "high",
-      "xhigh",
     ]);
-    // Without simulation only the honest native stops remain.
+    // A boolean-thinking model without simulation has only its native Default.
     assert.deepEqual(
       resolveModelReasoningEffortCapability({
         provider: "local",
@@ -464,9 +530,9 @@ describe("reasoning effort helpers", () => {
         localNativeThinking: true,
         simulatedEffortEnabled: false,
       }).levels,
-      ["none", "minimal"],
+      [],
     );
-    // Saved rungs stay valid for the native-thinking ladder.
+    // Saved player-facing stops stay valid while None and XHigh do not.
     assert.equal(
       effectiveModelReasoningEffort({
         provider: "local",

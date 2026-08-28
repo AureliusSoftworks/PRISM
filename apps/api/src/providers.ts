@@ -4,6 +4,8 @@ import {
   anthropicReasoningEffortForRequest,
   modelSupportsTurboMode,
   normalizeProviderReasoningEffort,
+  ollamaModelIsKnownToSupportNativeThinking,
+  ollamaModelUsesTieredThinking,
   openAiReasoningEffortForRequest,
   type ProviderReasoningEffort,
   type UsagePurpose,
@@ -212,7 +214,7 @@ export interface ModelCatalogEntry {
   isDefault?: boolean;
   localHost?: "primary" | "secondary";
   hostLabel?: string;
-  /** LOCAL model reports the Ollama native `thinking` capability. */
+  /** Ollama `/api/show` reports the native `thinking` capability. */
   thinking?: boolean;
   /** Model accepts image inputs in ordinary conversational requests. */
   supportsImageInput?: boolean;
@@ -1299,9 +1301,14 @@ const LOCAL_NATIVE_THINKING_TOKEN_HEADROOM = 1_024;
 const LOCAL_THINKING_CAPABILITY_TTL_MS = 5 * 60_000;
 const LOCAL_THINKING_CAPABILITY_ERROR_TTL_MS = 60_000;
 
+interface OllamaThinkingCapabilityProbe {
+  supported: boolean;
+  discovered: boolean;
+}
+
 const localThinkingCapabilityCache = new Map<
   string,
-  { value: boolean; expiresAt: number }
+  { value: OllamaThinkingCapabilityProbe; expiresAt: number }
 >();
 const localImageInputCapabilityCache = new Map<
   string,
@@ -1313,20 +1320,31 @@ export function resetLocalThinkingCapabilityCacheForTests(): void {
   localImageInputCapabilityCache.clear();
 }
 
-/** Whether this Ollama model reports the native `thinking` capability. */
-async function ollamaModelSupportsThinking(
+/** Capability discovery result from Ollama `/api/show`. Bearer credentials are
+ * fingerprinted for cache isolation and are never retained in the cache key. */
+async function probeOllamaModelThinkingCapability(
   host: string,
   model: string,
-): Promise<boolean> {
-  const cacheKey = `${host}::${model}`;
+  bearerToken?: string,
+): Promise<OllamaThinkingCapabilityProbe> {
+  const authScope = bearerToken
+    ? createHash("sha256").update(bearerToken).digest("hex").slice(0, 16)
+    : "daemon";
+  const cacheKey = `${host}::${model}::${authScope}`;
   const cached = localThinkingCapabilityCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
-  let value = false;
+  let value: OllamaThinkingCapabilityProbe = {
+    supported: false,
+    discovered: false,
+  };
   let ttlMs = LOCAL_THINKING_CAPABILITY_TTL_MS;
   try {
     const response = await fetch(`${host}/api/show`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(bearerToken ? { authorization: `Bearer ${bearerToken}` } : {}),
+      },
       body: JSON.stringify({ model }),
       signal: AbortSignal.timeout(LOCAL_THINKING_PROBE_TIMEOUT_MS),
     });
@@ -1334,9 +1352,12 @@ async function ollamaModelSupportsThinking(
       const payload = (await response.json()) as {
         capabilities?: unknown;
       };
-      value =
-        Array.isArray(payload.capabilities) &&
-        payload.capabilities.includes("thinking");
+      value = {
+        supported:
+          Array.isArray(payload.capabilities) &&
+          payload.capabilities.includes("thinking"),
+        discovered: true,
+      };
     } else {
       ttlMs = LOCAL_THINKING_CAPABILITY_ERROR_TTL_MS;
     }
@@ -1348,6 +1369,36 @@ async function ollamaModelSupportsThinking(
     expiresAt: Date.now() + ttlMs,
   });
   return value;
+}
+
+/** Whether this locally served Ollama model reports native thinking. */
+async function ollamaModelSupportsThinking(
+  host: string,
+  model: string,
+): Promise<boolean> {
+  return (await probeOllamaModelThinkingCapability(host, model)).supported;
+}
+
+/** Runtime Cloud capability. Authenticated direct models use Ollama Cloud's
+ * `/api/show`; daemon routes use the signed-in local daemon. The narrow
+ * documented GPT-OSS fallback applies only when capability discovery fails. */
+export async function ollamaCloudModelSupportsNativeThinking(
+  model: string,
+  ollamaCloudApiKey?: string | null,
+): Promise<boolean> {
+  const directModel = parseDirectOllamaCloudModelId(model);
+  const key = ollamaCloudApiKey?.trim() || null;
+  if (directModel && !key) return false;
+  const probe = key
+    ? await probeOllamaModelThinkingCapability(
+        OLLAMA_CLOUD_API_BASE,
+        directModel ?? model,
+        key,
+      )
+    : await probeOllamaModelThinkingCapability(config.ollamaHost, model);
+  return probe.discovered
+    ? probe.supported
+    : ollamaModelIsKnownToSupportNativeThinking(directModel ?? model);
 }
 
 /** Whether this Ollama model reports the native `vision` capability. */
@@ -1456,6 +1507,20 @@ function localNativeThinkRequested(options?: GenerateOptions): boolean {
     LOCAL_NATIVE_THINK_DEFAULT_PURPOSES.has(purpose) ||
     LOCAL_NATIVE_THINK_EFFORT_PURPOSES.has(purpose)
   );
+}
+
+/** GPT-OSS cannot fully disable its trace. Its provider-native tiers are
+ * shifted down onto Prism's player-facing ladder: Minimal requests provider
+ * Low, Low requests Medium, and Medium requests High. Default keeps the
+ * provider baseline; stale None/High/XHigh/Max values clamp safely. */
+function ollamaTieredThinkLevel(
+  options?: GenerateOptions,
+): "low" | "medium" | "high" {
+  const effort = normalizeProviderReasoningEffort(options?.reasoningEffort);
+  if (effort === "auto") return "medium";
+  if (effort === "none" || effort === "minimal") return "low";
+  if (effort === "low") return "medium";
+  return "high";
 }
 
 /**
@@ -1780,12 +1845,27 @@ async function buildUncachedModelCatalog(
   const probeThinkingIds = async (
     host: string | null,
     ids: string[],
+    options: { bearerToken?: string; documentedFallback?: boolean } = {},
   ): Promise<Set<string>> => {
     if (!host || ids.length === 0) return new Set();
-    const flags = await Promise.all(
-      ids.map((id) => ollamaModelSupportsThinking(host, id)),
+    const probes = await Promise.all(
+      ids.map((id) =>
+        probeOllamaModelThinkingCapability(
+          host,
+          id,
+          options.bearerToken,
+        ),
+      ),
     );
-    return new Set(ids.filter((_, index) => flags[index]));
+    return new Set(
+      ids.filter((id, index) => {
+        const probe = probes[index];
+        return probe?.supported === true ||
+          (probe?.discovered === false &&
+            options.documentedFallback === true &&
+            ollamaModelIsKnownToSupportNativeThinking(id));
+      }),
+    );
   };
   const probeImageInputIds = async (
     host: string | null,
@@ -1800,11 +1880,22 @@ async function buildUncachedModelCatalog(
   const [
     primaryThinkingIds,
     secondaryThinkingIds,
+    daemonCloudThinkingIds,
+    directCloudThinkingIds,
     primaryImageInputIds,
     secondaryImageInputIds,
   ] = await Promise.all([
     probeThinkingIds(config.ollamaHost, localIds),
     probeThinkingIds(privateSecondaryHost, secondaryLocalIds),
+    probeThinkingIds(config.ollamaHost, ollamaCloudIds, {
+      documentedFallback: true,
+    }),
+    probeThinkingIds(OLLAMA_CLOUD_API_BASE, directOllamaCloudIds, {
+      ...(ollamaCloudApiKey?.trim()
+        ? { bearerToken: ollamaCloudApiKey.trim() }
+        : {}),
+      documentedFallback: true,
+    }),
     probeImageInputIds(config.ollamaHost, localIds),
     probeImageInputIds(privateSecondaryHost, secondaryLocalIds),
   ]);
@@ -1849,6 +1940,7 @@ async function buildUncachedModelCatalog(
         toCatalogEntry(encodeDirectOllamaCloudModelId(id), "ollama_cloud", "", {
           label: `${modelLabelFromId(id, "ollama_cloud")} (Ollama Cloud)`,
           hostLabel: "Ollama Cloud",
+          thinking: directCloudThinkingIds.has(id),
           supportsStructuredOutput: false,
           executionClass: "online",
         }),
@@ -1857,6 +1949,7 @@ async function buildUncachedModelCatalog(
         toCatalogEntry(id, "ollama_cloud", "", {
           label: `${modelLabelFromId(id, "ollama_cloud")} (Ollama Cloud)`,
           hostLabel: "Ollama Cloud",
+          thinking: daemonCloudThinkingIds.has(id),
           supportsStructuredOutput: false,
           executionClass: "online",
         }),
@@ -2076,23 +2169,31 @@ export class LocalOllamaProvider implements LlmProvider {
     if (typeof options?.repetitionPenalty === "number") {
       ollamaOptions.repeat_penalty = options.repetitionPenalty;
     }
-    // Thinking-capable models (Qwen3, DeepSeek-R1, etc.) otherwise default to
-    // routing the visible reply into `message.thinking` and leave `content`
-    // empty, which breaks Prism chat (and any follow-up like
-    // sendGeneratedImage / Comfy). Thinking is therefore explicit: the
-    // effort→thinking mapping requests it, the capability probe confirms the
-    // model actually supports it, and everything else stays `think: false`.
-    const think =
-      !this.ollamaCloudExecution &&
-      localNativeThinkRequested(options) &&
-      (await ollamaModelSupportsThinking(ollamaHost, model));
-    if (think && typeof ollamaOptions.num_predict === "number") {
+    // Capability discovery is authoritative. GPT-OSS uses Ollama's tiered
+    // string contract and cannot fully disable its trace; other families keep
+    // the boolean thinking contract and Prism's existing effort semantics.
+    const nativeThinkingRequested = localNativeThinkRequested(options);
+    const tieredThinkingModel = ollamaModelUsesTieredThinking(model);
+    const thinkingSupported = nativeThinkingRequested || tieredThinkingModel
+      ? this.ollamaCloudExecution
+        ? await ollamaCloudModelSupportsNativeThinking(
+            requestedModel,
+            this.ollamaCloudApiKey,
+          )
+        : await ollamaModelSupportsThinking(ollamaHost, model)
+      : false;
+    const tieredThinking = tieredThinkingModel && thinkingSupported;
+    const think: boolean | "low" | "medium" | "high" = tieredThinking
+      ? ollamaTieredThinkLevel(options)
+      : nativeThinkingRequested && thinkingSupported;
+    const thinkingActive = tieredThinking || think === true;
+    if (thinkingActive && typeof ollamaOptions.num_predict === "number") {
       // Ollama counts thinking tokens against num_predict; keep room for the
       // visible reply after the chain-of-thought.
       ollamaOptions.num_predict =
         ollamaOptions.num_predict + LOCAL_NATIVE_THINKING_TOKEN_HEADROOM;
     }
-    const outboundMessages = think
+    const outboundMessages = thinkingActive
       ? [
           ...messages,
           {
@@ -2105,7 +2206,10 @@ export class LocalOllamaProvider implements LlmProvider {
       model,
       stream: false,
       messages: ollamaProviderMessages(outboundMessages),
-      think,
+      // Never send an invalid boolean to a tiered GPT-OSS model. When an
+      // unusual local manifest denies the capability, omit the field and let
+      // Ollama own compatibility rather than pretending its trace is off.
+      ...(!tieredThinkingModel || thinkingSupported ? { think } : {}),
     };
     if (!this.ollamaCloudExecution) {
       requestBody.keep_alive = options?.ollamaKeepAlive ?? "10m";
@@ -2219,7 +2323,7 @@ export class LocalOllamaProvider implements LlmProvider {
       text = trimmedThinking;
       nativeThinking = "";
     }
-    if (think && nativeThinking && text !== nativeThinking) {
+    if (thinkingActive && nativeThinking && text !== nativeThinking) {
       options?.onNativeThinking?.(nativeThinking);
     }
 

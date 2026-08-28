@@ -248,15 +248,16 @@ describe("mode tutorials", () => {
     assert.match(debate.body, /own established language and hierarchy/u);
   });
 
-  it("explains Refract's separate model picker without weakening the privacy lane", () => {
+  it("explains Refract's global routing without weakening the privacy lane", () => {
     const copy = Object.values(MODE_TUTORIALS)
       .flatMap((tutorial) => tutorial.steps)
       .map((step) => step.body)
       .join(" ");
-    assert.match(copy, /own model picker in the Prism companion's Synthesis tab/u);
-    assert.match(copy, /LOCAL only offers local models and ONLINE only offers online models/u);
-    assert.match(copy, /each lane remembers its model or Auto choice/u);
-    assert.match(copy, /Refract model is separate from chat and bot models/u);
+    assert.doesNotMatch(copy, /own model picker|each lane remembers its model/u);
+    assert.match(
+      copy,
+      /Refract uses the global LOCAL\/ONLINE, Model, and Effort controls/u,
+    );
     assert.match(copy, /APP MODE badge mirrors the global privacy toggle/u);
     assert.match(copy, /LOCAL keeps refraction offline/u);
     assert.match(copy, /ONLINE may send the item being refracted to an online provider/u);
@@ -616,7 +617,10 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /crests both screens white/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /generated drafts/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /shared navbar hides/u);
-    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /Refract picker/u);
+    assert.match(
+      MODE_TUTORIALS.avatar.steps[0]!.body,
+      /global Model and Effort settings active when generation begins/u,
+    );
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /During active assembly/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /close and confirm to cancel/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /prior draft restored/u);
@@ -627,7 +631,7 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /Counts 11–100 switch visibly/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /recoverable progress/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /one strong, two moderate, or three weak compound Powers/u);
-    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /Auto still chooses model and effort when Refract is on Auto/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /Auto still chooses both contextually/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /perimeter dock/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /lights stay dim and breathing/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /microphone-like accents/u);
@@ -711,7 +715,10 @@ describe("mode tutorials", () => {
       MODE_TUTORIALS.avatar.steps[2]!.body,
       /Wield Prism onto What makes this bot special\?/u,
     );
-    assert.match(MODE_TUTORIALS.avatar.steps[2]!.body, /Refract picker/u);
+    assert.match(
+      MODE_TUTORIALS.avatar.steps[2]!.body,
+      /global Model and Effort settings active when generation begins/u,
+    );
     assert.match(MODE_TUTORIALS.avatar.steps[2]!.body, /Save or Create bot/u);
     assert.match(MODE_TUTORIALS.avatar.steps[2]!.body, /Core for name/u);
     assert.match(
@@ -3774,7 +3781,7 @@ describe("mode tutorials", () => {
       const body = MODE_TUTORIALS[mode].steps
         .map((step) => step.body)
         .join(" ");
-      assert.match(body, /Synthesis focused on Refract settings/u);
+      assert.match(body, /Synthesis focused on Refract routing/u);
       assert.match(body, /rail of recent synthesized images/u);
       assert.match(body, /open that exact item in Asset Library/u);
       assert.match(body, /same saved or Private Prism conversation/u);

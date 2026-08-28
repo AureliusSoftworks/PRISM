@@ -2164,39 +2164,6 @@ describe("API request integration", () => {
     assert.deepEqual(resetPayload.modelTurboPreferences, []);
   });
 
-  it("persists the Refract model in the picker lane instead of snapping back to Auto", async () => {
-    const client = createClient();
-    const register = await client.request(
-      "/api/auth/register",
-      jsonInit({
-        username: "refract-model-picker-lane@example.com",
-        password: "refract-model-picker-lane-password",
-      }),
-    );
-    assert.equal(register.status, 201);
-
-    const savedOnline = await client.request(
-      "/api/settings/prism-refract-model",
-      {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          model: "gpt-5.6-sol",
-          responseMode: "online",
-        }),
-      },
-    );
-    assert.equal(savedOnline.status, 200, await savedOnline.clone().text());
-    const onlinePayload = await json(savedOnline);
-    assert.equal(onlinePayload.responseMode, "online");
-    assert.equal(onlinePayload.prismRefractOnlineModel, "gpt-5.6-sol");
-    assert.equal(onlinePayload.prismRefractLocalModel, "");
-
-    const loaded = await json(await client.request("/api/settings"));
-    assert.equal(loaded.settings.prismRefractOnlineModel, "gpt-5.6-sol");
-    assert.equal(loaded.settings.prismRefractLocalModel, "");
-  });
-
   it("persists the account-level Home atmosphere style", async () => {
     const client = createClient();
     const register = await client.request(
@@ -2987,7 +2954,7 @@ describe("API request integration", () => {
     assert.deepEqual(providerFactoryCalls.slice(providerStart), ["openai"]);
   });
 
-  it("routes Avatar Studio power compilation through the account Refract model", async () => {
+  it("routes Avatar Studio power compilation through the global model", async () => {
     const client = createClient();
     const register = await client.request(
       "/api/auth/register",
@@ -3001,6 +2968,7 @@ describe("API request integration", () => {
     db.prepare(
       `UPDATE users
           SET preferred_provider = ?,
+              preferred_local_model = ?,
               prism_refract_local_model = ?,
               prism_default_llm_model = ?
         WHERE email = ?`
@@ -3008,6 +2976,7 @@ describe("API request integration", () => {
       "local",
       "qwen3:8b",
       "qwen3:1.7b",
+      "llama3.2",
       "studio-refract-compiler@example.com"
     );
 

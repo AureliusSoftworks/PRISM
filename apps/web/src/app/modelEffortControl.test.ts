@@ -121,33 +121,34 @@ describe("model effort slider", () => {
     assert.equal(modelEffortSliderProgress(levels, "xhigh"), 100);
   });
 
-  it("uses Minimal as the baseline for native-thinking local models", () => {
+  it("uses Default then Minimal through High for Ollama thinking models", () => {
     const thinkingCapability: ModelReasoningEffortCapabilityV1 = {
       mode: "native-thinking",
-      levels: ["none", "minimal", "low", "medium", "high", "xhigh"],
-      supportsNone: true,
+      levels: ["minimal", "low", "medium", "high"],
+      supportsNone: false,
       supportsMax: false,
     };
     const levels = modelEffortSliderLevels(thinkingCapability);
-    assert.equal(modelEffortBaseline(thinkingCapability), "minimal");
+    assert.equal(modelEffortBaseline(thinkingCapability), "auto");
     assert.equal(
       modelEffortValueForCapability(thinkingCapability, undefined),
-      "minimal",
+      "auto",
     );
-    // An explicit None survives: the honest fast stop stays selectable.
     assert.equal(
       modelEffortValueForCapability(thinkingCapability, "none"),
-      "none",
+      "auto",
     );
-    assert.equal(levels.includes("auto"), false);
+    assert.equal(modelEffortValueForCapability(thinkingCapability, "minimal"), "minimal");
+    assert.equal(modelEffortValueForCapability(thinkingCapability, "high"), "high");
     assert.deepEqual(levels, [
-      "none",
+      "auto",
       "minimal",
       "low",
       "medium",
       "high",
-      "xhigh",
     ]);
+    assert.equal(levels.includes("none"), false);
+    assert.equal(levels.includes("xhigh"), false);
   });
 
   it("clamps wheel and keyboard-style stepping to available levels", () => {

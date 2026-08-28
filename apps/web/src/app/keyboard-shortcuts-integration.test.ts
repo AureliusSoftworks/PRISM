@@ -98,7 +98,7 @@ test("lets Model, Effort, and Speech Type select values from the wheel", () => {
   assert.match(pageSource, /modelWheelLockedRef/u);
   assert.match(
     pageSource,
-    /document\.addEventListener\("wheel", handleQuickWheel, \{[\s\S]{0,100}passive: false/u,
+    /if \(navbarPicker\) \{\s*document\.addEventListener\("wheel", handleQuickWheel, \{[\s\S]{0,100}passive: false/u,
   );
   assert.match(
     pageSource,
@@ -112,7 +112,10 @@ test("lets Model, Effort, and Speech Type select values from the wheel", () => {
     pageSource,
     /document\.addEventListener\("keydown", handleQuickArrows, true\)/u,
   );
-  assert.doesNotMatch(pageSource, /if \(navbarPicker\) return;/u);
+  assert.match(
+    pageSource,
+    /const handleModelWheel =[^]*?if \(\s*!navbarPicker \|\|/u,
+  );
   assert.doesNotMatch(pageSource, /returnToPointerBrowsing/u);
   assert.match(pageSource, /data-highlighted=\{/u);
   assert.doesNotMatch(
