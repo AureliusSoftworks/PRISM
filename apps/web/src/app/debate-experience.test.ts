@@ -45,6 +45,10 @@ const mysteryV2Css = readFileSync(
   fileURLToPath(new URL("./debateMysteryV2.module.css", import.meta.url)),
   "utf8",
 );
+const mysteryCss = readFileSync(
+  fileURLToPath(new URL("./debateMystery.module.css", import.meta.url)),
+  "utf8",
+);
 const archiveAssetsSource = readFileSync(
   fileURLToPath(new URL("./DebateArchiveAssetsModal.tsx", import.meta.url)),
   "utf8",
@@ -1449,6 +1453,48 @@ describe("Debate experience", () => {
     assert.match(source, /role="progressbar"/u);
     assert.match(css, /\.archiveForgeProgress/u);
     assert.match(css, /\.archiveForgeProgressTrack/u);
+  });
+
+  it("leads Whodunnit setup with a complete quick path and progressively discloses optional controls", () => {
+    assert.match(source, /data-tutorial-target="whodunnit-quick-start"/u);
+    assert.match(source, /A complete mystery needs only a mansion and a cast/u);
+    assert.match(source, /Keep the defaults for a balanced first case/u);
+    assert.match(source, /Choose a mansion size/u);
+    assert.match(source, /Quick is the shortest full mansion/u);
+    assert.match(source, /Every new mansion has a functional upstairs/u);
+    assert.match(source, /<InstalledMansionLibrary/u);
+    assert.match(source, /Install a mansion file/u);
+    assert.match(source, /data-tutorial-target="whodunnit-mansion-library"/u);
+    assert.match(source, /<strong>Mansion idea<\/strong><em>Optional<\/em>/u);
+    assert.match(source, /Classic · balanced/u);
+    assert.match(source, /data-tutorial-target="whodunnit-more-options"/u);
+    assert.match(source, /court tone, direct-to-court play, custom art and audio, recipe controls/iu);
+    assert.match(source, /Import a legacy shared Case Seed/u);
+    assert.match(source, /Next: choose the cast/u);
+    assert.ok(source.indexOf("Choose a mansion size") < source.indexOf("More case options"));
+    assert.match(mysteryCss, /\.quickStartNote\s*\{/u);
+    assert.match(mysteryCss, /\.setupDisclosure\s*\{/u);
+    assert.match(mysteryCss, /\.setupDisclosureBody\s*\{/u);
+    assert.match(mysteryCss, /\.optionalSetupGroup\s*\{/u);
+  });
+
+  it("gives Whodunnit setup controls an unmistakable interactive grammar", () => {
+    assert.match(source, /mysteryStyles\.setupControls/u);
+    assert.match(source, /data-theme=\{props\.theme\}/u);
+    assert.match(source, /aria-pressed=\{!selectedMysteryMansionBundle/u);
+    assert.match(source, /"Selected ✓" : "Choose"/u);
+    assert.match(source, /<strong>Install a mansion file<\/strong>/u);
+    assert.match(source, /className=\{mysteryStyles\.setupField\}/u);
+    assert.match(source, /className=\{mysteryStyles\.setupPrimaryAction\}/u);
+    assert.match(mysteryCss, /\.setupControls\s*\{[\s\S]*?--mystery-line:\s*var\(--debate-studio-line-strong/u);
+    assert.match(mysteryCss, /\.setupControls\[data-theme="light"\]/u);
+    assert.match(mysteryCss, /\.quickStartNote\s*\{[\s\S]*?border-left:/u);
+    assert.match(mysteryCss, /\.presetGrid button:hover:not\(:disabled\)[\s\S]*?transform:\s*translateY\(-2px\)/u);
+    assert.match(mysteryCss, /\.presetGrid button\[data-selected="true"\][\s\S]*?box-shadow:/u);
+    assert.match(mysteryCss, /\.setupDisclosure > summary em::after\s*\{[\s\S]*?content:\s*"›"/u);
+    assert.match(mysteryCss, /\.mansionPackageDropzone button:hover:not\(:disabled\)/u);
+    assert.match(mysteryCss, /\.installedMansionGrid > article\[data-selected="true"\]/u);
+    assert.match(mysteryCss, /\.setupPrimaryAction\.setupPrimaryAction\s*\{[\s\S]*?linear-gradient/u);
   });
 
   it("applies built-in presets without touching proceeding content and derives Custom from manual differences", () => {

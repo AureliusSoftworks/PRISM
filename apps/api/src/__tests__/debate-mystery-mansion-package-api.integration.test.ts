@@ -180,17 +180,58 @@ describe("portable mansion package API", () => {
     const imported = (await importResponse.json()) as Record<string, any>;
     const mansionId = String(imported.mansion.id);
     assert.equal(imported.mansion.portable.license.allowsRedistribution, true);
+    assert.equal(imported.mansion.library.defaults.title, "Violet House");
+    assert.equal(imported.mansion.library.defaults.description, "A compact reusable house.");
+    assert.equal(imported.mansion.library.overrides.title, null);
 
     const duplicateResponse = await client.request("/api/debates/mystery-mansions/inspect", binary());
     const duplicate = (await duplicateResponse.json()) as Record<string, any>;
     assert.equal(duplicate.preview.duplicateBundleId, mansionId);
 
     const assetId = String(imported.mansion.assets[0].id);
+    assert.equal(imported.mansion.library.defaults.thumbnailAssetId, assetId);
     const assetResponse = await client.request(
       `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}/assets/${encodeURIComponent(assetId)}/file`,
     );
     assert.equal(assetResponse.status, 200);
     assert.equal(assetResponse.headers.get("content-type"), "image/webp");
+
+    const customThumbnail = await sharp({
+      create: { width: 24, height: 16, channels: 4, background: "#c7a34b" },
+    }).png().toBuffer();
+    const updateResponse = await client.request(
+      `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}`,
+      jsonInit({
+        title: "My Violet House",
+        description: "A personal library description.",
+        thumbnailDataUrl: `data:image/png;base64,${customThumbnail.toString("base64")}`,
+      }, "PATCH"),
+    );
+    assert.equal(updateResponse.status, 200);
+    const updated = (await updateResponse.json()) as Record<string, any>;
+    assert.equal(updated.mansion.name, "Violet House");
+    assert.equal(updated.mansion.library.defaults.title, "Violet House");
+    assert.equal(updated.mansion.library.overrides.title, "My Violet House");
+    assert.equal(updated.mansion.library.overrides.description, "A personal library description.");
+    const overrideThumbnailId = String(updated.mansion.library.overrides.thumbnailAssetId);
+    assert.notEqual(overrideThumbnailId, assetId);
+    const overrideThumbnailResponse = await client.request(
+      `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}/assets/${encodeURIComponent(overrideThumbnailId)}/file`,
+    );
+    assert.equal(overrideThumbnailResponse.status, 200);
+    assert.equal(overrideThumbnailResponse.headers.get("content-type"), "image/webp");
+
+    const otherClient = createClient();
+    const otherRegistration = await otherClient.request(
+      "/api/auth/register",
+      jsonInit({ username: "other-mansion-owner@example.com", password: "other-mansion-owner-password" }),
+    );
+    assert.equal(otherRegistration.status, 201);
+    const foreignUpdate = await otherClient.request(
+      `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}`,
+      jsonInit({ title: "Not mine" }, "PATCH"),
+    );
+    assert.equal(foreignUpdate.status, 404);
 
     const exportResponse = await client.request(
       `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}/export`,
@@ -198,7 +239,20 @@ describe("portable mansion package API", () => {
     );
     assert.equal(exportResponse.status, 200);
     assert.match(exportResponse.headers.get("content-disposition") ?? "", /\.mansion"$/u);
-    assert.equal(inspectPortableMansionPackageV1(new Uint8Array(await exportResponse.arrayBuffer())).packageType, "mansion");
+    const exportedHeader = inspectPortableMansionPackageV1(new Uint8Array(await exportResponse.arrayBuffer()));
+    assert.equal(exportedHeader.packageType, "mansion");
+    assert.equal(exportedHeader.title, "Violet House");
+
+    const clearResponse = await client.request(
+      `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}`,
+      jsonInit({ title: null, description: null, thumbnailDataUrl: null }, "PATCH"),
+    );
+    assert.equal(clearResponse.status, 200);
+    const cleared = (await clearResponse.json()) as Record<string, any>;
+    assert.equal(cleared.mansion.library.overrides.title, null);
+    assert.equal(cleared.mansion.library.overrides.description, null);
+    assert.equal(cleared.mansion.library.overrides.thumbnailAssetId, null);
+    assert.equal(cleared.mansion.library.defaults.thumbnailAssetId, assetId);
 
     const removeResponse = await client.request(
       `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}`,

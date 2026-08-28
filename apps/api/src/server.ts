@@ -347,6 +347,7 @@ import {
   getDebateMysteryMansionBundleV2,
   listDebateMysteryMansionBundlesV2,
   saveDebateMysteryMansionBundleV2,
+  updateDebateMysteryMansionLibraryV1,
 } from "./debate-mystery-mansion-bundles.ts";
 import {
   exportPortableMansionPackageV1,
@@ -18805,6 +18806,22 @@ function buildRoutes(): RouteDefinition[] {
       ctx.res.setHeader("cache-control", "private, no-store");
       ctx.res.setHeader("x-content-type-options", "nosniff");
       ctx.res.end(envelope);
+    }),
+    route("PATCH", "/api/debates/mystery-mansions/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const mansion = await updateDebateMysteryMansionLibraryV1(
+        db,
+        decryptUserKey(userId),
+        userId,
+        ctx.params.id,
+        {
+          title: body.title,
+          description: body.description,
+          thumbnailDataUrl: body.thumbnailDataUrl,
+        },
+      );
+      json(ctx.res, 200, { ok: true, mansion });
     }),
     route("DELETE", "/api/debates/mystery-mansions/:id", async (ctx) => {
       const userId = requireAuth(ctx);

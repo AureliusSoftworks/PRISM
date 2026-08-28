@@ -132,6 +132,19 @@
   gap: 1rem;
 }
 
+.setupControls {
+  --mystery-bg: var(--debate-studio-canvas, #0c0b10);
+  --mystery-panel: color-mix(in srgb, var(--debate-studio-raised, #18151f) 94%, transparent);
+  --mystery-panel-strong: var(--debate-studio-raised, #18151f);
+  --mystery-line: var(--debate-studio-line-strong, rgba(194, 181, 229, 0.24));
+  --mystery-text: var(--debate-studio-ink, #eeeaf4);
+  --mystery-muted: var(--debate-studio-muted, #8f8998);
+  --mystery-violet: var(--debate-studio-accent, #ad9cff);
+  --mystery-cyan: #66e5ea;
+  --mystery-gold: #e3bd71;
+}
+.setupControls[data-theme="light"] { --mystery-cyan: #147e88; --mystery-gold: #926b19; }
+
 .setupSection,
 .caseDial,
 .castSummary,
@@ -186,6 +199,38 @@
   color: var(--mystery-muted);
 }
 
+.quickStartNote {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.2rem 0 0.2rem 0.9rem;
+  color: var(--mystery-muted);
+  border-left: 2px solid color-mix(in srgb, var(--mystery-violet) 55%, transparent);
+}
+.quickStartNote > span { color: var(--mystery-violet); line-height: 1.35; }
+.quickStartNote > div,
+.setupDisclosure > summary > span { display: grid; gap: 0.16rem; }
+.quickStartNote strong { color: var(--mystery-text); font-size: 0.8rem; }
+.quickStartNote small,
+.setupDisclosure small { color: var(--mystery-muted); line-height: 1.4; }
+
+.setupDisclosure { overflow: clip; border: 1px solid color-mix(in srgb, var(--mystery-violet) 38%, var(--mystery-line)); border-radius: 0.85rem; background: var(--mystery-panel-strong); box-shadow: 0 0.35rem 1rem rgba(0, 0, 0, 0.12), inset 0 1px color-mix(in srgb, var(--mystery-text) 5%, transparent); }
+.setupSection > .setupDisclosure { margin: 0.85rem 0 1rem; }
+.setupDisclosure > summary { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 3.8rem; box-sizing: border-box; padding: 0.85rem 0.95rem; list-style: none; background: linear-gradient(115deg, color-mix(in srgb, var(--mystery-violet) 9%, transparent), transparent 68%); cursor: pointer; transition: border-color 140ms ease, background 140ms ease, transform 100ms ease; }
+.setupDisclosure > summary::-webkit-details-marker { display: none; }
+.setupDisclosure > summary strong { color: var(--mystery-text); font-size: 0.84rem; }
+.setupDisclosure > summary em { display: inline-flex; align-items: center; gap: 0.35rem; min-width: 4.4rem; justify-content: center; padding: 0.42rem 0.62rem; color: var(--mystery-text); border: 1px solid color-mix(in srgb, var(--mystery-violet) 62%, var(--mystery-line)); border-radius: 999px; background: color-mix(in srgb, var(--mystery-violet) 16%, var(--mystery-panel-strong)); font-size: 0.7rem; font-style: normal; font-weight: 800; }
+.setupDisclosure > summary em::after { content: "›"; color: var(--mystery-violet); font-size: 1rem; line-height: 0.7; transition: transform 120ms ease; }
+.setupDisclosure[open] > summary em::after { transform: rotate(90deg); }
+.setupDisclosure[open] > summary { border-bottom: 1px solid var(--mystery-line); }
+.setupDisclosure > summary:hover { background: linear-gradient(115deg, color-mix(in srgb, var(--mystery-violet) 16%, transparent), color-mix(in srgb, var(--mystery-violet) 5%, transparent)); }
+.setupDisclosure > summary:focus-visible { outline: 2px solid var(--mystery-cyan); outline-offset: -3px; }
+.setupDisclosureBody { display: grid; gap: 0.85rem; padding: 0.9rem; }
+
+.optionalSetupGroup { display: grid; gap: 0.8rem; padding: 0.8rem; border: 1px solid var(--mystery-line); border-radius: 0.75rem; }
+.optionalSetupGroup > header { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
+.optionalSetupGroup > header small { color: var(--mystery-muted); }
+
 .presetGrid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -206,14 +251,34 @@
   cursor: pointer;
 }
 
-.presetGrid button[data-selected="true"] {
-  border-color: color-mix(in srgb, var(--mystery-violet) 75%, transparent);
-  background: color-mix(in srgb, var(--mystery-violet) 13%, transparent);
-  box-shadow: inset 0 0 1.5rem rgba(148, 112, 255, 0.08);
+.presetGrid button {
+  position: relative;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-content: start;
+  min-height: 6.5rem;
+  padding: 0.95rem;
+  color: var(--mystery-text);
+  border-color: color-mix(in srgb, var(--mystery-text) 18%, var(--mystery-line));
+  background: linear-gradient(145deg, color-mix(in srgb, var(--mystery-text) 5%, var(--mystery-panel-strong)), var(--mystery-panel-strong));
+  box-shadow: 0 0.45rem 1rem rgba(0, 0, 0, 0.14), inset 0 1px color-mix(in srgb, var(--mystery-text) 6%, transparent);
+  transition: transform 100ms ease, border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
 }
 
+.presetGrid button:hover:not(:disabled),
+.presetGrid button:focus-visible { border-color: color-mix(in srgb, var(--mystery-violet) 72%, var(--mystery-line)); background: linear-gradient(145deg, color-mix(in srgb, var(--mystery-violet) 13%, var(--mystery-panel-strong)), var(--mystery-panel-strong)); box-shadow: 0 0.65rem 1.35rem rgba(0, 0, 0, 0.2), 0 0 0 1px color-mix(in srgb, var(--mystery-violet) 22%, transparent); transform: translateY(-2px); }
+.presetGrid button:focus-visible { outline: 2px solid var(--mystery-cyan); outline-offset: 2px; }
+.presetGrid button[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--mystery-violet) 75%, transparent);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--mystery-violet) 20%, var(--mystery-panel-strong)), var(--mystery-panel-strong));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--mystery-violet) 72%, transparent), 0 0.65rem 1.5rem rgba(0, 0, 0, 0.18), inset 0 0 1.5rem rgba(148, 112, 255, 0.08);
+}
+
+.presetGrid button > strong { font-size: 0.9rem; }
+.presetGrid button > em { align-self: start; padding: 0.25rem 0.42rem; color: var(--mystery-violet); border: 1px solid color-mix(in srgb, var(--mystery-violet) 38%, var(--mystery-line)); border-radius: 999px; background: color-mix(in srgb, var(--mystery-violet) 8%, transparent); font-size: 0.63rem; font-style: normal; font-weight: 800; text-transform: uppercase; }
+.presetGrid button[data-selected="true"] > em { color: var(--mystery-text); border-color: color-mix(in srgb, var(--mystery-violet) 68%, var(--mystery-line)); background: color-mix(in srgb, var(--mystery-violet) 24%, transparent); }
 .presetGrid span,
 .presetGrid small {
+  grid-column: 1 / -1;
   color: var(--mystery-muted);
 }
 
@@ -226,12 +291,28 @@
 
 .advancedGrid label,
 .caseDial > label,
+.caseDial .setupDisclosureBody > label,
 .savedMansionPicker {
   display: grid;
   gap: 0.45rem;
   color: var(--mystery-muted);
   font-size: 0.78rem;
 }
+
+.setupStepHeading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.setupStepHeading > div { display: flex; align-items: baseline; gap: 0.7rem; }
+.setupStepHeading small { color: var(--mystery-violet); }
+.setupStepHeading h2 { margin: 0; color: var(--mystery-text); font-family: Georgia, "Times New Roman", serif; font-weight: 500; }
+.setupStepHeading > span { color: var(--mystery-muted); font-size: 0.72rem; }
+
+.setupField > span { display: flex; align-items: center; gap: 0.55rem; }
+.setupField > span strong { color: var(--mystery-text); font-size: 0.8rem; }
+.setupField > span em { padding: 0.18rem 0.4rem; color: var(--mystery-muted); border: 1px solid var(--mystery-line); border-radius: 999px; font-size: 0.6rem; font-style: normal; font-weight: 750; letter-spacing: 0.05em; text-transform: uppercase; }
 
 .advancedGrid input,
 .caseDial input,
@@ -253,6 +334,11 @@
   outline: none;
   background: color-mix(in srgb, var(--mystery-panel-strong) 90%, transparent);
 }
+
+.caseDial select:hover,
+.caseDial textarea:hover { border-color: color-mix(in srgb, var(--mystery-text) 32%, var(--mystery-line)); }
+.caseDial select:focus-visible,
+.caseDial textarea:focus-visible { border-color: var(--mystery-violet); outline: 2px solid color-mix(in srgb, var(--mystery-violet) 42%, transparent); outline-offset: 1px; }
 
 .caseDial textarea { min-height: 6rem; resize: vertical; }
 .caseDial label small,
@@ -290,11 +376,31 @@
   min-height: 2.45rem;
   padding: 0.58rem 0.82rem;
   color: var(--mystery-text);
-  border: 1px solid var(--mystery-line);
+  border: 1px solid color-mix(in srgb, var(--mystery-violet) 58%, var(--mystery-line));
   border-radius: 0.64rem;
-  background: color-mix(in srgb, var(--mystery-violet) 12%, var(--mystery-panel-strong));
+  background: linear-gradient(145deg, color-mix(in srgb, var(--mystery-violet) 18%, var(--mystery-panel-strong)), var(--mystery-panel-strong));
+  box-shadow: 0 0.38rem 0.9rem rgba(0, 0, 0, 0.14), inset 0 1px color-mix(in srgb, var(--mystery-text) 7%, transparent);
+  font-size: 0.74rem;
+  font-weight: 780;
   cursor: pointer;
+  transition: transform 100ms ease, border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
 }
+
+.mansionPackageDropzone button:hover:not(:disabled),
+.mansionPackagePreview button:hover:not(:disabled),
+.savedMansionActions button:hover:not(:disabled),
+.mansionPackageDropzone button:focus-visible,
+.mansionPackagePreview button:focus-visible,
+.savedMansionActions button:focus-visible {
+  border-color: var(--mystery-violet);
+  background: color-mix(in srgb, var(--mystery-violet) 24%, var(--mystery-panel-strong));
+  box-shadow: 0 0.55rem 1.1rem rgba(0, 0, 0, 0.2), 0 0 0 1px color-mix(in srgb, var(--mystery-violet) 24%, transparent);
+  transform: translateY(-1px);
+}
+
+.mansionPackageDropzone button:focus-visible,
+.mansionPackagePreview button:focus-visible,
+.savedMansionActions button:focus-visible { outline: 2px solid var(--mystery-cyan); outline-offset: 2px; }
 
 .mansionPackageDropzone button:disabled,
 .mansionPackagePreview button:disabled,
@@ -323,22 +429,214 @@
 .mansionPackagePreview input,
 .savedMansionManager input { width: 100%; box-sizing: border-box; padding: 0.62rem 0.7rem; color: var(--mystery-text); border: 1px solid var(--mystery-line); border-radius: 0.62rem; background: var(--mystery-panel-strong); }
 
-.savedMansionManager { padding: 0.8rem 0.9rem; }
-.savedMansionManager summary { cursor: pointer; font-weight: 700; }
-.savedMansionManager[open] summary { margin-bottom: 0.75rem; }
+.savedMansionManager { overflow: clip; }
+.savedMansionManager summary { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 3.5rem; box-sizing: border-box; padding: 0.78rem 0.9rem; list-style: none; background: linear-gradient(115deg, color-mix(in srgb, var(--mystery-violet) 8%, transparent), transparent 68%); cursor: pointer; }
+.savedMansionManager summary::-webkit-details-marker { display: none; }
+.savedMansionManager summary > span { display: grid; gap: 0.16rem; }
+.savedMansionManager summary strong { color: var(--mystery-text); font-size: 0.8rem; }
+.savedMansionManager summary small { color: var(--mystery-muted); font-size: 0.7rem; font-weight: 500; }
+.savedMansionManager summary em { display: inline-flex; align-items: center; gap: 0.32rem; padding: 0.38rem 0.58rem; color: var(--mystery-text); border: 1px solid color-mix(in srgb, var(--mystery-violet) 58%, var(--mystery-line)); border-radius: 999px; background: color-mix(in srgb, var(--mystery-violet) 14%, var(--mystery-panel-strong)); font-size: 0.68rem; font-style: normal; font-weight: 800; }
+.savedMansionManager summary em::after { content: "›"; color: var(--mystery-violet); font-size: 0.95rem; transition: transform 120ms ease; }
+.savedMansionManager[open] summary { border-bottom: 1px solid var(--mystery-line); }
+.savedMansionManager[open] summary em::after { transform: rotate(90deg); }
+.savedMansionManager summary:hover { background: linear-gradient(115deg, color-mix(in srgb, var(--mystery-violet) 15%, transparent), color-mix(in srgb, var(--mystery-violet) 4%, transparent)); }
+.savedMansionManager summary:focus-visible { outline: 2px solid var(--mystery-cyan); outline-offset: -3px; }
+.savedMansionManager > :not(summary) { margin-right: 0.9rem; margin-left: 0.9rem; }
+.savedMansionManager > :last-child { margin-bottom: 0.9rem; }
 .savedMansionMap { display: flex; flex-wrap: wrap; gap: 0.42rem; margin-bottom: 0.75rem; }
 .savedMansionMap span { padding: 0.32rem 0.48rem; border-radius: 0.5rem; background: rgba(128, 118, 174, 0.09); color: var(--mystery-muted); font-size: 0.72rem; }
 .savedMansionActions { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 0.7rem; }
 .savedMansionActions .savedMansionRemove { border-color: rgba(224, 105, 118, 0.38); color: #e8a3aa; }
+
+.installedMansions {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding: 1.05rem;
+  border: 1px solid color-mix(in srgb, var(--mystery-violet) 34%, var(--mystery-line));
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--mystery-panel-strong) 88%, transparent);
+  box-shadow: inset 0 1px color-mix(in srgb, var(--mystery-text) 5%, transparent);
+}
+
+.installedMansionsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.installedMansionsHeader > div { display: grid; gap: 0.18rem; }
+.installedMansionsHeader small { color: var(--mystery-violet); font-size: 0.62rem; font-weight: 800; letter-spacing: 0.09em; text-transform: uppercase; }
+.installedMansionsHeader h3 { margin: 0; color: var(--mystery-text); font-family: Georgia, "Times New Roman", serif; font-size: 1.2rem; font-weight: 500; }
+.installedMansionsHeader p { margin: 0; color: var(--mystery-muted); font-size: 0.74rem; }
+
+.randomMansionButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.55rem;
+  padding: 0.62rem 0.82rem;
+  color: var(--mystery-text);
+  border: 1px solid color-mix(in srgb, var(--mystery-cyan) 58%, var(--mystery-line));
+  border-radius: 0.7rem;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--mystery-cyan) 14%, var(--mystery-panel-strong)), var(--mystery-panel-strong));
+  box-shadow: 0 0.38rem 0.9rem rgba(0, 0, 0, 0.14);
+  font-size: 0.72rem;
+  font-weight: 780;
+  cursor: pointer;
+}
+.randomMansionButton > span { color: var(--mystery-cyan); }
+.randomMansionButton:hover:not(:disabled),
+.randomMansionButton:focus-visible { border-color: var(--mystery-cyan); transform: translateY(-1px); }
+.randomMansionButton:focus-visible { outline: 2px solid var(--mystery-violet); outline-offset: 2px; }
+.randomMansionButton:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.installedMansionsEmpty {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  color: var(--mystery-muted);
+  border: 1px dashed var(--mystery-line);
+  border-radius: 0.75rem;
+}
+.installedMansionsEmpty > span { color: var(--mystery-violet); }
+.installedMansionsEmpty > div { display: grid; gap: 0.12rem; }
+.installedMansionsEmpty strong { color: var(--mystery-text); font-size: 0.78rem; }
+.installedMansionsEmpty small { font-size: 0.7rem; }
+
+.installedMansionGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.installedMansionGrid > article {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--mystery-text) 17%, var(--mystery-line));
+  border-radius: 0.8rem;
+  background: var(--mystery-panel-strong);
+  box-shadow: 0 0.45rem 1rem rgba(0, 0, 0, 0.13);
+}
+.installedMansionGrid > article[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--mystery-violet) 78%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--mystery-violet) 70%, transparent), 0 0.7rem 1.35rem rgba(0, 0, 0, 0.18);
+}
+
+.installedMansionThumbnail {
+  position: relative;
+  display: grid;
+  aspect-ratio: 16 / 9;
+  place-items: center;
+  overflow: hidden;
+  color: var(--mystery-violet);
+  border-bottom: 1px solid var(--mystery-line);
+  background: radial-gradient(circle at 50% 34%, color-mix(in srgb, var(--mystery-violet) 18%, transparent), transparent 70%), var(--mystery-bg);
+  font-size: 2.2rem;
+}
+.installedMansionThumbnail img { width: 100%; height: 100%; object-fit: cover; }
+.installedMansionThumbnail em { position: absolute; right: 0.48rem; bottom: 0.45rem; padding: 0.24rem 0.4rem; color: #fff; border: 1px solid rgba(255, 255, 255, 0.26); border-radius: 999px; background: rgba(7, 8, 13, 0.72); backdrop-filter: blur(8px); font-size: 0.56rem; font-style: normal; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; }
+
+.installedMansionCopy { display: grid; align-content: start; gap: 0.3rem; padding: 0.78rem; }
+.installedMansionCopy h4 { margin: 0; color: var(--mystery-text); font-size: 0.84rem; }
+.installedMansionCopy p { display: -webkit-box; min-height: 2.5rem; margin: 0; overflow: hidden; color: var(--mystery-muted); font-size: 0.7rem; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.installedMansionCopy small { color: var(--mystery-muted); font-size: 0.62rem; }
+
+.installedMansionActions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.48rem; padding: 0 0.78rem 0.78rem; }
+.installedMansionActions button,
+.installedMansionEditor button {
+  min-height: 2.25rem;
+  padding: 0.5rem 0.68rem;
+  color: var(--mystery-text);
+  border: 1px solid var(--mystery-line);
+  border-radius: 0.58rem;
+  background: color-mix(in srgb, var(--mystery-violet) 9%, var(--mystery-panel-strong));
+  font-size: 0.67rem;
+  font-weight: 760;
+  cursor: pointer;
+}
+.installedMansionActions button:hover:not(:disabled),
+.installedMansionActions button:focus-visible,
+.installedMansionEditor button:hover:not(:disabled),
+.installedMansionEditor button:focus-visible { border-color: var(--mystery-violet); background: color-mix(in srgb, var(--mystery-violet) 17%, var(--mystery-panel-strong)); }
+.installedMansionActions button:focus-visible,
+.installedMansionEditor button:focus-visible { outline: 2px solid var(--mystery-cyan); outline-offset: 2px; }
+.installedMansionActions button:disabled,
+.installedMansionEditor button:disabled { opacity: 0.48; cursor: not-allowed; }
+.installedMansionActions .installedMansionSelect { border-color: color-mix(in srgb, var(--mystery-violet) 62%, var(--mystery-line)); background: color-mix(in srgb, var(--mystery-violet) 17%, var(--mystery-panel-strong)); }
+.installedMansionGrid > article[data-selected="true"] .installedMansionSelect { color: #fff; background: linear-gradient(135deg, color-mix(in srgb, var(--mystery-violet) 82%, #4f35a5), color-mix(in srgb, var(--mystery-violet) 58%, #2b1d64)); }
+
+.installedMansionEditor {
+  display: grid;
+  gap: 0.9rem;
+  padding: 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--mystery-violet) 54%, var(--mystery-line));
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--mystery-violet) 6%, var(--mystery-panel-strong));
+}
+.installedMansionEditor > header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.installedMansionEditor > header > div { display: grid; gap: 0.12rem; }
+.installedMansionEditor > header small { color: var(--mystery-violet); font-size: 0.6rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+.installedMansionEditor h4 { margin: 0; color: var(--mystery-text); }
+.installedMansionEditorGrid { display: grid; grid-template-columns: minmax(12rem, 0.72fr) minmax(0, 1.28fr); gap: 0.9rem; }
+.installedMansionThumbnailEditor { display: grid; align-content: start; gap: 0.65rem; }
+.installedMansionThumbnailEditor > img,
+.installedMansionThumbnailEditor > span { display: grid; width: 100%; aspect-ratio: 16 / 9; box-sizing: border-box; place-items: center; object-fit: cover; color: var(--mystery-violet); border: 1px solid var(--mystery-line); border-radius: 0.68rem; background: var(--mystery-bg); font-size: 2rem; }
+.installedMansionThumbnailEditor > div { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+.installedMansionThumbnailEditor label { display: inline-flex; min-height: 2.25rem; align-items: center; padding: 0.5rem 0.68rem; color: var(--mystery-text); border: 1px solid color-mix(in srgb, var(--mystery-violet) 55%, var(--mystery-line)); border-radius: 0.58rem; background: color-mix(in srgb, var(--mystery-violet) 14%, var(--mystery-panel-strong)); font-size: 0.67rem; font-weight: 760; cursor: pointer; }
+.installedMansionThumbnailEditor input[type="file"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.installedMansionEditorFields { display: grid; gap: 0.7rem; }
+.installedMansionEditorFields > div { display: grid; gap: 0.38rem; }
+.installedMansionEditorFields > div > span { display: flex; align-items: center; justify-content: space-between; gap: 0.65rem; }
+.installedMansionEditorFields label { color: var(--mystery-text); font-size: 0.72rem; font-weight: 700; }
+.installedMansionEditorFields em { color: var(--mystery-muted); font-size: 0.58rem; font-style: normal; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+.installedMansionEditorFields input,
+.installedMansionEditorFields textarea,
+.installedMansionEditorFooter input { width: 100%; box-sizing: border-box; padding: 0.65rem 0.7rem; color: var(--mystery-text); border: 1px solid var(--mystery-line); border-radius: 0.58rem; outline: none; background: var(--mystery-panel-strong); font: inherit; font-size: 0.72rem; }
+.installedMansionEditorFields input:focus-visible,
+.installedMansionEditorFields textarea:focus-visible,
+.installedMansionEditorFooter input:focus-visible { border-color: var(--mystery-violet); outline: 2px solid color-mix(in srgb, var(--mystery-violet) 40%, transparent); outline-offset: 1px; }
+.installedMansionEditorFields textarea { resize: vertical; }
+.installedMansionEditorFields > div > button { justify-self: start; min-height: auto; padding: 0.3rem 0.48rem; color: var(--mystery-muted); background: transparent; }
+.installedMansionEditorError { margin: 0; color: #efadb5; font-size: 0.7rem; }
+.installedMansionEditorFooter { display: flex; align-items: end; justify-content: space-between; gap: 1rem; padding-top: 0.8rem; border-top: 1px solid var(--mystery-line); }
+.installedMansionEditorFooter > div { display: flex; flex-wrap: wrap; align-items: end; gap: 0.48rem; }
+.installedMansionEditorFooter label { display: grid; gap: 0.3rem; color: var(--mystery-muted); font-size: 0.62rem; }
+.installedMansionEditorFooter label input { min-width: 12rem; }
+.installedMansionEditorFooter .savedMansionRemove { border-color: rgba(224, 105, 118, 0.38); color: #e8a3aa; }
+.installedMansionEditorFooter .installedMansionSave { min-width: 10.5rem; color: #fff; border-color: color-mix(in srgb, var(--mystery-violet) 76%, white 16%); background: linear-gradient(135deg, color-mix(in srgb, var(--mystery-violet) 82%, #4f35a5), color-mix(in srgb, var(--mystery-violet) 58%, #2b1d64)); box-shadow: 0 0.5rem 1rem color-mix(in srgb, var(--mystery-violet) 22%, transparent); }
+
+.installedMansionConfirmScrim { position: fixed; inset: 0; z-index: 160; display: grid; place-items: center; padding: 1.5rem; background: rgb(7 5 14 / 72%); backdrop-filter: blur(12px); }
+.installedMansionConfirm { width: min(30rem, 100%); padding: 1.35rem; border: 1px solid color-mix(in srgb, var(--mystery-violet) 38%, transparent); border-radius: 1.1rem; background: color-mix(in srgb, var(--mystery-panel) 96%, #171020); box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 40%); }
+.installedMansionConfirm small { color: var(--mystery-muted); font-size: 0.68rem; font-weight: 760; letter-spacing: 0.12em; text-transform: uppercase; }
+.installedMansionConfirm h4 { margin: 0.35rem 0 0; }
+.installedMansionConfirm p { margin: 0.65rem 0 1.1rem; color: var(--mystery-muted); line-height: 1.55; }
+.installedMansionConfirm > div { display: flex; justify-content: flex-end; gap: 0.65rem; }
+.installedMansionConfirm button { min-height: 2.35rem; padding: 0.52rem 0.75rem; color: var(--mystery-text); border: 1px solid var(--mystery-line); border-radius: 0.58rem; background: var(--mystery-panel-strong); font: inherit; font-size: 0.72rem; font-weight: 760; cursor: pointer; }
+.installedMansionConfirm button:hover:not(:disabled),
+.installedMansionConfirm button:focus-visible { border-color: var(--mystery-violet); background: color-mix(in srgb, var(--mystery-violet) 12%, var(--mystery-panel-strong)); }
+.installedMansionConfirm button:focus-visible { outline: 2px solid var(--mystery-cyan); outline-offset: 2px; }
+.installedMansionConfirm button:disabled { opacity: 0.48; cursor: not-allowed; }
+.installedMansionConfirm .savedMansionRemove { border-color: rgba(201, 69, 87, 0.5); color: color-mix(in srgb, #c94557 80%, var(--mystery-text)); background: color-mix(in srgb, #c94557 9%, var(--mystery-panel-strong)); }
 
 @media (max-width: 720px) {
   .mansionPackageDropzone,
   .mansionPackagePreview,
   .mansionPackagePreview[data-locked="true"] { grid-template-columns: 1fr; align-items: stretch; }
   .mansionPackageDropzone { display: grid; }
+  .installedMansionsHeader,
+  .installedMansionEditorFooter { align-items: stretch; flex-direction: column; }
+  .installedMansionGrid,
+  .installedMansionEditorGrid { grid-template-columns: 1fr; }
+  .randomMansionButton { justify-content: center; }
+  .installedMansionEditorFooter .installedMansionSave { width: 100%; }
 }
 
-.caseDial > label.caseModeChoice {
+.caseDial .caseModeChoice {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
@@ -351,13 +649,13 @@
   cursor: pointer;
 }
 
-.caseDial > label.caseModeChoice[data-selected="true"] {
+.caseDial .caseModeChoice[data-selected="true"] {
   border-color: color-mix(in srgb, var(--mystery-violet) 72%, transparent);
   background: color-mix(in srgb, var(--mystery-violet) 12%, transparent);
   box-shadow: inset 0 0 1.6rem rgba(148, 112, 255, 0.08);
 }
 
-.caseDial > label.caseModeChoice input {
+.caseDial .caseModeChoice input {
   width: auto;
   margin: 0.2rem 0 0;
 }
@@ -469,6 +767,21 @@
   color: var(--mystery-cyan);
   text-overflow: ellipsis;
 }
+
+.setupPrimaryAction.setupPrimaryAction {
+  min-height: 2.9rem;
+  padding: 0.72rem 1.05rem;
+  color: #fff;
+  border: 1px solid color-mix(in srgb, var(--mystery-violet) 76%, white 16%);
+  border-radius: 0.72rem;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--mystery-violet) 82%, #4f35a5), color-mix(in srgb, var(--mystery-violet) 58%, #2b1d64));
+  box-shadow: 0 0.65rem 1.4rem color-mix(in srgb, var(--mystery-violet) 28%, transparent), inset 0 1px rgba(255, 255, 255, 0.22);
+  font-size: 0.78rem;
+  font-weight: 820;
+}
+.setupPrimaryAction.setupPrimaryAction:hover,
+.setupPrimaryAction.setupPrimaryAction:focus-visible { filter: brightness(1.12); transform: translateY(-1px); }
+.setupPrimaryAction.setupPrimaryAction:focus-visible { outline: 2px solid var(--mystery-cyan); outline-offset: 2px; }
 
 .castRandomizeButton {
   display: inline-flex;

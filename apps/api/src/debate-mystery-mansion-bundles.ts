@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
   debateMysteryAcousticThemePaletteV1,
@@ -6,13 +6,15 @@ import {
   debateMysteryMansionBundleEligibleV2,
   type DebateMysteryHouseStyleV2,
   type DebateMysteryMansionAssetV1,
+  type DebateMysteryMansionLibraryPresentationV1,
   type DebateMysteryMansionBundleRoomV1,
   type DebateMysteryMansionBundleSummaryV1,
   type DebateWhodunnitFormatStateV2,
   type PortableMansionInstallationMetadataV1,
 } from "@localai/shared";
+import sharp from "sharp";
 import { getDebateSession } from "./debate.ts";
-import { decryptBytes } from "./security.ts";
+import { decryptBytes, encryptBytes } from "./security.ts";
 import { HttpError } from "./utils.http.ts";
 
 interface MansionBundleRow {
@@ -25,10 +27,51 @@ interface MansionBundleRow {
   suspect_count: number;
   style_json: string;
   layout_json: string;
+  library_metadata_json: string | null;
   portable_metadata_json: string | null;
   portable_payload_sha256: string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface SavedMansionLibraryMetadataV1 {
+  version: 1;
+  title: string | null;
+  description: string | null;
+  thumbnailAssetId: string | null;
+}
+
+export interface UpdateDebateMysteryMansionLibraryInputV1 {
+  title?: unknown;
+  description?: unknown;
+  thumbnailDataUrl?: unknown;
+}
+
+const MANSION_LIBRARY_THUMBNAIL_LOGICAL_ID = "library-thumbnail-override-v1";
+const MANSION_LIBRARY_THUMBNAIL_MAX_SOURCE_BYTES = 8 * 1024 * 1024;
+
+function parseLibraryMetadata(value: string | null): SavedMansionLibraryMetadataV1 {
+  if (!value) {
+    return { version: 1, title: null, description: null, thumbnailAssetId: null };
+  }
+  try {
+    const parsed = JSON.parse(value) as Partial<SavedMansionLibraryMetadataV1>;
+    return {
+      version: 1,
+      title: typeof parsed.title === "string" && parsed.title.trim()
+        ? parsed.title.trim().slice(0, 180)
+        : null,
+      description: typeof parsed.description === "string" && parsed.description.trim()
+        ? parsed.description.trim().slice(0, 1_200)
+        : null,
+      thumbnailAssetId:
+        typeof parsed.thumbnailAssetId === "string" && parsed.thumbnailAssetId.trim()
+          ? parsed.thumbnailAssetId.trim()
+          : null,
+    };
+  } catch {
+    return { version: 1, title: null, description: null, thumbnailAssetId: null };
+  }
 }
 
 function parsePortableMetadata(
@@ -159,10 +202,52 @@ function aggregateAssets(
   }));
 }
 
+function mansionLibraryPresentation(
+  row: MansionBundleRow,
+  style: DebateMysteryHouseStyleV2,
+  assets: DebateMysteryMansionAssetV1[],
+  portable: PortableMansionInstallationMetadataV1 | null,
+): DebateMysteryMansionLibraryPresentationV1 {
+  const saved = parseLibraryMetadata(row.library_metadata_json);
+  const defaultThumbnailAssetId =
+    assets.find(
+      (asset) =>
+        asset.role === "presentation" &&
+        asset.logicalId !== MANSION_LIBRARY_THUMBNAIL_LOGICAL_ID,
+    )?.id ??
+    assets.find((asset) => asset.role === "room")?.id ??
+    null;
+  const validThumbnailOverride = saved.thumbnailAssetId && assets.some(
+    (asset) =>
+      asset.id === saved.thumbnailAssetId &&
+      asset.logicalId === MANSION_LIBRARY_THUMBNAIL_LOGICAL_ID,
+  )
+    ? saved.thumbnailAssetId
+    : null;
+  return {
+    version: 1,
+    defaults: {
+      title: row.name,
+      description:
+        portable?.description?.trim() ||
+        `${style.label.trim() || "Whodunnit"} mansion · ${row.floors} floor${row.floors === 1 ? "" : "s"} · ${row.total_rooms} rooms.`,
+      thumbnailAssetId: defaultThumbnailAssetId,
+    },
+    overrides: {
+      title: saved.title,
+      description: saved.description,
+      thumbnailAssetId: validThumbnailOverride,
+    },
+  };
+}
+
 function summary(
   db: DatabaseSync,
   row: MansionBundleRow,
 ): DebateMysteryMansionBundleSummaryV1 {
+  const houseStyle = parseStyle(row.style_json);
+  const assets = aggregateAssets(db, row.user_id, row.id);
+  const portable = parsePortableMetadata(row.portable_metadata_json);
   return {
     version: 1,
     id: row.id,
@@ -171,10 +256,11 @@ function summary(
     floors: row.floors,
     totalRooms: row.total_rooms,
     suspectCount: row.suspect_count,
-    houseStyle: parseStyle(row.style_json),
+    houseStyle,
     rooms: parseRooms(row.layout_json),
-    assets: aggregateAssets(db, row.user_id, row.id),
-    portable: parsePortableMetadata(row.portable_metadata_json),
+    assets,
+    portable,
+    library: mansionLibraryPresentation(row, houseStyle, assets, portable),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -187,7 +273,7 @@ function bundleRow(
 ): MansionBundleRow {
   const row = db.prepare(
     `SELECT id, user_id, source_session_id, name, floors, total_rooms,
-            suspect_count, style_json, layout_json, portable_metadata_json,
+            suspect_count, style_json, layout_json, library_metadata_json, portable_metadata_json,
             portable_payload_sha256, created_at, updated_at
        FROM debate_mystery_mansion_bundles
       WHERE id = ? AND user_id = ?`,
@@ -210,13 +296,163 @@ export function listDebateMysteryMansionBundlesV2(
 ): DebateMysteryMansionBundleSummaryV1[] {
   const rows = db.prepare(
     `SELECT id, user_id, source_session_id, name, floors, total_rooms,
-            suspect_count, style_json, layout_json, portable_metadata_json,
+            suspect_count, style_json, layout_json, library_metadata_json, portable_metadata_json,
             portable_payload_sha256, created_at, updated_at
        FROM debate_mystery_mansion_bundles
       WHERE user_id = ?
       ORDER BY updated_at DESC, id`,
   ).all(userId) as unknown as MansionBundleRow[];
   return rows.map((row) => summary(db, row));
+}
+
+function normalizedMansionLibraryText(
+  value: unknown,
+  label: string,
+  maxLength: number,
+): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "string") {
+    throw new HttpError(400, `${label} must be text or null.`);
+  }
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  if (!normalized) {
+    throw new HttpError(400, `${label} cannot be blank. Use the file default instead.`);
+  }
+  if (normalized.length > maxLength) {
+    throw new HttpError(400, `${label} must be ${maxLength} characters or fewer.`);
+  }
+  return normalized;
+}
+
+async function normalizedMansionLibraryThumbnail(
+  value: unknown,
+): Promise<{ bytes: Buffer; sha256: string } | null | undefined> {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "string") {
+    throw new HttpError(400, "Mansion thumbnail must be an image data URL or null.");
+  }
+  const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/u.exec(value);
+  if (!match) {
+    throw new HttpError(400, "Choose a PNG, JPEG, or WebP mansion thumbnail.");
+  }
+  if (match[2]!.length > Math.ceil(MANSION_LIBRARY_THUMBNAIL_MAX_SOURCE_BYTES * 4 / 3) + 8) {
+    throw new HttpError(413, "Mansion thumbnails must be 8 MB or smaller.");
+  }
+  const source = Buffer.from(match[2]!, "base64");
+  if (source.byteLength === 0 || source.byteLength > MANSION_LIBRARY_THUMBNAIL_MAX_SOURCE_BYTES) {
+    throw new HttpError(413, "Mansion thumbnails must be 8 MB or smaller.");
+  }
+  try {
+    const bytes = await sharp(source, { limitInputPixels: 40_000_000 })
+      .rotate()
+      .resize(960, 540, { fit: "cover", position: "attention" })
+      .webp({ quality: 82 })
+      .toBuffer();
+    return {
+      bytes,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    };
+  } catch {
+    throw new HttpError(400, "That mansion thumbnail could not be decoded safely.");
+  }
+}
+
+/** Updates local library presentation without mutating the mansion's source
+ * name, portable description, package payload, or export defaults. */
+export async function updateDebateMysteryMansionLibraryV1(
+  db: DatabaseSync,
+  userKey: Buffer,
+  userId: string,
+  bundleId: string,
+  input: UpdateDebateMysteryMansionLibraryInputV1,
+): Promise<DebateMysteryMansionBundleSummaryV1> {
+  const row = bundleRow(db, userId, bundleId);
+  if (
+    input.title === undefined &&
+    input.description === undefined &&
+    input.thumbnailDataUrl === undefined
+  ) {
+    throw new HttpError(400, "Choose a mansion library detail to update.");
+  }
+  const title = normalizedMansionLibraryText(input.title, "Mansion title", 180);
+  const description = normalizedMansionLibraryText(
+    input.description,
+    "Mansion description",
+    1_200,
+  );
+  const thumbnail = await normalizedMansionLibraryThumbnail(input.thumbnailDataUrl);
+  const current = parseLibraryMetadata(row.library_metadata_json);
+  const next: SavedMansionLibraryMetadataV1 = {
+    version: 1,
+    title: title === undefined ? current.title : title,
+    description: description === undefined ? current.description : description,
+    thumbnailAssetId: current.thumbnailAssetId,
+  };
+  const now = new Date().toISOString();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    if (thumbnail !== undefined) {
+      db.prepare(
+        `DELETE FROM debate_mystery_mansion_asset_refs
+          WHERE bundle_id = ? AND user_id = ? AND role = 'presentation'
+            AND logical_id = ?`,
+      ).run(bundleId, userId, MANSION_LIBRARY_THUMBNAIL_LOGICAL_ID);
+      next.thumbnailAssetId = null;
+      if (thumbnail) {
+        const encrypted = encryptBytes(thumbnail.bytes, userKey);
+        db.prepare(
+          `INSERT INTO debate_mystery_mansion_assets
+             (id, user_id, ciphertext, cipher_iv, cipher_tag, sha256, byte_size,
+              mime_type, width, height, duration_ms, provider, model, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'image/webp', 960, 540, NULL,
+                   'library-edit', 'local-thumbnail-v1', ?, ?)
+           ON CONFLICT(user_id, sha256) DO UPDATE SET updated_at = excluded.updated_at`,
+        ).run(
+          randomUUID(),
+          userId,
+          encrypted.ciphertext,
+          encrypted.iv,
+          encrypted.tag,
+          thumbnail.sha256,
+          thumbnail.bytes.byteLength,
+          now,
+          now,
+        );
+        const stored = db.prepare(
+          "SELECT id FROM debate_mystery_mansion_assets WHERE user_id = ? AND sha256 = ?",
+        ).get(userId, thumbnail.sha256) as { id: string };
+        db.prepare(
+          `INSERT INTO debate_mystery_mansion_asset_refs
+             (bundle_id, user_id, asset_id, role, logical_id, created_at)
+           VALUES (?, ?, ?, 'presentation', ?, ?)`,
+        ).run(bundleId, userId, stored.id, MANSION_LIBRARY_THUMBNAIL_LOGICAL_ID, now);
+        next.thumbnailAssetId = stored.id;
+      }
+    }
+    const metadataJson = next.title || next.description || next.thumbnailAssetId
+      ? JSON.stringify(next)
+      : null;
+    db.prepare(
+      `UPDATE debate_mystery_mansion_bundles
+          SET library_metadata_json = ?, updated_at = ?
+        WHERE id = ? AND user_id = ?`,
+    ).run(metadataJson, now, bundleId, userId);
+    db.prepare(
+      `DELETE FROM debate_mystery_mansion_assets
+        WHERE user_id = ? AND NOT EXISTS (
+          SELECT 1 FROM debate_mystery_mansion_asset_refs AS refs
+           WHERE refs.user_id = debate_mystery_mansion_assets.user_id
+             AND refs.asset_id = debate_mystery_mansion_assets.id
+        )`,
+    ).run(userId);
+    db.exec("COMMIT");
+  } catch (error) {
+    if (db.isTransaction) db.exec("ROLLBACK");
+    throw error;
+  }
+  return getDebateMysteryMansionBundleV2(db, userId, bundleId);
 }
 
 export function deleteDebateMysteryMansionBundleV2(

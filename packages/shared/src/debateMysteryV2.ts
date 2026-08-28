@@ -118,6 +118,22 @@ export interface DebateMysteryMansionAssetV1 {
   byteLength: number;
 }
 
+export interface DebateMysteryMansionLibraryPresentationV1 {
+  version: 1;
+  defaults: {
+    title: string;
+    description: string;
+    thumbnailAssetId: string | null;
+  };
+  /** Local, tenant-scoped presentation only. Null means use the immutable
+   * saved/package default and never rewrites portable source metadata. */
+  overrides: {
+    title: string | null;
+    description: string | null;
+    thumbnailAssetId: string | null;
+  };
+}
+
 export interface DebateMysteryMansionBundleSummaryV1 {
   version: 1;
   id: string;
@@ -132,6 +148,9 @@ export interface DebateMysteryMansionBundleSummaryV1 {
   assets?: DebateMysteryMansionAssetV1[];
   /** Present when this mansion was installed from a portable package. */
   portable?: PortableMansionInstallationMetadataV1 | null;
+  /** Present on current API snapshots; older snapshots fall back to name and
+   * portable/house-style metadata on the client. */
+  library?: DebateMysteryMansionLibraryPresentationV1;
   createdAt: string;
   updatedAt: string;
 }

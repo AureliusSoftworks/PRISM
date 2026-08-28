@@ -178,9 +178,10 @@ export function exportInternalMansionPackageFromDbV1(args: {
             assets.sha256, assets.byte_size, assets.width, assets.height,
             assets.duration_ms
        FROM debate_mystery_mansion_asset_refs AS refs
-       JOIN debate_mystery_mansion_assets AS assets
+      JOIN debate_mystery_mansion_assets AS assets
          ON assets.id = refs.asset_id AND assets.user_id = refs.user_id
       WHERE refs.bundle_id = ? AND refs.user_id = ?
+        AND refs.logical_id <> 'library-thumbnail-override-v1'
       ORDER BY refs.role, refs.logical_id, assets.id`,
   ).all(args.bundleId, args.userId) as unknown as StoredMansionAssetRow[];
   const files = new Map<string, Uint8Array>();
@@ -280,8 +281,10 @@ export function exportInternalMansionPackageFromDbV1(args: {
     schema: "prism-mansion-package-v1",
     formatVersion: { major: 1, minor: 0 },
     packageId: randomUUID(),
-    title: `${bundle.houseStyle.label.trim() || "Whodunnit"} Mansion`,
-    description: "A reusable PRISM Whodunnit mansion.",
+    title: bundle.portable
+      ? bundle.name.trim() || `${bundle.houseStyle.label.trim() || "Whodunnit"} Mansion`
+      : `${bundle.houseStyle.label.trim() || "Whodunnit"} Mansion`,
+    description: bundle.portable?.description?.trim() || "A reusable PRISM Whodunnit mansion.",
     creator: { name: args.creatorName?.trim() || "PRISM creator", id: null, url: null },
     provenance: { createdAt: bundle.createdAt, prismVersion: args.prismVersion, generatedWith: [] },
     license: { name: "Private use", url: null, allowsRedistribution: false },

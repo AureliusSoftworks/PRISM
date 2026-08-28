@@ -2399,6 +2399,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       suspect_count INTEGER NOT NULL CHECK(suspect_count >= 1),
       style_json TEXT NOT NULL,
       layout_json TEXT NOT NULL,
+      library_metadata_json TEXT,
       portable_metadata_json TEXT,
       portable_payload_sha256 TEXT,
       created_at TEXT NOT NULL,
@@ -4593,6 +4594,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   ).all() as Array<{ name: string }>;
   if (!mansionBundleColumns.some((column) => column.name === "portable_metadata_json")) {
     db.exec("ALTER TABLE debate_mystery_mansion_bundles ADD COLUMN portable_metadata_json TEXT;");
+  }
+  if (!mansionBundleColumns.some((column) => column.name === "library_metadata_json")) {
+    db.exec("ALTER TABLE debate_mystery_mansion_bundles ADD COLUMN library_metadata_json TEXT;");
   }
   if (!mansionBundleColumns.some((column) => column.name === "portable_payload_sha256")) {
     db.exec("ALTER TABLE debate_mystery_mansion_bundles ADD COLUMN portable_payload_sha256 TEXT;");
