@@ -181,7 +181,6 @@ export function exportInternalMansionPackageFromDbV1(args: {
       JOIN debate_mystery_mansion_assets AS assets
          ON assets.id = refs.asset_id AND assets.user_id = refs.user_id
       WHERE refs.bundle_id = ? AND refs.user_id = ?
-        AND refs.logical_id <> 'library-thumbnail-override-v1'
       ORDER BY refs.role, refs.logical_id, assets.id`,
   ).all(args.bundleId, args.userId) as unknown as StoredMansionAssetRow[];
   const files = new Map<string, Uint8Array>();
@@ -277,6 +276,15 @@ export function exportInternalMansionPackageFromDbV1(args: {
         })),
       }
     : generatedAmbience;
+  const activePreviewCandidateId =
+    bundle.library?.overrides.thumbnailAssetId ??
+    bundle.library?.defaults.thumbnailAssetId ??
+    null;
+  const activePreviewStoredId = activePreviewCandidateId && stored.some(
+    (asset) => asset.id === activePreviewCandidateId && asset.role === "presentation",
+  )
+    ? activePreviewCandidateId
+    : null;
   const manifest: MansionPackageManifestV1 = {
     schema: "prism-mansion-package-v1",
     formatVersion: { major: 1, minor: 0 },
@@ -291,6 +299,7 @@ export function exportInternalMansionPackageFromDbV1(args: {
     contentWarnings: [],
     compatibility: { minimumFormatMajor: 1, maximumFormatMajor: 1, minimumPrismVersion: args.prismVersion },
     floorCount: bundle.floors,
+    scaleClass: bundle.scaleClass,
     rooms: bundle.rooms.map((room, roomIndex) => ({
       id: portableRoomIdByStoredId.get(room.id)!,
       templateId: room.templateId,
@@ -321,7 +330,10 @@ export function exportInternalMansionPackageFromDbV1(args: {
       promptContract: bundle.houseStyle.promptContract,
     },
     assets,
-    previewAssetId: assets.find((asset) => asset.role === "room")?.id ?? null,
+    previewAssetId:
+      (activePreviewStoredId ? portableIdByStoredId.get(activePreviewStoredId) : null) ??
+      assets.find((asset) => asset.role === "presentation")?.id ??
+      null,
     investigationThemeAssetId: assets.find((asset) => asset.role === "music")?.id ?? null,
     roomArt: DEFAULT_MANSION_ROOM_ART_CONTRACT_V1,
     ambience,

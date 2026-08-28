@@ -484,7 +484,9 @@ function prismConversationReplyProvider(
   const reply = [...conversation.messages]
     .reverse()
     .find((message) => message.role === "assistant");
-  return reply?.provider === "openai" || reply?.provider === "anthropic"
+  return reply?.provider === "ollama_cloud" ||
+    reply?.provider === "openai" ||
+    reply?.provider === "anthropic"
     ? reply.provider
     : "local";
 }

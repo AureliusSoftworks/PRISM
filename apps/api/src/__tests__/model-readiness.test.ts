@@ -27,6 +27,25 @@ describe("local model readiness", () => {
     resetModelReadinessForTests();
   });
 
+  it("skips residency and keep-warm probes for Ollama Cloud", async () => {
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      return Response.json({});
+    }) as typeof fetch;
+
+    const prepared = await prepareLocalModel({
+      model: "minimax-m2.5:cloud",
+    });
+    const warm = await keepAuxiliaryLocalModelWarm({
+      model: "gpt-oss:120b-cloud",
+    });
+
+    assert.equal(prepared.state, "not_applicable");
+    assert.equal(warm.state, "not_applicable");
+    assert.equal(fetchCount, 0);
+  });
+
   it("returns ready without generating when /api/ps reports a live model", async () => {
     let chatCalls = 0;
     globalThis.fetch = (async (input: string | URL | Request) => {

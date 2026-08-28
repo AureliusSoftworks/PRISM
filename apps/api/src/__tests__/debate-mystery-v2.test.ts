@@ -417,6 +417,21 @@ class ExhaustedWitnessV2AuthorProvider extends V2AuthorProvider {
   }
 }
 
+class IncompleteFoundationV2AuthorProvider extends V2AuthorProvider {
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const request = JSON.parse(messages.at(-1)!.content) as { section?: string };
+    if (request.section === "case_foundation") {
+      this.calls += 1;
+      this.sections.push("case_foundation");
+      return JSON.stringify({ title: "An Incomplete Local Draft" });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
 class ExactClockWithoutRecallV2AuthorProvider extends V2AuthorProvider {
   public override async generateResponse(
     messages: ProviderMessage[],
@@ -2410,6 +2425,39 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       JSON.stringify(session),
       /sealedCulpritSeatId|sealedAccompliceSeatId|actorAccounts|graphValidation|correctPresentations|privateCase/iu,
     );
+  });
+
+  it("keeps a LOCAL case playable when bounded foundation prose remains incomplete", async () => {
+    const db = testDb();
+    const provider = new IncompleteFoundationV2AuthorProvider();
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-incomplete-foundation",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    const session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    const state = v2State(session);
+    const { privateCase } = getDebateMysteryCaseV2(db, "user-1", session.id);
+
+    assert.equal(
+      provider.sections.filter((section) => section === "case_foundation").length,
+      3,
+      "the local author receives its strict bounded retry budget before fallback",
+    );
+    assert.equal(state.compilation.stage, "complete");
+    assert.equal(session.status, "waiting_for_player");
+    assert.equal((state.caseTitle ?? "").length > 0, true);
+    assert.equal(privateCase.victimDescription.length > 0, true);
+    assert.equal(privateCase.recordItems.every((item) => item.description.length > 0), true);
   });
 
   it("fills omitted earlier-format room and repeat performances with deterministic playable contracts", async () => {

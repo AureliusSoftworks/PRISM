@@ -85,6 +85,24 @@ describe("Auto fallback contracts", () => {
     );
   });
 
+  it("keeps Ollama Cloud in the ONLINE fallback lane", () => {
+    assert.deepEqual(
+      autoFallbackResolvedChain(
+        { provider: "openai", model: "gpt-primary" },
+        {
+          v: 1,
+          fallbacks: [
+            { provider: "ollama_cloud", model: "minimax-m2.5:cloud" },
+          ],
+        },
+      ),
+      [
+        { provider: "openai", model: "gpt-primary" },
+        { provider: "ollama_cloud", model: "minimax-m2.5:cloud" },
+      ],
+    );
+  });
+
   it("treats saved entries as priorities before remaining eligible models and final local recovery", () => {
     const runtimeChain = {
       v: 1 as const,

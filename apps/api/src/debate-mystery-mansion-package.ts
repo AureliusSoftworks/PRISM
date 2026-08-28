@@ -11,6 +11,7 @@ import {
   exportInternalMansionPackageFromDbV1,
   importInternalMansionPackageToDbV1,
 } from "./debate-mystery-mansion-codec.ts";
+import { ensureDebateMysteryMansionPortableRoomAssetsV1 } from "./debate-mystery-mansion-bundles.ts";
 import {
   inspectPortableMysteryEnvelopeHeaderV1,
   openPortableMysteryEnvelopeV1,
@@ -45,6 +46,12 @@ export async function exportPortableMansionPackageV1(args: {
   mode?: PortableMysteryEncryptionModeV1;
   password?: string;
 }): Promise<Uint8Array> {
+  await ensureDebateMysteryMansionPortableRoomAssetsV1(
+    args.db,
+    args.userKey,
+    args.userId,
+    args.bundleId,
+  );
   const payload = exportInternalMansionPackageFromDbV1(args);
   const preflight = preflightPortableMysteryArchiveV1(payload);
   const decoded = decodeInternalMansionPackageV1(payload);

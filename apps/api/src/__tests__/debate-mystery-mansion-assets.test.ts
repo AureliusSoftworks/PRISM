@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import { DatabaseSync } from "node:sqlite";
+import { DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1 } from "@localai/shared";
 import { replaceProtectedDebateMysteryMansionAssetsV1 } from "../debate-mystery-mansion-bundles.ts";
 
 function testDb(): DatabaseSync {
@@ -85,6 +86,14 @@ describe("saved mansion protected asset ownership", () => {
   it("deduplicates by tenant, anonymizes props, and replaces refs without orphaning bytes", () => {
     const db = testDb();
     addVaultAsset(db, "user-1", "session-1", "room", "library", "room bytes");
+    addVaultAsset(
+      db,
+      "user-1",
+      "session-1",
+      "room",
+      DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
+      "exterior bytes",
+    );
     addVaultAsset(db, "user-1", "session-1", "evidence", "culprit-letter", "prop bytes");
 
     db.exec("BEGIN IMMEDIATE");
@@ -98,6 +107,7 @@ describe("saved mansion protected asset ownership", () => {
       ).all("user-1") as unknown as Array<{ role: string; logical_id: string }>)
         .map((row) => ({ ...row })),
       [
+        { role: "presentation", logical_id: DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1 },
         { role: "prop", logical_id: "prop-001" },
         { role: "room", logical_id: "library" },
       ],
@@ -113,7 +123,7 @@ describe("saved mansion protected asset ownership", () => {
     assert.equal(
       (db.prepare("SELECT COUNT(*) AS count FROM debate_mystery_mansion_assets WHERE user_id = ?")
         .get("user-1") as { count: number }).count,
-      2,
+      3,
     );
 
     addVaultAsset(db, "user-2", "session-2", "room", "library", "room bytes");
@@ -121,7 +131,7 @@ describe("saved mansion protected asset ownership", () => {
     assert.equal(
       (db.prepare("SELECT COUNT(*) AS count FROM debate_mystery_mansion_assets")
         .get() as { count: number }).count,
-      3,
+      4,
     );
 
     db.prepare(
@@ -131,7 +141,7 @@ describe("saved mansion protected asset ownership", () => {
     assert.equal(
       (db.prepare("SELECT COUNT(*) AS count FROM debate_mystery_mansion_assets WHERE user_id = ?")
         .get("user-1") as { count: number }).count,
-      1,
+      2,
     );
   });
 });

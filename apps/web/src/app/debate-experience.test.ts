@@ -676,7 +676,7 @@ describe("Debate experience", () => {
     assert.match(source, /Try another version/u);
     assert.match(source, /Refine motion/u);
     assert.match(source, /Seat every voice/u);
-    assert.match(source, /Player seat & the Jury/iu);
+    assert.match(source, /Player seat & court/iu);
     assert.match(source, /Your seat & the Jury/iu);
     assert.match(source, /preferredJurorBotIds/u);
     assert.match(source, /emptyPreferredJurorBotIds/u);
@@ -1349,7 +1349,7 @@ describe("Debate experience", () => {
       /if \(option\.id === "whodunnit"\) \{[\s\S]{0,180}setFormat\("whodunnit"\)/u,
     );
     assert.doesNotMatch(source, /setMysterySetupOpen\(true\)/u);
-    assert.match(source, /format === "whodunnit" \? "Court" : "Motion"/u);
+    assert.match(source, /format === "whodunnit" \? "Setup" : "Motion"/u);
     assert.match(source, /<BotPickerToolbar/u);
     assert.match(source, /mysterySuspectBotIds\.map/u);
     assert.match(source, /const frozenConfig: DebateWhodunnitCreateConfigV2/u);
@@ -1455,10 +1455,28 @@ describe("Debate experience", () => {
     assert.match(css, /\.archiveForgeProgressTrack/u);
   });
 
-  it("leads Whodunnit setup with a complete quick path and progressively discloses optional controls", () => {
+  it("leads Whodunnit setup through one preserved decision page at a time", () => {
     assert.match(source, /data-tutorial-target="whodunnit-quick-start"/u);
-    assert.match(source, /A complete mystery needs only a mansion and a cast/u);
-    assert.match(source, /Keep the defaults for a balanced first case/u);
+    assert.match(source, /type WhodunnitSetupPage = "mansion" \| "story" \| "experience" \| "production"/u);
+    assert.match(source, /label: "Mansion", detail: "Choose the house"/u);
+    assert.match(source, /label: "Story", detail: "Set tone and difficulty"/u);
+    assert.match(source, /label: "Experience", detail: "Choose how you play"/u);
+    assert.match(source, /label: "Production", detail: "Set art and audio"/u);
+    assert.ok(
+      source.indexOf('{ id: "experience", label: "Experience"') <
+        source.indexOf('{ id: "mansion", label: "Mansion"'),
+    );
+    assert.match(source, /useState<WhodunnitSetupPage>\("experience"\)/u);
+    assert.match(source, /setupPage\.id === "mansion"/u);
+    assert.match(source, /mysterySetupPage !== "mansion" \|\| mansionStepReady/u);
+    assert.match(source, /disabled=\{index > mansionPageIndex && !mansionStepReady\}/u);
+    assert.match(source, /data-whodunnit-setup-page=\{mysterySetupPage\}/u);
+    assert.match(source, /mysterySetupPage === "mansion"/u);
+    assert.match(source, /mysterySetupPage === "story"/u);
+    assert.match(source, /mysterySetupPage === "experience"/u);
+    assert.match(source, /mysterySetupPage === "production"/u);
+    assert.match(source, /Installed mansions/u);
+    assert.match(source, /Create a new mansion/u);
     assert.match(source, /Choose a mansion size/u);
     assert.match(source, /Quick is the shortest full mansion/u);
     assert.match(source, /Every new mansion has a functional upstairs/u);
@@ -1467,14 +1485,15 @@ describe("Debate experience", () => {
     assert.match(source, /data-tutorial-target="whodunnit-mansion-library"/u);
     assert.match(source, /<strong>Mansion idea<\/strong><em>Optional<\/em>/u);
     assert.match(source, /Classic · balanced/u);
-    assert.match(source, /data-tutorial-target="whodunnit-more-options"/u);
-    assert.match(source, /court tone, direct-to-court play, custom art and audio, recipe controls/iu);
-    assert.match(source, /Import a legacy shared Case Seed/u);
-    assert.match(source, /Next: choose the cast/u);
-    assert.ok(source.indexOf("Choose a mansion size") < source.indexOf("More case options"));
+    assert.match(source, /<WhodunnitSetupDialog[\s\S]*?id="whodunnit-mansion-import"/u);
+    assert.match(source, /<WhodunnitSetupDialog[\s\S]*?id="whodunnit-seed-import"/u);
+    assert.match(source, /Continue to Cast/u);
+    assert.match(source, /aria-hidden="true">←<\/span> Back/u);
+    assert.doesNotMatch(source, /data-tutorial-target="whodunnit-more-options"/u);
     assert.match(mysteryCss, /\.quickStartNote\s*\{/u);
-    assert.match(mysteryCss, /\.setupDisclosure\s*\{/u);
-    assert.match(mysteryCss, /\.setupDisclosureBody\s*\{/u);
+    assert.match(mysteryCss, /\.guidedSetupProgress\s*\{/u);
+    assert.match(mysteryCss, /\.mansionSourcePicker\s*\{/u);
+    assert.match(mysteryCss, /\.guidedSetupFooter/u);
     assert.match(mysteryCss, /\.optionalSetupGroup\s*\{/u);
   });
 
@@ -1483,15 +1502,18 @@ describe("Debate experience", () => {
     assert.match(source, /data-theme=\{props\.theme\}/u);
     assert.match(source, /aria-pressed=\{!selectedMysteryMansionBundle/u);
     assert.match(source, /"Selected ✓" : "Choose"/u);
-    assert.match(source, /<strong>Install a mansion file<\/strong>/u);
+    assert.match(source, />Install a mansion file<\/button>/u);
     assert.match(source, /className=\{mysteryStyles\.setupField\}/u);
     assert.match(source, /className=\{mysteryStyles\.setupPrimaryAction\}/u);
+    assert.match(source, /aria-current=\{step\.id === mysterySetupPage \? "step" : undefined\}/u);
     assert.match(mysteryCss, /\.setupControls\s*\{[\s\S]*?--mystery-line:\s*var\(--debate-studio-line-strong/u);
     assert.match(mysteryCss, /\.setupControls\[data-theme="light"\]/u);
     assert.match(mysteryCss, /\.quickStartNote\s*\{[\s\S]*?border-left:/u);
     assert.match(mysteryCss, /\.presetGrid button:hover:not\(:disabled\)[\s\S]*?transform:\s*translateY\(-2px\)/u);
     assert.match(mysteryCss, /\.presetGrid button\[data-selected="true"\][\s\S]*?box-shadow:/u);
-    assert.match(mysteryCss, /\.setupDisclosure > summary em::after\s*\{[\s\S]*?content:\s*"›"/u);
+    assert.match(mysteryCss, /\.guidedSetupProgress button\[data-active="true"\]/u);
+    assert.match(mysteryCss, /\.mansionSourcePicker > label\[data-selected="true"\]/u);
+    assert.match(mysteryCss, /\.whodunnitDialog\s*\{[\s\S]*?max-height:/u);
     assert.match(mysteryCss, /\.mansionPackageDropzone button:hover:not\(:disabled\)/u);
     assert.match(mysteryCss, /\.installedMansionGrid > article\[data-selected="true"\]/u);
     assert.match(mysteryCss, /\.setupPrimaryAction\.setupPrimaryAction\s*\{[\s\S]*?linear-gradient/u);

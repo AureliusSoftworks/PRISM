@@ -287,6 +287,8 @@ export interface MansionPackageManifestV1 {
   contentWarnings: string[];
   compatibility: PortableMysteryCompatibilityV1;
   floorCount: number;
+  /** Additive so V1 packages without it remain readable. */
+  scaleClass?: "compact" | "standard" | "grand";
   rooms: MansionPackageRoomV1[];
   houseStyle: {
     id: string;
@@ -294,6 +296,8 @@ export interface MansionPackageManifestV1 {
     promptContract: string;
   };
   assets: PortableMysteryAssetDescriptorV1[];
+  /** New packages use a single exterior establishing shot. Legacy room-based
+   * previews remain readable but are not emitted by current Case Forge. */
   previewAssetId: string | null;
   investigationThemeAssetId: string | null;
   /** Additive: legacy packages derive room art with PRISM defaults. */
@@ -591,6 +595,14 @@ export function validateMansionPackageManifestV1(value: unknown): string[] {
   }
   if (!isNonNegativeInteger(value.floorCount) || value.floorCount < 1) {
     errors.push("manifest.floorCount is invalid.");
+  }
+  if (
+    value.scaleClass !== undefined &&
+    value.scaleClass !== "compact" &&
+    value.scaleClass !== "standard" &&
+    value.scaleClass !== "grand"
+  ) {
+    errors.push("manifest.scaleClass is invalid.");
   }
   const assetCollection = validateAssetCollection(value.assets, "manifest.assets");
   errors.push(...assetCollection.errors);

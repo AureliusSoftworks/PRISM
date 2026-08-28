@@ -10,7 +10,7 @@ export interface ZenProgressiveSegmentEvent {
   voiceSegmentId: string;
   segmentIndex: number;
   text: string;
-  provider: "local" | "openai" | "anthropic";
+  provider: "local" | "ollama_cloud" | "openai" | "anthropic";
   model: string;
   botId: string | null;
   moodKey: "joyful" | "warm" | "neutral" | "guarded" | "strained";
@@ -32,7 +32,7 @@ export interface PsychicProgressEvent {
   summary: string;
   scratchpad: string;
   effort: "auto" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
-  provider: "local" | "openai" | "anthropic";
+  provider: "local" | "ollama_cloud" | "openai" | "anthropic";
   model?: string;
   planningMode: "simulated" | "native" | "public";
   simulated: boolean;
@@ -123,6 +123,7 @@ export function parseZenProgressiveChatEvent<T>(
       record.effort === "high" ||
       record.effort === "xhigh") &&
     (record.provider === "local" ||
+      record.provider === "ollama_cloud" ||
       record.provider === "openai" ||
       record.provider === "anthropic") &&
     typeof record.passCount === "number" &&

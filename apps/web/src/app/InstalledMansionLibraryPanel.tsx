@@ -3,10 +3,12 @@
 import { useState, type ChangeEvent, type JSX } from "react";
 import type { DebateMysteryMansionBundleSummaryV1 } from "@localai/shared";
 import {
-  installedMansionThumbnailUrlV1,
+  installedMansionOriginV1,
+  installedMansionThumbnailSourceV1,
   resolveInstalledMansionPresentationV1,
   type InstalledMansionLibraryUpdateV1,
 } from "./installedMansionLibrary";
+import WhodunnitSetupDialog from "./WhodunnitSetupDialog";
 import styles from "./debateMystery.module.css";
 
 interface MansionEditorDraftV1 {
@@ -20,6 +22,7 @@ interface MansionEditorDraftV1 {
 }
 
 export interface InstalledMansionLibraryProps {
+  theme: "light" | "dark";
   mansions: DebateMysteryMansionBundleSummaryV1[];
   selectedMansionId: string;
   busy: boolean;
@@ -38,10 +41,10 @@ export interface InstalledMansionLibraryProps {
 
 function readMansionThumbnail(file: File): Promise<string> {
   if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
-    return Promise.reject(new Error("Choose a PNG, JPEG, or WebP thumbnail."));
+    return Promise.reject(new Error("Choose a PNG, JPEG, or WebP exterior cover."));
   }
   if (file.size > 8 * 1024 * 1024) {
-    return Promise.reject(new Error("Mansion thumbnails must be 8 MB or smaller."));
+    return Promise.reject(new Error("Mansion exterior covers must be 8 MB or smaller."));
   }
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -54,6 +57,7 @@ function readMansionThumbnail(file: File): Promise<string> {
 }
 
 export default function InstalledMansionLibrary({
+  theme,
   mansions,
   selectedMansionId,
   busy,
@@ -112,7 +116,7 @@ export default function InstalledMansionLibrary({
     const title = editor.title.trim();
     const description = editor.description.trim();
     if (!title || !description) {
-      setEditorError("Keep a title and description, or use their saved defaults.");
+      setEditorError("Keep a title and description, or use their original defaults.");
       return;
     }
     setEditorSaving(true);
@@ -133,8 +137,8 @@ export default function InstalledMansionLibrary({
   const editorThumbnailUrl = editor && editingMansion && editingPresentation
     ? editor.thumbnailAction === "replace"
       ? editor.thumbnailDataUrl
-      : installedMansionThumbnailUrlV1(
-          editingMansion.id,
+      : installedMansionThumbnailSourceV1(
+          editingMansion,
           editor.thumbnailAction === "default"
             ? editingPresentation.defaultThumbnailAssetId
             : editingPresentation.thumbnailAssetId,
@@ -176,10 +180,11 @@ export default function InstalledMansionLibrary({
         <div className={styles.installedMansionGrid}>
           {mansions.map((mansion) => {
             const presentation = resolveInstalledMansionPresentationV1(mansion);
-            const thumbnailUrl = installedMansionThumbnailUrlV1(
-              mansion.id,
+            const thumbnailUrl = installedMansionThumbnailSourceV1(
+              mansion,
               presentation.thumbnailAssetId,
             );
+            const origin = installedMansionOriginV1(mansion);
             const selected = mansion.id === selectedMansionId;
             return (
               <article key={mansion.id} data-selected={selected ? "true" : undefined}>
@@ -189,7 +194,15 @@ export default function InstalledMansionLibrary({
                   ) : (
                     <span aria-hidden="true">{mansion.rooms[0]?.emoji ?? "◇"}</span>
                   )}
-                  <em>{mansion.portable ? ".mansion" : "Saved house"}</em>
+                  <span
+                    className={styles.installedMansionOrigin}
+                    data-origin={origin.kind}
+                    title={origin.description}
+                    aria-label={`Origin: ${origin.description}`}
+                  >
+                    <i aria-hidden="true">{origin.kind === "imported" ? "↓" : "✦"}</i>
+                    <strong>{origin.label}</strong>
+                  </span>
                 </div>
                 <div className={styles.installedMansionCopy}>
                   <h4>{presentation.title}</h4>
@@ -222,23 +235,31 @@ export default function InstalledMansionLibrary({
       )}
 
       {editor && editingMansion && editingPresentation ? (
-        <section className={styles.installedMansionEditor} aria-label={`Edit ${editingPresentation.title}`}>
-          <header>
-            <div><small>Library details</small><h4>Edit installed mansion</h4></div>
-            <button type="button" disabled={editorSaving} onClick={() => setEditor(null)}>Close</button>
-          </header>
+        <WhodunnitSetupDialog
+          open={!removeConfirmation}
+          id="installed-mansion-editor"
+          theme={theme}
+          eyebrow="Library details"
+          title="Edit mansion details"
+          description="Customize its exterior cover, title, description, and sharing details in your Installed Mansions library."
+          size="wide"
+          busy={editorSaving}
+          onClose={() => setEditor(null)}
+        >
+        <section className={styles.installedMansionEditor}>
           <div className={styles.installedMansionEditorGrid}>
             <div className={styles.installedMansionThumbnailEditor}>
-              {editorThumbnailUrl ? <img src={editorThumbnailUrl} alt="Current mansion thumbnail" /> : <span aria-hidden="true">{editingMansion.rooms[0]?.emoji ?? "◇"}</span>}
+              {editorThumbnailUrl ? <img src={editorThumbnailUrl} alt="Current mansion exterior cover" /> : <span aria-hidden="true">{editingMansion.rooms[0]?.emoji ?? "◇"}</span>}
               <div>
-                <label htmlFor="installed-mansion-thumbnail">Choose thumbnail</label>
+                <label htmlFor="installed-mansion-thumbnail">Choose exterior cover</label>
                 <input id="installed-mansion-thumbnail" type="file" accept="image/png,image/jpeg,image/webp" disabled={editorSaving} onChange={(event) => void chooseThumbnail(event)} />
+                <small>Use one high-quality outside view that shows the complete mansion in its geography.</small>
                 <button
                   type="button"
                   disabled={editorSaving}
                   onClick={() => setEditor((current) => current ? { ...current, thumbnailAction: "default", thumbnailDataUrl: null } : current)}
                 >
-                  Use {editingMansion.portable ? "file" : "saved"} thumbnail
+                  Use {editingMansion.portable ? "package" : "original"} exterior
                 </button>
               </div>
             </div>
@@ -257,7 +278,7 @@ export default function InstalledMansionLibrary({
                       : current);
                   }}
                 />
-                <button type="button" disabled={editorSaving || editor.titleUsesDefault} onClick={() => setEditor((current) => current ? { ...current, title: editingPresentation.defaultTitle, titleUsesDefault: true } : current)}>Use {editingMansion.portable ? "file" : "saved"} title</button>
+                <button type="button" disabled={editorSaving || editor.titleUsesDefault} onClick={() => setEditor((current) => current ? { ...current, title: editingPresentation.defaultTitle, titleUsesDefault: true } : current)}>Use {editingMansion.portable ? "package" : "original"} title</button>
               </div>
               <div>
                 <span><label htmlFor="installed-mansion-description">Library description</label><em>{editor.descriptionUsesDefault ? "Default" : "Custom"}</em></span>
@@ -274,7 +295,7 @@ export default function InstalledMansionLibrary({
                       : current);
                   }}
                 />
-                <button type="button" disabled={editorSaving || editor.descriptionUsesDefault} onClick={() => setEditor((current) => current ? { ...current, description: editingPresentation.defaultDescription, descriptionUsesDefault: true } : current)}>Use {editingMansion.portable ? "file" : "saved"} description</button>
+                <button type="button" disabled={editorSaving || editor.descriptionUsesDefault} onClick={() => setEditor((current) => current ? { ...current, description: editingPresentation.defaultDescription, descriptionUsesDefault: true } : current)}>Use {editingMansion.portable ? "package" : "original"} description</button>
               </div>
             </div>
           </div>
@@ -296,47 +317,43 @@ export default function InstalledMansionLibrary({
             <button type="button" className={styles.installedMansionSave} disabled={busy || editorSaving} onClick={() => void saveEditor()}>{editorSaving ? "Saving…" : "Save library details"}</button>
           </div>
         </section>
+        </WhodunnitSetupDialog>
       ) : null}
 
       {removeConfirmation ? (
-        <div className={styles.installedMansionConfirmScrim}>
-          <section
-            className={styles.installedMansionConfirm}
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="installed-mansion-remove-title"
-            aria-describedby="installed-mansion-remove-description"
-          >
-            <small>Remove installed mansion</small>
-            <h4 id="installed-mansion-remove-title">
-              Remove {resolveInstalledMansionPresentationV1(removeConfirmation).title}?
-            </h4>
-            <p id="installed-mansion-remove-description">
-              This removes the local installed copy and its library details. Export it first if you want to keep the mansion file.
-            </p>
-            <div>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => setRemoveConfirmation(null)}
-              >
-                Keep mansion
-              </button>
-              <button
-                type="button"
-                className={styles.savedMansionRemove}
-                disabled={busy}
-                onClick={() => {
-                  onRemove(removeConfirmation);
-                  setRemoveConfirmation(null);
-                  setEditor(null);
-                }}
-              >
-                Remove from PRISM
-              </button>
-            </div>
-          </section>
-        </div>
+        <WhodunnitSetupDialog
+          open
+          id="installed-mansion-remove"
+          theme={theme}
+          eyebrow="Remove installed mansion"
+          title={`Remove ${resolveInstalledMansionPresentationV1(removeConfirmation).title}?`}
+          description="This removes the local installed copy and its library details. Export it first if you want to keep the mansion file."
+          role="alertdialog"
+          busy={busy}
+          onClose={() => setRemoveConfirmation(null)}
+        >
+          <div className={styles.installedMansionConfirmActions}>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setRemoveConfirmation(null)}
+            >
+              Keep mansion
+            </button>
+            <button
+              type="button"
+              className={styles.savedMansionRemove}
+              disabled={busy}
+              onClick={() => {
+                onRemove(removeConfirmation);
+                setRemoveConfirmation(null);
+                setEditor(null);
+              }}
+            >
+              Remove from PRISM
+            </button>
+          </div>
+        </WhodunnitSetupDialog>
       ) : null}
     </section>
   );

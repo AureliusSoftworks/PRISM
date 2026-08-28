@@ -78,6 +78,17 @@ test("mansion manifests accept unknown future fields but reject case-private fie
   assert.match(validateMansionPackageManifestV1(leaked).join("\n"), /culprit is case-private/u);
 });
 
+test("mansion manifests accept optional exterior scale while keeping V1 packages readable", () => {
+  const legacy = mansionManifest();
+  assert.deepEqual(validateMansionPackageManifestV1(legacy), []);
+  const current = { ...legacy, scaleClass: "grand" };
+  assert.deepEqual(validateMansionPackageManifestV1(current), []);
+  assert.match(
+    validateMansionPackageManifestV1({ ...legacy, scaleClass: "colossal" }).join("\n"),
+    /scaleClass is invalid/u,
+  );
+});
+
 test("mansion manifests carry one derivable Mosaic contract and optional Illustrated plates", () => {
   const manifest = mansionManifest();
   const illustratedHash = "b".repeat(64);

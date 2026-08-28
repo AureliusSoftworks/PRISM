@@ -162,7 +162,11 @@ export interface GenerateOptions {
   onNativeThinking?: (thinking: string) => void;
 }
 
-export type ProviderName = "local" | "openai" | "anthropic";
+export type ProviderName =
+  | "local"
+  | "ollama_cloud"
+  | "openai"
+  | "anthropic";
 
 function providerGenerationWork(
   providerName: ProviderName,
@@ -216,6 +220,10 @@ export interface ModelCatalogEntry {
   imageSource?: "ollama" | "comfyui" | "comfyui-workflow" | "comfyui-remote";
   /** False when an enabled model is intentionally omitted from manual pickers. */
   showInGlobalPicker?: boolean;
+  /** Cloud Ollama currently does not guarantee PRISM's JSON-schema contract. */
+  supportsStructuredOutput?: boolean;
+  /** Server-owned privacy classification; transport location is not authority. */
+  executionClass?: "local" | "online";
 }
 
 export interface ModelCatalog {
@@ -342,6 +350,8 @@ interface AnthropicConfig {
 export interface DualOllamaWorkloadOptions {
   secondaryOllamaHost?: string | null;
   experimentalDualOllama?: boolean;
+  /** Allows an explicitly selected Ollama Cloud helper only in account ONLINE mode. */
+  onlineEnabled?: boolean;
 }
 
 export interface ResolvedLocalOllamaTarget {
@@ -421,6 +431,12 @@ export function stripLeadingChatRoleMarker(text: string): string {
 
 export const SECONDARY_OLLAMA_MODEL_PREFIX = "ollama-secondary:";
 const DUAL_OLLAMA_WORKLOAD_STATUS_CACHE_MS = 30_000;
+
+/** Ollama's signed-in daemon exposes cloud routes with either current suffix. */
+export function isOllamaCloudModelId(value: string | null | undefined): boolean {
+  const id = value?.trim().toLowerCase() ?? "";
+  return id.endsWith(":cloud") || id.endsWith("-cloud");
+}
 
 export const OPENAI_DEFAULT_MODEL = "gpt-4o-mini";
 export const ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-6";
@@ -908,6 +924,8 @@ function toCatalogEntry(
     hostLabel?: string;
     thinking?: boolean;
     supportsImageInput?: boolean;
+    supportsStructuredOutput?: boolean;
+    executionClass?: "local" | "online";
   } = {}
 ): ModelCatalogEntry {
   return {
@@ -919,6 +937,12 @@ function toCatalogEntry(
     ...(options.hostLabel ? { hostLabel: options.hostLabel } : {}),
     ...(options.thinking ? { thinking: true } : {}),
     ...(options.supportsImageInput ? { supportsImageInput: true } : {}),
+    ...(options.supportsStructuredOutput === false
+      ? { supportsStructuredOutput: false }
+      : {}),
+    ...(options.executionClass
+      ? { executionClass: options.executionClass }
+      : {}),
   };
 }
 
@@ -1343,6 +1367,7 @@ export async function providerModelSupportsImageInput(
   modelId: string,
   options: DualOllamaWorkloadOptions = {},
 ): Promise<boolean> {
+  if (provider === "ollama_cloud") return false;
   if (provider !== "local") {
     return onlineModelSupportsImageInput(provider, modelId);
   }
@@ -1638,8 +1663,19 @@ async function buildUncachedModelCatalog(
     discoverOpenAiModelIds(openAiApiKey),
     discoverAnthropicModelIds(anthropicApiKey),
   ]);
-  const localIds = uniqueModelIdsByLabel([config.ollamaModel, ...discoveredLocal]);
-  const secondaryLocalIds = uniqueModelIdsByLabel(discoveredSecondaryLocal);
+  const ollamaCloudIds = uniqueModelIdsByLabel(
+    discoveredLocal.filter(isOllamaCloudModelId),
+  );
+  const defaultLocalModel = isOllamaCloudModelId(config.ollamaModel)
+    ? config.ollamaAuxiliaryModel || "llama3.2"
+    : config.ollamaModel;
+  const localIds = uniqueModelIdsByLabel([
+    defaultLocalModel,
+    ...discoveredLocal.filter((id) => !isOllamaCloudModelId(id)),
+  ]);
+  const secondaryLocalIds = uniqueModelIdsByLabel(
+    discoveredSecondaryLocal.filter((id) => !isOllamaCloudModelId(id)),
+  );
   const probeThinkingIds = async (
     host: string | null,
     ids: string[],
@@ -1690,7 +1726,7 @@ async function buildUncachedModelCatalog(
   return {
     local: [
       ...localIds.map((id) =>
-        toCatalogEntry(id, "local", config.ollamaModel, {
+        toCatalogEntry(id, "local", defaultLocalModel, {
           localHost: "primary",
           hostLabel: "Primary host",
           thinking: primaryThinkingIds.has(id),
@@ -1708,6 +1744,14 @@ async function buildUncachedModelCatalog(
       ),
     ],
     online: [
+      ...ollamaCloudIds.map((id) =>
+        toCatalogEntry(id, "ollama_cloud", "", {
+          label: `${modelLabelFromId(id, "ollama_cloud")} (Ollama Cloud)`,
+          hostLabel: "Ollama Cloud",
+          supportsStructuredOutput: false,
+          executionClass: "online",
+        }),
+      ),
       ...onlineIds.map((id) =>
         toCatalogEntry(id, "openai", OPENAI_DEFAULT_MODEL, {
           supportsImageInput: onlineModelSupportsImageInput("openai", id),
@@ -1720,8 +1764,11 @@ async function buildUncachedModelCatalog(
       ),
     ],
     defaults: {
-      local: config.ollamaModel,
-      online: OPENAI_DEFAULT_MODEL,
+      local: defaultLocalModel,
+      online:
+        (openAiApiKey ? OPENAI_DEFAULT_MODEL : null) ??
+        ollamaCloudIds[0] ??
+        (anthropicApiKey ? ANTHROPIC_DEFAULT_MODEL : OPENAI_DEFAULT_MODEL),
     },
   };
 }
@@ -1777,12 +1824,18 @@ async function classifyLocalModelHttpFailure(
 }
 
 export class LocalOllamaProvider implements LlmProvider {
-  public readonly name = "local" as const;
+  public readonly name: ProviderName;
   private readonly secondaryOllamaHost: string | null;
   private readonly secondaryOllamaHostRejected: boolean;
   private readonly experimentalDualOllama: boolean;
 
-  public constructor(options: DualOllamaWorkloadOptions = {}) {
+  private readonly ollamaCloudExecution: boolean;
+
+  public constructor(
+    options: DualOllamaWorkloadOptions & { ollamaCloudExecution?: boolean } = {},
+  ) {
+    this.ollamaCloudExecution = options.ollamaCloudExecution === true;
+    this.name = this.ollamaCloudExecution ? "ollama_cloud" : "local";
     const configuredSecondaryHost = options.secondaryOllamaHost?.trim() || null;
     this.secondaryOllamaHost = privateSecondaryOllamaHost(configuredSecondaryHost);
     this.secondaryOllamaHostRejected = Boolean(
@@ -1796,7 +1849,7 @@ export class LocalOllamaProvider implements LlmProvider {
     options?: GenerateOptions
   ): Promise<string> {
     if (!options?.generationWork) {
-      const work = providerGenerationWork("local", options);
+      const work = providerGenerationWork(this.name, options);
       return await Promise.resolve(
         runWithPrismGenerationWorkContext(work, () =>
           this.generateResponse(messages, { ...options, generationWork: work }),
@@ -1804,6 +1857,7 @@ export class LocalOllamaProvider implements LlmProvider {
       );
     }
     if (
+      !this.ollamaCloudExecution &&
       options?.generationWork?.executionLane === "selected" &&
       options.generationWork.operation !== "generate_response"
     ) {
@@ -1856,9 +1910,13 @@ export class LocalOllamaProvider implements LlmProvider {
     messages: ProviderMessage[],
     options?: GenerateOptions
   ): Promise<string> {
+    const requestedModel = options?.model?.trim() || config.ollamaModel;
+    if (isOllamaCloudModelId(requestedModel) !== this.ollamaCloudExecution) {
+      throw new LocalModelRequestError("authentication_or_configuration");
+    }
     if (
       this.secondaryOllamaHostRejected &&
-      parseSecondaryOllamaModelId(options?.model?.trim() || config.ollamaModel)
+      parseSecondaryOllamaModelId(requestedModel)
     ) {
       throw new LocalModelRequestError(
         "authentication_or_configuration",
@@ -1867,7 +1925,7 @@ export class LocalOllamaProvider implements LlmProvider {
       );
     }
     const target = await resolveLocalOllamaTarget(
-      options?.model?.trim() || config.ollamaModel,
+      requestedModel,
       {
         secondaryOllamaHost: this.secondaryOllamaHost,
         experimentalDualOllama: this.experimentalDualOllama,
@@ -1899,6 +1957,7 @@ export class LocalOllamaProvider implements LlmProvider {
     // effort→thinking mapping requests it, the capability probe confirms the
     // model actually supports it, and everything else stays `think: false`.
     const think =
+      !this.ollamaCloudExecution &&
       localNativeThinkRequested(options) &&
       (await ollamaModelSupportsThinking(ollamaHost, model));
     if (think && typeof ollamaOptions.num_predict === "number") {
@@ -1920,9 +1979,17 @@ export class LocalOllamaProvider implements LlmProvider {
       model,
       stream: false,
       messages: ollamaProviderMessages(outboundMessages),
-      keep_alive: options?.ollamaKeepAlive ?? "10m",
       think,
     };
+    if (!this.ollamaCloudExecution) {
+      requestBody.keep_alive = options?.ollamaKeepAlive ?? "10m";
+    }
+    if (
+      this.ollamaCloudExecution &&
+      (options?.jsonSchema || options?.jsonMode)
+    ) {
+      throw new LocalModelRequestError("authentication_or_configuration");
+    }
     if (options?.jsonSchema) {
       requestBody.format = options.jsonSchema;
     } else if (options?.jsonMode) {
@@ -1935,7 +2002,7 @@ export class LocalOllamaProvider implements LlmProvider {
     const startedAt = Date.now();
     let response: Response;
     try {
-      localOllamaActivityObserver?.(target, true);
+      if (!this.ollamaCloudExecution) localOllamaActivityObserver?.(target, true);
       response = await fetch(`${ollamaHost}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1947,7 +2014,7 @@ export class LocalOllamaProvider implements LlmProvider {
         recordDeveloperTranscriptEvent({
           kind: "llm",
           purpose: usagePurpose(options?.usagePurpose),
-          provider: "local",
+          provider: this.name,
           model,
           request: redactProviderImageData(requestBody),
           error: "Local model request was aborted by the caller.",
@@ -1958,7 +2025,7 @@ export class LocalOllamaProvider implements LlmProvider {
       recordDeveloperTranscriptEvent({
         kind: "llm",
         purpose: usagePurpose(options?.usagePurpose),
-        provider: "local",
+        provider: this.name,
         model,
         request: redactProviderImageData(requestBody),
         error: "Local model service was unavailable.",
@@ -1966,14 +2033,14 @@ export class LocalOllamaProvider implements LlmProvider {
       });
       throw new LocalModelRequestError("service_unavailable");
     } finally {
-      localOllamaActivityObserver?.(target, false);
+      if (!this.ollamaCloudExecution) localOllamaActivityObserver?.(target, false);
     }
     if (!response.ok) {
       const failureKind = await classifyLocalModelHttpFailure(response);
       recordDeveloperTranscriptEvent({
         kind: "llm",
         purpose: usagePurpose(options?.usagePurpose),
-        provider: "local",
+        provider: this.name,
         model,
         request: redactProviderImageData(requestBody),
         error: LOCAL_MODEL_REQUEST_ERROR_MESSAGES[failureKind],
@@ -2030,7 +2097,7 @@ export class LocalOllamaProvider implements LlmProvider {
         recordDeveloperTranscriptEvent({
           kind: "llm",
           purpose: usagePurpose(options?.usagePurpose),
-          provider: "local",
+          provider: this.name,
           model,
           request: redactProviderImageData(requestBody),
           rawOutput: payload,
@@ -2045,7 +2112,7 @@ export class LocalOllamaProvider implements LlmProvider {
       recordDeveloperTranscriptEvent({
         kind: "llm",
         purpose: usagePurpose(options?.usagePurpose),
-        provider: "local",
+        provider: this.name,
         model,
         request: redactProviderImageData(requestBody),
         rawOutput: payload,
@@ -2067,7 +2134,7 @@ export class LocalOllamaProvider implements LlmProvider {
         ? payload.total_duration / 1_000_000
         : Date.now() - startedAt;
     recordTextUsage({
-      provider: "local",
+      provider: this.name,
       model,
       purpose: usagePurpose(options?.usagePurpose),
       inputTokens,
@@ -2096,7 +2163,7 @@ export class LocalOllamaProvider implements LlmProvider {
         durationMs,
       },
     });
-    localOllamaResponseObserver?.(target);
+    if (!this.ollamaCloudExecution) localOllamaResponseObserver?.(target);
     return text;
   }
 
@@ -2105,6 +2172,13 @@ export class LocalOllamaProvider implements LlmProvider {
       secondaryOllamaHost: this.secondaryOllamaHost,
       experimentalDualOllama: this.experimentalDualOllama,
     });
+  }
+}
+
+/** ONLINE execution through the user's signed-in localhost Ollama daemon. */
+export class OllamaCloudProvider extends LocalOllamaProvider {
+  public constructor(options: DualOllamaWorkloadOptions = {}) {
+    super({ ...options, ollamaCloudExecution: true });
   }
 }
 
@@ -2626,15 +2700,25 @@ export function getAuxiliaryProvider(
   prismDefaultLlmModel?: string | null,
   providerOptions: DualOllamaWorkloadOptions = {}
 ): LlmProvider {
-  const auxiliaryModel = resolveAuxiliaryOllamaModel(prismDefaultLlmModel);
-  const inner = new LocalOllamaProvider(providerOptions);
+  const requestedModel = resolveAuxiliaryOllamaModel(prismDefaultLlmModel);
+  const cloudAllowed =
+    isOllamaCloudModelId(requestedModel) && providerOptions.onlineEnabled === true;
+  const localAuxiliaryModel = isOllamaCloudModelId(requestedModel)
+    ? config.ollamaAuxiliaryModel || "llama3.2"
+    : requestedModel;
+  const localInner = new LocalOllamaProvider(providerOptions);
+  const cloudInner = cloudAllowed ? new OllamaCloudProvider(providerOptions) : null;
   return {
-    name: "local",
-    diagnosticModel: auxiliaryModel,
+    name: cloudAllowed ? "ollama_cloud" : "local",
+    diagnosticModel: cloudAllowed ? requestedModel : localAuxiliaryModel,
     async generateResponse(
       messages: ProviderMessage[],
       options?: GenerateOptions
     ): Promise<string> {
+      const useCloud =
+        cloudInner !== null && !options?.jsonSchema && !options?.jsonMode;
+      const auxiliaryModel = useCloud ? requestedModel : localAuxiliaryModel;
+      const inner = useCloud ? cloudInner : localInner;
       const target = await resolveLocalOllamaTarget(
         auxiliaryModel,
         providerOptions,
@@ -2647,32 +2731,34 @@ export function getAuxiliaryProvider(
         role: "prepare",
         outputClass: "internal",
         priority: "background",
-        privacyMode: "local",
+        privacyMode: useCloud ? "online" : "local",
         ...options?.generationWork,
       });
+      const generate = async (signal: AbortSignal) =>
+        await Promise.resolve(
+          runWithPrismGenerationWorkContext(work, () =>
+            inner.generateResponse(messages, {
+              ...options,
+              generationWork: work,
+              model: auxiliaryModel,
+              allowFinalLocalFallback: false,
+              ...(!useCloud ? { ollamaKeepAlive: -1 } : {}),
+              signal,
+            }),
+          ),
+        );
+      if (useCloud) {
+        return generate(options?.signal ?? new AbortController().signal);
+      }
       return schedulePrismAuxiliaryWork({
         host: target.host,
         context: work,
         signal: options?.signal,
-        run: async (signal) =>
-          await Promise.resolve(
-            runWithPrismGenerationWorkContext(work, () =>
-              inner.generateResponse(messages, {
-                ...options,
-                generationWork: work,
-                model: auxiliaryModel,
-                allowFinalLocalFallback: false,
-                // Auxiliary work must never pay a cold-start penalty while PRISM is
-                // active. A negative keep_alive is Ollama's indefinite residency mode.
-                ollamaKeepAlive: -1,
-                signal,
-              }),
-            ),
-          ),
+        run: generate,
       });
     },
     async embedText(text: string): Promise<number[]> {
-      return inner.embedText(text);
+      return localInner.embedText(text);
     }
   };
 }
@@ -2711,6 +2797,9 @@ export function selectProvider(
   secondaryOllamaHost?: string | null,
   anthropicApiKey?: string
 ): LlmProvider {
+  if (preferredProvider === "ollama_cloud") {
+    return new OllamaCloudProvider({ secondaryOllamaHost });
+  }
   if (preferredProvider === "openai") {
     if (!openAiApiKey) {
       throw new Error(

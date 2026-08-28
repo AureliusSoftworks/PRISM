@@ -3166,6 +3166,7 @@ async function generateChatResponse(args: {
         ...attempt,
         available:
           index === 0 || args.providerFactory !== undefined || attempt.provider === "local" ||
+          attempt.provider === "ollama_cloud" ||
           (attempt.provider === "openai"
             ? Boolean(args.openAiApiKey)
             : Boolean(args.anthropicApiKey)),
@@ -6952,7 +6953,10 @@ function hydrateMessages(
       content: row.content,
       createdAt: row.created_at,
       provider:
-        row.provider === "local" || row.provider === "openai" || row.provider === "anthropic"
+        row.provider === "local" ||
+        row.provider === "ollama_cloud" ||
+        row.provider === "openai" ||
+        row.provider === "anthropic"
           ? row.provider
           : undefined,
       model: row.model ?? undefined,

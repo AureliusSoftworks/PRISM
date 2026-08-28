@@ -37,8 +37,8 @@ export function minimumWhodunnitBotsForCast(suspectCount: number): number {
 }
 
 /**
- * Fill newly added or invalid suspect seats without consuming an explicit
- * blank. A blank is the editable "Surprise me" state left by removing a bot.
+ * Normalize suspect seats without consuming an open or newly added seat.
+ * A blank is the editable "Surprise me" state resolved only at compile time.
  */
 export function fillWhodunnitSuspectSeats(
   bots: readonly WhodunnitCastBot[],
@@ -55,7 +55,7 @@ export function fillWhodunnitSuspectSeats(
     { length: targetSuspects },
     (_, index) => {
       const raw = current[index];
-      if (raw === "") return "";
+      if (raw === undefined || raw === "") return "";
       const botId = raw?.trim() ?? "";
       if (
         !botId ||

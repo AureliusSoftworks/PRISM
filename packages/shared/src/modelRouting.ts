@@ -18,7 +18,11 @@ export const REQUIRED_PRIMARY_LOCAL_MODEL_ID = REQUIRED_LOCAL_MODELS.chat;
 export const DISABLED_MODEL_CHOICE = "disabled";
 const REQUIRED_VISIBLE_LOCAL_MODEL_ID_SET = new Set<string>([REQUIRED_PRIMARY_LOCAL_MODEL_ID]);
 
-export type AutoModelProvider = "local" | "openai" | "anthropic";
+export type AutoModelProvider =
+  | "local"
+  | "ollama_cloud"
+  | "openai"
+  | "anthropic";
 export type ResponseLane = "local" | "online";
 
 export const AUTO_MODEL_ROUTING_POLICY_VERSION = 1 as const;
@@ -70,6 +74,7 @@ export function normalizeAutoRouteDecisionV1(
   if (record.lane !== "local" && record.lane !== "online") return undefined;
   if (
     record.provider !== "local" &&
+    record.provider !== "ollama_cloud" &&
     record.provider !== "openai" &&
     record.provider !== "anthropic"
   ) {
@@ -135,7 +140,11 @@ export const ONLINE_AUTO_PROVIDER_BIAS_WEIGHT = 10_000;
 /** Minimal catalog shape: only model ids are read. */
 export interface CatalogShapeForAuto {
   local: readonly { id: string }[];
-  online: readonly { id: string; provider?: AutoModelProvider }[];
+  online: readonly {
+    id: string;
+    provider?: AutoModelProvider;
+    supportsStructuredOutput?: boolean;
+  }[];
 }
 
 export interface ResolveAutoModelInput {
@@ -271,6 +280,7 @@ export function isCommonOnlineChatModel(model: ModelForDefaultVisibility): boole
   ) {
     return false;
   }
+  if (provider === "ollama_cloud") return true;
   const patterns =
     provider === "anthropic"
       ? COMMON_ANTHROPIC_CHAT_MODEL_PATTERNS
@@ -314,18 +324,26 @@ export function reconcileHiddenModelIdsForCatalog(
 function laneCatalogModels(
   catalog: CatalogShapeForAuto,
   lane: ResponseLane,
-): Array<{ id: string; provider: AutoModelProvider }> {
+): Array<{
+  id: string;
+  provider: AutoModelProvider;
+  supportsStructuredOutput?: boolean;
+}> {
   if (lane === "local") {
     return catalog.local.map((model) => ({ id: model.id, provider: "local" }));
   }
   return catalog.online.map((model) => ({
     id: model.id,
-    provider: model.provider === "anthropic" ? "anthropic" : "openai",
+    provider: model.provider ?? "openai",
+    supportsStructuredOutput: model.supportsStructuredOutput,
   }));
 }
 
 function inferOnlineProviderFromModelId(modelId: string): Exclude<AutoModelProvider, "local"> | null {
   const normalized = modelId.trim().toLowerCase();
+  if (normalized.endsWith(":cloud") || normalized.endsWith("-cloud")) {
+    return "ollama_cloud";
+  }
   if (normalized.startsWith("claude-")) return "anthropic";
   if (
     normalized.startsWith("gpt-") ||
@@ -361,8 +379,7 @@ function providerForCandidateModel(
     return inferredProvider === null || inferredProvider === "local" ? "local" : null;
   }
 
-  if (inferredProvider === "local" ||
-      (requestedProvider === "anthropic" && inferredProvider === "openai")) {
+  if (inferredProvider === "local") {
     return null;
   }
   return inferredProvider ?? requestedProvider;
@@ -524,6 +541,8 @@ function contextualAutoRoute(input: ResolveAutoModelInput): AutoRouteDecisionV1 
       (candidate) =>
         candidate.id &&
         !hidden.has(candidate.id) &&
+        (!input.routingContext?.structuredOutput ||
+          candidate.supportsStructuredOutput !== false) &&
         (!input.turboOnly || modelSupportsTurboMode(candidate.provider, candidate.id)),
     );
   if (candidates.length === 0) return null;
@@ -604,12 +623,20 @@ export function resolveAutoModel(input: ResolveAutoModelInput): ResolvedAutoMode
   const hidden = new Set(sanitizeHiddenModelIds(input.hiddenModelIds));
   const explicit = input.explicitModelOverride?.trim() || null;
   if (explicit) {
-    const fixed = firstVisibleRoutableModel(
-      [explicit],
-      hidden,
-      input.provider,
-      input.catalog,
-    );
+    const structuredUnsupported =
+      input.routingContext?.structuredOutput === true &&
+      input.catalog.online.some(
+        (model) =>
+          model.id === explicit && model.supportsStructuredOutput === false,
+      );
+    const fixed = structuredUnsupported
+      ? null
+      : firstVisibleRoutableModel(
+          [explicit],
+          hidden,
+          input.provider,
+          input.catalog,
+        );
     if (fixed) {
       return {
         provider: fixed.provider,
@@ -634,7 +661,10 @@ export function resolveAutoModel(input: ResolveAutoModelInput): ResolvedAutoMode
     const provider = input.provider === "anthropic" ? "anthropic" : "openai";
     return {
       provider,
-      model: provider === "anthropic" ? "claude-sonnet-4-6" : "gpt-4o-mini",
+      model:
+        provider === "anthropic"
+          ? "claude-sonnet-4-6"
+          : "gpt-4o-mini",
       usedRequiredLocalFallback: false,
     };
   }

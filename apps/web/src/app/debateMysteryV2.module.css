@@ -76,6 +76,54 @@
   box-shadow: 0 2rem 6rem rgba(0, 0, 0, 0.55), inset 0 1px rgba(255, 255, 255, 0.07);
 }
 
+.forgeCard[data-exterior-hero="true"] {
+  width: min(82rem, 100%);
+  min-height: min(46rem, calc(100dvh - 7rem));
+  isolation: isolate;
+  background: #090b15;
+}
+
+.forgeCard[data-exterior-hero="true"]::before,
+.forgeCard[data-exterior-hero="true"]::after {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  content: "";
+}
+
+.forgeCard[data-exterior-hero="true"]::before {
+  background: var(--forge-exterior-image) center / cover no-repeat;
+}
+
+.forgeCard[data-exterior-hero="true"]::after {
+  z-index: -1;
+  background:
+    linear-gradient(90deg, rgba(4, 6, 12, 0.05) 0 38%, rgba(4, 6, 12, 0.7) 62%, rgba(4, 6, 12, 0.98) 100%),
+    linear-gradient(0deg, rgba(4, 6, 12, 0.82), transparent 38%);
+}
+
+.forgeCard[data-exterior-hero="true"] > :not(.forgePrism) {
+  position: relative;
+  z-index: 2;
+  width: min(30rem, 100%);
+  margin-right: 0;
+  margin-left: auto;
+}
+
+.forgeExteriorStatus {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0 0 0.7rem;
+  color: #d6caef;
+  font-size: 0.72rem;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.forgeExteriorStatus > span { color: #66e5ea; text-shadow: 0 0 0.75rem currentColor; }
+
 .forgeCard h1 {
   max-width: 26rem;
   margin: 0.5rem 0;
@@ -289,11 +337,33 @@
 .error { color: #ffadbd; }
 
 .titleCard {
+  position: relative;
   display: grid;
   place-content: center;
   justify-items: center;
+  overflow: hidden;
   padding: 5rem 1.5rem;
   text-align: center;
+  background-color: #05070d;
+  background-image:
+    linear-gradient(180deg, rgba(3, 5, 12, 0.14), rgba(3, 5, 12, 0.58) 55%, rgba(3, 5, 12, 0.9)),
+    radial-gradient(circle at 50% 42%, rgba(4, 6, 13, 0.03), rgba(4, 6, 13, 0.5) 72%),
+    var(--mansion-exterior-image);
+  background-position: center;
+  background-size: cover;
+}
+
+.titleCardContent {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  padding: clamp(1.4rem, 3vw, 2.5rem);
+  border: 1px solid rgba(208, 194, 255, 0.2);
+  border-radius: 1.2rem;
+  background: rgba(5, 7, 15, 0.52);
+  box-shadow: 0 2rem 6rem rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(12px);
 }
 
 .caseOpening {
@@ -383,7 +453,7 @@
   letter-spacing: -0.065em;
 }
 
-.titleCard > p:not(.eyebrow) { color: var(--v2-muted); }
+.titleCardContent > p:not(.eyebrow) { color: var(--v2-muted); }
 .titleMetadata { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; margin: 1.3rem; }
 .titleMetadata span { padding: 0.45rem 0.65rem; border: 1px solid var(--v2-edge); border-radius: 99px; color: #d7d0e9; font-size: 0.76rem; }
 
@@ -1557,6 +1627,10 @@
 .ballots article small { color: #ff9cca; }
 
 @media (max-width: 760px) {
+  .forge { padding: 4.5rem 0.65rem 1rem; }
+  .forgeCard[data-exterior-hero="true"] { min-height: calc(100dvh - 5.5rem); padding: 1.25rem; }
+  .forgeCard[data-exterior-hero="true"]::after { background: linear-gradient(0deg, rgba(4, 6, 12, 0.98) 0 64%, rgba(4, 6, 12, 0.46) 100%); }
+  .forgeCard[data-exterior-hero="true"] > :not(.forgePrism) { width: 100%; }
   .investigationHeader, .courtHeader { grid-template-columns: auto 1fr auto; }
   .investigationHeader > div, .courtHeader > div { text-align: left; }
   .investigationHeader .eyebrow, .courtHeader .eyebrow { display: none; }

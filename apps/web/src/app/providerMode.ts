@@ -1,6 +1,6 @@
 import { DISABLED_MODEL_CHOICE, isDisabledModelChoice } from "@localai/shared";
 
-export type Provider = "local" | "openai" | "anthropic";
+export type Provider = "local" | "ollama_cloud" | "openai" | "anthropic";
 export type OnlineProvider = Exclude<Provider, "local">;
 export type ResponseMode = "local" | "online";
 export type AutoResponseMode = ResponseMode | "auto";
@@ -56,7 +56,7 @@ export function isOnlineProvider(provider: Provider): provider is OnlineProvider
 }
 
 export function onlineProviderFallback(provider: Provider): OnlineProvider {
-  return provider === "anthropic" ? "anthropic" : "openai";
+  return provider === "local" ? "openai" : provider;
 }
 
 export function fallbackOnlineModelIdsForProvider(
@@ -79,10 +79,12 @@ export function fallbackOnlineModelIdsForProvider(
   ids.push(
     provider === "anthropic"
       ? ANTHROPIC_FALLBACK_CHAT_MODEL_ID
-      : OPENAI_FALLBACK_CHAT_MODEL_ID
+      : provider === "openai"
+        ? OPENAI_FALLBACK_CHAT_MODEL_ID
+        : ""
   );
 
-  return Array.from(new Set(ids));
+  return Array.from(new Set(ids.filter(Boolean)));
 }
 
 export function combinedOnlineModelOptions<T extends ProviderModeModelOption>(
@@ -134,7 +136,11 @@ export function inferOnlineProviderForModelChoice(
         !model.disabledReason
     );
     if (exact && isOnlineProvider(exact.provider)) return exact.provider;
-    return normalized.toLowerCase().startsWith("claude-") ? "anthropic" : "openai";
+    const id = normalized.toLowerCase();
+    if (id.endsWith(":cloud") || id.endsWith("-cloud")) {
+      return "ollama_cloud";
+    }
+    return id.startsWith("claude-") ? "anthropic" : "openai";
   }
 
   const firstAvailable = onlineOptions.find(
@@ -223,6 +229,8 @@ export function applyOnlineModelChoice(args: {
     provider,
     choices: {
       local: normalizeProviderModeModelChoice(args.currentChoices.local),
+      ollama_cloud:
+        provider === "ollama_cloud" ? normalized : AUTO_MODEL_CHOICE,
       openai: provider === "openai" ? normalized : AUTO_MODEL_CHOICE,
       anthropic: provider === "anthropic" ? normalized : AUTO_MODEL_CHOICE,
     },
@@ -251,6 +259,9 @@ export function applyModelChoiceForResponseMode(args: {
         provider: "local",
         choices: {
           local: AUTO_MODEL_CHOICE,
+          ollama_cloud: normalizeProviderModeModelChoice(
+            args.currentChoices.ollama_cloud,
+          ),
           openai: normalizeProviderModeModelChoice(args.currentChoices.openai),
           anthropic: normalizeProviderModeModelChoice(args.currentChoices.anthropic),
         },
@@ -261,6 +272,7 @@ export function applyModelChoiceForResponseMode(args: {
       provider,
       choices: {
         local: normalizeProviderModeModelChoice(args.currentChoices.local),
+        ollama_cloud: AUTO_MODEL_CHOICE,
         openai: AUTO_MODEL_CHOICE,
         anthropic: AUTO_MODEL_CHOICE,
       },
@@ -275,6 +287,9 @@ export function applyModelChoiceForResponseMode(args: {
       provider: "local",
       choices: {
         local: normalized,
+        ollama_cloud: normalizeProviderModeModelChoice(
+          args.currentChoices.ollama_cloud,
+        ),
         openai: normalizeProviderModeModelChoice(args.currentChoices.openai),
         anthropic: normalizeProviderModeModelChoice(args.currentChoices.anthropic),
       },

@@ -9022,6 +9022,21 @@
     color-mix(in srgb, #15111c 82%, transparent);
 }
 
+.juryToggle[data-placement="cast-top"] {
+  border-color: color-mix(in srgb, #9d8cff 34%, var(--debate-studio-line));
+  background:
+    linear-gradient(
+      110deg,
+      color-mix(in srgb, #9d8cff 9%, var(--debate-studio-surface)),
+      color-mix(in srgb, var(--debate-studio-raised) 86%, transparent)
+    );
+  box-shadow: inset 3px 0 color-mix(in srgb, #9d8cff 72%, transparent);
+}
+
+.juryToggle[data-placement="cast-top"][data-enabled="true"] {
+  border-color: color-mix(in srgb, #9d8cff 58%, transparent);
+}
+
 .juryToggle > input {
   position: absolute;
   opacity: 0;

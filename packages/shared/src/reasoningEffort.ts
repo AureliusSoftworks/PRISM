@@ -13,7 +13,11 @@ export type RequestReasoningEffort = Exclude<ReasoningEffort, "auto">;
 /** Provider-only overdrive. Never persisted or exposed as an ordinary ladder stop. */
 export type MaxReasoningEffort = "max";
 export type ProviderReasoningEffort = ReasoningEffort | MaxReasoningEffort;
-export type NativeReasoningEffortProvider = "local" | "openai" | "anthropic";
+export type NativeReasoningEffortProvider =
+  | "local"
+  | "ollama_cloud"
+  | "openai"
+  | "anthropic";
 export type AnthropicRequestReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
 export const MODEL_REASONING_EFFORT_PREFERENCE_VALUES = [

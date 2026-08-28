@@ -2592,6 +2592,7 @@ export function exportUserSnapshot(
       messages: messages.map((message) => {
         const provider: ProviderName | undefined =
           message.provider === "local" ||
+          message.provider === "ollama_cloud" ||
           message.provider === "openai" ||
           message.provider === "anthropic"
             ? message.provider
@@ -3147,7 +3148,9 @@ export function exportUserSnapshot(
         topic: String(row.topic),
         producerBrief: String(row.producer_brief ?? ""),
         provider:
-          row.provider === "openai" || row.provider === "anthropic"
+          row.provider === "ollama_cloud" ||
+          row.provider === "openai" ||
+          row.provider === "anthropic"
             ? row.provider
             : "local",
         model: typeof row.model === "string" ? row.model : null,
@@ -4729,13 +4732,17 @@ function importUserSnapshotWithinTransaction(
         episode.title,
         episode.topic,
         episode.producerBrief,
-        episode.provider === "openai" || episode.provider === "anthropic"
+        episode.provider === "ollama_cloud" ||
+        episode.provider === "openai" ||
+        episode.provider === "anthropic"
           ? episode.provider
           : "local",
         typeof episode.model === "string" ? episode.model : null,
         episode.responseMode === "auto" || episode.responseMode === "online"
           ? episode.responseMode
-          : episode.provider === "openai" || episode.provider === "anthropic"
+          : episode.provider === "ollama_cloud" ||
+              episode.provider === "openai" ||
+              episode.provider === "anthropic"
             ? "online"
             : "local",
         typeof episode.durationMinutes === "number" &&
@@ -4891,6 +4898,7 @@ function importUserSnapshotWithinTransaction(
     for (const message of conversation.messages) {
       const providerValue =
         message.provider === "local" ||
+        message.provider === "ollama_cloud" ||
         message.provider === "openai" ||
         message.provider === "anthropic"
           ? message.provider

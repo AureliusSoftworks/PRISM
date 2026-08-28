@@ -112,8 +112,12 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(cssSource, /animation:\s*roomDescend[^;]+backwards/u);
   });
 
-  it("keeps the title card silent, then opens the frozen Casekeeper briefing in the crime scene", () => {
+  it("opens on the mansion exterior, keeps the title card silent, then enters the crime scene", () => {
     assert.match(experienceSource, /openingOrMapPlaybackSuppressed = state\.playPhase === "title_card"/u);
+    assert.match(experienceSource, /preparedMansionExteriorUrl/u);
+    assert.match(experienceSource, /DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1/u);
+    assert.match(experienceSource, /--mansion-exterior-image/u);
+    assert.match(cssSource, /\.titleCard\s*\{[\s\S]*var\(--mansion-exterior-image\)/u);
     assert.match(experienceSource, /if \(state\.playPhase === "case_opening"\)/u);
     assert.match(experienceSource, /nodeId === "briefing-opening"/u);
     assert.match(experienceSource, /<small>Casekeeper<\/small>/u);
@@ -701,19 +705,35 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(setupSource, /format === "whodunnit" && role === "judge"/u);
     assert.match(setupSource, /Premium unavailable for Whodunnit V2/u);
     assert.match(setupSource, /props\.initialFormat === "whodunnit"/u);
+    assert.match(setupSource, /data-placement=\{format === "whodunnit" \? "cast-top" : undefined\}/u);
+    assert.match(setupSource, /aria-controls=\{format === "whodunnit" \? "debate-mystery-jury-options" : undefined\}/u);
+    assert.match(setupSource, /\{format === "whodunnit" \? renderJuryToggle\(\) : null\}/u);
+    assert.match(setupSource, /\{format !== "whodunnit" \? renderJuryToggle\(\) : null\}/u);
+    assert.match(setupSource, /\{juryEnabled \? \(\s*<section\s*id="debate-mystery-jury-options"/u);
+    assert.match(setupSource, /activeMysteryCastSeat\.kind === "juror"[\s\S]{0,160}setActiveMysteryCastSeat\(\{ kind: "suspect", index: 0 \}\)/u);
+    assert.ok(
+      setupSource.indexOf('{format === "whodunnit" ? renderJuryToggle() : null}') <
+        setupSource.indexOf('className={styles.mysteryCastGroups}'),
+    );
   });
 
   it("offers a truthful Theme, Forge asset, Archive, and saved-mansion setup", () => {
-    assert.match(setupSource, /Theme \/ Spark/u);
-    assert.match(setupSource, /placeholder="Surprise me/u);
-    assert.match(setupSource, /Synthesize assets in Case Forge/u);
+    assert.match(setupSource, /<strong>Mansion idea<\/strong>/u);
+    assert.match(setupSource, /placeholder="Leave blank for Surprise me/u);
+    assert.match(setupSource, /Prepare presentation assets/u);
+    assert.match(setupSource, /LOCAL stays on this device/u);
+    assert.match(setupSource, /symbolic evidence, and an optional personalized ambience mix/u);
     assert.match(setupSource, /Create sealed exhibit images/u);
+    assert.match(setupSource, /LOCAL presents each authored exhibit as text and a symbolic evidence card/u);
+    assert.match(setupSource, /mysteryEvidenceAssetSynthesis && props\.responseMode !== "local"/u);
+    assert.match(setupSource, /disabled=\{props\.responseMode === "local"\}/u);
     assert.match(setupSource, /ONLINE only · LOCAL keeps the bundled room pack/u);
     assert.match(setupSource, /Ask ElevenLabs for an original instrumental mansion theme/u);
     assert.match(setupSource, /LOCAL and Auto keep The Midnight Clue bundled fallback/u);
-    assert.match(setupSource, /<strong>Ambience<\/strong>/u);
+    assert.match(setupSource, /"Personalize local ambience" : "Ambience"/u);
     assert.match(setupSource, /mansion-specific procedural mix/u);
-    assert.match(setupSource, /Off still uses the bundled theme palette and room acoustics/u);
+    assert.match(setupSource, /no online generator or new audio file/u);
+    assert.match(setupSource, /Off still uses matching bundled ambience/u);
     assert.match(setupSource, /Ambience remains mansion-owned and content-addressed/u);
     assert.match(setupSource, /mysteryEvidenceAssetSynthesis/u);
     assert.match(setupSource, /mysteryRoomAssetSynthesis/u);

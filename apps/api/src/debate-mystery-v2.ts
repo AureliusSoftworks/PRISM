@@ -49,6 +49,7 @@ import {
   reasoningGenerationBudgetMs,
   resolveDebateMysteryLineDeliveryV2,
   resolveDebateMysteryConfigV2,
+  resolveDebateMysteryMansionExteriorScaleClassV1,
   validateDebateMysteryAudioManifestV1,
   validateDebateMysteryCaseBible,
   validateDebateMysteryDialogueGraphV2,
@@ -72,6 +73,7 @@ import {
   type DebateMysteryRecordReferenceV2,
   type DebateMysteryResolvedConfigV1,
   type DebateMysteryResolvedConfigV2,
+  type DebateMysteryMansionExteriorScaleClassV1,
   type DebateMysteryRoomV2,
   type DebateMysterySealedAssetRefV1,
   type DebateMysterySpokenLineV2,
@@ -364,10 +366,25 @@ export type DebateMysteryRoomAssetPreparerV2 = (
   args: DebateMysteryRoomAssetPreparationV2,
 ) => Promise<Record<string, DebateMysterySealedAssetRefV1>>;
 
+export interface DebateMysteryMansionExteriorAssetPreparationV2 {
+  userId: string;
+  sessionId: string;
+  houseStyle: DebateMysteryHouseStyleV2;
+  scaleClass: DebateMysteryMansionExteriorScaleClassV1;
+  /** Mirrors the visible Rooms synthesis choice; LOCAL always resolves bundled. */
+  synthesize: boolean;
+  signal?: AbortSignal;
+}
+
+export type DebateMysteryMansionExteriorAssetPreparerV2 = (
+  args: DebateMysteryMansionExteriorAssetPreparationV2,
+) => Promise<DebateMysterySealedAssetRefV1>;
+
 interface DebateMysteryCompilationOptionsV2 {
   generateWave?: typeof generateBuiltinEnglishWave;
   prepareEvidenceAssets?: DebateMysteryEvidenceAssetPreparerV2;
   prepareRoomAssets?: DebateMysteryRoomAssetPreparerV2;
+  prepareMansionExteriorAsset?: DebateMysteryMansionExteriorAssetPreparerV2;
   onCompilationReady?: (session: DebateSessionV1) => void;
 }
 
@@ -501,6 +518,13 @@ interface AuthoredMysteryV2 {
 
 type AuthoredMysteryFoundationV2 = Omit<AuthoredMysteryV2, "suspects" | "prosecutionChoices">;
 type AuthoredMysteryFoundationCoreV2 = Omit<AuthoredMysteryFoundationV2, "examinations">;
+
+class MysteryFoundationValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MysteryFoundationValidationError";
+  }
+}
 
 interface MysteryV2AuthoringCheckpointV1 {
   kind: "authoring-v1";
@@ -1584,6 +1608,36 @@ function withPreparedRoomAsset(
   };
 }
 
+function withPreparedMansionExteriorAsset(
+  checkpoint: MysteryV2Checkpoint,
+  asset: DebateMysterySealedAssetRefV1,
+): MysteryV2Checkpoint {
+  return {
+    ...checkpoint,
+    publicState: { ...checkpoint.publicState, mansionExterior: asset },
+  };
+}
+
+/** Publishes the title-card exterior after a retry or background preparation. */
+export function attachDebateMysteryMansionExteriorAssetV2(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  asset: DebateMysterySealedAssetRefV1,
+): DebateSessionV1 {
+  const session = getDebateSession(db, userId, sessionId);
+  if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
+    throw new HttpError(409, "Mansion artwork requires a Whodunnit V2 case.");
+  }
+  if (JSON.stringify(session.formatState.mansionExterior ?? null) === JSON.stringify(asset)) {
+    return session;
+  }
+  return persistV2Session(db, userId, session, {
+    ...session.formatState,
+    mansionExterior: asset,
+  });
+}
+
 /**
  * Publishes one spoiler-safe room asset state after the durable background
  * worker settles it. Optimistic retries preserve simultaneous player actions.
@@ -1816,6 +1870,7 @@ function initialV2State(
     version: 2,
     format: "whodunnit",
     playPhase: "case_forge",
+    mansionExterior: null,
     compilation: {
       version: 2,
       jobId,
@@ -2021,6 +2076,7 @@ export async function createDebateMysterySessionV2(
     generateWave?: DebateMysteryCompilationOptionsV2["generateWave"];
     prepareEvidenceAssets?: DebateMysteryCompilationOptionsV2["prepareEvidenceAssets"];
     prepareRoomAssets?: DebateMysteryCompilationOptionsV2["prepareRoomAssets"];
+    prepareMansionExteriorAsset?: DebateMysteryCompilationOptionsV2["prepareMansionExteriorAsset"];
     onCompilationReady?: DebateMysteryCompilationOptionsV2["onCompilationReady"];
   } = {},
 ): Promise<DebateSessionV1> {
@@ -2078,6 +2134,7 @@ export async function createDebateMysterySessionV2(
       preset: "custom",
       floors: mansion.floors,
       totalRooms: mansion.totalRooms,
+      scaleClass: mansion.scaleClass,
       houseStyle: {
         ...mansion.houseStyle,
         bespokeAmbienceRequested:
@@ -2145,6 +2202,7 @@ export async function createDebateMysterySessionV2(
         generateWave: options.generateWave,
         prepareEvidenceAssets: options.prepareEvidenceAssets,
         prepareRoomAssets: options.prepareRoomAssets,
+        prepareMansionExteriorAsset: options.prepareMansionExteriorAsset,
         onCompilationReady: options.onCompilationReady,
       }).catch(() => {
         // The durable job records a spoiler-safe Needs Attention state.
@@ -2182,7 +2240,7 @@ function authoredFoundationCoreFromJson(args: {
     compact(args.value.prosecutorInternalReasoning, 800) ||
     compact(args.value.partnerConsultation, 800);
   if (!title || !victimName || !victimDescription || !publicOpening || !motive || !method || !prosecutorInternalReasoning) {
-    throw new Error("The authored case omitted required case prose.");
+    throw new MysteryFoundationValidationError("The authored case omitted required case prose.");
   }
   const evidenceRows = Array.isArray(args.value.evidence) ? args.value.evidence : [];
   const evidence = evidenceRows.flatMap((value) => {
@@ -2198,7 +2256,7 @@ function authoredFoundationCoreFromJson(args: {
     evidence.length !== args.evidenceIds.length ||
     !args.evidenceIds.every((id) => evidence.some((entry) => entry.id === id))
   ) {
-    throw new Error("The authored case did not describe every frozen evidence item exactly once.");
+    throw new MysteryFoundationValidationError("The authored case did not describe every frozen evidence item exactly once.");
   }
   return {
     title,
@@ -2210,6 +2268,31 @@ function authoredFoundationCoreFromJson(args: {
     prosecutorInternalReasoning,
     eyewitnessResolution: compact(args.value.eyewitnessResolution, 900) || null,
     evidence,
+  };
+}
+
+function deterministicAuthoredMysteryFoundationCoreV2(args: {
+  scaffold: ReturnType<typeof compileDeterministicDebateMystery>;
+  eyewitnessSeatId: string | null;
+}): AuthoredMysteryFoundationCoreV2 {
+  return {
+    title: args.scaffold.title,
+    victimName: args.scaffold.victim.name,
+    victimDescription: args.scaffold.victim.description,
+    publicOpening: args.scaffold.publicOpening,
+    motive: args.scaffold.motive,
+    method: args.scaffold.method,
+    prosecutorInternalReasoning:
+      "Follow the admitted physical record and testimony, test each contradiction against the frozen timeline, and leave the player's theory and courtroom strategy to them.",
+    eyewitnessResolution: args.eyewitnessSeatId
+      ? "The eyewitness account supplies context but cannot establish identity alone; reconcile it with the independently frozen timeline and physical record."
+      : null,
+    evidence: args.scaffold.evidence.map((item) => ({
+      id: item.id,
+      title: item.title,
+      description: item.observation,
+      emoji: item.emoji,
+    })),
   };
 }
 
@@ -3250,6 +3333,7 @@ async function generateMysteryAuthoringSectionV2<T>(args: {
       : "Unknown authoring error";
     throw new Error(
       `${args.label} could not satisfy validation after bounded generation. ${detail}`,
+      { cause: error },
     );
   });
   args.onReceipt?.(result.receipt);
@@ -3770,89 +3854,107 @@ async function authorMysteryV2(args: {
   if (!foundation) {
     let foundationCore = args.draft.foundationCore ?? null;
     if (!foundationCore) {
-      foundationCore = await generateMysteryAuthoringSectionV2({
-        runtime: args.runtime,
-        label: "The case foundation",
-        maxTokens: 4_500,
-        onAttempt: (attempt) => args.onDraft(
-          args.draft,
-          `Writing the Case · Drafting foundation · attempt ${attempt} of ${DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS}`,
-        ),
-        onReceipt: (receipt) =>
-          recordMysterySectionReceipt(args.draft, "foundation", receipt),
-        prompt: {
-          section: "case_foundation",
-          setup,
-          outputContract: {
-            title: "original spoiler-safe case title",
-            victimName: "fictional name",
-            victimDescription: "specific original identity and stakes",
-            publicOpening: omitInvestigation
-              ? "spoiler-safe prosecution case summary suitable for a court title card"
-              : "crime-scene briefing without naming the culprit",
-            motive: "sealed motive",
-            method: "sealed method",
-            prosecutorInternalReasoning: "spoiler-free first-person internal reasoning in the selected Prosecutor persona; it reviews the record but never chooses strategy for the player",
-            eyewitnessResolution: args.eyewitnessSeatId ? "exact fair weakness or reconciliation of eyewitness and two-source alibi" : null,
-            evidence: "every evidence id exactly once with id, title, description, emoji",
-          },
-          qualityRules: [
-            "Write a specific, coherent case foundation rather than an outline.",
-            "Keep the public opening, victim description, motive, method, and Prosecutor internal reasoning under 120 words each.",
-            "Keep each evidence description under 55 words.",
-            "Keep public prose free of culprit labels and private proof-route metadata.",
-            "Identity Crisis is presentation-only. Its cues must never change the sealed culprit, evidence, alibis, or proof routes.",
-            "No placeholders, TODOs, bracketed alternatives, or copied franchise characters.",
-          ],
-        },
-        validate: (value) => authoredFoundationCoreFromJson({
-          value,
-          evidenceIds: setup.evidenceIds,
-        }),
-      });
-      args.draft.foundationCore = foundationCore;
-      args.onDraft(args.draft, "Writing the Case · Foundation complete");
-      queueAudit("foundation", foundationCore, [
-        factLedger.frozenIds.victimId,
-        ...factLedger.frozenIds.suspectSeatIds,
-        ...factLedger.frozenIds.evidenceIds,
-      ]);
-      targetedRepairs.set("foundation", async (issues) => {
-        const repaired = await generateMysteryAuthoringSectionV2({
+      let deterministicFoundationFallback = false;
+      try {
+        foundationCore = await generateMysteryAuthoringSectionV2({
           runtime: args.runtime,
-          label: "The case foundation repair",
-          role: "repair",
+          label: "The case foundation",
           maxTokens: 4_500,
+          onAttempt: (attempt) => args.onDraft(
+            args.draft,
+            `Writing the Case · Drafting foundation · attempt ${attempt} of ${DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS}`,
+          ),
+          onReceipt: (receipt) =>
+            recordMysterySectionReceipt(args.draft, "foundation", receipt),
           prompt: {
-            section: "targeted_section_repair",
-            targetSectionKey: "foundation",
-            frozenLedgerSlice: {
-              sourceHash: factLedger.sourceHash,
-              culpritSeatId: factLedger.culpritSeatId,
-              accompliceSeatId: factLedger.accompliceSeatId,
-              frozenIds: factLedger.frozenIds,
+            section: "case_foundation",
+            setup,
+            outputContract: {
+              title: "original spoiler-safe case title",
+              victimName: "fictional name",
+              victimDescription: "specific original identity and stakes",
+              publicOpening: omitInvestigation
+                ? "spoiler-safe prosecution case summary suitable for a court title card"
+                : "crime-scene briefing without naming the culprit",
+              motive: "sealed motive",
+              method: "sealed method",
+              prosecutorInternalReasoning: "spoiler-free first-person internal reasoning in the selected Prosecutor persona; it reviews the record but never chooses strategy for the player",
+              eyewitnessResolution: args.eyewitnessSeatId ? "exact fair weakness or reconciliation of eyewitness and two-source alibi" : null,
+              evidence: "every evidence id exactly once with id, title, description, emoji",
             },
-            existingSection: args.draft.foundationCore,
-            repairDelta: issues,
-            outputContract: "Return one complete replacement foundation object in the same schema.",
+            qualityRules: [
+              "Write a specific, coherent case foundation rather than an outline.",
+              "Keep the public opening, victim description, motive, method, and Prosecutor internal reasoning under 120 words each.",
+              "Keep each evidence description under 55 words.",
+              "Keep public prose free of culprit labels and private proof-route metadata.",
+              "Identity Crisis is presentation-only. Its cues must never change the sealed culprit, evidence, alibis, or proof routes.",
+              "No placeholders, TODOs, bracketed alternatives, or copied franchise characters.",
+            ],
           },
           validate: (value) => authoredFoundationCoreFromJson({
             value,
             evidenceIds: setup.evidenceIds,
           }),
-          onReceipt: (receipt) =>
-            recordMysterySectionReceipt(args.draft, "foundation", receipt),
         });
-        args.draft.foundationCore = repaired;
-        args.draft.foundation = {
-          ...repaired,
-          examinations: setup.examinationIds.map((id) => ({
-            id,
-            text: args.draft.examinationsById[id]!,
-          })),
-        };
-        args.onDraft(args.draft, "Writing the Case · Foundation repaired");
-      });
+      } catch (error) {
+        const cause = error instanceof Error ? error.cause : null;
+        if (!(cause instanceof MysteryFoundationValidationError)) throw error;
+        foundationCore = deterministicAuthoredMysteryFoundationCoreV2({
+          scaffold: args.scaffold,
+          eyewitnessSeatId: args.eyewitnessSeatId,
+        });
+        deterministicFoundationFallback = true;
+      }
+      args.draft.foundationCore = foundationCore;
+      args.onDraft(
+        args.draft,
+        deterministicFoundationFallback
+          ? "Writing the Case · Foundation complete with deterministic case prose"
+          : "Writing the Case · Foundation complete",
+      );
+      if (!deterministicFoundationFallback) {
+        queueAudit("foundation", foundationCore, [
+          factLedger.frozenIds.victimId,
+          ...factLedger.frozenIds.suspectSeatIds,
+          ...factLedger.frozenIds.evidenceIds,
+        ]);
+        targetedRepairs.set("foundation", async (issues) => {
+          const repaired = await generateMysteryAuthoringSectionV2({
+            runtime: args.runtime,
+            label: "The case foundation repair",
+            role: "repair",
+            maxTokens: 4_500,
+            prompt: {
+              section: "targeted_section_repair",
+              targetSectionKey: "foundation",
+              frozenLedgerSlice: {
+                sourceHash: factLedger.sourceHash,
+                culpritSeatId: factLedger.culpritSeatId,
+                accompliceSeatId: factLedger.accompliceSeatId,
+                frozenIds: factLedger.frozenIds,
+              },
+              existingSection: args.draft.foundationCore,
+              repairDelta: issues,
+              outputContract: "Return one complete replacement foundation object in the same schema.",
+            },
+            validate: (value) => authoredFoundationCoreFromJson({
+              value,
+              evidenceIds: setup.evidenceIds,
+            }),
+            onReceipt: (receipt) =>
+              recordMysterySectionReceipt(args.draft, "foundation", receipt),
+          });
+          args.draft.foundationCore = repaired;
+          args.draft.foundation = {
+            ...repaired,
+            examinations: setup.examinationIds.map((id) => ({
+              id,
+              text: args.draft.examinationsById[id]!,
+            })),
+          };
+          args.onDraft(args.draft, "Writing the Case · Foundation repaired");
+        });
+      }
     }
 
     const examinationChunkSize = 8;
@@ -8732,6 +8834,23 @@ export async function runDebateMysteryCompilationV2(
           !Number.isInteger(line.performance.intensity)
         ) throw new Error(`Line ${line.id} has incomplete performance direction.`);
       }
+      if (!checkpoint.publicState.mansionExterior && options.prepareMansionExteriorAsset) {
+        const exterior = await options.prepareMansionExteriorAsset({
+          userId,
+          sessionId,
+          houseStyle: checkpoint.privateCase.config.houseStyle,
+          scaleClass: checkpoint.privateCase.config.scaleClass,
+          synthesize: checkpoint.privateCase.config.assetSynthesis.rooms,
+          signal: cancellationController.signal,
+        });
+        checkpoint = withPreparedMansionExteriorAsset(checkpoint, exterior);
+        currentJob = persistCompiledSectionCheckpoint(db, userId, sessionId, {
+          key: "section:mansion-exterior",
+          stage: "directing_performances",
+          checkpoint,
+          payload: JSON.stringify({ asset: exterior }),
+        });
+      }
       if (checkpoint.privateCase.config.assetSynthesis.evidence && options.prepareEvidenceAssets) {
         // Prepare every sealed physical exhibit without leaking undiscovered
         // Case File entries into public state. The image identity is promoted
@@ -8916,6 +9035,7 @@ export async function retryDebateMysteryCompilationV2(
     generateWave?: DebateMysteryCompilationOptionsV2["generateWave"];
     prepareEvidenceAssets?: DebateMysteryCompilationOptionsV2["prepareEvidenceAssets"];
     prepareRoomAssets?: DebateMysteryCompilationOptionsV2["prepareRoomAssets"];
+    prepareMansionExteriorAsset?: DebateMysteryCompilationOptionsV2["prepareMansionExteriorAsset"];
     onCompilationReady?: DebateMysteryCompilationOptionsV2["onCompilationReady"];
     deferBackgroundStart?: boolean;
   } = {},
@@ -8967,6 +9087,7 @@ export async function retryDebateMysteryCompilationV2(
         generateWave: options.generateWave,
         prepareEvidenceAssets: options.prepareEvidenceAssets,
         prepareRoomAssets: options.prepareRoomAssets,
+        prepareMansionExteriorAsset: options.prepareMansionExteriorAsset,
         onCompilationReady: options.onCompilationReady,
       }).catch(() => {
         // The durable job records its spoiler-safe failure state.

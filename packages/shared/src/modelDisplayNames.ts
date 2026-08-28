@@ -1,11 +1,16 @@
 export const TEXT_MODEL_DISPLAY_NAME_MAX_LENGTH = 80;
 export const TEXT_MODEL_DISPLAY_NAME_MAX_ENTRIES = 200;
 
-export type TextModelProvider = "local" | "openai" | "anthropic";
+export type TextModelProvider = "local" | "ollama_cloud" | "openai" | "anthropic";
 export type TextModelDisplayNames = Record<string, string>;
 
 function isTextModelProvider(value: string): value is TextModelProvider {
-  return value === "local" || value === "openai" || value === "anthropic";
+  return (
+    value === "local" ||
+    value === "ollama_cloud" ||
+    value === "openai" ||
+    value === "anthropic"
+  );
 }
 
 /**

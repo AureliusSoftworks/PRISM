@@ -11,6 +11,7 @@ import {
   exportPortableMansionPackageV1,
   importPortableMansionPackageV1,
   inspectPortableMansionPackageV1,
+  previewPortableMansionPackageV1,
 } from "../debate-mystery-mansion-package.ts";
 import { sealPortableMysteryEnvelopeV1 } from "../debate-mystery-package-envelope.ts";
 import { preflightPortableMysteryArchiveV1 } from "../debate-mystery-package-safety.ts";
@@ -125,6 +126,11 @@ describe("portable mansion package", () => {
       assert.equal(header.creatorName, "Package Creator");
       assert.equal(header.assetCount, 1);
       assert.equal(header.title, "Jungle Conservatory Mansion");
+      const preview = await previewPortableMansionPackageV1({
+        envelope,
+        password: "correct horse battery staple",
+      });
+      assert.equal(preview.manifest.scaleClass, "compact");
       const sourceSha = (source.db.prepare(
         "SELECT sha256 FROM debate_mystery_mansion_assets WHERE user_id = 'creator'",
       ).get() as { sha256: string }).sha256;
@@ -153,6 +159,7 @@ describe("portable mansion package", () => {
       const imported = getDebateMysteryMansionBundleV2(target.db, "recipient", bundleId);
       assert.equal(imported.rooms.length, 1);
       assert.equal(imported.suspectCount, 1);
+      assert.equal(imported.scaleClass, "compact");
       const importedSha = (target.db.prepare(
         "SELECT sha256 FROM debate_mystery_mansion_assets WHERE user_id = 'recipient'",
       ).get() as { sha256: string }).sha256;

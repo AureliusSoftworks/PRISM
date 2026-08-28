@@ -47,7 +47,7 @@ interface WarmupUiState {
 
 interface PrismRefractionGateValue {
   prepareLocalModel: (args: {
-    provider: "local" | "openai" | "anthropic";
+    provider: "local" | "ollama_cloud" | "openai" | "anthropic";
     model?: string | null;
     experience: ModelPreparationExperience;
     context?: PrismRefractionWarmupContext;
@@ -60,7 +60,7 @@ interface PrismRefractionGateValue {
     onCancel?: () => void;
   }) => Promise<T>;
   runLocalRefraction: <T>(args: {
-    provider: "local" | "openai" | "anthropic";
+    provider: "local" | "ollama_cloud" | "openai" | "anthropic";
     model?: string | null;
     experience: ModelPreparationExperience;
     context?: PrismRefractionWarmupContext;
@@ -116,7 +116,7 @@ export function PrismRefractionGateProvider(props: {
 
   const prepareLocalModel = useCallback(
     async (args: {
-      provider: "local" | "openai" | "anthropic";
+      provider: "local" | "ollama_cloud" | "openai" | "anthropic";
       model?: string | null;
       experience: ModelPreparationExperience;
       context?: PrismRefractionWarmupContext;
@@ -225,7 +225,7 @@ export function PrismRefractionGateProvider(props: {
 
   const runLocalRefraction = useCallback(
     async <T,>(args: {
-      provider: "local" | "openai" | "anthropic";
+      provider: "local" | "ollama_cloud" | "openai" | "anthropic";
       model?: string | null;
       experience: ModelPreparationExperience;
       context?: PrismRefractionWarmupContext;

@@ -270,6 +270,11 @@ describe("internal mansion codec", () => {
     assert.equal(JSON.stringify(decoded.manifest).includes("creator-case-seat"), false);
     assert.equal(decoded.manifest.ambience?.themePaletteId, "jungle-wilderness-v1");
     assert.equal(decoded.manifest.ambience?.assets[0]?.packageAssetId, null);
+    assert.equal(
+      decoded.manifest.previewAssetId,
+      null,
+      "new exports must not promote an interior room into the mansion cover",
+    );
 
     const importedId = importInternalMansionPackageToDbV1({
       db: target,

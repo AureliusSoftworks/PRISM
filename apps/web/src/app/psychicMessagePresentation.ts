@@ -12,7 +12,7 @@ import {
 
 export interface PsychicPresentationMessageLike {
   role: string;
-  provider?: "local" | "openai" | "anthropic";
+  provider?: "local" | "ollama_cloud" | "openai" | "anthropic";
   model?: string;
   psychicThought?: PsychicThoughtPayload;
   autoRecovery?: AutoRecoveryTraceV1;
@@ -67,6 +67,7 @@ export function assistantGenerationMetadata(
     psychicSource?.psychicThought?.provider;
   if (
     provider !== "local" &&
+    provider !== "ollama_cloud" &&
     provider !== "openai" &&
     provider !== "anthropic"
   ) {

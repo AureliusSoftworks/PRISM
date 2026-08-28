@@ -7,6 +7,8 @@ import {
   debateMysteryCredibilityMaximumV2,
   debateMysteryEyewitnessChanceV2,
   debateMysteryHouseStyleV2,
+  debateMysteryMansionExteriorPromptV1,
+  debateMysteryMansionExteriorScaleIsStaleV1,
   debateMysteryMansionBundleEligibleV2,
   debateMysteryPremiumAvailableV2,
   debateMysterySpectatorEvidenceReferencesV2,
@@ -19,6 +21,7 @@ import {
   validateDebateMysteryDialogueGraphV2,
   validateDebateMysteryStageCuePerformanceV1,
   resolveDebateMysteryConfigV2,
+  resolveDebateMysteryMansionExteriorScaleClassV1,
   splitDebateMysteryStageActionTextV2,
   type DebateMysteryAudioManifestV1,
   type DebateMysteryDialogueGraphV2,
@@ -29,6 +32,50 @@ import {
   type DebateMysteryStageCueV1,
   type DebateMysteryWitnessChapterV2,
 } from "./debateMysteryV2.ts";
+
+test("mansion exterior prompt freezes geography and rejects interior montage covers", () => {
+  const prompt = debateMysteryMansionExteriorPromptV1(
+    debateMysteryHouseStyleV2(
+      "A deep-space observatory mansion orbiting a blue giant with glass domes and sealed airlocks.",
+    ),
+  );
+  assert.match(prompt, /complete mansion from outside/iu);
+  assert.match(prompt, /geography/iu);
+  assert.match(prompt, /approach or entrance/iu);
+  assert.match(prompt, /No interiors/iu);
+  assert.match(prompt, /room montages, collages, mosaics/iu);
+  assert.match(prompt, /No .*evidence, clues/iu);
+});
+
+test("mansion exterior prompts make each scale family visually explicit", () => {
+  const houseStyle = debateMysteryHouseStyleV2("A rain-lashed old house on a wooded hill.");
+  const compact = debateMysteryMansionExteriorPromptV1(houseStyle, "compact");
+  const standard = debateMysteryMansionExteriorPromptV1(houseStyle, "standard");
+  const grand = debateMysteryMansionExteriorPromptV1(houseStyle, "grand");
+  assert.match(compact, /small two-story footprint/iu);
+  assert.match(standard, /broader two-story estate/iu);
+  assert.match(grand, /three-story.*multiple major wings/iu);
+  for (const prompt of [compact, standard, grand]) {
+    assert.match(prompt, /library-card size/iu);
+    assert.match(prompt, /Do not use camera zoom or cropping/iu);
+  }
+});
+
+test("mansion exterior scale follows presets and frozen custom topology", () => {
+  assert.equal(resolveDebateMysteryMansionExteriorScaleClassV1({ preset: "compact", floors: 3, totalRooms: 18 }), "compact");
+  assert.equal(resolveDebateMysteryMansionExteriorScaleClassV1({ preset: "standard", floors: 2, totalRooms: 5 }), "standard");
+  assert.equal(resolveDebateMysteryMansionExteriorScaleClassV1({ preset: "grand", floors: 2, totalRooms: 5 }), "grand");
+  assert.equal(resolveDebateMysteryMansionExteriorScaleClassV1({ preset: "custom", floors: 2, totalRooms: 7 }), "compact");
+  assert.equal(resolveDebateMysteryMansionExteriorScaleClassV1({ preset: "custom", floors: 2, totalRooms: 8 }), "standard");
+  assert.equal(resolveDebateMysteryMansionExteriorScaleClassV1({ preset: "custom", floors: 3, totalRooms: 8 }), "grand");
+  assert.equal(
+    debateMysteryMansionExteriorScaleIsStaleV1({
+      exteriorScaleClass: "compact",
+      topology: { preset: "custom", floors: 2, totalRooms: 8 },
+    }),
+    true,
+  );
+});
 
 test("clamps Case Forge progress copy to its declared authoring budget", () => {
   assert.equal(

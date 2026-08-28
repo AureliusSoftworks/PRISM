@@ -905,7 +905,7 @@ export interface PsychicThoughtPayload {
   v: 1;
   summary: string;
   effort: "auto" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
-  provider: "local" | "openai" | "anthropic";
+  provider: "local" | "ollama_cloud" | "openai" | "anthropic";
   model?: string;
   /** How PRISM produced the readable Psychic rationale for this turn. */
   planningMode?: "simulated" | "native" | "public";

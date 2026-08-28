@@ -25,6 +25,7 @@ export type EphemeralChatProviderPreferences = Record<
 
 export type EphemeralChatResolvedProvider =
   | "local"
+  | "ollama_cloud"
   | "openai"
   | "anthropic";
 

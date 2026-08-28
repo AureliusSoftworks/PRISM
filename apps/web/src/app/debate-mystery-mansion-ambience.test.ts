@@ -82,8 +82,10 @@ test("player wiring keeps ambience separate, stable across rooms, and visible in
   assert.match(experience, /backgroundRecordable=\{false\}[\s\S]{0,80}ambientFoley=\{false\}/u);
   assert.doesNotMatch(experience, /whodunnit-v2-mansion-ambience:[^`]*currentRoom/u);
   assert.match(setup, /data-tutorial-target="whodunnit-v2-ambience-synthesis"/u);
-  assert.match(setup, /<strong>Ambience<\/strong>/u);
-  assert.match(setup, /Build a mansion-specific procedural mix · no online generator/u);
+  assert.match(setup, /"Personalize local ambience" : "Ambience"/u);
+  assert.match(setup, /no online generator or new audio file/u);
+  assert.match(setup, /Off still uses matching bundled ambience/u);
   assert.match(tutorial, /Music and Ambience are separate Case Forge choices/u);
+  assert.match(tutorial, /without an online request or new audio file/u);
   assert.match(tutorial, /global Audio—not this setup choice—is the silence control/u);
 });

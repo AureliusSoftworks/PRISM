@@ -4,6 +4,7 @@ import type {
 } from "@localai/shared";
 import {
   LocalModelRequestError,
+  isOllamaCloudModelId,
   resolveLocalOllamaTarget,
   setLocalOllamaActivityObserver,
   setLocalOllamaResponseObserver,
@@ -411,6 +412,9 @@ export async function prepareLocalModel(args: {
   /** Test seam; production always uses the ten-minute cap. */
   timeoutMs?: number;
 }): Promise<ModelPreparationResponse> {
+  if (isOllamaCloudModelId(args.model)) {
+    return notApplicableResponse(args.model);
+  }
   let target: ResolvedLocalOllamaTarget;
   try {
     target = await resolveLocalOllamaTarget(args.model, args.options);
@@ -621,6 +625,9 @@ export async function keepAuxiliaryLocalModelWarm(args: {
   /** Test seam; production uses the normal preparation cap. */
   timeoutMs?: number;
 }): Promise<ModelPreparationResponse> {
+  if (isOllamaCloudModelId(args.model)) {
+    return notApplicableResponse(args.model);
+  }
   let target: ResolvedLocalOllamaTarget;
   try {
     target = await resolveLocalOllamaTarget(args.model, args.options);

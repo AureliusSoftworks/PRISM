@@ -5,7 +5,7 @@ import type {
 } from "@localai/shared";
 
 export type AppletResponseLane = "local" | "online";
-export type AppletModelProvider = "local" | "openai" | "anthropic";
+export type AppletModelProvider = "local" | "ollama_cloud" | "openai" | "anthropic";
 
 export interface ActualAppletRoute {
   provider: AppletModelProvider;
@@ -68,6 +68,7 @@ export function finalActualAppletRoute(
     !route ||
     !trimModel(route.model) ||
     (route.provider !== "local" &&
+      route.provider !== "ollama_cloud" &&
       route.provider !== "openai" &&
       route.provider !== "anthropic")
   ) {

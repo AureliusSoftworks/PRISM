@@ -23,6 +23,59 @@ export const DEBATE_MYSTERY_V2_SCHEMA_VERSION = 2 as const;
 export const DEBATE_MYSTERY_AUDIO_MANIFEST_VERSION = 1 as const;
 export const DEBATE_MYSTERY_PLAY_READINESS_VERSION = 5 as const;
 export const DEBATE_MYSTERY_V2_JUROR_COUNT = 4 as const;
+export const DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1 = "mansion-exterior-v1" as const;
+
+/**
+ * The silhouette family for a mansion's one exterior establishing shot. This
+ * is public topology/presentation data only; it must never be inferred from
+ * case facts or silently changed underneath a selected cover.
+ */
+export const DEBATE_MYSTERY_MANSION_EXTERIOR_SCALE_CLASSES_V1 = [
+  "compact",
+  "standard",
+  "grand",
+] as const;
+export type DebateMysteryMansionExteriorScaleClassV1 =
+  typeof DEBATE_MYSTERY_MANSION_EXTERIOR_SCALE_CLASSES_V1[number];
+
+export interface DebateMysteryMansionExteriorTopologyV1 {
+  preset?: DebateMysteryPresetId;
+  floors: number;
+  totalRooms: number;
+}
+
+/**
+ * Resolves a stable exterior silhouette from frozen public topology. Presets
+ * are exact; Custom never depends on mutable story direction or private case
+ * content. Three floors or thirteen-plus rooms read as Grand, while eight to
+ * twelve rooms read as Standard.
+ */
+export function resolveDebateMysteryMansionExteriorScaleClassV1(
+  topology: DebateMysteryMansionExteriorTopologyV1,
+): DebateMysteryMansionExteriorScaleClassV1 {
+  if (topology.preset === "compact") return "compact";
+  if (topology.preset === "standard") return "standard";
+  if (topology.preset === "grand") return "grand";
+  const floors = Number.isFinite(topology.floors) ? Math.floor(topology.floors) : 1;
+  const totalRooms = Number.isFinite(topology.totalRooms)
+    ? Math.floor(topology.totalRooms)
+    : 0;
+  if (floors >= 3 || totalRooms >= 13) return "grand";
+  if (totalRooms >= 8) return "standard";
+  return "compact";
+}
+
+/**
+ * Lets a topology editor expose a deliberate regenerate decision. Callers
+ * retain the current exterior asset until the player explicitly replaces it.
+ */
+export function debateMysteryMansionExteriorScaleIsStaleV1(args: {
+  exteriorScaleClass: DebateMysteryMansionExteriorScaleClassV1 | null | undefined;
+  topology: DebateMysteryMansionExteriorTopologyV1;
+}): boolean {
+  return Boolean(args.exteriorScaleClass) &&
+    args.exteriorScaleClass !== resolveDebateMysteryMansionExteriorScaleClassV1(args.topology);
+}
 
 export interface DebateMysteryPresetV2 {
   id: Exclude<DebateMysteryPresetId, "custom">;
@@ -125,8 +178,9 @@ export interface DebateMysteryMansionLibraryPresentationV1 {
     description: string;
     thumbnailAssetId: string | null;
   };
-  /** Local, tenant-scoped presentation only. Null means use the immutable
-   * saved/package default and never rewrites portable source metadata. */
+  /** Local, tenant-scoped presentation. Title/description never rewrite source
+   * metadata; an active custom thumbnail is copied as package preview art on
+   * export so the mansion keeps its visual identity on another installation. */
   overrides: {
     title: string | null;
     description: string | null;
@@ -141,6 +195,8 @@ export interface DebateMysteryMansionBundleSummaryV1 {
   sourceSessionId: string | null;
   floors: number;
   totalRooms: number;
+  /** Derived from the frozen public layout; legacy bundles derive it on read. */
+  scaleClass: DebateMysteryMansionExteriorScaleClassV1;
   suspectCount: number;
   houseStyle: DebateMysteryHouseStyleV2;
   rooms: DebateMysteryMansionBundleRoomV1[];
@@ -287,6 +343,8 @@ export interface DebateMysteryResolvedConfigV2
   > {
   floors: number;
   totalRooms: number;
+  /** Frozen with the public topology when Case Forge begins. */
+  scaleClass: DebateMysteryMansionExteriorScaleClassV1;
   judgeBotId: string;
   prosecutorBotId: string;
   investigationMode: DebateMysteryInvestigationModeV2;
@@ -1111,6 +1169,8 @@ export interface DebateWhodunnitFormatStateV2 {
   victim: { id: string; name: string } | null;
   suspects: DebateMysteryPublicSuspectSnapshotV1[];
   rooms: DebateMysteryRoomV2[];
+  /** Immediate, spoiler-safe exterior establishing shot for the title card. */
+  mansionExterior?: DebateMysterySealedAssetRefV1 | null;
   /** Public because the opening scene is visible; never derived from a clue. */
   crimeSceneRoomId?: string | null;
   /** Finite first-room sweep required before the mansion map unlocks. */
@@ -2103,6 +2163,11 @@ export function resolveDebateMysteryConfigV2(
     nonce: value.nonce.trim().slice(0, 200),
     floors,
     totalRooms,
+    scaleClass: resolveDebateMysteryMansionExteriorScaleClassV1({
+      preset,
+      floors,
+      totalRooms,
+    }),
     playerRole: value.playerRole === "spectator" ? "spectator" : "participant",
     participationDifficulty:
       value.participationDifficulty === "coach" || value.participationDifficulty === "immersive"
@@ -2370,6 +2435,16 @@ export function normalizeDebateMysteryFormatStateV2(
         configSource.mansionBundleId.trim()
           ? configSource.mansionBundleId.trim()
           : null,
+      scaleClass:
+        configSource.scaleClass === "compact" ||
+        configSource.scaleClass === "standard" ||
+        configSource.scaleClass === "grand"
+          ? configSource.scaleClass
+          : resolveDebateMysteryMansionExteriorScaleClassV1({
+              preset: configSource.preset as DebateMysteryPresetId | undefined,
+              floors: typeof configSource.floors === "number" ? configSource.floors : 2,
+              totalRooms: typeof configSource.totalRooms === "number" ? configSource.totalRooms : 10,
+            }),
       houseStyle,
     } as unknown as DebateMysteryResolvedConfigV2,
     compilation: {
@@ -2495,6 +2570,40 @@ export function debateMysteryAcousticThemePaletteV1(directionInput: string): str
     return "gothic-old-house-v1";
   }
   return "neutral-mansion-v1";
+}
+
+/**
+ * Spoiler-safe visual contract for the single image that introduces and
+ * represents a mansion. It is intentionally derived only from public house
+ * direction: the case truth never enters an exterior-generation prompt.
+ */
+export function debateMysteryMansionExteriorPromptV1(
+  houseStyle: DebateMysteryHouseStyleV2,
+  scaleClass: DebateMysteryMansionExteriorScaleClassV1 = "standard",
+): string {
+  const atmosphere = houseStyle.atmosphere;
+  const scaleDirection: Record<DebateMysteryMansionExteriorScaleClassV1, string> = {
+    compact:
+      "Compact silhouette: a visibly small two-story footprint with one principal volume, few or no major wings, and intimate grounds.",
+    standard:
+      "Standard silhouette: a materially broader two-story estate with a central block, evident side massing or wings, and a larger approach.",
+    grand:
+      "Grand silhouette: an unmistakably taller three-story and/or dramatically wider compound with multiple major wings, towers or roof volumes, and expansive grounds.",
+  };
+  return [
+    `Create one premium 16:9 exterior establishing shot for ${houseStyle.label}.`,
+    `Exterior scale family: ${scaleClass}.`,
+    scaleDirection[scaleClass],
+    houseStyle.promptContract,
+    `Geography and world: ${atmosphere.exteriorSetting}.`,
+    `Weather: ${atmosphere.weather}. Time of day: ${atmosphere.timeOfDay}.`,
+    `House condition: ${atmosphere.houseCondition}. Mood: ${atmosphere.mood}.`,
+    "Show the complete mansion from outside, including its approach or entrance, scale-appropriate vertical floor massing, architecture, surrounding terrain, and how the building occupies its geography.",
+    "Use a single continuous cinematic view with a readable silhouette and premium high-detail game key-art quality.",
+    "Do not use camera zoom or cropping to make different scale families occupy the same apparent size; the silhouette must read Small, Medium, or Large at library-card size.",
+    "No interiors, cutaways, room montages, collages, mosaics, split panels, floor plans, people, bodies, evidence, clues, weapons, text, logos, or UI.",
+    "The mansion exterior is the hero and must remain legible when cropped to a library card.",
+  ].join("\n");
 }
 
 /** Deterministic and spoiler-safe: this reads only the public house direction. */

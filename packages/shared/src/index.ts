@@ -1597,7 +1597,11 @@ import type {
 } from "./mood.js";
 
 export type UserRole = "user";
-export type LlmProviderName = "local" | "openai" | "anthropic";
+export type LlmProviderName =
+  | "local"
+  | "ollama_cloud"
+  | "openai"
+  | "anthropic";
 
 export type UsageProviderName =
   LlmProviderName | "ollama" | "comfyui" | "unknown";

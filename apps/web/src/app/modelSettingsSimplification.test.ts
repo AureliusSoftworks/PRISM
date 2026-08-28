@@ -23,6 +23,7 @@ const signalExperience = readFileSync(
 test("keeps Models focused on background work, recovery, and advanced visibility", () => {
   assert.match(page, /Background &amp; Recovery/u);
   assert.match(page, /<span>Background model<\/span>/u);
+  assert.match(page, /Ollama Cloud is available only while the global[\s\S]{0,120}mode is ONLINE/u);
   assert.match(page, /<span>Auto routing priorities<\/span>/u);
   assert.match(page, /<span>Manage model list<\/span>/u);
   assert.match(page, /Refresh models/u);

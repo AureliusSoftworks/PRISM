@@ -1,4 +1,8 @@
-export type ModeAwareTextModelProvider = "local" | "openai" | "anthropic";
+export type ModeAwareTextModelProvider =
+  | "local"
+  | "ollama_cloud"
+  | "openai"
+  | "anthropic";
 export type ModeAwareResponseMode = "local" | "auto" | "online";
 
 export interface ModeAwareModelOption {

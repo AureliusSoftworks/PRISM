@@ -6348,6 +6348,7 @@ export async function generateBotcastBookingSuggestion(
                 index === 0 ||
                 generation.providerFactory !== undefined ||
                 attempt.provider === "local" ||
+                attempt.provider === "ollama_cloud" ||
                 (attempt.provider === "openai"
                   ? Boolean(generation.openAiApiKey)
                   : Boolean(generation.anthropicApiKey)),
@@ -6719,6 +6720,7 @@ export async function generateBotcastProducerGuestBooking(
               index === 0 ||
               generation.providerFactory !== undefined ||
               attempt.provider === "local" ||
+              attempt.provider === "ollama_cloud" ||
               (attempt.provider === "openai"
                 ? Boolean(generation.openAiApiKey)
                 : Boolean(generation.anthropicApiKey)),
@@ -13733,6 +13735,7 @@ async function generateAuxiliaryBotcastJson<T>(args: {
             index === 0 ||
             args.generation.providerFactory !== undefined ||
             attempt.provider === "local" ||
+            attempt.provider === "ollama_cloud" ||
             (attempt.provider === "openai"
               ? Boolean(args.generation.openAiApiKey)
               : Boolean(args.generation.anthropicApiKey)),
@@ -17471,6 +17474,7 @@ export async function advanceBotcastEpisode(
               attempt.model === selectedModelId) ||
             generation.providerFactory !== undefined ||
             attempt.provider === "local" ||
+            attempt.provider === "ollama_cloud" ||
             (attempt.provider === "openai"
               ? Boolean(generation.openAiApiKey)
               : Boolean(generation.anthropicApiKey)),

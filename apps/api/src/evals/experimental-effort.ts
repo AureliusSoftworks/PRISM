@@ -24,7 +24,7 @@ type EvalSuiteId =
 interface CliOptions {
   prompt: string;
   suite: EvalSuiteId;
-  thinkingProvider: Exclude<ProviderName, "local">;
+  thinkingProvider: "openai" | "anthropic";
   localModel: string;
   thinkingModel: string;
   judgeModel: string;

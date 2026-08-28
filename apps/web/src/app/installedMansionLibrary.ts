@@ -1,4 +1,8 @@
-import type { DebateMysteryMansionBundleSummaryV1 } from "@localai/shared";
+import type {
+  DebateMysteryMansionBundleSummaryV1,
+  DebateMysteryMansionExteriorScaleClassV1,
+} from "@localai/shared";
+import { debateMysteryMansionExteriorFallbackV1 } from "./debateMysteryMansionExterior.ts";
 
 export interface InstalledMansionPresentationV1 {
   title: string;
@@ -18,12 +22,16 @@ export interface InstalledMansionLibraryUpdateV1 {
   thumbnailDataUrl?: string | null;
 }
 
+export interface InstalledMansionOriginV1 {
+  kind: "imported" | "created";
+  label: "Imported" | "Created here";
+  description: string;
+}
+
 function legacyDefaultThumbnailAssetId(
   mansion: DebateMysteryMansionBundleSummaryV1,
 ): string | null {
-  return mansion.assets?.find((asset) => asset.role === "presentation")?.id ??
-    mansion.assets?.find((asset) => asset.role === "room")?.id ??
-    null;
+  return mansion.assets?.find((asset) => asset.role === "presentation")?.id ?? null;
 }
 
 export function resolveInstalledMansionPresentationV1(
@@ -33,8 +41,13 @@ export function resolveInstalledMansionPresentationV1(
   const defaultDescription = mansion.library?.defaults.description?.trim() ||
     mansion.portable?.description?.trim() ||
     `${mansion.houseStyle.label} mansion · ${mansion.floors} floor${mansion.floors === 1 ? "" : "s"} · ${mansion.totalRooms} rooms.`;
-  const defaultThumbnailAssetId = mansion.library?.defaults.thumbnailAssetId ??
-    legacyDefaultThumbnailAssetId(mansion);
+  const presentationAssetIds = new Set(
+    (mansion.assets ?? []).filter((asset) => asset.role === "presentation").map((asset) => asset.id),
+  );
+  const fileDefaultThumbnail = mansion.library?.defaults.thumbnailAssetId ?? null;
+  const defaultThumbnailAssetId = fileDefaultThumbnail && presentationAssetIds.has(fileDefaultThumbnail)
+    ? fileDefaultThumbnail
+    : legacyDefaultThumbnailAssetId(mansion);
   const titleOverride = mansion.library?.overrides.title?.trim() || null;
   const descriptionOverride = mansion.library?.overrides.description?.trim() || null;
   const thumbnailOverrideAssetId = mansion.library?.overrides.thumbnailAssetId ?? null;
@@ -58,6 +71,72 @@ export function installedMansionThumbnailUrlV1(
   return assetId
     ? `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}/assets/${encodeURIComponent(assetId)}/file`
     : null;
+}
+
+export function installedMansionThumbnailSourceV1(
+  mansion: DebateMysteryMansionBundleSummaryV1,
+  assetId: string | null,
+): string | null {
+  return installedMansionExteriorPreviewV1({
+    mansion,
+    assetId,
+    scaleClass: mansion.scaleClass,
+  }).url;
+}
+
+export interface InstalledMansionExteriorPreviewV1 {
+  url: string;
+  scaleClass: DebateMysteryMansionExteriorScaleClassV1;
+  /** Included PRISM families can switch art immediately without synthesis. */
+  switchesWithTopology: boolean;
+  /** One-off package/custom covers remain visible until explicitly replaced. */
+  stale: boolean;
+}
+
+/**
+ * Mansion Editor preview contract. A mansion using PRISM's included family has
+ * all three covers available, so topology changes switch the preview at once.
+ * A custom protected cover is retained and marked stale instead.
+ */
+export function installedMansionExteriorPreviewV1(args: {
+  mansion: DebateMysteryMansionBundleSummaryV1;
+  assetId: string | null;
+  scaleClass: DebateMysteryMansionExteriorScaleClassV1;
+}): InstalledMansionExteriorPreviewV1 {
+  const { mansion, assetId, scaleClass } = args;
+  const resolvedScaleClass = scaleClass || mansion.scaleClass || "standard";
+  const currentScaleClass = mansion.scaleClass || "standard";
+  const protectedAssetUrl = installedMansionThumbnailUrlV1(mansion.id, assetId);
+  if (protectedAssetUrl) {
+    return {
+      url: protectedAssetUrl,
+      scaleClass: resolvedScaleClass,
+      switchesWithTopology: false,
+      stale: resolvedScaleClass !== currentScaleClass,
+    };
+  }
+  return {
+    url: debateMysteryMansionExteriorFallbackV1(mansion.houseStyle, resolvedScaleClass),
+    scaleClass: resolvedScaleClass,
+    switchesWithTopology: true,
+    stale: false,
+  };
+}
+
+export function installedMansionOriginV1(
+  mansion: DebateMysteryMansionBundleSummaryV1,
+): InstalledMansionOriginV1 {
+  return mansion.portable
+    ? {
+        kind: "imported",
+        label: "Imported",
+        description: "Imported from a portable .mansion package",
+      }
+    : {
+        kind: "created",
+        label: "Created here",
+        description: "Created in PRISM from a saved mansion level",
+      };
 }
 
 function secureRandomUint32(): number {

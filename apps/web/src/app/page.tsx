@@ -6181,9 +6181,14 @@ function selectedRowTextColor(
   return ensureContrast(rowAccent, selectedFill, 4.5);
 }
 
-type Provider = "local" | "openai" | "anthropic";
+type Provider = "local" | "ollama_cloud" | "openai" | "anthropic";
 function isProvider(value: unknown): value is Provider {
-  return value === "local" || value === "openai" || value === "anthropic";
+  return (
+    value === "local" ||
+    value === "ollama_cloud" ||
+    value === "openai" ||
+    value === "anthropic"
+  );
 }
 function responseModeShortLabel(mode: AutoResponseMode): string {
   return mode === "local" ? "LOCAL" : mode === "auto" ? "AUTO" : "ONLINE";
@@ -6193,6 +6198,7 @@ function responseModeDisplayLabel(mode: AutoResponseMode): string {
 }
 function providerDisplayLabel(provider: Provider): string {
   if (provider === "local") return "Local";
+  if (provider === "ollama_cloud") return "Ollama Cloud";
   if (provider === "anthropic") return "Anthropic";
   return "OpenAI";
 }
@@ -9785,7 +9791,11 @@ const STATUS_LABEL: Record<StatusTag, string> = {
 
 function getMessageStatus(msg: Message): StatusTag | null {
   if (msg.role === "user") return "human";
-  if (msg.provider === "openai" || msg.provider === "anthropic")
+  if (
+    msg.provider === "ollama_cloud" ||
+    msg.provider === "openai" ||
+    msg.provider === "anthropic"
+  )
     return "online";
   if (msg.provider === "local") return "local";
   // Pre-existing assistant messages without a provider record: no indicator.
@@ -11281,6 +11291,8 @@ interface ModelCatalogEntry {
   thinking?: boolean;
   /** Model accepts contextual image input for multimodal turns. */
   supportsImageInput?: boolean;
+  /** Model supports schema/JSON-constrained helper and applet turns. */
+  supportsStructuredOutput?: boolean;
   /** Present for image-only catalog rows (ComfyUI workflows). */
   imageSource?: "ollama" | "comfyui" | "comfyui-workflow" | "comfyui-remote";
   /** False when the enabled model is intentionally hidden from manual pickers. */
@@ -14927,6 +14939,7 @@ const ZEN_PERSONA_BACKDROP_STYLE_VARS = {
 function createDefaultChatModelChoiceByProvider(): Record<Provider, string> {
   return {
     local: AUTO_MODEL_CHOICE,
+    ollama_cloud: AUTO_MODEL_CHOICE,
     openai: AUTO_MODEL_CHOICE,
     anthropic: AUTO_MODEL_CHOICE,
   };
@@ -14955,6 +14968,7 @@ function normalizeCoffeeModelChoiceByProvider(
 ): Record<Provider, string> {
   return {
     local: normalizeCoffeeModelChoice(choices?.local),
+    ollama_cloud: normalizeCoffeeModelChoice(choices?.ollama_cloud),
     openai: normalizeCoffeeModelChoice(choices?.openai),
     anthropic: normalizeCoffeeModelChoice(choices?.anthropic),
   };
@@ -16073,6 +16087,7 @@ function onlineProviderHasConfiguredKey(
   settings: UserSettings | null,
   provider: Provider,
 ): boolean {
+  if (provider === "ollama_cloud") return true;
   return apiKeySourceAvailable(onlineProviderApiKeySource(settings, provider));
 }
 
@@ -16380,6 +16395,7 @@ function latestConversationAutoRoute(
       role: message.role,
       provider:
         message.provider === "local" ||
+        message.provider === "ollama_cloud" ||
         message.provider === "openai" ||
         message.provider === "anthropic"
           ? message.provider
@@ -16698,6 +16714,12 @@ function visibleModelChoicesByProvider(
       "local",
       choices.local,
     ),
+    ollama_cloud: visibleModelChoiceForProvider(
+      catalog,
+      settings,
+      "ollama_cloud",
+      choices.ollama_cloud,
+    ),
     openai: visibleModelChoiceForProvider(
       catalog,
       settings,
@@ -16719,6 +16741,7 @@ function onlineModelOptionsForPicker(
 ): ModelCatalogEntry[] {
   return withOnlineProviderHostLabels(
     combinedOnlineModelOptions(
+      chatModelOptionsForProvider(catalog, settings, "ollama_cloud"),
       chatModelOptionsForProvider(catalog, settings, "openai"),
       chatModelOptionsForProvider(catalog, settings, "anthropic"),
     ),
@@ -16843,7 +16866,7 @@ function uniqueModelOptions(options: ModelCatalogEntry[]): ModelCatalogEntry[] {
 }
 
 type SettingsModelEligibilityGroupId =
-  "ollama" | "openai" | "anthropic" | "elevenlabs";
+  "ollama" | "ollama_cloud" | "openai" | "anthropic" | "elevenlabs";
 
 interface SettingsModelEligibilityGroup {
   id: SettingsModelEligibilityGroupId;
@@ -16907,6 +16930,18 @@ function settingsModelEligibilityGroups(args: {
       label: "Ollama",
       meta: settingsOllamaGroupMeta(ollama),
       models: ollama,
+    });
+  }
+
+  const ollamaCloud = settingsModelGroupOptions(
+    textModelOptionsForProvider(args.catalog, args.settings, "ollama_cloud"),
+  );
+  if (ollamaCloud.length > 0) {
+    groups.push({
+      id: "ollama_cloud",
+      label: "Ollama Cloud",
+      meta: "Signed-in local Ollama daemon - ONLINE",
+      models: ollamaCloud,
     });
   }
 
@@ -16985,6 +17020,7 @@ function settingsModelToggleMeta(
   if (groupId === "ollama") {
     return `Offline${model.hostLabel ? ` - ${model.hostLabel}` : ""}`;
   }
+  if (groupId === "ollama_cloud") return "ONLINE chat";
   if (groupId === "anthropic") return "Chat";
   if (groupId === "elevenlabs") return "Image & Video";
   const id = model.id.toLowerCase();
@@ -16992,9 +17028,11 @@ function settingsModelToggleMeta(
 }
 
 function inferOnlineProviderForModelId(modelId: string): Provider {
-  return modelId.trim().toLowerCase().startsWith("claude-")
-    ? "anthropic"
-    : "openai";
+  const id = modelId.trim().toLowerCase();
+  if (id.endsWith(":cloud") || id.endsWith("-cloud")) {
+    return "ollama_cloud";
+  }
+  return id.startsWith("claude-") ? "anthropic" : "openai";
 }
 
 function blendToward(value: number, target: number, amount: number): number {
@@ -54195,6 +54233,7 @@ function HomeContent(): React.JSX.Element {
   const [imageGenModelChoiceByProvider, setImageGenModelChoiceByProvider] =
     useState<Record<Provider, string>>({
       local: AUTO_MODEL_CHOICE,
+      ollama_cloud: AUTO_MODEL_CHOICE,
       openai: AUTO_MODEL_CHOICE,
       anthropic: AUTO_MODEL_CHOICE,
     });
@@ -59397,15 +59436,29 @@ function HomeContent(): React.JSX.Element {
   );
 
   const prismInternalLlmCallOptions = useMemo(
-    () =>
-      includeSelectedModelOption(
-        textModelOptionsForProvider(modelCatalog, settings, "local"),
-        settingsLocalLlmModelChoice(
-          settings?.prismDefaultLlmModel,
-          commandCenterAuxiliaryModelId(settings),
-        ),
-        "local",
-      ),
+    () => {
+      const selected = settingsLocalLlmModelChoice(
+        settings?.prismDefaultLlmModel,
+        commandCenterAuxiliaryModelId(settings),
+      );
+      const options = uniqueModelOptions([
+        ...textModelOptionsForProvider(modelCatalog, settings, "local"),
+        ...(settings?.preferredProvider !== "local"
+          ? textModelOptionsForProvider(
+              modelCatalog,
+              settings,
+              "ollama_cloud",
+            )
+          : []),
+      ]);
+      return includeSelectedModelOption(
+        options,
+        selected,
+        inferOnlineProviderForModelId(selected) === "ollama_cloud"
+          ? "ollama_cloud"
+          : "local",
+      );
+    },
     [modelCatalog, settings],
   );
   function renderZenAtmosphereModelRow(
@@ -59591,9 +59644,12 @@ function HomeContent(): React.JSX.Element {
                 label="About background model"
                 variant="control"
               >
-                Chooses the local-only model for quiet background work such as
+                Chooses the model for quiet background work such as
                 orchestration, titles, summaries, memory inference, cleanup,
-                and indexing. Foreground Refract follows the global
+                and indexing. Ollama Cloud is available only while the global
+                mode is ONLINE; LOCAL always uses the local auxiliary model.
+                Structured helpers also stay local when Cloud cannot satisfy
+                their output contract. Foreground Refract follows the global
                 LOCAL/ONLINE, Model, and Effort controls.
               </PanelSectionInfo>
             </span>
@@ -93152,6 +93208,10 @@ function HomeContent(): React.JSX.Element {
       ): Record<Provider, string> => ({
         ...previous,
         local: previous.local === modelId ? AUTO_MODEL_CHOICE : previous.local,
+        ollama_cloud:
+          previous.ollama_cloud === modelId
+            ? AUTO_MODEL_CHOICE
+            : previous.ollama_cloud,
         openai:
           previous.openai === modelId ? AUTO_MODEL_CHOICE : previous.openai,
         anthropic:
@@ -145951,6 +146011,9 @@ function HomeContent(): React.JSX.Element {
   if (view === "debate") {
     const debateProvider = settings?.preferredProvider ?? "local";
     const debateBinaryResponseMode = responseModeForProvider(debateProvider);
+    const debateEligibleOnlineOptions = onlineChatModelOptions.filter(
+      (model) => model.supportsStructuredOutput !== false,
+    );
     const debateResolvedChoice = resolveModelChoiceForResponseMode({
       responseMode: debateBinaryResponseMode,
       providerPreference: debateProvider,
@@ -145959,7 +146022,7 @@ function HomeContent(): React.JSX.Element {
         settings,
         debateModelChoiceByProvider,
       ),
-      onlineOptions: onlineChatModelOptions,
+      onlineOptions: debateEligibleOnlineOptions,
     });
     const debateModelProvider = debateResolvedChoice.provider;
     const debateModelChoice = debateResolvedChoice.modelChoice;
@@ -145980,7 +146043,7 @@ function HomeContent(): React.JSX.Element {
         modelCatalog,
         settings,
         debateNavbarResponseMode,
-      ),
+      ).filter((model) => model.supportsStructuredOutput !== false),
       debateModelChoice,
       debateModelProvider,
     );
@@ -147135,11 +147198,18 @@ function HomeContent(): React.JSX.Element {
   if (view === "botcast") {
     const signalProvider = settings?.preferredProvider ?? "local";
     const signalResponseMode = responseModeForProvider(signalProvider);
+    const signalEligibleOnlineOptions = onlineChatModelOptions.filter(
+      (model) => model.supportsStructuredOutput !== false,
+    );
     const signalOnlineProviderCandidate =
       (signalProvider !== "local" ? signalProvider : null) ??
       onlineChatModelOptions.find((model) => !model.disabledReason)?.provider;
-    const signalOnlineProvider: "openai" | "anthropic" =
-      signalOnlineProviderCandidate === "anthropic" ? "anthropic" : "openai";
+    const signalOnlineProvider: "ollama_cloud" | "openai" | "anthropic" =
+      signalOnlineProviderCandidate === "ollama_cloud"
+        ? "ollama_cloud"
+        : signalOnlineProviderCandidate === "anthropic"
+          ? "anthropic"
+          : "openai";
     const signalHostChatProvider = resolveEphemeralChatProvider({
       preference:
         settings?.ephemeralChatProviderPreferences.botcast ?? "global",
@@ -147152,7 +147222,7 @@ function HomeContent(): React.JSX.Element {
       modelCatalog,
       settings,
       signalNavbarResponseMode,
-    );
+    ).filter((model) => model.supportsStructuredOutput !== false);
     const signalResolvedChoice = resolveModelChoiceForResponseMode({
       responseMode: signalNavbarResponseMode,
       providerPreference: signalProvider,
@@ -147161,7 +147231,7 @@ function HomeContent(): React.JSX.Element {
         settings,
         globalModelChoiceByProvider,
       ),
-      onlineOptions: onlineChatModelOptions,
+      onlineOptions: signalEligibleOnlineOptions,
     });
     const signalGlobalModelChoice = signalResolvedChoice.modelChoice;
     const signalModelOptions = signalNavbarModelOptions

@@ -11,6 +11,7 @@ import {
 } from "react";
 import {
   BOT_IDENTITY_PRESENTATION_TRANSITION_MS,
+  DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
   DEBATE_SCHEMA_VERSION,
   botIdentityPresentationTransitionActiveV1,
   debateMysteryMansionBundleEligibleV2,
@@ -129,6 +130,7 @@ import {
   type WhodunnitInvestigationArtStyle,
 } from "./debateMysteryInvestigationArt";
 import { DebateMysteryRoomCinematographyLayer } from "./debateMysteryRoomCinematographyLayer";
+import { debateMysteryMansionExteriorFallbackV1 } from "./debateMysteryMansionExterior";
 import styles from "./debateMysteryV2.module.css";
 
 interface V2SharedProps {
@@ -137,6 +139,8 @@ interface V2SharedProps {
   theme: "light" | "dark";
   audioEnabled: boolean;
   audioVolume: number;
+  /** Exterior-only mansion cover used by the library, package, and title card. */
+  mansionExteriorUrl?: string | null;
   whodunnitTextVoiceMode?: WhodunnitTextVoiceMode;
   playMysteryTextVoice?: (args: {
     mode: Exclude<WhodunnitTextVoiceMode, "off">;
@@ -641,11 +645,14 @@ export function DebateMysteryV2CompilationResume(
   const [liveCompilation, setLiveCompilation] = useState(state.compilation);
   const liveCompilationRef = useRef(liveCompilation);
   const [forgeTipIndex, setForgeTipIndex] = useState(0);
+  const [preparedMansionExteriorUrl, setPreparedMansionExteriorUrl] = useState<string | null>(null);
   const sessionId = props.session.id;
   const request = props.request;
   const onSessionChange = props.onSessionChange;
   const onSessionChangeRef = useRef(onSessionChange);
   const reducedMotion = usePrefersReducedMotion();
+  const mansionExteriorRevealed = state.mansionExterior?.revealed === true;
+  const mansionExteriorStatus = state.mansionExterior?.status ?? null;
 
   useEffect(() => {
     onSessionChangeRef.current = onSessionChange;
@@ -658,6 +665,37 @@ export function DebateMysteryV2CompilationResume(
   useEffect(() => {
     liveCompilationRef.current = liveCompilation;
   }, [liveCompilation]);
+
+  useEffect(() => {
+    if (!mansionExteriorRevealed || mansionExteriorStatus !== "ready") {
+      setPreparedMansionExteriorUrl(null);
+      return;
+    }
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+    void fetch(
+      sealedMysteryAssetApiUrl(
+        sessionId,
+        "room",
+        DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
+      ),
+      {
+        credentials: "same-origin",
+        cache: "no-store",
+        signal: controller.signal,
+      },
+    ).then(async (response) => {
+      if (!response.ok) return;
+      objectUrl = URL.createObjectURL(await response.blob());
+      setPreparedMansionExteriorUrl(objectUrl);
+    }).catch(() => {
+      // The size-matched bundled exterior remains visible if retrieval races.
+    });
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [mansionExteriorRevealed, mansionExteriorStatus, sessionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -790,6 +828,8 @@ export function DebateMysteryV2CompilationResume(
     compilationActive
       ? formatDebateMysteryForgeEta(compilation.approximateRemainingMs)
       : null;
+  const forgeExteriorUrl = props.mansionExteriorUrl ?? preparedMansionExteriorUrl ??
+    debateMysteryMansionExteriorFallbackV1(state.config.houseStyle, state.config.scaleClass);
 
   const retry = async (): Promise<void> => {
     setBusy(true);
@@ -842,8 +882,16 @@ export function DebateMysteryV2CompilationResume(
   return (
     <main className={styles.forge} data-theme={props.theme} data-tutorial-target="mystery-v2-case-forge">
       <button type="button" className={styles.archiveButton} onClick={props.onExit}>← Continue in background</button>
-      <section className={styles.forgeCard}>
+      <section
+        className={styles.forgeCard}
+        data-exterior-hero="true"
+        style={{ "--forge-exterior-image": `url("${forgeExteriorUrl}")` } as CSSProperties}
+      >
         <div className={styles.forgePrism} aria-hidden="true"><i /><i /><i /></div>
+        <p className={styles.forgeExteriorStatus}>
+          <span aria-hidden="true">◇</span>
+          Mansion exterior · {state.config.scaleClass}
+        </p>
         <p className={styles.eyebrow}>PRISM / Case Forge</p>
         <h1>{needsAttention ? "Case preparation stopped" : spectatorForge ? "Preparing your mystery to watch." : "Preparing a prosecution turnabout"}</h1>
         {!spectatorForge ? <p className={styles.forgeMessage}>{spoilerSafeProgressMessage}</p> : null}
@@ -1225,6 +1273,15 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       subjectId: string;
       style?: WhodunnitInvestigationArtStyle;
     }>();
+    if (state.mansionExterior?.revealed && state.mansionExterior.status === "ready") {
+      requests.set(
+        sealedMysteryAssetKey("room", DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1),
+        {
+          kind: "room",
+          subjectId: DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
+        },
+      );
+    }
     for (const room of state.rooms) {
       if (room.sealedAsset?.revealed && room.sealedAsset.status === "ready") {
         requests.set(sealedMysteryRoomArtKey(room.id, "illustrated"), {
@@ -1259,7 +1316,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       }
     }
     return Array.from(requests.entries()).sort(([left], [right]) => left.localeCompare(right));
-  }, [roomArtUpgradeStatus?.readyRoomIds, state.record, state.rooms]);
+  }, [roomArtUpgradeStatus?.readyRoomIds, state.mansionExterior, state.record, state.rooms]);
   const revealedAssetRequestKey = revealedAssetRequests.map(([key]) => key).join("|");
 
   useEffect(() => {
@@ -2719,18 +2776,32 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   }, [roomParallaxEnabled]);
 
   if (state.playPhase === "title_card") {
+    const preparedMansionExteriorUrl = sealedMysteryAssetObjectUrl(
+      sealedAssetObjectUrls,
+      "room",
+      DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
+      state.mansionExterior,
+    );
+    const mansionExteriorUrl = props.mansionExteriorUrl ?? preparedMansionExteriorUrl ??
+      debateMysteryMansionExteriorFallbackV1(state.config.houseStyle, state.config.scaleClass);
     return (
-      <main className={styles.titleCard} data-theme={props.theme}>
+      <main
+        className={styles.titleCard}
+        data-theme={props.theme}
+        style={{ "--mansion-exterior-image": `url("${mansionExteriorUrl}")` } as CSSProperties}
+      >
         <button type="button" className={styles.archiveButton} onClick={props.onExit}>← Archive</button>
-        <div className={styles.titlePrism} aria-hidden="true">◇</div>
-        <p className={styles.eyebrow}>PRISM presents</p>
-        <h1>{state.caseTitle}</h1>
-        <p>{state.fictionLabel}</p>
-        <div className={styles.titleMetadata}>
-          <span>{state.suspects.length} witnesses</span><span>{state.config.trialType === "jury" ? "Jury Trial" : "Bench Trial"}</span>{state.config.investigationMode === "court_only" ? <span>Court act</span> : null}<span>{state.voicesEnabled ? "Local performance ready" : "Text performance"}</span>
+        <div className={styles.titleCardContent}>
+          <div className={styles.titlePrism} aria-hidden="true">◇</div>
+          <p className={styles.eyebrow}>PRISM presents</p>
+          <h1>{state.caseTitle}</h1>
+          <p>{state.fictionLabel}</p>
+          <div className={styles.titleMetadata}>
+            <span>{state.suspects.length} witnesses</span><span>{state.config.trialType === "jury" ? "Jury Trial" : "Bench Trial"}</span>{state.config.investigationMode === "court_only" ? <span>Court act</span> : null}<span>{state.voicesEnabled ? "Local performance ready" : "Text performance"}</span>
+          </div>
+          <button type="button" className={styles.primaryAction} disabled={busy} onClick={() => void sendAction({ action: "move" })}>{state.config.investigationMode === "court_only" ? "Begin Trial" : spectator ? "Review Prosecutor Findings" : "Begin Case"}</button>
+          {error ? <p className={styles.error}>{error}</p> : null}
         </div>
-        <button type="button" className={styles.primaryAction} disabled={busy} onClick={() => void sendAction({ action: "move" })}>{state.config.investigationMode === "court_only" ? "Begin Trial" : spectator ? "Review Prosecutor Findings" : "Begin Case"}</button>
-        {error ? <p className={styles.error}>{error}</p> : null}
       </main>
     );
   }

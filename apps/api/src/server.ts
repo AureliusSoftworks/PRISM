@@ -302,6 +302,7 @@ import {
   applyDebateMysteryActionV2,
   applyDebateMysteryActionWithPersonaV2,
   attachDebateMysteryEvidenceAssetV2,
+  attachDebateMysteryMansionExteriorAssetV2,
   attachDebateMysteryRoomAssetV2,
   claimDebateMysteryAssetBackgroundLeaseV2,
   cancelDebateMysteryCompilationV2,
@@ -320,6 +321,7 @@ import {
   retryDebateMysteryCompilationV2,
   runDebateMysteryCompilationV2,
   type DebateMysteryEvidenceAssetPreparationV2,
+  type DebateMysteryMansionExteriorAssetPreparationV2,
   type DebateMysteryRoomAssetPreparationV2,
 } from "./debate-mystery-v2.ts";
 import {
@@ -343,6 +345,7 @@ import {
 } from "./debate-mystery-room-art.ts";
 import {
   deleteDebateMysteryMansionBundleV2,
+  ensureDebateMysteryMansionPortableRoomAssetsV1,
   getDebateMysteryMansionAssetFileV1,
   getDebateMysteryMansionBundleV2,
   listDebateMysteryMansionBundlesV2,
@@ -371,8 +374,10 @@ import { PortableMysteryImportSafetyError } from "./debate-mystery-package-safet
 import { DebateMysteryMansionCodecError } from "./debate-mystery-mansion-codec.ts";
 import { ensureDebateMysteryMansionThemeV1 } from "./debate-mystery-mansion-theme.ts";
 import {
+  DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
   PORTABLE_MANSION_PACKAGE_MIME_V1,
   PORTABLE_WHODUNNIT_PACKAGE_MIME_V1,
+  debateMysteryMansionExteriorPromptV1,
 } from "@localai/shared";
 import {
   buildSignalLiveBakeArtifactFromEpisode,
@@ -1746,6 +1751,7 @@ async function startPrismStorySession(
       surface: "story",
       inputText: premise ?? "",
       outputTokens: 2_048,
+      structuredOutput: true,
       simulatedEffortEnabled: true,
     },
     turboOnly: autoTurboEnabled,
@@ -1762,23 +1768,15 @@ async function startPrismStorySession(
     .filter(
       (entry) =>
         !hiddenModels.has(entry.id) &&
+        entry.supportsStructuredOutput !== false &&
         (!autoTurboEnabled ||
           modelSupportsTurboMode(
-            entry.provider === "anthropic"
-              ? "anthropic"
-              : entry.provider === "local"
-                ? "local"
-                : "openai",
+            entry.provider,
             entry.id,
           )),
     )
     .map((entry): AutoFallbackModelRef => ({
-      provider:
-        entry.provider === "anthropic"
-          ? "anthropic"
-          : entry.provider === "local"
-            ? "local"
-            : "openai",
+      provider: entry.provider,
       model: entry.id,
     }));
   const primaryRef: AutoFallbackModelRef = {
@@ -3995,10 +3993,12 @@ async function orchestratePrismCompanionRequest(args: {
 function dualOllamaWorkloadOptions(user: UserDbRow): {
   secondaryOllamaHost: string | null;
   experimentalDualOllama: boolean;
+  onlineEnabled: boolean;
 } {
   return {
     secondaryOllamaHost: user.secondary_ollama_host,
     experimentalDualOllama: user.experimental_dual_ollama_enabled === 1,
+    onlineEnabled: user.preferred_provider !== "local",
   };
 }
 
@@ -6176,7 +6176,10 @@ function getBraveSearchApiKeyForUser(
 }
 
 function readProvider(value: unknown): ProviderName | undefined {
-  return value === "local" || value === "openai" || value === "anthropic"
+  return value === "local" ||
+    value === "ollama_cloud" ||
+    value === "openai" ||
+    value === "anthropic"
     ? value
     : undefined;
 }
@@ -6267,17 +6270,22 @@ async function debateAiRuntimeForUser(
 ): Promise<DebateAiRuntime> {
   const user = getUserRow(userId);
   const requestedProviderName = readProvider(requestedProvider);
+  const accountRequiresLocal = userBlocksOnlineCapabilities(user);
   const legacyDefaultLane =
+    accountRequiresLocal ||
     requestedProviderName === "local" ||
     (!requestedProviderName && user.preferred_provider === "local")
       ? "local"
       : "online";
-  const requestedMode = normalizeResponseMode(
+  const normalizedMode = normalizeResponseMode(
     requestedResponseMode,
     legacyDefaultLane,
   );
-  const responseLane =
-    requestedMode === "auto" ? legacyDefaultLane : requestedMode;
+  const responseLane = accountRequiresLocal
+    ? "local"
+    : normalizedMode === "auto"
+      ? legacyDefaultLane
+      : normalizedMode;
   const preferredProvider: ProviderName =
     responseLane === "local"
       ? "local"
@@ -6318,7 +6326,7 @@ async function debateAiRuntimeForUser(
           ),
           online: catalog.online.filter((entry) =>
             frozenCandidateKeys.has(
-              `${entry.provider === "anthropic" ? "anthropic" : "openai"}:${entry.id.toLowerCase()}`,
+              `${entry.provider}:${entry.id.toLowerCase()}`,
             ),
           ),
         };
@@ -6391,7 +6399,7 @@ async function debateAiRuntimeForUser(
     dualOllamaWorkloadOptions(user),
   );
   const onlineLane = (
-    providerName: "openai" | "anthropic",
+    providerName: "ollama_cloud" | "openai" | "anthropic",
     model: string,
     reasoningEffort?: ProviderReasoningEffort,
   ): NonNullable<DebateAiRuntime["online"]> => {
@@ -6424,7 +6432,10 @@ async function debateAiRuntimeForUser(
           provider: providerName,
           modelId: model,
         }),
-      available: providerFactoryOverride !== selectProvider || Boolean(apiKey),
+      available:
+        providerName === "ollama_cloud" ||
+        providerFactoryOverride !== selectProvider ||
+        Boolean(apiKey),
     };
   };
   const primary =
@@ -6452,15 +6463,13 @@ async function debateAiRuntimeForUser(
           model: entry.id,
         }))
       : routingCatalog.online.map((entry) => ({
-          provider:
-            entry.provider === "anthropic"
-              ? ("anthropic" as const)
-              : ("openai" as const),
+          provider: entry.provider,
           model: entry.id,
         }))
   ).filter(
     (entry) =>
       !hiddenModels.has(entry.model) &&
+      entry.provider !== "ollama_cloud" &&
       (!autoTurboEnabled || modelSupportsTurboMode(entry.provider, entry.model)),
   );
   const primaryRef: AutoFallbackModelRef = {
@@ -6821,7 +6830,7 @@ async function contextualTextRuntimeForUser<
           ),
           online: catalog.online.filter((entry) =>
             frozenCandidateKeys.has(
-              `${entry.provider === "anthropic" ? "anthropic" : "openai"}:${entry.id.toLowerCase()}`,
+              `${entry.provider}:${entry.id.toLowerCase()}`,
             ),
           ),
         };
@@ -6936,18 +6945,15 @@ async function contextualTextRuntimeForUser<
     .filter(
       (entry) =>
         !hiddenModels.has(entry.id) &&
+        (!args.routingContext.structuredOutput ||
+          entry.supportsStructuredOutput !== false) &&
         (!autoTurboEnabled || modelSupportsTurboMode(
-          entry.provider === "anthropic" ? "anthropic" : entry.provider === "local" ? "local" : "openai",
+          entry.provider,
           entry.id,
         )),
     )
     .map((entry): AutoFallbackModelRef => ({
-      provider:
-        entry.provider === "anthropic"
-          ? "anthropic"
-          : entry.provider === "local"
-            ? "local"
-            : "openai",
+      provider: entry.provider,
       model: entry.id,
     }));
   const frozenFallbacks =
@@ -9666,6 +9672,124 @@ async function prepareDebateMysteryV2EvidenceAssets(
   return assetByExhibitId;
 }
 
+/**
+ * Prepares the spoiler-safe exterior that represents the mansion everywhere:
+ * Case Forge, Installed Mansions, portable preview, and the opening title card.
+ * LOCAL never enters the generation branch and resolves to bundled key art.
+ */
+async function prepareDebateMysteryV2MansionExteriorAsset(
+  args: DebateMysteryMansionExteriorAssetPreparationV2,
+): Promise<import("@localai/shared").DebateMysterySealedAssetRefV1> {
+  const session = getDebateSession(db, args.userId, args.sessionId);
+  if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
+    throw new HttpError(409, "Mansion exterior preparation requires a Whodunnit V2 case.");
+  }
+  const existing = getDebateMysterySealedAssetRefV1(
+    db,
+    args.userId,
+    args.sessionId,
+    "room",
+    DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
+  );
+  if (existing?.status === "ready" || existing?.status === "fallback") return existing;
+
+  setDebateMysteryAssetPendingV1(db, {
+    userId: args.userId,
+    sessionId: args.sessionId,
+    kind: "room",
+    subjectId: DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
+    mimeType: "image/png",
+  });
+  const user = getUserRow(args.userId);
+  const online = args.synthesize &&
+    session.responseMode !== "local" &&
+    !userBlocksOnlineCapabilities(user);
+  const userKey = decryptUserKey(args.userId);
+  const apiKey = online
+    ? getOpenAiApiKeyForUser(args.userId, userKey) ?? config.openAiApiKey
+    : undefined;
+  const controller = new AbortController();
+  const signal = args.signal ?? controller.signal;
+  let prepared: import("@localai/shared").DebateMysterySealedAssetRefV1 | null = null;
+  let failure = online && apiKey
+    ? "generation failed"
+    : "LOCAL or bundled art selection uses the curated mansion exterior";
+  let reviewRepairFeedback: string | null = null;
+  if (online && apiKey) {
+    for (let attempt = 1; attempt <= 2 && !prepared; attempt += 1) {
+      try {
+        prepared = await runMysteryAssetAttempt(signal, async (attemptSignal) => {
+          const generated = await generateRawDebateMysteryCandidate({
+            userId: args.userId,
+            title: `${args.houseStyle.label} exterior establishing shot`,
+            prompt: [
+              debateMysteryMansionExteriorPromptV1(args.houseStyle, args.scaleClass),
+              ...(attempt === 2 && reviewRepairFeedback
+                ? [`Correct these first-pass review findings: ${reviewRepairFeedback}`]
+                : []),
+            ].join("\n"),
+            apiKey,
+            model: "gpt-image-2",
+            size: "1536x1024",
+            quality: "high",
+            signal: attemptSignal,
+          });
+          const normalized = await sharp(generated.bytes, { failOn: "error" })
+            .rotate()
+            .flatten({ background: { r: 3, g: 8, b: 14 } })
+            .resize(1600, 900, { fit: "cover", position: "centre" })
+            .removeAlpha()
+            .png({ compressionLevel: 9 })
+            .toBuffer();
+          const pixels = await validateDebateMysteryAssetPixelsV1("room", normalized);
+          const review = await reviewDebateMysteryAssetWithVision({
+            apiKey,
+            bytes: normalized,
+            kind: "room",
+            requestedSubject: "complete mansion exterior in its geography",
+            houseStyle: debateMysteryMansionExteriorPromptV1(args.houseStyle, args.scaleClass),
+            signal: attemptSignal,
+          });
+          if (!review.approved) {
+            throw new Error(
+              `Vision review rejected the mansion exterior: ${review.reasons.join("; ") || "no reason supplied"}`,
+            );
+          }
+          const sealed = sealDebateMysteryAssetBytesV1(db, userKey, {
+            userId: args.userId,
+            sessionId: args.sessionId,
+            kind: "room",
+            subjectId: DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
+            bytes: normalized,
+            provider: "openai",
+            model: generated.model,
+            review: { attempt, pixels, vision: review },
+          });
+          return revealDebateMysteryAssetV1(
+            db,
+            args.userId,
+            args.sessionId,
+            "room",
+            DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
+          ) ?? sealed;
+        });
+      } catch (error) {
+        if (signal.aborted) throw error;
+        failure = spoilerSafeMysteryAssetFailure(error);
+        reviewRepairFeedback = failure.startsWith("Vision review rejected") ? failure : null;
+      }
+    }
+  }
+  return prepared ?? setDebateMysteryAssetFallbackV1(db, {
+    userId: args.userId,
+    sessionId: args.sessionId,
+    kind: "room",
+    subjectId: DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
+    mimeType: "image/webp",
+    reason: failure,
+  });
+}
+
 async function prepareDebateMysteryV2RoomAssets(
   args: DebateMysteryRoomAssetPreparationV2,
 ): Promise<Record<string, import("@localai/shared").DebateMysterySealedAssetRefV1>> {
@@ -10091,6 +10215,7 @@ function queueDebateMysteryV2CompilationInBackground(
       () => runDebateMysteryCompilationV2(db, userId, sessionId, runtime, {
         prepareEvidenceAssets: prepareDebateMysteryV2EvidenceAssets,
         prepareRoomAssets: prepareDebateMysteryV2RoomAssets,
+        prepareMansionExteriorAsset: prepareDebateMysteryV2MansionExteriorAsset,
         onCompilationReady: (ready) =>
           queueDebateMysteryV2RoomAssetBackground(userId, ready.id),
       }),
@@ -10644,7 +10769,10 @@ function queueCoffeeGroupSoundtrack(
     const group = getCoffeeGroup(generationDb, userId, groupId);
     if (!group) return;
     const user = getUserRow(userId);
-    const effectiveProvider = readProvider(requestedProvider) ?? user.preferred_provider;
+    const effectiveProvider =
+      user.preferred_provider === "local"
+        ? "local"
+        : (readProvider(requestedProvider) ?? user.preferred_provider);
     if (effectiveProvider === "local") {
       ensureCoffeeGroupSoundtrack(
         generationDb,
@@ -16589,10 +16717,7 @@ function buildRoutes(): RouteDefinition[] {
           createDefaultPrismMoodState("zen", now);
         const auxiliaryProvider = getAuxiliaryProvider(
           user.prism_default_llm_model,
-          {
-            secondaryOllamaHost: user.secondary_ollama_host,
-            experimentalDualOllama: user.experimental_dual_ollama_enabled === 1,
-          },
+          dualOllamaWorkloadOptions(user),
         );
         zenAutonomyDecision = await decideZenAutonomyTurn({
           db,
@@ -16869,21 +16994,12 @@ function buildRoutes(): RouteDefinition[] {
                     !chatHiddenModels.has(entry.id) &&
                     (!autoTurboEnabled ||
                       modelSupportsTurboMode(
-                        entry.provider === "anthropic"
-                          ? "anthropic"
-                          : entry.provider === "local"
-                            ? "local"
-                            : "openai",
+                        entry.provider,
                         entry.id,
                       )),
                 )
                 .map((entry) => ({
-                  provider:
-                    entry.provider === "anthropic"
-                      ? ("anthropic" as const)
-                      : entry.provider === "local"
-                        ? ("local" as const)
-                        : ("openai" as const),
+                  provider: entry.provider,
                   model: entry.id,
                 })),
               ...(responseLane === "online" && !autoTurboEnabled
@@ -18423,6 +18539,7 @@ function buildRoutes(): RouteDefinition[] {
                 deferBackgroundStart: true,
                 prepareEvidenceAssets: prepareDebateMysteryV2EvidenceAssets,
                 prepareRoomAssets: prepareDebateMysteryV2RoomAssets,
+                prepareMansionExteriorAsset: prepareDebateMysteryV2MansionExteriorAsset,
                 onCompilationReady: (ready) =>
                   queueDebateMysteryV2RoomAssetBackground(userId, ready.id),
               },
@@ -18932,9 +19049,15 @@ function buildRoutes(): RouteDefinition[] {
         responseMode: session.responseMode === "online" ? "online" : "local",
         apiKey: getElevenLabsApiKeyForUser(userId, decryptUserKey(userId)) ?? config.elevenLabsApiKey ?? null,
       });
+      const preparedMansion = await ensureDebateMysteryMansionPortableRoomAssetsV1(
+        db,
+        decryptUserKey(userId),
+        userId,
+        mansion.id,
+      );
       json(ctx.res, 201, {
         ok: true,
-        mansion: getDebateMysteryMansionBundleV2(db, userId, mansion.id),
+        mansion: preparedMansion,
         theme,
       });
     }),
@@ -19226,6 +19349,7 @@ function buildRoutes(): RouteDefinition[] {
           deferBackgroundStart: true,
           prepareEvidenceAssets: prepareDebateMysteryV2EvidenceAssets,
           prepareRoomAssets: prepareDebateMysteryV2RoomAssets,
+          prepareMansionExteriorAsset: prepareDebateMysteryV2MansionExteriorAsset,
           onCompilationReady: (ready) =>
             queueDebateMysteryV2RoomAssetBackground(userId, ready.id),
         }),
@@ -24585,7 +24709,10 @@ function buildRoutes(): RouteDefinition[] {
       if (!existing) throw new HttpError(404, "Coffee group not found.");
       const body = ctx.body as Record<string, unknown>;
       const user = getUserRow(userId);
-      const effectiveProvider = readProvider(body.preferredProvider) ?? user.preferred_provider;
+      const effectiveProvider =
+        user.preferred_provider === "local"
+          ? "local"
+          : (readProvider(body.preferredProvider) ?? user.preferred_provider);
       if (effectiveProvider === "local") {
         throw new HttpError(409, "Custom Coffee music requires ONLINE mode. Bundled Coffee Jazz remains available.");
       }
@@ -29737,7 +29864,12 @@ function buildRoutes(): RouteDefinition[] {
         nameProjectedElevenLabsText;
       const explicitOnlineContext = resolveVoiceSynthesisExplicitOnlineContext({
         persistedMessageProvider,
-        preferredProvider: user.preferred_provider,
+        preferredProvider:
+          user.preferred_provider === "anthropic"
+            ? "anthropic"
+            : user.preferred_provider === "openai"
+              ? "openai"
+              : "local",
         explicitOnlineContext: raw.explicitOnlineContext === true,
         explicitVoicePreview: raw.explicitVoicePreview === true,
         hasMessageId:
@@ -30322,10 +30454,10 @@ function buildRoutes(): RouteDefinition[] {
         throw new HttpError(400, "Prism needs a valid local Flight Recorder trace.");
       }
       const user = getUserRow(userId);
-      const provider = getAuxiliaryProvider(user.prism_default_llm_model, {
-        secondaryOllamaHost: user.secondary_ollama_host,
-        experimentalDualOllama: user.experimental_dual_ollama_enabled === 1,
-      });
+      const provider = getAuxiliaryProvider(
+        user.prism_default_llm_model,
+        dualOllamaWorkloadOptions(user),
+      );
       const summary = await provider.generateResponse(
         [
           {
@@ -31184,6 +31316,7 @@ function buildRoutes(): RouteDefinition[] {
       const body = ctx.body as Record<string, unknown>;
       const provider =
         body.provider === "local" ||
+        body.provider === "ollama_cloud" ||
         body.provider === "openai" ||
         body.provider === "anthropic"
           ? body.provider
@@ -31684,7 +31817,12 @@ function buildRoutes(): RouteDefinition[] {
         atmosphereStyle: user.atmosphere_style,
         hubAtmosphereEnabled: user.hub_atmosphere_enabled,
         startupPreference: user.startup_preference,
-        preferredProvider: user.preferred_provider,
+        preferredProvider:
+          user.preferred_provider === "anthropic"
+            ? "anthropic"
+            : user.preferred_provider === "openai"
+              ? "openai"
+              : "local",
         ephemeralChatProviderPreferences:
           user.ephemeral_chat_provider_preferences,
         preferredImageProvider: user.preferred_image_provider,

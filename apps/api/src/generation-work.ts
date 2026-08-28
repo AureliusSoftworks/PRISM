@@ -47,7 +47,12 @@ export interface PrismGenerationWorkReceipt {
   executionLane: PrismGenerationExecutionLane;
   role: PrismGenerationWorkRole;
   outputClass: PrismGenerationOutputClass;
-  provider: "deterministic" | "local" | "openai" | "anthropic";
+  provider:
+    | "deterministic"
+    | "local"
+    | "ollama_cloud"
+    | "openai"
+    | "anthropic";
   model: string;
   durationMs: number;
   inputTokens: number | null;

@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
+  DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
   debateMysteryAcousticThemePaletteV1,
   normalizeDebateMysteryAtmosphereContractV1,
   debateMysteryMansionBundleEligibleV2,
+  resolveDebateMysteryMansionExteriorScaleClassV1,
   type DebateMysteryHouseStyleV2,
   type DebateMysteryMansionAssetV1,
   type DebateMysteryMansionLibraryPresentationV1,
@@ -14,6 +16,7 @@ import {
 } from "@localai/shared";
 import sharp from "sharp";
 import { getDebateSession } from "./debate.ts";
+import { readGeneratedImageBytes } from "./image-storage.ts";
 import { decryptBytes, encryptBytes } from "./security.ts";
 import { HttpError } from "./utils.http.ts";
 
@@ -255,6 +258,10 @@ function summary(
     sourceSessionId: row.source_session_id,
     floors: row.floors,
     totalRooms: row.total_rooms,
+    scaleClass: resolveDebateMysteryMansionExteriorScaleClassV1({
+      floors: row.floors,
+      totalRooms: row.total_rooms,
+    }),
     suspectCount: row.suspect_count,
     houseStyle,
     rooms: parseRooms(row.layout_json),
@@ -517,6 +524,131 @@ export function getDebateMysteryMansionAssetFileV1(
   };
 }
 
+interface LegacyMansionRoomSourceRow {
+  room_id: string;
+  local_rel_path: string;
+  provider: string;
+  model: string;
+}
+
+function mansionImageMimeType(bytes: Buffer): "image/png" | "image/webp" | null {
+  if (
+    bytes.byteLength >= 8 &&
+    bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47
+  ) return "image/png";
+  if (
+    bytes.byteLength >= 12 &&
+    bytes.subarray(0, 4).toString("ascii") === "RIFF" &&
+    bytes.subarray(8, 12).toString("ascii") === "WEBP"
+  ) return "image/webp";
+  return null;
+}
+
+/**
+ * Makes a legacy saved mansion's room art portable without another provider
+ * call. Cover art is deliberately not derived here: a mansion cover is a
+ * dedicated exterior establishing shot, never a room plate or room mosaic.
+ */
+export async function ensureDebateMysteryMansionPortableRoomAssetsV1(
+  db: DatabaseSync,
+  userKey: Buffer,
+  userId: string,
+  bundleId: string,
+): Promise<DebateMysteryMansionBundleSummaryV1> {
+  const row = bundleRow(db, userId, bundleId);
+  const rooms = parseRooms(row.layout_json);
+  const roomIds = new Set(rooms.map((room) => room.id));
+  const protectedRoomIds = new Set(
+    (db.prepare(
+      `SELECT logical_id FROM debate_mystery_mansion_asset_refs
+        WHERE bundle_id = ? AND user_id = ? AND role = 'room'`,
+    ).all(bundleId, userId) as unknown as Array<{ logical_id: string }>)
+      .map((entry) => entry.logical_id),
+  );
+  const legacy = db.prepare(
+    `SELECT mansion_assets.room_id, images.local_rel_path, images.provider, images.model
+       FROM debate_mystery_mansion_bundle_assets AS mansion_assets
+       JOIN images ON images.id = mansion_assets.image_id
+                  AND images.user_id = mansion_assets.user_id
+      WHERE mansion_assets.bundle_id = ? AND mansion_assets.user_id = ?
+        AND TRIM(COALESCE(images.local_rel_path, '')) <> ''
+      ORDER BY mansion_assets.room_id`,
+  ).all(bundleId, userId) as unknown as LegacyMansionRoomSourceRow[];
+  const promotable: Array<{
+    roomId: string;
+    bytes: Buffer;
+    mimeType: "image/png" | "image/webp";
+    sha256: string;
+    width: number;
+    height: number;
+    provider: string;
+    model: string;
+  }> = [];
+  for (const source of legacy) {
+    if (!roomIds.has(source.room_id) || protectedRoomIds.has(source.room_id)) continue;
+    try {
+      const bytes = readGeneratedImageBytes(source.local_rel_path);
+      const mimeType = mansionImageMimeType(bytes);
+      if (!mimeType) continue;
+      const metadata = await sharp(bytes, {
+        failOn: "error",
+        limitInputPixels: 40_000_000,
+      }).metadata();
+      if (!metadata.width || !metadata.height) continue;
+      promotable.push({
+        roomId: source.room_id,
+        bytes,
+        mimeType,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        width: metadata.width,
+        height: metadata.height,
+        provider: source.provider,
+        model: source.model,
+      });
+    } catch {
+      // A missing legacy gallery file must not make the mansion unusable.
+    }
+  }
+  if (promotable.length > 0) {
+    const now = new Date().toISOString();
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const source of promotable) {
+        const encrypted = encryptBytes(source.bytes, userKey);
+        db.prepare(
+          `INSERT INTO debate_mystery_mansion_assets
+             (id, user_id, ciphertext, cipher_iv, cipher_tag, sha256, byte_size,
+              mime_type, width, height, duration_ms, provider, model, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+           ON CONFLICT(user_id, sha256) DO UPDATE SET
+             width = COALESCE(debate_mystery_mansion_assets.width, excluded.width),
+             height = COALESCE(debate_mystery_mansion_assets.height, excluded.height),
+             updated_at = excluded.updated_at`,
+        ).run(
+          randomUUID(), userId, encrypted.ciphertext, encrypted.iv, encrypted.tag,
+          source.sha256, source.bytes.byteLength, source.mimeType,
+          source.width, source.height, source.provider, source.model, now, now,
+        );
+        const stored = db.prepare(
+          "SELECT id FROM debate_mystery_mansion_assets WHERE user_id = ? AND sha256 = ?",
+        ).get(userId, source.sha256) as { id: string };
+        db.prepare(
+          `INSERT INTO debate_mystery_mansion_asset_refs
+             (bundle_id, user_id, asset_id, role, logical_id, created_at)
+           VALUES (?, ?, ?, 'room', ?, ?)
+           ON CONFLICT(bundle_id, role, logical_id) DO NOTHING`,
+        ).run(bundleId, userId, stored.id, source.roomId, now);
+      }
+      db.exec("COMMIT");
+    } catch (error) {
+      if (db.isTransaction) db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  return getDebateMysteryMansionBundleV2(db, userId, bundleId);
+}
+
 interface ReusableVaultAssetRow {
   subject_id: string;
   kind: "room" | "evidence";
@@ -575,8 +707,10 @@ export function replaceProtectedDebateMysteryMansionAssetsV1(
   ).all(userId, sessionId) as unknown as ReusableVaultAssetRow[];
   db.prepare(
     `DELETE FROM debate_mystery_mansion_asset_refs
-      WHERE bundle_id = ? AND user_id = ? AND role IN ('room', 'prop')`,
-  ).run(bundleId, userId);
+      WHERE bundle_id = ? AND user_id = ?
+        AND (role IN ('room', 'prop') OR
+             (role = 'presentation' AND logical_id = ?))`,
+  ).run(bundleId, userId, DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1);
   const insertAsset = db.prepare(
     `INSERT INTO debate_mystery_mansion_assets
        (id, user_id, ciphertext, cipher_iv, cipher_tag, sha256, byte_size,
@@ -616,7 +750,9 @@ export function replaceProtectedDebateMysteryMansionAssetsV1(
       now,
     );
     const stored = assetId.get(userId, row.sha256) as { id: string };
-    const role = row.kind === "room" ? "room" : "prop";
+    const isMansionExterior = row.kind === "room" &&
+      row.subject_id === DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1;
+    const role = isMansionExterior ? "presentation" : row.kind === "room" ? "room" : "prop";
     const logicalId = row.kind === "room"
       ? row.subject_id
       : `prop-${String(++propIndex).padStart(3, "0")}`;

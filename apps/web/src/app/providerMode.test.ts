@@ -29,6 +29,10 @@ const anthropicModels: ProviderModeModelOption[] = [
   { id: "claude-opus-4-1", provider: "anthropic" },
 ];
 
+const ollamaCloudModels: ProviderModeModelOption[] = [
+  { id: "minimax-m2.5:cloud", provider: "ollama_cloud" },
+];
+
 const localModels: ProviderModeModelOption[] = [
   { id: "llama3.2", provider: "local" },
   { id: "mistral:latest", provider: "local" },
@@ -37,6 +41,7 @@ const localModels: ProviderModeModelOption[] = [
 describe("provider mode helpers", () => {
   it("maps provider ids onto a binary Local/Online response mode", () => {
     assert.equal(responseModeForProvider("local"), "local");
+    assert.equal(responseModeForProvider("ollama_cloud"), "online");
     assert.equal(responseModeForProvider("openai"), "online");
     assert.equal(responseModeForProvider("anthropic"), "online");
     assert.equal(nextResponseMode("local"), "online");
@@ -69,7 +74,15 @@ describe("provider mode helpers", () => {
   });
 
   it("infers the online provider from a concrete selected model", () => {
-    const combined = combinedOnlineModelOptions(openAiModels, anthropicModels);
+    const combined = combinedOnlineModelOptions(
+      ollamaCloudModels,
+      openAiModels,
+      anthropicModels,
+    );
+    assert.equal(
+      inferOnlineProviderForModelChoice("minimax-m2.5:cloud", combined),
+      "ollama_cloud",
+    );
     assert.equal(
       inferOnlineProviderForModelChoice("claude-sonnet-4-6", combined),
       "anthropic"
@@ -111,6 +124,13 @@ describe("provider mode helpers", () => {
     assert.deepEqual(
       fallbackOnlineModelIdsForProvider("anthropic", "claude-opus-4-8"),
       ["claude-opus-4-8", "claude-sonnet-4-6"]
+    );
+    assert.deepEqual(
+      fallbackOnlineModelIdsForProvider(
+        "ollama_cloud",
+        "minimax-m2.5:cloud",
+      ),
+      ["minimax-m2.5:cloud"],
     );
   });
 
@@ -201,6 +221,7 @@ describe("provider mode helpers", () => {
         provider: "anthropic",
         choices: {
           local: "llama3.2",
+          ollama_cloud: "auto",
           openai: "auto",
           anthropic: "claude-sonnet-4-6",
         },
@@ -225,6 +246,7 @@ describe("provider mode helpers", () => {
         provider: "local",
         choices: {
           local: "mistral:latest",
+          ollama_cloud: "auto",
           openai: "gpt-4o",
           anthropic: "auto",
         },
@@ -249,6 +271,7 @@ describe("provider mode helpers", () => {
         provider: "anthropic",
         choices: {
           local: "mistral:latest",
+          ollama_cloud: "auto",
           openai: "auto",
           anthropic: "claude-sonnet-4-6",
         },
@@ -289,6 +312,7 @@ describe("provider mode helpers", () => {
         provider: "openai",
         choices: {
           local: "llama3.2",
+          ollama_cloud: "auto",
           openai: "auto",
           anthropic: "auto",
         },

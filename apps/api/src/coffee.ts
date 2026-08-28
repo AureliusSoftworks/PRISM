@@ -11287,11 +11287,11 @@ export async function suggestCoffeeGroupSetup(args: {
   direction?: unknown;
   roster: readonly CoffeeGroupSetupSuggestionRosterBot[];
   provider: LlmProvider;
-  providerName: "local" | "openai" | "anthropic";
+  providerName: "local" | "ollama_cloud" | "openai" | "anthropic";
   model: string;
 }): Promise<{
   suggestion: CoffeeGroupSetupSuggestionV1;
-  provider: "local" | "openai" | "anthropic";
+  provider: "local" | "ollama_cloud" | "openai" | "anthropic";
   model: string;
 }> {
   const roster = args.roster
@@ -15523,7 +15523,10 @@ function loadMessages(
             : row.content,
         createdAt: row.created_at,
         provider:
-          row.provider === "local" || row.provider === "openai" || row.provider === "anthropic"
+          row.provider === "local" ||
+          row.provider === "ollama_cloud" ||
+          row.provider === "openai" ||
+          row.provider === "anthropic"
             ? row.provider
             : undefined,
         model: row.model ?? undefined,
@@ -15608,7 +15611,10 @@ function loadAllMessages(
             : row.content,
         createdAt: row.created_at,
         provider:
-          row.provider === "local" || row.provider === "openai" || row.provider === "anthropic"
+          row.provider === "local" ||
+          row.provider === "ollama_cloud" ||
+          row.provider === "openai" ||
+          row.provider === "anthropic"
             ? row.provider
             : undefined,
         model: row.model ?? undefined,
@@ -17320,6 +17326,7 @@ async function generateCoffeePollStructuredBallot(args: {
           ...attempt,
           available:
             index === 0 || args.settings.providerFactory !== undefined || attempt.provider === "local" ||
+            attempt.provider === "ollama_cloud" ||
             (attempt.provider === "openai"
               ? Boolean(args.settings.openAiApiKey)
               : Boolean(args.settings.anthropicApiKey)),
@@ -20655,6 +20662,7 @@ async function generateCoffeeBotReply(args: {
           ...attempt,
           available:
             index === 0 || settings.providerFactory !== undefined || attempt.provider === "local" ||
+            attempt.provider === "ollama_cloud" ||
             (attempt.provider === "openai"
               ? Boolean(settings.openAiApiKey)
               : Boolean(settings.anthropicApiKey)),

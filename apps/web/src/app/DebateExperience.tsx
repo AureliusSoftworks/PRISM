@@ -186,8 +186,11 @@ import {
   type MansionPackageInspectionV1,
 } from "./mansionPackageClient";
 import InstalledMansionLibrary from "./InstalledMansionLibraryPanel";
+import WhodunnitSetupDialog from "./WhodunnitSetupDialog";
 import {
+  installedMansionThumbnailSourceV1,
   randomInstalledMansionIdV1,
+  resolveInstalledMansionPresentationV1,
   type InstalledMansionLibraryUpdateV1,
 } from "./installedMansionLibrary";
 import { PrismCompanionSessionNoteBoundary } from "./prismCompanionPresence";
@@ -804,14 +807,14 @@ export interface DebateExperienceProps {
   initialFormat?: DebateFormatId;
   playerName: string;
   storageScopeId: string;
-  preferredProvider: "local" | "openai" | "anthropic";
+  preferredProvider: "local" | "ollama_cloud" | "openai" | "anthropic";
   preferredImageProvider: "local" | "openai";
   assetRailGeneration?: (kind: "debate_exhibit") => AssetRailGenerationControl;
   responseMode: ResponseMode;
   reasoningEffort?: ProviderReasoningEffort;
   turbo?: boolean;
   modelOverride?: {
-    provider: "local" | "openai" | "anthropic";
+    provider: "local" | "ollama_cloud" | "openai" | "anthropic";
     model: string;
   } | null;
   /** Current concrete semantic route for configuration-bound consent. */
@@ -930,6 +933,19 @@ export interface DebateJudgeComposerRenderProps {
 
 type DebateView = "dashboard" | "live" | "baking" | "mystery";
 type DebateStudioPanel = "motion" | "cast" | "evidence" | "archive";
+type WhodunnitSetupPage = "mansion" | "story" | "experience" | "production";
+type WhodunnitMansionSource = "installed" | "new";
+
+const WHODUNNIT_SETUP_PAGES: ReadonlyArray<{
+  id: WhodunnitSetupPage;
+  label: string;
+  detail: string;
+}> = [
+  { id: "experience", label: "Experience", detail: "Choose how you play" },
+  { id: "mansion", label: "Mansion", detail: "Choose the house" },
+  { id: "story", label: "Story", detail: "Set tone and difficulty" },
+  { id: "production", label: "Production", detail: "Set art and audio" },
+];
 type DebatePresentationPlayerRole = Exclude<
   DebatePlayerRole,
   "investigator"
@@ -4817,6 +4833,12 @@ export function DebateExperience(
     "live" | "replay"
   >("live");
   const [studioPanel, setStudioPanel] = useState<DebateStudioPanel>("motion");
+  const [mysterySetupPage, setMysterySetupPage] =
+    useState<WhodunnitSetupPage>("experience");
+  const [mysteryMansionSource, setMysteryMansionSource] =
+    useState<WhodunnitMansionSource>("installed");
+  const [mansionImportOpen, setMansionImportOpen] = useState(false);
+  const [legacySeedImportOpen, setLegacySeedImportOpen] = useState(false);
   const [roomTuningOpen, setRoomTuningOpen] = useState(false);
   const [motionTuningOpen, setMotionTuningOpen] = useState(false);
   const [castTuningOpen, setCastTuningOpen] = useState(false);
@@ -5051,27 +5073,9 @@ export function DebateExperience(
   const [mysterySuspectSelection, setMysterySuspectSelection] = useState<
     string[]
   >(() => fillDebateMysteryCast(bots, [], 4));
-  const [mysteryJudgeBotId, setMysteryJudgeBotId] = useState(
-    () => bots.find((bot) => !mysterySuspectSelection.includes(bot.id))?.id ?? "",
-  );
-  const [mysteryProsecutorBotId, setMysteryProsecutorBotId] =
-    useState(
-      () =>
-        bots.find(
-          (bot) =>
-            !mysterySuspectSelection.includes(bot.id) &&
-            bot.id !== mysteryJudgeBotId,
-        )?.id ?? "",
-    );
-  const [mysteryRivalDefenseBotId, setMysteryRivalDefenseBotId] = useState(
-    () =>
-      bots.find(
-        (bot) =>
-          !mysterySuspectSelection.includes(bot.id) &&
-          bot.id !== mysteryJudgeBotId &&
-          bot.id !== mysteryProsecutorBotId,
-      )?.id ?? "",
-  );
+  const [mysteryJudgeBotId, setMysteryJudgeBotId] = useState("");
+  const [mysteryProsecutorBotId, setMysteryProsecutorBotId] = useState("");
+  const [mysteryRivalDefenseBotId, setMysteryRivalDefenseBotId] = useState("");
   const [activeMysteryCastSeat, setActiveMysteryCastSeat] =
     useState<DebateMysteryCastSeat>({ kind: "suspect", index: 0 });
   useEffect(() => {
@@ -6698,6 +6702,7 @@ export function DebateExperience(
       (candidate) => candidate.id === mansionId,
     );
     if (!mansionId || (!mansion && !suppliedMansion)) return;
+    setMysteryMansionSource("installed");
     setMysteryMansionBundleId(mansionId);
     setMysteryPreset("custom");
     if (mansion) {
@@ -6754,6 +6759,7 @@ export function DebateExperience(
     if (!mansionPackageFile || !mansionPackageInspection || mansionPackageInspection.locked) return;
     if (mansionPackageInspection.preview.duplicateBundleId) {
       chooseInstalledMansion(mansionPackageInspection.preview.duplicateBundleId);
+      setMansionImportOpen(false);
       return;
     }
     setMansionPackageState("installing");
@@ -6766,6 +6772,7 @@ export function DebateExperience(
       if (!mountedRef.current) return;
       await loadMysteryMansionBundles();
       chooseInstalledMansion(mansion.id, mansion);
+      setMansionImportOpen(false);
       setMansionPackageInspection((current) => current && !current.locked
         ? { ...current, preview: { ...current.preview, duplicateBundleId: mansion.id } }
         : current);
@@ -7983,7 +7990,8 @@ export function DebateExperience(
     inspiration: mysteryInspiration,
     spark: mysteryInspiration,
     assetSynthesis: {
-      evidence: mysteryEvidenceAssetSynthesis,
+      evidence:
+        mysteryEvidenceAssetSynthesis && props.responseMode !== "local",
       rooms:
         mysteryRoomAssetSynthesis &&
         !mysterySkipInvestigation &&
@@ -8485,6 +8493,10 @@ export function DebateExperience(
     startCreateIdempotencyKeyRef.current = null;
     setView("dashboard");
     setStudioPanel("motion");
+    setMysterySetupPage("experience");
+    setMysteryMansionSource("installed");
+    setMansionImportOpen(false);
+    setLegacySeedImportOpen(false);
     setRoomTuningOpen(false);
     setMotionTuningOpen(false);
     setCastTuningOpen(false);
@@ -8513,26 +8525,10 @@ export function DebateExperience(
     setMysteryFloors(1);
     setMysteryTotalRooms(5);
     setMysteryCustomSuspectCount(4);
-    const initialMysterySuspects = fillDebateMysteryCast(bots, [], 4);
-    const initialMysteryJudge =
-      bots.find((bot) => !initialMysterySuspects.includes(bot.id))?.id ?? "";
-    const initialMysteryProsecutor =
-      bots.find(
-        (bot) =>
-          !initialMysterySuspects.includes(bot.id) &&
-          bot.id !== initialMysteryJudge,
-      )?.id ?? "";
-    setMysterySuspectSelection(initialMysterySuspects);
-    setMysteryJudgeBotId(initialMysteryJudge);
-    setMysteryProsecutorBotId(initialMysteryProsecutor);
-    setMysteryRivalDefenseBotId(
-      bots.find(
-        (bot) =>
-          !initialMysterySuspects.includes(bot.id) &&
-          bot.id !== initialMysteryJudge &&
-          bot.id !== initialMysteryProsecutor,
-      )?.id ?? "",
-    );
+    setMysterySuspectSelection(fillDebateMysteryCast(bots, [], 4));
+    setMysteryJudgeBotId("");
+    setMysteryProsecutorBotId("");
+    setMysteryRivalDefenseBotId("");
     setActiveMysteryCastSeat({ kind: "suspect", index: 0 });
     setMysteryImportCode("");
     setInspectedMysterySeed(null);
@@ -13995,6 +13991,9 @@ export function DebateExperience(
     setObserverPerspective("live");
     setView("dashboard");
     setStudioPanel("motion");
+    setMysterySetupPage("experience");
+    setMansionImportOpen(false);
+    setLegacySeedImportOpen(false);
     setRoomTuningOpen(false);
     setMotionTuningOpen(false);
     setCastTuningOpen(draft.playerRole !== "judge" || draft.juryEnabled);
@@ -14423,6 +14422,7 @@ export function DebateExperience(
           .filter(Boolean),
       );
       setActiveMysteryCastSeat({ kind: "suspect", index: 0 });
+      setLegacySeedImportOpen(false);
       setStudioPanel("cast");
     } catch (caught) {
       setInspectedMysterySeed(null);
@@ -18948,12 +18948,12 @@ export function DebateExperience(
               {
                 id: "motion" as const,
                 index: "01",
-                label: format === "whodunnit" ? "Court" : "Motion",
+                label: format === "whodunnit" ? "Setup" : "Motion",
                 detail:
                   format === "whodunnit"
-                    ? mysterySetupValidated
-                      ? "Case recipe prepared"
-                      : "Shape the mystery"
+                    ? studioPanel === "cast"
+                      ? "Four choices preserved"
+                      : `${WHODUNNIT_SETUP_PAGES.find((page) => page.id === mysterySetupPage)?.label ?? "Experience"} · step ${Math.max(0, WHODUNNIT_SETUP_PAGES.findIndex((page) => page.id === mysterySetupPage)) + 1} of 4`
                     : motionComplete
                       ? "Debate prepared"
                       : "Shape the question",
@@ -19330,192 +19330,181 @@ export function DebateExperience(
     </main>
   );
 
-  const renderMysteryCourtStep = (): React.JSX.Element => (
-    <section
-      className={`${styles.setupPanel} ${styles.dashboardPanel} ${mysteryStyles.setupControls}`}
-      data-debate-dashboard-section="motion"
-      data-whodunnit-court="true"
-      data-theme={props.theme}
-    >
-      <div className={styles.setupCopy}>
-        <p className={styles.eyebrow}>01 / Mystery</p>
-        <h2>Start with the mansion</h2>
-        <p>
-          Choose a size and add a story idea if you have one. PRISM already has
-          sensible defaults for everything else.
-        </p>
-      </div>
-      <div
-        className={mysteryStyles.quickStartNote}
-        data-tutorial-target="whodunnit-quick-start"
+  const renderMysteryCourtStep = (): React.JSX.Element => {
+    const pageIndex = Math.max(
+      0,
+      WHODUNNIT_SETUP_PAGES.findIndex((page) => page.id === mysterySetupPage),
+    );
+    const page = WHODUNNIT_SETUP_PAGES[pageIndex]!;
+    const pageCopy: Record<WhodunnitSetupPage, string> = {
+      mansion: "Choose where this mystery happens. You can use a house you already installed or ask PRISM to build a new one.",
+      story: "Give PRISM one creative direction, or leave it blank for a coherent surprise. The sealed recipe always stays fair.",
+      experience: "Choose the courtroom tone and whether you want to investigate the mansion before trial.",
+      production: "Choose which presentation layers PRISM should prepare. Safe bundled defaults are already selected.",
+    };
+    const mansionStepReady =
+      mysteryMansionSource === "new" || Boolean(mysteryMansionBundleId);
+    const mansionPageIndex = WHODUNNIT_SETUP_PAGES.findIndex(
+      (setupPage) => setupPage.id === "mansion",
+    );
+    const currentPageReady =
+      mysterySetupPage !== "mansion" || mansionStepReady;
+    const goToPage = (nextPage: WhodunnitSetupPage): void => {
+      setStudioPanel("motion");
+      setMysterySetupPage(nextPage);
+    };
+    const continueSetup = (): void => {
+      if (!currentPageReady) return;
+      const nextPage = WHODUNNIT_SETUP_PAGES[pageIndex + 1];
+      if (nextPage) {
+        goToPage(nextPage.id);
+        return;
+      }
+      setStudioPanel("cast");
+    };
+    const previousPage = WHODUNNIT_SETUP_PAGES[pageIndex - 1];
+
+    return (
+      <section
+        className={`${styles.setupPanel} ${styles.dashboardPanel} ${mysteryStyles.setupControls}`}
+        data-debate-dashboard-section="motion"
+        data-whodunnit-court="true"
+        data-whodunnit-setup-page={mysterySetupPage}
+        data-theme={props.theme}
       >
-        <span aria-hidden="true">◇</span>
-        <div>
-          <strong>A complete mystery needs only a mansion and a cast.</strong>
-          <small>Keep the defaults for a balanced first case. Optional production and court controls are tucked away below.</small>
+        <div className={styles.setupCopy}>
+          <p className={styles.eyebrow}>{String(pageIndex + 1).padStart(2, "0")} / {page.label}</p>
+          <h2>{page.detail}</h2>
+          <p>{pageCopy[page.id]}</p>
         </div>
-      </div>
-      <div className={mysteryStyles.setupSection} data-tutorial-target="whodunnit-preset">
-        <header>
-          <div><small>1</small><h2>Choose a mansion size</h2></div>
-          <span>{mysteryTargetSuspects} suspects</span>
-        </header>
-        <p>Quick is the shortest full mansion. Every new mansion has a functional upstairs.</p>
-        <div className={mysteryStyles.presetGrid}>
-          {DEBATE_MYSTERY_V2_PRESETS.map((option) => (
+
+        <nav className={mysteryStyles.guidedSetupProgress} aria-label="Whodunnit setup progress" data-tutorial-target="whodunnit-guided-setup">
+          {WHODUNNIT_SETUP_PAGES.map((step, index) => (
             <button
+              key={step.id}
               type="button"
-              key={option.id}
-              data-selected={!selectedMysteryMansionBundle && mysteryPreset === option.id ? "true" : undefined}
-              aria-pressed={!selectedMysteryMansionBundle && mysteryPreset === option.id}
-              disabled={Boolean(inspectedMysterySeed)}
-              onClick={() => {
-                setMysteryMansionBundleId("");
-                setMysteryPreset(option.id);
-                setMysteryFloors(option.floors);
-                setMysteryTotalRooms(option.rooms);
-                setMysteryCustomSuspectCount(option.suspects);
-                setMysteryNonce(nextMysteryRecipeNonce());
-              }}
+              data-active={step.id === mysterySetupPage ? "true" : undefined}
+              data-complete={index < pageIndex ? "true" : undefined}
+              aria-current={step.id === mysterySetupPage ? "step" : undefined}
+              disabled={index > mansionPageIndex && !mansionStepReady}
+              onClick={() => goToPage(step.id)}
             >
-              <strong>{option.id === "compact" ? "Quick" : option.id[0]!.toUpperCase() + option.id.slice(1)}</strong>
-              <em>{!selectedMysteryMansionBundle && mysteryPreset === option.id ? "Selected ✓" : "Choose"}</em>
-              <span>{option.floors} floor{option.floors === 1 ? "" : "s"} · {option.rooms} rooms</span>
-              <small>{option.suspects} suspects{option.id === "compact" ? " · shortest" : option.id === "standard" ? " · balanced" : " · longest"}</small>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <strong>{step.label}</strong>
+              <small>{step.detail}</small>
             </button>
           ))}
-          <button
-            type="button"
-            data-selected={!selectedMysteryMansionBundle && mysteryPreset === "custom" ? "true" : undefined}
-            aria-pressed={!selectedMysteryMansionBundle && mysteryPreset === "custom"}
-            disabled={Boolean(inspectedMysterySeed)}
-            onClick={() => {
-              setMysteryMansionBundleId("");
-              setMysteryPreset("custom");
-              setMysteryNonce(nextMysteryRecipeNonce());
-            }}
-          >
-            <strong>Custom</strong><em>{!selectedMysteryMansionBundle && mysteryPreset === "custom" ? "Selected ✓" : "Choose"}</em><span>2–3 floors · 5–18 rooms</span><small>4–8 suspects</small>
+          <button type="button" disabled={!mansionStepReady} onClick={() => setStudioPanel("cast")}>
+            <span>05</span><strong>Cast</strong><small>Choose the ensemble</small>
           </button>
-        </div>
-        {mysteryPreset === "custom" && !inspectedMysterySeed && !selectedMysteryMansionBundle ? (
-          <div className={mysteryStyles.advancedGrid}>
-            <label>Floors <input type="number" min={2} max={3} value={mysteryFloors} onChange={(event) => { setMysteryFloors(Math.max(2, Math.min(3, Number(event.currentTarget.value) || 2))); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
-            <label>Rooms <input type="number" min={Math.max(5, mysteryCustomSuspectCount + 1)} max={18} value={mysteryTotalRooms} onChange={(event) => { setMysteryTotalRooms(Number(event.currentTarget.value)); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
-            <label>Suspects <input type="number" min={4} max={8} value={mysteryCustomSuspectCount} onChange={(event) => { setMysteryCustomSuspectCount(Math.max(4, Math.min(8, Number(event.currentTarget.value) || 4))); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
+        </nav>
+
+        {mysterySetupPage === "mansion" ? (
+          <>
+            <div className={mysteryStyles.quickStartNote} data-tutorial-target="whodunnit-quick-start">
+              <span aria-hidden="true">◇</span>
+              <div>
+                <strong>One house at a time.</strong>
+                <small>Your choice here is preserved while you move through Story, Production, and Cast.</small>
+              </div>
+            </div>
+            <fieldset className={mysteryStyles.mansionSourcePicker}>
+              <legend>How would you like to choose the mansion?</legend>
+              <label data-selected={mysteryMansionSource === "installed" ? "true" : undefined}>
+                <input type="radio" name="whodunnit-mansion-source" checked={mysteryMansionSource === "installed"} onChange={() => setMysteryMansionSource("installed")} />
+                <span><strong>Installed mansions</strong><small>Reuse a house already in your library.</small></span>
+              </label>
+              <label data-selected={mysteryMansionSource === "new" ? "true" : undefined}>
+                <input type="radio" name="whodunnit-mansion-source" checked={mysteryMansionSource === "new"} onChange={() => { setMysteryMansionSource("new"); setMysteryMansionBundleId(""); }} />
+                <span><strong>Create a new mansion</strong><small>Choose the size of a fresh house.</small></span>
+              </label>
+            </fieldset>
+
+            {mysteryMansionSource === "installed" ? (
+              <div className={mysteryStyles.guidedSetupPage}>
+                <InstalledMansionLibrary
+                  theme={props.theme}
+                  mansions={mysteryMansionBundles}
+                  selectedMansionId={mysteryMansionBundleId}
+                  busy={mansionPackageState !== "idle"}
+                  exportPassword={mansionExportPassword}
+                  onExportPasswordChange={setMansionExportPassword}
+                  onSelect={(mansionId) => chooseInstalledMansion(mansionId)}
+                  onRandom={chooseRandomInstalledMansion}
+                  onUpdate={updateInstalledMansion}
+                  onExport={(mansion) => void exportSavedMansion(mansion)}
+                  onPlayTheme={playSavedMansionTheme}
+                  onRemove={(mansion) => void removeSavedMansion(mansion)}
+                />
+                <div className={mysteryStyles.guidedSecondaryAction} data-tutorial-target="whodunnit-mansion-library">
+                  <div><strong>Have a mansion file?</strong><small>Inspect a shared .mansion before adding it to this library.</small></div>
+                  <button type="button" onClick={() => setMansionImportOpen(true)}>Install a mansion file</button>
+                </div>
+              </div>
+            ) : (
+              <div className={mysteryStyles.setupSection} data-tutorial-target="whodunnit-preset">
+                <header><div><small>1</small><h2>Choose a mansion size</h2></div><span>{mysteryTargetSuspects} suspects</span></header>
+                <p>Quick is the shortest full mansion. Every new mansion has a functional upstairs.</p>
+                <div className={mysteryStyles.presetGrid}>
+                  {DEBATE_MYSTERY_V2_PRESETS.map((option) => (
+                    <button
+                      type="button"
+                      key={option.id}
+                      data-selected={!selectedMysteryMansionBundle && mysteryPreset === option.id ? "true" : undefined}
+                      aria-pressed={!selectedMysteryMansionBundle && mysteryPreset === option.id}
+                      disabled={Boolean(inspectedMysterySeed)}
+                      onClick={() => {
+                        setMysteryMansionSource("new");
+                        setMysteryMansionBundleId("");
+                        setMysteryPreset(option.id);
+                        setMysteryFloors(option.floors);
+                        setMysteryTotalRooms(option.rooms);
+                        setMysteryCustomSuspectCount(option.suspects);
+                        setMysteryNonce(nextMysteryRecipeNonce());
+                      }}
+                    >
+                      <strong>{option.id === "compact" ? "Quick" : option.id[0]!.toUpperCase() + option.id.slice(1)}</strong>
+                      <em>{!selectedMysteryMansionBundle && mysteryPreset === option.id ? "Selected ✓" : "Choose"}</em>
+                      <span>{option.floors} floor{option.floors === 1 ? "" : "s"} · {option.rooms} rooms</span>
+                      <small>{option.suspects} suspects{option.id === "compact" ? " · shortest" : option.id === "standard" ? " · balanced" : " · longest"}</small>
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    data-selected={!selectedMysteryMansionBundle && mysteryPreset === "custom" ? "true" : undefined}
+                    aria-pressed={!selectedMysteryMansionBundle && mysteryPreset === "custom"}
+                    disabled={Boolean(inspectedMysterySeed)}
+                    onClick={() => { setMysteryMansionSource("new"); setMysteryMansionBundleId(""); setMysteryPreset("custom"); setMysteryNonce(nextMysteryRecipeNonce()); }}
+                  >
+                    <strong>Custom</strong><em>{!selectedMysteryMansionBundle && mysteryPreset === "custom" ? "Selected ✓" : "Choose"}</em><span>2–3 floors · 5–18 rooms</span><small>4–8 suspects</small>
+                  </button>
+                </div>
+                {mysteryPreset === "custom" && !inspectedMysterySeed && !selectedMysteryMansionBundle ? (
+                  <div className={mysteryStyles.advancedGrid}>
+                    <label>Floors <input type="number" min={2} max={3} value={mysteryFloors} onChange={(event) => { setMysteryFloors(Math.max(2, Math.min(3, Number(event.currentTarget.value) || 2))); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
+                    <label>Rooms <input type="number" min={Math.max(5, mysteryCustomSuspectCount + 1)} max={18} value={mysteryTotalRooms} onChange={(event) => { setMysteryTotalRooms(Number(event.currentTarget.value)); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
+                    <label>Suspects <input type="number" min={4} max={8} value={mysteryCustomSuspectCount} onChange={(event) => { setMysteryCustomSuspectCount(Math.max(4, Math.min(8, Number(event.currentTarget.value) || 4))); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </>
+        ) : null}
+
+        {mysterySetupPage === "story" ? (
+          <div className={mysteryStyles.caseDial}>
+            <header className={mysteryStyles.setupStepHeading}><div><small>2</small><h2>Set the story direction</h2></div><span>Optional idea · balanced defaults</span></header>
+            <label className={mysteryStyles.setupField} data-tutorial-target="whodunnit-v2-spark">
+              <span><strong>Mansion idea</strong><em>Optional</em></span>
+              <textarea value={mysteryInspiration} maxLength={2000} rows={4} onChange={(event) => { setMysteryInspiration(event.currentTarget.value); setMysteryNonce(nextMysteryRecipeNonce()); }} placeholder="Leave blank for Surprise me — or describe a mood, era, setting, or story spark." />
+              <small>PRISM uses this to cast, dress, and perform one coherent house. It never replaces the sealed case logic.</small>
+            </label>
+            <label className={mysteryStyles.setupField}><span><strong>Difficulty</strong><em>Choose one</em></span><select value={mysteryDifficulty} onChange={(event) => { setMysteryDifficulty(event.currentTarget.value as DebateMysteryDifficulty); setMysteryNonce(nextMysteryRecipeNonce()); }}><option value="casual">Casual · clearer proof</option><option value="classic">Classic · balanced</option><option value="mastermind">Mastermind · layered contradictions</option></select><small>Classic is the balanced default. Mansion size changes length; difficulty changes deduction complexity.</small></label>
           </div>
         ) : null}
-        <InstalledMansionLibrary
-          mansions={mysteryMansionBundles}
-          selectedMansionId={mysteryMansionBundleId}
-          busy={mansionPackageState !== "idle"}
-          exportPassword={mansionExportPassword}
-          onExportPasswordChange={setMansionExportPassword}
-          onSelect={(mansionId) => chooseInstalledMansion(mansionId)}
-          onRandom={chooseRandomInstalledMansion}
-          onUpdate={updateInstalledMansion}
-          onExport={(mansion) => void exportSavedMansion(mansion)}
-          onPlayTheme={playSavedMansionTheme}
-          onRemove={(mansion) => void removeSavedMansion(mansion)}
-        />
-        <details className={mysteryStyles.setupDisclosure} data-tutorial-target="whodunnit-mansion-library">
-          <summary>
-            <span>
-              <strong>Install a mansion file</strong>
-              <small>Optional · import a shared .mansion into Installed Mansions</small>
-            </span>
-            <em>Open</em>
-          </summary>
-          <div className={mysteryStyles.setupDisclosureBody}>
-            <section
-              className={mysteryStyles.mansionPackageWorkbench}
-              data-tutorial-target="whodunnit-mansion-import"
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={dropMansionPackage}
-            >
-              <div className={mysteryStyles.mansionPackageDropzone}>
-                <div>
-                  <strong>Bring in a mansion</strong>
-                  <span>Drop a .mansion here, or open one from this device.</span>
-                </div>
-                <button type="button" disabled={mansionPackageState !== "idle"} onClick={() => mansionPackageInputRef.current?.click()}>
-                  {mansionPackageState === "inspecting" ? "Inspecting…" : "Import Mansion"}
-                </button>
-                <input
-                  ref={mansionPackageInputRef}
-                  type="file"
-                  accept=".mansion,application/vnd.prism.mansion"
-                  hidden
-                  onChange={(event) => {
-                    const file = event.currentTarget.files?.[0];
-                    event.currentTarget.value = "";
-                    if (!file) return;
-                    setMansionPackagePassword("");
-                    void inspectMansionPackage(file);
-                  }}
-                />
-              </div>
-              {mansionPackageInspection?.locked ? (
-                <div className={mysteryStyles.mansionPackagePreview} data-locked="true">
-                  <div><small>Password protected</small><h3>{mansionPackageInspection.header.title}</h3><p>By {mansionPackageInspection.header.creatorName} · {portableMansionByteLabel(mansionPackageInspection.header.compressedBytes)}</p></div>
-                  <label>Package password<input type="password" value={mansionPackagePassword} autoComplete="off" onChange={(event) => setMansionPackagePassword(event.currentTarget.value)} /></label>
-                  <button type="button" disabled={!mansionPackagePassword || mansionPackageState !== "idle" || !mansionPackageFile} onClick={() => mansionPackageFile && void inspectMansionPackage(mansionPackageFile, mansionPackagePassword)}>Unlock preview</button>
-                </div>
-              ) : mansionPackageInspection ? (
-                <div className={mysteryStyles.mansionPackagePreview}>
-                  {mansionPackageInspection.preview.previewImageDataUrl ? <img src={mansionPackageInspection.preview.previewImageDataUrl} alt="" /> : <div className={mysteryStyles.mansionPackagePreviewFallback}>◇</div>}
-                  <div className={mysteryStyles.mansionPackagePreviewCopy}>
-                    <small>{mansionPackageInspection.preview.header.creatorSignature ? "Creator signature included" : "Unsigned package"} · {mansionPackageInspection.preview.header.encryptionMode === "password" ? "Password protected" : "PRISM spoiler seal"}</small>
-                    <h3>{mansionPackageInspection.preview.header.title}</h3>
-                    <p>{mansionPackageInspection.preview.description}</p>
-                    <div className={mysteryStyles.mansionPackageFacts}>
-                      <span>{mansionPackageInspection.preview.floorCount} floor{mansionPackageInspection.preview.floorCount === 1 ? "" : "s"}</span>
-                      <span>{mansionPackageInspection.preview.roomCount} rooms</span>
-                      <span>{mansionPackageInspection.preview.propCount} props</span>
-                      <span>{mansionPackageInspection.preview.hasInvestigationTheme ? "Theme included" : "Bundled theme fallback"}</span>
-                      <span>{portableMansionByteLabel(mansionPackageInspection.preview.header.compressedBytes)} package</span>
-                      <span>{portableMansionByteLabel(mansionPackageInspection.preview.header.expandedBytes)} expanded</span>
-                    </div>
-                    <p className={mysteryStyles.mansionPackageFinePrint}>By {mansionPackageInspection.preview.header.creatorName} · PRISM {mansionPackageInspection.preview.provenance.prismVersion} · {mansionPackageInspection.preview.license.name} · format {mansionPackageInspection.preview.header.compatibility.minimumFormatMajor}–{mansionPackageInspection.preview.header.compatibility.maximumFormatMajor}</p>
-                    {mansionPackageInspection.preview.provenance.generatedWith.length > 0 ? <p className={mysteryStyles.mansionPackageFinePrint}>Generated with {mansionPackageInspection.preview.provenance.generatedWith.join(" · ")}</p> : null}
-                    {mansionPackageInspection.preview.header.contentWarnings.length > 0 ? <p className={mysteryStyles.mansionPackageWarning}>Content notes: {mansionPackageInspection.preview.header.contentWarnings.join(" · ")}</p> : null}
-                    <button type="button" disabled={mansionPackageState !== "idle"} onClick={() => void installInspectedMansion()}>
-                      {mansionPackageInspection.preview.duplicateBundleId ? "Use installed mansion" : mansionPackageState === "installing" ? "Installing…" : "Install and use"}
-                    </button>
-                    <small>Installation stays offline and keeps package assets separate from Images and the Bot Library.</small>
-                  </div>
-                </div>
-              ) : null}
-            </section>
-          </div>
-        </details>
-      </div>
-      <div className={mysteryStyles.caseDial}>
-        <header className={mysteryStyles.setupStepHeading}>
-          <div><small>2</small><h2>Set the story direction</h2></div>
-          <span>Optional idea · balanced defaults</span>
-        </header>
-        <label className={mysteryStyles.setupField} data-tutorial-target="whodunnit-v2-spark">
-          <span><strong>Mansion idea</strong><em>Optional</em></span>
-          <textarea
-            value={mysteryInspiration}
-            maxLength={2000}
-            rows={4}
-            onChange={(event) => {
-              setMysteryInspiration(event.currentTarget.value);
-              setMysteryNonce(nextMysteryRecipeNonce());
-            }}
-            placeholder="Leave blank for Surprise me — or describe a mood, era, setting, or story spark."
-          />
-          <small>PRISM uses this to cast, dress, and perform one coherent house. It never replaces the sealed case logic.</small>
-        </label>
-        <label className={mysteryStyles.setupField}><span><strong>Difficulty</strong><em>Choose one</em></span><select value={mysteryDifficulty} onChange={(event) => { setMysteryDifficulty(event.currentTarget.value as DebateMysteryDifficulty); setMysteryNonce(nextMysteryRecipeNonce()); }}><option value="casual">Casual · clearer proof</option><option value="classic">Classic · balanced</option><option value="mastermind">Mastermind · layered contradictions</option></select><small>Classic is the balanced default. Mansion size changes length; difficulty changes deduction complexity.</small></label>
-        <details className={mysteryStyles.setupDisclosure} data-tutorial-target="whodunnit-more-options">
-          <summary>
-            <span><strong>More case options</strong><small>Court tone, direct-to-court play, custom art and audio, recipe controls</small></span>
-            <em>Open</em>
-          </summary>
-          <div className={mysteryStyles.setupDisclosureBody}>
+
+        {mysterySetupPage === "experience" ? (
+          <div className={mysteryStyles.caseDial}>
             <section className={mysteryStyles.optionalSetupGroup} data-tutorial-target="debate-room">
               <header><strong>Court presentation</strong><small>Whodunnit · {formalityDescriptor.title}</small></header>
               <DebateCourtFormalityControl formality={formality} onChange={chooseFormality} tutorialTarget="debate-rowdiness" />
@@ -19531,8 +19520,7 @@ export function DebateExperience(
                             if (disabled || option.id === "whodunnit") return;
                             if (option.id === "forum" || option.id === "turnabout") { setFormat(option.id); setRoleChecks([]); }
                           }} />
-                          <strong>{option.name}<em>{option.productionName}</em></strong>
-                          <span>{option.summary}</span><small>{option.cadence}</small>
+                          <strong>{option.name}<em>{option.productionName}</em></strong><span>{option.summary}</span><small>{option.cadence}</small>
                         </label>
                       )}
                     </PrismRefractTarget>
@@ -19540,119 +19528,119 @@ export function DebateExperience(
                 })}
               </fieldset>
             </section>
-        <label>Room art <select value={mysteryArtMode} onChange={(event) => { setMysteryArtMode(event.currentTarget.value as DebateMysteryArtMode); setMysteryNonce(nextMysteryRecipeNonce()); }}><option value="bundled">Bundled PRISM rooms</option><option value="generated" disabled={!inspectedMysterySeed}>Generated reskins · Legacy Case Seed</option></select><small>V2 uses aligned bundled rooms; imported V1 Case Seeds retain their generated-reskin option.</small></label>
-        <label
-          className={mysteryStyles.caseModeChoice}
-          data-selected={mysterySkipInvestigation ? "true" : undefined}
-          data-tutorial-target="whodunnit-v2-skip-investigation"
-        >
-          <input
-            type="checkbox"
-            checked={mysterySkipInvestigation}
-            onChange={(event) => {
-              setMysterySkipInvestigation(event.currentTarget.checked);
-              if (event.currentTarget.checked) {
-                setMysteryRoomAssetSynthesis(false);
-                setMysteryMusicAssetSynthesis(false);
-                setMysteryAmbienceAssetSynthesis(false);
-              }
-              setMysteryNonce(nextMysteryRecipeNonce());
-            }}
-          />
-          <span>
-            <strong>{playerRole === "spectator" ? "Start directly in court" : "Skip investigation"}</strong>
-            <small>
-              {playerRole === "spectator"
-                ? "Bypass conclusion review and begin the watch-only trial after the title card."
-                : "Prepare only the second act and enter court directly after the title card."}
-            </small>
-          </span>
-        </label>
-        <fieldset className={mysteryStyles.assetForgeChoices} data-tutorial-target="whodunnit-v2-assets">
-          <legend>Synthesize assets in Case Forge</legend>
-          <label data-enabled="true">
-            <input
-              type="checkbox"
-              checked={mysteryEvidenceAssetSynthesis}
-              onChange={(event) => {
-                setMysteryEvidenceAssetSynthesis(event.currentTarget.checked);
+            <label className={mysteryStyles.caseModeChoice} data-selected={mysterySkipInvestigation ? "true" : undefined} data-tutorial-target="whodunnit-v2-skip-investigation">
+              <input type="checkbox" checked={mysterySkipInvestigation} onChange={(event) => {
+                setMysterySkipInvestigation(event.currentTarget.checked);
+                if (event.currentTarget.checked) { setMysteryRoomAssetSynthesis(false); setMysteryMusicAssetSynthesis(false); setMysteryAmbienceAssetSynthesis(false); }
                 setMysteryNonce(nextMysteryRecipeNonce());
-              }}
-            />
-            <span><strong>Evidence</strong><small>Create sealed exhibit images. They appear only when the evidence is discovered.</small></span>
-          </label>
-          <label
-            data-enabled={!mysterySkipInvestigation && props.responseMode === "online" ? "true" : undefined}
-            aria-disabled={mysterySkipInvestigation || props.responseMode !== "online"}
-          >
-            <input
-              type="checkbox"
-              checked={mysteryRoomAssetSynthesis && !mysterySkipInvestigation && props.responseMode !== "local"}
-              disabled={mysterySkipInvestigation || props.responseMode === "local"}
-              onChange={(event) => {
-                setMysteryRoomAssetSynthesis(event.currentTarget.checked);
-                setMysteryNonce(nextMysteryRecipeNonce());
-              }}
-            />
-            <span><strong>Rooms</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude room assets." : props.responseMode === "local" ? "ONLINE only · LOCAL keeps the bundled room pack." : "Create sealed room edits in Case Forge; each one opens only when visited."}</small></span>
-          </label>
-          <label
-            data-enabled={!mysterySkipInvestigation && props.responseMode !== "local" ? "true" : undefined}
-            aria-disabled={mysterySkipInvestigation || props.responseMode === "local"}
-          >
-            <input
-              type="checkbox"
-              checked={mysteryMusicAssetSynthesis && !mysterySkipInvestigation && props.responseMode === "online"}
-              disabled={mysterySkipInvestigation || props.responseMode !== "online"}
-              onChange={(event) => {
-                setMysteryMusicAssetSynthesis(event.currentTarget.checked);
-                setMysteryNonce(nextMysteryRecipeNonce());
-              }}
-            />
-            <span><strong>Music</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude investigation music." : props.responseMode !== "online" ? "ONLINE only · LOCAL and Auto keep The Midnight Clue bundled fallback." : "Ask ElevenLabs for an original instrumental mansion theme; failure keeps the bundled theme."}</small></span>
-          </label>
-          <label
-            data-enabled={!mysterySkipInvestigation ? "true" : undefined}
-            aria-disabled={mysterySkipInvestigation}
-            data-tutorial-target="whodunnit-v2-ambience-synthesis"
-          >
-            <input
-              type="checkbox"
-              checked={mysteryAmbienceAssetSynthesis && !mysterySkipInvestigation}
-              disabled={mysterySkipInvestigation}
-              onChange={(event) => {
-                setMysteryAmbienceAssetSynthesis(event.currentTarget.checked);
-                setMysteryNonce(nextMysteryRecipeNonce());
-              }}
-            />
-            <span>
-              <strong>Ambience</strong>
-              <small>{mysterySkipInvestigation
-                ? "Unavailable · court-only cases exclude mansion ambience."
-                : props.responseMode === "local"
-                  ? "Build a mansion-specific procedural mix · no online generator. Off still uses the bundled theme palette and room acoustics."
-                  : "Build a mansion-specific procedural mix and preserve its bespoke-stem brief; unique assets target a measured 20–50 MB budget and fall back to the shared palette."}</small>
-            </span>
-          </label>
-          <p>Generated case art stays outside Images unless you save a revealed visual. Ambience remains mansion-owned and content-addressed.</p>
-        </fieldset>
-        <button type="button" className={mysteryStyles.seedButton} onClick={() => setMysteryNonce(nextMysteryRecipeNonce())}><span>Recipe Seed</span><code>{mysteryRecipeSeed}</code><small>Change the recipe</small></button>
-        <details className={mysteryStyles.seedImport} data-tutorial-target="whodunnit-seed-import">
-          <summary>Import a legacy shared Case Seed</summary>
-          <textarea value={mysteryImportCode} onChange={(event) => { setMysteryImportCode(event.currentTarget.value); setInspectedMysterySeed(null); setMysteryImportAssignments({}); }} placeholder="Paste the Case Seed JSON…" />
-          <button type="button" disabled={!mysteryImportCode.trim() || busy} onClick={() => void inspectMysterySeed()}>Inspect and map in Cast</button>
-          {inspectedMysterySeed ? <p><strong>{inspectedMysterySeed.title}</strong> · {inspectedMysterySeed.floors} floor{inspectedMysterySeed.floors === 1 ? "" : "s"} · {inspectedMysterySeed.totalRooms} rooms. Hidden seats are mapped with the shared Cast picker.</p> : null}
-        </details>
+              }} />
+              <span><strong>{playerRole === "spectator" ? "Start directly in court" : "Skip investigation"}</strong><small>{playerRole === "spectator" ? "Bypass conclusion review and begin the watch-only trial after the title card." : "Prepare only the second act and enter court directly after the title card."}</small></span>
+            </label>
           </div>
-        </details>
-      </div>
-      {mysterySetupError ? <p className={styles.error}>{mysterySetupError}</p> : null}
-      <div className={styles.panelAdvance}>
-        <span>{inspectedMysterySeed ? "Imported recipe inspected; map every seat on Cast." : "Defaults are ready. Nothing is frozen until you compile after casting."}</span>
-        <button type="button" className={mysteryStyles.setupPrimaryAction} onClick={() => setStudioPanel("cast")}>Next: choose the cast <span aria-hidden="true">→</span></button>
-      </div>
-    </section>
-  );
+        ) : null}
+
+        {mysterySetupPage === "production" ? (
+          <div className={mysteryStyles.caseDial} data-tutorial-target="whodunnit-production">
+            <label className={mysteryStyles.setupField}>Room art <select value={mysteryArtMode} onChange={(event) => { setMysteryArtMode(event.currentTarget.value as DebateMysteryArtMode); setMysteryNonce(nextMysteryRecipeNonce()); }}><option value="bundled">Bundled PRISM rooms</option><option value="generated" disabled={!inspectedMysterySeed}>Generated reskins · Legacy Case Seed</option></select><small>V2 uses aligned bundled rooms; imported V1 Case Seeds retain their generated-reskin option.</small></label>
+            <fieldset className={mysteryStyles.assetForgeChoices} data-tutorial-target="whodunnit-v2-assets">
+              <legend>Prepare presentation assets</legend>
+              {props.responseMode === "local" ? <p className={mysteryStyles.assetForgeModeNote}><strong>LOCAL stays on this device.</strong> PRISM uses installed art and music, symbolic evidence, and an optional personalized ambience mix.</p> : null}
+              <label data-enabled={props.responseMode !== "local" ? "true" : undefined} aria-disabled={props.responseMode === "local"}>
+                <input type="checkbox" checked={mysteryEvidenceAssetSynthesis && props.responseMode !== "local"} disabled={props.responseMode === "local"} onChange={(event) => { setMysteryEvidenceAssetSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
+                <span><strong>Evidence</strong><small>{props.responseMode === "local" ? "ONLINE only · LOCAL presents each authored exhibit as text and a symbolic evidence card." : "Create sealed exhibit images. They appear only when the evidence is discovered."}</small></span>
+              </label>
+              <label data-enabled={!mysterySkipInvestigation && props.responseMode === "online" ? "true" : undefined} aria-disabled={mysterySkipInvestigation || props.responseMode !== "online"}>
+                <input type="checkbox" checked={mysteryRoomAssetSynthesis && !mysterySkipInvestigation && props.responseMode !== "local"} disabled={mysterySkipInvestigation || props.responseMode === "local"} onChange={(event) => { setMysteryRoomAssetSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
+                <span><strong>Rooms</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude room assets." : props.responseMode === "local" ? "ONLINE only · LOCAL keeps the bundled room pack." : "Create sealed room edits in Case Forge; each one opens only when visited."}</small></span>
+              </label>
+              <label data-enabled={!mysterySkipInvestigation && props.responseMode !== "local" ? "true" : undefined} aria-disabled={mysterySkipInvestigation || props.responseMode === "local"}>
+                <input type="checkbox" checked={mysteryMusicAssetSynthesis && !mysterySkipInvestigation && props.responseMode === "online"} disabled={mysterySkipInvestigation || props.responseMode !== "online"} onChange={(event) => { setMysteryMusicAssetSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
+                <span><strong>Music</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude investigation music." : props.responseMode !== "online" ? "ONLINE only · LOCAL and Auto keep The Midnight Clue bundled fallback." : "Ask ElevenLabs for an original instrumental mansion theme; failure keeps the bundled theme."}</small></span>
+              </label>
+              <label data-enabled={!mysterySkipInvestigation ? "true" : undefined} aria-disabled={mysterySkipInvestigation} data-tutorial-target="whodunnit-v2-ambience-synthesis">
+                <input type="checkbox" checked={mysteryAmbienceAssetSynthesis && !mysterySkipInvestigation} disabled={mysterySkipInvestigation} onChange={(event) => { setMysteryAmbienceAssetSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
+                <span><strong>{props.responseMode === "local" ? "Personalize local ambience" : "Ambience"}</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude mansion ambience." : props.responseMode === "local" ? "Tailor the installed atmosphere with room-aware mixing · no online generator or new audio file. Off still uses matching bundled ambience." : "Build a mansion-specific procedural mix and preserve its bespoke-stem brief; unique assets target a measured 20–50 MB budget and fall back to the shared palette."}</small></span>
+              </label>
+              <p>Generated case art stays outside Images unless you save a revealed visual. Ambience remains mansion-owned and content-addressed.</p>
+            </fieldset>
+            <button type="button" className={mysteryStyles.seedButton} onClick={() => setMysteryNonce(nextMysteryRecipeNonce())}><span>Recipe Seed</span><code>{mysteryRecipeSeed}</code><small>Change the recipe</small></button>
+            <div className={mysteryStyles.guidedSecondaryAction}>
+              <div><strong>Legacy Case Seed</strong><small>Only needed to restore an older shared case.</small></div>
+              <button type="button" data-tutorial-target="whodunnit-seed-import" onClick={() => setLegacySeedImportOpen(true)}>Import legacy seed</button>
+            </div>
+          </div>
+        ) : null}
+
+        {mysterySetupError ? <p className={styles.error}>{mysterySetupError}</p> : null}
+        <div className={`${styles.panelAdvance} ${mysteryStyles.guidedSetupFooter}`}>
+          <button type="button" disabled={!previousPage} onClick={() => previousPage && goToPage(previousPage.id)}><span aria-hidden="true">←</span> Back</button>
+          <span>{!currentPageReady ? "Choose an installed mansion, or switch to Create a new mansion." : pageIndex === WHODUNNIT_SETUP_PAGES.length - 1 ? "Next, choose who will inhabit the case." : `Next: ${WHODUNNIT_SETUP_PAGES[pageIndex + 1]!.label}`}</span>
+          <button type="button" className={mysteryStyles.setupPrimaryAction} disabled={!currentPageReady} onClick={continueSetup}>
+            {pageIndex === WHODUNNIT_SETUP_PAGES.length - 1 ? "Continue to Cast" : "Continue"} <span aria-hidden="true">→</span>
+          </button>
+        </div>
+
+        <WhodunnitSetupDialog
+          open={mansionImportOpen}
+          id="whodunnit-mansion-import"
+          theme={props.theme}
+          eyebrow="Installed Mansions"
+          title="Install a mansion file"
+          description="Inspect a shared .mansion, its creator, protection, size, and compatibility before adding it to your library."
+          busy={mansionPackageState !== "idle"}
+          onClose={() => setMansionImportOpen(false)}
+        >
+          <section className={mysteryStyles.mansionPackageWorkbench} data-tutorial-target="whodunnit-mansion-import" onDragOver={(event) => event.preventDefault()} onDrop={dropMansionPackage}>
+            <div className={mysteryStyles.mansionPackageDropzone}>
+              <div><strong>Bring in a mansion</strong><span>Drop a .mansion here, or open one from this device.</span></div>
+              <button type="button" disabled={mansionPackageState !== "idle"} onClick={() => mansionPackageInputRef.current?.click()}>{mansionPackageState === "inspecting" ? "Inspecting…" : "Choose Mansion"}</button>
+              <input ref={mansionPackageInputRef} type="file" accept=".mansion,application/vnd.prism.mansion" hidden onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (!file) return; setMansionPackagePassword(""); void inspectMansionPackage(file); }} />
+            </div>
+            {mansionPackageInspection?.locked ? (
+              <div className={mysteryStyles.mansionPackagePreview} data-locked="true">
+                <div><small>Password protected</small><h3>{mansionPackageInspection.header.title}</h3><p>By {mansionPackageInspection.header.creatorName} · {portableMansionByteLabel(mansionPackageInspection.header.compressedBytes)}</p></div>
+                <label>Package password<input type="password" value={mansionPackagePassword} autoComplete="off" onChange={(event) => setMansionPackagePassword(event.currentTarget.value)} /></label>
+                <button type="button" disabled={!mansionPackagePassword || mansionPackageState !== "idle" || !mansionPackageFile} onClick={() => mansionPackageFile && void inspectMansionPackage(mansionPackageFile, mansionPackagePassword)}>Unlock preview</button>
+              </div>
+            ) : mansionPackageInspection ? (
+              <div className={mysteryStyles.mansionPackagePreview}>
+                {mansionPackageInspection.preview.previewImageDataUrl ? <img src={mansionPackageInspection.preview.previewImageDataUrl} alt="" /> : <div className={mysteryStyles.mansionPackagePreviewFallback}>◇</div>}
+                <div className={mysteryStyles.mansionPackagePreviewCopy}>
+                  <small>{mansionPackageInspection.preview.header.creatorSignature ? "Creator signature included" : "Unsigned package"} · {mansionPackageInspection.preview.header.encryptionMode === "password" ? "Password protected" : "PRISM spoiler seal"}</small>
+                  <h3>{mansionPackageInspection.preview.header.title}</h3><p>{mansionPackageInspection.preview.description}</p>
+                  <div className={mysteryStyles.mansionPackageFacts}>
+                    <span>{mansionPackageInspection.preview.floorCount} floor{mansionPackageInspection.preview.floorCount === 1 ? "" : "s"}</span><span>{mansionPackageInspection.preview.roomCount} rooms</span><span>{mansionPackageInspection.preview.propCount} props</span><span>{mansionPackageInspection.preview.hasInvestigationTheme ? "Theme included" : "Bundled theme fallback"}</span><span>{portableMansionByteLabel(mansionPackageInspection.preview.header.compressedBytes)} package</span><span>{portableMansionByteLabel(mansionPackageInspection.preview.header.expandedBytes)} expanded</span>
+                  </div>
+                  <p className={mysteryStyles.mansionPackageFinePrint}>By {mansionPackageInspection.preview.header.creatorName} · PRISM {mansionPackageInspection.preview.provenance.prismVersion} · {mansionPackageInspection.preview.license.name} · format {mansionPackageInspection.preview.header.compatibility.minimumFormatMajor}–{mansionPackageInspection.preview.header.compatibility.maximumFormatMajor}</p>
+                  {mansionPackageInspection.preview.provenance.generatedWith.length > 0 ? <p className={mysteryStyles.mansionPackageFinePrint}>Generated with {mansionPackageInspection.preview.provenance.generatedWith.join(" · ")}</p> : null}
+                  {mansionPackageInspection.preview.header.contentWarnings.length > 0 ? <p className={mysteryStyles.mansionPackageWarning}>Content notes: {mansionPackageInspection.preview.header.contentWarnings.join(" · ")}</p> : null}
+                  <button type="button" disabled={mansionPackageState !== "idle"} onClick={() => void installInspectedMansion()}>{mansionPackageInspection.preview.duplicateBundleId ? "Use installed mansion" : mansionPackageState === "installing" ? "Installing…" : "Install and use"}</button>
+                  <small>Installation stays offline and keeps package assets separate from Images and the Bot Library.</small>
+                </div>
+              </div>
+            ) : null}
+          </section>
+        </WhodunnitSetupDialog>
+
+        <WhodunnitSetupDialog
+          open={legacySeedImportOpen}
+          id="whodunnit-seed-import"
+          theme={props.theme}
+          eyebrow="Legacy compatibility"
+          title="Import a shared Case Seed"
+          description="Paste an older Case Seed, inspect it, then map its hidden seats on the Cast step."
+          busy={busy}
+          onClose={() => setLegacySeedImportOpen(false)}
+        >
+          <section className={mysteryStyles.seedImportDialog}>
+            <textarea value={mysteryImportCode} onChange={(event) => { setMysteryImportCode(event.currentTarget.value); setInspectedMysterySeed(null); setMysteryImportAssignments({}); }} placeholder="Paste the Case Seed JSON…" />
+            <button type="button" disabled={!mysteryImportCode.trim() || busy} onClick={() => void inspectMysterySeed()}>Inspect and map in Cast</button>
+            {inspectedMysterySeed ? <p><strong>{inspectedMysterySeed.title}</strong> · {inspectedMysterySeed.floors} floor{inspectedMysterySeed.floors === 1 ? "" : "s"} · {inspectedMysterySeed.totalRooms} rooms. Hidden seats are mapped with the shared Cast picker.</p> : null}
+          </section>
+        </WhodunnitSetupDialog>
+      </section>
+    );
+  };
 
   const renderMotionStep = (): React.JSX.Element => (
     <section
@@ -20303,6 +20291,63 @@ export function DebateExperience(
     );
   };
 
+  const setJuryTrialEnabled = (enabled: boolean): void => {
+    setJuryEnabled(enabled);
+    if (!enabled) {
+      setPreferredJurorBotIds(emptyPreferredJurorBotIds());
+      setActiveJurySeatIndex(null);
+      if (activeMysteryCastSeat.kind === "juror") {
+        setActiveMysteryCastSeat({ kind: "suspect", index: 0 });
+      }
+      return;
+    }
+    if (format === "whodunnit") {
+      setActiveJurySeatIndex(null);
+    } else if (activeJurySeatIndex === null) {
+      setActiveJurySeatIndex(0);
+    }
+  };
+
+  const renderJuryToggle = (): React.JSX.Element => (
+    <label
+      className={styles.juryToggle}
+      data-enabled={juryEnabled ? "true" : undefined}
+      data-placement={format === "whodunnit" ? "cast-top" : undefined}
+      data-tutorial-target="debate-jury"
+    >
+      <input
+        type="checkbox"
+        checked={juryEnabled}
+        aria-controls={format === "whodunnit" ? "debate-mystery-jury-options" : undefined}
+        onChange={(event) => setJuryTrialEnabled(event.currentTarget.checked)}
+      />
+      <span className={styles.juryToggleControl} aria-hidden="true">
+        <i />
+      </span>
+      <span>
+        <strong>
+          {format === "whodunnit"
+            ? "Jury Trial"
+            : "Four jurors + moderator"}
+        </strong>
+        <small>
+          {format === "whodunnit"
+            ? "Turn on to cast four jurors who deliberate after the public case. Turn off for a Bench Trial decided by the Judge."
+            : juryRoleDescription(playerRole)}
+        </small>
+      </span>
+      <b>
+        {format === "whodunnit"
+          ? juryEnabled
+            ? "4 jurors"
+            : "Bench Trial"
+          : juryEnabled
+            ? "Enabled"
+            : "Off"}
+      </b>
+    </label>
+  );
+
   const renderCastStep = (): React.JSX.Element => (
     <section
       className={`${styles.setupPanel} ${styles.dashboardPanel}`}
@@ -20312,14 +20357,14 @@ export function DebateExperience(
       <div className={styles.castStepHeader}>
         <div className={styles.setupCopy}>
           <p className={styles.eyebrow}>
-            02 / {format === "whodunnit" ? "Case cast" : format === "turnabout" ? "Turnabout cast" : "Forum cast"}
+            {format === "whodunnit" ? "05" : "02"} / {format === "whodunnit" ? "Case cast" : format === "turnabout" ? "Turnabout cast" : "Forum cast"}
           </p>
           <h2>Seat every voice</h2>
           <p>
             {format === "whodunnit"
               ? playerRole === "spectator"
                 ? "Choose any voices you care about, or leave seats on Surprise me. The selected Prosecutor investigates offstage; you review and file the editable conclusion before watching court."
-                : "Choose any voices you care about, or leave seats on Surprise me. You control every legal choice through the selected Prosecutor; the Judge, Defense Counsel, and jurors keep their own roles."
+                : "Choose any voices you care about, or leave seats on Surprise me. You control every legal choice through the selected Prosecutor; the remaining courtroom voices keep their own roles."
               : playerRole === "participant"
               ? "PRISM holds your side. Pin an opposing bot or Moderator/Judge when you care who fills the role; every unselected seat rests on Surprise me until the willingness check."
               : playerRole === "spectator"
@@ -20368,6 +20413,7 @@ export function DebateExperience(
           </button>
         ) : null}
       </div>
+      {format === "whodunnit" ? renderJuryToggle() : null}
       {format === "whodunnit" ? (
         <div className={styles.mysteryCastGroups}>
           <section
@@ -20427,6 +20473,7 @@ export function DebateExperience(
           </section>
           {juryEnabled ? (
             <section
+              id="debate-mystery-jury-options"
               className={styles.mysteryCastGroup}
               data-role-group="jury"
               data-tutorial-target="debate-mystery-jury"
@@ -20776,11 +20823,13 @@ export function DebateExperience(
         <summary>
           <span aria-hidden="true">◇</span>
           <span>
-            <strong>{format === "whodunnit" ? "Player seat & the Jury" : "Your seat & the Jury"}</strong>
+            <strong>{format === "whodunnit" ? "Player seat & court" : "Your seat & the Jury"}</strong>
             <small>
               {playerRole.charAt(0).toUpperCase() + playerRole.slice(1)} ·{" "}
               {visibleModeratorTitle}
-              {debateSetupJuryReadout(juryEnabled, preferredJurorBotIds)}
+              {format !== "whodunnit"
+                ? debateSetupJuryReadout(juryEnabled, preferredJurorBotIds)
+                : ""}
             </small>
           </span>
           <em>{castTuningOpen ? "Done" : "Change"}</em>
@@ -20983,38 +21032,7 @@ export function DebateExperience(
             </label> : null}
             </>
           ) : null}
-          <label
-            className={styles.juryToggle}
-            data-enabled={juryEnabled ? "true" : undefined}
-            data-tutorial-target="debate-jury"
-          >
-            <input
-              type="checkbox"
-              checked={juryEnabled}
-              onChange={(event) => {
-                const enabled = event.currentTarget.checked;
-                setJuryEnabled(enabled);
-                if (!enabled) {
-                  setPreferredJurorBotIds(emptyPreferredJurorBotIds());
-                  setActiveJurySeatIndex(null);
-                } else if (activeJurySeatIndex === null) {
-                  setActiveJurySeatIndex(0);
-                }
-              }}
-            />
-            <span className={styles.juryToggleControl} aria-hidden="true">
-              <i />
-            </span>
-            <span>
-              <strong>
-                {format === "whodunnit"
-                  ? "Four jurors + Judge"
-                  : "Four jurors + moderator"}
-              </strong>
-              <small>{juryRoleDescription(playerRole)}</small>
-            </span>
-            <b>{juryEnabled ? "Enabled" : "Off"}</b>
-          </label>
+          {format !== "whodunnit" ? renderJuryToggle() : null}
           {juryEnabled && format !== "whodunnit" ? (
             <div
               className={styles.jurySeatRow}
@@ -21296,11 +21314,22 @@ export function DebateExperience(
       ) : null}
       <div className={styles.setupActions}>
         {format === "whodunnit" ? (
-          <span>
-            The selected Judge presides publicly; PRISM keeps sealed case truth
-            backstage. Court, Jury, feedback, and every selected bot freeze only
-            when you compile.
-          </span>
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                setMysterySetupPage("production");
+                setStudioPanel("motion");
+              }}
+            >
+              <span aria-hidden="true">←</span> Back to Production
+            </button>
+            <span>
+              The selected Judge presides publicly; PRISM keeps sealed case truth
+              backstage. Court, Jury, feedback, and every selected bot freeze only
+              when you compile.
+            </span>
+          </>
         ) : playerRole !== "participant" ? (
           <button
             type="button"
@@ -22323,7 +22352,7 @@ export function DebateExperience(
               ? "Compile freezes a court-only case, its admitted prosecution record, and every reachable trial performance. The mansion, Theory Board, and investigation dialogue are omitted."
             : playerRole === "spectator"
               ? "Compile freezes the same private case and selected-Prosecutor investigation. You will review an editable conclusion from authorized findings before filing it and watching court."
-              : "Court and Cast share one editable Debate Studio draft. Compile freezes its recipe, seats, model, Effort, Turbo, Powers, and court contract."
+              : "Experience, Mansion, Story, Production, and Cast form one editable draft. Compile freezes its recipe, seats, model, Effort, Turbo, Powers, and court contract."
             : "One view of what will enter the chamber. Start freezes the room, motion, cast, consent, model, Powers, and evidence."}
         </p>
       </div>
@@ -30791,12 +30820,29 @@ export function DebateExperience(
     if (session.status === "completed") void loadSessions();
   };
 
+  const activeMysteryMansionBundleId = activeSession?.format === "whodunnit" &&
+      activeSession.formatState.format === "whodunnit" &&
+      activeSession.formatState.version === 2
+    ? activeSession.formatState.config.mansionBundleId
+    : null;
+  const activeMysteryMansion = activeMysteryMansionBundleId
+    ? mysteryMansionBundles.find(
+        (mansion) => mansion.id === activeMysteryMansionBundleId,
+      ) ?? null
+    : null;
+  const activeMysteryMansionExteriorUrl = activeMysteryMansion
+    ? installedMansionThumbnailSourceV1(
+        activeMysteryMansion,
+        resolveInstalledMansionPresentationV1(activeMysteryMansion).thumbnailAssetId,
+      )
+    : null;
   const mysterySharedProps = {
     bots,
     playerName: props.playerName,
     theme: props.theme,
     audioEnabled: props.audioEnabled,
     audioVolume: props.audioVolume,
+    mansionExteriorUrl: activeMysteryMansionExteriorUrl,
     whodunnitTextVoiceMode: props.whodunnitTextVoiceMode,
     playMysteryTextVoice: props.playMysteryTextVoice,
     request,

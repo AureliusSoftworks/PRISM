@@ -111,12 +111,12 @@ export interface MysteryBotSummary {
 }
 
 interface MysteryRoutingProps {
-  preferredProvider: "local" | "openai" | "anthropic";
+  preferredProvider: "local" | "ollama_cloud" | "openai" | "anthropic";
   responseMode: ResponseMode;
   reasoningEffort?: ProviderReasoningEffort;
   turbo?: boolean;
   modelOverride?: {
-    provider: "local" | "openai" | "anthropic";
+    provider: "local" | "ollama_cloud" | "openai" | "anthropic";
     model: string;
   } | null;
 }

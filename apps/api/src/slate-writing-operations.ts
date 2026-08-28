@@ -1417,7 +1417,7 @@ export function setSlateWritingOperationProposal(
   operationId: string,
   input: {
     prose: string;
-    provider: "local" | "openai" | "anthropic";
+    provider: "local" | "ollama_cloud" | "openai" | "anthropic";
     model: string;
     revisionId?: string | null;
     validatedSnapshotPatch?: Record<string, unknown>;
@@ -1929,7 +1929,7 @@ export interface SlateWritingOperationApplication {
   operationId: string;
   sectionId: string;
   prose: string;
-  provider: "local" | "openai" | "anthropic";
+  provider: "local" | "ollama_cloud" | "openai" | "anthropic";
   model: string;
   revisionId: string | null;
   validatedSnapshot: Record<string, unknown>;

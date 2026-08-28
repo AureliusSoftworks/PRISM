@@ -1113,6 +1113,7 @@ function coffeeReviewGenerationEvidence(
   }
   const provider =
     message.provider === "local" ||
+    message.provider === "ollama_cloud" ||
     message.provider === "openai" ||
     message.provider === "anthropic"
       ? message.provider

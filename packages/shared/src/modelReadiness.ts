@@ -17,7 +17,7 @@ export type ModelPreparationFailure =
   | "request_failed";
 
 export interface ModelPreparationRequest {
-  provider: "local" | "openai" | "anthropic";
+  provider: "local" | "ollama_cloud" | "openai" | "anthropic";
   model?: string | null;
   experience: ModelPreparationExperience;
   /**

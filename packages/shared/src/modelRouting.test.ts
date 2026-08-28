@@ -31,6 +31,8 @@ describe("default online model visibility", () => {
       { id: "claude-opus-4-8", provider: "anthropic" as const },
       { id: "claude-haiku-4-5", provider: "anthropic" as const },
       { id: "claude-3-5-sonnet-latest", provider: "anthropic" as const },
+      { id: "gpt-oss:120b-cloud", provider: "ollama_cloud" as const },
+      { id: "qwen3-coder:480b-cloud", provider: "ollama_cloud" as const },
     ]) {
       assert.equal(isCommonOnlineChatModel(model), true, model.id);
     }
@@ -217,6 +219,41 @@ describe("resolveAutoModel", () => {
         usedRequiredLocalFallback: false,
       },
     );
+  });
+
+  it("treats Ollama Cloud as ONLINE and excludes it from structured output", () => {
+    const cloudCatalog = {
+      local: [{ id: REQUIRED_PRIMARY_LOCAL_MODEL_ID }],
+      online: [
+        {
+          id: "minimax-m2.5:cloud",
+          provider: "ollama_cloud" as const,
+          supportsStructuredOutput: false,
+        },
+        { id: "gpt-4o-mini", provider: "openai" as const },
+      ],
+    };
+    const foreground = resolveAutoModel({
+      provider: "ollama_cloud",
+      lane: "online",
+      explicitModelOverride: "minimax-m2.5:cloud",
+      hiddenModelIds: [],
+      catalog: cloudCatalog,
+    });
+    assert.equal(foreground.provider, "ollama_cloud");
+    assert.equal(foreground.model, "minimax-m2.5:cloud");
+
+    const structured = resolveAutoModel({
+      provider: "ollama_cloud",
+      lane: "online",
+      explicitModelOverride: "minimax-m2.5:cloud",
+      hiddenModelIds: [],
+      catalog: cloudCatalog,
+      routingContext: { structuredOutput: true },
+      priceForModel: () => ({ inputUsdPerMillion: 1, outputUsdPerMillion: 1 }),
+    });
+    assert.equal(structured.provider, "openai");
+    assert.equal(structured.model, "gpt-4o-mini");
   });
 
   it("escalates capability for structured research and uses stable cost tie-breaking", () => {

@@ -14,12 +14,14 @@ import {
   AnthropicProvider,
   LocalModelRequestError,
   LocalOllamaProvider,
+  OllamaCloudProvider,
   OpenAiProvider,
   ProviderTurboUnavailableError,
   openAiModelUsesMaxCompletionTokens,
   openAiModelUsesFixedDefaultTemperature,
   openAiReasoningAwareCompletionTokenLimit,
   onlineModelSupportsImageInput,
+  isOllamaCloudModelId,
   providerModelSupportsImageInput,
   readOpenAiErrorMessage,
   resetLocalThinkingCapabilityCacheForTests,
@@ -124,6 +126,13 @@ describe("stripLeadingChatRoleMarker", () => {
 });
 
 describe("selectProvider", () => {
+  it("recognizes both current Ollama Cloud id conventions", () => {
+    assert.equal(isOllamaCloudModelId("minimax-m2.5:cloud"), true);
+    assert.equal(isOllamaCloudModelId("gpt-oss:120b-cloud"), true);
+    assert.equal(isOllamaCloudModelId("qwen3:8b"), false);
+    assert.equal(isOllamaCloudModelId("cloudy-local"), false);
+  });
+
   describe("LOCAL mode invariant", () => {
     it("returns LocalOllamaProvider when preferredProvider is 'local'", () => {
       const provider = selectProvider("local");
@@ -173,6 +182,14 @@ describe("selectProvider", () => {
       const provider = selectProvider("openai", "sk-test-key");
       assert.ok(provider instanceof OpenAiProvider);
       assert.equal(provider.name, "openai");
+    });
+  });
+
+  describe("OLLAMA CLOUD mode", () => {
+    it("uses the signed-in local daemon without credentials", () => {
+      const provider = selectProvider("ollama_cloud");
+      assert.ok(provider instanceof OllamaCloudProvider);
+      assert.equal(provider.name, "ollama_cloud");
     });
   });
 
@@ -502,6 +519,39 @@ describe("buildModelCatalog", () => {
     assert.ok(catalog.online.some((model) => model.id === "o5-mini"));
     assert.ok(!catalog.online.some((model) => model.id === "text-embedding-3-small"));
     assert.ok(!catalog.online.some((model) => model.id === "dall-e-3"));
+  });
+
+  it("classifies Ollama Cloud ids as ONLINE instead of LOCAL", async () => {
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/api/tags")) {
+        return Response.json({
+          models: [
+            { name: "llama3.2" },
+            { name: "minimax-m2.5:cloud" },
+            { name: "gpt-oss:120b-cloud" },
+          ],
+        });
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const catalog = await buildModelCatalog(undefined);
+
+    assert.deepEqual(
+      catalog.local.map((model) => model.id).filter(isOllamaCloudModelId),
+      [],
+    );
+    const cloud = catalog.online.filter(
+      (model) => model.provider === "ollama_cloud",
+    );
+    assert.deepEqual(
+      cloud.map((model) => model.id),
+      ["minimax-m2.5:cloud", "gpt-oss:120b-cloud"],
+    );
+    assert.ok(cloud.every((model) => model.executionClass === "online"));
+    assert.ok(cloud.every((model) => model.supportsStructuredOutput === false));
+    assert.ok(cloud.every((model) => model.hostLabel === "Ollama Cloud"));
   });
 
   it("collapses Anthropic Haiku alias and snapshot ids into one picker entry", async () => {
@@ -1313,6 +1363,58 @@ describe("system-owned local lanes", () => {
     assert.equal(requestedBody.model, "mistral:latest");
     assert.equal(provider.diagnosticModel, "mistral:latest");
     assert.equal(requestedBody.keep_alive, -1);
+  });
+
+  it("uses an explicit Cloud background model only in ONLINE mode", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return Response.json({ message: { content: "aux ok" } });
+    }) as typeof fetch;
+
+    const local = getAuxiliaryProvider("minimax-m2.5:cloud", {
+      onlineEnabled: false,
+    });
+    await local.generateResponse([{ role: "user", content: "title" }]);
+    assert.equal(local.name, "local");
+    assert.equal(requests.at(-1)?.model, "llama3.2");
+    assert.equal(requests.at(-1)?.keep_alive, -1);
+
+    const online = getAuxiliaryProvider("minimax-m2.5:cloud", {
+      onlineEnabled: true,
+    });
+    await online.generateResponse([{ role: "user", content: "title" }]);
+    assert.equal(online.name, "ollama_cloud");
+    assert.equal(requests.at(-1)?.model, "minimax-m2.5:cloud");
+    assert.equal("keep_alive" in (requests.at(-1) ?? {}), false);
+
+    await online.generateResponse([{ role: "user", content: "json" }], {
+      jsonMode: true,
+    });
+    assert.equal(requests.at(-1)?.model, "llama3.2");
+    assert.equal(requests.at(-1)?.format, "json");
+    assert.equal(requests.at(-1)?.keep_alive, -1);
+  });
+
+  it("blocks a Cloud id from the LOCAL provider before any request", async () => {
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      return Response.json({ message: { content: "unexpected" } });
+    }) as typeof fetch;
+
+    await assert.rejects(
+      () =>
+        new LocalOllamaProvider().generateResponse(
+          [{ role: "user", content: "hello" }],
+          {
+            model: "minimax-m2.5:cloud",
+            allowFinalLocalFallback: false,
+          },
+        ),
+      LocalModelRequestError,
+    );
+    assert.equal(fetchCount, 0);
   });
 
   it("keeps ordinary foreground local generation on the ten-minute residency policy", async () => {

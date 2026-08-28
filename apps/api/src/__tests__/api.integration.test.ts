@@ -3472,6 +3472,21 @@ describe("API request integration", () => {
     assert.equal(onlinePayload.episode.model, "claude-signal");
     assert.equal(onlinePayload.episode.responseMode, "online");
 
+    const cloudResponse = await client.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/episodes`,
+      jsonInit({
+        guestBotId: "signal-model-guest",
+        topic: "Route this recording through Ollama Cloud",
+        preferredProvider: "ollama_cloud",
+        modelOverride: "minimax-m2.5:cloud",
+      }),
+    );
+    const cloudPayload = await json(cloudResponse);
+    assert.equal(cloudResponse.status, 201, JSON.stringify(cloudPayload));
+    assert.equal(cloudPayload.episode.provider, "ollama_cloud");
+    assert.equal(cloudPayload.episode.model, "minimax-m2.5:cloud");
+    assert.equal(cloudPayload.episode.responseMode, "online");
+
     db.prepare("UPDATE users SET preferred_provider = 'local' WHERE id = ?").run(
       userId,
     );
@@ -3480,9 +3495,9 @@ describe("API request integration", () => {
       jsonInit({
         guestBotId: "signal-model-guest",
         topic: "Keep this recording local",
-        preferredProvider: "anthropic",
+        preferredProvider: "ollama_cloud",
         responseMode: "online",
-        modelOverride: "claude-stale-selection",
+        modelOverride: "minimax-m2.5:cloud",
       }),
     );
     const localPayload = await json(localResponse);

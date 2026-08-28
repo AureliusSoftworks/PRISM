@@ -30,8 +30,8 @@ export function coffeePlayerPlaybackProfile(
 }
 
 export function coffeePlayerEnglishEngine(args: {
-  accountProvider: "local" | "openai" | "anthropic";
-  coffeeProvider: "local" | "openai" | "anthropic";
+  accountProvider: "local" | "ollama_cloud" | "openai" | "anthropic";
+  coffeeProvider: "local" | "ollama_cloud" | "openai" | "anthropic";
   offlineProtectedBotPresent: boolean;
   selectedEngine: EnglishVoiceEngine;
 }): EnglishVoiceEngine {

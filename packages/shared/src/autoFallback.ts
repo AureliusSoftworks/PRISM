@@ -14,7 +14,11 @@ export const AUTO_FALLBACK_CHAIN_FALLBACK_COUNT =
   AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT;
 export const AUTO_FALLBACK_MODEL_ID_MAX_LENGTH = 240;
 
-export type AutoFallbackProvider = "local" | "openai" | "anthropic";
+export type AutoFallbackProvider =
+  | "local"
+  | "ollama_cloud"
+  | "openai"
+  | "anthropic";
 export type ResponseMode = "local" | "auto" | "online";
 export type ResponseLane = "local" | "online";
 
@@ -78,7 +82,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function isAutoFallbackProvider(value: unknown): value is AutoFallbackProvider {
-  return value === "local" || value === "openai" || value === "anthropic";
+  return (
+    value === "local" ||
+    value === "ollama_cloud" ||
+    value === "openai" ||
+    value === "anthropic"
+  );
 }
 
 export function normalizeResponseMode(

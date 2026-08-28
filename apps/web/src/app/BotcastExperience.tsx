@@ -635,7 +635,7 @@ export function signalProducerGuestHostInterruptionContext(args: {
 export interface BotcastModelOption {
   id: string;
   label: string;
-  provider: "local" | "openai" | "anthropic";
+  provider: "local" | "ollama_cloud" | "openai" | "anthropic";
   supportsImageInput?: boolean;
 }
 
@@ -653,7 +653,7 @@ export function signalEpisodeModelChoiceSupportsImageInput(
 }
 
 export type SignalActiveAutoRoute = {
-  provider: "local" | "openai" | "anthropic";
+  provider: "local" | "ollama_cloud" | "openai" | "anthropic";
   model: string;
   effort?: "auto" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   turbo?: boolean;
@@ -915,8 +915,8 @@ export interface BotcastExperienceProps {
   botGroups?: readonly BotPickerGroup[];
   initialCastBotIds?: string[];
   request: BotcastApiRequest;
-  preferredProvider: "local" | "openai" | "anthropic";
-  hostChatProvider: "local" | "openai" | "anthropic";
+  preferredProvider: "local" | "ollama_cloud" | "openai" | "anthropic";
+  hostChatProvider: "local" | "ollama_cloud" | "openai" | "anthropic";
   preferredImageProvider: "local" | "openai";
   assetRailGeneration?: (
     kind: "signal_studio" | "signal_logo",
@@ -1041,7 +1041,7 @@ export interface BotcastExperienceProps {
    */
   resolveLockedRoutingChip?: (args: {
     modelChoice: string;
-    modelProvider: "local" | "openai" | "anthropic";
+    modelProvider: "local" | "ollama_cloud" | "openai" | "anthropic";
     activeAutoRoute: SignalActiveAutoRoute | null;
   }) => LiveSessionRoutingChipLabels | null;
   navigationHeader:
@@ -2672,7 +2672,7 @@ export function BotcastExperience({
   const [keepSignalItemSaving, setKeepSignalItemSaving] = useState(false);
   const [signalImageCapability, setSignalImageCapability] = useState<{
     episodeId: string;
-    provider: "local" | "openai" | "anthropic";
+    provider: "local" | "ollama_cloud" | "openai" | "anthropic";
     model: string;
     modelSelectionKind: "auto" | "fixed";
     supportsImageInput: boolean;
@@ -16219,7 +16219,7 @@ export function BotcastExperience({
     let cancelled = false;
     setSignalImageCapability(null);
     void request<{
-      provider: "local" | "openai" | "anthropic";
+      provider: "local" | "ollama_cloud" | "openai" | "anthropic";
       model: string;
       modelSelectionKind: "auto" | "fixed";
       supportsImageInput: boolean;

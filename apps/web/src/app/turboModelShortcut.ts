@@ -2,7 +2,7 @@ import { modelSupportsTurboMode } from "@localai/shared";
 
 export interface TurboModelShortcutCandidate {
   id: string;
-  provider: "local" | "openai" | "anthropic";
+  provider: "local" | "ollama_cloud" | "openai" | "anthropic";
   disabledReason?: string;
 }
 

@@ -59,7 +59,11 @@ export type BotcastEpisodeOutcome =
   | "completed"
   | "guest_departed"
   | "host_departed";
-export type BotcastEpisodeProvider = "local" | "openai" | "anthropic";
+export type BotcastEpisodeProvider =
+  | "local"
+  | "ollama_cloud"
+  | "openai"
+  | "anthropic";
 export type BotcastEpisodeResponseMode = "local" | "auto" | "online";
 export type BotcastSpeakerRole = "host" | "guest";
 export type BotcastGuestKind = "bot" | "producer";

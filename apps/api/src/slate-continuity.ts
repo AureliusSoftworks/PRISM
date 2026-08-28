@@ -593,7 +593,7 @@ function insertSourceWithinTransaction(
     sourceRevision: number;
     content: string;
     authority: "human" | "ai" | "procedural";
-    provider?: "local" | "openai" | "anthropic" | null;
+    provider?: "local" | "ollama_cloud" | "openai" | "anthropic" | null;
     model?: string | null;
   },
 ): SourceRow {
@@ -1461,7 +1461,7 @@ export function replaceSlateSectionWithAiProse(
     prose: string;
     status: SlateSectionStatus;
     sourceKind: "ai_draft" | "accepted_revision";
-    provider: "local" | "openai" | "anthropic";
+    provider: "local" | "ollama_cloud" | "openai" | "anthropic";
     model: string;
     expectedSectionId: string;
     expectedRevision: number;
@@ -1672,7 +1672,7 @@ export function applyAcceptedSlateRevisionWithinTransaction(
     selectionEnd: number | null;
     originalText: string;
     proposedText: string;
-    provider: "local" | "openai" | "anthropic";
+    provider: "local" | "ollama_cloud" | "openai" | "anthropic";
     model: string;
     reason: string;
     now: string;

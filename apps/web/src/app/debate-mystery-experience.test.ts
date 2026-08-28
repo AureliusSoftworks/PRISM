@@ -130,7 +130,7 @@ describe("Debate Whodunnit experience", () => {
   it("keeps Whodunnit in Debate Studio with a cast public Judge and a sealed PRISM Casekeeper", () => {
     assert.match(shell, /setFormat\("whodunnit"\)/u);
     assert.doesNotMatch(shell, /setMysterySetupOpen\(true\)/u);
-    assert.match(shell, /format === "whodunnit" \? "Court" : "Motion"/u);
+    assert.match(shell, /label: format === "whodunnit" \? "Setup" : "Motion"/u);
     assert.match(shell, /studioPanel === "cast" \? renderCastStep\(\)/u);
     assert.match(shell, /\(role === "judge" && format === "whodunnit"\)/u);
     assert.match(shell, /cast a public Judge separately/u);
@@ -153,7 +153,7 @@ describe("Debate Whodunnit experience", () => {
     assert.match(shell, /mysteryJudgeBotId/u);
     assert.match(shell, /mysteryProsecutorBotId/u);
     assert.match(shell, /mysteryRivalDefenseBotId/u);
-    assert.match(shell, /\? "Four jurors \+ Judge"/u);
+    assert.match(shell, /\? "Jury Trial"/u);
     assert.match(shell, /data-role-group="suspects"/u);
     assert.match(shell, /data-role-group="courtroom"/u);
     assert.match(shell, /Four jurors \+ moderator/u);
@@ -741,6 +741,34 @@ describe("Debate Whodunnit experience", () => {
     assert.match(shell, /format === "whodunnit"[\s\S]{0,80}\? mysteryRoleSelected/u);
     assert.match(shell, /if \(!mysterySetupValidated \|\| busy\) return;/u);
     assert.match(shell, /\? "Surprise seats ready"/u);
+  });
+
+  it("starts every new Whodunnit cast seat on Surprise me", () => {
+    const bots = ["a", "b", "c", "d", "e", "f", "g"].map((id) => ({ id }));
+    assert.deepEqual(
+      fillWhodunnitSuspectSeats(bots, [], 4),
+      ["", "", "", ""],
+    );
+    assert.deepEqual(
+      fillWhodunnitSuspectSeats(bots, ["a", "b"], 4),
+      ["a", "b", "", ""],
+    );
+    assert.match(
+      shell,
+      /const \[mysteryJudgeBotId, setMysteryJudgeBotId\] = useState\(""\);/u,
+    );
+    assert.match(
+      shell,
+      /const \[mysteryProsecutorBotId, setMysteryProsecutorBotId\] = useState\(""\);/u,
+    );
+    assert.match(
+      shell,
+      /const \[mysteryRivalDefenseBotId, setMysteryRivalDefenseBotId\] = useState\(""\);/u,
+    );
+    assert.match(
+      shell,
+      /setMysterySuspectSelection\(fillDebateMysteryCast\(bots, \[\], 4\)\);[\s\S]{0,160}setMysteryJudgeBotId\(""\);[\s\S]{0,100}setMysteryProsecutorBotId\(""\);[\s\S]{0,100}setMysteryRivalDefenseBotId\(""\);/u,
+    );
   });
 
   it("treats every unfilled seat as a compile-time random choice while preserving manual cast", () => {
