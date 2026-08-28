@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, it } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import {
@@ -53,9 +52,9 @@ describe("Whodunnit mansion theme generation", () => {
 
   it("stores validated ONLINE MP3 bytes with provider provenance and reuses them", async () => {
     const { db, key } = fixture();
-    const audio = readFileSync(resolve(
-      process.cwd(),
-      "apps/web/public/audio/debate/whodunnit/the-midnight-clue.mp3",
+    const audio = readFileSync(new URL(
+      "../../../web/public/audio/debate/whodunnit/the-midnight-clue.mp3",
+      import.meta.url,
     ));
     let fetchCount = 0;
     const generate = () => ensureDebateMysteryMansionThemeV1({
