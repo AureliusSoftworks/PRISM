@@ -928,6 +928,7 @@ import {
   parseStoredElevenLabsVoiceBank,
   resolveNextSettings,
   sanitizeAnthropicKeyInput,
+  sanitizeOllamaCloudKeyInput,
   sanitizeBraveSearchKeyInput,
   sanitizeElevenLabsKeyInput,
   sanitizeOpenAiKeyInput,
@@ -1727,10 +1728,16 @@ async function startPrismStorySession(
       ? (getAnthropicApiKeyForUser(context.userId, context.userKey) ??
         config.anthropicApiKey)
       : undefined;
+  const ollamaCloudApiKey =
+    responseLane === "online"
+      ? (getOllamaCloudApiKeyForUser(context.userId, context.userKey) ??
+        config.ollamaApiKey)
+      : undefined;
   const catalog = await buildModelCatalog(
     responseLane === "online" ? openAiApiKey : undefined,
     user.secondary_ollama_host,
     responseLane === "online" ? anthropicApiKey : undefined,
+    responseLane === "online" ? ollamaCloudApiKey : undefined,
   );
   const hiddenModelIds = parseHiddenBotModelIds(user.hidden_bot_model_ids);
   const hiddenModels = new Set(hiddenModelIds);
@@ -1842,6 +1849,9 @@ async function startPrismStorySession(
                 user.secondary_ollama_host,
                 attempt.provider === "anthropic"
                   ? anthropicApiKey
+                  : undefined,
+                attempt.provider === "ollama_cloud"
+                  ? ollamaCloudApiKey
                   : undefined,
               ),
               providerName: attempt.provider,
@@ -3154,6 +3164,9 @@ interface UserDbRow {
   anthropic_key_ciphertext: string | null;
   anthropic_key_iv: string | null;
   anthropic_key_tag: string | null;
+  ollama_cloud_key_ciphertext: string | null;
+  ollama_cloud_key_iv: string | null;
+  ollama_cloud_key_tag: string | null;
   elevenlabs_key_ciphertext: string | null;
   elevenlabs_key_iv: string | null;
   elevenlabs_key_tag: string | null;
@@ -3504,7 +3517,7 @@ function liveBakePlannedSynthesisEngineForUser(
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, memory_learn_about_player, memory_learn_about_bots, memory_acquisition_sensitivity, memory_short_term_days, memory_long_term_threshold, memory_inferred_min_evidence, memory_inferred_threshold, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, debate_whodunnit_reuse_synthesized_exhibits, debate_whodunnit_text_voice_mode, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, online_auto_provider_bias, hidden_bot_model_ids, hidden_global_picker_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, preferred_home_atmosphere_image_model, preferred_home_atmosphere_image_provider, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_count, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_face_thinking_scale, prism_default_bot_face_thinking_offset_x, prism_default_bot_face_thinking_offset_y, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, prism_refract_local_model, prism_refract_online_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, zen_player_voice_enabled, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, memory_learn_about_player, memory_learn_about_bots, memory_acquisition_sensitivity, memory_short_term_days, memory_long_term_threshold, memory_inferred_min_evidence, memory_inferred_threshold, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, debate_whodunnit_reuse_synthesized_exhibits, debate_whodunnit_text_voice_mode, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, online_auto_provider_bias, hidden_bot_model_ids, hidden_global_picker_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, preferred_home_atmosphere_image_model, preferred_home_atmosphere_image_provider, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_count, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_face_thinking_scale, prism_default_bot_face_thinking_offset_x, prism_default_bot_face_thinking_offset_y, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, prism_refract_local_model, prism_refract_online_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, ollama_cloud_key_ciphertext, ollama_cloud_key_iv, ollama_cloud_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, zen_player_voice_enabled, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -3844,6 +3857,7 @@ async function orchestratePrismCompanionRequest(args: {
       getOpenAiApiKeyForUser(args.userId, userKey) ?? config.openAiApiKey,
       args.user.secondary_ollama_host,
       getAnthropicApiKeyForUser(args.userId, userKey) ?? config.anthropicApiKey,
+      getOllamaCloudApiKeyForUser(args.userId, userKey) ?? config.ollamaApiKey,
     );
     onlineModels = catalog.online;
   }
@@ -3994,11 +4008,18 @@ function dualOllamaWorkloadOptions(user: UserDbRow): {
   secondaryOllamaHost: string | null;
   experimentalDualOllama: boolean;
   onlineEnabled: boolean;
+  ollamaCloudApiKey?: string;
 } {
+  const onlineEnabled = user.preferred_provider !== "local";
+  const ollamaCloudApiKey = onlineEnabled
+    ? (getOllamaCloudApiKeyForUser(user.id, decryptUserKey(user.id)) ??
+      config.ollamaApiKey)
+    : undefined;
   return {
     secondaryOllamaHost: user.secondary_ollama_host,
     experimentalDualOllama: user.experimental_dual_ollama_enabled === 1,
-    onlineEnabled: user.preferred_provider !== "local",
+    onlineEnabled,
+    ...(ollamaCloudApiKey ? { ollamaCloudApiKey } : {}),
   };
 }
 
@@ -4216,6 +4237,28 @@ function getAnthropicApiKeyForUser(
   );
 }
 
+function getOllamaCloudApiKeyForUser(
+  userId: string,
+  userKey: Buffer,
+): string | undefined {
+  const user = getUserRow(userId);
+  if (
+    !user.ollama_cloud_key_ciphertext ||
+    !user.ollama_cloud_key_iv ||
+    !user.ollama_cloud_key_tag
+  ) {
+    return undefined;
+  }
+  return decryptText(
+    {
+      ciphertext: user.ollama_cloud_key_ciphertext,
+      iv: user.ollama_cloud_key_iv,
+      tag: user.ollama_cloud_key_tag,
+    },
+    userKey,
+  );
+}
+
 async function slateAiForUser(
   userId: string,
   projectId?: string,
@@ -4340,6 +4383,7 @@ async function slateAiForUser(
       runtime.openAiApiKey,
       user.secondary_ollama_host,
       runtime.anthropicApiKey,
+      runtime.ollamaCloudApiKey,
     ),
     providerName: runtime.provider,
     model: runtime.model,
@@ -6304,10 +6348,15 @@ async function debateAiRuntimeForUser(
     responseLane === "online"
       ? (getAnthropicApiKeyForUser(userId, userKey!) ?? config.anthropicApiKey)
       : undefined;
+  const ollamaCloudApiKey =
+    responseLane === "online"
+      ? (getOllamaCloudApiKeyForUser(userId, userKey!) ?? config.ollamaApiKey)
+      : undefined;
   const catalog = await buildModelCatalog(
     openAiApiKey,
     user.secondary_ollama_host,
     anthropicApiKey,
+    ollamaCloudApiKey,
   );
   const frozenCandidateKeys = new Set(
     (Array.isArray(requestedFrozenCandidates)
@@ -6411,6 +6460,7 @@ async function debateAiRuntimeForUser(
         providerName === "openai" ? apiKey : undefined,
         user.secondary_ollama_host,
         providerName === "anthropic" ? apiKey : undefined,
+        providerName === "ollama_cloud" ? ollamaCloudApiKey : undefined,
       ),
       providerName,
       model,
@@ -6807,10 +6857,16 @@ async function contextualTextRuntimeForUser<
       ? (getAnthropicApiKeyForUser(args.userId, userKey!) ??
         config.anthropicApiKey)
       : undefined;
+  const ollamaCloudApiKey =
+    responseMode === "online"
+      ? (getOllamaCloudApiKeyForUser(args.userId, userKey!) ??
+        config.ollamaApiKey)
+      : undefined;
   const catalog = await buildModelCatalog(
     openAiApiKey,
     args.user.secondary_ollama_host,
     anthropicApiKey,
+    ollamaCloudApiKey,
   );
   const frozenCandidateKeys = new Set(
     (Array.isArray(args.frozenCandidateAllowlist)
@@ -7030,6 +7086,7 @@ async function contextualTextRuntimeForUser<
     candidateAllowlist,
     openAiApiKey,
     anthropicApiKey,
+    ollamaCloudApiKey,
     autoFallbackChain: runtimeAutoRoutingChain,
   };
 }
@@ -15779,6 +15836,7 @@ function buildRoutes(): RouteDefinition[] {
                 runtime.openAiApiKey,
                 user.secondary_ollama_host,
                 runtime.anthropicApiKey,
+                runtime.ollamaCloudApiKey,
               );
               const resolution = await resolvePromptWildcardsWithModel({
                 prompt: finalizedPrompt,
@@ -15869,6 +15927,7 @@ function buildRoutes(): RouteDefinition[] {
         runtime.openAiApiKey,
         user.secondary_ollama_host,
         runtime.anthropicApiKey,
+        runtime.ollamaCloudApiKey,
       );
       const generationOverrides: GenerateOptions = {
         model: runtime.model,
@@ -16030,6 +16089,7 @@ function buildRoutes(): RouteDefinition[] {
         runtime.openAiApiKey,
         user.secondary_ollama_host,
         runtime.anthropicApiKey,
+        runtime.ollamaCloudApiKey,
       );
       const memoryLines = retrieveRecentMemoriesForStarter(
         db,
@@ -16928,6 +16988,8 @@ function buildRoutes(): RouteDefinition[] {
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
       const anthropicApiKey =
         getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
+      const ollamaCloudApiKey =
+        getOllamaCloudApiKeyForUser(userId, userKey) ?? config.ollamaApiKey;
       const braveSearchApiKey =
         getBraveSearchApiKeyForUser(userId, userKey) ??
         config.braveSearchApiKey;
@@ -16943,6 +17005,7 @@ function buildRoutes(): RouteDefinition[] {
         responseLane === "online" ? openAiApiKey : undefined,
         user.secondary_ollama_host,
         responseLane === "online" ? anthropicApiKey : undefined,
+        responseLane === "online" ? ollamaCloudApiKey : undefined,
       );
       const chatHiddenModelIds = parseHiddenBotModelIds(
         user.hidden_bot_model_ids,
@@ -17102,6 +17165,7 @@ function buildRoutes(): RouteDefinition[] {
           openAiApiKey,
           user.secondary_ollama_host,
           anthropicApiKey,
+          ollamaCloudApiKey,
         );
         const wildcardResolution = await resolvePromptWildcardsWithModel({
           prompt: messageForChat,
@@ -17635,6 +17699,7 @@ function buildRoutes(): RouteDefinition[] {
                   refractRuntime.openAiApiKey,
                   user.secondary_ollama_host,
                   refractRuntime.anthropicApiKey,
+                  refractRuntime.ollamaCloudApiKey,
                 ),
                 providerName: refractRuntime.provider,
                 model: refractRuntime.model,
@@ -25642,6 +25707,8 @@ function buildRoutes(): RouteDefinition[] {
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
       const anthropicApiKey =
         getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
+      const ollamaCloudApiKey =
+        getOllamaCloudApiKeyForUser(userId, userKey) ?? config.ollamaApiKey;
       const effectiveProvider = requestedProvider ?? user.preferred_provider;
       const conversation = await runWithUsageSession(
         {
@@ -27990,6 +28057,7 @@ function buildRoutes(): RouteDefinition[] {
         runtime.openAiApiKey,
         user.secondary_ollama_host,
         runtime.anthropicApiKey,
+        runtime.ollamaCloudApiKey,
       );
       const atmosphere =
         typeof body.atmosphere === "string"
@@ -31077,6 +31145,7 @@ function buildRoutes(): RouteDefinition[] {
           ),
           hasOpenAiApiKey: Boolean(user.openai_key_ciphertext),
           hasAnthropicApiKey: Boolean(user.anthropic_key_ciphertext),
+          hasOllamaCloudApiKey: Boolean(user.ollama_cloud_key_ciphertext),
           hasElevenLabsApiKey: Boolean(user.elevenlabs_key_ciphertext),
           hasBraveSearchApiKey: Boolean(user.brave_search_key_ciphertext),
           voiceMode: normalizeSpeechTypeVoiceMode(user.voice_mode),
@@ -31108,6 +31177,10 @@ function buildRoutes(): RouteDefinition[] {
           anthropicApiKeySource: apiKeySource(
             user.anthropic_key_ciphertext,
             config.anthropicApiKey,
+          ),
+          ollamaCloudApiKeySource: apiKeySource(
+            user.ollama_cloud_key_ciphertext,
+            config.ollamaApiKey,
           ),
           elevenLabsApiKeySource: apiKeySource(
             user.elevenlabs_key_ciphertext,
@@ -31420,6 +31493,8 @@ function buildRoutes(): RouteDefinition[] {
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
       const anthropicApiKey =
         getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
+      const ollamaCloudApiKey =
+        getOllamaCloudApiKeyForUser(userId, userKey) ?? config.ollamaApiKey;
       const buildCatalog =
         ctx.query.get("refresh") === "1"
           ? refreshModelCatalog
@@ -31428,6 +31503,7 @@ function buildRoutes(): RouteDefinition[] {
         openAiApiKey,
         user.secondary_ollama_host,
         anthropicApiKey,
+        ollamaCloudApiKey,
       );
       const hiddenBotModelIds = seedModelVisibilityDefaultsIfNeeded(
         user,
@@ -31766,6 +31842,9 @@ function buildRoutes(): RouteDefinition[] {
             ),
             hasOpenAiApiKey: Boolean(committedUser.openai_key_ciphertext),
             hasAnthropicApiKey: Boolean(committedUser.anthropic_key_ciphertext),
+            hasOllamaCloudApiKey: Boolean(
+              committedUser.ollama_cloud_key_ciphertext,
+            ),
             hasElevenLabsApiKey: Boolean(
               committedUser.elevenlabs_key_ciphertext,
             ),
@@ -31779,6 +31858,10 @@ function buildRoutes(): RouteDefinition[] {
             anthropicApiKeySource: apiKeySource(
               committedUser.anthropic_key_ciphertext,
               config.anthropicApiKey,
+            ),
+            ollamaCloudApiKeySource: apiKeySource(
+              committedUser.ollama_cloud_key_ciphertext,
+              config.ollamaApiKey,
             ),
             elevenLabsApiKeySource: apiKeySource(
               committedUser.elevenlabs_key_ciphertext,
@@ -31905,6 +31988,9 @@ function buildRoutes(): RouteDefinition[] {
       let anthropicCipher = user.anthropic_key_ciphertext;
       let anthropicIv = user.anthropic_key_iv;
       let anthropicTag = user.anthropic_key_tag;
+      let ollamaCloudCipher = user.ollama_cloud_key_ciphertext;
+      let ollamaCloudIv = user.ollama_cloud_key_iv;
+      let ollamaCloudTag = user.ollama_cloud_key_tag;
       let elevenLabsCipher = user.elevenlabs_key_ciphertext;
       let elevenLabsIv = user.elevenlabs_key_iv;
       let elevenLabsTag = user.elevenlabs_key_tag;
@@ -31933,6 +32019,19 @@ function buildRoutes(): RouteDefinition[] {
         anthropicCipher = null;
         anthropicIv = null;
         anthropicTag = null;
+      }
+      if (next.ollamaCloudKeyIntent.action === "replace") {
+        const encrypted = encryptText(
+          next.ollamaCloudKeyIntent.plaintext,
+          userKey,
+        );
+        ollamaCloudCipher = encrypted.ciphertext;
+        ollamaCloudIv = encrypted.iv;
+        ollamaCloudTag = encrypted.tag;
+      } else if (next.ollamaCloudKeyIntent.action === "clear") {
+        ollamaCloudCipher = null;
+        ollamaCloudIv = null;
+        ollamaCloudTag = null;
       }
       if (next.elevenLabsKeyIntent.action === "replace") {
         const encrypted = encryptText(
@@ -31977,6 +32076,7 @@ function buildRoutes(): RouteDefinition[] {
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
             anthropic_key_ciphertext = ?, anthropic_key_iv = ?, anthropic_key_tag = ?,
+            ollama_cloud_key_ciphertext = ?, ollama_cloud_key_iv = ?, ollama_cloud_key_tag = ?,
             elevenlabs_key_ciphertext = ?, elevenlabs_key_iv = ?, elevenlabs_key_tag = ?,
             brave_search_key_ciphertext = ?, brave_search_key_iv = ?, brave_search_key_tag = ?
         WHERE id = ?
@@ -32062,6 +32162,9 @@ function buildRoutes(): RouteDefinition[] {
         anthropicCipher,
         anthropicIv,
         anthropicTag,
+        ollamaCloudCipher,
+        ollamaCloudIv,
+        ollamaCloudTag,
         elevenLabsCipher,
         elevenLabsIv,
         elevenLabsTag,
@@ -32121,12 +32224,17 @@ function buildRoutes(): RouteDefinition[] {
           playerNamePronunciation: next.playerNamePronunciation,
           hasOpenAiApiKey: Boolean(openAiCipher),
           hasAnthropicApiKey: Boolean(anthropicCipher),
+          hasOllamaCloudApiKey: Boolean(ollamaCloudCipher),
           hasElevenLabsApiKey: Boolean(elevenLabsCipher),
           hasBraveSearchApiKey: Boolean(braveSearchCipher),
           openAiApiKeySource: apiKeySource(openAiCipher, config.openAiApiKey),
           anthropicApiKeySource: apiKeySource(
             anthropicCipher,
             config.anthropicApiKey,
+          ),
+          ollamaCloudApiKeySource: apiKeySource(
+            ollamaCloudCipher,
+            config.ollamaApiKey,
           ),
           elevenLabsApiKeySource: apiKeySource(
             elevenLabsCipher,
@@ -34388,10 +34496,14 @@ function buildRoutes(): RouteDefinition[] {
         const anthropicApiKey = onlineAllowed
           ? (getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey)
           : undefined;
+        const ollamaCloudApiKey = onlineAllowed
+          ? (getOllamaCloudApiKeyForUser(userId, userKey) ?? config.ollamaApiKey)
+          : undefined;
         const catalog = await buildModelCatalog(
           openAiApiKey,
           user.secondary_ollama_host,
           anthropicApiKey,
+          ollamaCloudApiKey,
         );
         const resolved = resolveAutoModel({
           provider: primaryProvider,
@@ -34485,10 +34597,14 @@ function buildRoutes(): RouteDefinition[] {
       const anthropicApiKey = onlineAllowed
         ? (getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey)
         : undefined;
+      const ollamaCloudApiKey = onlineAllowed
+        ? (getOllamaCloudApiKeyForUser(userId, userKey) ?? config.ollamaApiKey)
+        : undefined;
       const catalog = await buildModelCatalog(
         openAiApiKey,
         user.secondary_ollama_host,
         anthropicApiKey,
+        ollamaCloudApiKey,
       );
       const requestedModelOverride = readModelOverride(body.modelOverride);
       const explicitModelOverride =
@@ -34516,6 +34632,7 @@ function buildRoutes(): RouteDefinition[] {
         openAiApiKey,
         user.secondary_ollama_host,
         anthropicApiKey,
+        ollamaCloudApiKey,
       );
       const controller = new AbortController();
       const onClose = () => controller.abort();
@@ -34654,6 +34771,9 @@ function buildRoutes(): RouteDefinition[] {
       const anthropicApiKey = onlineAllowed
         ? (getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey)
         : undefined;
+      const ollamaCloudApiKey = onlineAllowed
+        ? (getOllamaCloudApiKeyForUser(userId, userKey) ?? config.ollamaApiKey)
+        : undefined;
       const voiceCatalog = await buildBotGenerationVoiceCatalogForUser({
         userId,
         user,
@@ -34664,6 +34784,7 @@ function buildRoutes(): RouteDefinition[] {
         openAiApiKey,
         user.secondary_ollama_host,
         anthropicApiKey,
+        ollamaCloudApiKey,
       );
       const resolved = resolveAutoModel({
         provider: primaryProvider,
@@ -34723,6 +34844,7 @@ function buildRoutes(): RouteDefinition[] {
         openAiApiKey,
         user.secondary_ollama_host,
         anthropicApiKey,
+        ollamaCloudApiKey,
       );
 
       const controller = new AbortController();

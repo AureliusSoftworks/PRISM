@@ -159,6 +159,8 @@ export interface AppConfig {
   ollamaInAppPullModel: string;
   ollamaAuxiliaryModel: string;
   ollamaEmbeddingModel: string;
+  /** Optional server-managed bearer credential for the fixed Ollama Cloud API. */
+  ollamaApiKey?: string;
   openAiApiKey?: string;
   anthropicApiKey?: string;
   elevenLabsApiKey?: string;
@@ -186,6 +188,7 @@ export function getAppConfig(): AppConfig {
       process.env.OLLAMA_IN_APP_PULL_MODEL?.trim() || "flux2-klein",
     ollamaAuxiliaryModel: process.env.OLLAMA_AUXILIARY_MODEL ?? "llama3.2",
     ollamaEmbeddingModel: process.env.OLLAMA_EMBEDDING_MODEL ?? "nomic-embed-text",
+    ollamaApiKey: process.env.OLLAMA_API_KEY,
     openAiApiKey: process.env.OPENAI_API_KEY,
     anthropicApiKey: process.env.ANTHROPIC_API_KEY,
     elevenLabsApiKey: process.env.ELEVENLABS_API_KEY,

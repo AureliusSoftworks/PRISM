@@ -451,13 +451,60 @@
   position: relative;
   grid-template-columns: minmax(0, 1fr) auto;
   align-content: start;
-  min-height: 6.5rem;
+  min-height: 14rem;
   padding: 0.95rem;
+  overflow: hidden;
   color: var(--mystery-text);
   border-color: color-mix(in srgb, var(--mystery-text) 18%, var(--mystery-line));
   background: linear-gradient(145deg, color-mix(in srgb, var(--mystery-text) 5%, var(--mystery-panel-strong)), var(--mystery-panel-strong));
   box-shadow: 0 0.45rem 1rem rgba(0, 0, 0, 0.14), inset 0 1px color-mix(in srgb, var(--mystery-text) 6%, transparent);
   transition: transform 100ms ease, border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+
+.presetThumbnail {
+  position: relative;
+  grid-column: 1 / -1;
+  width: calc(100% + 1.9rem);
+  aspect-ratio: 16 / 9;
+  margin: -0.95rem -0.95rem 0.5rem;
+  overflow: hidden;
+  border-bottom: 1px solid color-mix(in srgb, var(--mystery-text) 16%, var(--mystery-line));
+  background-position: center;
+  background-size: cover;
+  filter: saturate(0.92) brightness(0.86);
+  transition: filter 140ms ease, transform 180ms ease;
+}
+
+.presetThumbnail::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: linear-gradient(180deg, transparent 52%, color-mix(in srgb, var(--mystery-panel-strong) 70%, transparent));
+  pointer-events: none;
+}
+
+.presetGrid button:hover:not(:disabled) .presetThumbnail,
+.presetGrid button:focus-visible .presetThumbnail,
+.presetGrid button[data-selected="true"] .presetThumbnail {
+  filter: saturate(1.04) brightness(1);
+}
+
+.presetCustomThumbnail {
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at 50% 46%, color-mix(in srgb, var(--mystery-violet) 26%, transparent), transparent 42%),
+    linear-gradient(145deg, color-mix(in srgb, var(--mystery-cyan) 8%, var(--mystery-panel-strong)), color-mix(in srgb, var(--mystery-violet) 10%, var(--mystery-panel-strong)));
+  filter: none;
+}
+
+.presetGrid .presetCustomThumbnail > span {
+  grid-column: auto;
+  color: color-mix(in srgb, var(--mystery-text) 88%, var(--mystery-violet));
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2.8rem, 4vw, 4.2rem);
+  line-height: 1;
+  text-shadow: 0 0 1.5rem color-mix(in srgb, var(--mystery-violet) 48%, transparent);
 }
 
 .presetGrid button:hover:not(:disabled),

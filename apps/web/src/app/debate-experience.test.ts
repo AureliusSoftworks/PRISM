@@ -1480,6 +1480,9 @@ describe("Debate experience", () => {
     assert.match(source, /Choose a mansion size/u);
     assert.match(source, /Quick is the shortest full mansion/u);
     assert.match(source, /Every new mansion has a functional upstairs/u);
+    assert.match(source, /DEBATE_MYSTERY_MANSION_EXTERIOR_PATHS_V1\["neutral-mansion-v1"\]\[option\.id\]/u);
+    assert.match(source, /mysteryStyles\.presetCustomThumbnail/u);
+    assert.match(source, /aria-hidden="true"><span>\?<\/span>/u);
     assert.match(source, /<InstalledMansionLibrary/u);
     assert.match(source, /Install a mansion file/u);
     assert.match(source, /data-tutorial-target="whodunnit-mansion-library"/u);
@@ -1493,6 +1496,8 @@ describe("Debate experience", () => {
     assert.match(mysteryCss, /\.quickStartNote\s*\{/u);
     assert.match(mysteryCss, /\.guidedSetupProgress\s*\{/u);
     assert.match(mysteryCss, /\.mansionSourcePicker\s*\{/u);
+    assert.match(mysteryCss, /\.presetThumbnail\s*\{[\s\S]*?aspect-ratio:\s*16\s*\/\s*9/u);
+    assert.match(mysteryCss, /\.presetCustomThumbnail\s*\{[\s\S]*?radial-gradient/u);
     assert.match(mysteryCss, /\.guidedSetupFooter/u);
     assert.match(mysteryCss, /\.optionalSetupGroup\s*\{/u);
   });

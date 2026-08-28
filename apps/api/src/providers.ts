@@ -352,6 +352,8 @@ export interface DualOllamaWorkloadOptions {
   experimentalDualOllama?: boolean;
   /** Allows an explicitly selected Ollama Cloud helper only in account ONLINE mode. */
   onlineEnabled?: boolean;
+  /** Effective account/server bearer credential for the fixed Ollama Cloud API. */
+  ollamaCloudApiKey?: string;
 }
 
 export interface ResolvedLocalOllamaTarget {
@@ -401,7 +403,8 @@ function privateSecondaryOllamaHost(
 function modelCatalogCacheKey(
   openAiApiKey?: string,
   secondaryOllamaHost?: string | null,
-  anthropicApiKey?: string
+  anthropicApiKey?: string,
+  ollamaCloudApiKey?: string,
 ): string {
   const privateSecondaryHost = privateSecondaryOllamaHost(secondaryOllamaHost);
   return createHash("sha256")
@@ -411,6 +414,7 @@ function modelCatalogCacheKey(
       secondaryOllamaHost: privateSecondaryHost ?? "",
       openAiApiKey: openAiApiKey?.trim() ?? "",
       anthropicApiKey: anthropicApiKey?.trim() ?? "",
+      ollamaCloudApiKey: ollamaCloudApiKey?.trim() ?? "",
     }))
     .digest("hex");
 }
@@ -430,12 +434,32 @@ export function stripLeadingChatRoleMarker(text: string): string {
 }
 
 export const SECONDARY_OLLAMA_MODEL_PREFIX = "ollama-secondary:";
+export const OLLAMA_CLOUD_DIRECT_MODEL_PREFIX = "ollama-cloud-direct:";
+const OLLAMA_CLOUD_API_BASE = "https://ollama.com";
 const DUAL_OLLAMA_WORKLOAD_STATUS_CACHE_MS = 30_000;
 
 /** Ollama's signed-in daemon exposes cloud routes with either current suffix. */
 export function isOllamaCloudModelId(value: string | null | undefined): boolean {
   const id = value?.trim().toLowerCase() ?? "";
   return id.endsWith(":cloud") || id.endsWith("-cloud");
+}
+
+export function encodeDirectOllamaCloudModelId(modelId: string): string {
+  return `${OLLAMA_CLOUD_DIRECT_MODEL_PREFIX}${modelId.trim()}`;
+}
+
+export function parseDirectOllamaCloudModelId(
+  value: string | null | undefined,
+): string | null {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed.startsWith(OLLAMA_CLOUD_DIRECT_MODEL_PREFIX)) return null;
+  return trimmed.slice(OLLAMA_CLOUD_DIRECT_MODEL_PREFIX.length).trim() || null;
+}
+
+export function isOllamaCloudModelReference(
+  value: string | null | undefined,
+): boolean {
+  return isOllamaCloudModelId(value) || parseDirectOllamaCloudModelId(value) !== null;
 }
 
 export const OPENAI_DEFAULT_MODEL = "gpt-4o-mini";
@@ -1482,6 +1506,63 @@ async function discoverOpenAiModelIds(openAiApiKey?: string): Promise<string[]> 
   }
 }
 
+async function discoverDirectOllamaCloudModelIds(
+  ollamaCloudApiKey?: string,
+): Promise<string[]> {
+  const key = ollamaCloudApiKey?.trim();
+  if (!key) return [];
+  try {
+    const response = await fetch(`${OLLAMA_CLOUD_API_BASE}/api/tags`, {
+      headers: { authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(REMOTE_TAGS_PROBE_TIMEOUT_MS),
+    });
+    if (!response.ok) return [];
+    const payload = (await response.json()) as {
+      models?: Array<{ name?: unknown; model?: unknown }>;
+    };
+    return uniqueModelIds(
+      (payload.models ?? []).map((model) =>
+        typeof model.name === "string"
+          ? model.name
+          : typeof model.model === "string"
+            ? model.model
+            : "",
+      ),
+    );
+  } catch {
+    return [];
+  }
+}
+
+export async function checkOllamaCloudApiKeyStatus(
+  ollamaCloudApiKey?: string,
+  source: ApiKeyAuthSource = ollamaCloudApiKey?.trim() ? "account" : "none",
+): Promise<ProviderApiKeyAuthStatus> {
+  const key = ollamaCloudApiKey?.trim();
+  if (!key) return missingProviderApiKeyStatus();
+  try {
+    const response = await fetch(`${OLLAMA_CLOUD_API_BASE}/api/tags`, {
+      headers: { authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(REMOTE_TAGS_PROBE_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      return failedProviderApiKeyStatus(
+        source,
+        failedAuthStatusFromResponseStatus(response.status),
+        `Provider returned ${response.status}.`,
+      );
+    }
+    const payload = (await response.json()) as { models?: unknown[] };
+    return authenticatedProviderApiKeyStatus(source, payload.models?.length ?? 0);
+  } catch {
+    return failedProviderApiKeyStatus(
+      source,
+      "unreachable",
+      "Could not reach Ollama Cloud.",
+    );
+  }
+}
+
 function missingProviderApiKeyStatus(): ProviderApiKeyAuthStatus {
   return {
     configured: false,
@@ -1611,19 +1692,22 @@ export async function checkAnthropicApiKeyStatus(
 export async function buildModelCatalog(
   openAiApiKey?: string,
   secondaryOllamaHost?: string | null,
-  anthropicApiKey?: string
+  anthropicApiKey?: string,
+  ollamaCloudApiKey?: string,
 ): Promise<ModelCatalog> {
   const cacheKey = modelCatalogCacheKey(
     openAiApiKey,
     secondaryOllamaHost,
-    anthropicApiKey
+    anthropicApiKey,
+    ollamaCloudApiKey,
   );
   const cached = modelCatalogCache.get(cacheKey);
   if (cached) return cached;
   const catalog = buildUncachedModelCatalog(
     openAiApiKey,
     secondaryOllamaHost,
-    anthropicApiKey
+    anthropicApiKey,
+    ollamaCloudApiKey,
   );
   modelCatalogCache.set(cacheKey, catalog);
   try {
@@ -1639,17 +1723,29 @@ export async function refreshModelCatalog(
   openAiApiKey?: string,
   secondaryOllamaHost?: string | null,
   anthropicApiKey?: string,
+  ollamaCloudApiKey?: string,
 ): Promise<ModelCatalog> {
   modelCatalogCache.delete(
-    modelCatalogCacheKey(openAiApiKey, secondaryOllamaHost, anthropicApiKey),
+    modelCatalogCacheKey(
+      openAiApiKey,
+      secondaryOllamaHost,
+      anthropicApiKey,
+      ollamaCloudApiKey,
+    ),
   );
-  return buildModelCatalog(openAiApiKey, secondaryOllamaHost, anthropicApiKey);
+  return buildModelCatalog(
+    openAiApiKey,
+    secondaryOllamaHost,
+    anthropicApiKey,
+    ollamaCloudApiKey,
+  );
 }
 
 async function buildUncachedModelCatalog(
   openAiApiKey?: string,
   secondaryOllamaHost?: string | null,
-  anthropicApiKey?: string
+  anthropicApiKey?: string,
+  ollamaCloudApiKey?: string,
 ): Promise<ModelCatalog> {
   const privateSecondaryHost = privateSecondaryOllamaHost(secondaryOllamaHost);
   const [
@@ -1657,14 +1753,19 @@ async function buildUncachedModelCatalog(
     discoveredSecondaryLocal,
     discoveredOpenAi,
     discoveredAnthropic,
+    discoveredDirectOllamaCloud,
   ] = await Promise.all([
     discoverLocalModelIds(config.ollamaHost),
     privateSecondaryHost ? discoverLocalModelIds(privateSecondaryHost) : Promise.resolve([]),
     discoverOpenAiModelIds(openAiApiKey),
     discoverAnthropicModelIds(anthropicApiKey),
+    discoverDirectOllamaCloudModelIds(ollamaCloudApiKey),
   ]);
   const ollamaCloudIds = uniqueModelIdsByLabel(
     discoveredLocal.filter(isOllamaCloudModelId),
+  );
+  const directOllamaCloudIds = uniqueModelIdsByLabel(
+    discoveredDirectOllamaCloud,
   );
   const defaultLocalModel = isOllamaCloudModelId(config.ollamaModel)
     ? config.ollamaAuxiliaryModel || "llama3.2"
@@ -1744,6 +1845,14 @@ async function buildUncachedModelCatalog(
       ),
     ],
     online: [
+      ...directOllamaCloudIds.map((id) =>
+        toCatalogEntry(encodeDirectOllamaCloudModelId(id), "ollama_cloud", "", {
+          label: `${modelLabelFromId(id, "ollama_cloud")} (Ollama Cloud)`,
+          hostLabel: "Ollama Cloud",
+          supportsStructuredOutput: false,
+          executionClass: "online",
+        }),
+      ),
       ...ollamaCloudIds.map((id) =>
         toCatalogEntry(id, "ollama_cloud", "", {
           label: `${modelLabelFromId(id, "ollama_cloud")} (Ollama Cloud)`,
@@ -1767,6 +1876,9 @@ async function buildUncachedModelCatalog(
       local: defaultLocalModel,
       online:
         (openAiApiKey ? OPENAI_DEFAULT_MODEL : null) ??
+        (directOllamaCloudIds[0]
+          ? encodeDirectOllamaCloudModelId(directOllamaCloudIds[0])
+          : null) ??
         ollamaCloudIds[0] ??
         (anthropicApiKey ? ANTHROPIC_DEFAULT_MODEL : OPENAI_DEFAULT_MODEL),
     },
@@ -1830,11 +1942,13 @@ export class LocalOllamaProvider implements LlmProvider {
   private readonly experimentalDualOllama: boolean;
 
   private readonly ollamaCloudExecution: boolean;
+  private readonly ollamaCloudApiKey: string | null;
 
   public constructor(
     options: DualOllamaWorkloadOptions & { ollamaCloudExecution?: boolean } = {},
   ) {
     this.ollamaCloudExecution = options.ollamaCloudExecution === true;
+    this.ollamaCloudApiKey = options.ollamaCloudApiKey?.trim() || null;
     this.name = this.ollamaCloudExecution ? "ollama_cloud" : "local";
     const configuredSecondaryHost = options.secondaryOllamaHost?.trim() || null;
     this.secondaryOllamaHost = privateSecondaryOllamaHost(configuredSecondaryHost);
@@ -1911,7 +2025,9 @@ export class LocalOllamaProvider implements LlmProvider {
     options?: GenerateOptions
   ): Promise<string> {
     const requestedModel = options?.model?.trim() || config.ollamaModel;
-    if (isOllamaCloudModelId(requestedModel) !== this.ollamaCloudExecution) {
+    if (
+      isOllamaCloudModelReference(requestedModel) !== this.ollamaCloudExecution
+    ) {
       throw new LocalModelRequestError("authentication_or_configuration");
     }
     if (
@@ -1924,13 +2040,23 @@ export class LocalOllamaProvider implements LlmProvider {
         { pairedHostUnsafe: true },
       );
     }
-    const target = await resolveLocalOllamaTarget(
-      requestedModel,
-      {
-        secondaryOllamaHost: this.secondaryOllamaHost,
-        experimentalDualOllama: this.experimentalDualOllama,
-      },
-    );
+    const directModel = parseDirectOllamaCloudModelId(requestedModel);
+    if (directModel && !this.ollamaCloudApiKey) {
+      throw new LocalModelRequestError("authentication_or_configuration");
+    }
+    const target = this.ollamaCloudExecution && this.ollamaCloudApiKey
+      ? {
+          host: OLLAMA_CLOUD_API_BASE,
+          model: directModel ?? requestedModel,
+          hostKind: "primary" as const,
+        }
+      : await resolveLocalOllamaTarget(
+          requestedModel,
+          {
+            secondaryOllamaHost: this.secondaryOllamaHost,
+            experimentalDualOllama: this.experimentalDualOllama,
+          },
+        );
     const ollamaHost = target.host;
     const model = target.model;
     const ollamaOptions: Record<string, unknown> = {};
@@ -2005,7 +2131,12 @@ export class LocalOllamaProvider implements LlmProvider {
       if (!this.ollamaCloudExecution) localOllamaActivityObserver?.(target, true);
       response = await fetch(`${ollamaHost}/api/chat`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...(this.ollamaCloudApiKey
+            ? { authorization: `Bearer ${this.ollamaCloudApiKey}` }
+            : {}),
+        },
         body: JSON.stringify(requestBody),
         signal: options?.signal,
       });
@@ -2702,8 +2833,9 @@ export function getAuxiliaryProvider(
 ): LlmProvider {
   const requestedModel = resolveAuxiliaryOllamaModel(prismDefaultLlmModel);
   const cloudAllowed =
-    isOllamaCloudModelId(requestedModel) && providerOptions.onlineEnabled === true;
-  const localAuxiliaryModel = isOllamaCloudModelId(requestedModel)
+    isOllamaCloudModelReference(requestedModel) &&
+    providerOptions.onlineEnabled === true;
+  const localAuxiliaryModel = isOllamaCloudModelReference(requestedModel)
     ? config.ollamaAuxiliaryModel || "llama3.2"
     : requestedModel;
   const localInner = new LocalOllamaProvider(providerOptions);
@@ -2795,10 +2927,14 @@ export function selectProvider(
   preferredProvider: ProviderName,
   openAiApiKey?: string,
   secondaryOllamaHost?: string | null,
-  anthropicApiKey?: string
+  anthropicApiKey?: string,
+  ollamaCloudApiKey?: string,
 ): LlmProvider {
   if (preferredProvider === "ollama_cloud") {
-    return new OllamaCloudProvider({ secondaryOllamaHost });
+    return new OllamaCloudProvider({
+      secondaryOllamaHost,
+      ollamaCloudApiKey,
+    });
   }
   if (preferredProvider === "openai") {
     if (!openAiApiKey) {

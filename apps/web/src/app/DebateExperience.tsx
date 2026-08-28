@@ -193,6 +193,7 @@ import {
   resolveInstalledMansionPresentationV1,
   type InstalledMansionLibraryUpdateV1,
 } from "./installedMansionLibrary";
+import { DEBATE_MYSTERY_MANSION_EXTERIOR_PATHS_V1 } from "./debateMysteryMansionExterior";
 import { PrismCompanionSessionNoteBoundary } from "./prismCompanionPresence";
 import {
   appendAppletSessionNoteToTranscript,
@@ -19463,6 +19464,13 @@ export function DebateExperience(
                         setMysteryNonce(nextMysteryRecipeNonce());
                       }}
                     >
+                      <div
+                        className={mysteryStyles.presetThumbnail}
+                        aria-hidden="true"
+                        style={{
+                          backgroundImage: `url("${DEBATE_MYSTERY_MANSION_EXTERIOR_PATHS_V1["neutral-mansion-v1"][option.id]}")`,
+                        }}
+                      />
                       <strong>{option.id === "compact" ? "Quick" : option.id[0]!.toUpperCase() + option.id.slice(1)}</strong>
                       <em>{!selectedMysteryMansionBundle && mysteryPreset === option.id ? "Selected ✓" : "Choose"}</em>
                       <span>{option.floors} floor{option.floors === 1 ? "" : "s"} · {option.rooms} rooms</span>
@@ -19476,6 +19484,7 @@ export function DebateExperience(
                     disabled={Boolean(inspectedMysterySeed)}
                     onClick={() => { setMysteryMansionSource("new"); setMysteryMansionBundleId(""); setMysteryPreset("custom"); setMysteryNonce(nextMysteryRecipeNonce()); }}
                   >
+                    <div className={`${mysteryStyles.presetThumbnail} ${mysteryStyles.presetCustomThumbnail}`} aria-hidden="true"><span>?</span></div>
                     <strong>Custom</strong><em>{!selectedMysteryMansionBundle && mysteryPreset === "custom" ? "Selected ✓" : "Choose"}</em><span>2–3 floors · 5–18 rooms</span><small>4–8 suspects</small>
                   </button>
                 </div>

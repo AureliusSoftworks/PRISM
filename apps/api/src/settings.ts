@@ -345,6 +345,7 @@ export interface NextSettings {
    */
   openAiKeyIntent: { action: "replace"; plaintext: string } | { action: "clear" } | { action: "keep" };
   anthropicKeyIntent: { action: "replace"; plaintext: string } | { action: "clear" } | { action: "keep" };
+  ollamaCloudKeyIntent: { action: "replace"; plaintext: string } | { action: "clear" } | { action: "keep" };
   elevenLabsKeyIntent: { action: "replace"; plaintext: string } | { action: "clear" } | { action: "keep" };
   braveSearchKeyIntent: { action: "replace"; plaintext: string } | { action: "clear" } | { action: "keep" };
 }
@@ -926,6 +927,10 @@ export function sanitizeAnthropicKeyInput(input: string): string {
   return sanitizeOpenAiKeyInput(input);
 }
 
+export function sanitizeOllamaCloudKeyInput(input: string): string {
+  return sanitizeOpenAiKeyInput(input);
+}
+
 export function sanitizeElevenLabsKeyInput(input: string): string {
   return sanitizeOpenAiKeyInput(input);
 }
@@ -1395,6 +1400,16 @@ export function resolveNextSettings(
     anthropicKeyIntent = { action: "clear" };
   }
 
+  let ollamaCloudKeyIntent: NextSettings["ollamaCloudKeyIntent"] = { action: "keep" };
+  if (typeof body.ollamaCloudApiKey === "string") {
+    const sanitized = sanitizeOllamaCloudKeyInput(body.ollamaCloudApiKey);
+    if (sanitized.length > 0) {
+      ollamaCloudKeyIntent = { action: "replace", plaintext: sanitized };
+    }
+  } else if (body.ollamaCloudApiKey === null) {
+    ollamaCloudKeyIntent = { action: "clear" };
+  }
+
   let elevenLabsKeyIntent: NextSettings["elevenLabsKeyIntent"] = { action: "keep" };
   if (typeof body.elevenLabsApiKey === "string") {
     const sanitized = sanitizeElevenLabsKeyInput(body.elevenLabsApiKey);
@@ -1489,6 +1504,7 @@ export function resolveNextSettings(
     playerAudioVoiceProfile,
     openAiKeyIntent,
     anthropicKeyIntent,
+    ollamaCloudKeyIntent,
     elevenLabsKeyIntent,
     braveSearchKeyIntent,
   };

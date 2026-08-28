@@ -64,6 +64,8 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Back and Continue preserve the draft/u);
     assert.match(step.body, /create a new Quick, Standard, Grand, or Custom house/u);
     assert.match(step.body, /Quick uses the compact exterior family/u);
+    assert.match(step.body, /matching PRISM House exterior covers/u);
+    assert.match(step.body, /Custom uses a question-mark cover/u);
     assert.match(step.body, /Custom derives its family from the frozen public floor and room count/u);
     assert.match(step.body, /whether to use Installed Mansions/u);
     assert.match(step.body, /Use this mansion/u);

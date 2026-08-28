@@ -311,6 +311,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       anthropic_key_ciphertext TEXT,
       anthropic_key_iv TEXT,
       anthropic_key_tag TEXT,
+      ollama_cloud_key_ciphertext TEXT,
+      ollama_cloud_key_iv TEXT,
+      ollama_cloud_key_tag TEXT,
       elevenlabs_key_ciphertext TEXT,
       elevenlabs_key_iv TEXT,
       elevenlabs_key_tag TEXT,
@@ -3944,6 +3947,16 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasAnthropicKeyTag) {
     db.exec("ALTER TABLE users ADD COLUMN anthropic_key_tag TEXT;");
+  }
+  const ollamaCloudKeyColumns = [
+    ["ollama_cloud_key_ciphertext", "TEXT"],
+    ["ollama_cloud_key_iv", "TEXT"],
+    ["ollama_cloud_key_tag", "TEXT"],
+  ] as const;
+  for (const [name, type] of ollamaCloudKeyColumns) {
+    if (!userColumns.some((column) => column.name === name)) {
+      db.exec(`ALTER TABLE users ADD COLUMN ${name} ${type};`);
+    }
   }
   const hasElevenLabsKeyCiphertext = userColumns.some(
     (column) => column.name === "elevenlabs_key_ciphertext",

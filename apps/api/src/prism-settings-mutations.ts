@@ -15,6 +15,7 @@ import { MODEL_VISIBILITY_DEFAULTS_VERSION } from "./model-routing.ts";
 const HUMAN_ONLY_SETTING_KEYS = new Set([
   "openAiApiKey",
   "anthropicApiKey",
+  "ollamaCloudApiKey",
   "elevenLabsApiKey",
   "braveSearchApiKey",
   "devMemoriesEnabled",
