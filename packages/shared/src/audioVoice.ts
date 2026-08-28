@@ -13,6 +13,13 @@ export type VoiceMode = "mute" | "english" | "babble" | "bottish";
 export type SpeechTypeVoiceMode = Exclude<VoiceMode, "mute">;
 export type EnglishVoiceEngine = "builtin" | "elevenlabs";
 
+/** Presentation voice for written, non-TTS Whodunnit dialogue. This remains
+ * separate from the account-wide speech type so English character dialogue
+ * and the Casekeeper's text accompaniment can coexist. */
+export type WhodunnitTextVoiceMode = "off" | "babble" | "bottish";
+export const DEFAULT_WHODUNNIT_TEXT_VOICE_MODE: WhodunnitTextVoiceMode =
+  "bottish";
+
 export const VOICE_EFFECTS = [
   "clean",
   "radio",
@@ -1792,6 +1799,15 @@ export function normalizeVoiceMode(
     value === "english" ||
     value === "babble" ||
     value === "bottish"
+    ? value
+    : fallback;
+}
+
+export function normalizeWhodunnitTextVoiceMode(
+  value: unknown,
+  fallback: WhodunnitTextVoiceMode = DEFAULT_WHODUNNIT_TEXT_VOICE_MODE,
+): WhodunnitTextVoiceMode {
+  return value === "off" || value === "babble" || value === "bottish"
     ? value
     : fallback;
 }

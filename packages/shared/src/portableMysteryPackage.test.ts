@@ -3,9 +3,11 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import {
   canonicalPortablePackageJsonV1,
+  DEFAULT_MANSION_ROOM_ART_CONTRACT_V1,
   portableMysteryPackageMajorIsSupportedV1,
   validateMansionPackageHeaderV1,
   validateMansionPackageManifestV1,
+  validateWhodunnitPackageManifestV1,
 } from "./portableMysteryPackage.ts";
 
 const hash = "a".repeat(64);
@@ -76,6 +78,48 @@ test("mansion manifests accept unknown future fields but reject case-private fie
   assert.match(validateMansionPackageManifestV1(leaked).join("\n"), /culprit is case-private/u);
 });
 
+test("mansion manifests carry one derivable Mosaic contract and optional Illustrated plates", () => {
+  const manifest = mansionManifest();
+  const illustratedHash = "b".repeat(64);
+  (manifest.assets as Array<Record<string, unknown>>).push({
+    ...(manifest.assets as Array<Record<string, unknown>>)[0],
+    id: "room-art-illustrated",
+    archivePath: `assets/${illustratedHash}.png`,
+    sha256: illustratedHash,
+    mimeType: "image/png",
+    width: 1600,
+    height: 900,
+  });
+  (manifest.rooms as Array<Record<string, unknown>>)[0]!.illustratedRoomAssetId =
+    "room-art-illustrated";
+  manifest.roomArt = DEFAULT_MANSION_ROOM_ART_CONTRACT_V1;
+  assert.deepEqual(validateMansionPackageManifestV1(manifest), []);
+
+  manifest.roomArt = {
+    ...DEFAULT_MANSION_ROOM_ART_CONTRACT_V1,
+    mosaic: { ...DEFAULT_MANSION_ROOM_ART_CONTRACT_V1.mosaic, paletteColors: 16 },
+  };
+  assert.match(validateMansionPackageManifestV1(manifest).join("\n"), /roomArt is invalid/u);
+});
+
+test("mansion manifests reject malformed rooms and broken asset references", () => {
+  const invalid = mansionManifest();
+  const rooms = invalid.rooms as Array<Record<string, unknown>>;
+  const assets = invalid.assets as Array<Record<string, unknown>>;
+  rooms[0]!.neighborIds = ["missing-room"];
+  rooms[0]!.roomAssetId = "missing-art";
+  rooms[0]!.slots = [{ id: "slot-1", x: 2, y: 0.5 }];
+  assets.push({ ...assets[0], id: "duplicate-path" });
+  invalid.investigationThemeAssetId = "room-art";
+
+  const errors = validateMansionPackageManifestV1(invalid).join("\n");
+  assert.match(errors, /neighborIds references an invalid room/u);
+  assert.match(errors, /roomAssetId does not reference compatible room art/u);
+  assert.match(errors, /slots\[0\] is invalid/u);
+  assert.match(errors, /archivePath is duplicated/u);
+  assert.match(errors, /investigationThemeAssetId does not reference music/u);
+});
+
 test("unsupported major versions fail with a compatibility message", () => {
   const manifest = mansionManifest();
   manifest.formatVersion = { major: 2, minor: 0 };
@@ -103,4 +147,46 @@ test("public package headers contain bounded compatibility metadata", () => {
     encryptionMode: "spoiler_seal",
     creatorSignature: null,
   }), []);
+});
+
+test("portable package migration keeps additive minor fields but enforces capacity", () => {
+  const mansion = mansionManifest();
+  mansion.formatVersion = { major: 1, minor: 7 };
+  mansion.futureReplayHint = { camera: "wide" };
+  assert.deepEqual(validateMansionPackageManifestV1(mansion), []);
+
+  const whodunnit = {
+    schema: "prism-whodunnit-package-v1",
+    formatVersion: { major: 1, minor: 7 },
+    packageId: "migration-fixture",
+    title: "Migration fixture",
+    description: "Additive minor-version fixture.",
+    creator: { name: "PRISM", id: null, url: null },
+    provenance: { createdAt: "2026-08-27T00:00:00.000Z", prismVersion: "0.15.0", generatedWith: [] },
+    license: { name: "Private use", url: null, allowsRedistribution: false },
+    contentWarnings: [],
+    compatibility: { minimumFormatMajor: 1, maximumFormatMajor: 1, minimumPrismVersion: null },
+    mansionManifest: mansion,
+    mansionManifestSha256: hash,
+    cast: [],
+    publicCase: {},
+    privateCase: {},
+    proofContract: {},
+    dialogueGraph: {},
+    court: {},
+    evidenceAssignments: {},
+    voices: [],
+    assets: mansion.assets,
+    runtime: { session: {}, compiledPublicState: {}, audioManifest: null, assetBindings: [] },
+    silent: true,
+    futureCameraContract: { version: 2 },
+  };
+  assert.deepEqual(validateWhodunnitPackageManifestV1(whodunnit), []);
+  whodunnit.cast = Array.from({ length: 65 }, (_, index) => ({
+    id: `cast-${index}`,
+    name: `Cast ${index}`,
+    presentation: {},
+    voiceId: null,
+  }));
+  assert.match(validateWhodunnitPackageManifestV1(whodunnit).join("\n"), /cast exceeds the portable capacity/u);
 });

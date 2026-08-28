@@ -46,10 +46,16 @@ import {
   mysteryInvestigationMusicMix,
   mysteryInvestigationMusicSessionActive,
 } from "./debateMysteryMusic";
+import { mysteryInvestigationTargetAt } from "./debateMysteryRoomArt";
 import {
-  mysteryInvestigationTargetAt,
-  mysteryRoomArtworkSrc,
-} from "./debateMysteryRoomArt";
+  DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE,
+  readWhodunnitInvestigationArtStyle,
+  whodunnitBundledRoomArtPath,
+  whodunnitInvestigationAvatarPresentation,
+  whodunnitSavedRoomArtUrl,
+  writeWhodunnitInvestigationArtStyle,
+  type WhodunnitInvestigationArtStyle,
+} from "./debateMysteryInvestigationArt";
 import {
   debateMysteryBundledEvidenceAssetPath,
   debateMysteryBundledInventoryAssetPath,
@@ -597,6 +603,8 @@ export function DebateMysteryPlay(
   const [notebook, setNotebook] = useState<DebateMysteryNotebookV2 | null>(null);
   const [deskOpen, setDeskOpen] = useState(false);
   const [caseFileOpen, setCaseFileOpen] = useState(false);
+  const [investigationArtStyle, setInvestigationArtStyle] =
+    useState<WhodunnitInvestigationArtStyle>(DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE);
   const [spatialView, setSpatialView] = useState<"mansion" | "room">(
     state.activeActivity ? "room" : "mansion",
   );
@@ -627,6 +635,13 @@ export function DebateMysteryPlay(
     action: string;
     occurredAt: string;
   }>>([]);
+  useEffect(() => {
+    setInvestigationArtStyle(readWhodunnitInvestigationArtStyle(window.localStorage));
+  }, []);
+  const selectInvestigationArtStyle = useCallback((style: WhodunnitInvestigationArtStyle): void => {
+    setInvestigationArtStyle(style);
+    writeWhodunnitInvestigationArtStyle(window.localStorage, style);
+  }, []);
 
   const currentRoom =
     state.rooms.find((room) => room.id === state.currentRoomId) ?? state.rooms[0]!;
@@ -639,7 +654,12 @@ export function DebateMysteryPlay(
   const selectedRoom =
     state.rooms.find((room) => room.id === selectedRoomId) ?? currentRoom;
   const template = roomTemplate(currentRoom.templateId);
-  const roomArtworkSrc = mysteryRoomArtworkSrc(currentRoom.imageId, template);
+  const roomArtworkSrc = currentRoom.imageId
+    ? whodunnitSavedRoomArtUrl(currentRoom.imageId, investigationArtStyle)
+    : whodunnitBundledRoomArtPath(template.bundledAssetPath, investigationArtStyle);
+  const interviewAvatarPresentation = whodunnitInvestigationAvatarPresentation(
+    investigationArtStyle,
+  );
   const activeRegions = template.regions.filter(
     (region) => currentRoom.activeRegionIds.includes(region.id),
   );
@@ -2116,7 +2136,13 @@ export function DebateMysteryPlay(
           <section className={styles.roomPanel} data-kind={currentRoom.kind ?? "undiscovered"} data-focus={suspectRoomFocus}>
             <header>
               <div><p className={styles.eyebrow}>{(currentRoom.kind ?? "room").replace("_", " ")}</p><h2>{currentRoom.name ?? "Undiscovered room"}</h2></div>
-              <div className={styles.roomHeaderActions}>{suspectRoomFocus === "search" ? <button type="button" className={styles.leaveInvestigation} data-ui-sfx="none" disabled={busy} onClick={() => void finishActiveActivity()}>← Return to room</button> : suspectRoomFocus === "observe" ? <button type="button" className={styles.backToMansion} data-ui-sfx="none" onClick={showMansion}>← Mansion</button> : null}</div>
+              <div className={styles.roomHeaderActions}>
+                <div className={styles.roomArtStyleToggle} role="group" aria-label="Investigation room art" data-tutorial-target="mystery-v2-room-art-style">
+                  <button type="button" aria-pressed={investigationArtStyle === "mosaic"} onClick={() => selectInvestigationArtStyle("mosaic")}>Mosaic</button>
+                  <button type="button" aria-pressed={investigationArtStyle === "illustrated"} onClick={() => selectInvestigationArtStyle("illustrated")}>Illustrated</button>
+                </div>
+                {suspectRoomFocus === "search" ? <button type="button" className={styles.leaveInvestigation} data-ui-sfx="none" disabled={busy} onClick={() => void finishActiveActivity()}>← Return to room</button> : suspectRoomFocus === "observe" ? <button type="button" className={styles.backToMansion} data-ui-sfx="none" onClick={showMansion}>← Mansion</button> : null}
+              </div>
               {suspectRoomFocus === "search" ? <aside className={styles.roomCaseKit} data-mystery-room-control data-mystery-lens-chrome data-tutorial-target="whodunnit-room-case-kit" aria-label="Case Kit">
                 <header><strong>Case Kit</strong><span>{usableAccessItems.length}</span></header>
                 {usableAccessItems.length ? <div>{usableAccessItems.map((item) => (
@@ -2266,7 +2292,7 @@ export function DebateMysteryPlay(
               {currentSuspect && suspectRoomFocus === "interview" ? (
                 <div className={styles.interviewStage}>
                   <div className={styles.suspectPresence} data-mystery-interview-interactive style={{ "--suspect-color": currentSuspect.color ?? "#9c7cff" } as CSSProperties}>
-                    <span className={styles.suspectAvatar} data-tutorial-target="whodunnit-hd-interview">{props.renderMysteryBotAvatar(mysteryBotForSuspect(currentSuspect), "full", { demeanor: "suspect", thinking: interviewGenerating, talking: interviewSpeechTiming !== null, speechTiming: interviewSpeechTiming, blinkEnabled: true })}</span>
+                    <span className={styles.suspectAvatar} data-art-style={investigationArtStyle} data-tutorial-target="whodunnit-hd-interview">{props.renderMysteryBotAvatar(mysteryBotForSuspect(currentSuspect), interviewAvatarPresentation, { demeanor: "suspect", thinking: interviewGenerating, talking: interviewSpeechTiming !== null, speechTiming: interviewSpeechTiming, blinkEnabled: true })}</span>
                     <strong>{currentSuspect.name}</strong><small>Opening is free · each submitted question costs 1 action</small>
                   </div>
                   <section className={styles.interviewViewport} data-mystery-interview-interactive aria-label={`Interview with ${currentSuspect.name}`} onKeyDown={(event) => {

@@ -40,6 +40,7 @@ export const PRISM_JOURNALED_SETTING_KEYS = new Set([
   "experimentalAllModelEffortEnabled",
   "coffeeExperimentalTableAngleEnabled",
   "debateWhodunnitReuseSynthesizedExhibits",
+  "debateWhodunnitTextVoiceMode",
   "psychicModeEnabled",
   "autoFallbackChain",
   "onlineAutoProviderBias",
@@ -116,6 +117,7 @@ const PERSISTED_SETTING_COLUMNS = [
   "experimental_all_model_effort_enabled",
   "coffee_experimental_table_angle_enabled",
   "debate_whodunnit_reuse_synthesized_exhibits",
+  "debate_whodunnit_text_voice_mode",
   "psychic_mode_enabled",
   "auto_switch_model",
   "auto_fallback_chain",
@@ -238,6 +240,9 @@ function currentSettings(
     ),
     debateWhodunnitReuseSynthesizedExhibits: Number(
       row.debate_whodunnit_reuse_synthesized_exhibits,
+    ),
+    debateWhodunnitTextVoiceMode: nullableString(
+      row.debate_whodunnit_text_voice_mode,
     ),
     psychicModeEnabled: Number(row.psychic_mode_enabled),
     autoSwitchModel: Number(row.auto_switch_model),
@@ -406,6 +411,7 @@ function persistedValues(
       next.coffeeExperimentalTableAngleEnabled,
     debate_whodunnit_reuse_synthesized_exhibits:
       next.debateWhodunnitReuseSynthesizedExhibits,
+    debate_whodunnit_text_voice_mode: next.debateWhodunnitTextVoiceMode,
     psychic_mode_enabled: next.psychicModeEnabled,
     auto_switch_model: next.autoSwitchModel,
     auto_fallback_chain: next.autoFallbackChain,

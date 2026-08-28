@@ -1,4 +1,7 @@
-import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1 } from "@localai/shared";
+import {
+  DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  type WhodunnitTextVoiceMode,
+} from "@localai/shared";
 import { enqueueBottishVoice } from "./bottishVoice.ts";
 import { routeAudioElementToPrismOutput } from "./replayAudioMasterCapture.ts";
 import {
@@ -29,19 +32,25 @@ export interface DebateMysterySfxVoice {
   url: string;
 }
 
-export const DEBATE_MYSTERY_TEXT_BOTTISH_VOLUME_RATIO = 0.28;
+export const DEBATE_MYSTERY_TEXT_VOICE_VOLUME_RATIO = 0.28;
+/** @deprecated Prefer the mode-neutral text voice ratio. */
+export const DEBATE_MYSTERY_TEXT_BOTTISH_VOLUME_RATIO =
+  DEBATE_MYSTERY_TEXT_VOICE_VOLUME_RATIO;
 
-export function debateMysteryTextBottishShouldStart(args: {
+export function debateMysteryTextVoiceShouldStart(args: {
   audible: boolean;
   delivery?: "spoken" | "text_only" | "anonymous_babble";
   key: string | null;
+  mode: WhodunnitTextVoiceMode;
   startedKey: string | null;
+  startedMode: WhodunnitTextVoiceMode | null;
   streaming: boolean;
   visibleText: string;
 }): boolean {
   return Boolean(
     args.key &&
-    args.startedKey !== args.key &&
+    args.mode !== "off" &&
+    (args.startedKey !== args.key || args.startedMode !== args.mode) &&
     args.delivery === "text_only" &&
     args.streaming &&
     !args.audible &&
@@ -49,33 +58,79 @@ export function debateMysteryTextBottishShouldStart(args: {
   );
 }
 
-export function debateMysteryTextBottishDurationMs(text: string): number {
-  return Math.max(1_200, text.length * 34);
+export function debateMysteryTextVoiceShouldStop(args: {
+  audible: boolean;
+  delivery?: "spoken" | "text_only" | "anonymous_babble";
+  key: string | null;
+  mode: WhodunnitTextVoiceMode;
+  startedKey: string | null;
+  startedMode: WhodunnitTextVoiceMode | null;
+  streaming: boolean;
+}): boolean {
+  return Boolean(
+    args.startedKey &&
+    (
+      args.startedKey !== args.key ||
+      args.mode === "off" ||
+      args.startedMode !== args.mode ||
+      args.delivery !== "text_only" ||
+      !args.streaming ||
+      args.audible
+    ),
+  );
 }
 
-export async function playDebateMysteryTextBottish(args: {
+export async function playDebateMysteryTextVoice(args: {
   enabled: boolean;
+  mode: WhodunnitTextVoiceMode;
   seed: string;
+  signal?: AbortSignal;
   text: string;
   volume: number;
+  play?: (args: {
+    mode: Exclude<WhodunnitTextVoiceMode, "off">;
+    seed: string;
+    signal?: AbortSignal;
+    text: string;
+    volume: number;
+  }) => Promise<boolean>;
 }): Promise<boolean> {
   const volume = Math.max(0, Math.min(1, args.volume));
-  if (!args.enabled || volume <= 0 || !args.text.trim()) return false;
+  if (
+    !args.enabled ||
+    args.mode === "off" ||
+    volume <= 0 ||
+    !args.text.trim()
+  ) return false;
   try {
+    const playbackVolume = volume * DEBATE_MYSTERY_TEXT_VOICE_VOLUME_RATIO;
+    if (args.play) {
+      return args.play({
+        mode: args.mode,
+        seed: args.seed,
+        signal: args.signal,
+        text: args.text,
+        volume: playbackVolume,
+      });
+    }
+    if (args.mode !== "bottish") return false;
     await enqueueBottishVoice(
       args.text,
       DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
       args.seed,
       true,
-      volume * DEBATE_MYSTERY_TEXT_BOTTISH_VOLUME_RATIO,
-      undefined,
-      { targetDurationMs: debateMysteryTextBottishDurationMs(args.text) },
+      playbackVolume,
     );
     return true;
   } catch {
     return false;
   }
 }
+
+export const debateMysteryTextBottishShouldStart =
+  debateMysteryTextVoiceShouldStart;
+export const debateMysteryTextBottishShouldStop =
+  debateMysteryTextVoiceShouldStop;
 
 export function debateMysteryDialoguePresentationDismissed(
   previousKey: string | null,

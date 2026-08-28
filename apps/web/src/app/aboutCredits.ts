@@ -326,6 +326,13 @@ export const ABOUT_CREDIT_GROUPS: readonly AboutCreditGroup[] = [
         license: "PRISM production asset",
       },
       {
+        id: "prism-mansion-acoustics",
+        name: "PRISM Mansion Acoustics",
+        description:
+          "Locally produced, clue-neutral Opus atmosphere fixtures and the content-addressed acoustic-template system used by Whodunnit mansions.",
+        license: "PRISM production asset",
+      },
+      {
         id: "troll-rickroll",
         name: "Never Gonna Give You Up — Rick Astley",
         description:

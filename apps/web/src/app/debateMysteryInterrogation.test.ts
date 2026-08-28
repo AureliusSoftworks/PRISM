@@ -2,23 +2,73 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   WHODUNNIT_INTERROGATION_BEAT_MS,
+  WHODUNNIT_INVESTIGATION_DIALOGUE_GRACE_MS,
   nextWhodunnitInterrogationPhase,
   startWhodunnitInterrogation,
   whodunnitActorDriftTiming,
   whodunnitCaptionRevealIsPending,
   whodunnitCaptionSpeechText,
+  whodunnitCourtCalloutPresentationVisible,
   whodunnitCourtDialogueGestureCrossedPresentation,
   whodunnitCourtDialogueFinishDecision,
   whodunnitCourtPresentationVisible,
   whodunnitCourtPresentedWitnessSeatId,
   whodunnitDialogueGestureControlIsInteractive,
   whodunnitDialogueGestureDecision,
+  whodunnitInvestigationDialogueGraceMs,
+  whodunnitInvestigationDialogueShouldAutoAdvance,
   whodunnitInterrogationAudioOwnsMouth,
   whodunnitInterrogationBeatMs,
   whodunnitInterrogationCompletionIsCurrent,
   whodunnitInterrogationFinishDecision,
   whodunnitInterrogationMayStartAudio,
 } from "./debateMysteryInterrogation.ts";
+
+test("holds spoken dialogue briefly and scales text-only grace with visible length", () => {
+  assert.equal(whodunnitInvestigationDialogueGraceMs({
+    delivery: "spoken",
+    reducedMotion: false,
+    text: "A very long spoken line still follows its real audio clock.",
+  }), WHODUNNIT_INVESTIGATION_DIALOGUE_GRACE_MS.spoken);
+  const shortTextGrace = whodunnitInvestigationDialogueGraceMs({
+    delivery: "text_only",
+    reducedMotion: false,
+    text: "A note.",
+  });
+  const longTextGrace = whodunnitInvestigationDialogueGraceMs({
+    delivery: "text_only",
+    reducedMotion: false,
+    text: "A longer written observation with several details that deserve a calmer reading interval.",
+  });
+  assert.equal(shortTextGrace, WHODUNNIT_INVESTIGATION_DIALOGUE_GRACE_MS.textMin);
+  assert.ok(longTextGrace > shortTextGrace);
+  assert.equal(
+    whodunnitInvestigationDialogueGraceMs({
+      delivery: "text_only",
+      reducedMotion: true,
+      text: "A note.",
+    }),
+    shortTextGrace + WHODUNNIT_INVESTIGATION_DIALOGUE_GRACE_MS.reducedMotionExtra,
+  );
+});
+
+test("auto-advances only settled non-interactive Investigation dialogue", () => {
+  const settled = {
+    busy: false,
+    hasActiveAudio: false,
+    hasDialogue: true,
+    playPhase: "investigation",
+    requiresPlayerInput: false,
+    roomView: "room",
+    streaming: false,
+  };
+  assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance(settled), true);
+  assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance({ ...settled, hasActiveAudio: true }), false);
+  assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance({ ...settled, streaming: true }), false);
+  assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance({ ...settled, requiresPlayerInput: true }), false);
+  assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance({ ...settled, playPhase: "trial" }), false);
+  assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance({ ...settled, roomView: "mansion" }), false);
+});
 
 test("fills streaming dialogue before a later gesture advances it", () => {
   assert.equal(whodunnitDialogueGestureDecision({
@@ -275,6 +325,21 @@ test("keeps a verdict-bound Court exchange visible until its queue clears", () =
     hasQueuedDialogue: false,
     playPhase: "verdict",
   }), false);
+});
+
+test("holds the verdict callout until the final Court exchange clears", () => {
+  assert.equal(whodunnitCourtCalloutPresentationVisible({
+    courtPresentationActive: true,
+    playPhase: "trial",
+  }), true);
+  assert.equal(whodunnitCourtCalloutPresentationVisible({
+    courtPresentationActive: true,
+    playPhase: "verdict",
+  }), false);
+  assert.equal(whodunnitCourtCalloutPresentationVisible({
+    courtPresentationActive: false,
+    playPhase: "verdict",
+  }), true);
 });
 
 test("keeps legacy response-only Talk graphs playable", () => {

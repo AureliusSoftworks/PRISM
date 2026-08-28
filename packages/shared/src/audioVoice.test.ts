@@ -45,6 +45,7 @@ import {
   resolveBotPronunciationMapPointV1,
   resolveLocalVoicePronunciationLocale,
   normalizeVoiceMode,
+  normalizeWhodunnitTextVoiceMode,
   resolveVoicePlaybackTransform,
   resolveBotVoiceCharacter,
   parseStoredBotAudioVoiceProfileV1,
@@ -237,6 +238,10 @@ describe("audio voice normalization", () => {
     assert.equal(normalizeSpeechTypeVoiceMode("mute"), "english");
     assert.equal(normalizeSpeechTypeVoiceMode("babble"), "babble");
     assert.equal(normalizeSpeechTypeVoiceMode("robot", "bottish"), "bottish");
+    assert.equal(normalizeWhodunnitTextVoiceMode("off"), "off");
+    assert.equal(normalizeWhodunnitTextVoiceMode("babble"), "babble");
+    assert.equal(normalizeWhodunnitTextVoiceMode("bottish"), "bottish");
+    assert.equal(normalizeWhodunnitTextVoiceMode("robot"), "bottish");
     assert.equal(normalizeEnglishVoiceEngine("elevenlabs"), "elevenlabs");
     assert.equal(normalizeEnglishVoiceEngine("remote"), "builtin");
   });

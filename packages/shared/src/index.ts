@@ -764,6 +764,7 @@ export {
   resolveBotAudioVoiceProfileV1,
   resolveBotPronunciationMapPointV1,
   normalizeVoiceMode,
+  normalizeWhodunnitTextVoiceMode,
   normalizeVoiceDeliveryMood,
   elevenLabsVoiceDirectionForMood,
   expectedVoicePlaybackDurationMs,
@@ -835,6 +836,8 @@ export {
   type ElevenLabsVoiceEffect,
   type VoiceEffect,
   type VoiceMode,
+  type WhodunnitTextVoiceMode,
+  DEFAULT_WHODUNNIT_TEXT_VOICE_MODE,
 } from "./audioVoice.js";
 
 export {
@@ -3882,6 +3885,7 @@ export * from "./debate.js";
 export * from "./debateMystery.js";
 export * from "./debateMysteryV2.js";
 export * from "./portableMysteryPackage.js";
+export * from "./mansionAcoustics.js";
 export * from "./debateParticipation.js";
 export * from "./debateChairFavorability.js";
 export * from "./coffeeGroupSetup.js";

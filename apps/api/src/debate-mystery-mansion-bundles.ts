@@ -1,14 +1,18 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
+  debateMysteryAcousticThemePaletteV1,
+  normalizeDebateMysteryAtmosphereContractV1,
   debateMysteryMansionBundleEligibleV2,
   type DebateMysteryHouseStyleV2,
   type DebateMysteryMansionAssetV1,
   type DebateMysteryMansionBundleRoomV1,
   type DebateMysteryMansionBundleSummaryV1,
   type DebateWhodunnitFormatStateV2,
+  type PortableMansionInstallationMetadataV1,
 } from "@localai/shared";
 import { getDebateSession } from "./debate.ts";
+import { decryptBytes } from "./security.ts";
 import { HttpError } from "./utils.http.ts";
 
 interface MansionBundleRow {
@@ -21,8 +25,24 @@ interface MansionBundleRow {
   suspect_count: number;
   style_json: string;
   layout_json: string;
+  portable_metadata_json: string | null;
+  portable_payload_sha256: string | null;
   created_at: string;
   updated_at: string;
+}
+
+function parsePortableMetadata(
+  value: string | null,
+): PortableMansionInstallationMetadataV1 | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as PortableMansionInstallationMetadataV1;
+    return parsed && typeof parsed.packageId === "string" && typeof parsed.payloadSha256 === "string"
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function parseStyle(value: string): DebateMysteryHouseStyleV2 {
@@ -40,6 +60,19 @@ function parseStyle(value: string): DebateMysteryHouseStyleV2 {
     id: parsed.id,
     label: parsed.label,
     promptContract: parsed.promptContract,
+    atmosphere: normalizeDebateMysteryAtmosphereContractV1(
+      parsed.atmosphere,
+      `${parsed.label} ${parsed.promptContract}`,
+    ),
+    acousticThemePaletteId:
+      typeof parsed.acousticThemePaletteId === "string" && parsed.acousticThemePaletteId.trim()
+        ? parsed.acousticThemePaletteId.trim().slice(0, 200)
+        : debateMysteryAcousticThemePaletteV1(`${parsed.label} ${parsed.promptContract}`),
+    bespokeAmbienceRequested: parsed.bespokeAmbienceRequested === true,
+    ambience:
+      parsed.ambience && typeof parsed.ambience === "object" && parsed.ambience.version === 1
+        ? parsed.ambience
+        : null,
   };
 }
 
@@ -141,6 +174,7 @@ function summary(
     houseStyle: parseStyle(row.style_json),
     rooms: parseRooms(row.layout_json),
     assets: aggregateAssets(db, row.user_id, row.id),
+    portable: parsePortableMetadata(row.portable_metadata_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -153,7 +187,8 @@ function bundleRow(
 ): MansionBundleRow {
   const row = db.prepare(
     `SELECT id, user_id, source_session_id, name, floors, total_rooms,
-            suspect_count, style_json, layout_json, created_at, updated_at
+            suspect_count, style_json, layout_json, portable_metadata_json,
+            portable_payload_sha256, created_at, updated_at
        FROM debate_mystery_mansion_bundles
       WHERE id = ? AND user_id = ?`,
   ).get(bundleId, userId) as MansionBundleRow | undefined;
@@ -175,12 +210,75 @@ export function listDebateMysteryMansionBundlesV2(
 ): DebateMysteryMansionBundleSummaryV1[] {
   const rows = db.prepare(
     `SELECT id, user_id, source_session_id, name, floors, total_rooms,
-            suspect_count, style_json, layout_json, created_at, updated_at
+            suspect_count, style_json, layout_json, portable_metadata_json,
+            portable_payload_sha256, created_at, updated_at
        FROM debate_mystery_mansion_bundles
       WHERE user_id = ?
       ORDER BY updated_at DESC, id`,
   ).all(userId) as unknown as MansionBundleRow[];
   return rows.map((row) => summary(db, row));
+}
+
+export function deleteDebateMysteryMansionBundleV2(
+  db: DatabaseSync,
+  userId: string,
+  bundleId: string,
+): void {
+  bundleRow(db, userId, bundleId);
+  const sessions = db.prepare(
+    "SELECT session_json FROM debate_sessions WHERE user_id = ? AND status <> 'cancelled'",
+  ).all(userId) as Array<{ session_json: string }>;
+  const inUse = sessions.some((row) => {
+    try {
+      const session = JSON.parse(row.session_json) as {
+        formatState?: { config?: { mansionBundleId?: string | null } };
+      };
+      return session.formatState?.config?.mansionBundleId === bundleId;
+    } catch {
+      return false;
+    }
+  });
+  if (inUse) {
+    throw new HttpError(409, "That mansion is still used by a Whodunnit in Archive.");
+  }
+  db.prepare(
+    "DELETE FROM debate_mystery_mansion_bundles WHERE id = ? AND user_id = ?",
+  ).run(bundleId, userId);
+}
+
+export function getDebateMysteryMansionAssetFileV1(
+  db: DatabaseSync,
+  userKey: Buffer,
+  userId: string,
+  bundleId: string,
+  assetId: string,
+): { mimeType: DebateMysteryMansionAssetV1["mimeType"]; bytes: Buffer } {
+  const row = db.prepare(
+    `SELECT assets.mime_type, assets.ciphertext, assets.cipher_iv, assets.cipher_tag
+       FROM debate_mystery_mansion_asset_refs AS refs
+       JOIN debate_mystery_mansion_assets AS assets
+         ON assets.id = refs.asset_id AND assets.user_id = refs.user_id
+      WHERE refs.bundle_id = ? AND refs.user_id = ? AND assets.id = ?
+      LIMIT 1`,
+  ).get(bundleId, userId, assetId) as {
+    mime_type: DebateMysteryMansionAssetV1["mimeType"];
+    ciphertext: Buffer;
+    cipher_iv: Buffer;
+    cipher_tag: Buffer;
+  } | undefined;
+  if (!row) throw new HttpError(404, "That mansion asset was not found.");
+  const bytes = decryptBytes({
+    ciphertext: row.ciphertext,
+    iv: row.cipher_iv,
+    tag: row.cipher_tag,
+  }, userKey);
+  const mimeType = Buffer.from(bytes.subarray(0, 4)).toString("ascii") === "OggS"
+    ? "audio/ogg" as const
+    : row.mime_type;
+  return {
+    mimeType,
+    bytes,
+  };
 }
 
 interface ReusableVaultAssetRow {
@@ -194,6 +292,32 @@ interface ReusableVaultAssetRow {
   byte_size: number;
   provider: string | null;
   model: string | null;
+  review_json: string;
+}
+
+function reusableVaultAssetDimensions(
+  row: ReusableVaultAssetRow,
+): { width: number; height: number } {
+  try {
+    const review = JSON.parse(row.review_json) as {
+      pixels?: { width?: unknown; height?: unknown };
+    };
+    if (
+      typeof review.pixels?.width === "number" &&
+      Number.isInteger(review.pixels.width) &&
+      typeof review.pixels.height === "number" &&
+      Number.isInteger(review.pixels.height)
+    ) {
+      return { width: review.pixels.width, height: review.pixels.height };
+    }
+  } catch {
+    // Legacy rows did not preserve inspected dimensions.
+  }
+  return row.kind === "room"
+    ? row.subject_id.endsWith(":illustrated-v1")
+      ? { width: 1600, height: 900 }
+      : { width: 1536, height: 1024 }
+    : { width: 1024, height: 1024 };
 }
 
 /** Replaces one bundle's protected asset references inside the caller's save
@@ -206,7 +330,7 @@ export function replaceProtectedDebateMysteryMansionAssetsV1(
 ): void {
   const rows = db.prepare(
     `SELECT subject_id, kind, mime_type, ciphertext, cipher_iv, cipher_tag,
-            sha256, byte_size, provider, model
+            sha256, byte_size, provider, model, review_json
        FROM debate_mystery_asset_vault
       WHERE user_id = ? AND session_id = ? AND status = 'ready'
         AND ciphertext IS NOT NULL AND cipher_iv IS NOT NULL
@@ -214,14 +338,17 @@ export function replaceProtectedDebateMysteryMansionAssetsV1(
       ORDER BY kind, subject_id`,
   ).all(userId, sessionId) as unknown as ReusableVaultAssetRow[];
   db.prepare(
-    "DELETE FROM debate_mystery_mansion_asset_refs WHERE bundle_id = ? AND user_id = ?",
+    `DELETE FROM debate_mystery_mansion_asset_refs
+      WHERE bundle_id = ? AND user_id = ? AND role IN ('room', 'prop')`,
   ).run(bundleId, userId);
   const insertAsset = db.prepare(
     `INSERT INTO debate_mystery_mansion_assets
        (id, user_id, ciphertext, cipher_iv, cipher_tag, sha256, byte_size,
-        mime_type, provider, model, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        mime_type, width, height, duration_ms, provider, model, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
      ON CONFLICT(user_id, sha256) DO UPDATE SET
+       width = COALESCE(debate_mystery_mansion_assets.width, excluded.width),
+       height = COALESCE(debate_mystery_mansion_assets.height, excluded.height),
        updated_at = excluded.updated_at`,
   );
   const assetId = db.prepare(
@@ -235,6 +362,7 @@ export function replaceProtectedDebateMysteryMansionAssetsV1(
   const now = new Date().toISOString();
   let propIndex = 0;
   for (const row of rows) {
+    const dimensions = reusableVaultAssetDimensions(row);
     insertAsset.run(
       randomUUID(),
       userId,
@@ -244,6 +372,8 @@ export function replaceProtectedDebateMysteryMansionAssetsV1(
       row.sha256,
       row.byte_size,
       row.mime_type,
+      dimensions.width,
+      dimensions.height,
       row.provider,
       row.model,
       now,

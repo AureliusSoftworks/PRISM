@@ -1480,6 +1480,7 @@ import {
   premiumVoiceNativeAccentHintFromLabels,
   normalizeVoiceEffect,
   normalizeVoiceMode,
+  normalizeWhodunnitTextVoiceMode,
   voiceDeliveryRateForMood,
   voicePerformanceTextFromActionCues,
   voicePerformancePlanFromText,
@@ -1545,6 +1546,7 @@ import {
   type SlateHandoffCommitRequest,
   type SlateHandoffPreview,
   type VoiceMode,
+  type WhodunnitTextVoiceMode,
   type AutoFallbackChainV1,
   type AutoFallbackModelRef,
   type AutoRecoveryTraceV1,
@@ -10573,6 +10575,7 @@ interface UserSettings {
   experimentalDualOllamaEnabled: boolean;
   experimentalAllModelEffortEnabled: boolean;
   debateWhodunnitReuseSynthesizedExhibits: boolean;
+  debateWhodunnitTextVoiceMode: WhodunnitTextVoiceMode;
   modelEffortPreferences: ModelReasoningEffortPreferenceV1[];
   modelTurboPreferences: ModelTurboPreferenceV1[];
   psychicModeEnabled: boolean;
@@ -80784,6 +80787,9 @@ function HomeContent(): React.JSX.Element {
         d.settings.experimentalAllModelEffortEnabled === true,
       debateWhodunnitReuseSynthesizedExhibits:
         d.settings.debateWhodunnitReuseSynthesizedExhibits === true,
+      debateWhodunnitTextVoiceMode: normalizeWhodunnitTextVoiceMode(
+        d.settings.debateWhodunnitTextVoiceMode,
+      ),
       modelEffortPreferences: Array.isArray(d.settings.modelEffortPreferences)
         ? d.settings.modelEffortPreferences
         : [],
@@ -93385,6 +93391,37 @@ function HomeContent(): React.JSX.Element {
         err instanceof Error
           ? err.message
           : "Could not update Whodunnit exhibit reuse.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function persistDebateWhodunnitTextVoiceMode(
+    debateWhodunnitTextVoiceMode: WhodunnitTextVoiceMode,
+  ) {
+    if (!settings || busy) return;
+    const previous = settings;
+    setSettings({ ...settings, debateWhodunnitTextVoiceMode });
+    setBusy(true);
+    setPanelError(null);
+    setPanelNotice(null);
+    try {
+      await api("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ debateWhodunnitTextVoiceMode }),
+      });
+      setPanelNotice(
+        debateWhodunnitTextVoiceMode === "off"
+          ? "Written Whodunnit dialogue is now silent."
+          : `Written Whodunnit dialogue now uses ${debateWhodunnitTextVoiceMode === "babble" ? "Babble" : "Bottish"}.`,
+      );
+    } catch (err) {
+      setSettings(previous);
+      setPanelError(
+        err instanceof Error
+          ? err.message
+          : "Could not update the Whodunnit text voice.",
       );
     } finally {
       setBusy(false);
@@ -121221,6 +121258,54 @@ function HomeContent(): React.JSX.Element {
                       </section>
                       <section
                         className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
+                        data-settings-section="debate-whodunnit-voice"
+                        aria-labelledby="debate-whodunnit-text-voice-settings-title"
+                      >
+                        <header className={styles.settingsSectionHeader}>
+                          <div>
+                            <span className={styles.settingsEyebrow}>
+                              Whodunnit
+                            </span>
+                            <h4 id="debate-whodunnit-text-voice-settings-title">
+                              Written dialogue voice
+                            </h4>
+                          </div>
+                          <div className={styles.settingsSectionHeaderAside}>
+                            <small>Spoken TTS stays unchanged</small>
+                          </div>
+                        </header>
+                        <label
+                          className={styles.settingsFieldFull}
+                          data-tutorial-target="whodunnit-text-voice-setting"
+                        >
+                          <span>Text-stream accompaniment</span>
+                          <select
+                            value={settings.debateWhodunnitTextVoiceMode}
+                            aria-label="Whodunnit text voice"
+                            disabled={busy}
+                            onChange={(event) =>
+                              void persistDebateWhodunnitTextVoiceMode(
+                                normalizeWhodunnitTextVoiceMode(
+                                  event.currentTarget.value,
+                                ),
+                              )
+                            }
+                          >
+                            <option value="off">Off</option>
+                            <option value="babble">Babble</option>
+                            <option value="bottish">Bottish · Default</option>
+                          </select>
+                          <small>
+                            Chooses the voice that follows written Casekeeper
+                            observations and other non-spoken lines while they
+                            appear. Anonymous Casekeeper speech keeps its
+                            authored Babble carrier; character speech keeps its
+                            configured English or Premium voice.
+                          </small>
+                        </label>
+                      </section>
+                      <section
+                        className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
                         data-settings-section="debate"
                         aria-labelledby="debate-jury-settings-title"
                       >
@@ -146336,6 +146421,33 @@ function HomeContent(): React.JSX.Element {
                 }),
               )}
               audioVolume={settings?.voiceVolume ?? 0}
+              whodunnitTextVoiceMode={normalizeWhodunnitTextVoiceMode(
+                settings?.debateWhodunnitTextVoiceMode,
+              )}
+              playMysteryTextVoice={async ({
+                mode,
+                seed,
+                signal,
+                text,
+                volume,
+              }) => {
+                try {
+                  await enqueueRobotVoiceMode({
+                    mode,
+                    source: { text },
+                    sourceText: text,
+                    profile: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+                    seed,
+                    signal,
+                    effectsEnabled: settings?.voiceEffectsEnabled !== false,
+                    globalVolume: volume,
+                    allowBabbleFallback: true,
+                  });
+                  return signal?.aborted !== true;
+                } catch {
+                  return false;
+                }
+              }}
               request={api}
               onCreateSlateStory={({ sessionId, title, transcript }) =>
                 createSlateStoryFromTranscript({

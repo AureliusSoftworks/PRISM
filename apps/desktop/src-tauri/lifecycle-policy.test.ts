@@ -34,7 +34,7 @@ describe("desktop lifecycle policy", () => {
     );
     assert.match(
       source,
-      /tauri_plugin_single_instance::init\(\|app, _args, _cwd\| \{\s*show_main_window\(app\);\s*\}\)/u,
+      /tauri_plugin_single_instance::init\(\|app, args, _cwd\| \{\s*queue_portable_package_paths\(app, args\);\s*show_main_window\(app\);\s*\}\)/u,
     );
   });
 

@@ -9,6 +9,11 @@ import type {
 } from "./debateMystery.js";
 import type { BotFaceStyle } from "./botAvatar.js";
 import type { BotAvatarDetailsV1 } from "./botAvatarDetails.js";
+import type {
+  MansionAmbienceManifestV1,
+  MansionAtmosphereContractV1,
+  PortableMansionInstallationMetadataV1,
+} from "./portableMysteryPackage.js";
 import {
   botIdentityMirrorAvatarDetailsV1,
   botIdentityMirrorFaceV1,
@@ -19,12 +24,29 @@ export const DEBATE_MYSTERY_AUDIO_MANIFEST_VERSION = 1 as const;
 export const DEBATE_MYSTERY_PLAY_READINESS_VERSION = 5 as const;
 export const DEBATE_MYSTERY_V2_JUROR_COUNT = 4 as const;
 
+export interface DebateMysteryPresetV2 {
+  id: Exclude<DebateMysteryPresetId, "custom">;
+  floors: number;
+  rooms: number;
+  suspects: number;
+}
+
+/** New mansions always establish a real upstairs. Legacy V1 recipes and
+ * imported one-floor mansion blueprints keep their frozen topology. */
+export const DEBATE_MYSTERY_V2_PRESETS: readonly DebateMysteryPresetV2[] = [
+  { id: "compact", floors: 2, rooms: 5, suspects: 4 },
+  { id: "standard", floors: 2, rooms: 10, suspects: 6 },
+  { id: "grand", floors: 3, rooms: 15, suspects: 8 },
+] as const;
+
 export interface DebateMysteryAssetSynthesisV2 {
   evidence: boolean;
   /** ONLINE-only template edits. LOCAL cases retain bundled room art. */
   rooms: boolean;
-  /** Deliberately disabled; existing investigation music remains unchanged. */
-  music: false;
+  /** ONLINE-only instrumental mansion theme. Failure keeps the bundled bed. */
+  music: boolean;
+  /** Optional mansion identity. LOCAL uses deterministic procedural/shared acoustics only. */
+  ambience: boolean;
 }
 
 export type DebateMysterySealedAssetKindV1 = "evidence" | "room";
@@ -56,6 +78,11 @@ export interface DebateMysteryHouseStyleV2 {
   id: string;
   label: string;
   promptContract: string;
+  atmosphere: MansionAtmosphereContractV1;
+  acousticThemePaletteId: string;
+  bespokeAmbienceRequested: boolean;
+  /** Present on imported mansions so bespoke references and room mixes survive. */
+  ambience?: MansionAmbienceManifestV1 | null;
 }
 
 export interface DebateMysteryMansionBundleRoomV1 {
@@ -86,7 +113,7 @@ export interface DebateMysteryMansionAssetV1 {
   id: string;
   role: DebateMysteryMansionAssetRoleV1;
   logicalId: string;
-  mimeType: "image/png" | "image/webp" | "audio/mpeg";
+  mimeType: "image/png" | "image/webp" | "audio/mpeg" | "audio/ogg" | "audio/wav";
   sha256: string;
   byteLength: number;
 }
@@ -103,6 +130,8 @@ export interface DebateMysteryMansionBundleSummaryV1 {
   rooms: DebateMysteryMansionBundleRoomV1[];
   /** Absent only on pre-aggregate API snapshots. */
   assets?: DebateMysteryMansionAssetV1[];
+  /** Present when this mansion was installed from a portable package. */
+  portable?: PortableMansionInstallationMetadataV1 | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -288,6 +317,103 @@ export interface DebateMysteryPerformanceDirectionV2 {
   actorNote: string;
 }
 
+export interface DebateMysteryStageCueFactV1 {
+  id: string;
+  /** The only case-bearing statement the runtime actor may receive for this
+   * cue. Sealed forbidden facts are validated locally and are never copied
+   * into an ONLINE prompt. */
+  statement: string;
+  /** At least one fragment must appear when this fact is required on stage. */
+  mentionFragments: string[];
+  required: boolean;
+}
+
+export interface DebateMysteryStageCueBeatV1 {
+  id: string;
+  instruction: string;
+  /** Small deterministic receipt for a semantic beat. This is intentionally
+   * stricter than asking another model to judge testimony after the fact. */
+  acceptedTextFragments: string[];
+}
+
+/** Private performance contract. The compiler remains the author of the
+ * mystery; a runtime model may only act inside these sealed rails. */
+export interface DebateMysteryStageCueV1 {
+  version: 1;
+  id: string;
+  objective: string;
+  emotionalState: string;
+  knownFactIds: string[];
+  allowedFacts: DebateMysteryStageCueFactV1[];
+  requiredBeats: DebateMysteryStageCueBeatV1[];
+  /** Checked locally, but never sent to a provider prompt. */
+  forbiddenDisclosures: string[];
+  contradictionTrigger: {
+    record: DebateMysteryRecordReferenceV2;
+    instruction: string;
+  } | null;
+  exitCondition: string;
+  deterministicFallbackText: string;
+  maxCharacters: number;
+}
+
+export interface DebateMysteryStageCuePerformanceValidationV1 {
+  valid: boolean;
+  normalizedText: string;
+  errors: string[];
+}
+
+function normalizeMysteryStageCueTextV1(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function mysteryStageCueContainsV1(text: string, fragment: string): boolean {
+  const normalizedFragment = normalizeMysteryStageCueTextV1(fragment);
+  return Boolean(normalizedFragment) && text.includes(normalizedFragment);
+}
+
+export function validateDebateMysteryStageCuePerformanceV1(args: {
+  cue: DebateMysteryStageCueV1;
+  text: string;
+}): DebateMysteryStageCuePerformanceValidationV1 {
+  const text = args.text.trim().replace(/\s+/gu, " ");
+  const normalizedText = normalizeMysteryStageCueTextV1(text);
+  const errors: string[] = [];
+  if (!text) errors.push("The performed line is empty.");
+  if (text.length > args.cue.maxCharacters) {
+    errors.push(`The performed line exceeds ${args.cue.maxCharacters} characters.`);
+  }
+  for (const fact of args.cue.allowedFacts) {
+    if (
+      fact.required &&
+      !fact.mentionFragments.some((fragment) =>
+        mysteryStageCueContainsV1(normalizedText, fragment))
+    ) {
+      errors.push(`The performed line omits required fact ${fact.id}.`);
+    }
+  }
+  for (const beat of args.cue.requiredBeats) {
+    if (
+      !beat.acceptedTextFragments.some((fragment) =>
+        mysteryStageCueContainsV1(normalizedText, fragment))
+    ) {
+      errors.push(`The performed line omits required beat ${beat.id}.`);
+    }
+  }
+  for (const disclosure of args.cue.forbiddenDisclosures) {
+    if (mysteryStageCueContainsV1(normalizedText, disclosure)) {
+      errors.push("The performed line contains a forbidden disclosure.");
+      break;
+    }
+  }
+  return { valid: errors.length === 0, normalizedText: text, errors };
+}
+
 export interface DebateMysterySpokenLineV2 {
   id: string;
   nodeId: string;
@@ -299,6 +425,9 @@ export interface DebateMysterySpokenLineV2 {
   visibleText: string;
   spokenText: string;
   performance: DebateMysteryPerformanceDirectionV2;
+  /** Additive for hybrid runtime performances. Older frozen lines remain
+   * fully playable through their deterministic authored text. */
+  stageCue?: DebateMysteryStageCueV1 | null;
   mode: DebateMysteryLineModeV2;
   reusableCalloutKey: DebateMysteryCourtCalloutV2 | null;
 }
@@ -383,7 +512,8 @@ export interface DebateMysteryDialogueGraphV2 {
   witnessChapters: DebateMysteryWitnessChapterV2[];
   prosecutionChoices: DebateMysteryProsecutionChoiceV2[];
   /** One finite, two-step reveal for each suspect room. The Casekeeper node is
-   * text-only; the persona node is locally voiced before the case is playable. */
+   * text-only; the persona node is locally voiced when it enters the canonical
+   * transcript. */
   roomIntroductionNodeIdsByRoom?: Record<string, {
     casekeeperNodeId: string;
     personaNodeId: string;
@@ -466,6 +596,10 @@ export interface DebateMysteryAudioManifestEntryV1 {
 
 export interface DebateMysteryAudioManifestV1 {
   version: typeof DEBATE_MYSTERY_AUDIO_MANIFEST_VERSION;
+  /** Legacy packs eagerly contain every reachable branch. Stage-cue cases
+   * keep a verified sparse manifest and attach clips only after a line is
+   * actually accepted into the canonical transcript. */
+  preparationMode?: "eager-v1" | "lazy-on-demand-v1";
   caseId: string;
   caseHash: string;
   scriptHash: string;
@@ -1249,6 +1383,64 @@ export function validateDebateMysteryDialogueGraphV2(args: {
     if (!nodeById.has(line.nodeId)) errors.push(`Line ${line.id} references missing node ${line.nodeId}.`);
     if (!line.visibleText.trim()) errors.push(`Line ${line.id} has no visible text.`);
     if (line.mode !== "text_only" && !line.spokenText.trim()) errors.push(`Spoken line ${line.id} has no performance text.`);
+    if (line.stageCue) {
+      const cue = line.stageCue;
+      if (line.mode !== "spoken" || !line.speakerBotId) {
+        errors.push(`Stage cue ${cue.id || line.id} is not attached to a spoken bot line.`);
+      }
+      if (
+        cue.version !== 1 ||
+        !cue.id.trim() ||
+        !cue.objective.trim() ||
+        !cue.emotionalState.trim() ||
+        !cue.exitCondition.trim() ||
+        !cue.deterministicFallbackText.trim() ||
+        !Number.isInteger(cue.maxCharacters) ||
+        cue.maxCharacters < 80 ||
+        cue.maxCharacters > 1_200
+      ) {
+        errors.push(`Stage cue ${cue.id || line.id} has an incomplete performance contract.`);
+      }
+      for (const id of duplicateIds(cue.allowedFacts)) {
+        errors.push(`Stage cue ${cue.id} repeats allowed fact ${id}.`);
+      }
+      for (const id of duplicateIds(cue.requiredBeats)) {
+        errors.push(`Stage cue ${cue.id} repeats required beat ${id}.`);
+      }
+      const knownFactIds = new Set(cue.knownFactIds);
+      for (const fact of cue.allowedFacts) {
+        if (
+          !fact.id.trim() ||
+          !fact.statement.trim() ||
+          !fact.mentionFragments.some((fragment) => fragment.trim()) ||
+          !knownFactIds.has(fact.id)
+        ) {
+          errors.push(`Stage cue ${cue.id} has an invalid allowed fact ${fact.id || "unknown"}.`);
+        }
+      }
+      for (const beat of cue.requiredBeats) {
+        if (
+          !beat.id.trim() ||
+          !beat.instruction.trim() ||
+          !beat.acceptedTextFragments.some((fragment) => fragment.trim())
+        ) {
+          errors.push(`Stage cue ${cue.id} has an invalid required beat ${beat.id || "unknown"}.`);
+        }
+      }
+      if (
+        cue.contradictionTrigger &&
+        !recordIds.has(recordKey(cue.contradictionTrigger.record))
+      ) {
+        errors.push(`Stage cue ${cue.id} references a missing contradiction record.`);
+      }
+      const fallback = validateDebateMysteryStageCuePerformanceV1({
+        cue,
+        text: cue.deterministicFallbackText,
+      });
+      if (!fallback.valid) {
+        errors.push(`Stage cue ${cue.id} has an invalid deterministic fallback: ${fallback.errors.join(" ")}`);
+      }
+    }
     if (
       line.mode === "anonymous_babble" &&
       (line.speakerKind !== "narrator" || !line.speakerBotId)
@@ -1761,19 +1953,21 @@ export function validateDebateMysteryAudioManifestV1(args: {
   const required = new Set(args.reachableSpokenLineIds);
   const entries = new Map(args.manifest.entries.map((entry) => [entry.lineId, entry]));
   const graphLineIds = new Set(args.graph.lines.map((line) => line.id));
-  for (const lineId of required) {
-    const entry = entries.get(lineId);
-    if (!entry) {
-      errors.push(`Reachable spoken line ${lineId} is missing from the local audio pack.`);
-      continue;
-    }
-    if (!entry.sha256 || entry.byteSize <= 0 || entry.durationMs <= 0 || !entry.clipPath) {
-      errors.push(`Audio entry ${lineId} is incomplete.`);
+  if (args.manifest.preparationMode !== "lazy-on-demand-v1") {
+    for (const lineId of required) {
+      const entry = entries.get(lineId);
+      if (!entry) {
+        errors.push(`Reachable spoken line ${lineId} is missing from the local audio pack.`);
+        continue;
+      }
     }
   }
   for (const entry of args.manifest.entries) {
     if (!graphLineIds.has(entry.lineId)) errors.push(`Audio entry ${entry.lineId} is not in the dialogue graph.`);
     if (!required.has(entry.lineId)) errors.push(`Unreachable spoken line ${entry.lineId} was needlessly prepared.`);
+    if (!entry.sha256 || entry.byteSize <= 0 || entry.durationMs <= 0 || !entry.clipPath) {
+      errors.push(`Audio entry ${entry.lineId} is incomplete.`);
+    }
   }
   if (!args.manifest.complete) errors.push("The local audio manifest is not complete.");
   if (args.manifest.complete && !args.manifest.verifiedAt) errors.push("The completed local audio manifest has not been verified.");
@@ -1804,11 +1998,9 @@ export function resolveDebateMysteryConfigV2(
     throw new Error("Whodunnit V2 requires a version 2 setup.");
   }
   const preset = value.preset;
-  const presetDefaults = preset === "compact"
-    ? { floors: 1, rooms: 5, suspects: 4 }
-    : preset === "grand"
-      ? { floors: 3, rooms: 15, suspects: 8 }
-      : { floors: 2, rooms: 10, suspects: 6 };
+  const presetDefaults = DEBATE_MYSTERY_V2_PRESETS.find(
+    (entry) => entry.id === preset,
+  ) ?? { floors: 2, rooms: 10, suspects: 6 };
   const suspectBotIds = value.suspectBotIds.map((id) => id.trim()).filter(Boolean);
   if (suspectBotIds.length < 4 || suspectBotIds.length > 8) {
     throw new Error("Whodunnit V2 requires four to eight suspects.");
@@ -1840,7 +2032,7 @@ export function resolveDebateMysteryConfigV2(
     throw new Error("Every Whodunnit cast role must use a distinct bot.");
   }
   const floors = preset === "custom"
-    ? Math.min(3, Math.max(1, Math.floor(value.floors ?? 2)))
+    ? Math.min(3, Math.max(2, Math.floor(value.floors ?? 2)))
     : presetDefaults.floors;
   const totalRooms = preset === "custom"
     ? Math.min(18, Math.max(suspectBotIds.length + 1, Math.floor(value.totalRooms ?? 10)))
@@ -1860,7 +2052,12 @@ export function resolveDebateMysteryConfigV2(
     rooms:
       investigationMode === "full" &&
       value.assetSynthesis?.rooms === true,
-    music: false,
+    music:
+      investigationMode === "full" &&
+      value.assetSynthesis?.music === true,
+    ambience:
+      investigationMode === "full" &&
+      value.assetSynthesis?.ambience === true,
   };
   return {
     ...publicValue,
@@ -1880,7 +2077,10 @@ export function resolveDebateMysteryConfigV2(
       typeof value.mansionBundleId === "string" && value.mansionBundleId.trim()
         ? value.mansionBundleId.trim().slice(0, 200)
         : null,
-    houseStyle: debateMysteryHouseStyleV2(spark),
+    houseStyle: {
+      ...debateMysteryHouseStyleV2(spark),
+      bespokeAmbienceRequested: assetSynthesis.ambience,
+    },
     nonce: value.nonce.trim().slice(0, 200),
     floors,
     totalRooms,
@@ -1987,6 +2187,24 @@ export function normalizeDebateMysteryFormatStateV2(
           id: houseStyleSource.id,
           label: houseStyleSource.label,
           promptContract: houseStyleSource.promptContract,
+          atmosphere: normalizeDebateMysteryAtmosphereContractV1(
+            houseStyleSource.atmosphere,
+            `${houseStyleSource.label} ${houseStyleSource.promptContract}`,
+          ),
+          acousticThemePaletteId:
+            typeof houseStyleSource.acousticThemePaletteId === "string" &&
+            houseStyleSource.acousticThemePaletteId.trim()
+              ? houseStyleSource.acousticThemePaletteId.trim().slice(0, 200)
+              : debateMysteryAcousticThemePaletteV1(
+                  `${houseStyleSource.label} ${houseStyleSource.promptContract}`,
+                ),
+          bespokeAmbienceRequested: houseStyleSource.bespokeAmbienceRequested === true,
+          ambience:
+            houseStyleSource.ambience &&
+            typeof houseStyleSource.ambience === "object" &&
+            houseStyleSource.ambience.version === 1
+              ? houseStyleSource.ambience
+              : null,
         }
       : debateMysteryHouseStyleV2(spark);
   const readinessSource = source.readiness as
@@ -2119,7 +2337,12 @@ export function normalizeDebateMysteryFormatStateV2(
         rooms:
           configSource.investigationMode !== "court_only" &&
           assetSynthesisSource.rooms === true,
-        music: false,
+        music:
+          configSource.investigationMode !== "court_only" &&
+          assetSynthesisSource.music === true,
+        ambience:
+          configSource.investigationMode !== "court_only" &&
+          assetSynthesisSource.ambience === true,
       },
       investigationMode:
         configSource.investigationMode === "court_only" ? "court_only" : "full",
@@ -2241,6 +2464,90 @@ function mysteryStyleHash(value: string): string {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
+export function debateMysteryAcousticThemePaletteV1(directionInput: string): string {
+  const direction = directionInput.toLocaleLowerCase();
+  if (/\b(?:space|spacecraft|starship|spaceship|orbital|airlock|reactor|hull)\b/u.test(direction)) {
+    return "spacecraft-industrial-v1";
+  }
+  if (/\b(?:jungle|wilderness|canopy|rainforest|foliage|swamp|hut)\b/u.test(direction)) {
+    return "jungle-wilderness-v1";
+  }
+  if (/\b(?:gothic|haunted|victorian|blackwood|old house|manor|séance|seance)\b/u.test(direction)) {
+    return "gothic-old-house-v1";
+  }
+  return "neutral-mansion-v1";
+}
+
+/** Deterministic and spoiler-safe: this reads only the public house direction. */
+export function debateMysteryAtmosphereContractV1(
+  directionInput: string,
+): MansionAtmosphereContractV1 {
+  const direction = directionInput.replace(/\s+/gu, " ").trim().slice(0, 1_200);
+  const lower = direction.toLocaleLowerCase();
+  const isSpace = /\b(?:space|spacecraft|starship|spaceship|orbital|airlock|reactor|hull)\b/u.test(lower);
+  const isJungle = /\b(?:jungle|wilderness|canopy|rainforest|foliage|swamp)\b/u.test(lower);
+  const weather: MansionAtmosphereContractV1["weather"] =
+    /\b(?:storm|thunder|tempest|rain-lashed)\b/u.test(lower) ? "storm"
+      : /\b(?:rain|drizzle|downpour)\b/u.test(lower) ? "rain"
+        : /\b(?:snow|blizzard|sleet)\b/u.test(lower) ? "snow"
+          : /\b(?:fog|mist)\b/u.test(lower) ? "fog"
+            : /\b(?:wind|gust|gale)\b/u.test(lower) ? "wind"
+              : "clear";
+  const timeOfDay: MansionAtmosphereContractV1["timeOfDay"] =
+    /\b(?:night|midnight|moon|moonlight|candlelit)\b/u.test(lower) ? "night"
+      : /\b(?:dawn|sunrise)\b/u.test(lower) ? "dawn"
+        : /\b(?:dusk|sunset|twilight)\b/u.test(lower) ? "dusk"
+          : /\b(?:day|daylight|noon|sunlit)\b/u.test(lower) ? "day"
+            : "unknown";
+  return {
+    version: 1,
+    weather,
+    timeOfDay,
+    exteriorSetting: isSpace
+      ? "a sealed vessel beyond a planetary atmosphere"
+      : isJungle
+        ? "dense wet wilderness surrounding the structure"
+        : "the mansion grounds and surrounding landscape",
+    houseCondition: isSpace
+      ? "operational pressure vessel with lived-in mechanical systems"
+      : /\b(?:ruin|decay|derelict|abandoned|crumbling)\b/u.test(lower)
+        ? "weathered structure with audible age"
+        : "lived-in structure with coherent materials",
+    mood: /\b(?:elegant dread|ominous|haunted|horror|uneasy)\b/u.test(lower)
+      ? "restrained unease"
+      : isSpace
+        ? "isolated technological calm"
+        : isJungle
+          ? "humid watchfulness"
+          : "cinematic mystery",
+  };
+}
+
+export function normalizeDebateMysteryAtmosphereContractV1(
+  value: unknown,
+  fallbackDirection: string,
+): MansionAtmosphereContractV1 {
+  if (value && typeof value === "object") {
+    const source = value as Partial<MansionAtmosphereContractV1>;
+    if (source.version === 1 &&
+        ["clear", "fog", "rain", "snow", "storm", "wind"].includes(String(source.weather)) &&
+        ["dawn", "day", "dusk", "night", "unknown"].includes(String(source.timeOfDay)) &&
+        typeof source.exteriorSetting === "string" && source.exteriorSetting.trim() &&
+        typeof source.houseCondition === "string" && source.houseCondition.trim() &&
+        typeof source.mood === "string" && source.mood.trim()) {
+      return {
+        version: 1,
+        weather: source.weather!,
+        timeOfDay: source.timeOfDay!,
+        exteriorSetting: source.exteriorSetting.trim().slice(0, 400),
+        houseCondition: source.houseCondition.trim().slice(0, 400),
+        mood: source.mood.trim().slice(0, 400),
+      };
+    }
+  }
+  return debateMysteryAtmosphereContractV1(fallbackDirection);
+}
+
 /** A deterministic, spoiler-safe one-house contract shared by all visuals. */
 export function debateMysteryHouseStyleV2(sparkInput: string): DebateMysteryHouseStyleV2 {
   const spark = sparkInput.replace(/\s+/gu, " ").trim().slice(0, 600);
@@ -2254,6 +2561,10 @@ export function debateMysteryHouseStyleV2(sparkInput: string): DebateMysteryHous
       `Frozen Theme / Spark: ${direction}.`,
       "Preserve this identity for future room generation; do not introduce a second architecture, era, or palette.",
     ].join(" "),
+    atmosphere: debateMysteryAtmosphereContractV1(direction),
+    acousticThemePaletteId: debateMysteryAcousticThemePaletteV1(direction),
+    bespokeAmbienceRequested: false,
+    ambience: null,
   };
 }
 

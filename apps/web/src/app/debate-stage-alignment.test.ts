@@ -32,8 +32,11 @@ import {
   updateDebateStageLightBlendMode,
   updateDebateStageLightMaskOpacity,
   updateDebateStageModeratorMicroScale,
+  updateDebateStageJuryMemberPlacement,
+  updateDebateStageJuryPlacement,
   updateDebateStageGalleryVolume,
   updateDebateStageVoiceLevel,
+  updateDebateStageWhodunnitCourtPlacement,
   writeDebateStageAlignment,
   debateStageVoiceLevelForRole,
   normalizeDebateStageGalleryVolume,
@@ -84,6 +87,47 @@ describe("Debate stage alignment", () => {
       DEFAULT_DEBATE_STAGE_ALIGNMENT.evidenceTable,
     );
     assert.deepEqual(moved.gavel, DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel);
+  });
+
+  it("persists Court and Jury camera placements in the shared alignment contract", () => {
+    const courtAdjusted = updateDebateStageWhodunnitCourtPlacement(
+      DEFAULT_DEBATE_STAGE_ALIGNMENT,
+      "prosecutionMini",
+      { x: -18, y: 7.5, scale: 85 },
+    );
+    const jurorAdjusted = updateDebateStageJuryMemberPlacement(
+      courtAdjusted,
+      3,
+      { x: 12.5, y: -6, scale: 115 },
+    );
+    const adjusted = updateDebateStageJuryPlacement(
+      jurorAdjusted,
+      "votes",
+      { x: 4, y: 8, scale: 90 },
+    );
+    const style = debateStageAlignmentStyle(adjusted) as Record<string, string>;
+
+    assert.deepEqual(adjusted.whodunnitCourt.prosecutionMini, {
+      x: -18,
+      y: 7.5,
+      scale: 85,
+    });
+    assert.deepEqual(adjusted.juryChamber.members[3], {
+      x: 12.5,
+      y: -6,
+      scale: 115,
+    });
+    assert.deepEqual(adjusted.juryChamber.votes, {
+      x: 4,
+      y: 8,
+      scale: 90,
+    });
+    assert.equal(style["--whodunnit-prosecution-mini-offset-x"], "-18%");
+    assert.equal(style["--whodunnit-prosecution-mini-scale"], "0.85");
+    assert.equal(style["--debate-jury-member-3-offset-y"], "-6%");
+    assert.equal(style["--debate-jury-member-3-scale"], "1.15");
+    assert.equal(style["--debate-jury-votes-offset-x"], "4%");
+    assert.equal(style["--debate-jury-votes-scale"], "0.9");
   });
 
   it("keeps independent evidence geometry for every public-floor camera", () => {
@@ -159,6 +203,24 @@ describe("Debate stage alignment", () => {
         wide: DEBATE_STAGE_MODERATOR_MICRO_SCALE_DEFAULT,
         left: DEBATE_STAGE_MODERATOR_MICRO_SCALE_DEFAULT,
         right: DEBATE_STAGE_MODERATOR_MICRO_SCALE_DEFAULT,
+      },
+      whodunnitCourt: {
+        wideEvidenceTable: { x: 0, y: 0, scale: 100 },
+        wideWitnessSilhouette: { x: 0, y: 0, scale: 100 },
+        witness: { x: 0, y: 0, scale: 100 },
+        prosecutionMini: { x: 0, y: 0, scale: 100 },
+        defenseMini: { x: 0, y: 0, scale: 100 },
+        witnessNameplate: { x: 0, y: 0, scale: 100 },
+        witnessGlyph: { x: 0, y: 0, scale: 100 },
+      },
+      juryChamber: {
+        members: Array.from({ length: 5 }, () => ({
+          x: 0,
+          y: 0,
+          scale: 100,
+        })),
+        evidenceTable: { x: 0, y: 0, scale: 100 },
+        votes: { x: 0, y: 0, scale: 100 },
       },
     };
 
@@ -325,6 +387,8 @@ describe("Debate stage alignment", () => {
           left: DEBATE_STAGE_MODERATOR_MICRO_SCALE_DEFAULT,
           right: DEBATE_STAGE_MODERATOR_MICRO_SCALE_DEFAULT,
         },
+        whodunnitCourt: DEFAULT_DEBATE_STAGE_ALIGNMENT.whodunnitCourt,
+        juryChamber: DEFAULT_DEBATE_STAGE_ALIGNMENT.juryChamber,
       },
     );
   });

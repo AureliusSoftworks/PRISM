@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
@@ -51,6 +51,22 @@ import {
   listDebateMysteryMansionBundlesV2,
   saveDebateMysteryMansionBundleV2,
 } from "../debate-mystery-mansion-bundles.ts";
+import {
+  exportPortableMansionPackageV1,
+  importPortableMansionPackageV1,
+  inspectPortableMansionPackageV1,
+} from "../debate-mystery-mansion-package.ts";
+import {
+  decodeInternalWhodunnitPackageV1,
+  exportPortableWhodunnitPackageV1,
+  importPortableWhodunnitPackageV1,
+  inspectPortableWhodunnitPackageV1,
+} from "../debate-mystery-whodunnit-package.ts";
+import { openPortableMysteryEnvelopeV1 } from "../debate-mystery-package-envelope.ts";
+import {
+  resolveAbsoluteUnderDataRoot,
+  writeGeneratedImageBytesExclusive,
+} from "../image-storage.ts";
 import {
   getRevealedDebateMysteryAssetFileV1,
   revealDebateMysteryAssetV1,
@@ -563,7 +579,10 @@ class RoomIntroductionPersonaV2AuthorProvider extends V2AuthorProvider {
     options?: GenerateOptions,
   ): Promise<string> {
     const request = JSON.parse(String(messages.at(-1)?.content ?? "{}")) as Record<string, unknown>;
-    if (request.section !== "room_introduction_persona_polish") {
+    if (
+      request.section !== "room_introduction_persona_polish" &&
+      request.section !== "room_introduction_stage_cue_performance"
+    ) {
       const response = await super.generateResponse(messages, options);
       if (request.section !== "suspect_chapter" || !this.commaPrefixedCanonical) {
         return response;
@@ -582,6 +601,27 @@ class RoomIntroductionPersonaV2AuthorProvider extends V2AuthorProvider {
     this.roomIntroductionSignal = options?.signal ?? null;
     if (this.roomIntroductionMode === "hanging") {
       return new Promise(() => undefined);
+    }
+    if (request.section === "room_introduction_stage_cue_performance") {
+      const allowedFacts = (
+        request.stageCue &&
+        typeof request.stageCue === "object" &&
+        !Array.isArray(request.stageCue) &&
+        Array.isArray((request.stageCue as { allowedFacts?: unknown }).allowedFacts)
+      )
+        ? (request.stageCue as { allowedFacts: Array<{ statement?: string }> }).allowedFacts
+        : [];
+      const roomName = allowedFacts
+        .map((fact) => fact.statement?.match(/taking place in (.+)\.$/u)?.[1])
+        .find(Boolean) ?? "this room";
+      const speakerName = allowedFacts
+        .map((fact) => fact.statement?.match(/speaker is (.+)\.$/u)?.[1])
+        .find(Boolean) ?? "your witness";
+      return JSON.stringify({
+        spokenText: this.roomIntroductionMode === "content_bearing"
+          ? `I poisoned them, but take a careful look around ${roomName}. Ask me; I will answer only what I know.`
+          : `I am ${speakerName}. Take a careful look around ${roomName}. Ask what you need; I will answer only what I know.`,
+      });
     }
     return JSON.stringify({
       cadenceId: "gentle_start",
@@ -907,6 +947,85 @@ class UnrelatedCourtContradictionV2AuthorProvider extends V2AuthorProvider {
   }
 }
 
+class LooseSemanticMetadataV2AuthorProvider extends V2AuthorProvider {
+  public semanticCalls = 0;
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const response = await super.generateResponse(messages, options);
+    const request = JSON.parse(String(messages.at(-1)?.content ?? "{}")) as {
+      section?: string;
+      suspect?: {
+        contradictionContract?: {
+          recordId?: string;
+          recordText?: string;
+        };
+      };
+    };
+    if (request.section !== "contradiction_semantic_validation") {
+      if (
+        request.section === "suspect_chapter" &&
+        request.suspect?.contradictionContract?.recordText
+      ) {
+        const parsed = JSON.parse(response) as {
+          suspect?: { testimony?: Array<Record<string, unknown>> };
+        };
+        const second = parsed.suspect?.testimony?.[1];
+        if (second) {
+          const recordText = request.suspect.contradictionContract.recordText;
+          const statementText = `I deny the record's exact account: ${recordText}`;
+          second.text = statementText;
+          second.contradictionBasis = {
+            version: 1,
+            recordId: request.suspect.contradictionContract.recordId,
+            statementClaim: statementText,
+            recordClaim: recordText,
+            relationship: "cannot_both_be_true",
+          };
+        }
+        return JSON.stringify(parsed);
+      }
+      if (request.section === "targeted_contradiction_repair") {
+        const parsed = JSON.parse(response) as {
+          suspect?: { testimony?: Array<Record<string, unknown>> };
+        };
+        const second = parsed.suspect?.testimony?.[1];
+        if (second) {
+          second.contradictionBasis = {
+            version: 1,
+            recordId: (second.contradictionBasis as Record<string, unknown>)
+              ?.recordId,
+            statementClaim: "A paraphrase that is not in the statement.",
+            recordClaim: "A paraphrase that is not in the record.",
+            relationship: "cannot_both_be_true",
+          };
+        }
+        return JSON.stringify(parsed);
+      }
+      return response;
+    }
+    this.semanticCalls += 1;
+    const parsed = JSON.parse(response) as {
+      evaluations?: Array<Record<string, unknown>>;
+    };
+    for (const evaluation of parsed.evaluations ?? []) {
+      evaluation.statementClaim = "A paraphrase that is not in the statement.";
+      evaluation.recordClaim = "A paraphrase that is not in the record.";
+    }
+    const first = parsed.evaluations?.[0];
+    if (this.semanticCalls === 1 && first) {
+      first.verdict = "not_clear";
+      first.relationship = "direct_denial";
+      first.rationale =
+        "The route needs a more literal denial before it can be approved.";
+      first.repairInstruction = null;
+    }
+    return JSON.stringify(parsed);
+  }
+}
+
 class ShuffledCourtStatementsV2AuthorProvider extends V2AuthorProvider {
   public override async generateResponse(
     messages: ProviderMessage[],
@@ -969,6 +1088,7 @@ class EmptyAutoV2AuthorProvider implements LlmProvider {
 class AuditingV2AuxiliaryProvider implements LlmProvider {
   public readonly name = "local" as const;
   public readonly diagnosticModel = "llama3.2";
+  public voiceCardRequests = 0;
   public readonly connectiveStages: string[] = [];
   public readonly auditSectionKeys: string[] = [];
 
@@ -983,6 +1103,7 @@ class AuditingV2AuxiliaryProvider implements LlmProvider {
       topicIds?: string[];
     };
     if (request.bots) {
+      this.voiceCardRequests += 1;
       return JSON.stringify({
         voiceCards: request.bots.map((bot) => ({
           botId: bot.botId,
@@ -1253,7 +1374,7 @@ async function completedSpectatorCase(
     runtime(provider),
     { generateWave: async () => playableWave() },
   );
-  return finishSpectatorRun(db, session, key);
+  return finishSpectatorRunWithLazyAudio(db, session, key, provider);
 }
 
 function finishSpectatorRun(
@@ -1274,6 +1395,44 @@ function finishSpectatorRun(
       { action: "advance_spectator_trial" },
       `${key}-advance-${advance}`,
     );
+  }
+  assert.equal(v2State(session).playPhase, "verdict");
+  assert.equal(session.status, "completed");
+  return session;
+}
+
+async function finishSpectatorRunWithLazyAudio(
+  db: DatabaseSync,
+  startingSession: DebateSessionV1,
+  key: string,
+  provider: V2AuthorProvider,
+): Promise<DebateSessionV1> {
+  let session = startingSession;
+  const action = async (
+    request: Omit<DebateMysteryActionRequestV2, "version" | "expectedRevision" | "idempotencyKey">,
+    suffix: string,
+  ): Promise<void> => {
+    session = await applyDebateMysteryActionWithPersonaV2(
+      db,
+      "user-1",
+      session.id,
+      {
+        ...request,
+        version: 2,
+        expectedRevision: session.revision,
+        idempotencyKey: `${key}-${suffix}`,
+      } as DebateMysteryActionRequestV2,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+  };
+  await action({ action: "move" }, "review");
+  await action({
+    action: "file_theory",
+    theory: v2State(session).theory!,
+  }, "file");
+  for (let advance = 0; v2State(session).playPhase === "trial" && advance < 50; advance += 1) {
+    await action({ action: "advance_spectator_trial" }, `advance-${advance}`);
   }
   assert.equal(v2State(session).playPhase, "verdict");
   assert.equal(session.status, "completed");
@@ -1574,7 +1733,12 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     const { graph, privateCase } = getDebateMysteryCaseV2(db, "user-1", session.id);
     assert.equal(state.config.investigationMode, "court_only");
     assert.equal(state.compilation.substeps.some((substep) => substep.id === "room-details"), false);
-    assert.deepEqual(state.config.assetSynthesis, { evidence: false, rooms: false, music: false });
+    assert.deepEqual(state.config.assetSynthesis, {
+      evidence: false,
+      rooms: false,
+      music: false,
+      ambience: false,
+    });
     assert.deepEqual(state.rooms, []);
     assert.deepEqual(state.topics, []);
     assert.deepEqual(privateCase.investigationRoomIds, []);
@@ -1924,6 +2088,47 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal("caseFoundation" in repair, false);
   });
 
+  it("keeps ONLINE Case Forge on one model lane", async () => {
+    const db = testDb();
+    const author = new V2AuthorProvider();
+    const auxiliary = new AuditingV2AuxiliaryProvider();
+    const onlineRuntime: DebateAiRuntime = {
+      preferredProvider: "openai",
+      responseMode: "online",
+      local: {
+        provider: auxiliary,
+        providerName: "local",
+        model: "llama3.2",
+      },
+      online: {
+        provider: author,
+        providerName: "openai",
+        model: "gpt-5.6-sol",
+      },
+      auxiliary,
+    };
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-online-single-lane",
+      onlineRuntime,
+      { deferBackgroundStart: true },
+    );
+    const compiled = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      onlineRuntime,
+      { generateWave: async () => playableWave() },
+    );
+
+    assert.equal(v2State(compiled).compilation.stage, "complete");
+    assert.equal(auxiliary.voiceCardRequests, 0);
+    assert.deepEqual(auxiliary.connectiveStages, []);
+    assert.deepEqual(auxiliary.auditSectionKeys, []);
+  });
+
   it("repairs unrelated physical-evidence and prior-testimony contradictions before sealing", async () => {
     for (const kind of ["evidence", "testimony"] as const) {
       const db = testDb();
@@ -1946,7 +2151,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
 
       assert.equal(v2State(compiled).compilation.stage, "complete");
       assert.ok(provider.corruptedSeatId);
-      assert.ok(provider.contradictionValidationRequests.length >= 2);
+      assert.ok(provider.contradictionValidationRequests.length >= 1);
       assert.ok(provider.contradictionRepairRequests.some((request) =>
         request.witnessSeatId === provider.corruptedSeatId));
       const firstSemanticRequest = provider.contradictionValidationRequests[0] as {
@@ -1957,16 +2162,6 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
         ["id", "text"],
         "the independent judge must not see Press, revision, or the author's proposed basis",
       );
-      if (kind === "evidence") {
-        assert.ok(
-          new Set(
-            provider.contradictionRepairRequests.map(
-              (request) => request.witnessSeatId,
-            ),
-          ).size >= 2,
-          "repairing a source statement must force its dependent prior-testimony route through a second repair wave",
-        );
-      }
       const { privateCase, graph } = getDebateMysteryCaseV2(
         db,
         "user-1",
@@ -1989,7 +2184,37 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     }
   });
 
-  it("fails closed when an unrelated Court contradiction survives bounded repair", async () => {
+  it("grounds loose semantic quotes and supplies bounded repair metadata", async () => {
+    const db = testDb();
+    const provider = new LooseSemanticMetadataV2AuthorProvider();
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-loose-semantic-metadata",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    const compiled = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+
+    assert.equal(v2State(compiled).compilation.stage, "complete");
+    assert.ok(provider.semanticCalls >= 2);
+    assert.equal(provider.contradictionRepairRequests.length, 3);
+    const { privateCase } = getDebateMysteryCaseV2(
+      db,
+      "user-1",
+      compiled.id,
+    );
+    assert.equal(privateCase.contradictionSemanticContractVersion, 1);
+  });
+
+  it("uses a recall-safe exact-record repair when a model rewrite stays unrelated", async () => {
     const db = testDb();
     const provider = new UnrelatedCourtContradictionV2AuthorProvider(
       "testimony",
@@ -2003,7 +2228,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       runtime(provider),
       { deferBackgroundStart: true },
     );
-    const failed = await runDebateMysteryCompilationV2(
+    const compiled = await runDebateMysteryCompilationV2(
       db,
       "user-1",
       created.id,
@@ -2011,16 +2236,84 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       { generateWave: async () => playableWave() },
     );
 
-    assert.equal(failed.status, "failed");
-    assert.equal(v2State(failed).compilation.stage, "needs_attention");
-    assert.equal(provider.contradictionRepairRequests.length, 2);
-    const job = db.prepare(
-      "SELECT private_error FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
-    ).get("user-1", failed.id) as { private_error: string | null };
-    assert.match(job.private_error ?? "", /semantics remained unclear after bounded repair/iu);
+    assert.equal(v2State(compiled).compilation.stage, "complete");
+    assert.equal(provider.contradictionRepairRequests.length, 1);
+    assert.ok(provider.corruptedSeatId);
+    const { graph } = getDebateMysteryCaseV2(
+      db,
+      "user-1",
+      compiled.id,
+    );
+    const chapter = graph.witnessChapters.find(
+      (entry) => entry.witnessSeatId === provider.corruptedSeatId,
+    );
+    const second = chapter?.statementVersions[1];
+    const line = graph.lines.find((entry) => entry.id === second?.lineId);
+    assert.match(
+      line?.spokenText ?? "",
+      /assigned record's exact claim is false/iu,
+    );
+    const corruptedPair = provider.contradictionValidationRequests
+      .flatMap((request) => (request.pairs as Array<{
+        witnessSeatId: string;
+        record: { text: string };
+      }> | undefined) ?? [])
+      .find((pair) => pair.witnessSeatId === provider.corruptedSeatId);
+    assert.ok(corruptedPair?.record.text);
+    assert.equal(
+      (line?.spokenText ?? "").includes(corruptedPair.record.text),
+      false,
+      "the fallback must deny the assigned claim without teaching an imprecise witness the record's exact wording",
+    );
+    assert.doesNotMatch(line?.spokenText ?? "", /private quarters/iu);
     assert.doesNotMatch(
-      JSON.stringify(failed.formatState),
+      JSON.stringify(compiled.formatState),
       /private quarters|repairInstruction|recordText|contradictionSemantic/iu,
+    );
+  });
+
+  it("keeps grand eight-suspect contradiction records discoverable", async () => {
+    const db = testDb();
+    const provider = new V2AuthorProvider();
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      {
+        ...config(),
+        preset: "grand",
+        trialType: "bench",
+        suspectBotIds: Array.from({ length: 8 }, (_, index) =>
+          `bot-${index + 1}`),
+        prosecutorPartnerBotId: "bot-9",
+        rivalDefenseBotId: "bot-10",
+        jurorBotIds: [],
+      },
+      "create-v2-grand-discoverable-contradictions",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    const compiled = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+
+    assert.equal(v2State(compiled).compilation.stage, "complete");
+    const { privateCase } = getDebateMysteryCaseV2(
+      db,
+      "user-1",
+      compiled.id,
+    );
+    assert.equal(
+      privateCase.recordItems.some(
+        (item) =>
+          item.reference.kind === "evidence" &&
+          item.reference.id === "evidence-private-ledger",
+      ),
+      false,
+      "locked inventory evidence must not become a Court proof route until V2 can admit it",
     );
   });
 
@@ -2119,7 +2412,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     );
   });
 
-  it("keeps a complete earlier-format witness chapter playable when new presentation fields are omitted", async () => {
+  it("fills omitted earlier-format room and repeat performances with deterministic playable contracts", async () => {
     const db = testDb();
     const provider = new LegacyFormatV2AuthorProvider();
     const created = await createDebateMysterySessionV2(
@@ -2137,8 +2430,25 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(state.compilation.stage, "complete");
     assert.ok(state.dialogueHistory.some((entry) => /The house has given everyone reasons/u.test(entry.visibleText)) === false);
     const { graph } = getDebateMysteryCaseV2(db, "user-1", session.id);
-    assert.ok(graph.lines.some((line) => /The house has given everyone reasons/u.test(line.spokenText)));
-    assert.ok(graph.lines.some((line) => /^Quietly, As I said,/u.test(line.spokenText)));
+    const lineByNodeId = new Map(graph.lines.map((line) => [line.nodeId, line]));
+    const roomIntroductions = Object.values(graph.roomIntroductionNodeIdsByRoom ?? {});
+    assert.equal(roomIntroductions.length, state.suspects.length);
+    for (const introduction of roomIntroductions) {
+      const personaLine = lineByNodeId.get(introduction.personaNodeId);
+      assert.ok(personaLine?.stageCue, "legacy room introductions receive a sealed fallback cue");
+      assert.equal(
+        personaLine.spokenText,
+        personaLine.stageCue.deterministicFallbackText,
+        "the playable line is the cue's deterministic fallback before runtime performance",
+      );
+    }
+    const repeatGroups = Object.values(graph.repeatResponseNodeIdsByTopic ?? {});
+    assert.ok(repeatGroups.length > 0);
+    assert.equal(repeatGroups.every((nodeIds) => nodeIds.length > 0), true);
+    assert.equal(
+      repeatGroups.flat().every((nodeId) => Boolean(lineByNodeId.get(nodeId)?.spokenText)),
+      true,
+    );
   });
 
   it("compiles a proof-bearing witness core and supplies presentation-only dialogue", async () => {
@@ -3280,7 +3590,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     const introduction = before.graph.roomIntroductionNodeIdsByRoom?.[roomId];
     const personaNode = before.graph.nodes.find((node) => node.id === introduction?.personaNodeId)!;
     const canonicalLine = before.graph.lines.find((line) => line.id === personaNode.lineId)!;
-    assert.match(canonicalLine.visibleText, /^Honestly,/u);
+    assert.equal(canonicalLine.visibleText, canonicalLine.stageCue?.deterministicFallbackText);
     const frozenSpeakerProfile = before.privateCase.audioVoiceProfilesByBotId?.[
       canonicalLine.speakerBotId!
     ];
@@ -3289,12 +3599,16 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       "SELECT manifest_json FROM debate_mystery_audio_manifests WHERE user_id = ? AND session_id = ?",
     ).get("user-1", session.id) as { manifest_json: string };
     const initialManifest = JSON.parse(initialManifestRow.manifest_json) as {
+      preparationMode?: string;
       entries: Array<{ lineId: string; voiceProfileHash: string }>;
     };
-    const frozenVoiceProfileHash = initialManifest.entries.find(
-      (entry) => entry.lineId === canonicalLine.id,
-    )?.voiceProfileHash;
-    assert.ok(frozenVoiceProfileHash);
+    assert.equal(initialManifest.preparationMode, "lazy-on-demand-v1");
+    assert.equal(initialManifest.entries.length, 1);
+    assert.equal(
+      initialManifest.entries.find((entry) => entry.lineId === canonicalLine.id),
+      undefined,
+    );
+    const frozenVoiceProfileHash = digest(JSON.stringify(frozenSpeakerProfile));
     db.prepare(
       "UPDATE bots SET audio_voice_profile_override = ? WHERE user_id = ? AND id = ?",
     ).run(JSON.stringify({
@@ -3305,7 +3619,8 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     const originalReference = db.prepare(
       `SELECT cache_key FROM debate_mystery_audio_refs
         WHERE user_id = ? AND session_id = ? AND line_id = ?`,
-    ).get("user-1", session.id, canonicalLine.id) as { cache_key: string };
+    ).get("user-1", session.id, canonicalLine.id) as { cache_key: string } | undefined;
+    assert.equal(originalReference, undefined);
     const autoRuntime: DebateAiRuntime = {
       preferredProvider: "openai",
       responseMode: "online",
@@ -3337,24 +3652,31 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     );
     const personaBeat = v2State(performed).dialogueHistory.at(-1)!;
     assert.equal(provider.roomIntroductionCalls, 1);
-    assert.equal(provider.roomIntroductionRequests[0]?.canonicalText, canonicalLine.visibleText);
+    assert.equal(
+      provider.roomIntroductionRequests[0]?.section,
+      "room_introduction_stage_cue_performance",
+    );
     assert.deepEqual(
       provider.roomIntroductionRequests[0]?.personaStyleCues,
       ["Actor 1 is observant, theatrical, and exacting under pressure."],
     );
+    const roomName = v2State(session).rooms.find((room) => room.id === roomId)!.name;
     const expectedPersonaText =
-      "Let us speak plainly: I am Actor 1. Ask in good faith, and I will answer in kind—carefully, truthfully, and never beyond what I know.";
+      `I am Actor 1. Take a careful look around ${roomName}. Ask what you need; I will answer only what I know.`;
     assert.equal(personaBeat.visibleText, expectedPersonaText);
     assert.deepEqual(stagedVoiceProfile, frozenSpeakerProfile);
     assert.notEqual(personaBeat.visibleText, canonicalLine.visibleText);
-    assert.match(personaBeat.visibleText, /Ask in good faith/iu);
-    assert.match(personaBeat.visibleText, /never beyond what I know/iu);
-    const dialogueTemplateOptions = provider.roomIntroductionRequests[0]
-      ?.dialogueTemplateOptions as Array<{ dialogueTemplateId?: string; text?: string }>;
-    assert.ok(dialogueTemplateOptions.length >= 8);
-    assert.ok(dialogueTemplateOptions.some((option) =>
-      option.dialogueTemplateId === "compassionate_truth" &&
-      option.text?.includes("Actor 1")));
+    assert.match(personaBeat.visibleText, /careful look/iu);
+    assert.match(personaBeat.visibleText, /only what I know/iu);
+    const stageCuePrompt = provider.roomIntroductionRequests[0]?.stageCue as {
+      allowedFacts?: Array<{ statement?: string }>;
+      requiredBeats?: Array<{ id?: string }>;
+      forbiddenDisclosures?: unknown;
+    };
+    assert.ok(stageCuePrompt.allowedFacts?.some((fact) =>
+      fact.statement?.includes("Actor 1")));
+    assert.equal(stageCuePrompt.requiredBeats?.length, 3);
+    assert.equal(stageCuePrompt.forbiddenDisclosures, undefined);
 
     const persisted = getDebateMysteryCaseV2(db, "user-1", session.id);
     assert.equal(
@@ -3363,8 +3685,8 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     );
     assert.equal(
       persisted.privateCase.roomIntroductionPersonaPolishByRoom?.[roomId]
-        ?.dialogueTemplateId,
-      "compassionate_truth",
+        ?.stageCueVersion,
+      1,
     );
     const persistedLine = persisted.graph.lines.find((line) => line.id === canonicalLine.id)!;
     assert.equal(persistedLine.visibleText, personaBeat.visibleText);
@@ -3387,14 +3709,14 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       `SELECT cache_key FROM debate_mystery_audio_refs
         WHERE user_id = ? AND session_id = ? AND line_id = ?`,
     ).get("user-1", session.id, canonicalLine.id) as { cache_key: string };
-    assert.notEqual(polishedReference.cache_key, originalReference.cache_key);
+    assert.ok(polishedReference.cache_key);
     assert.ok(getDebateMysteryAudioClipV2(db, "user-1", session.id, canonicalLine.id).byteSize > 0);
     const publicJson = (db.prepare(
       "SELECT session_json FROM debate_sessions WHERE user_id = ? AND id = ?",
     ).get("user-1", session.id) as { session_json: string }).session_json;
     assert.doesNotMatch(
       publicJson,
-      /personaStyleCues|dialogueTemplateOptions|dialogueTemplateId|system_prompt/iu,
+      /personaStyleCues|stageCue|allowedFacts|forbiddenDisclosures|system_prompt/iu,
     );
 
     const idempotent = await applyDebateMysteryActionWithPersonaV2(
@@ -3474,8 +3796,8 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     );
     assert.equal(
       replayCase.privateCase.roomIntroductionPersonaPolishByRoom?.[roomId]
-        ?.dialogueTemplateId,
-      "compassionate_truth",
+        ?.stageCueVersion,
+      1,
     );
     assert.equal(
       replayCase.graph.lines.find((line) => line.id === canonicalLine.id)?.visibleText,
@@ -3572,7 +3894,76 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       persisted.privateCase.roomIntroductionPersonaPolishByRoom?.[roomId]?.outcome,
       "canonical",
     );
-    assert.equal(provider.roomIntroductionCalls, 1);
+    assert.equal(provider.roomIntroductionCalls, 2);
+  });
+
+  it("pins LOCAL stage-cue performance to the local lane even when an online lane is supplied", async () => {
+    const db = testDb();
+    const localProvider = new RoomIntroductionPersonaV2AuthorProvider();
+    const onlineProvider = new RoomIntroductionPersonaV2AuthorProvider();
+    let session = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-local-stage-cue-lane",
+      runtime(localProvider),
+      { deferBackgroundStart: true },
+    );
+    session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      session.id,
+      runtime(localProvider),
+      { generateWave: async () => playableWave() },
+    );
+    session = act(db, session, { action: "move" }, "local-stage-cue-title");
+    session = act(db, session, { action: "dismiss_case_opening" }, "local-stage-cue-opening");
+    const entered = enterMysterySuspectRoomForIntroduction(
+      db,
+      session,
+      "local-stage-cue",
+    );
+    session = entered.session;
+    const localRuntime: DebateAiRuntime = {
+      preferredProvider: "local",
+      responseMode: "local",
+      modelSelectionKind: "auto",
+      local: {
+        provider: localProvider,
+        providerName: "local",
+        model: "local-stage-cue-model",
+      },
+      online: {
+        provider: onlineProvider,
+        providerName: "openai",
+        model: "must-not-run",
+      },
+      lanes: [{
+        provider: onlineProvider,
+        providerName: "openai",
+        model: "must-not-run",
+      }],
+    };
+    const performed = await applyDebateMysteryActionWithPersonaV2(
+      db,
+      "user-1",
+      session.id,
+      {
+        version: 2,
+        expectedRevision: session.revision,
+        idempotencyKey: "local-stage-cue-perform",
+        action: "advance_room_introduction",
+        roomId: entered.roomId,
+      },
+      localRuntime,
+      { generateWave: async () => playableWave() },
+    );
+    assert.equal(localProvider.roomIntroductionCalls, 1);
+    assert.equal(onlineProvider.roomIntroductionCalls, 0);
+    assert.match(
+      v2State(performed).dialogueHistory.at(-1)?.visibleText ?? "",
+      /only what I know/iu,
+    );
   });
 
   it("upgrades a cadence-only saved receipt to stronger dialogue on its next unresolved reveal", async () => {
@@ -3670,8 +4061,8 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(
       getDebateMysteryCaseV2(db, "user-1", session.id)
         .privateCase.roomIntroductionPersonaPolishByRoom?.[entered.roomId]
-        ?.dialogueTemplateId,
-      "compassionate_truth",
+        ?.stageCueVersion,
+      1,
     );
   });
 
@@ -3821,7 +4212,10 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       session.id,
       request,
       runtime(provider),
-      { personaPolishTimeoutMs: 15 },
+      {
+        personaPolishTimeoutMs: 15,
+        generateWave: async () => playableWave(),
+      },
     );
     assert.ok(Date.now() - startedAt < 1_000, "a hanging provider must not hold the room reveal");
     assert.equal(provider.roomIntroductionSignal?.aborted, true);
@@ -3952,7 +4346,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.match(source.private_error ?? "", /default Present dialogue.*specific Case File record/iu);
   });
 
-  it("compiles every suspect chapter, prepares a complete local pack, and plays without runtime generation", async () => {
+  it("compiles every suspect chapter with a sparse local pack and plays without runtime authoring", async () => {
     const db = testDb();
     const provider = new V2AuthorProvider();
     const prismVoiceProfile = {
@@ -4173,8 +4567,8 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
         assert.equal(promptLine.speakerBotId, state.config.prosecutorBotId);
         assert.equal(responseLine.speakerKind, "bot");
         assert.equal(responseLine.speakerBotId, suspect.botId);
-        assert.ok(preparedProfilesByText.has(promptLine.spokenText));
-        assert.ok(preparedProfilesByText.has(responseLine.spokenText));
+        assert.equal(preparedProfilesByText.has(promptLine.spokenText), false);
+        assert.equal(preparedProfilesByText.has(responseLine.spokenText), false);
       }
     }
     const specificAuthoredReaction = graph.lines.find((line) => /That record narrows the interval more than I admitted/iu.test(line.spokenText));
@@ -4196,10 +4590,15 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     const manifestRow = db.prepare(
       "SELECT status, manifest_json FROM debate_mystery_audio_manifests WHERE user_id = 'user-1' AND session_id = ?",
     ).get(session.id) as { status: string; manifest_json: string };
-    const manifest = JSON.parse(manifestRow.manifest_json) as { entries: unknown[]; complete: boolean };
+    const manifest = JSON.parse(manifestRow.manifest_json) as {
+      preparationMode?: string;
+      entries: unknown[];
+      complete: boolean;
+    };
     assert.equal(manifestRow.status, "complete");
     assert.equal(manifest.complete, true);
-    assert.equal(manifest.entries.length, privateCase.graphValidation.reachableSpokenLineIds.length);
+    assert.equal(manifest.preparationMode, "lazy-on-demand-v1");
+    assert.equal(manifest.entries.length, 1, "Case Forge prepares only the opening carrier line");
     assert.equal(
       (manifest as { entries: Array<{ lineId: string }> }).entries.some(
         (entry) => examinationLines.some((line) => line.id === entry.lineId),
@@ -4258,19 +4657,20 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
         assert.equal(personaBeat.delivery, "spoken");
         assert.ok(personaBeat.lineId?.includes(`room-introduction-${roomId}-persona`));
         assert.equal(personaBeat.speakerBotId, entered.suspects.find((suspect) => suspect.roomId === roomId)?.botId);
-        assert.match(
+        const frozenPersonaLine = graph.lines.find((line) => line.id === personaBeat.lineId)!;
+        assert.equal(
           personaBeat.visibleText,
-          /Avery made every favor feel like an audit/u,
-          "the room handoff must retain the authored persona introduction instead of stock occupant copy",
+          frozenPersonaLine.stageCue?.deterministicFallbackText,
+          "the direct deterministic path uses the sealed cue fallback without runtime authoring",
         );
         assert.equal(
           personaBeat.stageActionText,
           "Squares their shoulders and studies the prosecutor",
         );
-        assert.ok(preparedProfilesByText.has(personaBeat.visibleText));
-        assert.ok((manifest as { entries: Array<{ lineId: string }> }).entries.some(
+        assert.equal(preparedProfilesByText.has(personaBeat.visibleText), false);
+        assert.equal((manifest as { entries: Array<{ lineId: string }> }).entries.some(
           (entry) => entry.lineId === personaBeat.lineId,
-        ));
+        ), false);
         assert.equal((manifest as { entries: Array<{ lineId: string }> }).entries.some(
           (entry) => entry.lineId === silentBeat.lineId,
         ), false);
@@ -4388,12 +4788,12 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(serviceBellExchange.length, 2);
     assert.match(serviceBellExchange[0]!.visibleText, /Service Bell Log/iu);
     assert.match(serviceBellExchange[1]!.visibleText, /Service Bell Log/iu);
-    assert.ok((manifest as { entries: Array<{ lineId: string }> }).entries.some(
+    assert.equal((manifest as { entries: Array<{ lineId: string }> }).entries.some(
       (entry) => entry.lineId === serviceBellExchange[0]!.lineId,
-    ));
-    assert.ok((manifest as { entries: Array<{ lineId: string }> }).entries.some(
+    ), false);
+    assert.equal((manifest as { entries: Array<{ lineId: string }> }).entries.some(
       (entry) => entry.lineId === serviceBellExchange[1]!.lineId,
-    ));
+    ), false);
     const firstTopic = v2State(session).topics.find((topic) => topic.suspectSeatId === firstSuspect.seatId)!;
     assert.throws(
       () => act(db, session, {
@@ -4419,9 +4819,9 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(responseLine?.speakerKind, "bot");
     // Player-authored prosecution speaks through the selected Prosecutor's
     // exact frozen bot profile, never the account-wide Prism fallback.
-    assert.notEqual(preparedProfilesByText.get(questionLine!.spokenText)?.baseVoiceId, "voice-5");
-    assert.ok((manifest as { entries: Array<{ lineId: string }> }).entries.some((entry) => entry.lineId === questionLine?.id));
-    assert.ok((manifest as { entries: Array<{ lineId: string }> }).entries.some((entry) => entry.lineId === responseLine?.id));
+    assert.equal(preparedProfilesByText.has(questionLine!.spokenText), false);
+    assert.equal((manifest as { entries: Array<{ lineId: string }> }).entries.some((entry) => entry.lineId === questionLine?.id), false);
+    assert.equal((manifest as { entries: Array<{ lineId: string }> }).entries.some((entry) => entry.lineId === responseLine?.id), false);
     const dialogueCountBeforeRepeat = state.dialogueHistory.length;
     const discoveryIdsBeforeRepeat = [...state.discoveryIds];
     session = act(db, session, { action: "talk", suspectSeatId: firstSuspect.seatId, topicNodeId: firstTopic.nodeId }, "talk-repeat-suspect");
@@ -4432,9 +4832,9 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     const repeatedResponseLine = graph.lines.find((line) => line.id === repeatedResponse.lineId)!;
     assert.match(repeatedResponse.visibleText, /like i said before|as i said|still going on about that/iu);
     assert.equal(repeatedResponse.visibleText, repeatedResponseLine.spokenText);
-    assert.ok((manifest as { entries: Array<{ lineId: string; botId?: string | null }> }).entries.some(
+    assert.equal((manifest as { entries: Array<{ lineId: string; botId?: string | null }> }).entries.some(
       (entry) => entry.lineId === repeatedResponseLine.id && entry.botId === firstSuspect.botId,
-    ));
+    ), false);
     assert.deepEqual(state.discoveryIds, discoveryIdsBeforeRepeat, "a repeated answer must not reapply topic mutations");
     assert.equal(state.theoryAvailable, true);
     const dialogueCountBeforeTrial = state.dialogueHistory.length;
@@ -4663,7 +5063,11 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.doesNotMatch(repairedPromptLine.spokenText, new RegExp(wrongRecord.title, "iu"));
     assert.match(repairedResponseLine.spokenText, new RegExp(selectedRecord.title, "iu"));
     assert.doesNotMatch(repairedResponseLine.spokenText, new RegExp(wrongRecord.title, "iu"));
-    assert.ok(locallyPreparedTexts.includes(repairedResponseLine.spokenText));
+    assert.deepEqual(
+      locallyPreparedTexts,
+      [],
+      "repairing an unspoken branch must not eagerly synthesize its replacement",
+    );
   });
 
   it("keeps verified reusable audio attached when its cache key predates the current derivation", async () => {
@@ -4682,6 +5086,27 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       "user-1",
       session.id,
       runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    session = act(db, session, { action: "move" }, "legacy-cache-title");
+    session = act(db, session, { action: "dismiss_case_opening" }, "legacy-cache-opening");
+    const entered = enterMysterySuspectRoomForIntroduction(
+      db,
+      session,
+      "legacy-cache",
+    );
+    session = await applyDebateMysteryActionWithPersonaV2(
+      db,
+      "user-1",
+      entered.session.id,
+      {
+        version: 2,
+        expectedRevision: entered.session.revision,
+        idempotencyKey: "legacy-cache-persona",
+        action: "advance_room_introduction",
+        roomId: entered.roomId,
+      },
+      null,
       { generateWave: async () => playableWave() },
     );
     const callsAfterCompile = provider.calls;
@@ -4764,7 +5189,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
   });
 
-  it("migrates an active legacy partner-shaped case and rebuilds only local player-role audio", async () => {
+  it("migrates an active legacy partner-shaped case without eagerly rebuilding unspoken audio", async () => {
     const db = testDb();
     const provider = new V2AuthorProvider();
     let session = await createDebateMysterySessionV2(
@@ -4944,7 +5369,11 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     );
     assert.equal(v2State(repaired).config.prosecutorBotId, prosecutorBotId);
     assert.equal("prosecutorPartnerBotId" in v2State(repaired).config, false);
-    assert.ok(locallyPreparedTexts.length > 0, "the changed Prosecutor profile must rebuild affected local clips");
+    assert.deepEqual(
+      locallyPreparedTexts,
+      [],
+      "changing the Prosecutor profile must not materialize unspoken branches during migration",
+    );
 
     const migrated = getDebateMysteryCaseV2(db, "user-1", session.id);
     const repairedUnvisitedSuspectRoom = v2State(repaired).rooms.find((room) =>
@@ -5014,7 +5443,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     )!;
     assert.match(legacyRepeatLine.spokenText, /like i said|already told you|said this once|still going on|already said|answered that before|to repeat myself|answer has not changed|already explained/iu);
     assert.equal(legacyRepeatLine.speakerBotId, migratedOriginalLine.speakerBotId);
-    assert.ok(locallyPreparedTexts.includes(legacyRepeatLine.spokenText));
+    assert.equal(locallyPreparedTexts.includes(legacyRepeatLine.spokenText), false);
     const repairedPresentNodeId = migrated.privateCase.presentNodeIdBySuspectRecord[legacyPresentMappingKey];
     assert.ok(repairedPresentNodeId, "legacy readiness repair must materialize the missing Present mapping");
     const repairedPresentNode = migrated.graph.nodes.find((node) => node.id === repairedPresentNodeId)!;
@@ -5030,17 +5459,16 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       "SELECT status, manifest_json FROM debate_mystery_audio_manifests WHERE session_id = ?",
     ).get(session.id) as { status: string; manifest_json: string };
     const repairedManifest = JSON.parse(manifestRow.manifest_json) as {
+      preparationMode?: string;
       complete: boolean;
       entries: Array<{ lineId: string; botId: string | null }>;
     };
     assert.equal(manifestRow.status, "complete");
     assert.equal(repairedManifest.complete, true);
-    assert.equal(
-      repairedManifest.entries.find((entry) => entry.lineId === migratedQuestionLine.id)?.botId,
-      prosecutorBotId,
-    );
-    assert.ok(repairedManifest.entries.some((entry) => entry.lineId === repairedPresentPrompt.id));
-    assert.ok(repairedManifest.entries.some((entry) => entry.lineId === repairedPresentResponse.id));
+    assert.equal(repairedManifest.preparationMode, "lazy-on-demand-v1");
+    assert.equal(repairedManifest.entries.some((entry) => entry.lineId === migratedQuestionLine.id), false);
+    assert.equal(repairedManifest.entries.some((entry) => entry.lineId === repairedPresentPrompt.id), false);
+    assert.equal(repairedManifest.entries.some((entry) => entry.lineId === repairedPresentResponse.id), false);
 
     const durableCheckpointRow = db.prepare(
       `SELECT checkpoint_json
@@ -5116,7 +5544,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(v2State(replayRun).playPhase, "investigation");
   });
 
-  it("resumes interrupted local preparation without rebuilding verified clips", async () => {
+  it("finishes lazy local preparation without touching unspoken branches", async () => {
     const db = testDb();
     const provider = new V2AuthorProvider();
     let session = await createDebateMysterySessionV2(
@@ -5136,59 +5564,26 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       {
         generateWave: async () => {
           firstPassCalls += 1;
-          if (firstPassCalls === 4) throw new Error("simulated local worker interruption");
+          if (firstPassCalls > 1) {
+            throw new Error("Case Forge must not synthesize an unspoken branch");
+          }
           return playableWave();
         },
       },
     );
-    assert.equal(v2State(session).compilation.stage, "needs_attention");
-    assert.equal(v2State(session).compilation.publicFailureCode, "CASE_FORGE_LOCAL_AUDIO_FAILED");
-    assert.equal(v2State(session).compilation.publicFailureStage, "preparing_local_voices");
-    assert.match(v2State(session).localAudioFailure ?? "", /complete text case is safe/u);
-    const partialRow = db.prepare(
+    assert.equal(v2State(session).compilation.stage, "complete");
+    assert.equal(firstPassCalls, 1);
+    const manifestRow = db.prepare(
       "SELECT manifest_json FROM debate_mystery_audio_manifests WHERE user_id = 'user-1' AND session_id = ?",
     ).get(session.id) as { manifest_json: string };
-    const partial = JSON.parse(partialRow.manifest_json) as { entries: Array<{ lineId: string; sha256: string }> };
-    assert.equal(firstPassCalls, 4);
-    assert.ok(
-      partial.entries.length >= 3,
-      "the interrupted pass must retain at least its three newly verified clips; account-cache hits may add more",
-    );
-
-    await retryDebateMysteryCompilationV2(
-      db,
-      "user-1",
-      session.id,
-      runtime(provider),
-      { deferBackgroundStart: true },
-    );
-    let resumedCalls = 0;
-    session = await runDebateMysteryCompilationV2(
-      db,
-      "user-1",
-      session.id,
-      runtime(provider),
-      {
-        generateWave: async () => {
-          resumedCalls += 1;
-          return playableWave();
-        },
-      },
-    );
-    const resumedState = v2State(session);
-    assert.equal(resumedState.compilation.stage, "complete");
-    assert.ok(resumedCalls > 0);
-    assert.ok(
-      resumedCalls <= resumedState.compilation.requiredAudioCount - partial.entries.length,
-      "resume may also reuse exact verified clips already present in the account cache",
-    );
-    const completeRow = db.prepare(
-      "SELECT manifest_json FROM debate_mystery_audio_manifests WHERE user_id = 'user-1' AND session_id = ?",
-    ).get(session.id) as { manifest_json: string };
-    const complete = JSON.parse(completeRow.manifest_json) as { entries: Array<{ lineId: string; sha256: string }> };
-    for (const entry of partial.entries) {
-      assert.equal(complete.entries.find((candidate) => candidate.lineId === entry.lineId)?.sha256, entry.sha256);
-    }
+    const manifest = JSON.parse(manifestRow.manifest_json) as {
+      preparationMode?: string;
+      entries: Array<{ lineId: string }>;
+    };
+    assert.equal(manifest.preparationMode, "lazy-on-demand-v1");
+    assert.equal(manifest.entries.length, 1);
+    assert.equal(v2State(session).compilation.preparedAudioCount, 1);
+    assert.equal(v2State(session).compilation.requiredAudioCount, 1);
   });
 
   it("lets Spectator review an editable authorized partner theory before watch-only court", async () => {
@@ -5254,10 +5649,15 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     const manifestRow = db.prepare(
       "SELECT manifest_json FROM debate_mystery_audio_manifests WHERE user_id = ? AND session_id = ?",
     ).get("user-1", session.id) as { manifest_json: string };
-    const manifest = JSON.parse(manifestRow.manifest_json) as { entries: Array<{ lineId: string }> };
+    const manifest = JSON.parse(manifestRow.manifest_json) as {
+      preparationMode?: string;
+      entries: Array<{ lineId: string }>;
+    };
+    assert.equal(manifest.preparationMode, "lazy-on-demand-v1");
     assert.deepEqual(
       new Set(manifest.entries.map((entry) => entry.lineId)),
-      new Set(compiled.privateCase.graphValidation.reachableSpokenLineIds),
+      new Set(),
+      "Spectator Case Forge does not pre-render its unused Court branches",
     );
     assert.equal(
       manifest.entries.some((entry) => entry.lineId === "line-choice-define-the-conflict-demeanor-option"),
@@ -5564,6 +5964,364 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       }),
       /integrity check/iu,
     );
+  });
+
+  it("round-trips a deleted complete Whodunnit across clean accounts and plays title-to-verdict offline", async () => {
+    const db = testDb();
+    db.prepare(
+      `INSERT INTO users
+         (id, email, display_name, password_hash, password_salt,
+          wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
+          preferred_provider, created_at, last_active_at)
+       VALUES ('portable-recipient', 'portable@example.com', 'Recipient', 'hash', 'salt',
+               'cipher', 'iv', 'tag', 'local', ?, ?)`,
+    ).run(NOW, NOW);
+    const provider = new V2AuthorProvider();
+    let source = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      { ...config(), playerRole: "spectator" },
+      "create-portable-roundtrip-source",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    source = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      source.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    const sourceState = v2State(source);
+    const sourceBundleId = "portable-source-mansion";
+    const mansionRooms = sourceState.rooms.length > 0
+      ? sourceState.rooms.map((room) => ({
+          id: room.id,
+          templateId: room.templateId ?? room.id,
+          name: room.name,
+          floor: room.floor,
+          x: room.x ?? 0,
+          y: room.y ?? 0,
+          width: room.width ?? 1,
+          height: room.height ?? 1,
+          neighborIds: room.neighborIds ?? [],
+          assignedSuspectSeatId: sourceState.suspects.find((suspect) => suspect.roomId === room.id)?.seatId ?? null,
+          emoji: room.emoji,
+          imageId: null,
+          bundledAssetPath: room.bundledAssetPath,
+        }))
+      : [
+        { x: 1, y: 1, neighbors: [2, 3, 4, 5] },
+        { x: 0, y: 1, neighbors: [1] },
+        { x: 2, y: 1, neighbors: [1] },
+        { x: 1, y: 0, neighbors: [1] },
+        { x: 1, y: 2, neighbors: [1] },
+      ].map(({ x, y, neighbors }, index) => ({
+          id: `portable-court-room-${index + 1}`,
+          templateId: index === 0 ? "library" : "study",
+          name: index === 0 ? "Archive Crime Scene" : `Archive Room ${index + 1}`,
+          floor: 1,
+          x,
+          y,
+          width: 1,
+          height: 1,
+          neighborIds: neighbors.map((roomNumber) => `portable-court-room-${roomNumber}`),
+          assignedSuspectSeatId: index === 0 ? null : `suspect-slot-${index}`,
+          emoji: index === 0 ? "⚖️" : "📚",
+          imageId: null,
+          bundledAssetPath: null,
+        }));
+    db.prepare(
+      `INSERT INTO debate_mystery_mansion_bundles
+         (id, user_id, source_session_id, name, floors, total_rooms,
+          suspect_count, style_json, layout_json, created_at, updated_at)
+       VALUES (?, 'user-1', ?, 'Violet Archive Mansion', ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      sourceBundleId,
+      source.id,
+      Math.max(...mansionRooms.map((room) => room.floor), 1),
+      4,
+      mansionRooms.length,
+      JSON.stringify(sourceState.config.houseStyle),
+      JSON.stringify(mansionRooms),
+      NOW,
+      NOW,
+    );
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = (() => {
+      fetchCalls += 1;
+      throw new Error("Portable Whodunnit operations and playback must stay offline.");
+    }) as typeof fetch;
+    try {
+      const mansionEnvelope = await exportPortableMansionPackageV1({
+        db,
+        userKey: Buffer.alloc(32, 1),
+        userId: "user-1",
+        bundleId: sourceBundleId,
+        prismVersion: "0.15.0",
+        creatorName: "Portable Fixture",
+      });
+      assert.equal(inspectPortableMansionPackageV1(mansionEnvelope).packageType, "mansion");
+      source = await finishSpectatorRunWithLazyAudio(
+        db,
+        source,
+        "portable-roundtrip-source",
+        provider,
+      );
+      deleteDebateSession(db, "user-1", source.id, {
+        expectedRevision: source.revision,
+        idempotencyKey: "recoverable-delete-before-mansion-import",
+      });
+      assert.equal(getDebateSession(db, "user-1", source.id).status, "cancelled");
+
+      const importedMansionBundleId = await importPortableMansionPackageV1({
+        db,
+        userKey: Buffer.alloc(32, 1),
+        userId: "user-1",
+        envelope: mansionEnvelope,
+      });
+      assert.notEqual(importedMansionBundleId, sourceBundleId);
+      let forge = await createDebateMysterySessionV2(
+        db,
+        "user-1",
+        { ...config(), playerRole: "spectator", mansionBundleId: importedMansionBundleId },
+        "create-portable-roundtrip-forge",
+        runtime(provider),
+        { deferBackgroundStart: true },
+      );
+      forge = await runDebateMysteryCompilationV2(
+        db,
+        "user-1",
+        forge.id,
+        runtime(provider),
+        { generateWave: async () => playableWave() },
+      );
+      assert.equal(v2State(forge).compilation.stage, "complete");
+      forge = await finishSpectatorRunWithLazyAudio(
+        db,
+        forge,
+        "portable-roundtrip-forge",
+        provider,
+      );
+      const fallbackSubjectId = "portable-shared-fallback";
+      db.prepare(
+        `INSERT INTO debate_mystery_asset_vault
+           (id, user_id, session_id, kind, subject_id, status, source, mime_type,
+            review_json, created_at, updated_at)
+         VALUES (?, 'user-1', ?, 'room', ?, 'fallback', 'bundled', 'image/webp',
+                 '{"fallback":true,"reasonCode":"generation_failed"}', ?, ?)`,
+      ).run(
+        "portable-shared-fallback-row",
+        forge.id,
+        fallbackSubjectId,
+        NOW,
+        NOW,
+      );
+      const sourcePrivate = getDebateMysteryCaseV2(db, "user-1", forge.id).privateCase;
+      const callsAfterCompile = provider.calls;
+      const envelope = await exportPortableWhodunnitPackageV1({
+        db,
+        userKey: Buffer.alloc(32, 1),
+        userId: "user-1",
+        sessionId: forge.id,
+        prismVersion: "0.15.0",
+        creatorName: "Portable Fixture",
+      });
+      const header = inspectPortableWhodunnitPackageV1(envelope);
+      assert.equal(header.packageType, "whodunnit");
+      assert.doesNotMatch(JSON.stringify(header), /culprit|proof|sealed|motive|method/iu);
+      const authenticated = decodeInternalWhodunnitPackageV1(
+        openPortableMysteryEnvelopeV1({ envelope }).payload,
+      );
+      assert.equal(
+        authenticated.manifest.runtime.assetBindings.some(
+          (binding) => binding.subjectId === fallbackSubjectId,
+        ),
+        false,
+        "metadata-only bundled fallbacks must not be embedded as protected package visuals",
+      );
+      const completedPlaythrough = authenticated.manifest.runtime.completedPlaythrough;
+      assert.ok(completedPlaythrough);
+      assert.equal(
+        completedPlaythrough.transcript.length,
+        v2State(forge).dialogueHistory.length,
+      );
+      assert.deepEqual(
+        completedPlaythrough.transcript.map((entry) =>
+          entry && typeof entry === "object" && !Array.isArray(entry)
+            ? entry.visibleText
+            : null),
+        v2State(forge).dialogueHistory.map((entry) => entry.visibleText),
+      );
+      assert.deepEqual(
+        {
+          ...completedPlaythrough.verdict,
+          jurorBallots: Array.isArray(completedPlaythrough.verdict.jurorBallots)
+            ? completedPlaythrough.verdict.jurorBallots.map((ballot) =>
+                ballot && typeof ballot === "object" && !Array.isArray(ballot)
+                  ? { ...ballot, jurorBotId: "portable-juror" }
+                  : ballot)
+            : [],
+        },
+        {
+          ...v2State(forge).verdict,
+          jurorBallots: v2State(forge).verdict?.jurorBallots.map((ballot) => ({
+            ...ballot,
+            jurorBotId: "portable-juror",
+          })),
+        },
+      );
+      assert.doesNotMatch(JSON.stringify(authenticated.manifest.publicCase), /sealedCulpritSeatId|proofContract/iu);
+      assert.doesNotMatch(JSON.stringify(authenticated.manifest), /user-1|portable-source-mansion|systemPrompt|inputJson|privateError/iu);
+      const packagedAudioManifest = authenticated.manifest.runtime.audioManifest as {
+        preparationMode?: string;
+        entries?: Array<{ lineId: string; reusableCalloutKey?: string | null }>;
+      };
+      assert.equal(packagedAudioManifest.preparationMode, "lazy-on-demand-v1");
+      assert.ok(
+        (packagedAudioManifest.entries?.length ?? 0) <
+          sourcePrivate.graphValidation.reachableSpokenLineIds.length,
+        "portable replay must exclude unspoken branch audio",
+      );
+      const transcriptLineIds = new Set(
+        v2State(forge).dialogueHistory.flatMap((entry) =>
+          entry.lineId && entry.delivery !== "text_only" ? [entry.lineId] : []),
+      );
+      const occurredCallouts = new Set<string>(
+        v2State(forge).calloutHistory.map((entry) => entry.callout),
+      );
+      for (const entry of packagedAudioManifest.entries ?? []) {
+        assert.ok(
+          transcriptLineIds.has(entry.lineId) ||
+            Boolean(entry.reusableCalloutKey && occurredCallouts.has(entry.reusableCalloutKey)),
+          `unused audio ${entry.lineId} entered the package`,
+        );
+      }
+
+      deleteDebateSession(db, "user-1", forge.id, {
+        expectedRevision: forge.revision,
+        idempotencyKey: "recoverable-delete-before-portable-import",
+      });
+      assert.equal(getDebateSession(db, "user-1", forge.id).status, "cancelled");
+
+      const failedAudioPaths: string[] = [];
+      await assert.rejects(
+        importPortableWhodunnitPackageV1({
+          db,
+          userKey: Buffer.alloc(32, 2),
+          userId: "portable-recipient",
+          envelope,
+          writeAudioFile: (relativePath, bytes) => {
+            failedAudioPaths.push(relativePath);
+            writeGeneratedImageBytesExclusive(relativePath, bytes);
+            if (failedAudioPaths.length === 2) throw new Error("injected portable audio write failure");
+          },
+        }),
+        /injected portable audio write failure/iu,
+      );
+      assert.ok(failedAudioPaths.length >= 2, "fixture must exercise cleanup after an earlier successful audio write");
+      for (const relativePath of failedAudioPaths) {
+        assert.equal(existsSync(resolveAbsoluteUnderDataRoot(relativePath)), false);
+      }
+      assert.equal(Number((db.prepare(
+        "SELECT COUNT(*) AS count FROM debate_sessions WHERE user_id = ?",
+      ).get("portable-recipient") as { count: number }).count), 0);
+
+      let collidingAudioPath = "";
+      const collidingBytes = Buffer.from("pre-existing portable audio");
+      await assert.rejects(
+        importPortableWhodunnitPackageV1({
+          db,
+          userKey: Buffer.alloc(32, 2),
+          userId: "portable-recipient",
+          envelope,
+          writeAudioFile: (relativePath) => {
+            collidingAudioPath = relativePath;
+            writeGeneratedImageBytesExclusive(relativePath, collidingBytes);
+            throw Object.assign(new Error("injected portable audio collision"), { code: "EEXIST" });
+          },
+        }),
+        /injected portable audio collision/iu,
+      );
+      assert.ok(collidingAudioPath);
+      const collidingAbsolutePath = resolveAbsoluteUnderDataRoot(collidingAudioPath);
+      assert.deepEqual(readFileSync(collidingAbsolutePath), collidingBytes);
+      rmSync(collidingAbsolutePath, { force: true });
+
+      const imported = await importPortableWhodunnitPackageV1({
+        db,
+        userKey: Buffer.alloc(32, 2),
+        userId: "portable-recipient",
+        envelope,
+      });
+      assert.notEqual(imported.sessionId, forge.id);
+      assert.notEqual(imported.mansionBundleId, sourceBundleId);
+      const importedSessionRow = db.prepare(
+        "SELECT user_id, session_json FROM debate_sessions WHERE id = ?",
+      ).get(imported.sessionId) as { user_id: string; session_json: string };
+      assert.equal(importedSessionRow.user_id, "portable-recipient");
+      const sourceIdLeak = importedSessionRow.session_json.match(/user-1|"bot-(?:[1-9]|10)"|portable-source-mansion/u);
+      const sourceLeakIndex = sourceIdLeak ? importedSessionRow.session_json.indexOf(sourceIdLeak[0]) : -1;
+      assert.equal(
+        sourceIdLeak?.[0],
+        undefined,
+        `source id leaked: ${importedSessionRow.session_json.slice(Math.max(0, sourceLeakIndex - 100), sourceLeakIndex + 120)}`,
+      );
+      const importedCase = getDebateMysteryCaseV2(db, "portable-recipient", imported.sessionId).privateCase;
+      assert.equal(
+        (importedCase as unknown as {
+          portableCompletedPlaythrough?: { transcript?: unknown[] };
+        }).portableCompletedPlaythrough?.transcript?.length,
+        v2State(forge).dialogueHistory.length,
+      );
+      assert.equal(importedCase.motive, sourcePrivate.motive);
+      assert.equal(importedCase.method, sourcePrivate.method);
+      assert.deepEqual(importedCase.recordItems.map((item) => ({
+        title: item.title,
+        description: item.description,
+        emoji: item.emoji,
+      })), sourcePrivate.recordItems.map((item) => ({
+        title: item.title,
+        description: item.description,
+        emoji: item.emoji,
+      })));
+      assert.equal(importedCase.sealedCulpritSeatId, sourcePrivate.sealedCulpritSeatId);
+      const importedAudio = db.prepare(
+        `SELECT COUNT(*) AS count, MIN(cache.user_id) AS owner
+           FROM debate_mystery_audio_refs AS refs
+           JOIN debate_mystery_audio_cache AS cache ON cache.cache_key = refs.cache_key
+          WHERE refs.session_id = ? AND refs.user_id = ?`,
+      ).get(imported.sessionId, "portable-recipient") as { count: number; owner: string };
+      assert.ok(importedAudio.count > 0);
+      assert.equal(importedAudio.owner, "portable-recipient");
+
+      let replay = getDebateSession(db, "portable-recipient", imported.sessionId);
+      const importedAct = (
+        request: Omit<DebateMysteryActionRequestV2, "version" | "expectedRevision" | "idempotencyKey">,
+        key: string,
+      ): void => {
+        replay = applyDebateMysteryActionV2(db, "portable-recipient", replay.id, {
+          ...request,
+          version: 2,
+          expectedRevision: replay.revision,
+          idempotencyKey: key,
+        } as DebateMysteryActionRequestV2);
+      };
+      importedAct({ action: "move" }, "portable-title-to-review");
+      const reviewed = v2State(replay);
+      assert.ok(reviewed.theory, "offline title playback must reach a meaningful filed theory");
+      importedAct({ action: "file_theory", theory: reviewed.theory }, "portable-file-theory");
+      for (let advance = 0; v2State(replay).playPhase === "trial" && advance < 50; advance += 1) {
+        importedAct({ action: "advance_spectator_trial" }, `portable-court-${advance}`);
+      }
+      assert.equal(v2State(replay).playPhase, "verdict");
+      assert.equal(replay.status, "completed");
+      assert.equal(provider.calls, callsAfterCompile);
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("never repairs corrupt replay audio and can create a silent Run instead", async () => {

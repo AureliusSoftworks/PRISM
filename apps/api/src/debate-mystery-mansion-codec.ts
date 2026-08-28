@@ -1,14 +1,23 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
+  buildMansionAmbienceManifestV1,
   canonicalPortablePackageJsonV1,
+  debateMysteryAcousticThemePaletteV1,
+  DEFAULT_MANSION_ROOM_ART_CONTRACT_V1,
+  normalizeDebateMysteryAtmosphereContractV1,
   validateMansionPackageManifestV1,
   type MansionPackageManifestV1,
+  type PortableMansionInstallationMetadataV1,
   type PortablePackageJsonValueV1,
 } from "@localai/shared";
 import { unzipSync, zipSync } from "fflate";
 import { getDebateMysteryMansionBundleV2 } from "./debate-mystery-mansion-bundles.ts";
 import { decryptBytes, encryptBytes } from "./security.ts";
+import {
+  portableMp3DurationMsV1,
+  preflightPortableMysteryArchiveV1,
+} from "./debate-mystery-package-safety.ts";
 
 const MANIFEST_PATH = "manifest.json";
 const MAX_INTERNAL_ARCHIVE_BYTES = 256 * 1024 * 1024;
@@ -25,6 +34,12 @@ export class DebateMysteryMansionCodecError extends Error {
 export interface InternalMansionPackageV1 {
   manifest: MansionPackageManifestV1;
   assets: ReadonlyMap<string, Uint8Array>;
+}
+
+export interface ImportedMansionPackageV1 {
+  bundleId: string;
+  roomIdMap: ReadonlyMap<string, string>;
+  assetIdMap: ReadonlyMap<string, string>;
 }
 
 function sha256(bytes: Uint8Array): string {
@@ -86,6 +101,7 @@ export function decodeInternalMansionPackageV1(
   if (archive.byteLength > MAX_INTERNAL_ARCHIVE_BYTES) {
     throw new DebateMysteryMansionCodecError("Mansion archive is too large.");
   }
+  preflightPortableMysteryArchiveV1(archive);
   let expandedBytes = 0;
   let entryCount = 0;
   let entries: Record<string, Uint8Array>;
@@ -134,10 +150,17 @@ interface StoredMansionAssetRow {
   cipher_tag: Buffer;
   sha256: string;
   byte_size: number;
+  width: number | null;
+  height: number | null;
+  duration_ms: number | null;
 }
 
-function assetExtension(mimeType: StoredMansionAssetRow["mime_type"]): "png" | "webp" | "mp3" {
-  return mimeType === "image/png" ? "png" : mimeType === "image/webp" ? "webp" : "mp3";
+function assetExtension(mimeType: StoredMansionAssetRow["mime_type"]): "png" | "webp" | "mp3" | "ogg" | "wav" {
+  if (mimeType === "image/png") return "png";
+  if (mimeType === "image/webp") return "webp";
+  if (mimeType === "audio/ogg") return "ogg";
+  if (mimeType === "audio/wav") return "wav";
+  return "mp3";
 }
 
 export function exportInternalMansionPackageFromDbV1(args: {
@@ -152,7 +175,8 @@ export function exportInternalMansionPackageFromDbV1(args: {
   const stored = args.db.prepare(
     `SELECT assets.id, refs.role, refs.logical_id, assets.mime_type,
             assets.ciphertext, assets.cipher_iv, assets.cipher_tag,
-            assets.sha256, assets.byte_size
+            assets.sha256, assets.byte_size, assets.width, assets.height,
+            assets.duration_ms
        FROM debate_mystery_mansion_asset_refs AS refs
        JOIN debate_mystery_mansion_assets AS assets
          ON assets.id = refs.asset_id AND assets.user_id = refs.user_id
@@ -161,7 +185,14 @@ export function exportInternalMansionPackageFromDbV1(args: {
   ).all(args.bundleId, args.userId) as unknown as StoredMansionAssetRow[];
   const files = new Map<string, Uint8Array>();
   const portableIdByStoredId = new Map<string, string>();
-  const assets = stored.map((asset, index) => {
+  const grouped = new Map<string, { asset: StoredMansionAssetRow; refs: StoredMansionAssetRow[] }>();
+  for (const asset of stored) {
+    const current = grouped.get(asset.id);
+    if (current) current.refs.push(asset);
+    else grouped.set(asset.id, { asset, refs: [asset] });
+  }
+  const assets = [...grouped.values()].map((group, index) => {
+    const asset = group.asset;
     const bytes = decryptBytes({
       ciphertext: asset.ciphertext,
       iv: asset.cipher_iv,
@@ -172,29 +203,83 @@ export function exportInternalMansionPackageFromDbV1(args: {
     }
     const id = `asset-${String(index + 1).padStart(3, "0")}`;
     portableIdByStoredId.set(asset.id, id);
-    const archivePath = `${asset.role === "music" ? "audio" : "assets"}/${asset.sha256}.${assetExtension(asset.mime_type)}`;
+    const roles = new Set(group.refs.map((ref) => ref.role));
+    const onlyAmbience = group.refs.every(
+      (ref) => ref.role === "music" && ref.logical_id.startsWith("ambience:"),
+    );
+    const role: StoredMansionAssetRow["role"] = onlyAmbience
+      ? "ambience"
+      : roles.size === 1
+      ? group.refs[0]!.role
+      : asset.mime_type.startsWith("image/") ? "presentation" : "music";
+    const effectiveMimeType: StoredMansionAssetRow["mime_type"] =
+      role === "ambience" && Buffer.from(bytes.subarray(0, 4)).toString("ascii") === "OggS"
+        ? "audio/ogg"
+        : asset.mime_type;
+    const archivePath = `${role === "music" || role === "ambience" ? "audio" : "assets"}/${asset.sha256}.${assetExtension(effectiveMimeType)}`;
     files.set(archivePath, bytes);
     return {
       id,
-      role: asset.role,
+      role,
       archivePath,
       sha256: asset.sha256,
       byteLength: asset.byte_size,
-      mimeType: asset.mime_type,
-      width: asset.role === "room" ? 1536 : asset.role === "prop" ? 1024 : null,
-      height: asset.role === "room" ? 1024 : asset.role === "prop" ? 1024 : null,
-      durationMs: null,
+      mimeType: effectiveMimeType,
+      width: asset.width ?? (role === "room" ? 1536 : role === "prop" || role === "presentation" ? 1024 : null),
+      height: asset.height ?? (role === "room" ? 1024 : role === "prop" || role === "presentation" ? 1024 : null),
+      durationMs: role === "music" || role === "ambience"
+        ? (asset.duration_ms ?? (effectiveMimeType === "audio/mpeg"
+            ? portableMp3DurationMsV1(bytes)
+            : null))
+        : null,
     };
   });
   const roomAssetByLogicalId = new Map(
     stored.filter((asset) => asset.role === "room")
       .map((asset) => [asset.logical_id, portableIdByStoredId.get(asset.id)!]),
   );
+  const portableRoomIdByStoredId = new Map(
+    bundle.rooms.map((room, index) => [room.id, `room-${String(index + 1).padStart(3, "0")}`]),
+  );
+  const anonymousPropAssetIds = [...new Set(
+    stored.filter((asset) => asset.role === "prop")
+      .map((asset) => portableIdByStoredId.get(asset.id))
+      .filter((id): id is string => Boolean(id)),
+  )];
   let slotIndex = 0;
+  const generatedAmbience = buildMansionAmbienceManifestV1({
+    houseStyle: bundle.houseStyle,
+    rooms: bundle.rooms.map((room) => ({
+      id: portableRoomIdByStoredId.get(room.id)!,
+      name: room.name,
+      floor: room.floor,
+    })),
+    promptContractHash: sha256(Buffer.from(bundle.houseStyle.promptContract, "utf8")),
+    variationSeed: bundle.houseStyle.id,
+  });
+  const ambience = bundle.houseStyle.ambience
+    ? {
+        ...bundle.houseStyle.ambience,
+        promptContractHash: sha256(Buffer.from(bundle.houseStyle.promptContract, "utf8")),
+        atmosphere: { ...bundle.houseStyle.atmosphere },
+        themePaletteId: bundle.houseStyle.acousticThemePaletteId,
+        bespokeSynthesisRequested: bundle.houseStyle.bespokeAmbienceRequested,
+        assets: bundle.houseStyle.ambience.assets.map((reference) => ({
+          ...reference,
+          packageAssetId: reference.packageAssetId
+            ? portableIdByStoredId.get(reference.packageAssetId) ?? reference.packageAssetId
+            : null,
+        })),
+        roomProfiles: bundle.houseStyle.ambience.roomProfiles.map((profile) => ({
+          ...profile,
+          roomId: portableRoomIdByStoredId.get(profile.roomId) ?? profile.roomId,
+        })),
+      }
+    : generatedAmbience;
   const manifest: MansionPackageManifestV1 = {
     schema: "prism-mansion-package-v1",
     formatVersion: { major: 1, minor: 0 },
-    packageId: bundle.id,
+    packageId: randomUUID(),
     title: `${bundle.houseStyle.label.trim() || "Whodunnit"} Mansion`,
     description: "A reusable PRISM Whodunnit mansion.",
     creator: { name: args.creatorName?.trim() || "PRISM creator", id: null, url: null },
@@ -203,8 +288,8 @@ export function exportInternalMansionPackageFromDbV1(args: {
     contentWarnings: [],
     compatibility: { minimumFormatMajor: 1, maximumFormatMajor: 1, minimumPrismVersion: args.prismVersion },
     floorCount: bundle.floors,
-    rooms: bundle.rooms.map((room) => ({
-      id: room.id,
+    rooms: bundle.rooms.map((room, roomIndex) => ({
+      id: portableRoomIdByStoredId.get(room.id)!,
       templateId: room.templateId,
       name: room.name,
       floor: room.floor,
@@ -212,18 +297,31 @@ export function exportInternalMansionPackageFromDbV1(args: {
       y: room.y,
       width: room.width,
       height: room.height,
-      neighborIds: [...room.neighborIds],
+      neighborIds: room.neighborIds
+        .map((id) => portableRoomIdByStoredId.get(id))
+        .filter((id): id is string => Boolean(id)),
       slots: room.assignedSuspectSeatId
         ? [{ id: `slot-${String(++slotIndex).padStart(3, "0")}`, x: 0.5, y: 0.5 }]
         : [],
       emoji: room.emoji,
       roomAssetId: roomAssetByLogicalId.get(room.id) ?? null,
-      propAssetIds: [],
+      illustratedRoomAssetId:
+        roomAssetByLogicalId.get(`${room.id}:illustrated-v1`) ?? null,
+      // Preserve presentation art without retaining original evidence placement.
+      propAssetIds: anonymousPropAssetIds.filter(
+        (_assetId, propIndex) => propIndex % bundle.rooms.length === roomIndex,
+      ),
     })),
-    houseStyle: { ...bundle.houseStyle },
+    houseStyle: {
+      id: bundle.houseStyle.id,
+      label: bundle.houseStyle.label,
+      promptContract: bundle.houseStyle.promptContract,
+    },
     assets,
     previewAssetId: assets.find((asset) => asset.role === "room")?.id ?? null,
     investigationThemeAssetId: assets.find((asset) => asset.role === "music")?.id ?? null,
+    roomArt: DEFAULT_MANSION_ROOM_ART_CONTRACT_V1,
+    ambience,
   };
   return encodeInternalMansionPackageV1({ manifest, assets: files });
 }
@@ -233,7 +331,22 @@ export function importInternalMansionPackageToDbV1(args: {
   userKey: Buffer;
   userId: string;
   archive: Uint8Array;
+  portableMetadata?: PortableMansionInstallationMetadataV1 | null;
+  /** Parent package imports own the surrounding transaction. */
+  manageTransaction?: boolean;
 }): string {
+  return importInternalMansionPackageToDbDetailedV1(args).bundleId;
+}
+
+export function importInternalMansionPackageToDbDetailedV1(args: {
+  db: DatabaseSync;
+  userKey: Buffer;
+  userId: string;
+  archive: Uint8Array;
+  portableMetadata?: PortableMansionInstallationMetadataV1 | null;
+  /** Parent package imports own the surrounding transaction. */
+  manageTransaction?: boolean;
+}): ImportedMansionPackageV1 {
   const decoded = decodeInternalMansionPackageV1(args.archive);
   const bundleId = randomUUID();
   const now = new Date().toISOString();
@@ -260,13 +373,38 @@ export function importInternalMansionPackageToDbV1(args: {
     throw new DebateMysteryMansionCodecError("Mansion has no reusable suspect slots.");
   }
   const assetByPortableId = new Map(decoded.manifest.assets.map((asset) => [asset.id, asset]));
-  args.db.exec("BEGIN IMMEDIATE");
+  const importedAssetIdByPortableId = new Map<string, string>();
+  const mansionAssetSchema = args.db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'debate_mystery_mansion_assets'",
+  ).get() as { sql?: string } | undefined;
+  const storesOggNatively = mansionAssetSchema?.sql?.includes("'audio/ogg'") === true;
+  const importedHouseStyle = {
+    version: 1 as const,
+    id: decoded.manifest.houseStyle.id,
+    label: decoded.manifest.houseStyle.label,
+    promptContract: decoded.manifest.houseStyle.promptContract,
+    atmosphere: normalizeDebateMysteryAtmosphereContractV1(
+      decoded.manifest.ambience?.atmosphere,
+      `${decoded.manifest.houseStyle.label} ${decoded.manifest.houseStyle.promptContract}`,
+    ),
+    acousticThemePaletteId:
+      decoded.manifest.ambience?.themePaletteId ??
+      debateMysteryAcousticThemePaletteV1(
+        `${decoded.manifest.houseStyle.label} ${decoded.manifest.houseStyle.promptContract}`,
+      ),
+    bespokeAmbienceRequested:
+      decoded.manifest.ambience?.bespokeSynthesisRequested === true,
+    ambience: null,
+  };
+  const manageTransaction = args.manageTransaction !== false;
+  if (manageTransaction) args.db.exec("BEGIN IMMEDIATE");
   try {
     args.db.prepare(
       `INSERT INTO debate_mystery_mansion_bundles
          (id, user_id, source_session_id, name, floors, total_rooms,
-          suspect_count, style_json, layout_json, created_at, updated_at)
-       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          suspect_count, style_json, layout_json, portable_metadata_json,
+          portable_payload_sha256, created_at, updated_at)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       bundleId,
       args.userId,
@@ -274,16 +412,18 @@ export function importInternalMansionPackageToDbV1(args: {
       decoded.manifest.floorCount,
       rooms.length,
       suspectIndex,
-      JSON.stringify({ version: 1, ...decoded.manifest.houseStyle }),
+      JSON.stringify(importedHouseStyle),
       JSON.stringify(rooms),
+      args.portableMetadata ? JSON.stringify(args.portableMetadata) : null,
+      args.portableMetadata?.payloadSha256 ?? null,
       now,
       now,
     );
     const insertAsset = args.db.prepare(
       `INSERT INTO debate_mystery_mansion_assets
          (id, user_id, ciphertext, cipher_iv, cipher_tag, sha256, byte_size,
-          mime_type, provider, model, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'package-import', 'internal-mansion-v1', ?, ?)
+          mime_type, width, height, duration_ms, provider, model, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'package-import', 'internal-mansion-v1', ?, ?)
        ON CONFLICT(user_id, sha256) DO NOTHING`,
     );
     const findAsset = args.db.prepare(
@@ -301,30 +441,83 @@ export function importInternalMansionPackageToDbV1(args: {
       insertAsset.run(
         randomUUID(), args.userId, encrypted.ciphertext, encrypted.iv,
         encrypted.tag, descriptor.sha256, bytes.byteLength,
-        descriptor.mimeType, now, now,
+        descriptor.mimeType === "audio/ogg" && !storesOggNatively
+          ? "audio/mpeg"
+          : descriptor.mimeType,
+        descriptor.width, descriptor.height,
+        descriptor.durationMs, now, now,
       );
       const stored = findAsset.get(args.userId, descriptor.sha256) as { id: string };
+      importedAssetIdByPortableId.set(descriptor.id, stored.id);
       let logicalId: string;
       if (descriptor.role === "room") {
         const sourceRoom = decoded.manifest.rooms.find((room) => room.roomAssetId === descriptor.id);
-        logicalId = sourceRoom ? roomIdMap.get(sourceRoom.id)! : `room-asset-${descriptor.id}`;
+        const illustratedRoom = decoded.manifest.rooms.find(
+          (room) => room.illustratedRoomAssetId === descriptor.id,
+        );
+        logicalId = sourceRoom
+          ? roomIdMap.get(sourceRoom.id)!
+          : illustratedRoom
+            ? `${roomIdMap.get(illustratedRoom.id)!}:illustrated-v1`
+            : `room-asset-${descriptor.id}`;
       } else if (descriptor.role === "prop") {
         logicalId = `prop-${String(++propIndex).padStart(3, "0")}`;
       } else {
         logicalId = descriptor.id;
       }
-      const storedRole = descriptor.role === "preview" ? "presentation" : descriptor.role;
+      const storedRole = descriptor.role === "preview" || descriptor.role === "presentation"
+        ? "presentation"
+        : descriptor.role === "ambience"
+          ? "music"
+          : descriptor.role;
+      if (storedRole === "voice") {
+        throw new DebateMysteryMansionCodecError("Mansion packages cannot install voice assets.");
+      }
+      if (descriptor.role === "ambience") {
+        const reference = decoded.manifest.ambience?.assets.find(
+          (candidate) => candidate.packageAssetId === descriptor.id,
+        );
+        if (!reference) {
+          throw new DebateMysteryMansionCodecError("Mansion ambience asset has no semantic reference.");
+        }
+        logicalId = `ambience:${reference.id}`;
+      }
       insertRef.run(bundleId, args.userId, stored.id, storedRole, logicalId, now);
     }
+    const installedAmbience = decoded.manifest.ambience
+      ? {
+          ...decoded.manifest.ambience,
+          assets: decoded.manifest.ambience.assets.map((reference) => ({
+            ...reference,
+            packageAssetId: reference.packageAssetId
+              ? importedAssetIdByPortableId.get(reference.packageAssetId) ?? null
+              : null,
+          })),
+          roomProfiles: decoded.manifest.ambience.roomProfiles.map((profile) => ({
+            ...profile,
+            roomId: roomIdMap.get(profile.roomId) ?? profile.roomId,
+          })),
+        }
+      : null;
+    args.db.prepare(
+      `UPDATE debate_mystery_mansion_bundles
+          SET style_json = ?, updated_at = ?
+        WHERE id = ? AND user_id = ?`,
+    ).run(
+      JSON.stringify({ ...importedHouseStyle, ambience: installedAmbience }),
+      now,
+      bundleId,
+      args.userId,
+    );
     for (const room of decoded.manifest.rooms) {
       if (room.roomAssetId && !assetByPortableId.has(room.roomAssetId)) {
         throw new DebateMysteryMansionCodecError(`Room ${room.id} references a missing asset.`);
       }
     }
-    args.db.exec("COMMIT");
+    if (manageTransaction) args.db.exec("COMMIT");
   } catch (error) {
-    if (args.db.isTransaction) args.db.exec("ROLLBACK");
+    if (manageTransaction && args.db.isTransaction) args.db.exec("ROLLBACK");
     throw error;
   }
-  return bundleId;
+  return { bundleId, roomIdMap, assetIdMap: importedAssetIdByPortableId };
 }

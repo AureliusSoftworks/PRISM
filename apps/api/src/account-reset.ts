@@ -163,6 +163,7 @@ export function restoreFactoryDefaultsInDatabase(
           experimental_all_model_effort_enabled = 0,
           coffee_experimental_table_angle_enabled = 0,
           debate_whodunnit_reuse_synthesized_exhibits = 0,
+          debate_whodunnit_text_voice_mode = 'bottish',
           psychic_mode_enabled = 0,
           comfyui_host = NULL,
           comfyui_workflows = '[]',

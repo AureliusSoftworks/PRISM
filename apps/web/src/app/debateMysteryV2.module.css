@@ -40,6 +40,7 @@
 
 .archiveButton,
 .investigationHeader > button,
+.investigationHeaderActions > button,
 .courtHeader > button,
 .forgeActions button,
 .verdictActions button {
@@ -442,6 +443,45 @@
 .courtHeader > button:last-child { justify-self: end; }
 .investigationHeader button span { min-width: 1.3rem; margin-left: 0.35rem; padding: 0.12rem 0.35rem; border-radius: 99px; background: #8b6bec; font-size: 0.68rem; }
 
+.investigationHeaderActions {
+  display: flex;
+  align-items: center;
+  justify-self: end;
+  gap: 0.55rem;
+}
+
+.roomArtStyleToggle {
+  display: inline-flex;
+  padding: 0.18rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0.62rem;
+  background: rgba(2, 4, 10, 0.62);
+}
+
+.roomArtStyleToggle > button {
+  padding: 0.42rem 0.58rem;
+  border: 0;
+  border-radius: 0.44rem;
+  color: #aaa5ba;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.72rem;
+}
+
+.roomArtStyleToggle > button[aria-pressed="true"] {
+  color: #fff;
+  background: linear-gradient(145deg, rgba(139, 107, 236, 0.88), rgba(74, 58, 143, 0.94));
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.16), 0 0 0.8rem rgba(139, 107, 236, 0.18);
+}
+
+.roomArtUpgradeButton {
+  padding: 0.48rem 0.62rem !important;
+  border-color: rgba(102, 229, 234, 0.34) !important;
+  color: #dffcff !important;
+  font-size: 0.68rem !important;
+  white-space: nowrap;
+}
+
 .mansionBoard {
   --mystery-panel: rgba(17, 20, 35, 0.88);
   --mystery-line: rgba(197, 192, 255, 0.18);
@@ -724,6 +764,17 @@
   filter: blur(12px);
   transform: scale(1.04);
 }
+.roomBackdropImage {
+  display: block;
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  object-fit: cover;
+  pointer-events: none;
+  user-select: none;
+}
 .roomParallaxLayer {
   position: absolute;
   z-index: 1;
@@ -767,6 +818,14 @@
   will-change: transform;
 }
 .roomActorDrift > :not(strong):not([data-signal-voice-action]) { max-height: 56vh; }
+.roomActor[data-art-style="mosaic"] :global([data-chat-mini-bot-avatar="true"][data-size="room"]) {
+  --chat-mini-bot-render-size: min(18rem, 42vw, 42vh);
+  --chat-mini-bot-glyph-size: max(18px, calc(var(--chat-mini-bot-render-size) * 0.12));
+  --chat-mini-bot-lower-screen-left: 38.6%;
+  --chat-mini-bot-lower-screen-top: 65.2%;
+  --chat-mini-bot-lower-screen-width: 22%;
+  --chat-mini-bot-lower-screen-height: 24.3%;
+}
 .roomActorDrift > strong { margin-top: -0.5rem; padding: 0.45rem 0.7rem; border-bottom: 2px solid var(--actor-color); background: rgba(6, 7, 14, 0.78); }
 @keyframes roomActorIdleDrift {
   /* Counter-rotation keeps the persona upright while the conjugated scale
@@ -1043,9 +1102,9 @@
 .theoryBoard > p { color: #aaa5b4; font-size: 0.78rem; }
 
 .court {
-  background:
-    linear-gradient(180deg, rgba(7, 9, 18, 0.05), rgba(7, 9, 18, 0.94)),
-    radial-gradient(ellipse at 50% 38%, #332651, #0a0b13 66%);
+  position: relative;
+  overflow: hidden;
+  background: #05060b;
 }
 
 .credibility { position: relative; z-index: 5; display: flex; align-items: center; justify-content: center; gap: 0.6rem; padding: 0.7rem; color: #b8b1c3; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; }
@@ -1053,31 +1112,408 @@
 .credibility i { width: 1.8rem; height: 0.32rem; border-radius: 99px; background: rgba(255, 255, 255, 0.1); }
 .credibility i[data-full="true"] { background: linear-gradient(90deg, #ff5c9a, #af72ff); box-shadow: 0 0 0.8rem rgba(245, 85, 174, 0.45); }
 
-.counselComposition { position: absolute; z-index: 5; inset: 6.6rem 0 10rem; pointer-events: none; }
+.courtStage {
+  position: fixed;
+  z-index: 1;
+  inset: 4.8rem 0 0;
+  overflow: hidden;
+  isolation: isolate;
+  background: #05060b;
+}
+.courtStage::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(3, 4, 8, 0.06) 52%, rgba(3, 4, 8, 0.7) 100%),
+    radial-gradient(ellipse at 50% 44%, transparent 42%, rgba(2, 3, 7, 0.34) 100%);
+}
+.courtBackdrop {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background: url("/debate/forum-dark.webp") center / cover no-repeat;
+  animation: courtCameraCut 180ms ease-out both;
+}
+.court[data-theme="light"] .courtBackdrop { background-image: url("/debate/forum-light.webp"); }
+.courtStage[data-camera="witness"] .courtBackdrop {
+  background-image: url("/debate/whodunnit-witness-dark.png");
+  background-position: center;
+}
+.court[data-theme="light"] .courtStage[data-camera="witness"] .courtBackdrop {
+  background-image: url("/debate/whodunnit-witness-light.png");
+}
+.courtStage[data-camera="judge"] .courtBackdrop {
+  background-image: url("/debate/moderator-dark.webp");
+}
+.court[data-theme="light"] .courtStage[data-camera="judge"] .courtBackdrop {
+  background-image: url("/debate/moderator-light.webp");
+}
+.courtStage[data-camera="prosecution"] .courtBackdrop {
+  transform: translate3d(-24%, -10%, 0) scale(1.48);
+}
+.courtStage[data-camera="defense"] .courtBackdrop {
+  transform: translate3d(24%, -10%, 0) scale(1.48);
+}
+@keyframes courtCameraCut {
+  from { opacity: 0.7; }
+  to { opacity: 1; }
+}
+
+.wideCourtComposition { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
+.wideEvidenceTable {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  bottom: -3rem;
+  width: min(52rem, 58vw);
+  height: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 1.3rem 1.6rem rgba(0, 0, 0, 0.62));
+  transform: translate(calc(-50% + var(--whodunnit-wide-evidence-table-offset-x, 0%)), var(--whodunnit-wide-evidence-table-offset-y, 0%)) scale(var(--whodunnit-wide-evidence-table-scale, 1));
+  transform-origin: center bottom;
+}
+.wideWitnessSilhouette {
+  position: absolute;
+  z-index: 5;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: translate(var(--whodunnit-wide-witness-silhouette-offset-x, 0%), var(--whodunnit-wide-witness-silhouette-offset-y, 0%)) scale(var(--whodunnit-wide-witness-silhouette-scale, 1));
+  transform-origin: center bottom;
+}
+.wideCourtPresence {
+  --court-presence-color: #a98cff;
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  width: clamp(5rem, 10vw, 10rem);
+  justify-items: center;
+  opacity: 0.64;
+  filter: grayscale(0.45) brightness(0.72) drop-shadow(0 1rem 1.5rem rgba(0, 0, 0, 0.56));
+  transition: opacity 180ms ease, filter 180ms ease, transform 180ms ease;
+}
+.wideCourtPresence[data-role="prosecution"] { right: 7%; bottom: 16%; }
+.wideCourtPresence[data-role="defense"] { left: 7%; bottom: 16%; }
+.wideCourtPresence[data-role="judge"] { left: 50%; bottom: 31%; transform: translateX(-50%) scale(0.78); }
+.wideCourtPresence[data-speaking="true"] {
+  opacity: 1;
+  filter: drop-shadow(0 0 1.5rem color-mix(in srgb, var(--court-presence-color), transparent 42%)) drop-shadow(0 1rem 1.5rem rgba(0, 0, 0, 0.56));
+}
+.wideCourtPresence[data-role="judge"][data-speaking="true"] { transform: translateX(-50%) scale(0.84); }
+.wideCourtPresence > :not(small) { max-width: 100%; max-height: 9rem; }
+.wideCourtPresence small { padding: 0.2rem 0.4rem; border-bottom: 2px solid var(--court-presence-color); background: rgba(6, 8, 14, 0.78); font-size: 0.55rem; letter-spacing: 0.08em; text-transform: uppercase; }
+
+.galleryRail {
+  position: absolute;
+  z-index: 2;
+  right: -2%;
+  bottom: 13.5rem;
+  left: -2%;
+  height: 3.5rem;
+  border-top: 1px solid rgba(231, 225, 255, 0.3);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.78);
+  background: linear-gradient(180deg, rgba(54, 51, 65, 0.96), rgba(7, 8, 14, 0.98));
+  box-shadow: 0 -1rem 2.5rem rgba(0, 0, 0, 0.32), 0 1.2rem 3rem rgba(0, 0, 0, 0.78);
+  transform: perspective(40rem) rotateX(58deg);
+  transform-origin: bottom;
+}
+
+.counselComposition { position: absolute; z-index: 7; inset: 0; pointer-events: none; }
 .counselSeat {
   --counsel-color: #a98cff;
   position: absolute;
-  bottom: 2rem;
+  bottom: 14.6rem;
   display: grid;
-  width: min(13rem, 22vw);
+  width: min(11rem, 17vw);
   justify-items: center;
-  filter: drop-shadow(0 1rem 1.7rem rgba(0, 0, 0, 0.48));
+  opacity: 0.58;
+  filter: grayscale(0.55) brightness(0.75) drop-shadow(0 1rem 1.7rem rgba(0, 0, 0, 0.48));
+  transition: opacity 180ms ease, filter 180ms ease, transform 180ms ease;
 }
-.counselSeat[data-side="prosecution"] { left: clamp(0.75rem, 4vw, 4rem); }
-.counselSeat[data-side="defense"] { right: clamp(0.75rem, 4vw, 4rem); }
-.counselSeat > :not(div):not(aside):not([data-signal-voice-action]) { max-width: 100%; max-height: 15rem; }
-.counselSeat > div { display: grid; width: 100%; padding: 0.42rem 0.55rem; border-bottom: 2px solid var(--counsel-color); background: rgba(7, 9, 18, 0.86); text-align: center; }
-.counselSeat > div small { color: #aaa5b7; font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.08em; }
-.defendantMini { --defendant-color: #a98cff; position: absolute; right: 72%; bottom: 0.25rem; display: grid; width: min(7rem, 12vw); justify-items: center; filter: drop-shadow(0 0.8rem 1.2rem rgba(0, 0, 0, 0.5)); }
-.defendantMini > :not(small):not([data-signal-voice-action]) { max-width: 100%; max-height: 8rem; }
-.defendantMini > small { width: max-content; max-width: 10rem; padding: 0.28rem 0.4rem; border-bottom: 2px solid var(--defendant-color); background: rgba(7, 9, 18, 0.9); font-size: 0.58rem; text-align: center; }
+.counselSeat[data-speaking="true"] { opacity: 1; filter: drop-shadow(0 0 1.7rem color-mix(in srgb, var(--counsel-color), transparent 40%)) drop-shadow(0 1rem 1.7rem rgba(0, 0, 0, 0.48)); }
+.counselSeat[data-side="prosecution"] {
+  right: clamp(0.75rem, 3vw, 3rem);
+  transform: translate(var(--whodunnit-prosecution-mini-offset-x, 0%), var(--whodunnit-prosecution-mini-offset-y, 0%)) scale(var(--whodunnit-prosecution-mini-scale, 1));
+  transform-origin: right bottom;
+}
+.counselSeat[data-side="defense"] {
+  left: clamp(0.75rem, 3vw, 3rem);
+  transform: translate(var(--whodunnit-defense-mini-offset-x, 0%), var(--whodunnit-defense-mini-offset-y, 0%)) scale(var(--whodunnit-defense-mini-scale, 1));
+  transform-origin: left bottom;
+}
+.counselAvatar { display: grid; width: 100%; max-height: 10rem; place-items: end center; padding: 0; overflow: hidden; background: none; }
+.counselAvatar > * { max-width: 100%; max-height: 10rem; }
+.counselIdentity { display: grid; width: 100%; padding: 0.42rem 0.55rem; border-bottom: 2px solid var(--counsel-color); background: rgba(7, 9, 18, 0.86); text-align: center; }
+.counselIdentity small { color: #aaa5b7; font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.counselGlyph { display: none; width: 3rem; height: 3rem; place-items: center; border: 1px solid color-mix(in srgb, var(--counsel-color), transparent 35%); border-radius: 50%; color: var(--counsel-color); background: rgba(7, 9, 18, 0.92); box-shadow: 0 0 1rem color-mix(in srgb, var(--counsel-color), transparent 58%); }
 
-.witnessStand { position: absolute; inset: 7.3rem 0 10rem; display: grid; place-content: center; justify-items: center; overflow: hidden; }
-.witnessAvatar { position: relative; display: grid; width: min(30rem, 50vw); height: min(55vh, 36rem); place-items: end center; filter: drop-shadow(0 2rem 3rem rgba(0, 0, 0, 0.62)); }
+.witnessStand { position: absolute; z-index: 3; inset: 0; overflow: hidden; pointer-events: none; }
+.witnessAvatar { position: absolute; z-index: 3; left: 50%; bottom: clamp(21rem, 36vh, 27rem); display: grid; width: min(28rem, 36vw); height: min(53vh, 34rem); place-items: end center; filter: drop-shadow(0 2rem 3rem rgba(0, 0, 0, 0.62)); transform: translate(-50%, var(--whodunnit-witness-offset-y, 0%)) scale(var(--whodunnit-witness-scale, 1)); transform-origin: center bottom; }
 .witnessAvatar > :not([data-signal-voice-action]) { max-height: 100%; }
-.witnessIdentity { position: absolute; bottom: 1rem; left: 50%; min-width: 17rem; padding: 0.7rem 1rem; border-bottom: 3px solid var(--witness-color); background: rgba(8, 9, 17, 0.82); text-align: center; transform: translateX(-50%); }
-.witnessIdentity h1 { margin: 0.12rem 0; }
-.witnessIdentity small { color: #aca5b8; }
+.witnessStandAsset { position: absolute; z-index: 4; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: drop-shadow(0 2rem 2.5rem rgba(0, 0, 0, 0.48)); }
+
+/* Stage Alignment hosts the Court in a smaller frame than live playback.
+   Keep its composition proportional to the player camera instead of letting
+   live viewport units enlarge and crop the preview actors and foreground. */
+:global([data-whodunnit-court-preview]) .wideEvidenceTable { bottom: -4%; width: 42%; }
+:global([data-whodunnit-court-preview]) .wideCourtPresence { width: 8%; }
+:global([data-whodunnit-court-preview]) .wideCourtPresence > :not(small) { max-height: 13%; }
+:global([data-whodunnit-court-preview]) .galleryRail { bottom: 19%; height: 5%; }
+:global([data-whodunnit-court-preview]) .counselSeat { bottom: 21%; width: 9%; }
+:global([data-whodunnit-court-preview]) .counselAvatar,
+:global([data-whodunnit-court-preview]) .counselAvatar > * { max-height: 13%; }
+:global([data-whodunnit-court-preview]) .witnessAvatar { bottom: 36%; width: 23%; height: 49%; }
+
+.courtPodiumFocus,
+.courtJudgeFocus { position: absolute; z-index: 3; inset: 0; pointer-events: none; }
+.courtPodiumFocus {
+  transform-origin: center;
+}
+.courtPodiumFocus[data-side="prosecution"] { transform: translate3d(-24%, -10%, 0) scale(1.48); }
+.courtPodiumFocus[data-side="defense"] { transform: translate3d(24%, -10%, 0) scale(1.48); }
+.courtPodiumAvatar { position: absolute; z-index: 3; bottom: 30.5%; display: block; width: clamp(126px, 11.4vw, 180px); filter: drop-shadow(0 24px 28px rgba(0, 0, 0, 0.42)); transform: translateX(-50%); }
+.courtJudgeAvatar { position: absolute; z-index: 3; bottom: 14rem; display: grid; width: min(30rem, 38vw); height: min(61vh, 40rem); place-items: end center; filter: drop-shadow(0 2rem 3rem rgba(0, 0, 0, 0.62)); }
+.courtPodiumAvatar > :not([data-signal-voice-action]),
+.courtJudgeAvatar > :not([data-signal-voice-action]) { max-width: 100%; max-height: 100%; }
+.courtPodiumFocus[data-side="prosecution"] .courtPodiumAvatar { left: 84.9%; }
+.courtPodiumFocus[data-side="defense"] .courtPodiumAvatar { left: 15.1%; }
+.courtPodiumForeground { position: absolute; z-index: 4; inset: 0; background: url("/debate/forum-dark-foreground.png") center / cover no-repeat; }
+.court[data-theme="light"] .courtPodiumForeground { background-image: url("/debate/forum-light-foreground.png"); }
+.courtJudgeAvatar { left: 50%; bottom: 14.5rem; width: min(30rem, 38vw); transform: translateX(-50%); }
+.courtPodiumIdentity { position: absolute; z-index: 6; bottom: 27%; display: grid; min-width: 14rem; padding: 0.55rem 0.9rem; border-bottom: 3px solid var(--court-presence-color); background: rgba(7, 9, 18, 0.9); text-align: center; transform: translateX(-50%); backdrop-filter: blur(12px); }
+.courtPodiumIdentity small { color: #aaa5b7; font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.courtPodiumFocus[data-side="prosecution"] .courtPodiumIdentity { left: 84.9%; }
+.courtPodiumFocus[data-side="defense"] .courtPodiumIdentity { left: 15.1%; }
+.courtJudgeFocus .courtPodiumIdentity { bottom: 15rem; left: 50%; }
+.courtJudgeGavel { position: absolute; z-index: 5; right: calc(50% - 15rem); bottom: 12.6rem; width: min(10rem, 17vw); height: auto; filter: drop-shadow(0 0.9rem 1.2rem rgba(0, 0, 0, 0.72)); }
+
+.courtEvidenceProjectors {
+  position: absolute;
+  z-index: 8;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.courtEvidenceProjector {
+  --court-projector-accent: #72d7ff;
+  --court-projector-anchor: 53%;
+  position: absolute;
+  top: clamp(7.75rem, 14vh, 11rem);
+  bottom: clamp(25rem, 41vh, 32rem);
+  display: grid;
+  width: min(29rem, 31vw);
+  grid-template-rows: minmax(0, 1fr) 4.4rem;
+  align-items: end;
+}
+.courtEvidenceProjector[data-projector-side="image"] { left: clamp(1rem, 4.5vw, 6rem); }
+.courtEvidenceProjector[data-projector-side="record"] {
+  --court-projector-accent: #c281ff;
+  --court-projector-anchor: 47%;
+  right: clamp(1rem, 4.5vw, 6rem);
+}
+.courtEvidenceProjection {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  min-height: 0;
+  align-self: stretch;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--court-projector-accent), transparent 48%);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--court-projector-accent), transparent 91%), transparent 38%),
+    linear-gradient(155deg, rgba(14, 18, 31, 0.91), rgba(5, 8, 17, 0.84));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.035),
+    inset 0 0 2.4rem color-mix(in srgb, var(--court-projector-accent), transparent 91%),
+    0 1.8rem 4rem rgba(0, 0, 0, 0.5),
+    0 0 2rem color-mix(in srgb, var(--court-projector-accent), transparent 83%);
+  clip-path: polygon(1.2% 3%, 98.7% 0, 96.8% 97%, 2.8% 100%);
+  backdrop-filter: blur(13px) saturate(1.12);
+  animation: courtEvidenceResolve 460ms cubic-bezier(0.16, 0.8, 0.24, 1) both;
+}
+.courtEvidenceProjector[data-projector-side="record"] .courtEvidenceProjection { animation-delay: 90ms; }
+.court[data-theme="light"] .courtEvidenceProjection {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--court-projector-accent), transparent 88%), transparent 38%),
+    linear-gradient(155deg, rgba(19, 22, 34, 0.88), rgba(7, 10, 18, 0.82));
+}
+.courtEvidenceProjection::before {
+  content: "";
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, transparent 0 45%, color-mix(in srgb, var(--court-projector-accent), transparent 78%) 50%, transparent 55%),
+    repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 4px);
+  mix-blend-mode: screen;
+  animation: courtEvidenceScan 520ms ease-out both;
+}
+.courtEvidenceProjection::after {
+  content: "";
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  pointer-events: none;
+  border-top: 1px solid color-mix(in srgb, var(--court-projector-accent), white 24%);
+  border-bottom: 1px solid color-mix(in srgb, var(--court-projector-accent), transparent 28%);
+  opacity: 0.5;
+  transform: translateX(2px);
+  mix-blend-mode: screen;
+}
+.courtEvidenceProjection small {
+  position: relative;
+  z-index: 5;
+  color: color-mix(in srgb, var(--court-projector-accent), white 40%);
+  font-size: 0.58rem;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.courtEvidenceProjector[data-projector-side="image"] .courtEvidenceProjection {
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.45rem;
+  padding: 0.75rem;
+}
+.courtEvidenceVisual {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  min-height: 0;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  background:
+    radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--court-projector-accent), transparent 88%), transparent 58%),
+    rgba(1, 4, 10, 0.48);
+}
+.courtEvidenceVisual img {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  padding: clamp(0.45rem, 1vw, 0.9rem);
+  object-fit: contain;
+  filter: drop-shadow(0 0.85rem 1.4rem rgba(0, 0, 0, 0.55));
+}
+.courtEvidenceVisual > span {
+  display: grid;
+  place-items: center;
+  color: white;
+  font-size: clamp(3rem, 7vw, 6.5rem);
+  filter: drop-shadow(0 0 1.25rem color-mix(in srgb, var(--court-projector-accent), transparent 52%));
+}
+.courtEvidenceProjector[data-projector-side="record"] .courtEvidenceProjection {
+  align-content: center;
+  gap: clamp(0.4rem, 0.9vh, 0.75rem);
+  padding: clamp(1rem, 2vw, 1.5rem);
+}
+.courtEvidenceProjector[data-projector-side="record"] strong,
+.courtEvidenceProjector[data-projector-side="record"] p,
+.courtEvidenceProjector[data-projector-side="record"] span { position: relative; z-index: 5; }
+.courtEvidenceProjector[data-projector-side="record"] strong {
+  font-size: clamp(1.05rem, 1.75vw, 1.55rem);
+  line-height: 1.05;
+  text-wrap: balance;
+}
+.courtEvidenceProjector[data-projector-side="record"] p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: #d3cedb;
+  font-size: clamp(0.72rem, 1.05vw, 0.92rem);
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+}
+.courtEvidenceProjector[data-projector-side="record"] span {
+  color: #9690a2;
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.courtEvidenceBeam {
+  position: absolute;
+  z-index: 1;
+  bottom: 2.9rem;
+  left: calc(var(--court-projector-anchor) - 24%);
+  width: 48%;
+  height: 48%;
+  opacity: 0.46;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--court-projector-accent), transparent 92%), color-mix(in srgb, var(--court-projector-accent), transparent 58%));
+  filter: blur(0.5rem);
+  clip-path: polygon(42% 100%, 58% 100%, 100% 0, 0 0);
+  mix-blend-mode: screen;
+  animation: courtEvidenceBeamResolve 520ms ease-out both;
+}
+.courtEvidenceProjectorMount {
+  position: absolute;
+  z-index: 5;
+  bottom: 0;
+  left: var(--court-projector-anchor);
+  width: 5.4rem;
+  height: 4.2rem;
+  filter: drop-shadow(0 1rem 1rem rgba(0, 0, 0, 0.76));
+  transform: translateX(-50%);
+}
+.courtEvidenceSocket {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 1.5rem;
+  border: 1px solid rgba(222, 228, 242, 0.24);
+  background:
+    linear-gradient(180deg, rgba(143, 151, 168, 0.42), rgba(19, 23, 32, 0.94) 38%, rgba(4, 6, 11, 0.98)),
+    repeating-linear-gradient(90deg, transparent 0 0.8rem, rgba(255, 255, 255, 0.05) 0.8rem 0.85rem);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.16), 0 0.4rem 0 rgba(2, 3, 7, 0.72);
+  clip-path: polygon(7% 0, 93% 0, 100% 42%, 86% 100%, 14% 100%, 0 42%);
+}
+.courtEvidencePrism {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 50%;
+  width: 3.2rem;
+  height: 3rem;
+  border: 1px solid color-mix(in srgb, var(--court-projector-accent), white 24%);
+  background:
+    linear-gradient(128deg, rgba(255, 255, 255, 0.62) 0 7%, transparent 8% 28%, color-mix(in srgb, var(--court-projector-accent), transparent 42%) 29% 48%, transparent 49%),
+    linear-gradient(230deg, color-mix(in srgb, var(--court-projector-accent), transparent 35%), rgba(15, 18, 31, 0.48) 58%, rgba(255, 255, 255, 0.28));
+  box-shadow:
+    inset 0 0 1.2rem rgba(255, 255, 255, 0.28),
+    0 0 0.8rem color-mix(in srgb, var(--court-projector-accent), transparent 28%),
+    0 0 2.4rem color-mix(in srgb, var(--court-projector-accent), transparent 60%);
+  clip-path: polygon(50% 0, 100% 86%, 50% 100%, 0 86%);
+  transform: translateX(-50%) perspective(8rem) rotateX(-8deg);
+  transform-origin: center bottom;
+}
+.courtEvidencePrism::after {
+  content: "";
+  position: absolute;
+  inset: 32% 34% 22%;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 0 0.8rem 0.25rem var(--court-projector-accent);
+  mix-blend-mode: screen;
+}
+@keyframes courtEvidenceResolve {
+  from { opacity: 0; filter: blur(0.45rem); transform: translateY(0.9rem) scaleY(0.86); }
+  54% { opacity: 0.82; transform: translateY(0.15rem) scaleY(1.015); }
+  to { opacity: 1; filter: blur(0); transform: none; }
+}
+@keyframes courtEvidenceScan {
+  from { opacity: 0; transform: translateY(-42%); }
+  38% { opacity: 0.72; }
+  to { opacity: 0.16; transform: translateY(42%); }
+}
+@keyframes courtEvidenceBeamResolve {
+  from { opacity: 0; transform: scaleY(0.05); transform-origin: bottom; }
+  to { opacity: 0.46; transform: scaleY(1); transform-origin: bottom; }
+}
 
 .testimony { position: fixed; z-index: 10; left: 50%; bottom: 6.5rem; width: min(52rem, calc(100vw - 2rem)); padding: 1rem 1.2rem; border: 1px solid rgba(176, 146, 255, 0.35); border-radius: 0.9rem; background: rgba(7, 9, 18, 0.93); box-shadow: 0 1.4rem 4rem rgba(0, 0, 0, 0.55); transform: translateX(-50%); backdrop-filter: blur(18px); }
 .testimony p { margin: 0.4rem 0; font-size: clamp(1rem, 2vw, 1.25rem); line-height: 1.45; }
@@ -1124,6 +1560,9 @@
   .investigationHeader, .courtHeader { grid-template-columns: auto 1fr auto; }
   .investigationHeader > div, .courtHeader > div { text-align: left; }
   .investigationHeader .eyebrow, .courtHeader .eyebrow { display: none; }
+  .investigationHeaderActions { gap: 0.3rem; }
+  .roomArtStyleToggle > button { padding-inline: 0.4rem; font-size: 0.64rem; }
+  .investigationHeaderActions > button { padding-inline: 0.55rem; }
   .mansionBoard { padding-inline: 0.6rem; }
   .mansionHeading { align-items: center; }
   .mansionViewport { min-height: 16rem; }
@@ -1142,10 +1581,65 @@
   .theoryHint { display: none; }
   .fileChargesButton { right: 0.7rem; bottom: 5.8rem; }
   .courtReaction { bottom: 15.6rem; }
-  .witnessAvatar { width: 75vw; }
-  .counselSeat { bottom: 3.5rem; width: 6.8rem; opacity: 0.9; }
-  .defendantMini { right: 56%; width: 4.2rem; }
+  .witnessAvatar { bottom: 19rem; width: min(66vw, 24rem); }
+  .witnessStandAsset { width: 100%; }
+  .counselSeat { bottom: 15rem; width: 6.8rem; }
+  .counselSeat[data-side="prosecution"] { right: 0.45rem; }
+  .counselSeat[data-side="defense"] { left: 0.45rem; }
+  .counselIdentity { padding-inline: 0.25rem; }
+  .counselIdentity strong { overflow: hidden; max-width: 100%; font-size: 0.68rem; text-overflow: ellipsis; white-space: nowrap; }
+  .courtJudgeAvatar { right: auto; bottom: 14rem; left: 50%; width: min(72vw, 28rem); transform: translateX(-50%); }
+  .courtJudgeFocus .courtPodiumIdentity { bottom: 14.8rem; min-width: 12rem; }
+  .courtJudgeGavel { right: calc(50% - 10rem); bottom: 13rem; }
+  .courtEvidenceProjectors {
+    top: 4.6rem;
+    right: 0.55rem;
+    bottom: auto;
+    left: 0.55rem;
+    display: grid;
+    grid-template-columns: minmax(7rem, 0.85fr) minmax(0, 1.15fr);
+    height: min(10rem, 24vh);
+    gap: 0.45rem;
+    padding: 0.45rem;
+    border: 1px solid rgba(199, 180, 255, 0.26);
+    border-radius: 0.85rem;
+    background: rgba(5, 8, 17, 0.88);
+    box-shadow: 0 1rem 2.4rem rgba(0, 0, 0, 0.52);
+    backdrop-filter: blur(14px);
+  }
+  .courtEvidenceProjector,
+  .courtEvidenceProjector[data-projector-side="image"],
+  .courtEvidenceProjector[data-projector-side="record"] {
+    position: relative;
+    inset: auto;
+    display: block;
+    width: auto;
+  }
+  .courtEvidenceProjection {
+    height: 100%;
+    clip-path: none;
+  }
+  .courtEvidenceProjector[data-projector-side="image"] .courtEvidenceProjection,
+  .courtEvidenceProjector[data-projector-side="record"] .courtEvidenceProjection { padding: 0.58rem; }
+  .courtEvidenceProjector[data-projector-side="record"] .courtEvidenceProjection { gap: 0.25rem; }
+  .courtEvidenceProjector[data-projector-side="record"] strong { font-size: 0.82rem; }
+  .courtEvidenceProjector[data-projector-side="record"] p { font-size: 0.66rem; line-height: 1.25; -webkit-line-clamp: 3; }
+  .courtEvidenceProjector[data-projector-side="record"] span { display: none; }
+  .courtEvidenceBeam,
+  .courtEvidenceProjectorMount { display: none; }
+  .wideCourtPresence { width: 4.8rem; }
+  .wideCourtPresence[data-role="prosecution"] { right: 4%; }
+  .wideCourtPresence[data-role="defense"] { left: 4%; }
   .ballots { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 560px) {
+  .counselAvatar { display: none; }
+  .counselGlyph { display: grid; }
+  .counselSeat { width: 5.4rem; opacity: 0.76; filter: none; }
+  .counselSeat[data-speaking="true"] { filter: drop-shadow(0 0 1.2rem color-mix(in srgb, var(--counsel-color), transparent 36%)); }
+  .counselIdentity small { display: none; }
+  .galleryRail { bottom: 13.8rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1162,6 +1656,13 @@
   .theoryBoard { animation: none; }
   .callout { inset: 42% 0 auto; animation: calloutStaticLife 1.65s step-end both; }
   .callout span { animation: none; }
+  .courtBackdrop { animation: none; }
+  .courtEvidenceProjection,
+  .courtEvidenceProjection::before,
+  .courtEvidenceBeam { animation: none; }
+  .courtEvidenceProjection::before { opacity: 0.06; }
+  .counselSeat,
+  .wideCourtPresence { transition: none; }
   .roomParallaxLayer { transform: none; transition: opacity 180ms ease; }
   .roomBackdrop, .roomBackdrop[data-blurred="true"] { transform: scale(1.025); transition: opacity 180ms ease; }
   .roomActor[data-prosecutor-speaking="true"] { opacity: 1; transform: translateX(-50%); }

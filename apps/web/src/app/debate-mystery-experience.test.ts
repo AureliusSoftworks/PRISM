@@ -18,6 +18,10 @@ import {
   mysteryRoomArtworkSrc,
 } from "./debateMysteryRoomArt.ts";
 import {
+  whodunnitBundledRoomArtPath,
+  whodunnitSavedRoomArtUrl,
+} from "./debateMysteryInvestigationArt.ts";
+import {
   mysteryMapOccupantPosition,
   mysteryRoomSuspectFacing,
   mysteryRoomSuspectWalkProfile,
@@ -60,9 +64,16 @@ function webpDimensions(file: Buffer): { width: number; height: number } {
         height: file.readUInt16LE(offset + 16) & 0x3fff,
       };
     }
+    if (tag === "VP8L" && file[offset + 8] === 0x2f) {
+      const bits = file.readUInt32LE(offset + 9);
+      return {
+        width: (bits & 0x3fff) + 1,
+        height: ((bits >>> 14) & 0x3fff) + 1,
+      };
+    }
     offset += 8 + size + (size % 2);
   }
-  throw new Error("Expected a lossy VP8 WebP frame");
+  throw new Error("Expected a VP8 or VP8L WebP frame");
 }
 
 describe("Whodunnit Desk drag and drop", () => {
@@ -266,13 +277,13 @@ describe("Debate Whodunnit experience", () => {
     assert.doesNotMatch(source, /if \(state\.playPhase === "theory"\) setDeskOpen\(true\)/u);
   });
 
-  it("preserves undiscovered-map secrecy and uses Mini search presences before HD interview focus", () => {
+  it("preserves undiscovered-map secrecy and keeps room avatars aligned with the art style", () => {
     assert.doesNotMatch(source, /<BotAvatarMicro/u);
     assert.match(source, /renderBotGlyph\(bot\.glyph, \{ size: 18, strokeWidth: 1\.5, className: styles\.mapOccupantGlyph \}\)/u);
     assert.match(source, /className=\{styles\.roomSuspectPresence\}/u);
     assert.match(source, /renderMysteryBotAvatar\(mysteryBotForSuspect\(currentSuspect\), "mini", \{ demeanor: "suspect", blinkEnabled: true, facing: currentSuspectFacing \}\)/u);
     assert.match(source, /state\.suspects\.filter\(\(suspect\) => suspect\.roomId === room\.id\)/u);
-    assert.match(source, /renderMysteryBotAvatar\(mysteryBotForSuspect\(currentSuspect\), "full", \{ demeanor: "suspect"/u);
+    assert.match(source, /renderMysteryBotAvatar\(mysteryBotForSuspect\(currentSuspect\), interviewAvatarPresentation, \{ demeanor: "suspect"/u);
     assert.match(source, /room\.discovered \? room\.name/u);
     assert.match(source, /\{room\.discovered \? <><strong>/u);
     assert.doesNotMatch(source, /roomTemplate\(room\.templateId\)\.emoji/u);
@@ -542,11 +553,11 @@ describe("Debate Whodunnit experience", () => {
     assert.match(css, /\.play\[data-phase="investigation"\] \.leadNotebook,[\s\S]*grid-template-columns: minmax\(0, 1fr\)/u);
   });
 
-  it("ships the sixteen bundled 1600x900 WebP room scenes", () => {
+  it("ships Illustrated and Mosaic 1600x900 WebP variants for all sixteen bundled rooms", () => {
     const directory = fileURLToPath(
       new URL("../../public/debate/mystery/rooms/", import.meta.url),
     );
-    const expected = [
+    const originals = [
       "arboretum.webp",
       "ballroom.webp",
       "basement.webp",
@@ -564,6 +575,10 @@ describe("Debate Whodunnit experience", () => {
       "rooftop-lounge.webp",
       "theater.webp",
     ];
+    const expected = originals.flatMap((filename) => [
+      filename,
+      filename.replace(/\.webp$/u, "-mosaic.webp"),
+    ]).sort();
     assert.deepEqual(readdirSync(directory).sort(), expected);
     for (const filename of expected) {
       const dimensions = webpDimensions(readFileSync(path.join(directory, filename)));
@@ -578,7 +593,16 @@ describe("Debate Whodunnit experience", () => {
       "/api/images/generated%20%2F%20room/file",
     );
     assert.equal(mysteryRoomArtworkSrc(null, template), "/debate/mystery/rooms/kitchen.webp");
-    assert.match(source, /const roomArtworkSrc = mysteryRoomArtworkSrc\(currentRoom\.imageId, template\)/u);
+    assert.equal(
+      whodunnitSavedRoomArtUrl("generated / room", "mosaic"),
+      "/api/images/generated%20%2F%20room/file?style=mosaic",
+    );
+    assert.equal(
+      whodunnitBundledRoomArtPath(template.bundledAssetPath, "mosaic"),
+      "/debate/mystery/rooms/kitchen-mosaic.webp",
+    );
+    assert.match(source, /whodunnitSavedRoomArtUrl\(currentRoom\.imageId, investigationArtStyle\)/u);
+    assert.match(source, /renderMysteryBotAvatar\(mysteryBotForSuspect\(currentSuspect\), interviewAvatarPresentation/u);
     assert.match(source, /<img className=\{styles\.generatedRoom\} src=\{roomArtworkSrc\}/u);
     assert.match(css, /\.roomScene\[data-blurred="true"\][\s\S]*\.generatedRoom/u);
   });

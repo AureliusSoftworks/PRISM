@@ -3,6 +3,7 @@ import type {
   ComfyUiWorkflowRegistration,
   EnglishVoiceEngine,
   VoiceMode,
+  WhodunnitTextVoiceMode,
 } from "@localai/shared";
 import {
   DEFAULT_PRISM_MOOD_SENSITIVITY,
@@ -18,6 +19,7 @@ import {
   normalizeBotNamePronunciation,
   normalizeEnglishVoiceEngine,
   normalizeSpeechTypeVoiceMode,
+  normalizeWhodunnitTextVoiceMode,
   parseStoredAutoFallbackChain,
   parseStoredBotAudioVoiceProfileV1,
   normalizeAutoFallbackChain,
@@ -193,6 +195,7 @@ export interface CurrentSettings {
   experimentalAllModelEffortEnabled: number;
   coffeeExperimentalTableAngleEnabled: number;
   debateWhodunnitReuseSynthesizedExhibits: number;
+  debateWhodunnitTextVoiceMode: string | null;
   psychicModeEnabled: number;
   /** @deprecated Import/backup compatibility only; runtime routing ignores it. */
   autoSwitchModel: number;
@@ -278,6 +281,7 @@ export interface NextSettings {
   experimentalAllModelEffortEnabled: number;
   coffeeExperimentalTableAngleEnabled: number;
   debateWhodunnitReuseSynthesizedExhibits: number;
+  debateWhodunnitTextVoiceMode: WhodunnitTextVoiceMode;
   psychicModeEnabled: number;
   autoSwitchModel: number;
   autoFallbackChain: string | null;
@@ -1026,6 +1030,10 @@ export function resolveNextSettings(
     typeof body.debateWhodunnitReuseSynthesizedExhibits === "boolean"
       ? Number(body.debateWhodunnitReuseSynthesizedExhibits)
       : current.debateWhodunnitReuseSynthesizedExhibits;
+  const debateWhodunnitTextVoiceMode = normalizeWhodunnitTextVoiceMode(
+    body.debateWhodunnitTextVoiceMode,
+    normalizeWhodunnitTextVoiceMode(current.debateWhodunnitTextVoiceMode),
+  );
   const psychicModeEnabled =
     typeof body.psychicModeEnabled === "boolean"
       ? Number(body.psychicModeEnabled)
@@ -1427,6 +1435,7 @@ export function resolveNextSettings(
     experimentalAllModelEffortEnabled,
     coffeeExperimentalTableAngleEnabled,
     debateWhodunnitReuseSynthesizedExhibits,
+    debateWhodunnitTextVoiceMode,
     psychicModeEnabled,
     autoSwitchModel,
     autoFallbackChain,

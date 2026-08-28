@@ -29,6 +29,7 @@ import {
   type DebateSessionV1,
   type DebateWhodunnitFormatStateV2,
   type BotFaceStyle,
+  type WhodunnitTextVoiceMode,
 } from "@localai/shared";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
 import IdentityPresentationBlackout from "./IdentityPresentationBlackout";
@@ -46,15 +47,19 @@ import {
   mysteryInvestigationMusicMix,
 } from "./debateMysteryMusic";
 import {
-  debateMysteryDialoguePresentationDismissed,
-  debateMysteryTextBottishShouldStart,
-  playDebateMysterySfx,
-  playDebateMysteryTextBottish,
-} from "./debateMysterySfx";
+  WHODUNNIT_MANSION_AMBIENCE_FADE_MS,
+  WHODUNNIT_MANSION_AMBIENCE_TRANSITION_MS,
+  mysteryMansionAmbienceAssetV1,
+  mysteryMansionAmbienceMixV1,
+} from "./debateMysteryMansionAmbience";
 import {
-  stopBottishVoice,
-  teardownBottishVoiceImmediately,
-} from "./bottishVoice";
+  debateMysteryDialoguePresentationDismissed,
+  debateMysteryTextVoiceShouldStart,
+  debateMysteryTextVoiceShouldStop,
+  playDebateMysterySfx,
+  playDebateMysteryTextVoice,
+} from "./debateMysterySfx";
+import { teardownBottishVoiceImmediately } from "./bottishVoice";
 import { cancelWhodunnitDialogueAudioImmediately } from "./debateMysteryDialogueAudio";
 import { mysteryMapOccupantPosition } from "./debateMysteryRoomWalk";
 import {
@@ -73,12 +78,15 @@ import {
   whodunnitActorDriftTiming,
   whodunnitCaptionRevealIsPending,
   whodunnitCaptionSpeechText,
+  whodunnitCourtCalloutPresentationVisible,
   whodunnitCourtDialogueGestureCrossedPresentation,
   whodunnitCourtDialogueFinishDecision,
   whodunnitCourtPresentationVisible,
   whodunnitCourtPresentedWitnessSeatId,
   whodunnitDialogueGestureControlIsInteractive,
   whodunnitDialogueGestureDecision,
+  whodunnitInvestigationDialogueGraceMs,
+  whodunnitInvestigationDialogueShouldAutoAdvance,
   whodunnitInterrogationAudioOwnsMouth,
   whodunnitInterrogationBeatMs,
   whodunnitInterrogationCompletionIsCurrent,
@@ -90,6 +98,10 @@ import { SignalVoiceActionText } from "./SignalVoiceActionText";
 import { signalVoicePerformanceActionPresentationAtProgress } from "./signalVoicePerformance";
 import { debateVoiceCompletionFallbackDurationMs } from "./signalLiveCaptions";
 import { createWhodunnitSpeechTimingLoop } from "./debateMysterySpeechTimingLoop";
+import {
+  resolveWhodunnitCourtCamera,
+  whodunnitCourtCameraLabel,
+} from "./debateMysteryCourtStage";
 import {
   debateMysteryRoomCasekeeperNarrationTextV2,
   debateMysteryRoomIntroductionGestureV2,
@@ -105,6 +117,17 @@ import {
   formatDebateMysteryForgeElapsed,
   formatDebateMysteryForgeEta,
 } from "./debateMysteryV2ForgeProgress";
+import {
+  DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE,
+  readWhodunnitInvestigationArtStyle,
+  whodunnitBundledRoomArtPathForRoom,
+  whodunnitIllustratedRoomSubjectId,
+  whodunnitInvestigationAvatarPresentation,
+  whodunnitSealedRoomArtUrl,
+  whodunnitSavedRoomArtUrl,
+  writeWhodunnitInvestigationArtStyle,
+  type WhodunnitInvestigationArtStyle,
+} from "./debateMysteryInvestigationArt";
 import { DebateMysteryRoomCinematographyLayer } from "./debateMysteryRoomCinematographyLayer";
 import styles from "./debateMysteryV2.module.css";
 
@@ -114,8 +137,17 @@ interface V2SharedProps {
   theme: "light" | "dark";
   audioEnabled: boolean;
   audioVolume: number;
+  whodunnitTextVoiceMode?: WhodunnitTextVoiceMode;
+  playMysteryTextVoice?: (args: {
+    mode: Exclude<WhodunnitTextVoiceMode, "off">;
+    seed: string;
+    signal?: AbortSignal;
+    text: string;
+    volume: number;
+  }) => Promise<boolean>;
   request: <T>(path: string, options?: RequestInit) => Promise<T>;
   renderBotGlyph: BotPickerGlyphRenderer;
+  stageAlignmentStyle?: CSSProperties;
   renderMysteryBotAvatar: (
     bot: MysteryBotSummary,
     presentation: "full" | "mini",
@@ -138,6 +170,16 @@ interface V2SpeechTiming {
   alignment: VoicePlaybackCharacterAlignment | null;
   /** This becomes true only from the local audio element's play event. */
   audible: boolean;
+}
+
+interface DebateMysteryRoomArtUpgradeStatusV1 {
+  version: 1;
+  status: "unavailable" | "ready" | "available" | "preparing" | "failed";
+  requiresUpgradeRoomIds: string[];
+  readyRoomIds: string[];
+  failedRoomIds: string[];
+  canUpgrade: boolean;
+  reason: string | null;
 }
 
 interface MysteryDialogueSfxPresentation {
@@ -397,8 +439,24 @@ function sealedMysteryAssetApiUrl(
   sessionId: string,
   kind: "evidence" | "room",
   subjectId: string,
+  style?: WhodunnitInvestigationArtStyle,
 ): string {
+  if (kind === "room" && style) {
+    return whodunnitSealedRoomArtUrl({ sessionId, subjectId, style });
+  }
   return `/api/debates/${encodeURIComponent(sessionId)}/mystery-assets/${kind}/${encodeURIComponent(subjectId)}/file`;
+}
+
+function sealedMysteryRoomArtKey(
+  subjectId: string,
+  style: WhodunnitInvestigationArtStyle,
+): string {
+  const originalKey = sealedMysteryAssetKey("room", subjectId);
+  return style === "mosaic" ? `${originalKey}:mosaic` : originalKey;
+}
+
+function sealedMysteryIllustratedRoomArtKey(subjectId: string): string {
+  return `${sealedMysteryAssetKey("room", subjectId)}:upgrade`;
 }
 
 function sealedMysteryAssetObjectUrl(
@@ -987,6 +1045,8 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const [dialoguePlaybackIndex, setDialoguePlaybackIndex] = useState(0);
   const [speechTiming, setSpeechTiming] = useState<V2SpeechTiming | null>(null);
   const [interrogationPhase, setInterrogationPhase] = useState<WhodunnitInterrogationPhase | null>(null);
+  const [courtEstablishedWitnessSeatId, setCourtEstablishedWitnessSeatId] = useState<string | null>(null);
+  const [presentedCourtRecord, setPresentedCourtRecord] = useState<DebateMysteryRecordReferenceV2 | null>(null);
   const [heldDialogue, setHeldDialogue] = useState<DebateMysteryPublicDialogueEntryV2 | null>(null);
   const [examiningHotspotId, setExaminingHotspotId] = useState<string | null>(null);
   const [investigationLens, setInvestigationLens] = useState<MysteryLensState>({
@@ -1007,6 +1067,11 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   >({});
   const [sealedAssetObjectUrls, setSealedAssetObjectUrls] = useState<Record<string, string>>({});
   const sealedAssetObjectUrlRef = useRef(new Map<string, string>());
+  const [investigationArtStyle, setInvestigationArtStyle] =
+    useState<WhodunnitInvestigationArtStyle>(DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE);
+  const [roomArtUpgradeStatus, setRoomArtUpgradeStatus] =
+    useState<DebateMysteryRoomArtUpgradeStatusV1 | null>(null);
+  const [roomArtUpgradeRequesting, setRoomArtUpgradeRequesting] = useState(false);
   const [openingMapReveal, setOpeningMapReveal] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [roomParallax, setRoomParallax] = useState({ x: 0, y: 0 });
@@ -1026,12 +1091,75 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     key: string | null;
     visibleText: string;
   }>({ key: null, visibleText: "" });
-  const dialogueTextBottishKeyRef = useRef<string | null>(null);
+  const dialogueTextVoiceRef = useRef<{
+    controller: AbortController;
+    key: string;
+    mode: Exclude<WhodunnitTextVoiceMode, "off">;
+  } | null>(null);
   const dialogueGestureFillRef = useRef<{
     bot: boolean;
     key: string | null;
   }>({ bot: false, key: null });
   const dialogueGestureAdvanceRef = useRef<string | null>(null);
+  useEffect(() => {
+    setInvestigationArtStyle(readWhodunnitInvestigationArtStyle(window.localStorage));
+  }, []);
+  const selectInvestigationArtStyle = useCallback((style: WhodunnitInvestigationArtStyle): void => {
+    setInvestigationArtStyle(style);
+    writeWhodunnitInvestigationArtStyle(window.localStorage, style);
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async (): Promise<void> => {
+      try {
+        const status = await props.request<DebateMysteryRoomArtUpgradeStatusV1>(
+          `/api/debates/${encodeURIComponent(props.session.id)}/mystery-room-art/upgrade`,
+        );
+        if (cancelled) return;
+        setRoomArtUpgradeStatus(status);
+      } catch {
+        if (!cancelled) setRoomArtUpgradeStatus(null);
+      }
+    };
+    void refresh();
+    return () => {
+      cancelled = true;
+    };
+  }, [props.request, props.session.id]);
+  useEffect(() => {
+    if (roomArtUpgradeStatus?.status !== "preparing") return;
+    let cancelled = false;
+    const refresh = (): void => {
+      void props.request<DebateMysteryRoomArtUpgradeStatusV1>(
+        `/api/debates/${encodeURIComponent(props.session.id)}/mystery-room-art/upgrade`,
+      ).then((status) => {
+        if (!cancelled) setRoomArtUpgradeStatus(status);
+      }).catch(() => {
+        // Keep the last known state; the bounded status interval retries.
+      });
+    };
+    const timer = window.setInterval(refresh, 1_500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [props.request, props.session.id, roomArtUpgradeStatus?.status, roomArtUpgradeStatus?.readyRoomIds.length]);
+  const startRoomArtUpgrade = useCallback(async (): Promise<void> => {
+    if (roomArtUpgradeRequesting) return;
+    setRoomArtUpgradeRequesting(true);
+    setError(null);
+    try {
+      const status = await props.request<DebateMysteryRoomArtUpgradeStatusV1>(
+        `/api/debates/${encodeURIComponent(props.session.id)}/mystery-room-art/upgrade`,
+        { method: "POST" },
+      );
+      setRoomArtUpgradeStatus(status);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The Illustrated room upgrade could not start.");
+    } finally {
+      setRoomArtUpgradeRequesting(false);
+    }
+  }, [props.request, props.session.id, roomArtUpgradeRequesting]);
   const releaseActiveDialogueAudio = useCallback((): void => {
     const audio = activeAudioRef.current;
     const outputCleanup = activeAudioOutputCleanupRef.current;
@@ -1048,10 +1176,11 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const cancelActiveDialogueAudio = useCallback((): void => {
     const audio = activeAudioRef.current;
     const outputCleanup = activeAudioOutputCleanupRef.current;
-    const ownsSyntheticVoice = dialogueTextBottishKeyRef.current !== null;
+    const ownsSyntheticVoice = dialogueTextVoiceRef.current !== null;
+    dialogueTextVoiceRef.current?.controller.abort();
     activeAudioRef.current = null;
     activeAudioOutputCleanupRef.current = null;
-    dialogueTextBottishKeyRef.current = null;
+    dialogueTextVoiceRef.current = null;
     audioGenerationRef.current += 1;
     cancelWhodunnitDialogueAudioImmediately({
       media: audio,
@@ -1091,13 +1220,30 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   }, [pendingRoomKey, props.onSessionChange, props.request, props.session.id, props.session.revision]);
   const botById = useMemo(() => new Map(props.bots.map((bot) => [bot.id, bot])), [props.bots]);
   const revealedAssetRequests = useMemo(() => {
-    const requests = new Map<string, { kind: "evidence" | "room"; subjectId: string }>();
+    const requests = new Map<string, {
+      kind: "evidence" | "room";
+      subjectId: string;
+      style?: WhodunnitInvestigationArtStyle;
+    }>();
     for (const room of state.rooms) {
       if (room.sealedAsset?.revealed && room.sealedAsset.status === "ready") {
-        requests.set(sealedMysteryAssetKey("room", room.id), {
+        requests.set(sealedMysteryRoomArtKey(room.id, "illustrated"), {
           kind: "room",
           subjectId: room.id,
+          style: "illustrated",
         });
+        requests.set(sealedMysteryRoomArtKey(room.id, "mosaic"), {
+          kind: "room",
+          subjectId: room.id,
+          style: "mosaic",
+        });
+        if (roomArtUpgradeStatus?.readyRoomIds.includes(room.id)) {
+          requests.set(sealedMysteryIllustratedRoomArtKey(room.id), {
+            kind: "room",
+            subjectId: whodunnitIllustratedRoomSubjectId(room.id),
+            style: "illustrated",
+          });
+        }
       }
     }
     for (const item of state.record) {
@@ -1113,7 +1259,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       }
     }
     return Array.from(requests.entries()).sort(([left], [right]) => left.localeCompare(right));
-  }, [state.record, state.rooms]);
+  }, [roomArtUpgradeStatus?.readyRoomIds, state.record, state.rooms]);
   const revealedAssetRequestKey = revealedAssetRequests.map(([key]) => key).join("|");
 
   useEffect(() => {
@@ -1129,7 +1275,12 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     for (const [key, request] of desired) {
       if (sealedAssetObjectUrlRef.current.has(key)) continue;
       void fetch(
-        sealedMysteryAssetApiUrl(props.session.id, request.kind, request.subjectId),
+        sealedMysteryAssetApiUrl(
+          props.session.id,
+          request.kind,
+          request.subjectId,
+          request.style,
+        ),
         {
           credentials: "same-origin",
           cache: "no-store",
@@ -1452,6 +1603,12 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     hasQueuedDialogue: queuedDialogue !== null,
     playPhase: state.playPhase,
   });
+  const callout = whodunnitCourtCalloutPresentationVisible({
+    courtPresentationActive,
+    playPhase: state.playPhase,
+  })
+    ? state.pendingCallout
+    : null;
   const courtPresentedWitnessSeatId = whodunnitCourtPresentedWitnessSeatId({
     activeWitnessSeatId: witnessSeatId,
     dialogueIndex: dialoguePlaybackIndex,
@@ -1473,16 +1630,56 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const activeStatementStageActionText = activeStatement?.stageActionText ?? activeStatementDelivery.stageActionText;
   const prosecutorBot = presentMysteryBot(botById.get(state.config.prosecutorBotId) ?? null);
   const defenseBot = presentMysteryBot(botById.get(state.config.rivalDefenseBotId) ?? null);
+  const judgeBot = presentMysteryBot(botById.get(state.config.judgeBotId) ?? null);
   const defendant = state.suspects.find((entry) => entry.seatId === state.court?.defendantSeatId) ?? null;
   const defendantBot = presentMysteryBot(defendant ? botById.get(defendant.botId) ?? null : null);
-  const defendantMiniVisible = Boolean(
-    defendant && defendantBot && defendant.seatId !== courtPresentedWitnessSeatId,
-  );
   const prosecutorDialogueActive = displayedDialogue?.speakerBotId === state.config.prosecutorBotId;
   const defenseDialogueActive = displayedDialogue?.speakerBotId === state.config.rivalDefenseBotId;
+  const judgeDialogueActive = displayedDialogue?.speakerKind === "judge" ||
+    displayedDialogue?.speakerBotId === state.config.judgeBotId;
   const defendantDialogueActive = Boolean(
     defendant && displayedDialogue?.speakerSeatId === defendant.seatId,
   );
+  const courtCamera = resolveWhodunnitCourtCamera({
+    defenseDialogueActive,
+    defendantDialogueActive,
+    establishingWitness: Boolean(
+      courtPresentationActive &&
+      courtPresentedWitnessSeatId &&
+      courtPresentedWitnessSeatId !== courtEstablishedWitnessSeatId
+    ),
+    interrogationPhase,
+    judgeDialogueActive,
+    prosecutionDialogueActive: prosecutorDialogueActive,
+  });
+  useEffect(() => {
+    if (!courtPresentationActive || !courtPresentedWitnessSeatId) {
+      setCourtEstablishedWitnessSeatId(null);
+      return;
+    }
+    if (courtPresentedWitnessSeatId === courtEstablishedWitnessSeatId) return;
+    const timer = window.setTimeout(
+      () => setCourtEstablishedWitnessSeatId(courtPresentedWitnessSeatId),
+      reducedMotion ? 450 : 1_050,
+    );
+    return () => window.clearTimeout(timer);
+  }, [courtEstablishedWitnessSeatId, courtPresentationActive, courtPresentedWitnessSeatId, reducedMotion]);
+  const defenseFocusBot = defendantDialogueActive && defendantBot ? defendantBot : defenseBot;
+  const defenseFocusRole = defendantDialogueActive ? "Defendant" : "Defense Counsel";
+  const presentedCourtRecordItem = presentedCourtRecord
+    ? state.record.find((item) => recordKey(item.reference) === recordKey(presentedCourtRecord)) ?? null
+    : null;
+  const presentedCourtRecordKindLabel = presentedCourtRecordItem?.reference.kind === "testimony"
+    ? "Sworn testimony"
+    : "Physical evidence";
+  const presentedCourtRecordAssetUrl = presentedCourtRecordItem?.reference.kind === "evidence"
+    ? sealedMysteryAssetObjectUrl(
+        sealedAssetObjectUrls,
+        "evidence",
+        presentedCourtRecordItem.reference.id,
+        presentedCourtRecordItem.sealedAsset,
+      )
+    : null;
   // Derive directly from the active entry so an action from a prior line
   // unmounts in the same render when the dialogue changes.
   const roomActionPresentation = mysterySignalActionPresentation(
@@ -1717,6 +1914,18 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const dialogueSfxKey = dialogueSfxPresentation?.key ?? null;
   const dialogueSfxStreaming = dialogueSfxPresentation?.streaming;
   const dialogueSfxVisibleText = dialogueSfxPresentation?.visibleText ?? "";
+  const mansionAmbienceAsset = mysteryMansionAmbienceAssetV1(
+    state.config.houseStyle,
+    state.config.mansionBundleId,
+  );
+  const mansionAmbienceMix = mysteryMansionAmbienceMixV1({
+    houseStyle: state.config.houseStyle,
+    room: currentRoom,
+    maxFloor: mansionFloors.at(-1) ?? 1,
+    roomView: state.roomView,
+    speechActive: dialogueSfxPresentation?.audible === true && speechTiming !== null,
+    theoryBoardOpen: theoryOpen,
+  });
   useEffect(() => {
     const previous = dialogueSfxPresentationRef.current;
     const nextKey = dialogueSfxKey;
@@ -1739,35 +1948,54 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   ]);
 
   useEffect(() => {
-    const startedKey = dialogueTextBottishKeyRef.current;
-    if (
-      startedKey &&
-      (startedKey !== dialogueSfxKey || dialogueSfxDelivery !== "text_only")
-    ) {
-      stopBottishVoice({ preservePreparedMedia: true });
-      dialogueTextBottishKeyRef.current = null;
-    }
-    if (!props.audioEnabled || props.audioVolume <= 0) {
-      if (dialogueTextBottishKeyRef.current) {
-        stopBottishVoice({ preservePreparedMedia: true });
-        dialogueTextBottishKeyRef.current = null;
-      }
-      return;
-    }
-    if (!debateMysteryTextBottishShouldStart({
+    const textVoiceMode = props.whodunnitTextVoiceMode ?? "bottish";
+    const started = dialogueTextVoiceRef.current;
+    if (debateMysteryTextVoiceShouldStop({
       audible: dialogueSfxAudible === true,
       delivery: dialogueSfxDelivery,
       key: dialogueSfxKey,
-      startedKey: dialogueTextBottishKeyRef.current,
+      mode: textVoiceMode,
+      startedKey: started?.key ?? null,
+      startedMode: started?.mode ?? null,
+      streaming: dialogueSfxStreaming === true,
+    })) {
+      dialogueTextVoiceRef.current?.controller.abort();
+      teardownBottishVoiceImmediately({ preservePreparedMedia: true });
+      dialogueTextVoiceRef.current = null;
+    }
+    if (!props.audioEnabled || props.audioVolume <= 0) {
+      if (dialogueTextVoiceRef.current) {
+        dialogueTextVoiceRef.current.controller.abort();
+        teardownBottishVoiceImmediately({ preservePreparedMedia: true });
+        dialogueTextVoiceRef.current = null;
+      }
+      return;
+    }
+    const active = dialogueTextVoiceRef.current;
+    if (!debateMysteryTextVoiceShouldStart({
+      audible: dialogueSfxAudible === true,
+      delivery: dialogueSfxDelivery,
+      key: dialogueSfxKey,
+      mode: textVoiceMode,
+      startedKey: active?.key ?? null,
+      startedMode: active?.mode ?? null,
       streaming: dialogueSfxStreaming === true,
       visibleText: dialogueSfxVisibleText,
-    }) || !dialogueSfxKey) return;
-    dialogueTextBottishKeyRef.current = dialogueSfxKey;
-    void playDebateMysteryTextBottish({
+    }) || !dialogueSfxKey || textVoiceMode === "off") return;
+    const controller = new AbortController();
+    dialogueTextVoiceRef.current = {
+      controller,
+      key: dialogueSfxKey,
+      mode: textVoiceMode,
+    };
+    void playDebateMysteryTextVoice({
       enabled: true,
+      mode: textVoiceMode,
       seed: `${props.session.id}:${dialogueSfxKey}`,
+      signal: controller.signal,
       text: dialogueSfxFullText,
       volume: props.audioVolume,
+      play: props.playMysteryTextVoice,
     });
   }, [
     dialogueSfxAudible,
@@ -1778,13 +2006,16 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     dialogueSfxVisibleText,
     props.audioEnabled,
     props.audioVolume,
+    props.playMysteryTextVoice,
     props.session.id,
+    props.whodunnitTextVoiceMode,
   ]);
 
   useEffect(() => () => {
-    if (!dialogueTextBottishKeyRef.current) return;
-    dialogueTextBottishKeyRef.current = null;
-    stopBottishVoice();
+    if (!dialogueTextVoiceRef.current) return;
+    dialogueTextVoiceRef.current.controller.abort();
+    dialogueTextVoiceRef.current = null;
+    teardownBottishVoiceImmediately();
   }, []);
 
   useEffect(() => {
@@ -1840,7 +2071,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     return () => query.removeEventListener("change", update);
   }, []);
 
-  const finishCurrentDialogue = useCallback((): void => {
+  const finishCurrentDialogue = useCallback((automatic = false): void => {
     if (!queuedDialogue) {
       if (dialogueSfxPresentation) {
         cancelActiveDialogueAudio();
@@ -1890,6 +2121,18 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       setInterrogationPhase(courtDialogue ? null : "suspect_entrance");
       return;
     }
+    if (automatic) {
+      setHeldDialogue(null);
+      setSpeechTiming(null);
+      setRoomDialogueBaseline({
+        contextKey: roomContextKey,
+        historyCount: state.dialogueHistory.length,
+      });
+      setInterrogationPhase(null);
+      setDialoguePlaybackQueue([]);
+      setDialoguePlaybackIndex(0);
+      return;
+    }
     setHeldDialogue(queuedDialogue);
     setInterrogationPhase(null);
     setDialoguePlaybackQueue([]);
@@ -1925,6 +2168,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         setDialoguePlaybackIndex(0);
         setInterrogationPhase(null);
       }
+      if (action.action === "retry_witness_checkpoint") setPresentedCourtRecord(null);
       const exchange = nextState.dialogueHistory.slice(previousDialogueCount);
       if (exchange.length) {
         setHeldDialogue(null);
@@ -2024,6 +2268,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       setSpeechTiming(settledSpeechTiming(playbackText));
       if (activeAudioRef.current === audio) activeAudioRef.current = null;
       if (queuedDialogue) {
+        if (state.playPhase === "investigation") return;
         if (interrogationPhase === "prosecutor_speaking") setInterrogationPhase("handoff");
         else if (interrogationPhase === "suspect_speaking") advanceDialoguePlayback();
         else advanceDialoguePlayback();
@@ -2073,6 +2318,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     interrogationAudioMayStart,
     interrogationPhase,
     spectatorBeat,
+    state.playPhase,
     state.voicesEnabled,
   ]);
 
@@ -2094,6 +2340,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       setSpeechTiming({ text: playbackText, elapsedMs, durationMs, alignment: null, audible: false });
       if (elapsedMs >= durationMs) {
         setSpeechTiming(settledSpeechTiming(playbackText));
+        if (state.playPhase === "investigation") return;
         if (interrogationPhase === "prosecutor_speaking") setInterrogationPhase("handoff");
         else advanceDialoguePlayback();
         return;
@@ -2113,6 +2360,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     interrogationPhase,
     spectatorBeat,
     roomIntroductionAwaitingContinue,
+    state.playPhase,
     state.voicesEnabled,
   ]);
 
@@ -2126,7 +2374,6 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   }, [busy, completedSpectatorBeat, sendAction, spectatorBeat]);
 
   useEffect(() => {
-    const callout = state.pendingCallout;
     if (!callout || callout.id === lastCalloutIdRef.current) return;
     lastCalloutIdRef.current = callout.id;
     void playDebateMysterySfx({
@@ -2134,7 +2381,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       enabled: props.audioEnabled,
       volume: props.audioVolume,
     });
-  }, [props.audioEnabled, props.audioVolume, state.pendingCallout]);
+  }, [callout, props.audioEnabled, props.audioVolume]);
 
   useEffect(() => {
     setTheory(state.theory ?? {
@@ -2167,6 +2414,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     setDialoguePlaybackIndex(0);
     setHeldDialogue(null);
     setSpeechTiming(null);
+    setPresentedCourtRecord(null);
     setInterrogationPhase(null);
     audioGenerationRef.current += 1;
     releaseActiveDialogueAudio();
@@ -2185,6 +2433,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     cancelActiveDialogueAudio();
     setHeldDialogue(null);
     setSpeechTiming(null);
+    setPresentedCourtRecord(null);
     dialogueGestureFillRef.current = { bot: false, key: null };
     dialogueGestureAdvanceRef.current = null;
     void sendAction({ action: "focus_statement", statementId: next.statementId });
@@ -2240,7 +2489,6 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     </div>
   );
 
-  const callout = state.pendingCallout;
   const calloutStyle = callout?.actorColor
     ? ({ "--mystery-callout-color": callout.actorColor } as CSSProperties)
     : undefined;
@@ -2256,21 +2504,41 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       !caseFileOpen &&
       !theoryOpen,
   );
-  const currentRoomAssetUrl = currentRoom ? sealedMysteryAssetObjectUrl(
-    sealedAssetObjectUrls,
-    "room",
-    currentRoom.id,
-    currentRoom?.sealedAsset,
-  ) : null;
+  const illustratedRoomArtAvailable = roomArtUpgradeStatus?.status === "ready";
+  const effectiveInvestigationArtStyle =
+    investigationArtStyle === "illustrated" && !illustratedRoomArtAvailable
+      ? "mosaic"
+      : investigationArtStyle;
+  const currentRoomHasIllustratedUpgrade = Boolean(
+    currentRoom && roomArtUpgradeStatus?.readyRoomIds.includes(currentRoom.id),
+  );
+  const currentRoomAssetUrl = currentRoom?.sealedAsset?.revealed &&
+      currentRoom.sealedAsset.status === "ready"
+    ? sealedAssetObjectUrls[
+        effectiveInvestigationArtStyle === "illustrated" && currentRoomHasIllustratedUpgrade
+          ? sealedMysteryIllustratedRoomArtKey(currentRoom.id)
+          : sealedMysteryRoomArtKey(currentRoom.id, effectiveInvestigationArtStyle)
+      ] ?? null
+    : null;
   const currentRoomAssetKey = currentRoom
     ? sealedMysteryAssetKey("room", currentRoom.id)
     : null;
+  const currentRoomBundledAssetUrl = currentRoom
+    ? whodunnitBundledRoomArtPathForRoom(
+        currentRoom,
+        effectiveInvestigationArtStyle,
+      )
+    : null;
+  const currentRoomImageUrl = currentRoomAssetUrl
+    ?? (currentRoom?.imageId
+      ? whodunnitSavedRoomArtUrl(currentRoom.imageId, effectiveInvestigationArtStyle)
+      : null)
+    ?? currentRoomBundledAssetUrl;
+  const investigationAvatarPresentation = whodunnitInvestigationAvatarPresentation(
+    effectiveInvestigationArtStyle,
+  );
   const roomSceneStyle = {
-    "--room-image": currentRoomAssetUrl
-      ? `url(${currentRoomAssetUrl})`
-      : currentRoom?.bundledAssetPath
-        ? `url(${currentRoom.bundledAssetPath})`
-        : "none",
+    "--room-image": currentRoomImageUrl ? `url(${currentRoomImageUrl})` : "none",
     "--room-parallax-x": `${roomParallax.x}px`,
     "--room-parallax-y": `${roomParallax.y}px`,
   } as CSSProperties;
@@ -2321,6 +2589,73 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     }
     finishCurrentDialogue();
   };
+  useEffect(() => {
+    if (
+      state.playPhase !== "investigation" ||
+      !roomIntroductionAwaitingContinue ||
+      busy ||
+      !roomDisplayedDialogue
+    ) return;
+    const timer = window.setTimeout(() => {
+      if (!roomCasekeeperNarrationVisible) {
+        if (roomCasekeeperNarrationKey) {
+          setRevealedCasekeeperNarrationKey(roomCasekeeperNarrationKey);
+        }
+        return;
+      }
+      advanceVisibleRoomDialogue();
+    }, roomCasekeeperNarrationVisible
+      ? whodunnitInvestigationDialogueGraceMs({
+          delivery: "text_only",
+          reducedMotion,
+          text: roomCasekeeperNarrationText,
+        })
+      : reducedMotion ? 0 : 450);
+    return () => window.clearTimeout(timer);
+  }, [
+    busy,
+    reducedMotion,
+    roomCasekeeperNarrationKey,
+    roomCasekeeperNarrationText,
+    roomCasekeeperNarrationVisible,
+    roomDisplayedDialogue,
+    roomIntroductionAwaitingContinue,
+    state.playPhase,
+  ]);
+  useEffect(() => {
+    if (roomIntroductionAwaitingContinue || !dialogueSfxPresentation) return;
+    const requiresPlayerInput = caseFileOpen || theoryOpen;
+    if (!whodunnitInvestigationDialogueShouldAutoAdvance({
+      busy,
+      hasActiveAudio: activeAudioRef.current !== null,
+      hasDialogue: roomDisplayedDialogue !== null,
+      playPhase: state.playPhase,
+      requiresPlayerInput,
+      roomView: state.roomView,
+      streaming: dialogueSfxPresentation.streaming,
+    })) return;
+    const presentationKey = dialogueSfxPresentation.key;
+    const timer = window.setTimeout(() => {
+      if (dialogueSfxPresentationRef.current.key !== presentationKey) return;
+      finishCurrentDialogue(true);
+    }, whodunnitInvestigationDialogueGraceMs({
+      delivery: dialogueSfxPresentation.delivery,
+      reducedMotion,
+      text: dialogueSfxPresentation.fullText,
+    }));
+    return () => window.clearTimeout(timer);
+  }, [
+    busy,
+    caseFileOpen,
+    dialogueSfxPresentation,
+    finishCurrentDialogue,
+    reducedMotion,
+    roomDisplayedDialogue,
+    roomIntroductionAwaitingContinue,
+    state.playPhase,
+    state.roomView,
+    theoryOpen,
+  ]);
   const handleInvestigationDialogueClickCapture = (event: React.MouseEvent<HTMLElement>): void => {
     if (mysteryDialogueGestureOriginIsInteractive(event.target)) return;
     if (!operateVisibleDialogueGesture(event.detail, advanceVisibleRoomDialogue)) return;
@@ -2420,12 +2755,17 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         operateVisibleDialogueGesture(1, () => void dismissOpening());
       }
     };
-    const openingRoomImage = currentRoom ? sealedMysteryAssetObjectUrl(
-      sealedAssetObjectUrls,
-      "room",
-      currentRoom.id,
-      currentRoom?.sealedAsset,
-    ) ?? currentRoom?.bundledAssetPath ?? null : null;
+    const openingRoomImage = currentRoom
+      ? sealedMysteryAssetObjectUrl(
+          sealedAssetObjectUrls,
+          "room",
+          currentRoom.id,
+          currentRoom?.sealedAsset,
+        ) ?? whodunnitBundledRoomArtPathForRoom(
+          currentRoom,
+          effectiveInvestigationArtStyle,
+        )
+      : null;
     return (
       <main className={styles.caseOpening} data-theme={props.theme}>
         <button type="button" className={styles.archiveButton} onClick={props.onExit}>← Archive</button>
@@ -2530,7 +2870,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
 
   if (courtPresentationActive && state.court && activeStatement) {
     return (
-      <main className={styles.court} data-theme={props.theme} data-dialogue-playback={dialoguePerformanceActive ? "active" : undefined} data-tutorial-target="mystery-v2-court">
+      <main className={styles.court} style={props.stageAlignmentStyle} data-theme={props.theme} data-dialogue-playback={dialoguePerformanceActive ? "active" : undefined} data-tutorial-target="mystery-v2-court">
         <SessionAtmosphereLayer
           sessionKey={`whodunnit-v2-court:${props.session.id}`}
           backgroundUrl="/audio/debate/courtroom-audience-murmur-loop.mp3"
@@ -2552,51 +2892,117 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         <div className={styles.credibility} aria-label={`${state.court.credibilityRemaining} of ${state.court.credibilityMaximum} credibility remaining`}>
           <span>Credibility</span><div>{Array.from({ length: state.court.credibilityMaximum }, (_, index) => <i key={index} data-full={index < state.court!.credibilityRemaining ? "true" : undefined} />)}</div>
         </div>
-        <section className={styles.counselComposition} aria-label="Court counsel">
-          <article className={styles.counselSeat} data-side="prosecution" style={{ "--counsel-color": prosecutorBot?.color ?? "#72d7ff" } as CSSProperties}>
-            {prosecutorDialogueActive && dialogueActionPresentation ? <SignalVoiceActionText key={`prosecution:${displayedDialogue?.nodeId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...dialogueActionPresentation} accent={prosecutorBot?.color} /> : null}
-            {prosecutorBot ? props.renderMysteryBotAvatar(prosecutorBot, "mini", {
-              demeanor: "partner",
-              talking: speechTiming !== null && prosecutorDialogueActive,
-              speechTiming: prosecutorDialogueActive ? speechTiming : null,
-              blinkEnabled: true,
-              facing: "right",
-            }) : <span>◇</span>}
-            <div><small>Player Prosecutor</small><strong>{prosecutorBot?.name ?? "Prosecutor"}</strong></div>
-          </article>
-          <article className={styles.counselSeat} data-side="defense" style={{ "--counsel-color": defenseBot?.color ?? "#ff7eaa" } as CSSProperties}>
-            {defenseDialogueActive && dialogueActionPresentation ? <SignalVoiceActionText key={`defense:${displayedDialogue?.nodeId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...dialogueActionPresentation} accent={defenseBot?.color} /> : null}
-            {defenseBot ? props.renderMysteryBotAvatar(defenseBot, "mini", {
-              demeanor: "partner",
-              talking: speechTiming !== null && defenseDialogueActive,
-              speechTiming: defenseDialogueActive ? speechTiming : null,
-              blinkEnabled: true,
-              facing: "left",
-            }) : <span>◇</span>}
-            <div><small>Defense Counsel</small><strong>{defenseBot?.name ?? "Defense"}</strong></div>
-            {defendantMiniVisible && defendant && defendantBot ? (
-              <aside
-                className={styles.defendantMini}
-                data-defendant-seat-id={defendant.seatId}
-                data-hidden-while-testifying="false"
-                style={{ "--defendant-color": defendant.color ?? "#a98cff" } as CSSProperties}
-              >
-                {defendantDialogueActive && dialogueActionPresentation ? <SignalVoiceActionText key={`defendant:${displayedDialogue?.nodeId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...dialogueActionPresentation} accent={defendantBot.color} /> : null}
-                {props.renderMysteryBotAvatar(defendantBot, "mini", {
-                  demeanor: "suspect",
-                  talking: speechTiming !== null && defendantDialogueActive,
-                  speechTiming: defendantDialogueActive ? speechTiming : null,
-                  blinkEnabled: true,
-                  facing: "left",
-                })}
-                <small>Defendant · {defendantBot.name}</small>
-              </aside>
-            ) : null}
-          </article>
-        </section>
-        <section className={styles.witnessStand} style={{ "--witness-color": courtPresentedWitness?.color ?? "#a98cff" } as CSSProperties}>
-          <div className={styles.witnessAvatar}>{courtPresentedWitnessBot ? props.renderMysteryBotAvatar(courtPresentedWitnessBot, "full", { demeanor: "suspect", talking: speechTiming !== null && courtPresentedWitnessDialogueActive, speechTiming: courtPresentedWitnessDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "left" }) : <span>◇</span>}{courtWitnessActionPresentation ? <SignalVoiceActionText key={`witness:${displayedDialogue?.nodeId ?? activeStatement?.statementId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...courtWitnessActionPresentation} accent={courtPresentedWitness?.color} /> : null}</div>
-          <div className={styles.witnessIdentity}><small>{courtPresentedWitnessSeatId === witnessSeatId ? `Witness ${state.court.completedChapterIds.length + 1} of ${state.court.witnessOrder.length}` : "Witness testimony"}</small><h1>{courtPresentedWitnessBot?.name ?? courtPresentedWitness?.name ?? "Witness"}</h1></div>
+        <section
+          className={styles.courtStage}
+          data-camera={courtCamera}
+          aria-label={whodunnitCourtCameraLabel(courtCamera)}
+        >
+          <div className={styles.courtBackdrop} aria-hidden="true" />
+          {courtCamera === "wide" ? (
+            <div className={styles.wideCourtComposition} aria-label="Courtroom establishing view">
+              <article className={styles.wideCourtPresence} data-role="prosecution" data-speaking={prosecutorDialogueActive ? "true" : undefined} style={{ "--court-presence-color": prosecutorBot?.color ?? "#72d7ff" } as CSSProperties}>
+                {prosecutorBot ? props.renderMysteryBotAvatar(prosecutorBot, "mini", { demeanor: "partner", talking: speechTiming !== null && prosecutorDialogueActive, speechTiming: prosecutorDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "left" }) : <span>◇</span>}
+                <small>Prosecution</small>
+              </article>
+              <article className={styles.wideCourtPresence} data-role="judge" data-speaking={judgeDialogueActive ? "true" : undefined} style={{ "--court-presence-color": judgeBot?.color ?? "#d5c8ff" } as CSSProperties}>
+                {judgeBot ? props.renderMysteryBotAvatar(judgeBot, "mini", { demeanor: "partner", talking: speechTiming !== null && judgeDialogueActive, speechTiming: judgeDialogueActive ? speechTiming : null, blinkEnabled: true }) : <span>◇</span>}
+                <small>Judge</small>
+              </article>
+              <article className={styles.wideCourtPresence} data-role="defense" data-speaking={defenseDialogueActive ? "true" : undefined} style={{ "--court-presence-color": defenseBot?.color ?? "#ff7eaa" } as CSSProperties}>
+                {defenseBot ? props.renderMysteryBotAvatar(defenseBot, "mini", { demeanor: "partner", talking: speechTiming !== null && defenseDialogueActive, speechTiming: defenseDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "right" }) : <span>◇</span>}
+                <small>Defense</small>
+              </article>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img className={styles.wideEvidenceTable} src={`/coffee-table/table_${props.theme}.png`} alt="Evidence table" />
+              {/* Supplied 1:1 alpha overlay shares the exact forum backplate transform. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img className={styles.wideWitnessSilhouette} src="/debate/whodunnit-witness-silhouette.png" alt="Witness seen from behind at the center stand" />
+            </div>
+          ) : null}
+          {courtCamera === "witness" ? (
+            <>
+              <div className={styles.galleryRail} aria-hidden="true" />
+              <section className={styles.counselComposition} aria-label="Court counsel">
+                <article className={styles.counselSeat} data-side="prosecution" data-speaking={prosecutorDialogueActive ? "true" : undefined} style={{ "--counsel-color": prosecutorBot?.color ?? "#72d7ff" } as CSSProperties}>
+                  {prosecutorDialogueActive && dialogueActionPresentation ? <SignalVoiceActionText key={`prosecution:${displayedDialogue?.nodeId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...dialogueActionPresentation} accent={prosecutorBot?.color} /> : null}
+                  <div className={styles.counselAvatar}>{prosecutorBot ? props.renderMysteryBotAvatar(prosecutorBot, "mini", { demeanor: "partner", talking: speechTiming !== null && prosecutorDialogueActive, speechTiming: prosecutorDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "left" }) : <span>◇</span>}</div>
+                  <i className={styles.counselGlyph} aria-hidden="true">{props.renderBotGlyph(prosecutorBot?.glyph ?? null, { size: 26, strokeWidth: 1.5 })}</i>
+                  <div className={styles.counselIdentity}><small>Player Prosecutor</small><strong>{prosecutorBot?.name ?? "Prosecutor"}</strong></div>
+                </article>
+                <article className={styles.counselSeat} data-side="defense" data-speaking={defenseDialogueActive ? "true" : undefined} style={{ "--counsel-color": defenseBot?.color ?? "#ff7eaa" } as CSSProperties}>
+                  {defenseDialogueActive && dialogueActionPresentation ? <SignalVoiceActionText key={`defense:${displayedDialogue?.nodeId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...dialogueActionPresentation} accent={defenseBot?.color} /> : null}
+                  <div className={styles.counselAvatar}>{defenseBot ? props.renderMysteryBotAvatar(defenseBot, "mini", { demeanor: "partner", talking: speechTiming !== null && defenseDialogueActive, speechTiming: defenseDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "right" }) : <span>◇</span>}</div>
+                  <i className={styles.counselGlyph} aria-hidden="true">{props.renderBotGlyph(defenseBot?.glyph ?? null, { size: 26, strokeWidth: 1.5 })}</i>
+                  <div className={styles.counselIdentity}><small>Defense Counsel</small><strong>{defenseBot?.name ?? "Defense"}</strong></div>
+                </article>
+              </section>
+              <section className={styles.witnessStand} style={{ "--witness-color": courtPresentedWitness?.color ?? "#a98cff" } as CSSProperties}>
+                <div className={styles.witnessAvatar}>{courtPresentedWitnessBot ? props.renderMysteryBotAvatar(courtPresentedWitnessBot, "full", { demeanor: "suspect", talking: speechTiming !== null && courtPresentedWitnessDialogueActive, speechTiming: courtPresentedWitnessDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "left" }) : <span>◇</span>}{courtWitnessActionPresentation ? <SignalVoiceActionText key={`witness:${displayedDialogue?.nodeId ?? activeStatement?.statementId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...courtWitnessActionPresentation} accent={courtPresentedWitness?.color} /> : null}</div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img className={styles.witnessStandAsset} src={`/debate/whodunnit-witness-foreground-${props.theme}.png`} alt="" aria-hidden="true" />
+              </section>
+            </>
+          ) : null}
+          {courtCamera === "prosecution" && prosecutorBot ? (
+            <section className={styles.courtPodiumFocus} data-side="prosecution" style={{ "--court-presence-color": prosecutorBot.color ?? "#72d7ff" } as CSSProperties}>
+              <div className={styles.courtPodiumAvatar}>{props.renderMysteryBotAvatar(prosecutorBot, "full", { demeanor: "partner", talking: speechTiming !== null && prosecutorDialogueActive, speechTiming: prosecutorDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "left" })}{dialogueActionPresentation ? <SignalVoiceActionText key={`prosecution-focus:${displayedDialogue?.nodeId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...dialogueActionPresentation} accent={prosecutorBot.color} /> : null}</div>
+              <div className={styles.courtPodiumForeground} aria-hidden="true" />
+              <div className={styles.courtPodiumIdentity}><small>Player Prosecutor</small><strong>{prosecutorBot.name}</strong></div>
+            </section>
+          ) : null}
+          {courtCamera === "defense" && defenseFocusBot ? (
+            <section className={styles.courtPodiumFocus} data-side="defense" style={{ "--court-presence-color": defenseFocusBot.color ?? "#ff7eaa" } as CSSProperties}>
+              <div className={styles.courtPodiumAvatar}>{props.renderMysteryBotAvatar(defenseFocusBot, "full", { demeanor: defendantDialogueActive ? "suspect" : "partner", talking: speechTiming !== null && (defenseDialogueActive || defendantDialogueActive), speechTiming: defenseDialogueActive || defendantDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "right" })}{dialogueActionPresentation ? <SignalVoiceActionText key={`defense-focus:${displayedDialogue?.nodeId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...dialogueActionPresentation} accent={defenseFocusBot.color} /> : null}</div>
+              <div className={styles.courtPodiumForeground} aria-hidden="true" />
+              <div className={styles.courtPodiumIdentity}><small>{defenseFocusRole}</small><strong>{defenseFocusBot.name}</strong></div>
+            </section>
+          ) : null}
+          {courtCamera === "judge" ? (
+            <section className={styles.courtJudgeFocus} style={{ "--court-presence-color": judgeBot?.color ?? "#d5c8ff" } as CSSProperties}>
+              <div className={styles.courtJudgeAvatar}>{judgeBot ? props.renderMysteryBotAvatar(judgeBot, "full", { demeanor: "partner", talking: speechTiming !== null && judgeDialogueActive, speechTiming: judgeDialogueActive ? speechTiming : null, blinkEnabled: true }) : <span>◇</span>}{dialogueActionPresentation ? <SignalVoiceActionText key={`judge-focus:${displayedDialogue?.nodeId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...dialogueActionPresentation} accent={judgeBot?.color} /> : null}</div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img className={styles.courtJudgeGavel} src={`/debate/moderator-gavel-${props.theme}-down.png`} alt="" aria-hidden="true" />
+              <div className={styles.courtPodiumIdentity}><small>Presiding Judge</small><strong>{judgeBot?.name ?? "The Court"}</strong></div>
+            </section>
+          ) : null}
+          {presentedCourtRecordItem && courtCamera === "witness" ? (
+            <aside
+              className={styles.courtEvidenceProjectors}
+              aria-label={`Presented evidence: ${presentedCourtRecordItem.title}`}
+              data-court-evidence-projectors="true"
+            >
+              <article className={styles.courtEvidenceProjector} data-projector-side="image" aria-label="Evidence image">
+                <div className={styles.courtEvidenceProjection} data-court-evidence-plane="image">
+                  <small>Exhibit visual</small>
+                  <div className={styles.courtEvidenceVisual}>
+                    {presentedCourtRecordAssetUrl ? (
+                      // Direct delivery preserves the sealed route's no-store boundary.
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={presentedCourtRecordAssetUrl} alt="" />
+                    ) : <span aria-hidden="true">{presentedCourtRecordItem.emoji}</span>}
+                  </div>
+                </div>
+                <i className={styles.courtEvidenceBeam} aria-hidden="true" />
+                <div className={styles.courtEvidenceProjectorMount} aria-hidden="true">
+                  <i className={styles.courtEvidencePrism} />
+                  <i className={styles.courtEvidenceSocket} />
+                </div>
+              </article>
+              <article className={styles.courtEvidenceProjector} data-projector-side="record" aria-label="Court record description">
+                <div className={styles.courtEvidenceProjection} data-court-evidence-plane="record">
+                  <small>Presented to the Court</small>
+                  <strong>{presentedCourtRecordItem.title}</strong>
+                  <p>{presentedCourtRecordItem.description}</p>
+                  <span>{presentedCourtRecordKindLabel} · Admitted record</span>
+                </div>
+                <i className={styles.courtEvidenceBeam} aria-hidden="true" />
+                <div className={styles.courtEvidenceProjectorMount} aria-hidden="true">
+                  <i className={styles.courtEvidencePrism} />
+                  <i className={styles.courtEvidenceSocket} />
+                </div>
+              </article>
+            </aside>
+          ) : null}
         </section>
         <section className={styles.testimony}>
           <div className={styles.testimonyNav}>
@@ -2611,11 +3017,11 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           <aside className={styles.courtReaction} role="button" tabIndex={0} onClick={handleCourtDialogueClick} onKeyDown={handleCourtDialogueKeyDown}><strong>{dialogueBot?.name ?? "Court"}</strong><p>{revealedSpeechText(whodunnitCaptionSpeechText(displayedDialogueDelivery.spokenText), captionSpeechTiming)}</p></aside>
         ) : null}
         {spectator ? <aside className={styles.courtReaction} role="status"><strong>Watch-only court</strong><p>The selected Prosecutor is conducting the examination from the frozen admissible record.</p></aside> : <nav className={styles.courtActions} aria-label="Prosecution actions">
-          <button type="button" disabled={busy || dialoguePerformanceActive} onClick={() => void sendAction({ action: "press_statement", statementId: activeStatement.statementId })} data-tutorial-target="mystery-v2-press"><span>!</span>Press</button>
+          <button type="button" disabled={busy || dialoguePerformanceActive} onClick={() => { setPresentedCourtRecord(null); void sendAction({ action: "press_statement", statementId: activeStatement.statementId }); }} data-tutorial-target="mystery-v2-press"><span>!</span>Press</button>
           <button type="button" disabled={busy || dialoguePerformanceActive} onClick={() => setCommand("present")} data-tutorial-target="mystery-v2-present-record"><span>◇</span>Objection</button>
           <button type="button" disabled={busy || dialoguePerformanceActive} onClick={() => void sendAction({ action: "review_strategy", contextNodeId: state.activeDialogueNodeId })} data-tutorial-target="mystery-v2-think"><span>◈</span>Think</button>
         </nav>}
-        {!spectator && command === "present" ? <div className={styles.choiceTray}><header><h2>Object with evidence or sworn testimony</h2><button type="button" onClick={() => setCommand(null)}>Close</button></header>{renderRecordButtons((record) => { setCommand(null); void sendAction({ action: "object_statement", statementId: activeStatement.statementId, record }); })}</div> : null}
+        {!spectator && command === "present" ? <div className={styles.choiceTray}><header><h2>Object with evidence or sworn testimony</h2><button type="button" onClick={() => setCommand(null)}>Close</button></header>{renderRecordButtons((record) => { setCommand(null); setPresentedCourtRecord(record); void sendAction({ action: "object_statement", statementId: activeStatement.statementId, record }); })}</div> : null}
         {!spectator && state.pendingProsecutionChoice ? <div className={styles.prosecutionChoice} role="dialog" aria-modal="true" aria-labelledby="prosecution-choice-title"><p className={styles.eyebrow}>Your response</p><h2 id="prosecution-choice-title">{state.pendingProsecutionChoice.prompt}</h2>{state.pendingProsecutionChoice.options.map((option) => <button key={option.id} type="button" disabled={busy || dialoguePerformanceActive} onClick={() => void sendAction({ action: "choose_prosecution_response", choiceId: state.pendingProsecutionChoice!.id, optionId: option.id })}>{option.text}</button>)}</div> : null}
         {caseFileOpen ? <CaseFile state={state} objectUrls={sealedAssetObjectUrls} saveState={sealedAssetSaveState} onSaveAsset={saveSealedAsset} onClose={() => setCaseFileOpen(false)} /> : null}
         {error ? <p className={styles.errorBanner}>{error}</p> : null}
@@ -2626,8 +3032,20 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   return (
     <main className={styles.investigation} data-theme={props.theme} data-view={state.roomView} data-opening-map-reveal={openingMapReveal ? "true" : undefined} data-tutorial-target="mystery-v2-investigation" onClickCapture={handleInvestigationDialogueClickCapture}>
       <SessionAtmosphereLayer
+        sessionKey={`whodunnit-v2-mansion-ambience:${props.session.id}:${state.config.houseStyle.id}`}
+        backgroundUrl={mansionAmbienceAsset?.url ?? null}
+        active={props.audioEnabled && mansionAmbienceAsset !== null}
+        volume={props.audioVolume}
+        mix={mansionAmbienceMix}
+        lifecycleTransitionMs={WHODUNNIT_MANSION_AMBIENCE_FADE_MS}
+        mixTransitionMs={WHODUNNIT_MANSION_AMBIENCE_TRANSITION_MS}
+        backgroundRecordable={false}
+        ambientFoley={false}
+      />
+      <SessionAtmosphereLayer
         sessionKey={`whodunnit-v2-investigation:${props.session.id}`}
-        backgroundUrl={WHODUNNIT_INVESTIGATION_MUSIC_URL}
+        backgroundUrl={`/api/debates/${encodeURIComponent(props.session.id)}/mystery-mansion/theme`}
+        backgroundFallbackUrl={WHODUNNIT_INVESTIGATION_MUSIC_URL}
         active={props.audioEnabled}
         volume={props.audioVolume}
         mix={mysteryInvestigationMusicMix({
@@ -2643,7 +3061,14 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       {!roomIntroductionActive ? <header className={styles.investigationHeader}>
         <button type="button" onClick={props.onExit}>← Archive</button>
         <div><p className={styles.eyebrow}>{state.caseTitle}</p><strong>{spectatorTheory ? "Prosecutor Findings" : "Investigation"}</strong></div>
-        <button type="button" onClick={() => setCaseFileOpen(true)} data-tutorial-target="mystery-v2-case-file">Case File <span>{admittedRecord.length}</span></button>
+        <div className={styles.investigationHeaderActions}>
+          <div className={styles.roomArtStyleToggle} role="group" aria-label="Investigation room art" data-tutorial-target="mystery-v2-room-art-style">
+            <button type="button" aria-pressed={effectiveInvestigationArtStyle === "mosaic"} onClick={() => selectInvestigationArtStyle("mosaic")}>Mosaic</button>
+            <button type="button" disabled={!illustratedRoomArtAvailable} aria-pressed={effectiveInvestigationArtStyle === "illustrated"} title={illustratedRoomArtAvailable ? "Use the mansion's high-detail room plates and full avatars." : roomArtUpgradeStatus?.reason ?? "Finish the mansion art upgrade first."} onClick={() => selectInvestigationArtStyle("illustrated")}>Illustrated</button>
+          </div>
+          {roomArtUpgradeStatus && roomArtUpgradeStatus.status !== "ready" && roomArtUpgradeStatus.status !== "unavailable" ? <button type="button" className={styles.roomArtUpgradeButton} disabled={roomArtUpgradeRequesting || roomArtUpgradeStatus.status === "preparing"} title="Uses ONLINE high-detail image generation for every 1280×720 Mosaic-source room." onClick={() => void startRoomArtUpgrade()}>{roomArtUpgradeStatus.status === "preparing" || roomArtUpgradeRequesting ? "Upgrading art…" : roomArtUpgradeStatus.status === "failed" ? "Retry art upgrade · ONLINE" : "Upgrade art · ONLINE"}</button> : null}
+          <button type="button" onClick={() => setCaseFileOpen(true)} data-tutorial-target="mystery-v2-case-file">Case File <span>{admittedRecord.length}</span></button>
+        </div>
       </header> : null}
       {spectatorTheory ? (
         <section className={styles.partnerFindings} aria-labelledby="prosecutor-findings-title">
@@ -2818,6 +3243,15 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               <span>Try again shortly.</span>
             </div>
           ) : null}
+          {currentRoomImageUrl ? (
+            <img
+              className={styles.roomBackdropImage}
+              src={currentRoomImageUrl}
+              alt=""
+              aria-hidden="true"
+              draggable={false}
+            />
+          ) : null}
           <div className={styles.roomParallaxLayer}>
             <div className={styles.roomBackdrop} data-blurred={roomActorVisible ? "true" : undefined} />
             <DebateMysteryRoomCinematographyLayer
@@ -2830,11 +3264,11 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           {command === "examine" && !roomComplete ? <i className={styles.investigationLens} aria-hidden="true" data-visible={lensActive ? "true" : undefined} data-targeted={debateMysteryV2LensClickTarget(investigationLens) ? "true" : undefined} style={{ left: `${investigationLens.x}%`, top: `${investigationLens.y}%`, "--lens-proximity": investigationLens.proximity } as CSSProperties} /> : null}
           {roomIntroductionPhase !== "casekeeper" ? <div className={styles.roomShade} /> : null}
           {!roomIntroductionActive ? <div className={styles.roomTitle}><small>Floor {currentRoom.floor}</small><h1>{currentRoom.name}</h1>{currentRoomAssetUrl && currentRoom.sealedAsset && currentRoomAssetKey ? <button type="button" className={styles.saveSealedAssetButton} disabled={sealedAssetSaveState[currentRoomAssetKey] === "saving" || sealedAssetSaveState[currentRoomAssetKey] === "saved"} onClick={(event) => { event.stopPropagation(); void saveSealedAsset(currentRoom.sealedAsset!, currentRoom.id, `${currentRoom.name} · Whodunnit room`); }}>{sealedAssetSaveState[currentRoomAssetKey] === "saving" ? "Saving…" : sealedAssetSaveState[currentRoomAssetKey] === "saved" ? "Saved to Images" : sealedAssetSaveState[currentRoomAssetKey] === "failed" ? "Retry save" : "Save room image"}</button> : null}</div> : null}
-          {roomActorVisible && currentBot ? <div className={styles.roomActor} data-interrogation-phase={interrogationPhase ?? undefined} style={{ "--actor-color": currentBot.color ?? "#a98cff" } as CSSProperties}><div className={styles.roomActorDrift} style={mysteryRoomActorDriftStyle(`${props.session.id}:${currentBot.id}:suspect`)}>{props.renderMysteryBotAvatar(currentBot, "full", { demeanor: "suspect", talking: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId, speechTiming: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId ? speechTiming : null, blinkEnabled: true, facing: "left", speechInkVisible: roomSpeechInkVisible })}<strong>{currentBot.name}</strong>{roomSuspectStageActionText && roomActionPresentation ? <SignalVoiceActionText key={`suspect:${roomDisplayedDialogue?.nodeId ?? ""}:${roomDisplayedDialogue?.occurredAt ?? ""}`} {...roomActionPresentation} accent={currentBot.color} /> : null}</div></div> : null}
-          {roomProsecutorActive && prosecutorBot ? <aside className={`${styles.roomActor} ${styles.roomProsecutorActor}`} data-prosecutor-speaking="true" data-interrogation-phase={interrogationPhase ?? undefined} style={{ "--actor-color": prosecutorBot.color ?? "#72d7ff" } as CSSProperties}>
+          {roomActorVisible && currentBot ? <div className={styles.roomActor} data-art-style={effectiveInvestigationArtStyle} data-interrogation-phase={interrogationPhase ?? undefined} style={{ "--actor-color": currentBot.color ?? "#a98cff" } as CSSProperties}><div className={styles.roomActorDrift} style={mysteryRoomActorDriftStyle(`${props.session.id}:${currentBot.id}:suspect`)}>{props.renderMysteryBotAvatar(currentBot, investigationAvatarPresentation, { demeanor: "suspect", talking: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId, speechTiming: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId ? speechTiming : null, blinkEnabled: true, facing: "left", speechInkVisible: roomSpeechInkVisible })}<strong>{currentBot.name}</strong>{roomSuspectStageActionText && roomActionPresentation ? <SignalVoiceActionText key={`suspect:${roomDisplayedDialogue?.nodeId ?? ""}:${roomDisplayedDialogue?.occurredAt ?? ""}`} {...roomActionPresentation} accent={currentBot.color} /> : null}</div></div> : null}
+          {roomProsecutorActive && prosecutorBot ? <aside className={`${styles.roomActor} ${styles.roomProsecutorActor}`} data-art-style={effectiveInvestigationArtStyle} data-prosecutor-speaking="true" data-interrogation-phase={interrogationPhase ?? undefined} style={{ "--actor-color": prosecutorBot.color ?? "#72d7ff" } as CSSProperties}>
             <div className={styles.roomActorDrift} style={mysteryRoomActorDriftStyle(`${props.session.id}:${prosecutorBot.id}:prosecutor`)}>
               {roomProsecutorStageActionText && roomActionPresentation ? <SignalVoiceActionText key={`room-prosecutor:${roomDisplayedDialogue?.nodeId ?? ""}:${roomDisplayedDialogue?.occurredAt ?? ""}`} {...roomActionPresentation} accent={prosecutorBot.color} /> : null}
-              {props.renderMysteryBotAvatar(prosecutorBot, "full", { demeanor: "partner", talking: audioMouthActive && !heldDialogue, speechTiming: audioMouthActive && !heldDialogue ? speechTiming : null, blinkEnabled: true, facing: "right", speechInkVisible: roomSpeechInkVisible })}
+              {props.renderMysteryBotAvatar(prosecutorBot, investigationAvatarPresentation, { demeanor: "partner", talking: audioMouthActive && !heldDialogue, speechTiming: audioMouthActive && !heldDialogue ? speechTiming : null, blinkEnabled: true, facing: "right", speechInkVisible: roomSpeechInkVisible })}
               <strong>{prosecutorBot.name} · Prosecutor</strong>
             </div>
           </aside> : null}
@@ -2899,7 +3333,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                     <span className={styles.dialogueContinueHint} role="status">
                       {busy && roomIntroductionAwaitingContinue && roomCasekeeperNarrationVisible
                         ? "Bringing the occupant forward…"
-                        : "Click to continue"}
+                        : "Click to advance early"}
                     </span>
                   )
                 : null}
@@ -2992,7 +3426,7 @@ function CaseFile(props: {
         })}
       </section>
       <section><h3>Witnesses</h3>{props.state.suspects.map((suspect) => <article key={suspect.seatId}><span aria-hidden="true" style={{ color: suspect.color ?? undefined }}>●</span><div><strong>{suspect.name}</strong><small>{props.state.metSuspectSeatIds.includes(suspect.seatId) ? "Interviewed" : "Not yet interviewed"}</small></div></article>)}</section>
-      <small>{props.state.voicesEnabled ? "Complete local English audio pack ready" : "Playing as a validated text case"}</small>
+      <small>{props.state.voicesEnabled ? "Local English performance ready · spoken lines cache on demand" : "Playing as a validated text case"}</small>
     </aside>
   );
 }

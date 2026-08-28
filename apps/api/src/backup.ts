@@ -83,6 +83,7 @@ import {
   normalizeBotVoiceVolume,
   normalizeEnglishVoiceEngine,
   normalizeSpeechTypeVoiceMode,
+  normalizeWhodunnitTextVoiceMode,
   normalizeGraphicsQuality,
   normalizeCrtFocus,
   normalizePrismTypographyScale,
@@ -110,6 +111,7 @@ import {
   normalizeCoffeeSessionSettings,
   type EnglishVoiceEngine,
   type VoiceMode,
+  type WhodunnitTextVoiceMode,
   type AutoFallbackChainV1,
   type EphemeralChatProviderPreferences,
   type ImageProviderName,
@@ -212,6 +214,7 @@ export interface BackupUserSettings {
   experimentalAllModelEffortEnabled?: boolean;
   coffeeExperimentalTableAngleEnabled?: boolean;
   debateWhodunnitReuseSynthesizedExhibits?: boolean;
+  debateWhodunnitTextVoiceMode?: WhodunnitTextVoiceMode;
   psychicModeEnabled?: boolean;
   autoModeEnabled?: boolean;
   autoFallbackChain?: AutoFallbackChainV1 | null;
@@ -1900,6 +1903,7 @@ export function exportUserSnapshot(
          experimental_all_model_effort_enabled,
          coffee_experimental_table_angle_enabled,
          debate_whodunnit_reuse_synthesized_exhibits,
+         debate_whodunnit_text_voice_mode,
          psychic_mode_enabled,
          auto_switch_model,
          auto_fallback_chain,
@@ -1983,6 +1987,7 @@ export function exportUserSnapshot(
         experimental_all_model_effort_enabled: number;
         coffee_experimental_table_angle_enabled: number;
         debate_whodunnit_reuse_synthesized_exhibits: number;
+        debate_whodunnit_text_voice_mode: string | null;
         psychic_mode_enabled: number;
         auto_switch_model: number;
         auto_fallback_chain: string | null;
@@ -2087,6 +2092,9 @@ export function exportUserSnapshot(
           user.coffee_experimental_table_angle_enabled === 1,
         debateWhodunnitReuseSynthesizedExhibits:
           user.debate_whodunnit_reuse_synthesized_exhibits === 1,
+        debateWhodunnitTextVoiceMode: normalizeWhodunnitTextVoiceMode(
+          user.debate_whodunnit_text_voice_mode,
+        ),
         psychicModeEnabled: user.psychic_mode_enabled === 1,
         autoModeEnabled: user.auto_switch_model === 1,
         autoFallbackChain: parseStoredAutoFallbackChain(
@@ -3926,6 +3934,7 @@ function importUserSnapshotWithinTransaction(
         experimental_all_model_effort_enabled = ?,
         coffee_experimental_table_angle_enabled = ?,
         debate_whodunnit_reuse_synthesized_exhibits = ?,
+        debate_whodunnit_text_voice_mode = ?,
         psychic_mode_enabled = ?,
         auto_switch_model = ?,
         auto_fallback_chain = ?,
@@ -4026,6 +4035,9 @@ function importUserSnapshotWithinTransaction(
       settings.experimentalAllModelEffortEnabled === true ? 1 : 0,
       settings.coffeeExperimentalTableAngleEnabled === true ? 1 : 0,
       settings.debateWhodunnitReuseSynthesizedExhibits === true ? 1 : 0,
+      normalizeWhodunnitTextVoiceMode(
+        settings.debateWhodunnitTextVoiceMode,
+      ),
       settings.psychicModeEnabled === true ? 1 : 0,
       settings.autoModeEnabled === true && storedAutoFallbackChain ? 1 : 0,
       storedAutoFallbackChain,

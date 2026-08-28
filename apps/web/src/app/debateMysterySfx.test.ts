@@ -3,7 +3,7 @@ import { statSync } from "node:fs";
 import test from "node:test";
 
 import {
-  DEBATE_MYSTERY_TEXT_BOTTISH_VOLUME_RATIO,
+  DEBATE_MYSTERY_TEXT_VOICE_VOLUME_RATIO,
   DEBATE_MYSTERY_DESK_ITEM_PICKUP_VOLUME_RATIO,
   DEBATE_MYSTERY_EVIDENCE_CHIME,
   DEBATE_MYSTERY_SFX_COOLDOWN_MS,
@@ -11,52 +11,161 @@ import {
   debateMysteryDeskItemSfxPlan,
   debateMysterySfxCueForAction,
   debateMysterySfxVoices,
-  debateMysteryTextBottishDurationMs,
-  debateMysteryTextBottishShouldStart,
+  debateMysteryTextVoiceShouldStart,
+  debateMysteryTextVoiceShouldStop,
+  playDebateMysteryTextVoice,
   playDebateMysteryDeskItemSfx,
   playDebateMysterySfx,
 } from "./debateMysterySfx.ts";
 
-test("starts Bottish once for streaming text-only delivery and never for anonymous Babble", () => {
+test("starts the selected text voice once and never replaces anonymous Casekeeper Babble", () => {
   const narratorBeat = {
     audible: false,
     delivery: "text_only" as const,
     key: "observation:1",
+    mode: "bottish" as const,
     startedKey: null,
+    startedMode: null,
     streaming: true,
     visibleText: "The kn",
   };
-  assert.equal(debateMysteryTextBottishShouldStart(narratorBeat), true);
+  assert.equal(debateMysteryTextVoiceShouldStart(narratorBeat), true);
   assert.equal(
-    debateMysteryTextBottishShouldStart({ ...narratorBeat, visibleText: "   " }),
+    debateMysteryTextVoiceShouldStart({ ...narratorBeat, visibleText: "   " }),
     false,
     "whitespace-only text stays quiet",
   );
   assert.equal(
-    debateMysteryTextBottishShouldStart({ ...narratorBeat, startedKey: narratorBeat.key }),
+    debateMysteryTextVoiceShouldStart({
+      ...narratorBeat,
+      startedKey: narratorBeat.key,
+      startedMode: "bottish",
+    }),
     false,
     "one text presentation starts only once",
   );
   assert.equal(
-    debateMysteryTextBottishShouldStart({ ...narratorBeat, delivery: "anonymous_babble" }),
+    debateMysteryTextVoiceShouldStart({ ...narratorBeat, delivery: "anonymous_babble" }),
     false,
     "anonymous speakers own a prepared Babble carrier instead",
   );
   assert.equal(
-    debateMysteryTextBottishShouldStart({ ...narratorBeat, delivery: "spoken" }),
+    debateMysteryTextVoiceShouldStart({ ...narratorBeat, delivery: "spoken" }),
     false,
   );
   assert.equal(
-    debateMysteryTextBottishShouldStart({ ...narratorBeat, audible: true }),
+    debateMysteryTextVoiceShouldStart({ ...narratorBeat, audible: true }),
     false,
   );
   assert.equal(
-    debateMysteryTextBottishShouldStart({ ...narratorBeat, streaming: false }),
+    debateMysteryTextVoiceShouldStart({ ...narratorBeat, streaming: false }),
     false,
   );
-  assert.equal(DEBATE_MYSTERY_TEXT_BOTTISH_VOLUME_RATIO, 0.28);
-  assert.equal(debateMysteryTextBottishDurationMs("short"), 1_200);
-  assert.equal(debateMysteryTextBottishDurationMs("x".repeat(100)), 3_400);
+  assert.equal(
+    debateMysteryTextVoiceShouldStart({ ...narratorBeat, mode: "off" }),
+    false,
+  );
+  assert.equal(DEBATE_MYSTERY_TEXT_VOICE_VOLUME_RATIO, 0.28);
+});
+
+test("stops the active text voice on completion, replacement, or mode change without touching TTS", () => {
+  const activeTextBeat = {
+    audible: false,
+    delivery: "text_only" as const,
+    key: "observation:1",
+    mode: "bottish" as const,
+    startedKey: "observation:1",
+    startedMode: "bottish" as const,
+    streaming: true,
+  };
+  assert.equal(debateMysteryTextVoiceShouldStop(activeTextBeat), false);
+  assert.equal(
+    debateMysteryTextVoiceShouldStop({ ...activeTextBeat, streaming: false }),
+    true,
+    "the final visible character ends Bottish",
+  );
+  assert.equal(
+    debateMysteryTextVoiceShouldStop({ ...activeTextBeat, key: "observation:2" }),
+    true,
+    "replacement cancels the previous carrier",
+  );
+  assert.equal(
+    debateMysteryTextVoiceShouldStop({ ...activeTextBeat, key: null }),
+    true,
+    "navigation or a phase transition releases the carrier",
+  );
+  assert.equal(
+    debateMysteryTextVoiceShouldStop({
+      audible: true,
+      delivery: "spoken",
+      key: "statement:1",
+      mode: "babble",
+      startedKey: null,
+      startedMode: null,
+      streaming: true,
+    }),
+    false,
+    "spoken TTS never acquires text-Bottish ownership",
+  );
+  assert.equal(
+    debateMysteryTextVoiceShouldStop({ ...activeTextBeat, mode: "babble" }),
+    true,
+    "switching modes cancels the old carrier before starting the new one",
+  );
+});
+
+test("dispatches Babble, Bottish, and Off through one bounded presentation contract", async () => {
+  const played: Array<{
+    mode: "babble" | "bottish";
+    seed: string;
+    signal?: AbortSignal;
+    text: string;
+    volume: number;
+  }> = [];
+  const play = async (args: {
+    mode: "babble" | "bottish";
+    seed: string;
+    signal?: AbortSignal;
+    text: string;
+    volume: number;
+  }) => {
+    played.push(args);
+    return true;
+  };
+  for (const mode of ["babble", "bottish"] as const) {
+    assert.equal(await playDebateMysteryTextVoice({
+      enabled: true,
+      mode,
+      seed: "casekeeper",
+      text: "The corridor answers.",
+      volume: 0.5,
+      play,
+    }), true);
+  }
+  assert.equal(await playDebateMysteryTextVoice({
+    enabled: true,
+    mode: "off",
+    seed: "casekeeper",
+    text: "The corridor answers.",
+    volume: 0.5,
+    play,
+  }), false);
+  assert.deepEqual(played, [
+    {
+      mode: "babble",
+      seed: "casekeeper",
+      signal: undefined,
+      text: "The corridor answers.",
+      volume: 0.14,
+    },
+    {
+      mode: "bottish",
+      seed: "casekeeper",
+      signal: undefined,
+      text: "The corridor answers.",
+      volume: 0.14,
+    },
+  ]);
 });
 
 test("dismisses every completed dialogue presentation without treating its first mount as a close", () => {

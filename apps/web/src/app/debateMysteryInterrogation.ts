@@ -4,6 +4,61 @@ export const WHODUNNIT_INTERROGATION_BEAT_MS = {
   suspectEntrance: 420,
 } as const;
 
+export const WHODUNNIT_INVESTIGATION_DIALOGUE_GRACE_MS = {
+  spoken: 700,
+  textBase: 700,
+  textMin: 1_200,
+  textMax: 4_200,
+  textPerCharacter: 12,
+  reducedMotionExtra: 400,
+} as const;
+
+/**
+ * Spoken lines need only a short caption hold after their real audio ends.
+ * Text-only lines earn additional reading time from their actual visible
+ * length because the player has no voice cadence to carry comprehension.
+ */
+export function whodunnitInvestigationDialogueGraceMs(args: {
+  delivery: "spoken" | "text_only" | "anonymous_babble";
+  reducedMotion: boolean;
+  text: string;
+}): number {
+  const base = args.delivery === "spoken"
+    ? WHODUNNIT_INVESTIGATION_DIALOGUE_GRACE_MS.spoken
+    : Math.min(
+        WHODUNNIT_INVESTIGATION_DIALOGUE_GRACE_MS.textMax,
+        Math.max(
+          WHODUNNIT_INVESTIGATION_DIALOGUE_GRACE_MS.textMin,
+          WHODUNNIT_INVESTIGATION_DIALOGUE_GRACE_MS.textBase +
+            args.text.trim().length * WHODUNNIT_INVESTIGATION_DIALOGUE_GRACE_MS.textPerCharacter,
+        ),
+      );
+  return base + (
+    args.reducedMotion
+      ? WHODUNNIT_INVESTIGATION_DIALOGUE_GRACE_MS.reducedMotionExtra
+      : 0
+  );
+}
+
+/** Only presentation-complete, non-interactive Investigation dialogue closes itself. */
+export function whodunnitInvestigationDialogueShouldAutoAdvance(args: {
+  busy: boolean;
+  hasActiveAudio: boolean;
+  hasDialogue: boolean;
+  playPhase: string;
+  requiresPlayerInput: boolean;
+  roomView: string;
+  streaming: boolean;
+}): boolean {
+  return args.playPhase === "investigation" &&
+    args.roomView === "room" &&
+    args.hasDialogue &&
+    !args.busy &&
+    !args.hasActiveAudio &&
+    !args.requiresPlayerInput &&
+    !args.streaming;
+}
+
 export type WhodunnitInterrogationPhase =
   | "prosecutor_entrance"
   | "prosecutor_speaking"
@@ -178,6 +233,19 @@ export function whodunnitCourtPresentationVisible(args: {
   return args.playPhase === "trial" || (
     args.playPhase === "verdict" && args.hasQueuedDialogue
   );
+}
+
+/**
+ * The server seals the verdict in the same mutation that queues the final
+ * objection, revision, and ruling dialogue. Keep its screen-wide result
+ * callout off the still-playing Cross-Examination surface; it belongs to the
+ * verdict surface after those authored Court beats have settled.
+ */
+export function whodunnitCourtCalloutPresentationVisible(args: {
+  courtPresentationActive: boolean;
+  playPhase: string;
+}): boolean {
+  return args.playPhase !== "verdict" || !args.courtPresentationActive;
 }
 
 export function whodunnitInterrogationMayStartAudio(

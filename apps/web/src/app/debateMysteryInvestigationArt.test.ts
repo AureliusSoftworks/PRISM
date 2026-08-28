@@ -1,0 +1,102 @@
+import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
+import { describe, it } from "node:test";
+import {
+  DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE,
+  readWhodunnitInvestigationArtStyle,
+  whodunnitBundledRoomArtPath,
+  whodunnitBundledRoomArtPathForRoom,
+  whodunnitInvestigationAvatarPresentation,
+  whodunnitIllustratedRoomSubjectId,
+  whodunnitSealedRoomArtUrl,
+  whodunnitSavedRoomArtUrl,
+  writeWhodunnitInvestigationArtStyle,
+} from "./debateMysteryInvestigationArt.ts";
+
+describe("Whodunnit investigation art style", () => {
+  it("defaults invalid and unavailable preferences to Mosaic", () => {
+    assert.equal(DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE, "mosaic");
+    assert.equal(readWhodunnitInvestigationArtStyle(null), "mosaic");
+    assert.equal(readWhodunnitInvestigationArtStyle({ getItem: () => "unknown" }), "mosaic");
+    assert.equal(readWhodunnitInvestigationArtStyle({ getItem: () => "illustrated" }), "illustrated");
+  });
+
+  it("persists the player presentation choice without touching case state", () => {
+    const writes: Array<[string, string]> = [];
+    writeWhodunnitInvestigationArtStyle({ setItem: (key, value) => { writes.push([key, value]); } }, "illustrated");
+    assert.deepEqual(writes, [["prism.whodunnit.investigation-art-style.v1", "illustrated"]]);
+  });
+
+  it("resolves bundled, sealed, and avatar variants as one presentation contract", () => {
+    assert.equal(
+      whodunnitBundledRoomArtPath("/debate/mystery/rooms/foyer.webp", "mosaic"),
+      "/debate/mystery/rooms/foyer-mosaic.webp",
+    );
+    assert.equal(
+      whodunnitBundledRoomArtPath("/debate/mystery/rooms/foyer.webp", "illustrated"),
+      "/debate/mystery/rooms/foyer.webp",
+    );
+    assert.equal(
+      whodunnitBundledRoomArtPathForRoom(
+        { templateId: "guest-bedroom", bundledAssetPath: null },
+        "mosaic",
+      ),
+      "/debate/mystery/rooms/bedroom-mosaic.webp",
+      "legacy and imported Guest Bedrooms keep a bundled backdrop",
+    );
+    assert.equal(
+      whodunnitBundledRoomArtPathForRoom(
+        { templateId: "guest-bedroom", bundledAssetPath: "/custom/guest.webp" },
+        "illustrated",
+      ),
+      "/custom/guest.webp",
+      "explicit package art wins over the semantic template fallback",
+    );
+    assert.equal(
+      whodunnitBundledRoomArtPathForRoom(
+        { templateId: "unknown-room", bundledAssetPath: null },
+        "mosaic",
+      ),
+      null,
+    );
+    assert.equal(whodunnitInvestigationAvatarPresentation("mosaic"), "mini");
+    assert.equal(whodunnitInvestigationAvatarPresentation("illustrated"), "full");
+    assert.equal(whodunnitIllustratedRoomSubjectId("room-2"), "room-2:illustrated-v1");
+    assert.equal(
+      whodunnitSealedRoomArtUrl({ sessionId: "case / 1", subjectId: "room / 2", style: "mosaic" }),
+      "/api/debates/case%20%2F%201/mystery-assets/room/room%20%2F%202/file?style=mosaic",
+    );
+    assert.equal(
+      whodunnitSavedRoomArtUrl("jungle / room", "mosaic"),
+      "/api/images/jungle%20%2F%20room/file?style=mosaic",
+    );
+  });
+
+  it("wires the presentation-only toggle and leaves Court on its authored cameras", () => {
+    const experience = readFileSync(
+      new URL("./DebateMysteryV2Experience.tsx", import.meta.url),
+      "utf8",
+    );
+    const css = readFileSync(new URL("./debateMysteryV2.module.css", import.meta.url), "utf8");
+    assert.match(experience, /data-tutorial-target="mystery-v2-room-art-style"/u);
+    assert.match(experience, /whodunnitBundledRoomArtPathForRoom/u);
+    assert.match(experience, /const currentRoomImageUrl = currentRoomAssetUrl/u);
+    assert.match(experience, /className=\{styles\.roomBackdropImage\}/u);
+    assert.match(experience, /src=\{currentRoomImageUrl\}/u);
+    assert.match(experience, /roomBackdropImage[\s\S]*roomParallaxLayer/u);
+    assert.match(css, /\.roomBackdropImage[\s\S]*z-index: 1;[\s\S]*width: 100vw;[\s\S]*height: 100dvh;/u);
+    assert.match(experience, /Upgrade art · ONLINE/u);
+    assert.match(experience, /renderMysteryBotAvatar\(currentBot, investigationAvatarPresentation/u);
+    assert.match(experience, /renderMysteryBotAvatar\(courtPresentedWitnessBot, "full"/u);
+    assert.match(css, /roomActor\[data-art-style="mosaic"\][\s\S]*--chat-mini-bot-render-size: min\(18rem, 42vw, 42vh\)/u);
+  });
+
+  it("ships one Mosaic sibling for every bundled investigation room", () => {
+    const names = readdirSync(new URL("../../public/debate/mystery/rooms", import.meta.url));
+    const originals = names.filter((name) => name.endsWith(".webp") && !name.endsWith("-mosaic.webp"));
+    assert.equal(originals.length, 16);
+    for (const original of originals) {
+      assert.ok(names.includes(original.replace(/\.webp$/u, "-mosaic.webp")), original);
+    }
+  });
+});

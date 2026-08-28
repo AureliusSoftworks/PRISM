@@ -38,6 +38,32 @@
     "resources": {
       "../../../runtime": "runtime"
     },
+    "fileAssociations": [
+      {
+        "ext": ["mansion"],
+        "name": "PRISM Mansion",
+        "description": "Portable PRISM Whodunnit mansion",
+        "role": "Viewer",
+        "mimeType": "application/vnd.prism.mansion",
+        "rank": "Owner",
+        "exportedType": {
+          "identifier": "com.localai.prism.mansion",
+          "conformsTo": ["public.data"]
+        }
+      },
+      {
+        "ext": ["whodunnit"],
+        "name": "PRISM Whodunnit",
+        "description": "Complete portable PRISM Whodunnit",
+        "role": "Viewer",
+        "mimeType": "application/vnd.prism.whodunnit",
+        "rank": "Owner",
+        "exportedType": {
+          "identifier": "com.localai.prism.whodunnit",
+          "conformsTo": ["public.data"]
+        }
+      }
+    ],
     "macOS": {
       "dmg": {
         "windowSize": {

@@ -664,6 +664,10 @@ describe("createDatabase bot export hash migration", () => {
         (column) => column.name === "debate_whodunnit_reuse_synthesized_exhibits"
       );
       assert.equal(debateWhodunnitReuseSynthesizedExhibitsColumn?.dflt_value, "0");
+      const debateWhodunnitTextVoiceModeColumn = userColumns.find(
+        (column) => column.name === "debate_whodunnit_text_voice_mode"
+      );
+      assert.equal(debateWhodunnitTextVoiceModeColumn?.dflt_value, "'bottish'");
       const psychicModeColumn = userColumns.find(
         (column) => column.name === "psychic_mode_enabled"
       );

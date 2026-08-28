@@ -351,6 +351,42 @@ test("seeded mansion layouts are stable for a seed and vary across seeds", () =>
   assert.ok(signatures.size > 20);
 });
 
+test("the five-room two-storey topology makes the foyer staircase functional", () => {
+  assert.equal(
+    resolveDebateMysteryConfig(createConfig("compact", "casual", "legacy-compact"))
+      .floors,
+    1,
+    "legacy V1 compact recipes retain their frozen one-floor contract",
+  );
+  const config = resolveDebateMysteryConfig({
+    ...createConfig("compact", "casual", "v2-compact-topology"),
+    preset: "custom",
+    floors: 2,
+    totalRooms: 5,
+  });
+  const bible = compileDeterministicDebateMystery({
+    config,
+    suspects: suspects(4),
+  });
+  assert.deepEqual(
+    [...new Set(bible.rooms.map((room) => room.floor))],
+    [1, 2],
+  );
+  const foyer = bible.rooms.find((room) => room.templateId === "foyer")!;
+  const foyerTemplate = DEBATE_MYSTERY_ROOM_TEMPLATES.find(
+    (room) => room.id === "foyer",
+  )!;
+  assert.ok(
+    foyerTemplate.regions.some((region) => /stair|upper landing/iu.test(region.label)),
+    "the Foyer visibly establishes the staircase and upstairs space",
+  );
+  assert.ok(
+    foyer.neighborIds.some((neighborId) =>
+      bible.rooms.find((room) => room.id === neighborId)?.floor === 2),
+    "the visible Foyer stairs enter the generated upstairs topology",
+  );
+});
+
 test("room types keep their stable normalized footprints while instances stay in bounds", () => {
   assert.deepEqual(Object.fromEntries(DEBATE_MYSTERY_ROOM_FOOTPRINTS.map((entry) => [entry.roomTypeId, [entry.width, entry.height]])), {
     bathroom: [2, 2], foyer: [3, 2], study: [3, 2], "dining-room": [4, 2], kitchen: [4, 2], conservatory: [4, 2],

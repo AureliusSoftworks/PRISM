@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  DEBATE_MYSTERY_V2_PRESETS,
   debateMysteryTalkTopicMirrorsRecordV2,
   debateMysteryClassifyVerdictV2,
   debateMysteryCredibilityMaximumV2,
@@ -16,6 +17,7 @@ import {
   normalizeDebateMysteryV2ForgeProgressMessage,
   validateDebateMysteryAudioManifestV1,
   validateDebateMysteryDialogueGraphV2,
+  validateDebateMysteryStageCuePerformanceV1,
   resolveDebateMysteryConfigV2,
   splitDebateMysteryStageActionTextV2,
   type DebateMysteryAudioManifestV1,
@@ -24,6 +26,7 @@ import {
   type DebateMysteryRecordReferenceV2,
   type DebateMysteryRoomV2,
   type DebateMysterySpokenLineV2,
+  type DebateMysteryStageCueV1,
   type DebateMysteryWitnessChapterV2,
 } from "./debateMysteryV2.ts";
 
@@ -601,6 +604,82 @@ test("local audio validation rejects missing and unreachable clips", () => {
   assert.ok(result.errors.some((error) => error.includes("not in the dialogue graph")));
 });
 
+test("lazy audio manifests remain valid without unspoken branch clips", () => {
+  const graph = validGraph();
+  const manifest: DebateMysteryAudioManifestV1 = {
+    version: 1,
+    preparationMode: "lazy-on-demand-v1",
+    caseId: graph.caseId,
+    caseHash: "case-hash",
+    scriptHash: "script-hash",
+    dialogueGraphHash: "graph-hash",
+    engine: "prism-instant-local",
+    model: "kokoro-82m-q8",
+    modelVersion: "1",
+    entries: [],
+    complete: true,
+    completedAt: "now",
+    verifiedAt: "now",
+  };
+  assert.deepEqual(validateDebateMysteryAudioManifestV1({
+    graph,
+    manifest,
+    reachableSpokenLineIds: ["line-press-seat-1"],
+  }), { valid: true, errors: [] });
+});
+
+test("stage-cue performances require grounded beats and reject sealed disclosures", () => {
+  const cue: DebateMysteryStageCueV1 = {
+    version: 1,
+    id: "cue-room-1",
+    objective: "Invite an investigation without adding a clue.",
+    emotionalState: "Guarded",
+    knownFactIds: ["room", "speaker"],
+    allowedFacts: [
+      {
+        id: "room",
+        statement: "The room is the Library.",
+        mentionFragments: ["Library"],
+        required: true,
+      },
+      {
+        id: "speaker",
+        statement: "The speaker is Rowan.",
+        mentionFragments: ["Rowan"],
+        required: true,
+      },
+    ],
+    requiredBeats: [{
+      id: "invite",
+      instruction: "Invite a careful look.",
+      acceptedTextFragments: ["look", "search"],
+    }],
+    forbiddenDisclosures: ["i poisoned"],
+    contradictionTrigger: null,
+    exitCondition: "Return control after one line.",
+    deterministicFallbackText: "I am Rowan. Look carefully around the Library.",
+    maxCharacters: 180,
+  };
+  assert.equal(validateDebateMysteryStageCuePerformanceV1({
+    cue,
+    text: "I am Rowan. Look carefully around the Library.",
+  }).valid, true);
+  assert.match(
+    validateDebateMysteryStageCuePerformanceV1({
+      cue,
+      text: "I am Rowan. I poisoned them. Look around the Library.",
+    }).errors.join(" "),
+    /forbidden disclosure/iu,
+  );
+  assert.match(
+    validateDebateMysteryStageCuePerformanceV1({
+      cue,
+      text: "Look carefully around the room.",
+    }).errors.join(" "),
+    /required fact/iu,
+  );
+});
+
 test("difficulty, eyewitness, Premium, and verdict contracts are deterministic", () => {
   assert.equal(debateMysteryCredibilityMaximumV2("casual"), 5);
   assert.equal(debateMysteryCredibilityMaximumV2("classic"), 4);
@@ -611,6 +690,36 @@ test("difficulty, eyewitness, Premium, and verdict contracts are deterministic",
   assert.equal(debateMysteryPremiumAvailableV2(), false);
   assert.equal(debateMysteryClassifyVerdictV2({ legalResult: "guilty", accusedIsCulprit: false, proofEstablished: true, proofSafe: true }), "wrongful_conviction");
   assert.equal(debateMysteryClassifyVerdictV2({ legalResult: "not_guilty", accusedIsCulprit: true, proofEstablished: true, proofSafe: true }), "acquittal_despite_proof");
+});
+
+test("new V2 mansions keep a two-floor minimum while compact stays easiest", () => {
+  assert.deepEqual(DEBATE_MYSTERY_V2_PRESETS, [
+    { id: "compact", floors: 2, rooms: 5, suspects: 4 },
+    { id: "standard", floors: 2, rooms: 10, suspects: 6 },
+    { id: "grand", floors: 3, rooms: 15, suspects: 8 },
+  ]);
+  const base = {
+    version: 2 as const,
+    preset: "compact" as const,
+    difficulty: "casual" as const,
+    artMode: "bundled" as const,
+    trialType: "bench" as const,
+    inspiration: "",
+    nonce: "two-storey-compact",
+    suspectBotIds: ["suspect-1", "suspect-2", "suspect-3", "suspect-4"],
+    prosecutorBotId: "prosecutor",
+    rivalDefenseBotId: "defense",
+    jurorBotIds: [],
+  };
+  const compact = resolveDebateMysteryConfigV2(base);
+  assert.equal(compact.floors, 2);
+  assert.equal(compact.totalRooms, 5);
+  assert.equal(compact.suspectBotIds.length, 4);
+  assert.equal(resolveDebateMysteryConfigV2({
+    ...base,
+    preset: "custom",
+    floors: 1,
+  }).floors, 2);
 });
 
 test("Theme, asset synthesis, and reusable mansion eligibility freeze deterministically", () => {
@@ -634,7 +743,8 @@ test("Theme, asset synthesis, and reusable mansion eligibility freeze determinis
   assert.deepEqual(resolved.assetSynthesis, {
     evidence: true,
     rooms: true,
-    music: false,
+    music: true,
+    ambience: false,
   });
   assert.equal(resolved.investigationMode, "full");
   const courtOnly = resolveDebateMysteryConfigV2({
@@ -643,7 +753,12 @@ test("Theme, asset synthesis, and reusable mansion eligibility freeze determinis
     assetSynthesis: { evidence: true, rooms: true, music: true as never },
   });
   assert.equal(courtOnly.investigationMode, "court_only");
-  assert.deepEqual(courtOnly.assetSynthesis, { evidence: true, rooms: false, music: false });
+  assert.deepEqual(courtOnly.assetSynthesis, {
+    evidence: true,
+    rooms: false,
+    music: false,
+    ambience: false,
+  });
   assert.equal(resolved.mansionBundleId, "mansion-1");
   assert.equal(
     resolved.houseStyle.id,

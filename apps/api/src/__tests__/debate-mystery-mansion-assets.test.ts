@@ -20,7 +20,8 @@ function testDb(): DatabaseSync {
       sha256 TEXT,
       byte_size INTEGER,
       provider TEXT,
-      model TEXT
+      model TEXT,
+      review_json TEXT NOT NULL DEFAULT '{}'
     );
     CREATE TABLE debate_mystery_mansion_assets (
       id TEXT PRIMARY KEY,
@@ -31,6 +32,9 @@ function testDb(): DatabaseSync {
       sha256 TEXT NOT NULL,
       byte_size INTEGER NOT NULL,
       mime_type TEXT NOT NULL,
+      width INTEGER,
+      height INTEGER,
+      duration_ms INTEGER,
       provider TEXT,
       model TEXT,
       created_at TEXT NOT NULL,
@@ -62,8 +66,8 @@ function addVaultAsset(
   db.prepare(
     `INSERT INTO debate_mystery_asset_vault
        (user_id, session_id, subject_id, kind, status, mime_type,
-        ciphertext, cipher_iv, cipher_tag, sha256, byte_size, provider, model)
-     VALUES (?, ?, ?, ?, 'ready', 'image/webp', ?, ?, ?, ?, ?, 'test', 'test')`,
+        ciphertext, cipher_iv, cipher_tag, sha256, byte_size, provider, model, review_json)
+     VALUES (?, ?, ?, ?, 'ready', 'image/webp', ?, ?, ?, ?, ?, 'test', 'test', '{}')`,
   ).run(
     userId,
     sessionId,

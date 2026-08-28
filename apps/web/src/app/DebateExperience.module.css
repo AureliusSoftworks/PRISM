@@ -7867,10 +7867,43 @@
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
 }
 
+.alignmentForum[data-whodunnit-court-preview] > .forumCamera {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.alignmentWhodunnitCourtPreview {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  background: #05060b;
+}
+
+.alignmentForum > .alignmentWhodunnitCourtPreview {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview]
+  :is(
+    .alignmentGavelTuner,
+    .alignmentEvidenceTuner,
+    .alignmentLightingTuner,
+    .alignmentVoiceMixer,
+    .alignmentModeratorScaleTuner,
+    .alignmentTuner
+  ) {
+  display: none;
+}
+
 .alignmentGavelTuner,
 .alignmentEvidenceTuner,
 .alignmentLightingTuner,
-.alignmentVoiceMixer {
+.alignmentVoiceMixer,
+.alignmentWhodunnitTuner {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -7880,6 +7913,239 @@
   padding: 9px 11px;
   background: color-mix(in srgb, var(--alignment-panel) 84%, transparent);
   box-shadow: inset 3px 0 color-mix(in srgb, #a995ff 44%, transparent);
+}
+
+.alignmentWhodunnitTuner {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--alignment-border);
+  border-radius: 14px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--alignment-panel) 84%, transparent);
+  box-shadow: inset 3px 0 color-mix(in srgb, #a995ff 44%, transparent);
+}
+
+.alignmentWhodunnitTuner > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.alignmentWhodunnitTuner > header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.alignmentWhodunnitTuner > header small {
+  color: var(--alignment-muted);
+}
+
+.alignmentWhodunnitRows {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.alignmentWhodunnitItem {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--alignment-border);
+  border-radius: 11px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--alignment-panel-raised) 72%, transparent);
+}
+
+.alignmentWhodunnitItem > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.alignmentWhodunnitItem label {
+  display: grid;
+  gap: 5px;
+  color: var(--alignment-muted);
+  font-size: 10px;
+}
+
+.alignmentWhodunnitItem label > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.alignmentWhodunnitItem output {
+  color: var(--alignment-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Court and Jury alignment are stage-first workspaces: the stage never leaves
+   the viewport while exact controls live in fixed rails on either side. */
+.alignmentModalBody:has(.alignmentViewportColumn[data-whodunnit-preview]) {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  padding-bottom: 14px;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview] {
+  display: grid;
+  width: min(100%, 1760px);
+  height: 100%;
+  min-height: 0;
+  grid-template-columns:
+    clamp(190px, 18vw, 276px)
+    minmax(0, 1fr)
+    clamp(190px, 18vw, 276px);
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 10px 14px;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview]
+  > .alignmentPreviewThemeScope {
+  height: fit-content;
+  min-width: 0;
+  grid-column: 2;
+  grid-row: 1 / -1;
+  align-self: center;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview]
+  > .alignmentWhodunnitTuner,
+.alignmentViewportColumn[data-whodunnit-preview]
+  > .alignmentWhodunnitTuner
+  > .alignmentWhodunnitRows {
+  display: contents;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview]
+  > .alignmentWhodunnitTuner
+  > header {
+  display: none;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview]
+  .alignmentWhodunnitItem {
+  min-height: 0;
+  align-self: center;
+  align-content: center;
+  gap: 5px;
+  padding: 8px 9px;
+  box-shadow: inset 3px 0 color-mix(in srgb, #a995ff 44%, transparent);
+}
+
+.alignmentViewportColumn[data-whodunnit-preview]
+  .alignmentWhodunnitItem
+  > header
+  button {
+  padding: 4px 8px;
+  font-size: 9px;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview]
+  .alignmentWhodunnitItem
+  label {
+  gap: 2px;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview]
+  .alignmentWhodunnitItem:nth-child(-n + 4) {
+  grid-column: 1;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview]
+  .alignmentWhodunnitItem:nth-child(n + 5) {
+  grid-column: 3;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview="jury"]
+  .alignmentWhodunnitItem:nth-child(1),
+.alignmentViewportColumn[data-whodunnit-preview="witness"]
+  .alignmentWhodunnitItem:nth-child(1) {
+  grid-row: 1;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview="jury"]
+  .alignmentWhodunnitItem:nth-child(2),
+.alignmentViewportColumn[data-whodunnit-preview="witness"]
+  .alignmentWhodunnitItem:nth-child(2) {
+  grid-row: 2;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview="jury"]
+  .alignmentWhodunnitItem:nth-child(3),
+.alignmentViewportColumn[data-whodunnit-preview="witness"]
+  .alignmentWhodunnitItem:nth-child(3) {
+  grid-row: 1;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview="jury"]
+  .alignmentWhodunnitItem:nth-child(4),
+.alignmentViewportColumn[data-whodunnit-preview="witness"]
+  .alignmentWhodunnitItem:nth-child(4) {
+  grid-row: 2;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview="jury"]
+  .alignmentWhodunnitItem:nth-child(5),
+.alignmentViewportColumn[data-whodunnit-preview="witness"]
+  .alignmentWhodunnitItem:nth-child(5) {
+  grid-row: 3;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview="jury"]
+  .alignmentWhodunnitItem:nth-child(3) {
+  grid-row: 3;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview="jury"]
+  .alignmentWhodunnitItem:nth-child(4) {
+  grid-row: 4;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview="jury"]
+  .alignmentWhodunnitItem:nth-child(5) {
+  grid-row: 1;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview="witness"]
+  .alignmentWhodunnitItem:nth-child(-n + 2) {
+  grid-column: 1;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview="witness"]
+  .alignmentWhodunnitItem:nth-child(n + 3) {
+  grid-column: 3;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview="jury"]
+  .alignmentWhodunnitItem:nth-child(6) {
+  grid-row: 2;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview="jury"]
+  .alignmentWhodunnitItem:nth-child(7) {
+  grid-row: 3;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview="wide"] {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.alignmentViewportColumn[data-whodunnit-preview="wide"]
+  .alignmentWhodunnitItem:nth-child(1) {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.alignmentViewportColumn[data-whodunnit-preview="wide"]
+  .alignmentWhodunnitItem:nth-child(2) {
+  grid-column: 3;
+  grid-row: 1;
 }
 
 .alignmentVoiceMixer {
@@ -9237,11 +9503,13 @@
 
 @keyframes jury-silent-deliberation {
   from {
-    transform: translate(-50%, -51%) rotate(-0.35deg);
+    transform: translate(-50%, -51%) rotate(-0.35deg)
+      scale(var(--debate-jury-member-alignment-scale, 1));
   }
 
   to {
-    transform: translate(-50%, -53%) rotate(0.35deg);
+    transform: translate(-50%, -53%) rotate(0.35deg)
+      scale(var(--debate-jury-member-alignment-scale, 1));
   }
 }
 
@@ -9290,7 +9558,8 @@
   position: absolute;
   width: clamp(210px, 19.5vw, 306px);
   height: clamp(280px, 26vw, 408px);
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, -50%)
+    scale(var(--debate-jury-member-alignment-scale, 1));
   color: var(--jury-seat-color);
   filter: saturate(0.82) brightness(0.86);
   transition:
@@ -9307,7 +9576,8 @@
     drop-shadow(
       0 0 18px color-mix(in srgb, var(--jury-seat-color) 55%, transparent)
     );
-  transform: translate(-50%, -52%) scale(1.035);
+  transform: translate(-50%, -52%) scale(1.035)
+    scale(var(--debate-jury-member-alignment-scale, 1));
 }
 
 .juryChamberSeat[data-thinking="true"] {
@@ -9320,21 +9590,24 @@
 .juryChamberSeat:not(
     [data-speaking="true"]
   )[data-listening-reaction="attentive"] {
-  transform: translate(-50%, -51%);
+  transform: translate(-50%, -51%)
+    scale(var(--debate-jury-member-alignment-scale, 1));
   filter: saturate(0.9) brightness(0.94);
 }
 
 .juryChamberSeat:not(
     [data-speaking="true"]
   )[data-listening-reaction="question"] {
-  transform: translate(-50%, -52%) rotate(-0.7deg);
+  transform: translate(-50%, -52%) rotate(-0.7deg)
+    scale(var(--debate-jury-member-alignment-scale, 1));
   filter: saturate(1) brightness(1);
 }
 
 .juryChamberSeat:not(
     [data-speaking="true"]
   )[data-listening-reaction="divided"] {
-  transform: translate(-48%, -50%) rotate(0.55deg);
+  transform: translate(-48%, -50%) rotate(0.55deg)
+    scale(var(--debate-jury-member-alignment-scale, 1));
   filter: saturate(0.96) brightness(0.95);
 }
 
@@ -9342,7 +9615,8 @@
     [data-listening-reaction="evidence"],
     [data-listening-reaction="concession"]
   ) {
-  transform: translate(-50%, -52%) scale(1.018);
+  transform: translate(-50%, -52%) scale(1.018)
+    scale(var(--debate-jury-member-alignment-scale, 1));
   filter: saturate(1.04) brightness(1.02)
     drop-shadow(
       0 0 12px color-mix(in srgb, var(--jury-seat-color) 28%, transparent)
@@ -9385,30 +9659,40 @@
 }
 
 .juryChamberSeat[data-seat="0"] {
+  translate: var(--debate-jury-member-0-offset-x, 0%) var(--debate-jury-member-0-offset-y, 0%);
+  --debate-jury-member-alignment-scale: var(--debate-jury-member-0-scale, 1);
   left: 27%;
   top: 53%;
   width: clamp(204px, 18.9vw, 294px);
   height: clamp(272px, 25.2vw, 392px);
 }
 .juryChamberSeat[data-seat="1"] {
+  translate: var(--debate-jury-member-1-offset-x, 0%) var(--debate-jury-member-1-offset-y, 0%);
+  --debate-jury-member-alignment-scale: var(--debate-jury-member-1-scale, 1);
   left: 73%;
   top: 53%;
   width: clamp(204px, 18.9vw, 294px);
   height: clamp(272px, 25.2vw, 392px);
 }
 .juryChamberSeat[data-seat="2"] {
+  translate: var(--debate-jury-member-2-offset-x, 0%) var(--debate-jury-member-2-offset-y, 0%);
+  --debate-jury-member-alignment-scale: var(--debate-jury-member-2-scale, 1);
   left: 38%;
   top: 69%;
   width: clamp(204px, 18.9vw, 294px);
   height: clamp(272px, 25.2vw, 392px);
 }
 .juryChamberSeat[data-seat="3"] {
+  translate: var(--debate-jury-member-3-offset-x, 0%) var(--debate-jury-member-3-offset-y, 0%);
+  --debate-jury-member-alignment-scale: var(--debate-jury-member-3-scale, 1);
   left: 62%;
   top: 69%;
   width: clamp(204px, 18.9vw, 294px);
   height: clamp(272px, 25.2vw, 392px);
 }
 .juryChamberSeat[data-seat="4"] {
+  translate: var(--debate-jury-member-4-offset-x, 0%) var(--debate-jury-member-4-offset-y, 0%);
+  --debate-jury-member-alignment-scale: var(--debate-jury-member-4-scale, 1);
   left: 87%;
   top: 65%;
 }
@@ -9563,7 +9847,8 @@
   width: min(72%, 880px);
   max-width: none;
   height: auto;
-  transform: translateX(-50%);
+  transform: translate(calc(-50% + var(--debate-jury-evidence-table-offset-x, 0%)), var(--debate-jury-evidence-table-offset-y, 0%)) scale(var(--debate-jury-evidence-table-scale, 1));
+  transform-origin: center bottom;
   filter: saturate(1.08) contrast(1.1) brightness(0.96)
     drop-shadow(0 30px 48px rgba(0, 0, 0, 0.6));
   pointer-events: none;
@@ -9790,7 +10075,8 @@
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 12px;
-  transform: translateX(-50%);
+  transform: translate(calc(-50% + var(--debate-jury-votes-offset-x, 0%)), var(--debate-jury-votes-offset-y, 0%)) scale(var(--debate-jury-votes-scale, 1));
+  transform-origin: center top;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 12px;
   padding: 7px 10px;

@@ -69,6 +69,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     experimentalAllModelEffortEnabled: 0,
     coffeeExperimentalTableAngleEnabled: 0,
     debateWhodunnitReuseSynthesizedExhibits: 0,
+    debateWhodunnitTextVoiceMode: "bottish",
     psychicModeEnabled: 0,
     autoSwitchModel: 0,
     autoFallbackChain: null,
@@ -769,6 +770,54 @@ describe("resolveNextSettings — debateWhodunnitReuseSynthesizedExhibits", () =
         current,
       ).debateWhodunnitReuseSynthesizedExhibits,
       1,
+    );
+  });
+});
+
+describe("resolveNextSettings — debateWhodunnitTextVoiceMode", () => {
+  it("persists Off, Babble, and Bottish while defaulting legacy values to Bottish", () => {
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitTextVoiceMode: "off" },
+        baseline(),
+      ).debateWhodunnitTextVoiceMode,
+      "off",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitTextVoiceMode: "babble" },
+        baseline(),
+      ).debateWhodunnitTextVoiceMode,
+      "babble",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitTextVoiceMode: "bottish" },
+        baseline({ debateWhodunnitTextVoiceMode: "babble" }),
+      ).debateWhodunnitTextVoiceMode,
+      "bottish",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitTextVoiceMode: "english" },
+        baseline({ debateWhodunnitTextVoiceMode: null }),
+      ).debateWhodunnitTextVoiceMode,
+      "bottish",
+    );
+  });
+
+  it("preserves a valid saved value when the patch omits or rejects the field", () => {
+    const current = baseline({ debateWhodunnitTextVoiceMode: "babble" });
+    assert.equal(
+      resolveNextSettings({}, current).debateWhodunnitTextVoiceMode,
+      "babble",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitTextVoiceMode: true },
+        current,
+      ).debateWhodunnitTextVoiceMode,
+      "babble",
     );
   });
 });

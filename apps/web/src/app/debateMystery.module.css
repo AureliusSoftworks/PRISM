@@ -259,6 +259,85 @@
 .savedMansionPicker small { color: var(--mystery-muted); line-height: 1.45; }
 .savedMansionPicker { margin: 0.8rem 0 1rem; }
 
+.mansionPackageWorkbench,
+.savedMansionManager {
+  margin: 0.8rem 0 1rem;
+  border: 1px solid var(--mystery-line);
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--mystery-panel-strong) 82%, transparent);
+}
+
+.mansionPackageDropzone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem;
+  border: 1px dashed color-mix(in srgb, var(--mystery-violet) 48%, transparent);
+  border-radius: 0.78rem;
+}
+
+.mansionPackageDropzone div,
+.mansionPackagePreviewCopy { display: grid; gap: 0.28rem; }
+.mansionPackageDropzone span,
+.mansionPackagePreview p,
+.mansionPackagePreview small,
+.savedMansionManager label { color: var(--mystery-muted); }
+
+.mansionPackageDropzone button,
+.mansionPackagePreview button,
+.savedMansionActions button {
+  min-height: 2.45rem;
+  padding: 0.58rem 0.82rem;
+  color: var(--mystery-text);
+  border: 1px solid var(--mystery-line);
+  border-radius: 0.64rem;
+  background: color-mix(in srgb, var(--mystery-violet) 12%, var(--mystery-panel-strong));
+  cursor: pointer;
+}
+
+.mansionPackageDropzone button:disabled,
+.mansionPackagePreview button:disabled,
+.savedMansionActions button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.mansionPackagePreview {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.55fr) minmax(0, 1.45fr);
+  gap: 1rem;
+  padding: 0.9rem;
+  border-top: 1px solid var(--mystery-line);
+}
+
+.mansionPackagePreview[data-locked="true"] { grid-template-columns: minmax(0, 1fr) minmax(180px, 0.7fr) auto; align-items: end; }
+.mansionPackagePreview img,
+.mansionPackagePreviewFallback { width: 100%; aspect-ratio: 3 / 2; border-radius: 0.68rem; object-fit: cover; background: rgba(128, 118, 174, 0.1); }
+.mansionPackagePreviewFallback { display: grid; place-items: center; font-size: 2rem; color: var(--mystery-violet); }
+.mansionPackagePreview h3,
+.mansionPackagePreview p { margin: 0; }
+.mansionPackageFacts { display: flex; flex-wrap: wrap; gap: 0.38rem; margin: 0.3rem 0; }
+.mansionPackageFacts span { padding: 0.24rem 0.48rem; border: 1px solid var(--mystery-line); border-radius: 99rem; color: var(--mystery-muted); font-size: 0.7rem; }
+.mansionPackageFinePrint { font-size: 0.72rem; line-height: 1.45; }
+.mansionPackageWarning { padding: 0.5rem 0.6rem; border-left: 2px solid #d7a34b; background: rgba(215, 163, 75, 0.08); }
+.mansionPackagePreview label,
+.savedMansionManager label { display: grid; gap: 0.38rem; font-size: 0.76rem; }
+.mansionPackagePreview input,
+.savedMansionManager input { width: 100%; box-sizing: border-box; padding: 0.62rem 0.7rem; color: var(--mystery-text); border: 1px solid var(--mystery-line); border-radius: 0.62rem; background: var(--mystery-panel-strong); }
+
+.savedMansionManager { padding: 0.8rem 0.9rem; }
+.savedMansionManager summary { cursor: pointer; font-weight: 700; }
+.savedMansionManager[open] summary { margin-bottom: 0.75rem; }
+.savedMansionMap { display: flex; flex-wrap: wrap; gap: 0.42rem; margin-bottom: 0.75rem; }
+.savedMansionMap span { padding: 0.32rem 0.48rem; border-radius: 0.5rem; background: rgba(128, 118, 174, 0.09); color: var(--mystery-muted); font-size: 0.72rem; }
+.savedMansionActions { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 0.7rem; }
+.savedMansionActions .savedMansionRemove { border-color: rgba(224, 105, 118, 0.38); color: #e8a3aa; }
+
+@media (max-width: 720px) {
+  .mansionPackageDropzone,
+  .mansionPackagePreview,
+  .mansionPackagePreview[data-locked="true"] { grid-template-columns: 1fr; align-items: stretch; }
+  .mansionPackageDropzone { display: grid; }
+}
+
 .caseDial > label.caseModeChoice {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -1200,6 +1279,29 @@
   gap: 0.45rem;
 }
 
+.roomArtStyleToggle {
+  display: inline-flex;
+  padding: 0.16rem;
+  border: 1px solid var(--mystery-line);
+  border-radius: 0.58rem;
+  background: rgba(2, 5, 11, 0.68);
+}
+
+.roomArtStyleToggle > button {
+  padding: 0.38rem 0.52rem;
+  color: var(--mystery-muted);
+  border: 0;
+  border-radius: 0.4rem;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.68rem;
+}
+
+.roomArtStyleToggle > button[aria-pressed="true"] {
+  color: #fff;
+  background: rgba(139, 107, 236, 0.78);
+}
+
 .mapDetails {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1760,6 +1862,11 @@
 .suspectAvatar :global([data-zen-live-bot-presence="true"]) {
   max-width: 100%;
   max-height: min(30vw, 23rem);
+}
+
+.suspectAvatar[data-art-style="mosaic"] :global([data-chat-mini-bot-avatar="true"][data-size="room"]) {
+  --chat-mini-bot-render-size: min(23rem, 30vw, 42vh);
+  --chat-mini-bot-glyph-size: max(18px, calc(var(--chat-mini-bot-render-size) * 0.12));
 }
 
 .suspectPresence strong {

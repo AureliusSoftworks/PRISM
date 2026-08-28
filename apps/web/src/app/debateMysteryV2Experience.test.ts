@@ -146,6 +146,9 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /onClickCapture=\{handleInvestigationDialogueClickCapture\}/u);
     assert.match(experienceSource, /handleInvestigationDialogueClickCapture[\s\S]*mysteryDialogueGestureOriginIsInteractive\(event\.target\)[\s\S]*operateVisibleDialogueGesture\(event\.detail, advanceVisibleRoomDialogue\)[\s\S]*event\.preventDefault\(\);[\s\S]*event\.stopPropagation\(\)/u);
     assert.match(experienceSource, /onKeyDown=\{\(event\) => \{[\s\S]*if \(event\.key === "Enter" \|\| event\.key === " "\)[\s\S]*operateVisibleDialogueGesture\(1, advanceVisibleRoomDialogue\)/u);
+    assert.match(experienceSource, /whodunnitInvestigationDialogueShouldAutoAdvance\(\{[\s\S]*hasActiveAudio: activeAudioRef\.current !== null[\s\S]*requiresPlayerInput[\s\S]*streaming: dialogueSfxPresentation\.streaming/u);
+    assert.match(experienceSource, /whodunnitInvestigationDialogueGraceMs\(\{[\s\S]*delivery: dialogueSfxPresentation\.delivery[\s\S]*text: dialogueSfxPresentation\.fullText/u);
+    assert.match(experienceSource, /finishCurrentDialogue\(true\)/u);
   });
 
   it("lets Court dialogue gestures cancel speech and advance its finite queue", () => {
@@ -200,6 +203,45 @@ describe("Whodunnit V2 prosecution experience", () => {
       /disabled=\{busy \|\| dialoguePerformanceActive\}/u,
     );
     assert.match(cssSource, /\.courtReaction\[role="button"\][\s\S]*cursor:\s*pointer/u);
+  });
+
+  it("stages a directed courtroom with witness, counsel, judge, and evidence cameras", () => {
+    assert.match(experienceSource, /resolveWhodunnitCourtCamera\(\{/u);
+    assert.match(experienceSource, /className=\{styles\.courtStage\}[\s\S]{0,180}data-camera=\{courtCamera\}/u);
+    assert.match(experienceSource, /whodunnit-witness-silhouette\.png/u);
+    assert.match(experienceSource, /coffee-table\/table_\$\{props\.theme\}\.png/u);
+    assert.match(experienceSource, /whodunnit-witness-foreground-\$\{props\.theme\}\.png/u);
+    assert.match(experienceSource, /moderator-gavel-\$\{props\.theme\}-down\.png/u);
+    assert.match(experienceSource, /className=\{styles\.counselGlyph\}/u);
+    assert.doesNotMatch(experienceSource, /className=\{styles\.witnessIdentity/u);
+    assert.match(experienceSource, /className=\{styles\.courtPodiumForeground\}/u);
+    assert.match(experienceSource, /style=\{props\.stageAlignmentStyle\}/u);
+    assert.match(experienceSource, /data-court-evidence-projectors="true"/u);
+    assert.match(experienceSource, /data-projector-side="image"[\s\S]*?data-projector-side="record"/u);
+    assert.match(experienceSource, /presentedCourtRecordItem\.description/u);
+    assert.match(experienceSource, /presentedCourtRecordItem && courtCamera === "witness"/u);
+    assert.doesNotMatch(experienceSource, /setCourtCamera|courtCameraControl/u);
+    assert.match(cssSource, /\.courtStage\[data-camera="witness"\] \.courtBackdrop[\s\S]*whodunnit-witness-dark/u);
+    assert.match(cssSource, /--whodunnit-wide-evidence-table-scale/u);
+    assert.match(cssSource, /\.witnessAvatar \{[^}]*bottom:\s*clamp\(21rem,\s*36vh,\s*27rem\)[^}]*--whodunnit-witness-scale/u);
+    assert.match(cssSource, /--whodunnit-defense-mini-offset-x/u);
+    assert.match(cssSource, /\.counselSeat\[data-side="prosecution"\] \{[^}]*right:\s*clamp/u);
+    assert.match(cssSource, /\.counselSeat\[data-side="defense"\] \{[^}]*left:\s*clamp/u);
+    assert.match(cssSource, /\.courtPodiumFocus\[data-side="prosecution"\] \{[^}]*translate3d\(-24%,\s*-10%,\s*0\) scale\(1\.48\)/u);
+    assert.match(cssSource, /\.courtPodiumFocus\[data-side="defense"\] \{[^}]*translate3d\(24%,\s*-10%,\s*0\) scale\(1\.48\)/u);
+    assert.match(cssSource, /\.courtStage\[data-camera="prosecution"\] \.courtBackdrop \{[^}]*translate3d\(-24%,\s*-10%,\s*0\) scale\(1\.48\)/u);
+    assert.match(cssSource, /\.courtStage\[data-camera="defense"\] \.courtBackdrop \{[^}]*translate3d\(24%,\s*-10%,\s*0\) scale\(1\.48\)/u);
+    assert.match(cssSource, /\.courtPodiumForeground \{[^}]*forum-dark-foreground\.png/u);
+    assert.match(cssSource, /\.courtEvidencePrism \{[^}]*clip-path:\s*polygon\(50% 0, 100% 86%, 50% 100%, 0 86%\)/u);
+    assert.match(cssSource, /\.courtEvidenceProjector \{[^}]*--court-projector-anchor:\s*53%/u);
+    assert.match(cssSource, /\.courtEvidenceProjector\[data-projector-side="record"\] \{[^}]*--court-projector-anchor:\s*47%/u);
+    assert.match(cssSource, /\.courtEvidenceBeam \{[^}]*left:\s*calc\(var\(--court-projector-anchor\) - 24%\)/u);
+    assert.match(cssSource, /\.courtEvidenceProjectorMount \{[^}]*left:\s*var\(--court-projector-anchor\)[^}]*transform:\s*translateX\(-50%\)/u);
+    assert.match(cssSource, /\.courtEvidenceProjection::before \{[\s\S]*mix-blend-mode:\s*screen/u);
+    assert.match(cssSource, /@media \(max-width: 760px\)[\s\S]*\.courtEvidenceProjectors \{[\s\S]*grid-template-columns/u);
+    assert.match(cssSource, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.courtEvidenceProjection,[\s\S]*animation:\s*none/u);
+    assert.doesNotMatch(cssSource, /\.witnessIdentity/u);
+    assert.match(cssSource, /@media \(max-width: 560px\)[\s\S]*\.counselAvatar \{ display: none; \}[\s\S]*\.counselGlyph \{ display: grid; \}/u);
   });
 
   it("keeps a failed-verdict rebuttal visible while allowing retry to interrupt it", () => {
@@ -268,14 +310,15 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(cssSource, /\.dialogueBox\[data-casekeeper-stage="narration"\][\s\S]*rgba\(192, 168, 255/u);
     assert.match(cssSource, /prefers-reduced-motion: reduce[\s\S]*\.casekeeperThinkingDots\s*\{\s*width:\s*3ch;\s*animation:\s*none/u);
     assert.match(tutorialSource, /dot beat grows from \\"\.\\" to \\"\.\.\\" to \\"\.\.\.\\"/u);
-    assert.match(tutorialSource, /Their frozen persona introduction then plays/u);
+    assert.match(tutorialSource, /Their sealed persona cue then performs/u);
     assert.match(tutorialSource, /archived case keeps its existing replay-stable wording/u);
   });
 
-  it("uses only the completed local pack during gameplay", () => {
+  it("uses only the on-demand local cache during gameplay", () => {
     assert.match(experienceSource, /mystery-audio\/\$\{encodeURIComponent\(lineId\)\}/u);
     assert.match(experienceSource, /Premium voices are unavailable in Whodunnit V2/u);
     assert.match(experienceSource, /No ElevenLabs request will be made/u);
+    assert.match(experienceSource, /spoken lines cache on demand/u);
     assert.doesNotMatch(experienceSource, /playMysteryVoice|playMysteryPlayerVoice|elevenlabs\.io/iu);
   });
 
@@ -441,7 +484,7 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /const roomObservationAwaitingContinue = Boolean\(/u);
     assert.match(experienceSource, /if \(!queuedDialogue\) \{[\s\S]*if \(roomDisplayedDialogue\) \{[\s\S]*setRoomDialogueBaseline\(\{/u);
     assert.match(experienceSource, /data-awaiting-continue=\{roomObservationAwaitingContinue \|\| roomIntroductionAwaitingContinue \? "true" : undefined\}/u);
-    assert.match(experienceSource, /roomObservationAwaitingContinue \|\| roomIntroductionAwaitingContinue[\s\S]*styles\.dialogueContinueHint[\s\S]*Click to continue/u);
+    assert.match(experienceSource, /roomObservationAwaitingContinue \|\| roomIntroductionAwaitingContinue[\s\S]*styles\.dialogueContinueHint[\s\S]*Click to advance early/u);
     assert.match(experienceSource, /const advanceVisibleRoomDialogue = \(\): void => \{[\s\S]*advance_room_introduction[\s\S]*finishCurrentDialogue\(\)/u);
     assert.match(experienceSource, /const lensActive = Boolean\([\s\S]*!roomObservationAwaitingContinue/u);
     assert.match(experienceSource, /const completionCueVisible = Boolean\([\s\S]*!roomObservationAwaitingContinue/u);
@@ -666,13 +709,22 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(setupSource, /Synthesize assets in Case Forge/u);
     assert.match(setupSource, /Create sealed exhibit images/u);
     assert.match(setupSource, /ONLINE only · LOCAL keeps the bundled room pack/u);
-    assert.match(setupSource, /Coming later · investigation music remains unchanged/u);
+    assert.match(setupSource, /Ask ElevenLabs for an original instrumental mansion theme/u);
+    assert.match(setupSource, /LOCAL and Auto keep The Midnight Clue bundled fallback/u);
+    assert.match(setupSource, /<strong>Ambience<\/strong>/u);
+    assert.match(setupSource, /mansion-specific procedural mix/u);
+    assert.match(setupSource, /Off still uses the bundled theme palette and room acoustics/u);
+    assert.match(setupSource, /Ambience remains mansion-owned and content-addressed/u);
     assert.match(setupSource, /mysteryEvidenceAssetSynthesis/u);
     assert.match(setupSource, /mysteryRoomAssetSynthesis/u);
+    assert.match(setupSource, /mysteryMusicAssetSynthesis/u);
+    assert.match(setupSource, /mysteryAmbienceAssetSynthesis/u);
     assert.match(setupSource, /setMysteryEvidenceAssetSynthesis\] =\s*useState\(false\)/u);
     assert.match(setupSource, /setMysteryRoomAssetSynthesis\] =\s*useState\(false\)/u);
+    assert.match(setupSource, /setMysteryMusicAssetSynthesis\] =\s*useState\(false\)/u);
+    assert.match(setupSource, /setMysteryAmbienceAssetSynthesis\] =\s*useState\(false\)/u);
     assert.match(setupSource, /props\.responseMode !== "local"/u);
-    assert.match(setupSource, /Generated case art stays outside Images and the Library/u);
+    assert.match(setupSource, /Generated case art stays outside Images unless you save a revealed visual/u);
     assert.match(setupSource, /mysteryMansionBundleId/u);
     assert.match(setupSource, /mystery-mansion\/save/u);
     assert.match(experienceSource, /Save mansion level/u);

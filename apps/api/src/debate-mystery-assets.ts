@@ -551,6 +551,35 @@ export function getRevealedDebateMysteryAssetFileV1(
   return { bytes, mimeType: row.mime_type, sha256 };
 }
 
+/** Server-only source access for sealed presentation work. This preserves the
+ * reveal boundary at the HTTP layer while allowing a room upgrade to be
+ * prepared from the immutable case-owned source before the player enters it. */
+export function getDebateMysteryAssetFileForPreparationV1(
+  db: DatabaseSync,
+  userKey: Buffer,
+  userId: string,
+  sessionId: string,
+  kind: DebateMysterySealedAssetKindV1,
+  subjectId: string,
+): { bytes: Buffer; mimeType: "image/png" | "image/webp"; sha256: string } {
+  const row = assetRow(db, userId, sessionId, kind, subjectId);
+  if (!row || row.status !== "ready") {
+    throw new HttpError(404, "That sealed case visual source is unavailable.");
+  }
+  if (!row.ciphertext || !row.cipher_iv || !row.cipher_tag || !row.sha256) {
+    throw new HttpError(409, "That case visual is using its bundled fallback.");
+  }
+  const bytes = decryptBytes(
+    { ciphertext: row.ciphertext, iv: row.cipher_iv, tag: row.cipher_tag },
+    userKey,
+  );
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  if (sha256 !== row.sha256 || bytes.length !== row.byte_size) {
+    throw new Error("Sealed case visual integrity validation failed.");
+  }
+  return { bytes, mimeType: row.mime_type, sha256 };
+}
+
 export function saveRevealedDebateMysteryAssetV1(
   db: DatabaseSync,
   userKey: Buffer,
@@ -595,7 +624,7 @@ export function saveRevealedDebateMysteryAssetV1(
       userId,
       title.trim().slice(0, 500) || "Saved Whodunnit visual",
       `/api/images/${encodeURIComponent(imageId)}/file`,
-      row.kind === "room" ? "1536x1024" : "1024x1024",
+      row.kind === "room" ? "1600x900" : "1024x1024",
       localRelPath,
       row.kind === "room" ? "whodunnit_room" : "debate_exhibit",
       now,
@@ -624,8 +653,15 @@ export async function validateDebateMysteryAssetPixelsV1(
   }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const { width, height, channels } = prepared.info;
   if (channels !== 4) throw new Error("Case visual could not be inspected as RGBA.");
-  if (kind === "room" && (width !== 1536 || height !== 1024)) {
-    throw new Error("Room synthesis must preserve the 1536×1024 template.");
+  if (
+    kind === "room" &&
+    !(
+      (width === 1536 && height === 1024) ||
+      (width === 1280 && height === 720) ||
+      (width === 1600 && height === 900)
+    )
+  ) {
+    throw new Error("Room synthesis must preserve an approved 1536×1024 legacy, 1280×720 Mosaic-source, or 1600×900 Illustrated canvas.");
   }
   if (kind === "evidence" && (width !== 1024 || height !== 1024)) {
     throw new Error("Evidence synthesis must normalize to 1024×1024.");

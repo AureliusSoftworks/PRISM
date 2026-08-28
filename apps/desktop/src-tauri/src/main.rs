@@ -326,6 +326,51 @@ struct RuntimeState {
     web_child: Mutex<Option<Child>>,
 }
 
+struct PortablePackageOpenState {
+    paths: Mutex<Vec<String>>,
+}
+
+impl PortablePackageOpenState {
+    fn new() -> Self {
+        Self { paths: Mutex::new(Vec::new()) }
+    }
+}
+
+fn portable_package_path(value: &str) -> Option<String> {
+    let path = if let Ok(url) = Url::parse(value) {
+        if url.scheme() != "file" { return None; }
+        url.to_file_path().ok()?
+    } else {
+        PathBuf::from(value)
+    };
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    if extension != "mansion" && extension != "whodunnit" { return None; }
+    Some(path.to_string_lossy().into_owned())
+}
+
+fn queue_portable_package_paths(app: &AppHandle, values: impl IntoIterator<Item = String>) {
+    let Some(state) = app.try_state::<PortablePackageOpenState>() else { return; };
+    let mut pending = state.paths.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    for value in values {
+        if let Some(path) = portable_package_path(&value) {
+            if !pending.contains(&path) { pending.push(path); }
+        }
+    }
+    drop(pending);
+    let _ = app.emit("prism-portable-package-open-pending", ());
+}
+
+fn emit_pending_portable_package_paths(app: &AppHandle) {
+    let Some(state) = app.try_state::<PortablePackageOpenState>() else { return; };
+    let pending = {
+        let mut paths = state.paths.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        std::mem::take(&mut *paths)
+    };
+    for path in pending {
+        let _ = app.emit("prism-open-portable-package", serde_json::json!({ "path": path }));
+    }
+}
+
 impl RuntimeState {
     fn new() -> Self {
         Self {
@@ -911,13 +956,15 @@ fn main() {
     // launch is redirected to the existing window and exits before setup can
     // spawn a second Qdrant/API/web runtime tree.
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        queue_portable_package_paths(app, args);
         show_main_window(app);
     }));
 
     let app = match builder
         .manage(RuntimeState::new())
         .manage(AppLifecycleState::new())
+        .manage(PortablePackageOpenState::new())
         .invoke_handler(tauri::generate_handler![
             toggle_fullscreen,
             set_cursor_position,
@@ -954,6 +1001,7 @@ fn main() {
             setup_tray(app)?;
 
             let app_handle = app.handle().clone();
+            queue_portable_package_paths(&app_handle, std::env::args().skip(1));
 
             // Arm before any runtime child exists, so an interrupt at any point
             // during startup still tears the tree down.
@@ -1014,6 +1062,7 @@ fn main() {
                 .build() {
                     emit_log(&app_handle, "prism", &format!("Window build failed: {error}"));
                 }
+                emit_pending_portable_package_paths(&app_handle);
             });
 
             Ok(())
@@ -1034,6 +1083,14 @@ fn main() {
         RunEvent::Exit => {
             let state: State<'_, RuntimeState> = app_handle.state();
             stop_runtime(&state);
+        }
+        #[cfg(target_os = "macos")]
+        RunEvent::Opened { urls } => {
+            queue_portable_package_paths(
+                &app_handle,
+                urls.into_iter().map(|url| url.to_string()),
+            );
+            show_main_window(&app_handle);
         }
         _ => {}
     });

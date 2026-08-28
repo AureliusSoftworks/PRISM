@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import {
   attachCoffeeCupFoley,
   startSessionAtmosphere,
@@ -21,6 +21,8 @@ export interface SessionAtmosphereLayerProps {
   sessionKey: string;
   volume: number;
   backgroundUrl?: string | null;
+  /** Used only when the preferred protected/generated bed cannot be loaded. */
+  backgroundFallbackUrl?: string | null;
   grainUrl?: string | null;
   preloadFoleyUrls?: readonly string[];
   mix?: SessionAtmosphereMix;
@@ -60,6 +62,7 @@ export function SessionAtmosphereLayer({
   sessionKey,
   volume,
   backgroundUrl,
+  backgroundFallbackUrl,
   grainUrl,
   preloadFoleyUrls,
   mix,
@@ -84,6 +87,7 @@ export function SessionAtmosphereLayer({
   coffeeCupRootRef,
   controllerHandleRef,
 }: SessionAtmosphereLayerProps): null {
+  const [resolvedBackgroundUrl, setResolvedBackgroundUrl] = useState(backgroundUrl);
   const presentationSuspended = usePrismPresentationSuspended();
   const deferFoleyRef = useRef(deferFoley);
   const deferBotVocalizationRef = useRef(deferBotVocalization);
@@ -92,6 +96,7 @@ export function SessionAtmosphereLayer({
   const mixRef = useRef(mix);
   const ambientBotVocalizationRef = useRef(onAmbientBotVocalization);
   const coffeeCupFoleyRef = useRef(onCoffeeCupFoley);
+  useEffect(() => setResolvedBackgroundUrl(backgroundUrl), [backgroundUrl]);
   useEffect(() => {
     deferFoleyRef.current = deferFoley;
     if (deferFoley) {
@@ -129,7 +134,7 @@ export function SessionAtmosphereLayer({
     const controller = startSessionAtmosphere({
       seed: sessionKey,
       volume: volumeRef.current,
-      backgroundUrl,
+      backgroundUrl: resolvedBackgroundUrl,
       grainUrl,
       mix: mixRef.current,
       startTransitionMs: lifecycleTransitionMs,
@@ -149,6 +154,12 @@ export function SessionAtmosphereLayer({
       ambientBotVocalizationProfile,
       onAmbientBotVocalization: (cue) =>
         ambientBotVocalizationRef.current?.(cue) ?? false,
+      onPlaybackError: () => {
+        if (
+          backgroundFallbackUrl &&
+          resolvedBackgroundUrl !== backgroundFallbackUrl
+        ) setResolvedBackgroundUrl(backgroundFallbackUrl);
+      },
     });
     controller.preloadFoley(preloadFoleyUrls ?? []);
     controller.setPresentationSuspended(
@@ -182,7 +193,8 @@ export function SessionAtmosphereLayer({
     grainRecordable,
     backgroundTone,
     backgroundRoomAcoustics,
-    backgroundUrl,
+    backgroundFallbackUrl,
+    resolvedBackgroundUrl,
     coffeeCupRootRef,
     controllerHandleRef,
     foleyRoomAcoustics,

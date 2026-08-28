@@ -234,6 +234,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       experimental_all_model_effort_enabled INTEGER NOT NULL DEFAULT 0,
       coffee_experimental_table_angle_enabled INTEGER NOT NULL DEFAULT 0,
       debate_whodunnit_reuse_synthesized_exhibits INTEGER NOT NULL DEFAULT 0,
+      debate_whodunnit_text_voice_mode TEXT NOT NULL DEFAULT 'bottish',
       psychic_mode_enabled INTEGER NOT NULL DEFAULT 0,
       comfyui_host TEXT,
       comfyui_workflows TEXT NOT NULL DEFAULT '[]',
@@ -2398,6 +2399,8 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       suspect_count INTEGER NOT NULL CHECK(suspect_count >= 1),
       style_json TEXT NOT NULL,
       layout_json TEXT NOT NULL,
+      portable_metadata_json TEXT,
+      portable_payload_sha256 TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       UNIQUE(user_id, source_session_id),
@@ -2427,7 +2430,10 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       cipher_tag BLOB NOT NULL,
       sha256 TEXT NOT NULL,
       byte_size INTEGER NOT NULL CHECK(byte_size > 0),
-      mime_type TEXT NOT NULL CHECK(mime_type IN ('image/png', 'image/webp', 'audio/mpeg')),
+      mime_type TEXT NOT NULL CHECK(mime_type IN ('image/png', 'image/webp', 'audio/mpeg', 'audio/ogg', 'audio/wav')),
+      width INTEGER,
+      height INTEGER,
+      duration_ms INTEGER,
       provider TEXT,
       model TEXT,
       created_at TEXT NOT NULL,
@@ -3504,6 +3510,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       "ALTER TABLE users ADD COLUMN debate_whodunnit_reuse_synthesized_exhibits INTEGER NOT NULL DEFAULT 0;",
     );
   }
+  const hasDebateWhodunnitTextVoiceMode = userColumns.some(
+    (column) => column.name === "debate_whodunnit_text_voice_mode",
+  );
+  if (!hasDebateWhodunnitTextVoiceMode) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN debate_whodunnit_text_voice_mode TEXT NOT NULL DEFAULT 'bottish';",
+    );
+  }
   const hasPsychicModeEnabled = userColumns.some(
     (column) => column.name === "psychic_mode_enabled",
   );
@@ -4573,6 +4587,29 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
         AND tier = 'short_term';
     `);
   }
+
+  const mansionBundleColumns = db.prepare(
+    "PRAGMA table_info(debate_mystery_mansion_bundles)",
+  ).all() as Array<{ name: string }>;
+  if (!mansionBundleColumns.some((column) => column.name === "portable_metadata_json")) {
+    db.exec("ALTER TABLE debate_mystery_mansion_bundles ADD COLUMN portable_metadata_json TEXT;");
+  }
+  if (!mansionBundleColumns.some((column) => column.name === "portable_payload_sha256")) {
+    db.exec("ALTER TABLE debate_mystery_mansion_bundles ADD COLUMN portable_payload_sha256 TEXT;");
+  }
+  const mansionAssetColumns = db.prepare(
+    "PRAGMA table_info(debate_mystery_mansion_assets)",
+  ).all() as Array<{ name: string }>;
+  for (const column of ["width", "height", "duration_ms"] as const) {
+    if (!mansionAssetColumns.some((entry) => entry.name === column)) {
+      db.exec(`ALTER TABLE debate_mystery_mansion_assets ADD COLUMN ${column} INTEGER;`);
+    }
+  }
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_debate_mystery_mansion_bundles_portable_payload
+      ON debate_mystery_mansion_bundles(user_id, portable_payload_sha256)
+      WHERE portable_payload_sha256 IS NOT NULL;
+  `);
 
   const imageColumns = db.prepare("PRAGMA table_info(images)").all() as Array<{
     name: string;

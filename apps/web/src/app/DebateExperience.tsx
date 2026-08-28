@@ -11,6 +11,7 @@ import {
   useSyncExternalStore,
   type FormEvent,
   type CSSProperties,
+  type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
@@ -29,7 +30,7 @@ import {
   DEBATE_EVIDENCE_ITEM_MAX_COUNT,
   DEBATE_FORMAT_CATALOG,
   DEBATE_FORMALITY_SPECTRUM,
-  DEBATE_MYSTERY_PRESETS,
+  DEBATE_MYSTERY_V2_PRESETS,
   DEBATE_MYSTERY_SCHEMA_VERSION,
   DEBATE_MYSTERY_V2_SCHEMA_VERSION,
   DEBATE_JURY_SIZE,
@@ -135,6 +136,7 @@ import {
   type ResponseMode,
   type LiveBakeArtifactV1,
   type ProviderReasoningEffort,
+  type WhodunnitTextVoiceMode,
 } from "@localai/shared";
 import {
   liveBakeStatusCopy,
@@ -176,6 +178,13 @@ import {
   type PrismRefractMagicTarget,
 } from "./prismRefract";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
+import {
+  downloadMansionPackageV1,
+  inspectMansionPackageFileV1,
+  installMansionPackageFileV1,
+  portableMansionByteLabel,
+  type MansionPackageInspectionV1,
+} from "./mansionPackageClient";
 import { PrismCompanionSessionNoteBoundary } from "./prismCompanionPresence";
 import {
   appendAppletSessionNoteToTranscript,
@@ -217,6 +226,7 @@ import { DebateEvidenceMentionPopover } from "./DebateEvidenceMentionPopover";
 import { DebateEvidenceDocument } from "./DebateEvidenceDocument";
 import { SpeechIntentReveal } from "./SpeechIntentReveal";
 import styles from "./DebateExperience.module.css";
+import mysteryV2Styles from "./debateMysteryV2.module.css";
 import mysteryStyles from "./debateMystery.module.css";
 import { debateLiveCaptionPage } from "./debateLiveCaption";
 import { debateTranscriptTimelineEntries } from "./debateTranscriptTimeline";
@@ -498,6 +508,12 @@ import {
   DEBATE_STAGE_LIGHT_MASK_OPACITY_STEP,
   DEBATE_STAGE_VOICE_LEVEL_MAX,
   DEBATE_STAGE_VOICE_LEVEL_STEP,
+  DEBATE_STAGE_WHODUNNIT_POSITION_MAX,
+  DEBATE_STAGE_WHODUNNIT_POSITION_MIN,
+  DEBATE_STAGE_WHODUNNIT_POSITION_STEP,
+  DEBATE_STAGE_WHODUNNIT_SCALE_MAX,
+  DEBATE_STAGE_WHODUNNIT_SCALE_MIN,
+  DEBATE_STAGE_WHODUNNIT_SCALE_STEP,
   DEFAULT_DEBATE_STAGE_ALIGNMENT,
   copyDebateStageAlignment,
   debateStageEvidenceViewForCamera,
@@ -517,7 +533,10 @@ import {
   updateDebateStageLightBlendMode,
   updateDebateStageLightMaskOpacity,
   updateDebateStageModeratorMicroScale,
+  updateDebateStageJuryMemberPlacement,
+  updateDebateStageJuryPlacement,
   updateDebateStageVoiceLevel,
+  updateDebateStageWhodunnitCourtPlacement,
   writeDebateStageAlignment,
   type DebateStageAlignmentItem,
   type DebateStageAlignmentRole,
@@ -527,7 +546,10 @@ import {
   type DebateStageEvidenceShadowV1,
   type DebateStageEvidenceView,
   type DebateStageLightBlendMode,
+  type DebateStageJuryMemberIndex,
   type DebateStageOffsetV1,
+  type DebateStageWhodunnitCourtItem,
+  type DebateStageWhodunnitPlacementV1,
 } from "./debateStageAlignment";
 import {
   DEFAULT_DEBATE_LIVE_CAPTIONS_ENABLED,
@@ -795,6 +817,14 @@ export interface DebateExperienceProps {
   theme: "light" | "dark";
   audioEnabled: boolean;
   audioVolume: number;
+  whodunnitTextVoiceMode?: WhodunnitTextVoiceMode;
+  playMysteryTextVoice?: (args: {
+    mode: Exclude<WhodunnitTextVoiceMode, "off">;
+    seed: string;
+    signal?: AbortSignal;
+    text: string;
+    volume: number;
+  }) => Promise<boolean>;
   objectionRulingTimeoutMs?: number;
   request: <T>(path: string, options?: RequestInit) => Promise<T>;
   renderBotGlyph: BotPickerGlyphRenderer;
@@ -938,7 +968,7 @@ function nextMysteryRecipeNonce(): string {
 }
 
 function debateMysteryPresetSuspectCount(preset: DebateMysteryPresetId): number {
-  return DEBATE_MYSTERY_PRESETS.find((candidate) => candidate.id === preset)
+  return DEBATE_MYSTERY_V2_PRESETS.find((candidate) => candidate.id === preset)
     ?.suspects ?? 4;
 }
 
@@ -1971,7 +2001,7 @@ const DEBATE_SCENE_RASTERS_BY_THEME: Record<"dark" | "light", string[]> = {
     "/debate/moderator-light-mask.png",
     "/debate/moderator-light-mask-foreground.png",
     "/debate/gallery-chamber-dark.webp",
-    "/debate/overview-table-dark.png",
+    "/coffee-table/table_dark.png",
   ],
   light: [
     "/debate/forum-light.webp",
@@ -1983,7 +2013,7 @@ const DEBATE_SCENE_RASTERS_BY_THEME: Record<"dark" | "light", string[]> = {
     "/debate/moderator-light-mask.png",
     "/debate/moderator-light-mask-foreground.png",
     "/debate/gallery-chamber-light.webp",
-    "/debate/overview-table-light.png",
+    "/coffee-table/table_light.png",
   ],
 };
 
@@ -4954,7 +4984,7 @@ export function DebateExperience(
     3;
   const debateMaterialQuality = useDebateDomPerformance({
     active:
-      view === "live" &&
+      (view === "live" || view === "mystery") &&
       activeSession !== null &&
       activeSession.status !== "paused",
     graphicsQuality: props.graphicsQuality,
@@ -4991,11 +5021,24 @@ export function DebateExperience(
     useState(false);
   const [mysteryRoomAssetSynthesis, setMysteryRoomAssetSynthesis] =
     useState(false);
+  const [mysteryMusicAssetSynthesis, setMysteryMusicAssetSynthesis] =
+    useState(false);
+  const [mysteryAmbienceAssetSynthesis, setMysteryAmbienceAssetSynthesis] =
+    useState(false);
   const [mysterySkipInvestigation, setMysterySkipInvestigation] = useState(false);
   const [mysteryMansionBundles, setMysteryMansionBundles] = useState<
     DebateMysteryMansionBundleSummaryV1[]
   >([]);
   const [mysteryMansionBundleId, setMysteryMansionBundleId] = useState("");
+  const [mansionPackageFile, setMansionPackageFile] = useState<File | null>(null);
+  const [mansionPackagePassword, setMansionPackagePassword] = useState("");
+  const [mansionPackageInspection, setMansionPackageInspection] =
+    useState<MansionPackageInspectionV1 | null>(null);
+  const [mansionPackageState, setMansionPackageState] = useState<
+    "idle" | "inspecting" | "installing" | "exporting" | "removing"
+  >("idle");
+  const [mansionExportPassword, setMansionExportPassword] = useState("");
+  const mansionPackageInputRef = useRef<HTMLInputElement | null>(null);
   const [mysteryNonce, setMysteryNonce] = useState("recipe-initial");
   const [mysteryFloors, setMysteryFloors] = useState(1);
   const [mysteryTotalRooms, setMysteryTotalRooms] = useState(5);
@@ -5814,6 +5857,10 @@ export function DebateExperience(
     useState<DebateClipboardState>("idle");
   const [stageAlignmentPreviewCamera, setStageAlignmentPreviewCamera] =
     useState<DebateStageEvidenceView>("wide");
+  const [stageAlignmentWhodunnitPreview, setStageAlignmentWhodunnitPreview] =
+    useState<"wide" | "witness" | null>(null);
+  const [stageAlignmentJuryPreview, setStageAlignmentJuryPreview] =
+    useState(false);
   const [stageAlignmentPreviewTheme, setStageAlignmentPreviewTheme] = useState<
     "light" | "dark"
   >(props.theme);
@@ -6637,6 +6684,112 @@ export function DebateExperience(
       }
     }
   }, [request]);
+
+  const inspectMansionPackage = useCallback(async (
+    file: File,
+    password = "",
+  ): Promise<void> => {
+    if (!file.name.toLowerCase().endsWith(".mansion")) {
+      setError("Choose a PRISM .mansion package.");
+      return;
+    }
+    setMansionPackageFile(file);
+    setMansionPackageInspection(null);
+    setMansionPackageState("inspecting");
+    setError(null);
+    try {
+      const inspection = await inspectMansionPackageFileV1(file, password || undefined);
+      if (!mountedRef.current) return;
+      setMansionPackageInspection(inspection);
+    } catch (caught) {
+      if (mountedRef.current) {
+        setError(caught instanceof Error ? caught.message : "That mansion package could not be inspected.");
+      }
+    } finally {
+      if (mountedRef.current) setMansionPackageState("idle");
+    }
+  }, []);
+
+  const dropMansionPackage = useCallback((event: ReactDragEvent<HTMLElement>): void => {
+    event.preventDefault();
+    const file = event.dataTransfer.files.item(0);
+    if (file) {
+      setMansionPackagePassword("");
+      void inspectMansionPackage(file);
+    }
+  }, [inspectMansionPackage]);
+
+  const installInspectedMansion = useCallback(async (): Promise<void> => {
+    if (!mansionPackageFile || !mansionPackageInspection || mansionPackageInspection.locked) return;
+    if (mansionPackageInspection.preview.duplicateBundleId) {
+      setMysteryMansionBundleId(mansionPackageInspection.preview.duplicateBundleId);
+      return;
+    }
+    setMansionPackageState("installing");
+    setError(null);
+    try {
+      const mansion = await installMansionPackageFileV1(
+        mansionPackageFile,
+        mansionPackagePassword || undefined,
+      );
+      if (!mountedRef.current) return;
+      await loadMysteryMansionBundles();
+      setMysteryMansionBundleId(mansion.id);
+      setMysteryPreset("custom");
+      setMysteryNonce(nextMysteryRecipeNonce());
+      setMansionPackageInspection((current) => current && !current.locked
+        ? { ...current, preview: { ...current.preview, duplicateBundleId: mansion.id } }
+        : current);
+    } catch (caught) {
+      if (mountedRef.current) {
+        setError(caught instanceof Error ? caught.message : "That mansion could not be installed.");
+      }
+    } finally {
+      if (mountedRef.current) setMansionPackageState("idle");
+    }
+  }, [
+    loadMysteryMansionBundles,
+    mansionPackageFile,
+    mansionPackageInspection,
+    mansionPackagePassword,
+  ]);
+
+  const exportSavedMansion = useCallback(async (mansion: DebateMysteryMansionBundleSummaryV1): Promise<void> => {
+    setMansionPackageState("exporting");
+    setError(null);
+    try {
+      await downloadMansionPackageV1({
+        mansionId: mansion.id,
+        mansionName: mansion.name,
+        password: mansionExportPassword || undefined,
+        creatorName: playerName,
+      });
+    } catch (caught) {
+      if (mountedRef.current) {
+        setError(caught instanceof Error ? caught.message : "That mansion could not be exported.");
+      }
+    } finally {
+      if (mountedRef.current) setMansionPackageState("idle");
+    }
+  }, [mansionExportPassword, playerName]);
+
+  const removeSavedMansion = useCallback(async (mansion: DebateMysteryMansionBundleSummaryV1): Promise<void> => {
+    if (!window.confirm(`Remove “${mansion.name}” from PRISM?`)) return;
+    setMansionPackageState("removing");
+    setError(null);
+    try {
+      await request(`/api/debates/mystery-mansions/${encodeURIComponent(mansion.id)}`, { method: "DELETE" });
+      if (!mountedRef.current) return;
+      setMysteryMansionBundleId((current) => current === mansion.id ? "" : current);
+      await loadMysteryMansionBundles();
+    } catch (caught) {
+      if (mountedRef.current) {
+        setError(caught instanceof Error ? caught.message : "That mansion could not be removed.");
+      }
+    } finally {
+      if (mountedRef.current) setMansionPackageState("idle");
+    }
+  }, [loadMysteryMansionBundles, request]);
 
   const updateSessionTurbo = useCallback(
     async (sessionId: string, turbo: boolean, knownSession?: DebateSessionV1) => {
@@ -7718,6 +7871,9 @@ export function DebateExperience(
   const selectedMysteryMansionBundle = mysteryMansionBundles.find(
     (bundle) => bundle.id === mysteryMansionBundleId,
   ) ?? null;
+  const selectedMysteryMansionMusic = selectedMysteryMansionBundle?.assets?.find(
+    (asset) => asset.role === "music",
+  ) ?? null;
   const mysteryTargetSuspects = selectedMysteryMansionBundle
     ? selectedMysteryMansionBundle.suspectCount
     : inspectedMysterySeed
@@ -7772,7 +7928,13 @@ export function DebateExperience(
         mysteryRoomAssetSynthesis &&
         !mysterySkipInvestigation &&
         props.responseMode !== "local",
-      music: false,
+      music:
+        mysteryMusicAssetSynthesis &&
+        !mysterySkipInvestigation &&
+        props.responseMode === "online",
+      ambience:
+        mysteryAmbienceAssetSynthesis &&
+        !mysterySkipInvestigation,
     },
     investigationMode: mysterySkipInvestigation ? "court_only" : "full",
     mansionBundleId: selectedMysteryMansionBundle?.id ?? null,
@@ -8283,6 +8445,8 @@ export function DebateExperience(
     setMysteryInspiration("");
     setMysteryEvidenceAssetSynthesis(false);
     setMysteryRoomAssetSynthesis(false);
+    setMysteryMusicAssetSynthesis(false);
+    setMysteryAmbienceAssetSynthesis(false);
     setMysterySkipInvestigation(false);
     setMysteryMansionBundleId("");
     setMysteryNonce(nextMysteryRecipeNonce());
@@ -19215,8 +19379,156 @@ export function DebateExperience(
             Fully explored mansions keep their layout, house direction, and room assets together for a future case.
           </small>
         </label>
+        <section
+          className={mysteryStyles.mansionPackageWorkbench}
+          data-tutorial-target="whodunnit-mansion-import"
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={dropMansionPackage}
+        >
+          <div className={mysteryStyles.mansionPackageDropzone}>
+            <div>
+              <strong>Bring in a mansion</strong>
+              <span>Drop a .mansion here, or open one from this device.</span>
+            </div>
+            <button
+              type="button"
+              disabled={mansionPackageState !== "idle"}
+              onClick={() => mansionPackageInputRef.current?.click()}
+            >
+              {mansionPackageState === "inspecting" ? "Inspecting…" : "Import Mansion"}
+            </button>
+            <input
+              ref={mansionPackageInputRef}
+              type="file"
+              accept=".mansion,application/vnd.prism.mansion"
+              hidden
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = "";
+                if (!file) return;
+                setMansionPackagePassword("");
+                void inspectMansionPackage(file);
+              }}
+            />
+          </div>
+          {mansionPackageInspection?.locked ? (
+            <div className={mysteryStyles.mansionPackagePreview} data-locked="true">
+              <div>
+                <small>Password protected</small>
+                <h3>{mansionPackageInspection.header.title}</h3>
+                <p>By {mansionPackageInspection.header.creatorName} · {portableMansionByteLabel(mansionPackageInspection.header.compressedBytes)}</p>
+              </div>
+              <label>
+                Package password
+                <input
+                  type="password"
+                  value={mansionPackagePassword}
+                  autoComplete="off"
+                  onChange={(event) => setMansionPackagePassword(event.currentTarget.value)}
+                />
+              </label>
+              <button
+                type="button"
+                disabled={!mansionPackagePassword || mansionPackageState !== "idle" || !mansionPackageFile}
+                onClick={() => mansionPackageFile && void inspectMansionPackage(mansionPackageFile, mansionPackagePassword)}
+              >
+                Unlock preview
+              </button>
+            </div>
+          ) : mansionPackageInspection ? (
+            <div className={mysteryStyles.mansionPackagePreview}>
+              {mansionPackageInspection.preview.previewImageDataUrl ? (
+                <img src={mansionPackageInspection.preview.previewImageDataUrl} alt="" />
+              ) : <div className={mysteryStyles.mansionPackagePreviewFallback}>◇</div>}
+              <div className={mysteryStyles.mansionPackagePreviewCopy}>
+                <small>{mansionPackageInspection.preview.header.creatorSignature ? "Creator signature included" : "Unsigned package"} · {mansionPackageInspection.preview.header.encryptionMode === "password" ? "Password protected" : "PRISM spoiler seal"}</small>
+                <h3>{mansionPackageInspection.preview.header.title}</h3>
+                <p>{mansionPackageInspection.preview.description}</p>
+                <div className={mysteryStyles.mansionPackageFacts}>
+                  <span>{mansionPackageInspection.preview.floorCount} floor{mansionPackageInspection.preview.floorCount === 1 ? "" : "s"}</span>
+                  <span>{mansionPackageInspection.preview.roomCount} rooms</span>
+                  <span>{mansionPackageInspection.preview.propCount} props</span>
+                  <span>{mansionPackageInspection.preview.hasInvestigationTheme ? "Theme included" : "Bundled theme fallback"}</span>
+                  <span>{portableMansionByteLabel(mansionPackageInspection.preview.header.compressedBytes)} package</span>
+                  <span>{portableMansionByteLabel(mansionPackageInspection.preview.header.expandedBytes)} expanded</span>
+                </div>
+                <p className={mysteryStyles.mansionPackageFinePrint}>
+                  By {mansionPackageInspection.preview.header.creatorName} · PRISM {mansionPackageInspection.preview.provenance.prismVersion} · {mansionPackageInspection.preview.license.name} · format {mansionPackageInspection.preview.header.compatibility.minimumFormatMajor}–{mansionPackageInspection.preview.header.compatibility.maximumFormatMajor}
+                </p>
+                {mansionPackageInspection.preview.provenance.generatedWith.length > 0 ? (
+                  <p className={mysteryStyles.mansionPackageFinePrint}>
+                    Generated with {mansionPackageInspection.preview.provenance.generatedWith.join(" · ")}
+                  </p>
+                ) : null}
+                {mansionPackageInspection.preview.header.contentWarnings.length > 0 ? (
+                  <p className={mysteryStyles.mansionPackageWarning}>Content notes: {mansionPackageInspection.preview.header.contentWarnings.join(" · ")}</p>
+                ) : null}
+                <button
+                  type="button"
+                  disabled={mansionPackageState !== "idle"}
+                  onClick={() => void installInspectedMansion()}
+                >
+                  {mansionPackageInspection.preview.duplicateBundleId
+                    ? "Use installed mansion"
+                    : mansionPackageState === "installing" ? "Installing…" : "Install and use"}
+                </button>
+                <small>Installation stays offline and keeps package assets separate from Images and the Bot Library.</small>
+              </div>
+            </div>
+          ) : null}
+        </section>
+        {selectedMysteryMansionBundle ? (
+          <details className={mysteryStyles.savedMansionManager}>
+            <summary>Manage {selectedMysteryMansionBundle.name}</summary>
+            <div className={mysteryStyles.savedMansionMap}>
+              {selectedMysteryMansionBundle.rooms.map((room) => (
+                <span key={room.id}>F{room.floor} · {room.emoji} {room.name}</span>
+              ))}
+            </div>
+            <label>
+              Optional export password
+              <input
+                type="password"
+                value={mansionExportPassword}
+                autoComplete="new-password"
+                onChange={(event) => setMansionExportPassword(event.currentTarget.value)}
+                placeholder="Leave blank for automatic spoiler seal"
+              />
+            </label>
+            <div className={mysteryStyles.savedMansionActions}>
+              <button
+                type="button"
+                disabled={mansionPackageState !== "idle" || selectedMysteryMansionBundle.portable?.license.allowsRedistribution === false}
+                title={selectedMysteryMansionBundle.portable?.license.allowsRedistribution === false ? "The package license does not permit redistribution." : undefined}
+                onClick={() => void exportSavedMansion(selectedMysteryMansionBundle)}
+              >
+                {mansionPackageState === "exporting" ? "Exporting…" : "Export Mansion"}
+              </button>
+              <button
+                type="button"
+                disabled={!selectedMysteryMansionMusic}
+                onClick={() => {
+                  if (!selectedMysteryMansionMusic) return;
+                  const audio = new Audio(`/api/debates/mystery-mansions/${encodeURIComponent(selectedMysteryMansionBundle.id)}/assets/${encodeURIComponent(selectedMysteryMansionMusic.id)}/file`);
+                  audio.volume = Math.max(0, Math.min(1, props.audioVolume));
+                  void audio.play().catch(() => setError("That mansion theme could not be played."));
+                }}
+              >
+                {selectedMysteryMansionMusic ? "Play theme" : "Bundled theme fallback"}
+              </button>
+              <button
+                type="button"
+                className={mysteryStyles.savedMansionRemove}
+                disabled={mansionPackageState !== "idle"}
+                onClick={() => void removeSavedMansion(selectedMysteryMansionBundle)}
+              >
+                {mansionPackageState === "removing" ? "Removing…" : "Remove from PRISM"}
+              </button>
+            </div>
+          </details>
+        ) : null}
         <div className={mysteryStyles.presetGrid}>
-          {DEBATE_MYSTERY_PRESETS.map((option) => (
+          {DEBATE_MYSTERY_V2_PRESETS.map((option) => (
             <button
               type="button"
               key={option.id}
@@ -19246,12 +19558,12 @@ export function DebateExperience(
               setMysteryNonce(nextMysteryRecipeNonce());
             }}
           >
-            <strong>Custom</strong><span>1–3 floors · 5–18 rooms</span><small>4–8 suspects</small>
+            <strong>Custom</strong><span>2–3 floors · 5–18 rooms</span><small>4–8 suspects</small>
           </button>
         </div>
         {mysteryPreset === "custom" && !inspectedMysterySeed ? (
           <div className={mysteryStyles.advancedGrid}>
-            <label>Floors <input type="number" min={1} max={3} value={mysteryFloors} onChange={(event) => { setMysteryFloors(Math.max(1, Math.min(3, Number(event.currentTarget.value) || 1))); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
+            <label>Floors <input type="number" min={2} max={3} value={mysteryFloors} onChange={(event) => { setMysteryFloors(Math.max(2, Math.min(3, Number(event.currentTarget.value) || 2))); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
             <label>Rooms <input type="number" min={Math.max(5, mysteryCustomSuspectCount + 1)} max={18} value={mysteryTotalRooms} onChange={(event) => { setMysteryTotalRooms(Number(event.currentTarget.value)); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
             <label>Suspects <input type="number" min={4} max={8} value={mysteryCustomSuspectCount} onChange={(event) => { setMysteryCustomSuspectCount(Math.max(4, Math.min(8, Number(event.currentTarget.value) || 4))); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
           </div>
@@ -19285,7 +19597,11 @@ export function DebateExperience(
             checked={mysterySkipInvestigation}
             onChange={(event) => {
               setMysterySkipInvestigation(event.currentTarget.checked);
-              if (event.currentTarget.checked) setMysteryRoomAssetSynthesis(false);
+              if (event.currentTarget.checked) {
+                setMysteryRoomAssetSynthesis(false);
+                setMysteryMusicAssetSynthesis(false);
+                setMysteryAmbienceAssetSynthesis(false);
+              }
               setMysteryNonce(nextMysteryRecipeNonce());
             }}
           />
@@ -19312,8 +19628,8 @@ export function DebateExperience(
             <span><strong>Evidence</strong><small>Create sealed exhibit images. They appear only when the evidence is discovered.</small></span>
           </label>
           <label
-            data-enabled={!mysterySkipInvestigation && props.responseMode !== "local" ? "true" : undefined}
-            aria-disabled={mysterySkipInvestigation || props.responseMode === "local"}
+            data-enabled={!mysterySkipInvestigation && props.responseMode === "online" ? "true" : undefined}
+            aria-disabled={mysterySkipInvestigation || props.responseMode !== "online"}
           >
             <input
               type="checkbox"
@@ -19326,11 +19642,45 @@ export function DebateExperience(
             />
             <span><strong>Rooms</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude room assets." : props.responseMode === "local" ? "ONLINE only · LOCAL keeps the bundled room pack." : "Create sealed room edits in Case Forge; each one opens only when visited."}</small></span>
           </label>
-          <label aria-disabled="true">
-            <input type="checkbox" checked={false} disabled readOnly />
-            <span><strong>Music</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude investigation music." : "Coming later · investigation music remains unchanged."}</small></span>
+          <label
+            data-enabled={!mysterySkipInvestigation && props.responseMode !== "local" ? "true" : undefined}
+            aria-disabled={mysterySkipInvestigation || props.responseMode === "local"}
+          >
+            <input
+              type="checkbox"
+              checked={mysteryMusicAssetSynthesis && !mysterySkipInvestigation && props.responseMode === "online"}
+              disabled={mysterySkipInvestigation || props.responseMode !== "online"}
+              onChange={(event) => {
+                setMysteryMusicAssetSynthesis(event.currentTarget.checked);
+                setMysteryNonce(nextMysteryRecipeNonce());
+              }}
+            />
+            <span><strong>Music</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude investigation music." : props.responseMode !== "online" ? "ONLINE only · LOCAL and Auto keep The Midnight Clue bundled fallback." : "Ask ElevenLabs for an original instrumental mansion theme; failure keeps the bundled theme."}</small></span>
           </label>
-          <p>Generated case art stays outside Images and the Library unless you explicitly save a revealed visual.</p>
+          <label
+            data-enabled={!mysterySkipInvestigation ? "true" : undefined}
+            aria-disabled={mysterySkipInvestigation}
+            data-tutorial-target="whodunnit-v2-ambience-synthesis"
+          >
+            <input
+              type="checkbox"
+              checked={mysteryAmbienceAssetSynthesis && !mysterySkipInvestigation}
+              disabled={mysterySkipInvestigation}
+              onChange={(event) => {
+                setMysteryAmbienceAssetSynthesis(event.currentTarget.checked);
+                setMysteryNonce(nextMysteryRecipeNonce());
+              }}
+            />
+            <span>
+              <strong>Ambience</strong>
+              <small>{mysterySkipInvestigation
+                ? "Unavailable · court-only cases exclude mansion ambience."
+                : props.responseMode === "local"
+                  ? "Build a mansion-specific procedural mix · no online generator. Off still uses the bundled theme palette and room acoustics."
+                  : "Build a mansion-specific procedural mix and preserve its bespoke-stem brief; unique assets target a measured 20–50 MB budget and fall back to the shared palette."}</small>
+            </span>
+          </label>
+          <p>Generated case art stays outside Images unless you save a revealed visual. Ambience remains mansion-owned and content-addressed.</p>
         </fieldset>
         <button type="button" className={mysteryStyles.seedButton} onClick={() => setMysteryNonce(nextMysteryRecipeNonce())}><span>Recipe Seed</span><code>{mysteryRecipeSeed}</code><small>Change the recipe</small></button>
       </div>
@@ -24478,12 +24828,12 @@ export function DebateExperience(
             </div>
           </div>
         ) : null}
-        {/* Wide/overview table — above the bots so the tabletop occludes
-            their lower frames, matching the Forum establishing shot. */}
+        {/* Transparent Coffee table — above the bots so the tabletop occludes
+            their lower frames without bringing a baked floor into the room. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           className={styles.juryTableRaster}
-          src={`/debate/overview-table-${props.theme}.png`}
+          src={`/coffee-table/table_${props.theme}.png`}
           alt=""
           aria-hidden="true"
         />
@@ -24666,6 +25016,36 @@ export function DebateExperience(
       };
       return { ...entry, presentation };
     });
+    const renderAlignmentCourtAvatar = (
+      bot: DebateBotSnapshotV1,
+      role: DebateStageAlignmentRole,
+      presentation: "full" | "mini",
+    ): ReactNode =>
+      props.renderBotAvatar ? (
+        props.renderBotAvatar(bot, {
+          role,
+          lookAtRole: null,
+          consumer: "forum",
+          presentation,
+          talking: false,
+          thinking: false,
+          voiceLevel: debateStageVoiceLevelForRole(
+            stageAlignmentDraft.voiceLevels,
+            role,
+          ),
+          colorCycle: false,
+          speechTiming: null,
+          foleyMouthShape: null,
+          listenerReaction: null,
+        })
+      ) : (
+        <span className={styles.botGlyphFallback}>
+          {props.renderBotGlyph(bot.glyph, {
+            size: presentation === "mini" ? 34 : 54,
+            strokeWidth: 1.4,
+          })}
+        </span>
+      );
     const interactiveAlignmentCast =
       stageAlignmentPreviewCamera === "moderator"
         ? alignmentCast.filter((entry) => entry.role === "moderator")
@@ -24673,6 +25053,73 @@ export function DebateExperience(
     const stageAlignmentEvidenceOnlyCamera =
       stageAlignmentPreviewCamera === "left" ||
       stageAlignmentPreviewCamera === "right";
+    const whodunnitPreviewItems: readonly DebateStageWhodunnitCourtItem[] =
+      stageAlignmentWhodunnitPreview === "wide"
+        ? ["wideEvidenceTable", "wideWitnessSilhouette"]
+        : stageAlignmentWhodunnitPreview === "witness"
+          ? [
+              "witness",
+              "prosecutionMini",
+              "defenseMini",
+            ]
+          : [];
+    const whodunnitPreviewItemLabels: Record<
+      DebateStageWhodunnitCourtItem,
+      string
+    > = {
+      wideEvidenceTable: "Evidence table",
+      wideWitnessSilhouette: "Witness silhouette",
+      witness: "Witness",
+      prosecutionMini: "Prosecution mini",
+      defenseMini: "Defense mini",
+      witnessNameplate: "Witness nameplate",
+      witnessGlyph: "Witness glyph",
+    };
+    const whodunnitPreviewIsDefault = whodunnitPreviewItems.every(
+      (item) =>
+        JSON.stringify(stageAlignmentDraft.whodunnitCourt[item]) ===
+        JSON.stringify(DEFAULT_DEBATE_STAGE_ALIGNMENT.whodunnitCourt[item]),
+    );
+    const juryPreviewIsDefault =
+      JSON.stringify(stageAlignmentDraft.juryChamber) ===
+      JSON.stringify(DEFAULT_DEBATE_STAGE_ALIGNMENT.juryChamber);
+    const juryPreviewItems: Array<{
+      key: string;
+      label: string;
+      placement: DebateStageWhodunnitPlacementV1;
+      defaultPlacement: DebateStageWhodunnitPlacementV1;
+      update: (
+        current: DebateStageAlignmentV14,
+        value: Partial<DebateStageWhodunnitPlacementV1>,
+      ) => DebateStageAlignmentV14;
+    }> = [
+      ...([0, 1, 2, 3, 4] as const).map((memberIndex) => ({
+        key: `member-${memberIndex}`,
+        label: memberIndex === 0 ? "Foreperson" : `Juror ${memberIndex + 1}`,
+        placement: stageAlignmentDraft.juryChamber.members[memberIndex],
+        defaultPlacement:
+          DEFAULT_DEBATE_STAGE_ALIGNMENT.juryChamber.members[memberIndex],
+        update: (
+          current: DebateStageAlignmentV14,
+          value: Partial<DebateStageWhodunnitPlacementV1>,
+        ) =>
+          updateDebateStageJuryMemberPlacement(
+            current,
+            memberIndex as DebateStageJuryMemberIndex,
+            value,
+          ),
+      })),
+      ...(["evidenceTable", "votes"] as const).map((item) => ({
+        key: item,
+        label: item === "evidenceTable" ? "Evidence table" : "Vote display",
+        placement: stageAlignmentDraft.juryChamber[item],
+        defaultPlacement: DEFAULT_DEBATE_STAGE_ALIGNMENT.juryChamber[item],
+        update: (
+          current: DebateStageAlignmentV14,
+          value: Partial<DebateStageWhodunnitPlacementV1>,
+        ) => updateDebateStageJuryPlacement(current, item, value),
+      })),
+    ];
     const stageAlignmentPreviewCameraLabel =
       stageAlignmentPreviewCamera === "wide"
         ? "Wide"
@@ -24748,10 +25195,13 @@ export function DebateExperience(
         stageAlignmentPreviewEvidenceKind,
         stageAlignmentPreviewEvidenceEmoji,
       );
-    const previewIsDefault =
-      placementIsDefault &&
-      evidenceTableIsDefault &&
-      (stageAlignmentPreviewCamera !== "moderator" || gavelIsDefault);
+    const previewIsDefault = stageAlignmentJuryPreview
+      ? juryPreviewIsDefault
+      : stageAlignmentWhodunnitPreview
+        ? whodunnitPreviewIsDefault
+      : placementIsDefault &&
+        evidenceTableIsDefault &&
+        (stageAlignmentPreviewCamera !== "moderator" || gavelIsDefault);
     const lightBlendModesAreDefault = (["dark", "light"] as const).every(
       (theme) =>
         stageAlignmentDraft.lightBlendModes[theme] ===
@@ -24848,13 +25298,13 @@ export function DebateExperience(
               <div>
                 <span className={styles.eyebrow}>Stage layout</span>
                 <h2 id="debate-stage-alignment-title">
-                  Main stage layout
+                  Stage alignment
                 </h2>
                 <p>
-                  Place every Forum element directly. Save the Main layout for
-                  this account and device; live presentation and replay use that
-                  saved Main layout. Copy Main defaults instead copies a
-                  source-ready V14 block and never changes shipped defaults.
+                  Place Forum, Court, and Jury elements directly. Save one
+                  layout for this account and device; live presentation and
+                  replay share it. Copy alignment defaults exports a
+                  source-ready V14 block without changing shipped defaults.
                 </p>
               </div>
               <div>
@@ -24881,7 +25331,7 @@ export function DebateExperience(
                       ? "Copied"
                       : stageAlignmentCopyState === "failed"
                         ? "Copy failed"
-                        : "Copy Main defaults"}
+                        : "Copy alignment defaults"}
                 </button>
                 <button type="button" onClick={cancelStageAlignment}>
                   Cancel
@@ -24899,12 +25349,20 @@ export function DebateExperience(
             <div className={styles.alignmentModalBody}>
               <div className={styles.alignmentEditorHeader}>
                 <p>
-                  {stageAlignmentPreviewCamera === "moderator"
+                  {stageAlignmentJuryPreview
+                    ? "Place each juror independently, then align the Jury chamber evidence table and public vote display."
+                    : stageAlignmentWhodunnitPreview === "wide"
+                    ? "Place the Whodunnit evidence table and witness silhouette in the locked courtroom establishing shot."
+                    : stageAlignmentWhodunnitPreview === "witness"
+                      ? "Place the witness, both live counsel minis, and the witness identity plate in the locked testimony camera."
+                      : stageAlignmentPreviewCamera === "moderator"
                     ? "Place the moderator bot, nameplate, and glyph plate independently from Main."
                     : stageAlignmentPreviewCamera === "wide"
                       ? "Place every bot, nameplate, and glyph plate in the Main Forum without changing the close-ups."
                       : `Place the source pamphlet and exhibit independently in the ${stageAlignmentPreviewCameraLabel} debater close-up.`}{" "}
-                  {stageAlignmentEvidenceOnlyCamera
+                  {stageAlignmentJuryPreview || stageAlignmentWhodunnitPreview
+                    ? "Use the exact position and scale controls below; all values save with this account's Stage Alignment preset."
+                    : stageAlignmentEvidenceOnlyCamera
                     ? "Use the evidence controls below to position and scale the active asset, or calibrate the Moderator micro avatar."
                     : "Drag an item or use arrow keys to nudge by 0.5%; hold Shift for 2%. Select the active item in the exact controls below."}
                 </p>
@@ -24922,7 +25380,11 @@ export function DebateExperience(
                             stageAlignmentPreviewCamera === previewCamera
                           }
                           onClick={() =>
-                            setStageAlignmentPreviewCamera(previewCamera)
+                            {
+                              setStageAlignmentWhodunnitPreview(null);
+                              setStageAlignmentJuryPreview(false);
+                              setStageAlignmentPreviewCamera(previewCamera);
+                            }
                           }
                           key={previewCamera}
                         >
@@ -24936,6 +25398,36 @@ export function DebateExperience(
                         </button>
                       ),
                     )}
+                    <button
+                      type="button"
+                      aria-pressed={stageAlignmentWhodunnitPreview === "wide"}
+                      onClick={() => {
+                        setStageAlignmentJuryPreview(false);
+                        setStageAlignmentWhodunnitPreview("wide");
+                      }}
+                    >
+                      Court wide
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={stageAlignmentWhodunnitPreview === "witness"}
+                      onClick={() => {
+                        setStageAlignmentJuryPreview(false);
+                        setStageAlignmentWhodunnitPreview("witness");
+                      }}
+                    >
+                      Witness
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={stageAlignmentJuryPreview}
+                      onClick={() => {
+                        setStageAlignmentWhodunnitPreview(null);
+                        setStageAlignmentJuryPreview(true);
+                      }}
+                    >
+                      Jury
+                    </button>
                   </div>
                   <div
                     className={styles.alignmentThemeToggle}
@@ -24961,7 +25453,27 @@ export function DebateExperience(
                     type="button"
                     onClick={() =>
                       setStageAlignmentDraft((current) =>
-                        stageAlignmentEvidenceOnlyCamera
+                        stageAlignmentJuryPreview
+                          ? normalizeDebateStageAlignment({
+                              ...current,
+                              juryChamber:
+                                DEFAULT_DEBATE_STAGE_ALIGNMENT.juryChamber,
+                            })
+                          : stageAlignmentWhodunnitPreview
+                          ? normalizeDebateStageAlignment({
+                              ...current,
+                              whodunnitCourt: {
+                                ...current.whodunnitCourt,
+                                ...Object.fromEntries(
+                                  whodunnitPreviewItems.map((item) => [
+                                    item,
+                                    DEFAULT_DEBATE_STAGE_ALIGNMENT
+                                      .whodunnitCourt[item],
+                                  ]),
+                                ),
+                              },
+                            })
+                          : stageAlignmentEvidenceOnlyCamera
                           ? normalizeDebateStageAlignment({
                               ...current,
                               moderatorMicroScales: {
@@ -25030,7 +25542,11 @@ export function DebateExperience(
                     }
                     disabled={previewIsDefault}
                   >
-                    {stageAlignmentPreviewCamera === "moderator"
+                    {stageAlignmentJuryPreview
+                      ? "Reset Jury"
+                      : stageAlignmentWhodunnitPreview
+                      ? "Reset Court view"
+                      : stageAlignmentPreviewCamera === "moderator"
                       ? "Reset moderator"
                       : stageAlignmentPreviewCamera === "wide"
                       ? "Reset Main"
@@ -25038,7 +25554,14 @@ export function DebateExperience(
                   </button>
                 </div>
               </div>
-              <div className={styles.alignmentViewportColumn}>
+              <div
+                className={styles.alignmentViewportColumn}
+                data-whodunnit-preview={
+                  stageAlignmentJuryPreview
+                    ? "jury"
+                    : (stageAlignmentWhodunnitPreview ?? undefined)
+                }
+              >
                 <div
                   className={`${styles.live} ${styles.alignmentPreviewThemeScope}`}
                   data-theme={stageAlignmentPreviewTheme}
@@ -25056,7 +25579,306 @@ export function DebateExperience(
                     className={`${styles.forum} ${styles.alignmentForum}`}
                     data-debate-alignment-stage="true"
                     data-debate-stage-viewport="alignment"
+                    data-whodunnit-court-preview={
+                      stageAlignmentJuryPreview
+                        ? "jury"
+                        : (stageAlignmentWhodunnitPreview ?? undefined)
+                    }
                   >
+                    {stageAlignmentJuryPreview ? (
+                      <div
+                        className={styles.juryChamber}
+                        data-jury-cadence="natural-five"
+                        data-phase="complete"
+                        data-theme={stageAlignmentPreviewTheme}
+                        style={debateStageAlignmentStyle(stageAlignmentDraft)}
+                        aria-label="Jury chamber alignment preview"
+                      >
+                        <div
+                          className={styles.juryChamberAura}
+                          aria-hidden="true"
+                        />
+                        <div className={styles.juryChamberBots}>
+                          {[
+                            moderatorBot,
+                            forBot,
+                            againstBot,
+                            forBot,
+                            againstBot,
+                          ].map((bot, index) => {
+                            const role: DebateStageAlignmentRole =
+                              index === 0
+                                ? "moderator"
+                                : index % 2
+                                  ? "for"
+                                  : "against";
+                            return (
+                              <div
+                                className={styles.juryChamberSeat}
+                                data-seat={index}
+                                data-visibility="visible"
+                                data-scale="normal"
+                                key={`alignment-juror:${index}`}
+                                style={{
+                                  "--jury-seat-color":
+                                    bot.color ?? DEBATE_GALLERY_COLORS[index],
+                                } as CSSProperties}
+                              >
+                                <div className={styles.juryChamberAvatar}>
+                                  {renderAlignmentCourtAvatar(
+                                    bot,
+                                    role,
+                                    "full",
+                                  )}
+                                </div>
+                                <div className={styles.juryChamberIdentity}>
+                                  <small>
+                                    {index === 0 ? "Foreperson · " : ""}
+                                    {bot.name}
+                                  </small>
+                                  <span data-side={index < 3 ? "for" : "against"}>
+                                    Voted {index < 3 ? "For" : "Against"}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div
+                          className={styles.juryVoteBoard}
+                          role="status"
+                          aria-label="Preview vote: For 3, Against 2"
+                        >
+                          <div className={styles.juryVoteSide} data-side="for">
+                            <span>For</span>
+                            <strong>3</strong>
+                          </div>
+                          <div
+                            className={styles.juryVoteProgress}
+                            aria-hidden="true"
+                          >
+                            {["for", "for", "for", "against", "against"].map(
+                              (side, index) => (
+                                <span
+                                  data-cast="true"
+                                  data-side={side}
+                                  key={`alignment-jury-vote:${index}`}
+                                >
+                                  {side === "for" ? "F" : "A"}
+                                </span>
+                              ),
+                            )}
+                            <small>5 / 5 jurors</small>
+                          </div>
+                          <div
+                            className={styles.juryVoteSide}
+                            data-side="against"
+                          >
+                            <span>Against</span>
+                            <strong>2</strong>
+                          </div>
+                        </div>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          className={styles.juryTableRaster}
+                          src={`/coffee-table/table_${stageAlignmentPreviewTheme}.png`}
+                          alt="Evidence table"
+                        />
+                        <div className={styles.jurySeal} aria-hidden="true">
+                          <span>◇</span>
+                          <strong>Jury Chamber</strong>
+                          <small>Alignment preview</small>
+                        </div>
+                      </div>
+                    ) : null}
+                    {stageAlignmentWhodunnitPreview ? (
+                      <div
+                        className={`${mysteryV2Styles.court} ${styles.alignmentWhodunnitCourtPreview}`}
+                        data-theme={stageAlignmentPreviewTheme}
+                        style={debateStageAlignmentStyle(stageAlignmentDraft)}
+                      >
+                        <section
+                          className={mysteryV2Styles.courtStage}
+                          data-camera={stageAlignmentWhodunnitPreview}
+                          aria-label={
+                            stageAlignmentWhodunnitPreview === "wide"
+                              ? "Whodunnit Court wide alignment preview"
+                              : "Whodunnit witness alignment preview"
+                          }
+                          style={{ position: "absolute", inset: 0 }}
+                        >
+                          <div
+                            className={mysteryV2Styles.courtBackdrop}
+                            aria-hidden="true"
+                          />
+                          {stageAlignmentWhodunnitPreview === "wide" ? (
+                            <div
+                              className={mysteryV2Styles.wideCourtComposition}
+                            >
+                              <article
+                                className={mysteryV2Styles.wideCourtPresence}
+                                data-role="prosecution"
+                                style={{
+                                  "--court-presence-color":
+                                    forBot.color ?? "#72d7ff",
+                                } as CSSProperties}
+                              >
+                                {renderAlignmentCourtAvatar(
+                                  forBot,
+                                  "for",
+                                  "mini",
+                                )}
+                                <small>Prosecution</small>
+                              </article>
+                              <article
+                                className={mysteryV2Styles.wideCourtPresence}
+                                data-role="judge"
+                                style={{
+                                  "--court-presence-color":
+                                    moderatorBot.color ?? "#d5c8ff",
+                                } as CSSProperties}
+                              >
+                                {renderAlignmentCourtAvatar(
+                                  moderatorBot,
+                                  "moderator",
+                                  "mini",
+                                )}
+                                <small>Judge</small>
+                              </article>
+                              <article
+                                className={mysteryV2Styles.wideCourtPresence}
+                                data-role="defense"
+                                style={{
+                                  "--court-presence-color":
+                                    againstBot.color ?? "#ff7eaa",
+                                } as CSSProperties}
+                              >
+                                {renderAlignmentCourtAvatar(
+                                  againstBot,
+                                  "against",
+                                  "mini",
+                                )}
+                                <small>Defense</small>
+                              </article>
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                className={mysteryV2Styles.wideEvidenceTable}
+                                src={`/coffee-table/table_${stageAlignmentPreviewTheme}.png`}
+                                alt="Evidence table"
+                              />
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                className={mysteryV2Styles.wideWitnessSilhouette}
+                                src="/debate/whodunnit-witness-silhouette.png"
+                                alt="Witness silhouette"
+                              />
+                            </div>
+                          ) : (
+                            <>
+                              <div
+                                className={mysteryV2Styles.galleryRail}
+                                aria-hidden="true"
+                              />
+                              <section
+                                className={mysteryV2Styles.counselComposition}
+                                aria-label="Court counsel minis"
+                              >
+                                <article
+                                  className={mysteryV2Styles.counselSeat}
+                                  data-side="prosecution"
+                                  style={{
+                                    "--counsel-color":
+                                      forBot.color ?? "#72d7ff",
+                                  } as CSSProperties}
+                                >
+                                  <div
+                                    className={mysteryV2Styles.counselAvatar}
+                                  >
+                                    {renderAlignmentCourtAvatar(
+                                      forBot,
+                                      "for",
+                                      "mini",
+                                    )}
+                                  </div>
+                                  <i
+                                    className={mysteryV2Styles.counselGlyph}
+                                    aria-hidden="true"
+                                  >
+                                    {props.renderBotGlyph(forBot.glyph, {
+                                      size: 26,
+                                      strokeWidth: 1.5,
+                                    })}
+                                  </i>
+                                  <div
+                                    className={mysteryV2Styles.counselIdentity}
+                                  >
+                                    <small>Player Prosecutor</small>
+                                    <strong>{forBot.name}</strong>
+                                  </div>
+                                </article>
+                                <article
+                                  className={mysteryV2Styles.counselSeat}
+                                  data-side="defense"
+                                  style={{
+                                    "--counsel-color":
+                                      againstBot.color ?? "#ff7eaa",
+                                  } as CSSProperties}
+                                >
+                                  <div
+                                    className={mysteryV2Styles.counselAvatar}
+                                  >
+                                    {renderAlignmentCourtAvatar(
+                                      againstBot,
+                                      "against",
+                                      "mini",
+                                    )}
+                                  </div>
+                                  <i
+                                    className={mysteryV2Styles.counselGlyph}
+                                    aria-hidden="true"
+                                  >
+                                    {props.renderBotGlyph(againstBot.glyph, {
+                                      size: 26,
+                                      strokeWidth: 1.5,
+                                    })}
+                                  </i>
+                                  <div
+                                    className={mysteryV2Styles.counselIdentity}
+                                  >
+                                    <small>Defense Counsel</small>
+                                    <strong>{againstBot.name}</strong>
+                                  </div>
+                                </article>
+                              </section>
+                              <section
+                                className={mysteryV2Styles.witnessStand}
+                                style={{
+                                  "--witness-color":
+                                    moderatorBot.color ?? "#a98cff",
+                                } as CSSProperties}
+                              >
+                                <div
+                                  className={mysteryV2Styles.witnessAvatar}
+                                >
+                                  {renderAlignmentCourtAvatar(
+                                    moderatorBot,
+                                    "moderator",
+                                    "full",
+                                  )}
+                                </div>
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  className={mysteryV2Styles.witnessStandAsset}
+                                  src={`/debate/whodunnit-witness-foreground-${stageAlignmentPreviewTheme}.png`}
+                                  alt=""
+                                  aria-hidden="true"
+                                />
+                              </section>
+                            </>
+                          )}
+                        </section>
+                      </div>
+                    ) : null}
                     <div
                       className={styles.forumCamera}
                       data-camera-view={stageAlignmentPreviewCamera}
@@ -25308,6 +26130,281 @@ export function DebateExperience(
                     </div>
                   </div>
                 </div>
+                {stageAlignmentJuryPreview ? (
+                  <section
+                    className={styles.alignmentWhodunnitTuner}
+                    aria-label="Jury chamber alignment controls"
+                    data-debate-jury-alignment="true"
+                  >
+                    <header>
+                      <div>
+                        <span className={styles.eyebrow}>Jury camera</span>
+                        <strong>Members, evidence table, and votes</strong>
+                        <small>
+                          Each juror has an independent X, Y, and scale.
+                        </small>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={juryPreviewIsDefault}
+                        onClick={() =>
+                          setStageAlignmentDraft((current) =>
+                            normalizeDebateStageAlignment({
+                              ...current,
+                              juryChamber:
+                                DEFAULT_DEBATE_STAGE_ALIGNMENT.juryChamber,
+                            }),
+                          )
+                        }
+                      >
+                        Reset Jury
+                      </button>
+                    </header>
+                    <div className={styles.alignmentWhodunnitRows}>
+                      {juryPreviewItems.map((item) => (
+                        <article
+                          className={styles.alignmentWhodunnitItem}
+                          key={item.key}
+                        >
+                          <header>
+                            <strong>{item.label}</strong>
+                            <button
+                              type="button"
+                              disabled={
+                                JSON.stringify(item.placement) ===
+                                JSON.stringify(item.defaultPlacement)
+                              }
+                              onClick={() =>
+                                setStageAlignmentDraft((current) =>
+                                  item.update(current, item.defaultPlacement),
+                                )
+                              }
+                            >
+                              Reset
+                            </button>
+                          </header>
+                          {(
+                            [
+                              {
+                                key: "x",
+                                label: "Horizontal",
+                                min: DEBATE_STAGE_WHODUNNIT_POSITION_MIN,
+                                max: DEBATE_STAGE_WHODUNNIT_POSITION_MAX,
+                                step: DEBATE_STAGE_WHODUNNIT_POSITION_STEP,
+                              },
+                              {
+                                key: "y",
+                                label: "Vertical",
+                                min: DEBATE_STAGE_WHODUNNIT_POSITION_MIN,
+                                max: DEBATE_STAGE_WHODUNNIT_POSITION_MAX,
+                                step: DEBATE_STAGE_WHODUNNIT_POSITION_STEP,
+                              },
+                              {
+                                key: "scale",
+                                label: "Scale",
+                                min: DEBATE_STAGE_WHODUNNIT_SCALE_MIN,
+                                max: DEBATE_STAGE_WHODUNNIT_SCALE_MAX,
+                                step: DEBATE_STAGE_WHODUNNIT_SCALE_STEP,
+                              },
+                            ] as const
+                          ).map((control) => (
+                            <label key={control.key}>
+                              <span>
+                                {control.label}
+                                <output>
+                                  {control.key !== "scale" &&
+                                  item.placement[control.key] > 0
+                                    ? "+"
+                                    : ""}
+                                  {item.placement[control.key].toFixed(
+                                    control.key === "scale" ? 0 : 1,
+                                  )}
+                                  %
+                                </output>
+                              </span>
+                              <input
+                                type="range"
+                                min={control.min}
+                                max={control.max}
+                                step={control.step}
+                                value={item.placement[control.key]}
+                                aria-label={`${item.label} ${control.label.toLowerCase()}`}
+                                onChange={(event) => {
+                                  const nextValue = Number(
+                                    event.currentTarget.value,
+                                  );
+                                  setStageAlignmentDraft((current) =>
+                                    item.update(current, {
+                                      [control.key]: nextValue,
+                                    }),
+                                  );
+                                }}
+                              />
+                            </label>
+                          ))}
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                ) : null}
+                {stageAlignmentWhodunnitPreview ? (
+                  <section
+                    className={styles.alignmentWhodunnitTuner}
+                    aria-label="Whodunnit Court alignment controls"
+                    data-debate-whodunnit-alignment={
+                      stageAlignmentWhodunnitPreview
+                    }
+                  >
+                    <header>
+                      <div>
+                        <span className={styles.eyebrow}>Whodunnit Court</span>
+                        <strong>
+                          {stageAlignmentWhodunnitPreview === "wide"
+                            ? "Wide angle view"
+                            : "Witness stand view"}
+                        </strong>
+                        <small>
+                          Locked camera composition · saved with Stage Alignment
+                        </small>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={whodunnitPreviewIsDefault}
+                        onClick={() =>
+                          setStageAlignmentDraft((current) =>
+                            normalizeDebateStageAlignment({
+                              ...current,
+                              whodunnitCourt: {
+                                ...current.whodunnitCourt,
+                                ...Object.fromEntries(
+                                  whodunnitPreviewItems.map((item) => [
+                                    item,
+                                    DEFAULT_DEBATE_STAGE_ALIGNMENT
+                                      .whodunnitCourt[item],
+                                  ]),
+                                ),
+                              },
+                            }),
+                          )
+                        }
+                      >
+                        Reset view
+                      </button>
+                    </header>
+                    <div className={styles.alignmentWhodunnitRows}>
+                      {whodunnitPreviewItems.map((item) => {
+                        const placement =
+                          stageAlignmentDraft.whodunnitCourt[item];
+                        const defaultPlacement =
+                          DEFAULT_DEBATE_STAGE_ALIGNMENT.whodunnitCourt[item];
+                        const controls: ReadonlyArray<{
+                          key: "x" | "y" | "scale";
+                          label: string;
+                          min: number;
+                          max: number;
+                          step: number;
+                          unit: string;
+                        }> = [
+                          ...(item === "witness"
+                            ? []
+                            : [
+                                {
+                                  key: "x" as const,
+                                  label: "Horizontal",
+                                  min: DEBATE_STAGE_WHODUNNIT_POSITION_MIN,
+                                  max: DEBATE_STAGE_WHODUNNIT_POSITION_MAX,
+                                  step: DEBATE_STAGE_WHODUNNIT_POSITION_STEP,
+                                  unit: "%",
+                                },
+                              ]),
+                          {
+                            key: "y" as const,
+                            label: "Vertical",
+                            min: DEBATE_STAGE_WHODUNNIT_POSITION_MIN,
+                            max: DEBATE_STAGE_WHODUNNIT_POSITION_MAX,
+                            step: DEBATE_STAGE_WHODUNNIT_POSITION_STEP,
+                            unit: "%",
+                          },
+                          {
+                            key: "scale" as const,
+                            label: "Scale",
+                            min: DEBATE_STAGE_WHODUNNIT_SCALE_MIN,
+                            max: DEBATE_STAGE_WHODUNNIT_SCALE_MAX,
+                            step: DEBATE_STAGE_WHODUNNIT_SCALE_STEP,
+                            unit: "%",
+                          },
+                        ];
+                        return (
+                          <article
+                            className={styles.alignmentWhodunnitItem}
+                            key={item}
+                          >
+                            <header>
+                              <strong>{whodunnitPreviewItemLabels[item]}</strong>
+                              <button
+                                type="button"
+                                disabled={
+                                  JSON.stringify(placement) ===
+                                  JSON.stringify(defaultPlacement)
+                                }
+                                onClick={() =>
+                                  setStageAlignmentDraft((current) =>
+                                    updateDebateStageWhodunnitCourtPlacement(
+                                      current,
+                                      item,
+                                      defaultPlacement,
+                                    ),
+                                  )
+                                }
+                              >
+                                Reset
+                              </button>
+                            </header>
+                            {controls.map((control) => (
+                              <label key={control.key}>
+                                <span>
+                                  {control.label}
+                                  <output>
+                                    {control.key !== "scale" &&
+                                    placement[control.key] > 0
+                                      ? "+"
+                                      : ""}
+                                    {placement[control.key].toFixed(
+                                      control.key === "scale" ? 0 : 1,
+                                    )}
+                                    {control.unit}
+                                  </output>
+                                </span>
+                                <input
+                                  type="range"
+                                  min={control.min}
+                                  max={control.max}
+                                  step={control.step}
+                                  value={placement[control.key]}
+                                  aria-label={`${whodunnitPreviewItemLabels[item]} ${control.label.toLowerCase()}`}
+                                  onChange={(event) => {
+                                    const nextValue = Number(
+                                      event.currentTarget.value,
+                                    );
+                                    setStageAlignmentDraft((current) =>
+                                      updateDebateStageWhodunnitCourtPlacement(
+                                        current,
+                                        item,
+                                        {
+                                          [control.key]: nextValue,
+                                        },
+                                      ),
+                                    );
+                                  }}
+                                />
+                              </label>
+                            ))}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ) : null}
                 <section
                   className={styles.alignmentVoiceMixer}
                   aria-label="Debate stage voice mixer"
@@ -29744,6 +30841,8 @@ export function DebateExperience(
     theme: props.theme,
     audioEnabled: props.audioEnabled,
     audioVolume: props.audioVolume,
+    whodunnitTextVoiceMode: props.whodunnitTextVoiceMode,
+    playMysteryTextVoice: props.playMysteryTextVoice,
     request,
     renderBotGlyph: props.renderBotGlyph,
     renderMysteryBotAvatar: (
@@ -29892,6 +30991,7 @@ export function DebateExperience(
         }}
       /> : <DebateMysteryV2Play
         {...mysterySharedProps}
+        stageAlignmentStyle={debateStageAlignmentStyle(stageAlignment)}
         session={activeSession}
         onSessionChange={adoptMysterySessionChange}
         onSaveMansion={async () => {

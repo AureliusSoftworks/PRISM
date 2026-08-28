@@ -41,6 +41,10 @@ const css = readFileSync(
   fileURLToPath(new URL("./DebateExperience.module.css", import.meta.url)),
   "utf8",
 );
+const mysteryV2Css = readFileSync(
+  fileURLToPath(new URL("./debateMysteryV2.module.css", import.meta.url)),
+  "utf8",
+);
 const archiveAssetsSource = readFileSync(
   fileURLToPath(new URL("./DebateArchiveAssetsModal.tsx", import.meta.url)),
   "utf8",
@@ -68,6 +72,13 @@ it("annotates routed Debate turns and publishes the newest Auto route", () => {
   assert.match(source, /Recovered after \$\{attempts\}/u);
   assert.match(source, /latestDebateActualAutoRoute\(activeSession\)/u);
   assert.match(source, /onActualAutoRouteChange\?\.\(/u);
+});
+
+it("keeps DOM frame diagnostics active for Whodunnit playback", () => {
+  assert.match(
+    source,
+    /useDebateDomPerformance\(\{[\s\S]{0,180}active:\s*\(view === "live" \|\| view === "mystery"\)[\s\S]{0,120}activeSession\.status !== "paused"/u,
+  );
 });
 const pageCss = readFileSync(
   fileURLToPath(new URL("./page.module.css", import.meta.url)),
@@ -1809,7 +1820,7 @@ describe("Debate experience", () => {
       source,
       /data-alignment-source=\{session \? "session" : "dashboard"\}/u,
     );
-    assert.match(source, /Place every Forum element directly/u);
+    assert.match(source, /Place Forum, Court, and Jury elements directly/u);
     assert.match(
       source,
       /const randomized = debateAlignmentPreviewCast\(\s*stageAlignmentCastCandidates\.map/u,
@@ -3442,7 +3453,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /src=\{`\/debate\/overview-table-\$\{props\.theme\}\.png`\}/u,
+      /src=\{`\/coffee-table\/table_\$\{props\.theme\}\.png`\}/u,
     );
     assert.match(source, /className=\{styles\.juryChamberBots\}/u);
     assert.match(source, /className=\{styles\.juryTableRaster\}/u);
@@ -3623,7 +3634,7 @@ describe("Debate experience", () => {
     assert.equal(
       existsSync(
         fileURLToPath(
-          new URL("../../public/debate/overview-table-light.png", import.meta.url),
+          new URL("../../public/coffee-table/table_light.png", import.meta.url),
         ),
       ),
       true,
@@ -3631,7 +3642,7 @@ describe("Debate experience", () => {
     assert.equal(
       existsSync(
         fileURLToPath(
-          new URL("../../public/debate/overview-table-dark.png", import.meta.url),
+          new URL("../../public/coffee-table/table_dark.png", import.meta.url),
         ),
       ),
       true,
@@ -5420,7 +5431,7 @@ describe("Debate experience", () => {
     assert.match(source, /aria-label="More stage controls"/u);
     assert.match(source, /className=\{styles\.cameraAdvanced\}/u);
     assert.match(source, /data-debate-stage-alignment-modal="true"/u);
-    assert.match(source, /Main stage layout/u);
+    assert.match(source, /Stage alignment/u);
     assert.match(source, /Save alignment/u);
     assert.match(source, /data-debate-alignment-voice-mixer="true"/u);
     assert.match(source, /Moderator mini avatar/u);
@@ -5458,6 +5469,45 @@ describe("Debate experience", () => {
     assert.match(source, /\(\["light", "dark"\] as const\)/u);
     assert.match(source, /\["wide", "left", "moderator", "right"\] as const/u);
     assert.match(source, /aria-label="Debate alignment preview camera"/u);
+    assert.match(source, /Court wide/u);
+    assert.match(source, /Witness/u);
+    assert.match(source, /Jury/u);
+    assert.match(source, /data-debate-whodunnit-alignment=/u);
+    assert.match(source, /data-debate-jury-alignment="true"/u);
+    assert.match(source, /updateDebateStageWhodunnitCourtPlacement/u);
+    assert.match(source, /updateDebateStageJuryMemberPlacement/u);
+    assert.match(source, /updateDebateStageJuryPlacement/u);
+    assert.match(source, /Each juror has an independent X, Y, and scale/u);
+    assert.match(source, /coffee-table\/table_\$\{stageAlignmentPreviewTheme\}\.png/u);
+    assert.doesNotMatch(source, /src=\{`\/debate\/overview-table-/u);
+    assert.match(css, /--debate-jury-member-0-offset-x/u);
+    assert.match(css, /--debate-jury-evidence-table-scale/u);
+    assert.match(css, /--debate-jury-votes-offset-y/u);
+    assert.match(
+      css,
+      /\.alignmentModalBody:has\(\.alignmentViewportColumn\[data-whodunnit-preview\]\)\s*\{[^}]*overflow:\s*hidden/u,
+    );
+    assert.match(
+      css,
+      /\.alignmentViewportColumn\[data-whodunnit-preview\]\s*\{[^}]*grid-template-columns:/u,
+    );
+    assert.match(
+      css,
+      /\.alignmentViewportColumn\[data-whodunnit-preview\][\s\S]{0,1400}grid-column:\s*3/u,
+    );
+    assert.match(
+      mysteryV2Css,
+      /:global\(\[data-whodunnit-court-preview\]\) \.witnessAvatar \{[^}]*bottom:\s*36%[^}]*width:\s*23%[^}]*height:\s*49%/u,
+    );
+    assert.match(
+      source,
+      /stageAlignmentWhodunnitPreview === "witness"\s*\? \[\s*"witness",\s*"prosecutionMini",\s*"defenseMini",\s*\]/u,
+    );
+    assert.doesNotMatch(source, /className=\{mysteryV2Styles\.witnessIdentity/u);
+    assert.match(
+      mysteryV2Css,
+      /:global\(\[data-whodunnit-court-preview\]\) \.wideEvidenceTable \{[^}]*bottom:\s*-4%[^}]*width:\s*42%/u,
+    );
     assert.match(source, /data-camera-view=\{stageAlignmentPreviewCamera\}/u);
     assert.match(source, /type DebateStageEvidenceView/u);
     assert.match(source, /stageAlignmentEvidenceOnlyCamera/u);
@@ -5520,11 +5570,11 @@ describe("Debate experience", () => {
       source,
       /updateStageAlignmentTarget\(\s*target,\s*defaultOffset,\s*\)/u,
     );
-    assert.match(source, /Copy Main defaults/u);
+    assert.match(source, /Copy alignment defaults/u);
     assert.match(source, /\? "Copied"/u);
     assert.match(
       source,
-      /Save the Main layout for\s*this account and device; live presentation and replay use that\s*saved Main layout\. Copy Main defaults instead copies a\s*source-ready V14 block and never changes shipped defaults\./u,
+      /Place Forum, Court, and Jury elements directly\. Save one\s*layout for this account and device; live presentation and\s*replay share it\. Copy alignment defaults exports a\s*source-ready V14 block without changing shipped defaults\./u,
     );
     assert.match(source, /formatDebateStageAlignmentClipboard/u);
     assert.match(source, /type="range"/u);
@@ -5737,7 +5787,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       css,
-      /\.alignmentLightingTuner,\n\.alignmentVoiceMixer\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\) auto/u,
+      /\.alignmentLightingTuner,[\s\S]{0,120}\.alignmentVoiceMixer,[\s\S]{0,120}\.alignmentWhodunnitTuner\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\) auto/u,
     );
     assert.match(
       css,
@@ -5855,8 +5905,8 @@ describe("Debate experience", () => {
     assert.match(source, /async function preloadDebateOpeningSceneAssets/u);
     assert.match(
       source,
-      /DEBATE_SCENE_RASTERS_BY_THEME[\s\S]{0,700}forum-light-mask\.png[\s\S]{0,500}overview-table-dark\.png/u,
-      "dark openings preload the CSS masks and later Jury camera table too",
+      /DEBATE_SCENE_RASTERS_BY_THEME[\s\S]{0,700}forum-light-mask\.png[\s\S]{0,500}coffee-table\/table_dark\.png/u,
+      "dark openings preload the CSS masks and transparent Jury table too",
     );
     assert.match(
       source,
