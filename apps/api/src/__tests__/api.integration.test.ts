@@ -1934,6 +1934,79 @@ describe("API request integration", () => {
     assert.equal(clearedPayload.settings.braveSearchApiKeySource, "none");
   });
 
+  it("stores Ollama Cloud credentials encrypted, account-scoped, and clearable", async () => {
+    const first = createClient();
+    const second = createClient();
+    const plaintext = "ollama-cloud-integration-secret";
+    assert.equal(
+      (
+        await first.request(
+          "/api/auth/register",
+          jsonInit({
+            username: "ollama-cloud-first@example.com",
+            password: "ollama-cloud-first-password",
+          }),
+        )
+      ).status,
+      201,
+    );
+    assert.equal(
+      (
+        await second.request(
+          "/api/auth/register",
+          jsonInit({
+            username: "ollama-cloud-second@example.com",
+            password: "ollama-cloud-second-password",
+          }),
+        )
+      ).status,
+      201,
+    );
+
+    const saved = await first.request("/api/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ollamaCloudApiKey: plaintext }),
+    });
+    const savedText = await saved.text();
+    assert.equal(saved.status, 200, savedText);
+    assert.equal(savedText.includes(plaintext), false);
+    const savedPayload = JSON.parse(savedText);
+    assert.equal(savedPayload.settings.hasOllamaCloudApiKey, true);
+    assert.equal(savedPayload.settings.ollamaCloudApiKeySource, "saved");
+    assert.equal("ollamaCloudApiKey" in savedPayload.settings, false);
+
+    const row = db
+      .prepare(
+        `SELECT ollama_cloud_key_ciphertext, ollama_cloud_key_iv,
+                ollama_cloud_key_tag
+           FROM users WHERE email = ?`,
+      )
+      .get("ollama-cloud-first@example.com") as {
+        ollama_cloud_key_ciphertext: string | null;
+        ollama_cloud_key_iv: string | null;
+        ollama_cloud_key_tag: string | null;
+      };
+    assert.ok(row.ollama_cloud_key_ciphertext);
+    assert.notEqual(row.ollama_cloud_key_ciphertext, plaintext);
+    assert.ok(row.ollama_cloud_key_iv);
+    assert.ok(row.ollama_cloud_key_tag);
+
+    const secondSettings = await json(await second.request("/api/settings"));
+    assert.equal(secondSettings.settings.hasOllamaCloudApiKey, false);
+    assert.equal(secondSettings.settings.ollamaCloudApiKeySource, "none");
+
+    const cleared = await first.request("/api/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ollamaCloudApiKey: null }),
+    });
+    assert.equal(cleared.status, 200);
+    const clearedPayload = await json(cleared);
+    assert.equal(clearedPayload.settings.hasOllamaCloudApiKey, false);
+    assert.equal(clearedPayload.settings.ollamaCloudApiKeySource, "none");
+  });
+
   it("persists and resets per-model effort profiles through Settings", async () => {
     const client = createClient();
     const register = await client.request(

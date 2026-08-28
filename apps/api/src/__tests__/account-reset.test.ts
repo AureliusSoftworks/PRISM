@@ -112,7 +112,8 @@ describe("restoreFactoryDefaultsInDatabase", () => {
             prism_default_bot_repetition_penalty,
             prism_default_llm_model, prism_image_tool_llm_model,
             dev_memories_enabled, dev_memories_text, openai_key_ciphertext,
-            anthropic_key_ciphertext, elevenlabs_key_ciphertext,
+            anthropic_key_ciphertext, ollama_cloud_key_ciphertext,
+            elevenlabs_key_ciphertext,
             brave_search_key_ciphertext, last_active_at
           FROM users
           WHERE id = ?
@@ -230,6 +231,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.dev_memories_text, "");
       assert.equal(user.openai_key_ciphertext, null);
       assert.equal(user.anthropic_key_ciphertext, null);
+      assert.equal(user.ollama_cloud_key_ciphertext, null);
       assert.equal(user.elevenlabs_key_ciphertext, null);
       assert.equal(user.brave_search_key_ciphertext, null);
       assert.equal(user.last_active_at, "2026-06-19T12:00:00.000Z");
@@ -365,6 +367,9 @@ function seedResetFixture(db: DatabaseSync): void {
       anthropic_key_ciphertext = 'anthropic-cipher',
       anthropic_key_iv = 'anthropic-iv',
       anthropic_key_tag = 'anthropic-tag',
+      ollama_cloud_key_ciphertext = 'ollama-cloud-cipher',
+      ollama_cloud_key_iv = 'ollama-cloud-iv',
+      ollama_cloud_key_tag = 'ollama-cloud-tag',
       elevenlabs_key_ciphertext = 'eleven-cipher',
       elevenlabs_key_iv = 'eleven-iv',
       elevenlabs_key_tag = 'eleven-tag',

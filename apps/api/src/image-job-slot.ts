@@ -14,7 +14,11 @@ import {
   runAssistantSentImageGeneration,
   type AssistantSentImageUserPrefs,
 } from "./assistant-sent-image.ts";
-import { getAuxiliaryProvider, type LlmProvider } from "./providers.ts";
+import {
+  getAuxiliaryProvider,
+  type DualOllamaWorkloadOptions,
+  type LlmProvider,
+} from "./providers.ts";
 import { runWithUsageSession } from "./usage.ts";
 
 function resolveImageJobWallMs(): number {
@@ -698,6 +702,7 @@ export function startChatImageBackgroundJob(args: {
   openAiApiKey: string | undefined;
   prefs: AssistantSentImageUserPrefs;
   prismDefaultLlmModel: string | null | undefined;
+  auxiliaryProviderOptions?: DualOllamaWorkloadOptions;
   chatModelUsed: string;
   chatProviderName: string;
   botName?: string;
@@ -710,6 +715,7 @@ export function startChatImageBackgroundJob(args: {
     openAiApiKey,
     prefs,
     prismDefaultLlmModel,
+    auxiliaryProviderOptions,
     chatModelUsed,
     chatProviderName,
     botName,
@@ -732,7 +738,10 @@ export function startChatImageBackgroundJob(args: {
         botId: job.botId,
       },
       async () => {
-        const auxiliaryProvider = getAuxiliaryProvider(prismDefaultLlmModel);
+        const auxiliaryProvider = getAuxiliaryProvider(
+          prismDefaultLlmModel,
+          auxiliaryProviderOptions,
+        );
         try {
           const result = await runAssistantSentImageGeneration({
             db,

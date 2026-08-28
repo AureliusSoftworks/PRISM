@@ -1153,6 +1153,7 @@ export interface BotcastGenerationOptions {
   responseMode?: BotcastEpisodeResponseMode;
   openAiApiKey?: string;
   anthropicApiKey?: string;
+  ollamaCloudApiKey?: string;
   /** Decrypted only in-process; enables encrypted pair recall/persistence. */
   userKey?: Buffer;
   secondaryOllamaHost?: string | null;
@@ -6361,6 +6362,7 @@ export async function generateBotcastBookingSuggestion(
                         generation.openAiApiKey,
                         generation.secondaryOllamaHost,
                         generation.anthropicApiKey,
+                        generation.ollamaCloudApiKey,
                       );
                 return provider.generateResponse(bookingMessages(), {
                   model: attempt.model,
@@ -6733,6 +6735,7 @@ export async function generateBotcastProducerGuestBooking(
                       generation.openAiApiKey,
                       generation.secondaryOllamaHost,
                       generation.anthropicApiKey,
+                      generation.ollamaCloudApiKey,
                     );
               return provider
                 .generateResponse(messages(), {
@@ -13665,6 +13668,7 @@ function generationProvider(
     options.openAiApiKey,
     options.secondaryOllamaHost,
     options.anthropicApiKey,
+    options.ollamaCloudApiKey,
   );
   return {
     provider,
@@ -13691,6 +13695,7 @@ function auxiliaryGenerationProvider(
         options.openAiApiKey,
         options.secondaryOllamaHost,
         options.anthropicApiKey,
+        options.ollamaCloudApiKey,
       )
     : getAuxiliaryProvider(options.prismDefaultLlmModel, {
         secondaryOllamaHost: options.secondaryOllamaHost,
@@ -13748,6 +13753,7 @@ async function generateAuxiliaryBotcastJson<T>(args: {
                     args.generation.openAiApiKey,
                     args.generation.secondaryOllamaHost,
                     args.generation.anthropicApiKey,
+                    args.generation.ollamaCloudApiKey,
                   );
             const options = args.options(
               attempt.provider,
@@ -17490,6 +17496,7 @@ export async function advanceBotcastEpisode(
                     generation.openAiApiKey,
                     generation.secondaryOllamaHost,
                     generation.anthropicApiKey,
+                    generation.ollamaCloudApiKey,
                   );
             const attemptUsesCompactLocalPrompt =
               attempt.provider === "local" && compactLocalPrompt !== null;

@@ -1205,12 +1205,16 @@ describe("mode tutorials", () => {
     assert.match(copy, /saved Auto routing priorities run first/u);
     assert.match(copy, /ONLINE ends with one bundled local attempt/u);
     assert.match(copy, /LOCAL evaluates only local Ollama models/u);
-    assert.match(copy, /ONLINE evaluates only configured OpenAI and Anthropic models/u);
+    assert.match(
+      copy,
+      /ONLINE evaluates available Ollama Cloud, OpenAI, and Anthropic models/u,
+    );
     assert.match(copy, /Refresh models re-runs discovery at runtime/u);
     assert.match(
       copy,
-      /ONLINE Auto provider lean slider: middle is Balanced \(pure cost and speed\)/u,
+      /ONLINE Auto provider triangle: OpenAI, Anthropic, and Ollama Cloud sit at the vertices/u,
     );
+    assert.match(copy, /Background model keeps two saved Ollama lanes/u);
     assert.match(
       copy,
       /In LOCAL Auto, clicking the upright triangle gives a failed ignition/u,

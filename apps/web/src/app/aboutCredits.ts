@@ -244,7 +244,8 @@ export const ABOUT_CREDIT_GROUPS: readonly AboutCreditGroup[] = [
       {
         id: "ollama",
         name: "Ollama",
-        description: "Local model discovery and inference.",
+        description:
+          "Local model discovery and inference, plus optional authenticated Ollama Cloud models.",
         href: "https://ollama.com/",
       },
       {

@@ -23,7 +23,18 @@ const signalExperience = readFileSync(
 test("keeps Models focused on background work, recovery, and advanced visibility", () => {
   assert.match(page, /Background &amp; Recovery/u);
   assert.match(page, /<span>Background model<\/span>/u);
-  assert.match(page, /Ollama Cloud is available only while the global[\s\S]{0,120}mode is ONLINE/u);
+  assert.match(page, /backgroundUsesCloud = settings\.preferredProvider !== "local"/u);
+  assert.match(page, /prismCloudLlmModel/u);
+  assert.match(
+    page,
+    /prismCloudLlmModel\.trim\(\) \|\| firstRunnableCloudBackgroundModel/u,
+  );
+  assert.match(
+    api,
+    /getAuxiliaryProvider\(\s*memoryUser\.prism_default_llm_model,\s*dualOllamaWorkloadOptions\(memoryUser\)/u,
+  );
+  assert.match(page, /Ollama Cloud is unavailable[\s\S]{0,220}safely falls back/u);
+  assert.match(page, /data-tutorial-target="online-auto-provider-triangle"/u);
   assert.match(page, /<span>Auto routing priorities<\/span>/u);
   assert.match(page, /<span>Manage model list<\/span>/u);
   assert.match(page, /Refresh models/u);
@@ -44,6 +55,37 @@ test("keeps Models focused on background work, recovery, and advanced visibility
   assert.doesNotMatch(page, /Saved effort profiles/u);
   assert.doesNotMatch(page, />Image fallback</u);
   assert.doesNotMatch(page, /image panel defaults/u);
+});
+
+test("includes enabled Ollama Cloud catalog models in normal ONLINE pickers", () => {
+  const pickerOptions = page.slice(
+    page.indexOf("function onlineModelOptionsForPicker"),
+    page.indexOf("function withOnlineProviderHostLabels"),
+  );
+  assert.match(
+    pickerOptions,
+    /chatModelOptionsForProvider\(catalog, settings, "ollama_cloud"\)/u,
+  );
+  assert.match(page, /id\.startsWith\("ollama-cloud-direct:"\)/u);
+  assert.match(page, /model\.provider === provider/u);
+});
+
+test("exposes an account-scoped Ollama Cloud key without returning plaintext", () => {
+  assert.match(page, /Ollama Cloud API key/u);
+  assert.match(page, /name=\{SETTINGS_OLLAMA_CLOUD_KEY_FIELD\}/u);
+  assert.match(page, /type="password"/u);
+  assert.match(page, /clearSavedKey\("ollama_cloud"\)/u);
+  assert.match(api, /hasOllamaCloudApiKey/u);
+  assert.match(api, /ollamaCloudApiKeySource/u);
+  const settingsResponseRoute = api.slice(
+    api.indexOf('route("GET", "/api/settings"'),
+    api.indexOf('route("PUT", "/api/model-effort-preferences"'),
+  );
+  assert.doesNotMatch(settingsResponseRoute, /\bollamaCloudApiKey\s*:/u);
+  assert.doesNotMatch(
+    settingsResponseRoute,
+    /ollama_cloud_key_(?:ciphertext|iv|tag)\s*:/u,
+  );
 });
 
 test("keeps model enablement and manual picker visibility independent", () => {

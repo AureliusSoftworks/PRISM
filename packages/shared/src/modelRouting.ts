@@ -137,6 +137,85 @@ export const ONLINE_AUTO_PROVIDER_BIAS_DEFAULT = 0;
  */
 export const ONLINE_AUTO_PROVIDER_BIAS_WEIGHT = 10_000;
 
+export const ONLINE_AUTO_PROVIDER_WEIGHTS_VERSION = 1 as const;
+export type OnlineAutoProviderId = "openai" | "anthropic" | "ollama_cloud";
+export interface OnlineAutoProviderWeightsV1 {
+  v: typeof ONLINE_AUTO_PROVIDER_WEIGHTS_VERSION;
+  openai: number;
+  anthropic: number;
+  ollama_cloud: number;
+}
+export const BALANCED_ONLINE_AUTO_PROVIDER_WEIGHTS: OnlineAutoProviderWeightsV1 = {
+  v: ONLINE_AUTO_PROVIDER_WEIGHTS_VERSION,
+  openai: 1 / 3,
+  anthropic: 1 / 3,
+  ollama_cloud: 1 / 3,
+};
+
+/** Normalize persisted/UI weights, using the old two-provider lean as migration input. */
+export function normalizeOnlineAutoProviderWeights(
+  value: unknown,
+  legacyBias?: unknown,
+): OnlineAutoProviderWeightsV1 {
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const raw = (["openai", "anthropic", "ollama_cloud"] as const).map((key) =>
+      typeof record[key] === "number" && Number.isFinite(record[key])
+        ? Math.max(0, record[key] as number)
+        : 0,
+    );
+    const total = raw.reduce((sum, weight) => sum + weight, 0);
+    if (total > 0) {
+      return {
+        v: ONLINE_AUTO_PROVIDER_WEIGHTS_VERSION,
+        openai: raw[0] / total,
+        anthropic: raw[1] / total,
+        ollama_cloud: raw[2] / total,
+      };
+    }
+  }
+  if (typeof legacyBias === "number" && Number.isFinite(legacyBias)) {
+    const bias = clampOnlineAutoProviderBias(legacyBias);
+    return {
+      v: ONLINE_AUTO_PROVIDER_WEIGHTS_VERSION,
+      openai: (1 - bias) / 3,
+      anthropic: (1 + bias) / 3,
+      ollama_cloud: 1 / 3,
+    };
+  }
+  return { ...BALANCED_ONLINE_AUTO_PROVIDER_WEIGHTS };
+}
+
+export function parseStoredOnlineAutoProviderWeights(
+  value: unknown,
+  legacyBias?: unknown,
+): OnlineAutoProviderWeightsV1 {
+  if (typeof value !== "string") {
+    return normalizeOnlineAutoProviderWeights(value, legacyBias);
+  }
+  try {
+    return normalizeOnlineAutoProviderWeights(JSON.parse(value), legacyBias);
+  } catch {
+    return normalizeOnlineAutoProviderWeights(null, legacyBias);
+  }
+}
+
+export function serializeOnlineAutoProviderWeights(value: unknown): string {
+  return JSON.stringify(normalizeOnlineAutoProviderWeights(value));
+}
+
+export function formatOnlineAutoProviderWeightsLabel(value: unknown): string {
+  const weights = normalizeOnlineAutoProviderWeights(value);
+  const rounded = [
+    Math.round(weights.openai * 100),
+    Math.round(weights.anthropic * 100),
+    Math.round(weights.ollama_cloud * 100),
+  ];
+  const delta = 100 - rounded.reduce((sum, weight) => sum + weight, 0);
+  rounded[rounded.indexOf(Math.max(...rounded))] += delta;
+  return `OpenAI ${rounded[0]}% · Anthropic ${rounded[1]}% · Ollama Cloud ${rounded[2]}%`;
+}
+
 /** Minimal catalog shape: only model ids are read. */
 export interface CatalogShapeForAuto {
   local: readonly { id: string }[];
@@ -160,6 +239,8 @@ export interface ResolveAutoModelInput {
    * Ignored for LOCAL. Clamped to [-1, 1]; default 0 = neutrality.
    */
   onlineAutoProviderBias?: number | null;
+  /** Server-authoritative three-provider ONLINE Auto preference. */
+  onlineAutoProviderWeights?: OnlineAutoProviderWeightsV1 | null;
   routingContext?: AutoRoutingContextV1;
   /** Restrict contextual ONLINE Auto to models eligible for Turbo. */
   turboOnly?: boolean;
@@ -195,6 +276,17 @@ function providerBiasScoreDelta(
   if (provider === "openai") return bias * ONLINE_AUTO_PROVIDER_BIAS_WEIGHT;
   if (provider === "anthropic") return -bias * ONLINE_AUTO_PROVIDER_BIAS_WEIGHT;
   return 0;
+}
+
+function providerWeightScoreDelta(
+  provider: AutoModelProvider,
+  weights: OnlineAutoProviderWeightsV1,
+): number {
+  if (provider === "local") return 0;
+  if (weights[provider] <= Number.EPSILON) {
+    return Number.MAX_SAFE_INTEGER / 8;
+  }
+  return (1 / 3 - weights[provider]) * ONLINE_AUTO_PROVIDER_BIAS_WEIGHT * 3;
 }
 
 export interface ResolvedAutoModel {
@@ -341,7 +433,11 @@ function laneCatalogModels(
 
 function inferOnlineProviderFromModelId(modelId: string): Exclude<AutoModelProvider, "local"> | null {
   const normalized = modelId.trim().toLowerCase();
-  if (normalized.endsWith(":cloud") || normalized.endsWith("-cloud")) {
+  if (
+    normalized.startsWith("ollama-cloud-direct:") ||
+    normalized.endsWith(":cloud") ||
+    normalized.endsWith("-cloud")
+  ) {
     return "ollama_cloud";
   }
   if (normalized.startsWith("claude-")) return "anthropic";
@@ -561,11 +657,16 @@ function contextualAutoRoute(input: ResolveAutoModelInput): AutoRouteDecisionV1 
       );
   const inputTokens = estimatedInputTokens(input.routingContext);
   const outputTokens = Math.max(1, Math.round(input.routingContext?.outputTokens ?? 800));
-  // Soft OpenAI↔Anthropic lean applies only inside the ONLINE lane.
+  // Provider weights apply only inside the ONLINE lane. The legacy scalar is
+  // retained solely as a migration input when no weight object is present.
   const providerBias =
     lane === "online"
       ? clampOnlineAutoProviderBias(input.onlineAutoProviderBias)
       : ONLINE_AUTO_PROVIDER_BIAS_DEFAULT;
+  const providerWeights = normalizeOnlineAutoProviderWeights(
+    input.onlineAutoProviderWeights,
+    providerBias,
+  );
   const ranked = viable
     .map((candidate) => {
       const price = input.priceForModel?.(candidate.provider, candidate.id) ?? null;
@@ -581,7 +682,9 @@ function contextualAutoRoute(input: ResolveAutoModelInput): AutoRouteDecisionV1 
           estimatedCost +
           candidate.profile.latency * 10_000 +
           (candidate.profile.known ? 0 : 1_000_000_000) +
-          providerBiasScoreDelta(candidate.provider, providerBias),
+          (input.onlineAutoProviderWeights
+            ? providerWeightScoreDelta(candidate.provider, providerWeights)
+            : providerBiasScoreDelta(candidate.provider, providerBias)),
       };
     })
     .sort((left, right) =>

@@ -10,6 +10,7 @@ import {
   type AutoFallbackChainV1,
   type AutoFallbackModelRef,
   type CatalogShapeForAuto,
+  type OnlineAutoProviderWeightsV1,
 } from "@localai/shared";
 import {
   autoResponseModeForProvider,
@@ -25,6 +26,7 @@ export function autoFallbackPrimaryForSelection(args: {
   hiddenModelIds: readonly string[];
   catalog: CatalogShapeForAuto | null | undefined;
   onlineAutoProviderBias?: number | null;
+  onlineAutoProviderWeights?: OnlineAutoProviderWeightsV1 | null;
 }): AutoFallbackModelRef | null {
   const storedChoice = args.modelChoice?.trim() ?? "";
   const modelChoice = isDisabledModelChoice(storedChoice) ? AUTO_MODEL_CHOICE : storedChoice;
@@ -36,6 +38,7 @@ export function autoFallbackPrimaryForSelection(args: {
     hiddenModelIds: [...args.hiddenModelIds],
     catalog: args.catalog ?? { local: [], online: [] },
     onlineAutoProviderBias: args.onlineAutoProviderBias,
+    onlineAutoProviderWeights: args.onlineAutoProviderWeights,
   });
   return { provider: resolved.provider, model: resolved.model };
 }

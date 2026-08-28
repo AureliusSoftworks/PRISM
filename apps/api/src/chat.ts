@@ -54,6 +54,7 @@ import {
   OPENAI_DEFAULT_MODEL,
   resolveAuxiliaryOllamaModel,
   type GenerateOptions,
+  type DualOllamaWorkloadOptions,
   type LlmProvider,
   type ProviderMessage,
   type ProviderName,
@@ -3010,6 +3011,7 @@ async function generateChatResponse(args: {
   providerFactory?: typeof selectProvider;
   openAiApiKey?: string;
   anthropicApiKey?: string;
+  ollamaCloudApiKey?: string;
   experimentalAllModelEffortEnabled?: boolean;
   psychicModeEnabled?: boolean;
   signal?: AbortSignal;
@@ -3177,7 +3179,8 @@ async function generateChatResponse(args: {
                 attempt.provider,
                 args.openAiApiKey,
                 args.secondaryOllamaHost,
-                args.anthropicApiKey
+                args.anthropicApiKey,
+                args.ollamaCloudApiKey,
               );
           const requestedFallbackEffort = normalizeProviderReasoningEffort(
             args.resolveReasoningEffort?.(attempt.provider, attempt.model) ??
@@ -3323,6 +3326,7 @@ async function generateProgressiveZenChatResponse(args: {
   providerFactory?: typeof selectProvider;
   openAiApiKey?: string;
   anthropicApiKey?: string;
+  ollamaCloudApiKey?: string;
   experimentalAllModelEffortEnabled?: boolean;
   psychicModeEnabled?: boolean;
   signal?: AbortSignal;
@@ -3390,6 +3394,7 @@ async function generateProgressiveZenChatResponse(args: {
           args.openAiApiKey,
           args.secondaryOllamaHost,
           args.anthropicApiKey,
+          args.ollamaCloudApiKey,
         );
   let progressiveInterrupted = false;
 
@@ -4026,7 +4031,8 @@ async function inferRefreshedConversationTitle(
 export async function refreshConversationTitle(
   db: DatabaseSync,
   userId: string,
-  conversationId: string
+  conversationId: string,
+  providerOptions: DualOllamaWorkloadOptions = {},
 ): Promise<{ id: string; title: string; updatedAt: string } | null> {
   const conversation = db
     .prepare(
@@ -4096,6 +4102,8 @@ export async function refreshConversationTitle(
     getAuxiliaryProvider(prismAuxiliaryModel ?? null, {
       secondaryOllamaHost,
       experimentalDualOllama: experimentalDualOllamaEnabled,
+      onlineEnabled: providerOptions.onlineEnabled,
+      ollamaCloudApiKey: providerOptions.ollamaCloudApiKey,
     }),
     recentMessages,
     conversation.title,
@@ -4129,6 +4137,7 @@ export interface UserChatSettings {
   autoMemory: boolean;
   openAiApiKey?: string;
   anthropicApiKey?: string;
+  ollamaCloudApiKey?: string;
   braveSearchApiKey?: string;
   /** User-provided name from Settings for bot-side personal addressing. */
   userDisplayName?: string;
@@ -8746,11 +8755,14 @@ export async function processChatMessage(
     effectiveProvider,
     settings.openAiApiKey,
     settings.secondaryOllamaHost,
-    settings.anthropicApiKey
+    settings.anthropicApiKey,
+    settings.ollamaCloudApiKey,
   );
   const auxiliaryProvider = (settings.auxiliaryProviderFactory ?? getAuxiliaryProvider)(settings.prismDefaultLlmModel, {
     secondaryOllamaHost: settings.secondaryOllamaHost,
     experimentalDualOllama: settings.experimentalDualOllamaEnabled === true,
+    onlineEnabled: effectiveProvider !== "local",
+    ollamaCloudApiKey: settings.ollamaCloudApiKey,
   });
   const executeWebSearch = async (query: string, source: "manual" | "automatic"): Promise<WebSearchPayload> => {
     pushBackendEvent("tool", "Running WebSearch", `source=${source}; query=${truncateToolCallPreview(query)}`);
@@ -8978,6 +8990,7 @@ export async function processChatMessage(
       providerFactory: settings.providerFactory,
       openAiApiKey: settings.openAiApiKey,
       anthropicApiKey: settings.anthropicApiKey,
+      ollamaCloudApiKey: settings.ollamaCloudApiKey,
       experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
       psychicModeEnabled: psychicModeEnabledForTurn,
       signal: settings.signal,
@@ -9054,6 +9067,7 @@ export async function processChatMessage(
           providerFactory: settings.providerFactory,
           openAiApiKey: settings.openAiApiKey,
           anthropicApiKey: settings.anthropicApiKey,
+          ollamaCloudApiKey: settings.ollamaCloudApiKey,
           experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
           psychicModeEnabled: psychicModeEnabledForTurn,
           signal: settings.signal,
@@ -9316,6 +9330,13 @@ export async function processChatMessage(
           openAiApiKey: settings.openAiApiKey,
           prefs: assistantImagePrefsForTurn(settings),
           prismDefaultLlmModel: settings.prismDefaultLlmModel,
+          auxiliaryProviderOptions: {
+            secondaryOllamaHost: settings.secondaryOllamaHost,
+            experimentalDualOllama:
+              settings.experimentalDualOllamaEnabled === true,
+            onlineEnabled: effectiveProvider !== "local",
+            ollamaCloudApiKey: settings.ollamaCloudApiKey,
+          },
           chatModelUsed: modelUsed,
           chatProviderName: providerNameUsed,
           botName: settings.starterPromptLabel,
@@ -10559,6 +10580,7 @@ export async function processChatMessage(
             providerFactory: settings.providerFactory,
             openAiApiKey: settings.openAiApiKey,
             anthropicApiKey: settings.anthropicApiKey,
+            ollamaCloudApiKey: settings.ollamaCloudApiKey,
             experimentalAllModelEffortEnabled:
               settings.experimentalAllModelEffortEnabled,
             psychicModeEnabled: psychicModeEnabledForTurn,
@@ -10609,6 +10631,7 @@ export async function processChatMessage(
             providerFactory: settings.providerFactory,
             openAiApiKey: settings.openAiApiKey,
             anthropicApiKey: settings.anthropicApiKey,
+            ollamaCloudApiKey: settings.ollamaCloudApiKey,
             experimentalAllModelEffortEnabled:
               settings.experimentalAllModelEffortEnabled,
             psychicModeEnabled: psychicModeEnabledForTurn,
@@ -10726,6 +10749,7 @@ export async function processChatMessage(
           providerFactory: settings.providerFactory,
           openAiApiKey: settings.openAiApiKey,
           anthropicApiKey: settings.anthropicApiKey,
+          ollamaCloudApiKey: settings.ollamaCloudApiKey,
           experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
           psychicModeEnabled: psychicModeEnabledForTurn,
           signal: settings.signal,
@@ -10809,6 +10833,7 @@ export async function processChatMessage(
             providerFactory: settings.providerFactory,
             openAiApiKey: settings.openAiApiKey,
             anthropicApiKey: settings.anthropicApiKey,
+            ollamaCloudApiKey: settings.ollamaCloudApiKey,
             experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
             psychicModeEnabled: psychicModeEnabledForTurn,
             signal: settings.signal,
@@ -11113,6 +11138,13 @@ export async function processChatMessage(
         openAiApiKey: settings.openAiApiKey,
         prefs: assistantImagePrefsForTurn(settings),
         prismDefaultLlmModel: settings.prismDefaultLlmModel,
+        auxiliaryProviderOptions: {
+          secondaryOllamaHost: settings.secondaryOllamaHost,
+          experimentalDualOllama:
+            settings.experimentalDualOllamaEnabled === true,
+          onlineEnabled: effectiveProvider !== "local",
+          ollamaCloudApiKey: settings.ollamaCloudApiKey,
+        },
         chatModelUsed: modelUsed,
         chatProviderName: providerNameUsed,
         botName: settings.starterPromptLabel,

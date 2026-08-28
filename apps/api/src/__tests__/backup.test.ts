@@ -27,7 +27,7 @@ import {
   normalizeCoffeeSessionSettings,
   parseStoredBotPowersV1,
 } from "@localai/shared";
-import { encryptJson } from "../security.ts";
+import { encryptJson, encryptText } from "../security.ts";
 import {
   readGlobalBotMood,
   setGlobalBotMood,
@@ -37,6 +37,26 @@ import {
   createBotcastShow,
   forceEndBotcastEpisode,
 } from "../botcast.ts";
+
+describe("backup credential exclusion", () => {
+  it("never exports the account Ollama Cloud bearer credential", () => {
+    withBackupDatabase((db, userKey) => {
+      const encrypted = encryptText("ollama-cloud-test-secret", userKey);
+      db.prepare(
+        `UPDATE users
+            SET ollama_cloud_key_ciphertext = ?,
+                ollama_cloud_key_iv = ?,
+                ollama_cloud_key_tag = ?
+          WHERE id = 'user-1'`,
+      ).run(encrypted.ciphertext, encrypted.iv, encrypted.tag);
+
+      const serialized = JSON.stringify(exportUserSnapshot(db, "user-1", userKey));
+      assert.equal(serialized.includes("ollama-cloud-test-secret"), false);
+      assert.equal(serialized.includes("ollamaCloudApiKey"), false);
+      assert.equal(serialized.includes("ollama_cloud_key"), false);
+    });
+  });
+});
 
 describe("backup Signal listener reviews", () => {
   it("round-trips public review provenance and accepts legacy reviews without it", () => {
@@ -816,6 +836,45 @@ describe("backup Coffee Groups", () => {
 });
 
 describe("backup Auto model settings", () => {
+  it("round-trips three-provider weights and paired background lanes", () => {
+    withBackupDatabase((db, userKey) => {
+      const weights = { v: 1, openai: 0.2, anthropic: 0.3, ollama_cloud: 0.5 };
+      db.prepare(
+        "UPDATE users SET online_auto_provider_weights = ?, prism_default_llm_model = ?, prism_cloud_llm_model = ? WHERE id = ?",
+      ).run(
+        JSON.stringify(weights),
+        "llama3.2",
+        "ollama-cloud-direct:gpt-oss",
+        "user-1",
+      );
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.deepEqual(snapshot.settings?.onlineAutoProviderWeights, weights);
+      assert.equal(snapshot.settings?.prismDefaultLlmModel, "llama3.2");
+      assert.equal(
+        snapshot.settings?.prismCloudLlmModel,
+        "ollama-cloud-direct:gpt-oss",
+      );
+
+      db.prepare(
+        "UPDATE users SET online_auto_provider_weights = NULL, prism_default_llm_model = NULL, prism_cloud_llm_model = NULL WHERE id = ?",
+      ).run("user-1");
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db
+        .prepare(
+          "SELECT online_auto_provider_weights, prism_default_llm_model, prism_cloud_llm_model FROM users WHERE id = ?",
+        )
+        .get("user-1") as {
+        online_auto_provider_weights: string;
+        prism_default_llm_model: string;
+        prism_cloud_llm_model: string;
+      };
+      assert.deepEqual(JSON.parse(restored.online_auto_provider_weights), weights);
+      assert.equal(restored.prism_default_llm_model, "llama3.2");
+      assert.equal(restored.prism_cloud_llm_model, "ollama-cloud-direct:gpt-oss");
+    });
+  });
+
   it("exports and restores Auto mode without exporting retired text fallback settings", () => {
     withBackupDatabase((db, userKey) => {
       const chain = {

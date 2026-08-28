@@ -5,6 +5,8 @@ import {
   REQUIRED_PRIMARY_LOCAL_MODEL_ID,
   clampOnlineAutoProviderBias,
   formatOnlineAutoProviderBiasLabel,
+  formatOnlineAutoProviderWeightsLabel,
+  normalizeOnlineAutoProviderWeights,
   defaultHiddenModelIdsForCatalog,
   isCommonOnlineChatModel,
   normalizeAutoRouteDecisionV1,
@@ -518,5 +520,65 @@ describe("clampOnlineAutoProviderBias", () => {
     assert.equal(formatOnlineAutoProviderBiasLabel(0.02), "Balanced");
     assert.equal(formatOnlineAutoProviderBiasLabel(-0.4), "Lean OpenAI 40%");
     assert.equal(formatOnlineAutoProviderBiasLabel(1), "Lean Anthropic 100%");
+  });
+});
+
+describe("ONLINE Auto provider weights", () => {
+  it("defaults to equal thirds and migrates the legacy lean with a Cloud baseline", () => {
+    assert.deepEqual(normalizeOnlineAutoProviderWeights(null), {
+      v: 1,
+      openai: 1 / 3,
+      anthropic: 1 / 3,
+      ollama_cloud: 1 / 3,
+    });
+    assert.deepEqual(normalizeOnlineAutoProviderWeights(null, -1), {
+      v: 1,
+      openai: 2 / 3,
+      anthropic: 0,
+      ollama_cloud: 1 / 3,
+    });
+  });
+
+  it("normalizes arbitrary values and formats a stable 100 percent summary", () => {
+    const weights = normalizeOnlineAutoProviderWeights({
+      openai: 2,
+      anthropic: 1,
+      ollama_cloud: 1,
+    });
+    assert.deepEqual(weights, {
+      v: 1,
+      openai: 0.5,
+      anthropic: 0.25,
+      ollama_cloud: 0.25,
+    });
+    assert.equal(
+      formatOnlineAutoProviderWeightsLabel(weights),
+      "OpenAI 50% · Anthropic 25% · Ollama Cloud 25%",
+    );
+  });
+
+  it("makes Ollama Cloud win an otherwise equal three-way ranking at its vertex", () => {
+    const resolved = resolveAutoModel({
+      provider: "openai",
+      lane: "online",
+      hiddenModelIds: [],
+      catalog: {
+        local: [],
+        online: [
+          { id: "gpt-4o-mini", provider: "openai" },
+          { id: "claude-haiku-4-5", provider: "anthropic" },
+          { id: "gpt-oss:120b-cloud", provider: "ollama_cloud" },
+        ],
+      },
+      onlineAutoProviderWeights: {
+        v: 1,
+        openai: 0,
+        anthropic: 0,
+        ollama_cloud: 1,
+      },
+      routingContext: { surface: "chat", inputText: "Hello" },
+      priceForModel: () => ({ inputUsdPerMillion: 1, outputUsdPerMillion: 1 }),
+    });
+    assert.equal(resolved.provider, "ollama_cloud");
   });
 });

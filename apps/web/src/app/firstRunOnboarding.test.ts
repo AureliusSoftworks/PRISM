@@ -38,6 +38,7 @@ describe("first-run onboarding", () => {
         "place",
         "atmosphere",
         "provider",
+        "ollama-cloud",
         "openai",
         "anthropic",
         "elevenlabs",
@@ -77,6 +78,7 @@ describe("first-run onboarding", () => {
 
   it("marks credentials and contextual Auto guidance as skippable", () => {
     for (const stepId of [
+      "ollama-cloud",
       "openai",
       "anthropic",
       "elevenlabs",
@@ -87,6 +89,17 @@ describe("first-run onboarding", () => {
         true,
       );
     }
+  });
+
+  it("offers Ollama Cloud as an optional encrypted account connection", () => {
+    const cloudStep = FIRST_RUN_SETUP_STEPS.find(
+      (step) => step.id === "ollama-cloud",
+    );
+    assert.equal(cloudStep?.title, "Connect Ollama Cloud");
+    assert.equal(cloudStep?.optional, true);
+    assert.match(pageSource, /keyProvider = "ollama_cloud"/u);
+    assert.match(pageSource, /patch\.ollamaCloudApiKey = keyValue/u);
+    assert.match(pageSource, /Ollama Cloud API key/u);
   });
 
   it("introduces contextual Auto and lane-specific recovery", () => {

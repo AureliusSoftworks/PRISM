@@ -25,6 +25,8 @@ import {
   normalizeAutoFallbackChain,
   serializeAutoFallbackChain,
   clampOnlineAutoProviderBias,
+  normalizeOnlineAutoProviderWeights,
+  type OnlineAutoProviderWeightsV1,
   type GraphicsQuality,
   type PrismTypographyScale,
   type HubAtmosphereStyle,
@@ -62,7 +64,7 @@ import { requirePrivateNetworkHttpUrl } from "./local-network-host.ts";
  * client) cannot happen again.
  */
 export type Theme = "light" | "dark" | "system";
-export type Provider = "local" | "openai" | "anthropic";
+export type Provider = "local" | "ollama_cloud" | "openai" | "anthropic";
 
 export interface ElevenLabsVoiceBank {
   [voiceId: string]: string | null;
@@ -203,6 +205,7 @@ export interface CurrentSettings {
   autoFallbackChain: string | null;
   /** Soft ONLINE Auto lean: -1 OpenAI … 0 balanced … +1 Anthropic. */
   onlineAutoProviderBias: number;
+  onlineAutoProviderWeights?: string | OnlineAutoProviderWeightsV1 | null;
   hiddenBotModelIds: string;
   hiddenGlobalPickerModelIds?: string;
   hiddenComfyUiWorkflowIds: string;
@@ -241,6 +244,7 @@ export interface CurrentSettings {
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
   /** Null/empty → server `OLLAMA_AUXILIARY_MODEL` (default llama3.2). */
   prismDefaultLlmModel: string | null;
+  prismCloudLlmModel?: string | null;
   /** Null/empty → use normal hub chat model for turns that emit `sendGeneratedImage`. */
   prismImageToolLlmModel: string | null;
   textModelDisplayNames: string | null;
@@ -286,6 +290,7 @@ export interface NextSettings {
   autoSwitchModel: number;
   autoFallbackChain: string | null;
   onlineAutoProviderBias: number;
+  onlineAutoProviderWeights: OnlineAutoProviderWeightsV1;
   hiddenBotModelIds: string[];
   hiddenGlobalPickerModelIds: string[];
   hiddenComfyUiWorkflowIds: string[];
@@ -320,6 +325,7 @@ export interface NextSettings {
   zenPersonaTransitionChoice: ZenPersonaTransitionChoice;
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
   prismDefaultLlmModel: string | null;
+  prismCloudLlmModel: string | null;
   prismImageToolLlmModel: string | null;
   textModelDisplayNames: TextModelDisplayNames;
   voiceMode: VoiceMode;
@@ -355,7 +361,12 @@ function isTheme(value: unknown): value is Theme {
 }
 
 function isProvider(value: unknown): value is Provider {
-  return value === "local" || value === "openai" || value === "anthropic";
+  return (
+    value === "local" ||
+    value === "ollama_cloud" ||
+    value === "openai" ||
+    value === "anthropic"
+  );
 }
 
 function isZenPersonaTransitionChoice(
@@ -1063,6 +1074,22 @@ export function resolveNextSettings(
     body.onlineAutoProviderBias === undefined
       ? clampOnlineAutoProviderBias(current.onlineAutoProviderBias)
       : clampOnlineAutoProviderBias(body.onlineAutoProviderBias);
+  const currentProviderWeights =
+    typeof current.onlineAutoProviderWeights === "string"
+      ? (() => {
+          try {
+            return JSON.parse(current.onlineAutoProviderWeights);
+          } catch {
+            return null;
+          }
+        })()
+      : current.onlineAutoProviderWeights;
+  const onlineAutoProviderWeights = normalizeOnlineAutoProviderWeights(
+    body.onlineAutoProviderWeights === undefined
+      ? currentProviderWeights
+      : body.onlineAutoProviderWeights,
+    onlineAutoProviderBias,
+  );
   const autoSwitchModel = current.autoSwitchModel;
   const hiddenBotModelIds = readHiddenBotModelIds(
     body.hiddenBotModelIds,
@@ -1311,6 +1338,10 @@ export function resolveNextSettings(
     body.prismDefaultLlmModel,
     current.prismDefaultLlmModel
   );
+  const prismCloudLlmModel = readPreferredModel(
+    body.prismCloudLlmModel,
+    current.prismCloudLlmModel ?? null,
+  );
   const prismImageToolLlmModel = readPreferredModel(
     body.prismImageToolLlmModel,
     current.prismImageToolLlmModel
@@ -1455,6 +1486,7 @@ export function resolveNextSettings(
     autoSwitchModel,
     autoFallbackChain,
     onlineAutoProviderBias,
+    onlineAutoProviderWeights,
     hiddenBotModelIds,
     hiddenGlobalPickerModelIds,
     hiddenComfyUiWorkflowIds,
@@ -1488,6 +1520,7 @@ export function resolveNextSettings(
     zenPersonaTransitionChoice,
     comfyUiWorkflows,
     prismDefaultLlmModel,
+    prismCloudLlmModel,
     prismImageToolLlmModel,
     textModelDisplayNames,
     voiceMode,

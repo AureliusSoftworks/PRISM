@@ -93,4 +93,10 @@ describe("configuration normalization", () => {
       }
     );
   });
+
+  it("reads the optional server Ollama Cloud bearer credential", () => {
+    withEnv({ OLLAMA_API_KEY: "ollama-server-test-key" }, () => {
+      assert.equal(getAppConfig().ollamaApiKey, "ollama-server-test-key");
+    });
+  });
 });

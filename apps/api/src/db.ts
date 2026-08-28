@@ -222,6 +222,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       auto_switch_model INTEGER NOT NULL DEFAULT 0,
       auto_fallback_chain TEXT,
       online_auto_provider_bias REAL NOT NULL DEFAULT 0,
+      online_auto_provider_weights TEXT,
       hidden_bot_model_ids TEXT NOT NULL DEFAULT '[]',
       hidden_global_picker_model_ids TEXT NOT NULL DEFAULT '[]',
       hidden_comfyui_workflow_ids TEXT NOT NULL DEFAULT '[]',
@@ -3625,6 +3626,12 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       "ALTER TABLE users ADD COLUMN online_auto_provider_bias REAL NOT NULL DEFAULT 0;",
     );
   }
+  const hasOnlineAutoProviderWeights = userColumns.some(
+    (column) => column.name === "online_auto_provider_weights",
+  );
+  if (!hasOnlineAutoProviderWeights) {
+    db.exec("ALTER TABLE users ADD COLUMN online_auto_provider_weights TEXT;");
+  }
   const hasComposerWritingAssist = userColumns.some(
     (column) => column.name === "composer_writing_assist",
   );
@@ -3898,6 +3905,24 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasPrismDefaultLlmModel) {
     db.exec("ALTER TABLE users ADD COLUMN prism_default_llm_model TEXT;");
+  }
+  const hasPrismCloudLlmModel = userColumns.some(
+    (column) => column.name === "prism_cloud_llm_model",
+  );
+  if (!hasPrismCloudLlmModel) {
+    db.exec("ALTER TABLE users ADD COLUMN prism_cloud_llm_model TEXT;");
+    db.exec(`
+      UPDATE users
+      SET prism_cloud_llm_model = prism_default_llm_model,
+          prism_default_llm_model = NULL
+      WHERE prism_cloud_llm_model IS NULL
+        AND prism_default_llm_model IS NOT NULL
+        AND (
+          lower(trim(prism_default_llm_model)) LIKE 'ollama-cloud-direct:%'
+          OR lower(trim(prism_default_llm_model)) LIKE '%:cloud'
+          OR lower(trim(prism_default_llm_model)) LIKE '%-cloud'
+        );
+    `);
   }
   const hasPrismImageToolLlmModel = userColumns.some(
     (column) => column.name === "prism_image_tool_llm_model",

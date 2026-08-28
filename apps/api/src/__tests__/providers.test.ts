@@ -10,6 +10,7 @@ import {
   checkLocalModelHostStatus,
   checkOpenAiApiKeyStatus,
   embedTextLocal,
+  encodeDirectOllamaCloudModelId,
   getAuxiliaryProvider,
   AnthropicProvider,
   LocalModelRequestError,
@@ -22,6 +23,7 @@ import {
   openAiReasoningAwareCompletionTokenLimit,
   onlineModelSupportsImageInput,
   isOllamaCloudModelId,
+  isOllamaCloudModelReference,
   providerModelSupportsImageInput,
   readOpenAiErrorMessage,
   resetLocalThinkingCapabilityCacheForTests,
@@ -190,6 +192,61 @@ describe("selectProvider", () => {
       const provider = selectProvider("ollama_cloud");
       assert.ok(provider instanceof OllamaCloudProvider);
       assert.equal(provider.name, "ollama_cloud");
+    });
+
+    it("sends bearer auth directly to the fixed Ollama Cloud API", async () => {
+      const originalFetch = globalThis.fetch;
+      let requestedUrl = "";
+      let authorization = "";
+      globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        requestedUrl = String(input);
+        authorization = new Headers(init?.headers).get("authorization") ?? "";
+        return Response.json({ message: { content: "cloud ok" } });
+      }) as typeof fetch;
+      try {
+        const provider = selectProvider(
+          "ollama_cloud",
+          undefined,
+          undefined,
+          undefined,
+          "ollama-test-key",
+        );
+        const result = await provider.generateResponse(
+          [{ role: "user", content: "hello" }],
+          {
+            model: encodeDirectOllamaCloudModelId("qwen3.5"),
+            allowFinalLocalFallback: false,
+          },
+        );
+        assert.equal(result, "cloud ok");
+        assert.equal(requestedUrl, "https://ollama.com/api/chat");
+        assert.equal(authorization, "Bearer ollama-test-key");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("rejects a direct Cloud ref from LOCAL before any request", async () => {
+      let fetchCount = 0;
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => {
+        fetchCount += 1;
+        return Response.json({ message: { content: "unexpected" } });
+      }) as typeof fetch;
+      try {
+        await assert.rejects(
+          () =>
+            selectProvider("local", undefined, undefined, undefined, "secret")
+              .generateResponse([{ role: "user", content: "hello" }], {
+                model: encodeDirectOllamaCloudModelId("qwen3.5"),
+                allowFinalLocalFallback: false,
+              }),
+          LocalModelRequestError,
+        );
+        assert.equal(fetchCount, 0);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
     });
   });
 
@@ -552,6 +609,37 @@ describe("buildModelCatalog", () => {
     assert.ok(cloud.every((model) => model.executionClass === "online"));
     assert.ok(cloud.every((model) => model.supportsStructuredOutput === false));
     assert.ok(cloud.every((model) => model.hostLabel === "Ollama Cloud"));
+  });
+
+  it("merges authenticated unsuffixed direct models without colliding with LOCAL", async () => {
+    const authorizations: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "https://ollama.com/api/tags") {
+        authorizations.push(new Headers(init?.headers).get("authorization") ?? "");
+        return Response.json({ models: [{ name: "qwen3.5" }] });
+      }
+      if (url.includes("/api/tags")) {
+        return Response.json({ models: [{ name: "qwen3.5" }] });
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const catalog = await buildModelCatalog(
+      undefined,
+      undefined,
+      undefined,
+      "ollama-test-key",
+    );
+    const directId = encodeDirectOllamaCloudModelId("qwen3.5");
+    assert.ok(catalog.local.some((model) => model.id === "qwen3.5"));
+    assert.ok(
+      catalog.online.some(
+        (model) => model.id === directId && model.provider === "ollama_cloud",
+      ),
+    );
+    assert.equal(isOllamaCloudModelReference(directId), true);
+    assert.deepEqual(authorizations, ["Bearer ollama-test-key"]);
   });
 
   it("collapses Anthropic Haiku alias and snapshot ids into one picker entry", async () => {

@@ -6,6 +6,24 @@ import {
 } from "../api-key-validation.ts";
 
 describe("validateApiKeyCredential", () => {
+  it("checks Ollama Cloud keys against the fixed tags endpoint with bearer auth", async () => {
+    const calls: Array<{ url: string; headers: Headers }> = [];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(input), headers: new Headers(init?.headers) });
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+
+    const result = await validateApiKeyCredential(
+      "ollama_cloud",
+      "ollama-test",
+      fetchImpl,
+    );
+
+    assert.equal(result.valid, true);
+    assert.equal(calls[0]?.url, "https://ollama.com/api/tags");
+    assert.equal(calls[0]?.headers.get("authorization"), "Bearer ollama-test");
+  });
+
   it("checks OpenAI keys with the bearer auth header", async () => {
     const calls: Array<{ url: string; headers: Headers }> = [];
     const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -80,6 +98,7 @@ describe("validateApiKeyCredential", () => {
       })) as typeof fetch;
 
     const providers: ApiKeyValidationProvider[] = [
+      "ollama_cloud",
       "openai",
       "anthropic",
       "elevenlabs",

@@ -31,6 +31,7 @@ export type FirstRunSetupStepId =
   | "place"
   | "atmosphere"
   | "provider"
+  | "ollama-cloud"
   | "openai"
   | "anthropic"
   | "elevenlabs"
@@ -57,6 +58,12 @@ export const FIRST_RUN_SETUP_STEPS: readonly FirstRunSetupStep[] = [
     title: "Choose your chat home base",
     shortTitle: "Chat privacy",
     optional: false,
+  },
+  {
+    id: "ollama-cloud",
+    title: "Connect Ollama Cloud",
+    shortTitle: "Ollama Cloud",
+    optional: true,
   },
   { id: "openai", title: "Connect OpenAI", shortTitle: "OpenAI", optional: true },
   { id: "anthropic", title: "Connect Anthropic", shortTitle: "Anthropic", optional: true },

@@ -939,6 +939,8 @@ import {
   refreshModelCatalog,
   checkDualOllamaWorkloadStatus,
   checkLocalModelHostStatus,
+  checkAnthropicApiKeyStatus,
+  checkOllamaCloudApiKeyStatus,
   checkOpenAiApiKeyStatus,
   defaultModelIdForProvider,
   getAuxiliaryProvider,
@@ -1192,6 +1194,7 @@ import {
   parseStoredManualAskQuestionPayload,
   parseStoredAutoFallbackChain,
   clampOnlineAutoProviderBias,
+  parseStoredOnlineAutoProviderWeights,
   autoFallbackResolvedChain,
   normalizeAutoFallbackModelRef,
   normalizeResponseMode,
@@ -1752,6 +1755,10 @@ async function startPrismStorySession(
     hiddenModelIds,
     catalog,
     onlineAutoProviderBias: clampOnlineAutoProviderBias(
+      user.online_auto_provider_bias,
+    ),
+    onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
+      user.online_auto_provider_weights,
       user.online_auto_provider_bias,
     ),
     routingContext: {
@@ -3073,6 +3080,7 @@ interface UserDbRow {
   auto_switch_model: number;
   auto_fallback_chain: string | null;
   online_auto_provider_bias: number;
+  online_auto_provider_weights: string | null;
   hidden_bot_model_ids: string;
   hidden_global_picker_model_ids: string;
   hidden_comfyui_workflow_ids: string;
@@ -3152,6 +3160,8 @@ interface UserDbRow {
   prism_default_bot_top_k: number | null;
   prism_default_bot_repetition_penalty: number | null;
   prism_default_llm_model: string | null;
+  prism_local_llm_model: string | null;
+  prism_cloud_llm_model: string | null;
   prism_image_tool_llm_model: string | null;
   prism_refract_local_model: string | null;
   prism_refract_online_model: string | null;
@@ -3569,6 +3579,27 @@ function getUserRow(userId: string): UserDbRow {
     faceRotation?.prism_default_bot_face_blink_count ?? null;
   row.prism_default_bot_face_mouth_speech_poses =
     faceRotation?.prism_default_bot_face_mouth_speech_poses ?? null;
+  const onlineRoutingPreferences = db
+    .prepare(
+      "SELECT online_auto_provider_weights, prism_default_llm_model, prism_cloud_llm_model FROM users WHERE id = ?",
+    )
+    .get(userId) as
+    | {
+        online_auto_provider_weights: string | null;
+        prism_default_llm_model: string | null;
+        prism_cloud_llm_model: string | null;
+      }
+    | undefined;
+  row.online_auto_provider_weights =
+    onlineRoutingPreferences?.online_auto_provider_weights ?? null;
+  row.prism_local_llm_model =
+    onlineRoutingPreferences?.prism_default_llm_model ?? null;
+  row.prism_cloud_llm_model =
+    onlineRoutingPreferences?.prism_cloud_llm_model ?? null;
+  row.prism_default_llm_model =
+    row.preferred_provider === "local"
+      ? row.prism_local_llm_model
+      : row.prism_cloud_llm_model?.trim() || row.prism_local_llm_model;
   return row;
 }
 
@@ -4023,6 +4054,19 @@ function dualOllamaWorkloadOptions(user: UserDbRow): {
   };
 }
 
+function coffeeAuxiliaryOnlineOptions(user: UserDbRow): {
+  onlineEnabled: boolean;
+  ollamaCloudApiKey?: string;
+} {
+  const options = dualOllamaWorkloadOptions(user);
+  return {
+    onlineEnabled: options.onlineEnabled,
+    ...(options.ollamaCloudApiKey
+      ? { ollamaCloudApiKey: options.ollamaCloudApiKey }
+      : {}),
+  };
+}
+
 async function inferBotMemoriesIfNeeded(
   userId: string,
   botId: string,
@@ -4056,14 +4100,9 @@ async function inferBotMemoriesIfNeeded(
   if (!shouldInfer) return;
 
   try {
-    const prismModel = (
-      db
-        .prepare("SELECT prism_default_llm_model AS m FROM users WHERE id = ?")
-        .get(userId) as { m: string | null } | undefined
-    )?.m;
     const memoryUser = getUserRow(userId);
     const auxiliaryProvider = getAuxiliaryProvider(
-      prismModel,
+      memoryUser.prism_default_llm_model,
       dualOllamaWorkloadOptions(memoryUser),
     );
     await inferAndStoreBotMemories(
@@ -6335,8 +6374,8 @@ async function debateAiRuntimeForUser(
       ? "local"
       : requestedProviderName && requestedProviderName !== "local"
         ? requestedProviderName
-        : user.preferred_provider === "anthropic"
-          ? "anthropic"
+        : user.preferred_provider !== "local"
+          ? user.preferred_provider
           : "openai";
   const modelOverride = readModelOverride(requestedModelOverride);
   const userKey = responseLane === "online" ? decryptUserKey(userId) : null;
@@ -6396,6 +6435,10 @@ async function debateAiRuntimeForUser(
     hiddenModelIds,
     catalog: routingCatalog,
     onlineAutoProviderBias: clampOnlineAutoProviderBias(
+      user.online_auto_provider_bias,
+    ),
+    onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
+      user.online_auto_provider_weights,
       user.online_auto_provider_bias,
     ),
     routingContext: {
@@ -6609,6 +6652,7 @@ function readApiKeyValidationProvider(
   value: unknown,
 ): ApiKeyValidationProvider {
   if (
+    value === "ollama_cloud" ||
     value === "openai" ||
     value === "anthropic" ||
     value === "elevenlabs" ||
@@ -6623,6 +6667,7 @@ function sanitizeApiKeyForProvider(
   provider: ApiKeyValidationProvider,
   value: string,
 ): string {
+  if (provider === "ollama_cloud") return sanitizeOllamaCloudKeyInput(value);
   if (provider === "anthropic") return sanitizeAnthropicKeyInput(value);
   if (provider === "elevenlabs") return sanitizeElevenLabsKeyInput(value);
   if (provider === "brave") return sanitizeBraveSearchKeyInput(value);
@@ -6844,8 +6889,8 @@ async function contextualTextRuntimeForUser<
       ? "local"
       : requestedProvider && requestedProvider !== "local"
         ? requestedProvider
-        : args.user.preferred_provider === "anthropic"
-          ? "anthropic"
+        : args.user.preferred_provider !== "local"
+          ? args.user.preferred_provider
           : "openai";
   const userKey = responseMode === "online" ? decryptUserKey(args.userId) : null;
   const openAiApiKey =
@@ -6946,6 +6991,10 @@ async function contextualTextRuntimeForUser<
     hiddenModelIds,
     catalog: capabilityRoutingCatalog,
     onlineAutoProviderBias: clampOnlineAutoProviderBias(
+      args.user.online_auto_provider_bias,
+    ),
+    onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
+      args.user.online_auto_provider_weights,
       args.user.online_auto_provider_bias,
     ),
     routingContext: {
@@ -15064,6 +15113,7 @@ function buildRoutes(): RouteDefinition[] {
         db,
         userId,
         ctx.params.id,
+        dualOllamaWorkloadOptions(getUserRow(userId)),
       );
       json(ctx.res, 200, {
         ok: true,
@@ -17029,6 +17079,10 @@ function buildRoutes(): RouteDefinition[] {
             onlineAutoProviderBias: clampOnlineAutoProviderBias(
               user.online_auto_provider_bias,
             ),
+            onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
+              user.online_auto_provider_weights,
+              user.online_auto_provider_bias,
+            ),
             routingContext: {
               surface: mode,
               inputText: message,
@@ -17287,6 +17341,7 @@ function buildRoutes(): RouteDefinition[] {
               !commandCenterPrompt && !incognito && Boolean(user.auto_memory),
             openAiApiKey,
             anthropicApiKey,
+            ollamaCloudApiKey,
             braveSearchApiKey,
             userDisplayName: user.display_name,
             starterPrompt,
@@ -17754,6 +17809,7 @@ function buildRoutes(): RouteDefinition[] {
               responseMode: refractRuntime.responseMode,
               openAiApiKey: refractRuntime.openAiApiKey,
               anthropicApiKey: refractRuntime.anthropicApiKey,
+              ollamaCloudApiKey: refractRuntime.ollamaCloudApiKey,
               secondaryOllamaHost: user.secondary_ollama_host,
               prismDefaultLlmModel: user.prism_default_llm_model,
               preferredLocalModel: user.preferred_local_model,
@@ -21123,15 +21179,15 @@ function buildRoutes(): RouteDefinition[] {
       );
       const requestedProvider = readProvider(body.preferredProvider);
       const onlineProvider =
-        user.preferred_provider === "anthropic" ? "anthropic" : "openai";
+        user.preferred_provider !== "local"
+          ? user.preferred_provider
+          : "openai";
       const ephemeralProvider = resolveEphemeralChatProvider({
         preference: preferences.debate,
         globalProvider:
           user.preferred_provider === "local"
             ? "local"
-            : user.preferred_provider === "anthropic"
-              ? "anthropic"
-              : "openai",
+            : user.preferred_provider,
         onlineProvider,
       });
       const preferredProvider =
@@ -21301,6 +21357,9 @@ function buildRoutes(): RouteDefinition[] {
             anthropicApiKey:
               getAnthropicApiKeyForUser(userId, userKey) ??
               config.anthropicApiKey,
+            ollamaCloudApiKey:
+              getOllamaCloudApiKeyForUser(userId, userKey) ??
+              config.ollamaApiKey,
             secondaryOllamaHost: user.secondary_ollama_host,
             preferredLocalModel:
               user.preferred_local_model &&
@@ -21553,6 +21612,7 @@ function buildRoutes(): RouteDefinition[] {
           responseMode: runtime.responseMode,
           openAiApiKey: runtime.openAiApiKey,
           anthropicApiKey: runtime.anthropicApiKey,
+          ollamaCloudApiKey: runtime.ollamaCloudApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
           preferredLocalModel:
             runtime.provider === "local" ? runtime.model : null,
@@ -21588,6 +21648,9 @@ function buildRoutes(): RouteDefinition[] {
           anthropicApiKey:
             getAnthropicApiKeyForUser(userId, userKey) ??
             config.anthropicApiKey,
+          ollamaCloudApiKey:
+            getOllamaCloudApiKeyForUser(userId, userKey) ??
+            config.ollamaApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
           prismDefaultLlmModel: user.prism_default_llm_model,
           preferredLocalModel: user.preferred_local_model,
@@ -21631,6 +21694,7 @@ function buildRoutes(): RouteDefinition[] {
           responseMode: runtime.responseMode,
           openAiApiKey: runtime.openAiApiKey,
           anthropicApiKey: runtime.anthropicApiKey,
+          ollamaCloudApiKey: runtime.ollamaCloudApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
           preferredLocalModel:
             runtime.provider === "local" ? runtime.model : null,
@@ -21666,6 +21730,7 @@ function buildRoutes(): RouteDefinition[] {
         responseMode: runtime.responseMode,
         openAiApiKey: runtime.openAiApiKey,
         anthropicApiKey: runtime.anthropicApiKey,
+        ollamaCloudApiKey: runtime.ollamaCloudApiKey,
         secondaryOllamaHost: user.secondary_ollama_host,
         prismDefaultLlmModel: user.prism_default_llm_model,
         preferredLocalModel:
@@ -21706,6 +21771,7 @@ function buildRoutes(): RouteDefinition[] {
           responseMode: runtime.responseMode,
           openAiApiKey: runtime.openAiApiKey,
           anthropicApiKey: runtime.anthropicApiKey,
+          ollamaCloudApiKey: runtime.ollamaCloudApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
           prismDefaultLlmModel: user.prism_default_llm_model,
           preferredLocalModel:
@@ -21729,6 +21795,7 @@ function buildRoutes(): RouteDefinition[] {
         user.preferred_provider === "local"
           ? "local"
           : requestedProvider === "local" ||
+              requestedProvider === "ollama_cloud" ||
               requestedProvider === "openai" ||
               requestedProvider === "anthropic"
             ? requestedProvider
@@ -21744,6 +21811,9 @@ function buildRoutes(): RouteDefinition[] {
           anthropicApiKey:
             getAnthropicApiKeyForUser(userId, userKey) ??
             config.anthropicApiKey,
+          ollamaCloudApiKey:
+            getOllamaCloudApiKeyForUser(userId, userKey) ??
+            config.ollamaApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
           preferredLocalModel: user.preferred_local_model,
           preferredOnlineModel: user.preferred_online_model,
@@ -21764,6 +21834,7 @@ function buildRoutes(): RouteDefinition[] {
         user.preferred_provider === "local"
           ? "local"
           : requestedProvider === "local" ||
+              requestedProvider === "ollama_cloud" ||
               requestedProvider === "openai" ||
               requestedProvider === "anthropic"
             ? requestedProvider
@@ -21779,6 +21850,9 @@ function buildRoutes(): RouteDefinition[] {
           anthropicApiKey:
             getAnthropicApiKeyForUser(userId, userKey) ??
             config.anthropicApiKey,
+          ollamaCloudApiKey:
+            getOllamaCloudApiKeyForUser(userId, userKey) ??
+            config.ollamaApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
           preferredLocalModel: user.preferred_local_model,
           preferredOnlineModel: user.preferred_online_model,
@@ -21837,6 +21911,7 @@ function buildRoutes(): RouteDefinition[] {
         responseMode: runtime.responseMode,
         openAiApiKey: runtime.openAiApiKey,
         anthropicApiKey: runtime.anthropicApiKey,
+        ollamaCloudApiKey: runtime.ollamaCloudApiKey,
         secondaryOllamaHost: user.secondary_ollama_host,
         preferredLocalModel:
           runtime.provider === "local" ? runtime.model : null,
@@ -23077,6 +23152,7 @@ function buildRoutes(): RouteDefinition[] {
               responseMode: runtime.responseMode,
               openAiApiKey: runtime.openAiApiKey,
               anthropicApiKey: runtime.anthropicApiKey,
+              ollamaCloudApiKey: runtime.ollamaCloudApiKey,
               secondaryOllamaHost: user.secondary_ollama_host,
               preferredLocalModel:
                 runtime.provider === "local" ? runtime.model : null,
@@ -23338,6 +23414,7 @@ function buildRoutes(): RouteDefinition[] {
               responseMode: runtime.responseMode,
               openAiApiKey: runtime.openAiApiKey,
               anthropicApiKey: runtime.anthropicApiKey,
+              ollamaCloudApiKey: runtime.ollamaCloudApiKey,
               secondaryOllamaHost: user.secondary_ollama_host,
               contextualModel: runtime.model,
               contextualReasoningEffort: runtime.reasoningEffort,
@@ -23693,6 +23770,7 @@ function buildRoutes(): RouteDefinition[] {
                       responseMode: runtime.responseMode,
                       openAiApiKey: runtime.openAiApiKey,
                       anthropicApiKey: runtime.anthropicApiKey,
+                      ollamaCloudApiKey: runtime.ollamaCloudApiKey,
                       userKey: signalUserKey,
                       secondaryOllamaHost: user.secondary_ollama_host,
                       contextualModel: runtime.model,
@@ -24203,6 +24281,7 @@ function buildRoutes(): RouteDefinition[] {
                   responseMode: runtime.responseMode,
                   openAiApiKey: runtime.openAiApiKey,
                   anthropicApiKey: runtime.anthropicApiKey,
+                  ollamaCloudApiKey: runtime.ollamaCloudApiKey,
                   userKey: signalUserKey,
                   secondaryOllamaHost: user.secondary_ollama_host,
                   contextualModel: runtime.model,
@@ -24471,6 +24550,7 @@ function buildRoutes(): RouteDefinition[] {
               responseMode: runtime.responseMode,
               openAiApiKey: runtime.openAiApiKey,
               anthropicApiKey: runtime.anthropicApiKey,
+              ollamaCloudApiKey: runtime.ollamaCloudApiKey,
               userKey: decryptUserKey(userId),
               secondaryOllamaHost: user.secondary_ollama_host,
               contextualModel: runtime.model,
@@ -24743,6 +24823,7 @@ function buildRoutes(): RouteDefinition[] {
           secondaryOllamaHost: user.secondary_ollama_host,
           experimentalDualOllamaEnabled:
             user.experimental_dual_ollama_enabled === 1,
+          ...coffeeAuxiliaryOnlineOptions(user),
           auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
         },
       );
@@ -24885,6 +24966,7 @@ function buildRoutes(): RouteDefinition[] {
               secondaryOllamaHost: user.secondary_ollama_host,
               experimentalDualOllamaEnabled:
                 user.experimental_dual_ollama_enabled === 1,
+              ...coffeeAuxiliaryOnlineOptions(user),
               auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
               userKey,
             },
@@ -24943,6 +25025,7 @@ function buildRoutes(): RouteDefinition[] {
               secondaryOllamaHost: user.secondary_ollama_host,
               experimentalDualOllamaEnabled:
                 user.experimental_dual_ollama_enabled === 1,
+              ...coffeeAuxiliaryOnlineOptions(user),
               auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
               userKey,
             },
@@ -25036,6 +25119,7 @@ function buildRoutes(): RouteDefinition[] {
           secondaryOllamaHost: user.secondary_ollama_host,
           experimentalDualOllamaEnabled:
             user.experimental_dual_ollama_enabled === 1,
+          ...coffeeAuxiliaryOnlineOptions(user),
           userKey,
         },
       );
@@ -25129,6 +25213,7 @@ function buildRoutes(): RouteDefinition[] {
         autoFallbackChain: departureRuntime.autoFallbackChain,
         openAiApiKey: departureRuntime.openAiApiKey,
         anthropicApiKey: departureRuntime.anthropicApiKey,
+        ollamaCloudApiKey: departureRuntime.ollamaCloudApiKey,
         secondaryOllamaHost: user.secondary_ollama_host,
         experimentalDualOllamaEnabled:
           user.experimental_dual_ollama_enabled === 1,
@@ -25300,6 +25385,7 @@ function buildRoutes(): RouteDefinition[] {
               secondaryOllamaHost: user.secondary_ollama_host,
               experimentalDualOllamaEnabled:
                 user.experimental_dual_ollama_enabled === 1,
+              ...coffeeAuxiliaryOnlineOptions(user),
               auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
             },
           ),
@@ -25335,6 +25421,7 @@ function buildRoutes(): RouteDefinition[] {
               secondaryOllamaHost: user.secondary_ollama_host,
               experimentalDualOllamaEnabled:
                 user.experimental_dual_ollama_enabled === 1,
+              ...coffeeAuxiliaryOnlineOptions(user),
               auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
               userKey,
             },
@@ -25505,6 +25592,7 @@ function buildRoutes(): RouteDefinition[] {
             autoFallbackChain: pollRuntime.autoFallbackChain,
             openAiApiKey: pollRuntime.openAiApiKey,
             anthropicApiKey: pollRuntime.anthropicApiKey,
+            ollamaCloudApiKey: pollRuntime.ollamaCloudApiKey,
             secondaryOllamaHost: user.secondary_ollama_host,
             experimentalDualOllamaEnabled:
               user.experimental_dual_ollama_enabled === 1,
@@ -25650,6 +25738,7 @@ function buildRoutes(): RouteDefinition[] {
               autoFallbackChain: autonomousRuntime.autoFallbackChain,
               openAiApiKey: autonomousRuntime.openAiApiKey,
               anthropicApiKey: autonomousRuntime.anthropicApiKey,
+              ollamaCloudApiKey: autonomousRuntime.ollamaCloudApiKey,
               secondaryOllamaHost: user.secondary_ollama_host,
               experimentalDualOllamaEnabled:
                 user.experimental_dual_ollama_enabled === 1,
@@ -25726,6 +25815,7 @@ function buildRoutes(): RouteDefinition[] {
             preferredOnlineModel: user.preferred_online_model,
             openAiApiKey,
             anthropicApiKey,
+            ollamaCloudApiKey,
             secondaryOllamaHost: user.secondary_ollama_host,
             experimentalDualOllamaEnabled:
               user.experimental_dual_ollama_enabled === 1,
@@ -25935,6 +26025,7 @@ function buildRoutes(): RouteDefinition[] {
               autoFallbackChain: runtime.autoFallbackChain,
               openAiApiKey: runtime.openAiApiKey,
               anthropicApiKey: runtime.anthropicApiKey,
+              ollamaCloudApiKey: runtime.ollamaCloudApiKey,
               secondaryOllamaHost: user.secondary_ollama_host,
               experimentalDualOllamaEnabled:
                 user.experimental_dual_ollama_enabled === 1,
@@ -26070,6 +26161,7 @@ function buildRoutes(): RouteDefinition[] {
                       autoFallbackChain: runtime.autoFallbackChain,
                       openAiApiKey: runtime.openAiApiKey,
                       anthropicApiKey: runtime.anthropicApiKey,
+                      ollamaCloudApiKey: runtime.ollamaCloudApiKey,
                       secondaryOllamaHost: user.secondary_ollama_host,
                       experimentalDualOllamaEnabled:
                         user.experimental_dual_ollama_enabled === 1,
@@ -26369,6 +26461,7 @@ function buildRoutes(): RouteDefinition[] {
                 autoFallbackChain: runtime.autoFallbackChain,
                 openAiApiKey: runtime.openAiApiKey,
                 anthropicApiKey: runtime.anthropicApiKey,
+                ollamaCloudApiKey: runtime.ollamaCloudApiKey,
                 secondaryOllamaHost: user.secondary_ollama_host,
                 experimentalDualOllamaEnabled:
                   user.experimental_dual_ollama_enabled === 1,
@@ -29933,11 +30026,11 @@ function buildRoutes(): RouteDefinition[] {
       const explicitOnlineContext = resolveVoiceSynthesisExplicitOnlineContext({
         persistedMessageProvider,
         preferredProvider:
-          user.preferred_provider === "anthropic"
-            ? "anthropic"
-            : user.preferred_provider === "openai"
-              ? "openai"
-              : "local",
+          user.preferred_provider === "ollama_cloud" ||
+          user.preferred_provider === "anthropic" ||
+          user.preferred_provider === "openai"
+            ? user.preferred_provider
+            : "local",
         explicitOnlineContext: raw.explicitOnlineContext === true,
         explicitVoicePreview: raw.explicitVoicePreview === true,
         hasMessageId:
@@ -31119,6 +31212,10 @@ function buildRoutes(): RouteDefinition[] {
           onlineAutoProviderBias: clampOnlineAutoProviderBias(
             user.online_auto_provider_bias,
           ),
+          onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
+            user.online_auto_provider_weights,
+            user.online_auto_provider_bias,
+          ),
           hiddenBotModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
           hiddenGlobalPickerModelIds: parseHiddenGlobalPickerModelIds(
             user.hidden_global_picker_model_ids,
@@ -31136,7 +31233,8 @@ function buildRoutes(): RouteDefinition[] {
           lenientLocalImageFallbackModel:
             user.lenient_local_image_fallback_model ?? "",
           ...normalizeDefaultBotSettingsForResponse(user),
-          prismDefaultLlmModel: user.prism_default_llm_model ?? "",
+          prismDefaultLlmModel: user.prism_local_llm_model ?? "",
+          prismCloudLlmModel: user.prism_cloud_llm_model ?? "",
           prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
           prismRefractLocalModel: user.prism_refract_local_model ?? "",
           prismRefractOnlineModel: user.prism_refract_online_model ?? "",
@@ -31664,6 +31762,62 @@ function buildRoutes(): RouteDefinition[] {
         },
       });
     }),
+    route("GET", "/api/settings/provider-key-status", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const openAiAccountKey = getOpenAiApiKeyForUser(userId, userKey);
+      const anthropicAccountKey = getAnthropicApiKeyForUser(userId, userKey);
+      const ollamaCloudAccountKey = getOllamaCloudApiKeyForUser(userId, userKey);
+      const onlineAllowed = !userBlocksOnlineCapabilities(user);
+      const unavailableWhileLocal = (
+        configured: boolean,
+        source: "account" | "server" | "none",
+      ) => ({
+        configured,
+        authenticated: false,
+        source,
+        status: configured ? ("unreachable" as const) : ("missing" as const),
+        modelCount: 0,
+        ...(configured
+          ? { message: "Switch Prism to AUTO or ONLINE to check this key." }
+          : {}),
+      });
+      const openAiKey = openAiAccountKey ?? config.openAiApiKey;
+      const anthropicKey = anthropicAccountKey ?? config.anthropicApiKey;
+      const ollamaCloudKey = ollamaCloudAccountKey ?? config.ollamaApiKey;
+      const openAiSource = openAiAccountKey
+        ? "account" as const
+        : config.openAiApiKey
+          ? "server" as const
+          : "none" as const;
+      const anthropicSource = anthropicAccountKey
+        ? "account" as const
+        : config.anthropicApiKey
+          ? "server" as const
+          : "none" as const;
+      const ollamaCloudSource = ollamaCloudAccountKey
+        ? "account" as const
+        : config.ollamaApiKey
+          ? "server" as const
+          : "none" as const;
+      const [openai, anthropic, ollamaCloud] = onlineAllowed
+        ? await Promise.all([
+            checkOpenAiApiKeyStatus(openAiKey, openAiSource),
+            checkAnthropicApiKeyStatus(anthropicKey, anthropicSource),
+            checkOllamaCloudApiKeyStatus(ollamaCloudKey, ollamaCloudSource),
+          ])
+        : [
+            unavailableWhileLocal(Boolean(openAiKey), openAiSource),
+            unavailableWhileLocal(Boolean(anthropicKey), anthropicSource),
+            unavailableWhileLocal(Boolean(ollamaCloudKey), ollamaCloudSource),
+          ];
+      ctx.res.setHeader("cache-control", "no-store");
+      json(ctx.res, 200, {
+        ok: true,
+        status: { openai, anthropic, ollamaCloud },
+      });
+    }),
     route("GET", "/api/settings/elevenlabs-credits", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
@@ -31901,11 +32055,11 @@ function buildRoutes(): RouteDefinition[] {
         hubAtmosphereEnabled: user.hub_atmosphere_enabled,
         startupPreference: user.startup_preference,
         preferredProvider:
-          user.preferred_provider === "anthropic"
-            ? "anthropic"
-            : user.preferred_provider === "openai"
-              ? "openai"
-              : "local",
+          user.preferred_provider === "ollama_cloud" ||
+          user.preferred_provider === "anthropic" ||
+          user.preferred_provider === "openai"
+            ? user.preferred_provider
+            : "local",
         ephemeralChatProviderPreferences:
           user.ephemeral_chat_provider_preferences,
         preferredImageProvider: user.preferred_image_provider,
@@ -31925,6 +32079,10 @@ function buildRoutes(): RouteDefinition[] {
         autoSwitchModel: user.auto_switch_model,
         autoFallbackChain: user.auto_fallback_chain,
         onlineAutoProviderBias: user.online_auto_provider_bias,
+        onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
+          user.online_auto_provider_weights,
+          user.online_auto_provider_bias,
+        ),
         hiddenBotModelIds: user.hidden_bot_model_ids,
         hiddenGlobalPickerModelIds: user.hidden_global_picker_model_ids,
         hiddenComfyUiWorkflowIds: user.hidden_comfyui_workflow_ids,
@@ -31963,7 +32121,8 @@ function buildRoutes(): RouteDefinition[] {
         zenAutonomyEnabled: user.zen_autonomy_enabled,
         zenPersonaTransitionChoice: user.zen_persona_transition_choice,
         comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
-        prismDefaultLlmModel: user.prism_default_llm_model,
+        prismDefaultLlmModel: user.prism_local_llm_model,
+        prismCloudLlmModel: user.prism_cloud_llm_model,
         prismImageToolLlmModel: user.prism_image_tool_llm_model,
         textModelDisplayNames: user.text_model_display_names,
         voiceMode: user.voice_mode,
@@ -32068,10 +32227,10 @@ function buildRoutes(): RouteDefinition[] {
         `
         UPDATE users
         SET display_name = ?, theme = ?, graphics_quality = ?, crt_focus = ?, typography_scale = ?, atmosphere_style = ?, hub_atmosphere_enabled = ?, startup_preference = ?, preferred_provider = ?, ephemeral_chat_provider_preferences = ?, preferred_image_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?, hidden_global_picker_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
-            experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, debate_whodunnit_reuse_synthesized_exhibits = ?, debate_whodunnit_text_voice_mode = ?, psychic_mode_enabled = ?, auto_switch_model = ?, auto_fallback_chain = ?, online_auto_provider_bias = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
+            experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, debate_whodunnit_reuse_synthesized_exhibits = ?, debate_whodunnit_text_voice_mode = ?, psychic_mode_enabled = ?, auto_switch_model = ?, auto_fallback_chain = ?, online_auto_provider_bias = ?, online_auto_provider_weights = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, preferred_home_atmosphere_image_model = ?, preferred_home_atmosphere_image_provider = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
-            comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?, text_model_display_names = ?,
+            comfyui_workflows = ?, prism_default_llm_model = ?, prism_cloud_llm_model = ?, prism_image_tool_llm_model = ?, text_model_display_names = ?,
             voice_mode = ?, voice_effects_enabled = ?, voice_volume = ?, operating_system_voices_enabled = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, elevenlabs_voice_collection_id = ?, zen_player_voice_enabled = ?, player_audio_voice_profile = ?, player_name_pronunciation = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
@@ -32109,6 +32268,7 @@ function buildRoutes(): RouteDefinition[] {
         next.autoSwitchModel,
         next.autoFallbackChain,
         next.onlineAutoProviderBias,
+        JSON.stringify(next.onlineAutoProviderWeights),
         next.preferredLocalModel,
         next.preferredOnlineModel,
         next.lenientLocalImageFallbackModel,
@@ -32139,6 +32299,7 @@ function buildRoutes(): RouteDefinition[] {
         next.zenPersonaTransitionChoice,
         JSON.stringify(next.comfyUiWorkflows),
         next.prismDefaultLlmModel,
+        next.prismCloudLlmModel,
         next.prismImageToolLlmModel,
         JSON.stringify(next.textModelDisplayNames),
         next.voiceMode,
@@ -32209,6 +32370,7 @@ function buildRoutes(): RouteDefinition[] {
             next.autoFallbackChain,
           ),
           onlineAutoProviderBias: next.onlineAutoProviderBias,
+          onlineAutoProviderWeights: next.onlineAutoProviderWeights,
           textModelDisplayNames: next.textModelDisplayNames,
           zenPersonaTransitionChoice: next.zenPersonaTransitionChoice,
           voiceMode: next.voiceMode,
@@ -34485,8 +34647,8 @@ function buildRoutes(): RouteDefinition[] {
             ? "local"
             : requestedProvider && requestedProvider !== "local"
               ? requestedProvider
-              : user.preferred_provider === "anthropic"
-                ? "anthropic"
+              : user.preferred_provider !== "local"
+                ? user.preferred_provider
                 : "openai";
         const userKey = decryptUserKey(userId);
         const onlineAllowed = responseMode !== "local";
@@ -34512,6 +34674,10 @@ function buildRoutes(): RouteDefinition[] {
           hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
           catalog,
           onlineAutoProviderBias: clampOnlineAutoProviderBias(
+            user.online_auto_provider_bias,
+          ),
+          onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
+            user.online_auto_provider_weights,
             user.online_auto_provider_bias,
           ),
           routingContext: {
@@ -34586,8 +34752,8 @@ function buildRoutes(): RouteDefinition[] {
           ? "local"
           : requestedProvider && requestedProvider !== "local"
               ? requestedProvider
-              : user.preferred_provider === "anthropic"
-                ? "anthropic"
+              : user.preferred_provider !== "local"
+                ? user.preferred_provider
                 : "openai";
       const userKey = decryptUserKey(userId);
       const onlineAllowed = responseMode !== "local";
@@ -34618,6 +34784,10 @@ function buildRoutes(): RouteDefinition[] {
         hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
         catalog,
         onlineAutoProviderBias: clampOnlineAutoProviderBias(
+          user.online_auto_provider_bias,
+        ),
+        onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
+          user.online_auto_provider_weights,
           user.online_auto_provider_bias,
         ),
         routingContext: {
@@ -34757,8 +34927,8 @@ function buildRoutes(): RouteDefinition[] {
           ? "local"
           : requestedProvider && requestedProvider !== "local"
               ? requestedProvider
-              : user.preferred_provider === "anthropic"
-                ? "anthropic"
+              : user.preferred_provider !== "local"
+                ? user.preferred_provider
                 : "openai";
 
       const userKey = decryptUserKey(userId);
@@ -34793,6 +34963,10 @@ function buildRoutes(): RouteDefinition[] {
         hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
         catalog,
         onlineAutoProviderBias: clampOnlineAutoProviderBias(
+          user.online_auto_provider_bias,
+        ),
+        onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
+          user.online_auto_provider_weights,
           user.online_auto_provider_bias,
         ),
         routingContext: {
@@ -35240,7 +35414,7 @@ function buildRoutes(): RouteDefinition[] {
         db,
         userId,
         botId,
-        prismDefaultLlmModel: user.prism_default_llm_model,
+        prismDefaultLlmModel: user.prism_default_llm_model ?? "",
         provider: auxiliaryProviderFactoryOverride(
           user.prism_default_llm_model ?? undefined,
           dualOllamaWorkloadOptions(user),

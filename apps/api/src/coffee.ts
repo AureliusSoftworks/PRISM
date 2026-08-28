@@ -6543,6 +6543,8 @@ async function refreshCoffeeMeetingSummary(args: {
   prismDefaultLlmModel?: string | null;
   secondaryOllamaHost?: string | null;
   experimentalDualOllamaEnabled?: boolean;
+  onlineEnabled?: boolean;
+  ollamaCloudApiKey?: string;
   summaryProvider?: LlmProvider;
 }): Promise<void> {
   const sourceMessages = coffeeMeetingSummarySourceMessages(args.history);
@@ -6564,6 +6566,8 @@ async function refreshCoffeeMeetingSummary(args: {
     getAuxiliaryProvider(args.prismDefaultLlmModel ?? undefined, {
       secondaryOllamaHost: args.secondaryOllamaHost,
       experimentalDualOllama: args.experimentalDualOllamaEnabled === true,
+      onlineEnabled: args.onlineEnabled === true,
+      ollamaCloudApiKey: args.ollamaCloudApiKey,
     });
   const rawSummary = await provider.generateResponse(
     buildCoffeeMeetingSummaryMessages({
@@ -6605,6 +6609,8 @@ export async function kickoffCoffeeMeetingSummaryRefresh(args: {
   prismDefaultLlmModel?: string | null;
   secondaryOllamaHost?: string | null;
   experimentalDualOllamaEnabled?: boolean;
+  onlineEnabled?: boolean;
+  ollamaCloudApiKey?: string;
   summaryProvider?: LlmProvider;
 }): Promise<void> {
   try {
@@ -6627,6 +6633,7 @@ export interface CoffeeTurnSettings {
   autoFallbackChain?: AutoFallbackChainV1 | null;
   openAiApiKey?: string;
   anthropicApiKey?: string;
+  ollamaCloudApiKey?: string;
   secondaryOllamaHost?: string | null;
   experimentalDualOllamaEnabled?: boolean;
   userDisplayName?: string;
@@ -6663,6 +6670,9 @@ interface CoffeeAuxiliaryOptions {
   prismDefaultLlmModel?: string | null;
   secondaryOllamaHost?: string | null;
   experimentalDualOllamaEnabled?: boolean;
+  preferredProvider?: ProviderName;
+  onlineEnabled?: boolean;
+  ollamaCloudApiKey?: string;
   auxiliaryProviderFactory?: typeof getAuxiliaryProvider;
 }
 
@@ -6672,6 +6682,11 @@ function coffeeAuxiliaryProvider(options?: CoffeeAuxiliaryOptions | null): LlmPr
     {
       secondaryOllamaHost: options?.secondaryOllamaHost,
       experimentalDualOllama: options?.experimentalDualOllamaEnabled === true,
+      onlineEnabled:
+        options?.onlineEnabled ??
+        (options?.preferredProvider !== undefined &&
+          options.preferredProvider !== "local"),
+      ollamaCloudApiKey: options?.ollamaCloudApiKey,
     }
   );
 }
@@ -17337,7 +17352,8 @@ async function generateCoffeePollStructuredBallot(args: {
                   attempt.provider,
                   args.settings.openAiApiKey,
                   args.settings.secondaryOllamaHost,
-                  args.settings.anthropicApiKey
+                  args.settings.anthropicApiKey,
+                  args.settings.ollamaCloudApiKey,
                 );
             return provider.generateResponse(messages, {
               ...args.options,
@@ -17426,6 +17442,7 @@ async function generateCoffeePollStructuredBallots(args: {
             turnSettings.openAiApiKey,
             turnSettings.secondaryOllamaHost,
             turnSettings.anthropicApiKey,
+            turnSettings.ollamaCloudApiKey,
             turnSettings.providerFactory
           );
       const model = pickSpeakerModel(
@@ -18424,6 +18441,7 @@ function pickSpeakerProvider(
   openAiApiKey: string | undefined,
   secondaryOllamaHost: string | null | undefined,
   anthropicApiKey: string | undefined,
+  ollamaCloudApiKey: string | undefined,
   providerFactory: typeof selectProvider = selectProvider
 ): { provider: LlmProvider; effectiveProvider: ProviderName } {
   const effective = effectiveCoffeeSpeakerProvider(speaker.onlineEnabled, preferred);
@@ -18431,7 +18449,8 @@ function pickSpeakerProvider(
     effective,
     openAiApiKey,
     secondaryOllamaHost,
-    anthropicApiKey
+    anthropicApiKey,
+    ollamaCloudApiKey,
   );
   return { provider, effectiveProvider: effective };
 }
@@ -19974,6 +19993,7 @@ async function generateCoffeeBotReply(args: {
     settings.openAiApiKey,
     settings.secondaryOllamaHost,
     settings.anthropicApiKey,
+    settings.ollamaCloudApiKey,
     settings.providerFactory
   );
   const speakerOptions: GenerateOptions = {};
@@ -20684,7 +20704,8 @@ async function generateCoffeeBotReply(args: {
                   attempt.provider,
                   settings.openAiApiKey,
                   settings.secondaryOllamaHost,
-                  settings.anthropicApiKey
+                  settings.anthropicApiKey,
+                  settings.ollamaCloudApiKey,
                 );
             const attemptEffort = autoFallbackReasoningEffort(
               index,
@@ -22517,6 +22538,8 @@ async function generateCoffeeBotReply(args: {
     prismDefaultLlmModel: settings.prismDefaultLlmModel ?? null,
     secondaryOllamaHost: settings.secondaryOllamaHost,
     experimentalDualOllamaEnabled: settings.experimentalDualOllamaEnabled === true,
+    onlineEnabled: settings.preferredProvider !== "local",
+    ollamaCloudApiKey: settings.ollamaCloudApiKey,
   });
   return {
     conversation: buildConversationResponse({
@@ -22671,7 +22694,8 @@ export async function generateCoffeeSessionSynopsis(
     effectiveProvider,
     settings.openAiApiKey,
     settings.secondaryOllamaHost,
-    settings.anthropicApiKey
+    settings.anthropicApiKey,
+    settings.ollamaCloudApiKey,
   );
   const options: GenerateOptions = {
     maxTokens: COFFEE_SESSION_SYNOPSIS_MAX_TOKENS,

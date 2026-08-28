@@ -11,6 +11,70 @@ import {
   resolveDbPath,
 } from "../db.ts";
 
+describe("Ollama Cloud credential migration", () => {
+  it("adds the nullable encrypted account columns", () => {
+    const db = new DatabaseSync(":memory:");
+    initializeDatabase(db);
+    const columns = new Set(
+      (db.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>).map(
+        (column) => column.name,
+      ),
+    );
+    assert.equal(columns.has("ollama_cloud_key_ciphertext"), true);
+    assert.equal(columns.has("ollama_cloud_key_iv"), true);
+    assert.equal(columns.has("ollama_cloud_key_tag"), true);
+    db.close();
+  });
+});
+
+describe("three-provider routing and background lane migration", () => {
+  it("adds nullable provider weights and Ollama Cloud background storage", () => {
+    const db = new DatabaseSync(":memory:");
+    initializeDatabase(db);
+    const columns = new Set(
+      (db.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>).map(
+        (column) => column.name,
+      ),
+    );
+    assert.equal(columns.has("online_auto_provider_weights"), true);
+    assert.equal(columns.has("prism_cloud_llm_model"), true);
+    db.close();
+  });
+
+  it("moves a legacy single-lane Cloud background choice without treating it as local", () => {
+    const db = new DatabaseSync(":memory:");
+    initializeDatabase(db);
+    db.exec("ALTER TABLE users DROP COLUMN prism_cloud_llm_model");
+    db.prepare(
+      "INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, prism_default_llm_model, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run(
+      "cloud-lane-user",
+      "cloud@example.com",
+      "Cloud",
+      "hash",
+      "salt",
+      "cipher",
+      "iv",
+      "tag",
+      "ollama-cloud-direct:gpt-oss",
+      "2026-08-28T00:00:00.000Z",
+      "2026-08-28T00:00:00.000Z",
+    );
+    initializeDatabase(db);
+    const migrated = db
+      .prepare(
+        "SELECT prism_default_llm_model, prism_cloud_llm_model FROM users WHERE id = ?",
+      )
+      .get("cloud-lane-user") as {
+      prism_default_llm_model: string | null;
+      prism_cloud_llm_model: string | null;
+    };
+    assert.equal(migrated.prism_default_llm_model, null);
+    assert.equal(migrated.prism_cloud_llm_model, "ollama-cloud-direct:gpt-oss");
+    db.close();
+  });
+});
+
 describe("bot color saturation migration", () => {
   it("upgrades existing bot colors once without changing hue or lightness", () => {
     const db = new DatabaseSync(":memory:");

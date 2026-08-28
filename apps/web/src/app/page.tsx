@@ -36,6 +36,7 @@ import { Markdown } from "@tiptap/markdown";
 import Placeholder from "@tiptap/extension-placeholder";
 import { LUCIDE_BOT_GLYPHS, LUCIDE_BOT_GLYPH_ORDER } from "./glyphCatalog";
 import GlyphTooltipLayer from "./GlyphTooltipLayer";
+import { OnlineAutoProviderTriangle } from "./OnlineAutoProviderTriangle";
 import { BackendUnavailableNotice } from "./BackendUnavailableNotice";
 import IdentityPresentationBlackout from "./IdentityPresentationBlackout";
 import {
@@ -1496,7 +1497,8 @@ import {
   HUB_ATMOSPHERE_STYLES,
   normalizeAutoFallbackChain,
   clampOnlineAutoProviderBias,
-  formatOnlineAutoProviderBiasLabel,
+  normalizeOnlineAutoProviderWeights,
+  type OnlineAutoProviderWeightsV1,
   normalizeHubAtmosphereStyle,
   normalizePrismTypographyScale,
   PRISM_ONBOARDING_VERSION,
@@ -10517,10 +10519,16 @@ type ProviderApiKeyAuthStatus = {
   message?: string;
 };
 type ProviderApiKeyStatusPayload = {
+  ollamaCloud: ProviderApiKeyAuthStatus;
   openai: ProviderApiKeyAuthStatus;
   anthropic: ProviderApiKeyAuthStatus;
 };
-type ApiKeyValidationProvider = "openai" | "anthropic" | "elevenlabs" | "brave";
+type ApiKeyValidationProvider =
+  | "ollama_cloud"
+  | "openai"
+  | "anthropic"
+  | "elevenlabs"
+  | "brave";
 type ApiKeyDraftStatus = "idle" | "checking" | "connected" | "error";
 type ApiKeyVisualStatus =
   "idle" | "ready" | "connected" | "checking" | "empty" | "error";
@@ -10592,6 +10600,7 @@ interface UserSettings {
   autoFallbackChain: AutoFallbackChainV1 | null;
   /** Soft ONLINE Auto lean: -1 OpenAI … 0 balanced … +1 Anthropic. */
   onlineAutoProviderBias: number;
+  onlineAutoProviderWeights: OnlineAutoProviderWeightsV1;
   legacyAutoFallbackModelSuggestion?: string;
   hiddenBotModelIds: string[];
   hiddenGlobalPickerModelIds: string[];
@@ -10599,10 +10608,12 @@ interface UserSettings {
   textModelDisplayNames: TextModelDisplayNames;
   hasOpenAiApiKey: boolean;
   hasAnthropicApiKey: boolean;
+  hasOllamaCloudApiKey: boolean;
   hasElevenLabsApiKey: boolean;
   hasBraveSearchApiKey: boolean;
   openAiApiKeySource: ApiKeySource;
   anthropicApiKeySource: ApiKeySource;
+  ollamaCloudApiKeySource: ApiKeySource;
   elevenLabsApiKeySource: ApiKeySource;
   braveSearchApiKeySource: ApiKeySource;
   voiceMode: VoiceMode;
@@ -10621,6 +10632,8 @@ interface UserSettings {
   comfyUiHost: string;
   /** Empty string → use server auxiliary model (see ollamaAuxiliaryModel). */
   prismDefaultLlmModel: string;
+  /** Saved ONLINE lane for quiet background/helper work. */
+  prismCloudLlmModel: string;
   /** Legacy compatibility only; image-intent routing now follows prismDefaultLlmModel. */
   prismImageToolLlmModel: string;
   /** Independent Refract model selection restored whenever its LOCAL/ONLINE lane returns. */
@@ -11047,10 +11060,12 @@ type SavedApiKeySettingsState = Pick<
   UserSettings,
   | "hasOpenAiApiKey"
   | "hasAnthropicApiKey"
+  | "hasOllamaCloudApiKey"
   | "hasElevenLabsApiKey"
   | "hasBraveSearchApiKey"
   | "openAiApiKeySource"
   | "anthropicApiKeySource"
+  | "ollamaCloudApiKeySource"
   | "elevenLabsApiKeySource"
   | "braveSearchApiKeySource"
 >;
@@ -14828,9 +14843,11 @@ const ELEVENLABS_IMAGE_MENU_DISABLED_REASON =
   "ElevenLabs Image & Video - integration pending";
 const SETTINGS_OPENAI_KEY_FIELD = "openAiApiKey";
 const SETTINGS_ANTHROPIC_KEY_FIELD = "anthropicApiKey";
+const SETTINGS_OLLAMA_CLOUD_KEY_FIELD = "ollamaCloudApiKey";
 const SETTINGS_ELEVENLABS_KEY_FIELD = "elevenLabsApiKey";
 const SETTINGS_BRAVE_SEARCH_KEY_FIELD = "braveSearchApiKey";
 const SETTINGS_PRISM_DEFAULT_LLM_MODEL_FIELD = "prismDefaultLlmModel";
+const SETTINGS_PRISM_CLOUD_LLM_MODEL_FIELD = "prismCloudLlmModel";
 const SETTINGS_PREFERRED_LOCAL_IMAGE_MODEL_FIELD = "preferredLocalImageModel";
 const SETTINGS_PREFERRED_OPENAI_IMAGE_MODEL_FIELD = "preferredOpenAiImageModel";
 const SETTINGS_PREFERRED_ZEN_WALLPAPER_LOCAL_IMAGE_MODEL_FIELD =
@@ -16078,6 +16095,7 @@ function onlineProviderApiKeySource(
   provider: Provider,
 ): ApiKeySource | null {
   if (!settings) return null;
+  if (provider === "ollama_cloud") return settings.ollamaCloudApiKeySource;
   if (provider === "openai") return settings.openAiApiKeySource;
   if (provider === "anthropic") return settings.anthropicApiKeySource;
   return null;
@@ -16087,7 +16105,6 @@ function onlineProviderHasConfiguredKey(
   settings: UserSettings | null,
   provider: Provider,
 ): boolean {
-  if (provider === "ollama_cloud") return true;
   return apiKeySourceAvailable(onlineProviderApiKeySource(settings, provider));
 }
 
@@ -16100,11 +16117,13 @@ function normalizeSavedApiKeySettingsState(
 ): SavedApiKeySettingsState {
   const hasOpenAiApiKey = state.hasOpenAiApiKey === true;
   const hasAnthropicApiKey = state.hasAnthropicApiKey === true;
+  const hasOllamaCloudApiKey = state.hasOllamaCloudApiKey === true;
   const hasElevenLabsApiKey = state.hasElevenLabsApiKey === true;
   const hasBraveSearchApiKey = state.hasBraveSearchApiKey === true;
   return {
     hasOpenAiApiKey,
     hasAnthropicApiKey,
+    hasOllamaCloudApiKey,
     hasElevenLabsApiKey,
     hasBraveSearchApiKey,
     openAiApiKeySource: normalizeApiKeySource(
@@ -16114,6 +16133,10 @@ function normalizeSavedApiKeySettingsState(
     anthropicApiKeySource: normalizeApiKeySource(
       state.anthropicApiKeySource,
       hasAnthropicApiKey,
+    ),
+    ollamaCloudApiKeySource: normalizeApiKeySource(
+      state.ollamaCloudApiKeySource,
+      hasOllamaCloudApiKey,
     ),
     elevenLabsApiKeySource: normalizeApiKeySource(
       state.elevenLabsApiKeySource,
@@ -16137,6 +16160,7 @@ function apiKeySourceStatusLabel(
 
 function createApiKeyDraftValidationMap(): ApiKeyDraftValidationMap {
   return {
+    ollama_cloud: { value: "", status: "idle", detail: null },
     openai: { value: "", status: "idle", detail: null },
     anthropic: { value: "", status: "idle", detail: null },
     elevenlabs: { value: "", status: "idle", detail: null },
@@ -16373,6 +16397,7 @@ function resolvedAutoPrimaryForComposer(
     hiddenModelIds: settings.hiddenBotModelIds,
     catalog,
     onlineAutoProviderBias: settings.onlineAutoProviderBias,
+    onlineAutoProviderWeights: settings.onlineAutoProviderWeights,
   });
 }
 
@@ -17029,7 +17054,11 @@ function settingsModelToggleMeta(
 
 function inferOnlineProviderForModelId(modelId: string): Provider {
   const id = modelId.trim().toLowerCase();
-  if (id.endsWith(":cloud") || id.endsWith("-cloud")) {
+  if (
+    id.startsWith("ollama-cloud-direct:") ||
+    id.endsWith(":cloud") ||
+    id.endsWith("-cloud")
+  ) {
     return "ollama_cloud";
   }
   return id.startsWith("claude-") ? "anthropic" : "openai";
@@ -51180,6 +51209,7 @@ function HomeContent(): React.JSX.Element {
     [zenMessageFontMaxPx, zenMessageFontMinPx],
   );
   const [anthropicKey, setAnthropicKey] = useState("");
+  const [ollamaCloudKey, setOllamaCloudKey] = useState("");
   const [elevenLabsKey, setElevenLabsKey] = useState("");
   const [elevenLabsCreditBalance, setElevenLabsCreditBalance] =
     useState<ElevenLabsCreditBalance | null>(null);
@@ -51387,6 +51417,7 @@ function HomeContent(): React.JSX.Element {
       // hidden from manual pickers in the candidate pool.
       const onlineOptions = withOnlineProviderHostLabels(
         combinedOnlineModelOptions(
+          textModelOptionsForProvider(modelCatalog, settings, "ollama_cloud"),
           textModelOptionsForProvider(modelCatalog, settings, "openai"),
           textModelOptionsForProvider(modelCatalog, settings, "anthropic"),
         ),
@@ -51402,6 +51433,7 @@ function HomeContent(): React.JSX.Element {
         hiddenModelIds: [],
         catalog: { local: [], online: turboEligibleOnlineOptions },
         onlineAutoProviderBias: settings.onlineAutoProviderBias,
+        onlineAutoProviderWeights: settings.onlineAutoProviderWeights,
       });
       const sameProviderTurboAutoPrimary =
         target?.provider && target.provider !== "local"
@@ -51416,6 +51448,7 @@ function HomeContent(): React.JSX.Element {
                 ),
               },
               onlineAutoProviderBias: settings.onlineAutoProviderBias,
+              onlineAutoProviderWeights: settings.onlineAutoProviderWeights,
             })
           : null;
       const turboCandidate = turboModelShortcutCandidate(
@@ -51711,6 +51744,7 @@ function HomeContent(): React.JSX.Element {
   const clearSettingsApiKeyDrafts = useCallback(
     (
       providers: ApiKeyValidationProvider[] = [
+        "ollama_cloud",
         "openai",
         "anthropic",
         "elevenlabs",
@@ -51718,6 +51752,7 @@ function HomeContent(): React.JSX.Element {
       ],
     ) => {
       const providerSet = new Set(providers);
+      if (providerSet.has("ollama_cloud")) setOllamaCloudKey("");
       if (providerSet.has("openai")) setOpenAiKey("");
       if (providerSet.has("anthropic")) setAnthropicKey("");
       if (providerSet.has("elevenlabs")) setElevenLabsKey("");
@@ -51744,6 +51779,7 @@ function HomeContent(): React.JSX.Element {
 
       if (typeof document !== "undefined") {
         const fieldNames: Record<ApiKeyValidationProvider, string> = {
+          ollama_cloud: SETTINGS_OLLAMA_CLOUD_KEY_FIELD,
           openai: SETTINGS_OPENAI_KEY_FIELD,
           anthropic: SETTINGS_ANTHROPIC_KEY_FIELD,
           elevenlabs: SETTINGS_ELEVENLABS_KEY_FIELD,
@@ -51765,7 +51801,9 @@ function HomeContent(): React.JSX.Element {
   );
   const setApiKeyDraftValue = useCallback(
     (provider: ApiKeyValidationProvider, value: string) => {
-      if (provider === "openai") {
+      if (provider === "ollama_cloud") {
+        setOllamaCloudKey(value);
+      } else if (provider === "openai") {
         setOpenAiKey(value);
       } else if (provider === "anthropic") {
         setAnthropicKey(value);
@@ -52445,6 +52483,10 @@ function HomeContent(): React.JSX.Element {
       controller.abort();
     };
   }
+  useEffect(
+    () => scheduleApiKeyDraftValidation("ollama_cloud", ollamaCloudKey),
+    [panel, ollamaCloudKey],
+  );
   useEffect(
     () => scheduleApiKeyDraftValidation("openai", openAiKey),
     [panel, openAiKey],
@@ -57143,6 +57185,10 @@ function HomeContent(): React.JSX.Element {
       patch.preferredProvider = desktopFirstRunPreferredProvider;
     } else if (step.id === "atmosphere") {
       patch.atmosphereStyle = desktopFirstRunAtmosphereStyle;
+    } else if (step.id === "ollama-cloud") {
+      keyProvider = "ollama_cloud";
+      keyValue = ollamaCloudKey.trim();
+      if (keyValue) patch.ollamaCloudApiKey = keyValue;
     } else if (step.id === "openai") {
       keyProvider = "openai";
       keyValue = openAiKey.trim();
@@ -57651,6 +57697,13 @@ function HomeContent(): React.JSX.Element {
   );
   const coffeePotAssetTheme: CoffeePotAssetTheme = resolvedTheme;
   const settingsModalBackdropClassName = `${styles.settingsAboutModalBackdrop} ${themeClass}`;
+  const ollamaCloudKeyDisplay = settings
+    ? apiKeyConnectionDisplay(
+        "Ollama Cloud",
+        settings.ollamaCloudApiKeySource,
+        apiKeyDraftValidation.ollama_cloud,
+      )
+    : null;
   const openAiKeyDisplay = settings
     ? apiKeyConnectionDisplay(
         "OpenAI",
@@ -57684,7 +57737,12 @@ function HomeContent(): React.JSX.Element {
     if (panel !== "settings") return;
     void refreshProviderKeyStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panel, settings?.hasOpenAiApiKey, settings?.hasAnthropicApiKey]);
+  }, [
+    panel,
+    settings?.hasOpenAiApiKey,
+    settings?.hasAnthropicApiKey,
+    settings?.hasOllamaCloudApiKey,
+  ]);
 
   useEffect(() => {
     if (panel !== "settings") return;
@@ -59435,30 +59493,23 @@ function HomeContent(): React.JSX.Element {
     ],
   );
 
-  const prismInternalLlmCallOptions = useMemo(
-    () => {
-      const selected = settingsLocalLlmModelChoice(
-        settings?.prismDefaultLlmModel,
-        commandCenterAuxiliaryModelId(settings),
-      );
-      const options = uniqueModelOptions([
-        ...textModelOptionsForProvider(modelCatalog, settings, "local"),
-        ...(settings?.preferredProvider !== "local"
-          ? textModelOptionsForProvider(
-              modelCatalog,
-              settings,
-              "ollama_cloud",
-            )
-          : []),
-      ]);
-      return includeSelectedModelOption(
-        options,
-        selected,
-        inferOnlineProviderForModelId(selected) === "ollama_cloud"
-          ? "ollama_cloud"
-          : "local",
-      );
-    },
+  const prismLocalLlmCallOptions = useMemo(() => {
+    const selected = settingsLocalLlmModelChoice(
+      settings?.prismDefaultLlmModel,
+      commandCenterAuxiliaryModelId(settings),
+    );
+    return includeSelectedModelOption(
+      textModelOptionsForProvider(modelCatalog, settings, "local"),
+      selected,
+      "local",
+    );
+  }, [modelCatalog, settings]);
+  const prismCloudLlmCallOptions = useMemo(
+    () =>
+      filterVisibleModelOptions(
+        textModelOptionsForProvider(modelCatalog, settings, "ollama_cloud"),
+        hiddenManualModelIds(settings),
+      ),
     [modelCatalog, settings],
   );
   function renderZenAtmosphereModelRow(
@@ -59583,6 +59634,18 @@ function HomeContent(): React.JSX.Element {
   ): React.ReactNode => {
     if (!settings) return null;
     const isModal = variant === "modal";
+    const backgroundUsesCloud = settings.preferredProvider !== "local";
+    const firstRunnableCloudBackgroundModel =
+      prismCloudLlmCallOptions.find((model) => !model.disabledReason)?.id ?? "";
+    const backgroundModelValue = backgroundUsesCloud
+      ? settings.prismCloudLlmModel.trim() || firstRunnableCloudBackgroundModel
+      : settingsLocalLlmModelChoice(
+          settings.prismDefaultLlmModel,
+          commandCenterAuxiliaryModelId(settings),
+        );
+    const backgroundModelOptions = backgroundUsesCloud
+      ? prismCloudLlmCallOptions
+      : prismLocalLlmCallOptions;
     const autoFallbackModels = [
       ...chatModelOptionsForProvider(modelCatalog, settings, "local"),
       ...onlineChatModelOptions,
@@ -59654,91 +59717,74 @@ function HomeContent(): React.JSX.Element {
               </PanelSectionInfo>
             </span>
             <ComposerModelPicker
-              value={settingsLocalLlmModelChoice(
-                settings.prismDefaultLlmModel,
-                commandCenterAuxiliaryModelId(settings),
-              )}
+              value={backgroundModelValue}
               onChange={(nextValue) => {
                 const next = nextValue.trim();
                 setSettings((previous) =>
                   previous
-                    ? { ...previous, prismDefaultLlmModel: next }
+                    ? backgroundUsesCloud
+                      ? { ...previous, prismCloudLlmModel: next }
+                      : { ...previous, prismDefaultLlmModel: next }
                     : previous,
                 );
               }}
-              options={prismInternalLlmCallOptions}
-              provider="local"
+              options={backgroundModelOptions}
+              provider={backgroundUsesCloud ? "ollama_cloud" : "local"}
               loading={modelCatalogLoading}
-              ariaLabel="Background model"
-              formName={SETTINGS_PRISM_DEFAULT_LLM_MODEL_FIELD}
+              ariaLabel={`${backgroundUsesCloud ? "ONLINE Ollama Cloud" : "LOCAL Ollama"} background model`}
+              formName={
+                backgroundUsesCloud
+                  ? SETTINGS_PRISM_CLOUD_LLM_MODEL_FIELD
+                  : SETTINGS_PRISM_DEFAULT_LLM_MODEL_FIELD
+              }
               placement="down"
               minMenuWidthPx={260}
               showAutoOption={false}
               dismissPopoversSignal={composerPopoverDismissSignal}
             />
+            <small className={styles.settingsOnlineAutoProviderBiasHint}>
+              {backgroundUsesCloud
+                ? backgroundModelOptions.length > 0
+                  ? "ONLINE lane · Ollama Cloud. Switching to LOCAL restores your saved local choice."
+                  : "Ollama Cloud is unavailable. Save a Cloud key or enable a discovered Cloud model; background work safely falls back to your saved local choice where permitted."
+                : "LOCAL lane · local Ollama only. Switching to ONLINE restores your saved Cloud choice."}
+            </small>
           </div>
           </div>
 
-        <label
+        <div
           className={`${styles.settingsRangeField} ${styles.settingsOnlineAutoProviderBiasField}`}
-          data-tutorial-target="online-auto-provider-bias"
+          data-tutorial-target="online-auto-provider-triangle"
         >
           <span className={styles.settingsRangeHeader}>
             <span className={styles.controlLabelWithInfo}>
-              <span>ONLINE Auto provider lean</span>
+              <span>ONLINE Auto provider balance</span>
               <PanelSectionInfo
                 id={`${variant}-control-info-online-auto-provider-bias`}
-                label="About ONLINE Auto provider lean"
+                label="About ONLINE Auto provider balance"
                 variant="control"
               >
-                Softly steers ONLINE Auto between OpenAI and Anthropic when both
-                can handle the request. Middle is Balanced (pure cost and
-                speed). Extremes lean hard but still allow the other provider
-                when it is clearly better. LOCAL Auto is unaffected.
+                Steers ONLINE Auto across OpenAI, Anthropic, and Ollama Cloud.
+                A vertex gives one provider 100%; an edge blends two; the
+                center is an equal three-way balance. Auto still requires an
+                available, visible, capable model, and structured work excludes
+                Cloud. LOCAL Auto is unaffected.
               </PanelSectionInfo>
             </span>
-            <span className={styles.settingsRangeValue}>
-              {formatOnlineAutoProviderBiasLabel(
-                settings.onlineAutoProviderBias,
-              )}
-            </span>
           </span>
-          <input
-            type="range"
-            className={styles.settingsOnlineAutoProviderBiasRange}
-            min={-100}
-            max={100}
-            step={1}
-            value={Math.round(
-              clampOnlineAutoProviderBias(settings.onlineAutoProviderBias) *
-                100,
-            )}
-            aria-label="ONLINE Auto provider lean"
-            onChange={(event) => {
-              const next = clampOnlineAutoProviderBias(
-                Number(event.target.value) / 100,
-              );
+          <OnlineAutoProviderTriangle
+            value={settings.onlineAutoProviderWeights}
+            onChange={(onlineAutoProviderWeights) =>
               setSettings((previous) =>
-                previous
-                  ? { ...previous, onlineAutoProviderBias: next }
-                  : previous,
-              );
-            }}
+                previous ? { ...previous, onlineAutoProviderWeights } : previous,
+              )
+            }
           />
-          <span
-            className={styles.settingsOnlineAutoProviderBiasLabels}
-            aria-hidden="true"
-          >
-            <span>OpenAI</span>
-            <span>Balanced</span>
-            <span>Anthropic</span>
-          </span>
           <small className={styles.settingsOnlineAutoProviderBiasHint}>
-            {settings.hasOpenAiApiKey && settings.hasAnthropicApiKey
-              ? "Applies when ONLINE Auto can choose from both providers."
-              : "Saves now. Takes effect for ONLINE Auto once both OpenAI and Anthropic keys (and visible models) are available."}
+            Preferences save even while a provider is unavailable. Auto only
+            ranks authenticated/discovered providers with runnable models.
           </small>
-        </label>
+        </div>
 
         <details
           className={styles.settingsModelDropdown}
@@ -80479,6 +80525,8 @@ function HomeContent(): React.JSX.Element {
     backendUnavailable,
     requestApiWithLoopbackFallback,
     settings?.experimentalDualOllamaEnabled,
+    settings?.preferredProvider,
+    settings?.prismCloudLlmModel,
     settings?.prismDefaultLlmModel,
     settings?.secondaryOllamaHost,
     user?.id,
@@ -80859,6 +80907,10 @@ function HomeContent(): React.JSX.Element {
       onlineAutoProviderBias: clampOnlineAutoProviderBias(
         d.settings.onlineAutoProviderBias,
       ),
+      onlineAutoProviderWeights: normalizeOnlineAutoProviderWeights(
+        d.settings.onlineAutoProviderWeights,
+        d.settings.onlineAutoProviderBias,
+      ),
       ephemeralChatProviderPreferences:
         normalizeEphemeralChatProviderPreferences(
           d.settings.ephemeralChatProviderPreferences,
@@ -80947,6 +80999,10 @@ function HomeContent(): React.JSX.Element {
       prismDefaultLlmModel:
         typeof d.settings.prismDefaultLlmModel === "string"
           ? d.settings.prismDefaultLlmModel
+          : "",
+      prismCloudLlmModel:
+        typeof d.settings.prismCloudLlmModel === "string"
+          ? d.settings.prismCloudLlmModel
           : "",
       prismImageToolLlmModel:
         typeof d.settings.prismImageToolLlmModel === "string"
@@ -81380,6 +81436,14 @@ function HomeContent(): React.JSX.Element {
       setProviderKeyStatus(d.status);
     } catch {
       setProviderKeyStatus({
+        ollamaCloud: {
+          configured: Boolean(settings?.hasOllamaCloudApiKey),
+          authenticated: false,
+          source: settings?.hasOllamaCloudApiKey ? "account" : "none",
+          status: settings?.hasOllamaCloudApiKey ? "unreachable" : "missing",
+          modelCount: 0,
+          message: "Could not check Ollama Cloud key status.",
+        },
         openai: {
           configured: Boolean(settings?.hasOpenAiApiKey),
           authenticated: false,
@@ -92978,6 +93042,11 @@ function HomeContent(): React.JSX.Element {
         SETTINGS_PRISM_DEFAULT_LLM_MODEL_FIELD,
         settings.prismDefaultLlmModel,
       ).trim();
+      const prismCloudLlmModel = readSettingsFormDataText(
+        formData,
+        SETTINGS_PRISM_CLOUD_LLM_MODEL_FIELD,
+        settings.prismCloudLlmModel,
+      ).trim();
       const preferredLocalImageModel = readSettingsFormDataText(
         formData,
         SETTINGS_PREFERRED_LOCAL_IMAGE_MODEL_FIELD,
@@ -93049,6 +93118,7 @@ function HomeContent(): React.JSX.Element {
           settings.prismDefaultLlmModel,
           visiblePrismDefaultLlmModel,
         ),
+        prismCloudLlmModel,
         preferredLocalImageModel: normalizeSettingsPickerSubmit(
           preferredLocalImageModel,
           settings.preferredLocalImageModel,
@@ -93083,6 +93153,11 @@ function HomeContent(): React.JSX.Element {
         SETTINGS_ANTHROPIC_KEY_FIELD,
         anthropicKey,
       );
+      const submittedOllamaCloudKey = readSettingsDraftText(
+        e.currentTarget,
+        SETTINGS_OLLAMA_CLOUD_KEY_FIELD,
+        ollamaCloudKey,
+      );
       const submittedElevenLabsKey = readSettingsDraftText(
         e.currentTarget,
         SETTINGS_ELEVENLABS_KEY_FIELD,
@@ -93100,6 +93175,10 @@ function HomeContent(): React.JSX.Element {
       const trimmedAnthropicKey = submittedAnthropicKey.trim();
       if (trimmedAnthropicKey.length > 0) {
         body.anthropicApiKey = trimmedAnthropicKey;
+      }
+      const trimmedOllamaCloudKey = submittedOllamaCloudKey.trim();
+      if (trimmedOllamaCloudKey.length > 0) {
+        body.ollamaCloudApiKey = trimmedOllamaCloudKey;
       }
       const trimmedElevenLabsKey = submittedElevenLabsKey.trim();
       if (trimmedElevenLabsKey.length > 0) {
@@ -93135,6 +93214,10 @@ function HomeContent(): React.JSX.Element {
         trimmedAnthropicKey.length > 0 &&
         !confirmedKeySettings.hasAnthropicApiKey
           ? "Anthropic"
+          : null,
+        trimmedOllamaCloudKey.length > 0 &&
+        !confirmedKeySettings.hasOllamaCloudApiKey
+          ? "Ollama Cloud"
           : null,
         trimmedElevenLabsKey.length > 0 &&
         !confirmedKeySettings.hasElevenLabsApiKey
@@ -93545,10 +93628,12 @@ function HomeContent(): React.JSX.Element {
   }
 
   async function clearSavedKey(
-    provider: "openai" | "anthropic" | "elevenlabs" | "brave",
+    provider: "ollama_cloud" | "openai" | "anthropic" | "elevenlabs" | "brave",
   ) {
     const providerName =
-      provider === "openai"
+      provider === "ollama_cloud"
+        ? "Ollama Cloud"
+        : provider === "openai"
         ? "OpenAI"
         : provider === "anthropic"
           ? "Anthropic"
@@ -93571,7 +93656,9 @@ function HomeContent(): React.JSX.Element {
       }>("/api/settings", {
         method: "PATCH",
         body: JSON.stringify(
-          provider === "openai"
+          provider === "ollama_cloud"
+            ? { ollamaCloudApiKey: null }
+            : provider === "openai"
             ? { openAiApiKey: null }
             : provider === "anthropic"
               ? { anthropicApiKey: null }
@@ -93591,7 +93678,9 @@ function HomeContent(): React.JSX.Element {
             : previous,
         );
       }
-      if (provider === "openai") {
+      if (provider === "ollama_cloud") {
+        clearSettingsApiKeyDrafts(["ollama_cloud"]);
+      } else if (provider === "openai") {
         clearSettingsApiKeyDrafts(["openai"]);
       } else if (provider === "anthropic") {
         clearSettingsApiKeyDrafts(["anthropic"]);
@@ -108258,27 +108347,33 @@ function HomeContent(): React.JSX.Element {
     const activeStep = firstRunSetupStepAt(activeStepIndex);
     const progressPercent = firstRunSetupProgressPercent(activeStepIndex);
     const activeKeyProvider: ApiKeyValidationProvider | null =
-      activeStep.id === "openai" ||
-      activeStep.id === "anthropic" ||
-      activeStep.id === "elevenlabs"
-        ? activeStep.id
-        : null;
+      activeStep.id === "ollama-cloud"
+        ? "ollama_cloud"
+        : activeStep.id === "openai" ||
+            activeStep.id === "anthropic" ||
+            activeStep.id === "elevenlabs"
+          ? activeStep.id
+          : null;
     const activeKeyValue =
-      activeKeyProvider === "openai"
-        ? openAiKey
-        : activeKeyProvider === "anthropic"
-          ? anthropicKey
-          : activeKeyProvider === "elevenlabs"
-            ? elevenLabsKey
-            : "";
+      activeKeyProvider === "ollama_cloud"
+        ? ollamaCloudKey
+        : activeKeyProvider === "openai"
+          ? openAiKey
+          : activeKeyProvider === "anthropic"
+            ? anthropicKey
+            : activeKeyProvider === "elevenlabs"
+              ? elevenLabsKey
+              : "";
     const activeKeyIsAlreadySaved = Boolean(
-      activeKeyProvider === "openai"
-        ? settings?.openAiApiKeySource !== "none"
-        : activeKeyProvider === "anthropic"
-          ? settings?.anthropicApiKeySource !== "none"
-          : activeKeyProvider === "elevenlabs"
-            ? settings?.elevenLabsApiKeySource !== "none"
-            : false,
+      activeKeyProvider === "ollama_cloud"
+        ? settings?.ollamaCloudApiKeySource !== "none"
+        : activeKeyProvider === "openai"
+          ? settings?.openAiApiKeySource !== "none"
+          : activeKeyProvider === "anthropic"
+            ? settings?.anthropicApiKeySource !== "none"
+            : activeKeyProvider === "elevenlabs"
+              ? settings?.elevenLabsApiKeySource !== "none"
+              : false,
     );
     const activeKeyIsServerManaged = Boolean(
       activeKeyProvider === "elevenlabs" &&
@@ -108510,11 +108605,13 @@ function HomeContent(): React.JSX.Element {
               <div className={styles.firstRunKeyStep}>
                 <label>
                   <span>
-                    {activeKeyProvider === "openai"
-                      ? "OpenAI API key"
-                      : activeKeyProvider === "anthropic"
-                        ? "Anthropic API key"
-                        : "ElevenLabs API key"}
+                    {activeKeyProvider === "ollama_cloud"
+                      ? "Ollama Cloud API key"
+                      : activeKeyProvider === "openai"
+                        ? "OpenAI API key"
+                        : activeKeyProvider === "anthropic"
+                          ? "Anthropic API key"
+                          : "ElevenLabs API key"}
                   </span>
             <input
               type="password"
@@ -122074,6 +122171,14 @@ function HomeContent(): React.JSX.Element {
                             >
                               <span
                                 data-status={
+                                  ollamaCloudKeyDisplay?.overviewStatus ?? "idle"
+                                }
+                              >
+                                {ollamaCloudKeyDisplay?.overviewText ??
+                                  "Ollama Cloud unset"}
+                              </span>
+                              <span
+                                data-status={
                                   openAiKeyDisplay?.overviewStatus ?? "idle"
                                 }
                               >
@@ -122113,6 +122218,60 @@ function HomeContent(): React.JSX.Element {
                               </span>
                             </div>
                             <div className={styles.settingsFieldGrid}>
+                              <label className={styles.settingsHostField}>
+                                <span className={styles.settingsHostLabel}>
+                                  Ollama Cloud key
+                                </span>
+                                <span
+                                  className={styles.settingsHostInputWrap}
+                                  data-status={
+                                    ollamaCloudKeyDisplay?.fieldStatus ?? "idle"
+                                  }
+                                  title={ollamaCloudKeyDisplay?.detail ?? undefined}
+                                >
+                                  <input
+                                    key={`settings-ollama-cloud-key-${apiKeyInputResetToken}-${settings.hasOllamaCloudApiKey ? "saved" : "empty"}`}
+                                    type="password"
+                                    name={SETTINGS_OLLAMA_CLOUD_KEY_FIELD}
+                                    placeholder={
+                                      settings.hasOllamaCloudApiKey
+                                        ? "Saved - type to replace"
+                                        : "Ollama Cloud API key"
+                                    }
+                                    value={ollamaCloudKey}
+                                    onChange={(event) =>
+                                      setApiKeyDraftValue(
+                                        "ollama_cloud",
+                                        event.target.value,
+                                      )
+                                    }
+                                    autoComplete="new-password"
+                                    autoCapitalize="none"
+                                    spellCheck={false}
+                                    data-lpignore="true"
+                                    data-1p-ignore="true"
+                                    data-bwignore="true"
+                                  />
+                                  <span
+                                    className={styles.settingsHostStatus}
+                                    aria-live="polite"
+                                  >
+                                    {ollamaCloudKeyDisplay?.fieldText ?? "Optional"}
+                                  </span>
+                                </span>
+                                {settings.hasOllamaCloudApiKey && (
+                                  <button
+                                    type="button"
+                                    className={styles.linkButton}
+                                    onClick={() =>
+                                      void clearSavedKey("ollama_cloud")
+                                    }
+                                    disabled={busy}
+                                  >
+                                    Clear saved key
+                                  </button>
+                                )}
+                              </label>
                               <label className={styles.settingsHostField}>
                                 <span className={styles.settingsHostLabel}>
                                   OpenAI key
@@ -123648,6 +123807,58 @@ function HomeContent(): React.JSX.Element {
                           text models and WebSearch, or add hosts for paired
                           Ollama routing and an external ComfyUI image server.
                         </p>
+                        <label className={styles.settingsHostField}>
+                          <span className={styles.settingsHostLabel}>
+                            Ollama Cloud API key
+                          </span>
+                          <span
+                            className={styles.settingsHostInputWrap}
+                            data-status={
+                              ollamaCloudKeyDisplay?.fieldStatus ?? "idle"
+                            }
+                            title={ollamaCloudKeyDisplay?.detail ?? undefined}
+                          >
+                            <input
+                              key={`settings-modal-ollama-cloud-key-${apiKeyInputResetToken}-${settings.hasOllamaCloudApiKey ? "saved" : "empty"}`}
+                              type="password"
+                              name={SETTINGS_OLLAMA_CLOUD_KEY_FIELD}
+                              placeholder={
+                                settings.hasOllamaCloudApiKey
+                                  ? "Saved (leave blank to keep; type to replace)"
+                                  : "Ollama Cloud API key"
+                              }
+                              value={ollamaCloudKey}
+                              onChange={(event) =>
+                                setApiKeyDraftValue(
+                                  "ollama_cloud",
+                                  event.target.value,
+                                )
+                              }
+                              autoComplete="new-password"
+                              autoCapitalize="none"
+                              spellCheck={false}
+                              data-lpignore="true"
+                              data-1p-ignore="true"
+                              data-bwignore="true"
+                            />
+                            <span
+                              className={styles.settingsHostStatus}
+                              aria-live="polite"
+                            >
+                              {ollamaCloudKeyDisplay?.fieldText ?? "Optional"}
+                            </span>
+                          </span>
+                          {settings.hasOllamaCloudApiKey && (
+                            <button
+                              type="button"
+                              className={styles.linkButton}
+                              onClick={() => void clearSavedKey("ollama_cloud")}
+                              disabled={busy}
+                            >
+                              Clear saved Ollama Cloud key
+                            </button>
+                          )}
+                        </label>
                         <label className={styles.settingsHostField}>
                           <span className={styles.settingsHostLabel}>
                             OpenAI API key

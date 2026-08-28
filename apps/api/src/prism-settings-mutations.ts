@@ -45,6 +45,7 @@ export const PRISM_JOURNALED_SETTING_KEYS = new Set([
   "psychicModeEnabled",
   "autoFallbackChain",
   "onlineAutoProviderBias",
+  "onlineAutoProviderWeights",
   "preferredLocalModel",
   "preferredOnlineModel",
   "hiddenBotModelIds",
@@ -78,6 +79,7 @@ export const PRISM_JOURNALED_SETTING_KEYS = new Set([
   "zenPersonaTransitionChoice",
   "comfyUiWorkflows",
   "prismDefaultLlmModel",
+  "prismCloudLlmModel",
   "prismImageToolLlmModel",
   "textModelDisplayNames",
   "voiceMode",
@@ -123,6 +125,7 @@ const PERSISTED_SETTING_COLUMNS = [
   "auto_switch_model",
   "auto_fallback_chain",
   "online_auto_provider_bias",
+  "online_auto_provider_weights",
   "preferred_local_model",
   "preferred_online_model",
   "lenient_local_image_fallback_model",
@@ -153,6 +156,7 @@ const PERSISTED_SETTING_COLUMNS = [
   "zen_persona_transition_choice",
   "comfyui_workflows",
   "prism_default_llm_model",
+  "prism_cloud_llm_model",
   "prism_image_tool_llm_model",
   "text_model_display_names",
   "voice_mode",
@@ -252,6 +256,7 @@ function currentSettings(
       typeof row.online_auto_provider_bias === "number"
         ? row.online_auto_provider_bias
         : 0,
+    onlineAutoProviderWeights: nullableString(row.online_auto_provider_weights),
     hiddenBotModelIds: String(row.hidden_bot_model_ids ?? "[]"),
     hiddenGlobalPickerModelIds: String(
       row.hidden_global_picker_model_ids ?? "[]",
@@ -350,6 +355,7 @@ function currentSettings(
       nullableString(row.comfyui_workflows),
     ),
     prismDefaultLlmModel: nullableString(row.prism_default_llm_model),
+    prismCloudLlmModel: nullableString(row.prism_cloud_llm_model),
     prismImageToolLlmModel: nullableString(row.prism_image_tool_llm_model),
     textModelDisplayNames: nullableString(row.text_model_display_names),
     primaryOllamaHost,
@@ -417,6 +423,7 @@ function persistedValues(
     auto_switch_model: next.autoSwitchModel,
     auto_fallback_chain: next.autoFallbackChain,
     online_auto_provider_bias: next.onlineAutoProviderBias,
+    online_auto_provider_weights: JSON.stringify(next.onlineAutoProviderWeights),
     preferred_local_model: next.preferredLocalModel,
     preferred_online_model: next.preferredOnlineModel,
     lenient_local_image_fallback_model:
@@ -457,6 +464,7 @@ function persistedValues(
     zen_persona_transition_choice: next.zenPersonaTransitionChoice,
     comfyui_workflows: stringifyJson(next.comfyUiWorkflows),
     prism_default_llm_model: next.prismDefaultLlmModel,
+    prism_cloud_llm_model: next.prismCloudLlmModel,
     prism_image_tool_llm_model: next.prismImageToolLlmModel,
     text_model_display_names: stringifyJson(next.textModelDisplayNames),
     voice_mode: next.voiceMode,

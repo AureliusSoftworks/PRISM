@@ -127,6 +127,9 @@ import {
   type BotcastPersonaReviewProvenanceV1,
   parseStoredAutoFallbackChain,
   clampOnlineAutoProviderBias,
+  parseStoredOnlineAutoProviderWeights,
+  serializeOnlineAutoProviderWeights,
+  type OnlineAutoProviderWeightsV1,
   normalizeEphemeralChatProviderPreferences,
   resolveImageProviderName,
   serializeAutoFallbackChain,
@@ -220,6 +223,7 @@ export interface BackupUserSettings {
   autoFallbackChain?: AutoFallbackChainV1 | null;
   /** Soft ONLINE Auto lean: -1 OpenAI … 0 balanced … +1 Anthropic. */
   onlineAutoProviderBias?: number;
+  onlineAutoProviderWeights?: OnlineAutoProviderWeightsV1;
   /** Legacy import only. New backups no longer export this display preference. */
   fallbackModelMessageStripe?: boolean;
   hiddenBotModelIds: string[];
@@ -251,6 +255,7 @@ export interface BackupUserSettings {
   prismDefaultBotFaceThinkingFrames?: BotFaceThinkingFrames | null;
   prismDefaultBotFaceMouthSpeechPoses?: BotFaceCustomSpeechPoses | null;
   prismDefaultLlmModel: string;
+  prismCloudLlmModel?: string;
   prismImageToolLlmModel: string;
   /** Prism Refract keeps independent Auto/model choices for the LOCAL and ONLINE lanes. */
   prismRefractLocalModel?: string;
@@ -1908,6 +1913,7 @@ export function exportUserSnapshot(
          auto_switch_model,
          auto_fallback_chain,
          online_auto_provider_bias,
+         online_auto_provider_weights,
          fallback_model_message_stripe,
          hidden_bot_model_ids,
          hidden_global_picker_model_ids,
@@ -1938,6 +1944,7 @@ export function exportUserSnapshot(
          prism_default_bot_face_thinking_frames,
          prism_default_bot_face_mouth_speech_poses,
          prism_default_llm_model,
+         prism_cloud_llm_model,
          prism_image_tool_llm_model,
          prism_refract_local_model,
          prism_refract_online_model,
@@ -1992,6 +1999,7 @@ export function exportUserSnapshot(
         auto_switch_model: number;
         auto_fallback_chain: string | null;
         online_auto_provider_bias: number;
+        online_auto_provider_weights: string | null;
         fallback_model_message_stripe: number;
         hidden_bot_model_ids: string | null;
         hidden_global_picker_model_ids: string | null;
@@ -2020,6 +2028,7 @@ export function exportUserSnapshot(
         prism_default_bot_face_thinking_frames: string | null;
         prism_default_bot_face_mouth_speech_poses: string | null;
         prism_default_llm_model: string | null;
+        prism_cloud_llm_model: string | null;
         prism_image_tool_llm_model: string | null;
         prism_refract_local_model: string | null;
         prism_refract_online_model: string | null;
@@ -2103,6 +2112,10 @@ export function exportUserSnapshot(
         onlineAutoProviderBias: clampOnlineAutoProviderBias(
           user.online_auto_provider_bias,
         ),
+        onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
+          user.online_auto_provider_weights,
+          user.online_auto_provider_bias,
+        ),
         hiddenBotModelIds: safeParseStringArray(user.hidden_bot_model_ids),
         hiddenGlobalPickerModelIds: safeParseStringArray(
           user.hidden_global_picker_model_ids,
@@ -2165,6 +2178,7 @@ export function exportUserSnapshot(
             user.prism_default_bot_face_mouth_speech_poses,
           ),
         prismDefaultLlmModel: user.prism_default_llm_model ?? "",
+        prismCloudLlmModel: user.prism_cloud_llm_model ?? "",
         prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
         prismRefractLocalModel: user.prism_refract_local_model ?? "",
         prismRefractOnlineModel: user.prism_refract_online_model ?? "",
@@ -3942,6 +3956,7 @@ function importUserSnapshotWithinTransaction(
         auto_switch_model = ?,
         auto_fallback_chain = ?,
         online_auto_provider_bias = ?,
+        online_auto_provider_weights = ?,
         fallback_model_message_stripe = ?,
         hidden_bot_model_ids = ?,
         hidden_global_picker_model_ids = ?,
@@ -3970,6 +3985,7 @@ function importUserSnapshotWithinTransaction(
         prism_default_bot_face_thinking_frames = ?,
         prism_default_bot_face_mouth_speech_poses = ?,
         prism_default_llm_model = ?,
+        prism_cloud_llm_model = ?,
         prism_image_tool_llm_model = ?,
         prism_refract_local_model = ?,
         prism_refract_online_model = ?,
@@ -4045,6 +4061,10 @@ function importUserSnapshotWithinTransaction(
       settings.autoModeEnabled === true && storedAutoFallbackChain ? 1 : 0,
       storedAutoFallbackChain,
       clampOnlineAutoProviderBias(settings.onlineAutoProviderBias),
+      serializeOnlineAutoProviderWeights(
+        settings.onlineAutoProviderWeights ??
+          parseStoredOnlineAutoProviderWeights(null, settings.onlineAutoProviderBias),
+      ),
       settings.fallbackModelMessageStripe === false ? 0 : 1,
       JSON.stringify(
         Array.isArray(settings.hiddenBotModelIds)
@@ -4116,6 +4136,7 @@ function importUserSnapshotWithinTransaction(
         settings.prismDefaultBotFaceMouthSpeechPoses,
       ),
       settings.prismDefaultLlmModel?.trim() ?? "",
+      settings.prismCloudLlmModel?.trim() ?? "",
       settings.prismImageToolLlmModel?.trim() ?? "",
       settings.prismRefractLocalModel?.trim() ?? "",
       settings.prismRefractOnlineModel?.trim() ?? "",

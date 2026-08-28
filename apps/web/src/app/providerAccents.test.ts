@@ -15,6 +15,10 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cssSource = readFileSync(join(here, "page.module.css"), "utf8");
+const providerTriangleCssSource = readFileSync(
+  join(here, "OnlineAutoProviderTriangle.module.css"),
+  "utf8",
+);
 
 describe("provider accents", () => {
   it("locks OpenAI to the hue-inverse of Anthropic terracotta", () => {
@@ -67,8 +71,8 @@ describe("provider accents", () => {
       /model-effort-hud-accent:\s*var\(--provider-accent-openai\)/u,
     );
     assert.match(
-      cssSource,
-      /settingsOnlineAutoProviderBiasRange::-webkit-slider-runnable-track[\s\S]{0,220}var\(--provider-accent-openai\)/u,
+      providerTriangleCssSource,
+      /openAiLabel[\s\S]{0,120}var\(--provider-accent-openai\)/u,
     );
     assert.doesNotMatch(cssSource, /#10a37f/u);
     assert.doesNotMatch(cssSource, /#7db7ff/u);

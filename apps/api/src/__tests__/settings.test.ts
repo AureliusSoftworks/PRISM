@@ -74,6 +74,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     autoSwitchModel: 0,
     autoFallbackChain: null,
     onlineAutoProviderBias: 0,
+    onlineAutoProviderWeights: null,
     hiddenBotModelIds: "[]",
     hiddenGlobalPickerModelIds: "[]",
     hiddenComfyUiWorkflowIds: "[]",
@@ -108,6 +109,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     zenPersonaTransitionChoice: "random",
     comfyUiWorkflows: [],
     prismDefaultLlmModel: null,
+    prismCloudLlmModel: null,
     prismImageToolLlmModel: null,
     textModelDisplayNames: null,
     voiceMode: "mute",
@@ -523,10 +525,15 @@ describe("resolveNextSettings — playerNamePronunciation", () => {
 });
 
 describe("resolveNextSettings — preferredProvider", () => {
-  it("accepts 'local', 'openai', and 'anthropic'", () => {
+  it("accepts every supported local and online text provider", () => {
     assert.equal(
       resolveNextSettings({ preferredProvider: "local" }, baseline()).preferredProvider,
       "local"
+    );
+    assert.equal(
+      resolveNextSettings({ preferredProvider: "ollama_cloud" }, baseline())
+        .preferredProvider,
+      "ollama_cloud",
     );
     assert.equal(
       resolveNextSettings({ preferredProvider: "openai" }, baseline()).preferredProvider,
@@ -987,6 +994,23 @@ describe("resolveNextSettings — onlineAutoProviderBias", () => {
   });
 });
 
+describe("resolveNextSettings — onlineAutoProviderWeights", () => {
+  it("normalizes three-provider weights and migrates a legacy lean", () => {
+    assert.deepEqual(
+      resolveNextSettings(
+        { onlineAutoProviderWeights: { openai: 6, anthropic: 3, ollama_cloud: 1 } },
+        baseline(),
+      ).onlineAutoProviderWeights,
+      { v: 1, openai: 0.6, anthropic: 0.3, ollama_cloud: 0.1 },
+    );
+    assert.deepEqual(
+      resolveNextSettings({}, baseline({ onlineAutoProviderBias: 1 }))
+        .onlineAutoProviderWeights,
+      { v: 1, openai: 0, anthropic: 2 / 3, ollama_cloud: 1 / 3 },
+    );
+  });
+});
+
 describe("resolveNextSettings — hiddenBotModelIds", () => {
   it("accepts a unique trimmed string list", () => {
     const next = resolveNextSettings(
@@ -1070,6 +1094,20 @@ describe("resolveNextSettings — prismDefaultLlmModel", () => {
       baseline()
     );
     assert.equal(next.prismDefaultLlmModel, DISABLED_MODEL_CHOICE);
+  });
+});
+
+describe("resolveNextSettings — paired background models", () => {
+  it("preserves Local and Ollama Cloud choices independently", () => {
+    const next = resolveNextSettings(
+      {
+        prismDefaultLlmModel: " llama3.2 ",
+        prismCloudLlmModel: " ollama-cloud-direct:gpt-oss ",
+      },
+      baseline(),
+    );
+    assert.equal(next.prismDefaultLlmModel, "llama3.2");
+    assert.equal(next.prismCloudLlmModel, "ollama-cloud-direct:gpt-oss");
   });
 });
 
@@ -1955,6 +1993,28 @@ describe("resolveNextSettings — anthropicApiKey", () => {
       action: "replace",
       plaintext: "sk-ant-api03-abc",
     });
+  });
+});
+
+describe("resolveNextSettings — ollamaCloudApiKey", () => {
+  it("supports replace, keep, clear, and pasted env syntax", () => {
+    assert.deepEqual(
+      resolveNextSettings(
+        { ollamaCloudApiKey: "OLLAMA_API_KEY=cloud-test-key" },
+        baseline(),
+      ).ollamaCloudKeyIntent,
+      { action: "replace", plaintext: "cloud-test-key" },
+    );
+    assert.deepEqual(
+      resolveNextSettings({ ollamaCloudApiKey: "   " }, baseline())
+        .ollamaCloudKeyIntent,
+      { action: "keep" },
+    );
+    assert.deepEqual(
+      resolveNextSettings({ ollamaCloudApiKey: null }, baseline())
+        .ollamaCloudKeyIntent,
+      { action: "clear" },
+    );
   });
 });
 
