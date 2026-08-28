@@ -105,6 +105,7 @@ import {
   formatDebateMysteryForgeElapsed,
   formatDebateMysteryForgeEta,
 } from "./debateMysteryV2ForgeProgress";
+import { DebateMysteryRoomCinematographyLayer } from "./debateMysteryRoomCinematographyLayer";
 import styles from "./debateMysteryV2.module.css";
 
 interface V2SharedProps {
@@ -2803,6 +2804,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         <section
           className={styles.roomScene}
           style={roomSceneStyle}
+          data-mystery-room-stage="true"
           data-parallax-enabled={roomParallaxEnabled ? "true" : undefined}
           data-lens-active={lensActive ? "true" : undefined}
           data-room-introduction={roomIntroductionActive ? roomIntroductionPhase : undefined}
@@ -2818,6 +2820,11 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           ) : null}
           <div className={styles.roomParallaxLayer}>
             <div className={styles.roomBackdrop} data-blurred={roomActorVisible ? "true" : undefined} />
+            <DebateMysteryRoomCinematographyLayer
+              room={currentRoom}
+              blurred={roomActorVisible}
+              reducedMotion={reducedMotion}
+            />
             {command === "examine" && !roomComplete ? <div className={styles.hotspots} aria-label="Examination points">{currentRoomUnexaminedHotspots.map((hotspot) => <button key={hotspot.id} type="button" aria-label={`Examine ${hotspot.label}`} disabled={!lensActive} data-examining={examiningHotspotId === hotspot.id ? "true" : undefined} style={hotspotSpotStyle(hotspot.polygon)} onFocus={() => { const center = debateMysteryV2HotspotCenter(hotspot.polygon); setInvestigationLens(resolveDebateMysteryV2Lens(center.x, center.y, currentRoom.hotspots)); }} onClick={(event) => { if (event.detail === 0) { event.stopPropagation(); void examineHotspot(hotspot.id); } }} />)}</div> : null}
           </div>
           {command === "examine" && !roomComplete ? <i className={styles.investigationLens} aria-hidden="true" data-visible={lensActive ? "true" : undefined} data-targeted={debateMysteryV2LensClickTarget(investigationLens) ? "true" : undefined} style={{ left: `${investigationLens.x}%`, top: `${investigationLens.y}%`, "--lens-proximity": investigationLens.proximity } as CSSProperties} /> : null}

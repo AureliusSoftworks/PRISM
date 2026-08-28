@@ -1,0 +1,80 @@
+.root {
+  position: absolute;
+  z-index: 2;
+  inset: -1.25rem;
+  overflow: hidden;
+  transform: scale(1.025);
+  transition: transform 220ms ease;
+  pointer-events: none;
+  isolation: isolate;
+}
+
+.root[data-blurred="true"] {
+  transform: scale(1.04);
+}
+
+.grade,
+.lighting,
+.grain,
+.vignette {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.grade {
+  background:
+    linear-gradient(
+      180deg,
+      var(--room-cinema-grade-top),
+      rgba(24, 31, 38, 0.02) 45%,
+      var(--room-cinema-grade-bottom)
+    ),
+    radial-gradient(ellipse at 50% 50%, transparent 25%, rgba(10, 21, 31, 0.18) 100%);
+  mix-blend-mode: soft-light;
+  opacity: 0.72;
+}
+
+.lighting,
+.grain {
+  display: block;
+  object-fit: cover;
+}
+
+.lighting {
+  mix-blend-mode: overlay;
+  opacity: 0.95;
+}
+
+.grain {
+  mix-blend-mode: soft-light;
+  opacity: var(--room-cinema-grain-opacity);
+}
+
+.vignette {
+  background: radial-gradient(
+    ellipse at 50% 48%,
+    transparent 42%,
+    rgba(1, 3, 6, 0.2) 72%,
+    rgba(0, 0, 0, 0.72) 112%
+  );
+  opacity: var(--room-cinema-vignette-opacity);
+}
+
+.root[data-art-style="mosaic"] .lighting,
+.root[data-art-style="mosaic"] .grain {
+  image-rendering: pixelated;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .root {
+    transition: none;
+  }
+
+  .lighting,
+  .grain {
+    will-change: auto;
+  }
+}
