@@ -328,7 +328,7 @@ describe("reasoning effort helpers", () => {
         ollamaNativeThinking: true,
         simulatedEffortEnabled: false,
       }).levels,
-      [],
+      ["none"],
     );
     assert.equal(
       resolveModelReasoningEffortCapability({
@@ -507,22 +507,23 @@ describe("reasoning effort helpers", () => {
     );
   });
 
-  it("shifts thinking-capable Ollama models from Default through High", () => {
+  it("preserves None for Ollama models that can disable thinking", () => {
     const thinkingLocal = resolveModelReasoningEffortCapability({
       provider: "local",
       modelId: "deepseek-r1:1.5b",
       localNativeThinking: true,
     });
     assert.equal(thinkingLocal.mode, "native-thinking");
-    assert.equal(thinkingLocal.supportsNone, false);
+    assert.equal(thinkingLocal.supportsNone, true);
     assert.equal(thinkingLocal.supportsMax, false);
     assert.deepEqual(thinkingLocal.levels, [
+      "none",
       "minimal",
       "low",
       "medium",
       "high",
     ]);
-    // A boolean-thinking model without simulation has only its native Default.
+    // A boolean-thinking model retains native None without simulated stops.
     assert.deepEqual(
       resolveModelReasoningEffortCapability({
         provider: "local",
@@ -530,9 +531,9 @@ describe("reasoning effort helpers", () => {
         localNativeThinking: true,
         simulatedEffortEnabled: false,
       }).levels,
-      [],
+      ["none"],
     );
-    // Saved player-facing stops stay valid while None and XHigh do not.
+    // Saved player-facing stops stay valid while XHigh remains unavailable.
     assert.equal(
       effectiveModelReasoningEffort({
         provider: "local",
@@ -541,6 +542,15 @@ describe("reasoning effort helpers", () => {
         localNativeThinking: true,
       }),
       "minimal",
+    );
+    assert.equal(
+      effectiveModelReasoningEffort({
+        provider: "local",
+        modelId: "deepseek-r1:1.5b",
+        preference: "none",
+        localNativeThinking: true,
+      }),
+      "none",
     );
   });
 

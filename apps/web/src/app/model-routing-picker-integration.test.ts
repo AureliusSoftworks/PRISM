@@ -618,7 +618,7 @@ describe("shared routing model picker integration", () => {
     );
     assert.match(
       pageSource,
-      /capability\.mode === "native-thinking"[\s\S]{0,80}"Native thinking · simulated above Default"/u,
+      /capability\.mode === "native-thinking"[\s\S]{0,180}"Native thinking · None available"[\s\S]{0,100}"Native thinking · required by model"/u,
     );
     assert.match(
       tutorialSource,
@@ -626,7 +626,7 @@ describe("shared routing model picker integration", () => {
     );
     assert.match(
       tutorialSource,
-      /Ollama thinking models use Default through High and never offer None or Extra High/u,
+      /Models that can disable native thinking also show None with the hollow circle; required-thinking families such as GPT-OSS omit None/u,
     );
   });
 

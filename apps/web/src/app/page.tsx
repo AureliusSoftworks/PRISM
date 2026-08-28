@@ -25802,7 +25802,9 @@ function ComposerModelPicker({
                   {effortControl.capability.mode === "simulated"
                     ? "Experimental · multi-call simulation"
                     : effortControl.capability.mode === "native-thinking"
-                      ? "Native thinking · simulated above Default"
+                      ? effortControl.capability.supportsNone
+                        ? "Native thinking · None available"
+                        : "Native thinking · required by model"
                       : "Saved for this model"}
                 </small>
               </div>

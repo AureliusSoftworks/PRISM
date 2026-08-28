@@ -151,6 +151,32 @@ describe("model effort slider", () => {
     assert.equal(levels.includes("xhigh"), false);
   });
 
+  it("keeps hollow-circle None for Ollama models that can disable thinking", () => {
+    const thinkingCapability: ModelReasoningEffortCapabilityV1 = {
+      mode: "native-thinking",
+      levels: ["none", "minimal", "low", "medium", "high"],
+      supportsNone: true,
+      supportsMax: false,
+    };
+    const levels = modelEffortSliderLevels(thinkingCapability);
+    assert.equal(modelEffortBaseline(thinkingCapability), "auto");
+    assert.equal(
+      modelEffortValueForCapability(thinkingCapability, undefined),
+      "auto",
+    );
+    assert.equal(modelEffortValueForCapability(thinkingCapability, "none"), "none");
+    assert.deepEqual(levels, [
+      "auto",
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+    ]);
+    assert.equal(levels.includes("xhigh"), false);
+    assert.notEqual(MODEL_EFFORT_ICON_PATHS.none, MODEL_EFFORT_ICON_PATHS.auto);
+  });
+
   it("clamps wheel and keyboard-style stepping to available levels", () => {
     const levels = modelEffortSliderLevels({
       mode: "native",

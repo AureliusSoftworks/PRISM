@@ -502,8 +502,8 @@ export function modelSupportsTurboMode(
 export interface ModelReasoningEffortCapabilityV1 {
   /**
    * `native-thinking` — Ollama model with its own trained chain-of-thought.
-   * Default owns the model's native baseline. Minimal through High add
-   * progressively more work without exposing an unreliable None state.
+   * Default owns the model's native baseline. Models that accept `think: false`
+   * also expose None; required-thinking families omit it.
    */
   mode: "native" | "native-thinking" | "simulated" | "unavailable";
   levels: readonly ModelReasoningEffortPreference[];
@@ -558,12 +558,24 @@ const LOCAL_SIMULATED_REASONING_LEVELS = [
   "high",
   "xhigh",
 ] as const satisfies readonly ModelReasoningEffortPreference[];
-/** Player-facing Ollama ladder above the model's native Default baseline. */
-const OLLAMA_THINKING_LEVELS = [
+/** Player-facing ladder for Ollama models whose thinking can be disabled. */
+const OLLAMA_OPTIONAL_THINKING_LEVELS = [
+  "none",
   "minimal",
   "low",
   "medium",
   "high",
+] as const satisfies readonly ModelReasoningEffortPreference[];
+/** Player-facing ladder for Ollama families that cannot disable thinking. */
+const OLLAMA_REQUIRED_THINKING_LEVELS = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+] as const satisfies readonly ModelReasoningEffortPreference[];
+/** Boolean-thinking models retain only None when simulation is unavailable. */
+const OLLAMA_OPTIONAL_NATIVE_ONLY_LEVELS = [
+  "none",
 ] as const satisfies readonly ModelReasoningEffortPreference[];
 /** GPT-OSS has three provider-native tiers when simulation is unavailable. */
 const OLLAMA_TIERED_NATIVE_ONLY_LEVELS = [
@@ -792,14 +804,17 @@ export function resolveModelReasoningEffortCapability(args: {
       ollamaModelIsKnownToSupportNativeThinking(args.modelId));
   if (args.provider === "local" || args.provider === "ollama_cloud") {
     if (ollamaNativeThinking) {
+      const requiredThinking = ollamaModelUsesTieredThinking(args.modelId);
       return {
         mode: "native-thinking",
         levels: simulatedEnabled
-          ? OLLAMA_THINKING_LEVELS
-          : ollamaModelUsesTieredThinking(args.modelId)
+          ? requiredThinking
+            ? OLLAMA_REQUIRED_THINKING_LEVELS
+            : OLLAMA_OPTIONAL_THINKING_LEVELS
+          : requiredThinking
             ? OLLAMA_TIERED_NATIVE_ONLY_LEVELS
-            : [],
-        supportsNone: false,
+            : OLLAMA_OPTIONAL_NATIVE_ONLY_LEVELS,
+        supportsNone: !requiredThinking,
         supportsMax: false,
       };
     }

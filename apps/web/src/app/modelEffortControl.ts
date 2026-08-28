@@ -38,12 +38,7 @@ export function modelEffortBaseline(
   capability: ModelReasoningEffortCapabilityV1,
 ): ReasoningEffort {
   // Ollama thinking models keep their native baseline at Default.
-  if (capability.mode === "native-thinking" && !capability.supportsNone) {
-    return "auto";
-  }
-  // Thinking-capable local models default to Minimal: one native
-  // chain-of-thought per reply, no simulated passes.
-  if (capability.mode === "native-thinking") return "minimal";
+  if (capability.mode === "native-thinking") return "auto";
   return capability.mode === "simulated" ? "none" : "auto";
 }
 
@@ -60,11 +55,10 @@ export function modelEffortSliderLevels(
   capability: ModelReasoningEffortCapabilityV1,
 ): ReasoningEffort[] {
   if (capability.mode === "unavailable") return [];
-  if (capability.mode === "native-thinking" && !capability.supportsNone) {
+  if (capability.mode === "native-thinking") {
     return ["auto", ...capability.levels];
   }
-  return capability.mode === "simulated" ||
-    (capability.mode === "native-thinking" && capability.supportsNone)
+  return capability.mode === "simulated"
     ? [...capability.levels]
     : ["auto", ...capability.levels];
 }
