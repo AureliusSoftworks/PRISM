@@ -320,6 +320,24 @@ describe("reasoning effort helpers", () => {
       }).mode,
       "simulated",
     );
+    for (const modelId of [
+      "kimi-k2.7-code:cloud",
+      "ollama-cloud-direct:kimi-k2.7-code:cloud",
+      "nemotron-3-super:cloud",
+    ]) {
+      const capability = resolveModelReasoningEffortCapability({
+        provider: "ollama_cloud",
+        modelId,
+        simulatedEffortEnabled: true,
+      });
+      assert.equal(capability.mode, "native-thinking", modelId);
+      assert.equal(capability.supportsNone, false, modelId);
+      assert.deepEqual(
+        capability.levels,
+        ["minimal", "low", "medium", "high"],
+        modelId,
+      );
+    }
     assert.equal(ollamaModelIsKnownToSupportNativeThinking("qwen3:8b"), false);
     assert.deepEqual(
       resolveModelReasoningEffortCapability({

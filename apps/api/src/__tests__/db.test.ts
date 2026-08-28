@@ -75,6 +75,78 @@ describe("three-provider routing and background lane migration", () => {
   });
 });
 
+describe("Ollama Cloud effort preference migration", () => {
+  it("widens the legacy provider constraint without losing saved preferences", () => {
+    const db = new DatabaseSync(":memory:");
+    initializeDatabase(db);
+    db.exec(`
+      DROP INDEX idx_model_effort_preferences_user_updated;
+      ALTER TABLE model_reasoning_effort_preferences
+        RENAME TO model_reasoning_effort_preferences_current;
+      CREATE TABLE model_reasoning_effort_preferences (
+        user_id TEXT NOT NULL,
+        provider TEXT NOT NULL CHECK(provider IN ('local', 'openai', 'anthropic')),
+        model_id TEXT NOT NULL,
+        effort TEXT NOT NULL CHECK(effort IN ('none', 'minimal', 'low', 'medium', 'high', 'xhigh')),
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(user_id, provider, model_id),
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+      INSERT INTO model_reasoning_effort_preferences
+        SELECT * FROM model_reasoning_effort_preferences_current;
+      DROP TABLE model_reasoning_effort_preferences_current;
+      CREATE INDEX idx_model_effort_preferences_user_updated
+        ON model_reasoning_effort_preferences(user_id, updated_at DESC);
+    `);
+    db.prepare(
+      "INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run(
+      "effort-user",
+      "effort@example.com",
+      "Effort",
+      "hash",
+      "salt",
+      "cipher",
+      "iv",
+      "tag",
+      "2026-08-28T00:00:00.000Z",
+      "2026-08-28T00:00:00.000Z",
+    );
+    db.prepare(
+      "INSERT INTO model_reasoning_effort_preferences (user_id, provider, model_id, effort, updated_at) VALUES (?, ?, ?, ?, ?)",
+    ).run(
+      "effort-user",
+      "openai",
+      "gpt-5.6-sol",
+      "high",
+      "2026-08-28T00:00:00.000Z",
+    );
+
+    initializeDatabase(db);
+
+    assert.equal(
+      (
+        db.prepare(
+          "SELECT effort FROM model_reasoning_effort_preferences WHERE user_id = ? AND provider = ?",
+        ).get("effort-user", "openai") as { effort: string }
+      ).effort,
+      "high",
+    );
+    assert.doesNotThrow(() =>
+      db.prepare(
+        "INSERT INTO model_reasoning_effort_preferences (user_id, provider, model_id, effort, updated_at) VALUES (?, ?, ?, ?, ?)",
+      ).run(
+        "effort-user",
+        "ollama_cloud",
+        "ollama-cloud-direct:kimi-k2.7-code:cloud",
+        "minimal",
+        "2026-08-28T00:00:01.000Z",
+      ),
+    );
+    db.close();
+  });
+});
+
 describe("bot color saturation migration", () => {
   it("upgrades existing bot colors once without changing hue or lightness", () => {
     const db = new DatabaseSync(":memory:");

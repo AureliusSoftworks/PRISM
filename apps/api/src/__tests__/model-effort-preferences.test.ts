@@ -5,6 +5,7 @@ import { initializeDatabase } from "../db.ts";
 import {
   findModelReasoningEffortPreference,
   listModelReasoningEffortPreferences,
+  normalizeModelEffortProvider,
   resetModelReasoningEffortPreferences,
   setModelReasoningEffortPreference,
 } from "../model-effort-preferences.ts";
@@ -62,6 +63,26 @@ function createTestDatabase(): DatabaseSync {
 }
 
 describe("model effort preferences", () => {
+  it("accepts Ollama Cloud as a persisted effort provider", () => {
+    assert.equal(normalizeModelEffortProvider("ollama_cloud"), "ollama_cloud");
+    const db = createTestDatabase();
+    setModelReasoningEffortPreference(db, {
+      userId: "user-1",
+      provider: "ollama_cloud",
+      modelId: "ollama-cloud-direct:kimi-k2.7-code:cloud",
+      effort: "minimal",
+    });
+    assert.equal(
+      findModelReasoningEffortPreference(
+        db,
+        "user-1",
+        "ollama_cloud",
+        "ollama-cloud-direct:kimi-k2.7-code:cloud",
+      ),
+      "minimal",
+    );
+  });
+
   it("persists Turbo only for supported online models", () => {
     const db = createTestDatabase();
     setModelTurboPreference(db, {

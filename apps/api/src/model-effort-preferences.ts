@@ -18,7 +18,10 @@ interface ModelEffortPreferenceRow {
 export function normalizeModelEffortProvider(
   value: unknown,
 ): NativeReasoningEffortProvider | null {
-  return value === "local" || value === "openai" || value === "anthropic"
+  return value === "local" ||
+    value === "ollama_cloud" ||
+    value === "openai" ||
+    value === "anthropic"
     ? value
     : null;
 }

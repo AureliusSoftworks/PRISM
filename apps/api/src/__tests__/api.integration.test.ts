@@ -2061,6 +2061,38 @@ describe("API request integration", () => {
     assert.equal(defaulted.status, 200);
     assert.deepEqual((await json(defaulted)).modelEffortPreferences, []);
 
+    const ollamaCloudSaved = await client.request(
+      "/api/model-effort-preferences",
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          provider: "ollama_cloud",
+          modelId: "ollama-cloud-direct:kimi-k2.7-code:cloud",
+          effort: "minimal",
+        }),
+      },
+    );
+    assert.equal(ollamaCloudSaved.status, 200, await ollamaCloudSaved.clone().text());
+    assert.equal(
+      (await json(ollamaCloudSaved)).modelEffortPreferences[0]?.provider,
+      "ollama_cloud",
+    );
+
+    const unsupportedNone = await client.request(
+      "/api/model-effort-preferences",
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          provider: "ollama_cloud",
+          modelId: "ollama-cloud-direct:kimi-k2.7-code:cloud",
+          effort: "none",
+        }),
+      },
+    );
+    assert.equal(unsupportedNone.status, 400);
+
     const reset = await client.request("/api/model-effort-preferences", {
       method: "DELETE",
     });

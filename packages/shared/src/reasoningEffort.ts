@@ -584,21 +584,40 @@ const OLLAMA_TIERED_NATIVE_ONLY_LEVELS = [
   "medium",
 ] as const satisfies readonly ModelReasoningEffortPreference[];
 
+function normalizedOllamaModelId(modelId: string): string {
+  return modelId
+    .trim()
+    .toLowerCase()
+    .replace(/^ollama-cloud-direct:/u, "");
+}
+
+function ollamaModelMatchesFamily(modelId: string, family: string): boolean {
+  const normalized = normalizedOllamaModelId(modelId);
+  return normalized === family || normalized.startsWith(`${family}:`);
+}
+
 /**
  * Models whose published Ollama integration supports the native `think` flag.
  * Keep this deliberately narrow: daemon-discovered LOCAL models should use
  * their reported capability instead of inheriting a family-name guess.
  */
 export function ollamaModelUsesTieredThinking(modelId: string): boolean {
-  const normalized = modelId
-    .trim()
-    .toLowerCase()
-    .replace(/^ollama-cloud-direct:/u, "");
-  return normalized === "gpt-oss" || normalized.startsWith("gpt-oss:");
+  return ollamaModelMatchesFamily(modelId, "gpt-oss");
+}
+
+/**
+ * Thinking families observed to ignore or reject a disabled-thinking state.
+ * Keep this conservative and explicit: the generic Ollama `thinking`
+ * capability alone does not say whether `think: false` is honored.
+ */
+function ollamaModelRequiresThinking(modelId: string): boolean {
+  return ["gpt-oss", "kimi-k2.7-code", "nemotron-3-super"].some((family) =>
+    ollamaModelMatchesFamily(modelId, family),
+  );
 }
 
 export function ollamaModelIsKnownToSupportNativeThinking(modelId: string): boolean {
-  return ollamaModelUsesTieredThinking(modelId);
+  return ollamaModelRequiresThinking(modelId);
 }
 
 export function normalizeReasoningEffort(value: unknown): ReasoningEffort {
@@ -804,7 +823,7 @@ export function resolveModelReasoningEffortCapability(args: {
       ollamaModelIsKnownToSupportNativeThinking(args.modelId));
   if (args.provider === "local" || args.provider === "ollama_cloud") {
     if (ollamaNativeThinking) {
-      const requiredThinking = ollamaModelUsesTieredThinking(args.modelId);
+      const requiredThinking = ollamaModelRequiresThinking(args.modelId);
       return {
         mode: "native-thinking",
         levels: simulatedEnabled

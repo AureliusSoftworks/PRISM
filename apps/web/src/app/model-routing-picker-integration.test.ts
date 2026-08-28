@@ -626,7 +626,7 @@ describe("shared routing model picker integration", () => {
     );
     assert.match(
       tutorialSource,
-      /Models that can disable native thinking also show None with the hollow circle; required-thinking families such as GPT-OSS omit None/u,
+      /Models that can disable native thinking also show None with the hollow circle; required-thinking families such as GPT-OSS, Kimi K2\.7 Code, and Nemotron 3 Super omit None/u,
     );
   });
 

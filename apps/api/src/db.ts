@@ -341,7 +341,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     CREATE TABLE IF NOT EXISTS model_reasoning_effort_preferences (
       user_id TEXT NOT NULL,
       provider TEXT NOT NULL
-        CHECK(provider IN ('local', 'openai', 'anthropic')),
+        CHECK(provider IN ('local', 'ollama_cloud', 'openai', 'anthropic')),
       model_id TEXT NOT NULL,
       effort TEXT NOT NULL
         CHECK(effort IN ('none', 'minimal', 'low', 'medium', 'high', 'xhigh')),
@@ -2785,6 +2785,39 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
   `);
+  const modelEffortPreferenceTable = db
+    .prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'model_reasoning_effort_preferences'",
+    )
+    .get() as { sql?: string } | undefined;
+  if (!modelEffortPreferenceTable?.sql?.includes("'ollama_cloud'")) {
+    db.exec(`
+      BEGIN IMMEDIATE;
+      ALTER TABLE model_reasoning_effort_preferences
+        RENAME TO model_reasoning_effort_preferences_legacy;
+      DROP INDEX IF EXISTS idx_model_effort_preferences_user_updated;
+      CREATE TABLE model_reasoning_effort_preferences (
+        user_id TEXT NOT NULL,
+        provider TEXT NOT NULL
+          CHECK(provider IN ('local', 'ollama_cloud', 'openai', 'anthropic')),
+        model_id TEXT NOT NULL,
+        effort TEXT NOT NULL
+          CHECK(effort IN ('none', 'minimal', 'low', 'medium', 'high', 'xhigh')),
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(user_id, provider, model_id),
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+      INSERT INTO model_reasoning_effort_preferences (
+        user_id, provider, model_id, effort, updated_at
+      )
+      SELECT user_id, provider, model_id, effort, updated_at
+        FROM model_reasoning_effort_preferences_legacy;
+      DROP TABLE model_reasoning_effort_preferences_legacy;
+      CREATE INDEX idx_model_effort_preferences_user_updated
+        ON model_reasoning_effort_preferences(user_id, updated_at DESC);
+      COMMIT;
+    `);
+  }
   const mysteryV2CaseColumns = new Set(
     (db.prepare("PRAGMA table_info(debate_mystery_v2_cases)").all() as Array<{
       name: string;
