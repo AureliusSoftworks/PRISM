@@ -1832,7 +1832,7 @@ export function normalizeBotcastEpisodeImageName(
   return normalized.slice(0, BOTCAST_EPISODE_IMAGE_NAME_MAX_LENGTH);
 }
 
-/** Private, request-scoped Producer intent; never part of replay metadata. */
+/** Private Producer intent; never part of Signal events or replay metadata. */
 export function normalizeBotcastEpisodeImageReason(
   value: unknown,
 ): string | null {

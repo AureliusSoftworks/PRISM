@@ -123,6 +123,10 @@ export function signalAudienceRatingColor(
 function signalShowAudienceRating(
   show: SignalShowAudienceRankingItem,
 ): number | null {
+  if (signalShowAudienceReviewCount(show) === 0) {
+    return null;
+  }
+
   const rating = show.audienceRating;
   return typeof rating === "number" && Number.isFinite(rating)
     ? Math.max(0, Math.min(5, rating))

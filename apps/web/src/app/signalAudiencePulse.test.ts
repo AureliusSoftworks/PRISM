@@ -183,7 +183,7 @@ describe("Signal audience pulse", () => {
         id: "unrated-new",
         name: "Unrated New",
         updatedAt: "2026-08-04T00:00:00.000Z",
-        audienceRating: null,
+        audienceRating: 3.5,
         audienceReviewCount: 0,
       },
       {

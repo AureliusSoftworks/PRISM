@@ -11,6 +11,41 @@ import {
   resolveDbPath,
 } from "../db.ts";
 
+describe("Signal retry image Reason migration", () => {
+  it("adds private Reason storage to legacy proxy rows with a blank default", () => {
+    const db = new DatabaseSync(":memory:");
+    initializeDatabase(db);
+    db.exec(`
+      PRAGMA foreign_keys = OFF;
+      ALTER TABLE botcast_episode_image_proxies DROP COLUMN presentation_reason;
+      INSERT INTO botcast_episode_image_proxies
+        (episode_id, user_id, image_id, content_type, width, height, image_bytes, created_at)
+      VALUES
+        ('legacy-episode', 'legacy-user', 'legacy-image', 'image/webp', 8, 6, X'00',
+         '2026-08-29T00:00:00.000Z');
+    `);
+
+    initializeDatabase(db);
+
+    const column = (
+      db.prepare("PRAGMA table_info(botcast_episode_image_proxies)").all() as Array<{
+        name: string;
+        dflt_value: string | null;
+      }>
+    ).find((candidate) => candidate.name === "presentation_reason");
+    assert.equal(column?.dflt_value, "''");
+    assert.equal(
+      (
+        db.prepare(
+          "SELECT presentation_reason FROM botcast_episode_image_proxies WHERE episode_id = ?",
+        ).get("legacy-episode") as { presentation_reason: string }
+      ).presentation_reason,
+      "",
+    );
+    db.close();
+  });
+});
+
 describe("Ollama Cloud credential migration", () => {
   it("adds the nullable encrypted account columns", () => {
     const db = new DatabaseSync(":memory:");

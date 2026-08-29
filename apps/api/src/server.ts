@@ -7319,7 +7319,7 @@ async function normalizeSignalEpisodeImageForTurn(
         name: archivedContext.name,
         mimeType: archivedContext.mimeType,
       },
-      presentationReason: null,
+      presentationReason: normalizeBotcastEpisodeImageReason(record.reason),
       replayEmoji: archivedContext.replayEmoji,
       // The vision request and new replay proxy are derived only from the
       // booking-owned archival proxy, never the original upload.
@@ -24392,6 +24392,45 @@ function buildRoutes(): RouteDefinition[] {
       ctx.res.setHeader("cache-control", "private, max-age=3600");
       ctx.res.end(Buffer.from(row.image_bytes));
     }),
+    route("GET", "/api/botcast/episodes/:id/retry-metadata", async (ctx) => {
+      const userId = requireAuth(ctx);
+      let episode: BotcastEpisode;
+      try {
+        episode = getBotcastEpisode(db, userId, ctx.params.id);
+      } catch {
+        throw new HttpError(404, "Signal booking not found.");
+      }
+      if (episode.status !== "completed" && episode.status !== "cancelled") {
+        throw new HttpError(
+          409,
+          "Only a completed or cancelled Signal booking has retry metadata.",
+        );
+      }
+      const imageContext = botcastLatestImageContextV1(episode.events);
+      if (!imageContext?.replayProxyId) {
+        json(ctx.res, 200, { ok: true, image: null });
+        return;
+      }
+      const row = db
+        .prepare(
+          `SELECT image_id, presentation_reason
+             FROM botcast_episode_image_proxies
+            WHERE episode_id = ? AND user_id = ? AND image_id = ?`,
+        )
+        .get(episode.id, userId, imageContext.imageId) as
+        | { image_id: string; presentation_reason: string }
+        | undefined;
+      json(ctx.res, 200, {
+        ok: true,
+        image: row
+          ? {
+              imageId: row.image_id,
+              reason:
+                normalizeBotcastEpisodeImageReason(row.presentation_reason) ?? "",
+            }
+          : null,
+      });
+    }),
     route("POST", "/api/botcast/episodes/:id/producer-cue", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
@@ -24671,6 +24710,7 @@ function buildRoutes(): RouteDefinition[] {
               provider: runtime.provider,
               model: runtime.model,
               replayEmoji: signalEpisodeImage.replayEmoji,
+              presentationReason: signalEpisodeImage.presentationReason,
               replayProxy: {
                 id: randomId(12),
                 ...replayProxy,
@@ -25016,6 +25056,7 @@ function buildRoutes(): RouteDefinition[] {
             provider: imageRuntime.provider,
             model: imageRuntime.model,
             replayEmoji: signalEpisodeImage.replayEmoji,
+            presentationReason: signalEpisodeImage.presentationReason,
             allowWatchBake: true,
             replayProxy: { id: randomId(12), ...replayProxy },
           },

@@ -207,6 +207,7 @@ import {
   normalizeBotcastIdentityMirrorResetV1,
   normalizeBotcastStudioGlowTuning,
   normalizeBotcastCameraFraming,
+  normalizeBotcastEpisodeImageReason,
   normalizeBotcastEpisodeImageReplayEmoji,
   normalizeBotcastLogoPlacement,
   parseStoredBotAvatarDetailsV1,
@@ -8812,6 +8813,8 @@ export function queueBotcastEpisodeImageContext(
   > & {
     /** Private Watch bake setup path; public producer calls remain live-only. */
     allowWatchBake?: boolean;
+    /** Private host-only presentation intent; never written to Signal events. */
+    presentationReason?: string | null;
     replayProxy?: {
       id: string;
       bytes: Buffer;
@@ -8837,6 +8840,9 @@ export function queueBotcastEpisodeImageContext(
     throw new Error("Signal accepts one image per episode.");
   }
   const replayProxy = input.replayProxy ?? null;
+  const presentationReason = normalizeBotcastEpisodeImageReason(
+    input.presentationReason,
+  );
   if (
     replayProxy &&
     (!replayProxy.id.trim() ||
@@ -8878,8 +8884,9 @@ export function queueBotcastEpisodeImageContext(
     if (replayProxy) {
       db.prepare(
         `INSERT INTO botcast_episode_image_proxies
-           (episode_id, user_id, image_id, content_type, width, height, image_bytes, created_at)
-         VALUES (?, ?, ?, 'image/webp', ?, ?, ?, ?)`,
+           (episode_id, user_id, image_id, content_type, width, height, image_bytes,
+            presentation_reason, created_at)
+         VALUES (?, ?, ?, 'image/webp', ?, ?, ?, ?, ?)`,
       ).run(
         episode.id,
         userId,
@@ -8887,6 +8894,7 @@ export function queueBotcastEpisodeImageContext(
         replayProxy.width,
         replayProxy.height,
         replayProxy.bytes,
+        presentationReason ?? "",
         now,
       );
     }

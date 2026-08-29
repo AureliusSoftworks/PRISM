@@ -374,6 +374,40 @@ describe("Signal experience shell", () => {
     assert.match(css, /grid-template-columns:\s*28px minmax\(0, 1fr\) auto/u);
   });
 
+  it("renders zero-review Signal show list ratings as 0 stars", () => {
+    assert.match(source, /const hasAudienceReviews = reviewCount > 0;/u);
+    assert.match(source, /const audienceRating = hasAudienceReviews \? rating : 0;/u);
+    assert.match(
+      source,
+      /data-unrated=\{hasAudienceReviews \? undefined : "true"\}/u,
+    );
+    assert.match(source, /\{`\$\{audienceRating\.toFixed\(1\)\} ★`\}/u);
+    assert.match(
+      source,
+      /const showAudienceRating =[\s\S]{0,120}showAudience\.reviewCount > 0[\s\S]{0,80}Math\.min\(5,\s*showAudience\.rating/u,
+    );
+  });
+
+  it("renders zero-review Audience Pulse ratings as 0.0 stars in the show card panel", () => {
+    assert.match(
+      source,
+      /const showAudienceRating =[\s\S]{0,120}showAudience\.reviewCount > 0[\s\S]{0,80}Math\.max\(0,\s*Math\.min\(5,\s*showAudience\.rating/u,
+    );
+    assert.match(
+      source,
+      /signalAudienceRatingColor\(showAudienceRating\)\s*\?\?/u,
+    );
+    assert.match(
+      source,
+      /\{showAudienceRating\.toFixed\(1\)\}[\s\S]{0,120}showAudienceRatingStar/u,
+    );
+    assert.match(source, /showAudienceRating === 0\s*\?\s*"No audience rating yet"/u);
+    assert.doesNotMatch(
+      source,
+      /showAudience\.rating === null/u,
+    );
+  });
+
   it("records four live camera modes and keeps the saved replay cut fixed", () => {
     assert.match(source, /\["left", "right", "wide", "auto"\] as const/u);
     assert.match(source, /botcastCameraModeAt\(\{/u);
@@ -2048,7 +2082,10 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /Early cut · setup only/u);
     assert.match(source, /data-tutorial-target="botcast-latest-episodes"/u);
-    assert.match(source, /const detail = await loadEpisode\(summary\.id\)/u);
+    assert.match(
+      source,
+      /const \[detail, retryMetadata\] = await Promise\.all\(\[[\s\S]{0,300}\/retry-metadata/u,
+    );
     assert.match(source, /signalEpisodeRetryDraft\(\{/u);
     assert.match(source, /setGuestDraftId\(retry\.guestId\)/u);
     assert.match(source, /setTopicDraft\(retry\.topic\)/u);
@@ -2056,6 +2093,8 @@ describe("Signal experience shell", () => {
     assert.match(source, /setGuestBriefDraft\(retry\.guestBrief\)/u);
     assert.match(source, /setEpisodeModelDraft\(retry\.modelId\)/u);
     assert.match(source, /setEpisodeDurationDraft\(retry\.durationMinutes\)/u);
+    assert.match(source, /retryMetadata,/u);
+    assert.match(source, /reason: retry\.image\.reason/u);
     assert.match(source, /Use setup/u);
     assert.match(source, /Nothing starts until you\s+say so/u);
     assert.match(css, /\.latestEpisodeList button/u);

@@ -338,7 +338,10 @@ import {
   type SignalCameraTransitionMode,
   type SignalDirectedCameraShot,
 } from "./signalCameraTransition";
-import { signalEpisodeRetryDraft } from "./signalEpisodeRetry";
+import {
+  signalEpisodeRetryDraft,
+  type SignalEpisodeRetryMetadata,
+} from "./signalEpisodeRetry";
 import { signalDepartureRoleAfterPresentedMessage } from "./signalDeparturePresentation";
 import {
   signalCompactThinkingNoticeAt,
@@ -13618,16 +13621,16 @@ export function BotcastExperience({
           const rating =
             typeof show.audienceRating === "number" &&
             Number.isFinite(show.audienceRating)
-              ? show.audienceRating
-              : null;
+              ? Math.max(0, Math.min(5, show.audienceRating))
+              : 0;
           const reviewCount = Math.max(
             0,
             Math.round(show.audienceReviewCount ?? 0),
           );
+          const hasAudienceReviews = reviewCount > 0;
+          const audienceRating = hasAudienceReviews ? rating : 0;
           const audienceLabel =
-            rating === null
-              ? "No audience rating yet"
-              : `${rating.toFixed(1)} out of 5 from ${reviewCount} review${reviewCount === 1 ? "" : "s"}`;
+            `${audienceRating.toFixed(1)} out of 5 from ${reviewCount} review${reviewCount === 1 ? "" : "s"}`;
           return (
             <button
               key={show.id}
@@ -13647,7 +13650,7 @@ export function BotcastExperience({
                     theme,
                   ),
                   ["--show-rating-color" as string]:
-                    signalAudienceRatingColor(rating) ?? undefined,
+                    signalAudienceRatingColor(audienceRating) ?? undefined,
                 } as CSSProperties
               }
               data-botcast-show-id={show.id}
@@ -13661,11 +13664,11 @@ export function BotcastExperience({
               </span>
               <span
                 className={styles.showRowRating}
-                data-unrated={rating === null ? "true" : undefined}
+                data-unrated={hasAudienceReviews ? undefined : "true"}
                 title={audienceLabel}
                 aria-hidden="true"
               >
-                {rating === null ? "—" : `${rating.toFixed(1)} ★`}
+                {`${audienceRating.toFixed(1)} ★`}
               </span>
             </button>
           );
@@ -15004,7 +15007,12 @@ export function BotcastExperience({
       setEpisodeSetupLoadingId(summary.id);
       setError(null);
       try {
-        const detail = await loadEpisode(summary.id);
+        const [detail, retryMetadata] = await Promise.all([
+          loadEpisode(summary.id),
+          request<SignalEpisodeRetryMetadata>(
+            `/api/botcast/episodes/${encodeURIComponent(summary.id)}/retry-metadata`,
+          ),
+        ]);
         if (selectedShowIdRef.current !== expectedShowId) return;
         if (detail.guestKind === "producer") {
           setGuestDraftId(BOTCAST_PRODUCER_GUEST_ID);
@@ -15033,6 +15041,7 @@ export function BotcastExperience({
           availableGuestIds: guestOptions.map((bot) => bot.id),
           availableModelIds: modelOptions.map((option) => option.id),
           currentResponseMode: responseMode,
+          retryMetadata,
         });
         setGuestDraftId(retry.guestId);
         setTopicDraft(retry.topic);
@@ -15051,8 +15060,7 @@ export function BotcastExperience({
                 archivalProxyEpisodeId: retry.image.sourceEpisodeId,
                 descriptor: retry.image.descriptor,
                 replayEmoji: retry.image.replayEmoji,
-                // Private presentation reasons are intentionally never archived.
-                reason: "",
+                reason: retry.image.reason,
               }
             : null,
         );
@@ -17119,6 +17127,11 @@ export function BotcastExperience({
     }
   };
 
+  const showAudienceRating =
+    showAudience !== null && showAudience.reviewCount > 0
+      ? Math.max(0, Math.min(5, showAudience.rating ?? 0))
+      : 0;
+
   return (
     <>
       {liveSessionActive ? (
@@ -19055,7 +19068,7 @@ export function BotcastExperience({
                           className={styles.showAudienceMetrics}
                           role="list"
                         >
-                          <span
+                            <span
                             className={styles.showAudienceMetric}
                             role="listitem"
                           >
@@ -19081,33 +19094,29 @@ export function BotcastExperience({
                                 {
                                   ["--signal-rating-color" as string]:
                                     signalAudienceRatingColor(
-                                      showAudience.rating,
+                                      showAudienceRating,
                                     ) ?? undefined,
                                 } as CSSProperties
                               }
                               aria-label={
-                                showAudience.rating === null
-                              ? "No audience rating yet"
-                                  : `${showAudience.rating.toFixed(1)} out of 5${
+                                showAudienceRating === 0
+                                  ? "No audience rating yet"
+                                  : `${showAudienceRating.toFixed(1)} out of 5${
                                       showAudience.ratingConfidence === "early"
                                         ? ", early rating"
                                         : ""
                                     }`
                               }
                           >
-                            {showAudience.rating === null ? (
-                              "—"
-                            ) : (
-                              <>
-                                {showAudience.rating.toFixed(1)}
-                                  <span
-                                    className={styles.showAudienceRatingStar}
-                                    aria-hidden="true"
-                                  >
-                                    ★
-                                  </span>
-                              </>
-                            )}
+                            <>
+                              {showAudienceRating.toFixed(1)}
+                              <span
+                                className={styles.showAudienceRatingStar}
+                                aria-hidden="true"
+                              >
+                                ★
+                              </span>
+                            </>
                           </strong>
                         </span>
                           <span
@@ -19682,16 +19691,14 @@ export function BotcastExperience({
                   </small>
                   <strong
                     style={
-                      {
-                        ["--signal-rating-color" as string]:
-                          signalAudienceRatingColor(showAudience.rating) ??
+                          {
+                            ["--signal-rating-color" as string]:
+                          signalAudienceRatingColor(showAudienceRating) ??
                           undefined,
-                      } as CSSProperties
-                    }
-                  >
-                    {showAudience.rating === null
-                      ? "—"
-                      : `${showAudience.rating.toFixed(1)} ★`}
+                          } as CSSProperties
+                        }
+                      >
+                    {`${showAudienceRating.toFixed(1)} ★`}
                   </strong>
                 </span>
                 <span role="listitem">

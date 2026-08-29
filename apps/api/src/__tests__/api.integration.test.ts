@@ -3857,14 +3857,87 @@ describe("API request integration", () => {
       .toBuffer();
     db.prepare(
       `INSERT INTO botcast_episode_image_proxies
-         (episode_id, user_id, image_id, content_type, width, height, image_bytes, created_at)
-       VALUES (?, ?, ?, 'image/webp', 8, 6, ?, ?)`,
+         (episode_id, user_id, image_id, content_type, width, height, image_bytes,
+          presentation_reason, created_at)
+       VALUES (?, ?, ?, 'image/webp', 8, 6, ?, ?, ?)`,
     ).run(
       episodeId,
       ownerId,
       "signal-route-proxy",
       replayProxyBytes,
+      "Frame it as a private gift.",
       createdAt,
+    );
+    db.prepare(
+      `INSERT INTO botcast_events
+         (id, user_id, episode_id, sequence, kind, payload_json, occurred_at)
+       VALUES (?, ?, ?,
+         (SELECT COALESCE(MAX(sequence), 0) + 1 FROM botcast_events
+           WHERE user_id = ? AND episode_id = ?),
+         'image_context', ?, ?)`,
+    ).run(
+      "signal-route-proxy-event",
+      ownerId,
+      episodeId,
+      ownerId,
+      episodeId,
+      JSON.stringify({
+        v: 1,
+        imageId: "signal-route-proxy",
+        kind: "picture",
+        name: "Private gift",
+        mimeType: "image/jpeg",
+        provider: "local",
+        model: "llava",
+        replayEmoji: "🎁",
+        replayProxyId: "signal-route-proxy-id",
+        savedAssetId: null,
+        phase: "dismissed",
+        hostIntroductionMessageId: null,
+        guestDiscussionMessageId: null,
+        hostFollowUpMessageId: null,
+        discussionMessageIds: [],
+        lifecycleEvidence: null,
+      }),
+      createdAt,
+    );
+    db.prepare(
+      "UPDATE botcast_episodes SET status = 'cancelled' WHERE id = ? AND user_id = ?",
+    ).run(episodeId, ownerId);
+    const retryMetadataResponse = await owner.request(
+      `/api/botcast/episodes/${encodeURIComponent(episodeId)}/retry-metadata`,
+    );
+    assert.equal(retryMetadataResponse.status, 200);
+    const retryMetadata = await json(retryMetadataResponse);
+    assert.deepEqual(retryMetadata, {
+      ok: true,
+      image: {
+        imageId: "signal-route-proxy",
+        reason: "Frame it as a private gift.",
+      },
+    });
+    assert.deepEqual(Object.keys(retryMetadata.image).sort(), ["imageId", "reason"]);
+    assert.equal(
+      (await stranger.request(
+        `/api/botcast/episodes/${encodeURIComponent(episodeId)}/retry-metadata`,
+      )).status,
+      404,
+    );
+    const publicEpisode = await json(await owner.request(
+      `/api/botcast/episodes/${encodeURIComponent(episodeId)}`,
+    ));
+    assert.equal(JSON.stringify(publicEpisode).includes("Frame it as a private gift."), false);
+    db.prepare(
+      "UPDATE botcast_episode_image_proxies SET presentation_reason = '' WHERE episode_id = ?",
+    ).run(episodeId);
+    assert.deepEqual(
+      await json(await owner.request(
+        `/api/botcast/episodes/${encodeURIComponent(episodeId)}/retry-metadata`,
+      )),
+      {
+        ok: true,
+        image: { imageId: "signal-route-proxy", reason: "" },
+      },
     );
     const replayProxyResponse = await owner.request(
       `/api/botcast/episodes/${encodeURIComponent(episodeId)}/image-proxy`,

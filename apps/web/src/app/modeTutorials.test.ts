@@ -3641,6 +3641,10 @@ describe("mode tutorials", () => {
     assert.match(booking, /opaque PNGs or JPGs as pictures/u);
     assert.match(booking, /editable spoken Name from the filename/u);
     assert.match(booking, /optional Reason private to the host/u);
+    assert.match(
+      booking,
+      /cached episode image with its editable Name and private Reason/u,
+    );
     assert.match(booking, /automatically presents the image/u);
     assert.match(booking, /bytes remain session-only/u);
     assert.match(controlRoom, /at least the guest’s response and the host’s follow-up/u);

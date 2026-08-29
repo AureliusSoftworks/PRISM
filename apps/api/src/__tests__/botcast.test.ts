@@ -1471,6 +1471,36 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.match(
         serverSource,
+        /archivalProxyEpisodeId[\s\S]{0,2600}presentationReason: normalizeBotcastEpisodeImageReason\(record\.reason\)/u,
+      );
+      assert.match(
+        serverSource,
+        /route\("GET", "\/api\/botcast\/episodes\/:id\/retry-metadata"/u,
+      );
+      const retryMetadataRouteStart = serverSource.indexOf(
+        'route("GET", "/api/botcast/episodes/:id/retry-metadata"',
+      );
+      const retryMetadataRouteEnd = serverSource.indexOf(
+        'route("POST", "/api/botcast/episodes/:id/producer-cue"',
+        retryMetadataRouteStart,
+      );
+      const retryMetadataRoute = serverSource.slice(
+        retryMetadataRouteStart,
+        retryMetadataRouteEnd,
+      );
+      assert.match(retryMetadataRoute, /const userId = requireAuth\(ctx\)/u);
+      assert.match(
+        retryMetadataRoute,
+        /WHERE episode_id = \? AND user_id = \? AND image_id = \?/u,
+      );
+      assert.match(retryMetadataRoute, /imageId: row\.image_id[\s\S]*?reason:/u);
+      assert.doesNotMatch(retryMetadataRoute, /image_bytes|payload_json/u);
+      assert.match(
+        serverSource,
+        /presentationReason: signalEpisodeImage\.presentationReason/g,
+      );
+      assert.match(
+        serverSource,
         /replayEmoji: signalEpisodeImage\.replayEmoji/u,
       );
       assert.doesNotMatch(serverSource, /episode-image\/emoji/u);
@@ -1554,6 +1584,7 @@ describe("Botcast persistence and isolation", () => {
           provider: "local",
           model: "llava",
           replayEmoji: "🖼️",
+          presentationReason: "  Introduce   it as a keepsake.  ",
           replayProxy: {
             id: "proxy-1",
             bytes: Buffer.from("webp-proxy"),
@@ -1568,7 +1599,8 @@ describe("Botcast persistence and isolation", () => {
       );
       const row = db
         .prepare(
-          `SELECT user_id, image_id, content_type, width, height, image_bytes
+          `SELECT user_id, image_id, content_type, width, height, image_bytes,
+                  presentation_reason
              FROM botcast_episode_image_proxies
             WHERE episode_id = ?`,
         )
@@ -1579,6 +1611,7 @@ describe("Botcast persistence and isolation", () => {
         width: number;
         height: number;
         image_bytes: Buffer;
+        presentation_reason: string;
       };
       assert.equal(row.user_id, "user-1");
       assert.equal(row.image_id, "signal-image-proxy");
@@ -1586,6 +1619,8 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(row.width, 128);
       assert.equal(row.height, 96);
       assert.deepEqual(Buffer.from(row.image_bytes), Buffer.from("webp-proxy"));
+      assert.equal(row.presentation_reason, "Introduce it as a keepsake.");
+      assert.equal("reason" in (queued.events.at(-1)?.payload ?? {}), false);
       assert.throws(
         () =>
           queueBotcastEpisodeImageContext(db, "user-1", episode.id, {

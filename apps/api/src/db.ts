@@ -2270,6 +2270,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       width INTEGER NOT NULL CHECK (width > 0 AND width <= 128),
       height INTEGER NOT NULL CHECK (height > 0 AND height <= 128),
       image_bytes BLOB NOT NULL,
+      presentation_reason TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(episode_id) REFERENCES botcast_episodes(id) ON DELETE CASCADE
@@ -2802,6 +2803,18 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
   `);
+  const botcastImageProxyColumns = new Set(
+    (
+      db.prepare("PRAGMA table_info(botcast_episode_image_proxies)").all() as Array<{
+        name: string;
+      }>
+    ).map((column) => column.name),
+  );
+  if (!botcastImageProxyColumns.has("presentation_reason")) {
+    db.exec(
+      "ALTER TABLE botcast_episode_image_proxies ADD COLUMN presentation_reason TEXT NOT NULL DEFAULT '';",
+    );
+  }
   const modelEffortPreferenceTable = db
     .prepare(
       "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'model_reasoning_effort_preferences'",

@@ -133,6 +133,12 @@ describe("Signal episode retry setup", () => {
       availableGuestIds: ["guest-1"],
       availableModelIds: ["model-1"],
       currentResponseMode: "local",
+      retryMetadata: {
+        image: {
+          imageId: "image-1",
+          reason: "Introduce it as a private gift.",
+        },
+      },
     });
 
     assert.deepEqual(retry.image, {
@@ -144,7 +150,51 @@ describe("Signal episode retry setup", () => {
         mimeType: "image/jpeg",
       },
       replayEmoji: "📕",
+      reason: "Introduce it as a private gift.",
     });
+  });
+
+  it("restores a legacy proxy with an editable blank Reason", () => {
+    const retry = signalEpisodeRetryDraft({
+      episode: {
+        ...episode,
+        events: [
+          {
+            id: "legacy-proxy-context",
+            episodeId: episode.id,
+            sequence: 1,
+            kind: "image_context",
+            payload: {
+              v: 1,
+              imageId: "legacy-proxy-image",
+              kind: "picture",
+              name: "Legacy photograph",
+              mimeType: "image/jpeg",
+              provider: "local",
+              model: "llava",
+              replayEmoji: "🖼️",
+              replayProxyId: "legacy-proxy",
+              savedAssetId: null,
+              phase: "dismissed",
+              hostIntroductionMessageId: null,
+              guestDiscussionMessageId: null,
+              hostFollowUpMessageId: null,
+            },
+            occurredAt: "2026-08-29T00:00:00.000Z",
+          },
+        ],
+      },
+      availableGuestIds: ["guest-1"],
+      availableModelIds: ["model-1"],
+      currentResponseMode: "local",
+      retryMetadata: {
+        image: { imageId: "legacy-proxy-image", reason: "" },
+      },
+    });
+
+    assert.equal(retry.image?.reason, "");
+    assert.equal(retry.guestBrief, episode.guestBrief);
+    assert.equal(retry.topic, episode.topic);
   });
 
   it("leaves legacy image records without an archival proxy unchanged", () => {

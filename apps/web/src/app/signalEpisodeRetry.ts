@@ -15,6 +15,12 @@ export type SignalEpisodeRetryImage = {
   imageId: string;
   descriptor: BotcastEpisodeImageDescriptor;
   replayEmoji: string;
+  /** Private editable host direction loaded from the retry-only API. */
+  reason: string;
+};
+
+export type SignalEpisodeRetryMetadata = {
+  image: { imageId: string; reason: string } | null;
 };
 
 export type SignalEpisodeRetryDraft = {
@@ -47,6 +53,7 @@ export function signalEpisodeRetryDraft(args: {
   availableGuestIds: readonly string[];
   availableModelIds: readonly string[];
   currentResponseMode: BotcastEpisodeResponseMode;
+  retryMetadata?: SignalEpisodeRetryMetadata | null;
 }): SignalEpisodeRetryDraft {
   const guestAvailable = args.availableGuestIds.includes(
     args.episode.guestBotId,
@@ -80,6 +87,10 @@ export function signalEpisodeRetryDraft(args: {
           mimeType: imageContext.mimeType,
         },
         replayEmoji: imageContext.replayEmoji,
+        reason:
+          args.retryMetadata?.image?.imageId === imageContext.imageId
+            ? args.retryMetadata.image.reason
+            : "",
       }
     : null;
 
