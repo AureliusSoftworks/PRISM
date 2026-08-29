@@ -709,7 +709,10 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(setupSource, /aria-controls=\{format === "whodunnit" \? "debate-mystery-jury-options" : undefined\}/u);
     assert.match(setupSource, /\{format === "whodunnit" \? renderJuryToggle\(\) : null\}/u);
     assert.match(setupSource, /\{format !== "whodunnit" \? renderJuryToggle\(\) : null\}/u);
-    assert.match(setupSource, /\{juryEnabled \? \(\s*<section\s*id="debate-mystery-jury-options"/u);
+    assert.match(
+      setupSource,
+      /\{juryEnabled \? \(\s*<PrismRefractTarget[\s\S]{0,400}id="debate-mystery-jury-options"/u,
+    );
     assert.match(setupSource, /activeMysteryCastSeat\.kind === "juror"[\s\S]{0,160}setActiveMysteryCastSeat\(\{ kind: "suspect", index: 0 \}\)/u);
     assert.ok(
       setupSource.indexOf('{format === "whodunnit" ? renderJuryToggle() : null}') <

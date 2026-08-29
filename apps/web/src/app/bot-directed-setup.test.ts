@@ -57,13 +57,16 @@ describe("bot-directed applet setup", () => {
     assert.match(pageSource, /id: `story-setup-anchor-\$\{bot\.id\}`/u);
   });
 
-  it("keeps a captured Whodunnit bot in a fully populated editable case setup", () => {
+  it("rerolls the active Whodunnit seat without turning a bot into case direction", () => {
     assert.match(
       whodunnitSource,
       /id: `debate-setup-anchor-\$\{bot\.id\}-\$\{/u,
     );
-    assert.match(whodunnitSource, /randomizeWhodunnitCastAroundBot/u);
-    assert.match(whodunnitSource, /randomizeMysteryCastAroundBot/u);
+    assert.match(
+      whodunnitSource,
+      /surpriseMysterySeat\(activeMysteryCastSeat\)/u,
+    );
+    assert.doesNotMatch(whodunnitSource, /randomizeMysteryCastAroundBot/u);
     assert.match(whodunnitSource, /setMysteryInspiration/u);
   });
 });
