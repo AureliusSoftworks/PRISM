@@ -78,7 +78,7 @@ const WAITING_SLOTS: readonly BubbleSlot[] = [
   { id: "right", xPercent: 75, yPercent: 13, sizePx: 56 },
   { id: "far-right", xPercent: 94, yPercent: 14, sizePx: 54 },
   { id: "upper-left", xPercent: 10, yPercent: 31, sizePx: 46 },
-  { id: "upper-right", xPercent: 90, yPercent: 31, sizePx: 48 },
+  { id: "upper-right", xPercent: 90, yPercent: 45, sizePx: 48 },
 ] as const;
 
 function stableHash(seed: string): number {

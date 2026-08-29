@@ -16594,7 +16594,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .botGroupHeroStage[data-room-variant="waiting"] {
   width: 100%;
-  padding: 0;
+  padding: calc(24px + var(--bot-group-hero-navbar-clearance)) 0 0;
 }
 
 .botGroupHero {
@@ -16814,8 +16814,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   order: 3;
   flex: 0 0 auto;
   width: min(1120px, calc(100% - 20px));
-  height: clamp(420px, calc(100dvh - 330px), 680px);
-  min-height: 420px;
+  height: clamp(360px, calc(100dvh - 390px), 680px);
+  min-height: 360px;
   margin: 0 auto;
 }
 

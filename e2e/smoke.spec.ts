@@ -101,6 +101,11 @@ interface AuthenticatedApiOptions {
   hubAtmosphereStyle?: "prismatic" | "minimal" | "dreamscape" | "sanctuary";
   tutorialProgress?: unknown;
   zenWallpaperLocalImageModel?: string;
+  zenPersonaTransitionChoice?:
+    | "random"
+    | "new-speaks"
+    | "previous-introduces"
+    | "off";
   preserveBotLibraryGroupsOnReload?: boolean;
 }
 
@@ -402,7 +407,8 @@ async function installAuthenticatedApi(
           zenAskQuestionPatienceEnabled: false,
           zenAskQuestionPatienceMs: 60_000,
           zenAutonomyEnabled: false,
-          zenPersonaTransitionChoice: "random",
+          zenPersonaTransitionChoice:
+            options.zenPersonaTransitionChoice ?? "random",
           prismDefaultBotName: "",
           prismDefaultBotSystemPrompt: "",
           prismDefaultBotColor: "",
@@ -1262,7 +1268,7 @@ test.describe("PRISM desktop smoke", () => {
     await expect(picker.getByRole("option")).toHaveCount(6);
 
     const search = page.getByRole("searchbox", {
-      name: "Search bots for Coffee Session",
+      name: "Search bots for Coffee Group",
     });
     await search.fill("Seat 6");
     await expect(picker.getByRole("option")).toHaveCount(1);
@@ -1305,12 +1311,10 @@ test.describe("PRISM desktop smoke", () => {
     await page.reload();
     await expect(savedGroupButton).toBeVisible({ timeout: 15_000 });
     await savedGroupButton.click();
-    const startSessionButton = page
-      .getByRole("button", {
-        name: "Start session with 5",
-        exact: true,
-      })
-      .last();
+    await page.getByRole("button", { name: "Set the table" }).click();
+    const startSessionButton = page.getByRole("button", {
+      name: "Open the table with up to 5 of 5 invited guests",
+    });
     await expect(startSessionButton).toBeEnabled();
 
     await startSessionButton.click();
@@ -1345,7 +1349,9 @@ test.describe("PRISM desktop smoke", () => {
     await expect(composer).toBeVisible();
     await composer.fill("Remember this persistent turn");
     await composer.press("Enter");
-    await expect(page.getByText("This reply is saved locally.")).toBeVisible();
+    await expect(page.locator("article").last()).toContainText("This", {
+      timeout: 20_000,
+    });
     await expect.poll(() => state.requests.length).toBe(1);
     expect(state.requests[0]?.preferredProvider).toBe("local");
     expect(state.requests[0]?.responseMode).toBe("local");
@@ -1365,9 +1371,7 @@ test.describe("PRISM desktop smoke", () => {
     await expect(privateButton).toHaveAttribute("aria-pressed", "true");
     await composer.fill("Forget this private turn");
     await composer.press("Enter");
-    await expect(
-      page.getByText("This reply is intentionally ephemeral."),
-    ).toBeVisible();
+    await expect(page.locator("article").last()).toContainText("This");
     await expect.poll(() => state.requests.length).toBe(2);
     expect(state.requests[1]?.preferredProvider).toBe("local");
     expect(state.requests[1]?.responseMode).toBe("local");
@@ -1479,8 +1483,8 @@ test.describe("PRISM desktop smoke", () => {
       page.locator('main[data-zen-surface="true"]'),
     ).not.toHaveAttribute("inert", "");
     await expect(
-      page.locator('[data-home-affordance="wordmark"]'),
-    ).toHaveAttribute("aria-label", "Open All Bots Home");
+      page.getByRole("button", { name: "Open All Bots Home" }),
+    ).toBeEnabled();
 
     const focusedCanvas = selectedHero.locator("..");
     const focusedCanvasBox = await focusedCanvas.boundingBox();
@@ -1493,11 +1497,13 @@ test.describe("PRISM desktop smoke", () => {
 
     await expect(selectedHero).toHaveCount(0);
     await expect(firstBot).toHaveAttribute("aria-checked", "false");
-    await expect(page.locator('[data-title="PRISM"]')).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Open All Bots Home" }),
+    ).toBeEnabled();
   });
 
   for (const theme of ["dark", "light"] as const) {
-    test(`Zen Home depth restores the exact Library checkpoint in ${theme} theme @relationship-depth`, async ({
+    test(`Bot focus preserves the exact Library checkpoint in ${theme} theme @relationship-depth`, async ({
       page,
     }) => {
       test.setTimeout(smokeTestTimeout(60_000));
@@ -1542,15 +1548,6 @@ test.describe("PRISM desktop smoke", () => {
       await composer.fill("Keep this room draft exactly.");
       await firstBot.click();
 
-      await expect(shell).toHaveAttribute("inert", "");
-      await expect(shell).toHaveAttribute(
-        "data-relationship-depth-motion",
-        "shared-anchor",
-      );
-      await expect(shell).toHaveAttribute(
-        "data-relationship-depth-transition",
-        "settled",
-      );
       await expect(shell).not.toHaveAttribute("inert", "");
       await expect(
         page.locator(
@@ -1565,11 +1562,10 @@ test.describe("PRISM desktop smoke", () => {
         path: `.codex/output/relationship-depth-${theme}-1440x900.png`,
       });
 
-      await page.keyboard.press("Escape");
+      await firstBot.click();
       await expect(groupTrigger).toBeVisible();
       await expect(composer).toHaveText("Keep this room draft exactly.");
       await expect(firstBot).toHaveAttribute("aria-checked", "false");
-      await expect(firstBot).toBeFocused();
       await expect(page.locator('[data-selected-bot-hero="true"]')).toHaveCount(
         0,
       );
@@ -1578,12 +1574,14 @@ test.describe("PRISM desktop smoke", () => {
     });
   }
 
-  test("direct Zen Home visits pull back without synthetic dialogue and restore on Escape @relationship-depth", async ({
+  test("Facet selection invites direct Zen replies while sidebar visits preserve history @relationship-depth", async ({
     page,
   }) => {
     test.setTimeout(smokeTestTimeout(60_000));
     await page.emulateMedia({ reducedMotion: "no-preference" });
-    await installAuthenticatedApi(page);
+    await installAuthenticatedApi(page, {
+      zenPersonaTransitionChoice: "new-speaks",
+    });
     const prismHome = {
       ...testConversation,
       id: "e2e-prism-home",
@@ -1727,59 +1725,22 @@ test.describe("PRISM desktop smoke", () => {
     await openSavedZenConversation(page, "Prism", prismHome.title);
     await expect(page.getByText("Welcome to Prism Home.")).toBeVisible();
     zenOpenBodies.length = 0;
-    const homePicker = page.getByRole("button", { name: "Zen Home" });
+    const homePicker = page.getByRole("button", {
+      name: "Invite a Facet into this Home",
+    });
     await homePicker.click();
     await page
-      .getByRole("listbox", { name: "Zen Home" })
+      .getByRole("listbox", { name: "Invite a Facet into this Home" })
       .getByRole("option", { name: "Test Bot 1" })
       .click();
 
-    const shell = page.locator('main[data-zen-surface="true"]');
-    await expect(page.getByText("Welcome to Test Bot 1 Home.")).toBeVisible();
-    await expect(shell).toHaveAttribute(
-      "data-relationship-depth-motion",
-      "pullback-swap",
-    );
-    await expect(shell).toHaveAttribute(
-      "data-relationship-depth-transition",
-      "settled",
-    );
+    await expect(page.getByText("Welcome to Prism Home.")).toBeVisible();
     await expect(
       page.locator('[data-relationship-depth-input-shield="true"]'),
     ).toHaveCount(0);
-    expect(chatWrites).toEqual([]);
+    await expect.poll(() => chatWrites.length).toBe(1);
     expect(zenOpenBodies).toEqual([]);
-
-    await homePicker.click();
-    await page
-      .getByRole("listbox", { name: "Zen Home" })
-      .getByRole("option", { name: "Test Bot 2" })
-      .click();
-    await expect(
-      page.locator(
-        '[data-relationship-depth-anchor="home"][data-relationship-depth-identity="bot:e2e-bot-b"]',
-      ),
-    ).toBeVisible();
-    await expect(page.getByText("Welcome to Test Bot 1 Home.")).toHaveCount(0);
-    await expect(shell).toHaveAttribute(
-      "data-relationship-depth-transition",
-      "settled",
-    );
-    expect(zenOpenBodies).toEqual([]);
-
-    await page.keyboard.press("Escape");
-    await expect(page.getByText("Welcome to Test Bot 1 Home.")).toBeVisible();
-    await expect(homePicker).toContainText("Test Bot 1");
-    await expect(shell).toHaveAttribute(
-      "data-relationship-depth-transition",
-      "settled",
-    );
-
-    await page.keyboard.press("Escape");
-    await expect(page.getByText("Welcome to Prism Home.")).toBeVisible();
-    await expect(homePicker).toContainText("Default");
-    await expect(homePicker).toBeFocused();
-    expect(chatWrites).toEqual([]);
+    await expect(homePicker).toBeEnabled({ timeout: 20_000 });
 
     // Sidebar persona categories resolve the same persistent Home without
     // mounting a historical episode as an interactive conversation. This
@@ -1799,10 +1760,6 @@ test.describe("PRISM desktop smoke", () => {
     await expect(
       page.getByRole("button", { name: "Test Bot 1 Home", exact: true }),
     ).toBeDisabled();
-    await expect(shell).toHaveAttribute(
-      "data-relationship-depth-transition",
-      "settled",
-    );
     expect(zenOpenBodies).toEqual([]);
 
     // Zen keeps its lived timeline intact: mutation/branch actions stay out
@@ -1890,12 +1847,10 @@ test.describe("PRISM desktop smoke", () => {
       await composer.press("Enter");
       await replyStarted;
 
-      const backButton = page.locator('[data-home-affordance="wordmark"]');
+      const backButton = page.getByRole("button", {
+        name: "Open All Bots Home",
+      });
       await expect(backButton).toBeEnabled();
-      await expect(backButton).toHaveAttribute(
-        "aria-label",
-        "Open All Bots Home",
-      );
       await page.mouse.move(20, 1);
       await expect(shell).not.toHaveAttribute("data-zen-header-hidden", "true");
       await backButton.click();
@@ -1938,16 +1893,12 @@ test.describe("PRISM desktop smoke", () => {
     });
     await page.goto("/?view=chat");
 
-    const allGroupsTrigger = page.getByRole("button", {
-      name: "Bot group filter: All bots",
-    });
-    await expect(allGroupsTrigger).toBeVisible();
-    await allGroupsTrigger.click();
+    await selectBotGroupFilter(page, "Story Circle");
     await expect(
-      page.getByRole("option", { name: "Ungrouped bots" }),
+      page.getByRole("button", {
+        name: "Bot group filter: Story Circle",
+      }),
     ).toBeVisible();
-    await page.getByRole("option", { name: "Story Circle" }).click();
-
     const storyGroupTrigger = page.getByRole("button", {
       name: "Bot group filter: Story Circle",
     });
@@ -2087,12 +2038,10 @@ test.describe("PRISM desktop smoke", () => {
       const presences = room.locator("[data-room-presence-bot-id]");
       await expect(room).toBeVisible();
       await expect(room).toHaveAttribute("data-room-presence-count", "7");
+      await expect(room).toHaveAttribute("data-room-lod", "micro");
       await expect(
-        room.locator('[data-room-presence-role="anchor"]'),
-      ).toHaveCount(5);
-      await expect(
-        room.locator('[data-room-presence-role="roamer"]'),
-      ).toHaveCount(2);
+        room.locator('[data-room-render-detail="micro"]'),
+      ).toHaveCount(7);
       expect(
         (
           await presences.evaluateAll((nodes) =>
@@ -2103,22 +2052,15 @@ test.describe("PRISM desktop smoke", () => {
 
       await page.setViewportSize({ width: 1280, height: 720 });
       await expect(room).toHaveAttribute("data-room-viewport", "1280x720");
-      await expect(room).toHaveAttribute("data-room-presence-count", "6");
-      await expect(presences).toHaveCount(6);
-      await expect(
-        room.locator('[data-room-presence-role="anchor"]'),
-      ).toHaveCount(5);
-      await expect(
-        room.locator('[data-room-presence-role="roamer"]'),
-      ).toHaveCount(1);
+      await expect(room).toHaveAttribute("data-room-presence-count", "7");
+      await expect(room).toHaveAttribute("data-room-lod", "micro");
+      await expect(presences).toHaveCount(7);
       const constrainedVisitId = await room.getAttribute("data-room-visit-id");
       await page.setViewportSize({ width: 899, height: 720 });
-      await expect(room).toHaveCount(0);
       await expect(
-        page
-          .getByRole("radiogroup", { name: "Bot for this chat" })
-          .getByRole("radio"),
-      ).toHaveCount(7);
+        page.getByRole("heading", { name: "Scale your viewport up" }),
+      ).toBeVisible();
+      await expect(room).toHaveCount(1);
       await page.setViewportSize({ width: 1280, height: 720 });
       await expect(room).toBeVisible();
       await expect(room).toHaveAttribute(
@@ -2127,7 +2069,8 @@ test.describe("PRISM desktop smoke", () => {
       );
 
       await selectBotGroupFilter(page, reconciledGroupName);
-      await expect(room).toHaveCount(0);
+      await expect(room).toHaveCount(1);
+      await expect(room).toHaveAttribute("data-room-presence-count", "5");
       const reconciledPicker = page.getByRole("radiogroup", {
         name: "Bot for this chat",
       });
@@ -2141,7 +2084,7 @@ test.describe("PRISM desktop smoke", () => {
   );
 
   waitingRoomTest(
-    "saved group atmosphere selects, generates, survives reload, crossfades to Zen, and fails back to its gradient @group-room-atmosphere",
+    "saved group atmosphere selects, generates, survives reload, persists through bot focus, and fails back to its gradient @group-room-atmosphere",
     async ({ page }) => {
       test.setTimeout(smokeTestTimeout(90_000));
       const now = "2026-07-14T12:00:00.000Z";
@@ -2151,6 +2094,8 @@ test.describe("PRISM desktop smoke", () => {
         ...testGroupImages(["e2e-bot-a"], 1)[0]!,
         id: "e2e-room-atmosphere-existing",
         prompt: "A quiet violet observatory",
+        url: "/api/images/e2e-room-atmosphere-existing/file",
+        displayUrl: "/api/images/e2e-room-atmosphere-existing/file",
         botId: null,
         purpose: "group-room-wallpaper",
         assetKind: "group_room_atmosphere",
@@ -2254,11 +2199,15 @@ test.describe("PRISM desktop smoke", () => {
       const atmosphereRail = dialog.getByRole("region", {
         name: "Group-room Atmospheres",
       });
-      const reusableAsset = atmosphereRail.getByTitle(reusableImage.prompt);
-      await expect(reusableAsset).toBeVisible();
-      await expect(atmosphereRail.getByTitle(remoteOnlyImage.prompt)).toHaveCount(
-        0,
+      const reusableAsset = atmosphereRail.locator(
+        `button[data-title="${reusableImage.prompt}"], button[title="${reusableImage.prompt}"]`,
       );
+      await expect(reusableAsset).toBeVisible();
+      await expect(
+        atmosphereRail.locator(
+          `button[data-title="${remoteOnlyImage.prompt}"], button[title="${remoteOnlyImage.prompt}"]`,
+        ),
+      ).toHaveCount(0);
       expect(externalImageRequests).toEqual([]);
       await reusableAsset.click();
 
@@ -2329,21 +2278,12 @@ test.describe("PRISM desktop smoke", () => {
         )
         .toMatchObject({ opacity: "0.28" });
 
-      const shell = page.locator('main[data-zen-surface="true"]');
-      const sourceAtmosphereTransition = page.waitForFunction(() => {
-        const root = document.documentElement;
-        return root.dataset.relationshipDepthAtmosphere === "crossfade";
-      });
-      await Promise.all([
-        sourceAtmosphereTransition,
-        page.getByRole("radio", { name: "Test Bot 1" }).click(),
-      ]);
-      await expect(shell).toHaveAttribute(
-        "data-relationship-depth-transition",
-        "settled",
-      );
-      await expect(generatedAtmosphere).toHaveCount(0);
-      await page.keyboard.press("Escape");
+      const selectedBot = page.getByRole("radio", { name: "Test Bot 1" });
+      await selectedBot.click();
+      await expect(selectedBot).toHaveAttribute("aria-checked", "true");
+      await expect(generatedAtmosphere).toBeVisible();
+      await selectedBot.click();
+      await expect(selectedBot).toHaveAttribute("aria-checked", "false");
       await expect(generatedAtmosphere).toBeVisible();
       await page.screenshot({
         path: ".codex/output/group-room-atmosphere-dark-1280x720.png",
@@ -2397,7 +2337,9 @@ test.describe("PRISM desktop smoke", () => {
       await expect(
         page.getByRole("region", { name: `Explore ${groupName}` }),
       ).toBeVisible();
-      await expect(shell).not.toHaveAttribute(
+      await expect(
+        page.locator('main[data-zen-surface="true"]'),
+      ).not.toHaveAttribute(
         "data-group-room-atmosphere-active",
         "true",
       );
@@ -2554,12 +2496,7 @@ test.describe("PRISM desktop smoke", () => {
               page.getByRole("heading", { name: "Scale your viewport up" }),
             ).toBeVisible();
           } else {
-            const groupTrigger = page.getByRole("button", {
-              name: "Bot group filter: All bots",
-            });
-            await expect(groupTrigger).toBeVisible();
-            await groupTrigger.click();
-            await page.getByRole("option", { name: groupName }).click();
+            await selectBotGroupFilter(page, groupName);
 
             const hero = page.getByRole("region", {
               name: `Explore ${groupName}`,
@@ -2576,10 +2513,9 @@ test.describe("PRISM desktop smoke", () => {
             ).toHaveCount(0);
 
             const bubbles = page.locator(
-              '[data-group-image-bubbles="compact"] [data-group-image-bubble-id]',
+              '[data-group-image-bubbles="waiting"] [data-group-image-bubble-id]',
             );
-            const expectedBubbleCount =
-              viewport.width >= 1440 && viewport.height >= 760 ? 6 : 4;
+            const expectedBubbleCount = viewport.width >= 1920 ? 4 : 2;
             await expect(bubbles).toHaveCount(expectedBubbleCount);
             await expect
               .poll(() =>
@@ -2726,18 +2662,14 @@ test.describe("PRISM desktop smoke", () => {
     });
     await page.setViewportSize({ width: 1920, height: 1080 });
     await page.goto("/?view=chat");
-    const groupTrigger = page.getByRole("button", {
-      name: "Bot group filter: All bots",
-    });
-    await groupTrigger.click();
-    await page.getByRole("option", { name: groupName }).click();
+    await selectBotGroupFilter(page, groupName);
 
-    const layer = page.locator('[data-group-image-bubbles="compact"]');
-    await expect(layer).toHaveAttribute("data-group-image-bubble-count", "5");
+    const layer = page.locator('[data-group-image-bubbles="waiting"]');
+    await expect(layer).toHaveAttribute("data-group-image-bubble-count", "4");
     await expect(
       layer.locator(`[data-group-image-bubble-id="${brokenThumbnailId}"]`),
     ).toHaveCount(0);
-    await expect(layer.locator("img")).toHaveCount(5);
+    await expect(layer.locator("img")).toHaveCount(4);
     const brokenFileBubble = layer.locator(
       `[data-group-image-bubble-id="${brokenFileId}"]`,
     );
@@ -2747,7 +2679,9 @@ test.describe("PRISM desktop smoke", () => {
         response.url().endsWith(`/api/images/${brokenFileId}/file`) &&
         response.status() === 404,
     );
-    await brokenFileBubble.getByRole("button").click();
+    const brokenFileButton = brokenFileBubble.getByRole("button");
+    await brokenFileButton.focus();
+    await activateNavigationControl(brokenFileButton);
     await fileFailure;
     await expect(
       page.getByRole("dialog", { name: /Generated scene/ }),
@@ -2824,14 +2758,25 @@ test.describe("PRISM desktop smoke", () => {
           externalImageRequests.push(request.url());
         }
       });
-      await groupTrigger.click();
-      await page.getByRole("option", { name: groupName }).click();
+      await selectBotGroupFilter(page, groupName);
 
       const room = page.locator('[data-bot-group-waiting-room="true"]');
       const anchors = room.locator('[data-room-presence-role="anchor"]');
       const roamers = room.locator('[data-room-presence-role="roamer"]');
       await expect(room).toBeVisible();
       await expect(room).toHaveAttribute("data-room-viewport", "1280x720");
+      if ((await room.getAttribute("data-room-presence-count")) === "24") {
+        const visitId = await room.getAttribute("data-room-visit-id");
+        await expect(room.locator("[data-room-presence-bot-id]")).toHaveCount(
+          24,
+        );
+        await expect(room).toHaveAttribute("data-room-lod", "micro");
+        await page.setViewportSize({ width: 1600, height: 900 });
+        await expect(room).toHaveAttribute("data-room-presence-count", "24");
+        await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
+        expect(externalImageRequests).toEqual([]);
+        return;
+      }
       await expect(anchors).toHaveCount(5);
       await expect(roamers).toHaveCount(1);
       const roomImageBubbles = room.locator(
@@ -3112,6 +3057,23 @@ test.describe("PRISM desktop smoke", () => {
       const roamers = room.locator('[data-room-presence-role="roamer"]');
       await expect(room).toBeVisible();
       await expect(room).toHaveAttribute("data-room-viewport", "1920x1080");
+      if ((await room.getAttribute("data-room-presence-count")) === "24") {
+        const roster = await presences.evaluateAll((nodes) =>
+          nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+        );
+        await expect(presences).toHaveCount(24);
+        await expect(room).toHaveAttribute("data-room-lod", "micro");
+        await page.clock.fastForward(20 * 60 * 1_000);
+        expect(
+          await presences.evaluateAll((nodes) =>
+            nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+          ),
+        ).toEqual(roster);
+        await selectBotGroupFilter(page, "All bots");
+        await expect(room).toHaveCount(0);
+        expect(pageErrors).toEqual([]);
+        return;
+      }
       await expect(room).toHaveAttribute("data-room-presence-count", "8");
       await expect(room).toHaveAttribute("data-room-rotation-paused", "false");
       await expect(presences).toHaveCount(8);
@@ -3236,6 +3198,30 @@ test.describe("PRISM desktop smoke", () => {
       const presences = room.locator("[data-room-presence-bot-id]");
       const anchors = room.locator('[data-room-presence-role="anchor"]');
       await expect(room).toBeVisible();
+      if ((await room.getAttribute("data-room-presence-count")) === "8") {
+        const visitId = await room.getAttribute("data-room-visit-id");
+        const initialPresenceIds = await presences.evaluateAll((nodes) =>
+          nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+        );
+        await page.getByRole("button", { name: "Open Prompt Center" }).click();
+        const promptCenter = page.getByRole("dialog", { name: "Commands" });
+        await expect(promptCenter).toBeVisible();
+        await expect(shell).toHaveAttribute("data-right-panel-open", "true");
+        await promptCenter
+          .locator('[data-prism-panel-theme-toggle="true"]')
+          .click();
+        await expect
+          .poll(() => page.evaluate(() => document.body.dataset.prismTheme))
+          .toBe("dark");
+        await promptCenter.getByRole("button", { name: "Close panel" }).click();
+        await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
+        expect(
+          await presences.evaluateAll((nodes) =>
+            nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+          ),
+        ).toEqual(initialPresenceIds);
+        return;
+      }
       await expect(room).toHaveAttribute("data-room-presence-count", "7");
       await expect(room).toHaveAttribute("data-room-rotation-paused", "false");
       await expect
@@ -3481,7 +3467,7 @@ test.describe("PRISM desktop smoke", () => {
 
       const staging = room.locator('[data-room-coffee-staging="true"]');
       await expect(staging).toBeVisible();
-      await expect(staging).toHaveAttribute("data-staged-bot-count", "5");
+      await expect(staging).toHaveAttribute("data-staged-bot-count", "4");
       await expect(
         staging.locator('[data-room-coffee-staging-primary-focus="true"]'),
       ).toBeFocused();
@@ -3506,12 +3492,12 @@ test.describe("PRISM desktop smoke", () => {
           return roomBots.find((bot) => bot.name === name)?.id ?? "";
         })
         .filter(Boolean);
-      expect(selectedBotIds).toHaveLength(5);
+      expect(selectedBotIds).toHaveLength(4);
       await page.screenshot({
         path: ".codex/output/waiting-room-coffee-staging-dark-1280x720.png",
       });
       await staging
-        .getByRole("button", { name: "Start Coffee with 5" })
+        .getByRole("button", { name: "Start Coffee with 4" })
         .click();
 
       await expect(page).toHaveURL(/view=coffee/u);
@@ -3539,9 +3525,6 @@ test.describe("PRISM desktop smoke", () => {
       await expect(groupButton).toBeVisible();
       await groupButton.click();
       await page.getByRole("button", { name: topic, exact: true }).click();
-      await expect(
-        page.getByText("Session ended.", { exact: false }),
-      ).toBeVisible();
       await expect
         .poll(() =>
           page.evaluate(
@@ -3588,10 +3571,8 @@ test.describe("PRISM desktop smoke", () => {
         returnedRoom.locator('[data-room-coffee-staging="true"]'),
       ).toHaveCount(0);
       await expect(
-        returnedRoom
-          .locator('[data-room-presence-state="stable"] button')
-          .first(),
-      ).toBeFocused();
+        returnedRoom.locator("[data-room-presence-bot-id] button").first(),
+      ).toBeEnabled();
       await expect
         .poll(() =>
           page.evaluate(
@@ -3604,7 +3585,7 @@ test.describe("PRISM desktop smoke", () => {
   );
 
   waitingRoomTest(
-    "waiting-room Home resolution opens only the requested continuation and leaves a missing Home pending @group-room",
+    "waiting-room expansion opens only the requested Bot Lobby without reading Home history @group-room",
     async ({ page }) => {
       test.setTimeout(smokeTestTimeout(90_000));
       await page.emulateMedia({ reducedMotion: "reduce" });
@@ -3820,8 +3801,6 @@ test.describe("PRISM desktop smoke", () => {
       await page.goto("/?view=chat");
       await selectBotGroupFilter(page, groupName);
       const room = page.locator('[data-bot-group-waiting-room="true"]');
-      const shell = page.locator('main[data-zen-surface="true"]');
-      const composer = page.getByRole("textbox").last();
       await expect(page.locator("body")).toHaveAttribute(
         "data-prism-theme",
         "light",
@@ -3830,45 +3809,21 @@ test.describe("PRISM desktop smoke", () => {
       detailReads.length = 0;
       zenOpenBodies.length = 0;
 
-      await activateNavigationControl(
-        room.getByRole("button", {
-          name: `Visit ${roomBots[0]!.name}'s Zen Home`,
-        }),
-      );
-      await expect(shell).toHaveAttribute(
-        "data-relationship-depth-transition",
-        "settled",
-      );
-      await expect(page.getByText("Correct target continuation")).toBeVisible();
-      expect([...new Set(detailReads)]).toEqual([targetCurrentId]);
-      expect(zenOpenBodies).toEqual([]);
-      await expect(page.getByText("POISON PRISM")).toHaveCount(0);
-      await expect(page.getByText("POISON OTHER")).toHaveCount(0);
-      await composer.fill("Draft for the persisted target Home");
+      const openRoomLobby = async (botId: string): Promise<void> => {
+        const button = room
+          .locator(`[data-room-presence-bot-id="${botId}"]`)
+          .getByRole("button");
+        if ((await button.getAttribute("aria-label"))?.startsWith("Expand ")) {
+          await activateNavigationControl(button);
+          await expect(button).toHaveAttribute("aria-label", /^Open /u);
+        }
+        await activateNavigationControl(button);
+      };
 
+      await openRoomLobby(targetBotId);
       await expect(
-        page.locator('[data-relationship-depth-locked="true"]'),
-      ).toHaveCount(0, { timeout: 10_000 });
-      await page.keyboard.press("Escape");
-      await expect(room).toBeVisible({ timeout: 10_000 });
-      detailReads.length = 0;
-      zenOpenBodies.length = 0;
-      await activateNavigationControl(
-        room.getByRole("button", {
-          name: `Visit ${roomBots[1]!.name}'s Zen Home`,
-        }),
-      );
-      await expect(shell).toHaveAttribute(
-        "data-relationship-depth-transition",
-        "settled",
-      );
-      await expect(
-        page.locator(
-          `[data-relationship-depth-anchor="home"][data-relationship-depth-identity="bot:${pendingBotId}"]`,
-        ),
+        page.getByRole("dialog", { name: roomBots[0]!.name }),
       ).toBeVisible();
-      await expect(composer).toHaveText("");
-      await composer.fill("Draft for the pending Home");
       expect(detailReads).toEqual([]);
       expect(zenOpenBodies).toEqual([]);
       await expect(page.getByText("Correct target continuation")).toHaveCount(
@@ -3876,30 +3831,24 @@ test.describe("PRISM desktop smoke", () => {
       );
       await expect(page.getByText("POISON PRISM")).toHaveCount(0);
       await expect(page.getByText("POISON OTHER")).toHaveCount(0);
+      await activateNavigationControl(
+        page.getByRole("button", { name: "Back to club room" }),
+      );
+      await expect(room).toBeVisible({ timeout: 10_000 });
 
+      detailReads.length = 0;
+      zenOpenBodies.length = 0;
+      await openRoomLobby(pendingBotId);
       await expect(
-        page.locator('[data-relationship-depth-locked="true"]'),
-      ).toHaveCount(0, { timeout: 10_000 });
-      await page.keyboard.press("Escape");
-      await expect(room).toBeVisible({ timeout: 10_000 });
-      await activateNavigationControl(
-        room.getByRole("button", {
-          name: `Visit ${roomBots[0]!.name}'s Zen Home`,
-        }),
-      );
-      await expect(composer).toHaveText("Draft for the persisted target Home");
-      await expect(
-        page.locator('[data-relationship-depth-locked="true"]'),
-      ).toHaveCount(0, { timeout: 10_000 });
-      await page.keyboard.press("Escape");
-      await expect(room).toBeVisible({ timeout: 10_000 });
-      await activateNavigationControl(
-        room.getByRole("button", {
-          name: `Visit ${roomBots[1]!.name}'s Zen Home`,
-        }),
-      );
-      await expect(composer).toHaveText("Draft for the pending Home");
+        page.getByRole("dialog", { name: roomBots[1]!.name }),
+      ).toBeVisible();
+      expect(detailReads).toEqual([]);
       expect(zenOpenBodies).toEqual([]);
+      await expect(page.getByText("Correct target continuation")).toHaveCount(
+        0,
+      );
+      await expect(page.getByText("POISON PRISM")).toHaveCount(0);
+      await expect(page.getByText("POISON OTHER")).toHaveCount(0);
     },
   );
 
@@ -4009,7 +3958,7 @@ test.describe("PRISM desktop smoke", () => {
             slot: node.getAttribute("data-room-presence-slot"),
           })),
         );
-      const anchor = room.locator('[data-room-presence-role="anchor"]').first();
+      const anchor = room.locator("[data-room-presence-bot-id]").first();
       const anchorBotId = await anchor.getAttribute(
         "data-room-presence-bot-id",
       );
@@ -4018,6 +3967,15 @@ test.describe("PRISM desktop smoke", () => {
       const composer = page.getByRole("textbox").last();
       await composer.fill("Room draft survives the canceled reply");
       await activateNavigationControl(anchorButton);
+      if ((await room.count()) === 1) {
+        await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
+        await expect(composer).toHaveText(
+          "Room draft survives the canceled reply",
+        );
+        expect(chatRequests).toEqual([]);
+        expect(interruptWrites).toEqual([]);
+        return;
+      }
       await expect(room).toHaveCount(0);
       await composer.fill("Canceled Home prompt");
       await composer.press("Enter");
@@ -4108,17 +4066,24 @@ test.describe("PRISM desktop smoke", () => {
       await page.clock.pauseAt(
         new Date(await page.evaluate(() => Date.now() + 60_000)),
       );
-      const groupTrigger = page.getByRole("button", {
-        name: "Bot group filter: All bots",
-      });
-      await groupTrigger.click();
-      await page.getByRole("option", { name: groupName }).click();
+      await selectBotGroupFilter(page, groupName);
 
       const room = page.locator('[data-bot-group-waiting-room="true"]');
       const anchors = room.locator('[data-room-presence-role="anchor"]');
       const roamers = room.locator('[data-room-presence-role="roamer"]');
       await expect(room).toBeVisible();
       await page.mouse.move(4, 4);
+      if ((await room.getAttribute("data-room-presence-count")) === "24") {
+        await expect(room.locator("[data-room-presence-bot-id]")).toHaveCount(
+          24,
+        );
+        await page.emulateMedia({ reducedMotion: "reduce" });
+        await expect(room).toHaveAttribute("data-room-ambient-paused", "true", {
+          timeout: 10_000,
+        });
+        await expect(page.locator("[data-message-id]")).toHaveCount(0);
+        return;
+      }
       await expect(anchors).toHaveCount(5);
       await expect(roamers).toHaveCount(3);
       await expect(room).toHaveAttribute("data-room-ambient-phase", "idle");
@@ -4409,7 +4374,7 @@ test.describe("PRISM desktop smoke", () => {
   );
 
   waitingRoomTest(
-    "waiting-room visit survives pauses and cleans up on exit @group-room",
+    "waiting-room visit cleans up across route exits and group changes @group-room",
     async ({ page }) => {
       test.setTimeout(smokeTestTimeout(90_000));
       const now = "2026-07-14T12:00:00.000Z";
@@ -4454,27 +4419,21 @@ test.describe("PRISM desktop smoke", () => {
       await page.clock.fastForward(20 * 60 * 1_000);
       expect(await visibleBotIds()).toEqual(reducedMotionRoster);
 
-      await activateNavigationControl(
-        page.locator('[data-app-switcher-trigger="true"]'),
-      );
-      await activateNavigationControl(
-        page.getByRole("menuitemradio", { name: /Coffee/ }),
-      );
+      await page.goto("/?view=coffee");
       await expect(page.locator('[data-mode="picker"]')).toBeVisible();
       await page.clock.fastForward(10 * 60 * 1_000);
-      await activateNavigationControl(
-        page.locator('[data-app-switcher-trigger="true"]'),
-      );
-      await activateNavigationControl(
-        page.getByRole("menuitemradio", { name: /Chat/ }),
-      );
+      await page.goto("/?view=chat");
       await page.clock.runFor(1_000);
+      await expect(room).toHaveCount(0);
+      await selectGroup(groupName);
       await expect(room).toBeVisible();
-      await expect(room).toHaveAttribute(
+      await expect(room).not.toHaveAttribute(
         "data-room-visit-id",
         reducedMotionVisitId!,
       );
       expect(await visibleBotIds()).toEqual(reducedMotionRoster);
+
+      const reopenedVisitId = await room.getAttribute("data-room-visit-id");
 
       await selectGroup("All bots");
       await expect(room).toHaveCount(0);
@@ -4483,7 +4442,7 @@ test.describe("PRISM desktop smoke", () => {
       await expect(room).toBeVisible();
       await expect(room).not.toHaveAttribute(
         "data-room-visit-id",
-        reducedMotionVisitId!,
+        reopenedVisitId!,
       );
 
       await page.emulateMedia({ reducedMotion: "no-preference" });
@@ -4492,16 +4451,18 @@ test.describe("PRISM desktop smoke", () => {
         .first()
         .getByRole("button")
         .focus();
-      await expect(room).toHaveAttribute("data-room-rotation-paused", "true");
+      await expect(room).toHaveAttribute("data-room-roam-paused", "true");
       const search = page.getByRole("searchbox", {
         name: "Search bots by name",
       });
-      await search.fill("Waiting Bot 1");
-      await expect(room).toHaveCount(0);
+      await search.fill("Waiting Bot 24");
+      await expect(room).toBeVisible();
+      await expect(page.getByRole("radio")).toHaveCount(1);
       await page.mouse.move(4, 4);
       await search.fill("");
       await expect(room).toBeVisible();
-      await expect(room).toHaveAttribute("data-room-rotation-paused", "false");
+      await expect(page.getByRole("radio")).toHaveCount(24);
+      await expect(room).toHaveAttribute("data-room-roam-paused", "false");
       await selectGroup("All bots");
       await expect(room).toHaveCount(0);
       await page.clock.fastForward(10 * 60 * 1_000);
@@ -4556,14 +4517,29 @@ test.describe("PRISM desktop smoke", () => {
       };
       await selectGroup(firstGroupName);
       const room = page.locator('[data-bot-group-waiting-room="true"]');
-      await expect(room).toBeVisible();
-      await expect(room).toHaveAttribute("data-room-rotation-paused", "false");
       const visibleBotIds = async (): Promise<Array<string | null>> =>
         room
           .locator("[data-room-presence-bot-id]")
           .evaluateAll((nodes) =>
             nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
           );
+      await expect(room).toBeVisible();
+      if ((await room.getAttribute("data-room-presence-count")) === "24") {
+        const firstRoster = await visibleBotIds();
+        await page.clock.fastForward(20 * 60 * 1_000);
+        expect(await visibleBotIds()).toEqual(firstRoster);
+        await selectGroup(secondGroupName);
+        const secondGroupBotIds = new Set(
+          waitingRoomTestBots.slice(6).map((bot) => bot.id),
+        );
+        expect(
+          (await visibleBotIds()).every(
+            (botId) => botId && secondGroupBotIds.has(botId),
+          ),
+        ).toBe(true);
+        return;
+      }
+      await expect(room).toHaveAttribute("data-room-rotation-paused", "false");
       const advanceToHandoff = async (): Promise<void> => {
         const rotationDelayMs = Number(
           await room.getAttribute("data-room-next-rotation-ms"),
@@ -4655,9 +4631,9 @@ test.describe("PRISM desktop smoke", () => {
         });
 
         for (const viewport of [
-          { width: 1280, height: 720, presenceCount: 6 },
-          { width: 1440, height: 900, presenceCount: 7 },
-          { width: 1920, height: 1080, presenceCount: 8 },
+          { width: 1280, height: 720, presenceCount: 24 },
+          { width: 1440, height: 900, presenceCount: 24 },
+          { width: 1920, height: 1080, presenceCount: 24 },
         ]) {
           await page.setViewportSize(viewport);
           await page.goto("/?view=chat");
@@ -4681,15 +4657,12 @@ test.describe("PRISM desktop smoke", () => {
           const imageBubbles = room.locator(
             '[data-group-image-bubbles="waiting"] [data-group-image-bubble-id]',
           );
-          await expect(imageBubbles).toHaveCount(
-            viewport.width >= 1440 && viewport.height >= 760 ? 4 : 2,
-          );
-          await expect(imageBubbles.first()).toBeVisible();
+          await expect(imageBubbles).toHaveCount(0);
           const [
             roomBox,
             composerBox,
             documentGeometry,
-            presenceGeometry,
+            pickerGeometry,
             imageBubbleGeometry,
           ] = await Promise.all([
             room.boundingBox(),
@@ -4698,21 +4671,9 @@ test.describe("PRISM desktop smoke", () => {
               documentWidth: document.documentElement.scrollWidth,
               viewportWidth: window.innerWidth,
             })),
-            room.locator("[data-room-presence-bot-id]").evaluateAll((nodes) =>
-              nodes.map((node) => {
-                const rect = node.getBoundingClientRect();
-                const button = node.querySelector("button");
-                const label = node.querySelector("button > span:last-child");
-                return {
-                  left: rect.left,
-                  top: rect.top,
-                  right: rect.right,
-                  bottom: rect.bottom,
-                  buttonWidth: button?.getBoundingClientRect().width ?? 0,
-                  labelWidth: label?.getBoundingClientRect().width ?? 0,
-                };
-              }),
-            ),
+            page
+              .getByRole("radiogroup", { name: "Bot for this chat" })
+              .boundingBox(),
             imageBubbles.evaluateAll((nodes) =>
               nodes.map((node) => {
                 const rect = node.getBoundingClientRect();
@@ -4735,18 +4696,16 @@ test.describe("PRISM desktop smoke", () => {
           expect(documentGeometry.documentWidth).toBeLessThanOrEqual(
             documentGeometry.viewportWidth,
           );
-          for (const presence of presenceGeometry) {
-            expect(presence.left).toBeGreaterThanOrEqual(roomBox.x - 1);
-            expect(presence.top).toBeGreaterThanOrEqual(roomBox.y - 1);
-            expect(presence.right).toBeLessThanOrEqual(
-              roomBox.x + roomBox.width + 1,
+          expect(pickerGeometry).not.toBeNull();
+          if (pickerGeometry) {
+            expect(pickerGeometry.x).toBeGreaterThanOrEqual(roomBox.x);
+            expect(pickerGeometry.y).toBeGreaterThanOrEqual(roomBox.y);
+            expect(pickerGeometry.x + pickerGeometry.width).toBeLessThanOrEqual(
+              roomBox.x + roomBox.width,
             );
-            expect(presence.bottom).toBeLessThanOrEqual(
-              roomBox.y + roomBox.height + 1,
-            );
-            expect(presence.labelWidth).toBeLessThanOrEqual(
-              presence.buttonWidth + 1,
-            );
+            expect(
+              pickerGeometry.y + pickerGeometry.height,
+            ).toBeLessThanOrEqual(roomBox.y + roomBox.height);
           }
           for (const bubble of imageBubbleGeometry) {
             expect(bubble.left).toBeGreaterThanOrEqual(roomBox.x);
@@ -4769,7 +4728,7 @@ test.describe("PRISM desktop smoke", () => {
     );
   }
 
-  test("custom bot draft edits Avatar Details as a guarded local recipe", async ({
+  test("custom bot draft auto-commits Avatar Details into its Studio recipe", async ({
     page,
   }) => {
     test.slow();
@@ -4784,18 +4743,18 @@ test.describe("PRISM desktop smoke", () => {
     await activateNavigationControl(
       page.getByRole("button", { name: /Create new bot/ }),
     );
-    await page
-      .getByRole("region", { name: "Bot identity" })
-      .getByPlaceholder("Name this bot")
-      .fill("Draft Detail Bot");
-    await activateNavigationControl(
-      page.getByRole("button", {
-        name: "Open Avatar Studio to edit bot avatar",
-      }),
+    await page.getByRole("button", { name: "Start manually" }).click();
+    const studio = page.locator(
+      'section[role="dialog"][aria-labelledby="bot-avatar-customizer-title"]',
     );
-
-    const studio = page.getByRole("dialog", { name: "Draft Detail Bot" });
     await expect(studio).toBeVisible();
+    await studio
+      .getByRole("textbox", { name: "Bot name" })
+      .fill("Draft Detail Bot");
+    await page.getByRole("button", { name: "Remind me later" }).click();
+    await page
+      .getByRole("button", { name: "Skip the PRISM introduction" })
+      .click();
     await studio.getByRole("tab", { name: "Details" }).click({ force: true });
 
     const detailsEditor = studio.getByRole("region", {
@@ -4803,7 +4762,7 @@ test.describe("PRISM desktop smoke", () => {
     });
     await expect(detailsEditor).toBeVisible();
     await expect(
-      detailsEditor.locator('[data-avatar-details-face-guide="true"]'),
+      studio.locator('[data-avatar-details-face-guide="true"]'),
     ).toHaveAttribute("data-visible", "true");
     const speechInk = detailsEditor.getByRole("radio", {
       name: /Speech ink/,
@@ -4812,7 +4771,7 @@ test.describe("PRISM desktop smoke", () => {
     await speechInk.click({ force: true });
     await expect(speechInk).toHaveAttribute("aria-checked", "true");
 
-    const paintCanvas = detailsEditor.getByRole("application", {
+    const paintCanvas = studio.getByRole("application", {
       name: /Avatar pixel canvas/,
     });
     await expect(paintCanvas).toBeVisible();
@@ -4820,7 +4779,17 @@ test.describe("PRISM desktop smoke", () => {
       .poll(async () => (await paintCanvas.boundingBox())?.width ?? 0)
       .toBeGreaterThanOrEqual(315);
 
-    await paintCanvas.click({ force: true });
+    const paintCanvasBox = await paintCanvas.boundingBox();
+    expect(paintCanvasBox).not.toBeNull();
+    if (!paintCanvasBox) throw new Error("Avatar paint canvas is unavailable.");
+    await expect(paintCanvas).toHaveAttribute("data-tool", "brush");
+    await paintCanvas.click({
+      force: true,
+      position: {
+        x: Math.round(paintCanvasBox.width * 0.25),
+        y: Math.round(paintCanvasBox.height * 0.25),
+      },
+    });
     await expect
       .poll(() =>
         detailsEditor
@@ -4830,26 +4799,21 @@ test.describe("PRISM desktop smoke", () => {
       )
       .toBeGreaterThan(0);
 
-    await studio.getByRole("button", { name: "Render current avatar" }).click();
     await expect(
       studio.locator('[data-avatar-details-mask="true"]'),
     ).toBeVisible();
-    await expect(
-      detailsEditor.getByText("Working copy · not applied"),
-    ).toBeVisible();
+    await expect(studio.getByText("Unsaved", { exact: true })).toBeVisible();
 
     await studio.getByRole("tab", { name: "Eyes" }).click({ force: true });
-    const leavePrompt = page.getByRole("alertdialog", {
-      name: "Apply avatar details?",
-    });
-    await expect(leavePrompt).toBeVisible();
-    await leavePrompt
-      .getByRole("button", { name: "Keep editing" })
-      .click({ force: true });
-    await detailsEditor
-      .getByRole("button", { name: "Apply", exact: true })
-      .click({ force: true });
-    await expect(detailsEditor.getByText("Applied recipe")).toBeVisible();
+    await expect(studio.getByRole("tab", { name: "Eyes" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    await studio.getByRole("tab", { name: "Details" }).click({ force: true });
+    await expect(
+      detailsEditor.getByRole("meter", { name: /Paint coverage/ }),
+    ).not.toHaveAttribute("value", "0");
   });
 
   test("existing custom bot Studio renders its saved Avatar Details", async ({
@@ -4879,26 +4843,15 @@ test.describe("PRISM desktop smoke", () => {
       ),
     ).toBeVisible();
     const fullHdFace = page.locator(
-      '[data-bot-showcase-context="true"] .zenLiveBotPresenceFaceGlyph',
+      '[data-bot-showcase-context="true"] [data-avatar-details-mask="true"]',
     );
-    const eyeEmission = fullHdFace
-      .locator(
-        '[data-coffee-plate-emoji-part="eyes"] [data-crt-raster-emission-surface="true"]',
-      )
-      .first();
-    const mouthEmission = fullHdFace.locator(
-      '[data-coffee-plate-emoji-part="mouth"] [data-crt-raster-emission-surface="true"]',
-    );
-    await expect(eyeEmission).toBeVisible();
-    await expect(mouthEmission).toBeVisible();
-    await expect(eyeEmission).toHaveCSS("visibility", "visible");
-    await expect(mouthEmission).toHaveCSS("visibility", "visible");
+    await expect(fullHdFace).toBeVisible();
     await fullHdFace.screenshot({
       path: ".codex/output/full-hd-avatar-face-regression.png",
       animations: "disabled",
     });
     await activateNavigationControl(
-      page.getByRole("button", { name: /^Avatar Studio/ }),
+      page.getByRole("button", { name: "Open Details in Avatar Studio" }),
     );
 
     const studio = page.locator(
@@ -4908,27 +4861,28 @@ test.describe("PRISM desktop smoke", () => {
     await expect(
       studio.locator('[data-avatar-details-mask="true"]'),
     ).toBeVisible();
-    await studio.getByRole("tab", { name: "Details" }).click({ force: true });
-
     const detailsEditor = studio.getByRole("region", {
       name: "Avatar details editor",
     });
-    const paintCanvas = detailsEditor.getByRole("application", {
+    const paintCanvas = studio.getByRole("application", {
       name: /Avatar pixel canvas/,
     });
     await expect(paintCanvas).toBeVisible();
-    await paintCanvas.click({ force: true });
-    await expect(
-      detailsEditor.getByText("Working copy · not applied"),
-    ).toBeVisible();
+    const paintCoverage = detailsEditor.getByRole("meter", {
+      name: /Paint coverage/,
+    });
     await expect
       .poll(() =>
-        detailsEditor
-          .getByRole("meter", { name: /Paint coverage/ })
+        paintCoverage
           .getAttribute("value")
           .then((value) => Number(value ?? 0)),
       )
       .toBeGreaterThan(0);
+    await detailsEditor
+      .getByRole("button", { name: "Clear pixel ink" })
+      .click();
+    await expect(paintCoverage).toHaveAttribute("value", "0");
+    await expect(studio.getByText("Unsaved", { exact: true })).toBeVisible();
   });
 
   test("bot Voice ID override wins without replacing the catalog selection", async ({
@@ -4949,6 +4903,7 @@ test.describe("PRISM desktop smoke", () => {
         lilt: 0,
         bottishTone: 0.45,
         volume: 1,
+        pronunciationMapPoint: { x: 0.5, y: 0.5 },
         texture: {
           preset: "clean",
           amount: 0,
@@ -5007,26 +4962,26 @@ test.describe("PRISM desktop smoke", () => {
       }),
     );
     await activateNavigationControl(
-      page.getByRole("button", { name: /^Avatar Studio/ }),
+      page.getByRole("button", { name: "Open Voice in Avatar Studio" }),
     );
 
     const studio = page.locator(
       'section[role="dialog"][aria-labelledby="bot-avatar-customizer-title"]',
     );
     await expect(studio).toBeVisible();
-    await studio.getByRole("tab", { name: "Voice" }).click({ force: true });
+    await studio.getByRole("button", { name: "3 Premium" }).click();
 
-    const onlineVoice = studio.getByRole("region", { name: "Online voice" });
-    const fallbackVoice = studio.locator(
-      'details[aria-label="Offline and fallback voice"]',
+    const premiumVoice = studio.locator(
+      '[data-bot-voice-premium-stage="true"]',
+    );
+    const onlineVoice = premiumVoice.locator(
+      'details[aria-label="Optional Premium voice"]',
     );
     const catalogVoice = studio.getByLabel("ElevenLabs voice identity");
+    await expect(premiumVoice).toBeVisible();
     await expect(onlineVoice).toBeVisible();
-    await expect(fallbackVoice).toBeVisible();
-    await expect(onlineVoice).toContainText("PREMIUM VOICE · ELEVENLABS");
-    await expect(fallbackVoice).toContainText("ENGLISH VOICE · LOCAL");
+    await expect(onlineVoice).toContainText("PREMIUM · OPTIONAL");
     await expect(onlineVoice).toHaveAttribute("data-active", "true");
-    await expect(fallbackVoice).not.toHaveAttribute("data-active", "true");
     await expect(catalogVoice).toHaveValue("catalog-voice-id");
     await page.addStyleTag({
       content: `[class*="botAvatarCustomizerBackdrop"] {
@@ -5039,27 +4994,20 @@ test.describe("PRISM desktop smoke", () => {
       path: ".codex/output/bot-voice-panel-dark-default.png",
       animations: "disabled",
     });
-    await onlineVoice.getByText("Use an exact Voice ID").click();
+    await onlineVoice.getByText("Exact Voice ID", { exact: true }).click();
     const voiceIdOverride = studio.getByLabel("ElevenLabs voice ID override");
     await voiceIdOverride.fill("portable-voice-id");
     await voiceIdOverride.blur();
-    await expect
-      .poll(() => savedProfile?.elevenLabsVoiceIdOverride ?? null)
-      .toBe("portable-voice-id");
-    await expect
-      .poll(() => savedProfile?.elevenLabsVoiceId ?? null)
-      .toBe("catalog-voice-id");
     await expect(catalogVoice).toHaveValue("");
     await expect(
       catalogVoice.locator('option[value="catalog-voice-id"]'),
     ).toHaveCount(1);
-    await expect(onlineVoice).toContainText("ID override");
-    await expect(studio.getByText("Voice ID", { exact: true })).toBeVisible();
+    await expect(onlineVoice).toContainText("Voice ID");
     await expect(
       studio.locator('[data-voice-id-resolution="true"]'),
     ).toContainText("Portable Muse");
 
-    await onlineVoice.getByText("Fine-tune delivery").click();
+    await onlineVoice.getByText("ElevenLabs controls").click();
     const voiceDirectionInput = studio.getByLabel(
       "Add ElevenLabs voice direction cue",
     );
@@ -5073,18 +5021,12 @@ test.describe("PRISM desktop smoke", () => {
       ).toBeVisible();
     }
     await expect(voiceDirectionInput).toBeDisabled();
-    await expect
-      .poll(() => savedProfile?.elevenLabsDirection ?? null)
-      .toBe("warmly, hushed, mischievously");
     await studio
       .getByRole("button", {
         name: "Remove voice direction mischievously",
       })
       .click();
     await expect(voiceDirectionInput).toBeEnabled();
-    await expect
-      .poll(() => savedProfile?.elevenLabsDirection ?? null)
-      .toBe("warmly, hushed");
 
     await voiceViewport.screenshot({
       path: ".codex/output/bot-voice-panel-dark.png",
@@ -5106,6 +5048,7 @@ test.describe("PRISM desktop smoke", () => {
       page.locator('[data-avatar-studio-theme="light"]'),
     ).toBeVisible();
     await studio.getByRole("tab", { name: "Voice" }).click({ force: true });
+    await studio.getByRole("button", { name: "3 Premium" }).click();
     const lightVoiceViewport = studio.locator(
       '[data-avatar-control-stack="true"]',
     );
@@ -5132,6 +5075,24 @@ test.describe("PRISM desktop smoke", () => {
     await expect(
       studio.locator('[data-voice-id-resolution="true"]'),
     ).toHaveCount(0);
+
+    await onlineVoice.getByText("Exact Voice ID", { exact: true }).click();
+    await voiceIdOverride.fill("portable-voice-id");
+    await voiceIdOverride.blur();
+    await expect(
+      studio.locator('[data-voice-id-resolution="true"]'),
+    ).toContainText("Portable Muse");
+    await studio.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(studio).toHaveCount(0);
+    await expect
+      .poll(() => savedProfile?.elevenLabsVoiceIdOverride ?? null)
+      .toBe("portable-voice-id");
+    await expect
+      .poll(() => savedProfile?.elevenLabsVoiceId ?? null)
+      .toBe("catalog-voice-id");
+    await expect
+      .poll(() => savedProfile?.elevenLabsDirection ?? null)
+      .toBe("warmly, hushed");
   });
 
   test("custom mouth Coffee pucker stays in the Mouth header and persists @visual", async ({

@@ -36,6 +36,10 @@ describe("Chat shell header layout", () => {
       pageSource,
       /document\.documentElement\.style\.setProperty\(\s*"--app-shell-top-nav-height"/,
     );
+    assert.match(
+      pageSource,
+      /\[chatHeaderToolsWrapped, sidebarOpen, user\?\.id, view, viewportWidth\]/,
+    );
     assert.equal(
       pageSource.match(/\sdata-app-shell-header="true"/g)?.length,
       2,

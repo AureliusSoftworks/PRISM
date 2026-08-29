@@ -56255,7 +56255,9 @@ function HomeContent(): React.JSX.Element {
     let frame: number | null = null;
     const syncAppShellTopNavHeight = () => {
       const header = chatHeaderRef.current;
-      const shell = header?.parentElement;
+      const shell =
+        header?.closest<HTMLElement>(`.${styles.chatPane}`) ??
+        header?.parentElement;
       if (!header || !shell) return;
       const heightValue = appShellTopNavHeightCssValue(
         header.getBoundingClientRect().height,
@@ -56310,7 +56312,10 @@ function HomeContent(): React.JSX.Element {
     syncAppShellTopNavHeight();
     scheduleMeasure();
     const header = chatHeaderRef.current;
-    const shell = header?.parentElement ?? null;
+    const shell =
+      header?.closest<HTMLElement>(`.${styles.chatPane}`) ??
+      header?.parentElement ??
+      null;
     const observer =
       header && typeof ResizeObserver !== "undefined"
         ? new ResizeObserver(scheduleMeasure)
@@ -56327,7 +56332,7 @@ function HomeContent(): React.JSX.Element {
         "--app-shell-top-nav-height",
       );
     };
-  }, [chatHeaderToolsWrapped, sidebarOpen, view, viewportWidth]);
+  }, [chatHeaderToolsWrapped, sidebarOpen, user?.id, view, viewportWidth]);
   useEffect(() => {
     if (sidebarOpen || panel !== null) setChatOverflowMenuOpen(false);
   }, [sidebarOpen, panel]);
@@ -92883,9 +92888,13 @@ function HomeContent(): React.JSX.Element {
       const response = await api<{ voices: PremiumVoiceLibraryEntry[] }>(
         "/api/voices/elevenlabs/library",
       );
-      setPremiumVoiceLibrary(response.voices);
+      if (!Array.isArray(response.voices)) {
+        throw new Error("PRISM voice library returned an invalid response.");
+      }
+      const voices = response.voices;
+      setPremiumVoiceLibrary(voices);
       setElevenLabsVoiceCatalog((current) => {
-        const saved = response.voices.map((voice) => ({
+        const saved = voices.map((voice) => ({
           voiceId: voice.providerVoiceId,
           name: voice.name,
           category: `PRISM Library · ${voice.category}`,
