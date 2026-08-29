@@ -1206,6 +1206,75 @@
 .refractPrompt input:focus { border-color: color-mix(in srgb, var(--companion-s) 60%, white); box-shadow: 0 0 0 2px color-mix(in srgb, var(--companion-i) 9%, transparent); }
 .refractPrompt small { color: var(--fg-subtle, #77716d); font: .56rem/1.2 system-ui, sans-serif; }
 
+.refractChoicePicker {
+  width: min(390px, calc(100vw - 24px));
+  display: grid;
+  gap: 8px;
+  padding: 13px;
+  border: 1px solid #b99cff66;
+  border-radius: 18px;
+  color: var(--fg, #edf3f8);
+  background:
+    radial-gradient(circle at 12% 0%, #e978d71c, transparent 52%),
+    color-mix(in srgb, var(--bg-surface, #151311) 94%, transparent);
+  box-shadow: 0 22px 58px -32px #000e, inset 0 1px 0 #ffffff12;
+  backdrop-filter: blur(20px) saturate(1.15);
+  -webkit-backdrop-filter: blur(20px) saturate(1.15);
+  pointer-events: auto;
+  animation: bubbleArrive 180ms ease-out both;
+}
+
+.refractChoicePicker > span {
+  color: #c5a9ff;
+  font: 780 .55rem/1.2 system-ui, sans-serif;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.refractChoicePicker strong {
+  font: 760 .78rem/1.2 system-ui, sans-serif;
+}
+
+.refractChoicePicker [role="listbox"] {
+  display: grid;
+  gap: 6px;
+  max-height: min(42dvh, 310px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.refractChoicePicker button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #ffffff1f;
+  border-radius: 11px;
+  color: var(--fg, #edf3f8);
+  background: #ffffff08;
+  font: 700 .67rem/1.2 system-ui, sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+
+.refractChoicePicker button:hover,
+.refractChoicePicker button:focus-visible {
+  border-color: #c5a9ff99;
+  outline: none;
+  background: #b99cff1c;
+}
+
+.refractChoicePicker button:disabled {
+  cursor: not-allowed;
+  opacity: .46;
+}
+
+.refractChoicePicker small {
+  color: var(--fg-subtle, #77716d);
+  font: .56rem/1.2 system-ui, sans-serif;
+}
+
 .srOnly {
   position: absolute;
   width: 1px;

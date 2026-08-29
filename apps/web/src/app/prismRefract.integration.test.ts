@@ -487,6 +487,16 @@ describe("Prism Refract integration", () => {
     );
   });
 
+  it("supports prompt-free immediate and persistent choice Refract actions", () => {
+    assert.match(companionSource, /target\.interaction === "immediate"/u);
+    assert.match(companionSource, /target\.interaction === "choice"/u);
+    assert.match(companionSource, /data-prism-refract-choice-picker="true"/u);
+    assert.match(companionSource, /keepOpen === true/u);
+    assert.match(companionSource, /choosePrismRefractMagicChoice/u);
+    assert.match(refractSource, /interaction\?: "prompt" \| "choice" \| "immediate"/u);
+    assert.match(refractSource, /keepOpen\?: boolean/u);
+  });
+
   it("keeps foreground Refract on the global mode, model, and Effort contract", () => {
     assert.doesNotMatch(companionSource, /refractModelPicker/u);
     assert.doesNotMatch(companionSource, /refractRouting/u);

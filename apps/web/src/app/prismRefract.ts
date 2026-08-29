@@ -45,6 +45,12 @@ export interface PrismRefractChoiceTarget extends PrismRefractTargetBase {
 
 export interface PrismRefractMagicTarget extends PrismRefractTargetBase {
   kind: "magic";
+  /** How the captured control should collect its one-pass Refract action. */
+  interaction?: "prompt" | "choice" | "immediate";
+  /** Choices rendered by the prompt-free picker interaction. */
+  choices?: () => readonly PrismRefractChoice[];
+  /** Keep a choice picker open so another click rerolls the same control. */
+  keepOpen?: boolean;
   /**
    * When true, the magic owns its own warmup + fullscreen loader
    * (e.g. New Duel / New Group invent). Companion skips the shared gate.
@@ -74,6 +80,7 @@ export function createBotDirectedSetupRefractTarget(input: {
   botName: string;
   disabled?: () => boolean;
   ownsPresentation?: boolean;
+  interaction?: PrismRefractMagicTarget["interaction"];
   run: (input: {
     botId: string;
     botName: string;
@@ -89,6 +96,7 @@ export function createBotDirectedSetupRefractTarget(input: {
     anchor,
     disabled: input.disabled,
     ownsPresentation: input.ownsPresentation,
+    interaction: input.interaction,
     run: (direction) => input.run({ ...anchor, direction }),
   };
 }

@@ -587,7 +587,7 @@ import {
   fillWhodunnitSuspectSeats,
   minimumWhodunnitBotsForCast,
   randomizeWhodunnitFullCast,
-  randomizeWhodunnitCastAroundBot,
+  randomizeWhodunnitGroupBotIds,
   resolveWhodunnitSurpriseCast,
   surpriseWhodunnitSeatBotId,
 } from "./debateMysteryCast";
@@ -9000,6 +9000,106 @@ export function DebateExperience(
     setMysteryNonce(nextMysteryRecipeNonce());
   };
 
+  type MysteryCastGroupKind = "suspects" | "courtroom" | "jury";
+
+  const randomizeMysteryGroup = (
+    kind: MysteryCastGroupKind,
+    groupId: string,
+  ): boolean => {
+    const group = debatePickerGroups.find((candidate) => candidate.id === groupId);
+    if (!group) return false;
+    const seatCount =
+      kind === "suspects"
+        ? mysteryTargetSuspects
+        : kind === "courtroom"
+          ? 3
+          : DEBATE_JURY_SIZE;
+    const currentGroupIds =
+      kind === "suspects"
+        ? mysterySuspectBotIds
+        : kind === "courtroom"
+          ? [mysteryJudgeBotId, mysteryProsecutorBotId, mysteryRivalDefenseBotId]
+          : preferredJurorBotIds;
+    const reservedIds = [
+      ...mysterySuspectBotIds,
+      mysteryJudgeBotId,
+      mysteryProsecutorBotId,
+      mysteryRivalDefenseBotId,
+      ...preferredJurorBotIds,
+    ].filter(
+      (id): id is string => Boolean(id) && !currentGroupIds.includes(id),
+    );
+    const selection = randomizeWhodunnitGroupBotIds(
+      group.botIds,
+      seatCount,
+      reservedIds,
+    );
+    if (!selection) {
+      setError(
+        `${group.name} does not have ${seatCount} available distinct Library bots for this container.`,
+      );
+      return false;
+    }
+    if (kind === "suspects") {
+      setMysterySuspectSelection(selection);
+      if (inspectedMysterySeed) {
+        setMysteryImportAssignments(
+          Object.fromEntries(
+            inspectedMysterySeed.seats.map((seat, index) => [
+              seat.seatId,
+              selection[index] ?? "",
+            ]),
+          ),
+        );
+      }
+    } else if (kind === "courtroom") {
+      setMysteryJudgeBotId(selection[0] ?? "");
+      setMysteryProsecutorBotId(selection[1] ?? "");
+      setMysteryRivalDefenseBotId(selection[2] ?? "");
+    } else {
+      setPreferredJurorBotIds(selection);
+    }
+    setError(null);
+    setMysteryNonce(nextMysteryRecipeNonce());
+    return true;
+  };
+
+  const mysteryGroupRefractTarget = (
+    kind: MysteryCastGroupKind,
+    label: string,
+  ): PrismRefractMagicTarget => ({
+    id: `debate:whodunnit:group:${kind}`,
+    label: `${label} group`,
+    kind: "magic",
+    interaction: "choice",
+    choices: () =>
+      debatePickerGroups.map((group) => ({
+        value: group.id,
+        label: `${group.name} · ${group.count ?? group.botIds.length} bots`,
+      })),
+    keepOpen: true,
+    ownsPresentation: true,
+    disabled: () => busy || format !== "whodunnit",
+    run: (groupId) => {
+      randomizeMysteryGroup(kind, groupId);
+    },
+  });
+
+  const mysterySeatRefractTarget = (
+    seat: DebateMysteryCastSeat,
+    label: string,
+  ): PrismRefractMagicTarget => ({
+    id: `debate:whodunnit:seat:${seat.kind}:${seat.kind === "suspect" || seat.kind === "juror" ? seat.index : "fixed"}`,
+    label: `${label} random bot`,
+    kind: "magic",
+    interaction: "immediate",
+    ownsPresentation: true,
+    disabled: () => busy || format !== "whodunnit",
+    run: () => {
+      surpriseMysterySeat(seat);
+    },
+  });
+
   const clearCastSlot = (slot: DebateCastSlot): void => {
     if (!selectableCastSlots.includes(slot)) return;
     const nextCast = { ...cast, [slot]: "" };
@@ -9139,29 +9239,6 @@ export function DebateExperience(
           : "moderator",
     );
     return true;
-  };
-
-  const randomizeMysteryCastAroundBot = (anchor: {
-    botId: string;
-    botName: string;
-    direction: string;
-  }): void => {
-    const allocation = randomizeWhodunnitCastAroundBot(
-      distinctWhodunnitCastBotIds(bots).map((id) => ({ id })),
-      mysteryTargetSuspects,
-      anchor.botId,
-    );
-    if (!allocation) return;
-    setMysterySuspectSelection(allocation.suspectBotIds);
-    setMysteryJudgeBotId(allocation.judgeBotId);
-    setMysteryProsecutorBotId(allocation.prosecutorBotId);
-    setMysteryRivalDefenseBotId(allocation.rivalDefenseBotId);
-    setMysteryInspiration(
-      anchor.direction.trim() ||
-        `A mystery centered on ${anchor.botName}'s world, relationships, and contradictions without assuming their guilt.`,
-    );
-    setMysteryNonce(nextMysteryRecipeNonce());
-    setActiveMysteryCastSeat({ kind: "suspect", index: 0 });
   };
 
   const stopStageAlignmentSoundCheck = (): void => {
@@ -20600,27 +20677,32 @@ export function DebateExperience(
         data-filled={bot ? "true" : undefined}
         style={{ "--debate-cast-color": bot?.color ?? "#8f7cff" } as CSSProperties}
       >
-        <button
-          type="button"
-          className={styles.castSlotSelect}
-          aria-pressed={active}
-          data-bot-id={bot?.id}
-          onClick={() => {
-            setActiveJurySeatIndex(null);
-            setActiveMysteryCastSeat(seat);
-            if (!bot) surpriseMysterySeat(seat);
-          }}
-        >
-          <span className={styles.castSlotGlyph} aria-hidden="true">
-            {bot
-              ? props.renderBotGlyph(bot.glyph, { size: 30, strokeWidth: 1.65 })
-              : props.renderBotGlyph("dice", { size: 30, strokeWidth: 1.65 })}
-          </span>
-          <span>
-            <small>{label}</small>
-            <strong>{bot?.name ?? "Surprise me"}</strong>
-          </span>
-        </button>
+        <PrismRefractTarget target={mysterySeatRefractTarget(seat, label)}>
+          {(binding) => (
+            <button
+              {...binding}
+              type="button"
+              className={styles.castSlotSelect}
+              aria-pressed={active}
+              data-bot-id={bot?.id}
+              onClick={() => {
+                setActiveJurySeatIndex(null);
+                setActiveMysteryCastSeat(seat);
+                if (!bot) surpriseMysterySeat(seat);
+              }}
+            >
+              <span className={styles.castSlotGlyph} aria-hidden="true">
+                {bot
+                  ? props.renderBotGlyph(bot.glyph, { size: 30, strokeWidth: 1.65 })
+                  : props.renderBotGlyph("dice", { size: 30, strokeWidth: 1.65 })}
+              </span>
+              <span>
+                <small>{label}</small>
+                <strong>{bot?.name ?? "Surprise me"}</strong>
+              </span>
+            </button>
+          )}
+        </PrismRefractTarget>
         {bot ? (
           <button
             type="button"
@@ -20760,84 +20842,105 @@ export function DebateExperience(
       {format === "whodunnit" ? renderJuryToggle() : null}
       {format === "whodunnit" ? (
         <div className={styles.mysteryCastGroups}>
-          <section
-            className={styles.mysteryCastGroup}
-            data-role-group="suspects"
-            data-tutorial-target="debate-mystery-suspects"
+          <PrismRefractTarget
+            target={mysteryGroupRefractTarget("suspects", "Suspects")}
           >
-            <header>
-              <span>Case ensemble</span>
-              <strong>Suspects</strong>
-              <small>People who may be interviewed, investigated, or accused.</small>
-              <em>{mysteryTargetSuspects} seats</em>
-            </header>
-            <div
-              className={styles.castSlotGrid}
-              data-seat-count={mysteryTargetSuspects}
-            >
-              {mysterySuspectBotIds.map((botId, index) =>
-                renderMysteryCastSlot({
-                  seat: { kind: "suspect", index },
-                  label: `Suspect ${index + 1}`,
-                  botId,
-                }),
-              )}
-            </div>
-          </section>
-          <section
-            className={styles.mysteryCastGroup}
-            data-role-group="courtroom"
-            data-tutorial-target="debate-mystery-courtroom"
+            {(binding) => (
+              <section
+                {...binding}
+                className={styles.mysteryCastGroup}
+                data-role-group="suspects"
+                data-tutorial-target="debate-mystery-suspects"
+              >
+                <header>
+                  <span>Case ensemble</span>
+                  <strong>Suspects</strong>
+                  <small>People who may be interviewed, investigated, or accused.</small>
+                  <em>{mysteryTargetSuspects} seats</em>
+                </header>
+                <div
+                  className={styles.castSlotGrid}
+                  data-seat-count={mysteryTargetSuspects}
+                >
+                  {mysterySuspectBotIds.map((botId, index) =>
+                    renderMysteryCastSlot({
+                      seat: { kind: "suspect", index },
+                      label: `Suspect ${index + 1}`,
+                      botId,
+                    }),
+                  )}
+                </div>
+              </section>
+            )}
+          </PrismRefractTarget>
+          <PrismRefractTarget
+            target={mysteryGroupRefractTarget("courtroom", "Courtroom")}
           >
-            <header>
-              <span>Public proceeding</span>
-              <strong>Courtroom</strong>
-              <small>The Judge presides publicly; PRISM keeps sealed case truth backstage.</small>
-              <em>3 seats</em>
-            </header>
-            <div className={styles.castSlotGrid} data-seat-count="3">
-              {[
-                {
-                  seat: { kind: "judge" } as const,
-                  label: "Presiding Judge",
-                  botId: mysteryJudgeBotId,
-                },
-                {
-                  seat: { kind: "prosecutor" } as const,
-                  label: "Player Prosecutor",
-                  botId: mysteryProsecutorBotId,
-                },
-                {
-                  seat: { kind: "defense" } as const,
-                  label: "Defense counsel",
-                  botId: mysteryRivalDefenseBotId,
-                },
-              ].map(renderMysteryCastSlot)}
-            </div>
-          </section>
+            {(binding) => (
+              <section
+                {...binding}
+                className={styles.mysteryCastGroup}
+                data-role-group="courtroom"
+                data-tutorial-target="debate-mystery-courtroom"
+              >
+                <header>
+                  <span>Public proceeding</span>
+                  <strong>Courtroom</strong>
+                  <small>The Judge presides publicly; PRISM keeps sealed case truth backstage.</small>
+                  <em>3 seats</em>
+                </header>
+                <div className={styles.castSlotGrid} data-seat-count="3">
+                  {[
+                    {
+                      seat: { kind: "judge" } as const,
+                      label: "Presiding Judge",
+                      botId: mysteryJudgeBotId,
+                    },
+                    {
+                      seat: { kind: "prosecutor" } as const,
+                      label: "Player Prosecutor",
+                      botId: mysteryProsecutorBotId,
+                    },
+                    {
+                      seat: { kind: "defense" } as const,
+                      label: "Defense counsel",
+                      botId: mysteryRivalDefenseBotId,
+                    },
+                  ].map(renderMysteryCastSlot)}
+                </div>
+              </section>
+            )}
+          </PrismRefractTarget>
           {juryEnabled ? (
-            <section
-              id="debate-mystery-jury-options"
-              className={styles.mysteryCastGroup}
-              data-role-group="jury"
-              data-tutorial-target="debate-mystery-jury"
+            <PrismRefractTarget
+              target={mysteryGroupRefractTarget("jury", "Jury")}
             >
-              <header>
-                <span>Public deliberation</span>
-                <strong>Jury</strong>
-                <small>Each juror is a distinct Library bot. Choose, replace, or Surprise each seat before the case freezes.</small>
-                <em>{DEBATE_JURY_SIZE} seats</em>
-              </header>
-              <div className={styles.castSlotGrid} data-seat-count={DEBATE_JURY_SIZE}>
-                {Array.from({ length: DEBATE_JURY_SIZE }, (_, index) =>
-                  renderMysteryCastSlot({
-                    seat: { kind: "juror", index },
-                    label: `Juror ${index + 1}`,
-                    botId: preferredJurorBotIds[index] ?? "",
-                  }),
-                )}
-              </div>
-            </section>
+              {(binding) => (
+                <section
+                  {...binding}
+                  id="debate-mystery-jury-options"
+                  className={styles.mysteryCastGroup}
+                  data-role-group="jury"
+                  data-tutorial-target="debate-mystery-jury"
+                >
+                  <header>
+                    <span>Public deliberation</span>
+                    <strong>Jury</strong>
+                    <small>Each juror is a distinct Library bot. Choose, replace, or Surprise each seat before the case freezes.</small>
+                    <em>{DEBATE_JURY_SIZE} seats</em>
+                  </header>
+                  <div className={styles.castSlotGrid} data-seat-count={DEBATE_JURY_SIZE}>
+                    {Array.from({ length: DEBATE_JURY_SIZE }, (_, index) =>
+                      renderMysteryCastSlot({
+                        seat: { kind: "juror", index },
+                        label: `Juror ${index + 1}`,
+                        botId: preferredJurorBotIds[index] ?? "",
+                      }),
+                    )}
+                  </div>
+                </section>
+              )}
+            </PrismRefractTarget>
           ) : null}
         </div>
       ) : (
@@ -21054,10 +21157,14 @@ export function DebateExperience(
                     botId: bot.id,
                     botName: bot.name,
                     ownsPresentation: true,
+                    interaction: format === "whodunnit" ? "immediate" : undefined,
                     disabled: () => busy || Boolean(effectiveDisabledReason),
                     run: ({ botId, botName, direction }) => {
                       if (format === "whodunnit") {
-                        randomizeMysteryCastAroundBot({ botId, botName, direction });
+                        // Wielding an individual Whodunnit bot is a prompt-free
+                        // seat reroll; the captured tile never becomes hidden
+                        // direction or case inspiration.
+                        surpriseMysterySeat(activeMysteryCastSeat);
                         return;
                       }
                       return generateNewDuelFromPrism(direction, {

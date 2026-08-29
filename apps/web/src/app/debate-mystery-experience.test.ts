@@ -8,6 +8,7 @@ import {
   randomizeWhodunnitCast,
   randomizeWhodunnitFullCast,
   randomizeWhodunnitCastAroundBot,
+  randomizeWhodunnitGroupBotIds,
   resolveWhodunnitSurpriseCast,
   surpriseWhodunnitSeatBotId,
   minimumWhodunnitBotsForCast,
@@ -910,9 +911,28 @@ describe("Debate Whodunnit experience", () => {
   it("registers every suspect tile as a bot-directed setup target", () => {
     assert.match(shell, /id: `debate-setup-anchor-\$\{bot\.id\}/u);
     assert.match(shell, /createBotDirectedSetupRefractTarget/u);
-    assert.match(shell, /randomizeMysteryCastAroundBot/u);
-    assert.match(shell, /setMysteryInspiration/u);
+    assert.match(shell, /interaction: format === "whodunnit" \? "immediate" : undefined/u);
+    assert.match(shell, /surpriseMysterySeat\(activeMysteryCastSeat\)/u);
+    assert.doesNotMatch(shell, /randomizeMysteryCastAroundBot/u);
     assert.match(shell, /effectiveDisabledReason/u);
+  });
+
+  it("rerolls a Whodunnit container from one group without duplicate or reserved bots", () => {
+    assert.deepEqual(
+      randomizeWhodunnitGroupBotIds(
+        ["a", "b", "c", "d", "a"],
+        3,
+        ["b"],
+        () => 0,
+      ),
+      ["c", "d", "a"],
+    );
+    assert.equal(randomizeWhodunnitGroupBotIds(["a", "b"], 3), null);
+    assert.match(shell, /mysteryGroupRefractTarget\("suspects", "Suspects"\)/u);
+    assert.match(shell, /mysteryGroupRefractTarget\("courtroom", "Courtroom"\)/u);
+    assert.match(shell, /mysteryGroupRefractTarget\("jury", "Jury"\)/u);
+    assert.match(shell, /interaction: "choice"/u);
+    assert.match(shell, /keepOpen: true/u);
   });
 
   it("normalizes bot IDs before randomizing", () => {

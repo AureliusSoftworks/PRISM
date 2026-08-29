@@ -168,6 +168,33 @@ export function randomizeWhodunnitFullCast(
   };
 }
 
+/** Pick a distinct subset from one Library group while preserving other seats. */
+export function randomizeWhodunnitGroupBotIds(
+  groupBotIds: readonly string[],
+  seatCount: number,
+  excludedBotIds: readonly string[] = [],
+  random: () => number = Math.random,
+): string[] | null {
+  const targetSeats = Math.max(0, Math.round(seatCount));
+  const excluded = new Set(
+    excludedBotIds.map((id) => id.trim()).filter(Boolean),
+  );
+  const candidates = distinctWhodunnitCastBotIds(
+    groupBotIds.map((id) => ({ id })),
+  ).filter((id) => !excluded.has(id));
+  if (candidates.length < targetSeats) return null;
+  for (let index = candidates.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(
+      Math.min(index, Math.max(0, random()) * (index + 1)),
+    );
+    [candidates[index], candidates[randomIndex]] = [
+      candidates[randomIndex]!,
+      candidates[index]!,
+    ];
+  }
+  return candidates.slice(0, targetSeats);
+}
+
 /**
  * Freeze a mixed manual/Surprise cast. Valid manual seats keep their exact
  * position; blanks, stale ids, and duplicate selections are filled from a

@@ -148,6 +148,8 @@ describe("first-run onboarding", () => {
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /hold Option/u);
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /stays fixed/u);
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /nothing begins/u);
+    assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /prompt-free Library group picker/u);
+    assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /random Library bot/u);
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /named stage presets/u);
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /never replace a show’s identity, cast, or artwork/u);
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /I Feel Lucky!/u);

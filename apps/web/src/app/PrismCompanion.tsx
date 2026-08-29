@@ -2975,12 +2975,28 @@ export default function PrismCompanion({
         );
       }
       playPrismCompanionGlassTap();
-      if (target.kind === "magic") {
+      if (target.kind === "magic" && target.interaction === "immediate") {
         document.documentElement.removeAttribute(PRISM_REFRACT_CURSOR_ATTRIBUTE);
-        setRefractStatus(
-          `Tell Prism how to shape ${target.label}, then press Enter.`,
-        );
-        window.requestAnimationFrame(() => refractPromptRef.current?.focus());
+        setRefractStatus(`Prism is refracting ${target.label}.`);
+        window.requestAnimationFrame(() => {
+          void Promise.resolve(target.run("")).catch((error) => {
+            onError?.(
+              error instanceof Error
+                ? error.message
+                : `Prism could not start ${target.label}.`,
+            );
+          }).finally(() => releasePrismRefract(false));
+        });
+      } else if (target.kind === "magic") {
+        document.documentElement.removeAttribute(PRISM_REFRACT_CURSOR_ATTRIBUTE);
+        if (target.interaction === "choice") {
+          setRefractStatus(`Choose how to shape ${target.label}.`);
+        } else {
+          setRefractStatus(
+            `Tell Prism how to shape ${target.label}, then press Enter.`,
+          );
+          window.requestAnimationFrame(() => refractPromptRef.current?.focus());
+        }
       } else {
         generatePrismRefractCandidate(session);
       }
@@ -2990,6 +3006,7 @@ export default function PrismCompanion({
       clearIdleDim,
       generatePrismRefractCandidate,
       markRefractTarget,
+      onError,
       releasePrismRefract,
       stopInertia,
       updateRefractSession,
@@ -3101,6 +3118,43 @@ export default function PrismCompanion({
     releasePrismRefract,
   ]);
 
+  const choosePrismRefractMagicChoice = useCallback(
+    (value: string): void => {
+      const session = refractSessionRef.current;
+      if (
+        !session ||
+        session.phase !== "prompting" ||
+        session.registration.target.kind !== "magic" ||
+        session.registration.target.interaction !== "choice"
+      ) {
+        return;
+      }
+      const target = session.registration.target;
+      const choice = target.choices?.().find(
+        (candidate) => candidate.value === value && !candidate.disabled,
+      );
+      if (!choice) return;
+      const keepOpen = target.keepOpen === true;
+      if (!keepOpen) releasePrismRefract(false);
+      void Promise.resolve(target.run(choice.value))
+        .then(() => {
+          if (keepOpen) {
+            setRefractStatus(
+              `${choice.label} selected. Choose again to reroll this container.`,
+            );
+          }
+        })
+        .catch((error) => {
+          onError?.(
+            error instanceof Error
+              ? error.message
+              : `Prism could not start ${target.label}.`,
+          );
+        });
+    },
+    [onError, releasePrismRefract],
+  );
+
   const dismissRefractTutorial = useCallback(
     (resolution: "skip" | "remind"): void => {
       refractTutorialRunRef.current = false;
@@ -3204,6 +3258,12 @@ export default function PrismCompanion({
       if (
         eventTarget instanceof Element &&
         eventTarget.closest('[data-prism-refract-tutorial-card="true"]')
+      ) {
+        return;
+      }
+      if (
+        eventTarget instanceof Element &&
+        eventTarget.closest('[data-prism-refract-choice-picker="true"]')
       ) {
         return;
       }
@@ -5386,34 +5446,63 @@ export default function PrismCompanion({
           ) : null}
           {refractSession?.phase === "prompting" &&
           refractSession.registration.target.kind === "magic" ? (
-            <form
-              className={styles.refractPrompt}
-              data-prism-refract-prompt="true"
-              onSubmit={(event) => {
-                event.preventDefault();
-                submitPrismRefractMagic();
-              }}
-            >
-              <label htmlFor="prism-refract-direction">
-                How should Prism shape this pass?
-              </label>
-              <input
-                ref={refractPromptRef}
-                id="prism-refract-direction"
-                value={refractPrompt}
-                maxLength={500}
-                autoComplete="off"
-                onChange={(event) => setRefractPrompt(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    releasePrismRefract(true);
-                  }
+            refractSession.registration.target.interaction === "choice" ? (
+              <section
+                className={styles.refractChoicePicker}
+                data-prism-refract-choice-picker="true"
+                role="dialog"
+                aria-label={`Choose a ${refractSession.registration.target.label}`}
+              >
+                <span>Refract</span>
+                <strong>Choose a group</strong>
+                <div role="listbox" aria-label={refractSession.registration.target.label}>
+                  {(refractSession.registration.target.choices?.() ?? []).map(
+                    (choice) => (
+                      <button
+                        key={choice.value}
+                        type="button"
+                        role="option"
+                        aria-selected={false}
+                        disabled={choice.disabled}
+                        onClick={() => choosePrismRefractMagicChoice(choice.value)}
+                      >
+                        <span>{choice.label}</span>
+                      </button>
+                    ),
+                  )}
+                </div>
+                <small>Choose again to reroll this container · Escape cancels</small>
+              </section>
+            ) : refractSession.registration.target.interaction === "immediate" ? null : (
+              <form
+                className={styles.refractPrompt}
+                data-prism-refract-prompt="true"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  submitPrismRefractMagic();
                 }}
-              />
-              <small>Enter shapes this pass · Escape cancels</small>
-            </form>
+              >
+                <label htmlFor="prism-refract-direction">
+                  How should Prism shape this pass?
+                </label>
+                <input
+                  ref={refractPromptRef}
+                  id="prism-refract-direction"
+                  value={refractPrompt}
+                  maxLength={500}
+                  autoComplete="off"
+                  onChange={(event) => setRefractPrompt(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      releasePrismRefract(true);
+                    }
+                  }}
+                />
+                <small>Enter shapes this pass · Escape cancels</small>
+              </form>
+            )
           ) : null}
           {open && panelView === "chat" ? (
             <div
