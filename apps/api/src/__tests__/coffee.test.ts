@@ -8012,7 +8012,7 @@ describe("Coffee group foundation", () => {
           },
           {
             preferredProvider: "local",
-            sessionRemainingMs: 300_000,
+            sessionRemainingMs: 600_000,
           }
         ),
       { chatBodies }
