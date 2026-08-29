@@ -85,6 +85,7 @@ const GRANDFATHERED_SURFACES = new Set<string>([
   "BotcastExperience.tsx :: signal-delete-title", // signal.episodes.delete
   "DebateExperience.tsx :: debate-delete-title", // debate.session.delete
   "DebateExperience.tsx :: debate-end-early-title", // recover-final-recess
+  "DebateExperience.tsx :: debate-mystery-restart-title", // restarts the current mystery setup/run
   "AssetLibrary.tsx :: deleteConfirmationId", // quarantine + restore
   "AssetLibrary.tsx :: magentaConfirmation", // /magenta-pass/undo
   "AssetLibrary.tsx :: compressConfirmation", // /compress/undo
@@ -116,6 +117,9 @@ const GRANDFATHERED_SURFACES = new Set<string>([
   "BotcastExperience.tsx :: studioCutConfirmation",
   "ActionSfxPackMagicButton.tsx :: awaitingRegenerateConfirm",
   "EnglishPacingCalibrateMagicButton.tsx :: awaitingRegenerateConfirm",
+  "InstalledMansionLibraryPanel.tsx :: (unlabelled dialog)", // removes an installed mansion without an inverse
+  "InstalledMansionLibraryPanel.tsx :: removeConfirmation",
+  "MansionEditorDialog.tsx :: regenerateConfirmationRoomId", // replaces accepted room art and clears authored overlays
 
   // --- Confirm-before-cancel on an in-flight operation, already pinned by
   // PrismBlockingLoader.test.ts.

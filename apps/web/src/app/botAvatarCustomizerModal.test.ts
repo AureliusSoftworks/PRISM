@@ -2689,7 +2689,7 @@ test("Powers read as an app-wide bot trait across active surfaces", () => {
   assert.match(pageSource, /botPowerCupRateMultiplierForBotV1/u);
   assert.match(
     pageSource,
-    /const coffeeCupRefused = coffeeCupPowerRateMultiplier === 0/u,
+    /const coffeeCupRefused = coffeeVesselMode === "none"/u,
   );
   assert.match(
     pageSource,

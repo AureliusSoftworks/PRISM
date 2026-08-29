@@ -121,7 +121,7 @@ test("review stops live audio and cannot start replay while the closing wrap is 
   );
   assert.match(
     pageSource,
-    /const hasSynopsis =\s*coffeeConversationHasSessionSynopsis\(coffeeConversation\);\s*if \(coffeeSessionModelDisabled && !hasSynopsis\)/,
+    /const hasSynopsis =\s*coffeeConversationHasSessionSynopsis\(coffeeConversation\);[\s\S]{0,260}if \(coffeeSessionModelDisabled && !hasSynopsis\)/,
   );
 });
 
@@ -139,7 +139,7 @@ test("leaving Coffee returns immediately while the epilogue continues in the bac
 test("finished Coffee review offers Coffee home back to setup", () => {
   assert.match(
     pageSource,
-    /onClick=\{\(\) => void exitCoffeeSessionToSelectedView\(\)\}[\s\S]{0,160}data-tutorial-target="coffee-review-home"[\s\S]{0,120}Coffee home/,
+    /onClick=\{\(\) =>\s*finishCoffeeSessionRef\.current\(coffeeConversation\?\.id\)\s*\}[\s\S]{0,160}data-tutorial-target="coffee-review-home"[\s\S]{0,120}Coffee home/,
   );
 });
 

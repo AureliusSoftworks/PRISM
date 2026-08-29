@@ -231,12 +231,11 @@ describe("installed mansion library", () => {
     assert.match(topologyEditor, /fixed silhouettes/u);
     assert.match(topologyEditor, /mansionLayoutV2PlacementIsLegal/u);
     assert.match(topologyEditor, /snapMansionLayoutV2Entity/u);
-    assert.match(topologyEditor, /Invalid drop—returned to the last legal connected position/u);
+    assert.match(topologyEditor, /That floor has no legal connected space for this room footprint/u);
     assert.match(topologyEditor, /Geometry-derived doors/u);
     assert.match(topologyEditor, /slideMansionLayoutV2Door/u);
     assert.match(topologyEditor, /removeMansionLayoutV2Door/u);
     assert.match(topologyEditor, /\+ Corridor/u);
-    assert.match(topologyEditor, /\+ Infill/u);
     assert.match(topologyEditor, /disabled=\{floor === 3 && !thirdFloorAccessible\}/u);
     assert.match(topologyEditor, /Floor 2 needs at least four semantic rooms/u);
     assert.match(topologyEditor, /roomAssetUrl\(mansion, entity, true\)/u);
@@ -252,9 +251,9 @@ describe("installed mansion library", () => {
     assert.match(topologyEditor, /MANSION_LAYOUT_V2_MAX_LIGHTS/u);
     assert.match(topologyEditor, /\["fire", "omni", "directional", "neon"\]/u);
     assert.match(topologyEditor, /Stable IDs seed animation; Reduced Motion freezes it/u);
-    assert.match(topologyEditor, /Generate room-art candidate · ONLINE/u);
+    assert.match(topologyEditor, /Upgrade this room to Illustrated · ONLINE/u);
     assert.match(topologyEditor, /Accept candidate/u);
-    assert.match(topologyEditor, /Retry candidate/u);
+    assert.match(topologyEditor, /Regenerate room asset/u);
     assert.match(topologyEditor, /Discard candidate/u);
     assert.match(topologyEditor, /LOCAL is server-rejected/u);
     assert.match(experience, /room-art\/\$\{encodeURIComponent\(roomId\)\}\/\$\{action\}/u);

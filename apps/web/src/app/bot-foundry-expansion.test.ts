@@ -180,8 +180,8 @@ describe("Bot Foundry expansion integration", () => {
       pageSource,
       /<BotAvatarMicro[\s\S]{0,220}(?:faceStyle|avatarDetails)=/u,
     );
-    assert.match(pageSource, /faceEyeCharacter=\{preview\.face\?\.eyeCharacter\}/u);
-    assert.match(pageSource, /faceMouthCharacter=\{preview\.face\?\.mouthCharacter\}/u);
+    assert.match(pageSource, /faceEyeCharacter=\{batchFaceStyle\.eyeCharacter\}/u);
+    assert.match(pageSource, /faceMouthCharacter=\{batchFaceStyle\.mouthCharacter\}/u);
     assert.match(pageSource, /data-avatar-render-tier/u);
     assert.match(pageSource, /--bot-foundry-slot-color/u);
   });

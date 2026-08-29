@@ -346,8 +346,8 @@ describe("typed local asset library", () => {
     assert.match(storageSource, /Generated/u);
     assert.match(storageSource, /synthesized or uploaded clips/u);
     assert.match(storageSource, /Audit unused/u);
-    assert.match(storageSource, /includeIncomplete/u);
-    assert.match(storageSource, /allowDelete/u);
+    assert.match(assetSource, /includeIncomplete/u);
+    assert.match(assetSource, /allowDelete/u);
     assert.match(serverSource, /route\("POST", "\/api\/assets\/upload"/u);
     assert.match(serverSource, /route\("GET", "\/api\/assets\/storage"/u);
     assert.match(serverSource, /route\("POST", "\/api\/assets\/storage\/visible"/u);

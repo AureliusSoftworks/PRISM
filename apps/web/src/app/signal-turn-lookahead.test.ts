@@ -85,7 +85,11 @@ describe("Signal turn lookahead", () => {
     );
     assert.match(
       signalSource,
-      /await introBufferPoll\.catch[\s\S]{0,220}?await prefetchKnownWatchEpisodeVoices\(presentationEpisode\)[\s\S]{0,120}?setEpisodePreRoll\(null\)/u,
+      /await prefetchKnownWatchEpisodeVoices\(bakedEpisode\);/u,
+    );
+    assert.match(
+      signalSource,
+      /await beginEpisodeIntroBookend\(watchBookend, presentationEpisode\.id\);[\s\S]{0,260}?setEpisodePreRoll\(null\)/u,
     );
   });
 

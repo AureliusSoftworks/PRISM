@@ -103,7 +103,7 @@ describe("Coffee Context Sparks UI", () => {
     assert.doesNotMatch(cssSource, /\.coffeeContextSparkCue/u);
     assert.match(tutorialSource, /COFFEE_CONTEXT_SPARKS_TUTORIAL_SUFFIX/u);
     assert.match(tutorialSource, /nothing sends until you choose Send/u);
-    assert.match(tutorialSource, /all spark chips leave the table when the session begins/u);
+    assert.match(tutorialSource, /The chip leaves the table when the session begins/u);
     assert.doesNotMatch(pageSource, /COFFEE_CONTEXT_SPARK_CUE_DISMISSED_SESSION_KEY/u);
   });
 });

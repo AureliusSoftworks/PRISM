@@ -3609,7 +3609,7 @@ describe("Signal experience shell", () => {
       /preferredProvider: episodeProvider,[\s\S]{0,160}responseMode,[\s\S]{0,160}modelOverride: selectedModelOption\?\.id \?\? null/u,
     );
     assert.doesNotMatch(source, /accountDefaultModel/u);
-    assert.match(source, /provider: "local" \| "openai" \| "anthropic"/u);
+    assert.match(source, /provider: "local" \| "ollama_cloud" \| "openai" \| "anthropic"/u);
     assert.match(source, /episodeModeLabel\(item\)/u);
     assert.match(source, /episodeModeLabel\(replayEpisode\)/u);
     assert.match(source, /function episodeModeLabel/u);

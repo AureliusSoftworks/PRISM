@@ -536,7 +536,7 @@ describe("shared routing model picker integration", () => {
     );
     assert.equal(
       pageSource.match(/renderTheme=\{resolvedTheme\}/gu)?.length,
-      7,
+      6,
       "every text-model picker with an Effort control should receive the active theme",
     );
     assert.match(

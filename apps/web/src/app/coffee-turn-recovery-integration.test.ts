@@ -42,7 +42,7 @@ describe("Coffee turn recovery UI integration", () => {
     );
     assert.match(
       pageSource,
-      /if \(\s*settleCoffeeTurnFailure\([\s\S]{0,220}activeConversation\.id[\s\S]{0,120}\) \{[\s\S]{0,160}setCoffeeDraft\(trimmed\)/u,
+      /if \(\s*settleCoffeeTurnFailure\([\s\S]{0,260}activeConversation\.id[\s\S]{0,120}\)\s*\) \{[\s\S]{0,220}setCoffeeDraft\(trimmed\)/u,
     );
   });
 

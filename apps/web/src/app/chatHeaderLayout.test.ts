@@ -167,7 +167,7 @@ describe("Chat shell header layout", () => {
       pickerStart,
     );
     const pickerSource = pageSource.slice(pickerStart, pickerEnd);
-    assert.match(pageSource, /const autoLabelShown = "Auto";/u);
+    assert.match(pageSource, /const autoLabelShown = autoRouteLabel\?\.trim\(\) \|\| "Auto";/u);
     assert.match(pageSource, /function AutoEffortIcon/u);
     assert.match(
       pageSource,

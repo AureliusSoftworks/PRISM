@@ -1450,7 +1450,6 @@ describe("Debate experience", () => {
       /\.turnaboutActions > div:first-child[\s\S]{0,260}grid-template-columns/u,
     );
     assert.match(css, /turnaboutActions:has\(\.turnaboutEvidencePicker\)/u);
-    assert.match(css, /data-debate-format="turnabout"/u);
   });
 
   it("lets one Whodunnit cook in the background without blocking other Debate work", () => {
@@ -1499,7 +1498,7 @@ describe("Debate experience", () => {
     assert.match(source, /<InstalledMansionLibrary/u);
     assert.match(source, /Install a mansion file/u);
     assert.match(source, /data-tutorial-target="whodunnit-mansion-library"/u);
-    assert.match(source, /<strong>Mansion idea<\/strong><em>Optional<\/em>/u);
+    assert.match(source, /<strong>Mystery spark<\/strong><em>Optional<\/em>/u);
     assert.match(source, /Classic · balanced/u);
     assert.match(source, /<WhodunnitSetupDialog[\s\S]*?id="whodunnit-mansion-import"/u);
     assert.match(source, /<WhodunnitSetupDialog[\s\S]*?id="whodunnit-seed-import"/u);

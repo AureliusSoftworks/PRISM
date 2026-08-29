@@ -127,7 +127,7 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /action: "dismiss_case_opening"/u);
     assert.match(experienceSource, /data-opening-map-reveal=\{openingMapReveal \? "true" : undefined\}/u);
     assert.match(experienceSource, /--opening-room-image/u);
-    assert.match(experienceSource, /Enter the crime scene/u);
+    assert.match(experienceSource, /Enter the incident scene/u);
     assert.match(cssSource, /\.caseOpeningStage\s*\{[\s\S]*var\(--opening-room-image\)/u);
     assert.match(cssSource, /\.caseOpeningStage\s*\{[\s\S]*cursor:\s*pointer/u);
     assert.match(cssSource, /\.investigation\[data-opening-map-reveal="true"\]::after[\s\S]*background:\s*#000/u);
@@ -718,7 +718,7 @@ describe("Whodunnit V2 prosecution experience", () => {
   });
 
   it("offers a truthful Theme, Forge asset, Archive, and saved-mansion setup", () => {
-    assert.match(setupSource, /<strong>Mansion idea<\/strong>/u);
+    assert.match(setupSource, /<strong>Mystery spark<\/strong>/u);
     assert.match(setupSource, /placeholder="Leave blank for Surprise me/u);
     assert.match(setupSource, /Prepare presentation assets/u);
     assert.match(setupSource, /LOCAL stays on this device/u);

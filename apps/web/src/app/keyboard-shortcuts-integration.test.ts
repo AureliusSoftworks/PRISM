@@ -198,7 +198,7 @@ test("turns Turbo into a compatible ONLINE route when the current model cannot u
   assert.match(pageSource, /turboModelShortcutCandidate\(/u);
   assert.match(
     pageSource,
-    /modelOptionsForResponseMode\([\s\S]{0,100}"online"[\s\S]{0,180}\.filter\(\(option\) => option\.provider !== "local"\)/u,
+    /combinedOnlineModelOptions\([\s\S]{0,220}textModelOptionsForProvider\(modelCatalog, settings, "ollama_cloud"\)[\s\S]{0,220}textModelOptionsForProvider\(modelCatalog, settings, "openai"\)[\s\S]{0,220}textModelOptionsForProvider\(modelCatalog, settings, "anthropic"\)/u,
   );
   assert.match(pageSource, /persistGlobalModelSelection\([\s\S]{0,300}turboCandidate\.provider/u);
   assert.match(pageSource, /persistModelTurboPreference\(turboTarget, true\)/u);
