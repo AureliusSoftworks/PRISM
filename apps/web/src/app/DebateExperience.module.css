@@ -3932,6 +3932,21 @@
   background: color-mix(in srgb, var(--accent, #7c6cff) 72%, #2a2436);
 }
 
+.captionControls button:disabled {
+  opacity: 0.34;
+  cursor: default;
+}
+
+.captionSizeReadout {
+  min-width: 34px;
+  color: #aaa2b3;
+  font-size: 9px;
+  font-weight: 720;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: center;
+}
+
 .stageTransportControls button.stagePauseButton,
 .stageTransportControls .stagePauseButton {
   min-width: 48px;
@@ -5899,6 +5914,26 @@
   background: rgba(255, 255, 255, 0.34);
 }
 
+.live[data-caption-size="small"] {
+  --debate-caption-speaker-font: clamp(7px, 0.66vw, 9px);
+  --debate-caption-body-font: clamp(11px, 1.02vw, 15px);
+}
+
+.live[data-caption-size="medium"] {
+  --debate-caption-speaker-font: clamp(8px, 0.76vw, 10px);
+  --debate-caption-body-font: clamp(13px, 1.18vw, 17px);
+}
+
+.live[data-caption-size="large"] {
+  --debate-caption-speaker-font: clamp(9px, 0.92vw, 12px);
+  --debate-caption-body-font: clamp(16px, 1.42vw, 21px);
+}
+
+.live[data-caption-size="extra-large"] {
+  --debate-caption-speaker-font: clamp(10px, 1.06vw, 14px);
+  --debate-caption-body-font: clamp(18px, 1.66vw, 24px);
+}
+
 .liveCaption {
   position: absolute;
   bottom: clamp(18px, 4.5%, 34px);
@@ -6018,7 +6053,7 @@
   align-items: center;
   gap: 7px;
   color: color-mix(in srgb, var(--debate-active-color) 56%, white);
-  font-size: clamp(8px, 0.76vw, 10px);
+  font-size: var(--debate-caption-speaker-font, clamp(8px, 0.76vw, 10px));
   font-weight: 760;
   line-height: 1;
   letter-spacing: 0.13em;
@@ -6039,7 +6074,7 @@
   display: block;
   margin-top: 6px;
   color: rgba(255, 255, 255, 0.94);
-  font-size: clamp(13px, 1.18vw, 17px);
+  font-size: var(--debate-caption-body-font, clamp(13px, 1.18vw, 17px));
   font-weight: 510;
   line-height: 1.38;
   letter-spacing: -0.006em;
@@ -10338,7 +10373,7 @@
 
 .juryCenterTranscript strong {
   color: color-mix(in srgb, var(--debate-active-color) 70%, currentColor);
-  font-size: 10px;
+  font-size: var(--debate-caption-speaker-font, 10px);
   letter-spacing: 0.09em;
   text-transform: uppercase;
 }
@@ -10346,8 +10381,16 @@
 .juryCenterTranscript p {
   margin: 0;
   font-family: var(--font-title, var(--font-ui-sans, ui-sans-serif));
-  font-size: clamp(11px, 1.08vw, 16px);
+  font-size: var(--debate-caption-body-font, clamp(11px, 1.08vw, 16px));
   line-height: 1.38;
+}
+
+.live[data-caption-size="large"] .juryCenterTranscript {
+  max-height: 25%;
+}
+
+.live[data-caption-size="extra-large"] .juryCenterTranscript {
+  max-height: 29%;
 }
 
 .live[data-jury-chamber="true"] :is(.stageSupport, .floorStatus) {

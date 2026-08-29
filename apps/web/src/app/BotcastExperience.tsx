@@ -193,6 +193,7 @@ import {
   type SignalPersonaTemperament,
   type AutoRecoveryTraceV1,
   type AutoRouteDecisionV1,
+  type ProviderReasoningEffort,
   type SignalStudioIncidentBeatV1,
 } from "@localai/shared";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
@@ -330,9 +331,16 @@ import {
 } from "./signalResponseCadence";
 import {
   DEFAULT_SIGNAL_LIVE_CAPTIONS_ENABLED,
+  readSignalLiveCaptionSize,
   readSignalLiveCaptionsEnabled,
+  writeSignalLiveCaptionSize,
   writeSignalLiveCaptionsEnabled,
 } from "./signalLiveCaptionsPreference";
+import {
+  DEFAULT_LIVE_CAPTION_SIZE,
+  liveCaptionSizeDetails,
+  stepLiveCaptionSize,
+} from "./liveCaptionSize";
 import {
   signalListenerReactionCameraShot,
   signalLiveAutoCameraShot,
@@ -675,11 +683,29 @@ export function signalEpisodeModelChoiceSupportsImageInput(
 export type SignalActiveAutoRoute = {
   provider: "local" | "ollama_cloud" | "openai" | "anthropic";
   model: string;
-  effort?: "auto" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+  effort?: ProviderReasoningEffort;
   turbo?: boolean;
   autoRoute?: AutoRouteDecisionV1;
   autoRecovery?: AutoRecoveryTraceV1;
 };
+
+/** Fixed Signal recordings persist their sealed effort in the routing event. */
+export function signalFrozenReasoningEffort(
+  episode: Pick<BotcastEpisode, "events">,
+): ProviderReasoningEffort | null {
+  const value = episode.events.find((event) => event.kind === "routing")
+    ?.payload.frozenReasoningEffort;
+  return value === "auto" ||
+    value === "none" ||
+    value === "minimal" ||
+    value === "low" ||
+    value === "medium" ||
+    value === "high" ||
+    value === "xhigh" ||
+    value === "max"
+    ? value
+    : null;
+}
 
 /** Latest concrete route Auto actually used, including an active image pin. */
 export function signalActiveAutoRoute(
@@ -937,6 +963,8 @@ export interface BotcastExperienceProps {
   /** Account-global draft selection; empty means Auto. */
   modelChoice?: string;
   onModelChoiceChange?: (value: string) => void;
+  /** Request-scoped Max overdrive for a fixed Signal model. */
+  reasoningEffort?: ProviderReasoningEffort;
   responseMode: BotcastEpisodeResponseMode;
   theme?: "light" | "dark";
   liveConversationPanelExpanded?: boolean;
@@ -1065,6 +1093,7 @@ export interface BotcastExperienceProps {
     modelChoice: string;
     modelProvider: "local" | "ollama_cloud" | "openai" | "anthropic";
     activeAutoRoute: SignalActiveAutoRoute | null;
+    lockedReasoningEffort: ProviderReasoningEffort | null;
   }) => LiveSessionRoutingChipLabels | null;
   navigationHeader:
     | ReactNode
@@ -2461,6 +2490,7 @@ export function BotcastExperience({
   modelOptions,
   modelChoice,
   onModelChoiceChange,
+  reasoningEffort,
   responseMode,
   theme = "dark",
   liveConversationPanelExpanded = false,
@@ -2803,6 +2833,9 @@ export function BotcastExperience({
   >(null);
   const [liveCaptionsEnabled, setLiveCaptionsEnabled] = useState(
     DEFAULT_SIGNAL_LIVE_CAPTIONS_ENABLED,
+  );
+  const [liveCaptionSize, setLiveCaptionSize] = useState(
+    DEFAULT_LIVE_CAPTION_SIZE,
   );
   const [liveCameraPostSpeechHoldShot, setLiveCameraPostSpeechHoldShot] =
     useState<SignalDirectedCameraShot | null>(null);
@@ -3157,6 +3190,7 @@ export function BotcastExperience({
 
   useEffect(() => {
     setLiveCaptionsEnabled(readSignalLiveCaptionsEnabled(window.localStorage));
+    setLiveCaptionSize(readSignalLiveCaptionSize(window.localStorage));
   }, []);
 
   useEffect(() => {
@@ -7244,6 +7278,7 @@ export function BotcastExperience({
             preferredProvider: episodeProvider,
             responseMode,
             modelOverride: selectedModelOption?.id ?? null,
+            ...(reasoningEffort === "max" ? { reasoningEffort: "max" } : {}),
             durationMinutes: episodeDurationDraft,
           }),
         },
@@ -12721,6 +12756,36 @@ export function BotcastExperience({
           >
             CC
           </button>
+          <button
+            type="button"
+            data-signal-caption-size="decrease"
+            aria-label={`Decrease Signal caption size, currently ${liveCaptionSizeDetails(liveCaptionSize).label}`}
+            title="Decrease caption size"
+            disabled={!liveCaptionsEnabled || liveCaptionSize === "small"}
+            onClick={() => adjustLiveCaptionSize(-1)}
+          >
+            A−
+          </button>
+          <output
+            className={styles.captionSizeReadout}
+            aria-label={`Signal caption size ${liveCaptionSizeDetails(liveCaptionSize).label}`}
+            aria-live="polite"
+            data-signal-caption-size-readout="true"
+          >
+            {liveCaptionSizeDetails(liveCaptionSize).percent}%
+          </output>
+          <button
+            type="button"
+            data-signal-caption-size="increase"
+            aria-label={`Increase Signal caption size, currently ${liveCaptionSizeDetails(liveCaptionSize).label}`}
+            title="Increase caption size"
+            disabled={
+              !liveCaptionsEnabled || liveCaptionSize === "extra-large"
+            }
+            onClick={() => adjustLiveCaptionSize(1)}
+          >
+            A+
+          </button>
         </div>
         {args.replay && replayFaithful && replayCompactThinkingNotice ? (
           <div
@@ -16511,6 +16576,13 @@ export function BotcastExperience({
       return next;
     });
   };
+  const adjustLiveCaptionSize = (direction: -1 | 1): void => {
+    setLiveCaptionSize((current) => {
+      const next = stepLiveCaptionSize(current, direction);
+      writeSignalLiveCaptionSize(window.localStorage, next);
+      return next;
+    });
+  };
   useEffect(() => {
     if (episode?.status !== "live") {
       return;
@@ -17100,12 +17172,16 @@ export function BotcastExperience({
     episode && botcastEpisodeModelSelectionKind(episode) === "auto"
       ? signalActiveAutoRoute(episode)
       : null;
+  const lockedReasoningEffort = episode
+    ? signalFrozenReasoningEffort(episode)
+    : null;
   const resolvedLockedRoutingChip =
     liveSessionActive
       ? (resolveLockedRoutingChip?.({
           modelChoice: episodeModelControlValue || "auto",
           modelProvider: episodeSelectedModelProvider,
           activeAutoRoute,
+          lockedReasoningEffort,
         }) ?? lockedRoutingChip)
       : null;
   const resolvedNavigationHeader =
@@ -17205,6 +17281,7 @@ export function BotcastExperience({
         episode?.guestKind === "producer" ? "true" : undefined
       }
       data-episode-outro={episodeOutro ? "true" : undefined}
+      data-caption-size={liveCaptionSize}
     >
       {liveSessionActive ? (
         <LiveSessionPrismWatermark
@@ -17896,28 +17973,6 @@ export function BotcastExperience({
                 data-producer-cue-phase={producerCueDeskPhase}
               >
                 <header className={styles.producerDeskHeader}>
-                  <div className={styles.producerDeskStageLip}>
-                    <div
-                      className={styles.producerDeskOnAir}
-                      data-live={episode.status === "live" ? "true" : undefined}
-                    >
-                      <i aria-hidden="true" />
-                      <strong>
-                        Signal · {episode.status === "live" ? "On air" : "Control room"}
-                      </strong>
-                    </div>
-                    <div className={styles.producerDeskFrequency}>
-                      <span
-                        className={styles.producerFrequencyWave}
-                        aria-hidden="true"
-                      >
-                        <i />
-                        <i />
-                        <i />
-                      </span>
-                      <strong>Private host frequency</strong>
-                    </div>
-                  </div>
                   <div className={styles.producerDeskPrivateLine}>
                     <div
                       className={styles.producerCueReadout}

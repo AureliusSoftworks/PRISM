@@ -16587,6 +16587,8 @@ function buildLiveSessionRoutingChip(args: {
   modelOptions: readonly ModelCatalogEntry[];
   /** Only a persisted/live server route may populate an Auto label. */
   actualAutoRoute: ActualAppletRoute | null;
+  /** Fixed live sessions persist their request-scoped effort at launch. */
+  lockedReasoningEffort?: ProviderReasoningEffort | null;
   choosing?: boolean;
   settings: UserSettings | null;
 }): LiveSessionRoutingChipLabels {
@@ -16619,7 +16621,10 @@ function buildLiveSessionRoutingChip(args: {
   );
   // A completed server turn outranks current settings so mid-session edits
   // cannot rewrite the route, effort, or Turbo state the player just saw.
-  const effort = args.actualAutoRoute?.effort ?? configuredEffort;
+  const effort =
+    args.actualAutoRoute?.effort ??
+    args.lockedReasoningEffort ??
+    configuredEffort;
   const turbo = args.actualAutoRoute?.turbo ?? configuredTurbo;
   return liveSessionRoutingChipLabels({
     modelIsAuto,
@@ -147559,6 +147564,19 @@ function HomeContent(): React.JSX.Element {
       onlineOptions: signalEligibleOnlineOptions,
     });
     const signalGlobalModelChoice = signalResolvedChoice.modelChoice;
+    const signalEffortTarget = modelEffortTargetForSelection({
+      provider: signalResolvedChoice.provider,
+      modelId: signalGlobalModelChoice,
+      options: signalNavbarModelOptions,
+      simulatedEffortEnabled: true,
+    });
+    const signalReasoningEffort = signalEffortTarget
+      ? effectiveModelReasoningEffortForRequest(
+          settings,
+          signalEffortTarget,
+          maxEffortTargetKey,
+        )
+      : undefined;
     const signalModelOptions = signalNavbarModelOptions
       .filter((model) => !model.disabledReason)
       .map((model) => ({
@@ -147609,6 +147627,7 @@ function HomeContent(): React.JSX.Element {
               ? ""
               : signalGlobalModelChoice
           }
+          reasoningEffort={signalReasoningEffort}
           onModelChoiceChange={(nextChoice) => {
             const applied = applyModelChoiceForResponseMode({
               responseMode: signalNavbarResponseMode,
@@ -147642,12 +147661,15 @@ function HomeContent(): React.JSX.Element {
             modelChoice,
             modelProvider,
             activeAutoRoute,
+            lockedReasoningEffort,
           }) =>
             buildLiveSessionRoutingChip({
               modelChoice,
               modelProvider,
               modelOptions: signalNavbarModelOptions,
               actualAutoRoute: activeAutoRoute,
+              lockedReasoningEffort:
+                lockedReasoningEffort ?? signalReasoningEffort,
               settings,
             })
           }

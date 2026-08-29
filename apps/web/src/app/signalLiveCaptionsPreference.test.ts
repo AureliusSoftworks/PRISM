@@ -4,7 +4,9 @@ import { describe, it } from "node:test";
 import {
   DEFAULT_SIGNAL_LIVE_CAPTIONS_ENABLED,
   normalizeSignalLiveCaptionsEnabled,
+  readSignalLiveCaptionSize,
   readSignalLiveCaptionsEnabled,
+  writeSignalLiveCaptionSize,
   writeSignalLiveCaptionsEnabled,
 } from "./signalLiveCaptionsPreference.ts";
 
@@ -27,6 +29,10 @@ describe("Signal live captions preference", () => {
     assert.equal(readSignalLiveCaptionsEnabled(storage), true);
     writeSignalLiveCaptionsEnabled(storage, false);
     assert.equal(readSignalLiveCaptionsEnabled(storage), false);
+    assert.equal(readSignalLiveCaptionSize(storage), "medium");
+    writeSignalLiveCaptionSize(storage, "large");
+    assert.equal(readSignalLiveCaptionSize(storage), "large");
     writeSignalLiveCaptionsEnabled(null, false);
+    writeSignalLiveCaptionSize(null, "small");
   });
 });

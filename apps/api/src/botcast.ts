@@ -158,6 +158,7 @@ import {
   SIGNAL_PICKLES_SLOW_SIP_DURATION_MS,
   BOT_POWER_CANONICAL_SILENCE_V1,
   normalizeAutoRecoveryTrace,
+  normalizeProviderReasoningEffort,
   botcastImageDiscussionMessageIdsV1,
   botcastLatestImageContextV1,
   applyDirectionalIrritationCleanTurnDecay,
@@ -324,6 +325,7 @@ import {
   signalConversationRepairCanStartV1,
   signalPendingInterruptionRepairV1,
   signalPendingRepetitionRepairV1,
+  signalParaphraseMateriallyReframesV1,
   planSignalOrganicInterruptionV1,
   planSignalRepetitionEligibilityV1,
   authoredSignalListenerPersonaSource,
@@ -1387,7 +1389,9 @@ export function botcastPreparedTurnCursor(
   // prepared for the one after it, putting the episode back on the foreground
   // path that produced the hold in the first place.
   const durableEvents = episode.events.filter(
-    (event) => event.kind !== "session_clock_hold",
+    (event) =>
+      event.kind !== "session_clock_hold" &&
+      event.kind !== "voice_playback_recovery",
   );
   const durableEpisode = {
     ...episode,
@@ -9032,6 +9036,8 @@ export interface BotcastRoutingSnapshotV1 {
   v: 1;
   lane: "local" | "online";
   modelSelectionKind: "auto" | "fixed";
+  /** Fixed-model effort sealed when the episode was created. */
+  frozenReasoningEffort?: Exclude<ProviderReasoningEffort, "auto">;
   candidateAllowlist: AutoFallbackModelRef[];
   fallbackChain: AutoFallbackModelRef[];
   policyVersion: number;
@@ -9066,10 +9072,21 @@ export function botcastRoutingSnapshot(
   const initialAutoRoute = normalizeAutoRouteDecisionV1(
     event.payload.initialAutoRoute,
   );
+  const normalizedFrozenReasoningEffort = Object.prototype.hasOwnProperty.call(
+    event.payload,
+    "frozenReasoningEffort",
+  )
+    ? normalizeProviderReasoningEffort(event.payload.frozenReasoningEffort)
+    : null;
+  const frozenReasoningEffort =
+    normalizedFrozenReasoningEffort === "auto"
+      ? null
+      : normalizedFrozenReasoningEffort;
   return {
     v: 1,
     lane,
     modelSelectionKind,
+    ...(frozenReasoningEffort !== null ? { frozenReasoningEffort } : {}),
     candidateAllowlist: normalizeRefs(event.payload.candidateAllowlist, 200),
     fallbackChain: normalizeRefs(event.payload.fallbackChain, 5),
     policyVersion:
@@ -11806,7 +11823,9 @@ export function buildBotcastSpeakerPrompt(
       : (pendingRepetitionRepair.phase === "opened" ||
             pendingRepetitionRepair.phase === "guest_request") &&
           args.speakerRole === "host"
-      ? `Public conversation repair: ${guestNamesHost} just asked for clarification. Repeat or plainly paraphrase your latest public question once, without scolding, adding a new question, or mentioning hidden direction. Let the repetition stand as this whole turn.`
+      ? pendingRepetitionRepair.repeatMode === "paraphrase"
+        ? `Public conversation repair: ${guestNamesHost} just asked for clarification. Materially reframe your latest public question once: preserve its meaning, but change its structure and wording rather than repeating it with an acknowledgement or a "let me rephrase" wrapper. Do not scold, add a second question, or mention hidden direction. Let the paraphrase stand as this whole turn.`
+        : `Public conversation repair: ${guestNamesHost} just asked for clarification. Repeat your latest public question once, without scolding, adding a new question, or mentioning hidden direction. Let the repetition stand as this whole turn.`
       : pendingRepetitionRepair.phase === "host_repeat" &&
           args.speakerRole === "guest"
         ? "Public conversation repair: the host has just repeated or paraphrased the question for you. Answer that question substantively now. Do not ask for it again, dodge with a generic acknowledgement, or discuss the repair machinery."
@@ -12030,6 +12049,24 @@ export function buildBotcastSpeakerPrompt(
       ? args.episode.guestKind === "producer"
         ? "Binding AI-synthesized interview plan: use the private pre-show plan as editorial grounding, then formulate every question yourself from that plan, any supplied guest context, and the evolving on-air answers. Ask one specific question at a time. Never ask the human guest to choose the next question, provide a prompt, steer the show, or supply private direction. Do not expose or quote the plan."
         : "Binding private episode premise: the private pre-show producer brief is the authored fictional premise and interview plan for this episode, not an optional conversation angle. Make its central event, offer, revelation, conflict, or question the substance of your first host question or proposition, including during the opening when possible. If the brief supplies a staged sequence, timing, escalation ladder, or specific tactics, follow that progression in order instead of collapsing it into one generic question or skipping ahead. Keep that premise authoritative as the interview develops: do not invert it, preemptively decline it, resolve it for the guest, moralize it away, or replace it with an adjacent topic. If the guest concedes, agrees, or recants before the closing segment, do not treat the premise as settled and coast: acknowledge the shift briefly and open the brief's next unexplored thread, pressure point, or consequence instead of summarizing and winding down early. Frame it naturally in your own voice; the guest remains free to negotiate, refuse, set boundaries, or answer in character. Never quote, paraphrase, or voice the brief's off-mic meta-asides or producer-to-you instructions on air—for example taste remarks like \"that show you love,\" permission lines like \"ask him whatever you want,\" or any wording that reveals a private producer note. Convert those directions into your own in-character questions only."
+      : null;
+  const interviewCoverageRunway = signalInterviewBriefCoverageRunwayV1({
+    producerBrief: privateProducerBrief,
+    durationMinutes: args.episode.durationMinutes,
+    messages: args.episode.messages,
+    repairs: publicConversationRepairs,
+  });
+  const interviewBreadthRule =
+    args.speakerRole === "host" &&
+      args.episode.segment === "interview" &&
+      !args.cue &&
+      !pendingRepetitionRepair &&
+      !pendingInterruptionRepair &&
+      activeBotPowersV1(speaker.powers).length === 0 &&
+      activeBotPowersV1(peer.powers).length === 0 &&
+      interviewCoverageRunway?.owed === true &&
+      interviewCoverageRunway.completedHostTurns >= 2
+      ? `Private interview breadth checkpoint: this ${interviewCoverageRunway.pace === "auto" ? "Auto" : "short"} episode's producer brief asks for ${interviewCoverageRunway.requestedDimensions} distinct dimensions, while only ${interviewCoverageRunway.completedHostTurns} substantive host turns are on air. Treat the transcript as a coverage ledger. Before revisiting an angle, use this turn to open one requested dimension that has not yet been meaningfully answered. Move laterally across the supplied subject—overall response, preference, emotional impact, concrete imagery or form, craft, revision, and ambiguity as applicable—instead of spending another exchange polishing the same claim. Respond briefly to the latest guest point, then ask exactly one materially new question. Keep the brief private: do not quote its instructions, recite a checklist, or mention coverage.`
       : null;
   const guestBriefRule =
     args.speakerRole === "guest" &&
@@ -12426,6 +12463,7 @@ export function buildBotcastSpeakerPrompt(
         ...(openingIntroductionRule ? [openingIntroductionRule] : []),
         ...(openingTopicFramingRule ? [openingTopicFramingRule] : []),
         ...(producerBriefRule ? [producerBriefRule] : []),
+        ...(interviewBreadthRule ? [interviewBreadthRule] : []),
         ...(guestBriefRule ? [guestBriefRule] : []),
         ...(guestPositionDurabilityRule ? [guestPositionDurabilityRule] : []),
         ...(producerGuestHostRule ? [producerGuestHostRule] : []),
@@ -13694,6 +13732,8 @@ function validateBotcastAutoSpeakerUtterance(input: {
   privateProducerDirection?: string;
   /** Whether Producer attribution is authorized by a direct-quote contract. */
   allowProducerAttribution?: boolean;
+  /** Public question that this host turn must materially paraphrase. */
+  requiredParaphraseSource?: string;
   recentSpeakerContents?: readonly string[];
 }):
   | { ok: true; value: string }
@@ -13801,6 +13841,12 @@ function validateBotcastAutoSpeakerUtterance(input: {
               : input.requireHostQuestion &&
                   botcastHostUtteranceNeedsInterviewQuestion(spokenContent)
                 ? "host_question"
+              : input.requiredParaphraseSource &&
+                  (!signalParaphraseMateriallyReframesV1({
+                    sourceContent: input.requiredParaphraseSource,
+                    candidateContent: spokenContent,
+                  }) || SIGNAL_REPETITION_REASK_PATTERN.test(spokenContent))
+                ? "repetition_paraphrase"
               // Fresh contact asks only whether the speaker introduced
               // themself at all; the `false_name` clause above is the sole
               // authority on which name is the wrong one. Reviewing 5a9f687a
@@ -13873,7 +13919,81 @@ function normalizeBotcastSpokenIdentity(value: string): string {
 }
 
 const SIGNAL_REPETITION_REASK_PATTERN =
-  /(?:^|\b)(?:what\??|sorry[, ]+(?:what\??|say (?:(?:that|it) )?again)|(?:could|can|would)\s+you\s+(?:say|ask|repeat)\s+(?:that|it|the question)\s+again|come again|what was the question|what did you (?:say|ask)|say that again)(?:$|\b)/iu;
+  /(?:^|\b)(?:what\s*\??|sorry[, ]+(?:what\s*\??|say (?:(?:that|it) )?again)|(?:could|can|would)\s+you\s+(?:say|ask|repeat)\s+(?:that|it|the question)\s+again|come again|what was the question|what did you (?:say|ask)|say that again)\s*[.!?]*\s*$/iu;
+
+/** Ordinary listener Foley is texture, not evidence that the line was lost. */
+export function signalListenerReactionObscuresSpeechV1(
+  listenerReaction?: ListenerReactionPlanV1 | null,
+): boolean {
+  const timing = listenerReaction?.signalOrganicBeat?.timing;
+  return Boolean(
+    timing && (timing.overlapMs > 0 || timing.speakerDuckMs > 0),
+  );
+}
+
+function signalProducerBriefPlanningQuestionCountV1(
+  producerBrief: string,
+): number {
+  const normalized = producerBrief.replace(/\s+/gu, " ").trim();
+  if (!normalized) return 0;
+  const suppliedSourceBoundary = normalized.search(
+    /\b(?:please\s+(?:read|review|consider)|read\s+the\s+following|source\s+material|for\s+better\s+context)\b/iu,
+  );
+  const planningText = suppliedSourceBoundary >= 0
+    ? normalized.slice(0, suppliedSourceBoundary)
+    : normalized;
+  return Math.min(8, planningText.match(/\?/gu)?.length ?? 0);
+}
+
+/**
+ * Short and Auto episodes reserve a small, bounded runway for multi-part
+ * producer briefs. Clarification repeats do not spend one of those editorial
+ * turns because they add no coverage.
+ */
+export function signalInterviewBriefCoverageRunwayV1(args: {
+  producerBrief: string;
+  durationMinutes: number | null | undefined;
+  messages: readonly Pick<BotcastMessage, "id" | "speakerRole">[];
+  repairs?: readonly SignalConversationRepairEventV1[];
+}): {
+  pace: "auto" | "short";
+  requestedDimensions: number;
+  completedHostTurns: number;
+  requiredHostTurns: number;
+  owed: boolean;
+} | null {
+  const pace = args.durationMinutes === null
+    ? "auto" as const
+    : typeof args.durationMinutes === "number" && args.durationMinutes <= 5
+      ? "short" as const
+      : null;
+  const requestedDimensions = signalProducerBriefPlanningQuestionCountV1(
+    args.producerBrief,
+  );
+  if (!pace || requestedDimensions < 2) return null;
+
+  const hostRepeatMessageIds = new Set(
+    (args.repairs ?? [])
+      .filter((repair) => repair.phase === "host_repeat")
+      .map((repair) => repair.triggerMessageId),
+  );
+  const completedHostTurns = args.messages.filter(
+    (message) =>
+      message.speakerRole === "host" &&
+      !hostRepeatMessageIds.has(message.id),
+  ).length;
+  const requiredHostTurns = Math.min(
+    4,
+    Math.max(3, requestedDimensions),
+  );
+  return {
+    pace,
+    requestedDimensions,
+    completedHostTurns,
+    requiredHostTurns,
+    owed: completedHostTurns < requiredHostTurns,
+  };
+}
 
 /** Final deterministic guard behind the public repetition prompt. */
 export function enforceSignalRepetitionRepairTurnV1(args: {
@@ -13899,24 +14019,11 @@ export function enforceSignalRepetitionRepairTurnV1(args: {
     source
   ) {
     if (args.repeatMode === "paraphrase") {
-      const sourceTerms = new Set(
-        normalizeBotcastSpokenIdentity(source)
-          .split(" ")
-          .filter((term) => term.length >= 4),
-      );
-      const generatedTerms = new Set(
-        normalizeBotcastSpokenIdentity(generated)
-          .split(" ")
-          .filter((term) => term.length >= 4),
-      );
-      const overlap = [...sourceTerms].filter((term) =>
-        generatedTerms.has(term),
-      ).length;
       if (
-        generated.endsWith("?") &&
-        normalizeBotcastSpokenIdentity(generated) !==
-          normalizeBotcastSpokenIdentity(source) &&
-        overlap >= Math.min(2, sourceTerms.size) &&
+        signalParaphraseMateriallyReframesV1({
+          sourceContent: source,
+          candidateContent: generated,
+        }) &&
         !SIGNAL_REPETITION_REASK_PATTERN.test(generated)
       ) {
         const acknowledged = /^(?:of course|sure|yes|absolutely)[,!.]/iu.test(
@@ -13926,6 +14033,11 @@ export function enforceSignalRepetitionRepairTurnV1(args: {
           : `Of course. ${generated}`;
         return { content: acknowledged, repeatMode: "paraphrase" };
       }
+      return {
+        content:
+          "Of course. Let me ask for the core of it instead: what is your direct answer, and which reason matters most?",
+        repeatMode: "paraphrase",
+      };
     }
     return { content: `Of course. ${source}`, repeatMode: "repeat" };
   }
@@ -14926,6 +15038,24 @@ function recordBotcastCoverageCameraSuggestions(args: {
       args.now,
     );
   }
+}
+
+export function botcastListenerCoverageShotV1(args: {
+  listenerVisibleToAudience: boolean;
+  speakerRole: BotcastSpeakerRole;
+  listenerReaction?: Pick<
+    ListenerReactionPlanV1,
+    "cameraCutEligible" | "vocalFoley"
+  > | null;
+}): BotcastDirectedCameraShot | null {
+  if (
+    !args.listenerVisibleToAudience ||
+    args.listenerReaction?.cameraCutEligible === false ||
+    args.listenerReaction?.vocalFoley
+  ) {
+    return null;
+  }
+  return args.speakerRole === "host" ? "right" : "left";
 }
 
 function recordBotcastMutePerformanceDirection(args: {
@@ -16220,7 +16350,7 @@ export async function advanceBotcastEpisode(
   // empty there is nobody left to answer. That case keeps the old behaviour —
   // discard the stale direction and continue the saved closing beat instead
   // of stranding the live show on an error banner.
-  if (requestedCue && episode.segment === "closing") {
+  if (!context.producerCut && requestedCue && episode.segment === "closing") {
     const guestCanStillAnswer =
       episode.guestPresenceMode !== "audience_only" &&
       botcastEpisodeDepartureOutcome(episode.events) !== "guest_departed";
@@ -16539,6 +16669,31 @@ export async function advanceBotcastEpisode(
       (signalPendingRepetitionRepairV1(repairEventsBeforeSegmentTransition) ||
         signalPendingInterruptionRepairV1(repairEventsBeforeSegmentTransition)),
   );
+  const interviewBriefCoverageRunway =
+    signalInterviewBriefCoverageRunwayV1({
+      producerBrief: signalProducerBriefWithoutPickles(
+        episode.producerBrief ?? "",
+      ),
+      durationMinutes: episode.durationMinutes,
+      messages: episode.messages,
+      repairs: repairEventsBeforeSegmentTransition,
+    });
+  const autoBriefCoverageRunwayOwed = Boolean(
+    episode.durationMinutes === null &&
+      episode.guestKind === "bot" &&
+      episode.guestPresenceMode === "present" &&
+      !episode.events.some(
+        (event) =>
+          event.kind === "segment" && event.payload.segment === "closing",
+      ) &&
+      (() => {
+        const snapshot = botcastEpisodePowerSnapshot(episode);
+        return !snapshot ||
+          (activeBotPowersV1(snapshot.hostPowers).length === 0 &&
+            activeBotPowersV1(snapshot.guestPowers).length === 0);
+      })() &&
+      interviewBriefCoverageRunway?.owed,
+  );
   const guestAlreadyDeparted =
     botcastEpisodeDepartureOutcome(episode.events) === "guest_departed";
   // A third pressure cue is resolved by the guest before the ordinary turn-count
@@ -16556,6 +16711,7 @@ export async function advanceBotcastEpisode(
     !imageDiscussionPending &&
     !pendingCrosstalkReclaim &&
     !coordinatedRepairOwed &&
+    !autoBriefCoverageRunwayOwed &&
     episode.segment === "interview" &&
     botcastSessionShouldClose({
       messages: episode.messages,
@@ -16701,7 +16857,9 @@ export async function advanceBotcastEpisode(
   const closingReopenUtterances = botcastClosingReopenUtterancesV1(episode);
   const closingReopenOwesAnExchange =
     closingReopenUtterances !== null && closingReopenUtterances < 2;
-  const nextSegment = departurePending
+  const nextSegment = producerCut
+    ? "closing"
+    : departurePending
     ? episode.segment
     : mutuallyMutedEpisodeShouldClose ||
         mutuallyConstrainedSilentEpisodeShouldClose ||
@@ -17338,6 +17496,19 @@ export async function advanceBotcastEpisode(
     ...currentEpisodeSpeakerContents,
     ...recentOpeningContents,
   ];
+  const pendingRepetitionRepairForGeneration = signalPendingRepetitionRepairV1(
+    botcastConversationRepairsFromEventsV1(episode.events),
+  );
+  const requiredSignalParaphraseSource =
+    speakerRole === "host" &&
+      pendingRepetitionRepairForGeneration?.repeatMode === "paraphrase" &&
+      (pendingRepetitionRepairForGeneration.phase === "opened" ||
+        pendingRepetitionRepairForGeneration.phase === "guest_request")
+      ? episode.messages.find(
+          (message) =>
+            message.id === pendingRepetitionRepairForGeneration.sourceMessageId,
+        )?.content.trim() || undefined
+      : undefined;
   const stageActionExclusions: StageActionExclusionV1[] = [];
   const producerCueStageActionContract =
     speakerRole === "host" &&
@@ -17647,6 +17818,11 @@ export async function advanceBotcastEpisode(
     ...(activeFalseNameState
       ? [
           `Hard false-name repair contract: your name is ${JSON.stringify(activeFalseNameState.believedName)}, not ${JSON.stringify(activeFalseNameState.holderBotName)}. Never claim the Library name as yours or address your believed name as though it belongs to the other speaker.`,
+        ]
+      : []),
+    ...(requiredSignalParaphraseSource
+      ? [
+          `Clarification contract: materially reframe the prior public question ${JSON.stringify(requiredSignalParaphraseSource)}. Preserve its meaning, but do not repeat it verbatim or near-verbatim and do not merely add an acknowledgement or a "let me rephrase" wrapper.`,
         ]
       : []),
     "If the persona refuses the fictional premise, make that refusal specific, in character, and substantive instead of using generic policy language.",
@@ -18098,6 +18274,7 @@ export async function advanceBotcastEpisode(
                   requiredDirectQuote: enforcedDirectQuote,
                   privateProducerDirection,
                   allowProducerAttribution: Boolean(requiredProducerQuote),
+                  requiredParaphraseSource: requiredSignalParaphraseSource,
                   recentSpeakerContents,
                 });
                 return validation.ok
@@ -18232,6 +18409,7 @@ export async function advanceBotcastEpisode(
                 requiredDirectQuote: enforcedDirectQuote,
                 privateProducerDirection,
                 allowProducerAttribution: Boolean(requiredProducerQuote),
+                requiredParaphraseSource: requiredSignalParaphraseSource,
                 recentSpeakerContents,
               });
               return validation.ok
@@ -18360,6 +18538,7 @@ export async function advanceBotcastEpisode(
               speakerMumblesSpeech ||
               Boolean(privateProducerDirection) ||
               Boolean(requiredProducerQuote) ||
+              Boolean(requiredSignalParaphraseSource) ||
               (activeFalseNameState && !firstHostOpening)) &&
             !speakerIsMutedForTurn &&
             !validateBotcastAutoSpeakerUtterance({
@@ -18383,6 +18562,7 @@ export async function advanceBotcastEpisode(
               requiredDirectQuote: enforcedDirectQuote,
               privateProducerDirection,
               allowProducerAttribution: Boolean(requiredProducerQuote),
+              requiredParaphraseSource: requiredSignalParaphraseSource,
             }).ok
           ) {
             const retry = await runSignalLocalTurn({
@@ -20738,11 +20918,8 @@ export async function advanceBotcastEpisode(
         episodeId: episode.id,
         sourceMessageId: messageId,
         hostQuestion: deliveredContent,
-        audibleInterference: Boolean(
-          listenerReaction?.signalListenerSequence?.beats.some((beat) =>
-            beat.kind === "vocal_foley" || beat.kind === "laughter"
-          ) || listenerReaction?.vocalFoley,
-        ),
+        audibleInterference:
+          signalListenerReactionObscuresSpeechV1(listenerReaction),
         // Hearing-repeat and every active Power were excluded above. This keeps
         // the Power's explicit request authoritative over the organic baseline.
         eligible: true,
@@ -21379,11 +21556,11 @@ export async function advanceBotcastEpisode(
         episodeId: episode.id,
         now,
         speakerShot: recordedSuggestion.shot,
-        listenerShot: listenerVisibleToAudience
-          ? speakerRole === "host"
-            ? "right"
-            : "left"
-          : null,
+        listenerShot: botcastListenerCoverageShotV1({
+          listenerVisibleToAudience,
+          speakerRole,
+          listenerReaction,
+        }),
         speakerStartMs: recordedSuggestion.atMs,
         utteranceEndMs,
         seed: messageId,

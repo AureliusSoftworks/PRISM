@@ -1,5 +1,14 @@
+import {
+  readLiveCaptionSize,
+  writeLiveCaptionSize,
+  type LiveCaptionSize,
+} from "./liveCaptionSize.ts";
+
 export const DEBATE_LIVE_CAPTIONS_STORAGE_KEY =
   "prism.debate.live-captions.v1";
+
+export const DEBATE_LIVE_CAPTION_SIZE_STORAGE_KEY =
+  "prism.debate.live-caption-size.v1";
 
 export const DEFAULT_DEBATE_LIVE_CAPTIONS_ENABLED = true;
 
@@ -44,4 +53,17 @@ export function writeDebateLiveCaptionsEnabled(
   } catch {
     // Storage can be unavailable in private/restricted browser contexts.
   }
+}
+
+export function readDebateLiveCaptionSize(
+  storage: Pick<DebateLiveCaptionsStorage, "getItem"> | null | undefined,
+): LiveCaptionSize {
+  return readLiveCaptionSize(storage, DEBATE_LIVE_CAPTION_SIZE_STORAGE_KEY);
+}
+
+export function writeDebateLiveCaptionSize(
+  storage: Pick<DebateLiveCaptionsStorage, "setItem"> | null | undefined,
+  size: LiveCaptionSize,
+): void {
+  writeLiveCaptionSize(storage, DEBATE_LIVE_CAPTION_SIZE_STORAGE_KEY, size);
 }

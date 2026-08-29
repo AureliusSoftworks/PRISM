@@ -54,10 +54,11 @@ describe("Signal experience shell", () => {
     assert.match(source, /Requeued for host/u);
   });
 
-  it("renders the live Producer controls as an accessible private cue desk without replacing cue authority", () => {
+  it("renders the live Producer controls as a compact accessible cue desk without replacing cue authority", () => {
     assert.match(source, /data-signal-producer-desk="true"/u);
     assert.match(source, /data-producer-cue-phase=\{producerCueDeskPhase\}/u);
-    assert.match(source, /Private host frequency/u);
+    assert.doesNotMatch(source, /Private host frequency/u);
+    assert.doesNotMatch(source, /producerDeskStageLip/u);
     assert.match(source, /Private line · \{hostBot\?\.name \?\? "Host"\}/u);
     assert.match(source, /aria-label="Producer cue delivery status"/u);
     for (const step of ["Queued", "Dispatching", "Delivered"]) {
@@ -83,6 +84,7 @@ describe("Signal experience shell", () => {
       );
     }
     assert.match(css, /\.producerDeskHeader\s*\{/u);
+    assert.doesNotMatch(css, /\.producerDeskStageLip\s*\{/u);
     assert.match(css, /data-producer-cue-phase="dispatching"/u);
     assert.match(css, /\.cueKey\s*\{/u);
     assert.match(css, /\.cueKeyCap\s*\{/u);
@@ -1531,6 +1533,25 @@ describe("Signal experience shell", () => {
     );
   });
 
+  it("sends and restores fixed Signal Max provenance for the live chip", () => {
+    const startEpisodeSource = source.slice(
+      source.indexOf("const startEpisode = async"),
+      source.indexOf("startEpisodeRef.current = startEpisode"),
+    );
+    assert.match(
+      startEpisodeSource,
+      /reasoningEffort === "max"[\s\S]{0,100}reasoningEffort: "max"/u,
+    );
+    assert.match(
+      source,
+      /function signalFrozenReasoningEffort\([\s\S]{0,500}frozenReasoningEffort/u,
+    );
+    assert.match(
+      source,
+      /resolveLockedRoutingChip\?\.\(\{[\s\S]{0,280}lockedReasoningEffort,/u,
+    );
+  });
+
   it("replays bounded branded bookends and audio-aligned Auto cameras", () => {
     const replayBookendSource = source.slice(
       source.indexOf("function SignalReplayBookend"),
@@ -2102,7 +2123,7 @@ describe("Signal experience shell", () => {
 
   it("keeps Signal coffee cosmetic and scopes producer direction", () => {
     assert.doesNotMatch(source, /top.?off|refill|depletion/iu);
-    assert.match(source, /Private host frequency/u);
+    assert.match(source, /Private line · \{hostBot\?\.name \?\? "Host"\}/u);
     assert.match(source, /sendCue\(\{ kind: "refocus" \}\)/u);
     assert.match(source, /Wrap it up/u);
     assert.match(source, /Say this…/u);
@@ -2761,9 +2782,14 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /<i aria-hidden="true" \/>/u);
     assert.match(source, /data-signal-captions-toggle="true"/u);
+    assert.match(source, /data-signal-caption-size="decrease"/u);
+    assert.match(source, /data-signal-caption-size="increase"/u);
+    assert.match(source, /data-signal-caption-size-readout="true"/u);
+    assert.match(source, /data-caption-size=\{liveCaptionSize\}/u);
     assert.match(source, /liveCaptionsEnabled &&/u);
     assert.match(source, /toggleLiveCaptions/u);
     assert.match(source, /writeSignalLiveCaptionsEnabled/u);
+    assert.match(source, /writeSignalLiveCaptionSize/u);
     assert.match(source, /aria-live="off"/u);
     assert.match(
       source,
@@ -2782,6 +2808,10 @@ describe("Signal experience shell", () => {
     assert.match(css, /\.liveCaption\s*>\s*i\s*\{[^}]*background:\s*linear-gradient/iu);
     assert.match(css, /\.live\[data-theme="light"\] \.liveCaption/iu);
     assert.match(css, /\.captionControls\s*\{[^}]*top:\s*12px/iu);
+    assert.match(
+      css,
+      /\.shell\[data-caption-size="extra-large"\]\s*\{[^}]*--signal-caption-body-font:\s*clamp\(18px,\s*1\.66vw,\s*24px\)/iu,
+    );
   });
 
   it("keeps the latest host prompt visible while a Producer guest is answering", () => {

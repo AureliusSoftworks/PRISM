@@ -567,7 +567,7 @@
 .stagePresetSaveRow input { width: 126px; }
 .stagePresetControls small { flex-basis: 100%; color: var(--botcast-muted); font-size: .62rem; line-height: 1.35; }
 .stageSoundcheckStatus { min-height: 34px; display: flex; align-items: center; gap: 9px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 14%, var(--botcast-line)); border-radius: 10px; padding: 8px 11px; color: var(--botcast-muted); background: color-mix(in srgb, var(--botcast-host-accent) 4%, var(--botcast-soft-panel)); font-size: .66rem; line-height: 1.4; }
-.stageSoundcheckStatus[data-active="true"] { border-color: color-mix(in srgb, var(--botcast-host-accent) 34%, var(--botcast-line)); color: var(--botcast-ink); }
+.stageSoundcheckStatus[data-active="true"] { border-color: color-mix(in srgb, var(--botcast-host-accent) 34%, var(--botcast-line)); color: var(--botcast-ink); font-size: var(--signal-soundcheck-caption-font, .66rem); }
 .stageSoundcheckStatus strong { flex: 0 0 auto; color: color-mix(in srgb, var(--botcast-host-accent) 72%, var(--botcast-ink)); }
 .stageSoundcheckStatus span { min-width: 0; }
 .stageVoiceMixer { display: grid; grid-template-columns: minmax(190px, .45fr) minmax(0, 1fr); align-items: center; gap: 16px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 20%, var(--botcast-line)); border-radius: 12px; padding: 11px 13px; background: color-mix(in srgb, var(--botcast-host-accent) 6%, var(--botcast-soft-panel)); box-shadow: inset 3px 0 color-mix(in srgb, var(--botcast-host-accent) 42%, transparent); }
@@ -1038,6 +1038,26 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .episodeImageRehearsalArt { display: grid; aspect-ratio: 4 / 3; place-items: center; overflow: hidden; background: radial-gradient(circle at 54% 42%, rgba(255,255,255,.92) 0 8%, transparent 9%), radial-gradient(ellipse at 50% 62%, #c7cfda 0 20%, transparent 21%), linear-gradient(145deg, #7c8ba3, #253043 62%, #101725); }
 .episodeImageRehearsalArt > span { width: 30%; aspect-ratio: 1; transform: rotate(45deg); border: 2px solid rgba(255,255,255,.72); border-radius: 5px; box-shadow: 18px -12px 0 -7px rgba(255,255,255,.46); }
 .episodeImageRehearsalArt[data-image-kind="item"] > span { position: absolute; left: 18%; bottom: 10%; width: 64%; height: 61%; aspect-ratio: auto; transform: none; border: 1px solid rgba(255,255,255,.32); border-radius: 44% 44% 34% 34% / 22% 22% 52% 52%; background: radial-gradient(circle at 39% 28%, rgba(255,255,255,.55) 0 4%, transparent 5%), linear-gradient(118deg, #3b485e, #9aa7ba 45%, #4a5970 78%, #273246); box-shadow: inset 8px 2px 12px rgba(255,255,255,.13), inset -9px -5px 14px rgba(0,0,0,.24); }
+.shell[data-caption-size="small"] {
+  --signal-caption-speaker-font: clamp(7px, 0.66vw, 9px);
+  --signal-caption-body-font: clamp(11px, 1.02vw, 15px);
+  --signal-soundcheck-caption-font: .58rem;
+}
+.shell[data-caption-size="medium"] {
+  --signal-caption-speaker-font: clamp(8px, 0.76vw, 10px);
+  --signal-caption-body-font: clamp(13px, 1.18vw, 17px);
+  --signal-soundcheck-caption-font: .66rem;
+}
+.shell[data-caption-size="large"] {
+  --signal-caption-speaker-font: clamp(9px, 0.92vw, 12px);
+  --signal-caption-body-font: clamp(16px, 1.42vw, 21px);
+  --signal-soundcheck-caption-font: .8rem;
+}
+.shell[data-caption-size="extra-large"] {
+  --signal-caption-speaker-font: clamp(10px, 1.06vw, 14px);
+  --signal-caption-body-font: clamp(18px, 1.66vw, 24px);
+  --signal-soundcheck-caption-font: .92rem;
+}
 .liveCaption {
   position: absolute;
   bottom: clamp(18px, 4.5%, 34px);
@@ -1076,6 +1096,8 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .captionControls { position: absolute; top: 12px; left: 12px; z-index: 20; display: flex; align-items: center; gap: 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 11px; padding: 5px; background: rgba(4,6,11,.72); backdrop-filter: blur(9px) saturate(1.08); box-shadow: 0 8px 22px rgba(0,0,0,.28); pointer-events: auto; }
 .captionControls button { min-width: 42px; border: 1px solid rgba(255,255,255,.14); border-radius: 7px; padding: 6px 9px; color: rgba(255,255,255,.72); background: rgba(255,255,255,.06); font: 760 .66rem/1 system-ui; letter-spacing: .08em; cursor: pointer; }
 .captionControls button[data-selected="true"] { border-color: transparent; color: #fff; background: linear-gradient(120deg, color-mix(in srgb, var(--botcast-host-accent) 76%, var(--prism-p)), var(--prism-m)); box-shadow: 0 6px 18px color-mix(in srgb, var(--botcast-host-accent) 18%, transparent); }
+.captionControls button:disabled { opacity: .34; cursor: default; }
+.captionSizeReadout { min-width: 34px; color: rgba(255,255,255,.72); font: 720 .58rem/1 system-ui; font-variant-numeric: tabular-nums; text-align: center; }
 .replayCompactThinkingNotice { position: absolute; top: 14px; right: 14px; z-index: 20; max-width: min(46%, 300px); border: 1px solid rgba(255,255,255,.16); border-radius: 999px; padding: 6px 10px; color: rgba(255,255,255,.82); background: rgba(4,6,11,.72); backdrop-filter: blur(9px) saturate(1.08); box-shadow: 0 8px 22px rgba(0,0,0,.28); font: 720 clamp(.54rem, .9vw, .68rem)/1.1 system-ui; letter-spacing: .035em; text-align: right; pointer-events: none; }
 .liveCaption > i {
   display: block;
@@ -1093,7 +1115,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
   align-items: center;
   gap: 7px;
   color: color-mix(in srgb, var(--botcast-caption-accent, var(--botcast-studio-accent)) 56%, white);
-  font-size: clamp(8px, 0.76vw, 10px);
+  font-size: var(--signal-caption-speaker-font, clamp(8px, 0.76vw, 10px));
   font-weight: 760;
   line-height: 1;
   letter-spacing: 0.13em;
@@ -1112,7 +1134,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
   display: block;
   margin-top: 6px;
   color: rgba(255, 255, 255, 0.94);
-  font-size: clamp(13px, 1.18vw, 17px);
+  font-size: var(--signal-caption-body-font, clamp(13px, 1.18vw, 17px));
   font-weight: 510;
   line-height: 1.38;
   letter-spacing: -0.006em;
@@ -1340,18 +1362,8 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 }
 .producerControls { position: relative; display: grid; grid-template-columns: minmax(250px, .88fr) minmax(520px, 1.7fr); grid-template-areas: "header header" "composer cues"; gap: 16px; align-items: stretch; overflow: hidden; padding: 18px; background: radial-gradient(circle at 90% -42px, color-mix(in srgb, var(--botcast-accent) 16%, transparent), transparent 40%), var(--botcast-panel); }
 .producerDeskHeader { grid-area: header; display: grid; margin: -18px -18px 0; overflow: hidden; border-bottom: 1px solid rgba(0,0,0,.72); background: #090a12; box-shadow: inset 0 1px rgba(255,255,255,.07), inset 0 -12px 22px rgba(0,0,0,.22); }
-.producerDeskStageLip { display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 18px; padding: 11px 18px; border-bottom: 1px solid color-mix(in srgb, var(--prism-s) 24%, rgba(255,255,255,.05)); background: linear-gradient(90deg, rgba(5,7,12,.98), color-mix(in srgb, var(--botcast-accent) 8%, #0d0b18)); box-shadow: inset 0 -10px 18px rgba(0,0,0,.25); }
-.producerDeskOnAir, .producerDeskFrequency, .producerCueReadout { display: flex; align-items: center; min-width: 0; }
-.producerDeskOnAir { gap: 9px; color: #f3effa; font: 760 .65rem/1 system-ui; letter-spacing: .12em; text-transform: uppercase; }
-.producerDeskOnAir > i, .producerCueReadout > i { flex: 0 0 auto; border-radius: 50%; }
-.producerDeskOnAir > i { width: 9px; height: 9px; background: #4b4d58; box-shadow: inset 0 1px 3px #000; }
-.producerDeskOnAir[data-live="true"] > i { background: #ff625b; box-shadow: 0 0 0 4px rgba(255,98,91,.1), 0 0 15px rgba(255,98,91,.85); }
-.producerDeskFrequency { gap: 9px; color: #c9c1dc; font: 700 .61rem/1 system-ui; letter-spacing: .1em; text-transform: uppercase; }
-.producerFrequencyWave { position: relative; display: block; width: 42px; height: 22px; }
-.producerFrequencyWave i { position: absolute; top: 50%; left: 50%; border: 1px solid var(--prism-s); border-top-color: transparent; border-bottom-color: transparent; border-radius: 50%; transform: translate(-50%, -50%); opacity: .72; }
-.producerFrequencyWave i:nth-child(1) { width: 11px; height: 11px; }
-.producerFrequencyWave i:nth-child(2) { width: 24px; height: 17px; opacity: .46; }
-.producerFrequencyWave i:nth-child(3) { width: 39px; height: 22px; opacity: .24; }
+.producerCueReadout { display: flex; align-items: center; min-width: 0; }
+.producerCueReadout > i { flex: 0 0 auto; border-radius: 50%; }
 .producerDeskPrivateLine { position: relative; display: grid; grid-template-columns: minmax(190px, 1fr) minmax(220px, .9fr) auto; align-items: center; gap: 16px; min-height: 64px; padding: 10px 15px; overflow: hidden; background: linear-gradient(180deg, rgba(4,5,10,.97), rgba(12,13,21,.99)); }
 .producerDeskPrivateLine::after { position: absolute; top: 0; bottom: 0; left: -30%; width: 28%; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--prism-s) 54%, transparent), transparent); content: ""; opacity: 0; pointer-events: none; }
 .producerControls[data-producer-cue-phase="dispatching"] .producerDeskPrivateLine::after { animation: signalProducerLineFlight 720ms cubic-bezier(.2,.76,.22,1) both; }
@@ -1779,7 +1791,6 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
   .stagePresetSaveRow input { min-width: 0; width: auto; flex: 1 1 auto; }
   .stageCameraSliders { grid-template-columns: 1fr; }
   .producerControls { grid-template-columns: minmax(0, 1fr); grid-template-areas: "header" "composer" "cues"; }
-  .producerDeskStageLip { align-items: flex-start; flex-direction: column; gap: 9px; }
   .producerDeskPrivateLine { grid-template-columns: minmax(0, 1fr) auto; }
   .producerCueLifecycle { grid-column: 1 / -1; grid-row: 2; }
   .producerDeskLineActions { grid-column: 2; grid-row: 1; }
@@ -1813,7 +1824,6 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 @media (max-width: 580px) {
   .producerControls { gap: 12px; padding: 12px; }
   .producerDeskHeader { margin: -12px -12px 0; }
-  .producerDeskStageLip { padding: 11px 13px; }
   .producerDeskPrivateLine { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 13px; }
   .producerCueLifecycle { grid-column: 1; grid-row: auto; }
   .producerDeskLineActions { grid-column: 1; grid-row: auto; justify-content: stretch; }

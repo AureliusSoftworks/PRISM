@@ -83,6 +83,25 @@ test("live session routing chip shows concrete model and effort", () => {
   );
 });
 
+test("live session routing chip distinguishes ordinary XHigh from Max", () => {
+  assert.equal(
+    liveSessionRoutingChipLabels({
+      modelIsAuto: false,
+      modelLabel: "GPT-5.6 Sol",
+      effort: "xhigh",
+    }).effortLabel,
+    "XHigh",
+  );
+  assert.equal(
+    liveSessionRoutingChipLabels({
+      modelIsAuto: false,
+      modelLabel: "GPT-5.6 Sol",
+      effort: "max",
+    }).effortLabel,
+    "Max",
+  );
+});
+
 test("live session routing chip always resolves a visible effort glyph", () => {
   assert.deepEqual(
     liveSessionRoutingChipLabels({
@@ -168,5 +187,10 @@ test("live session chrome mounts model chip and theme-aware watermark", () => {
     /data-debate-stage-viewport="live"[\s\S]{0,280}LiveSessionPrismWatermark[\s\S]{0,120}contained/u,
   );
   assert.match(signalSource, /resolveLockedRoutingChip/u);
+  assert.match(pageSource, /reasoningEffort=\{signalReasoningEffort\}/u);
+  assert.match(
+    pageSource,
+    /lockedReasoningEffort:\s*lockedReasoningEffort \?\? signalReasoningEffort/u,
+  );
   assert.match(signalSource, /LiveSessionPrismWatermark/u);
 });

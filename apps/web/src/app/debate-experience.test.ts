@@ -2135,9 +2135,14 @@ describe("Debate experience", () => {
     assert.match(source, /debateLiveCaptionPage\(props\.text\)/u);
     assert.doesNotMatch(source, /caption\.scrollTop = caption\.scrollHeight/u);
     assert.match(source, /data-debate-captions-toggle="true"/u);
+    assert.match(source, /data-debate-caption-size="decrease"/u);
+    assert.match(source, /data-debate-caption-size="increase"/u);
+    assert.match(source, /data-debate-caption-size-readout="true"/u);
+    assert.match(source, /data-caption-size=\{liveCaptionSize\}/u);
     assert.match(source, /liveCaptionsEnabled &&/u);
     assert.match(source, /toggleLiveCaptions/u);
     assert.match(source, /writeDebateLiveCaptionsEnabled/u);
+    assert.match(source, /writeDebateLiveCaptionSize/u);
     assert.match(
       source,
       /chamberEventVisible && activeEvent \? \(\s*liveCaptionsEnabled \? \(\s*<DebateVisibleTextConsumer/u,
@@ -2180,6 +2185,14 @@ describe("Debate experience", () => {
     assert.doesNotMatch(
       css,
       /\.liveCaption span\s*\{[^}]*overflow-y:\s*hidden/u,
+    );
+    assert.match(
+      css,
+      /\.live\[data-caption-size="extra-large"\]\s*\{[^}]*--debate-caption-body-font:\s*clamp\(18px,\s*1\.66vw,\s*24px\)/u,
+    );
+    assert.match(
+      css,
+      /\.juryCenterTranscript p\s*\{[^}]*font-size:\s*var\(--debate-caption-body-font/u,
     );
   });
 

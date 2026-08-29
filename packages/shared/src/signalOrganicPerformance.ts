@@ -418,7 +418,11 @@ export function signalRepetitionFrictionReasonV1(
   return null;
 }
 
-/** Restrained planned re-ask chance, with a tiny baseline for ordinary speech. */
+/**
+ * Planned re-asks are reserved for an observable source of friction. Ordinary,
+ * clear questions may still receive an organic model-authored clarification,
+ * but Signal must not manufacture a canned one from a baseline dice roll.
+ */
 export function planSignalRepetitionEligibilityV1(args: {
   episodeId: string;
   sourceMessageId: string;
@@ -435,14 +439,75 @@ export function planSignalRepetitionEligibilityV1(args: {
   const friction = args.audibleInterference
     ? "audible_interference" as const
     : signalRepetitionFrictionReasonV1(args.hostQuestion);
+  if (!friction) return null;
   const seed = `signal-repetition-plan-v1:${args.episodeId}:${args.sourceMessageId}`;
-  const chance = friction ? 0.14 : 0.004;
-  if (stableUnit(`${seed}:eligibility`) >= chance) return null;
+  if (stableUnit(`${seed}:eligibility`) >= 0.14) return null;
   return {
-    reason: friction ?? "ordinary_baseline",
+    reason: friction,
     repeatMode:
       stableUnit(`${seed}:mode`) < 0.5 ? "repeat" : "paraphrase",
   };
+}
+
+const SIGNAL_PARAPHRASE_ACKNOWLEDGEMENT_PREFIX =
+  /^(?:of course|sure|yes|absolutely)[,!.]\s*/iu;
+
+function signalParaphraseTermsV1(value: string): Set<string> {
+  return new Set(
+    value
+      .normalize("NFKD")
+      .toLocaleLowerCase("en-US")
+      .replace(/\p{M}+/gu, "")
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim()
+      .split(/\s+/u)
+      .filter((term) => term.length >= 3),
+  );
+}
+
+/**
+ * A paraphrase must change the shape of the public question, not merely add an
+ * acknowledgement or a "let me rephrase" wrapper around the same words.
+ * Semantic fidelity remains a prompt responsibility; this guard owns the
+ * deterministic, observable non-duplication boundary.
+ */
+export function signalParaphraseMateriallyReframesV1(args: {
+  sourceContent: string;
+  candidateContent: string;
+}): boolean {
+  const source = args.sourceContent.replace(/\s+/gu, " ").trim();
+  const candidate = args.candidateContent
+    .replace(/\s+/gu, " ")
+    .trim()
+    .replace(SIGNAL_PARAPHRASE_ACKNOWLEDGEMENT_PREFIX, "")
+    .trim();
+  if (!source || !candidate.endsWith("?")) return false;
+
+  const normalizedSource = [...signalParaphraseTermsV1(source)].join(" ");
+  const normalizedCandidate = [...signalParaphraseTermsV1(candidate)].join(" ");
+  if (
+    !normalizedSource ||
+    !normalizedCandidate ||
+    normalizedSource === normalizedCandidate ||
+    normalizedCandidate.includes(normalizedSource)
+  ) {
+    return false;
+  }
+
+  const sourceTerms = signalParaphraseTermsV1(source);
+  const candidateTerms = signalParaphraseTermsV1(candidate);
+  const sharedTermCount = [...sourceTerms].filter((term) =>
+    candidateTerms.has(term),
+  ).length;
+  const novelTermCount = [...candidateTerms].filter(
+    (term) => !sourceTerms.has(term),
+  ).length;
+  const sourceCoverage = sharedTermCount / sourceTerms.size;
+
+  if (sourceTerms.size === 1) {
+    return sharedTermCount === 0 && novelTermCount >= 1;
+  }
+  return sourceCoverage <= 0.72 && novelTermCount >= 1;
 }
 
 export function signalPendingRepetitionRepairV1(

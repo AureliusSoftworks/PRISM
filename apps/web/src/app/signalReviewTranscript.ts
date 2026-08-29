@@ -163,10 +163,23 @@ export function buildSignalReviewTranscript(
       event.kind === "session_clock_hold" &&
       event.payload.recovery === "preparation_timeout",
   ).length;
+  const voicePlaybackRecoveryEventsByMessageId = new Map<
+    string,
+    BotcastReplayEvent[]
+  >();
+  const voicePlaybackRecoveryCount = events.filter(
+    (event) => event.kind === "voice_playback_recovery",
+  ).length;
   for (const event of events) {
     const messageId = payloadString(event, "messageId");
     if (event.kind === "utterance" && messageId)
       utteranceEvents.set(messageId, event);
+    if (event.kind === "voice_playback_recovery" && messageId) {
+      const existing =
+        voicePlaybackRecoveryEventsByMessageId.get(messageId) ?? [];
+      existing.push(event);
+      voicePlaybackRecoveryEventsByMessageId.set(messageId, existing);
+    }
     const interruptedMessageId = payloadString(event, "interruptedMessageId");
     if (producerInterruptions.includes(event) && interruptedMessageId) {
       const existing =
@@ -217,6 +230,7 @@ export function buildSignalReviewTranscript(
     `- Recorded runtime: ${formatDuration(episode.runtimeMs)}`,
     `- Completed model warmup holds: ${formatDuration(episode.modelWarmupHoldDurationMs)}`,
     `- Foreground recoveries after preparation timeout: ${preparationTimeoutRecoveryCount}`,
+    `- Live voice stall recoveries: ${voicePlaybackRecoveryCount}`,
     `- Active model warmup hold started: ${formatTimestamp(episode.modelWarmupHoldStartedAt)}`,
     `- Final segment: ${episode.segment}`,
     `- Final tension: ${episode.tensionStage}`,
@@ -276,6 +290,8 @@ export function buildSignalReviewTranscript(
   } else {
     episode.messages.forEach((message, index) => {
       const event = utteranceEvents.get(message.id);
+      const voicePlaybackRecoveries =
+        voicePlaybackRecoveryEventsByMessageId.get(message.id) ?? [];
       const turnProducerInterruptions =
         producerInterruptionsByMessageId.get(message.id) ?? [];
       const participant = message.speakerRole === "host" ? host : guest;
@@ -343,6 +359,16 @@ export function buildSignalReviewTranscript(
               : "recorded repaired/fallback utterance; raw provider draft not preserved"
         }`,
         `- Immersive voice effect: ${event?.payload.immersiveVoiceEffect === true ? "yes" : "no"}`,
+        `- Live voice recovery: ${
+          voicePlaybackRecoveries.length > 0
+            ? voicePlaybackRecoveries
+                .map(
+                  (recovery) =>
+                    `${payloadString(recovery, "reason") ?? "unknown"} at ${formatDuration(Number(recovery.payload.elapsedMs))} / ${formatDuration(Number(recovery.payload.durationMs))} (event ${recovery.id})`,
+                )
+                .join("; ")
+            : "None recorded"
+        }`,
         `- Producer interruption: ${
           turnProducerInterruptions.length > 0
             ? turnProducerInterruptions

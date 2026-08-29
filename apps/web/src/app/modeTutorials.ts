@@ -678,6 +678,27 @@ function currentDebateRecordTutorialBody(body: string): string {
   );
 }
 
+function currentCaptionSizeTutorialBody(
+  body: string,
+  applet: "Signal" | "Debate",
+): string {
+  if (applet === "Signal") {
+    return body.replace(
+      "a CC button at the top-left of the screen toggles captions on or off and remembers your choice.",
+      "a CC button at the top-left of the screen toggles captions on or off and remembers your choice. The adjacent A− and A+ controls resize every Signal caption from 85% through 140% and remember that applet-wide size for live play, replay, and rehearsal soundchecks.",
+    );
+  }
+  return body
+    .replace(
+      "a CC button at the bottom-left of the Forum viewport toggles those captions on or off—including spoken Jury chamber subtitles—and remembers your choice.",
+      "a CC button at the bottom-left of the Forum viewport toggles those captions on or off—including spoken Jury chamber subtitles—and remembers your choice. The adjacent A− and A+ controls resize every Debate caption from 85% through 140%; that applet-wide size follows the Forum, Jury chamber, and saved proceeding playback.",
+    )
+    .replace(
+      "The same CC control that toggles Forum captions also shows or hides spoken Jury chamber subtitles.",
+      "The same CC control that toggles Forum captions also shows or hides spoken Jury chamber subtitles, and its saved A− or A+ size applies inside the chamber too.",
+    );
+}
+
 function currentDebateJuryTutorialBody(body: string): string {
   return body
     .replace(
@@ -1141,8 +1162,11 @@ const CURRENT_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
   debate: {
     ...BASE_MODE_TUTORIALS.debate,
     steps: [...BASE_MODE_TUTORIALS.debate.steps.map((step) => {
-      const body = currentDebateRecessTutorialBody(
-        currentDebateJuryTutorialBody(step.body),
+      const body = currentCaptionSizeTutorialBody(
+        currentDebateRecessTutorialBody(
+          currentDebateJuryTutorialBody(step.body),
+        ),
+        "Debate",
       );
       if (step.heading === "Read the living case") {
         return {
@@ -1250,9 +1274,12 @@ const CURRENT_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
   botcast: {
     ...BASE_MODE_TUTORIALS.botcast,
     steps: BASE_MODE_TUTORIALS.botcast.steps.map((step, index) => {
-      const body = currentSignalRefractTutorialBody(
-        currentSignalPowerTutorialBody(step),
-        index,
+      const body = currentCaptionSizeTutorialBody(
+        currentSignalRefractTutorialBody(
+          currentSignalPowerTutorialBody(step),
+          index,
+        ),
+        "Signal",
       );
       return step.heading === "Book tonight’s episode"
         ? {

@@ -3546,6 +3546,55 @@ describe("API request integration", () => {
     assert.equal(onlinePayload.episode.model, "claude-signal");
     assert.equal(onlinePayload.episode.responseMode, "online");
 
+    const savedMaxBase = await client.request(
+      "/api/model-effort-preferences",
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          provider: "openai",
+          modelId: "gpt-5.6-sol",
+          effort: "xhigh",
+        }),
+      },
+    );
+    assert.equal(savedMaxBase.status, 200, await savedMaxBase.clone().text());
+    const maxResponse = await client.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/episodes`,
+      jsonInit({
+        guestBotId: "signal-model-guest",
+        topic: "Keep Max sealed through this recording",
+        preferredProvider: "openai",
+        responseMode: "online",
+        modelOverride: "gpt-5.6-sol",
+        reasoningEffort: "max",
+      }),
+    );
+    const maxPayload = await json(maxResponse);
+    assert.equal(maxResponse.status, 201, JSON.stringify(maxPayload));
+    assert.equal(
+      maxPayload.episode.events.find(
+        (event: { kind: string }) => event.kind === "routing",
+      )?.payload.frozenReasoningEffort,
+      "max",
+    );
+    const maxAdvanceResponse = await client.request(
+      `/api/botcast/episodes/${encodeURIComponent(String(maxPayload.episode.id))}/advance`,
+      jsonInit({}),
+    );
+    const maxAdvancePayload = await json(maxAdvanceResponse);
+    assert.equal(
+      maxAdvanceResponse.status,
+      200,
+      JSON.stringify(maxAdvancePayload),
+    );
+    assert.equal(
+      maxAdvancePayload.episode.events.find(
+        (event: { kind: string }) => event.kind === "utterance",
+      )?.payload.reasoningEffort,
+      "max",
+    );
+
     const cloudResponse = await client.request(
       `/api/botcast/shows/${encodeURIComponent(showId)}/episodes`,
       jsonInit({

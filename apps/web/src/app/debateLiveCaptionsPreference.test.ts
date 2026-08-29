@@ -4,7 +4,9 @@ import { describe, it } from "node:test";
 import {
   DEFAULT_DEBATE_LIVE_CAPTIONS_ENABLED,
   normalizeDebateLiveCaptionsEnabled,
+  readDebateLiveCaptionSize,
   readDebateLiveCaptionsEnabled,
+  writeDebateLiveCaptionSize,
   writeDebateLiveCaptionsEnabled,
 } from "./debateLiveCaptionsPreference.ts";
 
@@ -30,6 +32,10 @@ describe("Debate live captions preference", () => {
     assert.equal(readDebateLiveCaptionsEnabled(storage), false);
     writeDebateLiveCaptionsEnabled(storage, true);
     assert.equal(readDebateLiveCaptionsEnabled(storage), true);
+    assert.equal(readDebateLiveCaptionSize(storage), "medium");
+    writeDebateLiveCaptionSize(storage, "extra-large");
+    assert.equal(readDebateLiveCaptionSize(storage), "extra-large");
     assert.equal(readDebateLiveCaptionsEnabled(null), true);
+    assert.equal(readDebateLiveCaptionSize(null), "medium");
   });
 });

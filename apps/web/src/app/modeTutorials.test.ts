@@ -3925,4 +3925,28 @@ describe("mode tutorials", () => {
     assert.match(signalBody, /genuine floor break/u);
     assert.doesNotMatch(signalBody, /saved transcript line is only \.\.\./u);
   });
+
+  it("teaches persistent applet-wide caption sizing in Signal and Debate", () => {
+    const signalBody = MODE_TUTORIALS.botcast.steps
+      .map((step) => step.body)
+      .join(" ");
+    const debateBody = MODE_TUTORIALS.debate.steps
+      .map((step) => step.body)
+      .join(" ");
+
+    assert.match(
+      signalBody,
+      /A− and A\+ controls resize every Signal caption from 85% through 140%/u,
+    );
+    assert.match(signalBody, /live play, replay, and rehearsal soundchecks/u);
+    assert.match(
+      debateBody,
+      /A− and A\+ controls resize every Debate caption from 85% through 140%/u,
+    );
+    assert.match(debateBody, /applet-wide size follows the Forum, Jury chamber/u);
+    assert.match(
+      debateBody,
+      /saved A− or A\+ size applies inside the chamber too/u,
+    );
+  });
 });

@@ -7236,10 +7236,17 @@ async function contextualSignalRuntimeForEpisode(args: {
       highStakes: true,
     },
   });
+  const frozenRuntime =
+    snapshot?.frozenReasoningEffort !== undefined
+      ? {
+          ...runtime,
+          reasoningEffort: snapshot.frozenReasoningEffort,
+        }
+      : runtime;
   const imageContext = botcastLatestImageContextV1(args.episode.events);
-  if (!imageContext || imageContext.phase === "dismissed") return runtime;
+  if (!imageContext || imageContext.phase === "dismissed") return frozenRuntime;
   return {
-    ...runtime,
+    ...frozenRuntime,
     responseMode:
       imageContext.provider === "local"
         ? "local" as const
@@ -23586,12 +23593,25 @@ function buildRoutes(): RouteDefinition[] {
       const explicitModelOverride = readCoffeeSessionSpeakerModel(
         body.modelOverride,
       );
+      const maxReasoningEffortRequested = body.reasoningEffort === "max";
+      if (
+        body.reasoningEffort !== undefined &&
+        !maxReasoningEffortRequested
+      ) {
+        throw new HttpError(
+          400,
+          "Only request-scoped Max reasoning may override Signal's saved Effort.",
+        );
+      }
       const runtime = await contextualTextRuntimeForUser({
         userId,
         user,
         requestedProvider: body.preferredProvider,
         requestedResponseMode: body.responseMode,
         modelOverride: explicitModelOverride,
+        requestedReasoningEffort: maxReasoningEffortRequested
+          ? "max"
+          : undefined,
         routingContext: {
           surface: "signal",
           inputText: [
@@ -23739,6 +23759,9 @@ function buildRoutes(): RouteDefinition[] {
           v: 1,
           lane: runtime.responseMode,
           modelSelectionKind: explicitModelOverride ? "fixed" : "auto",
+          ...(runtime.modelSelectionKind === "fixed"
+            ? { frozenReasoningEffort: runtime.reasoningEffort }
+            : {}),
           candidateAllowlist: runtime.candidateAllowlist,
           fallbackChain: (runtime.autoFallbackChain?.fallbacks ?? []).filter(
             (entry) =>
@@ -24200,6 +24223,39 @@ function buildRoutes(): RouteDefinition[] {
         ),
       });
     }),
+    route(
+      "POST",
+      "/api/botcast/episodes/:id/voice-playback-recovery",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const body = (ctx.body ?? {}) as Record<string, unknown>;
+        if (
+          typeof body.messageId !== "string" ||
+          body.reason !== "progress_stalled"
+        ) {
+          throw new HttpError(
+            400,
+            "Signal voice recovery requires a message and valid reason.",
+          );
+        }
+        json(ctx.res, 200, {
+          ok: true,
+          episode: projectBotcastEpisodeForAudienceV1(
+            recordBotcastVoicePlaybackRecovery(
+              db,
+              userId,
+              ctx.params.id,
+              {
+                messageId: body.messageId,
+                reason: body.reason,
+                elapsedMs: Number(body.elapsedMs),
+                durationMs: Number(body.durationMs),
+              },
+            ),
+          ),
+        });
+      },
+    ),
     route(
       "POST",
       "/api/botcast/episodes/:id/turn-preparations",

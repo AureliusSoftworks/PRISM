@@ -228,6 +228,7 @@ describe("Signal review transcript", () => {
       transcript,
       /- Foreground recoveries after preparation timeout: 1/u,
     );
+    assert.match(transcript, /- Live voice stall recoveries: 0/u);
     assert.match(
       transcript,
       /- Counts: 2 transcript turns \(2 with spoken content, 0 silence-only\), 2 segments, 8 production events/u,
@@ -248,6 +249,7 @@ describe("Signal review transcript", () => {
     );
     assert.match(transcript, /- ONLINE retry: None recorded/u);
     assert.match(transcript, /- Immersive voice effect: yes/u);
+    assert.match(transcript, /- Live voice recovery: None recorded/u);
     assert.match(
       transcript,
       /    What did the help cost you\?\n    Be specific\./u,
@@ -299,6 +301,41 @@ describe("Signal review transcript", () => {
       /- Turn routing: auto -> unknown -> provider default or unrecorded/u,
     );
     assert.match(transcript, /No production events were recorded\./u);
+  });
+
+  it("exports bounded live voice recovery beside its canonical turn", () => {
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        events: [
+          ...episode.events,
+          {
+            id: "event-voice-recovery",
+            episodeId: episode.id,
+            sequence: 9,
+            kind: "voice_playback_recovery",
+            payload: {
+              v: 1,
+              messageId: "message-1",
+              reason: "progress_stalled",
+              elapsedMs: 120,
+              durationMs: 8_400,
+              outcome: "advanced_after_bounded_stop",
+            },
+            occurredAt: "2026-07-17T17:00:13.000Z",
+          },
+        ],
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: "guest-1", name: "Grace" },
+    });
+
+    assert.match(transcript, /- Live voice stall recoveries: 1/u);
+    assert.match(
+      transcript,
+      /- Live voice recovery: progress_stalled at 00:00\.120 \/ 00:08\.400 \(event event-voice-recovery\)/u,
+    );
   });
 
   it("exports accepted review provenance without hidden reviewer instructions", () => {

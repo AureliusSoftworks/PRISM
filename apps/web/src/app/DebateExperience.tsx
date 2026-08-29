@@ -576,9 +576,16 @@ import {
 } from "./debateStageAlignment";
 import {
   DEFAULT_DEBATE_LIVE_CAPTIONS_ENABLED,
+  readDebateLiveCaptionSize,
   readDebateLiveCaptionsEnabled,
+  writeDebateLiveCaptionSize,
   writeDebateLiveCaptionsEnabled,
 } from "./debateLiveCaptionsPreference";
+import {
+  DEFAULT_LIVE_CAPTION_SIZE,
+  liveCaptionSizeDetails,
+  stepLiveCaptionSize,
+} from "./liveCaptionSize";
 import {
   BotPickerGrid,
   BotPickerTile,
@@ -5399,6 +5406,9 @@ export function DebateExperience(
   const [liveCaptionsEnabled, setLiveCaptionsEnabled] = useState(
     DEFAULT_DEBATE_LIVE_CAPTIONS_ENABLED,
   );
+  const [liveCaptionSize, setLiveCaptionSize] = useState(
+    DEFAULT_LIVE_CAPTION_SIZE,
+  );
   const presentationStore = useMemo(createDebatePresentationStore, []);
   const activeSessionIdRef = useRef<string | null>(activeSession?.id ?? null);
   /** Invalidates an Archive-open preload when the player leaves or opens another. */
@@ -6008,6 +6018,15 @@ export function DebateExperience(
       const next = !current;
       if (typeof window !== "undefined") {
         writeDebateLiveCaptionsEnabled(window.localStorage, next);
+      }
+      return next;
+    });
+  }, []);
+  const adjustLiveCaptionSize = useCallback((direction: -1 | 1): void => {
+    setLiveCaptionSize((current) => {
+      const next = stepLiveCaptionSize(current, direction);
+      if (typeof window !== "undefined") {
+        writeDebateLiveCaptionSize(window.localStorage, next);
       }
       return next;
     });
@@ -7245,6 +7264,7 @@ export function DebateExperience(
   useEffect(() => {
     if (typeof window === "undefined") return;
     setLiveCaptionsEnabled(readDebateLiveCaptionsEnabled(window.localStorage));
+    setLiveCaptionSize(readDebateLiveCaptionSize(window.localStorage));
   }, []);
   useEffect(() => {
     setLeaveDebatePortalTarget(document.body);
@@ -29284,6 +29304,7 @@ export function DebateExperience(
           data-session-visible-bot-count={debateVisibleBotCount}
           data-jury-chamber={juryChamberVisible ? "true" : undefined}
           data-evidence-on-table={activeEvidenceItem ? "true" : undefined}
+          data-caption-size={liveCaptionSize}
           style={
             {
               "--debate-active-color": activeColor ?? "#9c8cff",
@@ -30167,6 +30188,39 @@ export function DebateExperience(
                     onClick={toggleLiveCaptions}
                   >
                     CC
+                  </button>
+                  <button
+                    type="button"
+                    data-debate-caption-size="decrease"
+                    aria-label={`Decrease Debate caption size, currently ${liveCaptionSizeDetails(liveCaptionSize).label}`}
+                    title="Decrease caption size"
+                    disabled={
+                      !liveCaptionsEnabled || liveCaptionSize === "small"
+                    }
+                    onClick={() => adjustLiveCaptionSize(-1)}
+                  >
+                    A−
+                  </button>
+                  <output
+                    className={styles.captionSizeReadout}
+                    aria-label={`Debate caption size ${liveCaptionSizeDetails(liveCaptionSize).label}`}
+                    aria-live="polite"
+                    data-debate-caption-size-readout="true"
+                  >
+                    {liveCaptionSizeDetails(liveCaptionSize).percent}%
+                  </output>
+                  <button
+                    type="button"
+                    data-debate-caption-size="increase"
+                    aria-label={`Increase Debate caption size, currently ${liveCaptionSizeDetails(liveCaptionSize).label}`}
+                    title="Increase caption size"
+                    disabled={
+                      !liveCaptionsEnabled ||
+                      liveCaptionSize === "extra-large"
+                    }
+                    onClick={() => adjustLiveCaptionSize(1)}
+                  >
+                    A+
                   </button>
                 </div>
                 {session.status === "live" ||

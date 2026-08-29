@@ -1,5 +1,14 @@
+import {
+  readLiveCaptionSize,
+  writeLiveCaptionSize,
+  type LiveCaptionSize,
+} from "./liveCaptionSize.ts";
+
 export const SIGNAL_LIVE_CAPTIONS_STORAGE_KEY =
   "prism.signal.live-captions.v1";
+
+export const SIGNAL_LIVE_CAPTION_SIZE_STORAGE_KEY =
+  "prism.signal.live-caption-size.v1";
 
 export const DEFAULT_SIGNAL_LIVE_CAPTIONS_ENABLED = true;
 
@@ -44,4 +53,17 @@ export function writeSignalLiveCaptionsEnabled(
   } catch {
     // Storage can be unavailable in private/restricted browser contexts.
   }
+}
+
+export function readSignalLiveCaptionSize(
+  storage: Pick<SignalLiveCaptionsStorage, "getItem"> | null | undefined,
+): LiveCaptionSize {
+  return readLiveCaptionSize(storage, SIGNAL_LIVE_CAPTION_SIZE_STORAGE_KEY);
+}
+
+export function writeSignalLiveCaptionSize(
+  storage: Pick<SignalLiveCaptionsStorage, "setItem"> | null | undefined,
+  size: LiveCaptionSize,
+): void {
+  writeLiveCaptionSize(storage, SIGNAL_LIVE_CAPTION_SIZE_STORAGE_KEY, size);
 }

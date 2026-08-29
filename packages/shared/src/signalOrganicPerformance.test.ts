@@ -7,6 +7,7 @@ import {
   normalizeSignalStudioIncidentEventV1,
   planSignalOrganicInterruptionV1,
   planSignalRepetitionEligibilityV1,
+  signalParaphraseMateriallyReframesV1,
   signalConversationRepairCanStartV1,
   signalPendingInterruptionRepairV1,
   signalPendingRepetitionRepairV1,
@@ -168,7 +169,7 @@ test("mutual repair requires exact public heard context", () => {
   );
 });
 
-test("planned repetition recognizes high-friction questions with a tiny baseline", () => {
+test("planned repetition requires real friction and never rolls on a clear baseline", () => {
   assert.equal(
     signalRepetitionFrictionReasonV1(
       "How does deoxyribonucleic replication change under that constraint?",
@@ -203,7 +204,16 @@ test("planned repetition recognizes high-friction questions with a tiny baseline
     })
   ).filter(Boolean).length;
   assert.ok(high / 10_000 > 0.12 && high / 10_000 < 0.16);
-  assert.ok(ordinary / 10_000 > 0.001 && ordinary / 10_000 < 0.008);
+  assert.equal(ordinary, 0);
+  assert.equal(
+    planSignalRepetitionEligibilityV1({
+      episodeId: "14d0c954f8e54a5a8bb922a9",
+      sourceMessageId: "eae2bedf74242227e486b596",
+      hostQuestion:
+        'Then keep God and cut the proof. Would "and I knew there was a God above" preserve the revelation without pretending the bitter soil has completed an argument?',
+    }),
+    null,
+  );
   const interference = Array.from({ length: 10_000 }, (_, index) =>
     planSignalRepetitionEligibilityV1({
       episodeId: "repeat-episode",
@@ -215,6 +225,33 @@ test("planned repetition recognizes high-friction questions with a tiny baseline
   assert.ok(interference.length / 10_000 > 0.12);
   assert.ok(
     interference.every((plan) => plan.reason === "audible_interference"),
+  );
+});
+
+test("paraphrase materiality accepts a reframe and rejects wrapped repetition", () => {
+  const source =
+    "Which concrete tradeoff would change your position on this proposal?";
+  assert.equal(
+    signalParaphraseMateriallyReframesV1({
+      sourceContent: source,
+      candidateContent:
+        "What cost would actually make you reconsider the proposal?",
+    }),
+    true,
+  );
+  assert.equal(
+    signalParaphraseMateriallyReframesV1({
+      sourceContent: source,
+      candidateContent: `Of course. ${source}`,
+    }),
+    false,
+  );
+  assert.equal(
+    signalParaphraseMateriallyReframesV1({
+      sourceContent: source,
+      candidateContent: `Let me rephrase. ${source}`,
+    }),
+    false,
   );
 });
 

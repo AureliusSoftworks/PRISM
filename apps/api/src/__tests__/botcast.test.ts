@@ -78,6 +78,7 @@ import {
   botcastPowerInterruptedContentV1,
   botcastSocialSilenceChanceV1,
   botcastSpokenTurnWithinBudgetV1,
+  botcastListenerCoverageShotV1,
   botcastUtteranceClaimsSignalHistory,
   cancelBotcastEpisode,
   clearBotcastProducerCue,
@@ -124,6 +125,7 @@ import {
   readBotcastShowIntroAudio,
   readBotcastShowOutdentAudio,
   recordBotcastAudioCue,
+  recordBotcastVoicePlaybackRecovery,
   queueBotcastEpisodeImageContext,
   queueBotcastProducerCue,
   recoverBotcastProducerCueDispatch,
@@ -5511,6 +5513,109 @@ describe("Botcast persistence and isolation", () => {
     } finally {
       db.close();
     }
+  });
+
+  it("records bounded voice-stall recovery without invalidating prepared dialogue", async () => {
+    const db = fixture();
+    const provider = recordingProvider(
+      ["Welcome to the show. Ivo, what makes a promise durable?"],
+      [],
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Playback recovery provenance",
+      });
+      const opening = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      assert.ok(opening.message);
+      const cursorBefore = botcastPreparedTurnCursor(
+        db,
+        "user-1",
+        episode.id,
+      );
+
+      const recovered = recordBotcastVoicePlaybackRecovery(
+        db,
+        "user-1",
+        episode.id,
+        {
+          messageId: opening.message.id,
+          reason: "progress_stalled",
+          elapsedMs: 120,
+          durationMs: 8_400,
+        },
+      );
+
+      assert.deepEqual(
+        recovered.events.findLast(
+          (event) => event.kind === "voice_playback_recovery",
+        )?.payload,
+        {
+          v: 1,
+          messageId: opening.message.id,
+          reason: "progress_stalled",
+          elapsedMs: 120,
+          durationMs: 8_400,
+          outcome: "advanced_after_bounded_stop",
+        },
+      );
+      assert.equal(
+        botcastPreparedTurnCursor(db, "user-1", episode.id).promptStateHash,
+        cursorBefore.promptStateHash,
+        "presentation-only recovery must not invalidate prepared dialogue",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps incidental Foley on the speaker shot while preserving real coverage", () => {
+    assert.equal(
+      botcastListenerCoverageShotV1({
+        listenerVisibleToAudience: true,
+        speakerRole: "host",
+        listenerReaction: {
+          vocalFoley: "exhales",
+          cameraCutEligible: false,
+        },
+      }),
+      null,
+    );
+    assert.equal(
+      botcastListenerCoverageShotV1({
+        listenerVisibleToAudience: true,
+        speakerRole: "host",
+        listenerReaction: {
+          cameraCutEligible: false,
+        },
+      }),
+      null,
+    );
+    assert.equal(
+      botcastListenerCoverageShotV1({
+        listenerVisibleToAudience: true,
+        speakerRole: "guest",
+        listenerReaction: null,
+      }),
+      "left",
+    );
+    assert.equal(
+      botcastListenerCoverageShotV1({
+        listenerVisibleToAudience: true,
+        speakerRole: "host",
+        listenerReaction: {
+          cameraCutEligible: true,
+        },
+      }),
+      "right",
+    );
   });
 
   it("uses the local ident by default and revisions cached ElevenLabs show audio", () => {
@@ -20196,6 +20301,42 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("preserves a fixed Signal recording's sealed Max effort", () => {
+    const db = fixture();
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Sealed Max provenance",
+        preferredProvider: "openai",
+        modelOverride: "gpt-5.6-sol",
+      });
+      const frozen = recordBotcastRoutingSnapshot(
+        db,
+        "user-1",
+        created.id,
+        {
+          v: 1,
+          lane: "online",
+          modelSelectionKind: "fixed",
+          frozenReasoningEffort: "max",
+          candidateAllowlist: [
+            { provider: "openai", model: "gpt-5.6-sol" },
+          ],
+          fallbackChain: [],
+          policyVersion: 1,
+        },
+      );
+
+      assert.equal(
+        botcastRoutingSnapshot(frozen)?.frozenReasoningEffort,
+        "max",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("freezes Signal Auto routing and records the fresh per-turn decision", async () => {
     const db = fixture();
     const captures: GenerateOptions[] = [];
@@ -22278,6 +22419,87 @@ describe("Botcast persistence and isolation", () => {
             event.kind === "cut_away" &&
             event.payload.reason === "producer_cut",
         ),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps a queued wrap-up on one coherent producer-cut closing sequence", async () => {
+    const db = fixture();
+    const provider = recordingProvider(
+      [
+        "Welcome to the show. Ivo, what makes a promise durable?",
+        "Ivo Stone, thank you for joining me. And thank you all for watching.",
+      ],
+      [],
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "A cut during a queued wrap",
+      });
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      const queued = queueBotcastProducerCue(
+        db,
+        "user-1",
+        episode.id,
+        { kind: "wrap_up" },
+      );
+      const cueId = queued.events.findLast(
+        (event) =>
+          event.kind === "producer_cue" && event.payload.lifecycle === "queued",
+      )?.payload.cueId;
+
+      const cut = await endBotcastEpisodeOnProducerCut(
+        db,
+        "user-1",
+        episode.id,
+        generation(provider),
+      );
+      const cutSequence = cut.episode.events.find(
+        (event) =>
+          event.kind === "cut_away" && event.payload.reason === "producer_cut",
+      )?.sequence ?? 0;
+      const closingMessage = cut.message;
+
+      assert.equal(cut.episode.status, "completed");
+      assert.equal(cut.episode.segment, "closing");
+      assert.ok(closingMessage);
+      assert.equal(
+        cut.episode.events.find(
+          (event) =>
+            event.kind === "utterance" &&
+            event.payload.messageId === closingMessage.id,
+        )?.payload.segment,
+        "closing",
+      );
+      assert.equal(
+        cut.episode.events.some(
+          (event) =>
+            event.sequence > cutSequence &&
+            event.kind === "segment" &&
+            event.payload.segment === "interview",
+        ),
+        false,
+      );
+      assert.equal(
+        cut.episode.events.findLast(
+          (event) =>
+            event.kind === "producer_cue" && event.payload.cueId === cueId,
+        )?.payload.lifecycle,
+        "delivered",
+      );
+      assert.equal(
+        cut.episode.events.at(-1)?.kind,
+        "episode_completed",
       );
     } finally {
       db.close();
