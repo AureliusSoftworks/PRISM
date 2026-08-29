@@ -447,6 +447,13 @@ import {
   summarizeAppletMainThreadCensus,
 } from "./applet-main-thread-census-samples.ts";
 import {
+  listLiveSessionFocusEvents,
+  liveSessionFocusBelongsToUser,
+  readLiveSessionFocusSurface,
+  readLiveSessionFocusTransition,
+  recordLiveSessionFocusEvent,
+} from "./live-session-focus-events.ts";
+import {
   DebateSourceInspectionError,
   inspectDebateSourceUrl,
 } from "./debate-source-inspection.ts";
@@ -625,6 +632,7 @@ import {
 } from "./replay-recordings.ts";
 import type {
   BotGenerationVoiceCatalogV1,
+  BotcastEpisode,
   CoffeeGroupSynthesisItem,
   ReplayManifestV1,
   ReplayManifestV2,
@@ -1159,6 +1167,7 @@ import {
   expandSpeechText,
   voicePerformanceTextFromActionCues,
   voicePerformancePlanFromText,
+  voicePerformanceSynthesisTextV2,
   VOICE_VOCAL_ACTIONS,
   VOICE_VOCAL_ACTION_MODIFIERS,
   normalizeBotNamePronunciation,
@@ -1182,11 +1191,13 @@ import {
   listenerReactionInterruptedSpeakerTextV1,
   signalListenerReactionPlanForPlaybackV1,
   listenerReactionSpokenTextV1,
+  listenerReactionSequencePlansV1,
   listenerReactionTextIsAuthorizedV1,
   normalizeBotCrosstalkInterruptedSpeakerCue,
   coffeeInterruptionTranscriptSegments,
   botCrosstalkPrimarySpeakerContent,
   botcastListenerReactionForMessage,
+  botcastVoicePerformanceForMessageV2,
   botcastEpisodeImageFallbackEmoji,
   botcastEpisodeImageDescriptorFromFileName,
   botcastLatestImageContextV1,
@@ -7239,7 +7250,10 @@ async function contextualSignalRuntimeForEpisode(args: {
   };
 }
 
-async function normalizeSignalEpisodeImageForTurn(value: unknown): Promise<{
+async function normalizeSignalEpisodeImageForTurn(
+  value: unknown,
+  userId: string,
+): Promise<{
   imageId: string;
   descriptor: NonNullable<
     ReturnType<typeof botcastEpisodeImageDescriptorFromFileName>
@@ -7252,7 +7266,70 @@ async function normalizeSignalEpisodeImageForTurn(value: unknown): Promise<{
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new HttpError(400, "Signal image context is missing from this turn.");
   }
+  // Normalization is in-memory only and bounds provider payload dimensions.
   const record = value as Record<string, unknown>;
+  const archivalProxyEpisodeId =
+    typeof record.archivalProxyEpisodeId === "string"
+      ? record.archivalProxyEpisodeId.trim().slice(0, 160)
+      : "";
+  if (archivalProxyEpisodeId) {
+    let archivedEpisode: BotcastEpisode;
+    try {
+      archivedEpisode = getBotcastEpisode(db, userId, archivalProxyEpisodeId);
+    } catch {
+      throw new HttpError(404, "Signal's archived image booking was not found.");
+    }
+    if (
+      archivedEpisode.status !== "completed" &&
+      archivedEpisode.status !== "cancelled"
+    ) {
+      throw new HttpError(
+        409,
+        "Only a completed or cancelled Signal booking can reuse its archival image.",
+      );
+    }
+    const archivedContext = botcastLatestImageContextV1(archivedEpisode.events);
+    if (!archivedContext?.replayProxyId) {
+      throw new HttpError(404, "Signal's archived image proxy was not found.");
+    }
+    const archivedProxy = db
+      .prepare(
+        `SELECT content_type, image_bytes
+           FROM botcast_episode_image_proxies
+          WHERE episode_id = ? AND user_id = ? AND image_id = ?`,
+      )
+      .get(
+        archivedEpisode.id,
+        userId,
+        archivedContext.imageId,
+      ) as { content_type: string; image_bytes: Uint8Array } | undefined;
+    if (!archivedProxy || !(archivedProxy.image_bytes instanceof Uint8Array)) {
+      throw new HttpError(404, "Signal's archived image proxy was not found.");
+    }
+    const normalized = await normalizeImageAssetUpload(
+      `data:${archivedProxy.content_type};base64,${Buffer.from(archivedProxy.image_bytes).toString("base64")}`,
+      { width: 1536, height: 1536, fit: "inside" },
+    ).catch(() => {
+      throw new HttpError(400, "Signal could not read its archived image proxy.");
+    });
+    return {
+      imageId: archivedContext.imageId,
+      descriptor: {
+        kind: archivedContext.kind,
+        name: archivedContext.name,
+        mimeType: archivedContext.mimeType,
+      },
+      presentationReason: null,
+      replayEmoji: archivedContext.replayEmoji,
+      // The vision request and new replay proxy are derived only from the
+      // booking-owned archival proxy, never the original upload.
+      input: {
+        mimeType: "image/png",
+        data: normalized.pngBytes.toString("base64"),
+      },
+      rasterBytes: normalized.pngBytes,
+    };
+  }
   const imageId =
     typeof record.imageId === "string" ? record.imageId.trim().slice(0, 160) : "";
   const fileName =
@@ -7302,7 +7379,6 @@ async function normalizeSignalEpisodeImageForTurn(value: unknown): Promise<{
       record.replayEmoji,
       botcastEpisodeImageFallbackEmoji(descriptor.kind),
     ),
-    // Normalization is in-memory only and bounds provider payload dimensions.
     input: {
       mimeType: "image/png",
       data: normalized.pngBytes.toString("base64"),
@@ -19107,7 +19183,7 @@ function buildRoutes(): RouteDefinition[] {
           userKey: decryptUserKey(userId),
           userId,
           sessionId: session.id,
-          prismVersion: process.env.npm_package_version ?? "0.15.0",
+          prismVersion: process.env.npm_package_version ?? "0.15.1",
           creatorName: typeof body.creatorName === "string" ? body.creatorName : undefined,
           mode,
           password: typeof body.password === "string" ? body.password : undefined,
@@ -19166,7 +19242,7 @@ function buildRoutes(): RouteDefinition[] {
         userKey: decryptUserKey(userId),
         userId,
         bundleId: mansion.id,
-        prismVersion: process.env.npm_package_version ?? "0.15.0",
+        prismVersion: process.env.npm_package_version ?? "0.15.1",
         creatorName: typeof body.creatorName === "string" ? body.creatorName : undefined,
         mode,
         password,
@@ -20212,6 +20288,38 @@ function buildRoutes(): RouteDefinition[] {
           listAppletMainThreadCensusSamples(db, userId, surface, sessionId),
         ),
       });
+    }),
+    route("GET", "/api/session-focus-events", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const surface = readLiveSessionFocusSurface(ctx.query.get("surface"));
+      const sessionId = ctx.query.get("sessionId")?.trim() ?? "";
+      if (!surface || !sessionId) {
+        throw new HttpError(400, "surface and sessionId are required.");
+      }
+      if (!liveSessionFocusBelongsToUser(db, userId, surface, sessionId)) {
+        throw new HttpError(404, "Live session not found.");
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        events: listLiveSessionFocusEvents(db, userId, surface, sessionId),
+      });
+    }),
+    route("POST", "/api/session-focus-events", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const surface = readLiveSessionFocusSurface(body.surface);
+      const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : "";
+      const transition = readLiveSessionFocusTransition(body.transition);
+      if (!surface || !sessionId || !transition) {
+        throw new HttpError(400, "surface, sessionId, and transition are required.");
+      }
+      if (!liveSessionFocusBelongsToUser(db, userId, surface, sessionId)) {
+        throw new HttpError(404, "Live session not found.");
+      }
+      const recorded = recordLiveSessionFocusEvent(
+        db, userId, surface, sessionId, transition, body.occurredAt,
+      );
+      json(ctx.res, 200, { ok: true, ...recorded });
     }),
     route("POST", "/api/main-thread-census-samples", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -23488,6 +23596,7 @@ function buildRoutes(): RouteDefinition[] {
           inputText: [
             typeof body.topic === "string" ? body.topic : "",
             typeof body.producerBrief === "string" ? body.producerBrief : "",
+            typeof body.guestBrief === "string" ? body.guestBrief : "",
             typeof body.guestContext === "string" ? body.guestContext : "",
           ].join("\n"),
           outputTokens: 1_200,
@@ -23581,6 +23690,10 @@ function buildRoutes(): RouteDefinition[] {
           guestContext,
           topic: episodeTopic,
           producerBrief: episodeProducerBrief,
+          guestBrief:
+            !producerGuest && typeof body.guestBrief === "string"
+              ? body.guestBrief
+              : "",
           preferredProvider,
           responseMode: runtime.responseMode,
           modelOverride,
@@ -23926,6 +24039,12 @@ function buildRoutes(): RouteDefinition[] {
         ) {
           throw new HttpError(400, "durationMs must be a non-negative number.");
         }
+        if (
+          body.recovery !== undefined &&
+          body.recovery !== "preparation_timeout"
+        ) {
+          throw new HttpError(400, "recovery must be preparation_timeout.");
+        }
         const episode = recordBotcastSessionClockHold(
           db,
           userId,
@@ -23934,6 +24053,9 @@ function buildRoutes(): RouteDefinition[] {
             holdId: body.holdId,
             reason: body.reason,
             durationMs: body.durationMs,
+            ...(body.recovery === "preparation_timeout"
+              ? { recovery: body.recovery }
+              : {}),
           },
         );
         json(ctx.res, 200, {
@@ -24091,18 +24213,6 @@ function buildRoutes(): RouteDefinition[] {
           );
         }
         const user = getUserRow(userId);
-        const runtime = await contextualSignalRuntimeForEpisode({
-          userId,
-          user,
-          episode: frozen,
-        });
-        const signalUserKey = decryptUserKey(userId);
-        backfillMissingCompletedBotcastPairHistory({
-          db,
-          userId,
-          userKey: signalUserKey,
-          pairBotIds: [frozen.hostBotId, frozen.guestBotId],
-        });
         const powerTheme = readResolvedPowerTheme(body.theme);
         const stateCursor = botcastPreparedTurnCursor(
           db,
@@ -24115,6 +24225,33 @@ function buildRoutes(): RouteDefinition[] {
           sessionId: frozen.id,
           stateCursor,
           run: async (signal) => {
+            // Return the preparation handle before catalog/routing work starts.
+            // The browser can then bound this speculative head start and fall
+            // through to the foreground recovery path if preflight stalls.
+            const runtime = await contextualSignalRuntimeForEpisode({
+              userId,
+              user,
+              episode: frozen,
+            });
+            if (signal.aborted) {
+              throw new DOMException(
+                "Signal preparation was cancelled.",
+                "AbortError",
+              );
+            }
+            const signalUserKey = decryptUserKey(userId);
+            backfillMissingCompletedBotcastPairHistory({
+              db,
+              userId,
+              userKey: signalUserKey,
+              pairBotIds: [frozen.hostBotId, frozen.guestBotId],
+            });
+            if (signal.aborted) {
+              throw new DOMException(
+                "Signal preparation was cancelled.",
+                "AbortError",
+              );
+            }
             const isolated = createUserScopedPreparedDatabase(
               db,
               userId,
@@ -24467,7 +24604,7 @@ function buildRoutes(): RouteDefinition[] {
       const signalEpisodeImage =
         body.episodeImage === undefined
           ? null
-          : await normalizeSignalEpisodeImageForTurn(body.episodeImage);
+          : await normalizeSignalEpisodeImageForTurn(body.episodeImage, userId);
       let runtime = await contextualSignalRuntimeForEpisode({
         userId,
         user,
@@ -24533,9 +24670,7 @@ function buildRoutes(): RouteDefinition[] {
               ...signalEpisodeImage.descriptor,
               provider: runtime.provider,
               model: runtime.model,
-              replayEmoji: botcastEpisodeImageFallbackEmoji(
-                signalEpisodeImage.descriptor.kind,
-              ),
+              replayEmoji: signalEpisodeImage.replayEmoji,
               replayProxy: {
                 id: randomId(12),
                 ...replayProxy,
@@ -24769,7 +24904,7 @@ function buildRoutes(): RouteDefinition[] {
       const signalEpisodeImage =
         body.episodeImage === undefined || signalBakeAlreadyRunning
           ? null
-          : await normalizeSignalEpisodeImageForTurn(body.episodeImage);
+          : await normalizeSignalEpisodeImageForTurn(body.episodeImage, userId);
       const existingImageContext = botcastLatestImageContextV1(
         frozenEpisode.events,
       );
@@ -30120,12 +30255,25 @@ function buildRoutes(): RouteDefinition[] {
               (beat.kind === "audible_quip" || beat.kind === "interrupt"),
           )
           .flatMap((beat) => beat.quip ? [beat.quip] : []);
-        const savedSignalReaction =
+        const baseSavedSignalReaction =
           preparedSignalReaction ??
           botcastListenerReactionForMessage(
             signalEpisode.events,
             signalMessageId,
           );
+        const savedSignalReaction = listenerReactionRequested &&
+            baseSavedSignalReaction
+          ? listenerReactionSequencePlansV1(baseSavedSignalReaction).find(
+              (candidate) =>
+                candidate.listenerBotId === requestedSpeakerBotId &&
+                (listenerReactionFoleyRequested
+                  ? candidate.vocalFoley === raw.listenerReactionFoley
+                  : listenerReactionSpokenTextV1(candidate) ===
+                    (typeof raw.listenerReactionText === "string"
+                      ? raw.listenerReactionText.replace(/\s+/gu, " ").trim()
+                      : "")),
+            ) ?? baseSavedSignalReaction
+          : baseSavedSignalReaction;
         const signalPlaybackReaction = savedSignalReaction
           ? signalListenerReactionPlanForPlaybackV1({
               plan: savedSignalReaction,
@@ -30152,10 +30300,24 @@ function buildRoutes(): RouteDefinition[] {
           );
           if (cue) authorizedInterruptedSpeakerReactionTexts.push(cue);
         }
-        sourceText = botCrosstalkPrimarySpeakerContent(
+        const signalPrimaryText = botCrosstalkPrimarySpeakerContent(
           signalMessage.content,
           savedSignalReaction,
         );
+        sourceText = signalPrimaryText;
+        if (!listenerReactionRequested && !interruptedSpeakerReactionRequested) {
+          const organicPerformance = botcastVoicePerformanceForMessageV2(
+            signalEpisode.events,
+            signalMessageId,
+          );
+          const synthesisText = voicePerformanceSynthesisTextV2(
+            signalPrimaryText,
+            organicPerformance,
+          );
+          sourceText = synthesisText;
+          sourceElevenLabsText = synthesisText;
+          sourcePerformanceText = synthesisText;
+        }
         const voiceRole = listenerReactionRequested
           ? signalMessage.speaker_role === "host"
             ? "guest"
@@ -30241,11 +30403,21 @@ function buildRoutes(): RouteDefinition[] {
           ) {
             throw new HttpError(400, "Unsupported listener vocal Foley.");
           }
-          // Keep the authenticated provider request speakable without adding a
-          // transcript utterance. Eleven v3 turns the saved tag into the sound.
-          sourceText = "...";
-          sourceElevenLabsText = `[${vocalFoley}] ...`;
-          sourcePerformanceText = `[${vocalFoley}]`;
+          const authoredLocalLaugh =
+            vocalFoley === "chuckles" &&
+            Boolean(
+              normalizeBotAudioVoiceProfileV1(raw.profile).localLaughSyllable,
+            );
+          // Authored local laughter starts from a written laugh so the Instant
+          // projection can replace it with the exact saved syllable. Provider
+          // Foley keeps its authenticated Eleven v3 tag.
+          sourceText = authoredLocalLaugh ? "haha" : "...";
+          sourceElevenLabsText = authoredLocalLaugh
+            ? "haha"
+            : `[${vocalFoley}] ...`;
+          sourcePerformanceText = authoredLocalLaugh
+            ? "haha"
+            : `[${vocalFoley}]`;
         } else {
           const listenerReactionText =
             typeof raw.listenerReactionText === "string"
@@ -30450,13 +30622,16 @@ function buildRoutes(): RouteDefinition[] {
         user.operating_system_voices_enabled !== 0 ||
         Boolean(profile.systemVoiceName);
       if (listenerReactionFoleyRequested) {
-        if (raw.engine !== "elevenlabs") {
+        const authoredLocalLaugh =
+          normalizeListenerReactionVocalFoley(raw.listenerReactionFoley) ===
+            "chuckles" && Boolean(profile.localLaughSyllable);
+        if (raw.engine !== "elevenlabs" && !authoredLocalLaugh) {
           throw new HttpError(
             409,
             "Listener vocal Foley requires an ElevenLabs voice.",
           );
         }
-        if (!resolveElevenLabsVoiceId(profile)) {
+        if (!authoredLocalLaugh && !resolveElevenLabsVoiceId(profile)) {
           throw new HttpError(
             400,
             "Listener vocal Foley requires a selected ElevenLabs voice.",

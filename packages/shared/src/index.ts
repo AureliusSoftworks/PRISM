@@ -3871,6 +3871,7 @@ export * from "./actionSfxPack.js";
 export * from "./englishPacingProfile.js";
 export * from "./corporalityFoley.js";
 export * from "./signalFancyAction.js";
+export * from "./signalOrganicPerformance.js";
 export * from "./signalPickles.js";
 export * from "./signalMusicProfile.js";
 export * from "./voiceSpokenText.js";

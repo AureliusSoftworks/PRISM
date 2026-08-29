@@ -8,9 +8,34 @@ import {
 import {
   applyDebateSetupSuggestion,
   anchorDebateSetupCast,
+  debatePlayerRoleAfterFormatSelection,
   emptyPreferredJurorBotIds,
   preferredJurorBotIdsFromSession,
 } from "./debateExperienceState.ts";
+
+describe("debatePlayerRoleAfterFormatSelection", () => {
+  it("moves a Whodunnit participant into the Turnabout Judge seat", () => {
+    assert.equal(
+      debatePlayerRoleAfterFormatSelection("participant", "turnabout"),
+      "judge",
+    );
+  });
+
+  it("keeps compatible roles and resolves the inverse Whodunnit transition", () => {
+    assert.equal(
+      debatePlayerRoleAfterFormatSelection("spectator", "turnabout"),
+      "spectator",
+    );
+    assert.equal(
+      debatePlayerRoleAfterFormatSelection("judge", "whodunnit"),
+      "participant",
+    );
+    assert.equal(
+      debatePlayerRoleAfterFormatSelection("participant", "forum"),
+      "participant",
+    );
+  });
+});
 
 describe("anchorDebateSetupCast", () => {
   it("keeps the captured bot in its seat and repairs a generated duplicate", () => {

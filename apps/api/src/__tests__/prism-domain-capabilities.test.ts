@@ -129,6 +129,7 @@ describe("Prism Signal domain capabilities", () => {
           guestBotId: "guest",
           topic: "Sith Stand-Up",
           producerBrief: "Keep it funny.",
+          guestBrief: "You know the punchline is a confession.",
           preferredProvider: "local",
           responseMode: "local",
           modelOverride: "llama3.2",
@@ -152,15 +153,15 @@ describe("Prism Signal domain capabilities", () => {
         ).count,
         2,
       );
+      const storedEpisode = db
+        .prepare(
+          "SELECT playback_mode AS playbackMode, guest_brief AS guestBrief FROM botcast_episodes WHERE topic = 'Sith Stand-Up'",
+        )
+        .get() as { playbackMode: string; guestBrief: string };
+      assert.equal(storedEpisode.playbackMode, "live");
       assert.equal(
-        (
-          db
-            .prepare(
-              "SELECT playback_mode AS playbackMode FROM botcast_episodes WHERE topic = 'Sith Stand-Up'",
-            )
-            .get() as { playbackMode: string }
-        ).playbackMode,
-        "live",
+        storedEpisode.guestBrief,
+        "You know the punchline is a confession.",
       );
       assert.equal(
         registry.undo({ context: context(db), runId: created.id }).status,

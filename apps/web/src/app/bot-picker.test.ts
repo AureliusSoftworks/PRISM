@@ -191,7 +191,10 @@ describe("shared bot picker", () => {
     assert.match(source, /buildBotLibraryGroupVisualVariables/u);
     assert.match(source, /botLibraryGroupTrigger/u);
     assert.match(source, /botLibraryGroupOption/u);
-    assert.match(source, /aria-haspopup="listbox"/u);
+    assert.match(
+      source,
+      /aria-haspopup=\{groupSelectionIsModal \? "dialog" : "listbox"\}/u,
+    );
     assert.match(source, /ArrowDown[\s\S]{0,220}ArrowUp/u);
     assert.match(source, /createPortal\([\s\S]*botLibraryGroupMenu/u);
     assert.match(source, /placeBotPickerGroupMenu/u);
@@ -201,6 +204,16 @@ describe("shared bot picker", () => {
     assert.match(signalSource, /groupTheme=\{theme\}/u);
     assert.match(debateSource, /groupItems=\{bots\}/u);
     assert.match(debateSource, /groupTheme=\{props\.theme\}/u);
+  });
+
+  it("uses a bounded modal group picker for Signal", () => {
+    assert.match(source, /groupSelectionMode\?: "dropdown" \| "modal"/u);
+    assert.match(source, /groupSelectionIsModal = groupSelectionMode === "modal"/u);
+    assert.match(source, /role=\{groupSelectionIsModal \? "dialog" : undefined\}/u);
+    assert.match(source, /aria-modal=\{groupSelectionIsModal \? true : undefined\}/u);
+    assert.match(source, /groupModalBackdrop/u);
+    assert.match(source, /groupModalListbox/u);
+    assert.match(signalSource, /groupSelectionMode="modal"/u);
   });
 
   it("overrides Chat's upward composer menu so a body portal can sit on screen", () => {

@@ -18,6 +18,7 @@ import {
   debateEvidenceSourcePropKind,
   debateGalleryArrivalShouldMaskStage,
   debateMotionRevealState,
+  debatePlayerRoleAfterFormatSelection,
   debatePlayerJudgePrefilledCast,
   debatePrefilledCast,
   debateRoomPresence,
@@ -92,7 +93,7 @@ it("previews inert Flyting beside the available Debate formats", () => {
   );
   assert.match(
     source,
-    /const disabled = participantForumOnly \|\| comingSoon/u,
+    /const disabled = comingSoon/u,
   );
   assert.match(source, /if \(comingSoon\) return renderFormatCard\(\);/u);
   assert.match(source, /<b>Coming soon<\/b>/u);
@@ -1352,9 +1353,9 @@ describe("Debate experience", () => {
     assert.match(source, /option\.cadence/u);
     assert.match(
       source,
-      /participantForumOnly\s*\? "participant-forum-only"\s*: option\.availability/u,
+      /movesParticipantToJudge\s*\? "participant-role-change"\s*: option\.availability/u,
     );
-    assert.match(source, /const disabled =[\s\S]{0,120}participantForumOnly/u);
+    assert.match(source, /const disabled = comingSoon/u);
     assert.doesNotMatch(source, />\s*Coming later\s*</u);
     assert.match(source, /if \(disabled\) return/u);
     assert.match(
@@ -1964,6 +1965,38 @@ describe("Debate experience", () => {
     assert.doesNotMatch(css, /\.juryDeliberationChoice/u);
     assert.doesNotMatch(css, /\.proceedingControlActions \.endEarlyButton/u);
     assert.match(css, /\.evidenceRail/u);
+  });
+
+  it("requires an explicit Library choice to assign a Whodunnit role card", () => {
+    const mysterySeatCard = source.slice(
+      source.indexOf("const renderMysteryCastSlot"),
+      source.indexOf("const setJuryTrialEnabled"),
+    );
+    const castBotPicker = source.slice(
+      source.indexOf("<BotPickerTile"),
+      source.indexOf("</BotPickerGrid>"),
+    );
+    const mysteryCastDesktopCss = css.slice(
+      css.indexOf('@media (min-width: 901px) {', css.indexOf(".castPickerTile:disabled")),
+      css.indexOf(".castPickerEmpty"),
+    );
+
+    assert.match(
+      mysterySeatCard,
+      /onClick=\{\(\) => \{\s*setActiveJurySeatIndex\(null\);\s*setActiveMysteryCastSeat\(seat\);\s*\}\}/u,
+    );
+    assert.doesNotMatch(mysterySeatCard, /surpriseMysterySeat\(seat\)/u);
+    assert.match(
+      castBotPicker,
+      /if \(format === "whodunnit"\) \{\s*assignBotToMysterySeat\(bot\.id\);/u,
+    );
+    assert.match(source, /const mysterySeatRefractTarget[\s\S]{0,500}surpriseMysterySeat\(seat\)/u);
+    assert.match(source, /const mysteryGroupRefractTarget[\s\S]{0,700}randomizeMysteryGroup\(kind, groupId\)/u);
+    assert.match(mysteryCastDesktopCss, /data-debate-format="whodunnit"\][\s\S]*mysteryCastGroups/u);
+    assert.match(mysteryCastDesktopCss, /padding-top: 24px;[\s\S]*padding-bottom: 28px;/u);
+    assert.doesNotMatch(mysteryCastDesktopCss, /margin-top:/u);
+    assert.match(mysteryCastDesktopCss, /data-role-group="suspects"[\s\S]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/u);
+    assert.match(mysteryCastDesktopCss, /data-role-group="jury"[\s\S]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/u);
   });
 
   it("lets a hard-muted moderator create an open-floor Debate instead of blocking cast", () => {
@@ -2794,7 +2827,11 @@ describe("Debate experience", () => {
     assert.match(source, /Participant is available in Forum only\./u);
     assert.match(
       source,
-      /const participantForumOnly =\s*playerRole === "participant" && option\.id === "turnabout"/u,
+      /const movesParticipantToJudge =\s*playerRole === "participant" && option\.id === "turnabout"/u,
+    );
+    assert.equal(
+      debatePlayerRoleAfterFormatSelection("participant", "turnabout"),
+      "judge",
     );
     assert.match(
       source,
@@ -5559,6 +5596,18 @@ describe("Debate experience", () => {
     assert.match(source, /Jury/u);
     assert.match(source, /data-debate-main-court-prop-toggle=/u);
     assert.match(source, /data-debate-main-court-prop-tuner="true"/u);
+    assert.match(
+      source,
+      /const stageAlignmentCourtForegroundVisible\s*=\s*stageAlignmentWhodunnitPreview === null && !stageAlignmentJuryPreview/u,
+    );
+    assert.match(
+      source,
+      /data-debate-stage-court-foreground=\{[\s\S]{0,180}stageAlignmentMainCourtProp/u,
+    );
+    assert.match(
+      source,
+      /\{stageAlignmentCourtForegroundVisible \? \([\s\S]{0,240}data-debate-main-court-prop=/u,
+    );
     assert.match(source, /className=\{mysteryV2Styles\.wideEvidenceTable\}/u);
     assert.match(source, /mysteryV2Styles\.wideWitnessSilhouette/u);
     assert.match(
@@ -5621,6 +5670,22 @@ describe("Debate experience", () => {
     );
     assert.match(source, /Reset moderator/u);
     assert.match(source, /moderator bot, nameplate, and glyph plate/u);
+    assert.match(
+      pageCss,
+      /:global\(\[data-camera-view="wide"\]\)[\s\S]{0,260}data-debate-role="moderator"/u,
+    );
+    assert.match(
+      pageCss,
+      /:global\(\[data-camera-view="moderator"\]\)[\s\S]{0,260}data-debate-role="moderator"/u,
+    );
+    assert.match(
+      pageCss,
+      /\.debateBotPresencePlate\[data-debate-role="moderator"\][\s\S]{0,160}\.zenLiveBotPresenceFaceRig[\s\S]{0,340}--debate-moderator-face-only-offset-y/u,
+    );
+    assert.doesNotMatch(
+      pageCss,
+      /data-debate-role="moderator"\][\s\S]{0,240}data-avatar-details-mask/u,
+    );
     assert.match(source, /DEBATE_STAGE_ALIGNMENT_ITEMS\.map/u);
     assert.match(source, /className=\{styles\.alignmentItemToggle\}/u);
     assert.match(source, /data-alignment-item="bot"/u);

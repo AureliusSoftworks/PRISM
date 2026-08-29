@@ -31,6 +31,7 @@ import {
   normalizeBotFaceEyeOffsetY,
   normalizeBotFaceEyeRotationDeg,
   normalizeBotFaceEyeScale,
+  normalizeBotFaceFontWeight,
   normalizeBotFaceThinkingOffsetX,
   normalizeBotFaceThinkingOffsetY,
   normalizeBotFaceThinkingScale,
@@ -259,7 +260,7 @@ export type CoffeeSeatPlateEmojiProps = {
   faceMouthAnimation?: BotFaceGlyphAnimation | null;
   /** Four semantic Custom Speech poses, resolved from the portable face data. */
   faceMouthSpeechPoses?: BotFaceCustomSpeechPoses | null;
-  /** Retained for portable bot data; face weight adjustment is disabled. */
+  /** Studio-authored face weight, normalized at the shared renderer seam. */
   faceFontWeight?: number | null;
   faceEyeScale?: number | null;
   faceEyeOffsetX?: number | null;
@@ -343,6 +344,7 @@ export function CoffeeSeatPlateEmoji({
   faceMouthCharacter,
   faceMouthAnimation,
   faceMouthSpeechPoses,
+  faceFontWeight,
   faceEyeScale,
   faceEyeOffsetX,
   faceEyeOffsetY,
@@ -759,6 +761,8 @@ export function CoffeeSeatPlateEmoji({
     thinkingSpinnerActive || questionGlyphActive
       ? undefined
       : (normalizeBotFaceMouthRotationDeg(faceMouthRotationDeg) ?? undefined);
+  const normalizedFaceFontWeight =
+    normalizeBotFaceFontWeight(faceFontWeight) ?? undefined;
   const normalizedFaceThinkingScale =
     normalizeBotFaceThinkingScale(faceThinkingScale) ?? undefined;
   const normalizedFaceThinkingOffsetX =
@@ -909,6 +913,7 @@ export function CoffeeSeatPlateEmoji({
       style={
         {
           ["--bot-face-eye-scale" as string]: normalizedFaceEyeScale,
+          ["--bot-face-font-weight" as string]: normalizedFaceFontWeight,
           ["--bot-face-eye-spacing" as string]: `${normalizedFaceEyeSpacing}em`,
           ["--bot-face-gaze-x" as string]: `${displayGaze.xPx}px`,
           ["--bot-face-gaze-y" as string]: `${displayGaze.yPx}px`,

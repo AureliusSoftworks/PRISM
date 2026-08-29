@@ -14,5 +14,11 @@ export default function Error({
     console.error("[Prism route error]", error);
   }, [error]);
 
-  return <PrismAppErrorFallback onAction={reset} />;
+  return (
+    <PrismAppErrorFallback
+      error={error}
+      surface="Route"
+      onAction={reset}
+    />
+  );
 }

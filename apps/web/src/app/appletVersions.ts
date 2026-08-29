@@ -116,7 +116,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.89",
+    version: "1.90",
     status: "active",
   },
   feed: {

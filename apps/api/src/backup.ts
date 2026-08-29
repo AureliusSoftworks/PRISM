@@ -26,6 +26,12 @@ import {
   readAppletSessionNoteSurface,
 } from "./applet-session-notes.ts";
 import {
+  liveSessionFocusBelongsToUser,
+  readLiveSessionFocusSurface,
+  readLiveSessionFocusTransition,
+  recordLiveSessionFocusEvent,
+} from "./live-session-focus-events.ts";
+import {
   DEFAULT_BOT_FACE_BLINK_BAR,
   DEFAULT_BOT_FACE_BLINK_OFFSET_X,
   DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
@@ -563,6 +569,7 @@ export interface BackupSnapshot {
       guestKind?: "bot" | "producer";
       guestName?: string;
       guestContext?: string;
+      guestBrief?: string;
       title: string;
       topic: string;
       producerBrief: string;
@@ -716,6 +723,13 @@ export interface BackupSnapshot {
     entryId: string;
     fps: number;
     capturedAt: string;
+  }>;
+  /** Privacy-safe PRISM foreground transitions; no external window identity. */
+  focusEvents?: Array<{
+    surface: "chat" | "zen" | "coffee" | "signal" | "debate" | "story";
+    sessionId: string;
+    transition: "away" | "returned";
+    occurredAt: string;
   }>;
   /** Presentation-only response cues, including only the playback state actually persisted. */
   presenceBeats?: Array<{
@@ -2801,6 +2815,14 @@ export function exportUserSnapshot(
         ORDER BY captured_at, rowid`,
     )
     .all(userId) as Array<Record<string, unknown>>;
+  const focusEvents = db
+    .prepare(
+      `SELECT surface, session_id, transition, occurred_at
+         FROM live_session_focus_events
+        WHERE user_id = ?
+        ORDER BY occurred_at, rowid`,
+    )
+    .all(userId) as Array<Record<string, unknown>>;
   const botcastIntroAudio = db
     .prepare(
     `SELECT show_id, provider, model, prompt, content_type, audio_bytes,
@@ -3166,6 +3188,8 @@ export function exportUserSnapshot(
           typeof row.guest_name === "string" ? row.guest_name : "",
         guestContext:
           typeof row.guest_context === "string" ? row.guest_context : "",
+        guestBrief:
+          typeof row.guest_brief === "string" ? row.guest_brief : "",
         title: String(row.title),
         topic: String(row.topic),
         producerBrief: String(row.producer_brief ?? ""),
@@ -3362,6 +3386,12 @@ export function exportUserSnapshot(
       entryId: String(row.entry_id),
       fps: Number(row.fps),
       capturedAt: String(row.captured_at),
+    })),
+    focusEvents: focusEvents.map((row) => ({
+      surface: String(row.surface) as NonNullable<BackupSnapshot["focusEvents"]>[number]["surface"],
+      sessionId: String(row.session_id),
+      transition: String(row.transition) as "away" | "returned",
+      occurredAt: String(row.occurred_at),
     })),
     presenceBeats: presenceBeats.map((row) => ({
       id: String(row.id),
@@ -4745,12 +4775,12 @@ function importUserSnapshotWithinTransaction(
         `INSERT OR REPLACE INTO botcast_episodes
           (id, user_id, show_id, host_bot_id, guest_bot_id, guest_kind,
            guest_name, guest_context, title, topic,
-           producer_brief, provider, model, response_mode, duration_minutes, status, segment, outcome,
+           producer_brief, guest_brief, provider, model, response_mode, duration_minutes, status, segment, outcome,
            tension_level, warning_count, started_at, completed_at, runtime_ms,
            model_warmup_hold_duration_ms, model_warmup_hold_started_at,
            persona_reviewer_bot_id, persona_reviewer_name, persona_rating,
            persona_comment, persona_reviewed_at, persona_review_provenance_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         episode.id,
         userId,
@@ -4763,6 +4793,7 @@ function importUserSnapshotWithinTransaction(
         episode.title,
         episode.topic,
         episode.producerBrief,
+        episode.guestBrief ?? "",
         episode.provider === "ollama_cloud" ||
         episode.provider === "openai" ||
         episode.provider === "anthropic"
@@ -5264,6 +5295,16 @@ function importUserSnapshotWithinTransaction(
         fps,
         new Date(sample.capturedAt).toISOString(),
       );
+    }
+  }
+
+  if (snapshot.focusEvents) {
+    for (const event of snapshot.focusEvents) {
+      const surface = readLiveSessionFocusSurface(event?.surface);
+      const sessionId = event?.sessionId?.trim() ?? "";
+      const transition = readLiveSessionFocusTransition(event?.transition);
+      if (!surface || !sessionId || !transition || !Number.isFinite(Date.parse(event?.occurredAt ?? "")) || !liveSessionFocusBelongsToUser(db, userId, surface, sessionId)) continue;
+      recordLiveSessionFocusEvent(db, userId, surface, sessionId, transition, event.occurredAt);
     }
   }
 

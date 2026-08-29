@@ -18,6 +18,8 @@ import {
   MANSION_PLACEMENT_RELATIONS_V2,
   addAutoCenteredMansionLayoutV2Doors,
   canonicalMansionLayoutV2,
+  debateMysteryRoomFloorRuleV1,
+  debateMysteryRoomTypeIsAllowedOnFloorV1,
   mansionLayoutV2DoorPoint,
   mansionLayoutV2EntityRect,
   mansionLayoutV2EditorDerivativeFromLegacyRooms,
@@ -28,7 +30,6 @@ import {
   placeMansionLayoutV2Entity,
   mansionLayoutV2SemanticRoomCount,
   mansionLayoutV2SemanticRoomsAreConnected,
-  mansionLayoutV2TemplateIsRooftopOnly,
   mansionLayoutV2SharedWall,
   reconcileMansionLayoutV2Doors,
   removeMansionLayoutV2Door,
@@ -161,6 +162,23 @@ function clampNormalized(value: number): number {
 function roomTemplate(templateId: string) {
   return DEBATE_MYSTERY_ROOM_TEMPLATES.find((template) => template.id === templateId) ??
     DEBATE_MYSTERY_ROOM_TEMPLATES.find((template) => template.id === "parlor")!;
+}
+
+function roomFloorRulePresentation(templateId: string, topFloor: number) {
+  const rule = debateMysteryRoomFloorRuleV1(templateId);
+  if (rule === "ground-floor-only") {
+    return { label: "Floor 1 only", title: "Ground-floor only · use Floor 1" };
+  }
+  if (rule === "top-floor-only") {
+    return { label: "Top floor only", title: `Top-floor only · use Floor ${topFloor}` };
+  }
+  return null;
+}
+
+function roomFloorRuleNotice(templateId: string, name: string, topFloor: number): string {
+  return debateMysteryRoomFloorRuleV1(templateId) === "ground-floor-only"
+    ? `${name} can only be used on Floor 1.`
+    : `${name} can only be used on the current top floor, Floor ${topFloor}.`;
 }
 
 function roomAssetUrl(
@@ -550,6 +568,13 @@ export default function MansionEditorDialog({
   const selectedEntityCanBeRemoved = Boolean(selectedEntity && !selectedRemovalBlockedReason);
   const thirdFloorAccessible = mansionLayoutV2FloorSemanticRoomCount(layout, 2) >= 4;
   const rooftopFloor = mansionLayoutV2RooftopFloor(layout);
+  const paletteTopFloor = Math.max(rooftopFloor, selectedFloor);
+  const usedRoomTemplateIds = useMemo(
+    () => new Set(layout.entities
+      .filter((entity): entity is MansionLayoutRoomV2 => entity.kind === "room")
+      .map((room) => room.templateId)),
+    [layout.entities],
+  );
 
   const pushLayoutHistory = (snapshot: MansionLayoutV2): void => {
     setLayoutHistory((current) => {
@@ -767,19 +792,32 @@ export default function MansionEditorDialog({
       setNotice("Floor 2 needs at least four semantic rooms before Floor 3 opens.");
       return;
     }
-    const defaultTemplateId = layout.entities.some(
-      (entity) => entity.kind === "room" && entity.templateId === "foyer",
-    ) ? "parlor" : "foyer";
-    const template = roomTemplate(requestedTemplateId ?? defaultTemplateId);
-    if (mansionLayoutV2TemplateIsRooftopOnly(template.id) &&
-      (selectedFloor === 1 || selectedFloor < rooftopFloor)) {
-      setNotice(`Rooftop rooms can only be placed on the current top floor, Floor ${rooftopFloor}.`);
+    const availableDefaultTemplate = DEBATE_MYSTERY_ROOM_TEMPLATES.find((candidate) =>
+      !usedRoomTemplateIds.has(candidate.id) &&
+      debateMysteryRoomTypeIsAllowedOnFloorV1(candidate.id, selectedFloor, paletteTopFloor));
+    const requestedTemplate = requestedTemplateId
+      ? roomTemplate(requestedTemplateId)
+      : availableDefaultTemplate;
+    if (!requestedTemplate) {
+      setNotice("No unused room type is available on this floor.");
       return;
     }
-    const lowerRooftopRoom = layout.entities.find((entity) => entity.kind === "room" &&
-      mansionLayoutV2TemplateIsRooftopOnly(entity.templateId) && entity.floor < selectedFloor);
-    if (lowerRooftopRoom) {
-      setNotice(`Change the rooftop room on Floor ${lowerRooftopRoom.floor} before building above it.`);
+    const template = requestedTemplate;
+    if (usedRoomTemplateIds.has(template.id)) {
+      setNotice(`${template.name} is already placed in this mansion. Each room type can only be used once.`);
+      return;
+    }
+    if (!debateMysteryRoomTypeIsAllowedOnFloorV1(template.id, selectedFloor, paletteTopFloor)) {
+      setNotice(roomFloorRuleNotice(template.id, template.name, paletteTopFloor));
+      return;
+    }
+    const lowerTopFloorRoom = layout.entities.find(
+      (entity): entity is MansionLayoutRoomV2 => entity.kind === "room" &&
+        debateMysteryRoomFloorRuleV1(entity.templateId) === "top-floor-only" &&
+        entity.floor < selectedFloor,
+    );
+    if (lowerTopFloorRoom) {
+      setNotice(`Change ${lowerTopFloorRoom.name} on Floor ${lowerTopFloorRoom.floor} before building above it.`);
       return;
     }
     const entity: MansionLayoutRoomV2 = {
@@ -847,9 +885,14 @@ export default function MansionEditorDialog({
 
   const changeRoomTemplate = (room: MansionLayoutRoomV2, templateId: string): void => {
     const template = roomTemplate(templateId);
-    if (mansionLayoutV2TemplateIsRooftopOnly(template.id) &&
-      (room.floor === 1 || room.floor !== rooftopFloor)) {
-      setNotice(`Rooftop rooms can only be used on the current top floor, Floor ${rooftopFloor}.`);
+    const duplicateRoom = layout.entities.find((entity) =>
+      entity.kind === "room" && entity.id !== room.id && entity.templateId === template.id);
+    if (duplicateRoom) {
+      setNotice(`${template.name} is already placed in this mansion. Each room type can only be used once.`);
+      return;
+    }
+    if (!debateMysteryRoomTypeIsAllowedOnFloorV1(template.id, room.floor, rooftopFloor)) {
+      setNotice(roomFloorRuleNotice(template.id, template.name, rooftopFloor));
       return;
     }
     const candidate: MansionLayoutRoomV2 = {
@@ -1185,19 +1228,33 @@ export default function MansionEditorDialog({
           <header><strong>Room blocks</strong><small>Add to Floor {selectedFloor}</small></header>
           <div>
             {DEBATE_MYSTERY_ROOM_TEMPLATES.map((template) => {
-              const rooftopOnly = mansionLayoutV2TemplateIsRooftopOnly(template.id);
-              const disabled = rooftopOnly && (selectedFloor === 1 || selectedFloor < rooftopFloor);
+              const floorRule = roomFloorRulePresentation(template.id, paletteTopFloor);
+              const alreadyPlaced = usedRoomTemplateIds.has(template.id);
+              const floorUnavailable = !debateMysteryRoomTypeIsAllowedOnFloorV1(
+                template.id,
+                selectedFloor,
+                paletteTopFloor,
+              );
+              const disabled = alreadyPlaced || floorUnavailable;
               return (
                 <button
                   key={template.id}
                   type="button"
                   disabled={disabled}
-                  title={disabled ? `Rooftop-only · use Floor ${rooftopFloor}` : `Add ${template.name}`}
+                  title={alreadyPlaced
+                    ? `${template.name} is already placed in this mansion`
+                    : floorUnavailable
+                      ? floorRule?.title
+                      : `Add ${template.name}`}
                   onClick={() => addRoom(template.id)}
                 >
                   <span aria-hidden="true">{template.emoji}</span>
                   <strong>{template.name}</strong>
-                  {rooftopOnly ? <small>Rooftop only</small> : null}
+                  {alreadyPlaced
+                    ? <small>Placed</small>
+                    : floorRule
+                      ? <small>{floorRule.label}</small>
+                      : null}
                 </button>
               );
             })}
@@ -1233,8 +1290,15 @@ export default function MansionEditorDialog({
                       ? <option value={selectedRoom.templateId}>{selectedRoom.name} · imported type</option>
                       : null}
                     {DEBATE_MYSTERY_ROOM_TEMPLATES.map((template) => {
-                      const rooftopOnly = mansionLayoutV2TemplateIsRooftopOnly(template.id);
-                      return <option key={template.id} value={template.id} disabled={rooftopOnly && (selectedRoom.floor === 1 || selectedRoom.floor !== rooftopFloor)}>{template.name}{rooftopOnly ? " · rooftop only" : ""}</option>;
+                      const floorRule = roomFloorRulePresentation(template.id, rooftopFloor);
+                      const alreadyPlaced = template.id !== selectedRoom.templateId &&
+                        usedRoomTemplateIds.has(template.id);
+                      const floorUnavailable = !debateMysteryRoomTypeIsAllowedOnFloorV1(
+                        template.id,
+                        selectedRoom.floor,
+                        rooftopFloor,
+                      );
+                      return <option key={template.id} value={template.id} disabled={alreadyPlaced || floorUnavailable}>{template.name}{alreadyPlaced ? " · already placed" : floorRule ? ` · ${floorRule.label}` : ""}</option>;
                     })}
                   </select>
                 </label>

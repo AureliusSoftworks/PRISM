@@ -154,6 +154,24 @@ class FakeMediaRecorder {
   }
 }
 
+class FakeLifecycleTarget {
+  readonly listeners = new Map<string, Set<() => void>>();
+
+  addEventListener(kind: string, listener: () => void): void {
+    const listeners = this.listeners.get(kind) ?? new Set<() => void>();
+    listeners.add(listener);
+    this.listeners.set(kind, listeners);
+  }
+
+  removeEventListener(kind: string, listener: () => void): void {
+    this.listeners.get(kind)?.delete(listener);
+  }
+
+  dispatch(kind: string): void {
+    for (const listener of this.listeners.get(kind) ?? []) listener();
+  }
+}
+
 class StuckStopMediaRecorder extends FakeMediaRecorder {
   override stop(): void {
     this.state = "inactive";
@@ -317,6 +335,49 @@ test("a suspended or interrupted shared mixer is resumed before media-element ro
     Object.defineProperty(globalThis, "window", {
       configurable: true,
       value: originalWindow,
+    });
+  }
+});
+
+test("the shared mixer recovers on desktop focus without recreating or changing its output", async () => {
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  class LifecycleAudioContext extends FakeAudioContext {}
+  const windowTarget = Object.assign(new FakeLifecycleTarget(), {
+    AudioContext: LifecycleAudioContext,
+  });
+  const documentTarget = Object.assign(new FakeLifecycleTarget(), {
+    visibilityState: "visible",
+  });
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: windowTarget,
+  });
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: documentTarget,
+  });
+
+  try {
+    const context = prismAudioContext() as unknown as FakeAudioContext;
+    const output = prismAudioOutputNode(
+      context as unknown as AudioContext,
+    ) as unknown as FakeAudioNode;
+    context.state = "interrupted";
+    windowTarget.dispatch("focus");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.equal(context.state, "running");
+    assert.equal(prismAudioContext(), context);
+    assert.equal(output.connections.size, 1);
+  } finally {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: originalWindow,
+    });
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: originalDocument,
     });
   }
 });

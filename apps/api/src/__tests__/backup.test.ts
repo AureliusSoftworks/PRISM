@@ -81,6 +81,8 @@ describe("backup Signal listener reviews", () => {
       const episode = createBotcastEpisode(db, "user-1", show.id, {
         guestBotId: "signal-guest",
         topic: "What makes a review trustworthy?",
+        guestBrief:
+          "You know the reviewer missed the most important exchange.",
       });
       forceEndBotcastEpisode(db, "user-1", episode.id);
       const provenance = {
@@ -118,6 +120,10 @@ describe("backup Signal listener reviews", () => {
         snapshot.botcast?.episodes[0]?.personaReview?.provenance,
         provenance,
       );
+      assert.equal(
+        snapshot.botcast?.episodes[0]?.guestBrief,
+        "You know the reviewer missed the most important exchange.",
+      );
       db.prepare("DELETE FROM botcast_shows WHERE id = ?").run(show.id);
       importUserSnapshot(db, "user-1", snapshot, userKey);
       assert.deepEqual(
@@ -132,6 +138,16 @@ describe("backup Signal listener reviews", () => {
           ).provenance,
         ),
         provenance,
+      );
+      assert.equal(
+        (
+          db
+            .prepare(
+              "SELECT guest_brief AS guestBrief FROM botcast_episodes WHERE id = ?",
+            )
+            .get(episode.id) as { guestBrief: string }
+        ).guestBrief,
+        "You know the reviewer missed the most important exchange.",
       );
 
       const legacySnapshot = structuredClone(snapshot);
@@ -433,6 +449,12 @@ describe("backup applet session notes", () => {
          VALUES ('user-1', 'coffee', 'coffee-note-session', 'message-1', 59,
                  '2026-08-09T20:00:15.000Z')`,
       ).run();
+      db.prepare(
+        `INSERT INTO live_session_focus_events
+          (user_id, surface, session_id, transition, occurred_at)
+         VALUES ('user-1', 'coffee', 'coffee-note-session', 'away',
+                 '2026-08-09T20:00:20.000Z')`,
+      ).run();
 
       const snapshot = exportUserSnapshot(db, "user-1", userKey);
       assert.equal(
@@ -446,12 +468,21 @@ describe("backup applet session notes", () => {
       assert.equal(snapshot.sessionNotes?.[0]?.captures?.[0]?.fps, 57);
       assert.equal(snapshot.transcriptFrameSamples?.[0]?.entryId, "message-1");
       assert.equal(snapshot.transcriptFrameSamples?.[0]?.fps, 59);
+      assert.deepEqual(snapshot.focusEvents, [{
+        surface: "coffee",
+        sessionId: "coffee-note-session",
+        transition: "away",
+        occurredAt: "2026-08-09T20:00:20.000Z",
+      }]);
 
       db.prepare(
         "DELETE FROM applet_session_notes WHERE user_id = 'user-1'",
       ).run();
       db.prepare(
         "DELETE FROM applet_transcript_frame_samples WHERE user_id = 'user-1'",
+      ).run();
+      db.prepare(
+        "DELETE FROM live_session_focus_events WHERE user_id = 'user-1'",
       ).run();
       importUserSnapshot(db, "user-1", snapshot, userKey);
       const restored = db
@@ -479,6 +510,14 @@ describe("backup applet session notes", () => {
         .get() as { entry_id: string; fps: number };
       assert.equal(restoredFrameSample.entry_id, "message-1");
       assert.equal(restoredFrameSample.fps, 59);
+      assert.equal(
+        (db.prepare(
+          `SELECT transition FROM live_session_focus_events
+            WHERE user_id = 'user-1' AND surface = 'coffee'
+              AND session_id = 'coffee-note-session'`,
+        ).get() as { transition: string }).transition,
+        "away",
+      );
     });
   });
 });

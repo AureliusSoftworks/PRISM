@@ -946,6 +946,11 @@ describe("createDatabase bot export hash migration", () => {
           (column) => column.name === "pair_history_persisted_at",
         ),
       );
+      assert.ok(
+        botcastEpisodeColumns.some(
+          (column) => column.name === "guest_brief",
+        ),
+      );
       const row = reopened
         .prepare("SELECT export_hash FROM bots WHERE id = ?")
         .get("bot-1") as { export_hash: string | null } | undefined;

@@ -13,6 +13,7 @@ import type {
 } from "@localai/shared";
 import {
   audioContextNeedsResume,
+  installAudioContextRecoveryLifecycle,
   resumeAudioContextIfNeeded,
 } from "./audioContextRecovery.ts";
 import { createVoiceLightMeter } from "./voiceLightEnvelope.ts";
@@ -92,9 +93,23 @@ let sharedAudioContextConstructor: typeof AudioContext | null = null;
 let sharedWorldOutput: GainNode | null = null;
 let sharedLocalOnlyOutput: GainNode | null = null;
 let activeCapture: ReplayAudioMasterCaptureSession | null = null;
+let releaseSharedAudioContextRecovery: (() => void) | null = null;
 
 function nowMs(): number {
   return typeof performance === "undefined" ? Date.now() : performance.now();
+}
+
+function ensureSharedAudioContextRecovery(): void {
+  // Server rendering and test-only window shims have no application lifecycle
+  // to observe. A real browser always supplies document before a mixer exists.
+  if (releaseSharedAudioContextRecovery || typeof document === "undefined") {
+    return;
+  }
+  releaseSharedAudioContextRecovery = installAudioContextRecoveryLifecycle({
+    // Do not call prismAudioContext here: app/focus events must recover an
+    // existing mixer, never create audio or override a player's settings.
+    getContext: () => sharedAudioContext,
+  });
 }
 
 /**
@@ -117,6 +132,7 @@ export function prismAudioContext(): AudioContext | null {
     sharedAudioContextConstructor = window.AudioContext;
     sharedWorldOutput = null;
     sharedLocalOnlyOutput = null;
+    ensureSharedAudioContextRecovery();
   }
   return sharedAudioContext;
 }

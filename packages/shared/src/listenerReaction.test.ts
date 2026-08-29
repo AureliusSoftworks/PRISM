@@ -11,6 +11,8 @@ import {
   buildBotCrosstalkListenerReactionPlanV1,
   buildCoffeeListenerReactionPlanV1,
   buildSignalListenerReactionPlanV1,
+  buildSignalFriendlyInterruptionPlanV1,
+  buildSignalMutualInterruptionPlanV1,
   buildZenPlayerListenerReactionPlanV1,
   crosstalkInterruptionIsMeaningfulV1,
   normalizeBotCrosstalkInterruptedSpeakerCue,
@@ -32,11 +34,127 @@ import {
   listenerReactionSpeechCopySourceV1,
   listenerReactionSpokenTextV1,
   listenerReactionTextIsAuthorizedV1,
+  listenerReactionSequencePlansV1,
+  normalizeSignalListenerSequenceV1,
+  withSignalListenerSequenceV1,
+  signalNeutralBackchannelForTextV2,
   socialSilenceMessageIsMarkedV1,
 } from "./listenerReaction.ts";
 import { DIRECTIONAL_IRRITATION_SNARK_CUES } from "./directionalIrritation.ts";
 
 describe("listener reaction planning", () => {
+  it("keeps most medium/long Signal turns at one beat and makes three rare", () => {
+    const counts: number[] = [];
+    let authoredLaughVerified = false;
+    for (let index = 0; index < 2_000; index += 1) {
+      const base = buildSignalListenerReactionPlanV1({
+        episodeId: "plural-episode",
+        messageId: `plural-message-${index}`,
+        speakerBotId: "host",
+        listenerBotId: "guest",
+        listenerRole: "guest",
+        segment: "interview",
+        mood: "neutral",
+        tensionLevel: 0,
+        speakerText:
+          "The superconductivity measurement changed after the calibration, and the longer explanation connects that result to the practical consequence for this experiment.",
+      });
+      if (!base?.signalOrganicBeat || (!base.spokenCue && !base.vocalFoley)) continue;
+      const sequenced = withSignalListenerSequenceV1({
+        plan: { ...base, targetProgress: 0.44 },
+        customLaughPreferred: true,
+        wordCount: 54,
+        speakerText:
+          "The superconductivity measurement changed after the calibration, and this funny result still has a practical consequence for the experiment.",
+      });
+      assert.ok(sequenced.signalListenerSequence);
+      assert.deepEqual(
+        normalizeSignalListenerSequenceV1(sequenced.signalListenerSequence),
+        sequenced.signalListenerSequence,
+      );
+      const expanded = listenerReactionSequencePlansV1(sequenced);
+      counts.push(expanded.length);
+      if (expanded.some((plan) => plan.vocalFoley === "chuckles")) {
+        assert.ok(
+          expanded
+            .filter((plan) => plan.vocalFoley === "chuckles")
+            .every((plan) => plan.listenerLaughSource === "authored_local"),
+        );
+        authoredLaughVerified = true;
+      }
+    }
+    assert.ok(counts.length > 1_000);
+    const one = counts.filter((count) => count === 1).length / counts.length;
+    const two = counts.filter((count) => count === 2).length / counts.length;
+    const three = counts.filter((count) => count === 3).length / counts.length;
+    assert.ok(one > 0.62 && one < 0.75);
+    assert.ok(two > 0.2 && two < 0.38);
+    assert.ok(three > 0.008 && three < 0.035);
+    assert.equal(authoredLaughVerified, true);
+  });
+
+  it("keeps friendly Signal interruption repair soft and canonical-neutral", () => {
+    const plan = buildSignalFriendlyInterruptionPlanV1({
+      seed: "friendly",
+      messageId: "message",
+      speakerBotId: "guest",
+      listenerBotId: "host",
+      includeReturnInvitation: true,
+      speakerPersona: "A warm and contemplative guest.",
+    });
+    assert.equal(plan.interjectionAttempt, true);
+    assert.equal(plan.floorOutcome, "hold");
+    assert.ok(plan.interruptedSpeakerCue);
+    assert.equal(plan.signalOrganicBeat?.kind, "cut_in_retreat");
+    assert.equal(plan.signalOrganicBeat?.canonicalImpact, "none");
+    assert.equal(plan.cameraCutEligible, false);
+    const mutual = buildSignalMutualInterruptionPlanV1({
+      seed: "mutual",
+      messageId: "mutual-message",
+      speakerBotId: "guest",
+      listenerBotId: "host",
+    });
+    assert.equal(mutual.floorOutcome, "reclaim");
+    assert.equal(mutual.signalOrganicBeat?.kind, "mutual_collision");
+    assert.ok(mutual.interruptedSpeakerCue);
+    assert.equal(mutual.cameraCutEligible, false);
+    const savedMutual = normalizeListenerReactionPlanV1({
+      ...mutual,
+      audibleCutoff: "I would like to think tha—",
+    });
+    assert.ok(savedMutual);
+    assert.equal(
+      botCrosstalkPrimarySpeakerContent(
+        "I would like to think that I am good at a lot of things.",
+        savedMutual,
+      ),
+      "I would like to think tha—",
+    );
+  });
+
+  it("uses neutral semantic-safe backchannels with recent-cue rotation", () => {
+    assert.equal(
+      signalNeutralBackchannelForTextV2({
+        seed: "question",
+        speakerText: "Do you agree with that conclusion?",
+      }),
+      null,
+    );
+    const first = signalNeutralBackchannelForTextV2({
+      seed: "technical",
+      speakerText:
+        "The superconductivity measurement remained stable through the second calibration pass.",
+    });
+    assert.ok(first === "Mhm" || first === "Huh");
+    const rotated = signalNeutralBackchannelForTextV2({
+      seed: "technical",
+      speakerText:
+        "The superconductivity measurement remained stable through the second calibration pass.",
+      recentSpokenCues: [first],
+    });
+    assert.ok(rotated === "Mhm" || rotated === "Huh");
+    assert.notEqual(rotated, first);
+  });
   it("exposes exact short public reaction speech to Copycat across social modes", () => {
     for (const cue of ["Hmm...", "let me see...", "Nice!"] as const) {
       assert.equal(

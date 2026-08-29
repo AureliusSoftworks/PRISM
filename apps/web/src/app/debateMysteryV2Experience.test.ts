@@ -46,6 +46,47 @@ const tutorialSource = readFileSync(
 );
 
 describe("Whodunnit V2 prosecution experience", () => {
+  it("presents investigation and court actions as one tactile command-console system", () => {
+    assert.match(experienceSource, /data-console-label="Case desk · field commands"/u);
+    assert.match(experienceSource, /data-console-label="Prosecution console"/u);
+    for (const command of ["move", "examine", "talk", "present", "press", "objection", "think"]) {
+      assert.match(experienceSource, new RegExp(`data-command="${command}"`, "u"));
+    }
+    assert.match(experienceSource, /aria-pressed=\{command === "present"\}/u);
+    assert.match(cssSource, /button\[data-active="true"\]/u);
+    assert.match(cssSource, /translateY\(0\.3rem\)/u);
+    assert.match(cssSource, /\.investigation:has\(\.fileChargesButton\) \.dialogueBox/u);
+    assert.match(cssSource, /\.testimony \{[^}]*bottom: 8\.4rem;/u);
+    assert.match(cssSource, /button:focus-visible/u);
+    assert.match(cssSource, /prefers-reduced-motion: reduce/u);
+  });
+
+  it("reuses the existing Whodunnit sound palette for physical controls", () => {
+    for (const cue of ["navigate", "clip", "enter", "paper", "pencil", "theory"]) {
+      assert.match(experienceSource, new RegExp(`playControlSfx\\("${cue}"\\)`, "u"));
+    }
+  });
+
+  it("keeps the wide evidence table separate from the witness stand", () => {
+    const wideCourtStart = experienceSource.indexOf(
+      'courtCamera === "wide" ? (',
+    );
+    const witnessCourtStart = experienceSource.indexOf(
+      'courtCamera === "witness" ? (',
+      wideCourtStart,
+    );
+    const wideCourtSource = experienceSource.slice(
+      wideCourtStart,
+      witnessCourtStart,
+    );
+    assert.match(wideCourtSource, /styles\.wideEvidenceTable/u);
+    assert.doesNotMatch(wideCourtSource, /styles\.wideWitnessSilhouette/u);
+    assert.match(
+      experienceSource.slice(witnessCourtStart),
+      /styles\.witnessStand/u,
+    );
+  });
+
   it("never displays Case Forge progress above its declared attempt budget", () => {
     assert.equal(
       normalizeDebateMysteryV2ForgeProgressMessage(
@@ -212,7 +253,10 @@ describe("Whodunnit V2 prosecution experience", () => {
   it("stages a directed courtroom with witness, counsel, judge, and evidence cameras", () => {
     assert.match(experienceSource, /resolveWhodunnitCourtCamera\(\{/u);
     assert.match(experienceSource, /className=\{styles\.courtStage\}[\s\S]{0,180}data-camera=\{courtCamera\}/u);
-    assert.match(experienceSource, /whodunnit-witness-silhouette\.png/u);
+    assert.doesNotMatch(
+      experienceSource,
+      /whodunnit-witness-silhouette\.png/u,
+    );
     assert.match(experienceSource, /coffee-table\/table_\$\{props\.theme\}\.png/u);
     assert.match(experienceSource, /whodunnit-witness-foreground-\$\{props\.theme\}\.png/u);
     assert.match(experienceSource, /moderator-gavel-\$\{props\.theme\}-down\.png/u);

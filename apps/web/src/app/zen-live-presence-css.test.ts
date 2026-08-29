@@ -3619,8 +3619,8 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       readyFaceGlyphRule,
-      /var\(--crt-face-glow-filter\)/,
-      "Full-size faces must retain the proven compositor-level phosphor halo.",
+      /--zen-live-bot-glyph-compositor-glow-filter[\s\S]*var\(--crt-face-glow-filter\)/,
+      "Normal-size live faces retain the proven compositor phosphor halo.",
     );
     const readyFaceBloomRule = ruleForSelectorNeedlesWithBody(
       [
@@ -3643,7 +3643,17 @@ describe("Zen live presence CSS", () => {
     assert.match(
       readyFaceBloomRule,
       /filter:\s*blur\(var\(--crt-glyph-beam-softness\)\)\s*;/,
-      "The masked bloom keeps beam softness while the reliable parent surface owns the broad halo.",
+      "Normal-size live faces keep the reliable masked beam-softness clone.",
+    );
+    assert.match(
+      css,
+      /\.zenLiveBotPresencePlate\[data-avatar-customizer-preview="true"\],[\s\S]*?\.signalBotPresencePlate\s*\{[\s\S]*?--zen-live-bot-glyph-compositor-glow-filter:\s*opacity\(1\);/,
+      "Signal preview and Avatar Studio must disable the box-prone compositor halo without changing live Zen.",
+    );
+    assert.match(
+      css,
+      /data-crt-pixel-mask-ready="true"\]::before\s*\{[\s\S]*?content:\s*attr\(data-crt-glyph-content\);[\s\S]*?mask-image:\s*none;[\s\S]*?filter:\s*blur\(var\(--crt-glyph-beam-softness\)\)\s*var\(--crt-face-glow-filter\);/,
+      "Expanded previews repaint the authored glyph silhouette for a rich box-free halo.",
     );
     assert.doesNotMatch(readyFaceBloomRule, /content:\s*none\s*;/);
     const readyFaceCoreRule = ruleForNormalizedSelector(

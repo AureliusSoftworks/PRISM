@@ -8,7 +8,10 @@ import type {
   ResolvedLocalVoicePronunciationV1,
   ResolvedLocalVoiceSpeechprintV1,
 } from "./localVoice.js";
-import type { VoicePerformancePlanV1 } from "./voicePerformance.js";
+import type {
+  VoicePerformancePlanV1,
+  VoicePerformancePlanV2,
+} from "./voicePerformance.js";
 
 export const REPLAY_MANIFEST_VERSION = 1 as const;
 export const REPLAY_MANIFEST_V2_VERSION = 2 as const;
@@ -284,7 +287,7 @@ export interface ReplayVoiceTakeV1 {
   profile: BotAudioVoiceProfile;
   resolvedPronunciation?: ResolvedLocalVoicePronunciationV1 | null;
   resolvedSpeechprint?: ResolvedLocalVoiceSpeechprintV1 | null;
-  performancePlan?: VoicePerformancePlanV1 | null;
+  performancePlan?: VoicePerformancePlanV1 | VoicePerformancePlanV2 | null;
   moodKey: VoiceDeliveryMood;
   effectsEnabled: boolean;
   gain: number;

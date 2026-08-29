@@ -10792,6 +10792,74 @@ function botBallotPrompt(
   ].join("\n");
 }
 
+const DEBATE_BALLOT_ATTRIBUTION_VERB =
+  "(?:said|says|argued|argues|claimed|claims|noted|notes|explained|explains|showed|shows|demonstrated|demonstrates|established|establishes|admitted|admits|conceded|concedes|emphasized|emphasizes|highlighted|highlights|observed|observes|pointed\\s+out|points\\s+out|made\\s+clear|makes\\s+clear)";
+
+function debateBallotRegexEscape(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+function debateBallotReasonInventsNamedClaim(
+  session: DebateSessionV1,
+  voter: DebateBotSnapshotV1,
+  reason: string,
+): boolean {
+  const transcript = publicTranscript(session, voter.id, true);
+  const transcriptLines = transcript.split("\n");
+  const speakers = [
+    { id: session.moderator.id, name: session.moderatorName },
+    { id: session.forAdvocate.id, name: session.forAdvocate.name },
+    { id: session.againstAdvocate.id, name: session.againstAdvocate.name },
+    ...session.jury.jurors.map((juror) => ({ id: juror.id, name: juror.name })),
+  ].filter(
+    (speaker, index, all) =>
+      speaker.name.trim().length > 0 &&
+      all.findIndex((candidate) => candidate.id === speaker.id) === index,
+  );
+  const aliasOwners = new Map<string, Set<string>>();
+  const aliasesBySpeaker = new Map<string, Set<string>>();
+  for (const speaker of speakers) {
+    const fullName = speaker.name.trim();
+    const firstName = fullName.match(/[\p{L}\p{N}][\p{L}\p{N}'’.-]*/u)?.[0] ?? "";
+    const aliases = new Set([fullName]);
+    if (firstName.length >= 3 && !/^(?:the|and)$/iu.test(firstName)) {
+      aliases.add(firstName);
+    }
+    aliasesBySpeaker.set(speaker.id, aliases);
+    for (const alias of aliases) {
+      const key = alias.toLocaleLowerCase();
+      const owners = aliasOwners.get(key) ?? new Set<string>();
+      owners.add(speaker.id);
+      aliasOwners.set(key, owners);
+    }
+  }
+
+  for (const speaker of speakers) {
+    const heardSpeech = transcriptLines
+      .filter((line) => line.startsWith(`${speaker.name}: `))
+      .map((line) => line.slice(speaker.name.length + 2))
+      .join(" ");
+    const heardTokens = materialCaseBoardTokens(heardSpeech);
+    for (const alias of aliasesBySpeaker.get(speaker.id) ?? []) {
+      if (aliasOwners.get(alias.toLocaleLowerCase())?.size !== 1) continue;
+      const pattern = new RegExp(
+        `(?:^|[^\\p{L}\\p{N}])${debateBallotRegexEscape(alias)}\\s+${DEBATE_BALLOT_ATTRIBUTION_VERB}\\s+(?:that\\s+)?([^.!?;,\\n]+)`,
+        "giu",
+      );
+      for (const match of reason.matchAll(pattern)) {
+        const claimTokens = materialCaseBoardTokens(match[1] ?? "");
+        if (
+          claimTokens.size >= 2 &&
+          ![...claimTokens].some((token) => heardTokens.has(token))
+        ) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 function participantAdjustedBallot(
   session: DebateSessionV1,
   voterBotId: string,
@@ -10945,12 +11013,23 @@ async function generateBallot(
     )
       ? "I stand by the substance I put forward, and I am voting for the side that answered the motion most directly."
       : sanitizedReason;
-  const personaGroundedReason =
+  let personaGroundedReason =
     chromaticConstraint && recordSideId !== chromaticConstraint.sideId
       ? chromaticConstraint.polarity === "hate"
         ? `I will not back the ${chromaticConstraint.targetLabel}-bot case; ${sideLabel(session, finalSideId)} made the argument I can live with.`
         : `I am backing the ${chromaticConstraint.targetLabel}-bot case; ${sideLabel(session, finalSideId)} made the argument I can live with.`
       : holderAwareReason;
+  if (
+    personaGroundedReason &&
+    debateBallotReasonInventsNamedClaim(
+      session,
+      voter,
+      personaGroundedReason,
+    )
+  ) {
+    personaGroundedReason = `${sideLabel(session, finalSideId)} made the clearer case in the public exchange.`;
+    voicePerformanceCue = null;
+  }
   return {
     version: DEBATE_SCHEMA_VERSION,
     voterBotId: voter.id,

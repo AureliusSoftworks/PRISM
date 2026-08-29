@@ -10,10 +10,13 @@ import {
   expectedVoicePlaybackDurationMs,
   resolveBotVoiceCharacter,
   resolveVoicePlaybackTransform,
+  normalizeVoicePerformancePlanV2,
+  voicePerformanceRateAtProgressV2,
   type BotAudioVoiceProfileV1,
   type CoffeeVoiceDeliveryEnvelope,
   type VoiceDeliveryMood,
   type VoiceEffect,
+  type VoicePerformancePlanV2,
 } from "@localai/shared";
 import {
   connectRoomAcoustics,
@@ -288,6 +291,10 @@ export interface VoicePlaybackLifecycle {
   loudnessNormalization?: "interview";
   /** Temporary per-utterance delivery changes. V1 accepts the neutral envelope only. */
   deliveryEnvelope?: CoffeeVoiceDeliveryEnvelope;
+  /** Signal-only deterministic presentation; absent everywhere else. */
+  performancePlan?: VoicePerformancePlanV2 | null;
+  /** Public ephemeral caption for audible fillers or silent hesitation. */
+  onPerformanceCaption?: (caption: string | null, active: boolean) => void;
   /** Performance-scoped full-avatar light binding for this audible voice. */
   voiceLightTarget?: string;
   /** Already-smoothed normalized post-effect voice energy. */
@@ -321,6 +328,20 @@ export interface VoicePlaybackLifecycle {
   onEnd?: () => void;
   /** Clears presentation state when playback is superseded before completion. */
   onCancel?: () => void;
+}
+
+export function voicePerformanceMediaPlaybackRateV2(args: {
+  baseRate: number;
+  plan: VoicePerformancePlanV2 | null | undefined;
+  progress: number;
+}): number {
+  const plan = normalizeVoicePerformancePlanV2(args.plan);
+  return plan
+    ? Number(
+        (Math.max(0.5, Math.min(2, args.baseRate)) *
+          voicePerformanceRateAtProgressV2(plan, args.progress)).toFixed(3),
+      )
+    : Math.max(0.5, Math.min(2, args.baseRate));
 }
 
 export const LIVE_INTERVIEW_VOICE_LEVELER = {
@@ -1503,6 +1524,31 @@ export function scheduleRealtimeVoiceDuck(args: {
   return true;
 }
 
+/** Pause the active media-backed voice and resume from its exact source clock.
+ * Signal soft interruptions use this after a brief audible overlap so the
+ * original speaker genuinely keeps the floor instead of losing hidden words
+ * beneath a gain dip. V2 performance takes always use this media lane. */
+export function scheduleRealtimeVoicePause(args: {
+  channel?: VoicePlaybackChannel;
+  delayMs?: number;
+  holdMs: number;
+}): boolean {
+  const active = activeVoiceChannels[args.channel ?? "primary"];
+  const media = active.media;
+  if (!media || active.nodes.length === 0) return false;
+  const delayMs = Math.max(0, Math.min(1_000, Math.round(args.delayMs ?? 0)));
+  const holdMs = Math.max(120, Math.min(1_600, Math.round(args.holdMs)));
+  window.setTimeout(() => {
+    if (active.media !== media || media.ended) return;
+    media.pause();
+    window.setTimeout(() => {
+      if (active.media !== media || media.ended) return;
+      void media.play().catch(() => undefined);
+    }, holdMs);
+  }, delayMs);
+  return true;
+}
+
 export function stopReactionVoiceAudio(): void {
   stopRealtimeVoiceAudio("reaction");
   stopRealtimeVoiceAudio("crosstalk");
@@ -1830,11 +1876,26 @@ async function playLivePerformanceVoice(args: {
     let settled = false;
     let started = false;
     let progress: VoicePlaybackProgressController | null = null;
+    let performanceTimer: number | null = null;
+    let hesitationTimer: number | null = null;
+    let hesitationTriggered = false;
+    const performancePlan = normalizeVoicePerformancePlanV2(
+      args.lifecycle?.performancePlan,
+    );
     const finish = (
       outcome: "completed" | "cancelled" | "failed",
     ): void => {
       if (settled) return;
       settled = true;
+      if (performanceTimer !== null) {
+        window.clearInterval(performanceTimer);
+        performanceTimer = null;
+      }
+      if (hesitationTimer !== null) {
+        window.clearTimeout(hesitationTimer);
+        hesitationTimer = null;
+      }
+      args.lifecycle?.onPerformanceCaption?.(null, false);
       if (active.mediaStartTimer !== null) {
         window.clearTimeout(active.mediaStartTimer);
         active.mediaStartTimer = null;
@@ -1909,6 +1970,47 @@ async function playLivePerformanceVoice(args: {
           },
         );
         active.progress = progress;
+        if (performancePlan) {
+          performanceTimer = window.setInterval(() => {
+            if (settled || !Number.isFinite(audio.duration) || audio.duration <= 0) {
+              return;
+            }
+            const sourceProgress = Math.max(
+              0,
+              Math.min(1, audio.currentTime / audio.duration),
+            );
+            audio.playbackRate = voicePerformanceMediaPlaybackRateV2({
+              baseRate: playbackRateRatio,
+              plan: performancePlan,
+              progress: sourceProgress,
+            });
+            const hesitation = performancePlan.hesitation;
+            if (
+              hesitationTriggered ||
+              !hesitation ||
+              sourceProgress < hesitation.sourceProgress
+            ) {
+              return;
+            }
+            hesitationTriggered = true;
+            args.lifecycle?.onPerformanceCaption?.(
+              hesitation.caption ?? "…",
+              true,
+            );
+            if (hesitation.kind === "silence") audio.pause();
+            hesitationTimer = window.setTimeout(() => {
+              hesitationTimer = null;
+              args.lifecycle?.onPerformanceCaption?.(null, false);
+              if (
+                hesitation.kind === "silence" &&
+                !settled &&
+                (!args.isCurrent || args.isCurrent())
+              ) {
+                void audio.play().catch(() => finish("failed"));
+              }
+            }, hesitation.durationMs);
+          }, 32);
+        }
         if (
           args.maxDurationMs &&
           args.maxDurationMs > 0 &&
@@ -2141,6 +2243,22 @@ export async function playRealtimeVoiceBytes(args: {
   const localToneEnabled = args.localToneEnabled !== false;
   if (!profile.enabled || profile.volume <= 0) return true;
   const channel = args.channel ?? "primary";
+  if (normalizeVoicePerformancePlanV2(args.lifecycle?.performancePlan)) {
+    return playLivePerformanceVoice({
+      context,
+      bytes: args.bytes,
+      profile,
+      channel,
+      lifecycle: args.lifecycle,
+      alignment: args.alignment,
+      stereoPan: args.stereoPan,
+      maxDurationMs: args.maxDurationMs,
+      scheduledStartAtPerformanceMs: args.scheduledStartAtPerformanceMs,
+      compensateLifecycleForOutputLatency:
+        args.compensateLifecycleForOutputLatency,
+      isCurrent: args.isCurrent,
+    });
+  }
   if (livePerformanceBudget) {
     if (await liveVoicePlaybackWorkletAvailable(context)) {
       const decodedResult = await decodeLiveVoicePcmOwned(args.bytes);

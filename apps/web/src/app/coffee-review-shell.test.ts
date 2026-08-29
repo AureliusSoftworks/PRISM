@@ -75,7 +75,7 @@ test("Coffee review copies and downloads the same canonical public transcript", 
 test("previous Coffee sessions copy a verbose review transcript beside Delete", () => {
   assert.match(
     pageSource,
-    /const copyPreviousCoffeeSessionVerboseTranscript = async \([\s\S]{0,1200}\/export`[\s\S]{0,240}JSON\.stringify\(\{ format: "developer" \}\)[\s\S]{0,500}writeClipboardText\(exported\.markdown\)/u,
+    /const copyPreviousCoffeeSessionVerboseTranscript = async \([\s\S]{0,1400}\/export`[\s\S]{0,240}JSON\.stringify\(\{ format: "developer" \}\)[\s\S]{0,700}annotateTranscriptWithFocusEvents\([\s\S]{0,300}writeClipboardText\(markdown\)/u,
   );
   assert.match(
     pageSource,

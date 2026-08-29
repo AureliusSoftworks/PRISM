@@ -23,6 +23,18 @@ describe("Mansion Editor V2 experience", () => {
     assert.match(editorSource, /layoutHistory\.length === 0/u);
     assert.match(editorSource, /onClick=\{undoLayout\}>Undo/u);
     assert.match(editorSource, /mansionEditorCorridorResizeHandle/u);
+    assert.match(editorSource, /usedRoomTemplateIds/u);
+    assert.match(editorSource, /No unused room type is available on this floor/u);
+    assert.match(editorSource, /already placed in this mansion\. Each room type can only be used once/u);
+    assert.match(editorSource, /<small>Placed<\/small>/u);
+    assert.match(editorSource, /template\.id !== selectedRoom\.templateId/u);
+    assert.match(editorSource, /debateMysteryRoomFloorRuleV1/u);
+    assert.match(editorSource, /debateMysteryRoomTypeIsAllowedOnFloorV1/u);
+    assert.match(editorSource, /paletteTopFloor = Math\.max\(rooftopFloor, selectedFloor\)/u);
+    assert.match(editorSource, /Ground-floor only · use Floor 1/u);
+    assert.match(editorSource, /Top-floor only · use Floor/u);
+    assert.match(editorSource, /<small>\{floorRule\.label\}<\/small>/u);
+    assert.match(editorSource, /lowerTopFloorRoom/u);
   });
 
   it("drills into a room for click placement, direct lighting, and preview-only Mosaic", () => {
@@ -68,8 +80,8 @@ describe("Mansion Editor V2 experience", () => {
     assert.match(debateSource, /<MansionEditorDialog[\s\S]{0,260}creationFlow/u);
     assert.match(editorSource, /Semantic room palette/u);
     assert.match(editorSource, /DEBATE_MYSTERY_ROOM_TEMPLATES\.map/u);
-    assert.match(editorSource, /Rooftop only/u);
-    assert.match(editorSource, /mansionLayoutV2TemplateIsRooftopOnly/u);
+    assert.match(editorSource, /Floor 1 only/u);
+    assert.match(editorSource, /Top floor only/u);
     assert.match(editorSource, /mansionEditorInspector[\s\S]{0,420}mansionEditorRoomPalette/u);
     assert.match(editorSource, /Remove \{selectedRoom \? "room" : "block"\}/u);
     assert.match(editorSource, /disabled=\{!selectedEntityCanBeRemoved\}/u);

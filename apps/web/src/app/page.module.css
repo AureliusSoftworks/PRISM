@@ -4857,10 +4857,26 @@
   gap: 16px;
 }
 
+.appErrorActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.appErrorActions button:only-child {
+  grid-column: 1 / -1;
+}
+
 .appErrorBrand {
   display: flex;
   align-items: center;
   gap: 14px;
+}
+
+@media (max-width: 520px) {
+  .appErrorActions {
+    grid-template-columns: 1fr;
+  }
 }
 
 @keyframes backendUnavailablePulse {
@@ -28590,6 +28606,26 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .debateBotPresencePlate[data-debate-compact="true"] {
   --bot-ambient-hover-amplitude: 0.5px;
+}
+
+/* Debate's camera correction moves only the generated face glyph. Authored
+   Avatar Details Ink remains in its canonical screen plane, while the body,
+   nameplate, and lower glyph keep their established stage registration. */
+:global([data-camera-view="wide"])
+  .debateBotPresencePlate[data-debate-role="moderator"],
+:global([data-camera-view="moderator"])
+  .debateBotPresencePlate[data-debate-role="moderator"] {
+  --debate-moderator-face-only-offset-y: clamp(3px, 0.48vw, 8px);
+}
+
+.debateBotPresencePlate[data-debate-role="moderator"]
+  .zenLiveBotPresenceFaceRig {
+  transform: translate(
+      -50%,
+      calc(-50% + var(--debate-moderator-face-only-offset-y, 0px))
+    )
+    scale(var(--zen-live-bot-face-scale, 1))
+    scaleX(var(--zen-live-bot-face-layer-scale-x, 1));
 }
 
 .debateBotPresencePlate[data-debate-role="audience"] {
@@ -54939,7 +54975,7 @@ a.settingsCreditItem:focus-visible {
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-question-frame][data-face-font="neutral"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="neutral"] {
   font-family: var(--font-ui-sans), system-ui, sans-serif;
-  font-weight: 700;
+  font-weight: var(--bot-face-font-weight, 700);
   font-variation-settings: normal;
   font-synthesis: none;
   letter-spacing: 0.016em;
@@ -54955,7 +54991,7 @@ a.settingsCreditItem:focus-visible {
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="warm"] {
   font-family:
     var(--font-concise-rounded), var(--font-ui-sans), system-ui, sans-serif;
-  font-weight: 700;
+  font-weight: var(--bot-face-font-weight, 700);
   font-variation-settings: normal;
   font-synthesis: none;
   letter-spacing: -0.04em;
@@ -54970,7 +55006,7 @@ a.settingsCreditItem:focus-visible {
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-question-frame][data-face-font="concise"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="concise"] {
   font-family: var(--prism-mono-face-font);
-  font-weight: var(--prism-mono-face-weight);
+  font-weight: var(--bot-face-font-weight, var(--prism-mono-face-weight));
   font-variation-settings: normal;
   font-synthesis: none;
   letter-spacing: var(--prism-mono-face-letter-spacing);
@@ -54986,7 +55022,7 @@ a.settingsCreditItem:focus-visible {
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="playful"] {
   font-family:
     var(--font-playful-display), var(--font-ui-sans), system-ui, sans-serif;
-  font-weight: 400;
+  font-weight: var(--bot-face-font-weight, 400);
   font-variation-settings: normal;
   font-synthesis: none;
   letter-spacing: 0.02em;
@@ -55003,7 +55039,7 @@ a.settingsCreditItem:focus-visible {
   font-family:
     var(--font-formal-serif), var(--font-chat-serif), Georgia,
     "Times New Roman", serif;
-  font-weight: 600;
+  font-weight: var(--bot-face-font-weight, 600);
   font-variation-settings: normal;
   font-synthesis: none;
   letter-spacing: 0.015em;
@@ -75892,7 +75928,7 @@ a.settingsCreditItem:focus-visible {
   font-family: var(--prism-face-font);
   font-size: clamp(1.97rem, 5.87vw, 2.93rem);
   line-height: 1;
-  font-weight: var(--prism-face-weight);
+  font-weight: var(--bot-face-font-weight, var(--prism-face-weight));
   letter-spacing: var(--prism-face-letter-spacing);
   font-variant-ligatures: none;
   font-feature-settings:
@@ -76451,11 +76487,13 @@ a.settingsCreditItem:focus-visible {
   background: none;
   -webkit-text-fill-color: transparent;
   text-shadow: none;
-  /* Keep the proven compositor-level halo for full-size CRT faces. Some
-     packaged renderers suppress broad drop-shadows when the filter lives on
-     the same pseudo-element as an alpha mask; preserving the rich phosphor
-     bloom takes precedence over eliminating a faint rectangular artifact. */
-  --zen-live-bot-crt-flicker-base-filter: var(--crt-face-glow-filter);
+  /* Normal-size live surfaces keep the proven compositor halo. Expanded
+     preview surfaces swap this token to a neutral filter below so their much
+     larger transparent glyph box cannot become visible. */
+  --zen-live-bot-crt-flicker-base-filter: var(
+    --zen-live-bot-glyph-compositor-glow-filter,
+    var(--crt-face-glow-filter)
+  );
   filter: brightness(
       calc(
         var(--zen-live-bot-crt-flicker-base-brightness, 1.07) *
@@ -76468,7 +76506,10 @@ a.settingsCreditItem:focus-visible {
           var(--zen-live-bot-crt-shared-flicker-contrast-scale, 1)
       )
     )
-    var(--crt-face-glow-filter);
+    var(
+      --zen-live-bot-glyph-compositor-glow-filter,
+      var(--crt-face-glow-filter)
+    );
 }
 
 .zenLiveBotPresenceFaceGlyph
@@ -76536,6 +76577,35 @@ a.settingsCreditItem:focus-visible {
   background: var(--crt-face-edge-color, currentColor);
   opacity: var(--crt-glyph-emission-opacity, 1);
   filter: blur(var(--crt-glyph-beam-softness));
+}
+
+/* Signal setup/preview and Avatar Studio deliberately render the mannequin
+   much larger than live Signal or Zen. At that scale, some compositor paths
+   reveal the transparent text layer's rectangular boundary. Keep the live
+   recipe elsewhere, but move the broad halo onto the alpha-masked bloom clone
+   for these expanded preview surfaces. */
+.zenLiveBotPresencePlate[data-avatar-customizer-preview="true"],
+.signalBotPresencePlate {
+  --zen-live-bot-glyph-compositor-glow-filter: opacity(1);
+}
+
+:is(
+    .zenLiveBotPresencePlate[data-avatar-customizer-preview="true"],
+    .signalBotPresencePlate
+  )
+  :is(.zenLiveBotPresenceFaceGlyph, .zenLiveBotPresenceThinkingGlyph)
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]::before {
+  /* The core remains snapped to the pixel mask. The bloom instead repaints the
+     same authored glyph as text, whose alpha survives packaged compositor
+     filters without either revealing a box or suppressing the broad halo. */
+  content: attr(data-crt-glyph-content);
+  inset: calc(0px - var(--crt-glyph-emission-outset));
+  -webkit-mask-image: none;
+  mask-image: none;
+  background: none;
+  color: var(--crt-face-edge-color, currentColor);
+  -webkit-text-fill-color: currentColor;
+  filter: blur(var(--crt-glyph-beam-softness)) var(--crt-face-glow-filter);
 }
 
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="mouth"],

@@ -54,6 +54,44 @@ describe("Signal experience shell", () => {
     assert.match(source, /Requeued for host/u);
   });
 
+  it("renders the live Producer controls as an accessible private cue desk without replacing cue authority", () => {
+    assert.match(source, /data-signal-producer-desk="true"/u);
+    assert.match(source, /data-producer-cue-phase=\{producerCueDeskPhase\}/u);
+    assert.match(source, /Private host frequency/u);
+    assert.match(source, /Private line · \{hostBot\?\.name \?\? "Host"\}/u);
+    assert.match(source, /aria-label="Producer cue delivery status"/u);
+    for (const step of ["Queued", "Dispatching", "Delivered"]) {
+      assert.match(source, new RegExp(`${step}\\s*</li>`, "u"));
+    }
+    assert.match(source, /className=\{styles\.producerDeskLineActions\}/u);
+    assert.match(source, /className=\{styles\.producerCueComposerHeader\}/u);
+    assert.match(source, /className=\{styles\.producerCueBank\}/u);
+    assert.match(source, /aria-label="Director cues"/u);
+    assert.match(source, /interruptGuestWithQueuedCue/u);
+    assert.match(source, /onClick=\{clearProducerCues\}/u);
+    assert.match(source, /sendCue\(\{ kind: "present_image"/u);
+    for (const cueKind of [
+      "refocus",
+      "press_harder",
+      "move_on",
+      "lighten_up",
+      "wrap_up",
+    ]) {
+      assert.match(
+        source,
+        new RegExp(`sendCue\\(\\{ kind: "${cueKind}" \\}\\)`, "u"),
+      );
+    }
+    assert.match(css, /\.producerDeskHeader\s*\{/u);
+    assert.match(css, /data-producer-cue-phase="dispatching"/u);
+    assert.match(css, /\.cueKey\s*\{/u);
+    assert.match(css, /\.cueKeyCap\s*\{/u);
+    assert.match(css, /\.cueKeyLamp\s*\{/u);
+    assert.match(css, /\.cueKey\[data-queued="true"\]/u);
+    assert.match(css, /\.shell\[data-theme="light"\] \.producerDeskHeader/u);
+    assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.producerDeskPrivateLine::after \{ animation: none !important; \}/u);
+  });
+
   it("saves, applies, and deletes named Rehearse Stage presets without a second stage-save action", () => {
     assert.match(source, /\/api\/botcast\/stage-presets/u);
     assert.match(source, /Save preset/u);
@@ -97,6 +135,10 @@ describe("Signal experience shell", () => {
     assert.match(source, /dataUrl: episodeImageForTurn\.dataUrl/u);
     assert.match(
       source,
+      /archivalProxyEpisodeId:[\s\S]{0,120}episodeImageForTurn\.archivalProxyEpisodeId/u,
+    );
+    assert.match(
+      source,
       /descriptor:\s*\{[\s\S]{0,100}kind: resolvedImageContext\.kind[\s\S]{0,100}mimeType: resolvedImageContext\.mimeType/u,
     );
     assert.match(source, /sendCue\(\{ kind: "present_image", imageId: upload\.imageId \}\)/u);
@@ -124,6 +166,8 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /Auto → \$\{activeEpisodeImageCapability\.model\}/u);
     assert.match(source, /data-signal-setup-image="true"/u);
+    assert.match(source, /retry\.image[\s\S]{0,800}archivalProxyEpisodeId: retry\.image\.sourceEpisodeId/u);
+    assert.match(source, /No original upload is retained or reread\./u);
     assert.match(source, /const setupImageModeEligible = !producerGuestSelected;/u);
     assert.match(source, /\{setupImageModeEligible \? \(/u);
     assert.match(
@@ -468,13 +512,13 @@ describe("Signal experience shell", () => {
     assert.match(pageSource, /lifecycle: lifecycles\?\.listener/u);
     assert.match(pageSource, /lifecycle: lifecycles\?\.interrupted/u);
     assert.match(source, /createSignalReactionVoiceLifecycle\(/u);
-    assert.match(source, /function scheduleSignalOrganicPrimaryDuck\(/u);
-    assert.match(source, /scheduleRealtimeVoiceDuck\(\{[\s\S]{0,220}channel: "primary"[\s\S]{0,220}speakerDuckMs/u);
+    assert.match(source, /function scheduleSignalOrganicPrimaryPause\(/u);
+    assert.match(source, /scheduleRealtimeVoicePause\(\{[\s\S]{0,220}channel: "primary"[\s\S]{0,220}speakerDuckMs/u);
     assert.match(source, /onAudibleStart\?: \(\) => void/u);
     assert.match(source, /onAudibleStart\?\.\(\)/u);
     assert.match(
       source,
-      /signalListenerReactionVoiceGain\(plan\),\s*\(\) => scheduleSignalOrganicPrimaryDuck\(plan\)/u,
+      /signalListenerReactionVoiceGain\(sequencePlan\),\s*\(\) => scheduleSignalOrganicPrimaryPause\(sequencePlan\)/u,
     );
     assert.match(
       source,
@@ -577,7 +621,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /fireLiveListenerReaction\(message, elapsedMs, durationMs\);\s*playProducerGuestActionSfxAt\(elapsedMs, durationMs\)/u,
+      /fireLiveListenerReaction\(message, elapsedMs, durationMs\);\s*playStudioIncidentAt\(elapsedMs, durationMs\);\s*playProducerGuestActionSfxAt\(elapsedMs, durationMs\)/u,
     );
     assert.match(
       source,
@@ -1858,12 +1902,20 @@ describe("Signal experience shell", () => {
     assert.match(source, /field: "booking"/u);
     assert.match(source, /setTopicDraft\(topic\)/u);
     assert.match(source, /setProducerBriefDraft\(producerBrief\)/u);
+    assert.match(source, /setGuestBriefDraft\(guestBrief\)/u);
     assert.match(source, /Book for me/u);
-    assert.match(source, /short public title and a richer private angle/u);
+    assert.match(source, /separate private host and guest briefings/u);
     assert.match(source, /Everything remains editable/u);
     assert.match(source, /Episode topic <span>public title<\/span>/u);
     assert.match(source, /A short public title, not the full question/u);
-    assert.match(source, /Private producer comments/u);
+    assert.match(source, /Host briefing/u);
+    assert.match(source, /Guest briefing/u);
+    assert.match(source, /private to host · optional/u);
+    assert.match(source, /private to guest · optional/u);
+    assert.match(
+      source,
+      /The host is not told this\.[\s\S]{0,120}guest naturally reveals on air/u,
+    );
     const randomizerSource = source.slice(
       source.indexOf("const randomizeBooking"),
       source.indexOf("return (", source.indexOf("const randomizeBooking")),
@@ -1927,7 +1979,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       luckySource,
-      /await selectShow\(setup\.show\);[\s\S]*setGuestDraftId\(setup\.guestBotId\);[\s\S]*setTopicDraft\(setup\.topic\);[\s\S]*setProducerBriefDraft\(setup\.producerBrief\);[\s\S]*await startEpisode\(\{[\s\S]*watchAutoStart: true/u,
+      /await selectShow\(setup\.show\);[\s\S]*setGuestDraftId\(setup\.guestBotId\);[\s\S]*setTopicDraft\(setup\.topic\);[\s\S]*setProducerBriefDraft\(setup\.producerBrief\);[\s\S]*setGuestBriefDraft\(setup\.guestBrief\);[\s\S]*await startEpisode\(\{[\s\S]*watchAutoStart: true/u,
     );
     const startSource = source.slice(
       source.indexOf("const startEpisode = async"),
@@ -1936,6 +1988,11 @@ describe("Signal experience shell", () => {
     assert.match(startSource, /override\?: SignalEpisodeStartOverride/u);
     assert.match(startSource, /guestBotId: launchGuestId/u);
     assert.match(startSource, /topic: launchTopic\.trim\(\)/u);
+    assert.match(startSource, /guestBrief: launchGuestBrief/u);
+    assert.match(
+      startSource,
+      /const launchGuestBrief =[\s\S]{0,140}producerGuest[\s\S]*\? ""[\s\S]*override\?\.guestBrief \?\? guestBriefDraft/u,
+    );
     assert.match(startSource, /expandComposerDraft\?\.\(launchProducerBrief\)/u);
     assert.match(
       startSource,
@@ -1996,6 +2053,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /setGuestDraftId\(retry\.guestId\)/u);
     assert.match(source, /setTopicDraft\(retry\.topic\)/u);
     assert.match(source, /setProducerBriefDraft\(retry\.producerBrief\)/u);
+    assert.match(source, /setGuestBriefDraft\(retry\.guestBrief\)/u);
     assert.match(source, /setEpisodeModelDraft\(retry\.modelId\)/u);
     assert.match(source, /setEpisodeDurationDraft\(retry\.durationMinutes\)/u);
     assert.match(source, /Use setup/u);
@@ -2005,16 +2063,16 @@ describe("Signal experience shell", () => {
 
   it("keeps Signal coffee cosmetic and scopes producer direction", () => {
     assert.doesNotMatch(source, /top.?off|refill|depletion/iu);
-    assert.match(source, /Private host cues/u);
+    assert.match(source, /Private host frequency/u);
     assert.match(source, /sendCue\(\{ kind: "refocus" \}\)/u);
     assert.match(source, /Wrap it up/u);
-    assert.match(source, /Shape this…/u);
-    assert.match(source, /private wording to transform/u);
+    assert.match(source, /Say this…/u);
+    assert.match(source, /authorized on-air quote/u);
     assert.match(source, /directQuote/u);
     assert.match(source, /className=\{styles\.producerImageAttach\}/u);
     assert.match(source, /vision-capable active model can also discuss an image/u);
     assert.match(source, /BOTCAST_PRODUCER_DIRECT_QUOTE_MAX/u);
-    assert.match(source, /Private to the host\. Use this for context, direction, or a/u);
+    assert.match(source, /Host note is private context, direction, or a question/u);
     assert.match(css, /\.producerCueActions/u);
     assert.match(css, /\.producerImageAttach/u);
     assert.doesNotMatch(source, /guide\s+both bots/u);
@@ -2080,7 +2138,7 @@ describe("Signal experience shell", () => {
     assert.doesNotMatch(source, /disabled=\{busy \|\| !producerCueReady/u);
     assert.match(css, /\.producerControls button\[data-queued="true"\]/u);
     assert.match(css, /\.cueGrid\s*\{[^}]*repeat\(5, minmax\(0, 1fr\)\)/u);
-    assert.match(css, /\.cueGrid button\s*\{[^}]*min-height:\s*68px/u);
+    assert.match(css, /\.cueKey\s*\{[^}]*min-height:\s*116px/u);
     assert.match(source, /className=\{styles\.producerCueComposer\}/u);
     assert.match(source, /const submitAskAboutCue = \(\): void => \{/u);
     assert.match(source, /onClick=\{submitAskAboutCue\}/u);
@@ -2113,9 +2171,9 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("keeps private producer wording off air and attaches one gated session image", () => {
-    assert.match(source, /Shape this…/u);
-    assert.match(source, /private wording to transform — one line/u);
+  it("separates private Host notes from authorized on-air quotes and attaches one gated session image", () => {
+    assert.match(source, /Say this…/u);
+    assert.match(source, /authorized on-air quote — one line/u);
     assert.match(source, /<textarea/u);
     assert.match(source, /producerQuoteCount/u);
     assert.match(source, /directQuote/u);
@@ -2125,12 +2183,12 @@ describe("Signal experience shell", () => {
     assert.match(source, /title=\{producerImageTooltip\}/u);
     assert.match(source, /accept=\{SIGNAL_EPISODE_IMAGE_ACCEPT\}/u);
     assert.match(source, /vision-capable active model can also discuss an image/u);
-    assert.match(source, /Private to the host\. Use this for context, direction, or a/u);
-    assert.match(source, /host always paraphrases it in character/u);
-    assert.match(source, /never reveals\s+the private note/u);
+    assert.match(source, /Host note is private context, direction, or a question/u);
+    assert.match(source, /compatible host\s+delivers it exactly/u);
+    assert.match(source, /without revealing the\s+private Host note/u);
     assert.match(
       source,
-      /className=\{styles\.producerCueComposer\}[\s\S]{0,240}queuedCueStatus/u,
+      /className=\{styles\.producerCueComposer\}[\s\S]{0,900}queuedCueStatus/u,
     );
     assert.match(css, /\.producerCueActions/u);
     assert.match(css, /\.producerImageAttach/u);
@@ -2414,7 +2472,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /SIGNAL_LISTENER_REACTION_SCHEDULE_LEAD_MS = 500/u);
     assert.match(
       source,
-      /listenerStartAtPerformanceMs:[\s\S]{0,100}performance\.now\(\) \+ Math\.max\(0, atMs - elapsedMs\)/u,
+      /listenerStartAtPerformanceMs:[\s\S]{0,100}performance\.now\(\) \+ Math\.max\(0, sequenceAtMs - elapsedMs\)/u,
     );
     assert.match(source, /signalEphemeralSpeechByBotId/u);
     assert.match(
@@ -2500,7 +2558,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /!bot\.muted[\s\S]{0,120}!botPowerResponseIsSilentV1\(message\.content\)[\s\S]{0,120}onPrefetchUtterance\?\.\(message, bot\)/u,
+      /!bot\.muted[\s\S]{0,120}!botPowerResponseIsSilentV1\(message\.content\)[\s\S]{0,520}onPrefetchUtterance\?\.\(/u,
     );
     assert.match(pageSource, /signalVoiceClipCacheRef/u);
     assert.match(pageSource, /const prefetchBotcastUtterance = useCallback/u);

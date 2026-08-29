@@ -49,6 +49,16 @@ import {
 } from "./botPower.ts";
 import { signalPicklesSipCueFromEvent } from "./signalPickles.ts";
 import {
+  normalizeSignalConversationRepairEventV1,
+  normalizeSignalStudioIncidentEventV1,
+  type SignalConversationRepairEventV1,
+  type SignalStudioIncidentEventV1,
+} from "./signalOrganicPerformance.ts";
+import {
+  normalizeVoicePerformancePlanV2,
+  type VoicePerformancePlanV2,
+} from "./voicePerformance.ts";
+import {
   planAutoCameraCoverage,
   type AutoCameraCoverageBeat,
 } from "./autoCameraDirector.ts";
@@ -76,6 +86,7 @@ export const BOTCAST_PRODUCER_GUEST_ID = "__signal_producer_guest__";
 export const BOTCAST_PRODUCER_GUEST_NAME = "the Producer";
 export const BOTCAST_PRODUCER_GUEST_THINKING_TIME_SCALE = 0.5;
 export const BOTCAST_PRODUCER_BRIEF_MAX_LENGTH = 2_000;
+export const BOTCAST_GUEST_BRIEF_MAX_LENGTH = 2_000;
 export const BOTCAST_PERSONA_REVIEW_VISIBILITY_DELAY_MS = 4 * 60 * 60 * 1_000;
 /** `audience_only` is the legacy internal name for a guest isolated from the host. */
 export type BotcastGuestPresenceMode = "present" | "audience_only";
@@ -1290,6 +1301,8 @@ export interface BotcastMessage {
   stageActionText: string | null;
   /** Clean transcript plus optional Eleven v3 vocal-reaction tags. */
   voicePerformanceText: string | null;
+  /** Event-folded Signal V2 presentation; never stored as canonical message text. */
+  organicVoicePerformance?: VoicePerformancePlanV2;
   /** Delivery mood captured when this line was recorded. */
   moodKey: VoiceDeliveryMood;
   /**
@@ -1415,11 +1428,7 @@ export interface BotcastSegmentRecord {
 export interface BotcastProducerCue {
   kind: BotcastProducerCueKind;
   detail?: string;
-  /**
-   * Private wording for the host to transform in character. The legacy field
-   * name is retained on persisted requests, but these words are never an
-   * exact on-air quotation or a message attributed to the Producer.
-   */
+  /** Authorized audience-facing words; private direction stays in `detail`. */
   directQuote?: string;
   /** Server-owned reference for a queued Signal episode image. */
   imageId?: string;
@@ -1560,20 +1569,20 @@ export function botcastActiveProducerCueFromEvents(
 }
 
 /**
- * The legacy-named private wording field stays intentionally short so it
- * communicates one transformable intent instead of becoming a hidden script.
+ * A direct quote is read on air, so its ceiling is a performance budget rather
+ * than a private-text budget. Keep it near one spoken line.
  */
 export const BOTCAST_PRODUCER_DIRECT_QUOTE_MAX = 240;
 /** Direction, never spoken aloud. Mirrors the server-side `cleanText` ceiling. */
 export const BOTCAST_PRODUCER_CUE_DETAIL_MAX = 280;
-/** Legacy-named generation allowance retained for request compatibility. */
+/** Extra completion tokens so a host can frame an authorized direct quote. */
 export const BOTCAST_PRODUCER_DIRECT_QUOTE_LEAD_IN_TOKENS = 80;
 export const BOTCAST_PRODUCER_DIRECT_QUOTE_TURN_TOKENS_MAX = 2_048;
-/** @deprecated Historical exact-quote framing. Never use for new live cues. */
+/** Spoken framing for a Producer direct quote. The authorized words follow as-is. */
 export const BOTCAST_PRODUCER_DIRECT_QUOTE_LEAD_IN =
   "The Producer sent this in.";
 
-/** Completion budget derived from the private wording's size. */
+/** Completion budget for a host turn that must air a Producer quote in full. */
 export function botcastDirectQuoteTurnMaxTokens(directQuote: string): number {
   const words = directQuote.trim().split(/\s+/u).filter(Boolean).length;
   if (words === 0) return 0;
@@ -1583,7 +1592,7 @@ export function botcastDirectQuoteTurnMaxTokens(directQuote: string): number {
   );
 }
 
-/** @deprecated Historical exact-quote framing retained for old data/tests. */
+/** Live earpiece framing when a direct quote redirects an active host line. */
 export const BOTCAST_PRODUCER_DIRECT_QUOTE_UPDATE_LEAD_INS = [
   "Oh, hang on — now they're saying:",
   "Wait, scratch that, the Producer's got something else:",
@@ -1595,7 +1604,7 @@ export const BOTCAST_PRODUCER_DIRECT_QUOTE_UPDATE_LEAD_INS = [
   "Hang on, the booth's cutting in again:",
 ] as const;
 
-/** @deprecated Historical exact-quote framing retained for compatibility. */
+/** Rotates live-update framing so repeated Producer redirects do not sound canned. */
 export function botcastProducerDirectQuoteUpdateLeadInAt(
   ordinal: number,
 ): string {
@@ -1606,7 +1615,7 @@ export function botcastProducerDirectQuoteUpdateLeadInAt(
   ]!;
 }
 
-/** @deprecated Active Signal cues must transform private wording, never air it. */
+/** Canonical deterministic delivery for an authorized Producer direct quote. */
 export function composeBotcastProducerDirectQuoteUtterance(
   directQuote: string,
   leadIn: string = BOTCAST_PRODUCER_DIRECT_QUOTE_LEAD_IN,
@@ -1675,6 +1684,9 @@ export type BotcastReplayEventKind =
   | "camera_mode"
   | "camera_suggestion"
   | "listener_reaction"
+  | "voice_performance"
+  | "conversation_repair"
+  | "studio_incident"
   | "irritation"
   | "soundboard_cue"
   | "audio_cue"
@@ -1707,6 +1719,52 @@ export interface BotcastReplayEvent {
   kind: BotcastReplayEventKind;
   payload: Record<string, unknown>;
   occurredAt: string;
+}
+
+export function botcastVoicePerformanceForMessageV2(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+  messageId: string,
+): VoicePerformancePlanV2 | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.kind !== "voice_performance") continue;
+    const plan = normalizeVoicePerformancePlanV2(event.payload.plan);
+    if (plan?.messageId === messageId) return plan;
+  }
+  return null;
+}
+
+export function botcastConversationRepairsFromEventsV1(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+): SignalConversationRepairEventV1[] {
+  return events.flatMap((event) => {
+    if (event.kind !== "conversation_repair") return [];
+    const repair = normalizeSignalConversationRepairEventV1(
+      event.payload.repair,
+    );
+    return repair ? [repair] : [];
+  });
+}
+
+export function botcastStudioIncidentsFromEventsV1(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+): SignalStudioIncidentEventV1[] {
+  return events.flatMap((event) => {
+    if (event.kind !== "studio_incident") return [];
+    const incident = normalizeSignalStudioIncidentEventV1(
+      event.payload.incident,
+    );
+    return incident ? [incident] : [];
+  });
+}
+
+export function botcastStudioIncidentForMessageV1(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+  messageId: string,
+): SignalStudioIncidentEventV1 | null {
+  return botcastStudioIncidentsFromEventsV1(events).find(
+    (incident) => incident.sourceMessageId === messageId,
+  ) ?? null;
 }
 
 export type BotcastImageContextPhase =
@@ -3028,6 +3086,8 @@ export interface BotcastPersonaReviewProvenanceV1 {
 
 export interface BotcastEpisode extends BotcastEpisodeSummary {
   producerBrief: string;
+  /** Optional pre-show acting context delivered only to a bot guest. */
+  guestBrief?: string;
   /** Optional user-authored direction used by AI to synthesize this interview. */
   guestContext?: string;
   /** Legacy internal interaction mode; audience truth lives in audienceExperience. */
@@ -3102,6 +3162,8 @@ export interface BotcastEpisodeCreateRequest {
   guestContext?: string;
   topic?: string;
   producerBrief?: string;
+  /** Optional pre-show acting context delivered only to a bot guest. */
+  guestBrief?: string;
   preferredProvider?: BotcastEpisodeProvider;
   modelOverride?: string | null;
   responseMode?: BotcastEpisodeResponseMode;

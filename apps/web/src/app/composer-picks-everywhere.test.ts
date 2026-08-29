@@ -82,6 +82,10 @@ describe("composer shortcut language is Zen-only", () => {
       signalSource,
       /id: "signal-producer-brief"[\s\S]{0,260}onChange: setProducerBriefDraft/u,
     );
+    assert.match(
+      signalSource,
+      /id: "signal-guest-brief"[\s\S]{0,260}onChange: setGuestBriefDraft/u,
+    );
     assert.doesNotMatch(signalSource, /resolvePicksToPlainText/u);
     assert.match(
       pageSource,

@@ -839,15 +839,20 @@ describe("Coffee seat arrival CSS", () => {
     );
   });
 
-  it("keeps portable face weight data while disabling its render adjustment", () => {
+  it("applies the Studio-authored face weight without changing glow geometry", () => {
     assert.match(coffeeSeatPlateEmojiSource, /faceFontWeight\?: number \| null/);
+    assert.match(coffeeSeatPlateEmojiSource, /normalizeBotFaceFontWeight\(faceFontWeight\)/);
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /\["--bot-face-font-weight" as string\]: normalizedFaceFontWeight/,
+    );
     assert.doesNotMatch(
       coffeeSeatPlateEmojiSource,
       /MAXIMUM_BOT_FACE_CRT|function normalizeFaceFontWeight|function faceWeight[^\s(]*ForWeight/,
     );
     assert.doesNotMatch(
       coffeeSeatPlateEmojiSource,
-      /\["--bot-face-(?:font-weight|weight-(?:stroke|glow-radius-scale|glow-strength-scale|glow-stroke))" as string\]/,
+      /\["--bot-face-weight-(?:stroke|glow-radius-scale|glow-strength-scale|glow-stroke)" as string\]/,
     );
   });
 
@@ -858,25 +863,51 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       css,
-      /\.botAvatarFontOptionSample\[data-face-font="warm"\][\s\S]*?font-family:[\s\S]*?var\(--font-concise-rounded\)[\s\S]*?font-weight:\s*700\s*;/,
+      /\.botAvatarFontOptionSample\[data-face-font="warm"\][\s\S]*?font-family:[\s\S]*?var\(--font-concise-rounded\)[\s\S]*?font-weight:\s*var\(--bot-face-font-weight,\s*700\)\s*;/,
     );
     assert.match(
       css,
-      /\.botAvatarFontOptionSample\[data-face-font="concise"\][\s\S]*?font-family:\s*var\(--prism-mono-face-font\)[\s\S]*?font-weight:\s*var\(--prism-mono-face-weight\)\s*;/,
+      /\.botAvatarFontOptionSample\[data-face-font="concise"\][\s\S]*?font-family:\s*var\(--prism-mono-face-font\)[\s\S]*?font-weight:\s*var\(--bot-face-font-weight,\s*var\(--prism-mono-face-weight\)\)\s*;/,
     );
     assert.match(
       css,
-      /\.botAvatarFontOptionSample\[data-face-font="playful"\][\s\S]*?font-weight:\s*400\s*;/,
+      /\.botAvatarFontOptionSample\[data-face-font="playful"\][\s\S]*?font-weight:\s*var\(--bot-face-font-weight,\s*400\)\s*;/,
     );
     assert.match(
       css,
-      /\.botAvatarFontOptionSample\[data-face-font="formal"\][\s\S]*?font-family:[\s\S]*?var\(--font-formal-serif\)[\s\S]*?font-weight:\s*600\s*;/,
+      /\.botAvatarFontOptionSample\[data-face-font="formal"\][\s\S]*?font-family:[\s\S]*?var\(--font-formal-serif\)[\s\S]*?font-weight:\s*var\(--bot-face-font-weight,\s*600\)\s*;/,
     );
     assert.match(
       css,
-      /\.botAvatarFontOptionSample\[data-face-font="neutral"\][\s\S]*?font-weight:\s*700\s*;[\s\S]*?font-variation-settings:\s*normal\s*;[\s\S]*?font-synthesis:\s*none\s*;/,
+      /\.botAvatarFontOptionSample\[data-face-font="neutral"\][\s\S]*?font-weight:\s*var\(--bot-face-font-weight,\s*700\)\s*;[\s\S]*?font-variation-settings:\s*normal\s*;[\s\S]*?font-synthesis:\s*none\s*;/,
     );
-    assert.doesNotMatch(css, /--bot-face-font-weight/);
+    assert.match(css, /font-weight:\s*var\(--bot-face-font-weight,\s*700\)\s*;/);
+  });
+
+  it("keeps WebKit's synchronous font parser out of the CRT route-mount path", () => {
+    const layoutEffectStart = phosphorPixelGlyphSource.indexOf(
+      "useLayoutEffect(() =>",
+    );
+    const layoutEffectEnd = phosphorPixelGlyphSource.indexOf(
+      "}, [binaryAlpha, content, enabled, rasterKey]);",
+      layoutEffectStart,
+    );
+
+    assert.ok(layoutEffectStart >= 0 && layoutEffectEnd > layoutEffectStart);
+    const layoutEffectSource = phosphorPixelGlyphSource.slice(
+      layoutEffectStart,
+      layoutEffectEnd,
+    );
+    assert.doesNotMatch(
+      layoutEffectSource,
+      /document\.fonts\??\.check|document\.fonts\.check/,
+      "WebKit can synchronously throw SyntaxError code 12 while parsing FontFaceSet.check input",
+    );
+    assert.match(
+      layoutEffectSource,
+      /renderMask\(\);[\s\S]*document\.fonts\?\.ready/,
+      "route mount must still rasterize immediately and observe later font readiness",
+    );
   });
 
   it("rerasterizes authored face glyphs when their font identity or loaded font changes", () => {
@@ -1415,7 +1446,7 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(partRule, /--crt-weighted-bloom-radius:\s*calc\(/);
     assert.match(partRule, /paint-order:\s*stroke fill\s*;/);
 
-    assert.doesNotMatch(css, /--bot-face-font-weight/);
+    assert.match(css, /--bot-face-font-weight/);
   });
 
   it("renders live Coffee avatars at Zen scale without overlay layers", () => {

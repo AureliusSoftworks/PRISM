@@ -211,6 +211,11 @@ import {
   annotateAppletTranscriptFrameRates,
   useAppletTranscriptFrameRate,
 } from "./appletTranscriptFrameRate";
+import {
+  annotateTranscriptWithFocusEvents,
+  loadLiveSessionFocusEvents,
+  useLiveSessionFocusEvents,
+} from "./sessionFocusEvents";
 import { registerPrismSoftSynthesisJobs } from "./prismSoftSynthesisUi.ts";
 import {
   announcePrismSoftAssetJob,
@@ -257,6 +262,7 @@ import {
   debateEvidenceSourcePropKind,
   debateGalleryArrivalShouldMaskStage,
   debateMotionRevealState,
+  debatePlayerRoleAfterFormatSelection,
   debatePlayerJudgePrefilledCast,
   debateRoomPresence,
   debateSessionRetryDraft,
@@ -4879,6 +4885,11 @@ export function DebateExperience(
     activeSession?.id,
     activeSession?.events ?? [],
   );
+  useLiveSessionFocusEvents(
+    "debate",
+    activeSession?.id,
+    activeSession?.status === "live" || activeSession?.status === "waiting_for_player",
+  );
   useEffect(() => {
     if (view !== "baking" || !activeSession) return;
     setSpectatorGalleryArrivalNowMs(Date.now());
@@ -7747,7 +7758,7 @@ export function DebateExperience(
 
   const verboseTranscriptForSession = useCallback(
     async (session: DebateSessionV1): Promise<string> => {
-      const [presenceBeats, sessionMetadata] = await Promise.all([
+      const [presenceBeats, sessionMetadata, focusEvents] = await Promise.all([
         request<{ beats: BotPresenceBeatV1[] }>(
           `/api/presence-beats?surface=debate&sessionId=${encodeURIComponent(session.id)}`,
         )
@@ -7760,12 +7771,13 @@ export function DebateExperience(
           }),
         )
           .catch(() => ({ ok: true as const, note: null, frameSamples: [] })),
+        loadLiveSessionFocusEvents("debate", session.id).catch(() => []),
       ]);
       return annotateAppletTranscriptFrameRates(
-        appendAppletSessionNoteToTranscript(
+        annotateTranscriptWithFocusEvents(appendAppletSessionNoteToTranscript(
           formatDebateVerboseTranscript(session, playerName, presenceBeats),
           sessionMetadata.note,
-        ),
+        ), focusEvents),
         sessionMetadata.frameSamples,
       );
     },
@@ -7861,11 +7873,18 @@ export function DebateExperience(
     }
     setCaseBoardCopyState("copying");
     try {
+      const focusEvents = await loadLiveSessionFocusEvents(
+        "debate",
+        activeSession.id,
+      ).catch(() => []);
       await writeDebateClipboardText(
-        formatDebateCaseBoardTranscript({
-          session: activeSession,
-          cards: visibleCaseBoard,
-        }),
+        annotateTranscriptWithFocusEvents(
+          formatDebateCaseBoardTranscript({
+            session: activeSession,
+            cards: visibleCaseBoard,
+          }),
+          focusEvents,
+        ),
       );
       setCaseBoardCopyState("copied");
     } catch {
@@ -7890,11 +7909,19 @@ export function DebateExperience(
       setJuryRecordCopySessionId(sessionId);
       setJuryRecordCopyState("copying");
       try {
-        const session = await loadSession();
+        const [session, focusEvents] = await Promise.all([
+          loadSession(),
+          loadLiveSessionFocusEvents("debate", sessionId).catch(() => []),
+        ]);
         if (session.playerRole === "participant" || !session.jury.enabled) {
           throw new Error("Jury record unavailable.");
         }
-        await writeDebateClipboardText(formatDebateJuryRecord(session));
+        await writeDebateClipboardText(
+          annotateTranscriptWithFocusEvents(
+            formatDebateJuryRecord(session),
+            focusEvents,
+          ),
+        );
         setJuryRecordCopyState("copied");
       } catch {
         setJuryRecordCopyState("failed");
@@ -7927,7 +7954,7 @@ export function DebateExperience(
     }
     setReviewBundleCopyState("copying");
     try {
-      const [presenceBeats, sessionMetadata] = await Promise.all([
+      const [presenceBeats, sessionMetadata, focusEvents] = await Promise.all([
         request<{ beats: BotPresenceBeatV1[] }>(
           `/api/presence-beats?surface=debate&sessionId=${encodeURIComponent(activeSession.id)}`,
         )
@@ -7940,6 +7967,7 @@ export function DebateExperience(
           }),
         )
           .catch(() => ({ ok: true as const, note: null, frameSamples: [] })),
+        loadLiveSessionFocusEvents("debate", activeSession.id).catch(() => []),
       ]);
       const includeJury = debateArchivedJuryRecordIsCopyable({
         status: activeSession.status,
@@ -7948,7 +7976,7 @@ export function DebateExperience(
       });
       await writeDebateClipboardText(
         annotateAppletTranscriptFrameRates(
-          appendAppletSessionNoteToTranscript(
+          annotateTranscriptWithFocusEvents(appendAppletSessionNoteToTranscript(
             formatDebateCompleteReviewClipboard({
               session: activeSession,
               playerName,
@@ -7957,7 +7985,7 @@ export function DebateExperience(
               includeJury,
             }),
             sessionMetadata.note,
-          ),
+          ), focusEvents),
           sessionMetadata.frameSamples,
         ),
       );
@@ -19925,16 +19953,24 @@ export function DebateExperience(
               <fieldset className={styles.formatPicker} data-tutorial-target="debate-format">
                 <legend>Debate format</legend>
                 {DEBATE_FORMAT_CATALOG.filter((option) => option.availability === "available").map((option) => {
-                  const disabled = playerRole === "participant" && option.id === "turnabout";
+                  const movesParticipantToJudge =
+                    playerRole === "participant" && option.id === "turnabout";
                   return (
                     <PrismRefractTarget target={formatRefractMagic(option.id as DebateFormatId)} key={option.id}>
                       {(binding) => (
-                        <label {...binding} data-selected={format === option.id ? "true" : undefined} aria-disabled={disabled ? "true" : undefined}>
-                          <input type="radio" name="debate-format" value={option.id} checked={format === option.id} disabled={disabled} onChange={() => {
-                            if (disabled || option.id === "whodunnit") return;
-                            if (option.id === "forum" || option.id === "turnabout") { setFormat(option.id); setRoleChecks([]); }
+                        <label {...binding} data-selected={format === option.id ? "true" : undefined}>
+                          <input type="radio" name="debate-format" value={option.id} checked={format === option.id} onChange={() => {
+                            if (option.id === "whodunnit") return;
+                            if (option.id === "forum" || option.id === "turnabout") {
+                              setFormat(option.id);
+                              setPlayerRole((current) =>
+                                debatePlayerRoleAfterFormatSelection(current, option.id),
+                              );
+                              setRoleChecks([]);
+                            }
                           }} />
                           <strong>{option.name}<em>{option.productionName}</em></strong><span>{option.summary}</span><small>{option.cadence}</small>
+                          {movesParticipantToJudge ? <b>Uses Judge seat</b> : null}
                         </label>
                       )}
                     </PrismRefractTarget>
@@ -20137,9 +20173,9 @@ export function DebateExperience(
                 option.availability === "available" || option.id === "flyting",
             ).map((option) => {
               const comingSoon = option.availability === "coming_soon";
-              const participantForumOnly =
+              const movesParticipantToJudge =
                 playerRole === "participant" && option.id === "turnabout";
-              const disabled = participantForumOnly || comingSoon;
+              const disabled = comingSoon;
               const renderFormatCard = (
                 binding?: PrismRefractBinding,
               ): React.JSX.Element => (
@@ -20148,8 +20184,8 @@ export function DebateExperience(
                   key={option.id}
                   data-selected={format === option.id ? "true" : undefined}
                   data-availability={
-                    participantForumOnly
-                      ? "participant-forum-only"
+                    movesParticipantToJudge
+                      ? "participant-role-change"
                       : option.availability
                   }
                   aria-disabled={disabled ? "true" : undefined}
@@ -20165,9 +20201,12 @@ export function DebateExperience(
                       if (disabled) return;
                       if (option.id === "whodunnit") {
                         setFormat("whodunnit");
-                        if (playerRole === "judge") {
-                          setPlayerRole("participant");
-                        }
+                        setPlayerRole((current) =>
+                          debatePlayerRoleAfterFormatSelection(
+                            current,
+                            "whodunnit",
+                          ),
+                        );
                         setFormality((current) =>
                           current === "plainspoken" ? "structured" : current,
                         );
@@ -20182,6 +20221,12 @@ export function DebateExperience(
                         return;
                       }
                       setFormat(option.id);
+                      setPlayerRole((current) =>
+                        debatePlayerRoleAfterFormatSelection(
+                          current,
+                          option.id,
+                        ),
+                      );
                       setRoleChecks([]);
                     }}
                   />
@@ -20193,8 +20238,8 @@ export function DebateExperience(
                   <small>{option.cadence}</small>
                   {comingSoon ? (
                     <b>Coming soon</b>
-                  ) : participantForumOnly ? (
-                    <b>Participant uses Forum</b>
+                  ) : movesParticipantToJudge ? (
+                    <b>Uses Judge seat</b>
                   ) : null}
                 </label>
               );
@@ -20688,7 +20733,6 @@ export function DebateExperience(
               onClick={() => {
                 setActiveJurySeatIndex(null);
                 setActiveMysteryCastSeat(seat);
-                if (!bot) surpriseMysterySeat(seat);
               }}
             >
               <span className={styles.castSlotGlyph} aria-hidden="true">
@@ -20778,6 +20822,7 @@ export function DebateExperience(
     <section
       className={`${styles.setupPanel} ${styles.dashboardPanel}`}
       data-debate-dashboard-section="cast"
+      data-debate-format={format}
       data-tutorial-target="debate-cast"
     >
       <div className={styles.castStepHeader}>
@@ -25499,6 +25544,12 @@ export function DebateExperience(
       stageAlignmentPreviewCamera === "wide" &&
       stageAlignmentWhodunnitPreview === null &&
       !stageAlignmentJuryPreview;
+    // The Main foreground is one shared presentation state, not a Wide-only
+    // decoration. Keep it mounted through every Forum camera so switching to
+    // Moderator does not silently drop the active table (or replace it with a
+    // witness silhouette).
+    const stageAlignmentCourtForegroundVisible =
+      stageAlignmentWhodunnitPreview === null && !stageAlignmentJuryPreview;
     const mainCourtPropItems = [
       "wideEvidenceTable",
       "wideWitnessSilhouette",
@@ -26272,7 +26323,14 @@ export function DebateExperience(
                       className={styles.forumCamera}
                       data-camera-view={stageAlignmentPreviewCamera}
                       data-whodunnit-court-preview={
-                        stageAlignmentMainPreview ? "main" : undefined
+                        stageAlignmentCourtForegroundVisible
+                          ? "main"
+                          : undefined
+                      }
+                      data-debate-stage-court-foreground={
+                        stageAlignmentCourtForegroundVisible
+                          ? stageAlignmentMainCourtProp
+                          : undefined
                       }
                       data-alignment-evidence-only={
                         stageAlignmentEvidenceOnlyCamera ? "true" : undefined
@@ -26285,7 +26343,7 @@ export function DebateExperience(
                         aria-hidden="true"
                       />
                       <DebateForumLightMasks depth="backdrop" />
-                      {stageAlignmentMainPreview ? (
+                      {stageAlignmentCourtForegroundVisible ? (
                         <div
                           className={mysteryV2Styles.wideCourtComposition}
                           data-debate-main-court-prop={

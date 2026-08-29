@@ -387,7 +387,7 @@ class InterruptingV2AuthorProvider extends V2AuthorProvider {
     ) {
       this.calls += 1;
       this.sections.push("suspect_chapter:suspect-2");
-      return "{}";
+      throw new Error("simulated provider interruption");
     }
     return super.generateResponse(messages, options);
   }
@@ -406,12 +406,33 @@ class ExhaustedWitnessV2AuthorProvider extends V2AuthorProvider {
     };
     if (
       request.section === "suspect_chapter" &&
-      request.suspect?.seatId === "suspect-1"
+      request.suspect?.seatId === "suspect-3"
     ) {
-      this.calls += 1;
-      this.sections.push("suspect_chapter:suspect-1");
       this.onWitnessAttempt?.();
-      return "{}";
+      if (options?.model === "witness-repair-2") {
+        this.calls += 1;
+        this.sections.push("suspect_chapter:suspect-3");
+        return "not valid json";
+      }
+      const response = await super.generateResponse(messages, options);
+      const parsed = JSON.parse(response) as {
+        suspect?: {
+          seatId?: string;
+          testimony?: Array<{
+            contradictionBasis?: { recordClaim?: string };
+          }>;
+        };
+      };
+      if (options?.model === "witness-primary") {
+        const secondStatement = parsed.suspect?.testimony?.[1];
+        if (secondStatement?.contradictionBasis) {
+          secondStatement.contradictionBasis.recordClaim =
+            "This claim does not occur in the assigned record.";
+        }
+      } else if (parsed.suspect) {
+        parsed.suspect.seatId = "suspect-not-frozen";
+      }
+      return JSON.stringify(parsed);
     }
     return super.generateResponse(messages, options);
   }
@@ -1872,7 +1893,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     );
   });
 
-  it("rejects exact clock testimony from a witness without exact recall", async () => {
+  it("recovers exact clock testimony from a witness without exact recall", async () => {
     const db = testDb();
     const provider = new ExactClockWithoutRecallV2AuthorProvider();
     const created = await createDebateMysterySessionV2(
@@ -1890,11 +1911,8 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       runtime(provider),
       { generateWave: async () => playableWave() },
     );
-    assert.equal(v2State(session).compilation.stage, "needs_attention");
-    const row = db.prepare(
-      "SELECT private_error FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
-    ).get("user-1", session.id) as { private_error: string | null };
-    assert.match(row.private_error ?? "", /exact clock recall.*10:13 AM/iu);
+    assert.equal(v2State(session).compilation.stage, "complete");
+    assert.equal(session.status, "waiting_for_player");
     const impreciseWitnessRequests = provider.requests.filter((request) => {
       const suspect = request.suspect as
         | { temporalRecall?: string }
@@ -1909,6 +1927,26 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       impreciseWitnessRequests.every((request) =>
         !("timeline" in (request.setup as Record<string, unknown>))),
       "an imprecise witness prompt must not export exact timeline anchors",
+    );
+    const impreciseSeatIds = new Set(
+      impreciseWitnessRequests.flatMap((request) => {
+        const suspect = request.suspect as { seatId?: string } | undefined;
+        return suspect?.seatId ? [suspect.seatId] : [];
+      }),
+    );
+    const { privateCase, graph } = getDebateMysteryCaseV2(
+      db,
+      "user-1",
+      session.id,
+    );
+    assert.equal(privateCase.graphValidation.valid, true);
+    assert.doesNotMatch(
+      JSON.stringify(
+        graph.lines.filter((line) =>
+          line.speakerSeatId && impreciseSeatIds.has(line.speakerSeatId)
+        ),
+      ),
+      /10:13\s*AM/iu,
     );
   });
 
@@ -2045,7 +2083,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(terra.calls, sol.calls);
   });
 
-  it("stops an exhausted Auto witness chapter at three public attempts", async () => {
+  it("recovers an exhausted Auto witness chapter after three public attempts", async () => {
     const db = testDb();
     const provider = new ExhaustedWitnessV2AuthorProvider();
     const autoRuntime: DebateAiRuntime = {
@@ -2085,22 +2123,35 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     );
 
     assert.deepEqual(publicAttemptMessages, [
-      "Writing the Case · Witness chapter 1 of 4 · attempt 1 of 3",
-      "Writing the Case · Witness chapter 1 of 4 · attempt 2 of 3",
-      "Writing the Case · Witness chapter 1 of 4 · attempt 3 of 3",
+      "Writing the Case · Witness chapter 3 of 4 · attempt 1 of 3",
+      "Writing the Case · Witness chapter 3 of 4 · attempt 2 of 3",
+      "Writing the Case · Witness chapter 3 of 4 · attempt 3 of 3",
     ]);
     assert.equal(
       provider.sections.filter(
-        (section) => section === "suspect_chapter:suspect-1",
+        (section) => section === "suspect_chapter:suspect-3",
       ).length,
       3,
     );
-    assert.equal(session.status, "failed");
-    assert.equal(v2State(session).compilation.stage, "needs_attention");
-    assert.equal(v2State(session).compilation.retryable, true);
-    assert.equal(
-      v2State(session).compilation.spoilerSafeMessage,
-      "Case preparation needs attention",
+    assert.equal(session.status, "waiting_for_player");
+    assert.equal(v2State(session).compilation.stage, "complete");
+    const { privateCase, graph } = getDebateMysteryCaseV2(
+      db,
+      "user-1",
+      session.id,
+    );
+    assert.equal(privateCase.graphValidation.valid, true);
+    const recoveredChapter = graph.witnessChapters.find(
+      (chapter) => chapter.witnessSeatId === "suspect-3",
+    );
+    assert.equal(recoveredChapter?.initialStatementIds.length, 3);
+    const recoveredContradiction = recoveredChapter?.statementVersions.find(
+      (statement) => statement.statementId === "statement-suspect-3-2",
+    );
+    assert.match(
+      graph.lines.find((line) => line.id === recoveredContradiction?.lineId)
+        ?.spokenText ?? "",
+      /The assigned record's exact claim is false\.$/u,
     );
     assert.doesNotMatch(
       JSON.stringify(session),
@@ -2758,7 +2809,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     );
   });
 
-  it("reports each absent proof-bearing witness field in the private diagnostic", async () => {
+  it("recovers a witness chapter missing proof-bearing core fields", async () => {
     const db = testDb();
     const provider = new MissingWitnessCoreV2AuthorProvider();
     const created = await createDebateMysterySessionV2(
@@ -2772,18 +2823,23 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     const session = await runDebateMysteryCompilationV2(db, "user-1", created.id, runtime(provider), {
       generateWave: async () => playableWave(),
     });
-    assert.equal(v2State(session).compilation.stage, "needs_attention");
+    assert.equal(v2State(session).compilation.stage, "complete");
+    assert.equal(session.status, "waiting_for_player");
     assert.equal(
       provider.sections.filter((section) => section === "suspect_chapter:suspect-1").length,
       3,
     );
-    const source = db.prepare(
-      "SELECT private_error FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
-    ).get("user-1", session.id) as { private_error: string | null };
-    assert.match(source.private_error ?? "", /omitted required core dialogue: relationship,/u);
-    assert.match(source.private_error ?? "", /testimony\.statement-suspect-1-2\.press/u);
-    assert.match(source.private_error ?? "", /presentReactions\.evidence:[^,.]+\.response/u);
-    assert.doesNotMatch(source.private_error ?? "", /omitted required dialogue\.$/u);
+    const { privateCase, graph } = getDebateMysteryCaseV2(
+      db,
+      "user-1",
+      session.id,
+    );
+    assert.equal(privateCase.graphValidation.valid, true);
+    assert.ok(
+      graph.witnessChapters.every((chapter) =>
+        chapter.initialStatementIds.length === 3
+      ),
+    );
   });
 
   it("accepts prosecution choices authored with compatible presentation field names", async () => {
@@ -4344,7 +4400,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(provider.roomIntroductionCalls, 1);
   });
 
-  it("rejects courtroom language in investigation dialogue before a case can be sealed", async () => {
+  it("recovers courtroom language in investigation dialogue before sealing", async () => {
     const db = testDb();
     const provider = new CourtroomInvestigationV2AuthorProvider();
     const created = await createDebateMysterySessionV2(
@@ -4362,19 +4418,17 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       runtime(provider),
       { generateWave: async () => playableWave() },
     );
-    assert.equal(session.status, "failed");
-    assert.equal(v2State(session).compilation.stage, "needs_attention");
+    assert.equal(session.status, "waiting_for_player");
+    assert.equal(v2State(session).compilation.stage, "complete");
     assert.equal(
       provider.sections.filter((section) => section === "suspect_chapter:suspect-1").length,
       3,
     );
-    const source = db.prepare(
-      "SELECT private_error FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
-    ).get("user-1", session.id) as { private_error: string | null };
-    assert.match(source.private_error ?? "", /investigation dialogue.*courtroom language/iu);
+    const { privateCase } = getDebateMysteryCaseV2(db, "user-1", session.id);
+    assert.equal(privateCase.graphValidation.valid, true);
   });
 
-  it("rejects cross-wired Case File titles in Present dialogue before a case can be sealed", async () => {
+  it("recovers cross-wired Case File titles before sealing", async () => {
     const db = testDb();
     const provider = new CrosswiredPresentTitleV2AuthorProvider();
     const created = await createDebateMysterySessionV2(
@@ -4392,19 +4446,17 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       runtime(provider),
       { generateWave: async () => playableWave() },
     );
-    assert.equal(session.status, "failed");
-    assert.equal(v2State(session).compilation.stage, "needs_attention");
+    assert.equal(session.status, "waiting_for_player");
+    assert.equal(v2State(session).compilation.stage, "complete");
     assert.equal(
       provider.sections.filter((section) => section === "suspect_chapter:suspect-1").length,
       3,
     );
-    const source = db.prepare(
-      "SELECT private_error FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
-    ).get("user-1", session.id) as { private_error: string | null };
-    assert.match(source.private_error ?? "", /Present exchange names a different Case File record/iu);
+    const { privateCase } = getDebateMysteryCaseV2(db, "user-1", session.id);
+    assert.equal(privateCase.graphValidation.valid, true);
   });
 
-  it("rejects a record-specific title in reusable default Present dialogue", async () => {
+  it("recovers a record-specific title in reusable default Present dialogue", async () => {
     const db = testDb();
     const provider = new RecordSpecificDefaultPresentV2AuthorProvider();
     const created = await createDebateMysterySessionV2(
@@ -4422,16 +4474,14 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       runtime(provider),
       { generateWave: async () => playableWave() },
     );
-    assert.equal(session.status, "failed");
-    assert.equal(v2State(session).compilation.stage, "needs_attention");
+    assert.equal(session.status, "waiting_for_player");
+    assert.equal(v2State(session).compilation.stage, "complete");
     assert.equal(
       provider.sections.filter((section) => section === "suspect_chapter:suspect-1").length,
       3,
     );
-    const source = db.prepare(
-      "SELECT private_error FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
-    ).get("user-1", session.id) as { private_error: string | null };
-    assert.match(source.private_error ?? "", /default Present dialogue.*specific Case File record/iu);
+    const { privateCase } = getDebateMysteryCaseV2(db, "user-1", session.id);
+    assert.equal(privateCase.graphValidation.valid, true);
   });
 
   it("compiles every suspect chapter with a sparse local pack and plays without runtime authoring", async () => {

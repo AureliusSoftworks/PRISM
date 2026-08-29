@@ -111,6 +111,7 @@ import {
   estimatePrismTextTokens,
   prismGenerationBroker,
 } from "./generation-broker.ts";
+import { AutoFallbackExhaustedError } from "./auto-fallback.ts";
 import type { PrismGenerationWorkReceipt } from "./generation-work.ts";
 import { PRISM_INSTANT_VOICE_MODEL_ID, pcmWaveDurationMs } from "./local-voice-engine.ts";
 import { resolveAbsoluteUnderDataRoot } from "./image-storage.ts";
@@ -539,6 +540,26 @@ class MysteryFoundationValidationError extends Error {
     super(message);
     this.name = "MysteryFoundationValidationError";
   }
+}
+
+class MysteryWitnessChapterValidationError extends Error {
+  constructor(message: string, cause: unknown) {
+    super(message, { cause });
+    this.name = "MysteryWitnessChapterValidationError";
+  }
+}
+
+function mysteryWitnessChapterValidationExhausted(error: unknown): boolean {
+  const cause = error instanceof Error ? error.cause : null;
+  if (
+    cause instanceof MysteryWitnessChapterValidationError ||
+    cause instanceof SyntaxError
+  ) return true;
+  return cause instanceof AutoFallbackExhaustedError &&
+    cause.attempts.length > 0 &&
+    cause.attempts.every((attempt) =>
+      attempt.outcome === "failed" && attempt.reason === "invalid_output"
+    );
 }
 
 interface MysteryV2AuthoringCheckpointV1 {
@@ -4346,38 +4367,138 @@ async function authorMysteryV2(args: {
         relevantEvidenceIds.has(evidence.id),
       ),
     };
-    const validateSuspect = (value: Record<string, unknown>) =>
-      assertMysteryIncidentLanguageV2({
-        value: authoredSuspectFromJson({
-        value,
-        seatId: requirement.seatId,
-        requiredPresentRecords,
-        requiredContradictionRecord,
-        requiredPresentationGateRecord,
-        recordItems: validatedFoundation.evidence.map((evidence) => ({
-          reference: { kind: "evidence" as const, id: evidence.id },
-          title: evidence.title,
-        })),
-        rooms: setup.roomNames.map((room) => ({
-          id: room.roomId,
-          name: room.name,
-        })),
-        people: [
-          {
-            id: args.scaffold.victim.id,
-            name: validatedFoundation.victimName,
-          },
-          ...args.scaffold.suspects.map((suspect) => ({
-            id: suspect.seatId,
-            name: suspect.name,
-          })),
-        ],
-        knowledge: suspectKnowledgeBySeat[requirement.seatId]!,
-          courtOnly: omitInvestigation,
-        }),
-        incidentPlan: args.incidentPlan,
-        section: `Witness chapter ${requirement.ordinal}`,
+    const validateSuspect = (value: Record<string, unknown>) => {
+      try {
+        return assertMysteryIncidentLanguageV2({
+          value: authoredSuspectFromJson({
+            value,
+            seatId: requirement.seatId,
+            requiredPresentRecords,
+            requiredContradictionRecord,
+            requiredPresentationGateRecord,
+            recordItems: validatedFoundation.evidence.map((evidence) => ({
+              reference: { kind: "evidence" as const, id: evidence.id },
+              title: evidence.title,
+            })),
+            rooms: setup.roomNames.map((room) => ({
+              id: room.roomId,
+              name: room.name,
+            })),
+            people: [
+              {
+                id: args.scaffold.victim.id,
+                name: validatedFoundation.victimName,
+              },
+              ...args.scaffold.suspects.map((suspect) => ({
+                id: suspect.seatId,
+                name: suspect.name,
+              })),
+            ],
+            knowledge: suspectKnowledgeBySeat[requirement.seatId]!,
+            courtOnly: omitInvestigation,
+          }),
+          incidentPlan: args.incidentPlan,
+          section: `Witness chapter ${requirement.ordinal}`,
+        });
+      } catch (error) {
+        throw new MysteryWitnessChapterValidationError(
+          error instanceof Error
+            ? error.message
+            : `Witness chapter ${requirement.ordinal} failed validation.`,
+          error,
+        );
+      }
+    };
+    const deterministicWitnessChapter = (): AuthoredSuspectV2 => {
+      const actorAccount = args.scaffold.actorKnowledge.find(
+        (account) => account.seatId === requirement.seatId,
+      );
+      if (!actorAccount) {
+        throw new Error(
+          `Witness chapter ${requirement.ordinal} has no frozen actor account.`,
+        );
+      }
+      const recordClaim = groundedMysteryContradictionExcerptV2(
+        "",
+        requiredContradictionRecord.text,
+      );
+      const deterministicDenial = "The assigned record's exact claim is false.";
+      const statementClaim = groundedMysteryContradictionExcerptV2(
+        "",
+        deterministicDenial,
+      );
+      if (!recordClaim || !statementClaim) {
+        throw new Error(
+          `Witness chapter ${requirement.ordinal} has no groundable frozen contradiction.`,
+        );
+      }
+      const alibi = requirement.temporalRecall === "exact"
+        ? actorAccount.alibi
+        : requirement.temporalRecall === "approximate"
+          ? "I remember the order of my own movements, but not an exact clock time."
+          : "I cannot place events by time; I can only describe what I personally did and observed.";
+      return validateSuspect({
+        suspect: {
+          seatId: requirement.seatId,
+          relationship: actorAccount.relationshipToVictim,
+          alibi,
+          presentReactions: requirement.requiredPresentReactionRecordIds.map(
+            (recordId) => ({
+              recordId,
+              response:
+                "This Case File record changes what I can safely claim. I will limit my answer to my own account and the facts it establishes.",
+            }),
+          ),
+          testimony: [
+            {
+              id: requirement.requiredStatementIds[0],
+              text: `I knew ${validatedFoundation.victimName} through the household, but I did not know their private plans.`,
+              press:
+                "I can describe our connection, but I will not guess about choices I did not witness.",
+              defenseRebuttal:
+                "The witness has limited this statement to firsthand knowledge; speculation is not evidence.",
+              defenseObjection:
+                "Objection. The prosecution is asking the witness to claim knowledge they do not possess.",
+              revision:
+                "I knew the affected party through the household, but I cannot speak to anyone else's private decisions.",
+            },
+            {
+              id: requirement.requiredStatementIds[1],
+              text: deterministicDenial,
+              press:
+                "I am denying that exact claim, not a different event or a neighboring detail.",
+              defenseRebuttal:
+                "That record does not contradict this active sentence unless it proves the exact opposite claim.",
+              defenseObjection:
+                "Objection. The prosecution must compare the record to the witness's exact words.",
+              revision:
+                "I withdraw that denial. The assigned record's exact claim is true.",
+              contradictionBasis: {
+                version: 1,
+                recordId: mysteryRecordKey(requiredContradictionRecord.reference),
+                statementClaim,
+                recordClaim,
+                relationship: "cannot_both_be_true",
+              },
+            },
+            {
+              id: requirement.requiredStatementIds[2],
+              text:
+                "I can speak only to my own movements and what I directly observed.",
+              press:
+                "Anything beyond my own actions and observations would be speculation.",
+              defenseRebuttal:
+                "The witness has drawn a clear boundary around their firsthand account.",
+              defenseObjection:
+                "Objection. The question asks this witness to adopt someone else's knowledge.",
+              revision:
+                "I can confirm my own actions and direct observations; anything beyond that would be speculation.",
+            },
+          ],
+        },
       });
+    };
+    let deterministicWitnessFallback = false;
     let suspect: AuthoredSuspectV2 | undefined =
       args.draft.suspectsBySeatId[requirement.seatId];
     if (suspect) {
@@ -4393,7 +4514,8 @@ async function authorMysteryV2(args: {
       }
     }
     if (!suspect) {
-      suspect = await generateMysteryAuthoringSectionV2({
+      try {
+        suspect = await generateMysteryAuthoringSectionV2({
       runtime: args.runtime,
       label: `Witness chapter ${index + 1}`,
       maxTokens: omitInvestigation ? 3_600 : 5_000,
@@ -4500,10 +4622,20 @@ async function authorMysteryV2(args: {
           })),
         ),
       },
-        validate: validateSuspect,
-      });
+          validate: validateSuspect,
+        });
+      } catch (error) {
+        if (!mysteryWitnessChapterValidationExhausted(error)) throw error;
+        suspect = deterministicWitnessChapter();
+        deterministicWitnessFallback = true;
+      }
       args.draft.suspectsBySeatId[requirement.seatId] = suspect;
-      args.onDraft(args.draft, `Writing the Case · Witness chapter ${index + 1} of ${suspectRequirements.length} complete`);
+      args.onDraft(
+        args.draft,
+        deterministicWitnessFallback
+          ? `Writing the Case · Witness chapter ${index + 1} of ${suspectRequirements.length} recovered from frozen case facts`
+          : `Writing the Case · Witness chapter ${index + 1} of ${suspectRequirements.length} complete`,
+      );
     }
     const suspectSectionKey = `suspect:${requirement.seatId}`;
     const suspectFrozenIds = [
@@ -4547,11 +4679,13 @@ async function authorMysteryV2(args: {
         suspectSectionKey,
       )
     ) {
-      queueAudit(
-        suspectSectionKey,
-        args.draft.suspectsBySeatId[requirement.seatId]!,
-        suspectFrozenIds,
-      );
+      if (!deterministicWitnessFallback) {
+        queueAudit(
+          suspectSectionKey,
+          args.draft.suspectsBySeatId[requirement.seatId]!,
+          suspectFrozenIds,
+        );
+      }
     } else {
       pendingConnectives.push(
         prepareMysteryConnectiveAdditionsV2({
@@ -4566,12 +4700,15 @@ async function authorMysteryV2(args: {
             args.draft,
             `Writing the Case · Witness chapter ${index + 1} connective copy complete`,
           );
-          queueAudit(suspectSectionKey, connectedSuspect, suspectFrozenIds);
+          if (!deterministicWitnessFallback) {
+            queueAudit(suspectSectionKey, connectedSuspect, suspectFrozenIds);
+          }
         }),
       );
     }
-    targetedRepairs.set(suspectSectionKey, async (issues) => {
-      const repaired = await generateMysteryAuthoringSectionV2({
+    if (!deterministicWitnessFallback) {
+      targetedRepairs.set(suspectSectionKey, async (issues) => {
+        const repaired = await generateMysteryAuthoringSectionV2({
         runtime: args.runtime,
         label: `Witness chapter ${index + 1} repair`,
         role: "repair",
@@ -4604,17 +4741,18 @@ async function authorMysteryV2(args: {
         onReceipt: (receipt) =>
           recordMysterySectionReceipt(args.draft, suspectSectionKey, receipt),
       });
-      args.draft.suspectsBySeatId[requirement.seatId] = repaired;
-      const connectiveAdditions =
-        args.draft.connectiveAdditions[suspectSectionKey];
-      if (connectiveAdditions) {
-        applyConnectiveAdditions(connectiveAdditions);
-      }
-      args.onDraft(
-        args.draft,
-        `Writing the Case · Witness chapter ${index + 1} repaired`,
-      );
-    });
+        args.draft.suspectsBySeatId[requirement.seatId] = repaired;
+        const connectiveAdditions =
+          args.draft.connectiveAdditions[suspectSectionKey];
+        if (connectiveAdditions) {
+          applyConnectiveAdditions(connectiveAdditions);
+        }
+        args.onDraft(
+          args.draft,
+          `Writing the Case · Witness chapter ${index + 1} repaired`,
+        );
+      });
+    }
   }
 
   let prosecutionChoices = args.draft.prosecutionChoices;

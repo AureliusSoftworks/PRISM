@@ -97,7 +97,7 @@ describe("applet version helpers", () => {
     assert.equal(PRISM_APPLETS.coffee.version, "2.71");
     assert.equal(PRISM_APPLETS.debate.version, "0.54");
     assert.equal(PRISM_APPLETS.debate.status, "preview");
-    assert.equal(PRISM_APPLETS.botcast.version, "1.89");
+    assert.equal(PRISM_APPLETS.botcast.version, "1.90");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
     assert.equal(PRISM_APPLETS.story.version, "0.42");
     assert.equal(PRISM_APPLETS.story.status, "planned");

@@ -6,6 +6,10 @@ const signalSource = readFileSync(
   new URL("./BotcastExperience.tsx", import.meta.url),
   "utf8",
 );
+const preparationWaitSource = readFileSync(
+  new URL("./signalTurnPreparationWait.ts", import.meta.url),
+  "utf8",
+);
 
 function sourceBlock(marker: string): string {
   const start = signalSource.indexOf(marker);
@@ -42,10 +46,24 @@ describe("Signal turn lookahead", () => {
 
   it("waits on the server instead of polling speculative turns on the UI thread", () => {
     assert.match(
-      signalSource,
-      /\?waitMs=\$\{SIGNAL_PREPARATION_WAIT_MS\}/u,
+      preparationWaitSource,
+      /SIGNAL_PREPARATION_POLL_WAIT_MS/u,
     );
     assert.doesNotMatch(signalSource, /SIGNAL_PREPARATION_POLL_MS/u);
+  });
+
+  it("gives speculative generation a bounded runway before foreground recovery", () => {
+    assert.match(
+      preparationWaitSource,
+      /SIGNAL_PREPARATION_MAX_WAIT_MS = 30_000/u,
+    );
+    assert.match(signalSource, /preparationTimedOut/u);
+    assert.match(signalSource, /preparation_timeout/u);
+    assert.match(
+      signalSource,
+      /preparationTimedOut[\s\S]{0,260}?discardPreparedAdvance/u,
+      "a timed-out speculative job must be cancelled before foreground recovery",
+    );
   });
 
   it("authorizes voice prefetch against the exact prepared turn", () => {

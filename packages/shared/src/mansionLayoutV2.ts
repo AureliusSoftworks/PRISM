@@ -1,6 +1,8 @@
 import {
   DEBATE_MYSTERY_ROOM_TEMPLATES,
+  debateMysteryRoomFloorRuleV1,
   debateMysteryRoomFootprint,
+  debateMysteryRoomTypeIsAllowedOnFloorV1,
   type DebateMysteryRoomFootprintV1,
 } from "./debateMystery.ts";
 
@@ -938,9 +940,12 @@ export function mansionLayoutV2FromLegacyRooms(
 }
 
 function legacyUpperFloorPriority(templateId: string): number {
+  const floorRule = debateMysteryRoomFloorRuleV1(templateId);
+  if (floorRule === "top-floor-only") return -1;
   if (templateId === "primary-bedroom" || templateId === "guest-bedroom") return 0;
   if (templateId === "bathroom") return 1;
   if (templateId === "study" || templateId === "library") return 2;
+  if (floorRule === "ground-floor-only") return 4;
   return 3;
 }
 
@@ -1177,6 +1182,7 @@ export function validateMansionLayoutV2(
 
   const entityById = new Map<string, MansionLayoutEntityV2>();
   const rooms: MansionLayoutRoomV2[] = [];
+  const roomByTemplateId = new Map<string, MansionLayoutRoomV2>();
   for (const entity of layout.entities) {
     if (!entity.id?.trim() || entity.id.length > 200 || !ID_PATTERN.test(entity.id) || entityById.has(entity.id)) {
       errors.push("Every mansion block needs a unique stable ID.");
@@ -1194,6 +1200,15 @@ export function validateMansionLayoutV2(
       rooms.push(entity);
       if (!entity.templateId?.trim() || !entity.name?.trim()) {
         errors.push(`${entity.id} needs a room type and name.`);
+      }
+      const normalizedTemplateId = entity.templateId?.trim().toLowerCase() ?? "";
+      const existingRoom = roomByTemplateId.get(normalizedTemplateId);
+      if (normalizedTemplateId && existingRoom) {
+        errors.push(
+          `${entity.name || entity.id} duplicates the ${existingRoom.name || existingRoom.id} room type. Each semantic room type can only be placed once per mansion.`,
+        );
+      } else if (normalizedTemplateId) {
+        roomByTemplateId.set(normalizedTemplateId, entity);
       }
       if (entity.rotation !== 0 && entity.rotation !== 90) {
         errors.push(`${entity.name || entity.id} must use a 0 or 90 degree rotation.`);
@@ -1237,8 +1252,15 @@ export function validateMansionLayoutV2(
   }
   const rooftopFloor = Math.max(1, ...rooms.map((room) => room.floor));
   for (const room of rooms) {
-    if (mansionLayoutV2TemplateIsRooftopOnly(room.templateId) && room.floor !== rooftopFloor) {
-      errors.push(`${room.name || room.id} is rooftop-only and must stay on Floor ${rooftopFloor}.`);
+    if (debateMysteryRoomTypeIsAllowedOnFloorV1(room.templateId, room.floor, rooftopFloor)) continue;
+    const floorRule = debateMysteryRoomFloorRuleV1(room.templateId);
+    if (floorRule === "ground-floor-only") {
+      errors.push(`${room.name || room.id} is ground-floor-only and must stay on Floor 1.`);
+    } else if (floorRule === "top-floor-only") {
+      const restriction = mansionLayoutV2TemplateIsRooftopOnly(room.templateId)
+        ? "rooftop-only"
+        : "top-floor-only";
+      errors.push(`${room.name || room.id} is ${restriction} and must stay on Floor ${rooftopFloor}.`);
     }
   }
   if (typeof options.suspectCount === "number" && rooms.length < options.suspectCount) {

@@ -3689,6 +3689,8 @@ describe("API request integration", () => {
     assert.ok(bookingPayload.topic.length > 0);
     assert.equal(typeof bookingPayload.producerBrief, "string");
     assert.ok(bookingPayload.producerBrief.length > 0);
+    assert.equal(typeof bookingPayload.guestBrief, "string");
+    assert.ok(bookingPayload.guestBrief.length > 0);
 
     const invalidTopicResponse = await client.request(
       `/api/botcast/shows/${encodeURIComponent(showId)}/booking-suggestion`,

@@ -61,6 +61,8 @@ describe("mode tutorials", () => {
     assert.match(step.body, /guided five-step path/u);
     assert.match(step.body, /Experience, Mansion, Story, Production, then Cast/u);
     assert.match(step.body, /Only the current step's decisions are shown/u);
+    assert.match(step.body, /prompt-free group picker/u);
+    assert.match(step.body, /prompt-free random bot replacement/u);
     assert.match(step.body, /Back and Continue preserve the draft/u);
     assert.match(step.body, /create a new Quick, Standard, Grand, or Custom house/u);
     assert.match(step.body, /Quick uses the compact exterior family/u);
@@ -80,6 +82,8 @@ describe("mode tutorials", () => {
     assert.match(step.body, /full-screen Mansion Editor/u);
     assert.match(step.body, /fixed 16 by 12 planner/u);
     assert.match(step.body, /existing footprint and silhouette/u);
+    assert.match(step.body, /room type can be placed only once across the whole mansion, regardless of floor/u);
+    assert.match(step.body, /placed types remain visible but unavailable/u);
     assert.match(step.body, /Double-click a room to enter its Room Editor/u);
     assert.match(step.body, /counterclockwise and clockwise arrows/u);
     assert.match(step.body, /Undo restores the previous architectural layout step/u);
@@ -99,7 +103,9 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Open Mansion Editor/u);
     assert.match(step.body, /smallest valid connected two-floor plan/u);
     assert.match(step.body, /complete semantic room-block palette runs from Ballroom through Garage/u);
-    assert.match(step.body, /rooftop-only rooms stay on the highest occupied floor/u);
+    assert.match(step.body, /Foyer, Basement, and Garage stay on Floor 1/u);
+    assert.match(step.body, /Attic and Rooftop Lounge stay on the highest occupied floor/u);
+    assert.match(step.body, /impossible choices visible but disabled/u);
     assert.match(step.body, /remove it from the right inspector/u);
     assert.match(step.body, /informative full-screen blocker/u);
     assert.match(step.body, /returns to the mansion map/u);
@@ -121,6 +127,8 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Cast begins with the Jury Trial toggle/u);
     assert.match(step.body, /four juror seats appear only while it is on/u);
     assert.match(step.body, /Bench Trial hides them/u);
+    assert.match(step.body, /Select a role card first, then choose a Library bot/u);
+    assert.match(step.body, /clicking a role card never changes its current bot/u);
     assert.match(step.body, /Mansion idea/u);
     assert.doesNotMatch(step.body, /Theme \/ Spark/u);
     assert.match(step.body, /Participant setup offers Skip investigation/u);
@@ -273,10 +281,14 @@ describe("mode tutorials", () => {
     assert.ok(signal);
     assert.match(signal.body, /native Production Desk/u);
     assert.match(signal.body, /Latest episodes restores an editable booking/u);
+    assert.match(signal.body, /guest group filter opens a modal/u);
     assert.match(signal.body, /One launch row owns Begin episode or Prepare show/u);
     assert.match(signal.body, /missing guest or topic explained at that action/u);
     assert.match(signal.body, /I Feel Lucky!/u);
-    assert.match(signal.body, /show, guest, title, and private premise/u);
+    assert.match(
+      signal.body,
+      /show, guest, title, and separate private host and guest briefings/u,
+    );
     const lucky = MODE_TUTORIALS.botcast.steps.find(
       (step) => step.heading === "Take the lucky shortcut",
     );
@@ -1704,6 +1716,9 @@ describe("mode tutorials", () => {
     assert.match(castCopy, /role is the only required choice/u);
     assert.match(castCopy, /left on Surprise me is randomly assigned when you press Compile the case/u);
     assert.match(castCopy, /every manual choice stays put/u);
+    assert.match(castCopy, /Select a role card, then choose a bot from the Library grid/u);
+    assert.match(castCopy, /clicking the role card itself never changes its bot/u);
+    assert.match(castCopy, /Wield that seat for its dedicated one-seat Surprise reroll/u);
     assert.match(castCopy, /vertical hue lens/u);
     assert.match(castCopy, /Prism takes the center Judge \/ Moderator seat/u);
     assert.match(castCopy, /automatic neutral introduction/u);
@@ -2995,7 +3010,15 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalPowersTutorialBody(),
-      /richer provocative question.*private comments/u,
+      /richer provocative question.*Host briefing/u,
+    );
+    assert.match(
+      signalPowersTutorialBody(),
+      /Guest briefing gives only the guest private knowledge, motive, emotional posture, or something to withhold/u,
+    );
+    assert.match(
+      signalPowersTutorialBody(),
+      /host can learn that briefing only through what the guest naturally reveals on air/u,
     );
     assert.ok(
       MODE_TUTORIALS.botcast.steps.some((step) =>
@@ -3013,9 +3036,12 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalPowersTutorialBody(),
-      /Unrelated pairs still meet fresh; discarded shows, Producer-guest episodes, and private producer comments never become shared bot history/u,
+      /Unrelated pairs still meet fresh; discarded shows, Producer-guest episodes, private producer comments, and private guest briefings never become shared bot history/u,
     );
-    assert.match(signalPowersTutorialBody(), /stay editable/u);
+    assert.match(
+      signalPowersTutorialBody(),
+      /Book for me generates all three fields together/u,
+    );
     assert.match(
       signalPowersTutorialBody(),
       /Latest episodes can restore/u,
@@ -3248,21 +3274,18 @@ describe("mode tutorials", () => {
       signalControlRoomStep.body,
       /requires a substantive on-air payoff/u,
     );
+    assert.match(signalControlRoomStep.body, /Host notes remain private/u);
     assert.match(
       signalControlRoomStep.body,
-      /every cue remains private to the host/u,
+      /compatible host speaks a Say this quote exactly with Producer attribution/u,
     );
     assert.match(
       signalControlRoomStep.body,
-      /guest only hears the host’s own on-mic words/u,
+      /Tab moves between Host note… and Say this…[\s\S]*Enter sends whatever is filled[\s\S]*Enter again runs Interrupt guest now/u,
     );
     assert.match(
       signalControlRoomStep.body,
-      /Tab moves between Host note… and Shape this…[\s\S]*Enter sends whatever is filled[\s\S]*Enter again runs Interrupt guest now/u,
-    );
-    assert.match(
-      signalControlRoomStep.body,
-      /private wording to transform[\s\S]*every cue remains private to the host/u,
+      /authorize a one-line on-air quote with Say this[\s\S]*Host notes remain private/u,
     );
     assert.match(
       signalControlRoomStep.body,

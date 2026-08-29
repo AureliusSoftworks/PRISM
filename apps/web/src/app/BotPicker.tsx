@@ -282,6 +282,7 @@ interface BotPickerToolbarProps {
   groupValue?: string;
   onGroupChange?: (groupId: string) => void;
   groupTheme?: BotPickerGroupTheme;
+  groupSelectionMode?: "dropdown" | "modal";
   resultLabel?: string;
   compact?: boolean;
   className?: string;
@@ -297,6 +298,7 @@ export function BotPickerToolbar({
   groupValue,
   onGroupChange,
   groupTheme = "dark",
+  groupSelectionMode = "dropdown",
   resultLabel,
   compact = false,
   className,
@@ -314,6 +316,8 @@ export function BotPickerToolbar({
   const groupMenuAvailable = groups.length > 1 && onGroupChange !== undefined;
   const groupMenuGroups = groups;
   const groupMenuId = `bot-picker-group-listbox-${pickerId.replace(/:/g, "")}`;
+  const groupModalTitleId = `${groupMenuId}-title`;
+  const groupSelectionIsModal = groupSelectionMode === "modal";
   const selectedGroupBots = selectedGroup
     ? groupItems.filter((item) =>
         selectedGroup.botIds.includes(item.id),
@@ -328,7 +332,7 @@ export function BotPickerToolbar({
     : undefined;
 
   useEffect(() => {
-    if (!groupMenuOpen) return;
+    if (!groupMenuOpen || groupSelectionIsModal) return;
     const dismiss = (event: MouseEvent): void => {
       const target = event.target as Node;
       if (groupTriggerRef.current?.contains(target)) return;
@@ -337,10 +341,10 @@ export function BotPickerToolbar({
     };
     document.addEventListener("mousedown", dismiss);
     return () => document.removeEventListener("mousedown", dismiss);
-  }, [groupMenuOpen]);
+  }, [groupMenuOpen, groupSelectionIsModal]);
 
   useEffect(() => {
-    if (!groupMenuOpen) return;
+    if (!groupMenuOpen || groupSelectionIsModal) return;
     const update = (): void => {
       const trigger = groupTriggerRef.current;
       if (!trigger) return;
@@ -359,7 +363,7 @@ export function BotPickerToolbar({
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
     };
-  }, [groupMenuOpen]);
+  }, [groupMenuOpen, groupSelectionIsModal]);
 
   useEffect(() => {
     if (!groupMenuOpen) return;
@@ -426,7 +430,7 @@ export function BotPickerToolbar({
             type="button"
             className={pickerStyles.botLibraryGroupTrigger}
             aria-label={`Filter by bot group: ${selectedGroup.name}`}
-            aria-haspopup="listbox"
+            aria-haspopup={groupSelectionIsModal ? "dialog" : "listbox"}
             aria-expanded={groupMenuOpen}
             aria-controls={groupMenuOpen ? groupMenuId : undefined}
             onClick={() => setGroupMenuOpen((open) => !open)}
@@ -462,100 +466,155 @@ export function BotPickerToolbar({
               </svg>
             </span>
           </button>
-          {groupMenuOpen && groupMenuStyle && typeof document !== "undefined"
+          {groupMenuOpen &&
+          (groupSelectionIsModal || groupMenuStyle) &&
+          typeof document !== "undefined"
             ? createPortal(
                 <div
-                  ref={groupMenuRef}
-                  className={`${pickerStyles.composeBotMenu} ${pickerStyles.botLibraryGroupMenu} ${sharedStyles.groupMenuPortal}`}
-                  style={groupMenuStyle}
+                  className={
+                    groupSelectionIsModal
+                      ? sharedStyles.groupModalBackdrop
+                      : `${pickerStyles.composeBotMenu} ${pickerStyles.botLibraryGroupMenu} ${sharedStyles.groupMenuPortal}`
+                  }
+                  style={
+                    groupSelectionIsModal ? undefined : groupMenuStyle ?? undefined
+                  }
+                  role={groupSelectionIsModal ? "presentation" : undefined}
+                  onMouseDown={
+                    groupSelectionIsModal
+                      ? (event) => {
+                          if (event.target === event.currentTarget) {
+                            setGroupMenuOpen(false);
+                          }
+                        }
+                      : undefined
+                  }
                 >
                   <div
-                    id={groupMenuId}
-                    className={pickerStyles.composeBotListbox}
-                    role="listbox"
-                    aria-label="Filter by bot group"
-                    onKeyDown={(event) => {
-                      if (
-                        event.key === "ArrowDown" ||
-                        event.key === "ArrowUp"
-                      ) {
-                        event.preventDefault();
-                        moveGroupFocus(event.key === "ArrowDown" ? 1 : -1);
-                      } else if (event.key === "Home") {
-                        event.preventDefault();
-                        groupOptionRefs.current
-                          .get(groupMenuGroups[0]?.id ?? "")
-                          ?.focus();
-                      } else if (event.key === "End") {
-                        event.preventDefault();
-                        groupOptionRefs.current
-                          .get(groupMenuGroups.at(-1)?.id ?? "")
-                          ?.focus();
-                      }
-                    }}
+                    ref={groupMenuRef}
+                    className={
+                      groupSelectionIsModal
+                        ? sharedStyles.groupModal
+                        : undefined
+                    }
+                    role={groupSelectionIsModal ? "dialog" : undefined}
+                    aria-modal={groupSelectionIsModal ? true : undefined}
+                    aria-labelledby={
+                      groupSelectionIsModal ? groupModalTitleId : undefined
+                    }
                   >
-                    {groupMenuGroups.map((group) => {
-                      const groupBots = groupItems.filter((item) =>
-                        group.botIds.includes(item.id),
-                      );
-                      return (
+                    {groupSelectionIsModal ? (
+                      <header className={sharedStyles.groupModalHeader}>
+                        <div>
+                          <span>Signal guests</span>
+                          <h2 id={groupModalTitleId}>Choose a bot group</h2>
+                          <p>Browse the full roster without losing your place in setup.</p>
+                        </div>
                         <button
-                          key={group.id}
-                          ref={(node) => {
-                            if (node) {
-                              groupOptionRefs.current.set(group.id, node);
-                            } else {
-                              groupOptionRefs.current.delete(group.id);
-                            }
-                          }}
                           type="button"
-                          className={pickerStyles.botLibraryGroupOption}
-                          role="option"
-                          aria-selected={group.id === selectedGroup.id}
-                          tabIndex={group.id === selectedGroup.id ? 0 : -1}
-                          data-default-option={
-                            group.id === "all" ? "true" : undefined
-                          }
-                          style={
-                            buildBotLibraryGroupVisualVariables(
-                              group.id,
-                              groupBots,
-                              groupTheme,
-                            ) as CSSProperties
-                          }
-                          onClick={() => chooseGroup(group.id)}
+                          className={sharedStyles.groupModalClose}
+                          aria-label="Close bot group picker"
+                          onClick={() => {
+                            setGroupMenuOpen(false);
+                            groupTriggerRef.current?.focus();
+                          }}
                         >
-                          <span
-                            className={
-                              pickerStyles.botLibraryGroupOptionSwatch
+                          ×
+                        </button>
+                      </header>
+                    ) : null}
+                    <div
+                      id={groupMenuId}
+                      className={
+                        groupSelectionIsModal
+                          ? sharedStyles.groupModalListbox
+                          : pickerStyles.composeBotListbox
+                      }
+                      role="listbox"
+                      aria-label="Filter by bot group"
+                      onKeyDown={(event) => {
+                        if (
+                          event.key === "ArrowDown" ||
+                          event.key === "ArrowUp"
+                        ) {
+                          event.preventDefault();
+                          moveGroupFocus(event.key === "ArrowDown" ? 1 : -1);
+                        } else if (event.key === "Home") {
+                          event.preventDefault();
+                          groupOptionRefs.current
+                            .get(groupMenuGroups[0]?.id ?? "")
+                            ?.focus();
+                        } else if (event.key === "End") {
+                          event.preventDefault();
+                          groupOptionRefs.current
+                            .get(groupMenuGroups.at(-1)?.id ?? "")
+                            ?.focus();
+                        }
+                      }}
+                    >
+                      {groupMenuGroups.map((group) => {
+                        const groupBots = groupItems.filter((item) =>
+                          group.botIds.includes(item.id),
+                        );
+                        return (
+                          <button
+                            key={group.id}
+                            ref={(node) => {
+                              if (node) {
+                                groupOptionRefs.current.set(group.id, node);
+                              } else {
+                                groupOptionRefs.current.delete(group.id);
+                              }
+                            }}
+                            type="button"
+                            className={pickerStyles.botLibraryGroupOption}
+                            role="option"
+                            aria-selected={group.id === selectedGroup.id}
+                            tabIndex={group.id === selectedGroup.id ? 0 : -1}
+                            data-default-option={
+                              group.id === "all" ? "true" : undefined
                             }
-                            aria-hidden="true"
-                          />
-                          <span
-                            className={pickerStyles.botLibraryGroupOptionCopy}
+                            style={
+                              buildBotLibraryGroupVisualVariables(
+                                group.id,
+                                groupBots,
+                                groupTheme,
+                              ) as CSSProperties
+                            }
+                            onClick={() => chooseGroup(group.id)}
                           >
                             <span
                               className={
-                                pickerStyles.botLibraryGroupOptionName
+                                pickerStyles.botLibraryGroupOptionSwatch
                               }
-                            >
-                              {group.name}
-                            </span>
-                            {typeof group.count === "number" ? (
+                              aria-hidden="true"
+                            />
                               <span
-                                className={
-                                  pickerStyles.botLibraryGroupOptionCount
-                                }
+                                className={pickerStyles.botLibraryGroupOptionCopy}
                               >
-                                {group.count === 1
-                                  ? "1 bot"
-                                  : `${group.count} bots`}
+                                <span
+                                  className={
+                                    pickerStyles.botLibraryGroupOptionName
+                                  }
+                                >
+                                  {group.name}
+                                </span>
+                                {typeof group.count === "number" ? (
+                                  <span
+                                    className={
+                                      pickerStyles.botLibraryGroupOptionCount
+                                    }
+                                  >
+                                    {group.count === 1
+                                      ? "1 bot"
+                                      : `${group.count} bots`}
+                                  </span>
+                                ) : null}
                               </span>
-                            ) : null}
-                          </span>
-                        </button>
-                      );
-                    })}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>,
                 document.body,

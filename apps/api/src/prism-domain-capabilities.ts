@@ -4022,6 +4022,10 @@ function signalEpisodeCreateCapability(): PrismCapabilityDefinition {
           typeof input.producerBrief === "string"
             ? input.producerBrief.trim().slice(0, 4_000)
             : "",
+        guestBrief:
+          guestKind === "bot" && typeof input.guestBrief === "string"
+            ? input.guestBrief.trim().slice(0, 4_000)
+            : "",
         preferredProvider: provider,
         responseMode,
         modelOverride:
@@ -4082,6 +4086,11 @@ function signalEpisodeCreateCapability(): PrismCapabilityDefinition {
         producerBrief:
           typeof input.producerBrief === "string"
             ? input.producerBrief
+            : "",
+        guestBrief:
+          input.guestKind !== "producer" &&
+          typeof input.guestBrief === "string"
+            ? input.guestBrief
             : "",
         preferredProvider:
           input.preferredProvider === "ollama_cloud" ||

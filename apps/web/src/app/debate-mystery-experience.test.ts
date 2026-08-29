@@ -807,9 +807,17 @@ describe("Debate Whodunnit experience", () => {
     assert.match(shell, /Compile randomly assigns every Surprise me seat/u);
   });
 
-  it("leaves a removed Whodunnit seat on a one-seat Surprise me reroll", () => {
+  it("selects a removed Whodunnit seat without rerolling it", () => {
     assert.match(shell, /bot\?\.name \?\? "Surprise me"/u);
-    assert.match(shell, /if \(!bot\) surpriseMysterySeat\(seat\)/u);
+    assert.doesNotMatch(shell, /if \(!bot\) surpriseMysterySeat\(seat\)/u);
+    assert.match(
+      shell,
+      /setActiveMysteryCastSeat\(seat\);\s*\}\}/u,
+    );
+    assert.match(
+      shell,
+      /const mysterySeatRefractTarget[\s\S]{0,520}surpriseMysterySeat\(seat\)/u,
+    );
     assert.match(
       shell,
       /leave seat on Surprise me/u,

@@ -6,6 +6,8 @@ import {
   DEBATE_MYSTERY_ROOM_TEMPLATES,
   compileDeterministicDebateMystery,
   debateMysteryAccompliceChance,
+  debateMysteryRoomFloorRuleV1,
+  debateMysteryRoomTypeIsAllowedOnFloorV1,
   debateMysteryRoomsShareEdge,
   debateMysteryNotebookCharacterCount,
   gradeDebateMysteryTheory,
@@ -351,6 +353,15 @@ test("seeded mansion layouts are stable for a seed and vary across seeds", () =>
   assert.ok(signatures.size > 20);
 });
 
+test("semantic room types expose stable architectural floor rules", () => {
+  assert.equal(debateMysteryRoomFloorRuleV1("foyer"), "ground-floor-only");
+  assert.equal(debateMysteryRoomFloorRuleV1("cellar"), "ground-floor-only");
+  assert.equal(debateMysteryRoomFloorRuleV1("utility"), "ground-floor-only");
+  assert.equal(debateMysteryRoomFloorRuleV1("attic"), "top-floor-only");
+  assert.equal(debateMysteryRoomFloorRuleV1("rooftop-lounge"), "top-floor-only");
+  assert.equal(debateMysteryRoomFloorRuleV1("library"), null);
+});
+
 test("the five-room two-storey topology makes the foyer staircase functional", () => {
   assert.equal(
     resolveDebateMysteryConfig(createConfig("compact", "casual", "legacy-compact"))
@@ -530,6 +541,14 @@ test("custom floor counts keep architectural room groups intact", () => {
         const result = validateDebateMysteryCaseBible(bible, config.actionBudget);
         assert.deepEqual(result.errors, [], `${totalRooms} rooms / ${floors} floors / seed ${seed}: ${result.errors.join("; ")}`);
         assert.equal(new Set(bible.rooms.map((room) => room.floor)).size, floors);
+        const topFloor = Math.max(...bible.rooms.map((room) => room.floor));
+        for (const room of bible.rooms) {
+          assert.equal(
+            debateMysteryRoomTypeIsAllowedOnFloorV1(room.templateId, room.floor, topFloor),
+            true,
+            `${room.templateId} is on Floor ${room.floor} of ${topFloor}`,
+          );
+        }
       }
     }
   }

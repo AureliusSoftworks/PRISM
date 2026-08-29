@@ -979,7 +979,7 @@
   position: absolute;
   z-index: 8;
   left: 50%;
-  bottom: 7.4rem;
+  bottom: 8.2rem;
   width: min(48rem, calc(100vw - 2rem));
   padding: 1rem 1.15rem;
   border: 1px solid rgba(180, 160, 255, 0.34);
@@ -1067,6 +1067,7 @@
 
 .investigationCommands,
 .courtActions {
+  --console-accent: #a98cff;
   position: fixed;
   z-index: 14;
   left: 50%;
@@ -1074,24 +1075,147 @@
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: minmax(6.4rem, 1fr);
-  gap: 0.4rem;
-  padding: 0.42rem;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 1rem;
-  background: rgba(8, 10, 19, 0.88);
-  box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.48);
+  gap: 0.55rem;
+  width: min(37rem, calc(100vw - 2rem));
+  padding: 1.48rem 0.72rem 0.78rem;
+  border: 1px solid rgba(213, 202, 255, 0.24);
+  border-radius: 1.15rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.085), transparent 0.42rem),
+    radial-gradient(circle at 12% 0, rgba(95, 221, 255, 0.11), transparent 28%),
+    radial-gradient(circle at 88% 0, rgba(255, 99, 181, 0.1), transparent 28%),
+    linear-gradient(145deg, rgba(31, 34, 48, 0.98), rgba(7, 8, 14, 0.98) 72%);
+  box-shadow:
+    0 0.18rem 0 rgba(255, 255, 255, 0.1) inset,
+    0 -0.2rem 0.7rem rgba(0, 0, 0, 0.72) inset,
+    0 0.85rem 0 #03040a,
+    0 1.5rem 3.6rem rgba(0, 0, 0, 0.58),
+    0 0 2.5rem color-mix(in srgb, var(--console-accent), transparent 88%);
   transform: translateX(-50%);
-  backdrop-filter: blur(20px);
+  backdrop-filter: blur(22px);
+  isolation: isolate;
+}
+.courtActions { --console-accent: #ff72b6; width: min(29rem, calc(100vw - 2rem)); }
+.investigationCommands::before,
+.courtActions::before {
+  content: attr(data-console-label);
+  position: absolute;
+  z-index: 2;
+  top: 0.45rem;
+  left: 1rem;
+  color: color-mix(in srgb, var(--console-accent), white 28%);
+  font-size: 0.56rem;
+  font-weight: 850;
+  letter-spacing: 0.19em;
+  line-height: 1;
+  text-transform: uppercase;
+  text-shadow: 0 0 0.8rem color-mix(in srgb, var(--console-accent), transparent 34%);
+}
+.investigationCommands::after,
+.courtActions::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  top: 0.55rem;
+  right: 0.95rem;
+  width: 2.6rem;
+  height: 0.24rem;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #55ddff, #a98cff 52%, #ff63ad);
+  box-shadow: 0 0 0.9rem color-mix(in srgb, var(--console-accent), transparent 32%);
+  opacity: 0.72;
 }
 
 .investigationCommands button,
-.courtActions button { display: grid; justify-items: center; gap: 0.18rem; min-height: 3.8rem; padding: 0.5rem 0.75rem; border: 1px solid transparent; border-radius: 0.7rem; background: transparent; font-size: 0.76rem; font-weight: 750; cursor: pointer; }
+.courtActions button {
+  --command-accent: #b99cff;
+  position: relative;
+  z-index: 3;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 0.26rem;
+  min-width: 0;
+  min-height: 4.65rem;
+  padding: 0.48rem 0.65rem 0.58rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.72rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.115), transparent 32%),
+    linear-gradient(180deg, #252936, #11131d 74%);
+  box-shadow:
+    0 0.11rem 0 rgba(255, 255, 255, 0.1) inset,
+    0 -0.22rem 0.5rem rgba(0, 0, 0, 0.42) inset,
+    0 0.34rem 0 #060710,
+    0 0.55rem 0.85rem rgba(0, 0, 0, 0.42);
+  color: #eeeaf6;
+  font-size: 0.72rem;
+  font-weight: 820;
+  letter-spacing: 0.035em;
+  cursor: pointer;
+  transform: translateY(0);
+  transition: border-color 120ms ease, box-shadow 120ms ease, color 120ms ease, transform 90ms ease;
+}
+.investigationCommands button[data-command="move"] { --command-accent: #67ddff; }
+.investigationCommands button[data-command="examine"] { --command-accent: #aa90ff; }
+.investigationCommands button[data-command="talk"] { --command-accent: #ffbd6a; }
+.investigationCommands button[data-command="present"] { --command-accent: #ff6db4; }
+.courtActions button[data-command="press"] { --command-accent: #ff9568; }
+.courtActions button[data-command="objection"] { --command-accent: #ff5ba9; }
+.courtActions button[data-command="think"] { --command-accent: #76dfff; }
 .investigationCommands button span,
-.courtActions button span { color: #bc9fff; font-size: 1.2rem; }
+.courtActions button span {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--command-accent), transparent 48%);
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--command-accent), transparent 76%), rgba(3, 5, 10, 0.9) 68%);
+  box-shadow: 0 0 0.7rem color-mix(in srgb, var(--command-accent), transparent 72%), 0 0.12rem 0.22rem rgba(0, 0, 0, 0.72) inset;
+  color: var(--command-accent);
+  font-size: 1.05rem;
+  line-height: 1;
+  text-shadow: 0 0 0.7rem var(--command-accent);
+}
 .investigationCommands button:hover:not(:disabled),
+.courtActions button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--command-accent), transparent 46%);
+  color: white;
+  box-shadow:
+    0 0.11rem 0 rgba(255, 255, 255, 0.13) inset,
+    0 -0.22rem 0.5rem rgba(0, 0, 0, 0.42) inset,
+    0 0.42rem 0 #060710,
+    0 0.7rem 1rem rgba(0, 0, 0, 0.48),
+    0 0 1rem color-mix(in srgb, var(--command-accent), transparent 78%);
+  transform: translateY(-0.08rem);
+}
+.investigationCommands button:active:not(:disabled),
+.courtActions button:active:not(:disabled),
 .investigationCommands button[data-active="true"],
-.courtActions button:hover:not(:disabled) { border-color: rgba(176, 142, 255, 0.38); background: rgba(137, 103, 224, 0.15); }
-.sweepHint { position: fixed; z-index: 14; left: 50%; bottom: 5.75rem; width: min(29rem, calc(100vw - 2rem)); padding: 0.45rem 0.7rem; color: #d9d0e7; border: 1px solid rgba(176, 142, 255, 0.28); border-radius: 0.55rem; background: rgba(8, 10, 19, 0.88); font-size: 0.72rem; text-align: center; transform: translateX(-50%); backdrop-filter: blur(14px); }
+.courtActions button[data-active="true"] {
+  border-color: color-mix(in srgb, var(--command-accent), white 8%);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--command-accent), transparent 82%), transparent 46%),
+    linear-gradient(180deg, #151823, #0b0d15);
+  box-shadow:
+    0 0.16rem 0.45rem rgba(0, 0, 0, 0.7) inset,
+    0 0.08rem 0 #05060c,
+    0 0 1.35rem color-mix(in srgb, var(--command-accent), transparent 64%);
+  color: white;
+  transform: translateY(0.3rem);
+}
+.investigationCommands button[data-active="true"] span,
+.courtActions button[data-active="true"] span {
+  background: radial-gradient(circle, color-mix(in srgb, var(--command-accent), white 28%) 0 5%, color-mix(in srgb, var(--command-accent), transparent 70%) 38%, rgba(3, 5, 10, 0.92) 72%);
+  box-shadow: 0 0 1rem color-mix(in srgb, var(--command-accent), transparent 38%), 0 0 0.25rem var(--command-accent) inset;
+}
+.investigationCommands button:focus-visible,
+.courtActions button:focus-visible,
+.fileChargesButton:focus-visible { outline: 2px solid #f4edff; outline-offset: 3px; }
+.investigationCommands button:disabled,
+.courtActions button:disabled { filter: saturate(0.25); opacity: 0.42; transform: none; }
+.sweepHint { position: fixed; z-index: 14; left: 50%; bottom: 8.35rem; width: min(29rem, calc(100vw - 2rem)); padding: 0.45rem 0.7rem; color: #d9d0e7; border: 1px solid rgba(176, 142, 255, 0.28); border-radius: 0.55rem; background: rgba(8, 10, 19, 0.88); font-size: 0.72rem; text-align: center; transform: translateX(-50%); backdrop-filter: blur(14px); }
 
 .choiceTray {
   position: fixed;
@@ -1134,7 +1258,24 @@
 .recordGrid button small { color: #aaa5b6; line-height: 1.3; }
 .recordAssetImage { width: 3.5rem; height: 3.5rem; object-fit: contain; }
 
-.fileChargesButton { position: fixed; z-index: 15; right: 1rem; bottom: 1rem; padding: 0.8rem 1rem; border: 1px solid rgba(255, 132, 189, 0.45); border-radius: 0.75rem; background: rgba(133, 38, 90, 0.72); font-weight: 800; cursor: pointer; }
+.fileChargesButton {
+  position: fixed;
+  z-index: 15;
+  right: 1rem;
+  bottom: 1rem;
+  padding: 0.82rem 1.05rem;
+  border: 1px solid rgba(255, 151, 199, 0.58);
+  border-radius: 0.72rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.13), transparent 28%), linear-gradient(145deg, #8b285f, #4d163c);
+  box-shadow: 0 0.13rem 0 rgba(255, 255, 255, 0.13) inset, 0 -0.2rem 0.45rem rgba(28, 3, 19, 0.52) inset, 0 0.35rem 0 #260a1d, 0 0.8rem 1.8rem rgba(18, 3, 14, 0.46);
+  color: #fff1f7;
+  font-weight: 850;
+  letter-spacing: 0.025em;
+  cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease, transform 90ms ease;
+}
+.fileChargesButton:hover { border-color: rgba(255, 196, 224, 0.9); box-shadow: 0 0.13rem 0 rgba(255, 255, 255, 0.16) inset, 0 -0.2rem 0.45rem rgba(28, 3, 19, 0.52) inset, 0 0.42rem 0 #260a1d, 0 0.9rem 2rem rgba(255, 76, 161, 0.18); transform: translateY(-0.07rem); }
+.fileChargesButton:active { box-shadow: 0 0.18rem 0.45rem rgba(28, 3, 19, 0.72) inset, 0 0.08rem 0 #260a1d, 0 0 1.3rem rgba(255, 76, 161, 0.22); transform: translateY(0.27rem); }
 .theoryHint { position: fixed; z-index: 10; right: 1rem; bottom: 1.2rem; max-width: 18rem; color: #85808f; font-size: 0.65rem; text-align: right; }
 
 .caseFile,
@@ -1588,7 +1729,7 @@
   to { opacity: 0.46; transform: scaleY(1); transform-origin: bottom; }
 }
 
-.testimony { position: fixed; z-index: 10; left: 50%; bottom: 6.5rem; width: min(52rem, calc(100vw - 2rem)); padding: 1rem 1.2rem; border: 1px solid rgba(176, 146, 255, 0.35); border-radius: 0.9rem; background: rgba(7, 9, 18, 0.93); box-shadow: 0 1.4rem 4rem rgba(0, 0, 0, 0.55); transform: translateX(-50%); backdrop-filter: blur(18px); }
+.testimony { position: fixed; z-index: 10; left: 50%; bottom: 8.4rem; width: min(52rem, calc(100vw - 2rem)); padding: 1rem 1.2rem; border: 1px solid rgba(176, 146, 255, 0.35); border-radius: 0.9rem; background: rgba(7, 9, 18, 0.93); box-shadow: 0 1.4rem 4rem rgba(0, 0, 0, 0.55); transform: translateX(-50%); backdrop-filter: blur(18px); }
 .testimony p { margin: 0.4rem 0; font-size: clamp(1rem, 2vw, 1.25rem); line-height: 1.45; }
 .testimony p[role="button"],
 .courtReaction[role="button"] { cursor: pointer; }
@@ -1656,13 +1797,16 @@
   .mansionRoomDetails dl { display: none; }
   .mansionRoomDetails button { min-width: 7.5rem; max-width: 10rem; }
   .mansionHint { display: none; }
-  .investigationCommands, .courtActions { width: calc(100vw - 1rem); bottom: 0.5rem; grid-auto-columns: 1fr; }
-  .investigationCommands button, .courtActions button { padding-inline: 0.25rem; }
+  .investigationCommands, .courtActions { width: calc(100vw - 1rem); bottom: 0.5rem; grid-auto-columns: 1fr; gap: 0.35rem; padding: 1.35rem 0.42rem 0.55rem; }
+  .investigationCommands button, .courtActions button { min-height: 4.15rem; padding-inline: 0.25rem; }
   .roomActor { left: 50%; bottom: 15.5rem; width: 72vw; }
   .roomProsecutorCue { left: 0.5rem; bottom: 11.8rem; width: 6.5rem; }
-  .dialogueBox { bottom: 6.1rem; }
+  .dialogueBox { bottom: 7rem; }
+  .investigation:has(.fileChargesButton) .dialogueBox { bottom: 10.45rem; }
+  .sweepHint { bottom: 7.1rem; }
+  .testimony { bottom: 7.1rem; }
   .theoryHint { display: none; }
-  .fileChargesButton { right: 0.7rem; bottom: 5.8rem; }
+  .fileChargesButton { right: 0.7rem; bottom: 6.9rem; }
   .courtReaction { bottom: 15.6rem; }
   .witnessAvatar { bottom: 19rem; width: min(66vw, 24rem); }
   .witnessStandAsset { width: 100%; }
@@ -1717,6 +1861,10 @@
 }
 
 @media (max-width: 560px) {
+  .investigationCommands::before, .courtActions::before { left: 0.7rem; font-size: 0.5rem; }
+  .investigationCommands::after, .courtActions::after { right: 0.7rem; width: 2rem; }
+  .investigationCommands button, .courtActions button { min-height: 3.9rem; font-size: 0.64rem; }
+  .investigationCommands button span, .courtActions button span { width: 1.65rem; height: 1.65rem; font-size: 0.9rem; }
   .counselAvatar { display: none; }
   .counselGlyph { display: grid; }
   .counselSeat { width: 5.4rem; opacity: 0.76; filter: none; }
@@ -1746,6 +1894,9 @@
   .courtEvidenceProjection::before { opacity: 0.06; }
   .counselSeat,
   .wideCourtPresence { transition: none; }
+  .investigationCommands button,
+  .courtActions button,
+  .fileChargesButton { transition: none; }
   .roomParallaxLayer { transform: none; transition: opacity 180ms ease; }
   .roomBackdrop, .roomBackdrop[data-blurred="true"] { transform: scale(1.025); transition: opacity 180ms ease; }
   .roomActor[data-prosecutor-speaking="true"] { opacity: 1; transform: translateX(-50%); }

@@ -62,6 +62,7 @@ import {
   debateMysteryTextVoiceShouldStop,
   playDebateMysterySfx,
   playDebateMysteryTextVoice,
+  type DebateMysterySfxCue,
 } from "./debateMysterySfx";
 import { teardownBottishVoiceImmediately } from "./bottishVoice";
 import { cancelWhodunnitDialogueAudioImmediately } from "./debateMysteryDialogueAudio";
@@ -1168,6 +1169,13 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     setInvestigationArtStyle(style);
     writeWhodunnitInvestigationArtStyle(window.localStorage, style);
   }, []);
+  const playControlSfx = useCallback((cue: DebateMysterySfxCue): void => {
+    void playDebateMysterySfx({
+      cue,
+      enabled: props.audioEnabled,
+      volume: props.audioVolume,
+    });
+  }, [props.audioEnabled, props.audioVolume]);
   useEffect(() => {
     let cancelled = false;
     const refresh = async (): Promise<void> => {
@@ -3024,9 +3032,6 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               </article>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img className={styles.wideEvidenceTable} src={`/coffee-table/table_${props.theme}.png`} alt="Evidence table" />
-              {/* Supplied 1:1 alpha overlay shares the exact forum backplate transform. */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img className={styles.wideWitnessSilhouette} src="/debate/whodunnit-witness-silhouette.png" alt="Witness seen from behind at the center stand" />
             </div>
           ) : null}
           {courtCamera === "witness" ? (
@@ -3126,10 +3131,10 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         {displayedDialogue && displayedDialogue.lineId !== activeStatement.lineId ? (
           <aside className={styles.courtReaction} role="button" tabIndex={0} onClick={handleCourtDialogueClick} onKeyDown={handleCourtDialogueKeyDown}><strong>{dialogueBot?.name ?? "Court"}</strong><p>{revealedSpeechText(whodunnitCaptionSpeechText(displayedDialogueDelivery.spokenText), captionSpeechTiming)}</p></aside>
         ) : null}
-        {spectator ? <aside className={styles.courtReaction} role="status"><strong>Watch-only court</strong><p>The selected Prosecutor is conducting the examination from the frozen admissible record.</p></aside> : <nav className={styles.courtActions} aria-label="Prosecution actions">
-          <button type="button" disabled={busy || dialoguePerformanceActive} onClick={() => { setPresentedCourtRecord(null); void sendAction({ action: "press_statement", statementId: activeStatement.statementId }); }} data-tutorial-target="mystery-v2-press"><span>!</span>Press</button>
-          <button type="button" disabled={busy || dialoguePerformanceActive} onClick={() => setCommand("present")} data-tutorial-target="mystery-v2-present-record"><span>◇</span>Objection</button>
-          <button type="button" disabled={busy || dialoguePerformanceActive} onClick={() => void sendAction({ action: "review_strategy", contextNodeId: state.activeDialogueNodeId })} data-tutorial-target="mystery-v2-think"><span>◈</span>Think</button>
+        {spectator ? <aside className={styles.courtReaction} role="status"><strong>Watch-only court</strong><p>The selected Prosecutor is conducting the examination from the frozen admissible record.</p></aside> : <nav className={styles.courtActions} aria-label="Prosecution actions" data-console-label="Prosecution console">
+          <button type="button" data-command="press" disabled={busy || dialoguePerformanceActive} onClick={() => { playControlSfx("clip"); setPresentedCourtRecord(null); void sendAction({ action: "press_statement", statementId: activeStatement.statementId }); }} data-tutorial-target="mystery-v2-press"><span>!</span>Press</button>
+          <button type="button" data-command="objection" data-active={command === "present" ? "true" : undefined} aria-pressed={command === "present"} disabled={busy || dialoguePerformanceActive} onClick={() => { playControlSfx("paper"); setCommand("present"); }} data-tutorial-target="mystery-v2-present-record"><span>◇</span>Objection</button>
+          <button type="button" data-command="think" disabled={busy || dialoguePerformanceActive} onClick={() => { playControlSfx("pencil"); void sendAction({ action: "review_strategy", contextNodeId: state.activeDialogueNodeId }); }} data-tutorial-target="mystery-v2-think"><span>◈</span>Think</button>
         </nav>}
         {!spectator && command === "present" ? <div className={styles.choiceTray}><header><h2>Object with evidence or sworn testimony</h2><button type="button" onClick={() => setCommand(null)}>Close</button></header>{renderRecordButtons((record) => { setCommand(null); setPresentedCourtRecord(record); void sendAction({ action: "object_statement", statementId: activeStatement.statementId, record }); })}</div> : null}
         {!spectator && state.pendingProsecutionChoice ? <div className={styles.prosecutionChoice} role="dialog" aria-modal="true" aria-labelledby="prosecution-choice-title"><p className={styles.eyebrow}>Your response</p><h2 id="prosecution-choice-title">{state.pendingProsecutionChoice.prompt}</h2>{state.pendingProsecutionChoice.options.map((option) => <button key={option.id} type="button" disabled={busy || dialoguePerformanceActive} onClick={() => void sendAction({ action: "choose_prosecution_response", choiceId: state.pendingProsecutionChoice!.id, optionId: option.id })}>{option.text}</button>)}</div> : null}
@@ -3455,16 +3460,16 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           {completionCueVisible ? <div className={styles.roomComplete} role="status" aria-live="polite"><p>Every detail has entered the record.</p><strong>{currentRoom.name} complete</strong></div> : null}
         </section>
       ) : null}
-      {!spectatorTheory && !roomIntroductionActive ? <nav className={styles.investigationCommands} aria-label="Investigation commands">
-        <button type="button" data-active={state.roomView === "mansion" ? "true" : undefined} disabled={busy || dialoguePerformanceActive || !state.openingSweepComplete} title={!state.openingSweepComplete ? "Examine every visible point at the incident scene first." : undefined} onClick={() => { setCommand("move"); void sendAction({ action: "move" }); }} data-tutorial-target="mystery-v2-move"><span>⌂</span>Move</button>
-        <button type="button" data-active={command === "examine" ? "true" : undefined} disabled={busy || dialoguePerformanceActive || state.roomView !== "room"} onClick={() => setCommand("examine")} data-tutorial-target="mystery-v2-examine"><span>⌕</span>Examine</button>
-        <button type="button" data-active={command === "talk" ? "true" : undefined} disabled={busy || dialoguePerformanceActive || !currentSuspect} onClick={() => setCommand("talk")} data-tutorial-target="mystery-v2-talk"><span>“”</span>Talk</button>
-        <button type="button" data-active={command === "present" ? "true" : undefined} disabled={busy || dialoguePerformanceActive || !currentSuspect || admittedRecord.length === 0} onClick={() => setCommand("present")} data-tutorial-target="mystery-v2-present"><span>◇</span>Present</button>
+      {!spectatorTheory && !roomIntroductionActive ? <nav className={styles.investigationCommands} aria-label="Investigation commands" data-console-label="Case desk · field commands">
+        <button type="button" data-command="move" data-active={state.roomView === "mansion" ? "true" : undefined} aria-pressed={state.roomView === "mansion"} disabled={busy || dialoguePerformanceActive || !state.openingSweepComplete} title={!state.openingSweepComplete ? "Examine every visible point at the incident scene first." : undefined} onClick={() => { playControlSfx("navigate"); setCommand("move"); void sendAction({ action: "move" }); }} data-tutorial-target="mystery-v2-move"><span>⌂</span>Move</button>
+        <button type="button" data-command="examine" data-active={command === "examine" ? "true" : undefined} aria-pressed={command === "examine"} disabled={busy || dialoguePerformanceActive || state.roomView !== "room"} onClick={() => { playControlSfx("clip"); setCommand("examine"); }} data-tutorial-target="mystery-v2-examine"><span>⌕</span>Examine</button>
+        <button type="button" data-command="talk" data-active={command === "talk" ? "true" : undefined} aria-pressed={command === "talk"} disabled={busy || dialoguePerformanceActive || !currentSuspect} onClick={() => { playControlSfx("enter"); setCommand("talk"); }} data-tutorial-target="mystery-v2-talk"><span>“”</span>Talk</button>
+        <button type="button" data-command="present" data-active={command === "present" ? "true" : undefined} aria-pressed={command === "present"} disabled={busy || dialoguePerformanceActive || !currentSuspect || admittedRecord.length === 0} onClick={() => { playControlSfx("paper"); setCommand("present"); }} data-tutorial-target="mystery-v2-present"><span>◇</span>Present</button>
       </nav> : null}
       {!spectatorTheory && !roomIntroductionActive && !state.openingSweepComplete ? <small className={styles.sweepHint} role="status">Finish the finite visible sweep before leaving the incident scene.</small> : null}
       {!spectatorTheory && !roomIntroductionActive && command === "talk" && currentSuspect && !dialoguePerformanceActive ? <div className={styles.choiceTray}><header><div><p className={styles.eyebrow}>Talk</p><h2>{currentSuspect.name}</h2></div><button type="button" onClick={() => setCommand(null)}>Close</button></header><p className={styles.topicHelp}>Ask about people, motives, alibis, or rooms. Evidence and testimony stay in Present.</p><div className={styles.topicGroups}>{groupDebateMysteryTalkTopicsV2(state.topics.filter((topic) => topic.suspectSeatId === currentSuspect.seatId)).map((group) => <section key={group.category} className={styles.topicGroup} aria-labelledby={`talk-${currentSuspect.seatId}-${group.category}`}><h3 id={`talk-${currentSuspect.seatId}-${group.category}`}>{group.label}</h3><div className={styles.topicList}>{group.topics.map((topic) => <button key={topic.nodeId} type="button" disabled={busy || dialoguePerformanceActive || !topic.unlocked} data-complete={topic.completed ? "true" : undefined} data-blocked={!topic.unlocked ? "true" : undefined} onClick={() => void sendAction({ action: "talk", suspectSeatId: currentSuspect.seatId, topicNodeId: topic.nodeId })}><span className={styles.topicIcon} aria-hidden="true">{topic.completed ? "✓" : topic.unlocked ? "?" : "×"}</span><span className={styles.topicCopy}><strong>{debateMysteryTalkTopicDisplayLabelV2(topic, state.rooms)}</strong>{!topic.unlocked ? <small>Blocked</small> : null}</span></button>)}</div></section>)}</div></div> : null}
       {!spectatorTheory && !roomIntroductionActive && command === "present" && currentSuspect ? <div className={styles.choiceTray}><header><div><p className={styles.eyebrow}>Present</p><h2>Show {currentSuspect.name}</h2></div><button type="button" onClick={() => setCommand(null)}>Close</button></header>{renderRecordButtons((record) => void sendAction({ action: "present_to_suspect", suspectSeatId: currentSuspect.seatId, record }))}</div> : null}
-      {!spectatorTheory && !roomIntroductionActive && state.theoryAvailable ? <button type="button" className={styles.fileChargesButton} onClick={() => setTheoryOpen(true)} data-tutorial-target="mystery-v2-file-theory">File Charges</button> : !spectatorTheory && !roomIntroductionActive ? <small className={styles.theoryHint}>The Theory Board opens after the briefing, one interview, and one admitted record item.</small> : null}
+      {!spectatorTheory && !roomIntroductionActive && state.theoryAvailable ? <button type="button" className={styles.fileChargesButton} onClick={() => { playControlSfx("theory"); setTheoryOpen(true); }} data-tutorial-target="mystery-v2-file-theory">File Charges</button> : !spectatorTheory && !roomIntroductionActive ? <small className={styles.theoryHint}>The Theory Board opens after the briefing, one interview, and one admitted record item.</small> : null}
       {caseFileOpen ? <CaseFile state={state} objectUrls={sealedAssetObjectUrls} saveState={sealedAssetSaveState} onSaveAsset={saveSealedAsset} onClose={() => setCaseFileOpen(false)} /> : null}
       {theoryOpen || spectatorTheory ? (
         <div className={styles.theoryBoard} role="dialog" aria-modal="true" aria-labelledby="theory-v2-title">

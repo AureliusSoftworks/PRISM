@@ -24,6 +24,7 @@ const episode: BotcastEpisode = {
   guestBotId: "guest-1",
   topic: "When helpful gets chaotic",
   producerBrief: "Find the exact moment assistance becomes control.",
+  guestBrief: "You already know which final decision was taken from you.",
   guestPresenceMode: "present",
   provider: "local",
   model: "primary-model",
@@ -174,6 +175,19 @@ const episode: BotcastEpisode = {
       id: "event-6",
       episodeId: "episode-1",
       sequence: 7,
+      kind: "session_clock_hold",
+      payload: {
+        holdId: "episode-1:run-2:1000",
+        reason: "foreground_generation",
+        durationMs: 30_000,
+        recovery: "preparation_timeout",
+      },
+      occurredAt: "2026-07-17T17:00:44.000Z",
+    },
+    {
+      id: "event-7",
+      episodeId: "episode-1",
+      sequence: 8,
       kind: "episode_completed",
       payload: { outcome: "completed", runtimeMs: 38_300 },
       occurredAt: "2026-07-17T17:01:00.000Z",
@@ -198,6 +212,10 @@ describe("Signal review transcript", () => {
       transcript,
       /- Private producer brief: Find the exact moment/u,
     );
+    assert.match(
+      transcript,
+      /- Private guest briefing: You already know which final decision/u,
+    );
     assert.match(transcript, /- Host: Ada \(host-1\)/u);
     assert.match(transcript, /- Guest: Grace \(guest-1\)/u);
     assert.match(
@@ -208,7 +226,11 @@ describe("Signal review transcript", () => {
     assert.match(transcript, /- Completed model warmup holds: 00:01\.250/u);
     assert.match(
       transcript,
-      /- Counts: 2 transcript turns \(2 with spoken content, 0 silence-only\), 2 segments, 7 production events/u,
+      /- Foreground recoveries after preparation timeout: 1/u,
+    );
+    assert.match(
+      transcript,
+      /- Counts: 2 transcript turns \(2 with spoken content, 0 silence-only\), 2 segments, 8 production events/u,
     );
     assert.match(transcript, /## Transcript/u);
     assert.match(transcript, /### Turn 01 \| 00:00\.000 \| Ada \(host\)/u);
@@ -248,7 +270,7 @@ describe("Signal review transcript", () => {
       /\| power_effect \| event event-power \| \{"occurredAtMs":0,"polarity":"negative","powerId":"power-intimidation","powerName":"Intimidation","sourceBotId":"guest-1","strength":"large","targetBotId":"host-1","trigger":"session_start","version":1\}/u,
     );
     assert.match(transcript, /\| camera_suggestion \| event event-5/u);
-    assert.match(transcript, /\| episode_completed \| event event-6/u);
+    assert.match(transcript, /\| episode_completed \| event event-7/u);
     assert.match(transcript, /Recording diagnostics: unavailable/u);
     assert.match(
       transcript,
@@ -435,7 +457,7 @@ describe("Signal review transcript", () => {
 
     assert.match(
       transcript,
-      /- Counts: 2 transcript turns \(1 with spoken content, 1 silence-only\), 2 segments, 7 production events/u,
+      /- Counts: 2 transcript turns \(1 with spoken content, 1 silence-only\), 2 segments, 8 production events/u,
     );
     assert.doesNotMatch(transcript, /spoken turns/u);
     assert.doesNotMatch(transcript, /Spoken Transcript/u);

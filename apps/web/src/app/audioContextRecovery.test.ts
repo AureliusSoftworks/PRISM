@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   audioContextNeedsResume,
+  installAudioContextRecoveryLifecycle,
   resumeAudioContextIfNeeded,
   type ResumableAudioContext,
 } from "./audioContextRecovery.ts";
@@ -21,6 +22,46 @@ class FakeAudioContext implements ResumableAudioContext {
     this.resumes += 1;
     if (!this.resumeSucceeds) throw new Error("resume blocked");
     this.state = "running";
+  }
+}
+
+class FakeEventTarget {
+  readonly listeners = new Map<string, Set<EventListener>>();
+
+  addEventListener(kind: string, listener: EventListener): void {
+    const listeners = this.listeners.get(kind) ?? new Set<EventListener>();
+    listeners.add(listener);
+    this.listeners.set(kind, listeners);
+  }
+
+  removeEventListener(kind: string, listener: EventListener): void {
+    this.listeners.get(kind)?.delete(listener);
+  }
+
+  dispatch(kind: string): void {
+    for (const listener of this.listeners.get(kind) ?? []) {
+      listener(new Event(kind));
+    }
+  }
+}
+
+class DeferredResumeAudioContext implements ResumableAudioContext {
+  state: AudioContextState = "interrupted";
+  resumes = 0;
+  private finishResume: (() => void) | null = null;
+
+  resume(): Promise<void> {
+    this.resumes += 1;
+    return new Promise((resolve) => {
+      this.finishResume = () => {
+        this.state = "running";
+        resolve();
+      };
+    });
+  }
+
+  finish(): void {
+    this.finishResume?.();
   }
 }
 
@@ -49,6 +90,81 @@ describe("AudioContext recovery", () => {
     const context = new FakeAudioContext("interrupted", false);
     assert.equal(await resumeAudioContextIfNeeded(context), false);
     assert.equal(context.state, "interrupted");
+  });
+
+  it("recovers an existing mixer on app return and user gestures without creating one", async () => {
+    const context = new FakeAudioContext("interrupted");
+    const documentTarget = Object.assign(new FakeEventTarget(), {
+      visibilityState: "visible" as DocumentVisibilityState,
+    });
+    const windowTarget = new FakeEventTarget();
+    const deviceTarget = new FakeEventTarget();
+    let contextRequests = 0;
+    const release = installAudioContextRecoveryLifecycle({
+      getContext: () => {
+        contextRequests += 1;
+        return context;
+      },
+      documentTarget,
+      windowTarget,
+      deviceTarget,
+    });
+    try {
+      windowTarget.dispatch("focus");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.equal(context.state, "running");
+      assert.equal(context.resumes, 1);
+      assert.ok(contextRequests > 0);
+
+      context.state = "interrupted";
+      documentTarget.dispatch("pointerdown");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.equal(context.state, "running");
+      assert.equal(context.resumes, 2);
+
+      context.state = "interrupted";
+      deviceTarget.dispatch("devicechange");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.equal(context.state, "running");
+      assert.equal(context.resumes, 3);
+
+      context.state = "interrupted";
+      documentTarget.visibilityState = "hidden";
+      documentTarget.dispatch("visibilitychange");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.equal(context.resumes, 3);
+    } finally {
+      release();
+    }
+  });
+
+  it("can recover a replacement mixer after an earlier resume settles", async () => {
+    const firstContext = new DeferredResumeAudioContext();
+    const replacementContext = new FakeAudioContext("interrupted");
+    const documentTarget = Object.assign(new FakeEventTarget(), {
+      visibilityState: "visible" as DocumentVisibilityState,
+    });
+    const windowTarget = new FakeEventTarget();
+    let currentContext: ResumableAudioContext = firstContext;
+    const release = installAudioContextRecoveryLifecycle({
+      getContext: () => currentContext,
+      documentTarget,
+      windowTarget,
+      deviceTarget: null,
+    });
+    try {
+      windowTarget.dispatch("focus");
+      currentContext = replacementContext;
+      firstContext.finish();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      windowTarget.dispatch("focus");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.equal(replacementContext.state, "running");
+      assert.equal(replacementContext.resumes, 1);
+    } finally {
+      release();
+    }
   });
 
   it("is shared by the app audio engines that previously handled only suspended contexts", () => {

@@ -24,6 +24,24 @@ import {
 export type DebateEvidenceSourcePropKind = "brave" | "url" | "scholar";
 
 /**
+ * Format cards stay selectable even when the current player role is not valid
+ * for the destination. Resolve the nearest supported role in the same action
+ * so a Whodunnit participant can enter Turnabout without reloading the Studio.
+ */
+export function debatePlayerRoleAfterFormatSelection(
+  currentRole: DebatePlayerRole,
+  nextFormat: DebateFormatId,
+): DebatePlayerRole {
+  if (nextFormat === "turnabout" && currentRole === "participant") {
+    return "judge";
+  }
+  if (nextFormat === "whodunnit" && currentRole === "judge") {
+    return "participant";
+  }
+  return currentRole;
+}
+
+/**
  * Source provenance is encoded in stable evidence IDs so archived Debates can
  * recover the same physical prop without expanding the frozen evidence schema.
  */

@@ -110,6 +110,23 @@ describe("source-preserving Mansion Editor storage", () => {
     assert.equal(draft.derivation?.sourceTitle, "Blank slate");
     assert.equal(draft.layoutV2?.verticalConnectors.length, 1);
     assert.equal(draft.assets?.length, 0);
+    assert.ok(draft.layoutV2);
+    const duplicateAcrossFloors = {
+      ...draft.layoutV2,
+      entities: draft.layoutV2.entities.map((entity) =>
+        entity.kind === "room" && entity.templateId === "bathroom"
+          ? { ...entity, templateId: "study", name: "Second Study" }
+          : entity),
+    };
+    assert.throws(
+      () => updateDebateMysteryMansionTopologyV1(
+        db,
+        "owner",
+        draft.id,
+        { layoutV2: duplicateAcrossFloors },
+      ),
+      /room type.*only be placed once per mansion/u,
+    );
     assert.throws(
       () => getDebateMysteryMansionBundleV2(db, "other", draft.id),
       /not found/u,

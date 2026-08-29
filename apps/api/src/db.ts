@@ -821,6 +821,19 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     );
     CREATE INDEX IF NOT EXISTS idx_applet_main_thread_census_session
       ON applet_main_thread_census_samples(user_id, surface, session_id, elapsed_ms);
+    -- Privacy-safe foreground state for copied live-session transcripts. This
+    -- deliberately records no external app, tab, or inferred user activity.
+    CREATE TABLE IF NOT EXISTS live_session_focus_events (
+      user_id TEXT NOT NULL,
+      surface TEXT NOT NULL
+        CHECK(surface IN ('chat', 'zen', 'coffee', 'signal', 'debate', 'story')),
+      session_id TEXT NOT NULL,
+      transition TEXT NOT NULL CHECK(transition IN ('away', 'returned')),
+      occurred_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_live_session_focus_events_session
+      ON live_session_focus_events(user_id, surface, session_id, occurred_at);
     CREATE TABLE IF NOT EXISTS images (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -2181,6 +2194,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       title TEXT NOT NULL,
       topic TEXT NOT NULL,
       producer_brief TEXT NOT NULL DEFAULT '',
+      guest_brief TEXT NOT NULL DEFAULT '',
       provider TEXT NOT NULL DEFAULT 'local',
       model TEXT,
       response_mode TEXT NOT NULL DEFAULT 'local'
@@ -5308,6 +5322,13 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   ) {
     db.exec(
       "ALTER TABLE botcast_episodes ADD COLUMN guest_context TEXT NOT NULL DEFAULT '';",
+    );
+  }
+  if (
+    !botcastEpisodeColumns.some((column) => column.name === "guest_brief")
+  ) {
+    db.exec(
+      "ALTER TABLE botcast_episodes ADD COLUMN guest_brief TEXT NOT NULL DEFAULT '';",
     );
   }
   if (

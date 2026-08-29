@@ -1,11 +1,9 @@
 /**
  * How a persona receives words the Producer has told them to say.
  *
- * Signal's "Say this" cue used to be unconditional: the queued words were
- * composed deterministically and the host read them verbatim, whoever the host
- * was. That treats the persona as a speaker cone. A host with ethics would
- * refuse some of it, and would bend most of the rest toward their own way of
- * talking — the producer is direction, not a script.
+ * Signal's "Say this" cue authorizes the queued words for public delivery, but
+ * does not erase the host's persona. Compatible words take the deterministic
+ * verbatim path; genuine persona friction can bend or refuse the quote on air.
  *
  * This module scores the friction between a queued quote and the persona being
  * asked to say it, and names the bands:

@@ -612,6 +612,11 @@ import {
   useAppletTranscriptFrameRate,
 } from "./appletTranscriptFrameRate";
 import {
+  annotateTranscriptWithFocusEvents,
+  loadLiveSessionFocusEvents,
+  useLiveSessionFocusEvents,
+} from "./sessionFocusEvents";
+import {
   VIEWPORT_SAFE_AREA_DEFAULT_INSETS,
   clampPositionToViewportSafeArea,
   type ViewportSafeAreaInsets,
@@ -50439,6 +50444,12 @@ function HomeContent(): React.JSX.Element {
   } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
+  useLiveSessionFocusEvents(
+    detail?.mode === "zen" ? "zen" : "chat",
+    selectedId,
+    view === "chat" &&
+      (detail?.mode === "chat" || detail?.mode === "zen"),
+  );
   const zenHandoffSelectionRef = useRef<{
     conversationId: string;
     messageId: string;
@@ -67688,6 +67699,11 @@ function HomeContent(): React.JSX.Element {
   const coffeeCenterAutoFollowRef = useRef(true);
   const coffeeCenterAutoFollowKeyRef = useRef<string | null>(null);
   const [coffeeReplayActive, setCoffeeReplayActive] = useState(false);
+  useLiveSessionFocusEvents(
+    "coffee",
+    coffeeConversation?.id,
+    view === "coffee" && coffeeSessionPhase === "live" && !coffeeReplayActive,
+  );
   const coffeeLiveObserverMessagesRef = useRef<
     CoffeeConversationMessage[] | null
   >(null);
@@ -68097,6 +68113,11 @@ function HomeContent(): React.JSX.Element {
     storySession?.id,
     storySession?.transcript ?? [],
   );
+  useLiveSessionFocusEvents(
+    "story",
+    storySession?.id,
+    view === "story" && storySession?.status === "playing",
+  );
   const [storySelectedBotIds, setStorySelectedBotIds] = useState<string[]>([]);
   const [storyPremise, setStoryPremise] = useState("");
   const [storySearch, setStorySearch] = useState("");
@@ -68418,8 +68439,15 @@ function HomeContent(): React.JSX.Element {
       }),
     )
       .catch(() => ({ ok: true as const, note: null, frameSamples: [] }));
+    const focusEvents = await loadLiveSessionFocusEvents(
+      "coffee",
+      coffeeConversation.id,
+    ).catch(() => []);
     return annotateAppletTranscriptFrameRates(
-      appendAppletSessionNoteToTranscript(transcriptText, sessionMetadata.note),
+      annotateTranscriptWithFocusEvents(
+        appendAppletSessionNoteToTranscript(transcriptText, sessionMetadata.note),
+        focusEvents,
+      ),
       sessionMetadata.frameSamples,
     );
   };
@@ -72772,21 +72800,27 @@ function HomeContent(): React.JSX.Element {
             listenerBot.system_prompt,
           ),
         });
+        const playbackEngine: EnglishVoiceEngine =
+          playbackPlan.listenerLaughSource === "authored_local"
+            ? "builtin"
+            : engine;
         const key = listenerReactionVoiceCacheKey({
           plan: playbackPlan,
           profile,
-          engine,
+          engine: playbackEngine,
           mode: "english",
         });
         if (
           profile.enabled &&
-          (!playbackPlan.vocalFoley || engine === "elevenlabs") &&
+          (!playbackPlan.vocalFoley ||
+            playbackEngine === "elevenlabs" ||
+            playbackPlan.listenerLaughSource === "authored_local") &&
           !listenerReactionVoiceClipCacheRef.current.has(key)
         ) {
           const pending = requestListenerReactionEnglishClip({
             plan: playbackPlan,
             profile,
-            engine,
+            engine: playbackEngine,
             authority: "signal",
             ...(context?.signalTurnPreparationId
               ? {
@@ -72935,7 +72969,10 @@ function HomeContent(): React.JSX.Element {
         let interruptedEnglishClip: EnglishVoiceSynthesisClip | null = null;
         if (listenerReactionMode === "english") {
           if (canPlayListener && listenerBot && listenerProfile) {
-            const engine: EnglishVoiceEngine = engineForListener;
+            const engine: EnglishVoiceEngine =
+              playbackPlan.listenerLaughSource === "authored_local"
+                ? "builtin"
+                : engineForListener;
             const key = listenerReactionVoiceCacheKey({
               plan: playbackPlan,
               mode: "english",
@@ -72946,7 +72983,9 @@ function HomeContent(): React.JSX.Element {
             if (
               !pending &&
               listenerProfile.enabled &&
-              (!playbackPlan.vocalFoley || engine === "elevenlabs")
+              (!playbackPlan.vocalFoley ||
+                engine === "elevenlabs" ||
+                playbackPlan.listenerLaughSource === "authored_local")
             ) {
               pending = requestListenerReactionEnglishClip({
                 plan: playbackPlan,
@@ -73147,7 +73186,7 @@ function HomeContent(): React.JSX.Element {
             // local path, including Premium recovery, may instead return the
             // sentence-chunk stream so long statements cannot hit the local
             // voice model's single-clip token ceiling.
-            streamChunks: true,
+            streamChunks: !message.organicVoicePerformance,
             moodKey: message.moodKey,
             profile,
           }),
@@ -73920,9 +73959,11 @@ function HomeContent(): React.JSX.Element {
             ? null
             : voiceSelection.voiceMode,
         profile: playbackProfile,
-        performancePlan: voicePerformancePlanFromText(
-          capturePerformanceText ?? message.content,
-        ),
+        performancePlan:
+          message.organicVoicePerformance ??
+          voicePerformancePlanFromText(
+            capturePerformanceText ?? message.content,
+          ),
         moodKey: message.moodKey,
         effectsEnabled: settings.voiceEffectsEnabled !== false,
         gain: playbackVolume,
@@ -74048,6 +74089,10 @@ function HomeContent(): React.JSX.Element {
       const liveVoiceLightEnvelopeEnabled = playbackSurface !== "signal";
       const trackedLifecycle: VoicePlaybackLifecycle = {
         ...lifecycle,
+        performancePlan:
+          playbackSurface === "signal"
+            ? message.organicVoicePerformance ?? null
+            : null,
         loudnessNormalization:
           playbackSurface === "signal" ? "interview" : undefined,
         voiceLightTarget: liveVoiceLightEnvelopeEnabled
@@ -75945,10 +75990,11 @@ function HomeContent(): React.JSX.Element {
 
   const playDeadAirAside = useCallback(
     async (
-      plan: DeadAirAsidePlanV1,
+      plan: Pick<DeadAirAsidePlanV1, "text" | "seed" | "mood">,
       botSummary: BotcastBotSummary,
       onlineVoiceEnabled: boolean,
       stereoPan = 0,
+      lifecycle?: VoicePlaybackLifecycle,
     ): Promise<boolean> => {
       if (!settings || !listenerReactionMode || settings.voiceVolume <= 0)
         return false;
@@ -76025,6 +76071,7 @@ function HomeContent(): React.JSX.Element {
           englishClip,
           maxDurationMs: 3_600,
           stereoPan,
+          lifecycle,
         });
       } catch {
         return false;
@@ -94588,7 +94635,12 @@ function HomeContent(): React.JSX.Element {
       `/api/conversations/${selectedId}/export`,
       { method: "POST", body: JSON.stringify({ format: variant }) },
     );
-    const blob = new Blob([d.markdown], { type: "text/markdown" });
+    const focusEvents = await loadLiveSessionFocusEvents(
+      detail?.mode === "zen" ? "zen" : "chat",
+      selectedId,
+    ).catch(() => []);
+    const markdown = annotateTranscriptWithFocusEvents(d.markdown, focusEvents);
+    const blob = new Blob([markdown], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -94610,11 +94662,16 @@ function HomeContent(): React.JSX.Element {
         `/api/conversations/${encodeURIComponent(selectedId)}/export`,
         { method: "POST", body: JSON.stringify({ format: "developer" }) },
       );
-      if (!d.markdown.trim()) {
+      const focusEvents = await loadLiveSessionFocusEvents(
+        detail?.mode === "zen" ? "zen" : "chat",
+        selectedId,
+      ).catch(() => []);
+      const markdown = annotateTranscriptWithFocusEvents(d.markdown, focusEvents);
+      if (!markdown.trim()) {
         setError("Nothing to copy yet.");
         return;
       }
-      await writeClipboardText(d.markdown);
+      await writeClipboardText(markdown);
       const notice = sessionTranscriptNotice("developer", "copied");
       showLocalCommandToast(notice.title, notice.detail);
     } catch (err) {
@@ -94633,11 +94690,18 @@ function HomeContent(): React.JSX.Element {
         `/api/conversations/${encodeURIComponent(selectedId)}/export`,
         { method: "POST", body: JSON.stringify({ format: "standard" }) },
       );
+      const focusEvents = await loadLiveSessionFocusEvents(
+        detail.mode === "zen" ? "zen" : "chat",
+        selectedId,
+      ).catch(() => []);
       await createSlateStoryFromTranscript({
         key: `conversation:${selectedId}`,
         sourceApplet: "Chat / Zen",
         sourceTitle: detail.title || "Conversation",
-        transcript: exported.markdown,
+        transcript: annotateTranscriptWithFocusEvents(
+          exported.markdown,
+          focusEvents,
+        ),
       });
     } catch (cause) {
       setPanelError(
@@ -112656,13 +112720,20 @@ function HomeContent(): React.JSX.Element {
               mainThreadCensus: [],
               mainThreadCensusSummary: null,
             }));
+          const focusEvents = await loadLiveSessionFocusEvents(
+            "coffee",
+            coffeeConversation.id,
+          ).catch(() => []);
           const blob = new Blob(
             [
               appendPrismMainThreadCensusToTranscript(
                 annotateAppletTranscriptFrameRates(
-                  appendAppletSessionNoteToTranscript(
-                    transcript,
-                    sessionMetadata.note,
+                  annotateTranscriptWithFocusEvents(
+                    appendAppletSessionNoteToTranscript(
+                      transcript,
+                      sessionMetadata.note,
+                    ),
+                    focusEvents,
                   ),
                   sessionMetadata.frameSamples,
                 ),
@@ -137359,10 +137430,16 @@ function HomeContent(): React.JSX.Element {
           body: JSON.stringify({ format: "developer" }),
         },
       );
-      if (!exported.markdown.trim()) {
+      const focusEvents = await loadLiveSessionFocusEvents("coffee", sessionId)
+        .catch(() => []);
+      const markdown = annotateTranscriptWithFocusEvents(
+        exported.markdown,
+        focusEvents,
+      );
+      if (!markdown.trim()) {
         throw new Error("The Coffee transcript was empty.");
       }
-      await writeClipboardText(exported.markdown);
+      await writeClipboardText(markdown);
       setCoffeePreviousSessionCopyState({ sessionId, status: "copied" });
       const notice = sessionTranscriptNotice("developer", "copied");
       showLocalCommandToast(notice.title, `${sessionLabel}: ${notice.detail}`);
@@ -145772,7 +145849,7 @@ function HomeContent(): React.JSX.Element {
           : entry.kind === "choice"
             ? "Player choice"
             : entry.kind;
-        return `${speaker}: ${entry.text}`;
+        return `- At: ${entry.createdAt}\n${speaker}: ${entry.text}`;
       })
       .join("\n\n");
     const storySlateBusy = Boolean(
@@ -145794,14 +145871,17 @@ function HomeContent(): React.JSX.Element {
             <button
               type="button"
               className={styles.storyIconButton}
-              onClick={() =>
-                void createSlateStoryFromTranscript({
+              onClick={() => void (async () => {
+                const focusEvents = storySession
+                  ? await loadLiveSessionFocusEvents("story", storySession.id).catch(() => [])
+                  : [];
+                await createSlateStoryFromTranscript({
                   key: `story:${storySession?.id ?? "current"}`,
                   sourceApplet: "Story",
                   sourceTitle: storySession?.title ?? "Story experience",
-                  transcript: transcriptText,
-                })
-              }
+                  transcript: annotateTranscriptWithFocusEvents(transcriptText, focusEvents),
+                });
+              })()}
               disabled={transcript.length === 0 || slateTranscriptStoryBusyKey !== null}
               aria-label={storySlateBusy ? "Creating story in Slate" : "Create story in Slate"}
               title="Turn this played story transcript into editable prose in Slate"
@@ -147692,6 +147772,20 @@ function HomeContent(): React.JSX.Element {
           onInvalidatePrefetchedEpisode={invalidatePrefetchedBotcastEpisode}
           onPrefetchListenerReaction={prefetchBotcastListenerReaction}
           onListenerReaction={playBotcastListenerReaction}
+          onStudioIncidentDialogue={(dialogue, bot, lifecycle, stereoPan) =>
+            playDeadAirAside(
+              {
+                text: dialogue.beat.text,
+                seed:
+                  `signal-studio-dialogue:${dialogue.incidentId}:${dialogue.beatIndex}`,
+                mood: "warm",
+              },
+              bot,
+              signalEpisodeResponseMode !== "local" && bot.online_enabled !== 0,
+              stereoPan,
+              lifecycle,
+            )
+          }
           onPrepareUtterance={prepareBotcastUtterance}
           onPrewarmResponseCue={(botId) => {
             const bot = bots.find((candidate) => candidate.id === botId);

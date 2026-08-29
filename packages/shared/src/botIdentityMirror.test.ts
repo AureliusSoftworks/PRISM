@@ -496,6 +496,30 @@ test("identity mirror snapshot stays public and gives the holder its lived stole
     ),
     "That compass is fake, but the western ridge remains our best route.",
   );
+  assert.equal(
+    applyBotIdentityMirrorResponseV1(
+      "If I'm Ian, I'm Ian all the way—until someone says I'm not.",
+      state,
+      false,
+    ),
+    "If I'm Mara Vale, I'm Mara Vale all the way—until someone says I'm not.",
+  );
+  assert.equal(
+    applyBotIdentityMirrorResponseV1(
+      "The stone arch remains our best route.",
+      { ...state, holderBotName: "Ivo Stone" },
+      false,
+    ),
+    "The stone arch remains our best route.",
+  );
+  assert.equal(
+    applyBotIdentityMirrorResponseV1(
+      "If I'm Stone, the stone arch is still our best route.",
+      { ...state, holderBotName: "Ivo Stone" },
+      false,
+    ),
+    "If I'm Mara Vale, the stone arch is still our best route.",
+  );
   // Rejected recanting is removed without erasing the substantive clause.
   assert.equal(
     applyBotIdentityMirrorResponseV1(

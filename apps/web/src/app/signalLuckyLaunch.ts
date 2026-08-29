@@ -11,6 +11,7 @@ export interface SignalLuckyBotCandidate {
 export interface SignalLuckyBookingSuggestion {
   topic: string;
   producerBrief: string;
+  guestBrief: string;
   guestBotId?: string;
   generated: boolean;
 }
@@ -22,6 +23,7 @@ export interface SignalLuckyLaunchSetup<
   guestBotId: string;
   topic: string;
   producerBrief: string;
+  guestBrief: string;
 }
 
 export type SignalLuckyLaunchResult = "launched" | "busy";
@@ -106,6 +108,7 @@ export function createSignalLuckyLaunchRunner(): {
         });
         const topic = suggestion.topic.trim();
         const producerBrief = suggestion.producerBrief.trim();
+        const guestBrief = suggestion.guestBrief.trim();
         const eligibleGuestIds = new Set(
           args.bots
             .map((bot) => bot.id)
@@ -116,6 +119,7 @@ export function createSignalLuckyLaunchRunner(): {
           !suggestion.generated ||
           !topic ||
           !producerBrief ||
+          !guestBrief ||
           !eligibleGuestIds.has(resolvedGuestBotId)
         ) {
           throw new Error("Signal could not produce this lucky booking.");
@@ -126,6 +130,7 @@ export function createSignalLuckyLaunchRunner(): {
           guestBotId: resolvedGuestBotId,
           topic,
           producerBrief,
+          guestBrief,
         });
         return "launched";
       } finally {

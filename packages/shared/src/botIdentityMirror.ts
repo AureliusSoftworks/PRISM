@@ -543,12 +543,41 @@ export function applyBotIdentityMirrorResponseV1(
 ): string {
   const source = typeof value === "string" ? value.trim() : "";
   const believedSelfName = options.believedSelfName?.trim() || state.targetBotName;
-  const holderName = identityMirrorEscapeRegExpV1(state.holderBotName);
+  const holderNameParts = state.holderBotName.trim().split(/\s+/u).filter(Boolean);
+  const holderShortName = holderNameParts.length > 1
+    ? holderNameParts.at(-1) ?? ""
+    : "";
+  const targetNameParts = new Set(
+    state.targetBotName
+      .trim()
+      .split(/\s+/u)
+      .map((part) => part.toLocaleLowerCase()),
+  );
+  const holderShortAlias =
+    holderShortName.length >= 3 &&
+    !targetNameParts.has(holderShortName.toLocaleLowerCase())
+      ? holderShortName
+      : null;
   const targetName = identityMirrorEscapeRegExpV1(state.targetBotName);
+  // Providers often shorten a multi-word Library name after the first reveal
+  // ("Confusion Collin" -> "Collin"). A short alias can also be an ordinary
+  // word ("Stone"), so rewrite it only in an explicit self-naming phrase.
   let cleaned = source.replace(
-    new RegExp(`\\b${holderName}(?=$|[\\s,.;:!?—])`, "giu"),
+    new RegExp(
+      `\\b${identityMirrorEscapeRegExpV1(state.holderBotName)}(?=$|[\\s,.;:!?—])`,
+      "giu",
+    ),
     believedSelfName,
   );
+  if (holderShortAlias) {
+    cleaned = cleaned.replace(
+      new RegExp(
+        `(\\b(?:i(?:['’]m|\\s+am)|my\\s+name\\s+is|call\\s+me)\\s+)${identityMirrorEscapeRegExpV1(holderShortAlias)}(?=$|[\\s,.;:!?—])`,
+        "giu",
+      ),
+      (_match, prefix: string) => `${prefix}${believedSelfName}`,
+    );
+  }
   cleaned = cleaned.replace(
     new RegExp(
       `(?:^|[.!?]\\s+)[^.!?]*(?:i(?:['’]m|\\s+am)\\s+(?:(?:an?|the)\\s+)?${IDENTITY_MIRROR_FALSE_LABEL_V1}|you(?:['’]re|\\s+are)\\s+(?:the\\s+)?(?:real|original)\\s+${targetName}|i\\s+(?:recant|concede|take\\s+it\\s+back))[^.!?]*(?:[.!?]+\\s*|$)`,

@@ -30,6 +30,10 @@ import {
   type MansionPackageManifestV1,
   type PortablePackageJsonValueV1,
 } from "./portableMysteryPackage.ts";
+import {
+  debateMysteryRoomFloorRuleV1,
+  debateMysteryRoomTypeIsAllowedOnFloorV1,
+} from "./debateMystery.ts";
 
 function room(
   id: string,
@@ -249,6 +253,65 @@ describe("MansionLayoutV2 geometry", () => {
     assert.match(
       validateMansionLayoutV2(floorThree).join("\n"),
       /Floor 2 needs at least 4 semantic rooms/u,
+    );
+  });
+
+  it("rejects duplicate semantic room types across floors without limiting corridors", () => {
+    const valid = baseLayout();
+    const duplicateAcrossFloors: MansionLayoutV2 = {
+      ...valid,
+      entities: [
+        ...valid.entities,
+        room("second-parlor", "parlor", 2, 12, 8),
+      ],
+    };
+    assert.match(
+      validateMansionLayoutV2(duplicateAcrossFloors).join("\n"),
+      /duplicates the .* room type.*only be placed once per mansion/u,
+    );
+
+    const repeatedCorridors: MansionLayoutV2 = {
+      ...valid,
+      entities: [
+        ...valid.entities,
+        { kind: "corridor", id: "hall-2", floor: 2, x: 15, y: 10, width: 1, height: 1 },
+      ],
+    };
+    assert.doesNotMatch(
+      validateMansionLayoutV2(repeatedCorridors).join("\n"),
+      /room type.*only be placed once per mansion/u,
+    );
+  });
+
+  it("enforces ground-floor and top-floor semantic room contracts", () => {
+    for (const templateId of ["foyer", "cellar", "utility"]) {
+      assert.equal(debateMysteryRoomFloorRuleV1(templateId), "ground-floor-only");
+      assert.equal(debateMysteryRoomTypeIsAllowedOnFloorV1(templateId, 1, 3), true);
+      assert.equal(debateMysteryRoomTypeIsAllowedOnFloorV1(templateId, 2, 3), false);
+    }
+    for (const templateId of ["attic", "rooftop-lounge"]) {
+      assert.equal(debateMysteryRoomFloorRuleV1(templateId), "top-floor-only");
+      assert.equal(debateMysteryRoomTypeIsAllowedOnFloorV1(templateId, 2, 3), false);
+      assert.equal(debateMysteryRoomTypeIsAllowedOnFloorV1(templateId, 3, 3), true);
+    }
+
+    const valid = baseLayout();
+    const basementUpstairs: MansionLayoutV2 = {
+      ...valid,
+      entities: [...valid.entities, room("basement", "cellar", 2, 12, 8)],
+    };
+    assert.match(
+      validateMansionLayoutV2(basementUpstairs).join("\n"),
+      /ground-floor-only.*Floor 1/u,
+    );
+
+    const atticBelowTop: MansionLayoutV2 = {
+      ...valid,
+      entities: [...valid.entities, room("attic", "attic", 1, 10, 8)],
+    };
+    assert.match(
+      validateMansionLayoutV2(atticBelowTop).join("\n"),
+      /top-floor-only.*Floor 2/u,
     );
   });
 

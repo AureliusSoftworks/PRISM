@@ -20,6 +20,8 @@ export default function GlobalError({
         <PrismAppErrorFallback
           title="Prism is still here."
           body="The app shell hit a rendering problem. Try again when you are ready."
+          error={error}
+          surface="Application shell"
           onAction={reset}
         />
       </body>

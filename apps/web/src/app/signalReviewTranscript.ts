@@ -158,6 +158,11 @@ export function buildSignalReviewTranscript(
   ).length;
   const spokenContentTurnCount =
     episode.messages.length - silenceOnlyTurnCount;
+  const preparationTimeoutRecoveryCount = events.filter(
+    (event) =>
+      event.kind === "session_clock_hold" &&
+      event.payload.recovery === "preparation_timeout",
+  ).length;
   for (const event of events) {
     const messageId = payloadString(event, "messageId");
     if (event.kind === "utterance" && messageId)
@@ -196,6 +201,7 @@ export function buildSignalReviewTranscript(
     `- Title: ${episode.title}`,
     `- Topic: ${episode.topic}`,
     `- Private producer brief: ${episode.producerBrief.trim() || "None"}`,
+    `- Private guest briefing: ${episode.guestBrief?.trim() || "None"}`,
     `- Show premise: ${show.premise.trim() || "None"}`,
     `- Hosting style: ${show.hostingStyle.trim() || "None"}`,
     `- Host: ${host.name} (${host.id})`,
@@ -210,6 +216,7 @@ export function buildSignalReviewTranscript(
     `- Duration target: ${episode.durationMinutes == null ? "Auto" : `${episode.durationMinutes} minutes`}`,
     `- Recorded runtime: ${formatDuration(episode.runtimeMs)}`,
     `- Completed model warmup holds: ${formatDuration(episode.modelWarmupHoldDurationMs)}`,
+    `- Foreground recoveries after preparation timeout: ${preparationTimeoutRecoveryCount}`,
     `- Active model warmup hold started: ${formatTimestamp(episode.modelWarmupHoldStartedAt)}`,
     `- Final segment: ${episode.segment}`,
     `- Final tension: ${episode.tensionStage}`,

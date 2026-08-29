@@ -527,6 +527,44 @@ export const DEBATE_MYSTERY_ROOM_TEMPLATES: readonly DebateMysteryRoomTemplateV1
     };
   });
 
+export const DEBATE_MYSTERY_GROUND_FLOOR_ROOM_TYPE_IDS = [
+  "foyer",
+  "cellar",
+  "utility",
+] as const;
+export const DEBATE_MYSTERY_TOP_FLOOR_ROOM_TYPE_IDS = [
+  "attic",
+  "rooftop-lounge",
+] as const;
+
+export type DebateMysteryRoomFloorRuleV1 = "ground-floor-only" | "top-floor-only" | null;
+
+/** Architectural floor semantics shared by generated mansions, Mansion Editor,
+ * package validation, and every UI that offers semantic room types. */
+export function debateMysteryRoomFloorRuleV1(
+  roomTypeId: string,
+): DebateMysteryRoomFloorRuleV1 {
+  const normalizedId = roomTypeId.trim().toLowerCase();
+  if ((DEBATE_MYSTERY_GROUND_FLOOR_ROOM_TYPE_IDS as readonly string[]).includes(normalizedId)) {
+    return "ground-floor-only";
+  }
+  if ((DEBATE_MYSTERY_TOP_FLOOR_ROOM_TYPE_IDS as readonly string[]).includes(normalizedId)) {
+    return "top-floor-only";
+  }
+  return null;
+}
+
+export function debateMysteryRoomTypeIsAllowedOnFloorV1(
+  roomTypeId: string,
+  floor: number,
+  topFloor: number,
+): boolean {
+  const rule = debateMysteryRoomFloorRuleV1(roomTypeId);
+  if (rule === "ground-floor-only") return floor === 1;
+  if (rule === "top-floor-only") return floor === topFloor;
+  return true;
+}
+
 export interface DebateMysteryFloorplanRoomV1 {
   id: string;
   floor: number;
@@ -1355,9 +1393,9 @@ function mansionRoomTypeLineup(config: DebateMysteryResolvedConfigV1, random: ()
   const architecturalOrder = config.totalRooms <= 5
     ? ["foyer", "dining-room", "kitchen", "primary-bedroom", "bathroom"]
     : [
-        "foyer", "ballroom", "dining-room", "kitchen", "utility",
-        "primary-bedroom", "bathroom", "library", "parlor", "study",
-        "conservatory", "theater", "wine-room", "cellar", "pool",
+        "foyer", "dining-room", "kitchen", "primary-bedroom", "bathroom",
+        "library", "parlor", "study", "conservatory", "theater",
+        "wine-room", "ballroom", "utility", "cellar", "pool",
         "guest-bedroom", "attic",
       ];
   const roofEligible = config.floors > 1 && config.totalRooms >= 12;
@@ -1424,17 +1462,20 @@ function mansionFloorRoomTypes(
 ): string[][] {
   const floors = Array.from({ length: floorCount }, () => [] as string[]);
   const clusters = mysteryRoomTypeClusters(roomTypeIds);
-  const foyerCluster = clusters.find((cluster) => cluster.includes("foyer"));
-  const rooftopCluster = clusters.find((cluster) => cluster.includes("rooftop-lounge"));
-  const remaining = clusters.filter((cluster) => cluster !== foyerCluster && cluster !== rooftopCluster);
+  const groundFloorClusters = clusters.filter((cluster) => cluster.some((roomTypeId) =>
+    debateMysteryRoomFloorRuleV1(roomTypeId) === "ground-floor-only"));
+  const topFloorClusters = clusters.filter((cluster) => cluster.some((roomTypeId) =>
+    debateMysteryRoomFloorRuleV1(roomTypeId) === "top-floor-only"));
+  const fixedFloorClusters = new Set([...groundFloorClusters, ...topFloorClusters]);
+  const remaining = clusters.filter((cluster) => !fixedFloorClusters.has(cluster));
   const assign = (cluster: string[], floorIndex: number): void => {
     floors[floorIndex]!.push(...cluster);
     const index = remaining.indexOf(cluster);
     if (index >= 0) remaining.splice(index, 1);
   };
 
-  if (foyerCluster) floors[0]!.push(...foyerCluster);
-  if (rooftopCluster) floors[floorCount - 1]!.push(...rooftopCluster);
+  for (const cluster of groundFloorClusters) floors[0]!.push(...cluster);
+  for (const cluster of topFloorClusters) floors[floorCount - 1]!.push(...cluster);
 
   // Give every requested storey a real room group before balancing the rest.
   // Larger authored groups stay intact, so kitchen/dining, bedroom/bathroom,
@@ -2455,9 +2496,15 @@ export function validateDebateMysteryCaseBible(bible: DebateMysteryCaseBibleV1, 
   requireTypeAdjacency("primary-bedroom", "bathroom", "Bedroom and bathroom");
   requireTypeAdjacency("foyer", "ballroom", "Foyer and ballroom");
   requireTypeAdjacency("kitchen", "utility", "Kitchen and garage service access");
-  const rooftop = roomForType("rooftop-lounge");
-  if (rooftop && rooftop.floor !== Math.max(...bible.rooms.map((room) => room.floor))) {
-    errors.push("Rooftop Lounge must occupy the mansion's highest level.");
+  const topFloor = Math.max(1, ...bible.rooms.map((room) => room.floor));
+  for (const room of bible.rooms) {
+    if (debateMysteryRoomTypeIsAllowedOnFloorV1(room.templateId, room.floor, topFloor)) continue;
+    const floorRule = debateMysteryRoomFloorRuleV1(room.templateId);
+    if (floorRule === "ground-floor-only") {
+      errors.push(`${room.templateId} must occupy Floor 1.`);
+    } else if (floorRule === "top-floor-only") {
+      errors.push(`${room.templateId} must occupy the mansion's highest level, Floor ${topFloor}.`);
+    }
   }
   if (bible.rooms.some((room) => {
     const count = bible.activeRegions.filter((outcome) => outcome.roomId === room.id).length;

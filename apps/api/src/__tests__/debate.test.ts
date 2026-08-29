@@ -372,6 +372,26 @@ class EvidenceBallotProvider extends DebateProviderStub {
   }
 }
 
+class InventedAttributionBallotProvider extends DebateProviderStub {
+  public inventedBallotPrompts = 0;
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("Vote independently") && text.includes("You are Avery.")) {
+      this.inventedBallotPrompts += 1;
+      return JSON.stringify({
+        sideId: "for",
+        reason:
+          "I vote For because Bob said it can be drained and baked crisp.",
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
 class CommentlessAcceptanceProvider extends DebateProviderStub {
   public override async generateResponse(
     messages: ProviderMessage[],
@@ -5997,6 +6017,70 @@ describe("Debate engine", () => {
             !ballot.reason.includes("[[exhibit:invented]]"),
         ),
         true,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("replaces a ballot reason that invents a named speaker claim", async () => {
+    const db = createTestDb();
+    const provider = new InventedAttributionBallotProvider();
+    const debateRuntime = runtimeWith(provider);
+    try {
+      let session = await createDebateForRole(db, "spectator", {
+        debateRuntime,
+        moderatorNameOverride: "Bob Ross",
+      });
+      for (const key of ["intro", "opening"]) {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `ballot:invented-attribution:${key}`,
+          },
+          debateRuntime,
+        );
+      }
+      session = endDebateSessionEarly(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "ballot:invented-attribution:end-early",
+      });
+      let mutation = 0;
+      while (session.status !== "completed" && session.stepKey !== "completed") {
+        mutation += 1;
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `ballot:invented-attribution:advance:${mutation}`,
+          },
+          debateRuntime,
+        );
+        assert.ok(mutation < 12);
+      }
+
+      assert.equal(provider.inventedBallotPrompts, 1);
+      const advocateBallot = session.ballots.find(
+        (ballot) => ballot.voterBotId === "for",
+      );
+      assert.equal(
+        advocateBallot?.reason,
+        "Build Near Rail made the clearer case in the public exchange.",
+      );
+      assert.doesNotMatch(
+        advocateBallot?.reason ?? "",
+        /drained|baked crisp/iu,
+      );
+      assert.equal(
+        session.events
+          .filter((event) => event.speakerBotId === "moderator")
+          .some((event) => /drained|baked crisp/iu.test(event.content)),
+        false,
       );
     } finally {
       db.close();

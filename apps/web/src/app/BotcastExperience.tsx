@@ -35,6 +35,7 @@ import {
   BOTCAST_EPISODE_IMAGE_SCALE_STEP,
   BOTCAST_EPISODE_IMAGE_NAME_MAX_LENGTH,
   BOTCAST_EPISODE_IMAGE_REASON_MAX_LENGTH,
+  BOTCAST_GUEST_BRIEF_MAX_LENGTH,
   BOTCAST_CAMERA_ZOOM_MAX,
   BOTCAST_CAMERA_ZOOM_MIN,
   BOTCAST_CAMERA_ZOOM_STEP,
@@ -126,6 +127,9 @@ import {
   listenerReactionHasCrosstalkAudio,
   listenerReactionInterruptedSpeakerTextV1,
   listenerReactionSpokenTextV1,
+  listenerReactionSequencePlansV1,
+  botcastVoicePerformanceForMessageV2,
+  botcastStudioIncidentForMessageV1,
   resolveListenerReactionAtMs,
   socialSilenceMessageIsMarkedV1,
   replayCameraTransitionModeV2,
@@ -189,6 +193,7 @@ import {
   type SignalPersonaTemperament,
   type AutoRecoveryTraceV1,
   type AutoRouteDecisionV1,
+  type SignalStudioIncidentBeatV1,
 } from "@localai/shared";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
 import {
@@ -214,7 +219,13 @@ import {
   buildBundledActionSfxPlan,
   bundledActionSfxCueAtMs,
 } from "./coffee-action-sfx";
+import {
+  playSignalStudioIncidentAudio,
+  signalStudioIncidentCaptionAtProgressV1,
+} from "./signalStudioIncidentAudio";
+import { signalOrganicCaptionPresentationV1 } from "./signalOrganicCaption";
 import { nextBotcastShowIdAfterDeletion } from "./botcastDeletion";
+import { waitForSignalTurnPreparation } from "./signalTurnPreparationWait";
 import {
   signalHostRecoveryCandidateEnabled,
   signalHostRecoveryCandidateLabel,
@@ -255,6 +266,11 @@ import {
   annotateAppletTranscriptFrameRates,
   useAppletTranscriptFrameRate,
 } from "./appletTranscriptFrameRate";
+import {
+  annotateTranscriptWithFocusEvents,
+  loadLiveSessionFocusEvents,
+  useLiveSessionFocusEvents,
+} from "./sessionFocusEvents";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
 import { acquirePrismLivingSession } from "./prismPresentationSuspend";
 import { SIGNAL_STUDIO_FOLEY_ROOM_SEND } from "./roomAcoustics";
@@ -391,7 +407,7 @@ import {
   writeDiagnosticClipboard,
 } from "./webDiagnostics";
 import {
-  scheduleRealtimeVoiceDuck,
+  scheduleRealtimeVoicePause,
   type VoicePlaybackCharacterAlignment,
   type VoicePlaybackLifecycle,
 } from "./voiceEffects";
@@ -738,7 +754,6 @@ interface SignalListenerReactionVoiceLifecycles {
 }
 
 const SIGNAL_NATURAL_HANDOFF_MS = 40;
-const SIGNAL_PREPARATION_WAIT_MS = 15_000;
 const SIGNAL_NOTICE_TOAST_MS = 7_000;
 const SIGNAL_EPISODE_PRE_ROLL_MIN_MS = 3_000;
 const SIGNAL_ATMOSPHERE_BUSES = [
@@ -755,21 +770,6 @@ const SIGNAL_ATMOSPHERE_BUSES = [
 // the episode in a busy state and block the next on-air turn indefinitely.
 const SIGNAL_VOICE_COMPLETION_GRACE_MS = 4_000;
 
-async function waitForSignalTurnPreparation(
-  request: BotcastApiRequest,
-  initial: PreparedTurnV1,
-  signal: AbortSignal,
-): Promise<PreparedTurnV1> {
-  let preparation = initial;
-  while (preparation.phase === "preparing") {
-    const status = await request<{ preparation: PreparedTurnV1 }>(
-      `/api/turn-preparations/${encodeURIComponent(preparation.id)}?waitMs=${SIGNAL_PREPARATION_WAIT_MS}`,
-      { signal },
-    );
-    preparation = status.preparation;
-  }
-  return preparation;
-}
 /** Discrete mouths and captions stay fluid without rerendering Signal at 60 fps. */
 const SIGNAL_LIVE_SPEECH_RENDER_INTERVAL_MS = 50;
 /**
@@ -839,23 +839,26 @@ function signalInterruptedSpeakerRetortDelayMs(
   ) {
     return INTERRUPTED_SPEAKER_RETORT_PAUSE_MS;
   }
+  const organicPauseMs = plan.signalOrganicBeat?.kind === "cut_in_retreat"
+    ? plan.signalOrganicBeat.timing.speakerDuckMs
+    : 0;
   return (
-    Math.max(0, durationMs - elapsedMs) + INTERRUPTED_SPEAKER_RETORT_PAUSE_MS
+    Math.max(0, durationMs - elapsedMs) +
+    organicPauseMs +
+    INTERRUPTED_SPEAKER_RETORT_PAUSE_MS
   );
 }
 
 /** Give a real, successfully-started cut-in room on the primary voice bus. */
-function scheduleSignalOrganicPrimaryDuck(
+function scheduleSignalOrganicPrimaryPause(
   plan: ListenerReactionPlanV1,
 ): boolean {
   const organicBeat = plan.signalOrganicBeat;
   if (!organicBeat || organicBeat.kind !== "cut_in_retreat") return false;
-  return scheduleRealtimeVoiceDuck({
+  return scheduleRealtimeVoicePause({
     channel: "primary",
     delayMs: organicBeat.timing.overlapMs,
     holdMs: organicBeat.timing.speakerDuckMs,
-    resumeFadeMs: organicBeat.timing.resumeFadeMs,
-    duckGain: 0.24,
   });
 }
 const SIGNAL_OPENING_ADVANCE_ATTEMPTS = 2;
@@ -881,7 +884,12 @@ function signalHostChatStreamChunks(content: string): string[] {
 }
 
 type PreparedBotcastAdvanceResult =
-  { ok: true; preparation: PreparedTurnV1 } | { ok: false; error: unknown };
+  | {
+      ok: true;
+      preparation: PreparedTurnV1;
+      preparationTimedOut: boolean;
+    }
+  | { ok: false; error: unknown };
 
 type PreparedBotcastAdvance = {
   episodeId: string;
@@ -1007,6 +1015,16 @@ export interface BotcastExperienceProps {
     stereoPan: number,
     retortDelayMs?: number,
     lifecycles?: SignalListenerReactionVoiceLifecycles,
+  ) => boolean | Promise<boolean>;
+  onStudioIncidentDialogue?: (
+    dialogue: {
+      incidentId: string;
+      beatIndex: number;
+      beat: Extract<SignalStudioIncidentBeatV1, { kind: "dialogue" }>;
+    },
+    bot: BotcastBotSummary,
+    lifecycle: VoicePlaybackLifecycle,
+    stereoPan: number,
   ) => boolean | Promise<boolean>;
   onPrepareUtterance?: () => void;
   onResponseCueGeneration?: (args: {
@@ -1477,6 +1495,8 @@ type SignalEpisodeImageUpload = {
   imageId: string;
   fileName: string;
   dataUrl: string;
+  /** Completed/cancelled booking whose authenticated replay proxy is reused. */
+  archivalProxyEpisodeId?: string;
   descriptor: BotcastEpisodeImageDescriptor;
   /** Automatically chosen, pixel-free visual used when replay cannot resolve the image. */
   replayEmoji: string;
@@ -2459,6 +2479,7 @@ export function BotcastExperience({
   onInvalidatePrefetchedEpisode,
   onPrefetchListenerReaction,
   onListenerReaction,
+  onStudioIncidentDialogue,
   onPrepareUtterance,
   onResponseCueGeneration,
   onPrewarmResponseCue,
@@ -2514,6 +2535,7 @@ export function BotcastExperience({
   const [episodes, setEpisodes] = useState<BotcastEpisodeSummary[]>([]);
   const [episode, setEpisode] = useState<BotcastEpisode | null>(null);
   useAppletTranscriptFrameRate("signal", episode?.id, episode?.messages ?? []);
+  useLiveSessionFocusEvents("signal", episode?.id, episode?.status === "live");
   useEffect(() => {
     if (!episode || episode.status !== "live") return;
     // Keep Signal speech + rundown alive while visuals sleep on minimize.
@@ -2597,6 +2619,7 @@ export function BotcastExperience({
   const signalBotPickerViewportRef = useRef<HTMLDivElement>(null);
   const [topicDraft, setTopicDraft] = useState("");
   const [producerBriefDraft, setProducerBriefDraft] = useState("");
+  const [guestBriefDraft, setGuestBriefDraft] = useState("");
   const [producerGuestContextDraft, setProducerGuestContextDraft] =
     useState("");
   const [producerGuestAnswerDraft, setProducerGuestAnswerDraft] = useState("");
@@ -2726,6 +2749,11 @@ export function BotcastExperience({
     guest: boolean;
   }>({ episodeId: null, host: false, guest: false });
   const [liveSpeech, setLiveSpeech] = useState<BotcastLiveSpeech | null>(null);
+  const [signalPerformanceCaption, setSignalPerformanceCaption] = useState<{
+    messageId: string;
+    botId: string;
+    text: string;
+  } | null>(null);
   const liveSpeechRef = useRef<BotcastLiveSpeech | null>(null);
   liveSpeechRef.current = liveSpeech;
   const audibleHandoffOutgoingMessageIdRef = useRef<string | null>(null);
@@ -3506,6 +3534,7 @@ export function BotcastExperience({
     activeSpeechMessageIdRef.current = null;
     setSpeakingMessageId(null);
     setLiveSpeech(null);
+    setSignalPerformanceCaption(null);
     onStopUtteranceRef.current?.();
   }, []);
 
@@ -3887,6 +3916,7 @@ export function BotcastExperience({
       episodeId: string;
       holdId: string;
       durationMs: number;
+      recovery: "preparation_timeout" | null;
     }): Promise<void> => {
       const response = await request<{ episode: BotcastEpisode }>(
         `/api/botcast/episodes/${encodeURIComponent(args.episodeId)}/session-clock-hold`,
@@ -3896,6 +3926,7 @@ export function BotcastExperience({
             holdId: args.holdId,
             reason: "foreground_generation",
             durationMs: Math.max(0, Math.round(args.durationMs)),
+            ...(args.recovery ? { recovery: args.recovery } : {}),
           }),
         },
       );
@@ -4672,7 +4703,7 @@ export function BotcastExperience({
     const targetShow =
       shows.find((show) => show.id === targetEpisode.showId) ?? selectedShow;
     if (!targetShow) return null;
-    const [recordingEvidence, presenceBeats, sessionMetadata] = await Promise.all([
+    const [recordingEvidence, presenceBeats, sessionMetadata, focusEvents] = await Promise.all([
       loadSessionReviewRecordingEvidence(
         "signal",
         targetEpisode.id,
@@ -4689,11 +4720,12 @@ export function BotcastExperience({
         }),
       )
         .catch(() => ({ ok: true as const, note: null, frameSamples: [] })),
+      loadLiveSessionFocusEvents("signal", targetEpisode.id).catch(() => []),
     ]);
     return {
       title: `${targetShow.name} — ${targetEpisode.title}`,
       transcript: annotateAppletTranscriptFrameRates(
-        appendAppletSessionNoteToTranscript(
+        annotateTranscriptWithFocusEvents(appendAppletSessionNoteToTranscript(
           buildSignalReviewTranscript({
           episode: targetEpisode,
           show: targetShow,
@@ -4715,7 +4747,7 @@ export function BotcastExperience({
           presenceBeats,
           }),
           sessionMetadata.note,
-        ),
+        ), focusEvents),
         sessionMetadata.frameSamples,
       ),
     };
@@ -6153,6 +6185,7 @@ export function BotcastExperience({
         setGuestDraftId("");
         setTopicDraft("");
         setProducerBriefDraft("");
+        setGuestBriefDraft("");
         clearProducerCueDraftInputs({ quote: false });
         const nextShows = await loadShows();
         const nextShow =
@@ -6966,6 +6999,9 @@ export function BotcastExperience({
       ? (botsById.get(launchShow.hostBotId) ?? null)
       : null;
     const producerGuest = launchGuestId === BOTCAST_PRODUCER_GUEST_ID;
+    const launchGuestBrief = producerGuest
+      ? ""
+      : (override?.guestBrief ?? guestBriefDraft).trim();
     const watchMode = playbackModeDraft === "watch" && !producerGuest;
     const producerGuestWantsSurprise =
       producerGuest && !producerGuestContextDraft.trim();
@@ -7198,6 +7234,7 @@ export function BotcastExperience({
                   guestBotId: launchGuestId,
                   topic: launchTopic.trim(),
                   producerBrief: resolvedProducerBrief,
+                  guestBrief: launchGuestBrief,
                 }),
             ...(watchMode ? { playbackMode: "watch" } : {}),
             preferredProvider: episodeProvider,
@@ -7297,11 +7334,17 @@ export function BotcastExperience({
           theme,
           ...(setupImageUpload
             ? {
-                episodeImage: {
-                  imageId: setupImageUpload.imageId,
-                  fileName: setupImageUpload.fileName,
-                  dataUrl: setupImageUpload.dataUrl,
-                  name: setupImageUpload.descriptor.name,
+              episodeImage: {
+                imageId: setupImageUpload.imageId,
+                fileName: setupImageUpload.fileName,
+                dataUrl: setupImageUpload.dataUrl,
+                ...(setupImageUpload.archivalProxyEpisodeId
+                  ? {
+                      archivalProxyEpisodeId:
+                        setupImageUpload.archivalProxyEpisodeId,
+                    }
+                  : {}),
+                name: setupImageUpload.descriptor.name,
                   reason: setupImageUpload.reason,
                   replayEmoji: setupImageUpload.replayEmoji,
                 },
@@ -7377,6 +7420,7 @@ export function BotcastExperience({
         openingMessageReceived = bakedEpisode.messages.length > 0;
         setTopicDraft("");
         setProducerBriefDraft("");
+        setGuestBriefDraft("");
         setProducerGuestContextDraft("");
         setInternalEpisodeModelDraft("");
         clearProducerCueDraftInputs({ quote: false });
@@ -7481,6 +7525,7 @@ export function BotcastExperience({
       latestCaptureEpisode = opening.episode;
       setTopicDraft("");
       setProducerBriefDraft("");
+      setGuestBriefDraft("");
       setProducerGuestContextDraft("");
       setInternalEpisodeModelDraft("");
       clearProducerCueDraftInputs({ quote: false });
@@ -7608,6 +7653,7 @@ export function BotcastExperience({
     setGuestDraftId(launch.guestBotId);
     setTopicDraft(launch.topic);
     setProducerBriefDraft(launch.producerBrief);
+    setGuestBriefDraft("");
     orchestrationLaunchStagedTokenRef.current = launch.token;
   }, [
     botsById,
@@ -7629,6 +7675,7 @@ export function BotcastExperience({
       guestDraftId !== launch.guestBotId ||
       topicDraft !== launch.topic ||
       producerBriefDraft !== launch.producerBrief ||
+      guestBriefDraft !== "" ||
       episode
     ) {
       return;
@@ -7640,6 +7687,7 @@ export function BotcastExperience({
   }, [
     episode,
     guestDraftId,
+    guestBriefDraft,
     onOrchestrationLaunchConsumed,
     orchestrationLaunch,
     producerBriefDraft,
@@ -7672,17 +7720,19 @@ export function BotcastExperience({
         const listener = botsById.get(plan.listenerBotId);
         const interruptedBot = botsById.get(plan.speakerBotId);
         if (listener) {
-          onPrefetchListenerReaction?.(
-            plan,
-            listener,
-            interruptedBot
-              ? botWithIdentityBeforeMessage(
-                  interruptedBot,
-                  currentEpisode,
-                  message,
-                )
-              : undefined,
-          );
+          for (const sequencePlan of listenerReactionSequencePlansV1(plan)) {
+            onPrefetchListenerReaction?.(
+              sequencePlan,
+              listener,
+              interruptedBot
+                ? botWithIdentityBeforeMessage(
+                    interruptedBot,
+                    currentEpisode,
+                    message,
+                  )
+                : undefined,
+            );
+          }
         }
       }
       for (const beat of message.mutePerformance?.reactionBeats ?? []) {
@@ -7878,47 +7928,53 @@ export function BotcastExperience({
         listenerReactionAtMsByMessageIdRef.current.get(message.id) ??
         armListenerReactionTiming(message, durationMs);
       if (atMs === null) return;
-      const triggerAtMs = Math.max(
-        0,
-        atMs - SIGNAL_LISTENER_REACTION_SCHEDULE_LEAD_MS,
-      );
-      if (elapsedMs < triggerAtMs) return;
-      if (liveListenerReactionFiredRef.current.has(message.id)) return;
-      liveListenerReactionFiredRef.current.add(message.id);
-      if (!listenerReactionHasCrosstalkAudio(plan)) return;
-      const listener = botsById.get(plan.listenerBotId);
-      if (listener) {
+      for (const [index, sequencePlan] of
+        listenerReactionSequencePlansV1(plan).entries()) {
+        const sequenceAtMs = index === 0
+          ? atMs
+          : Math.round(durationMs * sequencePlan.targetProgress);
+        const triggerAtMs = Math.max(
+          0,
+          sequenceAtMs - SIGNAL_LISTENER_REACTION_SCHEDULE_LEAD_MS,
+        );
+        if (elapsedMs < triggerAtMs) continue;
+        const fireKey = `${message.id}:${index}`;
+        if (liveListenerReactionFiredRef.current.has(fireKey)) continue;
+        liveListenerReactionFiredRef.current.add(fireKey);
+        if (!listenerReactionHasCrosstalkAudio(sequencePlan)) continue;
+        const listener = botsById.get(sequencePlan.listenerBotId);
+        if (!listener) continue;
         const interruptedBot = botsById.get(plan.speakerBotId);
         const listenerRole =
           selectedShow?.hostBotId === listener.id ? "host" : "guest";
         const retortDelayMs = signalInterruptedSpeakerRetortDelayMs(
-          plan,
+          sequencePlan,
           elapsedMs,
           durationMs,
         );
         const playback = Promise.resolve(
           onListenerReaction?.(
-            plan,
+            sequencePlan,
             listener,
             signalStudioVoicePan(selectedShow?.studioLayout, listenerRole),
             retortDelayMs,
             {
               listener: createSignalReactionVoiceLifecycle(
-                plan.listenerBotId,
-                plan.messageId,
+                sequencePlan.listenerBotId,
+                `${sequencePlan.messageId}:sequence:${index}`,
                 "reaction",
-                listenerReactionSpokenTextV1(plan) ?? "",
-                signalListenerReactionVoiceGain(plan),
-                () => scheduleSignalOrganicPrimaryDuck(plan),
+                listenerReactionSpokenTextV1(sequencePlan) ?? "",
+                signalListenerReactionVoiceGain(sequencePlan),
+                () => scheduleSignalOrganicPrimaryPause(sequencePlan),
               ),
               interrupted: createSignalReactionVoiceLifecycle(
-                plan.speakerBotId,
-                plan.messageId,
+                sequencePlan.speakerBotId,
+                `${sequencePlan.messageId}:sequence:${index}`,
                 "crosstalk",
-                listenerReactionInterruptedSpeakerTextV1(plan) ?? "",
+                listenerReactionInterruptedSpeakerTextV1(sequencePlan) ?? "",
               ),
               listenerStartAtPerformanceMs:
-                performance.now() + Math.max(0, atMs - elapsedMs),
+                performance.now() + Math.max(0, sequenceAtMs - elapsedMs),
               ...(interruptedBot && episode
                 ? {
                     interruptedBot: botWithIdentityBeforeMessage(
@@ -8042,37 +8098,47 @@ export function BotcastExperience({
         listenerReactionAtMsByMessageIdRef.current.get(message.id) ??
         armListenerReactionTiming(message, durationMs);
       if (atMs === null) return;
-      if (elapsedMs < atMs) {
-        replayListenerReactionFiredRef.current.delete(message.id);
-        return;
-      }
-      if (replayListenerReactionFiredRef.current.has(message.id)) return;
-      replayListenerReactionFiredRef.current.add(message.id);
-      if (!listenerReactionHasCrosstalkAudio(plan)) return;
-      const listener = botsById.get(plan.listenerBotId);
-      if (listener) {
+      for (const [index, sequencePlan] of
+        listenerReactionSequencePlansV1(plan).entries()) {
+        const sequenceAtMs = index === 0
+          ? atMs
+          : Math.round(durationMs * sequencePlan.targetProgress);
+        const fireKey = `${message.id}:${index}`;
+        if (elapsedMs < sequenceAtMs) {
+          replayListenerReactionFiredRef.current.delete(fireKey);
+          continue;
+        }
+        if (replayListenerReactionFiredRef.current.has(fireKey)) continue;
+        replayListenerReactionFiredRef.current.add(fireKey);
+        if (!listenerReactionHasCrosstalkAudio(sequencePlan)) continue;
+        const listener = botsById.get(sequencePlan.listenerBotId);
+        if (!listener) continue;
         const listenerRole =
           selectedShow?.hostBotId === listener.id ? "host" : "guest";
         void Promise.resolve(
           onListenerReaction?.(
-            plan,
+            sequencePlan,
             listener,
             signalStudioVoicePan(selectedShow?.studioLayout, listenerRole),
-            signalInterruptedSpeakerRetortDelayMs(plan, elapsedMs, durationMs),
+            signalInterruptedSpeakerRetortDelayMs(
+              sequencePlan,
+              elapsedMs,
+              durationMs,
+            ),
             {
               listener: createSignalReactionVoiceLifecycle(
-                plan.listenerBotId,
-                plan.messageId,
+                sequencePlan.listenerBotId,
+                `${sequencePlan.messageId}:sequence:${index}`,
                 "reaction",
-                listenerReactionSpokenTextV1(plan) ?? "",
-                signalListenerReactionVoiceGain(plan),
-                () => scheduleSignalOrganicPrimaryDuck(plan),
+                listenerReactionSpokenTextV1(sequencePlan) ?? "",
+                signalListenerReactionVoiceGain(sequencePlan),
+                () => scheduleSignalOrganicPrimaryPause(sequencePlan),
               ),
               interrupted: createSignalReactionVoiceLifecycle(
-                plan.speakerBotId,
-                plan.messageId,
+                sequencePlan.speakerBotId,
+                `${sequencePlan.messageId}:sequence:${index}`,
                 "crosstalk",
-                listenerReactionInterruptedSpeakerTextV1(plan) ?? "",
+                listenerReactionInterruptedSpeakerTextV1(sequencePlan) ?? "",
               ),
               ...(botsById.get(plan.speakerBotId) && episode
                 ? {
@@ -8165,6 +8231,13 @@ export function BotcastExperience({
       onProgress?: (elapsedMs: number, durationMs: number) => void,
     ): Promise<void> => {
       const messageId = message.id;
+      const presentationContent = botCrosstalkPrimarySpeakerContent(
+        message.content,
+        listenerReactionPlanByMessageIdRef.current.get(message.id),
+      );
+      const presentationMessage = presentationContent === message.content
+        ? message
+        : { ...message, content: presentationContent };
       const socialSilence = socialSilenceMessageIsMarkedV1({
         content: message.content,
         marker: message.socialSilence,
@@ -8182,17 +8255,17 @@ export function BotcastExperience({
               ),
             )
           : signalSilentCaptionRevealDurationMs(
-              message.stageActionText ?? message.content,
+              message.stageActionText ?? presentationContent,
               { stageAction: Boolean(message.stageActionText) },
             );
       armListenerReactionTiming(message, durationMs);
       startTransition(() => {
         setLiveSpeech({
           messageId,
-          message,
+          message: presentationMessage,
           audible: false,
           reveal: startBotcastSpeechReveal({
-            text: message.content,
+            text: presentationContent,
             durationMs,
           }),
         });
@@ -8254,7 +8327,16 @@ export function BotcastExperience({
         botcastMessageIsAudibleToAudienceV1(message) &&
         !botPowerResponseIsSilentV1(message.content)
       ) {
-        onPrefetchUtterance?.(message, bot);
+        const organicVoicePerformance = botcastVoicePerformanceForMessageV2(
+          currentEpisode.events,
+          message.id,
+        );
+        onPrefetchUtterance?.(
+          organicVoicePerformance
+            ? { ...message, organicVoicePerformance }
+            : message,
+          bot,
+        );
       }
       startTransition(() => {
         setLiveSpeech({
@@ -8297,10 +8379,17 @@ export function BotcastExperience({
         message.content,
         listenerReactionPlanByMessageIdRef.current.get(message.id),
       );
-      const playbackMessage =
-        primarySpokenContent === message.content
-        ? message
-        : { ...message, content: primarySpokenContent };
+      const organicVoicePerformance = botcastVoicePerformanceForMessageV2(
+        currentEpisode.events,
+        message.id,
+      );
+      const playbackMessage = {
+        ...message,
+        ...(primarySpokenContent === message.content
+          ? {}
+          : { content: primarySpokenContent }),
+        ...(organicVoicePerformance ? { organicVoicePerformance } : {}),
+      };
       let playbackStarted = false;
       let playbackStartNotified = false;
       let voicePreparationTimer: number | null = null;
@@ -8337,6 +8426,56 @@ export function BotcastExperience({
           ? buildBundledActionSfxPlan(producerGuestActionCueText)
           : null;
       let producerGuestActionSfxPlayed = false;
+      const studioIncident = botcastStudioIncidentForMessageV1(
+        currentEpisode.events,
+        message.id,
+      );
+      let studioIncidentPlayed = false;
+      const studioIncidentDialogueFired = new Set<number>();
+      const studioIncidentDialoguePlaybacks: Promise<boolean>[] = [];
+      const playStudioIncidentAt = (
+        elapsedMs: number,
+        durationMs: number,
+      ): void => {
+        if (!studioIncident) return;
+        const progress = elapsedMs / Math.max(1, durationMs);
+        if (!studioIncidentPlayed && progress >= studioIncident.startProgress) {
+          studioIncidentPlayed = true;
+          playSignalStudioIncidentAudio(studioIncident, { durationMs, elapsedMs });
+        }
+        if (!onStudioIncidentDialogue) return;
+        for (const [beatIndex, beat] of studioIncident.beats.entries()) {
+          if (
+            beat.kind !== "dialogue" ||
+            progress < beat.atProgress ||
+            studioIncidentDialogueFired.has(beatIndex)
+          ) continue;
+          studioIncidentDialogueFired.add(beatIndex);
+          const dialogueBot = botsById.get(beat.actorBotId);
+          if (!dialogueBot) continue;
+          const playback = Promise.resolve(
+            onStudioIncidentDialogue(
+              { incidentId: studioIncident.incidentId, beatIndex, beat },
+              botWithIdentityBeforeMessage(
+                dialogueBot,
+                currentEpisode,
+                message,
+              ),
+              createSignalReactionVoiceLifecycle(
+                beat.actorBotId,
+                `${message.id}:studio:${beatIndex}`,
+                "reaction",
+                beat.text,
+              ),
+              signalStudioVoicePan(
+                selectedShow?.studioLayout,
+                beat.speakerRole,
+              ),
+            ),
+          ).then((played) => played ?? false).catch(() => false);
+          studioIncidentDialoguePlaybacks.push(playback);
+        }
+      };
       let producerGuestActionSfxResolvedCueAtMs: number | null = null;
       const playProducerGuestActionSfxAt = (
         elapsedMs: number,
@@ -8414,6 +8553,20 @@ export function BotcastExperience({
         );
       };
       const lifecycle: VoicePlaybackLifecycle = {
+        performancePlan: organicVoicePerformance,
+        onPerformanceCaption: (caption, active) => {
+          startTransition(() => {
+            setSignalPerformanceCaption(
+              active && caption
+                ? {
+                    messageId: message.id,
+                    botId: message.botId,
+                    text: caption,
+                  }
+                : null,
+            );
+          });
+        },
         onPresenceStart: () => {
           if (
             !voiceAttemptActive ||
@@ -8505,10 +8658,10 @@ export function BotcastExperience({
           startTransition(() => {
             setLiveSpeech({
               messageId: message.id,
-              message,
+              message: playbackMessage,
               audible: true,
               reveal: startBotcastSpeechReveal({
-                text: message.content,
+                text: primarySpokenContent,
                 durationMs: resolvedDurationMs,
                 alignment,
                 // Chunked speech has no full-clip alignment. Start its segment
@@ -8559,6 +8712,7 @@ export function BotcastExperience({
             prepareNextTurn();
           }
           fireLiveListenerReaction(message, elapsedMs, durationMs);
+          playStudioIncidentAt(elapsedMs, durationMs);
           playProducerGuestActionSfxAt(elapsedMs, durationMs);
           const renderNow = performance.now();
           signalLiveSpeechPlaybackClockRef.current = {
@@ -8670,6 +8824,9 @@ export function BotcastExperience({
       const pendingListenerReaction =
         liveListenerReactionPlaybackByMessageIdRef.current.get(message.id);
       if (pendingListenerReaction) await pendingListenerReaction;
+      if (studioIncidentDialoguePlaybacks.length > 0) {
+        await Promise.all(studioIncidentDialoguePlaybacks);
+      }
       if (
         activeSpeechMessageIdRef.current !== message.id ||
         !playbackStillOwned()
@@ -8688,6 +8845,7 @@ export function BotcastExperience({
         }
         notifyPlaybackStart();
         await revealUtteranceWithoutAudio(message, (elapsedMs, durationMs) => {
+          playStudioIncidentAt(elapsedMs, durationMs);
           playProducerGuestActionSfxAt(elapsedMs, durationMs);
           if (
             elapsedMs / Math.max(1, durationMs) >=
@@ -8765,11 +8923,13 @@ export function BotcastExperience({
       botsById,
       armListenerReactionTiming,
       clearLiveCameraPostSpeechHold,
+      createSignalReactionVoiceLifecycle,
       episodeOperationIsCurrent,
       fireLiveListenerReaction,
       holdLiveCameraAfterSpeech,
       onStopUtterance,
       onProducerGuestActionSfx,
+      onStudioIncidentDialogue,
       onUtterance,
       prepareEpisodeMessage,
       recordingVoiceSelection.englishVoiceEngine,
@@ -8823,14 +8983,14 @@ export function BotcastExperience({
         )
         .then(async ({ preparation }) => {
           prepared.preparationId = preparation.id;
-          return waitForSignalTurnPreparation(
+          return waitForSignalTurnPreparation({
             request,
-            preparation,
-            controller.signal,
-          );
+            initial: preparation,
+            signal: controller.signal,
+          });
         })
         .then(
-          (preparation) => {
+          ({ preparation, timedOut }) => {
             const utterance = preparation.provisionalUtterances[0];
             if (preparation.phase === "ready" && utterance) {
               const preparedMessage: BotcastMessage = {
@@ -8889,7 +9049,11 @@ export function BotcastExperience({
                 );
               }
             }
-            return { ok: true as const, preparation };
+            return {
+              ok: true as const,
+              preparation,
+              preparationTimedOut: timedOut,
+            };
           },
           (error: unknown) => ({ ok: false as const, error }),
         )
@@ -9057,6 +9221,7 @@ export function BotcastExperience({
         return Date.now();
       })();
       const foregroundHoldId = `${episode.id}:${runId}:${Date.now()}`;
+      let preparationRecovery: "preparation_timeout" | null = null;
       let completedForegroundHold: Promise<void> | null = null;
       const completeForegroundGenerationHold = (): Promise<void> => {
         if (completedForegroundHold) return completedForegroundHold;
@@ -9066,6 +9231,7 @@ export function BotcastExperience({
             episodeId: episode.id,
             holdId: foregroundHoldId,
             durationMs: Math.max(0, Date.now() - floorAvailableAtMs),
+            recovery: preparationRecovery,
           });
         })().catch(() => undefined);
         return completedForegroundHold;
@@ -9090,6 +9256,14 @@ export function BotcastExperience({
           : null;
         let warmupHoldActive = false;
         const preparedResult = prepared ? await prepared.result : null;
+        if (preparedResult?.ok && preparedResult.preparationTimedOut) {
+          preparationRecovery = "preparation_timeout";
+          if (preparedAdvanceRef.current === prepared) {
+            discardPreparedAdvance(
+              "Signal speculative preparation exceeded its bounded runway.",
+            );
+          }
+        }
         if (preparedAdvanceRef.current === prepared) {
           preparedAdvanceRef.current = null;
         }
@@ -9209,6 +9383,12 @@ export function BotcastExperience({
                         imageId: episodeImageForTurn.imageId,
                         fileName: episodeImageForTurn.fileName,
                         dataUrl: episodeImageForTurn.dataUrl,
+                        ...(episodeImageForTurn.archivalProxyEpisodeId
+                          ? {
+                              archivalProxyEpisodeId:
+                                episodeImageForTurn.archivalProxyEpisodeId,
+                            }
+                          : {}),
                         name: episodeImageForTurn.descriptor.name,
                         replayEmoji: episodeImageForTurn.replayEmoji,
                         ...(episodeImageForTurn.reason
@@ -11668,6 +11848,48 @@ export function BotcastExperience({
             )
           : replaySpeechActive)
       : speechReveal?.phase === "playing";
+    const activeOrganicVoicePerformance = args.activeMessage
+      ? botcastVoicePerformanceForMessageV2(
+          args.currentEpisode.events,
+          args.activeMessage.id,
+        )
+      : null;
+    const replayHesitationCaption = args.replay &&
+        activeOrganicVoicePerformance?.hesitation &&
+        speechIsPlaying &&
+        speechProgress >=
+          activeOrganicVoicePerformance.hesitation.sourceProgress &&
+        speechProgress <=
+          activeOrganicVoicePerformance.hesitation.sourceProgress + 0.08
+      ? activeOrganicVoicePerformance.hesitation.caption ?? "…"
+      : null;
+    const performanceCaptionText =
+      (!args.replay &&
+        args.activeMessage &&
+        signalPerformanceCaption?.messageId === args.activeMessage.id
+        ? signalPerformanceCaption.text
+        : null) ?? replayHesitationCaption;
+    const activeStudioIncident = args.activeMessage
+      ? botcastStudioIncidentForMessageV1(
+          args.currentEpisode.events,
+          args.activeMessage.id,
+        )
+      : null;
+    const studioIncidentCaption = activeStudioIncident && speechIsPlaying
+      ? signalStudioIncidentCaptionAtProgressV1({
+          incident: activeStudioIncident,
+          progress: speechProgress,
+        })
+      : null;
+    const studioIncidentCaptionText = studioIncidentCaption?.text ?? null;
+    const organicCaptionText =
+      performanceCaptionText ?? studioIncidentCaptionText;
+    const studioDialogueCaptionOwnsFloor = Boolean(
+      !performanceCaptionText && studioIncidentCaption?.kind === "dialogue",
+    );
+    const organicCaptionPresentation = signalOrganicCaptionPresentationV1(
+      organicCaptionText,
+    );
     const muteElapsedStageCueVisible = Boolean(
       args.activeMessage?.mutePerformance &&
         speechIsPlaying &&
@@ -11721,6 +11943,15 @@ export function BotcastExperience({
             (listenerReactionPlan.interjectionAttempt ? 1_600 : 1_200),
         ),
     );
+    const studioActionBeat = activeStudioIncident && speechIsPlaying
+      ? (activeStudioIncident.beats.findLast(
+          (beat) =>
+            beat.kind === "action" &&
+            speechProgress >= beat.atProgress &&
+            speechProgress <= Math.min(1, beat.atProgress + 0.14),
+        ) as Extract<SignalStudioIncidentBeatV1, { kind: "action" }> | undefined) ??
+        null
+      : null;
     const muteReactionBeat =
       args.activeMessage?.mutePerformance &&
       (args.replay ? replayPlaying : speechIsPlaying)
@@ -11736,14 +11967,21 @@ export function BotcastExperience({
         : null;
     const roleIsListenerReacting = (role: "host" | "guest"): boolean =>
       Boolean(
-        (muteReactionBeat?.reactorBotId ??
+        (studioActionBeat?.actorBotId ??
+          muteReactionBeat?.reactorBotId ??
           (listenerReactionActive
             ? listenerReactionPlan?.listenerBotId
             : null)) ===
           (role === "host" ? args.host?.id : args.guest?.id),
       );
     const listenerReactionActionForRole = (): string | null =>
-      muteReactionBeat
+      studioActionBeat
+        ? studioActionBeat.action === "lean_in"
+          ? "lean_in"
+          : studioActionBeat.action === "adjust_headphones"
+            ? "head_tilt"
+            : "nod"
+        : muteReactionBeat
         ? signalMuteReactionActionLabel(muteReactionBeat.action)
         : listenerReactionPlan
           ? listenerReactionActionLabel(listenerReactionPlan.visualAction)
@@ -11997,6 +12235,15 @@ export function BotcastExperience({
         fallback
       );
     };
+    const organicCaptionSpeakerBotId = studioDialogueCaptionOwnsFloor
+      ? studioIncidentCaption?.actorBotId ?? args.activeMessage?.botId
+      : args.activeMessage?.botId;
+    const organicCaptionSpeaker =
+      organicCaptionSpeakerBotId === args.host?.id
+        ? stagePublicName(args.host, "Host")
+        : organicCaptionSpeakerBotId === args.guest?.id
+          ? stagePublicName(args.guest, "Guest")
+          : delayedLiveCaptionSpeaker;
     const liveReactionCaptionSpeaker = liveReactionCaption
       ? liveReactionCaption.botId === args.host?.id
         ? stagePublicName(args.host, "Host")
@@ -12553,8 +12800,7 @@ export function BotcastExperience({
                 }
                 data-listener-reaction={
                   roleIsListenerReacting("host")
-                    ? (muteReactionBeat?.action ??
-                      listenerReactionPlan?.visualAction)
+                    ? listenerReactionActionForRole()
                     : undefined
                 }
               >
@@ -12664,8 +12910,7 @@ export function BotcastExperience({
                 }
                 data-listener-reaction={
                   roleIsListenerReacting("guest")
-                    ? (muteReactionBeat?.action ??
-                      listenerReactionPlan?.visualAction)
+                    ? listenerReactionActionForRole()
                     : (producerStageGesture ?? undefined)
                 }
               >
@@ -12800,7 +13045,38 @@ export function BotcastExperience({
             />
           </figure>
         ) : null}
-        {liveCaptionsEnabled && liveReactionCaption && liveReactionCaptionSpeaker && liveReactionCaptionPage.text ? (
+        {liveCaptionsEnabled && organicCaptionPresentation && args.activeMessage ? (
+          <div
+            className={styles.liveCaption}
+            style={{
+              ["--botcast-caption-accent" as string]: captionAccentForBotId(
+                organicCaptionSpeakerBotId ?? args.activeMessage.botId,
+              ),
+            }}
+            data-signal-live-caption="true"
+            data-signal-organic-caption="true"
+            data-message-id={args.activeMessage.id}
+            aria-live="polite"
+          >
+            <i aria-hidden="true" />
+            <div>
+              <strong>{organicCaptionSpeaker}</strong>
+              <span data-caption-rows="adaptive">
+                {organicCaptionPresentation.kind === "animated_ellipsis" ? (
+                  <span
+                    className={styles.signalAnimatedEllipsis}
+                    data-signal-animated-ellipsis="true"
+                    aria-label={organicCaptionPresentation.accessibleText}
+                  >
+                    <span aria-hidden="true">•</span>
+                    <span aria-hidden="true">•</span>
+                    <span aria-hidden="true">•</span>
+                  </span>
+                ) : organicCaptionPresentation.text}
+              </span>
+            </div>
+          </div>
+        ) : liveCaptionsEnabled && liveReactionCaption && liveReactionCaptionSpeaker && liveReactionCaptionPage.text ? (
           <div
             className={styles.liveCaption}
             style={{
@@ -13135,6 +13411,7 @@ export function BotcastExperience({
           groupValue={effectiveGroupId}
           onGroupChange={onGroupChange}
           groupTheme={theme}
+          groupSelectionMode="modal"
           resultLabel={resultLabel}
           compact={compact}
         />
@@ -13267,6 +13544,7 @@ export function BotcastExperience({
           request<{
             topic: string;
             producerBrief: string;
+            guestBrief: string;
             guestBotId?: string;
             generated: boolean;
           }>(
@@ -13289,6 +13567,7 @@ export function BotcastExperience({
           setGuestDraftId(setup.guestBotId);
           setTopicDraft(setup.topic);
           setProducerBriefDraft(setup.producerBrief);
+          setGuestBriefDraft(setup.guestBrief);
           setNotice("Lucky signal found. Taking it live…");
           await startEpisode({
             ...setup,
@@ -14732,6 +15011,7 @@ export function BotcastExperience({
           setProducerGuestContextDraft(detail.guestContext ?? "");
           setTopicDraft("");
           setProducerBriefDraft("");
+          setGuestBriefDraft("");
           if (modelChoice === undefined) {
             setEpisodeModelDraft(
               botcastEpisodeModelSelectionKind(detail) === "auto"
@@ -14757,6 +15037,25 @@ export function BotcastExperience({
         setGuestDraftId(retry.guestId);
         setTopicDraft(retry.topic);
         setProducerBriefDraft(retry.producerBrief);
+        setGuestBriefDraft(retry.guestBrief);
+        setSetupEpisodeImage(
+          retry.image
+            ? {
+                imageId: retry.image.imageId,
+                // The server resolves this exact booking's authenticated WebP
+                // archive proxy. No original upload is retained or reread.
+                fileName: `archived-signal-image.${
+                  retry.image.descriptor.mimeType === "image/png" ? "png" : "jpg"
+                }`,
+                dataUrl: "",
+                archivalProxyEpisodeId: retry.image.sourceEpisodeId,
+                descriptor: retry.image.descriptor,
+                replayEmoji: retry.image.replayEmoji,
+                // Private presentation reasons are intentionally never archived.
+                reason: "",
+              }
+            : null,
+        );
         if (modelChoice === undefined) {
           setEpisodeModelDraft(retry.modelId);
         }
@@ -14816,6 +15115,7 @@ export function BotcastExperience({
         const response = await request<{
           topic: string;
           producerBrief: string;
+          guestBrief: string;
           guestBotId?: string;
           generated: boolean;
         }>(
@@ -14836,6 +15136,7 @@ export function BotcastExperience({
         );
         const topic = response.topic.trim();
         const producerBrief = response.producerBrief.trim();
+        const guestBrief = response.guestBrief.trim();
         const resolvedGuestId = resolvedSignalBookingGuestId({
           anchoredGuestId,
           suggestedGuestId: response.guestBotId,
@@ -14848,6 +15149,7 @@ export function BotcastExperience({
           !response.generated ||
           !topic ||
           !producerBrief ||
+          !guestBrief ||
           !resolvedGuestId ||
           !bookingGuest
         ) {
@@ -14856,8 +15158,9 @@ export function BotcastExperience({
         setGuestDraftId(resolvedGuestId);
         setTopicDraft(topic);
         setProducerBriefDraft(producerBrief);
+        setGuestBriefDraft(guestBrief);
         setNotice(
-          `${bookingGuest.name} is booked with a short public title and a richer private angle. Everything remains editable.`,
+          `${bookingGuest.name} is booked with a short public title and separate private host and guest briefings. Everything remains editable.`,
         );
       } catch (bookingError) {
         setError(
@@ -15174,7 +15477,7 @@ export function BotcastExperience({
             </div>
           ) : (
           <>
-          <div className={styles.setupField}>
+          <div className={`${styles.setupField} ${styles.episodeTopic}`}>
             <label htmlFor="signal-episode-topic">
               Episode topic <span>public title</span>
             </label>
@@ -15217,13 +15520,13 @@ export function BotcastExperience({
           </div>
           <div className={`${styles.setupField} ${styles.producerBrief}`}>
             <label htmlFor="signal-producer-brief">
-            Private producer comments <span>optional</span>
+            Host briefing <span>private to host · optional</span>
             </label>
             <PrismRefractTarget
               target={{
                 id: `signal-producer-brief-${selectedShow.id}`,
                 kind: "field",
-                label: "private producer comments",
+                label: "host briefing",
                 read: () => producerBriefDraft,
                 preview: setProducerBriefDraft,
                 accept: setProducerBriefDraft,
@@ -15258,9 +15561,9 @@ export function BotcastExperience({
                       value: producerBriefDraft,
                       onChange: setProducerBriefDraft,
                       placeholder:
-                        "The provocative question, angle, boundaries, and follow-ups. This stays off-mic.",
+                        "What the host should pursue, challenge, or keep in bounds.",
                       multiline: true,
-                      ariaLabel: "Private producer comments",
+                      ariaLabel: "Host briefing",
                       className: styles.pickAwareSetupField,
                       disabled: busy,
                     })}
@@ -15273,11 +15576,49 @@ export function BotcastExperience({
                     onChange={(event) =>
                       setProducerBriefDraft(event.target.value)
                     }
-                    placeholder="The provocative question, angle, boundaries, and follow-ups. This stays off-mic."
+                    placeholder="What the host should pursue, challenge, or keep in bounds."
                   />
                 )
               }
             </PrismRefractTarget>
+          </div>
+          <div className={`${styles.setupField} ${styles.guestBrief}`}>
+            <label htmlFor="signal-guest-brief">
+              Guest briefing <span>private to guest · optional</span>
+            </label>
+            {renderPickAwareComposer ? (
+              <div
+                className={styles.contextualTextField}
+                data-multiline="true"
+                tabIndex={-1}
+              >
+                {renderPickAwareComposer({
+                  id: "signal-guest-brief",
+                  value: guestBriefDraft,
+                  onChange: setGuestBriefDraft,
+                  placeholder:
+                    "What the guest knows, wants, fears, or is hiding.",
+                  multiline: true,
+                  ariaLabel: "Guest briefing",
+                  className: styles.pickAwareSetupField,
+                  disabled: busy,
+                })}
+              </div>
+            ) : (
+              <textarea
+                id="signal-guest-brief"
+                value={guestBriefDraft}
+                maxLength={BOTCAST_GUEST_BRIEF_MAX_LENGTH}
+                onChange={(event) =>
+                  setGuestBriefDraft(event.currentTarget.value)
+                }
+                placeholder="What the guest knows, wants, fears, or is hiding."
+              />
+            )}
+            <small>
+              The host is not told this. They can learn it only from what the
+              guest naturally reveals on air.
+            </small>
           </div>
           {setupImageModeEligible ? (
             <div
@@ -16280,6 +16621,26 @@ export function BotcastExperience({
         : null,
     [episode],
   );
+  // The desk only visualizes the authoritative client/server cue lifecycle; it
+  // never promotes a cue or infers delivery from the presentation alone.
+  const producerCueDeskPhase = queuedProducerCue
+    ? queuedCueStatus === "dispatching"
+      ? "dispatching"
+      : queuedCueStatus === "requeued"
+        ? "requeued"
+        : "queued"
+    : producerCueLifecycleFeedback?.status === "delivered"
+      ? "delivered"
+      : producerCueLifecycleFeedback?.status === "failed"
+        ? "failed"
+        : "idle";
+  const producerCueDeskReadout = queuedProducerCue
+    ? signalProducerCueLabel(queuedProducerCue)
+    : producerCueDeskPhase === "delivered"
+      ? "Last cue delivered"
+      : producerCueDeskPhase === "failed"
+        ? "Last cue needs revision"
+        : "Line clear";
   const activeEpisodeImageCapability =
     episode && signalImageCapability?.episodeId === episode.id
       ? signalImageCapability
@@ -17494,9 +17855,115 @@ export function BotcastExperience({
                 className={styles.producerControls}
                 aria-label="Private producer controls"
                 data-tutorial-target="botcast-cues"
+                data-signal-producer-desk="true"
+                data-producer-cue-phase={producerCueDeskPhase}
               >
+                <header className={styles.producerDeskHeader}>
+                  <div className={styles.producerDeskStageLip}>
+                    <div
+                      className={styles.producerDeskOnAir}
+                      data-live={episode.status === "live" ? "true" : undefined}
+                    >
+                      <i aria-hidden="true" />
+                      <strong>
+                        Signal · {episode.status === "live" ? "On air" : "Control room"}
+                      </strong>
+                    </div>
+                    <div className={styles.producerDeskFrequency}>
+                      <span
+                        className={styles.producerFrequencyWave}
+                        aria-hidden="true"
+                      >
+                        <i />
+                        <i />
+                        <i />
+                      </span>
+                      <strong>Private host frequency</strong>
+                    </div>
+                  </div>
+                  <div className={styles.producerDeskPrivateLine}>
+                    <div
+                      className={styles.producerCueReadout}
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <i aria-hidden="true" />
+                      <span>
+                        <small>Private line · {hostBot?.name ?? "Host"}</small>
+                        <strong>{producerCueDeskReadout}</strong>
+                      </span>
+                    </div>
+                    <ol
+                      className={styles.producerCueLifecycle}
+                      aria-label="Producer cue delivery status"
+                    >
+                      <li
+                        data-active={
+                          producerCueDeskPhase !== "idle" ? "true" : undefined
+                        }
+                      >
+                        Queued
+                      </li>
+                      <li
+                        data-active={
+                          producerCueDeskPhase === "dispatching" ||
+                          producerCueDeskPhase === "delivered"
+                            ? "true"
+                            : undefined
+                        }
+                      >
+                        Dispatching
+                      </li>
+                      <li
+                        data-active={
+                          producerCueDeskPhase === "delivered"
+                            ? "true"
+                            : undefined
+                        }
+                      >
+                        Delivered
+                      </li>
+                    </ol>
+                    <div className={styles.producerDeskLineActions}>
+                      <button
+                        type="button"
+                        className={styles.producerInterruptButton}
+                        disabled={!queuedCueCanInterruptGuest}
+                        onClick={() => void interruptGuestWithQueuedCue()}
+                        title={
+                          queuedCueInterruptUnavailableReason ??
+                          (hostBot?.muted
+                            ? "Let the muted host attempt the cut in canonical silence."
+                            : hostBot?.echoesAddressedSpeech
+                              ? "Have the echo-bound host cut in by repeating the last audience-heard phrase."
+                              : queuedProducerCue
+                                ? "Have the host take the mic now with this queued cue."
+                                : "Queue a cue before interrupting the guest.")
+                        }
+                      >
+                        Interrupt guest now
+                      </button>
+                      <button
+                        ref={producerCueClearButtonRef}
+                        type="button"
+                        className={styles.producerCueClear}
+                        disabled={!producerCuesAreClearable}
+                        onClick={clearProducerCues}
+                        title="Clear both fields and withdraw any queued cue."
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                </header>
                 <div className={styles.producerCueComposer}>
-                  <span className={styles.eyebrow}>Private host cues</span>
+                  <header className={styles.producerCueComposerHeader}>
+                    <div>
+                      <span>Private channel</span>
+                      <strong>Shape a cue</strong>
+                    </div>
+                    <small className={styles.producerChannelLight}>Host only</small>
+                  </header>
                   {queuedProducerCue ? (
                     <div className={styles.queuedCueStatus} role="status">
                       <p>
@@ -17507,32 +17974,9 @@ export function BotcastExperience({
                             : "Queued for host"}
                         : {signalProducerCueLabel(queuedProducerCue)}.
                       </p>
-                      <button
-                        type="button"
-                        disabled={!queuedCueCanInterruptGuest}
-                        onClick={() => void interruptGuestWithQueuedCue()}
-                        title={
-                          queuedCueInterruptUnavailableReason ??
-                          (hostBot?.muted
-                            ? "Let the muted host attempt the cut in canonical silence."
-                            : hostBot?.echoesAddressedSpeech
-                              ? "Have the echo-bound host cut in by repeating the last audience-heard phrase."
-                              : "Have the host take the mic now with this queued cue.")
-                        }
-                      >
-                        Interrupt guest now
-                      </button>
                       {queuedCueInterruptUnavailableReason ? (
                         <small>{queuedCueInterruptUnavailableReason}</small>
                       ) : null}
-                      <button
-                        type="button"
-                        className={styles.producerCueClear}
-                        onClick={clearProducerCues}
-                        title="Withdraw this cue before the host hears it."
-                      >
-                        Clear
-                      </button>
                     </div>
                   ) : producerCueLifecycleFeedback?.status === "failed" ? (
                     <div className={styles.queuedCueStatus} role="status">
@@ -17588,7 +18032,7 @@ export function BotcastExperience({
                     </span>
                   </label>
                   <label>
-                    Shape this…
+                    Say this…
                     <div>
                       <textarea
                         ref={producerQuoteInputRef}
@@ -17618,7 +18062,7 @@ export function BotcastExperience({
                             end: event.currentTarget.selectionEnd ?? 0,
                           };
                         }}
-                        placeholder="private wording to transform — one line"
+                        placeholder="authorized on-air quote — one line"
                         maxLength={BOTCAST_PRODUCER_DIRECT_QUOTE_MAX}
                       />
                     </div>
@@ -17634,6 +18078,7 @@ export function BotcastExperience({
                     <button
                       ref={producerCueSendButtonRef}
                       type="button"
+                      className={styles.producerCueSend}
                       data-queued={
                         queuedProducerCue?.kind === "ask_about"
                           ? "true"
@@ -17647,16 +18092,6 @@ export function BotcastExperience({
                       onClick={submitAskAboutCue}
                     >
                       Send
-                    </button>
-                    <button
-                      ref={producerCueClearButtonRef}
-                      type="button"
-                      className={styles.producerCueClear}
-                      disabled={!producerCuesAreClearable}
-                      onClick={clearProducerCues}
-                      title="Clear both boxes and withdraw any queued cue."
-                    >
-                      Clear
                     </button>
                     <span
                       className={styles.producerImageAttachWrap}
@@ -17687,78 +18122,139 @@ export function BotcastExperience({
                   </div>
                   {queuedProducerCue ? null : (
                     <small>
-                      Private to the host. Use this for context, direction, or a
-                      question. Shape this guides the host’s next line, but the
-                      host always paraphrases it in character and never reveals
-                      the private note. Keep it to one clear intent. A
+                      Host note is private context, direction, or a question.
+                      Say this is authorized on-air wording: a compatible host
+                      delivers it exactly, while genuine persona resistance is
+                      stated on air as a bend or refusal without revealing the
+                      private Host note. Keep each to one clear intent. A
                       vision-capable active model can also discuss an image on
                       the center table.
                     </small>
                   )}
                 </div>
-                <div className={styles.cueGrid}>
+                <section
+                  className={styles.producerCueBank}
+                  aria-label="Director cues"
+                >
+                  <header className={styles.producerCueBankHeader}>
+                    <div>
+                      <span>Director cues</span>
+                      <strong>Press to send</strong>
+                    </div>
+                    <small>Physical cue bank</small>
+                  </header>
+                  <div className={styles.cueGrid}>
                   <button
                     type="button"
-                    className={styles.refocusCue}
+                    className={`${styles.cueKey} ${styles.refocusCue}`}
                     data-queued={
                           queuedProducerCue?.kind === "refocus"
                             ? "true"
                             : undefined
                     }
+                    aria-pressed={queuedProducerCue?.kind === "refocus"}
                     disabled={!producerCueAvailable}
                     onClick={() => sendCue({ kind: "refocus" })}
                   >
-                    Refocus
+                    <span className={styles.cueKeyCap}>
+                      <span className={styles.cueKeySymbol} aria-hidden="true">◎</span>
+                      <span className={styles.cueKeyLabel}>
+                        <strong>Refocus</strong>
+                        <small>Center</small>
+                      </span>
+                    </span>
+                    <span className={styles.cueKeyLamp} aria-hidden="true" />
                   </button>
                   <button
                     type="button"
+                    className={styles.cueKey}
+                    data-cue-kind="press"
                     data-queued={
                       queuedProducerCue?.kind === "press_harder"
                         ? "true"
                         : undefined
                     }
+                    aria-pressed={queuedProducerCue?.kind === "press_harder"}
                     disabled={!producerCueAvailable}
                     onClick={() => sendCue({ kind: "press_harder" })}
                   >
-                    Press harder
+                    <span className={styles.cueKeyCap}>
+                      <span className={styles.cueKeySymbol} aria-hidden="true">▲</span>
+                      <span className={styles.cueKeyLabel}>
+                        <strong>Press harder</strong>
+                        <small>Pressure</small>
+                      </span>
+                    </span>
+                    <span className={styles.cueKeyLamp} aria-hidden="true" />
                   </button>
                   <button
                     type="button"
+                    className={styles.cueKey}
+                    data-cue-kind="move"
                     data-queued={
                           queuedProducerCue?.kind === "move_on"
                             ? "true"
                             : undefined
                     }
+                    aria-pressed={queuedProducerCue?.kind === "move_on"}
                     disabled={!producerCueAvailable}
                     onClick={() => sendCue({ kind: "move_on" })}
                   >
-                    Move on
+                    <span className={styles.cueKeyCap}>
+                      <span className={styles.cueKeySymbol} aria-hidden="true">→</span>
+                      <span className={styles.cueKeyLabel}>
+                        <strong>Move on</strong>
+                        <small>Advance</small>
+                      </span>
+                    </span>
+                    <span className={styles.cueKeyLamp} aria-hidden="true" />
                   </button>
                   <button
                     type="button"
+                    className={styles.cueKey}
+                    data-cue-kind="lighten"
                     data-queued={
                       queuedProducerCue?.kind === "lighten_up"
                         ? "true"
                         : undefined
                     }
+                    aria-pressed={queuedProducerCue?.kind === "lighten_up"}
                     disabled={!producerCueAvailable}
                     onClick={() => sendCue({ kind: "lighten_up" })}
                   >
-                    Lighten up
+                    <span className={styles.cueKeyCap}>
+                      <span className={styles.cueKeySymbol} aria-hidden="true">✦</span>
+                      <span className={styles.cueKeyLabel}>
+                        <strong>Lighten up</strong>
+                        <small>Lift</small>
+                      </span>
+                    </span>
+                    <span className={styles.cueKeyLamp} aria-hidden="true" />
                   </button>
                   <button
                     type="button"
+                    className={styles.cueKey}
+                    data-cue-kind="wrap"
                     data-queued={
                           queuedProducerCue?.kind === "wrap_up"
                             ? "true"
                             : undefined
                     }
+                    aria-pressed={queuedProducerCue?.kind === "wrap_up"}
                     disabled={!producerCueAvailable}
                     onClick={() => sendCue({ kind: "wrap_up" })}
                   >
-                    Wrap it up
+                    <span className={styles.cueKeyCap}>
+                      <span className={styles.cueKeySymbol} aria-hidden="true">◉</span>
+                      <span className={styles.cueKeyLabel}>
+                        <strong>Wrap it up</strong>
+                        <small>Close</small>
+                      </span>
+                    </span>
+                    <span className={styles.cueKeyLamp} aria-hidden="true" />
                   </button>
-                </div>
+                  </div>
+                </section>
               </aside>
               </div>
             ) : null}
