@@ -1048,6 +1048,11 @@ WHODUNNIT_TUTORIAL_STEP.body +=
   " Mansion packages are optional: setup can open or accept a dropped .mansion, show its creator, protection, compatibility, size, provenance, license, content notes, room map, and theme status before anything is installed, then use it for a fresh case entirely offline. A fully explored saved mansion can be exported with PRISM’s automatic spoiler seal or an optional password; imported work can be re-exported only when its license permits. Music and Ambience are separate Case Forge choices. In LOCAL the Ambience control reads Personalize local ambience: On applies a deterministic mansion-specific room mix to installed or shared audio without an online request or new audio file. Off still uses matching bundled ambience and room-acoustic rules, so global Audio—not this setup choice—is the silence control. During Investigation the continuous world bed crossfades its room mix without restarting, ducks under speech, and imported mansions retain embedded ambience with semantic-role fallbacks. Settings → Assets opens separate Music, Effects, and Ambience libraries for audition, search, source and applet filtering, player tags, provenance, and usage references; Settings → Storage remains byte accounting and protected cleanup rather than another asset browser.";
 
 WHODUNNIT_TUTORIAL_STEP.body = WHODUNNIT_TUTORIAL_STEP.body.replace(
+  "Double-click any room or corridor to rotate it.",
+  "Double-click a room to enter its Room Editor. Rotate the selected room or corridor with the counterclockwise and clockwise arrows in the right inspector; Undo restores the previous architectural layout step.",
+);
+
+WHODUNNIT_TUTORIAL_STEP.body = WHODUNNIT_TUTORIAL_STEP.body.replace(
   "Ordinary Investigation dialogue closes itself after presentation: spoken lines hold briefly after their audio ends, while silent text holds through its final character and a length-aware reading interval.",
   "Click any non-interactive part of the screen, or press Space or Return, to finish or advance the visible line early. A choice, evidence response, examination selection, tutorial acknowledgment, or other meaningful prompt stays open until you answer it.",
 );

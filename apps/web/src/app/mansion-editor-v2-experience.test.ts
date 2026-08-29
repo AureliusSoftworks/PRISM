@@ -14,7 +14,11 @@ describe("Mansion Editor V2 experience", () => {
     assert.doesNotMatch(editorSource, /\+ Infill/u);
     assert.match(editorSource, /Add centered door to/u);
     assert.match(editorSource, /That move would create an island/u);
-    assert.match(editorSource, /onDoubleClick=\{\(\) => rotateEntity\(entity\)\}/u);
+    assert.match(editorSource, /onDoubleClick=\{\(\) => entity\.kind === "room" && setRoomEditorId\(entity\.id\)\}/u);
+    assert.match(editorSource, /Rotate .* counterclockwise/u);
+    assert.match(editorSource, /Rotate .* clockwise/u);
+    assert.match(editorSource, /layoutHistory\.length === 0/u);
+    assert.match(editorSource, /onClick=\{undoLayout\}>Undo/u);
     assert.match(editorSource, /mansionEditorCorridorResizeHandle/u);
   });
 

@@ -471,6 +471,7 @@ export default function MansionEditorDialog({
   onDiscardRoomArt,
 }: MansionEditorDialogProps): JSX.Element {
   const [layout, setLayout] = useState(() => initialLayout(mansion));
+  const [layoutHistory, setLayoutHistory] = useState<MansionLayoutV2[]>([]);
   const [selectedFloor, setSelectedFloor] = useState(1);
   const [selectedEntityId, setSelectedEntityId] = useState(
     () => layout.entities.find((entity) => entity.floor === 1)?.id ?? layout.entities[0]?.id ?? "",
@@ -520,6 +521,35 @@ export default function MansionEditorDialog({
     [layout, mansion.suspectCount],
   );
   const thirdFloorAccessible = mansionLayoutV2FloorSemanticRoomCount(layout, 2) >= 4;
+
+  const pushLayoutHistory = (snapshot: MansionLayoutV2): void => {
+    setLayoutHistory((current) => {
+      if (current.at(-1) && canonicalMansionLayoutV2(current.at(-1)!) === canonicalMansionLayoutV2(snapshot)) {
+        return current;
+      }
+      return [...current, cloneLayout(snapshot)].slice(-50);
+    });
+  };
+
+  const commitLayout = (next: MansionLayoutV2): void => {
+    if (canonicalMansionLayoutV2(next) === canonicalMansionLayoutV2(layout)) return;
+    pushLayoutHistory(layout);
+    setLayout(next);
+  };
+
+  const undoLayout = (): void => {
+    const previous = layoutHistory.at(-1);
+    if (!previous) return;
+    setLayoutHistory((current) => current.slice(0, -1));
+    setLayout(cloneLayout(previous));
+    const retainedSelection = previous.entities.find((entity) => entity.id === selectedEntityId);
+    const fallback = previous.entities.find((entity) => entity.floor === selectedFloor) ?? previous.entities[0];
+    setSelectedEntityId(retainedSelection?.id ?? fallback?.id ?? "");
+    if (roomEditorId && !previous.entities.some((entity) => entity.id === roomEditorId && entity.kind === "room")) {
+      setRoomEditorId(null);
+    }
+    setNotice("Undid the last mansion layout change.");
+  };
 
   const updateRoom = (roomId: string, update: Partial<MansionLayoutRoomV2>): void => {
     setLayout((current) => ({
@@ -705,7 +735,7 @@ export default function MansionEditorDialog({
       setNotice("That floor has no legal connected space for this room footprint.");
       return;
     }
-    setLayout(next);
+    commitLayout(next);
     setSelectedEntityId(entity.id);
     setNotice(null);
   };
@@ -725,7 +755,7 @@ export default function MansionEditorDialog({
       setNotice("No legal shared-edge position is available for a corridor.");
       return;
     }
-    setLayout(next);
+    commitLayout(next);
     setSelectedEntityId(entity.id);
     setNotice(null);
   };
@@ -738,7 +768,7 @@ export default function MansionEditorDialog({
       setNotice("That block still carries circulation. Add another route before removing it.");
       return;
     }
-    setLayout(next);
+    commitLayout(next);
     setSelectedEntityId(next.entities.find((entity) => entity.floor === selectedFloor)?.id ?? "");
     if (roomEditorId === selectedEntity.id) setRoomEditorId(null);
     setNotice(null);
@@ -770,7 +800,7 @@ export default function MansionEditorDialog({
       setNotice("That silhouette would break the connected plan.");
       return;
     }
-    setLayout(next);
+    commitLayout(next);
     setNotice(null);
   };
 
@@ -782,9 +812,9 @@ export default function MansionEditorDialog({
     if (layout.doors.some((door) =>
       (door.aEntityId === entityId && door.bEntityId === otherId) ||
       (door.aEntityId === otherId && door.bEntityId === entityId))) return;
-    setLayout((current) => ({
-      ...current,
-      doors: [...current.doors, {
+    commitLayout({
+      ...layout,
+      doors: [...layout.doors, {
         id: stableId("door"),
         floor: entity.floor,
         aEntityId: entity.id,
@@ -792,7 +822,7 @@ export default function MansionEditorDialog({
         aWall: wall.aWall,
         position: 0.5,
       }],
-    }));
+    });
     setNotice(null);
   };
 
@@ -837,7 +867,7 @@ export default function MansionEditorDialog({
       x: drag.previewX,
       y: drag.previewY,
     });
-    setLayout(next);
+    commitLayout(next);
     setDrag(null);
     setNotice(moved && next === layout
       ? "That move would create an island, so the block stayed connected."
@@ -897,15 +927,27 @@ export default function MansionEditorDialog({
   const finishCorridorResize = (event: ReactPointerEvent<HTMLSpanElement>): void => {
     event.preventDefault();
     event.stopPropagation();
+    if (corridorResize && canonicalMansionLayoutV2(layout) !==
+      canonicalMansionLayoutV2(corridorResize.baseLayout)) {
+      pushLayoutHistory(corridorResize.baseLayout);
+    }
     setCorridorResize(null);
     setNotice(null);
   };
 
-  const rotateEntity = (entity: MansionLayoutEntityV2): void => {
+  const cancelCorridorResize = (): void => {
+    if (corridorResize) setLayout(corridorResize.baseLayout);
+    setCorridorResize(null);
+  };
+
+  const rotateEntity = (
+    entity: MansionLayoutEntityV2,
+    _direction: "counterclockwise" | "clockwise",
+  ): void => {
     if (entity.kind === "room") {
-      setLayout(rotateMansionLayoutV2Room(layout, entity.id));
+      commitLayout(rotateMansionLayoutV2Room(layout, entity.id));
     } else if (entity.kind === "corridor") {
-      setLayout(placeMansionLayoutV2Entity(layout, entity.id, {
+      commitLayout(placeMansionLayoutV2Entity(layout, entity.id, {
         ...entity,
         width: entity.height,
         height: entity.width,
@@ -989,7 +1031,7 @@ export default function MansionEditorDialog({
                     gridRow: `${preview.y + 1} / span ${preview.height}`,
                     ...(roomArt ? { backgroundImage: `linear-gradient(rgb(4 8 15 / 28%), rgb(4 8 15 / 62%)), url("${roomArt}")` } : {}),
                   } as CSSProperties}
-                  onDoubleClick={() => rotateEntity(entity)}
+                  onDoubleClick={() => entity.kind === "room" && setRoomEditorId(entity.id)}
                   onClick={() => setSelectedEntityId(entity.id)}
                   onPointerDown={(event) => beginDrag(event, entity)}
                   onPointerMove={continueDrag}
@@ -1013,7 +1055,7 @@ export default function MansionEditorDialog({
                       )}
                       onPointerMove={continueCorridorResize}
                       onPointerUp={finishCorridorResize}
-                      onPointerCancel={() => setCorridorResize(null)}
+                      onPointerCancel={cancelCorridorResize}
                     />
                   )) : null}
                 </button>
@@ -1040,7 +1082,7 @@ export default function MansionEditorDialog({
             })}
           </div>
           <div className={styles.mansionEditorCanvasActions}>
-            <span>Drag to arrange. Collisions reflow nearby blocks; only an island returns. Double-click rotates.</span>
+            <span>Drag to arrange. Collisions reflow nearby blocks; only an island returns. Double-click a room to enter it.</span>
             <button type="button" disabled={!selectedRoom} onClick={() => selectedRoom && setRoomEditorId(selectedRoom.id)}>Open Room Editor</button>
           </div>
         </div>
@@ -1053,6 +1095,22 @@ export default function MansionEditorDialog({
               <span aria-hidden="true">{selectedRoom?.emoji ?? "⇄"}</span>
               <div><small>{selectedRoom ? "Selected room" : selectedEntity.kind}</small><strong>{selectedRoom?.name ?? selectedEntity.id}</strong></div>
             </header>
+            <div className={styles.mansionEditorTransformActions}>
+              <button
+                type="button"
+                aria-label={`Rotate ${selectedRoom ? "room" : "corridor"} counterclockwise`}
+                title="Rotate counterclockwise"
+                onClick={() => rotateEntity(selectedEntity, "counterclockwise")}
+              >↶</button>
+              <span>{selectedRoom ? `${selectedRoom.rotation}°` : `${selectedBlock?.width ?? 0}×${selectedBlock?.height ?? 0}`}</span>
+              <button
+                type="button"
+                aria-label={`Rotate ${selectedRoom ? "room" : "corridor"} clockwise`}
+                title="Rotate clockwise"
+                onClick={() => rotateEntity(selectedEntity, "clockwise")}
+              >↷</button>
+              <button type="button" disabled={layoutHistory.length === 0} onClick={undoLayout}>Undo</button>
+            </div>
             {selectedRoom ? (
               <>
                 <label>Room type
@@ -1070,9 +1128,9 @@ export default function MansionEditorDialog({
 
             <fieldset className={styles.mansionEditorGeometry}>
               <legend>{selectedRoom ? "Fixed silhouette" : "Block geometry"}</legend>
-              <div><span>Horizontal</span><button type="button" onClick={() => setLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x - 1, y: selectedEntity.y }))}>←</button><output>{selectedEntity.x + 1}</output><button type="button" onClick={() => setLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x + 1, y: selectedEntity.y }))}>→</button></div>
-              <div><span>Vertical</span><button type="button" onClick={() => setLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x, y: selectedEntity.y - 1 }))}>↑</button><output>{selectedEntity.y + 1}</output><button type="button" onClick={() => setLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x, y: selectedEntity.y + 1 }))}>↓</button></div>
-              <p>{selectedRoom ? `${selectedRoom.rotation}° fixed room silhouette` : `${selectedBlock?.width ?? 0}×${selectedBlock?.height ?? 0} corridor · drag an edge to resize`} · double-click to rotate</p>
+              <div><span>Horizontal</span><button type="button" onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x - 1, y: selectedEntity.y }))}>←</button><output>{selectedEntity.x + 1}</output><button type="button" onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x + 1, y: selectedEntity.y }))}>→</button></div>
+              <div><span>Vertical</span><button type="button" onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x, y: selectedEntity.y - 1 }))}>↑</button><output>{selectedEntity.y + 1}</output><button type="button" onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x, y: selectedEntity.y + 1 }))}>↓</button></div>
+              <p>{selectedRoom ? "Fixed room silhouette" : `${selectedBlock?.width ?? 0}×${selectedBlock?.height ?? 0} corridor · drag an edge to resize`}</p>
             </fieldset>
 
             <fieldset className={styles.mansionEditorConnections}>
@@ -1083,8 +1141,8 @@ export default function MansionEditorDialog({
                 return (
                   <div key={door.id} className={styles.mansionEditorDoorControl}>
                     <span><strong>{other?.kind === "room" ? other.name : other?.kind ?? "Route"}</strong><small>Shared-wall door</small></span>
-                    <input aria-label={`Door position toward ${otherId}`} type="range" min="0" max="1" step="0.01" value={door.position} onChange={(event) => setLayout(slideMansionLayoutV2Door(layout, door.id, Number(event.currentTarget.value)))} />
-                    <button type="button" onClick={() => setLayout(removeMansionLayoutV2Door(layout, door.id))}>Remove</button>
+                    <input aria-label={`Door position toward ${otherId}`} type="range" min="0" max="1" step="0.01" value={door.position} onChange={(event) => commitLayout(slideMansionLayoutV2Door(layout, door.id, Number(event.currentTarget.value)))} />
+                    <button type="button" onClick={() => commitLayout(removeMansionLayoutV2Door(layout, door.id))}>Remove</button>
                   </div>
                 );
               })}

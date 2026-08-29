@@ -1042,6 +1042,11 @@
 .mansionEditorInspector > header > div { display: grid; gap: 0.1rem; min-width: 0; }
 .mansionEditorInspector > header small { color: var(--mystery-violet); font-size: 0.6rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
 .mansionEditorInspector > header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mansionEditorTransformActions { display: grid; grid-template-columns: 2.5rem minmax(2.7rem, auto) 2.5rem minmax(4.5rem, 1fr); align-items: center; gap: 0.42rem; }
+.mansionEditorTransformActions > span { color: var(--mystery-muted); font-size: 0.7rem; font-weight: 800; text-align: center; }
+.mansionEditorTransformActions > button { min-height: 2.45rem; padding: 0.4rem 0.55rem; }
+.mansionEditorTransformActions > button:first-child,
+.mansionEditorTransformActions > button:nth-child(3) { color: var(--mystery-cyan); font-size: 1.15rem; }
 .mansionEditorInspector > label { display: grid; gap: 0.35rem; color: var(--mystery-muted); font-size: 0.7rem; font-weight: 700; }
 .mansionEditorInspector input,
 .mansionEditorInspector select { width: 100%; box-sizing: border-box; min-height: 2.45rem; padding: 0.5rem 0.62rem; color: var(--mystery-text); border: 1px solid var(--mystery-line); border-radius: 0.52rem; outline: none; background: var(--mystery-panel-strong); font: inherit; }
