@@ -12148,6 +12148,65 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("repairs transcript punctuation around retained Signal performance tags", async () => {
+    const db = fixture();
+    const provider = recordingProvider(
+      [
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore clean performance punctuation.",
+        "The first test is whether the visible transcript keeps the intended sentence.",
+        "And what happens when the performance cue lands inside the reply?",
+        "Okay, [burps], that is the part I wanted to test.",
+      ],
+      [],
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Clean performance punctuation",
+      });
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      const guestTurn = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+
+      assert.equal(
+        guestTurn.message?.content,
+        "Okay, that is the part I wanted to test.",
+      );
+      assert.equal(
+        guestTurn.message?.voicePerformanceText,
+        "Okay, that is the part I wanted to test. [exhales]",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("persists an invited Signal stage action separately from speech and vocal tags", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
@@ -20887,6 +20946,101 @@ describe("Botcast persistence and isolation", () => {
         reason: "provider_availability",
         fallbackKind: "host_follow_up",
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lands mixed Signal Auto validation and provider exhaustion instead of returning 503", async () => {
+    const db = fixture();
+    const attempts: Array<{ provider: string; model: string | undefined }> = [];
+    let callCount = 0;
+    const providerFactory: typeof selectProvider = (providerName) => ({
+      name: providerName,
+      async generateResponse(_messages, options) {
+        callCount += 1;
+        attempts.push({ provider: providerName, model: options.model });
+        if (callCount === 1) {
+          return "Welcome to Signal Test. I'm Mara Vale, joined by Ivo Stone to examine exact quotation. Ivo, where should we begin?";
+        }
+        if (callCount === 2) {
+          return "I cannot help with that request.";
+        }
+        throw new Error("Provider unavailable");
+      },
+      async embedText() {
+        return [];
+      },
+    });
+    try {
+      const show = createBotcastShow(db, "user-1", {
+        hostBotId: "host-1",
+        name: "Signal Test",
+      });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Exact quotation under provider pressure",
+        preferredProvider: "openai",
+        modelOverride: "gpt-signal-primary",
+        responseMode: "auto",
+      });
+      const generationOptions = {
+        preferredProvider: "openai" as const,
+        providerFactory,
+        signalSocialSilenceChanceOverride: 0,
+        autoFallbackChain: {
+          v: 1 as const,
+          fallbacks: [
+            { provider: "anthropic" as const, model: "claude-signal-fallback" },
+            { provider: "local" as const, model: "local-signal-fallback" },
+          ],
+        },
+      };
+
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+      const recovered = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+
+      assert.deepEqual(attempts.slice(1), [
+        { provider: "openai", model: "gpt-signal-primary" },
+        { provider: "anthropic", model: "claude-signal-fallback" },
+      ]);
+      assert.equal(recovered.message?.speakerRole, "guest");
+      assert.ok(recovered.message?.content.trim());
+      const generationEvent = recovered.episode.events
+        .filter((event) => event.kind === "provider_generation")
+        .at(-1);
+      assert.equal(generationEvent?.payload.outcome, "failed");
+      assert.equal(generationEvent?.payload.exhaustionKind, "provider_availability");
+      assert.deepEqual(generationEvent?.payload.recovery, {
+        v: 1,
+        strategy: "deterministic_signal_turn",
+      });
+      assert.deepEqual(
+        (generationEvent?.payload.attempts as Array<Record<string, unknown>>)
+          .map((attempt) => attempt.reason),
+        ["refusal", "provider_error"],
+      );
+      const utterance = recovered.episode.events
+        .filter((event) => event.kind === "utterance")
+        .at(-1);
+      assert.equal(utterance?.payload.provider, "deterministic");
+      assert.equal(utterance?.payload.model, "signal-auto-recovery-fallback");
+      assert.equal(
+        utterance?.payload.utteranceRepair?.source,
+        "provider_recovery",
+      );
     } finally {
       db.close();
     }

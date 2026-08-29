@@ -12526,10 +12526,8 @@ function extractBotcastVoicePerformance(
   let voicePerformanceText = normalizedPerformanceText;
   if (automaticReactionRole) {
     let selectedAutomaticTag: string | null = null;
-    const performanceWithoutAutomaticTags = (
-      normalizedPerformanceText ?? content
-    )
-      .replace(
+    const performanceWithoutAutomaticTags = collapseRemovedCueWhitespace(
+      (normalizedPerformanceText ?? content).replace(
         BOTCAST_BRACKETED_DIRECTION_PATTERN,
         (match, rawTag: string) => {
           const tag = rawTag.trim().toLowerCase();
@@ -12546,9 +12544,8 @@ function extractBotcastVoicePerformance(
           }
           return " ";
         },
-      )
-      .replace(/\s+/gu, " ")
-      .trim();
+      ),
+    );
     voicePerformanceText =
       authoredAsteriskPerformanceTags.size > 0
         ? performanceWithoutAutomaticTags

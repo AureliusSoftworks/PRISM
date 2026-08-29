@@ -165,7 +165,8 @@ export function voiceSpokenText(
   options: VoiceSpokenTextOptions = {},
 ): string {
   if (typeof value !== "string") return "";
-  return normalizeNestedActionQuotes(value)
+  return collapseRemovedCueWhitespace(
+    normalizeNestedActionQuotes(value)
     .replace(BRACKETED_ACTION_PATTERN, " ")
     .replace(
       MARKED_SPEECH_BLOCK_PATTERN,
@@ -178,9 +179,8 @@ export function voiceSpokenText(
           ? " "
           : inner;
       },
-    )
-    .replace(/\s+/gu, " ")
-    .trim();
+    ),
+  );
 }
 
 /**
@@ -248,6 +248,13 @@ export function collapseRemovedCueWhitespace(value: string): string {
   return value
     .replace(/\s+/gu, " ")
     .replace(/\s+([,.;:!?…])/gu, "$1")
+    // When a retained performance tag sits between matching separators, keep
+    // the separator after the cue: `Okay, [burps],` -> `Okay [burps],`.
+    .replace(/([,;:])\s*(\[[^\]\r\n]{1,240}\])\s*\1/gu, " $2$1")
+    // A lifted inline cue can leave the same separator on both sides, as in
+    // `Okay, [burps],` -> `Okay,,`. Keep the authored separator once.
+    .replace(/([,;:])\1+/gu, "$1")
+    .replace(/\.{4,}/gu, "...")
     .trim();
 }
 

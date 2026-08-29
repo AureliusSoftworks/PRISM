@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  collapseRemovedCueWhitespace,
   voicePerformanceTextFromActionCues,
   voiceSpokenText,
 } from "./voiceSpokenText.ts";
@@ -125,6 +126,15 @@ describe("voice spoken text", () => {
     );
   });
 
+  it("repairs duplicate punctuation around a removed inline performance cue", () => {
+    assert.equal(collapseRemovedCueWhitespace("Okay,  ,"), "Okay,");
+    assert.equal(voiceSpokenText("Okay, [burps],"), "Okay,");
+    assert.equal(
+      voicePerformanceTextFromActionCues("Okay, [burps],"),
+      "Okay [burps],",
+    );
+  });
+
   it("performs physical actions without treating Markdown emphasis as a cue", () => {
     assert.equal(
       voicePerformanceTextFromActionCues(
@@ -176,7 +186,7 @@ describe("voice spoken text", () => {
     // "*wink*" at the end of a sentence is a stage direction, never a word.
     assert.equal(
       voiceSpokenText("The war effort was tanking *wink*."),
-      "The war effort was tanking .",
+      "The war effort was tanking.",
     );
     assert.equal(
       voicePerformanceTextFromActionCues(
@@ -187,7 +197,7 @@ describe("voice spoken text", () => {
     // A direction bridging two spoken pauses is stagecraft, not emphasis.
     assert.equal(
       voiceSpokenText("No response is needed for your... *pauses* ...bluntness."),
-      "No response is needed for your... ...bluntness.",
+      "No response is needed for your...bluntness.",
     );
     assert.equal(
       voicePerformanceTextFromActionCues(
