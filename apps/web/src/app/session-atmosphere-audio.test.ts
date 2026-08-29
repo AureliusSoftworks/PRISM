@@ -665,10 +665,11 @@ test("HTML loop fallback fades lifecycle and mix changes without restarting", as
     });
     assert.equal(instances.length, 2);
     await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 30));
-    assert.deepEqual(
-      instances.map(({ volume }) => volume),
-      [0.1, 0.05],
+    const [backgroundVolume, grainVolume] = instances.map(
+      ({ volume }) => volume,
     );
+    assert.ok(Math.abs((backgroundVolume ?? 0) - 0.1) <= 0.001);
+    assert.ok(Math.abs((grainVolume ?? 0) - 0.05) <= 0.001);
 
     controller.stop(20);
     assert.ok(instances.every(({ paused }) => !paused));

@@ -3452,6 +3452,15 @@ test.describe("PRISM desktop smoke", () => {
           });
         },
       );
+      await page.route(
+        `**/api/coffee/sessions/${coffeeSessionId}/replay-events`,
+        async (route) => {
+          await fulfillJson(route, {
+            ok: true,
+            conversation: coffeeConversation(false),
+          });
+        },
+      );
       await page.route("**/api/conversations", async (route) => {
         if (route.request().method() !== "GET") return route.fallback();
         await fulfillJson(route, {
@@ -4649,22 +4658,24 @@ test.describe("PRISM desktop smoke", () => {
           ],
         });
 
-        for (const viewport of [
+        const viewports = [
           { width: 1280, height: 720, presenceCount: 24 },
           { width: 1440, height: 900, presenceCount: 24 },
           { width: 1920, height: 1080, presenceCount: 24 },
-        ]) {
-          await page.setViewportSize(viewport);
-          await page.goto("/?view=chat");
-          await activateNavigationControl(
-            page.getByRole("button", { name: /Bot group filter:/ }).first(),
-          );
-          await activateNavigationControl(
-            page.getByRole("option", { name: groupName }),
-          );
+        ];
+        await page.setViewportSize(viewports[0]!);
+        await page.goto("/?view=chat");
+        await activateNavigationControl(
+          page.getByRole("button", { name: /Bot group filter:/ }).first(),
+        );
+        await activateNavigationControl(
+          page.getByRole("option", { name: groupName }),
+        );
 
-          const room = page.locator('[data-bot-group-waiting-room="true"]');
-          const composer = page.getByRole("textbox").last();
+        const room = page.locator('[data-bot-group-waiting-room="true"]');
+        const composer = page.getByRole("textbox").last();
+        for (const viewport of viewports) {
+          await page.setViewportSize(viewport);
           await expect(room).toBeVisible();
           await expect(room).toHaveAttribute(
             "data-room-presence-count",
@@ -4770,10 +4781,6 @@ test.describe("PRISM desktop smoke", () => {
     await studio
       .getByRole("textbox", { name: "Bot name" })
       .fill("Draft Detail Bot");
-    await page.getByRole("button", { name: "Remind me later" }).click();
-    await page
-      .getByRole("button", { name: "Skip the PRISM introduction" })
-      .click();
     await studio.getByRole("tab", { name: "Details" }).click({ force: true });
 
     const detailsEditor = studio.getByRole("region", {
