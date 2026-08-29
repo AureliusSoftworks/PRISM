@@ -108641,9 +108641,10 @@ function HomeContent(): React.JSX.Element {
                 <p>
                   Debate follows one guided path: name the idea, let Prism
                   prepare the balanced motion and side briefs, choose the
-                  debaters, then add or skip evidence. Tune the room and Your
-                  seat &amp; the Jury keep Forum, Turnabout, atmosphere, roles,
-                  and Jury controls close without crowding the setup.
+                  debaters, then add or skip evidence. The always-visible Tune
+                  the room panel and Your seat &amp; the Jury keep Forum,
+                  Turnabout, atmosphere, roles, and Jury controls close without
+                  crowding the setup.
                 </p>
                 <p>{FIRST_RUN_BATCH_FOUNDRY_GUIDANCE}</p>
                 <p>{FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE}</p>

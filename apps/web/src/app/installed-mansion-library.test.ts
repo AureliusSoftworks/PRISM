@@ -94,6 +94,25 @@ describe("installed mansion library", () => {
     assert.equal(installedMansionOriginV1(mansion()).label, "Imported");
   });
 
+  it("labels a source-preserving Mansion Editor copy as derived", () => {
+    const derived = mansion({
+      portable: null,
+      derivation: {
+        version: 1,
+        sourceBundleId: "blackwood",
+        sourceTitle: "Blackwood House",
+        sourcePackageId: "blackwood-package",
+        acceptedExteriorScaleClass: "standard",
+        createdAt: "2026-08-28T01:00:00.000Z",
+      },
+    });
+    assert.deepEqual(installedMansionOriginV1(derived), {
+      kind: "derived",
+      label: "Derived",
+      description: "Editable copy of Blackwood House",
+    });
+  });
+
   it("switches included exterior families immediately while retaining a custom cover as stale", () => {
     const bundled = mansion({ portable: null, assets: [], scaleClass: "grand" });
     assert.deepEqual(
@@ -140,6 +159,7 @@ describe("installed mansion library", () => {
 
   it("presents dedicated selection, randomization, and reversible metadata controls", () => {
     const component = readFileSync(new URL("./InstalledMansionLibraryPanel.tsx", import.meta.url), "utf8");
+    const topologyEditor = readFileSync(new URL("./MansionEditorDialog.tsx", import.meta.url), "utf8");
     const dialog = readFileSync(new URL("./WhodunnitSetupDialog.tsx", import.meta.url), "utf8");
     const experience = readFileSync(new URL("./DebateExperience.tsx", import.meta.url), "utf8");
     const styles = readFileSync(new URL("./debateMystery.module.css", import.meta.url), "utf8");
@@ -149,10 +169,14 @@ describe("installed mansion library", () => {
     assert.match(component, /Random installed mansion/u);
     assert.match(component, /Use this mansion/u);
     assert.match(component, /className=\{styles\.installedMansionOrigin\}/u);
-    assert.match(component, /origin\.kind === "imported" \? "↓" : "✦"/u);
+    assert.match(component, /origin\.kind === "derived" \? "↗" : "✦"/u);
     assert.match(component, /data-tutorial-target="whodunnit-edit-mansion"/u);
     assert.match(component, /Choose exterior cover/u);
     assert.match(component, /title="Edit mansion details"/u);
+    assert.match(component, /Duplicate & edit mansion/u);
+    assert.match(component, /Open Mansion Editor/u);
+    assert.match(component, /data-tutorial-target="whodunnit-open-mansion-editor"/u);
+    assert.match(component, /<MansionEditorDialog/u);
     assert.match(component, /Use \{editingMansion\.portable \? "package" : "original"\} title/u);
     assert.match(component, /Use \{editingMansion\.portable \? "package" : "original"\} description/u);
     assert.match(component, /thumbnailAction: "default"/u);
@@ -170,11 +194,18 @@ describe("installed mansion library", () => {
     assert.match(component, /const description = event\.currentTarget\.value;[\s\S]*?description, descriptionUsesDefault: false/u);
     assert.match(experience, /randomInstalledMansionIdV1/u);
     assert.match(experience, /method: "PATCH"/u);
+    assert.match(experience, /mystery-mansions\/\$\{encodeURIComponent\(mansion\.id\)\}\/clone/u);
+    assert.match(experience, /mystery-mansions\/\$\{encodeURIComponent\(mansion\.id\)\}\/topology/u);
     assert.match(experience, /setMysteryNonce\(nextMysteryRecipeNonce\(\)\)/u);
     assert.match(styles, /\.installedMansionGrid > article\[data-selected="true"\]/u);
     assert.match(styles, /\.installedMansionOrigin\[data-origin="imported"\]/u);
     assert.match(styles, /\.installedMansionOrigin\[data-origin="created"\]/u);
+    assert.match(styles, /\.installedMansionOrigin\[data-origin="derived"\]/u);
     assert.match(styles, /\.installedMansionEditor/u);
+    assert.match(styles, /\.mansionTopologyEditor/u);
+    assert.match(topologyEditor, /data-tutorial-target="whodunnit-mansion-editor"/u);
+    assert.match(topologyEditor, /Save mansion plan/u);
+    assert.match(topologyEditor, /Doors, stairs, and portals/u);
     assert.match(styles, /\.whodunnitDialogScrim/u);
     assert.match(styles, /\.whodunnitDialog\s*\{[\s\S]*?max-height:/u);
     assert.match(styles, /\.whodunnitDialog\[data-size="wide"\]\s*\{[\s\S]*?width:\s*min\(88rem/u);

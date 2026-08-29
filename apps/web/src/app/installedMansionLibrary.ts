@@ -23,8 +23,8 @@ export interface InstalledMansionLibraryUpdateV1 {
 }
 
 export interface InstalledMansionOriginV1 {
-  kind: "imported" | "created";
-  label: "Imported" | "Created here";
+  kind: "imported" | "created" | "derived";
+  label: "Imported" | "Created here" | "Derived";
   description: string;
 }
 
@@ -105,14 +105,15 @@ export function installedMansionExteriorPreviewV1(args: {
 }): InstalledMansionExteriorPreviewV1 {
   const { mansion, assetId, scaleClass } = args;
   const resolvedScaleClass = scaleClass || mansion.scaleClass || "standard";
-  const currentScaleClass = mansion.scaleClass || "standard";
+  const acceptedExteriorScaleClass =
+    mansion.derivation?.acceptedExteriorScaleClass ?? mansion.scaleClass ?? "standard";
   const protectedAssetUrl = installedMansionThumbnailUrlV1(mansion.id, assetId);
   if (protectedAssetUrl) {
     return {
       url: protectedAssetUrl,
       scaleClass: resolvedScaleClass,
       switchesWithTopology: false,
-      stale: resolvedScaleClass !== currentScaleClass,
+      stale: resolvedScaleClass !== acceptedExteriorScaleClass,
     };
   }
   return {
@@ -126,6 +127,13 @@ export function installedMansionExteriorPreviewV1(args: {
 export function installedMansionOriginV1(
   mansion: DebateMysteryMansionBundleSummaryV1,
 ): InstalledMansionOriginV1 {
+  if (mansion.derivation) {
+    return {
+      kind: "derived",
+      label: "Derived",
+      description: `Editable copy of ${mansion.derivation.sourceTitle}`,
+    };
+  }
   return mansion.portable
     ? {
         kind: "imported",

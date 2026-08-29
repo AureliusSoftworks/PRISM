@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, type ChangeEvent, type JSX } from "react";
-import type { DebateMysteryMansionBundleSummaryV1 } from "@localai/shared";
+import type {
+  DebateMysteryMansionBundleRoomV1,
+  DebateMysteryMansionBundleSummaryV1,
+} from "@localai/shared";
 import {
   installedMansionOriginV1,
   installedMansionThumbnailSourceV1,
@@ -9,6 +12,7 @@ import {
   type InstalledMansionLibraryUpdateV1,
 } from "./installedMansionLibrary";
 import WhodunnitSetupDialog from "./WhodunnitSetupDialog";
+import MansionEditorDialog from "./MansionEditorDialog";
 import styles from "./debateMystery.module.css";
 
 interface MansionEditorDraftV1 {
@@ -34,6 +38,13 @@ export interface InstalledMansionLibraryProps {
     mansion: DebateMysteryMansionBundleSummaryV1,
     update: InstalledMansionLibraryUpdateV1,
   ) => Promise<boolean>;
+  onClone: (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+  ) => Promise<DebateMysteryMansionBundleSummaryV1 | null>;
+  onSaveTopology: (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+    rooms: DebateMysteryMansionBundleRoomV1[],
+  ) => Promise<DebateMysteryMansionBundleSummaryV1 | null>;
   onExport: (mansion: DebateMysteryMansionBundleSummaryV1) => void;
   onPlayTheme: (mansion: DebateMysteryMansionBundleSummaryV1) => void;
   onRemove: (mansion: DebateMysteryMansionBundleSummaryV1) => void;
@@ -66,6 +77,8 @@ export default function InstalledMansionLibrary({
   onSelect,
   onRandom,
   onUpdate,
+  onClone,
+  onSaveTopology,
   onExport,
   onPlayTheme,
   onRemove,
@@ -74,6 +87,8 @@ export default function InstalledMansionLibrary({
   const [editorError, setEditorError] = useState<string | null>(null);
   const [editorSaving, setEditorSaving] = useState(false);
   const [removeConfirmation, setRemoveConfirmation] =
+    useState<DebateMysteryMansionBundleSummaryV1 | null>(null);
+  const [topologyMansion, setTopologyMansion] =
     useState<DebateMysteryMansionBundleSummaryV1 | null>(null);
   const editingMansion = editor
     ? mansions.find((mansion) => mansion.id === editor.mansionId) ?? null
@@ -132,6 +147,19 @@ export default function InstalledMansionLibrary({
     });
     setEditorSaving(false);
     if (saved) setEditor(null);
+  };
+
+  const openMansionEditor = async (): Promise<void> => {
+    if (!editingMansion) return;
+    setEditorSaving(true);
+    setEditorError(null);
+    const editable = editingMansion.derivation
+      ? editingMansion
+      : await onClone(editingMansion);
+    setEditorSaving(false);
+    if (!editable) return;
+    setEditor(null);
+    setTopologyMansion(editable);
   };
 
   const editorThumbnailUrl = editor && editingMansion && editingPresentation
@@ -200,7 +228,7 @@ export default function InstalledMansionLibrary({
                     title={origin.description}
                     aria-label={`Origin: ${origin.description}`}
                   >
-                    <i aria-hidden="true">{origin.kind === "imported" ? "↓" : "✦"}</i>
+                    <i aria-hidden="true">{origin.kind === "imported" ? "↓" : origin.kind === "derived" ? "↗" : "✦"}</i>
                     <strong>{origin.label}</strong>
                   </span>
                 </div>
@@ -302,6 +330,15 @@ export default function InstalledMansionLibrary({
           {editorError ? <p className={styles.installedMansionEditorError} role="alert">{editorError}</p> : null}
           <div className={styles.installedMansionEditorFooter}>
             <div>
+              <button
+                type="button"
+                className={styles.mansionEditorLaunch}
+                data-tutorial-target="whodunnit-open-mansion-editor"
+                disabled={busy || editorSaving}
+                onClick={() => void openMansionEditor()}
+              >
+                {editingMansion.derivation ? "Open Mansion Editor" : "Duplicate & edit mansion"}
+              </button>
               <label>Optional export password<input type="password" value={exportPassword} autoComplete="new-password" disabled={editorSaving} onChange={(event) => onExportPasswordChange(event.currentTarget.value)} /></label>
               <button type="button" disabled={busy || editorSaving || editingMansion.portable?.license.allowsRedistribution === false} onClick={() => onExport(editingMansion)}>Export Mansion</button>
               <button type="button" disabled={busy || editorSaving || !editingMansion.assets?.some((asset) => asset.role === "music")} onClick={() => onPlayTheme(editingMansion)}>Play theme</button>
@@ -318,6 +355,16 @@ export default function InstalledMansionLibrary({
           </div>
         </section>
         </WhodunnitSetupDialog>
+      ) : null}
+
+      {topologyMansion && !removeConfirmation ? (
+        <MansionEditorDialog
+          theme={theme}
+          mansion={topologyMansion}
+          busy={busy}
+          onClose={() => setTopologyMansion(null)}
+          onSave={onSaveTopology}
+        />
       ) : null}
 
       {removeConfirmation ? (

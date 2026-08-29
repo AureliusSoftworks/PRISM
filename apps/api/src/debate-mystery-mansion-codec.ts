@@ -289,7 +289,7 @@ export function exportInternalMansionPackageFromDbV1(args: {
     schema: "prism-mansion-package-v1",
     formatVersion: { major: 1, minor: 0 },
     packageId: randomUUID(),
-    title: bundle.portable
+    title: bundle.portable || bundle.derivation
       ? bundle.name.trim() || `${bundle.houseStyle.label.trim() || "Whodunnit"} Mansion`
       : `${bundle.houseStyle.label.trim() || "Whodunnit"} Mansion`,
     description: bundle.portable?.description?.trim() || "A reusable PRISM Whodunnit mansion.",

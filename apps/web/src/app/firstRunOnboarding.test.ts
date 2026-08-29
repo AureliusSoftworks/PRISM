@@ -121,9 +121,9 @@ describe("first-run onboarding", () => {
       pageSource,
       /choose the\s*debaters, then add or skip evidence/u,
     );
-    assert.match(pageSource, /Tune the room and Your\s*seat &amp; the Jury/u);
-    assert.match(pageSource, /Forum, Turnabout, atmosphere, roles/u);
-    assert.match(pageSource, /without crowding the setup/u);
+    assert.match(pageSource, /always-visible Tune\s*the room panel and Your\s*seat &amp; the Jury/u);
+    assert.match(pageSource, /Forum,\s*Turnabout,\s*atmosphere,\s*roles/u);
+    assert.match(pageSource, /without\s+crowding\s+the\s+setup/u);
   });
 
   it("introduces the rich and lean automatic Batch Foundry thresholds", () => {

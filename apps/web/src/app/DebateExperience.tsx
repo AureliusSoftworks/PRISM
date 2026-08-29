@@ -102,6 +102,7 @@ import {
   type DebateMysteryArtMode,
   type DebateMysteryCaseCodeV1,
   type DebateMysteryDifficulty,
+  type DebateMysteryMansionBundleRoomV1,
   type DebateMysteryMansionBundleSummaryV1,
   type DebateMysteryPresetId,
   type DebateMysteryRoomNarrationAppearanceV2,
@@ -4840,7 +4841,6 @@ export function DebateExperience(
     useState<WhodunnitMansionSource>("installed");
   const [mansionImportOpen, setMansionImportOpen] = useState(false);
   const [legacySeedImportOpen, setLegacySeedImportOpen] = useState(false);
-  const [roomTuningOpen, setRoomTuningOpen] = useState(false);
   const [motionTuningOpen, setMotionTuningOpen] = useState(false);
   const [castTuningOpen, setCastTuningOpen] = useState(false);
   const [evidenceDecisionMade, setEvidenceDecisionMade] = useState(false);
@@ -6818,6 +6818,59 @@ export function DebateExperience(
     }
   }, [request]);
 
+  const cloneInstalledMansion = useCallback(async (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+  ): Promise<DebateMysteryMansionBundleSummaryV1 | null> => {
+    setMansionPackageState("updating");
+    setError(null);
+    try {
+      const result = await request<{ mansion: DebateMysteryMansionBundleSummaryV1 }>(
+        `/api/debates/mystery-mansions/${encodeURIComponent(mansion.id)}/clone`,
+        { ...requestBody({}), method: "POST" },
+      );
+      if (!mountedRef.current) return null;
+      setMysteryMansionBundles((current) => [
+        result.mansion,
+        ...current.filter((candidate) => candidate.id !== result.mansion.id),
+      ]);
+      return result.mansion;
+    } catch (caught) {
+      if (mountedRef.current) {
+        setError(caught instanceof Error ? caught.message : "That mansion could not be duplicated.");
+      }
+      return null;
+    } finally {
+      if (mountedRef.current) setMansionPackageState("idle");
+    }
+  }, [request]);
+
+  const saveInstalledMansionTopology = useCallback(async (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+    rooms: DebateMysteryMansionBundleRoomV1[],
+  ): Promise<DebateMysteryMansionBundleSummaryV1 | null> => {
+    setMansionPackageState("updating");
+    setError(null);
+    try {
+      const result = await request<{ mansion: DebateMysteryMansionBundleSummaryV1 }>(
+        `/api/debates/mystery-mansions/${encodeURIComponent(mansion.id)}/topology`,
+        { ...requestBody({ rooms }), method: "PATCH" },
+      );
+      if (!mountedRef.current) return null;
+      setMysteryMansionBundles((current) => current.map((candidate) =>
+        candidate.id === result.mansion.id ? result.mansion : candidate,
+      ));
+      chooseInstalledMansion(result.mansion.id, result.mansion);
+      return result.mansion;
+    } catch (caught) {
+      if (mountedRef.current) {
+        setError(caught instanceof Error ? caught.message : "That mansion plan could not be saved.");
+      }
+      return null;
+    } finally {
+      if (mountedRef.current) setMansionPackageState("idle");
+    }
+  }, [chooseInstalledMansion, request]);
+
   const exportSavedMansion = useCallback(async (mansion: DebateMysteryMansionBundleSummaryV1): Promise<void> => {
     setMansionPackageState("exporting");
     setError(null);
@@ -8498,7 +8551,6 @@ export function DebateExperience(
     setMysteryMansionSource("installed");
     setMansionImportOpen(false);
     setLegacySeedImportOpen(false);
-    setRoomTuningOpen(false);
     setMotionTuningOpen(false);
     setCastTuningOpen(false);
     setEvidenceDecisionMade(false);
@@ -13995,7 +14047,6 @@ export function DebateExperience(
     setMysterySetupPage("experience");
     setMansionImportOpen(false);
     setLegacySeedImportOpen(false);
-    setRoomTuningOpen(false);
     setMotionTuningOpen(false);
     setCastTuningOpen(draft.playerRole !== "judge" || draft.juryEnabled);
     setEvidenceDecisionMade(false);
@@ -19433,6 +19484,8 @@ export function DebateExperience(
                   onSelect={(mansionId) => chooseInstalledMansion(mansionId)}
                   onRandom={chooseRandomInstalledMansion}
                   onUpdate={updateInstalledMansion}
+                  onClone={cloneInstalledMansion}
+                  onSaveTopology={saveInstalledMansionTopology}
                   onExport={(mansion) => void exportSavedMansion(mansion)}
                   onPlayTheme={playSavedMansionTheme}
                   onRemove={(mansion) => void removeSavedMansion(mansion)}
@@ -19664,13 +19717,11 @@ export function DebateExperience(
           and write a private brief for each side.
         </p>
       </div>
-      <details
+      <section
         className={styles.roomTuning}
-        open={roomTuningOpen}
-        onToggle={(event) => setRoomTuningOpen(event.currentTarget.open)}
         data-tutorial-target="debate-room"
       >
-        <summary>
+        <header>
           <span aria-hidden="true">◇</span>
           <span>
             <strong>Tune the room</strong>
@@ -19684,8 +19735,8 @@ export function DebateExperience(
                 : "Action-driven"}
             </small>
           </span>
-          <em>{roomTuningOpen ? "Done" : "Tune"}</em>
-        </summary>
+          <em>Always visible</em>
+        </header>
         <div className={styles.roomTuningBody}>
           <div
             className={styles.proceedingPresets}
@@ -19850,7 +19901,7 @@ export function DebateExperience(
             )}
           </div>
         </div>
-      </details>
+      </section>
       <div className={styles.motionSeed}>
         <div className={`${styles.field} ${styles.territoryField}`}>
           <label htmlFor="debate-territory">Your idea</label>

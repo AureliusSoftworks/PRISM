@@ -221,6 +221,38 @@ describe("portable mansion package API", () => {
     assert.equal(overrideThumbnailResponse.status, 200);
     assert.equal(overrideThumbnailResponse.headers.get("content-type"), "image/webp");
 
+    const cloneResponse = await client.request(
+      `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}/clone`,
+      jsonInit({}, "POST"),
+    );
+    assert.equal(cloneResponse.status, 201);
+    const cloned = (await cloneResponse.json()) as Record<string, any>;
+    const cloneId = String(cloned.mansion.id);
+    assert.notEqual(cloneId, mansionId);
+    assert.equal(cloned.mansion.name, "My Violet House Copy");
+    assert.equal(cloned.mansion.portable, null);
+    assert.equal(cloned.mansion.derivation.sourceBundleId, mansionId);
+    const editedRooms = [
+      { id: "foyer-edit", templateId: "foyer", name: "Foyer", floor: 1, x: 0, y: 0, width: 2, height: 2, neighborIds: ["parlor-edit", "landing-edit"] },
+      { id: "parlor-edit", templateId: "parlor", name: "Parlor", floor: 1, x: 2, y: 0, width: 2, height: 2, neighborIds: ["foyer-edit", "library-edit"] },
+      { id: "library-edit", templateId: "library", name: "Library", floor: 1, x: 4, y: 0, width: 2, height: 2, neighborIds: ["parlor-edit"] },
+      { id: "landing-edit", templateId: "guest-bedroom", name: "Guest Bedroom", floor: 2, x: 0, y: 0, width: 2, height: 2, neighborIds: ["foyer-edit", "bathroom-edit"] },
+      { id: "bathroom-edit", templateId: "bathroom", name: "Bathroom", floor: 2, x: 2, y: 0, width: 2, height: 2, neighborIds: ["landing-edit"] },
+    ];
+    const protectedSourceResponse = await client.request(
+      `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}/topology`,
+      jsonInit({ rooms: editedRooms }, "PATCH"),
+    );
+    assert.equal(protectedSourceResponse.status, 409);
+    const topologyResponse = await client.request(
+      `/api/debates/mystery-mansions/${encodeURIComponent(cloneId)}/topology`,
+      jsonInit({ rooms: editedRooms }, "PATCH"),
+    );
+    assert.equal(topologyResponse.status, 200);
+    const edited = (await topologyResponse.json()) as Record<string, any>;
+    assert.equal(edited.mansion.floors, 2);
+    assert.equal(edited.mansion.totalRooms, 5);
+
     const otherClient = createClient();
     const otherRegistration = await otherClient.request(
       "/api/auth/register",
@@ -232,6 +264,11 @@ describe("portable mansion package API", () => {
       jsonInit({ title: "Not mine" }, "PATCH"),
     );
     assert.equal(foreignUpdate.status, 404);
+    const foreignClone = await otherClient.request(
+      `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}/clone`,
+      jsonInit({}, "POST"),
+    );
+    assert.equal(foreignClone.status, 404);
 
     const exportResponse = await client.request(
       `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}/export`,
@@ -259,6 +296,11 @@ describe("portable mansion package API", () => {
       { method: "DELETE" },
     );
     assert.equal(removeResponse.status, 200);
+    const removeCloneResponse = await client.request(
+      `/api/debates/mystery-mansions/${encodeURIComponent(cloneId)}`,
+      { method: "DELETE" },
+    );
+    assert.equal(removeCloneResponse.status, 200);
 
     const restrictedEnvelope = await fixtureEnvelope({
       packageId: "api-restricted-mansion",

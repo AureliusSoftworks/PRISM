@@ -11063,7 +11063,7 @@
     color-mix(in srgb, var(--debate-studio-ink) 4%, transparent);
 }
 
-.roomTuning > summary,
+.roomTuning > header,
 .castTuning > summary {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -11071,22 +11071,23 @@
   gap: 13px;
   padding: 13px 15px;
   list-style: none;
+}
+
+.castTuning > summary {
   cursor: pointer;
 }
 
-.roomTuning > summary::-webkit-details-marker,
 .castTuning > summary::-webkit-details-marker {
   display: none;
 }
 
-.roomTuning > summary:hover,
-.roomTuning > summary:focus-visible,
+.roomTuning > header,
 .castTuning > summary:hover,
 .castTuning > summary:focus-visible {
   background: color-mix(in srgb, var(--debate-studio-accent) 7%, transparent);
 }
 
-.roomTuning > summary > span:first-child,
+.roomTuning > header > span:first-child,
 .castTuning > summary > span:first-child {
   display: grid;
   width: 28px;
@@ -11101,20 +11102,20 @@
     color-mix(in srgb, var(--debate-studio-accent) 12%, transparent);
 }
 
-.roomTuning > summary > span:nth-child(2),
+.roomTuning > header > span:nth-child(2),
 .castTuning > summary > span:nth-child(2) {
   display: grid;
   min-width: 0;
   gap: 3px;
 }
 
-.roomTuning > summary strong,
+.roomTuning > header strong,
 .castTuning > summary strong {
   color: var(--debate-studio-ink);
   font-size: 12px;
 }
 
-.roomTuning > summary small,
+.roomTuning > header small,
 .castTuning > summary small {
   overflow: hidden;
   color: var(--debate-studio-muted);
@@ -11124,7 +11125,7 @@
   white-space: nowrap;
 }
 
-.roomTuning > summary em,
+.roomTuning > header em,
 .castTuning > summary em {
   border: 1px solid var(--debate-studio-line);
   border-radius: 999px;

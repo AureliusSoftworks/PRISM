@@ -344,6 +344,7 @@ import {
   renderDebateMysteryRoomArtV1,
 } from "./debate-mystery-room-art.ts";
 import {
+  cloneDebateMysteryMansionBundleV1,
   deleteDebateMysteryMansionBundleV2,
   ensureDebateMysteryMansionPortableRoomAssetsV1,
   getDebateMysteryMansionAssetFileV1,
@@ -351,6 +352,7 @@ import {
   listDebateMysteryMansionBundlesV2,
   saveDebateMysteryMansionBundleV2,
   updateDebateMysteryMansionLibraryV1,
+  updateDebateMysteryMansionTopologyV1,
 } from "./debate-mystery-mansion-bundles.ts";
 import {
   exportPortableMansionPackageV1,
@@ -19044,6 +19046,22 @@ function buildRoutes(): RouteDefinition[] {
       ctx.res.setHeader("cache-control", "private, no-store");
       ctx.res.setHeader("x-content-type-options", "nosniff");
       ctx.res.end(envelope);
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/clone", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const mansion = cloneDebateMysteryMansionBundleV1(db, userId, ctx.params.id);
+      json(ctx.res, 201, { ok: true, mansion });
+    }),
+    route("PATCH", "/api/debates/mystery-mansions/:id/topology", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const mansion = updateDebateMysteryMansionTopologyV1(
+        db,
+        userId,
+        ctx.params.id,
+        { rooms: body.rooms },
+      );
+      json(ctx.res, 200, { ok: true, mansion });
     }),
     route("PATCH", "/api/debates/mystery-mansions/:id", async (ctx) => {
       const userId = requireAuth(ctx);

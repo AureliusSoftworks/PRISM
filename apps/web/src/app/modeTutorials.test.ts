@@ -75,6 +75,11 @@ describe("mode tutorials", () => {
     assert.match(step.body, /quiet origin badge/u);
     assert.match(step.body, /Imported means it came from a portable \.mansion package/u);
     assert.match(step.body, /Created here means it was saved from a PRISM mansion level/u);
+    assert.match(step.body, /Derived marks an editable local copy/u);
+    assert.match(step.body, /Duplicate & edit mansion preserves that source/u);
+    assert.match(step.body, /full-screen Mansion Editor/u);
+    assert.match(step.body, /functional foyer staircase/u);
+    assert.match(step.body, /saved derivative becomes the mansion selected for this case/u);
     assert.match(step.body, /high-quality exterior establishing cover/u);
     assert.match(step.body, /interiors and room mosaics are never cover fallbacks/u);
     assert.match(step.body, /Install a mansion file/u);
@@ -850,7 +855,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /Wield Prism onto Stage layout to open the lab with a shuffled preview cast/u);
     assert.match(copy, /without inventing or erasing history/u);
     assert.match(copy, /Tune the room keeps the proceeding preset/u);
-    assert.match(copy, /leave it closed and trust the defaults/u);
+    assert.match(copy, /always visible while you shape the Debate/u);
     assert.match(copy, /University Union to Daytime Showdown/u);
     assert.match(copy, /sharper language, faster confrontation/u);
     assert.match(copy, /facts, safety boundaries/u);

@@ -27,7 +27,7 @@ export interface WhodunnitSetupDialogProps {
   description: string;
   busy?: boolean;
   role?: "dialog" | "alertdialog";
-  size?: "default" | "wide";
+  size?: "default" | "wide" | "screen";
   children: ReactNode;
   onClose: () => void;
 }

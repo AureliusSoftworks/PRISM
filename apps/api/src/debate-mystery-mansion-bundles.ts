@@ -1,14 +1,17 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
+  DEBATE_MYSTERY_ROOM_TEMPLATES,
   DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
   debateMysteryAcousticThemePaletteV1,
   normalizeDebateMysteryAtmosphereContractV1,
   debateMysteryMansionBundleEligibleV2,
   resolveDebateMysteryMansionExteriorScaleClassV1,
+  validateDebateMysteryMansionEditorTopologyV1,
   type DebateMysteryHouseStyleV2,
   type DebateMysteryMansionAssetV1,
   type DebateMysteryMansionLibraryPresentationV1,
+  type DebateMysteryMansionDerivationV1,
   type DebateMysteryMansionBundleRoomV1,
   type DebateMysteryMansionBundleSummaryV1,
   type DebateWhodunnitFormatStateV2,
@@ -31,10 +34,33 @@ interface MansionBundleRow {
   style_json: string;
   layout_json: string;
   library_metadata_json: string | null;
+  derivation_metadata_json: string | null;
   portable_metadata_json: string | null;
   portable_payload_sha256: string | null;
   created_at: string;
   updated_at: string;
+}
+
+function parseDerivationMetadata(
+  value: string | null,
+): DebateMysteryMansionDerivationV1 | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as Partial<DebateMysteryMansionDerivationV1>;
+    if (
+      parsed.version !== 1 ||
+      typeof parsed.sourceBundleId !== "string" ||
+      typeof parsed.sourceTitle !== "string" ||
+      (parsed.sourcePackageId !== null && typeof parsed.sourcePackageId !== "string") ||
+      (parsed.acceptedExteriorScaleClass !== "compact" &&
+        parsed.acceptedExteriorScaleClass !== "standard" &&
+        parsed.acceptedExteriorScaleClass !== "grand") ||
+      typeof parsed.createdAt !== "string"
+    ) return null;
+    return parsed as DebateMysteryMansionDerivationV1;
+  } catch {
+    return null;
+  }
 }
 
 interface SavedMansionLibraryMetadataV1 {
@@ -251,6 +277,7 @@ function summary(
   const houseStyle = parseStyle(row.style_json);
   const assets = aggregateAssets(db, row.user_id, row.id);
   const portable = parsePortableMetadata(row.portable_metadata_json);
+  const derivation = parseDerivationMetadata(row.derivation_metadata_json);
   return {
     version: 1,
     id: row.id,
@@ -267,6 +294,7 @@ function summary(
     rooms: parseRooms(row.layout_json),
     assets,
     portable,
+    derivation,
     library: mansionLibraryPresentation(row, houseStyle, assets, portable),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -280,7 +308,8 @@ function bundleRow(
 ): MansionBundleRow {
   const row = db.prepare(
     `SELECT id, user_id, source_session_id, name, floors, total_rooms,
-            suspect_count, style_json, layout_json, library_metadata_json, portable_metadata_json,
+            suspect_count, style_json, layout_json, library_metadata_json, derivation_metadata_json,
+            portable_metadata_json,
             portable_payload_sha256, created_at, updated_at
        FROM debate_mystery_mansion_bundles
       WHERE id = ? AND user_id = ?`,
@@ -303,7 +332,8 @@ export function listDebateMysteryMansionBundlesV2(
 ): DebateMysteryMansionBundleSummaryV1[] {
   const rows = db.prepare(
     `SELECT id, user_id, source_session_id, name, floors, total_rooms,
-            suspect_count, style_json, layout_json, library_metadata_json, portable_metadata_json,
+            suspect_count, style_json, layout_json, library_metadata_json, derivation_metadata_json,
+            portable_metadata_json,
             portable_payload_sha256, created_at, updated_at
        FROM debate_mystery_mansion_bundles
       WHERE user_id = ?
@@ -391,6 +421,7 @@ export async function updateDebateMysteryMansionLibraryV1(
   );
   const thumbnail = await normalizedMansionLibraryThumbnail(input.thumbnailDataUrl);
   const current = parseLibraryMetadata(row.library_metadata_json);
+  const currentDerivation = parseDerivationMetadata(row.derivation_metadata_json);
   const next: SavedMansionLibraryMetadataV1 = {
     version: 1,
     title: title === undefined ? current.title : title,
@@ -441,11 +472,249 @@ export async function updateDebateMysteryMansionLibraryV1(
     const metadataJson = next.title || next.description || next.thumbnailAssetId
       ? JSON.stringify(next)
       : null;
+    const nextDerivation = thumbnail
+      ? currentDerivation && {
+          ...currentDerivation,
+          acceptedExteriorScaleClass: resolveDebateMysteryMansionExteriorScaleClassV1({
+            floors: row.floors,
+            totalRooms: row.total_rooms,
+          }),
+        }
+      : currentDerivation;
     db.prepare(
       `UPDATE debate_mystery_mansion_bundles
-          SET library_metadata_json = ?, updated_at = ?
+          SET library_metadata_json = ?, derivation_metadata_json = ?, updated_at = ?
         WHERE id = ? AND user_id = ?`,
-    ).run(metadataJson, now, bundleId, userId);
+    ).run(
+      metadataJson,
+      nextDerivation ? JSON.stringify(nextDerivation) : null,
+      now,
+      bundleId,
+      userId,
+    );
+    db.prepare(
+      `DELETE FROM debate_mystery_mansion_assets
+        WHERE user_id = ? AND NOT EXISTS (
+          SELECT 1 FROM debate_mystery_mansion_asset_refs AS refs
+           WHERE refs.user_id = debate_mystery_mansion_assets.user_id
+             AND refs.asset_id = debate_mystery_mansion_assets.id
+        )`,
+    ).run(userId);
+    db.exec("COMMIT");
+  } catch (error) {
+    if (db.isTransaction) db.exec("ROLLBACK");
+    throw error;
+  }
+  return getDebateMysteryMansionBundleV2(db, userId, bundleId);
+}
+
+function copiedMansionTitle(db: DatabaseSync, userId: string, sourceTitle: string): string {
+  const base = sourceTitle.replace(/\s+Copy(?:\s+\d+)?$/u, "").trim() || "Untitled Mansion";
+  for (let copy = 1; copy < 1_000; copy += 1) {
+    const suffix = copy === 1 ? " Copy" : ` Copy ${copy}`;
+    const candidate = `${base.slice(0, 180 - suffix.length)}${suffix}`;
+    const exists = db.prepare(
+      "SELECT 1 FROM debate_mystery_mansion_bundles WHERE user_id = ? AND name = ? LIMIT 1",
+    ).get(userId, candidate);
+    if (!exists) return candidate;
+  }
+  return `${base.slice(0, 168)} ${randomUUID().slice(0, 8)}`;
+}
+
+/** Creates a tenant-owned derivative. Aggregate assets remain content-addressed
+ * and shared by reference, while the source row and portable provenance stay
+ * immutable. */
+export function cloneDebateMysteryMansionBundleV1(
+  db: DatabaseSync,
+  userId: string,
+  sourceBundleId: string,
+): DebateMysteryMansionBundleSummaryV1 {
+  const source = bundleRow(db, userId, sourceBundleId);
+  const sourceStyle = parseStyle(source.style_json);
+  const sourceAssets = aggregateAssets(db, userId, sourceBundleId);
+  const sourcePortable = parsePortableMetadata(source.portable_metadata_json);
+  const sourcePresentation = mansionLibraryPresentation(
+    source,
+    sourceStyle,
+    sourceAssets,
+    sourcePortable,
+  );
+  const sourceTitle =
+    sourcePresentation.overrides.title ?? sourcePresentation.defaults.title;
+  const sourceDescription =
+    sourcePresentation.overrides.description ?? sourcePresentation.defaults.description;
+  const sourceThumbnail = sourcePresentation.overrides.thumbnailAssetId;
+  const id = randomUUID();
+  const now = new Date().toISOString();
+  const name = copiedMansionTitle(db, userId, sourceTitle);
+  const derivation: DebateMysteryMansionDerivationV1 = {
+    version: 1,
+    sourceBundleId,
+    sourceTitle,
+    sourcePackageId: sourcePortable?.packageId ?? null,
+    acceptedExteriorScaleClass: resolveDebateMysteryMansionExteriorScaleClassV1({
+      floors: source.floors,
+      totalRooms: source.total_rooms,
+    }),
+    createdAt: now,
+  };
+  const library: SavedMansionLibraryMetadataV1 = {
+    version: 1,
+    title: null,
+    description: sourceDescription,
+    thumbnailAssetId: sourceThumbnail,
+  };
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare(
+      `INSERT INTO debate_mystery_mansion_bundles
+         (id, user_id, source_session_id, name, floors, total_rooms,
+          suspect_count, style_json, layout_json, library_metadata_json,
+          derivation_metadata_json, portable_metadata_json, portable_payload_sha256,
+          created_at, updated_at)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
+    ).run(
+      id,
+      userId,
+      name,
+      source.floors,
+      source.total_rooms,
+      source.suspect_count,
+      source.style_json,
+      source.layout_json,
+      JSON.stringify(library),
+      JSON.stringify(derivation),
+      now,
+      now,
+    );
+    db.prepare(
+      `INSERT INTO debate_mystery_mansion_asset_refs
+         (bundle_id, user_id, asset_id, role, logical_id, created_at)
+       SELECT ?, user_id, asset_id, role, logical_id, ?
+         FROM debate_mystery_mansion_asset_refs
+        WHERE bundle_id = ? AND user_id = ?`,
+    ).run(id, now, sourceBundleId, userId);
+    db.prepare(
+      `INSERT INTO debate_mystery_mansion_bundle_assets
+         (bundle_id, user_id, room_id, image_id, created_at)
+       SELECT ?, user_id, room_id, image_id, ?
+         FROM debate_mystery_mansion_bundle_assets
+        WHERE bundle_id = ? AND user_id = ?`,
+    ).run(id, now, sourceBundleId, userId);
+    db.exec("COMMIT");
+  } catch (error) {
+    if (db.isTransaction) db.exec("ROLLBACK");
+    throw error;
+  }
+  return getDebateMysteryMansionBundleV2(db, userId, id);
+}
+
+export interface UpdateDebateMysteryMansionTopologyInputV1 {
+  rooms?: unknown;
+}
+
+function mansionEditorInteger(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw new HttpError(400, `${label} must be a whole number.`);
+  }
+  return value;
+}
+
+function normalizeMansionEditorRooms(
+  input: unknown,
+  existingRooms: DebateMysteryMansionBundleRoomV1[],
+  suspectCount: number,
+): DebateMysteryMansionBundleRoomV1[] {
+  if (!Array.isArray(input)) throw new HttpError(400, "Mansion rooms are required.");
+  const existingById = new Map(existingRooms.map((room) => [room.id, room]));
+  const knownTemplates = new Map(DEBATE_MYSTERY_ROOM_TEMPLATES.map((template) => [template.id, template]));
+  const rooms = input.map((entry, index): DebateMysteryMansionBundleRoomV1 => {
+    if (!entry || typeof entry !== "object") throw new HttpError(400, `Room ${index + 1} is invalid.`);
+    const candidate = entry as Record<string, unknown>;
+    const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
+    const existing = existingById.get(id);
+    if (!id || id.length > 200 || (!existing && !/^[A-Za-z0-9:_-]+$/u.test(id))) {
+      throw new HttpError(400, `Room ${index + 1} has an invalid identity.`);
+    }
+    const templateId = typeof candidate.templateId === "string" ? candidate.templateId.trim() : "";
+    const template = knownTemplates.get(templateId);
+    if (!template && existing?.templateId !== templateId) {
+      throw new HttpError(400, `Room ${index + 1} uses an unsupported room type.`);
+    }
+    const name = typeof candidate.name === "string"
+      ? candidate.name.replace(/\s+/gu, " ").trim().slice(0, 80)
+      : "";
+    if (!name) throw new HttpError(400, `Room ${index + 1} needs a name.`);
+    const neighborIds = Array.isArray(candidate.neighborIds)
+      ? candidate.neighborIds.map((value) => typeof value === "string" ? value.trim() : "")
+          .filter(Boolean)
+      : [];
+    const templateChanged = Boolean(existing && existing.templateId !== templateId);
+    return {
+      id,
+      templateId,
+      name,
+      floor: mansionEditorInteger(candidate.floor, `${name} floor`),
+      x: mansionEditorInteger(candidate.x, `${name} horizontal position`),
+      y: mansionEditorInteger(candidate.y, `${name} vertical position`),
+      width: mansionEditorInteger(candidate.width, `${name} width`),
+      height: mansionEditorInteger(candidate.height, `${name} depth`),
+      neighborIds,
+      assignedSuspectSeatId: existing?.assignedSuspectSeatId ?? null,
+      emoji: template?.emoji ?? existing?.emoji ?? "◇",
+      imageId: templateChanged ? null : existing?.imageId ?? null,
+      bundledAssetPath: templateChanged
+        ? template?.bundledAssetPath ?? null
+        : existing?.bundledAssetPath ?? template?.bundledAssetPath ?? null,
+    };
+  });
+  const errors = validateDebateMysteryMansionEditorTopologyV1(rooms, suspectCount);
+  if (errors.length > 0) throw new HttpError(400, errors.join("\n"));
+  return rooms;
+}
+
+/** Saves only a previously cloned derivative; source packages and ordinary
+ * installed mansions are deliberately read-only topology inputs. */
+export function updateDebateMysteryMansionTopologyV1(
+  db: DatabaseSync,
+  userId: string,
+  bundleId: string,
+  input: UpdateDebateMysteryMansionTopologyInputV1,
+): DebateMysteryMansionBundleSummaryV1 {
+  const row = bundleRow(db, userId, bundleId);
+  if (!parseDerivationMetadata(row.derivation_metadata_json)) {
+    throw new HttpError(409, "Duplicate this mansion before editing its plan.");
+  }
+  if (input.rooms === undefined) throw new HttpError(400, "Choose a mansion plan to save.");
+  const existingRooms = parseRooms(row.layout_json);
+  const rooms = normalizeMansionEditorRooms(input.rooms, existingRooms, row.suspect_count);
+  const nextById = new Map(rooms.map((room) => [room.id, room]));
+  const invalidatedRoomIds = existingRooms
+    .filter((room) => !nextById.has(room.id) || nextById.get(room.id)?.templateId !== room.templateId)
+    .map((room) => room.id);
+  const floors = Math.max(...rooms.map((room) => room.floor));
+  const now = new Date().toISOString();
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const deleteProtectedRoomAsset = db.prepare(
+      `DELETE FROM debate_mystery_mansion_asset_refs
+        WHERE bundle_id = ? AND user_id = ? AND role = 'room'
+          AND logical_id IN (?, ?)`,
+    );
+    const deleteLegacyRoomAsset = db.prepare(
+      "DELETE FROM debate_mystery_mansion_bundle_assets WHERE bundle_id = ? AND user_id = ? AND room_id = ?",
+    );
+    for (const roomId of invalidatedRoomIds) {
+      deleteProtectedRoomAsset.run(bundleId, userId, roomId, `${roomId}:illustrated-v1`);
+      deleteLegacyRoomAsset.run(bundleId, userId, roomId);
+    }
+    db.prepare(
+      `UPDATE debate_mystery_mansion_bundles
+          SET floors = ?, total_rooms = ?, layout_json = ?, updated_at = ?
+        WHERE id = ? AND user_id = ?`,
+    ).run(floors, rooms.length, JSON.stringify(rooms), now, bundleId, userId);
     db.prepare(
       `DELETE FROM debate_mystery_mansion_assets
         WHERE user_id = ? AND NOT EXISTS (

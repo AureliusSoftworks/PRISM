@@ -154,6 +154,125 @@ export interface DebateMysteryMansionBundleRoomV1 {
   bundledAssetPath: string | null;
 }
 
+export const DEBATE_MYSTERY_MANSION_EDITOR_MIN_FLOORS_V1 = 2;
+export const DEBATE_MYSTERY_MANSION_EDITOR_MAX_FLOORS_V1 = 3;
+export const DEBATE_MYSTERY_MANSION_EDITOR_MIN_ROOMS_V1 = 5;
+export const DEBATE_MYSTERY_MANSION_EDITOR_MAX_ROOMS_V1 = 18;
+export const DEBATE_MYSTERY_MANSION_EDITOR_GRID_COLUMNS_V1 = 16;
+export const DEBATE_MYSTERY_MANSION_EDITOR_GRID_ROWS_V1 = 12;
+
+export interface DebateMysteryMansionDerivationV1 {
+  version: 1;
+  sourceBundleId: string;
+  sourceTitle: string;
+  sourcePackageId: string | null;
+  /** Scale for which a retained one-off exterior was accepted. */
+  acceptedExteriorScaleClass: DebateMysteryMansionExteriorScaleClassV1;
+  createdAt: string;
+}
+
+/** Shared client/server validation for explicitly edited mansion topology.
+ * Legacy packages remain readable; these constraints apply only when saving a
+ * new local derivative through Mansion Editor. */
+export function validateDebateMysteryMansionEditorTopologyV1(
+  rooms: readonly DebateMysteryMansionBundleRoomV1[],
+  suspectCount = 1,
+): string[] {
+  const errors: string[] = [];
+  if (
+    rooms.length < DEBATE_MYSTERY_MANSION_EDITOR_MIN_ROOMS_V1 ||
+    rooms.length > DEBATE_MYSTERY_MANSION_EDITOR_MAX_ROOMS_V1
+  ) {
+    errors.push(
+      `Use ${DEBATE_MYSTERY_MANSION_EDITOR_MIN_ROOMS_V1}–${DEBATE_MYSTERY_MANSION_EDITOR_MAX_ROOMS_V1} rooms.`,
+    );
+  }
+  if (rooms.length < suspectCount) {
+    errors.push(`Keep at least ${suspectCount} rooms for this mansion's supported cast.`);
+  }
+
+  const ids = new Set<string>();
+  for (const room of rooms) {
+    if (!room.id.trim() || ids.has(room.id)) errors.push("Every room needs a unique identity.");
+    ids.add(room.id);
+    if (!room.name.trim()) errors.push("Every room needs a name.");
+    if (
+      !Number.isInteger(room.floor) ||
+      room.floor < 1 ||
+      room.floor > DEBATE_MYSTERY_MANSION_EDITOR_MAX_FLOORS_V1
+    ) errors.push(`${room.name || "A room"} is on an unsupported floor.`);
+    if (
+      !Number.isInteger(room.x) || !Number.isInteger(room.y) ||
+      !Number.isInteger(room.width) || !Number.isInteger(room.height) ||
+      room.x < 0 || room.y < 0 || room.width < 1 || room.height < 1 ||
+      room.x + room.width > DEBATE_MYSTERY_MANSION_EDITOR_GRID_COLUMNS_V1 ||
+      room.y + room.height > DEBATE_MYSTERY_MANSION_EDITOR_GRID_ROWS_V1
+    ) errors.push(`${room.name || "A room"} must fit inside the floor grid.`);
+  }
+
+  const floors = new Set(rooms.map((room) => room.floor));
+  if (!floors.has(1) || !floors.has(2)) {
+    errors.push("Every edited mansion needs occupied ground and upper floors.");
+  }
+  const highestFloor = Math.max(0, ...floors);
+  for (let floor = 1; floor <= highestFloor; floor += 1) {
+    if (!floors.has(floor)) errors.push("Mansion floors must remain consecutive.");
+  }
+
+  for (let index = 0; index < rooms.length; index += 1) {
+    const room = rooms[index]!;
+    for (let otherIndex = index + 1; otherIndex < rooms.length; otherIndex += 1) {
+      const other = rooms[otherIndex]!;
+      if (room.floor !== other.floor) continue;
+      const overlaps =
+        room.x < other.x + other.width &&
+        room.x + room.width > other.x &&
+        room.y < other.y + other.height &&
+        room.y + room.height > other.y;
+      if (overlaps) errors.push(`${room.name} overlaps ${other.name} on floor ${room.floor}.`);
+    }
+  }
+
+  const roomById = new Map(rooms.map((room) => [room.id, room]));
+  for (const room of rooms) {
+    const neighbors = new Set(room.neighborIds);
+    if (neighbors.size !== room.neighborIds.length) {
+      errors.push(`${room.name} has a duplicate connection.`);
+    }
+    for (const neighborId of neighbors) {
+      const neighbor = roomById.get(neighborId);
+      if (!neighbor || neighborId === room.id) {
+        errors.push(`${room.name} has an invalid connection.`);
+      } else if (!neighbor.neighborIds.includes(room.id)) {
+        errors.push(`${room.name} and ${neighbor.name} must share a two-way connection.`);
+      }
+    }
+  }
+
+  const foyer = rooms.find((room) => room.floor === 1 && room.templateId === "foyer");
+  if (!foyer) {
+    errors.push("Keep a foyer on the ground floor.");
+  } else if (!foyer.neighborIds.some((id) => (roomById.get(id)?.floor ?? 1) > 1)) {
+    errors.push("Connect the foyer staircase to an upstairs room.");
+  }
+
+  if (foyer) {
+    const visited = new Set<string>();
+    const queue = [foyer.id];
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      if (visited.has(id)) continue;
+      visited.add(id);
+      for (const neighborId of roomById.get(id)?.neighborIds ?? []) {
+        if (roomById.has(neighborId) && !visited.has(neighborId)) queue.push(neighborId);
+      }
+    }
+    if (visited.size !== rooms.length) errors.push("Connect every room to the mansion's walkable plan.");
+  }
+
+  return [...new Set(errors)];
+}
+
 export type DebateMysteryMansionAssetRoleV1 =
   | "room"
   | "prop"
@@ -204,6 +323,8 @@ export interface DebateMysteryMansionBundleSummaryV1 {
   assets?: DebateMysteryMansionAssetV1[];
   /** Present when this mansion was installed from a portable package. */
   portable?: PortableMansionInstallationMetadataV1 | null;
+  /** Present only on a source-preserving local Mansion Editor derivative. */
+  derivation?: DebateMysteryMansionDerivationV1 | null;
   /** Present on current API snapshots; older snapshots fall back to name and
    * portable/house-style metadata on the client. */
   library?: DebateMysteryMansionLibraryPresentationV1;

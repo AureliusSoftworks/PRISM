@@ -664,12 +664,11 @@ describe("Debate experience", () => {
   it("uses one progressive setup path with optional room, motion, and seat tuning", () => {
     assert.doesNotMatch(source, /DebateSetupMode|setupMode/u);
     assert.doesNotMatch(source, /Basic setup|Advanced setup/u);
-    assert.match(
-      source,
-      /const \[roomTuningOpen, setRoomTuningOpen\] = useState\(false\)/u,
-    );
+    assert.doesNotMatch(source, /roomTuningOpen|setRoomTuningOpen/u);
     assert.match(source, /data-tutorial-target="debate-room"/u);
     assert.match(source, /<strong>Tune the room<\/strong>/u);
+    assert.match(source, /<section[\s\S]*?className=\{styles\.roomTuning\}[\s\S]*?<header>/u);
+    assert.doesNotMatch(source, /<details[\s\S]*?className=\{styles\.roomTuning\}/u);
     assert.match(source, /Your idea/u);
     assert.match(source, /Build the debate/u);
     assert.match(source, /Prism fills the motion and both sides/u);

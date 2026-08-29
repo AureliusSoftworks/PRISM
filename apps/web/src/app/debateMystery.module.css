@@ -82,6 +82,12 @@
   max-height: calc(100vh - 4rem);
 }
 
+.whodunnitDialog[data-size="screen"] {
+  width: calc(100vw - 2rem);
+  height: calc(100vh - 2rem);
+  max-height: calc(100vh - 2rem);
+}
+
 .whodunnitDialogHeader {
   display: flex;
   align-items: start;
@@ -125,6 +131,10 @@
 .whodunnitDialog[data-size="wide"] .whodunnitDialogHeader p { font-size: 0.95rem; }
 .whodunnitDialog[data-size="wide"] .whodunnitDialogHeader button { min-height: 2.75rem; padding: 0.68rem 0.95rem; font-size: 0.86rem; }
 .whodunnitDialog[data-size="wide"] .whodunnitDialogBody { padding: 1.65rem; }
+.whodunnitDialog[data-size="screen"] .whodunnitDialogHeader { padding: 0.9rem 1.15rem; }
+.whodunnitDialog[data-size="screen"] .whodunnitDialogHeader h2 { font-size: clamp(1.4rem, 1.8vw, 2rem); }
+.whodunnitDialog[data-size="screen"] .whodunnitDialogHeader p { font-size: 0.82rem; }
+.whodunnitDialog[data-size="screen"] .whodunnitDialogBody { min-height: 0; padding: 0; overflow: hidden; }
 .installedMansionConfirmActions { display: flex; justify-content: flex-end; gap: 0.65rem; }
 .installedMansionConfirmActions .savedMansionRemove { border-color: rgba(201, 69, 87, 0.5); color: color-mix(in srgb, #c94557 80%, var(--mystery-text)); background: color-mix(in srgb, #c94557 9%, var(--mystery-panel-strong)); }
 
@@ -804,6 +814,7 @@
 }
 .installedMansionOrigin[data-origin="imported"] { --mansion-origin-accent: var(--mystery-cyan); }
 .installedMansionOrigin[data-origin="created"] { --mansion-origin-accent: var(--mystery-violet); }
+.installedMansionOrigin[data-origin="derived"] { --mansion-origin-accent: var(--mystery-gold); }
 .installedMansionOrigin i { color: var(--mansion-origin-accent); font-size: 0.72rem; font-style: normal; line-height: 1; text-shadow: 0 0 0.5rem currentColor; }
 .installedMansionOrigin strong { font-size: inherit; font-weight: 820; }
 
@@ -879,6 +890,117 @@
 .installedMansionEditor .installedMansionEditorFooter button { min-height: 2.7rem; padding: 0.64rem 0.86rem; font-size: 0.83rem; }
 .installedMansionEditorFooter .savedMansionRemove { border-color: rgba(224, 105, 118, 0.38); color: #e8a3aa; }
 .installedMansionEditorFooter .installedMansionSave { min-width: 12rem; color: #fff; border-color: color-mix(in srgb, var(--mystery-violet) 76%, white 16%); background: linear-gradient(135deg, color-mix(in srgb, var(--mystery-violet) 82%, #4f35a5), color-mix(in srgb, var(--mystery-violet) 58%, #2b1d64)); box-shadow: 0 0.5rem 1rem color-mix(in srgb, var(--mystery-violet) 22%, transparent); }
+.installedMansionEditorFooter .mansionEditorLaunch { color: #10131b; border-color: color-mix(in srgb, var(--mystery-cyan) 72%, white 14%); background: linear-gradient(135deg, color-mix(in srgb, var(--mystery-cyan) 82%, white 8%), color-mix(in srgb, var(--mystery-cyan) 56%, #1a6270)); }
+
+.mansionTopologyEditor {
+  display: grid;
+  grid-template-columns: minmax(12rem, 0.22fr) minmax(32rem, 1fr) minmax(18rem, 0.32fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+  height: 100%;
+  background: var(--mystery-bg);
+}
+
+.mansionEditorExterior,
+.mansionEditorInspector {
+  min-height: 0;
+  padding: 1rem;
+  overflow-y: auto;
+  background: color-mix(in srgb, var(--mystery-panel-strong) 94%, var(--mystery-violet) 6%);
+}
+.mansionEditorExterior { border-right: 1px solid var(--mystery-line); }
+.mansionEditorInspector { border-left: 1px solid var(--mystery-line); }
+.mansionEditorExterior > div { width: 100%; aspect-ratio: 16 / 9; border: 1px solid var(--mystery-line); border-radius: 0.75rem; background-position: center; background-size: cover; box-shadow: 0 0.8rem 2rem rgb(0 0 0 / 24%); }
+.mansionEditorExterior > span { display: inline-flex; margin-top: 0.65rem; padding: 0.28rem 0.48rem; color: var(--mystery-gold); border: 1px solid color-mix(in srgb, var(--mystery-gold) 45%, transparent); border-radius: 999px; font-size: 0.66rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+.mansionEditorExterior > p { display: grid; gap: 0.28rem; margin: 0.85rem 0 0; color: var(--mystery-muted); font-size: 0.76rem; line-height: 1.5; }
+.mansionEditorExterior > p strong { color: var(--mystery-text); font-size: 0.82rem; }
+
+.mansionEditorWorkspace { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; }
+.mansionEditorFloorBar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.75rem; border-bottom: 1px solid var(--mystery-line); background: var(--mystery-panel); }
+.mansionEditorFloorBar nav,
+.mansionEditorFloorBar > div { display: flex; gap: 0.45rem; }
+.mansionEditorFloorBar button,
+.mansionEditorCanvasActions button,
+.mansionEditorInspector button,
+.mansionEditorFooter button { min-height: 2.35rem; padding: 0.5rem 0.72rem; color: var(--mystery-text); border: 1px solid var(--mystery-line); border-radius: 0.55rem; background: var(--mystery-panel-strong); font: inherit; font-size: 0.72rem; font-weight: 750; cursor: pointer; }
+.mansionEditorFloorBar button:hover:not(:disabled),
+.mansionEditorCanvasActions button:hover:not(:disabled),
+.mansionEditorInspector button:hover:not(:disabled),
+.mansionEditorFooter button:hover:not(:disabled),
+.mansionEditorFloorBar button:focus-visible,
+.mansionEditorCanvasActions button:focus-visible,
+.mansionEditorInspector button:focus-visible,
+.mansionEditorFooter button:focus-visible { border-color: var(--mystery-violet); outline: 2px solid color-mix(in srgb, var(--mystery-cyan) 54%, transparent); outline-offset: 1px; }
+.mansionEditorFloorBar button:disabled,
+.mansionEditorCanvasActions button:disabled,
+.mansionEditorInspector button:disabled,
+.mansionEditorFooter button:disabled { opacity: 0.45; cursor: not-allowed; }
+.mansionEditorFloorBar nav button { display: grid; gap: 0.08rem; min-width: 5.2rem; text-align: left; }
+.mansionEditorFloorBar nav button[aria-pressed="true"] { border-color: var(--mystery-violet); background: color-mix(in srgb, var(--mystery-violet) 19%, var(--mystery-panel-strong)); }
+.mansionEditorFloorBar nav small { color: var(--mystery-muted); font-size: 0.6rem; font-weight: 500; }
+
+.mansionEditorCanvasShell { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; padding: 1rem; }
+.mansionEditorCanvas {
+  display: grid;
+  grid-template-columns: repeat(16, minmax(0, 1fr));
+  grid-template-rows: repeat(12, minmax(0, 1fr));
+  min-height: 28rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--mystery-violet) 42%, var(--mystery-line));
+  border-radius: 0.8rem;
+  background-color: color-mix(in srgb, var(--mystery-panel-strong) 84%, transparent);
+  background-image: linear-gradient(to right, var(--mystery-line) 1px, transparent 1px), linear-gradient(to bottom, var(--mystery-line) 1px, transparent 1px);
+  background-size: calc(100% / 16) calc(100% / 12);
+  box-shadow: inset 0 0 3rem rgb(0 0 0 / 20%);
+  touch-action: none;
+}
+.mansionEditorCanvas > button { z-index: 1; display: grid; align-content: center; justify-items: center; min-width: 0; min-height: 0; margin: 0.16rem; padding: 0.25rem; overflow: hidden; color: var(--mystery-text); border: 1px solid color-mix(in srgb, var(--mystery-violet) 52%, var(--mystery-line)); border-radius: 0.5rem; background: linear-gradient(145deg, color-mix(in srgb, var(--mystery-violet) 17%, var(--mystery-panel-strong)), var(--mystery-panel-strong)); box-shadow: 0 0.32rem 0.75rem rgb(0 0 0 / 22%); font: inherit; cursor: grab; user-select: none; }
+.mansionEditorCanvas > button:active { cursor: grabbing; }
+.mansionEditorCanvas > button[data-selected="true"] { z-index: 2; border-color: var(--mystery-cyan); box-shadow: 0 0 0 2px color-mix(in srgb, var(--mystery-cyan) 32%, transparent), 0 0.5rem 1rem rgb(0 0 0 / 28%); }
+.mansionEditorCanvas > button > span { font-size: 1.05rem; }
+.mansionEditorCanvas > button > strong { max-width: 100%; overflow: hidden; font-size: 0.72rem; text-overflow: ellipsis; white-space: nowrap; }
+.mansionEditorCanvas > button > small { color: var(--mystery-muted); font-size: 0.54rem; }
+.mansionEditorCanvasActions { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding-top: 0.7rem; color: var(--mystery-muted); font-size: 0.7rem; }
+
+.mansionEditorInspector { display: grid; align-content: start; gap: 0.8rem; }
+.mansionEditorInspector > header { display: flex; align-items: center; gap: 0.7rem; padding-bottom: 0.7rem; border-bottom: 1px solid var(--mystery-line); }
+.mansionEditorInspector > header > span { display: grid; width: 2.65rem; height: 2.65rem; place-items: center; border: 1px solid var(--mystery-line); border-radius: 0.65rem; background: var(--mystery-bg); font-size: 1.3rem; }
+.mansionEditorInspector > header > div { display: grid; gap: 0.1rem; min-width: 0; }
+.mansionEditorInspector > header small { color: var(--mystery-violet); font-size: 0.6rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+.mansionEditorInspector > header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mansionEditorInspector > label { display: grid; gap: 0.35rem; color: var(--mystery-muted); font-size: 0.7rem; font-weight: 700; }
+.mansionEditorInspector input,
+.mansionEditorInspector select { width: 100%; box-sizing: border-box; min-height: 2.45rem; padding: 0.5rem 0.62rem; color: var(--mystery-text); border: 1px solid var(--mystery-line); border-radius: 0.52rem; outline: none; background: var(--mystery-panel-strong); font: inherit; }
+.mansionEditorInspector input:focus-visible,
+.mansionEditorInspector select:focus-visible { border-color: var(--mystery-violet); outline: 2px solid color-mix(in srgb, var(--mystery-cyan) 38%, transparent); }
+.mansionEditorGeometry,
+.mansionEditorConnections { display: grid; gap: 0.42rem; margin: 0; padding: 0.75rem; border: 1px solid var(--mystery-line); border-radius: 0.65rem; }
+.mansionEditorGeometry legend,
+.mansionEditorConnections legend { padding: 0 0.3rem; color: var(--mystery-text); font-size: 0.72rem; font-weight: 800; }
+.mansionEditorGeometry > div { display: grid; grid-template-columns: minmax(0, 1fr) 2rem 2rem 2rem; align-items: center; gap: 0.3rem; }
+.mansionEditorGeometry > div > span { color: var(--mystery-muted); font-size: 0.68rem; }
+.mansionEditorGeometry button { min-height: 2rem; padding: 0.25rem; }
+.mansionEditorGeometry output { text-align: center; font-size: 0.72rem; }
+.mansionEditorConnections { max-height: 15rem; overflow-y: auto; }
+.mansionEditorConnections > label { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0.45rem; padding: 0.35rem; border-radius: 0.45rem; cursor: pointer; }
+.mansionEditorConnections > label:hover { background: color-mix(in srgb, var(--mystery-violet) 9%, transparent); }
+.mansionEditorConnections > label > input { width: 0.95rem; min-height: auto; }
+.mansionEditorConnections > label > span { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.35rem; align-items: center; min-width: 0; font-size: 0.72rem; }
+.mansionEditorConnections strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mansionEditorConnections small { grid-column: 2; color: var(--mystery-muted); font-size: 0.6rem; }
+.mansionEditorInspector .mansionEditorRemoveRoom { color: #e8a3aa; border-color: rgba(224, 105, 118, 0.38); }
+
+.mansionEditorFooter { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 0.65rem; padding: 0.75rem 1rem; border-top: 1px solid var(--mystery-line); background: var(--mystery-panel-strong); }
+.mansionEditorFooter > div { display: grid; gap: 0.16rem; }
+.mansionEditorFooter > div strong { font-size: 0.76rem; }
+.mansionEditorFooter > div span { color: #efadb5; font-size: 0.66rem; }
+.mansionEditorFooter > div span[data-valid="true"] { color: var(--mystery-cyan); }
+.mansionEditorFooter .installedMansionSave { min-width: 11rem; color: #fff; border-color: color-mix(in srgb, var(--mystery-violet) 76%, white 16%); background: linear-gradient(135deg, color-mix(in srgb, var(--mystery-violet) 82%, #4f35a5), color-mix(in srgb, var(--mystery-violet) 58%, #2b1d64)); }
+
+@media (max-width: 1180px) {
+  .mansionTopologyEditor { grid-template-columns: minmax(30rem, 1fr) minmax(17rem, 0.36fr); }
+  .mansionEditorExterior { display: none; }
+}
 
 .installedMansionConfirmScrim { position: fixed; inset: 0; z-index: 160; display: grid; place-items: center; padding: 1.5rem; background: rgb(7 5 14 / 72%); backdrop-filter: blur(12px); }
 .installedMansionConfirm { width: min(30rem, 100%); padding: 1.35rem; border: 1px solid color-mix(in srgb, var(--mystery-violet) 38%, transparent); border-radius: 1.1rem; background: color-mix(in srgb, var(--mystery-panel) 96%, #171020); box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 40%); }
@@ -897,6 +1019,7 @@
   .whodunnitDialogScrim { padding: 0; place-items: stretch; }
   .whodunnitDialog { width: 100%; max-height: 100vh; border-radius: 0; }
   .whodunnitDialog[data-size="wide"] { width: 100%; min-height: 100vh; max-height: 100vh; }
+  .whodunnitDialog[data-size="screen"] { width: 100%; height: 100vh; max-height: 100vh; }
   .whodunnitDialogHeader { gap: 0.75rem; padding: 0.9rem; }
   .whodunnitDialogBody { padding: 0.9rem; }
   .guidedSetupProgress { grid-template-columns: repeat(5, minmax(3rem, 1fr)); }
@@ -916,6 +1039,14 @@
   .installedMansionEditorGrid { grid-template-columns: 1fr; }
   .randomMansionButton { justify-content: center; }
   .installedMansionEditorFooter .installedMansionSave { width: 100%; }
+  .mansionTopologyEditor { display: block; height: auto; min-height: 100%; overflow-y: auto; }
+  .mansionEditorWorkspace { min-height: 38rem; }
+  .mansionEditorFloorBar { align-items: stretch; flex-direction: column; }
+  .mansionEditorFloorBar nav { overflow-x: auto; }
+  .mansionEditorCanvasShell { min-height: 32rem; }
+  .mansionEditorInspector { border-top: 1px solid var(--mystery-line); border-left: 0; }
+  .mansionEditorFooter { position: sticky; bottom: 0; grid-template-columns: 1fr; }
+  .whodunnitDialog[data-size="screen"] .whodunnitDialogBody { overflow-y: auto; }
 }
 
 .caseDial .caseModeChoice {
