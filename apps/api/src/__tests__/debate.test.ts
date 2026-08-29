@@ -5821,6 +5821,18 @@ describe("Debate engine", () => {
       assert.equal(opening?.timing?.limitMs, 20_000);
       assert.equal(opening?.timing?.status, "overtime");
       assert.ok((opening?.timing?.overtimeMs ?? 0) > 0);
+      const authoredOpening = Array.from(
+        { length: 110 },
+        (_, index) => `grounded${index + 1}`,
+      ).join(" ");
+      assert.match(opening?.content ?? "", /—$/u);
+      assert.ok((opening?.content.length ?? 0) < authoredOpening.length);
+      assert.equal(opening?.powerIntendedContent, authoredOpening);
+      const publicOpening = debateSessionForPlayer(session).events.find(
+        (event) => event.id === opening?.id,
+      );
+      assert.equal(publicOpening?.content, opening?.content);
+      assert.equal(publicOpening?.powerIntendedContent, undefined);
       const correction = session.events.find(
         (event) =>
           event.kind === "moderator_ruling" &&

@@ -10363,13 +10363,18 @@ async function speechTransition(
       withBoard.events.push(floorBreak.rulingEvent);
     }
   }
-  // Apply the heard cut to the persisted copy only, after every consumer above
-  // has reasoned from the original delivery. Unspoken overrun is not part of
-  // the record, so citations that lived only in the cut tail drop with it.
+  // Apply the heard cut to the persisted public copy only, after every
+  // consumer above has reasoned from the original delivery. Preserve the
+  // authored draft in the existing private-intent field so diagnostics and
+  // faithful replay provenance can distinguish intended from heard speech;
+  // observer projection strips that field. Citations that lived only in the
+  // unheard tail still drop from the public event.
   if (overtimeHeardCut && overtimeCorrection) {
+    const authoredContent = event.powerIntendedContent ?? event.content;
     event = {
       ...event,
       content: overtimeHeardCut,
+      powerIntendedContent: authoredContent,
       sourceIds: debateSourceIdsFromText(overtimeHeardCut, session.evidence),
     };
   }

@@ -1799,7 +1799,7 @@ export function botPowerDefinitionIsExplicitInterruptionV1(
   const intent = compactText(intentValue, BOT_POWER_INTENT_MAX_LENGTH)
     .toLowerCase()
     .replace(/[’]/gu, "'");
-  if (/^(?:interrupt(?:er|ing)?|interject(?:or|ing)?)\b/u.test(name)) return true;
+  if (/^(?:interrupt(?:er|or|ing)?|interject(?:or|ing)?)\b/u.test(name)) return true;
   if (
     /\b(?:when|after|if)\s+(?:they(?:'re| are)|this bot is|the bot is)?\s*interrupted\b|\b(?:hates?|dislikes?|fears?|resists?)\s+being\s+interrupted\b|\b(?:cannot|can't|never)\s+be\s+interrupted\b/u.test(
       intent,
@@ -1808,7 +1808,7 @@ export function botPowerDefinitionIsExplicitInterruptionV1(
     return false;
   }
   return [
-    /\b(?:interrupts?|interjects?)\s+(?:others?|people|bots?|speakers?|whoever|anyone|conversations?)\b/u,
+    /\b(?:interrupts?|interjects?)\s+(?:others?|people|bots?|speakers?|whoever|anyone|everyone|conversations?)\b/u,
     /\b(?:cuts?|jumps?|butts?|breaks?)\s+in\b/u,
     /\b(?:cuts?|jumps?)\s+into\s+(?:live\s+)?(?:openings?|speech|answers?|turns?)\b/u,
     /\b(?:talks?|speaks?)\s+over\s+(?:others?|people|bots?|speakers?|whoever|anyone)\b/u,
@@ -1882,6 +1882,8 @@ export function botPowerDefinitionIsUnconditionalInterruptionV1(
     /\bat\s+every\s+(?:opening|opportunity)\b/u,
     /\b(?:always|constantly|invariably)\b[\s\S]{0,80}\b(?:interrupts?|interjects?|cuts?\s+in|jumps?\s+in|talks?\s+over)\b/u,
     /\b(?:interrupts?|interjects?|cuts?\s+in|jumps?\s+in|talks?\s+over)\b[\s\S]{0,80}\b(?:always|constantly|every\s+time)\b/u,
+    /\b(?:endless|irresistible|uncontrollable|compulsive)\b[\s\S]{0,100}\b(?:interrupts?|interjects?|cuts?\s+in|jumps?\s+in|talks?\s+over)\b/u,
+    /\b(?:interrupts?|interjects?)\s+everyone\b[\s\S]{0,100}\bregardless\s+of\b/u,
     /\b100\s*(?:%|percent)\b/u,
   ].some((pattern) => pattern.test(intent));
 }
@@ -1928,7 +1930,7 @@ export function strongestBotPowerInterruptionEffectV1(
             frequency: effects.some(
               (effect) =>
                 effect.type === "action_bias" && effect.frequency === "frequent",
-            ) || /\b(?:aggressively|always|constantly|frequently|often|whenever\s+possible)\b/iu.test(power.intent)
+            ) || /\b(?:aggressively|always|constantly|frequently|often|whenever\s+possible|endless|irresistible|uncontrollable|compulsive)\b/iu.test(power.intent)
               ? "frequent" as const
               : "occasional" as const,
             strength: effects.reduce<BotPowerStrength>((strongest, effect) => {
@@ -1941,7 +1943,7 @@ export function strongestBotPowerInterruptionEffectV1(
                   : strongest;
               }
               return strongest;
-            }, /\b(?:aggressively|forcefully|always|constantly)\b/iu.test(power.intent)
+            }, /\b(?:aggressively|forcefully|always|constantly|endless|irresistible|uncontrollable|compulsive)\b/iu.test(power.intent)
               ? "large"
               : "medium"),
             certainty: botPowerDefinitionIsUnconditionalInterruptionV1(
@@ -2025,6 +2027,25 @@ export function activeBotPowerEffectsV1(value: unknown): BotPowerEffectV1[] {
       !next.some((effect) => effect.type === "breathless")
     ) {
       next = [{ type: "breathless" as const }, ...next];
+    }
+    if (
+      botPowerDefinitionIsExplicitInterruptionV1(power.name, power.intent) &&
+      !next.some((effect) => effect.type === "interruption")
+    ) {
+      const intense = /\b(?:aggressively|forcefully|always|constantly|endless|irresistible|uncontrollable|compulsive)\b/iu.test(
+        power.intent,
+      );
+      const frequent = intense ||
+        /\b(?:frequently|often|whenever\s+possible)\b/iu.test(power.intent);
+      next = [{
+        type: "interruption" as const,
+        frequency: frequent ? "frequent" as const : "occasional" as const,
+        strength: intense ? "large" as const : "medium" as const,
+        targets: [{ kind: "all" as const }],
+        ...(botPowerDefinitionIsUnconditionalInterruptionV1(power.name, power.intent)
+          ? { certainty: "always" as const }
+          : {}),
+      }, ...next];
     }
     if (
       botPowerDefinitionIsExplicitAddressedSpeechCopyV1(

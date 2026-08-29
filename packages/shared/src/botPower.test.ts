@@ -1786,6 +1786,43 @@ test("interruption Powers normalize and recover legacy turn-pressure contracts",
     ),
     false,
   );
+  const connieName = "Interruptor";
+  const connieIntent =
+    "An endless, irresistible desire to interrupt everyone she talks to, regardless of rank, mood, or occasion.";
+  assert.equal(
+    botPowerDefinitionIsExplicitInterruptionV1(connieName, connieIntent),
+    true,
+  );
+  assert.equal(
+    botPowerDefinitionIsUnconditionalInterruptionV1(connieName, connieIntent),
+    true,
+  );
+  assert.deepEqual(
+    strongestBotPowerInterruptionEffectV1([{
+      version: 1,
+      id: "interruptor",
+      name: connieName,
+      intent: connieIntent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(connieName, connieIntent),
+        selfCue: "Interrupt everyone.",
+        observerCue: "Connie interrupts everyone.",
+        effects: [],
+        ruleLabels: ["Interruptor"],
+      },
+    }], (target) => target.kind === "all"),
+    {
+      powerId: "interruptor",
+      powerName: "Interruptor",
+      frequency: "frequent",
+      strength: "large",
+      targets: [{ kind: "all" }],
+      certainty: "always",
+    },
+  );
   assert.deepEqual(
     normalizeBotPowerEffectV1({ type: "interruption" }),
     {

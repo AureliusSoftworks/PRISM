@@ -3166,6 +3166,106 @@ test("Coffee upgrades an older Interrupting Tom snapshot to unconditional cut-in
   ]);
 });
 
+test("Interruptor every-person wording compiles and recovers as unconditional Coffee cut-ins", async () => {
+  const name = "Interruptor";
+  const intent =
+    "An endless, irresistible desire to interrupt everyone she talks to, regardless of rank, mood, or occasion.";
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("Interruptor should compile deterministically");
+    },
+    async embedText() { return []; },
+  };
+  const compiled = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Correction Connie",
+    powers: [{
+      version: 1,
+      id: "interruptor",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+  assert.equal(calls, 0);
+  assert.deepEqual(
+    compiled.powers[0]?.compiled?.effects.find((effect) => effect.type === "interruption"),
+    {
+      type: "interruption",
+      frequency: "frequent",
+      strength: "large",
+      targets: [{ kind: "all" }],
+      certainty: "always",
+    },
+  );
+
+  const db = powerDb();
+  db.prepare("INSERT INTO conversations VALUES (?, ?, 'coffee', ?, NULL)")
+    .run(
+      "connie-session",
+      "user",
+      JSON.stringify(["connie", "alice", "tom", "sarah", "brian"]),
+    );
+  db.prepare("INSERT INTO bots VALUES (?, 'user', ?, ?, ?, ?)").run(
+    "connie",
+    "Correction Connie",
+    "",
+    null,
+    JSON.stringify([{
+      version: 1,
+      id: "interruptor",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Interrupt everyone.",
+        observerCue: "Connie interrupts everyone.",
+        effects: [],
+        ruleLabels: ["Interruptor"],
+      },
+    }]),
+  );
+  for (const [id, botName] of [
+    ["alice", "Alice"],
+    ["tom", "Interrupting Tom"],
+    ["sarah", "Sassy Sarah"],
+    ["brian", "Brash Brian"],
+  ]) {
+    db.prepare("INSERT INTO bots VALUES (?, 'user', ?, ?, ?, ?)").run(
+      id,
+      botName,
+      "",
+      null,
+      "[]",
+    );
+  }
+
+  const plan = resolveCoffeePowersForSession(db, "user", "connie-session");
+  assert.deepEqual(
+    plan.bots.connie?.effects.find((effect) => effect.type === "interruption"),
+    {
+      type: "interruption",
+      frequency: "frequent",
+      strength: "large",
+      targets: [
+        { kind: "bot", name: "Alice", botId: "alice" },
+        { kind: "bot", name: "Interrupting Tom", botId: "tom" },
+        { kind: "bot", name: "Sassy Sarah", botId: "sarah" },
+        { kind: "bot", name: "Brash Brian", botId: "brian" },
+      ],
+      certainty: "always",
+    },
+  );
+});
+
 test("simulation conversion compiles as a persistent campaign, while awareness alone stays model-authored", async () => {
   let calls = 0;
   const provider: LlmProvider = {

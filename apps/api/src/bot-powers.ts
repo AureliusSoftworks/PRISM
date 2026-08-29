@@ -1122,8 +1122,8 @@ function deterministicInterruptionPower(
     return null;
   }
   const text = compact(`${source.name} ${source.intent}`, 560).toLowerCase();
-  const frequent = /\b(?:aggressively|always|constantly|frequently|often|whenever\s+possible)\b/u.test(text);
-  const strength = /\b(?:aggressively|forcefully|always|constantly)\b/u.test(text)
+  const frequent = /\b(?:aggressively|always|constantly|frequently|often|whenever\s+possible|endless|irresistible|uncontrollable|compulsive)\b/u.test(text);
+  const strength = /\b(?:aggressively|forcefully|always|constantly|endless|irresistible|uncontrollable|compulsive)\b/u.test(text)
     ? "large" as const
     : "medium" as const;
   const frequency = frequent ? "frequent" as const : "occasional" as const;
