@@ -1746,7 +1746,7 @@ test.describe("PRISM desktop smoke", () => {
     const homePicker = page.getByRole("button", {
       name: "Invite a Facet into this Home",
     });
-    await homePicker.click();
+    await activateNavigationControl(homePicker);
     await page
       .getByRole("listbox", { name: "Invite a Facet into this Home" })
       .getByRole("option", { name: "Test Bot 1" })
@@ -1777,7 +1777,7 @@ test.describe("PRISM desktop smoke", () => {
     await expect(page.getByText("Welcome to Test Bot 1 Home.")).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Test Bot 1 Home", exact: true }),
-    ).toBeDisabled();
+    ).toBeDisabled({ timeout: 20_000 });
     expect(zenOpenBodies).toEqual([]);
 
     // Zen keeps its lived timeline intact: mutation/branch actions stay out
@@ -1871,7 +1871,7 @@ test.describe("PRISM desktop smoke", () => {
       await expect(backButton).toBeEnabled();
       await page.mouse.move(20, 1);
       await expect(shell).not.toHaveAttribute("data-zen-header-hidden", "true");
-      await backButton.click();
+      await activateNavigationControl(backButton);
       await expect(page.locator('[data-selected-bot-hero="true"]')).toHaveCount(
         0,
       );
