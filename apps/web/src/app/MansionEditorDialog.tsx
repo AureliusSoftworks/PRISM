@@ -599,6 +599,10 @@ export default function MansionEditorDialog({
     const overlay = roomOverlayRef.current;
     if (!overlay) return null;
     const bounds = overlay.getBoundingClientRect();
+    if (
+      event.clientX < bounds.left || event.clientX > bounds.right ||
+      event.clientY < bounds.top || event.clientY > bounds.bottom
+    ) return null;
     return {
       x: clampNormalized((event.clientX - bounds.left) / Math.max(1, bounds.width)),
       y: clampNormalized((event.clientY - bounds.top) / Math.max(1, bounds.height)),
@@ -606,9 +610,10 @@ export default function MansionEditorDialog({
   };
 
   const beginRoomOverlay = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    if (!roomEditorRoom || !roomTool) return;
+    if (!roomEditorRoom || !roomTool || !event.isPrimary || event.button !== 0 || overlayGesture) return;
     const point = roomOverlayPoint(event);
     if (!point) return;
+    event.preventDefault();
     if (roomTool === "anchor") {
       const roomAnchorCount = layout.placementAnchors.filter(
         (anchor) => anchor.roomId === roomEditorRoom.id,
@@ -1197,7 +1202,15 @@ export default function MansionEditorDialog({
         </div>
       </header>
 
-      <div className={styles.mansionRoomEditorStage} data-mosaic-preview={mosaicPreview ? "true" : "false"}>
+      <div
+        className={styles.mansionRoomEditorStage}
+        data-mosaic-preview={mosaicPreview ? "true" : "false"}
+        data-placement-active={roomTool ?? undefined}
+        onPointerDown={beginRoomOverlay}
+        onPointerMove={continueRoomOverlay}
+        onPointerUp={finishRoomOverlay}
+        onPointerCancel={() => setOverlayGesture(null)}
+      >
         {(() => {
           const candidate = layout.roomArtCandidates.find((entry) => entry.roomId === roomEditorRoom.id) ?? null;
           const currentUrl = roomAssetUrl(mansion, roomEditorRoom, mosaicPreview);
@@ -1219,10 +1232,6 @@ export default function MansionEditorDialog({
           className={styles.mansionRoomOverlay}
           aria-label="Room authoring canvas"
           data-active-tool={roomTool ?? undefined}
-          onPointerDown={beginRoomOverlay}
-          onPointerMove={continueRoomOverlay}
-          onPointerUp={finishRoomOverlay}
-          onPointerCancel={() => setOverlayGesture(null)}
         >
           {layout.placementAnchors.filter((anchor) => anchor.roomId === roomEditorRoom.id).map((anchor) => (
             <button key={anchor.id} type="button" className={styles.mansionRoomAnchorMarker} style={{ left: `${anchor.point.x * 100}%`, top: `${anchor.point.y * 100}%` }} title={`${anchor.relation} ${anchor.name}`} onPointerDown={(event) => event.stopPropagation()}>{anchor.name.slice(0, 1).toUpperCase()}</button>

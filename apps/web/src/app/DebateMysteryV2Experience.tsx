@@ -3143,7 +3143,8 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     <main className={styles.investigation} data-theme={props.theme} data-view={state.roomView} data-music-program={investigationMusicProgram.phase} data-opening-map-reveal={openingMapReveal ? "true" : undefined} data-tutorial-target="mystery-v2-investigation" onClickCapture={handleInvestigationDialogueClickCapture}>
       <SessionAtmosphereLayer
         sessionKey={`whodunnit-v2-mansion-ambience:${props.session.id}:${state.config.houseStyle.id}`}
-        backgroundUrl={mansionAmbienceAsset?.url ?? null}
+        backgroundUrl={`/api/debates/${encodeURIComponent(props.session.id)}/mystery-mansion/atmosphere`}
+        backgroundFallbackUrl={mansionAmbienceAsset?.url ?? null}
         active={props.audioEnabled && mansionAmbienceAsset !== null}
         volume={props.audioVolume}
         mix={mansionAmbienceMix}

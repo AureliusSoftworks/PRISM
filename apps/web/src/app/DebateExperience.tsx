@@ -6933,7 +6933,7 @@ export function DebateExperience(
   const mutateSavedMansionAtmosphere = useCallback(async (
     mansion: DebateMysteryMansionBundleSummaryV1,
     action: "generate" | "accept" | "discard" | "undo",
-  ): Promise<boolean> => {
+  ): Promise<{ ok: boolean; error: string | null }> => {
     setMansionPackageState(action === "generate" ? "generating-atmosphere" : "updating");
     setError(null);
     try {
@@ -6944,16 +6944,17 @@ export function DebateExperience(
           method: "POST",
         },
       );
-      if (!mountedRef.current) return false;
+      if (!mountedRef.current) return { ok: false, error: null };
       setMysteryMansionBundles((current) => current.map((candidate) =>
         candidate.id === result.mansion.id ? result.mansion : candidate,
       ));
-      return true;
+      return { ok: true, error: null };
     } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "That mansion atmosphere could not be updated.";
       if (mountedRef.current) {
-        setError(caught instanceof Error ? caught.message : "That mansion atmosphere could not be updated.");
+        setError(message);
       }
-      return false;
+      return { ok: false, error: message };
     } finally {
       if (mountedRef.current) setMansionPackageState("idle");
     }
@@ -6981,7 +6982,7 @@ export function DebateExperience(
   const mutateSavedMansionTheme = useCallback(async (
     mansion: DebateMysteryMansionBundleSummaryV1,
     action: "generate" | "accept" | "discard" | "undo",
-  ): Promise<boolean> => {
+  ): Promise<{ ok: boolean; error: string | null }> => {
     setMansionPackageState(action === "generate" ? "generating-music" : "updating");
     setError(null);
     try {
@@ -7020,16 +7021,17 @@ export function DebateExperience(
           throw validationError;
         }
       }
-      if (!mountedRef.current) return false;
+      if (!mountedRef.current) return { ok: false, error: null };
       setMysteryMansionBundles((current) => current.map((candidate) =>
         candidate.id === updatedMansion.id ? updatedMansion : candidate,
       ));
-      return true;
+      return { ok: true, error: null };
     } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "That mansion music could not be updated.";
       if (mountedRef.current) {
-        setError(caught instanceof Error ? caught.message : "That mansion music could not be updated.");
+        setError(message);
       }
-      return false;
+      return { ok: false, error: message };
     } finally {
       if (mountedRef.current) setMansionPackageState("idle");
     }
@@ -31428,11 +31430,19 @@ export function DebateExperience(
         session={activeSession}
         onSessionChange={adoptMysterySessionChange}
         onSaveMansion={async () => {
-          await request<{ mansion: DebateMysteryMansionBundleSummaryV1 }>(
+          const result = await request<{
+            mansion: DebateMysteryMansionBundleSummaryV1;
+            theme?: { failure?: string | null };
+          }>(
             `/api/debates/${encodeURIComponent(activeSession.id)}/mystery-mansion/save`,
             { method: "POST" },
           );
           await loadMysteryMansionBundles();
+          if (result.theme?.failure) {
+            setError(
+              `Mansion saved, but its music was not synthesized: ${result.theme.failure} Open its Soundscape to retry.`,
+            );
+          }
         }}
         transcriptCopyState={transcriptCopyState}
         reviewCopyState={reviewBundleCopyState}

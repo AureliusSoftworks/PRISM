@@ -395,6 +395,7 @@ import {
 } from "./debate-mystery-mansion-room-art.ts";
 import {
   DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
+  MANSION_ATMOSPHERE_ACTIVE_LOGICAL_ID_V1,
   MANSION_MUSIC_ACTIVE_LOGICAL_ID_V1,
   MANSION_MUSIC_CANDIDATE_LOGICAL_ID_V1,
   MANSION_MUSIC_PREVIOUS_LOGICAL_ID_V1,
@@ -19373,6 +19374,47 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       undoDebateMysteryMansionAtmosphereV1(db, userId, ctx.params.id);
       json(ctx.res, 200, { ok: true, mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id) });
+    }),
+    route("GET", "/api/debates/:id/mystery-mansion/atmosphere", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const session = getDebateSession(db, userId, ctx.params.id);
+      if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
+        throw new HttpError(404, "That mansion atmosphere was not found.");
+      }
+      const configuredBundleId = session.formatState.config.mansionBundleId;
+      const frozenSnapshot = session.formatState.config.mansionSnapshot;
+      const sourceBundle = configuredBundleId ? null : db.prepare(
+        `SELECT id FROM debate_mystery_mansion_bundles
+          WHERE user_id = ? AND source_session_id = ? LIMIT 1`,
+      ).get(userId, session.id) as { id: string } | undefined;
+      const bundleId = frozenSnapshot?.sourceBundleId ?? configuredBundleId ?? sourceBundle?.id ?? null;
+      if (!bundleId) throw new HttpError(404, "That mansion atmosphere was not found.");
+      const frozenAtmosphere = frozenSnapshot?.presentation.assets.find(
+        (asset) => asset.role === "music" &&
+          asset.logicalId === MANSION_ATMOSPHERE_ACTIVE_LOGICAL_ID_V1,
+      ) ?? null;
+      const atmosphere = frozenAtmosphere ?? db.prepare(
+        `SELECT assets.id FROM debate_mystery_mansion_asset_refs AS refs
+           JOIN debate_mystery_mansion_assets AS assets
+             ON assets.id = refs.asset_id AND assets.user_id = refs.user_id
+          WHERE refs.bundle_id = ? AND refs.user_id = ? AND refs.role = 'music'
+            AND refs.logical_id = ?
+          LIMIT 1`,
+      ).get(bundleId, userId, MANSION_ATMOSPHERE_ACTIVE_LOGICAL_ID_V1) as { id: string } | undefined;
+      if (!atmosphere) throw new HttpError(404, "No accepted mansion atmosphere is available.");
+      const file = getDebateMysteryMansionAssetFileV1(
+        db,
+        decryptUserKey(userId),
+        userId,
+        bundleId,
+        atmosphere.id,
+      );
+      ctx.res.statusCode = 200;
+      ctx.res.setHeader("content-type", file.mimeType);
+      ctx.res.setHeader("content-length", String(file.bytes.byteLength));
+      ctx.res.setHeader("cache-control", "private, no-store");
+      ctx.res.setHeader("x-content-type-options", "nosniff");
+      ctx.res.end(file.bytes);
     }),
     route("GET", "/api/debates/:id/mystery-mansion/theme", async (ctx) => {
       const userId = requireAuth(ctx);

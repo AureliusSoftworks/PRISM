@@ -27,6 +27,11 @@ interface MansionEditorDraftV1 {
   thumbnailDataUrl: string | null;
 }
 
+export interface MansionSoundscapeMutationResultV1 {
+  ok: boolean;
+  error: string | null;
+}
+
 export interface InstalledMansionLibraryProps {
   theme: "light" | "dark";
   mansions: DebateMysteryMansionBundleSummaryV1[];
@@ -64,14 +69,14 @@ export interface InstalledMansionLibraryProps {
   onExport: (mansion: DebateMysteryMansionBundleSummaryV1) => void;
   onGenerateTheme: (
     mansion: DebateMysteryMansionBundleSummaryV1,
-  ) => Promise<boolean>;
-  onAcceptTheme: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<boolean>;
-  onDiscardTheme: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<boolean>;
-  onUndoTheme: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<boolean>;
-  onGenerateAtmosphere: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<boolean>;
-  onAcceptAtmosphere: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<boolean>;
-  onDiscardAtmosphere: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<boolean>;
-  onUndoAtmosphere: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<boolean>;
+  ) => Promise<MansionSoundscapeMutationResultV1>;
+  onAcceptTheme: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<MansionSoundscapeMutationResultV1>;
+  onDiscardTheme: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<MansionSoundscapeMutationResultV1>;
+  onUndoTheme: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<MansionSoundscapeMutationResultV1>;
+  onGenerateAtmosphere: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<MansionSoundscapeMutationResultV1>;
+  onAcceptAtmosphere: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<MansionSoundscapeMutationResultV1>;
+  onDiscardAtmosphere: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<MansionSoundscapeMutationResultV1>;
+  onUndoAtmosphere: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<MansionSoundscapeMutationResultV1>;
   onRemove: (mansion: DebateMysteryMansionBundleSummaryV1) => void;
 }
 
@@ -199,6 +204,20 @@ export default function InstalledMansionLibrary({
     if (!editable) return;
     setEditor(null);
     setTopologyMansion(editable);
+  };
+
+  const runSoundscapeMutation = async (
+    mutation: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<MansionSoundscapeMutationResultV1>,
+    fallback: string,
+  ): Promise<void> => {
+    if (!editingMansion) return;
+    setEditorError(null);
+    try {
+      const result = await mutation(editingMansion);
+      if (!result.ok) setEditorError(result.error ?? fallback);
+    } catch (caught) {
+      setEditorError(caught instanceof Error ? caught.message : fallback);
+    }
   };
 
   const editorThumbnailUrl = editor && editingMansion && editingPresentation
@@ -427,20 +446,20 @@ export default function InstalledMansionLibrary({
                 />
                 {editingMansion.music?.candidate ? (
                   <div className={styles.installedMansionMusicDecision}>
-                    <button type="button" disabled={busy || editorSaving} onClick={() => void onAcceptTheme(editingMansion)}>Use this version</button>
-                    <button type="button" disabled={busy || editorSaving} onClick={() => void onDiscardTheme(editingMansion)}>Discard</button>
+                    <button type="button" disabled={busy || editorSaving} onClick={() => void runSoundscapeMutation(onAcceptTheme, "That mansion music could not be accepted.")}>Use this version</button>
+                    <button type="button" disabled={busy || editorSaving} onClick={() => void runSoundscapeMutation(onDiscardTheme, "That mansion music preview could not be discarded.")}>Discard</button>
                   </div>
                 ) : (
                   <div className={styles.installedMansionMusicControls}>
                     <button
                       type="button"
                       disabled={busy || editorSaving || responseMode === "local"}
-                      onClick={() => void onGenerateTheme(editingMansion)}
+                      onClick={() => void runSoundscapeMutation(onGenerateTheme, "That mansion music could not be synthesized.")}
                     >
                       {editingMansion.music?.active ? "Resynthesize music" : "Synthesize music"}
                     </button>
                     {editingMansion.music?.previous ? (
-                      <button type="button" disabled={busy || editorSaving} onClick={() => void onUndoTheme(editingMansion)}>Undo previous version</button>
+                      <button type="button" disabled={busy || editorSaving} onClick={() => void runSoundscapeMutation(onUndoTheme, "The previous mansion music could not be restored.")}>Undo previous version</button>
                     ) : null}
                   </div>
                 )}
@@ -478,20 +497,20 @@ export default function InstalledMansionLibrary({
                 </dl>
                 {editingMansion.atmosphere?.candidate ? (
                   <div className={styles.installedMansionMusicDecision}>
-                    <button type="button" disabled={busy || editorSaving} onClick={() => void onAcceptAtmosphere(editingMansion)}>Use this version</button>
-                    <button type="button" disabled={busy || editorSaving} onClick={() => void onDiscardAtmosphere(editingMansion)}>Discard</button>
+                    <button type="button" disabled={busy || editorSaving} onClick={() => void runSoundscapeMutation(onAcceptAtmosphere, "That mansion atmosphere could not be accepted.")}>Use this version</button>
+                    <button type="button" disabled={busy || editorSaving} onClick={() => void runSoundscapeMutation(onDiscardAtmosphere, "That mansion atmosphere preview could not be discarded.")}>Discard</button>
                   </div>
                 ) : (
                   <div className={styles.installedMansionMusicControls}>
                     <button
                       type="button"
                       disabled={busy || editorSaving || responseMode === "local"}
-                      onClick={() => void onGenerateAtmosphere(editingMansion)}
+                      onClick={() => void runSoundscapeMutation(onGenerateAtmosphere, "That mansion atmosphere could not be synthesized.")}
                     >
                       {editingMansion.atmosphere?.active ? "Resynthesize atmosphere" : "Synthesize atmosphere"}
                     </button>
                     {editingMansion.atmosphere?.previous ? (
-                      <button type="button" disabled={busy || editorSaving} onClick={() => void onUndoAtmosphere(editingMansion)}>Undo previous version</button>
+                      <button type="button" disabled={busy || editorSaving} onClick={() => void runSoundscapeMutation(onUndoAtmosphere, "The previous mansion atmosphere could not be restored.")}>Undo previous version</button>
                     ) : null}
                   </div>
                 )}

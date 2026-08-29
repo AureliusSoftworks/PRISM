@@ -31,6 +31,14 @@ describe("Mansion Editor V2 experience", () => {
     );
     assert.match(editorSource, /\+ Place anchor/u);
     assert.match(editorSource, /Draw the neon path/u);
+    assert.match(editorSource, /data-placement-active=\{roomTool \?\? undefined\}/u);
+    assert.match(editorSource, /onPointerDown=\{beginRoomOverlay\}/u);
+    assert.match(editorSource, /event\.clientX < bounds\.left \|\| event\.clientX > bounds\.right/u);
+    assert.match(editorSource, /!event\.isPrimary \|\| event\.button !== 0 \|\| overlayGesture/u);
+    assert.match(
+      mysteryCss,
+      /\.mansionRoomEditorStage > img,[\s\S]{0,360}aspect-ratio: 16 \/ 9; object-fit: cover; object-position: center;/u,
+    );
     assert.match(editorSource, /beginLightGesture\(event, selectedLight, "resize"\)/u);
     assert.match(editorSource, /Random flicker/u);
     assert.match(editorSource, /data-directional-dust/u);
@@ -46,6 +54,10 @@ describe("Mansion Editor V2 experience", () => {
   });
 
   it("renders deterministic overlays and freezes them for Reduced Motion", () => {
+    assert.match(mysteryCss, /mansionRoomEditorStage\[data-placement-active\] \{ cursor: crosshair;/u);
+    assert.match(mysteryCss, /mansionRoomOverlay \{[^}]*pointer-events: none;/u);
+    assert.match(mysteryCss, /mansionRoomAnchorMarker \{[^}]*pointer-events: auto;/u);
+    assert.match(mysteryCss, /mansionLightResizeHandle \{[^}]*pointer-events: auto;/u);
     assert.match(mysteryCss, /mix-blend-mode: overlay/u);
     assert.match(mysteryCss, /mansionDynamicLightNeon/u);
     assert.match(mysteryCss, /mansionDirectionalDust/u);

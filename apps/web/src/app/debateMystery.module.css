@@ -1106,9 +1106,10 @@
 .mansionRoomEditorBreadcrumb button:disabled,
 .mansionRoomEditorTools button:disabled { opacity: 0.45; cursor: not-allowed; }
 .mansionRoomEditorStage { position: relative; display: grid; min-width: 0; min-height: 0; place-items: center; overflow: hidden; padding: 1.2rem; background: radial-gradient(circle at 50% 25%, color-mix(in srgb, var(--mystery-violet) 13%, transparent), transparent 62%), #070b13; }
+.mansionRoomEditorStage[data-placement-active] { cursor: crosshair; }
 .mansionRoomEditorStage > img,
 .mansionRoomArtCompare,
-.mansionRoomArtFallback { width: min(100%, 80rem); max-height: 100%; aspect-ratio: 16 / 9; object-fit: contain; border: 1px solid color-mix(in srgb, var(--mystery-cyan) 25%, var(--mystery-line)); border-radius: 0.8rem; box-shadow: 0 1.25rem 3rem rgb(0 0 0 / 35%); }
+.mansionRoomArtFallback { width: min(100%, 80rem); max-height: 100%; aspect-ratio: 16 / 9; object-fit: cover; object-position: center; border: 1px solid color-mix(in srgb, var(--mystery-cyan) 25%, var(--mystery-line)); border-radius: 0.8rem; box-shadow: 0 1.25rem 3rem rgb(0 0 0 / 35%); }
 .mansionRoomEditorStage[data-mosaic-preview="true"] > img { image-rendering: pixelated; }
 .mansionRoomArtCompare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; gap: 0.7rem; aspect-ratio: auto; padding: 0.7rem; background: var(--mystery-panel-strong); }
 .mansionRoomArtCompare figure { position: relative; display: grid; min-width: 0; margin: 0; }
@@ -1117,9 +1118,9 @@
 .mansionRoomArtCompare figcaption { position: absolute; right: 0.45rem; bottom: 0.45rem; padding: 0.25rem 0.42rem; color: white; border-radius: 999px; background: rgb(5 8 14 / 78%); font-size: 0.62rem; font-weight: 800; }
 .mansionRoomArtFallback { display: grid; place-items: center; align-content: center; gap: 0.5rem; color: var(--mystery-text); background: linear-gradient(145deg, color-mix(in srgb, var(--mystery-violet) 18%, var(--mystery-panel-strong)), var(--mystery-panel-strong)); }
 .mansionRoomArtFallback span { font-size: 4rem; }
-.mansionRoomOverlay { position: absolute; z-index: 4; inset: 1.2rem; width: auto; max-width: 80rem; aspect-ratio: 16 / 9; place-self: center; overflow: hidden; border-radius: 0.8rem; pointer-events: auto; touch-action: none; }
-.mansionRoomOverlay[data-active-tool] { cursor: crosshair; box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--mystery-cyan) 72%, transparent); }
-.mansionRoomAnchorMarker { position: absolute; z-index: 6; display: grid; width: 1.55rem; height: 1.55rem; padding: 0; place-items: center; color: #10131b; border: 2px solid white; border-radius: 50%; background: var(--mystery-gold); box-shadow: 0 0 0 0.25rem rgb(0 0 0 / 34%); font: inherit; font-size: 0.65rem; font-weight: 900; transform: translate(-50%, -50%); cursor: pointer; }
+.mansionRoomOverlay { position: absolute; z-index: 4; inset: 1.2rem; width: auto; max-width: 80rem; aspect-ratio: 16 / 9; place-self: center; overflow: hidden; border-radius: 0.8rem; pointer-events: none; touch-action: none; }
+.mansionRoomOverlay[data-active-tool] { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--mystery-cyan) 72%, transparent); }
+.mansionRoomAnchorMarker { position: absolute; z-index: 6; display: grid; width: 1.55rem; height: 1.55rem; padding: 0; place-items: center; color: #10131b; border: 2px solid white; border-radius: 50%; background: var(--mystery-gold); box-shadow: 0 0 0 0.25rem rgb(0 0 0 / 34%); font: inherit; font-size: 0.65rem; font-weight: 900; transform: translate(-50%, -50%); pointer-events: auto; cursor: pointer; }
 .mansionDynamicLight { position: absolute; z-index: 4; padding: 0; color: var(--mansion-light-color); border: 0; opacity: var(--mansion-light-intensity); filter: drop-shadow(0 0 0.8rem var(--mansion-light-color)); mix-blend-mode: overlay; pointer-events: auto; animation-delay: var(--mansion-light-delay); transform: translate(-50%, -50%); transform-origin: center; cursor: move; }
 .mansionDynamicLight[data-selected="true"] { outline: 2px solid color-mix(in srgb, var(--mystery-cyan) 88%, white); outline-offset: 0.25rem; }
 .mansionDynamicLight[data-light-kind="fire"] { clip-path: polygon(50% 0, 100% 100%, 0 100%); background: radial-gradient(circle at 50% 72%, white 0 8%, var(--mansion-light-color) 36%, transparent 72%); }
@@ -1133,7 +1134,7 @@
 @keyframes mansionDynamicLightNeon { 0%, 38%, 43%, 100% { opacity: var(--mansion-light-intensity); } 40% { opacity: calc(var(--mansion-light-intensity) * 0.62); } 50% { opacity: calc(var(--mansion-light-intensity) * 0.5); } }
 @keyframes mansionDynamicLightBulb { 0%, 92%, 96%, 100% { opacity: var(--mansion-light-intensity); } 93%, 97% { opacity: calc(var(--mansion-light-intensity) * 0.35); } }
 @keyframes mansionDirectionalDust { from { opacity: 0.18; transform: translate3d(-1%, 2%, 0); } to { opacity: 0.52; transform: translate3d(2%, -2%, 0); } }
-.mansionLightResizeHandle { position: absolute; z-index: 9; width: 1.1rem; height: 1.1rem; padding: 0; border: 2px solid white; border-radius: 50%; background: var(--mystery-cyan); box-shadow: 0 0 0 0.22rem rgb(0 0 0 / 40%); transform: translate(-50%, -50%); cursor: nwse-resize; }
+.mansionLightResizeHandle { position: absolute; z-index: 9; width: 1.1rem; height: 1.1rem; padding: 0; border: 2px solid white; border-radius: 50%; background: var(--mystery-cyan); box-shadow: 0 0 0 0.22rem rgb(0 0 0 / 40%); transform: translate(-50%, -50%); pointer-events: auto; cursor: nwse-resize; }
 .mansionRoomPlacementHint { position: absolute; z-index: 12; left: 50%; bottom: 0.75rem; padding: 0.38rem 0.58rem; color: #10131b; border-radius: 999px; background: var(--mystery-cyan); box-shadow: 0 0.5rem 1rem rgb(0 0 0 / 28%); font-size: 0.65rem; font-weight: 850; transform: translateX(-50%); pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
   .mansionDynamicLight,

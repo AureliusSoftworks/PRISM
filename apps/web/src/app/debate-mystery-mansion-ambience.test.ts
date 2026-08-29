@@ -78,6 +78,8 @@ test("player wiring keeps ambience separate, stable across rooms, and visible in
   const setup = readSource("DebateExperience.tsx");
   const tutorial = readSource("modeTutorials.ts");
   assert.match(experience, /sessionKey=\{`whodunnit-v2-mansion-ambience:\$\{props\.session\.id\}:\$\{state\.config\.houseStyle\.id\}`\}/u);
+  assert.match(experience, /\/api\/debates\/\$\{encodeURIComponent\(props\.session\.id\)\}\/mystery-mansion\/atmosphere/u);
+  assert.match(experience, /backgroundFallbackUrl=\{mansionAmbienceAsset\?\.url \?\? null\}/u);
   assert.match(experience, /mixTransitionMs=\{WHODUNNIT_MANSION_AMBIENCE_TRANSITION_MS\}/u);
   assert.match(experience, /backgroundRecordable=\{false\}[\s\S]{0,80}ambientFoley=\{false\}/u);
   assert.doesNotMatch(experience, /whodunnit-v2-mansion-ambience:[^`]*currentRoom/u);
@@ -88,4 +90,14 @@ test("player wiring keeps ambience separate, stable across rooms, and visible in
   assert.match(tutorial, /Music and Ambience are separate Case Forge choices/u);
   assert.match(tutorial, /without an online request or new audio file/u);
   assert.match(tutorial, /global Audio—not this setup choice—is the silence control/u);
+});
+
+test("soundscape failures remain visible inside the installed mansion editor", () => {
+  const library = readSource("InstalledMansionLibraryPanel.tsx");
+  const setup = readSource("DebateExperience.tsx");
+  assert.match(library, /runSoundscapeMutation/u);
+  assert.match(library, /if \(!result\.ok\) setEditorError\(result\.error \?\? fallback\)/u);
+  assert.match(library, /That mansion music could not be synthesized\./u);
+  assert.match(library, /That mansion atmosphere could not be synthesized\./u);
+  assert.match(setup, /return \{ ok: false, error: message \}/u);
 });
