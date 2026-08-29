@@ -894,23 +894,27 @@ export function validateMansionPackageManifestV1(value: unknown): string[] {
   ) {
     errors.push("manifest.investigationThemeTitle is invalid.");
   }
+  const musicIdentityErrors = value.musicIdentity === undefined
+    ? []
+    : validateMansionMusicIdentityV1(value.musicIdentity);
+  const validMusicIdentity = value.musicIdentity !== undefined && musicIdentityErrors.length === 0
+    ? value.musicIdentity as MansionMusicIdentityV1
+    : null;
   if (value.investigationThemeLoop !== undefined && value.investigationThemeLoop !== null) {
     const themeDuration = typeof value.investigationThemeAssetId === "string"
       ? assetCollection.byId.get(value.investigationThemeAssetId)?.durationMs
       : null;
-    if (typeof themeDuration !== "number" || !value.musicIdentity) {
+    if (typeof themeDuration !== "number" || !validMusicIdentity) {
       errors.push("manifest.investigationThemeLoop requires a timed theme and music identity.");
     } else {
       errors.push(...validateMansionMusicLoopV1(
         value.investigationThemeLoop,
         themeDuration,
-        value.musicIdentity,
+        validMusicIdentity,
       ).map((error) => `manifest.${error}`));
     }
   }
-  if (value.musicIdentity !== undefined) {
-    errors.push(...validateMansionMusicIdentityV1(value.musicIdentity).map((error) => `manifest.${error}`));
-  }
+  errors.push(...musicIdentityErrors.map((error) => `manifest.${error}`));
   if (value.ambience !== undefined && value.ambience !== null) {
     if (!isRecord(value.ambience) || value.ambience.version !== 1) {
       errors.push("manifest.ambience is invalid.");

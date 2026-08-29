@@ -704,6 +704,7 @@ export async function updateDebateMysteryMansionLibraryV1(
     description: description === undefined ? current.description : description,
     thumbnailAssetId: current.thumbnailAssetId,
     music: current.music,
+    atmosphere: current.atmosphere,
   };
   const now = new Date().toISOString();
   db.exec("BEGIN IMMEDIATE");
@@ -847,6 +848,7 @@ export function cloneDebateMysteryMansionBundleV1(
   const sourceDescription =
     sourcePresentation.overrides.description ?? sourcePresentation.defaults.description;
   const sourceThumbnail = sourcePresentation.overrides.thumbnailAssetId;
+  const sourceLibraryMetadata = parseLibraryMetadata(source.library_metadata_json);
   const sourceRooms = parseRooms(source.layout_json);
   const sourceLayoutV2 = parseLayoutV2(source.layout_json);
   const migratedLayoutV2 = sourceLayoutV2 ??
@@ -886,7 +888,8 @@ export function cloneDebateMysteryMansionBundleV1(
     title: null,
     description: sourceDescription,
     thumbnailAssetId: sourceThumbnail,
-    music: parseLibraryMetadata(source.library_metadata_json).music,
+    music: sourceLibraryMetadata.music,
+    atmosphere: sourceLibraryMetadata.atmosphere,
   };
 
   db.exec("BEGIN IMMEDIATE");

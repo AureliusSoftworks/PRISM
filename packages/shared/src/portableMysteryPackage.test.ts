@@ -143,6 +143,15 @@ test("mansion manifests carry an optional titled, sealed music identity while le
     }).join("\n"),
     /musicIdentity safety contract is invalid/u,
   );
+  const invalidIdentityErrors = validateMansionPackageManifestV1({
+    ...current,
+    musicIdentity: {},
+  }).join("\n");
+  assert.match(
+    invalidIdentityErrors,
+    /investigationThemeLoop requires a timed theme and music identity/u,
+  );
+  assert.match(invalidIdentityErrors, /musicIdentity.version is invalid/u);
   assert.match(
     validateMansionPackageManifestV1({ ...current, investigationThemeTitle: "" }).join("\n"),
     /investigationThemeTitle is invalid/u,
