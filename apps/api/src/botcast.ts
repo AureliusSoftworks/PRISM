@@ -8796,6 +8796,51 @@ export function recordBotcastAudioCue(
   return getBotcastEpisode(db, userId, episode.id);
 }
 
+export function recordBotcastVoicePlaybackRecovery(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+  input: {
+    messageId: string;
+    reason: "progress_stalled";
+    elapsedMs: number;
+    durationMs: number;
+  },
+): BotcastEpisode {
+  const episode = getBotcastEpisode(db, userId, episodeId);
+  if (episode.status !== "live") {
+    throw new Error("Signal voice recovery is locked after the episode ends.");
+  }
+  if (!episode.messages.some((message) => message.id === input.messageId)) {
+    throw new Error("Signal voice recovery requires an episode message.");
+  }
+  if (input.reason !== "progress_stalled") {
+    throw new Error("Choose a valid Signal voice recovery reason.");
+  }
+  const elapsedMs = Number.isFinite(input.elapsedMs)
+    ? Math.max(0, Math.round(input.elapsedMs))
+    : 0;
+  const durationMs = Number.isFinite(input.durationMs)
+    ? Math.max(1, Math.round(input.durationMs))
+    : 1;
+  recordEvent(
+    db,
+    userId,
+    episode.id,
+    "voice_playback_recovery",
+    {
+      v: 1,
+      messageId: input.messageId,
+      reason: input.reason,
+      elapsedMs: Math.min(elapsedMs, durationMs),
+      durationMs,
+      outcome: "advanced_after_bounded_stop",
+    },
+    new Date().toISOString(),
+  );
+  return getBotcastEpisode(db, userId, episode.id);
+}
+
 /** Queue one owned image for the host to introduce on the next eligible turn. */
 export function queueBotcastEpisodeImageContext(
   db: DatabaseSync,

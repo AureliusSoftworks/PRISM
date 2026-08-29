@@ -226,6 +226,7 @@ import {
 import { signalOrganicCaptionPresentationV1 } from "./signalOrganicCaption";
 import { nextBotcastShowIdAfterDeletion } from "./botcastDeletion";
 import { waitForSignalTurnPreparation } from "./signalTurnPreparationWait";
+import { signalVoiceProgressHeartbeatAdvanced } from "./signalVoiceProgressWatchdog";
 import {
   signalHostRecoveryCandidateEnabled,
   signalHostRecoveryCandidateLabel,
@@ -8399,6 +8400,7 @@ export function BotcastExperience({
       let voiceCompletionTimer: number | null = null;
       let settleVoicePlayback: ((value: boolean) => void) | null = null;
       let voiceAttemptActive = true;
+      let lastVoiceProgressElapsedMs = 0;
       let followingTurnPrepared = false;
       const presentationDeferred =
         options?.deferPresentationUntilPlaybackStart === true;
@@ -8548,9 +8550,23 @@ export function BotcastExperience({
         }
         voiceCompletionTimer = window.setTimeout(
           () => {
-          voiceAttemptActive = false;
-          onStopUtterance?.();
-          settleVoicePlayback?.(false);
+            voiceAttemptActive = false;
+            if (playbackStarted) {
+              void request(
+                `/api/botcast/episodes/${encodeURIComponent(currentEpisode.id)}/voice-playback-recovery`,
+                {
+                  method: "POST",
+                  body: JSON.stringify({
+                    messageId: message.id,
+                    reason: "progress_stalled",
+                    elapsedMs: lastVoiceProgressElapsedMs,
+                    durationMs: armedVoiceCompletionDurationMs,
+                  }),
+                },
+              ).catch(() => undefined);
+            }
+            onStopUtterance?.();
+            settleVoicePlayback?.(false);
           },
           delayMs,
         );
@@ -8705,9 +8721,17 @@ export function BotcastExperience({
             !playbackStillOwned()
           )
             return;
-          armVoiceCompletionWatchdog(durationMs, elapsedMs, {
-            heartbeat: true,
-          });
+          if (
+            signalVoiceProgressHeartbeatAdvanced({
+              previousElapsedMs: lastVoiceProgressElapsedMs,
+              elapsedMs,
+            })
+          ) {
+            lastVoiceProgressElapsedMs = Math.max(0, elapsedMs);
+            armVoiceCompletionWatchdog(durationMs, elapsedMs, {
+              heartbeat: true,
+            });
+          }
           if (
             elapsedMs / Math.max(1, durationMs) >=
             SIGNAL_HOST_CUE_REDIRECT_LATEST_PROGRESS

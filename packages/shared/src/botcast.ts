@@ -1693,6 +1693,7 @@ export type BotcastReplayEventKind =
   | "capture_timing"
   | "guest_thinking"
   | "session_clock_hold"
+  | "voice_playback_recovery"
   | "episode_completed"
   | "episode_cancelled";
 

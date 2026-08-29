@@ -508,6 +508,7 @@ import {
   readBotcastShowIntroAudio,
   readBotcastShowOutdentAudio,
   recordBotcastAudioCue,
+  recordBotcastVoicePlaybackRecovery,
   queueBotcastEpisodeImageContext,
   queueBotcastProducerCue,
   recoverBotcastProducerCueDispatch,
