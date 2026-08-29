@@ -109,6 +109,23 @@ interface AuthenticatedApiOptions {
   preserveBotLibraryGroupsOnReload?: boolean;
 }
 
+const completedTutorialProgress = Object.fromEntries(
+  [
+    "zen",
+    "chat",
+    "coffee",
+    "debate",
+    "botcast",
+    "avatar",
+    "prismWield",
+    "signalRefract",
+    "slate",
+  ].map((tutorialId) => [
+    tutorialId,
+    { status: "completed", step: 0, remindAfter: null },
+  ]),
+);
+
 interface TestImageRecord {
   id: string;
   prompt: string;
@@ -356,7 +373,8 @@ async function installAuthenticatedApi(
             introResolution: "completed",
             setupStep: 0,
           },
-          tutorialProgress: options.tutorialProgress,
+          tutorialProgress:
+            options.tutorialProgress ?? completedTutorialProgress,
           atmosphereStyle: fixtureHubAtmosphereStyle,
           hubAtmosphereEnabled: fixtureHubAtmosphereEnabled,
           hubAtmosphereImageId: options.hubAtmosphereImageId ?? null,
@@ -2406,7 +2424,7 @@ test.describe("PRISM desktop smoke", () => {
       const dialog = page.getByRole("dialog", {
         name: `${groupName} atmosphere`,
       });
-      await dialog.getByTitle(secondImage.prompt).click();
+      await dialog.locator('button[aria-pressed="false"]').click();
       await expect(
         page.locator(`[data-room-atmosphere-image-id="${secondImage.id}"]`),
       ).toBeVisible();
@@ -3507,6 +3525,7 @@ test.describe("PRISM desktop smoke", () => {
       expect(groupSessionBody?.presetId).toBeUndefined();
       expect(groupSessionBody?.forceAttendance).toBe(true);
       expect(directSessionPosts).toEqual([]);
+      await page.getByRole("button", { name: "Skip", exact: true }).click();
       await expect(page.locator('[data-phase="arriving"]')).toBeVisible();
       const checkpointKey = `prism_bot_group_coffee_return_checkpoint_v1:${encodeURIComponent(coffeeSessionId)}`;
       await expect
