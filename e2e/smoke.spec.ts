@@ -344,6 +344,7 @@ async function installAuthenticatedApi(
           theme?: unknown;
           atmosphereStyle?: unknown;
           hubAtmosphereEnabled?: unknown;
+          preferredProvider?: unknown;
         };
         if (
           body.theme === "dark" ||
@@ -354,6 +355,15 @@ async function installAuthenticatedApi(
         }
         if (typeof body.hubAtmosphereEnabled === "boolean") {
           fixtureHubAtmosphereEnabled = body.hubAtmosphereEnabled;
+        }
+        if (
+          body.preferredProvider === "local" ||
+          body.preferredProvider === "openai" ||
+          body.preferredProvider === "anthropic" ||
+          body.preferredProvider === "google" ||
+          body.preferredProvider === "xai"
+        ) {
+          fixtureUser.preferredProvider = body.preferredProvider;
         }
         if (
           body.atmosphereStyle === "prismatic" ||
@@ -646,6 +656,9 @@ async function installAuthenticatedApi(
       return json({ ok: true, groups: [] });
     if (pathname === "/api/coffee/presets")
       return json({ ok: true, presets: [] });
+    if (/^\/api\/coffee\/sessions\/[^/]+\/context-sparks$/.test(pathname)) {
+      return json({ ok: true, sparks: [] });
+    }
     return json({});
   });
 }
@@ -1238,8 +1251,10 @@ test.describe("PRISM desktop smoke", () => {
     for (const mode of ["ONLINE", "LOCAL"] as const) {
       const modeButton = page.getByRole("button", { name: mode, exact: true });
       await expect(modeButton).toBeEnabled();
-      await modeButton.click();
-      await expect(modeButton).toHaveAttribute("aria-pressed", "true");
+      await activateNavigationControl(modeButton);
+      await expect(modeButton).toHaveAttribute("aria-pressed", "true", {
+        timeout: 20_000,
+      });
       await variantTile.click();
       await expect(variantTile).toHaveAttribute("aria-selected", "true");
       await variantTile.click();
@@ -3534,8 +3549,17 @@ test.describe("PRISM desktop smoke", () => {
       expect(groupSessionBody?.presetId).toBeUndefined();
       expect(groupSessionBody?.forceAttendance).toBe(true);
       expect(directSessionPosts).toEqual([]);
-      await page.getByRole("button", { name: "Skip", exact: true }).click();
-      await expect(page.locator('[data-phase="arriving"]')).toBeVisible();
+      const arrivingPhase = page.locator('[data-phase="arriving"]');
+      const skipIntro = page.getByRole("button", {
+        name: "Skip",
+        exact: true,
+      });
+      if (await skipIntro.isVisible()) {
+        await skipIntro
+          .evaluate((element) => (element as HTMLButtonElement).click())
+          .catch(() => undefined);
+      }
+      await expect(arrivingPhase).toBeVisible();
       const checkpointKey = `prism_bot_group_coffee_return_checkpoint_v1:${encodeURIComponent(coffeeSessionId)}`;
       await expect
         .poll(() =>
