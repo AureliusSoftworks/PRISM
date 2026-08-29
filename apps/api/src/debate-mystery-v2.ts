@@ -8893,6 +8893,17 @@ export async function runDebateMysteryCompilationV2(
       if (!incidentPlanValidation.valid) {
         throw new Error(incidentPlanValidation.errors.join("\n"));
       }
+      const savedMansionRooms = config.mansionBundleId
+        ? config.mansionSnapshot?.rooms ?? getDebateMysteryMansionBundleV2(
+            db,
+            userId,
+            config.mansionBundleId,
+          ).rooms
+        : null;
+      const crimeSceneRoom = savedMansionRooms?.find((room) => !room.assignedSuspectSeatId) ?? null;
+      const orderedMansionRooms = savedMansionRooms && crimeSceneRoom
+        ? [crimeSceneRoom, ...savedMansionRooms.filter((room) => room.id !== crimeSceneRoom.id)]
+        : savedMansionRooms;
       const scaffold = compileDeterministicDebateMystery({
         config: v1ScaffoldConfig(config, incidentPlan),
         suspects: suspectRows.map((bot) => ({
@@ -8902,14 +8913,9 @@ export async function runDebateMysteryCompilationV2(
           color: bot.color,
           glyph: bot.glyph,
         })),
-        ...(config.mansionBundleId
+        ...(orderedMansionRooms
           ? {
-              roomBlueprint: (config.mansionSnapshot?.rooms ??
-                getDebateMysteryMansionBundleV2(
-                  db,
-                  userId,
-                  config.mansionBundleId,
-                ).rooms).map((room, index) => ({
+              roomBlueprint: orderedMansionRooms.map((room, index) => ({
                 id: room.id,
                 floor: room.floor,
                 x: room.x,
