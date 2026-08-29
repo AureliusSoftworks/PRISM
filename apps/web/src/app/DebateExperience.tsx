@@ -191,6 +191,7 @@ import {
   type MansionPackageInspectionV1,
 } from "./mansionPackageClient";
 import InstalledMansionLibrary from "./InstalledMansionLibraryPanel";
+import MansionEditorDialog from "./MansionEditorDialog";
 import { validateMansionMusicCandidateUrlV1 } from "./mansionMusicValidation";
 import WhodunnitSetupDialog from "./WhodunnitSetupDialog";
 import {
@@ -5078,6 +5079,8 @@ export function DebateExperience(
   const [mysteryMansionBundles, setMysteryMansionBundles] = useState<
     DebateMysteryMansionBundleSummaryV1[]
   >([]);
+  const [blankMansionEditor, setBlankMansionEditor] =
+    useState<DebateMysteryMansionBundleSummaryV1 | null>(null);
   const [mysteryMansionBundleId, setMysteryMansionBundleId] = useState("");
   const [mansionPackageFile, setMansionPackageFile] = useState<File | null>(null);
   const [mansionPackagePassword, setMansionPackagePassword] = useState("");
@@ -6871,6 +6874,29 @@ export function DebateExperience(
     }
   }, [request]);
 
+  const createBlankMansion = useCallback(async (): Promise<void> => {
+    setMansionPackageState("updating");
+    setError(null);
+    try {
+      const result = await request<{ mansion: DebateMysteryMansionBundleSummaryV1 }>(
+        "/api/debates/mystery-mansions",
+        { ...requestBody({}), method: "POST" },
+      );
+      if (!mountedRef.current) return;
+      setMysteryMansionBundles((current) => [
+        result.mansion,
+        ...current.filter((candidate) => candidate.id !== result.mansion.id),
+      ]);
+      setBlankMansionEditor(result.mansion);
+    } catch (caught) {
+      if (mountedRef.current) {
+        setError(caught instanceof Error ? caught.message : "A blank mansion draft could not be created.");
+      }
+    } finally {
+      if (mountedRef.current) setMansionPackageState("idle");
+    }
+  }, [request]);
+
   const saveInstalledMansionTopology = useCallback(async (
     mansion: DebateMysteryMansionBundleSummaryV1,
     layoutV2: MansionLayoutV2,
@@ -6901,7 +6927,7 @@ export function DebateExperience(
   const mutateSavedMansionRoomArt = useCallback(async (
     mansion: DebateMysteryMansionBundleSummaryV1,
     roomId: string,
-    action: "generate" | "accept" | "discard",
+    action: "generate" | "accept" | "discard" | "regenerate",
   ): Promise<DebateMysteryMansionBundleSummaryV1 | null> => {
     setMansionPackageState("updating");
     setError(null);
@@ -19711,6 +19737,7 @@ export function DebateExperience(
                   onGenerateRoomArt={(mansion, roomId) => mutateSavedMansionRoomArt(mansion, roomId, "generate")}
                   onAcceptRoomArt={(mansion, roomId) => mutateSavedMansionRoomArt(mansion, roomId, "accept")}
                   onDiscardRoomArt={(mansion, roomId) => mutateSavedMansionRoomArt(mansion, roomId, "discard")}
+                  onRegenerateRoomArt={(mansion, roomId) => mutateSavedMansionRoomArt(mansion, roomId, "regenerate")}
                   onExport={(mansion) => void exportSavedMansion(mansion)}
                   onGenerateTheme={(mansion) => mutateSavedMansionTheme(mansion, "generate")}
                   onAcceptTheme={(mansion) => mutateSavedMansionTheme(mansion, "accept")}
@@ -19731,6 +19758,10 @@ export function DebateExperience(
               <div className={mysteryStyles.setupSection} data-tutorial-target="whodunnit-preset">
                 <header><div><small>1</small><h2>Choose a mansion size</h2></div><span>{mysteryTargetSuspects} suspects</span></header>
                 <p>Quick is the shortest full mansion. Every new mansion has a functional upstairs.</p>
+                <div className={mysteryStyles.guidedSecondaryAction} data-tutorial-target="whodunnit-create-mansion-editor">
+                  <div><strong>Design the mansion yourself</strong><small>Start with the smallest connected two-floor house, then compose its rooms in Mansion Editor.</small></div>
+                  <button type="button" disabled={mansionPackageState !== "idle"} onClick={() => void createBlankMansion()}>{mansionPackageState === "updating" ? "Opening editor…" : "Open Mansion Editor"}</button>
+                </div>
                 <div className={mysteryStyles.presetGrid}>
                   {DEBATE_MYSTERY_V2_PRESETS.map((option) => (
                     <button
@@ -31541,6 +31572,21 @@ export function DebateExperience(
           )
         : null}
       {experience}
+      {blankMansionEditor ? (
+        <MansionEditorDialog
+          theme={props.theme}
+          mansion={blankMansionEditor}
+          busy={mansionPackageState !== "idle"}
+          responseMode={props.responseMode === "local" ? "local" : "online"}
+          creationFlow
+          onClose={() => setBlankMansionEditor(null)}
+          onSave={saveInstalledMansionTopology}
+          onGenerateRoomArt={(mansion, roomId) => mutateSavedMansionRoomArt(mansion, roomId, "generate")}
+          onAcceptRoomArt={(mansion, roomId) => mutateSavedMansionRoomArt(mansion, roomId, "accept")}
+          onDiscardRoomArt={(mansion, roomId) => mutateSavedMansionRoomArt(mansion, roomId, "discard")}
+          onRegenerateRoomArt={(mansion, roomId) => mutateSavedMansionRoomArt(mansion, roomId, "regenerate")}
+        />
+      ) : null}
       {renderStageAlignmentModal(activeSession)}
       {inventWarmup ? (
         <ModelWarmupIntermission

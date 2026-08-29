@@ -1052,6 +1052,16 @@ WHODUNNIT_TUTORIAL_STEP.body = WHODUNNIT_TUTORIAL_STEP.body.replace(
   "Double-click a room to enter its Room Editor. Rotate the selected room or corridor with the counterclockwise and clockwise arrows in the right inspector; Undo restores the previous architectural layout step.",
 );
 
+WHODUNNIT_TUTORIAL_STEP.body = WHODUNNIT_TUTORIAL_STEP.body
+  .replace(
+    "Mansion then asks whether to use Installed Mansions or create a new Quick, Standard, Grand, or Custom house.",
+    "Mansion then asks whether to use Installed Mansions or create a new Quick, Standard, Grand, or Custom house. Create a new mansion also offers Open Mansion Editor: it creates a tenant-owned blank draft with the smallest valid connected two-floor plan, then opens the same full-screen editor used for Derived mansions. The complete semantic room-block palette runs from Ballroom through Garage; rooftop-only rooms stay on the highest occupied floor in both the controls and saved validation. Select any removable room or corridor and remove it from the right inspector. Continue checks the connected plan and derives its bundled or accepted 24-color Mosaic silhouettes behind an informative full-screen blocker, then returns to the mansion map so you can review it before choosing Use this mansion.",
+  )
+  .replace(
+    "In ONLINE, Generate room-art candidate stages mansion-owned art without replacing the accepted plate until Accept candidate; Retry candidate and Discard candidate also leave accepted art intact. LOCAL disables generation and continues with bundled or already accepted art.",
+    "Inside the open Room Editor, Regenerate room asset deliberately returns only that room to its bundled Mosaic plate and clears that room's anchors, lights, and staged art. Upgrade this room to Illustrated · ONLINE stages a candidate for only the open room without replacing its accepted plate until Accept candidate; retrying or discarding also leaves accepted art intact. There is no all-room upgrade in Mansion Editor. LOCAL disables Illustrated generation and continues with bundled or already accepted art.",
+  );
+
 WHODUNNIT_TUTORIAL_STEP.body = WHODUNNIT_TUTORIAL_STEP.body.replace(
   "Ordinary Investigation dialogue closes itself after presentation: spoken lines hold briefly after their audio ends, while silent text holds through its final character and a length-aware reading interval.",
   "Click any non-interactive part of the screen, or press Space or Return, to finish or advance the visible line early. A choice, evidence response, examination selection, tutorial acknowledgment, or other meaningful prompt stays open until you answer it.",

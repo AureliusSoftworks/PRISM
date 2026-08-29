@@ -24,9 +24,11 @@ import {
   mansionLayoutV2FloorSemanticRoomCount,
   mansionLayoutV2FromLegacyRooms,
   mansionLayoutV2PlacementIsLegal,
+  mansionLayoutV2RooftopFloor,
   placeMansionLayoutV2Entity,
   mansionLayoutV2SemanticRoomCount,
   mansionLayoutV2SemanticRoomsAreConnected,
+  mansionLayoutV2TemplateIsRooftopOnly,
   mansionLayoutV2SharedWall,
   reconcileMansionLayoutV2Doors,
   removeMansionLayoutV2Door,
@@ -53,13 +55,17 @@ import {
   whodunnitMansionRoomArtUrl,
 } from "./debateMysteryInvestigationArt";
 import WhodunnitSetupDialog from "./WhodunnitSetupDialog";
+import { PrismBlockingLoader } from "./PrismBlockingLoader";
 import styles from "./debateMystery.module.css";
+
+const CREATION_MOSAIC_MINIMUM_LOADER_MS = 900;
 
 interface MansionEditorDialogProps {
   theme: "light" | "dark";
   mansion: DebateMysteryMansionBundleSummaryV1;
   busy: boolean;
   responseMode: "local" | "online";
+  creationFlow?: boolean;
   onClose: () => void;
   onSave: (
     mansion: DebateMysteryMansionBundleSummaryV1,
@@ -74,6 +80,10 @@ interface MansionEditorDialogProps {
     roomId: string,
   ) => Promise<DebateMysteryMansionBundleSummaryV1 | null>;
   onDiscardRoomArt?: (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+    roomId: string,
+  ) => Promise<DebateMysteryMansionBundleSummaryV1 | null>;
+  onRegenerateRoomArt?: (
     mansion: DebateMysteryMansionBundleSummaryV1,
     roomId: string,
   ) => Promise<DebateMysteryMansionBundleSummaryV1 | null>;
@@ -461,16 +471,19 @@ function omniHasNeonBulb(
 
 export default function MansionEditorDialog({
   theme,
-  mansion,
+  mansion: initialMansion,
   busy,
   responseMode,
+  creationFlow = false,
   onClose,
   onSave,
   onGenerateRoomArt,
   onAcceptRoomArt,
   onDiscardRoomArt,
+  onRegenerateRoomArt,
 }: MansionEditorDialogProps): JSX.Element {
-  const [layout, setLayout] = useState(() => initialLayout(mansion));
+  const [mansion, setMansion] = useState(initialMansion);
+  const [layout, setLayout] = useState(() => initialLayout(initialMansion));
   const [layoutHistory, setLayoutHistory] = useState<MansionLayoutV2[]>([]);
   const [selectedFloor, setSelectedFloor] = useState(1);
   const [selectedEntityId, setSelectedEntityId] = useState(
@@ -480,7 +493,10 @@ export default function MansionEditorDialog({
   const [mosaicPreview, setMosaicPreview] = useState(true);
   const [saving, setSaving] = useState(false);
   const [roomArtBusy, setRoomArtBusy] = useState(false);
+  const [creationPrepared, setCreationPrepared] = useState(false);
+  const [regenerateConfirmationRoomId, setRegenerateConfirmationRoomId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [roomArtNotice, setRoomArtNotice] = useState<string | null>(null);
   const [drag, setDrag] = useState<EntityDragV2 | null>(null);
   const [corridorResize, setCorridorResize] = useState<CorridorResizeV2 | null>(null);
   const [roomTool, setRoomTool] = useState<RoomPlacementToolV2 | null>(null);
@@ -501,6 +517,8 @@ export default function MansionEditorDialog({
   const persistedLayoutMatchesDraft = Boolean(
     mansion.layoutV2 && canonicalMansionLayoutV2(mansion.layoutV2) === canonicalMansionLayoutV2(layout),
   );
+  const creationReady = creationPrepared && persistedLayoutMatchesDraft;
+  const roomRefinementReady = !creationFlow || creationReady;
   const presentation = resolveInstalledMansionPresentationV1(mansion);
   const semanticRoomCount = mansionLayoutV2SemanticRoomCount(layout);
   const draftFloors = Math.max(1, ...layout.entities.map((entity) => entity.floor));
@@ -520,7 +538,18 @@ export default function MansionEditorDialog({
     }),
     [layout, mansion.suspectCount],
   );
+  const selectedRemovalErrors = selectedEntity
+    ? validateMansionLayoutV2(removeEntityFromLayout(layout, selectedEntity.id), {
+        suspectCount: mansion.suspectCount,
+        requireEditorFloors: true,
+      })
+    : [];
+  const selectedRemovalBlockedReason = selectedRoom?.templateId === "foyer"
+    ? "The Foyer is required structure."
+    : selectedRemovalErrors[0] ?? null;
+  const selectedEntityCanBeRemoved = Boolean(selectedEntity && !selectedRemovalBlockedReason);
   const thirdFloorAccessible = mansionLayoutV2FloorSemanticRoomCount(layout, 2) >= 4;
+  const rooftopFloor = mansionLayoutV2RooftopFloor(layout);
 
   const pushLayoutHistory = (snapshot: MansionLayoutV2): void => {
     setLayoutHistory((current) => {
@@ -535,6 +564,16 @@ export default function MansionEditorDialog({
     if (canonicalMansionLayoutV2(next) === canonicalMansionLayoutV2(layout)) return;
     pushLayoutHistory(layout);
     setLayout(next);
+  };
+
+  const openRoomEditor = (roomId: string): void => {
+    if (!roomRefinementReady) {
+      setNotice("Continue to generate the Mosaic before entering individual rooms.");
+      return;
+    }
+    setRoomArtNotice(null);
+    setRegenerateConfirmationRoomId(null);
+    setRoomEditorId(roomId);
   };
 
   const undoLayout = (): void => {
@@ -573,23 +612,34 @@ export default function MansionEditorDialog({
   const replaceLayoutFromMansion = (
     updated: DebateMysteryMansionBundleSummaryV1 | null,
   ): void => {
-    if (updated?.layoutV2) setLayout(cloneLayout(updated.layoutV2));
+    if (!updated) return;
+    setMansion(updated);
+    if (updated.layoutV2) setLayout(cloneLayout(updated.layoutV2));
   };
 
   const mutateRoomArt = async (
-    action: "generate" | "accept" | "discard",
+    action: "generate" | "accept" | "discard" | "regenerate",
     roomId: string,
   ): Promise<void> => {
     const handler = action === "generate"
       ? onGenerateRoomArt
       : action === "accept"
         ? onAcceptRoomArt
-        : onDiscardRoomArt;
+        : action === "discard"
+          ? onDiscardRoomArt
+          : onRegenerateRoomArt;
     if (!handler || roomArtBusy) return;
     setRoomArtBusy(true);
     setNotice(null);
+    setRoomArtNotice(null);
     try {
-      replaceLayoutFromMansion(await handler(mansion, roomId));
+      const updated = await handler(mansion, roomId);
+      replaceLayoutFromMansion(updated);
+      if (updated && action === "regenerate") {
+        setSelectedLightId(null);
+        setRegenerateConfirmationRoomId(null);
+        setRoomArtNotice("This room returned to its bundled Mosaic plate; its anchors and lights were cleared.");
+      }
     } finally {
       setRoomArtBusy(false);
     }
@@ -712,14 +762,26 @@ export default function MansionEditorDialog({
     }
   };
 
-  const addRoom = (): void => {
+  const addRoom = (requestedTemplateId?: string): void => {
     if (selectedFloor === 3 && !thirdFloorAccessible) {
       setNotice("Floor 2 needs at least four semantic rooms before Floor 3 opens.");
       return;
     }
-    const template = roomTemplate(layout.entities.some(
+    const defaultTemplateId = layout.entities.some(
       (entity) => entity.kind === "room" && entity.templateId === "foyer",
-    ) ? "parlor" : "foyer");
+    ) ? "parlor" : "foyer";
+    const template = roomTemplate(requestedTemplateId ?? defaultTemplateId);
+    if (mansionLayoutV2TemplateIsRooftopOnly(template.id) &&
+      (selectedFloor === 1 || selectedFloor < rooftopFloor)) {
+      setNotice(`Rooftop rooms can only be placed on the current top floor, Floor ${rooftopFloor}.`);
+      return;
+    }
+    const lowerRooftopRoom = layout.entities.find((entity) => entity.kind === "room" &&
+      mansionLayoutV2TemplateIsRooftopOnly(entity.templateId) && entity.floor < selectedFloor);
+    if (lowerRooftopRoom) {
+      setNotice(`Change the rooftop room on Floor ${lowerRooftopRoom.floor} before building above it.`);
+      return;
+    }
     const entity: MansionLayoutRoomV2 = {
       kind: "room",
       id: stableId("room"),
@@ -766,7 +828,11 @@ export default function MansionEditorDialog({
   };
 
   const removeSelectedEntity = (): void => {
-    if (!selectedEntity || selectedRoom?.templateId === "foyer") return;
+    if (!selectedEntity) return;
+    if (!selectedEntityCanBeRemoved) {
+      setNotice(selectedRemovalBlockedReason ?? "That block is required by the mansion structure.");
+      return;
+    }
     const next = removeEntityFromLayout(layout, selectedEntity.id);
     if (mansionLayoutV2SemanticRoomsAreConnected(layout) &&
       !mansionLayoutV2SemanticRoomsAreConnected(next)) {
@@ -781,6 +847,11 @@ export default function MansionEditorDialog({
 
   const changeRoomTemplate = (room: MansionLayoutRoomV2, templateId: string): void => {
     const template = roomTemplate(templateId);
+    if (mansionLayoutV2TemplateIsRooftopOnly(template.id) &&
+      (room.floor === 1 || room.floor !== rooftopFloor)) {
+      setNotice(`Rooftop rooms can only be used on the current top floor, Floor ${rooftopFloor}.`);
+      return;
+    }
     const candidate: MansionLayoutRoomV2 = {
       ...room,
       templateId: template.id,
@@ -963,10 +1034,24 @@ export default function MansionEditorDialog({
 
   const save = async (): Promise<void> => {
     if (validationErrors.length > 0) return;
+    const loaderStartedAt = Date.now();
     setSaving(true);
     try {
       const saved = await onSave(mansion, layout);
-      if (saved) onClose();
+      if (!saved) return;
+      replaceLayoutFromMansion(saved);
+      if (creationFlow) {
+        const remainingLoaderTime = CREATION_MOSAIC_MINIMUM_LOADER_MS - (Date.now() - loaderStartedAt);
+        if (remainingLoaderTime > 0) {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, remainingLoaderTime));
+        }
+        setCreationPrepared(true);
+        setLayoutHistory([]);
+        setRoomEditorId(null);
+        setNotice("Mosaic silhouettes are ready. Review the mansion map, then use this mansion.");
+      } else {
+        onClose();
+      }
     } finally {
       setSaving(false);
     }
@@ -1006,7 +1091,7 @@ export default function MansionEditorDialog({
             ))}
           </nav>
           <div>
-            <button type="button" onClick={addRoom}>+ Room</button>
+            <button type="button" onClick={() => addRoom()}>+ Room</button>
             <button type="button" onClick={addCorridor}>+ Corridor</button>
           </div>
         </header>
@@ -1018,7 +1103,7 @@ export default function MansionEditorDialog({
               const preview = drag?.id === entity.id
                 ? { ...rect, x: drag.previewX, y: drag.previewY }
                 : rect;
-              const roomArt = entity.kind === "room"
+              const roomArt = entity.kind === "room" && roomRefinementReady
                 ? roomAssetUrl(mansion, entity, true)
                 : null;
               return (
@@ -1036,7 +1121,7 @@ export default function MansionEditorDialog({
                     gridRow: `${preview.y + 1} / span ${preview.height}`,
                     ...(roomArt ? { backgroundImage: `linear-gradient(rgb(4 8 15 / 28%), rgb(4 8 15 / 62%)), url("${roomArt}")` } : {}),
                   } as CSSProperties}
-                  onDoubleClick={() => entity.kind === "room" && setRoomEditorId(entity.id)}
+                  onDoubleClick={() => entity.kind === "room" && openRoomEditor(entity.id)}
                   onClick={() => setSelectedEntityId(entity.id)}
                   onPointerDown={(event) => beginDrag(event, entity)}
                   onPointerMove={continueDrag}
@@ -1087,13 +1172,37 @@ export default function MansionEditorDialog({
             })}
           </div>
           <div className={styles.mansionEditorCanvasActions}>
-            <span>Drag to arrange. Collisions reflow nearby blocks; only an island returns. Double-click a room to enter it.</span>
-            <button type="button" disabled={!selectedRoom} onClick={() => selectedRoom && setRoomEditorId(selectedRoom.id)}>Open Room Editor</button>
+            <span>{roomRefinementReady
+              ? "Drag to arrange. Collisions reflow nearby blocks; only an island returns. Double-click a room to enter it."
+              : "Arrange structural placeholders, then Continue to generate Mosaic silhouettes before entering rooms."}</span>
+            <button type="button" disabled={!selectedRoom || !roomRefinementReady} onClick={() => selectedRoom && openRoomEditor(selectedRoom.id)}>Open Room Editor</button>
           </div>
         </div>
       </div>
 
       <aside className={styles.mansionEditorInspector}>
+        <section className={styles.mansionEditorRoomPalette} aria-label="Semantic room palette">
+          <header><strong>Room blocks</strong><small>Add to Floor {selectedFloor}</small></header>
+          <div>
+            {DEBATE_MYSTERY_ROOM_TEMPLATES.map((template) => {
+              const rooftopOnly = mansionLayoutV2TemplateIsRooftopOnly(template.id);
+              const disabled = rooftopOnly && (selectedFloor === 1 || selectedFloor < rooftopFloor);
+              return (
+                <button
+                  key={template.id}
+                  type="button"
+                  disabled={disabled}
+                  title={disabled ? `Rooftop-only · use Floor ${rooftopFloor}` : `Add ${template.name}`}
+                  onClick={() => addRoom(template.id)}
+                >
+                  <span aria-hidden="true">{template.emoji}</span>
+                  <strong>{template.name}</strong>
+                  {rooftopOnly ? <small>Rooftop only</small> : null}
+                </button>
+              );
+            })}
+          </div>
+        </section>
         {selectedEntity ? (
           <>
             <header>
@@ -1123,11 +1232,14 @@ export default function MansionEditorDialog({
                     {!DEBATE_MYSTERY_ROOM_TEMPLATES.some((template) => template.id === selectedRoom.templateId)
                       ? <option value={selectedRoom.templateId}>{selectedRoom.name} · imported type</option>
                       : null}
-                    {DEBATE_MYSTERY_ROOM_TEMPLATES.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
+                    {DEBATE_MYSTERY_ROOM_TEMPLATES.map((template) => {
+                      const rooftopOnly = mansionLayoutV2TemplateIsRooftopOnly(template.id);
+                      return <option key={template.id} value={template.id} disabled={rooftopOnly && (selectedRoom.floor === 1 || selectedRoom.floor !== rooftopFloor)}>{template.name}{rooftopOnly ? " · rooftop only" : ""}</option>;
+                    })}
                   </select>
                 </label>
                 <label>Room name<input value={selectedRoom.name} maxLength={80} onChange={(event) => updateRoom(selectedRoom.id, { name: event.currentTarget.value })} /></label>
-                <button type="button" onClick={() => setRoomEditorId(selectedRoom.id)}>Room art, anchors & lights</button>
+                <button type="button" disabled={!roomRefinementReady} title={roomRefinementReady ? undefined : "Generate the Mosaic before refining rooms"} onClick={() => openRoomEditor(selectedRoom.id)}>Room art, anchors & lights</button>
               </>
             ) : null}
 
@@ -1172,7 +1284,7 @@ export default function MansionEditorDialog({
                 <span aria-hidden="true">↕</span><span><strong>{connector.kind}</strong><small>Vertical connector preserved</small></span>
               </div>
             ))}
-            <button type="button" className={styles.mansionEditorRemoveRoom} disabled={selectedRoom?.templateId === "foyer"} onClick={removeSelectedEntity}>Remove {selectedRoom ? "room" : "block"}</button>
+            <button type="button" className={styles.mansionEditorRemoveRoom} disabled={!selectedEntityCanBeRemoved} title={selectedRemovalBlockedReason ?? "Remove selected block"} onClick={removeSelectedEntity}>Remove {selectedRoom ? "room" : "block"}</button>
           </>
         ) : <p>Select a room or corridor from the plan.</p>}
       </aside>
@@ -1182,8 +1294,12 @@ export default function MansionEditorDialog({
           <strong>{semanticRoomCount} semantic rooms · {draftFloors} floors · {draftScaleClass}</strong>
           {notice ? <span role="status">{notice}</span> : validationErrors.length > 0 ? <span role="alert">{validationErrors[0]}{validationErrors.length > 1 ? ` · ${validationErrors.length - 1} more` : ""}</span> : <span data-valid="true">Plan is connected and ready to save.</span>}
         </div>
-        <button type="button" disabled={busy || saving} onClick={onClose}>Close</button>
-        <button type="button" className={styles.installedMansionSave} disabled={busy || saving || validationErrors.length > 0} onClick={() => void save()}>{saving ? "Saving plan…" : "Save mansion plan"}</button>
+        <button type="button" disabled={busy || saving} onClick={onClose}>{creationFlow ? "Return to setup" : "Close"}</button>
+        {creationReady ? (
+          <button type="button" className={styles.installedMansionSave} disabled={busy || saving} onClick={onClose}>Use this mansion</button>
+        ) : (
+          <button type="button" className={styles.installedMansionSave} disabled={busy || saving || validationErrors.length > 0} onClick={() => void save()}>{saving ? "Preparing Mosaic…" : creationFlow ? "Continue" : "Save mansion plan"}</button>
+        )}
       </footer>
     </section>
   );
@@ -1211,48 +1327,50 @@ export default function MansionEditorDialog({
         onPointerUp={finishRoomOverlay}
         onPointerCancel={() => setOverlayGesture(null)}
       >
-        {(() => {
-          const candidate = layout.roomArtCandidates.find((entry) => entry.roomId === roomEditorRoom.id) ?? null;
-          const currentUrl = roomAssetUrl(mansion, roomEditorRoom, mosaicPreview);
-          const candidateUrl = candidate?.status === "ready" && candidate.assetId
-            ? candidateAssetUrl(mansion, candidate.assetId)
-            : null;
-          return candidateUrl ? (
-            <div className={styles.mansionRoomArtCompare}>
-              <figure>{currentUrl ? <img src={currentUrl} alt={`${roomEditorRoom.name} accepted or bundled room art`} /> : <span>Bundled silhouette</span>}<figcaption>Current</figcaption></figure>
-              <figure><img src={candidateUrl} alt={`${roomEditorRoom.name} generated candidate`} /><figcaption>Candidate · not accepted</figcaption></figure>
-            </div>
-          ) : currentUrl
-            ? <img src={currentUrl} alt={`${roomEditorRoom.name} room art`} />
-            : <div className={styles.mansionRoomArtFallback}><span aria-hidden="true">{roomEditorRoom.emoji}</span><strong>{roomEditorRoom.name}</strong></div>;
-        })()}
+        <div className={styles.mansionRoomArtViewport}>
+          {(() => {
+            const candidate = layout.roomArtCandidates.find((entry) => entry.roomId === roomEditorRoom.id) ?? null;
+            const currentUrl = roomAssetUrl(mansion, roomEditorRoom, mosaicPreview);
+            const candidateUrl = candidate?.status === "ready" && candidate.assetId
+              ? candidateAssetUrl(mansion, candidate.assetId)
+              : null;
+            return candidateUrl ? (
+              <div className={styles.mansionRoomArtCompare}>
+                <figure>{currentUrl ? <img src={currentUrl} alt={`${roomEditorRoom.name} accepted or bundled room art`} /> : <span>Bundled silhouette</span>}<figcaption>Current</figcaption></figure>
+                <figure><img src={candidateUrl} alt={`${roomEditorRoom.name} generated candidate`} /><figcaption>Candidate · not accepted</figcaption></figure>
+              </div>
+            ) : currentUrl
+              ? <img src={currentUrl} alt={`${roomEditorRoom.name} room art`} />
+              : <div className={styles.mansionRoomArtFallback}><span aria-hidden="true">{roomEditorRoom.emoji}</span><strong>{roomEditorRoom.name}</strong></div>;
+          })()}
 
-        <div
-          ref={roomOverlayRef}
-          className={styles.mansionRoomOverlay}
-          aria-label="Room authoring canvas"
-          data-active-tool={roomTool ?? undefined}
-        >
-          {layout.placementAnchors.filter((anchor) => anchor.roomId === roomEditorRoom.id).map((anchor) => (
-            <button key={anchor.id} type="button" className={styles.mansionRoomAnchorMarker} style={{ left: `${anchor.point.x * 100}%`, top: `${anchor.point.y * 100}%` }} title={`${anchor.relation} ${anchor.name}`} onPointerDown={(event) => event.stopPropagation()}>{anchor.name.slice(0, 1).toUpperCase()}</button>
-          ))}
-          {layout.lights.filter((light) => light.roomId === roomEditorRoom.id).map((light) => light.kind === "neon" ? (
-            <svg key={light.id} className={styles.mansionDynamicLight} data-light-kind="neon" data-selected={light.id === selectedLightId ? "true" : undefined} viewBox="0 0 100 100" preserveAspectRatio="none" style={lightStyle(light)} aria-label="Neon vector light" onPointerDown={(event) => beginLightGesture(event, light, "move")}>
-              <polyline points={light.geometry.points.map((point) => `${point.x * 100},${point.y * 100}`).join(" ")} fill="none" stroke="currentColor" strokeWidth={Math.max(0.5, light.geometry.width * 100)} />
-            </svg>
-          ) : (
-            <button key={light.id} type="button" className={styles.mansionDynamicLight} data-light-kind={light.kind} data-selected={light.id === selectedLightId ? "true" : undefined} data-fire-animation={light.kind === "fire" ? light.animation : undefined} data-directional-dust={light.kind === "directional" && light.dust ? "true" : undefined} data-bulb-flicker={omniHasNeonBulb(light, roomEditorLights) ? "true" : undefined} style={lightStyle(light)} aria-label={`${light.kind} dynamic light`} onPointerDown={(event) => beginLightGesture(event, light, "move")} />
-          ))}
-          {selectedLight ? (
-            <button
-              type="button"
-              className={styles.mansionLightResizeHandle}
-              style={lightResizeHandleStyle(selectedLight)}
-              aria-label={`Resize ${selectedLight.kind} light`}
-              onPointerDown={(event) => beginLightGesture(event, selectedLight, "resize")}
-            />
-          ) : null}
-          {roomTool ? <span className={styles.mansionRoomPlacementHint} role="status">{roomTool === "neon" ? "Draw the neon path" : `Click to place ${roomTool}`}</span> : null}
+          <div
+            ref={roomOverlayRef}
+            className={styles.mansionRoomOverlay}
+            aria-label="Room authoring canvas"
+            data-active-tool={roomTool ?? undefined}
+          >
+            {layout.placementAnchors.filter((anchor) => anchor.roomId === roomEditorRoom.id).map((anchor) => (
+              <button key={anchor.id} type="button" className={styles.mansionRoomAnchorMarker} style={{ left: `${anchor.point.x * 100}%`, top: `${anchor.point.y * 100}%` }} title={`${anchor.relation} ${anchor.name}`} onPointerDown={(event) => event.stopPropagation()}>{anchor.name.slice(0, 1).toUpperCase()}</button>
+            ))}
+            {layout.lights.filter((light) => light.roomId === roomEditorRoom.id).map((light) => light.kind === "neon" ? (
+              <svg key={light.id} className={styles.mansionDynamicLight} data-light-kind="neon" data-selected={light.id === selectedLightId ? "true" : undefined} viewBox="0 0 100 100" preserveAspectRatio="none" style={lightStyle(light)} aria-label="Neon vector light" onPointerDown={(event) => beginLightGesture(event, light, "move")}>
+                <polyline points={light.geometry.points.map((point) => `${point.x * 100},${point.y * 100}`).join(" ")} fill="none" stroke="currentColor" strokeWidth={Math.max(0.5, light.geometry.width * 100)} />
+              </svg>
+            ) : (
+              <button key={light.id} type="button" className={styles.mansionDynamicLight} data-light-kind={light.kind} data-selected={light.id === selectedLightId ? "true" : undefined} data-fire-animation={light.kind === "fire" ? light.animation : undefined} data-directional-dust={light.kind === "directional" && light.dust ? "true" : undefined} data-bulb-flicker={omniHasNeonBulb(light, roomEditorLights) ? "true" : undefined} style={lightStyle(light)} aria-label={`${light.kind} dynamic light`} onPointerDown={(event) => beginLightGesture(event, light, "move")} />
+            ))}
+            {selectedLight ? (
+              <button
+                type="button"
+                className={styles.mansionLightResizeHandle}
+                style={lightResizeHandleStyle(selectedLight)}
+                aria-label={`Resize ${selectedLight.kind} light`}
+                onPointerDown={(event) => beginLightGesture(event, selectedLight, "resize")}
+              />
+            ) : null}
+            {roomTool ? <span className={styles.mansionRoomPlacementHint} role="status">{roomTool === "neon" ? "Draw the neon path" : `Click to place ${roomTool}`}</span> : null}
+          </div>
         </div>
       </div>
 
@@ -1260,25 +1378,39 @@ export default function MansionEditorDialog({
         <section>
           <header><small>Room presentation</small><h3>{roomEditorRoom.name}</h3></header>
           <p>New rooms use their bundled room-type art. Mosaic changes this preview only; it never changes geometry, hotspots, evidence, or the saved source plate.</p>
+          {roomArtNotice ? <p className={styles.mansionRoomEditorNotice} role="status">{roomArtNotice}</p> : null}
           {(() => {
             const candidate = layout.roomArtCandidates.find((entry) => entry.roomId === roomEditorRoom.id) ?? null;
             const persistedRoom = mansion.layoutV2?.entities.some((entity) => entity.id === roomEditorRoom.id) ?? false;
             const roomArtMutationReady = persistedRoom && persistedLayoutMatchesDraft;
             return (
               <div className={styles.mansionRoomArtCandidateControls} data-candidate-status={candidate?.status ?? "none"}>
+                <button
+                  type="button"
+                  disabled={busy || roomArtBusy || !roomArtMutationReady || !onRegenerateRoomArt}
+                  data-awaiting-confirmation={regenerateConfirmationRoomId === roomEditorRoom.id ? "true" : undefined}
+                  onClick={() => {
+                    if (regenerateConfirmationRoomId === roomEditorRoom.id) {
+                      void mutateRoomArt("regenerate", roomEditorRoom.id);
+                    } else {
+                      setRegenerateConfirmationRoomId(roomEditorRoom.id);
+                    }
+                  }}
+                >{regenerateConfirmationRoomId === roomEditorRoom.id ? "Confirm reset room asset" : "Regenerate room asset"}</button>
+                <small>Resets this room to its bundled Mosaic plate and clears only this room&apos;s anchors, lights, and staged art.</small>
                 {candidate?.status === "ready" ? (
                   <>
                     <button type="button" disabled={busy || roomArtBusy || !roomArtMutationReady} onClick={() => void mutateRoomArt("accept", roomEditorRoom.id)}>Accept candidate</button>
-                    <button type="button" disabled={busy || roomArtBusy || responseMode === "local" || !roomArtMutationReady} onClick={() => void mutateRoomArt("generate", roomEditorRoom.id)}>Retry candidate</button>
+                    <button type="button" disabled={busy || roomArtBusy || responseMode === "local" || !roomArtMutationReady} onClick={() => void mutateRoomArt("generate", roomEditorRoom.id)}>Retry Illustrated candidate</button>
                     <button type="button" disabled={busy || roomArtBusy || !roomArtMutationReady} onClick={() => void mutateRoomArt("discard", roomEditorRoom.id)}>Discard candidate</button>
                   </>
                 ) : (
-                  <button type="button" disabled={busy || roomArtBusy || responseMode === "local" || !roomArtMutationReady || !onGenerateRoomArt} onClick={() => void mutateRoomArt("generate", roomEditorRoom.id)}>Generate room-art candidate · ONLINE</button>
+                  <button type="button" disabled={busy || roomArtBusy || responseMode === "local" || !roomArtMutationReady || !onGenerateRoomArt} onClick={() => void mutateRoomArt("generate", roomEditorRoom.id)}>Upgrade this room to Illustrated · ONLINE</button>
                 )}
                 <small>{responseMode === "local"
                   ? "LOCAL is server-rejected and uses bundled or accepted art."
                   : roomArtMutationReady
-                    ? "Generation stages a content-addressed candidate. Accepted art is never overwritten until Accept candidate."
+                    ? "Only this open room is upgraded. Generation stages a content-addressed candidate; accepted art is never overwritten until Accept candidate."
                     : "Save the current mansion plan before generating or changing its mansion-owned candidate."}</small>
               </div>
             );
@@ -1418,18 +1550,33 @@ export default function MansionEditorDialog({
   ) : null;
 
   return (
-    <WhodunnitSetupDialog
-      open
-      id="mansion-topology-editor"
-      theme={theme}
-      eyebrow={roomEditor ? "Room Editor" : "Mansion Editor"}
-      title={presentation.title}
-      description={`Editing a local derivative of ${mansion.derivation?.sourceTitle ?? mansion.name}. The source remains unchanged.`}
-      size="screen"
-      busy={busy || saving || roomArtBusy}
-      onClose={onClose}
-    >
-      {roomEditor ?? planner}
-    </WhodunnitSetupDialog>
+    <>
+      <WhodunnitSetupDialog
+        open
+        id="mansion-topology-editor"
+        theme={theme}
+        eyebrow={roomEditor ? "Room Editor" : "Mansion Editor"}
+        title={presentation.title}
+        description={creationFlow
+          ? "Build a tenant-owned mansion from a compact connected two-floor draft. Continue derives its local Mosaic room silhouettes."
+          : `Editing a local derivative of ${mansion.derivation?.sourceTitle ?? mansion.name}. The source remains unchanged.`}
+        size="screen"
+        busy={busy || saving || roomArtBusy}
+        onClose={onClose}
+      >
+        {roomEditor ?? planner}
+      </WhodunnitSetupDialog>
+      <PrismBlockingLoader
+        open={saving && creationFlow}
+        placement="fullscreen"
+        theme={theme}
+        eyebrow="PRISM / Mansion Editor"
+        title="Building Mosaic room plates"
+        detail="PRISM is mapping each semantic room to its bundled or accepted source, deriving the 24-color silhouettes, and checking both floors remain connected."
+        stepLabel="Preparing the mansion map"
+        progress={0.72}
+        footer="LOCAL stays local. No case truth or mansion art leaves this device."
+      />
+    </>
   );
 }

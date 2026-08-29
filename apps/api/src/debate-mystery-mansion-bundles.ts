@@ -11,7 +11,9 @@ import {
   MANSION_ATMOSPHERE_PREVIOUS_LOGICAL_ID_V1,
   canonicalMansionLayoutV2,
   canonicalPortablePackageJsonV1,
+  createBlankMansionLayoutV2,
   debateMysteryAcousticThemePaletteV1,
+  debateMysteryHouseStyleV2,
   deriveMansionMusicIdentityV1,
   normalizeMansionMusicIdentityV1,
   normalizeDebateMysteryAtmosphereContractV1,
@@ -69,7 +71,7 @@ function parseDerivationMetadata(
     const parsed = JSON.parse(value) as Partial<DebateMysteryMansionDerivationV1>;
     if (
       parsed.version !== 1 ||
-      typeof parsed.sourceBundleId !== "string" ||
+      (parsed.sourceBundleId !== null && typeof parsed.sourceBundleId !== "string") ||
       typeof parsed.sourceTitle !== "string" ||
       (parsed.sourcePackageId !== null && typeof parsed.sourcePackageId !== "string") ||
       (parsed.acceptedExteriorScaleClass !== "compact" &&
@@ -797,6 +799,75 @@ function copiedMansionTitle(db: DatabaseSync, userId: string, sourceTitle: strin
     if (!exists) return candidate;
   }
   return `${base.slice(0, 168)} ${randomUUID().slice(0, 8)}`;
+}
+
+function availableBlankMansionTitle(db: DatabaseSync, userId: string): string {
+  const base = "Untitled Mansion";
+  const available = (candidate: string): boolean => !db.prepare(
+    "SELECT 1 FROM debate_mystery_mansion_bundles WHERE user_id = ? AND name = ? LIMIT 1",
+  ).get(userId, candidate);
+  if (available(base)) return base;
+  for (let copy = 2; copy < 1_000; copy += 1) {
+    const candidate = `${base} ${copy}`;
+    if (available(candidate)) return candidate;
+  }
+  return `${base} ${randomUUID().slice(0, 8)}`;
+}
+
+/** Starts one editable tenant-owned house without creating or mutating an
+ * installed source package. The initial plates are bundled Mosaic sources, so
+ * this path is deterministic and fully available in hard LOCAL mode. */
+export function createBlankDebateMysteryMansionBundleV1(
+  db: DatabaseSync,
+  userId: string,
+): DebateMysteryMansionBundleSummaryV1 {
+  const id = randomUUID();
+  const now = new Date().toISOString();
+  const name = availableBlankMansionTitle(db, userId);
+  const layout = createBlankMansionLayoutV2();
+  const rooms = mansionLayoutV2ToLegacyRooms(layout);
+  const houseStyle = debateMysteryHouseStyleV2("");
+  const derivation: DebateMysteryMansionDerivationV1 = {
+    version: 1,
+    sourceBundleId: null,
+    sourceTitle: "Blank slate",
+    sourcePackageId: null,
+    acceptedExteriorScaleClass: "compact",
+    createdAt: now,
+  };
+  const library: SavedMansionLibraryMetadataV1 = {
+    version: 1,
+    title: null,
+    description: "A tenant-owned mansion draft built in Mansion Editor.",
+    thumbnailAssetId: null,
+    music: null,
+    atmosphere: null,
+  };
+  const errors = validateMansionLayoutV2(layout, {
+    suspectCount: 4,
+    requireEditorFloors: true,
+  });
+  if (errors.length > 0) throw new Error(`Blank Mansion Editor layout is invalid: ${errors.join(" ")}`);
+  db.prepare(
+    `INSERT INTO debate_mystery_mansion_bundles
+       (id, user_id, source_session_id, name, floors, total_rooms,
+        suspect_count, style_json, layout_json, library_metadata_json,
+        derivation_metadata_json, portable_metadata_json, portable_payload_sha256,
+        created_at, updated_at)
+     VALUES (?, ?, NULL, ?, 2, ?, 4, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
+  ).run(
+    id,
+    userId,
+    name,
+    rooms.length,
+    JSON.stringify(houseStyle),
+    canonicalMansionLayoutV2(layout),
+    JSON.stringify(library),
+    JSON.stringify(derivation),
+    now,
+    now,
+  );
+  return getDebateMysteryMansionBundleV2(db, userId, id);
 }
 
 function migrateLegacyRoomArtRefsToLayoutV2(

@@ -66,6 +66,10 @@ export interface InstalledMansionLibraryProps {
     mansion: DebateMysteryMansionBundleSummaryV1,
     roomId: string,
   ) => Promise<DebateMysteryMansionBundleSummaryV1 | null>;
+  onRegenerateRoomArt: (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+    roomId: string,
+  ) => Promise<DebateMysteryMansionBundleSummaryV1 | null>;
   onExport: (mansion: DebateMysteryMansionBundleSummaryV1) => void;
   onGenerateTheme: (
     mansion: DebateMysteryMansionBundleSummaryV1,
@@ -114,6 +118,7 @@ export default function InstalledMansionLibrary({
   onGenerateRoomArt,
   onAcceptRoomArt,
   onDiscardRoomArt,
+  onRegenerateRoomArt,
   onExport,
   onGenerateTheme,
   onAcceptTheme,
@@ -562,6 +567,7 @@ export default function InstalledMansionLibrary({
           onGenerateRoomArt={onGenerateRoomArt}
           onAcceptRoomArt={onAcceptRoomArt}
           onDiscardRoomArt={onDiscardRoomArt}
+          onRegenerateRoomArt={onRegenerateRoomArt}
         />
       ) : null}
 

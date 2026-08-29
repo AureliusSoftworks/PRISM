@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 import {
   addAutoCenteredMansionLayoutV2Doors,
   canonicalMansionLayoutV2,
+  createBlankMansionLayoutV2,
   mansionDynamicLightFrameV2,
   mansionLayoutV2EditorDerivativeFromLegacyRooms,
   mansionLayoutV2CompatibilityNeighborIds,
@@ -87,6 +88,21 @@ function baseLayout(): MansionLayoutV2 {
 }
 
 describe("MansionLayoutV2 geometry", () => {
+  it("starts blank authoring from the smallest valid connected two-floor house", () => {
+    const layout = createBlankMansionLayoutV2();
+    assert.equal(mansionLayoutV2SemanticRoomCount(layout), 4);
+    assert.equal(mansionLayoutV2FloorSemanticRoomCount(layout, 1), 2);
+    assert.equal(mansionLayoutV2FloorSemanticRoomCount(layout, 2), 2);
+    const suspectSlotIds = layout.entities
+      .filter((entity): entity is MansionLayoutRoomV2 => entity.kind === "room")
+      .map((entity) => entity.suspectSlotId);
+    assert.equal(suspectSlotIds.every((slotId) => slotId !== null), true);
+    assert.equal(new Set(suspectSlotIds).size, 4);
+    assert.equal(layout.verticalConnectors.length, 1);
+    assert.equal(mansionLayoutV2SemanticRoomsAreConnected(layout), true);
+    assert.deepEqual(validateMansionLayoutV2(layout, { suspectCount: 4 }), []);
+  });
+
   it("moves a legacy one-floor source into a connected two-floor derivative without adding rooms", () => {
     const legacyRooms = [
       { id: "foyer", templateId: "foyer", name: "Foyer", floor: 1, x: 0, y: 0, width: 3, height: 2, neighborIds: ["bed"], assignedSuspectSeatId: null, emoji: "◇", imageId: null, bundledAssetPath: null },
@@ -234,6 +250,27 @@ describe("MansionLayoutV2 geometry", () => {
       validateMansionLayoutV2(floorThree).join("\n"),
       /Floor 2 needs at least 4 semantic rooms/u,
     );
+  });
+
+  it("keeps rooftop-only templates on the highest occupied floor", () => {
+    const valid = baseLayout();
+    const rooftop = room("roof", "rooftop-lounge", 3, 0, 4);
+    const tower = room("tower-room", "study", 3, 10, 4);
+    const onRoof: MansionLayoutV2 = {
+      ...valid,
+      entities: [...valid.entities, rooftop, tower],
+      verticalConnectors: [
+        ...valid.verticalConnectors,
+        { id: "stairs:library:roof", kind: "stairs", lowerEntityId: "library", upperEntityId: "roof" },
+        { id: "stairs:study:tower", kind: "stairs", lowerEntityId: "study", upperEntityId: "tower-room" },
+      ],
+    };
+    assert.doesNotMatch(validateMansionLayoutV2(onRoof).join("\n"), /rooftop-only/u);
+    const belowRoof = {
+      ...onRoof,
+      entities: onRoof.entities.map((entity) => entity.id === "roof" ? { ...entity, floor: 2 } : entity),
+    } as MansionLayoutV2;
+    assert.match(validateMansionLayoutV2(belowRoof).join("\n"), /rooftop-only.*Floor 3/u);
   });
 
   it("produces one canonical hash input regardless of array insertion order", () => {

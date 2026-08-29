@@ -345,6 +345,7 @@ import {
 } from "./debate-mystery-room-art.ts";
 import {
   cloneDebateMysteryMansionBundleV1,
+  createBlankDebateMysteryMansionBundleV1,
   deleteDebateMysteryMansionBundleV2,
   ensureDebateMysteryMansionPortableRoomAssetsV1,
   getDebateMysteryMansionAssetFileV1,
@@ -391,6 +392,7 @@ import {
 import {
   acceptMansionRoomArtCandidateV2,
   discardMansionRoomArtCandidateV2,
+  regenerateMansionRoomAssetV2,
   stageMansionRoomArtCandidateV2,
 } from "./debate-mystery-mansion-room-art.ts";
 import {
@@ -18997,6 +18999,17 @@ function buildRoutes(): RouteDefinition[] {
         mansions: listDebateMysteryMansionBundlesV2(db, userId),
       });
     }),
+    route("POST", "/api/debates/mystery-mansions", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (Object.keys(body).length > 0) {
+        throw new HttpError(400, "Blank mansion creation does not accept client-authored fields.");
+      }
+      json(ctx.res, 201, {
+        ok: true,
+        mansion: createBlankDebateMysteryMansionBundleV1(db, userId),
+      });
+    }),
     route("POST", "/api/debates/mystery-mansions/inspect", async (ctx) => {
       const userId = requireAuth(ctx);
       try {
@@ -19230,6 +19243,18 @@ function buildRoutes(): RouteDefinition[] {
         throw new HttpError(400, "Discarding room art does not take client-authored fields.");
       }
       discardMansionRoomArtCandidateV2(db, userId, ctx.params.id, ctx.params.roomId);
+      json(ctx.res, 200, {
+        ok: true,
+        mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/room-art/:roomId/regenerate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (Object.keys(body).length > 0) {
+        throw new HttpError(400, "Regenerating a room asset does not take client-authored fields.");
+      }
+      regenerateMansionRoomAssetV2(db, userId, ctx.params.id, ctx.params.roomId);
       json(ctx.res, 200, {
         ok: true,
         mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id),

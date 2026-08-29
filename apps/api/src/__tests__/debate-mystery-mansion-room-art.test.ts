@@ -12,6 +12,7 @@ import {
   acceptMansionRoomArtCandidateV2,
   buildMansionRoomArtCandidatePromptV2,
   discardMansionRoomArtCandidateV2,
+  regenerateMansionRoomAssetV2,
   stageMansionRoomArtCandidateV2,
 } from "../debate-mystery-mansion-room-art.ts";
 import { initializeDatabase } from "../db.ts";
@@ -163,6 +164,52 @@ describe("mansion-owned room-art candidates", () => {
     assert.equal(calls, 0);
   });
 
+  it("regenerates only the selected room and clears its authored nodes locally", () => {
+    const { db, layout } = fixture();
+    const authored: MansionLayoutV2 = {
+      ...layout,
+      entities: layout.entities.map((entry) => entry.id === "study" && entry.kind === "room"
+        ? { ...entry, imageId: "legacy-study", acceptedRoomAssetId: "accepted-study" }
+        : entry),
+      placementAnchors: [
+        ...layout.placementAnchors,
+        { id: "anchor:bath", roomId: "bath", name: "mirror", relation: "near", point: { x: 0.5, y: 0.4 } },
+      ],
+      lights: [
+        {
+          id: "light:study", roomId: "study", kind: "omni", color: "#ffffff",
+          intensity: 0.5, animationSeed: "study", cuePermission: { version: 1, mode: "mansion_static", allowedCueIds: [] },
+          geometry: { x: 0.5, y: 0.5, radius: 0.2 },
+        },
+        {
+          id: "light:bath", roomId: "bath", kind: "omni", color: "#ffffff",
+          intensity: 0.5, animationSeed: "bath", cuePermission: { version: 1, mode: "mansion_static", allowedCueIds: [] },
+          geometry: { x: 0.5, y: 0.5, radius: 0.2 },
+        },
+      ],
+      roomArtCandidates: [{
+        id: "candidate:study", roomId: "study", status: "failed", prompt: "safe",
+        promptSha256: "a".repeat(64), assetId: null, createdAt: "2026-08-29T00:00:00.000Z",
+      }],
+    };
+    db.prepare(
+      "UPDATE debate_mystery_mansion_bundles SET layout_json = ? WHERE id = 'mansion' AND user_id = 'owner'",
+    ).run(canonicalMansionLayoutV2(authored));
+
+    regenerateMansionRoomAssetV2(db, "owner", "mansion", "study");
+    const regenerated = storedLayout(db);
+    const study = regenerated.entities.find(
+      (entry): entry is MansionLayoutRoomV2 => entry.kind === "room" && entry.id === "study",
+    )!;
+    assert.equal(study.imageId, null);
+    assert.equal(study.acceptedRoomAssetId, null);
+    assert.equal(regenerated.placementAnchors.some((entry) => entry.roomId === "study"), false);
+    assert.equal(regenerated.lights.some((entry) => entry.roomId === "study"), false);
+    assert.equal(regenerated.roomArtCandidates.some((entry) => entry.roomId === "study"), false);
+    assert.equal(regenerated.placementAnchors.some((entry) => entry.roomId === "bath"), true);
+    assert.equal(regenerated.lights.some((entry) => entry.roomId === "bath"), true);
+  });
+
   it("stages, retries, accepts, and discards content-addressed candidates without replacing accepted art early", async () => {
     const { db } = fixture();
     const firstBytes = await sharp({
@@ -212,6 +259,13 @@ describe("mansion-owned room-art candidates", () => {
     )!;
     assert.equal(study.acceptedRoomAssetId, retried.assetId);
     assert.equal(layout.roomArtCandidates.length, 0);
+    assert.equal(
+      layout.entities
+        .filter((entry): entry is MansionLayoutRoomV2 => entry.kind === "room" && entry.id !== "study")
+        .every((entry) => entry.acceptedRoomAssetId === null),
+      true,
+      "accepting one room must not upgrade any other room",
+    );
 
     const acceptedAssetId = study.acceptedRoomAssetId;
     await stage();

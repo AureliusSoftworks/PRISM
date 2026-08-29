@@ -973,6 +973,18 @@
 .mansionEditorExterior > span { display: inline-flex; margin-top: 0.65rem; padding: 0.28rem 0.48rem; color: var(--mystery-gold); border: 1px solid color-mix(in srgb, var(--mystery-gold) 45%, transparent); border-radius: 999px; font-size: 0.66rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
 .mansionEditorExterior > p { display: grid; gap: 0.28rem; margin: 0.85rem 0 0; color: var(--mystery-muted); font-size: 0.76rem; line-height: 1.5; }
 .mansionEditorExterior > p strong { color: var(--mystery-text); font-size: 0.82rem; }
+.mansionEditorRoomPalette { display: grid; gap: 0.55rem; margin-top: 1rem; padding-top: 0.85rem; border-top: 1px solid var(--mystery-line); }
+.mansionEditorRoomPalette > header { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
+.mansionEditorRoomPalette > header strong { font-size: 0.78rem; }
+.mansionEditorRoomPalette > header small { color: var(--mystery-muted); font-size: 0.62rem; }
+.mansionEditorRoomPalette > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.38rem; }
+.mansionEditorRoomPalette button { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0.35rem; min-height: 2.4rem; padding: 0.42rem 0.5rem; color: var(--mystery-text); text-align: left; border: 1px solid var(--mystery-line); border-radius: 0.48rem; background: var(--mystery-panel-strong); cursor: pointer; }
+.mansionEditorRoomPalette button:hover:not(:disabled),
+.mansionEditorRoomPalette button:focus-visible { border-color: var(--mystery-violet); outline: 2px solid color-mix(in srgb, var(--mystery-cyan) 42%, transparent); }
+.mansionEditorRoomPalette button:disabled { opacity: 0.45; cursor: not-allowed; }
+.mansionEditorRoomPalette button > span { font-size: 0.9rem; }
+.mansionEditorRoomPalette button > strong { overflow: hidden; font-size: 0.62rem; text-overflow: ellipsis; white-space: nowrap; }
+.mansionEditorRoomPalette button > small { grid-column: 2; color: var(--mystery-gold); font-size: 0.52rem; }
 
 .mansionEditorWorkspace { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; }
 .mansionEditorFloorBar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.75rem; border-bottom: 1px solid var(--mystery-line); background: var(--mystery-panel); }
@@ -1107,10 +1119,11 @@
 .mansionRoomEditorTools button:disabled { opacity: 0.45; cursor: not-allowed; }
 .mansionRoomEditorStage { position: relative; display: grid; min-width: 0; min-height: 0; place-items: center; overflow: hidden; padding: 1.2rem; background: radial-gradient(circle at 50% 25%, color-mix(in srgb, var(--mystery-violet) 13%, transparent), transparent 62%), #070b13; }
 .mansionRoomEditorStage[data-placement-active] { cursor: crosshair; }
-.mansionRoomEditorStage > img,
+.mansionRoomArtViewport { position: relative; display: grid; width: min(100%, 80rem); max-height: 100%; aspect-ratio: 16 / 9; }
+.mansionRoomArtViewport > img,
 .mansionRoomArtCompare,
-.mansionRoomArtFallback { width: min(100%, 80rem); max-height: 100%; aspect-ratio: 16 / 9; object-fit: cover; object-position: center; border: 1px solid color-mix(in srgb, var(--mystery-cyan) 25%, var(--mystery-line)); border-radius: 0.8rem; box-shadow: 0 1.25rem 3rem rgb(0 0 0 / 35%); }
-.mansionRoomEditorStage[data-mosaic-preview="true"] > img { image-rendering: pixelated; }
+.mansionRoomArtFallback { width: 100%; height: 100%; min-height: 0; aspect-ratio: 16 / 9; object-fit: cover; object-position: center; border: 1px solid color-mix(in srgb, var(--mystery-cyan) 25%, var(--mystery-line)); border-radius: 0.8rem; box-shadow: 0 1.25rem 3rem rgb(0 0 0 / 35%); }
+.mansionRoomEditorStage[data-mosaic-preview="true"] .mansionRoomArtViewport > img { image-rendering: pixelated; }
 .mansionRoomArtCompare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; gap: 0.7rem; aspect-ratio: auto; padding: 0.7rem; background: var(--mystery-panel-strong); }
 .mansionRoomArtCompare figure { position: relative; display: grid; min-width: 0; margin: 0; }
 .mansionRoomArtCompare img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 0.5rem; }
@@ -1118,7 +1131,7 @@
 .mansionRoomArtCompare figcaption { position: absolute; right: 0.45rem; bottom: 0.45rem; padding: 0.25rem 0.42rem; color: white; border-radius: 999px; background: rgb(5 8 14 / 78%); font-size: 0.62rem; font-weight: 800; }
 .mansionRoomArtFallback { display: grid; place-items: center; align-content: center; gap: 0.5rem; color: var(--mystery-text); background: linear-gradient(145deg, color-mix(in srgb, var(--mystery-violet) 18%, var(--mystery-panel-strong)), var(--mystery-panel-strong)); }
 .mansionRoomArtFallback span { font-size: 4rem; }
-.mansionRoomOverlay { position: absolute; z-index: 4; inset: 1.2rem; width: auto; max-width: 80rem; aspect-ratio: 16 / 9; place-self: center; overflow: hidden; border-radius: 0.8rem; pointer-events: none; touch-action: none; }
+.mansionRoomOverlay { position: absolute; z-index: 4; inset: 0; overflow: hidden; border-radius: 0.8rem; pointer-events: none; touch-action: none; }
 .mansionRoomOverlay[data-active-tool] { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--mystery-cyan) 72%, transparent); }
 .mansionRoomAnchorMarker { position: absolute; z-index: 6; display: grid; width: 1.55rem; height: 1.55rem; padding: 0; place-items: center; color: #10131b; border: 2px solid white; border-radius: 50%; background: var(--mystery-gold); box-shadow: 0 0 0 0.25rem rgb(0 0 0 / 34%); font: inherit; font-size: 0.65rem; font-weight: 900; transform: translate(-50%, -50%); pointer-events: auto; cursor: pointer; }
 .mansionDynamicLight { position: absolute; z-index: 4; padding: 0; color: var(--mansion-light-color); border: 0; opacity: var(--mansion-light-intensity); filter: drop-shadow(0 0 0.8rem var(--mansion-light-color)); mix-blend-mode: overlay; pointer-events: auto; animation-delay: var(--mansion-light-delay); transform: translate(-50%, -50%); transform-origin: center; cursor: move; }
@@ -1149,6 +1162,7 @@
 .mansionRoomEditorTools h3 { margin: 0; font-size: 0.95rem; }
 .mansionRoomEditorTools header > span { color: var(--mystery-muted); font-size: 0.65rem; }
 .mansionRoomEditorTools p { margin: 0; color: var(--mystery-muted); font-size: 0.68rem; line-height: 1.5; }
+.mansionRoomEditorTools .mansionRoomEditorNotice { padding: 0.55rem 0.65rem; color: var(--mystery-text); border: 1px solid color-mix(in srgb, var(--mystery-cyan) 44%, var(--mystery-line)); border-radius: 0.5rem; background: color-mix(in srgb, var(--mystery-cyan) 9%, var(--mystery-panel)); }
 .mansionRoomArtCandidateControls { display: flex; flex-wrap: wrap; gap: 0.42rem; }
 .mansionRoomArtCandidateControls small { flex-basis: 100%; color: var(--mystery-muted); font-size: 0.64rem; line-height: 1.45; }
 .mansionRoomEditorList { display: grid; gap: 0.48rem; }

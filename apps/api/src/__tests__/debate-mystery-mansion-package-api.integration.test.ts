@@ -4,6 +4,7 @@ import { createServer, type AddressInfo } from "node:http";
 import { after, describe, it } from "node:test";
 import { getAppConfig } from "@localai/config";
 import {
+  addAutoCenteredMansionLayoutV2Doors,
   PORTABLE_MANSION_PACKAGE_MIME_V1,
   type MansionPackageManifestV1,
 } from "@localai/shared";
@@ -176,8 +177,9 @@ describe("portable mansion package API", () => {
     assert.match(preview.preview.previewImageDataUrl, /^data:image\/webp;base64,/u);
 
     const importResponse = await client.request("/api/debates/mystery-mansions/import", binary());
-    assert.equal(importResponse.status, 201);
-    const imported = (await importResponse.json()) as Record<string, any>;
+    const importBody = await importResponse.text();
+    assert.equal(importResponse.status, 201, importBody);
+    const imported = JSON.parse(importBody) as Record<string, any>;
     const mansionId = String(imported.mansion.id);
     assert.equal(imported.mansion.portable.license.allowsRedistribution, true);
     assert.equal(imported.mansion.library.defaults.title, "Violet House");
@@ -341,6 +343,161 @@ describe("portable mansion package API", () => {
       jsonInit({ mode: "spoiler_seal" }),
     );
     assert.equal(restrictedExport.status, 403);
+    assert.equal(fetchRecorder.calls.length, 0);
+  });
+
+  it("creates blank editor mansions, enforces rooftop placement, and resets one room locally", async () => {
+    const client = createClient();
+    const registration = await client.request(
+      "/api/auth/register",
+      jsonInit({ username: "blank-mansion-owner@example.com", password: "blank-mansion-owner-password" }),
+    );
+    assert.equal(registration.status, 201);
+
+    const rejectedFields = await client.request(
+      "/api/debates/mystery-mansions",
+      jsonInit({ name: "Client-authored title" }),
+    );
+    assert.equal(rejectedFields.status, 400);
+
+    const createResponse = await client.request(
+      "/api/debates/mystery-mansions",
+      jsonInit({}),
+    );
+    assert.equal(createResponse.status, 201);
+    const created = (await createResponse.json()) as Record<string, any>;
+    const mansionId = String(created.mansion.id);
+    const layout = created.mansion.layoutV2 as Record<string, any>;
+    assert.equal(created.mansion.totalRooms, 4);
+    assert.equal(created.mansion.floors, 2);
+    assert.equal(created.mansion.derivation.sourceBundleId, null);
+
+    const invalidRooftopLayout = {
+      ...layout,
+      entities: layout.entities.map((entity: Record<string, any>) => entity.id === "room:parlor"
+        ? { ...entity, templateId: "rooftop-lounge", name: "Rooftop Lounge" }
+        : entity),
+    };
+    const invalidRooftopResponse = await client.request(
+      `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}/topology`,
+      jsonInit({ layoutV2: invalidRooftopLayout }, "PATCH"),
+    );
+    assert.equal(invalidRooftopResponse.status, 400);
+    assert.match(await invalidRooftopResponse.text(), /rooftop-only.*Floor 2/u);
+
+    const authoredLayout = {
+      ...layout,
+      placementAnchors: [
+        {
+          id: "anchor:study",
+          roomId: "room:study",
+          name: "writing desk",
+          relation: "beside",
+          point: { x: 0.62, y: 0.48 },
+        },
+        {
+          id: "anchor:bathroom",
+          roomId: "room:bathroom",
+          name: "mirror",
+          relation: "near",
+          point: { x: 0.5, y: 0.35 },
+        },
+      ],
+      lights: ["room:study", "room:bathroom"].map((roomId, index) => ({
+        id: `light:${index}`,
+        roomId,
+        kind: "omni",
+        color: "#ffffff",
+        intensity: 0.5,
+        animationSeed: roomId,
+        cuePermission: { version: 1, mode: "mansion_static", allowedCueIds: [] },
+        geometry: { x: 0.5, y: 0.5, radius: 0.2 },
+      })),
+    };
+    const authoredRooftopLayout = addAutoCenteredMansionLayoutV2Doors({
+      ...authoredLayout,
+      entities: [
+        ...authoredLayout.entities,
+        {
+          kind: "room",
+          id: "room:rooftop",
+          templateId: "rooftop-lounge",
+          name: "Rooftop Lounge",
+          floor: 2,
+          x: 9,
+          y: 0,
+          rotation: 90,
+          suspectSlotId: null,
+          emoji: "🌃",
+          imageId: null,
+          bundledAssetPath: "/debate/mystery/rooms/rooftop-lounge.webp",
+          acceptedRoomAssetId: null,
+        },
+      ],
+    }, "room:rooftop");
+    const saveResponse = await client.request(
+      `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}/topology`,
+      jsonInit({ layoutV2: authoredRooftopLayout }, "PATCH"),
+    );
+    assert.equal(saveResponse.status, 200);
+
+    const regenerateResponse = await client.request(
+      `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}/room-art/${encodeURIComponent("room:study")}/regenerate`,
+      jsonInit({}),
+    );
+    assert.equal(regenerateResponse.status, 200);
+    const regenerated = (await regenerateResponse.json()) as Record<string, any>;
+    assert.equal(
+      regenerated.mansion.layoutV2.placementAnchors.some(
+        (anchor: Record<string, any>) => anchor.roomId === "room:study",
+      ),
+      false,
+    );
+    assert.equal(
+      regenerated.mansion.layoutV2.lights.some(
+        (light: Record<string, any>) => light.roomId === "room:study",
+      ),
+      false,
+    );
+    assert.equal(
+      regenerated.mansion.layoutV2.placementAnchors.some(
+        (anchor: Record<string, any>) => anchor.roomId === "room:bathroom",
+      ),
+      true,
+    );
+    assert.equal(
+      regenerated.mansion.layoutV2.lights.some(
+        (light: Record<string, any>) => light.roomId === "room:bathroom",
+      ),
+      true,
+    );
+
+    const regeneratedRooftop = regenerated.mansion.layoutV2.entities.find(
+      (entity: Record<string, any>) => entity.templateId === "rooftop-lounge",
+    );
+    assert.equal(regeneratedRooftop?.floor, 2);
+
+    const exportResponse = await client.request(
+      `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}/export`,
+      jsonInit({ mode: "spoiler_seal", creatorName: "Fixture Creator" }),
+    );
+    assert.equal(exportResponse.status, 200);
+    const exported = new Uint8Array(await exportResponse.arrayBuffer());
+    const importResponse = await client.request(
+      "/api/debates/mystery-mansions/import",
+      {
+        method: "POST",
+        headers: { "content-type": PORTABLE_MANSION_PACKAGE_MIME_V1 },
+        body: exported,
+      },
+    );
+    const importedBody = await importResponse.text();
+    assert.equal(importResponse.status, 201, importedBody);
+    const importedRooftopBundle = JSON.parse(importedBody) as Record<string, any>;
+    const importedRooftop = importedRooftopBundle.mansion.layoutV2.entities.find(
+      (entity: Record<string, any>) => entity.templateId === "rooftop-lounge",
+    );
+    assert.equal(importedRooftop?.floor, 2);
     assert.equal(fetchRecorder.calls.length, 0);
   });
 });

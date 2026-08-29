@@ -181,7 +181,8 @@ export function canAddDebateMysteryMansionEditorThirdFloorV1(
 
 export interface DebateMysteryMansionDerivationV1 {
   version: 1;
-  sourceBundleId: string;
+  /** Null only for a tenant-owned blank draft created directly in Mansion Editor. */
+  sourceBundleId: string | null;
   sourceTitle: string;
   sourcePackageId: string | null;
   /** Scale for which a retained one-off exterior was accepted. */

@@ -1,4 +1,5 @@
 import {
+  DEBATE_MYSTERY_ROOM_TEMPLATES,
   debateMysteryRoomFootprint,
   type DebateMysteryRoomFootprintV1,
 } from "./debateMystery.ts";
@@ -10,6 +11,7 @@ export const MANSION_LAYOUT_V2_MAX_FLOORS = 3 as const;
 export const MANSION_LAYOUT_V2_MAX_ANCHORS_PER_ROOM = 24 as const;
 export const MANSION_LAYOUT_V2_MAX_LIGHTS = 8 as const;
 export const MANSION_LAYOUT_V2_MAX_NEON_POINTS = 32 as const;
+export const MANSION_LAYOUT_V2_ROOFTOP_TEMPLATE_IDS = ["rooftop-lounge"] as const;
 
 export type MansionLayoutRotationV2 = 0 | 90;
 export type MansionLayoutEntityKindV2 = "room" | "corridor" | "infill";
@@ -663,6 +665,75 @@ export function mansionLayoutV2FloorSemanticRoomCount(
   ).length;
 }
 
+export function mansionLayoutV2TemplateIsRooftopOnly(templateId: string): boolean {
+  return (MANSION_LAYOUT_V2_ROOFTOP_TEMPLATE_IDS as readonly string[]).includes(templateId);
+}
+
+export function mansionLayoutV2RooftopFloor(layout: MansionLayoutV2): number {
+  return Math.max(
+    1,
+    ...layout.entities
+      .filter((entity): entity is MansionLayoutRoomV2 => entity.kind === "room")
+      .map((room) => room.floor),
+  );
+}
+
+/** The smallest complete editable house: four suspect-capable semantic rooms,
+ * occupied Floors 1 and 2, explicit same-floor circulation, and one real stair
+ * connector. Bundled room plates keep creation deterministic and offline. */
+export function createBlankMansionLayoutV2(): MansionLayoutV2 {
+  const templateById = new Map(DEBATE_MYSTERY_ROOM_TEMPLATES.map((template) => [template.id, template]));
+  const room = (
+    id: string,
+    templateId: string,
+    name: string,
+    floor: number,
+    x: number,
+  ): MansionLayoutRoomV2 => {
+    const template = templateById.get(templateId);
+    return {
+      kind: "room",
+      id,
+      templateId,
+      name,
+      floor,
+      x,
+      y: 5,
+      rotation: 0,
+      suspectSlotId: `slot:${id}`,
+      emoji: template?.emoji ?? "◇",
+      imageId: null,
+      bundledAssetPath: template?.bundledAssetPath ?? null,
+      acceptedRoomAssetId: null,
+    };
+  };
+  const entities: MansionLayoutEntityV2[] = [
+    room("room:foyer", "foyer", "Foyer", 1, 3),
+    { kind: "corridor", id: "corridor:floor-1", floor: 1, x: 6, y: 5, width: 1, height: 2 },
+    room("room:parlor", "parlor", "Parlor", 1, 7),
+    room("room:study", "study", "Study", 2, 3),
+    { kind: "corridor", id: "corridor:floor-2", floor: 2, x: 6, y: 5, width: 1, height: 2 },
+    room("room:bathroom", "bathroom", "Bathroom", 2, 7),
+  ];
+  let layout: MansionLayoutV2 = {
+    version: 2,
+    envelope: { columns: 16, rows: 12 },
+    entities,
+    doors: [],
+    verticalConnectors: [{
+      id: "stairs:floor-1:floor-2",
+      kind: "stairs",
+      lowerEntityId: "corridor:floor-1",
+      upperEntityId: "corridor:floor-2",
+    }],
+    placementAnchors: [],
+    lights: [],
+    roomArtCandidates: [],
+  };
+  for (const entity of entities) layout = addAutoCenteredMansionLayoutV2Doors(layout, entity.id);
+  return layout;
+}
+
 export function mansionLayoutV2ToLegacyRooms(
   layout: MansionLayoutV2,
 ): MansionLayoutLegacyRoomV1[] {
@@ -1163,6 +1234,12 @@ export function validateMansionLayoutV2(
   }
   if (floors.has(3) && mansionLayoutV2FloorSemanticRoomCount(layout, 2) < 4) {
     errors.push("Floor 2 needs at least 4 semantic rooms before Floor 3 can be used.");
+  }
+  const rooftopFloor = Math.max(1, ...rooms.map((room) => room.floor));
+  for (const room of rooms) {
+    if (mansionLayoutV2TemplateIsRooftopOnly(room.templateId) && room.floor !== rooftopFloor) {
+      errors.push(`${room.name || room.id} is rooftop-only and must stay on Floor ${rooftopFloor}.`);
+    }
   }
   if (typeof options.suspectCount === "number" && rooms.length < options.suspectCount) {
     errors.push(`Keep at least ${options.suspectCount} semantic rooms for this mansion's supported cast.`);

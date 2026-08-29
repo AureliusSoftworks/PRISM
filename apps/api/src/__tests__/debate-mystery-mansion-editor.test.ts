@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { DebateMysteryMansionBundleRoomV1 } from "@localai/shared";
 import {
   cloneDebateMysteryMansionBundleV1,
+  createBlankDebateMysteryMansionBundleV1,
   getDebateMysteryMansionAssetFileV1,
   getDebateMysteryMansionBundleV2,
   updateDebateMysteryMansionTopologyV1,
@@ -90,6 +91,31 @@ function addRoomAssetRef(
 }
 
 describe("source-preserving Mansion Editor storage", () => {
+  it("creates a tenant-owned blank draft without a mutable source bundle", () => {
+    const db = initializeDatabase(new DatabaseSync(":memory:"));
+    const now = "2026-08-29T00:00:00.000Z";
+    db.prepare(
+      `INSERT INTO users
+         (id, email, display_name, password_hash, password_salt,
+          wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
+          preferred_provider, created_at, last_active_at)
+       VALUES ('owner', 'owner@example.com', 'Owner', 'hash', 'salt',
+               'cipher', 'iv', 'tag', 'local', ?, ?)`,
+    ).run(now, now);
+    const draft = createBlankDebateMysteryMansionBundleV1(db, "owner");
+    assert.equal(draft.floors, 2);
+    assert.equal(draft.totalRooms, 4);
+    assert.equal(draft.suspectCount, 4);
+    assert.equal(draft.derivation?.sourceBundleId, null);
+    assert.equal(draft.derivation?.sourceTitle, "Blank slate");
+    assert.equal(draft.layoutV2?.verticalConnectors.length, 1);
+    assert.equal(draft.assets?.length, 0);
+    assert.throws(
+      () => getDebateMysteryMansionBundleV2(db, "other", draft.id),
+      /not found/u,
+    );
+  });
+
   it("clones provenance and saves only the derivative topology", () => {
     const db = initializeDatabase(new DatabaseSync(":memory:"));
     const now = "2026-08-28T00:00:00.000Z";

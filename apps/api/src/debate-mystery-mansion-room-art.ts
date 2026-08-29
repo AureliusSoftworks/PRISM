@@ -424,3 +424,52 @@ export function discardMansionRoomArtCandidateV2(
     throw error;
   }
 }
+
+/** Returns exactly one room to its canonical bundled Mosaic source. This is a
+ * local reset, not image generation: it clears only that room's accepted and
+ * candidate art plus authored anchors/lights, and never touches another room. */
+export function regenerateMansionRoomAssetV2(
+  db: DatabaseSync,
+  userId: string,
+  bundleId: string,
+  roomId: string,
+): void {
+  const row = readBundle(db, userId, bundleId);
+  const layout = parseLayout(row);
+  roomFromLayout(layout, roomId);
+  const next: MansionLayoutV2 = {
+    ...layout,
+    entities: layout.entities.map((entity) => entity.id === roomId && entity.kind === "room"
+      ? { ...entity, imageId: null, acceptedRoomAssetId: null }
+      : entity),
+    placementAnchors: layout.placementAnchors.filter((anchor) => anchor.roomId !== roomId),
+    lights: layout.lights.filter((light) => light.roomId !== roomId),
+    roomArtCandidates: layout.roomArtCandidates.filter((candidate) => candidate.roomId !== roomId),
+  };
+  const now = new Date().toISOString();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare(
+      `DELETE FROM debate_mystery_mansion_asset_refs
+        WHERE bundle_id = ? AND user_id = ? AND role = 'room'
+          AND logical_id IN (?, ?, ?, ?)`,
+    ).run(
+      bundleId,
+      userId,
+      roomId,
+      `${roomId}:illustrated-v1`,
+      acceptedLogicalId(roomId),
+      candidateLogicalId(roomId),
+    );
+    db.prepare(
+      `DELETE FROM debate_mystery_mansion_bundle_assets
+        WHERE bundle_id = ? AND user_id = ? AND room_id = ?`,
+    ).run(bundleId, userId, roomId);
+    persistLayout(db, userId, bundleId, next, now);
+    cleanupUnreferencedRoomArt(db, userId);
+    db.exec("COMMIT");
+  } catch (error) {
+    if (db.isTransaction) db.exec("ROLLBACK");
+    throw error;
+  }
+}
