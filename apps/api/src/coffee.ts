@@ -510,6 +510,12 @@ export interface CoffeeBotProfile {
   id: string;
   name: string;
   systemPrompt: string;
+  /**
+   * Authored profile prompt before runtime-only context is appended.
+   * Topic/name helpers must use this source so same-account Library metadata
+   * cannot masquerade as one seated bot's own persona facets.
+   */
+  authoredSystemPrompt?: string;
   exportHash?: string | null;
   cloneFamilyId?: string | null;
   color: string | null;
@@ -2950,6 +2956,10 @@ const COFFEE_PROMPT_LEAK_ANYWHERE_PATTERNS = [
   /\b(?:you(?:'re| are)|that(?:'s| is)|this(?:'s| is))\s+(?:correct|right)\s+to\s+(?:respond|reply|answer|write|provide|produce)\s+(?:with\s+)?(?:a\s+)?(?:short|brief|natural|conversational|single)\b/i,
   /\bstay on this topic until the user explicitly changes it\b/i,
   /\bdo not invent personal goals or claim hidden scores\b/i,
+  // Internal topic-coach scaffolds from older Coffee fallback prompts must
+  // never become a bot's visible table line.
+  /\bwhat would change your answer to this\s*:/iu,
+  /\bwhere does this question become real\s*:/iu,
 ] as const;
 
 const COFFEE_PROMPT_LEAK_REPAIR_MAX_TOKENS = 48;
@@ -4764,8 +4774,8 @@ function buildCoffeeTopicFallbackOptions(rawTopic: string | null | undefined): s
   return [
     `Back to the question—${topic}—which detail changes the answer?`,
     `Which example best answers this: ${topic}?`,
-    `What would change your answer to this: ${topic}?`,
-    `Where does this question become real: ${topic}?`,
+    `I would change my mind about ${topic} if the cost landed somewhere else.`,
+    `For me, ${topic} becomes real when someone has to absorb the consequence.`,
     `What has everyone missed about the question ${topic}?`,
     `The disagreement is still here: ${topic}?`,
   ];
@@ -7825,10 +7835,13 @@ type CoffeeBotProfileRow = {
 };
 
 function mapCoffeeBotProfileRow(row: CoffeeBotProfileRow): CoffeeBotProfile {
+  const authoredSystemPrompt =
+    typeof row.system_prompt === "string" ? row.system_prompt : "";
   return {
     id: row.id,
     name: typeof row.name === "string" && row.name.trim().length > 0 ? row.name.trim() : "Unnamed bot",
-    systemPrompt: typeof row.system_prompt === "string" ? row.system_prompt : "",
+    systemPrompt: authoredSystemPrompt,
+    authoredSystemPrompt,
     exportHash: row.export_hash ?? null,
     cloneFamilyId: row.clone_family_id ?? null,
     color: row.color ?? null,
@@ -8184,7 +8197,7 @@ function attachCoffeeBotSemanticFacets(
   return group.map((bot) => {
     const resolved = effectiveBotSemanticFacets({
       name: bot.name,
-      systemPrompt: bot.systemPrompt,
+      systemPrompt: bot.authoredSystemPrompt ?? bot.systemPrompt,
       semanticFacets: bot.semanticFacetsRaw ?? null,
       semanticFacetsSourceHash: bot.semanticFacetsSourceHash ?? null,
     });
@@ -10711,7 +10724,10 @@ const COFFEE_GROUP_NAME_THEME_RULES: Array<{
 
 function coffeeGroupHasWizardingWorldSignal(group: CoffeeBotProfile[]): boolean {
   const text = group
-    .map((bot) => `${bot.name} ${bot.systemPrompt}`)
+    .map(
+      (bot) =>
+        `${bot.name} ${bot.authoredSystemPrompt ?? bot.systemPrompt}`,
+    )
     .join(" ")
     .toLowerCase();
   return /\b(harry\s+potter|potter|mcgonagall|mcgonnigal|hogwarts|gryffindor|slytherin|ravenclaw|hufflepuff|quidditch|transfiguration|dumbledore|wizard|witch|wand|spell|magic|magical)\b/u.test(text);
@@ -10724,7 +10740,7 @@ function coffeeNameHasWizardingWorldAnchor(name: string): boolean {
 function coffeeBotSemanticFacets(bot: CoffeeBotProfile): BotSemanticFacets {
   return bot.semanticFacets ?? deriveDeterministicBotSemanticFacets({
     name: bot.name,
-    systemPrompt: bot.systemPrompt,
+    systemPrompt: bot.authoredSystemPrompt ?? bot.systemPrompt,
   });
 }
 
@@ -10828,7 +10844,8 @@ function collectCoffeeGroupNameRelevance(group: CoffeeBotProfile[]): CoffeeGroup
     const botTerms = new Set<string>();
     relevance.botTerms.push(botTerms);
     addCoffeeGroupNameRelevanceFromText(relevance, botTerms, bot.name, 4);
-    const { fields } = parseStoredBotPrompt(bot.systemPrompt);
+    const authoredSystemPrompt = bot.authoredSystemPrompt ?? bot.systemPrompt;
+    const { fields } = parseStoredBotPrompt(authoredSystemPrompt);
     const profileTexts = [
       fields.identity.role,
       fields.purpose.statement,
@@ -10840,7 +10857,7 @@ function collectCoffeeGroupNameRelevance(group: CoffeeBotProfile[]): CoffeeGroup
     for (const text of profileTexts) {
       addCoffeeGroupNameRelevanceFromText(relevance, botTerms, text, 6);
     }
-    const fallbackPersona = summarizePersonaForRouter(bot.systemPrompt).replace(/^"|"$/g, "");
+    const fallbackPersona = summarizePersonaForRouter(authoredSystemPrompt).replace(/^"|"$/g, "");
     addCoffeeGroupNameRelevanceFromText(relevance, botTerms, fallbackPersona, 4);
     for (const facetText of coffeeBotFacetTexts(bot)) {
       addCoffeeGroupNameRelevanceFromText(relevance, botTerms, facetText, 8);
@@ -10930,7 +10947,8 @@ function normalizeCoffeeStarterMemoryHint(raw: string): string {
 }
 
 function collectCoffeeBotTopicHints(bot: CoffeeBotProfile): string[] {
-  const { fields } = parseStoredBotPrompt(bot.systemPrompt);
+  const authoredSystemPrompt = bot.authoredSystemPrompt ?? bot.systemPrompt;
+  const { fields } = parseStoredBotPrompt(authoredSystemPrompt);
   const candidates = [
     fields.core.interests,
     fields.worldview.values,
@@ -10944,7 +10962,7 @@ function collectCoffeeBotTopicHints(bot: CoffeeBotProfile): string[] {
     if (normalized) unique.add(normalized);
   }
   if (unique.size === 0) {
-    const fallbackPersona = summarizePersonaForRouter(bot.systemPrompt).replace(/^"|"$/g, "");
+    const fallbackPersona = summarizePersonaForRouter(authoredSystemPrompt).replace(/^"|"$/g, "");
     const normalized = compactCoffeeTopicHint(fallbackPersona);
     if (normalized) unique.add(normalized);
   }
@@ -11059,7 +11077,8 @@ function buildDeterministicCoffeeGroupName(group: CoffeeBotProfile[]): string {
 }
 
 function formatCoffeeBotContextSummary(bot: CoffeeBotProfile): string {
-  const { fields } = parseStoredBotPrompt(bot.systemPrompt);
+  const authoredSystemPrompt = bot.authoredSystemPrompt ?? bot.systemPrompt;
+  const { fields } = parseStoredBotPrompt(authoredSystemPrompt);
   const summaryParts: string[] = [];
   const role = normalizeCoffeePromptSnippet(fields.identity.role, 40);
   const purpose = compactCoffeeTopicHint(fields.purpose.statement);
@@ -11074,7 +11093,7 @@ function formatCoffeeBotContextSummary(bot: CoffeeBotProfile): string {
   if (values) summaryParts.push(`values=${values}`);
   if (boundaries) summaryParts.push(`boundaries=${boundaries}`);
   if (summaryParts.length === 0) {
-    const fallbackPersona = summarizePersonaForRouter(bot.systemPrompt).replace(/^"|"$/g, "");
+    const fallbackPersona = summarizePersonaForRouter(authoredSystemPrompt).replace(/^"|"$/g, "");
     if (fallbackPersona) summaryParts.push(`persona=${fallbackPersona}`);
   }
   const facetSummary = formatCoffeeBotFacetSummary(bot);
@@ -12211,7 +12230,8 @@ function normalizeCoffeeBotTopicConcept(raw: string): string | null {
 }
 
 function collectCoffeeBotTopicConcepts(bot: CoffeeBotProfile): string[] {
-  const { fields } = parseStoredBotPrompt(bot.systemPrompt);
+  const authoredSystemPrompt = bot.authoredSystemPrompt ?? bot.systemPrompt;
+  const { fields } = parseStoredBotPrompt(authoredSystemPrompt);
   const facets = coffeeBotSemanticFacets(bot);
   const texts = [
     fields.core.interests,
@@ -12220,7 +12240,7 @@ function collectCoffeeBotTopicConcepts(bot: CoffeeBotProfile): string[] {
     ...facets.values,
     ...facets.tensions,
     ...facets.domains,
-    summarizePersonaForRouter(bot.systemPrompt),
+    summarizePersonaForRouter(authoredSystemPrompt),
   ];
   const botNameTokens = new Set(coffeeStarterTopicTokens(bot.name));
   const concepts: string[] = [];
@@ -12267,7 +12287,7 @@ function collectCoffeeBotTopicKeywordPhrases(bot: CoffeeBotProfile): string[] {
   for (const text of [
     ...collectCoffeeBotTopicHints(bot),
     ...coffeeBotFacetTexts(bot),
-    summarizePersonaForRouter(bot.systemPrompt),
+    summarizePersonaForRouter(bot.authoredSystemPrompt ?? bot.systemPrompt),
   ]) {
     const tokens = (text.toLowerCase().match(/[\p{L}\p{N}'-]+/gu) ?? [])
       .filter((token) => token.length > 2)

@@ -7980,6 +7980,10 @@ describe("Coffee group foundation", () => {
       groupBotIds: [ALICE.id, BORIS.id],
       durationMinutes: 10,
     });
+    // Join sessions are open-ended and derive cup age from their first saved
+    // message. Keep this interruption fixture current so it cannot wander into
+    // the unrelated empty-cup group-wrap path as the calendar advances.
+    const interruptedAt = new Date(Date.now() - 1_000).toISOString();
     db.prepare(
       `INSERT INTO messages
          (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
@@ -7990,7 +7994,7 @@ describe("Coffee group foundation", () => {
       userId,
       "The sauce analogy works because it makes the abstract thing tasteable.",
       BORIS.id,
-      "2026-01-01T00:00:00.000Z"
+      interruptedAt,
     );
 
     const chatBodies: unknown[] = [];
@@ -11606,6 +11610,60 @@ describe("inferCoffeeStarterTopics", () => {
     assert.ok(topics.includes("The burden of being chosen"));
   });
 
+  it("keeps prior-cast Library metadata out of the current Coffee facet prompt", async () => {
+    let capturedPrompt = "";
+    const provider = {
+      async generateResponse(
+        messages: Array<{ role: string; content: string }>,
+      ): Promise<string> {
+        capturedPrompt = messages.map((message) => message.content).join("\n");
+        return JSON.stringify({
+          candidates: [
+            "Who owns the closing shift?",
+            "Can optimism survive customer service?",
+            "The day the formula leaked",
+            "When quiet becomes a protest",
+          ].map((label, index) => ({
+            label,
+            kind: ["reflective", "tension", "scenario", "wildcard"][index],
+            anchorBotId: index % 2 === 0 ? "bot-spongebob" : "bot-squidward",
+            anchorBasis: index % 2 === 0 ? "Krusty Krab" : "clarinet and quiet",
+          })),
+        });
+      },
+    };
+    const staleLibraryContext =
+      "Same-account Library metadata: Harry Potter, Professor McGonagall, Hogwarts.";
+    const group: CoffeeBotProfile[] = [
+      {
+        ...ALICE,
+        id: "bot-spongebob",
+        name: "SpongeBob SquarePants",
+        authoredSystemPrompt: "Fry cook at the Krusty Krab in Bikini Bottom.",
+        systemPrompt: `Fry cook at the Krusty Krab in Bikini Bottom.\n\n${staleLibraryContext}`,
+      },
+      {
+        ...BORIS,
+        id: "bot-squidward",
+        name: "Squidward Tentacles",
+        authoredSystemPrompt: "Clarinet player and Krusty Krab cashier who wants quiet.",
+        systemPrompt: `Clarinet player and Krusty Krab cashier who wants quiet.\n\n${staleLibraryContext}`,
+      },
+    ];
+
+    await inferCoffeeStarterTopics({
+      provider: provider as never,
+      group,
+      sessionSettings: normalizeCoffeeSessionSettings(undefined),
+    });
+
+    assert.match(capturedPrompt, /Krusty Krab|Bikini Bottom/iu);
+    assert.doesNotMatch(
+      capturedPrompt,
+      /Harry Potter|Professor McGonagall|Hogwarts/iu,
+    );
+  });
+
   it("demotes generic model topics for canon-specific SpongeBob groups", async () => {
     const provider = {
       async generateResponse(): Promise<string> {
@@ -13633,6 +13691,16 @@ describe("coffee prompt leak cleanup", () => {
       ),
       true
     );
+    for (const leakedTopicCoachLine of [
+      "What would change your answer to this: Evil plan to take over the world?",
+      "Where does this question become real: Evil plan to take over the world?",
+    ]) {
+      assert.equal(coffeeReplyLooksLikePromptLeak(leakedTopicCoachLine), true);
+      assert.equal(
+        sanitizeCoffeeTableReply(leakedTopicCoachLine, "Darth Vader"),
+        "",
+      );
+    }
     assert.equal(
       coffeeReplyLooksLikePromptLeak("Show me rather and penny with a receipt attached."),
       true
