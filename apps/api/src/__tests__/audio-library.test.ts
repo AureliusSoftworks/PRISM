@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import { ensureActionSfxPackSchema } from "../action-sfx-pack.ts";
 import {
   listAudioLibraryClips,
+  listAudioLibraryPage,
   readBotAvatarSfxBytes,
   summarizeAudioLibraryBytes,
 } from "../audio-library.ts";
@@ -68,7 +69,7 @@ function createAudioLibraryDb(): { db: DatabaseSync; userId: string } {
 }
 
 describe("audio-library", () => {
-  it("lists vocal action packs and avatar loops under Sound Effects", () => {
+  it("indexes non-voice avatar loops but excludes vocal Action SFX packs", () => {
     const { db, userId } = createAudioLibraryDb();
     const now = new Date().toISOString();
     db.prepare(
@@ -102,17 +103,11 @@ describe("audio-library", () => {
        VALUES (?, 'bot', ?, 'laugh', 1, 'audio/mpeg', ?, 'legacy prose seed', 'gen1', ?)`,
     ).run(userId, "bot-mira", tinyMp3, now);
 
-    const clips = listAudioLibraryClips(db, userId, "sound_effects");
-    assert.equal(clips.length, 2);
-    assert.ok(clips.some((clip) => clip.id.startsWith("action-sfx:")));
-    assert.ok(clips.some((clip) => clip.id === "avatar-sfx:bot-mira"));
-    assert.ok(
-      clips.every(
-        (clip) =>
-          clip.url.startsWith("/api/action-sfx-pack/clip?") ||
-          clip.url === "/api/bots/bot-mira/avatar-sfx",
-      ),
-    );
+    const clips = listAudioLibraryClips(db, userId, "effects", { source: "mine" });
+    assert.equal(clips.length, 1);
+    assert.equal(clips[0]?.id, "avatar-sfx:bot-mira");
+    assert.equal(clips[0]?.url, "/api/bots/bot-mira/avatar-sfx");
+    assert.ok(clips.every((clip) => !clip.id.startsWith("action-sfx:")));
 
     const avatarBytes = readBotAvatarSfxBytes(db, userId, "bot-mira");
     assert.ok(avatarBytes);
@@ -120,7 +115,7 @@ describe("audio-library", () => {
     assert.ok(avatarBytes.bytes.length > 0);
   });
 
-  it("lists Signal ident and atmosphere beds under Music", () => {
+  it("separates Signal music from ambience", () => {
     const { db, userId } = createAudioLibraryDb();
     const now = new Date().toISOString();
     db.prepare(
@@ -142,19 +137,25 @@ describe("audio-library", () => {
          4000, 1, ?, ?)`,
     ).run("show-1", userId, tinyMp3, now, now);
 
-    const clips = listAudioLibraryClips(db, userId, "music");
-    assert.equal(clips.length, 3);
+    const clips = listAudioLibraryClips(db, userId, "music", { source: "mine" });
+    assert.equal(clips.length, 2);
     assert.ok(clips.some((clip) => clip.label.includes("Ident")));
     assert.ok(clips.some((clip) => clip.label.includes("Outdent")));
-    assert.ok(clips.some((clip) => clip.label.includes("Atmosphere")));
+    assert.ok(clips.every((clip) => clip.category === "music"));
     assert.ok(
       clips.every((clip) => clip.url.includes("/api/botcast/shows/show-1/")),
     );
 
+    const ambience = listAudioLibraryClips(db, userId, "ambience", { source: "mine" });
+    assert.equal(ambience.length, 1);
+    assert.match(ambience[0]?.label ?? "", /Atmosphere/u);
+    assert.equal(ambience[0]?.category, "ambience");
+
     const summary = summarizeAudioLibraryBytes(db, userId);
     assert.ok(summary.musicBytes > 0);
+    assert.ok(summary.ambienceBytes > 0);
     assert.equal(summary.soundEffectsBytes, 0);
-    assert.equal(summary.totalBytes, summary.musicBytes);
+    assert.equal(summary.totalBytes, summary.musicBytes + summary.ambienceBytes);
   });
 
   it("keeps other users' audio out of the inventory", () => {
@@ -172,6 +173,34 @@ describe("audio-library", () => {
          4000, 1, ?, ?)`,
     ).run("show-other", "other-user", tinyMp3, now, now);
 
-    assert.deepEqual(listAudioLibraryClips(db, userId, "music"), []);
+    assert.deepEqual(listAudioLibraryClips(db, userId, "music", { source: "mine" }), []);
+  });
+
+  it("shows PRISM assets without charging them to personal storage", () => {
+    const { db, userId } = createAudioLibraryDb();
+    const effects = listAudioLibraryClips(db, userId, "effects", { source: "prism" });
+    assert.ok(effects.some((clip) => clip.semanticRole === "paper_pickup"));
+    assert.ok(effects.every((clip) => clip.readOnly && clip.bytes === 0));
+    assert.equal(summarizeAudioLibraryBytes(db, userId).totalBytes, 0);
+  });
+
+  it("paginates deterministically after exact category and source filtering", () => {
+    const { db, userId } = createAudioLibraryDb();
+    const first = listAudioLibraryPage(db, userId, "ambience", {
+      source: "prism",
+      offset: 0,
+      limit: 2,
+    });
+    assert.equal(first.clips.length, 2);
+    assert.equal(first.total, 3);
+    assert.equal(first.nextOffset, 2);
+    const second = listAudioLibraryPage(db, userId, "ambience", {
+      source: "prism",
+      offset: first.nextOffset,
+      limit: 2,
+    });
+    assert.equal(second.clips.length, 1);
+    assert.equal(second.nextOffset, null);
+    assert.ok(first.clips.every((clip) => clip.category === "ambience"));
   });
 });

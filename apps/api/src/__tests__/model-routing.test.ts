@@ -221,10 +221,10 @@ describe("resolveAutoModel", () => {
     assert.equal(resolved.autoRoute?.model, "gpt-4.1-mini");
   });
 
-  it("keeps balanced online Auto independent of a stale provider preference", () => {
+  it("keeps balanced online Auto independent of the incoming provider", () => {
     const resolved = resolveAutoModel({
       provider: "anthropic",
-      explicitModelOverride: "gpt-5.3-chat-latest",
+      lane: "online",
       preferredModel: "gpt-4o-mini",
       hiddenModelIds: [],
       catalog: catalog(),
@@ -233,10 +233,10 @@ describe("resolveAutoModel", () => {
     assertAutoRoute(resolved, "openai", "gpt-4o-mini", "online");
   });
 
-  it("keeps balanced online Auto independent of a stale Anthropic preference", () => {
+  it("keeps balanced online Auto independent of a stale Anthropic model preference", () => {
     const resolved = resolveAutoModel({
       provider: "anthropic",
-      explicitModelOverride: "gpt-4o-mini",
+      lane: "online",
       preferredModel: "claude-opus-4-8",
       hiddenModelIds: [],
       catalog: catalog(),

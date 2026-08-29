@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  canAddDebateMysteryMansionEditorThirdFloorV1,
   validateDebateMysteryMansionEditorTopologyV1,
   type DebateMysteryMansionBundleRoomV1,
 } from "./debateMysteryV2.ts";
@@ -58,5 +59,28 @@ describe("Mansion Editor topology", () => {
     assert.match(errors, /overlaps/u);
     assert.match(errors, /two-way connection/u);
     assert.match(errors, /walkable plan/u);
+  });
+
+  it("requires four second-floor rooms before a third floor can be saved", () => {
+    const tooNarrow = validRooms();
+    tooNarrow.push(room("observatory", "library", 3, 0, 0, ["landing"]));
+    tooNarrow[3] = { ...tooNarrow[3]!, neighborIds: ["foyer", "bathroom", "observatory"] };
+    assert.equal(canAddDebateMysteryMansionEditorThirdFloorV1(tooNarrow), false);
+    assert.match(
+      validateDebateMysteryMansionEditorTopologyV1(tooNarrow, 4).join("\n"),
+      /Floor 2 needs at least 4 rooms before Floor 3 can be used/u,
+    );
+
+    const supported = [
+      ...tooNarrow,
+      room("gallery", "library", 2, 4, 0, ["landing", "study"]),
+      room("study", "library", 2, 6, 0, ["gallery"]),
+    ];
+    supported[3] = { ...supported[3]!, neighborIds: ["foyer", "bathroom", "observatory", "gallery"] };
+    assert.equal(canAddDebateMysteryMansionEditorThirdFloorV1(supported), true);
+    assert.doesNotMatch(
+      validateDebateMysteryMansionEditorTopologyV1(supported, 4).join("\n"),
+      /Floor 2 needs at least/u,
+    );
   });
 });

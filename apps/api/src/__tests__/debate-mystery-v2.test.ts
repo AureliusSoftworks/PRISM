@@ -1474,6 +1474,46 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     );
   });
 
+  it("authors a fraud charge without falling back to murder presentation", async () => {
+    const db = testDb();
+    const provider = new V2AuthorProvider();
+    let session = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      {
+        ...config(),
+        playerRole: "participant",
+        inspiration: "A forged will redirects the estate during a masquerade.",
+      },
+      "create-fraud-charge",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      session.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    let state = v2State(session);
+    assert.equal(state.compilation.stage, "complete");
+    assert.equal(state.caseCharge?.kind, "fraud");
+    assert.match(state.caseCharge?.accusationPrompt ?? "", /responsible/iu);
+    session = act(db, session, { action: "move" }, "fraud-title-card");
+    state = v2State(session);
+    assert.equal(state.playPhase, "case_opening");
+    assert.doesNotMatch(
+      JSON.stringify({
+        caseTitle: state.caseTitle,
+        caseCharge: state.caseCharge,
+        record: state.record,
+        dialogueHistory: state.dialogueHistory,
+      }),
+      /\b(?:murder|murderer|killed|killing|dead|death|corpse|fatal)\b/iu,
+    );
+  });
+
   it("freezes difficulty-scaled suspect awareness and temporal recall", () => {
     const suspects = Array.from({ length: 8 }, (_, index) => ({
       seatId: `suspect-${index + 1}`,
@@ -5767,7 +5807,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(state.theoryAvailable, false);
     assert.equal(state.theory?.culpritSeatId, alternateAccused.seatId);
     assert.equal(state.theory?.motive, "A revised public motive hypothesis.");
-    assert.equal(state.theory?.accompliceSeatId, null);
+    assert.equal(state.theory?.accompliceSeatId, state.suspects[1]!.seatId);
     assert.deepEqual(state.theory?.evidenceIds.sort(), authorized.map((key) => key.replace(/^evidence:/u, "")).sort());
     assert.deepEqual(state.theory?.testimonyIds, []);
     assert.ok(state.theoryFiledAt);
@@ -5796,6 +5836,13 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     }
     state = v2State(session);
     assert.equal(state.playPhase, "verdict");
+    assert.equal(state.verdict?.defendantVerdicts?.length, 2);
+    assert.equal(state.verdict?.jurorBallots.length, 8);
+    assert.equal(state.verdict?.accusationCorrect, false);
+    assert.deepEqual(
+      state.verdict?.defendantVerdicts?.map((entry) => entry.seatId),
+      [alternateAccused.seatId, state.suspects[1]!.seatId],
+    );
     assert.equal(state.court?.completedChapterIds.length, compiled.graph.witnessChapters.length);
     const heardLineIds = new Set(state.dialogueHistory.flatMap((entry) =>
       entry.lineId ? [entry.lineId] : [],

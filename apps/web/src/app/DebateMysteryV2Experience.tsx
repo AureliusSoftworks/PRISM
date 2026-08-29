@@ -15,6 +15,8 @@ import {
   DEBATE_SCHEMA_VERSION,
   botIdentityPresentationTransitionActiveV1,
   debateMysteryMansionBundleEligibleV2,
+  debateMysteryTheoryAccusedSeatIdsV2,
+  debateMysteryTheoryWithAccusedSeatIdsV2,
   normalizeDebateMysteryV2ForgeProgressMessage,
   splitDebateMysteryStageActionTextV2,
   type DebateMysteryActionRequestV2,
@@ -46,6 +48,7 @@ import {
   WHODUNNIT_INVESTIGATION_MUSIC_TRANSITION_MS,
   WHODUNNIT_INVESTIGATION_MUSIC_URL,
   mysteryInvestigationMusicMix,
+  mysteryInvestigationMusicProgramV1,
 } from "./debateMysteryMusic";
 import {
   WHODUNNIT_MANSION_AMBIENCE_FADE_MS,
@@ -621,8 +624,13 @@ function mysteryDialogueGestureOriginIsInteractive(target: EventTarget | null): 
 
 const AUDIO_OFF_REVEAL_MS_PER_CHARACTER = 34;
 
-function emptyTheory(state: DebateWhodunnitFormatStateV2): DebateMysteryTheoryV1 {
+function emptyTheory(
+  state: Pick<DebateWhodunnitFormatStateV2, "theory" | "suspects" | "caseCharge">,
+): DebateMysteryTheoryV1 {
   return state.theory ?? {
+    accusedSeatIds: state.suspects[0]?.seatId ? [state.suspects[0].seatId] : [],
+    incidentId: state.caseCharge?.incidentId,
+    claim: state.caseCharge?.accusationPrompt,
     culpritSeatId: state.suspects[0]?.seatId ?? null,
     method: "",
     motive: "",
@@ -1088,6 +1096,10 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const [command, setCommand] = useState<"move" | "examine" | "talk" | "present" | null>(null);
   const [caseFileOpen, setCaseFileOpen] = useState(false);
   const [theoryOpen, setTheoryOpen] = useState(state.playPhase === "theory");
+  const musicProgramStartedAtRef = useRef(Date.now());
+  const [musicProgramNow, setMusicProgramNow] = useState(() => Date.now());
+  const [musicAccentUntil, setMusicAccentUntil] = useState(0);
+  const previousTheoryAvailableRef = useRef(state.theoryAvailable);
   const [theory, setTheory] = useState<DebateMysteryTheoryV1>(() => emptyTheory(state));
   const [dialoguePlaybackQueue, setDialoguePlaybackQueue] = useState<DebateMysteryPublicDialogueEntryV2[]>([]);
   const [dialoguePlaybackIndex, setDialoguePlaybackIndex] = useState(0);
@@ -1568,6 +1580,25 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   });
   const roomSpeechInkVisible = !dialoguePerformanceActive || interrogationPhase === "handoff";
   const admittedRecord = state.record.filter((item) => item.admitted);
+  const theoryAccusedSeatIds = debateMysteryTheoryAccusedSeatIdsV2(theory);
+  useEffect(() => {
+    if (state.playPhase !== "investigation") return;
+    const timer = window.setInterval(() => setMusicProgramNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [state.playPhase]);
+  useEffect(() => {
+    if (!previousTheoryAvailableRef.current && state.theoryAvailable) {
+      const now = Date.now();
+      setMusicProgramNow(now);
+      setMusicAccentUntil(now + 8_000);
+    }
+    previousTheoryAvailableRef.current = state.theoryAvailable;
+  }, [state.theoryAvailable]);
+  const investigationMusicProgram = mysteryInvestigationMusicProgramV1({
+    seed: `${props.session.id}:${state.config.houseStyle.id}`,
+    elapsedMs: musicProgramNow - musicProgramStartedAtRef.current,
+    accentActive: musicAccentUntil > musicProgramNow,
+  });
   const mansionCanBeSaved = debateMysteryMansionBundleEligibleV2(state);
   const failedVisualCount = state.rooms.filter(
     (room) => room.sealedAsset?.status === "fallback",
@@ -2441,17 +2472,13 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   }, [callout, props.audioEnabled, props.audioVolume]);
 
   useEffect(() => {
-    setTheory(state.theory ?? {
-      culpritSeatId: state.suspects[0]?.seatId ?? null,
-      method: "",
-      motive: "",
-      opportunity: "",
-      accompliceSeatId: null,
-      evidenceIds: [],
-      testimonyIds: [],
-    });
+    setTheory(emptyTheory({
+      theory: state.theory,
+      suspects: state.suspects,
+      caseCharge: state.caseCharge,
+    }));
     if (state.playPhase === "theory") setTheoryOpen(true);
-  }, [state.playPhase, state.theory, state.suspects]);
+  }, [state.caseCharge, state.playPhase, state.theory, state.suspects]);
 
   useEffect(() => {
     if (state.roomView !== "mansion") return;
@@ -2775,6 +2802,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     if (!roomParallaxEnabled) setRoomParallax({ x: 0, y: 0 });
   }, [roomParallaxEnabled]);
 
+  const defendantVerdicts = state.verdict?.defendantVerdicts ?? [];
+  const verdictIsMixed = new Set(defendantVerdicts.map((entry) => entry.legalResult)).size > 1;
+
   if (state.playPhase === "title_card") {
     const preparedMansionExteriorUrl = sealedMysteryAssetObjectUrl(
       sealedAssetObjectUrls,
@@ -2797,7 +2827,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           <h1>{state.caseTitle}</h1>
           <p>{state.fictionLabel}</p>
           <div className={styles.titleMetadata}>
-            <span>{state.suspects.length} witnesses</span><span>{state.config.trialType === "jury" ? "Jury Trial" : "Bench Trial"}</span>{state.config.investigationMode === "court_only" ? <span>Court act</span> : null}<span>{state.voicesEnabled ? "Local performance ready" : "Text performance"}</span>
+            {state.caseCharge ? <span>{state.caseCharge.title}</span> : null}<span>{state.suspects.length} witnesses</span><span>{state.config.trialType === "jury" ? "Jury Trial" : "Bench Trial"}</span>{state.config.investigationMode === "court_only" ? <span>Court act</span> : null}<span>{state.voicesEnabled ? "Local performance ready" : "Text performance"}</span>
           </div>
           <button type="button" className={styles.primaryAction} disabled={busy} onClick={() => void sendAction({ action: "move" })}>{state.config.investigationMode === "court_only" ? "Begin Trial" : spectator ? "Review Prosecutor Findings" : "Begin Case"}</button>
           {error ? <p className={styles.error}>{error}</p> : null}
@@ -2842,7 +2872,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         <button type="button" className={styles.archiveButton} onClick={props.onExit}>← Archive</button>
         <section
           className={styles.caseOpeningStage}
-          aria-label="Casekeeper briefing in the crime scene. Click anywhere to begin the visible sweep."
+          aria-label="Casekeeper briefing at the incident scene. Click anywhere to begin the visible sweep."
           aria-busy={busy || undefined}
           role="button"
           tabIndex={0}
@@ -2874,7 +2904,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           >
             <small>Casekeeper</small>
             <p>{revealedSpeechText(whodunnitCaptionSpeechText(openingText), captionSpeechTiming)}</p>
-            <span className={styles.dialogueContinueHint} role="status">{busy ? "Opening the crime scene…" : "Enter the crime scene"}</span>
+            <span className={styles.dialogueContinueHint} role="status">{busy ? "Opening the incident scene…" : "Enter the incident scene"}</span>
           </div>
         </section>
         {error ? <p className={styles.errorBanner}>{error}</p> : null}
@@ -2888,8 +2918,16 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       <main className={styles.verdict} data-theme={props.theme}>
         {callout ? <div key={callout.id} className={styles.callout} style={calloutStyle} role="status" aria-live="assertive"><span>{CALLOUT_COPY[callout.callout]}</span></div> : null}
         <button type="button" className={styles.archiveButton} onClick={props.onExit}>← Archive</button>
-        <p className={styles.eyebrow}>The Court finds</p>
-        <h1 data-result={state.verdict.legalResult}>{state.verdict.legalResult === "guilty" ? "GUILTY" : "NOT GUILTY"}</h1>
+        <p className={styles.eyebrow}>The Court finds · {state.caseCharge?.title ?? "Filed charge"}</p>
+        <h1 data-result={verdictIsMixed ? "mixed" : state.verdict.legalResult}>{verdictIsMixed ? "MIXED VERDICT" : state.verdict.legalResult === "guilty" ? "GUILTY" : "NOT GUILTY"}</h1>
+        {defendantVerdicts.length ? (
+          <section className={styles.defendantVerdicts} aria-label="Verdicts by defendant">
+            {defendantVerdicts.map((entry) => {
+              const defendant = state.suspects.find((suspect) => suspect.seatId === entry.seatId);
+              return <article key={entry.seatId} data-result={entry.legalResult}><strong>{defendant?.name ?? "Defendant"}</strong><span>{entry.legalResult === "guilty" ? "GUILTY" : "NOT GUILTY"}</span></article>;
+            })}
+          </section>
+        ) : null}
         <section className={styles.truthGrade}>
           <h2>{state.verdict.classification.replaceAll("_", " ")}</h2>
           <p>Truth and proof grade: <strong>{state.verdict.proofGrade}</strong></p>
@@ -2898,7 +2936,8 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         {state.verdict.jurorBallots.length > 0 ? (
           <section className={styles.ballots}><h2>Juror breakdown</h2>{state.verdict.jurorBallots.map((ballot) => {
             const bot = botById.get(ballot.jurorBotId);
-            return <article key={ballot.jurorBotId}><strong>{bot?.name ?? "Juror"}</strong><span>{ballot.vote.replace("_", " ")}</span><p>{ballot.reason}</p>{ballot.powerAffected ? <small>Power affected</small> : null}</article>;
+            const defendant = state.suspects.find((suspect) => suspect.seatId === ballot.defendantSeatId);
+            return <article key={`${ballot.jurorBotId}:${ballot.defendantSeatId ?? "legacy"}`}><strong>{bot?.name ?? "Juror"}</strong><span>{ballot.vote.replace("_", " ")}</span>{defendant ? <small>Re: {defendant.name}</small> : null}<p>{ballot.reason}</p>{ballot.powerAffected ? <small>Power affected</small> : null}</article>;
           })}</section>
         ) : null}
         <div className={styles.verdictActions}>
@@ -3101,7 +3140,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   }
 
   return (
-    <main className={styles.investigation} data-theme={props.theme} data-view={state.roomView} data-opening-map-reveal={openingMapReveal ? "true" : undefined} data-tutorial-target="mystery-v2-investigation" onClickCapture={handleInvestigationDialogueClickCapture}>
+    <main className={styles.investigation} data-theme={props.theme} data-view={state.roomView} data-music-program={investigationMusicProgram.phase} data-opening-map-reveal={openingMapReveal ? "true" : undefined} data-tutorial-target="mystery-v2-investigation" onClickCapture={handleInvestigationDialogueClickCapture}>
       <SessionAtmosphereLayer
         sessionKey={`whodunnit-v2-mansion-ambience:${props.session.id}:${state.config.houseStyle.id}`}
         backgroundUrl={mansionAmbienceAsset?.url ?? null}
@@ -3122,6 +3161,8 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         mix={mysteryInvestigationMusicMix({
           theoryBoardOpen: theoryOpen,
           roomIntroductionActive,
+          programAudible: investigationMusicProgram.audible,
+          accentActive: investigationMusicProgram.phase === "accent",
         })}
         lifecycleTransitionMs={WHODUNNIT_INVESTIGATION_MUSIC_FADE_MS}
         mixTransitionMs={WHODUNNIT_INVESTIGATION_MUSIC_TRANSITION_MS}
@@ -3414,17 +3455,71 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         </section>
       ) : null}
       {!spectatorTheory && !roomIntroductionActive ? <nav className={styles.investigationCommands} aria-label="Investigation commands">
-        <button type="button" data-active={state.roomView === "mansion" ? "true" : undefined} disabled={busy || dialoguePerformanceActive || !state.openingSweepComplete} title={!state.openingSweepComplete ? "Examine every visible point in the crime scene first." : undefined} onClick={() => { setCommand("move"); void sendAction({ action: "move" }); }} data-tutorial-target="mystery-v2-move"><span>⌂</span>Move</button>
+        <button type="button" data-active={state.roomView === "mansion" ? "true" : undefined} disabled={busy || dialoguePerformanceActive || !state.openingSweepComplete} title={!state.openingSweepComplete ? "Examine every visible point at the incident scene first." : undefined} onClick={() => { setCommand("move"); void sendAction({ action: "move" }); }} data-tutorial-target="mystery-v2-move"><span>⌂</span>Move</button>
         <button type="button" data-active={command === "examine" ? "true" : undefined} disabled={busy || dialoguePerformanceActive || state.roomView !== "room"} onClick={() => setCommand("examine")} data-tutorial-target="mystery-v2-examine"><span>⌕</span>Examine</button>
         <button type="button" data-active={command === "talk" ? "true" : undefined} disabled={busy || dialoguePerformanceActive || !currentSuspect} onClick={() => setCommand("talk")} data-tutorial-target="mystery-v2-talk"><span>“”</span>Talk</button>
         <button type="button" data-active={command === "present" ? "true" : undefined} disabled={busy || dialoguePerformanceActive || !currentSuspect || admittedRecord.length === 0} onClick={() => setCommand("present")} data-tutorial-target="mystery-v2-present"><span>◇</span>Present</button>
       </nav> : null}
-      {!spectatorTheory && !roomIntroductionActive && !state.openingSweepComplete ? <small className={styles.sweepHint} role="status">Finish the finite visible sweep before leaving the crime scene.</small> : null}
+      {!spectatorTheory && !roomIntroductionActive && !state.openingSweepComplete ? <small className={styles.sweepHint} role="status">Finish the finite visible sweep before leaving the incident scene.</small> : null}
       {!spectatorTheory && !roomIntroductionActive && command === "talk" && currentSuspect && !dialoguePerformanceActive ? <div className={styles.choiceTray}><header><div><p className={styles.eyebrow}>Talk</p><h2>{currentSuspect.name}</h2></div><button type="button" onClick={() => setCommand(null)}>Close</button></header><p className={styles.topicHelp}>Ask about people, motives, alibis, or rooms. Evidence and testimony stay in Present.</p><div className={styles.topicGroups}>{groupDebateMysteryTalkTopicsV2(state.topics.filter((topic) => topic.suspectSeatId === currentSuspect.seatId)).map((group) => <section key={group.category} className={styles.topicGroup} aria-labelledby={`talk-${currentSuspect.seatId}-${group.category}`}><h3 id={`talk-${currentSuspect.seatId}-${group.category}`}>{group.label}</h3><div className={styles.topicList}>{group.topics.map((topic) => <button key={topic.nodeId} type="button" disabled={busy || dialoguePerformanceActive || !topic.unlocked} data-complete={topic.completed ? "true" : undefined} data-blocked={!topic.unlocked ? "true" : undefined} onClick={() => void sendAction({ action: "talk", suspectSeatId: currentSuspect.seatId, topicNodeId: topic.nodeId })}><span className={styles.topicIcon} aria-hidden="true">{topic.completed ? "✓" : topic.unlocked ? "?" : "×"}</span><span className={styles.topicCopy}><strong>{debateMysteryTalkTopicDisplayLabelV2(topic, state.rooms)}</strong>{!topic.unlocked ? <small>Blocked</small> : null}</span></button>)}</div></section>)}</div></div> : null}
       {!spectatorTheory && !roomIntroductionActive && command === "present" && currentSuspect ? <div className={styles.choiceTray}><header><div><p className={styles.eyebrow}>Present</p><h2>Show {currentSuspect.name}</h2></div><button type="button" onClick={() => setCommand(null)}>Close</button></header>{renderRecordButtons((record) => void sendAction({ action: "present_to_suspect", suspectSeatId: currentSuspect.seatId, record }))}</div> : null}
       {!spectatorTheory && !roomIntroductionActive && state.theoryAvailable ? <button type="button" className={styles.fileChargesButton} onClick={() => setTheoryOpen(true)} data-tutorial-target="mystery-v2-file-theory">File Charges</button> : !spectatorTheory && !roomIntroductionActive ? <small className={styles.theoryHint}>The Theory Board opens after the briefing, one interview, and one admitted record item.</small> : null}
       {caseFileOpen ? <CaseFile state={state} objectUrls={sealedAssetObjectUrls} saveState={sealedAssetSaveState} onSaveAsset={saveSealedAsset} onClose={() => setCaseFileOpen(false)} /> : null}
-      {theoryOpen || spectatorTheory ? <div className={styles.theoryBoard} role="dialog" aria-modal="true" aria-labelledby="theory-v2-title"><header><div><p className={styles.eyebrow}>{spectatorTheory ? "Prosecutor research · editable" : "Theory Board"}</p><h2 id="theory-v2-title">{spectatorTheory ? "Review the Prosecutor conclusion" : "File the prosecution's case"}</h2></div>{spectatorTheory ? null : <button type="button" onClick={() => setTheoryOpen(false)}>Close</button>}</header>{spectatorTheory ? <p>The selected Prosecutor&apos;s conclusion is a public hypothesis built from the admitted physical findings. You may revise every field before filing it.</p> : null}<label>Accused<select value={theory.culpritSeatId ?? ""} onChange={(event) => setTheory((current) => ({ ...current, culpritSeatId: event.target.value || null }))}>{state.suspects.map((suspect) => <option key={suspect.seatId} value={suspect.seatId}>{suspect.name}</option>)}</select></label><label>Method<textarea value={theory.method} onChange={(event) => setTheory((current) => ({ ...current, method: event.target.value }))} placeholder="How was the crime committed?" /></label><label>Motive<textarea value={theory.motive} onChange={(event) => setTheory((current) => ({ ...current, motive: event.target.value }))} placeholder="Why would the accused do it?" /></label><label>Opportunity<textarea value={theory.opportunity} onChange={(event) => setTheory((current) => ({ ...current, opportunity: event.target.value }))} placeholder="When and where was the opportunity?" /></label><fieldset><legend>Evidence to admit</legend>{admittedRecord.filter((item) => item.reference.kind === "evidence").map((item) => <label key={item.reference.id}><input type="checkbox" checked={theory.evidenceIds.includes(item.reference.id)} onChange={(event) => setTheory((current) => ({ ...current, evidenceIds: event.target.checked ? [...current.evidenceIds, item.reference.id] : current.evidenceIds.filter((id) => id !== item.reference.id) }))} />{item.emoji} {item.title}</label>)}</fieldset><p>Incomplete method, motive, or opportunity will weaken the case, but will not block trial.</p><button type="button" className={styles.primaryAction} disabled={busy || !theory.culpritSeatId} onClick={() => { if (!spectatorTheory) setTheoryOpen(false); void sendAction({ action: "file_theory", theory }); }}>{spectatorTheory ? "File conclusion and watch court" : "File charges and open court"}</button></div> : null}
+      {theoryOpen || spectatorTheory ? (
+        <div className={styles.theoryBoard} role="dialog" aria-modal="true" aria-labelledby="theory-v2-title">
+          <header>
+            <div>
+              <p className={styles.eyebrow}>{spectatorTheory ? "Prosecutor research · editable" : "Theory Board"}</p>
+              <h2 id="theory-v2-title">{spectatorTheory ? "Review the Prosecutor conclusion" : "File the prosecution's case"}</h2>
+            </div>
+            {spectatorTheory ? null : <button type="button" onClick={() => setTheoryOpen(false)}>Close</button>}
+          </header>
+          {state.caseCharge ? (
+            <section className={styles.caseCharge} aria-label="Charge">
+              <small>Charge · {state.caseCharge.title}</small>
+              <strong>{state.caseCharge.accusationPrompt}</strong>
+            </section>
+          ) : null}
+          {spectatorTheory ? <p>The selected Prosecutor&apos;s conclusion is a public hypothesis built from the admitted physical findings. You may revise every field before filing it.</p> : null}
+          <fieldset>
+            <legend>Accused · choose one or two</legend>
+            {state.suspects.map((suspect) => {
+              const selected = theoryAccusedSeatIds.includes(suspect.seatId);
+              return (
+                <label key={suspect.seatId}>
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    disabled={!selected && theoryAccusedSeatIds.length >= 2}
+                    onChange={(event) => setTheory((current) => {
+                      const currentAccused = debateMysteryTheoryAccusedSeatIdsV2(current);
+                      const nextAccused = event.target.checked
+                        ? [...currentAccused, suspect.seatId].slice(0, 2)
+                        : currentAccused.filter((seatId) => seatId !== suspect.seatId);
+                      return debateMysteryTheoryWithAccusedSeatIdsV2(current, nextAccused);
+                    })}
+                  />
+                  {suspect.name}
+                </label>
+              );
+            })}
+          </fieldset>
+          <label>Method<textarea value={theory.method} onChange={(event) => setTheory((current) => ({ ...current, method: event.target.value }))} placeholder="How was the incident carried out?" /></label>
+          <label>Motive<textarea value={theory.motive} onChange={(event) => setTheory((current) => ({ ...current, motive: event.target.value }))} placeholder="Why was each accused responsible?" /></label>
+          <label>Opportunity<textarea value={theory.opportunity} onChange={(event) => setTheory((current) => ({ ...current, opportunity: event.target.value }))} placeholder="When and where did each accused have the opportunity?" /></label>
+          <fieldset>
+            <legend>Evidence to admit</legend>
+            {admittedRecord.filter((item) => item.reference.kind === "evidence").map((item) => (
+              <label key={item.reference.id}>
+                <input type="checkbox" checked={theory.evidenceIds.includes(item.reference.id)} onChange={(event) => setTheory((current) => ({ ...current, evidenceIds: event.target.checked ? [...current.evidenceIds, item.reference.id] : current.evidenceIds.filter((id) => id !== item.reference.id) }))} />
+                {item.emoji} {item.title}
+              </label>
+            ))}
+          </fieldset>
+          <p>Incomplete method, motive, or opportunity will weaken the case, but will not block trial.</p>
+          <button type="button" className={styles.primaryAction} disabled={busy || theoryAccusedSeatIds.length === 0} onClick={() => { if (!spectatorTheory) setTheoryOpen(false); void sendAction({ action: "file_theory", theory }); }}>{spectatorTheory ? "File conclusion and watch court" : "File charges and open court"}</button>
+        </div>
+      ) : null}
       {callout ? <div key={callout.id} className={styles.callout} style={calloutStyle} role="status" aria-live="assertive"><span>{CALLOUT_COPY[callout.callout]}</span></div> : null}
       {error ? <p className={styles.errorBanner}>{error}</p> : null}
     </main>

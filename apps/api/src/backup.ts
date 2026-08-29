@@ -129,7 +129,9 @@ import {
   clampOnlineAutoProviderBias,
   parseStoredOnlineAutoProviderWeights,
   serializeOnlineAutoProviderWeights,
+  normalizeOnlineAutoQualityPosture,
   type OnlineAutoProviderWeightsV1,
+  type OnlineAutoQualityPosture,
   normalizeEphemeralChatProviderPreferences,
   resolveImageProviderName,
   serializeAutoFallbackChain,
@@ -224,6 +226,7 @@ export interface BackupUserSettings {
   /** Soft ONLINE Auto lean: -1 OpenAI … 0 balanced … +1 Anthropic. */
   onlineAutoProviderBias?: number;
   onlineAutoProviderWeights?: OnlineAutoProviderWeightsV1;
+  onlineAutoQualityPosture?: OnlineAutoQualityPosture;
   /** Legacy import only. New backups no longer export this display preference. */
   fallbackModelMessageStripe?: boolean;
   hiddenBotModelIds: string[];
@@ -1914,6 +1917,7 @@ export function exportUserSnapshot(
          auto_fallback_chain,
          online_auto_provider_bias,
          online_auto_provider_weights,
+         online_auto_quality_posture,
          fallback_model_message_stripe,
          hidden_bot_model_ids,
          hidden_global_picker_model_ids,
@@ -2000,6 +2004,7 @@ export function exportUserSnapshot(
         auto_fallback_chain: string | null;
         online_auto_provider_bias: number;
         online_auto_provider_weights: string | null;
+        online_auto_quality_posture: string | null;
         fallback_model_message_stripe: number;
         hidden_bot_model_ids: string | null;
         hidden_global_picker_model_ids: string | null;
@@ -2115,6 +2120,9 @@ export function exportUserSnapshot(
         onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
           user.online_auto_provider_weights,
           user.online_auto_provider_bias,
+        ),
+        onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
+          user.online_auto_quality_posture,
         ),
         hiddenBotModelIds: safeParseStringArray(user.hidden_bot_model_ids),
         hiddenGlobalPickerModelIds: safeParseStringArray(
@@ -3957,6 +3965,7 @@ function importUserSnapshotWithinTransaction(
         auto_fallback_chain = ?,
         online_auto_provider_bias = ?,
         online_auto_provider_weights = ?,
+        online_auto_quality_posture = ?,
         fallback_model_message_stripe = ?,
         hidden_bot_model_ids = ?,
         hidden_global_picker_model_ids = ?,
@@ -4065,6 +4074,7 @@ function importUserSnapshotWithinTransaction(
         settings.onlineAutoProviderWeights ??
           parseStoredOnlineAutoProviderWeights(null, settings.onlineAutoProviderBias),
       ),
+      normalizeOnlineAutoQualityPosture(settings.onlineAutoQualityPosture),
       settings.fallbackModelMessageStripe === false ? 0 : 1,
       JSON.stringify(
         Array.isArray(settings.hiddenBotModelIds)

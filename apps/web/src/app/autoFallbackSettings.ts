@@ -27,6 +27,7 @@ export function autoFallbackPrimaryForSelection(args: {
   catalog: CatalogShapeForAuto | null | undefined;
   onlineAutoProviderBias?: number | null;
   onlineAutoProviderWeights?: OnlineAutoProviderWeightsV1 | null;
+  onlineAutoQualityPosture?: import("@localai/shared").OnlineAutoQualityPosture | null;
 }): AutoFallbackModelRef | null {
   const storedChoice = args.modelChoice?.trim() ?? "";
   const modelChoice = isDisabledModelChoice(storedChoice) ? AUTO_MODEL_CHOICE : storedChoice;
@@ -39,6 +40,7 @@ export function autoFallbackPrimaryForSelection(args: {
     catalog: args.catalog ?? { local: [], online: [] },
     onlineAutoProviderBias: args.onlineAutoProviderBias,
     onlineAutoProviderWeights: args.onlineAutoProviderWeights,
+    onlineAutoQualityPosture: args.onlineAutoQualityPosture,
   });
   return { provider: resolved.provider, model: resolved.model };
 }

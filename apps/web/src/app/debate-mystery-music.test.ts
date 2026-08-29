@@ -11,12 +11,13 @@ import {
   WHODUNNIT_INVESTIGATION_MUSIC_TRANSITION_MS,
   WHODUNNIT_INVESTIGATION_MUSIC_URL,
   mysteryInvestigationMusicMix,
+  mysteryInvestigationMusicProgramV1,
   mysteryInvestigationMusicSessionActive,
 } from "./debateMysteryMusic.ts";
 
 const appDirectory = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(
-  resolve(appDirectory, "DebateMysteryExperience.tsx"),
+  resolve(appDirectory, "DebateMysteryV2Experience.tsx"),
   "utf8",
 );
 const tutorialSource = readFileSync(
@@ -57,6 +58,34 @@ describe("Whodunnit investigation music", () => {
     assert.ok(WHODUNNIT_INVESTIGATION_MUSIC_FADE_MS >= 320);
   });
 
+  it("uses deterministic musical cells with longer ambience-only rests", () => {
+    const first = mysteryInvestigationMusicProgramV1({ seed: "blackwood", elapsedMs: 0 });
+    const same = mysteryInvestigationMusicProgramV1({ seed: "blackwood", elapsedMs: 0 });
+    assert.deepEqual(first, same);
+    assert.equal(first.phase, "cell");
+    assert.ok(first.cellDurationMs >= 8_000 && first.cellDurationMs <= 16_000);
+    assert.ok(first.restDurationMs >= 45_000 && first.restDurationMs <= 85_000);
+    assert.ok(first.restDurationMs > first.cellDurationMs);
+    const rest = mysteryInvestigationMusicProgramV1({
+      seed: "blackwood",
+      elapsedMs: first.cellDurationMs + 1,
+    });
+    assert.equal(rest.phase, "rest");
+    assert.equal(rest.audible, false);
+    const accent = mysteryInvestigationMusicProgramV1({
+      seed: "blackwood",
+      elapsedMs: first.cellDurationMs + 1,
+      accentActive: true,
+    });
+    assert.equal(accent.phase, "accent");
+    assert.equal(accent.audible, true);
+    assert.ok(WHODUNNIT_INVESTIGATION_MUSIC_MIX.background <= 0.07);
+    assert.ok(mysteryInvestigationMusicMix({
+      theoryBoardOpen: false,
+      accentActive: true,
+    }).background <= 0.09);
+  });
+
   it("ships the compact three-minute stereo music asset", () => {
     const assetPath = resolve(
       appDirectory,
@@ -70,8 +99,9 @@ describe("Whodunnit investigation music", () => {
 
   it("uses the shared local-only music layer and the global audio controls", () => {
     assert.match(source, /<SessionAtmosphereLayer/u);
-    assert.match(source, /mysteryInvestigationMusicSessionActive\(state\.playPhase\)/u);
-    assert.match(source, /active=\{Boolean\([\s\S]*props\.audioEnabled[\s\S]*props\.audioVolume/u);
+    assert.match(source, /data-music-program=\{investigationMusicProgram\.phase\}/u);
+    assert.match(source, /active=\{props\.audioEnabled\}/u);
+    assert.match(source, /programAudible: investigationMusicProgram\.audible/u);
     assert.match(source, /backgroundRecordable=\{false\}/u);
     assert.match(source, /ambientFoley=\{false\}/u);
     assert.match(
@@ -81,11 +111,12 @@ describe("Whodunnit investigation music", () => {
     assert.match(source, /lifecycleTransitionMs=\{WHODUNNIT_INVESTIGATION_MUSIC_FADE_MS\}/u);
   });
 
-  it("documents the first-visit silence, steady interviews, and silent non-investigation boundaries", () => {
+  it("documents the furniture-music cadence and silent non-investigation boundaries", () => {
     assert.match(
       tutorialSource,
-      /The Midnight Clue underscores the mansion investigation at one steady level—after any first-visit introduction and even during interviews/u,
+      /short deterministic cells emerge between long ambience-only rests/u,
     );
+    assert.match(tutorialSource, /routine pickups, navigation, and hovering never trigger it/u);
     assert.match(tutorialSource, /fades for the Theory Board and courtroom/u);
   });
 });

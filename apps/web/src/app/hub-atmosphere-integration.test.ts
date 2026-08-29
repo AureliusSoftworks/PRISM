@@ -141,8 +141,14 @@ describe("Chat / Prism atmosphere integration", () => {
     assert.match(storageSource, /label: "General"/u);
     assert.match(storageSource, /id: "audio"/u);
     assert.match(storageSource, /label: "Audio"/u);
-    assert.match(storageSource, /label: "Sound Effects"/u);
+    assert.match(storageSource, /label: "Effects"/u);
     assert.match(storageSource, /label: "Music"/u);
-    assert.match(storageSource, /AudioLibraryModal/u);
+    assert.match(storageSource, /label: "Ambience"/u);
+    assert.doesNotMatch(storageSource, /AudioLibraryModal|AssetLibraryModal/u);
+    const assetsSource = readFileSync(
+      new URL("./AssetsSettings.tsx", import.meta.url),
+      "utf8",
+    );
+    assert.match(assetsSource, /AudioLibraryModal/u);
   });
 });

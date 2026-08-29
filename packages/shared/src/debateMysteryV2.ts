@@ -14,6 +14,14 @@ import type {
   MansionAtmosphereContractV1,
   PortableMansionInstallationMetadataV1,
 } from "./portableMysteryPackage.js";
+import type {
+  MansionMusicIdentityV1,
+  MansionMusicLibraryStateV1,
+  MansionMusicLoopV1,
+  MansionAtmosphereLibraryStateV1,
+} from "./mansionMusic.js";
+import type { MansionLayoutV2 } from "./mansionLayoutV2.js";
+import type { MysteryPublicChargeV1 } from "./mysteryIncidentPlan.js";
 import {
   botIdentityMirrorAvatarDetailsV1,
   botIdentityMirrorFaceV1,
@@ -136,6 +144,8 @@ export interface DebateMysteryHouseStyleV2 {
   bespokeAmbienceRequested: boolean;
   /** Present on imported mansions so bespoke references and room mixes survive. */
   ambience?: MansionAmbienceManifestV1 | null;
+  /** Additive: legacy mansions derive this from their public style and atmosphere. */
+  musicIdentity?: MansionMusicIdentityV1;
 }
 
 export interface DebateMysteryMansionBundleRoomV1 {
@@ -158,8 +168,16 @@ export const DEBATE_MYSTERY_MANSION_EDITOR_MIN_FLOORS_V1 = 2;
 export const DEBATE_MYSTERY_MANSION_EDITOR_MAX_FLOORS_V1 = 3;
 export const DEBATE_MYSTERY_MANSION_EDITOR_MIN_ROOMS_V1 = 5;
 export const DEBATE_MYSTERY_MANSION_EDITOR_MAX_ROOMS_V1 = 18;
+export const DEBATE_MYSTERY_MANSION_EDITOR_MIN_SECOND_FLOOR_ROOMS_FOR_THIRD_V1 = 4;
 export const DEBATE_MYSTERY_MANSION_EDITOR_GRID_COLUMNS_V1 = 16;
 export const DEBATE_MYSTERY_MANSION_EDITOR_GRID_ROWS_V1 = 12;
+
+export function canAddDebateMysteryMansionEditorThirdFloorV1(
+  rooms: readonly DebateMysteryMansionBundleRoomV1[],
+): boolean {
+  return rooms.filter((room) => room.floor === 2).length >=
+    DEBATE_MYSTERY_MANSION_EDITOR_MIN_SECOND_FLOOR_ROOMS_FOR_THIRD_V1;
+}
 
 export interface DebateMysteryMansionDerivationV1 {
   version: 1;
@@ -213,6 +231,11 @@ export function validateDebateMysteryMansionEditorTopologyV1(
   const floors = new Set(rooms.map((room) => room.floor));
   if (!floors.has(1) || !floors.has(2)) {
     errors.push("Every edited mansion needs occupied ground and upper floors.");
+  }
+  if (floors.has(3) && !canAddDebateMysteryMansionEditorThirdFloorV1(rooms)) {
+    errors.push(
+      `Floor 2 needs at least ${DEBATE_MYSTERY_MANSION_EDITOR_MIN_SECOND_FLOOR_ROOMS_FOR_THIRD_V1} rooms before Floor 3 can be used.`,
+    );
   }
   const highestFloor = Math.max(0, ...floors);
   for (let floor = 1; floor <= highestFloor; floor += 1) {
@@ -288,6 +311,7 @@ export interface DebateMysteryMansionAssetV1 {
   mimeType: "image/png" | "image/webp" | "audio/mpeg" | "audio/ogg" | "audio/wav";
   sha256: string;
   byteLength: number;
+  durationMs?: number | null;
 }
 
 export interface DebateMysteryMansionLibraryPresentationV1 {
@@ -319,6 +343,9 @@ export interface DebateMysteryMansionBundleSummaryV1 {
   suspectCount: number;
   houseStyle: DebateMysteryHouseStyleV2;
   rooms: DebateMysteryMansionBundleRoomV1[];
+  /** Additive connected planner state. Legacy V1 bundles omit this and keep
+   * their exact compatibility rooms readable/playable. */
+  layoutV2?: MansionLayoutV2 | null;
   /** Absent only on pre-aggregate API snapshots. */
   assets?: DebateMysteryMansionAssetV1[];
   /** Present when this mansion was installed from a portable package. */
@@ -328,8 +355,40 @@ export interface DebateMysteryMansionBundleSummaryV1 {
   /** Present on current API snapshots; older snapshots fall back to name and
    * portable/house-style metadata on the client. */
   library?: DebateMysteryMansionLibraryPresentationV1;
+  /** Current Mansion Library soundtrack state. Only active exports or plays in Investigation. */
+  music?: MansionMusicLibraryStateV1;
+  /** Current Mansion Library environmental world-bed state. */
+  atmosphere?: MansionAtmosphereLibraryStateV1;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DebateMysteryMansionPresentationSnapshotV2 {
+  version: 2;
+  name: string;
+  title: string;
+  description: string;
+  thumbnailAssetId: string | null;
+  scaleClass: DebateMysteryMansionExteriorScaleClassV1;
+  houseStyle: DebateMysteryHouseStyleV2;
+  assets: DebateMysteryMansionAssetV1[];
+  /** Frozen with the accepted theme so replay never reads mutable Library timing. */
+  investigationThemeLoop?: MansionMusicLoopV1 | null;
+}
+
+/** Captured once when Case Forge creates a session. Mutable Library metadata
+ * and topology can no longer race later compilation, Archive, or replay. */
+export interface DebateMysteryMansionSnapshotV2 {
+  version: 2;
+  sourceBundleId: string;
+  /** V1-compatible semantic projection used by the existing case compiler. */
+  rooms: DebateMysteryMansionBundleRoomV1[];
+  /** Present for V2 sources; null preserves a V1 source without rewriting it. */
+  layoutV2: MansionLayoutV2 | null;
+  layoutSha256: string;
+  presentation: DebateMysteryMansionPresentationSnapshotV2;
+  presentationSha256: string;
+  capturedAt: string;
 }
 
 export type DebateMysteryTrialTypeV2 = "jury" | "bench";
@@ -472,6 +531,8 @@ export interface DebateMysteryResolvedConfigV2
   spark: string;
   assetSynthesis: DebateMysteryAssetSynthesisV2;
   mansionBundleId: string | null;
+  /** Canonical immutable aggregate snapshot. Legacy archived cases omit it. */
+  mansionSnapshot: DebateMysteryMansionSnapshotV2 | null;
   houseStyle: DebateMysteryHouseStyleV2;
   jurorBotIds: [string, string, string, string] | [];
   eyewitnessChance: number;
@@ -820,6 +881,8 @@ export type DebateMysteryVerdictClassificationV2 =
 
 export interface DebateMysteryJurorBallotV2 {
   jurorBotId: string;
+  /** Defendant this ballot concerns. Missing on legacy single-defendant trials. */
+  defendantSeatId?: string;
   vote: "guilty" | "not_guilty";
   reason: string;
   powerAffected: boolean;
@@ -828,6 +891,17 @@ export interface DebateMysteryJurorBallotV2 {
 export interface DebateMysteryVerdictV2 {
   legalResult: "guilty" | "not_guilty";
   classification: DebateMysteryVerdictClassificationV2;
+  /** Charge-agnostic correctness. Missing on legacy homicide verdicts. */
+  accusationCorrect?: boolean;
+  /** Per-defendant legal results allow one filed accusation to name several
+   * people without collapsing mixed outcomes into one factual answer. */
+  defendantVerdicts?: Array<{
+    seatId: string;
+    legalResult: "guilty" | "not_guilty";
+    factuallyResponsible: boolean;
+    classification: DebateMysteryVerdictClassificationV2;
+  }>;
+  /** Legacy homicide alias retained for Archive/package compatibility. */
   sealedCulpritCorrect: boolean;
   proofGrade: "proved" | "unsafe" | "failed";
   jurorBallots: DebateMysteryJurorBallotV2[];
@@ -1286,6 +1360,8 @@ export interface DebateWhodunnitFormatStateV2 {
   compilation: DebateMysteryCompilationStatusV2;
   caseTitle: string | null;
   fictionLabel: "Fictional, non-canonical case";
+  /** Public charge only. Responsible parties and linked incidents stay sealed. */
+  caseCharge?: MysteryPublicChargeV1 | null;
   config: DebateMysteryResolvedConfigV2;
   victim: { id: string; name: string } | null;
   suspects: DebateMysteryPublicSuspectSnapshotV1[];
@@ -2277,6 +2353,7 @@ export function resolveDebateMysteryConfigV2(
       typeof value.mansionBundleId === "string" && value.mansionBundleId.trim()
         ? value.mansionBundleId.trim().slice(0, 200)
         : null,
+    mansionSnapshot: null,
     houseStyle: {
       ...debateMysteryHouseStyleV2(spark),
       bespokeAmbienceRequested: assetSynthesis.ambience,
@@ -2312,6 +2389,54 @@ export function debateMysteryClassifyVerdictV2(args: {
   }
   if (args.proofEstablished && args.accusedIsCulprit) return "acquittal_despite_proof";
   return "failed_prosecution";
+}
+
+/** Ordered, deduplicated filed defendants with legacy murder compatibility. */
+export function debateMysteryTheoryAccusedSeatIdsV2(
+  theory: DebateMysteryTheoryV1 | null | undefined,
+): string[] {
+  if (!theory) return [];
+  const explicit = Array.isArray(theory.accusedSeatIds)
+    ? theory.accusedSeatIds
+    : [];
+  const legacyAliases = [theory.culpritSeatId, theory.accompliceSeatId].flatMap((seatId) =>
+    typeof seatId === "string" && seatId.trim() ? [seatId.trim()] : []);
+  const explicitNormalized = explicit.flatMap((seatId) =>
+    typeof seatId === "string" && seatId.trim() ? [seatId.trim()] : []);
+  // An older client may edit only culpritSeatId/accompliceSeatId after reading
+  // a newer state that also contains accusedSeatIds. Treat a disagreement as
+  // a legacy alias edit; current clients always update both representations.
+  const candidates = explicitNormalized.length &&
+    explicitNormalized.join("\0") === legacyAliases.join("\0")
+    ? explicitNormalized
+    : legacyAliases.length
+      ? legacyAliases
+      : explicitNormalized;
+  return [...new Set(candidates.flatMap((seatId) =>
+    typeof seatId === "string" && seatId.trim() ? [seatId.trim()] : []))];
+}
+
+export function debateMysteryTheoryWithAccusedSeatIdsV2(
+  theory: DebateMysteryTheoryV1,
+  accusedSeatIds: readonly string[],
+): DebateMysteryTheoryV1 {
+  const normalized = [...new Set(accusedSeatIds.map((seatId) => seatId.trim()).filter(Boolean))];
+  return {
+    ...theory,
+    accusedSeatIds: normalized,
+    culpritSeatId: normalized[0] ?? null,
+    accompliceSeatId: normalized[1] ?? null,
+  };
+}
+
+export function debateMysteryAccusationMatchesV2(
+  accusedSeatIds: readonly string[],
+  responsibleSeatIds: readonly string[],
+): boolean {
+  const accused = new Set(accusedSeatIds);
+  const responsible = new Set(responsibleSeatIds);
+  return accused.size === responsible.size &&
+    [...accused].every((seatId) => responsible.has(seatId));
 }
 
 export function emptyDebateMysteryRequirementsV2(): DebateMysteryDialogueRequirementV2 {
@@ -2555,6 +2680,13 @@ export function normalizeDebateMysteryFormatStateV2(
         typeof configSource.mansionBundleId === "string" &&
         configSource.mansionBundleId.trim()
           ? configSource.mansionBundleId.trim()
+          : null,
+      mansionSnapshot:
+        configSource.mansionSnapshot &&
+        typeof configSource.mansionSnapshot === "object" &&
+        !Array.isArray(configSource.mansionSnapshot) &&
+        (configSource.mansionSnapshot as { version?: unknown }).version === 2
+          ? configSource.mansionSnapshot as unknown as DebateMysteryMansionSnapshotV2
           : null,
       scaleClass:
         configSource.scaleClass === "compact" ||

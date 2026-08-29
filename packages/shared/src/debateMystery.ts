@@ -698,6 +698,14 @@ export type DebateMysteryPublicTestimonyExcerptV1 = Omit<
 >;
 
 export interface DebateMysteryTheoryV1 {
+  /** Charge-agnostic accusation. New V2 cases use this ordered, deduplicated
+   * set; legacy cases derive it from culpritSeatId/accompliceSeatId. */
+  accusedSeatIds?: string[];
+  /** Public incident being prosecuted. Omitted by legacy homicide cases. */
+  incidentId?: string;
+  /** Player-authored concise theory of responsibility for the filed charge. */
+  claim?: string;
+  /** Legacy primary-defendant alias retained for saved V1/V2 murder cases. */
   culpritSeatId: string | null;
   method: string;
   motive: string;

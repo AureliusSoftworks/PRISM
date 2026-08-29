@@ -11,8 +11,10 @@ describe("Flight Recorder summary route", () => {
     )?.[0] ?? "";
     assert.match(route, /const userId = requireAuth\(ctx\)/u);
     assert.match(route, /safeEvents = trace[\s\S]*?\.filter\(\(line\)/u);
-    assert.match(route, /getAuxiliaryProvider\(user\.prism_default_llm_model/u);
-    assert.match(route, /experimentalDualOllama: user\.experimental_dual_ollama_enabled === 1/u);
+    assert.match(
+      route,
+      /getAuxiliaryProvider\(\s*user\.prism_default_llm_model,\s*dualOllamaWorkloadOptions\(user\)/u,
+    );
     assert.match(route, /Never claim access to prompts, messages, memories, credentials, audio, or hidden reasoning/u);
     assert.doesNotMatch(route, /selectProvider\(/u);
     assert.doesNotMatch(route, /getOpenAiApiKeyForUser/u);

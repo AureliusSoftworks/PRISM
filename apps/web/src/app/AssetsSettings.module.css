@@ -1,0 +1,135 @@
+.assetsSettings {
+  display: grid;
+  gap: 1.15rem;
+  width: 100%;
+}
+
+.header {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.header > span {
+  color: var(--accent, #a78bfa);
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.header h4,
+.header p,
+.reuseNote p {
+  margin: 0;
+}
+
+.header h4 {
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: clamp(1.8rem, 4vw, 2.7rem);
+  font-weight: 500;
+}
+
+.header p,
+.reuseNote p {
+  max-width: 48rem;
+  color: var(--fg-muted, rgba(255, 255, 255, 0.62));
+  line-height: 1.5;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.card {
+  --asset-accent: #4169e1;
+  --asset-soft: rgba(35, 63, 146, 0.18);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.75rem;
+  min-height: 10.5rem;
+  padding: 1rem;
+  text-align: left;
+  color: inherit;
+  border: 1px solid color-mix(in srgb, var(--asset-accent) 52%, var(--line, rgba(255, 255, 255, 0.12)));
+  border-radius: 1rem;
+  background: linear-gradient(145deg, var(--asset-soft), color-mix(in srgb, var(--bg-surface, #17151e) 94%, transparent));
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.card[data-audio-asset-category="effects"] {
+  --asset-accent: #d28a36;
+  --asset-soft: rgba(184, 111, 33, 0.17);
+}
+
+.card[data-audio-asset-category="ambience"] {
+  --asset-accent: #35a88b;
+  --asset-soft: rgba(35, 130, 106, 0.17);
+}
+
+.card:hover,
+.card:focus-visible {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--asset-accent) 78%, white 8%);
+  box-shadow: 0 14px 32px color-mix(in srgb, var(--asset-accent) 18%, transparent);
+}
+
+.glyph {
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  color: color-mix(in srgb, var(--asset-accent) 78%, white);
+  border: 1px solid color-mix(in srgb, var(--asset-accent) 64%, transparent);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--asset-accent) 16%, transparent);
+  font-size: 1.25rem;
+}
+
+.cardCopy {
+  display: grid;
+  align-content: start;
+  gap: 0.35rem;
+}
+
+.cardCopy strong {
+  color: color-mix(in srgb, var(--asset-accent) 72%, white);
+  font-size: 1.15rem;
+}
+
+.cardCopy small,
+.count {
+  color: var(--fg-muted, rgba(255, 255, 255, 0.6));
+  line-height: 1.4;
+}
+
+.count {
+  grid-column: 1 / -1;
+  align-self: end;
+  padding-top: 0.65rem;
+  border-top: 1px solid color-mix(in srgb, var(--asset-accent) 24%, transparent);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.reuseNote {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.9rem 1rem;
+  border-left: 3px solid #35a88b;
+  border-radius: 0.4rem 0.8rem 0.8rem 0.4rem;
+  background: rgba(35, 130, 106, 0.08);
+}
+
+@media (max-width: 980px) {
+  .cards {
+    grid-template-columns: 1fr;
+  }
+
+  .card {
+    min-height: 8rem;
+  }
+}

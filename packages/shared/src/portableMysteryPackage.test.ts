@@ -9,6 +9,7 @@ import {
   validateMansionPackageManifestV1,
   validateWhodunnitPackageManifestV1,
 } from "./portableMysteryPackage.ts";
+import { deriveMansionMusicIdentityV1 } from "./mansionMusic.ts";
 
 const hash = "a".repeat(64);
 
@@ -86,6 +87,65 @@ test("mansion manifests accept optional exterior scale while keeping V1 packages
   assert.match(
     validateMansionPackageManifestV1({ ...legacy, scaleClass: "colossal" }).join("\n"),
     /scaleClass is invalid/u,
+  );
+});
+
+test("mansion manifests carry an optional titled, sealed music identity while legacy packages stay readable", () => {
+  const legacy = mansionManifest();
+  assert.deepEqual(validateMansionPackageManifestV1(legacy), []);
+  const musicHash = "b".repeat(64);
+  const current = {
+    ...legacy,
+    assets: [
+      ...(legacy.assets as Array<Record<string, unknown>>),
+      {
+        id: "investigation-theme",
+        role: "music",
+        archivePath: `audio/${musicHash}.mp3`,
+        sha256: musicHash,
+        byteLength: 2_880_621,
+        mimeType: "audio/mpeg",
+        width: null,
+        height: null,
+        durationMs: 120_024,
+      },
+    ],
+    investigationThemeAssetId: "investigation-theme",
+    investigationThemeTitle: "Lanterns Beneath the Monsoon",
+    investigationThemeLoop: {
+      version: 1,
+      loopStartMs: 1_000,
+      loopEndMs: 119_000,
+      crossfadeMs: 1_500,
+      silenceRatio: 0.52,
+    },
+    musicIdentity: deriveMansionMusicIdentityV1({
+      title: "The Jungle House",
+      houseStyleLabel: "Grounded expedition manor",
+      houseStylePromptContract: "Monsoon beside one banyan.",
+    }),
+  };
+  assert.deepEqual(validateMansionPackageManifestV1(current), []);
+  assert.match(
+    validateMansionPackageManifestV1({
+      ...current,
+      investigationThemeLoop: {
+        ...current.investigationThemeLoop,
+        silenceRatio: 0.2,
+      },
+    }).join("\n"),
+    /music loop silence ratio is invalid/u,
+  );
+  assert.match(
+    validateMansionPackageManifestV1({
+      ...current,
+      musicIdentity: { ...current.musicIdentity, instrumental: false },
+    }).join("\n"),
+    /musicIdentity safety contract is invalid/u,
+  );
+  assert.match(
+    validateMansionPackageManifestV1({ ...current, investigationThemeTitle: "" }).join("\n"),
+    /investigationThemeTitle is invalid/u,
   );
 });
 

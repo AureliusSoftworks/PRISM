@@ -28,7 +28,7 @@ describe("Ollama Cloud credential migration", () => {
 });
 
 describe("three-provider routing and background lane migration", () => {
-  it("adds nullable provider weights and Ollama Cloud background storage", () => {
+  it("adds provider weights, the Quality first posture, and Cloud background storage", () => {
     const db = new DatabaseSync(":memory:");
     initializeDatabase(db);
     const columns = new Set(
@@ -37,6 +37,7 @@ describe("three-provider routing and background lane migration", () => {
       ),
     );
     assert.equal(columns.has("online_auto_provider_weights"), true);
+    assert.equal(columns.has("online_auto_quality_posture"), true);
     assert.equal(columns.has("prism_cloud_llm_model"), true);
     db.close();
   });

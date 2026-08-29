@@ -3209,9 +3209,12 @@ export {
   ONLINE_AUTO_PROVIDER_BIAS_WEIGHT,
   ONLINE_AUTO_PROVIDER_WEIGHTS_VERSION,
   BALANCED_ONLINE_AUTO_PROVIDER_WEIGHTS,
+  DEFAULT_ONLINE_AUTO_QUALITY_POSTURE,
   clampOnlineAutoProviderBias,
   formatOnlineAutoProviderBiasLabel,
+  formatOnlineAutoQualityPostureLabel,
   normalizeOnlineAutoProviderWeights,
+  normalizeOnlineAutoQualityPosture,
   parseStoredOnlineAutoProviderWeights,
   serializeOnlineAutoProviderWeights,
   formatOnlineAutoProviderWeightsLabel,
@@ -3224,6 +3227,7 @@ export {
   resolveAutoModel,
   type AutoModelProvider,
   type OnlineAutoProviderId,
+  type OnlineAutoQualityPosture,
   type OnlineAutoProviderWeightsV1,
   type AutoModelPriceV1,
   type AutoRouteDecisionV1,
@@ -3898,7 +3902,11 @@ export * from "./slateHandoff.js";
 export * from "./debate.js";
 export * from "./debateMystery.js";
 export * from "./debateMysteryV2.js";
+export * from "./mysteryIncidentPlan.js";
 export * from "./portableMysteryPackage.js";
+export * from "./mansionLayoutV2.js";
+export * from "./mansionMusic.js";
+export * from "./audioAssets.js";
 export * from "./mansionAcoustics.js";
 export * from "./debateParticipation.js";
 export * from "./debateChairFavorability.js";

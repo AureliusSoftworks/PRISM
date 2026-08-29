@@ -164,8 +164,11 @@ export function normalizeFallbackChainsV2(
   const local = (rawLocal as AutoFallbackModelRef[]).filter(
     (entry) => entry.provider === "local",
   );
+  // Cloud is a background-helper provider. Older saved global foreground
+  // chains may still contain it, so migrate those entries away while parsing
+  // instead of letting them re-enter an ONLINE recovery route.
   const online = (rawOnline as AutoFallbackModelRef[]).filter(
-    (entry) => entry.provider !== "local",
+    (entry) => entry.provider !== "local" && entry.provider !== "ollama_cloud",
   );
   if (
     local.length > AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT ||
@@ -243,7 +246,9 @@ export function autoFallbackResolvedChain(
     normalizedPrimary,
     ...authoredPriorities,
     ...eligibleCandidates,
-  ];
+  ].filter(
+    (entry) => lane !== "online" || entry.provider !== "ollama_cloud",
+  );
   const seen = new Set<string>();
   const reservesFinalLocalSlot = finalLocalRecovery?.provider === "local";
   const resolved = ordered

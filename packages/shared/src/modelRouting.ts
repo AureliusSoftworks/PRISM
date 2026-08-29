@@ -139,6 +139,31 @@ export const ONLINE_AUTO_PROVIDER_BIAS_WEIGHT = 10_000;
 
 export const ONLINE_AUTO_PROVIDER_WEIGHTS_VERSION = 1 as const;
 export type OnlineAutoProviderId = "openai" | "anthropic" | "ollama_cloud";
+/**
+ * The provider triangle expresses taste; this setting expresses the quality
+ * boundary within which that taste may operate.
+ */
+export type OnlineAutoQualityPosture = "quality" | "open" | "economy";
+export const DEFAULT_ONLINE_AUTO_QUALITY_POSTURE: OnlineAutoQualityPosture =
+  "quality";
+
+export function normalizeOnlineAutoQualityPosture(
+  value: unknown,
+): OnlineAutoQualityPosture {
+  return value === "open" || value === "economy" ? value : "quality";
+}
+
+export function formatOnlineAutoQualityPostureLabel(value: unknown): string {
+  switch (normalizeOnlineAutoQualityPosture(value)) {
+    case "open":
+      return "Open mix";
+    case "economy":
+      return "Economy";
+    default:
+      return "Quality first";
+  }
+}
+
 export interface OnlineAutoProviderWeightsV1 {
   v: typeof ONLINE_AUTO_PROVIDER_WEIGHTS_VERSION;
   openai: number;
@@ -240,8 +265,10 @@ export interface ResolveAutoModelInput {
    * Ignored for LOCAL. Clamped to [-1, 1]; default 0 = neutrality.
    */
   onlineAutoProviderBias?: number | null;
-  /** Server-authoritative three-provider ONLINE Auto preference. */
+  /** @deprecated Persisted for backup compatibility; foreground Auto ignores it. */
   onlineAutoProviderWeights?: OnlineAutoProviderWeightsV1 | null;
+  /** @deprecated Persisted for backup compatibility; foreground Auto ignores it. */
+  onlineAutoQualityPosture?: OnlineAutoQualityPosture | null;
   routingContext?: AutoRoutingContextV1;
   /** Restrict contextual ONLINE Auto to models eligible for Turbo. */
   turboOnly?: boolean;
@@ -277,17 +304,6 @@ function providerBiasScoreDelta(
   if (provider === "openai") return bias * ONLINE_AUTO_PROVIDER_BIAS_WEIGHT;
   if (provider === "anthropic") return -bias * ONLINE_AUTO_PROVIDER_BIAS_WEIGHT;
   return 0;
-}
-
-function providerWeightScoreDelta(
-  provider: AutoModelProvider,
-  weights: OnlineAutoProviderWeightsV1,
-): number {
-  if (provider === "local") return 0;
-  if (weights[provider] <= Number.EPSILON) {
-    return Number.MAX_SAFE_INTEGER / 8;
-  }
-  return (1 / 3 - weights[provider]) * ONLINE_AUTO_PROVIDER_BIAS_WEIGHT * 3;
 }
 
 export interface ResolvedAutoModel {
@@ -645,6 +661,10 @@ function contextualAutoRoute(input: ResolveAutoModelInput): AutoRouteDecisionV1 
     .filter(
       (candidate) =>
         candidate.id &&
+        // Ollama Cloud is a bounded ONLINE helper, never a global foreground
+        // route. Keep this shared boundary ahead of every applet-specific
+        // eligibility rule so Auto and recovery agree everywhere.
+        (lane !== "online" || candidate.provider !== "ollama_cloud") &&
         !hidden.has(candidate.id) &&
         (!input.routingContext?.structuredOutput ||
           candidate.supportsStructuredOutput !== false) &&
@@ -666,16 +686,13 @@ function contextualAutoRoute(input: ResolveAutoModelInput): AutoRouteDecisionV1 
       );
   const inputTokens = estimatedInputTokens(input.routingContext);
   const outputTokens = Math.max(1, Math.round(input.routingContext?.outputTokens ?? 800));
-  // Provider weights apply only inside the ONLINE lane. The legacy scalar is
-  // retained solely as a migration input when no weight object is present.
+  // Foreground ONLINE Auto is intentionally binary: the legacy scalar is the
+  // sole preference between OpenAI and Anthropic. Newer three-way values are
+  // accepted elsewhere for backup compatibility but never affect this route.
   const providerBias =
     lane === "online"
       ? clampOnlineAutoProviderBias(input.onlineAutoProviderBias)
       : ONLINE_AUTO_PROVIDER_BIAS_DEFAULT;
-  const providerWeights = normalizeOnlineAutoProviderWeights(
-    input.onlineAutoProviderWeights,
-    providerBias,
-  );
   const ranked = viable
     .map((candidate) => {
       const price = input.priceForModel?.(candidate.provider, candidate.id) ?? null;
@@ -691,9 +708,7 @@ function contextualAutoRoute(input: ResolveAutoModelInput): AutoRouteDecisionV1 
           estimatedCost +
           candidate.profile.latency * 10_000 +
           (candidate.profile.known ? 0 : 1_000_000_000) +
-          (input.onlineAutoProviderWeights
-            ? providerWeightScoreDelta(candidate.provider, providerWeights)
-            : providerBiasScoreDelta(candidate.provider, providerBias)),
+          providerBiasScoreDelta(candidate.provider, providerBias),
       };
     })
     .sort((left, right) =>
@@ -734,6 +749,7 @@ function contextualAutoRoute(input: ResolveAutoModelInput): AutoRouteDecisionV1 
 
 export function resolveAutoModel(input: ResolveAutoModelInput): ResolvedAutoModel {
   const hidden = new Set(sanitizeHiddenModelIds(input.hiddenModelIds));
+  const lane: ResponseLane = input.lane ?? (input.provider === "local" ? "local" : "online");
   const explicit = input.explicitModelOverride?.trim() || null;
   if (explicit) {
     const structuredUnsupported =
@@ -750,7 +766,7 @@ export function resolveAutoModel(input: ResolveAutoModelInput): ResolvedAutoMode
           input.provider,
           input.catalog,
         );
-    if (fixed) {
+    if (fixed && !(lane === "online" && fixed.provider === "ollama_cloud")) {
       return {
         provider: fixed.provider,
         model: fixed.model,
@@ -769,7 +785,6 @@ export function resolveAutoModel(input: ResolveAutoModelInput): ResolvedAutoMode
     };
   }
 
-  const lane: ResponseLane = input.lane ?? (input.provider === "local" ? "local" : "online");
   if (lane === "online") {
     const provider = input.provider === "anthropic" ? "anthropic" : "openai";
     return {

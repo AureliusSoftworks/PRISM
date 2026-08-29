@@ -1170,6 +1170,9 @@
 .theoryBoard fieldset { display: grid; gap: 0.4rem; padding: 0.8rem; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 0.7rem; }
 .theoryBoard fieldset label { display: flex; gap: 0.45rem; }
 .theoryBoard > p { color: #aaa5b4; font-size: 0.78rem; }
+.caseCharge { display: grid; gap: 0.25rem; padding: 0.8rem; border: 1px solid rgba(184, 156, 255, 0.32); border-radius: 0.7rem; background: rgba(150, 116, 255, 0.08); }
+.caseCharge small { color: #b89cff; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+.caseCharge strong { color: #f5f1ff; }
 
 .court {
   position: relative;
@@ -1616,6 +1619,12 @@
 .verdict > h1 { margin: 0; font-size: clamp(4rem, 14vw, 10rem); line-height: 0.82; letter-spacing: -0.075em; }
 .verdict > h1[data-result="guilty"] { color: #ff77aa; text-shadow: 0 0 2rem rgba(255, 65, 139, 0.35); }
 .verdict > h1[data-result="not_guilty"] { color: #7de5ff; text-shadow: 0 0 2rem rgba(77, 213, 255, 0.3); }
+.verdict > h1[data-result="mixed"] { color: #d7c7ff; font-size: clamp(3.2rem, 10vw, 7.5rem); text-shadow: 0 0 2rem rgba(151, 111, 255, 0.3); }
+.defendantVerdicts { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 0.65rem; width: min(42rem, 100%); }
+.defendantVerdicts article { display: grid; gap: 0.3rem; padding: 0.9rem; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 0.75rem; background: rgba(255, 255, 255, 0.035); }
+.defendantVerdicts article span { font-weight: 900; letter-spacing: 0.08em; }
+.defendantVerdicts article[data-result="guilty"] span { color: #ff77aa; }
+.defendantVerdicts article[data-result="not_guilty"] span { color: #7de5ff; }
 .truthGrade { width: min(42rem, 100%); padding: 1.1rem; border: 1px solid var(--v2-edge); border-radius: 0.9rem; background: rgba(255, 255, 255, 0.035); }
 .truthGrade h2 { margin: 0; text-transform: capitalize; }
 .truthGrade p { color: #b9b4c4; }

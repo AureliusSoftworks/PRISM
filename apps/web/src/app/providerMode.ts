@@ -1,7 +1,8 @@
 import { DISABLED_MODEL_CHOICE, isDisabledModelChoice } from "@localai/shared";
 
 export type Provider = "local" | "ollama_cloud" | "openai" | "anthropic";
-export type OnlineProvider = Exclude<Provider, "local">;
+/** Global foreground ONLINE controls are deliberately OpenAI/Anthropic-only. */
+export type OnlineProvider = "openai" | "anthropic";
 export type ResponseMode = "local" | "online";
 export type AutoResponseMode = ResponseMode | "auto";
 
@@ -13,6 +14,7 @@ export interface ProviderModeModelOption {
   id: string;
   provider: Provider;
   disabledReason?: string;
+  supportsStructuredOutput?: boolean;
   /** False only when Settings hides this enabled model from manual pickers. */
   showInGlobalPicker?: boolean;
 }
@@ -52,17 +54,18 @@ export function blocksOnlineCapabilities(mode: AutoResponseMode): boolean {
 }
 
 export function isOnlineProvider(provider: Provider): provider is OnlineProvider {
-  return provider !== "local";
+  return provider === "openai" || provider === "anthropic";
 }
 
 export function onlineProviderFallback(provider: Provider): OnlineProvider {
-  return provider === "local" ? "openai" : provider;
+  return provider === "anthropic" ? "anthropic" : "openai";
 }
 
 export function fallbackOnlineModelIdsForProvider(
   provider: OnlineProvider,
   preferredOnlineModel?: string | null
 ): string[] {
+  if (!isOnlineProvider(provider)) return [];
   const ids: string[] = [];
   const preferred = normalizeProviderModeModelChoice(preferredOnlineModel);
   if (preferred !== AUTO_MODEL_CHOICE && preferred !== DISABLED_MODEL_CHOICE) {
@@ -116,7 +119,29 @@ export function filterVisibleOnlineModelOptions<T extends ProviderModeModelOptio
   options: readonly T[],
   hiddenModelIds: readonly string[]
 ): T[] {
-  return filterVisibleModelOptions(options, hiddenModelIds);
+  return filterVisibleModelOptions(options, hiddenModelIds).filter(
+    (model) => isOnlineProvider(model.provider),
+  );
+}
+
+/**
+ * Global picker visibility is player-owned. Capability-limited applets keep a
+ * checked model visible and explain why it cannot run there instead of
+ * silently removing it from the shared picker.
+ */
+export function markStructuredOutputModelsUnavailable<
+  T extends ProviderModeModelOption,
+>(options: readonly T[], surfaceLabel: string): T[] {
+  return options.map((model) =>
+    model.supportsStructuredOutput === false
+      ? {
+          ...model,
+          disabledReason:
+            model.disabledReason ??
+            `${surfaceLabel} requires structured output, which this model's provider does not support yet.`,
+        }
+      : model,
+  );
 }
 
 export function inferOnlineProviderForModelChoice(
@@ -137,9 +162,6 @@ export function inferOnlineProviderForModelChoice(
     );
     if (exact && isOnlineProvider(exact.provider)) return exact.provider;
     const id = normalized.toLowerCase();
-    if (id.endsWith(":cloud") || id.endsWith("-cloud")) {
-      return "ollama_cloud";
-    }
     return id.startsWith("claude-") ? "anthropic" : "openai";
   }
 
@@ -229,8 +251,9 @@ export function applyOnlineModelChoice(args: {
     provider,
     choices: {
       local: normalizeProviderModeModelChoice(args.currentChoices.local),
-      ollama_cloud:
-        provider === "ollama_cloud" ? normalized : AUTO_MODEL_CHOICE,
+      // A stale global Cloud model is never carried forward into foreground
+      // state. Cloud remains selectable only in its dedicated background lane.
+      ollama_cloud: AUTO_MODEL_CHOICE,
       openai: provider === "openai" ? normalized : AUTO_MODEL_CHOICE,
       anthropic: provider === "anthropic" ? normalized : AUTO_MODEL_CHOICE,
     },

@@ -7,11 +7,6 @@ import {
   type ImageAssetStorageKindSummary,
   type ImageAssetStorageSummary,
 } from "@localai/shared";
-import { AssetLibraryModal } from "./AssetLibrary";
-import { AudioLibraryModal } from "./AudioLibrary";
-import {
-  type AudioLibraryBin,
-} from "./audioLibraryCatalog";
 import styles from "./StorageSettings.module.css";
 import pageStyles from "./page.module.css";
 
@@ -153,14 +148,19 @@ const STORAGE_APPLETS: Record<StorageAppletId, StorageAppletDef> = {
     kinds: [],
     children: [
       {
-        id: "sound_effects",
+        id: "effects",
         kind: null,
-        label: "Sound Effects",
+        label: "Effects",
       },
       {
         id: "music",
         kind: null,
         label: "Music",
+      },
+      {
+        id: "ambience",
+        kind: null,
+        label: "Ambience",
       },
     ],
     showWhenEmpty: true,
@@ -185,6 +185,30 @@ async function loadStorage(): Promise<ImageAssetStorageSummary> {
     | null;
   if (!response.ok || !payload?.storage) {
     throw new Error(payload?.error ?? "Storage usage is unavailable.");
+  }
+  return payload.storage;
+}
+
+interface AudioAssetStorageSummary {
+  soundEffectsBytes: number;
+  musicBytes: number;
+  ambienceBytes: number;
+  totalBytes: number;
+  blobBytes: number;
+  assetCount: number;
+  acceptedCount: number;
+  hotCount: number;
+  coldCandidateCount: number;
+  coldCandidateBytes: number;
+}
+
+async function loadAudioAssetStorage(): Promise<AudioAssetStorageSummary> {
+  const response = await fetch("/api/audio-assets/storage");
+  const payload = (await response.json().catch(() => null)) as
+    | { storage?: AudioAssetStorageSummary; error?: string }
+    | null;
+  if (!response.ok || !payload?.storage) {
+    throw new Error(payload?.error ?? "Audio storage usage is unavailable.");
   }
   return payload.storage;
 }
@@ -365,6 +389,7 @@ function summarizeKinds(
 
 function buildAppletNodes(
   byKind: readonly ImageAssetStorageKindSummary[],
+  audio: AudioAssetStorageSummary | null = null,
 ): LensNode[] {
   const map = summarizeKinds(byKind);
   return STORAGE_APPLET_ORDER.map((appletId) => {
@@ -376,6 +401,10 @@ function buildAppletNodes(
       if (!entry) continue;
       bytes += entry.bytes;
       count += entry.count;
+    }
+    if (appletId === "audio" && audio) {
+      bytes = audio.totalBytes;
+      count = Number(audio.totalBytes > 0);
     }
     return {
       id: applet.id,
@@ -400,19 +429,29 @@ function buildAppletNodes(
 function buildChildNodes(
   appletId: StorageAppletId,
   byKind: readonly ImageAssetStorageKindSummary[],
+  audio: AudioAssetStorageSummary | null = null,
 ): LensNode[] {
   const map = summarizeKinds(byKind);
   const applet = STORAGE_APPLETS[appletId];
   return applet.children
     .map((child) => {
       const entry = child.kind ? map.get(child.kind) : undefined;
+      const audioBytes = appletId === "audio"
+        ? child.id === "effects"
+          ? audio?.soundEffectsBytes ?? 0
+          : child.id === "music"
+            ? audio?.musicBytes ?? 0
+            : child.id === "ambience"
+              ? audio?.ambienceBytes ?? 0
+              : 0
+        : 0;
       return {
         id: `${appletId}:${child.id}`,
         label: child.label,
         shortLabel: child.label,
         color: applet.color,
-        bytes: entry?.bytes ?? 0,
-        count: entry?.count ?? 0,
+        bytes: entry?.bytes ?? audioBytes,
+        count: entry?.count ?? Number(audioBytes > 0),
         share: 0,
         kind: child.kind,
         appletId,
@@ -432,10 +471,10 @@ export function StorageSettings({
   auditBusy?: boolean;
 }) {
   const [summary, setSummary] = useState<ImageAssetStorageSummary | null>(null);
+  const [audioStorage, setAudioStorage] = useState<AudioAssetStorageSummary | null>(null);
+  const [audioCleanupOpen, setAudioCleanupOpen] = useState(false);
+  const [audioCleanupBusy, setAudioCleanupBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [kind, setKind] = useState<ImageAssetKind>("debate_exhibit");
-  const [manageOpen, setManageOpen] = useState(false);
-  const [audioBin, setAudioBin] = useState<AudioLibraryBin | null>(null);
   const [tidyPreview, setTidyPreview] = useState<ImageAssetSmartTidyPreview | null>(null);
   const [tidyBusy, setTidyBusy] = useState(false);
   const [tidyMessage, setTidyMessage] = useState<string | null>(null);
@@ -449,16 +488,16 @@ export function StorageSettings({
   const [drillAppletId, setDrillAppletId] = useState<StorageAppletId | null>(null);
 
   const rootNodes = useMemo(
-    () => buildAppletNodes(summary?.byKind ?? []),
-    [summary],
+    () => buildAppletNodes(summary?.byKind ?? [], audioStorage),
+    [audioStorage, summary],
   );
 
   const childNodes = useMemo(
     () =>
       drillAppletId
-        ? buildChildNodes(drillAppletId, summary?.byKind ?? [])
+        ? buildChildNodes(drillAppletId, summary?.byKind ?? [], audioStorage)
         : [],
-    [drillAppletId, summary],
+    [audioStorage, drillAppletId, summary],
   );
 
   const lensNodes = drillAppletId ? childNodes : rootNodes;
@@ -481,9 +520,13 @@ export function StorageSettings({
   const refresh = useCallback(async (): Promise<void> => {
     setError(null);
     try {
-      const next = await loadStorage();
+      const [next, nextAudioStorage] = await Promise.all([
+        loadStorage(),
+        loadAudioAssetStorage().catch(() => null),
+      ]);
       setSummary(next);
-      const applets = buildAppletNodes(next.byKind);
+      setAudioStorage(nextAudioStorage);
+      const applets = buildAppletNodes(next.byKind, nextAudioStorage);
       setFocusId((current) =>
         current && applets.some((node) => node.id === current)
           ? current
@@ -492,7 +535,7 @@ export function StorageSettings({
       setDrillAppletId((current) => {
         if (!current) return null;
         const stillActive =
-          buildChildNodes(current, next.byKind).length > 0 ||
+          buildChildNodes(current, next.byKind, nextAudioStorage).length > 0 ||
           STORAGE_APPLETS[current].showWhenEmpty;
         return stillActive ? current : null;
       });
@@ -514,43 +557,41 @@ export function StorageSettings({
     return () => window.clearTimeout(timeoutId);
   }, [refresh]);
 
-  const openKind = (next: ImageAssetKind): void => {
-    setKind(next);
-    setManageOpen(true);
-  };
-
-  const openAudioBin = (next: AudioLibraryBin): void => {
-    setAudioBin(next);
-  };
-
   const activateNode = (node: LensNode): void => {
     setFocusId(node.id);
-    if (node.kind) {
-      openKind(node.kind);
-      return;
-    }
     if (!node.appletId) return;
-    // Audio child placeholders open the browse + play library.
-    if (node.appletId === "audio" && node.id !== node.appletId) {
-      if (node.id.endsWith(":sound_effects")) {
-        openAudioBin("sound_effects");
-        return;
-      }
-      if (node.id.endsWith(":music")) {
-        openAudioBin("music");
-        return;
-      }
-    }
-    // Root primitive tile (id matches applet) can drill into child types.
+    // Storage only explains byte ownership. Asset browsing lives in Settings → Assets.
     if (node.id !== node.appletId) return;
     const applet = STORAGE_APPLETS[node.appletId];
-    if (applet.children.length === 1 && applet.children[0]?.kind) {
-      openKind(applet.children[0].kind);
-      return;
-    }
-    if (applet.children.length > 1) {
+    if (applet.children.length > 0) {
       setDrillAppletId(node.appletId);
       setFocusId(null);
+    }
+  };
+
+  const confirmAudioCandidateCleanup = async (): Promise<void> => {
+    if (!audioStorage?.coldCandidateCount) {
+      setAudioCleanupOpen(false);
+      return;
+    }
+    setAudioCleanupBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/audio-assets/cleanup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ scope: "cold_candidates" }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      if (!response.ok) throw new Error(payload?.error ?? "Audio candidate cleanup failed.");
+      setAudioCleanupOpen(false);
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Audio candidate cleanup failed.");
+    } finally {
+      setAudioCleanupBusy(false);
     }
   };
 
@@ -738,11 +779,7 @@ export function StorageSettings({
                     tile.appletId &&
                     STORAGE_APPLETS[tile.appletId].children.length > 1
                       ? " · open types"
-                      : tile.appletId === "audio" && tile.id !== tile.appletId
-                        ? " · browse & play"
-                        : !tile.kind && tile.id !== tile.appletId
-                          ? " · coming soon"
-                          : ""}
+                      : ""}
                   </small>
                 </span>
                 <span className={styles.spaceLensRowMeta}>
@@ -801,11 +838,11 @@ export function StorageSettings({
                 onFocus={() => setFocusId(tile.id)}
                 onClick={() => activateNode(tile)}
                 aria-label={
-                  tile.kind
-                    ? `${tile.label}: ${tile.count} assets, ${formatBytes(tile.bytes)}. Click to open.`
-                    : `${tile.label}: ${tile.count} assets, ${formatBytes(tile.bytes)}. Click to view types.`
+                  tile.id === tile.appletId
+                    ? `${tile.label}: ${tile.count} assets, ${formatBytes(tile.bytes)}. Click to view storage types.`
+                    : `${tile.label}: ${tile.count} assets, ${formatBytes(tile.bytes)}.`
                 }
-                title={tile.kind ? "Open this bin" : "View asset types"}
+                title={tile.id === tile.appletId ? "View storage types" : "Storage usage"}
               >
                 <span className={styles.spaceOrbCore} aria-hidden="true" />
                 <span className={styles.spaceOrbLabel}>
@@ -825,11 +862,25 @@ export function StorageSettings({
             Three protected cleanups: <strong>Smart tidy</strong> looks for old,
             low-reuse library assets Prism thinks you abandoned.{" "}
             <strong>Audit unused</strong> finds system-managed orphans with no
-            remaining references. <strong>Whodunnit audio</strong> clears only
-            local performances no case, Archive, or replay still owns.
+            remaining references. <strong>Audio candidates</strong> clears only
+            rejected or unaccepted catalog takes with no active usage. <strong>Whodunnit audio</strong> clears only local performances no case, Archive, or replay still owns.
           </p>
         </div>
         <div className={styles.careActions}>
+          <button
+            type="button"
+            className={styles.actionAudit}
+            data-settings-action="storage-audio-candidate-cleanup"
+            onClick={() => setAudioCleanupOpen(true)}
+            disabled={!audioStorage?.coldCandidateCount || audioCleanupBusy}
+            title="Accepted and actively referenced audio always remains protected."
+          >
+            {audioCleanupBusy
+              ? "Clearing…"
+              : audioStorage?.coldCandidateCount
+                ? `Audio candidates · ${audioStorage.coldCandidateCount}`
+                : "Audio candidates · protected"}
+          </button>
           <button
             type="button"
             className={styles.actionTidy}
@@ -902,6 +953,37 @@ export function StorageSettings({
               Whodunnit cases protect {mysteryAudioStorage.referencedClipCount} local recordings ({formatBytes(mysteryAudioStorage.referencedBytes)})
             </span>
           ) : null}
+          {audioStorage ? (
+            <span>
+              Audio catalog {audioStorage.assetCount} assets · {audioStorage.hotCount} active · {audioStorage.coldCandidateCount} cold
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {audioCleanupOpen && audioStorage ? (
+        <div
+          className={styles.tidyPanel}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="audio-candidate-cleanup-title"
+          data-settings-target="storage-audio-candidate-cleanup-dialog"
+        >
+          <header>
+            <div>
+              <span className={pageStyles.settingsEyebrow}>Audio catalog</span>
+              <h5 id="audio-candidate-cleanup-title">Clear unreferenced audio candidates?</h5>
+            </div>
+            <button type="button" className={pageStyles.linkButton} onClick={() => setAudioCleanupOpen(false)} disabled={audioCleanupBusy}>Not now</button>
+          </header>
+          <p>
+            {audioStorage.coldCandidateCount} rejected or unaccepted asset{audioStorage.coldCandidateCount === 1 ? "" : "s"} · up to {formatBytes(audioStorage.coldCandidateBytes)}. Accepted audio and anything referenced by a mansion, applet, or Archive remains protected. Shared encrypted bytes are reclaimed only when no metadata record still uses them.
+          </p>
+          <div className={styles.tidyActions}>
+            <button type="button" className={pageStyles.btnPrimary} onClick={() => void confirmAudioCandidateCleanup()} disabled={audioCleanupBusy}>
+              {audioCleanupBusy ? "Clearing…" : "Clear cold candidates"}
+            </button>
+          </div>
         </div>
       ) : null}
 
@@ -1007,23 +1089,6 @@ export function StorageSettings({
         </div>
       ) : null}
 
-      {manageOpen ? (
-        <AssetLibraryModal
-          kind={kind}
-          includeIncomplete
-          allowDelete
-          onClose={() => {
-            setManageOpen(false);
-            void refresh();
-          }}
-        />
-      ) : null}
-      {audioBin ? (
-        <AudioLibraryModal
-          bin={audioBin}
-          onClose={() => setAudioBin(null)}
-        />
-      ) : null}
     </section>
   );
 }

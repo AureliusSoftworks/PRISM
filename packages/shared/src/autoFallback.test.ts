@@ -85,8 +85,8 @@ describe("Auto fallback contracts", () => {
     );
   });
 
-  it("keeps Ollama Cloud in the ONLINE fallback lane", () => {
-    assert.deepEqual(
+  it("drops Ollama Cloud from global ONLINE fallback recovery", () => {
+    assert.equal(
       autoFallbackResolvedChain(
         { provider: "openai", model: "gpt-primary" },
         {
@@ -96,10 +96,24 @@ describe("Auto fallback contracts", () => {
           ],
         },
       ),
-      [
-        { provider: "openai", model: "gpt-primary" },
-        { provider: "ollama_cloud", model: "minimax-m2.5:cloud" },
-      ],
+      null,
+    );
+  });
+
+  it("migrates saved Cloud fallback entries out of the global ONLINE chain", () => {
+    assert.deepEqual(
+      normalizeFallbackChainsV2({
+        v: 1,
+        fallbacks: [
+          { provider: "ollama_cloud", model: "minimax-m2.5:cloud" },
+          { provider: "anthropic", model: "claude-sonnet" },
+        ],
+      }),
+      {
+        v: 2,
+        local: [],
+        online: [{ provider: "anthropic", model: "claude-sonnet" }],
+      },
     );
   });
 

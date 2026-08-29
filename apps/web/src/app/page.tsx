@@ -36,7 +36,6 @@ import { Markdown } from "@tiptap/markdown";
 import Placeholder from "@tiptap/extension-placeholder";
 import { LUCIDE_BOT_GLYPHS, LUCIDE_BOT_GLYPH_ORDER } from "./glyphCatalog";
 import GlyphTooltipLayer from "./GlyphTooltipLayer";
-import { OnlineAutoProviderTriangle } from "./OnlineAutoProviderTriangle";
 import { BackendUnavailableNotice } from "./BackendUnavailableNotice";
 import IdentityPresentationBlackout from "./IdentityPresentationBlackout";
 import {
@@ -717,6 +716,7 @@ import {
   fallbackOnlineModelIdsForProvider,
   filterVisibleModelOptions,
   isOnlineProvider,
+  markStructuredOutputModelsUnavailable,
   nextResponseMode,
   resolveModelChoiceForResponseMode,
   responseModeForProvider,
@@ -1034,6 +1034,7 @@ import {
   type SettingsScope,
 } from "./SettingsPanel";
 import { StorageSettings } from "./StorageSettings";
+import { AssetsSettings } from "./AssetsSettings";
 import { MemorySettings } from "./MemorySettings";
 import {
   AssetRail,
@@ -1497,8 +1498,11 @@ import {
   HUB_ATMOSPHERE_STYLES,
   normalizeAutoFallbackChain,
   clampOnlineAutoProviderBias,
+  formatOnlineAutoProviderBiasLabel,
   normalizeOnlineAutoProviderWeights,
+  normalizeOnlineAutoQualityPosture,
   type OnlineAutoProviderWeightsV1,
+  type OnlineAutoQualityPosture,
   normalizeHubAtmosphereStyle,
   normalizePrismTypographyScale,
   PRISM_ONBOARDING_VERSION,
@@ -10601,6 +10605,7 @@ interface UserSettings {
   /** Soft ONLINE Auto lean: -1 OpenAI … 0 balanced … +1 Anthropic. */
   onlineAutoProviderBias: number;
   onlineAutoProviderWeights: OnlineAutoProviderWeightsV1;
+  onlineAutoQualityPosture: OnlineAutoQualityPosture;
   legacyAutoFallbackModelSuggestion?: string;
   hiddenBotModelIds: string[];
   hiddenGlobalPickerModelIds: string[];
@@ -14966,8 +14971,9 @@ function globalModelChoicesFromSettings(
   if (!settings) return choices;
   choices.local = normalizeModelChoice(settings.preferredLocalModel);
   const onlineChoice = normalizeModelChoice(settings.preferredOnlineModel);
-  if (onlineChoice !== AUTO_MODEL_CHOICE) {
-    choices[inferOnlineProviderForModelId(onlineChoice)] = onlineChoice;
+  const provider = inferOnlineProviderForModelId(onlineChoice);
+  if (onlineChoice !== AUTO_MODEL_CHOICE && provider !== "ollama_cloud") {
+    choices[provider] = onlineChoice;
   }
   return choices;
 }
@@ -16395,6 +16401,7 @@ function resolvedAutoPrimaryForComposer(
     catalog,
     onlineAutoProviderBias: settings.onlineAutoProviderBias,
     onlineAutoProviderWeights: settings.onlineAutoProviderWeights,
+    onlineAutoQualityPosture: settings.onlineAutoQualityPosture,
   });
 }
 
@@ -16680,6 +16687,9 @@ function visibleConcreteOnlineModelChoice(
   }
   const options = onlineModelOptionsForPicker(catalog, settings);
   const provider = inferOnlineProviderForModelId(visibleChoice);
+  if (provider === "ollama_cloud") {
+    return defaultOnlineModelChoice(catalog, settings);
+  }
   return options.some((model) => model.id === visibleChoice) ||
     onlineProviderCanPreserveModelChoice(catalog, settings, provider)
     ? visibleChoice
@@ -16693,6 +16703,7 @@ function visibleModelChoiceForProvider(
   choice: string | null | undefined,
 ): string {
   const visibleChoice = normalizeModelChoice(choice);
+  if (provider === "ollama_cloud") return AUTO_MODEL_CHOICE;
   if (visibleChoice === DISABLED_MODEL_CHOICE) return DISABLED_MODEL_CHOICE;
   if (visibleChoice === AUTO_MODEL_CHOICE) {
     return visibleChoice;
@@ -16789,7 +16800,6 @@ function onlineModelOptionsForPicker(
 ): ModelCatalogEntry[] {
   return withOnlineProviderHostLabels(
     combinedOnlineModelOptions(
-      chatModelOptionsForProvider(catalog, settings, "ollama_cloud"),
       chatModelOptionsForProvider(catalog, settings, "openai"),
       chatModelOptionsForProvider(catalog, settings, "anthropic"),
     ),
@@ -17068,7 +17078,7 @@ function settingsModelToggleMeta(
   if (groupId === "ollama") {
     return `Offline${model.hostLabel ? ` - ${model.hostLabel}` : ""}`;
   }
-  if (groupId === "ollama_cloud") return "ONLINE chat";
+  if (groupId === "ollama_cloud") return "ONLINE background";
   if (groupId === "anthropic") return "Chat";
   if (groupId === "elevenlabs") return "Image & Video";
   const id = model.id.toLowerCase();
@@ -51474,6 +51484,7 @@ function HomeContent(): React.JSX.Element {
         catalog: { local: [], online: turboEligibleOnlineOptions },
         onlineAutoProviderBias: settings.onlineAutoProviderBias,
         onlineAutoProviderWeights: settings.onlineAutoProviderWeights,
+        onlineAutoQualityPosture: settings.onlineAutoQualityPosture,
       });
       const sameProviderTurboAutoPrimary =
         target?.provider && target.provider !== "local"
@@ -51489,6 +51500,7 @@ function HomeContent(): React.JSX.Element {
               },
               onlineAutoProviderBias: settings.onlineAutoProviderBias,
               onlineAutoProviderWeights: settings.onlineAutoProviderWeights,
+              onlineAutoQualityPosture: settings.onlineAutoQualityPosture,
             })
           : null;
       const turboCandidate = turboModelShortcutCandidate(
@@ -58948,15 +58960,17 @@ function HomeContent(): React.JSX.Element {
           ? normalizeModelChoice(settings.preferredOnlineModel)
           : normalizeModelChoice(nextChoices[nextProvider]);
       const preferredOnlineModel =
-        requestedOnlineChoice === AUTO_MODEL_CHOICE
+        requestedOnlineChoice === AUTO_MODEL_CHOICE ||
+        inferOnlineProviderForModelId(requestedOnlineChoice) === "ollama_cloud"
           ? ""
           : requestedOnlineChoice;
       const canonicalChoices = createDefaultChatModelChoiceByProvider();
       canonicalChoices.local = normalizeModelChoice(preferredLocalModel);
       if (preferredOnlineModel) {
-        canonicalChoices[
-          inferOnlineProviderForModelId(preferredOnlineModel)
-        ] = preferredOnlineModel;
+        const provider = inferOnlineProviderForModelId(preferredOnlineModel);
+        if (provider !== "ollama_cloud") {
+          canonicalChoices[provider] = preferredOnlineModel;
+        }
       }
       const previousModelChoice = normalizeModelChoice(
         previousChoices[settings.preferredProvider],
@@ -59437,9 +59451,8 @@ function HomeContent(): React.JSX.Element {
   }, [modelCatalog, settings]);
   const prismCloudLlmCallOptions = useMemo(
     () =>
-      filterVisibleModelOptions(
-        textModelOptionsForProvider(modelCatalog, settings, "ollama_cloud"),
-        hiddenManualModelIds(settings),
+      textModelOptionsForProvider(modelCatalog, settings, "ollama_cloud").filter(
+        (model) => !model.disabledReason,
       ),
     [modelCatalog, settings],
   );
@@ -59605,7 +59618,11 @@ function HomeContent(): React.JSX.Element {
       }),
       label: `${providerDisplayLabel(model.provider)} · ${model.label}`,
     }));
-    const autoFallbackEntries = suggestedChain?.fallbacks ?? [];
+    // Settings written before Cloud became helper-only can still contain a
+    // foreground Cloud fallback. Keep it out of the editable global chain.
+    const autoFallbackEntries = (suggestedChain?.fallbacks ?? []).filter(
+      (entry) => entry.provider !== "ollama_cloud",
+    );
     const autoFallbackSelectedValues = new Set(
       autoFallbackEntries.map(encodeAutoFallbackPickerValue),
     );
@@ -59683,39 +59700,53 @@ function HomeContent(): React.JSX.Element {
           </div>
           </div>
 
-        <div
+        <label
           className={`${styles.settingsRangeField} ${styles.settingsOnlineAutoProviderBiasField}`}
-          data-tutorial-target="online-auto-provider-triangle"
+          data-tutorial-target="online-auto-provider-bias"
         >
           <span className={styles.settingsRangeHeader}>
             <span className={styles.controlLabelWithInfo}>
-              <span>ONLINE Auto provider balance</span>
+              <span>ONLINE Auto provider lean</span>
               <PanelSectionInfo
                 id={`${variant}-control-info-online-auto-provider-bias`}
-                label="About ONLINE Auto provider balance"
+                label="About ONLINE Auto provider lean"
                 variant="control"
               >
-                Steers ONLINE Auto across OpenAI, Anthropic, and Ollama Cloud.
-                A vertex gives one provider 100%; an edge blends two; the
-                center is an equal three-way balance. Auto still requires an
-                available, visible, capable model, and structured work excludes
-                Cloud. LOCAL Auto is unaffected.
+                Softly steers ONLINE Auto between OpenAI and Anthropic when
+                both can handle the request. Middle is Balanced (pure cost and
+                speed). Extremes lean hard but still allow the other provider
+                when it is clearly better. LOCAL Auto is unaffected.
               </PanelSectionInfo>
             </span>
           </span>
-          <OnlineAutoProviderTriangle
-            value={settings.onlineAutoProviderWeights}
-            onChange={(onlineAutoProviderWeights) =>
+          <span className={styles.settingsRangeValue}>
+            {formatOnlineAutoProviderBiasLabel(settings.onlineAutoProviderBias)}
+          </span>
+          <input
+            type="range"
+            className={styles.settingsOnlineAutoProviderBiasRange}
+            min={-100}
+            max={100}
+            step={1}
+            value={Math.round(
+              clampOnlineAutoProviderBias(settings.onlineAutoProviderBias) * 100,
+            )}
+            aria-label="ONLINE Auto provider lean"
+            onChange={(event) => {
+              const next = clampOnlineAutoProviderBias(
+                Number(event.target.value) / 100,
+              );
               setSettings((previous) =>
-                previous ? { ...previous, onlineAutoProviderWeights } : previous,
-              )
-            }
+                previous ? { ...previous, onlineAutoProviderBias: next } : previous,
+              );
+            }}
           />
-          <small className={styles.settingsOnlineAutoProviderBiasHint}>
-            Preferences save even while a provider is unavailable. Auto only
-            ranks authenticated/discovered providers with runnable models.
-          </small>
-        </div>
+          <span className={styles.settingsOnlineAutoProviderBiasLabels} aria-hidden="true">
+            <span>OpenAI</span>
+            <span>Balanced</span>
+            <span>Anthropic</span>
+          </span>
+        </label>
 
         <details
           className={styles.settingsModelDropdown}
@@ -59795,7 +59826,7 @@ function HomeContent(): React.JSX.Element {
                     <small>
                       {lane === "local"
                         ? "Only local Ollama models can run here."
-                        : "Runnable Ollama Cloud, OpenAI, and Anthropic models can run here."}
+                        : "Only runnable OpenAI and Anthropic models can run here."}
                     </small>
           </div>
           <div className={styles.settingsFallbackGrid} role="list">
@@ -80882,6 +80913,9 @@ function HomeContent(): React.JSX.Element {
       onlineAutoProviderWeights: normalizeOnlineAutoProviderWeights(
         d.settings.onlineAutoProviderWeights,
         d.settings.onlineAutoProviderBias,
+      ),
+      onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
+        d.settings.onlineAutoQualityPosture,
       ),
       ephemeralChatProviderPreferences:
         normalizeEphemeralChatProviderPreferences(
@@ -108609,6 +108643,8 @@ function HomeContent(): React.JSX.Element {
                     ? "Already connected. Leave this blank to keep the saved key."
                     : activeKeyProvider === "elevenlabs"
                       ? "Prism verifies and encrypts this key. It unlocks ElevenLabs image models, Premium voice, and your voice catalog. English remains local and uses no ElevenLabs credits. In Avatar Studio, one Accent Map pin shapes both Local and Premium voice while keeping the spoken language English. Prism assigns stable Premium defaults from the collection you choose in Voice Settings."
+                      : activeKeyProvider === "ollama_cloud"
+                        ? "Prism verifies and encrypts this key. Ollama Cloud is reserved for the ONLINE Background model, where it can handle quiet helper work; it never enters foreground Auto, recovery, or manual model pickers."
                       : "Prism verifies this before saving it encrypted to your account."}
                 </p>
               </div>
@@ -122789,6 +122825,7 @@ function HomeContent(): React.JSX.Element {
                                   group.models.length - disabledInGroup;
                                 const visibleInPicker = group.models.filter(
                                   (model) =>
+                                    group.id !== "ollama_cloud" &&
                                     (isRequiredPrimaryLocalModel(model) ||
                                       !settings.hiddenBotModelIds.includes(
                                         model.id,
@@ -122799,7 +122836,9 @@ function HomeContent(): React.JSX.Element {
                                 ).length;
                                 const providerVisibilityMeta =
                                   group.models.length > 0
-                                    ? `${group.meta} - ${enabledInGroup}/${group.models.length} enabled - ${visibleInPicker} in picker`
+                                    ? group.id === "ollama_cloud"
+                                      ? `${group.meta} - ${enabledInGroup}/${group.models.length} enabled for background`
+                                      : `${group.meta} - ${enabledInGroup}/${group.models.length} enabled - ${visibleInPicker} in picker`
                                     : group.meta;
                                 return (
                                   <details
@@ -122834,9 +122873,9 @@ function HomeContent(): React.JSX.Element {
                                           label={`About ${group.label} model visibility`}
                                           variant="control"
                                         >
-                                          Enabled controls availability and
-                                          Auto eligibility. Show in picker only
-                                          controls manual model pickers.
+                                          {group.id === "ollama_cloud"
+                                            ? "Enabled Ollama Cloud models are available only to the separate ONLINE Background model picker."
+                                            : "Enabled controls availability and Auto eligibility. Show in picker only controls manual model pickers."}
                                         </PanelSectionInfo>
                                       </span>
                                           <small>
@@ -122874,6 +122913,8 @@ function HomeContent(): React.JSX.Element {
                                           !settings.hiddenGlobalPickerModelIds.includes(
                                             model.id,
                                           );
+                                        const canShowInGlobalPicker =
+                                          group.id !== "ollama_cloud";
                                         const isTextModel =
                                           group.id !== "elevenlabs" &&
                                           !(group.id === "openai" &&
@@ -122960,30 +123001,32 @@ function HomeContent(): React.JSX.Element {
                                                     required,
                                                   )}`}
                                             </small>
-                                            <label
-                                              className={
-                                                styles.settingsModelPickerToggle
-                                              }
-                                              title={
-                                                enabled
-                                                  ? "Show this enabled model in manual model pickers"
-                                                  : "Enable this model to change picker visibility"
-                                              }
-                                            >
-                                              <input
-                                                type="checkbox"
-                                                aria-label={`Show ${model.label} in picker`}
-                                                checked={pickerVisible}
-                                                disabled={!enabled}
-                                                onChange={(event) =>
-                                                  setGlobalPickerModelVisible(
-                                                    model.id,
-                                                    event.currentTarget.checked,
-                                                  )
+                                            {canShowInGlobalPicker ? (
+                                              <label
+                                                className={
+                                                  styles.settingsModelPickerToggle
                                                 }
-                                              />
-                                              <span>Show in picker</span>
-                                            </label>
+                                                title={
+                                                  enabled
+                                                    ? "Show this enabled model in manual model pickers"
+                                                    : "Enable this model to change picker visibility"
+                                                }
+                                              >
+                                                <input
+                                                  type="checkbox"
+                                                  aria-label={`Show ${model.label} in picker`}
+                                                  checked={pickerVisible}
+                                                  disabled={!enabled}
+                                                  onChange={(event) =>
+                                                    setGlobalPickerModelVisible(
+                                                      model.id,
+                                                      event.currentTarget.checked,
+                                                    )
+                                                  }
+                                                />
+                                                <span>Show in picker</span>
+                                              </label>
+                                            ) : null}
                                             {isTextModel ? (
                                               editing ? (
                                                 <span className={styles.settingsModelDisplayNameActions}>
@@ -123119,6 +123162,10 @@ function HomeContent(): React.JSX.Element {
                             onAuditUnused={() => void previewUnusedImageAssets()}
                             auditBusy={busy || imageCleanupPreviewLoading}
                           />
+                        )}
+
+                        {activeSettingsScope === "assets" && (
+                          <AssetsSettings />
                         )}
 
                         {activeSettingsScope === "help" && (
@@ -146218,17 +146265,20 @@ function HomeContent(): React.JSX.Element {
     const debateResponseMode = debateBinaryResponseMode;
     const debateNavbarResponseMode = debateBinaryResponseMode;
     const debateEffectiveProvider = debateModelProvider;
-    const debateModelOptions = includeSelectedResponseModeModelOption(
-      modelCatalog,
-      settings,
-      debateNavbarResponseMode,
-      modelOptionsForResponseMode(
+    const debateModelOptions = markStructuredOutputModelsUnavailable(
+      includeSelectedResponseModeModelOption(
         modelCatalog,
         settings,
         debateNavbarResponseMode,
-      ).filter((model) => model.supportsStructuredOutput !== false),
-      debateModelChoice,
-      debateModelProvider,
+        modelOptionsForResponseMode(
+          modelCatalog,
+          settings,
+          debateNavbarResponseMode,
+        ),
+        debateModelChoice,
+        debateModelProvider,
+      ),
+      "Debate and Whodunnit",
     );
     const debateEffortTarget = modelEffortTargetForSelection({
       provider: debatePrimaryForAuto?.provider ?? debateModelProvider,
@@ -147401,11 +147451,14 @@ function HomeContent(): React.JSX.Element {
     });
     const signalEpisodeResponseMode = signalResponseMode;
     const signalNavbarResponseMode = signalResponseMode;
-    const signalNavbarModelOptions = modelOptionsForResponseMode(
-      modelCatalog,
-      settings,
-      signalNavbarResponseMode,
-    ).filter((model) => model.supportsStructuredOutput !== false);
+    const signalNavbarModelOptions = markStructuredOutputModelsUnavailable(
+      modelOptionsForResponseMode(
+        modelCatalog,
+        settings,
+        signalNavbarResponseMode,
+      ),
+      "Signal",
+    );
     const signalResolvedChoice = resolveModelChoiceForResponseMode({
       responseMode: signalNavbarResponseMode,
       providerPreference: signalProvider,

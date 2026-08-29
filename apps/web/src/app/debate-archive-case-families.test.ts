@@ -6,6 +6,7 @@ import type { DebateSessionListItemV1 } from "@localai/shared";
 import {
   debateArchiveProceedingActionLabel,
   groupDebateArchiveSessions,
+  groupDebateArchiveSessionsByFormat,
 } from "./debateArchiveCaseFamilies.ts";
 
 function archiveRun(args: {
@@ -153,6 +154,42 @@ describe("Whodunnit V2 Archive families", () => {
     assert.equal(debateArchiveProceedingActionLabel(deferredGroup), "Start debate");
     assert.equal(debateArchiveProceedingActionLabel(pausedGroup), "Resume debate");
     assert.equal(debateArchiveProceedingActionLabel(completedGroup), "Watch replay");
+  });
+
+  it("groups completed records into newest-first production shelves", () => {
+    const forum = {
+      ...archiveRun({
+        id: "forum",
+        status: "completed",
+        updatedAt: "2026-08-26T10:00:00.000Z",
+        version: 1,
+      }),
+      format: "forum" as const,
+      mysteryVersion: undefined,
+    };
+    const turnabout = {
+      ...forum,
+      id: "turnabout",
+      format: "turnabout" as const,
+      updatedAt: "2026-08-27T10:00:00.000Z",
+    };
+    const whodunnit = archiveRun({
+      id: "whodunnit",
+      status: "completed",
+      updatedAt: "2026-08-28T10:00:00.000Z",
+      version: 1,
+    });
+
+    const shelves = groupDebateArchiveSessionsByFormat(
+      groupDebateArchiveSessions([forum, turnabout, whodunnit]),
+    );
+
+    assert.deepEqual(shelves.map((shelf) => shelf.format), [
+      "whodunnit",
+      "turnabout",
+      "forum",
+    ]);
+    assert.deepEqual(shelves.map((shelf) => shelf.groups.length), [1, 1, 1]);
   });
 
   it("exposes nested Run actions and the same-mystery confirmation accessibly", () => {

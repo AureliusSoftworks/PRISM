@@ -90,8 +90,18 @@ describe("Debate stage alignment", () => {
   });
 
   it("persists Court and Jury camera placements in the shared alignment contract", () => {
-    const courtAdjusted = updateDebateStageWhodunnitCourtPlacement(
+    const tableAdjusted = updateDebateStageWhodunnitCourtPlacement(
       DEFAULT_DEBATE_STAGE_ALIGNMENT,
+      "wideEvidenceTable",
+      { x: -9, y: 6, scale: 92 },
+    );
+    const silhouetteAdjusted = updateDebateStageWhodunnitCourtPlacement(
+      tableAdjusted,
+      "wideWitnessSilhouette",
+      { x: 11, y: -4, scale: 108 },
+    );
+    const courtAdjusted = updateDebateStageWhodunnitCourtPlacement(
+      silhouetteAdjusted,
       "prosecutionMini",
       { x: -18, y: 7.5, scale: 85 },
     );
@@ -112,6 +122,16 @@ describe("Debate stage alignment", () => {
       y: 7.5,
       scale: 85,
     });
+    assert.deepEqual(adjusted.whodunnitCourt.wideEvidenceTable, {
+      x: -9,
+      y: 6,
+      scale: 92,
+    });
+    assert.deepEqual(adjusted.whodunnitCourt.wideWitnessSilhouette, {
+      x: 11,
+      y: -4,
+      scale: 108,
+    });
     assert.deepEqual(adjusted.juryChamber.members[3], {
       x: 12.5,
       y: -6,
@@ -124,6 +144,11 @@ describe("Debate stage alignment", () => {
     });
     assert.equal(style["--whodunnit-prosecution-mini-offset-x"], "-18%");
     assert.equal(style["--whodunnit-prosecution-mini-scale"], "0.85");
+    assert.equal(style["--whodunnit-wide-evidence-table-offset-x"], "-9%");
+    assert.equal(
+      style["--whodunnit-wide-witness-silhouette-offset-x"],
+      "11%",
+    );
     assert.equal(style["--debate-jury-member-3-offset-y"], "-6%");
     assert.equal(style["--debate-jury-member-3-scale"], "1.15");
     assert.equal(style["--debate-jury-votes-offset-x"], "4%");

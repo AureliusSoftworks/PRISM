@@ -6,6 +6,8 @@ import {
   clampOnlineAutoProviderBias,
   formatOnlineAutoProviderBiasLabel,
   formatOnlineAutoProviderWeightsLabel,
+  formatOnlineAutoQualityPostureLabel,
+  normalizeOnlineAutoQualityPosture,
   normalizeOnlineAutoProviderWeights,
   defaultHiddenModelIdsForCatalog,
   isCommonOnlineChatModel,
@@ -223,7 +225,7 @@ describe("resolveAutoModel", () => {
     );
   });
 
-  it("treats Ollama Cloud as ONLINE and excludes it from structured output", () => {
+  it("migrates stale Ollama Cloud foreground choices to an eligible flagship route", () => {
     const cloudCatalog = {
       local: [{ id: REQUIRED_PRIMARY_LOCAL_MODEL_ID }],
       online: [
@@ -242,8 +244,8 @@ describe("resolveAutoModel", () => {
       hiddenModelIds: [],
       catalog: cloudCatalog,
     });
-    assert.equal(foreground.provider, "ollama_cloud");
-    assert.equal(foreground.model, "minimax-m2.5:cloud");
+    assert.equal(foreground.provider, "openai");
+    assert.equal(foreground.model, "gpt-4o-mini");
 
     const structured = resolveAutoModel({
       provider: "ollama_cloud",
@@ -523,7 +525,42 @@ describe("clampOnlineAutoProviderBias", () => {
   });
 });
 
-describe("ONLINE Auto provider weights", () => {
+describe("legacy ONLINE Auto provider weights", () => {
+  it("defaults the routing posture to Quality first", () => {
+    assert.equal(normalizeOnlineAutoQualityPosture(undefined), "quality");
+    assert.equal(normalizeOnlineAutoQualityPosture("open"), "open");
+    assert.equal(normalizeOnlineAutoQualityPosture("economy"), "economy");
+    assert.equal(formatOnlineAutoQualityPostureLabel("quality"), "Quality first");
+  });
+
+  it("does not let a saved Cloud vertex affect foreground Auto", () => {
+    const input = {
+      provider: "openai" as const,
+      lane: "online" as const,
+      hiddenModelIds: [],
+      catalog: {
+        local: [],
+        online: [
+          { id: "gpt-4o", provider: "openai" as const },
+          { id: "claude-sonnet-4-6", provider: "anthropic" as const },
+          { id: "gpt-5:cloud", provider: "ollama_cloud" as const },
+        ],
+      },
+      onlineAutoProviderWeights: {
+        v: 1 as const,
+        openai: 0,
+        anthropic: 0,
+        ollama_cloud: 1,
+      },
+      routingContext: { surface: "chat", research: true },
+      priceForModel: (provider: string) => ({
+        inputUsdPerMillion: provider === "ollama_cloud" ? 0.01 : 100,
+        outputUsdPerMillion: provider === "ollama_cloud" ? 0.01 : 100,
+      }),
+    };
+    assert.notEqual(resolveAutoModel({ ...input }).provider, "ollama_cloud");
+  });
+
   it("defaults to equal thirds and migrates the legacy lean with a Cloud baseline", () => {
     assert.deepEqual(normalizeOnlineAutoProviderWeights(null), {
       v: 1,
@@ -557,7 +594,7 @@ describe("ONLINE Auto provider weights", () => {
     );
   });
 
-  it("makes Ollama Cloud win an otherwise equal three-way ranking at its vertex", () => {
+  it("excludes Ollama Cloud even when it is the cheapest saved three-way candidate", () => {
     const resolved = resolveAutoModel({
       provider: "openai",
       lane: "online",
@@ -579,10 +616,10 @@ describe("ONLINE Auto provider weights", () => {
       routingContext: { surface: "chat", inputText: "Hello" },
       priceForModel: () => ({ inputUsdPerMillion: 1, outputUsdPerMillion: 1 }),
     });
-    assert.equal(resolved.provider, "ollama_cloud");
+    assert.notEqual(resolved.provider, "ollama_cloud");
   });
 
-  it("preserves discovered Cloud thinking metadata when Auto clamps effort", () => {
+  it("falls back safely when a stale Cloud-only foreground catalog is restored", () => {
     const resolved = resolveAutoModel({
       provider: "ollama_cloud",
       lane: "online",
@@ -607,6 +644,7 @@ describe("ONLINE Auto provider weights", () => {
         simulatedEffortEnabled: true,
       },
     });
-    assert.equal(resolved.autoRoute?.reasoningEffort, "high");
+    assert.equal(resolved.provider, "openai");
+    assert.equal(resolved.model, "gpt-4o-mini");
   });
 });

@@ -525,7 +525,7 @@ describe("resolveNextSettings — playerNamePronunciation", () => {
 });
 
 describe("resolveNextSettings — preferredProvider", () => {
-  it("accepts every supported local and online text provider", () => {
+  it("keeps global foreground provider selection local, OpenAI, or Anthropic", () => {
     assert.equal(
       resolveNextSettings({ preferredProvider: "local" }, baseline()).preferredProvider,
       "local"
@@ -533,7 +533,7 @@ describe("resolveNextSettings — preferredProvider", () => {
     assert.equal(
       resolveNextSettings({ preferredProvider: "ollama_cloud" }, baseline())
         .preferredProvider,
-      "ollama_cloud",
+      "openai",
     );
     assert.equal(
       resolveNextSettings({ preferredProvider: "openai" }, baseline()).preferredProvider,
@@ -548,6 +548,11 @@ describe("resolveNextSettings — preferredProvider", () => {
   it("keeps the stored provider when the field is missing or invalid", () => {
     const current = baseline({ preferredProvider: "openai" });
     assert.equal(resolveNextSettings({}, current).preferredProvider, "openai");
+    assert.equal(
+      resolveNextSettings({}, baseline({ preferredProvider: "ollama_cloud" }))
+        .preferredProvider,
+      "openai",
+    );
     assert.equal(
       resolveNextSettings({ preferredProvider: "azure" }, current).preferredProvider,
       "openai"
@@ -1011,6 +1016,25 @@ describe("resolveNextSettings — onlineAutoProviderWeights", () => {
   });
 });
 
+describe("resolveNextSettings — onlineAutoQualityPosture", () => {
+  it("defaults legacy accounts to Quality first and persists the selected posture", () => {
+    assert.equal(
+      resolveNextSettings({}, baseline()).onlineAutoQualityPosture,
+      "quality",
+    );
+    assert.equal(
+      resolveNextSettings({ onlineAutoQualityPosture: "open" }, baseline())
+        .onlineAutoQualityPosture,
+      "open",
+    );
+    assert.equal(
+      resolveNextSettings({ onlineAutoQualityPosture: "economy" }, baseline())
+        .onlineAutoQualityPosture,
+      "economy",
+    );
+  });
+});
+
 describe("resolveNextSettings — hiddenBotModelIds", () => {
   it("accepts a unique trimmed string list", () => {
     const next = resolveNextSettings(
@@ -1194,6 +1218,16 @@ describe("resolveNextSettings — global account text models", () => {
     );
     assert.equal(next.preferredLocalModel, null);
     assert.equal(next.preferredOnlineModel, null);
+  });
+
+  it("migrates a stale Ollama Cloud foreground selection back to Auto", () => {
+    assert.equal(
+      resolveNextSettings(
+        { preferredOnlineModel: "minimax-m2.5:cloud" },
+        baseline(),
+      ).preferredOnlineModel,
+      null,
+    );
   });
 
   it("keeps existing values when invalid types are sent", () => {

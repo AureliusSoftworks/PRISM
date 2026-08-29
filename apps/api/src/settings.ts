@@ -26,7 +26,9 @@ import {
   serializeAutoFallbackChain,
   clampOnlineAutoProviderBias,
   normalizeOnlineAutoProviderWeights,
+  normalizeOnlineAutoQualityPosture,
   type OnlineAutoProviderWeightsV1,
+  type OnlineAutoQualityPosture,
   type GraphicsQuality,
   type PrismTypographyScale,
   type HubAtmosphereStyle,
@@ -206,6 +208,7 @@ export interface CurrentSettings {
   /** Soft ONLINE Auto lean: -1 OpenAI … 0 balanced … +1 Anthropic. */
   onlineAutoProviderBias: number;
   onlineAutoProviderWeights?: string | OnlineAutoProviderWeightsV1 | null;
+  onlineAutoQualityPosture?: string | null;
   hiddenBotModelIds: string;
   hiddenGlobalPickerModelIds?: string;
   hiddenComfyUiWorkflowIds: string;
@@ -291,6 +294,7 @@ export interface NextSettings {
   autoFallbackChain: string | null;
   onlineAutoProviderBias: number;
   onlineAutoProviderWeights: OnlineAutoProviderWeightsV1;
+  onlineAutoQualityPosture: OnlineAutoQualityPosture;
   hiddenBotModelIds: string[];
   hiddenGlobalPickerModelIds: string[];
   hiddenComfyUiWorkflowIds: string[];
@@ -367,6 +371,20 @@ function isProvider(value: unknown): value is Provider {
     value === "openai" ||
     value === "anthropic"
   );
+}
+
+/** Ollama Cloud is reserved for the separate ONLINE background helper lane. */
+function normalizeForegroundProvider(value: Provider): Provider {
+  return value === "ollama_cloud" ? "openai" : value;
+}
+
+function normalizeForegroundOnlineModel(value: string | null): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.endsWith(":cloud") ||
+      normalized.endsWith("-cloud") ||
+      normalized.startsWith("ollama-cloud-direct:")
+    ? null
+    : value;
 }
 
 function isZenPersonaTransitionChoice(
@@ -1002,9 +1020,11 @@ export function resolveNextSettings(
     body.startupPreference,
     normalizePrismStartupPreference(current.startupPreference),
   );
-  const preferredProvider: Provider = isProvider(body.preferredProvider)
-    ? body.preferredProvider
-    : current.preferredProvider;
+  const preferredProvider = normalizeForegroundProvider(
+    isProvider(body.preferredProvider)
+      ? body.preferredProvider
+      : current.preferredProvider,
+  );
   const ephemeralChatProviderPreferences =
     body.ephemeralChatProviderPreferences === undefined
       ? normalizeEphemeralChatProviderPreferences(
@@ -1090,6 +1110,11 @@ export function resolveNextSettings(
       : body.onlineAutoProviderWeights,
     onlineAutoProviderBias,
   );
+  const onlineAutoQualityPosture = normalizeOnlineAutoQualityPosture(
+    body.onlineAutoQualityPosture === undefined
+      ? current.onlineAutoQualityPosture
+      : body.onlineAutoQualityPosture,
+  );
   const autoSwitchModel = current.autoSwitchModel;
   const hiddenBotModelIds = readHiddenBotModelIds(
     body.hiddenBotModelIds,
@@ -1107,9 +1132,8 @@ export function resolveNextSettings(
     body.preferredLocalModel,
     current.preferredLocalModel
   );
-  const preferredOnlineModel = readPreferredTextModel(
-    body.preferredOnlineModel,
-    current.preferredOnlineModel
+  const preferredOnlineModel = normalizeForegroundOnlineModel(
+    readPreferredTextModel(body.preferredOnlineModel, current.preferredOnlineModel),
   );
   const lenientLocalImageFallbackModel = readPreferredModel(
     body.lenientLocalImageFallbackModel,
@@ -1487,6 +1511,7 @@ export function resolveNextSettings(
     autoFallbackChain,
     onlineAutoProviderBias,
     onlineAutoProviderWeights,
+    onlineAutoQualityPosture,
     hiddenBotModelIds,
     hiddenGlobalPickerModelIds,
     hiddenComfyUiWorkflowIds,

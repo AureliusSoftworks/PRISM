@@ -374,9 +374,30 @@ import {
 } from "./debate-mystery-package-envelope.ts";
 import { PortableMysteryImportSafetyError } from "./debate-mystery-package-safety.ts";
 import { DebateMysteryMansionCodecError } from "./debate-mystery-mansion-codec.ts";
-import { ensureDebateMysteryMansionThemeV1 } from "./debate-mystery-mansion-theme.ts";
+import {
+  acceptDebateMysteryMansionThemeV1,
+  discardDebateMysteryMansionThemeV1,
+  ensureDebateMysteryMansionThemeV1,
+  stageDebateMysteryMansionThemeV1,
+  undoDebateMysteryMansionThemeV1,
+  validateDebateMysteryMansionThemeCandidateV1,
+} from "./debate-mystery-mansion-theme.ts";
+import {
+  acceptDebateMysteryMansionAtmosphereV1,
+  discardDebateMysteryMansionAtmosphereV1,
+  stageDebateMysteryMansionAtmosphereV1,
+  undoDebateMysteryMansionAtmosphereV1,
+} from "./debate-mystery-mansion-atmosphere.ts";
+import {
+  acceptMansionRoomArtCandidateV2,
+  discardMansionRoomArtCandidateV2,
+  stageMansionRoomArtCandidateV2,
+} from "./debate-mystery-mansion-room-art.ts";
 import {
   DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
+  MANSION_MUSIC_ACTIVE_LOGICAL_ID_V1,
+  MANSION_MUSIC_CANDIDATE_LOGICAL_ID_V1,
+  MANSION_MUSIC_PREVIOUS_LOGICAL_ID_V1,
   PORTABLE_MANSION_PACKAGE_MIME_V1,
   PORTABLE_WHODUNNIT_PACKAGE_MIME_V1,
   debateMysteryMansionExteriorPromptV1,
@@ -540,10 +561,18 @@ import {
   getActionSfxPackSummary,
 } from "./action-sfx-pack.ts";
 import {
-  listAudioLibraryClips,
+  listAudioLibraryPage,
+  normalizeAudioLibraryBin,
   readBotAvatarSfxBytes,
+  summarizeAudioLibraryBytes,
   type AudioLibraryBin,
 } from "./audio-library.ts";
+import {
+  readCanonicalAudioAssetBytesV1,
+  deleteColdAudioAssetCandidatesV1,
+  summarizeCanonicalAudioAssetStorageV1,
+  updateAudioAssetPlayerTagsV1,
+} from "./audio-asset-catalog.ts";
 import {
   ENGLISH_PACING_MISSING_VOICE_MESSAGE,
   calibrateEnglishPacingProfile,
@@ -1197,6 +1226,7 @@ import {
   parseStoredAutoFallbackChain,
   clampOnlineAutoProviderBias,
   parseStoredOnlineAutoProviderWeights,
+  normalizeOnlineAutoQualityPosture,
   autoFallbackResolvedChain,
   normalizeAutoFallbackModelRef,
   normalizeResponseMode,
@@ -1763,6 +1793,9 @@ async function startPrismStorySession(
       user.online_auto_provider_weights,
       user.online_auto_provider_bias,
     ),
+    onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
+      user.online_auto_quality_posture,
+    ),
     routingContext: {
       surface: "story",
       inputText: premise ?? "",
@@ -1784,6 +1817,7 @@ async function startPrismStorySession(
     .filter(
       (entry) =>
         !hiddenModels.has(entry.id) &&
+        (responseLane !== "online" || entry.provider !== "ollama_cloud") &&
         entry.supportsStructuredOutput !== false &&
         (!autoTurboEnabled ||
           modelSupportsTurboMode(
@@ -3083,6 +3117,7 @@ interface UserDbRow {
   auto_fallback_chain: string | null;
   online_auto_provider_bias: number;
   online_auto_provider_weights: string | null;
+  online_auto_quality_posture: string | null;
   hidden_bot_model_ids: string;
   hidden_global_picker_model_ids: string;
   hidden_comfyui_workflow_ids: string;
@@ -3583,17 +3618,20 @@ function getUserRow(userId: string): UserDbRow {
     faceRotation?.prism_default_bot_face_mouth_speech_poses ?? null;
   const onlineRoutingPreferences = db
     .prepare(
-      "SELECT online_auto_provider_weights, prism_default_llm_model, prism_cloud_llm_model FROM users WHERE id = ?",
+      "SELECT online_auto_provider_weights, online_auto_quality_posture, prism_default_llm_model, prism_cloud_llm_model FROM users WHERE id = ?",
     )
     .get(userId) as
     | {
         online_auto_provider_weights: string | null;
+        online_auto_quality_posture: string | null;
         prism_default_llm_model: string | null;
         prism_cloud_llm_model: string | null;
       }
     | undefined;
   row.online_auto_provider_weights =
     onlineRoutingPreferences?.online_auto_provider_weights ?? null;
+  row.online_auto_quality_posture =
+    onlineRoutingPreferences?.online_auto_quality_posture ?? "quality";
   row.prism_local_llm_model =
     onlineRoutingPreferences?.prism_default_llm_model ?? null;
   row.prism_cloud_llm_model =
@@ -6443,6 +6481,9 @@ async function debateAiRuntimeForUser(
       user.online_auto_provider_weights,
       user.online_auto_provider_bias,
     ),
+    onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
+      user.online_auto_quality_posture,
+    ),
     routingContext: {
       surface: "debate",
       structuredOutput: true,
@@ -6580,7 +6621,8 @@ async function debateAiRuntimeForUser(
           (entry) =>
             responseLane === "local"
               ? entry.provider === "local"
-              : entry.provider !== "local" || modelSelectionKind === "auto",
+              : entry.provider !== "local" &&
+                entry.provider !== "ollama_cloud",
         )
       : [];
   const runtimeAutoRoutingChain: AutoFallbackChainV1 | null =
@@ -6999,6 +7041,9 @@ async function contextualTextRuntimeForUser<
       args.user.online_auto_provider_weights,
       args.user.online_auto_provider_bias,
     ),
+    onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
+      args.user.online_auto_quality_posture,
+    ),
     routingContext: {
       ...args.routingContext,
       simulatedEffortEnabled: true,
@@ -7052,6 +7097,7 @@ async function contextualTextRuntimeForUser<
     .filter(
       (entry) =>
         !hiddenModels.has(entry.id) &&
+        (responseMode !== "online" || entry.provider !== "ollama_cloud") &&
         (!args.routingContext.structuredOutput ||
           entry.supportsStructuredOutput !== false) &&
         (!autoTurboEnabled || modelSupportsTurboMode(
@@ -7073,8 +7119,8 @@ async function contextualTextRuntimeForUser<
                   entry !== null &&
                   (responseMode === "local"
                     ? entry.provider === "local"
-                    : entry.provider !== "local" ||
-                      modelSelectionKind === "auto"),
+                    : entry.provider !== "local" &&
+                      entry.provider !== "ollama_cloud"),
               )
           : [])
       : null;
@@ -15183,20 +15229,89 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/audio-library", async (ctx) => {
       const userId = requireAuth(ctx);
       const url = new URL(ctx.req.url ?? "/", "http://localhost");
-      const binRaw = url.searchParams.get("bin")?.trim() ?? "";
-      const bin: AudioLibraryBin | null =
-        binRaw === "sound_effects" || binRaw === "music" ? binRaw : null;
+      const binRaw = url.searchParams.get("category")?.trim() ??
+        url.searchParams.get("bin")?.trim() ?? "";
+      const bin: AudioLibraryBin | null = normalizeAudioLibraryBin(binRaw);
       if (!bin) {
         throw new HttpError(
           400,
-          "Choose an audio library bin: sound_effects or music.",
+          "Choose an audio category: music, effects, or ambience.",
         );
+      }
+      const sourceRaw = url.searchParams.get("source");
+      const source = sourceRaw === "mine" || sourceRaw === "prism"
+        ? sourceRaw
+        : null;
+      const query = (url.searchParams.get("q") ?? "").trim().slice(0, 200);
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      const limit = Number(url.searchParams.get("limit") ?? 100);
+      const page = listAudioLibraryPage(db, userId, bin, {
+        source,
+        query,
+        offset: Number.isFinite(offset) ? offset : 0,
+        limit: Number.isFinite(limit) ? limit : 100,
+      });
+      json(ctx.res, 200, {
+        ok: true,
+        category: bin,
+        ...page,
+      });
+    }),
+    route("GET", "/api/audio-assets/storage", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        storage: {
+          ...summarizeAudioLibraryBytes(db, userId),
+          ...summarizeCanonicalAudioAssetStorageV1(db, userId),
+        },
+      });
+    }),
+    route("POST", "/api/audio-assets/cleanup", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (body.scope !== "cold_candidates" || Object.keys(body).some((key) => key !== "scope")) {
+        throw new HttpError(400, "Only cold audio candidates can be cleared here.");
       }
       json(ctx.res, 200, {
         ok: true,
-        bin,
-        clips: listAudioLibraryClips(db, userId, bin),
+        result: deleteColdAudioAssetCandidatesV1(db, userId),
       });
+    }),
+    route("PATCH", "/api/audio-assets/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (
+        Object.keys(body).some((key) => key !== "tags") ||
+        !Array.isArray(body.tags) ||
+        body.tags.some((tag) => typeof tag !== "string")
+      ) {
+        throw new HttpError(400, "tags must be an array of text labels.");
+      }
+      const asset = updateAudioAssetPlayerTagsV1(
+        db,
+        userId,
+        ctx.params.id,
+        body.tags,
+      );
+      if (!asset) throw new HttpError(404, "That audio asset is unavailable.");
+      json(ctx.res, 200, { ok: true, asset });
+    }),
+    route("GET", "/api/audio-assets/:id/file", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const file = readCanonicalAudioAssetBytesV1(
+        db,
+        decryptUserKey(userId),
+        userId,
+        ctx.params.id,
+      );
+      if (!file) throw new HttpError(404, "That audio asset is unavailable.");
+      ctx.res.statusCode = 200;
+      ctx.res.setHeader("content-type", file.mimeType);
+      ctx.res.setHeader("content-length", String(file.bytes.byteLength));
+      ctx.res.setHeader("cache-control", "private, no-store");
+      ctx.res.setHeader("x-content-type-options", "nosniff");
+      ctx.res.end(file.bytes);
     }),
     route("POST", "/api/bots/:id/chat-atmosphere/ensure", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -17085,6 +17200,9 @@ function buildRoutes(): RouteDefinition[] {
               user.online_auto_provider_weights,
               user.online_auto_provider_bias,
             ),
+            onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
+              user.online_auto_quality_posture,
+            ),
             routingContext: {
               surface: mode,
               inputText: message,
@@ -17111,6 +17229,8 @@ function buildRoutes(): RouteDefinition[] {
                 .filter(
                   (entry) =>
                     !chatHiddenModels.has(entry.id) &&
+                    (responseLane !== "online" ||
+                      entry.provider !== "ollama_cloud") &&
                     (!autoTurboEnabled ||
                       modelSupportsTurboMode(
                         entry.provider,
@@ -19059,9 +19179,60 @@ function buildRoutes(): RouteDefinition[] {
         db,
         userId,
         ctx.params.id,
-        { rooms: body.rooms },
+        { rooms: body.rooms, layoutV2: body.layoutV2 },
       );
       json(ctx.res, 200, { ok: true, mansion });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/room-art/:roomId/generate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (Object.keys(body).some((key) => key !== "responseMode")) {
+        throw new HttpError(400, "Mansion room art accepts only the current response mode.");
+      }
+      const user = getUserRow(userId);
+      const responseMode = body.responseMode === "online" && !userBlocksOnlineCapabilities(user)
+        ? "online" as const
+        : "local" as const;
+      const userKey = decryptUserKey(userId);
+      const candidate = await stageMansionRoomArtCandidateV2({
+        db,
+        userKey,
+        userId,
+        bundleId: ctx.params.id,
+        roomId: ctx.params.roomId,
+        responseMode,
+        apiKey: getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey ?? null,
+        model: user.preferred_openai_image_model,
+      });
+      json(ctx.res, 201, {
+        ok: true,
+        candidate,
+        mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/room-art/:roomId/accept", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (Object.keys(body).length > 0) {
+        throw new HttpError(400, "Accepting room art does not take client-authored fields.");
+      }
+      acceptMansionRoomArtCandidateV2(db, userId, ctx.params.id, ctx.params.roomId);
+      json(ctx.res, 200, {
+        ok: true,
+        mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/room-art/:roomId/discard", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (Object.keys(body).length > 0) {
+        throw new HttpError(400, "Discarding room art does not take client-authored fields.");
+      }
+      discardMansionRoomArtCandidateV2(db, userId, ctx.params.id, ctx.params.roomId);
+      json(ctx.res, 200, {
+        ok: true,
+        mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id),
+      });
     }),
     route("PATCH", "/api/debates/mystery-mansions/:id", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -19110,6 +19281,99 @@ function buildRoutes(): RouteDefinition[] {
       ctx.res.setHeader("x-content-type-options", "nosniff");
       ctx.res.end(bytes);
     }),
+    route("POST", "/api/debates/mystery-mansions/:id/theme/generate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const allowedKeys = new Set(["responseMode"]);
+      if (Object.keys(body).some((key) => !allowedKeys.has(key))) {
+        throw new HttpError(400, "Mansion music synthesis accepts only the current response mode.");
+      }
+      const responseMode = body.responseMode === "online" ? "online" : "local";
+      const userKey = decryptUserKey(userId);
+      const theme = await stageDebateMysteryMansionThemeV1({
+        db,
+        userKey,
+        userId,
+        bundleId: ctx.params.id,
+        responseMode,
+        apiKey: getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey ?? null,
+      });
+      json(ctx.res, 201, {
+        ok: true,
+        theme,
+        mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/theme/accept", async (ctx) => {
+      const userId = requireAuth(ctx);
+      acceptDebateMysteryMansionThemeV1(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true, mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id) });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/theme/validate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (Object.keys(body).some((key) => key !== "loop")) {
+        throw new HttpError(400, "Mansion music validation accepts only decoded loop measurements.");
+      }
+      const loop = validateDebateMysteryMansionThemeCandidateV1({
+        db,
+        userId,
+        bundleId: ctx.params.id,
+        loop: body.loop,
+      });
+      json(ctx.res, 200, {
+        ok: true,
+        loop,
+        mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/theme/discard", async (ctx) => {
+      const userId = requireAuth(ctx);
+      discardDebateMysteryMansionThemeV1(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true, mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id) });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/theme/undo", async (ctx) => {
+      const userId = requireAuth(ctx);
+      undoDebateMysteryMansionThemeV1(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true, mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id) });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/atmosphere/generate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (Object.keys(body).some((key) => key !== "responseMode")) {
+        throw new HttpError(400, "Mansion atmosphere synthesis accepts only the current response mode.");
+      }
+      const responseMode = body.responseMode === "online" ? "online" : "local";
+      const userKey = decryptUserKey(userId);
+      const atmosphere = await stageDebateMysteryMansionAtmosphereV1({
+        db,
+        userKey,
+        userId,
+        bundleId: ctx.params.id,
+        responseMode,
+        apiKey: getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey ?? null,
+      });
+      json(ctx.res, 201, {
+        ok: true,
+        atmosphere,
+        mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/atmosphere/accept", async (ctx) => {
+      const userId = requireAuth(ctx);
+      acceptDebateMysteryMansionAtmosphereV1(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true, mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id) });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/atmosphere/discard", async (ctx) => {
+      const userId = requireAuth(ctx);
+      discardDebateMysteryMansionAtmosphereV1(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true, mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id) });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/atmosphere/undo", async (ctx) => {
+      const userId = requireAuth(ctx);
+      undoDebateMysteryMansionAtmosphereV1(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true, mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id) });
+    }),
     route("GET", "/api/debates/:id/mystery-mansion/theme", async (ctx) => {
       const userId = requireAuth(ctx);
       const session = getDebateSession(db, userId, ctx.params.id);
@@ -19117,29 +19381,51 @@ function buildRoutes(): RouteDefinition[] {
         throw new HttpError(404, "That mansion theme was not found.");
       }
       const configuredBundleId = session.formatState.config.mansionBundleId;
+      const frozenSnapshot = session.formatState.config.mansionSnapshot;
       const sourceBundle = configuredBundleId ? null : db.prepare(
         `SELECT id FROM debate_mystery_mansion_bundles
           WHERE user_id = ? AND source_session_id = ? LIMIT 1`,
       ).get(userId, session.id) as { id: string } | undefined;
-      const bundleId = configuredBundleId ?? sourceBundle?.id ?? null;
+      const bundleId = frozenSnapshot?.sourceBundleId ?? configuredBundleId ?? sourceBundle?.id ?? null;
       if (!bundleId) throw new HttpError(404, "That mansion theme was not found.");
-      const theme = db.prepare(
+      const frozenTheme = frozenSnapshot?.presentation.assets.find(
+        (asset) => asset.role === "music" &&
+          asset.logicalId === MANSION_MUSIC_ACTIVE_LOGICAL_ID_V1,
+      ) ?? frozenSnapshot?.presentation.assets.find(
+        (asset) => asset.role === "music" && !asset.logicalId.startsWith("ambience:"),
+      ) ?? null;
+      const theme = frozenTheme ?? db.prepare(
         `SELECT assets.id FROM debate_mystery_mansion_asset_refs AS refs
            JOIN debate_mystery_mansion_assets AS assets
              ON assets.id = refs.asset_id AND assets.user_id = refs.user_id
           WHERE refs.bundle_id = ? AND refs.user_id = ? AND refs.role = 'music'
             AND refs.logical_id NOT LIKE 'ambience:%'
+            AND refs.logical_id NOT IN (?, ?)
+          ORDER BY CASE WHEN refs.logical_id = ? THEN 0 ELSE 1 END, refs.created_at
           LIMIT 1`,
-      ).get(bundleId, userId) as { id: string } | undefined;
+      ).get(
+        bundleId,
+        userId,
+        MANSION_MUSIC_CANDIDATE_LOGICAL_ID_V1,
+        MANSION_MUSIC_PREVIOUS_LOGICAL_ID_V1,
+        MANSION_MUSIC_ACTIVE_LOGICAL_ID_V1,
+      ) as { id: string } | undefined;
       if (!theme) throw new HttpError(404, "That mansion theme was not found.");
       const file = getDebateMysteryMansionAssetFileV1(
         db, decryptUserKey(userId), userId, bundleId, theme.id,
       );
+      const loop = frozenSnapshot?.presentation.investigationThemeLoop ??
+        getDebateMysteryMansionBundleV2(db, userId, bundleId).music?.active?.loop ?? null;
       ctx.res.statusCode = 200;
       ctx.res.setHeader("content-type", file.mimeType);
       ctx.res.setHeader("content-length", String(file.bytes.byteLength));
       ctx.res.setHeader("cache-control", "private, no-store");
       ctx.res.setHeader("x-content-type-options", "nosniff");
+      if (loop) {
+        ctx.res.setHeader("x-prism-loop-start-ms", String(Math.round(loop.loopStartMs)));
+        ctx.res.setHeader("x-prism-loop-end-ms", String(Math.round(loop.loopEndMs)));
+        ctx.res.setHeader("x-prism-loop-crossfade-ms", String(Math.round(loop.crossfadeMs)));
+      }
       ctx.res.end(file.bytes);
     }),
     route("POST", "/api/debates/:id/mystery-mansion/save", async (ctx) => {
@@ -30044,11 +30330,12 @@ function buildRoutes(): RouteDefinition[] {
       const explicitOnlineContext = resolveVoiceSynthesisExplicitOnlineContext({
         persistedMessageProvider,
         preferredProvider:
-          user.preferred_provider === "ollama_cloud" ||
           user.preferred_provider === "anthropic" ||
           user.preferred_provider === "openai"
             ? user.preferred_provider
-            : "local",
+            : user.preferred_provider === "local"
+              ? "local"
+              : "openai",
         explicitOnlineContext: raw.explicitOnlineContext === true,
         explicitVoicePreview: raw.explicitVoicePreview === true,
         hasMessageId:
@@ -31197,7 +31484,13 @@ function buildRoutes(): RouteDefinition[] {
             user.startup_preference,
           ),
           ...livingShellProgress,
-          preferredProvider: user.preferred_provider,
+          preferredProvider:
+            user.preferred_provider === "anthropic" ||
+            user.preferred_provider === "openai"
+              ? user.preferred_provider
+              : user.preferred_provider === "local"
+                ? "local"
+                : "openai",
           ephemeralChatProviderPreferences:
             normalizeEphemeralChatProviderPreferences(
               user.ephemeral_chat_provider_preferences,
@@ -31234,6 +31527,9 @@ function buildRoutes(): RouteDefinition[] {
             user.online_auto_provider_weights,
             user.online_auto_provider_bias,
           ),
+          onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
+            user.online_auto_quality_posture,
+          ),
           hiddenBotModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
           hiddenGlobalPickerModelIds: parseHiddenGlobalPickerModelIds(
             user.hidden_global_picker_model_ids,
@@ -31242,7 +31538,12 @@ function buildRoutes(): RouteDefinition[] {
             user.hidden_comfyui_workflow_ids,
           ),
           preferredLocalModel: user.preferred_local_model ?? "",
-          preferredOnlineModel: user.preferred_online_model ?? "",
+          preferredOnlineModel:
+            user.preferred_online_model?.endsWith(":cloud") ||
+            user.preferred_online_model?.endsWith("-cloud") ||
+            user.preferred_online_model?.startsWith("ollama-cloud-direct:")
+              ? ""
+              : user.preferred_online_model ?? "",
           legacyAutoFallbackModelSuggestion:
             !parseStoredAutoFallbackChain(user.auto_fallback_chain) &&
             user.lenient_local_fallback_model
@@ -32052,6 +32353,9 @@ function buildRoutes(): RouteDefinition[] {
           user.online_auto_provider_weights,
           user.online_auto_provider_bias,
         ),
+        onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
+          user.online_auto_quality_posture,
+        ),
         hiddenBotModelIds: user.hidden_bot_model_ids,
         hiddenGlobalPickerModelIds: user.hidden_global_picker_model_ids,
         hiddenComfyUiWorkflowIds: user.hidden_comfyui_workflow_ids,
@@ -32196,7 +32500,7 @@ function buildRoutes(): RouteDefinition[] {
         `
         UPDATE users
         SET display_name = ?, theme = ?, graphics_quality = ?, crt_focus = ?, typography_scale = ?, atmosphere_style = ?, hub_atmosphere_enabled = ?, startup_preference = ?, preferred_provider = ?, ephemeral_chat_provider_preferences = ?, preferred_image_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?, hidden_global_picker_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
-            experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, debate_whodunnit_reuse_synthesized_exhibits = ?, debate_whodunnit_text_voice_mode = ?, psychic_mode_enabled = ?, auto_switch_model = ?, auto_fallback_chain = ?, online_auto_provider_bias = ?, online_auto_provider_weights = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
+            experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, debate_whodunnit_reuse_synthesized_exhibits = ?, debate_whodunnit_text_voice_mode = ?, psychic_mode_enabled = ?, auto_switch_model = ?, auto_fallback_chain = ?, online_auto_provider_bias = ?, online_auto_provider_weights = ?, online_auto_quality_posture = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, preferred_home_atmosphere_image_model = ?, preferred_home_atmosphere_image_provider = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_cloud_llm_model = ?, prism_image_tool_llm_model = ?, text_model_display_names = ?,
@@ -32238,6 +32542,7 @@ function buildRoutes(): RouteDefinition[] {
         next.autoFallbackChain,
         next.onlineAutoProviderBias,
         JSON.stringify(next.onlineAutoProviderWeights),
+        next.onlineAutoQualityPosture,
         next.preferredLocalModel,
         next.preferredOnlineModel,
         next.lenientLocalImageFallbackModel,
@@ -34649,6 +34954,9 @@ function buildRoutes(): RouteDefinition[] {
             user.online_auto_provider_weights,
             user.online_auto_provider_bias,
           ),
+          onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
+            user.online_auto_quality_posture,
+          ),
           routingContext: {
             surface: useRefractRouting ? "prism-refract" : "bot-powers",
             inputText: JSON.stringify(body.powers ?? []),
@@ -34758,6 +35066,9 @@ function buildRoutes(): RouteDefinition[] {
         onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
           user.online_auto_provider_weights,
           user.online_auto_provider_bias,
+        ),
+        onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
+          user.online_auto_quality_posture,
         ),
         routingContext: {
           surface: "bot-field",
@@ -34937,6 +35248,9 @@ function buildRoutes(): RouteDefinition[] {
         onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
           user.online_auto_provider_weights,
           user.online_auto_provider_bias,
+        ),
+        onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
+          user.online_auto_quality_posture,
         ),
         routingContext: {
           surface: "bot-generation",

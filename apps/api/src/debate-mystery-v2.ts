@@ -21,6 +21,8 @@ import {
   DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
   DEBATE_MYSTERY_V2_SCHEMA_VERSION,
   compileDeterministicDebateMystery,
+  bindMysteryIncidentPlanV1,
+  composeMysteryIncidentPlanV1,
   debateEvidenceExhibitTitle,
   botPowerChromaticBiasColorMatchesV1,
   botPowerChromaticBiasEffectsFromEffectsV1,
@@ -32,8 +34,11 @@ import {
   debateMysteryPremiumAvailableV2,
   debateMysteryRoomNarrationNamesPersonaV2,
   debateMysteryRoomNarrationTextV2,
+  debateMysteryAccusationMatchesV2,
   debateMysterySpectatorEvidenceReferencesV2,
   debateMysteryTalkTopicMirrorsRecordV2,
+  debateMysteryTheoryAccusedSeatIdsV2,
+  debateMysteryTheoryWithAccusedSeatIdsV2,
   emptyDebateMysteryMutationsV2,
   emptyDebateMysteryRequirementsV2,
   normalizeBotAudioVoiceProfileV1,
@@ -42,6 +47,8 @@ import {
   normalizeDebateEvidencePacketV1,
   normalizeDebateMysteryTalkSubjectV2,
   normalizeDebateMysteryV2ForgeProgressMessage,
+  mysteryIncidentPlanRequiresAccompliceV1,
+  mysteryPublicChargeV1,
   parseStoredBotAvatarDetailsV1,
   parseStoredBotAudioVoiceProfileV1,
   parseStoredBotPrompt,
@@ -54,6 +61,7 @@ import {
   validateDebateMysteryCaseBible,
   validateDebateMysteryDialogueGraphV2,
   validateDebateMysteryStageCuePerformanceV1,
+  validateMysteryIncidentPlanV1,
   type BotAudioVoiceProfileV1,
   type DebateMysteryActionRequestV2,
   type DebateEvidenceExhibitV1,
@@ -86,6 +94,9 @@ import {
   type DebateSessionV1,
   type DebateWhodunnitCreateConfigV2,
   type DebateWhodunnitFormatStateV2,
+  type MysteryBoundIncidentPlanV1,
+  type MysteryIncidentPlanV1,
+  type MysteryPublicChargeV1,
 } from "@localai/shared";
 import { generateBuiltinEnglishWave, isPlayablePcmWave } from "./builtin-tts.ts";
 import { buildBabbleSpeechText } from "./babble-text.ts";
@@ -103,7 +114,11 @@ import {
 import type { PrismGenerationWorkReceipt } from "./generation-work.ts";
 import { PRISM_INSTANT_VOICE_MODEL_ID, pcmWaveDurationMs } from "./local-voice-engine.ts";
 import { resolveAbsoluteUnderDataRoot } from "./image-storage.ts";
-import { getDebateMysteryMansionBundleV2 } from "./debate-mystery-mansion-bundles.ts";
+import {
+  freezeDebateMysteryMansionSnapshotV2,
+  getDebateMysteryMansionBundleV2,
+  retainDebateMysteryMansionSnapshotAssetsV2,
+} from "./debate-mystery-mansion-bundles.ts";
 import {
   cloneDebateMysterySealedAssetsForReplayV1,
   deleteDebateMysterySealedAssetsV1,
@@ -352,7 +367,7 @@ export interface DebateMysteryRoomAssetPreparationV2 {
     "id" | "templateId" | "name" | "bundledAssetPath"
   >>;
   crimeSceneRoomId: string;
-  /** Initial Forge prepares only the murder scene; background resolves the frontier. */
+  /** Initial Forge prepares only the incident scene; background resolves the frontier. */
   mode: "initial" | "background";
   houseStyle: DebateMysteryHouseStyleV2;
   signal?: AbortSignal;
@@ -538,6 +553,9 @@ interface MysteryV2AuthoringCheckpointV1 {
 interface MysteryV2FactLedger {
   version: 1;
   sourceHash: string;
+  /** Deterministic sealed incident composition. Models may phrase it but may
+   * never add, remove, or reassign one of these facts. */
+  incidentPlan: MysteryBoundIncidentPlanV1;
   culpritSeatId: string;
   accompliceSeatId: string | null;
   eyewitnessSeatId: string | null;
@@ -612,6 +630,15 @@ interface MysteryV2AuthoringCheckpoint {
 interface PrivateMysteryCaseV2 {
   version: 2;
   config: DebateMysteryResolvedConfigV2;
+  /** Additive private truth contract. Legacy compiled cases omit it. */
+  incidentPlan?: MysteryBoundIncidentPlanV1;
+  /** Spoiler-safe charge duplicated privately so imported/archive repairs do
+   * not need to infer it from presentation copy. */
+  publicCharge?: MysteryPublicChargeV1;
+  /** Charge-agnostic responsible parties. Legacy homicide cases derive this
+   * from sealedCulpritSeatId; old accomplices may belong only to a secondary
+   * incident, so they are not silently added to the filed charge. */
+  sealedResponsibleSeatIds?: string[];
   sealedCulpritSeatId: string;
   sealedAccompliceSeatId: string | null;
   motive: string;
@@ -982,7 +1009,10 @@ function mysteryIdentityMirrorTargetSnapshotV1(
   };
 }
 
-function v1ScaffoldConfig(config: DebateMysteryResolvedConfigV2): DebateMysteryResolvedConfigV1 {
+function v1ScaffoldConfig(
+  config: DebateMysteryResolvedConfigV2,
+  incidentPlan?: MysteryIncidentPlanV1,
+): DebateMysteryResolvedConfigV1 {
   return {
     version: 1,
     preset: config.preset,
@@ -1001,11 +1031,13 @@ function v1ScaffoldConfig(config: DebateMysteryResolvedConfigV2): DebateMysteryR
     prosecutorPartnerBotId: config.prosecutorBotId,
     rivalDefenseBotId: config.rivalDefenseBotId,
     actionBudget: 10_000,
-    accompliceChance: debateMysteryAccompliceChance(
-      config.difficulty,
-      config.preset,
-      config.suspectBotIds.length,
-    ),
+    accompliceChance: incidentPlan && mysteryIncidentPlanRequiresAccompliceV1(incidentPlan)
+      ? 1
+      : debateMysteryAccompliceChance(
+          config.difficulty,
+          config.preset,
+          config.suspectBotIds.length,
+        ),
   };
 }
 
@@ -1900,6 +1932,7 @@ function initialV2State(
     },
     caseTitle: null,
     fictionLabel: "Fictional, non-canonical case",
+    caseCharge: null,
     config,
     victim: null,
     suspects: [],
@@ -1955,7 +1988,7 @@ function mysteryV2SessionRequest(
       version: 1,
       id: randomUUID(),
       title: "Whodunnit?",
-      motion: "Determine who murdered the victim and prove the filed accusation in court.",
+      motion: "Determine who is responsible for the central incident and prove the filed accusation in court.",
       forSide: { label: "Prosecution", brief: "Investigate, file charges, and prove the accusation from the admitted record." },
       againstSide: { label: "Defense", brief: "Test the accusation against every fair alternative in the admitted record." },
     },
@@ -2129,16 +2162,18 @@ export async function createDebateMysterySessionV2(
         `This saved mansion requires exactly ${mansion.suspectCount} suspects.`,
       );
     }
+    const mansionSnapshot = freezeDebateMysteryMansionSnapshotV2(mansion);
     config = {
       ...config,
       preset: "custom",
       floors: mansion.floors,
       totalRooms: mansion.totalRooms,
       scaleClass: mansion.scaleClass,
+      mansionSnapshot,
       houseStyle: {
-        ...mansion.houseStyle,
+        ...mansionSnapshot.presentation.houseStyle,
         bespokeAmbienceRequested:
-          mansion.houseStyle.bespokeAmbienceRequested || config.assetSynthesis.ambience,
+          mansionSnapshot.presentation.houseStyle.bespokeAmbienceRequested || config.assetSynthesis.ambience,
       },
     };
   }
@@ -2179,6 +2214,14 @@ export async function createDebateMysterySessionV2(
     error: null,
     powerPlan: debatePowerPlanForBots(db, userId, allBotIds, "dark"),
   }, initialV2State(config, jobId, now));
+  if (config.mansionSnapshot) {
+    retainDebateMysteryMansionSnapshotAssetsV2(
+      db,
+      userId,
+      session.id,
+      config.mansionSnapshot,
+    );
+  }
   db.prepare(
     `INSERT INTO debate_mystery_v2_jobs
        (id, user_id, session_id, status, stage, attempt, completed_passes,
@@ -2294,6 +2337,102 @@ function deterministicAuthoredMysteryFoundationCoreV2(args: {
       emoji: item.emoji,
     })),
   };
+}
+
+/**
+ * Grounds each deterministic complication in two ordinary Case File records.
+ * The authoring model can make the prose elegant, but this final pass owns the
+ * exact material trace and opportunity claim so a complication cannot exist as
+ * flavor text alone or silently drift between retries.
+ */
+function applyMysteryIncidentPlanToFoundationV2<
+  TFoundation extends AuthoredMysteryFoundationCoreV2,
+>(args: {
+  foundation: TFoundation;
+  incidentPlan: MysteryBoundIncidentPlanV1;
+  scaffold: ReturnType<typeof compileDeterministicDebateMystery>;
+}): TFoundation {
+  if (!args.foundation.evidence.length) return args.foundation;
+  const primary = args.incidentPlan.primary;
+  const affectedName = args.foundation.victimName;
+  const incidentNoun = primary.title.toLocaleLowerCase();
+  const subjectLabel = primary.subject.replace(/^(?:a|an|the)\s+/iu, "");
+  const primaryFoundation = primary.kind === "homicide"
+    ? args.foundation
+    : {
+        ...args.foundation,
+        title: `The ${primary.title} of ${subjectLabel}`,
+        victimDescription:
+          `${affectedName} is the person most directly affected by ${primary.subject}, with private relationships to every member of the frozen ensemble.`,
+        publicOpening:
+          `A suspected ${incidentNoun} involving ${primary.subject} has drawn every selected suspect into the same mansion. The decisive facts are hidden in its rooms, records, and testimony. You are the lead investigator.`,
+        motive:
+          `Control of ${primary.subject}, and the consequences of its discovery, supplied the decisive motive.`,
+        method: primary.method,
+        prosecutorInternalReasoning:
+          "Follow the admitted physical record and testimony, test each contradiction against the frozen incident window, and leave the player's accusation and courtroom strategy to them.",
+        evidence: args.foundation.evidence.map((entry, index) => ({
+          ...entry,
+          title: index === 0
+            ? `${primary.title} access record`
+            : index === 1
+              ? `${primary.title} material trace`
+              : `${primary.title} timeline trace ${index}`,
+          description: index === 0
+            ? `A preserved access record establishes who could reach ${primary.subject} during the incident window.`
+            : index === 1
+              ? `A material trace links ${primary.subject} to a deliberate act during the incident window.`
+              : `A timestamped detail narrows the opportunity surrounding ${primary.subject} without identifying the responsible party by itself.`,
+        })),
+      };
+  const suspectNameBySeat = new Map(
+    args.scaffold.suspects.map((suspect) => [suspect.seatId, suspect.name]),
+  );
+  const evidence = primaryFoundation.evidence.map((entry) => ({ ...entry }));
+  const reachableEvidenceIds = new Set(
+    args.scaffold.activeRegions.flatMap((outcome) =>
+      outcome.evidenceId ? [outcome.evidenceId] : []),
+  );
+  const reachableEvidenceIndexes = evidence.flatMap((entry, index) =>
+    reachableEvidenceIds.has(entry.id) ? [index] : []);
+  const proofEvidenceIndexes = reachableEvidenceIndexes.length
+    ? reachableEvidenceIndexes
+    : evidence.map((_entry, index) => index);
+  args.incidentPlan.complications.forEach((complication, index) => {
+    const traceIndex = proofEvidenceIndexes[(index * 2) % proofEvidenceIndexes.length]!;
+    const opportunityIndex = proofEvidenceIndexes[(index * 2 + 1) % proofEvidenceIndexes.length]!;
+    const traceSentence = complication.sealedTruth;
+    const actorName = suspectNameBySeat.get(complication.actorSeatId) ?? "A participant";
+    const opportunitySentence =
+      `${actorName} had access to ${complication.subject} during the same window.`;
+    const trace = evidence[traceIndex]!;
+    if (!trace.description.includes(traceSentence)) {
+      trace.description = `${trace.description} ${traceSentence}`.trim();
+    }
+    const opportunity = evidence[opportunityIndex]!;
+    if (!opportunity.description.includes(opportunitySentence)) {
+      opportunity.description = `${opportunity.description} ${opportunitySentence}`.trim();
+    }
+  });
+  return { ...primaryFoundation, evidence };
+}
+
+const MYSTERY_HOMICIDE_LANGUAGE_RE =
+  /\b(?:murder(?:ed|er|ing)?|kill(?:ed|er|ing)?|dead|death|corpse|fatal(?:ly)?|body\s+(?:was\s+)?found)\b/iu;
+
+function assertMysteryIncidentLanguageV2<T>(args: {
+  value: T;
+  incidentPlan: MysteryBoundIncidentPlanV1;
+  section: string;
+}): T {
+  const homicideIsCanonical = args.incidentPlan.primary.kind === "homicide" ||
+    args.incidentPlan.complications.some((incident) => incident.kind === "homicide");
+  if (!homicideIsCanonical && MYSTERY_HOMICIDE_LANGUAGE_RE.test(JSON.stringify(args.value))) {
+    throw new Error(
+      `${args.section} asserted homicide even though the frozen incident plan contains none.`,
+    );
+  }
+  return args.value;
 }
 
 function authoredExaminationsFromJson(args: {
@@ -3622,6 +3761,7 @@ async function evaluateMysteryContradictionSemanticsV2(args: {
 async function authorMysteryV2(args: {
   runtime: DebateAiRuntime;
   config: DebateMysteryResolvedConfigV2;
+  incidentPlan: MysteryBoundIncidentPlanV1;
   scaffold: ReturnType<typeof compileDeterministicDebateMystery>;
   bots: MysteryV2BotRow[];
   powerPlan: DebateSessionV1["powerPlan"];
@@ -3691,6 +3831,7 @@ async function authorMysteryV2(args: {
   });
   const factLedgerWithoutHash = {
     version: 1 as const,
+    incidentPlan: args.incidentPlan,
     culpritSeatId: args.scaffold.culpritSeatId,
     accompliceSeatId: args.scaffold.accompliceSeatId,
     eyewitnessSeatId: args.eyewitnessSeatId,
@@ -3805,10 +3946,24 @@ async function authorMysteryV2(args: {
       }),
     );
   };
+  const primaryIsHomicide = args.incidentPlan.primary.kind === "homicide";
+  const caseIncludesHomicide = primaryIsHomicide ||
+    args.incidentPlan.complications.some((incident) => incident.kind === "homicide");
+  const authoredTimeline = primaryIsHomicide
+    ? args.scaffold.timeline
+    : args.scaffold.timeline.map((entry, index) => ({
+        ...entry,
+        fact: index === 0
+          ? `${args.incidentPlan.primary.subject} was last documented as secure.`
+          : index === args.scaffold.timeline.length - 1
+            ? `The discrepancy involving ${args.incidentPlan.primary.subject} was discovered.`
+            : `A material event narrowed the incident window without establishing responsibility by itself.`,
+      }));
   const setup = {
     investigationMode: args.config.investigationMode,
     inspiration: args.config.inspiration,
     spark: args.config.spark,
+    incidentPlan: args.incidentPlan,
     houseStyle: args.config.houseStyle.promptContract,
     difficulty: args.config.difficulty,
     preset: args.config.preset,
@@ -3817,7 +3972,7 @@ async function authorMysteryV2(args: {
     accompliceSeatId: args.scaffold.accompliceSeatId,
     eyewitnessSeatId: args.eyewitnessSeatId,
     victimId: args.scaffold.victim.id,
-    timeline: args.scaffold.timeline,
+    timeline: authoredTimeline,
     roomNames: omitInvestigation ? [] : args.scaffold.rooms.map((room) => ({
       roomId: room.id,
       name: DEBATE_MYSTERY_ROOM_TEMPLATES.find((template) => template.id === room.templateId)?.name ?? room.templateId,
@@ -3884,6 +4039,12 @@ async function authorMysteryV2(args: {
             },
             qualityRules: [
               "Write a specific, coherent case foundation rather than an outline.",
+              "The frozen incident plan is canonical truth. Thread every listed complication through the supplied evidence without adding another incident, changing its actor, or exposing private role labels in public prose.",
+              primaryIsHomicide
+                ? "The primary charge is homicide. Do not substitute a different central incident."
+                : caseIncludesHomicide
+                  ? `The primary charge is ${args.incidentPlan.primary.title}. Homicide is a linked secondary incident only; preserve it without turning it into the filed charge.`
+                : `The primary charge is ${args.incidentPlan.primary.title}, not homicide. Never describe a murder, killing, death, corpse, fatal injury, or murder weapon anywhere in this case. The person named by victimName is the affected party and remains alive.`,
               "Keep the public opening, victim description, motive, method, and Prosecutor internal reasoning under 120 words each.",
               "Keep each evidence description under 55 words.",
               "Keep public prose free of culprit labels and private proof-route metadata.",
@@ -3905,6 +4066,11 @@ async function authorMysteryV2(args: {
         });
         deterministicFoundationFallback = true;
       }
+      foundationCore = applyMysteryIncidentPlanToFoundationV2({
+        foundation: foundationCore,
+        incidentPlan: args.incidentPlan,
+        scaffold: args.scaffold,
+      });
       args.draft.foundationCore = foundationCore;
       args.onDraft(
         args.draft,
@@ -3997,10 +4163,17 @@ async function authorMysteryV2(args: {
           qualityRules: [
             "Keep each examination result under 40 words.",
             "Describe only what the prosecutor can fairly perceive or record at that hotspot.",
+            ...(caseIncludesHomicide ? [] : [
+              `This is a ${args.incidentPlan.primary.title} case, not a homicide. Never mention murder, killing, death, a corpse, a fatal injury, or a murder weapon.`,
+            ]),
             "No placeholders, spoilers, deductions on the player's behalf, or copied franchise material.",
           ],
         },
-        validate: (value) => authoredExaminationsFromJson({ value, examinationIds: missingIds }),
+        validate: (value) => assertMysteryIncidentLanguageV2({
+          value: authoredExaminationsFromJson({ value, examinationIds: missingIds }),
+          incidentPlan: args.incidentPlan,
+          section: "Room examination copy",
+        }),
       });
       authoredChunk.forEach((entry) => {
         examinationsById[entry.id] = entry.text;
@@ -4028,9 +4201,13 @@ async function authorMysteryV2(args: {
             repairDelta: issues,
             outputContract: "Return a complete examinations array for the exact supplied IDs.",
           },
-          validate: (value) => authoredExaminationsFromJson({
-            value,
-            examinationIds: missingIds,
+          validate: (value) => assertMysteryIncidentLanguageV2({
+            value: authoredExaminationsFromJson({
+              value,
+              examinationIds: missingIds,
+            }),
+            incidentPlan: args.incidentPlan,
+            section: "Repaired room examination copy",
           }),
           onReceipt: (receipt) =>
             recordMysterySectionReceipt(
@@ -4057,6 +4234,20 @@ async function authorMysteryV2(args: {
   }
   if (!foundation) {
     throw new Error("The resumable case draft is missing its foundation.");
+  }
+  const groundedFoundation = applyMysteryIncidentPlanToFoundationV2({
+    foundation,
+    incidentPlan: args.incidentPlan,
+    scaffold: args.scaffold,
+  });
+  if (groundedFoundation !== foundation) {
+    foundation = groundedFoundation;
+    args.draft.foundation = groundedFoundation;
+    const {
+      examinations: _examinations,
+      ...groundedFoundationCore
+    } = groundedFoundation;
+    args.draft.foundationCore = groundedFoundationCore;
   }
   const validatedFoundation = foundation;
 
@@ -4156,7 +4347,8 @@ async function authorMysteryV2(args: {
       ),
     };
     const validateSuspect = (value: Record<string, unknown>) =>
-      authoredSuspectFromJson({
+      assertMysteryIncidentLanguageV2({
+        value: authoredSuspectFromJson({
         value,
         seatId: requirement.seatId,
         requiredPresentRecords,
@@ -4181,7 +4373,10 @@ async function authorMysteryV2(args: {
           })),
         ],
         knowledge: suspectKnowledgeBySeat[requirement.seatId]!,
-        courtOnly: omitInvestigation,
+          courtOnly: omitInvestigation,
+        }),
+        incidentPlan: args.incidentPlan,
+        section: `Witness chapter ${requirement.ordinal}`,
       });
     let suspect: AuthoredSuspectV2 | undefined =
       args.draft.suspectsBySeatId[requirement.seatId];
@@ -4261,10 +4456,13 @@ async function authorMysteryV2(args: {
           "Press answers add context without erasing the proof route.",
           "Revision text materially changes the sworn account.",
           requirement.awareness === "involved"
-            ? "This suspect is privately involved in the crime. They may conceal or distort what they know, but their public account must stay coherent with the sealed role."
+            ? "This suspect is privately involved in the incident. They may conceal or distort what they know, but their public account must stay coherent with the sealed role."
             : requirement.awareness === "unaware"
               ? "This innocent suspect is an unrelated worker, visitor, or bystander caught in the wrong place at the wrong time. They have no privileged case knowledge or hidden motive; an honest 'I don't know' is valid, and their contradiction must concern only their own routine, sequence, or mistaken impression."
               : "This innocent suspect has only incidental knowledge from their own work, routine, or observations. Do not give them the sealed motive, method, culprit identity, or knowledge of events they could not personally perceive.",
+          ...(caseIncludesHomicide ? [] : [
+            `The primary charge is ${args.incidentPlan.primary.title}, not homicide. Never mention a murder, killing, death, corpse, fatal injury, murder weapon, killer, or murderer. The affected party is alive.`,
+          ]),
           requirement.temporalRecall === "exact"
             ? "This suspect may use an exact clock time only where their role and personal observations plausibly support it."
             : requirement.temporalRecall === "approximate"
@@ -4402,30 +4600,7 @@ async function authorMysteryV2(args: {
           repairDelta: issues,
           outputContract: "Return one complete replacement suspect object in the same schema. Change only fields named by the repair delta.",
         },
-        validate: (value) => authoredSuspectFromJson({
-          value,
-          seatId: requirement.seatId,
-          requiredPresentRecords,
-          requiredContradictionRecord,
-          requiredPresentationGateRecord,
-          recordItems: validatedFoundation.evidence.map((evidence) => ({
-            reference: { kind: "evidence" as const, id: evidence.id },
-            title: evidence.title,
-          })),
-          rooms: setup.roomNames.map((room) => ({
-            id: room.roomId,
-            name: room.name,
-          })),
-          people: [
-            { id: args.scaffold.victim.id, name: validatedFoundation.victimName },
-            ...args.scaffold.suspects.map((entry) => ({
-              id: entry.seatId,
-              name: entry.name,
-            })),
-          ],
-          knowledge: suspectKnowledgeBySeat[requirement.seatId]!,
-          courtOnly: omitInvestigation,
-        }),
+        validate: validateSuspect,
         onReceipt: (receipt) =>
           recordMysterySectionReceipt(args.draft, suspectSectionKey, receipt),
       });
@@ -4506,6 +4681,9 @@ async function authorMysteryV2(args: {
             ? "Author exactly one complete response for each automated Spectator prosecution choice."
             : "The player chooses the option. Never choose or recommend an option in authored text.",
           "Write each option in the frozen Prosecutor persona and keep every nonverbal beat out of spoken text.",
+          ...(caseIncludesHomicide ? [] : [
+            `This is a ${args.incidentPlan.primary.title} prosecution, not a homicide. Never mention murder, killing, death, a corpse, a fatal injury, or a murder weapon.`,
+          ]),
         ],
       },
       sourcePrompt: {
@@ -4522,11 +4700,15 @@ async function authorMysteryV2(args: {
           }),
         ),
       },
-      validate: (value) => authoredProsecutionChoicesFromJson(
-        value,
-        suspectRequirements.map((entry) => entry.seatId),
-        automatedSpectator ? 1 : 2,
-      ),
+      validate: (value) => assertMysteryIncidentLanguageV2({
+        value: authoredProsecutionChoicesFromJson(
+          value,
+          suspectRequirements.map((entry) => entry.seatId),
+          automatedSpectator ? 1 : 2,
+        ),
+        incidentPlan: args.incidentPlan,
+        section: "Prosecution choice copy",
+      }),
     });
     args.draft.prosecutionChoices = prosecutionChoices;
     args.onDraft(args.draft, "Writing the Case · Prosecution responses complete");
@@ -4558,11 +4740,15 @@ async function authorMysteryV2(args: {
           repairDelta: issues,
           outputContract: "Return the complete prosecutionChoices array in the same schema. Change only fields named by the repair delta.",
         },
-        validate: (value) => authoredProsecutionChoicesFromJson(
-          value,
-          suspectRequirements.map((entry) => entry.seatId),
-          automatedSpectator ? 1 : 2,
-        ),
+        validate: (value) => assertMysteryIncidentLanguageV2({
+          value: authoredProsecutionChoicesFromJson(
+            value,
+            suspectRequirements.map((entry) => entry.seatId),
+            automatedSpectator ? 1 : 2,
+          ),
+          incidentPlan: args.incidentPlan,
+          section: "Repaired prosecution choice copy",
+        }),
         onReceipt: (receipt) =>
           recordMysterySectionReceipt(
             args.draft,
@@ -4853,6 +5039,11 @@ async function authorMysteryV2(args: {
   args.onDraft(args.draft, "Testing Contradictions · Meaning verified");
 
   foundation = args.draft.foundation ?? foundation;
+  foundation = applyMysteryIncidentPlanToFoundationV2({
+    foundation,
+    incidentPlan: args.incidentPlan,
+    scaffold: args.scaffold,
+  });
   prosecutionChoices = args.draft.prosecutionChoices ?? prosecutionChoices;
 
   const authored: AuthoredMysteryV2 = {
@@ -5119,6 +5310,7 @@ async function polishMysteryPersonaDialogueGraphV2(args: {
 function buildMysteryV2Graph(args: {
   sessionId: string;
   config: DebateMysteryResolvedConfigV2;
+  incidentPlan: MysteryBoundIncidentPlanV1;
   scaffold: ReturnType<typeof compileDeterministicDebateMystery>;
   bots: MysteryV2BotRow[];
   authored: AuthoredMysteryV2;
@@ -5916,6 +6108,9 @@ function buildMysteryV2Graph(args: {
   const privateCase: PrivateMysteryCaseV2 = {
     version: 2,
     config: args.config,
+    incidentPlan: args.incidentPlan,
+    publicCharge: mysteryPublicChargeV1(args.incidentPlan),
+    sealedResponsibleSeatIds: [...args.incidentPlan.primary.responsibleSeatIds],
     sealedCulpritSeatId: args.scaffold.culpritSeatId,
     sealedAccompliceSeatId: args.scaffold.accompliceSeatId,
     motive: args.authored.motive,
@@ -5986,6 +6181,7 @@ function buildMysteryV2Graph(args: {
   const publicState: DebateWhodunnitFormatStateV2 = {
     ...initialV2State(args.config, "pending", now),
     caseTitle: args.authored.title,
+    caseCharge: mysteryPublicChargeV1(args.incidentPlan),
     victim: { id: args.scaffold.victim.id, name: args.authored.victimName },
     suspects: args.scaffold.suspects.map(({ roomId: _roomId, ...suspect }) => ({ ...suspect, roomId: _roomId })),
     rooms: omitInvestigation ? [] : args.scaffold.rooms.map((room) => {
@@ -8685,8 +8881,20 @@ export async function runDebateMysteryCompilationV2(
         if (!bot) throw new Error("A frozen suspect is no longer available.");
         return bot;
       });
+      const incidentPlan = composeMysteryIncidentPlanV1({
+        spark: config.spark,
+        difficulty: config.difficulty,
+        nonce: config.nonce,
+      });
+      const incidentPlanValidation = validateMysteryIncidentPlanV1({
+        plan: incidentPlan,
+        difficulty: config.difficulty,
+      });
+      if (!incidentPlanValidation.valid) {
+        throw new Error(incidentPlanValidation.errors.join("\n"));
+      }
       const scaffold = compileDeterministicDebateMystery({
-        config: v1ScaffoldConfig(config),
+        config: v1ScaffoldConfig(config, incidentPlan),
         suspects: suspectRows.map((bot) => ({
           botId: bot.id,
           exportHash: bot.export_hash,
@@ -8696,11 +8904,12 @@ export async function runDebateMysteryCompilationV2(
         })),
         ...(config.mansionBundleId
           ? {
-              roomBlueprint: getDebateMysteryMansionBundleV2(
-                db,
-                userId,
-                config.mansionBundleId,
-              ).rooms.map((room, index) => ({
+              roomBlueprint: (config.mansionSnapshot?.rooms ??
+                getDebateMysteryMansionBundleV2(
+                  db,
+                  userId,
+                  config.mansionBundleId,
+                ).rooms).map((room, index) => ({
                 id: room.id,
                 floor: room.floor,
                 x: room.x,
@@ -8722,6 +8931,11 @@ export async function runDebateMysteryCompilationV2(
       });
       const scaffoldValidation = validateDebateMysteryCaseBible(scaffold, 10_000);
       if (!scaffoldValidation.valid) throw new Error(scaffoldValidation.errors.join("\n"));
+      const boundIncidentPlan = bindMysteryIncidentPlanV1({
+        plan: incidentPlan,
+        principalSeatId: scaffold.culpritSeatId,
+        accompliceSeatId: scaffold.accompliceSeatId,
+      });
       const examinationIds = scaffold.activeRegions.map((outcome) => `${outcome.roomId}:${outcome.regionId}`);
       const eyewitnessSeatId = deterministicEyewitnessSeat(
         scaffold.caseSeed,
@@ -8760,6 +8974,7 @@ export async function runDebateMysteryCompilationV2(
       const authored = await authorMysteryV2({
         runtime,
         config,
+        incidentPlan: boundIncidentPlan,
         scaffold,
         bots,
         powerPlan: session.powerPlan,
@@ -8783,6 +8998,7 @@ export async function runDebateMysteryCompilationV2(
       checkpoint = buildMysteryV2Graph({
         sessionId,
         config,
+        incidentPlan: boundIncidentPlan,
         scaffold,
         bots,
         authored,
@@ -10176,9 +10392,9 @@ function enterWitnessChapterV2(args: {
     court: {
       witnessOrder: [...args.graph.witnessChapters].sort((a, b) => a.ordinal - b.ordinal).map((chapter) => chapter.id),
       defendantSeatId:
-        args.state.theory?.culpritSeatId ??
+        debateMysteryTheoryAccusedSeatIdsV2(args.state.theory)[0] ??
         (args.state.config.investigationMode === "court_only"
-          ? args.privateCase.sealedCulpritSeatId
+          ? privateMysteryResponsibleSeatIdsV2(args.privateCase)[0] ?? null
           : null),
       completedChapterIds: args.state.court?.completedChapterIds ?? [],
       activeChapterId: args.chapter.id,
@@ -10223,19 +10439,28 @@ function enterWitnessChapterV2(args: {
   };
 }
 
+function privateMysteryResponsibleSeatIdsV2(
+  privateCase: PrivateMysteryCaseV2,
+): string[] {
+  const explicit = privateCase.sealedResponsibleSeatIds?.filter(Boolean) ?? [];
+  return [...new Set(explicit.length ? explicit : [privateCase.sealedCulpritSeatId])];
+}
+
 function jurorVerdictV2(args: {
   session: DebateSessionV1;
   state: DebateWhodunnitFormatStateV2;
   privateCase: PrivateMysteryCaseV2;
   proofEstablished: boolean;
 }): DebateMysteryVerdictV2 {
-  const accusedSeatId = args.state.theory?.culpritSeatId ?? null;
-  const accused = args.state.suspects.find((suspect) => suspect.seatId === accusedSeatId);
-  const accusedIsCulprit = accusedSeatId === args.privateCase.sealedCulpritSeatId;
+  const accusedSeatIds = debateMysteryTheoryAccusedSeatIdsV2(args.state.theory);
+  const responsibleSeatIds = privateMysteryResponsibleSeatIdsV2(args.privateCase);
+  const responsibleSeatIdSet = new Set(responsibleSeatIds);
   const ballots = args.state.config.trialType === "jury"
-    ? args.session.jury.jurors.map((juror) => {
+    ? accusedSeatIds.flatMap((defendantSeatId) => {
+      const accused = args.state.suspects.find((suspect) => suspect.seatId === defendantSeatId);
+      return args.session.jury.jurors.map((juror) => {
         const predisposition = args.session.voterPredispositions?.find((entry) => entry.voterBotId === juror.id);
-        const personaNoise = (Number.parseInt(sha256(`${args.session.id}:${juror.id}:verdict`).slice(0, 8), 16) / 0xffffffff - 0.5) * 0.35;
+        const personaNoise = (Number.parseInt(sha256(`${args.session.id}:${juror.id}:${defendantSeatId}:verdict`).slice(0, 8), 16) / 0xffffffff - 0.5) * 0.35;
         const bias = Math.max(-1, Math.min(1, predisposition?.participantBias ?? 0));
         let score = (args.proofEstablished ? 0.65 : -0.45) + bias * 0.6 + personaNoise;
         let powerAffected = false;
@@ -10249,28 +10474,50 @@ function jurorVerdictV2(args: {
         const vote = score >= 0 ? "guilty" as const : "not_guilty" as const;
         return {
           jurorBotId: juror.id,
+          defendantSeatId,
           vote,
           reason: powerAffected
             ? "A shared Power overrode this juror's ordinary proof assessment."
             : predisposition?.rationale || (vote === "guilty" ? "The admitted contradictions proved the charge." : "The prosecution did not eliminate reasonable doubt."),
           powerAffected,
         };
-      })
+      });
+    })
     : [];
-  const guiltyVotes = ballots.filter((ballot) => ballot.vote === "guilty").length;
-  const legalResult = args.state.config.trialType === "bench"
-    ? args.proofEstablished ? "guilty" as const : "not_guilty" as const
-    : guiltyVotes >= 3 ? "guilty" as const : "not_guilty" as const;
   const proofSafe = args.proofEstablished && (args.state.theory?.evidenceIds.length ?? 0) > 0;
+  const defendantVerdicts = accusedSeatIds.map((seatId) => {
+    const guiltyVotes = ballots.filter(
+      (ballot) => ballot.defendantSeatId === seatId && ballot.vote === "guilty",
+    ).length;
+    const legalResult = args.state.config.trialType === "bench"
+      ? args.proofEstablished ? "guilty" as const : "not_guilty" as const
+      : guiltyVotes >= 3 ? "guilty" as const : "not_guilty" as const;
+    const factuallyResponsible = responsibleSeatIdSet.has(seatId);
+    return {
+      seatId,
+      legalResult,
+      factuallyResponsible,
+      classification: debateMysteryClassifyVerdictV2({
+        legalResult,
+        accusedIsCulprit: factuallyResponsible,
+        proofEstablished: args.proofEstablished,
+        proofSafe,
+      }),
+    };
+  });
+  const legalResult = defendantVerdicts.some((entry) => entry.legalResult === "guilty")
+    ? "guilty" as const
+    : "not_guilty" as const;
+  const accusationCorrect = debateMysteryAccusationMatchesV2(accusedSeatIds, responsibleSeatIds);
+  const classification = defendantVerdicts.find(
+    (entry) => entry.classification === "wrongful_conviction",
+  )?.classification ?? defendantVerdicts[0]?.classification ?? "failed_prosecution";
   return {
     legalResult,
-    classification: debateMysteryClassifyVerdictV2({
-      legalResult,
-      accusedIsCulprit,
-      proofEstablished: args.proofEstablished,
-      proofSafe,
-    }),
-    sealedCulpritCorrect: accusedIsCulprit,
+    classification,
+    accusationCorrect,
+    defendantVerdicts,
+    sealedCulpritCorrect: accusedSeatIds[0] === args.privateCase.sealedCulpritSeatId,
     proofGrade: args.proofEstablished ? proofSafe ? "proved" : "unsafe" : "failed",
     jurorBallots: ballots,
     deliveredAt: new Date().toISOString(),
@@ -10295,24 +10542,38 @@ function failCourtForCredibilityV2(
   state: DebateWhodunnitFormatStateV2,
   privateCase: PrivateMysteryCaseV2,
 ): DebateWhodunnitFormatStateV2 {
-  const accusedIsCulprit = state.theory?.culpritSeatId === privateCase.sealedCulpritSeatId;
+  const accusedSeatIds = debateMysteryTheoryAccusedSeatIdsV2(state.theory);
+  const responsibleSeatIds = privateMysteryResponsibleSeatIdsV2(privateCase);
+  const responsibleSeatIdSet = new Set(responsibleSeatIds);
+  const defendantVerdicts = accusedSeatIds.map((seatId) => {
+    const factuallyResponsible = responsibleSeatIdSet.has(seatId);
+    return {
+      seatId,
+      legalResult: "not_guilty" as const,
+      factuallyResponsible,
+      classification: debateMysteryClassifyVerdictV2({
+        legalResult: "not_guilty",
+        accusedIsCulprit: factuallyResponsible,
+        proofEstablished: false,
+        proofSafe: false,
+      }),
+    };
+  });
   const verdict: DebateMysteryVerdictV2 = {
     legalResult: "not_guilty",
-    classification: debateMysteryClassifyVerdictV2({
-      legalResult: "not_guilty",
-      accusedIsCulprit,
-      proofEstablished: false,
-      proofSafe: false,
-    }),
-    sealedCulpritCorrect: accusedIsCulprit,
+    classification: defendantVerdicts[0]?.classification ?? "failed_prosecution",
+    accusationCorrect: debateMysteryAccusationMatchesV2(accusedSeatIds, responsibleSeatIds),
+    defendantVerdicts,
+    sealedCulpritCorrect: accusedSeatIds[0] === privateCase.sealedCulpritSeatId,
     proofGrade: "failed",
     jurorBallots: state.config.trialType === "jury"
-      ? state.config.jurorBotIds.map((jurorBotId) => ({
+      ? accusedSeatIds.flatMap((defendantSeatId) => state.config.jurorBotIds.map((jurorBotId) => ({
           jurorBotId,
+          defendantSeatId,
           vote: "not_guilty" as const,
           reason: "The prosecution exhausted its credibility before proving the active testimony.",
           powerAffected: false,
-        }))
+        })))
       : [],
     deliveredAt: new Date().toISOString(),
   };
@@ -10324,10 +10585,13 @@ function prepareSpectatorTheoryV2(args: {
   graph: DebateMysteryDialogueGraphV2;
   privateCase: PrivateMysteryCaseV2;
 }): DebateWhodunnitFormatStateV2 {
-  const accused = args.state.suspects.find(
-    (suspect) => suspect.seatId === args.privateCase.sealedCulpritSeatId,
-  );
-  if (!accused) throw new HttpError(409, "The automated Prosecutor could not form a reviewable conclusion.");
+  const accusedSeatIds = privateMysteryResponsibleSeatIdsV2(args.privateCase);
+  const accused = accusedSeatIds.map((seatId) =>
+    args.state.suspects.find((suspect) => suspect.seatId === seatId));
+  if (accused.some((suspect) => !suspect)) {
+    throw new HttpError(409, "The automated Prosecutor could not form a reviewable conclusion.");
+  }
+  const accusedNames = accused.map((suspect) => suspect!.name).join(" and ");
   const admittedReferences = debateMysterySpectatorEvidenceReferencesV2(args.graph);
   const admittedKeys = new Set(admittedReferences.map(mysteryRecordKey));
   const now = new Date().toISOString();
@@ -10354,7 +10618,7 @@ function prepareSpectatorTheoryV2(args: {
       nodeId: "prosecutor-offstage-investigation",
       lineId: null,
       stageActionText: null,
-      visibleText: `The selected Prosecutor investigated the mansion and proposed charges against ${accused.name}. Review the admitted physical findings and revise the conclusion before filing it.`,
+      visibleText: `The selected Prosecutor investigated the mansion and proposed charges against ${accusedNames}. Review the admitted physical findings and revise the conclusion before filing it.`,
       speakerSeatId: null,
       speakerBotId: args.state.config.prosecutorBotId,
       speakerKind: "bot",
@@ -10362,18 +10626,18 @@ function prepareSpectatorTheoryV2(args: {
     }],
     activeDialogueNodeId: "prosecutor-offstage-investigation",
     theoryAvailable: true,
-    // This is an editable public hypothesis, not a projection of the private
-    // dialogue graph. The accomplice remains unset because the authorized
-    // physical record does not independently establish one.
-    theory: {
-      culpritSeatId: accused.seatId,
+    // This is an editable public hypothesis, not the private incident plan.
+    theory: debateMysteryTheoryWithAccusedSeatIdsV2({
+      culpritSeatId: null,
       accompliceSeatId: null,
+      incidentId: args.state.caseCharge?.incidentId,
+      claim: args.state.caseCharge?.accusationPrompt,
       method: args.privateCase.method,
       motive: args.privateCase.motive,
-      opportunity: "The admitted timeline and physical record place the accused at the crime scene during the fatal interval.",
+      opportunity: "The admitted timeline and physical record place the accused within the decisive incident window.",
       evidenceIds: admittedReferences.map((reference) => reference.id),
       testimonyIds: [],
-    },
+    }, accusedSeatIds),
     theoryFiledAt: null,
     court: null,
     pendingProsecutionChoice: null,
@@ -10385,10 +10649,11 @@ function prepareCourtOnlyTrialV2(args: {
   graph: DebateMysteryDialogueGraphV2;
   privateCase: PrivateMysteryCaseV2;
 }): DebateWhodunnitFormatStateV2 {
-  const accused = args.state.suspects.find(
-    (suspect) => suspect.seatId === args.privateCase.sealedCulpritSeatId,
-  );
-  if (!accused) throw new HttpError(409, "The court filing has no valid defendant.");
+  const accusedSeatIds = privateMysteryResponsibleSeatIdsV2(args.privateCase);
+  if (accusedSeatIds.some((seatId) =>
+    !args.state.suspects.some((suspect) => suspect.seatId === seatId))) {
+    throw new HttpError(409, "The court filing has no valid defendant.");
+  }
   const admittedReferences = debateMysterySpectatorEvidenceReferencesV2(args.graph);
   const admittedKeys = new Set(admittedReferences.map(mysteryRecordKey));
   const now = new Date().toISOString();
@@ -10414,15 +10679,17 @@ function prepareCourtOnlyTrialV2(args: {
     metSuspectSeatIds: args.state.suspects.map((suspect) => suspect.seatId),
     record,
     theoryAvailable: true,
-    theory: {
-      culpritSeatId: accused.seatId,
+    theory: debateMysteryTheoryWithAccusedSeatIdsV2({
+      culpritSeatId: null,
       accompliceSeatId: null,
+      incidentId: args.state.caseCharge?.incidentId,
+      claim: args.state.caseCharge?.accusationPrompt,
       method: args.privateCase.method,
       motive: args.privateCase.motive,
-      opportunity: "The admitted prosecution record places the defendant within the fatal timeline and supplies the statement-level contradictions for trial.",
+      opportunity: "The admitted prosecution record places the defendant within the incident timeline and supplies the statement-level contradictions for trial.",
       evidenceIds: admittedReferences.map((reference) => reference.id),
       testimonyIds: [],
-    },
+    }, accusedSeatIds),
     theoryFiledAt: now,
     court: null,
     pendingProsecutionChoice: null,
@@ -11682,7 +11949,7 @@ export function applyDebateMysteryActionV2(
       const crimeScene = state.rooms.find(
         (room) => room.id === (state.crimeSceneRoomId ?? privateCase.crimeSceneRoomId),
       );
-      if (!crimeScene) throw new HttpError(409, "The authored crime scene is unavailable.");
+      if (!crimeScene) throw new HttpError(409, "The authored incident scene is unavailable.");
       if (crimeScene.sealedAsset?.status === "pending") {
         throw new HttpError(
           409,
@@ -11727,7 +11994,7 @@ export function applyDebateMysteryActionV2(
           if (!state.openingSweepComplete && room.id !== state.currentRoomId) {
             throw new HttpError(
               409,
-              "Finish the finite visible sweep before leaving the crime scene.",
+              "Finish the finite visible sweep before leaving the incident scene.",
               "MYSTERY_OPENING_SWEEP_INCOMPLETE",
             );
           }
@@ -11911,24 +12178,34 @@ export function applyDebateMysteryActionV2(
       throw new HttpError(409, "Charges can only be filed from the investigation.");
     }
     if (!state.theoryAvailable) throw new HttpError(409, "Complete the crime-scene briefing, meet one suspect, and admit one record item first.");
+    const suspectSeatIds = new Set(state.suspects.map((suspect) => suspect.seatId));
+    const accusedSeatIds = debateMysteryTheoryAccusedSeatIdsV2(request.theory)
+      .filter((seatId) => suspectSeatIds.has(seatId))
+      .slice(0, 2);
+    if (!accusedSeatIds.length) {
+      throw new HttpError(400, "Accuse at least one person before filing the charge.");
+    }
     if (spectator) {
-      const suspectSeatIds = new Set(state.suspects.map((suspect) => suspect.seatId));
       const admittedEvidenceIds = new Set(state.record.flatMap((item) =>
         item.admitted && item.reference.kind === "evidence" ? [item.reference.id] : [],
       ));
-      state.theory = {
-        culpritSeatId: request.theory.culpritSeatId && suspectSeatIds.has(request.theory.culpritSeatId)
-          ? request.theory.culpritSeatId
-          : null,
+      state.theory = debateMysteryTheoryWithAccusedSeatIdsV2({
+        culpritSeatId: null,
+        accompliceSeatId: null,
+        incidentId: state.caseCharge?.incidentId,
+        claim: compact(request.theory.claim, 500) || state.caseCharge?.accusationPrompt,
         method: compact(request.theory.method, 2_000),
         motive: compact(request.theory.motive, 2_000),
         opportunity: compact(request.theory.opportunity, 2_000),
-        accompliceSeatId: null,
         evidenceIds: [...new Set(request.theory.evidenceIds.filter((id) => admittedEvidenceIds.has(id)))],
         testimonyIds: [],
-      };
+      }, accusedSeatIds);
     } else {
-      state.theory = structuredClone(request.theory);
+      state.theory = debateMysteryTheoryWithAccusedSeatIdsV2({
+        ...structuredClone(request.theory),
+        incidentId: state.caseCharge?.incidentId,
+        claim: compact(request.theory.claim, 500) || state.caseCharge?.accusationPrompt,
+      }, accusedSeatIds);
     }
     state.theoryFiledAt = new Date().toISOString();
     const firstChapter = [...graph.witnessChapters].sort((a, b) => a.ordinal - b.ordinal)[0];

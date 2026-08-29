@@ -17,7 +17,16 @@ describe("portable mansion setup experience", () => {
     assert.match(experience, /Unlock preview/u);
     assert.match(experience, /Install and use/u);
     assert.match(setupSource, /Export Mansion/u);
-    assert.match(setupSource, /Play theme/u);
+    assert.match(setupSource, /Music and atmosphere/u);
+    assert.match(setupSource, /SanctumAudioPlayer/u);
+    assert.match(setupSource, /Synthesize music/u);
+    assert.match(setupSource, /Instrument-only noir phrases/u);
+    assert.match(setupSource, /Synthesize atmosphere/u);
+    assert.match(setupSource, /world bed continues across rooms/u);
+    assert.doesNotMatch(installedLibrary, />\s*Refract\s*</u);
+    assert.match(setupSource, /Use this version/u);
+    assert.match(setupSource, /Undo previous version/u);
+    assert.doesNotMatch(setupSource, /Play theme/u);
     assert.match(setupSource, /Remove from PRISM/u);
     assert.match(setupSource, /license\.allowsRedistribution === false/u);
     assert.match(client, /x-prism-package-password/u);

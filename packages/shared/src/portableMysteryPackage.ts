@@ -1,3 +1,15 @@
+import {
+  validateMansionMusicLoopV1,
+  validateMansionMusicIdentityV1,
+  type MansionMusicIdentityV1,
+  type MansionMusicLoopV1,
+} from "./mansionMusic.ts";
+import {
+  mansionLayoutV2ToLegacyRooms,
+  validateMansionLayoutV2,
+  type MansionLayoutV2,
+} from "./mansionLayoutV2.ts";
+
 export const PORTABLE_MYSTERY_PACKAGE_FORMAT_MAJOR_V1 = 1 as const;
 export const PORTABLE_MYSTERY_PACKAGE_FORMAT_MINOR_V1 = 0 as const;
 export const PORTABLE_MYSTERY_PACKAGE_MAGIC_V1 = "PRISMPKG" as const;
@@ -289,6 +301,9 @@ export interface MansionPackageManifestV1 {
   floorCount: number;
   /** Additive so V1 packages without it remain readable. */
   scaleClass?: "compact" | "standard" | "grand";
+  /** Additive connected planner contract. `rooms` remains the V1-compatible
+   * semantic projection so older PRISM installs can still play the package. */
+  layoutV2?: MansionLayoutV2;
   rooms: MansionPackageRoomV1[];
   houseStyle: {
     id: string;
@@ -300,6 +315,12 @@ export interface MansionPackageManifestV1 {
    * previews remain readable but are not emitted by current Case Forge. */
   previewAssetId: string | null;
   investigationThemeAssetId: string | null;
+  /** Additive title for the active packaged investigation theme. */
+  investigationThemeTitle?: string | null;
+  /** Additive decoded loop contract; legacy themes use runtime-safe defaults. */
+  investigationThemeLoop?: MansionMusicLoopV1 | null;
+  /** Sealed mansion-only musical identity; legacy packages derive one on install. */
+  musicIdentity?: MansionMusicIdentityV1;
   /** Additive: legacy packages derive room art with PRISM defaults. */
   roomArt?: MansionRoomArtContractV1;
   /** Optional so legacy one-floor and pre-ambience packages stay valid. */
@@ -409,7 +430,9 @@ export interface WhodunnitPackageManifestV1 {
 
 const SHA256_HEX = /^[a-f0-9]{64}$/u;
 const SAFE_ARCHIVE_PATH = /^(?:assets|audio)\/[a-f0-9]{64}\.(?:png|webp|mp3|ogg|wav)$/u;
-const MAX_PORTABLE_ROOMS_V1 = 64;
+const MAX_PORTABLE_LEGACY_ROOMS_V1 = 64;
+const MAX_PORTABLE_LEGACY_FLOORS_V1 = 64;
+const MAX_PORTABLE_LEGACY_COORDINATE_V1 = 4_096;
 const MAX_PORTABLE_ASSETS_V1 = 511;
 const MAX_PORTABLE_CAST_V1 = 64;
 const MANSION_PRIVATE_FIELD_NAMES = new Set([
@@ -554,6 +577,47 @@ function assetReferenceIsCompatible(
   return typeof asset.mimeType === "string" && asset.mimeType.startsWith(`${media}/`);
 }
 
+function portableMansionLayoutV2Shape(value: unknown): value is MansionLayoutV2 {
+  if (!isRecord(value) || value.version !== 2 || !isRecord(value.envelope)) return false;
+  if (
+    !Array.isArray(value.entities) || !Array.isArray(value.doors) ||
+    !Array.isArray(value.verticalConnectors) || !Array.isArray(value.placementAnchors) ||
+    !Array.isArray(value.lights) || !Array.isArray(value.roomArtCandidates)
+  ) return false;
+  if (!value.entities.every((entry) => {
+    if (!isRecord(entry) || typeof entry.id !== "string" || typeof entry.kind !== "string") return false;
+    if (entry.kind === "room") {
+      return typeof entry.templateId === "string" && typeof entry.name === "string" &&
+        typeof entry.rotation === "number";
+    }
+    return (entry.kind === "corridor" || entry.kind === "infill") &&
+      typeof entry.width === "number" && typeof entry.height === "number";
+  })) return false;
+  if (!value.doors.every((entry) => isRecord(entry) &&
+    typeof entry.id === "string" && typeof entry.aEntityId === "string" &&
+    typeof entry.bEntityId === "string" && typeof entry.aWall === "string")) return false;
+  if (!value.verticalConnectors.every((entry) => isRecord(entry) &&
+    typeof entry.id === "string" && typeof entry.kind === "string" &&
+    typeof entry.lowerEntityId === "string" && typeof entry.upperEntityId === "string")) return false;
+  if (!value.placementAnchors.every((entry) => isRecord(entry) &&
+    typeof entry.id === "string" && typeof entry.roomId === "string" &&
+    typeof entry.name === "string" && typeof entry.relation === "string" &&
+    isRecord(entry.point))) return false;
+  if (!value.lights.every((entry) => {
+    if (!isRecord(entry) || !["fire", "omni", "directional", "neon"].includes(String(entry.kind)) ||
+      typeof entry.id !== "string" || typeof entry.roomId !== "string" ||
+      typeof entry.color !== "string" || typeof entry.animationSeed !== "string" ||
+      !isRecord(entry.geometry) || !isRecord(entry.cuePermission) ||
+      !Array.isArray(entry.cuePermission.allowedCueIds)) return false;
+    return entry.kind !== "neon" || Array.isArray(entry.geometry.points) &&
+      entry.geometry.points.every(isRecord);
+  })) return false;
+  return value.roomArtCandidates.every((entry) => isRecord(entry) &&
+    typeof entry.id === "string" && typeof entry.roomId === "string" &&
+    typeof entry.status === "string" && typeof entry.prompt === "string" &&
+    typeof entry.promptSha256 === "string" && typeof entry.createdAt === "string");
+}
+
 export function validateMansionPackageHeaderV1(value: unknown): string[] {
   if (!isRecord(value)) return ["header is invalid."];
   const errors = [
@@ -595,6 +659,8 @@ export function validateMansionPackageManifestV1(value: unknown): string[] {
   }
   if (!isNonNegativeInteger(value.floorCount) || value.floorCount < 1) {
     errors.push("manifest.floorCount is invalid.");
+  } else if (value.layoutV2 === undefined && value.floorCount > MAX_PORTABLE_LEGACY_FLOORS_V1) {
+    errors.push("manifest.floorCount exceeds the legacy portable bound.");
   }
   if (
     value.scaleClass !== undefined &&
@@ -610,7 +676,10 @@ export function validateMansionPackageManifestV1(value: unknown): string[] {
   if (!Array.isArray(value.rooms) || value.rooms.length < 1) {
     errors.push("manifest.rooms is empty.");
   } else {
-    if (value.rooms.length > MAX_PORTABLE_ROOMS_V1) errors.push("manifest.rooms exceeds the portable capacity.");
+    const portableRoomCount = value.rooms.length;
+    if (value.layoutV2 === undefined && value.rooms.length > MAX_PORTABLE_LEGACY_ROOMS_V1) {
+      errors.push("manifest.rooms exceeds the legacy portable capacity.");
+    }
     const slotIds = new Set<string>();
     value.rooms.forEach((room, index) => {
       const path = `manifest.rooms[${index}]`;
@@ -630,19 +699,36 @@ export function validateMansionPackageManifestV1(value: unknown): string[] {
         errors.push(`${path}.floor is invalid.`);
       }
       for (const key of ["x", "y"] as const) {
-        if (!isFiniteNumber(room[key])) errors.push(`${path}.${key} is invalid.`);
+        if (!isFiniteNumber(room[key]) || room[key] < 0 || room[key] > MAX_PORTABLE_LEGACY_COORDINATE_V1) {
+          errors.push(`${path}.${key} is invalid.`);
+        }
       }
       for (const key of ["width", "height"] as const) {
-        if (!isFiniteNumber(room[key]) || room[key] <= 0) errors.push(`${path}.${key} is invalid.`);
+        if (!isFiniteNumber(room[key]) || room[key] <= 0 || room[key] > MAX_PORTABLE_LEGACY_COORDINATE_V1) {
+          errors.push(`${path}.${key} is invalid.`);
+        }
+      }
+      if (
+        isFiniteNumber(room.x) && isFiniteNumber(room.width) &&
+        room.x + room.width > MAX_PORTABLE_LEGACY_COORDINATE_V1 ||
+        isFiniteNumber(room.y) && isFiniteNumber(room.height) &&
+        room.y + room.height > MAX_PORTABLE_LEGACY_COORDINATE_V1
+      ) {
+        errors.push(`${path} exceeds the legacy coordinate bound.`);
       }
       if (!Array.isArray(room.neighborIds) || !room.neighborIds.every(isNonEmptyString)) {
         errors.push(`${path}.neighborIds is invalid.`);
+      } else if (room.neighborIds.length > portableRoomCount) {
+        errors.push(`${path}.neighborIds exceeds the room bound.`);
       } else if (new Set(room.neighborIds).size !== room.neighborIds.length) {
         errors.push(`${path}.neighborIds contains duplicates.`);
       }
       if (!Array.isArray(room.slots)) {
         errors.push(`${path}.slots is invalid.`);
       } else {
+        if (room.slots.length > MAX_PORTABLE_CAST_V1) {
+          errors.push(`${path}.slots exceeds the portable capacity.`);
+        }
         room.slots.forEach((slot, slotIndex) => {
           const slotPath = `${path}.slots[${slotIndex}]`;
           if (!isRecord(slot) || !isNonEmptyString(slot.id) ||
@@ -681,6 +767,9 @@ export function validateMansionPackageManifestV1(value: unknown): string[] {
       if (!Array.isArray(room.propAssetIds) || !room.propAssetIds.every(isNonEmptyString)) {
         errors.push(`${path}.propAssetIds is invalid.`);
       } else {
+        if (room.propAssetIds.length > MAX_PORTABLE_ASSETS_V1) {
+          errors.push(`${path}.propAssetIds exceeds the portable capacity.`);
+        }
         if (new Set(room.propAssetIds).size !== room.propAssetIds.length) {
           errors.push(`${path}.propAssetIds contains duplicates.`);
         }
@@ -699,6 +788,58 @@ export function validateMansionPackageManifestV1(value: unknown): string[] {
         }
       }
     });
+  }
+  if (value.layoutV2 !== undefined) {
+    if (!portableMansionLayoutV2Shape(value.layoutV2)) {
+      errors.push("manifest.layoutV2 is invalid.");
+    } else {
+      const layoutErrors = validateMansionLayoutV2(value.layoutV2, {
+        requireEditorFloors: true,
+      });
+      errors.push(...layoutErrors.map((error) => `manifest.layoutV2: ${error}`));
+      if (layoutErrors.length === 0 && Array.isArray(value.rooms)) {
+        const projected = mansionLayoutV2ToLegacyRooms(value.layoutV2);
+        const projectedById = new Map(projected.map((room) => [room.id, room]));
+        if (projected.length !== value.rooms.length) {
+          errors.push("manifest.layoutV2 semantic rooms do not match manifest.rooms.");
+        }
+        for (const room of value.rooms) {
+          if (!isRecord(room) || !isNonEmptyString(room.id)) continue;
+          const source = projectedById.get(room.id);
+          if (!source) {
+            errors.push(`manifest.layoutV2 is missing semantic room ${room.id}.`);
+            continue;
+          }
+          const compatible = room.templateId === source.templateId &&
+            room.name === source.name && room.floor === source.floor &&
+            room.x === source.x && room.y === source.y &&
+            room.width === source.width && room.height === source.height &&
+            Array.isArray(room.neighborIds) &&
+            [...room.neighborIds].sort().join("\u0000") === [...source.neighborIds].sort().join("\u0000");
+          if (!compatible) errors.push(`manifest.layoutV2 projection for ${room.id} is not canonical.`);
+        }
+        const highestFloor = Math.max(0, ...projected.map((room) => room.floor));
+        if (value.floorCount !== highestFloor) {
+          errors.push("manifest.floorCount does not match manifest.layoutV2.");
+        }
+      }
+      for (const entity of value.layoutV2.entities) {
+        if (entity.kind !== "room" || !entity.acceptedRoomAssetId) continue;
+        if (!assetReferenceIsCompatible(
+          assetCollection.byId.get(entity.acceptedRoomAssetId),
+          ["room", "presentation"],
+          "image",
+        )) errors.push(`manifest.layoutV2 room ${entity.id} references incompatible accepted art.`);
+      }
+      for (const candidate of value.layoutV2.roomArtCandidates) {
+        if (candidate.status !== "ready" || !candidate.assetId) continue;
+        if (!assetReferenceIsCompatible(
+          assetCollection.byId.get(candidate.assetId),
+          ["room", "presentation"],
+          "image",
+        )) errors.push(`manifest.layoutV2 candidate ${candidate.id} references incompatible art.`);
+      }
+    }
   }
   if (value.roomArt !== undefined) {
     const roomArt = value.roomArt;
@@ -745,6 +886,30 @@ export function validateMansionPackageManifestV1(value: unknown): string[] {
     assetCollection.byId.get(value.investigationThemeAssetId), ["music"], "audio",
   )) {
     errors.push("manifest.investigationThemeAssetId does not reference music.");
+  }
+  if (
+    value.investigationThemeTitle !== undefined &&
+    value.investigationThemeTitle !== null &&
+    !isNonEmptyString(value.investigationThemeTitle)
+  ) {
+    errors.push("manifest.investigationThemeTitle is invalid.");
+  }
+  if (value.investigationThemeLoop !== undefined && value.investigationThemeLoop !== null) {
+    const themeDuration = typeof value.investigationThemeAssetId === "string"
+      ? assetCollection.byId.get(value.investigationThemeAssetId)?.durationMs
+      : null;
+    if (typeof themeDuration !== "number" || !value.musicIdentity) {
+      errors.push("manifest.investigationThemeLoop requires a timed theme and music identity.");
+    } else {
+      errors.push(...validateMansionMusicLoopV1(
+        value.investigationThemeLoop,
+        themeDuration,
+        value.musicIdentity,
+      ).map((error) => `manifest.${error}`));
+    }
+  }
+  if (value.musicIdentity !== undefined) {
+    errors.push(...validateMansionMusicIdentityV1(value.musicIdentity).map((error) => `manifest.${error}`));
   }
   if (value.ambience !== undefined && value.ambience !== null) {
     if (!isRecord(value.ambience) || value.ambience.version !== 1) {

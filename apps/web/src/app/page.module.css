@@ -8235,6 +8235,38 @@
   margin: 10px 0 14px;
 }
 
+.settingsAutoQualityPostures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.settingsAutoQualityPosture {
+  min-height: 2rem;
+  padding: 0.38rem 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--fg-muted) 26%, transparent);
+  border-radius: 0.62rem;
+  background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.1;
+  cursor: pointer;
+}
+
+.settingsAutoQualityPosture[data-active="true"] {
+  border-color: color-mix(in srgb, var(--prism-pink) 64%, transparent);
+  background: color-mix(in srgb, var(--prism-pink) 16%, var(--bg-surface));
+  color: var(--fg);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--prism-pink) 22%, transparent);
+}
+
+.settingsAutoQualityPosture:focus-visible {
+  outline: 2px solid var(--prism-pink);
+  outline-offset: 2px;
+}
+
 /* Beat `.form input[type="range"] { background: transparent }` so the brand
    gradient actually paints on WebKit + Firefox tracks. */
 .form .settingsOnlineAutoProviderBiasRange,

@@ -39,6 +39,7 @@ import {
   ensureImageAssetLibrarySchema,
   synchronizeImageAssetCatalog,
 } from "./image-asset-library.ts";
+import { ensureAudioAssetCatalogSchema } from "./audio-asset-catalog.ts";
 import { ensureUserNotesSchema } from "./user-notes.ts";
 
 export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
@@ -223,6 +224,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       auto_fallback_chain TEXT,
       online_auto_provider_bias REAL NOT NULL DEFAULT 0,
       online_auto_provider_weights TEXT,
+      online_auto_quality_posture TEXT NOT NULL DEFAULT 'quality',
       hidden_bot_model_ids TEXT NOT NULL DEFAULT '[]',
       hidden_global_picker_model_ids TEXT NOT NULL DEFAULT '[]',
       hidden_comfyui_workflow_ids TEXT NOT NULL DEFAULT '[]',
@@ -3666,6 +3668,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasOnlineAutoProviderWeights) {
     db.exec("ALTER TABLE users ADD COLUMN online_auto_provider_weights TEXT;");
   }
+  const hasOnlineAutoQualityPosture = userColumns.some(
+    (column) => column.name === "online_auto_quality_posture",
+  );
+  if (!hasOnlineAutoQualityPosture) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN online_auto_quality_posture TEXT NOT NULL DEFAULT 'quality';",
+    );
+  }
   const hasComposerWritingAssist = userColumns.some(
     (column) => column.name === "composer_writing_assist",
   );
@@ -5761,6 +5771,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
 
   ensureUserNotesSchema(db);
   ensureImageAssetLibrarySchema(db);
+  ensureAudioAssetCatalogSchema(db);
   for (const row of db.prepare("SELECT id FROM users").all() as Array<{
     id: string;
   }>) {

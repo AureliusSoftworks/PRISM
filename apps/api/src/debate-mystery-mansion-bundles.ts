@@ -3,10 +3,24 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   DEBATE_MYSTERY_ROOM_TEMPLATES,
   DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
+  MANSION_MUSIC_ACTIVE_LOGICAL_ID_V1,
+  MANSION_MUSIC_CANDIDATE_LOGICAL_ID_V1,
+  MANSION_MUSIC_PREVIOUS_LOGICAL_ID_V1,
+  MANSION_ATMOSPHERE_ACTIVE_LOGICAL_ID_V1,
+  MANSION_ATMOSPHERE_CANDIDATE_LOGICAL_ID_V1,
+  MANSION_ATMOSPHERE_PREVIOUS_LOGICAL_ID_V1,
+  canonicalMansionLayoutV2,
+  canonicalPortablePackageJsonV1,
   debateMysteryAcousticThemePaletteV1,
+  deriveMansionMusicIdentityV1,
+  normalizeMansionMusicIdentityV1,
   normalizeDebateMysteryAtmosphereContractV1,
   debateMysteryMansionBundleEligibleV2,
   resolveDebateMysteryMansionExteriorScaleClassV1,
+  mansionLayoutV2EditorDerivativeFromLegacyRooms,
+  mansionLayoutV2HousePlanFromLegacyRooms,
+  mansionLayoutV2ToLegacyRooms,
+  validateMansionLayoutV2,
   validateDebateMysteryMansionEditorTopologyV1,
   type DebateMysteryHouseStyleV2,
   type DebateMysteryMansionAssetV1,
@@ -14,8 +28,14 @@ import {
   type DebateMysteryMansionDerivationV1,
   type DebateMysteryMansionBundleRoomV1,
   type DebateMysteryMansionBundleSummaryV1,
+  type DebateMysteryMansionSnapshotV2,
+  type MansionLayoutRoomV2,
+  type MansionLayoutV2,
+  type MansionMusicRefractLensV1,
+  type MansionMusicLoopV1,
   type DebateWhodunnitFormatStateV2,
   type PortableMansionInstallationMetadataV1,
+  type PortablePackageJsonValueV1,
 } from "@localai/shared";
 import sharp from "sharp";
 import { getDebateSession } from "./debate.ts";
@@ -68,6 +88,23 @@ interface SavedMansionLibraryMetadataV1 {
   title: string | null;
   description: string | null;
   thumbnailAssetId: string | null;
+  music: {
+    version: 1;
+    activeTitle: string | null;
+    candidateTitle: string | null;
+    candidateLens: MansionMusicRefractLensV1 | "signature" | null;
+    previousTitle: string | null;
+    activeLoop: MansionMusicLoopV1 | null;
+    candidateLoop: MansionMusicLoopV1 | null;
+    previousLoop: MansionMusicLoopV1 | null;
+    candidateValidation: "pending" | "validated" | null;
+  } | null;
+  atmosphere: {
+    version: 1;
+    activeTitle: string | null;
+    candidateTitle: string | null;
+    previousTitle: string | null;
+  } | null;
 }
 
 export interface UpdateDebateMysteryMansionLibraryInputV1 {
@@ -79,9 +116,21 @@ export interface UpdateDebateMysteryMansionLibraryInputV1 {
 const MANSION_LIBRARY_THUMBNAIL_LOGICAL_ID = "library-thumbnail-override-v1";
 const MANSION_LIBRARY_THUMBNAIL_MAX_SOURCE_BYTES = 8 * 1024 * 1024;
 
+function parseMusicLoop(value: unknown): MansionMusicLoopV1 | null {
+  if (!value || typeof value !== "object") return null;
+  const input = value as Partial<MansionMusicLoopV1>;
+  return input.version === 1 &&
+    typeof input.loopStartMs === "number" && Number.isFinite(input.loopStartMs) &&
+    typeof input.loopEndMs === "number" && Number.isFinite(input.loopEndMs) &&
+    typeof input.crossfadeMs === "number" && Number.isFinite(input.crossfadeMs) &&
+    typeof input.silenceRatio === "number" && Number.isFinite(input.silenceRatio)
+      ? input as MansionMusicLoopV1
+      : null;
+}
+
 function parseLibraryMetadata(value: string | null): SavedMansionLibraryMetadataV1 {
   if (!value) {
-    return { version: 1, title: null, description: null, thumbnailAssetId: null };
+    return { version: 1, title: null, description: null, thumbnailAssetId: null, music: null, atmosphere: null };
   }
   try {
     const parsed = JSON.parse(value) as Partial<SavedMansionLibraryMetadataV1>;
@@ -97,9 +146,44 @@ function parseLibraryMetadata(value: string | null): SavedMansionLibraryMetadata
         typeof parsed.thumbnailAssetId === "string" && parsed.thumbnailAssetId.trim()
           ? parsed.thumbnailAssetId.trim()
           : null,
+      music: parsed.music && typeof parsed.music === "object" && parsed.music.version === 1
+        ? {
+            version: 1,
+            activeTitle: typeof parsed.music.activeTitle === "string" && parsed.music.activeTitle.trim()
+              ? parsed.music.activeTitle.trim().slice(0, 180) : null,
+            candidateTitle: typeof parsed.music.candidateTitle === "string" && parsed.music.candidateTitle.trim()
+              ? parsed.music.candidateTitle.trim().slice(0, 180) : null,
+            candidateLens:
+              parsed.music.candidateLens === "signature" ||
+              parsed.music.candidateLens === "shadow" ||
+              parsed.music.candidateLens === "pulse" ||
+              parsed.music.candidateLens === "atmosphere"
+                ? parsed.music.candidateLens : null,
+            previousTitle: typeof parsed.music.previousTitle === "string" && parsed.music.previousTitle.trim()
+              ? parsed.music.previousTitle.trim().slice(0, 180) : null,
+            activeLoop: parseMusicLoop(parsed.music.activeLoop),
+            candidateLoop: parseMusicLoop(parsed.music.candidateLoop),
+            previousLoop: parseMusicLoop(parsed.music.previousLoop),
+            candidateValidation:
+              parsed.music.candidateValidation === "pending" || parsed.music.candidateValidation === "validated"
+                ? parsed.music.candidateValidation
+                : null,
+          }
+        : null,
+      atmosphere: parsed.atmosphere && typeof parsed.atmosphere === "object" && parsed.atmosphere.version === 1
+        ? {
+            version: 1,
+            activeTitle: typeof parsed.atmosphere.activeTitle === "string" && parsed.atmosphere.activeTitle.trim()
+              ? parsed.atmosphere.activeTitle.trim().slice(0, 180) : null,
+            candidateTitle: typeof parsed.atmosphere.candidateTitle === "string" && parsed.atmosphere.candidateTitle.trim()
+              ? parsed.atmosphere.candidateTitle.trim().slice(0, 180) : null,
+            previousTitle: typeof parsed.atmosphere.previousTitle === "string" && parsed.atmosphere.previousTitle.trim()
+              ? parsed.atmosphere.previousTitle.trim().slice(0, 180) : null,
+          }
+        : null,
     };
   } catch {
-    return { version: 1, title: null, description: null, thumbnailAssetId: null };
+    return { version: 1, title: null, description: null, thumbnailAssetId: null, music: null, atmosphere: null };
   }
 }
 
@@ -127,15 +211,22 @@ function parseStyle(value: string): DebateMysteryHouseStyleV2 {
   ) {
     throw new Error("Saved mansion style is invalid.");
   }
+  const atmosphere = normalizeDebateMysteryAtmosphereContractV1(
+    parsed.atmosphere,
+    `${parsed.label} ${parsed.promptContract}`,
+  );
+  const fallbackMusicIdentity = deriveMansionMusicIdentityV1({
+    title: parsed.label,
+    houseStyleLabel: parsed.label,
+    houseStylePromptContract: parsed.promptContract,
+    atmosphere,
+  });
   return {
     version: 1,
     id: parsed.id,
     label: parsed.label,
     promptContract: parsed.promptContract,
-    atmosphere: normalizeDebateMysteryAtmosphereContractV1(
-      parsed.atmosphere,
-      `${parsed.label} ${parsed.promptContract}`,
-    ),
+    atmosphere,
     acousticThemePaletteId:
       typeof parsed.acousticThemePaletteId === "string" && parsed.acousticThemePaletteId.trim()
         ? parsed.acousticThemePaletteId.trim().slice(0, 200)
@@ -145,11 +236,11 @@ function parseStyle(value: string): DebateMysteryHouseStyleV2 {
       parsed.ambience && typeof parsed.ambience === "object" && parsed.ambience.version === 1
         ? parsed.ambience
         : null,
+    musicIdentity: normalizeMansionMusicIdentityV1(parsed.musicIdentity, fallbackMusicIdentity),
   };
 }
 
-function parseRooms(value: string): DebateMysteryMansionBundleRoomV1[] {
-  const parsed = JSON.parse(value) as unknown;
+function parseLegacyRooms(parsed: unknown): DebateMysteryMansionBundleRoomV1[] {
   if (!Array.isArray(parsed) || parsed.length === 0) {
     throw new Error("Saved mansion layout is invalid.");
   }
@@ -201,6 +292,29 @@ function parseRooms(value: string): DebateMysteryMansionBundleRoomV1[] {
   });
 }
 
+function parseLayoutV2(value: string): MansionLayoutV2 | null {
+  const parsed = JSON.parse(value) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) ||
+      (parsed as { version?: unknown }).version !== 2) return null;
+  try {
+    const layout = parsed as MansionLayoutV2;
+    const errors = validateMansionLayoutV2(layout, { requireEditorFloors: true });
+    if (errors.length > 0) throw new Error(errors.join("\n"));
+    return layout;
+  } catch (error) {
+    throw new Error(
+      `Saved MansionLayoutV2 is invalid: ${error instanceof Error ? error.message : "unknown layout error"}`,
+    );
+  }
+}
+
+function parseRooms(value: string): DebateMysteryMansionBundleRoomV1[] {
+  const layoutV2 = parseLayoutV2(value);
+  return layoutV2
+    ? mansionLayoutV2ToLegacyRooms(layoutV2) as DebateMysteryMansionBundleRoomV1[]
+    : parseLegacyRooms(JSON.parse(value) as unknown);
+}
+
 function aggregateAssets(
   db: DatabaseSync,
   userId: string,
@@ -208,11 +322,12 @@ function aggregateAssets(
 ): DebateMysteryMansionAssetV1[] {
   return (db.prepare(
     `SELECT assets.id, refs.role, refs.logical_id, assets.mime_type,
-            assets.sha256, assets.byte_size
+            assets.sha256, assets.byte_size, assets.duration_ms
        FROM debate_mystery_mansion_asset_refs AS refs
        JOIN debate_mystery_mansion_assets AS assets
          ON assets.id = refs.asset_id AND assets.user_id = refs.user_id
       WHERE refs.bundle_id = ? AND refs.user_id = ?
+        AND refs.logical_id NOT LIKE 'case:%'
       ORDER BY refs.role, refs.logical_id, assets.id`,
   ).all(bundleId, userId) as unknown as Array<{
     id: string;
@@ -221,6 +336,7 @@ function aggregateAssets(
     mime_type: DebateMysteryMansionAssetV1["mimeType"];
     sha256: string;
     byte_size: number;
+    duration_ms: number | null;
   }>).map((asset) => ({
     id: asset.id,
     role: asset.role,
@@ -228,6 +344,7 @@ function aggregateAssets(
     mimeType: asset.mime_type,
     sha256: asset.sha256,
     byteLength: asset.byte_size,
+    durationMs: asset.duration_ms,
   }));
 }
 
@@ -278,6 +395,27 @@ function summary(
   const assets = aggregateAssets(db, row.user_id, row.id);
   const portable = parsePortableMetadata(row.portable_metadata_json);
   const derivation = parseDerivationMetadata(row.derivation_metadata_json);
+  const libraryMetadata = parseLibraryMetadata(row.library_metadata_json);
+  const activeAsset = assets.find((asset) => asset.role === "music" && asset.logicalId === MANSION_MUSIC_ACTIVE_LOGICAL_ID_V1) ??
+    assets.find((asset) => asset.role === "music" && !asset.logicalId.startsWith("ambience:") &&
+      asset.logicalId !== MANSION_MUSIC_CANDIDATE_LOGICAL_ID_V1 &&
+      asset.logicalId !== MANSION_MUSIC_PREVIOUS_LOGICAL_ID_V1) ?? null;
+  const candidateAsset = assets.find(
+    (asset) => asset.role === "music" && asset.logicalId === MANSION_MUSIC_CANDIDATE_LOGICAL_ID_V1,
+  ) ?? null;
+  const previousAsset = assets.find(
+    (asset) => asset.role === "music" && asset.logicalId === MANSION_MUSIC_PREVIOUS_LOGICAL_ID_V1,
+  ) ?? null;
+  const activeAtmosphereAsset = assets.find(
+    (asset) => asset.role === "music" && asset.logicalId === MANSION_ATMOSPHERE_ACTIVE_LOGICAL_ID_V1,
+  ) ?? null;
+  const candidateAtmosphereAsset = assets.find(
+    (asset) => asset.role === "music" && asset.logicalId === MANSION_ATMOSPHERE_CANDIDATE_LOGICAL_ID_V1,
+  ) ?? null;
+  const previousAtmosphereAsset = assets.find(
+    (asset) => asset.role === "music" && asset.logicalId === MANSION_ATMOSPHERE_PREVIOUS_LOGICAL_ID_V1,
+  ) ?? null;
+  const parsedLayoutV2 = parseLayoutV2(row.layout_json);
   return {
     version: 1,
     id: row.id,
@@ -292,13 +430,151 @@ function summary(
     suspectCount: row.suspect_count,
     houseStyle,
     rooms: parseRooms(row.layout_json),
+    layoutV2: parsedLayoutV2
+      ? migrateLegacyRoomArtRefsToLayoutV2(parsedLayoutV2, assets)
+      : null,
     assets,
     portable,
     derivation,
     library: mansionLibraryPresentation(row, houseStyle, assets, portable),
+    music: {
+      version: 1,
+      identity: houseStyle.musicIdentity!,
+      active: activeAsset ? {
+        assetId: activeAsset.id,
+        title: libraryMetadata.music?.activeTitle ?? `${row.name} investigation theme`,
+        loop: libraryMetadata.music?.activeLoop ?? null,
+      } : null,
+      candidate: candidateAsset ? {
+        assetId: candidateAsset.id,
+        title: libraryMetadata.music?.candidateTitle ?? `${row.name} refracted preview`,
+        lens: libraryMetadata.music?.candidateLens ?? "signature",
+        loop: libraryMetadata.music?.candidateLoop ?? null,
+        validated: libraryMetadata.music?.candidateValidation !== "pending",
+      } : null,
+      previous: previousAsset ? {
+        assetId: previousAsset.id,
+        title: libraryMetadata.music?.previousTitle ?? `${row.name} previous theme`,
+        loop: libraryMetadata.music?.previousLoop ?? null,
+      } : null,
+    },
+    atmosphere: {
+      version: 1,
+      active: activeAtmosphereAsset ? {
+        assetId: activeAtmosphereAsset.id,
+        title: libraryMetadata.atmosphere?.activeTitle ?? `${row.name} atmosphere`,
+      } : null,
+      candidate: candidateAtmosphereAsset ? {
+        assetId: candidateAtmosphereAsset.id,
+        title: libraryMetadata.atmosphere?.candidateTitle ?? `${row.name} atmosphere preview`,
+      } : null,
+      previous: previousAtmosphereAsset ? {
+        assetId: previousAtmosphereAsset.id,
+        title: libraryMetadata.atmosphere?.previousTitle ?? `${row.name} previous atmosphere`,
+      } : null,
+    },
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function frozenMansionJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+/** Captures the exact spoiler-safe mansion input used by one Case Forge run.
+ * Callers persist this snapshot with the session before any asynchronous pass
+ * can observe a later Library edit. */
+export function freezeDebateMysteryMansionSnapshotV2(
+  mansion: DebateMysteryMansionBundleSummaryV1,
+  capturedAt = new Date().toISOString(),
+): DebateMysteryMansionSnapshotV2 {
+  const title = mansion.library?.overrides.title ??
+    mansion.library?.defaults.title ?? mansion.name;
+  const description = mansion.library?.overrides.description ??
+    mansion.library?.defaults.description ?? "A reusable PRISM Whodunnit mansion.";
+  const thumbnailAssetId = mansion.library?.overrides.thumbnailAssetId ??
+    mansion.library?.defaults.thumbnailAssetId ?? null;
+  const rooms = frozenMansionJson(mansion.rooms).map((room) => ({
+    ...room,
+    neighborIds: [...room.neighborIds].sort(),
+  })).sort((left, right) => left.id.localeCompare(right.id));
+  const layoutV2 = mansion.layoutV2
+    ? JSON.parse(canonicalMansionLayoutV2({
+        ...mansion.layoutV2,
+        // Candidates are mutable authoring previews. Only explicitly accepted
+        // room art belongs to a Case snapshot and its canonical layout hash.
+        roomArtCandidates: [],
+      })) as MansionLayoutV2
+    : null;
+  const transientAssetIds = new Set([
+    ...(mansion.layoutV2?.roomArtCandidates.flatMap((candidate) =>
+      candidate.assetId ? [candidate.assetId] : []) ?? []),
+    ...(mansion.music?.candidate ? [mansion.music.candidate.assetId] : []),
+    ...(mansion.music?.previous ? [mansion.music.previous.assetId] : []),
+    ...(mansion.atmosphere?.candidate ? [mansion.atmosphere.candidate.assetId] : []),
+    ...(mansion.atmosphere?.previous ? [mansion.atmosphere.previous.assetId] : []),
+  ]);
+  const presentation = {
+    version: 2 as const,
+    name: mansion.name,
+    title,
+    description,
+    thumbnailAssetId,
+    scaleClass: mansion.scaleClass,
+    houseStyle: frozenMansionJson(mansion.houseStyle),
+    investigationThemeLoop: frozenMansionJson(mansion.music?.active?.loop ?? null),
+    assets: frozenMansionJson(mansion.assets ?? [])
+      .filter((asset) => !transientAssetIds.has(asset.id))
+      .sort(
+      (left, right) => left.id.localeCompare(right.id),
+      ),
+  };
+  const layoutCanonical = layoutV2
+    ? canonicalMansionLayoutV2(layoutV2)
+    : canonicalPortablePackageJsonV1(rooms as unknown as PortablePackageJsonValueV1);
+  const presentationCanonical = canonicalPortablePackageJsonV1(
+    presentation as unknown as PortablePackageJsonValueV1,
+  );
+  return {
+    version: 2,
+    sourceBundleId: mansion.id,
+    rooms,
+    layoutV2,
+    layoutSha256: createHash("sha256").update(layoutCanonical).digest("hex"),
+    presentation,
+    presentationSha256: createHash("sha256").update(presentationCanonical).digest("hex"),
+    capturedAt,
+  };
+}
+
+/** Keeps every frozen presentation byte addressable for the life of the
+ * source bundle/case without copying encrypted content or exposing the case
+ * retention refs in Mansion Library summaries and exports. */
+export function retainDebateMysteryMansionSnapshotAssetsV2(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  snapshot: DebateMysteryMansionSnapshotV2,
+): void {
+  const insert = db.prepare(
+    `INSERT OR IGNORE INTO debate_mystery_mansion_asset_refs
+       (bundle_id, user_id, asset_id, role, logical_id, created_at)
+     SELECT refs.bundle_id, refs.user_id, refs.asset_id, refs.role, ?, ?
+       FROM debate_mystery_mansion_asset_refs AS refs
+      WHERE refs.bundle_id = ? AND refs.user_id = ? AND refs.asset_id = ?
+      LIMIT 1`,
+  );
+  const now = new Date().toISOString();
+  for (const asset of snapshot.presentation.assets) {
+    insert.run(
+      `case:${sessionId}:${asset.role}:${asset.id}`,
+      now,
+      snapshot.sourceBundleId,
+      userId,
+      asset.id,
+    );
+  }
 }
 
 function bundleRow(
@@ -427,6 +703,7 @@ export async function updateDebateMysteryMansionLibraryV1(
     title: title === undefined ? current.title : title,
     description: description === undefined ? current.description : description,
     thumbnailAssetId: current.thumbnailAssetId,
+    music: current.music,
   };
   const now = new Date().toISOString();
   db.exec("BEGIN IMMEDIATE");
@@ -469,7 +746,7 @@ export async function updateDebateMysteryMansionLibraryV1(
         next.thumbnailAssetId = stored.id;
       }
     }
-    const metadataJson = next.title || next.description || next.thumbnailAssetId
+    const metadataJson = next.title || next.description || next.thumbnailAssetId || next.music
       ? JSON.stringify(next)
       : null;
     const nextDerivation = thumbnail
@@ -521,6 +798,32 @@ function copiedMansionTitle(db: DatabaseSync, userId: string, sourceTitle: strin
   return `${base.slice(0, 168)} ${randomUUID().slice(0, 8)}`;
 }
 
+function migrateLegacyRoomArtRefsToLayoutV2(
+  layout: MansionLayoutV2,
+  assets: DebateMysteryMansionAssetV1[],
+): MansionLayoutV2 {
+  const roomAssetIdByLogicalId = new Map(
+    assets
+      .filter((asset) => asset.role === "room")
+      .map((asset) => [asset.logicalId, asset.id]),
+  );
+  return {
+    ...layout,
+    entities: layout.entities.map((entity) => entity.kind === "room"
+      ? {
+          ...entity,
+          // An accepted V2 plate is authoritative. The plain legacy ref is a
+          // compatibility fallback; a candidate is deliberately never read.
+          acceptedRoomAssetId:
+            entity.acceptedRoomAssetId ??
+            roomAssetIdByLogicalId.get(`${entity.id}:accepted-v2`) ??
+            roomAssetIdByLogicalId.get(entity.id) ??
+            null,
+        }
+      : entity),
+  };
+}
+
 /** Creates a tenant-owned derivative. Aggregate assets remain content-addressed
  * and shared by reference, while the source row and portable provenance stay
  * immutable. */
@@ -544,6 +847,26 @@ export function cloneDebateMysteryMansionBundleV1(
   const sourceDescription =
     sourcePresentation.overrides.description ?? sourcePresentation.defaults.description;
   const sourceThumbnail = sourcePresentation.overrides.thumbnailAssetId;
+  const sourceRooms = parseRooms(source.layout_json);
+  const sourceLayoutV2 = parseLayoutV2(source.layout_json);
+  const migratedLayoutV2 = sourceLayoutV2 ??
+    migrateLegacyRoomArtRefsToLayoutV2(
+      mansionLayoutV2EditorDerivativeFromLegacyRooms(sourceRooms, {
+        seed: `${sourceStyle.id}:${source.name}`,
+      }),
+      sourceAssets,
+    );
+  // A tiny legacy source may not contain enough semantic rooms to occupy two
+  // floors. Keep that derivative in readable V1 form so the editor can present
+  // the unresolved placement requirement and let the player add a room.
+  const derivativeLayoutV2 = validateMansionLayoutV2(migratedLayoutV2, {
+    suspectCount: source.suspect_count,
+    requireEditorFloors: true,
+  }).length === 0 ? migratedLayoutV2 : null;
+  const derivativeRooms = derivativeLayoutV2
+    ? mansionLayoutV2ToLegacyRooms(derivativeLayoutV2)
+    : sourceRooms;
+  const derivativeFloors = Math.max(...derivativeRooms.map((room) => room.floor));
   const id = randomUUID();
   const now = new Date().toISOString();
   const name = copiedMansionTitle(db, userId, sourceTitle);
@@ -563,6 +886,7 @@ export function cloneDebateMysteryMansionBundleV1(
     title: null,
     description: sourceDescription,
     thumbnailAssetId: sourceThumbnail,
+    music: parseLibraryMetadata(source.library_metadata_json).music,
   };
 
   db.exec("BEGIN IMMEDIATE");
@@ -578,11 +902,11 @@ export function cloneDebateMysteryMansionBundleV1(
       id,
       userId,
       name,
-      source.floors,
-      source.total_rooms,
+      derivativeFloors,
+      derivativeRooms.length,
       source.suspect_count,
       source.style_json,
-      source.layout_json,
+      derivativeLayoutV2 ? canonicalMansionLayoutV2(derivativeLayoutV2) : source.layout_json,
       JSON.stringify(library),
       JSON.stringify(derivation),
       now,
@@ -593,7 +917,8 @@ export function cloneDebateMysteryMansionBundleV1(
          (bundle_id, user_id, asset_id, role, logical_id, created_at)
        SELECT ?, user_id, asset_id, role, logical_id, ?
          FROM debate_mystery_mansion_asset_refs
-        WHERE bundle_id = ? AND user_id = ?`,
+        WHERE bundle_id = ? AND user_id = ?
+          AND logical_id NOT LIKE 'case:%'`,
     ).run(id, now, sourceBundleId, userId);
     db.prepare(
       `INSERT INTO debate_mystery_mansion_bundle_assets
@@ -612,6 +937,7 @@ export function cloneDebateMysteryMansionBundleV1(
 
 export interface UpdateDebateMysteryMansionTopologyInputV1 {
   rooms?: unknown;
+  layoutV2?: unknown;
 }
 
 function mansionEditorInteger(value: unknown, label: string): number {
@@ -674,6 +1000,104 @@ function normalizeMansionEditorRooms(
   return rooms;
 }
 
+function normalizeMansionEditorLayoutV2(
+  input: unknown,
+  existingRooms: DebateMysteryMansionBundleRoomV1[],
+  existingLayout: MansionLayoutV2 | null,
+  suspectCount: number,
+): MansionLayoutV2 {
+  let source: MansionLayoutV2;
+  try {
+    source = JSON.parse(JSON.stringify(input)) as MansionLayoutV2;
+    source = {
+      ...source,
+      entities: source.entities.map((entity) => entity.kind === "infill"
+        ? { ...entity, kind: "corridor" as const }
+        : entity),
+    };
+    const errors = validateMansionLayoutV2(source, {
+      suspectCount,
+      requireEditorFloors: true,
+    });
+    if (errors.length > 0) throw new Error(errors.join("\n"));
+  } catch (error) {
+    throw new HttpError(
+      400,
+      error instanceof Error ? error.message : "MansionLayoutV2 is invalid.",
+    );
+  }
+  const existingById = new Map(existingRooms.map((room) => [room.id, room]));
+  const existingV2ById = new Map(
+    (existingLayout?.entities ?? [])
+      .filter((entity): entity is MansionLayoutRoomV2 => entity.kind === "room")
+      .map((room) => [room.id, room]),
+  );
+  const knownTemplates = new Map(
+    DEBATE_MYSTERY_ROOM_TEMPLATES.map((template) => [template.id, template]),
+  );
+  const entities = source.entities.map((entity) => {
+    if (entity.kind !== "room") return { ...entity };
+    const existing = existingById.get(entity.id);
+    const existingV2 = existingV2ById.get(entity.id);
+    const template = knownTemplates.get(entity.templateId);
+    if (!template && existing?.templateId !== entity.templateId) {
+      throw new HttpError(400, `${entity.name || entity.id} uses an unsupported room type.`);
+    }
+    const name = entity.name.replace(/\s+/gu, " ").trim().slice(0, 80);
+    if (!name) throw new HttpError(400, `${entity.id} needs a room name.`);
+    const templateChanged = Boolean(existing && existing.templateId !== entity.templateId);
+    return {
+      ...entity,
+      name,
+      suspectSlotId: existingV2?.suspectSlotId ??
+        (existing?.assignedSuspectSeatId ? `slot:${entity.id}` : null),
+      emoji: template?.emoji ?? existing?.emoji ?? entity.emoji ?? "◇",
+      imageId: templateChanged ? null : existing?.imageId ?? null,
+      bundledAssetPath: templateChanged
+        ? template?.bundledAssetPath ?? null
+        : existing?.bundledAssetPath ?? template?.bundledAssetPath ?? null,
+      acceptedRoomAssetId: templateChanged
+        ? null
+        : existingV2?.acceptedRoomAssetId ?? null,
+    } satisfies MansionLayoutRoomV2;
+  });
+  const preservedCandidateIds = new Set(existingLayout?.roomArtCandidates.map((candidate) => candidate.id) ?? []);
+  const normalized: MansionLayoutV2 = {
+    ...source,
+    envelope: { columns: 16, rows: 12 },
+    entities,
+    doors: source.doors.map((door) => ({ ...door })),
+    verticalConnectors: source.verticalConnectors.map((connector) => ({ ...connector })),
+    placementAnchors: source.placementAnchors.map((anchor) => ({
+      ...anchor,
+      name: anchor.name.replace(/\s+/gu, " ").trim().slice(0, 80),
+      point: { ...anchor.point },
+    })),
+    lights: source.lights.map((light) => ({
+      ...light,
+      geometry: "points" in light.geometry
+        ? { ...light.geometry, points: light.geometry.points.map((point) => ({ ...point })) }
+        : { ...light.geometry },
+      cuePermission: {
+        version: 1,
+        mode: "mansion_static",
+        allowedCueIds: [...light.cuePermission.allowedCueIds],
+      },
+    })) as MansionLayoutV2["lights"],
+    // Candidate lifecycle is server-owned. Topology saves cannot forge a
+    // protected asset or accept a candidate by editing JSON.
+    roomArtCandidates: (existingLayout?.roomArtCandidates ?? [])
+      .filter((candidate) => preservedCandidateIds.has(candidate.id))
+      .map((candidate) => ({ ...candidate })),
+  };
+  const errors = validateMansionLayoutV2(normalized, {
+    suspectCount,
+    requireEditorFloors: true,
+  });
+  if (errors.length > 0) throw new HttpError(400, errors.join("\n"));
+  return normalized;
+}
+
 /** Saves only a previously cloned derivative; source packages and ordinary
  * installed mansions are deliberately read-only topology inputs. */
 export function updateDebateMysteryMansionTopologyV1(
@@ -686,9 +1110,22 @@ export function updateDebateMysteryMansionTopologyV1(
   if (!parseDerivationMetadata(row.derivation_metadata_json)) {
     throw new HttpError(409, "Duplicate this mansion before editing its plan.");
   }
-  if (input.rooms === undefined) throw new HttpError(400, "Choose a mansion plan to save.");
+  if (input.rooms === undefined && input.layoutV2 === undefined) {
+    throw new HttpError(400, "Choose a mansion plan to save.");
+  }
   const existingRooms = parseRooms(row.layout_json);
-  const rooms = normalizeMansionEditorRooms(input.rooms, existingRooms, row.suspect_count);
+  const existingLayoutV2 = parseLayoutV2(row.layout_json);
+  const layoutV2 = input.layoutV2 === undefined
+    ? null
+    : normalizeMansionEditorLayoutV2(
+        input.layoutV2,
+        existingRooms,
+        existingLayoutV2,
+        row.suspect_count,
+      );
+  const rooms = layoutV2
+    ? mansionLayoutV2ToLegacyRooms(layoutV2) as DebateMysteryMansionBundleRoomV1[]
+    : normalizeMansionEditorRooms(input.rooms, existingRooms, row.suspect_count);
   const nextById = new Map(rooms.map((room) => [room.id, room]));
   const invalidatedRoomIds = existingRooms
     .filter((room) => !nextById.has(room.id) || nextById.get(room.id)?.templateId !== room.templateId)
@@ -714,7 +1151,14 @@ export function updateDebateMysteryMansionTopologyV1(
       `UPDATE debate_mystery_mansion_bundles
           SET floors = ?, total_rooms = ?, layout_json = ?, updated_at = ?
         WHERE id = ? AND user_id = ?`,
-    ).run(floors, rooms.length, JSON.stringify(rooms), now, bundleId, userId);
+    ).run(
+      floors,
+      rooms.length,
+      layoutV2 ? canonicalMansionLayoutV2(layoutV2) : JSON.stringify(rooms),
+      now,
+      bundleId,
+      userId,
+    );
     db.prepare(
       `DELETE FROM debate_mystery_mansion_assets
         WHERE user_id = ? AND NOT EXISTS (
@@ -1084,6 +1528,9 @@ export function saveDebateMysteryMansionBundleV2(
     );
   }
   const rooms = bundleRoomsFromState(state, roomImageIdById);
+  const layoutV2 = mansionLayoutV2HousePlanFromLegacyRooms(rooms, {
+    seed: `${state.config.houseStyle.id}:${state.config.houseStyle.label}`,
+  });
   const imageIds = [...new Set(rooms.flatMap((room) => room.imageId ? [room.imageId] : []))];
   if (imageIds.length > 0) {
     const owned = db.prepare(
@@ -1128,7 +1575,7 @@ export function saveDebateMysteryMansionBundleV2(
       rooms.length,
       state.suspects.length,
       JSON.stringify(state.config.houseStyle),
-      JSON.stringify(rooms),
+      canonicalMansionLayoutV2(layoutV2),
       createdAt,
       now,
     );

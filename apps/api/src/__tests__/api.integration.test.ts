@@ -3550,15 +3550,15 @@ describe("API request integration", () => {
       `/api/botcast/shows/${encodeURIComponent(showId)}/episodes`,
       jsonInit({
         guestBotId: "signal-model-guest",
-        topic: "Route this recording through Ollama Cloud",
+        topic: "Migrate this stale Cloud recording choice",
         preferredProvider: "ollama_cloud",
         modelOverride: "minimax-m2.5:cloud",
       }),
     );
     const cloudPayload = await json(cloudResponse);
     assert.equal(cloudResponse.status, 201, JSON.stringify(cloudPayload));
-    assert.equal(cloudPayload.episode.provider, "ollama_cloud");
-    assert.equal(cloudPayload.episode.model, "minimax-m2.5:cloud");
+    assert.notEqual(cloudPayload.episode.provider, "ollama_cloud");
+    assert.notEqual(cloudPayload.episode.model, "minimax-m2.5:cloud");
     assert.equal(cloudPayload.episode.responseMode, "online");
 
     db.prepare("UPDATE users SET preferred_provider = 'local' WHERE id = ?").run(

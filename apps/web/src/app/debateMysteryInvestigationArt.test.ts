@@ -8,6 +8,7 @@ import {
   whodunnitBundledRoomArtPathForRoom,
   whodunnitInvestigationAvatarPresentation,
   whodunnitIllustratedRoomSubjectId,
+  whodunnitMansionRoomArtUrl,
   whodunnitSealedRoomArtUrl,
   whodunnitSavedRoomArtUrl,
   writeWhodunnitInvestigationArtStyle,
@@ -70,6 +71,22 @@ describe("Whodunnit investigation art style", () => {
       whodunnitSavedRoomArtUrl("jungle / room", "mosaic"),
       "/api/images/jungle%20%2F%20room/file?style=mosaic",
     );
+    const illustratedMansionRoom = whodunnitMansionRoomArtUrl(
+      "banyan / copy",
+      "dining / illustrated",
+      "illustrated",
+    );
+    const mosaicMansionRoom = whodunnitMansionRoomArtUrl(
+      "banyan / copy",
+      "dining / illustrated",
+      "mosaic",
+    );
+    assert.equal(
+      illustratedMansionRoom,
+      "/api/debates/mystery-mansions/banyan%20%2F%20copy/assets/dining%20%2F%20illustrated/file",
+    );
+    assert.equal(mosaicMansionRoom, `${illustratedMansionRoom}?style=mosaic`);
+    assert.notEqual(mosaicMansionRoom, illustratedMansionRoom);
   });
 
   it("wires the presentation-only toggle and leaves Court on its authored cameras", () => {

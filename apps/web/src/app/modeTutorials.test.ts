@@ -78,6 +78,25 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Derived marks an editable local copy/u);
     assert.match(step.body, /Duplicate & edit mansion preserves that source/u);
     assert.match(step.body, /full-screen Mansion Editor/u);
+    assert.match(step.body, /fixed 16 by 12 planner/u);
+    assert.match(step.body, /existing footprint and silhouette/u);
+    assert.match(step.body, /ninety-degree rotation/u);
+    assert.match(step.body, /disconnected drop reverts/u);
+    assert.match(step.body, /Corridors are traversable plan blocks/u);
+    assert.match(step.body, /decorative infill is visual only/u);
+    assert.match(step.body, /Shared-wall doors auto-center/u);
+    assert.match(step.body, /neighbor compatibility comes from this geometry/u);
+    assert.match(step.body, /drill into the Room Editor/u);
+    assert.match(step.body, /Mosaic is preview-only/u);
+    assert.match(step.body, /Choose Place anchor, then click the room image/u);
+    assert.match(step.body, /Each room can carry at most eight seeded fire, omni, directional, or freehand-neon lights/u);
+    assert.match(step.body, /drag to move, and use the edge handle to resize/u);
+    assert.match(step.body, /Reduced Motion freezes their deterministic animation/u);
+    assert.match(step.body, /static mansion presentation in this release/u);
+    assert.match(step.body, /Generate room-art candidate stages mansion-owned art/u);
+    assert.match(step.body, /Accept candidate/u);
+    assert.match(step.body, /LOCAL disables generation/u);
+    assert.match(step.body, /Floor 3 stays disabled until Floor 2 has at least four semantic rooms/u);
     assert.match(step.body, /functional foyer staircase/u);
     assert.match(step.body, /saved derivative becomes the mansion selected for this case/u);
     assert.match(step.body, /high-quality exterior establishing cover/u);
@@ -103,7 +122,7 @@ describe("mode tutorials", () => {
     assert.match(step.body, /encrypted case vault—not Images, Generated Images, or the Library/u);
     assert.match(step.body, /Save image is the explicit action/u);
     assert.match(step.body, /exterior establishing cover behind the title card/u);
-    assert.match(step.body, /opens inside the murder scene/u);
+    assert.match(step.body, /opens inside the central incident room/u);
     assert.match(step.body, /one finite visible sweep/u);
     assert.match(step.body, /one connected doorway at a time/u);
     assert.match(step.body, /Preparing your mystery to watch/u);
@@ -114,9 +133,20 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Choose Continue in background/u);
     assert.match(step.body, /other PRISM synthesis or start another Debate/u);
     assert.match(step.body, /only one Whodunnit at a time/u);
+    assert.match(step.body, /Installed Mansion details owns one Soundscape surface/u);
+    assert.match(step.body, /packaged layer or PRISM fallback/u);
+    assert.match(step.body, /brief noir phrases and long quiet intervals/u);
+    assert.match(step.body, /substantial near-silence and quiet loop boundaries/u);
+    assert.doesNotMatch(step.body, /Shadow, Pulse, or Atmosphere/u);
+    assert.match(step.body, /Use this version/u);
+    assert.match(step.body, /Soundscape surface with separate Music and Atmosphere tabs/u);
+    assert.match(step.body, /one seamless mansion-wide environmental bed/u);
+    assert.match(step.body, /LOCAL can play packaged and fallback music and ambience but never contacts ElevenLabs/u);
+    assert.match(step.body, /Settings → Assets opens separate Music, Effects, and Ambience libraries/u);
+    assert.match(step.body, /Settings → Storage remains byte accounting and protected cleanup/u);
     assert.match(step.body, /a little after ten/u);
     assert.match(step.body, /wrong place at the wrong time/u);
-    assert.match(step.body, /Accomplices are reserved for Mastermind/u);
+    assert.match(step.body, /explicit accomplice or conspiracy motif can bind a second responsible party/u);
     assert.match(step.body, /room art defaults to Mosaic/u);
     assert.match(step.body, /24-color 320×180 logical plate reconstructed at 1600×900/u);
     assert.match(step.body, /Upgrade art · ONLINE/u);
@@ -160,7 +190,7 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Present is the only evidence or sworn-testimony interaction/u);
     assert.match(step.body, /correct record is shown to the correct suspect/u);
     assert.match(step.body, /wrong record or recipient unlocks nothing/u);
-    assert.match(step.body, /Theory Board opens after the crime-scene briefing/u);
+    assert.match(step.body, /Theory Board opens after the incident-scene briefing/u);
     assert.match(step.body, /weakens the case rather than blocking trial/u);
     assert.match(step.body, /directs the Court camera for you/u);
     assert.match(step.body, /wide Forum view/u);
@@ -175,6 +205,7 @@ describe("mode tutorials", () => {
     assert.match(step.body, /costs credibility/u);
     assert.match(step.body, /Retry current witness restores/u);
     assert.match(step.body, /shared Powers/u);
+    assert.match(step.body, /GUILTY or NOT GUILTY for each filed defendant/u);
     assert.match(step.body, /truth\/proof grade and juror breakdown/u);
     assert.match(step.body, /Reduced Motion/u);
     assert.match(step.body, /Archive and replay reuse the persisted result without another model or voice call/u);
@@ -853,6 +884,9 @@ describe("mode tutorials", () => {
     assert.match(copy, /Wield Prism onto Cast in the left rail to reseat the proceeding/u);
     assert.match(copy, /Wield Prism onto Evidence in the left rail to replace the optional exhibits/u);
     assert.match(copy, /Wield Prism onto Stage layout to open the lab with a shuffled preview cast/u);
+    assert.match(copy, /Main is also the Whodunnit courtroom establishing view/u);
+    assert.match(copy, /Table and Witness switch/u);
+    assert.match(copy, /fourth shuffled Library bot/u);
     assert.match(copy, /without inventing or erasing history/u);
     assert.match(copy, /Tune the room keeps the proceeding preset/u);
     assert.match(copy, /always visible while you shape the Debate/u);
@@ -892,6 +926,10 @@ describe("mode tutorials", () => {
     assert.match(copy, /Generate all assets before the debate automates artwork/u);
     assert.match(copy, /Each proceeding starts as a compact cast, title, motion, and state summary/u);
     assert.match(copy, /select it to reveal the complete metadata, synopsis, Assets, setup reuse/u);
+    assert.match(
+      copy,
+      /color-coded shelves for Forum proceedings, Turnabout trials, and Whodunnit cases/u,
+    );
     assert.match(copy, /server-owned soft queue immediately/u);
     assert.match(copy, /switch to Signal or any other applet/u);
     assert.match(copy, /attaches directly to its saved Debate exhibit/u);
@@ -1217,15 +1255,11 @@ describe("mode tutorials", () => {
     assert.match(copy, /saved Auto routing priorities run first/u);
     assert.match(copy, /ONLINE ends with one bundled local attempt/u);
     assert.match(copy, /LOCAL evaluates only local Ollama models/u);
-    assert.match(
-      copy,
-      /ONLINE evaluates available Ollama Cloud, OpenAI, and Anthropic models/u,
-    );
+    assert.match(copy, /ONLINE evaluates available OpenAI and Anthropic models/u);
+    assert.match(copy, /Ollama Cloud stays in the separate ONLINE Background model picker/u);
     assert.match(copy, /Refresh models re-runs discovery at runtime/u);
-    assert.match(
-      copy,
-      /ONLINE Auto provider triangle: OpenAI, Anthropic, and Ollama Cloud sit at the vertices/u,
-    );
+    assert.match(copy, /ONLINE Auto provider lean slider/u);
+    assert.doesNotMatch(copy, /ONLINE Auto provider triangle/u);
     assert.match(copy, /Background model keeps two saved Ollama lanes/u);
     assert.match(
       copy,

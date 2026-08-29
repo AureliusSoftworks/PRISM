@@ -2,8 +2,8 @@
 
 import { useState, type ChangeEvent, type JSX } from "react";
 import type {
-  DebateMysteryMansionBundleRoomV1,
   DebateMysteryMansionBundleSummaryV1,
+  MansionLayoutV2,
 } from "@localai/shared";
 import {
   installedMansionOriginV1,
@@ -13,6 +13,8 @@ import {
 } from "./installedMansionLibrary";
 import WhodunnitSetupDialog from "./WhodunnitSetupDialog";
 import MansionEditorDialog from "./MansionEditorDialog";
+import { SanctumAudioPlayer } from "./SanctumAudioPlayer";
+import { mysteryMansionAmbienceAssetV1 } from "./debateMysteryMansionAmbience";
 import styles from "./debateMystery.module.css";
 
 interface MansionEditorDraftV1 {
@@ -30,6 +32,8 @@ export interface InstalledMansionLibraryProps {
   mansions: DebateMysteryMansionBundleSummaryV1[];
   selectedMansionId: string;
   busy: boolean;
+  responseMode: "local" | "online";
+  audioVolume: number;
   exportPassword: string;
   onExportPasswordChange: (value: string) => void;
   onSelect: (mansionId: string) => void;
@@ -43,10 +47,31 @@ export interface InstalledMansionLibraryProps {
   ) => Promise<DebateMysteryMansionBundleSummaryV1 | null>;
   onSaveTopology: (
     mansion: DebateMysteryMansionBundleSummaryV1,
-    rooms: DebateMysteryMansionBundleRoomV1[],
+    layoutV2: MansionLayoutV2,
+  ) => Promise<DebateMysteryMansionBundleSummaryV1 | null>;
+  onGenerateRoomArt: (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+    roomId: string,
+  ) => Promise<DebateMysteryMansionBundleSummaryV1 | null>;
+  onAcceptRoomArt: (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+    roomId: string,
+  ) => Promise<DebateMysteryMansionBundleSummaryV1 | null>;
+  onDiscardRoomArt: (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+    roomId: string,
   ) => Promise<DebateMysteryMansionBundleSummaryV1 | null>;
   onExport: (mansion: DebateMysteryMansionBundleSummaryV1) => void;
-  onPlayTheme: (mansion: DebateMysteryMansionBundleSummaryV1) => void;
+  onGenerateTheme: (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+  ) => Promise<boolean>;
+  onAcceptTheme: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<boolean>;
+  onDiscardTheme: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<boolean>;
+  onUndoTheme: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<boolean>;
+  onGenerateAtmosphere: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<boolean>;
+  onAcceptAtmosphere: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<boolean>;
+  onDiscardAtmosphere: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<boolean>;
+  onUndoAtmosphere: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<boolean>;
   onRemove: (mansion: DebateMysteryMansionBundleSummaryV1) => void;
 }
 
@@ -72,6 +97,8 @@ export default function InstalledMansionLibrary({
   mansions,
   selectedMansionId,
   busy,
+  responseMode,
+  audioVolume,
   exportPassword,
   onExportPasswordChange,
   onSelect,
@@ -79,13 +106,24 @@ export default function InstalledMansionLibrary({
   onUpdate,
   onClone,
   onSaveTopology,
+  onGenerateRoomArt,
+  onAcceptRoomArt,
+  onDiscardRoomArt,
   onExport,
-  onPlayTheme,
+  onGenerateTheme,
+  onAcceptTheme,
+  onDiscardTheme,
+  onUndoTheme,
+  onGenerateAtmosphere,
+  onAcceptAtmosphere,
+  onDiscardAtmosphere,
+  onUndoAtmosphere,
   onRemove,
 }: InstalledMansionLibraryProps): JSX.Element {
   const [editor, setEditor] = useState<MansionEditorDraftV1 | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [editorSaving, setEditorSaving] = useState(false);
+  const [soundscapeTab, setSoundscapeTab] = useState<"music" | "atmosphere">("music");
   const [removeConfirmation, setRemoveConfirmation] =
     useState<DebateMysteryMansionBundleSummaryV1 | null>(null);
   const [topologyMansion, setTopologyMansion] =
@@ -108,6 +146,7 @@ export default function InstalledMansionLibrary({
       thumbnailAction: "keep",
       thumbnailDataUrl: null,
     });
+    setSoundscapeTab("music");
     setEditorError(null);
   };
 
@@ -172,6 +211,18 @@ export default function InstalledMansionLibrary({
             : editingPresentation.thumbnailAssetId,
         )
     : null;
+  const themePreview = editingMansion?.music?.candidate ?? editingMansion?.music?.active ?? null;
+  const themePreviewSource = editingMansion && themePreview
+    ? `/api/debates/mystery-mansions/${encodeURIComponent(editingMansion.id)}/assets/${encodeURIComponent(themePreview.assetId)}/file`
+    : "/audio/debate/whodunnit/the-midnight-clue.mp3";
+  const sharedAtmospherePreview = editingMansion
+    ? mysteryMansionAmbienceAssetV1(editingMansion.houseStyle, editingMansion.id)
+    : null;
+  const atmosphereTrack = editingMansion?.atmosphere?.candidate ?? editingMansion?.atmosphere?.active ?? null;
+  const atmospherePreviewSource = editingMansion && atmosphereTrack
+    ? `/api/debates/mystery-mansions/${encodeURIComponent(editingMansion.id)}/assets/${encodeURIComponent(atmosphereTrack.assetId)}/file`
+    : sharedAtmospherePreview?.url ?? null;
+  const ambienceManifest = editingMansion?.houseStyle.ambience ?? null;
 
   return (
     <section
@@ -327,6 +378,131 @@ export default function InstalledMansionLibrary({
               </div>
             </div>
           </div>
+          <section
+            className={styles.installedMansionMusic}
+            data-tutorial-target="whodunnit-mansion-soundscape"
+          >
+            <header className={styles.installedMansionSoundscapeHeader}>
+              <div>
+                <small>Mansion soundscape</small>
+                <h4>Music and atmosphere</h4>
+                <p>Audition the score separately from the continuous environmental bed and room acoustics.</p>
+              </div>
+            </header>
+            <div className={styles.installedMansionSoundscapeTabs} role="tablist" aria-label="Mansion soundscape">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={soundscapeTab === "music"}
+                data-active={soundscapeTab === "music" ? "true" : undefined}
+                onClick={() => setSoundscapeTab("music")}
+              >
+                Music
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={soundscapeTab === "atmosphere"}
+                data-active={soundscapeTab === "atmosphere" ? "true" : undefined}
+                onClick={() => setSoundscapeTab("atmosphere")}
+              >
+                Atmosphere
+              </button>
+            </div>
+            {soundscapeTab === "music" ? (
+              <div className={styles.installedMansionSoundscapePanel} role="tabpanel" data-soundscape-panel="music">
+                <header>
+                  <div>
+                    <small>Furniture music</small>
+                    <h4>{editingMansion.music?.candidate ? "Music preview" : editingMansion.music?.active ? "Packaged investigation theme" : "Bundled PRISM fallback"}</h4>
+                    <p>Instrument-only noir phrases emerge between long quiet intervals. Environmental sound remains in Atmosphere.</p>
+                  </div>
+                  {editingMansion.music?.candidate ? <span>Not active yet</span> : null}
+                </header>
+                <SanctumAudioPlayer
+                  src={themePreviewSource}
+                  label={themePreview?.title ?? "The Midnight Clue"}
+                  kicker={editingMansion.music?.candidate ? "Music preview" : editingMansion.music?.active ? "Mansion theme" : "PRISM fallback"}
+                  volume={audioVolume}
+                />
+                {editingMansion.music?.candidate ? (
+                  <div className={styles.installedMansionMusicDecision}>
+                    <button type="button" disabled={busy || editorSaving} onClick={() => void onAcceptTheme(editingMansion)}>Use this version</button>
+                    <button type="button" disabled={busy || editorSaving} onClick={() => void onDiscardTheme(editingMansion)}>Discard</button>
+                  </div>
+                ) : (
+                  <div className={styles.installedMansionMusicControls}>
+                    <button
+                      type="button"
+                      disabled={busy || editorSaving || responseMode === "local"}
+                      onClick={() => void onGenerateTheme(editingMansion)}
+                    >
+                      {editingMansion.music?.active ? "Resynthesize music" : "Synthesize music"}
+                    </button>
+                    {editingMansion.music?.previous ? (
+                      <button type="button" disabled={busy || editorSaving} onClick={() => void onUndoTheme(editingMansion)}>Undo previous version</button>
+                    ) : null}
+                  </div>
+                )}
+                <small className={styles.installedMansionMusicPrivacy}>
+                  {responseMode === "local"
+                    ? "LOCAL stays fully offline. You can audition packaged or bundled music; switch to ONLINE to synthesize."
+                    : "ONLINE synthesis uses ElevenLabs Music. Instrument-only versions remain previews until you explicitly accept them."}
+                </small>
+              </div>
+            ) : (
+              <div className={styles.installedMansionSoundscapePanel} role="tabpanel" data-soundscape-panel="atmosphere">
+                <header>
+                  <div>
+                    <small>Continuous atmosphere</small>
+                    <h4>{editingMansion.atmosphere?.candidate ? "Atmosphere preview" : editingMansion.atmosphere?.active || ambienceManifest?.bespokeSynthesisRequested ? "Mansion identity bed" : "Bundled theme palette"}</h4>
+                    <p>The world bed continues across rooms while exposure, filtering, emitters, and speech ducking crossfade around it.</p>
+                  </div>
+                  <span>{ambienceManifest ? `${ambienceManifest.roomProfiles.length} room profiles` : "Automatic"}</span>
+                </header>
+                {atmospherePreviewSource ? (
+                  <SanctumAudioPlayer
+                    src={atmospherePreviewSource}
+                    label={atmosphereTrack?.title ?? `${editingMansion.houseStyle.atmosphere.weather} · ${editingMansion.houseStyle.atmosphere.timeOfDay}`}
+                    kicker={editingMansion.atmosphere?.candidate ? "Atmosphere preview" : editingMansion.atmosphere?.active || ambienceManifest?.bespokeSynthesisRequested ? "Mansion atmosphere" : "PRISM acoustic library"}
+                    volume={audioVolume}
+                  />
+                ) : (
+                  <p className={styles.installedMansionAtmosphereFallback}>Silence is the safe fallback when no compatible environmental bed is available.</p>
+                )}
+                <dl className={styles.installedMansionAtmosphereFacts}>
+                  <div><dt>Palette</dt><dd>{editingMansion.houseStyle.acousticThemePaletteId}</dd></div>
+                  <div><dt>World</dt><dd>{editingMansion.houseStyle.atmosphere.exteriorSetting}</dd></div>
+                  <div><dt>Weather</dt><dd>{editingMansion.houseStyle.atmosphere.weather}</dd></div>
+                  <div><dt>Room treatment</dt><dd>{ambienceManifest ? `${ambienceManifest.crossfade.roomTransitionMs} ms crossfade · speech duck ${Math.round(ambienceManifest.speechDucking.gain * 100)}%` : "Derived by room type and exposure"}</dd></div>
+                </dl>
+                {editingMansion.atmosphere?.candidate ? (
+                  <div className={styles.installedMansionMusicDecision}>
+                    <button type="button" disabled={busy || editorSaving} onClick={() => void onAcceptAtmosphere(editingMansion)}>Use this version</button>
+                    <button type="button" disabled={busy || editorSaving} onClick={() => void onDiscardAtmosphere(editingMansion)}>Discard</button>
+                  </div>
+                ) : (
+                  <div className={styles.installedMansionMusicControls}>
+                    <button
+                      type="button"
+                      disabled={busy || editorSaving || responseMode === "local"}
+                      onClick={() => void onGenerateAtmosphere(editingMansion)}
+                    >
+                      {editingMansion.atmosphere?.active ? "Resynthesize atmosphere" : "Synthesize atmosphere"}
+                    </button>
+                    {editingMansion.atmosphere?.previous ? (
+                      <button type="button" disabled={busy || editorSaving} onClick={() => void onUndoAtmosphere(editingMansion)}>Undo previous version</button>
+                    ) : null}
+                  </div>
+                )}
+                <small className={styles.installedMansionMusicPrivacy}>
+                  {responseMode === "local"
+                    ? "LOCAL uses packaged or bundled beds and procedural room mixing without contacting an online generator."
+                    : "ONLINE can synthesize one seamless mansion-wide bed. Only non-semantic environmental layers may play automatically; clue-bearing sounds require a sealed stage cue."}
+                </small>
+              </div>
+            )}
+          </section>
           {editorError ? <p className={styles.installedMansionEditorError} role="alert">{editorError}</p> : null}
           <div className={styles.installedMansionEditorFooter}>
             <div>
@@ -341,7 +517,6 @@ export default function InstalledMansionLibrary({
               </button>
               <label>Optional export password<input type="password" value={exportPassword} autoComplete="new-password" disabled={editorSaving} onChange={(event) => onExportPasswordChange(event.currentTarget.value)} /></label>
               <button type="button" disabled={busy || editorSaving || editingMansion.portable?.license.allowsRedistribution === false} onClick={() => onExport(editingMansion)}>Export Mansion</button>
-              <button type="button" disabled={busy || editorSaving || !editingMansion.assets?.some((asset) => asset.role === "music")} onClick={() => onPlayTheme(editingMansion)}>Play theme</button>
               <button
                 type="button"
                 className={styles.savedMansionRemove}
@@ -362,8 +537,12 @@ export default function InstalledMansionLibrary({
           theme={theme}
           mansion={topologyMansion}
           busy={busy}
+          responseMode={responseMode}
           onClose={() => setTopologyMansion(null)}
           onSave={onSaveTopology}
+          onGenerateRoomArt={onGenerateRoomArt}
+          onAcceptRoomArt={onAcceptRoomArt}
+          onDiscardRoomArt={onDiscardRoomArt}
         />
       ) : null}
 

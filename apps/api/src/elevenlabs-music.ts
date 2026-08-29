@@ -9,6 +9,8 @@ export const SIGNAL_ELEVENLABS_MUSIC_MODEL = "music_v2";
 export const COFFEE_ELEVENLABS_MUSIC_MODEL = "music_v2";
 export const COFFEE_SOUNDTRACK_DURATION_MS = 90_000;
 export const COFFEE_SOUNDTRACK_MAX_BYTES = 12 * 1024 * 1024;
+export const MANSION_SOUNDTRACK_DURATION_MS = 120_000;
+export const MANSION_SOUNDTRACK_MAX_BYTES = 16 * 1024 * 1024;
 const SIGNAL_INTRO_AUDIO_MAX_BYTES = 4 * 1024 * 1024;
 
 export class ElevenLabsMusicError extends Error {
@@ -301,9 +303,14 @@ export async function requestSignalElevenLabsMusic(args: {
 export async function requestCoffeeGroupElevenLabsMusic(args: {
   apiKey: string;
   prompt: string;
+  durationMs?: number;
+  maxBytes?: number;
+  unavailableMessage?: string;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }): Promise<{ audioBytes: Buffer; contentType: string; requestId: string | null }> {
+  const durationMs = Math.max(3_000, Math.min(600_000, args.durationMs ?? COFFEE_SOUNDTRACK_DURATION_MS));
+  const maxBytes = Math.max(1, args.maxBytes ?? COFFEE_SOUNDTRACK_MAX_BYTES);
   const response = await (args.fetchImpl ?? fetch)(
     "https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192",
     {
@@ -316,7 +323,7 @@ export async function requestCoffeeGroupElevenLabsMusic(args: {
       body: JSON.stringify({
         prompt: args.prompt,
         model_id: COFFEE_ELEVENLABS_MUSIC_MODEL,
-        music_length_ms: COFFEE_SOUNDTRACK_DURATION_MS,
+        music_length_ms: durationMs,
         force_instrumental: true,
       }),
     },
@@ -324,17 +331,17 @@ export async function requestCoffeeGroupElevenLabsMusic(args: {
   if (!response.ok) {
     throw await musicError(
       response,
-      "ElevenLabs Music is unavailable; bundled Coffee Jazz is playing.",
+      args.unavailableMessage ?? "ElevenLabs Music is unavailable; bundled Coffee Jazz is playing.",
     );
   }
   const announcedLength = Number(response.headers.get("content-length") ?? 0);
   if (
     Number.isFinite(announcedLength) &&
-    announcedLength > COFFEE_SOUNDTRACK_MAX_BYTES
+    announcedLength > maxBytes
   ) {
     throw new ElevenLabsMusicError(
       502,
-      "ElevenLabs returned oversized Coffee music.",
+      "ElevenLabs returned oversized music.",
     );
   }
   const audioBytes = Buffer.from(await response.arrayBuffer());
@@ -344,12 +351,12 @@ export async function requestCoffeeGroupElevenLabsMusic(args: {
     ?.trim();
   if (
     audioBytes.length === 0 ||
-    audioBytes.length > COFFEE_SOUNDTRACK_MAX_BYTES ||
+    audioBytes.length > maxBytes ||
     !contentType?.startsWith("audio/")
   ) {
     throw new ElevenLabsMusicError(
       502,
-      "ElevenLabs returned invalid Coffee music.",
+      "ElevenLabs returned invalid music.",
     );
   }
   return {

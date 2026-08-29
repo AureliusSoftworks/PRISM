@@ -34,7 +34,10 @@ test("keeps Models focused on background work, recovery, and advanced visibility
     /getAuxiliaryProvider\(\s*memoryUser\.prism_default_llm_model,\s*dualOllamaWorkloadOptions\(memoryUser\)/u,
   );
   assert.match(page, /Ollama Cloud is unavailable[\s\S]{0,220}safely falls back/u);
-  assert.match(page, /data-tutorial-target="online-auto-provider-triangle"/u);
+  assert.match(page, /Only runnable OpenAI and Anthropic models can run here/u);
+  assert.match(page, /data-tutorial-target="online-auto-provider-bias"/u);
+  assert.match(page, /ONLINE Auto provider lean/u);
+  assert.match(page, /formatOnlineAutoProviderBiasLabel/u);
   assert.match(page, /<span>Auto routing priorities<\/span>/u);
   assert.match(page, /<span>Manage model list<\/span>/u);
   assert.match(page, /Refresh models/u);
@@ -57,17 +60,29 @@ test("keeps Models focused on background work, recovery, and advanced visibility
   assert.doesNotMatch(page, /image panel defaults/u);
 });
 
-test("includes enabled Ollama Cloud catalog models in normal ONLINE pickers", () => {
+test("keeps Ollama Cloud out of normal ONLINE pickers", () => {
   const pickerOptions = page.slice(
     page.indexOf("function onlineModelOptionsForPicker"),
     page.indexOf("function withOnlineProviderHostLabels"),
   );
-  assert.match(
+  assert.doesNotMatch(
     pickerOptions,
     /chatModelOptionsForProvider\(catalog, settings, "ollama_cloud"\)/u,
   );
   assert.match(page, /id\.startsWith\("ollama-cloud-direct:"\)/u);
   assert.match(page, /model\.provider === provider/u);
+});
+
+test("keeps enabled Cloud models in the separate background picker", () => {
+  const backgroundOptions = page.slice(
+    page.indexOf("const prismCloudLlmCallOptions"),
+    page.indexOf("function renderZenAtmosphereModelRow"),
+  );
+  assert.match(backgroundOptions, /textModelOptionsForProvider\(modelCatalog, settings, "ollama_cloud"\)/u);
+  assert.match(backgroundOptions, /!model\.disabledReason/u);
+  assert.doesNotMatch(backgroundOptions, /hiddenManualModelIds/u);
+  assert.match(page, /ONLINE background/u);
+  assert.match(page, /enabled for background/u);
 });
 
 test("exposes an account-scoped Ollama Cloud key without returning plaintext", () => {
@@ -98,6 +113,11 @@ test("keeps model enablement and manual picker visibility independent", () => {
   );
   assert.match(page, /hiddenGlobalPickerModelIds: Array\.from\(hidden\)/u);
   assert.match(page, /hiddenBotModelIds: Array\.from\(current\)/u);
+  const cloudVisibility = page.slice(
+    page.indexOf('group.id === "ollama_cloud"'),
+    page.indexOf("const isTextModel", page.indexOf('group.id === "ollama_cloud"')),
+  );
+  assert.match(cloudVisibility, /canShowInGlobalPicker/u);
   const pickerVisibilitySetter = page.slice(
     page.indexOf("function setGlobalPickerModelVisible"),
     page.indexOf("async function saveTextModelDisplayName"),

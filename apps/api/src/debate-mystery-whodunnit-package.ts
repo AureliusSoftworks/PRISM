@@ -3,10 +3,14 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import {
   canonicalPortablePackageJsonV1,
+  canonicalMansionLayoutV2,
   portableMysteryPackageMajorIsSupportedV1,
+  remapMansionLayoutV2Ids,
   validateDebateMysteryDialogueGraphV2,
   validateWhodunnitPackageManifestV1,
   type MansionPackageHeaderV1,
+  type MansionLayoutV2,
+  type DebateMysteryMansionSnapshotV2,
   type PortableMansionInstallationMetadataV1,
   type PortableMysteryAssetDescriptorV1,
   type PortableMysteryEncryptionModeV1,
@@ -16,6 +20,10 @@ import {
 } from "@localai/shared";
 import { unzipSync, zipSync } from "fflate";
 import { getDebateSession } from "./debate.ts";
+import {
+  getDebateMysteryMansionBundleV2,
+  retainDebateMysteryMansionSnapshotAssetsV2,
+} from "./debate-mystery-mansion-bundles.ts";
 import {
   decodeInternalMansionPackageV1,
   encodeInternalMansionPackageV1,
@@ -40,6 +48,9 @@ const MAX_INTERNAL_ARCHIVE_BYTES = 256 * 1024 * 1024;
 const FORBIDDEN_PUBLIC_KEYS = new Set([
   "sealedCulpritSeatId",
   "sealedAccompliceSeatId",
+  "sealedResponsibleSeatIds",
+  "responsibleSeatIds",
+  "incidentPlan",
   "privateCase",
   "proofContract",
   "evidenceRoomIdById",
@@ -111,6 +122,23 @@ function asRecord(value: unknown, label: string): Record<string, PortablePackage
     throw new PortableWhodunnitPackageError(`${label} is invalid.`);
   }
   return value as Record<string, PortablePackageJsonValueV1>;
+}
+
+function refreshPortableMansionSnapshotHashes(
+  holder: Record<string, PortablePackageJsonValueV1>,
+): void {
+  const config = holder.config;
+  if (!config || typeof config !== "object" || Array.isArray(config)) return;
+  const snapshot = config.mansionSnapshot;
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot) || snapshot.version !== 2) return;
+  const layoutV2 = snapshot.layoutV2;
+  snapshot.layoutSha256 = layoutV2 && typeof layoutV2 === "object" && !Array.isArray(layoutV2)
+    ? sha256(canonicalMansionLayoutV2(layoutV2 as unknown as MansionLayoutV2))
+    : sha256(canonicalPortablePackageJsonV1(snapshot.rooms ?? []));
+  const presentation = snapshot.presentation;
+  if (presentation && typeof presentation === "object" && !Array.isArray(presentation)) {
+    snapshot.presentationSha256 = sha256(canonicalPortablePackageJsonV1(presentation));
+  }
 }
 
 function deepForbiddenKeys(value: unknown, forbidden: ReadonlySet<string>, path = "value"): string[] {
@@ -370,6 +398,7 @@ export async function exportPortableWhodunnitPackageV1(args: {
   const mansion = decodeInternalMansionPackageV1(exportInternalMansionPackageFromDbV1({
     db: args.db, userKey: args.userKey, userId: args.userId, bundleId,
     prismVersion: args.prismVersion, creatorName: args.creatorName,
+    snapshot: sourceSession.formatState.config.mansionSnapshot,
   }));
   const assets = new Map<string, Uint8Array>();
   const descriptors: PortableMysteryAssetDescriptorV1[] = [];
@@ -398,6 +427,13 @@ export async function exportPortableWhodunnitPackageV1(args: {
       roomAssetId: room.roomAssetId ? mansionAssetIdMap.get(room.roomAssetId) ?? null : null,
       propAssetIds: room.propAssetIds.map((id) => mansionAssetIdMap.get(id)!).filter(Boolean),
     })),
+    layoutV2: mansion.manifest.layoutV2
+      ? JSON.parse(canonicalMansionLayoutV2(remapMansionLayoutV2Ids(
+          mansion.manifest.layoutV2,
+          (id) => id,
+          (id) => mansionAssetIdMap.get(id) ?? null,
+        ))) as MansionLayoutV2
+      : undefined,
     previewAssetId: mansion.manifest.previewAssetId
       ? mansionAssetIdMap.get(mansion.manifest.previewAssetId) ?? null : null,
     investigationThemeAssetId: mansion.manifest.investigationThemeAssetId
@@ -414,10 +450,8 @@ export async function exportPortableWhodunnitPackageV1(args: {
         }
       : mansion.manifest.ambience,
   };
-  const sourceLayout = args.db.prepare(
-    "SELECT layout_json FROM debate_mystery_mansion_bundles WHERE id = ? AND user_id = ?",
-  ).get(bundleId, args.userId) as { layout_json: string };
-  const sourceRooms = JSON.parse(sourceLayout.layout_json) as Array<{ id: string }>;
+  const sourceRooms = sourceSession.formatState.config.mansionSnapshot?.rooms ??
+    getDebateMysteryMansionBundleV2(args.db, args.userId, bundleId).rooms;
   const portableReplacements = new Map<string, string>([
     [args.sessionId, "portable-session"],
     [job.id, "portable-job"],
@@ -427,6 +461,13 @@ export async function exportPortableWhodunnitPackageV1(args: {
     const portableRoom = mansionManifest.rooms[index];
     if (portableRoom) portableReplacements.set(room.id, portableRoom.id);
   });
+  for (const snapshotAsset of sourceSession.formatState.config.mansionSnapshot?.presentation.assets ?? []) {
+    const mansionAsset = mansion.manifest.assets.find(
+      (asset) => asset.sha256 === snapshotAsset.sha256 && asset.mimeType === snapshotAsset.mimeType,
+    );
+    const portableAssetId = mansionAsset ? mansionAssetIdMap.get(mansionAsset.id) : null;
+    if (portableAssetId) portableReplacements.set(snapshotAsset.id, portableAssetId);
+  }
   const sourceBotIds = new Set<string>();
   const rawConfig = rawPrivateCase.config;
   if (rawConfig && typeof rawConfig === "object" && !Array.isArray(rawConfig)) {
@@ -444,6 +485,7 @@ export async function exportPortableWhodunnitPackageV1(args: {
     sanitizeBotSnapshots(replaceStrings(asJson(rawPrivateCase), portableReplacements)),
     "Portable private case",
   );
+  refreshPortableMansionSnapshotHashes(privateCase);
   // Portable replay owns only the performed transcript clips. Even a legacy
   // eager source becomes sparse after export so unused branches do not keep
   // consuming storage on every recipient installation.
@@ -456,10 +498,12 @@ export async function exportPortableWhodunnitPackageV1(args: {
     sanitizeBotSnapshots(replaceStrings(asJson(rawCompiledPublicState), portableReplacements)),
     "Portable compiled public state",
   );
+  refreshPortableMansionSnapshotHashes(compiledPublicState);
   const completedState = asRecord(
     sanitizeBotSnapshots(replaceStrings(asJson(sourceSession.formatState), portableReplacements)),
     "Portable completed playthrough state",
   );
+  refreshPortableMansionSnapshotHashes(completedState);
   const completedDiscoveryIds = Array.isArray(completedState.discoveryIds)
     ? completedState.discoveryIds.filter((entry): entry is string => typeof entry === "string")
     : [];
@@ -897,6 +941,10 @@ export async function importPortableWhodunnitPackageV1(args: {
     for (const [portableRoomId, importedRoomId] of importedMansion.roomIdMap) {
       replacements.set(portableRoomId, importedRoomId);
     }
+    for (const [portableAssetId, importedAssetId] of importedMansion.assetIdMap) {
+      replacements.set(portableAssetId, importedAssetId);
+    }
+    replacements.set(manifest.mansionManifest.packageId, importedMansion.bundleId);
     const finalSession = asRecord(replaceStrings(asJson(remappedSession), replacements), "Imported session");
     const finalPublic = asRecord(replaceStrings(asJson(remappedPublic), replacements), "Imported public state");
     const finalPrivate = asRecord(replaceStrings(asJson(remappedPrivate), replacements), "Imported private case");
@@ -912,6 +960,22 @@ export async function importPortableWhodunnitPackageV1(args: {
     }
     if (finalPrivate.config && typeof finalPrivate.config === "object" && !Array.isArray(finalPrivate.config)) {
       finalPrivate.config.mansionBundleId = importedMansion.bundleId;
+    }
+    refreshPortableMansionSnapshotHashes(finalPublic);
+    refreshPortableMansionSnapshotHashes(finalPrivate);
+    const importedSnapshot = finalPublic.config && typeof finalPublic.config === "object" &&
+      !Array.isArray(finalPublic.config) && finalPublic.config.mansionSnapshot &&
+      typeof finalPublic.config.mansionSnapshot === "object" &&
+      !Array.isArray(finalPublic.config.mansionSnapshot)
+        ? finalPublic.config.mansionSnapshot as unknown as DebateMysteryMansionSnapshotV2
+        : null;
+    if (importedSnapshot?.version === 2) {
+      retainDebateMysteryMansionSnapshotAssetsV2(
+        args.db,
+        args.userId,
+        newSessionId,
+        importedSnapshot,
+      );
     }
     finalSession.formatState = finalPublic;
     const privateJson = JSON.stringify(finalPrivate);

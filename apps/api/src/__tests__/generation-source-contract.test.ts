@@ -35,7 +35,8 @@ describe("generation broker source contract", () => {
 
   it("keeps all concrete text providers behind generation-work context", () => {
     const providers = readFileSync(join(sourceRoot, "providers.ts"), "utf8");
-    for (const provider of ["local", "openai", "anthropic"] as const) {
+    assert.match(providers, /providerGenerationWork\(this\.name, options\)/u);
+    for (const provider of ["openai", "anthropic"] as const) {
       assert.match(
         providers,
         new RegExp(`providerGenerationWork\\(\\"${provider}\\", options\\)`),

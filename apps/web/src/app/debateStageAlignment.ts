@@ -182,6 +182,7 @@ export interface DebateStageModeratorMicroScalesV1 {
 }
 
 export type DebateStageWhodunnitCourtItem =
+  // `wide*` keys remain serialized for V14 compatibility; both now belong to Main.
   | "wideEvidenceTable"
   | "wideWitnessSilhouette"
   | "witness"
@@ -229,7 +230,7 @@ export interface DebateStageAlignmentV14 {
   galleryVolume: number;
   /** Compact Moderator avatar scale for the public Wide, Left, and Right cameras. */
   moderatorMicroScales: DebateStageModeratorMicroScalesV1;
-  /** Wide-court and witness-camera placements used only by Whodunnit. */
+  /** Main courtroom foregrounds and witness-camera placements used by Whodunnit. */
   whodunnitCourt: DebateStageWhodunnitCourtV1;
   /** Independent Jury chamber member, table, and public vote placements. */
   juryChamber: DebateStageJuryChamberV1;

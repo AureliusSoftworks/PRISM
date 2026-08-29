@@ -840,9 +840,10 @@ describe("backup Auto model settings", () => {
     withBackupDatabase((db, userKey) => {
       const weights = { v: 1, openai: 0.2, anthropic: 0.3, ollama_cloud: 0.5 };
       db.prepare(
-        "UPDATE users SET online_auto_provider_weights = ?, prism_default_llm_model = ?, prism_cloud_llm_model = ? WHERE id = ?",
+        "UPDATE users SET online_auto_provider_weights = ?, online_auto_quality_posture = ?, prism_default_llm_model = ?, prism_cloud_llm_model = ? WHERE id = ?",
       ).run(
         JSON.stringify(weights),
+        "open",
         "llama3.2",
         "ollama-cloud-direct:gpt-oss",
         "user-1",
@@ -850,6 +851,7 @@ describe("backup Auto model settings", () => {
 
       const snapshot = exportUserSnapshot(db, "user-1", userKey);
       assert.deepEqual(snapshot.settings?.onlineAutoProviderWeights, weights);
+      assert.equal(snapshot.settings?.onlineAutoQualityPosture, "open");
       assert.equal(snapshot.settings?.prismDefaultLlmModel, "llama3.2");
       assert.equal(
         snapshot.settings?.prismCloudLlmModel,
@@ -857,19 +859,21 @@ describe("backup Auto model settings", () => {
       );
 
       db.prepare(
-        "UPDATE users SET online_auto_provider_weights = NULL, prism_default_llm_model = NULL, prism_cloud_llm_model = NULL WHERE id = ?",
+        "UPDATE users SET online_auto_provider_weights = NULL, online_auto_quality_posture = 'quality', prism_default_llm_model = NULL, prism_cloud_llm_model = NULL WHERE id = ?",
       ).run("user-1");
       importUserSnapshot(db, "user-1", snapshot, userKey);
       const restored = db
         .prepare(
-          "SELECT online_auto_provider_weights, prism_default_llm_model, prism_cloud_llm_model FROM users WHERE id = ?",
+          "SELECT online_auto_provider_weights, online_auto_quality_posture, prism_default_llm_model, prism_cloud_llm_model FROM users WHERE id = ?",
         )
         .get("user-1") as {
         online_auto_provider_weights: string;
+        online_auto_quality_posture: string;
         prism_default_llm_model: string;
         prism_cloud_llm_model: string;
       };
       assert.deepEqual(JSON.parse(restored.online_auto_provider_weights), weights);
+      assert.equal(restored.online_auto_quality_posture, "open");
       assert.equal(restored.prism_default_llm_model, "llama3.2");
       assert.equal(restored.prism_cloud_llm_model, "ollama-cloud-direct:gpt-oss");
     });

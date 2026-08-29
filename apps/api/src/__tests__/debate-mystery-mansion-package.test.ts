@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { DatabaseSync } from "node:sqlite";
-import type { MansionPackageManifestV1 } from "@localai/shared";
+import {
+  deriveMansionMusicIdentityV1,
+  type MansionPackageManifestV1,
+} from "@localai/shared";
 import sharp from "sharp";
 import {
   encodeInternalMansionPackageV1,
@@ -247,5 +251,107 @@ describe("portable mansion package", () => {
     assert.equal(rowCount(target.db, "debate_mystery_mansion_bundles"), 0);
     assert.equal(rowCount(target.db, "debate_mystery_mansion_assets"), 0);
     assert.equal(rowCount(target.db, "debate_mystery_mansion_asset_refs"), 0);
+  });
+
+  it("exports only the accepted mansion theme and preserves its title and identity on import", async () => {
+    const source = await sourceFixture();
+    const target = emptyTarget();
+    const audio = Buffer.from(readFileSync(new URL(
+      "../../../web/public/audio/debate/whodunnit/the-midnight-clue.mp3",
+      import.meta.url,
+    )));
+    const digest = createHash("sha256").update(audio).digest("hex");
+    const encrypted = encryptBytes(audio, source.key);
+    const durationMs = 180_036;
+    source.db.prepare(
+      `INSERT INTO debate_mystery_mansion_assets
+         (id, user_id, ciphertext, cipher_iv, cipher_tag, sha256, byte_size,
+          mime_type, duration_ms, provider, model, created_at, updated_at)
+       VALUES ('theme', 'creator', ?, ?, ?, ?, ?, 'audio/mpeg', ?, 'elevenlabs', 'music_v2', ?, ?)`,
+    ).run(
+      encrypted.ciphertext, encrypted.iv, encrypted.tag, digest, audio.byteLength,
+      durationMs, now, now,
+    );
+    for (const logicalId of [
+      "investigation-theme-v1",
+      "investigation-theme-candidate-v1",
+      "investigation-theme-previous-v1",
+    ]) {
+      source.db.prepare(
+        `INSERT INTO debate_mystery_mansion_asset_refs
+           (bundle_id, user_id, asset_id, role, logical_id, created_at)
+         VALUES (?, 'creator', 'theme', 'music', ?, ?)`,
+      ).run(source.bundleId, logicalId, now);
+    }
+    const identity = deriveMansionMusicIdentityV1({
+      title: "Jungle Conservatory",
+      houseStyleLabel: "Jungle Conservatory",
+      houseStylePromptContract: "A grounded rain-soaked botanical manor.",
+    });
+    source.db.prepare(
+      `UPDATE debate_mystery_mansion_bundles
+          SET style_json = ?, library_metadata_json = ?
+        WHERE id = ? AND user_id = 'creator'`,
+    ).run(
+      JSON.stringify({
+        version: 1,
+        id: "jungle-conservatory",
+        label: "Jungle Conservatory",
+        promptContract: "A grounded rain-soaked botanical manor.",
+        musicIdentity: identity,
+      }),
+      JSON.stringify({
+        version: 1,
+        music: {
+          version: 1,
+          activeTitle: "Lanterns Beneath the Monsoon",
+          activeLoop: {
+            version: 1,
+            loopStartMs: 1_000,
+            loopEndMs: 179_000,
+            crossfadeMs: 1_500,
+            silenceRatio: 0.52,
+          },
+          candidateTitle: "Discarded preview",
+          candidateLens: "shadow",
+          previousTitle: "Previous version",
+        },
+      }),
+      source.bundleId,
+    );
+
+    const envelope = await exportPortableMansionPackageV1({
+      db: source.db,
+      userKey: source.key,
+      userId: "creator",
+      bundleId: source.bundleId,
+      prismVersion: "0.15.0",
+      creatorName: "Package Creator",
+      mode: "spoiler_seal",
+    });
+    const preview = await previewPortableMansionPackageV1({ envelope });
+    assert.equal(preview.manifest.investigationThemeTitle, "Lanterns Beneath the Monsoon");
+    assert.deepEqual(preview.manifest.musicIdentity, identity);
+    assert.deepEqual(preview.manifest.investigationThemeLoop, {
+      version: 1,
+      loopStartMs: 1_000,
+      loopEndMs: 179_000,
+      crossfadeMs: 1_500,
+      silenceRatio: 0.52,
+    });
+    assert.equal(preview.manifest.assets.filter((asset) => asset.role === "music").length, 1);
+
+    const importedId = await importPortableMansionPackageV1({
+      db: target.db,
+      userKey: target.key,
+      userId: "recipient",
+      envelope,
+    });
+    const imported = getDebateMysteryMansionBundleV2(target.db, "recipient", importedId);
+    assert.equal(imported.music?.active?.title, "Lanterns Beneath the Monsoon");
+    assert.deepEqual(imported.music?.active?.loop, preview.manifest.investigationThemeLoop);
+    assert.equal(imported.music?.candidate, null);
+    assert.equal(imported.music?.previous, null);
+    assert.equal(imported.music?.identity.noirSubgenre, "botanical chamber noir");
   });
 });

@@ -93,6 +93,15 @@ export interface DebateCastSelection {
   againstAdvocate: string;
 }
 
+/**
+ * Stage Alignment adds a non-participating witness so the testimony camera
+ * never reuses the moderator or either advocate as its calibration subject.
+ */
+export interface DebateAlignmentPreviewCastSelection
+  extends DebateCastSelection {
+  witness: string;
+}
+
 export type DebateRoomPresence =
   | "arriving"
   | "occupied"
@@ -367,12 +376,19 @@ export function resolveDebateSurpriseCast(
   return next;
 }
 
-/** Stage alignment always uses a fresh random three-bot Library cast. */
+/** Stage alignment always uses four distinct Library bots, including a witness. */
 export function debateAlignmentPreviewCast(
   availableBotIds: readonly string[],
   random: () => number = Math.random,
-): DebateCastSelection | null {
-  return randomDebateCast(availableBotIds, random);
+): DebateAlignmentPreviewCastSelection | null {
+  const shuffledIds = shuffledUniqueBotIds(availableBotIds, random);
+  if (shuffledIds.length < 4) return null;
+  return {
+    moderator: shuffledIds[0]!,
+    forAdvocate: shuffledIds[1]!,
+    againstAdvocate: shuffledIds[2]!,
+    witness: shuffledIds[3]!,
+  };
 }
 
 /** Selecting a synthesized slate replaces its five editable fields together. */

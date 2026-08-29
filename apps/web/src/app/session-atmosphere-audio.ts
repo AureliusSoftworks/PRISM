@@ -569,15 +569,26 @@ export function createSeamlessSessionAtmosphereLoopBuffer(
   decoded: AudioBuffer,
   endTrimSeconds = SESSION_ATMOSPHERE_LOOP_END_TRIM_SECONDS,
   crossfadeSeconds = SESSION_ATMOSPHERE_LOOP_CROSSFADE_SECONDS,
+  loopStartSeconds = 0,
+  explicitLoopEndSeconds?: number,
 ): AudioBuffer {
   const sampleRate = decoded.sampleRate;
-  const loopEndSeconds = sessionAtmosphereLoopEndTime(
-    decoded.duration,
-    endTrimSeconds,
+  const normalizedLoopStartSeconds = Math.max(
+    0,
+    Math.min(decoded.duration - 1, Number.isFinite(loopStartSeconds) ? loopStartSeconds : 0),
   );
-  const usableFrames = Math.max(
-    1,
+  const loopStartFrame = Math.floor(normalizedLoopStartSeconds * sampleRate);
+  const loopEndSeconds = typeof explicitLoopEndSeconds === "number" &&
+      Number.isFinite(explicitLoopEndSeconds) && explicitLoopEndSeconds > normalizedLoopStartSeconds
+    ? Math.min(decoded.duration, explicitLoopEndSeconds)
+    : sessionAtmosphereLoopEndTime(decoded.duration, endTrimSeconds);
+  const loopEndFrame = Math.max(
+    loopStartFrame + 1,
     Math.min(decoded.length, Math.floor(loopEndSeconds * sampleRate)),
+  );
+  const regionFrames = Math.max(
+    1,
+    loopEndFrame - loopStartFrame,
   );
   const desiredCrossfadeFrames = Math.max(
     0,
@@ -587,10 +598,10 @@ export function createSeamlessSessionAtmosphereLoopBuffer(
   );
   const crossfadeFrames = Math.min(
     desiredCrossfadeFrames,
-    Math.floor(usableFrames / 4),
+    Math.floor(regionFrames / 4),
   );
   const loopFrames =
-    crossfadeFrames >= 2 ? usableFrames - crossfadeFrames : usableFrames;
+    crossfadeFrames >= 2 ? regionFrames - crossfadeFrames : regionFrames;
   const output = context.createBuffer(
     decoded.numberOfChannels,
     loopFrames,
@@ -601,19 +612,21 @@ export function createSeamlessSessionAtmosphereLoopBuffer(
     const inputChannel = decoded.getChannelData(channel);
     const outputChannel = output.getChannelData(channel);
     if (crossfadeFrames < 2) {
-      outputChannel.set(inputChannel.subarray(0, loopFrames));
+      outputChannel.set(inputChannel.subarray(loopStartFrame, loopStartFrame + loopFrames));
       continue;
     }
     // Rotate the overlap to the start: the buffer's last and first samples
     // remain adjacent source samples, while its old tail dissolves into its head.
     for (let frame = 0; frame < crossfadeFrames; frame += 1) {
       const headMix = frame / (crossfadeFrames - 1);
+      const tailGain = Math.cos(headMix * Math.PI / 2);
+      const headGain = Math.sin(headMix * Math.PI / 2);
       outputChannel[frame] =
-        inputChannel[loopFrames + frame]! * (1 - headMix) +
-        inputChannel[frame]! * headMix;
+        inputChannel[loopStartFrame + loopFrames + frame]! * tailGain +
+        inputChannel[loopStartFrame + frame]! * headGain;
     }
     outputChannel.set(
-      inputChannel.subarray(crossfadeFrames, loopFrames),
+      inputChannel.subarray(loopStartFrame + crossfadeFrames, loopStartFrame + loopFrames),
       crossfadeFrames,
     );
   }
@@ -1080,9 +1093,19 @@ export function startSessionAtmosphere(args: {
         );
         if (stopped || loadController.signal.aborted) return;
         const source = context.createBufferSource();
+        const loopStartMs = Number(response.headers?.get?.("x-prism-loop-start-ms"));
+        const loopEndMs = Number(response.headers?.get?.("x-prism-loop-end-ms"));
+        const loopCrossfadeMs = Number(response.headers?.get?.("x-prism-loop-crossfade-ms"));
+        const hasValidatedLoop = Number.isFinite(loopStartMs) && loopStartMs >= 0 &&
+          Number.isFinite(loopEndMs) && loopEndMs > loopStartMs &&
+          Number.isFinite(loopCrossfadeMs) && loopCrossfadeMs > 0;
         source.buffer = createSeamlessSessionAtmosphereLoopBuffer(
           context,
           decoded,
+          hasValidatedLoop ? 0 : SESSION_ATMOSPHERE_LOOP_END_TRIM_SECONDS,
+          hasValidatedLoop ? loopCrossfadeMs / 1_000 : SESSION_ATMOSPHERE_LOOP_CROSSFADE_SECONDS,
+          hasValidatedLoop ? loopStartMs / 1_000 : 0,
+          hasValidatedLoop ? loopEndMs / 1_000 : undefined,
         );
         source.loop = true;
         source.loopStart = 0;

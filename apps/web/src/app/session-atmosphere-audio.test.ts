@@ -742,6 +742,20 @@ test("atmosphere loops crossfade into a periodic, sample-continuous buffer", () 
   assert.equal(channel[3], 3);
   assert.equal(channel[4], 4);
   assert.equal(channel[0]! - channel.at(-1)!, 1);
+
+  const validatedRegion = createSeamlessSessionAtmosphereLoopBuffer(
+    context,
+    decoded as unknown as AudioBuffer,
+    0,
+    0.5,
+    0.5,
+    3.5,
+  );
+  const validatedChannel = validatedRegion.getChannelData(0);
+  assert.equal(validatedRegion.duration, 2.5);
+  assert.equal(validatedChannel[0], 24);
+  assert.equal(validatedChannel.at(-1), 23);
+  assert.equal(validatedChannel[0]! - validatedChannel.at(-1)!, 1);
 });
 
 test("supported browsers play decoded atmosphere on sample-accurate loop sources", async () => {
@@ -852,6 +866,11 @@ test("supported browsers play decoded atmosphere on sample-accurate loop sources
       return {
         ok: true,
         status: 200,
+        headers: new Headers({
+          "x-prism-loop-start-ms": "500",
+          "x-prism-loop-end-ms": "3500",
+          "x-prism-loop-crossfade-ms": "500",
+        }),
         arrayBuffer: async () => new ArrayBuffer(8),
       };
     },
@@ -881,7 +900,7 @@ test("supported browsers play decoded atmosphere on sample-accurate loop sources
     assert.ok(sources.every((source) => source.started));
     assert.ok(sources.every((source) => source.loop));
     assert.ok(sources.every((source) => source.loopStart === 0));
-    assert.ok(sources.every((source) => source.loopEnd === 2.25));
+    assert.ok(sources.every((source) => source.loopEnd === 2.5));
     assert.deepEqual(gainRamps, [
       {
         value: DEFAULT_SESSION_ATMOSPHERE_MIX.background,

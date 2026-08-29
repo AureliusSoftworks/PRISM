@@ -113,3 +113,12 @@ export function whodunnitSavedRoomArtUrl(
   const base = `/api/images/${encodeURIComponent(imageId)}/file`;
   return style === "mosaic" ? `${base}?style=mosaic` : base;
 }
+
+export function whodunnitMansionRoomArtUrl(
+  mansionId: string,
+  assetId: string,
+  style: WhodunnitInvestigationArtStyle,
+): string {
+  const base = `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}/assets/${encodeURIComponent(assetId)}/file`;
+  return style === "mosaic" ? `${base}?style=mosaic` : base;
+}

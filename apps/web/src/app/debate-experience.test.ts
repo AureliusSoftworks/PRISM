@@ -84,6 +84,19 @@ it("keeps DOM frame diagnostics active for Whodunnit playback", () => {
     /useDebateDomPerformance\(\{[\s\S]{0,180}active:\s*\(view === "live" \|\| view === "mystery"\)[\s\S]{0,120}activeSession\.status !== "paused"/u,
   );
 });
+
+it("previews inert Flyting beside the available Debate formats", () => {
+  assert.match(
+    source,
+    /option\.availability === "available" \|\| option\.id === "flyting"/u,
+  );
+  assert.match(
+    source,
+    /const disabled = participantForumOnly \|\| comingSoon/u,
+  );
+  assert.match(source, /if \(comingSoon\) return renderFormatCard\(\);/u);
+  assert.match(source, /<b>Coming soon<\/b>/u);
+});
 const pageCss = readFileSync(
   fileURLToPath(new URL("./page.module.css", import.meta.url)),
   "utf8",
@@ -575,17 +588,18 @@ describe("Debate experience", () => {
     assert.match(source, /leave seat on Surprise me/u);
   });
 
-  it("gives stage alignment a fresh random three-bot Library cast", () => {
+  it("gives stage alignment a fourth distinct Library bot for the witness", () => {
     assert.deepEqual(
       debateAlignmentPreviewCast(["m", "f", "a", "extra"], () => 0),
       {
         moderator: "f",
         forAdvocate: "a",
         againstAdvocate: "extra",
+        witness: "m",
       },
     );
     assert.equal(
-      debateAlignmentPreviewCast(["m", "f"], () => 0.5),
+      debateAlignmentPreviewCast(["m", "f", "a"], () => 0.5),
       null,
     );
   });
@@ -5541,9 +5555,21 @@ describe("Debate experience", () => {
     assert.match(source, /\(\["light", "dark"\] as const\)/u);
     assert.match(source, /\["wide", "left", "moderator", "right"\] as const/u);
     assert.match(source, /aria-label="Debate alignment preview camera"/u);
-    assert.match(source, /Court wide/u);
+    assert.doesNotMatch(source, /Court wide/u);
     assert.match(source, /Witness/u);
     assert.match(source, /Jury/u);
+    assert.match(source, /data-debate-main-court-prop-toggle=/u);
+    assert.match(source, /data-debate-main-court-prop-tuner="true"/u);
+    assert.match(source, /className=\{mysteryV2Styles\.wideEvidenceTable\}/u);
+    assert.match(source, /mysteryV2Styles\.wideWitnessSilhouette/u);
+    assert.match(
+      source,
+      /const witnessSourceBot = stageAlignmentPreviewCast\.witness/u,
+    );
+    assert.match(
+      source,
+      /renderAlignmentCourtAvatar\(\s*witnessBot,\s*"moderator",\s*"full",?\s*\)/u,
+    );
     assert.match(source, /data-debate-whodunnit-alignment=/u);
     assert.match(source, /data-debate-jury-alignment="true"/u);
     assert.match(source, /updateDebateStageWhodunnitCourtPlacement/u);

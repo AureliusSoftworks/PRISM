@@ -41,6 +41,7 @@ export type SettingsScope =
   | "shortcuts"
   | "voice"
   | "storage"
+  | "assets"
   | "help"
   | "about"
   | "account";
@@ -87,6 +88,7 @@ const SETTINGS_NAV_GROUPS: readonly {
     items: [
       { scope: "memories", title: "Memories", icon: <Brain size={16} strokeWidth={2} /> },
       { scope: "storage", title: "Storage", icon: <HardDrive size={16} strokeWidth={2} /> },
+      { scope: "assets", title: "Assets", icon: <Sparkles size={16} strokeWidth={2} /> },
       { scope: "network", title: "Network", icon: <Network size={16} strokeWidth={2} /> },
     ],
   },

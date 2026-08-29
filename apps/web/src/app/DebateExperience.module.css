@@ -11727,10 +11727,6 @@
   padding-right: 70px;
 }
 
-.dashboard[data-debate-format="turnabout"] {
-  --debate-studio-accent: #d7894f;
-}
-
 .motionSeed .field textarea {
   height: 100%;
   min-height: 102px;
@@ -13598,7 +13594,7 @@
 }
 
 .dashboard .archivePanel .archiveGroup[data-archive-group="completed"] {
-  opacity: 0.88;
+  opacity: 1;
 }
 
 .dashboard .archivePanel .archiveGroup[data-archive-group="completed"] .archiveGroupHeading {
@@ -13616,6 +13612,120 @@
 
 .dashboard .archivePanel .archiveGroup[data-archive-group="completed"] .archiveChipTitle {
   color: color-mix(in srgb, #f8f8f8 86%, #a8a8b8);
+}
+
+.archiveFormatShelves {
+  display: grid;
+  gap: 14px;
+  padding-top: 14px;
+}
+
+.archiveFormatShelf {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  border: 1px solid
+    color-mix(in srgb, var(--debate-studio-accent) 30%, var(--debate-studio-line));
+  border-radius: 12px;
+  background:
+    linear-gradient(
+      112deg,
+      color-mix(in srgb, var(--debate-studio-accent) 9%, transparent),
+      transparent 46%
+    ),
+    color-mix(in srgb, var(--debate-studio-raised) 88%, transparent);
+  box-shadow:
+    inset 3px 0 var(--debate-studio-accent),
+    0 12px 28px rgba(0, 0, 0, 0.12);
+}
+
+.archiveFormatShelfHeading {
+  margin: 0;
+}
+
+.archiveFormatShelfHeading > button {
+  display: grid;
+  width: 100%;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 11px;
+  border: 0;
+  padding: 11px 13px 11px 12px;
+  color: var(--debate-studio-ink);
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.archiveFormatShelfHeading > button:hover {
+  background: color-mix(in srgb, var(--debate-studio-accent) 7%, transparent);
+}
+
+.archiveFormatShelfHeading > button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--debate-studio-accent) 80%, white);
+  outline-offset: -3px;
+}
+
+.archiveFormatShelfMark {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--debate-studio-accent) 62%, transparent);
+  border-radius: 50%;
+  color: color-mix(in srgb, var(--debate-studio-accent) 78%, white);
+  background: color-mix(in srgb, var(--debate-studio-accent) 12%, transparent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--debate-studio-accent) 22%, transparent);
+  font-size: 14px;
+}
+
+.archiveFormatShelfIdentity {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.archiveFormatShelfIdentity strong {
+  color: color-mix(in srgb, var(--debate-studio-accent) 78%, var(--debate-studio-ink));
+  font-size: 12px;
+  font-weight: 720;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.archiveFormatShelfIdentity small,
+.archiveFormatShelfCount {
+  color: var(--debate-studio-muted);
+  font-size: 9px;
+  font-weight: 560;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.archiveFormatShelfCount {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.archiveFormatShelfChevron {
+  color: color-mix(in srgb, var(--debate-studio-accent) 72%, var(--debate-studio-muted));
+  font-size: 11px;
+  transition: transform 160ms ease;
+}
+
+.archiveFormatShelf[data-collapsed="true"] .archiveFormatShelfChevron {
+  transform: rotate(-90deg);
+}
+
+.archiveFormatShelf > .sessionList {
+  gap: 10px;
+  border-top: 1px solid
+    color-mix(in srgb, var(--debate-studio-accent) 18%, var(--debate-studio-line));
+  padding: 12px;
+}
+
+.archiveFormatShelf > .sessionList[hidden] {
+  display: none;
 }
 
 .dashboard .archivePanel .sessionList {
@@ -14159,6 +14269,14 @@
 }
 
 @media (max-width: 720px) {
+  .archiveFormatShelfHeading > button {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .archiveFormatShelfCount {
+    display: none;
+  }
+
   .archiveChipTitle {
     max-width: 100%;
   }

@@ -253,6 +253,27 @@ describe("portable mansion package API", () => {
     assert.equal(edited.mansion.floors, 2);
     assert.equal(edited.mansion.totalRooms, 5);
 
+    const unsupportedThirdFloor = editedRooms.map((room) => room.id === "landing-edit"
+      ? { ...room, neighborIds: [...room.neighborIds, "observatory-edit"] }
+      : room);
+    unsupportedThirdFloor.push({
+      id: "observatory-edit",
+      templateId: "library",
+      name: "Observatory",
+      floor: 3,
+      x: 0,
+      y: 0,
+      width: 2,
+      height: 2,
+      neighborIds: ["landing-edit"],
+    });
+    const unsupportedThirdFloorResponse = await client.request(
+      `/api/debates/mystery-mansions/${encodeURIComponent(cloneId)}/topology`,
+      jsonInit({ rooms: unsupportedThirdFloor }, "PATCH"),
+    );
+    assert.equal(unsupportedThirdFloorResponse.status, 400);
+    assert.match(await unsupportedThirdFloorResponse.text(), /Floor 2 needs at least 4 rooms/u);
+
     const otherClient = createClient();
     const otherRegistration = await otherClient.request(
       "/api/auth/register",
@@ -269,7 +290,6 @@ describe("portable mansion package API", () => {
       jsonInit({}, "POST"),
     );
     assert.equal(foreignClone.status, 404);
-
     const exportResponse = await client.request(
       `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}/export`,
       jsonInit({ mode: "spoiler_seal", creatorName: "Recipient" }),

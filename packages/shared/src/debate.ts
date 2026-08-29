@@ -95,6 +95,54 @@ export const DEBATE_FORUM_MAX_REBUTTAL_ROUNDS = 3;
 
 export type DebateFormatId = "forum" | "turnabout" | "whodunnit";
 export type DebateFormatCatalogId = DebateFormatId | "flyting" | "cypher";
+
+export interface DebateFormatVisualThemeV1 {
+  accentDark: string;
+  accentLight: string;
+  archiveNoun: string;
+  archiveNounPlural: string;
+}
+
+/**
+ * One exhaustive visual identity contract for every current and announced
+ * Debate production. Adding a catalog id requires choosing its theme here,
+ * so shared surfaces such as Studio and Archive cannot silently fall back to
+ * another production's identity.
+ */
+export const DEBATE_FORMAT_VISUAL_THEMES: Readonly<
+  Record<DebateFormatCatalogId, DebateFormatVisualThemeV1>
+> = {
+  forum: {
+    accentDark: "#ad9cff",
+    accentLight: "#705bc4",
+    archiveNoun: "proceeding",
+    archiveNounPlural: "proceedings",
+  },
+  turnabout: {
+    accentDark: "#d7894f",
+    accentLight: "#a65425",
+    archiveNoun: "trial",
+    archiveNounPlural: "trials",
+  },
+  whodunnit: {
+    accentDark: "#66e5ea",
+    accentLight: "#147e88",
+    archiveNoun: "case",
+    archiveNounPlural: "cases",
+  },
+  flyting: {
+    accentDark: "#e3bd71",
+    accentLight: "#926b19",
+    archiveNoun: "contest",
+    archiveNounPlural: "contests",
+  },
+  cypher: {
+    accentDark: "#ec68c8",
+    accentLight: "#a73383",
+    archiveNoun: "battle",
+    archiveNounPlural: "battles",
+  },
+};
 export type DebatePlayerRole = "judge" | "participant" | "spectator" | "investigator";
 /** Versioned now so future assisted-play levels can migrate without ambiguity. */
 export type DebateParticipantDifficulty = "coach" | "standard" | "immersive";

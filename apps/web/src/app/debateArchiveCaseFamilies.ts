@@ -1,4 +1,7 @@
-import type { DebateSessionListItemV1 } from "@localai/shared";
+import type {
+  DebateFormatId,
+  DebateSessionListItemV1,
+} from "@localai/shared";
 
 export interface DebateArchiveSessionGroup {
   key: string;
@@ -7,6 +10,12 @@ export interface DebateArchiveSessionGroup {
   isMysteryCaseFamily: boolean;
   openRun: DebateSessionListItemV1 | null;
   latestCompletedRun: DebateSessionListItemV1 | null;
+  updatedAt: string;
+}
+
+export interface DebateArchiveFormatShelf {
+  format: DebateFormatId;
+  groups: DebateArchiveSessionGroup[];
   updatedAt: string;
 }
 
@@ -71,4 +80,25 @@ export function groupDebateArchiveSessions(
       updatedAt,
     };
   }).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+/** Keeps the newest production shelf first while preserving newest-first cards. */
+export function groupDebateArchiveSessionsByFormat(
+  groups: readonly DebateArchiveSessionGroup[],
+): DebateArchiveFormatShelf[] {
+  const shelves = new Map<DebateFormatId, DebateArchiveSessionGroup[]>();
+  for (const group of groups) {
+    const format = group.representative.format;
+    shelves.set(format, [...(shelves.get(format) ?? []), group]);
+  }
+  return [...shelves.entries()]
+    .map(([format, formatGroups]) => ({
+      format,
+      groups: formatGroups,
+      updatedAt: formatGroups.reduce(
+        (latest, group) => (group.updatedAt > latest ? group.updatedAt : latest),
+        formatGroups[0]?.updatedAt ?? "",
+      ),
+    }))
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }

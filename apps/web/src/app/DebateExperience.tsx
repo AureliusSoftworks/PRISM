@@ -29,6 +29,7 @@ import {
 import {
   DEBATE_EVIDENCE_ITEM_MAX_COUNT,
   DEBATE_FORMAT_CATALOG,
+  DEBATE_FORMAT_VISUAL_THEMES,
   DEBATE_FORMALITY_SPECTRUM,
   DEBATE_MYSTERY_V2_PRESETS,
   DEBATE_MYSTERY_SCHEMA_VERSION,
@@ -69,6 +70,7 @@ import {
   debateSilenceHoldDurationMs,
   debateSpokenText,
   heardBotPresenceBeatTextV1,
+  inferMysterySparkMotifsV1,
   normalizeDebateVoicePerformanceCue,
   normalizeDebateModeratorTitle,
   resolveDebateForumRoundPlan,
@@ -102,8 +104,8 @@ import {
   type DebateMysteryArtMode,
   type DebateMysteryCaseCodeV1,
   type DebateMysteryDifficulty,
-  type DebateMysteryMansionBundleRoomV1,
   type DebateMysteryMansionBundleSummaryV1,
+  type MansionLayoutV2,
   type DebateMysteryPresetId,
   type DebateMysteryRoomNarrationAppearanceV2,
   type DebateForumRoundMode,
@@ -153,6 +155,7 @@ import { buildDebateArchiveChipVisualStyle } from "./debateArchiveChipGradient";
 import {
   debateArchiveProceedingActionLabel,
   groupDebateArchiveSessions,
+  groupDebateArchiveSessionsByFormat,
   type DebateArchiveSessionGroup,
 } from "./debateArchiveCaseFamilies";
 import {
@@ -176,6 +179,7 @@ import {
 import {
   createBotDirectedSetupRefractTarget,
   PrismRefractTarget,
+  type PrismRefractBinding,
   type PrismRefractMagicTarget,
 } from "./prismRefract";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
@@ -187,6 +191,7 @@ import {
   type MansionPackageInspectionV1,
 } from "./mansionPackageClient";
 import InstalledMansionLibrary from "./InstalledMansionLibraryPanel";
+import { validateMansionMusicCandidateUrlV1 } from "./mansionMusicValidation";
 import WhodunnitSetupDialog from "./WhodunnitSetupDialog";
 import {
   installedMansionThumbnailSourceV1,
@@ -260,6 +265,7 @@ import {
   randomDebateCast,
   randomDebatePlayerJudgeCast,
   resolveDebateSurpriseCast,
+  type DebateAlignmentPreviewCastSelection,
   type DebateCastSelection,
 } from "./debateExperienceState";
 import { useDebateEvidenceMentionTextarea } from "./useDebateEvidenceMentionTextarea";
@@ -584,6 +590,10 @@ import {
   resolveWhodunnitSurpriseCast,
   surpriseWhodunnitSeatBotId,
 } from "./debateMysteryCast";
+import {
+  normalizeWhodunnitCustomMansionRoomCount,
+  whodunnitCustomMansionRoomMinimum,
+} from "./debateMysterySetup";
 import { useAmbientBotVocalization } from "./ambient-bot-vocalization";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
 import {
@@ -962,6 +972,17 @@ const DEBATE_STAGE_LAYOUT_AUTHORING_ENABLED = prismDeveloperAuthoringEnabled({
   NODE_ENV: process.env.NODE_ENV,
   NEXT_PUBLIC_PRISM_BRANCH: process.env.NEXT_PUBLIC_PRISM_BRANCH,
 });
+
+function debateFormatThemeStyle(
+  format: DebateFormatId,
+  theme: "light" | "dark",
+): CSSProperties {
+  const formatTheme = DEBATE_FORMAT_VISUAL_THEMES[format];
+  return {
+    "--debate-studio-accent":
+      theme === "light" ? formatTheme.accentLight : formatTheme.accentDark,
+  } as CSSProperties;
+}
 type DebateCastSlot = "moderator" | "forAdvocate" | "againstAdvocate";
 type DebateMysteryCastSeat =
   | { kind: "suspect"; index: number }
@@ -5063,7 +5084,7 @@ export function DebateExperience(
   const [mansionPackageInspection, setMansionPackageInspection] =
     useState<MansionPackageInspectionV1 | null>(null);
   const [mansionPackageState, setMansionPackageState] = useState<
-    "idle" | "inspecting" | "installing" | "exporting" | "removing" | "updating"
+    "idle" | "inspecting" | "installing" | "exporting" | "removing" | "updating" | "generating-music" | "generating-atmosphere"
   >("idle");
   const [mansionExportPassword, setMansionExportPassword] = useState("");
   const mansionPackageInputRef = useRef<HTMLInputElement | null>(null);
@@ -5215,6 +5236,8 @@ export function DebateExperience(
   const [expandedArchiveSessionId, setExpandedArchiveSessionId] = useState<
     string | null
   >(null);
+  const [collapsedArchiveFormatShelves, setCollapsedArchiveFormatShelves] =
+    useState<ReadonlySet<DebateFormatId>>(() => new Set());
   const [archiveSynthesizingExhibitIds, setArchiveSynthesizingExhibitIds] =
     useState<ReadonlySet<string>>(() => new Set());
   const [setupExhibitMagenta, setSetupExhibitMagenta] = useState<{
@@ -5857,7 +5880,7 @@ export function DebateExperience(
     );
   const [stageAlignmentOpen, setStageAlignmentOpen] = useState(false);
   const [stageAlignmentPreviewCastIds, setStageAlignmentPreviewCastIds] =
-    useState<DebateCastSelection | null>(null);
+    useState<DebateAlignmentPreviewCastSelection | null>(null);
   const [stageAlignmentSoundCheck, setStageAlignmentSoundCheck] =
     useState<DebateStageSoundCheckState>(null);
   /** Alignment-only gallery heat ladder while mic testing (not saved). */
@@ -5868,7 +5891,11 @@ export function DebateExperience(
   const [stageAlignmentPreviewCamera, setStageAlignmentPreviewCamera] =
     useState<DebateStageEvidenceView>("wide");
   const [stageAlignmentWhodunnitPreview, setStageAlignmentWhodunnitPreview] =
-    useState<"wide" | "witness" | null>(null);
+    useState<"witness" | null>(null);
+  const [stageAlignmentMainCourtProp, setStageAlignmentMainCourtProp] =
+    useState<"wideEvidenceTable" | "wideWitnessSilhouette">(
+      "wideEvidenceTable",
+    );
   const [stageAlignmentJuryPreview, setStageAlignmentJuryPreview] =
     useState(false);
   const [stageAlignmentPreviewTheme, setStageAlignmentPreviewTheme] = useState<
@@ -6846,14 +6873,14 @@ export function DebateExperience(
 
   const saveInstalledMansionTopology = useCallback(async (
     mansion: DebateMysteryMansionBundleSummaryV1,
-    rooms: DebateMysteryMansionBundleRoomV1[],
+    layoutV2: MansionLayoutV2,
   ): Promise<DebateMysteryMansionBundleSummaryV1 | null> => {
     setMansionPackageState("updating");
     setError(null);
     try {
       const result = await request<{ mansion: DebateMysteryMansionBundleSummaryV1 }>(
         `/api/debates/mystery-mansions/${encodeURIComponent(mansion.id)}/topology`,
-        { ...requestBody({ rooms }), method: "PATCH" },
+        { ...requestBody({ layoutV2 }), method: "PATCH" },
       );
       if (!mountedRef.current) return null;
       setMysteryMansionBundles((current) => current.map((candidate) =>
@@ -6870,6 +6897,67 @@ export function DebateExperience(
       if (mountedRef.current) setMansionPackageState("idle");
     }
   }, [chooseInstalledMansion, request]);
+
+  const mutateSavedMansionRoomArt = useCallback(async (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+    roomId: string,
+    action: "generate" | "accept" | "discard",
+  ): Promise<DebateMysteryMansionBundleSummaryV1 | null> => {
+    setMansionPackageState("updating");
+    setError(null);
+    try {
+      const result = await request<{ mansion: DebateMysteryMansionBundleSummaryV1 }>(
+        `/api/debates/mystery-mansions/${encodeURIComponent(mansion.id)}/room-art/${encodeURIComponent(roomId)}/${action}`,
+        {
+          ...requestBody(action === "generate" ? { responseMode: props.responseMode } : {}),
+          method: "POST",
+        },
+      );
+      if (!mountedRef.current) return null;
+      setMysteryMansionBundles((current) => current.map((candidate) =>
+        candidate.id === result.mansion.id ? result.mansion : candidate,
+      ));
+      return result.mansion;
+    } catch (caught) {
+      if (mountedRef.current) {
+        setError(caught instanceof Error
+          ? caught.message
+          : "That room-art candidate could not be updated.");
+      }
+      return null;
+    } finally {
+      if (mountedRef.current) setMansionPackageState("idle");
+    }
+  }, [props.responseMode, request]);
+
+  const mutateSavedMansionAtmosphere = useCallback(async (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+    action: "generate" | "accept" | "discard" | "undo",
+  ): Promise<boolean> => {
+    setMansionPackageState(action === "generate" ? "generating-atmosphere" : "updating");
+    setError(null);
+    try {
+      const result = await request<{ mansion: DebateMysteryMansionBundleSummaryV1 }>(
+        `/api/debates/mystery-mansions/${encodeURIComponent(mansion.id)}/atmosphere/${action}`,
+        {
+          ...requestBody(action === "generate" ? { responseMode: props.responseMode } : {}),
+          method: "POST",
+        },
+      );
+      if (!mountedRef.current) return false;
+      setMysteryMansionBundles((current) => current.map((candidate) =>
+        candidate.id === result.mansion.id ? result.mansion : candidate,
+      ));
+      return true;
+    } catch (caught) {
+      if (mountedRef.current) {
+        setError(caught instanceof Error ? caught.message : "That mansion atmosphere could not be updated.");
+      }
+      return false;
+    } finally {
+      if (mountedRef.current) setMansionPackageState("idle");
+    }
+  }, [props.responseMode, request]);
 
   const exportSavedMansion = useCallback(async (mansion: DebateMysteryMansionBundleSummaryV1): Promise<void> => {
     setMansionPackageState("exporting");
@@ -6890,13 +6978,62 @@ export function DebateExperience(
     }
   }, [mansionExportPassword, playerName]);
 
-  const playSavedMansionTheme = useCallback((mansion: DebateMysteryMansionBundleSummaryV1): void => {
-    const music = mansion.assets?.find((asset) => asset.role === "music") ?? null;
-    if (!music) return;
-    const audio = new Audio(`/api/debates/mystery-mansions/${encodeURIComponent(mansion.id)}/assets/${encodeURIComponent(music.id)}/file`);
-    audio.volume = Math.max(0, Math.min(1, props.audioVolume));
-    void audio.play().catch(() => setError("That mansion theme could not be played."));
-  }, [props.audioVolume]);
+  const mutateSavedMansionTheme = useCallback(async (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+    action: "generate" | "accept" | "discard" | "undo",
+  ): Promise<boolean> => {
+    setMansionPackageState(action === "generate" ? "generating-music" : "updating");
+    setError(null);
+    try {
+      const result = await request<{ mansion: DebateMysteryMansionBundleSummaryV1 }>(
+        `/api/debates/mystery-mansions/${encodeURIComponent(mansion.id)}/theme/${action}`,
+        {
+          ...requestBody(action === "generate"
+            ? { responseMode: props.responseMode }
+            : {}),
+          method: "POST",
+        },
+      );
+      let updatedMansion = result.mansion;
+      if (action === "generate" && updatedMansion.music?.candidate) {
+        try {
+          const candidate = updatedMansion.music.candidate;
+          const loop = await validateMansionMusicCandidateUrlV1(
+            `/api/debates/mystery-mansions/${encodeURIComponent(updatedMansion.id)}/assets/${encodeURIComponent(candidate.assetId)}/file`,
+            updatedMansion.music.identity,
+          );
+          const validated = await request<{ mansion: DebateMysteryMansionBundleSummaryV1 }>(
+            `/api/debates/mystery-mansions/${encodeURIComponent(updatedMansion.id)}/theme/validate`,
+            { ...requestBody({ loop }), method: "POST" },
+          );
+          updatedMansion = validated.mansion;
+        } catch (validationError) {
+          const discarded = await request<{ mansion: DebateMysteryMansionBundleSummaryV1 }>(
+            `/api/debates/mystery-mansions/${encodeURIComponent(updatedMansion.id)}/theme/discard`,
+            { ...requestBody({}), method: "POST" },
+          ).catch(() => null);
+          if (discarded && mountedRef.current) {
+            setMysteryMansionBundles((current) => current.map((candidate) =>
+              candidate.id === discarded.mansion.id ? discarded.mansion : candidate,
+            ));
+          }
+          throw validationError;
+        }
+      }
+      if (!mountedRef.current) return false;
+      setMysteryMansionBundles((current) => current.map((candidate) =>
+        candidate.id === updatedMansion.id ? updatedMansion : candidate,
+      ));
+      return true;
+    } catch (caught) {
+      if (mountedRef.current) {
+        setError(caught instanceof Error ? caught.message : "That mansion music could not be updated.");
+      }
+      return false;
+    } finally {
+      if (mountedRef.current) setMansionPackageState("idle");
+    }
+  }, [props.responseMode, request]);
 
   const removeSavedMansion = useCallback(async (mansion: DebateMysteryMansionBundleSummaryV1): Promise<void> => {
     setMansionPackageState("removing");
@@ -7145,7 +7282,7 @@ export function DebateExperience(
   );
   const stageAlignmentCastCandidates = useMemo(() => {
     const audible = bots.filter((bot) => !bot.hardMuted);
-    return audible.length >= 3 ? audible : bots;
+    return audible.length >= 4 ? audible : bots;
   }, [bots]);
   const stageAlignmentPreviewCast = useMemo(() => {
     if (!stageAlignmentPreviewCastIds) return null;
@@ -7154,8 +7291,9 @@ export function DebateExperience(
     const againstAdvocate = botById.get(
       stageAlignmentPreviewCastIds.againstAdvocate,
     );
-    if (!moderator || !forAdvocate || !againstAdvocate) return null;
-    return { moderator, forAdvocate, againstAdvocate };
+    const witness = botById.get(stageAlignmentPreviewCastIds.witness);
+    if (!moderator || !forAdvocate || !againstAdvocate || !witness) return null;
+    return { moderator, forAdvocate, againstAdvocate, witness };
   }, [botById, stageAlignmentPreviewCastIds]);
   const selectedEvidence = sourceDrawerId
     ? ((activeSession
@@ -8002,6 +8140,19 @@ export function DebateExperience(
     : mysteryPreset === "custom"
       ? mysteryCustomSuspectCount
       : debateMysteryPresetSuspectCount(mysteryPreset);
+  const mysteryCustomRoomMinimum = whodunnitCustomMansionRoomMinimum(
+    mysteryCustomSuspectCount,
+  );
+  const normalizedMysteryTotalRooms =
+    mysteryPreset === "custom" && !inspectedMysterySeed && !selectedMysteryMansionBundle
+      ? normalizeWhodunnitCustomMansionRoomCount(
+          mysteryTotalRooms,
+          mysteryCustomSuspectCount,
+        )
+      : mysteryTotalRooms;
+  const mysterySparkMotifs = inferMysterySparkMotifsV1(
+    mysteryInspiration,
+  ).motifs;
   const mysterySuspectBotIds = fillDebateMysteryCast(
     bots,
     mysterySuspectSelection,
@@ -8027,7 +8178,7 @@ export function DebateExperience(
     ...(inspectedMysterySeed || mysteryPreset === "custom"
       ? {
           floors: inspectedMysterySeed?.floors ?? mysteryFloors,
-          totalRooms: inspectedMysterySeed?.totalRooms ?? mysteryTotalRooms,
+          totalRooms: inspectedMysterySeed?.totalRooms ?? normalizedMysteryTotalRooms,
         }
       : {}),
     suspectBotIds: mysterySuspectBotIds,
@@ -8064,7 +8215,7 @@ export function DebateExperience(
     ...(inspectedMysterySeed || selectedMysteryMansionBundle || mysteryPreset === "custom"
       ? {
           floors: inspectedMysterySeed?.floors ?? selectedMysteryMansionBundle?.floors ?? mysteryFloors,
-          totalRooms: inspectedMysterySeed?.totalRooms ?? selectedMysteryMansionBundle?.totalRooms ?? mysteryTotalRooms,
+          totalRooms: inspectedMysterySeed?.totalRooms ?? selectedMysteryMansionBundle?.totalRooms ?? normalizedMysteryTotalRooms,
         }
       : {}),
     suspectBotIds: mysterySuspectBotIds,
@@ -8999,7 +9150,7 @@ export function DebateExperience(
     );
     if (!randomized) {
       setError(
-        "Create at least three Library bots to calibrate the Debate stage.",
+        "Create at least four Library bots to calibrate the Debate stage and witness camera.",
       );
       return false;
     }
@@ -9008,11 +9159,13 @@ export function DebateExperience(
       randomized.moderator === stageAlignmentPreviewCastIds.moderator &&
       randomized.forAdvocate === stageAlignmentPreviewCastIds.forAdvocate &&
       randomized.againstAdvocate ===
-        stageAlignmentPreviewCastIds.againstAdvocate
+        stageAlignmentPreviewCastIds.againstAdvocate &&
+      randomized.witness === stageAlignmentPreviewCastIds.witness
         ? {
             moderator: randomized.forAdvocate,
             forAdvocate: randomized.againstAdvocate,
-            againstAdvocate: randomized.moderator,
+            againstAdvocate: randomized.witness,
+            witness: randomized.moderator,
           }
         : randomized;
     setStageAlignmentPreviewCastIds(previewIds);
@@ -9024,6 +9177,9 @@ export function DebateExperience(
     if (!randomizeStageAlignmentPreviewCast()) return;
     setStageAlignmentDraft(copyDebateStageAlignment(stageAlignment));
     setStageAlignmentPreviewCamera("wide");
+    setStageAlignmentWhodunnitPreview(null);
+    setStageAlignmentJuryPreview(false);
+    setStageAlignmentMainCourtProp("wideEvidenceTable");
     setStageAlignmentPreviewTheme(props.theme);
     setStageAlignmentPreviewEvidenceEmoji(
       pickDebateStageAlignmentEvidenceEmoji(),
@@ -18282,7 +18438,9 @@ export function DebateExperience(
       <li
         key={group.key}
         className={styles.archiveChipRow}
+        data-debate-format={session.format}
         data-status={session.status}
+        style={debateFormatThemeStyle(session.format, props.theme)}
         data-archive-group-item={
           session.status === "completed" ? "completed" : "open"
         }
@@ -18712,6 +18870,7 @@ export function DebateExperience(
     const completedSessions = archiveGroups.filter(
       (group) => group.representative.status === "completed",
     );
+    const completedShelves = groupDebateArchiveSessionsByFormat(completedSessions);
     return (
     <section className={`${styles.historySection} ${styles.archivePanel}`}>
       <div className={styles.sectionHeading}>
@@ -18773,11 +18932,69 @@ export function DebateExperience(
                   {completedSessions.length === 1 ? "" : "s"}
                 </span>
               </header>
-              <ul className={styles.sessionList}>
-                {completedSessions.map((group, index) =>
-                  renderArchiveSessionRow(group, index),
-                )}
-              </ul>
+              <div className={styles.archiveFormatShelves}>
+                {completedShelves.map((shelf) => {
+                  const descriptor = DEBATE_FORMAT_CATALOG.find(
+                    (entry) => entry.id === shelf.format,
+                  )!;
+                  const formatTheme = DEBATE_FORMAT_VISUAL_THEMES[shelf.format];
+                  const collapsed = collapsedArchiveFormatShelves.has(shelf.format);
+                  const shelfListId = `debate-archive-${shelf.format}-shelf`;
+                  const countLabel = shelf.groups.length === 1
+                    ? `1 ${formatTheme.archiveNoun}`
+                    : `${shelf.groups.length} ${formatTheme.archiveNounPlural}`;
+                  return (
+                    <section
+                      key={shelf.format}
+                      className={styles.archiveFormatShelf}
+                      data-archive-format={shelf.format}
+                      data-collapsed={collapsed ? "true" : undefined}
+                      style={debateFormatThemeStyle(shelf.format, props.theme)}
+                      aria-labelledby={`debate-archive-${shelf.format}-heading`}
+                    >
+                      <h4
+                        id={`debate-archive-${shelf.format}-heading`}
+                        className={styles.archiveFormatShelfHeading}
+                      >
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCollapsedArchiveFormatShelves((current) => {
+                              const next = new Set(current);
+                              if (next.has(shelf.format)) next.delete(shelf.format);
+                              else next.add(shelf.format);
+                              return next;
+                            })
+                          }
+                          aria-expanded={!collapsed}
+                          aria-controls={shelfListId}
+                        >
+                          <span className={styles.archiveFormatShelfMark} aria-hidden="true">
+                            ◇
+                          </span>
+                          <span className={styles.archiveFormatShelfIdentity}>
+                            <strong>{descriptor.name}</strong>
+                            <small>{descriptor.productionName}</small>
+                          </span>
+                          <span className={styles.archiveFormatShelfCount}>{countLabel}</span>
+                          <span className={styles.archiveFormatShelfChevron} aria-hidden="true">
+                            ▾
+                          </span>
+                        </button>
+                      </h4>
+                      <ul
+                        id={shelfListId}
+                        className={styles.sessionList}
+                        hidden={collapsed}
+                      >
+                        {shelf.groups.map((group, index) =>
+                          renderArchiveSessionRow(group, index),
+                        )}
+                      </ul>
+                    </section>
+                  );
+                })}
+              </div>
             </section>
           ) : null}
         </div>
@@ -18929,6 +19146,7 @@ export function DebateExperience(
       data-debate-surface="dashboard"
       data-debate-format={format}
       data-theme={props.theme}
+      style={debateFormatThemeStyle(format, props.theme)}
     >
       <header className={styles.lobbyHeader}>
         <button
@@ -19479,6 +19697,8 @@ export function DebateExperience(
                   mansions={mysteryMansionBundles}
                   selectedMansionId={mysteryMansionBundleId}
                   busy={mansionPackageState !== "idle"}
+                  responseMode={props.responseMode === "local" ? "local" : "online"}
+                  audioVolume={props.audioVolume}
                   exportPassword={mansionExportPassword}
                   onExportPasswordChange={setMansionExportPassword}
                   onSelect={(mansionId) => chooseInstalledMansion(mansionId)}
@@ -19486,8 +19706,18 @@ export function DebateExperience(
                   onUpdate={updateInstalledMansion}
                   onClone={cloneInstalledMansion}
                   onSaveTopology={saveInstalledMansionTopology}
+                  onGenerateRoomArt={(mansion, roomId) => mutateSavedMansionRoomArt(mansion, roomId, "generate")}
+                  onAcceptRoomArt={(mansion, roomId) => mutateSavedMansionRoomArt(mansion, roomId, "accept")}
+                  onDiscardRoomArt={(mansion, roomId) => mutateSavedMansionRoomArt(mansion, roomId, "discard")}
                   onExport={(mansion) => void exportSavedMansion(mansion)}
-                  onPlayTheme={playSavedMansionTheme}
+                  onGenerateTheme={(mansion) => mutateSavedMansionTheme(mansion, "generate")}
+                  onAcceptTheme={(mansion) => mutateSavedMansionTheme(mansion, "accept")}
+                  onDiscardTheme={(mansion) => mutateSavedMansionTheme(mansion, "discard")}
+                  onUndoTheme={(mansion) => mutateSavedMansionTheme(mansion, "undo")}
+                  onGenerateAtmosphere={(mansion) => mutateSavedMansionAtmosphere(mansion, "generate")}
+                  onAcceptAtmosphere={(mansion) => mutateSavedMansionAtmosphere(mansion, "accept")}
+                  onDiscardAtmosphere={(mansion) => mutateSavedMansionAtmosphere(mansion, "discard")}
+                  onUndoAtmosphere={(mansion) => mutateSavedMansionAtmosphere(mansion, "undo")}
                   onRemove={(mansion) => void removeSavedMansion(mansion)}
                 />
                 <div className={mysteryStyles.guidedSecondaryAction} data-tutorial-target="whodunnit-mansion-library">
@@ -19535,7 +19765,7 @@ export function DebateExperience(
                     data-selected={!selectedMysteryMansionBundle && mysteryPreset === "custom" ? "true" : undefined}
                     aria-pressed={!selectedMysteryMansionBundle && mysteryPreset === "custom"}
                     disabled={Boolean(inspectedMysterySeed)}
-                    onClick={() => { setMysteryMansionSource("new"); setMysteryMansionBundleId(""); setMysteryPreset("custom"); setMysteryNonce(nextMysteryRecipeNonce()); }}
+                    onClick={() => { setMysteryMansionSource("new"); setMysteryMansionBundleId(""); setMysteryPreset("custom"); setMysteryTotalRooms((current) => normalizeWhodunnitCustomMansionRoomCount(current, mysteryCustomSuspectCount)); setMysteryNonce(nextMysteryRecipeNonce()); }}
                   >
                     <div className={`${mysteryStyles.presetThumbnail} ${mysteryStyles.presetCustomThumbnail}`} aria-hidden="true"><span>?</span></div>
                     <strong>Custom</strong><em>{!selectedMysteryMansionBundle && mysteryPreset === "custom" ? "Selected ✓" : "Choose"}</em><span>2–3 floors · 5–18 rooms</span><small>4–8 suspects</small>
@@ -19544,8 +19774,8 @@ export function DebateExperience(
                 {mysteryPreset === "custom" && !inspectedMysterySeed && !selectedMysteryMansionBundle ? (
                   <div className={mysteryStyles.advancedGrid}>
                     <label>Floors <input type="number" min={2} max={3} value={mysteryFloors} onChange={(event) => { setMysteryFloors(Math.max(2, Math.min(3, Number(event.currentTarget.value) || 2))); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
-                    <label>Rooms <input type="number" min={Math.max(5, mysteryCustomSuspectCount + 1)} max={18} value={mysteryTotalRooms} onChange={(event) => { setMysteryTotalRooms(Number(event.currentTarget.value)); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
-                    <label>Suspects <input type="number" min={4} max={8} value={mysteryCustomSuspectCount} onChange={(event) => { setMysteryCustomSuspectCount(Math.max(4, Math.min(8, Number(event.currentTarget.value) || 4))); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
+                    <label>Rooms <input type="number" min={mysteryCustomRoomMinimum} max={18} value={normalizedMysteryTotalRooms} onChange={(event) => { setMysteryTotalRooms(normalizeWhodunnitCustomMansionRoomCount(event.currentTarget.value, mysteryCustomSuspectCount)); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
+                    <label>Suspects <input type="number" min={4} max={8} value={mysteryCustomSuspectCount} onChange={(event) => { const nextSuspectCount = Math.max(4, Math.min(8, Number(event.currentTarget.value) || 4)); setMysteryCustomSuspectCount(nextSuspectCount); setMysteryTotalRooms((current) => normalizeWhodunnitCustomMansionRoomCount(current, nextSuspectCount)); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
                   </div>
                 ) : null}
               </div>
@@ -19557,9 +19787,21 @@ export function DebateExperience(
           <div className={mysteryStyles.caseDial}>
             <header className={mysteryStyles.setupStepHeading}><div><small>2</small><h2>Set the story direction</h2></div><span>Optional idea · balanced defaults</span></header>
             <label className={mysteryStyles.setupField} data-tutorial-target="whodunnit-v2-spark">
-              <span><strong>Mansion idea</strong><em>Optional</em></span>
+              <span><strong>Mystery spark</strong><em>Optional</em></span>
               <textarea value={mysteryInspiration} maxLength={2000} rows={4} onChange={(event) => { setMysteryInspiration(event.currentTarget.value); setMysteryNonce(nextMysteryRecipeNonce()); }} placeholder="Leave blank for Surprise me — or describe a mood, era, setting, or story spark." />
-              <small>PRISM uses this to cast, dress, and perform one coherent house. It never replaces the sealed case logic.</small>
+              <small>PRISM uses this to cast, dress, and compose one coherent case. Deterministic case logic—not the writing model—freezes the truth.</small>
+              <div className={mysteryStyles.sparkInterpretation} aria-live="polite">
+                <span>PRISM heard</span>
+                {mysterySparkMotifs.length ? (
+                  <div>
+                    {mysterySparkMotifs.map((motif) => (
+                      <span key={motif.id}>{motif.label}</span>
+                    ))}
+                  </div>
+                ) : (
+                  <small>Leave the spark blank for a seeded surprise.</small>
+                )}
+              </div>
             </label>
             <label className={mysteryStyles.setupField}><span><strong>Difficulty</strong><em>Choose one</em></span><select value={mysteryDifficulty} onChange={(event) => { setMysteryDifficulty(event.currentTarget.value as DebateMysteryDifficulty); setMysteryNonce(nextMysteryRecipeNonce()); }}><option value="casual">Casual · clearer proof</option><option value="classic">Classic · balanced</option><option value="mastermind">Mastermind · layered contradictions</option></select><small>Classic is the balanced default. Mansion size changes length; difficulty changes deduction complexity.</small></label>
           </div>
@@ -19781,69 +20023,78 @@ export function DebateExperience(
           >
             <legend>Debate format</legend>
             {DEBATE_FORMAT_CATALOG.filter(
-              (option) => option.availability === "available",
+              (option) =>
+                option.availability === "available" || option.id === "flyting",
             ).map((option) => {
+              const comingSoon = option.availability === "coming_soon";
               const participantForumOnly =
                 playerRole === "participant" && option.id === "turnabout";
-              const disabled = participantForumOnly;
+              const disabled = participantForumOnly || comingSoon;
+              const renderFormatCard = (
+                binding?: PrismRefractBinding,
+              ): React.JSX.Element => (
+                <label
+                  {...binding}
+                  key={option.id}
+                  data-selected={format === option.id ? "true" : undefined}
+                  data-availability={
+                    participantForumOnly
+                      ? "participant-forum-only"
+                      : option.availability
+                  }
+                  aria-disabled={disabled ? "true" : undefined}
+                  tabIndex={disabled ? 0 : undefined}
+                >
+                  <input
+                    type="radio"
+                    name="debate-format"
+                    value={option.id}
+                    checked={format === option.id}
+                    disabled={disabled}
+                    onChange={() => {
+                      if (disabled) return;
+                      if (option.id === "whodunnit") {
+                        setFormat("whodunnit");
+                        if (playerRole === "judge") {
+                          setPlayerRole("participant");
+                        }
+                        setFormality((current) =>
+                          current === "plainspoken" ? "structured" : current,
+                        );
+                        setCastTuningOpen(true);
+                        setRoleChecks([]);
+                        return;
+                      }
+                      if (
+                        option.id !== "forum" &&
+                        option.id !== "turnabout"
+                      ) {
+                        return;
+                      }
+                      setFormat(option.id);
+                      setRoleChecks([]);
+                    }}
+                  />
+                  <strong>
+                    {option.name}
+                    <em>{option.productionName}</em>
+                  </strong>
+                  <span>{option.summary}</span>
+                  <small>{option.cadence}</small>
+                  {comingSoon ? (
+                    <b>Coming soon</b>
+                  ) : participantForumOnly ? (
+                    <b>Participant uses Forum</b>
+                  ) : null}
+                </label>
+              );
+              if (comingSoon) return renderFormatCard();
               return (
                 <PrismRefractTarget
                   target={formatRefractMagic(option.id as DebateFormatId)}
                   key={option.id}
                 >
-                  {(binding) => (
-                    <label
-                      {...binding}
-                      data-selected={format === option.id ? "true" : undefined}
-                      data-availability={
-                        participantForumOnly
-                          ? "participant-forum-only"
-                          : option.availability
-                      }
-                      aria-disabled={disabled ? "true" : undefined}
-                      tabIndex={disabled ? 0 : undefined}
-                    >
-                      <input
-                        type="radio"
-                        name="debate-format"
-                        value={option.id}
-                        checked={format === option.id}
-                        disabled={disabled}
-                        onChange={() => {
-                          if (disabled) return;
-                          if (option.id === "whodunnit") {
-                            setFormat("whodunnit");
-                            if (playerRole === "judge") {
-                              setPlayerRole("participant");
-                            }
-                            setFormality((current) =>
-                              current === "plainspoken" ? "structured" : current,
-                            );
-                            setCastTuningOpen(true);
-                            setRoleChecks([]);
-                            return;
-                          }
-                          if (
-                            option.id !== "forum" &&
-                            option.id !== "turnabout"
-                          ) {
-                            return;
-                          }
-                          setFormat(option.id);
-                          setRoleChecks([]);
-                        }}
-                      />
-                      <strong>
-                        {option.name}
-                        <em>{option.productionName}</em>
-                      </strong>
-                      <span>{option.summary}</span>
-                      <small>{option.cadence}</small>
-                      {participantForumOnly ? (
-                        <b>Participant uses Forum</b>
-                      ) : null}
-                    </label>
-                  )}
+                  {renderFormatCard}
                 </PrismRefractTarget>
               );
             })}
@@ -25013,6 +25264,7 @@ export function DebateExperience(
     const forSourceBot = stageAlignmentPreviewCast.forAdvocate;
     const moderatorSourceBot = stageAlignmentPreviewCast.moderator;
     const againstSourceBot = stageAlignmentPreviewCast.againstAdvocate;
+    const witnessSourceBot = stageAlignmentPreviewCast.witness;
     const forBot = debateAlignmentPreviewSnapshot(
       forSourceBot,
       "advocate",
@@ -25027,6 +25279,11 @@ export function DebateExperience(
       againstSourceBot,
       "advocate",
       "against",
+    );
+    const witnessBot = debateAlignmentPreviewSnapshot(
+      witnessSourceBot,
+      "advocate",
+      null,
     );
     const alignmentCast = [
       {
@@ -25098,10 +25355,22 @@ export function DebateExperience(
     const stageAlignmentEvidenceOnlyCamera =
       stageAlignmentPreviewCamera === "left" ||
       stageAlignmentPreviewCamera === "right";
+    const stageAlignmentMainPreview =
+      stageAlignmentPreviewCamera === "wide" &&
+      stageAlignmentWhodunnitPreview === null &&
+      !stageAlignmentJuryPreview;
+    const mainCourtPropItems = [
+      "wideEvidenceTable",
+      "wideWitnessSilhouette",
+    ] as const satisfies readonly DebateStageWhodunnitCourtItem[];
+    const activeMainCourtPlacement =
+      stageAlignmentDraft.whodunnitCourt[stageAlignmentMainCourtProp];
+    const defaultActiveMainCourtPlacement =
+      DEFAULT_DEBATE_STAGE_ALIGNMENT.whodunnitCourt[
+        stageAlignmentMainCourtProp
+      ];
     const whodunnitPreviewItems: readonly DebateStageWhodunnitCourtItem[] =
-      stageAlignmentWhodunnitPreview === "wide"
-        ? ["wideEvidenceTable", "wideWitnessSilhouette"]
-        : stageAlignmentWhodunnitPreview === "witness"
+      stageAlignmentWhodunnitPreview === "witness"
           ? [
               "witness",
               "prosecutionMini",
@@ -25121,6 +25390,11 @@ export function DebateExperience(
       witnessGlyph: "Witness glyph",
     };
     const whodunnitPreviewIsDefault = whodunnitPreviewItems.every(
+      (item) =>
+        JSON.stringify(stageAlignmentDraft.whodunnitCourt[item]) ===
+        JSON.stringify(DEFAULT_DEBATE_STAGE_ALIGNMENT.whodunnitCourt[item]),
+    );
+    const mainCourtPropsAreDefault = mainCourtPropItems.every(
       (item) =>
         JSON.stringify(stageAlignmentDraft.whodunnitCourt[item]) ===
         JSON.stringify(DEFAULT_DEBATE_STAGE_ALIGNMENT.whodunnitCourt[item]),
@@ -25246,6 +25520,7 @@ export function DebateExperience(
         ? whodunnitPreviewIsDefault
       : placementIsDefault &&
         evidenceTableIsDefault &&
+        (!stageAlignmentMainPreview || mainCourtPropsAreDefault) &&
         (stageAlignmentPreviewCamera !== "moderator" || gavelIsDefault);
     const lightBlendModesAreDefault = (["dark", "light"] as const).every(
       (theme) =>
@@ -25396,14 +25671,12 @@ export function DebateExperience(
                 <p>
                   {stageAlignmentJuryPreview
                     ? "Place each juror independently, then align the Jury chamber evidence table and public vote display."
-                    : stageAlignmentWhodunnitPreview === "wide"
-                    ? "Place the Whodunnit evidence table and witness silhouette in the locked courtroom establishing shot."
                     : stageAlignmentWhodunnitPreview === "witness"
                       ? "Place the witness, both live counsel minis, and the witness identity plate in the locked testimony camera."
                       : stageAlignmentPreviewCamera === "moderator"
                     ? "Place the moderator bot, nameplate, and glyph plate independently from Main."
                     : stageAlignmentPreviewCamera === "wide"
-                      ? "Place every bot, nameplate, and glyph plate in the Main Forum without changing the close-ups."
+                      ? "Place every bot, nameplate, and glyph plate in Main, then tune its evidence table and witness silhouette independently."
                       : `Place the source pamphlet and exhibit independently in the ${stageAlignmentPreviewCameraLabel} debater close-up.`}{" "}
                   {stageAlignmentJuryPreview || stageAlignmentWhodunnitPreview
                     ? "Use the exact position and scale controls below; all values save with this account's Stage Alignment preset."
@@ -25443,16 +25716,6 @@ export function DebateExperience(
                         </button>
                       ),
                     )}
-                    <button
-                      type="button"
-                      aria-pressed={stageAlignmentWhodunnitPreview === "wide"}
-                      onClick={() => {
-                        setStageAlignmentJuryPreview(false);
-                        setStageAlignmentWhodunnitPreview("wide");
-                      }}
-                    >
-                      Court wide
-                    </button>
                     <button
                       type="button"
                       aria-pressed={stageAlignmentWhodunnitPreview === "witness"}
@@ -25568,6 +25831,15 @@ export function DebateExperience(
                             : normalizeDebateStageAlignment({
                                 ...current,
                                 main: DEFAULT_DEBATE_STAGE_ALIGNMENT.main,
+                                whodunnitCourt: {
+                                  ...current.whodunnitCourt,
+                                  wideEvidenceTable:
+                                    DEFAULT_DEBATE_STAGE_ALIGNMENT
+                                      .whodunnitCourt.wideEvidenceTable,
+                                  wideWitnessSilhouette:
+                                    DEFAULT_DEBATE_STAGE_ALIGNMENT
+                                      .whodunnitCourt.wideWitnessSilhouette,
+                                },
                                 moderatorMicroScales:
                                   DEFAULT_DEBATE_STAGE_ALIGNMENT.moderatorMicroScales,
                                 evidenceTable: {
@@ -25744,82 +26016,15 @@ export function DebateExperience(
                       >
                         <section
                           className={mysteryV2Styles.courtStage}
-                          data-camera={stageAlignmentWhodunnitPreview}
-                          aria-label={
-                            stageAlignmentWhodunnitPreview === "wide"
-                              ? "Whodunnit Court wide alignment preview"
-                              : "Whodunnit witness alignment preview"
-                          }
+                          data-camera="witness"
+                          aria-label="Whodunnit witness alignment preview"
                           style={{ position: "absolute", inset: 0 }}
                         >
                           <div
                             className={mysteryV2Styles.courtBackdrop}
                             aria-hidden="true"
                           />
-                          {stageAlignmentWhodunnitPreview === "wide" ? (
-                            <div
-                              className={mysteryV2Styles.wideCourtComposition}
-                            >
-                              <article
-                                className={mysteryV2Styles.wideCourtPresence}
-                                data-role="prosecution"
-                                style={{
-                                  "--court-presence-color":
-                                    forBot.color ?? "#72d7ff",
-                                } as CSSProperties}
-                              >
-                                {renderAlignmentCourtAvatar(
-                                  forBot,
-                                  "for",
-                                  "mini",
-                                )}
-                                <small>Prosecution</small>
-                              </article>
-                              <article
-                                className={mysteryV2Styles.wideCourtPresence}
-                                data-role="judge"
-                                style={{
-                                  "--court-presence-color":
-                                    moderatorBot.color ?? "#d5c8ff",
-                                } as CSSProperties}
-                              >
-                                {renderAlignmentCourtAvatar(
-                                  moderatorBot,
-                                  "moderator",
-                                  "mini",
-                                )}
-                                <small>Judge</small>
-                              </article>
-                              <article
-                                className={mysteryV2Styles.wideCourtPresence}
-                                data-role="defense"
-                                style={{
-                                  "--court-presence-color":
-                                    againstBot.color ?? "#ff7eaa",
-                                } as CSSProperties}
-                              >
-                                {renderAlignmentCourtAvatar(
-                                  againstBot,
-                                  "against",
-                                  "mini",
-                                )}
-                                <small>Defense</small>
-                              </article>
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                className={mysteryV2Styles.wideEvidenceTable}
-                                src={`/coffee-table/table_${stageAlignmentPreviewTheme}.png`}
-                                alt="Evidence table"
-                              />
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                className={mysteryV2Styles.wideWitnessSilhouette}
-                                src="/debate/whodunnit-witness-silhouette.png"
-                                alt="Witness silhouette"
-                              />
-                            </div>
-                          ) : (
-                            <>
+                          <>
                               <div
                                 className={mysteryV2Styles.galleryRail}
                                 aria-hidden="true"
@@ -25899,14 +26104,14 @@ export function DebateExperience(
                                 className={mysteryV2Styles.witnessStand}
                                 style={{
                                   "--witness-color":
-                                    moderatorBot.color ?? "#a98cff",
+                                    witnessBot.color ?? "#a98cff",
                                 } as CSSProperties}
                               >
                                 <div
                                   className={mysteryV2Styles.witnessAvatar}
                                 >
                                   {renderAlignmentCourtAvatar(
-                                    moderatorBot,
+                                    witnessBot,
                                     "moderator",
                                     "full",
                                   )}
@@ -25919,14 +26124,16 @@ export function DebateExperience(
                                   aria-hidden="true"
                                 />
                               </section>
-                            </>
-                          )}
+                          </>
                         </section>
                       </div>
                     ) : null}
                     <div
                       className={styles.forumCamera}
                       data-camera-view={stageAlignmentPreviewCamera}
+                      data-whodunnit-court-preview={
+                        stageAlignmentMainPreview ? "main" : undefined
+                      }
                       data-alignment-evidence-only={
                         stageAlignmentEvidenceOnlyCamera ? "true" : undefined
                       }
@@ -25938,6 +26145,39 @@ export function DebateExperience(
                         aria-hidden="true"
                       />
                       <DebateForumLightMasks depth="backdrop" />
+                      {stageAlignmentMainPreview ? (
+                        <div
+                          className={mysteryV2Styles.wideCourtComposition}
+                          data-debate-main-court-prop={
+                            stageAlignmentMainCourtProp
+                          }
+                          aria-label={
+                            stageAlignmentMainCourtProp ===
+                            "wideEvidenceTable"
+                              ? "Main evidence table preview"
+                              : "Main witness silhouette preview"
+                          }
+                        >
+                          {stageAlignmentMainCourtProp ===
+                          "wideEvidenceTable" ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              className={mysteryV2Styles.wideEvidenceTable}
+                              src={`/coffee-table/table_${stageAlignmentPreviewTheme}.png`}
+                              alt="Evidence table"
+                            />
+                          ) : (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              className={
+                                mysteryV2Styles.wideWitnessSilhouette
+                              }
+                              src="/debate/whodunnit-witness-silhouette.png"
+                              alt="Witness silhouette"
+                            />
+                          )}
+                        </div>
+                      ) : null}
                       {interactiveAlignmentCast.map(
                         ({ role, bot, presentation }) => {
                           const soundCheckPlaying =
@@ -26303,11 +26543,7 @@ export function DebateExperience(
                     <header>
                       <div>
                         <span className={styles.eyebrow}>Whodunnit Court</span>
-                        <strong>
-                          {stageAlignmentWhodunnitPreview === "wide"
-                            ? "Wide angle view"
-                            : "Witness stand view"}
-                        </strong>
+                        <strong>Witness stand view</strong>
                         <small>
                           Locked camera composition · saved with Stage Alignment
                         </small>
@@ -27158,6 +27394,134 @@ export function DebateExperience(
                     </small>
                   </div>
                 </section>
+                {stageAlignmentMainPreview ? (
+                  <section
+                    className={styles.alignmentEvidenceTuner}
+                    aria-label="Main courtroom foreground controls"
+                    data-debate-main-court-prop-tuner="true"
+                    data-main-court-prop={stageAlignmentMainCourtProp}
+                  >
+                    <header>
+                      <div>
+                        <span className={styles.eyebrow}>Main view</span>
+                        <strong>
+                          {stageAlignmentMainCourtProp ===
+                          "wideEvidenceTable"
+                            ? "Evidence table"
+                            : "Witness silhouette"}
+                        </strong>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={
+                          JSON.stringify(activeMainCourtPlacement) ===
+                          JSON.stringify(defaultActiveMainCourtPlacement)
+                        }
+                        onClick={() =>
+                          setStageAlignmentDraft((current) =>
+                            updateDebateStageWhodunnitCourtPlacement(
+                              current,
+                              stageAlignmentMainCourtProp,
+                              defaultActiveMainCourtPlacement,
+                            ),
+                          )
+                        }
+                      >
+                        Reset
+                      </button>
+                    </header>
+                    <div className={styles.alignmentEvidenceEditor}>
+                      <div
+                        className={styles.alignmentEvidenceKindToggle}
+                        role="group"
+                        aria-label="Main courtroom foreground to align"
+                      >
+                        {mainCourtPropItems.map((item) => (
+                          <button
+                            type="button"
+                            key={item}
+                            aria-pressed={stageAlignmentMainCourtProp === item}
+                            data-debate-main-court-prop-toggle={item}
+                            onClick={() => setStageAlignmentMainCourtProp(item)}
+                          >
+                            {item === "wideEvidenceTable"
+                              ? "Table"
+                              : "Witness"}
+                          </button>
+                        ))}
+                      </div>
+                      <div className={styles.alignmentGavelTunerRows}>
+                        {(
+                          [
+                            {
+                              key: "x",
+                              label: "Horizontal",
+                              min: DEBATE_STAGE_WHODUNNIT_POSITION_MIN,
+                              max: DEBATE_STAGE_WHODUNNIT_POSITION_MAX,
+                              step: DEBATE_STAGE_WHODUNNIT_POSITION_STEP,
+                            },
+                            {
+                              key: "y",
+                              label: "Vertical",
+                              min: DEBATE_STAGE_WHODUNNIT_POSITION_MIN,
+                              max: DEBATE_STAGE_WHODUNNIT_POSITION_MAX,
+                              step: DEBATE_STAGE_WHODUNNIT_POSITION_STEP,
+                            },
+                            {
+                              key: "scale",
+                              label: "Scale",
+                              min: DEBATE_STAGE_WHODUNNIT_SCALE_MIN,
+                              max: DEBATE_STAGE_WHODUNNIT_SCALE_MAX,
+                              step: DEBATE_STAGE_WHODUNNIT_SCALE_STEP,
+                            },
+                          ] as const
+                        ).map((control) => (
+                          <label key={control.key}>
+                            <span>
+                              {control.label}
+                              <output>
+                                {control.key !== "scale" &&
+                                activeMainCourtPlacement[control.key] > 0
+                                  ? "+"
+                                  : ""}
+                                {activeMainCourtPlacement[
+                                  control.key
+                                ].toFixed(
+                                  control.key === "scale" ? 0 : 1,
+                                )}
+                                %
+                              </output>
+                            </span>
+                            <input
+                              type="range"
+                              min={control.min}
+                              max={control.max}
+                              step={control.step}
+                              value={activeMainCourtPlacement[control.key]}
+                              aria-label={`${stageAlignmentMainCourtProp === "wideEvidenceTable" ? "Evidence table" : "Witness silhouette"} ${control.label.toLowerCase()}`}
+                              onChange={(event) => {
+                                const nextValue = Number(
+                                  event.currentTarget.value,
+                                );
+                                setStageAlignmentDraft((current) =>
+                                  updateDebateStageWhodunnitCourtPlacement(
+                                    current,
+                                    stageAlignmentMainCourtProp,
+                                    { [control.key]: nextValue },
+                                  ),
+                                );
+                              }}
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <small>
+                      Table and witness silhouette retain separate saved
+                      positions. Main shows one foreground at a time.
+                    </small>
+                  </section>
+                ) : null}
                 <section
                   className={styles.alignmentLightingTuner}
                   aria-label="Debate light color mask controls"
@@ -30885,17 +31249,24 @@ export function DebateExperience(
       activeSession.formatState.version === 2
     ? activeSession.formatState.config.mansionBundleId
     : null;
+  const activeMysteryMansionSnapshot = activeSession?.format === "whodunnit" &&
+      activeSession.formatState.format === "whodunnit" &&
+      activeSession.formatState.version === 2
+    ? activeSession.formatState.config.mansionSnapshot
+    : null;
   const activeMysteryMansion = activeMysteryMansionBundleId
     ? mysteryMansionBundles.find(
         (mansion) => mansion.id === activeMysteryMansionBundleId,
       ) ?? null
     : null;
-  const activeMysteryMansionExteriorUrl = activeMysteryMansion
-    ? installedMansionThumbnailSourceV1(
+  const activeMysteryMansionExteriorUrl = activeMysteryMansionSnapshot?.presentation.thumbnailAssetId
+    ? `/api/debates/mystery-mansions/${encodeURIComponent(activeMysteryMansionSnapshot.sourceBundleId)}/assets/${encodeURIComponent(activeMysteryMansionSnapshot.presentation.thumbnailAssetId)}/file`
+    : activeMysteryMansion
+      ? installedMansionThumbnailSourceV1(
         activeMysteryMansion,
         resolveInstalledMansionPresentationV1(activeMysteryMansion).thumbnailAssetId,
       )
-    : null;
+      : null;
   const mysterySharedProps = {
     bots,
     playerName: props.playerName,

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import type { DebateMysteryMansionBundleRoomV1 } from "@localai/shared";
 import {
   cloneDebateMysteryMansionBundleV1,
+  getDebateMysteryMansionAssetFileV1,
   getDebateMysteryMansionBundleV2,
   updateDebateMysteryMansionTopologyV1,
 } from "../debate-mystery-mansion-bundles.ts";
@@ -12,6 +14,7 @@ import {
   exportInternalMansionPackageFromDbV1,
 } from "../debate-mystery-mansion-codec.ts";
 import { initializeDatabase } from "../db.ts";
+import { encryptBytes } from "../security.ts";
 
 function room(
   id: string,
@@ -57,6 +60,35 @@ function editedRooms(): DebateMysteryMansionBundleRoomV1[] {
   ];
 }
 
+function addRoomAssetRef(
+  db: DatabaseSync,
+  assetId: string,
+  logicalId: string,
+  now: string,
+): void {
+  const encrypted = encryptBytes(Buffer.from(assetId), Buffer.alloc(32, 7));
+  db.prepare(
+    `INSERT INTO debate_mystery_mansion_assets
+       (id, user_id, ciphertext, cipher_iv, cipher_tag, sha256, byte_size,
+        mime_type, provider, model, created_at, updated_at)
+     VALUES (?, 'owner', ?, ?, ?, ?, ?, 'image/webp', 'fixture', 'fixture', ?, ?)`,
+  ).run(
+    assetId,
+    encrypted.ciphertext,
+    encrypted.iv,
+    encrypted.tag,
+    createHash("sha256").update(assetId).digest("hex"),
+    Buffer.byteLength(assetId),
+    now,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO debate_mystery_mansion_asset_refs
+       (bundle_id, user_id, asset_id, role, logical_id, created_at)
+     VALUES ('source', 'owner', ?, 'room', ?, ?)`,
+  ).run(assetId, logicalId, now);
+}
+
 describe("source-preserving Mansion Editor storage", () => {
   it("clones provenance and saves only the derivative topology", () => {
     const db = initializeDatabase(new DatabaseSync(":memory:"));
@@ -94,6 +126,10 @@ describe("source-preserving Mansion Editor storage", () => {
       now,
       now,
     );
+    addRoomAssetRef(db, "foyer-legacy", "foyer", now);
+    addRoomAssetRef(db, "foyer-accepted", "foyer:accepted-v2", now);
+    addRoomAssetRef(db, "parlor-legacy", "parlor", now);
+    addRoomAssetRef(db, "library-candidate", "library:candidate-v2", now);
 
     const clone = cloneDebateMysteryMansionBundleV1(db, "owner", "source");
     assert.notEqual(clone.id, "source");
@@ -102,6 +138,66 @@ describe("source-preserving Mansion Editor storage", () => {
     assert.equal(clone.derivation?.sourceBundleId, "source");
     assert.equal(clone.derivation?.sourcePackageId, "violet-package");
     assert.equal(clone.library?.overrides.description, "A retained local description.");
+    assert.equal(clone.layoutV2?.version, 2);
+    assert.equal(clone.floors, 2);
+    assert.equal(clone.layoutV2?.entities.filter((entity) => entity.kind === "room").length, 5);
+    assert.equal(getDebateMysteryMansionBundleV2(db, "owner", "source").layoutV2, null);
+    const clonedRooms = new Map(
+      clone.layoutV2?.entities
+        .filter((entity) => entity.kind === "room")
+        .map((entity) => [entity.id, entity.acceptedRoomAssetId]),
+    );
+    assert.equal(clonedRooms.get("foyer"), "foyer-accepted");
+    assert.equal(clonedRooms.get("parlor"), "parlor-legacy");
+    assert.equal(clonedRooms.get("library"), null);
+    assert.deepEqual(
+      getDebateMysteryMansionAssetFileV1(
+        db,
+        Buffer.alloc(32, 7),
+        "owner",
+        clone.id,
+        "foyer-accepted",
+      ),
+      { mimeType: "image/webp", bytes: Buffer.from("foyer-accepted") },
+    );
+    assert.deepEqual(
+      clone.assets.filter((asset) => asset.role === "room").map((asset) => ({
+        id: asset.id,
+        logicalId: asset.logicalId,
+      })),
+      [
+        { id: "foyer-legacy", logicalId: "foyer" },
+        { id: "foyer-accepted", logicalId: "foyer:accepted-v2" },
+        { id: "library-candidate", logicalId: "library:candidate-v2" },
+        { id: "parlor-legacy", logicalId: "parlor" },
+      ],
+    );
+    assert.equal(
+      (db.prepare(
+        "SELECT COUNT(*) AS count FROM debate_mystery_mansion_assets WHERE user_id = 'owner'",
+      ).get() as { count: number }).count,
+      4,
+    );
+    assert.ok(clone.layoutV2);
+    db.prepare(
+      "UPDATE debate_mystery_mansion_bundles SET layout_json = ? WHERE id = ? AND user_id = 'owner'",
+    ).run(
+      JSON.stringify({
+        ...clone.layoutV2,
+        entities: clone.layoutV2.entities.map((entity) => entity.kind === "room"
+          ? { ...entity, acceptedRoomAssetId: null }
+          : entity),
+      }),
+      clone.id,
+    );
+    const recoveredRooms = new Map(
+      getDebateMysteryMansionBundleV2(db, "owner", clone.id).layoutV2?.entities
+        .filter((entity) => entity.kind === "room")
+        .map((entity) => [entity.id, entity.acceptedRoomAssetId]),
+    );
+    assert.equal(recoveredRooms.get("foyer"), "foyer-accepted");
+    assert.equal(recoveredRooms.get("parlor"), "parlor-legacy");
+    assert.equal(recoveredRooms.get("library"), null);
     assert.throws(
       () => updateDebateMysteryMansionTopologyV1(db, "owner", "source", { rooms: editedRooms() }),
       /Duplicate this mansion/u,

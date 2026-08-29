@@ -13,6 +13,7 @@ import {
   filterVisibleModelOptions,
   filterVisibleOnlineModelOptions,
   inferOnlineProviderForModelChoice,
+  markStructuredOutputModelsUnavailable,
   nextResponseMode,
   resolveModelChoiceForResponseMode,
   responseModeForProvider,
@@ -73,16 +74,13 @@ describe("provider mode helpers", () => {
     );
   });
 
-  it("infers the online provider from a concrete selected model", () => {
+  it("rejects a stale Cloud choice from the global foreground picker", () => {
     const combined = combinedOnlineModelOptions(
       ollamaCloudModels,
       openAiModels,
       anthropicModels,
     );
-    assert.equal(
-      inferOnlineProviderForModelChoice("minimax-m2.5:cloud", combined),
-      "ollama_cloud",
-    );
+    assert.equal(inferOnlineProviderForModelChoice("minimax-m2.5:cloud", combined), "openai");
     assert.equal(
       inferOnlineProviderForModelChoice("claude-sonnet-4-6", combined),
       "anthropic"
@@ -124,13 +122,6 @@ describe("provider mode helpers", () => {
     assert.deepEqual(
       fallbackOnlineModelIdsForProvider("anthropic", "claude-opus-4-8"),
       ["claude-opus-4-8", "claude-sonnet-4-6"]
-    );
-    assert.deepEqual(
-      fallbackOnlineModelIdsForProvider(
-        "ollama_cloud",
-        "minimax-m2.5:cloud",
-      ),
-      ["minimax-m2.5:cloud"],
     );
   });
 
@@ -174,6 +165,27 @@ describe("provider mode helpers", () => {
       [],
     );
     assert.deepEqual(visible.map((model) => model.id), ["gpt-4o-mini"]);
+  });
+
+  it("keeps checked capability-limited models visible with an explanation", () => {
+    const candidates: ProviderModeModelOption[] = [
+      { id: "gpt-5.6-sol", provider: "openai" },
+      {
+        id: "ollama-cloud-direct:kimi-k2.7-code:cloud",
+        provider: "ollama_cloud",
+        supportsStructuredOutput: false,
+      },
+    ];
+    const options = markStructuredOutputModelsUnavailable(
+      candidates,
+      "Debate and Whodunnit",
+    );
+    assert.equal(options.length, 2);
+    assert.equal(options[0]?.disabledReason, undefined);
+    assert.match(
+      options[1]?.disabledReason ?? "",
+      /Debate and Whodunnit requires structured output/u,
+    );
   });
 
   it("resolves legacy state with both online provider slots populated", () => {
