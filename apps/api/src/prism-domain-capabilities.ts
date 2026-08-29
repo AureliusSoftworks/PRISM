@@ -3996,6 +3996,7 @@ function signalEpisodeCreateCapability(): PrismCapabilityDefinition {
             ? "online"
             : "local";
       const provider =
+        input.preferredProvider === "ollama_cloud" ||
         input.preferredProvider === "openai" ||
         input.preferredProvider === "anthropic"
           ? input.preferredProvider
@@ -4083,6 +4084,7 @@ function signalEpisodeCreateCapability(): PrismCapabilityDefinition {
             ? input.producerBrief
             : "",
         preferredProvider:
+          input.preferredProvider === "ollama_cloud" ||
           input.preferredProvider === "openai" ||
           input.preferredProvider === "anthropic"
             ? input.preferredProvider

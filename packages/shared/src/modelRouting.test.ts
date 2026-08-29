@@ -598,12 +598,15 @@ describe("ONLINE Auto provider weights", () => {
         ],
       },
       routingContext: {
-        surface: "chat",
+        surface: "signal",
         inputText: "Analyze this carefully.",
+        structuredOutput: true,
+        toolUse: true,
+        research: true,
         highStakes: true,
-        simulatedEffortEnabled: false,
+        simulatedEffortEnabled: true,
       },
     });
-    assert.equal(resolved.autoRoute?.reasoningEffort, "minimal");
+    assert.equal(resolved.autoRoute?.reasoningEffort, "high");
   });
 });
