@@ -17,7 +17,7 @@ jobs:
   deterministic:
     name: Unit, integration, coverage, and browser smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     env:
       # Pull-request checkouts are detached; preserve the source branch for
       # branch-gated development surfaces such as Avatar Details Studio.
@@ -35,10 +35,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run deterministic test suites
-        run: npm test
-
-      - name: Enforce coverage thresholds
+      - name: Run deterministic suites and enforce coverage thresholds
         run: npm run test:coverage
 
       - name: Typecheck workspace
