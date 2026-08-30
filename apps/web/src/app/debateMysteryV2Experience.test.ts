@@ -885,6 +885,30 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(setupSource, /setMysteryRoomAssetSynthesis\] =\s*useState\(false\)/u);
     assert.match(setupSource, /setMysteryMusicAssetSynthesis\] =\s*useState\(false\)/u);
     assert.match(setupSource, /setMysteryAmbienceAssetSynthesis\] =\s*useState\(false\)/u);
+    assert.match(
+      setupSource,
+      /production: selectedMysteryMansionBundle[\s\S]{0,100}"Choose the evidence and music for this case\."/u,
+    );
+    assert.match(
+      setupSource,
+      /rooms:[\s\S]{0,100}!selectedMysteryMansionBundle[\s\S]{0,220}illustratedRooms:[\s\S]{0,140}!selectedMysteryMansionBundle/u,
+    );
+    assert.match(
+      setupSource,
+      /ambience:[\s\S]{0,100}!selectedMysteryMansionBundle/u,
+    );
+    assert.match(
+      setupSource,
+      /\{!selectedMysteryMansionBundle \? <label className=\{mysteryStyles\.setupField\}>Room art/u,
+    );
+    assert.match(
+      setupSource,
+      /\{!selectedMysteryMansionBundle \? <label[^>]+>[\s\S]{0,500}<strong>Rooms<\/strong>/u,
+    );
+    assert.match(
+      setupSource,
+      /\{!selectedMysteryMansionBundle \? <label[^>]+data-tutorial-target="whodunnit-v2-ambience-synthesis"/u,
+    );
     assert.match(setupSource, /props\.responseMode !== "local"/u);
     assert.match(setupSource, /Generated case art stays outside Images unless you save a revealed visual/u);
     assert.match(setupSource, /mysteryMansionBundleId/u);

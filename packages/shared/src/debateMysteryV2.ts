@@ -2282,6 +2282,36 @@ export function debateMysteryPremiumAvailableV2(): false {
   return false;
 }
 
+/** Case Forge may add evidence and music to an installed mansion, but never
+ * replace that reusable mansion's rooms or ambience. */
+export function resolveDebateMysteryAssetSynthesisV2(input: {
+  assetSynthesis?: Partial<DebateMysteryAssetSynthesisV2> | Record<string, unknown>;
+  investigationMode?: DebateMysteryInvestigationModeV2;
+  mansionBundleId?: string | null;
+}): DebateMysteryAssetSynthesisV2 {
+  const hasInstalledMansion = Boolean(input.mansionBundleId?.trim());
+  const includesInvestigation = input.investigationMode !== "court_only";
+  return {
+    evidence: input.assetSynthesis?.evidence === true,
+    rooms:
+      includesInvestigation &&
+      !hasInstalledMansion &&
+      input.assetSynthesis?.rooms === true,
+    illustratedRooms:
+      includesInvestigation &&
+      !hasInstalledMansion &&
+      input.assetSynthesis?.rooms === true &&
+      input.assetSynthesis?.illustratedRooms === true,
+    music:
+      includesInvestigation &&
+      input.assetSynthesis?.music === true,
+    ambience:
+      includesInvestigation &&
+      !hasInstalledMansion &&
+      input.assetSynthesis?.ambience === true,
+  };
+}
+
 export function resolveDebateMysteryConfigV2(
   value: DebateWhodunnitCreateConfigV2,
 ): DebateMysteryResolvedConfigV2 {
@@ -2338,24 +2368,15 @@ export function resolveDebateMysteryConfigV2(
   const spark = (value.spark?.trim() || value.inspiration.trim()).slice(0, 2_000);
   const investigationMode: DebateMysteryInvestigationModeV2 =
     value.investigationMode === "court_only" ? "court_only" : "full";
-  const assetSynthesis: DebateMysteryAssetSynthesisV2 = {
-    evidence: value.assetSynthesis?.evidence === true,
-    // Court-only cases never prepare investigation-only assets. These remain
-    // server-enforced even after their setup toggles become available.
-    rooms:
-      investigationMode === "full" &&
-      value.assetSynthesis?.rooms === true,
-    illustratedRooms:
-      investigationMode === "full" &&
-      value.assetSynthesis?.rooms === true &&
-      value.assetSynthesis?.illustratedRooms === true,
-    music:
-      investigationMode === "full" &&
-      value.assetSynthesis?.music === true,
-    ambience:
-      investigationMode === "full" &&
-      value.assetSynthesis?.ambience === true,
-  };
+  const mansionBundleId =
+    typeof value.mansionBundleId === "string" && value.mansionBundleId.trim()
+      ? value.mansionBundleId.trim().slice(0, 200)
+      : null;
+  const assetSynthesis = resolveDebateMysteryAssetSynthesisV2({
+    assetSynthesis: value.assetSynthesis,
+    investigationMode,
+    mansionBundleId,
+  });
   return {
     ...publicValue,
     trialType,
@@ -2370,10 +2391,7 @@ export function resolveDebateMysteryConfigV2(
     spark,
     assetSynthesis,
     investigationMode,
-    mansionBundleId:
-      typeof value.mansionBundleId === "string" && value.mansionBundleId.trim()
-        ? value.mansionBundleId.trim().slice(0, 200)
-        : null,
+    mansionBundleId,
     mansionSnapshot: null,
     houseStyle: {
       ...debateMysteryHouseStyleV2(
@@ -2564,6 +2582,11 @@ export function normalizeDebateMysteryFormatStateV2(
     configSource.assetSynthesis && typeof configSource.assetSynthesis === "object"
       ? configSource.assetSynthesis as Record<string, unknown>
       : {};
+  const mansionBundleId =
+    typeof configSource.mansionBundleId === "string" &&
+    configSource.mansionBundleId.trim()
+      ? configSource.mansionBundleId.trim()
+      : null;
   const houseStyleSource =
     configSource.houseStyle && typeof configSource.houseStyle === "object"
       ? configSource.houseStyle as Partial<DebateMysteryHouseStyleV2>
@@ -2724,29 +2747,15 @@ export function normalizeDebateMysteryFormatStateV2(
       prosecutorBotId,
       inspiration: spark,
       spark,
-      assetSynthesis: {
-        evidence: assetSynthesisSource.evidence === true,
-        rooms:
-          configSource.investigationMode !== "court_only" &&
-          assetSynthesisSource.rooms === true,
-        illustratedRooms:
-          configSource.investigationMode !== "court_only" &&
-          assetSynthesisSource.rooms === true &&
-          assetSynthesisSource.illustratedRooms === true,
-        music:
-          configSource.investigationMode !== "court_only" &&
-          assetSynthesisSource.music === true,
-        ambience:
-          configSource.investigationMode !== "court_only" &&
-          assetSynthesisSource.ambience === true,
-      },
+      assetSynthesis: resolveDebateMysteryAssetSynthesisV2({
+        assetSynthesis: assetSynthesisSource,
+        investigationMode:
+          configSource.investigationMode === "court_only" ? "court_only" : "full",
+        mansionBundleId,
+      }),
       investigationMode:
         configSource.investigationMode === "court_only" ? "court_only" : "full",
-      mansionBundleId:
-        typeof configSource.mansionBundleId === "string" &&
-        configSource.mansionBundleId.trim()
-          ? configSource.mansionBundleId.trim()
-          : null,
+      mansionBundleId,
       mansionSnapshot:
         configSource.mansionSnapshot &&
         typeof configSource.mansionSnapshot === "object" &&

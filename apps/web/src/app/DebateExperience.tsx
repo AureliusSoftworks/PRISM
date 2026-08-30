@@ -8357,11 +8357,13 @@ export function DebateExperience(
         mysteryEvidenceAssetSynthesis && props.responseMode !== "local",
       rooms:
         mysteryRoomAssetSynthesis &&
+        !selectedMysteryMansionBundle &&
         !mysterySkipInvestigation &&
         props.responseMode !== "local",
       illustratedRooms:
         mysteryRoomAssetSynthesis &&
         mysteryIllustratedRoomSynthesis &&
+        !selectedMysteryMansionBundle &&
         !mysterySkipInvestigation &&
         props.responseMode !== "local",
       music:
@@ -8370,6 +8372,7 @@ export function DebateExperience(
         props.responseMode === "online",
       ambience:
         mysteryAmbienceAssetSynthesis &&
+        !selectedMysteryMansionBundle &&
         !mysterySkipInvestigation,
     },
     investigationMode: mysterySkipInvestigation ? "court_only" : "full",
@@ -19983,7 +19986,9 @@ export function DebateExperience(
       mansion: "Choose where this mystery happens. You can use a house you already installed or ask PRISM to build a new one.",
       story: "Give PRISM one creative direction, or leave it blank for a coherent surprise. The sealed recipe always stays fair.",
       experience: "Choose the courtroom tone and whether you want to investigate the mansion before trial.",
-      production: "Choose which presentation layers PRISM should prepare. Safe bundled defaults are already selected.",
+      production: selectedMysteryMansionBundle
+        ? "Choose the evidence and music for this case."
+        : "Choose which presentation layers PRISM should prepare. Safe bundled defaults are already selected.",
     };
     const mansionStepReady =
       mysteryMansionSource === "new" || Boolean(mysteryMansionBundleId);
@@ -20260,19 +20265,19 @@ export function DebateExperience(
 
         {mysterySetupPage === "production" ? (
           <div className={mysteryStyles.caseDial} data-tutorial-target="whodunnit-production">
-            <label className={mysteryStyles.setupField}>Room art <select value={mysteryArtMode} onChange={(event) => { setMysteryArtMode(event.currentTarget.value as DebateMysteryArtMode); setMysteryNonce(nextMysteryRecipeNonce()); }}><option value="bundled">Bundled PRISM rooms</option><option value="generated" disabled={!inspectedMysterySeed}>Generated reskins · Legacy Case Seed</option></select><small>V2 uses aligned bundled rooms; imported V1 Case Seeds retain their generated-reskin option.</small></label>
+            {!selectedMysteryMansionBundle ? <label className={mysteryStyles.setupField}>Room art <select value={mysteryArtMode} onChange={(event) => { setMysteryArtMode(event.currentTarget.value as DebateMysteryArtMode); setMysteryNonce(nextMysteryRecipeNonce()); }}><option value="bundled">Bundled PRISM rooms</option><option value="generated" disabled={!inspectedMysterySeed}>Generated reskins · Legacy Case Seed</option></select><small>V2 uses aligned bundled rooms; imported V1 Case Seeds retain their generated-reskin option.</small></label> : null}
             <fieldset className={mysteryStyles.assetForgeChoices} data-tutorial-target="whodunnit-v2-assets">
-              <legend>Prepare presentation assets</legend>
-              {props.responseMode === "local" ? <p className={mysteryStyles.assetForgeModeNote}><strong>LOCAL stays on this device.</strong> PRISM uses installed art and music, symbolic evidence, and an optional personalized ambience mix.</p> : null}
+              <legend>{selectedMysteryMansionBundle ? "Prepare case assets" : "Prepare presentation assets"}</legend>
+              {props.responseMode === "local" ? <p className={mysteryStyles.assetForgeModeNote}><strong>LOCAL stays on this device.</strong> {selectedMysteryMansionBundle ? "PRISM uses symbolic evidence and bundled case music." : "PRISM uses installed art and music, symbolic evidence, and an optional personalized ambience mix."}</p> : null}
               <label data-enabled={props.responseMode !== "local" ? "true" : undefined} aria-disabled={props.responseMode === "local"}>
                 <input type="checkbox" checked={mysteryEvidenceAssetSynthesis && props.responseMode !== "local"} disabled={props.responseMode === "local"} onChange={(event) => { setMysteryEvidenceAssetSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
                 <span><strong>Evidence</strong><small>{props.responseMode === "local" ? "ONLINE only · LOCAL presents each authored exhibit as text and a symbolic evidence card." : "Create sealed exhibit images. They appear only when the evidence is discovered."}</small></span>
               </label>
-              <label data-enabled={!mysterySkipInvestigation && props.responseMode === "online" ? "true" : undefined} aria-disabled={mysterySkipInvestigation || props.responseMode !== "online"}>
+              {!selectedMysteryMansionBundle ? <label data-enabled={!mysterySkipInvestigation && props.responseMode === "online" ? "true" : undefined} aria-disabled={mysterySkipInvestigation || props.responseMode !== "online"}>
                 <input type="checkbox" checked={mysteryRoomAssetSynthesis && !mysterySkipInvestigation && props.responseMode !== "local"} disabled={mysterySkipInvestigation || props.responseMode === "local"} onChange={(event) => { const enabled = event.currentTarget.checked; setMysteryRoomAssetSynthesis(enabled); if (!enabled) setMysteryIllustratedRoomSynthesis(false); setMysteryNonce(nextMysteryRecipeNonce()); }} />
                 <span><strong>Rooms</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude room assets." : props.responseMode === "local" ? "ONLINE only · LOCAL keeps the bundled room pack." : "Create sealed room edits in Case Forge; each one opens only when visited."}</small></span>
-              </label>
-              {mysteryRoomAssetSynthesis ? (
+              </label> : null}
+              {!selectedMysteryMansionBundle && mysteryRoomAssetSynthesis ? (
                 <label data-enabled={!mysterySkipInvestigation && props.responseMode === "online" ? "true" : undefined} aria-disabled={mysterySkipInvestigation || props.responseMode !== "online"}>
                   <input type="checkbox" checked={mysteryIllustratedRoomSynthesis && !mysterySkipInvestigation && props.responseMode !== "local"} disabled={mysterySkipInvestigation || props.responseMode !== "online"} onChange={(event) => { setMysteryIllustratedRoomSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
                   <span><strong>Upgrade every room to Illustrated</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases have no room pack." : props.responseMode === "local" ? "ONLINE only · LOCAL never sends mansion art to a remote generator." : "Keep Case Forge open while it turns every Mosaic source into the full high-detail room set, then begin Investigation in Illustrated view."}</small></span>
@@ -20282,11 +20287,11 @@ export function DebateExperience(
                 <input type="checkbox" checked={mysteryMusicAssetSynthesis && !mysterySkipInvestigation && props.responseMode === "online"} disabled={mysterySkipInvestigation || props.responseMode !== "online"} onChange={(event) => { setMysteryMusicAssetSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
                 <span><strong>Music</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude investigation music." : props.responseMode !== "online" ? "ONLINE only · LOCAL and Auto keep The Midnight Clue bundled fallback." : "Ask ElevenLabs for an original instrumental mansion theme; failure keeps the bundled theme."}</small></span>
               </label>
-              <label data-enabled={!mysterySkipInvestigation ? "true" : undefined} aria-disabled={mysterySkipInvestigation} data-tutorial-target="whodunnit-v2-ambience-synthesis">
+              {!selectedMysteryMansionBundle ? <label data-enabled={!mysterySkipInvestigation ? "true" : undefined} aria-disabled={mysterySkipInvestigation} data-tutorial-target="whodunnit-v2-ambience-synthesis">
                 <input type="checkbox" checked={mysteryAmbienceAssetSynthesis && !mysterySkipInvestigation} disabled={mysterySkipInvestigation} onChange={(event) => { setMysteryAmbienceAssetSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
-                <span><strong>{props.responseMode === "local" ? "Personalize local ambience" : "Ambience"}</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude mansion ambience." : props.responseMode === "local" ? "Tailor the installed atmosphere with room-aware mixing · no online generator or new audio file. Off still uses matching bundled ambience." : "Build a mansion-specific procedural mix and preserve its bespoke-stem brief; unique assets target a measured 20–50 MB budget and fall back to the shared palette."}</small></span>
-              </label>
-              <p>Generated case art stays outside Images unless you save a revealed visual. Ambience remains mansion-owned and content-addressed.</p>
+                <span><strong>{props.responseMode === "local" ? "Personalize local ambience" : "Ambience"}</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude mansion ambience." : props.responseMode === "local" ? "Tailor this mansion's atmosphere with room-aware mixing · no online generator or new audio file. Off still uses matching bundled ambience." : "Build a mansion-specific procedural mix and preserve its bespoke-stem brief; unique assets target a measured 20–50 MB budget and fall back to the shared palette."}</small></span>
+              </label> : null}
+              {!selectedMysteryMansionBundle ? <p>Generated case art stays outside Images unless you save a revealed visual. Ambience remains mansion-owned and content-addressed.</p> : null}
             </fieldset>
             <button type="button" className={mysteryStyles.seedButton} onClick={() => setMysteryNonce(nextMysteryRecipeNonce())}><span>Recipe Seed</span><code>{mysteryRecipeSeed}</code><small>Change the recipe</small></button>
             <div className={mysteryStyles.guidedSecondaryAction}>

@@ -3810,6 +3810,37 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       listDebateMysteryMansionBundlesV2(db, "user-1").map((entry) => entry.id),
       [mansion.id],
     );
+
+    const reusedMansion = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      {
+        ...config(),
+        mansionBundleId: mansion.id,
+        assetSynthesis: {
+          evidence: true,
+          rooms: true,
+          illustratedRooms: true,
+          music: true,
+          ambience: true,
+        },
+      },
+      "create-v2-reused-mansion-assets",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    const reusedConfig = v2State(reusedMansion).config;
+    assert.deepEqual(reusedConfig.assetSynthesis, {
+      evidence: true,
+      rooms: false,
+      illustratedRooms: false,
+      music: true,
+      ambience: false,
+    });
+    assert.equal(
+      reusedConfig.houseStyle.bespokeAmbienceRequested,
+      mansion.houseStyle.bespokeAmbienceRequested,
+    );
   });
 
   it("resumes evidence preparation without rebuilding a verified exhibit", async () => {

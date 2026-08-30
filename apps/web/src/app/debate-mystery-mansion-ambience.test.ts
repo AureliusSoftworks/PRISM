@@ -87,7 +87,9 @@ test("player wiring keeps ambience separate, stable across rooms, and visible in
   assert.match(setup, /"Personalize local ambience" : "Ambience"/u);
   assert.match(setup, /no online generator or new audio file/u);
   assert.match(setup, /Off still uses matching bundled ambience/u);
-  assert.match(tutorial, /Music and Ambience are separate Case Forge choices/u);
+  assert.match(tutorial, /installed mansion brings its rooms and ambience with it/u);
+  assert.match(tutorial, /Production offers only case-owned Evidence and Music/u);
+  assert.match(tutorial, /Rooms and Ambience appear there only while creating a new mansion/u);
   assert.match(tutorial, /without an online request or new audio file/u);
   assert.match(tutorial, /global Audio—not this setup choice—is the silence control/u);
 });

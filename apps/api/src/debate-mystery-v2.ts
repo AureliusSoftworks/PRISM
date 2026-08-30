@@ -2321,8 +2321,6 @@ export async function createDebateMysterySessionV2(
       mansionSnapshot,
       houseStyle: {
         ...mansionSnapshot.presentation.houseStyle,
-        bespokeAmbienceRequested:
-          mansionSnapshot.presentation.houseStyle.bespokeAmbienceRequested || config.assetSynthesis.ambience,
       },
     };
   }

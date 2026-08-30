@@ -801,7 +801,7 @@ test("Theme, asset synthesis, and reusable mansion eligibility freeze determinis
     trialType: "bench",
     inspiration: "",
     spark: "Rainy art-deco observatory",
-    assetSynthesis: { evidence: true, rooms: true, illustratedRooms: true, music: true as never },
+    assetSynthesis: { evidence: true, rooms: true, illustratedRooms: true, music: true, ambience: true },
     mansionBundleId: "mansion-1",
     nonce: "theme-contract",
     suspectBotIds: ["suspect-1", "suspect-2", "suspect-3", "suspect-4"],
@@ -812,8 +812,8 @@ test("Theme, asset synthesis, and reusable mansion eligibility freeze determinis
   assert.equal(resolved.spark, "Rainy art-deco observatory");
   assert.deepEqual(resolved.assetSynthesis, {
     evidence: true,
-    rooms: true,
-    illustratedRooms: true,
+    rooms: false,
+    illustratedRooms: false,
     music: true,
     ambience: false,
   });
