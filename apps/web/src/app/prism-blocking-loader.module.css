@@ -160,6 +160,29 @@
   height: 8px;
 }
 
+.chatReturn {
+  justify-self: start;
+  min-height: 30px;
+  border: 1px solid color-mix(in srgb, var(--prism-s) 38%, var(--loader-line));
+  border-radius: 999px;
+  padding: 0 11px;
+  color: color-mix(in srgb, var(--loader-ink) 82%, var(--prism-s));
+  background: color-mix(in srgb, var(--prism-s) 8%, var(--loader-card));
+  font: 750 .66rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.chatReturn:hover,
+.chatReturn:focus-visible {
+  border-color: color-mix(in srgb, var(--prism-s) 68%, var(--loader-line));
+  color: var(--loader-ink);
+}
+
+.chatReturn:focus-visible {
+  outline: 2px solid var(--prism-s);
+  outline-offset: 2px;
+}
+
 .footerActions {
   display: flex;
   flex-wrap: wrap;

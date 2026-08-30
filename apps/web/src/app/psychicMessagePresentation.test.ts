@@ -105,7 +105,23 @@ describe("Psychic message presentation", () => {
         },
         autoRecovery: {
           v: 1,
-          attempts: [],
+          attempts: [
+            {
+              provider: "openai",
+              model: "gpt-5.6-sol",
+              reasoningEffort: "high",
+              durationMs: 10,
+              outcome: "failed",
+              reason: "provider_error",
+            },
+            {
+              provider: "openai",
+              model: "gpt-5-mini",
+              reasoningEffort: "xhigh",
+              durationMs: 20,
+              outcome: "succeeded",
+            },
+          ],
           finalProvider: "openai",
           finalModel: "gpt-5-mini",
           crossedOnline: false,
@@ -115,7 +131,7 @@ describe("Psychic message presentation", () => {
     );
 
     assert.equal(metadata?.model, "Auto → OpenAI · gpt-5-mini");
-    assert.equal(metadata?.effort, "none");
+    assert.equal(metadata?.effort, "xhigh");
     assert.equal(metadata?.recovered, true);
   });
 

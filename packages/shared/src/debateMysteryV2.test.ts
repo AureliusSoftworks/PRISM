@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
   DEBATE_MYSTERY_V2_PRESETS,
   debateMysteryTalkTopicMirrorsRecordV2,
   debateMysteryClassifyVerdictV2,
@@ -32,6 +33,10 @@ import {
   type DebateMysteryStageCueV1,
   type DebateMysteryWitnessChapterV2,
 } from "./debateMysteryV2.ts";
+
+test("gives Case Forge five bounded authoring attempts", () => {
+  assert.equal(DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS, 5);
+});
 
 test("mansion exterior prompt freezes geography and rejects interior montage covers", () => {
   const prompt = debateMysteryMansionExteriorPromptV1(
@@ -80,15 +85,15 @@ test("mansion exterior scale follows presets and frozen custom topology", () => 
 test("clamps Case Forge progress copy to its declared authoring budget", () => {
   assert.equal(
     normalizeDebateMysteryV2ForgeProgressMessage(
-      "Writing the Case · Witness chapter 1 of 4 · attempt 4 of 3",
+      "Writing the Case · Witness chapter 1 of 4 · attempt 6 of 5",
     ),
-    "Writing the Case · Witness chapter 1 of 4 · attempt 3 of 3",
+    "Writing the Case · Witness chapter 1 of 4 · attempt 5 of 5",
   );
   assert.equal(
     normalizeDebateMysteryV2ForgeProgressMessage(
-      "Writing the Case · Witness chapter 1 of 4 · attempt 2 of 3",
+      "Writing the Case · Witness chapter 1 of 4 · attempt 4 of 5",
     ),
-    "Writing the Case · Witness chapter 1 of 4 · attempt 2 of 3",
+    "Writing the Case · Witness chapter 1 of 4 · attempt 4 of 5",
   );
 });
 
@@ -100,6 +105,7 @@ test("normalizes a frozen pre-substep Case Forge payload without crashing Archiv
       version: 2,
       prosecutorBotId: "prosecutor-1",
       spark: "",
+      nonce: "legacy-title",
     },
     compilation: {
       version: 2,
@@ -113,6 +119,15 @@ test("normalizes a frozen pre-substep Case Forge payload without crashing Archiv
       retryable: false,
       spoilerSafeMessage: "Writing the Case",
       updatedAt: "2026-08-25T00:00:00.000Z",
+    },
+    caseTitle: "The Disappearance of an earlier unexplained disappearance",
+    caseCharge: {
+      version: 1,
+      incidentId: "primary-disappearance",
+      kind: "disappearance",
+      title: "Disappearance",
+      subject: "an earlier unexplained disappearance",
+      accusationPrompt: "Who is responsible for an earlier unexplained disappearance?",
     },
     suspects: [],
     rooms: [{
@@ -195,6 +210,14 @@ test("normalizes a frozen pre-substep Case Forge payload without crashing Archiv
   );
   assert.equal(normalized.identityMirrorTargetSnapshots["prosecutor-1"]?.glyph, "lucideScale");
   assert.equal(normalized.rooms[0]?.accessState, "being_secured");
+  assert.notEqual(
+    normalized.caseTitle,
+    "The Disappearance of an earlier unexplained disappearance",
+  );
+  assert.doesNotMatch(
+    normalized.caseTitle ?? "",
+    /disappear\w*.*disappear\w*/iu,
+  );
 });
 
 function line(id: string, nodeId: string, visibleText = id): DebateMysterySpokenLineV2 {
@@ -778,7 +801,7 @@ test("Theme, asset synthesis, and reusable mansion eligibility freeze determinis
     trialType: "bench",
     inspiration: "",
     spark: "Rainy art-deco observatory",
-    assetSynthesis: { evidence: true, rooms: true, music: true as never },
+    assetSynthesis: { evidence: true, rooms: true, illustratedRooms: true, music: true as never },
     mansionBundleId: "mansion-1",
     nonce: "theme-contract",
     suspectBotIds: ["suspect-1", "suspect-2", "suspect-3", "suspect-4"],
@@ -790,6 +813,7 @@ test("Theme, asset synthesis, and reusable mansion eligibility freeze determinis
   assert.deepEqual(resolved.assetSynthesis, {
     evidence: true,
     rooms: true,
+    illustratedRooms: true,
     music: true,
     ambience: false,
   });
@@ -797,12 +821,13 @@ test("Theme, asset synthesis, and reusable mansion eligibility freeze determinis
   const courtOnly = resolveDebateMysteryConfigV2({
     ...resolved,
     investigationMode: "court_only",
-    assetSynthesis: { evidence: true, rooms: true, music: true as never },
+    assetSynthesis: { evidence: true, rooms: true, illustratedRooms: true, music: true as never },
   });
   assert.equal(courtOnly.investigationMode, "court_only");
   assert.deepEqual(courtOnly.assetSynthesis, {
     evidence: true,
     rooms: false,
+    illustratedRooms: false,
     music: false,
     ambience: false,
   });

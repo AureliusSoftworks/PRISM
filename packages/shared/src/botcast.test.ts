@@ -41,6 +41,7 @@ import {
   botcastEchoHostInterruptPhrase,
   botcastEpisodeDepartureOutcome,
   botcastGuestDepartureEligible,
+  botcastGuestWalkOffRiskV1,
   botcastGuestAnswerAdvancesInterview,
   botcastGuestVoluntaryDepartureIntent,
   botcastGuestHasDepartedAt,
@@ -1846,6 +1847,192 @@ describe("Botcast episode state", () => {
     assert.deepEqual(
       applyBotcastProducerCueToTension(calm, { kind: "refocus" }),
       calm,
+    );
+  });
+
+  it("projects only deterministic guest walk-off risk for the producer", () => {
+    const baseEpisode = {
+      events: [] as BotcastReplayEvent[],
+      guestKind: "bot" as const,
+      guestPresenceMode: "present" as const,
+      guestBotId: "guest",
+      hostBotId: "host",
+      tensionStage: "calm" as const,
+      warningCount: 0,
+      outcome: null,
+      segment: "interview" as const,
+    };
+    assert.deepEqual(botcastGuestWalkOffRiskV1(baseEpisode), {
+      available: true,
+      chancePercent: 0,
+      status: "settled",
+      source: "none",
+    });
+    assert.deepEqual(
+      botcastGuestWalkOffRiskV1({
+        ...baseEpisode,
+        tensionStage: "warning",
+        warningCount: 1,
+        events: [
+          {
+            id: "irritation-1",
+            episodeId: "episode-1",
+            sequence: 1,
+            kind: "irritation",
+            payload: {
+              transition: {
+                v: 1,
+                name: "directionalIrritation",
+                transitionId: "irritation-1",
+                reason: "meaningful_cutoff",
+                subjectBotId: "guest",
+                targetBotId: "host",
+                before: 0.5,
+                after: 0.75,
+                delta: 0.25,
+                tier: "high",
+                occurredAt: "2026-01-01T00:00:00.000Z",
+              },
+            },
+            occurredAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      }),
+      {
+        available: true,
+        chancePercent: 75,
+        status: "elevated",
+        source: "combined",
+      },
+    );
+    assert.deepEqual(
+      botcastGuestWalkOffRiskV1({
+        ...baseEpisode,
+        tensionStage: "departed",
+        warningCount: 1,
+      }),
+      {
+        available: true,
+        chancePercent: 100,
+        status: "eligible",
+        source: "producer_pressure",
+      },
+    );
+  });
+
+  it("handles a departed, protected, or unavailable guest without forecasting a voluntary exit", () => {
+    const baseEpisode = {
+      events: [] as BotcastReplayEvent[],
+      guestKind: "bot" as const,
+      guestPresenceMode: "present" as const,
+      guestBotId: "guest",
+      hostBotId: "host",
+      tensionStage: "departed" as const,
+      warningCount: 1,
+      outcome: null,
+      segment: "interview" as const,
+    };
+    assert.deepEqual(
+      botcastGuestWalkOffRiskV1({
+        ...baseEpisode,
+        outcome: "guest_departed",
+      }),
+      {
+        available: false,
+        chancePercent: 100,
+        status: "departed",
+        source: "none",
+      },
+    );
+    for (const effect of [
+      {
+        type: "troll" as const,
+        dialect: "internet_lingo" as const,
+        grammar: "deliberately_bad" as const,
+        targets: "all_other_bots" as const,
+        playerTarget: "zen_only" as const,
+      },
+      {
+        type: "eternal_introduction" as const,
+        memory: "current_other_speaker_message" as const,
+      },
+    ]) {
+      const name =
+        effect.type === "troll" ? "Troll" : "Eternal Introduction";
+      const intent =
+        effect.type === "troll"
+          ? "Annoy other bots with bad grammar."
+          : "Every message is a first introduction and prior messages are unavailable.";
+      assert.deepEqual(
+        botcastGuestWalkOffRiskV1({
+          ...baseEpisode,
+          events: [
+            {
+              id: `power-${effect.type}`,
+              episodeId: "episode-1",
+              sequence: 1,
+              kind: "segment",
+              payload: {
+                segment: "opening",
+                ordinal: 0,
+                powerSnapshot: {
+                  v: 1,
+                  hostBotId: "host",
+                  guestBotId: "guest",
+                  hostPowers: [],
+                  guestPowers: [
+                    {
+                      version: 1,
+                      id: `power-${effect.type}`,
+                      name,
+                      intent,
+                      enabled: true,
+                      compileStatus: "ready",
+                      compiled: {
+                        version: 1,
+                        sourceHash: botPowerSourceHashV1(name, intent),
+                        selfCue: "",
+                        observerCue: "",
+                        effects:
+                          effect.type === "troll" ? [] : [effect],
+                        ruleLabels: [],
+                      },
+                    },
+                  ],
+                },
+              },
+              occurredAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+        }),
+        {
+          available: true,
+          chancePercent: 0,
+          status: "suppressed",
+          source: "none",
+        },
+      );
+    }
+    assert.equal(
+      botcastGuestWalkOffRiskV1({
+        ...baseEpisode,
+        guestKind: "producer",
+      }).status,
+      "unavailable",
+    );
+    assert.equal(
+      botcastGuestWalkOffRiskV1({
+        ...baseEpisode,
+        guestPresenceMode: "audience_only",
+      }).status,
+      "unavailable",
+    );
+    assert.equal(
+      botcastGuestWalkOffRiskV1({
+        ...baseEpisode,
+        segment: "closing",
+      }).status,
+      "closing",
     );
   });
 

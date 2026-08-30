@@ -547,44 +547,11 @@ describe("Prism Refract integration", () => {
     );
     assert.match(
       companionSource,
-      /panelView === "synthesis"[\s\S]*?className=\{styles\.synthesisRefractRow\}[\s\S]*className=\{styles\.synthesisRefractGuidance\}/u,
-    );
-    assert.match(
-      companionSource,
       /target\.closest\('\[data-compose-model-menu="true"\]'\)/u,
     );
-    const chatPanelBranch =
-      companionSource.match(
-        /open && panelView === ["']chat["'][\s\S]*?open && panelView === ["']synthesis["']/u,
-      )?.[0] ?? "";
-    assert.ok(
-      chatPanelBranch.includes('panelView === "chat"') ||
-        chatPanelBranch.includes("panelView === 'chat'"),
-    );
-    assert.doesNotMatch(
-      chatPanelBranch,
-      /refractModelPicker|styles\.refractModelPicker/u,
-    );
-    assert.match(companionSource, /Refract routing/u);
-    assert.match(companionSource, /aria-label=\{`App mode /u);
-    assert.match(companionSource, /className=\{styles\.refractLaneBadge\}/u);
-    assert.match(companionSource, /data-lane=\{refractResponseMode\}/u);
-    assert.match(
-      companionSource,
-      /title="Controlled by the global LOCAL\/ONLINE privacy toggle"/u,
-    );
-    assert.match(
-      companionSource,
-      /Refract uses the global Model and Effort settings active[\s\S]*when you begin refracting\./u,
-    );
-    assert.match(
-      companionSource,
-      /ONLINE may send the item being refracted to an online provider\./u,
-    );
-    assert.match(
-      companionSource,
-      /LOCAL keeps the item being refracted offline\./u,
-    );
+    assert.doesNotMatch(companionSource, /panelView|Refract routing/u);
+    assert.doesNotMatch(companionSource, /refractResponseMode|refractLaneBadge/u);
+    assert.doesNotMatch(pageSource, /refractResponseMode=/u);
     const magicSubmission =
       companionSource.match(
         /const submitPrismRefractMagic[\s\S]*?const dismissRefractTutorial/u,

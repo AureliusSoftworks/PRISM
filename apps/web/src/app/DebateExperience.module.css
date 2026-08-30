@@ -126,7 +126,7 @@
   color: #6e6678;
 }
 
-.lobby[data-theme="light"] .sessionList li,
+.lobby[data-theme="light"] .sessionList > li,
 .setup[data-theme="light"] .slateGrid button,
 .setup[data-theme="light"] .sideEditor,
 .setup[data-theme="light"] .rolePicker label,
@@ -696,7 +696,7 @@
   list-style: none;
 }
 
-.sessionList li {
+.sessionList > li {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1485,7 +1485,7 @@
   font-size: 12px;
 }
 
-.dashboard .sessionList li {
+.dashboard .sessionList > li {
   align-items: stretch;
   border-radius: 13px;
   padding: 5px;
@@ -14000,7 +14000,7 @@
   gap: 12px;
 }
 
-.dashboard .archivePanel .sessionList li,
+.dashboard .archivePanel .sessionList > li,
 .dashboard .archivePanel .archiveChipRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -14297,9 +14297,9 @@
   position: relative;
   z-index: 1;
   display: grid;
-  gap: 11px;
+  gap: 13px;
   border-top: 1px solid rgba(255, 255, 255, 0.12);
-  padding: 12px 14px 14px;
+  padding: 14px 16px 16px;
   background: rgba(3, 3, 10, 0.16);
 }
 
@@ -14498,11 +14498,28 @@
   display: grid;
   grid-template-columns: minmax(110px, 0.75fr) minmax(150px, 1fr) auto;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 9px;
-  padding: 8px 9px;
-  background: rgba(0, 0, 0, 0.2);
+  border-radius: 10px;
+  padding: 10px 11px;
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.archiveRunRow[data-current="true"] {
+  border-color: color-mix(
+    in srgb,
+    var(--debate-studio-accent) 34%,
+    rgba(255, 255, 255, 0.12)
+  );
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--debate-studio-accent) 13%, transparent),
+      transparent 38%
+    ),
+    rgba(0, 0, 0, 0.28);
+  box-shadow: inset 3px 0 0
+    color-mix(in srgb, var(--debate-studio-accent) 72%, white);
 }
 
 .archiveRunIdentity,
@@ -14533,7 +14550,28 @@
 .archiveRunActions {
   display: flex;
   align-items: center;
-  gap: 5px;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.archiveRunCurrent {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  border: 1px solid
+    color-mix(in srgb, var(--debate-studio-accent) 34%, transparent);
+  border-radius: 999px;
+  padding: 4px 9px;
+  color: color-mix(in srgb, var(--debate-studio-accent) 58%, white);
+  background: color-mix(
+    in srgb,
+    var(--debate-studio-accent) 10%,
+    rgba(0, 0, 0, 0.2)
+  );
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 @media (max-width: 720px) {
@@ -14580,20 +14618,28 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
-  padding-top: 10px;
+  padding-top: 12px;
 }
 
 .dashboard .archivePanel .archiveOpenButton,
 .dashboard .archivePanel .archiveReuseButton,
 .dashboard .archivePanel .deleteButton {
-  min-height: 32px;
-  border: 1px solid transparent;
+  min-height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 8px;
-  background: transparent;
-  padding: 8px 10px;
+  background: rgba(4, 4, 11, 0.22);
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 650;
   white-space: nowrap;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
 }
 
 .dashboard .archivePanel .archiveOpenButton {
@@ -14604,33 +14650,128 @@
   );
   color: #11101a;
   background: color-mix(in srgb, var(--debate-studio-accent) 82%, white);
-  font-weight: 700;
+  box-shadow: 0 6px 18px
+    color-mix(in srgb, var(--debate-studio-accent) 18%, transparent);
+  font-weight: 760;
+}
+
+.dashboard .archivePanel .archiveActions > .archiveOpenButton {
+  min-height: 40px;
+  padding-inline: 15px;
+}
+
+.dashboard .archivePanel .archiveActions > .archiveOpenButton::after {
+  content: "\2192";
+  margin-left: 8px;
 }
 
 .dashboard .archivePanel .archiveOpenButton:hover:not(:disabled) {
   background: color-mix(in srgb, var(--debate-studio-accent) 72%, white);
+  transform: translateY(-1px);
 }
 
 .dashboard .archivePanel .archiveReuseButton {
-  color: var(--debate-studio-accent);
+  border-color: color-mix(
+    in srgb,
+    var(--debate-studio-accent) 24%,
+    rgba(255, 255, 255, 0.12)
+  );
+  color: color-mix(in srgb, var(--debate-studio-accent) 55%, white);
+  background: rgba(4, 4, 11, 0.25);
 }
 
 .dashboard .archivePanel .archiveReuseButton:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--debate-studio-accent) 9%, transparent);
+  border-color: color-mix(
+    in srgb,
+    var(--debate-studio-accent) 48%,
+    rgba(255, 255, 255, 0.16)
+  );
+  background: color-mix(
+    in srgb,
+    var(--debate-studio-accent) 12%,
+    rgba(0, 0, 0, 0.3)
+  );
 }
 
 .dashboard .archivePanel .deleteButton {
-  color: #d89aad;
+  border-color: rgba(216, 154, 173, 0.2);
+  color: #e1a7b8;
+  background: rgba(64, 14, 31, 0.14);
 }
 
-.dashboard .archivePanel .deleteButton:hover {
-  background: color-mix(in srgb, #d89aad 9%, transparent);
+.dashboard .archivePanel .deleteButton:hover:not(:disabled) {
+  border-color: rgba(231, 164, 184, 0.42);
+  color: #f0bdcc;
+  background: rgba(106, 28, 53, 0.24);
+}
+
+.dashboard .archivePanel .archiveActions > .deleteButton {
+  margin-inline-start: auto;
+}
+
+.dashboard
+  .archivePanel
+  :is(.archiveOpenButton, .archiveReuseButton, .deleteButton):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--debate-studio-accent) 78%, white);
+  outline-offset: 2px;
 }
 
 .dashboard .archivePanel .archiveOpenButton:disabled,
-.dashboard .archivePanel .archiveReuseButton:disabled {
+.dashboard .archivePanel .archiveReuseButton:disabled,
+.dashboard .archivePanel .deleteButton:disabled {
   opacity: 0.42;
   cursor: not-allowed;
+  transform: none;
+}
+
+.archiveRunActions .archiveRunOpenButton {
+  min-height: 30px;
+  padding: 5px 9px;
+}
+
+@media (max-width: 720px) {
+  .dashboard .archivePanel .archiveActions > button {
+    flex: 1 1 calc(50% - 4px);
+  }
+
+  .dashboard .archivePanel .archiveActions > .archiveOpenButton {
+    flex-basis: 100%;
+  }
+
+  .dashboard .archivePanel .archiveActions > .deleteButton {
+    margin-inline-start: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .archiveChipExpanded {
+    padding-inline: 12px;
+  }
+
+  .archiveRunRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .archiveRunMeta,
+  .archiveRunActions {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .archiveRunActions {
+    justify-content: stretch;
+  }
+
+  .archiveRunActions > button,
+  .dashboard .archivePanel .archiveActions > button {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+
+  .archiveRunCurrent {
+    flex: 0 0 auto;
+    justify-content: center;
+  }
 }
 
 .archiveAssetsDialog {

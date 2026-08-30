@@ -334,6 +334,13 @@ export const ABOUT_CREDIT_GROUPS: readonly AboutCreditGroup[] = [
         license: "PRISM production asset",
       },
       {
+        id: "whodunnit-traversal-foley",
+        name: "Whodunnit Mansion Traversal Foley",
+        description:
+          "Original footsteps and door performances generated with ElevenLabs Sound Effects, technically reviewed, curated, and integrated as offline PRISM production assets.",
+        license: "PRISM production asset",
+      },
+      {
         id: "troll-rickroll",
         name: "Never Gonna Give You Up — Rick Astley",
         description:

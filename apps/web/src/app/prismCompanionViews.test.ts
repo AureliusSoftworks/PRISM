@@ -16,10 +16,10 @@ describe("Prism companion view requests", () => {
     const unsubscribe = subscribePrismCompanionViewRequests(() => {
       publications += 1;
     });
-    requestPrismCompanionView("notes");
-    requestPrismCompanionView("notes");
+    requestPrismCompanionView("chat");
+    requestPrismCompanionView("chat");
     assert.deepEqual(getPrismCompanionViewRequestSnapshot(), {
-      view: "notes",
+      view: "chat",
       requestId: 2,
     });
     assert.equal(publications, 2);

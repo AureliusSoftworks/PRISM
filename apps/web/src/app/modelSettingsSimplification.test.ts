@@ -38,7 +38,7 @@ test("keeps Models focused on background work, recovery, and advanced visibility
   assert.match(page, /data-tutorial-target="online-auto-provider-bias"/u);
   assert.match(page, /ONLINE Auto provider lean/u);
   assert.match(page, /formatOnlineAutoProviderBiasLabel/u);
-  assert.match(page, /<span>Auto routing priorities<\/span>/u);
+  assert.match(page, /<span>Model fallback chains<\/span>/u);
   assert.match(page, /<span>Manage model list<\/span>/u);
   assert.match(page, /Refresh models/u);
   assert.match(page, /refresh=1/u);
@@ -155,7 +155,7 @@ test("applies picker visibility to shared text, image, customizer, and Slate pat
   );
   assert.match(
     api,
-    /const hiddenModelIds = parseHiddenBotModelIds\(user\.hidden_bot_model_ids\)[\s\S]{0,5000}eligibleCandidates: candidateAllowlist/u,
+    /const hiddenModelIds = parseHiddenBotModelIds\(user\.hidden_bot_model_ids\)[\s\S]{0,2500}resolveAutoModelRoutePlan\(\{[\s\S]{0,500}hiddenModelIds/u,
   );
   assert.doesNotMatch(api, /AUTO_OPT_IN_MODEL_IDS|hiddenAutoOptInModelIds/u);
 });

@@ -1,4 +1,5 @@
 import { routeAudioElementToPrismOutput } from "./replayAudioMasterCapture.ts";
+import type { RoomAcousticsSend } from "./roomAcoustics.ts";
 
 export type DebateExhibitImpactMaterial =
   | "wood"
@@ -191,6 +192,7 @@ export async function playDebateExhibitImpactSfx(args: {
   moment: DebateExhibitImpactMoment;
   volume?: number;
   enabled?: boolean;
+  roomAcoustics?: RoomAcousticsSend | null;
 }): Promise<boolean> {
   if (args.enabled === false) return false;
   const volume = Math.max(0, Math.min(1, args.volume ?? 0.55));
@@ -198,7 +200,9 @@ export async function playDebateExhibitImpactSfx(args: {
   const impact = debateExhibitImpactForExhibit(args.exhibit, args.moment);
   const audio = new Audio(impact.url);
   audio.volume = Math.max(0, Math.min(1, volume * impact.trim));
-  const outputCleanup = routeAudioElementToPrismOutput(audio);
+  const outputCleanup = routeAudioElementToPrismOutput(audio, {
+    roomAcoustics: args.roomAcoustics,
+  });
   try {
     await audio.play();
     return true;
@@ -206,11 +210,16 @@ export async function playDebateExhibitImpactSfx(args: {
     return false;
   } finally {
     const release = (): void => {
+      outputCleanup?.release();
+      audio.removeEventListener("ended", release);
+      audio.removeEventListener("error", cancel);
+    };
+    const cancel = (): void => {
       outputCleanup?.();
       audio.removeEventListener("ended", release);
-      audio.removeEventListener("error", release);
+      audio.removeEventListener("error", cancel);
     };
     audio.addEventListener("ended", release);
-    audio.addEventListener("error", release);
+    audio.addEventListener("error", cancel);
   }
 }

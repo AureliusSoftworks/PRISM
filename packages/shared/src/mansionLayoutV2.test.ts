@@ -15,6 +15,7 @@ import {
   mansionLayoutV2SemanticRoomCount,
   mansionLayoutV2SemanticRoomsAreConnected,
   mansionLayoutV2SharedWall,
+  mansionLayoutV2TraversalRoute,
   removeMansionLayoutV2Door,
   rotateMansionLayoutV2Room,
   slideMansionLayoutV2Door,
@@ -222,6 +223,40 @@ describe("MansionLayoutV2 geometry", () => {
     assert.deepEqual(neighbors.get("parlor"), ["foyer"]);
     assert.equal(mansionLayoutV2SemanticRoomCount(layout), 6);
     assert.equal(mansionLayoutV2FloorSemanticRoomCount(layout, 1), 2);
+  });
+
+  it("resolves a stable room route through exact corridor doors", () => {
+    const route = mansionLayoutV2TraversalRoute(baseLayout(), "foyer", "parlor");
+    assert.ok(route);
+    assert.deepEqual(route.entityIds, ["foyer", "hall", "parlor"]);
+    assert.equal(route.doorIds.length, 2);
+    assert.deepEqual(
+      route.waypoints.map((point) => point.kind),
+      ["entity_center", "door", "entity_center", "door", "entity_center"],
+    );
+    assert.deepEqual(
+      route.waypoints.filter((point) => point.kind === "door").map(({ x, y }) => ({ x, y })),
+      [{ x: 3, y: 1 }, { x: 4, y: 1 }],
+    );
+    assert.ok(route.distanceUnits > 0);
+  });
+
+  it("preserves vertical connector kind and floor changes in traversal routes", () => {
+    const route = mansionLayoutV2TraversalRoute(baseLayout(), "foyer", "landing");
+    assert.ok(route);
+    assert.deepEqual(route.entityIds, ["foyer", "landing"]);
+    assert.deepEqual(route.connectorIds, ["stairs:foyer:landing"]);
+    assert.equal(route.waypoints.some((point) =>
+      point.kind === "vertical_connector" && point.connectorKind === "stairs"), true);
+    assert.deepEqual([...new Set(route.waypoints.map((point) => point.floor))], [1, 2]);
+  });
+
+  it("returns null for missing or disconnected semantic rooms", () => {
+    const disconnected = baseLayout();
+    disconnected.doors = disconnected.doors.filter((door) =>
+      door.aEntityId !== "parlor" && door.bEntityId !== "parlor");
+    assert.equal(mansionLayoutV2TraversalRoute(disconnected, "foyer", "parlor"), null);
+    assert.equal(mansionLayoutV2TraversalRoute(disconnected, "missing", "foyer"), null);
   });
 
   it("validates doors, connectivity, decorative counts, and the Floor 3 gate", () => {

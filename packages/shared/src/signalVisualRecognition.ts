@@ -268,6 +268,17 @@ const boundedRegion = (value: unknown): SignalVisualRegionV1 | null => {
 const cueState = (value: unknown): SignalVisualCueState | null =>
   value === "match" || value === "missing" || value === "conflict" ? value : null;
 
+function regionContains(
+  outer: SignalVisualRegionV1,
+  inner: SignalVisualRegionV1,
+): boolean {
+  const epsilon = 0.000001;
+  return inner.x + epsilon >= outer.x &&
+    inner.y + epsilon >= outer.y &&
+    inner.x + inner.width <= outer.x + outer.width + epsilon &&
+    inner.y + inner.height <= outer.y + outer.height + epsilon;
+}
+
 export function normalizeSignalVisualRawSubjectsV1(
   value: unknown,
 ): SignalVisualRawSubjectEvidenceV1[] | null {
@@ -414,6 +425,7 @@ export function resolveSignalVisualRecognitionSubjectsV1(args: {
       if (!candidate || !candidate.recognitionEligible || evidence.color !== "match" ||
           evidence.glyph !== "match" || evidence.face !== "match" ||
           !subject.colorEvidenceRegion || !subject.observedColor ||
+          !regionContains(subject.region, subject.colorEvidenceRegion) ||
           !signalVisualColorsMatch(candidate.signature.color, subject.observedColor)) return [];
       return collisionCounts.get(candidate.signature.appearanceHash) === 1 ? [candidate] : [];
     });

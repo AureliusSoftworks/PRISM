@@ -17,6 +17,21 @@ import { decodeBotAvatarDetailsPaintColorMap } from "@localai/shared";
 const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
 
 describe("bot generation route", () => {
+  it("uses dynamic Auto escalation for Power compilation without borrowing the fixed-model chain", () => {
+    const routeSource = serverSource.slice(
+      serverSource.indexOf('route("POST", "/api/bot-powers/compile"'),
+      serverSource.indexOf('route("POST", "/api/bots/generate-field"'),
+    );
+
+    assert.match(routeSource, /resolveAutoModelRoutePlan\(/u);
+    assert.match(
+      routeSource,
+      /const recoveryChain:[\s\S]*?resolved\.autoRoute[\s\S]*?: parseStoredAutoFallbackChain\(user\.auto_fallback_chain\)/u,
+    );
+    assert.match(routeSource, /reasoningEffort: route\.reasoningEffort/u);
+    assert.match(routeSource, /providerWithTextRecovery\(/u);
+  });
+
   it("keeps refracted Ink on the selected LOCAL/ONLINE lane without image generation", () => {
     const routeSource = serverSource.slice(
       serverSource.indexOf('route("POST", "/api/bots/generate-avatar-details-ink"'),

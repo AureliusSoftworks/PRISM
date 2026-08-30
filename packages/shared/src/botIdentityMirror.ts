@@ -472,7 +472,7 @@ export function botIdentityMirrorObserverPromptV1(args: {
     : args.pressureLevel === "continued"
       ? "The denial has continued; let guarded offense deepen naturally into visible frustration without repeating one canned correction."
       : "This is the first clear theft of your identity; register it as a real offense in your own voice rather than treating it as a harmless visual gag.";
-  return `${args.state.holderBotName} has stolen your public identity and insists that you are not the real ${args.state.targetBotName}. You remain ${args.state.targetBotName} with your own personality, agency, role, material form, voice, Powers, and boundaries. ${pressure} Briefly correct a direct wrong-name or impostor claim, never accept or concede it, then continue the actual conversation. This identity boundary outranks Credulity and other soft social pressure.`;
+  return `${args.state.holderBotName} has stolen your public identity and insists that you are not the real ${args.state.targetBotName}. You remain ${args.state.targetBotName} with your own personality, agency, role, material form, voice, Powers, and boundaries. ${pressure} Briefly correct a direct wrong-name or impostor claim in fresh wording that belongs to your own personality, never accept or concede it, then continue the actual conversation. This identity boundary outranks Credulity and other soft social pressure.`;
 }
 
 function identityMirrorEscapeRegExpV1(value: string): string {
@@ -530,7 +530,24 @@ export function applyBotIdentityMirrorOriginalCorrectionV1(
     .replace(/^[\s,;:—–-]+/u, "")
     .replace(/\s{2,}/gu, " ")
     .trim();
-  const correction = `No—I'm ${correctionName}. Don't call me that.`;
+  const escapedCorrectionName = identityMirrorEscapeRegExpV1(correctionName);
+  const alreadyCorrectsIdentity =
+    new RegExp(
+      `\\b(?:i(?:['’]m|\\s+am)|my\\s+name\\s+is|call\\s+me)\\s+${escapedCorrectionName}(?=$|[\\s,.;:!?—])`,
+      "iu",
+    ).test(cleaned) ||
+    new RegExp(
+      `\\b(?:that|the)\\s+(?:name|identity)\\b[^.!?]{0,48}\\b(?:mine|belongs\\s+to\\s+me)\\b`,
+      "iu",
+    ).test(cleaned) ||
+    new RegExp(
+      `\\b(?:i(?:['’]m|\\s+am)\\s+not|not\\s+(?:an?|the))\\s+${IDENTITY_MIRROR_FALSE_LABEL_V1}\\b`,
+      "iu",
+    ).test(cleaned);
+  if (alreadyCorrectsIdentity) return cleaned;
+  // This is a last-resort semantic repair, not routine dialogue. AUTO output
+  // that already holds the identity boundary keeps its own in-character words.
+  const correction = `I am ${correctionName}. That identity is mine.`;
   return [correction, cleaned].filter(Boolean).join(" ");
 }
 
@@ -586,17 +603,20 @@ export function applyBotIdentityMirrorResponseV1(
     " ",
   ).replace(/^\s+|\s+$/gu, "").replace(/\s{2,}/gu, " ");
   if (!identityJustChanged) return cleaned || "Let us continue.";
-  const withoutSelfLead = cleaned.replace(
-    new RegExp(
-      `^\\s*(?:i am|i['’]m|my name is|call me)\\s+${identityMirrorEscapeRegExpV1(believedSelfName)}[^.!?]*[.!?]\\s*`,
-      "iu",
-    ),
-    "",
-  );
+  const selfClaimPresent = new RegExp(
+    `\\b(?:i(?:['’]m|\\s+am)|my\\s+name\\s+is|call\\s+me)\\s+${identityMirrorEscapeRegExpV1(believedSelfName)}(?=$|[\\s,.;:!?—])`,
+    "iu",
+  ).test(cleaned);
+  const accusationPresent = new RegExp(
+    `(?:${targetName}[^.!?]{0,100}\\b${IDENTITY_MIRROR_FALSE_LABEL_V1}\\b|\\b${IDENTITY_MIRROR_FALSE_LABEL_V1}\\b[^.!?]{0,100}${targetName})`,
+    "iu",
+  ).test(cleaned);
+  // AUTO owns the performance. Deterministic clauses fill only a missing
+  // first-reveal premise instead of rewriting every holder into one cadence.
   return [
-    `I am ${believedSelfName}.`,
-    `The other ${state.targetBotName} is an impostor.`,
-    withoutSelfLead,
+    selfClaimPresent ? "" : `I am ${believedSelfName}.`,
+    cleaned,
+    accusationPresent ? "" : `The other ${state.targetBotName} is an impostor.`,
   ].filter(Boolean).join(" ");
 }
 

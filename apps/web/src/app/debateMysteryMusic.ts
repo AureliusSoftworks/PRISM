@@ -99,10 +99,16 @@ export function mysteryCasePreludeMusicMix(
 export function mysteryInvestigationMusicMix(args: {
   theoryBoardOpen: boolean;
   roomIntroductionActive?: boolean;
+  roomComplete?: boolean;
   programAudible?: boolean;
   accentActive?: boolean;
 }): SessionAtmosphereMix {
-  if (args.theoryBoardOpen || args.roomIntroductionActive || args.programAudible === false) {
+  if (
+    args.theoryBoardOpen ||
+    args.roomIntroductionActive ||
+    args.roomComplete ||
+    args.programAudible === false
+  ) {
     return WHODUNNIT_INVESTIGATION_MUSIC_SILENT_MIX;
   }
   return args.accentActive

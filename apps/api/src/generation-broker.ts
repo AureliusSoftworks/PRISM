@@ -35,6 +35,7 @@ export interface PrismStructuredGenerationResult<T> {
     provider: ProviderName;
     model: string;
     outcome: "succeeded" | "failed";
+    reasoningEffort?: Exclude<ProviderReasoningEffort, "auto" | "max">;
     reason?: string;
     durationMs: number;
   }>;
@@ -241,8 +242,8 @@ export async function runPrismDeterministicWork<T>(args: {
 
 /**
  * Shared structured-generation boundary for selected and auxiliary work.
- * Auto advances through the frozen lane order; fixed selection retries only
- * its selected lane with caller-authored repair context.
+ * Auto advances through the per-work-item upward route plan; fixed selection
+ * retries only its selected lane with caller-authored repair context.
  */
 export async function runPrismStructuredGeneration<T>(
   request: PrismStructuredGenerationRequest<T>,
@@ -274,6 +275,11 @@ export async function runPrismStructuredGeneration<T>(
       attempts: lanes.map((lane, index) => ({
         provider: lane.providerName,
         model: lane.model,
+        ...(lane.reasoningEffort &&
+        lane.reasoningEffort !== "auto" &&
+        lane.reasoningEffort !== "max"
+          ? { reasoningEffort: lane.reasoningEffort }
+          : {}),
         available: lane.available,
         run: async (signal) => {
           const attemptWork = workForAttempt(work, index + 1, priorError);
@@ -347,6 +353,9 @@ export async function runPrismStructuredGeneration<T>(
         provider: attempt.provider,
         model: attempt.model,
         outcome: attempt.outcome,
+        ...(attempt.reasoningEffort
+          ? { reasoningEffort: attempt.reasoningEffort }
+          : {}),
         ...(attempt.reason ? { reason: attempt.reason } : {}),
         durationMs: attempt.durationMs,
       })),
@@ -356,7 +365,12 @@ export async function runPrismStructuredGeneration<T>(
   const lane = lanes[0]!;
   const maxAttempts = Math.max(
     1,
-    Math.min(3, requestedMaxAttempts ?? request.maxFixedAttempts ?? 3),
+    Math.min(
+      5,
+      request.modelSelectionKind === "auto"
+        ? 1
+        : requestedMaxAttempts ?? request.maxFixedAttempts ?? 3,
+    ),
   );
   const attempts: PrismStructuredGenerationResult<T>["attempts"] = [];
   let lastError: unknown = new Error("Generation work did not complete.");
@@ -409,6 +423,11 @@ export async function runPrismStructuredGeneration<T>(
         provider: lane.providerName,
         model: lane.model,
         outcome: "succeeded",
+        ...(lane.reasoningEffort &&
+        lane.reasoningEffort !== "auto" &&
+        lane.reasoningEffort !== "max"
+          ? { reasoningEffort: lane.reasoningEffort }
+          : {}),
         durationMs: Date.now() - attemptStartedAt,
       });
       return {
@@ -430,6 +449,11 @@ export async function runPrismStructuredGeneration<T>(
         provider: lane.providerName,
         model: lane.model,
         outcome: "failed",
+        ...(lane.reasoningEffort &&
+        lane.reasoningEffort !== "auto" &&
+        lane.reasoningEffort !== "max"
+          ? { reasoningEffort: lane.reasoningEffort }
+          : {}),
         reason: priorError,
         durationMs: Date.now() - attemptStartedAt,
       });

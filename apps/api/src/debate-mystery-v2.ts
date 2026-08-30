@@ -129,6 +129,7 @@ import {
   resetDebateMysteryAssetRevealsV1,
   revealDebateMysteryAssetV1,
 } from "./debate-mystery-assets.ts";
+import { debateMysteryIllustratedRoomSubjectIdV1 } from "./debate-mystery-room-art.ts";
 import { HttpError } from "./utils.http.ts";
 
 const V2_JOB_LEASE_MS = 90_000;
@@ -385,6 +386,16 @@ export type DebateMysteryRoomAssetPreparerV2 = (
   args: DebateMysteryRoomAssetPreparationV2,
 ) => Promise<Record<string, DebateMysterySealedAssetRefV1>>;
 
+export interface DebateMysteryIllustratedRoomPreparationV2 {
+  userId: string;
+  sessionId: string;
+  signal?: AbortSignal;
+}
+
+export type DebateMysteryIllustratedRoomPreparerV2 = (
+  args: DebateMysteryIllustratedRoomPreparationV2,
+) => Promise<void>;
+
 export interface DebateMysteryMansionExteriorAssetPreparationV2 {
   userId: string;
   sessionId: string;
@@ -403,6 +414,7 @@ interface DebateMysteryCompilationOptionsV2 {
   generateWave?: typeof generateBuiltinEnglishWave;
   prepareEvidenceAssets?: DebateMysteryEvidenceAssetPreparerV2;
   prepareRoomAssets?: DebateMysteryRoomAssetPreparerV2;
+  prepareIllustratedRooms?: DebateMysteryIllustratedRoomPreparerV2;
   prepareMansionExteriorAsset?: DebateMysteryMansionExteriorAssetPreparerV2;
   adoptMansionExteriorDraft?: (args: {
     userId: string;
@@ -2082,7 +2094,12 @@ function mysteryV2SessionRequest(
 ): DebateSessionCreateRequest {
   return {
     format: "whodunnit",
-    whodunnit: source as unknown as DebateSessionCreateRequest["whodunnit"],
+    whodunnit: {
+      ...source,
+      // The session's immediate V2 projection is constructed before the
+      // compiler's private checkpoint. Keep this resolved choice there too.
+      assetSynthesis: config.assetSynthesis,
+    } as unknown as DebateSessionCreateRequest["whodunnit"],
     formality: "structured",
     presetId: "custom",
     jury: {
@@ -2214,6 +2231,7 @@ export async function createDebateMysterySessionV2(
     generateWave?: DebateMysteryCompilationOptionsV2["generateWave"];
     prepareEvidenceAssets?: DebateMysteryCompilationOptionsV2["prepareEvidenceAssets"];
     prepareRoomAssets?: DebateMysteryCompilationOptionsV2["prepareRoomAssets"];
+    prepareIllustratedRooms?: DebateMysteryCompilationOptionsV2["prepareIllustratedRooms"];
     prepareMansionExteriorAsset?: DebateMysteryCompilationOptionsV2["prepareMansionExteriorAsset"];
     adoptMansionExteriorDraft?: DebateMysteryCompilationOptionsV2["adoptMansionExteriorDraft"];
     onCompilationReady?: DebateMysteryCompilationOptionsV2["onCompilationReady"];
@@ -2241,6 +2259,7 @@ export async function createDebateMysterySessionV2(
       assetSynthesis: {
         ...config.assetSynthesis,
         rooms: false,
+        illustratedRooms: false,
         music: false,
         ambience: false,
       },
@@ -2361,6 +2380,7 @@ export async function createDebateMysterySessionV2(
         generateWave: options.generateWave,
         prepareEvidenceAssets: options.prepareEvidenceAssets,
         prepareRoomAssets: options.prepareRoomAssets,
+        prepareIllustratedRooms: options.prepareIllustratedRooms,
         prepareMansionExteriorAsset: options.prepareMansionExteriorAsset,
         onCompilationReady: options.onCompilationReady,
       }).catch(() => {
@@ -9448,7 +9468,9 @@ export async function runDebateMysteryCompilationV2(
             sessionId,
             rooms: pendingRooms,
             crimeSceneRoomId: checkpoint.privateCase.crimeSceneRoomId,
-            mode: "initial",
+            mode: checkpoint.privateCase.config.assetSynthesis.illustratedRooms
+              ? "background"
+              : "initial",
             houseStyle: checkpoint.privateCase.config.houseStyle,
             signal: cancellationController.signal,
             onPrepared: (roomId, asset) => {
@@ -9466,6 +9488,24 @@ export async function runDebateMysteryCompilationV2(
             checkpoint = withPreparedRoomAsset(checkpoint, roomId, asset);
           }
         }
+      }
+      if (
+        checkpoint.privateCase.config.assetSynthesis.illustratedRooms &&
+        options.prepareIllustratedRooms
+      ) {
+        currentJob = updateJob(db, userId, sessionId, {
+          publicMessage: "Upgrading every room to Illustrated",
+        });
+        setPublicCompilationStatus(db, userId, sessionId, currentJob, {
+          ...checkpoint.publicState,
+          playPhase: "case_forge",
+        });
+        await options.prepareIllustratedRooms({
+          userId,
+          sessionId,
+          signal: cancellationController.signal,
+        });
+        requireLease();
       }
       requireLease();
       // This is the final authored graph: persona delivery has been applied
@@ -9587,6 +9627,7 @@ export async function retryDebateMysteryCompilationV2(
     generateWave?: DebateMysteryCompilationOptionsV2["generateWave"];
     prepareEvidenceAssets?: DebateMysteryCompilationOptionsV2["prepareEvidenceAssets"];
     prepareRoomAssets?: DebateMysteryCompilationOptionsV2["prepareRoomAssets"];
+    prepareIllustratedRooms?: DebateMysteryCompilationOptionsV2["prepareIllustratedRooms"];
     prepareMansionExteriorAsset?: DebateMysteryCompilationOptionsV2["prepareMansionExteriorAsset"];
     onCompilationReady?: DebateMysteryCompilationOptionsV2["onCompilationReady"];
     deferBackgroundStart?: boolean;
@@ -9639,6 +9680,7 @@ export async function retryDebateMysteryCompilationV2(
         generateWave: options.generateWave,
         prepareEvidenceAssets: options.prepareEvidenceAssets,
         prepareRoomAssets: options.prepareRoomAssets,
+        prepareIllustratedRooms: options.prepareIllustratedRooms,
         prepareMansionExteriorAsset: options.prepareMansionExteriorAsset,
         onCompilationReady: options.onCompilationReady,
       }).catch(() => {
@@ -12243,6 +12285,12 @@ export function applyDebateMysteryActionV2(
   ): void => {
     assetRevealRequests.push({ kind, subjectId });
     if (kind === "room") {
+      if (state.rooms.some((room) => room.id === subjectId)) {
+        assetRevealRequests.push({
+          kind: "room",
+          subjectId: debateMysteryIllustratedRoomSubjectIdV1(subjectId),
+        });
+      }
       state.rooms = state.rooms.map((room) =>
         room.id === subjectId && room.sealedAsset
           ? { ...room, sealedAsset: { ...room.sealedAsset, revealed: true } }
@@ -12272,7 +12320,23 @@ export function applyDebateMysteryActionV2(
     throw new HttpError(409, "Only a Spectator case advances automatically.");
   }
   const publicPayload: Record<string, unknown> = { action: request.action };
-  if (request.action === "move") {
+  if (request.action === "enter_mansion") {
+    if (spectator || courtOnly || state.playPhase !== "title_card") {
+      throw new HttpError(409, "The mansion door is not available right now.");
+    }
+    const foyer = state.rooms.find((room) => room.templateId === "foyer")
+      ?? state.rooms.find((room) => room.id === state.currentRoomId)
+      ?? state.rooms[0];
+    if (!foyer) throw new HttpError(409, "The mansion foyer is unavailable.");
+    // A fresh Run crosses this one threshold before normal discovery rules.
+    // Legacy malformed layouts retain their compiled opening-room fallback.
+    foyer.visited = true;
+    foyer.accessState = "visited";
+    state.playPhase = "case_opening";
+    state.currentRoomId = foyer.id;
+    state.roomView = "room";
+    authorizeAsset("room", foyer.id);
+  } else if (request.action === "move") {
     if (state.playPhase === "title_card" && courtOnly) {
       state = prepareCourtOnlyTrialV2({ state, graph, privateCase });
     } else if (state.playPhase === "title_card" && spectator) {
@@ -12309,7 +12373,10 @@ export function applyDebateMysteryActionV2(
           throw new HttpError(409, "Mansion movement is unavailable right now.");
         }
         if (!request.roomId) {
-          if (!state.openingSweepComplete) {
+          if (
+            !state.openingSweepComplete &&
+            state.currentRoomId === (state.crimeSceneRoomId ?? privateCase.crimeSceneRoomId)
+          ) {
             throw new HttpError(
               409,
               "Finish the finite visible sweep before opening the mansion map.",
@@ -12327,7 +12394,11 @@ export function applyDebateMysteryActionV2(
               "MYSTERY_ROOM_BEING_SECURED",
             );
           }
-          if (!state.openingSweepComplete && room.id !== state.currentRoomId) {
+          if (
+            !state.openingSweepComplete &&
+            state.currentRoomId === (state.crimeSceneRoomId ?? privateCase.crimeSceneRoomId) &&
+            room.id !== state.currentRoomId
+          ) {
             throw new HttpError(
               409,
               "Finish the finite visible sweep before leaving the incident scene.",

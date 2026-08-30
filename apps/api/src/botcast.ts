@@ -6486,6 +6486,7 @@ export async function generateBotcastBookingSuggestion(
                       attempt.model,
                       360,
                     ).reasoningEffort,
+                    attempt.reasoningEffort,
                   ),
                   usagePurpose: index === 0 ? "botcast_brand" : "chat_fallback",
                   jsonMode: true,
@@ -6865,6 +6866,7 @@ export async function generateBotcastProducerGuestBooking(
                       attempt.provider,
                       attempt.model,
                     ).reasoningEffort,
+                    attempt.reasoningEffort,
                   ),
                   usagePurpose:
                     index === 0 ? "botcast_brand" : "chat_fallback",
@@ -8716,7 +8718,6 @@ export function recordBotcastSoundboardCue(
     kind: BotcastSoundboardCueKind;
     atMs: number;
     variantIndex?: number;
-    gain?: number;
   },
 ): BotcastEpisode {
   const episode = getBotcastEpisode(db, userId, episodeId);
@@ -8754,9 +8755,6 @@ export function recordBotcastSoundboardCue(
       source: "producer",
       ...(Number.isInteger(input.variantIndex) && input.variantIndex! >= 0
         ? { variantIndex: Math.min(32, input.variantIndex!) }
-        : {}),
-      ...(Number.isFinite(input.gain) && input.gain! >= 0
-        ? { gain: Math.min(1.5, input.gain!) }
         : {}),
     },
     now,
@@ -9740,6 +9738,33 @@ export function botcastProducerCueRecoveryFallbackV1(args: {
   const anchor = botcastProducerCueRecoveryAnchor(args.cue.detail ?? "");
   if (!anchor) return null;
   return `${args.guestName}, let's focus on ${anchor}. What concrete detail changes how we should understand it?`;
+}
+
+/**
+ * A host recovery line may quote only the guest's saved public observation.
+ * It never invents a first-hand visual reading or falls back to the episode
+ * title, which may have nothing to do with the presented asset.
+ */
+export function botcastHostImageObservationFallbackV1(args: {
+  guestName: string;
+  guestObservation: string | null | undefined;
+}): string {
+  const normalized = extractBotcastVoicePerformance(
+    args.guestObservation ?? "",
+    false,
+  ).content
+    .replace(/[“”"]/gu, "'")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const firstSentence = normalized.split(/(?<=[.!?…])\s+/u)[0] ?? "";
+  const words = firstSentence.split(/\s+/u).filter(Boolean);
+  const excerpt = words.length > 24
+    ? `${words.slice(0, 24).join(" ").replace(/[.!?…]+$/u, "")}…`
+    : firstSentence;
+  if (!excerpt) {
+    return `${args.guestName}, stay with the observation you just made. Why does that detail matter?`;
+  }
+  return `${args.guestName}, your observation—“${excerpt}”—gives us a concrete thread. Why does that detail matter?`;
 }
 
 function persistProducerCue(
@@ -11280,11 +11305,11 @@ interface BotcastHearingRepeatDirective {
   sourceMessageId: string;
   repeatedContent: string;
   sourceMood: BotcastMessage["moodKey"];
-  moodPenalty: "small" | "medium" | "large";
+  moodPenalty?: "small" | "medium" | "large";
 }
 
 function botcastHearingRepeatDirective(args: {
-  episode: Pick<BotcastEpisode, "guestPresenceMode" | "messages">;
+  episode: Pick<BotcastEpisode, "guestPresenceMode" | "messages" | "events">;
   speakerRole: BotcastSpeakerRole;
   speaker: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt" | "powers">;
   requester: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt" | "powers">;
@@ -11317,8 +11342,20 @@ function botcastHearingRepeatDirective(args: {
   ) {
     return null;
   }
-  const effect = hearingRepeatEffectFromPowers(args.requester.powers);
-  return effect
+  const listenerOwnedEffect = hearingRepeatEffectFromPowers(
+    args.requester.powers,
+  );
+  const sourceOwnedAudibilityEffect =
+    botPowerIntermittentAudibilityEffectV1(args.speaker.powers);
+  const sourceOwnedMissRequiresRepeat =
+    sourceOwnedAudibilityEffect?.missEvent === "inaudible_ask_repeat" &&
+    botcastQuietHearingOutcomeV1(
+      args.episode.events,
+      sourceMessage.id,
+      args.speaker.id,
+      args.requester.id,
+    ) === false;
+  return listenerOwnedEffect || sourceOwnedMissRequiresRepeat
     ? {
         requesterBotId: args.requester.id,
         repeatingBotId: args.speaker.id,
@@ -11326,7 +11363,9 @@ function botcastHearingRepeatDirective(args: {
         sourceMessageId: sourceMessage.id,
         repeatedContent: sourceMessage.content,
         sourceMood: sourceMessage.moodKey,
-        moodPenalty: effect.moodPenalty,
+        ...(listenerOwnedEffect
+          ? { moodPenalty: listenerOwnedEffect.moodPenalty }
+          : {}),
       }
     : null;
 }
@@ -11462,6 +11501,7 @@ const BOTCAST_SILENT_HOST_SPEECH_CLAIM_PATTERNS = [
 function botcastQuietHearingOutcomeV1(
   events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
   sourceMessageId: string,
+  sourceBotId: string,
   listenerBotId: string,
 ): boolean | null {
   for (let index = events.length - 1; index >= 0; index -= 1) {
@@ -11470,6 +11510,7 @@ function botcastQuietHearingOutcomeV1(
     if (
       event.payload.effect === "quiet_hearing" &&
       event.payload.sourceMessageId === sourceMessageId &&
+      event.payload.sourceBotId === sourceBotId &&
       event.payload.listenerBotId === listenerBotId &&
       typeof event.payload.heard === "boolean"
     ) {
@@ -12355,9 +12396,10 @@ export function buildBotcastSpeakerPrompt(
     .map((message) => {
       const peerMessage = message.botId !== speaker.id;
       const quietHearing = peerMessage && !speakerPiercesDeliveryFilters
-        ? botcastQuietHearingOutcomeV1(
+          ? botcastQuietHearingOutcomeV1(
             args.episode.events,
             message.id,
+            peer.id,
             speaker.id,
           )
         : null;
@@ -13301,6 +13343,7 @@ type BotcastUtteranceRepairReason =
   | "formal_thanks_appended"
   | "generic_closing"
   | "generic_follow_up"
+  | "guest_coda_role"
   | "incomplete_signoff"
   | "incomplete"
   | "missing_producer_quote"
@@ -13580,6 +13623,33 @@ const BOTCAST_GENERIC_HOST_CLOSING_PATTERNS = [
   /\b(?:please\s+)?(?:remember|reflect on|consider)\s+(?:the|its|this|what)\b/iu,
 ] as const;
 
+export const BOTCAST_GUEST_CODA_FALLBACK_V1 =
+  "That tension is exactly where my answer stays.";
+
+const BOTCAST_GUEST_CODA_HOST_SIGNOFF_PATTERNS = [
+  /\b(?:thank(?:s| you)?|good\s+night)\b[^.!?…]{0,48}\b(?:audience|everybody|everyone|folks|listeners?|viewers?|watching|listening|tuning\s+in|joining\s+us|at\s+home|y[’']?all|you\s+all)\b/iu,
+  /\b(?:audience|everybody|everyone|folks|listeners?|viewers?|those\s+(?:watching|listening)|you\s+(?:all|at\s+home|watching|listening))\b\s*[,!:—-]/iu,
+  /\bthat(?:['’]s| is)\s+all\s+for\s+(?:today|tonight|now|this\s+(?:show|episode))\b/iu,
+  /\b(?:that(?:['’]s| is)\s+(?:our|the)\s+(?:show|episode)|we(?:['’]re| are)\s+out\s+of\s+time|signing\s+off|until\s+next\s+time|see\s+you\s+next\s+time|from\s+all\s+of\s+us|this\s+has\s+been)\b/iu,
+  /\b(?:we(?:'ll| will)|let(?:'s| us))\s+(?:leave|end|close|stop)\s+(?:it|this|the\s+(?:show|episode|broadcast|interview|conversation))\b/iu,
+  /\b(?:show|episode|broadcast|program|interview|conversation)\b[^.!?…]{0,32}\b(?:is\s+)?(?:over|ending|ended|closed|done|finished)\b/iu,
+  /\b(?:end|ending|close|closing|finish|finishing)\b[^.!?…]{0,24}\b(?:show|episode|broadcast|program|interview|conversation)\b/iu,
+] as const;
+
+/** True when a selected guest coda steals the host's closing role. */
+export function botcastGuestClosingCodaViolatesRoleV1(
+  content: string,
+): boolean {
+  const spoken = extractBotcastVoicePerformance(content, false).content
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (!spoken) return true;
+  if (spoken.split(/\s+/u).filter(Boolean).length > 12) return true;
+  return BOTCAST_GUEST_CODA_HOST_SIGNOFF_PATTERNS.some((pattern) =>
+    pattern.test(spoken),
+  );
+}
+
 function botcastHostClosingNeedsPersonaRetry(content: string): boolean {
   const spoken = extractBotcastVoicePerformance(content, false).content.trim();
   if (!spoken) return true;
@@ -13834,6 +13904,7 @@ function validateBotcastAutoSpeakerUtterance(input: {
   falseNameState?: BotFalseNameStateV1 | null;
   hostClosing?: boolean;
   hostClosingGuestName?: string;
+  guestFinalCoda?: boolean;
   requireHostQuestion?: boolean;
   rejectPeerIdentityClaim?: boolean;
   requireFreshContact?: boolean;
@@ -13959,6 +14030,9 @@ function validateBotcastAutoSpeakerUtterance(input: {
             ? "false_name"
             : hostClosingClause !== null
               ? hostClosingClause
+              : input.guestFinalCoda &&
+                  botcastGuestClosingCodaViolatesRoleV1(spokenContent)
+                ? "guest_coda_role"
               : input.requireHostQuestion &&
                   botcastHostUtteranceNeedsInterviewQuestion(spokenContent)
                 ? "host_question"
@@ -14423,6 +14497,7 @@ async function generateAuxiliaryBotcastJson<T>(args: {
                   ? args.generation.contextualReasoningEffort ??
                     options.reasoningEffort
                   : options.reasoningEffort,
+                attempt.reasoningEffort,
               ),
               turbo:
                 index === 0
@@ -17184,12 +17259,12 @@ export async function advanceBotcastEpisode(
       guestDeparted: guestAlreadyDeparted,
       guestPowers: guestPowerSnapshot ?? currentGuest.powers,
     });
-  if (
+  const guestClosingLastWordStateAtTurnStart =
     botcastGuestClosingLastWordStateV1(
       episode,
       guestClosingLastWordEligible,
-    ) === "awaiting_guest"
-  ) {
+    );
+  if (guestClosingLastWordStateAtTurnStart === "awaiting_guest") {
     scheduledSpeakerRole = "guest";
   }
   const echoHostClosingNeedsGuestReflection =
@@ -17223,6 +17298,9 @@ export async function advanceBotcastEpisode(
           (cueDelivery === "interrupt_guest" || cueDelivery === "redirect_host")
         ? "host"
         : scheduledSpeakerRole;
+  const selectedGuestFinalCoda =
+    speakerRole === "guest" &&
+    guestClosingLastWordStateAtTurnStart === "awaiting_guest";
   let imageContextAtTurnStart = botcastLatestImageContextV1(episode.events);
   const explicitImageLifecycleAction =
     imageContextAtTurnStart &&
@@ -18088,6 +18166,8 @@ export async function advanceBotcastEpisode(
     "The previous draft was rejected before it could go on air.",
     hostClosingTurn
       ? `Write a completely new final sign-off in ${speaker.name}'s established persona. Use two or three short sentences, 16 to 48 words: one sharp topic-specific observation, then a distinct closing beat. ${episode.guestPresenceMode === "audience_only" ? "Thank the audience for watching or listening." : `Thank ${peerAddressName} by name for joining and thank the audience for watching or listening. Both thanks are mandatory.`} It must sound like this host, not a canned suffix. Do not explain a lesson, address "listeners at home," prescribe reflection, use ceremonial farewell language, or explain or reinterpret persona lore or catchphrases.`
+      : selectedGuestFinalCoda
+        ? `Write a completely new final guest coda in ${speaker.name}'s persona using no more than twelve words. Give only this guest's brief claim, correction, or concession. Do not thank or address the audience, announce that the show is ending, or imitate a host sign-off.`
       : speakerRole === "host"
         ? `Write a completely new host line in ${speaker.name}'s persona. Respond briefly to the guest's latest claim, then ask one specific follow-up question that ends with a question mark.`
         : peerSpeechObfuscated
@@ -18387,6 +18467,8 @@ export async function advanceBotcastEpisode(
     modelUsed = "signal-producer-quote";
   } else if (hearingRepeatDirective) {
     raw = hearingRepeatDirective.repeatedContent;
+    providerUsed = "deterministic";
+    modelUsed = "signal-hearing-repeat";
   } else if (speakerEchoesForTurn) {
     raw = applyBotPowerEchoResponseV1(addressedSpeechForEcho);
     providerUsed = "deterministic";
@@ -18438,6 +18520,7 @@ export async function advanceBotcastEpisode(
                         modelId: attempt.model,
                         simulatedEffortEnabled: true,
                       }),
+                  attempt.reasoningEffort,
                 );
             const attemptOptions: GenerateOptions = {
               ...generationOptions,
@@ -18505,6 +18588,7 @@ export async function advanceBotcastEpisode(
                         modelId: attempt.model,
                         simulatedEffortEnabled: true,
                       }),
+                  attempt.reasoningEffort,
                 ),
             { provider: attempt.provider, modelId: attempt.model },
           );
@@ -18534,6 +18618,7 @@ export async function advanceBotcastEpisode(
                     ? null
                     : activeFalseNameState,
                   hostClosing: hostClosingTurn,
+                  guestFinalCoda: selectedGuestFinalCoda,
                   requireHostQuestion:
                     speakerRole === "host" &&
                     episode.segment === "interview" &&
@@ -18669,6 +18754,7 @@ export async function advanceBotcastEpisode(
                   ? null
                   : activeFalseNameState,
                 hostClosing: hostClosingTurn,
+                guestFinalCoda: selectedGuestFinalCoda,
                 requireHostQuestion:
                   speakerRole === "host" &&
                   episode.segment === "interview" &&
@@ -19145,6 +19231,14 @@ export async function advanceBotcastEpisode(
           peerName: peer.name,
         })
       : null;
+  const savedGuestImageObservation = imageContextAtTurnStart
+    ?.guestDiscussionMessageId
+    ? episode.messages.find(
+        (message) =>
+          message.id === imageContextAtTurnStart.guestDiscussionMessageId &&
+          message.speakerRole === "guest",
+      )?.content ?? null
+    : null;
   const imageDiscussionFallback =
     imageDiscussionTurn === "host_introduction"
       ? `I've placed ${speakerRelativeImageReference ?? "this image"} at the center of the table. ${hostNamesGuest}, take a look—what are your thoughts?`
@@ -19153,9 +19247,10 @@ export async function advanceBotcastEpisode(
           ? `Let me take a look at ${speakerRelativeImageReference ?? "this item"}. Its physical presence changes how I read the details and what they suggest.`
           : `Let me take a look at ${speakerRelativeImageReference ?? "this picture"}. It makes its strongest point through what it puts in focus and what it leaves unresolved.`
         : imageDiscussionTurn === "host_follow_up"
-          ? requestedCue
-            ? `Keeping both ${speakerRelativeImageReference ?? "this image"} and your point in view, ${hostNamesGuest}, the clarification sharpens the question; my own read is that the visible emphasis changes how we should weigh your claim.`
-            : `My own read of ${speakerRelativeImageReference ?? "this image"} is that its visible emphasis strengthens part of your point, ${hostNamesGuest}, while leaving a useful tension unresolved. Let's carry that tension back into ${openingSubject}.`
+          ? botcastHostImageObservationFallbackV1({
+              guestName: hostNamesGuest,
+              guestObservation: savedGuestImageObservation,
+            })
           : null;
   const producerCueRecoveryFallback =
     speakerRole === "host"
@@ -19167,11 +19262,11 @@ export async function advanceBotcastEpisode(
       : null;
   const fallback =
     speakerRole === "host"
-    ? imageDiscussionFallback ??
+    ? producerCueRecoveryFallback ??
+      imageDiscussionFallback ??
       producerCutFallback ??
       silentGuestHostFallback ??
       producerQuoteFallback ??
-      producerCueRecoveryFallback ??
       (firstHostOpening
           ? openingIntroFallback!
           : episode.guestPresenceMode === "audience_only"
@@ -19943,6 +20038,12 @@ export async function advanceBotcastEpisode(
         })
       : null;
   if (mutualRestartEnforcement) content = mutualRestartEnforcement;
+  const guestCodaRoleRepairApplied =
+    selectedGuestFinalCoda &&
+    botcastGuestClosingCodaViolatesRoleV1(content);
+  if (guestCodaRoleRepairApplied) {
+    content = BOTCAST_GUEST_CODA_FALLBACK_V1;
+  }
   const publicPowerInterruptedContent = powerCutoffApplied
     ? {
         ...powerCutoffApplied,
@@ -19980,6 +20081,8 @@ export async function advanceBotcastEpisode(
   const stageActionText =
     participantDepartsThisTurn || hostSignsOffThisTurn
       ? null
+      : guestCodaRoleRepairApplied
+        ? null
       : imageDiscussionTurn === "host_introduction" && imageContextAtTurnStart
         ? `places ${botcastEpisodeImageSpokenReference(imageContextAtTurnStart).replace(/^this\b/u, "the")} in the center of the table`
         : deterministicSpeechCopySilence
@@ -20055,8 +20158,10 @@ export async function advanceBotcastEpisode(
         : null;
   const unpressuredMessageMoodKey = speakerQuietIgnored
     ? lowerVoiceMoodForHearingRepeat(tensionMoodKey)
-    : speakerRepeatsForHearingPower
+    : speakerRepeatsForHearingPower && hearingRepeatDirective!.moodPenalty
     ? lowerVoiceMoodForHearingRepeat(hearingRepeatDirective!.sourceMood)
+    : speakerRepeatsForHearingPower
+      ? hearingRepeatDirective!.sourceMood
     : turnMoodBoost
       ? turnMoodDrain
         ? lowerBotcastMoodForDrainV1(
@@ -20158,6 +20263,8 @@ export async function advanceBotcastEpisode(
         ? "speaker_identity_swap"
         : onlineTurn?.validationFailureClause === "fresh_contact"
           ? "power_fresh_contact"
+          : onlineTurn?.validationFailureClause === "guest_coda_role"
+            ? "guest_coda_role"
           : null;
   recordEvent(
     db,
@@ -20175,10 +20282,10 @@ export async function advanceBotcastEpisode(
     ...(providerUsed !== "deterministic"
       ? {
           // These values belong to this committed utterance, not the current
-          // picker preference. Recovery deliberately clears Turbo and uses
-          // the fallback's no-reasoning route.
+          // picker preference. Auto recovery carries its own per-attempt
+          // effort while legacy fixed fallbacks retain None.
           reasoningEffort: autoRecovery
-            ? "none"
+            ? autoRecovery.attempts.at(-1)?.reasoningEffort ?? "none"
             : (generation.contextualReasoningEffort ??
               generationOptions.reasoningEffort ??
               "auto"),
@@ -20268,7 +20375,9 @@ export async function advanceBotcastEpisode(
             requesterBotId: hearingRepeatDirective!.requesterBotId,
             requestMessageId: hearingRepeatDirective!.requestMessageId,
             sourceMessageId: hearingRepeatDirective!.sourceMessageId,
-            moodPenalty: hearingRepeatDirective!.moodPenalty,
+            ...(hearingRepeatDirective!.moodPenalty
+              ? { moodPenalty: hearingRepeatDirective!.moodPenalty }
+              : {}),
           },
         }
       : speakerQuietIgnored
@@ -20329,7 +20438,8 @@ export async function advanceBotcastEpisode(
       closingContractRepaired ||
       freshContactRepairApplied ||
       prematureSignoffRepairApplied ||
-      postPowerGuestRepairApplied) &&
+      postPowerGuestRepairApplied ||
+      guestCodaRoleRepairApplied) &&
     !socialSilenceMarker &&
     !speakerIsMutedForTurn &&
     !speakerReadsProducerQuote
@@ -20362,13 +20472,18 @@ export async function advanceBotcastEpisode(
               (prematureSignoffRepairApplied
                 ? "premature_signoff"
                 : undefined) ??
+              (guestCodaRoleRepairApplied
+                ? "guest_coda_role"
+                : undefined) ??
               (postPowerGuestRepairApplied
                 ? "non_answering_deferral"
                 : undefined) ??
               "power_fresh_contact",
             fallbackKind:
               speakerRole === "guest"
-                ? "guest_substantive_answer"
+                ? selectedGuestFinalCoda
+                  ? "guest_coda"
+                  : "guest_substantive_answer"
                 : firstHostOpening
                   ? "host_opening"
                   : episode.segment === "closing" || wrapUpCue
@@ -20417,9 +20532,10 @@ export async function advanceBotcastEpisode(
     : null;
   const precedingQuietHearing = latestOnAirMessage &&
     !botPowerIgnoresOtherPowersV1(speaker.powers)
-    ? botcastQuietHearingOutcomeV1(
+      ? botcastQuietHearingOutcomeV1(
         episode.events,
         latestOnAirMessage.id,
+        peer.id,
         speaker.id,
       )
     : null;
@@ -21762,7 +21878,7 @@ export async function advanceBotcastEpisode(
     });
     const recordedSuggestion =
       firstOpeningHost && speakerVisibleToAudience
-        ? { ...suggestion, minimumHoldMs: 1_800 }
+        ? { ...suggestion, minimumHoldMs: 900 }
         : suggestion;
     recordEvent(
       db,
@@ -21798,7 +21914,11 @@ export async function advanceBotcastEpisode(
           introductionAtMs,
         );
         if (guestFocusAtMs > recordedSuggestion.atMs) {
-          const introductionHoldMs = 1_800;
+          const utteranceEndMs = messageStartMs + utteranceDurationMs;
+          const introductionHoldMs = Math.min(
+            1_600,
+            utteranceEndMs - guestFocusAtMs,
+          );
           recordedIntroduction = true;
           recordEvent(
             db,
@@ -21816,31 +21936,27 @@ export async function advanceBotcastEpisode(
             },
             now,
           );
-          // Naming the guest is a visit, not a hand-off — the host is still
-          // mid-sentence. Recording the introduction skips the coverage block
-          // below, so the cut back to the host has to be placed here or the
-          // camera sits on a silent guest for the rest of the opening.
+          // Naming the guest is a visit, not a hand-off. Always leave that
+          // close-up: return to the host when they still have a real phrase,
+          // otherwise breathe Wide before the guest takes the floor.
           const introductionReturnAtMs = guestFocusAtMs + introductionHoldMs;
-          if (
-            introductionReturnAtMs + BOTCAST_DIRECTOR_MIN_SHOT_MS <=
-            messageStartMs + utteranceDurationMs
-          ) {
-            recordEvent(
-              db,
-              userId,
-              episode.id,
-              "camera_suggestion",
-              {
-                shot: recordedSuggestion.shot,
-                reason: "speaker",
-                speakerRole,
-                atMs: introductionReturnAtMs,
-                minimumHoldMs: BOTCAST_DIRECTOR_MIN_SHOT_MS,
-                messageId,
-              },
-              now,
-            );
-          }
+          const hostHasClosingPhrase =
+            utteranceEndMs - introductionReturnAtMs >= 1_200;
+          recordEvent(
+            db,
+            userId,
+            episode.id,
+            "camera_suggestion",
+            {
+              shot: hostHasClosingPhrase ? recordedSuggestion.shot : "wide",
+              reason: hostHasClosingPhrase ? "speaker" : "coverage",
+              ...(hostHasClosingPhrase ? { speakerRole } : {}),
+              atMs: introductionReturnAtMs,
+              minimumHoldMs: hostHasClosingPhrase ? 1_200 : 900,
+              messageId,
+            },
+            now,
+          );
         }
       }
     }

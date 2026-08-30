@@ -41,7 +41,9 @@ import {
 import {
   BOT_POWER_CANONICAL_SILENCE_V1,
   botPowerAvatarVisibilityModeV1,
+  botPowerEternallyIntroducesV1,
   botPowerResponseIsSilentV1,
+  botPowerTrollsV1,
   type BotPowerMutePerformanceV1,
   type BotPowerAvatarVisibilityModeV1,
   type BotPowerObserverPerspectiveV1,
@@ -3397,6 +3399,139 @@ export function botcastGuestDepartureEligible(
   state: BotcastTensionState,
 ): boolean {
   return state.level >= 3 && state.warningCount >= 1;
+}
+
+/** Producer-facing projection of the two deterministic guest walk-off paths. */
+export type BotcastGuestWalkOffRiskStatusV1 =
+  | "unavailable"
+  | "settled"
+  | "elevated"
+  | "eligible"
+  | "suppressed"
+  | "departed"
+  | "closing";
+
+export type BotcastGuestWalkOffRiskSourceV1 =
+  | "none"
+  | "producer_pressure"
+  | "directed_irritation"
+  | "combined";
+
+export interface BotcastGuestWalkOffRiskV1 {
+  /** `false` means this episode has no present bot guest to assess. */
+  available: boolean;
+  /** A calibrated index, presented as an estimate rather than a forecast. */
+  chancePercent: number;
+  status: BotcastGuestWalkOffRiskStatusV1;
+  source: BotcastGuestWalkOffRiskSourceV1;
+}
+
+/**
+ * Resolve the producer's honest walk-off estimate without inspecting prompts or
+ * generation state. Voluntary departures are intentionally not forecast here.
+ */
+export function botcastGuestWalkOffRiskV1(
+  episode: Pick<
+    BotcastEpisode,
+    | "events"
+    | "guestKind"
+    | "guestPresenceMode"
+    | "guestBotId"
+    | "hostBotId"
+    | "tensionStage"
+    | "warningCount"
+    | "outcome"
+    | "segment"
+  >,
+): BotcastGuestWalkOffRiskV1 {
+  const guestDeparted =
+    episode.outcome === "guest_departed" ||
+    botcastEpisodeDepartureOutcome(episode.events) === "guest_departed";
+  if (guestDeparted) {
+    return {
+      available: false,
+      chancePercent: 100,
+      status: "departed",
+      source: "none",
+    };
+  }
+  if (episode.guestKind !== "bot" || episode.guestPresenceMode !== "present") {
+    return {
+      available: false,
+      chancePercent: 0,
+      status: "unavailable",
+      source: "none",
+    };
+  }
+  if (episode.segment === "closing") {
+    return {
+      available: false,
+      chancePercent: 0,
+      status: "closing",
+      source: "none",
+    };
+  }
+
+  const guestPowers = botcastSnapshotPowersForRoleV1(episode, "guest");
+  if (
+    guestPowers &&
+    (botPowerTrollsV1(guestPowers) || botPowerEternallyIntroducesV1(guestPowers))
+  ) {
+    return {
+      available: true,
+      chancePercent: 0,
+      status: "suppressed",
+      source: "none",
+    };
+  }
+
+  const tensionLevel =
+    episode.tensionStage === "departed"
+      ? 3
+      : episode.tensionStage === "warning"
+        ? 2
+        : episode.tensionStage === "resistance"
+          ? 1
+          : 0;
+  // These bands mirror the existing departure threshold while leaving the
+  // middle states legible as a calibrated producer index, not a model claim.
+  const pressurePercent =
+    tensionLevel >= 3
+      ? episode.warningCount >= 1
+        ? 100
+        : 85
+      : tensionLevel === 2
+        ? 60
+        : tensionLevel === 1
+          ? 25
+          : 0;
+  const irritationPercent = Math.round(
+    botcastDirectionalIrritationIntensityBetween(
+      episode.events,
+      episode.guestBotId,
+      episode.hostBotId,
+    ) * 100,
+  );
+  const chancePercent = Math.max(pressurePercent, irritationPercent);
+  const source =
+    pressurePercent > 0 && irritationPercent > 0
+      ? "combined"
+      : pressurePercent > 0
+        ? "producer_pressure"
+        : irritationPercent > 0
+          ? "directed_irritation"
+          : "none";
+  return {
+    available: true,
+    chancePercent,
+    status:
+      chancePercent >= 100
+        ? "eligible"
+        : chancePercent > 0
+          ? "elevated"
+          : "settled",
+    source,
+  };
 }
 
 export function botcastSegmentForTurn(args: {

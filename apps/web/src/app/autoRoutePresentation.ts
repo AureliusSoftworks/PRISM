@@ -55,9 +55,7 @@ export function routeMatchesAppletLane(
   if (!route || !trimModel(route.model)) return false;
   if (lane === "local") return route.provider === "local";
   if (route.provider !== "local") return true;
-  // ONLINE may finish on its explicit final local recovery. The frozen Auto
-  // decision distinguishes that from stale LOCAL history after a lane switch.
-  return route.autoRoute?.lane === "online" && Boolean(route.autoRecovery);
+  return false;
 }
 
 /** The recovery final is the only concrete route a completed turn may expose. */
@@ -107,10 +105,8 @@ export function latestActualAppletRoute(
     const route = finalActualAppletRoute({
       provider: turn.autoRecovery?.finalProvider ?? turn.provider ?? turn.autoRoute?.provider ?? "local",
       model: turn.autoRecovery?.finalModel ?? turn.model ?? turn.autoRoute?.model ?? "",
-      // The fallback executor deliberately strips deliberation and Turbo; do
-      // not let an initial-route preference leak onto the recovered turn.
       effort: turn.autoRecovery
-        ? "none"
+        ? turn.autoRecovery.attempts.at(-1)?.reasoningEffort ?? "none"
         : (turn.reasoningEffort ?? turn.autoRoute?.reasoningEffort),
       turbo: turn.autoRecovery ? false : turn.turbo,
       autoRoute: turn.autoRoute,

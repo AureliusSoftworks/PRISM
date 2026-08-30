@@ -12,6 +12,8 @@ export type { ResolvedAutoModel } from "@localai/shared";
 
 import {
   resolveAutoModel as resolveSharedAutoModel,
+  resolveAutoModelRoutePlan as resolveSharedAutoModelRoutePlan,
+  type AutoRouteDecisionV1,
   type ResolveAutoModelInput,
   type ResolvedAutoModel,
 } from "@localai/shared";
@@ -51,4 +53,20 @@ export function resolveAutoModel(input: ResolveAutoModelInput): ResolvedAutoMode
       input.priceForModel ??
       ((provider, modelId) => routingTextPriceForModel(provider, modelId)),
   });
+}
+
+/** API wrapper adds Usage pricing to every route in the dynamic Auto plan. */
+export function resolveAutoModelRoutePlan(
+  input: ResolveAutoModelInput,
+  maxAttempts = 3,
+): AutoRouteDecisionV1[] {
+  return resolveSharedAutoModelRoutePlan(
+    {
+      ...input,
+      priceForModel:
+        input.priceForModel ??
+        ((provider, modelId) => routingTextPriceForModel(provider, modelId)),
+    },
+    maxAttempts,
+  );
 }

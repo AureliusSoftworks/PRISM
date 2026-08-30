@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 
-export type PrismCompanionView = "synthesis" | "chat" | "notes";
+export type PrismCompanionView = "chat";
 
 export interface PrismCompanionViewRequestSnapshot {
   view: PrismCompanionView;

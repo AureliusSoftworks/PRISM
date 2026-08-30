@@ -197,6 +197,34 @@ export interface MansionLayoutRectV2 {
   height: number;
 }
 
+export type MansionTraversalWaypointKindV1 =
+  | "entity_center"
+  | "door"
+  | "vertical_connector";
+
+/** A deterministic, presentation-safe point along one legal mansion move. */
+export interface MansionTraversalWaypointV1 {
+  kind: MansionTraversalWaypointKindV1;
+  floor: number;
+  x: number;
+  y: number;
+  entityId: string;
+  edgeId: string | null;
+  connectorKind: MansionVerticalConnectorKindV2 | null;
+}
+
+/** The concrete corridor/door route hidden behind one semantic room move. */
+export interface MansionTraversalRouteV1 {
+  version: 1;
+  fromRoomId: string;
+  toRoomId: string;
+  entityIds: string[];
+  doorIds: string[];
+  connectorIds: string[];
+  waypoints: MansionTraversalWaypointV1[];
+  distanceUnits: number;
+}
+
 export interface MansionLayoutSharedWallV2 {
   aWall: MansionLayoutWallV2;
   bWall: MansionLayoutWallV2;
@@ -324,6 +352,188 @@ export function mansionLayoutV2DoorPoint(
   return wall.orientation === "vertical"
     ? { x: wall.coordinate, y: along }
     : { x: along, y: wall.coordinate };
+}
+
+type MansionTraversalEdgeV1 = {
+  fromEntityId: string;
+  toEntityId: string;
+  kind: "door" | "vertical_connector";
+  id: string;
+  door: MansionLayoutDoorV2 | null;
+  connector: MansionVerticalConnectorV2 | null;
+};
+
+function mansionLayoutV2EntityCenter(
+  entity: MansionLayoutEntityV2,
+): { x: number; y: number } {
+  const rect = mansionLayoutV2EntityRect(entity);
+  return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+}
+
+/** Resolve the exact corridor/door chain behind one legal semantic-room move.
+ * Neighbor ordering is stable, so identical frozen mansion snapshots replay
+ * the same route even when more than one shortest path exists. */
+export function mansionLayoutV2TraversalRoute(
+  layout: MansionLayoutV2,
+  fromRoomId: string,
+  toRoomId: string,
+): MansionTraversalRouteV1 | null {
+  const byId = new Map(layout.entities.map((entity) => [entity.id, entity]));
+  const from = byId.get(fromRoomId);
+  const to = byId.get(toRoomId);
+  if (from?.kind !== "room" || to?.kind !== "room") return null;
+
+  const edgesByEntity = new Map<string, MansionTraversalEdgeV1[]>();
+  const addEdge = (edge: MansionTraversalEdgeV1): void => {
+    const existing = edgesByEntity.get(edge.fromEntityId) ?? [];
+    existing.push(edge);
+    edgesByEntity.set(edge.fromEntityId, existing);
+  };
+  for (const door of layout.doors) {
+    if (!byId.has(door.aEntityId) || !byId.has(door.bEntityId)) continue;
+    addEdge({
+      fromEntityId: door.aEntityId,
+      toEntityId: door.bEntityId,
+      kind: "door",
+      id: door.id,
+      door,
+      connector: null,
+    });
+    addEdge({
+      fromEntityId: door.bEntityId,
+      toEntityId: door.aEntityId,
+      kind: "door",
+      id: door.id,
+      door,
+      connector: null,
+    });
+  }
+  for (const connector of layout.verticalConnectors) {
+    if (!byId.has(connector.lowerEntityId) || !byId.has(connector.upperEntityId)) continue;
+    addEdge({
+      fromEntityId: connector.lowerEntityId,
+      toEntityId: connector.upperEntityId,
+      kind: "vertical_connector",
+      id: connector.id,
+      door: null,
+      connector,
+    });
+    addEdge({
+      fromEntityId: connector.upperEntityId,
+      toEntityId: connector.lowerEntityId,
+      kind: "vertical_connector",
+      id: connector.id,
+      door: null,
+      connector,
+    });
+  }
+  for (const edges of edgesByEntity.values()) {
+    edges.sort((left, right) =>
+      left.toEntityId.localeCompare(right.toEntityId) ||
+      left.kind.localeCompare(right.kind) ||
+      left.id.localeCompare(right.id));
+  }
+
+  const parent = new Map<string, MansionTraversalEdgeV1>();
+  const visited = new Set<string>([fromRoomId]);
+  const queue = [fromRoomId];
+  while (queue.length > 0 && !visited.has(toRoomId)) {
+    const entityId = queue.shift()!;
+    for (const edge of edgesByEntity.get(entityId) ?? []) {
+      const next = byId.get(edge.toEntityId);
+      if (!next || !entityIsTraversable(next) || visited.has(next.id)) continue;
+      visited.add(next.id);
+      parent.set(next.id, edge);
+      queue.push(next.id);
+      if (next.id === toRoomId) break;
+    }
+  }
+  if (!visited.has(toRoomId)) return null;
+
+  const reversedEdges: MansionTraversalEdgeV1[] = [];
+  let cursor = toRoomId;
+  while (cursor !== fromRoomId) {
+    const edge = parent.get(cursor);
+    if (!edge) return null;
+    reversedEdges.push(edge);
+    cursor = edge.fromEntityId;
+  }
+  const edges = reversedEdges.reverse();
+  const entityIds = [fromRoomId, ...edges.map((edge) => edge.toEntityId)];
+  const startCenter = mansionLayoutV2EntityCenter(from);
+  const waypoints: MansionTraversalWaypointV1[] = [{
+    kind: "entity_center",
+    floor: from.floor,
+    x: startCenter.x,
+    y: startCenter.y,
+    entityId: from.id,
+    edgeId: null,
+    connectorKind: null,
+  }];
+  const doorIds: string[] = [];
+  const connectorIds: string[] = [];
+  for (const edge of edges) {
+    const source = byId.get(edge.fromEntityId)!;
+    const destination = byId.get(edge.toEntityId)!;
+    if (edge.kind === "door" && edge.door) {
+      const point = mansionLayoutV2DoorPoint(layout, edge.door) ?? (() => {
+        const left = mansionLayoutV2EntityCenter(source);
+        const right = mansionLayoutV2EntityCenter(destination);
+        return { x: (left.x + right.x) / 2, y: (left.y + right.y) / 2 };
+      })();
+      doorIds.push(edge.id);
+      waypoints.push({
+        kind: "door",
+        floor: source.floor,
+        x: point.x,
+        y: point.y,
+        entityId: source.id,
+        edgeId: edge.id,
+        connectorKind: null,
+      });
+    } else if (edge.connector) {
+      const sourceCenter = mansionLayoutV2EntityCenter(source);
+      connectorIds.push(edge.id);
+      waypoints.push({
+        kind: "vertical_connector",
+        floor: source.floor,
+        x: sourceCenter.x,
+        y: sourceCenter.y,
+        entityId: source.id,
+        edgeId: edge.id,
+        connectorKind: edge.connector.kind,
+      });
+    }
+    const destinationCenter = mansionLayoutV2EntityCenter(destination);
+    waypoints.push({
+      kind: "entity_center",
+      floor: destination.floor,
+      x: destinationCenter.x,
+      y: destinationCenter.y,
+      entityId: destination.id,
+      edgeId: edge.id,
+      connectorKind: edge.connector?.kind ?? null,
+    });
+  }
+
+  let distanceUnits = 0;
+  for (let index = 1; index < waypoints.length; index += 1) {
+    const previous = waypoints[index - 1]!;
+    const next = waypoints[index]!;
+    distanceUnits += previous.floor === next.floor
+      ? Math.hypot(next.x - previous.x, next.y - previous.y)
+      : 4 + Math.abs(next.floor - previous.floor) * 2;
+  }
+  return {
+    version: 1,
+    fromRoomId,
+    toRoomId,
+    entityIds,
+    doorIds,
+    connectorIds,
+    waypoints,
+    distanceUnits: Math.round(distanceUnits * 1_000) / 1_000,
+  };
 }
 
 function pairKey(left: string, right: string): string {

@@ -685,6 +685,7 @@ import {
 import {
   DEBATE_FORUM_FOLEY_ROOM_SEND,
   DEBATE_TURNABOUT_FOLEY_ROOM_SEND,
+  type RoomAcousticsSend,
 } from "./roomAcoustics";
 import { magentaTintedRasterUrl } from "./magentaKeyRaster";
 import type { VoicePlaybackCharacterAlignment } from "./voiceEffects";
@@ -839,6 +840,8 @@ export interface DebateExperienceProps {
   /** Optional entry format for directed launches and local QA fixtures. */
   initialFormat?: DebateFormatId;
   playerName: string;
+  playerColor?: string | null;
+  playerGlyph?: string | null;
   storageScopeId: string;
   preferredProvider: "local" | "ollama_cloud" | "openai" | "anthropic";
   preferredImageProvider: "local" | "openai";
@@ -865,6 +868,7 @@ export interface DebateExperienceProps {
     signal?: AbortSignal;
     text: string;
     volume: number;
+    roomAcoustics?: RoomAcousticsSend;
   }) => Promise<boolean>;
   objectionRulingTimeoutMs?: number;
   request: <T>(path: string, options?: RequestInit) => Promise<T>;
@@ -3139,7 +3143,7 @@ function debateEventGenerationAnnotation(
   const provider = event.autoRecovery?.finalProvider ?? event.provider;
   const model = event.autoRecovery?.finalModel ?? event.model;
   const effort = event.autoRecovery
-    ? "none"
+    ? event.autoRecovery.attempts.at(-1)?.reasoningEffort ?? "none"
     : (event.autoRoute?.reasoningEffort ?? fallbackEffort);
   const details = [`Effort ${DEBATE_ARCHIVE_EFFORT_LABELS[effort]}`];
   if (!event.autoRecovery && event.turbo) details.push("Turbo");
@@ -3719,7 +3723,7 @@ export function formatDebateVerboseTranscript(
     `- Resolved routing: ${debateResolvedRoutingLabel(session)}`,
     `- Effort: ${DEBATE_TRANSCRIPT_EFFORT_GLYPHS[session.lastReasoningEffort ?? "auto"]}${session.lastTurbo ? "🔥" : ""} ${DEBATE_ARCHIVE_EFFORT_LABELS[session.lastReasoningEffort ?? "auto"]}${session.lastTurbo ? " (Turbo)" : ""}`,
     "- Spoken timing: setting-independent estimates from each final heard line",
-    `- Frozen generation chain: ${session.generationChain.map((entry) => `${entry.provider}/${entry.model}`).join(" → ")}`,
+    `- ${session.modelSelectionKind === "auto" ? "Initial Auto escalation plan" : "Fixed fallback chain"}: ${session.generationChain.map((entry) => `${entry.provider}/${entry.model}`).join(" → ")}`,
     ...cast.map(
       ([role, bot]) =>
         `- ${role}: ${
@@ -5104,6 +5108,8 @@ export function DebateExperience(
   const [mysteryEvidenceAssetSynthesis, setMysteryEvidenceAssetSynthesis] =
     useState(false);
   const [mysteryRoomAssetSynthesis, setMysteryRoomAssetSynthesis] =
+    useState(false);
+  const [mysteryIllustratedRoomSynthesis, setMysteryIllustratedRoomSynthesis] =
     useState(false);
   const [mysteryMusicAssetSynthesis, setMysteryMusicAssetSynthesis] =
     useState(false);
@@ -8323,6 +8329,11 @@ export function DebateExperience(
         mysteryRoomAssetSynthesis &&
         !mysterySkipInvestigation &&
         props.responseMode !== "local",
+      illustratedRooms:
+        mysteryRoomAssetSynthesis &&
+        mysteryIllustratedRoomSynthesis &&
+        !mysterySkipInvestigation &&
+        props.responseMode !== "local",
       music:
         mysteryMusicAssetSynthesis &&
         !mysterySkipInvestigation &&
@@ -8853,6 +8864,7 @@ export function DebateExperience(
     setMysteryMansionExteriorError(null);
     setMysteryEvidenceAssetSynthesis(false);
     setMysteryRoomAssetSynthesis(false);
+    setMysteryIllustratedRoomSynthesis(false);
     setMysteryMusicAssetSynthesis(false);
     setMysteryAmbienceAssetSynthesis(false);
     setMysterySkipInvestigation(false);
@@ -18935,13 +18947,18 @@ export function DebateExperience(
               >
                 {familyRuns.map((run) => {
                   const ordinal = run.mysteryRunOrdinal ?? 1;
+                  const isCurrentRun = openFamilyRun?.id === run.id;
                   const outcome = run.status === "completed"
                     ? run.mysteryRouteGrade
                       ? gradeLabelForMysteryArchive(run.mysteryRouteGrade)
                       : "Completed"
                     : sessionStatusLabel(run);
                   return (
-                    <li key={run.id} className={styles.archiveRunRow}>
+                    <li
+                      key={run.id}
+                      className={styles.archiveRunRow}
+                      data-current={isCurrentRun ? "true" : undefined}
+                    >
                       <div className={styles.archiveRunIdentity}>
                         <strong>Run {ordinal}</strong>
                         <span>{outcome}</span>
@@ -18957,15 +18974,24 @@ export function DebateExperience(
                         </span>
                       </div>
                       <div className={styles.archiveRunActions}>
-                        <button
-                          type="button"
-                          className={styles.archiveOpenButton}
-                          onClick={() => void openSession(run)}
-                          disabled={busy}
-                          aria-label={`Open Run ${ordinal} of ${session.title}`}
-                        >
-                          Open
-                        </button>
+                        {isCurrentRun ? (
+                          <span
+                            className={styles.archiveRunCurrent}
+                            aria-label={`Run ${ordinal} is the current run`}
+                          >
+                            Current
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            className={`${styles.archiveReuseButton} ${styles.archiveRunOpenButton}`}
+                            onClick={() => void openSession(run)}
+                            disabled={busy}
+                            aria-label={`Open Run ${ordinal} of ${session.title}`}
+                          >
+                            Open
+                          </button>
+                        )}
                         <button
                           type="button"
                           className={styles.deleteButton}
@@ -18981,7 +19007,11 @@ export function DebateExperience(
                 })}
               </ol>
             ) : null}
-            <div className={styles.archiveActions}>
+            <div
+              className={styles.archiveActions}
+              role="group"
+              aria-label={`Actions for ${session.title}`}
+            >
               {session.format !== "whodunnit" ? (
                 <button
                   type="button"
@@ -20138,7 +20168,7 @@ export function DebateExperience(
             <label className={mysteryStyles.caseModeChoice} data-selected={mysterySkipInvestigation ? "true" : undefined} data-tutorial-target="whodunnit-v2-skip-investigation">
               <input type="checkbox" checked={mysterySkipInvestigation} onChange={(event) => {
                 setMysterySkipInvestigation(event.currentTarget.checked);
-                if (event.currentTarget.checked) { setMysteryRoomAssetSynthesis(false); setMysteryMusicAssetSynthesis(false); setMysteryAmbienceAssetSynthesis(false); }
+                if (event.currentTarget.checked) { setMysteryRoomAssetSynthesis(false); setMysteryIllustratedRoomSynthesis(false); setMysteryMusicAssetSynthesis(false); setMysteryAmbienceAssetSynthesis(false); }
                 setMysteryNonce(nextMysteryRecipeNonce());
               }} />
               <span><strong>{playerRole === "spectator" ? "Start directly in court" : "Skip investigation"}</strong><small>{playerRole === "spectator" ? "Bypass conclusion review and begin the watch-only trial after the title card." : "Prepare only the second act and enter court directly after the title card."}</small></span>
@@ -20157,9 +20187,15 @@ export function DebateExperience(
                 <span><strong>Evidence</strong><small>{props.responseMode === "local" ? "ONLINE only · LOCAL presents each authored exhibit as text and a symbolic evidence card." : "Create sealed exhibit images. They appear only when the evidence is discovered."}</small></span>
               </label>
               <label data-enabled={!mysterySkipInvestigation && props.responseMode === "online" ? "true" : undefined} aria-disabled={mysterySkipInvestigation || props.responseMode !== "online"}>
-                <input type="checkbox" checked={mysteryRoomAssetSynthesis && !mysterySkipInvestigation && props.responseMode !== "local"} disabled={mysterySkipInvestigation || props.responseMode === "local"} onChange={(event) => { setMysteryRoomAssetSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
+                <input type="checkbox" checked={mysteryRoomAssetSynthesis && !mysterySkipInvestigation && props.responseMode !== "local"} disabled={mysterySkipInvestigation || props.responseMode === "local"} onChange={(event) => { const enabled = event.currentTarget.checked; setMysteryRoomAssetSynthesis(enabled); if (!enabled) setMysteryIllustratedRoomSynthesis(false); setMysteryNonce(nextMysteryRecipeNonce()); }} />
                 <span><strong>Rooms</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude room assets." : props.responseMode === "local" ? "ONLINE only · LOCAL keeps the bundled room pack." : "Create sealed room edits in Case Forge; each one opens only when visited."}</small></span>
               </label>
+              {mysteryRoomAssetSynthesis ? (
+                <label data-enabled={!mysterySkipInvestigation && props.responseMode === "online" ? "true" : undefined} aria-disabled={mysterySkipInvestigation || props.responseMode !== "online"}>
+                  <input type="checkbox" checked={mysteryIllustratedRoomSynthesis && !mysterySkipInvestigation && props.responseMode !== "local"} disabled={mysterySkipInvestigation || props.responseMode !== "online"} onChange={(event) => { setMysteryIllustratedRoomSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
+                  <span><strong>Upgrade every room to Illustrated</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases have no room pack." : props.responseMode === "local" ? "ONLINE only · LOCAL never sends mansion art to a remote generator." : "Keep Case Forge open while it turns every Mosaic source into the full high-detail room set, then begin Investigation in Illustrated view."}</small></span>
+                </label>
+              ) : null}
               <label data-enabled={!mysterySkipInvestigation && props.responseMode !== "local" ? "true" : undefined} aria-disabled={mysterySkipInvestigation || props.responseMode === "local"}>
                 <input type="checkbox" checked={mysteryMusicAssetSynthesis && !mysterySkipInvestigation && props.responseMode === "online"} disabled={mysterySkipInvestigation || props.responseMode !== "online"} onChange={(event) => { setMysteryMusicAssetSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
                 <span><strong>Music</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude investigation music." : props.responseMode !== "online" ? "ONLINE only · LOCAL and Auto keep The Midnight Clue bundled fallback." : "Ask ElevenLabs for an original instrumental mansion theme; failure keeps the bundled theme."}</small></span>
@@ -31632,6 +31668,8 @@ export function DebateExperience(
   const mysterySharedProps = {
     bots,
     playerName: props.playerName,
+    playerColor: props.playerColor,
+    playerGlyph: props.playerGlyph,
     theme: props.theme,
     audioEnabled: props.audioEnabled,
     audioVolume: props.audioVolume,

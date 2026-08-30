@@ -47,6 +47,12 @@ export const SIGNAL_STUDIO_FOLEY_ROOM_SEND = {
   wet: 0.11,
 } as const satisfies RoomAcousticsSend;
 
+/** One shared return for the producer's audience-only soundboard group. */
+export const SIGNAL_STUDIO_SOUNDBOARD_ROOM_SEND = {
+  profile: SIGNAL_STUDIO_ROOM_PROFILE,
+  wet: 0.1,
+} as const satisfies RoomAcousticsSend;
+
 export const DEBATE_FORUM_ROOM_PROFILE = {
   id: "debate-prismatic-forum-v1",
   durationSeconds: 0.72,

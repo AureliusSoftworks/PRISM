@@ -46,20 +46,23 @@ const AUTO_FALLBACK_VALIDATION_DIAGNOSTICS_PREFIX = " Validation clauses: ";
 const AUTO_FALLBACK_SAFE_MODEL_LABEL_RE =
   /^[a-z0-9][a-z0-9._:/+-]{0,79}$/iu;
 
-/** The primary keeps its configured effort; recovery attempts prioritize speed. */
+/** Auto plans may supply a per-route effort; fixed fallbacks retain legacy None. */
 export function autoFallbackReasoningEffort<
   T extends ProviderReasoningEffort | undefined,
 >(
   attemptIndex: number,
   primaryEffort: T,
+  routedEffort?: ProviderReasoningEffort,
 ): T | "none";
 export function autoFallbackReasoningEffort<
   T extends ProviderReasoningEffort | undefined,
 >(
   attemptIndex: number,
   primaryEffort: T,
+  routedEffort?: ProviderReasoningEffort,
 ): T | "none" {
-  return attemptIndex === 0 ? primaryEffort : "none";
+  return (routedEffort ?? (attemptIndex === 0 ? primaryEffort : "none")) as
+    T | "none";
 }
 
 function safeAutoFallbackAttemptLabel(
@@ -224,6 +227,9 @@ export async function runAutoFallbackChain<T = string>(args: {
       traces.push({
         provider: attempt.provider,
         model: attempt.model,
+        ...(attempt.reasoningEffort
+          ? { reasoningEffort: attempt.reasoningEffort }
+          : {}),
         durationMs: 0,
         outcome: "failed",
         reason: "unavailable",
@@ -286,6 +292,9 @@ export async function runAutoFallbackChain<T = string>(args: {
         traces.push({
           provider: attempt.provider,
           model: attempt.model,
+          ...(attempt.reasoningEffort
+            ? { reasoningEffort: attempt.reasoningEffort }
+            : {}),
           durationMs,
           outcome: "failed",
           reason: validated.reason,
@@ -296,6 +305,9 @@ export async function runAutoFallbackChain<T = string>(args: {
       const success: AutoFallbackAttemptTraceV1 = {
         provider: attempt.provider,
         model: attempt.model,
+        ...(attempt.reasoningEffort
+          ? { reasoningEffort: attempt.reasoningEffort }
+          : {}),
         durationMs,
         outcome: "succeeded",
       };
@@ -323,6 +335,9 @@ export async function runAutoFallbackChain<T = string>(args: {
       traces.push({
         provider: attempt.provider,
         model: attempt.model,
+        ...(attempt.reasoningEffort
+          ? { reasoningEffort: attempt.reasoningEffort }
+          : {}),
         durationMs: Math.max(0, Math.round(now() - attemptStartedAt)),
         outcome: "failed",
         reason: timedOut ? "timeout" : "provider_error",

@@ -1359,6 +1359,7 @@ async function generateJson(
               reasoningEffort: autoFallbackReasoningEffort(
                 index,
                 options.reasoningEffort ?? lane.reasoningEffort,
+                lane.reasoningEffort,
               ) ?? undefined,
               allowFinalLocalFallback: false,
             },
@@ -1371,6 +1372,7 @@ async function generateJson(
         autoFallbackReasoningEffort(
           index,
           options.reasoningEffort ?? ordered[index]?.reasoningEffort,
+          ordered[index]?.reasoningEffort,
         ),
         { provider: attempt.provider, modelId: attempt.model },
       ),

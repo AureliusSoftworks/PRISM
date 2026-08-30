@@ -395,6 +395,12 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
         targetSelector: '[data-tutorial-target="botcast-episode-image"]',
       },
       {
+        heading: "Meet the opening",
+        body: "When the ident clears, Signal fades into the studio and lets the room breathe for one to two seconds before the host takes the mic. During the host’s cast introduction, Auto visits the guest as their name lands, then returns to the host when the sentence continues or breathes Wide before the guest takes the floor. The guest has a replay-stable chance to offer a brief greeting immediately after the introduction. Visual identity status stays out of the way for ordinary props and pictures, including unavailable checks; it appears only when inspection actually finds a bot-like subject.",
+        clickLabel: "the episode setup desk",
+        targetSelector: '[data-tutorial-target="botcast-setup"]',
+      },
+      {
         heading: "Take the lucky shortcut",
         body: "I Feel Lucky! sits beneath Create show and unlocks once a show exists. It is Signal’s one-click fast lane: it chooses an active show, books an available non-host guest who fits that show, synthesizes a coherent public episode title plus separate private host and guest briefings, and immediately starts through the same launch checks as Begin episode. If synthesis fails, nothing starts and the Production Desk stays available.",
         clickLabel: "I Feel Lucky!",
@@ -511,9 +517,9 @@ const BOT_NAMING_POWER_TUTORIAL_SUFFIX =
 const COFFEE_GROUP_CREATION_LOADER_TUTORIAL_SUFFIX =
   "Creating a new Coffee Group saves the table immediately, then its Name, one-sentence Ethos, character-free Atmosphere, and original approximately 90-second loop-ready lo-fi focus track finish independently. The track keeps light percussion and a jazzy or easy-listening background foundation, reduces only bounded public cast signals into a distinct, wholly original sonic fingerprint, and falls back to bundled Jazz whenever ONLINE music is unavailable. Create or Regenerate works automatically; Wield Prism Refract on that action when the cast-derived sound needs a different direction. The Ethos softly shapes topic ideas, routing, and replies without becoming a quoted agenda. Each identity item remains editable or independently retryable, so one failed item never blocks the table.";
 const SOFT_SYNTHESIS_PRISM_TUTORIAL_SUFFIX =
-  "While image synthesis runs softly, its job count stays attached to the real Prism orb. Open it to wrap the status card around Prism, and drag Prism to move both. An open Prism menu keeps the assistant anchored, so close or minimize the status card before holding the Wield modifier. Once closed, an untargeted throw keeps the same inertia and collision behavior as Chat and Zen.";
+  "While image synthesis runs softly, its job count stays attached to the real Prism orb without replacing chat. Open Prism, choose the active Progress face, and the status card wraps around the same orb; Return to Prism chat takes you straight back. Drag Prism to move the status card with it. An open Prism menu keeps the assistant anchored, so close or minimize the status card before holding the Wield modifier. Once closed, an untargeted throw keeps the same inertia and collision behavior as Chat and Zen.";
 const PRISM_COMPANION_VIEWS_TUTORIAL_SUFFIX =
-  "The floating Prism panel keeps Synthesis focused on Refract routing and a rail of recent synthesized images; select one to open that exact item in Asset Library. Refract uses the global LOCAL/ONLINE, Model, and Effort controls as they are set when refraction begins. Its APP MODE badge mirrors the global privacy toggle: LOCAL keeps refraction offline, while ONLINE may send the item being refracted to an online provider. Chat keeps the same saved or Private Prism conversation and focused-chat handoff. Notes reuses the session-note composer for encrypted personal notes you can create, reopen, edit, and delete; personal Notes stay unavailable while Prism Chat is Private. On the default bot overview, Prism stays in its Home mark and follows live layout or screen changes. Opening Settings, Avatar Studio, Images, Memories, Usage, Prompt Center, Bots, or another top-bar panel visually submerges the passive orb while keeping Wield and contextual field population available above the panel. Closing the panel restores Prism on the underlying surface. On ordinary surfaces, your Prism shortcut opens this menu at the orb's current location. With the menu closed, Wield Prism onto any safe editable control. Text and editor surfaces first open a one-line steering composer: existing prose offers selected Make this more creative text for immediate replacement, while an empty field starts blank. Press Enter to generate, then Space to reroll with that same direction. Choices, multi-selects, toggles, dates, colors, and bounded values still resolve locally, with a multi-select choosing exactly one valid option. The moving spectrum stays visible and the control stays locked until the result appears. Keep Command held on macOS or Control held on Windows and Linux, then click distinct eligible controls to queue each once in click order; Prism refracts them consecutively, while repeat clicks on the active or already-queued control do nothing. The same safety boundaries remain: passwords, credentials, disabled or read-only controls, destructive confirmations, live production, and replay remain untouched. While a Prism menu is open, the Wield modifier leaves the assistant anchored; close the menu before you Wield it.";
+  "The floating Prism panel is chat-first. Its draggable tetrahedron gives the same conversation four direct faces: Saved keeps history, Private uses no history or memory, Focus continues the exact exchange in full chat, and Progress opens the soft-synthesis status card only while work is active. Rotate and select the tetrahedron or use its four labeled controls for the same destinations. The Prism orb always opens chat even when a synthesis count is attached, and the status card offers Return to Prism chat. There is no separate Synthesis, Activity, or Personal Notes destination here; private notes captured during live applet sessions remain in that session's + flow. Refract uses the global LOCAL/ONLINE, Model, and Effort controls as they are set when refraction begins. On the default bot overview, Prism stays in its Home mark and follows live layout or screen changes. Opening Settings, Avatar Studio, Images, Memories, Usage, Prompt Center, Bots, or another top-bar panel visually submerges the passive orb while keeping Wield and contextual field population available above the panel. Closing the panel restores Prism on the underlying surface. On ordinary surfaces, your Prism shortcut opens chat at the orb's current location. With the menu closed, Wield Prism onto any safe editable control. Text and editor surfaces first open a one-line steering composer: existing prose offers selected Make this more creative text for immediate replacement, while an empty field starts blank. Press Enter to generate, then Space to reroll with that same direction. Choices, multi-selects, toggles, dates, colors, and bounded values still resolve locally, with a multi-select choosing exactly one valid option. The moving spectrum stays visible and the control stays locked until the result appears. Keep Command held on macOS or Control held on Windows and Linux, then click distinct eligible controls to queue each once in click order; Prism refracts them consecutively, while repeat clicks on the active or already-queued control do nothing. The same safety boundaries remain: passwords, credentials, disabled or read-only controls, destructive confirmations, live production, and replay remain untouched. While a Prism menu is open, the Wield modifier leaves the assistant anchored; close the menu before you Wield it.";
 const COFFEE_PRISM_PRESENCE_TUTORIAL_SUFFIX =
   "During the live session, Prism becomes a + for private session notes instead of opening assistant chat. Click + or use the Prism shortcut to capture a fresh note, then press Enter to add it and return to the session. Every reopen starts blank. The first keystroke timestamps the note beside the nearest transcript moment, while readable sentence-cased bullets remain at the bottom in one combined transcript section, with overlapping captures collapsed into the most complete note. Drag + directly, or hold the Wield modifier to let it follow your cursor; releasing only relocates it and never refracts a control.";
 const APPLET_SESSION_NOTE_TUTORIAL_SUFFIX =
@@ -626,6 +632,14 @@ function currentSignalPowerTutorialBody(step: ModeTutorialStep): string {
       "The Host briefing shapes only the host and the Guest briefing shapes only the bot guest; neither goes directly on mic or appears to the other speaker.",
     )
     .replace(
+      "If a hard-of-hearing cast member asks what was said, the prior speaker repeats its saved on-air line and its saved delivery mood drops one step each time. Direct producer direction and closing safety still take priority.",
+      "If a hard-of-hearing cast member asks what was said, the prior speaker repeats its saved on-air line and its saved delivery mood drops one step each time. A listener asking after a saved Quiet or Microscopic miss receives the same exact repeat without changing the speaker's delivery. Direct producer direction and closing safety still take priority.",
+    )
+    .replace(
+      "in half of eligible bot-guest episodes, a replay-stable fair coin then gives the guest one brief final coda before the stage fades to black or white",
+      "in half of eligible bot-guest episodes, a replay-stable fair coin then gives the guest one brief guest-owned final coda—never another host sign-off—before the stage fades to black or white",
+    )
+    .replace(
       "Every episode is a fresh, non-canonical meeting: persona lore shapes beliefs and voice without becoming a prior relationship between the cast.",
       "A first-time bot pairing begins as a fresh, non-canonical meeting: persona lore shapes beliefs and voice without becoming a prior relationship between the cast. After two bots complete an episode together, each keeps its own recent encrypted, directional memory drawn only from the audience-visible show, and that exact pair may recognize the interaction or carry its tone while the history remains recent. Repeated meetings or audience-visible repeated behavior can reinforce that history into durable continuity. Unrelated pairs still meet fresh; discarded shows, Producer-guest episodes, private producer comments, and private guest briefings never become shared bot history.",
     )
@@ -698,6 +712,10 @@ function currentCaptionSizeTutorialBody(
 function currentDebateJuryTutorialBody(body: string): string {
   return body
     .replace(
+      "while preserving that proceeding’s frozen model, Effort, cast, Jury, rules, and evidence—including any asset updates made in Archive.",
+      "while preserving that proceeding’s Auto-or-fixed routing selection, cast, Jury, rules, and evidence—including any asset updates made in Archive. Auto stays dynamic; a concrete model retains its saved Effort and fallback chain.",
+    )
+    .replace(
       "Interject and Objection both capture the exact audience-heard fragment, desaturate the Forum except PRISM's thinking glyph, slow the Debate clock by 8×, and open a 30-second evidence-aware message box. The opponent audibly soft-cuts mid-phrase while their camera still holds. Then Interject plays “Hold on—” or Objection plays “Objection!” before the camera pans to PRISM · You; only after the call finishes does the composer take focus. Expiry withdraws the cut-in with a small favorability loss and restores the opponent's floor. A submitted objection goes to the bot Moderator/Judge for Sustained or Overruled. Sustained leaves the cutoff in place, while Overruled returns the opponent's floor for a concise continuation. Withdraw objection also returns the floor, records the withdrawal instead of a ruling, and lets the opponent finish. Only the heard fragment remains public before either path resolves.",
       "Interject and Objection first open a four-card Producer deck while the opponent continues at normal speed. Three replay-stable Rhetorical Gambits show only a tactic and intent; Steer my debater accepts private direction. Opening custom steering or committing a gambit starts the 1/8-speed preparation interval: the Forum desaturates except PRISM's thinking glyph, the opponent fades to mute, and their transcript keeps advancing slowly. Attach up to three frozen evidence items before confirming. PRISM prepares the performed line, fixed call, reaction, and ruling before the canonical interruption changes. Only then does the opponent audibly soft-cut at the latest audience-heard fragment. Interject plays “Hold on—” and Objection plays “Objection!” while the interrupted camera still holds; the immediate room reaction lands there too, then the camera pans to PRISM · You for the prepared line. Objection requests Sustained or Overruled through an independent procedural ruling; Interject instead receives a persona-shaped decorum response. Social persuasion and procedural merit remain separate, so a gambit can win the room while being overruled. A requested clarification opens a fresh typed-only 30-second window; expiry produces the two-beat awkward failure. Preparation failure, cancellation, or a stale target restores ordinary speed and audio without a phantom call. Only the heard fragment remains public before either path resolves.",
     )
@@ -707,7 +725,7 @@ function currentDebateJuryTutorialBody(body: string): string {
     )
     .replace(
       "Auto still chooses model and Effort for each Debate generation when selected, including during Spectator bake.",
-      "Auto chooses the Debate model once when the session is created and keeps that concrete model for every generation, including Spectator bake. At a saved Debate's Start boundary, an explicit current model replaces the setup model; leaving the selector on Auto preserves the model already chosen for that Debate.",
+      "Auto resolves the model and Effort afresh for each Debate generation, including Spectator bake. A saved Debate preserves whether Auto or a concrete model was selected: Auto remains dynamic at Start and throughout the session, while a concrete selection keeps its saved model and fallback chain.",
     )
     .replace(
       "A Participant shares three recess requests between Pause and a confirmed Leave Debate: PRISM records the recess in the background without delaying the return to Studio.",
@@ -826,6 +844,10 @@ function currentDebateRecessTutorialBody(body: string): string {
       "Leaving an unfinished Debate by any route preserves its exact floor and saved runtime. Opening any archived Debate replays the full title card while the gallery fills gradually, just like a fresh start. Guests keep walking in while the title card reads Preparing or buffering — the house is an approximate clock, not a one-to-one loader. That seating time is real preload time: PRISM uses the saved provider, model, Effort or Max state, current session Turbo setting, and frozen route plan—not the current navbar choices—to prepare the Moderator’s return-to-order line, its voice, the held floor, and a canonical safe runway. The title first reads Preparing, with Start or Resume disabled until the first audible sequence can begin without model or voice-generation delay. Ready now · buffering ahead means you may begin immediately or wait while PRISM safely warms more turns; Fully buffered means the maximum safe lookahead is hot. Nothing auto-starts or dismisses the title card. Waiting longer can reduce later latency, but buffering always stops before a human message, ruling, objection, verdict, or other player-owned boundary. Spectator can keep extending its append-only bake; Judge and Participant stop at that boundary or the bounded cap. Starting early cuts immediately to the gavel while safe work may continue behind the live stage. If playback catches the runway, the expected bot’s own in-world thinking animation identifies the wait—never a modal or fullscreen loader—and a failed deeper attempt never disables an already-ready Start or Resume. Auto stays Wide whenever nobody is speaking and visits the Moderator only for an actual Moderator line, including a return from the Jury chamber.",
     )
     .replace(
+      "PRISM uses the saved provider, model, Effort or Max state, current session Turbo setting, and frozen route plan—not the current navbar choices—to prepare the Moderator’s return-to-order line",
+      "PRISM preserves the saved privacy lane, Auto-or-fixed selection, and current session Turbo setting. Fixed selections retain their fallback chain; Auto resolves model and Effort afresh for each prepared turn while PRISM prepares the Moderator’s return-to-order line",
+    )
+    .replace(
       "Pause or Gavel to resume",
       "Pause or Resume",
     )
@@ -851,8 +873,12 @@ const MODEL_ROUTING_VISIBILITY_TUTORIAL_SUFFIX = (
     "Mythos 5 is an optional Anthropic model: it begins disabled in Settings → Models → Manage model list and joins Auto only after you enable it. Its separate Show in picker choice then controls whether it appears for manual selection.",
   )
   .replace(
-    "Settings keeps separate optional LOCAL and ONLINE Auto routing priorities; drag their grips to set the preferred recovery order.",
-    "Settings places optional Offline and Online Auto routing priorities side by side. Drag the model chips within their own column to set the preferred recovery order, or use the grip's Up and Down keys.",
+    "Settings keeps separate optional LOCAL and ONLINE Auto routing priorities; drag their grips to set the preferred recovery order. Auto then appends every other eligible model, skips duplicates, and always uses None during recovery. ONLINE ends with one explicit bundled local attempt. Fixed models bypass Auto priorities.",
+    "Settings places optional Offline and Online fixed-model fallback chains side by side. Drag the model chips within their own column to set their order, or use the grip's Up and Down keys. Auto ignores these chains: it resolves model and Effort per request, then moves only to a better task-fit model after failure. LOCAL Auto stays local; ONLINE Auto stays online.",
+  )
+  .replace(
+    "The split model control saves Effort per concrete model across every surface; only an already-running live session keeps its frozen routing snapshot until it ends.",
+    "The split model control saves Effort per concrete model across every surface. A running fixed-model session retains its selected model and fallback chain; a running Auto session continues to resolve model and Effort for each work item.",
   );
 
 function currentChatZenPresentationTutorialBody(body: string): string {
@@ -869,6 +895,22 @@ function currentChatZenPresentationTutorialBody(body: string): string {
 
 function currentSimulatedEffortTutorialBody(body: string): string {
   return currentChatZenPresentationTutorialBody(body)
+    .replace(
+      "If recovery is needed, saved Auto routing priorities run first, then every other eligible model in that lane. ONLINE finishes with one bundled local recovery attempt; LOCAL never leaves your network. Every recovery uses None for speed.",
+      "If an Auto attempt fails, Prism moves only to a better model for that request and recalculates Effort for the recovery attempt. Saved fallback chains apply only to specifically selected models. LOCAL Auto never leaves your network.",
+    )
+    .replace(
+      "During recovery, saved Auto routing priorities run first, then every other eligible model in that lane; ONLINE finishes with one bundled local attempt.",
+      "If an Auto attempt fails, Prism moves only to a better model and recalculates Effort for that attempt. Saved fallback chains apply only to specifically selected models, and LOCAL Auto always stays local.",
+    )
+    .replace(
+      "saved Auto routing priorities run first during recovery, followed by every other eligible model in that lane with no thinking. ONLINE ends with one bundled local attempt.",
+      "if an Auto attempt fails, Prism moves only to a better model for that work item and recalculates Effort. Saved fallback chains apply only to specifically selected models, and LOCAL Auto always stays local.",
+    )
+    .replace(
+      "Save freezes that resolved route plan into Archive Open for later; Start then freezes that ordered chain — the resolved route plan, the Forum round plan, and the format version with the cast, Jury (Surprise seats plus any pinned library jurors), motion, consent, evidence, and resolved Powers; every generated statement and ballot records the model that actually handled it.",
+      "Save preserves whether the proceeding uses Auto or a specifically selected model. Fixed selections keep their ordered fallback chain; Auto resolves model and Effort again for each work item as the record changes. Start still freezes the Forum round plan and format version with the cast, Jury (Surprise seats plus any pinned library jurors), motion, consent, evidence, and resolved Powers; every generated statement and ballot records the model and Effort that actually handled it.",
+    )
     .replace(
       "private simulated passes may still run underneath for quality.",
       "PRISM simulated passes may still run underneath for quality.",
@@ -941,6 +983,8 @@ const COFFEE_PRE_SESSION_ALIGNMENT_TUTORIAL_PREFIX =
   "A Coffee Group opens to its group home first. Set the table opens a compact Table Setup desk with the visit controls, guest list, and recent-session reuse. Back to group discards only that uncommitted visit draft; durable group settings and saved sessions stay intact. One footer summarizes guests, topic state, visit and duration, and preset, explains anything still missing, and owns Open the table.";
 const SIGNAL_PRE_SESSION_ALIGNMENT_TUTORIAL_PREFIX =
   "Signal stays on its native Production Desk. Latest episodes restores an editable booking without starting it, and the guest, topic or private Producer direction, mode, duration, and Watch behavior remain together at the desk. The guest group filter opens a modal with its own scrollable roster, so browsing groups never fights the setup viewport. One launch row owns Begin episode or Prepare show, with a missing guest or topic explained at that action. I Feel Lucky! is the deliberate fast lane beside it: one click resolves a coherent show, guest, title, and separate private host and guest briefings, then starts immediately.";
+const SIGNAL_GUEST_ANNOYANCE_TUTORIAL_SUFFIX =
+  "The compact Guest annoyance meter beneath the cue deck is producer-only. Its walk-off percentage is an estimate from the visible episode state: producer pressure and repeated directed interruptions can raise it, while a guest Power can suppress a deterministic walk-off. It never reads private prompts or reasoning, and it does not forecast a voluntary goodbye that only emerges in a generated on-air response.";
 const DEBATE_PRE_SESSION_ALIGNMENT_TUTORIAL_PREFIX =
   "Debate keeps its procedural Studio navigation, proceeding review, readiness rail, consent and evidence checks, Save Debate, Start Debate, and Archive setup reuse. The Studio presents those decisions in its own established language and hierarchy.";
 const DEBATE_FORMAT_REFRACT_TUTORIAL_SUFFIX =
@@ -1055,7 +1099,7 @@ WHODUNNIT_TUTORIAL_STEP.body = `${WHODUNNIT_TUTORIAL_STEP.body} Settings → Deb
   .replace("The prosecution partner investigates offstage", "The frozen case pre-fills")
   .replace(
     "The Midnight Clue underscores the mansion investigation at one steady level—even during interviews—through the global Audio toggle and volume, then fades for the Theory Board and courtroom.",
-    "Mansion music behaves like quiet furniture music: short deterministic cells emerge between long ambience-only rests, continue from the current track position, and may briefly rise only when the mystery materially expands. Interviews, routine pickups, navigation, and hovering never trigger it. Global Audio and volume still control the layer, and it fades for the Theory Board and courtroom.",
+    "Mansion music begins quietly while Case Forge builds the case and remains through the ready title card. During Investigation it behaves like quiet furniture music: short deterministic cells emerge between long ambience-only rests, continue from the current track position, and may briefly rise only when the mystery materially expands. Interviews, routine pickups, navigation, and hovering never trigger it. Global Audio and volume still control the layer, and it fades when you leave the case, for the opening briefing, the Theory Board, and courtroom.",
   )
   .replace(
     "Move returns to PRISM’s shallow-isometric mansion and enters any unlocked room for free.",
@@ -1118,7 +1162,7 @@ WHODUNNIT_TUTORIAL_STEP.body = WHODUNNIT_TUTORIAL_STEP.body
 
 WHODUNNIT_TUTORIAL_STEP.body = WHODUNNIT_TUTORIAL_STEP.body.replace(
   "In a Participant case, Begin Case first presents the mansion's high-quality exterior establishing cover behind the title card, then opens inside the central incident room beneath the Casekeeper briefing.",
-  "When Archive reopens a completed, unstarted Participant case, its fullscreen title card waits at the mansion exterior. Start Investigation then opens inside the central incident room beneath the Casekeeper briefing.",
+  "When Archive reopens a completed, unstarted Participant case, its fullscreen title card waits outside the mansion. Open the glowing door target with a click, Enter, or Space to cross into the Foyer; the Casekeeper briefing then hands off to the normal investigation, and that single threshold never spends an extra discovery action.",
 );
 
 WHODUNNIT_TUTORIAL_STEP.body = WHODUNNIT_TUTORIAL_STEP.body.replace(
@@ -1159,7 +1203,7 @@ WHODUNNIT_TUTORIAL_STEP.body = WHODUNNIT_TUTORIAL_STEP.body.replaceAll(
 );
 
 WHODUNNIT_TUTORIAL_STEP.body +=
-  " Personalize local ambience applies a mansion-specific procedural mix without an online request or new audio file. Generated case art stays in the encrypted case vault—not Images, Generated Images, or the Library—until a revealed visual is deliberately copied; Save image is the explicit action. The exterior establishing cover behind the title card opens inside the central incident room for one finite visible sweep, and Move permits one connected doorway at a time.";
+  " Personalize local ambience applies a mansion-specific procedural mix without an online request or new audio file. Generated case art stays in the encrypted case vault—not Images, Generated Images, or the Library—until a revealed visual is deliberately copied; Save image is the explicit action. Select Rooms, then Upgrade every room to Illustrated, in ONLINE Case Forge to keep the Forge open while it prepares the entire high-detail set from its Mosaic sources; the active investigation switches to Illustrated automatically once that full set is ready, while missing and legacy art keeps its Mosaic fallback. The exterior establishing cover waits outside the mansion until you deliberately open its door into the Foyer. Your profile glyph and color appear in the player orb: first visits follow it through the mansion's doors, corridors, and floor connectors, while visited rooms open immediately with a short physical travel bridge. Click, Enter, or Space completes a journey early; Reduced Motion uses that same immediate bridge. Move permits one connected doorway at a time.";
 
 const CURRENT_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
   ...BASE_MODE_TUTORIALS,
@@ -1298,7 +1342,7 @@ const CURRENT_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
           : step.heading === "Produce from the control room"
             ? {
                 ...step,
-                body: `${body} ${APPLET_SESSION_NOTE_TUTORIAL_SUFFIX} ${SIGNAL_CROSSTALK_SOCIAL_SILENCE_TUTORIAL_SUFFIX}`,
+                body: `${body} ${APPLET_SESSION_NOTE_TUTORIAL_SUFFIX} ${SIGNAL_CROSSTALK_SOCIAL_SILENCE_TUTORIAL_SUFFIX} ${SIGNAL_GUEST_ANNOYANCE_TUTORIAL_SUFFIX}`,
               }
             : step.heading === "Watch the saved cut"
               ? {

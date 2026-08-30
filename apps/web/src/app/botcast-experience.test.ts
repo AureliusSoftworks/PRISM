@@ -75,6 +75,12 @@ describe("Signal experience shell", () => {
     assert.match(source, /className=\{styles\.producerCueComposerHeader\}/u);
     assert.match(source, /className=\{styles\.producerCueBank\}/u);
     assert.match(source, /aria-label="Director cues"/u);
+    assert.match(source, /botcastGuestWalkOffRiskV1\(episode\)/u);
+    assert.match(source, /aria-label="Guest annoyance"/u);
+    assert.match(source, /role="meter"/u);
+    assert.match(source, /Estimated walk-off chance/u);
+    assert.match(source, /Producer-facing estimate/u);
+    assert.doesNotMatch(source, /signalSoundboardAvailable|triggerSignalSoundboardCue|SIGNAL_SOUNDBOARD_CUES/u);
     assert.match(source, /interruptGuestWithQueuedCue/u);
     assert.match(source, /onClick=\{clearProducerCues\}/u);
     assert.match(source, /sendCue\(\{ kind: "present_image"/u);
@@ -96,6 +102,14 @@ describe("Signal experience shell", () => {
     assert.match(css, /\.cueKey\s*\{/u);
     assert.match(css, /\.cueKeyCap\s*\{/u);
     assert.match(css, /\.cueKeyLamp\s*\{/u);
+    assert.match(css, /\.guestAnnoyanceMeter\s*\{/u);
+    assert.match(css, /\.guestAnnoyanceTrack\s*\{/u);
+    assert.match(css, /\.guestAnnoyanceFill\s*\{[^}]*transition:\s*width/u);
+    assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.guestAnnoyanceFill \{ transition: none !important; \}/u);
+    assert.match(
+      css,
+      /\.producerCueBank\s*\{[^}]*grid-template-rows:\s*auto auto minmax\(58px,\s*1fr\)/u,
+    );
     assert.match(css, /\.cueKey\[data-queued="true"\]/u);
     assert.match(css, /\.shell\[data-theme="light"\] \.producerDeskHeader/u);
     assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.producerDeskPrivateLine::after \{ animation: none !important; \}/u);
@@ -210,11 +224,7 @@ describe("Signal experience shell", () => {
       source,
       /if \(!hasVisibleTransparency\) descriptor\.kind = "picture"/u,
     );
-    assert.match(source, /botcastImageContextForMessageV1/u);
-    assert.match(
-      source,
-      /latestStageImageContext\?\.phase === "presented"[\s\S]{0,100}latestStageImageContext\?\.phase === "discussing"/u,
-    );
+    assert.match(source, /signalEpisodeStageImageContext/u);
     assert.match(source, /className=\{styles\.episodeImageContext\}/u);
     assert.match(source, /savedAssetId/u);
     assert.match(source, /className=\{styles\.episodeImageReplayEmoji\}/u);
@@ -1198,11 +1208,11 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       css,
-      /\.shell\[data-live-episode="true"\] \.main\s*\{[^}]*overflow-y:\s*hidden/iu,
+      /\.shell\[data-live-episode="true"\] \.main\s*\{[^}]*overflow-y:\s*auto;[^}]*scrollbar-gutter:\s*stable/iu,
     );
     assert.match(
       css,
-      /\.shell\[data-live-episode="true"\] \.liveLayout \.stageViewport\s*\{[^}]*calc\(\(100dvh - 360px\) \* 1\.7778\)/iu,
+      /\.shell\[data-live-episode="true"\] \.liveLayout \.stageViewport\s*\{[^}]*calc\(\(100dvh - 412px\) \* 1\.7778\)/iu,
     );
     assert.doesNotMatch(source, /className=\{styles\.transcript\}/u);
     assert.match(source, /className=\{styles\.replayTranscript\}/u);
@@ -1476,7 +1486,7 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("keeps the startup card through a useful opening buffer for bot and Producer guests", () => {
+  it("keeps the startup card through a useful opening buffer, then lets the studio breathe", () => {
     const startEpisodeSource = source.slice(
       source.indexOf("const startEpisode = async"),
       source.indexOf("startEpisodeRef.current = startEpisode"),
@@ -1500,12 +1510,13 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       startEpisodeSource,
-      /await Promise\.all\(\[introPlayback\.finished, visualMinimum\]\);[\s\S]{0,500}const releaseOpeningCard = \(\): void =>[\s\S]{0,900}playPreparedEpisodeMessage\([\s\S]{0,220}releaseOpeningCard,[\s\S]{0,120}onPresenceStart: releaseOpeningCard/u,
+      /await Promise\.all\(\[introPlayback\.finished, visualMinimum\]\);[\s\S]{0,180}await revealOpeningStudio\(\);[\s\S]{0,220}playPreparedEpisodeMessage\(/u,
     );
-    assert.doesNotMatch(
+    assert.match(
       startEpisodeSource,
-      /await new Promise<void>\(\(resolve\) =>[\s\S]{0,180}460[\s\S]{0,240}playPreparedEpisodeMessage\(/u,
+      /signalOpeningStudioRevealTiming\(\{[\s\S]{0,120}preRollSkipRequestedRef\.current[\s\S]{0,900}timing\.hostEntranceDelayMs - timing\.fadeMs/u,
     );
+    assert.doesNotMatch(startEpisodeSource, /onPresenceStart: releaseOpeningCard/u);
     assert.doesNotMatch(preparationHoldSource, /setEpisodePreRoll\(null\)/u);
   });
 
@@ -2234,7 +2245,7 @@ describe("Signal experience shell", () => {
     assert.doesNotMatch(source, /disabled=\{busy \|\| !producerCueReady/u);
     assert.match(css, /\.producerControls button\[data-queued="true"\]/u);
     assert.match(css, /\.cueGrid\s*\{[^}]*repeat\(5, minmax\(0, 1fr\)\)/u);
-    assert.match(css, /\.cueKey\s*\{[^}]*min-height:\s*116px/u);
+    assert.match(css, /\.cueKey\s*\{[^}]*min-height:\s*86px;[^}]*height:\s*86px/u);
     assert.match(source, /className=\{styles\.producerCueComposer\}/u);
     assert.match(source, /const submitAskAboutCue = \(\): void => \{/u);
     assert.match(source, /onClick=\{submitAskAboutCue\}/u);

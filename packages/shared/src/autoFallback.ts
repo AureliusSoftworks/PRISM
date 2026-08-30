@@ -1,3 +1,5 @@
+import type { ModelReasoningEffortPreference } from "./reasoningEffort.ts";
+
 export const AUTO_FALLBACK_CHAIN_VERSION = 1 as const;
 export const FALLBACK_CHAINS_VERSION = 2 as const;
 export const AUTO_FALLBACK_CHAIN_MIN_FALLBACK_COUNT = 1 as const;
@@ -33,6 +35,8 @@ export type AutoFallbackFailureReason =
 export interface AutoFallbackModelRef {
   provider: AutoFallbackProvider;
   model: string;
+  /** Runtime-only per-attempt Auto effort. Settings serialization strips it. */
+  reasoningEffort?: ModelReasoningEffortPreference;
 }
 
 export interface AutoFallbackChainV1 {
@@ -45,8 +49,8 @@ export interface AutoFallbackChainV1 {
    */
   eligibleCandidates?: AutoFallbackModelRef[];
   /**
-   * Runtime-only last-resort recovery. ONLINE Auto uses the bundled local model;
-   * LOCAL and fixed-model requests leave this unset.
+   * Legacy runtime-only last-resort recovery. Global Auto no longer crosses
+   * privacy lanes; normalization remains for older saved traces and packages.
    */
   finalLocalRecovery?: AutoFallbackModelRef;
 }
@@ -111,7 +115,18 @@ export function normalizeAutoFallbackModelRef(
     ? value.model.trim().slice(0, AUTO_FALLBACK_MODEL_ID_MAX_LENGTH)
     : "";
   if (!model || model.toLowerCase() === "auto") return null;
-  return { provider: value.provider, model };
+  const reasoningEffort =
+    typeof value.reasoningEffort === "string" &&
+    ["none", "minimal", "low", "medium", "high", "xhigh"].includes(
+      value.reasoningEffort,
+    )
+      ? (value.reasoningEffort as ModelReasoningEffortPreference)
+      : undefined;
+  return {
+    provider: value.provider,
+    model,
+    ...(reasoningEffort ? { reasoningEffort } : {}),
+  };
 }
 
 export function normalizeAutoFallbackChain(
@@ -218,7 +233,19 @@ export function serializeAutoFallbackChain(
   value: AutoFallbackChainV1 | null | undefined
 ): string | null {
   const normalized = normalizeFallbackChainsV2(value);
-  return normalized ? JSON.stringify(normalized) : null;
+  return normalized
+    ? JSON.stringify({
+        ...normalized,
+        local: normalized.local.map(({ provider, model }) => ({
+          provider,
+          model,
+        })),
+        online: normalized.online.map(({ provider, model }) => ({
+          provider,
+          model,
+        })),
+      })
+    : null;
 }
 
 export function autoFallbackResolvedChain(

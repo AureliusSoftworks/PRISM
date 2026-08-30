@@ -89,11 +89,8 @@ export function assistantGenerationMetadata(
   const automatic = assistant.autoRoute !== undefined;
   return {
     model: `${automatic ? "Auto → " : ""}${providerDisplayName(route.provider)} · ${route.model}`,
-    // Recovery attempts intentionally use the fast no-reasoning fallback.
-    // This annotation is frozen with the turn, never inferred from a later
-    // route preference.
     effort: assistant.autoRecovery
-      ? "none"
+      ? assistant.autoRecovery.attempts.at(-1)?.reasoningEffort ?? "none"
       : (assistant.autoRoute?.reasoningEffort ??
         assistant.reasoningEffort ??
         psychicSource?.psychicThought?.effort ??

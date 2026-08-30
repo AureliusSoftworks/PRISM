@@ -36,12 +36,17 @@ test("atlas cells contain opaque tokens and procedural cues but no bot names", (
 
 test("Signal attaches fresh passports and refuses archived recognition proof", () => {
   assert.match(experience, /buildEpisodeVisualIdentity/u);
-  assert.match(experience, /Inspecting visual identities/u);
+  assert.match(experience, /Preparing the episode image/u);
+  assert.match(experience, /signalVisualIdentityNotice/u);
   assert.match(experience, /visualIdentity: episodeImageForTurn\.archivalProxyEpisodeId/u);
   assert.match(experience, /reason: "fresh_proof_required"/u);
   assert.match(experience, /visibility !== "hidden"/u);
   assert.match(experience, /scale !== "microscopic"/u);
   assert.match(experience, /!colorCycle/u);
+  assert.match(experience, /resolveBotIdentityMirrorFaceV1/u);
+  assert.match(experience, /resolveBotIdentityMirrorAvatarDetailsV1/u);
+  assert.match(experience, /resolveBotIdentityShapeshiftFaceV1/u);
+  assert.match(experience, /resolveBotIdentityShapeshiftAvatarDetailsV1/u);
 });
 
 test("Signal tutorial explains the three-cue and privacy contract", () => {
@@ -49,6 +54,11 @@ test("Signal tutorial explains the three-cue and privacy contract", () => {
   assert.match(tutorial, /LOCAL keeps the source and references local/u);
   assert.match(tutorial, /opaque, name-free procedural references/u);
   assert.match(tutorial, /timeout continues the show without naming anyone/u);
+  assert.match(
+    tutorial,
+    /Visual identity status stays out of the way for ordinary props and pictures/u,
+  );
+  assert.match(tutorial, /only when inspection actually finds a bot-like subject/u);
 });
 
 test("Signal excludes public catalog bots that are not installed", () => {

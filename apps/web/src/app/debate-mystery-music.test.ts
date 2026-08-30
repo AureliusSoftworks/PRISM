@@ -10,6 +10,10 @@ import {
   WHODUNNIT_INVESTIGATION_MUSIC_SILENT_MIX,
   WHODUNNIT_INVESTIGATION_MUSIC_TRANSITION_MS,
   WHODUNNIT_INVESTIGATION_MUSIC_URL,
+  WHODUNNIT_CASE_FORGE_MUSIC_MIX,
+  WHODUNNIT_TITLE_CARD_MUSIC_MIX,
+  mysteryCasePreludeMusicMix,
+  mysteryCasePreludeMusicSessionActive,
   mysteryInvestigationMusicMix,
   mysteryInvestigationMusicProgramV1,
   mysteryInvestigationMusicSessionActive,
@@ -18,6 +22,10 @@ import {
 const appDirectory = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(
   resolve(appDirectory, "DebateMysteryV2Experience.tsx"),
+  "utf8",
+);
+const shellSource = readFileSync(
+  resolve(appDirectory, "DebateExperience.tsx"),
   "utf8",
 );
 const tutorialSource = readFileSync(
@@ -32,6 +40,28 @@ describe("Whodunnit investigation music", () => {
     assert.equal(mysteryInvestigationMusicSessionActive("theory"), false);
     assert.equal(mysteryInvestigationMusicSessionActive("trial"), false);
     assert.equal(mysteryInvestigationMusicSessionActive("verdict"), false);
+  });
+
+  it("carries the established case theme through Case Forge and the ready title card", () => {
+    assert.equal(mysteryCasePreludeMusicSessionActive("case_forge"), true);
+    assert.equal(mysteryCasePreludeMusicSessionActive("title_card"), true);
+    assert.equal(mysteryCasePreludeMusicSessionActive("case_opening"), false);
+    assert.equal(mysteryCasePreludeMusicSessionActive("investigation"), false);
+    assert.equal(mysteryCasePreludeMusicSessionActive("theory"), false);
+    assert.equal(mysteryCasePreludeMusicSessionActive("trial"), false);
+    assert.equal(mysteryCasePreludeMusicSessionActive("verdict"), false);
+    assert.equal(
+      mysteryCasePreludeMusicMix("case_forge"),
+      WHODUNNIT_CASE_FORGE_MUSIC_MIX,
+    );
+    assert.equal(
+      mysteryCasePreludeMusicMix("title_card"),
+      WHODUNNIT_TITLE_CARD_MUSIC_MIX,
+    );
+    assert.ok(
+      WHODUNNIT_TITLE_CARD_MUSIC_MIX.background >
+        WHODUNNIT_CASE_FORGE_MUSIC_MIX.background,
+    );
   });
 
   it("keeps its level during interviews and fades silently for first-visit introductions and the Theory Board", () => {
@@ -53,6 +83,20 @@ describe("Whodunnit investigation music", () => {
         roomIntroductionActive: true,
       }),
       WHODUNNIT_INVESTIGATION_MUSIC_SILENT_MIX,
+    );
+    assert.equal(
+      mysteryInvestigationMusicMix({
+        theoryBoardOpen: false,
+        roomComplete: true,
+      }),
+      WHODUNNIT_INVESTIGATION_MUSIC_SILENT_MIX,
+    );
+    assert.equal(
+      mysteryInvestigationMusicMix({
+        theoryBoardOpen: false,
+        roomComplete: false,
+      }),
+      WHODUNNIT_INVESTIGATION_MUSIC_MIX,
     );
     assert.ok(WHODUNNIT_INVESTIGATION_MUSIC_TRANSITION_MS >= 120);
     assert.ok(WHODUNNIT_INVESTIGATION_MUSIC_FADE_MS >= 320);
@@ -101,6 +145,7 @@ describe("Whodunnit investigation music", () => {
     assert.match(source, /<SessionAtmosphereLayer/u);
     assert.match(source, /data-music-program=\{investigationMusicProgram\.phase\}/u);
     assert.match(source, /active=\{props\.audioEnabled\}/u);
+    assert.match(source, /roomIntroductionActive,\s*roomComplete,\s*programAudible/u);
     assert.match(source, /programAudible: investigationMusicProgram\.audible/u);
     assert.match(source, /backgroundRecordable=\{false\}/u);
     assert.match(source, /ambientFoley=\{false\}/u);
@@ -111,6 +156,17 @@ describe("Whodunnit investigation music", () => {
     assert.match(source, /lifecycleTransitionMs=\{WHODUNNIT_INVESTIGATION_MUSIC_FADE_MS\}/u);
   });
 
+  it("mounts one replay-safe prelude layer only on the visible Forge and title surfaces", () => {
+    assert.match(shellSource, /mysteryCasePreludeMusicSessionActive\(activeSession\.formatState\.playPhase\)/u);
+    assert.match(shellSource, /sessionKey=\{`whodunnit-v2-prelude:\$\{activeSession\.id\}`\}/u);
+    assert.match(shellSource, /mystery-mansion\/theme/u);
+    assert.match(shellSource, /backgroundFallbackUrl=\{WHODUNNIT_INVESTIGATION_MUSIC_URL\}/u);
+    assert.match(shellSource, /active=\{props\.audioEnabled && props\.audioVolume > 0\}/u);
+    assert.match(shellSource, /mix=\{mysteryCasePreludeMusicMix\(mysteryPreludeMusicPhase\)\}/u);
+    assert.match(shellSource, /backgroundRecordable=\{false\}/u);
+    assert.match(shellSource, /ambientFoley=\{false\}/u);
+  });
+
   it("documents the furniture-music cadence and silent non-investigation boundaries", () => {
     assert.match(
       tutorialSource,
@@ -118,5 +174,7 @@ describe("Whodunnit investigation music", () => {
     );
     assert.match(tutorialSource, /routine pickups, navigation, and hovering never trigger it/u);
     assert.match(tutorialSource, /fades for the Theory Board and courtroom/u);
+    assert.match(tutorialSource, /begins quietly while Case Forge builds the case/u);
+    assert.match(tutorialSource, /remains through the ready title card/u);
   });
 });

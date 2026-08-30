@@ -1,21 +1,23 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import type { BotcastReplayEvent } from "@localai/shared";
 import {
+  SIGNAL_SOUNDBOARD_CATEGORY_TRIMS,
   SIGNAL_SOUNDBOARD_CUES,
+  SIGNAL_SOUNDBOARD_GROUP_BUS,
   playSignalSoundboardCue,
   signalSoundboardEventsBetween,
   signalSoundboardNextVariantIndex,
   signalSoundboardPlaybackPlan,
   stopSignalSoundboardAudio,
 } from "./signalSoundboard.ts";
-import type { SessionAtmosphereFoleyPlaybackOptions } from "./session-atmosphere-audio.ts";
+
+const source = readFileSync(new URL("./signalSoundboard.ts", import.meta.url), "utf8");
 
 class FakeSoundboardAudio {
   currentTime = 0;
   paused = true;
-  playbackRate = 1;
-  preservesPitch = true;
   preload = "";
   volume = 1;
   playCount = 0;
@@ -53,20 +55,36 @@ function soundboardEvent(
 }
 
 describe("Signal soundboard", () => {
-  it("ships four local broadcast reactions with four room-mix variations each", () => {
+  it("ships four local broadcast reactions with fixed category trims", () => {
     assert.deepEqual(
       SIGNAL_SOUNDBOARD_CUES.map((cue) => cue.kind),
       ["applause", "laughter", "gasp", "rimshot"],
     );
+    assert.deepEqual(
+      SIGNAL_SOUNDBOARD_CUES.map((cue) => cue.label),
+      ["Applause", "Laughter", "Gasp", "Rimshot"],
+    );
     for (const cue of SIGNAL_SOUNDBOARD_CUES) {
       assert.ok(cue.sources.length >= 1);
       assert.match(cue.sources[0]!, /^\/audio\/signal\/soundboard\/.+\.mp3$/u);
-      const plans = [0, 1, 2, 3].map((index) =>
-        signalSoundboardPlaybackPlan(cue.kind, index),
-      );
-      assert.ok(plans.every((plan) => plan && plan.trim <= 0.21));
-      assert.equal(new Set(plans.map((plan) => plan?.playbackRate)).size, 4);
+      const plan = signalSoundboardPlaybackPlan(cue.kind, 3);
+      assert.equal(plan?.variantIndex, 0);
+      assert.equal(plan?.trim, SIGNAL_SOUNDBOARD_CATEGORY_TRIMS[cue.kind]);
     }
+  });
+
+  it("keeps every hit on one fixed-EQ, compressed, recordable group with one room send", () => {
+    assert.equal(SIGNAL_SOUNDBOARD_GROUP_BUS.highPassHz, 130);
+    assert.equal(SIGNAL_SOUNDBOARD_GROUP_BUS.lowPassHz, 3_600);
+    assert.equal(SIGNAL_SOUNDBOARD_GROUP_BUS.compressor.ratio, 4);
+    assert.equal(
+      SIGNAL_SOUNDBOARD_GROUP_BUS.roomSend.profile.id,
+      "signal-intimate-treated-studio-v1",
+    );
+    assert.equal(SIGNAL_SOUNDBOARD_GROUP_BUS.roomSend.wet, 0.1);
+    assert.match(source, /createMediaElementSource[\s\S]{0,120}source\.connect\(group\.input\)/u);
+    assert.match(source, /connectRoomAcoustics\([\s\S]{0,180}destination: prismAudioOutputNode\(context\)/u);
+    assert.doesNotMatch(source, /playbackRate|stereoPan/u);
   });
 
   it("plays from the originating click and releases finished audio", async () => {
@@ -79,8 +97,6 @@ describe("Signal soundboard", () => {
     assert.equal(audio.playCount, 1);
     assert.equal(audio.preload, "auto");
     assert.equal(audio.volume, 0.16);
-    assert.equal(audio.playbackRate, 0.97);
-    assert.equal(audio.preservesPitch, false);
     audio.listeners.get("ended")?.();
     assert.equal(audio.pauseCount, 1);
     assert.equal(audio.currentTime, 0);
@@ -113,14 +129,14 @@ describe("Signal soundboard", () => {
     );
   });
 
-  it("cycles variants per cue kind and preserves that choice during replay", () => {
+  it("keeps future source-bank selection replay-stable without changing DSP identity", () => {
     const events = [
       soundboardEvent("event-1", "applause", 1_000),
       soundboardEvent("event-2", "gasp", 1_500),
       soundboardEvent("event-3", "applause", 2_000),
     ];
-    assert.equal(signalSoundboardNextVariantIndex(events, "applause"), 2);
-    assert.equal(signalSoundboardNextVariantIndex(events, "gasp"), 1);
+    assert.equal(signalSoundboardNextVariantIndex(events, "applause"), 0);
+    assert.equal(signalSoundboardNextVariantIndex(events, "gasp"), 0);
     assert.deepEqual(
       signalSoundboardEventsBetween({
         events,
@@ -128,51 +144,17 @@ describe("Signal soundboard", () => {
         elapsedMs: 2_100,
       }),
       [
-        { eventId: "event-3", kind: "applause", atMs: 2_000, variantIndex: 1 },
+        { eventId: "event-3", kind: "applause", atMs: 2_000, variantIndex: 0 },
       ],
     );
   });
 
-  it("plays through the studio foley bus with room-friendly treatment", () => {
-    let played:
-      | { url: string; options?: SessionAtmosphereFoleyPlaybackOptions }
-      | undefined;
-    const studioController = {
-      playFoley(
-        url: string,
-        options?: SessionAtmosphereFoleyPlaybackOptions,
-      ): boolean {
-        played = { url, options };
-        return true;
-      },
-      stopFoley(): void {},
-    };
-    assert.equal(
-      playSignalSoundboardCue("laughter", {
-        variantIndex: 2,
-        studioController,
-      }),
-      true,
-    );
-    assert.equal(played?.url, "/audio/signal/soundboard/laughter.mp3");
-    assert.equal(played?.options?.tag, "signal-soundboard");
-    assert.equal(played?.options?.trim, 0.21);
-    assert.ok((played?.options?.highCutHz ?? Infinity) <= 4_200);
-  });
-
   it("can release active clips immediately for deterministic teardown", async () => {
     const audio = new FakeSoundboardAudio();
-    let stoppedTag = "";
     playSignalSoundboardCue("rimshot", { createAudio: () => audio });
     await Promise.resolve();
-    stopSignalSoundboardAudio(0, {
-      playFoley: () => true,
-      stopFoley: (tag) => {
-        stoppedTag = tag;
-      },
-    });
+    stopSignalSoundboardAudio(0);
     assert.equal(audio.paused, true);
     assert.equal(audio.currentTime, 0);
-    assert.equal(stoppedTag, "signal-soundboard");
   });
 });

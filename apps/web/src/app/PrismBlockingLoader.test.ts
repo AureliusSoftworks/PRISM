@@ -55,8 +55,8 @@ describe("PrismBlockingLoader confirm-before-cancel contract", () => {
     assert.match(source, /useSyncExternalStore\(/u);
     assert.match(source, /companionVisual\.position/u);
     assert.match(source, /data-prism-soft-orb-anchored="true"/u);
-    assert.match(source, /<PrismCompanionViewTabs/u);
-    assert.match(source, /activeView="synthesis"/u);
+    assert.match(source, /requestPrismCompanionView/u);
+    assert.match(source, /Return to Prism chat/u);
     assert.match(source, /hardCompanionSuppressed/u);
     assert.match(source, /animatePrismOrbHandoff/u);
     assert.doesNotMatch(source, /setPrismSoftSynthesisLodged/u);

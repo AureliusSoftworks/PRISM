@@ -97,6 +97,8 @@ export type ListenerReactionSpokenCue =
   | "Mhm"
   | "Huh"
   | "Sure sure"
+  | "Hi."
+  | "Hey."
   | "No, hold on."
   | "Let me answer that."
   | "That's not fair."
@@ -173,6 +175,10 @@ export const SIGNAL_ORGANIC_BACKCHANNEL_CUES = [
   "Mhm",
   "Huh",
   "Sure sure",
+] as const satisfies readonly ListenerReactionSpokenCue[];
+export const SIGNAL_OPENING_GUEST_ACKNOWLEDGEMENT_CUES = [
+  "Hi.",
+  "Hey.",
 ] as const satisfies readonly ListenerReactionSpokenCue[];
 export const SIGNAL_ORGANIC_RETURN_INVITATION_CUES = [
   "You had something—go ahead.",
@@ -345,6 +351,8 @@ const SPOKEN_CUES = new Set<ListenerReactionSpokenCue>([
   "Mhm",
   "Huh",
   "Sure sure",
+  "Hi.",
+  "Hey.",
   "No, hold on.",
   "Let me answer that.",
   "That's not fair.",
@@ -1752,6 +1760,11 @@ export function buildSignalListenerReactionPlanV1(args: {
   const audible =
     args.segment !== "closing" &&
     stableUnit(`${seed}:audio-roll`) < audioChance;
+  const openingGuestAcknowledgement =
+    args.segment === "opening" &&
+    args.listenerRole === "guest" &&
+    typeof args.minimumTargetProgress === "number" &&
+    Number.isFinite(args.minimumTargetProgress);
   const recentPlans = args.recentPlans ?? [];
   const recentFoleys = recentPlans.flatMap((plan) =>
     plan.vocalFoley ? [plan.vocalFoley] : []
@@ -1761,12 +1774,24 @@ export function buildSignalListenerReactionPlanV1(args: {
     ...(args.recentSpokenCues ?? []),
     ...recentPlans.flatMap((plan) => plan.spokenCue ? [plan.spokenCue] : []),
   ];
+  const recentSpokenCueSet = new Set(recentSpokenCues.slice(-3));
+  const openingAcknowledgementCues =
+    SIGNAL_OPENING_GUEST_ACKNOWLEDGEMENT_CUES.filter(
+      (cue) => !recentSpokenCueSet.has(cue),
+    );
   const spokenCue = audible && stableUnit(`${seed}:spoken-modality`) < 0.58
-    ? signalNeutralBackchannelForTextV2({
-        seed,
-        speakerText: args.speakerText ?? "",
-        recentSpokenCues,
-      }) ?? undefined
+    ? openingGuestAcknowledgement
+      ? choose(
+          `${seed}:opening-acknowledgement`,
+          openingAcknowledgementCues.length > 0
+            ? openingAcknowledgementCues
+            : SIGNAL_OPENING_GUEST_ACKNOWLEDGEMENT_CUES,
+        )
+      : signalNeutralBackchannelForTextV2({
+          seed,
+          speakerText: args.speakerText ?? "",
+          recentSpokenCues,
+        }) ?? undefined
     : undefined;
   // A neutral cue may still be semantically unsafe for this source. Preserve
   // embodied audio with the nonverbal bank instead of forcing agreement.
@@ -1779,7 +1804,10 @@ export function buildSignalListenerReactionPlanV1(args: {
       ? Math.max(0.3, Math.min(0.9, args.minimumTargetProgress))
       : 0.3;
   const plannedTargetProgress = Number(
-    Math.max(targetProgress(seed), minimumTargetProgress).toFixed(3),
+    (openingGuestAcknowledgement
+      ? minimumTargetProgress
+      : Math.max(targetProgress(seed), minimumTargetProgress)
+    ).toFixed(3),
   );
   const organicBeatKind: SignalOrganicBeatKind | null = spokenCue
     ? "backchannel"

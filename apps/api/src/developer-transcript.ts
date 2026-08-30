@@ -373,8 +373,15 @@ function canonicalMessageGeneration(
   if (!provider || !model) return "Not recorded as model-generated.";
 
   const details: string[] = [];
+  const recoveredAttempt = Array.isArray(autoRecovery?.attempts)
+    ? autoRecovery.attempts.at(-1)
+    : undefined;
   const effort = transcriptEffortLabel(
-    autoRecovery ? "none" : (payload?.reasoningEffort ?? autoRoute?.reasoningEffort),
+    autoRecovery
+      ? isJsonRecord(recoveredAttempt)
+        ? recoveredAttempt.reasoningEffort ?? "none"
+        : "none"
+      : (payload?.reasoningEffort ?? autoRoute?.reasoningEffort),
   );
   if (effort) details.push(`Effort ${effort}`);
   if (!autoRecovery && payload?.turbo === true) details.push("Turbo");

@@ -71,6 +71,10 @@ function payloadRecord(
     : null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function signalGenerationAnnotation(
   event: BotcastReplayEvent | undefined,
   humanAuthored: boolean,
@@ -89,8 +93,14 @@ function signalGenerationAnnotation(
   if (!provider || !model) return "Model route not recorded.";
   const automatic =
     autoRoute !== null || payloadString(event, "responseMode") === "auto";
+  const recoveryAttempts = Array.isArray(autoRecovery?.attempts)
+    ? autoRecovery.attempts
+    : [];
+  const recoveredAttempt = recoveryAttempts.at(-1);
   const effortValue = autoRecovery
-    ? "none"
+    ? isRecord(recoveredAttempt)
+      ? recoveredAttempt.reasoningEffort ?? "none"
+      : "none"
     : (event?.payload.reasoningEffort ?? autoRoute?.reasoningEffort);
   const effort =
     typeof effortValue === "string" && effortValue.trim()

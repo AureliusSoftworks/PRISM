@@ -3,11 +3,72 @@ import { describe, it } from "node:test";
 import {
   signalEpisodeImageIsVisible,
   signalEpisodeImageScale,
+  signalEpisodeStageImageContext,
   signalPendingEpisodeImageCueIsAwaitingHostTurn,
   signalQueuedProducerCueIsServerOwned,
+  signalVisualIdentityNotice,
 } from "./signalEpisodeImagePresentation.ts";
 
 describe("Signal episode image presentation", () => {
+  it("keeps visual identity status silent for ordinary images and unavailable checks", () => {
+    assert.equal(
+      signalVisualIdentityNotice({
+        v: 1,
+        status: "resolved",
+        provider: "local",
+        model: "vision-model",
+        candidateCount: 2,
+        completedAt: new Date(0).toISOString(),
+        subjects: [],
+      }),
+      null,
+    );
+    assert.equal(
+      signalVisualIdentityNotice({
+        v: 1,
+        status: "unavailable",
+        reason: "provider_error",
+        completedAt: new Date(0).toISOString(),
+      }),
+      null,
+    );
+  });
+
+  it("surfaces identity only after a bot-like subject is actually found", () => {
+    const subject = {
+      region: { x: 0, y: 0, width: 1, height: 1 },
+      colorEvidenceRegion: null,
+      referenceToken: null,
+      cueStates: { color: "missing", glyph: "missing", face: "missing" },
+      recognizedBotId: null,
+      appearanceHash: null,
+    } as const;
+    assert.equal(
+      signalVisualIdentityNotice({
+        v: 1,
+        status: "resolved",
+        provider: "local",
+        model: "vision-model",
+        candidateCount: 2,
+        completedAt: new Date(0).toISOString(),
+        subjects: [subject],
+      }),
+      "A bot-like subject was found, but no identity passed color, glyph, and face.",
+    );
+    assert.match(
+      signalVisualIdentityNotice({
+        v: 1,
+        status: "resolved",
+        provider: "local",
+        model: "vision-model",
+        candidateCount: 2,
+        completedAt: new Date(0).toISOString(),
+        subjects: [{ ...subject, recognizedBotId: "rick" }],
+      }) ?? "",
+      /1 subject passed/u,
+    );
+  });
+
   it("keeps a pre-show image cue queued across the guest turn before its host introduction", () => {
     const pendingCue = { kind: "present_image", imageId: "image-1" } as const;
     const pendingImage = { episodeId: "episode-1", imageId: "image-1" };
@@ -115,6 +176,42 @@ describe("Signal episode image presentation", () => {
         speakingMessageId: null,
       }),
       false,
+    );
+  });
+
+  it("uses message-linked context on mic and the active lifecycle between lines", () => {
+    const context = {
+      v: 1,
+      imageId: "image-1",
+      phase: "presented",
+      kind: "picture",
+      name: "Photo",
+      mimeType: "image/png",
+      replayEmoji: "🖼️",
+      replayProxyId: null,
+      savedAssetId: null,
+      provider: "local",
+      model: "test-model",
+      hostIntroductionMessageId: "host-1",
+      guestDiscussionMessageId: null,
+      hostFollowUpMessageId: null,
+      discussionMessageIds: ["host-1"],
+    } as const;
+    const events = [{ kind: "image_context" as const, payload: context }];
+
+    assert.equal(
+      signalEpisodeStageImageContext({ events, activeMessageId: "host-1" })
+        ?.imageId,
+      "image-1",
+    );
+    assert.equal(
+      signalEpisodeStageImageContext({ events, activeMessageId: null })
+        ?.imageId,
+      "image-1",
+    );
+    assert.equal(
+      signalEpisodeStageImageContext({ events, activeMessageId: "other" }),
+      null,
     );
   });
 });

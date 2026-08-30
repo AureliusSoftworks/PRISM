@@ -17381,6 +17381,7 @@ async function generateCoffeePollStructuredBallot(args: {
               reasoningEffort: autoFallbackReasoningEffort(
                 index,
                 args.options?.reasoningEffort,
+                attempt.reasoningEffort,
               ),
               temperature: 0.1,
               maxTokens: 220,
@@ -20730,6 +20731,7 @@ async function generateCoffeeBotReply(args: {
             const attemptEffort = autoFallbackReasoningEffort(
               index,
               reasoningEffortForAttempt(attempt.provider, attempt.model),
+              attempt.reasoningEffort,
             );
             const attemptOptions: GenerateOptions = {
               ...speakerOptions,
@@ -20759,6 +20761,7 @@ async function generateCoffeeBotReply(args: {
             autoFallbackReasoningEffort(
               index,
               reasoningEffortForAttempt(attempt.provider, attempt.model),
+              attempt.reasoningEffort,
             ),
             { provider: attempt.provider, modelId: attempt.model },
           ),
@@ -22231,7 +22234,7 @@ async function generateCoffeeBotReply(args: {
     coffeeTurnRoute,
     autoRoute: settings.autoRouteDecision,
     reasoningEffort: autoRecovery
-      ? "none"
+      ? autoRecovery.attempts.at(-1)?.reasoningEffort ?? "none"
       : (settings.autoRouteDecision?.reasoningEffort ?? effectiveReasoningEffort),
     turbo: !autoRecovery &&
       resolveUserModelTurboMode(db, {

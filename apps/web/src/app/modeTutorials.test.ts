@@ -12,6 +12,17 @@ function signalPowersTutorialBody(): string {
 }
 
 describe("mode tutorials", () => {
+  it("explains Signal's producer-only guest annoyance estimate without exposing private reasoning", () => {
+    const body = MODE_TUTORIALS.botcast.steps.find(
+      (step) => step.heading === "Produce from the control room",
+    )?.body ?? "";
+    assert.match(body, /Guest annoyance meter/u);
+    assert.match(body, /producer-only/u);
+    assert.match(body, /producer pressure and repeated directed interruptions/u);
+    assert.match(body, /never reads private prompts or reasoning/u);
+    assert.match(body, /does not forecast a voluntary goodbye/u);
+  });
+
   it("teaches explicit Coffee roster setup and bot-directed Wield where supported", () => {
     const coffeeBody = MODE_TUTORIALS.coffee.steps[0]?.body ?? "";
     assert.match(coffeeBody, /each permanent member explicitly/u);
@@ -142,8 +153,19 @@ describe("mode tutorials", () => {
     assert.match(step.body, /without an online request or new audio file/u);
     assert.match(step.body, /encrypted case vault—not Images, Generated Images, or the Library/u);
     assert.match(step.body, /Save image is the explicit action/u);
-    assert.match(step.body, /exterior establishing cover behind the title card/u);
-    assert.match(step.body, /opens inside the central incident room/u);
+    assert.match(step.body, /fullscreen title card waits outside the mansion/u);
+    assert.match(step.body, /Open the glowing door target/u);
+    assert.match(step.body, /cross into the Foyer/u);
+    assert.match(step.body, /Casekeeper briefing then hands off/u);
+    assert.match(step.body, /threshold never spends an extra discovery action/u);
+    assert.match(step.body, /Upgrade every room to Illustrated/u);
+    assert.match(step.body, /keep the Forge open while it prepares the entire high-detail set/u);
+    assert.match(step.body, /active investigation switches to Illustrated automatically/u);
+    assert.match(step.body, /missing and legacy art keeps its Mosaic fallback/u);
+    assert.match(step.body, /profile glyph and color appear in the player orb/u);
+    assert.match(step.body, /first visits follow it through the mansion's doors, corridors, and floor connectors/u);
+    assert.match(step.body, /visited rooms open immediately with a short physical travel bridge/u);
+    assert.match(step.body, /Reduced Motion uses that same immediate bridge/u);
     assert.match(step.body, /one finite visible sweep/u);
     assert.match(step.body, /one connected doorway at a time/u);
     assert.match(step.body, /Preparing your mystery to watch/u);
@@ -319,9 +341,9 @@ describe("mode tutorials", () => {
       copy,
       /Refract uses the global LOCAL\/ONLINE, Model, and Effort controls/u,
     );
-    assert.match(copy, /APP MODE badge mirrors the global privacy toggle/u);
-    assert.match(copy, /LOCAL keeps refraction offline/u);
-    assert.match(copy, /ONLINE may send the item being refracted to an online provider/u);
+    assert.match(copy, /as they are set when refraction begins/u);
+    assert.match(copy, /no separate Synthesis, Activity, or Personal Notes destination/u);
+    assert.doesNotMatch(copy, /APP MODE badge|Refract model picker/u);
   });
 
   it("explains transient native Max without changing the ordinary ladder", () => {
@@ -1176,7 +1198,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /gallery fills gradually/u);
     assert.match(copy, /Guests keep walking in while the title card reads Preparing or buffering/u);
     assert.match(copy, /approximate clock, not a one-to-one loader/u);
-    assert.match(copy, /saved provider, model, Effort or Max state, current session Turbo setting/u);
+    assert.match(copy, /saved privacy lane, Auto-or-fixed selection, and current session Turbo setting/u);
     assert.match(copy, /title first reads Preparing/u);
     assert.match(copy, /Start or Resume disabled until the first audible sequence/u);
     assert.match(copy, /Ready now · buffering ahead/u);
@@ -1284,8 +1306,8 @@ describe("mode tutorials", () => {
       /After a Participant verdict, only the bot opponent may react before the bot Moderator\/Judge closes/u,
     );
     assert.match(copy, /Choose LOCAL or ONLINE in the navbar/u);
-    assert.match(copy, /saved Auto routing priorities run first/u);
-    assert.match(copy, /ONLINE ends with one bundled local attempt/u);
+    assert.match(copy, /moves only to a better model/u);
+    assert.match(copy, /Saved fallback chains apply only/u);
     assert.match(copy, /LOCAL evaluates only local Ollama models/u);
     assert.match(copy, /ONLINE evaluates available OpenAI and Anthropic models/u);
     assert.match(copy, /Ollama Cloud stays in the separate ONLINE Background model picker/u);
@@ -1325,7 +1347,7 @@ describe("mode tutorials", () => {
       copy,
       /Start and Save stay locked until the motion, cast, consent, and explicit evidence choice are complete/u,
     );
-    assert.match(copy, /Start then freezes that ordered chain/u);
+    assert.match(copy, /Auto resolves model and Effort again for each work item/u);
     assert.match(
       copy,
       /LOCAL\/ONLINE, model, and Effort stay locked for the whole sit/u,
@@ -1336,10 +1358,10 @@ describe("mode tutorials", () => {
     );
     assert.match(
       copy,
-      /Auto chooses the Debate model once when the session is created/u,
+      /Auto resolves the model and Effort afresh for each Debate generation/u,
     );
-    assert.match(copy, /explicit current model replaces the setup model/u);
-    assert.match(copy, /selector on Auto preserves the model already chosen/u);
+    assert.match(copy, /Auto remains dynamic at Start and throughout the session/u);
+    assert.match(copy, /concrete selection keeps its saved model and fallback chain/u);
     assert.match(
       copy,
       /visible gallery walk-in as its loading screen/u,
@@ -1517,14 +1539,14 @@ describe("mode tutorials", () => {
     assert.match(copy, /individual ballots remain private/u);
   });
 
-  it("teaches Debate's start-frozen model contract", () => {
+  it("teaches Debate's dynamic Auto and fixed-model contract", () => {
     const copy = MODE_TUTORIALS.debate.steps
       .map((step) => step.body)
       .join(" ");
-    assert.match(copy, /Auto chooses the Debate model once when the session is created/u);
-    assert.match(copy, /explicit current model replaces the setup model/u);
-    assert.match(copy, /selector on Auto preserves the model already chosen/u);
-    assert.match(copy, /every generation, including Spectator bake/u);
+    assert.match(copy, /Auto resolves the model and Effort afresh/u);
+    assert.match(copy, /Auto remains dynamic at Start and throughout the session/u);
+    assert.match(copy, /concrete selection keeps its saved model and fallback chain/u);
+    assert.match(copy, /each Debate generation, including Spectator bake/u);
   });
 
   it("teaches audio-first Participant floor breaks with a separate slowed preparation window", () => {
@@ -2152,8 +2174,8 @@ describe("mode tutorials", () => {
       setup?.body ?? "",
       /current model and response routing stay selected/,
     );
-    assert.match(setup?.body ?? "", /saved Auto routing priorities run first/);
-    assert.match(setup?.body ?? "", /every other eligible model in that lane/);
+    assert.match(setup?.body ?? "", /moves only to a better model/);
+    assert.match(setup?.body ?? "", /Saved fallback chains apply only/);
     // The Auto/Timed length control is gone: every table is open-ended and the
     // player ends it. The copy must promise that without any hidden ceiling.
     assert.match(setup?.body ?? "", /Every table is open-ended/);
@@ -2225,12 +2247,12 @@ describe("mode tutorials", () => {
     );
     assert.match(
       routing?.body ?? "",
-      /saved Auto routing priorities run first/,
+      /moves only to a better model/,
     );
     assert.match(routing?.body ?? "", /Auto is the default model inside either lane/u);
     assert.match(
       routing?.body ?? "",
-      /Every recovery uses None for speed/u,
+      /recalculates Effort for the recovery attempt/u,
     );
     assert.match(
       routing?.body ?? "",
@@ -3620,6 +3642,19 @@ describe("mode tutorials", () => {
     );
   });
 
+  it("teaches the Signal opening pause, guest visit, and quiet image inspection", () => {
+    const opening = MODE_TUTORIALS.botcast.steps.find(
+      (step) => step.heading === "Meet the opening",
+    )?.body ?? "";
+
+    assert.match(opening, /lets the room breathe for one to two seconds/u);
+    assert.match(opening, /Auto visits the guest as their name lands/u);
+    assert.match(opening, /returns to the host.*or breathes Wide/u);
+    assert.match(opening, /chance to offer a brief greeting immediately/u);
+    assert.match(opening, /ordinary props and pictures/u);
+    assert.match(opening, /only when inspection actually finds a bot-like subject/u);
+  });
+
   it("explains that a Signal Power can remove a bot's coffee cup", () => {
     const booking = MODE_TUTORIALS.botcast.steps.find(
       (step) => step.heading === "Book tonight’s episode",
@@ -3886,28 +3921,35 @@ describe("mode tutorials", () => {
         .map((step) => step.body)
         .join(" ");
       assert.match(body, /job count stays attached to the real Prism orb/u);
-      assert.match(body, /drag Prism to move both/u);
+      assert.match(body, /without replacing chat/u);
+      assert.match(body, /choose the active Progress face/u);
+      assert.match(body, /Return to Prism chat/u);
+      assert.match(body, /Drag Prism to move the status card with it/u);
       assert.match(body, /close or minimize the status card before holding the Wield modifier/u);
       assert.match(body, /same inertia and collision behavior as Chat and Zen/u);
     }
   });
 
-  it("teaches the focused Prism Synthesis surface alongside Chat and Notes", () => {
+  it("teaches the chat-first Prism tetrahedron without a Personal Notes destination", () => {
     for (const mode of ["chat", "zen"] as const) {
       const body = MODE_TUTORIALS[mode].steps
         .map((step) => step.body)
         .join(" ");
-      assert.match(body, /Synthesis focused on Refract routing/u);
-      assert.match(body, /rail of recent synthesized images/u);
-      assert.match(body, /open that exact item in Asset Library/u);
-      assert.match(body, /same saved or Private Prism conversation/u);
-      assert.match(body, /create, reopen, edit, and delete/u);
-      assert.match(body, /personal Notes stay unavailable.*Private/u);
+      assert.match(body, /floating Prism panel is chat-first/u);
+      assert.match(body, /draggable tetrahedron/u);
+      assert.match(body, /Saved keeps history/u);
+      assert.match(body, /Private uses no history or memory/u);
+      assert.match(body, /Focus continues the exact exchange in full chat/u);
+      assert.match(body, /Progress opens the soft-synthesis status card only while work is active/u);
+      assert.match(body, /four labeled controls/u);
+      assert.match(body, /orb always opens chat even when a synthesis count is attached/u);
+      assert.match(body, /no separate Synthesis, Activity, or Personal Notes destination/u);
+      assert.match(body, /private notes captured during live applet sessions remain.*\+ flow/u);
       assert.match(body, /default bot overview.*Home mark/u);
       assert.match(body, /Opening Settings, Avatar Studio.*visually submerges the passive orb/u);
       assert.match(body, /Wield and contextual field population available above the panel/u);
       assert.match(body, /Closing the panel restores Prism/u);
-      assert.match(body, /ordinary surfaces.*shortcut opens this menu at the orb's current location/u);
+      assert.match(body, /ordinary surfaces.*shortcut opens chat at the orb's current location/u);
       assert.match(body, /any safe editable control/u);
       assert.match(body, /Text and editor surfaces first open a one-line steering composer/u);
       assert.match(body, /selected Make this more creative text/u);

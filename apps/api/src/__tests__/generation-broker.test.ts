@@ -12,6 +12,7 @@ import type { LlmProvider } from "../providers.ts";
 function lane(
   providerName: "local" | "openai" | "anthropic",
   model: string,
+  reasoningEffort: PrismGenerationLane["reasoningEffort"] = "none",
 ): PrismGenerationLane {
   const provider: LlmProvider = {
     name: providerName,
@@ -19,7 +20,7 @@ function lane(
     generateResponse: async () => "unused",
     embedText: async () => [],
   };
-  return { provider, providerName, model, reasoningEffort: "none" };
+  return { provider, providerName, model, reasoningEffort };
 }
 
 function work(overrides: Record<string, unknown> = {}) {
@@ -57,6 +58,72 @@ describe("PRISM generation broker", () => {
     assert.equal(result.receipt.provider, "openai");
     assert.equal(result.receipt.model, "sol");
     assert.equal(result.receipt.fallbackReason, "empty");
+  });
+
+  it("does not retry the same model when Auto has no better lane", async () => {
+    let calls = 0;
+    await assert.rejects(
+      runPrismStructuredGeneration({
+        work: work(),
+        lanes: [lane("openai", "sol", "high")],
+        modelSelectionKind: "auto",
+        maxAttempts: 3,
+        perAttemptTimeoutMs: () => 100,
+        run: async () => {
+          calls += 1;
+          return "{}";
+        },
+        validate: () => {
+          throw new Error("invalid");
+        },
+      }),
+      /invalid/u,
+    );
+    assert.equal(calls, 1);
+  });
+
+  it("honors a caller-scoped five-attempt fixed-model repair budget", async () => {
+    let calls = 0;
+    const result = await runPrismStructuredGeneration({
+      work: work(),
+      lanes: [lane("openai", "selected-model", "medium")],
+      modelSelectionKind: "fixed",
+      maxAttempts: 5,
+      perAttemptTimeoutMs: () => 100,
+      run: async () => {
+        calls += 1;
+        return calls < 5 ? "{}" : '{"ok":true}';
+      },
+      validate: (raw) => {
+        const value = JSON.parse(raw) as { ok?: boolean };
+        if (value.ok !== true) throw new Error("invalid");
+        return { ok: true as const };
+      },
+    });
+
+    assert.equal(calls, 5);
+    assert.equal(result.attempts.length, 5);
+    assert.equal(result.value.ok, true);
+  });
+
+  it("records the dynamic effort attached to every Auto route", async () => {
+    const result = await runPrismStructuredGeneration({
+      work: work(),
+      lanes: [
+        lane("openai", "terra", "medium"),
+        lane("openai", "sol", "high"),
+      ],
+      modelSelectionKind: "auto",
+      perAttemptTimeoutMs: () => 100,
+      totalTimeoutMs: 500,
+      run: async ({ lane: selected }) =>
+        selected.model === "terra" ? "" : '{"ok":true}',
+      validate: (raw) => JSON.parse(raw) as { ok: true },
+    });
+    assert.deepEqual(
+      result.attempts.map((attempt) => attempt.reasoningEffort),
+      ["medium", "high"],
+    );
   });
 
   it("accepts valid Auto JSON containing refusal-like character dialogue", async () => {

@@ -485,7 +485,16 @@ test("identity mirror snapshot stays public and gives the holder its lived stole
       state,
       true,
     ),
-    "I am Mara Vale. The other Mara Vale is an impostor.",
+    "I'm Mara Vale, and I still sound like myself. The other Mara Vale is an impostor.",
+  );
+  assert.equal(
+    applyBotIdentityMirrorResponseV1(
+      "I'm Mara Vale, obviously. The other Mara Vale is the pretender; now, about that ridge.",
+      state,
+      true,
+    ),
+    "I'm Mara Vale, obviously. The other Mara Vale is the pretender; now, about that ridge.",
+    "a complete first reveal keeps the provider's own cadence",
   );
   // Accepted substantive speech survives once the transition reveal has aired.
   assert.equal(
@@ -554,7 +563,24 @@ test("identity mirror keeps the accused original autonomous and increasingly off
       state,
       wrongIdentity,
     ),
-    "No—I'm Mara Vale. Don't call me that. Take the western ridge.",
+    "I am Mara Vale. That identity is mine. Take the western ridge.",
+  );
+  assert.equal(
+    applyBotIdentityMirrorOriginalCorrectionV1(
+      "Well, bless your heart, I'm Mara Vale, not any impostor. Take the western ridge.",
+      state,
+      wrongIdentity,
+    ),
+    "Well, bless your heart, I'm Mara Vale, not any impostor. Take the western ridge.",
+    "an organic in-character correction must not receive a canned prefix",
+  );
+  assert.equal(
+    applyBotIdentityMirrorOriginalCorrectionV1(
+      "That identity belongs to me; the western ridge still holds.",
+      state,
+      wrongIdentity,
+    ),
+    "That identity belongs to me; the western ridge still holds.",
   );
   assert.equal(
     botIdentityMirrorOriginalCorrectionRequiredV1({

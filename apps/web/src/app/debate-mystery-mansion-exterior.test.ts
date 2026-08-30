@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 
 import {
   DEBATE_MYSTERY_MANSION_EXTERIOR_PATHS_V1,
+  debateMysteryMansionDoorTargetV1,
   debateMysteryMansionExteriorFallbackV1,
 } from "./debateMysteryMansionExterior.ts";
 
@@ -37,6 +38,25 @@ describe("mansion exterior presentation", () => {
     assert.equal(
       debateMysteryMansionExteriorFallbackV1({ label: "PRISM House" }, "standard"),
       "/debate/mystery/exteriors/prism-house-standard-v1.webp",
+    );
+  });
+
+  it("pins the exterior threshold target to each reviewed entrance composition", () => {
+    assert.deepEqual(
+      debateMysteryMansionDoorTargetV1({ label: "Gothic old house" }, "compact"),
+      { xPercent: 50, yPercent: 59 },
+    );
+    assert.deepEqual(
+      debateMysteryMansionDoorTargetV1({ label: "Orbital observatory" }, "standard"),
+      { xPercent: 66, yPercent: 58 },
+    );
+    assert.deepEqual(
+      debateMysteryMansionDoorTargetV1({ label: "Jungle expedition" }, "grand"),
+      { xPercent: 45, yPercent: 57 },
+    );
+    assert.deepEqual(
+      debateMysteryMansionDoorTargetV1({ label: "PRISM House" }, "standard"),
+      { xPercent: 60, yPercent: 44 },
     );
   });
 

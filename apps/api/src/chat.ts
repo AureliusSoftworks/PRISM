@@ -3213,6 +3213,7 @@ async function generateChatResponse(args: {
           const fallbackEffort = autoFallbackReasoningEffort(
             index,
             requestedFallbackEffort,
+            attempt.reasoningEffort,
           );
           const prepared = await prepareAttempt(
             provider,
@@ -3252,6 +3253,7 @@ async function generateChatResponse(args: {
               );
               return requested;
             })(),
+            attempt.reasoningEffort,
           ),
           { provider: attempt.provider, modelId: attempt.model },
         ),
@@ -9456,6 +9458,13 @@ export async function processChatMessage(
       typeof assistantBotId === "string"
         ? settings.starterPromptLabel?.trim() ?? ""
         : "";
+    const committedReasoningEffort = autoRecovery
+      ? autoRecovery.attempts.at(-1)?.reasoningEffort ?? "none"
+      : settings.resolveReasoningEffort?.(providerNameUsed, modelUsed) ??
+        settings.autoRouteDecision?.reasoningEffort ??
+        normalizeProviderReasoningEffort(
+          settings.botOverrides?.reasoningEffort,
+        );
     const assistantMessageProse: ChatMessage = {
       id: assistantMessageId,
       role: "assistant",
@@ -9466,12 +9475,8 @@ export async function processChatMessage(
       ...(settings.autoRouteDecision
         ? { autoRoute: settings.autoRouteDecision }
         : {}),
-      ...(!settings.autoRouteDecision
-        ? {
-            reasoningEffort: normalizeProviderReasoningEffort(
-              settings.botOverrides?.reasoningEffort,
-            ),
-          }
+      ...(committedReasoningEffort
+        ? { reasoningEffort: committedReasoningEffort }
         : {}),
       ...(settings.resolveTurboMode?.(providerNameUsed, modelUsed) === true
         ? { turbo: true }
@@ -11293,6 +11298,13 @@ export async function processChatMessage(
     assistantProseMessageId,
     assistantCreatedAt,
   );
+  const committedReasoningEffort = autoRecovery
+    ? autoRecovery.attempts.at(-1)?.reasoningEffort ?? "none"
+    : settings.resolveReasoningEffort?.(providerNameUsed, modelUsed) ??
+      settings.autoRouteDecision?.reasoningEffort ??
+      normalizeProviderReasoningEffort(
+        settings.botOverrides?.reasoningEffort,
+      );
   const toolPayloadProseOnly = withChatPrivatePowerIntendedSpeech(
     serializeAssistantInterruptionReactionReceipt(
       serializeAssistantToolPayload({
@@ -11310,11 +11322,7 @@ export async function processChatMessage(
         userNotes: userNotesForTurn,
         autoRecovery,
         autoRoute: settings.autoRouteDecision,
-        reasoningEffort: settings.autoRouteDecision
-          ? undefined
-          : normalizeProviderReasoningEffort(
-              settings.botOverrides?.reasoningEffort,
-            ),
+        reasoningEffort: committedReasoningEffort,
         turbo:
           settings.resolveTurboMode?.(providerNameUsed, modelUsed) === true,
         botPowerExactResponse: botPowerQuietIgnoredTurn

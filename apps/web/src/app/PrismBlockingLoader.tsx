@@ -12,7 +12,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { PrismOrb } from "./PrismOrb";
-import { PrismCompanionViewTabs } from "./PrismCompanionViewTabs";
+import { requestPrismCompanionView } from "./prismCompanionViews.ts";
 import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
 import styles from "./prism-blocking-loader.module.css";
 import { formatBlockingLoaderElapsed } from "./prismBlockingLoaderFormat";
@@ -292,10 +292,13 @@ export function PrismBlockingLoader({
       aria-describedby={detailId}
     >
       {docked ? (
-        <PrismCompanionViewTabs
-          activeView="synthesis"
-          synthesisJobCount={softUi.jobCount}
-        />
+        <button
+          type="button"
+          className={styles.chatReturn}
+          onClick={() => requestPrismCompanionView("chat")}
+        >
+          Return to Prism chat
+        </button>
       ) : null}
       {onCancel ? (
         <button

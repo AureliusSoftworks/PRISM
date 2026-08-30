@@ -395,6 +395,7 @@ import {
   stageMansionRoomArtCandidateV2,
 } from "./debate-mystery-mansion-room-art.ts";
 import {
+  DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
   DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
   MANSION_ATMOSPHERE_ACTIVE_LOGICAL_ID_V1,
   MANSION_MUSIC_ACTIVE_LOGICAL_ID_V1,
@@ -1033,6 +1034,7 @@ import {
   MODEL_VISIBILITY_DEFAULTS_VERSION,
   reconcileHiddenModelIdsForCatalog,
   resolveAutoModel,
+  resolveAutoModelRoutePlan,
   REQUIRED_PRIMARY_LOCAL_MODEL_ID,
 } from "./model-routing.ts";
 import {
@@ -1336,7 +1338,12 @@ import {
   buildImagePromptAttempts,
   runImagePromptAttempts,
 } from "./image-prompt-retry.ts";
-import { AutoFallbackExhaustedError } from "./auto-fallback.ts";
+import {
+  AutoFallbackExhaustedError,
+  autoFallbackReasoningEffort,
+  runAutoFallbackChain,
+  validateAutoFallbackText,
+} from "./auto-fallback.ts";
 import {
   checkComfyUiHostStatus,
   listComfyUiWorkflowJsonRelPaths,
@@ -1733,6 +1740,80 @@ async function rebuildSignalStudioLighting(
 
 let masterKey = deriveMasterKey(config.encryptionMasterKey);
 let providerFactoryOverride: typeof selectProvider = selectProvider;
+
+/**
+ * Some bounded authoring helpers own semantic repair internally instead of
+ * accepting a fallback chain. This provider keeps their existing API while
+ * ensuring a second compiler call starts above the route that just failed.
+ */
+function providerWithTextRecovery(args: {
+  primary: LlmProvider;
+  attempts: readonly AutoFallbackModelRef[];
+  openAiApiKey?: string;
+  anthropicApiKey?: string;
+  ollamaCloudApiKey?: string;
+  secondaryOllamaHost?: string | null;
+}): LlmProvider {
+  if (args.attempts.length <= 1) return args.primary;
+  let nextStartIndex = 0;
+  return {
+    ...args.primary,
+    generateResponse: async (messages, options) => {
+      const startIndex = Math.min(
+        nextStartIndex,
+        Math.max(0, args.attempts.length - 1),
+      );
+      const remaining = args.attempts.slice(startIndex);
+      const result = await runAutoFallbackChain({
+        attempts: remaining.map((attempt, offset) => ({
+          ...attempt,
+          available:
+            startIndex + offset === 0 ||
+            attempt.provider === "local" ||
+            (attempt.provider === "openai"
+              ? Boolean(args.openAiApiKey)
+              : attempt.provider === "ollama_cloud"
+                ? Boolean(args.ollamaCloudApiKey)
+              : Boolean(args.anthropicApiKey)),
+          run: (signal) => {
+            const provider =
+              startIndex + offset === 0
+                ? args.primary
+                : providerFactoryOverride(
+                    attempt.provider,
+                    args.openAiApiKey,
+                    args.secondaryOllamaHost,
+                    args.anthropicApiKey,
+                    args.ollamaCloudApiKey,
+                  );
+            return provider.generateResponse(messages, {
+              ...options,
+              model: attempt.model,
+              reasoningEffort: autoFallbackReasoningEffort(
+                startIndex + offset,
+                options?.reasoningEffort,
+                attempt.reasoningEffort,
+              ),
+              allowFinalLocalFallback: false,
+              signal,
+            });
+          },
+        })),
+        perAttemptTimeoutMs: 90_000,
+        totalTimeoutMs: remaining.length * 90_000,
+        signal: options?.signal,
+        validate: validateAutoFallbackText,
+      });
+      const finalIndex = args.attempts.findIndex(
+        (attempt) =>
+          attempt.provider === result.provider &&
+          attempt.model.toLowerCase() === result.model.toLowerCase(),
+      );
+      nextStartIndex = finalIndex >= 0 ? finalIndex + 1 : startIndex + 1;
+      return result.value;
+    },
+  };
+}
 let auxiliaryProviderFactoryOverride: typeof getAuxiliaryProvider =
   getAuxiliaryProvider;
 let builtinVoiceWaveGeneratorOverride: typeof generateBuiltinEnglishWave =
@@ -1826,6 +1907,32 @@ async function startPrismStorySession(
     },
     turboOnly: autoTurboEnabled,
   });
+  const autoRoutePlan = resolvedAuto.autoRoute
+    ? resolveAutoModelRoutePlan({
+        provider: effectiveProvider,
+        lane: responseLane,
+        hiddenModelIds,
+        catalog,
+        onlineAutoProviderBias: clampOnlineAutoProviderBias(
+          user.online_auto_provider_bias,
+        ),
+        onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
+          user.online_auto_provider_weights,
+          user.online_auto_provider_bias,
+        ),
+        onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
+          user.online_auto_quality_posture,
+        ),
+        routingContext: {
+          surface: "story",
+          inputText: premise ?? "",
+          outputTokens: 2_048,
+          structuredOutput: true,
+          simulatedEffortEnabled: true,
+        },
+        turboOnly: autoTurboEnabled,
+      })
+    : [];
   effectiveProvider = resolvedAuto.provider;
   const storedReasoningEffort = resolveUserModelReasoningEffort(db, {
     userId: context.userId,
@@ -1858,23 +1965,32 @@ async function startPrismStorySession(
     parseStoredAutoFallbackChain(user.auto_fallback_chain),
     autoTurboEnabled,
   );
-  const storyAutoRoutingChain: AutoFallbackChainV1 | null = resolvedAuto.autoRoute
-    ? {
-        v: 1,
-        fallbacks: configuredFallbacks?.fallbacks ?? [],
-        eligibleCandidates: candidateAllowlist,
-        ...(responseLane === "online" && !autoTurboEnabled
-          ? {
-              finalLocalRecovery: {
-                provider: "local" as const,
-                model: REQUIRED_PRIMARY_LOCAL_MODEL_ID,
-              },
-            }
-          : {}),
-      }
-    : null;
-  const generationChain =
-    autoFallbackResolvedChain(primaryRef, storyAutoRoutingChain) ?? [primaryRef];
+  const storyRecoveryChain: AutoFallbackChainV1 | null = resolvedAuto.autoRoute
+    ? autoRoutePlan.length > 1
+      ? {
+          v: 1,
+          fallbacks: autoRoutePlan.slice(1).map((route) => ({
+            provider: route.provider,
+            model: route.model,
+            reasoningEffort: route.reasoningEffort,
+          })),
+        }
+      : null
+    : configuredFallbacks;
+  const generationChain = autoFallbackResolvedChain(
+    {
+      ...primaryRef,
+      ...(resolvedAuto.autoRoute
+        ? { reasoningEffort: resolvedAuto.autoRoute.reasoningEffort }
+        : {}),
+    },
+    storyRecoveryChain,
+  ) ?? [{
+    ...primaryRef,
+    ...(resolvedAuto.autoRoute
+      ? { reasoningEffort: resolvedAuto.autoRoute.reasoningEffort }
+      : {}),
+  }];
   const session = createStorySession(db, context.userId, {
     botIds,
     premise,
@@ -1931,16 +2047,14 @@ async function startPrismStorySession(
               bots: storyBots,
               premise,
               ...(powerTheme ? { theme: powerTheme } : {}),
-              ...(index === 0
-                ? resolvedAuto.autoRoute?.reasoningEffort ??
-                  storedReasoningEffort
-                  ? {
-                      reasoningEffort:
-                        resolvedAuto.autoRoute?.reasoningEffort ??
-                        storedReasoningEffort,
-                    }
-                  : {}
-                : { reasoningEffort: "none" }),
+              ...(attempt.reasoningEffort ??
+              (index === 0 ? storedReasoningEffort : "none")
+                ? {
+                    reasoningEffort:
+                      attempt.reasoningEffort ??
+                      (index === 0 ? storedReasoningEffort : "none"),
+                  }
+                : {}),
             },
           );
           if (generated.status !== "failed") return generated;
@@ -6331,10 +6445,10 @@ function readProvider(value: unknown): ProviderName | undefined {
 function frozenDebateModelOverride(session: {
   model: string;
   modelSelectionKind?: "auto" | "fixed";
-}): string {
-  // Auto chooses once when the Debate is created. Every later generation,
-  // including Spectator bake, keeps that concrete primary model.
-  return session.model;
+}): string | null {
+  // Fixed selections remain fixed. Auto is intentionally re-resolved for
+  // every Debate work item as the record and prompt complexity change.
+  return session.modelSelectionKind === "auto" ? null : session.model;
 }
 
 function debateAutoRoutingContext(
@@ -6348,6 +6462,7 @@ function debateAutoRoutingContext(
     | "lastTurbo"
     | "latestAutoRoute"
     | "modelSelectionKind"
+    | "formatState"
   >,
 ): AutoRoutingContextV1 & {
   frozenReasoningEffort?: ProviderReasoningEffort;
@@ -6379,7 +6494,12 @@ function debateAutoRoutingContext(
   );
 
   return {
-    surface: "debate",
+    surface:
+      session.formatState.format === "whodunnit" &&
+      session.formatState.version === 2 &&
+      session.formatState.playPhase === "case_forge"
+        ? "case-forge"
+        : "debate",
     inputText,
     // Account for the frozen personas and procedural instructions that wrap
     // the visible record in every Debate generation prompt.
@@ -6388,12 +6508,11 @@ function debateAutoRoutingContext(
     structuredOutput: true,
     highStakes: true,
     frozenModelSelectionKind: session.modelSelectionKind ?? "fixed",
-    ...(session.lastReasoningEffort
+    ...(session.modelSelectionKind !== "auto" && session.lastReasoningEffort
       ? { frozenReasoningEffort: session.lastReasoningEffort }
-      : session.latestAutoRoute?.reasoningEffort
-        ? { frozenReasoningEffort: session.latestAutoRoute.reasoningEffort }
-        : {}),
-    ...(typeof session.lastTurbo === "boolean"
+      : {}),
+    ...(session.modelSelectionKind !== "auto" &&
+    typeof session.lastTurbo === "boolean"
       ? { frozenTurbo: session.lastTurbo }
       : {}),
   };
@@ -6439,6 +6558,11 @@ async function debateAiRuntimeForUser(
           ? user.preferred_provider
           : "openai";
   const modelOverride = readModelOverride(requestedModelOverride);
+  const requestedModelSelectionKind =
+    requestedRoutingContext?.frozenModelSelectionKind;
+  const autoSelected =
+    requestedModelSelectionKind === "auto" ||
+    (requestedModelSelectionKind === undefined && modelOverride === null);
   const userKey = responseLane === "online" ? decryptUserKey(userId) : null;
   const openAiApiKey =
     responseLane === "online"
@@ -6467,7 +6591,7 @@ async function debateAiRuntimeForUser(
     ).map((entry) => `${entry.provider}:${entry.model.toLowerCase()}`),
   );
   const routingCatalog =
-    frozenCandidateKeys.size === 0
+    autoSelected || frozenCandidateKeys.size === 0
       ? catalog
       : {
           local: catalog.local.filter((entry) =>
@@ -6484,7 +6608,9 @@ async function debateAiRuntimeForUser(
   const frozenReasoningEffort = normalizeProviderReasoningEffort(
     requestedRoutingContext?.frozenReasoningEffort,
   );
-  const frozenTurbo = requestedRoutingContext?.frozenTurbo;
+  const frozenTurbo = autoSelected
+    ? undefined
+    : requestedRoutingContext?.frozenTurbo;
   const autoTurboEnabled =
     responseLane === "online" &&
     modelOverride === null &&
@@ -6514,8 +6640,39 @@ async function debateAiRuntimeForUser(
     },
     turboOnly: autoTurboEnabled,
   });
+  const autoRoutePlan = autoSelected
+    ? resolveAutoModelRoutePlan(
+        {
+          provider: preferredProvider,
+          lane: responseLane,
+          hiddenModelIds,
+          catalog: routingCatalog,
+          onlineAutoProviderBias: clampOnlineAutoProviderBias(
+            user.online_auto_provider_bias,
+          ),
+          onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
+            user.online_auto_provider_weights,
+            user.online_auto_provider_bias,
+          ),
+          onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
+            user.online_auto_quality_posture,
+          ),
+          routingContext: {
+            surface: "debate",
+            structuredOutput: true,
+            highStakes: true,
+            outputTokens: 2_400,
+            ...requestedRoutingContext,
+          },
+          turboOnly: autoTurboEnabled,
+        },
+        requestedRoutingContext?.surface === "case-forge"
+          ? DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS
+          : undefined,
+      )
+    : [];
   const primaryEffort =
-    frozenReasoningEffort !== "auto"
+    !autoSelected && frozenReasoningEffort !== "auto"
       ? frozenReasoningEffort
       : resolvedPrimary.autoRoute?.reasoningEffort ??
         resolveUserModelReasoningEffort(db, {
@@ -6603,7 +6760,7 @@ async function debateAiRuntimeForUser(
           resolvedPrimary.model,
           primaryEffort,
         );
-  const hasFrozenChain = Array.isArray(requestedFrozenChain);
+  const hasFrozenChain = !autoSelected && Array.isArray(requestedFrozenChain);
   const frozenChain = hasFrozenChain
     ? requestedFrozenChain
         .map(normalizeAutoFallbackModelRef)
@@ -6634,7 +6791,7 @@ async function debateAiRuntimeForUser(
     model: primary.model,
   };
   const modelSelectionKind =
-    requestedRoutingContext?.frozenModelSelectionKind ??
+    requestedModelSelectionKind ??
     (resolvedPrimary.autoRoute ? "auto" : "fixed");
   const frozenFallbacks =
     frozenChain.length > 1
@@ -6646,26 +6803,32 @@ async function debateAiRuntimeForUser(
                 entry.provider !== "ollama_cloud",
         )
       : [];
-  const runtimeAutoRoutingChain: AutoFallbackChainV1 | null =
+  const runtimeRecoveryChain: AutoFallbackChainV1 | null =
     modelSelectionKind === "auto"
-      ? {
-          v: 1,
-          fallbacks: configuredChain?.fallbacks ?? [],
-          eligibleCandidates: candidateAllowlist,
-          ...(responseLane === "online" && !autoTurboEnabled
-            ? {
-                finalLocalRecovery: {
-                  provider: "local" as const,
-                  model: REQUIRED_PRIMARY_LOCAL_MODEL_ID,
-                },
-              }
-            : {}),
-        }
-      : null;
+      ? autoRoutePlan.length > 1
+        ? {
+            v: 1,
+            fallbacks: autoRoutePlan.slice(1).map((route) => ({
+              provider: route.provider,
+              model: route.model,
+              reasoningEffort: route.reasoningEffort,
+            })),
+          }
+        : null
+      : hasFrozenChain
+        ? frozenFallbacks.length > 0
+          ? { v: 1, fallbacks: frozenFallbacks }
+          : null
+        : configuredChain;
+  const routedPrimaryRef: AutoFallbackModelRef = {
+    ...primaryRef,
+    ...(resolvedPrimary.autoRoute
+      ? { reasoningEffort: resolvedPrimary.autoRoute.reasoningEffort }
+      : {}),
+  };
   const resolvedChain =
-    hasFrozenChain
-      ? [primaryRef, ...frozenFallbacks]
-      : (autoFallbackResolvedChain(primaryRef, runtimeAutoRoutingChain) ?? [primaryRef]);
+    autoFallbackResolvedChain(routedPrimaryRef, runtimeRecoveryChain) ??
+    [routedPrimaryRef];
   const seen = new Set<string>();
   const lanes = resolvedChain
     .filter((entry) => {
@@ -6680,16 +6843,18 @@ async function debateAiRuntimeForUser(
             ...local,
             model: entry.model,
             reasoningEffort:
-              index === 0
+              entry.reasoningEffort ??
+              (index === 0
                 ? primaryEffort
-                : ("none" satisfies ReasoningEffort),
+                : ("none" satisfies ReasoningEffort)),
           }
         : onlineLane(
             entry.provider,
             entry.model,
-            index === 0
-              ? primaryEffort
-              : ("none" satisfies ReasoningEffort),
+            entry.reasoningEffort ??
+              (index === 0
+                ? primaryEffort
+                : ("none" satisfies ReasoningEffort)),
           ),
     );
   return {
@@ -6978,28 +7143,10 @@ async function contextualTextRuntimeForUser<
     anthropicApiKey,
     ollamaCloudApiKey,
   );
-  const frozenCandidateKeys = new Set(
-    (Array.isArray(args.frozenCandidateAllowlist)
-      ? args.frozenCandidateAllowlist
-          .map(normalizeAutoFallbackModelRef)
-          .filter((entry): entry is AutoFallbackModelRef => entry !== null)
-      : []
-    ).map((entry) => `${entry.provider}:${entry.model.toLowerCase()}`),
-  );
-  const routingCatalog =
-    frozenCandidateKeys.size === 0
-      ? catalog
-      : {
-          ...catalog,
-          local: catalog.local.filter((entry) =>
-            frozenCandidateKeys.has(`local:${entry.id.toLowerCase()}`),
-          ),
-          online: catalog.online.filter((entry) =>
-            frozenCandidateKeys.has(
-              `${entry.provider}:${entry.id.toLowerCase()}`,
-            ),
-          ),
-        };
+  // Auto is resolved from the current eligible catalog for every work item.
+  // Historical candidate snapshots remain provenance only and must not freeze
+  // a later Auto turn to an older model set.
+  const routingCatalog = catalog;
   const capabilityRoutingCatalog = args.requiresImageInput
     ? {
         ...routingCatalog,
@@ -7071,6 +7218,29 @@ async function contextualTextRuntimeForUser<
     },
     turboOnly: autoTurboEnabled,
   });
+  const autoRoutePlan = modelSelectionKind === "auto"
+    ? resolveAutoModelRoutePlan({
+        provider: primaryProvider,
+        lane: responseMode,
+        hiddenModelIds,
+        catalog: capabilityRoutingCatalog,
+        onlineAutoProviderBias: clampOnlineAutoProviderBias(
+          args.user.online_auto_provider_bias,
+        ),
+        onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
+          args.user.online_auto_provider_weights,
+          args.user.online_auto_provider_bias,
+        ),
+        onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
+          args.user.online_auto_quality_posture,
+        ),
+        routingContext: {
+          ...args.routingContext,
+          simulatedEffortEnabled: true,
+        },
+        turboOnly: autoTurboEnabled,
+      })
+    : [];
   const storedReasoningEffort = resolveUserModelReasoningEffort(db, {
       userId: args.userId,
       provider: resolved.provider,
@@ -7145,7 +7315,7 @@ async function contextualTextRuntimeForUser<
               )
           : [])
       : null;
-  const configuredAutoPriorities =
+  const configuredFixedFallbacks =
     frozenFallbacks !== null
       ? frozenFallbacks
       : (turboCapableAutoFallbackChain(
@@ -7158,32 +7328,27 @@ async function contextualTextRuntimeForUser<
     ),
   );
   const runtimeAutoPriorities = args.requiresImageInput
-    ? configuredAutoPriorities.filter((entry) =>
+    ? configuredFixedFallbacks.filter((entry) =>
         imageCapableCandidateKeys.has(
           `${entry.provider}:${entry.model.toLowerCase()}`,
         ),
       )
-    : configuredAutoPriorities;
-  const runtimeAutoRoutingChain: AutoFallbackChainV1 | null =
+    : configuredFixedFallbacks;
+  const runtimeRecoveryChain: AutoFallbackChainV1 | null =
     modelSelectionKind === "auto"
-      ? {
-          v: 1,
-          // Settings entries are ordering hints. Every other eligible model is
-          // appended by the shared resolver. Ordinary ONLINE Auto receives one
-          // explicit bundled-local recovery; Turbo remains on eligible online
-          // candidates so Fast never degrades silently.
-          fallbacks: runtimeAutoPriorities,
-          eligibleCandidates: candidateAllowlist,
-          ...(responseMode === "online" && !args.requiresImageInput && !autoTurboEnabled
-            ? {
-                finalLocalRecovery: {
-                  provider: "local" as const,
-                  model: REQUIRED_PRIMARY_LOCAL_MODEL_ID,
-                },
-              }
-            : {}),
-        }
-      : null;
+      ? autoRoutePlan.length > 1
+        ? {
+            v: 1,
+            fallbacks: autoRoutePlan.slice(1).map((route) => ({
+              provider: route.provider,
+              model: route.model,
+              reasoningEffort: route.reasoningEffort,
+            })),
+          }
+        : null
+      : runtimeAutoPriorities.length > 0
+        ? { v: 1, fallbacks: runtimeAutoPriorities }
+        : null;
   return {
     responseMode,
     provider: resolved.provider,
@@ -7205,7 +7370,7 @@ async function contextualTextRuntimeForUser<
     openAiApiKey,
     anthropicApiKey,
     ollamaCloudApiKey,
-    autoFallbackChain: runtimeAutoRoutingChain,
+    autoFallbackChain: runtimeRecoveryChain,
   };
 }
 
@@ -7224,12 +7389,14 @@ async function contextualSignalRuntimeForEpisode(args: {
     requestedResponseMode:
       args.episode.provider === "local" ? "local" : "online",
     modelOverride: autoSelected ? null : args.episode.model,
-    ...(snapshot
+    ...(!autoSelected && snapshot
       ? { frozenCandidateAllowlist: snapshot.candidateAllowlist }
       : {}),
     // Legacy sessions had no frozen fallback provenance; keep them to their
     // recorded primary instead of applying today's account configuration.
-    frozenFallbackChain: snapshot?.fallbackChain ?? [],
+    ...(!autoSelected
+      ? { frozenFallbackChain: snapshot?.fallbackChain ?? [] }
+      : {}),
     requiresImageInput: args.requiresImageInput,
     routingContext: {
       surface: "signal",
@@ -7243,7 +7410,7 @@ async function contextualSignalRuntimeForEpisode(args: {
     },
   });
   const frozenRuntime =
-    snapshot?.frozenReasoningEffort !== undefined
+    !autoSelected && snapshot?.frozenReasoningEffort !== undefined
       ? {
           ...runtime,
           reasoningEffort: snapshot.frozenReasoningEffort,
@@ -10416,6 +10583,7 @@ function debateMysteryRoomArtUpgradeStatusV1(
 async function prepareDebateMysteryIllustratedRoomsV1(
   userId: string,
   sessionId: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   const session = getDebateSession(db, userId, sessionId);
   if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
@@ -10435,7 +10603,8 @@ async function prepareDebateMysteryIllustratedRoomsV1(
   const requiredRoomIds = new Set(
     debateMysteryRoomArtUpgradeStatusV1(userId, sessionId).requiresUpgradeRoomIds,
   );
-  const controller = new AbortController();
+  const fallbackController = new AbortController();
+  const preparationSignal = signal ?? fallbackController.signal;
   for (const room of mysteryState.rooms) {
     if (!requiredRoomIds.has(room.id)) continue;
     const subjectId = debateMysteryIllustratedRoomSubjectIdV1(room.id);
@@ -10455,7 +10624,7 @@ async function prepareDebateMysteryIllustratedRoomsV1(
       mimeType: "image/png",
     });
     try {
-      await runMysteryAssetAttempt(controller.signal, async (attemptSignal) => {
+      await runMysteryAssetAttempt(preparationSignal, async (attemptSignal) => {
         const source = getDebateMysteryAssetFileForPreparationV1(
           db,
           userKey,
@@ -10515,10 +10684,15 @@ async function prepareDebateMysteryIllustratedRoomsV1(
           model: generated.model,
           review: { attempt: 1, pixels, vision: review },
         });
-        revealDebateMysteryAssetV1(db, userId, sessionId, "room", subjectId);
         return sealed;
       });
     } catch (error) {
+      if (
+        preparationSignal.aborted ||
+        (error instanceof Error && error.name === "AbortError")
+      ) {
+        throw error;
+      }
       setDebateMysteryAssetFallbackV1(db, {
         userId,
         sessionId,
@@ -10600,6 +10774,8 @@ function queueDebateMysteryV2CompilationInBackground(
       () => runDebateMysteryCompilationV2(db, userId, sessionId, runtime, {
         prepareEvidenceAssets: prepareDebateMysteryV2EvidenceAssets,
         prepareRoomAssets: prepareDebateMysteryV2RoomAssets,
+        prepareIllustratedRooms: ({ userId: ownerId, sessionId: caseId, signal }) =>
+          prepareDebateMysteryIllustratedRoomsV1(ownerId, caseId, signal),
         prepareMansionExteriorAsset: prepareDebateMysteryV2MansionExteriorAsset,
         onCompilationReady: (ready) =>
           queueDebateMysteryV2RoomAssetBackground(userId, ready.id),
@@ -10765,6 +10941,16 @@ function queueDebateMysteryV2RoomAssetBackground(
     );
     const active = mysteryRoomAssetBackgroundRuns.get(key);
     if (active?.controller === controller) mysteryRoomAssetBackgroundRuns.delete(key);
+    const completed = getDebateSession(db, userId, sessionId);
+    if (
+      !controller.signal.aborted &&
+      completed.formatState.format === "whodunnit" &&
+      completed.formatState.version === 2 &&
+      completed.formatState.config.assetSynthesis.illustratedRooms &&
+      completed.formatState.rooms.every((room) => room.sealedAsset?.status !== "pending")
+    ) {
+      queueDebateMysteryIllustratedRoomsV1(userId, sessionId);
+    }
   });
   mysteryRoomAssetBackgroundRuns.set(key, { controller, promise });
 }
@@ -17408,7 +17594,6 @@ function buildRoutes(): RouteDefinition[] {
       const chatHiddenModelIds = parseHiddenBotModelIds(
         user.hidden_bot_model_ids,
       );
-      const chatHiddenModels = new Set(chatHiddenModelIds);
       const resolvedAuto = prismHomeTurn
         ? {
             provider: "local" as const,
@@ -17443,45 +17628,54 @@ function buildRoutes(): RouteDefinition[] {
             },
             turboOnly: autoTurboEnabled,
           });
+      const chatAutoRoutePlan = resolvedAuto.autoRoute
+        ? resolveAutoModelRoutePlan({
+            provider: effectiveProvider,
+            lane: responseLane,
+            hiddenModelIds: chatHiddenModelIds,
+            catalog: chatModelCatalog,
+            onlineAutoProviderBias: clampOnlineAutoProviderBias(
+              user.online_auto_provider_bias,
+            ),
+            onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
+              user.online_auto_provider_weights,
+              user.online_auto_provider_bias,
+            ),
+            onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
+              user.online_auto_quality_posture,
+            ),
+            routingContext: {
+              surface: mode,
+              inputText: message,
+              outputTokens: generationOverrides.maxTokens,
+              toolUse: Boolean(manualTool),
+              simulatedEffortEnabled: true,
+            },
+            turboOnly: autoTurboEnabled,
+          })
+        : [];
       const chatAutoRoutingChain: AutoFallbackChainV1 | null =
         resolvedAuto.autoRoute
-          ? {
-              v: 1,
-              fallbacks:
-                turboCapableAutoFallbackChain(
-                  parseStoredAutoFallbackChain(user.auto_fallback_chain),
-                  autoTurboEnabled,
-                )?.fallbacks ?? [],
-              eligibleCandidates: (
-                responseLane === "local"
-                  ? chatModelCatalog.local
-                  : chatModelCatalog.online
-              )
-                .filter(
-                  (entry) =>
-                    !chatHiddenModels.has(entry.id) &&
-                    (responseLane !== "online" ||
-                      entry.provider !== "ollama_cloud") &&
-                    (!autoTurboEnabled ||
-                      modelSupportsTurboMode(
-                        entry.provider,
-                        entry.id,
-                      )),
-                )
-                .map((entry) => ({
-                  provider: entry.provider,
-                  model: entry.id,
+          ? chatAutoRoutePlan.length > 1
+            ? {
+                v: 1,
+                fallbacks: chatAutoRoutePlan.slice(1).map((route) => ({
+                  provider: route.provider,
+                  model: route.model,
+                  reasoningEffort: route.reasoningEffort,
                 })),
-              ...(responseLane === "online" && !autoTurboEnabled
-                ? {
-                    finalLocalRecovery: {
-                      provider: "local" as const,
-                      model: REQUIRED_PRIMARY_LOCAL_MODEL_ID,
-                    },
-                  }
-                : {}),
-            }
-          : null;
+              }
+            : null
+          : turboCapableAutoFallbackChain(
+              parseStoredAutoFallbackChain(user.auto_fallback_chain),
+              autoTurboEnabled,
+            );
+      const chatAutoRouteByKey = new Map(
+        chatAutoRoutePlan.map((route) => [
+          `${route.provider}:${route.model.toLowerCase()}`,
+          route,
+        ]),
+      );
       effectiveProvider = resolvedAuto.provider;
       generationOverrides.model = resolvedAuto.model;
       const storedReasoningEffort = resolveUserModelReasoningEffort(db, {
@@ -17704,14 +17898,17 @@ function buildRoutes(): RouteDefinition[] {
             responseMode: effectiveProvider === "local" ? "local" : "online",
             autoFallbackChain: chatAutoRoutingChain,
             resolveReasoningEffort: (provider, model) =>
-              resolvedAuto.autoRoute?.provider === provider &&
+              chatAutoRouteByKey.get(
+                `${provider}:${model.toLowerCase()}`,
+              )?.reasoningEffort ??
+              (resolvedAuto.autoRoute?.provider === provider &&
               resolvedAuto.autoRoute.model === model
                 ? resolvedAuto.autoRoute.reasoningEffort
                 : resolveUserModelReasoningEffort(db, {
                     userId,
                     provider,
                     modelId: model,
-                  }),
+                  })),
             resolveTurboMode: (provider, model) =>
               (autoTurboEnabled && provider !== "local") ||
               resolveUserModelTurboMode(db, {
@@ -19029,6 +19226,9 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/debates", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
+      const whodunnitVersion = body.whodunnit && typeof body.whodunnit === "object"
+        ? (body.whodunnit as Record<string, unknown>).version
+        : null;
       const runtime = await debateAiRuntimeForUser(
         userId,
         body.preferredProvider,
@@ -19037,7 +19237,10 @@ function buildRoutes(): RouteDefinition[] {
         undefined,
         undefined,
         {
-          surface: "debate",
+          surface:
+            body.format === "whodunnit" && whodunnitVersion === 2
+              ? "case-forge"
+              : "debate",
           frozenReasoningEffort: normalizeProviderReasoningEffort(
             body.reasoningEffort,
           ),
@@ -19046,9 +19249,6 @@ function buildRoutes(): RouteDefinition[] {
             : {}),
         },
       );
-      const whodunnitVersion = body.whodunnit && typeof body.whodunnit === "object"
-        ? (body.whodunnit as Record<string, unknown>).version
-        : null;
       const session = body.format === "whodunnit" && whodunnitVersion === 2
         ? await runWithUsageSession(
             {
@@ -19068,6 +19268,8 @@ function buildRoutes(): RouteDefinition[] {
                 deferBackgroundStart: true,
                 prepareEvidenceAssets: prepareDebateMysteryV2EvidenceAssets,
                 prepareRoomAssets: prepareDebateMysteryV2RoomAssets,
+                prepareIllustratedRooms: ({ userId: ownerId, sessionId: caseId, signal }) =>
+                  prepareDebateMysteryIllustratedRoomsV1(ownerId, caseId, signal),
                 prepareMansionExteriorAsset: prepareDebateMysteryV2MansionExteriorAsset,
                 adoptMansionExteriorDraft: adoptDebateMysteryV2MansionExteriorDraft,
                 onCompilationReady: (ready) =>
@@ -20125,6 +20327,8 @@ function buildRoutes(): RouteDefinition[] {
           deferBackgroundStart: true,
           prepareEvidenceAssets: prepareDebateMysteryV2EvidenceAssets,
           prepareRoomAssets: prepareDebateMysteryV2RoomAssets,
+          prepareIllustratedRooms: ({ userId: ownerId, sessionId: caseId, signal }) =>
+            prepareDebateMysteryIllustratedRoomsV1(ownerId, caseId, signal),
           prepareMansionExteriorAsset: prepareDebateMysteryV2MansionExteriorAsset,
           onCompilationReady: (ready) =>
             queueDebateMysteryV2RoomAssetBackground(userId, ready.id),
@@ -24375,7 +24579,6 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/botcast/episodes/:id/soundboard", async (ctx) => {
       const userId = requireAuth(ctx);
-      invalidateTurnPreparation(userId, "signal", ctx.params.id, "Signal cue changed.");
       const body = ctx.body as Record<string, unknown>;
       const kind = body.kind;
       if (
@@ -24419,7 +24622,6 @@ function buildRoutes(): RouteDefinition[] {
             kind,
             atMs,
             variantIndex: Number(body.variantIndex),
-            gain: Number(body.gain),
           }),
         ),
       });
@@ -35629,11 +35831,22 @@ function buildRoutes(): RouteDefinition[] {
           anthropicApiKey,
           ollamaCloudApiKey,
         );
+        const hiddenModelIds = parseHiddenBotModelIds(
+          user.hidden_bot_model_ids,
+        );
+        const routingContext = {
+          surface: useRefractRouting ? "prism-refract" : "bot-powers",
+          inputText: JSON.stringify(body.powers ?? []),
+          structuredOutput: true,
+          outputTokens: 2_000,
+          highStakes: true,
+          simulatedEffortEnabled: true,
+        } as const;
         const resolved = resolveAutoModel({
           provider: primaryProvider,
           lane: responseMode,
           explicitModelOverride,
-          hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
+          hiddenModelIds,
           catalog,
           onlineAutoProviderBias: clampOnlineAutoProviderBias(
             user.online_auto_provider_bias,
@@ -35645,20 +35858,64 @@ function buildRoutes(): RouteDefinition[] {
           onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
             user.online_auto_quality_posture,
           ),
-          routingContext: {
-            surface: useRefractRouting ? "prism-refract" : "bot-powers",
-            inputText: JSON.stringify(body.powers ?? []),
-            structuredOutput: true,
-            outputTokens: 2_000,
-            highStakes: true,
-          },
+          routingContext,
         });
-        compileProvider = providerFactoryOverride(
+        const autoRoutePlan = resolved.autoRoute
+          ? resolveAutoModelRoutePlan({
+              provider: primaryProvider,
+              lane: responseMode,
+              hiddenModelIds,
+              catalog,
+              onlineAutoProviderBias: clampOnlineAutoProviderBias(
+                user.online_auto_provider_bias,
+              ),
+              onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
+                user.online_auto_provider_weights,
+                user.online_auto_provider_bias,
+              ),
+              onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
+                user.online_auto_quality_posture,
+              ),
+              routingContext,
+            })
+          : [];
+        const recoveryChain: AutoFallbackChainV1 | null = resolved.autoRoute
+          ? autoRoutePlan.length > 1
+            ? {
+                v: 1,
+                fallbacks: autoRoutePlan.slice(1).map((route) => ({
+                  provider: route.provider,
+                  model: route.model,
+                  reasoningEffort: route.reasoningEffort,
+                })),
+              }
+            : null
+          : parseStoredAutoFallbackChain(user.auto_fallback_chain);
+        const primaryAttempt: AutoFallbackModelRef = {
+          provider: resolved.provider,
+          model: resolved.model,
+          ...(resolved.autoRoute
+            ? { reasoningEffort: resolved.autoRoute.reasoningEffort }
+            : {}),
+        };
+        const attempts =
+          autoFallbackResolvedChain(primaryAttempt, recoveryChain) ??
+          [primaryAttempt];
+        const primaryCompileProvider = providerFactoryOverride(
           resolved.provider,
           openAiApiKey,
           user.secondary_ollama_host,
           anthropicApiKey,
+          ollamaCloudApiKey,
         );
+        compileProvider = providerWithTextRecovery({
+          primary: primaryCompileProvider,
+          attempts,
+          openAiApiKey,
+          anthropicApiKey,
+          ollamaCloudApiKey,
+          secondaryOllamaHost: user.secondary_ollama_host,
+        });
         compileModel = resolved.model;
       } else {
         compileProvider = auxiliaryProviderFactoryOverride(
@@ -35742,11 +35999,19 @@ function buildRoutes(): RouteDefinition[] {
         requestedModelOverride?.toLowerCase() === "auto"
           ? null
           : requestedModelOverride;
+      const hiddenModelIds = parseHiddenBotModelIds(user.hidden_bot_model_ids);
+      const routingContext = {
+        surface: "bot-field",
+        inputText: JSON.stringify(body.context ?? {}),
+        structuredOutput: true,
+        outputTokens: 600,
+        simulatedEffortEnabled: true,
+      } as const;
       const resolved = resolveAutoModel({
         provider: primaryProvider,
         lane: responseMode,
         explicitModelOverride,
-        hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
+        hiddenModelIds,
         catalog,
         onlineAutoProviderBias: clampOnlineAutoProviderBias(
           user.online_auto_provider_bias,
@@ -35758,13 +36023,40 @@ function buildRoutes(): RouteDefinition[] {
         onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
           user.online_auto_quality_posture,
         ),
-        routingContext: {
-          surface: "bot-field",
-          inputText: JSON.stringify(body.context ?? {}),
-          structuredOutput: true,
-          outputTokens: 600,
-        },
+        routingContext,
       });
+      const autoRoutePlan = resolved.autoRoute
+        ? resolveAutoModelRoutePlan({
+            provider: primaryProvider,
+            lane: responseMode,
+            hiddenModelIds,
+            catalog,
+            onlineAutoProviderBias: clampOnlineAutoProviderBias(
+              user.online_auto_provider_bias,
+            ),
+            onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
+              user.online_auto_provider_weights,
+              user.online_auto_provider_bias,
+            ),
+            onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
+              user.online_auto_quality_posture,
+            ),
+            routingContext,
+          })
+        : [];
+      const generationFallbackChain: AutoFallbackChainV1 | null =
+        resolved.autoRoute
+          ? autoRoutePlan.length > 1
+            ? {
+                v: 1,
+                fallbacks: autoRoutePlan.slice(1).map((route) => ({
+                  provider: route.provider,
+                  model: route.model,
+                  reasoningEffort: route.reasoningEffort,
+                })),
+              }
+            : null
+          : storedAutoFallbackChain;
       const provider = providerFactoryOverride(
         resolved.provider,
         openAiApiKey,
@@ -35793,7 +36085,8 @@ function buildRoutes(): RouteDefinition[] {
               providerName: resolved.provider,
               model: resolved.model,
               responseMode,
-              autoFallbackChain: storedAutoFallbackChain,
+              reasoningEffort: resolved.autoRoute?.reasoningEffort,
+              autoFallbackChain: generationFallbackChain,
               providerFactory: providerFactoryOverride,
               openAiApiKey,
               anthropicApiKey,
@@ -35864,14 +36157,23 @@ function buildRoutes(): RouteDefinition[] {
         ollamaCloudApiKey,
       );
       const requestedModelOverride = readModelOverride(body.modelOverride);
+      const explicitModelOverride =
+        requestedModelOverride?.toLowerCase() === "auto"
+          ? null
+          : requestedModelOverride;
+      const hiddenModelIds = parseHiddenBotModelIds(user.hidden_bot_model_ids);
+      const routingContext = {
+        surface: "bot-generation",
+        inputText: prompt,
+        structuredOutput: true,
+        outputTokens: 1_200,
+        simulatedEffortEnabled: true,
+      } as const;
       const resolved = resolveAutoModel({
         provider: primaryProvider,
         lane: responseMode,
-        explicitModelOverride:
-          requestedModelOverride?.toLowerCase() === "auto"
-            ? null
-            : requestedModelOverride,
-        hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
+        explicitModelOverride,
+        hiddenModelIds,
         catalog,
         onlineAutoProviderBias: clampOnlineAutoProviderBias(
           user.online_auto_provider_bias,
@@ -35883,13 +36185,40 @@ function buildRoutes(): RouteDefinition[] {
         onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
           user.online_auto_quality_posture,
         ),
-        routingContext: {
-          surface: "bot-generation",
-          inputText: prompt,
-          structuredOutput: true,
-          outputTokens: 1_200,
-        },
+        routingContext,
       });
+      const autoRoutePlan = resolved.autoRoute
+        ? resolveAutoModelRoutePlan({
+            provider: primaryProvider,
+            lane: responseMode,
+            hiddenModelIds,
+            catalog,
+            onlineAutoProviderBias: clampOnlineAutoProviderBias(
+              user.online_auto_provider_bias,
+            ),
+            onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
+              user.online_auto_provider_weights,
+              user.online_auto_provider_bias,
+            ),
+            onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
+              user.online_auto_quality_posture,
+            ),
+            routingContext,
+          })
+        : [];
+      const generationFallbackChain: AutoFallbackChainV1 | null =
+        resolved.autoRoute
+          ? autoRoutePlan.length > 1
+            ? {
+                v: 1,
+                fallbacks: autoRoutePlan.slice(1).map((route) => ({
+                  provider: route.provider,
+                  model: route.model,
+                  reasoningEffort: route.reasoningEffort,
+                })),
+              }
+            : null
+          : parseStoredAutoFallbackChain(user.auto_fallback_chain);
       const provider = providerFactoryOverride(
         resolved.provider,
         openAiApiKey,
@@ -35916,9 +36245,8 @@ function buildRoutes(): RouteDefinition[] {
               providerName: resolved.provider,
               model: resolved.model,
               responseMode,
-              autoFallbackChain: parseStoredAutoFallbackChain(
-                user.auto_fallback_chain,
-              ),
+              reasoningEffort: resolved.autoRoute?.reasoningEffort,
+              autoFallbackChain: generationFallbackChain,
               providerFactory: providerFactoryOverride,
               openAiApiKey,
               anthropicApiKey,
@@ -36074,6 +36402,45 @@ function buildRoutes(): RouteDefinition[] {
           simulatedEffortEnabled: true,
         },
       });
+      const autoRoutePlan = resolved.autoRoute
+        ? resolveAutoModelRoutePlan({
+            provider: primaryProvider,
+            lane: responseMode,
+            hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
+            catalog,
+            onlineAutoProviderBias: clampOnlineAutoProviderBias(
+              user.online_auto_provider_bias,
+            ),
+            onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
+              user.online_auto_provider_weights,
+              user.online_auto_provider_bias,
+            ),
+            onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
+              user.online_auto_quality_posture,
+            ),
+            routingContext: {
+              surface: "bot-generation",
+              inputText: prompt,
+              structuredOutput: true,
+              outputTokens: 6_000,
+              highStakes: true,
+              simulatedEffortEnabled: true,
+            },
+          })
+        : [];
+      const generationFallbackChain: AutoFallbackChainV1 | null =
+        resolved.autoRoute
+          ? autoRoutePlan.length > 1
+            ? {
+                v: 1,
+                fallbacks: autoRoutePlan.slice(1).map((route) => ({
+                  provider: route.provider,
+                  model: route.model,
+                  reasoningEffort: route.reasoningEffort,
+                })),
+              }
+            : null
+          : storedAutoFallbackChain;
       const resolvedEffortCapability = resolveModelReasoningEffortCapability({
         provider: resolved.provider,
         modelId: resolved.model,
@@ -36141,7 +36508,7 @@ function buildRoutes(): RouteDefinition[] {
               model: resolved.model,
               responseMode,
               reasoningEffort,
-              autoFallbackChain: storedAutoFallbackChain,
+              autoFallbackChain: generationFallbackChain,
               providerFactory: providerFactoryOverride,
               openAiApiKey,
               anthropicApiKey,

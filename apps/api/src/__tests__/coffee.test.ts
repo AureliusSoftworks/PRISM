@@ -6833,7 +6833,7 @@ describe("Coffee group foundation", () => {
     ).replace(/\[([^\]]+)\]\(prism-bot:[^)]+\)/gu, "$1");
     assert.equal(
       mirroredHolderContent,
-      "I am Alice. The other Alice is an impostor.",
+      "I'm Alice, and I still sound exactly like myself. The other Alice is an impostor.",
     );
 
     const repeat = await withMockedCoffeeFetch(

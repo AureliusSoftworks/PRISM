@@ -199,6 +199,12 @@ export interface MysteryCaseTitleValidationV1 {
   errors: string[];
 }
 
+/** The spoiler-safe public context required to validate or recover a case title. */
+export interface MysteryCaseTitlePlanV1 {
+  sourceHash: string;
+  primary: Pick<MysteryPrimaryIncidentV1, "kind" | "subject">;
+}
+
 const MYSTERY_CASE_TITLE_STOP_WORDS = new Set([
   "a",
   "an",
@@ -264,7 +270,7 @@ export function validateMysteryCaseTitleV1(
 
 /** A polished, spoiler-safe fallback for an invalid or unavailable authored title. */
 export function deterministicMysteryCaseTitleV1(
-  plan: Pick<MysteryIncidentPlanV1, "primary" | "sourceHash">,
+  plan: MysteryCaseTitlePlanV1,
 ): string {
   const subject = plan.primary.subject.toLocaleLowerCase();
   let titles: readonly string[];
@@ -274,7 +280,7 @@ export function deterministicMysteryCaseTitleV1(
       break;
     case "theft":
       titles = /diamonds?/u.test(subject)
-        ? ["The Diamonds at Dusk", "The Empty Jewel Case", "The Cold-Cut Diamonds"]
+        ? ["The Diamonds at Dusk", "The Empty Jewel Case", "The Diamonds Under Glass"]
         : /jewels?/u.test(subject)
           ? ["The Vanished Jewels", "The Empty Jewel Case", "The Jewels After Midnight"]
           : /painting/u.test(subject)
@@ -308,7 +314,7 @@ export function deterministicMysteryCaseTitleV1(
 
 export function resolveMysteryCaseTitleV1(args: {
   authoredTitle: string | null | undefined;
-  plan: Pick<MysteryIncidentPlanV1, "primary" | "sourceHash">;
+  plan: MysteryCaseTitlePlanV1;
 }): string {
   const validation = validateMysteryCaseTitleV1(args.authoredTitle ?? "");
   return validation.valid

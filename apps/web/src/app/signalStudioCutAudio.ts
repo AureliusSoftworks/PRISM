@@ -322,7 +322,6 @@ export async function prepareSignalStudioCut(
       );
       url = plan?.src ?? null;
       gain = plan?.trim ?? gain;
-      playbackRate = plan?.playbackRate ?? 1;
     } else if (
       cueKind === "action_sfx" &&
       isSignalActionSfxDirectionPayload(event.payload)

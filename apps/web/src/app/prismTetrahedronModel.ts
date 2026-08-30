@@ -3,6 +3,12 @@ export interface PrismTetrahedronRotation {
   y: number;
 }
 
+export type PrismTetrahedronFaceId =
+  | "saved"
+  | "private"
+  | "focus"
+  | "progress";
+
 interface PrismTetrahedronPoint3D {
   x: number;
   y: number;
@@ -10,7 +16,7 @@ interface PrismTetrahedronPoint3D {
 }
 
 export interface ProjectedPrismTetrahedronFace {
-  id: string;
+  id: PrismTetrahedronFaceId;
   label: string;
   color: string;
   points: readonly { x: number; y: number }[];
@@ -28,10 +34,20 @@ const TETRAHEDRON_VERTICES: readonly PrismTetrahedronPoint3D[] = [
 ];
 
 const TETRAHEDRON_FACES = [
-  { id: "rose", label: "Rose", color: "#ff7b8f", indices: [0, 1, 2] },
-  { id: "amber", label: "Amber", color: "#ffbf69", indices: [0, 3, 1] },
-  { id: "cyan", label: "Cyan", color: "#55ddea", indices: [0, 2, 3] },
-  { id: "violet", label: "Violet", color: "#9f83ff", indices: [1, 3, 2] },
+  { id: "saved", label: "Saved", color: "#55ddea", indices: [0, 1, 2] },
+  {
+    id: "private",
+    label: "Private",
+    color: "#9f83ff",
+    indices: [0, 3, 1],
+  },
+  { id: "focus", label: "Focus", color: "#ffbf69", indices: [0, 2, 3] },
+  {
+    id: "progress",
+    label: "Progress",
+    color: "#ff7b8f",
+    indices: [1, 3, 2],
+  },
 ] as const;
 
 function rotate(point: PrismTetrahedronPoint3D, rotation: PrismTetrahedronRotation): PrismTetrahedronPoint3D {

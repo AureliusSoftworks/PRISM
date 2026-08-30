@@ -915,6 +915,11 @@ export async function generateBotDraft(
   const primaryAttempt: AutoFallbackModelRef = {
     provider: args.providerName,
     model: args.model,
+    ...(args.reasoningEffort &&
+    args.reasoningEffort !== "auto" &&
+    args.reasoningEffort !== "max"
+      ? { reasoningEffort: args.reasoningEffort }
+      : {}),
   };
   const resolvedAttempts = autoFallbackResolvedChain(
     primaryAttempt,
@@ -960,6 +965,7 @@ export async function generateBotDraft(
               reasoningEffort: autoFallbackReasoningEffort(
                 originalIndex,
                 args.reasoningEffort,
+                attempt.reasoningEffort,
               ),
               signal,
             });
@@ -1010,6 +1016,7 @@ export async function generateBotDraft(
         reasoningEffort: autoFallbackReasoningEffort(
           originalIndex,
           args.reasoningEffort,
+          attempt.reasoningEffort,
         ),
         signal: args.signal,
       });
@@ -1125,6 +1132,11 @@ export async function generateAvatarDetailsInk(
   const primaryAttempt: AutoFallbackModelRef = {
     provider: args.providerName,
     model: args.model,
+    ...(args.reasoningEffort &&
+    args.reasoningEffort !== "auto" &&
+    args.reasoningEffort !== "max"
+      ? { reasoningEffort: args.reasoningEffort }
+      : {}),
   };
   const attempts = autoFallbackResolvedChain(primaryAttempt, args.autoFallbackChain);
   const providerForAttempt = (attempt: AutoFallbackModelRef): LlmProvider =>
@@ -1266,7 +1278,15 @@ export async function generateBotField(
   };
 
   const attempts = autoFallbackResolvedChain(
-    { provider: args.providerName, model: args.model },
+    {
+      provider: args.providerName,
+      model: args.model,
+      ...(args.reasoningEffort &&
+      args.reasoningEffort !== "auto" &&
+      args.reasoningEffort !== "max"
+        ? { reasoningEffort: args.reasoningEffort }
+        : {}),
+    },
     args.autoFallbackChain,
   );
   if (attempts) {
@@ -1288,7 +1308,11 @@ export async function generateBotField(
                 );
             return provider.generateResponse(messages, {
               ...options(attempt.model, signal),
-              reasoningEffort: autoFallbackReasoningEffort(index, undefined),
+              reasoningEffort: autoFallbackReasoningEffort(
+                index,
+                undefined,
+                attempt.reasoningEffort,
+              ),
             });
           },
         })),

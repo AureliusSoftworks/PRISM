@@ -226,4 +226,77 @@ describe("Auto fallback contracts", () => {
     );
     assert.equal(normalizeAutoRecoveryTrace({ v: 1, attempts: [] }), undefined);
   });
+
+  it("preserves runtime Auto effort without persisting it in Settings", () => {
+    const runtime = {
+      v: 1 as const,
+      fallbacks: [
+        {
+          provider: "openai" as const,
+          model: "gpt-5.6-terra",
+          reasoningEffort: "high" as const,
+        },
+      ],
+    };
+    assert.deepEqual(
+      autoFallbackResolvedChain(
+        {
+          provider: "openai",
+          model: "gpt-4.1",
+          reasoningEffort: "medium",
+        },
+        runtime,
+      ),
+      [
+        {
+          provider: "openai",
+          model: "gpt-4.1",
+          reasoningEffort: "medium",
+        },
+        {
+          provider: "openai",
+          model: "gpt-5.6-terra",
+          reasoningEffort: "high",
+        },
+      ],
+    );
+    assert.equal(
+      serializeAutoFallbackChain(runtime),
+      JSON.stringify({
+        v: 2,
+        local: [],
+        online: [{ provider: "openai", model: "gpt-5.6-terra" }],
+      }),
+    );
+  });
+
+  it("preserves per-attempt effort in normalized recovery provenance", () => {
+    const normalized = normalizeAutoRecoveryTrace({
+      v: 1,
+      attempts: [
+        {
+          provider: "openai",
+          model: "gpt-4.1",
+          reasoningEffort: "medium",
+          durationMs: 900,
+          outcome: "failed",
+          reason: "invalid_output",
+        },
+        {
+          provider: "openai",
+          model: "gpt-5.6-terra",
+          reasoningEffort: "high",
+          durationMs: 1_400,
+          outcome: "succeeded",
+        },
+      ],
+      finalProvider: "openai",
+      finalModel: "gpt-5.6-terra",
+      crossedOnline: true,
+    });
+    assert.deepEqual(
+      normalized?.attempts.map((attempt) => attempt.reasoningEffort),
+      ["medium", "high"],
+    );
+  });
 });

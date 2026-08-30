@@ -75,7 +75,23 @@ test("newest persisted completion wins and freezes its recovery final", () => {
         },
         autoRecovery: {
           v: 1,
-          attempts: [],
+          attempts: [
+            {
+              provider: "openai",
+              model: "gpt-primary",
+              reasoningEffort: "high",
+              durationMs: 10,
+              outcome: "failed",
+              reason: "provider_error",
+            },
+            {
+              provider: "anthropic",
+              model: "claude-recovered",
+              reasoningEffort: "xhigh",
+              durationMs: 20,
+              outcome: "succeeded",
+            },
+          ],
           finalProvider: "anthropic",
           finalModel: "claude-recovered",
           crossedOnline: false,
@@ -92,7 +108,7 @@ test("newest persisted completion wins and freezes its recovery final", () => {
   }, {
     provider: "anthropic",
     model: "claude-recovered",
-    effort: "none",
+    effort: "xhigh",
     turbo: false,
   });
 });
@@ -131,7 +147,7 @@ test("a fixed turn cannot become Auto status after the picker changes", () => {
   );
 });
 
-test("ONLINE preserves its explicit final local recovery as the current route", () => {
+test("ONLINE Auto rejects a stale cross-lane local recovery", () => {
   const route = latestActualAppletRoute(
     [
       {
@@ -157,8 +173,7 @@ test("ONLINE preserves its explicit final local recovery as the current route", 
     ],
     "online",
   );
-  assert.equal(route?.provider, "local");
-  assert.equal(route?.model, "qwen-recovery");
+  assert.equal(route, null);
 });
 
 test("a deterministic completion cannot eclipse an earlier server route", () => {

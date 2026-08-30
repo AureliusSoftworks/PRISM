@@ -262,12 +262,20 @@ describe("listener reaction planning", () => {
       }),
     ).filter((plan) => plan !== null);
     const audible = opening.filter((plan) => plan.spokenCue || plan.vocalFoley);
+    const spoken = opening.filter((plan) => plan.spokenCue);
 
     assert.ok(opening.length > 1_760 && opening.length < 1_840);
     assert.ok(audible.length / 2_000 > 0.66);
     assert.ok(audible.length / opening.length > 0.74);
     assert.ok(audible.length / opening.length < 0.82);
-    assert.ok(opening.every((plan) => plan.targetProgress >= 0.62));
+    assert.ok(spoken.length / 2_000 > 0.37);
+    assert.ok(spoken.length / 2_000 < 0.45);
+    assert.ok(
+      spoken.every(
+        (plan) => plan.spokenCue === "Hi." || plan.spokenCue === "Hey.",
+      ),
+    );
+    assert.ok(opening.every((plan) => plan.targetProgress === 0.62));
   });
 
   it("keeps Signal reactions present on most turns without making every beat audible", () => {

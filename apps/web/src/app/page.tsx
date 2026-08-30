@@ -59812,28 +59812,29 @@ function HomeContent(): React.JSX.Element {
               >
           <summary>
             <span className={styles.settingsDropdownSummaryRow}>
-              <span>Auto routing priorities</span>
+              <span>Model fallback chains</span>
                 <PanelSectionInfo
                 id={`${variant}-control-info-auto-recovery`}
-                label="About Auto routing priorities"
+                label="About model fallback chains"
                   variant="control"
                 >
-                Optional models that Auto tries first during recovery. Prism
-                still appends every other eligible model in the selected lane.
+                Used only after a specifically selected model fails. Auto
+                ignores these chains and builds a better-model recovery plan
+                for each request.
                 </PanelSectionInfo>
               </span>
             <small>
               {autoFallbackEntries.length === 0
-                ? "Automatic ordering"
-                : `${autoFallbackEntries.length} priorit${autoFallbackEntries.length === 1 ? "y" : "ies"}`}
+                ? "Not configured"
+                : `${autoFallbackEntries.length} fallback${autoFallbackEntries.length === 1 ? "" : "s"}`}
             </small>
           </summary>
           <div className={styles.settingsFallbackControls}>
           <p className={styles.settingsFallbackDescription}>
-              Auto chooses a primary model for each request, then tries these
-              priorities first if recovery is needed. Prism skips duplicates,
-              appends every other eligible model in the lane, and uses no
-              thinking for recovery. ONLINE ends with one bundled local attempt.
+              When you select a concrete LOCAL or ONLINE model, Prism tries
+              these fallbacks in order after it fails. When Auto is selected,
+              these lists do not apply: Prism escalates to a better model and
+              recalculates Effort for the work. LOCAL Auto always stays local.
           </p>
           <div className={styles.settingsFallbackLaneColumns}>
             {(["local", "online"] as const).map((lane) => {
@@ -59877,10 +59878,10 @@ function HomeContent(): React.JSX.Element {
                   key={lane}
                   className={styles.settingsFallbackLane}
                   data-auto-fallback-lane={lane}
-                  aria-label={`${laneLabel} Auto priorities`}
+                  aria-label={`${laneLabel} model fallbacks`}
                 >
           <div className={styles.settingsAutoPrimary}>
-                    <span>{laneLabel} Auto priorities</span>
+                    <span>{laneLabel} model fallbacks</span>
                     <small>
                       {lane === "local"
                         ? "Only local Ollama models can run here."
@@ -60047,7 +60048,7 @@ function HomeContent(): React.JSX.Element {
                                 label={`About ${laneLabel} priority ${laneIndex + 1}`}
                         variant="control"
                       >
-                                {`Tried before Prism's remaining eligible ${laneLabel} models when Auto recovers.`}
+                                {`Tried in this position after a specifically selected ${laneLabel} model fails.`}
                       </PanelSectionInfo>
                     </span>
                     <ComposerModelPicker
@@ -60078,7 +60079,7 @@ function HomeContent(): React.JSX.Element {
                       options={optionsForSlot}
                               provider={lane}
                       loading={modelCatalogLoading}
-                              ariaLabel={`${laneLabel} Auto priority ${laneIndex + 1} model`}
+                              ariaLabel={`${laneLabel} fallback ${laneIndex + 1} model`}
                       placement="down"
                       minMenuWidthPx={260}
                       showAutoOption={false}
@@ -60140,7 +60141,7 @@ function HomeContent(): React.JSX.Element {
           >
                     {rows.length >= AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT
               ? "Five priorities configured"
-                      : `+ Add ${laneLabel} priority`}
+                      : `+ Add ${laneLabel} fallback`}
           </button>
         </section>
               );
@@ -109063,11 +109064,11 @@ function HomeContent(): React.JSX.Element {
                   triangle means Effort is being chosen automatically.
                 </p>
                 <p>
-                  LOCAL and ONLINE have separate optional Auto routing
-                  priorities in Settings. Auto appends every other eligible
-                  model after those priorities. Recovery uses no thinking for
-                  speed; ONLINE finishes with one bundled local attempt, while
-                  LOCAL never evaluates or calls an online model.
+                  Auto resolves model and Effort afresh for every request. If
+                  that attempt fails, Prism moves only to a better model and
+                  may raise or lower Effort for the work. Saved fallback chains
+                  apply only when you specifically select a model. LOCAL Auto
+                  never evaluates or calls an online model.
                 </p>
               </div>
             ) : null}
@@ -113313,7 +113314,6 @@ function HomeContent(): React.JSX.Element {
           submerged={companionSubmergedByMainPanel}
           keyboardShortcut={keyboardShortcuts.prism}
           surface={prismCompanionSurfaceReference()}
-          refractResponseMode={botGeneratorResponseMode}
           presentation={view === "chat" ? chatPresentation : null}
           zenSessionIdleGapMs={settings.zenSessionIdleGapMs}
           chatHomeHeroDocked={
@@ -147299,6 +147299,8 @@ function HomeContent(): React.JSX.Element {
               }))}
               initialBotIds={initialDebateBotIds}
               playerName={user?.displayName?.trim() || "You"}
+              playerColor={settings?.prismDefaultBotColor || "#ae8cff"}
+              playerGlyph={settings?.prismDefaultBotGlyph || null}
               storageScopeId={user?.id ?? "signed-out"}
               preferredProvider={debateEffectiveProvider}
               preferredImageProvider={
@@ -147346,6 +147348,7 @@ function HomeContent(): React.JSX.Element {
                 signal,
                 text,
                 volume,
+                roomAcoustics,
               }) => {
                 try {
                   await enqueueRobotVoiceMode({
@@ -147358,6 +147361,7 @@ function HomeContent(): React.JSX.Element {
                     effectsEnabled: settings?.voiceEffectsEnabled !== false,
                     globalVolume: volume,
                     allowBabbleFallback: true,
+                    roomAcoustics,
                   });
                   return signal?.aborted !== true;
                 } catch {

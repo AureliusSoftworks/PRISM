@@ -18,10 +18,7 @@ import remarkGfm from "remark-gfm";
 import { createPortal } from "react-dom";
 import { Plus, Volume2, VolumeX } from "lucide-react";
 import {
-  USER_NOTE_BODY_MAX,
-  USER_NOTE_TITLE_MAX,
   type ChatMessage,
-  type ImageAssetSet,
   type EphemeralChatResolvedProvider,
   type PrismActionProposalV1,
   type PrismActionRunV1,
@@ -95,9 +92,8 @@ import {
 } from "./prismCompanionSpeech";
 import { setPrismSystemPause } from "./prismVisualLifecycle";
 import { PrismOrb } from "./PrismOrb";
-import { PrismTetrahedronPrototype } from "./PrismTetrahedronPrototype";
+import { PrismTetrahedronNavigator } from "./PrismTetrahedronNavigator";
 import { playPrismHotkeyInaccessibleSfx } from "./prismHotkeySfx";
-import { PrismCompanionViewTabs } from "./PrismCompanionViewTabs";
 import {
   getPrismCompanionSuppressedServerSnapshot,
   getPrismCompanionSuppressedSnapshot,
@@ -118,13 +114,11 @@ import {
 } from "./prismOrbHandoff";
 import {
   setPrismSoftSynthesisExpanded,
-  togglePrismSoftSynthesisExpanded,
   usePrismSoftSynthesisUi,
 } from "./prismSoftSynthesisUi.ts";
 import { publishPrismCompanionVisualSnapshot } from "./prismCompanionVisualSnapshot";
 import {
   usePrismCompanionViewRequest,
-  type PrismCompanionView,
 } from "./prismCompanionViews.ts";
 import {
   setAppNavbarCompanionOpen,
@@ -176,11 +170,7 @@ import {
   buildBotPowerRefractRequestTarget,
 } from "./botPowerRefract";
 import type { SpeechCharacterAlignment } from "./speechRevealTimeline";
-import {
-  prismActionLabel,
-  prismActionStatusLabel,
-} from "./prismActionPresentation";
-import { AssetLibraryModal } from "./AssetLibrary";
+import { prismActionStatusLabel } from "./prismActionPresentation";
 import styles from "./prismCompanion.module.css";
 
 const PRISM_COMPANION_SYSTEM_PAUSE_REASON = "prism-companion";
@@ -262,14 +252,6 @@ export interface PrismCompanionConversationSnapshot {
   [key: string]: unknown;
 }
 
-interface PrismPersonalNote {
-  id: string;
-  title: string;
-  body: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export interface PrismCompanionFocusedChatHandoff {
   privateMode: boolean;
   conversationId: string;
@@ -284,8 +266,6 @@ export interface PrismCompanionProps {
   submerged?: boolean;
   keyboardShortcut: string | null;
   surface: PrismCompanionSurfaceReference;
-  /** Global privacy lane shown beside Refract's shared Model/Effort contract. */
-  refractResponseMode?: "local" | "online";
   /** Chat and Zen share one route; this is the authoritative view boundary. */
   presentation?: PrismCompanionPresentation;
   /** The account's existing "Same session after idle" duration. */
@@ -393,17 +373,6 @@ async function waitForPrismRefractPreviewPaint(input: {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function isPrismPersonalNote(value: unknown): value is PrismPersonalNote {
-  return (
-    isRecord(value) &&
-    typeof value.id === "string" &&
-    typeof value.title === "string" &&
-    typeof value.body === "string" &&
-    typeof value.createdAt === "string" &&
-    typeof value.updatedAt === "string"
-  );
 }
 
 function parsePrismConversationSnapshot(
@@ -619,7 +588,6 @@ export default function PrismCompanion({
   submerged = false,
   keyboardShortcut,
   surface,
-  refractResponseMode = "local",
   presentation = null,
   zenSessionIdleGapMs = DEFAULT_PRISM_COMPANION_SESSION_IDLE_GAP_MS,
   chatHomeHeroDocked = false,
@@ -655,25 +623,7 @@ export default function PrismCompanion({
     [accountKey],
   );
   const [open, setOpen] = useState(false);
-  const [panelView, setPanelView] = useState<PrismCompanionView>("chat");
   const [draft, setDraft] = useState("");
-  const [recentSynthesisAssets, setRecentSynthesisAssets] = useState<ImageAssetSet[]>([]);
-  const [recentSynthesisAssetsLoading, setRecentSynthesisAssetsLoading] =
-    useState(false);
-  const [recentSynthesisAssetsUnavailable, setRecentSynthesisAssetsUnavailable] =
-    useState(false);
-  const [synthesisLibraryAssetId, setSynthesisLibraryAssetId] = useState<
-    string | null
-  >(null);
-  const [personalNotes, setPersonalNotes] = useState<PrismPersonalNote[]>([]);
-  const [personalNotesLoading, setPersonalNotesLoading] = useState(false);
-  const [personalNoteBusy, setPersonalNoteBusy] = useState(false);
-  const [personalNoteStatus, setPersonalNoteStatus] = useState("");
-  const [personalNoteId, setPersonalNoteId] = useState<string | null>(null);
-  const [personalNoteTitle, setPersonalNoteTitle] = useState("");
-  const [personalNoteBody, setPersonalNoteBody] = useState("");
-  const [personalNoteDeleteConfirm, setPersonalNoteDeleteConfirm] =
-    useState(false);
   // The note pad is uncontrolled: a keystroke must not re-render the whole
   // companion overlay (mannequin, cloud, effects) floating above a live
   // stage — per-keystroke reconciliation here is the "typing a comment tanks
@@ -703,8 +653,6 @@ export default function PrismCompanion({
   const interactionLocked = busy || conversationLoading;
   const [actions, setActions] = useState<PrismCompanionActionIntent[]>([]);
   const [cards, setCards] = useState<PrismCompanionCardV1[]>([]);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [recentRuns, setRecentRuns] = useState<PrismActionRunV1[]>([]);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [speechEnabled, setSpeechEnabled] = useState(() =>
     readSpeechEnabled(accountKey),
@@ -794,7 +742,6 @@ export default function PrismCompanion({
       composerRef.current.value = "";
     }
   }, []);
-  const personalNoteTitleRef = useRef<HTMLInputElement | null>(null);
   const refractPromptRef = useRef<HTMLInputElement | null>(null);
   const sessionNoteContextRef = useRef(sessionNoteContext);
   const sessionNoteTypingStartedAtRef = useRef<string | null>(null);
@@ -844,7 +791,6 @@ export default function PrismCompanion({
   });
   const handledViewRequestRef = useRef(viewRequest.requestId);
   const sessionNoteSavingRef = useRef(false);
-  const personalNotesLoadedRef = useRef(false);
   const sessionRecordRef = useRef<PrismCompanionSessionRecord | null>(null);
   const savedConversationRef =
     useRef<PrismCompanionConversationSnapshot | null>(null);
@@ -1947,12 +1893,6 @@ export default function PrismCompanion({
     setActions([]);
     setCards([]);
     contextTokenIdsRef.current = [];
-    personalNotesLoadedRef.current = false;
-    setPersonalNotes([]);
-    setPersonalNoteId(null);
-    setPersonalNoteTitle("");
-    setPersonalNoteBody("");
-    setPersonalNoteStatus("");
     setDraft("");
     setOpen(false);
   }, [
@@ -1987,7 +1927,6 @@ export default function PrismCompanion({
 
   const presentAssistantConversation = useCallback((): void => {
     clearIdleDim();
-    setPanelView("chat");
     setPrismSoftSynthesisExpanded(false);
     setOpen(true);
     if (!privateMode) {
@@ -2030,12 +1969,6 @@ export default function PrismCompanion({
     },
     [persistPosition, presentAssistantConversation, stopInertia],
   );
-
-  const toggleSoftSynthesisFromOrb = useCallback((): void => {
-    if (!softSynthesisUi.expanded) inheritChatHomeDockPosition();
-    setOpen(false);
-    togglePrismSoftSynthesisExpanded();
-  }, [inheritChatHomeDockPosition, softSynthesisUi.expanded]);
 
   const openSessionNote = useCallback((): void => {
     clearIdleDim();
@@ -2121,233 +2054,11 @@ export default function PrismCompanion({
     [openAndFocus, openSessionNote, sessionNoteContext],
   );
 
-  const resetPersonalNoteEditor = useCallback((): void => {
-    setPersonalNoteId(null);
-    setPersonalNoteTitle("");
-    setPersonalNoteBody("");
-    setPersonalNoteDeleteConfirm(false);
-    setPersonalNoteStatus("");
-    window.requestAnimationFrame(() => personalNoteTitleRef.current?.focus());
-  }, []);
-
-  const editPersonalNote = useCallback((note: PrismPersonalNote): void => {
-    setPersonalNoteId(note.id);
-    setPersonalNoteTitle(note.title);
-    setPersonalNoteBody(note.body);
-    setPersonalNoteDeleteConfirm(false);
-    setPersonalNoteStatus("");
-    window.requestAnimationFrame(() => personalNoteTitleRef.current?.focus());
-  }, []);
-
-  const loadPersonalNotes = useCallback(
-    async (force = false): Promise<void> => {
-      if (privateMode || (personalNotesLoadedRef.current && !force)) return;
-      setPersonalNotesLoading(true);
-      setPersonalNoteStatus("");
-      try {
-        const response = await fetch("/api/prism/notes", {
-          credentials: "same-origin",
-        });
-        const payload: unknown = await response.json().catch(() => ({}));
-        if (
-          !response.ok ||
-          !isRecord(payload) ||
-          !Array.isArray(payload.notes) ||
-          !payload.notes.every(isPrismPersonalNote)
-        ) {
-          throw new Error(
-            isRecord(payload) && typeof payload.error === "string"
-              ? payload.error
-              : "Prism could not open your notes.",
-          );
-        }
-        personalNotesLoadedRef.current = true;
-        setPersonalNotes(payload.notes);
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Prism could not open your notes.";
-        setPersonalNoteStatus(message);
-        onError?.(message);
-      } finally {
-        setPersonalNotesLoading(false);
-      }
-    },
-    [onError, privateMode],
-  );
-
-  const savePersonalNote = useCallback(async (): Promise<void> => {
-    const title = personalNoteTitle.trim();
-    const body = personalNoteBody.trim();
-    if (privateMode || personalNoteBusy || !title || !body) return;
-    setPersonalNoteBusy(true);
-    setPersonalNoteDeleteConfirm(false);
-    setPersonalNoteStatus("Saving…");
-    try {
-      const response = await fetch(
-        personalNoteId
-          ? `/api/prism/notes/${encodeURIComponent(personalNoteId)}`
-          : "/api/prism/notes",
-        {
-          method: personalNoteId ? "PUT" : "POST",
-          credentials: "same-origin",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ title, body }),
-        },
-      );
-      const payload: unknown = await response.json().catch(() => ({}));
-      if (
-        !response.ok ||
-        !isRecord(payload) ||
-        !isPrismPersonalNote(payload.note)
-      ) {
-        throw new Error(
-          isRecord(payload) && typeof payload.error === "string"
-            ? payload.error
-            : "Prism could not save this note.",
-        );
-      }
-      const savedNote = payload.note;
-      personalNotesLoadedRef.current = true;
-      setPersonalNotes((current) => [
-        savedNote,
-        ...current.filter((note) => note.id !== savedNote.id),
-      ]);
-      setPersonalNoteId(savedNote.id);
-      setPersonalNoteTitle(savedNote.title);
-      setPersonalNoteBody(savedNote.body);
-      setPersonalNoteStatus(personalNoteId ? "Note updated" : "Note saved");
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Prism could not save this note.";
-      setPersonalNoteStatus(message);
-      onError?.(message);
-    } finally {
-      setPersonalNoteBusy(false);
-    }
-  }, [
-    onError,
-    personalNoteBody,
-    personalNoteBusy,
-    personalNoteId,
-    personalNoteTitle,
-    privateMode,
-  ]);
-
-  const deletePersonalNote = useCallback(async (): Promise<void> => {
-    if (!personalNoteId || privateMode || personalNoteBusy) return;
-    setPersonalNoteBusy(true);
-    setPersonalNoteStatus("Deleting…");
-    try {
-      const response = await fetch(
-        `/api/prism/notes/${encodeURIComponent(personalNoteId)}`,
-        { method: "DELETE", credentials: "same-origin" },
-      );
-      const payload: unknown = await response.json().catch(() => ({}));
-      if (!response.ok || !isRecord(payload) || payload.ok !== true) {
-        throw new Error(
-          isRecord(payload) && typeof payload.error === "string"
-            ? payload.error
-            : "Prism could not delete this note.",
-        );
-      }
-      setPersonalNotes((current) =>
-        current.filter((note) => note.id !== personalNoteId),
-      );
-      resetPersonalNoteEditor();
-      setPersonalNoteStatus("Note deleted");
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Prism could not delete this note.";
-      setPersonalNoteStatus(message);
-      onError?.(message);
-    } finally {
-      setPersonalNoteBusy(false);
-    }
-  }, [
-    onError,
-    personalNoteBusy,
-    personalNoteId,
-    privateMode,
-    resetPersonalNoteEditor,
-  ]);
-
-  useEffect(() => {
-    if (!open || panelView !== "synthesis") return;
-    const controller = new AbortController();
-    setRecentSynthesisAssetsLoading(true);
-    setRecentSynthesisAssetsUnavailable(false);
-    void fetch(
-      "/api/assets?kind=general_image&source=generated&limit=5&sort=recency",
-      { credentials: "include", signal: controller.signal },
-    )
-      .then(async (response) => {
-        const payload: unknown = await response.json().catch(() => null);
-        if (
-          !response.ok ||
-          !payload ||
-          typeof payload !== "object" ||
-          !Array.isArray((payload as { assets?: unknown }).assets)
-        ) {
-          throw new Error("Recent synthesized assets are unavailable.");
-        }
-        return (payload as { assets: ImageAssetSet[] }).assets;
-      })
-      .then((assets) => {
-        if (!controller.signal.aborted) setRecentSynthesisAssets(assets);
-      })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        if (!controller.signal.aborted) setRecentSynthesisAssetsUnavailable(true);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setRecentSynthesisAssetsLoading(false);
-      });
-    return () => controller.abort();
-  }, [open, panelView, softSynthesisUi.jobCount]);
-
   useEffect(() => {
     if (viewRequest.requestId === handledViewRequestRef.current) return;
     handledViewRequestRef.current = viewRequest.requestId;
-
-    if (viewRequest.view === "synthesis" && softSynthesisActive) {
-      if (!softSynthesisUi.expanded) inheritChatHomeDockPosition();
-      setPanelView("synthesis");
-      setOpen(false);
-      setPrismSoftSynthesisExpanded(true);
-      return;
-    }
-
-    setPrismSoftSynthesisExpanded(false);
-    if (viewRequest.view === "chat") {
-      openAndFocus();
-      return;
-    }
-
-    inheritChatHomeDockPosition();
-    clearIdleDim();
-    setPanelView(viewRequest.view);
-    setOpen(true);
-    if (viewRequest.view === "notes") {
-      void loadPersonalNotes();
-      window.requestAnimationFrame(() => personalNoteTitleRef.current?.focus());
-    } else {
-      window.requestAnimationFrame(() => composerRef.current?.focus());
-    }
-  }, [
-    clearIdleDim,
-    inheritChatHomeDockPosition,
-    loadPersonalNotes,
-    openAndFocus,
-    softSynthesisActive,
-    softSynthesisUi.expanded,
-    viewRequest,
-  ]);
+    openAndFocus();
+  }, [openAndFocus, viewRequest]);
 
   const generatePrismUniversalInputCandidate = useCallback(
     async ({
@@ -4183,16 +3894,6 @@ export default function PrismCompanion({
         ];
         setCards(nextCards);
         rememberPrismContextTokens(nextCards);
-        if (
-          payload.run.affectedEntities.length > 0 ||
-          payload.run.undoAvailable ||
-          payload.run.nonReversibleConsequences.length > 0
-        ) {
-          setRecentRuns((current) => [
-            payload.run,
-            ...current.filter((run) => run.id !== payload.run.id),
-          ].slice(0, 12));
-        }
         await reconcileOrchestrationResult(payload.run);
       } catch (error) {
         onError?.(
@@ -4242,11 +3943,6 @@ export default function PrismCompanion({
             run: payload.run,
           },
         ]);
-        setRecentRuns((current) =>
-          current.map((run) =>
-            run.id === payload.run.id ? payload.run : run,
-          ),
-        );
         await reconcileOrchestrationResult(payload.run);
       } catch (error) {
         onError?.(
@@ -4260,36 +3956,6 @@ export default function PrismCompanion({
     },
     [busy, onError, reconcileOrchestrationResult, surface],
   );
-
-  const togglePrismHistory = useCallback(async (): Promise<void> => {
-    if (historyOpen) {
-      setHistoryOpen(false);
-      return;
-    }
-    setHistoryOpen(true);
-    try {
-      const response = await fetch("/api/prism/actions?limit=12", {
-        credentials: "same-origin",
-        cache: "no-store",
-      });
-      const payload = (await response.json().catch(() => ({}))) as {
-        ok?: boolean;
-        runs?: PrismActionRunV1[];
-      };
-      if (response.ok && payload.ok === true && Array.isArray(payload.runs)) {
-        setRecentRuns(
-          payload.runs.filter(
-            (run) =>
-              run.affectedEntities.length > 0 ||
-              run.undoAvailable ||
-              run.nonReversibleConsequences.length > 0,
-          ),
-        );
-      }
-    } catch {
-      onError?.("Prism could not load recent activity.");
-    }
-  }, [historyOpen, onError]);
 
   const sendMessage = async (): Promise<void> => {
     const content = draft.trim();
@@ -4476,7 +4142,6 @@ export default function PrismCompanion({
     setPrivateMode(nextPrivateMode);
     setActions([]);
     setCards([]);
-    setHistoryOpen(false);
     contextTokenIdsRef.current = [];
     if (!nextPrivateMode) {
       void ensurePersistentConversation().catch((error) => {
@@ -4549,8 +4214,6 @@ export default function PrismCompanion({
 
   useEffect(() => {
     if (!softSynthesisActive) return;
-    setPanelView("synthesis");
-    setOpen(false);
     clearIdleDim();
   }, [clearIdleDim, softSynthesisActive]);
 
@@ -5010,10 +4673,6 @@ export default function PrismCompanion({
     } else {
       playPrismCompanionGlassTap();
       persistPosition(positionRef.current);
-      if (softSynthesisActive) {
-        toggleSoftSynthesisFromOrb();
-        return;
-      }
       activatePrismConversation();
     }
   };
@@ -5560,7 +5219,7 @@ export default function PrismCompanion({
               </form>
             )
           ) : null}
-          {open && panelView === "chat" ? (
+          {open ? (
             <div
               className={styles.bubbleCloud}
               aria-live="polite"
@@ -5920,38 +5579,9 @@ export default function PrismCompanion({
                   ))}
                 </div>
               ) : null}
-              {historyOpen ? (
-                <div
-                  className={styles.actionHistory}
-                  aria-label="Recent Prism activity"
-                >
-                  {recentRuns.length > 0 ? (
-                    recentRuns.map((run) => (
-                      <article key={run.id}>
-                        <span>{prismActionLabel(run.capabilityId)}</span>
-                        <small>
-                          {prismActionStatusLabel(run.status)} ·{" "}
-                          {new Date(run.createdAt).toLocaleString()}
-                        </small>
-                        {run.undoAvailable ? (
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => void undoPrismRun(run.id)}
-                          >
-                            Undo
-                          </button>
-                        ) : null}
-                      </article>
-                    ))
-                  ) : (
-                    <small>No persistent Prism actions yet.</small>
-                  )}
-                </div>
-              ) : null}
             </div>
           ) : null}
-          {open && panelView === "chat" ? (
+          {open ? (
             <form
               id="global-prism-companion"
               className={styles.composer}
@@ -5960,11 +5590,24 @@ export default function PrismCompanion({
                 void sendMessage();
               }}
             >
-              <PrismCompanionViewTabs
-                activeView="chat"
+              <PrismTetrahedronNavigator
+                privateMode={privateMode}
                 synthesisJobCount={softSynthesisUi.jobCount}
+                interactionLocked={interactionLocked}
+                focusedChatAvailable={Boolean(onContinueFocusedChat)}
+                onOpenSaved={() => {
+                  if (privateMode) togglePrivateMode();
+                }}
+                onOpenPrivate={() => {
+                  if (!privateMode) togglePrivateMode();
+                }}
+                onContinueFocused={() => void continueInFocusedChat()}
+                onOpenProgress={() => {
+                  if (!softSynthesisActive) return;
+                  setOpen(false);
+                  setPrismSoftSynthesisExpanded(true);
+                }}
               />
-              <PrismTetrahedronPrototype key={surface.surfaceId} />
               <textarea
                 ref={composerRef}
                 value={draft}
@@ -5993,41 +5636,19 @@ export default function PrismCompanion({
                 }}
               />
               <div className={styles.composerStatus}>
-                <button
-                  type="button"
-                  className={styles.privacyToggle}
-                  data-enabled={privateMode ? "true" : "false"}
-                  aria-pressed={privateMode}
-                  disabled={interactionLocked}
-                  onClick={togglePrivateMode}
+                <span
+                  className={styles.persistenceState}
+                  data-private={privateMode ? "true" : undefined}
                 >
-                  Private
-                </button>
+                  {privateMode ? "Private" : "Saved"}
+                </span>
                 <small>
                   {privateMode
                     ? "Not in history or memory"
                     : "Saved Prism chat"}
                 </small>
-                {onContinueFocusedChat ? (
-                  <button
-                    type="button"
-                    className={styles.continueButton}
-                    disabled={interactionLocked}
-                    onClick={() => void continueInFocusedChat()}
-                  >
-                    Continue in focused chat
-                  </button>
-                ) : null}
               </div>
               <footer>
-                <button
-                  type="button"
-                  className={styles.historyToggle}
-                  aria-expanded={historyOpen}
-                  onClick={() => void togglePrismHistory()}
-                >
-                  Activity
-                </button>
                 <button
                   type="button"
                   className={styles.voiceToggle}
@@ -6062,267 +5683,6 @@ export default function PrismCompanion({
               </footer>
             </form>
           ) : null}
-          {open && panelView === "synthesis" ? (
-            <section
-              id="global-prism-synthesis"
-              className={`${styles.composer} ${styles.sessionNoteComposer} ${styles.synthesisPanel}`}
-              aria-label="Prism Refract settings and recent synthesized images"
-            >
-              <div className={styles.synthesisRefractRow}>
-                <header className={styles.synthesisRefractHeader}>
-                  <span className={styles.synthesisRefractIdentity}>
-                    Refract routing
-                  </span>
-                  <span
-                    className={styles.refractLaneBadge}
-                    data-lane={refractResponseMode}
-                    title="Controlled by the global LOCAL/ONLINE privacy toggle"
-                    aria-label={`App mode ${refractResponseMode.toUpperCase()}. Controlled by the global LOCAL/ONLINE privacy toggle.`}
-                  >
-                    <span>App mode</span>
-                    <span aria-hidden="true">·</span>
-                    <strong>{refractResponseMode.toUpperCase()}</strong>
-                  </span>
-                </header>
-                <div className={styles.synthesisRefractGuidance}>
-                  <p>
-                    Refract uses the global Model and Effort settings active
-                    when you begin refracting.
-                  </p>
-                  <p
-                    className={styles.synthesisRefractPrivacy}
-                    data-lane={refractResponseMode}
-                  >
-                    {refractResponseMode === "online"
-                      ? "ONLINE may send the item being refracted to an online provider."
-                      : "LOCAL keeps the item being refracted offline."}
-                  </p>
-                </div>
-              </div>
-              <section
-                className={styles.synthesisRecentRail}
-                aria-label="Recently synthesized images"
-              >
-                <header>
-                  <span>Recent syntheses</span>
-                </header>
-                <div className={styles.synthesisRecentItems}>
-                  {recentSynthesisAssetsLoading ? (
-                    <small className={styles.synthesisRecentStatus}>
-                      Loading…
-                    </small>
-                  ) : recentSynthesisAssetsUnavailable ? (
-                    <small className={styles.synthesisRecentStatus}>
-                      Recent images are unavailable.
-                    </small>
-                  ) : recentSynthesisAssets.length === 0 ? (
-                    <small className={styles.synthesisRecentStatus}>
-                      No synthesized images yet.
-                    </small>
-                  ) : (
-                    recentSynthesisAssets.map((asset) => {
-                      const member =
-                        asset.members.find(
-                          (candidate) => candidate.role === "primary",
-                        ) ?? asset.members[0];
-                      if (!member) return null;
-                      const label = asset.title.trim() || member.prompt.trim();
-                      return (
-                        <button
-                          key={asset.id}
-                          type="button"
-                          className={styles.synthesisRecentItem}
-                          onClick={() => setSynthesisLibraryAssetId(asset.id)}
-                          aria-label={`Open ${label || "synthesized image"} in Asset Library`}
-                          title={label || "Open in Asset Library"}
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={member.thumbnailUrl || member.url} alt="" />
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-              </section>
-              {synthesisLibraryAssetId ? (
-                <AssetLibraryModal
-                  kind="general_image"
-                  initialAssetId={synthesisLibraryAssetId}
-                  onClose={() => setSynthesisLibraryAssetId(null)}
-                />
-              ) : null}
-            </section>
-          ) : null}
-          {open && panelView === "notes" ? (
-            <form
-              id="global-prism-notes"
-              className={`${styles.composer} ${styles.sessionNoteComposer} ${styles.personalNotesComposer}`}
-              onSubmit={(event) => {
-                event.preventDefault();
-                void savePersonalNote();
-              }}
-            >
-              <PrismCompanionViewTabs
-                activeView="notes"
-                synthesisJobCount={softSynthesisUi.jobCount}
-              />
-              <div className={styles.sessionNoteHeading}>
-                <span>Notes</span>
-                {!privateMode ? (
-                  <button
-                    type="button"
-                    className={styles.noteSecondaryButton}
-                    onClick={resetPersonalNoteEditor}
-                  >
-                    New note
-                  </button>
-                ) : (
-                  <small>Saved to your account</small>
-                )}
-              </div>
-              {privateMode ? (
-                <div className={styles.personalNoteBlocked} role="status">
-                  Personal notes stay outside Private chat. Switch Chat back to
-                  Saved to view or edit them.
-                </div>
-              ) : personalNotesLoading ? (
-                <div className={styles.personalNoteBlocked} role="status">
-                  Opening your notes…
-                </div>
-              ) : (
-                <>
-                  {personalNotes.length > 0 ? (
-                    <div
-                      className={styles.personalNotesRail}
-                      aria-label="Saved notes"
-                    >
-                      {personalNotes.map((note) => (
-                        <button
-                          key={note.id}
-                          type="button"
-                          className={styles.personalNoteChoice}
-                          data-selected={
-                            personalNoteId === note.id ? "true" : undefined
-                          }
-                          onClick={() => editPersonalNote(note)}
-                        >
-                          <span>{note.title}</span>
-                          <small>
-                            {new Date(note.updatedAt).toLocaleDateString()}
-                          </small>
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <small className={styles.personalNoteEmpty}>
-                      No notes yet. Leave something for your future self.
-                    </small>
-                  )}
-                  <label className={styles.srOnly} htmlFor="prism-note-title">
-                    Note title
-                  </label>
-                  <input
-                    ref={personalNoteTitleRef}
-                    id="prism-note-title"
-                    className={styles.personalNoteTitle}
-                    value={personalNoteTitle}
-                    maxLength={USER_NOTE_TITLE_MAX}
-                    autoComplete="off"
-                    placeholder="Note title"
-                    onChange={(event) => {
-                      setPersonalNoteTitle(event.target.value);
-                      setPersonalNoteDeleteConfirm(false);
-                      setPersonalNoteStatus("");
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape") {
-                        event.preventDefault();
-                        setOpen(false);
-                      } else if (event.key === "Enter") {
-                        event.preventDefault();
-                        composerRef.current?.focus();
-                      }
-                    }}
-                  />
-                  <label className={styles.srOnly} htmlFor="prism-note-body">
-                    Note body
-                  </label>
-                  <textarea
-                    ref={composerRef}
-                    id="prism-note-body"
-                    value={personalNoteBody}
-                    rows={5}
-                    maxLength={USER_NOTE_BODY_MAX}
-                    aria-label="Note body"
-                    placeholder="Leave yourself a note…"
-                    enterKeyHint="send"
-                    onChange={(event) => {
-                      setPersonalNoteBody(event.target.value);
-                      setPersonalNoteDeleteConfirm(false);
-                      setPersonalNoteStatus("");
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape") {
-                        event.preventDefault();
-                        setOpen(false);
-                      } else if (
-                        shouldSubmitComposerOnEnter({
-                          key: event.key,
-                          shiftKey: event.shiftKey,
-                          isComposing: event.nativeEvent.isComposing,
-                        })
-                      ) {
-                        event.preventDefault();
-                        if (
-                          !personalNoteBusy &&
-                          personalNoteTitle.trim() &&
-                          personalNoteBody.trim()
-                        ) {
-                          event.currentTarget.form?.requestSubmit();
-                        }
-                      }
-                    }}
-                  />
-                  <footer>
-                    {personalNoteId ? (
-                      <button
-                        type="button"
-                        className={styles.noteDeleteButton}
-                        data-confirm={
-                          personalNoteDeleteConfirm ? "true" : undefined
-                        }
-                        disabled={personalNoteBusy}
-                        onClick={() => {
-                          if (personalNoteDeleteConfirm) {
-                            void deletePersonalNote();
-                          } else {
-                            setPersonalNoteDeleteConfirm(true);
-                            setPersonalNoteStatus("Press Delete again to confirm");
-                          }
-                        }}
-                      >
-                        {personalNoteDeleteConfirm ? "Confirm delete" : "Delete"}
-                      </button>
-                    ) : null}
-                    <small aria-live="polite">
-                      {personalNoteStatus || "Enter saves · Shift+Enter adds a line"}
-                    </small>
-                    <button
-                      type="submit"
-                      className={styles.sendButton}
-                      disabled={
-                        personalNoteBusy ||
-                        !personalNoteTitle.trim() ||
-                        !personalNoteBody.trim()
-                      }
-                    >
-                      {personalNoteId ? "Update note" : "Save note"}
-                    </button>
-                  </footer>
-                </>
-              )}
-            </form>
-          ) : null}
         </div>
         <button
           ref={avatarRef}
@@ -6335,35 +5695,25 @@ export default function PrismCompanion({
               ? zenCanvasOrb
                 ? "Choose a PRISM applet"
                 : "Open Prism assistant. Hold for applets."
-              : softSynthesisActive
-              ? softSynthesisUi.expanded
-                ? "Minimize soft synthesis"
-                : `Show soft synthesis · ${softSynthesisUi.jobCount} job${softSynthesisUi.jobCount === 1 ? "" : "s"}`
               : refractSession
                 ? `Prism is refracting ${refractSession.registration.target.label}`
                 : open
-                  ? `Move or minimize Prism ${panelView}`
-                  : "Move or talk with Prism"
+                  ? "Move or minimize Prism chat"
+                  : softSynthesisActive
+                    ? `Move or talk with Prism · ${softSynthesisUi.jobCount} active synthesis job${softSynthesisUi.jobCount === 1 ? "" : "s"}`
+                    : "Move or talk with Prism"
           }
           aria-expanded={
             chatHomeOrbDocked
               ? homeBaseRadialVisible
-              : softSynthesisActive
-                ? softSynthesisUi.expanded
-                : open
+              : open
           }
           aria-controls={
             chatHomeOrbDocked
               ? homeBaseRadialVisible
                 ? "prism-home-base-radial-launcher"
                 : undefined
-              : softSynthesisActive
-                ? undefined
-              : panelView === "synthesis"
-                ? "global-prism-synthesis"
-                : panelView === "notes"
-                  ? "global-prism-notes"
-                  : "global-prism-companion"
+              : "global-prism-companion"
           }
           aria-keyshortcuts={
             chatHomeOrbDocked ? undefined : shortcutPresentation.aria
@@ -6416,10 +5766,6 @@ export default function PrismCompanion({
             }
             if (event.detail === 0) {
               playPrismCompanionGlassTap();
-              if (softSynthesisActive) {
-                toggleSoftSynthesisFromOrb();
-                return;
-              }
               activatePrismConversation();
             }
           }}

@@ -1,8 +1,30 @@
-import type {
-  BotcastEpisodeImagePlacement,
-  BotcastImageContextV1,
-  BotcastProducerCue,
+import {
+  botcastImageContextForMessageV1,
+  botcastLatestImageContextV1,
+  type BotcastEpisodeImagePlacement,
+  type BotcastImageContextV1,
+  type BotcastProducerCue,
+  type SignalVisualRecognitionV1,
 } from "@localai/shared";
+
+/**
+ * Identity is an exceptional bot-image result, not a status surface for every
+ * ordinary prop or picture. Failed inspection is therefore silent unless the
+ * matcher actually found a procedural-avatar subject to explain.
+ */
+export function signalVisualIdentityNotice(
+  recognition: SignalVisualRecognitionV1 | null | undefined,
+): string | null {
+  if (recognition?.status !== "resolved" || recognition.subjects.length === 0) {
+    return null;
+  }
+  const namedSubjects = recognition.subjects.filter(
+    (subject) => subject.recognizedBotId,
+  ).length;
+  return namedSubjects > 0
+    ? `Visual identity inspection complete: ${namedSubjects} subject${namedSubjects === 1 ? "" : "s"} passed color, glyph, and face.`
+    : "A bot-like subject was found, but no identity passed color, glyph, and face.";
+}
 
 export function signalPendingEpisodeImageCueIsAwaitingHostTurn(args: {
   episodeId: string;
@@ -38,6 +60,19 @@ export function signalEpisodeImageScale(
   kind: BotcastImageContextV1["kind"],
 ): number {
   return kind === "item" ? placement.itemScale : placement.photoScale;
+}
+
+export function signalEpisodeStageImageContext(args: {
+  events: Parameters<typeof botcastLatestImageContextV1>[0];
+  activeMessageId: string | null;
+}): BotcastImageContextV1 | null {
+  const latest = botcastLatestImageContextV1(args.events);
+  if (args.activeMessageId) {
+    return botcastImageContextForMessageV1(args.events, args.activeMessageId);
+  }
+  return latest?.phase === "presented" || latest?.phase === "discussing"
+    ? latest
+    : null;
 }
 
 export function signalEpisodeImageIsVisible(args: {

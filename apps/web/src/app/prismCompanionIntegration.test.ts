@@ -10,6 +10,10 @@ const companionCss = readFileSync(
   new URL("./prismCompanion.module.css", import.meta.url),
   "utf8",
 );
+const tetrahedronNavigator = readFileSync(
+  new URL("./PrismTetrahedronNavigator.tsx", import.meta.url),
+  "utf8",
+);
 const orbCss = readFileSync(
   new URL("./prism-orb.module.css", import.meta.url),
   "utf8",
@@ -53,9 +57,9 @@ test("mounts the global companion on product shells and submerges it behind top-
   );
   assert.doesNotMatch(page, /prismRefractLocalModel|prismRefractOnlineModel/u);
   assert.doesNotMatch(page, /\/api\/settings\/prism-refract-model/u);
-  assert.match(page, /refractResponseMode=\{botGeneratorResponseMode\}/u);
+  assert.doesNotMatch(page, /refractResponseMode=/u);
   assert.doesNotMatch(component, /refractModelPicker/u);
-  assert.match(component, /refractResponseMode\?:/u);
+  assert.doesNotMatch(component, /refractResponseMode\?:/u);
   assert.doesNotMatch(component, /refractRouting/u);
 });
 
@@ -156,9 +160,7 @@ test("keeps the companion explicit, keyboard accessible, and capability-driven",
   assert.match(component, /contextTokenIds: contextTokenIdsRef\.current/u);
   assert.match(component, /Review exact changes/u);
   assert.match(component, /Estimated cost:/u);
-  assert.match(component, /aria-label="Recent Prism activity"/u);
-  assert.match(component, /prismActionLabel\(run\.capabilityId\)/u);
-  assert.match(component, /prismActionStatusLabel\(run\.status\)/u);
+  assert.match(component, /prismActionStatusLabel\(card\.run\.status\)/u);
   assert.match(component, /“undo that” reverses the latest meaningful action/u);
   assert.doesNotMatch(component, /delete_bot|delete_project|delete_conversation/u);
   assert.match(handoffCanvas, /Exact source preview/u);
@@ -221,7 +223,7 @@ test("keeps ordinary assistant talk in one account-scoped saved Prism chat", () 
 
 test("isolates Private talk and hands either lane to focused chat", () => {
   assert.match(component, /prismCompanionPrivateRecoveryStorageKey\(accountKey\)/u);
-  assert.match(component, /aria-pressed=\{privateMode\}/u);
+  assert.match(tetrahedronNavigator, /activeChatFace:[\s\S]*privateMode/u);
   assert.match(component, /Not in history or memory/u);
   assert.match(component, /incognito: true/u);
   assert.match(component, /ephemeralMessages: privateTranscript/u);
@@ -230,7 +232,7 @@ test("isolates Private talk and hands either lane to focused chat", () => {
     /const persistentConversation = privateMode\s*\? null/u,
   );
   assert.match(component, /onContinueFocusedChat\?:/u);
-  assert.match(component, /Continue in focused chat/u);
+  assert.match(tetrahedronNavigator, /onContinueFocused/u);
   assert.match(
     component,
     /await onContinueFocusedChat\(\{\s*privateMode,\s*conversationId: conversation\.id,\s*conversation,/u,
@@ -583,7 +585,11 @@ test("dims the idle orb after settle, then vanishes after the same delay", () =>
   assert.match(component, /const clearIdleDim = useCallback/u);
   assert.match(
     component,
-    /inheritChatHomeDockPosition\(\);[\s\S]{0,140}clearIdleDim\(\);[\s\S]{0,180}setOpen\(true\)/u,
+    /const openAndFocus = useCallback[\s\S]{0,180}inheritChatHomeDockPosition\(\);[\s\S]{0,80}presentAssistantConversation\(\)/u,
+  );
+  assert.match(
+    component,
+    /const presentAssistantConversation = useCallback[\s\S]{0,180}clearIdleDim\(\);[\s\S]{0,100}setOpen\(true\)/u,
   );
   assert.match(component, /clearIdleDim\(\);\s*stopInertia\(false\)/u);
   assert.match(
@@ -666,8 +672,9 @@ test("retires the full-manuscript Slate chat route in favor of global metadata",
 
 test("soft synthesis keeps the real companion wieldable, draggable, and inertial", () => {
   assert.match(component, /usePrismSoftSynthesisUi/u);
-  assert.match(component, /togglePrismSoftSynthesisExpanded/u);
   assert.match(component, /setPrismSoftSynthesisExpanded\(false\)/u);
+  assert.match(component, /setPrismSoftSynthesisExpanded\(true\)/u);
+  assert.match(component, /onOpenProgress/u);
   assert.match(component, /data-prism-companion-avatar="true"/u);
   assert.match(component, /styles\.softJobChip/u);
   assert.match(component, /softSynthesisActive/u);
@@ -711,44 +718,19 @@ test("keeps Prism anchored while an assistant menu is open", () => {
   );
 });
 
-test("switches the floating Prism panel among Synthesis, Chat, and Notes", () => {
-  assert.match(component, /PrismCompanionViewTabs/u);
-  assert.match(component, /activeView="chat"/u);
-  assert.match(component, /activeView="notes"/u);
-  assert.match(component, /id="global-prism-synthesis"/u);
-  assert.match(
-    component,
-    /className=\{styles\.synthesisRefractRow\}[\s\S]*className=\{styles\.synthesisRefractGuidance\}/u,
-  );
-  assert.match(companionCss, /\.synthesisRefractRow\s*\{/u);
-  assert.doesNotMatch(companionCss, /\.refractModelPicker/u);
-  assert.match(component, /Refract routing/u);
-  assert.match(component, /<span>App mode<\/span>/u);
-  assert.match(component, /className=\{styles\.synthesisRefractGuidance\}/u);
-  assert.match(
-    component,
-    /Refract uses the global Model and Effort settings active[\s\S]*when you begin refracting/u,
-  );
-  assert.match(
-    companionCss,
-    /:global\(\[data-theme="light"\]\)[\s\S]*?\.synthesisRefractPrivacy\[data-lane="local"\][\s\S]*?color:\s*#0b5f6d/u,
-  );
-  assert.doesNotMatch(companionCss, /\.synthesisRefractCard\s*\{/u);
-  assert.match(component, /className=\{styles\.refractLaneBadge\}/u);
-  const synthesisPanel =
-    component.match(
-      /open && panelView === "synthesis"[\s\S]*?open && panelView === "notes"/u,
-    )?.[0] ?? "";
-  assert.doesNotMatch(synthesisPanel, /PrismCompanionViewTabs|Open Images|synthesisEmptyOrb/u);
-  assert.match(component, /source=generated&limit=5&sort=recency/u);
-  assert.match(component, /className=\{styles\.synthesisRecentRail\}/u);
-  assert.match(component, /<AssetLibraryModal[\s\S]*initialAssetId=\{synthesisLibraryAssetId\}/u);
-  assert.match(component, /onClick=\{\(\) => setSynthesisLibraryAssetId\(asset\.id\)\}/u);
-  assert.doesNotMatch(component, /onOpenImagePrompt/u);
-  assert.doesNotMatch(page, /onOpenImagePrompt=\{async \(prompt\) =>/u);
-  assert.match(component, /id="global-prism-notes"/u);
-  assert.match(component, /fetch\("\/api\/prism\/notes"/u);
-  assert.match(component, /method: personalNoteId \? "PUT" : "POST"/u);
-  assert.match(component, /method: "DELETE"/u);
-  assert.match(component, /Press Delete again to confirm/u);
+test("keeps the floating Prism panel chat-first around the tetrahedron", () => {
+  assert.match(component, /PrismTetrahedronNavigator/u);
+  assert.match(component, /privateMode=\{privateMode\}/u);
+  assert.match(component, /onOpenSaved/u);
+  assert.match(component, /onOpenPrivate/u);
+  assert.match(component, /onContinueFocused/u);
+  assert.match(component, /onOpenProgress/u);
+  assert.match(component, /id="global-prism-companion"/u);
+  assert.match(component, /placeholder="Ask Prism…"/u);
+  assert.doesNotMatch(component, /PrismCompanionViewTabs|panelView/u);
+  assert.doesNotMatch(component, /global-prism-synthesis|global-prism-notes/u);
+  assert.doesNotMatch(component, /\/api\/prism\/notes/u);
+  assert.doesNotMatch(component, /Recent syntheses|Refract routing/u);
+  assert.doesNotMatch(page, /refractResponseMode=/u);
+  assert.doesNotMatch(companionCss, /personalNote|synthesisRefract|synthesisRecent/u);
 });

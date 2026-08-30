@@ -157,6 +157,7 @@ test("dispatches Babble, Bottish, and Off through one bounded presentation contr
       signal: undefined,
       text: "The corridor answers.",
       volume: 0.14,
+      roomAcoustics: undefined,
     },
     {
       mode: "bottish",
@@ -164,6 +165,7 @@ test("dispatches Babble, Bottish, and Off through one bounded presentation contr
       signal: undefined,
       text: "The corridor answers.",
       volume: 0.14,
+      roomAcoustics: undefined,
     },
   ]);
 });

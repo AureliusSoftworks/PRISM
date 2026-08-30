@@ -122,3 +122,14 @@ test("missing same-subject color evidence blocks a model-declared match", () => 
   const [resolved] = resolveSignalVisualRecognitionSubjectsV1({ candidates: [red], rawSubjects: [raw] });
   assert.equal(resolved?.recognizedBotId, null);
 });
+
+test("color evidence outside the subject region cannot satisfy the same-region rule", () => {
+  const red = candidate("AAAABBBB", "red", "#ff0000");
+  const raw = subject([{ token: red.token, color: "match", glyph: "match", face: "match" }]);
+  raw.colorEvidenceRegion = { x: 0.7, y: 0.1, width: 0.2, height: 0.2 };
+  const [resolved] = resolveSignalVisualRecognitionSubjectsV1({
+    candidates: [red],
+    rawSubjects: [raw],
+  });
+  assert.equal(resolved?.recognizedBotId, null);
+});

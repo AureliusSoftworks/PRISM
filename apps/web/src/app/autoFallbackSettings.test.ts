@@ -39,7 +39,7 @@ describe("Auto fallback settings", () => {
     );
   });
 
-  it("renders separate ordered LOCAL and ONLINE Auto priorities", () => {
+  it("renders separate ordered LOCAL and ONLINE fixed-model fallbacks", () => {
     assert.match(pageSource, /fallbackRowsForLane/);
     assert.match(pageSource, /\["local", "online"\] as const/);
     assert.match(pageSource, /AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT/);
@@ -57,12 +57,13 @@ describe("Auto fallback settings", () => {
     assert.doesNotMatch(pageSource, /draggable=\{rows\.length > 1\}/u);
     assert.match(pageSource, /event\.key === "ArrowUp"/u);
     assert.match(pageSource, /aria-live="polite"/u);
-    assert.match(pageSource, /\+ Add \$\{laneLabel\} priority/);
-    assert.match(pageSource, /appends every other eligible model in the lane/u);
-    assert.match(pageSource, /ONLINE ends with one bundled local attempt/u);
+    assert.match(pageSource, /\+ Add \$\{laneLabel\} fallback/);
+    assert.match(pageSource, /specifically selected model fails/u);
+    assert.match(pageSource, /When Auto is selected/u);
+    assert.match(pageSource, /recalculates Effort for the work/u);
   });
 
-  it("presents Offline and Online priorities as draggable chip columns", () => {
+  it("presents Offline and Online fallbacks as draggable chip columns", () => {
     assert.match(pageSource, /className=\{styles\.settingsFallbackLaneColumns\}/u);
     assert.match(pageSource, /data-auto-fallback-lane=\{lane\}/u);
     assert.match(pageSource, /lane === "local" \? "OFFLINE" : "ONLINE"/u);

@@ -21,7 +21,12 @@ import type {
   MansionAtmosphereLibraryStateV1,
 } from "./mansionMusic.js";
 import type { MansionLayoutV2 } from "./mansionLayoutV2.js";
-import type { MysteryPublicChargeV1 } from "./mysteryIncidentPlan.js";
+import {
+  MYSTERY_INCIDENT_KINDS_V1,
+  resolveMysteryCaseTitleV1,
+  type MysteryIncidentKindV1,
+  type MysteryPublicChargeV1,
+} from "./mysteryIncidentPlan.ts";
 import {
   botIdentityMirrorAvatarDetailsV1,
   botIdentityMirrorFaceV1,
@@ -104,6 +109,8 @@ export interface DebateMysteryAssetSynthesisV2 {
   evidence: boolean;
   /** ONLINE-only template edits. LOCAL cases retain bundled room art. */
   rooms: boolean;
+  /** Upgrade the complete synthesized room pack to Illustrated before play. */
+  illustratedRooms: boolean;
   /** ONLINE-only instrumental mansion theme. Failure keeps the bundled bed. */
   music: boolean;
   /** Optional mansion identity. LOCAL uses deterministic procedural/shared acoustics only. */
@@ -395,7 +402,7 @@ export interface DebateMysteryMansionSnapshotV2 {
 export type DebateMysteryTrialTypeV2 = "jury" | "bench";
 /** Frozen at compilation: full mansion investigation, or court from the title card. */
 export type DebateMysteryInvestigationModeV2 = "full" | "court_only";
-export const DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS = 3;
+export const DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS = 5;
 
 /**
  * Clamp stale or malformed public progress copy to its own declared budget.
@@ -1424,6 +1431,7 @@ export interface DebateMysteryPlayAgainRequestV2 {
 
 export type DebateMysteryActionRequestV2 =
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "move"; roomId?: string }
+  | { version: 2; expectedRevision: number; idempotencyKey: string; action: "enter_mansion" }
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "dismiss_case_opening" }
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "advance_room_introduction"; roomId: string }
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "complete_room_introduction"; roomId: string }
@@ -2337,6 +2345,10 @@ export function resolveDebateMysteryConfigV2(
     rooms:
       investigationMode === "full" &&
       value.assetSynthesis?.rooms === true,
+    illustratedRooms:
+      investigationMode === "full" &&
+      value.assetSynthesis?.rooms === true &&
+      value.assetSynthesis?.illustratedRooms === true,
     music:
       investigationMode === "full" &&
       value.assetSynthesis?.music === true,
@@ -2512,6 +2524,42 @@ export function normalizeDebateMysteryFormatStateV2(
     (typeof configSource.inspiration === "string"
       ? configSource.inspiration.trim()
       : "");
+  const publicCharge = source.caseCharge as unknown;
+  const normalizedCaseTitle = (() => {
+    const authoredTitle =
+      typeof source.caseTitle === "string" ? source.caseTitle : null;
+    if (!publicCharge || typeof publicCharge !== "object" || Array.isArray(publicCharge)) {
+      return authoredTitle;
+    }
+    const charge = publicCharge as Record<string, unknown>;
+    const kind = typeof charge.kind === "string" ? charge.kind : "";
+    const subject = typeof charge.subject === "string" ? charge.subject.trim() : "";
+    if (
+      charge.version !== 1 ||
+      !MYSTERY_INCIDENT_KINDS_V1.includes(kind as MysteryIncidentKindV1) ||
+      !subject
+    ) {
+      return authoredTitle;
+    }
+    const incidentId =
+      typeof charge.incidentId === "string" && charge.incidentId.trim()
+        ? charge.incidentId.trim()
+        : "legacy-incident";
+    const nonce =
+      typeof configSource.nonce === "string" && configSource.nonce.trim()
+        ? configSource.nonce.trim()
+        : "legacy-case";
+    return resolveMysteryCaseTitleV1({
+      authoredTitle,
+      plan: {
+        sourceHash: `${incidentId}:${nonce}`,
+        primary: {
+          kind: kind as MysteryIncidentKindV1,
+          subject,
+        },
+      },
+    });
+  })();
   const assetSynthesisSource =
     configSource.assetSynthesis && typeof configSource.assetSynthesis === "object"
       ? configSource.assetSynthesis as Record<string, unknown>
@@ -2660,6 +2708,7 @@ export function normalizeDebateMysteryFormatStateV2(
   );
   return {
     ...(source as DebateWhodunnitFormatStateV2),
+    caseTitle: normalizedCaseTitle,
     rooms: source.rooms.map((room) => ({
       ...room,
       accessState: room.visited
@@ -2680,6 +2729,10 @@ export function normalizeDebateMysteryFormatStateV2(
         rooms:
           configSource.investigationMode !== "court_only" &&
           assetSynthesisSource.rooms === true,
+        illustratedRooms:
+          configSource.investigationMode !== "court_only" &&
+          assetSynthesisSource.rooms === true &&
+          assetSynthesisSource.illustratedRooms === true,
         music:
           configSource.investigationMode !== "court_only" &&
           assetSynthesisSource.music === true,

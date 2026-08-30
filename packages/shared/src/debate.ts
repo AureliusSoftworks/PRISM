@@ -1443,17 +1443,17 @@ export interface DebateSessionV1 {
   status: DebateStatus;
   phase: DebatePhase;
   stepKey: string;
-  /** Primary generation lane, frozen when Start succeeds. */
+  /** Most recently resolved primary generation lane. */
   provider: LlmProviderName;
   model: string;
   responseMode: ResponseMode;
-  /** Auto chose the start model; fixed was selected explicitly. Both stay pinned. */
+  /** Auto resolves per work item; fixed remains explicitly pinned. */
   modelSelectionKind?: "auto" | "fixed";
-  /** Visible, runnable same-lane candidates frozen when the session starts. */
+  /** Candidate snapshot retained for provenance; Auto uses the live catalog. */
   autoCandidateAllowlist?: AutoFallbackModelRef[];
-  /** Deterministic routing policy frozen when the session starts. */
+  /** Routing policy version recorded when the session starts. */
   routingPolicyVersion?: number;
-  /** Auto route that selected the Debate's pinned start model. */
+  /** Most recent concrete route selected while Auto remains active. */
   latestAutoRoute?: AutoRouteDecisionV1;
   /**
    * Last applied effort for archive chrome. Auto updates this alongside
@@ -1463,7 +1463,7 @@ export interface DebateSessionV1 {
   lastReasoningEffort?: Exclude<ProviderReasoningEffort, "auto"> | null;
   /** Whether the most recently resolved generation lane used Turbo. */
   lastTurbo?: boolean;
-  /** Ordered primary + fallback lanes. One entry for LOCAL/ONLINE. */
+  /** Initial Auto escalation plan or the fixed model's ordered fallback lanes. */
   generationChain: AutoFallbackModelRef[];
   format: DebateFormatId;
   formatVersion: typeof DEBATE_FORMAT_SCHEMA_VERSION;

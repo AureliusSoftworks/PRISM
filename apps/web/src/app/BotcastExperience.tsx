@@ -76,6 +76,7 @@ import {
   botcastDepartureSpeakerRole,
   botcastEchoHostInterruptPhrase,
   botcastEpisodeModelSelectionKind,
+  botcastGuestWalkOffRiskV1,
   botcastGuestHasDepartedAt,
   botcastHostHasDepartedAt,
   botcastHostInterruptionLineAt,
@@ -92,7 +93,6 @@ import {
   botcastInterruptedGuestContent,
   botcastListenerReactionForMessage,
   botcastEpisodeImageDescriptorFromFileName,
-  botcastImageContextForMessageV1,
   botcastLatestImageContextV1,
   botcastMessageIsAudibleToAudienceV1,
   botcastNextSpeakerRole,
@@ -414,9 +414,18 @@ import { signalStageSoundcheckMessages } from "./signalStageSoundcheck";
 import {
   signalEpisodeImageIsVisible,
   signalEpisodeImageScale,
+  signalEpisodeStageImageContext,
   signalPendingEpisodeImageCueIsAwaitingHostTurn,
   signalQueuedProducerCueIsServerOwned,
+  signalVisualIdentityNotice,
 } from "./signalEpisodeImagePresentation";
+import { signalOpeningStudioRevealTiming } from "./signalOpeningChoreography";
+import {
+  playSignalEpisodeImageFoley,
+  signalEpisodeImageFoleyTransition,
+  stopSignalEpisodeImageFoley,
+  type SignalEpisodeImageFoleyPresentation,
+} from "./signalEpisodeImageFoley";
 import { shouldSubmitComposerOnEnter } from "./composerKeyPolicy";
 import { applyComposerSendAutoCorrect } from "./composerSendAutoCorrect";
 import {
@@ -1184,6 +1193,7 @@ type SignalEpisodePreRoll = {
   guestName: string;
   topic: string;
   phase: "preparing" | "landing";
+  landingMs: number;
   source: "local" | "elevenlabs";
 };
 
@@ -2942,6 +2952,10 @@ export function BotcastExperience({
   const advanceInFlightRef = useRef(false);
   const queuedProducerCueRef = useRef<BotcastProducerCue | null>(null);
   const signalEpisodeImageRef = useRef<SignalEpisodeImageUpload | null>(null);
+  const signalEpisodeImageFoleyRef = useRef<{
+    episodeId: string | null;
+    presentation: SignalEpisodeImageFoleyPresentation | null;
+  }>({ episodeId: null, presentation: null });
   const producerImageInputRef = useRef<HTMLInputElement | null>(null);
   const setupProducerImageInputRef = useRef<HTMLInputElement | null>(null);
   const producerGuestThinkingStartedAtRef = useRef<number | null>(null);
@@ -7234,6 +7248,10 @@ export function BotcastExperience({
           : "Synthesizing your interview"
         : launchTopic.trim(),
       phase: "preparing",
+      landingMs: signalOpeningStudioRevealTiming({
+        reducedMotion: false,
+        skipped: false,
+      }).fadeMs,
       source: launchShow.introAudio.source,
     };
     let provisionalCaptureId: string | null = null;
@@ -7316,6 +7334,46 @@ export function BotcastExperience({
         // introPlayback.finished early and lets the opening line air before the
         // extended intro has completed.
       });
+    };
+
+    const waitForOpeningStudioDelay = (durationMs: number): Promise<void> =>
+      new Promise((resolve) => {
+        if (controller.signal.aborted || durationMs <= 0) {
+          resolve();
+          return;
+        }
+        let settled = false;
+        let timer = 0;
+        const finish = (): void => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timer);
+          controller.signal.removeEventListener("abort", finish);
+          resolve();
+        };
+        timer = window.setTimeout(finish, durationMs);
+        controller.signal.addEventListener("abort", finish, { once: true });
+      });
+
+    const revealOpeningStudio = async (): Promise<void> => {
+      const timing = signalOpeningStudioRevealTiming({
+        reducedMotion,
+        skipped: preRollSkipRequestedRef.current,
+      });
+      setEpisodePreRoll((current) =>
+        current?.showId === launchShow.id
+          ? { ...current, phase: "landing", landingMs: timing.fadeMs }
+          : current,
+      );
+      releaseSignalIntroAudio();
+      await waitForOpeningStudioDelay(timing.fadeMs);
+      if (!episodeOperationIsCurrent(controller, runId)) return;
+      setEpisodePreRoll((current) =>
+        current?.showId === launchShow.id ? null : current,
+      );
+      await waitForOpeningStudioDelay(
+        Math.max(0, timing.hostEntranceDelayMs - timing.fadeMs),
+      );
     };
 
     // Watch bakes behind a fullscreen loader first. The branded intro card
@@ -7604,7 +7662,8 @@ export function BotcastExperience({
           await beginEpisodeIntroBookend(watchBookend, presentationEpisode.id);
           await Promise.all([introPlayback.finished, visualMinimum]);
           if (!episodeOperationIsCurrent(controller, runId)) return;
-          setEpisodePreRoll(null);
+          await revealOpeningStudio();
+          if (!episodeOperationIsCurrent(controller, runId)) return;
           for (const message of presentationEpisode.messages) {
             if (!episodeOperationIsCurrent(controller, runId)) return;
             prepareEpisodeMessage(message, presentationEpisode);
@@ -7676,33 +7735,14 @@ export function BotcastExperience({
       await releaseSignalModelWarmup(opening.episode.id);
       await Promise.all([introPlayback.finished, visualMinimum]);
       if (!episodeOperationIsCurrent(controller, runId)) return;
-      let openingCardReleaseStarted = false;
-      const releaseOpeningCard = (): void => {
-        if (openingCardReleaseStarted) return;
-        openingCardReleaseStarted = true;
-        const landingMs =
-          preRollSkipRequestedRef.current || reducedMotion ? 90 : 460;
-        setEpisodePreRoll((current) =>
-          current?.showId === launchShow.id
-            ? { ...current, phase: "landing" }
-            : current,
-        );
-        window.setTimeout(() => {
-          if (!episodeOperationIsCurrent(controller, runId)) return;
-          setEpisodePreRoll((current) =>
-            current?.showId === launchShow.id ? null : current,
-          );
-        }, landingMs);
-        releaseSignalIntroAudio();
-      };
+      await revealOpeningStudio();
+      if (!episodeOperationIsCurrent(controller, runId)) return;
       await playPreparedEpisodeMessage(
         opening.message,
         opening.episode,
         controller,
         runId,
         true,
-        releaseOpeningCard,
-        { onPresenceStart: releaseOpeningCard },
       );
       if (!episodeOperationIsCurrent(controller, runId)) return;
       if (setupImageUpload) {
@@ -9644,24 +9684,10 @@ export function BotcastExperience({
           };
           signalEpisodeImageRef.current = resolvedUpload;
           setSignalEpisodeImage(resolvedUpload);
-          const recognition = resolvedImageContext.visualRecognition;
-          if (recognition?.status === "resolved") {
-            const namedSubjects = recognition.subjects.filter(
-              (subject) => subject.recognizedBotId,
-            ).length;
-            setNotice(
-              namedSubjects > 0
-                ? `Visual identity inspection complete: ${namedSubjects} subject${namedSubjects === 1 ? "" : "s"} passed color, glyph, and face.`
-                : "Visual identity inspection complete. No subject passed all three cues.",
-            );
-          } else if (
-            recognition?.status === "timed_out" ||
-            recognition?.status === "unavailable"
-          ) {
-            setNotice(
-              "Visual identity inspection was unavailable. The show continued without naming anyone.",
-            );
-          }
+          const identityNotice = signalVisualIdentityNotice(
+            resolvedImageContext.visualRecognition,
+          );
+          if (identityNotice) setNotice(identityNotice);
         }
         if (requestedCue) {
           await finishResponseCue?.();
@@ -11700,18 +11726,10 @@ export function BotcastExperience({
     guestDeparted?: boolean;
     hostDeparted?: boolean;
   }): React.JSX.Element => {
-    const latestStageImageContext = botcastLatestImageContextV1(
-      args.currentEpisode.events,
-    );
-    const stageImageContext = args.activeMessage
-      ? botcastImageContextForMessageV1(
-          args.currentEpisode.events,
-          args.activeMessage.id,
-        )
-      : latestStageImageContext?.phase === "presented" ||
-          latestStageImageContext?.phase === "discussing"
-        ? latestStageImageContext
-        : null;
+    const stageImageContext = signalEpisodeStageImageContext({
+      events: args.currentEpisode.events,
+      activeMessageId: args.activeMessage?.id ?? null,
+    });
     const stageEpisodeImage =
       signalEpisodeImage?.episodeId === args.currentEpisode.id &&
       signalEpisodeImage.imageId === stageImageContext?.imageId
@@ -13256,10 +13274,6 @@ export function BotcastExperience({
                 Host has left the studio
               </span>
             ) : null}
-            <strong className={styles.nameplate}>
-              <span>Host</span>
-              {stagePublicName(args.host, "Host")}
-            </strong>
           </div>
           <div
             className={`${styles.seat} ${styles.guestSeat}`}
@@ -13275,11 +13289,30 @@ export function BotcastExperience({
                 Guest has left the studio
               </span>
             ) : null}
-            <strong className={styles.nameplate}>
-              <span>{guestHiddenFromAudience ? "Booked guest" : "Guest"}</span>
-              {stagePublicName(args.guest, "Guest")}
-            </strong>
           </div>
+        </div>
+        <div
+          className={styles.stageNameplates}
+          data-shot={args.shot}
+          aria-label="Signal stage identities"
+        >
+          <strong
+            className={`${styles.nameplate} ${styles.hostNameplate}`}
+            data-role="host"
+            data-departed={hostDeparted ? "true" : undefined}
+          >
+            <span>Host</span>
+            {stagePublicName(args.host, "Host")}
+          </strong>
+          <strong
+            className={`${styles.nameplate} ${styles.guestNameplate}`}
+            data-role="guest"
+            data-departed={guestDeparted ? "true" : undefined}
+            data-audience-hidden={guestHiddenFromAudience ? "true" : undefined}
+          >
+            <span>{guestHiddenFromAudience ? "Booked guest" : "Guest"}</span>
+            {stagePublicName(args.guest, "Guest")}
+          </strong>
         </div>
         {stageImageVisible && stageImageContext ? (
           <figure
@@ -15251,7 +15284,7 @@ export function BotcastExperience({
         const replayMetadata = await acquireSignalEpisodeImageReplayMetadata(
           fileInput,
         );
-        setNotice("Inspecting visual identities…");
+        setNotice("Preparing the episode image…");
         const visualIdentity = await buildEpisodeVisualIdentity(null);
         setSetupEpisodeImage({
           imageId,
@@ -16318,6 +16351,74 @@ export function BotcastExperience({
     speakingMessageId,
     episodeMessages: episode?.messages ?? [],
   });
+  const liveStageImageContext = episode
+    ? signalEpisodeStageImageContext({
+        events: episode.events,
+        activeMessageId: liveActiveMessage?.id ?? null,
+      })
+    : null;
+  const liveStageImageVisible = Boolean(
+    episode?.status === "live" &&
+      liveStageImageContext &&
+      signalEpisodeImageIsVisible({
+        hasImageContext: true,
+        replay: false,
+        activeMessageId: liveActiveMessage?.id ?? null,
+        speakingMessageId,
+      }),
+  );
+  const liveStageFoleyEpisodeId =
+    episode?.status === "live" ? episode.id : null;
+  const liveStageFoleyImageId = liveStageImageVisible
+    ? (liveStageImageContext?.imageId ?? null)
+    : null;
+  const liveStageFoleyKind = liveStageImageVisible
+    ? (liveStageImageContext?.kind ?? null)
+    : null;
+  useEffect(() => {
+    const previous = signalEpisodeImageFoleyRef.current;
+    const current: SignalEpisodeImageFoleyPresentation | null =
+      liveStageFoleyEpisodeId && liveStageFoleyImageId && liveStageFoleyKind
+        ? {
+            episodeId: liveStageFoleyEpisodeId,
+            imageId: liveStageFoleyImageId,
+            kind: liveStageFoleyKind,
+          }
+        : null;
+
+    // Opening, reloading, or leaving an episode is not a performed table move.
+    // Seed the new surface silently and release any unfinished prior clip.
+    if (previous.episodeId !== liveStageFoleyEpisodeId) {
+      stopSignalEpisodeImageFoley();
+      signalEpisodeImageFoleyRef.current = {
+        episodeId: liveStageFoleyEpisodeId,
+        presentation: current,
+      };
+      return;
+    }
+
+    const plans = signalEpisodeImageFoleyTransition(
+      previous.presentation,
+      current,
+    );
+    signalEpisodeImageFoleyRef.current = {
+      episodeId: liveStageFoleyEpisodeId,
+      presentation: current,
+    };
+    for (const plan of plans) {
+      playSignalEpisodeImageFoley(plan, {
+        enabled: introAudioEnabled,
+        masterVolume: introAudioVolume,
+      });
+    }
+  }, [
+    introAudioEnabled,
+    introAudioVolume,
+    liveStageFoleyEpisodeId,
+    liveStageFoleyImageId,
+    liveStageFoleyKind,
+  ]);
+  useEffect(() => () => stopSignalEpisodeImageFoley(), []);
   const liveCameraElapsedMs = (() => {
     if (!episode || episode.messages.length === 0) return 0;
     const timeline = botcastReplayTimeline(episode.messages, episode.events);
@@ -16806,6 +16907,7 @@ export function BotcastExperience({
       setCameraSaving(false);
     }
   };
+  const guestWalkOffRisk = episode ? botcastGuestWalkOffRiskV1(episode) : null;
   const toggleLiveCaptions = (): void => {
     setLiveCaptionsEnabled((current) => {
       const next = !current;
@@ -17279,7 +17381,7 @@ export function BotcastExperience({
       const replayMetadata = await acquireSignalEpisodeImageReplayMetadata(
         fileInput,
       );
-      setNotice("Inspecting visual identities…");
+      setNotice("Preparing the episode image…");
       const visualIdentity = await buildEpisodeVisualIdentity(episode);
       const upload: SignalEpisodeImageUpload = {
         episodeId: episode.id,
@@ -17296,7 +17398,7 @@ export function BotcastExperience({
       discardPreparedAdvance(
         "An ephemeral Producer image replaced the prepared Signal turn.",
       );
-      setNotice("Inspecting visual identities before the host speaks…");
+      setNotice(`${replayMetadata.descriptor.name} is queued for the host.`);
       sendCue({ kind: "present_image", imageId: upload.imageId });
     } catch (caught) {
       setError(signalErrorToast("Add image to Signal", caught));
@@ -17889,9 +17991,13 @@ export function BotcastExperience({
           data-kind="intro"
           data-source={episodePreRoll.source}
           data-watch-ready={watchPlaybackReady ? "true" : undefined}
-            style={
-              { "--botcast-accent": selectedShow.accentColor } as CSSProperties
-            }
+          style={
+            {
+              "--botcast-accent": selectedShow.accentColor,
+              "--signal-replay-intro-landing-ms":
+                `${episodePreRoll.landingMs}ms`,
+            } as CSSProperties
+          }
           aria-label={`${episodePreRoll.showName} episode introduction`}
           aria-live="polite"
         >
@@ -18727,6 +18833,72 @@ export function BotcastExperience({
                     <span className={styles.cueKeyLamp} aria-hidden="true" />
                   </button>
                   </div>
+                  {guestWalkOffRisk ? (
+                    <section
+                      className={styles.guestAnnoyanceMeter}
+                      aria-label="Guest annoyance"
+                      data-guest-walkoff-status={guestWalkOffRisk.status}
+                    >
+                      <header className={styles.guestAnnoyanceMeterHeader}>
+                        <span>Guest annoyance</span>
+                        <small>
+                          {guestWalkOffRisk.status === "departed"
+                            ? "Guest has left"
+                            : guestWalkOffRisk.status === "closing"
+                              ? "Closing the show"
+                              : guestWalkOffRisk.status === "suppressed"
+                                ? "Deterministic walk-off suppressed"
+                                : guestWalkOffRisk.available
+                                  ? "Producer-facing estimate"
+                                  : "No present bot guest"}
+                        </small>
+                      </header>
+                      <div
+                        className={styles.guestAnnoyanceTrack}
+                        role="meter"
+                        aria-label="Estimated walk-off chance"
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={guestWalkOffRisk.chancePercent}
+                        aria-valuetext={
+                          guestWalkOffRisk.status === "departed"
+                            ? "Guest has already walked off"
+                            : guestWalkOffRisk.status === "suppressed"
+                              ? "Deterministic walk-off risk is suppressed"
+                              : `${guestWalkOffRisk.chancePercent}% estimated walk-off chance`
+                        }
+                      >
+                        <span
+                          className={styles.guestAnnoyanceFill}
+                          style={{
+                            "--signal-guest-annoyance-percent": `${guestWalkOffRisk.chancePercent}%`,
+                          } as CSSProperties}
+                        />
+                      </div>
+                      <div className={styles.guestAnnoyanceStatus}>
+                        <span>
+                          {guestWalkOffRisk.status === "eligible"
+                            ? "Walk-off is due on the next guest turn"
+                            : guestWalkOffRisk.status === "elevated"
+                              ? guestWalkOffRisk.source === "combined"
+                                ? "Pressure and directed irritation are both elevated"
+                                : guestWalkOffRisk.source === "directed_irritation"
+                                  ? "Directed irritation is elevated"
+                                  : "Producer pressure is elevated"
+                              : guestWalkOffRisk.status === "settled"
+                                ? "Guest is settled"
+                                : "No active walk-off estimate"}
+                        </span>
+                        <strong>
+                          {guestWalkOffRisk.available
+                            ? `Estimated walk-off chance ${guestWalkOffRisk.chancePercent}%`
+                            : guestWalkOffRisk.status === "departed"
+                              ? "Walked off"
+                              : "Estimate unavailable"}
+                        </strong>
+                      </div>
+                    </section>
+                  ) : null}
                 </section>
               </aside>
               </div>

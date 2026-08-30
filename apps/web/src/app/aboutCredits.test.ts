@@ -94,6 +94,10 @@ describe("About credits", () => {
       credits.find((credit) => credit.id === "the-midnight-clue")?.name,
       "The Midnight Clue",
     );
+    assert.equal(
+      credits.find((credit) => credit.id === "whodunnit-traversal-foley")?.name,
+      "Whodunnit Mansion Traversal Foley",
+    );
     for (const group of ABOUT_CREDIT_GROUPS) {
       assert.ok(group.description.trim());
       assert.ok(group.credits.length > 0);

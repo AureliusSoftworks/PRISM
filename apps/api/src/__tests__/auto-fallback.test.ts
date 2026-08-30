@@ -25,10 +25,11 @@ describe("Auto fallback runner", () => {
     assert.equal(AUTO_FALLBACK_TOTAL_TIMEOUT_MAX_MS, 600_000);
   });
 
-  it("preserves primary effort and disables thinking on every fallback", () => {
+  it("preserves legacy fixed effort while honoring dynamic Auto route effort", () => {
     assert.equal(autoFallbackReasoningEffort(0, "high"), "high");
     assert.equal(autoFallbackReasoningEffort(1, "high"), "none");
     assert.equal(autoFallbackReasoningEffort(5, "xhigh"), "none");
+    assert.equal(autoFallbackReasoningEffort(1, "high", "xhigh"), "xhigh");
   });
 
   it("retains every distinct validation clause after later invalid JSON and timeout failures", () => {

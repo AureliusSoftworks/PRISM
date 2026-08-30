@@ -3226,6 +3226,7 @@ export {
   reconcileHiddenModelIdsForCatalog,
   sanitizeHiddenModelIds,
   resolveAutoModel,
+  resolveAutoModelRoutePlan,
   type AutoModelProvider,
   type OnlineAutoProviderId,
   type OnlineAutoQualityPosture,

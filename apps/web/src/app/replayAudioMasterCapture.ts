@@ -22,6 +22,11 @@ import {
   resolveVoiceCensorTimings,
   type VoiceCensorPlanV1,
 } from "./voiceCensorTone.ts";
+import {
+  connectRoomAcoustics,
+  type RoomAcousticsConnection,
+  type RoomAcousticsSend,
+} from "./roomAcoustics.ts";
 import type { VoicePlaybackCharacterAlignment } from "./voiceEffects.ts";
 
 export type ReplayAudioMasterCaptureResult = {
@@ -205,6 +210,11 @@ export function prismLocalOnlyAudioOutputNode(context: AudioContext): AudioNode 
  * Routes an HTML media element into the same final post-effect output. A
  * recordable element is never allowed to fall back to direct device playback.
  */
+export type PrismAudioElementRouteCleanup = (() => void) & {
+  /** Stop the dry feed while allowing the current room return to decay. */
+  release(): void;
+};
+
 export function routeAudioElementToPrismOutput(
   audio: HTMLMediaElement,
   options: {
@@ -213,8 +223,10 @@ export function routeAudioElementToPrismOutput(
     censorAlignment?: VoicePlaybackCharacterAlignment | null;
     censorDurationMs?: number;
     readCensorElapsedMs?: () => number;
+    roomAcoustics?: RoomAcousticsSend | null;
+    stereoPan?: number;
   } = {},
-): (() => void) | null {
+): PrismAudioElementRouteCleanup | null {
   const context = prismAudioContext();
   const output = worldOutputForSharedContext();
   if (!context || !output) {
@@ -230,6 +242,7 @@ export function routeAudioElementToPrismOutput(
       ? createVoiceLightMeter(context, options.onLevel)
       : null;
     const routedNodes: AudioNode[] = [];
+    let roomConnection: RoomAcousticsConnection | null = null;
     let routed = false;
     const connectRoute = () => {
       if (routed) return;
@@ -261,12 +274,21 @@ export function routeAudioElementToPrismOutput(
           }),
         );
       }
-      if (lightMeter) routeInput.connect(lightMeter.node).connect(output);
-      else routeInput.connect(output);
+      const roomInput = lightMeter ? lightMeter.node : routeInput;
+      if (lightMeter) routeInput.connect(lightMeter.node);
+      roomConnection = connectRoomAcoustics({
+        context,
+        input: roomInput,
+        destination: output,
+        send: options.roomAcoustics,
+        stereoPan: options.stereoPan,
+      });
     };
     if (options.censorPlan) audio.addEventListener("playing", connectRoute, { once: true });
     else connectRoute();
-    return () => {
+    let closed = false;
+    let released = false;
+    const finishNodes = (): void => {
       lightMeter?.stop();
       if (typeof audio.removeEventListener === "function") {
         audio.removeEventListener("playing", connectRoute);
@@ -286,6 +308,19 @@ export function routeAudioElementToPrismOutput(
         // The media element or shared context is already released.
       }
     };
+    const cleanup = (() => {
+      if (closed || released) return;
+      closed = true;
+      roomConnection?.disconnect();
+      finishNodes();
+    }) as PrismAudioElementRouteCleanup;
+    cleanup.release = (): void => {
+      if (closed || released) return;
+      released = true;
+      roomConnection?.release();
+      finishNodes();
+    };
+    return cleanup;
   } catch {
     options.onLevel?.(0);
     return null;

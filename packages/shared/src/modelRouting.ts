@@ -41,6 +41,7 @@ export type AutoRouteReasonCode =
   | "long_context"
   | "high_stakes"
   | "surface_complexity"
+  | "failure_escalation"
   | "known_cost_preferred"
   | "only_viable_candidate";
 
@@ -101,6 +102,7 @@ export function normalizeAutoRouteDecisionV1(
     "long_context",
     "high_stakes",
     "surface_complexity",
+    "failure_escalation",
     "known_cost_preferred",
     "only_viable_candidate",
   ]);
@@ -616,6 +618,28 @@ function routingProfile(provider: AutoModelProvider, modelId: string): {
   return { capability: 2, latency: 5, known: false };
 }
 
+/**
+ * Coarse, provider-neutral capability ladder used only after an Auto attempt
+ * fails. Initial Auto selection still balances task fit, latency, provider
+ * preference, and price; recovery must move upward instead of walking a
+ * catalog- or cost-ordered fallback list.
+ */
+function autoEscalationTier(
+  provider: AutoModelProvider,
+  modelId: string,
+): number {
+  const id = modelId.trim().toLowerCase();
+  if (provider === "local") {
+    return routingProfile(provider, modelId).capability;
+  }
+  if (/gpt-3\.5|nano|haiku|4o-mini/u.test(id)) return 1;
+  if (/mini|luna/u.test(id)) return 2;
+  if (/gpt-4\.1|gpt-4o|chatgpt-4o/u.test(id)) return 3;
+  if (/opus|pro|sol|(?:^|-)o[345](?:-|$)/u.test(id)) return 5;
+  if (/sonnet|terra|gpt-5/u.test(id)) return 4;
+  return Math.max(1, routingProfile(provider, modelId).capability);
+}
+
 function clampAutoEffort(args: {
   provider: AutoModelProvider;
   modelId: string;
@@ -745,6 +769,133 @@ function contextualAutoRoute(input: ResolveAutoModelInput): AutoRouteDecisionV1 
     }),
     reasonCodes: Array.from(new Set(reasonCodes)),
   };
+}
+
+function targetAutoEffortForComplexity(
+  score: number,
+): ModelReasoningEffortPreference {
+  return score <= 0
+    ? "none"
+    : score <= 2
+      ? "low"
+      : score <= 4
+        ? "medium"
+        : score <= 6
+          ? "high"
+          : "xhigh";
+}
+
+/**
+ * Resolve one bounded Auto execution plan for a single prompt/work item.
+ * The first route is the ordinary contextual Auto choice. Every later route
+ * is selected from a strictly higher capability tier and receives effort
+ * recalculated for the failed work rather than inheriting a session snapshot.
+ * User-authored fixed-model fallback chains intentionally do not participate.
+ */
+export function resolveAutoModelRoutePlan(
+  input: ResolveAutoModelInput,
+  maxAttempts = 3,
+): AutoRouteDecisionV1[] {
+  const primary = contextualAutoRoute(input);
+  if (!primary) return [];
+
+  const attemptLimit = Math.max(1, Math.min(5, Math.floor(maxAttempts)));
+  if (attemptLimit === 1) return [primary];
+
+  const lane: ResponseLane =
+    input.lane ?? (input.provider === "local" ? "local" : "online");
+  const hidden = new Set(sanitizeHiddenModelIds(input.hiddenModelIds));
+  const candidates = laneCatalogModels(input.catalog, lane)
+    .map((candidate) => ({ ...candidate, id: candidate.id.trim() }))
+    .filter(
+      (candidate) =>
+        candidate.id &&
+        (lane !== "online" || candidate.provider !== "ollama_cloud") &&
+        !hidden.has(candidate.id) &&
+        (!input.routingContext?.structuredOutput ||
+          candidate.supportsStructuredOutput !== false) &&
+        (!input.turboOnly ||
+          modelSupportsTurboMode(candidate.provider, candidate.id)),
+    );
+  const complexity = routingComplexity(input.routingContext);
+  const inputTokens = estimatedInputTokens(input.routingContext);
+  const outputTokens = Math.max(
+    1,
+    Math.round(input.routingContext?.outputTokens ?? 800),
+  );
+  const providerBias =
+    lane === "online"
+      ? clampOnlineAutoProviderBias(input.onlineAutoProviderBias)
+      : ONLINE_AUTO_PROVIDER_BIAS_DEFAULT;
+  const primaryKey = `${primary.provider}:${primary.model.toLowerCase()}`;
+  const ranked = candidates
+    .filter(
+      (candidate) =>
+        `${candidate.provider}:${candidate.id.toLowerCase()}` !== primaryKey,
+    )
+    .map((candidate) => {
+      const price =
+        input.priceForModel?.(candidate.provider, candidate.id) ?? null;
+      const estimatedCost = price
+        ? inputTokens * price.inputUsdPerMillion +
+          outputTokens * price.outputUsdPerMillion
+        : candidate.provider === "local"
+          ? 0
+          : Number.MAX_SAFE_INTEGER / 4;
+      return {
+        ...candidate,
+        price,
+        tier: autoEscalationTier(candidate.provider, candidate.id),
+        score:
+          estimatedCost +
+          routingProfile(candidate.provider, candidate.id).latency * 10_000 +
+          providerBiasScoreDelta(candidate.provider, providerBias),
+      };
+    });
+
+  const plan: AutoRouteDecisionV1[] = [primary];
+  let currentTier = autoEscalationTier(primary.provider, primary.model);
+  while (plan.length < attemptLimit) {
+    const higherTiers = ranked
+      .map((candidate) => candidate.tier)
+      .filter((tier) => tier > currentTier);
+    if (higherTiers.length === 0) break;
+    const nextTier = Math.min(...higherTiers);
+    const selected = ranked
+      .filter((candidate) => candidate.tier === nextTier)
+      .sort((left, right) =>
+        left.score - right.score ||
+        left.provider.localeCompare(right.provider) ||
+        left.id.localeCompare(right.id),
+      )[0];
+    if (!selected) break;
+    const reasonCodes = Array.from(
+      new Set<AutoRouteReasonCode>([
+        ...complexity.reasons,
+        "failure_escalation",
+        ...(selected.price ? ["known_cost_preferred" as const] : []),
+      ]),
+    );
+    plan.push({
+      v: AUTO_MODEL_ROUTING_POLICY_VERSION,
+      lane,
+      provider: selected.provider,
+      model: selected.id,
+      reasoningEffort: clampAutoEffort({
+        provider: selected.provider,
+        modelId: selected.id,
+        target: targetAutoEffortForComplexity(
+          complexity.score + plan.length * 2,
+        ),
+        simulatedEffortEnabled:
+          input.routingContext?.simulatedEffortEnabled === true,
+        ollamaNativeThinking: selected.thinking === true,
+      }),
+      reasonCodes,
+    });
+    currentTier = nextTier;
+  }
+  return plan;
 }
 
 export function resolveAutoModel(input: ResolveAutoModelInput): ResolvedAutoModel {

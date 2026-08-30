@@ -1296,7 +1296,13 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .producerGuestPresence > span { font: 850 clamp(.9rem, 2.4vw, 1.6rem)/1 system-ui; letter-spacing: .16em; }
 .producerGuestPresence > strong { max-width: 84%; overflow: hidden; font: 720 clamp(.55rem, 1vw, .72rem)/1.2 system-ui; text-overflow: ellipsis; white-space: nowrap; opacity: .74; }
 .producerGuestPresence[data-talking="true"] { box-shadow: inset 0 0 34px rgba(255,255,255,.1), 0 14px 36px rgba(0,0,0,.34), 0 0 42px color-mix(in srgb, var(--botcast-host-accent) 38%, transparent); }
-.nameplate { position: absolute; z-index: 8; bottom: 1.5%; min-width: 112px; display: grid; gap: 3px; border: 1px solid rgba(255,255,255,.13); border-radius: 999px; padding: 6px 14px 7px; text-align: center; color: rgba(255,255,255,.94); background: rgba(7,8,12,.72); backdrop-filter: blur(10px) saturate(1.08); font-size: clamp(.62rem, 1.1vw, .82rem); line-height: 1.05; box-shadow: 0 7px 20px rgba(0,0,0,.38); }
+.stageNameplates { position: absolute; inset: 0; z-index: 17; pointer-events: none; }
+.nameplate { position: absolute; bottom: clamp(58px, 8.5%, 72px); min-width: 112px; max-width: min(15%, 180px); display: grid; gap: 3px; overflow: hidden; border: 1px solid rgba(255,255,255,.13); border-radius: 999px; padding: 6px 14px 7px; color: rgba(255,255,255,.94); background: rgba(7,8,12,.72); backdrop-filter: blur(10px) saturate(1.08); box-shadow: 0 7px 20px rgba(0,0,0,.38); font-size: clamp(.62rem, 1.1vw, .82rem); line-height: 1.05; text-align: center; text-overflow: ellipsis; white-space: nowrap; transition: opacity 180ms ease, transform 180ms ease; }
+.hostNameplate { left: clamp(14px, 2.4%, 32px); }
+.guestNameplate { right: clamp(14px, 2.4%, 32px); }
+.stageNameplates[data-shot="left"] .guestNameplate,
+.stageNameplates[data-shot="right"] .hostNameplate { opacity: 0; transform: translateY(6px); }
+.nameplate[data-departed="true"] { opacity: .5; }
 .nameplate span { color: rgba(255,255,255,.48); font: 760 .48rem/1 system-ui; letter-spacing: .14em; text-transform: uppercase; }
 .stageMug { position: absolute; z-index: 9; width: max(6.2%, 58px); aspect-ratio: 8 / 9; display: grid; place-items: end center; transform: translate(-50%, -50%); pointer-events: none; will-change: transform; }
 .stageMug[data-sipping="true"] { animation: signalStageMugSip var(--signal-cup-sip-duration-ms, 1400ms) ease-in-out 1 both; }
@@ -1338,7 +1344,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .mugFallback { display: grid; place-items: center; width: 100%; height: 100%; font-size: clamp(1.5rem, 3vw, 2.5rem); filter: drop-shadow(0 7px 8px rgba(0,0,0,.5)); }
 .emptyChairLabel { position: absolute; z-index: 4; top: 47%; max-width: 150px; border: 1px solid rgba(255,255,255,.1); border-radius: 999px; padding: 7px 11px; color: rgba(255,255,255,.58); background: rgba(7,8,12,.52); backdrop-filter: blur(8px); text-align: center; font-size: .64rem; animation: signalEmptyChairReveal 260ms ease-out 640ms both; }
 
-.controlRoom { max-width: 1180px; margin: 12px auto 0; }
+.controlRoom { max-width: 1180px; margin: 8px auto 0; }
 .liveLayout .controlRoom { max-width: 1320px; }
 .signalMemoryReceiptDetail { max-width: 1320px; margin: 12px auto 0; }
 .producerControls, .replayTranscript { border: 1px solid var(--botcast-line); border-radius: 15px; background: var(--botcast-panel); box-shadow: 0 18px 44px var(--botcast-shadow); }
@@ -1365,11 +1371,11 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
   from { transform: translate(-50%, -50%) translate3d(var(--signal-cup-return-delta-x, 0), var(--signal-cup-return-delta-y, 0), 0); }
   to { transform: translate(-50%, -50%) translate3d(0, 0, 0); }
 }
-.producerControls { position: relative; display: grid; grid-template-columns: minmax(250px, .88fr) minmax(520px, 1.7fr); grid-template-areas: "header header" "composer cues"; gap: 16px; align-items: stretch; overflow: hidden; padding: 18px; background: radial-gradient(circle at 90% -42px, color-mix(in srgb, var(--botcast-accent) 16%, transparent), transparent 40%), var(--botcast-panel); }
-.producerDeskHeader { grid-area: header; display: grid; margin: -18px -18px 0; overflow: hidden; border-bottom: 1px solid rgba(0,0,0,.72); background: #090a12; box-shadow: inset 0 1px rgba(255,255,255,.07), inset 0 -12px 22px rgba(0,0,0,.22); }
+.producerControls { position: relative; display: grid; grid-template-columns: minmax(250px, .88fr) minmax(520px, 1.7fr); grid-template-areas: "header header" "composer cues"; gap: 10px; align-items: stretch; overflow: hidden; padding: 12px; background: radial-gradient(circle at 90% -42px, color-mix(in srgb, var(--botcast-accent) 16%, transparent), transparent 40%), var(--botcast-panel); }
+.producerDeskHeader { grid-area: header; display: grid; margin: -12px -12px 0; overflow: hidden; border-bottom: 1px solid rgba(0,0,0,.72); background: #090a12; box-shadow: inset 0 1px rgba(255,255,255,.07), inset 0 -12px 22px rgba(0,0,0,.22); }
 .producerCueReadout { display: flex; align-items: center; min-width: 0; }
 .producerCueReadout > i { flex: 0 0 auto; border-radius: 50%; }
-.producerDeskPrivateLine { position: relative; display: grid; grid-template-columns: minmax(190px, 1fr) minmax(220px, .9fr) auto; align-items: center; gap: 16px; min-height: 64px; padding: 10px 15px; overflow: hidden; background: linear-gradient(180deg, rgba(4,5,10,.97), rgba(12,13,21,.99)); }
+.producerDeskPrivateLine { position: relative; display: grid; grid-template-columns: minmax(190px, 1fr) minmax(220px, .9fr) auto; align-items: center; gap: 12px; min-height: 48px; padding: 7px 12px; overflow: hidden; background: linear-gradient(180deg, rgba(4,5,10,.97), rgba(12,13,21,.99)); }
 .producerDeskPrivateLine::after { position: absolute; top: 0; bottom: 0; left: -30%; width: 28%; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--prism-s) 54%, transparent), transparent); content: ""; opacity: 0; pointer-events: none; }
 .producerControls[data-producer-cue-phase="dispatching"] .producerDeskPrivateLine::after { animation: signalProducerLineFlight 720ms cubic-bezier(.2,.76,.22,1) both; }
 .producerCueReadout { gap: 9px; }
@@ -1391,8 +1397,8 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .producerControls[data-producer-cue-phase="failed"] .producerCueLifecycle li:first-child::before { background: #ff6159; box-shadow: 0 0 10px rgba(255,97,89,.45); }
 .producerDeskLineActions { position: relative; z-index: 1; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .producerDeskLineActions .producerInterruptButton:not(:disabled) { border-color: rgba(255,97,89,.48); background: linear-gradient(180deg, #6f302f, #3d1c20); box-shadow: inset 0 1px rgba(255,255,255,.15), 0 3px 0 #17080a, 0 0 16px rgba(255,97,89,.12); }
-.producerCueComposer, .producerCueBank { min-width: 0; border: 1px solid rgba(255,255,255,.12); border-radius: 16px; background: linear-gradient(145deg, rgba(255,255,255,.035), transparent 36%), color-mix(in srgb, var(--botcast-panel) 96%, #0a0b13); box-shadow: inset 0 1px rgba(255,255,255,.07), inset 0 -12px 22px rgba(0,0,0,.18), 0 8px 18px rgba(0,0,0,.2); }
-.producerCueComposer { grid-area: composer; display: grid; align-content: start; gap: 9px; padding: 15px; }
+.producerCueComposer, .producerCueBank { min-width: 0; border: 1px solid rgba(255,255,255,.12); border-radius: 13px; background: linear-gradient(145deg, rgba(255,255,255,.035), transparent 36%), color-mix(in srgb, var(--botcast-panel) 96%, #0a0b13); box-shadow: inset 0 1px rgba(255,255,255,.07), inset 0 -12px 22px rgba(0,0,0,.18), 0 8px 18px rgba(0,0,0,.2); }
+.producerCueComposer { grid-area: composer; display: grid; align-content: start; gap: 6px; padding: 10px; }
 .producerCueComposerHeader, .producerCueBankHeader { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .producerCueComposerHeader > div, .producerCueBankHeader > div { display: grid; gap: 3px; }
 .producerCueComposerHeader span, .producerCueBankHeader span { color: var(--botcast-muted); font: 700 .54rem/1 system-ui; letter-spacing: .14em; text-transform: uppercase; }
@@ -1400,7 +1406,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .producerCueComposerHeader small, .producerCueBankHeader small { color: var(--botcast-muted); font: 650 .58rem/1.2 system-ui; }
 .producerChannelLight { display: inline-flex; align-items: center; gap: 6px; }
 .producerChannelLight::before { width: 7px; height: 7px; border-radius: 50%; background: var(--botcast-accent); box-shadow: 0 0 10px color-mix(in srgb, var(--botcast-accent) 74%, transparent); content: ""; }
-.producerControls label { display: grid; gap: 7px; margin: 0; color: var(--botcast-muted); font-size: .7rem; }
+.producerControls label { display: grid; gap: 4px; margin: 0; color: var(--botcast-muted); font-size: .66rem; }
 .producerControls label > div { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .producerCueActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .producerImageAttachWrap { display: inline-flex; }
@@ -1408,21 +1414,21 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .producerImageAttach:disabled { opacity: .55; cursor: default; }
 .producerImageAttach svg { width: 14px; height: 14px; }
 .producerControls input, .producerControls textarea { width: 100%; border: 1px solid color-mix(in srgb, var(--botcast-line) 82%, #353746); border-radius: 9px; color: var(--botcast-ink); background: color-mix(in srgb, var(--botcast-field) 94%, #070811); box-shadow: inset 0 2px 7px rgba(0,0,0,.42), 0 1px rgba(255,255,255,.04); caret-color: var(--prism-s); }
-.producerControls input { min-height: 38px; font: 650 .78rem/1.2 system-ui; }
-.producerControls textarea { min-height: 64px; max-height: 110px; resize: vertical; font: 650 .78rem/1.35 system-ui; }
+.producerControls input { min-height: 34px; font: 650 .76rem/1.2 system-ui; }
+.producerControls textarea { min-height: 48px; max-height: 76px; resize: vertical; font: 650 .76rem/1.3 system-ui; }
 .producerQuoteCount { justify-self: end; color: #797b81; font: 650 .58rem/1 system-ui; }
 .producerCueClear { border: 1px solid var(--botcast-line); border-radius: 8px; padding: 6px 11px; color: var(--botcast-muted); background: transparent; font: 700 .66rem/1 system-ui; white-space: nowrap; cursor: pointer; transition: color 140ms ease, border-color 140ms ease, background 140ms ease; }
 .producerCueClear:hover:not(:disabled) { color: var(--botcast-ink); border-color: color-mix(in srgb, var(--botcast-accent) 42%, var(--botcast-line)); background: color-mix(in srgb, var(--botcast-accent) 7%, transparent); }
 .producerCueClear:disabled { opacity: .38; cursor: default; }
-.producerControls button { border: 1px solid rgba(255,255,255,.13); border-radius: 13px; color: inherit; background: rgba(255,255,255,.055); padding: 11px 13px; font: 780 .74rem/1.1 system-ui; cursor: pointer; box-shadow: inset 0 1px rgba(255,255,255,.045); transition: transform 150ms ease, border-color 150ms ease, background 150ms ease, box-shadow 150ms ease; }
+.producerControls button { border: 1px solid rgba(255,255,255,.13); border-radius: 10px; color: inherit; background: rgba(255,255,255,.055); padding: 8px 10px; font: 780 .7rem/1.1 system-ui; cursor: pointer; box-shadow: inset 0 1px rgba(255,255,255,.045); transition: transform 150ms ease, border-color 150ms ease, background 150ms ease, box-shadow 150ms ease; }
 .producerControls button:hover:not(:disabled) { transform: translateY(-2px); border-color: color-mix(in srgb, var(--botcast-accent) 42%, rgba(255,255,255,.18)); background: color-mix(in srgb, var(--botcast-accent) 10%, rgba(255,255,255,.07)); box-shadow: 0 9px 22px color-mix(in srgb, var(--botcast-accent) 12%, transparent), inset 0 1px rgba(255,255,255,.08); }
 .producerControls button:active:not(:disabled) { transform: translateY(1px) scale(.985); }
 .producerCueComposer button { min-width: 84px; }
 .producerCueSend { border-color: color-mix(in srgb, var(--prism-s) 44%, var(--botcast-line)) !important; background: linear-gradient(180deg, color-mix(in srgb, var(--prism-s) 28%, #18252a), #102329) !important; box-shadow: inset 0 1px rgba(255,255,255,.14), 0 3px 0 #061214, 0 0 14px color-mix(in srgb, var(--prism-s) 10%, transparent) !important; }
 .producerControls button[data-queued="true"]:not(.cueKey) { border-color: color-mix(in srgb, var(--botcast-accent) 72%, white); background: color-mix(in srgb, var(--botcast-accent) 20%, rgba(255,255,255,.06)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--botcast-accent) 24%, transparent), 0 10px 26px color-mix(in srgb, var(--botcast-accent) 18%, transparent), inset 0 1px rgba(255,255,255,.1); animation: signalCueQueued 720ms cubic-bezier(.2,.72,.18,1) both; }
-.producerCueBank { grid-area: cues; display: grid; grid-template-rows: auto 1fr; gap: 13px; padding: 15px; }
-.cueGrid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: stretch; gap: 10px; }
-.cueKey { --cue-color: var(--botcast-accent); position: relative; min-width: 0; min-height: 116px; border: 0 !important; border-radius: 15px !important; padding: 0 0 8px !important; color: #f4f2fb !important; background: linear-gradient(180deg, #080910, #05060a) !important; box-shadow: 0 9px 18px rgba(0,0,0,.42) !important; cursor: pointer; transition: transform 110ms ease, filter 140ms ease !important; }
+.producerCueBank { grid-area: cues; display: grid; grid-template-rows: auto auto minmax(58px, 1fr); gap: 8px; padding: 10px; }
+.cueGrid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: start; gap: 8px; }
+.cueKey { --cue-color: var(--botcast-accent); position: relative; min-width: 0; min-height: 86px; height: 86px; border: 0 !important; border-radius: 13px !important; padding: 0 0 7px !important; color: #f4f2fb !important; background: linear-gradient(180deg, #080910, #05060a) !important; box-shadow: 0 9px 18px rgba(0,0,0,.42) !important; cursor: pointer; transition: transform 110ms ease, filter 140ms ease !important; }
 .cueKey::before, .cueKey::after { position: absolute; z-index: 3; top: 8px; width: 5px; height: 5px; border-radius: 50%; background: #71737f; box-shadow: inset 0 1px rgba(255,255,255,.4), 0 1px 2px #000; content: ""; pointer-events: none; }
 .cueKey::before { left: 8px; }
 .cueKey::after { right: 8px; }
@@ -1433,14 +1439,24 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .refocusCue { --cue-color: #5ce8e2; }
 .cueKey:hover:not(:disabled) { transform: translateY(-2px) !important; filter: brightness(1.08); }
 .cueKey:active:not(:disabled), .cueKey[data-queued="true"] { transform: translateY(6px) !important; filter: brightness(1.12); }
-.cueKeyCap { position: absolute; inset: 0 0 8px; display: grid; grid-template-rows: 1fr auto; align-items: center; justify-items: center; gap: 5px; border: 1px solid rgba(255,255,255,.15); border-radius: 15px; padding: 15px 7px 11px; background: radial-gradient(circle at 50% 20%, color-mix(in srgb, var(--cue-color) 19%, transparent), transparent 48%), linear-gradient(160deg, #30323f 0%, #1a1c27 48%, #11121a 100%); box-shadow: inset 0 2px rgba(255,255,255,.12), inset 0 -8px 12px rgba(0,0,0,.38), 0 5px 0 #0c0d14, 0 8px 15px rgba(0,0,0,.36); transition: border-color 140ms ease, box-shadow 120ms ease, transform 110ms ease; }
+.cueKeyCap { position: absolute; inset: 0 0 7px; display: grid; grid-template-rows: 1fr auto; align-items: center; justify-items: center; gap: 3px; border: 1px solid rgba(255,255,255,.15); border-radius: 13px; padding: 9px 6px 8px; background: radial-gradient(circle at 50% 20%, color-mix(in srgb, var(--cue-color) 19%, transparent), transparent 48%), linear-gradient(160deg, #30323f 0%, #1a1c27 48%, #11121a 100%); box-shadow: inset 0 2px rgba(255,255,255,.12), inset 0 -8px 12px rgba(0,0,0,.38), 0 5px 0 #0c0d14, 0 8px 15px rgba(0,0,0,.36); transition: border-color 140ms ease, box-shadow 120ms ease, transform 110ms ease; }
 .cueKey:active:not(:disabled) .cueKeyCap, .cueKey[data-queued="true"] .cueKeyCap { border-color: color-mix(in srgb, var(--cue-color) 70%, white); box-shadow: inset 0 4px 12px rgba(0,0,0,.58), inset 0 0 20px color-mix(in srgb, var(--cue-color) 18%, transparent), 0 1px 0 #0c0d14, 0 0 20px color-mix(in srgb, var(--cue-color) 25%, transparent); transform: translateY(5px); }
-.cueKeySymbol { display: grid; width: 40px; height: 40px; place-items: center; border: 1px solid color-mix(in srgb, var(--cue-color) 42%, #4a4c59); border-radius: 50%; color: var(--cue-color); background: radial-gradient(circle, color-mix(in srgb, var(--cue-color) 13%, #11131c), #090a10 72%); box-shadow: inset 0 0 15px rgba(0,0,0,.7), 0 0 15px color-mix(in srgb, var(--cue-color) 14%, transparent); font-size: 19px; text-shadow: 0 0 10px var(--cue-color); }
+.cueKeySymbol { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid color-mix(in srgb, var(--cue-color) 42%, #4a4c59); border-radius: 50%; color: var(--cue-color); background: radial-gradient(circle, color-mix(in srgb, var(--cue-color) 13%, #11131c), #090a10 72%); box-shadow: inset 0 0 15px rgba(0,0,0,.7), 0 0 15px color-mix(in srgb, var(--cue-color) 14%, transparent); font-size: 15px; text-shadow: 0 0 10px var(--cue-color); }
 .cueKeyLabel { display: grid; justify-items: center; gap: 2px; text-align: center; }
 .cueKeyLabel strong { font: 650 .68rem/1.1 system-ui; }
 .cueKeyLabel small { color: #8f91a4; font: 650 .5rem/1 system-ui; letter-spacing: .05em; text-transform: uppercase; }
 .cueKeyLamp { position: absolute; z-index: 4; right: 10px; bottom: 16px; width: 7px; height: 7px; border-radius: 50%; background: #3a3c48; box-shadow: inset 0 1px 2px #000; }
 .cueKey[data-queued="true"] .cueKeyLamp { background: var(--cue-color); box-shadow: 0 0 11px var(--cue-color), inset 0 1px rgba(255,255,255,.7); }
+.guestAnnoyanceMeter { --signal-guest-annoyance-color: #ffb454; display: grid; grid-template-columns: minmax(132px, .38fr) minmax(0, 1fr); align-items: center; gap: 8px 10px; min-height: 58px; border: 1px solid color-mix(in srgb, var(--signal-guest-annoyance-color) 22%, rgba(255,255,255,.12)); border-radius: 13px; padding: 8px 10px; background: linear-gradient(145deg, color-mix(in srgb, var(--signal-guest-annoyance-color) 8%, transparent), transparent 48%), color-mix(in srgb, var(--botcast-panel) 96%, #090a11); box-shadow: inset 0 1px rgba(255,255,255,.065), inset 0 -10px 18px rgba(0,0,0,.18); }
+.guestAnnoyanceMeter[data-guest-walkoff-status="eligible"], .guestAnnoyanceMeter[data-guest-walkoff-status="departed"] { --signal-guest-annoyance-color: #ff7069; }
+.guestAnnoyanceMeter[data-guest-walkoff-status="suppressed"] { --signal-guest-annoyance-color: var(--prism-s); }
+.guestAnnoyanceMeterHeader { display: grid; gap: 3px; min-width: 0; }
+.guestAnnoyanceMeterHeader span { color: var(--botcast-ink); font: 720 .66rem/1.1 system-ui; letter-spacing: .09em; text-transform: uppercase; }
+.guestAnnoyanceMeterHeader small { color: var(--botcast-muted); font: 620 .56rem/1.25 system-ui; }
+.guestAnnoyanceTrack { position: relative; min-width: 0; height: 10px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--signal-guest-annoyance-color) 26%, rgba(255,255,255,.16)); border-radius: 999px; background: rgba(0,0,0,.34); box-shadow: inset 0 1px 3px rgba(0,0,0,.56); }
+.guestAnnoyanceFill { display: block; width: var(--signal-guest-annoyance-percent); height: 100%; border-radius: inherit; background: linear-gradient(90deg, color-mix(in srgb, var(--signal-guest-annoyance-color) 64%, #ffd66e), var(--signal-guest-annoyance-color)); box-shadow: 0 0 12px color-mix(in srgb, var(--signal-guest-annoyance-color) 48%, transparent); transition: width 180ms ease; }
+.guestAnnoyanceStatus { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--botcast-muted); font: 620 .56rem/1.2 system-ui; }
+.guestAnnoyanceStatus strong { color: color-mix(in srgb, var(--signal-guest-annoyance-color) 72%, white); font: 750 .59rem/1.2 system-ui; text-align: right; }
 .queuedCueStatus { display: grid; align-items: center; gap: 5px; margin: 0; border: 1px solid color-mix(in srgb, var(--botcast-accent) 28%, var(--botcast-line)); border-radius: 10px; padding: 7px 8px; color: color-mix(in srgb, var(--botcast-accent) 72%, white); background: color-mix(in srgb, var(--botcast-accent) 8%, transparent); font-size: .7rem; line-height: 1.35; }
 .queuedCueStatus p { margin: 0; }
 .producerCueComposer small { display: block; margin: 0; color: #797b81; font-size: .64rem; line-height: 1.35; }
@@ -1703,10 +1719,11 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .shell[data-theme="light"] .liveTopline .cutShowButton { border-color: rgba(164,42,37,.5); color: #fff; background: linear-gradient(135deg, #a82d29, #e24b3f); box-shadow: 0 7px 18px rgba(166,42,36,.2), inset 0 1px rgba(255,255,255,.16); }
 
 @media (min-width: 901px) and (min-height: 760px) {
-  .shell[data-live-episode="true"] .main { overflow-y: hidden; }
-  .shell[data-live-episode="true"] .liveLayout { height: 100%; box-sizing: border-box; overflow: hidden; }
-  .shell[data-live-episode="true"] .liveLayout .stageViewport { width: min(1320px, 100%, calc((100dvh - 360px) * 1.7778)); }
+  .shell[data-live-episode="true"] .main { overflow-y: auto; scrollbar-gutter: stable; }
+  .shell[data-live-episode="true"] .liveLayout { min-height: 100%; box-sizing: border-box; overflow: visible; padding-bottom: 12px; }
+  .shell[data-live-episode="true"] .liveLayout .stageViewport { width: min(1320px, 100%, calc((100dvh - 412px) * 1.7778)); }
   .shell[data-live-episode="true"] .controlRoom { width: 100%; }
+  .shell[data-live-episode="true"] .producerCueComposer > small { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .shell[data-producer-guest="true"] .main { overflow-y: auto; }
   .shell[data-producer-guest="true"] .liveLayout { height: auto; min-height: 100%; overflow: visible; padding-bottom: 0; }
 }
@@ -1801,6 +1818,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
   .producerDeskLineActions { grid-column: 2; grid-row: 1; }
   .cueGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cueGrid .cueKey:last-child { grid-column: 1 / -1; }
+  .guestAnnoyanceMeter { grid-template-columns: minmax(0, 1fr); }
   .setupGrid, .setupEpisodeImageDraft { grid-template-columns: 1fr; }
   .episodeTopic, .producerBrief, .guestBrief, .setupEpisodeImage { grid-column: auto; }
   .episodeLaunchRow { align-items: stretch; flex-direction: column; }
@@ -1846,11 +1864,16 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
     bottom: clamp(14px, 3%, 26px);
     width: min(86%, 680px);
   }
+  .nameplate {
+    bottom: calc(clamp(14px, 3%, 26px) + 86px);
+    max-width: min(28%, 180px);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .stageScene { transition-duration: 120ms; }
   .stageScene, .episodeOpenButton, .episodeParticipantChip, .episodeDeleteButton, .episodePreRoll, .preRollLockup, .showAudiencePulse, .showIdentityGearButton, .showIdentityGearButton span, .liveCaption, .liveCaption span { transition: none !important; animation: none !important; }
+  .guestAnnoyanceFill { transition: none !important; }
   .episodePreRoll[data-kind="intro"]::after { opacity: 0; animation: none !important; }
   .episodeOutro { opacity: 1; animation: none !important; }
   .producerControls button, .producerGuestSipButton { transition: none !important; }

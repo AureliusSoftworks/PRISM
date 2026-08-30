@@ -14,6 +14,7 @@ import {
   normalizeAutoRouteDecisionV1,
   reconcileHiddenModelIdsForCatalog,
   resolveAutoModel,
+  resolveAutoModelRoutePlan,
 } from "./modelRouting.ts";
 
 describe("default online model visibility", () => {
@@ -380,6 +381,124 @@ describe("resolveAutoModel", () => {
     assert.equal(resolved.provider, "openai");
     assert.equal(resolved.model, "gpt-4o-mini");
     assert.equal(resolved.autoRoute, undefined);
+  });
+
+  it("escalates failed Auto work only to strictly better task-fit models", () => {
+    const plan = resolveAutoModelRoutePlan({
+      provider: "openai",
+      lane: "online",
+      hiddenModelIds: [],
+      catalog: {
+        local: [{ id: "qwen3:14b" }],
+        online: [
+          { id: "gpt-3.5-turbo", provider: "openai" },
+          { id: "gpt-4o-mini", provider: "openai" },
+          { id: "gpt-4.1", provider: "openai" },
+          { id: "gpt-5.6-terra", provider: "openai" },
+          { id: "gpt-5.6-sol", provider: "openai" },
+        ],
+      },
+      routingContext: {
+        surface: "case-forge",
+        structuredOutput: true,
+        highStakes: true,
+        outputTokens: 4_000,
+        simulatedEffortEnabled: true,
+      },
+      priceForModel: () => ({
+        inputUsdPerMillion: 1,
+        outputUsdPerMillion: 1,
+      }),
+    });
+
+    assert.deepEqual(
+      plan.map((route) => route.model),
+      ["gpt-4.1", "gpt-5.6-terra", "gpt-5.6-sol"],
+    );
+    assert.ok(
+      plan.slice(1).every((route) =>
+        route.reasonCodes.includes("failure_escalation"),
+      ),
+    );
+    assert.ok(plan.every((route) => route.lane === "online"));
+    assert.ok(plan.every((route) => route.provider !== "local"));
+  });
+
+  it("keeps LOCAL Auto escalation local and bounded", () => {
+    const plan = resolveAutoModelRoutePlan({
+      provider: "local",
+      lane: "local",
+      hiddenModelIds: [],
+      catalog: {
+        local: [
+          { id: "gemma3:4b" },
+          { id: "qwen3:9b" },
+          { id: "qwen3:14b" },
+          { id: "qwen3:70b" },
+        ],
+        online: [{ id: "gpt-5.6-sol", provider: "openai" }],
+      },
+      routingContext: {
+        surface: "chat",
+        inputText: "Hello",
+        simulatedEffortEnabled: true,
+      },
+    });
+
+    assert.equal(plan.length, 3);
+    assert.ok(plan.every((route) => route.provider === "local"));
+    assert.deepEqual(
+      plan.map((route) => route.model),
+      ["gemma3:4b", "qwen3:9b", "qwen3:14b"],
+    );
+  });
+
+  it("allows Case Forge to request five upward Auto routes without changing the default ceiling", () => {
+    const input = {
+      provider: "openai" as const,
+      lane: "online" as const,
+      hiddenModelIds: [],
+      catalog: {
+        local: [],
+        online: [
+          { id: "gpt-4o-mini", provider: "openai" as const },
+          { id: "gpt-5.6-luna", provider: "openai" as const },
+          { id: "gpt-4.1", provider: "openai" as const },
+          { id: "gpt-5.6-terra", provider: "openai" as const },
+          { id: "gpt-5.6-sol", provider: "openai" as const },
+        ],
+      },
+      priceForModel: () => ({
+        inputUsdPerMillion: 1,
+        outputUsdPerMillion: 1,
+      }),
+    };
+
+    assert.equal(resolveAutoModelRoutePlan(input).length, 3);
+    assert.deepEqual(
+      resolveAutoModelRoutePlan(input, 5).map((route) => route.model),
+      [
+        "gpt-4o-mini",
+        "gpt-5.6-luna",
+        "gpt-4.1",
+        "gpt-5.6-terra",
+        "gpt-5.6-sol",
+      ],
+    );
+  });
+
+  it("does not repeat a top-tier Auto model when no better route exists", () => {
+    const plan = resolveAutoModelRoutePlan({
+      provider: "openai",
+      lane: "online",
+      hiddenModelIds: [],
+      catalog: {
+        local: [],
+        online: [{ id: "gpt-5.6-sol", provider: "openai" }],
+      },
+      routingContext: { highStakes: true, structuredOutput: true },
+    });
+    assert.equal(plan.length, 1);
   });
 
   describe("onlineAutoProviderBias", () => {

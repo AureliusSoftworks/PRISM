@@ -4,6 +4,7 @@ import {
 } from "@localai/shared";
 import { enqueueBottishVoice } from "./bottishVoice.ts";
 import { routeAudioElementToPrismOutput } from "./replayAudioMasterCapture.ts";
+import type { RoomAcousticsSend } from "./roomAcoustics.ts";
 import {
   debateExhibitImpactForExhibit,
   playDebateExhibitImpactSfx,
@@ -87,12 +88,14 @@ export async function playDebateMysteryTextVoice(args: {
   signal?: AbortSignal;
   text: string;
   volume: number;
+  roomAcoustics?: RoomAcousticsSend;
   play?: (args: {
     mode: Exclude<WhodunnitTextVoiceMode, "off">;
     seed: string;
     signal?: AbortSignal;
     text: string;
     volume: number;
+    roomAcoustics?: RoomAcousticsSend;
   }) => Promise<boolean>;
 }): Promise<boolean> {
   const volume = Math.max(0, Math.min(1, args.volume));
@@ -111,6 +114,7 @@ export async function playDebateMysteryTextVoice(args: {
         signal: args.signal,
         text: args.text,
         volume: playbackVolume,
+        roomAcoustics: args.roomAcoustics,
       });
     }
     if (args.mode !== "bottish") return false;
@@ -120,6 +124,9 @@ export async function playDebateMysteryTextVoice(args: {
       args.seed,
       true,
       playbackVolume,
+      undefined,
+      undefined,
+      args.roomAcoustics,
     );
     return true;
   } catch {
@@ -176,6 +183,7 @@ export async function playDebateMysteryDeskItemSfx(args: {
   moment: DebateMysteryDeskItemSfxMoment;
   enabled: boolean;
   volume: number;
+  roomAcoustics?: RoomAcousticsSend | null;
 }): Promise<boolean> {
   const plan = debateMysteryDeskItemSfxPlan(args);
   return playDebateExhibitImpactSfx({
@@ -183,6 +191,7 @@ export async function playDebateMysteryDeskItemSfx(args: {
     moment: "table_place",
     enabled: args.enabled,
     volume: plan.volume,
+    roomAcoustics: args.roomAcoustics,
   });
 }
 

@@ -964,39 +964,6 @@
 .orchestrationCard button:disabled { opacity: .45; cursor: wait; }
 .resultActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 
-.actionHistory {
-  display: grid;
-  gap: 6px;
-  width: min(390px, 92%);
-  padding: 9px;
-  border: 1px solid #ffffff14;
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--bg-surface, #151311) 92%, transparent);
-  pointer-events: auto;
-}
-.actionHistory article {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 2px 8px;
-  align-items: center;
-  padding: 7px 8px;
-  border-radius: 10px;
-  background: #ffffff08;
-}
-.actionHistory article > span { font: 680 .62rem/1.25 system-ui, sans-serif; }
-.actionHistory small { color: var(--fg-muted, #aaa4a0); font: .55rem/1.3 system-ui, sans-serif; }
-.actionHistory button {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  padding: 6px 9px;
-  border: 1px solid #8bdfff42;
-  border-radius: 999px;
-  color: #bcefff;
-  background: color-mix(in srgb, var(--companion-i) 5%, transparent);
-  font: 720 .56rem/1 system-ui, sans-serif;
-  cursor: pointer;
-}
-
 .composer {
   width: min(390px, 100%);
   display: grid;
@@ -1039,107 +1006,6 @@
 
 .sessionNoteComposer footer {
   align-items: center;
-}
-
-.synthesisPanel {
-  width: min(390px, calc(100vw - 24px));
-  gap: 12px;
-}
-
-.personalNotesComposer {
-  max-height: min(610px, calc(100vh - 28px));
-}
-
-.personalNotesRail {
-  display: flex;
-  gap: 7px;
-  overflow-x: auto;
-  padding: 1px 1px 5px;
-  scrollbar-width: thin;
-}
-
-.personalNoteChoice {
-  min-width: 138px;
-  max-width: 188px;
-  display: grid;
-  gap: 4px;
-  padding: 9px 10px !important;
-  border: 1px solid #ffffff16 !important;
-  border-radius: 12px !important;
-  color: var(--fg-muted, #aaa4a0) !important;
-  background: #ffffff07 !important;
-  text-align: left;
-}
-
-.personalNoteChoice[data-selected="true"] {
-  border-color: #8bdfff66 !important;
-  color: var(--fg, #edf3f8) !important;
-  background: color-mix(in srgb, var(--companion-i) 9%, transparent) !important;
-}
-
-.personalNoteChoice span {
-  overflow: hidden;
-  font: 720 .64rem/1.25 system-ui, sans-serif;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.personalNoteChoice small {
-  color: var(--fg-subtle, #77716d);
-  font-size: .52rem;
-}
-
-.personalNoteTitle {
-  width: 100%;
-  padding: 8px 9px;
-  border: 0;
-  border-bottom: 1px solid #ffffff18;
-  outline: 0;
-  color: var(--fg, #edf3f8);
-  background: transparent;
-  font: 720 .78rem/1.35 system-ui, sans-serif;
-}
-
-.personalNoteTitle::placeholder {
-  color: var(--fg-muted, #aaa4a0);
-}
-
-.personalNoteTitle:focus {
-  border-bottom-color: #8bdfff73;
-}
-
-.personalNoteBlocked,
-.personalNoteEmpty {
-  padding: 18px 12px;
-  border: 1px dashed #ffffff1c;
-  border-radius: 13px;
-  color: var(--fg-muted, #aaa4a0);
-  background: #ffffff05;
-  font: .64rem/1.45 system-ui, sans-serif;
-  text-align: center;
-}
-
-.composer .noteSecondaryButton {
-  padding: 5px 8px;
-  border: 1px solid #ffffff1c;
-  color: #bcefff;
-  background: #ffffff08;
-  font-size: .56rem;
-}
-
-.composer .noteDeleteButton {
-  flex: 0 0 auto;
-  padding: 6px 8px;
-  border: 1px solid #ff818133;
-  color: #ffb4b4;
-  background: #ff64640a;
-  font-size: .56rem;
-}
-
-.composer .noteDeleteButton[data-confirm="true"] {
-  border-color: #ff818177;
-  color: #fff0f0;
-  background: #ff646424;
 }
 
 .refractPrompt {
@@ -1293,144 +1159,24 @@
 .composer textarea::placeholder { color: var(--fg-muted, #aaa4a0); }
 .composerStatus,
 .composer footer { display: flex; align-items: center; gap: 8px; }
-.synthesisRefractRow {
-  width: 100%;
-  display: grid;
-  gap: 8px;
-  padding: 2px 0 3px;
-  color: var(--fg, #edf3f8);
-}
-.synthesisRefractHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-.synthesisRefractIdentity {
-  min-width: 0;
-  color: #9ceaff;
-  font: 780 .56rem/1.25 system-ui, sans-serif;
-  letter-spacing: .09em;
-  text-transform: uppercase;
-}
-.synthesisRefractGuidance {
-  display: grid;
-  gap: 3px;
-}
-.synthesisRefractGuidance p {
-  margin: 0;
-  color: var(--fg-muted, #aaa4a0);
-  font: .55rem/1.4 system-ui, sans-serif;
-}
-.synthesisRefractGuidance .synthesisRefractPrivacy {
-  color: var(--fg-subtle, #77716d);
-}
-.synthesisRefractGuidance .synthesisRefractPrivacy[data-lane="local"] {
-  color: #86dbe9;
-}
-.synthesisRefractGuidance .synthesisRefractPrivacy[data-lane="online"] {
-  color: #d9b873;
-}
-.synthesisRecentRail {
-  display: grid;
-  gap: 7px;
-}
-.synthesisRecentRail > header > span {
-  color: var(--fg-muted, #aaa4a0);
-  font: 780 .56rem/1.2 system-ui, sans-serif;
-  letter-spacing: .09em;
-  text-transform: uppercase;
-}
-.synthesisRecentItems {
-  display: flex;
-  min-height: 76px;
-  gap: 8px;
-  overflow-x: auto;
-  padding: 1px 1px 5px;
-  scrollbar-width: thin;
-}
-.synthesisRecentItem {
-  width: 76px;
-  min-width: 76px;
-  height: 76px;
-  padding: 0 !important;
-  overflow: hidden;
-  border: 1px solid #ffffff24 !important;
-  border-radius: 12px !important;
-  background: #090b10 !important;
-  box-shadow: 0 8px 16px -12px #000d;
-}
-.synthesisRecentItem:hover,
-.synthesisRecentItem:focus-visible {
-  outline: none;
-  border-color: color-mix(in srgb, var(--companion-s) 68%, white) !important;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--companion-s) 22%, transparent);
-}
-.synthesisRecentItem img {
-  width: 100%;
-  height: 100%;
-  display: block;
-  object-fit: cover;
-}
-.synthesisRecentStatus {
-  align-self: center;
-  color: var(--fg-subtle, #77716d);
-  font: .58rem/1.3 system-ui, sans-serif;
-}
-.refractLaneBadge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex: 0 0 auto;
-  border: 1px solid #ffffff35;
-  border-radius: 999px;
-  padding: 3px 8px;
-  color: #eff8ff;
-  background: #ffffff10;
-  font: 700 .5rem/1.2 system-ui, sans-serif;
-  letter-spacing: .11em;
-  text-transform: uppercase;
-}
-.refractLaneBadge strong {
-  color: inherit;
-  font: inherit;
-}
-.refractLaneBadge[data-lane="local"] {
-  border-color: #4fd0e733;
-  color: #9df1ff;
-  background: #4fd0e70f;
-}
-.refractLaneBadge[data-lane="online"] {
-  border-color: #d0a84f33;
-  color: #ffd89f;
-  background: #d0a84f12;
-}
 .composer footer { justify-content: flex-end; }
 .composer small { flex: 1 1 auto; color: var(--fg-subtle, #77716d); font: .56rem/1.3 system-ui, sans-serif; }
 .composer button { padding: 7px 12px; border: 0; border-radius: 999px; color: #071013; background: #9ceaff; font: 780 .65rem/1 system-ui, sans-serif; cursor: pointer; }
 .composer button:disabled { cursor: default; opacity: .42; }
-.composer .privacyToggle,
-.composer .continueButton {
+.persistenceState {
   flex: 0 0 auto;
-  padding: 6px 8px;
-  border: 1px solid #ffffff1c;
-  color: var(--fg-muted, #aaa4a0);
-  background: #ffffff09;
-  font-size: .57rem;
+  border: 1px solid #8bdfff36;
+  border-radius: 999px;
+  padding: 4px 7px;
+  color: #bcefff;
+  background: color-mix(in srgb, var(--companion-i) 6%, transparent);
+  font: 760 .54rem/1 system-ui, sans-serif;
 }
-.composer .privacyToggle[data-enabled="true"] {
+.persistenceState[data-private="true"] {
   border-color: color-mix(in srgb, var(--companion-m) 48%, transparent);
   color: #e4dcff;
   background: color-mix(in srgb, var(--companion-m) 11%, transparent);
 }
-.composer .continueButton {
-  margin-left: auto;
-  border-color: #8bdfff42;
-  color: #bcefff;
-  background: color-mix(in srgb, var(--companion-i) 6%, transparent);
-}
-.composer .privacyToggle:hover,
-.composer .continueButton:hover { border-color: #8bdfff72; color: var(--fg, #edf3f8); }
 .composer .voiceToggle {
   display: inline-flex;
   flex: 0 0 auto;
@@ -1442,15 +1188,6 @@
   background: #ffffff09;
   font-size: .57rem;
 }
-.composer .historyToggle {
-  flex: 0 0 auto;
-  padding: 6px 8px;
-  border: 1px solid #ffffff1c;
-  color: var(--fg-muted, #aaa4a0);
-  background: #ffffff09;
-  font-size: .57rem;
-}
-.composer .historyToggle:hover { border-color: #8bdfff72; color: var(--fg, #edf3f8); }
 .composer .voiceToggle[data-enabled="true"] {
   border-color: #8bdfff42;
   color: #bcefff;
@@ -1461,9 +1198,6 @@
   color: var(--fg, #edf3f8);
 }
 .composer .voiceToggle:focus-visible,
-.composer .historyToggle:focus-visible,
-.composer .privacyToggle:focus-visible,
-.composer .continueButton:focus-visible,
 .composer .sendButton:focus-visible {
   outline: 2px solid #ffffff;
   outline-offset: 2px;
@@ -1679,43 +1413,12 @@
 }
 
 :global([data-theme="light"]) .thinking p,
-:global([data-theme="light"]) .synthesisRefractIdentity,
 :global([data-theme="light"]) .sessionNoteHeading > small,
 :global([data-theme="light"]) .sessionNoteComposer footer > small,
 :global([data-theme="light"]) .composer small,
 :global([data-theme="light"]) .refractTutorial p,
 :global([data-theme="light"]) .refractPrompt small {
   color: #52677d;
-}
-
-:global([data-theme="light"]) .refractLaneBadge {
-  border-color: #54708b3a;
-  color: #36516a;
-  background: #ffffff9e;
-}
-
-:global([data-theme="light"]) .refractLaneBadge[data-lane="local"] {
-  border-color: #0f7282;
-  color: #0b4b56;
-  background: #b6f3ff7d;
-}
-
-:global([data-theme="light"]) .refractLaneBadge[data-lane="online"] {
-  border-color: #8b6c21;
-  color: #5b4b17;
-  background: #ffe7ad77;
-}
-
-:global([data-theme="light"])
-  .synthesisRefractGuidance
-  .synthesisRefractPrivacy[data-lane="local"] {
-  color: #0b5f6d;
-}
-
-:global([data-theme="light"])
-  .synthesisRefractGuidance
-  .synthesisRefractPrivacy[data-lane="online"] {
-  color: #6b5318;
 }
 
 :global([data-theme="light"]) .markdown a,
@@ -1729,16 +1432,14 @@
 
 :global([data-theme="light"]) .copyButton,
 :global([data-theme="light"]) .actions button,
-:global([data-theme="light"]) .orchestrationCard button,
-:global([data-theme="light"]) .actionHistory button {
+:global([data-theme="light"]) .orchestrationCard button {
   border-color: #477c9a48;
   color: #24546f;
   background: #ffffff9e;
 }
 
 :global([data-theme="light"]) .userNotesCard,
-:global([data-theme="light"]) .orchestrationCard,
-:global([data-theme="light"]) .actionHistory {
+:global([data-theme="light"]) .orchestrationCard {
   border-color: #54708b32;
   color: #1f3148;
   background:
@@ -1755,23 +1456,16 @@
 :global([data-theme="light"]) .userNotesHeadline,
 :global([data-theme="light"]) .userNotesList,
 :global([data-theme="light"]) .orchestrationCard p,
-:global([data-theme="light"]) .orchestrationCard small,
-:global([data-theme="light"]) .actionHistory small {
+:global([data-theme="light"]) .orchestrationCard small {
   color: #52677d;
 }
 
-:global([data-theme="light"]) .actionHistory article {
-  background: #ffffff8c;
-}
-
 :global([data-theme="light"]) .composer textarea,
-:global([data-theme="light"]) .personalNoteTitle,
 :global([data-theme="light"]) .refractPrompt input {
   color: #1f3148;
 }
 
-:global([data-theme="light"]) .composer textarea::placeholder,
-:global([data-theme="light"]) .personalNoteTitle::placeholder {
+:global([data-theme="light"]) .composer textarea::placeholder {
   color: #6b7d90;
 }
 
@@ -1780,26 +1474,20 @@
   background: #ffffffae;
 }
 
-:global([data-theme="light"]) .composer .privacyToggle,
-:global([data-theme="light"]) .composer .continueButton,
-:global([data-theme="light"]) .composer .voiceToggle,
-:global([data-theme="light"]) .composer .historyToggle,
-:global([data-theme="light"]) .composer .noteSecondaryButton,
-:global([data-theme="light"]) .personalNoteChoice {
+:global([data-theme="light"]) .composer .voiceToggle {
   border-color: #54708b2d !important;
   color: #36516a !important;
   background: #ffffff91 !important;
 }
 
-:global([data-theme="light"]) .personalNoteChoice[data-selected="true"] {
-  border-color: color-mix(in srgb, var(--companion-s) 48%, #54708b) !important;
-  color: #1f3148 !important;
-  background: color-mix(in srgb, var(--companion-s) 13%, #ffffff) !important;
+:global([data-theme="light"]) .persistenceState {
+  border-color: #477c9a48;
+  color: #24546f;
+  background: #ffffff9e;
 }
 
-:global([data-theme="light"]) .personalNoteBlocked,
-:global([data-theme="light"]) .personalNoteEmpty {
-  border-color: #54708b33;
-  color: #52677d;
-  background: #ffffff80;
+:global([data-theme="light"]) .persistenceState[data-private="true"] {
+  border-color: #7159a05c;
+  color: #513c78;
+  background: #f2eaffbc;
 }
