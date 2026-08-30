@@ -11,6 +11,7 @@ import {
   imageAssetStorageSummary,
   getBotImageAssetLibraryIndex,
   getImageAssetSetForCatalog,
+  listImageAssetItemReuseCandidates,
   listImageAssetCatalog,
   rebuildImageBotAssociations,
   synchronizeImageAssetCatalog,
@@ -85,6 +86,48 @@ function makeDb(): DatabaseSync {
 }
 
 describe("local image asset catalog", () => {
+  it("exposes ready Item metadata for Case Forge's relevance-gated reuse", () => {
+    const db = makeDb();
+    try {
+      seedUser(db, "user-1");
+      seedUser(db, "user-2");
+      seedImage(db, {
+        id: "item-lantern",
+        userId: "user-1",
+        origin: "signal_item",
+        purpose: "signal_item",
+        prompt: "Weathered brass lantern from a lakeside cabin boathouse",
+      });
+      seedImage(db, {
+        id: "other-user-item",
+        userId: "user-2",
+        origin: "signal_item",
+        purpose: "signal_item",
+        prompt: "Private silver key",
+      });
+
+      const candidates = listImageAssetItemReuseCandidates(db, "user-1");
+
+      assert.equal(candidates.length, 1);
+      assert.deepEqual(candidates[0], {
+        assetSetId: candidates[0]!.assetSetId,
+        imageId: "item-lantern",
+        localRelPath: "generated-images/user-1/item-lantern.png",
+        title: "Weathered brass lantern from a lakeside cabin boathouse",
+        prompt: "Weathered brass lantern from a lakeside cabin boathouse",
+        revisedPrompt: null,
+        automaticTags: candidates[0]!.automaticTags,
+        playerTags: [],
+        sourceContext: {},
+        createdAt: NOW,
+      });
+      assert.ok(candidates[0]!.automaticTags.includes("lantern"));
+      assert.match(candidates[0]!.prompt, /lakeside cabin/u);
+    } finally {
+      db.close();
+    }
+  });
+
   it("idempotently groups only authoritative Signal Light/Dark pairs", () => {
     const db = makeDb();
     try {

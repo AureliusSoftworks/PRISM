@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   BOT_IDENTITY_SHAPESHIFT_TRANSITION_MS,
+  applyBotIdentityShapeshiftAccentMapV1,
   applyBotIdentityShapeshiftResponseV1,
   botIdentityShapeshiftHolderPromptV1,
   botIdentityShapeshiftTargetChangesV1,
@@ -10,6 +11,7 @@ import {
   createBotIdentityShapeshiftStateV1,
   normalizeBotIdentityShapeshiftStateV1,
   pickBotIdentityShapeshiftCandidateIndexV1,
+  resolveBotIdentityShapeshiftVoiceV1,
 } from "./botIdentityShapeshift.ts";
 import {
   botPowerShapeshiftsIdentityV1,
@@ -30,7 +32,32 @@ function shapeshiftState() {
     targetPersonaPrompt: "A terse lunar cartographer who speaks in bearings.",
     targetFace: { faceEyeCharacter: "◉", faceMouthCharacter: "_" },
     targetAvatarDetails: null,
-    targetVoice: { v: 2, enabled: true, baseVoiceId: "voice-4", pitch: 0.2 },
+    holderVoice: {
+      v: 2,
+      enabled: true,
+      baseVoiceId: "voice-2",
+      elevenLabsVoiceId: "shannon-provider-voice",
+      elevenLabsEffect: "echo",
+      voiceEffectExplicit: true,
+      pitch: -0.35,
+      warmth: 0.4,
+    },
+    targetVoice: {
+      v: 2,
+      enabled: true,
+      baseVoiceId: "voice-4",
+      elevenLabsVoiceId: "terry-provider-voice",
+      elevenLabsEffect: "deep-space",
+      voiceEffectExplicit: true,
+      pitch: 0.2,
+      pronunciationBase: "en-GB",
+      accentDefinitionId: "irish-english",
+      pronunciationMapPoint: { x: 0.83, y: 0.19 },
+      speechprintInfluence: "irish-english",
+      speechprintStrength: "strong",
+      speechprintVariationSeed: "terry-irish-v1",
+      accentPronunciationEnabled: true,
+    },
     targetColor: "#ff00aa",
     targetGlyph: "lucideOrbit",
     targetVoicePreset: "playful",
@@ -91,7 +118,8 @@ test("identity shapeshift snapshot stays public-form only and sticky until targe
   assert.equal(normalized?.targetGlyph, "lucideOrbit");
   assert.equal(normalized?.targetVoicePreset, "playful");
   assert.equal(normalized?.targetFrameMaterialSeed, "bot-frame-material:id:mara");
-  assert.equal(normalized?.targetVoice.elevenLabsEffect, "chorus");
+  assert.equal(normalized?.holderVoice?.baseVoiceId, "voice-2");
+  assert.equal(normalized?.targetVoice.baseVoiceId, "voice-4");
   assert.equal(botIdentityShapeshiftTargetChangesV1(state, "mara"), false);
   assert.equal(botIdentityShapeshiftTargetChangesV1(state, "sol"), true);
   assert.match(
@@ -105,6 +133,37 @@ test("identity shapeshift snapshot stays public-form only and sticky until targe
   );
 });
 
+test("identity shapeshift retains Shannon voice identity and overlays only Terry Accent Map", () => {
+  const state = shapeshiftState();
+  const voice = resolveBotIdentityShapeshiftVoiceV1(state, null, null);
+  assert.equal(voice.baseVoiceId, "voice-2");
+  assert.equal(voice.elevenLabsVoiceId, "shannon-provider-voice");
+  assert.equal(voice.elevenLabsEffect, "echo");
+  assert.equal(voice.pitch, -0.35);
+  assert.equal(voice.warmth, 0.4);
+  assert.equal(voice.pronunciationBase, "en-GB");
+  assert.equal(voice.accentDefinitionId, "irish-english");
+  assert.deepEqual(voice.pronunciationMapPoint, { x: 0.83, y: 0.19 });
+  assert.equal(voice.speechprintInfluence, "irish-english");
+  assert.equal(voice.speechprintStrength, "strong");
+  assert.equal(voice.speechprintVariationSeed, "terry-irish-v1");
+  assert.equal(voice.accentPronunciationEnabled, true);
+
+  const disabled = applyBotIdentityShapeshiftAccentMapV1(
+    state.holderVoice,
+    { ...state.targetVoice, accentPronunciationEnabled: false },
+  );
+  assert.equal(disabled.baseVoiceId, "voice-2");
+  assert.equal(disabled.elevenLabsVoiceId, "shannon-provider-voice");
+  assert.equal(disabled.elevenLabsEffect, "echo");
+  assert.equal(disabled.accentPronunciationEnabled, false);
+  assert.equal(disabled.accentDefinitionId, undefined);
+  assert.equal(disabled.pronunciationMapPoint, undefined);
+  assert.equal(disabled.pronunciationBase, "follow-voice");
+  assert.equal(disabled.speechprintInfluence, "none");
+  assert.equal(disabled.speechprintVariationSeed, "natural-v1");
+});
+
 test("identity shapeshift response rewrite claims the borrowed form once", () => {
   const state = shapeshiftState();
   const first = applyBotIdentityShapeshiftResponseV1(
@@ -113,6 +172,14 @@ test("identity shapeshift response rewrite claims the borrowed form once", () =>
     true,
   );
   assert.match(first, /^I am Mara Vale\./u);
+  assert.equal(
+    applyBotIdentityShapeshiftResponseV1(
+      "I am Mara Vale. This is Veil of Voices, and I am Mara Vale. Across from me sits Forgetful Forrest.",
+      state,
+      true,
+    ),
+    "I am Mara Vale. This is Veil of Voices. Across from me sits Forgetful Forrest.",
+  );
   const later = applyBotIdentityShapeshiftResponseV1(
     "I am Mara Vale. Bearing north looks clear.",
     state,

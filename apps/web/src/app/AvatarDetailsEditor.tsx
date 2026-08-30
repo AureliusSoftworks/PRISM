@@ -375,7 +375,7 @@ const AvatarDetailsEditorSession = forwardRef<
   const paintedPixels = avatarDetailsPaintColorPixelCount(paintColorMap);
   const coveragePercent =
     avatarDetailsPaintColorCoveragePercent(paintColorMap);
-  const guideInk = theme === "light" ? "#050608" : "#ffffff";
+  const guideInk = normalizedAccentColor;
   const faceGuideStyle = {
     ...BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE,
     "--coffee-plate-emoji-nudge-y": "clamp(-5px, -2.6%, -2px)",
@@ -608,7 +608,7 @@ const AvatarDetailsEditorSession = forwardRef<
     const canvas = screenGuideRef.current;
     const context = canvas?.getContext("2d", { alpha: true });
     if (!canvas || !context) return;
-    const guideValue = theme === "light" ? 0 : 255;
+    const guideValue = 255;
     const imageData = context.createImageData(
       AVATAR_DETAILS_CANVAS_SIZE,
       AVATAR_DETAILS_CANVAS_SIZE,
@@ -630,7 +630,7 @@ const AvatarDetailsEditorSession = forwardRef<
       }
     }
     context.putImageData(imageData, 0, 0);
-  }, [theme]);
+  }, []);
 
   useEffect(() => {
     drawWorkingCanvas(workingRef.current);

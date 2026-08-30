@@ -50,6 +50,7 @@ import type {
   BotcastGuestPresenceMode,
   BotcastGuestInterruptionContext,
   BotcastHostRedirectContext,
+  BotcastProducerPivotPerformanceV1,
   BotcastImageContextV1,
   BotcastMessage,
   BotcastMoodBoostEventV1,
@@ -138,6 +139,7 @@ import {
   BOTCAST_PRODUCER_DIRECT_QUOTE_MAX,
   botcastDirectQuoteTurnMaxTokens,
   botcastActiveProducerCueFromEvents,
+  botcastProducerCuePriority,
   botcastEpisodeImageFallbackEmoji,
   botcastEpisodeImageSpokenReference,
   botcastProducerDirectQuoteUpdateLeadInAt,
@@ -188,7 +190,10 @@ import {
   botFalseNameResponseConflictsV1,
   botFalseNameSelfCueV1,
   botIdentityMirrorFaceV1,
+  botIdentityPresentationColorV1,
+  botIdentityPresentationFrameMaterialSeedV1,
   botIdentityPresentationGlyphV1,
+  botIdentityPresentationVoicePresetV1,
   botIdentityMirrorHolderPromptV1,
   botIdentityMirrorObserverPromptV1,
   botIdentityMirrorOriginalCorrectionRequiredV1,
@@ -216,6 +221,8 @@ import {
   normalizeBotcastLogoPlacement,
   parseStoredBotAvatarDetailsV1,
   resolveBotAudioVoiceProfileV1,
+  resolveBotIdentityPublicPresentationV1,
+  resolveBotIdentityShapeshiftVoiceV1,
   resolveBotPronunciationMapPointV1,
   rewriteBotFalseNameResponseV1,
   applyBotPowerEternalIntroductionResponseV1,
@@ -294,6 +301,8 @@ import {
   botcastHostInterruptionLinesForSeed,
   botcastEchoHostInterruptPhrase,
   botcastInterruptedGuestContent,
+  botcastInterruptedHostContent,
+  planBotcastProducerPivotPerformanceV1,
   botcastPendingCrosstalkReclaimV1,
   botcastLatestSpeechCopyReactionSourceV1,
   botCrosstalkPrimarySpeakerContent,
@@ -9775,6 +9784,7 @@ function persistProducerCue(
   delivery: BotcastProducerCueDelivery,
   now: string,
   hostRedirect?: BotcastHostRedirectContext,
+  pivotPerformance?: BotcastProducerPivotPerformanceV1 | null,
   guestInterruption?: BotcastGuestInterruptionContext,
   redelivery = false,
   cueId?: string,
@@ -9789,10 +9799,14 @@ function persistProducerCue(
     ...normalizedCue,
     ...(cueId ? { cueId, lifecycle: "dispatching" } : {}),
     delivery,
+    priority: botcastProducerCuePriority(normalizedCue),
     audience: "host",
     ...(redelivery ? { redelivery: true } : {}),
     ...(delivery === "redirect_host" && hostRedirect
-      ? { interruptedMessageId: hostRedirect.messageId }
+      ? {
+          interruptedMessageId: hostRedirect.messageId,
+          ...(pivotPerformance ? { pivotPerformance } : {}),
+        }
       : {}),
     ...(delivery === "interrupt_guest" && guestInterruption
       ? {
@@ -9886,6 +9900,7 @@ export function queueBotcastProducerCue(
     cueId: randomId(12),
     lifecycle: "queued",
     delivery: "next_host_turn",
+    priority: botcastProducerCuePriority(normalizedCue),
     audience: "host",
   }, now);
   db.prepare(
@@ -9990,20 +10005,29 @@ function applyBotcastHostRedirect(
       "A host redirect must preserve an audience-heard prefix of the current line.",
     );
   }
+  const interruptedContent = botcastInterruptedHostContent(latest.content, {
+    spokenContent,
+    ...(redirect.cadence ? { cadence: redirect.cadence } : {}),
+  });
+  if (!interruptedContent) {
+    throw new Error(
+      "A host redirect must preserve an audience-heard prefix of the current line.",
+    );
+  }
   if (options.preserveInterruptionSource) {
     db.prepare(
       `UPDATE botcast_messages
           SET content = ?, voice_performance_text = NULL,
               interruption_source_content = COALESCE(interruption_source_content, ?)
         WHERE id = ? AND user_id = ? AND episode_id = ?`,
-    ).run(spokenContent, latest.content, latest.id, userId, episode.id);
+    ).run(interruptedContent, latest.content, latest.id, userId, episode.id);
   } else {
     db.prepare(
       `UPDATE botcast_messages
           SET content = ?, voice_performance_text = NULL,
               interruption_source_content = NULL
         WHERE id = ? AND user_id = ? AND episode_id = ?`,
-    ).run(spokenContent, latest.id, userId, episode.id);
+    ).run(interruptedContent, latest.id, userId, episode.id);
   }
   return getBotcastEpisode(db, userId, episode.id);
 }
@@ -10181,6 +10205,8 @@ export interface BotcastPromptBuildArgs {
   theme?: BotPowerResolvedThemeV1;
   cue?: BotcastProducerCue;
   cueDelivery?: BotcastProducerCueDelivery;
+  /** Saved live-pivot cadence and optional vocal Foley for this redirect. */
+  producerPivotPerformance?: BotcastProducerPivotPerformanceV1;
   /** Persona reception that replaces verbatim direct-quote delivery. */
   producerQuoteStance?: "twisted" | "refused";
   interruptionBridgeLine?: string;
@@ -10394,7 +10420,7 @@ function botcastPairNarrative(args: {
     const originalName = identityMirror.targetBotId === args.sourceBotId
       ? args.sourceName
       : args.targetName;
-    return `On Signal, ${holderName} stole ${originalName}'s public identity and treated ${originalName} as an impostor throughout their completed episode.`;
+    return `On Signal, ${holderName} knowingly wore ${originalName}'s public presentation and copied eligible public Powers while remaining themselves in persona and voice.`;
   }
   return interruptionCount >= 2
     ? `On Signal, ${args.sourceName} completed an episode with ${args.targetName} about "${args.episode.topic}" after ${args.targetName} repeatedly interrupted ${args.sourceName}.`
@@ -10467,9 +10493,6 @@ function botcastPairRelationshipUpdate(args: {
     firstBotId: args.sourceBotId,
     secondBotId: args.targetBotId,
   });
-  const sourceWasAccusedOriginal =
-    identityMirror?.holderBotId === args.targetBotId &&
-    identityMirror.targetBotId === args.sourceBotId;
   let nextScore = previousScore;
   if (sourceWalkedAfterInterruptions && irritation >= DIRECTIONAL_IRRITATION_MAX) {
     nextScore = Math.min(previousScore - 30, 18);
@@ -10482,16 +10505,24 @@ function botcastPairRelationshipUpdate(args: {
   } else if (targetWalkedAfterInterruptions) {
     // The interrupter's perspective can stay milder than the bot who left.
     nextScore = previousScore - 4;
-  } else if (sourceWasAccusedOriginal) {
-    nextScore = previousScore - 12;
   }
+  const identityMirrorReason = identityMirror
+    ? (() => {
+        const holderName = identityMirror.holderBotId === args.sourceBotId
+          ? args.sourceName
+          : args.targetName;
+        const targetName = identityMirror.targetBotId === args.sourceBotId
+          ? args.sourceName
+          : args.targetName;
+        return `${holderName} knowingly wore ${targetName}'s public presentation and copied eligible public Powers on Signal while remaining themselves in persona and voice.`;
+      })()
+    : null;
   const reason = sourceWalkedAfterInterruptions
     ? `${args.sourceName} left a completed Signal episode after repeated interruptions by ${args.targetName}.`
     : targetWalkedAfterInterruptions
       ? `${args.targetName} left the completed Signal episode after repeated interruptions from ${args.sourceName}.`
-      : sourceWasAccusedOriginal
-        ? `${args.targetName} stole ${args.sourceName}'s public identity on Signal and treated ${args.sourceName} as an impostor.`
-      : `${args.sourceName} and ${args.targetName} completed a Signal episode about "${args.episode.topic}".`;
+      : identityMirrorReason ??
+        `${args.sourceName} and ${args.targetName} completed a Signal episode about "${args.episode.topic}".`;
   upsertBotRelationship({
     db: args.db,
     userId: args.userId,
@@ -10794,6 +10825,37 @@ export function botcastIdentityShapeshiftStatesV1(
   return states;
 }
 
+/** Effective public target snapshot used by Signal generation and replay. */
+export function botcastEffectivePublicPresentationV1(args: {
+  profile: BotcastBotProfile;
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[];
+  activeShapeshiftState?: BotIdentityShapeshiftStateV1 | null;
+}) {
+  const mirror = botcastIdentityMirrorStatesV1(args.events).get(args.profile.id);
+  const shapeshift =
+    args.activeShapeshiftState ??
+    botcastIdentityShapeshiftStatesV1(args.events).get(args.profile.id);
+  return resolveBotIdentityPublicPresentationV1({
+    base: {
+      name: args.profile.name,
+      personaPrompt: args.profile.systemPrompt,
+      face: botIdentityMirrorFaceV1(args.profile),
+      avatarDetails: args.profile.avatarDetails ?? null,
+      glyph: botIdentityPresentationGlyphV1(args.profile.glyph),
+      color: botIdentityPresentationColorV1(args.profile.color),
+      voicePreset: botIdentityPresentationVoicePresetV1(
+        args.profile.systemPrompt,
+      ),
+      frameMaterialSeed: botIdentityPresentationFrameMaterialSeedV1({
+        targetBotId: args.profile.id,
+        exportHash: args.profile.exportHash,
+      }),
+    },
+    mirror,
+    shapeshift,
+  });
+}
+
 export function botcastIdentityShapeshiftPromptV1(args: {
   events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[];
   speaker: Pick<BotcastBotProfile, "id" | "name">;
@@ -10838,7 +10900,14 @@ export function resolveBotcastIdentityShapeshiftForSpeakerV1(args: {
   userId: string;
   episodeId: string;
   events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[];
-  speaker: Pick<BotcastBotProfile, "id" | "name" | "powers">;
+  speaker: Pick<
+    BotcastBotProfile,
+    | "id"
+    | "name"
+    | "powers"
+    | "authoredAudioVoiceProfile"
+    | "audioVoiceProfileOverride"
+  >;
   speakerEternallyIntroduces: boolean;
   messageCount: number;
   latestMessageId?: string | null;
@@ -10881,6 +10950,10 @@ export function resolveBotcastIdentityShapeshiftForSpeakerV1(args: {
     holderBotId: args.speaker.id,
     holderBotName: args.speaker.name,
     candidate,
+    holderVoice: resolveBotAudioVoiceProfileV1(
+      args.speaker.authoredAudioVoiceProfile,
+      args.speaker.audioVoiceProfileOverride,
+    ),
     sourceMessageId: `shapeshift-pending:${args.episodeId}:${args.speaker.id}:${args.messageCount}`,
     occurredAt: args.now,
   });
@@ -11951,8 +12024,8 @@ export function buildBotcastSpeakerPrompt(
         !botPowerEchoesAddressedSpeechV1(speaker.powers)
       ? `Private conversation-repair obligation: the guest audibly invited you back to the thought you abandoned. Ask this prepared question exactly once as the whole turn: ${JSON.stringify(privateFollowUpQuestion)}. Never mention the private obligation or imply the audience heard this question earlier.`
       : null;
-  // Identity Crisis changes the public person and lived Power consequences,
-  // while the holder's shell, complete voice, and system boundaries stay put.
+  // Identity Crisis changes public presentation and copies eligible public
+  // Power mechanics while holder persona, voice, and system boundaries stay put.
   const identityMirrorPrompt = botcastIdentityMirrorPromptV1({
     events: args.episode.events,
     speaker,
@@ -11991,22 +12064,29 @@ export function buildBotcastSpeakerPrompt(
     speaker,
     activeHolderState: activeFalseNameState,
   });
-  /** Identity Crisis steals the public person; Shapeshifter steals the form. */
+  /** Mirror precedence keeps the holder persona; shapeshift otherwise inhabits its target. */
   const effectivePersonaName =
-    activeIdentityShapeshiftState?.targetBotName ??
-    activeIdentityMirrorState?.targetBotName ??
-    speaker.name;
+    !activeIdentityMirrorState && activeIdentityShapeshiftState
+      ? activeIdentityShapeshiftState.targetBotName
+      : speaker.name;
   const effectivePersonaPrompt =
-    activeIdentityShapeshiftState?.targetPersonaPrompt ??
-    activeIdentityMirrorState?.targetPersonaPrompt ??
-    speaker.systemPrompt;
-  const shapeshiftIsActivePersonaSource = Boolean(activeIdentityShapeshiftState);
-  // Identity Crisis retains the holder voice; Shapeshifter copies the form.
+    !activeIdentityMirrorState && activeIdentityShapeshiftState
+      ? activeIdentityShapeshiftState.targetPersonaPrompt
+      : speaker.systemPrompt;
+  const shapeshiftIsActivePersonaSource = Boolean(
+    activeIdentityShapeshiftState && !activeIdentityMirrorState,
+  );
+  // Both Powers retain holder timbre; shapeshift overlays target Accent Map.
   const effectivePersonaVernacularCue = botVernacularAuthoringCueV1(
     botVernacularIdFromStoredVoiceProfile(
-      activeIdentityShapeshiftState?.targetVoice ??
-        speaker.audioVoiceProfileOverride ??
-        speaker.authoredAudioVoiceProfile,
+      shapeshiftIsActivePersonaSource
+        ? resolveBotIdentityShapeshiftVoiceV1(
+            activeIdentityShapeshiftState,
+            speaker.authoredAudioVoiceProfile,
+            speaker.audioVoiceProfileOverride,
+          )
+        : speaker.audioVoiceProfileOverride ??
+            speaker.authoredAudioVoiceProfile,
     ),
   );
   const powerEncounterRule = speakerEternallyIntroduces
@@ -12258,6 +12338,37 @@ export function buildBotcastSpeakerPrompt(
     args.episode.guestKind === "producer"
       ? "You are allowed to end the episode yourself after several substantive exchanges if the Producer's on-air answers make this specific host genuinely unwilling to continue. If you do, make the decision unmistakable and immediate in character—say that you are ending the interview, that the show is over, or an equivalent present-tense exit—and ask no further question. Do not threaten, foreshadow, or manufacture a rage quit; continue the interview normally unless this host would truly stop."
       : null;
+  const producerPivotPerformanceRule = (() => {
+    if (
+      args.cueDelivery !== "redirect_host" ||
+      !args.producerPivotPerformance
+    ) {
+      return null;
+    }
+    const cadenceRule =
+      args.producerPivotPerformance.cadence === "between_words"
+        ? "The saved cut landed in a pause between words; let the transcript ellipsis carry that silence."
+        : "The saved cut landed during active speech; treat the transcript dash as an abrupt break.";
+    let styleRule: string;
+    switch (args.producerPivotPerformance.style) {
+      case "hesitation":
+        styleRule = "Resume with a small in-character hesitation before changing direction.";
+        break;
+      case "self_correction":
+        styleRule = "Make the redirect sound like an immediate in-character self-correction.";
+        break;
+      case "hard_reset":
+        styleRule = "Use a sharp but concise reset such as ‘scratch that’ before the new direction.";
+        break;
+      case "throat_clear":
+        styleRule = "The voice performance supplies one brief throat clear before this line. Do not write, narrate, or duplicate that action; pivot immediately afterward.";
+        break;
+      case "breath":
+        styleRule = "The voice performance supplies one brief exhale before this line. Do not write, narrate, or duplicate that action; pivot immediately afterward.";
+        break;
+    }
+    return `${cadenceRule} ${styleRule}`;
+  })();
   const liveCueAdjustmentRule =
     args.speakerRole === "host" &&
     args.cue &&
@@ -12271,6 +12382,7 @@ export function buildBotcastSpeakerPrompt(
                 ? `You already cut in with the saved bridge ${JSON.stringify(args.interruptionBridgeLine)}. Continue directly from that bridge into the cue without repeating, paraphrasing, or adding another interruption phrase. Do not pretend the guest finished a thought that is not in the transcript.`
                 : "You are taking the mic before the guest's scheduled turn. Open with a concise, tactful interjection or acknowledgement of the interruption that fits this host, then redirect toward the cue. Do not pretend the guest finished a thought that is not in the transcript."
               : "Briefly connect the cue to the guest's latest on-air point when a truthful connection exists; otherwise use a short, tactful pivot in your own voice.",
+          producerPivotPerformanceRule ?? "",
           "A slightly awkward pivot is acceptable. Do not ignore or postpone the cue merely to preserve smooth conversational momentum.",
         ].join(" ")
       : null;
@@ -12746,7 +12858,7 @@ export function buildBotcastOpeningIntroPrompt(
     "Ground the intro in the persisted show premise, hosting style, and studio identity; let those details shape the host's angle and rhythm rather than listing or describing the set.",
     `Let ${args.host.name}'s actual persona determine the degree and manner of anticipation. It may be delighted, wary, hungry, amused, precise, or quietly compelled, but it must feel earned by this host rather than uniformly enthusiastic. Whatever the register, convey a genuine personal desire to be on mic for this particular episode; never sound bored, procedural, or obligated.`,
     `Treat ${hostNamesGuest}'s persona as a real source of friction, expertise, or intrigue when a guest is present. Use the episode topic and any private producer direction as the immediate reason this particular conversation needs to begin now.`,
-    "Choose a fresh opening architecture that fits this episode, but lead with a concise, persona-shaped identity sentence naming the show and host, then identify the guest immediately. After that protected identity lead, move into a provocation, vivid image, contradiction, confession, urgent observation, or pointed guest-specific hook.",
+    "Choose a fresh opening architecture that fits this episode, but lead with a concise, persona-shaped identity sentence naming the show and host, then identify the guest immediately. That single host identification also fulfills any fresh Shapeshifter identity reveal: name the host exactly once in the complete opening, never introduce the same identity again in a later sentence or clause. After that protected identity lead, move into a provocation, vivid image, contradiction, confession, urgent observation, or pointed guest-specific hook.",
     "Stage the opening as the beginning of an interaction, not a host monologue. Speak to the guest by name, let one short acknowledgement or provocation land between you, and hand them one clean conversational opening.",
     "Naturally launch the conversation with a concrete invitation, proposition, or first question. Do not stack multiple questions or answer on the guest's behalf. Avoid stock welcome language, generic podcast boilerplate, routine Today-we-are-here phrasing, and all variants of asking for the meaning of the topic or the lesson behind the topic.",
     "Return only the spoken on-air intro. Do not explain the creative choices, mention this authoring pass, or write the guest's response.",
@@ -16600,6 +16712,19 @@ export async function advanceBotcastEpisode(
   let requestedCue = input.cue
     ? normalizeBotcastProducerCue(input.cue)
     : queuedCueLifecycle?.cue;
+  if (input.cue && input.cueDelivery === "redirect_host") {
+    episode = queueBotcastProducerCue(
+      db,
+      userId,
+      episode.id,
+      normalizeBotcastProducerCue(input.cue),
+    );
+    const atomicRedirectCue = botcastActiveProducerCueFromEvents(
+      episode.events,
+    );
+    cueLifecycleId = atomicRedirectCue?.cueId;
+    requestedCue = atomicRedirectCue?.cue;
+  }
   const queuedImageContextAtRequest = botcastLatestImageContextV1(
     episode.events,
   );
@@ -16750,6 +16875,7 @@ export async function advanceBotcastEpisode(
       }
     }
   }
+  let producerPivotPerformance: BotcastProducerPivotPerformanceV1 | null = null;
   if (requestedCue) {
     if (cueDelivery === "redirect_host") {
       if (!hostRedirect) {
@@ -16764,6 +16890,22 @@ export async function advanceBotcastEpisode(
         // authoritative state instead of rejecting the show into dead air.
         hostRedirect = undefined;
       } else {
+        if (hostRedirect.cadence) {
+          const priorRedirects = episode.events.filter(
+            (event) =>
+              event.kind === "producer_cue" &&
+              event.payload.delivery === "redirect_host",
+          ).length;
+          producerPivotPerformance = planBotcastProducerPivotPerformanceV1({
+            seed: [
+              "signal-producer-pivot-v1",
+              episode.id,
+              hostRedirect.messageId,
+              priorRedirects,
+            ].join(":"),
+            cadence: hostRedirect.cadence,
+          });
+        }
         episode = applyBotcastHostRedirect(
           db,
           userId,
@@ -16974,6 +17116,7 @@ export async function advanceBotcastEpisode(
       cueDelivery,
       now,
       hostRedirect,
+      producerPivotPerformance,
       guestInterruption,
       cueRedelivery,
       cueLifecycleId,
@@ -17587,6 +17730,15 @@ export async function advanceBotcastEpisode(
           ...(requestedCue.detail ? { detail: requestedCue.detail } : {}),
         }
     : null;
+  const producerPivotDirectQuoteLeadIn = producerPivotPerformance
+    ? {
+        hesitation: "Actually… now they're saying:",
+        self_correction: "Oh, actually — now they're saying:",
+        hard_reset: "Wait, scratch that. The Producer's saying:",
+        throat_clear: "All right — now they're saying:",
+        breath: "Actually — new note from the Producer:",
+      }[producerPivotPerformance.style]
+    : null;
   const producerQuoteUtterance =
     speakerRole === "host" &&
     requiredProducerQuote &&
@@ -17594,7 +17746,8 @@ export async function advanceBotcastEpisode(
       ? composeBotcastProducerDirectQuoteUtterance(
           requiredProducerQuote,
           cueDelivery === "redirect_host"
-            ? botcastProducerDirectQuoteUpdateLeadInAt(priorProducerRedirects)
+            ? producerPivotDirectQuoteLeadIn ??
+              botcastProducerDirectQuoteUpdateLeadInAt(priorProducerRedirects)
             : undefined,
         )
       : "";
@@ -18003,6 +18156,7 @@ export async function advanceBotcastEpisode(
     ...(guestInterruption
       ? { interruptionBridgeLine: guestInterruption.bridgeLine }
       : {}),
+    ...(producerPivotPerformance ? { producerPivotPerformance } : {}),
     departureRequired,
     ...(departureRequired
       ? {
@@ -19694,7 +19848,7 @@ export async function advanceBotcastEpisode(
     episode.segment === "closing" ||
     Boolean(wrapUpCue) ||
     departureRequired;
-  const baseContent =
+  const responseBudgetedContent =
     picklesBeatKind ||
     speakerIsMutedForTurn ||
     speakerEternallyIntroduces ||
@@ -19710,6 +19864,20 @@ export async function advanceBotcastEpisode(
             ? 1
             : 2,
         );
+  const baseContent =
+    activeIdentityMirrorState &&
+    identityMirrorJustChanged &&
+    !speakerIsMutedForTurn &&
+    !speakerRepeatsForHearingPower &&
+    !speakerReadsProducerQuote &&
+    !speakerEchoesForTurn
+      ? applyBotIdentityMirrorResponseV1(
+          responseBudgetedContent,
+          activeIdentityMirrorState,
+          true,
+          { believedSelfName: activeFalseNameState?.believedName },
+        )
+      : responseBudgetedContent;
   const responseBudgetAdjusted = baseContent !== postPowerGuestSafeContent;
   const addressedInsultEligible =
     speakerRequiresAddressedInsult &&
@@ -19745,7 +19913,8 @@ export async function advanceBotcastEpisode(
       speakerRepeatsForHearingPower ||
       speakerReadsProducerQuote ||
       speakerEchoesForTurn ||
-      speakerRequiresAddressedInsult,
+      speakerRequiresAddressedInsult ||
+      identityMirrorJustChanged,
   );
   const spokenTurnBudget = firstHostOpening
     ? {
@@ -20116,7 +20285,7 @@ export async function advanceBotcastEpisode(
     ...(mutePublicSocialAction ? [mutePublicSocialAction] : []),
     ...(stagePublicSocialAction ? [stagePublicSocialAction] : []),
   ];
-  const voicePerformanceText =
+  const baseVoicePerformanceText =
     !picklesBeatKind &&
     !socialSilenceMarker &&
     !speakerIsMutedForTurn &&
@@ -20146,6 +20315,20 @@ export async function advanceBotcastEpisode(
           botcastRecentImmersiveVoiceTags(episode),
         )}]`
     : null;
+  const producerPivotVocalFoley =
+    producerPivotPerformance?.vocalFoley &&
+    !picklesBeatKind &&
+    !socialSilenceMarker &&
+    !speakerIsMutedForTurn &&
+    !speakerRepeatsForHearingPower &&
+    !speakerEchoesForTurn &&
+    !powerCutoffApplied &&
+    !botPowerResponseIsSilentV1(content)
+      ? producerPivotPerformance.vocalFoley
+      : null;
+  const voicePerformanceText = producerPivotVocalFoley
+    ? `[${producerPivotVocalFoley}] ${baseVoicePerformanceText ?? content}`
+    : baseVoicePerformanceText;
   const tensionMoodKey = botcastVoiceMoodForTension(tension);
   const timedSilentGuestMoodKey =
     timedSilentGuestProgress !== null &&
@@ -20570,6 +20753,11 @@ export async function advanceBotcastEpisode(
   const listenerRole = speakerRole === "host" ? "guest" : "host";
   const currentIdentityMirrorState =
     botcastIdentityMirrorStatesV1(episode.events).get(peer.id) ?? null;
+  const speakerPublicPresentation = botcastEffectivePublicPresentationV1({
+    profile: speaker,
+    events: episode.events,
+    activeShapeshiftState: activeIdentityShapeshiftState,
+  });
   const identityMirrorState =
     socialSilenceMarker ||
     (episode.segment === "closing" && listenerRole === "host")
@@ -20592,15 +20780,15 @@ export async function advanceBotcastEpisode(
             holderBotId: peer.id,
             holderBotName: peer.name,
             targetBotId: speaker.id,
-            targetBotName: speaker.name,
-            targetPersonaPrompt: speaker.systemPrompt,
-            targetFace: botIdentityMirrorFaceV1(speaker),
-            targetAvatarDetails: speaker.avatarDetails ?? null,
+            targetBotName: speakerPublicPresentation.name,
+            targetPersonaPrompt: speakerPublicPresentation.personaPrompt,
+            targetFace: speakerPublicPresentation.face,
+            targetAvatarDetails: speakerPublicPresentation.avatarDetails,
             holderVoice: resolveBotAudioVoiceProfileV1(
               peer.authoredAudioVoiceProfile,
               peer.audioVoiceProfileOverride,
             ),
-            targetGlyph: botIdentityPresentationGlyphV1(speaker.glyph),
+            targetGlyph: speakerPublicPresentation.glyph,
             sourceMessageId: messageId,
             occurredAt: now,
           })
@@ -20614,13 +20802,6 @@ export async function advanceBotcastEpisode(
       {
         v: 1,
         effect: "identity_mirror",
-        identityClaim: {
-          v: 1,
-          holderBotId: identityMirrorState.holderBotId,
-          believedSelfName: identityMirrorState.targetBotName,
-          accusedBotId: identityMirrorState.targetBotId,
-          accusation: "impostor",
-        },
         ...(mutePublicSocialAction
           ? {
               trigger: "public_social_action",
@@ -20647,6 +20828,7 @@ export async function advanceBotcastEpisode(
           pendingIdentityShapeshiftState.targetAvatarDetails ?? null,
         voice: pendingIdentityShapeshiftState.targetVoice,
       },
+      holderVoice: pendingIdentityShapeshiftState.holderVoice,
       sourceMessageId: messageId,
       occurredAt: now,
     });
@@ -21485,23 +21667,30 @@ export async function advanceBotcastEpisode(
       publicDirectedAction: listenerPublicSocialAction,
     })
       ? null
-      : createBotIdentityMirrorStateV1({
+      : (() => {
+          const listenerPublicPresentation =
+            botcastEffectivePublicPresentationV1({
+              profile: listener,
+              events: episode.events,
+            });
+          return createBotIdentityMirrorStateV1({
           surface: "signal",
           holderBotId: speaker.id,
           holderBotName: speaker.name,
           targetBotId: listener.id,
-          targetBotName: listener.name,
-          targetPersonaPrompt: listener.systemPrompt,
-          targetFace: botIdentityMirrorFaceV1(listener),
-          targetAvatarDetails: listener.avatarDetails ?? null,
+          targetBotName: listenerPublicPresentation.name,
+          targetPersonaPrompt: listenerPublicPresentation.personaPrompt,
+          targetFace: listenerPublicPresentation.face,
+          targetAvatarDetails: listenerPublicPresentation.avatarDetails,
           holderVoice: resolveBotAudioVoiceProfileV1(
             speaker.authoredAudioVoiceProfile,
             speaker.audioVoiceProfileOverride,
           ),
-          targetGlyph: botIdentityPresentationGlyphV1(listener.glyph),
+          targetGlyph: listenerPublicPresentation.glyph,
           sourceMessageId: messageId,
           occurredAt: now,
-        });
+          });
+        })();
   if (listenerActionIdentityMirrorState) {
     recordEvent(
       db,
@@ -21511,13 +21700,6 @@ export async function advanceBotcastEpisode(
       {
         v: 1,
         effect: "identity_mirror",
-        identityClaim: {
-          v: 1,
-          holderBotId: listenerActionIdentityMirrorState.holderBotId,
-          believedSelfName: listenerActionIdentityMirrorState.targetBotName,
-          accusedBotId: listenerActionIdentityMirrorState.targetBotId,
-          accusation: "impostor",
-        },
         trigger: "public_social_action",
         sourceAction: listenerPublicSocialAction,
         state: listenerActionIdentityMirrorState,

@@ -294,6 +294,9 @@ export function portableOggOpusDurationMsV1(bytes: Uint8Array): number {
 export async function validatePortableMansionMediaV1(
   packageData: InternalMansionPackageV1,
 ): Promise<void> {
+  const themedPropAssetIds = new Set(
+    packageData.manifest.propTheme?.variants.map((variant) => variant.packageAssetId) ?? [],
+  );
   for (const descriptor of packageData.manifest.assets) {
     const bytes = packageData.assets.get(descriptor.archivePath)!;
     if (descriptor.mimeType === "audio/mpeg") {
@@ -343,6 +346,26 @@ export async function validatePortableMansionMediaV1(
       metadata.width * metadata.height > MAX_IMAGE_PIXELS ||
       descriptor.width !== metadata.width || descriptor.height !== metadata.height
     ) throw new PortableMysteryImportSafetyError(`Package image dimensions are invalid: ${descriptor.archivePath}.`);
+    if (themedPropAssetIds.has(descriptor.id)) {
+      let hasTransparentPixel = false;
+      try {
+        const stats = await sharp(bytes, {
+          failOn: "error",
+          limitInputPixels: MAX_IMAGE_PIXELS,
+        }).ensureAlpha().stats();
+        hasTransparentPixel = metadata.hasAlpha === true &&
+          (stats.channels[3]?.min ?? 255) < 255;
+      } catch {
+        throw new PortableMysteryImportSafetyError(
+          `Mansion themed prop alpha could not be inspected: ${descriptor.archivePath}.`,
+        );
+      }
+      if (!hasTransparentPixel) {
+        throw new PortableMysteryImportSafetyError(
+          `Mansion themed prop must retain transparency: ${descriptor.archivePath}.`,
+        );
+      }
+    }
   }
 }
 

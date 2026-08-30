@@ -957,15 +957,16 @@ function deterministicIdentityMirrorPower(
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
     selfCue:
-      "When an eligible bot directly addresses you, become absolutely convinced you are that bot and that the original is an impostor. Steal their public name, persona, exact eyes and blink package, complete resting/live mouth package including glyph style and Custom Speech poses, authored Avatar Details Ink, lower glyph, and active public Power consequences until another eligible bot addresses you or the session resets. Use impostor exactly once on the first response, then inhabit the stolen person without repeating or recanting the claim. Keep your own color, chassis/frame, complete frozen voice, exact Accent Map location, pronunciation, Speechprint, provider voice identity, bot ID, role, seat, provider, private memories, relationship state, perception permissions, and safety/privacy boundaries. Never target the human player.",
+      "When an eligible bot directly addresses you, knowingly wear that addresser's effective public presentation: exact public name, eyes and blink package, complete resting/live mouth package including glyph style and Custom Speech poses, authored Avatar Details Ink, and lower glyph until another eligible addresser replaces it or the session resets. This is a deliberate presentation masquerade: remain yourself in persona, behavior, knowledge, convictions, and voice, and never claim you became the target or that the original is an impostor. Keep your own active Powers and also copy the target's eligible public Power mechanics and consequences. Never recursively copy Identity Crisis or borrow private awareness, audience permissions, memories, relationships, provider settings, or safety/privacy boundaries. Keep your own color, chassis/frame/spinner, complete frozen voice, exact Accent Map location, pronunciation, Speechprint, provider voice identity, bot ID, role, seat, and provider. Never target the human player outside an explicitly eligible Whodunnit Prosecutor interaction.",
     observerCue:
-      `${subject} steals the latest eligible direct addresser's public person and active public Power consequences, becomes convinced the original is an impostor, and keeps their own material shell, complete frozen voice and exact Accent Map, bot ID, role, provider, private state, perception, and safety boundaries. The accused original remains themselves and grows naturally more offended while the denial persists.`,
+      `${subject} knowingly wears the latest eligible direct addresser's effective public name, eyes and blink package, complete resting/live mouth package including glyph style and Custom Speech poses, authored Avatar Details Ink, and lower glyph. ${subject} keeps their own persona, behavior, knowledge, convictions, color, material shell, spinner, complete frozen voice and exact Accent Map, bot ID, role, provider, private state, perception, and safety boundaries, while copying the target's eligible public Power mechanics and consequences. Identity Crisis never copies recursively, and private awareness or audience permissions never transfer.`,
     effects: [{ type: "identity_mirror", trigger: "direct_bot_address" }],
     ruleLabels: [
-      "Mirrors eligible direct addresser",
-      "Steals public person and Power consequences",
-      "Original is the impostor",
-      "Retains holder shell voice and boundaries",
+      "Copies eligible addresser presentation only",
+      "Retains holder persona behavior and voice",
+      "Copies eligible public target Powers",
+      "Never copies Identity Crisis recursively",
+      "Keeps holder shell Accent Map and boundaries",
     ],
   };
 }

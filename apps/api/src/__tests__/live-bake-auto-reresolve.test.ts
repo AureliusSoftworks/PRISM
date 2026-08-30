@@ -69,11 +69,11 @@ describe("live bake Auto re-resolve", () => {
     );
     assert.match(
       server,
-      /normalizeSignalEpisodeImageForTurn\(body\.episodeImage\)/u,
+      /normalizeSignalEpisodeImageForTurn\(body\.episodeImage, userId\)/u,
     );
     assert.match(
       server,
-      /queueBotcastEpisodeImageContext\([\s\S]{0,900}?allowWatchBake: true/u,
+      /queueBotcastEpisodeImageContext\([\s\S]{0,2200}?allowWatchBake: true/u,
     );
     assert.match(
       server,

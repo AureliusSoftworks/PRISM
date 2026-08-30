@@ -1188,7 +1188,7 @@ function signalPairNarrativeEncounterCount(args: {
 }
 
 function signalPairNarrativeIsSalient(text: string): boolean {
-  return /\brepeated interruptions?\b|\brepeatedly interrupted\b|\b(?:left|walked out|departure)\b[\s\S]{0,120}\binterrupting\b|\binterrupting\b[\s\S]{0,120}\b(?:left|walked out|departure)\b|\bstole\b[\s\S]{0,120}\bpublic identity\b[\s\S]{0,120}\bimpost(?:or|er)\b/iu.test(
+  return /\brepeated interruptions?\b|\brepeatedly interrupted\b|\b(?:left|walked out|departure)\b[\s\S]{0,120}\binterrupting\b|\binterrupting\b[\s\S]{0,120}\b(?:left|walked out|departure)\b|\bstole\b[\s\S]{0,120}\bpublic identity\b[\s\S]{0,120}\bimpost(?:or|er)\b|\bknowingly wore\b[\s\S]{0,120}\bpublic presentation\b[\s\S]{0,120}\bcopied eligible public Powers\b/iu.test(
     text,
   );
 }

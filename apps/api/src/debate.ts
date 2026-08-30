@@ -2802,6 +2802,87 @@ function debatePowerPlan(
   };
 }
 
+const DEBATE_IDENTITY_MIRROR_BORROWED_POWER_PREFIX = "identity-mirror:";
+
+/**
+ * Rebuild the live Debate plan after each committed floor event. Identity
+ * Crisis follows the same latest-speaker target already used by Debate's
+ * frozen presentation routing, copies only eligible public mechanics, and
+ * replaces the previous target's borrowed mechanics atomically.
+ */
+export function debatePowerPlanWithIdentityMirrorTargetsV1(args: {
+  plan: DebatePowerPlanV1;
+  events: readonly Pick<DebateEventV1, "speakerBotId">[];
+}): DebatePowerPlanV1 {
+  const baseBots = Object.fromEntries(
+    Object.entries(args.plan.bots).map(([botId, bot]) => {
+      const effects = bot.effects.filter(
+        (entry) =>
+          !entry.powerId.startsWith(
+            DEBATE_IDENTITY_MIRROR_BORROWED_POWER_PREFIX,
+          ),
+      );
+      return [
+        botId,
+        {
+          ...bot,
+          effects,
+          hardMuted: effects.some((entry) => entry.effect.type === "mute"),
+        },
+      ];
+    }),
+  ) as DebatePowerPlanV1["bots"];
+  let changed = false;
+  const bots = { ...baseBots };
+  for (const [holderBotId, holder] of Object.entries(baseBots)) {
+    if (
+      !holder.effects.some((entry) => entry.effect.type === "identity_mirror")
+    ) {
+      continue;
+    }
+    const targetBotId = [...args.events]
+      .reverse()
+      .find(
+        (event) =>
+          event.speakerBotId &&
+          event.speakerBotId !== holderBotId &&
+          Boolean(baseBots[event.speakerBotId]),
+      )?.speakerBotId;
+    if (!targetBotId) continue;
+    const target = baseBots[targetBotId];
+    if (!target) continue;
+    const borrowed = target.effects
+      .filter(
+        (entry) =>
+          entry.effect.type !== "identity_mirror" &&
+          entry.effect.type !== "awareness" &&
+          entry.effect.type !== "speech_audience",
+      )
+      .map((entry) => ({
+        ...entry,
+        powerId:
+          `${DEBATE_IDENTITY_MIRROR_BORROWED_POWER_PREFIX}${targetBotId}:${entry.powerId}`
+            .slice(0, 128),
+        powerName: `Copied ${entry.powerName}`.slice(0, 128),
+      }));
+    if (borrowed.length === 0) continue;
+    changed = true;
+    const effects = [...holder.effects, ...borrowed];
+    bots[holderBotId] = {
+      ...holder,
+      effects,
+      hardMuted: effects.some((entry) => entry.effect.type === "mute"),
+    };
+  }
+  return changed || Object.values(args.plan.bots).some((bot) =>
+    bot.effects.some((entry) =>
+      entry.powerId.startsWith(DEBATE_IDENTITY_MIRROR_BORROWED_POWER_PREFIX)
+    )
+  )
+    ? { ...args.plan, bots }
+    : args.plan;
+}
+
 /** Whodunnit keeps suspects outside the three top-level Debate snapshots, but
  * they still need the same frozen Power resolution as every other cast bot. */
 export function debatePowerPlanForBots(
@@ -5403,13 +5484,18 @@ function commitMutation(
       previous.id,
       applyDebateTrollPresentationsV1(previous, newEvents),
     );
+    const committedEvents = eventRows(db, userId, previous.id);
     const next = synchronizeDebateParticipationState(
       {
         ...nextInput,
+        powerPlan: debatePowerPlanWithIdentityMirrorTargetsV1({
+          plan: nextInput.powerPlan,
+          events: committedEvents,
+        }),
         revision: previous.revision + 1,
         updatedAt: now,
         // Prefer DB truth: a refinement may have landed while this turn prepared.
-        events: eventRows(db, userId, previous.id),
+        events: committedEvents,
       },
       now,
     );
@@ -5524,12 +5610,17 @@ function commitRetainedEventMutation(
       updateEvent.run(JSON.stringify(event), event.id, userId, previous.id);
     }
     insertEvents(db, userId, previous.id, newEvents);
+    const committedEvents = eventRows(db, userId, previous.id);
     const next = synchronizeDebateParticipationState(
       {
         ...nextInput,
+        powerPlan: debatePowerPlanWithIdentityMirrorTargetsV1({
+          plan: nextInput.powerPlan,
+          events: committedEvents,
+        }),
         revision: previous.revision + 1,
         updatedAt: now,
-        events: eventRows(db, userId, previous.id),
+        events: committedEvents,
       },
       now,
     );

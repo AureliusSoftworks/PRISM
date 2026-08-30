@@ -40,6 +40,10 @@ import {
   type WhodunnitTextVoiceMode,
 } from "@localai/shared";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
+import {
+  PrismChromeNotice,
+  PrismChromeNoticeViewport,
+} from "./PrismChromeNotice";
 import IdentityPresentationBlackout from "./IdentityPresentationBlackout";
 import { debateIdentityAppearanceBotV1 } from "./debateIdentityPresentation";
 import {
@@ -161,6 +165,24 @@ import {
   debateMysteryMansionExteriorFallbackV1,
 } from "./debateMysteryMansionExterior";
 import styles from "./debateMysteryV2.module.css";
+
+function WhodunnitChromeErrorNotice(props: {
+  message: string;
+  onDismiss: () => void;
+}): React.JSX.Element {
+  return (
+    <PrismChromeNoticeViewport ariaLabel="Whodunnit notifications">
+      <PrismChromeNotice
+        label="Whodunnit"
+        message={props.message}
+        tone="error"
+        title={props.message}
+        onDismiss={props.onDismiss}
+        dismissLabel="Dismiss Whodunnit error"
+      />
+    </PrismChromeNoticeViewport>
+  );
+}
 
 interface V2SharedProps {
   bots: MysteryBotSummary[];
@@ -3449,7 +3471,12 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
             <span className={styles.dialogueContinueHint} role="status">{busy ? "Opening the incident scene…" : "Enter the incident scene"}</span>
           </div>
         </section>
-        {error ? <p className={styles.errorBanner}>{error}</p> : null}
+        {error ? (
+          <WhodunnitChromeErrorNotice
+            message={error}
+            onDismiss={() => setError(null)}
+          />
+        ) : null}
       </main>
     );
   }
@@ -3673,7 +3700,12 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         {!spectator && command === "present" ? <div className={styles.choiceTray}><header><h2>Object with evidence or sworn testimony</h2><button type="button" onClick={() => setCommand(null)}>Close</button></header>{renderRecordButtons((record) => { setCommand(null); setPresentedCourtRecord(record); void sendAction({ action: "object_statement", statementId: activeStatement.statementId, record }); })}</div> : null}
         {!spectator && state.pendingProsecutionChoice ? <div className={styles.prosecutionChoice} role="dialog" aria-modal="true" aria-labelledby="prosecution-choice-title"><p className={styles.eyebrow}>Your response</p><h2 id="prosecution-choice-title">{state.pendingProsecutionChoice.prompt}</h2>{state.pendingProsecutionChoice.options.map((option) => <button key={option.id} type="button" disabled={busy || dialoguePerformanceActive} onClick={() => void sendAction({ action: "choose_prosecution_response", choiceId: state.pendingProsecutionChoice!.id, optionId: option.id })}>{option.text}</button>)}</div> : null}
         {caseFileOpen ? <CaseFile state={state} objectUrls={sealedAssetObjectUrls} saveState={sealedAssetSaveState} onSaveAsset={saveSealedAsset} onClose={() => setCaseFileOpen(false)} /> : null}
-        {error ? <p className={styles.errorBanner}>{error}</p> : null}
+        {error ? (
+          <WhodunnitChromeErrorNotice
+            message={error}
+            onDismiss={() => setError(null)}
+          />
+        ) : null}
       </main>
     );
   }
@@ -4124,7 +4156,12 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         </div>
       ) : null}
       {callout ? <div key={callout.id} className={styles.callout} style={calloutStyle} role="status" aria-live="assertive"><span>{CALLOUT_COPY[callout.callout]}</span></div> : null}
-      {error ? <p className={styles.errorBanner}>{error}</p> : null}
+      {error ? (
+        <WhodunnitChromeErrorNotice
+          message={error}
+          onDismiss={() => setError(null)}
+        />
+      ) : null}
     </main>
   );
 }

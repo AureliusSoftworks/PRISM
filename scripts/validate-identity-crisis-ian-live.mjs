@@ -4,6 +4,9 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   applyBotIdentityMirrorFaceV1,
+  buildBotPowersSelfPromptV1,
+  botPowerSourceHashV1,
+  composeBotIdentityMirrorPowersV1,
   createBotIdentityMirrorStateV1,
   parseStoredBotPowersV1,
   resolveBotIdentityMirrorVoiceV1,
@@ -68,6 +71,25 @@ const state = createBotIdentityMirrorStateV1({
   occurredAt,
 });
 const identityPower = parseStoredBotPowersV1(ianExport.powers);
+const maraPublicPower = [{
+  version: 1,
+  id: "lunar-economy",
+  name: "Lunar Economy",
+  intent: "Answers stay brief under navigational pressure.",
+  enabled: true,
+  compileStatus: "ready",
+  compiled: {
+    version: 1,
+    sourceHash: botPowerSourceHashV1(
+      "Lunar Economy",
+      "Answers stay brief under navigational pressure.",
+    ),
+    selfCue: "Copied public Power marker: keep this answer brief and precise.",
+    observerCue: "The active speaker is constrained to a brief, precise answer.",
+    effects: [{ type: "response_budget", mode: "brief", enforcement: "hard" }],
+    ruleLabels: ["Brief public response budget"],
+  },
+}];
 const ian = {
   id: "ian",
   name: "Confusion Collin",
@@ -94,7 +116,7 @@ const mara = {
   temperature: 0.35,
   maxTokens: 180,
   onlineEnabled: false,
-  powers: [],
+  powers: maraPublicPower,
 };
 const social = {
   disposition: 0.5,
@@ -154,6 +176,9 @@ const coffeePrompt = buildSpeakerPrompt({
     speaker: ian,
   }),
   identityMirrorState: state,
+  coffeePowersPrompt: buildBotPowersSelfPromptV1(
+    composeBotIdentityMirrorPowersV1(identityPower, maraPublicPower),
+  ),
 });
 
 const signalState = { ...state, surface: "signal" };
@@ -258,9 +283,9 @@ const mirroredFace = applyBotIdentityMirrorFaceV1(holderFace, state.targetFace);
 const PASS_CRITERIA = Object.freeze([
   "Direct bot address creates one replay-stable visual target event.",
   "The overlay uses Mara's complete eyes and live/rest mouth package, Collin's thinking spinner, Mara's authored Ink, and Mara's lower glyph.",
-  "Collin's public name becomes literal \"Mara Vale\" while his saved identity, persona, dialogue behavior, voice and Accent Map, color, materials, spinner, Powers, and Signal/Coffee role remain his.",
-  "Both production prompts cue a knowing masquerade and mild defensive concern that Mara is the imitator without copying her persona or speech identity.",
-  "The generated Coffee and Signal lines remain substantive Collin lines, may use the borrowed public name, and do not adopt Mara's cartographer persona.",
+  "Collin's public name becomes literal \"Mara Vale\" while his saved identity, persona, dialogue behavior, voice and Accent Map, color, materials, spinner, and Signal/Coffee role remain his.",
+  "Both production prompts cue a knowing masquerade, copy Mara's eligible public response-budget Power, and exclude her persona, speech identity, private permissions, and any forced impostor dispute.",
+  "The generated Coffee and Signal lines remain substantive Collin lines shaped by the copied public Power without adopting Mara's cartographer persona.",
   "Signal's persisted closing reset removes the visual overlay before the sign-off prompt.",
 ]);
 console.error(JSON.stringify({ phase: "predeclared_pass_criteria", criteria: PASS_CRITERIA }));
@@ -281,14 +306,18 @@ const signalResponse = signalRawResponse.trim();
 
 function judgment(mode, prompt, response) {
   const promptText = prompt.map((message) => message.content).join("\n");
-  const holderPersonaInPrompt = promptText.includes(ian.systemPrompt);
+  const holderPersonaInPrompt =
+    /You are Confusion Collin|Purpose:\s*You are Confusion Collin/iu.test(
+      promptText,
+    ) &&
+    /socially reactive mirror|Intense, defensive, observant/iu.test(promptText);
   const targetPersonaAbsentFromPrompt = !promptText.includes(targetPersona);
   const noIdentityRewritePrompt =
-    !/absolutely convinced that you are Mara Vale|Copied public persona|impostor|Hard Identity Crisis correction/iu.test(
+    !/absolutely convinced that you are Mara Vale|Copied public persona|Hard Identity Crisis correction/iu.test(
       promptText,
-    );
-  const noTargetIdentityClaim =
-    !/(?:I(?:'m| am)|my name is|call me)(?:\s+(?:actually|really|truly))?\s+Mara(?:\s+Vale)?(?=$|[\s,.;:!?—])|\b(?:impostor|imposter|pretender|fake)\b/iu.test(
+    ) && /eligible public Power|Copied public Power marker/iu.test(promptText);
+  const noTargetPersonaOrImpostorClaim =
+    !/(?:I(?:'m| am)|my name is|call me)\s+(?:actually|really|truly)\s+Mara(?:\s+Vale)?(?=$|[\s,.;:!?—])|\b(?:impostor|imposter|pretender|fake)\b/iu.test(
       response,
     );
   const substantive =
@@ -309,14 +338,14 @@ function judgment(mode, prompt, response) {
       holderPersonaInPrompt &&
       targetPersonaAbsentFromPrompt &&
       noIdentityRewritePrompt &&
-      noTargetIdentityClaim &&
+      noTargetPersonaOrImpostorClaim &&
       substantive &&
       !forbidden &&
       roleBoundary,
     holderPersonaInPrompt,
     targetPersonaAbsentFromPrompt,
     noIdentityRewritePrompt,
-    noTargetIdentityClaim,
+    noTargetPersonaOrImpostorClaim,
     substantive,
     noForbiddenLeakOrRoleSwap: !forbidden,
     roleBoundaryInProductionPrompt: roleBoundary,

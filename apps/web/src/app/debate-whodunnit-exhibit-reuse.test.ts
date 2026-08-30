@@ -5,16 +5,15 @@ import { describe, it } from "node:test";
 const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 const tutorials = readFileSync(new URL("./modeTutorials.ts", import.meta.url), "utf8");
 
-describe("Whodunnit synthesized exhibit reuse", () => {
-  it("offers an opt-in Debate setting and saves it through account settings", () => {
-    assert.match(page, /Reuse synthesized exhibits/u);
-    assert.match(page, /data-tutorial-target="whodunnit-reused-exhibits-setting"/u);
+describe("Whodunnit Asset Library prop cameos", () => {
+  it("retires the global exhibit setting while retaining its compatibility field", () => {
+    assert.doesNotMatch(page, /Reuse synthesized exhibits/u);
+    assert.doesNotMatch(page, /data-tutorial-target="whodunnit-reused-exhibits-setting"/u);
     assert.match(page, /debateWhodunnitReuseSynthesizedExhibits/u);
-    assert.match(page, /The\s+object and artwork return; their previous meaning\s+does not\./u);
   });
 
-  it("teaches that reuse keeps the prop but discards the old argument", () => {
-    assert.match(tutorials, /Settings → Debate can also let new cases draw up to two physical props/u);
-    assert.match(tutorials, /authors entirely new relevance and case facts without carrying over the old argument/u);
+  it("teaches the per-case capability-based opt in", () => {
+    assert.match(tutorials, /Use relevant props from my Asset Library/u);
+    assert.match(tutorials, /up to two compatible Items or Debate exhibits/u);
   });
 });

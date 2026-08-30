@@ -75,6 +75,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function producerPivotSummary(event: BotcastReplayEvent): string | null {
+  const performance = payloadRecord(event, "pivotPerformance");
+  if (!performance) return null;
+  const cadence =
+    typeof performance.cadence === "string" ? performance.cadence : "unknown";
+  const style =
+    typeof performance.style === "string" ? performance.style : "unknown";
+  const vocalFoley =
+    typeof performance.vocalFoley === "string"
+      ? performance.vocalFoley
+      : "none";
+  return `cut cadence: ${cadence}; pivot style: ${style}; vocal Foley: ${vocalFoley}`;
+}
+
 function signalGenerationAnnotation(
   event: BotcastReplayEvent | undefined,
   humanAuthored: boolean,
@@ -204,8 +218,9 @@ export function buildSignalReviewTranscript(
   });
   const producerCueLifecycleLines = botcastProducerCueLifecyclesFromEvents(
     events,
-  ).map((lifecycle) =>
-    `- Cue ${lifecycle.cueId} | ${lifecycle.status}${lifecycle.failure ? ` | ${lifecycle.failure}` : ""} | ${lifecycle.delivery}`,
+  ).map(
+    (lifecycle) =>
+      `- Cue ${lifecycle.cueId} | ${lifecycle.status}${lifecycle.failure ? ` | ${lifecycle.failure}` : ""} | ${lifecycle.delivery} | ${lifecycle.priority}`,
   );
 
   const lines: string[] = [
@@ -383,8 +398,10 @@ export function buildSignalReviewTranscript(
           turnProducerInterruptions.length > 0
             ? turnProducerInterruptions
                 .map(
-                  (interruption) =>
-                    `${payloadString(interruption, "delivery") ?? "unknown delivery"} — ${payloadString(interruption, "kind") ?? "producer cue"} (event ${interruption.id}); this canonical turn contains only the audience-heard prefix`,
+                  (interruption) => {
+                    const pivotSummary = producerPivotSummary(interruption);
+                    return `${payloadString(interruption, "delivery") ?? "unknown delivery"} — ${payloadString(interruption, "kind") ?? "producer cue"} (${payloadString(interruption, "priority") ?? "ordinary"}${pivotSummary ? `; ${pivotSummary}` : ""}; event ${interruption.id}); this canonical turn contains only the audience-heard prefix`;
+                  },
                 )
                 .join("; ")
             : "None recorded"
@@ -416,7 +433,8 @@ export function buildSignalReviewTranscript(
             event,
             "interruptedMessageId",
           );
-          return `- Event ID: ${event.id} | Delivery: ${payloadString(event, "delivery") ?? "unknown"} | Kind: ${payloadString(event, "kind") ?? "unknown"} | Interrupted message ID: ${interruptedMessageId ?? "None"} | Scheduled bridge: ${payloadString(event, "interruptionBridgeLine") ?? "None"} | Canonical interrupted message: ${interruptedMessageId && canonicalMessageIds.has(interruptedMessageId) ? "yes" : "no"}`;
+          const pivotSummary = producerPivotSummary(event);
+          return `- Event ID: ${event.id} | Delivery: ${payloadString(event, "delivery") ?? "unknown"} | Priority: ${payloadString(event, "priority") ?? "ordinary"} | Kind: ${payloadString(event, "kind") ?? "unknown"}${pivotSummary ? ` | ${pivotSummary}` : ""} | Interrupted message ID: ${interruptedMessageId ?? "None"} | Scheduled bridge: ${payloadString(event, "interruptionBridgeLine") ?? "None"} | Canonical interrupted message: ${interruptedMessageId && canonicalMessageIds.has(interruptedMessageId) ? "yes" : "no"}`;
         })
       : ["No redirect_host or interrupt_guest producer handoffs were recorded."]),
     "",

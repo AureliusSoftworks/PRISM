@@ -7,6 +7,7 @@ import {
 } from "node:crypto";
 import {
   PORTABLE_MYSTERY_PACKAGE_MAGIC_V1,
+  PORTABLE_MYSTERY_PACKAGE_FORMAT_MINOR_V1,
   canonicalPortablePackageJsonV1,
   validateMansionPackageHeaderV1,
   type MansionPackageHeaderV1,
@@ -121,7 +122,7 @@ export function sealPortableMysteryEnvelopeV1(args: {
   }
   const header: MansionPackageHeaderV1 = {
     magic: PORTABLE_MYSTERY_PACKAGE_MAGIC_V1,
-    formatVersion: { major: 1, minor: 0 },
+    formatVersion: { major: 1, minor: PORTABLE_MYSTERY_PACKAGE_FORMAT_MINOR_V1 },
     packageType: args.metadata.packageType,
     title: args.metadata.title,
     creatorName: args.metadata.creatorName,

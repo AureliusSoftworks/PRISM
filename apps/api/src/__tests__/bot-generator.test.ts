@@ -12,7 +12,10 @@ import {
   sanitizeBotGenerationFieldContext,
 } from "../bot-generator.ts";
 import type { GenerateOptions, ProviderMessage } from "../providers.ts";
-import { decodeBotAvatarDetailsPaintColorMap } from "@localai/shared";
+import {
+  CURSED_TONGUE_GENERATED_AUTHORING_PROMPT,
+  decodeBotAvatarDetailsPaintColorMap,
+} from "@localai/shared";
 
 const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
 
@@ -557,7 +560,7 @@ describe("PRISM bot generator", () => {
     assert.equal(result.modelUsed, "fallback-online");
     assert.equal(
       result.draft.powers[0]?.intent,
-      "Every non-silent public spoken reply is involuntarily laced with frequent strong non-slur profanity; their private intended wording stays clean.",
+      CURSED_TONGUE_GENERATED_AUTHORING_PROMPT,
     );
   });
 

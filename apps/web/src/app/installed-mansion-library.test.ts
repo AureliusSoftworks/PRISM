@@ -176,6 +176,13 @@ describe("installed mansion library", () => {
     assert.match(component, /Duplicate & edit mansion/u);
     assert.match(component, /Open Mansion Editor/u);
     assert.match(component, /data-tutorial-target="whodunnit-mansion-soundscape"/u);
+    assert.match(component, /data-tutorial-target="whodunnit-mansion-prop-theme"/u);
+    assert.match(component, /16\/16 themed props/u);
+    assert.match(component, /Uses PRISM prop fallbacks/u);
+    assert.match(component, /Mansion evidence wardrobe/u);
+    assert.match(component, /Recipients use this pack offline without adding it to their Asset Library/u);
+    assert.match(component, /Generate themed prop pack/u);
+    assert.match(component, /Retry/u);
     assert.match(component, /role="tablist" aria-label="Mansion soundscape"/u);
     assert.match(component, /data-soundscape-panel="music"/u);
     assert.match(component, /data-soundscape-panel="atmosphere"/u);

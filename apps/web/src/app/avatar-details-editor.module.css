@@ -718,7 +718,7 @@
 
 .editor[data-editor-theme="light"] .canvasFrame {
   border-color: color-mix(in srgb, #050608 54%, var(--line));
-  background-color: #ffffff;
+  background-color: #050608;
   box-shadow: none;
 }
 

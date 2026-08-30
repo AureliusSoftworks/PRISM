@@ -806,7 +806,10 @@ describe("Coffee spectral observer projection", () => {
       const message = turn.conversation.messages.findLast(
         (candidate) => candidate.botId === ALICE.id,
       );
-      if (message?.coffeeAudienceBotIds?.length === 0) {
+      if (
+        message?.coffeeAudienceBotIds?.length === 0 &&
+        message.socialSilence === undefined
+      ) {
         assert.ok(message.content.trim());
         missedLine = message.content;
         break;
@@ -6794,7 +6797,7 @@ describe("Coffee group foundation", () => {
 
     const holderChatBodies: unknown[] = [];
     const mirroredHolderTurn = await withMockedCoffeeFetch(
-      "I'm Identity Crisis Ian, and I still sound exactly like myself.",
+      "North is still the cleanest bearing; the ridge confirms it.",
       () => processCoffeeTurn(
         db,
         userId,
@@ -6814,26 +6817,26 @@ describe("Coffee group foundation", () => {
     );
     assert.match(
       mirroredHolderPrompt,
-      /absolutely convinced that you are Alice/iu,
+      /knowing public masquerade/iu,
     );
     assert.match(
       mirroredHolderPrompt,
-      /original Alice is an impostor/iu,
+      /Remain fully Identity Crisis Ian in persona and behavior/iu,
+    );
+    assert.doesNotMatch(
+      mirroredHolderPrompt,
+      /Persona:\\nCurious philosopher who loves Socratic questions/iu,
     );
     assert.match(
       mirroredHolderPrompt,
-      /Copied public persona:\\nCurious philosopher who loves Socratic questions/iu,
-    );
-    assert.match(
-      mirroredHolderPrompt,
-      /material shell.*complete frozen voice.*exact Accent Map/isu,
+      /complete frozen voice and Accent Map/isu,
     );
     const mirroredHolderContent = (
       mirroredHolderTurn.conversation.messages.at(-1)?.content ?? ""
     ).replace(/\[([^\]]+)\]\(prism-bot:[^)]+\)/gu, "$1");
     assert.equal(
       mirroredHolderContent,
-      "I'm Alice, and I still sound exactly like myself. The other Alice is an impostor.",
+      "North is still the cleanest bearing; the ridge confirms it.",
     );
 
     const repeat = await withMockedCoffeeFetch(
@@ -12162,7 +12165,7 @@ describe("buildSpeakerPrompt", () => {
     );
   });
 
-  it("persists identity mirroring with holder-only guidance and unchanged social state", () => {
+  it("persists identity mirroring with holder persona, copied public Powers, and unchanged social state", () => {
     const state = createBotIdentityMirrorStateV1({
       surface: "coffee",
       holderBotId: "ian",
@@ -12191,31 +12194,31 @@ describe("buildSpeakerPrompt", () => {
     });
     assert.match(
       holderPrompt,
-      /absolutely convinced that you are Mara Vale/iu,
+      /knowing public masquerade/iu,
     );
     assert.match(
       holderPrompt,
-      /original Mara Vale is an impostor/iu,
+      /Remain fully Identity Crisis Ian in persona and behavior/iu,
     );
     assert.match(
+      holderPrompt,
+      /execute Mara Vale's eligible public Power mechanics and consequences/iu,
+    );
+    assert.doesNotMatch(
       holderPrompt,
       /Copied public persona:\s*A terse lunar cartographer/iu,
-    );
-    assert.match(
-      holderPrompt,
-      /material shell.*complete frozen voice.*exact Accent Map/isu,
     );
 
     const originalPrompt = coffeeIdentityMirrorPromptForSpeaker({
       history,
       speaker: { id: "mara", name: "Mara Vale" },
     });
-    assert.match(originalPrompt, /stolen your public identity/iu);
-    assert.match(originalPrompt, /not the real Mara Vale/iu);
-    assert.match(originalPrompt, /real offense/iu);
+    assert.match(originalPrompt, /knowingly wearing your current public nameplate and face/iu);
+    assert.match(originalPrompt, /copying your eligible public Power mechanics/iu);
+    assert.match(originalPrompt, /Do not force an identity dispute/iu);
     assert.match(
       originalPrompt,
-      /remain Mara Vale with your own personality, agency, role, material form, voice, Powers, and boundaries/iu,
+      /remain yourself with your own personality, agency, role, material form, voice, Powers, and boundaries/iu,
     );
 
     const reloaded = coffeeIdentityMirrorStatesFromHistory(
@@ -12251,7 +12254,7 @@ describe("buildSpeakerPrompt", () => {
 
   });
 
-  it("does not borrow Coffee amnesia, aliases, or other target effects", () => {
+  it("borrows Coffee public amnesia and aliases while filtering private and recursive effects", () => {
     const state = createBotIdentityMirrorStateV1({
       surface: "coffee",
       holderBotId: "ian",
@@ -12299,8 +12302,12 @@ describe("buildSpeakerPrompt", () => {
               continuity: "session_sticky_until_amnesia",
               pool: "mixed_persona_names",
             },
+            {
+              type: "speech_audience",
+              allowed: [{ kind: "bot", name: "Private Listener" }],
+            },
           ],
-          ruleLabels: [],
+          ruleLabels: ["private target rule must not transfer"],
           warnings: [],
         },
       },
@@ -12316,9 +12323,20 @@ describe("buildSpeakerPrompt", () => {
 
     assert.deepEqual(
       composed?.bots.ian?.effects.map((effect) => effect.type),
-      ["identity_mirror"],
+      ["identity_mirror", "eternal_introduction", "false_name"],
     );
-    assert.deepEqual(composed?.bots.ian?.powerIds, ["identity-crisis"]);
+    assert.deepEqual(composed?.bots.ian?.powerIds, [
+      "identity-crisis",
+      "identity-mirror:steven:public-powers",
+    ]);
+    assert.doesNotMatch(
+      composed?.bots.ian?.selfCue ?? "",
+      /Private Listener|private target rule must not transfer/i,
+    );
+    assert.doesNotMatch(
+      composed?.bots.ian?.ruleLabels.join("\n") ?? "",
+      /private target rule must not transfer/i,
+    );
     assert.equal(composed?.bots.steven, plan.bots.steven);
   });
 

@@ -98,6 +98,7 @@ import {
   debateModeratorOpeningCoversDocket,
   debateModeratorChallengeLooksEmpty,
   debateAdvocateSpeechNearEcho,
+  debatePowerPlanWithIdentityMirrorTargetsV1,
   sanitizeDebateModeratorDelivery,
   type DebateAiRuntime,
 } from "../debate.ts";
@@ -133,6 +134,101 @@ const MOTION: DebateMotionSlateV1 = {
     brief: "Oppose the blanket rule and defend more locally tailored growth.",
   },
 };
+
+it("lets Debate Identity Crisis replace copied public Powers with the current presentation target", () => {
+  const effect = (
+    powerId: string,
+    powerName: string,
+    value: BotPowerEffectV1,
+  ) => ({ powerId, powerName, policy: "direct" as const, effect: value });
+  const plan = {
+    version: DEBATE_SCHEMA_VERSION,
+    resolvedAt: NOW,
+    theme: "dark" as const,
+    bots: {
+      collin: {
+        botId: "collin",
+        effects: [
+          effect("identity-crisis", "Identity Crisis", {
+            type: "identity_mirror",
+            trigger: "direct_bot_address",
+          }),
+        ],
+        hardMuted: false,
+        visibleToBotIds: null,
+        speechAudienceBotIds: null,
+        warnings: [],
+      },
+      shannon: {
+        botId: "shannon",
+        effects: [
+          effect("shapeshifter", "Shapeshifter", {
+            type: "identity_shapeshift",
+            source: "library_or_marketplace",
+            continuity: "session_sticky_until_amnesia",
+            excludesPlayer: true,
+          }),
+          effect("mute", "Mute", { type: "mute" }),
+          effect("private", "Private hearing", {
+            type: "speech_audience",
+            allowed: [{ kind: "bot", name: "One Listener" }],
+          }),
+        ],
+        hardMuted: true,
+        visibleToBotIds: null,
+        speechAudienceBotIds: ["one-listener"],
+        warnings: [],
+      },
+      recursive: {
+        botId: "recursive",
+        effects: [
+          effect("other-mirror", "Other Identity Crisis", {
+            type: "identity_mirror",
+            trigger: "direct_bot_address",
+          }),
+          effect("brief", "Brief", {
+            type: "response_budget",
+            mode: "brief",
+            enforcement: "hard",
+          }),
+        ],
+        hardMuted: false,
+        visibleToBotIds: null,
+        speechAudienceBotIds: null,
+        warnings: [],
+      },
+    },
+  };
+  const copiedShannon = debatePowerPlanWithIdentityMirrorTargetsV1({
+    plan,
+    events: [{ speakerBotId: "shannon" }],
+  });
+  assert.deepEqual(
+    copiedShannon.bots.collin?.effects.map((entry) => entry.effect.type),
+    ["identity_mirror", "identity_shapeshift", "mute"],
+  );
+  assert.equal(copiedShannon.bots.collin?.hardMuted, true);
+  assert.equal(copiedShannon.bots.collin?.speechAudienceBotIds, null);
+
+  const retargeted = debatePowerPlanWithIdentityMirrorTargetsV1({
+    plan: copiedShannon,
+    events: [
+      { speakerBotId: "shannon" },
+      { speakerBotId: "recursive" },
+    ],
+  });
+  assert.deepEqual(
+    retargeted.bots.collin?.effects.map((entry) => entry.effect.type),
+    ["identity_mirror", "response_budget"],
+  );
+  assert.equal(retargeted.bots.collin?.hardMuted, false);
+  assert.equal(
+    retargeted.bots.collin?.effects.some(
+      (entry) => entry.powerName === "Copied Other Identity Crisis",
+    ),
+    false,
+  );
+});
 
 class DebateProviderStub implements LlmProvider {
   public readonly name = "local" as const;
@@ -446,7 +542,7 @@ class InventedAttributionBallotProvider extends DebateProviderStub {
       return JSON.stringify({
         sideId: "for",
         reason:
-          "I vote For because Bob said it can be drained and baked crisp.",
+          "I vote For because Mira said it can be drained and baked crisp.",
       });
     }
     return super.generateResponse(messages, options);
@@ -2571,7 +2667,7 @@ describe("Debate engine", () => {
     }
   });
 
-  it("keeps the saved model, effort, and Turbo when an archived Debate starts", async () => {
+  it("keeps saved runtime metadata while Auto re-resolves each Debate work item", async () => {
     const db = createTestDb();
     try {
       const savedRuntime = runtime();
@@ -2617,10 +2713,9 @@ describe("Debate engine", () => {
         serverSource.indexOf("function frozenDebateModelOverride"),
         serverSource.indexOf("function debateAutoRoutingContext"),
       );
-      assert.match(frozenOverrideSource, /return session\.model/u);
-      assert.doesNotMatch(
+      assert.match(
         frozenOverrideSource,
-        /modelSelectionKind === "auto"/u,
+        /return session\.modelSelectionKind === "auto" \? null : session\.model/u,
       );
     } finally {
       db.close();

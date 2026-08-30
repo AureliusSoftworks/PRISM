@@ -6,7 +6,7 @@ import {
 } from "node:http";
 import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import { randomInt } from "node:crypto";
+import { createHash, randomInt } from "node:crypto";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -315,6 +315,7 @@ import {
   getDebateMysteryAudioClipV2,
   getDebateMysteryAudioStorageSummaryV2,
   getDebateMysteryCompilationStatusV2,
+  getDebateMysteryCaseV2,
   pendingDebateMysteryEvidenceAssetsForRoomV2,
   playDebateMysteryV2Again,
   releaseDebateMysteryAssetBackgroundLeaseV2,
@@ -323,6 +324,7 @@ import {
   retryDebateMysteryCompilationV2,
   runDebateMysteryCompilationV2,
   type DebateMysteryEvidenceAssetPreparationV2,
+  type DebateMysteryEvidencePropResolutionRequestV1,
   type DebateMysteryMansionExteriorAssetPreparationV2,
   type DebateMysteryRoomAssetPreparationV2,
 } from "./debate-mystery-v2.ts";
@@ -357,6 +359,14 @@ import {
   updateDebateMysteryMansionLibraryV1,
   updateDebateMysteryMansionTopologyV1,
 } from "./debate-mystery-mansion-bundles.ts";
+import {
+  beginDebateMysteryMansionPropVariantAttemptV1,
+  ensureDebateMysteryMansionPropVariantsV1,
+  failDebateMysteryMansionPropVariantAttemptV1,
+  getDebateMysteryMansionPropThemeStateV1,
+  retryDebateMysteryMansionPropVariantV1,
+  saveReadyDebateMysteryMansionPropVariantV1,
+} from "./debate-mystery-mansion-prop-variants.ts";
 import {
   exportPortableMansionPackageV1,
   importPortableMansionPackageV1,
@@ -406,6 +416,8 @@ import {
   MANSION_MUSIC_PREVIOUS_LOGICAL_ID_V1,
   PORTABLE_MANSION_PACKAGE_MIME_V1,
   PORTABLE_WHODUNNIT_PACKAGE_MIME_V1,
+  WHODUNNIT_PROP_ARCHETYPE_IDS_V1,
+  WHODUNNIT_PROP_ARCHETYPES_V1,
   debateMysteryHouseStyleV2,
   debateMysteryMansionExteriorPromptV1,
   resolveDebateMysteryMansionExteriorScaleClassV1,
@@ -1289,6 +1301,8 @@ import {
   BOT_PERSON_NAME_MAX_LENGTH,
   BOTCAST_ELEVENLABS_INTRO_DURATION_MS,
   BOTCAST_ELEVENLABS_OUTDENT_DURATION_MS,
+  botcastActiveProducerCueFromEvents,
+  botcastProducerCuePreemptsHostSpeech,
   buildSignalMusicProfile,
   normalizePrismRefractDirection,
   normalizePrismRefractRequest,
@@ -1374,6 +1388,7 @@ import {
   getBotImageAssetLibraryIndex,
   getImageAssetSet,
   getImageAssetSetForCatalog,
+  getImageAssetSetForContentSha256,
   getImageAssetSetForImage,
   imageAssetSelectionStorageBytes,
   imageAssetStorageSummary,
@@ -1383,9 +1398,24 @@ import {
   updateImageAssetPlayerTags,
 } from "./image-asset-library.ts";
 import {
+  analyzeItemCapabilityCard,
+  disableItemCapabilityCard,
+  getItemCapabilityCard,
+  ItemCapabilityCardError,
+  listReadyWhodunnitItemCapabilityCandidates,
+  retryItemCapabilityCard,
+  updateItemCapabilityCard,
+  type ItemCapabilityAnalyzerV1,
+} from "./image-asset-capability-cards.ts";
+import {
+  selectWhodunnitEvidencePropBindingsV1,
+  type WhodunnitPersonalPropCandidateV1,
+} from "./debate-mystery-prop-selection.ts";
+import {
   applySmartTidyWithDeleter,
   compressImageAssetSet,
   ensureImageAssetSetHotForEdit,
+  heuristicSmartTags,
   ImageAssetSmartMemoryError,
   migrateImageAssetSetToCold,
   previewSmartTidyCandidates,
@@ -9959,6 +9989,7 @@ async function generateRawDebateMysteryCandidate(args: {
   model?: string;
   size: "1536x1024" | "1024x1024" | "1280x720";
   quality?: "low" | "medium" | "high" | "hd";
+  background?: "transparent" | "opaque" | "auto";
   signal: AbortSignal;
 }): Promise<{ bytes: Buffer; model: string }> {
   const requestId = randomId(16);
@@ -9993,7 +10024,7 @@ async function generateRawDebateMysteryCandidate(args: {
           model: args.model,
           size: args.size,
           quality: args.quality ?? "hd",
-          background: "opaque",
+          background: args.background ?? "opaque",
           signal: acquired.abortController.signal,
         });
     return {
@@ -10009,6 +10040,317 @@ async function generateRawDebateMysteryCandidate(args: {
   }
 }
 
+/**
+ * Freezes functional prop identity before the first prose request. Personal
+ * bytes are copied into the sealed case here, so later Library edits or
+ * deletion cannot change the compiled case or replay.
+ */
+async function resolveDebateMysteryV2EvidencePropBindings(
+  args: DebateMysteryEvidencePropResolutionRequestV1,
+): Promise<Record<string, import("@localai/shared").EvidencePropBindingV1>> {
+  const userKey = decryptUserKey(args.userId);
+  const preparedPersonal = new Map<string, {
+    candidate: WhodunnitPersonalPropCandidateV1;
+    pngBytes: Buffer;
+    pixels: Awaited<ReturnType<typeof validateDebateMysteryAssetPixelsV1>>;
+  }>();
+  if (args.config.useRelevantAssetLibraryProps) {
+    for (const source of listReadyWhodunnitItemCapabilityCandidates(db, args.userId)) {
+      if (!source.card.primaryArchetype || args.signal?.aborted) break;
+      try {
+        const raw = await readGeneratedImageBytesForPromptAttachment(source.localRelPath);
+        const normalized = await normalizeGeneratedDebateExhibitImage(raw);
+        const pixels = await validateDebateMysteryAssetPixelsV1(
+          "evidence",
+          normalized.pngBytes,
+        );
+        const contentSha256 = createHash("sha256")
+          .update(normalized.pngBytes)
+          .digest("hex");
+        preparedPersonal.set(source.assetSetId, {
+          candidate: {
+            assetSetId: source.assetSetId,
+            imageId: source.imageId,
+            assetKind: source.kind,
+            localRelPath: source.localRelPath,
+            exactIdentity: source.card.exactIdentity,
+            whatItDoes: source.card.whatItDoes,
+            primaryArchetype: source.card.primaryArchetype,
+            capabilities: source.card.capabilities,
+            limitations: source.card.limitations,
+            settingTags: source.card.settingTags,
+            genreTags: source.card.genreTags,
+            confidence: source.card.confidence,
+            contentSha256,
+            createdAt: source.card.createdAt,
+          },
+          pngBytes: normalized.pngBytes,
+          pixels,
+        });
+      } catch (error) {
+        console.warn("[debate-mystery-v2] capability-ready personal prop rejected", {
+          sessionId: args.sessionId,
+          assetSetId: source.assetSetId,
+          reason: spoilerSafeMysteryAssetFailure(error),
+        });
+      }
+    }
+  }
+  const assetShaById = new Map(
+    (args.config.mansionSnapshot?.presentation.assets ?? []).map((asset) => [asset.id, asset.sha256]),
+  );
+  const selected = selectWhodunnitEvidencePropBindingsV1({
+    needs: args.evidence.map((evidence) => ({
+      evidenceId: evidence.id,
+      title: evidence.title,
+      object: evidence.object,
+      observation: evidence.observation,
+      isCanonicalWeapon: evidence.isCanonicalWeapon,
+    })),
+    setting: args.setting,
+    personalEnabled: args.config.useRelevantAssetLibraryProps,
+    personalCandidates: [...preparedPersonal.values()].map((entry) => entry.candidate),
+    mansionVariants: (args.config.mansionSnapshot?.presentation.propTheme?.variants ?? [])
+      .flatMap((variant) => {
+        const contentSha256 = assetShaById.get(variant.packageAssetId);
+        return contentSha256 ? [{ ...variant, contentSha256 }] : [];
+      }),
+  });
+  for (const [evidenceId, source] of Object.entries(selected.privatePersonalSourceByEvidenceId)) {
+    const prepared = preparedPersonal.get(source.assetSetId);
+    if (!prepared) continue;
+    setDebateMysteryAssetPendingV1(db, {
+      userId: args.userId,
+      sessionId: args.sessionId,
+      kind: "evidence",
+      subjectId: evidenceId,
+      mimeType: "image/png",
+    });
+    sealDebateMysteryAssetBytesV1(db, userKey, {
+      userId: args.userId,
+      sessionId: args.sessionId,
+      kind: "evidence",
+      subjectId: evidenceId,
+      bytes: prepared.pngBytes,
+      provider: "asset-library",
+      model: "capability-card-v1",
+      review: {
+        sourceKind: prepared.candidate.assetKind,
+        archetypeId: prepared.candidate.primaryArchetype,
+        contentSha256: prepared.candidate.contentSha256,
+        pixels: prepared.pixels,
+      },
+    });
+    recordImageAssetAttach(db, args.userId, source.imageId);
+  }
+  return selected.bindingsByEvidenceId;
+}
+
+const ITEM_CAPABILITY_ANALYSIS_SCHEMA_V1 = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "exactIdentity",
+    "whatItDoes",
+    "primaryArchetype",
+    "capabilities",
+    "limitations",
+    "settingTags",
+    "genreTags",
+    "confidence",
+  ],
+  properties: {
+    exactIdentity: { type: "string" },
+    whatItDoes: { type: "string" },
+    primaryArchetype: {
+      type: "string",
+      enum: [...WHODUNNIT_PROP_ARCHETYPE_IDS_V1],
+    },
+    capabilities: {
+      type: "array",
+      minItems: 1,
+      maxItems: 8,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "description"],
+        properties: {
+          id: { type: "string" },
+          description: { type: "string" },
+        },
+      },
+    },
+    limitations: { type: "array", maxItems: 12, items: { type: "string" } },
+    settingTags: { type: "array", maxItems: 16, items: { type: "string" } },
+    genreTags: { type: "array", maxItems: 16, items: { type: "string" } },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+  },
+} as const;
+
+function itemCapabilityOriginLaneV1(
+  userId: string,
+  assetSetId: string,
+): "local" | "online" {
+  const row = db
+    .prepare(
+      `SELECT images.provider
+         FROM image_asset_sets sets
+         JOIN image_asset_set_items items
+           ON items.set_id = sets.id AND items.role = 'primary'
+         JOIN images ON images.id = items.image_id AND images.user_id = sets.user_id
+        WHERE sets.id = ? AND sets.user_id = ?
+          AND sets.kind IN ('item', 'debate_exhibit')
+        LIMIT 1`,
+    )
+    .get(assetSetId, userId) as { provider: string } | undefined;
+  if (!row) throw new HttpError(404, "Item capability card not found.");
+  // Uploads do not carry an outbound privacy grant. Treat them as LOCAL;
+  // generated assets may be re-analyzed only inside their original lane.
+  return row.provider.trim().toLowerCase() === "local" ||
+    row.provider.trim().toLowerCase() === "upload"
+    ? "local"
+    : "online";
+}
+
+function itemCapabilityAnalyzerV1(args: {
+  userId: string;
+  lane: "local" | "online";
+}): ItemCapabilityAnalyzerV1 {
+  return {
+    lane: args.lane,
+    analyzerId: "prism-item-capability-vision-v1",
+    async analyze(input) {
+      if (!input.image.localRelPath) {
+        throw new Error("The source image is unavailable for capability analysis.");
+      }
+      const user = getUserRow(args.userId);
+      const runtime = await contextualTextRuntimeForUser({
+        userId: args.userId,
+        user,
+        requestedProvider: args.lane === "local" ? "local" : undefined,
+        requestedResponseMode: args.lane,
+        requiresImageInput: true,
+        routingContext: {
+          surface: "whodunnit",
+          inputText: `${input.name}\n${input.prompt}`,
+          outputTokens: 650,
+          structuredOutput: true,
+          highStakes: true,
+        },
+      });
+      if (runtime.responseMode !== args.lane) {
+        throw new Error("Capability analysis changed privacy lanes.");
+      }
+      const provider = selectProvider(
+        runtime.provider,
+        runtime.openAiApiKey,
+        user.secondary_ollama_host,
+        runtime.anthropicApiKey,
+        runtime.ollamaCloudApiKey,
+      );
+      const sourceBytes = await readGeneratedImageBytesForPromptAttachment(
+        input.image.localRelPath,
+      );
+      const normalized = await normalizeGeneratedDebateExhibitImage(sourceBytes);
+      const vocabulary = WHODUNNIT_PROP_ARCHETYPE_IDS_V1.map((id) => {
+        const definition = WHODUNNIT_PROP_ARCHETYPES_V1[id];
+        return `${id}: ${definition.purpose}`;
+      }).join("\n");
+      const response = await provider.generateResponse(
+        [
+          {
+            role: "system",
+            content: [
+              "Analyze one object for a reusable Whodunnit capability card.",
+              "Use only the supplied image, name, prompt, and applet context.",
+              "Describe its exact identity and what it actually does; classify by function, not visual resemblance.",
+              "A portal gun that opens portals is a key, not a firearm. A lightsaber or claymore is a blade.",
+              "Return conservative JSON. State extraordinary setting requirements and functional limitations explicitly.",
+              "Choose exactly one primary archetype from this registry:",
+              vocabulary,
+            ].join("\n"),
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              name: input.name,
+              prompt: input.prompt,
+              appletContext: input.appletContext,
+            }).slice(0, 12_000),
+            images: [
+              {
+                mimeType: "image/png",
+                data: normalized.pngBytes.toString("base64"),
+              },
+            ],
+          },
+        ],
+        {
+          model: runtime.model,
+          reasoningEffort: runtime.reasoningEffort,
+          turbo: runtime.turbo,
+          temperature: 0.1,
+          maxTokens: 650,
+          jsonMode: true,
+          jsonSchema: ITEM_CAPABILITY_ANALYSIS_SCHEMA_V1,
+          jsonSchemaName: "item_capability_card_v1",
+          usagePurpose: "image_generation",
+          allowFinalLocalFallback: false,
+          generationWork: {
+            workflow: "whodunnit_item_capability",
+            stage: "analyze",
+            privacyMode: args.lane,
+            outputClass: "critical",
+          },
+        },
+      );
+      return JSON.parse(response) as unknown;
+    },
+  };
+}
+
+async function analyzeOwnedItemCapabilityCardV1(args: {
+  userId: string;
+  assetSetId: string;
+  retry?: boolean;
+}) {
+  const lane = itemCapabilityOriginLaneV1(args.userId, args.assetSetId);
+  const analyzer = itemCapabilityAnalyzerV1({ userId: args.userId, lane });
+  return args.retry
+    ? retryItemCapabilityCard(db, args.userId, args.assetSetId, {
+        lane,
+        analyzer,
+      })
+    : analyzeItemCapabilityCard(db, args.userId, args.assetSetId, {
+        lane,
+        analyzer,
+      });
+}
+
+function queueItemCapabilityAnalysisForImageV1(
+  userId: string,
+  imageId: string,
+): void {
+  const asset = getImageAssetSetForImage(db, userId, imageId);
+  if (
+    !asset ||
+    (asset.kind !== "item" && asset.kind !== "debate_exhibit") ||
+    asset.capabilityCard?.status !== "pending" ||
+    asset.capabilityCard.provenance
+  ) {
+    return;
+  }
+  void analyzeOwnedItemCapabilityCardV1({
+    userId,
+    assetSetId: asset.id,
+  }).catch((error) => {
+    console.warn("[item-capability] nonblocking analysis unavailable", {
+      assetSetId: asset.id,
+      reason: error instanceof Error ? error.message : "analysis failed",
+    });
+  });
+}
+
 /** Canonical sealed evidence synthesis. No candidate enters `images`; the
  * encrypted case vault is the only durable destination before discovery. */
 async function prepareDebateMysteryV2EvidenceAssets(
@@ -10021,23 +10363,10 @@ async function prepareDebateMysteryV2EvidenceAssets(
   if (session.status === "cancelled") {
     throw new HttpError(409, "That case is no longer available.");
   }
-  const user = getUserRow(args.userId);
-  const selection = resolveTypedAssetGenerationSelection(
-    args.userId,
-    "debate_exhibit",
-    { provider: "openai" },
-  );
-  // The case's synthesis lane is frozen when Case Forge begins. Account mode
-  // may change while the durable job continues in the background, but it must
-  // neither revoke an already-authorized ONLINE pack nor upgrade a LOCAL one.
-  const online = session.responseMode !== "local";
   const userKey = decryptUserKey(args.userId);
-  const apiKey = online
-    ? getOpenAiApiKeyForUser(args.userId, userKey) ?? config.openAiApiKey
-    : undefined;
-  const fallbackController = new AbortController();
-  const signal = args.signal ?? fallbackController.signal;
   const assetByExhibitId: Record<string, import("@localai/shared").DebateMysterySealedAssetRefV1> = {};
+  const privateCase = getDebateMysteryCaseV2(db, args.userId, args.sessionId).privateCase;
+  const propBindingsById = privateCase.evidencePropBindingsById ?? {};
   for (const exhibit of args.exhibits) {
     const existing = getDebateMysterySealedAssetRefV1(
       db,
@@ -10064,74 +10393,61 @@ async function prepareDebateMysteryV2EvidenceAssets(
       continue;
     }
     let prepared: import("@localai/shared").DebateMysterySealedAssetRefV1 | null = null;
-    let failure = online && apiKey ? "generation failed" : "ONLINE synthesis was not authorized";
-    let reviewRepairFeedback: string | null = null;
-    if (online && apiKey) {
-      for (let attempt = 1; attempt <= 2 && !prepared; attempt += 1) {
-        try {
-          prepared = await runMysteryAssetAttempt(signal, async (attemptSignal) => {
-            const generated = await generateRawDebateMysteryCandidate({
-              userId: args.userId,
-              title: exhibit.title,
-              prompt: [
-                buildDebateExhibitSpritePrompt(exhibit),
-                args.houseStyle.promptContract,
-                "Express the shared house style through this object's materials, palette, patina, and lighting while keeping it isolated on transparency.",
-                "The object remains presentation-only: do not add clues, labels, symbols, surroundings, people, bodies, gore, text, UI, or facts beyond its frozen title.",
-                ...(attempt === 2 && reviewRepairFeedback
-                  ? [`Second-pass repair feedback: ${reviewRepairFeedback}`]
-                  : []),
-              ].join(" "),
-              apiKey,
-              model: selection.provider === "openai" ? selection.model : undefined,
-              size: "1024x1024",
-              signal: attemptSignal,
-            });
-            const normalized = await normalizeGeneratedDebateExhibitImage(generated.bytes);
-            const pixels = await validateDebateMysteryAssetPixelsV1(
-              "evidence",
-              normalized.pngBytes,
-            );
-            const review = await reviewDebateMysteryAssetWithVision({
-              apiKey,
-              bytes: normalized.pngBytes,
-              kind: "evidence",
-              requestedSubject: exhibit.title,
-              houseStyle: args.houseStyle.promptContract,
-              signal: attemptSignal,
-            });
-            if (!review.approved) {
-              throw new Error(
-                `Vision review rejected the exhibit: ${
-                  review.reasons.join("; ") || "no reason supplied"
-                }`,
-              );
-            }
-            return sealDebateMysteryAssetBytesV1(db, userKey, {
-              userId: args.userId,
-              sessionId: args.sessionId,
-              kind: "evidence",
-              subjectId: exhibit.id,
-              bytes: normalized.pngBytes,
-              provider: "openai",
-              model: generated.model,
-              review: { attempt, pixels, vision: review },
-            });
-          });
-        } catch (error) {
-          if (signal.aborted) throw error;
-          failure = spoilerSafeMysteryAssetFailure(error);
-          reviewRepairFeedback = failure.startsWith("Vision review rejected")
-            ? failure
-            : null;
-          console.warn("[debate-mystery-v2] sealed visual attempt failed", {
-            sessionId: args.sessionId,
-            kind: "evidence",
-            subjectId: exhibit.id,
-            attempt,
-            reason: failure,
-          });
+    const binding = propBindingsById[exhibit.id];
+    let failure = binding
+      ? `The frozen ${binding.visualSource} prop artwork was unavailable.`
+      : "No functional prop binding was available.";
+    if (binding?.visualSource === "mansion") {
+      try {
+        const snapshot = session.formatState.config.mansionSnapshot;
+        const variant = snapshot?.presentation.propTheme?.variants.find(
+          (candidate) => candidate.archetypeId === binding.archetypeId,
+        );
+        if (!snapshot || !variant) throw new Error("The frozen mansion prop variant is missing.");
+        const source = getDebateMysteryMansionAssetFileV1(
+          db,
+          userKey,
+          args.userId,
+          snapshot.sourceBundleId,
+          variant.packageAssetId,
+        );
+        const sourceContentSha256 = createHash("sha256")
+          .update(source.bytes)
+          .digest("hex");
+        if (sourceContentSha256 !== binding.contentSha256) {
+          throw new Error("The frozen mansion prop content hash changed.");
         }
+        const normalized = await normalizeGeneratedDebateExhibitImage(source.bytes);
+        const pixels = await validateDebateMysteryAssetPixelsV1(
+          "evidence",
+          normalized.pngBytes,
+        );
+        const sealedContentSha256 = createHash("sha256")
+          .update(normalized.pngBytes)
+          .digest("hex");
+        prepared = sealDebateMysteryAssetBytesV1(db, userKey, {
+          userId: args.userId,
+          sessionId: args.sessionId,
+          kind: "evidence",
+          subjectId: exhibit.id,
+          bytes: normalized.pngBytes,
+          provider: "mansion-theme",
+          model: `prop-theme-v1:${binding.archetypeId}`,
+          review: {
+            archetypeId: binding.archetypeId,
+            sourceContentSha256,
+            sealedContentSha256,
+            pixels,
+          },
+        });
+      } catch (error) {
+        failure = spoilerSafeMysteryAssetFailure(error);
+        console.warn("[debate-mystery-v2] frozen mansion prop rejected", {
+          sessionId: args.sessionId,
+          evidenceId: exhibit.id,
+          archetypeId: binding.archetypeId,
+          reason: failure,
+        });
       }
     }
     prepared ??= setDebateMysteryAssetFallbackV1(db, {
@@ -10729,6 +11045,156 @@ const mysteryRoomAssetBackgroundRuns = new Map<
   { controller: AbortController; promise: Promise<void> }
 >();
 
+const mysteryMansionPropThemeBackgroundRuns = new Map<
+  string,
+  { controller: AbortController; promise: Promise<void> }
+>();
+
+function prioritizedMansionPropArchetypesV1(
+  userId: string,
+  sessionId?: string | null,
+): typeof WHODUNNIT_PROP_ARCHETYPE_IDS_V1[number][] {
+  if (!sessionId) return [...WHODUNNIT_PROP_ARCHETYPE_IDS_V1];
+  try {
+    const privateCase = getDebateMysteryCaseV2(db, userId, sessionId).privateCase;
+    const required = Object.values(privateCase.evidencePropBindingsById ?? {})
+      .map((binding) => binding.archetypeId);
+    return [
+      ...new Set([...required, ...WHODUNNIT_PROP_ARCHETYPE_IDS_V1]),
+    ];
+  } catch {
+    return [...WHODUNNIT_PROP_ARCHETYPE_IDS_V1];
+  }
+}
+
+function queueDebateMysteryMansionPropThemeV1(args: {
+  userId: string;
+  bundleId: string;
+  sessionId?: string | null;
+}): void {
+  if (!detachedBackgroundJobsAllowed) return;
+  const key = `${args.userId}:${args.bundleId}`;
+  if (mysteryMansionPropThemeBackgroundRuns.has(key)) return;
+  const user = getUserRow(args.userId);
+  if (userBlocksOnlineCapabilities(user)) return;
+  const userKey = decryptUserKey(args.userId);
+  const apiKey = getOpenAiApiKeyForUser(args.userId, userKey) ?? config.openAiApiKey;
+  if (!apiKey) return;
+  const selection = resolveTypedAssetGenerationSelection(
+    args.userId,
+    "debate_exhibit",
+    { provider: "openai" },
+  );
+  const controller = new AbortController();
+  const promise = (async () => {
+    ensureDebateMysteryMansionPropVariantsV1(db, args.userId, args.bundleId);
+    const mansion = getDebateMysteryMansionBundleV2(
+      db,
+      args.userId,
+      args.bundleId,
+    );
+    for (const archetypeId of prioritizedMansionPropArchetypesV1(
+      args.userId,
+      args.sessionId,
+    )) {
+      if (controller.signal.aborted) break;
+      const current = getDebateMysteryMansionPropThemeStateV1(
+        db,
+        args.userId,
+        args.bundleId,
+      ).progress.variants.find((variant) => variant.archetypeId === archetypeId);
+      if (!current || current.status !== "pending") continue;
+      const definition = WHODUNNIT_PROP_ARCHETYPES_V1[archetypeId];
+      while (!controller.signal.aborted) {
+        const before = getDebateMysteryMansionPropThemeStateV1(
+          db,
+          args.userId,
+          args.bundleId,
+        ).progress.variants.find((variant) => variant.archetypeId === archetypeId);
+        if (!before || before.status !== "pending" || before.attemptCount >= 2) break;
+        const attempt = beginDebateMysteryMansionPropVariantAttemptV1(
+          db,
+          args.userId,
+          args.bundleId,
+          archetypeId,
+        );
+        try {
+          const displayName = `${mansion.name} ${definition.label}`;
+          const appearanceDescription = [
+            `A mansion-themed ${definition.label.toLowerCase()} built for ${definition.purpose.toLowerCase()}`,
+            mansion.houseStyle.label,
+          ].filter(Boolean).join(" · ");
+          const generated = await generateRawDebateMysteryCandidate({
+            userId: args.userId,
+            title: displayName,
+            prompt: [
+              `Create one isolated evidence-prop sprite: ${displayName}.`,
+              `Functional role: ${definition.purpose}`,
+              mansion.houseStyle.promptContract,
+              "Translate the mansion's era, lighting, material palette, wear, and craftsmanship into this object while keeping its function unmistakable.",
+              "Show exactly one complete object with an unbroken silhouette, centered at a consistent three-quarter view and occupying roughly 70 percent of the square.",
+              "No people, hands, scenery, room, pedestal, plaque, labels, readable text, symbols, border, card, logo, watermark, UI, duplicate subject, or unrelated object.",
+              "Use exact flat #FF00FF behind the object only; keep that color out of the object so PRISM can remove it to transparent black.",
+            ].join(" "),
+            apiKey,
+            model: selection.model,
+            size: "1024x1024",
+            quality: "high",
+            background: "transparent",
+            signal: controller.signal,
+          });
+          const normalized = await normalizeGeneratedDebateExhibitImage(
+            generated.bytes,
+          );
+          await validateDebateMysteryAssetPixelsV1(
+            "evidence",
+            normalized.pngBytes,
+          );
+          const optimized = await sharp(normalized.pngBytes, { failOn: "error" })
+            .resize(512, 512, { fit: "contain" })
+            .webp({ quality: 90, alphaQuality: 100, effort: 6 })
+            .toBuffer();
+          await saveReadyDebateMysteryMansionPropVariantV1(
+            db,
+            userKey,
+            args.userId,
+            args.bundleId,
+            {
+              archetypeId,
+              displayName,
+              appearanceDescription,
+              bytes: optimized,
+              mimeType: "image/webp",
+              provider: "openai",
+              model: generated.model,
+            },
+          );
+          break;
+        } catch (error) {
+          if (controller.signal.aborted) throw error;
+          failDebateMysteryMansionPropVariantAttemptV1(
+            db,
+            args.userId,
+            args.bundleId,
+            archetypeId,
+            `attempt_${attempt}:${spoilerSafeMysteryAssetFailure(error)}`,
+          );
+        }
+      }
+    }
+  })().finally(() => {
+    mysteryMansionPropThemeBackgroundRuns.delete(key);
+  });
+  mysteryMansionPropThemeBackgroundRuns.set(key, { controller, promise });
+  void promise.catch((error) => {
+    if (controller.signal.aborted) return;
+    console.warn("[mansion-prop-theme] background generation stopped", {
+      bundleId: args.bundleId,
+      reason: spoilerSafeMysteryAssetFailure(error),
+    });
+  });
+}
+
 const mysteryCompilationBackgroundRuns = new Map<string, Promise<void>>();
 
 function queueActiveDebateMysteryV2Compilation(userId: string): void {
@@ -10772,6 +11238,7 @@ function queueDebateMysteryV2CompilationInBackground(
         surface: "debate",
       },
       () => runDebateMysteryCompilationV2(db, userId, sessionId, runtime, {
+        resolveEvidencePropBindings: resolveDebateMysteryV2EvidencePropBindings,
         prepareEvidenceAssets: prepareDebateMysteryV2EvidenceAssets,
         prepareRoomAssets: prepareDebateMysteryV2RoomAssets,
         prepareIllustratedRooms: ({ userId: ownerId, sessionId: caseId, signal }) =>
@@ -10859,6 +11326,20 @@ function queueDebateMysteryV2RoomAssetBackground(
         leaseOwner,
       );
     }, 5 * 60_000);
+    const initialSession = getDebateSession(db, userId, sessionId);
+    if (
+      initialSession.responseMode === "online" &&
+      initialSession.formatState.format === "whodunnit" &&
+      initialSession.formatState.version === 2 &&
+      initialSession.formatState.config.assetSynthesis.evidence &&
+      initialSession.formatState.config.mansionBundleId
+    ) {
+      queueDebateMysteryMansionPropThemeV1({
+        userId,
+        bundleId: initialSession.formatState.config.mansionBundleId,
+        sessionId,
+      });
+    }
     while (!controller.signal.aborted) {
       const session = getDebateSession(db, userId, sessionId);
       if (
@@ -18853,6 +19334,7 @@ function buildRoutes(): RouteDefinition[] {
         title: descriptor.title,
         imageBytes: normalized.pngBytes,
       });
+      queueItemCapabilityAnalysisForImageV1(userId, asset.imageId);
       json(ctx.res, 201, {
         ok: true,
         image: {
@@ -19025,6 +19507,7 @@ function buildRoutes(): RouteDefinition[] {
                   exhibitId,
                   _image.imageId,
                 );
+                queueItemCapabilityAnalysisForImageV1(userId, _image.imageId);
                 return;
               } catch (error) {
                 lastError = error;
@@ -19127,6 +19610,7 @@ function buildRoutes(): RouteDefinition[] {
           normalizeImageBytes: async (imageBytes) =>
             (await normalizeGeneratedDebateExhibitImage(imageBytes)).pngBytes,
         });
+        queueItemCapabilityAnalysisForImageV1(userId, asset.imageId);
         json(ctx.res, 201, {
           ok: true,
           image: {
@@ -19304,6 +19788,7 @@ function buildRoutes(): RouteDefinition[] {
               runtime,
               {
                 deferBackgroundStart: true,
+                resolveEvidencePropBindings: resolveDebateMysteryV2EvidencePropBindings,
                 prepareEvidenceAssets: prepareDebateMysteryV2EvidenceAssets,
                 prepareRoomAssets: prepareDebateMysteryV2RoomAssets,
                 prepareIllustratedRooms: ({ userId: ownerId, sessionId: caseId, signal }) =>
@@ -19534,6 +20019,66 @@ function buildRoutes(): RouteDefinition[] {
         mansion: createBlankDebateMysteryMansionBundleV1(db, userId),
       });
     }),
+    route("GET", "/api/debates/mystery-mansions/:id/prop-theme", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        ...getDebateMysteryMansionPropThemeStateV1(
+          db,
+          userId,
+          ctx.params.id,
+        ),
+      });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/prop-theme/generate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (body.responseMode !== "online" || userBlocksOnlineCapabilities(user)) {
+        throw new HttpError(
+          409,
+          "Mansion prop synthesis is ONLINE only. LOCAL keeps PRISM fallbacks and packaged variants.",
+        );
+      }
+      ensureDebateMysteryMansionPropVariantsV1(db, userId, ctx.params.id);
+      queueDebateMysteryMansionPropThemeV1({
+        userId,
+        bundleId: ctx.params.id,
+      });
+      json(ctx.res, 202, {
+        ok: true,
+        mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/prop-theme/:archetypeId/retry", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (body.responseMode !== "online" || userBlocksOnlineCapabilities(user)) {
+        throw new HttpError(
+          409,
+          "Mansion prop Retry is ONLINE only. LOCAL keeps the current fallback.",
+        );
+      }
+      const archetypeId = WHODUNNIT_PROP_ARCHETYPE_IDS_V1.find(
+        (candidate) => candidate === ctx.params.archetypeId,
+      );
+      if (!archetypeId) throw new HttpError(404, "That Whodunnit prop role is not supported.");
+      retryDebateMysteryMansionPropVariantV1(
+        db,
+        userId,
+        ctx.params.id,
+        archetypeId,
+      );
+      queueDebateMysteryMansionPropThemeV1({
+        userId,
+        bundleId: ctx.params.id,
+      });
+      json(ctx.res, 202, {
+        ok: true,
+        mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id),
+      });
+    }),
     route("POST", "/api/debates/mystery-mansions/inspect", async (ctx) => {
       const userId = requireAuth(ctx);
       try {
@@ -19572,6 +20117,7 @@ function buildRoutes(): RouteDefinition[] {
             previewImageDataUrl,
             floorCount: opened.manifest.floorCount,
             roomCount: opened.manifest.rooms.length,
+            themedPropCount: opened.manifest.propTheme?.variants.length ?? 0,
             propCount: opened.manifest.assets.filter((asset) => asset.role === "prop").length,
             hasInvestigationTheme: opened.manifest.investigationThemeAssetId !== null,
             provenance: opened.manifest.provenance,
@@ -20363,6 +20909,7 @@ function buildRoutes(): RouteDefinition[] {
         },
         () => retryDebateMysteryCompilationV2(db, userId, ctx.params.id, runtime, {
           deferBackgroundStart: true,
+          resolveEvidencePropBindings: resolveDebateMysteryV2EvidencePropBindings,
           prepareEvidenceAssets: prepareDebateMysteryV2EvidenceAssets,
           prepareRoomAssets: prepareDebateMysteryV2RoomAssets,
           prepareIllustratedRooms: ({ userId: ownerId, sessionId: caseId, signal }) =>
@@ -25129,12 +25676,19 @@ function buildRoutes(): RouteDefinition[] {
         !Array.isArray(body.hostRedirect)
           ? (body.hostRedirect as Record<string, unknown>)
           : null;
+      const hostRedirectCadence =
+        hostRedirectRecord?.cadence === "active_speech"
+          ? "active_speech" as const
+          : hostRedirectRecord?.cadence === "between_words"
+            ? "between_words" as const
+            : undefined;
       const hostRedirect =
         typeof hostRedirectRecord?.messageId === "string" &&
         typeof hostRedirectRecord.spokenContent === "string"
           ? {
               messageId: hostRedirectRecord.messageId,
               spokenContent: hostRedirectRecord.spokenContent,
+              ...(hostRedirectCadence ? { cadence: hostRedirectCadence } : {}),
             }
           : undefined;
       const guestInterruptionRecord =
@@ -25397,10 +25951,16 @@ function buildRoutes(): RouteDefinition[] {
       }
       const signalUserKey = decryptUserKey(userId);
       const operationKey = `${userId}:${ctx.params.id}`;
+      const cueForPriority =
+        cue ?? botcastActiveProducerCueFromEvents(frozenEpisode.events)?.cue;
       let signalAdvanceOperation;
       try {
         signalAdvanceOperation = signalAdvanceOperations.begin(operationKey, {
-          preempt: cueDelivery === "interrupt_guest",
+          preempt:
+            cueDelivery === "interrupt_guest" ||
+            (cueDelivery === "redirect_host" &&
+              cueForPriority !== undefined &&
+              botcastProducerCuePreemptsHostSpeech(cueForPriority)),
         });
       } catch (error) {
         if (error instanceof SignalAdvanceOperationBusyError) {
@@ -31032,13 +31592,15 @@ function buildRoutes(): RouteDefinition[] {
             signalEpisode.events,
             signalMessageId,
           );
-          const synthesisText = voicePerformanceSynthesisTextV2(
-            signalPrimaryText,
-            organicPerformance,
-          );
-          sourceText = synthesisText;
-          sourceElevenLabsText = synthesisText;
-          sourcePerformanceText = synthesisText;
+          if (organicPerformance) {
+            const synthesisText = voicePerformanceSynthesisTextV2(
+              signalPrimaryText,
+              organicPerformance,
+            );
+            sourceText = synthesisText;
+            sourceElevenLabsText = synthesisText;
+            sourcePerformanceText = synthesisText;
+          }
         }
         const voiceRole = listenerReactionRequested
           ? signalMessage.speaker_role === "host"
@@ -34727,6 +35289,51 @@ function buildRoutes(): RouteDefinition[] {
       ).map((row) => mapImageRowToClient(row));
       json(ctx.res, 200, { ok: true, images });
     }),
+    route("POST", "/api/assets/signal-item/inspect", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      if (
+        typeof body.dataUrl !== "string" ||
+        !/^data:image\/png;base64,/iu.test(body.dataUrl)
+      ) {
+        throw new HttpError(400, "Only transparent PNG Signal items can be kept.");
+      }
+      const title =
+        typeof body.title === "string" && body.title.trim()
+          ? body.title.trim().slice(0, 240)
+          : "Signal item";
+      const normalized = await normalizeImageAssetUpload(body.dataUrl, {
+        width: 2048,
+        height: 2048,
+        fit: "inside",
+      }).catch((error) => {
+        throw new HttpError(
+          400,
+          error instanceof Error ? error.message : "The image could not be inspected.",
+        );
+      });
+      if (!(await imageHasVisibleTransparency(normalized.pngBytes))) {
+        throw new HttpError(400, "Only transparent PNG Signal items can be kept.");
+      }
+      const existingAsset = getImageAssetSetForContentSha256(
+        db,
+        userId,
+        "item",
+        normalized.contentSha256,
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        contentSha256: normalized.contentSha256,
+        alreadySaved: Boolean(existingAsset),
+        automaticTags:
+          existingAsset?.automaticTags ??
+          heuristicSmartTags({
+            kind: "item",
+            title,
+            prompt: title,
+          }),
+      });
+    }),
     route("POST", "/api/assets/upload", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -34824,6 +35431,66 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.title === "string" && body.title.trim()
           ? body.title.trim().slice(0, 240)
           : `Uploaded ${kind.replaceAll("_", " ")}`;
+      const existingAsset =
+        kind === "item"
+          ? getImageAssetSetForContentSha256(
+              db,
+              userId,
+              kind,
+              normalized.contentSha256,
+            )
+          : null;
+      const existingImageId = existingAsset?.members.find(
+        (member) => member.role === "primary",
+      )?.imageId;
+      if (existingAsset && existingImageId) {
+        if (signalEpisodeId && signalGuest) {
+          const existingImage = db
+            .prepare(
+              `SELECT bot_id, related_bot_ids
+                 FROM images
+                WHERE id = ? AND user_id = ?`,
+            )
+            .get(existingImageId, userId) as
+            | { bot_id: string | null; related_bot_ids: string | null }
+            | undefined;
+          if (!existingImage) {
+            throw new Error("The existing Signal item could not be resolved.");
+          }
+          linkBotcastEpisodeImageAsset(
+            db,
+            userId,
+            signalEpisodeId,
+            existingImageId,
+          );
+          db.prepare(
+            `UPDATE images
+                SET related_bot_ids = ?
+              WHERE id = ? AND user_id = ?`,
+          ).run(
+            serializeImageRelatedBotIds(
+              [
+                ...normalizeImageRelatedBotIds(
+                  existingImage.related_bot_ids,
+                  existingImage.bot_id,
+                ),
+                signalGuest.guest_bot_id,
+              ],
+              existingImage.bot_id,
+            ),
+            existingImageId,
+            userId,
+          );
+        }
+        json(ctx.res, 200, {
+          ok: true,
+          imageId: existingImageId,
+          asset: existingAsset,
+          deduplicated: true,
+        });
+        queueItemCapabilityAnalysisForImageV1(userId, existingImageId);
+        return;
+      }
       const imageId = randomId(12);
       const relatedBotIds = signalGuest
         ? serializeImageRelatedBotIds([signalGuest.guest_bot_id])
@@ -34832,13 +35499,13 @@ function buildRoutes(): RouteDefinition[] {
       const createdAt = new Date().toISOString();
       try {
         writeGeneratedImageBytes(localRelPath, normalized.pngBytes);
-        await tryGenerateThumbAfterPngWrite(localRelPath);
         db.prepare(
           `INSERT INTO images
              (id, user_id, related_bot_ids, origin, prompt, revised_prompt, url,
-              size, quality, provider, model, local_rel_path, purpose, created_at)
+              size, quality, provider, model, local_rel_path, purpose,
+              content_sha256, created_at)
            VALUES (?, ?, ?, ?, ?, NULL, '', ?, 'standard', 'upload',
-                   'asset-upload', ?, ?, ?)`,
+                   'asset-upload', ?, ?, ?, ?)`,
         ).run(
           imageId,
           userId,
@@ -34848,8 +35515,10 @@ function buildRoutes(): RouteDefinition[] {
           `${normalized.width}x${normalized.height}`,
           localRelPath,
           provenance.purpose,
+          normalized.contentSha256,
           createdAt,
         );
+        await tryGenerateThumbAfterPngWrite(localRelPath);
       } catch (error) {
         tryUnlinkGeneratedImageFile(localRelPath);
         throw error;
@@ -34889,6 +35558,7 @@ function buildRoutes(): RouteDefinition[] {
         // Heuristic tags from catalog sync remain.
       }
       const refreshed = getImageAssetSet(db, userId, asset.id) ?? asset;
+      queueItemCapabilityAnalysisForImageV1(userId, imageId);
       json(ctx.res, 201, { ok: true, imageId, asset: refreshed });
     }),
     route("POST", "/api/home/atmosphere/assets/:id/reuse", async (ctx) => {
@@ -35048,6 +35718,87 @@ function buildRoutes(): RouteDefinition[] {
       });
       if (!asset) throw new HttpError(404, "Asset set not found.");
       json(ctx.res, 200, { ok: true, asset });
+    }),
+    route("GET", "/api/assets/:id/capability", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        const card = getItemCapabilityCard(db, userId, ctx.params.id, {
+          createPending: true,
+        });
+        if (!card) throw new HttpError(404, "Item capability card not found.");
+        json(ctx.res, 200, { ok: true, card });
+      } catch (error) {
+        if (error instanceof ItemCapabilityCardError) {
+          throw new HttpError(error.code === "not_found" ? 404 : 400, error.message);
+        }
+        throw error;
+      }
+    }),
+    route("PATCH", "/api/assets/:id/capability", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        const card = updateItemCapabilityCard(
+          db,
+          userId,
+          ctx.params.id,
+          (ctx.body ?? {}) as Record<string, unknown>,
+        );
+        json(ctx.res, 200, { ok: true, card });
+      } catch (error) {
+        if (error instanceof ItemCapabilityCardError) {
+          throw new HttpError(error.code === "not_found" ? 404 : 400, error.message);
+        }
+        throw error;
+      }
+    }),
+    route("POST", "/api/assets/:id/capability/analyze", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        const result = await analyzeOwnedItemCapabilityCardV1({
+          userId,
+          assetSetId: ctx.params.id,
+        });
+        json(ctx.res, 200, { ok: true, ...result });
+      } catch (error) {
+        if (error instanceof ItemCapabilityCardError) {
+          throw new HttpError(
+            error.code === "not_found" ? 404 : error.code === "privacy_lane" ? 409 : 400,
+            error.message,
+          );
+        }
+        throw error;
+      }
+    }),
+    route("POST", "/api/assets/:id/capability/retry", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        const result = await analyzeOwnedItemCapabilityCardV1({
+          userId,
+          assetSetId: ctx.params.id,
+          retry: true,
+        });
+        json(ctx.res, 200, { ok: true, ...result });
+      } catch (error) {
+        if (error instanceof ItemCapabilityCardError) {
+          throw new HttpError(
+            error.code === "not_found" ? 404 : error.code === "privacy_lane" ? 409 : 400,
+            error.message,
+          );
+        }
+        throw error;
+      }
+    }),
+    route("POST", "/api/assets/:id/capability/disable", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        const card = disableItemCapabilityCard(db, userId, ctx.params.id);
+        json(ctx.res, 200, { ok: true, card });
+      } catch (error) {
+        if (error instanceof ItemCapabilityCardError) {
+          throw new HttpError(error.code === "not_found" ? 404 : 400, error.message);
+        }
+        throw error;
+      }
     }),
     route("GET", "/api/bots/:id/assets", async (ctx) => {
       const userId = requireAuth(ctx);

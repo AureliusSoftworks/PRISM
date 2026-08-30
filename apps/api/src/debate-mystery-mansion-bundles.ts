@@ -44,6 +44,11 @@ import { getDebateSession } from "./debate.ts";
 import { readGeneratedImageBytes } from "./image-storage.ts";
 import { decryptBytes, encryptBytes } from "./security.ts";
 import { HttpError } from "./utils.http.ts";
+import {
+  cleanupUnreferencedDebateMysteryMansionAssetsV1,
+  cloneDebateMysteryMansionPropVariantsV1,
+  getDebateMysteryMansionPropThemeStateV1,
+} from "./debate-mystery-mansion-prop-variants.ts";
 
 interface MansionBundleRow {
   id: string;
@@ -398,6 +403,7 @@ function summary(
   const portable = parsePortableMetadata(row.portable_metadata_json);
   const derivation = parseDerivationMetadata(row.derivation_metadata_json);
   const libraryMetadata = parseLibraryMetadata(row.library_metadata_json);
+  const propThemeState = getDebateMysteryMansionPropThemeStateV1(db, row.user_id, row.id);
   const activeAsset = assets.find((asset) => asset.role === "music" && asset.logicalId === MANSION_MUSIC_ACTIVE_LOGICAL_ID_V1) ??
     assets.find((asset) => asset.role === "music" && !asset.logicalId.startsWith("ambience:") &&
       asset.logicalId !== MANSION_MUSIC_CANDIDATE_LOGICAL_ID_V1 &&
@@ -475,6 +481,8 @@ function summary(
         title: libraryMetadata.atmosphere?.previousTitle ?? `${row.name} previous atmosphere`,
       } : null,
     },
+    propTheme: propThemeState.propTheme,
+    propThemeProgress: propThemeState.progress,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -517,6 +525,9 @@ export function freezeDebateMysteryMansionSnapshotV2(
     ...(mansion.atmosphere?.candidate ? [mansion.atmosphere.candidate.assetId] : []),
     ...(mansion.atmosphere?.previous ? [mansion.atmosphere.previous.assetId] : []),
   ]);
+  const acceptedThemeAssetIds = new Set(
+    mansion.propTheme?.variants.map((variant) => variant.packageAssetId) ?? [],
+  );
   const presentation = {
     version: 2 as const,
     name: mansion.name,
@@ -526,8 +537,12 @@ export function freezeDebateMysteryMansionSnapshotV2(
     scaleClass: mansion.scaleClass,
     houseStyle: frozenMansionJson(mansion.houseStyle),
     investigationThemeLoop: frozenMansionJson(mansion.music?.active?.loop ?? null),
+    propTheme: frozenMansionJson(mansion.propTheme ?? null),
     assets: frozenMansionJson(mansion.assets ?? [])
       .filter((asset) => !transientAssetIds.has(asset.id))
+      .filter((asset) =>
+        !asset.logicalId.startsWith("theme:") || acceptedThemeAssetIds.has(asset.id),
+      )
       .sort(
       (left, right) => left.id.localeCompare(right.id),
       ),
@@ -772,14 +787,7 @@ export async function updateDebateMysteryMansionLibraryV1(
       bundleId,
       userId,
     );
-    db.prepare(
-      `DELETE FROM debate_mystery_mansion_assets
-        WHERE user_id = ? AND NOT EXISTS (
-          SELECT 1 FROM debate_mystery_mansion_asset_refs AS refs
-           WHERE refs.user_id = debate_mystery_mansion_assets.user_id
-             AND refs.asset_id = debate_mystery_mansion_assets.id
-        )`,
-    ).run(userId);
+    cleanupUnreferencedDebateMysteryMansionAssetsV1(db, userId);
     db.exec("COMMIT");
   } catch (error) {
     if (db.isTransaction) db.exec("ROLLBACK");
@@ -1001,6 +1009,7 @@ export function cloneDebateMysteryMansionBundleV1(
          FROM debate_mystery_mansion_bundle_assets
         WHERE bundle_id = ? AND user_id = ?`,
     ).run(id, now, sourceBundleId, userId);
+    cloneDebateMysteryMansionPropVariantsV1(db, userId, sourceBundleId, id, now);
     db.exec("COMMIT");
   } catch (error) {
     if (db.isTransaction) db.exec("ROLLBACK");
@@ -1233,14 +1242,7 @@ export function updateDebateMysteryMansionTopologyV1(
       bundleId,
       userId,
     );
-    db.prepare(
-      `DELETE FROM debate_mystery_mansion_assets
-        WHERE user_id = ? AND NOT EXISTS (
-          SELECT 1 FROM debate_mystery_mansion_asset_refs AS refs
-           WHERE refs.user_id = debate_mystery_mansion_assets.user_id
-             AND refs.asset_id = debate_mystery_mansion_assets.id
-        )`,
-    ).run(userId);
+    cleanupUnreferencedDebateMysteryMansionAssetsV1(db, userId);
     db.exec("COMMIT");
   } catch (error) {
     if (db.isTransaction) db.exec("ROLLBACK");
@@ -1271,9 +1273,18 @@ export function deleteDebateMysteryMansionBundleV2(
   if (inUse) {
     throw new HttpError(409, "That mansion is still used by a Whodunnit in Archive.");
   }
-  db.prepare(
-    "DELETE FROM debate_mystery_mansion_bundles WHERE id = ? AND user_id = ?",
-  ).run(bundleId, userId);
+  const ownsTransaction = !db.isTransaction;
+  if (ownsTransaction) db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare(
+      "DELETE FROM debate_mystery_mansion_bundles WHERE id = ? AND user_id = ?",
+    ).run(bundleId, userId);
+    cleanupUnreferencedDebateMysteryMansionAssetsV1(db, userId);
+    if (ownsTransaction) db.exec("COMMIT");
+  } catch (error) {
+    if (ownsTransaction && db.isTransaction) db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 export function getDebateMysteryMansionAssetFileV1(
@@ -1495,7 +1506,8 @@ export function replaceProtectedDebateMysteryMansionAssetsV1(
   db.prepare(
     `DELETE FROM debate_mystery_mansion_asset_refs
       WHERE bundle_id = ? AND user_id = ?
-        AND (role IN ('room', 'prop') OR
+        AND (role = 'room' OR
+             (role = 'prop' AND logical_id NOT LIKE 'theme:%') OR
              (role = 'presentation' AND logical_id = ?))`,
   ).run(bundleId, userId, DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1);
   const insertAsset = db.prepare(
@@ -1545,14 +1557,7 @@ export function replaceProtectedDebateMysteryMansionAssetsV1(
       : `prop-${String(++propIndex).padStart(3, "0")}`;
     insertRef.run(bundleId, userId, stored.id, role, logicalId, now);
   }
-  db.prepare(
-    `DELETE FROM debate_mystery_mansion_assets
-      WHERE user_id = ? AND NOT EXISTS (
-        SELECT 1 FROM debate_mystery_mansion_asset_refs AS refs
-         WHERE refs.user_id = debate_mystery_mansion_assets.user_id
-           AND refs.asset_id = debate_mystery_mansion_assets.id
-      )`,
-  ).run(userId);
+  cleanupUnreferencedDebateMysteryMansionAssetsV1(db, userId);
 }
 
 function bundleRoomsFromState(

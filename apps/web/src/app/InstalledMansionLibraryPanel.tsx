@@ -81,6 +81,11 @@ export interface InstalledMansionLibraryProps {
   onAcceptAtmosphere: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<MansionSoundscapeMutationResultV1>;
   onDiscardAtmosphere: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<MansionSoundscapeMutationResultV1>;
   onUndoAtmosphere: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<MansionSoundscapeMutationResultV1>;
+  onGenerateProps: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<MansionSoundscapeMutationResultV1>;
+  onRetryProp: (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+    archetypeId: string,
+  ) => Promise<MansionSoundscapeMutationResultV1>;
   onRemove: (mansion: DebateMysteryMansionBundleSummaryV1) => void;
 }
 
@@ -128,6 +133,8 @@ export default function InstalledMansionLibrary({
   onAcceptAtmosphere,
   onDiscardAtmosphere,
   onUndoAtmosphere,
+  onGenerateProps,
+  onRetryProp,
   onRemove,
 }: InstalledMansionLibraryProps): JSX.Element {
   const [editor, setEditor] = useState<MansionEditorDraftV1 | null>(null);
@@ -311,6 +318,13 @@ export default function InstalledMansionLibrary({
                   <h4>{presentation.title}</h4>
                   <p>{presentation.description}</p>
                   <small>{mansion.floors} floor{mansion.floors === 1 ? "" : "s"} · {mansion.totalRooms} rooms · {mansion.suspectCount} suspects</small>
+                  <small data-tutorial-target="whodunnit-mansion-prop-theme">
+                    {mansion.propTheme
+                      ? "16/16 themed props"
+                      : mansion.propThemeProgress && mansion.propThemeProgress.readyCount > 0
+                        ? `${mansion.propThemeProgress.readyCount}/16 themed props · ${mansion.propThemeProgress.failedCount > 0 ? `${mansion.propThemeProgress.failedCount} need Retry` : "generation in progress"}`
+                        : "Uses PRISM prop fallbacks"}
+                  </small>
                 </div>
                 <div className={styles.installedMansionActions}>
                   <button
@@ -402,6 +416,61 @@ export default function InstalledMansionLibrary({
               </div>
             </div>
           </div>
+          <section
+            className={styles.installedMansionMusic}
+            data-tutorial-target="whodunnit-mansion-prop-theme"
+          >
+            <header className={styles.installedMansionSoundscapeHeader}>
+              <div>
+                <small>Mansion evidence wardrobe</small>
+                <h4>{editingMansion.propTheme ? "16/16 themed props" : "Themed evidence props"}</h4>
+                <p>
+                  One reusable visual replacement for every functional role. Recipients use this pack offline without adding it to their Asset Library.
+                </p>
+              </div>
+              <span>
+                {editingMansion.propThemeProgress?.readyCount ?? 0}/16 ready
+              </span>
+            </header>
+            {editingMansion.propTheme ? (
+              <p>Complete. Future cases reuse this pack without another model call.</p>
+            ) : (
+              <div className={styles.installedMansionMusicControls}>
+                <button
+                  type="button"
+                  disabled={busy || editorSaving || responseMode === "local"}
+                  onClick={() => void runSoundscapeMutation(
+                    onGenerateProps,
+                    "That mansion prop pack could not be started.",
+                  )}
+                >
+                  {editingMansion.propThemeProgress?.readyCount
+                    ? "Continue missing props"
+                    : "Generate themed prop pack"}
+                </button>
+                {(editingMansion.propThemeProgress?.variants ?? [])
+                  .filter((variant) => variant.status === "failed")
+                  .map((variant) => (
+                    <button
+                      key={variant.archetypeId}
+                      type="button"
+                      disabled={busy || editorSaving || responseMode === "local"}
+                      onClick={() => void runSoundscapeMutation(
+                        (mansion) => onRetryProp(mansion, variant.archetypeId),
+                        `The ${variant.archetypeId.replaceAll("_", " ")} prop could not be retried.`,
+                      )}
+                    >
+                      Retry {variant.archetypeId.replaceAll("_", " ")}
+                    </button>
+                  ))}
+              </div>
+            )}
+            <small className={styles.installedMansionMusicPrivacy}>
+              {responseMode === "local"
+                ? "LOCAL uses ready packaged variants and PRISM fallbacks; it never contacts an image provider."
+                : "Generation is restartable, accepts at most two automatic attempts per role, and never blocks a case."}
+            </small>
+          </section>
           <section
             className={styles.installedMansionMusic}
             data-tutorial-target="whodunnit-mansion-soundscape"

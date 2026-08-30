@@ -297,12 +297,13 @@ describe("Avatar Details Studio integration", () => {
     );
     assert.match(
       editorSource,
-      /const guideInk = theme === "light" \? "#050608" : "#ffffff"/,
+      /const guideInk = normalizedAccentColor/,
     );
     assert.match(
       editorCss,
-      /\.editor\[data-editor-theme="light"\] \.canvasFrame\s*\{[\s\S]*?background-color:\s*#ffffff/,
+      /\.editor\[data-editor-theme="light"\] \.canvasFrame\s*\{[\s\S]*?background-color:\s*#050608/,
     );
+    assert.match(editorSource, /const guideValue = 255/);
     assert.match(
       editorSource,
       /\.\.\.BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE/,

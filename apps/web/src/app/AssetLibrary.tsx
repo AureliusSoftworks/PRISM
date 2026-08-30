@@ -15,11 +15,15 @@ import {
   IMAGE_ASSET_KIND_LABELS,
   TEXT_ENTRY_SEARCH_MAX_LENGTH,
   TEXT_ENTRY_TAG_MAX_LENGTH,
+  WHODUNNIT_PROP_ARCHETYPE_IDS_V1,
+  WHODUNNIT_PROP_ARCHETYPES_V1,
   type BotImageAssetLibraryIndex,
   type ImageAssetCatalogPage,
   type ImageAssetKind,
   type ImageProviderName,
   type ImageAssetSet,
+  type ItemCapabilityCardV1,
+  type WhodunnitPropArchetypeIdV1,
 } from "@localai/shared";
 import {
   PrismRefractTarget,
@@ -59,6 +63,34 @@ interface MagentaPassResponse {
     changedPixels: number;
     passCount: number;
     undoAvailable: boolean;
+  };
+}
+
+interface CapabilityCardResponse {
+  ok: boolean;
+  card: ItemCapabilityCardV1;
+  attempted?: boolean;
+  reason?: string;
+}
+
+interface CapabilityDraft {
+  exactIdentity: string;
+  whatItDoes: string;
+  primaryArchetype: WhodunnitPropArchetypeIdV1 | "";
+  limitations: string;
+  settingTags: string;
+  genreTags: string;
+}
+
+function capabilityDraftForAsset(asset: ImageAssetSet | null): CapabilityDraft {
+  const card = asset?.capabilityCard;
+  return {
+    exactIdentity: card?.exactIdentity || asset?.title || "",
+    whatItDoes: card?.whatItDoes ?? "",
+    primaryArchetype: card?.primaryArchetype ?? "",
+    limitations: card?.limitations.join(", ") ?? "",
+    settingTags: card?.settingTags.join(", ") ?? "",
+    genreTags: card?.genreTags.join(", ") ?? "",
   };
 }
 
@@ -696,6 +728,12 @@ export function AssetLibraryModal({
     null,
   );
   const [compressConfirmation, setCompressConfirmation] = useState(false);
+  const [capabilityDraft, setCapabilityDraft] = useState<CapabilityDraft>(() =>
+    capabilityDraftForAsset(null),
+  );
+  const [capabilityBusy, setCapabilityBusy] = useState<
+    "save" | "analyze" | "disable" | null
+  >(null);
   const currentIds = useMemo(() => new Set(currentImageIds), [currentImageIds]);
   const detailIsCurrent =
     detail?.members.some((member) => currentIds.has(member.imageId)) ?? false;
@@ -842,6 +880,25 @@ export function AssetLibraryModal({
     );
   }, []);
 
+  const replaceCapabilityCard = useCallback((card: ItemCapabilityCardV1): void => {
+    setDetail((current) =>
+      current?.id === card.assetSetId
+        ? { ...current, capabilityCard: card }
+        : current,
+    );
+    setAssets((assetsNow) =>
+      assetsNow.map((candidate) =>
+        candidate.id === card.assetSetId
+          ? { ...candidate, capabilityCard: card }
+          : candidate,
+      ),
+    );
+  }, []);
+
+  useEffect(() => {
+    setCapabilityDraft(capabilityDraftForAsset(detail));
+  }, [detail]);
+
   const openDetail = useCallback((asset: ImageAssetSet): void => {
     setDetail(asset);
     setTagDraft(asset.playerTags.join(", "));
@@ -868,6 +925,101 @@ export function AssetLibraryModal({
       })();
     }
   }, [replaceAsset]);
+
+  const capabilityList = (value: string): string[] =>
+    value.split(",").map((entry) => entry.trim()).filter(Boolean);
+
+  const saveCapabilityCard = async (): Promise<void> => {
+    if (!detail || capabilityBusy) return;
+    setCapabilityBusy("save");
+    setError(null);
+    try {
+      const response = await readJson<CapabilityCardResponse>(
+        await fetch(`/api/assets/${encodeURIComponent(detail.id)}/capability`, {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            exactIdentity: capabilityDraft.exactIdentity,
+            whatItDoes: capabilityDraft.whatItDoes,
+            primaryArchetype: capabilityDraft.primaryArchetype || null,
+            capabilities: capabilityDraft.primaryArchetype && capabilityDraft.whatItDoes.trim()
+              ? [{
+                  id: `archetype_${capabilityDraft.primaryArchetype}`,
+                  description: capabilityDraft.whatItDoes.trim(),
+                }]
+              : [],
+            limitations: capabilityList(capabilityDraft.limitations),
+            settingTags: capabilityList(capabilityDraft.settingTags),
+            genreTags: capabilityList(capabilityDraft.genreTags),
+          }),
+        }),
+      );
+      replaceCapabilityCard(response.card);
+      setNotice(
+        response.card.status === "ready"
+          ? "Whodunnit capability saved."
+          : "Saved for review; complete the identity, purpose, and role before automatic use.",
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The capability card could not be saved.");
+    } finally {
+      setCapabilityBusy(null);
+    }
+  };
+
+  const analyzeCapabilityCard = async (): Promise<void> => {
+    if (!detail || capabilityBusy) return;
+    const retry = detail.capabilityCard?.status === "needs_review";
+    setCapabilityBusy("analyze");
+    setError(null);
+    try {
+      const response = await readJson<CapabilityCardResponse>(
+        await fetch(
+          `/api/assets/${encodeURIComponent(detail.id)}/capability/${retry ? "retry" : "analyze"}`,
+          { method: "POST", credentials: "include", body: "{}" },
+        ),
+      );
+      replaceCapabilityCard(response.card);
+      setNotice(
+        response.card.status === "ready"
+          ? "Prism analyzed this object's Whodunnit capability."
+          : response.reason === "analyzer_unavailable"
+            ? "Saved as pending. A compatible analyzer is not available in this privacy lane."
+            : "Prism needs your review before this object can appear automatically.",
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The capability analysis could not run.");
+    } finally {
+      setCapabilityBusy(null);
+    }
+  };
+
+  const toggleCapabilityDisabled = async (): Promise<void> => {
+    if (!detail || capabilityBusy) return;
+    const disabled = detail.capabilityCard?.status === "disabled";
+    if (disabled) {
+      await saveCapabilityCard();
+      return;
+    }
+    setCapabilityBusy("disable");
+    setError(null);
+    try {
+      const response = await readJson<CapabilityCardResponse>(
+        await fetch(`/api/assets/${encodeURIComponent(detail.id)}/capability/disable`, {
+          method: "POST",
+          credentials: "include",
+          body: "{}",
+        }),
+      );
+      replaceCapabilityCard(response.card);
+      setNotice("This object will stay out of automatic Whodunnit selection.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The capability card could not be disabled.");
+    } finally {
+      setCapabilityBusy(null);
+    }
+  };
 
   useEffect(() => {
     const requestedAssetId = initialAssetId?.trim() ?? "";
@@ -1320,6 +1472,151 @@ export function AssetLibraryModal({
                 </div>
               ) : null}
               <p>{detail.source === "legacy" ? "Protected legacy asset" : assetSourceLabel(detail)} · {new Date(detail.createdAt).toLocaleString()}</p>
+              {(detail.kind === "item" || detail.kind === "debate_exhibit") && detail.capabilityCard ? (
+                <section
+                  className={`${styles.capabilityCard} ${sharedStyles.form} ${sharedStyles.formInModal}`}
+                  aria-label="Whodunnit capability"
+                  data-whodunnit-capability-card="true"
+                >
+                  <header>
+                    <div>
+                      <strong>Whodunnit capability</strong>
+                      <small>
+                        {detail.capabilityCard.status === "ready"
+                          ? "Ready for relevant cases"
+                          : detail.capabilityCard.status === "pending"
+                            ? "Pending analysis — never selected automatically"
+                            : detail.capabilityCard.status === "needs_review"
+                              ? "Needs your review"
+                              : "Disabled for automatic use"}
+                      </small>
+                    </div>
+                    <span data-status={detail.capabilityCard.status}>
+                      {detail.capabilityCard.status.replace("_", " ")}
+                    </span>
+                  </header>
+                  <label>
+                    <span>What it is</span>
+                    <input
+                      value={capabilityDraft.exactIdentity}
+                      maxLength={160}
+                      onChange={(event) =>
+                        setCapabilityDraft((current) => ({
+                          ...current,
+                          exactIdentity: event.currentTarget.value,
+                        }))
+                      }
+                      placeholder="Rick’s Portal Gun"
+                      disabled={capabilityBusy !== null}
+                    />
+                  </label>
+                  <label>
+                    <span>What it does</span>
+                    <textarea
+                      value={capabilityDraft.whatItDoes}
+                      maxLength={800}
+                      rows={3}
+                      onChange={(event) =>
+                        setCapabilityDraft((current) => ({
+                          ...current,
+                          whatItDoes: event.currentTarget.value,
+                        }))
+                      }
+                      placeholder="Opens a portal between two reachable surfaces; it does not fire projectiles."
+                      disabled={capabilityBusy !== null}
+                    />
+                  </label>
+                  <label>
+                    <span>Whodunnit role</span>
+                    <select
+                      value={capabilityDraft.primaryArchetype}
+                      onChange={(event) =>
+                        setCapabilityDraft((current) => ({
+                          ...current,
+                          primaryArchetype: event.currentTarget.value as CapabilityDraft["primaryArchetype"],
+                        }))
+                      }
+                      disabled={capabilityBusy !== null}
+                    >
+                      <option value="">Choose a functional role</option>
+                      {WHODUNNIT_PROP_ARCHETYPE_IDS_V1.map((archetypeId) => (
+                        <option key={archetypeId} value={archetypeId}>
+                          {WHODUNNIT_PROP_ARCHETYPES_V1[archetypeId].label}
+                        </option>
+                      ))}
+                    </select>
+                    {capabilityDraft.primaryArchetype ? (
+                      <small>
+                        {WHODUNNIT_PROP_ARCHETYPES_V1[capabilityDraft.primaryArchetype].purpose}
+                      </small>
+                    ) : null}
+                  </label>
+                  <details>
+                    <summary>Compatibility details</summary>
+                    <label>
+                      <span>Limitations</span>
+                      <input
+                        value={capabilityDraft.limitations}
+                        onChange={(event) => setCapabilityDraft((current) => ({ ...current, limitations: event.currentTarget.value }))}
+                        placeholder="requires paired receiver, cannot cut steel"
+                        disabled={capabilityBusy !== null}
+                      />
+                    </label>
+                    <label>
+                      <span>Supported settings</span>
+                      <input
+                        value={capabilityDraft.settingTags}
+                        onChange={(event) => setCapabilityDraft((current) => ({ ...current, settingTags: event.currentTarget.value }))}
+                        placeholder="space station, laboratory"
+                        disabled={capabilityBusy !== null}
+                      />
+                    </label>
+                    <label>
+                      <span>Genre tags</span>
+                      <input
+                        value={capabilityDraft.genreTags}
+                        onChange={(event) => setCapabilityDraft((current) => ({ ...current, genreTags: event.currentTarget.value }))}
+                        placeholder="science fiction"
+                        disabled={capabilityBusy !== null}
+                      />
+                    </label>
+                  </details>
+                  <footer>
+                    <button
+                      type="button"
+                      className={sharedStyles.btnPrimary}
+                      onClick={() => void saveCapabilityCard()}
+                      disabled={capabilityBusy !== null}
+                    >
+                      {capabilityBusy === "save" ? "Saving…" : detail.capabilityCard.status === "disabled" ? "Save and enable" : "Save capability"}
+                    </button>
+                    <button
+                      type="button"
+                      className={sharedStyles.linkButton}
+                      onClick={() => void analyzeCapabilityCard()}
+                      disabled={capabilityBusy !== null || detail.capabilityCard.status === "disabled"}
+                    >
+                      {capabilityBusy === "analyze"
+                        ? "Analyzing…"
+                        : detail.capabilityCard.status === "needs_review"
+                          ? "Retry analysis"
+                          : "Analyze"}
+                    </button>
+                    <button
+                      type="button"
+                      className={sharedStyles.linkButton}
+                      onClick={() => void toggleCapabilityDisabled()}
+                      disabled={capabilityBusy !== null}
+                    >
+                      {capabilityBusy === "disable"
+                        ? "Disabling…"
+                        : detail.capabilityCard.status === "disabled"
+                          ? "Enable"
+                          : "Disable"}
+                    </button>
+                  </footer>
+                </section>
+              ) : null}
               {detail.status === "ready" && primaryMember(detail) ? (
                 <section
                   className={styles.magentaPass}

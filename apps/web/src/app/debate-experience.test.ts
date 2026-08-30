@@ -2512,18 +2512,20 @@ describe("Debate experience", () => {
     assert.match(css, /\.identHoldAction/u);
   });
 
-  it("copies Debate error toasts when clicked", () => {
+  it("copies Debate errors from the shared compact chrome rail", () => {
     assert.match(source, /function DebateErrorToast/u);
     assert.match(source, /writeDebateClipboardText\(props\.message\)/u);
-    assert.match(source, /Click to copy error\./u);
+    assert.match(source, /<PrismChromeNoticeViewport ariaLabel="Debate notifications">/u);
+    assert.match(source, /label="Debate error"/u);
+    assert.match(source, /"Copy error"/u);
     assert.ok(
       (
         source.match(
-          /<DebateErrorToast key=\{error\} message=\{error\} \/>/gu,
+          /<DebateErrorToast[\s\S]{0,120}message=\{error\}[\s\S]{0,120}onDismiss=\{\(\) => setError\(null\)\}/gu,
         ) ?? []
       ).length >= 2,
     );
-    assert.match(css, /\.errorToast\s*\{/u);
+    assert.doesNotMatch(source, /styles\.errorToast/u);
   });
 
   it("shows one overall live timer and a separate speech-synced floor clock", () => {
@@ -5075,7 +5077,7 @@ describe("Debate experience", () => {
     assert.match(source, /debateTableEvidenceItem\(/u);
     assert.match(
       source,
-      /<DebateEvidencePedestal[\s\S]{0,120}key=\{activeEvidenceItem\.value\.id\}/u,
+      /<DebateEvidencePedestalPresence[\s\S]{0,120}item=\{activeEvidenceItem\}/u,
     );
     assert.match(source, /<DebateEvidencePedestal/u);
     assert.match(source, /<DebateEvidenceDocument/u);

@@ -53,6 +53,13 @@ export interface BotIdentityShapeshiftStateV1
   targetPersonaPrompt: string;
   targetFace: BotFaceStyle;
   targetAvatarDetails?: BotAvatarDetailsV1 | null;
+  /**
+   * The holder's effective voice is frozen for faithful replay. Shapeshifting
+   * never replaces this voice identity, provider voice, effect, or non-accent
+   * shaping; targetVoice is retained only as the source of the target Accent
+   * Map region and pronunciation enablement.
+   */
+  holderVoice?: NormalizedBotAudioVoiceProfileV1;
   targetVoice: NormalizedBotAudioVoiceProfileV1;
   sourceMessageId: string;
   occurredAt: string;
@@ -98,6 +105,10 @@ export function normalizeBotIdentityShapeshiftStateV1(
     ? botIdentityMirrorAvatarDetailsV1(row.targetAvatarDetails)
     : undefined;
   const presentation = normalizeBotIdentityPresentationSnapshotV1(row);
+  const hasHolderVoice = Object.prototype.hasOwnProperty.call(
+    row,
+    "holderVoice",
+  );
   const sourceMessageId = boundedText(row.sourceMessageId, 160);
   const occurredAt = normalizedIso(row.occurredAt);
   if (
@@ -119,7 +130,11 @@ export function normalizeBotIdentityShapeshiftStateV1(
     Array.isArray(row.targetFace) ||
     !row.targetVoice ||
     typeof row.targetVoice !== "object" ||
-    Array.isArray(row.targetVoice)
+    Array.isArray(row.targetVoice) ||
+    (hasHolderVoice &&
+      (!row.holderVoice ||
+        typeof row.holderVoice !== "object" ||
+        Array.isArray(row.holderVoice)))
   ) {
     return null;
   }
@@ -136,6 +151,9 @@ export function normalizeBotIdentityShapeshiftStateV1(
     targetPersonaPrompt,
     targetFace: botIdentityMirrorFaceV1(row.targetFace as BotFaceStyle),
     ...(hasTargetAvatarDetails ? { targetAvatarDetails } : {}),
+    ...(hasHolderVoice
+      ? { holderVoice: botIdentityMirrorVoiceV1(row.holderVoice) }
+      : {}),
     targetVoice: botIdentityMirrorVoiceV1(row.targetVoice),
     ...presentation,
     sourceMessageId,
@@ -153,6 +171,7 @@ export function createBotIdentityShapeshiftStateV1(args: {
   targetPersonaPrompt: string;
   targetFace: BotFaceStyleInput | BotFaceStyle;
   targetAvatarDetails?: unknown;
+  holderVoice?: unknown;
   targetVoice: unknown;
   targetColor?: string;
   targetGlyph?: string | null;
@@ -179,6 +198,9 @@ export function createBotIdentityShapeshiftStateV1(args: {
             args.targetAvatarDetails,
           ),
         }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(args, "holderVoice")
+      ? { holderVoice: botIdentityMirrorVoiceV1(args.holderVoice) }
       : {}),
     targetVoice: botIdentityMirrorVoiceV1(args.targetVoice),
     ...(args.targetColor ? { targetColor: args.targetColor } : {}),
@@ -226,10 +248,43 @@ export function resolveBotIdentityShapeshiftVoiceV1(
   holderAuthoredVoice: unknown,
   holderVoiceOverride: unknown,
 ): NormalizedBotAudioVoiceProfileV1 {
-  return (
-    state?.targetVoice ??
-    resolveBotAudioVoiceProfileV1(holderAuthoredVoice, holderVoiceOverride)
-  );
+  const holderVoice =
+    state?.holderVoice ??
+    resolveBotAudioVoiceProfileV1(holderAuthoredVoice, holderVoiceOverride);
+  return state
+    ? applyBotIdentityShapeshiftAccentMapV1(holderVoice, state.targetVoice)
+    : holderVoice;
+}
+
+/**
+ * Shapeshifter keeps the holder's complete audible identity and overlays only
+ * the target's Accent Map region plus its on/off switch. A disabled target
+ * therefore disables transformed accent pronunciation without replacing any
+ * holder timbre, provider, effect, Feel, or other shaping.
+ */
+export function applyBotIdentityShapeshiftAccentMapV1(
+  holderValue: unknown,
+  targetValue: unknown,
+): NormalizedBotAudioVoiceProfileV1 {
+  const holder = normalizeBotAudioVoiceProfileV1(holderValue);
+  const target = normalizeBotAudioVoiceProfileV1(targetValue);
+  const enabled = target.accentPronunciationEnabled === true;
+  return normalizeBotAudioVoiceProfileV1({
+    ...holder,
+    accentPronunciationEnabled: enabled,
+    pronunciationBase: enabled ? target.pronunciationBase : "follow-voice",
+    accentDefinitionId: enabled ? (target.accentDefinitionId ?? null) : null,
+    pronunciationMapPoint: enabled
+      ? (target.pronunciationMapPoint ?? null)
+      : null,
+    speechprintInfluence: enabled ? target.speechprintInfluence : "none",
+    speechprintStrength: enabled
+      ? target.speechprintStrength
+      : holder.speechprintStrength,
+    speechprintVariationSeed: enabled
+      ? target.speechprintVariationSeed
+      : "natural-v1",
+  });
 }
 
 export function resolveBotIdentityShapeshiftFaceV1(
@@ -282,6 +337,13 @@ function stripRepeatedShapeshiftDeclarationV1(
     `(?:i(?:['’]ve| have)?\\s+(?:just\\s+)?(?:shapeshifted|shape-?shifted|transformed|become)|this(?:\\s+new)?\\s+form)`;
   const sentenceBoundary = `(^|[.!?]\\s+)`;
   let cleaned = value.replace(
+    new RegExp(
+      `(?:\\s*[,;]\\s*|\\s+)(?:and|but)\\s+${selfClaim}(?=\\s*[.!?;:]|$)`,
+      "giu",
+    ),
+    "",
+  );
+  cleaned = cleaned.replace(
     new RegExp(
       `${sentenceBoundary}${selfClaim}\\s*(?:[.!?;:]\\s*|,\\s*(?:and\\s+)?)`,
       "giu",
@@ -337,9 +399,20 @@ export function applyBotIdentityShapeshiftResponseV1(
   const claimsTarget = new RegExp(
     `\\b(?:i am|i['’]m|my name is|call me)\\s+${targetName}(?=$|[\\s,.;:!?—])`,
     "iu",
-  ).test(rewritten);
-  const requiredLead = claimsTarget ? [] : [`I am ${state.targetBotName}.`];
-  return [...requiredLead, rewritten].filter(Boolean).join(" ");
+  );
+  const firstClaim = claimsTarget.exec(rewritten);
+  if (!firstClaim) {
+    return [`I am ${state.targetBotName}.`, rewritten]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  const firstClaimEnd = firstClaim.index + firstClaim[0].length;
+  const afterFirstClaim = stripRepeatedShapeshiftDeclarationV1(
+    rewritten.slice(firstClaimEnd),
+    state.targetBotName,
+  );
+  return `${rewritten.slice(0, firstClaimEnd)}${afterFirstClaim}`.trim();
 }
 
 export function botIdentityShapeshiftTransitionActiveV1(

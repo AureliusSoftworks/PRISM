@@ -21,6 +21,13 @@ describe("mode tutorials", () => {
     assert.match(body, /producer pressure and repeated directed interruptions/u);
     assert.match(body, /never reads private prompts or reasoning/u);
     assert.match(body, /does not forecast a voluntary goodbye/u);
+    assert.match(
+      body,
+      /private Host note, direct Say this cue, or attached image arrives while the host is audibly speaking/u,
+    );
+    assert.match(body, /cut in the pause between words leaves an ellipsis/u);
+    assert.match(body, /active-speech cut leaves a sharper dash/u);
+    assert.match(body, /breath, or throat clear/u);
   });
 
   it("teaches explicit Coffee roster setup and bot-directed Wield where supported", () => {
@@ -253,15 +260,18 @@ describe("mode tutorials", () => {
     assert.match(step.body, /truth\/proof grade and juror breakdown/u);
     assert.match(step.body, /Reduced Motion/u);
     assert.match(step.body, /Archive and replay reuse the persisted result without another model or voice call/u);
-    assert.match(step.body, /Identity Crisis makes the holder sincerely become the latest eligible direct addresser and treat the original as an impostor/u);
+    assert.match(step.body, /Identity Crisis knowingly wears the latest eligible direct addresser’s effective public name/u);
+    assert.match(step.body, /copies that target’s eligible public Powers and consequences/u);
+    assert.match(step.body, /Identity Crisis never copies recursively/u);
+    assert.match(step.body, /private awareness or audience permissions never transfer/u);
+    assert.match(step.body, /Identity Mirror presentation has precedence/u);
     assert.match(step.body, /complete resting and speaking mouth package/u);
-    assert.match(step.body, /literally double-quoted public name/u);
+    assert.match(step.body, /public name/u);
     assert.match(step.body, /player-controlled Prosecutor is eligible/u);
     assert.match(step.body, /witness holder retargets to whoever is currently speaking directly to that witness/u);
-    assert.match(step.body, /accused original treats that claim as real pressure/u);
-    assert.match(step.body, /concern that can deepen naturally instead of panic or constant repetition/u);
-    assert.match(step.body, /color, material shell, complete frozen voice and exact Accent Map location, pronunciation, Speechprint, provider voice identity/u);
-    assert.match(step.body, /target form, direct-address event, and timing are frozen for replay/u);
+    assert.match(step.body, /holder stays itself in persona and behavior/u);
+    assert.match(step.body, /complete frozen voice and Accent Map/u);
+    assert.match(step.body, /target form, copied public Power consequences, direct-address event, and timing are frozen for replay/u);
     assert.match(step.body, /one case card with every immutable playthrough nested beneath it/u);
     assert.match(step.body, /same mystery/u);
     assert.match(step.body, /zero AI, image, or voice synthesis/u);
@@ -3319,11 +3329,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalControlRoomStep.body,
-      /arrives early in the host’s own line[\s\S]*break off and redirect on mic[\s\S]*pivot lands a little awkwardly/u,
-    );
-    assert.match(
-      signalControlRoomStep.body,
-      /Once most of the point is already out[\s\S]*stays queued for the host’s next turn/u,
+      /private Host note, direct Say this cue, or attached image arrives while the host is audibly speaking[\s\S]*pivots on mic[\s\S]*pause between words leaves an ellipsis/u,
     );
     assert.match(
       signalControlRoomStep.body,

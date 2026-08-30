@@ -21,6 +21,11 @@ import type {
   MansionAtmosphereLibraryStateV1,
 } from "./mansionMusic.js";
 import type { MansionLayoutV2 } from "./mansionLayoutV2.js";
+import type {
+  EvidencePropBindingV1,
+  MansionPropThemeV1,
+  MansionPropThemeProgressV1,
+} from "./whodunnitProps.js";
 import {
   MYSTERY_INCIDENT_KINDS_V1,
   resolveMysteryCaseTitleV1,
@@ -132,7 +137,7 @@ export interface DebateMysterySealedAssetRefV1 {
   version: 1;
   kind: DebateMysterySealedAssetKindV1;
   status: DebateMysterySealedAssetStatusV1;
-  source: "synthesized" | "bundled";
+  source: "synthesized" | "bundled" | "mansion" | "asset_library";
   revealed: boolean;
   mimeType: "image/png" | "image/webp";
 }
@@ -367,6 +372,10 @@ export interface DebateMysteryMansionBundleSummaryV1 {
   music?: MansionMusicLibraryStateV1;
   /** Current Mansion Library environmental world-bed state. */
   atmosphere?: MansionAtmosphereLibraryStateV1;
+  /** Complete portable archetype pack. Partial generation is exposed separately by the API. */
+  propTheme?: MansionPropThemeV1 | null;
+  /** Mutable generation status; not copied into case snapshots or portable exports. */
+  propThemeProgress?: MansionPropThemeProgressV1;
   createdAt: string;
   updatedAt: string;
 }
@@ -382,6 +391,8 @@ export interface DebateMysteryMansionPresentationSnapshotV2 {
   assets: DebateMysteryMansionAssetV1[];
   /** Frozen with the accepted theme so replay never reads mutable Library timing. */
   investigationThemeLoop?: MansionMusicLoopV1 | null;
+  /** Frozen themed identities and local protected asset references. */
+  propTheme?: MansionPropThemeV1 | null;
 }
 
 /** Captured once when Case Forge creates a session. Mutable Library metadata
@@ -499,6 +510,8 @@ export interface DebateWhodunnitCreateConfigV2 {
   /** Frozen freeform Theme / Spark. `inspiration` remains its V2 compatibility alias. */
   spark?: string;
   assetSynthesis?: Partial<DebateMysteryAssetSynthesisV2>;
+  /** Default-off permission to freeze up to two compatible personal prop cameos. */
+  useRelevantAssetLibraryProps?: boolean;
   /** Minimal setup seam for an aggregate-owned saved mansion. */
   mansionBundleId?: string | null;
   /** Accepted, tenant-owned exterior draft for a newly created mansion. */
@@ -531,6 +544,7 @@ export interface DebateMysteryResolvedConfigV2
     | "investigationMode"
     | "spark"
     | "assetSynthesis"
+    | "useRelevantAssetLibraryProps"
     | "mansionBundleId"
     | "mansionExteriorImageId"
     | "mansionExteriorDirection"
@@ -544,6 +558,7 @@ export interface DebateMysteryResolvedConfigV2
   investigationMode: DebateMysteryInvestigationModeV2;
   spark: string;
   assetSynthesis: DebateMysteryAssetSynthesisV2;
+  useRelevantAssetLibraryProps: boolean;
   mansionBundleId: string | null;
   /** Canonical immutable aggregate snapshot. Legacy archived cases omit it. */
   mansionSnapshot: DebateMysteryMansionSnapshotV2 | null;
@@ -726,8 +741,8 @@ export interface DebateMysteryDialogueNodeV2 {
   speakerSeatId: string | null;
   intendedRecipientSeatId: string | null;
   /** Optional explicit bot recipient for a sealed direct-address exchange.
-   * This preserves presentation-only Powers without inferring routing from
-   * turn order during replay. */
+   * This preserves presentation and copied-Power routing without inferring it
+   * from turn order during replay. */
   intendedRecipientBotId?: string | null;
   lineId: string | null;
   label: string | null;
@@ -1154,6 +1169,8 @@ export interface DebateMysteryPublicRecordItemV2 {
   visualKind?: "emoji" | "upload" | "synthesized";
   imageId?: string | null;
   sealedAsset?: DebateMysterySealedAssetRefV1 | null;
+  /** Immutable object identity chosen before authoring. Missing on legacy cases. */
+  evidencePropBinding?: EvidencePropBindingV1 | null;
   admitted: boolean;
   updatedAt: string;
 }
@@ -2390,6 +2407,7 @@ export function resolveDebateMysteryConfigV2(
     inspiration: spark,
     spark,
     assetSynthesis,
+    useRelevantAssetLibraryProps: value.useRelevantAssetLibraryProps === true,
     investigationMode,
     mansionBundleId,
     mansionSnapshot: null,
@@ -2753,6 +2771,8 @@ export function normalizeDebateMysteryFormatStateV2(
           configSource.investigationMode === "court_only" ? "court_only" : "full",
         mansionBundleId,
       }),
+      useRelevantAssetLibraryProps:
+        configSource.useRelevantAssetLibraryProps === true,
       investigationMode:
         configSource.investigationMode === "court_only" ? "court_only" : "full",
       mansionBundleId,

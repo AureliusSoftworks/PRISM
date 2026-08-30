@@ -149,6 +149,7 @@ import {
   strongestBotPowerAntiTruthEffectV1,
   applyBotPowerAntiTruthTrueNameLeakV1,
   applyBotIdentityShapeshiftResponseV1,
+  resolveBotIdentityShapeshiftVoiceV1,
   rewriteBotFalseNameResponseV1,
   createBotFalseNameStateV1,
   botIdentityShapeshiftHolderPromptV1,
@@ -4758,6 +4759,7 @@ function resolveChatZenIdentityShapeshiftV1(args: {
   surface: "chat" | "zen";
   holderBotId: string;
   holderBotName: string;
+  holderVoice?: unknown;
   history: readonly ChatMessage[];
   eternallyIntroduces: boolean;
   now?: string;
@@ -4798,6 +4800,7 @@ function resolveChatZenIdentityShapeshiftV1(args: {
     holderBotId: args.holderBotId,
     holderBotName: args.holderBotName,
     candidate,
+    holderVoice: args.holderVoice,
     sourceMessageId: `shapeshift-pending:${args.conversationId}:${args.holderBotId}:${args.history.length}`,
     occurredAt: args.now ?? new Date().toISOString(),
   });
@@ -4844,9 +4847,13 @@ function applyIdentityShapeshiftToBotSystemPromptV1(args: {
     args.botPowers,
     {
       ...(args.believedName ? { believedName: args.believedName } : {}),
-      // The borrowed public form carries its own voice — vernacular included.
-      audioVoiceProfile:
-        args.state.targetVoice ?? args.holderAudioVoiceProfile,
+      // The public form carries only the target Accent Map region. Timbre,
+      // provider voice, effect, Feel, and other shaping stay holder-owned.
+      audioVoiceProfile: resolveBotIdentityShapeshiftVoiceV1(
+        args.state,
+        args.holderAudioVoiceProfile,
+        null,
+      ),
     },
   );
   if (isZenMode(args.mode)) {
@@ -4883,6 +4890,7 @@ function persistIdentityShapeshiftStateForMessageV1(
       avatarDetails: state.targetAvatarDetails ?? null,
       voice: state.targetVoice,
     },
+    holderVoice: state.holderVoice,
     sourceMessageId: messageId,
     occurredAt,
   });
@@ -8868,6 +8876,7 @@ export async function processChatMessage(
             holderBotName:
               settings.starterPromptLabel?.trim() ||
               shapeshiftHolderBotId,
+            holderVoice: settings.botAudioVoiceProfile,
             history,
             eternallyIntroduces: botPowerEternalIntroductionTurn,
           })
@@ -10367,6 +10376,7 @@ export async function processChatMessage(
           holderBotId: shapeshiftHolderBotId,
           holderBotName:
             settings.starterPromptLabel?.trim() || shapeshiftHolderBotId,
+          holderVoice: settings.botAudioVoiceProfile,
           history,
           eternallyIntroduces: botPowerEternalIntroductionTurn,
         })

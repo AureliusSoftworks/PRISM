@@ -2024,8 +2024,6 @@
 @keyframes calloutText { 0% { transform: translateX(-100vw) rotate(-7deg) skewX(-8deg) scale(1.4); } 16% { transform: translateX(0) rotate(-7deg) skewX(-8deg) scale(1); } 78% { transform: translateX(0) rotate(-7deg) skewX(-8deg) scale(1); } 100% { transform: translateX(80vw) rotate(-7deg) skewX(-8deg) scale(0.9); } }
 @keyframes calloutStaticLife { 0%, 75% { opacity: 1; } 100% { opacity: 0; visibility: hidden; } }
 
-.errorBanner { position: fixed; z-index: 80; left: 50%; top: 5.5rem; width: min(34rem, calc(100vw - 2rem)); margin: 0; padding: 0.75rem 1rem; border: 1px solid rgba(255, 89, 124, 0.42); border-radius: 0.7rem; background: rgba(63, 12, 27, 0.94); color: #ffd2db; transform: translateX(-50%); }
-
 .verdict { display: grid; align-content: start; justify-items: center; gap: 1rem; padding: 7rem max(1rem, calc((100vw - 62rem) / 2)) 4rem; text-align: center; }
 .verdict > h1 { margin: 0; font-size: clamp(4rem, 14vw, 10rem); line-height: 0.82; letter-spacing: -0.075em; }
 .verdict > h1[data-result="guilty"] { color: #ff77aa; text-shadow: 0 0 2rem rgba(255, 65, 139, 0.35); }

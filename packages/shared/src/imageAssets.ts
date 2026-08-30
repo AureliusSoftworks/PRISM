@@ -1,3 +1,5 @@
+import type { WhodunnitPropArchetypeIdV1 } from "./whodunnitProps.js";
+
 export const IMAGE_ASSET_KINDS = [
   "general_image",
   "item",
@@ -79,6 +81,56 @@ export interface ImageAssetMember {
   createdAt: string;
 }
 
+export const ITEM_CAPABILITY_CARD_STATUSES_V1 = [
+  "pending",
+  "ready",
+  "needs_review",
+  "disabled",
+] as const;
+
+export type ItemCapabilityCardStatusV1 =
+  (typeof ITEM_CAPABILITY_CARD_STATUSES_V1)[number];
+
+/** A normalized functional claim used for capability-based prop matching. */
+export interface ItemCapabilityV1 {
+  id: string;
+  description: string;
+}
+
+export interface ItemCapabilityAnalysisProvenanceV1 {
+  source: "analysis" | "player_edit";
+  lane: "local" | "online" | "player";
+  analyzerId: string;
+  model: string | null;
+  promptVersion: string | null;
+  inputImageId: string | null;
+  inputContentSha256: string | null;
+  analyzedAt: string;
+}
+
+/**
+ * Editable semantic identity for an Item or Debate exhibit. This record is
+ * stored independently from the derived Asset Library catalog so catalog
+ * synchronization cannot overwrite player edits.
+ */
+export interface ItemCapabilityCardV1 {
+  version: 1;
+  assetSetId: string;
+  status: ItemCapabilityCardStatusV1;
+  exactIdentity: string;
+  whatItDoes: string;
+  primaryArchetype: WhodunnitPropArchetypeIdV1 | null;
+  capabilities: ItemCapabilityV1[];
+  limitations: string[];
+  settingTags: string[];
+  genreTags: string[];
+  confidence: number;
+  provenance: ItemCapabilityAnalysisProvenanceV1 | null;
+  playerEdited: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ImageAssetSet {
   id: string;
   kind: ImageAssetKind;
@@ -100,6 +152,7 @@ export interface ImageAssetSet {
   members: ImageAssetMember[];
   magentaPassCount: number;
   magentaUndoAvailable: boolean;
+  capabilityCard: ItemCapabilityCardV1 | null;
 }
 
 export interface ImageAssetUsage {

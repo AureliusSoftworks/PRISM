@@ -34,34 +34,38 @@ describe("Identity Crisis avatar ink integration", () => {
     );
   });
 
-  it("describes the exact visual and quoted-name handoff in current mode guidance", () => {
+  it("describes the copied-Power mirror and voice-safe shapeshift contracts", () => {
     assert.match(
       tutorialSource,
-      /steals the latest eligible direct addresser’s public person: it sincerely becomes that name and persona, treats the original as an impostor/u,
+      /knowingly wears the latest eligible direct addresser’s effective public presentation/u,
     );
     assert.match(
       tutorialSource,
-      /holder’s color, material shell, complete frozen voice and exact Accent Map location, pronunciation, Speechprint, provider voice identity, chassis\/frame, thinking spinner, bot ID, seat, role, private memories and relationships/u,
+      /It also copies the target’s eligible public Powers and consequences/u,
     );
     assert.match(
       tutorialSource,
-      /saved handoff and timing replay exactly and reset with the session/u,
+      /saved timing replays exactly and resets with the session/u,
     );
     assert.match(
       tutorialSource,
-      /sincerely become the latest eligible direct addresser and treat the original as an impostor, taking their exact eyes and blink package, complete resting and speaking mouth package including glyph style and Custom Speech poses, Avatar Details Ink, lower glyph, and literally double-quoted public name/u,
+      /Identity Crisis never copies recursively/u,
     );
     assert.match(
       tutorialSource,
-      /holder’s color, material shell, complete frozen voice and exact Accent Map location, pronunciation, Speechprint, provider voice identity, chassis\/frame, Powers, thinking spinner, and every other private or mechanical field remain unchanged/u,
+      /holder keeps its actual voice identity, provider voice, voice effect, and every non-accent shaping field/u,
     );
     assert.match(
       tutorialSource,
-      /accused original treats that claim as real pressure, with concern that can deepen naturally instead of panic or constant repetition/u,
+      /target with pronunciation off disables the transformed accent/u,
     );
     assert.match(
       tutorialSource,
-      /Shapeshifter sincerely becomes a different Library bot's complete public form/u,
+      /Shapeshifter sincerely becomes a different Library bot's public persona and complete visual form/u,
+    );
+    assert.match(
+      tutorialSource,
+      /Mechanical seat, Powers, and hard speech rules stay with the holder/u,
     );
     assert.match(
       tutorialSource,

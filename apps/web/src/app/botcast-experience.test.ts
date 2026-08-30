@@ -14,6 +14,10 @@ const css = readFileSync(
   new URL("./botcast.module.css", import.meta.url),
   "utf8",
 );
+const tutorials = readFileSync(
+  new URL("./modeTutorials.ts", import.meta.url),
+  "utf8",
+);
 const blockingLoaderSource = readFileSync(
   new URL("./PrismBlockingLoader.tsx", import.meta.url),
   "utf8",
@@ -261,16 +265,25 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /const \[keepSignalItem, setKeepSignalItem\] = useState\(false\)/u);
     assert.match(source, /signalEpisodeImage\.descriptor\.kind === "item"/u);
+    assert.match(source, /\/api\/assets\/signal-item\/inspect/u);
+    assert.match(source, /assetLibraryInspection\?\.alreadySaved === false/u);
     assert.match(source, /Keep \{signalEpisodeImage\.descriptor\.name\} in Items/u);
-    assert.match(source, /await request\(`\/api\/assets\/upload`, \{[\s\S]{0,180}kind: "item"/u);
+    assert.match(source, /`\/api\/assets\/upload`, \{[\s\S]{0,220}kind: "item"/u);
     assert.match(source, /kind: "item",[\s\S]{0,180}signalEpisodeId: uploadedItem\.episodeId/u);
     assert.match(source, /It stays session-only unless kept/u);
+    assert.match(source, /Prism keywords:/u);
+    assert.match(source, /Already in Items/u);
+    assert.match(source, /Prism matched this exact upload/u);
+    assert.match(source, /saved\.deduplicated/u);
     assert.match(
       source,
       /saving links[\s\S]{0,80}episodeOutro\.episode\.guestName/u,
     );
     assert.match(pageSource, /supportsImageInput: model\.supportsImageInput === true/u);
     assert.match(css, /\.setupEpisodeImage\s*\{[^}]*grid-column:\s*1 \/ -1/u);
+    assert.match(css, /\.episodeOutroItemStatus/u);
+    assert.match(tutorials, /exact upload hash is not already in Items/u);
+    assert.match(tutorials, /available to future Whodunnit sessions/u);
   });
 
   it("keeps the generated studio raster as a stable image source", () => {
@@ -1218,18 +1231,12 @@ describe("Signal experience shell", () => {
     assert.match(source, /className=\{styles\.replayTranscript\}/u);
   });
 
-  it("floats Signal errors and updates in dismissible toast notifications", () => {
-    assert.match(source, /aria-label="Signal notifications"/u);
-    assert.match(
-      source,
-      /data-signal-toast-kind="error"[\s\S]{0,80}role="alert"/u,
-    );
-    assert.match(
-      source,
-      /data-signal-toast-kind="notice"[\s\S]{0,80}role="status"/u,
-    );
-    assert.match(source, /aria-label="Dismiss Signal error"/u);
-    assert.match(source, /aria-label="Dismiss Signal update"/u);
+  it("docks Signal errors and updates into the shared compact chrome rail", () => {
+    assert.match(source, /<PrismChromeNoticeViewport ariaLabel="Signal notifications">/u);
+    assert.match(source, /label="Signal error"[\s\S]{0,100}tone="error"/u);
+    assert.match(source, /label="Signal"[\s\S]{0,100}message=\{notice\}/u);
+    assert.match(source, /dismissLabel="Dismiss Signal error"/u);
+    assert.match(source, /dismissLabel="Dismiss Signal update"/u);
     assert.match(source, /buildWebDiagnosticReport\(/u);
     assert.match(source, /writeDiagnosticClipboard\(report\)/u);
     assert.match(
@@ -1240,17 +1247,9 @@ describe("Signal experience shell", () => {
       pageSource,
       /throw apiErrorWithDiagnostic\([\s\S]{0,180}path,[\s\S]{0,100}options,[\s\S]{0,100}res\.status/iu,
     );
-    assert.match(source, /className=\{styles\.signalToastBody\}/u);
-    assert.match(source, /Copy Signal diagnostic report to clipboard/u);
-    assert.match(
-      source,
-      /className=\{styles\.signalToastBody\}[\s\S]{0,900}className=\{styles\.signalToastIcon\}[\s\S]{0,300}className=\{styles\.signalToastCopy\}/u,
-    );
-    assert.match(
-      source,
-      /event\.stopPropagation\(\);[\s\S]{0,80}setError\(null\)/u,
-    );
-    assert.match(source, /Diagnostic report copied to clipboard\./u);
+    assert.match(source, /"Copy report"/u);
+    assert.match(source, /"Copied"/u);
+    assert.match(source, /onDismiss=\{\(\) => setError\(null\)\}/u);
     const errorCopySource = source.slice(
       source.indexOf("const copySignalErrorToast = async"),
       source.indexOf(
@@ -1265,23 +1264,8 @@ describe("Signal experience shell", () => {
       source,
       /setNotice\(\(current\) => \(current === notice \? null : current\)\)/u,
     );
-    assert.doesNotMatch(source, /styles\.(?:error|notice)/u);
-    assert.match(
-      css,
-      /\.signalToastRegion\s*\{[^}]*position:\s*fixed;[^}]*top:\s*82px;[^}]*right:\s*20px/iu,
-    );
-    assert.match(css, /\.signalToast\s*\{[^}]*pointer-events:\s*auto/iu);
-    assert.match(
-      css,
-      /\.signalToastBody\s*\{[^}]*grid-template-columns:\s*auto minmax\(0, 1fr\)[^}]*cursor:\s*copy/iu,
-    );
-    assert.match(css, /\.signalToastBody:focus-visible/u);
-    assert.match(css, /\.signalToastDiagnosticHint/u);
-    assert.match(css, /@keyframes signalToastIn/u);
-    assert.match(
-      css,
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.signalToast\s*\{[^}]*animation:\s*none !important/iu,
-    );
+    assert.doesNotMatch(source, /styles\.signalToast/u);
+    assert.doesNotMatch(css, /\.signalToast/u);
   });
 
   it("opens episodes through a full-stage skippable show-branded pre-roll", () => {
@@ -2212,10 +2196,23 @@ describe("Signal experience shell", () => {
     assert.match(source, /interruptionBridgePlayback/u);
     assert.match(source, /playPreparedEpisodeMessage\([\s\S]{0,180}false,/u);
     assert.match(source, /signalHostCueShouldRedirect/u);
-    assert.match(source, /void advanceEpisode\(undefined, "redirect_host"/u);
+    assert.match(source, /botcastProducerCuePreemptsHostSpeech\(cue\)/u);
     assert.match(
       source,
-      /messageId:\s*activeHostMessage\.id,[\s\S]{0,80}spokenContent,/u,
+      /advanceEpisode\(\s*cue,\s*"redirect_host"/u,
+    );
+    assert.match(
+      source,
+      /signalLiveSpeechProjectedElapsedMs\(/u,
+    );
+    assert.match(source, /botcastSpeechRevealIsVoicing\(projectedHostReveal\)/u);
+    assert.match(
+      source,
+      /botcastInterruptedHostContent\(activeHostMessage\.content,[\s\S]{0,160}cadence: hostRedirectCadence/u,
+    );
+    assert.match(
+      source,
+      /messageId:\s*activeHostMessage\.id,[\s\S]{0,80}spokenContent,[\s\S]{0,80}cadence: hostRedirectCadence/u,
     );
     assert.match(
       source,

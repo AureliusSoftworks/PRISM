@@ -6204,8 +6204,8 @@ export function buildBotPowersSelfPromptV1(value: unknown): string {
 }
 
 /**
- * Identity Crisis steals public Power consequences but not recursive identity,
- * private awareness, audience access, or any holder-owned system boundary.
+ * Identity Crisis copies eligible public Power mechanics, but never recursive
+ * identity mirroring, private awareness, or audience permission boundaries.
  */
 export function composeBotIdentityMirrorPowersV1(
   holderValue: unknown,
@@ -6222,10 +6222,20 @@ export function composeBotIdentityMirrorPowersV1(
         effect.type !== "speech_audience",
     );
     if (effects.length === 0) return [];
+    const removedPrivateEffects = effects.length !== compiled.effects.length;
     return [{
       ...power,
       id: `identity-mirror:${power.id}`.slice(0, 128),
-      compiled: { ...compiled, effects },
+      compiled: {
+        ...compiled,
+        selfCue: removedPrivateEffects
+          ? `You copied the eligible public mechanics of \"${power.name}\". Execute only the supplied public runtime effects; do not infer or reveal any private awareness or audience permissions.`
+          : compiled.selfCue,
+        observerCue: removedPrivateEffects
+          ? `Identity Crisis is copying the eligible public mechanics of \"${power.name}\"; private awareness and audience permissions remain with the original holder.`
+          : compiled.observerCue,
+        effects,
+      },
     }];
   });
   return [...holder, ...borrowed];

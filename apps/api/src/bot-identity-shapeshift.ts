@@ -340,6 +340,7 @@ export function createIdentityShapeshiftStateFromCandidateV1(args: {
   holderBotId: string;
   holderBotName: string;
   candidate: BotIdentityShapeshiftCandidateV1;
+  holderVoice?: unknown;
   sourceMessageId: string;
   occurredAt: string;
 }): BotIdentityShapeshiftStateV1 {
@@ -353,6 +354,9 @@ export function createIdentityShapeshiftStateFromCandidateV1(args: {
     targetPersonaPrompt: args.candidate.personaPrompt,
     targetFace: args.candidate.face,
     targetAvatarDetails: args.candidate.avatarDetails,
+    ...(Object.prototype.hasOwnProperty.call(args, "holderVoice")
+      ? { holderVoice: args.holderVoice }
+      : {}),
     targetVoice: args.candidate.voice,
     targetColor: args.candidate.color,
     targetGlyph: args.candidate.glyph,

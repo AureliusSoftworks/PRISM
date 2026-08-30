@@ -40,6 +40,10 @@ import {
 import { debateEvidencePropRotationDeg } from "./debateEvidenceProp";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
 import {
+  PrismChromeNotice,
+  PrismChromeNoticeViewport,
+} from "./PrismChromeNotice";
+import {
   WHODUNNIT_INVESTIGATION_MUSIC_FADE_MS,
   WHODUNNIT_INVESTIGATION_MUSIC_TRANSITION_MS,
   WHODUNNIT_INVESTIGATION_MUSIC_URL,
@@ -1893,7 +1897,18 @@ export function DebateMysteryPlay(
         </div>
       </header>
 
-      {error ? <div className={styles.errorBanner} role="alert">{error}</div> : null}
+      {error ? (
+        <PrismChromeNoticeViewport ariaLabel="Whodunnit notifications">
+          <PrismChromeNotice
+            label="Whodunnit"
+            message={error}
+            tone="error"
+            title={error}
+            onDismiss={() => setError(null)}
+            dismissLabel="Dismiss Whodunnit error"
+          />
+        </PrismChromeNoticeViewport>
+      ) : null}
 
       {choosingInvestigationPath ? (
         <section className={styles.investigationAssignment} data-tutorial-target="whodunnit-investigation-choice" aria-labelledby="whodunnit-assignment-title">

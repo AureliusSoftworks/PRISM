@@ -278,7 +278,7 @@ test("identity mirror accepts only explicit direct bot address syntax", () => {
   );
 });
 
-test("identity mirror snapshot stays public and gives the holder its lived stolen-person behavior", () => {
+test("identity mirror snapshot stays public and keeps the holder behind a knowing masquerade", () => {
   const state = identityState();
   assert.equal(state.targetFace.eyeCharacter, "◉");
   assert.deepEqual(state.targetAvatarDetails, targetAvatarDetails);
@@ -291,16 +291,18 @@ test("identity mirror snapshot stays public and gives the holder its lived stole
     roleLabel: "Signal guest",
     state,
   });
-  assert.match(holderPrompt, /absolutely convinced that you are Mara Vale/iu);
-  assert.match(holderPrompt, /"Mara Vale"/u);
-  assert.match(holderPrompt, /original Mara Vale is an impostor/iu);
-  assert.match(holderPrompt, /public name, persona, face.*active public Powers/isu);
-  assert.match(holderPrompt, /material shell.*complete frozen voice.*exact Accent Map/isu);
+  assert.match(holderPrompt, /knowing public masquerade/iu);
+  assert.match(holderPrompt, /current public nameplate, face, authored Ink, and lower glyph/iu);
+  assert.match(holderPrompt, /Remain fully Identity Crisis Ian in persona and behavior/iu);
+  assert.match(holderPrompt, /Never borrow or imitate Mara Vale's persona or voice/iu);
+  assert.match(holderPrompt, /execute Mara Vale's eligible public Power mechanics and consequences/iu);
+  assert.match(holderPrompt, /Never copy Identity Crisis recursively/iu);
+  assert.match(holderPrompt, /complete frozen voice and Accent Map/iu);
   assert.match(holderPrompt, /private memories, relationship state, and perception permissions/iu);
-  assert.match(holderPrompt, /terse lunar cartographer/iu);
+  assert.doesNotMatch(holderPrompt, /terse lunar cartographer/iu);
   assert.equal(
     botIdentityMirrorQuotedTargetNameV1("  Mara   Vale  "),
-    '"Mara Vale"',
+    "Mara Vale",
   );
   assert.equal(
     normalizeBotIdentityMirrorStateV1({ ...state, targetKind: "human" }),
@@ -485,7 +487,7 @@ test("identity mirror snapshot stays public and gives the holder its lived stole
       state,
       true,
     ),
-    "I'm Mara Vale, and I still sound like myself. The other Mara Vale is an impostor.",
+    "I'm Identity Crisis Ian, and I still sound like myself.",
   );
   assert.equal(
     applyBotIdentityMirrorResponseV1(
@@ -494,7 +496,7 @@ test("identity mirror snapshot stays public and gives the holder its lived stole
       true,
     ),
     "I'm Mara Vale, obviously. The other Mara Vale is the pretender; now, about that ridge.",
-    "a complete first reveal keeps the provider's own cadence",
+    "presentation-only recovery never rewrites provider text",
   );
   // Accepted substantive speech survives once the transition reveal has aired.
   assert.equal(
@@ -511,7 +513,7 @@ test("identity mirror snapshot stays public and gives the holder its lived stole
       state,
       false,
     ),
-    "If I'm Mara Vale, I'm Mara Vale all the way—until someone says I'm not.",
+    "If I'm Ian, I'm Ian all the way—until someone says I'm not.",
   );
   assert.equal(
     applyBotIdentityMirrorResponseV1(
@@ -527,43 +529,43 @@ test("identity mirror snapshot stays public and gives the holder its lived stole
       { ...state, holderBotName: "Ivo Stone" },
       false,
     ),
-    "If I'm Mara Vale, the stone arch is still our best route.",
+    "If I'm Stone, the stone arch is still our best route.",
   );
-  // Rejected recanting is removed without erasing the substantive clause.
+  // Presentation-only recovery does not invent or erase identity claims.
   assert.equal(
     applyBotIdentityMirrorResponseV1(
       "I concede I'm the impostor. The western ridge remains our best route.",
       state,
       false,
     ),
-    "The western ridge remains our best route.",
+    "I concede I'm the impostor. The western ridge remains our best route.",
   );
 });
 
-test("identity mirror keeps the accused original autonomous and increasingly offended", () => {
+test("identity mirror observers understand the presentation and copied-Power boundary", () => {
   const state = identityState();
   const originalPrompt = botIdentityMirrorObserverPromptV1({
     observerBotId: state.targetBotId,
     state,
   });
-  assert.match(originalPrompt, /stolen your public identity/iu);
-  assert.match(originalPrompt, /not the real Mara Vale/iu);
-  assert.match(originalPrompt, /real offense/iu);
-  assert.match(originalPrompt, /never accept or concede/iu);
+  assert.match(originalPrompt, /knowingly wearing your current public nameplate and face/iu);
+  assert.match(originalPrompt, /presentation masquerade/iu);
+  assert.match(originalPrompt, /copying your eligible public Power mechanics/iu);
+  assert.match(originalPrompt, /Do not force an identity dispute/iu);
 
   const wrongIdentity = botIdentityMirrorOriginalCorrectionRequiredV1({
     state,
     sourceBotId: "ian",
     text: "The other Mara Vale is an impostor. Which ridge should we take?",
   });
-  assert.equal(wrongIdentity, true);
+  assert.equal(wrongIdentity, false);
   assert.equal(
     applyBotIdentityMirrorOriginalCorrectionV1(
       "Fine, I suppose I'm the impostor. Take the western ridge.",
       state,
       wrongIdentity,
     ),
-    "I am Mara Vale. That identity is mine. Take the western ridge.",
+    "Fine, I suppose I'm the impostor. Take the western ridge.",
   );
   assert.equal(
     applyBotIdentityMirrorOriginalCorrectionV1(

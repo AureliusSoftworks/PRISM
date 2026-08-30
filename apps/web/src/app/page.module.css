@@ -34205,82 +34205,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   position: relative;
   z-index: 4;
   display: grid;
-  gap: 8px;
-  width: min(260px, 28vw);
+  gap: 4px;
+  width: min(360px, 36vw);
   pointer-events: none;
-}
-
-.memoryLearnedNotice {
-  appearance: none;
-  width: 100%;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 2px 9px;
-  align-items: center;
-  max-width: 100%;
-  padding: 11px 14px;
-  border: 1px solid color-mix(in srgb, var(--accent) 44%, var(--line));
-  border-radius: 16px;
-  background:
-    radial-gradient(
-      circle at 10% 20%,
-      color-mix(in srgb, var(--accent) 24%, transparent),
-      transparent 48%
-    ),
-    color-mix(in srgb, var(--bg-surface) 94%, transparent);
-  color: var(--fg);
-  box-shadow:
-    var(--shadow-lg),
-    0 0 26px color-mix(in srgb, var(--accent) 20%, transparent);
-  pointer-events: auto;
-  cursor: pointer;
-  animation: memoryLearnedIn 3.6s ease both;
-}
-
-.memoryLearnedNotice[data-memory-toast-kind="retracted"] {
-  border-color: color-mix(in srgb, var(--fg-muted) 34%, var(--line));
-  background:
-    radial-gradient(
-      circle at 10% 20%,
-      color-mix(in srgb, var(--fg-muted) 18%, transparent),
-      transparent 48%
-    ),
-    color-mix(in srgb, var(--bg-surface) 94%, transparent);
-}
-
-.memoryLearnedNotice[data-memory-toast-kind="rejected"] {
-  border-color: color-mix(in srgb, var(--fg-muted) 24%, var(--line));
-  background:
-    radial-gradient(
-      circle at 10% 20%,
-      color-mix(in srgb, var(--fg-muted) 10%, transparent),
-      transparent 48%
-    ),
-    color-mix(in srgb, var(--bg-surface) 96%, transparent);
-  box-shadow:
-    var(--shadow-lg),
-    0 0 18px color-mix(in srgb, var(--fg-muted) 10%, transparent);
-}
-
-.memoryLearnedNotice > span {
-  grid-row: 1 / span 2;
-  color: var(--accent-ink);
-  font-size: 18px;
-  line-height: 1;
-}
-
-.memoryLearnedNotice strong {
-  font-size: 13px;
-  line-height: 1.15;
-}
-
-.memoryLearnedNotice small {
-  color: var(--fg-muted);
-  font-size: 11px;
-  line-height: 1.2;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .memoryToastOverflow {
@@ -34294,109 +34221,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   box-shadow: var(--shadow-sm);
 }
 
-@keyframes memoryLearnedIn {
-  0% {
-    opacity: 0;
-    transform: translateY(10px) scale(0.96);
-  }
-  10%,
-  82% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(4px) scale(0.98);
-  }
-}
-
 .zenMemoryToastStack {
-  position: fixed;
-  left: 50%;
-  top: clamp(82px, 12dvh, 138px);
   z-index: 872;
-  width: min(520px, calc(100vw - 32px));
-  justify-items: center;
-  gap: 10px;
-  transform: translateX(-50%);
-}
-
-.zenMemoryToastStack .memoryLearnedNotice {
-  width: min(100%, 520px);
-  min-height: 54px;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 3px 11px;
-  padding: 12px 16px 13px;
-  border-radius: 20px;
-  border-color: color-mix(in srgb, var(--accent) 42%, #ffffff 16%);
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--bg-surface) 72%, var(--accent) 10%),
-    color-mix(in srgb, var(--bg-deep) 72%, transparent)
-  );
-  color: color-mix(in srgb, var(--fg) 92%, #ffffff 8%);
-  box-shadow:
-    0 20px 70px rgba(0, 0, 0, 0.3),
-    0 0 44px color-mix(in srgb, var(--accent) 18%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #ffffff 14%, transparent);
-  backdrop-filter: blur(18px) saturate(1.12);
-  -webkit-backdrop-filter: blur(18px) saturate(1.12);
-  animation: zenMemoryLearnedIn 6.8s ease both;
-}
-
-.themeLight .zenMemoryToastStack .memoryLearnedNotice {
-  border-color: color-mix(in srgb, var(--accent) 36%, #ffffff 36%);
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, #f8fbff 82%, var(--accent) 8%),
-    color-mix(in srgb, #f8fbff 68%, transparent)
-  );
-  color: color-mix(in srgb, var(--fg) 90%, #15120f 10%);
-  box-shadow:
-    0 18px 54px rgba(84, 62, 34, 0.16),
-    0 0 36px color-mix(in srgb, var(--accent) 15%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #ffffff 72%, transparent);
-}
-
-.zenMemoryToastStack .memoryLearnedNotice[data-memory-toast-kind="retracted"],
-.zenMemoryToastStack .memoryLearnedNotice[data-memory-toast-kind="rejected"] {
-  border-color: color-mix(in srgb, var(--fg-muted) 32%, var(--line));
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--bg-surface) 76%, var(--fg-muted) 6%),
-    color-mix(in srgb, var(--bg-deep) 72%, transparent)
-  );
-}
-
-.zenMemoryToastStack .memoryLearnedNotice > span {
-  grid-row: 1 / span 2;
-  width: 24px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
-  color: color-mix(in srgb, var(--accent-ink) 82%, #ffffff 18%);
-  font-size: 16px;
-  text-shadow: 0 0 16px color-mix(in srgb, var(--accent) 40%, transparent);
-}
-
-.zenMemoryToastStack .memoryLearnedNotice strong {
-  font-size: 12px;
-  font-weight: 780;
-  letter-spacing: 0.08em;
-  line-height: 1.1;
-  text-transform: uppercase;
-}
-
-.zenMemoryToastStack .memoryLearnedNotice small {
-  display: -webkit-box;
-  color: color-mix(in srgb, var(--fg-muted) 84%, var(--fg));
-  font-size: 12px;
-  line-height: 1.34;
-  white-space: normal;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  width: min(620px, calc(100vw - 24px));
 }
 
 .zenMemoryToastStack .memoryToastOverflow {
@@ -34407,148 +34234,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   -webkit-backdrop-filter: blur(10px);
 }
 
-.commandToast {
-  position: fixed;
-  left: 50%;
-  bottom: max(92px, calc(env(safe-area-inset-bottom) + 22px));
-  z-index: 874;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-  width: min(340px, calc(100vw - 32px));
-  padding: 11px 14px;
-  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line));
-  border-radius: 18px;
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--bg-surface) 88%, var(--accent) 8%),
-    color-mix(in srgb, var(--bg-deep) 88%, transparent)
-  );
-  color: var(--fg);
-  box-shadow:
-    0 18px 60px rgba(0, 0, 0, 0.25),
-    0 0 32px color-mix(in srgb, var(--accent) 14%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #ffffff 12%, transparent);
-  pointer-events: none;
-  transform: translateX(-50%);
-  backdrop-filter: blur(18px) saturate(1.12);
-  -webkit-backdrop-filter: blur(18px) saturate(1.12);
-  animation: commandToastIn 3.6s ease both;
-}
-
-.localCommandToast {
-  border-color: color-mix(in srgb, var(--accent) 24%, var(--line));
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--bg-surface) 90%, var(--accent) 5%),
-    color-mix(in srgb, var(--bg-deep) 90%, var(--fg-muted) 4%)
-  );
-  box-shadow:
-    0 18px 50px rgba(0, 0, 0, 0.2),
-    0 0 22px color-mix(in srgb, var(--accent) 10%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #ffffff 10%, transparent);
-}
-
-.commandToastDot {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: var(--accent);
-  box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 60%, transparent);
-}
-
-.commandToastCopy {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-
-.commandToastCopy strong {
-  font-size: 12px;
-  font-weight: 760;
-  letter-spacing: 0.08em;
-  line-height: 1.1;
-  text-transform: uppercase;
-}
-
-.commandToastCopy small {
-  color: var(--fg-muted);
-  font-size: 12px;
-  line-height: 1.25;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-@keyframes commandToastIn {
-  0% {
-    opacity: 0;
-    transform: translate(-50%, 10px) scale(0.97);
-  }
-  12%,
-  82% {
-    opacity: 1;
-    transform: translate(-50%, 0) scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: translate(-50%, 6px) scale(0.985);
-  }
-}
-
-@keyframes zenMemoryLearnedIn {
-  0% {
-    opacity: 0;
-    transform: translateY(-8px) scale(0.98);
-  }
-  9%,
-  84% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(-5px) scale(0.985);
-  }
-}
-
 .chatHeaderActions .memoryToastStack {
   flex: 0 0 auto;
-  width: auto;
-}
-
-.chatHeaderActions .memoryLearnedNotice,
-.chatHeaderIdentityGroup .memoryLearnedNotice {
-  min-height: 30px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  width: auto;
-  max-width: min(260px, 28vw);
-  padding: 0 12px;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-
-.chatHeaderActions .memoryLearnedNotice > span,
-.chatHeaderIdentityGroup .memoryLearnedNotice > span {
-  grid-row: auto;
-  font-size: 14px;
-}
-
-.chatHeaderActions .memoryLearnedNotice strong,
-.chatHeaderIdentityGroup .memoryLearnedNotice strong {
-  font-size: 12px;
-  font-weight: 780;
-  letter-spacing: 0.08em;
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.chatHeaderActions .memoryLearnedNotice small,
-.chatHeaderIdentityGroup .memoryLearnedNotice small {
-  display: none;
+  width: min(360px, 36vw);
 }
 
 .composeUtilityActions {
@@ -68307,15 +67995,8 @@ a.settingsCreditItem:focus-visible {
       left: 50%;
       top: 50%;
       z-index: 5;
-      width: auto;
+      width: min(270px, calc(100vw - 118px));
       transform: translate(-50%, -50%);
-    }
-
-    .chatHeaderIdentityGroup .memoryLearnedNotice {
-      max-width: min(270px, calc(100vw - 118px));
-      box-shadow:
-        var(--shadow-lg),
-        0 0 28px color-mix(in srgb, var(--accent) 26%, transparent);
     }
 
     .chatHeader .headerIdentityName {

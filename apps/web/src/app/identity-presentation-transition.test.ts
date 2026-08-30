@@ -162,7 +162,7 @@ test("Identity Crisis overlays the target face, Ink, glyph, and quoted public na
   );
   assert.match(
     debateIdentitySource,
-    /if \(args\.effect === "identity_shapeshift"\) \{[\s\S]{0,80}\.\.\.args\.target,[\s\S]{0,200}name: args\.holder\.name,[\s\S]{0,120}color: args\.holder\.color,[\s\S]{0,40}glyph: args\.holder\.glyph,/u,
+    /if \(args\.effect === "identity_shapeshift"\) \{[\s\S]*\.\.\.args\.target,[\s\S]*name: args\.holder\.name,[\s\S]*color: args\.holder\.color,[\s\S]*glyph: args\.holder\.glyph,[\s\S]*powers: args\.holder\.powers,[\s\S]*applyBotIdentityShapeshiftAccentMapV1/u,
     "Shapeshifter wears the target's form while keeping the holder's name, color, and glyph",
   );
   assert.match(
@@ -172,8 +172,8 @@ test("Identity Crisis overlays the target face, Ink, glyph, and quoted public na
   );
   assert.match(
     debateSource,
-    /voiceSourceBotId: shapeshifting \? \(identitySource\?\.id \?\? bot\.id\) : bot\.id/u,
-    "Identity Crisis speech must remain routed through the holder",
+    /voiceSourceBotId: bot\.id/u,
+    "both Identity Crisis and Shapeshifter speech must remain routed through the holder",
   );
   assert.match(
     pageSource,

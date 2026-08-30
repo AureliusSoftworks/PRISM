@@ -226,7 +226,7 @@ test("Debate mirror borrows only target eyes, complete mouth, Ink, and glyph", (
     "holder-frame",
   );
   assert.equal(mirrored.replayVisualSnapshot?.screenMaterialSeed, "holder-screen");
-  assert.equal(mirrored.name, '"Target Persona"');
+  assert.equal(mirrored.name, "Target Persona");
   assert.equal(mirrored.systemPrompt, holder.systemPrompt);
   assert.equal(mirrored.glyph, target.glyph);
   assert.deepEqual(mirrored.avatarDetails, targetInk);
@@ -271,7 +271,8 @@ test("Debate mirror borrows only target eyes, complete mouth, Ink, and glyph", (
   }
   assert.deepEqual(mirrored.powers, holder.powers);
 
-  // Shapeshifter takes the target's face, chassis, and voice, but the holder's
+  // Shapeshifter takes the target's face, chassis, persona, and Accent Map, but
+  // keeps the holder's actual voice and Powers. The holder's
   // authored identity anchors — name, color, glyph — always persist so the
   // chamber can still tell who actually holds the floor. The disguise is
   // carried by the "Appearing as …" label, not by overwriting the speaker.
@@ -300,13 +301,37 @@ test("Debate mirror borrows only target eyes, complete mouth, Ink, and glyph", (
     "Shapeshifter still wears the target's face",
   );
   assert.deepEqual(
-    shifted.replayVisualSnapshot,
-    target.replayVisualSnapshot,
-    "Shapeshifter still wears the target's frozen visual form",
+    shifted.replayVisualSnapshot?.faceStyle,
+    target.replayVisualSnapshot?.faceStyle,
+    "Shapeshifter still wears the target's frozen face",
   );
-  assert.deepEqual(
-    shifted.voiceProfile,
-    target.voiceProfile,
-    "Shapeshifter still speaks with the target's voice",
+  assert.equal(shifted.replayVisualSnapshot?.frameMaterialSeed, "target-frame");
+  assert.equal(
+    shifted.replayVisualSnapshot?.voicePreset,
+    "formal",
+    "Shapeshifter keeps the holder's voice preset",
   );
+  if (
+    shifted.voiceProfile &&
+    "baseVoiceId" in shifted.voiceProfile &&
+    "elevenLabsEffect" in shifted.voiceProfile
+  ) {
+    assert.equal(shifted.voiceProfile.baseVoiceId, "voice-2");
+    assert.equal(shifted.voiceProfile.elevenLabsEffect, "echo");
+    assert.equal(shifted.voiceProfile.pitch, 0);
+    assert.equal(shifted.voiceProfile.accentDefinitionId, "indian-english");
+    assert.deepEqual(
+      shifted.voiceProfile.pronunciationMapPoint,
+      { x: 0.83, y: 0.19 },
+    );
+    assert.equal(shifted.voiceProfile.pronunciationBase, "en-GB");
+    assert.equal(shifted.voiceProfile.speechprintInfluence, "indian-english");
+    assert.equal(
+      shifted.voiceProfile.speechprintVariationSeed,
+      "target-speechprint",
+    );
+  } else {
+    assert.fail("Shapeshifter should retain the holder voice with target Accent Map.");
+  }
+  assert.deepEqual(shifted.powers, holder.powers);
 });

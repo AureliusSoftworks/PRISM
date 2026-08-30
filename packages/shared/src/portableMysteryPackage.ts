@@ -9,9 +9,15 @@ import {
   validateMansionLayoutV2,
   type MansionLayoutV2,
 } from "./mansionLayoutV2.ts";
+import {
+  WHODUNNIT_PROP_ARCHETYPE_IDS_V1,
+  WHODUNNIT_PROP_REGISTRY_VERSION_V1,
+  isWhodunnitPropArchetypeIdV1,
+  type MansionPropThemeV1,
+} from "./whodunnitProps.ts";
 
 export const PORTABLE_MYSTERY_PACKAGE_FORMAT_MAJOR_V1 = 1 as const;
-export const PORTABLE_MYSTERY_PACKAGE_FORMAT_MINOR_V1 = 0 as const;
+export const PORTABLE_MYSTERY_PACKAGE_FORMAT_MINOR_V1 = 1 as const;
 export const PORTABLE_MYSTERY_PACKAGE_MAGIC_V1 = "PRISMPKG" as const;
 export const PORTABLE_MANSION_PACKAGE_MIME_V1 = "application/vnd.prism.mansion" as const;
 export const PORTABLE_WHODUNNIT_PACKAGE_MIME_V1 = "application/vnd.prism.whodunnit" as const;
@@ -325,6 +331,8 @@ export interface MansionPackageManifestV1 {
   roomArt?: MansionRoomArtContractV1;
   /** Optional so legacy one-floor and pre-ambience packages stay valid. */
   ambience?: MansionAmbienceManifestV1 | null;
+  /** Additive complete replacement pack. Legacy anonymous room props remain separate. */
+  propTheme?: MansionPropThemeV1;
 }
 
 export interface PortableMansionInstallationMetadataV1 {
@@ -345,6 +353,8 @@ export interface PortableMansionPackagePreviewV1 {
   previewImageDataUrl: string | null;
   floorCount: number;
   roomCount: number;
+  /** Complete themed archetype coverage. Legacy anonymous propCount is kept below. */
+  themedPropCount: number;
   propCount: number;
   hasInvestigationTheme: boolean;
   provenance: PortableMysteryProvenanceV1;
@@ -372,7 +382,7 @@ export interface WhodunnitPackageRuntimeAssetBindingV1 {
   subjectId: string;
   lineId: string | null;
   status: "ready" | "fallback" | "complete";
-  source: "synthesized" | "bundled" | "local";
+  source: "synthesized" | "bundled" | "local" | "mansion" | "asset_library";
 }
 
 export interface WhodunnitPackageCompletedPlaythroughV1 {
@@ -672,6 +682,63 @@ export function validateMansionPackageManifestV1(value: unknown): string[] {
   }
   const assetCollection = validateAssetCollection(value.assets, "manifest.assets");
   errors.push(...assetCollection.errors);
+  if (value.propTheme !== undefined) {
+    if (!isRecord(value.formatVersion) || !isNonNegativeInteger(value.formatVersion.minor) ||
+        value.formatVersion.minor < PORTABLE_MYSTERY_PACKAGE_FORMAT_MINOR_V1) {
+      errors.push(
+        `manifest.propTheme requires package minor ${PORTABLE_MYSTERY_PACKAGE_FORMAT_MINOR_V1} or newer.`,
+      );
+    }
+    if (!isRecord(value.propTheme)) {
+      errors.push("manifest.propTheme is invalid.");
+    } else {
+      if (value.propTheme.version !== 1) errors.push("manifest.propTheme.version is invalid.");
+      if (value.propTheme.registryVersion !== WHODUNNIT_PROP_REGISTRY_VERSION_V1) {
+        errors.push("manifest.propTheme.registryVersion is unsupported.");
+      }
+      if (!Array.isArray(value.propTheme.variants) ||
+          value.propTheme.variants.length !== WHODUNNIT_PROP_ARCHETYPE_IDS_V1.length) {
+        errors.push(`manifest.propTheme must contain exactly ${WHODUNNIT_PROP_ARCHETYPE_IDS_V1.length} variants.`);
+      } else {
+        const archetypeIds = new Set<string>();
+        const packageAssetIds = new Set<string>();
+        value.propTheme.variants.forEach((variant, index) => {
+          const path = `manifest.propTheme.variants[${index}]`;
+          if (!isRecord(variant)) {
+            errors.push(`${path} is invalid.`);
+            return;
+          }
+          if (!isWhodunnitPropArchetypeIdV1(variant.archetypeId)) {
+            errors.push(`${path}.archetypeId is invalid.`);
+          } else if (archetypeIds.has(variant.archetypeId)) {
+            errors.push(`${path}.archetypeId is duplicated.`);
+          } else {
+            archetypeIds.add(variant.archetypeId);
+          }
+          for (const key of ["displayName", "appearanceDescription", "packageAssetId"] as const) {
+            if (!isNonEmptyString(variant[key])) errors.push(`${path}.${key} is missing.`);
+          }
+          if (isNonEmptyString(variant.packageAssetId)) {
+            if (packageAssetIds.has(variant.packageAssetId)) {
+              errors.push(`${path}.packageAssetId is duplicated.`);
+            } else {
+              packageAssetIds.add(variant.packageAssetId);
+            }
+            if (!assetReferenceIsCompatible(
+              assetCollection.byId.get(variant.packageAssetId), ["prop"], "image",
+            )) errors.push(`${path}.packageAssetId does not reference compatible prop art.`);
+          }
+        });
+        if (archetypeIds.size === WHODUNNIT_PROP_ARCHETYPE_IDS_V1.length) {
+          for (const archetypeId of WHODUNNIT_PROP_ARCHETYPE_IDS_V1) {
+            if (!archetypeIds.has(archetypeId)) {
+              errors.push(`manifest.propTheme is missing ${archetypeId}.`);
+            }
+          }
+        }
+      }
+    }
+  }
   const roomIds = new Set<string>();
   if (!Array.isArray(value.rooms) || value.rooms.length < 1) {
     errors.push("manifest.rooms is empty.");

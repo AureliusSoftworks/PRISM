@@ -208,6 +208,25 @@ describe("Signal kept item persona associations", () => {
       replayEmoji: "🌸",
     });
 
+    const inspectionResponse = await client.request(
+      "/api/assets/signal-item/inspect",
+      jsonInit({
+        title: "flower",
+        dataUrl: dataUrl(transparentPng, "image/png"),
+      }),
+    );
+    const inspection = (await inspectionResponse.json()) as {
+      contentSha256: string;
+      alreadySaved: boolean;
+      automaticTags: string[];
+    };
+    assert.equal(inspectionResponse.status, 200, JSON.stringify(inspection));
+    assert.match(inspection.contentSha256, /^[a-f0-9]{64}$/u);
+    assert.equal(inspection.alreadySaved, false);
+    assert.ok(inspection.automaticTags.length >= 3);
+    assert.ok(inspection.automaticTags.length <= 6);
+    assert.ok(inspection.automaticTags.includes("flower"));
+
     const response = await client.request(
       "/api/assets/upload",
       jsonInit({
@@ -217,19 +236,26 @@ describe("Signal kept item persona associations", () => {
         signalEpisodeId: episodeId,
       }),
     );
-    const payload = (await response.json()) as { imageId: string };
+    const payload = (await response.json()) as {
+      imageId: string;
+      asset: { kind: string; automaticTags: string[] };
+    };
     assert.equal(response.status, 201, JSON.stringify(payload));
+    assert.equal(payload.asset.kind, "item");
 
     const stored = db
       .prepare(
-        "SELECT bot_id, related_bot_ids FROM images WHERE id = ? AND user_id = ?",
+        `SELECT bot_id, related_bot_ids, content_sha256
+           FROM images WHERE id = ? AND user_id = ?`,
       )
       .get(payload.imageId, userId) as {
       bot_id: string | null;
       related_bot_ids: string;
+      content_sha256: string;
     };
     assert.equal(stored.bot_id, null);
     assert.deepEqual(JSON.parse(stored.related_bot_ids), [guestBotId]);
+    assert.equal(stored.content_sha256, inspection.contentSha256);
     const associations = db
       .prepare(
         `SELECT bot_id, relation
@@ -240,6 +266,92 @@ describe("Signal kept item persona associations", () => {
     assert.deepEqual(
       associations.map((association) => ({ ...association })),
       [{ bot_id: guestBotId, relation: "participant" }],
+    );
+
+    // Existing Item rows from before content hashes were introduced are
+    // recognized from their stored local PNG on the next exact inspection.
+    db.prepare(
+      "UPDATE images SET content_sha256 = NULL WHERE id = ? AND user_id = ?",
+    ).run(payload.imageId, userId);
+    const duplicateInspectionResponse = await client.request(
+      "/api/assets/signal-item/inspect",
+      jsonInit({
+        title: "flower",
+        dataUrl: dataUrl(transparentPng, "image/png"),
+      }),
+    );
+    const duplicateInspection = (await duplicateInspectionResponse.json()) as {
+      alreadySaved: boolean;
+      automaticTags: string[];
+    };
+    assert.equal(duplicateInspectionResponse.status, 200);
+    assert.equal(duplicateInspection.alreadySaved, true);
+    assert.deepEqual(duplicateInspection.automaticTags, payload.asset.automaticTags);
+    assert.equal(
+      (
+        db.prepare(
+          "SELECT content_sha256 FROM images WHERE id = ? AND user_id = ?",
+        ).get(payload.imageId, userId) as { content_sha256: string }
+      ).content_sha256,
+      inspection.contentSha256,
+    );
+
+    const otherClient = createClient();
+    await register(otherClient, "signal-item-other-library@example.com");
+    const otherInspectionResponse = await otherClient.request(
+      "/api/assets/signal-item/inspect",
+      jsonInit({
+        title: "flower",
+        dataUrl: dataUrl(transparentPng, "image/png"),
+      }),
+    );
+    const otherInspection = (await otherInspectionResponse.json()) as {
+      alreadySaved: boolean;
+    };
+    assert.equal(otherInspectionResponse.status, 200);
+    assert.equal(otherInspection.alreadySaved, false);
+
+    const secondEpisode = createBotGuestEpisode(userId, "owner-second");
+    queueBotcastEpisodeImageContext(db, userId, secondEpisode.episodeId, {
+      imageId: "owner-second-ephemeral-item",
+      kind: "item",
+      name: "flower",
+      mimeType: "image/png",
+      provider: "openai",
+      model: "gpt-image-1",
+      replayEmoji: "🌸",
+    });
+    const beforeDuplicate = imageCount(userId);
+    const duplicateSaveResponse = await client.request(
+      "/api/assets/upload",
+      jsonInit({
+        kind: "item",
+        title: "flower",
+        dataUrl: dataUrl(transparentPng, "image/png"),
+        signalEpisodeId: secondEpisode.episodeId,
+      }),
+    );
+    const duplicateSave = (await duplicateSaveResponse.json()) as {
+      imageId: string;
+      deduplicated: boolean;
+    };
+    assert.equal(duplicateSaveResponse.status, 200, JSON.stringify(duplicateSave));
+    assert.equal(duplicateSave.deduplicated, true);
+    assert.equal(duplicateSave.imageId, payload.imageId);
+    assert.equal(imageCount(userId), beforeDuplicate);
+    const duplicateAssociations = db
+      .prepare(
+        `SELECT bot_id, relation
+           FROM image_bot_associations
+          WHERE user_id = ? AND image_id = ?
+          ORDER BY bot_id`,
+      )
+      .all(userId, payload.imageId) as Array<{ bot_id: string; relation: string }>;
+    assert.deepEqual(
+      duplicateAssociations.map((association) => ({ ...association })),
+      [guestBotId, secondEpisode.guestBotId]
+        .sort()
+        .map((botId) => ({ bot_id: botId, relation: "participant" })),
     );
   });
 
@@ -254,6 +366,15 @@ describe("Signal kept item persona associations", () => {
     const ownerEpisode = createBotGuestEpisode(ownerId, "guard-owner");
     const outsiderEpisode = createBotGuestEpisode(outsiderId, "guard-outsider");
     const before = imageCount(ownerId);
+    const inspection = await owner.request(
+      "/api/assets/signal-item/inspect",
+      jsonInit({
+        title: "opaque flower",
+        dataUrl: dataUrl(opaquePng, "image/png"),
+      }),
+    );
+    assert.equal(inspection.status, 400, await inspection.text());
+    assert.equal(imageCount(ownerId), before);
     const attempts = [
       {
         signalEpisodeId: "missing-episode",

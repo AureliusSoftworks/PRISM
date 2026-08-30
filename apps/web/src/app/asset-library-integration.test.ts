@@ -61,6 +61,23 @@ describe("typed local asset library", () => {
     assert.match(assetSource, /\{viewAllLabel\}/u);
   });
 
+  it("keeps Item and Debate exhibit capability cards visible, editable, and opt-in safe", () => {
+    assert.match(assetSource, /detail\.kind === "item" \|\| detail\.kind === "debate_exhibit"/u);
+    assert.match(assetSource, /data-whodunnit-capability-card="true"/u);
+    assert.match(assetSource, /What it is/u);
+    assert.match(assetSource, /What it does/u);
+    assert.match(assetSource, /Whodunnit role/u);
+    assert.match(assetSource, /Pending analysis — never selected automatically/u);
+    assert.match(assetSource, /"Analyze"/u);
+    assert.match(assetSource, /Retry analysis/u);
+    assert.match(assetSource, /"Disable"/u);
+    assert.match(assetSource, /method: "PATCH"/u);
+    assert.match(serverSource, /\/api\/assets\/:id\/capability\/analyze/u);
+    assert.match(serverSource, /\/api\/assets\/:id\/capability\/retry/u);
+    assert.match(serverSource, /\/api\/assets\/:id\/capability\/disable/u);
+    assert.match(tutorialSource, /original LOCAL or ONLINE privacy lane/u);
+  });
+
   it("keeps Upload separate from an explicit Synthesize target", () => {
     assert.match(assetSource, /kind: "magic"/u);
     assert.match(assetSource, /PrismRefractTarget target=\{synthesizeTarget\}/u);

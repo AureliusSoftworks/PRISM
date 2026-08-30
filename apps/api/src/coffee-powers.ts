@@ -76,15 +76,58 @@ interface CoffeePowerBotRow {
 }
 
 /**
- * Identity Crisis is a visual overlay. Coffee keeps the frozen Power plan
- * unchanged so every mechanic remains with its authored holder.
+ * Identity Crisis composes the current target's eligible public mechanics
+ * into the holder while keeping private awareness, audience permissions, and
+ * recursive Identity Crisis anchored to their authored owners.
  */
 export function coffeePowerPlanWithIdentityMirrorHolderPowersV1(args: {
   plan: CoffeePowerPlanV1 | null;
   states: ReadonlyMap<string, BotIdentityMirrorStateV1>;
   botNamesById: ReadonlyMap<string, string>;
 }): CoffeePowerPlanV1 | null {
-  return args.plan;
+  if (!args.plan || args.states.size === 0) return args.plan;
+  let changed = false;
+  const bots = { ...args.plan.bots };
+  for (const [holderBotId, state] of args.states) {
+    const holder = args.plan.bots[holderBotId];
+    const target = args.plan.bots[state.targetBotId];
+    if (!holder || !target) continue;
+    const borrowedEffects = target.effects.filter(
+      (effect) =>
+        effect.type !== "identity_mirror" &&
+        effect.type !== "awareness" &&
+        effect.type !== "speech_audience",
+    );
+    if (borrowedEffects.length === 0) continue;
+    changed = true;
+    const targetName =
+      args.botNamesById.get(state.targetBotId) ?? state.targetBotName;
+    const copiedPowerId = `identity-mirror:${state.targetBotId}:public-powers`.slice(0, 128);
+    bots[holderBotId] = {
+      ...holder,
+      powerIds: [...holder.powerIds, copiedPowerId],
+      powerNames: [
+        ...(holder.powerNames ?? []),
+        `Copied public Powers (${targetName})`,
+      ],
+      selfCue: [
+        holder.selfCue,
+        `Identity Crisis copied ${targetName}'s eligible public Power mechanics. Execute only the supplied runtime effects while retaining your own persona and voice; do not infer or reveal private awareness or audience permissions.`,
+      ].filter(Boolean).join("\n"),
+      observerCue: [
+        holder.observerCue,
+        `Identity Crisis is copying ${targetName}'s eligible public Power mechanics while private awareness and audience permissions remain with ${targetName}.`,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      effects: [...holder.effects, ...borrowedEffects],
+      ruleLabels: [
+        ...(holder.ruleLabels ?? []),
+        `Identity Crisis copies eligible public Powers from ${targetName}`,
+      ],
+    };
+  }
+  return changed ? { ...args.plan, bots } : args.plan;
 }
 
 function parseStringArray(raw: string | null | undefined): string[] {

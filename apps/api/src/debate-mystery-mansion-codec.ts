@@ -14,12 +14,15 @@ import {
   deriveMansionMusicIdentityV1,
   normalizeMansionMusicIdentityV1,
   normalizeDebateMysteryAtmosphereContractV1,
+  PORTABLE_MYSTERY_PACKAGE_FORMAT_MINOR_V1,
   remapMansionLayoutV2Ids,
   validateMansionPackageManifestV1,
+  WHODUNNIT_PROP_ARCHETYPE_IDS_V1,
   type MansionPackageManifestV1,
   type PortableMansionInstallationMetadataV1,
   type PortablePackageJsonValueV1,
   type MansionLayoutV2,
+  type MansionPropThemeV1,
   type DebateMysteryMansionSnapshotV2,
 } from "@localai/shared";
 import { unzipSync, zipSync } from "fflate";
@@ -196,13 +199,50 @@ export function exportInternalMansionPackageFromDbV1(args: {
       WHERE refs.bundle_id = ? AND refs.user_id = ?
       ORDER BY refs.role, refs.logical_id, assets.id`,
   ).all(args.bundleId, args.userId) as unknown as StoredMansionAssetRow[];
+  const frozenSnapshot = args.snapshot?.sourceBundleId === bundle.id ? args.snapshot : null;
   const snapshotAssets = args.snapshot?.sourceBundleId === args.bundleId
     ? args.snapshot.presentation.assets
     : null;
+  const candidatePropTheme =
+    frozenSnapshot?.presentation.propTheme ?? bundle.propTheme ?? null;
+  const availableAssetIds = new Set(
+    snapshotAssets?.map((asset) => asset.id) ?? allStored.map((asset) => asset.id),
+  );
+  const availableThemeRefKeys = new Set(
+    (snapshotAssets ?? allStored.map((asset) => ({
+      id: asset.id,
+      role: asset.role,
+      logicalId: asset.logical_id,
+    })))
+      .filter((asset) => asset.role === "prop" && asset.logicalId.startsWith("theme:"))
+      .map((asset) => `${asset.logicalId}\u0000${asset.id}`),
+  );
+  const completeSourcePropTheme = candidatePropTheme &&
+    candidatePropTheme.version === 1 &&
+    candidatePropTheme.registryVersion === 1 &&
+    candidatePropTheme.variants.length === WHODUNNIT_PROP_ARCHETYPE_IDS_V1.length &&
+    new Set(candidatePropTheme.variants.map((variant) => variant.archetypeId)).size ===
+      WHODUNNIT_PROP_ARCHETYPE_IDS_V1.length &&
+    new Set(candidatePropTheme.variants.map((variant) => variant.packageAssetId)).size ===
+      WHODUNNIT_PROP_ARCHETYPE_IDS_V1.length &&
+    WHODUNNIT_PROP_ARCHETYPE_IDS_V1.every((archetypeId) =>
+      candidatePropTheme.variants.some((variant) =>
+        variant.archetypeId === archetypeId &&
+        availableAssetIds.has(variant.packageAssetId) &&
+        availableThemeRefKeys.has(`theme:${archetypeId}\u0000${variant.packageAssetId}`)),
+    )
+      ? candidatePropTheme
+      : null;
+  const completeThemeAssetIds = new Set(
+    completeSourcePropTheme?.variants.map((variant) => variant.packageAssetId) ?? [],
+  );
   const stored = snapshotAssets
     ? snapshotAssets.flatMap((snapshotAsset) => {
         const row = allStored.find((candidate) => candidate.id === snapshotAsset.id);
-        if (!row || snapshotAsset.role === "music" &&
+        if (!row ||
+          snapshotAsset.logicalId.startsWith("theme:") &&
+            !completeThemeAssetIds.has(snapshotAsset.id) ||
+          snapshotAsset.role === "music" &&
           (snapshotAsset.logicalId === MANSION_MUSIC_CANDIDATE_LOGICAL_ID_V1 ||
             snapshotAsset.logicalId === MANSION_MUSIC_PREVIOUS_LOGICAL_ID_V1)) return [];
         return [{
@@ -213,6 +253,7 @@ export function exportInternalMansionPackageFromDbV1(args: {
       })
     : allStored.filter((asset) =>
         !asset.logical_id.startsWith("case:") &&
+        (!asset.logical_id.startsWith("theme:") || completeThemeAssetIds.has(asset.id)) &&
         !(asset.role === "music" &&
           (asset.logical_id === MANSION_MUSIC_CANDIDATE_LOGICAL_ID_V1 ||
             asset.logical_id === MANSION_MUSIC_PREVIOUS_LOGICAL_ID_V1 ||
@@ -274,7 +315,6 @@ export function exportInternalMansionPackageFromDbV1(args: {
     stored.filter((asset) => asset.role === "room")
       .map((asset) => [asset.logical_id, portableIdByStoredId.get(asset.id)!]),
   );
-  const frozenSnapshot = args.snapshot?.sourceBundleId === bundle.id ? args.snapshot : null;
   const sourceRooms = frozenSnapshot?.rooms ?? bundle.rooms;
   const sourceLayoutV2 = frozenSnapshot?.layoutV2 ?? bundle.layoutV2 ?? null;
   const sourceHouseStyle = frozenSnapshot?.presentation.houseStyle ?? bundle.houseStyle;
@@ -318,8 +358,24 @@ export function exportInternalMansionPackageFromDbV1(args: {
         return JSON.parse(canonicalMansionLayoutV2(portable)) as MansionLayoutV2;
       })()
     : null;
+  const portablePropTheme: MansionPropThemeV1 | null = completeSourcePropTheme
+    ? {
+        version: 1,
+        registryVersion: 1,
+        variants: WHODUNNIT_PROP_ARCHETYPE_IDS_V1.map((archetypeId) => {
+          const variant = completeSourcePropTheme.variants.find(
+            (candidate) => candidate.archetypeId === archetypeId,
+          )!;
+          return {
+            ...variant,
+            packageAssetId: portableIdByStoredId.get(variant.packageAssetId)!,
+          };
+        }),
+      }
+    : null;
   const anonymousPropAssetIds = [...new Set(
     stored.filter((asset) => asset.role === "prop")
+      .filter((asset) => !asset.logical_id.startsWith("theme:"))
       .map((asset) => portableIdByStoredId.get(asset.id))
       .filter((id): id is string => Boolean(id)),
   )];
@@ -365,7 +421,7 @@ export function exportInternalMansionPackageFromDbV1(args: {
     : null;
   const manifest: MansionPackageManifestV1 = {
     schema: "prism-mansion-package-v1",
-    formatVersion: { major: 1, minor: 0 },
+    formatVersion: { major: 1, minor: PORTABLE_MYSTERY_PACKAGE_FORMAT_MINOR_V1 },
     packageId: randomUUID(),
     title: sourceTitle,
     description: sourceDescription,
@@ -421,6 +477,7 @@ export function exportInternalMansionPackageFromDbV1(args: {
     musicIdentity: sourceHouseStyle.musicIdentity ?? bundle.music?.identity,
     roomArt: DEFAULT_MANSION_ROOM_ART_CONTRACT_V1,
     ambience,
+    ...(portablePropTheme ? { propTheme: portablePropTheme } : {}),
   };
   return encodeInternalMansionPackageV1({ manifest, assets: files });
 }
@@ -545,7 +602,25 @@ export function importInternalMansionPackageToDbDetailedV1(args: {
          (bundle_id, user_id, asset_id, role, logical_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
     );
+    const insertPropVariant = args.db.prepare(
+      `INSERT INTO debate_mystery_mansion_prop_variants
+         (user_id, bundle_id, registry_version, archetype_id, status,
+          display_name, appearance_description, asset_id, attempt_count,
+          failure_code, created_at, updated_at)
+       VALUES (?, ?, 1, ?, 'ready', ?, ?, ?, 0, NULL, ?, ?)
+       ON CONFLICT(user_id, bundle_id, registry_version, archetype_id) DO UPDATE SET
+         status = 'ready',
+         display_name = excluded.display_name,
+         appearance_description = excluded.appearance_description,
+         asset_id = excluded.asset_id,
+         attempt_count = 0,
+         failure_code = NULL,
+         updated_at = excluded.updated_at`,
+    );
     let propIndex = 0;
+    const themedVariantByPortableAssetId = new Map(
+      decoded.manifest.propTheme?.variants.map((variant) => [variant.packageAssetId, variant]) ?? [],
+    );
     for (const descriptor of decoded.manifest.assets) {
       const bytes = Buffer.from(decoded.assets.get(descriptor.archivePath)!);
       const encrypted = encryptBytes(bytes, args.userKey);
@@ -560,6 +635,9 @@ export function importInternalMansionPackageToDbDetailedV1(args: {
       );
       const stored = findAsset.get(args.userId, descriptor.sha256) as { id: string };
       importedAssetIdByPortableId.set(descriptor.id, stored.id);
+      const themedVariant = descriptor.role === "prop"
+        ? themedVariantByPortableAssetId.get(descriptor.id)
+        : undefined;
       let logicalId: string;
       if (descriptor.role === "room") {
         const sourceRoom = decoded.manifest.rooms.find((room) => room.roomAssetId === descriptor.id);
@@ -572,7 +650,9 @@ export function importInternalMansionPackageToDbDetailedV1(args: {
             ? `${roomIdMap.get(illustratedRoom.id)!}:illustrated-v1`
             : `room-asset-${descriptor.id}`;
       } else if (descriptor.role === "prop") {
-        logicalId = `prop-${String(++propIndex).padStart(3, "0")}`;
+        logicalId = themedVariant
+          ? `theme:${themedVariant.archetypeId}`
+          : `prop-${String(++propIndex).padStart(3, "0")}`;
       } else if (
         descriptor.role === "music" &&
         descriptor.id === decoded.manifest.investigationThemeAssetId
@@ -599,6 +679,18 @@ export function importInternalMansionPackageToDbDetailedV1(args: {
         logicalId = `ambience:${reference.id}`;
       }
       insertRef.run(bundleId, args.userId, stored.id, storedRole, logicalId, now);
+      if (themedVariant) {
+        insertPropVariant.run(
+          args.userId,
+          bundleId,
+          themedVariant.archetypeId,
+          themedVariant.displayName,
+          themedVariant.appearanceDescription,
+          stored.id,
+          now,
+          now,
+        );
+      }
     }
     const installedAmbience = decoded.manifest.ambience
       ? {

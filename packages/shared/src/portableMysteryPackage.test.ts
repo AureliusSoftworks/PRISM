@@ -10,6 +10,10 @@ import {
   validateWhodunnitPackageManifestV1,
 } from "./portableMysteryPackage.ts";
 import { deriveMansionMusicIdentityV1 } from "./mansionMusic.ts";
+import {
+  WHODUNNIT_PROP_ARCHETYPE_IDS_V1,
+  type MansionPropThemeV1,
+} from "./whodunnitProps.ts";
 
 const hash = "a".repeat(64);
 
@@ -87,6 +91,69 @@ test("mansion manifests accept optional exterior scale while keeping V1 packages
   assert.match(
     validateMansionPackageManifestV1({ ...legacy, scaleClass: "colossal" }).join("\n"),
     /scaleClass is invalid/u,
+  );
+});
+
+test("mansion manifests accept only complete 16-archetype themed prop packs", () => {
+  const manifest = mansionManifest();
+  const assets = manifest.assets as Array<Record<string, unknown>>;
+  const variants: MansionPropThemeV1["variants"] = WHODUNNIT_PROP_ARCHETYPE_IDS_V1.map(
+    (archetypeId, index) => {
+      const assetId = `theme-prop-${archetypeId}`;
+      const sha256 = (index + 1).toString(16).padStart(64, "0");
+      assets.push({
+        id: assetId,
+        role: "prop",
+        archivePath: `assets/${sha256}.webp`,
+        sha256,
+        byteLength: 8_192,
+        mimeType: "image/webp",
+        width: 512,
+        height: 512,
+        durationMs: null,
+      });
+      return {
+        archetypeId,
+        displayName: `Jungle ${archetypeId}`,
+        appearanceDescription: `A rain-worn ${archetypeId} made for the Jungle House.`,
+        packageAssetId: assetId,
+      };
+    },
+  );
+  manifest.propTheme = { version: 1, registryVersion: 1, variants };
+  manifest.formatVersion = { major: 1, minor: 1 };
+  assert.deepEqual(validateMansionPackageManifestV1(manifest), []);
+
+  assert.match(
+    validateMansionPackageManifestV1({
+      ...manifest,
+      formatVersion: { major: 1, minor: 0 },
+    }).join("\n"),
+    /propTheme requires package minor 1/u,
+  );
+
+  const partial = {
+    ...manifest,
+    propTheme: { version: 1, registryVersion: 1, variants: variants.slice(0, 15) },
+  };
+  assert.match(
+    validateMansionPackageManifestV1(partial).join("\n"),
+    /exactly 16 variants/u,
+  );
+
+  const duplicated = structuredClone(manifest);
+  duplicated.propTheme.variants[15]!.archetypeId = "key";
+  duplicated.propTheme.variants[15]!.packageAssetId =
+    duplicated.propTheme.variants[0]!.packageAssetId;
+  const duplicateErrors = validateMansionPackageManifestV1(duplicated).join("\n");
+  assert.match(duplicateErrors, /archetypeId is duplicated/u);
+  assert.match(duplicateErrors, /packageAssetId is duplicated/u);
+
+  const wrongRole = structuredClone(manifest);
+  (wrongRole.assets as Array<Record<string, unknown>>)[1]!.role = "room";
+  assert.match(
+    validateMansionPackageManifestV1(wrongRole).join("\n"),
+    /does not reference compatible prop art/u,
   );
 });
 

@@ -572,9 +572,11 @@ export {
   botIdentityPresentationGlyphV1,
   botIdentityPresentationScreenMaterialSeedV1,
   botIdentityPresentationTransitionActiveV1,
+  resolveBotIdentityPublicPresentationV1,
   botIdentityPresentationVoicePresetV1,
   normalizeBotIdentityPresentationSnapshotV1,
   type BotIdentityPresentationSnapshotV1,
+  type BotIdentityPublicPresentationV1,
 } from "./botIdentityPresentation.js";
 
 export {
@@ -614,6 +616,7 @@ export {
   botIdentityShapeshiftTargetChangesV1,
   botIdentityShapeshiftTransitionActiveV1,
   createBotIdentityShapeshiftStateV1,
+  applyBotIdentityShapeshiftAccentMapV1,
   normalizeBotIdentityShapeshiftStateV1,
   pickBotIdentityShapeshiftCandidateIndexV1,
   resolveBotIdentityShapeshiftAvatarDetailsV1,
@@ -1033,6 +1036,7 @@ export {
 
 export {
   BOT_GENERATION_DRAFT_VERSION,
+  CURSED_TONGUE_GENERATED_AUTHORING_PROMPT,
   BOT_GENERATED_AVATAR_INK_MAX_PAINTED_PIXELS,
   BOT_GENERATED_AVATAR_INK_MAX_PATHS,
   BOT_GENERATION_GLYPH_IDS,
@@ -3908,6 +3912,7 @@ export * from "./debateMystery.js";
 export * from "./debateMysteryV2.js";
 export * from "./mysteryIncidentPlan.js";
 export * from "./portableMysteryPackage.js";
+export * from "./whodunnitProps.js";
 export * from "./mansionLayoutV2.js";
 export * from "./mansionMusic.js";
 export * from "./audioAssets.js";

@@ -1477,6 +1477,36 @@ export interface BotcastProducerCue {
   imageId?: string;
 }
 
+/**
+ * Signal resolves cue urgency from the cue itself, rather than from whichever
+ * live surface happened to receive it. A quoted Host instruction is the
+ * strongest producer direction; a private Host note or image needs the next
+ * Host turn immediately; generic control-card direction retains the normal
+ * handoff cadence.
+ */
+export type BotcastProducerCuePriority =
+  | "ordinary"
+  | "priority"
+  | "immediate";
+
+export function botcastProducerCuePriority(
+  cue: Pick<BotcastProducerCue, "kind" | "detail" | "directQuote">,
+): BotcastProducerCuePriority {
+  if (cue.directQuote?.trim()) return "immediate";
+  if (cue.detail?.trim() || cue.kind === "present_image") return "priority";
+  return "ordinary";
+}
+
+/**
+ * High-priority Producer input pivots an audible Host at its current word
+ * boundary.
+ */
+export function botcastProducerCuePreemptsHostSpeech(
+  cue: Pick<BotcastProducerCue, "kind" | "detail" | "directQuote">,
+): boolean {
+  return botcastProducerCuePriority(cue) !== "ordinary";
+}
+
 /** Durable, event-backed producer-cue feedback for a live Signal episode. */
 export type BotcastProducerCueLifecycleStatus =
   | "queued"
@@ -1491,6 +1521,7 @@ export interface BotcastProducerCueLifecycle {
   cueId: string;
   cue: BotcastProducerCue;
   delivery: BotcastProducerCueDelivery;
+  priority: BotcastProducerCuePriority;
   status: BotcastProducerCueLifecycleStatus;
   eventId: string;
   sequence: number;
@@ -1561,6 +1592,12 @@ export function botcastProducerCueLifecyclesFromEvents(
         cueId,
         cue,
         delivery,
+        priority:
+          event.payload.priority === "ordinary" ||
+          event.payload.priority === "priority" ||
+          event.payload.priority === "immediate"
+            ? event.payload.priority
+            : botcastProducerCuePriority(cue),
         status,
         eventId: event.id,
         sequence: event.sequence,
@@ -3234,6 +3271,86 @@ export interface BotcastHostRedirectContext {
   messageId: string;
   /** Exact prefix the audience heard before the host changed direction. */
   spokenContent: string;
+  /**
+   * Audible state at the Producer's cut. Older clients omit this and retain
+   * the legacy unmarked prefix; live Signal supplies it from the voice clock.
+   */
+  cadence?: BotcastHostRedirectCadence;
+}
+
+export type BotcastHostRedirectCadence =
+  | "active_speech"
+  | "between_words";
+
+export type BotcastProducerPivotStyle =
+  | "hesitation"
+  | "self_correction"
+  | "hard_reset"
+  | "throat_clear"
+  | "breath";
+
+export interface BotcastProducerPivotPerformanceV1 {
+  v: 1;
+  cadence: BotcastHostRedirectCadence;
+  transcriptMark: "ellipsis" | "em_dash";
+  style: BotcastProducerPivotStyle;
+  vocalFoley: "clears throat" | "exhales" | null;
+}
+
+/** Canonical transcript for a Host line cut by live Producer direction. */
+export function botcastInterruptedHostContent(
+  fullContent: string,
+  redirect: Pick<BotcastHostRedirectContext, "spokenContent" | "cadence">,
+): string | null {
+  const prefix = redirect.spokenContent.trimEnd();
+  if (!prefix.trim() || !fullContent.startsWith(prefix)) return null;
+  if (prefix === fullContent || /[—…]$/u.test(prefix)) return prefix;
+  if (redirect.cadence === "between_words") return `${prefix}…`;
+  if (redirect.cadence === "active_speech") return `${prefix}—`;
+  return prefix;
+}
+
+function botcastProducerPivotSeedHashV1(seed: string): number {
+  let hash = 2166136261;
+  for (const character of seed) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+/**
+ * A saved Producer redirect owns one understated performance choice so live
+ * playback and replay never improvise different hesitation/Foley around it.
+ */
+export function planBotcastProducerPivotPerformanceV1(args: {
+  seed: string;
+  cadence: BotcastHostRedirectCadence;
+}): BotcastProducerPivotPerformanceV1 {
+  const palette = args.cadence === "between_words"
+    ? ([
+        { style: "hesitation", vocalFoley: null },
+        { style: "self_correction", vocalFoley: null },
+        { style: "throat_clear", vocalFoley: "clears throat" },
+        { style: "breath", vocalFoley: "exhales" },
+      ] as const)
+    : ([
+        { style: "self_correction", vocalFoley: null },
+        { style: "hard_reset", vocalFoley: null },
+        { style: "throat_clear", vocalFoley: "clears throat" },
+        { style: "breath", vocalFoley: "exhales" },
+      ] as const);
+  const selected = palette[
+    botcastProducerPivotSeedHashV1(args.seed) % palette.length
+  ]!;
+  return {
+    v: 1,
+    cadence: args.cadence,
+    transcriptMark:
+      args.cadence === "between_words" ? "ellipsis" : "em_dash",
+    style: selected.style,
+    vocalFoley: selected.vocalFoley,
+  };
 }
 
 export interface BotcastGuestInterruptionContext {

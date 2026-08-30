@@ -1,6 +1,7 @@
 import {
   applyBotIdentityMirrorFaceV1,
   applyBotIdentityMirrorHolderVoiceEffectV1,
+  applyBotIdentityShapeshiftAccentMapV1,
   botIdentityMirrorQuotedTargetNameV1,
   botIdentityPresentationFrameMaterialSeedV1,
   botIdentityPresentationScreenMaterialSeedV1,
@@ -31,8 +32,8 @@ export interface DebateIdentityPresentationChangeV1 {
  * Build the public avatar passed to Debate rendering. Identity Crisis borrows
  * the target's eyes, complete resting/live mouth package, Avatar Details Ink,
  * lower glyph, and quoted public name. Every other field stays with the holder.
- * Shapeshifter takes the target's face, chassis, and voice, but the holder's
- * authored identity anchors — name, color, glyph — always persist so the
+ * Shapeshifter takes the target's face and chassis, but the holder's Powers,
+ * audible identity, and authored identity anchors — name, color, glyph — persist so the
  * chamber can still tell who actually holds the floor. The disguise is carried
  * by the "Appearing as …" label, not by overwriting the speaker.
  */
@@ -43,6 +44,9 @@ export function debateIdentityAppearanceBotV1(args: {
 }): DebateBotSnapshotV1 {
   if (!args.target || !args.effect) return args.holder;
   if (args.effect === "identity_shapeshift") {
+    const holderVoicePreset =
+      args.holder.replayVisualSnapshot?.voicePreset ??
+      botIdentityPresentationVoicePresetV1(args.holder.systemPrompt);
     return {
       ...args.target,
       version: args.holder.version,
@@ -55,6 +59,17 @@ export function debateIdentityAppearanceBotV1(args: {
       provider: args.holder.provider,
       model: args.holder.model,
       revision: args.holder.revision,
+      powers: args.holder.powers,
+      voiceProfile: applyBotIdentityShapeshiftAccentMapV1(
+        args.holder.voiceProfile,
+        args.target.voiceProfile,
+      ),
+      replayVisualSnapshot: args.target.replayVisualSnapshot
+        ? {
+            ...args.target.replayVisualSnapshot,
+            voicePreset: holderVoicePreset,
+          }
+        : args.target.replayVisualSnapshot,
     };
   }
 

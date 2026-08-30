@@ -37,6 +37,10 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { LUCIDE_BOT_GLYPHS, LUCIDE_BOT_GLYPH_ORDER } from "./glyphCatalog";
 import GlyphTooltipLayer from "./GlyphTooltipLayer";
 import { BackendUnavailableNotice } from "./BackendUnavailableNotice";
+import {
+  PrismChromeNotice,
+  PrismChromeNoticeViewport,
+} from "./PrismChromeNotice";
 import IdentityPresentationBlackout from "./IdentityPresentationBlackout";
 import {
   BOT_FRAME_FINISH_RECIPES,
@@ -2614,7 +2618,7 @@ function rectsIntersect(
 const MESSAGE_COPY_FEEDBACK_MS = 1600;
 const MEMORY_TOAST_DISMISS_MS = 7000;
 const MEMORY_TOAST_REARM_MS = 2500;
-const MEMORY_TOAST_VISIBLE_LIMIT = 3;
+const MEMORY_TOAST_VISIBLE_LIMIT = 1;
 const LOCAL_COMMAND_TOAST_DISMISS_MS = 3600;
 const COMPOSER_HISTORY_LIMIT = 50;
 const AUXILIARY_MODEL_KEEP_WARM_INTERVAL_MS = 30_000;
@@ -8059,7 +8063,7 @@ interface Message {
   /** Public replay-stable timed Mute presentation; never contains intended speech. */
   botPowerMutePerformance?: BotPowerMutePerformanceV1;
   botPowerTrollPresentation?: BotPowerTrollPresentationV1;
-  /** Session-sticky Shapeshifter public form (face, ink, voice, persona). */
+  /** Session-sticky Shapeshifter public form (face, Ink, target Accent Map, persona). */
   identityShapeshift?: BotIdentityShapeshiftStateV1;
   /** Client-only state while one Zen reply is arriving as spoken beats. */
   zenProgressive?: {
@@ -18702,7 +18706,11 @@ function resolveAssistantMessageAudioVoiceProfile(args: {
     );
   }
   return (
-    state?.targetVoice ?? normalizeBotAudioVoiceProfileV1(args.fallbackProfile)
+    resolveBotIdentityShapeshiftVoiceV1(
+      state,
+      args.fallbackProfile,
+      null,
+    )
   );
 }
 
@@ -18739,7 +18747,11 @@ function botWithIdentityShapeshiftPresentation(
     glyph: Object.prototype.hasOwnProperty.call(state, "targetGlyph")
       ? (state.targetGlyph ?? null)
       : bot.glyph,
-    authored_audio_voice_profile: state.targetVoice,
+    authored_audio_voice_profile: resolveBotIdentityShapeshiftVoiceV1(
+      state,
+      bot.authored_audio_voice_profile,
+      bot.audio_voice_profile_override,
+    ),
     audio_voice_profile_override: null,
     replayVisualSnapshot: {
       v: 1,
@@ -93739,40 +93751,6 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function persistDebateWhodunnitExhibitReuse(enabled: boolean) {
-    if (!settings || busy) return;
-    const previous = settings;
-    setSettings({
-      ...settings,
-      debateWhodunnitReuseSynthesizedExhibits: enabled,
-    });
-    setBusy(true);
-    setPanelError(null);
-    setPanelNotice(null);
-    try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify({
-          debateWhodunnitReuseSynthesizedExhibits: enabled,
-        }),
-      });
-      setPanelNotice(
-        enabled
-          ? "New Whodunnit cases may now reuse synthesized Debate exhibits."
-          : "New Whodunnit cases will use their own evidence art.",
-      );
-    } catch (err) {
-      setSettings(previous);
-      setPanelError(
-        err instanceof Error
-          ? err.message
-          : "Could not update Whodunnit exhibit reuse.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function persistDebateWhodunnitTextVoiceMode(
     debateWhodunnitTextVoiceMode: WhodunnitTextVoiceMode,
   ) {
@@ -112082,48 +112060,30 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
-  const renderSweepUndoToast = () => {
-    if (!sweepUndoToast) return null;
-    const remainingMs = Math.max(0, sweepUndoToast.expiresAt - Date.now());
-    const remainingSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
-    return (
-      <div className={styles.sweepUndoToast} role="status" aria-live="polite">
-        <span className={styles.sweepUndoToastCopy}>
-          Sweep complete. Undo available for {remainingSeconds}s.
-        </span>
-        <button
-          type="button"
-          className={styles.sweepUndoToastButton}
-          disabled={sweepBusy}
-          onClick={() => {
-            void undoConversationSweepFromToast(sweepUndoToast.batchId);
-          }}
-        >
-          Undo
-        </button>
-      </div>
-    );
-  };
-
   const renderMemoryToasts = (variant: "default" | "zen" = "default") => {
     if (memoryToasts.length === 0) return null;
     const visible = memoryToasts.slice(0, MEMORY_TOAST_VISIBLE_LIMIT);
     const overflow = Math.max(0, memoryToasts.length - visible.length);
     const zenVariant = variant === "zen";
     return (
-      <div
+      <PrismChromeNoticeViewport
+        placement={zenVariant ? "chrome" : "inline"}
         className={`${styles.memoryToastStack} ${
           zenVariant ? styles.zenMemoryToastStack : ""
         }`}
-        aria-live="polite"
+        ariaLabel="Memory updates"
       >
         {visible.map((toast) => (
-          <button
+          <PrismChromeNotice
             key={toast.id}
-            type="button"
-            className={styles.memoryLearnedNotice}
-            data-memory-toast-kind={toast.kind}
-            onClick={() => void undoMemoryToast(toast)}
+            label={memoryToastTitle(toast)}
+            message={memoryToastDetail(toast)}
+            tone={toast.kind === "rejected" ? "warning" : "memory"}
+            title={`${memoryToastTitle(toast)}: ${memoryToastDetail(toast)}`}
+            action={{
+              label: toast.kind === "rejected" ? "Dismiss" : "Undo",
+              onClick: () => void undoMemoryToast(toast),
+            }}
             onMouseEnter={() =>
               setPausedMemoryToastIds((current) =>
                 new Set(current).add(toast.id),
@@ -112138,32 +112098,20 @@ function HomeContent(): React.JSX.Element {
               setMemoryToasts((current) =>
                 current.map((item) =>
                   item.id === toast.id
-                    ? { ...item, expiresAt: Date.now() + MEMORY_TOAST_REARM_MS }
+                    ? {
+                        ...item,
+                        expiresAt: Date.now() + MEMORY_TOAST_REARM_MS,
+                      }
                     : item,
                 ),
               );
             }}
-            title={
-              toast.kind === "rejected" ? "Click to dismiss" : "Click to undo"
-            }
-          >
-            <span aria-hidden="true">
-              {zenVariant && toast.kind === "created"
-                ? "✦"
-                : toast.kind === "created"
-                  ? "◆"
-                  : toast.kind === "retracted"
-                    ? "↺"
-                    : "◇"}
-            </span>
-            <strong>{memoryToastTitle(toast)}</strong>
-            <small>{memoryToastDetail(toast)}</small>
-          </button>
+          />
         ))}
         {overflow > 0 && (
           <div className={styles.memoryToastOverflow}>+{overflow} more</div>
         )}
-      </div>
+      </PrismChromeNoticeViewport>
     );
   };
 
@@ -112199,20 +112147,45 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
-  const renderLocalCommandToast = () => {
-    if (!localCommandToast) return null;
+  const renderGlobalChromeNotices = () => {
+    if (!sweepUndoToast && !localCommandToast) return null;
+    const remainingSeconds = sweepUndoToast
+      ? Math.max(1, Math.ceil((sweepUndoToast.expiresAt - Date.now()) / 1000))
+      : 0;
+    const localTitle = localCommandToast?.title ?? "";
+    const localTone = /could(?:n’t| not)|failed|unavailable|locked/iu.test(
+      localTitle,
+    )
+      ? "error"
+      : /complete|copied|saved|reset|restored|ready/iu.test(localTitle)
+        ? "success"
+        : "info";
     return (
-      <div
-        className={`${styles.commandToast} ${styles.localCommandToast}`}
-        role="status"
-        aria-live="polite"
-      >
-        <span className={styles.commandToastDot} aria-hidden="true" />
-        <span className={styles.commandToastCopy}>
-          <strong>{localCommandToast.title}</strong>
-          <small>{localCommandToast.detail}</small>
-        </span>
-      </div>
+      <PrismChromeNoticeViewport ariaLabel="PRISM notifications">
+        {sweepUndoToast ? (
+          <PrismChromeNotice
+            label="Sweep complete"
+            message="Chats were condensed into summaries."
+            tone="success"
+            action={{
+              label: `Undo · ${remainingSeconds}s`,
+              disabled: sweepBusy,
+              onClick: () =>
+                void undoConversationSweepFromToast(sweepUndoToast.batchId),
+            }}
+            onDismiss={() => setSweepUndoToast(null)}
+            dismissLabel="Dismiss sweep notification"
+          />
+        ) : localCommandToast ? (
+          <PrismChromeNotice
+            label={localCommandToast.title}
+            message={localCommandToast.detail}
+            tone={localTone}
+            title={`${localCommandToast.title}: ${localCommandToast.detail}`}
+            onDismiss={() => setLocalCommandToast(null)}
+          />
+        ) : null}
+      </PrismChromeNoticeViewport>
     );
   };
 
@@ -121895,56 +121868,6 @@ function HomeContent(): React.JSX.Element {
                   <div className={`${styles.form} ${styles.settingsWorkspace}`}>
                     <div className={styles.settingsSectionGrid}>
                       {renderEphemeralChatProviderSetting("debate")}
-                      <section
-                        className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
-                        data-settings-section="debate-whodunnit"
-                        aria-labelledby="debate-whodunnit-evidence-settings-title"
-                      >
-                        <header className={styles.settingsSectionHeader}>
-                          <div>
-                            <span className={styles.settingsEyebrow}>
-                              Whodunnit
-                            </span>
-                            <h4 id="debate-whodunnit-evidence-settings-title">
-                              Evidence collection
-                            </h4>
-                          </div>
-                          <div className={styles.settingsSectionHeaderAside}>
-                            <small>New cases only</small>
-                            <PanelSectionInfo
-                              id="settings-section-info-debate-whodunnit-evidence"
-                              label="About reused Whodunnit exhibits"
-                            >
-                              Whodunnit may select up to two synthesized
-                              physical props from your Debate exhibit library.
-                              It reuses the object and artwork only, then writes
-                              a completely new case role, observation, and
-                              relevance around it.
-                            </PanelSectionInfo>
-                          </div>
-                        </header>
-                        <label
-                          className={`${styles.checkbox} ${styles.settingsInlineToggle}`}
-                          data-tutorial-target="whodunnit-reused-exhibits-setting"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={
-                              settings.debateWhodunnitReuseSynthesizedExhibits ===
-                              true
-                            }
-                            disabled={busy}
-                            onChange={(event) =>
-                              void persistDebateWhodunnitExhibitReuse(
-                                event.currentTarget.checked,
-                              )
-                            }
-                          />
-                          <span>
-                            <strong>Reuse synthesized exhibits</strong>
-                          </span>
-                        </label>
-                      </section>
                       <section
                         className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
                         data-settings-section="debate-whodunnit-voice"
@@ -145757,7 +145680,7 @@ function HomeContent(): React.JSX.Element {
         {renderCoffeeGroupSettingsModal()}
 
         {renderSharedPanels()}
-        {renderLocalCommandToast()}
+        {renderGlobalChromeNotices()}
         {renderBackendUnavailableNotice("banner")}
         {renderDeleteAllModal()}
         {renderConversationGroupDeleteModal()}
@@ -151340,8 +151263,7 @@ function HomeContent(): React.JSX.Element {
         {renderImagesDeleteAllModal()}
         {renderImageCleanupPreviewModal()}
         {renderSweepConfirmModal()}
-        {renderSweepUndoToast()}
-        {renderLocalCommandToast()}
+        {renderGlobalChromeNotices()}
         {touchPreview && (
           <TouchPreviewBalloon
             bot={
@@ -153366,8 +153288,7 @@ function HomeContent(): React.JSX.Element {
       {renderImagesDeleteAllModal()}
       {renderImageCleanupPreviewModal()}
       {renderSweepConfirmModal()}
-      {renderSweepUndoToast()}
-      {renderLocalCommandToast()}
+      {renderGlobalChromeNotices()}
       {touchPreview && (
         <TouchPreviewBalloon
           bot={

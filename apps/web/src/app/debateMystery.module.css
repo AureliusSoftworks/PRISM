@@ -1535,8 +1535,7 @@
   opacity: 0.42;
 }
 
-.error,
-.errorBanner {
+.error {
   color: #ff9eaa;
 }
 
@@ -1740,19 +1739,6 @@
   color: var(--mystery-cyan);
   font-size: 1.08rem;
   line-height: 1;
-}
-
-.errorBanner {
-  position: fixed;
-  z-index: 50;
-  top: 7.4rem;
-  left: 50%;
-  max-width: min(36rem, calc(100% - 2rem));
-  padding: 0.75rem 1rem;
-  border: 1px solid rgba(255, 107, 128, 0.35);
-  border-radius: 999px;
-  background: rgba(50, 15, 24, 0.94);
-  transform: translateX(-50%);
 }
 
 .actionToast {

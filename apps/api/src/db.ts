@@ -39,6 +39,7 @@ import {
   ensureImageAssetLibrarySchema,
   synchronizeImageAssetCatalog,
 } from "./image-asset-library.ts";
+import { ensureItemCapabilityCardSchema } from "./image-asset-capability-cards.ts";
 import { ensureAudioAssetCatalogSchema } from "./audio-asset-catalog.ts";
 import { ensureUserNotesSchema } from "./user-notes.ts";
 
@@ -850,6 +851,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       local_rel_path TEXT,
       model TEXT NOT NULL DEFAULT 'gpt-image-2',
       purpose TEXT NOT NULL DEFAULT 'gallery',
+      content_sha256 TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
@@ -2478,6 +2480,38 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     );
     CREATE INDEX IF NOT EXISTS idx_debate_mystery_mansion_asset_refs_asset
       ON debate_mystery_mansion_asset_refs(user_id, asset_id);
+    CREATE TABLE IF NOT EXISTS debate_mystery_mansion_prop_variants (
+      user_id TEXT NOT NULL,
+      bundle_id TEXT NOT NULL,
+      registry_version INTEGER NOT NULL DEFAULT 1 CHECK(registry_version = 1),
+      archetype_id TEXT NOT NULL CHECK(archetype_id IN (
+        'key', 'code', 'remote', 'container', 'valuables', 'ledger', 'receipt',
+        'letter', 'timepiece', 'fiber', 'fragment', 'toxin', 'firearm', 'blade',
+        'blunt_object', 'long_implement'
+      )),
+      status TEXT NOT NULL CHECK(status IN ('pending', 'ready', 'failed')),
+      display_name TEXT NOT NULL DEFAULT '',
+      appearance_description TEXT NOT NULL DEFAULT '',
+      asset_id TEXT,
+      attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count BETWEEN 0 AND 2),
+      failure_code TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, bundle_id, registry_version, archetype_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(bundle_id) REFERENCES debate_mystery_mansion_bundles(id) ON DELETE CASCADE,
+      FOREIGN KEY(asset_id) REFERENCES debate_mystery_mansion_assets(id) ON DELETE RESTRICT,
+      CHECK(status <> 'ready' OR (
+        asset_id IS NOT NULL AND length(trim(display_name)) > 0 AND
+        length(trim(appearance_description)) > 0
+      )),
+      CHECK(status = 'ready' OR asset_id IS NULL)
+    );
+    CREATE INDEX IF NOT EXISTS idx_debate_mystery_mansion_prop_variants_bundle
+      ON debate_mystery_mansion_prop_variants(user_id, bundle_id, registry_version, status);
+    CREATE INDEX IF NOT EXISTS idx_debate_mystery_mansion_prop_variants_asset
+      ON debate_mystery_mansion_prop_variants(user_id, asset_id)
+      WHERE asset_id IS NOT NULL;
     CREATE TABLE IF NOT EXISTS debate_mystery_audio_manifests (
       session_id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -4839,6 +4873,17 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       "ALTER TABLE images ADD COLUMN purpose TEXT NOT NULL DEFAULT 'gallery';",
     );
   }
+  const hasImageContentSha256Column = imageColumns.some(
+    (column) => column.name === "content_sha256",
+  );
+  if (!hasImageContentSha256Column) {
+    db.exec("ALTER TABLE images ADD COLUMN content_sha256 TEXT;");
+  }
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_images_user_purpose_content_sha256
+      ON images(user_id, purpose, content_sha256)
+      WHERE content_sha256 IS NOT NULL AND purpose = 'signal_item';
+  `);
 
   // Keep generated Signal artwork in its exact tool lane instead of the
   // general Images panel. Current show JSON can safely identify legacy assets;
@@ -5805,6 +5850,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
 
   ensureUserNotesSchema(db);
   ensureImageAssetLibrarySchema(db);
+  ensureItemCapabilityCardSchema(db);
   ensureAudioAssetCatalogSchema(db);
   for (const row of db.prepare("SELECT id FROM users").all() as Array<{
     id: string;

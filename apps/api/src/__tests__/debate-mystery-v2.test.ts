@@ -658,7 +658,7 @@ class InterruptingSpectatorChoicesV2AuthorProvider extends V2AuthorProvider {
     if (request.section === "prosecution_choices" && !this.permitChoices) {
       this.calls += 1;
       this.sections.push("prosecution_choices");
-      return "{}";
+      throw new Error("simulated Spectator prosecution author interruption");
     }
     return super.generateResponse(messages, options);
   }
@@ -2617,7 +2617,10 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
 
     assert.equal(v2State(compiled).compilation.stage, "complete");
     assert.ok(provider.semanticCalls >= 2);
-    assert.equal(provider.contradictionRepairRequests.length, 3);
+    assert.equal(
+      provider.contradictionRepairRequests.length,
+      DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
+    );
     const { privateCase } = getDebateMysteryCaseV2(
       db,
       "user-1",
@@ -2886,7 +2889,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
 
     assert.equal(
       provider.sections.filter((section) => section === "case_foundation").length,
-      3,
+      DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
       "the local author receives its strict bounded retry budget before fallback",
     );
     assert.equal(state.compilation.stage, "complete");
@@ -3021,7 +3024,10 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     const { graph, privateCase } = getDebateMysteryCaseV2(db, "user-1", session.id);
     const lineByNodeId = new Map(graph.lines.map((line) => [line.nodeId, line]));
 
-    assert.equal(provider.invalidBatchAttempts, 3);
+    assert.equal(
+      provider.invalidBatchAttempts,
+      DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
+    );
     assert.equal(
       provider.sections.filter((section) => section === "room_examinations").length,
       roomAttemptsBeforeResume,
@@ -3077,7 +3083,10 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       recoveryBySection?: Record<string, unknown>;
     };
 
-    assert.equal(provider.failedBatchAttempts, 3);
+    assert.equal(
+      provider.failedBatchAttempts,
+      DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
+    );
     assert.equal(v2State(session).compilation.stage, "needs_attention");
     assert.match(job.private_error ?? "", /simulated room author provider outage/iu);
     assert.deepEqual(draft.recoveryBySection ?? {}, {});
@@ -3397,7 +3406,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(session.status, "waiting_for_player");
     assert.equal(
       provider.sections.filter((section) => section === "suspect_chapter:suspect-1").length,
-      3,
+      DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
     );
     const { privateCase, graph } = getDebateMysteryCaseV2(
       db,
@@ -5092,7 +5101,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(v2State(session).compilation.stage, "complete");
     assert.equal(
       provider.sections.filter((section) => section === "suspect_chapter:suspect-1").length,
-      3,
+      DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
     );
     const { privateCase } = getDebateMysteryCaseV2(db, "user-1", session.id);
     assert.equal(privateCase.graphValidation.valid, true);
@@ -5120,7 +5129,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(v2State(session).compilation.stage, "complete");
     assert.equal(
       provider.sections.filter((section) => section === "suspect_chapter:suspect-1").length,
-      3,
+      DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
     );
     const { privateCase } = getDebateMysteryCaseV2(db, "user-1", session.id);
     assert.equal(privateCase.graphValidation.valid, true);
@@ -5148,7 +5157,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(v2State(session).compilation.stage, "complete");
     assert.equal(
       provider.sections.filter((section) => section === "suspect_chapter:suspect-1").length,
-      3,
+      DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
     );
     const { privateCase } = getDebateMysteryCaseV2(db, "user-1", session.id);
     assert.equal(privateCase.graphValidation.valid, true);
@@ -7453,7 +7462,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.ok(synthesisStart >= 0 && synthesisEnd > synthesisStart);
     const synthesis = serverSource.slice(synthesisStart, synthesisEnd);
     assert.match(synthesis, /session\.responseMode !== "local"/u);
-    assert.match(synthesis, /!userBlocksOnlineCapabilities\(user\)/u);
+    assert.doesNotMatch(synthesis, /userBlocksOnlineCapabilities\(user\)/u);
     assert.match(synthesis, /attempt <= 2/u);
     assert.match(synthesis, /runMysteryAssetAttempt/u);
     assert.match(synthesis, /reviewDebateMysteryAssetWithVision/u);

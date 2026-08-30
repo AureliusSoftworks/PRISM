@@ -21,12 +21,14 @@ import {
 import { normalizeImageRelatedBotIds } from "./image-provenance.ts";
 import { imageAssetUsageLabels } from "./image-asset-cleanup.ts";
 import { heuristicSmartTags } from "./image-asset-smart-memory.ts";
+import { itemCapabilityCardsForAssetSets } from "./image-asset-capability-cards.ts";
 import {
   buildGeneratedImageCompressUndoRelativePath,
   generatedImageStorageSizeBytes,
   listGeneratedImageRecoveryBatchesForUser,
   markGeneratedImageQuarantineCommitted,
   quarantineGeneratedImageFiles,
+  readGeneratedImageBytes,
   resolveAbsoluteUnderDataRoot,
   restoreQuarantinedGeneratedImageFiles,
 } from "./image-storage.ts";
@@ -94,6 +96,24 @@ export interface DeleteImageAssetSetResult {
   imageIds: string[];
   recoveryId: string;
   recoveryBytes: number;
+}
+
+/**
+ * Local metadata Case Forge may use to decide whether an Item can be safely
+ * recast as case evidence. The caller must still make a case-specific,
+ * relevance-gated choice; the catalog deliberately does not make that call.
+ */
+export interface ImageAssetItemReuseCandidate {
+  assetSetId: string;
+  imageId: string;
+  localRelPath: string;
+  title: string;
+  prompt: string;
+  revisedPrompt: string | null;
+  automaticTags: string[];
+  playerTags: string[];
+  sourceContext: Record<string, unknown>;
+  createdAt: string;
 }
 
 export class ImageAssetLibraryError extends Error {
@@ -1438,6 +1458,15 @@ function mapAssetSetRows(
   const members = membersForSets(db, ids);
   const usage = usageForSets(db, userId, ids);
   const magentaRevisionState = magentaRevisionStateForSets(db, userId, ids);
+  const capabilityCards = itemCapabilityCardsForAssetSets(
+    db,
+    userId,
+    rows.flatMap((row) =>
+      isImageAssetKind(row.kind)
+        ? [{ id: row.id, kind: row.kind as ImageAssetKind }]
+        : [],
+    ),
+  );
   return rows.map((row) => {
     const kind = row.kind as ImageAssetKind;
     const setUsage = navigableUsage(usage.get(row.id) ?? [], kind);
@@ -1464,6 +1493,7 @@ function mapAssetSetRows(
       members: members.get(row.id) ?? [],
       magentaPassCount: magentaRevisionState.get(row.id) ?? 0,
       magentaUndoAvailable: (magentaRevisionState.get(row.id) ?? 0) > 0,
+      capabilityCard: capabilityCards.get(row.id) ?? null,
     };
   });
 }
@@ -1543,6 +1573,58 @@ export function listImageAssetCatalog(
     assets,
     nextCursor: hasMore ? cursorForOffset(offset + limit) : null,
   };
+}
+
+/**
+ * Returns the primary transparent Item members with the metadata needed for a
+ * downstream semantic match. It never reads image bytes or mutates a case.
+ */
+export function listImageAssetItemReuseCandidates(
+  db: DatabaseSync,
+  userId: string,
+  limit = 80,
+): ImageAssetItemReuseCandidate[] {
+  synchronizeImageAssetCatalog(db, userId);
+  const boundedLimit = Math.min(160, Math.max(1, Math.floor(limit)));
+  const rows = db.prepare(
+    `SELECT sets.id AS asset_set_id, sets.title, sets.automatic_tags_json,
+            sets.player_tags_json, sets.source_context_json, images.id AS image_id,
+            images.local_rel_path, images.prompt, images.revised_prompt,
+            images.created_at
+       FROM image_asset_sets AS sets
+       JOIN image_asset_set_items AS items ON items.set_id = sets.id
+       JOIN images ON images.id = items.image_id AND images.user_id = sets.user_id
+      WHERE sets.user_id = ?
+        AND sets.kind = 'item'
+        AND sets.status = 'ready'
+        AND items.role = 'primary'
+        AND TRIM(COALESCE(images.local_rel_path, '')) <> ''
+      ORDER BY sets.updated_at DESC, sets.id DESC
+      LIMIT ?`,
+  ).all(userId, boundedLimit) as Array<{
+    asset_set_id: string;
+    title: string;
+    automatic_tags_json: string;
+    player_tags_json: string;
+    source_context_json: string;
+    image_id: string;
+    local_rel_path: string;
+    prompt: string;
+    revised_prompt: string | null;
+    created_at: string;
+  }>;
+  return rows.map((row) => ({
+    assetSetId: row.asset_set_id,
+    imageId: row.image_id,
+    localRelPath: row.local_rel_path,
+    title: row.title,
+    prompt: row.prompt,
+    revisedPrompt: row.revised_prompt,
+    automaticTags: parseStringArray(row.automatic_tags_json),
+    playerTags: parseStringArray(row.player_tags_json),
+    sourceContext: parseJsonObject(row.source_context_json),
+    createdAt: row.created_at,
+  }));
 }
 
 export function getBotImageAssetLibraryIndex(
@@ -1699,6 +1781,61 @@ export function getImageAssetSetForImage(
         WHERE sets.user_id = ? AND items.image_id = ?`,
     )
     .get(userId, imageId) as unknown as AssetSetRow | undefined;
+  return row ? mapAssetSetRows(db, userId, [row])[0] ?? null : null;
+}
+
+/** Finds a tenant-owned asset of the requested kind from exact upload bytes. */
+export function getImageAssetSetForContentSha256(
+  db: DatabaseSync,
+  userId: string,
+  kind: ImageAssetKind,
+  contentSha256: string,
+): ImageAssetSet | null {
+  if (!/^[a-f0-9]{64}$/u.test(contentSha256)) return null;
+  synchronizeImageAssetCatalog(db, userId);
+  const findRow = (): AssetSetRow | undefined =>
+    db.prepare(
+      `SELECT sets.*
+         FROM image_asset_sets sets
+         JOIN image_asset_set_items items ON items.set_id = sets.id
+         JOIN images ON images.id = items.image_id
+        WHERE sets.user_id = ?
+          AND sets.kind = ?
+          AND images.content_sha256 = ?
+        LIMIT 1`,
+    ).get(userId, kind, contentSha256) as unknown as AssetSetRow | undefined;
+  let row = findRow();
+  if (!row) {
+    const legacyMembers = db
+      .prepare(
+        `SELECT images.id, images.local_rel_path
+           FROM image_asset_sets sets
+           JOIN image_asset_set_items items ON items.set_id = sets.id
+           JOIN images ON images.id = items.image_id
+          WHERE sets.user_id = ?
+            AND sets.kind = ?
+            AND images.content_sha256 IS NULL
+            AND TRIM(COALESCE(images.local_rel_path, '')) <> ''`,
+      )
+      .all(userId, kind) as Array<{ id: string; local_rel_path: string }>;
+    for (const member of legacyMembers) {
+      try {
+        const storedSha256 = createHash("sha256")
+          .update(readGeneratedImageBytes(member.local_rel_path))
+          .digest("hex");
+        if (storedSha256 !== contentSha256) continue;
+        db.prepare(
+          `UPDATE images
+              SET content_sha256 = ?
+            WHERE id = ? AND user_id = ? AND content_sha256 IS NULL`,
+        ).run(contentSha256, member.id, userId);
+        row = findRow();
+        if (row) break;
+      } catch {
+        // Missing or quarantined legacy files are not eligible for exact reuse.
+      }
+    }
+  }
   return row ? mapAssetSetRows(db, userId, [row])[0] ?? null : null;
 }
 

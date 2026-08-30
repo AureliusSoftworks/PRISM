@@ -27,6 +27,8 @@ import {
   applyBotcastProducerCueToTension,
   botcastActiveProducerCueFromEvents,
   botcastProducerCueLifecyclesFromEvents,
+  botcastProducerCuePreemptsHostSpeech,
+  botcastProducerCuePriority,
   botcastAutoCameraLeadInMs,
   botcastFallbackStudioAccentVariantForSeed,
   botcastCameraModeAt,
@@ -51,6 +53,8 @@ import {
   botcastHostRageQuitIntent,
   botcastHostSignOffIntent,
   botcastInterruptedGuestContent,
+  botcastInterruptedHostContent,
+  planBotcastProducerPivotPerformanceV1,
   botcastInterruptionBridgeMessageId,
   botcastEpisodeImageDescriptorFromFileName,
   botcastEpisodeImageSpokenReference,
@@ -96,6 +100,101 @@ import {
 } from "./botcast.ts";
 
 describe("Signal public cadence speech", () => {
+  it("marks pause cuts with an ellipsis and active-speech cuts with a dash", () => {
+    const fullContent = "Do you sometimes find yourself looking away?";
+    assert.equal(
+      botcastInterruptedHostContent(fullContent, {
+        spokenContent: "Do you sometimes find yourself",
+        cadence: "between_words",
+      }),
+      "Do you sometimes find yourself…",
+    );
+    assert.equal(
+      botcastInterruptedHostContent(fullContent, {
+        spokenContent: "Do you sometimes find yourself",
+        cadence: "active_speech",
+      }),
+      "Do you sometimes find yourself—",
+    );
+    assert.equal(
+      botcastInterruptedHostContent(fullContent, {
+        spokenContent: "Do you sometimes find yourself",
+      }),
+      "Do you sometimes find yourself",
+    );
+  });
+
+  it("plans one deterministic replay-safe Producer pivot performance", () => {
+    const pause = planBotcastProducerPivotPerformanceV1({
+      seed: "pause-seed",
+      cadence: "between_words",
+    });
+    assert.deepEqual(
+      planBotcastProducerPivotPerformanceV1({
+        seed: "pause-seed",
+        cadence: "between_words",
+      }),
+      pause,
+    );
+    assert.equal(pause.transcriptMark, "ellipsis");
+    assert.equal(
+      planBotcastProducerPivotPerformanceV1({
+        seed: "active-seed",
+        cadence: "active_speech",
+      }).transcriptMark,
+      "em_dash",
+    );
+    const plannedFoley = Array.from({ length: 32 }, (_, index) =>
+      planBotcastProducerPivotPerformanceV1({
+        seed: `pivot-${index}`,
+        cadence: "between_words",
+      }).vocalFoley,
+    );
+    assert.ok(plannedFoley.includes("clears throat"));
+    assert.ok(plannedFoley.includes("exhales"));
+  });
+
+  it("gives direct Host cues and Producer images durable preemption priority", () => {
+    assert.equal(
+      botcastProducerCuePriority({
+        kind: "ask_about",
+        directQuote: "Ask this exactly.",
+      }),
+      "immediate",
+    );
+    assert.equal(botcastProducerCuePriority({ kind: "present_image" }), "priority");
+    assert.equal(
+      botcastProducerCuePriority({
+        kind: "ask_about",
+        detail: "Ask why the first attempt failed.",
+      }),
+      "priority",
+    );
+    assert.equal(botcastProducerCuePriority({ kind: "refocus" }), "ordinary");
+    assert.equal(
+      botcastProducerCuePreemptsHostSpeech({
+        kind: "ask_about",
+        directQuote: "Ask this exactly.",
+      }),
+      true,
+    );
+    assert.equal(
+      botcastProducerCuePreemptsHostSpeech({ kind: "present_image" }),
+      true,
+    );
+    assert.equal(
+      botcastProducerCuePreemptsHostSpeech({
+        kind: "ask_about",
+        detail: "Ask why the first attempt failed.",
+      }),
+      true,
+    );
+    assert.equal(
+      botcastProducerCuePreemptsHostSpeech({ kind: "refocus" }),
+      false,
+    );
+  });
+
   it("rebuilds durable producer cue queue, redelivery, and safe failure state", () => {
     const events: BotcastReplayEvent[] = [
       {

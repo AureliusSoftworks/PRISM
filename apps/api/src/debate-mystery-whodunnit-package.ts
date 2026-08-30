@@ -4,6 +4,7 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   canonicalPortablePackageJsonV1,
   canonicalMansionLayoutV2,
+  PORTABLE_MYSTERY_PACKAGE_FORMAT_MINOR_V1,
   portableMysteryPackageMajorIsSupportedV1,
   remapMansionLayoutV2Ids,
   validateDebateMysteryDialogueGraphV2,
@@ -682,7 +683,7 @@ export async function exportPortableWhodunnitPackageV1(args: {
   }
   const manifest: WhodunnitPackageManifestV1 = {
     schema: "prism-whodunnit-package-v1",
-    formatVersion: { major: 1, minor: 0 },
+    formatVersion: { major: 1, minor: PORTABLE_MYSTERY_PACKAGE_FORMAT_MINOR_V1 },
     packageId: randomUUID(),
     title,
     description,

@@ -97,6 +97,7 @@ import {
   type DebateSessionV1,
   type DebateWhodunnitCreateConfigV2,
   type DebateWhodunnitFormatStateV2,
+  type EvidencePropBindingV1,
   type MysteryBoundIncidentPlanV1,
   type MysteryIncidentPlanV1,
   type MysteryPublicChargeV1,
@@ -131,6 +132,10 @@ import {
 } from "./debate-mystery-assets.ts";
 import { debateMysteryIllustratedRoomSubjectIdV1 } from "./debate-mystery-room-art.ts";
 import { HttpError } from "./utils.http.ts";
+import {
+  applyWhodunnitPropBindingsToScaffoldV1,
+  selectWhodunnitEvidencePropBindingsV1,
+} from "./debate-mystery-prop-selection.ts";
 
 const V2_JOB_LEASE_MS = 90_000;
 const V2_TOTAL_PASSES = 5;
@@ -364,6 +369,25 @@ export type DebateMysteryEvidenceAssetPreparerV2 = (
   args: DebateMysteryEvidenceAssetPreparationV2,
 ) => Promise<Record<string, DebateMysterySealedAssetRefV1>>;
 
+export interface DebateMysteryEvidencePropResolutionRequestV1 {
+  userId: string;
+  sessionId: string;
+  config: DebateMysteryResolvedConfigV2;
+  setting: string;
+  evidence: Array<{
+    id: string;
+    title: string;
+    object: string;
+    observation: string;
+    isCanonicalWeapon: boolean;
+  }>;
+  signal?: AbortSignal;
+}
+
+export type DebateMysteryEvidencePropResolverV1 = (
+  args: DebateMysteryEvidencePropResolutionRequestV1,
+) => Promise<Record<string, EvidencePropBindingV1>>;
+
 export interface DebateMysteryRoomAssetPreparationV2 {
   userId: string;
   sessionId: string;
@@ -411,6 +435,7 @@ export type DebateMysteryMansionExteriorAssetPreparerV2 = (
 ) => Promise<DebateMysterySealedAssetRefV1>;
 
 interface DebateMysteryCompilationOptionsV2 {
+  resolveEvidencePropBindings?: DebateMysteryEvidencePropResolverV1;
   generateWave?: typeof generateBuiltinEnglishWave;
   prepareEvidenceAssets?: DebateMysteryEvidenceAssetPreparerV2;
   prepareRoomAssets?: DebateMysteryRoomAssetPreparerV2;
@@ -702,6 +727,8 @@ interface MysteryV2SectionRecoveryReceipt {
 
 interface MysteryV2AuthoringCheckpoint {
   kind: "authoring-v2";
+  /** Frozen before the first prose request; a restart cannot reselect mutable Library items. */
+  evidencePropBindingsById: Record<string, EvidencePropBindingV1>;
   foundation: AuthoredMysteryFoundationV2 | null;
   foundationCore: AuthoredMysteryFoundationCoreV2 | null;
   examinationsById: Record<string, string>;
@@ -757,6 +784,8 @@ interface PrivateMysteryCaseV2 {
     imageId?: string | null;
     sealedAsset?: DebateMysterySealedAssetRefV1 | null;
   }>;
+  /** Sanitized identity/capability snapshots selected before prose authoring. */
+  evidencePropBindingsById?: Record<string, EvidencePropBindingV1>;
   /** Private presentation routing only; never serialized into the public case state. */
   evidenceRoomIdById?: Record<string, string>;
   examineNodeIdByHotspot: Record<string, string>;
@@ -835,6 +864,8 @@ function normalizeMysteryV2AuthoringCheckpoint(
   if (isMysteryV2AuthoringCheckpoint(value)) {
     return {
       kind: "authoring-v2",
+      evidencePropBindingsById:
+        value.kind === "authoring-v2" ? value.evidencePropBindingsById ?? {} : {},
       foundation: value.foundation ?? null,
       foundationCore: value.foundationCore ?? null,
       examinationsById: value.examinationsById ?? {},
@@ -852,6 +883,7 @@ function normalizeMysteryV2AuthoringCheckpoint(
   }
   return {
     kind: "authoring-v2",
+    evidencePropBindingsById: {},
     foundation: null,
     foundationCore: null,
     examinationsById: {},
@@ -2249,6 +2281,7 @@ export async function createDebateMysterySessionV2(
   options: {
     deferBackgroundStart?: boolean;
     generateWave?: DebateMysteryCompilationOptionsV2["generateWave"];
+    resolveEvidencePropBindings?: DebateMysteryCompilationOptionsV2["resolveEvidencePropBindings"];
     prepareEvidenceAssets?: DebateMysteryCompilationOptionsV2["prepareEvidenceAssets"];
     prepareRoomAssets?: DebateMysteryCompilationOptionsV2["prepareRoomAssets"];
     prepareIllustratedRooms?: DebateMysteryCompilationOptionsV2["prepareIllustratedRooms"];
@@ -2396,6 +2429,7 @@ export async function createDebateMysterySessionV2(
     queueMicrotask(() => {
       void runDebateMysteryCompilationV2(db, userId, session.id, runtime, {
         generateWave: options.generateWave,
+        resolveEvidencePropBindings: options.resolveEvidencePropBindings,
         prepareEvidenceAssets: options.prepareEvidenceAssets,
         prepareRoomAssets: options.prepareRoomAssets,
         prepareIllustratedRooms: options.prepareIllustratedRooms,
@@ -2580,6 +2614,47 @@ function applyMysteryIncidentPlanToFoundationV2<
     }
   });
   return { ...primaryFoundation, evidence };
+}
+
+/** The semantic binding is case truth. Model-authored prose may elaborate it,
+ * but cannot rename the object after selection or reduce it back to a generic
+ * archetype. This runs before testimony and Court dialogue are authored. */
+function applyFrozenEvidencePropBindingsToFoundationV1<
+  TFoundation extends AuthoredMysteryFoundationCoreV2,
+>(args: {
+  foundation: TFoundation;
+  scaffold: ReturnType<typeof compileDeterministicDebateMystery>;
+  bindingsByEvidenceId: Readonly<Record<string, EvidencePropBindingV1>>;
+}): TFoundation {
+  let changed = false;
+  const evidence = args.foundation.evidence.map((entry) => {
+    const binding = args.bindingsByEvidenceId[entry.id];
+    if (!binding) return entry;
+    const exactIdentity = binding.chosenIdentity.displayName.trim();
+    const description = entry.description.toLocaleLowerCase().includes(
+      exactIdentity.toLocaleLowerCase(),
+    )
+      ? entry.description
+      : `${exactIdentity}: ${entry.description}`;
+    if (entry.title === exactIdentity && description === entry.description) {
+      return entry;
+    }
+    changed = true;
+    return { ...entry, title: exactIdentity, description };
+  });
+  const canonicalWeapon = args.scaffold.evidence.find(
+    (entry) => entry.isCanonicalWeapon,
+  );
+  const weaponIdentity = canonicalWeapon
+    ? args.bindingsByEvidenceId[canonicalWeapon.id]?.chosenIdentity.displayName.trim()
+    : null;
+  const method = weaponIdentity && !args.foundation.method.toLocaleLowerCase().includes(
+    weaponIdentity.toLocaleLowerCase(),
+  )
+    ? `${args.foundation.method} The physical instrument was ${weaponIdentity}.`
+    : args.foundation.method;
+  if (method !== args.foundation.method) changed = true;
+  return changed ? { ...args.foundation, evidence, method } : args.foundation;
 }
 
 const MYSTERY_HOMICIDE_LANGUAGE_RE =
@@ -4041,6 +4116,7 @@ async function authorMysteryV2(args: {
   eyewitnessSeatId: string | null;
   examinationIds: string[];
   requiredContradictionBySeat: ReadonlyMap<string, DebateMysteryRecordReferenceV2>;
+  evidencePropBindingsById: Readonly<Record<string, EvidencePropBindingV1>>;
   draft: MysteryV2AuthoringCheckpoint;
   onDraft: (draft: MysteryV2AuthoringCheckpoint, message: string) => void;
 }): Promise<AuthoredMysteryV2> {
@@ -4258,7 +4334,7 @@ async function authorMysteryV2(args: {
         ? [{
             botId,
             name: botById.get(botId)?.name ?? botId,
-            rule: "When another cast bot or the player-controlled Prosecutor directly addresses this holder, the holder knowingly masquerades as that addresser to appropriate only their exact eyes and blink package, complete resting/live mouth package including glyph style and Custom Speech poses, Avatar Details Ink, lower glyph, and a literally double-quoted copy of the addresser's public name. The holder defensively treats the original as the imitator, with mild concern rather than panic or constant repetition. The holder keeps their color, communication frame, complete authored voice, Accent Map location, pronunciation, Speechprint, provider voice identity, Powers, memories, role, and every other speech or mechanical identity field. This is presentation and authored dialogue only and must not change sealed facts or gameplay.",
+            rule: "When another cast bot or the player-controlled Prosecutor directly addresses this holder, the holder knowingly masquerades as that addresser: copy their exact eyes and blink package, complete resting/live mouth package including glyph style and Custom Speech poses, Avatar Details Ink, lower glyph, literally double-quoted public name, and eligible public Power consequences. Keep the holder's persona, behavior, color, communication frame, complete authored voice, Accent Map location, pronunciation, Speechprint, provider voice identity, native Powers, memories, role, and every private or mechanical identity field. Never copy Identity Crisis recursively or transfer private awareness or audience permissions. The original remains themselves; do not force an impostor dispute. Copied Power consequences may shape frozen presentation and dialogue but must never change sealed facts, evidence, proof routes, or outcomes.",
           }]
         : [],
     ),
@@ -4552,6 +4628,20 @@ async function authorMysteryV2(args: {
       ...groundedFoundationCore
     } = groundedFoundation;
     args.draft.foundationCore = groundedFoundationCore;
+  }
+  const propBoundFoundation = applyFrozenEvidencePropBindingsToFoundationV1({
+    foundation,
+    scaffold: args.scaffold,
+    bindingsByEvidenceId: args.evidencePropBindingsById,
+  });
+  if (propBoundFoundation !== foundation) {
+    foundation = propBoundFoundation;
+    args.draft.foundation = propBoundFoundation;
+    const {
+      examinations: _examinations,
+      ...propBoundFoundationCore
+    } = propBoundFoundation;
+    args.draft.foundationCore = propBoundFoundationCore;
   }
   const validatedFoundation = foundation;
 
@@ -5771,6 +5861,7 @@ function buildMysteryV2Graph(args: {
   contradictionBySeat: ReadonlyMap<string, DebateMysteryRecordReferenceV2>;
   personaVoiceCardsByBotId?: Record<string, MysteryV2VoiceCard>;
   authoringRecoveryBySection?: Record<string, MysteryV2SectionRecoveryReceipt>;
+  evidencePropBindingsById?: Record<string, EvidencePropBindingV1>;
 }): { graph: DebateMysteryDialogueGraphV2; privateCase: PrivateMysteryCaseV2; publicState: DebateWhodunnitFormatStateV2 } {
   const compilationScope = resolveMysteryCompilationScopeV2(args.config);
   const omitInvestigation = mysteryCompilationOmitsInvestigationV2(compilationScope);
@@ -5793,6 +5884,19 @@ function buildMysteryV2Graph(args: {
   const nameBySeat = new Map(args.scaffold.suspects.map((suspect) => [suspect.seatId, suspect.name]));
   const nameByBotId = new Map(args.bots.map((bot) => [bot.id, bot.name]));
   const authoredEvidence = new Map(args.authored.evidence.map((entry) => [entry.id, entry]));
+  for (const [evidenceId, binding] of Object.entries(args.evidencePropBindingsById ?? {})) {
+    const evidence = authoredEvidence.get(evidenceId);
+    if (!evidence) {
+      throw new Error(`Frozen prop binding ${evidenceId} has no authored evidence record.`);
+    }
+    const exactIdentity = binding.chosenIdentity.displayName.trim();
+    if (
+      evidence.title !== exactIdentity ||
+      !evidence.description.toLocaleLowerCase().includes(exactIdentity.toLocaleLowerCase())
+    ) {
+      throw new Error(`Frozen prop identity drifted during authoring: ${exactIdentity}.`);
+    }
+  }
   const authoredExaminations = new Map(args.authored.examinations.map((entry) => [entry.id, entry.text]));
   const talkSubjectRooms = args.scaffold.rooms.map((room) => ({
     id: room.id,
@@ -6592,6 +6696,11 @@ function buildMysteryV2Graph(args: {
         emoji: "💬",
       };
     }),
+    evidencePropBindingsById: Object.fromEntries(
+      Object.entries(args.evidencePropBindingsById ?? {}).map(
+        ([evidenceId, binding]) => [evidenceId, structuredClone(binding)],
+      ),
+    ),
     evidenceRoomIdById: Object.fromEntries(
       args.scaffold.activeRegions.flatMap((outcome) =>
         outcome.evidenceId ? [[outcome.evidenceId, outcome.roomId] as const] : []),
@@ -9328,7 +9437,7 @@ export async function runDebateMysteryCompilationV2(
       checkpoint = null;
       setPublicCompilationStatus(db, userId, sessionId, currentJob);
     }
-    const authoringDraft = normalizeMysteryV2AuthoringCheckpoint(
+    let authoringDraft = normalizeMysteryV2AuthoringCheckpoint(
       checkpoint ? storedCheckpoint : currentJob.checkpoint_json
         ? JSON.parse(currentJob.checkpoint_json) as unknown
         : null,
@@ -9362,7 +9471,7 @@ export async function runDebateMysteryCompilationV2(
       const orderedMansionRooms = savedMansionRooms && crimeSceneRoom
         ? [crimeSceneRoom, ...savedMansionRooms.filter((room) => room.id !== crimeSceneRoom.id)]
         : savedMansionRooms;
-      const scaffold = compileDeterministicDebateMystery({
+      let scaffold = compileDeterministicDebateMystery({
         config: v1ScaffoldConfig(config, incidentPlan),
         suspects: suspectRows.map((bot) => ({
           botId: bot.id,
@@ -9393,6 +9502,75 @@ export async function runDebateMysteryCompilationV2(
             }
           : {}),
       });
+      let evidencePropBindingsById = authoringDraft.evidencePropBindingsById;
+      if (Object.keys(evidencePropBindingsById).length === 0) {
+        const setting = [
+          config.houseStyle.label,
+          config.houseStyle.promptContract,
+          config.spark,
+          config.mansionSnapshot?.presentation.name ?? "",
+          config.mansionSnapshot?.presentation.title ?? "",
+          config.mansionSnapshot?.presentation.description ?? "",
+          ...scaffold.rooms.map((room) =>
+            config.mansionSnapshot?.rooms.find((candidate) => candidate.id === room.id)?.name ??
+            room.templateId
+          ),
+        ].join(" ");
+        if (options.resolveEvidencePropBindings) {
+          evidencePropBindingsById = await options.resolveEvidencePropBindings({
+            userId,
+            sessionId,
+            config,
+            setting,
+            evidence: scaffold.evidence.map((evidence) => ({
+              id: evidence.id,
+              title: evidence.title,
+              object: evidence.object,
+              observation: evidence.observation,
+              isCanonicalWeapon: evidence.isCanonicalWeapon,
+            })),
+            signal: cancellationController.signal,
+          });
+        } else {
+          const assetShaById = new Map(
+            (config.mansionSnapshot?.presentation.assets ?? []).map((asset) => [asset.id, asset.sha256]),
+          );
+          evidencePropBindingsById = selectWhodunnitEvidencePropBindingsV1({
+            needs: scaffold.evidence.map((evidence) => ({
+              evidenceId: evidence.id,
+              title: evidence.title,
+              object: evidence.object,
+              observation: evidence.observation,
+              isCanonicalWeapon: evidence.isCanonicalWeapon,
+            })),
+            setting,
+            personalEnabled: false,
+            personalCandidates: [],
+            mansionVariants: (config.mansionSnapshot?.presentation.propTheme?.variants ?? [])
+              .flatMap((variant) => {
+                const contentSha256 = assetShaById.get(variant.packageAssetId);
+                return contentSha256 ? [{ ...variant, contentSha256 }] : [];
+              }),
+          }).bindingsByEvidenceId;
+        }
+        authoringDraft = {
+          ...authoringDraft,
+          evidencePropBindingsById,
+        };
+        requireLease();
+        currentJob = persistAuthoringCheckpoint(
+          db,
+          userId,
+          sessionId,
+          authoringDraft,
+          V2_SPOILER_SAFE_MESSAGES.writing_case,
+        );
+        setPublicCompilationStatus(db, userId, sessionId, currentJob);
+      }
+      scaffold = applyWhodunnitPropBindingsToScaffoldV1(
+        scaffold,
+        evidencePropBindingsById,
+      );
       const scaffoldValidation = validateDebateMysteryCaseBible(
         scaffold,
         10_000,
@@ -9453,6 +9631,7 @@ export async function runDebateMysteryCompilationV2(
         eyewitnessSeatId,
         examinationIds,
         requiredContradictionBySeat: contradictionBySeat,
+        evidencePropBindingsById,
         draft: authoringDraft,
         onDraft: (draft, message) => {
           requireLease();
@@ -9480,6 +9659,7 @@ export async function runDebateMysteryCompilationV2(
         contradictionBySeat,
         personaVoiceCardsByBotId: authoringDraft.contextCapsule?.voiceCardsByBotId,
         authoringRecoveryBySection: authoringDraft.recoveryBySection,
+        evidencePropBindingsById,
       });
       requireLease();
       storeCompiledCaseV2(db, userId, sessionId, checkpoint.privateCase, checkpoint.graph);
@@ -9746,6 +9926,7 @@ export async function retryDebateMysteryCompilationV2(
   runtime: DebateAiRuntime,
   options: {
     generateWave?: DebateMysteryCompilationOptionsV2["generateWave"];
+    resolveEvidencePropBindings?: DebateMysteryCompilationOptionsV2["resolveEvidencePropBindings"];
     prepareEvidenceAssets?: DebateMysteryCompilationOptionsV2["prepareEvidenceAssets"];
     prepareRoomAssets?: DebateMysteryCompilationOptionsV2["prepareRoomAssets"];
     prepareIllustratedRooms?: DebateMysteryCompilationOptionsV2["prepareIllustratedRooms"];
@@ -9799,6 +9980,7 @@ export async function retryDebateMysteryCompilationV2(
     queueMicrotask(() => {
       void runDebateMysteryCompilationV2(db, userId, sessionId, runtime, {
         generateWave: options.generateWave,
+        resolveEvidencePropBindings: options.resolveEvidencePropBindings,
         prepareEvidenceAssets: options.prepareEvidenceAssets,
         prepareRoomAssets: options.prepareRoomAssets,
         prepareIllustratedRooms: options.prepareIllustratedRooms,

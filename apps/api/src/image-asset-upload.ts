@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import sharp from "sharp";
 
 export const IMAGE_ASSET_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
@@ -6,6 +7,8 @@ export interface NormalizedImageAssetUpload {
   pngBytes: Buffer;
   width: number;
   height: number;
+  /** SHA-256 of the normalized PNG bytes written to local storage. */
+  contentSha256: string;
 }
 
 /**
@@ -58,5 +61,11 @@ export async function normalizeImageAssetUpload(
   if (!metadata.width || !metadata.height) {
     throw new Error("The uploaded image dimensions could not be read.");
   }
-  return { pngBytes, width: metadata.width, height: metadata.height };
+  const contentSha256 = createHash("sha256").update(pngBytes).digest("hex");
+  return {
+    pngBytes,
+    width: metadata.width,
+    height: metadata.height,
+    contentSha256,
+  };
 }

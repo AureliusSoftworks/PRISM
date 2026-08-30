@@ -263,6 +263,9 @@
 .episodeOutroKeepItem span { display: grid; gap: 3px; min-width: 0; }
 .episodeOutroKeepItem strong { font: 750 .68rem/1.15 system-ui; }
 .episodeOutroKeepItem small { color: rgba(255,255,255,.56); font: 550 .58rem/1.25 system-ui; }
+.episodeOutroItemStatus { display: grid; gap: 3px; max-width: 310px; padding: 8px 11px; border: 1px solid color-mix(in srgb, var(--botcast-accent) 38%, rgba(255,255,255,.14)); border-radius: 12px; color: rgba(255,255,255,.82); background: rgba(8,10,18,.34); backdrop-filter: blur(12px); }
+.episodeOutroItemStatus strong { font: 750 .68rem/1.15 system-ui; }
+.episodeOutroItemStatus small { color: rgba(255,255,255,.56); font: 550 .58rem/1.25 system-ui; }
 .episodeOutroActions > button { border: 1px solid rgba(255,255,255,.19); border-radius: 999px; padding: 8px 12px; color: rgba(255,255,255,.72); background: rgba(255,255,255,.055); font: 700 .68rem/1 system-ui; cursor: pointer; backdrop-filter: blur(12px); }
 .episodeOutroActions > button:hover { color: #fff; border-color: rgba(255,255,255,.38); background: rgba(255,255,255,.1); }
 .episodeOutro[data-phase="complete"] .episodeOutroActions > button { border-color: color-mix(in srgb, var(--botcast-accent) 62%, rgba(255,255,255,.28)); color: #fff; background: color-mix(in srgb, var(--botcast-accent) 18%, rgba(255,255,255,.07)); }
@@ -288,6 +291,8 @@
 .shell[data-theme="light"] .episodeOutroActions > button { border-color: rgba(30,34,56,.15); color: rgba(23,23,36,.66); background: rgba(255,255,255,.6); box-shadow: 0 9px 26px rgba(65,69,103,.1), inset 0 1px rgba(255,255,255,.92); }
 .shell[data-theme="light"] .episodeOutroKeepItem { border-color: rgba(30,34,56,.13); color: rgba(23,23,36,.78); background: rgba(255,255,255,.62); }
 .shell[data-theme="light"] .episodeOutroKeepItem small { color: rgba(23,23,36,.5); }
+.shell[data-theme="light"] .episodeOutroItemStatus { border-color: color-mix(in srgb, var(--botcast-accent) 28%, rgba(30,34,56,.13)); color: rgba(23,23,36,.78); background: rgba(255,255,255,.62); }
+.shell[data-theme="light"] .episodeOutroItemStatus small { color: rgba(23,23,36,.5); }
 .shell[data-theme="light"] .episodeOutroActions > button:hover { color: #171724; border-color: color-mix(in srgb, var(--botcast-accent) 36%, rgba(30,34,56,.15)); background: rgba(255,255,255,.88); }
 .shell[data-theme="light"] .preRollSignalField { opacity: .62; }
 .shell[data-theme="light"] .preRollSignalField i { border-color: color-mix(in srgb, var(--botcast-accent) 30%, rgba(53,61,94,.13)); }
@@ -328,25 +333,6 @@
 .showDeleteButton:hover { border-color: color-mix(in srgb, var(--prism-p) 48%, var(--botcast-line)); background: color-mix(in srgb, var(--prism-p) 11%, transparent); }
 .header h1 { margin: 8px 0; }
 .header p { max-width: 800px; margin: 0; color: var(--botcast-muted); line-height: 1.45; }
-.signalToastRegion { position: fixed; top: 82px; right: 20px; z-index: 180; width: min(420px, calc(100vw - 40px)); display: grid; gap: 10px; pointer-events: none; }
-.signalToast { --signal-toast-accent: var(--prism-m); position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--signal-toast-accent) 34%, var(--botcast-line)); border-radius: 16px; padding: 12px 11px 12px 13px; color: var(--botcast-ink); background: linear-gradient(135deg, color-mix(in srgb, var(--signal-toast-accent) 10%, var(--botcast-panel)), color-mix(in srgb, var(--botcast-panel) 94%, transparent)); box-shadow: 0 20px 58px rgba(0,0,0,.36), 0 0 28px color-mix(in srgb, var(--signal-toast-accent) 9%, transparent), inset 0 1px rgba(255,255,255,.1); backdrop-filter: blur(22px) saturate(1.18); pointer-events: auto; animation: signalToastIn 220ms cubic-bezier(.2,.82,.2,1) both; }
-.signalToast::before { position: absolute; inset: 0 auto 0 0; width: 3px; content: ""; background: var(--signal-toast-accent); box-shadow: 0 0 16px color-mix(in srgb, var(--signal-toast-accent) 62%, transparent); }
-.signalToast[data-signal-toast-kind="notice"] { --signal-toast-accent: var(--prism-s); }
-.signalToast[data-signal-toast-kind="error"] { --signal-toast-accent: var(--prism-p); }
-.signalToastIcon { width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--signal-toast-accent) 52%, transparent); border-radius: 50%; color: color-mix(in srgb, var(--signal-toast-accent) 76%, var(--botcast-ink)); background: color-mix(in srgb, var(--signal-toast-accent) 12%, transparent); box-shadow: 0 0 14px color-mix(in srgb, var(--signal-toast-accent) 12%, transparent); font: 850 .7rem/1 system-ui; }
-.signalToastCopy { min-width: 0; display: grid; gap: 4px; padding-top: 1px; }
-.signalToastCopy strong { font: 800 .74rem/1.1 system-ui; letter-spacing: .04em; }
-.signalToastCopy small { color: color-mix(in srgb, var(--botcast-ink) 78%, var(--botcast-muted)); font: 560 .74rem/1.4 system-ui; text-wrap: pretty; }
-.signalToastBody { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 11px; border: 0; border-radius: 7px; padding: 1px 0; color: inherit; background: transparent; text-align: left; cursor: copy; }
-.signalToastDiagnosticHint { color: color-mix(in srgb, var(--signal-toast-accent) 72%, var(--botcast-ink)) !important; font-size: .67rem !important; }
-.signalToastBody:hover .signalToastDiagnosticHint { text-decoration: underline; text-underline-offset: 2px; }
-.signalToastBody:focus-visible { outline: 2px solid color-mix(in srgb, var(--signal-toast-accent) 76%, transparent); outline-offset: 3px; border-radius: 5px; }
-.signalToast[data-copy-state="copied"] .signalToastDiagnosticHint { color: color-mix(in srgb, var(--prism-s) 76%, var(--botcast-ink)) !important; }
-.signalToast[data-copy-state="failed"] .signalToastDiagnosticHint { color: color-mix(in srgb, var(--prism-p) 80%, var(--botcast-ink)) !important; }
-.signalToastDismiss { width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 50%; padding: 0; color: var(--botcast-muted); background: transparent; font: 500 1.1rem/1 system-ui; cursor: pointer; transition: color 160ms ease, background 160ms ease; }
-.signalToastDismiss:hover, .signalToastDismiss:focus-visible { color: var(--botcast-ink); background: color-mix(in srgb, var(--signal-toast-accent) 13%, transparent); }
-@keyframes signalToastIn { from { opacity: 0; transform: translate3d(0, -8px, 0) scale(.98); } to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); } }
-
 .header .eyebrow { color: var(--botcast-host-accent); }
 .showDashboard { padding: 28px 34px 60px; background: linear-gradient(180deg, color-mix(in srgb, var(--botcast-host-accent) 3.5%, transparent), transparent 340px); }
 .signalVacantHostRecovery { max-width: 720px; margin: 42px auto; padding: 32px; border: 1px solid color-mix(in srgb, var(--botcast-accent, #8d7cff) 38%, var(--botcast-line)); border-radius: 24px; background: linear-gradient(145deg, color-mix(in srgb, var(--botcast-accent, #8d7cff) 13%, #151725), #10111b); box-shadow: 0 22px 52px rgba(0,0,0,.24); }
@@ -1020,7 +1006,9 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .atmosphereMixerSliders input { width: 100%; margin: 0; accent-color: var(--prism-s); }
 .atmosphereMixer > small { grid-column: 1 / -1; margin-top: -6px; color: var(--botcast-muted); font-size: .58rem; }
 .stageScene { position: absolute; inset: 0; transform: translate(var(--botcast-camera-offset-x, 0%), var(--botcast-camera-offset-y, 0%)) scale(var(--botcast-camera-zoom, 1)); transform-origin: center 55%; transition: transform 900ms cubic-bezier(.22,.72,.2,1), filter 900ms ease; }
-.episodeImageContext { position: absolute; left: var(--signal-episode-image-x, 50%); top: var(--signal-episode-image-y, 75%); z-index: 32; width: clamp(88px, 14%, 180px); box-sizing: border-box; margin: 0; transform: translate(-50%, -50%) scale(var(--signal-episode-image-scale, 1)); transform-origin: center; transition: opacity 240ms ease, transform 700ms cubic-bezier(.22,.72,.2,1), left 240ms ease, top 240ms ease; pointer-events: none; }
+.episodeImageContext { position: absolute; left: var(--signal-episode-image-x, 50%); top: var(--signal-episode-image-y, 75%); z-index: 32; width: clamp(88px, 14%, 180px); box-sizing: border-box; margin: 0; transform: translate(-50%, -50%) scale(var(--signal-episode-image-scale, 1)); transform-origin: center; pointer-events: none; }
+.episodeImageContext[data-stage-exhibit-motion="entering"] { animation: signal-stage-exhibit-enter 520ms cubic-bezier(.18,.84,.22,1) both; }
+.episodeImageContext[data-stage-exhibit-motion="exiting"] { animation: signal-stage-exhibit-exit 520ms cubic-bezier(.48,.02,.8,.32) both; }
 .episodeImageContext img { display: block; width: 100%; max-height: 24vh; object-fit: contain; }
 .episodeImageReplayEmoji { display: grid; width: 100%; aspect-ratio: 1; place-items: center; font-size: clamp(54px, 8vw, 112px); line-height: 1; }
 .episodeImageReplayUnavailable { display: grid; width: 100%; min-height: 96px; aspect-ratio: 4 / 3; place-items: center; padding: 16px; box-sizing: border-box; color: color-mix(in srgb, var(--botcast-ink) 68%, transparent); background: color-mix(in srgb, var(--botcast-field) 74%, transparent); border: 1px dashed color-mix(in srgb, var(--botcast-ink) 32%, transparent); font: 600 11px/1.2 var(--font-mono, ui-monospace, monospace); letter-spacing: .08em; text-align: center; text-transform: uppercase; }
@@ -1039,6 +1027,8 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .episodeImageRehearsalArt { display: grid; aspect-ratio: 4 / 3; place-items: center; overflow: hidden; background: radial-gradient(circle at 54% 42%, rgba(255,255,255,.92) 0 8%, transparent 9%), radial-gradient(ellipse at 50% 62%, #c7cfda 0 20%, transparent 21%), linear-gradient(145deg, #7c8ba3, #253043 62%, #101725); }
 .episodeImageRehearsalArt > span { width: 30%; aspect-ratio: 1; transform: rotate(45deg); border: 2px solid rgba(255,255,255,.72); border-radius: 5px; box-shadow: 18px -12px 0 -7px rgba(255,255,255,.46); }
 .episodeImageRehearsalArt[data-image-kind="item"] > span { position: absolute; left: 18%; bottom: 10%; width: 64%; height: 61%; aspect-ratio: auto; transform: none; border: 1px solid rgba(255,255,255,.32); border-radius: 44% 44% 34% 34% / 22% 22% 52% 52%; background: radial-gradient(circle at 39% 28%, rgba(255,255,255,.55) 0 4%, transparent 5%), linear-gradient(118deg, #3b485e, #9aa7ba 45%, #4a5970 78%, #273246); box-shadow: inset 8px 2px 12px rgba(255,255,255,.13), inset -9px -5px 14px rgba(0,0,0,.24); }
+@keyframes signal-stage-exhibit-enter { from { opacity: 0; translate: 0 calc(100vh + 100%); } to { opacity: 1; translate: 0 0; } }
+@keyframes signal-stage-exhibit-exit { from { opacity: 1; translate: 0 0; } to { opacity: 0; translate: 0 calc(100vh + 100%); } }
 .shell[data-caption-size="small"] {
   --signal-caption-speaker-font: clamp(7px, 0.66vw, 9px);
   --signal-caption-body-font: clamp(11px, 1.02vw, 15px);
@@ -1739,7 +1729,6 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
   .shell { height: auto; min-height: 100dvh; grid-template-columns: 1fr; grid-template-rows: auto auto auto; overflow: visible; }
   .mainNavigation { grid-column: 1; grid-row: 1; min-height: 66px; }
   .shell[data-live-episode="true"] .main { grid-row: 2; }
-  .signalToastRegion { top: 78px; right: 12px; width: min(420px, calc(100vw - 24px)); }
   .episodePreRoll { grid-column: 1; grid-row: 3; min-height: calc(100dvh - var(--app-navbar-height, 66px)); }
   .shell[data-live-episode="true"] .episodePreRoll { grid-row: 2; }
   .episodeOutro { inset: var(--app-navbar-height, 66px) 0 0; min-height: 0; }
@@ -1872,7 +1861,8 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 
 @media (prefers-reduced-motion: reduce) {
   .stageScene { transition-duration: 120ms; }
-  .stageScene, .episodeOpenButton, .episodeParticipantChip, .episodeDeleteButton, .episodePreRoll, .preRollLockup, .showAudiencePulse, .showIdentityGearButton, .showIdentityGearButton span, .liveCaption, .liveCaption span { transition: none !important; animation: none !important; }
+  .stageScene, .episodeImageContext, .episodeOpenButton, .episodeParticipantChip, .episodeDeleteButton, .episodePreRoll, .preRollLockup, .showAudiencePulse, .showIdentityGearButton, .showIdentityGearButton span, .liveCaption, .liveCaption span { transition: none !important; animation: none !important; }
+  .episodeImageContext[data-stage-exhibit-motion="exiting"] { opacity: 0; }
   .guestAnnoyanceFill { transition: none !important; }
   .episodePreRoll[data-kind="intro"]::after { opacity: 0; animation: none !important; }
   .episodeOutro { opacity: 1; animation: none !important; }
@@ -1891,7 +1881,6 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
   .feelLuckyButton { transition: none !important; }
   .studioSpotlight { animation: none !important; transform: translateX(-50%) rotate(0deg); }
   .preRollSignalField i, .preRollEyebrow, .preRollLogo, .preRollOrbit, .preRollLockup h1, .preRollLockup p, .preRollLockup strong, .preRollMeters i, .showIntroPulse i { animation: none !important; }
-  .signalToast { animation: none !important; }
   .replayAction, .replayPlayButton, .replayVersionMenu button, .replayProgressFill { transition: none !important; }
   .replayQualityProgress svg { animation: none; }
 }

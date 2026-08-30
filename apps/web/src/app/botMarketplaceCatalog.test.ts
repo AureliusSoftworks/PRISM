@@ -53,13 +53,14 @@ const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.
 const repoRoot = path.resolve(appRoot, "../..");
 const publicRoot = path.join(appRoot, "public");
 const faceFontIds = new Set(["neutral", "warm", "concise", "playful", "formal"]);
-const precomposedPairEyeIds = new Set([
+const singleGlyphEyeIds = new Set([
   "alan-watts",
   "aristotle",
   "thomas-hobbes",
   "claude-monet",
   "joseph-campbell",
   "sigmund-freud",
+  "identity-crisis-ian",
 ]);
 
 function publicMarketplaceBots(
@@ -171,7 +172,7 @@ describe("bot marketplace static catalog", () => {
       ["crazy-brenda", "⊙"],
       ["mumbling-jim", "~"],
       ["obsessed-kevin", "★"],
-      ["identity-crisis-ian", "?"],
+      ["identity-crisis-ian", "ø"],
       ["sad-sally", "-"],
       ["forgetful-freddie", "?"],
       ["alias-avery", "o"],
@@ -207,7 +208,7 @@ describe("bot marketplace static catalog", () => {
         customEyeCount += 1;
         assert.equal(
           bot.faceEyeCount,
-          precomposedPairEyeIds.has(entry.id) ? 1 : 2,
+          singleGlyphEyeIds.has(entry.id) ? 1 : 2,
           entry.name,
         );
         assert.equal(
@@ -596,6 +597,7 @@ describe("bot marketplace static catalog", () => {
           "power",
           "showcase",
           "identity",
+          "powers",
           "eyes",
           "mouth",
           "face",
@@ -604,11 +606,11 @@ describe("bot marketplace static catalog", () => {
         ]);
         assert.match(
           entry.description ?? "",
-          /eyes, speaking mouth, Ink, glyph, and quoted public name.*retaining his color and complete speech identity/iu,
+          /effective public presentation and eligible public Powers.*retaining his own persona, color, and complete voice/iu,
         );
         assert.match(
           bundle.botJson.profile?.purpose.statement ?? "",
-          /exact eyes.*resting\/live mouth package.*Avatar Details Ink.*lower glyph.*double-quoted public name/iu,
+          /effective public name.*exact eyes.*resting\/live mouth package.*Avatar Details Ink.*lower glyph/iu,
         );
         assert.match(
           bundle.botJson.profile?.appearance.description ?? "",
@@ -616,17 +618,17 @@ describe("bot marketplace static catalog", () => {
         );
         assert.match(
           powers[0]?.intent ?? "",
-          /presentation-only.*exact eyes\/blink.*resting\/live mouth\/visemes with glyph style and Custom Speech poses.*Avatar Details Ink.*lower glyph.*literal double-quoted/iu,
+          /eligible direct bot address.*player Prosecutor.*effective public name.*exact eyes\/blink.*live mouth\/visemes and Custom Speech poses.*Avatar Details Ink.*lower glyph.*eligible public Powers\/consequences/iu,
         );
         assert.match(
           powers[0]?.intent ?? "",
-          /Keep Collin's color\/frame.*voice.*Accent Map\/location.*pronunciation.*Speechprint\/provider voice/iu,
+          /Keep Collin's persona, color, chassis\/frame\/spinner, complete voice and Accent Map, bot identity, role, privacy, safety, and mechanics/iu,
         );
         assert.match(
           powers[0]?.intent ?? "",
-          /knowingly masquerades.*double-quoted public name.*Defensively treat the original as the suspicious imitator.*mild concern.*player Prosecutor/iu,
+          /copies.*eligible public Powers\/consequences.*Never copy Identity Crisis recursively or private awareness\/audience permissions.*Identity Mirror presentation beats Shapeshifter/iu,
         );
-        assert.match(powers[0]?.intent ?? "", /Frozen replay; no gameplay synthesis/iu);
+        assert.match(powers[0]?.intent ?? "", /replay\/reset is frozen.*No gameplay synthesis/iu);
         assert.doesNotMatch(
           powers[0]?.intent ?? "",
           /complete public audiovisual identity/iu,
@@ -717,6 +719,14 @@ describe("bot marketplace static catalog", () => {
         assert.equal(shapeshift?.pool, "library_or_marketplace");
         assert.equal(shapeshift?.continuity, "session_sticky_until_amnesia");
         assert.match(bundle.botJson.systemPrompt ?? "", /Library|Marketplace|shapeshift|form/iu);
+        assert.match(
+          powers[0]?.intent ?? "",
+          /Keep Shannon's actual voice identity, provider voice, voice effect, and every non-accent voice shaping field/iu,
+        );
+        assert.match(
+          powers[0]?.intent ?? "",
+          /overlay only the target's Accent Map region and pronunciation enablement.*pronunciation off/iu,
+        );
       }
     }
   });
@@ -965,8 +975,8 @@ describe("bot marketplace static catalog", () => {
           entry.id === "carl-jung" || entry.id === "salvador-dali" ? 0 : null,
           `${entry.name} default eye rotation`,
         );
-      } else if (precomposedPairEyeIds.has(entry.id)) {
-        assert.equal(eyeCount, 1, `${entry.name} precomposed pair eyes`);
+      } else if (singleGlyphEyeIds.has(entry.id)) {
+        assert.equal(eyeCount, 1, `${entry.name} single-glyph eyes`);
       } else {
         assert.equal(eyeCount, 2, `${entry.name} paired custom eyes`);
       }
@@ -1056,6 +1066,8 @@ describe("bot marketplace static catalog", () => {
         ["copycat-calvin", "."],
         ["buckethead", "none"],
         ["darth-vader", "none"],
+        ["georgia-okeeffe", "¦"],
+        ["identity-crisis-ian", "|"],
         ["spongebob-squarepants", "|"],
       ]).get(entry.id) ?? " ";
       assert.equal(bundle.botJson.bot.faceBlinkBar, expectedBlink, entry.name);

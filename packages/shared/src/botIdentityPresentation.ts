@@ -7,6 +7,8 @@ import {
   parseStoredBotPrompt,
   type BotVoicePreset,
 } from "./botProfile.ts";
+import type { BotFaceStyle } from "./botAvatar.ts";
+import type { BotAvatarDetailsV1 } from "./botAvatarDetails.ts";
 
 export const BOT_IDENTITY_PRESENTATION_TRANSITION_MS = 760;
 
@@ -15,6 +17,87 @@ export interface BotIdentityPresentationSnapshotV1 {
   targetGlyph?: string | null;
   targetVoicePreset?: BotVoicePreset;
   targetFrameMaterialSeed?: string;
+}
+
+export interface BotIdentityPublicPresentationV1 {
+  name: string;
+  personaPrompt: string;
+  face: BotFaceStyle;
+  avatarDetails: BotAvatarDetailsV1 | null;
+  glyph: string | null;
+  color: string;
+  voicePreset: BotVoicePreset;
+  frameMaterialSeed: string;
+}
+
+type BotIdentityMirrorPresentationInputV1 = {
+  targetBotName: string;
+  targetFace: BotFaceStyle;
+  targetAvatarDetails?: BotAvatarDetailsV1 | null;
+  targetGlyph?: string | null;
+};
+
+type BotIdentityShapeshiftPresentationInputV1 =
+  BotIdentityMirrorPresentationInputV1 & {
+    targetPersonaPrompt: string;
+    targetColor?: string;
+    targetVoicePreset?: BotVoicePreset;
+    targetFrameMaterialSeed?: string;
+  };
+
+/**
+ * Single public projection contract. Native Identity Mirror presentation wins
+ * over native Shapeshifter state. Mirror changes only name/face/Ink/glyph;
+ * shapeshift changes persona and complete visible form. Powers, mechanics, and
+ * voice are intentionally absent and therefore can never transfer here.
+ */
+export function resolveBotIdentityPublicPresentationV1(args: {
+  base: BotIdentityPublicPresentationV1;
+  mirror?: BotIdentityMirrorPresentationInputV1 | null;
+  shapeshift?: BotIdentityShapeshiftPresentationInputV1 | null;
+}): BotIdentityPublicPresentationV1 {
+  if (args.mirror) {
+    return {
+      ...args.base,
+      name: args.mirror.targetBotName,
+      face: args.mirror.targetFace,
+      avatarDetails: Object.prototype.hasOwnProperty.call(
+        args.mirror,
+        "targetAvatarDetails",
+      )
+        ? (args.mirror.targetAvatarDetails ?? null)
+        : args.base.avatarDetails,
+      glyph: Object.prototype.hasOwnProperty.call(args.mirror, "targetGlyph")
+        ? (args.mirror.targetGlyph ?? null)
+        : args.base.glyph,
+    };
+  }
+  const shaped = args.shapeshift
+    ? {
+        ...args.base,
+        name: args.shapeshift.targetBotName,
+        personaPrompt: args.shapeshift.targetPersonaPrompt,
+        face: args.shapeshift.targetFace,
+        avatarDetails: Object.prototype.hasOwnProperty.call(
+          args.shapeshift,
+          "targetAvatarDetails",
+        )
+          ? (args.shapeshift.targetAvatarDetails ?? null)
+          : args.base.avatarDetails,
+        glyph: Object.prototype.hasOwnProperty.call(
+          args.shapeshift,
+          "targetGlyph",
+        )
+          ? (args.shapeshift.targetGlyph ?? null)
+          : args.base.glyph,
+        color: args.shapeshift.targetColor ?? args.base.color,
+        voicePreset:
+          args.shapeshift.targetVoicePreset ?? args.base.voicePreset,
+        frameMaterialSeed:
+          args.shapeshift.targetFrameMaterialSeed ?? args.base.frameMaterialSeed,
+      }
+    : args.base;
+  return shaped;
 }
 
 function boundedText(value: unknown, max: number): string {

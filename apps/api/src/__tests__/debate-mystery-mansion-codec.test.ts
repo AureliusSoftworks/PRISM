@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   buildMansionAmbienceManifestV1,
   debateMysteryHouseStyleV2,
+  WHODUNNIT_PROP_ARCHETYPE_IDS_V1,
   type MansionPackageManifestV1,
 } from "@localai/shared";
 import {
@@ -69,6 +70,44 @@ function manifest(): MansionPackageManifestV1 {
   };
 }
 
+function mansionPackageWithPropTheme(): {
+  manifest: MansionPackageManifestV1;
+  assets: Map<string, Uint8Array>;
+} {
+  const themed = manifest();
+  themed.formatVersion.minor = 1;
+  const assets = new Map<string, Uint8Array>([[roomPath, roomBytes]]);
+  themed.propTheme = {
+    version: 1,
+    registryVersion: 1,
+    variants: WHODUNNIT_PROP_ARCHETYPE_IDS_V1.map((archetypeId) => {
+      const bytes = Buffer.from(`prop theme bytes:${archetypeId}`);
+      const digest = createHash("sha256").update(bytes).digest("hex");
+      const archivePath = `assets/${digest}.webp`;
+      const packageAssetId = `prop-${archetypeId}`;
+      themed.assets.push({
+        id: packageAssetId,
+        role: "prop",
+        archivePath,
+        sha256: digest,
+        byteLength: bytes.byteLength,
+        mimeType: "image/webp",
+        width: 512,
+        height: 512,
+        durationMs: null,
+      });
+      assets.set(archivePath, bytes);
+      return {
+        archetypeId,
+        displayName: `Jungle ${archetypeId}`,
+        appearanceDescription: `A rain-worn ${archetypeId} from the Jungle Mansion.`,
+        packageAssetId,
+      };
+    }),
+  };
+  return { manifest: themed, assets };
+}
+
 describe("internal mansion codec", () => {
   it("encodes byte-identically and validates every decoded content hash", () => {
     const input = { manifest: manifest(), assets: new Map([[roomPath, roomBytes]]) };
@@ -100,6 +139,81 @@ describe("internal mansion codec", () => {
       }),
       /undeclared asset/u,
     );
+  });
+
+  it("imports complete prop themes as protected archetype refs and re-exports them intact", () => {
+    const db = initializeDatabase(new DatabaseSync(":memory:"));
+    const now = "2026-08-30T00:00:00.000Z";
+    db.prepare(
+      `INSERT INTO users
+         (id, email, display_name, password_hash, password_salt,
+          wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
+          preferred_provider, created_at, last_active_at)
+       VALUES ('recipient', 'recipient@example.com', 'Player', 'hash', 'salt',
+               'cipher', 'iv', 'tag', 'local', ?, ?)`,
+    ).run(now, now);
+    const source = mansionPackageWithPropTheme();
+    const key = Buffer.alloc(32, 9);
+    const bundleId = importInternalMansionPackageToDbV1({
+      db,
+      userKey: key,
+      userId: "recipient",
+      archive: encodeInternalMansionPackageV1(source),
+    });
+    const variantRows = db.prepare(
+      `SELECT archetype_id, status, display_name, asset_id
+         FROM debate_mystery_mansion_prop_variants
+        WHERE user_id = ? AND bundle_id = ?
+        ORDER BY archetype_id`,
+    ).all("recipient", bundleId) as Array<{
+      archetype_id: string;
+      status: string;
+      display_name: string;
+      asset_id: string | null;
+    }>;
+    assert.equal(variantRows.length, 16);
+    assert.ok(variantRows.every((row) => row.status === "ready" && row.asset_id));
+    const themeRefs = db.prepare(
+      `SELECT logical_id FROM debate_mystery_mansion_asset_refs
+        WHERE user_id = ? AND bundle_id = ? AND logical_id LIKE 'theme:%'`,
+    ).all("recipient", bundleId) as Array<{ logical_id: string }>;
+    assert.equal(themeRefs.length, 16);
+
+    const reexported = decodeInternalMansionPackageV1(
+      exportInternalMansionPackageFromDbV1({
+        db,
+        userKey: key,
+        userId: "recipient",
+        bundleId,
+        prismVersion: "0.15.1",
+      }),
+    );
+    assert.equal(reexported.manifest.formatVersion.minor, 1);
+    assert.deepEqual(
+      reexported.manifest.propTheme?.variants.map((variant) => variant.archetypeId),
+      WHODUNNIT_PROP_ARCHETYPE_IDS_V1,
+    );
+    assert.equal(new Set(
+      reexported.manifest.propTheme?.variants.map((variant) => variant.packageAssetId),
+    ).size, 16);
+    assert.ok(reexported.manifest.rooms.every((room) => room.propAssetIds.length === 0));
+
+    db.prepare(
+      `DELETE FROM debate_mystery_mansion_prop_variants
+        WHERE user_id = ? AND bundle_id = ? AND archetype_id = 'key'`,
+    ).run("recipient", bundleId);
+    const partial = decodeInternalMansionPackageV1(
+      exportInternalMansionPackageFromDbV1({
+        db,
+        userKey: key,
+        userId: "recipient",
+        bundleId,
+        prismVersion: "0.15.1",
+      }),
+    );
+    assert.equal(partial.manifest.propTheme, undefined);
+    assert.equal(partial.manifest.assets.some((asset) => asset.role === "prop"), false);
+    assert.ok(partial.manifest.rooms.every((room) => room.propAssetIds.length === 0));
   });
 
   it("preserves mansion-unique ambience while remapping room and asset identities", () => {

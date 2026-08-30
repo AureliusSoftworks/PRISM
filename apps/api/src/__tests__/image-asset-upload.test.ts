@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import sharp from "sharp";
 import {
@@ -24,6 +25,10 @@ describe("local asset uploads", () => {
     assert.equal(result.width, 600);
     assert.equal(result.height, 400);
     assert.equal((await sharp(result.pngBytes).metadata()).format, "png");
+    assert.equal(
+      result.contentSha256,
+      createHash("sha256").update(result.pngBytes).digest("hex"),
+    );
   });
 
   it("rejects non-image data", () => {

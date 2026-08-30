@@ -185,6 +185,10 @@ import {
 } from "./prismRefract";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
 import {
+  PrismChromeNotice,
+  PrismChromeNoticeViewport,
+} from "./PrismChromeNotice";
+import {
   downloadMansionPackageV1,
   inspectMansionPackageFileV1,
   installMansionPackageFileV1,
@@ -657,6 +661,10 @@ import {
 } from "./debateExhibitImpactSfx";
 import { debateModeratorLookAtRole } from "./debateModeratorGaze";
 import { debateEvidencePropRotationDeg } from "./debateEvidenceProp";
+import {
+  useStageExhibitPresence,
+  type StageExhibitMotionState,
+} from "./stageExhibitPresence";
 import {
   composeDebateRoundSummary,
   debateCaseBoardChronological,
@@ -4131,38 +4139,37 @@ function debateErrorClipboardText(caught: unknown, fallback: string): string {
   return fallback;
 }
 
-function DebateErrorToast(props: { message: string }): React.JSX.Element {
+function DebateErrorToast(props: {
+  message: string;
+  onDismiss: () => void;
+}): React.JSX.Element {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
     "idle",
   );
   return (
-    <button
-      type="button"
-      className={`${styles.error} ${styles.errorToast}`}
-      role="alert"
-      data-copy-state={copyState}
-      onClick={() => {
-        void writeDebateClipboardText(props.message)
-          .then(() => setCopyState("copied"))
-          .catch(() => setCopyState("failed"));
-      }}
-      aria-label={`${props.message} ${
-        copyState === "copied"
-          ? "Copied to clipboard."
-          : copyState === "failed"
-            ? "Copy failed."
-            : "Click to copy this error."
-      }`}
-    >
-      <span>{props.message}</span>
-      <small>
-        {copyState === "copied"
-          ? "Copied to clipboard."
-          : copyState === "failed"
-            ? "Couldn’t copy. Try again."
-            : "Click to copy error."}
-      </small>
-    </button>
+    <PrismChromeNoticeViewport ariaLabel="Debate notifications">
+      <PrismChromeNotice
+        label="Debate error"
+        message={props.message}
+        tone="error"
+        title={props.message}
+        action={{
+          label:
+            copyState === "copied"
+              ? "Copied"
+              : copyState === "failed"
+                ? "Retry copy"
+                : "Copy error",
+          onClick: () => {
+            void writeDebateClipboardText(props.message)
+              .then(() => setCopyState("copied"))
+              .catch(() => setCopyState("failed"));
+          },
+        }}
+        onDismiss={props.onDismiss}
+        dismissLabel="Dismiss Debate error"
+      />
+    </PrismChromeNoticeViewport>
   );
 }
 
@@ -4181,14 +4188,16 @@ function DebateNoticeToast(props: {
     return () => window.clearTimeout(timer);
   }, [props.detail, props.onDismiss, props.title]);
   return (
-    <div
-      className={`${styles.notice} ${styles.noticeToast}`}
-      role="status"
-      aria-live="polite"
-    >
-      <strong>{props.title}</strong>
-      <span>{props.detail}</span>
-    </div>
+    <PrismChromeNoticeViewport ariaLabel="Debate notifications">
+      <PrismChromeNotice
+        label={props.title}
+        message={props.detail}
+        tone="success"
+        title={`${props.title}: ${props.detail}`}
+        onDismiss={props.onDismiss}
+        dismissLabel="Dismiss Debate update"
+      />
+    </PrismChromeNoticeViewport>
   );
 }
 
@@ -4453,6 +4462,8 @@ function DebateEvidencePedestal({
   audioEnabled = false,
   atmosphereControllerRef,
   alignmentPreview = false,
+  motionState = "present",
+  onMotionEnd,
 }: {
   item: DebateEvidenceItemV1;
   view: DebateStageEvidenceView;
@@ -4460,6 +4471,8 @@ function DebateEvidencePedestal({
   audioEnabled?: boolean;
   atmosphereControllerRef?: RefObject<SessionAtmosphereController | null>;
   alignmentPreview?: boolean;
+  motionState?: StageExhibitMotionState;
+  onMotionEnd?: () => void;
 }): React.JSX.Element {
   const lastPlacedEvidenceIdRef = useRef<string | null>(null);
   const exhibit = item.kind === "exhibit" ? item.value : null;
@@ -4495,6 +4508,9 @@ function DebateEvidencePedestal({
       data-visual-kind={exhibit?.visualKind ?? "document"}
       data-evidence-kind={item.kind}
       data-evidence-view={view}
+      data-stage-exhibit-motion={
+        alignmentPreview ? undefined : motionState
+      }
       data-impact-material={
         exhibit ? resolveDebateExhibitImpactMaterial(exhibit) : "paper"
       }
@@ -4502,18 +4518,25 @@ function DebateEvidencePedestal({
       data-debate-evidence-alignment-preview={
         alignmentPreview ? "true" : undefined
       }
-      aria-hidden={alignmentPreview ? "true" : undefined}
+      aria-hidden={
+        alignmentPreview || motionState === "exiting" ? "true" : undefined
+      }
       aria-label={`Presented evidence: ${title}`}
       style={
         {
           "--debate-evidence-prop-rotate": `${propRotationDeg}deg`,
         } as CSSProperties
       }
+      onAnimationEnd={(event) => {
+        if (event.target === event.currentTarget) onMotionEnd?.();
+      }}
     >
       <button
         type="button"
         onClick={onOpen}
-        tabIndex={alignmentPreview ? -1 : undefined}
+        tabIndex={
+          alignmentPreview || motionState === "exiting" ? -1 : undefined
+        }
         title={title}
         aria-label={`Open evidence: ${title}`}
       >
@@ -4542,6 +4565,53 @@ function DebateEvidencePedestal({
         )}
       </button>
     </section>
+  );
+}
+
+function DebateEvidencePedestalPresence(props: {
+  item: DebateEvidenceItemV1 | null;
+  view: DebateStageEvidenceView;
+  onOpen: (item: DebateEvidenceItemV1) => void;
+  audioEnabled?: boolean;
+  atmosphereControllerRef?: RefObject<SessionAtmosphereController | null>;
+}): React.JSX.Element {
+  const exhibit = props.item?.kind === "exhibit" ? props.item.value : null;
+  const source = props.item?.kind === "source" ? props.item.value : null;
+  const target = useMemo(
+    () => {
+      if (exhibit) {
+        return {
+          id: exhibit.id,
+          value: { kind: "exhibit", value: exhibit } as const,
+        };
+      }
+      if (source) {
+        return {
+          id: source.id,
+          value: { kind: "source", value: source } as const,
+        };
+      }
+      return null;
+    },
+    [exhibit, source],
+  );
+  const { items, finishMotion } = useStageExhibitPresence<DebateEvidenceItemV1>(target);
+
+  return (
+    <>
+      {items.map(({ id, value, motionState }) => (
+        <DebateEvidencePedestal
+          key={id}
+          item={value}
+          view={props.view}
+          motionState={motionState}
+          audioEnabled={props.audioEnabled}
+          atmosphereControllerRef={props.atmosphereControllerRef}
+          onOpen={() => props.onOpen(value)}
+          onMotionEnd={() => finishMotion(id)}
+        />
+      ))}
+    </>
   );
 }
 
@@ -4776,7 +4846,10 @@ function debateBotPresentation(
       identityEffect === "identity_mirror"
         ? (identitySource?.glyph ?? bot.glyph)
         : bot.glyph,
-    voiceSourceBotId: shapeshifting ? (identitySource?.id ?? bot.id) : bot.id,
+    // Shapeshifter borrows the visible form, never the target timbre/provider
+    // voice. Debate currently has no persisted Accent Map overlay snapshot, so
+    // retain the holder voice instead of incorrectly replacing it wholesale.
+    voiceSourceBotId: bot.id,
     visibility:
       observerProjection.visibility === "hidden"
         ? "hidden"
@@ -5137,6 +5210,8 @@ export function DebateExperience(
   const [mysteryMansionExteriorError, setMysteryMansionExteriorError] = useState<string | null>(null);
   const [mysteryEvidenceAssetSynthesis, setMysteryEvidenceAssetSynthesis] =
     useState(false);
+  const [mysteryUseRelevantAssetLibraryProps, setMysteryUseRelevantAssetLibraryProps] =
+    useState(false);
   const [mysteryRoomAssetSynthesis, setMysteryRoomAssetSynthesis] =
     useState(false);
   const [mysteryIllustratedRoomSynthesis, setMysteryIllustratedRoomSynthesis] =
@@ -5157,10 +5232,11 @@ export function DebateExperience(
   const [mansionPackageInspection, setMansionPackageInspection] =
     useState<MansionPackageInspectionV1 | null>(null);
   const [mansionPackageState, setMansionPackageState] = useState<
-    "idle" | "inspecting" | "installing" | "exporting" | "removing" | "updating" | "generating-music" | "generating-atmosphere"
+    "idle" | "inspecting" | "installing" | "exporting" | "removing" | "updating" | "generating-music" | "generating-atmosphere" | "generating-props"
   >("idle");
   const [mansionExportPassword, setMansionExportPassword] = useState("");
   const mansionPackageInputRef = useRef<HTMLInputElement | null>(null);
+  const mansionPropThemePollsRef = useRef(new Set<string>());
   const [mysteryNonce, setMysteryNonce] = useState("recipe-initial");
   const [mysteryFloors, setMysteryFloors] = useState(1);
   const [mysteryTotalRooms, setMysteryTotalRooms] = useState(5);
@@ -6807,6 +6883,34 @@ export function DebateExperience(
     }
   }, [request]);
 
+  const pollMansionPropTheme = useCallback((mansionId: string): void => {
+    if (mansionPropThemePollsRef.current.has(mansionId)) return;
+    mansionPropThemePollsRef.current.add(mansionId);
+    void (async () => {
+      try {
+        for (let pass = 0; pass < 360 && mountedRef.current; pass += 1) {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 5_000));
+          if (!mountedRef.current) return;
+          const result = await request<{
+            mansions: DebateMysteryMansionBundleSummaryV1[];
+          }>("/api/debates/mystery-mansions");
+          if (!mountedRef.current) return;
+          setMysteryMansionBundles(result.mansions);
+          const target = result.mansions.find((mansion) => mansion.id === mansionId);
+          if (
+            !target ||
+            target.propThemeProgress?.complete ||
+            target.propThemeProgress?.pendingCount === 0
+          ) return;
+        }
+      } catch {
+        // Progress is durable and refreshes the next time Installed Mansions opens.
+      } finally {
+        mansionPropThemePollsRef.current.delete(mansionId);
+      }
+    })();
+  }, [request]);
+
   const chooseInstalledMansion = useCallback((
     mansionId: string,
     suppliedMansion?: DebateMysteryMansionBundleSummaryV1,
@@ -7144,6 +7248,40 @@ export function DebateExperience(
       if (mountedRef.current) setMansionPackageState("idle");
     }
   }, [props.responseMode, request]);
+
+  const mutateSavedMansionPropTheme = useCallback(async (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+    archetypeId?: string,
+  ): Promise<{ ok: boolean; error: string | null }> => {
+    setMansionPackageState("generating-props");
+    setError(null);
+    try {
+      const suffix = archetypeId
+        ? `/${encodeURIComponent(archetypeId)}/retry`
+        : "/generate";
+      const result = await request<{ mansion: DebateMysteryMansionBundleSummaryV1 }>(
+        `/api/debates/mystery-mansions/${encodeURIComponent(mansion.id)}/prop-theme${suffix}`,
+        {
+          ...requestBody({ responseMode: props.responseMode }),
+          method: "POST",
+        },
+      );
+      if (!mountedRef.current) return { ok: false, error: null };
+      setMysteryMansionBundles((current) => current.map((candidate) =>
+        candidate.id === result.mansion.id ? result.mansion : candidate,
+      ));
+      pollMansionPropTheme(mansion.id);
+      return { ok: true, error: null };
+    } catch (caught) {
+      const message = caught instanceof Error
+        ? caught.message
+        : "That mansion prop pack could not be updated.";
+      if (mountedRef.current) setError(message);
+      return { ok: false, error: message };
+    } finally {
+      if (mountedRef.current) setMansionPackageState("idle");
+    }
+  }, [pollMansionPropTheme, props.responseMode, request]);
 
   const removeSavedMansion = useCallback(async (mansion: DebateMysteryMansionBundleSummaryV1): Promise<void> => {
     setMansionPackageState("removing");
@@ -8375,6 +8513,7 @@ export function DebateExperience(
         !selectedMysteryMansionBundle &&
         !mysterySkipInvestigation,
     },
+    useRelevantAssetLibraryProps: mysteryUseRelevantAssetLibraryProps,
     investigationMode: mysterySkipInvestigation ? "court_only" : "full",
     mansionBundleId: selectedMysteryMansionBundle?.id ?? null,
     ...(mysteryMansionSource === "new" && mysteryMansionExteriorDraft
@@ -19571,8 +19710,13 @@ export function DebateExperience(
           Create at least two Library bots to start a Debate.
         </p>
       ) : null}
-      {error ? <DebateErrorToast key={error} message={error} /> : null}
-      {refractionNotice ? (
+      {error ? (
+        <DebateErrorToast
+          key={error}
+          message={error}
+          onDismiss={() => setError(null)}
+        />
+      ) : refractionNotice ? (
         <DebateNoticeToast
           key={`${refractionNotice.title}:${refractionNotice.detail}`}
           title={refractionNotice.title}
@@ -19961,16 +20105,20 @@ export function DebateExperience(
         />
       ) : null}
       {deleteUndo ? (
-        <div className={styles.undoToast} role="status">
-          <span>“{deleteUndo.motion}” was removed.</span>
-          <button
-            type="button"
-            onClick={() => void undoDeleteSession()}
-            disabled={busy}
-          >
-            Undo
-          </button>
-        </div>
+        <PrismChromeNoticeViewport ariaLabel="Debate notifications">
+          <PrismChromeNotice
+            label="Debate removed"
+            message={`“${deleteUndo.motion}” moved to recoverable history.`}
+            tone="warning"
+            action={{
+              label: "Undo",
+              disabled: busy,
+              onClick: () => void undoDeleteSession(),
+            }}
+            onDismiss={() => setDeleteUndo(null)}
+            dismissLabel="Dismiss delete notification"
+          />
+        </PrismChromeNoticeViewport>
       ) : null}
     </main>
     );
@@ -19987,7 +20135,7 @@ export function DebateExperience(
       story: "Give PRISM one creative direction, or leave it blank for a coherent surprise. The sealed recipe always stays fair.",
       experience: "Choose the courtroom tone and whether you want to investigate the mansion before trial.",
       production: selectedMysteryMansionBundle
-        ? "Choose the evidence and music for this case."
+        ? "Choose how this mansion's reusable props and music should be prepared."
         : "Choose which presentation layers PRISM should prepare. Safe bundled defaults are already selected.",
     };
     const mansionStepReady =
@@ -20097,6 +20245,8 @@ export function DebateExperience(
                   onAcceptAtmosphere={(mansion) => mutateSavedMansionAtmosphere(mansion, "accept")}
                   onDiscardAtmosphere={(mansion) => mutateSavedMansionAtmosphere(mansion, "discard")}
                   onUndoAtmosphere={(mansion) => mutateSavedMansionAtmosphere(mansion, "undo")}
+                  onGenerateProps={(mansion) => mutateSavedMansionPropTheme(mansion)}
+                  onRetryProp={(mansion, archetypeId) => mutateSavedMansionPropTheme(mansion, archetypeId)}
                   onRemove={(mansion) => void removeSavedMansion(mansion)}
                 />
                 <div className={mysteryStyles.guidedSecondaryAction} data-tutorial-target="whodunnit-mansion-library">
@@ -20268,10 +20418,14 @@ export function DebateExperience(
             {!selectedMysteryMansionBundle ? <label className={mysteryStyles.setupField}>Room art <select value={mysteryArtMode} onChange={(event) => { setMysteryArtMode(event.currentTarget.value as DebateMysteryArtMode); setMysteryNonce(nextMysteryRecipeNonce()); }}><option value="bundled">Bundled PRISM rooms</option><option value="generated" disabled={!inspectedMysterySeed}>Generated reskins · Legacy Case Seed</option></select><small>V2 uses aligned bundled rooms; imported V1 Case Seeds retain their generated-reskin option.</small></label> : null}
             <fieldset className={mysteryStyles.assetForgeChoices} data-tutorial-target="whodunnit-v2-assets">
               <legend>{selectedMysteryMansionBundle ? "Prepare case assets" : "Prepare presentation assets"}</legend>
-              {props.responseMode === "local" ? <p className={mysteryStyles.assetForgeModeNote}><strong>LOCAL stays on this device.</strong> {selectedMysteryMansionBundle ? "PRISM uses symbolic evidence and bundled case music." : "PRISM uses installed art and music, symbolic evidence, and an optional personalized ambience mix."}</p> : null}
+              {props.responseMode === "local" ? <p className={mysteryStyles.assetForgeModeNote}><strong>LOCAL stays on this device.</strong> {selectedMysteryMansionBundle ? "PRISM uses ready mansion variants, bundled prop fallbacks, and bundled case music." : "PRISM uses installed art and music, bundled prop fallbacks, and an optional personalized ambience mix."}</p> : null}
+              <label data-enabled={mysteryUseRelevantAssetLibraryProps ? "true" : undefined} data-tutorial-target="whodunnit-v2-personal-props">
+                <input type="checkbox" checked={mysteryUseRelevantAssetLibraryProps} onChange={(event) => { setMysteryUseRelevantAssetLibraryProps(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
+                <span><strong>Use relevant props from my Asset Library</strong><small>Optionally weave up to two compatible Items or Debate exhibits into this case. Their identity is frozen before the case is written; unsuitable objects stay in your Library.</small></span>
+              </label>
               <label data-enabled={props.responseMode !== "local" ? "true" : undefined} aria-disabled={props.responseMode === "local"}>
                 <input type="checkbox" checked={mysteryEvidenceAssetSynthesis && props.responseMode !== "local"} disabled={props.responseMode === "local"} onChange={(event) => { setMysteryEvidenceAssetSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
-                <span><strong>Evidence</strong><small>{props.responseMode === "local" ? "ONLINE only · LOCAL presents each authored exhibit as text and a symbolic evidence card." : "Create sealed exhibit images. They appear only when the evidence is discovered."}</small></span>
+                <span><strong>Mansion prop pack</strong><small>{props.responseMode === "local" ? "ONLINE only · LOCAL uses ready mansion variants and PRISM’s 16 bundled prop fallbacks." : "Prioritize the roles this case needs, then complete all 16 reusable themed props in the background. Existing variants and PRISM fallbacks keep play available immediately."}</small></span>
               </label>
               {!selectedMysteryMansionBundle ? <label data-enabled={!mysterySkipInvestigation && props.responseMode === "online" ? "true" : undefined} aria-disabled={mysterySkipInvestigation || props.responseMode !== "online"}>
                 <input type="checkbox" checked={mysteryRoomAssetSynthesis && !mysterySkipInvestigation && props.responseMode !== "local"} disabled={mysterySkipInvestigation || props.responseMode === "local"} onChange={(event) => { const enabled = event.currentTarget.checked; setMysteryRoomAssetSynthesis(enabled); if (!enabled) setMysteryIllustratedRoomSynthesis(false); setMysteryNonce(nextMysteryRecipeNonce()); }} />
@@ -20339,7 +20493,7 @@ export function DebateExperience(
                   <small>{mansionPackageInspection.preview.header.creatorSignature ? "Creator signature included" : "Unsigned package"} · {mansionPackageInspection.preview.header.encryptionMode === "password" ? "Password protected" : "PRISM spoiler seal"}</small>
                   <h3>{mansionPackageInspection.preview.header.title}</h3><p>{mansionPackageInspection.preview.description}</p>
                   <div className={mysteryStyles.mansionPackageFacts}>
-                    <span>{mansionPackageInspection.preview.floorCount} floor{mansionPackageInspection.preview.floorCount === 1 ? "" : "s"}</span><span>{mansionPackageInspection.preview.roomCount} rooms</span><span>{mansionPackageInspection.preview.propCount} props</span><span>{mansionPackageInspection.preview.hasInvestigationTheme ? "Theme included" : "Bundled theme fallback"}</span><span>{portableMansionByteLabel(mansionPackageInspection.preview.header.compressedBytes)} package</span><span>{portableMansionByteLabel(mansionPackageInspection.preview.header.expandedBytes)} expanded</span>
+                    <span>{mansionPackageInspection.preview.floorCount} floor{mansionPackageInspection.preview.floorCount === 1 ? "" : "s"}</span><span>{mansionPackageInspection.preview.roomCount} rooms</span><span>{mansionPackageInspection.preview.themedPropCount === 16 ? "16/16 themed props" : "Uses PRISM prop fallbacks"}</span><span>{mansionPackageInspection.preview.hasInvestigationTheme ? "Theme included" : "Bundled theme fallback"}</span><span>{portableMansionByteLabel(mansionPackageInspection.preview.header.compressedBytes)} package</span><span>{portableMansionByteLabel(mansionPackageInspection.preview.header.expandedBytes)} expanded</span>
                   </div>
                   <p className={mysteryStyles.mansionPackageFinePrint}>By {mansionPackageInspection.preview.header.creatorName} · PRISM {mansionPackageInspection.preview.provenance.prismVersion} · {mansionPackageInspection.preview.license.name} · format {mansionPackageInspection.preview.header.compatibility.minimumFormatMajor}–{mansionPackageInspection.preview.header.compatibility.maximumFormatMajor}</p>
                   {mansionPackageInspection.preview.provenance.generatedWith.length > 0 ? <p className={mysteryStyles.mansionPackageFinePrint}>Generated with {mansionPackageInspection.preview.provenance.generatedWith.join(" · ")}</p> : null}
@@ -30124,22 +30278,17 @@ export function DebateExperience(
                       className={styles.podiumForeground}
                       aria-hidden="true"
                     />
-                    {activeEvidenceItem ? (
-                      <DebateEvidencePedestal
-                        key={activeEvidenceItem.value.id}
-                        item={activeEvidenceItem}
-                        view={evidenceView}
-                        audioEnabled={
-                          props.audioEnabled &&
-                          props.audioVolume > 0 &&
-                          session.status !== "paused"
-                        }
-                        atmosphereControllerRef={debateAtmosphereControllerRef}
-                        onOpen={() =>
-                          setSourceDrawerId(activeEvidenceItem.value.id)
-                        }
-                      />
-                    ) : null}
+                    <DebateEvidencePedestalPresence
+                      item={activeEvidenceItem}
+                      view={evidenceView}
+                      audioEnabled={
+                        props.audioEnabled &&
+                        props.audioVolume > 0 &&
+                        session.status !== "paused"
+                      }
+                      atmosphereControllerRef={debateAtmosphereControllerRef}
+                      onOpen={(item) => setSourceDrawerId(item.value.id)}
+                    />
                     <DebateForumLightMasks depth="foreground" />
                     <DebateModeratorGavel
                       theme={props.theme}
@@ -30827,7 +30976,13 @@ export function DebateExperience(
                   </div>
                 </div>
               ) : null}
-              {error ? <DebateErrorToast key={error} message={error} /> : null}
+              {error ? (
+                <DebateErrorToast
+                  key={error}
+                  message={error}
+                  onDismiss={() => setError(null)}
+                />
+              ) : null}
               {liveRailPanel === "proceedings" ||
               (liveRailPanel === "verdict" && !sealedCompleted) ? (
                 <div

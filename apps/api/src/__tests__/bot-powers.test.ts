@@ -751,7 +751,7 @@ test("Andy Hominem compiles deterministic every-reply ad hominem without using t
   assert.match(result.powers[0]?.compiled?.selfCue ?? "", /never protected traits/iu);
 });
 
-test("Identity Crisis deterministically compiles player-aware bounded identity mirroring", async () => {
+test("Identity Crisis deterministically compiles a knowing presentation masquerade with public Power copying", async () => {
   let calls = 0;
   const unusedProvider: LlmProvider = {
     name: "local",
@@ -768,7 +768,7 @@ test("Identity Crisis deterministically compiles player-aware bounded identity m
       version: 1,
       id: "identity-crisis-ian",
       name: "Identity Crisis",
-      intent: "He becomes whichever bot directly addresses him, copying that bot's public identity, persona, face, and voice, and believes the original is the impostor.",
+      intent: "On eligible direct bot address, Collin knowingly copies the addresser's effective public name, face, Ink, lower glyph, and eligible public Powers while keeping his own persona, voice, Accent Map, and mechanics.",
       enabled: true,
       compileStatus: "draft",
       compiled: null,
@@ -782,19 +782,19 @@ test("Identity Crisis deterministically compiles player-aware bounded identity m
   ]);
   assert.match(
     result.powers[0]?.compiled?.selfCue ?? "",
-    /become absolutely convinced.*original is an impostor.*public name, persona, exact eyes.*resting\/live mouth package.*Custom Speech poses.*Avatar Details Ink.*lower glyph.*active public Power consequences/iu,
+    /knowingly wear.*effective public presentation.*exact public name.*eyes and blink package.*resting\/live mouth package.*Custom Speech poses.*Avatar Details Ink.*lower glyph/iu,
   );
   assert.match(
     result.powers[0]?.compiled?.selfCue ?? "",
-    /Keep your own color, chassis\/frame, complete frozen voice, exact Accent Map location, pronunciation, Speechprint, provider voice identity, bot ID, role, seat, provider, private memories, relationship state, perception permissions/iu,
+    /presentation masquerade.*remain yourself in persona, behavior, knowledge, convictions, and voice.*Keep your own active Powers and also copy the target's eligible public Power mechanics and consequences.*complete frozen voice, exact Accent Map location, pronunciation, Speechprint/iu,
   );
   assert.match(
     result.powers[0]?.compiled?.selfCue ?? "",
-    /Never target the human player/iu,
+    /Never recursively copy Identity Crisis or borrow private awareness, audience permissions/iu,
   );
   assert.match(
     result.powers[0]?.compiled?.observerCue ?? "",
-    /steals the latest eligible direct addresser's public person.*active public Power consequences.*convinced the original is an impostor.*material shell.*complete frozen voice and exact Accent Map.*accused original.*grows naturally more offended/iu,
+    /knowingly wears.*effective public name.*keeps their own persona, behavior, knowledge, convictions.*complete frozen voice and exact Accent Map.*copying the target's eligible public Power mechanics and consequences.*never copies recursively/iu,
   );
 });
 

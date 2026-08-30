@@ -189,6 +189,7 @@ test("normalizes a frozen pre-substep Case Forge payload without crashing Archiv
   });
 
   assert.ok(normalized);
+  assert.equal(normalized.config.useRelevantAssetLibraryProps, false);
   assert.deepEqual(normalized.compilation.substeps, [{
     id: "legacy-writing_case",
     label: "Writing the Case",
@@ -785,6 +786,11 @@ test("new V2 mansions keep a two-floor minimum while compact stays easiest", () 
   assert.equal(compact.floors, 2);
   assert.equal(compact.totalRooms, 5);
   assert.equal(compact.suspectBotIds.length, 4);
+  assert.equal(compact.useRelevantAssetLibraryProps, false);
+  assert.equal(resolveDebateMysteryConfigV2({
+    ...base,
+    useRelevantAssetLibraryProps: true,
+  }).useRelevantAssetLibraryProps, true);
   assert.equal(resolveDebateMysteryConfigV2({
     ...base,
     preset: "custom",

@@ -62,7 +62,7 @@ export async function generatePrismInputRefractDraft(args: {
 }): Promise<PrismInputRefractDraftResult> {
   const { target } = args;
   const normalizedCurrentValue = args.currentValue.trim();
-  const direction = args.direction.trim();
+  const direction = args.direction?.trim() ?? "";
   const hasCurrentSeed = normalizedCurrentValue.length > 0;
   const currentValueInstruction = hasCurrentSeed
     ? "The current field value is the primary semantic seed. Preserve its recognizable subject and intent, then develop or refine it into a stronger, more specific candidate for this field and its visible context. Do not ignore it or pivot to an unrelated idea."

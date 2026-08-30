@@ -393,6 +393,7 @@ describe("Signal review transcript", () => {
               kind: "ask_about",
               directQuote: privateDirection,
               delivery: "next_host_turn",
+              priority: "immediate",
             },
             occurredAt: "2026-07-17T17:01:01.000Z",
           },
@@ -416,7 +417,10 @@ describe("Signal review transcript", () => {
     });
 
     assert.match(transcript, /## Producer Cue Lifecycle/u);
-    assert.match(transcript, /Cue cue-private \| failed \| privacy_validation/u);
+    assert.match(
+      transcript,
+      /Cue cue-private \| failed \| privacy_validation \| next_host_turn \| immediate/u,
+    );
     assert.doesNotMatch(transcript, /Say this exact private sentence/u);
   });
 
@@ -646,6 +650,13 @@ describe("Signal review transcript", () => {
               delivery: "redirect_host",
               audience: "host",
               interruptedMessageId: "message-1",
+              pivotPerformance: {
+                v: 1,
+                cadence: "between_words",
+                transcriptMark: "ellipsis",
+                style: "throat_clear",
+                vocalFoley: "clears throat",
+              },
             },
             occurredAt: "2026-07-17T17:00:05.000Z",
           },
@@ -659,11 +670,11 @@ describe("Signal review transcript", () => {
 
     assert.match(
       transcript,
-      /- Producer interruption: redirect_host — ask_about \(event event-redirect\); this canonical turn contains only the audience-heard prefix/u,
+      /- Producer interruption: redirect_host — ask_about \(ordinary; cut cadence: between_words; pivot style: throat_clear; vocal Foley: clears throat; event event-redirect\); this canonical turn contains only the audience-heard prefix/u,
     );
     assert.match(
       transcript,
-      /- Event ID: event-redirect \| Delivery: redirect_host \| Kind: ask_about \| Interrupted message ID: message-1 \| Scheduled bridge: None \| Canonical interrupted message: yes/u,
+      /- Event ID: event-redirect \| Delivery: redirect_host \| Priority: ordinary \| Kind: ask_about \| cut cadence: between_words; pivot style: throat_clear; vocal Foley: clears throat \| Interrupted message ID: message-1 \| Scheduled bridge: None \| Canonical interrupted message: yes/u,
     );
   });
 
@@ -698,7 +709,7 @@ describe("Signal review transcript", () => {
 
     assert.match(
       transcript,
-      /- Producer interruption: interrupt_guest — press_harder \(event event-guest-interrupt\); this canonical turn contains only the audience-heard prefix/u,
+      /- Producer interruption: interrupt_guest — press_harder \(ordinary; event event-guest-interrupt\); this canonical turn contains only the audience-heard prefix/u,
     );
     assert.match(
       transcript,
@@ -737,7 +748,7 @@ describe("Signal review transcript", () => {
 
     assert.match(
       transcript,
-      /- Event ID: event-hidden-guest-interrupt \| Delivery: interrupt_guest \| Kind: ask_about \| Interrupted message ID: cancelled-guest-draft \| Scheduled bridge: Hold that thought\. \| Canonical interrupted message: no/u,
+      /- Event ID: event-hidden-guest-interrupt \| Delivery: interrupt_guest \| Priority: ordinary \| Kind: ask_about \| Interrupted message ID: cancelled-guest-draft \| Scheduled bridge: Hold that thought\. \| Canonical interrupted message: no/u,
     );
     assert.match(
       transcript,
@@ -745,7 +756,7 @@ describe("Signal review transcript", () => {
     );
     assert.doesNotMatch(
       transcript,
-      /Producer interruption: interrupt_guest — ask_about \(event event-hidden-guest-interrupt\)/u,
+      /Producer interruption: interrupt_guest — ask_about \(ordinary; event event-hidden-guest-interrupt\)/u,
     );
   });
 

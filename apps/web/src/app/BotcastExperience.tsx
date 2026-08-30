@@ -73,6 +73,7 @@ import {
   botcastAutoCoverageShotAt,
   botcastActiveProducerCueFromEvents,
   botcastProducerCueLifecyclesFromEvents,
+  botcastProducerCuePreemptsHostSpeech,
   botcastDepartureSpeakerRole,
   botcastEchoHostInterruptPhrase,
   botcastEpisodeModelSelectionKind,
@@ -91,6 +92,7 @@ import {
   botcastFalseNameStatesAtV1,
   botcastInterruptionBridgeMessageId,
   botcastInterruptedGuestContent,
+  botcastInterruptedHostContent,
   botcastListenerReactionForMessage,
   botcastEpisodeImageDescriptorFromFileName,
   botcastLatestImageContextV1,
@@ -241,6 +243,7 @@ import {
   signalShouldScreenHostRecovery,
 } from "./signalHostRecovery";
 import {
+  botcastSpeechRevealIsVoicing,
   botcastSpeechRevealVisibleText,
   finishBotcastSpeechReveal,
   prepareBotcastSpeechReveal,
@@ -249,6 +252,10 @@ import {
   updateBotcastSpeechReveal,
 } from "./botcastSpeechReveal";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
+import {
+  PrismChromeNotice,
+  PrismChromeNoticeViewport,
+} from "./PrismChromeNotice";
 import {
   buildSignalVisualPassportBundleV1,
   type SignalVisualPassportSourceV1,
@@ -419,6 +426,7 @@ import {
   signalQueuedProducerCueIsServerOwned,
   signalVisualIdentityNotice,
 } from "./signalEpisodeImagePresentation";
+import { useStageExhibitPresence } from "./stageExhibitPresence";
 import { signalOpeningStudioRevealTiming } from "./signalOpeningChoreography";
 import {
   playSignalEpisodeImageFoley,
@@ -1560,6 +1568,12 @@ const SIGNAL_ASSET_ACCEPT = "image/png,image/jpeg,image/webp";
 const SIGNAL_ASSET_UPLOAD_MAX_BYTES = 16 * 1024 * 1024;
 const SIGNAL_EPISODE_IMAGE_ACCEPT = ".png,.jpg";
 
+type SignalItemLibraryInspection = {
+  contentSha256: string;
+  alreadySaved: boolean;
+  automaticTags: string[];
+};
+
 type SignalEpisodeImageUpload = {
   episodeId: string;
   imageId: string;
@@ -1574,6 +1588,8 @@ type SignalEpisodeImageUpload = {
   reason: string;
   /** Ephemeral, opaque procedural references. API strips these before persistence. */
   visualIdentity: SignalVisualPassportBundleV1;
+  /** Exact-upload library status; absent for pictures and archival-proxy retries. */
+  assetLibraryInspection?: SignalItemLibraryInspection;
 };
 
 type SignalSetupEpisodeImage = Omit<SignalEpisodeImageUpload, "episodeId">;
@@ -1684,6 +1700,89 @@ function signalEpisodeImagePlacementStyle(
     ["--signal-episode-image-scale" as string]:
       signalEpisodeImageScale(placement, kind) / 100,
   };
+}
+
+type SignalStageExhibitPresentation = Readonly<{
+  context: BotcastImageContextV1;
+  episodeId: string;
+  replay: boolean;
+  ephemeralDataUrl: string | null | undefined;
+  speakerRole: BotcastMessage["speakerRole"] | undefined;
+  messageId: string | undefined;
+  shot: "left" | "right" | "wide";
+  placement: Readonly<BotcastEpisodeImagePlacement>;
+}>;
+
+function SignalEpisodeImagePresence(props: {
+  context: BotcastImageContextV1 | null;
+  episodeId: string;
+  replay: boolean;
+  ephemeralDataUrl: string | null | undefined;
+  speakerRole: BotcastMessage["speakerRole"] | undefined;
+  messageId: string | undefined;
+  shot: "left" | "right" | "wide";
+  placement: Readonly<BotcastEpisodeImagePlacement>;
+}): React.JSX.Element {
+  const target = useMemo(
+    () =>
+      props.context
+        ? {
+            id: `${props.episodeId}:${props.context.imageId}`,
+            value: {
+              context: props.context,
+              episodeId: props.episodeId,
+              replay: props.replay,
+              ephemeralDataUrl: props.ephemeralDataUrl,
+              speakerRole: props.speakerRole,
+              messageId: props.messageId,
+              shot: props.shot,
+              placement: props.placement,
+            } satisfies SignalStageExhibitPresentation,
+          }
+        : null,
+    [
+      props.context,
+      props.episodeId,
+      props.ephemeralDataUrl,
+      props.messageId,
+      props.placement,
+      props.replay,
+      props.shot,
+      props.speakerRole,
+    ],
+  );
+  const { items, finishMotion } = useStageExhibitPresence(target);
+
+  return (
+    <>
+      {items.map(({ id, value, motionState }) => (
+        <figure
+          key={id}
+          className={styles.episodeImageContext}
+          data-stage-exhibit-motion={motionState}
+          data-speaker-role={value.speakerRole}
+          data-image-kind={value.context.kind}
+          data-message-id={value.messageId}
+          data-camera-shot={value.shot}
+          aria-hidden={motionState === "exiting" ? "true" : undefined}
+          style={signalEpisodeImagePlacementStyle(
+            value.placement,
+            value.context.kind,
+          )}
+          onAnimationEnd={(event) => {
+            if (event.target === event.currentTarget) finishMotion(id);
+          }}
+        >
+          <SignalEpisodeImageVisual
+            context={value.context}
+            episodeId={value.episodeId}
+            replay={value.replay}
+            ephemeralDataUrl={value.ephemeralDataUrl}
+          />
+        </figure>
+      ))}
+    </>
+  );
 }
 
 function signalLogoPlacementStyle(
@@ -10247,47 +10346,82 @@ export function BotcastExperience({
       episode.playbackMode === "watch"
     )
       return;
-    if (cue.kind !== "present_image" && !(await queueProducerCue(cue))) {
-      return;
-    }
     const activeHostMessage = episode.messages.find(
       (message) =>
-        message.id === speakingMessageId && message.speakerRole === "host",
+        message.id === activeSpeechMessageIdRef.current &&
+        message.speakerRole === "host",
     );
+    const currentLiveSpeech = liveSpeechRef.current;
     const activeHostReveal =
       activeHostMessage &&
-      liveSpeech?.messageId === activeHostMessage.id &&
-      liveSpeech.reveal.phase === "playing"
-        ? liveSpeech.reveal
-        : null;
-    const spokenContent = activeHostReveal
-      ? botcastSpeechRevealVisibleText(activeHostReveal).trimEnd()
+      currentLiveSpeech?.messageId === activeHostMessage.id &&
+      currentLiveSpeech.reveal.phase === "playing"
+      ? currentLiveSpeech.reveal
+      : null;
+    const projectedHostReveal = activeHostReveal && currentLiveSpeech
+      ? updateBotcastSpeechReveal(
+          activeHostReveal,
+          signalLiveSpeechProjectedElapsedMs({
+            liveSpeech: currentLiveSpeech,
+            clock: signalLiveSpeechPlaybackClockRef.current,
+            nowMs: performance.now(),
+          }),
+        )
+      : null;
+    const spokenContent = projectedHostReveal
+      ? botcastSpeechRevealVisibleText(projectedHostReveal).trimEnd()
       : "";
+    const hostRedirectCadence =
+      botcastSpeechRevealIsVoicing(projectedHostReveal) === false
+        ? "between_words" as const
+        : "active_speech" as const;
     if (
       activeHostMessage &&
       activeHostReveal &&
-      signalHostCueShouldRedirect({
-        progress: activeHostReveal.progress,
-        spokenContent,
-        randomValue: Math.random(),
-      })
+      spokenContent.trim() &&
+      (botcastProducerCuePreemptsHostSpeech(cue) ||
+        signalHostCueShouldRedirect({
+          progress: activeHostReveal.progress,
+          spokenContent,
+          randomValue: Math.random(),
+        }))
     ) {
       invalidateEpisodeOperation();
-      setEpisode({
-        ...episode,
-        messages: episode.messages.map((message) =>
-          message.id === activeHostMessage.id
-            ? { ...message, content: spokenContent, voicePerformanceText: null }
-            : message,
-        ),
-      });
+      setEpisode((current) =>
+        current?.id === episode.id
+          ? {
+              ...current,
+              messages: current.messages.map((message) =>
+                message.id === activeHostMessage.id
+                  ? {
+                      ...message,
+                      content:
+                        botcastInterruptedHostContent(activeHostMessage.content, {
+                          spokenContent,
+                          cadence: hostRedirectCadence,
+                        }) ?? spokenContent,
+                      voicePerformanceText: null,
+                    }
+                  : message,
+              ),
+            }
+          : current,
+      );
       if (cue.kind === "present_image") assignQueuedProducerCue(cue);
       setAutoRun(true);
       onPrepareUtterance?.();
-      void advanceEpisode(undefined, "redirect_host", {
-        messageId: activeHostMessage.id,
-        spokenContent,
-      });
+      void advanceEpisode(
+        cue,
+        "redirect_host",
+        {
+          messageId: activeHostMessage.id,
+          spokenContent,
+          cadence: hostRedirectCadence,
+        },
+      );
+      return;
+    }
+    if (cue.kind !== "present_image" && !(await queueProducerCue(cue))) {
       return;
     }
     if (cue.kind === "present_image") assignQueuedProducerCue(cue);
@@ -13314,26 +13448,16 @@ export function BotcastExperience({
             {stagePublicName(args.guest, "Guest")}
           </strong>
         </div>
-        {stageImageVisible && stageImageContext ? (
-          <figure
-            className={styles.episodeImageContext}
-            data-speaker-role={args.activeMessage?.speakerRole}
-            data-image-kind={stageImageContext.kind}
-            data-message-id={args.activeMessage?.id}
-            data-camera-shot={args.shot}
-            style={signalEpisodeImagePlacementStyle(
-              activeCameraFrame.episodeImage,
-              stageImageContext.kind,
-            )}
-          >
-            <SignalEpisodeImageVisual
-              context={stageImageContext}
-              episodeId={args.currentEpisode.id}
-              replay={args.replay}
-              ephemeralDataUrl={stageEpisodeImage?.dataUrl}
-            />
-          </figure>
-        ) : null}
+        <SignalEpisodeImagePresence
+          context={stageImageVisible ? stageImageContext : null}
+          episodeId={args.currentEpisode.id}
+          replay={args.replay}
+          ephemeralDataUrl={stageEpisodeImage?.dataUrl}
+          speakerRole={args.activeMessage?.speakerRole}
+          messageId={args.activeMessage?.id}
+          shot={args.shot}
+          placement={activeCameraFrame.episodeImage}
+        />
         {liveCaptionsEnabled &&
         !args.replay &&
         speechReveal?.phase === "playing" &&
@@ -15280,6 +15404,19 @@ export function BotcastExperience({
       setError(null);
       try {
         const fileInput = await readSignalEpisodeImageFile(file);
+        const assetLibraryInspection =
+          fileInput.descriptor.kind === "item"
+            ? await request<SignalItemLibraryInspection>(
+                "/api/assets/signal-item/inspect",
+                {
+                  method: "POST",
+                  body: JSON.stringify({
+                    title: fileInput.descriptor.name,
+                    dataUrl: fileInput.dataUrl,
+                  }),
+                },
+              )
+            : undefined;
         const imageId = crypto.randomUUID();
         const replayMetadata = await acquireSignalEpisodeImageReplayMetadata(
           fileInput,
@@ -15293,6 +15430,7 @@ export function BotcastExperience({
           replayEmoji: replayMetadata.replayEmoji,
           reason: "",
           visualIdentity,
+          ...(assetLibraryInspection ? { assetLibraryInspection } : {}),
         });
         setNotice(
           `${replayMetadata.descriptor.name} is attached to tonight's setup. Signal will place it automatically during the interview.`,
@@ -15997,7 +16135,11 @@ export function BotcastExperience({
                 <div className={styles.setupEpisodeImageDraft}>
                   <small data-image-kind={setupEpisodeImage.descriptor.kind}>
                     {setupEpisodeImage.descriptor.kind === "item"
-                      ? "Transparent PNG item · presented as the physical item; you can optionally keep it in Items after the episode."
+                      ? setupEpisodeImage.assetLibraryInspection?.alreadySaved
+                        ? "Transparent PNG item · presented as the physical item; this exact upload is already in Items."
+                        : setupEpisodeImage.assetLibraryInspection
+                          ? "Transparent PNG item · presented as the physical item; you can optionally keep it in Items after the episode."
+                          : "Archived item reference · presented from its replay proxy; attach the original again to save it in Items."
                       : setupEpisodeImage.descriptor.mimeType === "image/png"
                         ? "Opaque PNG photo · presented as a framed picture and never saved automatically."
                         : "JPG photo · presented as a framed picture and never saved automatically."}
@@ -17377,6 +17519,19 @@ export function BotcastExperience({
     setError(null);
     try {
       const fileInput = await readSignalEpisodeImageFile(file);
+      const assetLibraryInspection =
+        fileInput.descriptor.kind === "item"
+          ? await request<SignalItemLibraryInspection>(
+              "/api/assets/signal-item/inspect",
+              {
+                method: "POST",
+                body: JSON.stringify({
+                  title: fileInput.descriptor.name,
+                  dataUrl: fileInput.dataUrl,
+                }),
+              },
+            )
+          : undefined;
       const imageId = crypto.randomUUID();
       const replayMetadata = await acquireSignalEpisodeImageReplayMetadata(
         fileInput,
@@ -17391,6 +17546,7 @@ export function BotcastExperience({
         replayEmoji: replayMetadata.replayEmoji,
         reason: "",
         visualIdentity,
+        ...(assetLibraryInspection ? { assetLibraryInspection } : {}),
       };
       signalEpisodeImageRef.current = upload;
       setSignalEpisodeImage(upload);
@@ -17529,14 +17685,16 @@ export function BotcastExperience({
       watchReplayPresentationEpisodeId === episodeOutro.episodeId;
     const uploadedItem =
       signalEpisodeImage?.episodeId === episodeOutro.episodeId &&
-      signalEpisodeImage.descriptor.kind === "item"
+      signalEpisodeImage.descriptor.kind === "item" &&
+      signalEpisodeImage.assetLibraryInspection?.alreadySaved === false
         ? signalEpisodeImage
         : null;
     if (keepSignalItem && uploadedItem && !episodeOutro.discarded) {
       setKeepSignalItemSaving(true);
       setError(null);
       try {
-        await request(`/api/assets/upload`, {
+        const saved = await request<{ deduplicated?: boolean }>(
+          `/api/assets/upload`, {
           method: "POST",
           body: JSON.stringify({
             kind: "item",
@@ -17544,9 +17702,12 @@ export function BotcastExperience({
             dataUrl: uploadedItem.dataUrl,
             signalEpisodeId: uploadedItem.episodeId,
           }),
-        });
+          },
+        );
         setNotice(
-          `${uploadedItem.descriptor.name} was saved to Items and linked to ${episodeOutro.episode.guestName ?? "the guest"}.`,
+          saved.deduplicated
+            ? `${uploadedItem.descriptor.name} was already in Items and is now linked to ${episodeOutro.episode.guestName ?? "the guest"}.`
+            : `${uploadedItem.descriptor.name} was saved to Items and linked to ${episodeOutro.episode.guestName ?? "the guest"}.`,
         );
       } catch (saveError) {
         setError(signalErrorToast("Save Signal item", saveError));
@@ -17764,84 +17925,45 @@ export function BotcastExperience({
       ) : null}
       <div className={styles.mainNavigation}>{resolvedNavigationHeader}</div>
       {error || notice ? (
-        <aside
-          className={styles.signalToastRegion}
-          aria-label="Signal notifications"
-        >
+        <PrismChromeNoticeViewport ariaLabel="Signal notifications">
           {error ? (
-            <div
-              className={styles.signalToast}
-              data-signal-toast-kind="error"
-              role="alert"
-              data-copy-state={error.copyState ?? undefined}
-            >
-              <button
-                type="button"
-                className={styles.signalToastBody}
-                onClick={() => void copySignalErrorToast()}
-                aria-busy={error.copyState === "copying"}
-                aria-label={
+            <PrismChromeNotice
+              label="Signal error"
+              message={error.summary}
+              tone="error"
+              title={error.summary}
+              action={{
+                label:
+                  error.copyState === "copying"
+                    ? "Copying…"
+                    : error.copyState === "copied"
+                      ? "Copied"
+                      : error.copyState === "failed"
+                        ? "Retry copy"
+                        : "Copy report",
+                ariaLabel:
                   error.copyState === "copied"
-                    ? `Signal error. ${error.summary} Diagnostic report copied to clipboard.`
+                    ? "Diagnostic report copied to clipboard."
                     : error.copyState === "failed"
-                      ? `Signal error. ${error.summary} Couldn’t copy diagnostics. Try again.`
-                      : `Signal error. ${error.summary} Copy Signal diagnostic report to clipboard.`
-                }
-              >
-                <span className={styles.signalToastIcon} aria-hidden="true">
-                  !
-                </span>
-                <span className={styles.signalToastCopy}>
-                  <strong>Signal error</strong>
-                  <small>{error.summary}</small>
-                  <small className={styles.signalToastDiagnosticHint}>
-                    {error.copyState === "copying"
-                      ? "Copying diagnostic report…"
-                      : error.copyState === "copied"
-                        ? "Diagnostic report copied to clipboard."
-                        : error.copyState === "failed"
-                          ? "Couldn’t copy diagnostics. Try again."
-                          : "Click to copy a privacy-safe diagnostic report."}
-                  </small>
-                </span>
-              </button>
-              <button
-                type="button"
-                className={styles.signalToastDismiss}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setError(null);
-                }}
-                aria-label="Dismiss Signal error"
-              >
-                ×
-              </button>
-            </div>
+                      ? "Copy failed. Retry copying the Signal diagnostic report."
+                      : "Copy the privacy-safe Signal diagnostic report.",
+                disabled: error.copyState === "copying",
+                onClick: () => void copySignalErrorToast(),
+              }}
+              onDismiss={() => setError(null)}
+              dismissLabel="Dismiss Signal error"
+            />
+          ) : notice ? (
+            <PrismChromeNotice
+              label="Signal"
+              message={notice}
+              tone="info"
+              title={notice}
+              onDismiss={() => setNotice(null)}
+              dismissLabel="Dismiss Signal update"
+            />
           ) : null}
-          {notice ? (
-            <div
-              className={styles.signalToast}
-              data-signal-toast-kind="notice"
-              role="status"
-            >
-              <span className={styles.signalToastIcon} aria-hidden="true">
-                i
-              </span>
-              <span className={styles.signalToastCopy}>
-                <strong>Signal update</strong>
-                <small>{notice}</small>
-              </span>
-              <button
-                type="button"
-                className={styles.signalToastDismiss}
-                onClick={() => setNotice(null)}
-                aria-label="Dismiss Signal update"
-              >
-                ×
-              </button>
-            </div>
-          ) : null}
-        </aside>
+        </PrismChromeNoticeViewport>
       ) : null}
       {hostChatOpen && selectedShow && hostBot ? (
         <div
@@ -18087,7 +18209,8 @@ export function BotcastExperience({
           <div className={styles.episodeOutroActions}>
             {!episodeOutro.discarded &&
             signalEpisodeImage?.episodeId === episodeOutro.episodeId &&
-            signalEpisodeImage.descriptor.kind === "item" ? (
+            signalEpisodeImage.descriptor.kind === "item" &&
+            signalEpisodeImage.assetLibraryInspection?.alreadySaved === false ? (
               <label className={styles.episodeOutroKeepItem}>
                 <input
                   type="checkbox"
@@ -18103,8 +18226,22 @@ export function BotcastExperience({
                     Optional. It stays session-only unless kept; saving links
                     it to {episodeOutro.episode.guestName ?? "this guest"}.
                   </small>
+                  <small>
+                    Prism keywords: {signalEpisodeImage.assetLibraryInspection.automaticTags.join(" · ")}
+                  </small>
                 </span>
               </label>
+            ) : null}
+            {!episodeOutro.discarded &&
+            signalEpisodeImage?.episodeId === episodeOutro.episodeId &&
+            signalEpisodeImage.descriptor.kind === "item" &&
+            signalEpisodeImage.assetLibraryInspection?.alreadySaved === true ? (
+              <div className={styles.episodeOutroItemStatus}>
+                <strong>Already in Items</strong>
+                <small>
+                  Prism matched this exact upload. Keywords: {signalEpisodeImage.assetLibraryInspection.automaticTags.join(" · ")}
+                </small>
+              </div>
             ) : null}
             {!episodeOutro.discarded &&
               episodeOutro.episode.status === "completed" &&

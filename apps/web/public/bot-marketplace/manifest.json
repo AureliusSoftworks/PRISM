@@ -1,7 +1,7 @@
 {
   "schema": "prism-bot-marketplace-v1",
   "version": 25,
-  "updatedAt": "2026-08-16T06:30:00.000Z",
+  "updatedAt": "2026-08-30T15:37:27.887Z",
   "themes": [
     {
       "id": "originals",
@@ -1403,8 +1403,8 @@
     {
       "id": "identity-crisis-ian",
       "name": "Confusion Collin",
-      "subtitle": "A four-part visual identity glitch",
-      "description": "A brittle visual mirror who borrows an eligible direct addresser's eyes, speaking mouth, Ink, glyph, and quoted public name while retaining his color and complete speech identity.",
+      "subtitle": "A knowing public identity masquerade",
+      "description": "A knowing masquerader who copies an eligible direct addresser's effective public presentation and eligible public Powers while retaining his own persona, color, and complete voice.",
       "botHash": "07c0020559027ab50546b8a9e175b27d",
       "bundlePath": "/bot-marketplace/bots/bot-identity-crisis-ian.bot",
       "memoryCount": 0,
@@ -1415,6 +1415,7 @@
         "power",
         "showcase",
         "identity",
+        "powers",
         "eyes",
         "mouth",
         "face",
@@ -1524,7 +1525,7 @@
         "shapeshift",
         "library",
         "face",
-        "voice"
+        "accent"
       ],
       "marketplaceVisible": false
     },

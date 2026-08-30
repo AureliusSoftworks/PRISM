@@ -2762,7 +2762,7 @@ test("power immunity removes only another bot's active Power layer", () => {
   );
 });
 
-test("identity mirror borrows public target mechanics but excludes recursive and private access", () => {
+test("identity mirror copies public target Powers without recursive or private mechanics", () => {
   const power = (id: string, effects: Parameters<typeof normalizeBotPowerEffectV1>[0][]) => ({
     version: 1 as const,
     id,
@@ -2791,16 +2791,23 @@ test("identity mirror borrows public target mechanics but excludes recursive and
         },
       ]),
       power("recursive", [{ type: "identity_mirror", trigger: "direct_bot_address" }]),
-      power("private-hearing", [{
-        type: "speech_audience",
-        allowed: [{ kind: "bot", name: "Only Me" }],
-      }]),
+      power("mixed-public-private", [
+        { type: "response_budget", mode: "brief", enforcement: "hard" },
+        {
+          type: "awareness",
+          allowed: [{ kind: "bot", name: "Secret Witness" }],
+        },
+        {
+          type: "speech_audience",
+          allowed: [{ kind: "bot", name: "Only Me" }],
+        },
+      ]),
     ],
   );
 
   assert.deepEqual(
     composed.map((candidate) => candidate.id),
-    ["holder", "identity-mirror:forgetful"],
+    ["holder", "identity-mirror:forgetful", "identity-mirror:mixed-public-private"],
   );
   assert.equal(botPowerEternallyIntroducesV1(composed), true);
   assert.equal(botPowerBelievesFalseNameV1(composed), true);
@@ -2812,7 +2819,16 @@ test("identity mirror borrows public target mechanics but excludes recursive and
       continuity: "session_sticky_until_amnesia",
       pool: "mixed_persona_names",
     },
+    { type: "response_budget", mode: "brief", enforcement: "hard" },
   ]);
+  assert.doesNotMatch(
+    buildBotPowersSelfPromptV1(composed),
+    /mixed-public-private self cue|Secret Witness/i,
+  );
+  assert.match(
+    buildBotPowersSelfPromptV1(composed),
+    /eligible public mechanics of \"mixed-public-private\"/i,
+  );
   assert.deepEqual(
     normalizeBotPowerEffectV1({
       type: "false_name",
@@ -2839,7 +2855,8 @@ test("identity mirror borrows public target mechanics but excludes recursive and
     activeBotPowerEffectsV1(composed).some(
       (effect) =>
         effect.type === "identity_mirror" ||
-        effect.type === "speech_audience",
+        effect.type === "speech_audience" ||
+        effect.type === "awareness",
     ),
     false,
   );

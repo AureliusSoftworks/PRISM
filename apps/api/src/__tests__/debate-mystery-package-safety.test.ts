@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import type { MansionPackageManifestV1 } from "@localai/shared";
+import {
+  WHODUNNIT_PROP_ARCHETYPE_IDS_V1,
+  type MansionPackageManifestV1,
+} from "@localai/shared";
 import { zipSync } from "fflate";
 import sharp from "sharp";
 import type { InternalMansionPackageV1 } from "../debate-mystery-mansion-codec.ts";
@@ -73,6 +76,52 @@ function packageWithImage(args: {
   return { manifest, assets: new Map([[archivePath, args.bytes]]) };
 }
 
+async function packageWithPropTheme(hasTransparency: boolean): Promise<InternalMansionPackageV1> {
+  const room = await sharp({
+    create: { width: 4, height: 3, channels: 4, background: "#6a3bb7" },
+  }).webp().toBuffer();
+  const packageData = packageWithImage({ bytes: room });
+  packageData.manifest.formatVersion.minor = 1;
+  packageData.manifest.propTheme = {
+    version: 1,
+    registryVersion: 1,
+    variants: [],
+  };
+  for (const [index, archetypeId] of WHODUNNIT_PROP_ARCHETYPE_IDS_V1.entries()) {
+    const pixels = Buffer.from([
+      20 + index, 40, 60, 255,
+      20 + index, 40, 60, 255,
+      20 + index, 40, 60, 255,
+      0, 0, 0, hasTransparency ? 0 : 255,
+    ]);
+    const bytes = await sharp(pixels, {
+      raw: { width: 2, height: 2, channels: 4 },
+    }).webp({ lossless: true }).toBuffer();
+    const digest = sha256(bytes);
+    const archivePath = `assets/${digest}.webp`;
+    const id = `prop-${archetypeId}`;
+    packageData.manifest.assets.push({
+      id,
+      role: "prop",
+      archivePath,
+      sha256: digest,
+      byteLength: bytes.byteLength,
+      mimeType: "image/webp",
+      width: 2,
+      height: 2,
+      durationMs: null,
+    });
+    packageData.manifest.propTheme.variants.push({
+      archetypeId,
+      displayName: `Theme ${archetypeId}`,
+      appearanceDescription: `A themed ${archetypeId}.`,
+      packageAssetId: id,
+    });
+    packageData.assets.set(archivePath, bytes);
+  }
+  return packageData;
+}
+
 describe("portable mystery package import safety", () => {
   it("preflights a normal archive without inflating it", () => {
     const hash = "a".repeat(64);
@@ -134,6 +183,19 @@ describe("portable mystery package import safety", () => {
       validatePortableMansionMediaV1(packageWithImage({ bytes: Buffer.from("RIFF0000WEBPnot-an-image") })),
       /could not be decoded/u,
     );
+  });
+
+  it("requires transparent alpha only for opted-in complete mansion prop themes", async () => {
+    await validatePortableMansionMediaV1(await packageWithPropTheme(true));
+    await assert.rejects(
+      validatePortableMansionMediaV1(await packageWithPropTheme(false)),
+      /themed prop must retain transparency/u,
+    );
+
+    const opaqueLegacy = await sharp({
+      create: { width: 4, height: 3, channels: 3, background: "#6a3bb7" },
+    }).webp().toBuffer();
+    await validatePortableMansionMediaV1(packageWithImage({ bytes: opaqueLegacy }));
   });
 
   it("walks MPEG frames for duration and rejects signature-only audio", () => {

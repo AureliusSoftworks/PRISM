@@ -210,7 +210,10 @@ import {
   listenerReactionHasAudio,
   botNaturalAddressAliasesV1,
   botIdentityMirrorFaceV1,
+  botIdentityPresentationColorV1,
+  botIdentityPresentationFrameMaterialSeedV1,
   botIdentityPresentationGlyphV1,
+  botIdentityPresentationVoicePresetV1,
   botIdentityMirrorHolderPromptV1,
   botIdentityMirrorObserverPromptV1,
   botIdentityMirrorOriginalCorrectionRequiredV1,
@@ -224,6 +227,8 @@ import {
   createBotFalseNameStateV1,
   coffeeStageActionFromStageAction,
   createBotIdentityMirrorStateV1,
+  resolveBotIdentityPublicPresentationV1,
+  resolveBotIdentityShapeshiftVoiceV1,
   COFFEE_SESSION_DURATION_MINUTES_MAX,
   COFFEE_SESSION_DURATION_MINUTES_MIN,
   COFFEE_BAR_ORDER_MAX_LENGTH,
@@ -14654,7 +14659,7 @@ export function buildSpeakerPrompt(args: {
   peerAddressByBotId?: ReadonlyMap<string, string>;
   /** Compact, already-resolved Coffee-only power context for this speaker. */
   coffeePowersPrompt?: string | null;
-  /** Persisted visual-only Identity Crisis state. */
+  /** Persisted Identity Crisis presentation target; copied public mechanics are supplied separately. */
   identityMirrorPrompt?: string | null;
   /** Active holder snapshot used only by replay/presentation. */
   identityMirrorState?: BotIdentityMirrorStateV1 | null;
@@ -14748,11 +14753,13 @@ export function buildSpeakerPrompt(args: {
     speaker.flirtEnabled === true,
     undefined,
     {
-      // Identity Crisis is visual-only; Shapeshifter copies the form.
-      audioVoiceProfile:
-        identityShapeshiftState?.targetVoice ??
-        speaker.audioVoiceProfileOverride ??
+      // Identity Crisis is visual-only; Shapeshifter keeps holder timbre and
+      // overlays only the target Accent Map region/enablement.
+      audioVoiceProfile: resolveBotIdentityShapeshiftVoiceV1(
+        identityShapeshiftState,
         speaker.authoredAudioVoiceProfile,
+        speaker.audioVoiceProfileOverride,
+      ),
     },
   );
   const cloneIdentityPrompt = buildCloneFamilyIdentityPrompt(speaker, group);
@@ -20375,6 +20382,10 @@ async function generateCoffeeBotReply(args: {
           holderBotId: speaker.id,
           holderBotName: speaker.name,
           candidate,
+          holderVoice: resolveBotAudioVoiceProfileV1(
+            speaker.authoredAudioVoiceProfile,
+            speaker.audioVoiceProfileOverride,
+          ),
           sourceMessageId: `shapeshift-pending:${row.id}:${speaker.id}:${speakerVisibleHistory.length}`,
           occurredAt: new Date().toISOString(),
         });
@@ -21676,6 +21687,23 @@ async function generateCoffeeBotReply(args: {
         identityMirrorHolder.id,
       )
     : false;
+  const speakerPublicPresentation = resolveBotIdentityPublicPresentationV1({
+    base: {
+      name: speaker.name,
+      personaPrompt: speaker.systemPrompt,
+      face: botIdentityMirrorFaceV1(speaker),
+      avatarDetails: speaker.avatarDetails ?? null,
+      glyph: botIdentityPresentationGlyphV1(speaker.glyph),
+      color: botIdentityPresentationColorV1(speaker.color),
+      voicePreset: botIdentityPresentationVoicePresetV1(speaker.systemPrompt),
+      frameMaterialSeed: botIdentityPresentationFrameMaterialSeedV1({
+        targetBotId: speaker.id,
+        exportHash: speaker.exportHash,
+      }),
+    },
+    mirror: activeIdentityMirrorState,
+    shapeshift: activeIdentityShapeshiftState,
+  });
   const identityMirrorState =
     identityMirrorHolder &&
     identityMirrorHolder.id !== speaker.id &&
@@ -21686,15 +21714,15 @@ async function generateCoffeeBotReply(args: {
           holderBotId: identityMirrorHolder.id,
           holderBotName: identityMirrorHolder.name,
           targetBotId: speaker.id,
-          targetBotName: speaker.name,
-          targetPersonaPrompt: speaker.systemPrompt,
-          targetFace: botIdentityMirrorFaceV1(speaker),
-          targetAvatarDetails: speaker.avatarDetails ?? null,
+          targetBotName: speakerPublicPresentation.name,
+          targetPersonaPrompt: speakerPublicPresentation.personaPrompt,
+          targetFace: speakerPublicPresentation.face,
+          targetAvatarDetails: speakerPublicPresentation.avatarDetails,
           holderVoice: resolveBotAudioVoiceProfileV1(
             identityMirrorHolder.authoredAudioVoiceProfile,
             identityMirrorHolder.audioVoiceProfileOverride,
           ),
-          targetGlyph: botIdentityPresentationGlyphV1(speaker.glyph),
+          targetGlyph: speakerPublicPresentation.glyph,
           sourceMessageId: assistantMessageId,
           occurredAt: assistantNow,
         })
@@ -21961,6 +21989,7 @@ async function generateCoffeeBotReply(args: {
         avatarDetails: pendingIdentityShapeshiftState.targetAvatarDetails ?? null,
         voice: pendingIdentityShapeshiftState.targetVoice,
       },
+      holderVoice: pendingIdentityShapeshiftState.holderVoice,
       sourceMessageId: assistantMessageId,
       occurredAt: assistantNow,
     });

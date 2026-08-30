@@ -486,6 +486,80 @@
   color: var(--fg);
 }
 
+.capabilityCard {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--accent, #8b5cf6) 34%, transparent);
+  border-radius: 0.8rem;
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--accent, #8b5cf6) 10%, transparent), transparent 72%),
+    color-mix(in srgb, var(--bg-surface) 92%, transparent);
+}
+
+.capabilityCard > header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.capabilityCard > header > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.capabilityCard small {
+  color: var(--fg-muted);
+  line-height: 1.35;
+}
+
+.capabilityCard > header > span {
+  flex: 0 0 auto;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  color: var(--fg-muted);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  font-size: 0.66rem;
+  text-transform: capitalize;
+}
+
+.capabilityCard > header > span[data-status="ready"] {
+  color: color-mix(in srgb, #72e6ab 76%, var(--fg));
+  background: color-mix(in srgb, #2ec27e 13%, transparent);
+}
+
+.capabilityCard > header > span[data-status="needs_review"] {
+  color: color-mix(in srgb, #f6c66d 80%, var(--fg));
+}
+
+.capabilityCard textarea {
+  resize: vertical;
+}
+
+.capabilityCard details {
+  display: grid;
+  gap: 0.65rem;
+  padding-top: 0.15rem;
+}
+
+.capabilityCard details[open] summary {
+  margin-bottom: 0.65rem;
+}
+
+.capabilityCard summary {
+  cursor: pointer;
+  color: var(--fg-muted);
+  font-weight: 650;
+}
+
+.capabilityCard > footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .assetCard > img[data-viewport-loaded="false"],
 .detail > img[data-viewport-loaded="false"] {
   min-height: 8rem;
