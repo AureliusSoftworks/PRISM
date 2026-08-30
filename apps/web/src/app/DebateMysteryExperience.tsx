@@ -1440,7 +1440,11 @@ export function DebateMysteryPlay(
   const theoryMode = theoryBoardOpen || state.playPhase === "theory";
   const theoryClaimOptions = debateMysteryTheoryClaimOptions(state);
   const investigationMusicMix = mysteryInvestigationMusicMix({
-    theoryBoardOpen,
+    caseFileOpen,
+    outside: false,
+    roomComplete: false,
+    roomIntroductionActive: false,
+    roomView: "mansion",
   });
   const theoryChecklist = [
     { label: "Accused", complete: Boolean(theoryAccused) },

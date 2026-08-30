@@ -11,6 +11,7 @@ const signal = read("./BotcastExperience.tsx");
 const signalCss = read("./botcast.module.css");
 const debate = read("./DebateExperience.tsx");
 const debateCss = read("./DebateExperience.module.css");
+const flyting = read("./DebateFlyting.tsx");
 const tutorials = read("./modeTutorials.ts");
 
 describe("bot-grid hue lens contract", () => {
@@ -33,6 +34,11 @@ describe("bot-grid hue lens contract", () => {
     assert.equal((debate.match(/<BotPickerGrid\b/gu) ?? []).length, 1);
     assert.match(debate, /className=\{styles\.castPickerHueLens\}/u);
     assert.match(debateCss, /\.castPickerHueLens input\[type="range"\]\s*\{[^}]*writing-mode:\s*vertical-lr/u);
+
+    assert.equal((flyting.match(/<BotPickerGrid\b/gu) ?? []).length, 1);
+    assert.match(flyting, /className=\{studioStyles\.castPickerHueLens\}/u);
+    assert.match(flyting, /aria-label="Browse Flyting cast bots by hue"/u);
+    assert.match(flyting, /aria-label="Clear Flyting cast hue lens"/u);
 
     assert.match(tutorials, /long horizontal hue lens browses the canvas grid/u);
     assert.match(tutorials, /card grid has its own vertical hue lens on the right/u);

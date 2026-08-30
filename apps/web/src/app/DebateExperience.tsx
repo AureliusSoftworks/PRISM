@@ -47,7 +47,8 @@ import {
   DEBATE_SIDE_LABEL_MAX_LENGTH,
   DEBATE_SETUP_PRESETS,
   BOT_IDENTITY_PRESENTATION_TRANSITION_MS,
-  botIdentityMirrorQuotedTargetNameV1,
+  botIdentityMirrorPublicNameV1,
+  botIdentityShapeshiftQuotedTargetNameV1,
   botPowerIsBreathlessV1,
   pickBotSessionSurnameNameV1,
   botIdentityPresentationTransitionActiveV1,
@@ -89,6 +90,7 @@ import {
   modelSupportsTurboMode,
   normalizeBotAudioVoiceControl,
   normalizeBotAudioVoiceProfileV1,
+  proceduralPortableCaseThumbnailDataUrlV1,
   hexToHsl,
   type DebateAdvocacyConsent,
   type DebateArchiveReturnBufferPhaseV1,
@@ -106,6 +108,7 @@ import {
   type DebateMysteryCaseCodeV1,
   type DebateMysteryDifficulty,
   type DebateMysteryMansionBundleSummaryV1,
+  type PortableCaseLibrarySummaryV1,
   type MansionLayoutV2,
   type DebateMysteryPresetId,
   type DebateMysteryRoomNarrationAppearanceV2,
@@ -196,10 +199,18 @@ import {
   type MansionPackageInspectionV1,
 } from "./mansionPackageClient";
 import InstalledMansionLibrary from "./InstalledMansionLibraryPanel";
+import InstalledCaseLibraryPanel from "./InstalledCaseLibraryPanel";
+import {
+  downloadCasePackageV1,
+  inspectCasePackageFileV1,
+  installCasePackageFileV1,
+  type CasePackageInspectionV1,
+} from "./casePackageClient";
 import MansionEditorDialog from "./MansionEditorDialog";
 import { validateMansionMusicCandidateUrlV1 } from "./mansionMusicValidation";
 import WhodunnitSetupDialog from "./WhodunnitSetupDialog";
 import {
+  frozenMansionExteriorThumbnailAssetIdV1,
   installedMansionThumbnailSourceV1,
   randomInstalledMansionIdV1,
   resolveInstalledMansionPresentationV1,
@@ -257,6 +268,7 @@ import mysteryStyles from "./debateMystery.module.css";
 import { debateLiveCaptionPage } from "./debateLiveCaption";
 import { debateTranscriptTimelineEntries } from "./debateTranscriptTimeline";
 import type { DebateForumRole } from "./DebateForumScene";
+import { DebateForumAccentKeys } from "./DebateForumAccentKeyLayers";
 import type { BotAvatarFacing } from "./bot-avatar-render-geometry";
 import {
   copyDebateMotionSlate,
@@ -740,6 +752,7 @@ import {
   DebateMysteryV2Play,
   DebateMysteryV2Readiness,
 } from "./DebateMysteryV2Experience";
+import { debateMysteryRestoredAudioPerformanceKeyV2 } from "./debateMysterySfx";
 import {
   DebateFlytingLive,
   DebateFlytingSetup,
@@ -2076,6 +2089,8 @@ const DEBATE_SCENE_RASTERS_BY_THEME: Record<"dark" | "light", string[]> = {
   dark: [
     "/debate/forum-dark.webp",
     "/debate/forum-dark-foreground.png",
+    "/debate/forum-accent-keys.png",
+    "/debate/forum-accent-keys-foreground.png",
     "/debate/forum-light-mask.png",
     "/debate/forum-light-mask-foreground.png",
     "/debate/moderator-dark.webp",
@@ -2088,6 +2103,8 @@ const DEBATE_SCENE_RASTERS_BY_THEME: Record<"dark" | "light", string[]> = {
   light: [
     "/debate/forum-light.webp",
     "/debate/forum-light-foreground.png",
+    "/debate/forum-accent-keys.png",
+    "/debate/forum-accent-keys-foreground.png",
     "/debate/forum-light-mask.png",
     "/debate/forum-light-mask-foreground.png",
     "/debate/moderator-light.webp",
@@ -2175,28 +2192,18 @@ async function decodeMountedDebateStageImages(): Promise<void> {
 }
 
 function DebateForumLightMasks(props: {
+  againstColor: unknown;
   depth: "backdrop" | "foreground";
+  forColor: unknown;
+  moderatorColor: unknown;
 }): React.JSX.Element {
-  const foregroundClass =
-    props.depth === "foreground" ? ` ${styles.lightMaskForeground}` : "";
   return (
-    <>
-      <div
-        className={`${styles.lightMaskFor}${foregroundClass}`}
-        data-light-depth={props.depth}
-        aria-hidden="true"
-      />
-      <div
-        className={`${styles.lightMaskAgainst}${foregroundClass}`}
-        data-light-depth={props.depth}
-        aria-hidden="true"
-      />
-      <div
-        className={`${styles.lightMaskModerator}${foregroundClass}`}
-        data-light-depth={props.depth}
-        aria-hidden="true"
-      />
-    </>
+    <DebateForumAccentKeys
+      againstColor={props.againstColor}
+      depth={props.depth}
+      forColor={props.forColor}
+      moderatorColor={props.moderatorColor}
+    />
   );
 }
 
@@ -4825,18 +4832,18 @@ function debateBotPresentation(
     { holderSpeaking: true },
   );
   // Neither visual Power changes who the chamber is addressing. Shapeshifter
-  // names its complete disguise; Identity Crisis takes the target's quoted
+  // names its complete disguise; Identity Crisis presents as The real target.
   // public name while preserving the holder's mechanical identity.
   const shapeshifting = identityEffect === "identity_shapeshift";
   const identityMirrorDisplayName =
     identityEffect === "identity_mirror" && identitySource
-      ? botIdentityMirrorQuotedTargetNameV1(identitySource.name)
+      ? botIdentityMirrorPublicNameV1(identitySource.name)
       : "";
   return {
     displayName: identityMirrorDisplayName || displayName,
     identityLabel: identitySource
       ? shapeshifting
-        ? `Appearing as ${identitySource.name}`
+        ? `Appearing as ${botIdentityShapeshiftQuotedTargetNameV1(identitySource.name)}`
         : null
       : falseName
         ? `Believes: ${falseName}`
@@ -5001,6 +5008,22 @@ export function DebateExperience(
   const [activeSession, setActiveSession] = useState<DebateSessionV1 | null>(
     null,
   );
+  const [mysteryExteriorIntroStartedSessionId, setMysteryExteriorIntroStartedSessionId] =
+    useState<string | null>(null);
+  useEffect(() => {
+    const visibleTitleSessionId = activeSession?.format === "whodunnit" &&
+      activeSession.formatState.format === "whodunnit" &&
+      activeSession.formatState.version === 2 &&
+      activeSession.formatState.playPhase === "title_card"
+        ? activeSession.id
+        : null;
+    if (
+      mysteryExteriorIntroStartedSessionId &&
+      mysteryExteriorIntroStartedSessionId !== visibleTitleSessionId
+    ) {
+      setMysteryExteriorIntroStartedSessionId(null);
+    }
+  }, [activeSession, mysteryExteriorIntroStartedSessionId]);
   useAppletTranscriptFrameRate(
     "debate",
     activeSession?.id,
@@ -5224,6 +5247,19 @@ export function DebateExperience(
   const [mysteryMansionBundles, setMysteryMansionBundles] = useState<
     DebateMysteryMansionBundleSummaryV1[]
   >([]);
+  const [mysteryCasePackages, setMysteryCasePackages] = useState<
+    PortableCaseLibrarySummaryV1[]
+  >([]);
+  const [mysteryCasePackageId, setMysteryCasePackageId] = useState("");
+  const [caseImportOpen, setCaseImportOpen] = useState(false);
+  const [casePackageFile, setCasePackageFile] = useState<File | null>(null);
+  const [casePackagePassword, setCasePackagePassword] = useState("");
+  const [casePackageInspection, setCasePackageInspection] =
+    useState<CasePackageInspectionV1 | null>(null);
+  const [casePackageState, setCasePackageState] = useState<
+    "idle" | "inspecting" | "installing" | "removing"
+  >("idle");
+  const casePackageInputRef = useRef<HTMLInputElement | null>(null);
   const [blankMansionEditor, setBlankMansionEditor] =
     useState<DebateMysteryMansionBundleSummaryV1 | null>(null);
   const [mysteryMansionBundleId, setMysteryMansionBundleId] = useState("");
@@ -5547,6 +5583,11 @@ export function DebateExperience(
   const archiveReturnLookaheadAbortRef = useRef<AbortController | null>(null);
   /** Guards delayed buffer responses from replacing a session after Start/Resume. */
   const archiveReturnTitleSessionIdRef = useRef<string | null>(null);
+  /** Exact Whodunnit line already heard before returning through Archive. */
+  const mysteryArchiveReturnAudioRef = useRef<{
+    performanceKey: string | null;
+    sessionId: string;
+  } | null>(null);
   /** Reuse the same create key so a failed Start cannot spawn a second proceeding. */
   const startCreateIdempotencyKeyRef = useRef<string | null>(null);
   const activeSessionRef = useRef(activeSession);
@@ -6883,6 +6924,104 @@ export function DebateExperience(
     }
   }, [request]);
 
+  const loadMysteryCasePackages = useCallback(async (): Promise<void> => {
+    try {
+      const result = await request<{ cases: PortableCaseLibrarySummaryV1[] }>(
+        "/api/debates/mystery-cases",
+      );
+      if (mountedRef.current) setMysteryCasePackages(result.cases);
+    } catch (caught) {
+      if (mountedRef.current) {
+        setError(caught instanceof Error ? caught.message : "Reusable cases could not be loaded.");
+      }
+    }
+  }, [request]);
+
+  const chooseInstalledCase = useCallback((caseId: string): void => {
+    const caseFile = mysteryCasePackages.find((candidate) => candidate.id === caseId);
+    if (!caseFile) return;
+    setMysteryCasePackageId(caseFile.id);
+    setMysteryDifficulty(caseFile.difficulty);
+    setJuryEnabled(caseFile.trialType === "jury");
+    setMysterySkipInvestigation(false);
+  }, [mysteryCasePackages]);
+
+  const inspectCasePackage = useCallback(async (file: File, password = ""): Promise<void> => {
+    if (!file.name.toLowerCase().endsWith(".case")) {
+      setError("Choose a PRISM .case package.");
+      return;
+    }
+    setCasePackageFile(file);
+    setCasePackageInspection(null);
+    setCasePackageState("inspecting");
+    setError(null);
+    try {
+      const inspection = await inspectCasePackageFileV1(file, password || undefined);
+      if (mountedRef.current) setCasePackageInspection(inspection);
+    } catch (caught) {
+      if (mountedRef.current) {
+        setError(caught instanceof Error ? caught.message : "That case package could not be inspected.");
+      }
+    } finally {
+      if (mountedRef.current) setCasePackageState("idle");
+    }
+  }, []);
+
+  const installInspectedCase = useCallback(async (): Promise<void> => {
+    if (!casePackageFile || !casePackageInspection || casePackageInspection.locked) return;
+    const duplicateId = casePackageInspection.preview.duplicateCaseId;
+    if (duplicateId) {
+      chooseInstalledCase(duplicateId);
+      setCaseImportOpen(false);
+      return;
+    }
+    setCasePackageState("installing");
+    setError(null);
+    try {
+      const installed = await installCasePackageFileV1(
+        casePackageFile,
+        casePackagePassword || undefined,
+      );
+      if (!mountedRef.current) return;
+      setMysteryCasePackages((current) => [
+        installed,
+        ...current.filter((candidate) => candidate.id !== installed.id),
+      ]);
+      setMysteryCasePackageId(installed.id);
+      setMysteryDifficulty(installed.difficulty);
+      setJuryEnabled(installed.trialType === "jury");
+      setMysterySkipInvestigation(false);
+      setCaseImportOpen(false);
+    } catch (caught) {
+      if (mountedRef.current) {
+        setError(caught instanceof Error ? caught.message : "That case could not be installed.");
+      }
+    } finally {
+      if (mountedRef.current) setCasePackageState("idle");
+    }
+  }, [casePackageFile, casePackageInspection, casePackagePassword, chooseInstalledCase]);
+
+  const removeInstalledCase = useCallback(async (
+    caseFile: PortableCaseLibrarySummaryV1,
+  ): Promise<void> => {
+    setCasePackageState("removing");
+    setError(null);
+    try {
+      await request(`/api/debates/mystery-cases/${encodeURIComponent(caseFile.id)}`, {
+        method: "DELETE",
+      });
+      if (!mountedRef.current) return;
+      setMysteryCasePackages((current) => current.filter((candidate) => candidate.id !== caseFile.id));
+      setMysteryCasePackageId((current) => current === caseFile.id ? "" : current);
+    } catch (caught) {
+      if (mountedRef.current) {
+        setError(caught instanceof Error ? caught.message : "That reusable case could not be removed.");
+      }
+    } finally {
+      if (mountedRef.current) setCasePackageState("idle");
+    }
+  }, [request]);
+
   const pollMansionPropTheme = useCallback((mansionId: string): void => {
     if (mansionPropThemePollsRef.current.has(mansionId)) return;
     mansionPropThemePollsRef.current.add(mansionId);
@@ -7364,6 +7503,7 @@ export function DebateExperience(
       archiveTranscriptCopyResetTimersRef.current;
     void loadSessions();
     void loadMysteryMansionBundles();
+    void loadMysteryCasePackages();
     return () => {
       mountedRef.current = false;
       presentationRunRef.current += 1;
@@ -7433,7 +7573,7 @@ export function DebateExperience(
         speechRevealRunRef.current = null;
       }
     };
-  }, [loadMysteryMansionBundles, loadSessions, onStopUtterance, presentationStore]);
+  }, [loadMysteryCasePackages, loadMysteryMansionBundles, loadSessions, onStopUtterance, presentationStore]);
   useEffect(() => {
     if (view === "live" && props.audioEnabled && props.audioVolume > 0) {
       setDebateIdentAudioVolume(props.audioVolume);
@@ -8399,7 +8539,23 @@ export function DebateExperience(
   const selectedMysteryMansionBundle = mysteryMansionBundles.find(
     (bundle) => bundle.id === mysteryMansionBundleId,
   ) ?? null;
-  const mysteryTargetSuspects = selectedMysteryMansionBundle
+  const selectedMysteryCasePackage = mysteryCasePackages.find(
+    (caseFile) => caseFile.id === mysteryCasePackageId,
+  ) ?? null;
+  const selectedMysteryCaseCompatibilityError = selectedMysteryCasePackage && selectedMysteryMansionBundle
+    ? selectedMysteryMansionBundle.suspectCount !== selectedMysteryCasePackage.suspectCount
+      ? `This case needs exactly ${selectedMysteryCasePackage.suspectCount} suspect rooms.`
+      : selectedMysteryMansionBundle.totalRooms !== selectedMysteryCasePackage.minimumRoomCount
+        ? `This case currently needs a ${selectedMysteryCasePackage.minimumRoomCount}-room mansion so every room remains meaningful.`
+        : selectedMysteryMansionBundle.floors < selectedMysteryCasePackage.minimumFloorCount
+          ? `This case needs at least ${selectedMysteryCasePackage.minimumFloorCount} floors.`
+          : null
+    : selectedMysteryCasePackage
+      ? "Choose an installed mansion for this reusable case."
+      : null;
+  const mysteryTargetSuspects = selectedMysteryCasePackage
+    ? selectedMysteryCasePackage.suspectCount
+    : selectedMysteryMansionBundle
     ? selectedMysteryMansionBundle.suspectCount
     : inspectedMysterySeed
     ? inspectedMysterySeed.seats.length
@@ -8567,7 +8723,9 @@ export function DebateExperience(
   // A Surprise tile is a valid authored random-selection state. The complete
   // distinct cast is resolved and frozen only when the player compiles.
   const mysterySetupValidated = mysteryRoleSelected;
-  if (
+  if (format === "whodunnit" && selectedMysteryCasePackage) {
+    mysterySetupError = selectedMysteryCaseCompatibilityError;
+  } else if (
     format === "whodunnit" &&
     mysteryDistinctLibraryBotCount <
       mysteryCastRequirement + (juryEnabled ? DEBATE_JURY_SIZE : 0)
@@ -13802,6 +13960,7 @@ export function DebateExperience(
     archiveReturnLookaheadAbortRef.current?.abort();
     archiveReturnLookaheadAbortRef.current = null;
     archiveReturnTitleSessionIdRef.current = null;
+    mysteryArchiveReturnAudioRef.current = null;
     const sessionId =
       spectatorBakeSessionIdRef.current ||
       activeSessionIdRef.current ||
@@ -13889,6 +14048,7 @@ export function DebateExperience(
     archiveReturnLookaheadAbortRef.current?.abort();
     archiveReturnLookaheadAbortRef.current = null;
     archiveReturnTitleSessionIdRef.current = null;
+    mysteryArchiveReturnAudioRef.current = null;
     const archiveReturnController = new AbortController();
     archiveReturnBufferAbortRef.current = archiveReturnController;
     const archiveOpenRunId = archiveOpenRunRef.current + 1;
@@ -13922,6 +14082,12 @@ export function DebateExperience(
         session.format === "whodunnit" &&
         session.formatState.format === "whodunnit"
       ) {
+        mysteryArchiveReturnAudioRef.current = {
+          performanceKey: session.formatState.version === 2
+            ? debateMysteryRestoredAudioPerformanceKeyV2(session.formatState)
+            : null,
+          sessionId: session.id,
+        };
         activeSessionIdRef.current = session.id;
         activeSessionRef.current = session;
         setActiveSession(session);
@@ -15107,6 +15273,38 @@ export function DebateExperience(
 
   const startMystery = async (): Promise<void> => {
     if (!mysterySetupValidated || busy) return;
+    if (selectedMysteryCasePackage) {
+      if (!selectedMysteryMansionBundle || selectedMysteryCaseCompatibilityError) {
+        setError(selectedMysteryCaseCompatibilityError ?? "Choose a compatible installed mansion.");
+        return;
+      }
+      setBusy(true);
+      setSetupRestoreNotice(null);
+      setError(null);
+      try {
+        if (!startCreateIdempotencyKeyRef.current) {
+          startCreateIdempotencyKeyRef.current = nextMutationKey("mystery-case-assemble");
+        }
+        const result = await props.request<{ session: DebateSessionV1 }>(
+          `/api/debates/mystery-cases/${encodeURIComponent(selectedMysteryCasePackage.id)}/assemble`,
+          requestBody({
+            mansionBundleId: selectedMysteryMansionBundle.id,
+            idempotencyKey: startCreateIdempotencyKeyRef.current,
+          }),
+        );
+        startCreateIdempotencyKeyRef.current = null;
+        activeSessionIdRef.current = result.session.id;
+        activeSessionRef.current = result.session;
+        setActiveSession(result.session);
+        setView("mystery");
+        void loadSessions();
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "PRISM could not assemble that case and mansion.");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     if (activeCaseForgeSession) {
       setError(null);
       setSetupRestoreNotice(
@@ -18846,9 +19044,16 @@ export function DebateExperience(
     const againstAdvocateVisual = session.advocateVisuals?.find(
       (advocate) => advocate.sideId === "against",
     );
+    const whodunnitMatchup = session.format === "whodunnit";
+    const forMatchupSideLabel = whodunnitMatchup
+      ? session.forTeamName?.trim() || "Prosecution"
+      : "For";
+    const againstMatchupSideLabel = whodunnitMatchup
+      ? session.againstTeamName?.trim() || "Defense"
+      : "Against";
     const matchupLabel =
       forAdvocateVisual && againstAdvocateVisual
-        ? `${forAdvocateVisual.name} versus ${againstAdvocateVisual.name}`
+        ? `${forMatchupSideLabel}: ${forAdvocateVisual.name} versus ${againstMatchupSideLabel}: ${againstAdvocateVisual.name}`
         : null;
     const expanded = expandedArchiveSessionId === group.key;
     const canRestartArchivedProceeding =
@@ -18957,7 +19162,7 @@ export function DebateExperience(
                       })}
                     </span>
                     <span className={styles.archiveChipCombatantCopy}>
-                      <small>For</small>
+                      <small>{forMatchupSideLabel}</small>
                       <b>{forAdvocateVisual.name}</b>
                     </span>
                   </span>
@@ -18984,7 +19189,7 @@ export function DebateExperience(
                       })}
                     </span>
                     <span className={styles.archiveChipCombatantCopy}>
-                      <small>Against</small>
+                      <small>{againstMatchupSideLabel}</small>
                       <b>{againstAdvocateVisual.name}</b>
                     </span>
                   </span>
@@ -19624,7 +19829,9 @@ export function DebateExperience(
     if (format === "flyting") {
       return (
         <DebateFlytingSetup
+          archiveCount={sessions.length}
           bots={bots}
+          botGroups={botGroups}
           theme={props.theme}
           preferredProvider={props.preferredProvider}
           responseMode={props.responseMode}
@@ -19633,8 +19840,31 @@ export function DebateExperience(
           modelOverride={props.modelOverride}
           request={request}
           renderBotGlyph={props.renderBotGlyph}
+          renderBotAvatar={props.renderBotAvatar}
+          onBotContextMenu={props.onBotContextMenu}
+          onBotContextLongPressStart={props.onBotContextLongPressStart}
+          onBotContextLongPressMove={props.onBotContextLongPressMove}
+          onBotContextLongPressEnd={props.onBotContextLongPressEnd}
           onBackToFormats={() => setFormat("forum")}
+          onFormatChange={(nextFormat) => {
+            setFormat(nextFormat);
+            setPlayerRole((current) =>
+              debatePlayerRoleAfterFormatSelection(current, nextFormat),
+            );
+            if (nextFormat === "whodunnit") {
+              setFormality((current) =>
+                current === "plainspoken" ? "structured" : current,
+              );
+              setCastTuningOpen(true);
+            }
+            setRoleChecks([]);
+          }}
           onExit={props.onExit}
+          onOpenArchive={() => {
+            setFormat("forum");
+            setStudioPanel("archive");
+          }}
+          onResetTutorial={props.onResetTutorial}
           onStart={(session) => {
             activeSessionIdRef.current = session.id;
             activeSessionRef.current = session;
@@ -20132,11 +20362,9 @@ export function DebateExperience(
     const page = WHODUNNIT_SETUP_PAGES[pageIndex]!;
     const pageCopy: Record<WhodunnitSetupPage, string> = {
       mansion: "Choose where this mystery happens. You can use a house you already installed or ask PRISM to build a new one.",
-      story: "Give PRISM one creative direction, or leave it blank for a coherent surprise. The sealed recipe always stays fair.",
+      story: "Forge a fresh sealed case, or pair an installed .case with this mansion and skip case synthesis.",
       experience: "Choose the courtroom tone and whether you want to investigate the mansion before trial.",
-      production: selectedMysteryMansionBundle
-        ? "Choose how this mansion's reusable props and music should be prepared."
-        : "Choose which presentation layers PRISM should prepare. Safe bundled defaults are already selected.",
+      production: "Choose optional clue visuals and music. Ready mansion variants or PRISM’s bundled clue props always keep the case playable.",
     };
     const mansionStepReady =
       mysteryMansionSource === "new" || Boolean(mysteryMansionBundleId);
@@ -20145,12 +20373,21 @@ export function DebateExperience(
     );
     const currentPageReady =
       mysterySetupPage !== "mansion" || mansionStepReady;
+    const reusableCaseReady = Boolean(
+      selectedMysteryCasePackage &&
+      selectedMysteryMansionBundle &&
+      !selectedMysteryCaseCompatibilityError,
+    );
     const goToPage = (nextPage: WhodunnitSetupPage): void => {
       setStudioPanel("motion");
       setMysterySetupPage(nextPage);
     };
     const continueSetup = (): void => {
       if (!currentPageReady) return;
+      if (selectedMysteryCasePackage) {
+        if (reusableCaseReady) void startMystery();
+        return;
+      }
       const nextPage = WHODUNNIT_SETUP_PAGES[pageIndex + 1];
       if (nextPage) {
         goToPage(nextPage.id);
@@ -20190,8 +20427,8 @@ export function DebateExperience(
               <small>{step.detail}</small>
             </button>
           ))}
-          <button type="button" disabled={!mansionStepReady} onClick={() => setStudioPanel("cast")}>
-            <span>05</span><strong>Cast</strong><small>Choose the ensemble</small>
+          <button type="button" disabled={!mansionStepReady || Boolean(selectedMysteryCasePackage && !reusableCaseReady)} onClick={() => selectedMysteryCasePackage ? void startMystery() : setStudioPanel("cast")}>
+            <span>05</span><strong>{selectedMysteryCasePackage ? "Assemble" : "Cast"}</strong><small>{selectedMysteryCasePackage ? "Bind case and mansion" : "Choose the ensemble"}</small>
           </button>
         </nav>
 
@@ -20341,25 +20578,38 @@ export function DebateExperience(
 
         {mysterySetupPage === "story" ? (
           <div className={mysteryStyles.caseDial}>
-            <header className={mysteryStyles.setupStepHeading}><div><small>2</small><h2>Set the story direction</h2></div><span>Optional idea · balanced defaults</span></header>
-            <label className={mysteryStyles.setupField} data-tutorial-target="whodunnit-v2-spark">
-              <span><strong>Mystery spark</strong><em>Optional</em></span>
-              <textarea value={mysteryInspiration} maxLength={2000} rows={4} onChange={(event) => { setMysteryInspiration(event.currentTarget.value); setMysteryNonce(nextMysteryRecipeNonce()); }} placeholder="Leave blank for Surprise me — or describe a mood, era, incident, or story spark." />
-              <small>Story owns premise and tone; it may dress the selected mansion but never replaces its house, scale, or geography. Deterministic case logic—not the writing model—freezes the truth.</small>
-              <div className={mysteryStyles.sparkInterpretation} aria-live="polite">
-                <span>PRISM heard</span>
-                {mysterySparkMotifs.length ? (
-                  <div>
-                    {mysterySparkMotifs.map((motif) => (
-                      <span key={motif.id}>{motif.label}</span>
-                    ))}
-                  </div>
-                ) : (
-                  <small>Leave the spark blank for a seeded surprise.</small>
-                )}
+            <header className={mysteryStyles.setupStepHeading}><div><small>2</small><h2>Choose or forge the case</h2></div><span>Case logic · mansion assets</span></header>
+            <InstalledCaseLibraryPanel
+              cases={mysteryCasePackages}
+              selectedCaseId={mysteryCasePackageId}
+              busy={casePackageState !== "idle" || busy}
+              onSelect={chooseInstalledCase}
+              onForgeNew={() => setMysteryCasePackageId("")}
+              onRemove={(caseFile) => void removeInstalledCase(caseFile)}
+            />
+            <div className={mysteryStyles.guidedSecondaryAction}>
+              <div><strong>Have a case file?</strong><small>Its abstract cover is generated locally from public package metadata.</small></div>
+              <button type="button" onClick={() => setCaseImportOpen(true)}>Install a .case file</button>
+            </div>
+            {selectedMysteryCasePackage ? (
+              <div className={mysteryStyles.quickStartNote} data-compatible={reusableCaseReady ? "true" : "false"}>
+                <span aria-hidden="true">◇</span>
+                <div><strong>{reusableCaseReady ? "Ready to assemble locally." : "Choose a compatible mansion."}</strong><small>{selectedMysteryCaseCompatibilityError ?? "The sealed logic and cast stay fixed; the selected mansion supplies rooms, art, music, and ambience."}</small></div>
               </div>
-            </label>
-            <label className={mysteryStyles.setupField}><span><strong>Difficulty</strong><em>Choose one</em></span><select value={mysteryDifficulty} onChange={(event) => { setMysteryDifficulty(event.currentTarget.value as DebateMysteryDifficulty); setMysteryNonce(nextMysteryRecipeNonce()); }}><option value="casual">Casual · clearer proof</option><option value="classic">Classic · balanced</option><option value="mastermind">Mastermind · layered contradictions</option></select><small>Classic is the balanced default. Mansion size changes length; difficulty changes deduction complexity.</small></label>
+            ) : (
+              <>
+                <label className={mysteryStyles.setupField} data-tutorial-target="whodunnit-v2-spark">
+                  <span><strong>Mystery spark</strong><em>Optional</em></span>
+                  <textarea value={mysteryInspiration} maxLength={2000} rows={4} onChange={(event) => { setMysteryInspiration(event.currentTarget.value); setMysteryNonce(nextMysteryRecipeNonce()); }} placeholder="Leave blank for Surprise me — or describe a mood, era, incident, or story spark." />
+                  <small>Story owns premise and tone; it may dress the selected mansion but never replaces its house, scale, or geography. Deterministic case logic—not the writing model—freezes the truth.</small>
+                  <div className={mysteryStyles.sparkInterpretation} aria-live="polite">
+                    <span>PRISM heard</span>
+                    {mysterySparkMotifs.length ? <div>{mysterySparkMotifs.map((motif) => <span key={motif.id}>{motif.label}</span>)}</div> : <small>Leave the spark blank for a seeded surprise.</small>}
+                  </div>
+                </label>
+                <label className={mysteryStyles.setupField}><span><strong>Difficulty</strong><em>Choose one</em></span><select value={mysteryDifficulty} onChange={(event) => { setMysteryDifficulty(event.currentTarget.value as DebateMysteryDifficulty); setMysteryNonce(nextMysteryRecipeNonce()); }}><option value="casual">Casual · clearer proof</option><option value="classic">Classic · balanced</option><option value="mastermind">Mastermind · layered contradictions</option></select><small>Classic is the balanced default. Mansion size changes length; difficulty changes deduction complexity.</small></label>
+              </>
+            )}
           </div>
         ) : null}
 
@@ -20417,15 +20667,15 @@ export function DebateExperience(
           <div className={mysteryStyles.caseDial} data-tutorial-target="whodunnit-production">
             {!selectedMysteryMansionBundle ? <label className={mysteryStyles.setupField}>Room art <select value={mysteryArtMode} onChange={(event) => { setMysteryArtMode(event.currentTarget.value as DebateMysteryArtMode); setMysteryNonce(nextMysteryRecipeNonce()); }}><option value="bundled">Bundled PRISM rooms</option><option value="generated" disabled={!inspectedMysterySeed}>Generated reskins · Legacy Case Seed</option></select><small>V2 uses aligned bundled rooms; imported V1 Case Seeds retain their generated-reskin option.</small></label> : null}
             <fieldset className={mysteryStyles.assetForgeChoices} data-tutorial-target="whodunnit-v2-assets">
-              <legend>{selectedMysteryMansionBundle ? "Prepare case assets" : "Prepare presentation assets"}</legend>
-              {props.responseMode === "local" ? <p className={mysteryStyles.assetForgeModeNote}><strong>LOCAL stays on this device.</strong> {selectedMysteryMansionBundle ? "PRISM uses ready mansion variants, bundled prop fallbacks, and bundled case music." : "PRISM uses installed art and music, bundled prop fallbacks, and an optional personalized ambience mix."}</p> : null}
+              <legend>Optional clue visuals</legend>
+              <p className={mysteryStyles.assetForgeModeNote}><strong>Every case has clues.</strong> Ready mansion variants are used first; PRISM’s bundled clue props fill any gaps. The choices below only personalize or generate their visuals.{props.responseMode === "local" ? <> <strong>LOCAL stays on this device.</strong> PRISM uses installed art and music, bundled clue cards, and an optional personalized ambience mix.</> : null}</p>
               <label data-enabled={mysteryUseRelevantAssetLibraryProps ? "true" : undefined} data-tutorial-target="whodunnit-v2-personal-props">
                 <input type="checkbox" checked={mysteryUseRelevantAssetLibraryProps} onChange={(event) => { setMysteryUseRelevantAssetLibraryProps(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
-                <span><strong>Use relevant props from my Asset Library</strong><small>Optionally weave up to two compatible Items or Debate exhibits into this case. Their identity is frozen before the case is written; unsuitable objects stay in your Library.</small></span>
+                <span><strong>Use props from my Asset Library</strong><small>Optional · PRISM can weave up to two compatible Items or Debate exhibits into matching clues. This does not change your mansion; their identity is frozen before the case is written.</small></span>
               </label>
               <label data-enabled={props.responseMode !== "local" ? "true" : undefined} aria-disabled={props.responseMode === "local"}>
                 <input type="checkbox" checked={mysteryEvidenceAssetSynthesis && props.responseMode !== "local"} disabled={props.responseMode === "local"} onChange={(event) => { setMysteryEvidenceAssetSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
-                <span><strong>Mansion prop pack</strong><small>{props.responseMode === "local" ? "ONLINE only · LOCAL uses ready mansion variants and PRISM’s 16 bundled prop fallbacks." : "Prioritize the roles this case needs, then complete all 16 reusable themed props in the background. Existing variants and PRISM fallbacks keep play available immediately."}</small></span>
+                <span><strong>Generate setting-matched clue props</strong><small>{props.responseMode === "local" ? "ONLINE only · LOCAL uses ready mansion variants first, then PRISM’s bundled clue props." : "Optional · Prepare reusable themed visuals for the 16 clue roles this mansion may need. Without it, ready mansion variants are used first, then PRISM’s bundled clue props."}</small></span>
               </label>
               {!selectedMysteryMansionBundle ? <label data-enabled={!mysterySkipInvestigation && props.responseMode === "online" ? "true" : undefined} aria-disabled={mysterySkipInvestigation || props.responseMode !== "online"}>
                 <input type="checkbox" checked={mysteryRoomAssetSynthesis && !mysterySkipInvestigation && props.responseMode !== "local"} disabled={mysterySkipInvestigation || props.responseMode === "local"} onChange={(event) => { const enabled = event.currentTarget.checked; setMysteryRoomAssetSynthesis(enabled); if (!enabled) setMysteryIllustratedRoomSynthesis(false); setMysteryNonce(nextMysteryRecipeNonce()); }} />
@@ -20458,9 +20708,9 @@ export function DebateExperience(
         {mysterySetupError || mysteryMansionExteriorError ? <p className={styles.error}>{mysterySetupError ?? mysteryMansionExteriorError}</p> : null}
         <div className={`${styles.panelAdvance} ${mysteryStyles.guidedSetupFooter}`}>
           <button type="button" disabled={!previousPage} onClick={() => previousPage && goToPage(previousPage.id)}><span aria-hidden="true">←</span> Back</button>
-          <span>{!currentPageReady ? "Choose an installed mansion, or switch to Create a new mansion." : pageIndex === WHODUNNIT_SETUP_PAGES.length - 1 ? "Next, choose who will inhabit the case." : `Next: ${WHODUNNIT_SETUP_PAGES[pageIndex + 1]!.label}`}</span>
-          <button type="button" className={mysteryStyles.setupPrimaryAction} disabled={!currentPageReady} onClick={continueSetup}>
-            {pageIndex === WHODUNNIT_SETUP_PAGES.length - 1 ? "Continue to Cast" : "Continue"} <span aria-hidden="true">→</span>
+          <span>{selectedMysteryCasePackage ? selectedMysteryCaseCompatibilityError ?? "Case logic and mansion assets will be bound without Case Forge synthesis." : !currentPageReady ? "Choose an installed mansion, or switch to Create a new mansion." : pageIndex === WHODUNNIT_SETUP_PAGES.length - 1 ? "Next, choose who will inhabit the case." : `Next: ${WHODUNNIT_SETUP_PAGES[pageIndex + 1]!.label}`}</span>
+          <button type="button" className={mysteryStyles.setupPrimaryAction} disabled={!currentPageReady || Boolean(selectedMysteryCasePackage && !reusableCaseReady) || busy} onClick={continueSetup}>
+            {selectedMysteryCasePackage ? busy ? "Assembling…" : "Assemble case" : pageIndex === WHODUNNIT_SETUP_PAGES.length - 1 ? "Continue to Cast" : "Continue"} <span aria-hidden="true">→</span>
           </button>
         </div>
 
@@ -20500,6 +20750,44 @@ export function DebateExperience(
                   {mansionPackageInspection.preview.header.contentWarnings.length > 0 ? <p className={mysteryStyles.mansionPackageWarning}>Content notes: {mansionPackageInspection.preview.header.contentWarnings.join(" · ")}</p> : null}
                   <button type="button" disabled={mansionPackageState !== "idle"} onClick={() => void installInspectedMansion()}>{mansionPackageInspection.preview.duplicateBundleId ? "Use installed mansion" : mansionPackageState === "installing" ? "Installing…" : "Install and use"}</button>
                   <small>Installation stays offline and keeps package assets separate from Images and the Bot Library.</small>
+                </div>
+              </div>
+            ) : null}
+          </section>
+        </WhodunnitSetupDialog>
+
+        <WhodunnitSetupDialog
+          open={caseImportOpen}
+          id="whodunnit-case-import"
+          theme={props.theme}
+          eyebrow="Case Library"
+          title="Install a reusable case"
+          description="Inspect a sealed .case before adding its certified logic and local abstract cover to your library."
+          busy={casePackageState !== "idle"}
+          onClose={() => setCaseImportOpen(false)}
+        >
+          <section className={mysteryStyles.mansionPackageWorkbench} data-tutorial-target="whodunnit-case-import" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const file = event.dataTransfer.files.item(0); if (file) { setCasePackagePassword(""); void inspectCasePackage(file); } }}>
+            <div className={mysteryStyles.mansionPackageDropzone}>
+              <div><strong>Bring in a sealed case</strong><span>Drop a .case here, or open one from this device.</span></div>
+              <button type="button" disabled={casePackageState !== "idle"} onClick={() => casePackageInputRef.current?.click()}>{casePackageState === "inspecting" ? "Inspecting…" : "Choose Case"}</button>
+              <input ref={casePackageInputRef} type="file" accept=".case,application/vnd.prism.case" hidden onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (!file) return; setCasePackagePassword(""); void inspectCasePackage(file); }} />
+            </div>
+            {casePackageInspection?.locked ? (
+              <div className={mysteryStyles.mansionPackagePreview} data-locked="true">
+                <div><small>Password protected</small><h3>{casePackageInspection.header.title}</h3><p>By {casePackageInspection.header.creatorName} · {portableMansionByteLabel(casePackageInspection.header.compressedBytes)}</p></div>
+                <label>Package password<input type="password" value={casePackagePassword} autoComplete="off" onChange={(event) => setCasePackagePassword(event.currentTarget.value)} /></label>
+                <button type="button" disabled={!casePackagePassword || casePackageState !== "idle" || !casePackageFile} onClick={() => casePackageFile && void inspectCasePackage(casePackageFile, casePackagePassword)}>Unlock preview</button>
+              </div>
+            ) : casePackageInspection ? (
+              <div className={mysteryStyles.mansionPackagePreview}>
+                <img src={proceduralPortableCaseThumbnailDataUrlV1(casePackageInspection.preview.thumbnail)} alt="" />
+                <div className={mysteryStyles.mansionPackagePreviewCopy}>
+                  <small>{casePackageInspection.preview.header.creatorSignature ? "Creator signature included" : "Unsigned package"} · {casePackageInspection.preview.header.encryptionMode === "password" ? "Password protected" : "PRISM spoiler seal"}</small>
+                  <h3>{casePackageInspection.preview.title}</h3><p>{casePackageInspection.preview.description}</p>
+                  <div className={mysteryStyles.mansionPackageFacts}><span>{casePackageInspection.preview.difficulty}</span><span>{casePackageInspection.preview.suspectCount} suspects</span><span>{casePackageInspection.preview.minimumRoomCount} rooms</span><span>{casePackageInspection.preview.minimumFloorCount}+ floors</span><span>{casePackageInspection.preview.trialType} trial</span></div>
+                  <p className={mysteryStyles.mansionPackageFinePrint}>By {casePackageInspection.preview.creatorName} · PRISM {casePackageInspection.preview.provenance.prismVersion} · {casePackageInspection.preview.license.name}</p>
+                  <button type="button" disabled={casePackageState !== "idle"} onClick={() => void installInspectedCase()}>{casePackageInspection.preview.duplicateCaseId ? "Use installed case" : casePackageState === "installing" ? "Installing…" : "Install and use"}</button>
+                  <small>Installation and thumbnail rendering stay local. The sealed truth is never exposed in this preview.</small>
                 </div>
               </div>
             ) : null}
@@ -26760,7 +27048,12 @@ export function DebateExperience(
                         className={styles.receiverMatte}
                         aria-hidden="true"
                       />
-                      <DebateForumLightMasks depth="backdrop" />
+                      <DebateForumLightMasks
+                        depth="backdrop"
+                        forColor={forBot.color}
+                        moderatorColor={moderatorBot.color}
+                        againstColor={againstBot.color}
+                      />
                       {stageAlignmentCourtForegroundVisible ? (
                         <div
                           className={mysteryV2Styles.wideCourtComposition}
@@ -26889,7 +27182,12 @@ export function DebateExperience(
                         className={styles.podiumForeground}
                         aria-hidden="true"
                       />
-                      <DebateForumLightMasks depth="foreground" />
+                      <DebateForumLightMasks
+                        depth="foreground"
+                        forColor={forBot.color}
+                        moderatorColor={moderatorBot.color}
+                        againstColor={againstBot.color}
+                      />
                       <DebateEvidencePedestal
                         item={alignmentEvidencePreviewItem}
                         view={evidenceAlignmentView}
@@ -29724,7 +30022,7 @@ export function DebateExperience(
               aria-live="polite"
               aria-atomic="true"
             >
-              {activeEvent.mutePerformance.elapsedCue.replace(/^\*|\*$/gu, "")}
+              Silent response.
             </span>
           ) : null}
           {debateIdentPlaying ? (
@@ -29944,7 +30242,12 @@ export function DebateExperience(
                     style={debateStageAlignmentStyle(stageAlignment)}
                   >
                     <div className={styles.receiverMatte} aria-hidden="true" />
-                    <DebateForumLightMasks depth="backdrop" />
+                    <DebateForumLightMasks
+                      depth="backdrop"
+                      forColor={session.forAdvocate.color}
+                      moderatorColor={session.moderator.color}
+                      againstColor={session.againstAdvocate.color}
+                    />
                     {stageCast.map(
                       ({
                         role,
@@ -30289,7 +30592,12 @@ export function DebateExperience(
                       atmosphereControllerRef={debateAtmosphereControllerRef}
                       onOpen={(item) => setSourceDrawerId(item.value.id)}
                     />
-                    <DebateForumLightMasks depth="foreground" />
+                    <DebateForumLightMasks
+                      depth="foreground"
+                      forColor={session.forAdvocate.color}
+                      moderatorColor={session.moderator.color}
+                      againstColor={session.againstAdvocate.color}
+                    />
                     <DebateModeratorGavel
                       theme={props.theme}
                       color={session.moderator.color ?? "#d9d2ff"}
@@ -31910,8 +32218,10 @@ export function DebateExperience(
         (mansion) => mansion.id === activeMysteryMansionBundleId,
       ) ?? null
     : null;
-  const activeMysteryMansionExteriorUrl = activeMysteryMansionSnapshot?.presentation.thumbnailAssetId
-    ? `/api/debates/mystery-mansions/${encodeURIComponent(activeMysteryMansionSnapshot.sourceBundleId)}/assets/${encodeURIComponent(activeMysteryMansionSnapshot.presentation.thumbnailAssetId)}/file`
+  const frozenMysteryMansionExteriorAssetId =
+    frozenMansionExteriorThumbnailAssetIdV1(activeMysteryMansionSnapshot);
+  const activeMysteryMansionExteriorUrl = frozenMysteryMansionExteriorAssetId
+    ? `/api/debates/mystery-mansions/${encodeURIComponent(activeMysteryMansionSnapshot!.sourceBundleId)}/assets/${encodeURIComponent(frozenMysteryMansionExteriorAssetId)}/file`
     : activeMysteryMansion
       ? installedMansionThumbnailSourceV1(
         activeMysteryMansion,
@@ -31926,6 +32236,10 @@ export function DebateExperience(
     theme: props.theme,
     audioEnabled: props.audioEnabled,
     audioVolume: props.audioVolume,
+    restoredAudioPerformanceKey:
+      mysteryArchiveReturnAudioRef.current?.sessionId === activeSession?.id
+        ? (mysteryArchiveReturnAudioRef.current?.performanceKey ?? null)
+        : null,
     mansionExteriorUrl: activeMysteryMansionExteriorUrl,
     whodunnitTextVoiceMode: props.whodunnitTextVoiceMode,
     playMysteryTextVoice: props.playMysteryTextVoice,
@@ -32044,12 +32358,14 @@ export function DebateExperience(
     activeSession?.format === "whodunnit" &&
     activeSession.formatState.format === "whodunnit" &&
     activeSession.formatState.version === 2 &&
+    mysteryExteriorIntroStartedSessionId !== activeSession.id &&
     mysteryCasePreludeMusicSessionActive(activeSession.formatState.playPhase)
       ? activeSession.formatState.playPhase
       : null;
   const playFlytingEvent = async (
     event: DebateEventV1,
     session: DebateSessionV1,
+    lifecycle?: DebateUtterance["lifecycle"],
   ): Promise<void> => {
     if (
       !props.onUtterance ||
@@ -32073,6 +32389,7 @@ export function DebateExperience(
         playerVoice: event.speakerKind === "player",
         spokenText,
         voiceSourceBotId: speaker?.id ?? null,
+        lifecycle,
       }),
       {
         stallMs: DEBATE_PRESENTATION_FIRST_VOICE_STALL_MS,
@@ -32093,13 +32410,19 @@ export function DebateExperience(
           void loadSessions();
         }}
         onExit={() => {
+          const stopped =
+            activeSession.formatState.format === "whodunnit" &&
+            activeSession.formatState.version === 2 &&
+            activeSession.formatState.compilation.stage === "needs_attention";
           activeSessionIdRef.current = null;
           activeSessionRef.current = null;
           setActiveSession(null);
           setView("dashboard");
-          setStudioPanel("archive");
+          setStudioPanel(stopped ? "motion" : "archive");
           setSetupRestoreNotice(
-            "Case Forge is continuing in the background. You can start another Debate or use other PRISM synthesis while it cooks.",
+            stopped
+              ? "The stopped case remains saved in Archive. Adjust the setup whenever you are ready to try again."
+              : "Case Forge is continuing in the background. You can start another Debate or use other PRISM synthesis while it cooks.",
           );
           void loadSessions();
         }}
@@ -32118,9 +32441,11 @@ export function DebateExperience(
         }}
       /> : <DebateMysteryV2Play
         {...mysterySharedProps}
+        exteriorIntroStarted={mysteryExteriorIntroStartedSessionId === activeSession.id}
         stageAlignmentStyle={debateStageAlignmentStyle(stageAlignment)}
         session={activeSession}
         onSessionChange={adoptMysterySessionChange}
+        onExteriorIntroStart={() => setMysteryExteriorIntroStartedSessionId(activeSession.id)}
         onSaveMansion={async () => {
           const result = await request<{
             mansion: DebateMysteryMansionBundleSummaryV1;
@@ -32136,6 +32461,12 @@ export function DebateExperience(
             );
           }
         }}
+        onExportCase={() => downloadCasePackageV1({
+          sessionId: activeSession.id,
+          caseTitle: activeSession.formatState.format === "whodunnit"
+            ? activeSession.formatState.caseTitle ?? "PRISM-Case"
+            : "PRISM-Case",
+        })}
         transcriptCopyState={transcriptCopyState}
         reviewCopyState={reviewBundleCopyState}
         onCopyVerboseTranscript={copyVerboseTranscript}
@@ -32191,6 +32522,7 @@ export function DebateExperience(
       modelOverride={props.modelOverride}
       request={request}
       renderBotGlyph={props.renderBotGlyph}
+      renderBotAvatar={props.renderBotAvatar}
       session={activeSession}
       audioEnabled={props.audioEnabled}
       audioVolume={props.audioVolume}

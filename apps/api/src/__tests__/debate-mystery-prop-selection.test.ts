@@ -103,7 +103,7 @@ describe("Whodunnit prop binding selection", () => {
     assert.equal(selected.bindingsByEvidenceId[keyNeed.evidenceId]?.visualSource, "mansion");
   });
 
-  it("rewrites identity, observation, and method before prose authoring", () => {
+  it("keeps canonical weapon truth validator-consistent when binding a prop identity", () => {
     const selected = selectWhodunnitEvidencePropBindingsV1({
       needs: [{ evidenceId: "weapon", title: "Hunting knife", object: "hunting knife", observation: "The hunting knife was hidden beneath the desk.", isCanonicalWeapon: true }],
       setting: "A science fiction station.",
@@ -113,10 +113,18 @@ describe("Whodunnit prop binding selection", () => {
     });
     const rebound = applyWhodunnitPropBindingsToScaffoldV1({
       method: "a fatal blow from a hunting knife",
-      evidence: [{ id: "weapon", adjective: "recovered", object: "hunting knife", title: "Recovered hunting knife", observation: "The hunting knife was hidden beneath the desk.", keywords: ["knife"] }],
+      publicOpening: "The first report names a hunting knife as the weapon.",
+      weapon: { descriptor: "hunting knife" },
+      evidence: [{ id: "weapon", adjective: "recovered", object: "hunting knife", title: "Recovered hunting knife", observation: "The hunting knife was hidden beneath the desk.", keywords: ["knife"], isCanonicalWeapon: true }],
     }, selected.bindingsByEvidenceId);
     assert.equal(rebound.evidence[0]?.title, "Red Lightsaber");
     assert.match(rebound.evidence[0]?.observation ?? "", /Its function in this world: Cuts and pierces/u);
     assert.equal(rebound.method, "a fatal blow from a Red Lightsaber");
+    assert.equal(rebound.publicOpening, "The first report names a Red Lightsaber as the weapon.");
+    assert.equal(rebound.weapon.descriptor, "Red Lightsaber");
+    assert.equal(
+      rebound.evidence.find((item) => item.isCanonicalWeapon)?.object,
+      rebound.weapon.descriptor,
+    );
   });
 });

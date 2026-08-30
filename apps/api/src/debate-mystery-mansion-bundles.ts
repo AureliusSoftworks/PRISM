@@ -9,6 +9,7 @@ import {
   MANSION_ATMOSPHERE_ACTIVE_LOGICAL_ID_V1,
   MANSION_ATMOSPHERE_CANDIDATE_LOGICAL_ID_V1,
   MANSION_ATMOSPHERE_PREVIOUS_LOGICAL_ID_V1,
+  autoDecorateMansionLayoutV2,
   canonicalMansionLayoutV2,
   canonicalPortablePackageJsonV1,
   createBlankMansionLayoutV2,
@@ -49,6 +50,7 @@ import {
   cloneDebateMysteryMansionPropVariantsV1,
   getDebateMysteryMansionPropThemeStateV1,
 } from "./debate-mystery-mansion-prop-variants.ts";
+import { applyCuratedImportedMansionDecorationV1 } from "./debate-mystery-mansion-curated-decoration.ts";
 
 interface MansionBundleRow {
   id: string;
@@ -367,12 +369,11 @@ function mansionLibraryPresentation(
       (asset) =>
         asset.role === "presentation" &&
         asset.logicalId !== MANSION_LIBRARY_THUMBNAIL_LOGICAL_ID,
-    )?.id ??
-    assets.find((asset) => asset.role === "room")?.id ??
-    null;
+    )?.id ?? null;
   const validThumbnailOverride = saved.thumbnailAssetId && assets.some(
     (asset) =>
       asset.id === saved.thumbnailAssetId &&
+      asset.role === "presentation" &&
       asset.logicalId === MANSION_LIBRARY_THUMBNAIL_LOGICAL_ID,
   )
     ? saved.thumbnailAssetId
@@ -509,14 +510,45 @@ export function freezeDebateMysteryMansionSnapshotV2(
     ...room,
     neighborIds: [...room.neighborIds].sort(),
   })).sort((left, right) => left.id.localeCompare(right.id));
-  const layoutV2 = mansion.layoutV2
-    ? JSON.parse(canonicalMansionLayoutV2({
-        ...mansion.layoutV2,
-        // Candidates are mutable authoring previews. Only explicitly accepted
-        // room art belongs to a Case snapshot and its canonical layout hash.
-        roomArtCandidates: [],
-      })) as MansionLayoutV2
-    : null;
+  // Case Forge fills missing presentation metadata in its immutable projection.
+  // The installed/imported source stays byte-for-byte unchanged, and existing
+  // authored anchors or room lights remain authoritative.
+  const decorationLineage = mansion.portable?.payloadSha256 ||
+    mansion.portable?.packageId || mansion.id;
+  const decorationSeed = `${mansion.houseStyle.id}:${decorationLineage}`;
+  const legacyRoomAssetIdByRoomId = new Map(
+    (mansion.assets ?? [])
+      .filter((asset) => asset.role === "room" && rooms.some((room) => room.id === asset.logicalId))
+      .map((asset) => [asset.logicalId, asset.id]),
+  );
+  const sourceLayoutV2 = mansion.layoutV2 ?? (() => {
+    const projected = mansionLayoutV2HousePlanFromLegacyRooms(
+      rooms,
+      { seed: decorationSeed },
+    );
+    return {
+      ...projected,
+      entities: projected.entities.map((entity) => {
+        if (entity.kind !== "room") return entity;
+        const acceptedRoomAssetId = legacyRoomAssetIdByRoomId.get(entity.id);
+        return acceptedRoomAssetId ? { ...entity, acceptedRoomAssetId } : entity;
+      }),
+    };
+  })();
+  const curatedLayoutV2 = applyCuratedImportedMansionDecorationV1(
+    sourceLayoutV2,
+    mansion.portable?.payloadSha256,
+  );
+  const decoratedLayoutV2 = autoDecorateMansionLayoutV2({
+    ...curatedLayoutV2,
+    // Candidates are mutable authoring previews. Only explicitly accepted
+    // room art belongs to a Case snapshot and its canonical layout hash.
+    roomArtCandidates: [],
+  }, {
+    seed: decorationSeed,
+    sourceIdentity: decorationLineage,
+  });
+  const layoutV2 = JSON.parse(canonicalMansionLayoutV2(decoratedLayoutV2)) as MansionLayoutV2;
   const transientAssetIds = new Set([
     ...(mansion.layoutV2?.roomArtCandidates.flatMap((candidate) =>
       candidate.assetId ? [candidate.assetId] : []) ?? []),

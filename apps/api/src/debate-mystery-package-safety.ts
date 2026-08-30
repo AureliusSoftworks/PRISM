@@ -11,10 +11,11 @@ const ZIP_STORE = 0;
 const ZIP_DEFLATE = 8;
 const MAX_ENTRY_COUNT = 512;
 const MAX_ENTRY_BYTES = 64 * 1024 * 1024;
+const MAX_COMPONENT_ENTRY_BYTES = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES = 384 * 1024 * 1024;
 const MAX_COMPRESSION_RATIO = 200;
 const MAX_IMAGE_PIXELS = 40_000_000;
-const SAFE_ENTRY_PATH = /^(?:manifest\.json|assets\/[a-f0-9]{64}\.(?:png|webp)|audio\/[a-f0-9]{64}\.(?:mp3|ogg|wav))$/u;
+const SAFE_ENTRY_PATH = /^(?:manifest\.json|assets\/[a-f0-9]{64}\.(?:png|webp)|audio\/[a-f0-9]{64}\.(?:mp3|ogg|wav)|components\/(?:case\.case|mansion\.mansion))$/u;
 
 export class PortableMysteryImportSafetyError extends Error {
   constructor(message: string) {
@@ -99,12 +100,16 @@ export function preflightPortableMysteryArchiveV1(
     const externalAttributes = uint32(archive, cursor + 38);
     const localOffset = uint32(archive, cursor + 42);
     const next = cursor + 46 + nameBytes + extraBytes + entryCommentBytes;
+    const path = safePath(archive.subarray(cursor + 46, cursor + 46 + nameBytes));
+    const maxEntryBytes = path.startsWith("components/")
+      ? MAX_COMPONENT_ENTRY_BYTES
+      : MAX_ENTRY_BYTES;
     if (
       next > end || nameBytes < 1 || diskStart !== 0 ||
       (flags & 0x0001) !== 0 ||
       (compression !== ZIP_STORE && compression !== ZIP_DEFLATE) ||
       compressedBytes === 0xffffffff || uncompressedBytes === 0xffffffff ||
-      compressedBytes > MAX_ENTRY_BYTES || uncompressedBytes > MAX_ENTRY_BYTES ||
+      compressedBytes > maxEntryBytes || uncompressedBytes > maxEntryBytes ||
       (compressedBytes === 0 && uncompressedBytes !== 0) ||
       (uncompressedBytes > 1024 * 1024 && uncompressedBytes > compressedBytes * MAX_COMPRESSION_RATIO)
     ) throw new PortableMysteryImportSafetyError("Package archive entry is unsafe or too large.");
@@ -117,7 +122,6 @@ export function preflightPortableMysteryArchiveV1(
     if (expandedBytes > MAX_EXPANDED_BYTES) {
       throw new PortableMysteryImportSafetyError("Package archive expands beyond its safe limit.");
     }
-    const path = safePath(archive.subarray(cursor + 46, cursor + 46 + nameBytes));
     if (paths.has(path)) throw new PortableMysteryImportSafetyError(`Package archive repeats ${path}.`);
     paths.add(path);
 

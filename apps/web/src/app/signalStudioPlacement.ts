@@ -90,6 +90,25 @@ export function signalStudioSeatColorOrder(
     : { leftColor: guestColor, rightColor: hostColor };
 }
 
+/** Keeps role-owned labels attached to their resolved physical studio seat. */
+export function signalStudioNameplateSide(
+  layout: BotcastStudioLayout | null | undefined,
+  role: BotcastSpeakerRole,
+): "left" | "right" {
+  const normalized = normalizeBotcastStudioLayout(layout);
+  if (normalized.hostBot.x === normalized.guestBot.x) {
+    return role === "host" ? "left" : "right";
+  }
+  const hostIsLeft = normalized.hostBot.x < normalized.guestBot.x;
+  return role === "host"
+    ? hostIsLeft
+      ? "left"
+      : "right"
+    : hostIsLeft
+      ? "right"
+      : "left";
+}
+
 /**
  * Maps the saved on-screen seat to restrained stereo staging. The full
  * left/right range intentionally stays narrow so Signal remains intelligible

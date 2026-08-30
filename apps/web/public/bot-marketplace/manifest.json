@@ -1,7 +1,7 @@
 {
   "schema": "prism-bot-marketplace-v1",
   "version": 25,
-  "updatedAt": "2026-08-30T15:37:27.887Z",
+  "updatedAt": "2026-08-30T18:30:00.000Z",
   "themes": [
     {
       "id": "originals",
@@ -1404,7 +1404,7 @@
       "id": "identity-crisis-ian",
       "name": "Confusion Collin",
       "subtitle": "A knowing public identity masquerade",
-      "description": "A knowing masquerader who copies an eligible direct addresser's effective public presentation and eligible public Powers while retaining his own persona, color, and complete voice.",
+      "description": "A knowing masquerader who publicly becomes The real <effective target name> after an eligible direct address and copies eligible public Powers. He retains his own persona, color, and complete voice. On Signal, he may seize the curtain in the booked guest's face and call the original an impostor.",
       "botHash": "07c0020559027ab50546b8a9e175b27d",
       "bundlePath": "/bot-marketplace/bots/bot-identity-crisis-ian.bot",
       "memoryCount": 0,
@@ -1511,7 +1511,7 @@
       "id": "shapeshifter-sam",
       "name": "Shapeshifter Shannon",
       "subtitle": "A borrowed Library face until memory slips",
-      "description": "A restless morpher who sincerely becomes a different Library bot's complete public form until short-term amnesia forces a reshuffle.",
+      "description": "A restless morpher who sincerely becomes a different Library bot's complete public form until short-term amnesia forces a reshuffle; the borrowed name is always visibly quoted, and her own voice sometimes gives the illusion away.",
       "botHash": "554f1959ba2a942c8a123bfce590d531",
       "bundlePath": "/bot-marketplace/bots/bot-shapeshifter-sam.bot",
       "memoryCount": 0,

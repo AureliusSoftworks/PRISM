@@ -847,9 +847,9 @@ describe("bot-locked Chat lane", () => {
     );
 
     const publicMessage = result.conversation.messages.at(-1);
-    assert.match(
-      publicMessage?.content ?? "",
-      /^\*nods once\* \*sips coffee\* \.{2} \*2 seconds pass without an audible word\.\*$/u,
+    assert.equal(
+      publicMessage?.content,
+      "*nods once* *sips coffee* ......",
     );
     assert.equal(publicMessage?.botPowerMutePerformance?.periodCount, 2);
     assert.equal(publicMessage?.provider, "local");
@@ -1295,9 +1295,9 @@ describe("bot-locked Chat lane", () => {
       },
     );
 
-    assert.match(
-      result.conversation.messages.at(-1)?.content ?? "",
-      /^\*leans closer\* \.{2} \*2 seconds pass without an audible word\.\*$/u,
+    assert.equal(
+      result.conversation.messages.at(-1)?.content,
+      "*leans closer* ......",
     );
     assert.equal(
       result.conversation.messages.at(-1)?.botPowerExactResponse,

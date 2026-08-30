@@ -134,8 +134,8 @@ export const DEBATE_FORMAT_VISUAL_THEMES: Readonly<
     archiveNounPlural: "cases",
   },
   flyting: {
-    accentDark: "#e3bd71",
-    accentLight: "#926b19",
+    accentDark: "#ff4d6d",
+    accentLight: "#b52b48",
     archiveNoun: "contest",
     archiveNounPlural: "contests",
   },

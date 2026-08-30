@@ -64,7 +64,7 @@ describe("chatMiniBotAvatar", () => {
     assert.equal(botAvatarScreenFacingScaleX("left"), "-1");
     assert.match(
       cssSource,
-      /\.upperScreenContent\s*\{[\s\S]*?transform:\s*scaleX\(var\(--chat-mini-bot-upper-screen-facing-scale-x, 1\)\)/,
+      /\.upperScreenContent\s*\{[\s\S]*?transform:\s*translateY\(var\(--chat-mini-bot-upper-screen-nudge-y, 0px\)\)\s*scaleX\(var\(--chat-mini-bot-upper-screen-facing-scale-x, 1\)\)/,
     );
     assert.match(
       cssSource,
@@ -126,6 +126,19 @@ describe("chatMiniBotAvatar", () => {
     assert.match(
       cssSource,
       /\.lowerScreenContent\s*\{[^}]*transform:\s*translate\([^}]*--chat-mini-bot-lower-screen-nudge-x[^}]*--chat-mini-bot-lower-screen-nudge-y[^}]*\)\s*scaleX\(var\(--chat-mini-bot-lower-screen-facing-scale-x, 1\)\)/,
+    );
+  });
+
+  it("keeps compact face ink saturated and optically centered", () => {
+    assert.match(
+      cssSource,
+      /\.root\s*\{[^}]*--chat-mini-bot-upper-screen-nudge-y:\s*clamp\(\s*1px,\s*calc\(var\(--chat-mini-bot-render-size\) \* 0\.02\),\s*2px\s*\)/,
+      "the shared compact face plane needs a small downward optical correction",
+    );
+    assert.match(
+      pageCssSource,
+      /\.coffeeSeatPlateEmoji:is\(\.coffeeSeatMiniAvatarFace, \.emptyStateHeroMiniFace\)\s*\[data-crt-glyph-layer="true"\]\s*\{[^}]*color:\s*var\(--chat-mini-bot-color, var\(--accent\)\)[^}]*background:\s*none[^}]*-webkit-text-fill-color:\s*currentColor/,
+      "compact CRT glyph sources must paint with the bot color instead of the full-size white-hot gradient",
     );
   });
 

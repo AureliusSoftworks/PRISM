@@ -2,11 +2,117 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  SIGNAL_AUTOMATIC_CAMERA_MIN_HOLD_MS,
+  SIGNAL_SPEECH_START_WIDE_HOLD_MS,
+  signalAutomaticCameraPresentationAt,
   signalListenerReactionCameraShot,
   signalLiveAutoCameraShot,
+  signalSpeechStartCameraShot,
 } from "./signalCameraTransition.ts";
 
 describe("Signal automatic camera direction", () => {
+  it("establishes the studio Wide for five seconds after the intro clears", () => {
+    const duringIntro = signalAutomaticCameraPresentationAt({
+      state: null,
+      episodeId: "episode-opening",
+      proposedShot: "left",
+      nowMs: 1_000,
+      introActive: true,
+    });
+    assert.equal(duringIntro.state.shot, "wide");
+
+    const revealed = signalAutomaticCameraPresentationAt({
+      state: duringIntro.state,
+      episodeId: "episode-opening",
+      proposedShot: "left",
+      nowMs: 8_000,
+      introActive: false,
+    });
+    assert.equal(revealed.state.shot, "wide");
+    assert.equal(
+      revealed.nextEvaluationInMs,
+      SIGNAL_AUTOMATIC_CAMERA_MIN_HOLD_MS,
+    );
+
+    const justBeforeCut = signalAutomaticCameraPresentationAt({
+      state: revealed.state,
+      episodeId: "episode-opening",
+      proposedShot: "left",
+      nowMs: 12_999,
+      introActive: false,
+    });
+    assert.equal(justBeforeCut.state.shot, "wide");
+    assert.equal(justBeforeCut.nextEvaluationInMs, 1);
+
+    const readyToCut = signalAutomaticCameraPresentationAt({
+      state: revealed.state,
+      episodeId: "episode-opening",
+      proposedShot: "left",
+      nowMs: 13_000,
+      introActive: false,
+    });
+    assert.equal(readyToCut.state.shot, "left");
+  });
+
+  it("sometimes starts either speaker Wide with a replay-stable choice", () => {
+    for (const speakerShot of ["left", "right"] as const) {
+      const starts = Array.from({ length: 64 }, (_, index) =>
+        signalSpeechStartCameraShot({
+          messageId: `message-${index}`,
+          speakerShot,
+          speechElapsedMs: 0,
+        }),
+      );
+      assert.ok(starts.includes("wide"));
+      assert.ok(starts.includes(speakerShot));
+      assert.deepEqual(
+        starts,
+        Array.from({ length: 64 }, (_, index) =>
+          signalSpeechStartCameraShot({
+            messageId: `message-${index}`,
+            speakerShot,
+            speechElapsedMs: 0,
+          }),
+        ),
+      );
+    }
+    assert.equal(
+      signalSpeechStartCameraShot({
+        messageId: "message-0",
+        speakerShot: "left",
+        speechElapsedMs: SIGNAL_SPEECH_START_WIDE_HOLD_MS,
+      }),
+      "left",
+    );
+  });
+
+  it("blocks every automatic switch until the current shot has held five seconds", () => {
+    const state = {
+      episodeId: "episode-cooldown",
+      shot: "left" as const,
+      switchedAtMs: 2_000,
+      introActive: false,
+    };
+    const held = signalAutomaticCameraPresentationAt({
+      state,
+      episodeId: state.episodeId,
+      proposedShot: "right",
+      nowMs: 6_999,
+      introActive: false,
+    });
+    assert.equal(held.state.shot, "left");
+    assert.equal(held.nextEvaluationInMs, 1);
+
+    const switched = signalAutomaticCameraPresentationAt({
+      state,
+      episodeId: state.episodeId,
+      proposedShot: "right",
+      nowMs: 7_000,
+      introActive: false,
+    });
+    assert.equal(switched.state.shot, "right");
+    assert.equal(switched.state.switchedAtMs, 7_000);
+  });
 
   it("holds Wide while an incoming host voice prepares over the live mic", () => {
     assert.equal(

@@ -22,7 +22,7 @@ export const PORTABLE_MYSTERY_PACKAGE_MAGIC_V1 = "PRISMPKG" as const;
 export const PORTABLE_MANSION_PACKAGE_MIME_V1 = "application/vnd.prism.mansion" as const;
 export const PORTABLE_WHODUNNIT_PACKAGE_MIME_V1 = "application/vnd.prism.whodunnit" as const;
 
-export type PortableMysteryPackageTypeV1 = "mansion" | "whodunnit";
+export type PortableMysteryPackageTypeV1 = "mansion" | "case" | "whodunnit";
 export type PortableMysteryEncryptionModeV1 = "spoiler_seal" | "password";
 export type PortableMysteryAssetRoleV1 =
   | "room"
@@ -408,6 +408,20 @@ export interface WhodunnitPackageRuntimeV1 {
   assetBindings: WhodunnitPackageRuntimeAssetBindingV1[];
 }
 
+export interface WhodunnitPackageComponentReferenceV1 {
+  archivePath: "components/case.case" | "components/mansion.mansion";
+  sha256: string;
+  byteLength: number;
+}
+
+/** New exports carry independently portable building blocks while retaining
+ * the flattened V1 fields below for backward-compatible direct replay. */
+export interface WhodunnitPackageCompositionV1 {
+  version: 1;
+  case: WhodunnitPackageComponentReferenceV1 & { archivePath: "components/case.case" };
+  mansion: WhodunnitPackageComponentReferenceV1 & { archivePath: "components/mansion.mansion" };
+}
+
 /**
  * This manifest lives inside the authenticated package payload. `privateCase`
  * and `proofContract` must never be copied into public headers or projections.
@@ -423,6 +437,7 @@ export interface WhodunnitPackageManifestV1 {
   license: PortableMysteryLicenseV1;
   contentWarnings: string[];
   compatibility: PortableMysteryCompatibilityV1;
+  composition?: WhodunnitPackageCompositionV1;
   mansionManifest: MansionPackageManifestV1;
   mansionManifestSha256: string;
   cast: WhodunnitPackageCastSnapshotV1[];
@@ -635,7 +650,11 @@ export function validateMansionPackageHeaderV1(value: unknown): string[] {
     ...validateCompatibility(value.compatibility, "header.compatibility"),
   ];
   if (value.magic !== PORTABLE_MYSTERY_PACKAGE_MAGIC_V1) errors.push("header.magic is invalid.");
-  if (value.packageType !== "mansion" && value.packageType !== "whodunnit") {
+  if (
+    value.packageType !== "mansion" &&
+    value.packageType !== "case" &&
+    value.packageType !== "whodunnit"
+  ) {
     errors.push("header.packageType is invalid.");
   }
   for (const key of ["title", "creatorName"] as const) {
@@ -1167,6 +1186,23 @@ export function validateWhodunnitPackageManifestV1(value: unknown): string[] {
   if (value.schema !== "prism-whodunnit-package-v1") errors.push("manifest.schema is invalid.");
   for (const key of ["packageId", "title", "description"] as const) {
     if (!isNonEmptyString(value[key])) errors.push(`manifest.${key} is missing.`);
+  }
+  if (value.composition !== undefined) {
+    if (!isRecord(value.composition) || value.composition.version !== 1) {
+      errors.push("manifest.composition is invalid.");
+    } else {
+      for (const [kind, expectedPath] of [
+        ["case", "components/case.case"],
+        ["mansion", "components/mansion.mansion"],
+      ] as const) {
+        const component = value.composition[kind];
+        if (!isRecord(component) || component.archivePath !== expectedPath ||
+            typeof component.sha256 !== "string" || !SHA256_HEX.test(component.sha256) ||
+            !isNonNegativeInteger(component.byteLength) || component.byteLength < 1) {
+          errors.push(`manifest.composition.${kind} is invalid.`);
+        }
+      }
+    }
   }
   const mansionErrors = validateMansionPackageManifestV1(value.mansionManifest);
   errors.push(...mansionErrors.map((error) => `manifest.mansionManifest: ${error}`));

@@ -19141,6 +19141,20 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transform-origin: center center;
 }
 
+/* Compact faces are identity-color LEDs, not white-hot CRT previews. Paint
+   the glyph source itself with the Mini's bot color so scaled custom eye
+   pairs cannot expose the full-size CRT gradient beneath the colored core. */
+.coffeeSeatPlateEmoji:is(.coffeeSeatMiniAvatarFace, .emptyStateHeroMiniFace)
+  [data-crt-glyph-layer="true"] {
+  color: var(--chat-mini-bot-color, var(--accent));
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  -webkit-text-fill-color: currentColor;
+  -webkit-text-stroke: 0;
+  paint-order: fill;
+}
+
 .coffeeSeatPlateEmoji.emptyStateHeroMiniFace
   [data-coffee-plate-emoji-part],
 .coffeeSeatPlateEmoji.emptyStateHeroMiniFace
@@ -76563,6 +76577,10 @@ a.settingsCreditItem:focus-visible {
 :is(
     .zenLiveBotPresencePlate[data-avatar-customizer-preview="true"],
     .signalBotPresencePlate
+  )
+  :is(
+    .zenLiveBotPresenceScreenContentRig,
+    .zenLiveBotPresenceThinkingGlyphAnchor
   )
   :is(.zenLiveBotPresenceFaceGlyph, .zenLiveBotPresenceThinkingGlyph)
   [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]::before {

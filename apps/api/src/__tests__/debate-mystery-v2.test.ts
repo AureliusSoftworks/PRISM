@@ -64,6 +64,13 @@ import {
   importPortableWhodunnitPackageV1,
   inspectPortableWhodunnitPackageV1,
 } from "../debate-mystery-whodunnit-package.ts";
+import {
+  assemblePortableCasePackageV1,
+  exportPortableCasePackageV1,
+  importPortableCasePackageV1,
+  inspectPortableCasePackageV1,
+  listPortableCaseLibraryV1,
+} from "../debate-mystery-case-package.ts";
 import { openPortableMysteryEnvelopeV1 } from "../debate-mystery-package-envelope.ts";
 import {
   resolveAbsoluteUnderDataRoot,
@@ -2899,6 +2906,69 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(privateCase.recordItems.every((item) => item.description.length > 0), true);
   });
 
+  it("keeps a frozen prop identity after non-homicide incident normalization", async () => {
+    const db = testDb();
+    const provider = new V2AuthorProvider();
+    const propName = "Archive Seal";
+    let boundEvidenceId = "";
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      {
+        ...config(),
+        inspiration: "An unexplained disappearance at a winter lodge",
+      },
+      "create-v2-non-homicide-prop-binding",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    const session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      runtime(provider),
+      {
+        resolveEvidencePropBindings: async ({ evidence }) => {
+          const target = evidence[0]!;
+          boundEvidenceId = target.id;
+          return {
+            [target.id]: {
+              version: 1,
+              archetypeId: "key",
+              chosenIdentity: {
+                displayName: propName,
+                appearanceDescription: "A distinct archival seal used as an access key.",
+              },
+              capabilitySnapshot: {
+                whatItDoes: "Authenticates access to a protected archive.",
+                capabilities: ["authenticates access"],
+                limitations: ["does not identify its holder"],
+              },
+              visualSource: "prism",
+              contentSha256: "a".repeat(64),
+            },
+          };
+        },
+        generateWave: async () => playableWave(),
+      },
+    );
+
+    assert.equal(session.status, "waiting_for_player");
+    assert.equal(v2State(session).compilation.stage, "complete");
+    const { privateCase } = getDebateMysteryCaseV2(
+      db,
+      "user-1",
+      session.id,
+    );
+    const boundRecord = privateCase.recordItems.find(
+      (item) =>
+        item.reference.kind === "evidence" &&
+        item.reference.id === boundEvidenceId,
+    );
+    assert.equal(boundRecord?.title, propName);
+    assert.match(boundRecord?.description ?? "", /Archive Seal/iu);
+  });
+
   it("rejects repetitive titles and publishes the polished title from the durable foundation checkpoint", async () => {
     const db = testDb();
     const provider = new DurableCaseTitleV2AuthorProvider();
@@ -5449,10 +5519,15 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(state.playPhase, "investigation");
     assert.equal(state.roomView, "room");
     assert.equal(state.currentRoomId, privateCase.crimeSceneRoomId);
-    assert.throws(
-      () => act(db, session, { action: "move" }, "map-before-visible-sweep"),
-      /finite visible sweep/iu,
+    session = act(db, session, { action: "move" }, "map-before-visible-sweep");
+    assert.equal(v2State(session).roomView, "mansion");
+    session = act(
+      db,
+      session,
+      { action: "move", roomId: privateCase.crimeSceneRoomId },
+      "return-before-visible-sweep",
     );
+    assert.equal(v2State(session).roomView, "room");
     assert.equal(provider.calls, providerCallsBeforeOpening, "opening the case only reuses the compiled briefing");
     const finishRoom = (roomId: string): void => {
       const entered = v2State(session);
@@ -6831,6 +6906,15 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       runtime(provider),
       { generateWave: async () => playableWave() },
     );
+    assert.throws(
+      () => exportPortableCasePackageV1({
+        db,
+        userId: "user-1",
+        sessionId: source.id,
+        prismVersion: "0.15.0",
+      }),
+      /only after its mansion investigation is complete/iu,
+    );
     const sourceState = v2State(source);
     const sourceBundleId = "portable-source-mansion";
     const mansionRooms = sourceState.rooms.length > 0
@@ -6959,6 +7043,58 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       );
       const sourcePrivate = getDebateMysteryCaseV2(db, "user-1", forge.id).privateCase;
       const callsAfterCompile = provider.calls;
+      const caseEnvelope = exportPortableCasePackageV1({
+        db,
+        userId: "user-1",
+        sessionId: forge.id,
+        prismVersion: "0.15.0",
+        creatorName: "Portable Fixture",
+      });
+      assert.equal(inspectPortableCasePackageV1(caseEnvelope).packageType, "case");
+      const installedCase = importPortableCasePackageV1({
+        db,
+        userKey: Buffer.alloc(32, 2),
+        userId: "portable-recipient",
+        envelope: caseEnvelope,
+      });
+      assert.doesNotMatch(installedCase.description, /^A certified reusable/iu);
+      assert.ok(installedCase.description.length > 40);
+      assert.ok(installedCase.storyTags.length >= 1);
+      assert.deepEqual(
+        listPortableCaseLibraryV1(db, Buffer.alloc(32, 2), "portable-recipient")
+          .map(({ description, storyTags }) => ({ description, storyTags })),
+        [{ description: installedCase.description, storyTags: installedCase.storyTags }],
+      );
+      const recipientMansionBundleId = await importPortableMansionPackageV1({
+        db,
+        userKey: Buffer.alloc(32, 2),
+        userId: "portable-recipient",
+        envelope: mansionEnvelope,
+      });
+      const assembled = assemblePortableCasePackageV1({
+        db,
+        userKey: Buffer.alloc(32, 2),
+        userId: "portable-recipient",
+        caseId: installedCase.id,
+        mansionBundleId: recipientMansionBundleId,
+        idempotencyKey: "assemble-reusable-case",
+      });
+      const assembledSession = getDebateSession(db, "portable-recipient", assembled.sessionId);
+      assert.equal(assembledSession.status, "waiting_for_player");
+      assert.equal(v2State(assembledSession).config.mansionBundleId, recipientMansionBundleId);
+      const assembledPrivate = getDebateMysteryCaseV2(
+        db,
+        "portable-recipient",
+        assembled.sessionId,
+      ).privateCase;
+      assert.deepEqual(
+        new Set(
+          v2State(assembledSession).config.mansionSnapshot?.rooms.flatMap((room) =>
+            room.assignedSuspectSeatId ? [room.assignedSuspectSeatId] : []) ?? [],
+        ),
+        new Set(assembledPrivate.actorAccounts.map((account) => account.seatId)),
+      );
+      assert.equal(provider.calls, callsAfterCompile, "case assembly must stay offline and skip authoring");
       const envelope = await exportPortableWhodunnitPackageV1({
         db,
         userKey: Buffer.alloc(32, 1),
@@ -6973,6 +7109,11 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       const authenticated = decodeInternalWhodunnitPackageV1(
         openPortableMysteryEnvelopeV1({ envelope }).payload,
       );
+      assert.deepEqual(
+        [...(authenticated.components?.keys() ?? [])].sort(),
+        ["components/case.case", "components/mansion.mansion"],
+      );
+      assert.equal(authenticated.manifest.composition?.version, 1);
       assert.equal(
         authenticated.manifest.runtime.assetBindings.some(
           (binding) => binding.subjectId === fallbackSubjectId,
@@ -7044,6 +7185,9 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       });
       assert.equal(getDebateSession(db, "user-1", forge.id).status, "cancelled");
 
+      const recipientSessionCountBeforeFailedImport = Number((db.prepare(
+        "SELECT COUNT(*) AS count FROM debate_sessions WHERE user_id = ?",
+      ).get("portable-recipient") as { count: number }).count);
       const failedAudioPaths: string[] = [];
       await assert.rejects(
         importPortableWhodunnitPackageV1({
@@ -7065,7 +7209,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       }
       assert.equal(Number((db.prepare(
         "SELECT COUNT(*) AS count FROM debate_sessions WHERE user_id = ?",
-      ).get("portable-recipient") as { count: number }).count), 0);
+      ).get("portable-recipient") as { count: number }).count), recipientSessionCountBeforeFailedImport);
 
       let collidingAudioPath = "";
       const collidingBytes = Buffer.from("pre-existing portable audio");
@@ -7301,6 +7445,20 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     state = v2State(session);
     assert.equal(state.playPhase, "investigation");
     assert.equal(state.currentRoomId, foyer.id);
+    session = act(db, session, { action: "move" }, "participant-open-map-before-foyer-sweep");
+    assert.equal(v2State(session).roomView, "mansion");
+    const adjacentFoyerRoomId = v2State(session).rooms.find((room) =>
+      room.id !== foyer.id &&
+      ((room.neighborIds ?? []).includes(foyer.id) || (foyer.neighborIds ?? []).includes(room.id))
+    )?.id;
+    assert.ok(adjacentFoyerRoomId, "the authored foyer needs an adjacent room");
+    session = act(
+      db,
+      session,
+      { action: "move", roomId: adjacentFoyerRoomId },
+      "participant-enter-adjacent-room-before-foyer-sweep",
+    );
+    assert.equal(v2State(session).currentRoomId, adjacentFoyerRoomId);
     const restarted = restartDebateMysteryInvestigationV2(
       db,
       "user-1",

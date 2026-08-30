@@ -606,11 +606,11 @@ describe("bot marketplace static catalog", () => {
         ]);
         assert.match(
           entry.description ?? "",
-          /effective public presentation and eligible public Powers.*retaining his own persona, color, and complete voice/iu,
+          /publicly becomes The real <effective target name>.*public Powers.*retains his own persona, color, and complete voice/iu,
         );
         assert.match(
           bundle.botJson.profile?.purpose.statement ?? "",
-          /effective public name.*exact eyes.*resting\/live mouth package.*Avatar Details Ink.*lower glyph/iu,
+          /The real <effective target name>.*exact eyes.*resting\/live mouth package.*Avatar Details Ink.*lower glyph/iu,
         );
         assert.match(
           bundle.botJson.profile?.appearance.description ?? "",
@@ -618,17 +618,17 @@ describe("bot marketplace static catalog", () => {
         );
         assert.match(
           powers[0]?.intent ?? "",
-          /eligible direct bot address.*player Prosecutor.*effective public name.*exact eyes\/blink.*live mouth\/visemes and Custom Speech poses.*Avatar Details Ink.*lower glyph.*eligible public Powers\/consequences/iu,
+          /eligible direct bot address.*The real <effective target name>.*eyes\/blink.*live mouth\/visemes.*Ink.*glyph.*eligible public Powers/iu,
         );
         assert.match(
           powers[0]?.intent ?? "",
-          /Keep Collin's persona, color, chassis\/frame\/spinner, complete voice and Accent Map, bot identity, role, privacy, safety, and mechanics/iu,
+          /Signal bot guest.*freeze before curtain.*introduce show and self.*call (?:the actual )?guest impostor once.*soft tension/iu,
         );
         assert.match(
           powers[0]?.intent ?? "",
-          /copies.*eligible public Powers\/consequences.*Never copy Identity Crisis recursively or private awareness\/audience permissions.*Identity Mirror presentation beats Shapeshifter/iu,
+          /Collin retains persona, color, chassis\/frame\/spinner, complete voice\/Accent Map, bot ID, role, privacy, safety, mechanics.*Never copy recursively or private awareness\/audience permissions/iu,
         );
-        assert.match(powers[0]?.intent ?? "", /replay\/reset is frozen.*No gameplay synthesis/iu);
+        assert.match(powers[0]?.intent ?? "", /replay keeps soft tension/iu);
         assert.doesNotMatch(
           powers[0]?.intent ?? "",
           /complete public audiovisual identity/iu,
@@ -707,11 +707,23 @@ describe("bot marketplace static catalog", () => {
         assert.match(bundle.botJson.systemPrompt ?? "", /random persona name|John\/Jane Doe|believed/iu);
       }
       if (botId === "shapeshifter-sam") {
+        assert.equal(bundle.botJson.exportedAt, "2026-08-30T18:30:00.000Z");
+        assert.match(entry.description ?? "", /quoted.*voice/iu);
         assert.equal(bundle.botJson.bot.color, fullySaturateBotColor("#ff8f5c"));
         assert.equal(bundle.botJson.bot.glyph, "lucideSparkles");
         assert.equal(bundle.botJson.bot.faceEyeCharacter, "∞");
         assert.deepEqual(bundle.botJson.bot.faceThinkingFrames, ["~", "o", "O", "∞"]);
         assert.match(bundle.botJson.bot.voicePreviewLine ?? "", /Library handed me today/iu);
+        assert.match(powers[0]?.intent ?? "", /literal quotation marks/iu);
+        assert.match(powers[0]?.intent ?? "", /occasionally, never obligatorily/iu);
+        assert.match(
+          bundle.botJson.profile?.core.quirks ?? "",
+          /voice mismatch without being forced/iu,
+        );
+        assert.match(
+          powers[0]?.compiled?.selfCue ?? "",
+          /literally double-quoted public name/iu,
+        );
         const shapeshift = powers[0]?.compiled?.effects.find(
           (effect) => effect.type === "identity_shapeshift",
         );

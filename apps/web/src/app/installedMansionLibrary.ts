@@ -1,8 +1,11 @@
 import type {
   DebateMysteryMansionBundleSummaryV1,
   DebateMysteryMansionExteriorScaleClassV1,
+  DebateMysteryMansionSnapshotV2,
 } from "@localai/shared";
 import { debateMysteryMansionExteriorFallbackV1 } from "./debateMysteryMansionExterior.ts";
+
+const MANSION_LIBRARY_THUMBNAIL_LOGICAL_ID = "library-thumbnail-override-v1";
 
 export interface InstalledMansionPresentationV1 {
   title: string;
@@ -31,7 +34,11 @@ export interface InstalledMansionOriginV1 {
 function legacyDefaultThumbnailAssetId(
   mansion: DebateMysteryMansionBundleSummaryV1,
 ): string | null {
-  return mansion.assets?.find((asset) => asset.role === "presentation")?.id ?? null;
+  return mansion.assets?.find(
+    (asset) =>
+      asset.role === "presentation" &&
+      asset.logicalId !== MANSION_LIBRARY_THUMBNAIL_LOGICAL_ID,
+  )?.id ?? null;
 }
 
 export function resolveInstalledMansionPresentationV1(
@@ -50,7 +57,10 @@ export function resolveInstalledMansionPresentationV1(
     : legacyDefaultThumbnailAssetId(mansion);
   const titleOverride = mansion.library?.overrides.title?.trim() || null;
   const descriptionOverride = mansion.library?.overrides.description?.trim() || null;
-  const thumbnailOverrideAssetId = mansion.library?.overrides.thumbnailAssetId ?? null;
+  const fileThumbnailOverride = mansion.library?.overrides.thumbnailAssetId ?? null;
+  const thumbnailOverrideAssetId = fileThumbnailOverride && presentationAssetIds.has(fileThumbnailOverride)
+    ? fileThumbnailOverride
+    : null;
   return {
     title: titleOverride ?? defaultTitle,
     description: descriptionOverride ?? defaultDescription,
@@ -70,6 +80,19 @@ export function installedMansionThumbnailUrlV1(
 ): string | null {
   return assetId
     ? `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}/assets/${encodeURIComponent(assetId)}/file`
+    : null;
+}
+
+/** Legacy case snapshots could freeze the first room image as their cover.
+ * Only a dedicated presentation asset is allowed to represent the exterior. */
+export function frozenMansionExteriorThumbnailAssetIdV1(
+  snapshot: DebateMysteryMansionSnapshotV2 | null | undefined,
+): string | null {
+  const assetId = snapshot?.presentation.thumbnailAssetId ?? null;
+  return assetId && snapshot?.presentation.assets.some(
+    (asset) => asset.id === assetId && asset.role === "presentation",
+  )
+    ? assetId
     : null;
 }
 
@@ -107,7 +130,12 @@ export function installedMansionExteriorPreviewV1(args: {
   const resolvedScaleClass = scaleClass || mansion.scaleClass || "standard";
   const acceptedExteriorScaleClass =
     mansion.derivation?.acceptedExteriorScaleClass ?? mansion.scaleClass ?? "standard";
-  const protectedAssetUrl = installedMansionThumbnailUrlV1(mansion.id, assetId);
+  const protectedAssetId = assetId && mansion.assets?.some(
+    (asset) => asset.id === assetId && asset.role === "presentation",
+  )
+    ? assetId
+    : null;
+  const protectedAssetUrl = installedMansionThumbnailUrlV1(mansion.id, protectedAssetId);
   if (protectedAssetUrl) {
     return {
       url: protectedAssetUrl,

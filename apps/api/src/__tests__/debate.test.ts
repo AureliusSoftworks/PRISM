@@ -2195,7 +2195,6 @@ async function createFlytingTestSession(
       playerSideId: playerRole === "participant" ? "for" : null,
       jury: {
         enabled: true,
-        jurorBotIds: ["hall-1", "hall-2", "hall-3", "hall-4"],
       },
       advocacyConsent: checks,
       preferredProvider: "local",
@@ -13433,10 +13432,8 @@ describe("Debate engine", () => {
       assert.equal(moderatorOpening?.speakerBotId, "moderator");
       assert.equal(botPowerResponseIsSilentV1(moderatorOpening?.content), true);
       assert.ok(moderatorOpening?.mutePerformance);
-      assert.match(
-        moderatorOpening?.content ?? "",
-        /seconds? pass without an audible word/u,
-      );
+      assert.match(moderatorOpening?.content ?? "", /\.{6}$/u);
+      assert.doesNotMatch(moderatorOpening?.content ?? "", /pass without/u);
 
       session = await advanceDebateSession(
         db,
@@ -14241,10 +14238,7 @@ describe("Debate engine", () => {
       assert.equal(moderatorEvents.length, 1);
       assert.equal(moderatorEvents[0]?.kind, "silence");
       assert.ok(moderatorEvents[0]?.mutePerformance);
-      assert.match(
-        moderatorEvents[0]?.content ?? "",
-        /^\.+ \*\d+ seconds pass without an audible word\.\*$/u,
-      );
+      assert.equal(moderatorEvents[0]?.content, "......");
       const disclosure = intro.events.find(
         (event) =>
           event.speakerKind === "system" &&
@@ -15382,6 +15376,11 @@ describe("Flyting V1", () => {
       assert.equal(created.formatState.bout?.title, "The Holly and the Horn");
       assert.equal(created.formatState.bout?.frozenAt !== null, true);
       assert.deepEqual(bout.forbiddenTopics, ["children"]);
+      assert.deepEqual(
+        new Set(created.jury.jurors.map((juror) => juror.id)),
+        new Set(["hall-1", "hall-2", "hall-3", "hall-4"]),
+      );
+      assert.ok(created.jury.jurors.every((juror) => juror.source === "library"));
 
       let session = created;
       for (let index = 0; index < 32 && session.status !== "completed"; index += 1) {

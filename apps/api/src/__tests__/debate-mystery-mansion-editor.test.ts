@@ -153,7 +153,12 @@ describe("source-preserving Mansion Editor storage", () => {
     ).run(
       JSON.stringify({ version: 1, id: "gothic", label: "Private case prompt", promptContract: "Spoiler-free Gothic architecture." }),
       JSON.stringify(sourceRooms()),
-      JSON.stringify({ version: 1, title: "My Violet House", description: "A retained local description.", thumbnailAssetId: null }),
+      JSON.stringify({
+        version: 1,
+        title: "My Violet House",
+        description: "A retained local description.",
+        thumbnailAssetId: "room-thumbnail-impostor",
+      }),
       JSON.stringify({
         packageId: "violet-package",
         payloadSha256: "a".repeat(64),
@@ -173,6 +178,30 @@ describe("source-preserving Mansion Editor storage", () => {
     addRoomAssetRef(db, "foyer-accepted", "foyer:accepted-v2", now);
     addRoomAssetRef(db, "parlor-legacy", "parlor", now);
     addRoomAssetRef(db, "library-candidate", "library:candidate-v2", now);
+    addRoomAssetRef(
+      db,
+      "room-thumbnail-impostor",
+      "library-thumbnail-override-v1",
+      now,
+    );
+
+    const sourcePresentation = getDebateMysteryMansionBundleV2(db, "owner", "source");
+    assert.equal(
+      sourcePresentation.library?.defaults.thumbnailAssetId,
+      null,
+      "room interiors must never become mansion exterior thumbnails",
+    );
+    assert.equal(
+      sourcePresentation.library?.overrides.thumbnailAssetId,
+      null,
+      "a room asset cannot masquerade as a local exterior override",
+    );
+    db.prepare(
+      "DELETE FROM debate_mystery_mansion_asset_refs WHERE bundle_id = 'source' AND asset_id = 'room-thumbnail-impostor'",
+    ).run();
+    db.prepare(
+      "DELETE FROM debate_mystery_mansion_assets WHERE id = 'room-thumbnail-impostor'",
+    ).run();
 
     const clone = cloneDebateMysteryMansionBundleV1(db, "owner", "source");
     assert.notEqual(clone.id, "source");

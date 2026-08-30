@@ -15,6 +15,10 @@ export const BOTCAST_SCREENPLAY_LABEL_PATTERN = new RegExp(
 );
 
 const BOTCAST_GENERIC_HOST_STALL_PATTERNS = [
+  /^I (?:love|like) your (?:energy|point|answer)(?: right now)?[.!?]?$/iu,
+  /^that is optimistic[.!?]?$/iu,
+  /^I saw your hand\b/iu,
+  /^I mean it(?:['’]s| is) over[.!?]?$/iu,
   /^what would you like to (?:explore|talk about|discuss) next\??$/iu,
   /^what do you (?:want to|wanna) (?:talk about|discuss|explore)(?: next)?\??$/iu,
   /^where (?:should|do) we go from here\??$/iu,
@@ -255,20 +259,12 @@ export function botcastUtteranceContainsScreenplayLabels(value: string): boolean
   return BOTCAST_SCREENPLAY_LABEL_PATTERN.test(value);
 }
 
-/** True when a host line is a generic stall instead of an interview question. */
+/** True when a host line is empty praise or a generic stall instead of a contribution. */
 export function botcastHostUtteranceIsGenericStall(value: string): boolean {
   const spoken = spokenForQualityCheck(value).replace(/["'”’]+$/u, "");
   return BOTCAST_GENERIC_HOST_STALL_PATTERNS.some((pattern) =>
     pattern.test(spoken),
   );
-}
-
-/** True when an ordinary host turn fails to return the floor with a question. */
-export function botcastHostUtteranceNeedsInterviewQuestion(
-  value: string,
-): boolean {
-  const spoken = spokenForQualityCheck(value);
-  return Boolean(spoken) && !/\?\s*["”'’)]*$/u.test(spoken);
 }
 
 /** True when a primary guest turn is only a vague reaction or sign-off. */

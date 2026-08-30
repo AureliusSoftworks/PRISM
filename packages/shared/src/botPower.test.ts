@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   COFFEE_POWER_PROMPT_MAX_TOKENS,
   BOT_POWER_CANONICAL_SILENCE_V1,
+  BOT_POWER_MUTE_PUBLIC_MARK_V1,
   BOT_POWER_MAX_COUNT,
   activeBotPowerEffectsV1,
   activeBotPowersV1,
@@ -226,7 +227,7 @@ test("a prompt Power reroll persists only its fresh title and rune presentation"
   );
 });
 
-test("timed mute quantizes post-budget intended speech and renders immediate dots", () => {
+test("timed mute quantizes post-budget intended speech and stores a plain six-dot mark", () => {
   const concise = applyBotPowerResponseBudgetV1(
     "One two three four five six seven eight nine ten eleven twelve thirteen fourteen.",
     { type: "response_budget", mode: "minimal" },
@@ -245,7 +246,10 @@ test("timed mute quantizes post-budget intended speech and renders immediate dot
     "*raises one finger* I meant to explain the whole idea.",
     performance,
   );
-  assert.match(publicResponse, /^\*raises one finger\* \.+ \*\d+ seconds? pass without an audible word\.\*$/u);
+  assert.equal(
+    publicResponse,
+    `*raises one finger* ${BOT_POWER_MUTE_PUBLIC_MARK_V1}`,
+  );
   assert.equal(botPowerResponseIsSemanticSilenceV1(publicResponse), true);
 });
 
@@ -265,7 +269,7 @@ test("semantic silence recognizes legacy and action-plus-period responses", () =
   assert.equal(botPowerResponseIsSemanticSilenceV1("*14 seconds pass*"), false);
 });
 
-test("timed mute public frames begin immediately and defer the elapsed cue", () => {
+test("timed mute public frames stay on the plain six-dot mark", () => {
   const performance = createBotPowerMutePerformanceV1({
     intendedSpeech: "One two three four five six seven eight nine ten.",
     seed: "chat:mute:clock",
@@ -276,19 +280,19 @@ test("timed mute public frames begin immediately and defer the elapsed cue", () 
   );
   assert.equal(
     botPowerMutePublicResponseAtElapsedV1(publicResponse, performance, 0),
-    "*raises a hand* .",
+    `*raises a hand* ${BOT_POWER_MUTE_PUBLIC_MARK_V1}`,
   );
   assert.equal(
     botPowerMutePublicResponseAtElapsedV1(publicResponse, performance, 1_999),
-    "*raises a hand* ..",
+    `*raises a hand* ${BOT_POWER_MUTE_PUBLIC_MARK_V1}`,
   );
-  assert.match(
+  assert.equal(
     botPowerMutePublicResponseAtElapsedV1(
       publicResponse,
       performance,
       performance.durationMs,
     ),
-    /seconds? pass without an audible word/u,
+    `*raises a hand* ${BOT_POWER_MUTE_PUBLIC_MARK_V1}`,
   );
 });
 
@@ -374,11 +378,34 @@ test("mute reaction beats are deterministic, bounded, spaced, and Power-aware", 
     }],
     allowInterrupt: false,
   });
-  const projectedQuip = mumbled.find((beat) => beat.quip)?.quip ?? "";
-  assert.ok(projectedQuip);
-  assert.doesNotMatch(
-    projectedQuip,
-    /take your time|No rush|you good|Awkward silence|Any day|finished|Cat got|Proceed when ready|waiting/iu,
+  assert.equal(mumbled.length, 1);
+  assert.equal(
+    mumbled.every(
+      (beat) => beat.kind === "visual" && !("quip" in beat) && !("foley" in beat),
+    ),
+    true,
+  );
+  const interrupted = planBotPowerMuteReactionBeatsV1({
+    seed: "mute-interrupt:0",
+    durationMs: 30_000,
+    candidates: [{
+      botId: "listener",
+      temperament: "frustrated",
+      mode: "signal",
+      mumbling: true,
+      pronunciationMapPoint: { x: 0.82, y: 0.16 },
+    }],
+    allowInterrupt: true,
+    guaranteedInterruption: true,
+  });
+  const floorBreak = interrupted.find((beat) => beat.kind === "interrupt");
+  assert.ok(floorBreak?.quip);
+  assert.notEqual(floorBreak.quip, "Any day now.");
+  assert.equal(
+    interrupted.filter((beat) => beat.kind !== "interrupt").every(
+      (beat) => beat.kind === "visual" && !("quip" in beat) && !("foley" in beat),
+    ),
+    true,
   );
 });
 
@@ -403,7 +430,7 @@ test("mute reaction density and interruption curves match the timed tiers", () =
   assert.equal(botPowerMuteInterruptionChanceV1(12_000, 0, true), 0.75);
 });
 
-test("a nine-second Signal Mute turn always gives the listener one awkward beat", () => {
+test("a nine-second Signal Mute turn keeps its listener beat visual-only", () => {
   const beats = planBotPowerMuteReactionBeatsV1({
     seed:
       "2d3e93da21bca16e794eae8b:ecfc19c0034e5faf1852f3d0:4:mute",
@@ -419,8 +446,35 @@ test("a nine-second Signal Mute turn always gives the listener one awkward beat"
 
   assert.equal(beats.length, 1);
   assert.equal(beats[0]?.reactorBotId, "57abdbdd9bd7317190854871");
+  assert.equal(beats[0]?.kind, "visual");
+  assert.equal("quip" in beats[0]!, false);
+  assert.equal("foley" in beats[0]!, false);
   assert.ok((beats[0]?.atMs ?? 0) >= 4_000);
   assert.ok((beats[0]?.atMs ?? 0) <= 7_000);
+});
+
+test("the reviewed Quiet Tim episode keeps both ten-second reactions silent", () => {
+  for (const turnOrdinal of [2, 4]) {
+    const beats = planBotPowerMuteReactionBeatsV1({
+      seed:
+        `76e7efe6f7ba6c1b06576efb:876e97f09075d3c2625bb49a:${turnOrdinal}:mute`,
+      durationMs: 10_000,
+      candidates: [{
+        botId: "c94a64ffd34dc1da6f1e1ceb",
+        directAddressee: true,
+        temperament: "frustrated",
+        mood: "calm",
+        mode: "signal",
+      }],
+      allowInterrupt: true,
+    });
+    assert.deepEqual(beats, [{
+      atMs: 5_500,
+      reactorBotId: "c94a64ffd34dc1da6f1e1ceb",
+      kind: "visual",
+      action: "tap_fingers",
+    }]);
+  }
 });
 
 test("mute performance sanitizer rejects malformed private-looking metadata", () => {
@@ -1431,17 +1485,17 @@ test("mute Powers normalize and enforce silent action-aware responses", () => {
   assert.equal(BOT_POWER_CANONICAL_SILENCE_V1, "...");
   assert.equal(
     applyBotPowerMuteResponseV1("*nods once* I can still explain this. *sips coffee*"),
-    "*nods once* *sips coffee* ...",
+    "*nods once* *sips coffee* ......",
   );
   assert.equal(
     applyBotPowerMuteResponseV1("*why* ..."),
-    "...",
+    "......",
   );
   assert.equal(
     applyBotPowerMuteResponseV1("*meets his gaze, then looks away* ..."),
-    "*meets his gaze, then looks away* ...",
+    "*meets his gaze, then looks away* ......",
   );
-  assert.equal(applyBotPowerMuteResponseV1("**emphasis** Spoken words."), "...");
+  assert.equal(applyBotPowerMuteResponseV1("**emphasis** Spoken words."), "......");
   assert.equal(botPowerResponseIsSilentV1("*nods once* ..."), true);
   assert.equal(botPowerResponseIsSilentV1("*nods once* I agree."), false);
   assert.match(botPowerSelfCueLinesV1(powers)[0] ?? "", /substantive ordinary speech/u);

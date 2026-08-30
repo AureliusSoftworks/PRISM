@@ -328,8 +328,7 @@ describe("Coffee timed-Mute floor handoff", () => {
     assert.equal(
       coffeeMessageBelongsInBotPromptHistory({
         role: "assistant",
-        content:
-          ".............. *14 seconds pass without an audible word.*",
+        content: "......",
         botPowerMutePerformance: interruptedPerformance,
       }),
       true,
@@ -12213,7 +12212,7 @@ describe("buildSpeakerPrompt", () => {
       history,
       speaker: { id: "mara", name: "Mara Vale" },
     });
-    assert.match(originalPrompt, /knowingly wearing your current public nameplate and face/iu);
+    assert.match(originalPrompt, /knowingly presenting as The real Mara Vale with your face/iu);
     assert.match(originalPrompt, /copying your eligible public Power mechanics/iu);
     assert.match(originalPrompt, /Do not force an identity dispute/iu);
     assert.match(

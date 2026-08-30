@@ -10,6 +10,11 @@
     calc(var(--chat-mini-bot-render-size) * 0.12)
   );
   /* One shared optical registration for every compact surface. */
+  --chat-mini-bot-upper-screen-nudge-y: clamp(
+    1px,
+    calc(var(--chat-mini-bot-render-size) * 0.02),
+    2px
+  );
   --chat-mini-bot-lower-screen-nudge-x: 1px;
   --chat-mini-bot-lower-screen-nudge-y: 0px;
   --chat-mini-bot-lower-screen-left: 40.6%;
@@ -151,7 +156,8 @@
 }
 
 .upperScreenContent {
-  transform: scaleX(var(--chat-mini-bot-upper-screen-facing-scale-x, 1));
+  transform: translateY(var(--chat-mini-bot-upper-screen-nudge-y, 0px))
+    scaleX(var(--chat-mini-bot-upper-screen-facing-scale-x, 1));
   transition: none;
   backface-visibility: hidden;
 }

@@ -136,7 +136,7 @@ describe("Signal live captions", () => {
     assert.equal(signalLiveCaptionText(reveal, { content: "..." }), "");
   });
 
-  it("reveals a timed Mute performance at exactly one period per second", () => {
+  it("keeps a timed Mute performance on the plain six-dot mark", () => {
     const message = {
       content: ".............. *14 seconds pass without an audible word.*",
       mutePerformance: {
@@ -156,15 +156,15 @@ describe("Signal live captions", () => {
 
     assert.equal(
       signalLiveCaptionText(updateBotcastSpeechReveal(reveal, 0), message),
-      ".",
+      "......",
     );
     assert.equal(
       signalLiveCaptionText(updateBotcastSpeechReveal(reveal, 1_999), message),
-      "..",
+      "......",
     );
     assert.equal(
       signalLiveCaptionText(updateBotcastSpeechReveal(reveal, 14_000), message),
-      ".............. *14 seconds pass without an audible word.*",
+      "......",
     );
   });
 });

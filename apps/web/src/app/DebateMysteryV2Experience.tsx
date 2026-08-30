@@ -36,6 +36,7 @@ import {
   type DebateWhodunnitFormatStateV2,
   type BotFaceStyle,
   type MansionLayoutBlockV2,
+  type MansionDynamicLightV2,
   type MansionTraversalRouteV1,
   type WhodunnitTextVoiceMode,
 } from "@localai/shared";
@@ -50,14 +51,13 @@ import {
   debateMysteryIdentityMirrorFaceV1,
   debateMysteryIdentityMirrorPresentationsV1,
   debateMysteryIdentityMirrorTargetBotSnapshotV1,
-  debateMysteryQuotedIdentityNameV1,
+  debateMysteryPublicIdentityNameV1,
 } from "./debateMysteryIdentityMirror";
 import {
   WHODUNNIT_INVESTIGATION_MUSIC_FADE_MS,
   WHODUNNIT_INVESTIGATION_MUSIC_TRANSITION_MS,
   WHODUNNIT_INVESTIGATION_MUSIC_URL,
   mysteryInvestigationMusicMix,
-  mysteryInvestigationMusicProgramV1,
 } from "./debateMysteryMusic";
 import {
   WHODUNNIT_MANSION_AMBIENCE_FADE_MS,
@@ -67,6 +67,7 @@ import {
 } from "./debateMysteryMansionAmbience";
 import {
   debateMysteryDialoguePresentationDismissed,
+  debateMysteryPreparedAudioShouldStart,
   debateMysteryTextVoiceShouldStart,
   debateMysteryTextVoiceShouldStop,
   playDebateMysterySfx,
@@ -154,12 +155,14 @@ import {
   whodunnitDiscoveredMansionRoomArtV1,
   whodunnitIllustratedRoomSubjectId,
   whodunnitInvestigationAvatarPresentation,
+  whodunnitMansionRoomArtUrl,
   whodunnitSealedRoomArtUrl,
   whodunnitSavedRoomArtUrl,
   writeWhodunnitInvestigationArtStyle,
   type WhodunnitInvestigationArtStyle,
 } from "./debateMysteryInvestigationArt";
 import { DebateMysteryRoomCinematographyLayer } from "./debateMysteryRoomCinematographyLayer";
+import { mysteryRoomUsesTemplateLightGeometryV1 } from "./debateMysteryRoomCinematography";
 import {
   debateMysteryMansionDoorTargetV1,
   debateMysteryMansionExteriorFallbackV1,
@@ -192,6 +195,8 @@ interface V2SharedProps {
   theme: "light" | "dark";
   audioEnabled: boolean;
   audioVolume: number;
+  /** Durable performance already heard before this Archive return. */
+  restoredAudioPerformanceKey?: string | null;
   /** Exterior-only mansion cover used by the library, package, and title card. */
   mansionExteriorUrl?: string | null;
   whodunnitTextVoiceMode?: WhodunnitTextVoiceMode;
@@ -339,11 +344,14 @@ type V2ReviewCopyState = "idle" | "copying" | "copied" | "failed";
 type V2ForgeErrorCopyState = "idle" | "copying" | "copied" | "failed";
 
 interface V2PlayProps extends V2ExperienceProps {
+  exteriorIntroStarted: boolean;
   transcriptCopyState: V2ReviewCopyState;
   reviewCopyState: V2ReviewCopyState;
+  onExteriorIntroStart: () => void;
   onCopyVerboseTranscript: () => Promise<void>;
   onCopyAllReviewData: () => Promise<void>;
   onSaveMansion: () => Promise<void>;
+  onExportCase: () => Promise<void>;
 }
 
 type V2ClientAction<T = DebateMysteryActionRequestV2> = T extends unknown
@@ -363,7 +371,10 @@ interface MysteryMansionTravelPresentationV1 {
   toRoom: DebateMysteryRoomV2;
   durationMs: number;
   startedAtMs: number;
+  returningFromExterior?: boolean;
 }
+
+const MYSTERY_MANSION_OUTSIDE_SELECTION_ID = "mansion:outside";
 
 const FORGE_STAGES: Array<{
   id: DebateMysteryCompilationStageV2 | "begin_case";
@@ -485,7 +496,7 @@ function mysteryIdentityMirrorAppearance(
   });
   return {
     ...holder,
-    name: debateMysteryQuotedIdentityNameV1(copiedName),
+    name: debateMysteryPublicIdentityNameV1(copiedName),
     glyph: appearance.glyph,
     avatarDetails: appearance.avatarDetails,
     voiceProfile: appearance.voiceProfile,
@@ -1154,7 +1165,7 @@ export function DebateMysteryV2CompilationResume(
                     ? "Copy failed — try again"
                     : "Copy error details"}
             </button>
-            <button type="button" onClick={props.onExit}>Return to Archive</button>
+            <button type="button" onClick={props.onExit}>Return to setup</button>
           </div>
         ) : null}
         {needsAttention && errorDetailsCopyState !== "idle" ? (
@@ -1248,10 +1259,6 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const [command, setCommand] = useState<"move" | "examine" | "talk" | "present" | null>(null);
   const [caseFileOpen, setCaseFileOpen] = useState(false);
   const [theoryOpen, setTheoryOpen] = useState(state.playPhase === "theory");
-  const musicProgramStartedAtRef = useRef(Date.now());
-  const [musicProgramNow, setMusicProgramNow] = useState(() => Date.now());
-  const [musicAccentUntil, setMusicAccentUntil] = useState(0);
-  const previousTheoryAvailableRef = useRef(state.theoryAvailable);
   const [theory, setTheory] = useState<DebateMysteryTheoryV1>(() => emptyTheory(state));
   const [dialoguePlaybackQueue, setDialoguePlaybackQueue] = useState<DebateMysteryPublicDialogueEntryV2[]>([]);
   const [dialoguePlaybackIndex, setDialoguePlaybackIndex] = useState(0);
@@ -1270,6 +1277,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const [completionCueRoomId, setCompletionCueRoomId] = useState<string | null>(null);
   const [mansionSaveState, setMansionSaveState] = useState<
     "idle" | "saving" | "saved" | "failed"
+  >("idle");
+  const [caseExportState, setCaseExportState] = useState<
+    "idle" | "exporting" | "exported" | "failed"
   >("idle");
   const [visualRetryState, setVisualRetryState] = useState<
     "idle" | "retrying" | "queued" | "failed"
@@ -1291,6 +1301,8 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     useState<MysteryMansionTravelPresentationV1 | null>(null);
   const [exteriorEntryPresentation, setExteriorEntryPresentation] =
     useState<MysteryMansionTravelPresentationV1 | null>(null);
+  const [visitingExterior, setVisitingExterior] = useState(false);
+  const [exteriorRoomReveal, setExteriorRoomReveal] = useState(false);
   const [travelProgress, setTravelProgress] = useState(0);
   const travelFoleyRef = useRef<MysteryMansionTravelFoleyHandleV1 | null>(null);
   const travelFrameRef = useRef<number | null>(null);
@@ -1758,24 +1770,6 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const roomSpeechInkVisible = !dialoguePerformanceActive || interrogationPhase === "handoff";
   const admittedRecord = state.record.filter((item) => item.admitted);
   const theoryAccusedSeatIds = debateMysteryTheoryAccusedSeatIdsV2(theory);
-  useEffect(() => {
-    if (state.playPhase !== "investigation") return;
-    const timer = window.setInterval(() => setMusicProgramNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
-  }, [state.playPhase]);
-  useEffect(() => {
-    if (!previousTheoryAvailableRef.current && state.theoryAvailable) {
-      const now = Date.now();
-      setMusicProgramNow(now);
-      setMusicAccentUntil(now + 8_000);
-    }
-    previousTheoryAvailableRef.current = state.theoryAvailable;
-  }, [state.theoryAvailable]);
-  const investigationMusicProgram = mysteryInvestigationMusicProgramV1({
-    seed: `${props.session.id}:${state.config.houseStyle.id}`,
-    elapsedMs: musicProgramNow - musicProgramStartedAtRef.current,
-    accentActive: musicAccentUntil > musicProgramNow,
-  });
   const mansionCanBeSaved = debateMysteryMansionBundleEligibleV2(state);
   const failedVisualCount = state.rooms.filter(
     (room) => room.sealedAsset?.status === "fallback",
@@ -2116,9 +2110,12 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       .map((corridor) => ({ corridor, ...mansionLayoutV2EntityRect(corridor) })) ?? [],
     [mansionFloor, mansionLayout],
   );
-  const mansionSelectedRoom = state.rooms.find((room) => room.id === selectedMansionRoomId && room.floor === mansionFloor)
-    ?? mansionPlacements[0]?.room
-    ?? null;
+  const mansionOutsideSelected = selectedMansionRoomId === MYSTERY_MANSION_OUTSIDE_SELECTION_ID;
+  const mansionSelectedRoom = mansionOutsideSelected
+    ? null
+    : state.rooms.find((room) => room.id === selectedMansionRoomId && room.floor === mansionFloor)
+      ?? mansionPlacements[0]?.room
+      ?? null;
   const mansionSelectedSuspect = state.suspects.find((suspect) => suspect.roomId === mansionSelectedRoom?.id) ?? null;
   const mansionSelectedRoomPending = mansionSelectedRoom?.sealedAsset?.status === "pending";
   const mansionSelectedRoomAdjacent = Boolean(
@@ -2615,19 +2612,30 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       );
     }
     travelFoleyRef.current = null;
+    if (exteriorEntryPresentation.returningFromExterior) {
+      setVisitingExterior(false);
+      setExteriorRoomReveal(true);
+    }
     setExteriorEntryPresentation(null);
     finishDeferredAction(exteriorEntryPresentation.deferred);
   }, [exteriorEntryPresentation, finishDeferredAction, playCompactTravelBridge, props.session.id, props.session.revision]);
 
-  const beginExteriorEntry = useCallback(async (): Promise<void> => {
+  const beginExteriorEntry = useCallback(async (
+    returningFromExterior = false,
+  ): Promise<void> => {
     if (exteriorEntryPresentation) {
       finishExteriorEntry(true);
       return;
     }
-    const foyer = state.rooms.find((room) => /foyer/u.test(room.name.toLocaleLowerCase())) ??
+    const foyer = state.rooms.find((room) => room.templateId?.toLocaleLowerCase() === "foyer") ??
+      state.rooms.find((room) => /foyer/u.test(room.name.toLocaleLowerCase())) ??
       currentRoom ?? state.rooms[0];
     if (!foyer) {
-      void sendAction({ action: "enter_mansion" });
+      if (returningFromExterior) {
+        setError("The mansion foyer is unavailable.");
+      } else {
+        void sendAction({ action: "enter_mansion" });
+      }
       return;
     }
     const grounds: DebateMysteryRoomV2 = {
@@ -2646,7 +2654,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       hotspots: [],
     };
     const route = legacyMansionTraversalRoute(grounds, foyer);
-    const deferred = await requestDeferredAction({ action: "enter_mansion" });
+    const deferred = await requestDeferredAction(returningFromExterior
+      ? { action: "move", roomId: foyer.id }
+      : { action: "enter_mansion" });
     if (!deferred) return;
     if (reducedMotion) {
       playCompactTravelBridge(
@@ -2655,6 +2665,10 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         foyer,
         `${props.session.id}:${props.session.revision}:exterior:reduced-motion`,
       );
+      if (returningFromExterior) {
+        setVisitingExterior(false);
+        setExteriorRoomReveal(true);
+      }
       finishDeferredAction(deferred);
       return;
     }
@@ -2681,6 +2695,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       toRoom: foyer,
       durationMs,
       startedAtMs: performance.now(),
+      returningFromExterior,
     });
   }, [currentRoom, exteriorEntryPresentation, finishDeferredAction, finishExteriorEntry, playCompactTravelBridge, props.audioEnabled, props.audioVolume, props.session.id, props.session.revision, reducedMotion, requestDeferredAction, sendAction, state.config.houseStyle, state.rooms]);
 
@@ -2697,6 +2712,12 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       }
     };
   }, [exteriorEntryPresentation, finishExteriorEntry]);
+
+  useEffect(() => {
+    if (!exteriorRoomReveal) return;
+    const timer = window.setTimeout(() => setExteriorRoomReveal(false), 1_900);
+    return () => window.clearTimeout(timer);
+  }, [exteriorRoomReveal]);
 
   const finishMansionTravel = useCallback((collapseToCompact: boolean): void => {
     if (!travelPresentation) return;
@@ -2814,11 +2835,27 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
 
   useEffect(() => {
     const lineId = playbackLineId;
-    if (!lineId || !interrogationAudioMayStart || !state.voicesEnabled || !props.audioEnabled || props.audioVolume <= 0) return;
-    if (lastPlayedPerformanceKeyRef.current === playbackPerformanceKey) {
+    const restoredPlayback =
+      props.restoredAudioPerformanceKey === playbackPerformanceKey;
+    if (!debateMysteryPreparedAudioShouldStart({
+      audioEnabled: props.audioEnabled,
+      audioVolume: props.audioVolume,
+      interrogationAudioMayStart,
+      lastPlayedPerformanceKey: lastPlayedPerformanceKeyRef.current,
+      lineId,
+      playbackPerformanceKey,
+      restoredPerformanceKey: props.restoredAudioPerformanceKey ?? null,
+      voicesEnabled: state.voicesEnabled,
+    })) {
+      if (restoredPlayback) {
+        lastPlayedPerformanceKeyRef.current = playbackPerformanceKey;
+        return;
+      }
+      if (lastPlayedPerformanceKeyRef.current !== playbackPerformanceKey) return;
       if (spectatorBeat) setCompletedSpectatorBeat(spectatorBeat);
       return;
     }
+    if (lineId === null) return;
     lastPlayedPerformanceKeyRef.current = playbackPerformanceKey;
     const audioGeneration = audioGenerationRef.current + 1;
     audioGenerationRef.current = audioGeneration;
@@ -2920,6 +2957,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     playbackText,
     props.audioEnabled,
     props.audioVolume,
+    props.restoredAudioPerformanceKey,
     props.session.id,
     queuedDialogue,
     interrogationAudioMayStart,
@@ -3137,11 +3175,39 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         effectiveInvestigationArtStyle,
       )
     : null;
+  const currentRoomLayoutEntity = currentRoom && mansionLayout
+    ? mansionLayout.entities.find((entity) => entity.kind === "room" && entity.id === currentRoom.id) ?? null
+    : null;
+  const currentRoomAcceptedAssetUrl = currentRoomLayoutEntity?.kind === "room" &&
+      currentRoomLayoutEntity.acceptedRoomAssetId &&
+      state.config.mansionSnapshot?.sourceBundleId
+    ? whodunnitMansionRoomArtUrl(
+        state.config.mansionSnapshot.sourceBundleId,
+        currentRoomLayoutEntity.acceptedRoomAssetId,
+        effectiveInvestigationArtStyle,
+      )
+    : null;
   const currentRoomImageUrl = currentRoomAssetUrl
     ?? (currentRoom?.imageId
       ? whodunnitSavedRoomArtUrl(currentRoom.imageId, effectiveInvestigationArtStyle)
       : null)
+    ?? currentRoomAcceptedAssetUrl
     ?? currentRoomBundledAssetUrl;
+  const currentRoomLights = useMemo<readonly MansionDynamicLightV2[]>(
+    () => currentRoom && mansionLayout
+      ? mansionLayout.lights.filter((light) => light.roomId === currentRoom.id)
+      : [],
+    [currentRoom, mansionLayout],
+  );
+  const currentRoomUsesTemplateLightGeometry = currentRoom
+    ? mysteryRoomUsesTemplateLightGeometryV1({
+        imageId: currentRoom.imageId,
+        acceptedRoomAssetId: currentRoomLayoutEntity?.kind === "room"
+          ? currentRoomLayoutEntity.acceptedRoomAssetId
+          : null,
+        sealedAsset: currentRoom.sealedAsset,
+      })
+    : false;
   const investigationAvatarPresentation = whodunnitInvestigationAvatarPresentation(
     effectiveInvestigationArtStyle,
   );
@@ -3328,8 +3394,19 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
 
   const defendantVerdicts = state.verdict?.defendantVerdicts ?? [];
   const verdictIsMixed = new Set(defendantVerdicts.map((entry) => entry.legalResult)).size > 1;
+  const exportReusableCase = async (): Promise<void> => {
+    if (caseExportState === "exporting") return;
+    setCaseExportState("exporting");
+    try {
+      await props.onExportCase();
+      setCaseExportState("exported");
+    } catch (caught) {
+      setCaseExportState("failed");
+      setError(caught instanceof Error ? caught.message : "The reusable case could not be exported.");
+    }
+  };
 
-  if (state.playPhase === "title_card") {
+  if (state.playPhase === "title_card" || visitingExterior) {
     const preparedMansionExteriorUrl = sealedMysteryAssetObjectUrl(
       sealedAssetObjectUrls,
       "room",
@@ -3343,10 +3420,22 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       state.config.scaleClass,
     );
     const mansionDoorEntry = state.config.investigationMode === "full" && !spectator;
+    const firstPersonExterior = visitingExterior || props.exteriorIntroStarted;
+    const startWhodunnit = (): void => {
+      if (!mansionDoorEntry) {
+        void sendAction({ action: "move" });
+        return;
+      }
+      props.onExteriorIntroStart();
+    };
+    const enterFromExterior = (): void => {
+      void beginExteriorEntry(visitingExterior);
+    };
     return (
       <main
         className={styles.titleCard}
         data-theme={props.theme}
+        data-first-person-exterior={firstPersonExterior ? "true" : undefined}
         data-exterior-entering={exteriorEntryPresentation ? "true" : undefined}
         style={{
           "--mansion-exterior-image": `url("${mansionExteriorUrl}")`,
@@ -3354,30 +3443,31 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           "--mansion-door-y": `${mansionDoorTarget.yPercent}%`,
         } as CSSProperties}
       >
-        <button type="button" className={styles.archiveButton} disabled={busy} onClick={props.onExit}>← Archive</button>
-        <div
-          className={styles.titleCardContent}
-          data-door-threshold={mansionDoorEntry ? "true" : undefined}
-        >
-          <div className={styles.titlePrism} aria-hidden="true">◇</div>
-          <p className={styles.eyebrow}>PRISM presents</p>
-          <h1>{state.caseTitle}</h1>
-          <p>{state.fictionLabel}</p>
-          <div className={styles.titleMetadata}>
-            {state.caseCharge ? <span>{state.caseCharge.title}</span> : null}<span>{state.suspects.length} witnesses</span><span>{state.config.trialType === "jury" ? "Jury Trial" : "Bench Trial"}</span>{state.config.investigationMode === "court_only" ? <span>Court act</span> : null}<span>{state.voicesEnabled ? "Local performance ready" : "Text performance"}</span>
-          </div>
-          {!mansionDoorEntry ? <button type="button" className={styles.primaryAction} disabled={busy} onClick={() => void sendAction({ action: "move" })}>{state.config.investigationMode === "court_only" ? "Begin Trial" : "Review Prosecutor Findings"}</button> : null}
-          {error ? <p className={styles.error}>{error}</p> : null}
-        </div>
-        {mansionDoorEntry ? (
+        {!firstPersonExterior ? (
           <>
-            <MysteryPlayerOrb
-              className={styles.titlePlayerOrb}
-              color={props.playerColor}
-              glyph={props.playerGlyph}
-              label={`${props.playerName} outside the mansion`}
-              renderBotGlyph={props.renderBotGlyph}
-            />
+            <button type="button" className={styles.archiveButton} disabled={busy} onClick={props.onExit}>← Archive</button>
+            <div
+              className={styles.titleCardContent}
+              data-door-threshold={mansionDoorEntry ? "true" : undefined}
+            >
+              <div className={styles.titlePrism} aria-hidden="true">◇</div>
+              <p className={styles.eyebrow}>PRISM presents</p>
+              <h1>{state.caseTitle}</h1>
+              <p>{state.fictionLabel}</p>
+              <div className={styles.titleMetadata}>
+                {state.caseCharge ? <span>{state.caseCharge.title}</span> : null}<span>{state.suspects.length} witnesses</span><span>{state.config.trialType === "jury" ? "Jury Trial" : "Bench Trial"}</span>{state.config.investigationMode === "court_only" ? <span>Court act</span> : null}<span>{state.voicesEnabled ? "Local performance ready" : "Text performance"}</span>
+              </div>
+              <button
+                type="button"
+                className={styles.primaryAction}
+                disabled={busy}
+                onClick={startWhodunnit}
+                data-tutorial-target="whodunnit-start"
+              >Start</button>
+              {error ? <p className={styles.error}>{error}</p> : null}
+            </div>
+          </>
+        ) : mansionDoorEntry ? (
             <button
               type="button"
               className={styles.titleDoor}
@@ -3385,15 +3475,13 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               disabled={busy && !exteriorEntryPresentation}
               aria-label={exteriorEntryPresentation
                 ? "Enter the foyer now"
-                : "Open the mansion door and enter the foyer"}
-              onClick={() => void beginExteriorEntry()}
+                : "Enter the mansion"}
+              onClick={enterFromExterior}
             >
-              <span className={styles.titleDoorFocus} aria-hidden="true" />
+              <span className={styles.titleDoorFocus} aria-hidden="true">
+                <span className={styles.titleDoorMark} />
+              </span>
             </button>
-            <p className={styles.titleDoorHint} aria-hidden="true">
-              {exteriorEntryPresentation ? "Crossing the threshold" : "Open the mansion door"} <span>· click, Enter, or Space</span>
-            </p>
-          </>
         ) : null}
       </main>
     );
@@ -3419,17 +3507,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         operateVisibleDialogueGesture(1, () => void dismissOpening());
       }
     };
-    const openingRoomImage = currentRoom
-      ? sealedMysteryAssetObjectUrl(
-          sealedAssetObjectUrls,
-          "room",
-          currentRoom.id,
-          currentRoom?.sealedAsset,
-        ) ?? whodunnitBundledRoomArtPathForRoom(
-          currentRoom,
-          effectiveInvestigationArtStyle,
-        )
-      : null;
+    // The briefing and the playable room must resolve through the same art
+    // path so a saved/custom foyer never flashes the bundled PRISM fallback.
+    const openingRoomImage = currentRoomImageUrl;
     return (
       <main className={styles.caseOpening} data-theme={props.theme}>
         <button type="button" className={styles.archiveButton} disabled={busy} onClick={props.onExit}>← Archive</button>
@@ -3510,6 +3590,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           })}</section>
         ) : null}
         <div className={styles.verdictActions}>
+          <button type="button" disabled={caseExportState === "exporting"} onClick={() => void exportReusableCase()} data-tutorial-target="whodunnit-case-export">
+            {caseExportState === "exporting" ? "Exporting .case…" : caseExportState === "exported" ? ".case exported" : caseExportState === "failed" ? "Export .case again" : "Export reusable .case"}
+          </button>
           {retryable && !spectator ? <button type="button" className={styles.primaryAction} disabled={busy} onClick={() => void sendAction({ action: "retry_witness_checkpoint" })}>Retry current witness</button> : null}
           <button
             type="button"
@@ -3711,7 +3794,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   }
 
   return (
-    <main className={styles.investigation} data-theme={props.theme} data-view={state.roomView} data-music-program={investigationMusicProgram.phase} data-opening-map-reveal={openingMapReveal ? "true" : undefined} data-tutorial-target="mystery-v2-investigation" onClickCapture={handleInvestigationDialogueClickCapture}>
+    <main className={styles.investigation} data-theme={props.theme} data-view={state.roomView} data-opening-map-reveal={openingMapReveal ? "true" : undefined} data-exterior-room-reveal={exteriorRoomReveal ? "true" : undefined} data-tutorial-target="mystery-v2-investigation" onClickCapture={handleInvestigationDialogueClickCapture}>
       <SessionAtmosphereLayer
         sessionKey={`whodunnit-v2-mansion-ambience:${props.session.id}:${state.config.houseStyle.id}`}
         backgroundUrl={`/api/debates/${encodeURIComponent(props.session.id)}/mystery-mansion/atmosphere`}
@@ -3731,11 +3814,11 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         active={props.audioEnabled}
         volume={props.audioVolume}
         mix={mysteryInvestigationMusicMix({
-          theoryBoardOpen: theoryOpen,
+          caseFileOpen,
+          outside: visitingExterior,
           roomIntroductionActive,
           roomComplete,
-          programAudible: investigationMusicProgram.audible,
-          accentActive: investigationMusicProgram.phase === "accent",
+          roomView: state.roomView,
         })}
         lifecycleTransitionMs={WHODUNNIT_INVESTIGATION_MUSIC_FADE_MS}
         mixTransitionMs={WHODUNNIT_INVESTIGATION_MUSIC_TRANSITION_MS}
@@ -3824,6 +3907,15 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
             </nav>
           </header>
           <div className={styles.mansionViewport}>
+            <button
+              type="button"
+              className={styles.mansionOutsideTravelTarget}
+              data-selected={mansionOutsideSelected ? "true" : undefined}
+              aria-label="Select exterior grounds"
+              aria-pressed={mansionOutsideSelected}
+              disabled={busy || travelPresentation !== null}
+              onClick={() => setSelectedMansionRoomId(MYSTERY_MANSION_OUTSIDE_SELECTION_ID)}
+            />
             <div className={styles.mansionCanvas}>
               {mansionCorridors.map((placement) => (
                 <i
@@ -3943,7 +4035,16 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               ) : null}
             </div>
           </div>
-          {mansionSelectedRoom ? (
+          {mansionOutsideSelected ? (
+            <section className={styles.mansionRoomDetails} aria-live="polite" data-outside="true">
+              <div>
+                <small>Selected area</small>
+                <strong>Exterior grounds</strong>
+                <span>Outside the mansion</span>
+              </div>
+              <button type="button" disabled={busy || travelPresentation !== null} onClick={() => setVisitingExterior(true)}>Go outside</button>
+            </section>
+          ) : mansionSelectedRoom ? (
             <section className={styles.mansionRoomDetails} aria-live="polite" data-locked={!mansionSelectedRoom.unlocked ? "true" : undefined}>
               <div>
                 <small>Selected room</small>
@@ -4003,6 +4104,8 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
             <div className={styles.roomBackdrop} data-blurred={roomActorVisible ? "true" : undefined} />
             <DebateMysteryRoomCinematographyLayer
               room={currentRoom}
+              lights={currentRoomLights}
+              templateLightingAligned={currentRoomUsesTemplateLightGeometry}
               blurred={roomActorVisible}
               reducedMotion={reducedMotion}
             />
@@ -4090,12 +4193,11 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         </section>
       ) : null}
       {!spectatorTheory && !roomIntroductionActive ? <nav className={styles.investigationCommands} aria-label="Investigation commands" data-console-label="Case desk · field commands">
-        <button type="button" data-command="move" data-active={state.roomView === "mansion" ? "true" : undefined} aria-pressed={state.roomView === "mansion"} disabled={busy || dialoguePerformanceActive || !state.openingSweepComplete} title={!state.openingSweepComplete ? "Examine every visible point at the incident scene first." : undefined} onClick={() => { playControlSfx("navigate"); setCommand("move"); void sendAction({ action: "move" }); }} data-tutorial-target="mystery-v2-move"><span>⌂</span>Move</button>
+        <button type="button" data-command="move" data-active={state.roomView === "mansion" ? "true" : undefined} aria-pressed={state.roomView === "mansion"} disabled={busy || dialoguePerformanceActive} onClick={() => { playControlSfx("navigate"); setCommand("move"); void sendAction({ action: "move" }); }} data-tutorial-target="mystery-v2-move"><span>⌂</span>Move</button>
         <button type="button" data-command="examine" data-active={command === "examine" ? "true" : undefined} aria-pressed={command === "examine"} disabled={busy || dialoguePerformanceActive || state.roomView !== "room"} onClick={() => { playControlSfx("clip"); setCommand("examine"); }} data-tutorial-target="mystery-v2-examine"><span>⌕</span>Examine</button>
         <button type="button" data-command="talk" data-active={command === "talk" ? "true" : undefined} aria-pressed={command === "talk"} disabled={busy || dialoguePerformanceActive || !currentSuspect} onClick={() => { playControlSfx("enter"); setCommand("talk"); }} data-tutorial-target="mystery-v2-talk"><span>“”</span>Talk</button>
         <button type="button" data-command="present" data-active={command === "present" ? "true" : undefined} aria-pressed={command === "present"} disabled={busy || dialoguePerformanceActive || !currentSuspect || admittedRecord.length === 0} onClick={() => { playControlSfx("paper"); setCommand("present"); }} data-tutorial-target="mystery-v2-present"><span>◇</span>Present</button>
       </nav> : null}
-      {!spectatorTheory && !roomIntroductionActive && !state.openingSweepComplete ? <small className={styles.sweepHint} role="status">Finish the finite visible sweep before leaving the incident scene.</small> : null}
       {!spectatorTheory && !roomIntroductionActive && command === "talk" && currentSuspect && !dialoguePerformanceActive ? <div className={styles.choiceTray}><header><div><p className={styles.eyebrow}>Talk</p><h2>{currentSuspect.name}</h2></div><button type="button" onClick={() => setCommand(null)}>Close</button></header><p className={styles.topicHelp}>Ask about people, motives, alibis, or rooms. Evidence and testimony stay in Present.</p><div className={styles.topicGroups}>{groupDebateMysteryTalkTopicsV2(state.topics.filter((topic) => topic.suspectSeatId === currentSuspect.seatId)).map((group) => <section key={group.category} className={styles.topicGroup} aria-labelledby={`talk-${currentSuspect.seatId}-${group.category}`}><h3 id={`talk-${currentSuspect.seatId}-${group.category}`}>{group.label}</h3><div className={styles.topicList}>{group.topics.map((topic) => <button key={topic.nodeId} type="button" disabled={busy || dialoguePerformanceActive || !topic.unlocked} data-complete={topic.completed ? "true" : undefined} data-blocked={!topic.unlocked ? "true" : undefined} onClick={() => void sendAction({ action: "talk", suspectSeatId: currentSuspect.seatId, topicNodeId: topic.nodeId })}><span className={styles.topicIcon} aria-hidden="true">{topic.completed ? "✓" : topic.unlocked ? "?" : "×"}</span><span className={styles.topicCopy}><strong>{debateMysteryTalkTopicDisplayLabelV2(topic, state.rooms)}</strong>{!topic.unlocked ? <small>Blocked</small> : null}</span></button>)}</div></section>)}</div></div> : null}
       {!spectatorTheory && !roomIntroductionActive && command === "present" && currentSuspect ? <div className={styles.choiceTray}><header><div><p className={styles.eyebrow}>Present</p><h2>Show {currentSuspect.name}</h2></div><button type="button" onClick={() => setCommand(null)}>Close</button></header>{renderRecordButtons((record) => void sendAction({ action: "present_to_suspect", suspectSeatId: currentSuspect.seatId, record }))}</div> : null}
       {!spectatorTheory && !roomIntroductionActive && state.theoryAvailable ? <button type="button" className={styles.fileChargesButton} onClick={() => { playControlSfx("theory"); setTheoryOpen(true); }} data-tutorial-target="mystery-v2-file-theory">File Charges</button> : !spectatorTheory && !roomIntroductionActive ? <small className={styles.theoryHint}>The Theory Board opens after the briefing, one interview, and one admitted record item.</small> : null}

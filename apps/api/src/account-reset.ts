@@ -36,6 +36,7 @@ export const FACTORY_RESET_USER_DATA_TABLES = [
   "debate_mystery_notebook_revisions",
   "debate_mystery_notebooks",
   "debate_mystery_actions",
+  "debate_mystery_case_packages",
   "debate_mystery_cases",
   "audio_asset_usages",
   "audio_assets",

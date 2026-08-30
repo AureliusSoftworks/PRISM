@@ -40,6 +40,18 @@
     },
     "fileAssociations": [
       {
+        "ext": ["case"],
+        "name": "PRISM Case",
+        "description": "Reusable sealed PRISM Whodunnit case",
+        "role": "Viewer",
+        "mimeType": "application/vnd.prism.case",
+        "rank": "Owner",
+        "exportedType": {
+          "identifier": "com.localai.prism.case",
+          "conformsTo": ["public.data"]
+        }
+      },
+      {
         "ext": ["mansion"],
         "name": "PRISM Mansion",
         "description": "Portable PRISM Whodunnit mansion",

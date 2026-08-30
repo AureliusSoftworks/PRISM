@@ -42,6 +42,26 @@ const flytingCss = readFileSync(
   fileURLToPath(new URL("./DebateFlyting.module.css", import.meta.url)),
   "utf8",
 );
+const flytingHelmetKey = readFileSync(
+  fileURLToPath(new URL("../../public/debate/flyting/viking-helmet-accent-key.svg", import.meta.url)),
+  "utf8",
+);
+const flytingShieldKey = readFileSync(
+  fileURLToPath(new URL("../../public/debate/flyting/viking-shield-accent-key.svg", import.meta.url)),
+  "utf8",
+);
+const flytingLeftHallKey = readFileSync(
+  fileURLToPath(new URL("../../public/debate/flyting/mead-hall-left-accent-key.svg", import.meta.url)),
+  "utf8",
+);
+const flytingHostHallKey = readFileSync(
+  fileURLToPath(new URL("../../public/debate/flyting/mead-hall-host-accent-key.svg", import.meta.url)),
+  "utf8",
+);
+const flytingRightHallKey = readFileSync(
+  fileURLToPath(new URL("../../public/debate/flyting/mead-hall-right-accent-key.svg", import.meta.url)),
+  "utf8",
+);
 const evidenceDocumentSource = readFileSync(
   fileURLToPath(new URL("./DebateEvidenceDocument.tsx", import.meta.url)),
   "utf8",
@@ -68,6 +88,10 @@ const assetLibraryCss = readFileSync(
 );
 const forumSceneSource = readFileSync(
   fileURLToPath(new URL("./DebateForumScene.tsx", import.meta.url)),
+  "utf8",
+);
+const forumAccentKeysSource = readFileSync(
+  fileURLToPath(new URL("./DebateForumAccentKeyLayers.tsx", import.meta.url)),
   "utf8",
 );
 const page = readFileSync(
@@ -104,10 +128,58 @@ it("opens executable Flyting beside the available Debate formats", () => {
   assert.match(source, /"debate-format-flyting"/u);
   assert.match(flytingSource, /Boast · Flyte · Rejoinder · Acclamation/u);
   assert.match(flytingSource, /No timer · four exchanges/u);
+  assert.match(flytingSource, /studioStyles\.dashboard/u);
+  assert.match(flytingSource, /studioStyles\.studioNav/u);
+  assert.match(flytingSource, /studioStyles\.dashboardDesk/u);
+  assert.match(flytingSource, /studioStyles\.dashboardRail/u);
+  assert.match(flytingSource, /data-debate-format="flyting"/u);
+  assert.match(flytingSource, /DEBATE_FORMAT_VISUAL_THEMES\.flyting/u);
+  assert.match(flytingSource, /FlytingAtmosphereControl/u);
+  assert.match(flytingSource, /data-disabled="true"/u);
+  assert.match(flytingSource, /--debate-rowdiness-progress/u);
+  assert.match(flytingSource, /DEBATE_FORMAT_CATALOG\.filter/u);
+  assert.match(flytingSource, /flytingCoachChoice/u);
+  assert.match(flytingSource, /onFormatChange/u);
+  assert.match(flytingSource, /Mead Hall floor/u);
+  assert.match(flytingSource, /Proceeding card/u);
+  assert.match(flytingSource, /Pro · left/u);
+  assert.match(flytingSource, /Con · right/u);
+  assert.match(flytingSource, /sideId === "for" \? "Pro" : "Con"/u);
+  assert.match(flytingSource, /Four Hall members/u);
+  assert.match(flytingSource, /const \[jurorBotIds, setJurorBotIds\]/u);
+  assert.match(flytingSource, /Hall seats begin on Surprise me|Leave any Hall seat on Surprise me/u);
+  assert.match(flytingSource, /jurorBotIds,/u);
   assert.match(flytingSource, /◇ Wield PRISM/u);
   assert.match(flytingSource, /Yield · leave unanswered/u);
   assert.match(flytingSource, /Hall Record/u);
+  assert.match(flytingSource, /debateFlytingHallPresentation/u);
+  assert.match(flytingSource, /"--flyting-lane-left": forColor/u);
+  assert.match(flytingSource, /"--flyting-lane-host": hostColor/u);
+  assert.match(flytingSource, /"--flyting-lane-right": againstColor/u);
+  assert.match(flytingSource, /normalizeBotIdentityColor/u);
+  assert.doesNotMatch(flytingSource, /#(?:ff0000|00ff00|0000ff)/iu);
   assert.match(flytingCss, /\.hallStage/u);
+  assert.match(flytingCss, /mead-hall-dark-v2\.webp/u);
+  assert.match(flytingCss, /mead-hall-light-v2\.webp/u);
+  assert.match(flytingCss, /mead-hall-left-accent-key\.svg/u);
+  assert.match(flytingCss, /viking-helmet-accent-key\.svg/u);
+  assert.match(flytingCss, /background-blend-mode: color, normal/u);
+  assert.match(flytingCss, /\.hallPrism/u);
+  assert.match(flytingCss, /\.hostShield/u);
+  assert.match(flytingCss, /\.hallGallery\[data-quiet="true"\]/u);
+  assert.match(flytingCss, /hallGalleryCrosstalk/u);
+  assert.match(flytingSource, /data-flyting-hall-asset="banner"/u);
+  assert.match(flytingSource, /data-flyting-hall-asset="shield"/u);
+  assert.match(flytingSource, /data-flyting-hall-asset="helmet"/u);
+  assert.match(flytingCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]{0,380}hallGallery span::before/u);
+  assert.match(flytingCss, /\[data-intensity="extinguished"\]/u);
+  assert.match(flytingHelmetKey, /#FF00FF/u);
+  assert.match(flytingShieldKey, /#FF00FF/u);
+  assert.match(flytingLeftHallKey, /#FF0000/u);
+  assert.match(flytingHostHallKey, /#00FF00/u);
+  assert.match(flytingRightHallKey, /#0000FF/u);
+  assert.match(flytingCss, /\.studioReadout/u);
+  assert.match(flytingCss, /\.changeFormatAction/u);
 });
 const pageCss = readFileSync(
   fileURLToPath(new URL("./page.module.css", import.meta.url)),
@@ -1477,6 +1549,15 @@ describe("Debate experience", () => {
     assert.match(source, /role="progressbar"/u);
     assert.match(css, /\.archiveForgeProgress/u);
     assert.match(css, /\.archiveForgeProgressTrack/u);
+  });
+
+  it("returns a stopped Case Forge to setup without discarding its Archive record", () => {
+    assert.match(
+      source,
+      /activeSession\.formatState\.format === "whodunnit"[\s\S]{0,180}activeSession\.formatState\.compilation\.stage === "needs_attention"/u,
+    );
+    assert.match(source, /setStudioPanel\(stopped \? "motion" : "archive"\)/u);
+    assert.match(source, /The stopped case remains saved in Archive/u);
   });
 
   it("leads Whodunnit setup through one preserved decision page at a time", () => {
@@ -4058,16 +4139,19 @@ describe("Debate experience", () => {
       /\.forumCamera\[data-camera-view="moderator"\]\s+\.lightMaskModerator\s*\{[^}]*background:\s*var\(--debate-moderator-color\)[^}]*moderator-light-mask\.png/u,
     );
     assert.match(source, /className=\{styles\.podiumForeground\}/u);
-    assert.match(source, /<DebateForumLightMasks depth="backdrop" \/>/u);
-    assert.match(source, /<DebateForumLightMasks depth="foreground" \/>/u);
+    assert.match(source, /<DebateForumLightMasks[\s\S]{0,220}depth="backdrop"/u);
+    assert.match(source, /<DebateForumLightMasks[\s\S]{0,220}depth="foreground"/u);
     assert.match(
-      source,
-      /className=\{`\$\{styles\.lightMaskFor\}\$\{foregroundClass\}`\}/u,
+      forumAccentKeysSource,
+      /className=\{`\$\{styles\.lightMaskFor\}\$\{foregroundFallbackClass\}`\}/u,
     );
     assert.match(
       source,
-      /className=\{styles\.podiumForeground\}[\s\S]{0,120}<DebateForumLightMasks depth="foreground" \/>/u,
+      /className=\{styles\.podiumForeground\}[\s\S]{0,500}<DebateForumLightMasks[\s\S]{0,180}depth="foreground"/u,
     );
+    assert.match(source, /<DebateForumAccentKeys/u);
+    assert.match(forumAccentKeysSource, /data-source=\{source\}/u);
+    assert.match(forumAccentKeysSource, /renderDebateForumAccentPixels/u);
     assert.match(source, /data-active-role=\{activeRole \?\? undefined\}/u);
     assert.doesNotMatch(source, /<DebateForumScene/u);
     assert.doesNotMatch(css, /\.lightMaskFor\s*\{[^}]*clip-path:\s*polygon/u);

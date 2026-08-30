@@ -18,7 +18,7 @@ import {
   debateMysteryIdentityMirrorFaceV1,
   debateMysteryIdentityMirrorPresentationsV1,
   debateMysteryIdentityMirrorTargetBotSnapshotV1,
-  debateMysteryQuotedIdentityNameV1,
+  debateMysteryPublicIdentityNameV1,
 } from "./debateMysteryIdentityMirror.ts";
 
 const holder = "holder";
@@ -314,7 +314,7 @@ test("Whodunnit Identity Crisis freezes an exact player target and quotes the co
     sourceDialogueKey: "talk-holder-seat-alibi:line-1:2026-08-25T10:00:00.000Z",
     occurredAt: "2026-08-25T10:00:00.000Z",
   });
-  assert.equal(debateMysteryQuotedIdentityNameV1("Miles   Edgeworth"), "Miles Edgeworth");
+  assert.equal(debateMysteryPublicIdentityNameV1("Miles   Edgeworth"), "The real Miles Edgeworth");
 
   const holderVoice = normalizeBotAudioVoiceProfileV1({
     v: 2,

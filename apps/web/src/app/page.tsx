@@ -1271,8 +1271,9 @@ import {
   botPowerMetaSigilV1,
   botPowerAuthoringParadoxHintV1,
   BOT_IDENTITY_SHAPESHIFT_TRANSITION_MS,
-  botIdentityMirrorQuotedTargetNameV1,
+  botIdentityMirrorPublicNameV1,
   botIdentityMirrorTransitionActiveV1,
+  botIdentityShapeshiftQuotedTargetNameV1,
   botIdentityShapeshiftTransitionActiveV1,
   resolveBotIdentityMirrorAvatarDetailsV1,
   resolveBotIdentityMirrorFaceV1,
@@ -1673,6 +1674,7 @@ import {
 } from "./signalVoiceFallback";
 import { SignalVoicePrefetchScheduler } from "./signalVoicePrefetch";
 import { signalVoiceCompletionFallbackDurationMs } from "./signalLiveCaptions";
+import type { SignalResponseCueSpeechState } from "./signalLiveAvatarSpeech";
 import {
   applyOfflineVoiceSelection,
   builtinVoiceSelectionValue,
@@ -7802,6 +7804,7 @@ function coffeeTableDisplayText(text: string): string {
 }
 
 function coffeeTableDisplayTextForMessage(message: {
+  botPowerMutePerformance?: BotPowerMutePerformanceV1;
   content: string;
   role: string;
   transcriptInterruptionSegment?: unknown;
@@ -7811,7 +7814,14 @@ function coffeeTableDisplayTextForMessage(message: {
       clampCoffeeTableText(message.content.replace(/\s+/gu, " ").trim()),
     );
   }
-  const displayText = coffeeTableDisplayText(message.content);
+  const publicContent = message.botPowerMutePerformance
+    ? botPowerMutePublicResponseAtElapsedV1(
+        message.content,
+        message.botPowerMutePerformance,
+        message.botPowerMutePerformance.durationMs,
+      )
+    : message.content;
+  const displayText = coffeeTableDisplayText(publicContent);
   return message.role === "user"
     ? coffeeSentenceCaseTableProse(displayText)
     : displayText;
@@ -7931,7 +7941,12 @@ function coffeeReplayDisplayLengthForMessage(
   if (!coffeeMessageHasTableText(message)) {
     return coffeeReplayMessageHasStateEvent(message) ? 12 : 0;
   }
-  return getBotMentionDisplayLength(coffeeTableDisplayTextForMessage(message));
+  const displayLength = getBotMentionDisplayLength(
+    coffeeTableDisplayTextForMessage(message),
+  );
+  return message.botPowerMutePerformance
+    ? Math.max(displayLength, message.botPowerMutePerformance.periodCount)
+    : displayLength;
 }
 
 interface SessionUser {
@@ -36199,7 +36214,7 @@ function MarkdownMessageBody({
       (botPowerMuteElapsedMs ?? botPowerMutePerformance.durationMs) >=
         botPowerMutePerformance.durationMs;
     const accessibleStatus = muteComplete
-      ? botPowerMutePerformance.elapsedCue.replace(/^\*|\*$/gu, "")
+      ? "Silent response."
       : "Silent response in progress.";
     return (
       <>
@@ -52947,6 +52962,11 @@ function HomeContent(): React.JSX.Element {
     new Map<string, BotResponseCueRuntimeState>(),
   );
   const responseCueServerIdRef = useRef<string | null>(null);
+  const responseCueSpeechRef = useRef<SignalResponseCueSpeechState | null>(
+    null,
+  );
+  const [activeResponseCueSpeech, setActiveResponseCueSpeech] =
+    useState<SignalResponseCueSpeechState | null>(null);
   const [activeResponseCueBeat, setActiveResponseCueBeat] =
     useState<BotPresenceBeatV1 | null>(null);
   const [responseCueBeatHistory, setResponseCueBeatHistory] = useState<
@@ -72598,8 +72618,29 @@ function HomeContent(): React.JSX.Element {
         channel: "reaction",
         signal: controller.signal,
         lifecycle: {
-          onStart: () => {
+          onStart: (durationMs, playbackAlignment) => {
             startedAtMs = Date.now();
+            if (args.surface === "signal") {
+              const speech: SignalResponseCueSpeechState = {
+                surface: "signal",
+                sessionId: args.sessionId,
+                responseId: args.responseId,
+                speakerBotId: args.bot.id,
+                text: decision.cue.phrase,
+                durationMs: Math.max(
+                  1,
+                  durationMs ?? BOT_RESPONSE_CUE_MAX_PLAYBACK_MS,
+                ),
+                alignment: playbackAlignment ?? null,
+                clock: {
+                  messageId: args.responseId,
+                  elapsedMs: 0,
+                  observedAtMs: performance.now(),
+                },
+              };
+              responseCueSpeechRef.current = speech;
+              setActiveResponseCueSpeech(speech);
+            }
             const localBeat: BotPresenceBeatV1 = {
               v: 1,
               id: `local-${args.responseId}`,
@@ -72649,6 +72690,12 @@ function HomeContent(): React.JSX.Element {
               .catch(() => undefined);
           },
           onProgress: (elapsedMs, durationMs) => {
+            const responseCueSpeech = responseCueSpeechRef.current;
+            if (responseCueSpeech?.responseId === args.responseId) {
+              responseCueSpeech.durationMs = Math.max(1, durationMs);
+              responseCueSpeech.clock.elapsedMs = elapsedMs;
+              responseCueSpeech.clock.observedAtMs = performance.now();
+            }
             playbackReachedNaturalEnd =
               durationMs > 0 && elapsedMs >= Math.max(0, durationMs - 32);
             heardCharacterCount = Math.min(
@@ -72673,6 +72720,13 @@ function HomeContent(): React.JSX.Element {
                   : beat,
               ),
             );
+          },
+          onPlaybackClock: (readElapsedMs, durationMs) => {
+            const responseCueSpeech = responseCueSpeechRef.current;
+            if (responseCueSpeech?.responseId !== args.responseId) return;
+            responseCueSpeech.durationMs = Math.max(1, durationMs);
+            responseCueSpeech.clock.readElapsedMs =
+              readElapsedMs ?? undefined;
           },
           onEnd: () => {
             if (playbackReachedNaturalEnd) {
@@ -72739,6 +72793,12 @@ function HomeContent(): React.JSX.Element {
       }
       if (responseCuePlaybackAbortRef.current === controller) {
         responseCuePlaybackAbortRef.current = null;
+      }
+      if (responseCueSpeechRef.current?.responseId === args.responseId) {
+        responseCueSpeechRef.current = null;
+        setActiveResponseCueSpeech((current) =>
+          current?.responseId === args.responseId ? null : current,
+        );
       }
     }
   };
@@ -93807,9 +93867,7 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function cycleThemeMode() {
-    const nextTheme = nextThemeMode(effectiveThemeMode);
-
+  async function applyThemeMode(nextTheme: Theme) {
     if (settings) {
       // Logged in: persist the choice server-side, optimistically update the UI.
       const previous = settings;
@@ -93836,6 +93894,10 @@ function HomeContent(): React.JSX.Element {
     } catch {
       // Non-fatal: if storage is blocked the toggle still works in-memory.
     }
+  }
+
+  async function cycleThemeMode() {
+    await applyThemeMode(nextThemeMode(effectiveThemeMode));
   }
 
   async function clearSavedKey(
@@ -139227,10 +139289,7 @@ function HomeContent(): React.JSX.Element {
                           aria-live="polite"
                           aria-atomic="true"
                         >
-                          {message.botPowerMutePerformance.elapsedCue.replace(
-                            /^\*|\*$/gu,
-                            "",
-                          )}
+                          Silent response.
                         </span>
                       ) : null}
                       <SpeechIntentReveal
@@ -142146,12 +142205,14 @@ function HomeContent(): React.JSX.Element {
               const falseNameState = falseNameByHolderBotId[bot.id] ?? null;
               const seatPublicName =
                 (identityMirrorState
-                  ? botIdentityMirrorQuotedTargetNameV1(
+                  ? botIdentityMirrorPublicNameV1(
                       identityMirrorState.targetBotName,
                     )
                   : "") ||
                 falseNameState?.believedName?.trim() ||
-                identityShapeshiftState?.targetBotName?.trim() ||
+                botIdentityShapeshiftQuotedTargetNameV1(
+                  identityShapeshiftState?.targetBotName,
+                ) ||
                 bot.name;
               const identityMirrorNowMs = coffeeReplayActive
                 ? replayPlayhead.nowMs
@@ -148081,6 +148142,7 @@ function HomeContent(): React.JSX.Element {
             })
           }
           responseMode={signalEpisodeResponseMode}
+          onThemeChange={applyThemeMode}
           recordingVoiceSelection={voicePlaybackSelectionRef.current}
           onRecordingStateChange={handleSignalRecordingStateChange}
           onLiveSessionActiveChange={(active, sessionId) => {
@@ -148268,6 +148330,7 @@ function HomeContent(): React.JSX.Element {
           }}
           presenceBeat={activeResponseCueBeat}
           presenceBeats={responseCueBeatHistory}
+          responseCueSpeech={activeResponseCueSpeech}
           onStopUtterance={stopBotcastUtterance}
           onReleaseUtterance={releaseBotcastPrimaryUtterance}
           onProducerGuestActionSfx={playSignalProducerGuestActionSfx}

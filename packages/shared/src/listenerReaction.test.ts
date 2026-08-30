@@ -4,6 +4,7 @@ import {
   BOT_CROSSTALK_DEFERENTIAL_INTERRUPTER_CUES,
   BOT_CROSSTALK_INTERRUPTER_YIELD_CHANCE,
   BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE,
+  SIGNAL_OPENING_GUEST_ACKNOWLEDGEMENT_CUES,
   appendBotCrosstalkInterruptedSpeakerCue,
   botCrosstalkInterrupterYieldsForSeed,
   botCrosstalkInterruptedSpeakerCueHasAudio,
@@ -38,6 +39,7 @@ import {
   normalizeSignalListenerSequenceV1,
   withSignalListenerSequenceV1,
   signalNeutralBackchannelForTextV2,
+  signalOpeningGuestAcknowledgementCuesForPersonaV1,
   socialSilenceMessageIsMarkedV1,
 } from "./listenerReaction.ts";
 import { DIRECTIONAL_IRRITATION_SNARK_CUES } from "./directionalIrritation.ts";
@@ -271,11 +273,68 @@ describe("listener reaction planning", () => {
     assert.ok(spoken.length / 2_000 > 0.37);
     assert.ok(spoken.length / 2_000 < 0.45);
     assert.ok(
-      spoken.every(
-        (plan) => plan.spokenCue === "Hi." || plan.spokenCue === "Hey.",
+      spoken.every((plan) =>
+        SIGNAL_OPENING_GUEST_ACKNOWLEDGEMENT_CUES.includes(
+          plan.spokenCue as (typeof SIGNAL_OPENING_GUEST_ACKNOWLEDGEMENT_CUES)[number],
+        )
       ),
     );
+    assert.ok(
+      spoken.every((plan) => plan.spokenCue !== "Hi." && plan.spokenCue !== "Hey."),
+    );
     assert.ok(opening.every((plan) => plan.targetProgress === 0.62));
+  });
+
+  it("shapes opening guest acknowledgements from the authored persona", () => {
+    const creative = signalOpeningGuestAcknowledgementCuesForPersonaV1(
+      "An eccentric surrealist painter with an imaginative, artistic voice.",
+    );
+    const commanding = signalOpeningGuestAcknowledgementCuesForPersonaV1(
+      "A severe military commander who values discipline and control.",
+    );
+    const warm = signalOpeningGuestAcknowledgementCuesForPersonaV1(
+      "A warm, gentle, compassionate friend.",
+    );
+
+    assert.deepEqual(creative, [
+      "Now that's an entrance.",
+      "Delightfully strange already.",
+      "You've set the stage beautifully.",
+      "I can work with that.",
+    ]);
+    assert.deepEqual(commanding, [
+      "You have my attention.",
+      "A strong opening.",
+      "Let's get to it.",
+      "All right. Begin.",
+    ]);
+    assert.deepEqual(warm, [
+      "What a lovely welcome.",
+      "I'm glad we're doing this.",
+      "You're very kind.",
+      "It's lovely to be here.",
+    ]);
+    assert.ok(
+      [...creative, ...commanding, ...warm].every(
+        (cue) => cue !== "Hi." && cue !== "Hey.",
+      ),
+    );
+    assert.equal(
+      normalizeListenerReactionPlanV1({
+        v: 1,
+        name: "listenerReaction",
+        speakerBotId: "legacy-host",
+        listenerBotId: "legacy-guest",
+        messageId: "legacy-opening",
+        targetSource: "role",
+        visualAction: "nod",
+        spokenCue: "Hi.",
+        targetProgress: 0.62,
+        seed: "legacy-opening",
+        cameraCutEligible: false,
+      })?.spokenCue,
+      "Hi.",
+    );
   });
 
   it("keeps Signal reactions present on most turns without making every beat audible", () => {

@@ -863,7 +863,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .episodeGrid span, .episodeGrid small { color: var(--botcast-muted); }
 .episodeNumber { color: var(--botcast-host-accent) !important; font: 750 .66rem/1 system-ui; letter-spacing: .12em; }
 
-.liveLayout { padding: 12px 18px; }
+.liveLayout { --signal-live-stage-max-width: 1680px; --signal-live-desk-max-width: 1320px; --signal-live-inline-gutter: clamp(8px, 1vw, 18px); padding: 12px 18px; }
 .replayLayout { padding: 18px 28px 40px; }
 .replayStage { position: relative; max-width: 1180px; margin: 0 auto; }
 .replayStage > .stageViewport { max-width: none; margin: 0; }
@@ -978,6 +978,10 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .liveRoutingChip { max-width: 260px; color: var(--botcast-muted); }
 .liveDegradedWarning { border: 1px solid rgba(255,190,94,.34); border-radius: 999px; padding: 5px 8px; color: #ffd292; background: rgba(112,72,18,.24); font-weight: 760; letter-spacing: .035em; }
 .liveTopline button { border: 1px solid var(--botcast-line); border-radius: 7px; color: inherit; background: var(--botcast-soft-panel); padding: 7px 9px; cursor: pointer; }
+.liveTopline .liveThemeToggle { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 72px; border-color: color-mix(in srgb, var(--prism-s) 28%, var(--botcast-line)); color: color-mix(in srgb, var(--botcast-ink) 78%, var(--prism-s)); background: linear-gradient(145deg, color-mix(in srgb, var(--prism-s) 9%, var(--botcast-soft-panel)), var(--botcast-soft-panel)); box-shadow: inset 0 1px rgba(255,255,255,.06); font: 760 .66rem/1 system-ui; letter-spacing: .035em; }
+.liveTopline .liveThemeToggle:hover { border-color: color-mix(in srgb, var(--prism-s) 52%, var(--botcast-line)); color: var(--botcast-ink); background: color-mix(in srgb, var(--prism-s) 13%, var(--botcast-soft-panel)); }
+.liveTopline .liveThemeToggle:focus-visible { outline: 2px solid color-mix(in srgb, var(--prism-s) 72%, white); outline-offset: 2px; }
+.liveTopline .liveThemeToggle svg { flex: 0 0 auto; }
 .liveTopline .cutShowButton { border-color: rgba(255,96,79,.58); color: #fff5f2; background: linear-gradient(135deg, #a82d29, #e24b3f); box-shadow: 0 7px 18px rgba(166,42,36,.24), inset 0 1px rgba(255,255,255,.16); font-weight: 820; }
 .liveTopline .cutShowButton:hover:not(:disabled) { border-color: rgba(255,190,181,.76); background: linear-gradient(135deg, #bd332e, #f45b4d); }
 .liveCameraControls { position: relative; top: -42px; z-index: 8; max-width: 1320px; height: 0; margin: 0 auto; box-sizing: border-box; display: flex; align-items: center; justify-content: flex-end; gap: 5px; padding: 0 12px; }
@@ -1182,7 +1186,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
   color: rgba(24, 19, 28, 0.92);
   text-shadow: none;
 }
-.muteElapsedStageCue { position: absolute; left: 50%; bottom: 9%; z-index: 19; width: max-content; max-width: min(78%, 760px); transform: translateX(-50%); border: 1px solid rgba(255,255,255,.13); border-radius: 999px; padding: 7px 12px 8px; color: rgba(255,255,255,.78); background: rgba(4,6,11,.7); backdrop-filter: blur(9px) saturate(1.05); font: italic 680 clamp(.64rem, 1.16vw, .86rem)/1.25 system-ui; letter-spacing: .035em; text-align: center; text-wrap: balance; text-shadow: 0 2px 7px rgba(0,0,0,.95); box-shadow: 0 6px 22px rgba(0,0,0,.24); animation: signalVoiceActionIn 160ms ease-out both; pointer-events: none; }
+.muteSilenceMark { position: absolute; left: 50%; bottom: 9%; z-index: 19; transform: translateX(-50%); color: rgba(255,255,255,.78); font: 680 clamp(.82rem, 1.4vw, 1.05rem)/1 system-ui; letter-spacing: .08em; text-align: center; text-shadow: 0 2px 7px rgba(0,0,0,.95); animation: signalVoiceActionIn 160ms ease-out both; pointer-events: none; }
 .screenReaderStatus { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .liveCaption[data-signal-producer-host-prompt="true"] { pointer-events: auto; }
 .liveCaption[data-signal-producer-host-prompt="true"] span {
@@ -1288,8 +1292,8 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .producerGuestPresence[data-talking="true"] { box-shadow: inset 0 0 34px rgba(255,255,255,.1), 0 14px 36px rgba(0,0,0,.34), 0 0 42px color-mix(in srgb, var(--botcast-host-accent) 38%, transparent); }
 .stageNameplates { position: absolute; inset: 0; z-index: 17; pointer-events: none; }
 .nameplate { position: absolute; bottom: clamp(58px, 8.5%, 72px); min-width: 112px; max-width: min(15%, 180px); display: grid; gap: 3px; overflow: hidden; border: 1px solid rgba(255,255,255,.13); border-radius: 999px; padding: 6px 14px 7px; color: rgba(255,255,255,.94); background: rgba(7,8,12,.72); backdrop-filter: blur(10px) saturate(1.08); box-shadow: 0 7px 20px rgba(0,0,0,.38); font-size: clamp(.62rem, 1.1vw, .82rem); line-height: 1.05; text-align: center; text-overflow: ellipsis; white-space: nowrap; transition: opacity 180ms ease, transform 180ms ease; }
-.hostNameplate { left: clamp(14px, 2.4%, 32px); }
-.guestNameplate { right: clamp(14px, 2.4%, 32px); }
+.leftNameplate { left: clamp(14px, 2.4%, 32px); }
+.rightNameplate { right: clamp(14px, 2.4%, 32px); }
 .stageNameplates[data-shot="left"] .guestNameplate,
 .stageNameplates[data-shot="right"] .hostNameplate { opacity: 0; transform: translateY(6px); }
 .nameplate[data-departed="true"] { opacity: .5; }
@@ -1335,8 +1339,8 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .emptyChairLabel { position: absolute; z-index: 4; top: 47%; max-width: 150px; border: 1px solid rgba(255,255,255,.1); border-radius: 999px; padding: 7px 11px; color: rgba(255,255,255,.58); background: rgba(7,8,12,.52); backdrop-filter: blur(8px); text-align: center; font-size: .64rem; animation: signalEmptyChairReveal 260ms ease-out 640ms both; }
 
 .controlRoom { max-width: 1180px; margin: 8px auto 0; }
-.liveLayout .controlRoom { max-width: 1320px; }
-.signalMemoryReceiptDetail { max-width: 1320px; margin: 12px auto 0; }
+.liveLayout .controlRoom { max-width: var(--signal-live-desk-max-width); }
+.signalMemoryReceiptDetail { max-width: var(--signal-live-desk-max-width, 1320px); margin: 12px auto 0; }
 .producerControls, .replayTranscript { border: 1px solid var(--botcast-line); border-radius: 15px; background: var(--botcast-panel); box-shadow: 0 18px 44px var(--botcast-shadow); }
 .replayTranscript button[data-power-voice-presence="loud"] { --power-message-font-scale: 1.12; }
 .replayTranscript button[data-power-voice-presence="quiet"] { --power-message-font-scale: .88; }
@@ -1453,7 +1457,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 @keyframes signalCueQueued { from { transform: scale(.94); } 58% { transform: scale(1.025); } to { transform: scale(1); } }
 @keyframes signalProducerLineFlight { from { left: -30%; opacity: 0; } 16% { opacity: 1; } 84% { opacity: 1; } to { left: 104%; opacity: 0; } }
 .returnButton { display: block; margin: 16px auto; }
-.producerGuestComposerDock { position: sticky; bottom: 0; z-index: 18; max-width: 1320px; margin: 0 auto; padding-top: 10px; background: linear-gradient(180deg, transparent, var(--botcast-canvas) 18%); }
+.producerGuestComposerDock { position: sticky; bottom: 0; z-index: 18; max-width: var(--signal-live-desk-max-width, 1320px); margin: 0 auto; padding-top: 10px; background: linear-gradient(180deg, transparent, var(--botcast-canvas) 18%); }
 .producerGuestActionRail { display: flex; justify-content: flex-end; margin: 0 0 7px; }
 .producerGuestSipButton { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 28%, var(--botcast-line)); border-radius: 999px; padding: 6px 12px; color: var(--botcast-ink); background: color-mix(in srgb, var(--botcast-canvas) 92%, transparent); box-shadow: 0 8px 22px color-mix(in srgb, var(--botcast-host-accent) 8%, transparent); font: 760 .68rem/1 system-ui; cursor: pointer; transition: transform 150ms ease, border-color 150ms ease, background 150ms ease; }
 .producerGuestSipButton:hover:not(:disabled) { transform: translateY(-1px); border-color: color-mix(in srgb, var(--botcast-host-accent) 58%, var(--botcast-line)); background: color-mix(in srgb, var(--botcast-host-accent) 10%, var(--botcast-canvas)); }
@@ -1702,16 +1706,43 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .shell[data-theme="light"] .producerControls button,
 .shell[data-theme="light"] .producerGuestSipButton,
 .shell[data-theme="light"] .liveTopline button { border-color: var(--botcast-line); background: rgba(255,255,255,.7); color: var(--botcast-ink); }
+.shell[data-theme="light"] .liveTopline .liveThemeToggle { border-color: color-mix(in srgb, var(--prism-s) 24%, #c2cad6); color: #5f4810; background: linear-gradient(145deg, #fffdf2, #f1ead1); box-shadow: inset 0 1px rgba(255,255,255,.9), 0 5px 14px rgba(70,61,34,.08); }
+.shell[data-theme="light"] .liveTopline .liveThemeToggle:hover { border-color: color-mix(in srgb, var(--prism-s) 46%, #adb7c5); color: #3f2d02; background: linear-gradient(145deg, #fffef8, #ebe1bd); }
 .shell[data-theme="light"] .producerControls button[data-queued="true"] { border-color: color-mix(in srgb, var(--botcast-accent) 58%, var(--botcast-line)); background: color-mix(in srgb, var(--botcast-accent) 14%, rgba(255,255,255,.82)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--botcast-accent) 16%, transparent), 0 10px 26px color-mix(in srgb, var(--botcast-accent) 13%, transparent), inset 0 1px rgba(255,255,255,.9); }
-.shell[data-theme="light"] .producerDeskHeader { background: #090a12; box-shadow: inset 0 1px rgba(255,255,255,.09), inset 0 -12px 22px rgba(0,0,0,.22); }
+.shell[data-theme="light"] .producerControls { background: radial-gradient(circle at 92% -48px, color-mix(in srgb, var(--botcast-accent) 16%, transparent), transparent 42%), linear-gradient(160deg, #f8fafc, #e9eef5); }
+.shell[data-theme="light"] .producerDeskHeader { border-bottom-color: color-mix(in srgb, var(--botcast-accent) 24%, #c4ccd8); background: linear-gradient(180deg, #fdfefe, #e7edf5); box-shadow: inset 0 1px rgba(255,255,255,.98), inset 0 -1px rgba(90,104,126,.14); }
+.shell[data-theme="light"] .producerDeskPrivateLine { background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(234,240,247,.98)); }
+.shell[data-theme="light"] .producerCueReadout > i { border-color: #8b96a7; background: #d4dbe5; box-shadow: inset 0 1px 2px rgba(46,58,77,.22), 0 1px rgba(255,255,255,.92); }
+.shell[data-theme="light"] .producerCueReadout small, .shell[data-theme="light"] .producerCueLifecycle li, .shell[data-theme="light"] .producerCueComposerHeader span, .shell[data-theme="light"] .producerCueBankHeader span, .shell[data-theme="light"] .producerCueComposerHeader small, .shell[data-theme="light"] .producerCueBankHeader small, .shell[data-theme="light"] .producerControls label, .shell[data-theme="light"] .producerCueComposer > small, .shell[data-theme="light"] .producerQuoteCount { color: color-mix(in srgb, var(--botcast-ink) 57%, transparent); }
+.shell[data-theme="light"] .producerCueReadout strong, .shell[data-theme="light"] .producerCueLifecycle li[data-active="true"], .shell[data-theme="light"] .producerCueComposerHeader strong, .shell[data-theme="light"] .producerCueBankHeader strong { color: var(--botcast-ink); }
+.shell[data-theme="light"] .producerCueLifecycle li::before { background: #c8d0dc; box-shadow: inset 0 1px 2px rgba(46,58,77,.2); }
+.shell[data-theme="light"] .producerCueComposer, .shell[data-theme="light"] .producerCueBank { border-color: rgba(115,128,149,.28); background: linear-gradient(145deg, rgba(255,255,255,.92), rgba(243,247,251,.84)); box-shadow: inset 0 1px rgba(255,255,255,.98), inset 0 -10px 18px rgba(90,104,126,.06), 0 10px 24px rgba(55,68,91,.11); }
+.shell[data-theme="light"] .producerControls input, .shell[data-theme="light"] .producerControls textarea { border-color: #b9c4d2; background: rgba(255,255,255,.94); box-shadow: inset 0 1px 3px rgba(48,60,79,.11), 0 1px rgba(255,255,255,.9); }
+.shell[data-theme="light"] .producerCueClear { border-color: #b7c2d0; color: color-mix(in srgb, var(--botcast-ink) 68%, transparent); background: rgba(255,255,255,.68); }
+.shell[data-theme="light"] .producerControls button:disabled, .shell[data-theme="light"] .producerCueClear:disabled, .shell[data-theme="light"] .producerImageAttach:disabled { opacity: 1; border-color: #c8d0dc; color: color-mix(in srgb, var(--botcast-ink) 42%, transparent); background: #edf1f6; box-shadow: inset 0 1px rgba(255,255,255,.88); }
+.shell[data-theme="light"] .producerCueSend:disabled { border-color: #b7c9cf !important; color: #526a72 !important; background: #dce9ec !important; box-shadow: inset 0 1px rgba(255,255,255,.9), 0 2px 0 #b4c5ca !important; }
+.shell[data-theme="light"] .cueKey { color: var(--botcast-ink) !important; background: linear-gradient(180deg, #dce3ec, #c4cedb) !important; box-shadow: 0 5px 0 #9daaba, 0 10px 18px rgba(53,66,87,.2) !important; }
+.shell[data-theme="light"] .cueKey::before, .shell[data-theme="light"] .cueKey::after { background: #a8b3c2; box-shadow: inset 0 1px rgba(255,255,255,.85), 0 1px 2px rgba(46,58,77,.22); }
+.shell[data-theme="light"] .cueKeyCap { border-color: rgba(112,126,148,.4); background: radial-gradient(circle at 50% 17%, color-mix(in srgb, var(--cue-color) 23%, rgba(255,255,255,.92)), transparent 52%), linear-gradient(160deg, #ffffff, #e9eef5 52%, #d9e1eb); box-shadow: inset 0 2px rgba(255,255,255,.98), inset 0 -8px 12px rgba(75,90,112,.12), 0 4px 0 #aab5c3, 0 7px 13px rgba(59,72,93,.17); }
+.shell[data-theme="light"] .cueKeyLabel small { color: color-mix(in srgb, var(--botcast-ink) 55%, transparent); }
+.shell[data-theme="light"] .cueKeySymbol { border-color: color-mix(in srgb, var(--cue-color) 58%, #8b98aa); background: radial-gradient(circle, color-mix(in srgb, var(--cue-color) 17%, white), #f6f8fb 72%); box-shadow: inset 0 0 12px rgba(75,90,112,.12), 0 0 12px color-mix(in srgb, var(--cue-color) 18%, transparent); }
+.shell[data-theme="light"] .cueKeyLamp { background: #aab5c3; box-shadow: inset 0 1px 2px rgba(46,58,77,.24); }
+.shell[data-theme="light"] .cueKey:disabled { filter: saturate(.38); }
+.shell[data-theme="light"] .guestAnnoyanceStatus strong { color: color-mix(in srgb, var(--signal-guest-annoyance-color) 46%, #422909); }
 .shell[data-theme="light"] .producerDeskLineActions .producerInterruptButton:not(:disabled) { border-color: rgba(184,56,50,.62); color: #fff; background: linear-gradient(180deg, #813b38, #492126); box-shadow: inset 0 1px rgba(255,255,255,.16), 0 3px 0 #210b0d, 0 0 16px rgba(184,56,50,.14); }
 .shell[data-theme="light"] .liveCameraControls button[data-selected="true"] { border-color: transparent; color: #fff; background: linear-gradient(120deg, color-mix(in srgb, var(--botcast-host-accent) 76%, var(--prism-p)), var(--prism-m)); }
 .shell[data-theme="light"] .liveTopline .cutShowButton { border-color: rgba(164,42,37,.5); color: #fff; background: linear-gradient(135deg, #a82d29, #e24b3f); box-shadow: 0 7px 18px rgba(166,42,36,.2), inset 0 1px rgba(255,255,255,.16); }
 
+@media (min-width: 901px) {
+  .shell[data-live-episode="true"] .liveLayout { padding-inline: var(--signal-live-inline-gutter); }
+  .shell[data-live-episode="true"] .liveTopline,
+  .shell[data-live-episode="true"] .liveCameraControls,
+  .shell[data-live-episode="true"] .liveLayout .stageViewport { box-sizing: border-box; width: min(100%, var(--signal-live-stage-max-width)); max-width: none; }
+}
+
 @media (min-width: 901px) and (min-height: 760px) {
   .shell[data-live-episode="true"] .main { overflow-y: auto; scrollbar-gutter: stable; }
   .shell[data-live-episode="true"] .liveLayout { min-height: 100%; box-sizing: border-box; overflow: visible; padding-bottom: 12px; }
-  .shell[data-live-episode="true"] .liveLayout .stageViewport { width: min(1320px, 100%, calc((100dvh - 412px) * 1.7778)); }
   .shell[data-live-episode="true"] .controlRoom { width: 100%; }
   .shell[data-live-episode="true"] .producerCueComposer > small { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .shell[data-producer-guest="true"] .main { overflow-y: auto; }

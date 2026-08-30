@@ -96,7 +96,7 @@ test("Chat and Zen schedule one persisted transition end without rerender loops"
   );
 });
 
-test("Identity Crisis overlays the target face, Ink, glyph, and quoted public name only", () => {
+test("Identity Crisis overlays the target face, Ink, glyph, and distinct public name only", () => {
   assert.match(
     pageSource,
     /const identityFullFormPresentationState = identityMirrorState\s+\? null\s+: identityShapeshiftState/u,
@@ -122,23 +122,33 @@ test("Identity Crisis overlays the target face, Ink, glyph, and quoted public na
   assert.match(pageSource, /resolveBotIdentityMirrorFaceV1/u);
   assert.match(
     pageSource,
-    /identityMirrorState\s*\?\s*botIdentityMirrorQuotedTargetNameV1\([\s\S]{0,100}identityMirrorState\.targetBotName/u,
-    "Coffee nameplates must take the target's literally quoted public name",
+    /identityMirrorState\s*\?\s*botIdentityMirrorPublicNameV1\([\s\S]{0,100}identityMirrorState\.targetBotName/u,
+    "Coffee nameplates must present Identity Crisis as The real target",
+  );
+  assert.match(
+    pageSource,
+    /botIdentityShapeshiftQuotedTargetNameV1\(\s*identityShapeshiftState\?\.targetBotName/u,
+    "Coffee nameplates must quote Shapeshifter's borrowed public name",
   );
   assert.match(
     botcastSource,
-    /const mirroredIdentity = bot\s+\?\s*botIdentityMirrorQuotedTargetNameV1\([\s\S]{0,100}identityMirrorStates\.get\(bot\.id\)\?\.targetBotName/u,
-    "Signal nameplates and captions must take the target's literally quoted public name",
+    /const mirroredIdentity = bot\s+\?\s*botIdentityMirrorPublicNameV1\([\s\S]{0,100}identityMirrorStates\.get\(bot\.id\)\?\.targetBotName/u,
+    "Signal nameplates and captions must present Identity Crisis as The real target",
+  );
+  assert.match(
+    botcastSource,
+    /const borrowedIdentity = bot\s+\?\s*botIdentityShapeshiftQuotedTargetNameV1\([\s\S]{0,120}identityShapeshiftStates\.get\(bot\.id\)\?\.targetBotName/u,
+    "Signal nameplates and captions must quote Shapeshifter's borrowed public name",
   );
   assert.match(
     debateSource,
     /displayName: identityMirrorDisplayName \|\| displayName/u,
-    "Debate nameplates must take the target's literally quoted public name",
+    "Debate nameplates must present Identity Crisis as The real target",
   );
   assert.match(
     debateSource,
-    /identityLabel: identitySource\s*\?\s*shapeshifting\s*\?\s*`Appearing as \$\{identitySource\.name\}`\s*:\s*null\s*:\s*falseName/u,
-    "Identity Crisis must not duplicate the quoted public name as a secondary label",
+    /identityLabel: identitySource\s*\?\s*shapeshifting\s*\?\s*`Appearing as \$\{botIdentityShapeshiftQuotedTargetNameV1\(identitySource\.name\)\}`\s*:\s*null\s*:\s*falseName/u,
+    "Identity Crisis must not duplicate its public name as a secondary label",
   );
   assert.match(
     debateSource,
@@ -167,8 +177,8 @@ test("Identity Crisis overlays the target face, Ink, glyph, and quoted public na
   );
   assert.match(
     debateIdentitySource,
-    /applyBotIdentityMirrorFaceV1\([\s\S]*return \{\s*\.\.\.args\.holder,[\s\S]*botIdentityMirrorQuotedTargetNameV1\(args\.target\.name\)[\s\S]*glyph: args\.target\.glyph,[\s\S]*voiceProfile: applyBotIdentityMirrorHolderVoiceEffectV1/u,
-    "Debate Identity Crisis must retain holder identity while borrowing the face, Ink, glyph, and quoted name",
+    /applyBotIdentityMirrorFaceV1\([\s\S]*return \{\s*\.\.\.args\.holder,[\s\S]*botIdentityMirrorPublicNameV1\(args\.target\.name\)[\s\S]*glyph: args\.target\.glyph,[\s\S]*voiceProfile: applyBotIdentityMirrorHolderVoiceEffectV1/u,
+    "Debate Identity Crisis must retain holder identity while borrowing the face, Ink, glyph, and public name",
   );
   assert.match(
     debateSource,

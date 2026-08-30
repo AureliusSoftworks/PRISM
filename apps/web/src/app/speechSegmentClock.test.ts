@@ -142,4 +142,39 @@ describe("speech segment clock — English clause gaps", () => {
     assert.ok(resumed.startsWith(prefixAfterFirst.trimEnd()));
     assert.equal(botcastSpeechRevealIsVoicing(reveal), true);
   });
+
+  it("includes heard vocal actions in activity without revealing text", () => {
+    const segments: SpeechSegmentTiming[] = [
+      {
+        kind: "vocal-action",
+        action: "exhales",
+        sourceStart: 0,
+        sourceEnd: 0,
+        startMs: 100,
+        endMs: 700,
+        heard: true,
+      },
+      {
+        kind: "vocal-action",
+        action: "coughs",
+        sourceStart: 0,
+        sourceEnd: 0,
+        startMs: 900,
+        endMs: 1_200,
+        heard: false,
+      },
+    ];
+    const windows = buildSpeechActivityWindowsFromHeardSegments(
+      segments,
+      1_400,
+    );
+
+    assert.ok(windows);
+    assert.equal(speechActivityAtMs(windows, 350), true);
+    assert.equal(speechActivityAtMs(windows, 1_050), false);
+    assert.equal(
+      visibleCharacterCountFromSegmentTimings("Behind", segments, 500),
+      0,
+    );
+  });
 });

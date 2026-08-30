@@ -203,6 +203,7 @@ export {
   BOT_POWER_LOUD_VOICE_GAIN_MULTIPLIER_V1,
   BOT_POWER_QUIET_TEXT_SCALE_V1,
   BOT_POWER_QUIET_VOICE_GAIN_MULTIPLIER_V1,
+  BOT_POWER_MUTE_PUBLIC_MARK_V1,
   BOT_POWER_SIGIL_IDS_V1,
   BOT_POWER_VERSION,
   botPowerFallbackTitleV1,
@@ -593,6 +594,7 @@ export {
   botIdentityMirrorFaceV1,
   botIdentityMirrorVoiceV1,
   botIdentityMirrorHolderPromptV1,
+  botIdentityMirrorPublicNameV1,
   botIdentityMirrorQuotedTargetNameV1,
   botIdentityMirrorObserverPromptV1,
   botIdentityMirrorOriginalCorrectionRequiredV1,
@@ -612,6 +614,7 @@ export {
   applyBotIdentityShapeshiftResponseV1,
   botIdentityShapeshiftHolderPromptV1,
   botIdentityShapeshiftObserverPromptV1,
+  botIdentityShapeshiftQuotedTargetNameV1,
   botIdentityShapeshiftSeedHashV1,
   botIdentityShapeshiftTargetChangesV1,
   botIdentityShapeshiftTransitionActiveV1,
@@ -3912,8 +3915,10 @@ export * from "./debateMystery.js";
 export * from "./debateMysteryV2.js";
 export * from "./mysteryIncidentPlan.js";
 export * from "./portableMysteryPackage.js";
+export * from "./portableMysteryCase.js";
 export * from "./whodunnitProps.js";
 export * from "./mansionLayoutV2.js";
+export * from "./mansionAutoDecorationV2.js";
 export * from "./mansionMusic.js";
 export * from "./audioAssets.js";
 export * from "./mansionAcoustics.js";

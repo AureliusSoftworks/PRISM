@@ -20,6 +20,9 @@ import {
   signalLiveSpeechIsActiveAtElapsedMs,
   signalLiveSpeechPlaybackIsOwned,
   signalLiveSpeechProjectedElapsedMs,
+  signalResponseCueMouthShapeAt,
+  signalVocalActionMouthShapeAtElapsedMs,
+  type SignalResponseCueSpeechState,
   type SignalLiveSpeechState,
 } from "./signalLiveAvatarSpeech.ts";
 import { zenLiveActionPlateFace } from "./zenLiveActions.ts";
@@ -199,6 +202,124 @@ describe("Signal live avatar speech", () => {
     assert.ok(
       standardMouthGlyphs.size > 1,
       "a standard viseme mouth such as Correction Connie's must visibly change glyphs",
+    );
+  });
+
+  it("articulates a spoken response cue from its live audible clock", () => {
+    let audibleElapsedMs = 0;
+    const speech: SignalResponseCueSpeechState = {
+      surface: "signal",
+      sessionId: "episode-1",
+      responseId: "response-1",
+      speakerBotId: "host-bot",
+      text: "One moment.",
+      durationMs: 1_200,
+      alignment: null,
+      clock: {
+        messageId: "response-1",
+        elapsedMs: 0,
+        observedAtMs: 10_000,
+        readElapsedMs: () => audibleElapsedMs,
+      },
+    };
+    const shapes = new Set(
+      [80, 260, 480, 720, 960].map((elapsedMs) => {
+        audibleElapsedMs = elapsedMs;
+        return signalResponseCueMouthShapeAt({
+          speech,
+          botId: "host-bot",
+          nowMs: 99_000,
+        });
+      }),
+    );
+
+    assert.ok(shapes.size > 1);
+    assert.ok(Array.from(shapes).some((shape) => shape !== "closed"));
+    assert.equal(
+      signalResponseCueMouthShapeAt({
+        speech,
+        botId: "guest-bot",
+        nowMs: 99_000,
+      }),
+      "closed",
+    );
+  });
+
+  it("gives heard vocal actions physical action-specific mouth envelopes", () => {
+    assert.equal(
+      signalVocalActionMouthShapeAtElapsedMs({
+        action: "exhales",
+        elapsedMs: 240,
+        durationMs: 800,
+      }),
+      "open-round",
+    );
+    assert.equal(
+      signalVocalActionMouthShapeAtElapsedMs({
+        action: "coughs",
+        elapsedMs: 240,
+        durationMs: 800,
+      }),
+      "open-wide",
+    );
+
+    const active = message("vocal-action", "Behind that answer is a cost.");
+    let reveal = startBotcastSpeechReveal({
+      text: active.content,
+      durationMs: 1_600,
+      segmentClock: true,
+      segmentTimings: [],
+    });
+    reveal = applyBotcastSpeechRevealSegmentTiming(reveal, {
+      kind: "vocal-action",
+      action: "exhales",
+      sourceStart: 0,
+      sourceEnd: 0,
+      startMs: 0,
+      endMs: 600,
+      heard: true,
+    });
+    const live: SignalLiveSpeechState = {
+      messageId: active.id,
+      message: active,
+      audible: true,
+      reveal: updateBotcastSpeechReveal(reveal, 300),
+    };
+    assert.notEqual(
+      signalLivePrimaryAvatarSpeech({ liveSpeech: live, role: "host" })
+        .mouthShape,
+      "closed",
+    );
+    assert.equal(
+      signalLiveSpeechIsActiveAtElapsedMs({ liveSpeech: live, role: "host" }),
+      true,
+    );
+
+    const silent: SignalLiveSpeechState = {
+      ...live,
+      reveal: applyBotcastSpeechRevealSegmentTiming(
+        startBotcastSpeechReveal({
+          text: active.content,
+          durationMs: 1_600,
+          segmentClock: true,
+          segmentTimings: [],
+        }),
+        {
+          kind: "vocal-action",
+          action: "exhales",
+          sourceStart: 0,
+          sourceEnd: 0,
+          startMs: 0,
+          endMs: 600,
+          heard: false,
+        },
+      ),
+    };
+    silent.reveal = updateBotcastSpeechReveal(silent.reveal, 300);
+    assert.equal(
+      signalLivePrimaryAvatarSpeech({ liveSpeech: silent, role: "host" })
+        .mouthShape,
+      "closed",
     );
   });
 

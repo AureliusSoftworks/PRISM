@@ -49,6 +49,37 @@ const voiceActionCss = readFileSync(
 );
 
 describe("Signal experience shell", () => {
+  it("keeps a persistent Light and Dark switch in the live session chrome", () => {
+    assert.match(
+      source,
+      /onThemeChange\?: \(theme: "light" \| "dark"\) => void \| Promise<void>/u,
+    );
+    assert.match(
+      source,
+      /void onThemeChange\(theme === "light" \? "dark" : "light"\)/u,
+    );
+    assert.match(
+      source,
+      /aria-label=\{`Switch Signal to \$\{theme === "light" \? "Dark" : "Light"\} Mode`\}/u,
+    );
+    assert.match(source, /data-theme-mode=\{theme\}/u);
+    assert.match(pageSource, /async function applyThemeMode\(nextTheme: Theme\)/u);
+    assert.match(pageSource, /onThemeChange=\{applyThemeMode\}/u);
+    assert.match(
+      pageSource,
+      /body: JSON\.stringify\(\{ theme: nextTheme \}\)/u,
+    );
+    assert.match(css, /\.liveTopline \.liveThemeToggle\s*\{/u);
+    assert.match(
+      css,
+      /\.shell\[data-theme="light"\] \.liveTopline \.liveThemeToggle\s*\{/u,
+    );
+    assert.match(
+      tutorials,
+      /The compact Light\/Dark control remains in the live topline and changes only PRISM’s appearance; it never alters the episode, recording, or replay\./u,
+    );
+  });
+
   it("surfaces sustained automatic recovery without exposing diagnostics", () => {
     assert.match(source, /signalSessionIsDegraded\(episode\.events\)/u);
     assert.match(source, /Signal recovering · quality may vary/u);
@@ -116,6 +147,12 @@ describe("Signal experience shell", () => {
     );
     assert.match(css, /\.cueKey\[data-queued="true"\]/u);
     assert.match(css, /\.shell\[data-theme="light"\] \.producerDeskHeader/u);
+    assert.match(css, /\.shell\[data-theme="light"\] \.producerControls \{[^}]*linear-gradient\(160deg, #f8fafc, #e9eef5\)/u);
+    assert.match(css, /\.shell\[data-theme="light"\] \.producerDeskPrivateLine \{[^}]*rgba\(255,255,255,\.96\)/u);
+    assert.match(css, /\.shell\[data-theme="light"\] \.cueKey \{[^}]*#dce3ec/u);
+    assert.match(css, /\.shell\[data-theme="light"\] \.producerControls button:disabled/u);
+    assert.match(css, /\.shell\[data-theme="light"\] \.producerCueSend:disabled \{[^}]*#dce9ec/iu);
+    assert.match(css, /\.shell\[data-theme="light"\] \.guestAnnoyanceStatus strong \{[^}]*#422909/iu);
     assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.producerDeskPrivateLine::after \{ animation: none !important; \}/u);
   });
 
@@ -505,7 +542,7 @@ describe("Signal experience shell", () => {
     assert.doesNotMatch(source, /window\.addEventListener\("keyup", onKeyUp\)/u);
   });
 
-  it("holds voice preparation Wide and hands directly to ready speech", () => {
+  it("holds voice preparation Wide and directs ready speech without camera twitch", () => {
     assert.match(
       source,
       /const liveBotThinking = Boolean\([\s\S]{0,220}busy[\s\S]{0,100}speakingMessageId === null/u,
@@ -521,8 +558,11 @@ describe("Signal experience shell", () => {
     assert.match(source, /signalLiveAutoCameraShot\(\{/u);
     assert.match(
       source,
-      /const liveSpeakingShot =[\s\S]{0,120}liveCameraMode === "auto"/u,
+      /const liveSpeakingCloseupShot:[\s\S]{0,120}liveCameraMode === "auto"/u,
     );
+    assert.match(source, /signalSpeechStartCameraShot\(\{/u);
+    assert.match(source, /signalAutomaticCameraPresentationAt\(\{/u);
+    assert.match(source, /introActive: episodePreRoll !== null/u);
     assert.match(source, /speakingShot: liveSpeakingShot/u);
     assert.match(source, /coverageShot:/u);
     assert.match(source, /botcastAutoCoverageShotAt\(\{/u);
@@ -1584,7 +1624,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /signalReplayBookendAt\([\s\S]{0,180}replayElapsedMs[\s\S]{0,220}introEndMs: replayIntroCardEndMs/u,
+      /signalReplayBookendAt\([\s\S]{0,180}replayCapturedPresentationElapsedMs[\s\S]{0,220}introEndMs: replayIntroCardEndMs/u,
     );
     assert.match(
       source,
@@ -1596,7 +1636,15 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /signalReplayCapturedPresentationElapsedMs\(\{[\s\S]{0,120}timeline: replayActiveTimeline,[\s\S]{0,80}replayElapsedMs/u,
+      /signalReplayCapturedPresentationElapsedMs\(\{[\s\S]{0,120}timeline: replayActiveTimeline,[\s\S]{0,120}replayElapsedMs,[\s\S]{0,120}mediaDurationMs: replayIntrinsicMediaDurationMs,[\s\S]{0,120}capturedDurationMs: replayCapturedDurationMs/u,
+    );
+    assert.match(
+      source,
+      /signalReplayMediaDurationMs\(audioUrl\)\.then\(publishDuration\)/u,
+    );
+    assert.match(
+      source,
+      /replayStageBoundaryTimesMs\.map\(\(capturedElapsedMs\) =>[\s\S]{0,180}signalReplayMediaElapsedMs\(\{/u,
     );
     assert.doesNotMatch(
       source,
@@ -1686,11 +1734,11 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /const replayCameraDirectedScene = useMemo\([\s\S]{0,240}replaySceneAtV2\([\s\S]{0,120}replayElapsedMs/u,
+      /const replayCameraDirectedScene = useMemo\([\s\S]{0,240}replaySceneAtV2\([\s\S]{0,120}replayCapturedPresentationElapsedMs/u,
     );
     assert.match(
       source,
-      /signalFaithfulReplayCameraState\(\{[\s\S]{0,180}replayElapsedMs,[\s\S]{0,80}scene: replayCameraDirectedScene/u,
+      /signalFaithfulReplayCameraState\(\{[\s\S]{0,180}replayElapsedMs: replayCapturedPresentationElapsedMs,[\s\S]{0,100}scene: replayCameraDirectedScene/u,
     );
     assert.match(source, /audio\.playbackRate = 1/u);
     assert.match(source, /SIGNAL_REPLAY_STAGE_RENDER_INTERVAL_MS = 250/u);
@@ -1769,7 +1817,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /replayFaithfulCamera\?\.eventElapsedMs \?\? replayElapsedMs/u,
+      /replayFaithfulCamera\?\.eventElapsedMs \?\?[\s\S]{0,100}replayFaithful \? replayCapturedPresentationElapsedMs : replayElapsedMs/u,
     );
     assert.match(
       source,
@@ -2795,6 +2843,29 @@ describe("Signal experience shell", () => {
     );
   });
 
+  it("routes spoken response cues through Signal's audible-clock mouth sampler", () => {
+    assert.match(
+      pageSource,
+      /const responseCueSpeechRef = useRef<SignalResponseCueSpeechState/u,
+    );
+    assert.match(
+      pageSource,
+      /onPlaybackClock: \(readElapsedMs, durationMs\)[\s\S]{0,420}responseCueSpeech\.clock\.readElapsedMs/u,
+    );
+    assert.match(
+      pageSource,
+      /responseCueSpeech=\{activeResponseCueSpeech\}/u,
+    );
+    assert.match(
+      source,
+      /signalResponseCueMouthShapeAt\(\{[\s\S]{0,180}activeResponseCueSpeech/u,
+    );
+    assert.match(
+      source,
+      /ephemeralSpeech !== undefined \|\|[\s\S]{0,80}activeResponseCueSpeech !== null/u,
+    );
+  });
+
   it("reserves the full transcript and playback controls for replay", () => {
     assert.doesNotMatch(source, /className=\{styles\.transcript\}/u);
     assert.doesNotMatch(source, /signalTranscriptFollowingRef/u);
@@ -2816,13 +2887,17 @@ describe("Signal experience shell", () => {
     assert.match(source, /data-botcast-replay-intro-row="true"/u);
     assert.match(
       source,
-      /replayElapsedMs < replayIntroCardEndMs[\s\S]{0,80}\? "true"/u,
+      /replayCapturedPresentationElapsedMs < replayIntroCardEndMs[\s\S]{0,80}\? "true"/u,
     );
     assert.match(
       source,
       /const replayMessageIndex =\s*replayFaithful\s*\?\s*replayFaithfulMessageIndex\s*:\s*botcastReplayMessageIndexAt/u,
     );
     assert.match(source, /onClick=\{\(\) => seekFaithfulReplay\(0\)\}/u);
+    assert.match(
+      source,
+      /seekFaithfulReplay\([\s\S]{0,100}signalReplayMediaElapsedMs\(\{[\s\S]{0,140}capturedElapsedMs: nextMs/u,
+    );
     assert.match(
       source,
       /Opening video · \{runtimeLabel\(replayIntroCardEndMs\)\}/u,
@@ -2956,11 +3031,15 @@ describe("Signal experience shell", () => {
       source,
       /botcastSignalStandardCadenceDurationMs\([\s\S]{0,180}message\.mutePerformance/u,
     );
-    assert.match(source, /data-signal-mute-elapsed-cue="true"/u);
-    assert.match(source, /muteElapsedStageCueVisible/u);
+    assert.match(source, /data-signal-mute-silence-mark="true"/u);
+    assert.match(source, /muteSilenceMarkVisible/u);
     assert.match(
       css,
-      /\.muteElapsedStageCue\s*\{[^}]*bottom:\s*9%;[^}]*z-index:\s*19/iu,
+      /\.muteSilenceMark\s*\{[^}]*bottom:\s*9%;[^}]*z-index:\s*19/iu,
+    );
+    assert.doesNotMatch(
+      css,
+      /\.muteSilenceMark\s*\{[^}]*(?:border|background|box-shadow):/iu,
     );
   });
 

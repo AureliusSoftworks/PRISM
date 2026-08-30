@@ -402,7 +402,8 @@ export interface DebateMysteryMansionSnapshotV2 {
   sourceBundleId: string;
   /** V1-compatible semantic projection used by the existing case compiler. */
   rooms: DebateMysteryMansionBundleRoomV1[];
-  /** Present for V2 sources; null preserves a V1 source without rewriting it. */
+  /** Current Case Forge projects V1 sources into a decorated V2 snapshot;
+   * null remains readable only for older stored snapshots. */
   layoutV2: MansionLayoutV2 | null;
   layoutSha256: string;
   presentation: DebateMysteryMansionPresentationSnapshotV2;

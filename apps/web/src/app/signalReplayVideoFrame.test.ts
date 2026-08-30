@@ -24,6 +24,7 @@ import {
   signalReplayIntroLandingFadeMs,
   signalReplayIntroLandingRemainingMs,
   signalReplayCapturedPresentationElapsedMs,
+  signalReplayMediaElapsedMs,
   signalReplayIntroVisualElapsedMs,
   signalReplayIntroVisualOffsetMs,
   signalReplayVideoEventElapsedMs,
@@ -199,6 +200,53 @@ describe("signalReplayCapturedPresentationElapsedMs", () => {
       replayElapsedMs: 7_500,
     });
     assert.equal(laterFrameMs - earlierFrameMs, 3_500);
+  });
+
+  it("calibrates a shorter WebM transport onto the saved presentation clock", () => {
+    const capturedDurationMs = 100_467;
+    const mediaDurationMs = 97_555;
+    const calibratedTimeline: ReplayTimelineV1 = {
+      ...timeline,
+      durationMs: capturedDurationMs,
+    };
+
+    assert.equal(
+      signalReplayCapturedPresentationElapsedMs({
+        timeline: calibratedTimeline,
+        replayElapsedMs: mediaDurationMs,
+        mediaDurationMs,
+        capturedDurationMs,
+      }),
+      capturedDurationMs,
+    );
+    assert.equal(
+      Math.round(
+        signalReplayCapturedPresentationElapsedMs({
+          timeline: calibratedTimeline,
+          replayElapsedMs: mediaDurationMs / 2,
+          mediaDurationMs,
+          capturedDurationMs,
+        }),
+      ),
+      Math.round(capturedDurationMs / 2),
+    );
+  });
+
+  it("maps saved transcript seeks back to the shorter media transport", () => {
+    assert.equal(
+      Math.round(
+        signalReplayMediaElapsedMs({
+          capturedElapsedMs: 49_035,
+          mediaDurationMs: 97_555,
+          capturedDurationMs: 100_467,
+        }),
+      ),
+      47_614,
+    );
+    assert.equal(
+      signalReplayMediaElapsedMs({ capturedElapsedMs: 4_200 }),
+      4_200,
+    );
   });
 
   it("clamps the captured presentation clock to the audio timeline", () => {

@@ -6,6 +6,8 @@ import {
   applyBotIdentityShapeshiftAccentMapV1,
   applyBotIdentityShapeshiftResponseV1,
   botIdentityShapeshiftHolderPromptV1,
+  botIdentityShapeshiftObserverPromptV1,
+  botIdentityShapeshiftQuotedTargetNameV1,
   botIdentityShapeshiftTargetChangesV1,
   botIdentityShapeshiftTransitionActiveV1,
   createBotIdentityShapeshiftStateV1,
@@ -129,8 +131,34 @@ test("identity shapeshift snapshot stays public-form only and sticky until targe
       state,
       identityJustChanged: true,
     }),
-    /Hard shapeshift rule:[\s\S]*Mara Vale/u,
+    /Hard shapeshift rule:[\s\S]*"Mara Vale"/u,
   );
+  assert.equal(
+    botIdentityShapeshiftQuotedTargetNameV1(state.targetBotName),
+    '"Mara Vale"',
+  );
+  assert.equal(
+    botIdentityShapeshiftQuotedTargetNameV1('  "Mara   Vale"  '),
+    '"Mara Vale"',
+    "an already quoted effective target must not gain nested quotes",
+  );
+});
+
+test("identity shapeshift gives active observers an occasional voice-mismatch cue", () => {
+  const state = shapeshiftState();
+  const observer = botIdentityShapeshiftObserverPromptV1({
+    observerBotId: "other-bot",
+    state,
+  });
+  const original = botIdentityShapeshiftObserverPromptV1({
+    observerBotId: state.targetBotId,
+    state,
+  });
+  for (const cue of [observer, original]) {
+    assert.match(cue, /Sometimes, but never by obligation or on every turn/iu);
+    assert.match(cue, /voice still does not sound like "Mara Vale"/iu);
+    assert.match(cue, /own judgment/u);
+  }
 });
 
 test("identity shapeshift retains Shannon voice identity and overlays only Terry Accent Map", () => {
@@ -171,14 +199,14 @@ test("identity shapeshift response rewrite claims the borrowed form once", () =>
     state,
     true,
   );
-  assert.match(first, /^I am Mara Vale\./u);
+  assert.match(first, /^I am "Mara Vale"\./u);
   assert.equal(
     applyBotIdentityShapeshiftResponseV1(
       "I am Mara Vale. This is Veil of Voices, and I am Mara Vale. Across from me sits Forgetful Forrest.",
       state,
       true,
     ),
-    "I am Mara Vale. This is Veil of Voices. Across from me sits Forgetful Forrest.",
+    'I am "Mara Vale". This is Veil of Voices. Across from me sits Forgetful Forrest.',
   );
   const later = applyBotIdentityShapeshiftResponseV1(
     "I am Mara Vale. Bearing north looks clear.",
@@ -191,7 +219,7 @@ test("identity shapeshift response rewrite claims the borrowed form once", () =>
     state,
     false,
   );
-  assert.match(rewritten, /I am Mara Vale/u);
+  assert.match(rewritten, /I am "Mara Vale"/u);
 });
 
 test("identity shapeshift transition window and deterministic pick stay bounded", () => {

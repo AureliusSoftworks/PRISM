@@ -5,6 +5,7 @@ import {
 } from "@localai/shared";
 
 import type { BotcastSpeechRevealState } from "./botcastSpeechReveal.ts";
+import type { SpeechCharacterAlignment } from "./speechRevealTimeline.ts";
 import {
   crtSpeechMouthShapeAtAlignedElapsedMs,
   crtSpeechMouthShapeAtElapsedMs,
@@ -27,6 +28,90 @@ export type SignalLiveSpeechPlaybackClock = {
   /** Prefer the engine's live audible clock over wall-time projection. */
   readElapsedMs?: () => number;
 };
+
+/** Live-only response-cue playback state; persistence stays in BotPresenceBeatV1. */
+export type SignalResponseCueSpeechState = {
+  surface: "signal";
+  sessionId: string;
+  responseId: string;
+  speakerBotId: string;
+  text: string;
+  durationMs: number;
+  alignment: SpeechCharacterAlignment | null;
+  clock: SignalLiveSpeechPlaybackClock;
+};
+
+/** Resolve response-cue articulation from the same audible clock as the clip. */
+export function signalResponseCueMouthShapeAt(args: {
+  speech: SignalResponseCueSpeechState | null;
+  botId: string;
+  nowMs: number;
+}): ZenLiveBotMouthShape {
+  const speech = args.speech;
+  if (!speech || speech.speakerBotId !== args.botId) return "closed";
+  const sampledElapsedMs = speech.clock.readElapsedMs?.();
+  const elapsedMs = Number.isFinite(sampledElapsedMs)
+    ? sampledElapsedMs!
+    : speech.clock.elapsedMs +
+      Math.max(0, args.nowMs - speech.clock.observedAtMs);
+  return crtSpeechMouthShapeAtAlignedElapsedMs({
+    text: speech.text,
+    elapsedMs: Math.min(speech.durationMs, Math.max(0, elapsedMs)),
+    durationMs: speech.durationMs,
+    alignment: speech.alignment,
+  });
+}
+
+/**
+ * Physical, deterministic envelopes for heard nonverbal voice actions.
+ * The action label is never fed to the speech-viseme engine as dialogue.
+ */
+export function signalVocalActionMouthShapeAtElapsedMs(args: {
+  action?: string | null;
+  elapsedMs: number;
+  durationMs: number;
+}): ZenLiveBotMouthShape {
+  const durationMs = Math.max(1, args.durationMs);
+  const progress = Math.min(1, Math.max(0, args.elapsedMs / durationMs));
+  if (progress <= 0 || progress >= 1) return "closed";
+  const action = (args.action ?? "").toLocaleLowerCase("en-US");
+
+  if (/gasp|inhale|sharp breath/u.test(action)) {
+    if (progress < 0.12) return "speech-closed";
+    if (progress < 0.72) return "open-wide";
+    return progress < 0.9 ? "open-round" : "open-small";
+  }
+  if (/exhale|sigh|breath out/u.test(action)) {
+    if (progress < 0.15) return "open-small";
+    if (progress < 0.72) return "open-round";
+    return progress < 0.9 ? "open-small" : "speech-closed";
+  }
+  if (/cough|clear(?:s|ing|ed)? (?:the |their )?throat/u.test(action)) {
+    if (progress < 0.16) return "speech-closed";
+    if (progress < 0.38) return "open-wide";
+    if (progress < 0.58) return "speech-closed";
+    return progress < 0.82 ? "open-small" : "speech-closed";
+  }
+  if (/laugh|chuckle|giggle|snicker/u.test(action)) {
+    const beat = Math.floor(progress * 8) % 3;
+    return beat === 0
+      ? "open-wide"
+      : beat === 1
+        ? "open-small"
+        : "speech-closed";
+  }
+  if (/whistle/u.test(action)) {
+    return progress < 0.82 ? "open-round" : "narrow";
+  }
+  if (/hum|murmur|grunt|groan/u.test(action)) {
+    return progress < 0.22 || progress > 0.82
+      ? "speech-closed"
+      : "open-small";
+  }
+  return progress < 0.2 || progress > 0.84
+    ? "speech-closed"
+    : "open-small";
+}
 
 /**
  * Primary speech belongs to its audible message, not to speculative generation
@@ -125,13 +210,17 @@ export function signalLiveSpeechMouthShapeAtElapsedMs(args: {
         elapsedMs < candidate.endMs,
     );
     if (segment) {
-      if (
-        segment.kind !== "speech" ||
-        !segment.heard ||
-        segment.sourceEnd <= segment.sourceStart
-      ) {
+      if (!segment.heard) {
         return "closed";
       }
+      if (segment.kind === "vocal-action") {
+        return signalVocalActionMouthShapeAtElapsedMs({
+          action: segment.action,
+          elapsedMs: elapsedMs - segment.startMs,
+          durationMs: segment.endMs - segment.startMs,
+        });
+      }
+      if (segment.sourceEnd <= segment.sourceStart) return "closed";
       const sourceCharacters = Array.from(reveal.text);
       const sourceStart = Math.max(
         0,

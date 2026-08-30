@@ -30,6 +30,8 @@ describe("Debate format visual themes", () => {
     );
     assert.equal(DEBATE_FORMAT_VISUAL_THEMES.whodunnit.archiveNoun, "case");
     assert.equal(DEBATE_FORMAT_VISUAL_THEMES.turnabout.archiveNoun, "trial");
+    assert.equal(DEBATE_FORMAT_VISUAL_THEMES.flyting.accentDark, "#ff4d6d");
+    assert.equal(DEBATE_FORMAT_VISUAL_THEMES.flyting.accentLight, "#b52b48");
   });
 
   it("drives both the Studio shell and completed archive shelves", () => {

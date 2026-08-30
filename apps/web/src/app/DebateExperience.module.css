@@ -3609,6 +3609,106 @@
   --debate-light-mask-base-opacity: 0.3;
 }
 
+.forumAccentKeyStack {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.forumAccentKeyStack[data-depth="foreground"] {
+  z-index: 5;
+}
+
+.forumAccentKeyLayer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  --debate-forum-key-base-opacity: 0.2;
+  --debate-forum-key-opacity-factor: var(
+    --debate-light-mask-opacity-dark-factor,
+    1
+  );
+  mix-blend-mode: var(--debate-light-blend-mode-dark, hard-light);
+  opacity: calc(
+    var(--debate-forum-key-base-opacity) *
+      var(--debate-forum-key-opacity-factor)
+  );
+  transition: opacity 520ms ease;
+}
+
+.forumAccentKeyStack[data-ready="false"] .forumAccentKeyLayer,
+.forumAccentKeyStack[data-ready="true"]
+  .forumAccentKeyFallback
+  :is(.lightMaskFor, .lightMaskAgainst, .lightMaskModerator) {
+  opacity: 0;
+}
+
+.forumCamera:not([data-camera-view="moderator"])[data-active-role="for"]
+  .forumAccentKeyStack[data-ready="true"]
+  .forumAccentKeyFallback
+  .lightMaskFor,
+.forumCamera:not([data-camera-view="moderator"])[data-active-role="against"]
+  .forumAccentKeyStack[data-ready="true"]
+  .forumAccentKeyFallback
+  .lightMaskAgainst,
+.forumCamera:not([data-camera-view="moderator"])[data-active-role="moderator"]
+  .forumAccentKeyStack[data-ready="true"]
+  .forumAccentKeyFallback
+  .lightMaskModerator {
+  --debate-light-mask-base-opacity: 0.08;
+  opacity: calc(
+    var(--debate-light-mask-base-opacity) *
+      var(--debate-light-mask-opacity-factor)
+  );
+}
+
+.live[data-theme="light"] .forumAccentKeyLayer {
+  --debate-forum-key-base-opacity: 0.16;
+  --debate-forum-key-opacity-factor: var(
+    --debate-light-mask-opacity-light-factor,
+    1
+  );
+  mix-blend-mode: var(--debate-light-blend-mode-light, color);
+}
+
+.live[data-theme="light"]
+  .forumCamera:not([data-camera-view="moderator"])[data-active-role="for"]
+  .forumAccentKeyStack[data-ready="true"]
+  .forumAccentKeyFallback
+  .lightMaskFor,
+.live[data-theme="light"]
+  .forumCamera:not([data-camera-view="moderator"])[data-active-role="against"]
+  .forumAccentKeyStack[data-ready="true"]
+  .forumAccentKeyFallback
+  .lightMaskAgainst,
+.live[data-theme="light"]
+  .forumCamera:not([data-camera-view="moderator"])[data-active-role="moderator"]
+  .forumAccentKeyStack[data-ready="true"]
+  .forumAccentKeyFallback
+  .lightMaskModerator {
+  --debate-light-mask-base-opacity: 0.06;
+}
+
+.forumCamera[data-camera-view="moderator"] .forumAccentKeyLayer {
+  opacity: 0;
+}
+
+/* The close moderator camera has its own authored mask. Keep that proven
+   fallback while the exact-key Forum overlays own every wide/side view. */
+.forumCamera[data-camera-view="moderator"]
+  .forumAccentKeyStack[data-ready="true"]
+  .forumAccentKeyFallback
+  .lightMaskModerator {
+  opacity: calc(
+    var(--debate-light-mask-base-opacity) *
+      var(--debate-light-mask-opacity-factor)
+  );
+}
+
 .botPosition {
   position: absolute;
   z-index: 3;
@@ -6070,7 +6170,8 @@
 
 .live[data-debate-material-quality="minimal"] .lightMaskFor,
 .live[data-debate-material-quality="minimal"] .lightMaskAgainst,
-.live[data-debate-material-quality="minimal"] .lightMaskModerator {
+.live[data-debate-material-quality="minimal"] .lightMaskModerator,
+.live[data-debate-material-quality="minimal"] .forumAccentKeyLayer {
   filter: none;
   mix-blend-mode: normal;
 }
@@ -9004,6 +9105,7 @@
   .lightMaskFor,
   .lightMaskAgainst,
   .lightMaskModerator,
+  .forumAccentKeyLayer,
   .forumCamera,
   .debaterFocusDepthOverlay,
   .botStagePresence,

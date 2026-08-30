@@ -11,6 +11,8 @@ import {
 
 export const BOT_POWER_VERSION = 1 as const;
 export const BOT_POWER_CANONICAL_SILENCE_V1 = "..." as const;
+/** Plain player-facing mark for a timed Mute; timing stays in metadata. */
+export const BOT_POWER_MUTE_PUBLIC_MARK_V1 = "......" as const;
 export const BOT_POWER_MUTE_PERFORMANCE_VERSION = 1 as const;
 export const BOT_POWER_MUTE_MIN_DURATION_MS = 1_000 as const;
 export const BOT_POWER_MUTE_MAX_DURATION_MS = 120_000 as const;
@@ -3843,23 +3845,13 @@ export function botPowerMutePublicResponseAtElapsedV1(
 ): string {
   const normalized = normalizeBotPowerMutePerformanceV1(performance);
   if (!normalized) return typeof value === "string" ? value : "";
+  // Elapsed time still drives the silent hold, reactions, and camera. It no
+  // longer becomes explanatory transcript copy or a growing run of periods.
+  void elapsedMs;
   const actions = botPowerMuteActionTextsV1(value).map(
     (action) => `*${action}*`,
   );
-  const safeElapsedMs = Number.isFinite(elapsedMs)
-    ? Math.max(0, elapsedMs)
-    : normalized.durationMs;
-  const visiblePeriods = Math.min(
-    normalized.periodCount,
-    Math.max(1, Math.floor(safeElapsedMs / 1_000) + 1),
-  );
-  return [
-    ...actions,
-    botPowerMutePeriodsV1(visiblePeriods),
-    ...(safeElapsedMs >= normalized.durationMs
-      ? [normalized.elapsedCue]
-      : []),
-  ].join(" ");
+  return [...actions, BOT_POWER_MUTE_PUBLIC_MARK_V1].join(" ");
 }
 
 /**
@@ -4083,15 +4075,12 @@ export function planBotPowerMuteReactionBeatsV1(args: {
       candidate,
       `${args.seed}:${candidate.botId}:${index}:line`,
     );
+    // Ordinary reactions may change the shot and body language, but the Mute
+    // holder's timed floor remains actual dead air. Only an explicit floor
+    // interruption may add speech and end that silent performance early.
     const kind: BotPowerMuteReactionKindV1 = interrupt
       ? "interrupt"
-      : candidate.muted || candidate.hardSpeechSuppressed
-        ? "visual"
-        : candidate.breathless
-          ? "audible_quip"
-          : botPowerMuteStableUnitV1(`${args.seed}:${candidate.botId}:${index}:kind`) < 0.28
-            ? "lung_foley"
-            : "audible_quip";
+      : "visual";
     const action = selected.action;
     const rawQuip = selected.quip;
     const mumbledQuip = candidate.mumbling
@@ -4111,8 +4100,7 @@ export function planBotPowerMuteReactionBeatsV1(args: {
       reactorBotId: candidate.botId,
       kind,
       action,
-      ...(kind === "audible_quip" || kind === "interrupt" ? { quip } : {}),
-      ...(kind === "lung_foley" ? { foley: selected.foley } : {}),
+      ...(kind === "interrupt" ? { quip } : {}),
     });
   }
   return beats;
@@ -4235,18 +4223,12 @@ export function applyBotPowerMuteResponseV1(
   value: unknown,
   performance?: BotPowerMutePerformanceV1 | null,
 ): string {
+  // Performance metadata owns duration and reactions, never the public prose.
+  void performance;
   const actions = botPowerMuteActionTextsV1(value).map(
     (text) => `*${text}*`,
   );
-  const normalized = performance
-    ? normalizeBotPowerMutePerformanceV1(performance)
-    : null;
-  if (!normalized) return [...actions, BOT_POWER_CANONICAL_SILENCE_V1].join(" ");
-  return [
-    ...actions,
-    botPowerMutePeriodsV1(normalized.periodCount),
-    normalized.elapsedCue,
-  ].join(" ");
+  return [...actions, BOT_POWER_MUTE_PUBLIC_MARK_V1].join(" ");
 }
 
 function botPowerIntroductionNameV1(value: unknown): string {

@@ -4334,7 +4334,7 @@ async function authorMysteryV2(args: {
         ? [{
             botId,
             name: botById.get(botId)?.name ?? botId,
-            rule: "When another cast bot or the player-controlled Prosecutor directly addresses this holder, the holder knowingly masquerades as that addresser: copy their exact eyes and blink package, complete resting/live mouth package including glyph style and Custom Speech poses, Avatar Details Ink, lower glyph, literally double-quoted public name, and eligible public Power consequences. Keep the holder's persona, behavior, color, communication frame, complete authored voice, Accent Map location, pronunciation, Speechprint, provider voice identity, native Powers, memories, role, and every private or mechanical identity field. Never copy Identity Crisis recursively or transfer private awareness or audience permissions. The original remains themselves; do not force an impostor dispute. Copied Power consequences may shape frozen presentation and dialogue but must never change sealed facts, evidence, proof routes, or outcomes.",
+            rule: "When another cast bot or the player-controlled Prosecutor directly addresses this holder, the holder knowingly masquerades as that addresser: copy their exact eyes and blink package, complete resting/live mouth package including glyph style and Custom Speech poses, Avatar Details Ink, lower glyph, public name The real <effective target name>, and eligible public Power consequences. Keep the holder's persona, behavior, color, communication frame, complete authored voice, Accent Map location, pronunciation, Speechprint, provider voice identity, native Powers, memories, role, and every private or mechanical identity field. Never copy Identity Crisis recursively or transfer private awareness or audience permissions. The original remains themselves; do not force an impostor dispute. Copied Power consequences may shape frozen presentation and dialogue but must never change sealed facts, evidence, proof routes, or outcomes.",
           }]
         : [],
     ),
@@ -5585,6 +5585,17 @@ async function authorMysteryV2(args: {
     incidentPlan: args.incidentPlan,
     scaffold: args.scaffold,
   });
+  foundation = applyFrozenEvidencePropBindingsToFoundationV1({
+    foundation,
+    scaffold: args.scaffold,
+    bindingsByEvidenceId: args.evidencePropBindingsById,
+  });
+  args.draft.foundation = foundation;
+  const {
+    examinations: _examinations,
+    ...foundationCore
+  } = foundation;
+  args.draft.foundationCore = foundationCore;
   prosecutionChoices = args.draft.prosecutionChoices ?? prosecutionChoices;
 
   const authored: AuthoredMysteryV2 = {
@@ -12676,16 +12687,6 @@ export function applyDebateMysteryActionV2(
           throw new HttpError(409, "Mansion movement is unavailable right now.");
         }
         if (!request.roomId) {
-          if (
-            !state.openingSweepComplete &&
-            state.currentRoomId === (state.crimeSceneRoomId ?? privateCase.crimeSceneRoomId)
-          ) {
-            throw new HttpError(
-              409,
-              "Finish the finite visible sweep before opening the mansion map.",
-              "MYSTERY_OPENING_SWEEP_INCOMPLETE",
-            );
-          }
           state.roomView = "mansion";
         } else {
           const room = state.rooms.find((entry) => entry.id === request.roomId);
@@ -12695,17 +12696,6 @@ export function applyDebateMysteryActionV2(
               409,
               "The Casekeeper is still securing this room. Try again shortly.",
               "MYSTERY_ROOM_BEING_SECURED",
-            );
-          }
-          if (
-            !state.openingSweepComplete &&
-            state.currentRoomId === (state.crimeSceneRoomId ?? privateCase.crimeSceneRoomId) &&
-            room.id !== state.currentRoomId
-          ) {
-            throw new HttpError(
-              409,
-              "Finish the finite visible sweep before leaving the incident scene.",
-              "MYSTERY_OPENING_SWEEP_INCOMPLETE",
             );
           }
           const currentRoom = state.rooms.find((entry) => entry.id === state.currentRoomId);

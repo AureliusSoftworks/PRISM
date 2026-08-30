@@ -38,6 +38,62 @@ export const DEBATE_MYSTERY_TEXT_VOICE_VOLUME_RATIO = 0.28;
 export const DEBATE_MYSTERY_TEXT_BOTTISH_VOLUME_RATIO =
   DEBATE_MYSTERY_TEXT_VOICE_VOLUME_RATIO;
 
+type DebateMysteryRestoredPlaybackStateV2 = {
+  playPhase: string;
+  dialogueHistory: readonly {
+    lineId?: string | null;
+    nodeId: string;
+    occurredAt: string;
+  }[];
+  court?: {
+    activeStatementId?: string | null;
+    statements: readonly {
+      lineId: string;
+      statementId: string;
+      version: number;
+    }[];
+  } | null;
+};
+
+/** The already-heard durable line that an Archive return must not replay. */
+export function debateMysteryRestoredAudioPerformanceKeyV2(
+  state: DebateMysteryRestoredPlaybackStateV2,
+): string | null {
+  if (state.playPhase === "trial" && state.court) {
+    const statement = state.court.statements.find(
+      (entry) => entry.statementId === state.court?.activeStatementId,
+    ) ?? state.court.statements[0] ?? null;
+    return statement
+      ? `statement:${statement.statementId}:${statement.version}:${statement.lineId}`
+      : null;
+  }
+  const dialogue = state.dialogueHistory.at(-1) ?? null;
+  return dialogue?.lineId
+    ? `${dialogue.nodeId}:${dialogue.occurredAt}:${dialogue.lineId}`
+    : null;
+}
+
+export function debateMysteryPreparedAudioShouldStart(args: {
+  audioEnabled: boolean;
+  audioVolume: number;
+  interrogationAudioMayStart: boolean;
+  lastPlayedPerformanceKey: string | null;
+  lineId: string | null;
+  playbackPerformanceKey: string;
+  restoredPerformanceKey: string | null;
+  voicesEnabled: boolean;
+}): boolean {
+  return Boolean(
+    args.lineId &&
+    args.interrogationAudioMayStart &&
+    args.voicesEnabled &&
+    args.audioEnabled &&
+    args.audioVolume > 0 &&
+    args.playbackPerformanceKey !== args.restoredPerformanceKey &&
+    args.playbackPerformanceKey !== args.lastPlayedPerformanceKey
+  );
+}
+
 export function debateMysteryTextVoiceShouldStart(args: {
   audible: boolean;
   delivery?: "spoken" | "text_only" | "anonymous_babble";

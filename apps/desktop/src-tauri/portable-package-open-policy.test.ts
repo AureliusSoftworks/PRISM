@@ -8,8 +8,9 @@ const config = JSON.parse(readFileSync(new URL("./tauri.conf.json", import.meta.
 };
 
 describe("desktop portable package open policy", () => {
-  it("associates both portable mystery extensions in packaged desktop builds", () => {
+  it("associates every portable mystery extension in packaged desktop builds", () => {
     const associations = config.bundle?.fileAssociations ?? [];
+    assert.ok(associations.some((entry) => entry.ext?.includes("case") && entry.mimeType === "application/vnd.prism.case"));
     assert.ok(associations.some((entry) => entry.ext?.includes("mansion") && entry.mimeType === "application/vnd.prism.mansion"));
     assert.ok(associations.some((entry) => entry.ext?.includes("whodunnit") && entry.mimeType === "application/vnd.prism.whodunnit"));
   });
@@ -19,6 +20,6 @@ describe("desktop portable package open policy", () => {
     assert.match(source, /tauri_plugin_single_instance::init\(\|app, args, _cwd\| \{\s*queue_portable_package_paths\(app, args\);/u);
     assert.match(source, /RunEvent::Opened \{ urls \}[\s\S]{0,260}queue_portable_package_paths/u);
     assert.match(source, /app\.emit\("prism-open-portable-package"/u);
-    assert.match(source, /extension != "mansion" && extension != "whodunnit"/u);
+    assert.match(source, /extension != "case" && extension != "mansion" && extension != "whodunnit"/u);
   });
 });

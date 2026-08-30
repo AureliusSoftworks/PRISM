@@ -86,19 +86,19 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.51",
+    version: "1.53",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.50",
+    version: "1.52",
     status: "active",
   },
   debate: {
     id: "debate",
     name: "Debate",
-    version: "0.57",
+    version: "0.59",
     status: "preview",
   },
   polling: {
@@ -110,13 +110,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.73",
+    version: "2.76",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.93",
+    version: "1.98",
     status: "active",
   },
   feed: {
@@ -331,7 +331,10 @@ export const BOT_POWER_IDENTITY_MIRROR_MODE_POLICY: Record<
   surf: "deferred",
 };
 
-/** Session-sticky Library/Marketplace public form; reshuffles with short-term amnesia. */
+/**
+ * Session-sticky Library/Marketplace public form; quoted name presentation is
+ * direct, while Coffee and Signal add only an active-target observer cue.
+ */
 export const BOT_POWER_IDENTITY_SHAPESHIFT_MODE_POLICY: Record<
   PrismAppletId,
   BotPowerIdentityShapeshiftModePolicy

@@ -26,6 +26,11 @@ export interface MysteryRoomCinematographyProfileV1 {
   emitters: readonly MysteryRoomLightEmitterV1[];
 }
 
+export type MysteryRoomCinematographyLightSourceV1 =
+  | "authored"
+  | "template"
+  | "none";
+
 const FOYER_PROFILE_V1: MysteryRoomCinematographyProfileV1 = Object.freeze({
   version: 1,
   id: "foyer-v1",
@@ -157,6 +162,32 @@ export function mysteryRoomCinematographyProfileV1(room: {
   const name = room.name?.trim().toLowerCase() ?? "";
   if (templateId === "foyer" || name === "foyer") return FOYER_PROFILE_V1;
   return null;
+}
+
+/** Authored room lights always win. Template emitters are safe only while the
+ * matching bundled room plate is visible; custom/generated art has different
+ * geometry even when it shares the same semantic room type. */
+export function mysteryRoomCinematographyLightSourceV1(args: {
+  authoredLightCount: number;
+  templateLightingAligned: boolean;
+  hasTemplateProfile: boolean;
+}): MysteryRoomCinematographyLightSourceV1 {
+  if (args.authoredLightCount > 0) return "authored";
+  if (args.templateLightingAligned && args.hasTemplateProfile) return "template";
+  return "none";
+}
+
+export function mysteryRoomUsesTemplateLightGeometryV1(room: {
+  imageId?: string | null;
+  acceptedRoomAssetId?: string | null;
+  sealedAsset?: {
+    revealed?: boolean;
+    status?: string;
+  } | null;
+}): boolean {
+  return !room.imageId &&
+    !room.acceptedRoomAssetId &&
+    !(room.sealedAsset?.revealed && room.sealedAsset.status === "ready");
 }
 
 export function mysteryRoomCinematographyCanvasSize(

@@ -411,6 +411,46 @@
 .guidedSecondaryAction button:focus-visible { border-color: var(--mystery-violet); background: color-mix(in srgb, var(--mystery-violet) 20%, var(--mystery-panel-strong)); }
 .guidedSecondaryAction button:focus-visible { outline: 2px solid var(--mystery-cyan); outline-offset: 2px; }
 
+.installedCases { display: grid; gap: 0.85rem; }
+.installedCasesHeader { display: flex; align-items: end; justify-content: space-between; gap: 1rem; }
+.installedCasesHeader > div { display: grid; gap: 0.16rem; }
+.installedCasesHeader small { color: var(--mystery-cyan); font-size: 0.62rem; font-weight: 800; letter-spacing: 0.09em; text-transform: uppercase; }
+.installedCasesHeader h3 { margin: 0; color: var(--mystery-text); font-family: Georgia, "Times New Roman", serif; font-size: 1.18rem; font-weight: 500; }
+.installedCasesHeader button,
+.installedCaseGrid button { color: var(--mystery-text); border: 1px solid var(--mystery-line); border-radius: 0.62rem; background: var(--mystery-panel-strong); cursor: pointer; }
+.installedCasesHeader button { min-height: 2.4rem; padding: 0.5rem 0.72rem; }
+.installedCasesHeader button[data-selected="true"] { border-color: var(--mystery-violet); background: color-mix(in srgb, var(--mystery-violet) 18%, var(--mystery-panel-strong)); }
+.installedCaseGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 23rem), 28rem)); gap: 0.75rem; }
+.installedCaseGrid > article { display: grid; min-width: 0; align-content: start; overflow: hidden; border: 1px solid var(--mystery-line); border-radius: 0.78rem; background: color-mix(in srgb, var(--mystery-panel-strong) 93%, transparent); }
+.installedCaseGrid > article[data-selected="true"] { border-color: var(--mystery-cyan); box-shadow: 0 0 0 1px color-mix(in srgb, var(--mystery-cyan) 34%, transparent), 0 0 1.2rem color-mix(in srgb, var(--mystery-violet) 15%, transparent); }
+.installedCaseSelect { position: relative; display: block; min-height: 9.25rem; width: 100%; padding: 0; overflow: hidden; text-align: left; border: 0 !important; border-radius: 0 !important; isolation: isolate; }
+.installedCaseSelect::after { position: absolute; z-index: 1; inset: 0; content: ""; background: linear-gradient(90deg, rgba(2, 3, 8, 0.97) 0%, rgba(4, 6, 13, 0.88) 38%, rgba(5, 8, 16, 0.48) 68%, transparent 100%); pointer-events: none; }
+.installedCaseSelect img { position: absolute; z-index: 0; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: transform 220ms ease, filter 220ms ease; }
+.installedCaseOverlay { position: relative; z-index: 2; display: grid; width: min(76%, 21rem); align-content: center; gap: 0.28rem; min-height: 9.25rem; box-sizing: border-box; padding: 0.78rem 0.85rem; color: #fff; }
+.installedCaseOverlay > small { color: color-mix(in srgb, var(--mystery-cyan) 82%, #fff); font-size: 0.55rem; font-weight: 820; letter-spacing: 0.1em; text-transform: uppercase; }
+.installedCaseOverlay > strong { display: -webkit-box; overflow: hidden; font-family: Georgia, "Times New Roman", serif; font-size: 0.98rem; font-weight: 600; line-height: 1.12; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.installedCaseDescription { display: -webkit-box; overflow: hidden; color: rgba(255, 255, 255, 0.72); font-size: 0.64rem; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.installedCaseStoryTags { display: flex; flex-wrap: wrap; gap: 0.28rem; margin-top: 0.12rem; }
+.installedCaseStoryTags > span { padding: 0.18rem 0.38rem; color: color-mix(in srgb, var(--mystery-cyan) 78%, #fff); border: 1px solid color-mix(in srgb, var(--mystery-cyan) 32%, rgba(255, 255, 255, 0.15)); border-radius: 999px; background: color-mix(in srgb, var(--mystery-cyan) 8%, rgba(5, 7, 14, 0.56)); backdrop-filter: blur(6px); font-size: 0.53rem; font-weight: 720; line-height: 1; }
+.installedCaseFacts { display: flex; flex-wrap: wrap; gap: 0; color: rgba(255, 255, 255, 0.47); font-size: 0.51rem; line-height: 1.15; text-transform: capitalize; }
+.installedCaseFacts > span + span::before { margin: 0 0.32rem; content: "·"; color: rgba(255, 255, 255, 0.28); }
+.installedCaseGrid > article:hover .installedCaseSelect img,
+.installedCaseGrid > article[data-selected="true"] .installedCaseSelect img { filter: saturate(1.08) brightness(1.05); transform: scale(1.025); }
+.installedCaseGrid footer { color: var(--mystery-muted); font-size: 0.66rem; }
+.installedCaseGrid footer { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.55rem 0.75rem; border-top: 1px solid var(--mystery-line); }
+.installedCaseGrid footer button { padding: 0.3rem 0.5rem; color: var(--mystery-muted); background: transparent; }
+.installedCaseGrid button:hover:not(:disabled),
+.installedCaseGrid button:focus-visible,
+.installedCasesHeader button:hover,
+.installedCasesHeader button:focus-visible { border-color: var(--mystery-violet); }
+.installedCaseGrid button:focus-visible,
+.installedCasesHeader button:focus-visible { outline: 2px solid var(--mystery-cyan); outline-offset: 2px; }
+.installedCaseGrid button:disabled { opacity: 0.48; cursor: not-allowed; }
+.installedCasesEmpty { display: flex; align-items: center; gap: 0.7rem; min-height: 4.5rem; padding: 0.85rem; color: var(--mystery-muted); border: 1px dashed var(--mystery-line); border-radius: 0.72rem; }
+.installedCasesEmpty > span { color: var(--mystery-violet); font-size: 1.4rem; }
+.installedCasesEmpty > div { display: grid; gap: 0.12rem; }
+.installedCasesEmpty strong { color: var(--mystery-text); font-size: 0.78rem; }
+
 .mansionExteriorRefract { align-items: end; }
 .mansionExteriorRefract > div { flex: 0 1 15rem; }
 .mansionExteriorRefract > .setupField { display: grid; flex: 1 1 24rem; gap: 0.38rem; min-width: 0; }
@@ -1172,6 +1212,9 @@
 @media (prefers-reduced-motion: reduce) {
   .mansionDynamicLight,
   .mansionDynamicLight::after { animation: none !important; }
+  .installedCaseSelect img { transition: none; }
+  .installedCaseGrid > article:hover .installedCaseSelect img,
+  .installedCaseGrid > article[data-selected="true"] .installedCaseSelect img { transform: none; }
 }
 
 .mansionRoomEditorTools { min-height: 0; padding: 1rem; overflow-y: auto; border-left: 1px solid var(--mystery-line); background: color-mix(in srgb, var(--mystery-panel-strong) 95%, var(--mystery-violet) 5%); }
@@ -1242,9 +1285,12 @@
   .mansionPackagePreview[data-locked="true"] { grid-template-columns: 1fr; align-items: stretch; }
   .mansionPackageDropzone { display: grid; }
   .installedMansionsHeader,
+  .installedCasesHeader,
   .installedMansionEditorFooter { align-items: stretch; flex-direction: column; }
+  .installedCaseGrid,
   .installedMansionGrid,
   .installedMansionEditorGrid { grid-template-columns: 1fr; }
+  .installedCaseOverlay { width: min(88%, 21rem); }
   .installedMansionMusic > header,
   .installedMansionSoundscapePanel > header { align-items: stretch; flex-direction: column; }
   .installedMansionAtmosphereFacts { grid-template-columns: 1fr; }

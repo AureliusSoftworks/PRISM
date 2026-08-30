@@ -341,10 +341,72 @@ export function signalReplayIntroVisualElapsedMs(args: {
 export function signalReplayCapturedPresentationElapsedMs(args: {
   timeline: ReplayTimelineV1;
   replayElapsedMs: number;
+  /** Packet-accurate duration of the audio element's transport clock. */
+  mediaDurationMs?: number | null;
+  /** Duration used when the replay direction and timeline were captured. */
+  capturedDurationMs?: number | null;
 }): number {
+  const mediaDurationMs =
+    typeof args.mediaDurationMs === "number" &&
+    Number.isFinite(args.mediaDurationMs) &&
+    args.mediaDurationMs > 0
+      ? args.mediaDurationMs
+      : null;
+  const capturedDurationMs =
+    typeof args.capturedDurationMs === "number" &&
+    Number.isFinite(args.capturedDurationMs) &&
+    args.capturedDurationMs > 0
+      ? args.capturedDurationMs
+      : args.timeline.durationMs;
+  const boundedMediaElapsedMs = Math.max(
+    0,
+    mediaDurationMs === null
+      ? args.replayElapsedMs
+      : Math.min(mediaDurationMs, args.replayElapsedMs),
+  );
+  const capturedElapsedMs =
+    mediaDurationMs === null
+      ? boundedMediaElapsedMs
+      : (boundedMediaElapsedMs * capturedDurationMs) / mediaDurationMs;
   return Math.max(
     0,
-    Math.min(args.timeline.durationMs, args.replayElapsedMs),
+    Math.min(args.timeline.durationMs, capturedElapsedMs),
+  );
+}
+
+/** Convert a saved presentation cue back onto the audio transport clock. */
+export function signalReplayMediaElapsedMs(args: {
+  capturedElapsedMs: number;
+  mediaDurationMs?: number | null;
+  capturedDurationMs?: number | null;
+}): number {
+  const mediaDurationMs =
+    typeof args.mediaDurationMs === "number" &&
+    Number.isFinite(args.mediaDurationMs) &&
+    args.mediaDurationMs > 0
+      ? args.mediaDurationMs
+      : null;
+  const capturedDurationMs =
+    typeof args.capturedDurationMs === "number" &&
+    Number.isFinite(args.capturedDurationMs) &&
+    args.capturedDurationMs > 0
+      ? args.capturedDurationMs
+      : null;
+  const boundedCapturedElapsedMs = Math.max(
+    0,
+    capturedDurationMs === null
+      ? args.capturedElapsedMs
+      : Math.min(capturedDurationMs, args.capturedElapsedMs),
+  );
+  if (mediaDurationMs === null || capturedDurationMs === null) {
+    return boundedCapturedElapsedMs;
+  }
+  return Math.max(
+    0,
+    Math.min(
+      mediaDurationMs,
+      (boundedCapturedElapsedMs * mediaDurationMs) / capturedDurationMs,
+    ),
   );
 }
 

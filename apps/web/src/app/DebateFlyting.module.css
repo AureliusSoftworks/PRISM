@@ -1,4 +1,25 @@
-.setupShell,
+.setupShell {
+  --hall-gold: var(--debate-studio-accent, #ff4d6d);
+  --hall-gold-deep: #b52b48;
+  --hall-ink: var(--debate-studio-ink, #eeeaf4);
+  --hall-muted: var(--debate-studio-muted, #8f8998);
+  --hall-panel: var(--debate-studio-surface, #121017);
+  --hall-panel-soft: var(--debate-studio-raised, #18151f);
+  --hall-border: var(--debate-studio-line-strong, rgba(194, 181, 229, 0.24));
+  min-height: 0;
+  font-family: var(--font-ui-sans, ui-sans-serif, system-ui, sans-serif);
+}
+
+.setupShell[data-theme="light"] {
+  --hall-gold: var(--debate-studio-accent, #b52b48);
+  --hall-gold-deep: #8f1f37;
+  --hall-ink: var(--debate-studio-ink, #25212b);
+  --hall-muted: var(--debate-studio-muted, #736c7b);
+  --hall-panel: var(--debate-studio-surface, #f2f1f5);
+  --hall-panel-soft: var(--debate-studio-raised, #faf9fc);
+  --hall-border: var(--debate-studio-line-strong, rgba(77, 63, 105, 0.22));
+}
+
 .liveShell {
   --hall-gold: #e3bd71;
   --hall-gold-deep: #8a6124;
@@ -14,7 +35,6 @@
     linear-gradient(145deg, #17100e 0%, #261813 48%, #120d0c 100%);
 }
 
-.setupShell[data-theme="light"],
 .liveShell[data-theme="light"] {
   --hall-gold: #926b19;
   --hall-gold-deep: #6e4c13;
@@ -74,18 +94,18 @@
   font-size: 0.82rem;
 }
 
-.setupShell button,
 .liveShell button,
-.setupShell select,
+.setupPanel button,
 .liveShell select,
-.setupShell input,
+.setupPanel select,
 .liveShell input,
-.setupShell textarea,
+.setupPanel input,
+.setupPanel textarea,
 .liveShell textarea {
   font: inherit;
 }
 
-.setupShell button,
+.setupPanel button:not(.flytingCastSeatButton):not(.flytingCastSeatClear):not(.flytingCastPickerTile),
 .liveShell button {
   color: inherit;
   border: 1px solid var(--hall-border);
@@ -95,18 +115,18 @@
   transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
 }
 
-.setupShell button:hover:not(:disabled),
+.setupPanel button:not(.flytingCastSeatButton):not(.flytingCastSeatClear):not(.flytingCastPickerTile):hover:not(:disabled),
 .liveShell button:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--hall-gold) 62%, transparent);
   background: color-mix(in srgb, var(--hall-gold) 10%, transparent);
 }
 
-.setupShell button:active:not(:disabled),
+.setupPanel button:not(.flytingCastSeatButton):not(.flytingCastSeatClear):not(.flytingCastPickerTile):active:not(:disabled),
 .liveShell button:active:not(:disabled) {
   transform: translateY(1px);
 }
 
-.setupShell button:disabled,
+.setupPanel button:not(.flytingCastSeatButton):not(.flytingCastSeatClear):not(.flytingCastPickerTile):disabled,
 .liveShell button:disabled {
   cursor: default;
   opacity: 0.42;
@@ -171,22 +191,42 @@
 
 .setupPanel {
   position: relative;
-  min-height: 670px;
-  padding: clamp(22px, 4vw, 44px);
-  border: 1px solid var(--hall-border);
-  border-radius: 22px;
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--hall-panel) 95%, transparent), var(--hall-panel-soft)),
-    repeating-linear-gradient(90deg, transparent 0 82px, rgba(255, 255, 255, 0.015) 83px 84px);
-  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.22);
+  display: grid;
+  min-height: 100%;
+  align-content: start;
+  gap: 24px;
 }
 
 .panelHeading {
+  position: relative;
   display: flex;
+  width: min(760px, 100%);
+  box-sizing: border-box;
   justify-content: space-between;
   align-items: flex-start;
   gap: 24px;
-  margin-bottom: 26px;
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+
+.panelHeading::before {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  width: 2px;
+  content: "";
+  background: linear-gradient(
+    180deg,
+    var(--hall-gold),
+    color-mix(in srgb, var(--hall-gold) 8%, transparent)
+  );
+  box-shadow: 0 0 18px color-mix(in srgb, var(--hall-gold) 34%, transparent);
+}
+
+.panelHeading > div {
+  display: grid;
+  gap: 5px;
 }
 
 .panelHeading h2,
@@ -200,38 +240,65 @@
 }
 
 .panelHeading h2 {
-  font-size: clamp(1.55rem, 3vw, 2.4rem);
+  margin: 0;
+  color: var(--hall-ink);
+  font-family: var(--font-title, var(--font-ui-sans, ui-sans-serif));
+  font-size: clamp(29px, 3vw, 42px);
+  font-weight: 360;
+  letter-spacing: -0.035em;
+}
+
+.panelHeading p {
+  max-width: 680px;
+  margin: 2px 0 0;
+  color: var(--hall-muted);
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .panelHeading > span {
+  flex: 0 0 auto;
   color: var(--hall-muted);
-  font-size: 0.76rem;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
 .roleCards {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  margin-bottom: 22px;
+  gap: 10px;
+  margin-bottom: 0;
 }
 
 .roleCards label {
   position: relative;
-  min-height: 132px;
+  min-height: 118px;
   display: flex;
   flex-direction: column;
   gap: 9px;
-  padding: 18px;
+  padding: 17px;
   border: 1px solid var(--hall-border);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.025);
+  border-radius: 9px;
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--hall-gold) 3%, var(--hall-panel-soft)),
+    var(--hall-panel)
+  );
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
   cursor: pointer;
 }
 
 .roleCards label[data-selected="true"] {
   border-color: var(--hall-gold);
-  background: color-mix(in srgb, var(--hall-gold) 12%, transparent);
-  box-shadow: inset 0 -2px var(--hall-gold);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--hall-gold) 14%, var(--hall-panel-soft)),
+    color-mix(in srgb, var(--hall-gold) 5%, var(--hall-panel))
+  );
+  box-shadow:
+    inset 3px 0 var(--hall-gold),
+    0 0 24px color-mix(in srgb, var(--hall-gold) 9%, transparent);
 }
 
 .roleCards input {
@@ -251,16 +318,15 @@
   line-height: 1.55;
 }
 
-.sideChoice,
-.hallSeats {
-  margin: 0 0 22px;
+.sideChoice {
+  margin: 0;
   padding: 16px;
   border: 1px solid var(--hall-border);
-  border-radius: 12px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--hall-panel-soft) 56%, transparent);
 }
 
-.sideChoice legend,
-.hallSeats legend {
+.sideChoice legend {
   padding: 0 8px;
   color: var(--hall-gold);
   font-size: 0.75rem;
@@ -281,11 +347,69 @@
   font-size: 0.85rem;
 }
 
+.flytingAtmosphereDisabled {
+  --debate-rowdiness-accent: var(--debate-studio-accent);
+  opacity: 0.82;
+}
+
+.flytingPresetControl:disabled {
+  cursor: not-allowed;
+  filter: saturate(0.42);
+}
+
+.flytingFormatPicker {
+  margin-top: 1px;
+}
+
+.flytingCoachChoice {
+  align-items: center;
+}
+
+.flytingCoachChoiceControls {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.flytingCoachChoiceControls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, currentColor 13%, transparent);
+  border-radius: 999px;
+  padding: 6px 9px;
+  color: #aaa2b3;
+  background: color-mix(in srgb, #211c2a 74%, transparent);
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.flytingCoachChoiceControls label[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--debate-studio-accent) 58%, transparent);
+  color: var(--debate-studio-ink);
+  background: color-mix(in srgb, var(--debate-studio-accent) 18%, #211c2a);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--debate-studio-accent) 12%, transparent);
+}
+
+.flytingCoachChoiceControls input {
+  margin: 0;
+  accent-color: var(--debate-studio-accent);
+}
+
+.flytingCoachChoiceUnavailable {
+  color: var(--debate-studio-muted);
+  font-size: 10px;
+  font-style: italic;
+}
+
 .field {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 18px 0;
+  margin: 0;
 }
 
 .field > span,
@@ -315,9 +439,13 @@
   padding: 11px 12px;
   color: inherit;
   border: 1px solid var(--hall-border);
-  border-radius: 9px;
+  border-radius: 8px;
   outline: none;
-  background: rgba(0, 0, 0, 0.16);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--hall-panel-soft) 88%, transparent),
+    color-mix(in srgb, var(--hall-panel) 94%, transparent)
+  );
   resize: vertical;
 }
 
@@ -344,11 +472,18 @@
 
 .panelActions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 10px;
-  margin-top: 28px;
+  margin-top: 0;
   padding-top: 20px;
   border-top: 1px solid var(--hall-border);
+}
+
+.panelActions > span {
+  margin-right: auto;
+  color: var(--hall-muted);
+  font-size: 10px;
 }
 
 .panelActions button,
@@ -363,6 +498,57 @@
   background: linear-gradient(180deg, color-mix(in srgb, var(--hall-gold) 88%, #fff), var(--hall-gold)) !important;
   box-shadow: 0 8px 24px color-mix(in srgb, var(--hall-gold) 20%, transparent);
   font-weight: 850 !important;
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+}
+
+.flytingCastRoster {
+  display: grid;
+  gap: 12px;
+}
+
+.flytingPrincipalCast {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.flytingCastSeat {
+  min-height: 78px;
+}
+
+.flytingCastSeatButton {
+  min-height: 78px;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+.flytingCastSeatButton:hover:not(:disabled),
+.flytingCastSeatButton:focus-visible {
+  background: color-mix(
+    in srgb,
+    var(--debate-cast-color) 7%,
+    transparent
+  ) !important;
+}
+
+.flytingCastSeatButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--debate-cast-color) 62%, transparent);
+  outline-offset: -2px;
+}
+
+.flytingCastSeatClear {
+  border-radius: 999px !important;
+}
+
+.flytingCastPicker {
+  margin-top: 2px;
+}
+
+.flytingCastPickerGrid {
+  max-height: 270px;
+}
+
+.flytingCastPickerTile {
+  font: inherit;
 }
 
 .flyterCast {
@@ -390,8 +576,7 @@
   gap: 8px;
 }
 
-.flyterCast select,
-.hallSeats select {
+.flyterCast select {
   min-width: 0;
   padding: 8px;
   color: inherit;
@@ -443,18 +628,33 @@
   color: var(--hall-muted);
 }
 
-.hallSeats {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
+.gallerySeed {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--hall-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--hall-gold) 6%, transparent);
 }
 
-.hallSeats label {
-  display: grid;
-  grid-template-columns: 62px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-  font-size: 0.75rem;
+.gallerySeed > span {
+  flex: 0 0 auto;
+  color: var(--hall-gold);
+  font-size: 1.45rem;
+  letter-spacing: 0.12em;
+}
+
+.gallerySeed > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.gallerySeed small {
+  color: var(--hall-muted);
+  line-height: 1.45;
 }
 
 .forgePreview {
@@ -609,6 +809,164 @@
   background: color-mix(in srgb, var(--hall-gold) 7%, transparent);
 }
 
+.changeFormatAction,
+.openHallAction {
+  border-color: color-mix(in srgb, var(--hall-gold) 70%, white 18%) !important;
+  color: #180b10 !important;
+  background: linear-gradient(
+    135deg,
+    #fff7f9,
+    color-mix(in srgb, var(--hall-gold) 58%, #ffffff)
+  ) !important;
+  box-shadow:
+    0 8px 26px color-mix(in srgb, var(--hall-gold) 18%, transparent),
+    inset 0 1px rgba(255, 255, 255, 0.72) !important;
+}
+
+.studioReadout {
+  position: relative;
+  display: grid;
+  gap: 11px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--debate-studio-line);
+  padding: 17px 18px 15px;
+  background:
+    radial-gradient(
+      ellipse at 50% 72%,
+      color-mix(in srgb, var(--hall-gold) 11%, transparent),
+      transparent 66%
+    ),
+    color-mix(in srgb, var(--debate-studio-canvas) 66%, transparent);
+}
+
+.studioReadout::before {
+  position: absolute;
+  inset: auto -8% -44% 35%;
+  width: 180px;
+  aspect-ratio: 1;
+  border: 1px solid color-mix(in srgb, var(--hall-gold) 20%, transparent);
+  transform: rotate(45deg);
+  content: "";
+  pointer-events: none;
+}
+
+.studioReadout > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--hall-muted);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.studioReadout > header strong {
+  color: var(--hall-gold);
+  font-size: 9px;
+}
+
+.studioCircuit {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  gap: 8px;
+  padding-top: 17px;
+}
+
+.studioBeam {
+  position: absolute;
+  top: 21px;
+  right: 13%;
+  left: 13%;
+  height: 1px;
+  background: linear-gradient(90deg, #2fd3e3, var(--hall-gold), #ff5f8f);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--hall-gold) 44%, transparent);
+  opacity: 0.58;
+}
+
+.studioCircuitSeat {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  min-width: 0;
+  justify-items: center;
+  gap: 2px;
+  color: var(--flyting-bot-color);
+  text-align: center;
+}
+
+.studioCircuitSeat > span {
+  display: grid;
+  width: 39px;
+  height: 39px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--flyting-bot-color) 48%, transparent);
+  border-radius: 50%;
+  background:
+    radial-gradient(
+      circle,
+      color-mix(in srgb, var(--flyting-bot-color) 16%, transparent),
+      transparent 70%
+    ),
+    var(--debate-studio-surface);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--flyting-bot-color) 15%, transparent);
+  font-size: 17px;
+}
+
+.studioCircuitSeat small {
+  overflow: hidden;
+  width: 100%;
+  margin-top: 3px;
+  color: var(--hall-muted);
+  font-size: 8px;
+  letter-spacing: 0.07em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.studioCircuitSeat strong {
+  overflow: hidden;
+  width: 100%;
+  color: var(--hall-ink);
+  font-size: 10px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studioReadout > p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: var(--hall-muted);
+  font-family: var(--font-serif, ui-serif, Georgia, serif);
+  font-size: 11px;
+  line-height: 1.35;
+  text-align: center;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.studioReadout > small {
+  color: color-mix(in srgb, var(--hall-gold) 72%, var(--hall-muted));
+  font-size: 8px;
+  font-weight: 720;
+  letter-spacing: 0.07em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.proceedingCard {
+  min-height: 0;
+}
+
+.mobileReviewAction {
+  display: none;
+}
+
 .liveHeader {
   position: relative;
   z-index: 10;
@@ -632,27 +990,66 @@
   overflow: hidden;
   border-bottom: 1px solid var(--hall-border);
   background:
-    radial-gradient(ellipse at 50% 100%, rgba(231, 121, 38, 0.36), transparent 34%),
-    linear-gradient(90deg, rgba(8, 5, 5, 0.6), transparent 24% 76%, rgba(8, 5, 5, 0.6)),
-    repeating-linear-gradient(92deg, #251713 0 5px, #1c120f 5px 66px, #2d1b15 67px 72px);
+    radial-gradient(ellipse at 50% 96%, color-mix(in srgb, var(--flyting-fire-color) 28%, transparent), transparent 36%),
+    linear-gradient(90deg, color-mix(in srgb, var(--flyting-lane-left) 13%, rgba(8, 5, 5, 0.6)), transparent 30% 70%, color-mix(in srgb, var(--flyting-lane-right) 13%, rgba(8, 5, 5, 0.6))),
+    url("/debate/flyting/mead-hall-dark-v2.webp") center / cover no-repeat;
   box-shadow: inset 0 -50px 80px rgba(0, 0, 0, 0.4);
+}
+
+.hallStage::before {
+  position: absolute;
+  z-index: 1;
+  inset: 18% 0 0;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--flyting-lane-left) 18%, transparent), transparent 34%),
+    linear-gradient(270deg, color-mix(in srgb, var(--flyting-lane-right) 18%, transparent), transparent 34%),
+    radial-gradient(ellipse at 50% 36%, color-mix(in srgb, var(--flyting-lane-host) 9%, transparent), transparent 30%);
+  content: "";
+  pointer-events: none;
 }
 
 [data-theme="light"] .hallStage {
   background:
-    radial-gradient(ellipse at 50% 100%, rgba(231, 121, 38, 0.34), transparent 34%),
-    linear-gradient(90deg, rgba(49, 28, 18, 0.33), transparent 24% 76%, rgba(49, 28, 18, 0.33)),
-    repeating-linear-gradient(92deg, #6e432f 0 5px, #80543a 5px 66px, #5d3527 67px 72px);
+    radial-gradient(ellipse at 50% 100%, color-mix(in srgb, var(--flyting-fire-color) 20%, transparent), transparent 34%),
+    linear-gradient(90deg, color-mix(in srgb, var(--flyting-lane-left) 8%, transparent), transparent 24% 76%, color-mix(in srgb, var(--flyting-lane-right) 8%, transparent)),
+    url("/debate/flyting/mead-hall-light-v2.webp") center / cover no-repeat;
+}
+
+.hallAccentKeys {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  pointer-events: none;
+}
+
+.hallAccentKeys span {
+  position: absolute;
+  inset: 0;
+  background: var(--flyting-key-color);
+  opacity: var(--flyting-key-opacity, 0.62);
+  mix-blend-mode: screen;
+  -webkit-mask: var(--flyting-key-mask) center / cover no-repeat;
+  mask: var(--flyting-key-mask) center / cover no-repeat;
+}
+
+.hallAccentKeys span[data-key="left"] {
+  --flyting-key-color: var(--flyting-lane-left);
+  --flyting-key-mask: url("/debate/flyting/mead-hall-left-accent-key.svg");
+}
+
+.hallAccentKeys span[data-key="host"] {
+  --flyting-key-color: var(--flyting-lane-host);
+  --flyting-key-mask: url("/debate/flyting/mead-hall-host-accent-key.svg");
+  --flyting-key-opacity: 0.34;
+}
+
+.hallAccentKeys span[data-key="right"] {
+  --flyting-key-color: var(--flyting-lane-right);
+  --flyting-key-mask: url("/debate/flyting/mead-hall-right-accent-key.svg");
 }
 
 .hallRoof {
-  position: absolute;
-  inset: 0 0 auto;
-  height: 42%;
-  clip-path: polygon(0 0, 100% 0, 80% 100%, 20% 100%);
-  background:
-    repeating-linear-gradient(104deg, transparent 0 12%, rgba(7, 5, 4, 0.8) 12.5% 14%, transparent 14.5% 25%),
-    linear-gradient(#0c0908, rgba(21, 13, 11, 0.84));
+  display: none;
 }
 
 .hallRoof span {
@@ -670,17 +1067,27 @@
 
 .hallFire {
   position: absolute;
+  z-index: 6;
   left: 50%;
-  bottom: 16px;
+  bottom: 22px;
   width: 140px;
   height: 74px;
   transform: translateX(-50%);
-  filter: drop-shadow(0 0 34px rgba(255, 112, 22, 0.65));
+  --hall-fire-scale: 0.9;
+  --hall-fire-opacity: 0.58;
+  --hall-fire-glow: 20px;
+  filter: drop-shadow(0 0 var(--hall-fire-glow) color-mix(in srgb, var(--flyting-fire-color) 78%, transparent));
+  transition: filter 360ms ease, opacity 360ms ease;
 }
+
+.hallFire[data-intensity="simmering"] { --hall-fire-scale: 1; --hall-fire-opacity: 0.74; --hall-fire-glow: 28px; }
+.hallFire[data-intensity="burning"] { --hall-fire-scale: 1.14; --hall-fire-opacity: 0.9; --hall-fire-glow: 38px; }
+.hallFire[data-intensity="roaring"] { --hall-fire-scale: 1.32; --hall-fire-opacity: 1; --hall-fire-glow: 52px; }
 
 .hallFire::before,
 .hallFire i,
-.hallFire b {
+.hallFire b,
+.hallFire em {
   content: "";
   position: absolute;
   left: 50%;
@@ -688,23 +1095,115 @@
   width: 42px;
   height: 65px;
   border-radius: 70% 18% 64% 30%;
-  background: linear-gradient(#ffd58c, #e45b19 72%);
-  transform: translateX(-50%) rotate(45deg);
+  background:
+    linear-gradient(var(--flyting-fire-color), var(--flyting-fire-color)),
+    linear-gradient(#ffffff 0%, #b7b7b7 42%, #3d3d3d 100%);
+  background-blend-mode: color, normal;
+  opacity: var(--hall-fire-opacity);
+  transform: translateX(-50%) rotate(45deg) scale(var(--hall-fire-scale));
   animation: fireFlicker 1.25s ease-in-out infinite alternate;
 }
 
 .hallFire i { left: 31%; width: 30px; height: 45px; animation-delay: -0.6s; }
 .hallFire b { left: 69%; width: 26px; height: 38px; animation-delay: -0.25s; }
+.hallFire em {
+  left: 50%;
+  bottom: 5px;
+  width: 82px;
+  height: 16px;
+  border-radius: 50%;
+  background:
+    linear-gradient(var(--flyting-fire-color), var(--flyting-fire-color)),
+    radial-gradient(ellipse, #8d8d8d, #161616 72%);
+  background-blend-mode: color, normal;
+  transform: translateX(-50%) scaleX(var(--hall-fire-scale));
+}
+
+.hallFire[data-intensity="extinguished"]::before,
+.hallFire[data-intensity="extinguished"] i,
+.hallFire[data-intensity="extinguished"] b {
+  display: none;
+}
+
+.hallFire[data-intensity="extinguished"] em {
+  width: 54px;
+  height: 23px;
+  background:
+    radial-gradient(ellipse at 36% 48%, rgba(206, 211, 214, 0.72), transparent 48%),
+    radial-gradient(ellipse at 68% 58%, rgba(154, 161, 165, 0.58), transparent 54%),
+    radial-gradient(ellipse, rgba(112, 118, 122, 0.46), rgba(80, 84, 87, 0.08) 68%, transparent 72%);
+  filter: blur(2px) drop-shadow(0 -8px 10px rgba(190, 196, 200, 0.22));
+  animation: hallSmoke 3.4s ease-in-out infinite;
+}
 
 @keyframes fireFlicker {
-  from { transform: translateX(-50%) rotate(41deg) scale(0.92, 1.02); opacity: 0.78; }
-  to { transform: translateX(-50%) rotate(48deg) scale(1.08, 0.9); opacity: 1; }
+  from { transform: translateX(-50%) rotate(41deg) scale(calc(var(--hall-fire-scale) * 0.92), calc(var(--hall-fire-scale) * 1.02)); opacity: calc(var(--hall-fire-opacity) * 0.78); }
+  to { transform: translateX(-50%) rotate(48deg) scale(calc(var(--hall-fire-scale) * 1.08), calc(var(--hall-fire-scale) * 0.9)); opacity: var(--hall-fire-opacity); }
 }
+
+@keyframes hallSmoke {
+  from { opacity: 0.22; transform: translate(-50%, 0) scale(0.7); }
+  to { opacity: 0.68; transform: translate(-50%, -42px) scale(1.4); }
+}
+
+.hallPrism {
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  bottom: 105px;
+  width: 76px;
+  height: 94px;
+  transform: translateX(-50%);
+  filter: saturate(1.25);
+}
+
+.hallPrism[data-leading="for"] { filter: saturate(1.7) drop-shadow(0 0 8px color-mix(in srgb, var(--flyting-lane-left) 44%, transparent)); }
+.hallPrism[data-leading="against"] { filter: saturate(1.7) drop-shadow(0 0 8px color-mix(in srgb, var(--flyting-lane-right) 44%, transparent)); }
+
+.prismCore {
+  position: absolute;
+  inset: 2px 7px 18px;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  background:
+    linear-gradient(
+      100deg,
+      var(--flyting-lane-left) 0 var(--flyting-prism-for),
+      rgba(255, 255, 255, 0.08) var(--flyting-prism-for) var(--flyting-prism-against-start),
+      var(--flyting-lane-right) var(--flyting-prism-against-start) 100%
+    ),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.08));
+  box-shadow: 0 0 24px color-mix(in srgb, var(--flyting-fire-color) 44%, transparent);
+}
+
+.prismCore::after {
+  position: absolute;
+  inset: 16% 24% 18%;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.74);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--flyting-fire-color) 70%, transparent);
+  content: "";
+}
+
+.prismMeasure {
+  position: absolute;
+  right: -8px;
+  bottom: 0;
+  left: -8px;
+  display: flex;
+  height: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+  background: rgba(9, 6, 6, 0.7);
+}
+
+.prismMeasure i { width: var(--flyting-prism-for); background: var(--flyting-lane-left); }
+.prismMeasure b { width: var(--flyting-prism-against); margin-left: auto; background: var(--flyting-lane-right); }
 
 .hallHost {
   position: absolute;
   z-index: 4;
-  top: 30%;
+  top: clamp(4px, 2%, 14px);
   left: 50%;
   display: flex;
   flex-direction: column;
@@ -714,10 +1213,51 @@
   text-align: center;
 }
 
+.hostAvatarPresence {
+  position: relative;
+  z-index: 1;
+  width: clamp(108px, 10vw, 150px);
+  height: clamp(126px, 17vh, 182px);
+  pointer-events: none;
+}
+
+.hostAvatarPresence > [data-debate-bot-avatar="true"] {
+  width: 100%;
+  height: 100%;
+}
+
 .hostStaff {
   color: var(--hall-gold);
   font-size: 3rem;
   text-shadow: 0 0 20px color-mix(in srgb, var(--hall-gold) 60%, transparent);
+}
+
+.hostShield {
+  position: relative;
+  width: 52px;
+  height: 60px;
+  display: grid;
+  place-items: center;
+  color: var(--flyting-bot-color);
+  background: url("/debate/flyting/viking-shield-base.svg") center / contain no-repeat;
+  filter: drop-shadow(0 0 12px color-mix(in srgb, var(--flyting-bot-color) 28%, transparent));
+  margin-top: -34px;
+  z-index: 2;
+}
+
+.hostShield::before {
+  position: absolute;
+  inset: 0;
+  background: var(--flyting-bot-color);
+  content: "";
+  -webkit-mask: url("/debate/flyting/viking-shield-accent-key.svg") center / contain no-repeat;
+  mask: url("/debate/flyting/viking-shield-accent-key.svg") center / contain no-repeat;
+}
+
+.hostShield svg {
+  position: relative;
+  z-index: 1;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--flyting-bot-color) 74%, transparent));
 }
 
 .hallHost strong {
@@ -725,14 +1265,15 @@
 }
 
 .hallHost small {
-  color: #c7aa7e;
+  color: color-mix(in srgb, var(--flyting-lane-host) 48%, #f2f4dd);
 }
 
 .flyterPodium {
   position: absolute;
   z-index: 5;
-  bottom: 28px;
+  bottom: 12px;
   width: clamp(190px, 24vw, 340px);
+  min-height: clamp(250px, 34vh, 360px);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -750,7 +1291,23 @@
   filter: drop-shadow(0 0 20px color-mix(in srgb, var(--flyting-bot-color) 62%, transparent));
 }
 
+.flyterAvatarPresence {
+  position: relative;
+  z-index: 3;
+  width: clamp(152px, 16vw, 224px);
+  height: clamp(178px, 25vh, 268px);
+  pointer-events: none;
+}
+
+.flyterAvatarPresence > [data-debate-bot-avatar="true"] {
+  width: 100%;
+  height: 100%;
+}
+
 .banner {
+  position: absolute;
+  z-index: 1;
+  top: 10%;
   width: clamp(118px, 13vw, 170px);
   height: clamp(150px, 20vh, 230px);
   display: grid;
@@ -759,15 +1316,30 @@
   clip-path: polygon(8% 0, 92% 0, 92% 78%, 50% 100%, 8% 78%);
   background:
     linear-gradient(90deg, rgba(255, 255, 255, 0.08), transparent 18% 82%, rgba(0, 0, 0, 0.22)),
-    color-mix(in srgb, var(--flyting-bot-color) 20%, #24130f);
-  border-top: 5px solid color-mix(in srgb, var(--flyting-bot-color) 80%, #fff);
+    color-mix(in srgb, var(--flyting-lane-color) 19%, #24130f);
+  border-top: 5px solid var(--flyting-lane-color);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--flyting-lane-color) 62%, transparent), 0 0 24px color-mix(in srgb, var(--flyting-lane-color) 18%, transparent);
+}
+
+.banner::before {
+  position: absolute;
+  inset: 0;
+  background: var(--flyting-bot-color);
+  content: "";
+  opacity: 0.48;
+  -webkit-mask: url("/debate/flyting/flyting-banner-accent-key.svg") center / 100% 100% no-repeat;
+  mask: url("/debate/flyting/flyting-banner-accent-key.svg") center / 100% 100% no-repeat;
 }
 
 .banner span {
+  position: relative;
+  z-index: 1;
   filter: drop-shadow(0 0 12px color-mix(in srgb, var(--flyting-bot-color) 65%, transparent));
 }
 
 .flyterPodium > div:last-child {
+  position: relative;
+  z-index: 4;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -783,30 +1355,128 @@
 }
 
 .hallGallery {
-  position: absolute;
-  z-index: 3;
-  inset: auto 0 8px;
-  display: flex;
-  justify-content: center;
-  gap: 175px;
-  pointer-events: none;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+  min-height: 92px;
+  padding: 10px clamp(18px, 4vw, 72px);
+  border-bottom: 1px solid var(--hall-border);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--flyting-lane-left) 8%, transparent), transparent 28% 72%, color-mix(in srgb, var(--flyting-lane-right) 8%, transparent)),
+    #130d0b;
 }
 
-.hallGallery span {
-  width: 42px;
-  height: 42px;
+.hallGallery > p {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  color: var(--hall-muted);
+  font-size: 0.63rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.hallGallery > p strong { color: #f0d9aa; font-size: 0.68rem; }
+
+.hallGallery > div {
+  display: flex;
+  justify-content: space-evenly;
+  gap: clamp(8px, 3vw, 42px);
+}
+
+.hallGallery > div > span {
+  position: relative;
+  width: 62px;
+  height: 64px;
   display: grid;
   place-items: center;
   color: var(--flyting-bot-color);
-  border: 1px solid color-mix(in srgb, var(--flyting-bot-color) 38%, transparent);
-  border-radius: 50%;
-  background: rgba(11, 7, 6, 0.88);
-  opacity: 0.62;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--flyting-bot-color) 34%, transparent));
+  animation: hallGalleryRowdy 1.1s ease-in-out infinite alternate;
+  animation-delay: calc(var(--flyting-gallery-index, 0) * -120ms);
 }
 
-.hallGallery span[data-voted="true"] {
-  opacity: 1;
-  box-shadow: 0 0 14px color-mix(in srgb, var(--flyting-bot-color) 36%, transparent);
+.hallGallery > div > span > i {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  background: url("/debate/flyting/viking-helmet-base.svg") center / contain no-repeat;
+}
+
+.hallGallery > div > span > i::before {
+  position: absolute;
+  inset: 0;
+  background: var(--flyting-bot-color);
+  content: "";
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--flyting-bot-color) 56%, transparent));
+  -webkit-mask: url("/debate/flyting/viking-helmet-accent-key.svg") center / contain no-repeat;
+  mask: url("/debate/flyting/viking-helmet-accent-key.svg") center / contain no-repeat;
+}
+
+.hallGallery > div > span > i::after {
+  content: none;
+}
+
+.hallGallery > div > span > b {
+  position: relative;
+  z-index: 1;
+  width: 52px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  opacity: 0.96;
+}
+
+.hallGallery > div > span > b > [data-debate-bot-avatar="true"] {
+  width: 100%;
+  height: 100%;
+}
+
+.hallGallery > div > span::after {
+  position: absolute;
+  right: -6px;
+  bottom: -4px;
+  width: 18px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--flyting-bot-color);
+  box-shadow: 0 0 7px var(--flyting-bot-color);
+  content: "";
+}
+
+.hallGallery > div > span::before {
+  position: absolute;
+  z-index: 2;
+  top: -5px;
+  right: -4px;
+  color: var(--flyting-bot-color);
+  content: "᛫ ᛫";
+  font-size: 0.46rem;
+  letter-spacing: 0.08em;
+  opacity: 0.78;
+  text-shadow: 0 0 6px var(--flyting-bot-color);
+  animation: hallGalleryCrosstalk 760ms ease-in-out infinite alternate;
+  animation-delay: calc(var(--flyting-gallery-index, 0) * -90ms);
+}
+
+.hallGallery > div > span[data-voted="true"] { filter: brightness(1.22) drop-shadow(0 0 10px color-mix(in srgb, var(--flyting-bot-color) 72%, transparent)); }
+.hallGallery[data-quiet="true"] > div > span { animation-duration: 2.4s; animation-name: hallGalleryListen; }
+.hallGallery[data-quiet="true"] > div > span::before { animation: none; opacity: 0.13; }
+
+@keyframes hallGalleryRowdy {
+  from { transform: translateY(2px) rotate(-1.5deg); }
+  to { transform: translateY(-6px) rotate(1.5deg); }
+}
+
+@keyframes hallGalleryListen {
+  from { transform: translateY(1px); }
+  to { transform: translateY(-1px); }
+}
+
+@keyframes hallGalleryCrosstalk {
+  from { transform: translateY(1px) rotate(-3deg); opacity: 0.36; }
+  to { transform: translateY(-3px) rotate(3deg); opacity: 0.86; }
 }
 
 .liveLayout {
@@ -1162,6 +1832,18 @@
   }
 }
 
+@media (max-width: 1180px) {
+  .mobileReviewAction {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .panelActions > span {
+    display: none;
+  }
+}
+
 @media (max-width: 720px) {
   .setupHeader,
   .liveHeader {
@@ -1196,16 +1878,16 @@
     grid-template-columns: 1fr;
   }
 
+  .flytingPrincipalCast {
+    grid-template-columns: 1fr;
+  }
+
   .flyterCast {
     grid-template-columns: 1fr;
   }
 
   .versus {
     justify-self: center;
-  }
-
-  .hallSeats {
-    grid-template-columns: 1fr;
   }
 
   .forgePreview {
@@ -1239,6 +1921,9 @@
   .hallFire::before,
   .hallFire i,
   .hallFire b,
+  .hallFire em,
+  .hallGallery span,
+  .hallGallery span::before,
   .waitingPanel > span {
     animation: none;
   }

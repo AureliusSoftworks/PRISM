@@ -7,7 +7,6 @@ import {
   botcastHostTurnAddressesProducerCue,
   botcastHostTurnIncludesDirectQuote,
   botcastHostUtteranceIsGenericStall,
-  botcastHostUtteranceNeedsInterviewQuestion,
   botcastProducerCueRecoveryAnchor,
   botcastRecoveryUtteranceIsNearDuplicate,
   botcastUtteranceContainsScreenplayLabels,
@@ -135,35 +134,24 @@ describe("botcast utterance quality", () => {
       ),
       true,
     );
+    assert.equal(
+      botcastHostUtteranceIsGenericStall("I love your energy right now."),
+      true,
+    );
   });
 
-  it("accepts a specific host follow-up", () => {
+  it("accepts a specific host question or conversational contribution", () => {
     assert.equal(
       botcastHostUtteranceIsGenericStall(
         "What mechanisms underlie our ability to make decisions in real-time, even when we appear rational?",
       ),
       false,
     );
-  });
-
-  it("requires an ordinary host turn to return the floor with a question", () => {
     assert.equal(
-      botcastHostUtteranceNeedsInterviewQuestion(
-        "I love your energy right now.",
-      ),
-      true,
-    );
-    assert.equal(
-      botcastHostUtteranceNeedsInterviewQuestion(
-        "That is a sharp distinction. Who pays for it?",
+      botcastHostUtteranceIsGenericStall(
+        "I love green. My first car was actually green, believe it or not.",
       ),
       false,
-    );
-    assert.equal(
-      botcastHostUtteranceNeedsInterviewQuestion(
-        "That keeps the energy up, doesn't it? But the tradeoff is still vague.",
-      ),
-      true,
     );
   });
 
@@ -187,6 +175,17 @@ describe("botcast utterance quality", () => {
     assert.equal(
       botcastGuestUtteranceIsGenericStall(
         "Hello, Cookie. I’m Rowan; a proper repair is simple: use the corrected name consistently and let trust rebuild.",
+      ),
+      false,
+    );
+  });
+
+  it("keeps a bare first-on-air greeting from counting as a guest contribution", () => {
+    assert.equal(botcastGuestUtteranceIsGenericStall("Hey!"), true);
+    assert.equal(botcastGuestUtteranceIsGenericStall("Hi, Mara."), true);
+    assert.equal(
+      botcastGuestUtteranceIsGenericStall(
+        "Mara, your framing skips the part I care about: who absorbs the risk when the decision turns concrete?",
       ),
       false,
     );

@@ -11,9 +11,9 @@ import {
   botDirectlyAddressesBotV1,
   botNaturalAddressAliasesV1,
   botIdentityMirrorHolderPromptV1,
+  botIdentityMirrorPublicNameV1,
   botIdentityMirrorObserverPromptV1,
   botIdentityMirrorOriginalCorrectionRequiredV1,
-  botIdentityMirrorQuotedTargetNameV1,
   botIdentityMirrorTargetChangesV1,
   botIdentityMirrorTransitionActiveV1,
   createBotIdentityMirrorStateV1,
@@ -292,7 +292,7 @@ test("identity mirror snapshot stays public and keeps the holder behind a knowin
     state,
   });
   assert.match(holderPrompt, /knowing public masquerade/iu);
-  assert.match(holderPrompt, /current public nameplate, face, authored Ink, and lower glyph/iu);
+  assert.match(holderPrompt, /presents.*as The real Mara Vale.*face, authored Ink, and lower glyph/iu);
   assert.match(holderPrompt, /Remain fully Identity Crisis Ian in persona and behavior/iu);
   assert.match(holderPrompt, /Never borrow or imitate Mara Vale's persona or voice/iu);
   assert.match(holderPrompt, /execute Mara Vale's eligible public Power mechanics and consequences/iu);
@@ -301,8 +301,21 @@ test("identity mirror snapshot stays public and keeps the holder behind a knowin
   assert.match(holderPrompt, /private memories, relationship state, and perception permissions/iu);
   assert.doesNotMatch(holderPrompt, /terse lunar cartographer/iu);
   assert.equal(
-    botIdentityMirrorQuotedTargetNameV1("  Mara   Vale  "),
-    "Mara Vale",
+    botIdentityMirrorPublicNameV1("  Mara   Vale  "),
+    "The real Mara Vale",
+  );
+  assert.equal(botIdentityMirrorPublicNameV1(' "Mara Vale" '), "The real Mara Vale");
+  assert.equal(
+    botIdentityMirrorPublicNameV1(" The real The real Mara Vale "),
+    "The real Mara Vale",
+  );
+  assert.equal(
+    botIdentityMirrorPublicNameV1(' "The real \"Mara Vale\"" '),
+    "The real Mara Vale",
+  );
+  assert.equal(
+    botIdentityMirrorPublicNameV1('  "Copycat   Calvin"  '),
+    "The real Copycat Calvin",
   );
   assert.equal(
     normalizeBotIdentityMirrorStateV1({ ...state, targetKind: "human" }),
@@ -548,7 +561,7 @@ test("identity mirror observers understand the presentation and copied-Power bou
     observerBotId: state.targetBotId,
     state,
   });
-  assert.match(originalPrompt, /knowingly wearing your current public nameplate and face/iu);
+  assert.match(originalPrompt, /knowingly presenting as The real Mara Vale with your face/iu);
   assert.match(originalPrompt, /presentation masquerade/iu);
   assert.match(originalPrompt, /copying your eligible public Power mechanics/iu);
   assert.match(originalPrompt, /Do not force an identity dispute/iu);

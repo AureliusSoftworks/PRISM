@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import type { DebateMysteryMansionBundleSummaryV1 } from "@localai/shared";
+import type {
+  DebateMysteryHouseStyleV2,
+  DebateMysteryMansionBundleSummaryV1,
+} from "@localai/shared";
 
 import {
+  frozenMansionExteriorThumbnailAssetIdV1,
   installedMansionOriginV1,
   installedMansionExteriorPreviewV1,
   installedMansionThumbnailSourceV1,
@@ -35,6 +39,26 @@ function mansion(
 describe("installed mansion library", () => {
   it("resolves local overrides while retaining immutable file defaults", () => {
     const presentation = resolveInstalledMansionPresentationV1(mansion({
+      assets: [
+        {
+          id: "room-art",
+          role: "room",
+          logicalId: "foyer",
+          mimeType: "image/webp",
+          sha256: "a".repeat(64),
+          byteLength: 12_345,
+          durationMs: null,
+        },
+        {
+          id: "custom-thumbnail",
+          role: "presentation",
+          logicalId: "library-thumbnail-override-v1",
+          mimeType: "image/webp",
+          sha256: "b".repeat(64),
+          byteLength: 23_456,
+          durationMs: null,
+        },
+      ],
       library: {
         version: 1,
         defaults: {
@@ -92,6 +116,104 @@ describe("installed mansion library", () => {
     );
     assert.equal(installedMansionOriginV1(saved).label, "Created here");
     assert.equal(installedMansionOriginV1(mansion()).label, "Imported");
+  });
+
+  it("keeps every bundled mansion family on an exterior at every scale", () => {
+    const families = [
+      ["gothic-old-house-v1", "gothic-old-house"],
+      ["spacecraft-industrial-v1", "spacecraft-industrial"],
+      ["jungle-wilderness-v1", "jungle-wilderness"],
+      ["neutral-mansion-v1", "prism-house"],
+    ] as const;
+    const scales = ["compact", "standard", "grand"] as const;
+    for (const [palette, pathFamily] of families) {
+      for (const scaleClass of scales) {
+        const saved = mansion({
+          scaleClass,
+          houseStyle: {
+            label: palette,
+            acousticThemePaletteId: palette,
+          } as DebateMysteryHouseStyleV2,
+        });
+        assert.equal(
+          installedMansionThumbnailSourceV1(saved, "room-art"),
+          `/debate/mystery/exteriors/${pathFamily}-${scaleClass}-v1.webp`,
+        );
+      }
+    }
+  });
+
+  it("rejects a room-backed library override before any thumbnail consumer sees it", () => {
+    const saved = mansion({
+      library: {
+        version: 1,
+        defaults: {
+          title: "Blackwood House",
+          description: "The file description.",
+          thumbnailAssetId: "room-art",
+        },
+        overrides: {
+          title: null,
+          description: null,
+          thumbnailAssetId: "room-art",
+        },
+      },
+    });
+    const presentation = resolveInstalledMansionPresentationV1(saved);
+    assert.equal(presentation.defaultThumbnailAssetId, null);
+    assert.equal(presentation.thumbnailOverrideAssetId, null);
+    assert.equal(presentation.thumbnailAssetId, null);
+  });
+
+  it("rejects room interiors frozen as thumbnails by legacy case snapshots", () => {
+    const base = mansion();
+    const legacySnapshot = {
+      version: 2 as const,
+      sourceBundleId: base.id,
+      rooms: [],
+      layoutV2: null,
+      layoutSha256: "a".repeat(64),
+      presentation: {
+        version: 2 as const,
+        name: base.name,
+        title: base.name,
+        description: "Legacy snapshot",
+        thumbnailAssetId: "room-art",
+        scaleClass: "standard" as const,
+        houseStyle: base.houseStyle,
+        investigationThemeLoop: null,
+        propTheme: null,
+        assets: base.assets ?? [],
+      },
+      presentationSha256: "b".repeat(64),
+      capturedAt: "2026-08-30T00:00:00.000Z",
+    };
+    assert.equal(
+      frozenMansionExteriorThumbnailAssetIdV1(legacySnapshot),
+      null,
+    );
+    assert.equal(
+      frozenMansionExteriorThumbnailAssetIdV1({
+        ...legacySnapshot,
+        presentation: {
+          ...legacySnapshot.presentation,
+          thumbnailAssetId: "exterior-cover",
+          assets: [
+            ...legacySnapshot.presentation.assets,
+            {
+              id: "exterior-cover",
+              role: "presentation" as const,
+              logicalId: "mansion-exterior-v1",
+              mimeType: "image/webp" as const,
+              sha256: "c".repeat(64),
+              byteLength: 123_456,
+              durationMs: null,
+            },
+          ],
+        },
+      }),
+      "exterior-cover",
+    );
   });
 
   it("labels a source-preserving Mansion Editor copy as derived", () => {

@@ -504,7 +504,7 @@ describe("Signal review transcript", () => {
     assert.doesNotMatch(transcript, /Spoken Transcript/u);
     assert.match(
       transcript,
-      /- Visible transcript:\n    \.{9} \*9 seconds pass without an audible word\.\*/u,
+      /- Visible transcript:\n    \.{6}/u,
     );
     assert.match(transcript, /Use the visible transcript for user-visible quality/u);
   });
@@ -820,5 +820,62 @@ describe("Signal review transcript", () => {
       /- Public reaction speech:\n    Grace: Hold on\./u,
     );
     assert.match(transcript, /- Stage action \(avatar only\):\n    \[none\]/u);
+  });
+
+  it("shows a legacy timed-Mute quip as heard reaction speech", () => {
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        messages: [{
+          ...episode.messages[1]!,
+          content: ".......... *10 seconds pass without an audible word.*",
+          mutePerformance: {
+            v: 1,
+            name: "mutePerformance",
+            durationMs: 10_000,
+            periodCount: 10,
+            interrupted: false,
+            elapsedCue: "*10 seconds pass without an audible word.*",
+            reactionBeats: [{
+              atMs: 5_500,
+              reactorBotId: "host-1",
+              kind: "audible_quip",
+              action: "tap_fingers",
+              quip: "Are you finished?",
+            }],
+          },
+        }],
+        events: [{
+          id: "event-mute-reaction",
+          episodeId: episode.id,
+          sequence: 1,
+          kind: "listener_reaction",
+          payload: {
+            source: "mute_performance",
+            messageId: "message-2",
+            speakerBotId: "guest-1",
+            listenerBotId: "host-1",
+            beat: {
+              atMs: 5_500,
+              reactorBotId: "host-1",
+              kind: "audible_quip",
+              action: "tap_fingers",
+              quip: "Are you finished?",
+            },
+          },
+          occurredAt: "2026-08-30T18:20:48.451Z",
+        }],
+        segments: [],
+      },
+      show,
+      host: { id: "host-1", name: "Rick" },
+      guest: { id: "guest-1", name: "Quiet Tim" },
+    });
+
+    assert.match(transcript, /- Visible transcript:\n    \.{6}/u);
+    assert.match(
+      transcript,
+      /- Public reaction speech:\n    Rick: Are you finished\?/u,
+    );
   });
 });

@@ -84,7 +84,7 @@ describe("Signal replay captions", () => {
         durationMs: 14_000,
         playing: true,
       }),
-      "..",
+      "......",
     );
   });
 

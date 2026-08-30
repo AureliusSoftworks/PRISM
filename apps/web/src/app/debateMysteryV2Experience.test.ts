@@ -159,20 +159,32 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(cssSource, /animation:\s*roomDescend[^;]+backwards/u);
   });
 
-  it("opens on the mansion exterior with a spatial door threshold, then enters the foyer", () => {
+  it("starts on the title card, then clears to a first-person exterior door threshold", () => {
     assert.match(experienceSource, /openingOrMapPlaybackSuppressed = state\.playPhase === "title_card"/u);
     assert.match(experienceSource, /preparedMansionExteriorUrl/u);
     assert.match(experienceSource, /DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1/u);
     assert.match(experienceSource, /--mansion-exterior-image/u);
     assert.match(cssSource, /\.titleCard\s*\{[\s\S]*var\(--mansion-exterior-image\)/u);
+    assert.match(experienceSource, /data-tutorial-target="whodunnit-start"/u);
+    assert.match(experienceSource, />Start<\/button>/u);
+    assert.match(experienceSource, /data-first-person-exterior=\{firstPersonExterior/u);
+    assert.match(cssSource, /\.titleCard\[data-first-person-exterior="true"\]\s*\{[\s\S]*background-image:\s*var\(--mansion-exterior-image\)/u);
     assert.match(experienceSource, /className=\{styles\.titleDoor\}/u);
     assert.match(experienceSource, /data-door-threshold=\{mansionDoorEntry/u);
     assert.match(experienceSource, /data-tutorial-target="whodunnit-enter-mansion"/u);
     assert.match(experienceSource, /className=\{styles\.titleDoorFocus\}/u);
-    assert.match(experienceSource, /"Open the mansion door and enter the foyer"/u);
+    assert.match(experienceSource, /className=\{styles\.titleDoorMark\}/u);
+    assert.match(experienceSource, /"Enter the mansion"/u);
     assert.match(experienceSource, /action: "enter_mansion"/u);
     assert.match(cssSource, /\.titleDoor:focus-visible/u);
-    assert.match(cssSource, /\.titleDoorHint/u);
+    assert.match(cssSource, /\.titleDoor::before\s*\{[\s\S]*titleDoorBeacon/u);
+    assert.match(cssSource, /\.titleDoorMark\s*\{[\s\S]*border:\s*2px solid/u);
+    assert.doesNotMatch(experienceSource, /styles\.titlePlayerOrb/u);
+    assert.doesNotMatch(experienceSource, /styles\.titleDoorHint/u);
+    assert.doesNotMatch(cssSource, /\.titlePlayerOrb/u);
+    assert.doesNotMatch(cssSource, /\.titleDoorHint/u);
+    assert.match(setupSource, /mysteryExteriorIntroStartedSessionId !== activeSession\.id/u);
+    assert.match(setupSource, /onExteriorIntroStart=\{\(\) => setMysteryExteriorIntroStartedSessionId\(activeSession\.id\)\}/u);
     assert.match(setupSource, /mysteryCasePreludeMusicSessionActive\(activeSession\.formatState\.playPhase\)/u);
     assert.match(setupSource, /backgroundRecordable=\{false\}/u);
     assert.match(experienceSource, /if \(state\.playPhase === "case_opening"\)/u);
@@ -182,6 +194,7 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /className=\{styles\.caseOpeningStage\}[\s\S]*onKeyDown=\{handleOpeningKeyDown\}/u);
     assert.doesNotMatch(experienceSource, /className=\{styles\.caseOpeningDialogue\}[\s\S]{0,280}onClick=\{\(\) => void dismissOpening\(\)\}/u);
     assert.match(experienceSource, /action: "dismiss_case_opening"/u);
+    assert.match(experienceSource, /const openingRoomImage = currentRoomImageUrl/u);
     assert.match(experienceSource, /data-opening-map-reveal=\{openingMapReveal \? "true" : undefined\}/u);
     assert.match(experienceSource, /--opening-room-image/u);
     assert.match(experienceSource, /Enter the incident scene/u);
@@ -191,6 +204,29 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(cssSource, /@keyframes caseOpeningReveal/u);
     assert.match(experienceSource, /caseOpeningPlayerAvatar/u);
     assert.match(experienceSource, /player character/u);
+    assert.match(setupSource, /frozenMansionExteriorThumbnailAssetIdV1\(activeMysteryMansionSnapshot\)/u);
+  });
+
+  it("selects the exterior grounds before reversible travel outside", () => {
+    assert.match(experienceSource, /className=\{styles\.mansionOutsideTravelTarget\}/u);
+    assert.match(experienceSource, /MYSTERY_MANSION_OUTSIDE_SELECTION_ID/u);
+    assert.match(experienceSource, /aria-label="Select exterior grounds"/u);
+    assert.match(experienceSource, /aria-pressed=\{mansionOutsideSelected\}/u);
+    assert.match(experienceSource, /setSelectedMansionRoomId\(MYSTERY_MANSION_OUTSIDE_SELECTION_ID\)/u);
+    assert.match(experienceSource, /data-selected=\{mansionOutsideSelected \? "true" : undefined\}/u);
+    assert.match(experienceSource, /<strong>Exterior grounds<\/strong>/u);
+    assert.match(experienceSource, />Go outside<\/button>/u);
+    assert.match(experienceSource, /setVisitingExterior\(true\)/u);
+    assert.match(experienceSource, /void beginExteriorEntry\(visitingExterior\)/u);
+    assert.match(experienceSource, /returningFromExterior[\s\S]*\{ action: "move", roomId: foyer\.id \}[\s\S]*\{ action: "enter_mansion" \}/u);
+    assert.match(experienceSource, /exteriorEntryPresentation\.returningFromExterior[\s\S]*setVisitingExterior\(false\);[\s\S]*setExteriorRoomReveal\(true\)/u);
+    assert.match(experienceSource, /data-exterior-room-reveal=\{exteriorRoomReveal \? "true" : undefined\}/u);
+    assert.match(cssSource, /\.investigation\[data-exterior-room-reveal="true"\]::after[\s\S]*animation:\s*exteriorRoomReveal 1\.85s/u);
+    assert.match(cssSource, /\.mansionCanvas\s*\{[\s\S]*pointer-events:\s*none/u);
+    assert.match(cssSource, /\.mansionRoom\s*\{[\s\S]*pointer-events:\s*auto/u);
+    assert.match(cssSource, /\.mansionOutsideTravelTarget\[data-selected="true"\][\s\S]*inset 0 0 0 2px/u);
+    assert.doesNotMatch(experienceSource, /outsideTravelPromptOpen|Travel outside\?/u);
+    assert.doesNotMatch(experienceSource, /action: "travel_outside"/u);
   });
 
   it("adopts accepted mansion moves only after embodied or compact travel completes", () => {
@@ -444,6 +480,26 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.doesNotMatch(experienceSource, /playMysteryVoice|playMysteryPlayerVoice|elevenlabs\.io/iu);
   });
 
+  it("returns from Archive without replaying the durable dialogue checkpoint", () => {
+    assert.match(
+      setupSource,
+      /session\.format === "whodunnit"[\s\S]{0,260}mysteryArchiveReturnAudioRef\.current = \{[\s\S]{0,180}debateMysteryRestoredAudioPerformanceKeyV2\(session\.formatState\)/u,
+    );
+    assert.match(
+      setupSource,
+      /restoredAudioPerformanceKey:[\s\S]{0,180}mysteryArchiveReturnAudioRef\.current\?\.performanceKey/u,
+    );
+    assert.match(
+      experienceSource,
+      /debateMysteryPreparedAudioShouldStart\(\{[\s\S]{0,420}restoredPerformanceKey: props\.restoredAudioPerformanceKey/u,
+    );
+    assert.match(
+      experienceSource,
+      /if \(restoredPlayback\) \{\s*lastPlayedPerformanceKeyRef\.current = playbackPerformanceKey;\s*return;/u,
+      "a restored trial beat must stay quiet and must not auto-advance as completed playback",
+    );
+  });
+
   it("replays Identity Crisis from the frozen Power plan and public dialogue only", () => {
     assert.match(experienceSource, /debateMysteryIdentityMirrorPresentationsV1/u);
     assert.match(experienceSource, /mysteryIdentityMirrorAppearance/u);
@@ -456,7 +512,7 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /debateMysteryIdentityMirrorFaceV1\(frozenHolder, frozenTarget\)/u);
     assert.match(experienceSource, /faceStyleOverride/u);
     assert.match(setupSource, /faceStyleOverride: bot\.faceStyleOverride \?\? null/u);
-    assert.match(experienceSource, /debateMysteryQuotedIdentityNameV1\(copiedName\)/u);
+    assert.match(experienceSource, /debateMysteryPublicIdentityNameV1\(copiedName\)/u);
     assert.doesNotMatch(
       experienceSource,
       /mysteryIdentityMirrorAppearance\(bot, botById\.get\(mirror\.targetBotId\)/u,
@@ -745,7 +801,7 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /Error details copied to clipboard/u);
     assert.match(experienceSource, /Could not copy error details\. Try again\./u);
     assert.match(experienceSource, /Continue without voices/u);
-    assert.match(experienceSource, /Return to Archive/u);
+    assert.match(experienceSource, /Return to setup/u);
     assert.match(experienceSource, /Case preparation stopped/u);
     assert.match(experienceSource, /The Forge is not still running/u);
     assert.match(experienceSource, /resume from the last durable checkpoint/u);
@@ -862,11 +918,13 @@ describe("Whodunnit V2 prosecution experience", () => {
   it("offers a truthful Theme, Forge asset, Archive, and saved-mansion setup", () => {
     assert.match(setupSource, /<strong>Mystery spark<\/strong>/u);
     assert.match(setupSource, /placeholder="Leave blank for Surprise me/u);
-    assert.match(setupSource, /Prepare presentation assets/u);
-    assert.match(setupSource, /LOCAL stays on this device/u);
-    assert.match(setupSource, /symbolic evidence, and an optional personalized ambience mix/u);
-    assert.match(setupSource, /Create sealed exhibit images/u);
-    assert.match(setupSource, /LOCAL presents each authored exhibit as text and a symbolic evidence card/u);
+    assert.match(setupSource, /Optional clue visuals/u);
+    assert.match(setupSource, /Every case has clues/u);
+    assert.match(setupSource, /Ready mansion variants are used first/u);
+    assert.match(setupSource, /Use props from my Asset Library/u);
+    assert.match(setupSource, /Generate setting-matched clue props/u);
+    assert.match(setupSource, /Without it, ready mansion variants are used first/u);
+    assert.match(setupSource, /bundled clue cards, and an optional personalized ambience mix/u);
     assert.match(setupSource, /mysteryEvidenceAssetSynthesis && props\.responseMode !== "local"/u);
     assert.match(setupSource, /disabled=\{props\.responseMode === "local"\}/u);
     assert.match(setupSource, /ONLINE only · LOCAL keeps the bundled room pack/u);
@@ -887,7 +945,7 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(setupSource, /setMysteryAmbienceAssetSynthesis\] =\s*useState\(false\)/u);
     assert.match(
       setupSource,
-      /production: selectedMysteryMansionBundle[\s\S]{0,100}"Choose the evidence and music for this case\."/u,
+      /Choose optional clue visuals and music\. Ready mansion variants or PRISM’s bundled clue props always keep the case playable\./u,
     );
     assert.match(
       setupSource,
@@ -927,8 +985,11 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /sealedMysteryAssetObjectUrl/u);
     assert.match(experienceSource, /Save evidence image/u);
     assert.match(experienceSource, /Save room image/u);
-    assert.match(experienceSource, /Finish the finite visible sweep/u);
-    assert.match(experienceSource, /state\.config\.investigationMode === "court_only" \? "Begin Trial"/u);
+    assert.match(experienceSource, /data-command="move"[\s\S]{0,260}disabled=\{busy \|\| dialoguePerformanceActive\}/u);
+    assert.doesNotMatch(experienceSource, /data-command="move"[\s\S]{0,260}!state\.openingSweepComplete/u);
+    assert.doesNotMatch(experienceSource, /Finish the finite visible sweep before leaving/u);
+    assert.match(experienceSource, /data-tutorial-target="whodunnit-start"/u);
+    assert.match(experienceSource, /if \(!mansionDoorEntry\) \{[\s\S]{0,120}sendAction\(\{ action: "move" \}\);[\s\S]{0,60}return;/u);
   });
 
   it("re-enables failed visual recovery after the soft poll settles", () => {
@@ -947,7 +1008,7 @@ describe("Whodunnit V2 prosecution experience", () => {
   });
 
   it("routes Spectator through editable Prosecutor findings before watch-only court", () => {
-    assert.match(experienceSource, /Review Prosecutor Findings/u);
+    assert.match(experienceSource, />Start<\/button>/u);
     assert.match(experienceSource, /Prosecutor research · editable/u);
     assert.match(experienceSource, /Review the Prosecutor conclusion/u);
     assert.match(experienceSource, /File conclusion and watch court/u);

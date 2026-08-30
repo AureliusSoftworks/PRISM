@@ -161,7 +161,10 @@ describe("mode tutorials", () => {
     assert.match(step.body, /encrypted case vault—not Images, Generated Images, or the Library/u);
     assert.match(step.body, /Save image is the explicit action/u);
     assert.match(step.body, /fullscreen title card waits outside the mansion/u);
-    assert.match(step.body, /Open the glowing door target/u);
+    assert.match(step.body, /Choose Start to clear the title, all copy, and vignette/u);
+    assert.match(step.body, /intro music fall silent/u);
+    assert.match(step.body, /first-person exterior/u);
+    assert.match(step.body, /click the glowing mansion entrance/u);
     assert.match(step.body, /cross into the Foyer/u);
     assert.match(step.body, /Casekeeper briefing then hands off/u);
     assert.match(step.body, /threshold never spends an extra discovery action/u);
@@ -169,11 +172,20 @@ describe("mode tutorials", () => {
     assert.match(step.body, /keep the Forge open while it prepares the entire high-detail set/u);
     assert.match(step.body, /active investigation switches to Illustrated automatically/u);
     assert.match(step.body, /missing and legacy art keeps its Mosaic fallback/u);
-    assert.match(step.body, /profile glyph and color appear in the player orb/u);
+    assert.match(step.body, /Case Forge deterministically attempts to fill only those gaps/u);
+    assert.match(step.body, /authored placements remain authoritative/u);
+    assert.match(step.body, /imported package stays unchanged/u);
+    assert.match(step.body, /click the exterior or yard to select the entire outside region/u);
+    assert.match(step.body, /choose Go outside in the normal destination bar/u);
+    assert.match(step.body, /click its entrance to return directly to the Foyer/u);
+    assert.match(step.body, /without losing investigation progress/u);
+    assert.match(step.body, /Inside the Move map, your profile glyph and color appear in the player orb/u);
     assert.match(step.body, /first visits follow it through the mansion's doors, corridors, and floor connectors/u);
     assert.match(step.body, /visited rooms open immediately with a short physical travel bridge/u);
     assert.match(step.body, /Reduced Motion uses that same immediate bridge/u);
-    assert.match(step.body, /one finite visible sweep/u);
+    assert.match(step.body, /Move is immediately available after the room introduction/u);
+    assert.match(step.body, /explore through adjacent rooms/u);
+    assert.match(step.body, /return to unfinished details whenever you like/u);
     assert.match(step.body, /First visits require a connected doorway/u);
     assert.match(step.body, /discovered rooms can be revisited instantly from anywhere/u);
     assert.match(step.body, /Preparing your mystery to watch/u);
@@ -260,13 +272,13 @@ describe("mode tutorials", () => {
     assert.match(step.body, /truth\/proof grade and juror breakdown/u);
     assert.match(step.body, /Reduced Motion/u);
     assert.match(step.body, /Archive and replay reuse the persisted result without another model or voice call/u);
-    assert.match(step.body, /Identity Crisis knowingly wears the latest eligible direct addresser’s effective public name/u);
-    assert.match(step.body, /copies that target’s eligible public Powers and consequences/u);
+    assert.match(step.body, /Identity Crisis knowingly presents as The real <effective target name> after the latest eligible direct address/u);
+    assert.match(step.body, /that target’s eligible public Powers and consequences/u);
     assert.match(step.body, /Identity Crisis never copies recursively/u);
     assert.match(step.body, /private awareness or audience permissions never transfer/u);
     assert.match(step.body, /Identity Mirror presentation has precedence/u);
     assert.match(step.body, /complete resting and speaking mouth package/u);
-    assert.match(step.body, /public name/u);
+    assert.match(step.body, /The real <effective target name>/u);
     assert.match(step.body, /player-controlled Prosecutor is eligible/u);
     assert.match(step.body, /witness holder retargets to whoever is currently speaking directly to that witness/u);
     assert.match(step.body, /holder stays itself in persona and behavior/u);
@@ -935,6 +947,7 @@ describe("mode tutorials", () => {
         '[data-tutorial-target="debate-camera"]',
         '[data-tutorial-target="debate-copy-all-review-data"]',
         '[data-tutorial-target="debate-format"]',
+        '[data-tutorial-target="debate-format-flyting"]',
       ],
     );
     const copy = tutorial.steps.map((step) => step.body).join(" ");
@@ -1044,6 +1057,11 @@ describe("mode tutorials", () => {
       /LOCAL blocks research and page reading before network access/u,
     );
     assert.match(copy, /Powers never make a bot ineligible for a role/u);
+    assert.match(copy, /Pro, Con, Host, or one of four Hall role cards/u);
+    assert.match(copy, /choose that exact seat from the shared Library grid/u);
+    assert.match(copy, /Hall seats begin on Surprise me/u);
+    assert.match(copy, /draws every unresolved Hall member from the remaining Library/u);
+    assert.match(copy, /complete distinct cast then freezes with the proceeding/u);
     assert.match(copy, /inaccessible speech never enters captions, voice/u);
     assert.match(copy, /shared case board, or listener-facing ballot reasons/u);
     assert.match(copy, /sparse replay-stable roll/u);
@@ -2548,7 +2566,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       setupCopy,
-      /privately authors a normal opening[\s\S]*timed periods and an elapsed cue/u,
+      /privately authors a normal opening[\s\S]*silent hold and six-dot mark/u,
     );
     assert.match(
       setupCopy,
@@ -2593,6 +2611,8 @@ describe("mode tutorials", () => {
     ].join(" ");
     assert.match(copy, /agency|no control/iu);
     assert.match(copy, /privacy|private knowledge/iu);
+    assert.match(copy, /literal quotation marks/iu);
+    assert.match(copy, /occasionally notice the imperfect voice match/iu);
     assert.match(copy, /safety/iu);
   });
 
@@ -3164,15 +3184,15 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalLiveCutStep.body,
-      /uses editorial hard cuts exactly as audible host and guest speech begins/u,
+      /holds that establishing Wide for five seconds after the ident clears/u,
     );
     assert.match(
       signalLiveCutStep.body,
-      /If Auto has been on one person for a while, it cuts Wide to see the studio/u,
+      /Later turns sometimes begin or remain Wide as either bot starts speaking/u,
     );
     assert.match(
       signalLiveCutStep.body,
-      /sometimes glances at the other person for a few seconds even when they are not reacting/u,
+      /Every automatic shot holds for at least five seconds/u,
     );
     assert.match(
       signalLiveCutStep.body,
@@ -3184,15 +3204,15 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalLiveCutStep.body,
-      /ready handoffs never flash Wide or glide late/u,
+      /handoffs never create camera twitch/u,
     );
     assert.match(
       signalLiveCutStep.body,
-      /audible interruption returns to Wide[^.]*incoming voice prepares[^.]*current speaker live/u,
+      /Auto proposes Wide and takes it as soon as the current five-second hold allows/u,
     );
     assert.match(
       signalLiveCutStep.body,
-      /Sustained audible interruptions cut directly to the interrupter/u,
+      /Sustained audible interruptions direct the next eligible cut to the interrupter/u,
     );
     assert.match(
       signalLiveCutStep.body,
@@ -3373,8 +3393,9 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalControlRoomStep.body,
-      /camera grammar is fixed: ready dialogue and live interruptions cut/u,
+      /camera grammar is fixed: ready dialogue and live interruptions guide the next eligible cut/u,
     );
+    assert.match(signalControlRoomStep.body, /five-second floor/u);
     assert.match(
       signalControlRoomStep.body,
       /restores the full chrome/u,
@@ -3529,6 +3550,10 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalPowersTutorialBody(),
+      /Copycat does.*echoed curtain still yields to one substantive host-and-guest interview exchange before Auto can close/u,
+    );
+    assert.match(
+      signalPowersTutorialBody(),
       /Interrupt guest now still works for an echo-bound host[\s\S]*last audience-heard phrase/u,
     );
     assert.match(
@@ -3654,7 +3679,7 @@ describe("mode tutorials", () => {
       (step) => step.heading === "Meet the opening",
     )?.body ?? "";
 
-    assert.match(opening, /lets the room breathe for one to two seconds/u);
+    assert.match(opening, /five-second establishing beat/u);
     assert.match(opening, /Auto visits the guest as their name lands/u);
     assert.match(opening, /returns to the host.*or breathes Wide/u);
     assert.match(opening, /chance to offer a brief greeting immediately/u);
@@ -3989,7 +4014,7 @@ describe("mode tutorials", () => {
     }
   });
 
-  it("teaches timed unaware Mute without the legacy fixed ellipsis contract", () => {
+  it("teaches timed unaware Mute as dead air with one six-dot mark", () => {
     for (const mode of [
       "chat",
       "zen",
@@ -4001,16 +4026,19 @@ describe("mode tutorials", () => {
         .map((step) => step.body)
         .join(" ");
       assert.match(body, /privately remembers a complete ordinary answer/u);
-      assert.match(body, /one period per second/u);
-      assert.match(body, /starting with \. immediately/u);
-      assert.match(body, /elapsed-time stage cue/u);
+      assert.match(body, /silent hold and one fixed six-dot mark/u);
+      assert.match(body, /duration never becomes explanatory copy or a status chip/u);
       assert.match(body, /no voice or mouth movement/u);
+      assert.doesNotMatch(body, /one period per second/u);
+      assert.doesNotMatch(body, /starting with \. immediately/u);
       assert.doesNotMatch(body, /only answers with \.\.\./u);
     }
     const chatBody = MODE_TUTORIALS.chat.steps.map((step) => step.body).join(" ");
     assert.match(chatBody, /Chat and Zen never invent a reaction for the player/u);
     const signalBody = MODE_TUTORIALS.botcast.steps.map((step) => step.body).join(" ");
-    assert.match(signalBody, /genuine floor break/u);
+    assert.match(signalBody, /sparse replay-stable visual looks/u);
+    assert.match(signalBody, /only a genuine floor interruption may end the dead air with speech/u);
+    assert.match(signalBody, /genuine floor interruption/u);
     assert.doesNotMatch(signalBody, /saved transcript line is only \.\.\./u);
   });
 
@@ -4036,5 +4064,15 @@ describe("mode tutorials", () => {
       debateBody,
       /saved A− or A\+ size applies inside the chamber too/u,
     );
+  });
+
+  it("teaches reusable case and mansion composition", () => {
+    const debateBody = MODE_TUTORIALS.debate.steps.map((step) => step.body).join(" ");
+    assert.match(debateBody, /A \.case owns the certified sealed logic and frozen cast/u);
+    assert.match(debateBody, /a \.mansion owns the rooms, artwork, music, ambience/u);
+    assert.match(debateBody, /skips Case Forge synthesis and Cast setup entirely/u);
+    assert.match(debateBody, /rendered procedurally and locally/u);
+    assert.match(debateBody, /only after the mansion investigation is complete/u);
+    assert.match(debateBody, /contains independently authenticated \.case and \.mansion components/u);
   });
 });

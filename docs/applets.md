@@ -29,11 +29,11 @@ ship as `0.5.2` while Coffee is `v0.7`.
 
 | Applet  | Version | Status             | Notes                                                                                                                                                                                                                                                                                                       |
 | ------- | ------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Chat    | v1.51   | Active             | Full playground with independent saved conversations, Troll persona cues, timed unaware Mute delivery, Accent Map-keyed Mumbling dialects, six-tier size presentation, session-sticky Shapeshifter persona/visual embodiment with holder-owned voice and target Accent Map overlay, Surname Drift last names, phosphor-hue prejudice, and masked Cursed Tongue delivery inside each PRISM or persona Home.                                                                                         |
-| Zen     | v1.50   | Active             | Calm one-to-one continuity with bounded player-facing Troll pestering, timed unaware Mute delivery, Accent Map-keyed Mumbling dialects, draggable six-tier embodiment, direct human access, session-sticky Shapeshifter persona/visual embodiment with holder-owned voice and target Accent Map overlay, Surname Drift last names, phosphor-hue prejudice, and masked Cursed Tongue delivery.                                                                                                        |
-| Coffee  | v2.73   | Active             | Two-to-five-bot tables with participant-scoped Context Spark continuity, mood-gated rare ordinary cut-ins, bounded Troll interruptions and public bait, cast-aware avatar effects, Power-projected reaction speech, masked Cursed Tongue delivery, timed Mute reactions and floor breaks, replay-safe knowing Identity Crisis name/eye/mouth/Ink/glyph overlays that keep persona/voice while copying eligible public Powers, Shapeshifter persona/visual copying with holder-owned voice and target Accent Map overlay but no Power transfer, session last names, replay-safe form changes, phosphor-hue prejudice among seated bots, local-only café Jazz beds, and faithful replay that seats Default Prism for the player.                   |
-| Signal  | v1.93   | Active             | Interview studio with a faded, breathing studio entrance, guest-introduction cutaways and optional greetings, quiet bot-only visual identity status, bounded Troll interruptions and public bait, masked Cursed Tongue delivery with an electronic censor beep, ready-but-paused spectator buffering, audible-clock mouth animation, a paint-contained live stage, premium host-and-premise show identities with cohesive character, concept, and broadcast cues, performance-colored audience ratings, quiet replay-provenanced listener backchannels, private-safe Mumbling interruptions and reaction speech, visibly elapsed timed Mute performances with guaranteed awkward-duration reactions and hard cuts, replay-safe knowing Identity Crisis name/eye/mouth/Ink/glyph overlays that keep persona/voice while copying eligible public Powers, Shapeshifter persona/visual copying with holder-owned voice and target Accent Map overlay but no Power transfer, session last names, replay-safe form changes, exact on-air producer quotes, Power-permissive encounters, and phosphor-hue prejudice between host and guest. |
-| Debate  | v0.57   | Preview            | Forum, Turnabout, Whodunnit, and Flyting proceedings share frozen routing, consent, Powers, durability, and Archive. Identity Crisis is a knowing presentation masquerade that retains persona/voice while copying eligible public Powers; Shapeshifter retains holder voice identity and never copies target Powers. LOCAL remains a hard offline boundary. |
+| Chat    | v1.53   | Active             | Full playground with independent saved conversations, Troll persona cues, timed unaware Mute delivery, Accent Map-keyed Mumbling dialects, six-tier size presentation, session-sticky Shapeshifter persona/visual embodiment with holder-owned voice and target Accent Map overlay and quoted borrowed name, Surname Drift last names, phosphor-hue prejudice, and masked Cursed Tongue delivery inside each PRISM or persona Home.                                                                                         |
+| Zen     | v1.52   | Active             | Calm one-to-one continuity with bounded player-facing Troll pestering, timed unaware Mute delivery, Accent Map-keyed Mumbling dialects, draggable six-tier embodiment, direct human access, session-sticky Shapeshifter persona/visual embodiment with holder-owned voice and target Accent Map overlay and quoted borrowed name, Surname Drift last names, phosphor-hue prejudice, and masked Cursed Tongue delivery.                                                                                                        |
+| Coffee  | v2.76   | Active             | Two-to-five-bot tables with participant-scoped Context Spark continuity, mood-gated rare ordinary cut-ins, bounded Troll interruptions and public bait, cast-aware avatar effects, Power-projected reaction speech, masked Cursed Tongue delivery, timed Mute dead air, reactions, and floor breaks with a terse six-dot public mark, replay-safe Identity Crisis presentation as The real target with name/eye/mouth/Ink/glyph overlays that keep persona/voice while copying eligible public Powers, Shapeshifter persona/visual copying with holder-owned voice and target Accent Map overlay but no Power transfer, quoted borrowed names, occasional observer voice-mismatch notice, session last names, replay-safe form changes, phosphor-hue prejudice among seated bots, local-only café Jazz beds, and faithful replay that seats Default Prism for the player.                   |
+| Signal  | v1.98   | Active             | Interview studio with a faded, breathing studio entrance, guest-introduction cutaways and optional greetings, quiet bot-only visual identity status, bounded Troll interruptions and public bait, masked Cursed Tongue delivery with an electronic censor beep, ready-but-paused spectator buffering, audible-clock mouth animation, a paint-contained live stage, premium host-and-premise show identities with cohesive character, concept, and broadcast cues, performance-colored audience ratings, quiet replay-provenanced listener backchannels, private-safe Mumbling interruptions and reaction speech, timed Mute dead air with a terse six-dot public mark, guaranteed awkward-duration reactions, and hard cuts, replay-safe Identity Crisis presentation as The real target with name/eye/mouth/Ink/glyph overlays that keep persona/voice while copying eligible public Powers, and Confusion Collin's one-time booked-guest impostor curtain reveal as The real guest with soft episode tension plus a protected substantive interview exchange when Copycat echoes it, Shapeshifter persona/visual copying with holder-owned voice and target Accent Map overlay but no Power transfer, quoted borrowed names and occasional observer voice-mismatch notice, session last names, replay-safe form changes, exact on-air producer quotes, Power-permissive encounters, and phosphor-hue prejudice between host and guest. |
+| Debate  | v0.59   | Preview            | Forum, Turnabout, Whodunnit, and Flyting proceedings share frozen routing, consent, Powers, durability, Archive, and terse six-dot timed Mute presentation. Identity Crisis presents the holder as The real target while retaining persona/voice and copying eligible public Powers; Shapeshifter retains holder voice identity and never copies target Powers. LOCAL remains a hard offline boundary. |
 | Polling | v0.0    | Planned            | AI-powered polling across bot groups.                                                                                                                                                                                                                                                                       |
 | Feed    | v0.0    | Planned            | BotBook-style social feed.                                                                                                                                                                                                                                                                                  |
 | Games   | v0.0    | Planned            | Boardgame-like bot matches.                                                                                                                                                                                                                                                                                 |
@@ -51,20 +51,21 @@ Debate's release boundary and platform QA gaps are recorded in
 - A Mute holder authors ordinary substantive speech and privately remembers it
   as delivered. Legacy Ready Mute snapshots receive this current runtime cue
   without a database migration.
-- Non-exempt audiences receive one period per quantized second, starting with
-  `.` immediately, then one environmental elapsed-time cue. Physical actions
-  remain visible; voice and mouth motion remain sealed. Existing player speech
-  whitelists continue to receive clear speech.
+- Non-exempt audiences receive dead air and one fixed six-dot mark (`......`).
+  The duration never becomes explanatory copy or a status chip. Physical
+  actions remain visible; voice and mouth motion remain sealed. Existing player
+  speech whitelists continue to receive clear speech.
 - The public, versioned performance record contains only duration, period
   count, interruption state, elapsed cue, and deterministic reaction beats.
   Intended speech stays holder-private and never enters public APIs, memories,
   exports, another bot's history, or performance reactions.
 - Chat and Zen never fabricate player reactions. Coffee, Signal, and Debate
-  may add sparse persona-aware listener actions, allowed Foley, or transformed
-  quips while long silence is playing. Six- and seven-second pauses remain
-  sparse; from eight seconds onward at least one listener beat is guaranteed.
+  may add sparse persona-aware visual listener actions while the dead air holds;
+  only a genuine floor interruption may add speech. Six- and seven-second
+  pauses remain sparse; from eight seconds onward at least one listener beat is
+  guaranteed.
   These beats are replay direction only.
-  A genuine floor break truncates the public dots and privately preserves only
+  A genuine floor break truncates the silent hold and privately preserves only
   the holder's intended prefix plus interruption context.
 - Signal uses instant reaction cuts with at least a 2.5-second hold and returns
   to the muted speaker between beats when time remains. Camera animation is
@@ -152,7 +153,7 @@ stages do not block the standalone preview.
 - A ready speech-obfuscation Power keeps ordinary clear intended speech in the
   holder's private history while every public speech lane receives deterministic
   normal-volume gibberish. Spoken listener acknowledgements, crosstalk leads,
-  interrupted-speaker retorts, and timed-Mute reaction quips use the same
+  interrupted-speaker retorts, and explicit timed-Mute floor interruptions use the same
   projection; physical actions and nonverbal vocal Foley remain intact.
 - An explicitly saved Accent Map pin selects the consonant and vowel family and
   seeds replay-stable variation. Moving the pin changes the holder's gibberish
@@ -228,7 +229,7 @@ stages do not block the standalone preview.
   bot-to-bot addresser, Slate has no participant identity-theft surface, and
   every other planned applet is deferred in the exhaustive mode policy.
 - A genuinely new eligible addresser replaces the visual target. The holder
-  knowingly wears the target's effective current public name, exact eyes and
+  knowingly presents as `The real <effective target name>`, with the target's exact eyes and
   blink package, complete resting/live mouth and viseme package including glyph
   style and Custom Speech poses, authored Avatar Details Ink, and lower glyph.
 - The holder stays itself in persona and behavior but copies the target's
@@ -242,7 +243,10 @@ stages do not block the standalone preview.
   masquerade in authored dialogue; it never changes gameplay or synthesizes live.
   Shapeshifter copies public persona and complete visual form while retaining
   the holder voice identity, provider voice, voice effect, and non-accent
-  shaping; only target Accent Map region/enablement overlays that voice.
+  shaping; only target Accent Map region/enablement overlays that voice. The
+  borrowed public name is always literally quoted. While an active target is
+  present in Coffee or Signal, peers may occasionally notice the imperfect
+  voice match, but they are never required to comment or surrender agency.
 
 ## Troll Power policy
 
@@ -288,6 +292,32 @@ stages do not block the standalone preview.
 ## Changelog
 
 ### 2026-08-30
+
+- Advanced `Coffee` to `v2.76`, `Signal` to `v1.98`, and `Debate` to `v0.59`.
+  Identity Crisis now presents the holder as `The real <effective target name>`
+  from raw frozen target identity in live and replay surfaces. Shapeshifter
+  retains its distinct, literally quoted borrowed name. Confusion Collin's
+  booked-guest curtain says `I'm The real Copycat Calvin` while Copycat Calvin
+  remains the only accused impostor and retains the protected interview runway.
+
+- Advanced `Signal` to `v1.97`. Confusion Collin still takes the booked guest's
+  public name and makes his one-time impostor accusation at the curtain. When
+  Copycat echoes that opening, Signal now preserves one substantive interview
+  exchange before Auto may move to closing.
+- Advanced `Signal` to `v1.96`. Confusion Collin now freezes a booked bot guest
+  before the curtain, visibly takes that guest's public form at reveal, and
+  deterministically opens by introducing the show, introducing himself as the
+  copied public name, and accusing the actual guest of being the impostor.
+  The saved opening is replayed from canonical events; the accusation remains
+  a soft episode premise rather than a mandatory repeated dispute.
+
+- Advanced `Chat` to `v1.53`, `Zen` to `v1.52`, `Coffee` to `v2.75`,
+  `Signal` to `v1.95`, and `Debate` to `v0.58`. Timed Mute now performs as
+  dead air with a plain `......` mark; the explanatory elapsed-time chip is
+  gone from live, replay, review, and transcript presentation. Ordinary
+  listener reactions remain visual-only, while a true floor interruption may
+  still end the silence with speech. Private intended speech and timing
+  metadata remain sealed.
 
 - Advanced `Chat` to `v1.51`, `Zen` to `v1.50`, `Coffee` to `v2.73`,
   `Signal` to `v1.93`, and `Debate` to `v0.57`. Identity Crisis is now a
@@ -339,10 +369,10 @@ stages do not block the standalone preview.
   “What they meant” card while ordinary speech, memory, replay, transcript,
   caption, audio, and export surfaces remain gibberish-only.
 
-- Identity Crisis now uses the copied, literally quoted target name anywhere
-  the Power is active in Coffee, Signal, Debate, and Whodunnit. Collin knowingly
-  performs the masquerade while defensively treating the original as the
-  imitator; his color, persona, voice, Accent Map, and speech identity stay his.
+- Identity Crisis now uses `The real <effective target name>` anywhere the Power
+  is active in Coffee, Signal, Debate, and Whodunnit. Collin knowingly performs
+  the masquerade while defensively treating the original as the imitator; his
+  color, persona, voice, Accent Map, and speech identity stay his.
 
 - Advanced `Debate` to `v0.53`. Whodunnit V2 now freezes exact Identity Crisis
   target eyes, mouth, Avatar Details Ink, glyph, and public name at Case Forge;

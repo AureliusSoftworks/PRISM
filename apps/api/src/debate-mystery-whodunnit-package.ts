@@ -28,9 +28,14 @@ import {
 import {
   decodeInternalMansionPackageV1,
   encodeInternalMansionPackageV1,
-  exportInternalMansionPackageFromDbV1,
   importInternalMansionPackageToDbDetailedV1,
 } from "./debate-mystery-mansion-codec.ts";
+import { exportPortableMansionPackageV1 } from "./debate-mystery-mansion-package.ts";
+import {
+  decodeInternalCasePackageV1,
+  exportPortableCasePackageV1,
+  portableWhodunnitCompositionRecordV1,
+} from "./debate-mystery-case-package.ts";
 import {
   inspectPortableMysteryEnvelopeHeaderV1,
   openPortableMysteryEnvelopeV1,
@@ -86,6 +91,7 @@ export class PortableWhodunnitPackageError extends Error {
 interface InternalWhodunnitPackageV1 {
   manifest: WhodunnitPackageManifestV1;
   assets: ReadonlyMap<string, Uint8Array>;
+  components?: ReadonlyMap<string, Uint8Array>;
 }
 
 interface VaultRow {
@@ -199,6 +205,38 @@ function validateInternalPackage(input: InternalWhodunnitPackageV1): void {
   if (mansionHash !== input.manifest.mansionManifestSha256) {
     throw new PortableWhodunnitPackageError("Embedded mansion manifest integrity failed.");
   }
+  const componentPaths = new Set(input.components?.keys() ?? []);
+  if (!input.manifest.composition) {
+    if (componentPaths.size) {
+      throw new PortableWhodunnitPackageError("Legacy Whodunnit contains undeclared components.");
+    }
+    return;
+  }
+  const expectedComponents = [
+    input.manifest.composition.case,
+    input.manifest.composition.mansion,
+  ];
+  if (componentPaths.size !== expectedComponents.length) {
+    throw new PortableWhodunnitPackageError("Whodunnit composition is incomplete.");
+  }
+  for (const component of expectedComponents) {
+    const bytes = input.components?.get(component.archivePath);
+    if (!bytes || bytes.byteLength !== component.byteLength || sha256(bytes) !== component.sha256) {
+      throw new PortableWhodunnitPackageError(`Whodunnit component integrity failed: ${component.archivePath}.`);
+    }
+    const opened = openPortableMysteryEnvelopeV1({ envelope: bytes });
+    if (component.archivePath.endsWith(".case")) {
+      if (opened.header.packageType !== "case") {
+        throw new PortableWhodunnitPackageError("Embedded case component has the wrong package type.");
+      }
+      decodeInternalCasePackageV1(opened.payload);
+    } else {
+      if (opened.header.packageType !== "mansion") {
+        throw new PortableWhodunnitPackageError("Embedded mansion component has the wrong package type.");
+      }
+      decodeInternalMansionPackageV1(opened.payload);
+    }
+  }
 }
 
 export function encodeInternalWhodunnitPackageV1(input: InternalWhodunnitPackageV1): Uint8Array {
@@ -207,6 +245,9 @@ export function encodeInternalWhodunnitPackageV1(input: InternalWhodunnitPackage
     [MANIFEST_PATH]: new TextEncoder().encode(canonicalPortablePackageJsonV1(asJson(input.manifest))),
   };
   for (const path of [...input.assets.keys()].sort()) entries[path] = Uint8Array.from(input.assets.get(path)!);
+  for (const path of [...(input.components?.keys() ?? [])].sort()) {
+    entries[path] = Uint8Array.from(input.components!.get(path)!);
+  }
   const archive = zipSync(entries, { level: 9 });
   if (archive.byteLength > MAX_INTERNAL_ARCHIVE_BYTES) {
     throw new PortableWhodunnitPackageError("Whodunnit archive is too large.");
@@ -231,8 +272,13 @@ export function decodeInternalWhodunnitPackageV1(archive: Uint8Array): InternalW
     throw new PortableWhodunnitPackageError("Whodunnit manifest is invalid JSON.");
   }
   const assets = new Map<string, Uint8Array>();
-  for (const [path, bytes] of Object.entries(entries)) if (path !== MANIFEST_PATH) assets.set(path, Uint8Array.from(bytes));
-  const decoded = { manifest, assets };
+  const components = new Map<string, Uint8Array>();
+  for (const [path, bytes] of Object.entries(entries)) {
+    if (path === MANIFEST_PATH) continue;
+    if (path.startsWith("components/")) components.set(path, Uint8Array.from(bytes));
+    else assets.set(path, Uint8Array.from(bytes));
+  }
+  const decoded = { manifest, assets, ...(components.size ? { components } : {}) };
   validateInternalPackage(decoded);
   return decoded;
 }
@@ -398,11 +444,32 @@ export async function exportPortableWhodunnitPackageV1(args: {
     typeof sourceSession.formatState.config.mansionBundleId === "string"
       ? sourceSession.formatState.config.mansionBundleId : null,
   );
-  const mansion = decodeInternalMansionPackageV1(exportInternalMansionPackageFromDbV1({
-    db: args.db, userKey: args.userKey, userId: args.userId, bundleId,
-    prismVersion: args.prismVersion, creatorName: args.creatorName,
-    snapshot: sourceSession.formatState.config.mansionSnapshot,
-  }));
+  const sourceMansionRooms = sourceSession.formatState.config.mansionSnapshot?.rooms ??
+    getDebateMysteryMansionBundleV2(args.db, args.userId, bundleId).rooms;
+  const mansionComponent = await exportPortableMansionPackageV1({
+    db: args.db,
+    userKey: args.userKey,
+    userId: args.userId,
+    bundleId,
+    prismVersion: args.prismVersion,
+    creatorName: args.creatorName,
+    mode: "spoiler_seal",
+  });
+  const openedMansionComponent = openPortableMysteryEnvelopeV1({ envelope: mansionComponent });
+  const mansion = decodeInternalMansionPackageV1(openedMansionComponent.payload);
+  const caseComponent = exportPortableCasePackageV1({
+    db: args.db,
+    userId: args.userId,
+    sessionId: args.sessionId,
+    prismVersion: args.prismVersion,
+    creatorName: args.creatorName,
+    mode: "spoiler_seal",
+    mansionRooms: sourceMansionRooms.map((room) => asJson(room)),
+  });
+  const composition = portableWhodunnitCompositionRecordV1({
+    caseArchive: caseComponent,
+    mansionArchive: mansionComponent,
+  });
   const assets = new Map<string, Uint8Array>();
   const descriptors: PortableMysteryAssetDescriptorV1[] = [];
   const assetByHash = new Map<string, PortableMysteryAssetDescriptorV1>();
@@ -453,8 +520,7 @@ export async function exportPortableWhodunnitPackageV1(args: {
         }
       : mansion.manifest.ambience,
   };
-  const sourceRooms = sourceSession.formatState.config.mansionSnapshot?.rooms ??
-    getDebateMysteryMansionBundleV2(args.db, args.userId, bundleId).rooms;
+  const sourceRooms = sourceMansionRooms;
   const portableReplacements = new Map<string, string>([
     [args.sessionId, "portable-session"],
     [job.id, "portable-job"],
@@ -692,6 +758,7 @@ export async function exportPortableWhodunnitPackageV1(args: {
     license: { name: "Private use", url: null, allowsRedistribution: false },
     contentWarnings: [],
     compatibility,
+    composition,
     mansionManifest,
     mansionManifestSha256: sha256(canonicalPortablePackageJsonV1(asJson(mansionManifest))),
     cast,
@@ -716,7 +783,11 @@ export async function exportPortableWhodunnitPackageV1(args: {
     },
     silent: !sourceSession.formatState.voicesEnabled,
   };
-  const payload = encodeInternalWhodunnitPackageV1({ manifest, assets });
+  const components = new Map<string, Uint8Array>([
+    [composition.case.archivePath, caseComponent],
+    [composition.mansion.archivePath, mansionComponent],
+  ]);
+  const payload = encodeInternalWhodunnitPackageV1({ manifest, assets, components });
   const preflight = preflightPortableMysteryArchiveV1(payload);
   await validatePortableMansionMediaV1({
     manifest: { ...mansionManifest, assets: descriptors },
@@ -749,7 +820,8 @@ async function openAndValidateWhodunnit(args: { envelope: Uint8Array; password?:
   if (
     opened.header.expandedBytes !== preflight.expandedBytes ||
     opened.header.assetCount !== decoded.manifest.assets.length ||
-    preflight.entryCount !== decoded.manifest.assets.length + 1 ||
+    preflight.entryCount !== decoded.manifest.assets.length + 1 +
+      (decoded.manifest.composition ? 2 : 0) ||
     opened.header.title !== decoded.manifest.title ||
     opened.header.creatorName !== decoded.manifest.creator.name ||
     JSON.stringify(opened.header.compatibility) !== JSON.stringify(decoded.manifest.compatibility) ||
@@ -861,7 +933,11 @@ export async function importPortableWhodunnitPackageV1(args: {
     mansionManifestSha256: sha256(canonicalPortablePackageJsonV1(asJson(mansionManifest))),
     assets: sanitizedMedia.manifest.assets,
   };
-  const decoded: InternalWhodunnitPackageV1 = { manifest, assets: sanitizedMedia.assets };
+  const decoded: InternalWhodunnitPackageV1 = {
+    manifest,
+    assets: sanitizedMedia.assets,
+    ...(authenticated.components ? { components: authenticated.components } : {}),
+  };
   validateInternalPackage(decoded);
 
   const newSessionId = randomUUID();

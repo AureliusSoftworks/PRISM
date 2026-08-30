@@ -279,6 +279,8 @@ function replaceObjectIdentity(
 export function applyWhodunnitPropBindingsToScaffoldV1<
   T extends {
     method: string;
+    publicOpening: string;
+    weapon: { descriptor: string };
     evidence: Array<{
       id: string;
       adjective: string;
@@ -286,16 +288,23 @@ export function applyWhodunnitPropBindingsToScaffoldV1<
       title: string;
       observation: string;
       keywords: string[];
+      isCanonicalWeapon: boolean;
     }>;
   },
 >(scaffold: T, bindingsByEvidenceId: Readonly<Record<string, EvidencePropBindingV1>>): T {
   let method = scaffold.method;
+  let publicOpening = scaffold.publicOpening;
+  let weapon = scaffold.weapon;
   const evidence = scaffold.evidence.map((item) => {
     const binding = bindingsByEvidenceId[item.id];
     if (!binding) return item;
     const displayName = binding.chosenIdentity.displayName.trim();
     if (!displayName) return item;
     method = replaceObjectIdentity(method, item.object, displayName);
+    publicOpening = replaceObjectIdentity(publicOpening, item.object, displayName);
+    if (item.isCanonicalWeapon) {
+      weapon = { ...weapon, descriptor: displayName };
+    }
     const rewrittenObservation = replaceObjectIdentity(
       item.observation,
       item.object,
@@ -314,5 +323,5 @@ export function applyWhodunnitPropBindingsToScaffoldV1<
       ])),
     };
   });
-  return { ...scaffold, method, evidence };
+  return { ...scaffold, method, publicOpening, weapon, evidence };
 }

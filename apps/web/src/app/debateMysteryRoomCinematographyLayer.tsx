@@ -1,6 +1,10 @@
 "use client";
 
 import {
+  mansionDynamicLightFrameV2,
+  type MansionDynamicLightV2,
+} from "@localai/shared";
+import {
   useEffect,
   useRef,
   type CSSProperties,
@@ -8,6 +12,7 @@ import {
 import {
   mysteryRoomCinematographyArtStyleV1,
   mysteryRoomCinematographyCanvasSize,
+  mysteryRoomCinematographyLightSourceV1,
   mysteryRoomCinematographyProfileV1,
   mysteryRoomCinematographySeed,
   mysteryRoomLightIntensityV1,
@@ -21,9 +26,21 @@ interface DebateMysteryRoomCinematographyLayerProps {
     templateId?: string | null;
     name?: string | null;
   };
+  lights: readonly MansionDynamicLightV2[];
+  templateLightingAligned: boolean;
   blurred: boolean;
   reducedMotion: boolean;
 }
+
+const AUTHORED_LIGHT_PROFILE_V1 = Object.freeze({
+  version: 1 as const,
+  id: "authored-room-lights-v2",
+  gradeTop: "transparent",
+  gradeBottom: "transparent",
+  grainOpacity: 0,
+  vignetteOpacity: 0,
+  emitters: Object.freeze<MysteryRoomLightEmitterV1[]>([]),
+});
 
 function drawGlow(
   context: CanvasRenderingContext2D,
@@ -45,6 +62,94 @@ function drawGlow(
   context.restore();
 }
 
+function drawRadialAuthoredLight(
+  context: CanvasRenderingContext2D,
+  light: Extract<MansionDynamicLightV2, { kind: "fire" | "omni" }>,
+  width: number,
+  height: number,
+  intensity: number,
+): void {
+  const radius = width * light.geometry.radius;
+  context.save();
+  context.globalAlpha = intensity;
+  context.translate(width * light.geometry.x, height * light.geometry.y);
+  if (light.kind === "fire") {
+    context.rotate(light.geometry.rotation * Math.PI / 180);
+    context.scale(0.82, 1.18);
+  }
+  const gradient = context.createRadialGradient(0, 0, 0, 0, 0, radius);
+  gradient.addColorStop(0, light.color);
+  gradient.addColorStop(light.kind === "fire" ? 0.22 : 0.12, light.color);
+  gradient.addColorStop(1, "transparent");
+  context.fillStyle = gradient;
+  context.fillRect(-radius, -radius, radius * 2, radius * 2);
+  context.restore();
+}
+
+function drawDirectionalAuthoredLight(
+  context: CanvasRenderingContext2D,
+  light: Extract<MansionDynamicLightV2, { kind: "directional" }>,
+  width: number,
+  height: number,
+  intensity: number,
+): void {
+  const lightWidth = width * light.geometry.width;
+  const lightHeight = height * light.geometry.height;
+  context.save();
+  context.globalAlpha = intensity;
+  context.translate(width * light.geometry.x, height * light.geometry.y);
+  context.rotate(light.geometry.rotation * Math.PI / 180);
+  const gradient = context.createLinearGradient(-lightWidth / 2, 0, lightWidth / 2, 0);
+  gradient.addColorStop(0, light.color);
+  gradient.addColorStop(0.28, light.color);
+  gradient.addColorStop(1, "transparent");
+  context.fillStyle = gradient;
+  context.fillRect(-lightWidth / 2, -lightHeight / 2, lightWidth, lightHeight);
+  context.restore();
+}
+
+function drawNeonAuthoredLight(
+  context: CanvasRenderingContext2D,
+  light: Extract<MansionDynamicLightV2, { kind: "neon" }>,
+  width: number,
+  height: number,
+  intensity: number,
+): void {
+  const [first, ...rest] = light.geometry.points;
+  if (!first) return;
+  context.save();
+  context.globalAlpha = intensity;
+  context.strokeStyle = light.color;
+  context.shadowColor = light.color;
+  context.shadowBlur = Math.max(4, light.geometry.width * Math.min(width, height) * 3);
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.lineWidth = Math.max(1, light.geometry.width * Math.min(width, height));
+  context.beginPath();
+  context.moveTo(first.x * width, first.y * height);
+  for (const point of rest) context.lineTo(point.x * width, point.y * height);
+  context.stroke();
+  context.restore();
+}
+
+function drawAuthoredLight(
+  context: CanvasRenderingContext2D,
+  light: MansionDynamicLightV2,
+  width: number,
+  height: number,
+  elapsedMs: number,
+  reducedMotion: boolean,
+): void {
+  const intensity = mansionDynamicLightFrameV2(light, elapsedMs, reducedMotion).intensity;
+  if (light.kind === "fire" || light.kind === "omni") {
+    drawRadialAuthoredLight(context, light, width, height, intensity);
+  } else if (light.kind === "directional") {
+    drawDirectionalAuthoredLight(context, light, width, height, intensity);
+  } else {
+    drawNeonAuthoredLight(context, light, width, height, intensity);
+  }
+}
+
 function seededRandom(seed: number): () => number {
   let state = seed >>> 0;
   return () => {
@@ -58,7 +163,13 @@ function seededRandom(seed: number): () => number {
 export function DebateMysteryRoomCinematographyLayer(
   props: DebateMysteryRoomCinematographyLayerProps,
 ): React.JSX.Element | null {
-  const profile = mysteryRoomCinematographyProfileV1(props.room);
+  const templateProfile = mysteryRoomCinematographyProfileV1(props.room);
+  const lightSource = mysteryRoomCinematographyLightSourceV1({
+    authoredLightCount: props.lights.length,
+    templateLightingAligned: props.templateLightingAligned,
+    hasTemplateProfile: Boolean(templateProfile),
+  });
+  const profile = templateProfile ?? (lightSource === "authored" ? AUTHORED_LIGHT_PROFILE_V1 : null);
   const rootRef = useRef<HTMLDivElement>(null);
   const lightCanvasRef = useRef<HTMLCanvasElement>(null);
   const grainCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -82,20 +193,33 @@ export function DebateMysteryRoomCinematographyLayer(
     let lastLightAt = Number.NEGATIVE_INFINITY;
     let lastGrainFrame = -1;
 
-    const drawLights = (elapsedSeconds: number): void => {
+    const drawLights = (elapsedMs: number): void => {
       lightContext.clearRect(0, 0, width, height);
-      for (const emitter of profile.emitters) {
-        drawGlow(
-          lightContext,
-          emitter,
-          width,
-          height,
-          mysteryRoomLightIntensityV1({
+      if (lightSource === "template") {
+        for (const emitter of profile.emitters) {
+          drawGlow(
+            lightContext,
             emitter,
-            elapsedSeconds,
-            reducedMotion: props.reducedMotion,
-          }),
-        );
+            width,
+            height,
+            mysteryRoomLightIntensityV1({
+              emitter,
+              elapsedSeconds: elapsedMs / 1000,
+              reducedMotion: props.reducedMotion,
+            }),
+          );
+        }
+      } else if (lightSource === "authored") {
+        for (const light of props.lights) {
+          drawAuthoredLight(
+            lightContext,
+            light,
+            width,
+            height,
+            elapsedMs,
+            props.reducedMotion,
+          );
+        }
       }
     };
 
@@ -131,13 +255,13 @@ export function DebateMysteryRoomCinematographyLayer(
       }
       lastLightAt = Number.NEGATIVE_INFINITY;
       lastGrainFrame = -1;
-      drawLights(props.reducedMotion ? 0 : performance.now() / 1000);
+      drawLights(props.reducedMotion ? 0 : performance.now());
       drawGrain(0);
     };
 
     const render = (time: number): void => {
       if (time - lastLightAt >= 1000 / 30) {
-        drawLights(time / 1000);
+        drawLights(time);
         lastLightAt = time;
       }
       const grainFrame = props.reducedMotion ? 0 : Math.floor(time / 260);
@@ -158,7 +282,7 @@ export function DebateMysteryRoomCinematographyLayer(
       stageObserver?.disconnect();
       window.cancelAnimationFrame(animationFrame);
     };
-  }, [profile, props.reducedMotion, props.room.id]);
+  }, [lightSource, profile, props.lights, props.reducedMotion, props.room.id]);
 
   if (!profile) return null;
   const style = {
@@ -175,6 +299,7 @@ export function DebateMysteryRoomCinematographyLayer(
       data-art-style="illustrated"
       data-blurred={props.blurred ? "true" : undefined}
       data-cinematography-profile={profile.id}
+      data-light-source={lightSource}
       data-light-motion={props.reducedMotion ? "frozen" : "live"}
       style={style}
       aria-hidden="true"

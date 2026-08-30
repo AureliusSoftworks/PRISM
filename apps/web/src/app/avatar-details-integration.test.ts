@@ -63,6 +63,21 @@ describe("Avatar Details Studio integration", () => {
     assert.doesNotMatch(pageSource, /Apply avatar details\?/);
   });
 
+  it("keeps the editor face guide out of the unmasked expanded-preview repaint", () => {
+    assert.match(
+      pageCss,
+      /\.zenLiveBotPresencePlate\[data-avatar-customizer-preview="true"\][\s\S]*?\.signalBotPresencePlate[\s\S]*?:is\(\s*\.zenLiveBotPresenceScreenContentRig,\s*\.zenLiveBotPresenceThinkingGlyphAnchor\s*\)[\s\S]*?\[data-crt-glyph-layer="true"\]\[data-crt-pixel-mask-ready="true"\]::before\s*\{[\s\S]*?-webkit-mask-image:\s*none;[\s\S]*?mask-image:\s*none;/u,
+    );
+    assert.match(
+      editorSource,
+      /data-avatar-details-face-guide="true"[\s\S]*?<CoffeeSeatPlateEmoji/u,
+    );
+    assert.match(
+      editorCss,
+      /\.faceGuideGlyph[\s\S]*?\[data-crt-pixel-mask-ready="true"\]::before\s*\{[\s\S]*?-webkit-mask-image:\s*var\(--crt-phosphor-pixel-mask\);[\s\S]*?mask-image:\s*var\(--crt-phosphor-pixel-mask\);/u,
+    );
+  });
+
   it("refracts a prompt into one editable, undoable Ink draft without autosaving", () => {
     assert.match(editorSource, /<strong>Refract Ink<\/strong>/u);
     assert.match(editorSource, /aria-label="Ink direction"/u);

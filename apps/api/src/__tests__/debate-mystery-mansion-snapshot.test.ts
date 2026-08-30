@@ -127,6 +127,8 @@ describe("immutable mansion Case snapshots", () => {
     );
     assert.equal(snapshot.presentation.title, "Frozen title");
     assert.equal(snapshot.layoutV2?.roomArtCandidates.length, 0);
+    assert.ok(snapshot.layoutV2?.placementAnchors.length);
+    assert.ok(snapshot.layoutV2?.lights.length);
     assert.deepEqual(snapshot.presentation.assets.map((asset) => asset.id), [
       "accepted-room", "active-music", "cover",
     ]);
@@ -153,6 +155,166 @@ describe("immutable mansion Case snapshots", () => {
     );
     assert.equal(same.layoutSha256, snapshot.layoutSha256);
     assert.equal(same.presentationSha256, snapshot.presentationSha256);
+  });
+
+  it("fills only missing Case decoration without mutating the installed mansion", () => {
+    const source = mansion();
+    const authoredAnchor = {
+      id: "anchor:foyer:authored",
+      roomId: "foyer",
+      name: "bespoke brass table",
+      relation: "on" as const,
+      point: { x: 0.31, y: 0.62 },
+    };
+    const authoredLight = {
+      id: "light:foyer:authored",
+      roomId: "foyer",
+      kind: "omni" as const,
+      color: "#f4c985",
+      intensity: 0.42,
+      animationSeed: "authored-seed",
+      cuePermission: {
+        version: 1 as const,
+        mode: "mansion_static" as const,
+        allowedCueIds: [],
+      },
+      geometry: { x: 0.49, y: 0.38, radius: 0.23 },
+    };
+    source.layoutV2!.placementAnchors.push(authoredAnchor);
+    source.layoutV2!.lights.push(authoredLight);
+
+    const snapshot = freezeDebateMysteryMansionSnapshotV2(
+      source,
+      "2026-08-28T01:00:00.000Z",
+    );
+
+    assert.deepEqual(source.layoutV2!.placementAnchors, [authoredAnchor]);
+    assert.deepEqual(source.layoutV2!.lights, [authoredLight]);
+    assert.deepEqual(
+      snapshot.layoutV2!.placementAnchors.find((anchor) => anchor.id === authoredAnchor.id),
+      authoredAnchor,
+    );
+    assert.deepEqual(
+      snapshot.layoutV2!.lights.find((light) => light.id === authoredLight.id),
+      authoredLight,
+    );
+    assert.ok(
+      snapshot.layoutV2!.placementAnchors.some((anchor) => anchor.roomId === "landing"),
+      "Case Forge should fill missing placement tags in an undecorated room",
+    );
+    assert.ok(
+      snapshot.layoutV2!.lights.some((light) => light.roomId === "landing"),
+      "Case Forge should fill missing ambient lights in an undecorated room",
+    );
+  });
+
+  it("projects legacy V1 mansion rooms into a decorated Case layout without rewriting the source", () => {
+    const source = mansion();
+    source.layoutV2 = null;
+    source.assets!.push({
+      id: "legacy-foyer-plate",
+      role: "room",
+      logicalId: "foyer",
+      mimeType: "image/webp",
+      sha256: "6".repeat(64),
+      byteLength: 20,
+      durationMs: null,
+    });
+    const sourceRooms = structuredClone(source.rooms);
+
+    const snapshot = freezeDebateMysteryMansionSnapshotV2(
+      source,
+      "2026-08-28T01:00:00.000Z",
+    );
+
+    assert.ok(snapshot.layoutV2);
+    assert.equal(
+      snapshot.layoutV2.entities.filter((entity) => entity.kind === "room").length,
+      source.rooms.length,
+    );
+    assert.ok(snapshot.layoutV2.placementAnchors.length);
+    assert.ok(snapshot.layoutV2.lights.length);
+    const projectedFoyer = snapshot.layoutV2.entities.find((entity) => entity.id === "foyer");
+    assert.equal(
+      projectedFoyer?.kind === "room" ? projectedFoyer.acceptedRoomAssetId : null,
+      "legacy-foyer-plate",
+    );
+    assert.ok(
+      snapshot.layoutV2.placementAnchors.some((anchor) =>
+        anchor.roomId === "foyer" && anchor.name === "left wall"),
+      "custom legacy room art should use neutral placement geometry",
+    );
+    assert.ok(
+      !snapshot.layoutV2.placementAnchors.some((anchor) =>
+        anchor.roomId === "foyer" && anchor.name === "entry doors"),
+      "custom legacy room art must not inherit bundled foyer coordinates",
+    );
+    assert.equal(snapshot.rooms.length, source.rooms.length);
+    assert.equal(source.layoutV2, null);
+    assert.deepEqual(source.rooms, sourceRooms);
+  });
+
+  it("applies the image-reviewed imported-mansion rig before generic Case decoration", () => {
+    const source = mansion();
+    source.portable = {
+      packageId: "blackwood-package",
+      payloadSha256: "07fd4f50b2ed90beca78c28cf56d010ad9daf7efb3db28d5c1ae389b9c866dda",
+      description: "Blackwood fixture.",
+      creator: { name: "Fixture", id: null, url: null },
+      provenance: {
+        createdAt: "2026-08-28T00:00:00.000Z",
+        prismVersion: "0.15.0",
+        generatedWith: [],
+      },
+      license: { name: "Private use", url: null, allowsRedistribution: false },
+      contentWarnings: [],
+      encryptionMode: "spoiler_seal",
+      creatorSignature: null,
+    };
+
+    const snapshot = freezeDebateMysteryMansionSnapshotV2(source);
+    assert.deepEqual(
+      snapshot.layoutV2!.placementAnchors
+        .filter((anchor) => anchor.roomId === "foyer")
+        .map((anchor) => anchor.name),
+      ["center console", "entry bench", "entry console", "entry door", "foyer rug", "stair landing"],
+    );
+    assert.equal(snapshot.layoutV2!.lights.filter((light) => light.roomId === "foyer").length, 4);
+    assert.ok(!snapshot.layoutV2!.placementAnchors.some((anchor) =>
+      anchor.roomId === "foyer" && anchor.name === "left wall"));
+  });
+
+  it("keeps generated decoration stable across installations of the same portable mansion", () => {
+    const portable = {
+      packageId: "portable-mansion",
+      payloadSha256: "f".repeat(64),
+      description: "A portable mansion fixture.",
+      creator: { name: "Fixture", id: null, url: null },
+      provenance: {
+        createdAt: "2026-08-28T00:00:00.000Z",
+        prismVersion: "0.15.0",
+        generatedWith: [],
+      },
+      license: { name: "Private use", url: null, allowsRedistribution: false },
+      contentWarnings: [],
+      encryptionMode: "spoiler_seal" as const,
+      creatorSignature: null,
+    };
+    const first = mansion();
+    first.id = "first-installation";
+    first.portable = portable;
+    first.layoutV2 = null;
+    const second = mansion();
+    second.id = "second-installation";
+    second.portable = structuredClone(portable);
+    second.layoutV2 = null;
+
+    const firstSnapshot = freezeDebateMysteryMansionSnapshotV2(first);
+    const secondSnapshot = freezeDebateMysteryMansionSnapshotV2(second);
+
+    assert.equal(firstSnapshot.layoutSha256, secondSnapshot.layoutSha256);
+    assert.deepEqual(firstSnapshot.layoutV2?.placementAnchors, secondSnapshot.layoutV2?.placementAnchors);
+    assert.deepEqual(firstSnapshot.layoutV2?.lights, secondSnapshot.layoutV2?.lights);
   });
 
   it("retains frozen protected assets only inside the owning tenant", () => {

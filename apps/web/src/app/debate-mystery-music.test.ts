@@ -15,7 +15,6 @@ import {
   mysteryCasePreludeMusicMix,
   mysteryCasePreludeMusicSessionActive,
   mysteryInvestigationMusicMix,
-  mysteryInvestigationMusicProgramV1,
   mysteryInvestigationMusicSessionActive,
 } from "./debateMysteryMusic.ts";
 
@@ -64,70 +63,58 @@ describe("Whodunnit investigation music", () => {
     );
   });
 
-  it("keeps its level during interviews and fades silently for first-visit introductions and the Theory Board", () => {
+  it("loops throughout investigation except the four explicit silence states", () => {
+    const ordinaryInvestigation = {
+      caseFileOpen: false,
+      outside: false,
+      roomComplete: false,
+      roomIntroductionActive: false,
+      roomView: "room" as const,
+    };
     assert.equal(
-      mysteryInvestigationMusicMix({
-        theoryBoardOpen: false,
-      }),
+      mysteryInvestigationMusicMix(ordinaryInvestigation),
       WHODUNNIT_INVESTIGATION_MUSIC_MIX,
     );
     assert.equal(
       mysteryInvestigationMusicMix({
-        theoryBoardOpen: true,
+        ...ordinaryInvestigation,
+        outside: true,
       }),
       WHODUNNIT_INVESTIGATION_MUSIC_SILENT_MIX,
     );
     assert.equal(
       mysteryInvestigationMusicMix({
-        theoryBoardOpen: false,
+        ...ordinaryInvestigation,
+        caseFileOpen: true,
+      }),
+      WHODUNNIT_INVESTIGATION_MUSIC_SILENT_MIX,
+    );
+    assert.equal(
+      mysteryInvestigationMusicMix({
+        ...ordinaryInvestigation,
         roomIntroductionActive: true,
       }),
       WHODUNNIT_INVESTIGATION_MUSIC_SILENT_MIX,
     );
     assert.equal(
       mysteryInvestigationMusicMix({
-        theoryBoardOpen: false,
+        ...ordinaryInvestigation,
         roomComplete: true,
       }),
       WHODUNNIT_INVESTIGATION_MUSIC_SILENT_MIX,
     );
     assert.equal(
       mysteryInvestigationMusicMix({
-        theoryBoardOpen: false,
-        roomComplete: false,
+        ...ordinaryInvestigation,
+        roomComplete: true,
+        roomIntroductionActive: true,
+        roomView: "mansion",
       }),
       WHODUNNIT_INVESTIGATION_MUSIC_MIX,
+      "a completed or newly entered current room must not silence the mansion map",
     );
     assert.ok(WHODUNNIT_INVESTIGATION_MUSIC_TRANSITION_MS >= 120);
     assert.ok(WHODUNNIT_INVESTIGATION_MUSIC_FADE_MS >= 320);
-  });
-
-  it("uses deterministic musical cells with longer ambience-only rests", () => {
-    const first = mysteryInvestigationMusicProgramV1({ seed: "blackwood", elapsedMs: 0 });
-    const same = mysteryInvestigationMusicProgramV1({ seed: "blackwood", elapsedMs: 0 });
-    assert.deepEqual(first, same);
-    assert.equal(first.phase, "cell");
-    assert.ok(first.cellDurationMs >= 8_000 && first.cellDurationMs <= 16_000);
-    assert.ok(first.restDurationMs >= 45_000 && first.restDurationMs <= 85_000);
-    assert.ok(first.restDurationMs > first.cellDurationMs);
-    const rest = mysteryInvestigationMusicProgramV1({
-      seed: "blackwood",
-      elapsedMs: first.cellDurationMs + 1,
-    });
-    assert.equal(rest.phase, "rest");
-    assert.equal(rest.audible, false);
-    const accent = mysteryInvestigationMusicProgramV1({
-      seed: "blackwood",
-      elapsedMs: first.cellDurationMs + 1,
-      accentActive: true,
-    });
-    assert.equal(accent.phase, "accent");
-    assert.equal(accent.audible, true);
-    assert.ok(WHODUNNIT_INVESTIGATION_MUSIC_MIX.background <= 0.07);
-    assert.ok(mysteryInvestigationMusicMix({
-      theoryBoardOpen: false,
-      accentActive: true,
-    }).background <= 0.09);
   });
 
   it("ships the compact three-minute stereo music asset", () => {
@@ -143,10 +130,10 @@ describe("Whodunnit investigation music", () => {
 
   it("uses the shared local-only music layer and the global audio controls", () => {
     assert.match(source, /<SessionAtmosphereLayer/u);
-    assert.match(source, /data-music-program=\{investigationMusicProgram\.phase\}/u);
     assert.match(source, /active=\{props\.audioEnabled\}/u);
-    assert.match(source, /roomIntroductionActive,\s*roomComplete,\s*programAudible/u);
-    assert.match(source, /programAudible: investigationMusicProgram\.audible/u);
+    assert.match(source, /caseFileOpen,\s*outside: visitingExterior,\s*roomIntroductionActive,\s*roomComplete,\s*roomView: state\.roomView/u);
+    assert.match(source, /state\.playPhase === "title_card" \|\| visitingExterior/u);
+    assert.doesNotMatch(source, /mysteryInvestigationMusicProgramV1|data-music-program/u);
     assert.match(source, /backgroundRecordable=\{false\}/u);
     assert.match(source, /ambientFoley=\{false\}/u);
     assert.match(
@@ -158,6 +145,8 @@ describe("Whodunnit investigation music", () => {
 
   it("mounts one replay-safe prelude layer only on the visible Forge and title surfaces", () => {
     assert.match(shellSource, /mysteryCasePreludeMusicSessionActive\(activeSession\.formatState\.playPhase\)/u);
+    assert.match(shellSource, /mysteryExteriorIntroStartedSessionId !== activeSession\.id/u);
+    assert.match(shellSource, /onExteriorIntroStart=\{\(\) => setMysteryExteriorIntroStartedSessionId\(activeSession\.id\)\}/u);
     assert.match(shellSource, /sessionKey=\{`whodunnit-v2-prelude:\$\{activeSession\.id\}`\}/u);
     assert.match(shellSource, /mystery-mansion\/theme/u);
     assert.match(shellSource, /backgroundFallbackUrl=\{WHODUNNIT_INVESTIGATION_MUSIC_URL\}/u);
@@ -167,13 +156,12 @@ describe("Whodunnit investigation music", () => {
     assert.match(shellSource, /ambientFoley=\{false\}/u);
   });
 
-  it("documents the furniture-music cadence and silent non-investigation boundaries", () => {
+  it("documents the continuous loop and its four investigation silence states", () => {
     assert.match(
       tutorialSource,
-      /short deterministic cells emerge between long ambience-only rests/u,
+      /During Investigation it loops continuously/u,
     );
-    assert.match(tutorialSource, /routine pickups, navigation, and hovering never trigger it/u);
-    assert.match(tutorialSource, /fades for the Theory Board and courtroom/u);
+    assert.match(tutorialSource, /outside, the Case File is open, you are inside a completed room, or a first-entry room dialogue is playing/u);
     assert.match(tutorialSource, /begins quietly while Case Forge builds the case/u);
     assert.match(tutorialSource, /remains through the ready title card/u);
   });

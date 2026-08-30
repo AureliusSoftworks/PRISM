@@ -49,8 +49,9 @@ test("debate archive list items carry routing and frozen cast visuals", () => {
   assert.match(apiDebate, /castColors = debateSessionListCastColors\(parsed\)/u);
   assert.match(
     apiDebate,
-    /advocateVisuals = debateSessionListAdvocateVisuals\(parsed\)/u,
+    /advocateVisuals = debateSessionListAdvocateVisuals\(\s*parsed,\s*mysteryV2ArchiveState,\s*\)/u,
   );
+  assert.match(apiDebate, /mysteryV2ArchiveState = mysteryV2/u);
   assert.match(apiDebate, /lastReasoningEffort: debateRuntimeReasoningEffort/u);
   assert.match(apiDebate, /lastTurbo: debateRuntimeTurbo/u);
 });
@@ -63,9 +64,12 @@ test("debate archive rows render compact matchups with progressive detail", () =
   assert.match(experienceSource, /DebateArchiveEffortIcon/u);
   assert.match(experienceSource, /className=\{styles\.archiveChipMatchup\}/u);
   assert.match(experienceSource, /className=\{styles\.archiveChipCombatantIdentity\}/u);
-  assert.match(experienceSource, /<small>For<\/small>/u);
+  assert.match(experienceSource, /const whodunnitMatchup = session\.format === "whodunnit"/u);
+  assert.match(experienceSource, /session\.forTeamName\?\.trim\(\) \|\| "Prosecution"/u);
+  assert.match(experienceSource, /session\.againstTeamName\?\.trim\(\) \|\| "Defense"/u);
+  assert.match(experienceSource, /<small>\{forMatchupSideLabel\}<\/small>/u);
   assert.match(experienceSource, /<b>\{forAdvocateVisual\.name\}<\/b>/u);
-  assert.match(experienceSource, /<small>Against<\/small>/u);
+  assert.match(experienceSource, /<small>\{againstMatchupSideLabel\}<\/small>/u);
   assert.match(experienceSource, /<b>\{againstAdvocateVisual\.name\}<\/b>/u);
   assert.match(experienceSource, /aria-label=\{matchupLabel\}/u);
   assert.match(experienceSource, /className=\{styles\.archiveChipToggle\}/u);

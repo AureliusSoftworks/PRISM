@@ -382,6 +382,16 @@ import {
   PortableWhodunnitPackageError,
 } from "./debate-mystery-whodunnit-package.ts";
 import {
+  assemblePortableCasePackageV1,
+  deletePortableCaseLibraryV1,
+  exportPortableCasePackageV1,
+  importPortableCasePackageV1,
+  inspectPortableCasePackageV1,
+  listPortableCaseLibraryV1,
+  previewPortableCasePackageV1,
+  PortableCasePackageError,
+} from "./debate-mystery-case-package.ts";
+import {
   MAX_PORTABLE_MYSTERY_ENVELOPE_BYTES,
   PortableMysteryEnvelopeError,
 } from "./debate-mystery-package-envelope.ts";
@@ -414,6 +424,7 @@ import {
   MANSION_MUSIC_ACTIVE_LOGICAL_ID_V1,
   MANSION_MUSIC_CANDIDATE_LOGICAL_ID_V1,
   MANSION_MUSIC_PREVIOUS_LOGICAL_ID_V1,
+  PORTABLE_CASE_PACKAGE_MIME_V1,
   PORTABLE_MANSION_PACKAGE_MIME_V1,
   PORTABLE_WHODUNNIT_PACKAGE_MIME_V1,
   WHODUNNIT_PROP_ARCHETYPE_IDS_V1,
@@ -2478,6 +2489,13 @@ function portableMansionArchivePayload(body: unknown): Uint8Array {
   return body;
 }
 
+function portableCaseArchivePayload(body: unknown): Uint8Array {
+  if (!(body instanceof Uint8Array)) {
+    throw new HttpError(400, "A .case package file is required.");
+  }
+  return body;
+}
+
 function portableMansionPassword(ctx: RequestContext): string | undefined {
   const raw = ctx.req.headers["x-prism-package-password"];
   const password = (Array.isArray(raw) ? raw[0] : raw)?.slice(0, 1024) ?? "";
@@ -2490,7 +2508,8 @@ function rethrowPortableMansionError(error: unknown): never {
     error instanceof PortableMysteryEnvelopeError ||
     error instanceof PortableMysteryImportSafetyError ||
     error instanceof DebateMysteryMansionCodecError ||
-    error instanceof PortableWhodunnitPackageError
+    error instanceof PortableWhodunnitPackageError ||
+    error instanceof PortableCasePackageError
   ) throw new HttpError(400, error.message);
   throw error;
 }
@@ -8273,6 +8292,9 @@ async function deleteUserAccount(userId: string): Promise<void> {
     );
     db.prepare(
       "DELETE FROM debate_mystery_mansion_bundles WHERE user_id = ?",
+    ).run(userId);
+    db.prepare(
+      "DELETE FROM debate_mystery_case_packages WHERE user_id = ?",
     ).run(userId);
     db.prepare("DELETE FROM images WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM bots WHERE user_id = ?").run(userId);
@@ -20000,6 +20022,109 @@ function buildRoutes(): RouteDefinition[] {
       );
       ctx.res.setHeader("cache-control", "private, no-store");
       json(ctx.res, 201, { ok: true, image: saved });
+    }),
+    route("GET", "/api/debates/mystery-cases", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        cases: listPortableCaseLibraryV1(db, decryptUserKey(userId), userId),
+      });
+    }),
+    route("POST", "/api/debates/mystery-cases/inspect", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        const envelope = portableCaseArchivePayload(ctx.body);
+        const header = inspectPortableCasePackageV1(envelope);
+        if (header.encryptionMode === "password" && !portableMansionPassword(ctx)) {
+          json(ctx.res, 200, { ok: true, locked: true, header });
+          return;
+        }
+        const preview = previewPortableCasePackageV1({
+          db,
+          userId,
+          envelope,
+          password: portableMansionPassword(ctx),
+        });
+        json(ctx.res, 200, { ok: true, preview: { header, ...preview } });
+      } catch (error) {
+        rethrowPortableMansionError(error);
+      }
+    }),
+    route("POST", "/api/debates/mystery-cases/import", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        const installedCase = importPortableCasePackageV1({
+          db,
+          userKey: decryptUserKey(userId),
+          userId,
+          envelope: portableCaseArchivePayload(ctx.body),
+          password: portableMansionPassword(ctx),
+        });
+        json(ctx.res, 201, { ok: true, case: installedCase });
+      } catch (error) {
+        rethrowPortableMansionError(error);
+      }
+    }),
+    route("DELETE", "/api/debates/mystery-cases/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      deletePortableCaseLibraryV1(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true });
+    }),
+    route("POST", "/api/debates/mystery-cases/:id/assemble", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (typeof body.mansionBundleId !== "string" || !body.mansionBundleId.trim()) {
+        throw new HttpError(400, "Choose a mansion for this case.");
+      }
+      if (typeof body.idempotencyKey !== "string" || !body.idempotencyKey.trim()) {
+        throw new HttpError(400, "A stable assembly key is required.");
+      }
+      try {
+        const assembled = assemblePortableCasePackageV1({
+          db,
+          userKey: decryptUserKey(userId),
+          userId,
+          caseId: ctx.params.id,
+          mansionBundleId: body.mansionBundleId,
+          idempotencyKey: body.idempotencyKey,
+        });
+        json(ctx.res, 201, {
+          ok: true,
+          session: debateSessionForPlayer(getDebateSession(db, userId, assembled.sessionId)),
+          mansionBundleId: assembled.mansionBundleId,
+        });
+      } catch (error) {
+        rethrowPortableMansionError(error);
+      }
+    }),
+    route("POST", "/api/debates/:id/mystery-case/export", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      try {
+        const session = getDebateSession(db, userId, ctx.params.id);
+        const envelope = exportPortableCasePackageV1({
+          db,
+          userId,
+          sessionId: session.id,
+          prismVersion: process.env.npm_package_version ?? "0.15.1",
+          creatorName: typeof body.creatorName === "string" ? body.creatorName : undefined,
+          mode: body.mode === "password" ? "password" : "spoiler_seal",
+          password: typeof body.password === "string" ? body.password : undefined,
+        });
+        const title = session.formatState.format === "whodunnit"
+          ? session.formatState.caseTitle ?? "PRISM-Case"
+          : "PRISM-Case";
+        const filename = `${title}.case`.replace(/[^a-zA-Z0-9._ -]/gu, "-");
+        ctx.res.statusCode = 200;
+        ctx.res.setHeader("content-type", PORTABLE_CASE_PACKAGE_MIME_V1);
+        ctx.res.setHeader("content-length", String(envelope.byteLength));
+        ctx.res.setHeader("content-disposition", `attachment; filename="${filename}"`);
+        ctx.res.setHeader("cache-control", "private, no-store");
+        ctx.res.setHeader("x-content-type-options", "nosniff");
+        ctx.res.end(envelope);
+      } catch (error) {
+        rethrowPortableMansionError(error);
+      }
     }),
     route("GET", "/api/debates/mystery-mansions", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -39406,7 +39531,7 @@ async function dispatchRequest(
       /^\/api\/replays\/[^/]+\/studio-cut\/mix\/audio-chunk$/u.test(pathname);
     const portableMansionUpload =
       method === "POST" &&
-      /^\/api\/debates\/(?:mystery-mansions|whodunnit-packages)\/(?:inspect|import)$/u.test(pathname);
+      /^\/api\/debates\/(?:mystery-mansions|mystery-cases|whodunnit-packages)\/(?:inspect|import)$/u.test(pathname);
     const body =
       method === "POST" ||
       method === "PUT" ||

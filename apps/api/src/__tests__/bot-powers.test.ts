@@ -794,7 +794,7 @@ test("Identity Crisis deterministically compiles a knowing presentation masquera
   );
   assert.match(
     result.powers[0]?.compiled?.observerCue ?? "",
-    /knowingly wears.*effective public name.*keeps their own persona, behavior, knowledge, convictions.*complete frozen voice and exact Accent Map.*copying the target's eligible public Power mechanics and consequences.*never copies recursively/iu,
+    /presents as The real <effective target name>.*keeps their own persona, behavior, knowledge, convictions.*complete frozen voice and exact Accent Map.*Identity Crisis never copies recursively/iu,
   );
 });
 
@@ -834,6 +834,14 @@ test("Shapeshifter deterministically compiles sticky Library/Marketplace identit
   ]);
   assert.match(result.powers[0]?.compiled?.selfCue ?? "", /Library bot/iu);
   assert.match(result.powers[0]?.compiled?.selfCue ?? "", /amnesia/iu);
+  assert.match(
+    result.powers[0]?.compiled?.selfCue ?? "",
+    /literally double-quoted public name/iu,
+  );
+  assert.match(
+    result.powers[0]?.compiled?.selfCue ?? "",
+    /Keep the holder's actual voice identity.*overlay only the target Accent Map/iu,
+  );
   assert.match(result.powers[0]?.compiled?.observerCue ?? "", /Library bot/iu);
 });
 

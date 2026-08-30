@@ -11,6 +11,7 @@ import {
   SIGNAL_STUDIO_VOICE_MAX_PAN,
   signalStudioFloorGlowHandleStyle,
   signalStudioMaskedFloorGlowStyle,
+  signalStudioNameplateSide,
   signalStudioOverscanCoordinate,
   signalStudioPlacementStyle,
   signalStudioSeatColorOrder,
@@ -97,6 +98,23 @@ describe("Signal studio placement parity", () => {
       ),
       { leftColor: "guest-orange", rightColor: "host-blue" },
     );
+  });
+
+  it("keeps each nameplate with its occupant when seats are swapped", () => {
+    assert.equal(
+      signalStudioNameplateSide(BOTCAST_DEFAULT_STUDIO_LAYOUT, "host"),
+      "left",
+    );
+    assert.equal(
+      signalStudioNameplateSide(BOTCAST_DEFAULT_STUDIO_LAYOUT, "guest"),
+      "right",
+    );
+
+    const swapped = swapBotcastStudioLayoutSeats(
+      BOTCAST_DEFAULT_STUDIO_LAYOUT,
+    );
+    assert.equal(signalStudioNameplateSide(swapped, "host"), "right");
+    assert.equal(signalStudioNameplateSide(swapped, "guest"), "left");
   });
 
   it("stages voices subtly from their saved seats", () => {

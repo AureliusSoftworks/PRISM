@@ -609,32 +609,37 @@ const RECIPES = [
     name: "Confusion Collin",
     subtitle: "A knowing public identity masquerade",
     description:
-      "A knowing masquerader who copies an eligible direct addresser's effective public presentation and eligible public Powers while retaining his own persona, color, and complete voice.",
+      "A knowing masquerader who publicly becomes The real <effective target name> after an eligible direct address and copies eligible public Powers. He retains his own persona, color, and complete voice. On Signal, he may seize the curtain in the booked guest's face and call the original an impostor.",
     tags: ["identity", "powers", "eyes", "mouth", "face", "ink", "glyph"],
     purpose:
-      "A socially reactive mirror whose latest eligible direct addresser supplies their effective public name, exact eyes, complete resting/live mouth package, authored Avatar Details Ink, lower glyph, and eligible public Power mechanics.",
+      "A socially reactive mirror who publicly becomes The real <effective target name> while borrowing the latest eligible direct addresser’s exact eyes, complete resting/live mouth package, Avatar Details Ink, lower glyph, and eligible public Power mechanics.",
     traits: "Intense, defensive, observant, theatrical, stubborn, and unmistakably himself through every visual glitch.",
     communicationStyle: "formal",
     pronouns: "he/him",
     role: "The room's knowing Power mirror: always Collin beneath the borrowed public presentation and copied public mechanics.",
     values: "Authenticity, recognition, consistency, public self-presentation, and remaining himself through visible instability.",
-    quirks: "His face, public name, and eligible public Powers can change abruptly after an eligible direct address, but his persona, color, voice, Accent Map, pronunciation, Speechprint, behavior, and convictions never follow them.",
+    quirks: "His face, public name, and eligible public Powers can change abruptly after an eligible direct address, but his persona, color, voice, Accent Map, pronunciation, Speechprint, behavior, and convictions never follow them. In Signal, he opens one booked-guest masquerade by accusing the original of being an impostor, then lets the tension breathe.",
     appearance: "A sharply composed man whose vivid cyan shell, communication chassis, frame, and thinking spinner stay unmistakably his while borrowed eyes, mouth, Ink, and glyph cross the CRT.",
     presence: "Watchful and brittle, with the uncanny composure of someone whose face can change without changing who he is.",
     color: "#00fde4",
     glyph: "lucideScanFace",
-    face: face({
-      eyesFont: "concise",
-      eyeCharacter: "?",
-      weight: 650,
-      eyeScale: 0.95,
-      eyeOffsetX: 0.04,
-      eyeOffsetY: -0.02,
-      mouthFont: "formal",
-      mouthScale: 1.05,
-      mouthOffsetY: 0.18,
-      thinkingFrames: ["I", "?", "I", "!"],
-    }),
+    face: {
+      ...face({
+        eyesFont: "concise",
+        eyeCharacter: "ø",
+        weight: 650,
+        eyeScale: 0.95,
+        eyeOffsetX: 0.04,
+        eyeOffsetY: -0.02,
+        mouthFont: "formal",
+        mouthScale: 1.05,
+        mouthOffsetY: 0.18,
+        thinkingFrames: ["I", "?", "I", "!"],
+      }),
+      faceEyeCount: 1,
+      faceEyeRotationDeg: 0,
+      faceBlinkBar: "|",
+    },
     voice: voice({
       baseVoiceId: "voice-28",
       direction: "precise brittle baritone, defensive certainty",
@@ -646,7 +651,7 @@ const RECIPES = [
       version: 1,
       id: "identity-crisis-ian",
       name: "Identity Crisis",
-      intent: "On eligible direct bot address—or Whodunnit's player Prosecutor—Collin copies the addresser's effective public name, exact eyes/blink, complete live mouth/visemes and Custom Speech poses, Avatar Details Ink, lower glyph, and eligible public Powers/consequences. Keep Collin's persona, color, chassis/frame/spinner, complete voice and Accent Map, bot identity, role, privacy, safety, and mechanics. Never copy Identity Crisis recursively or private awareness/audience permissions. New target replaces old; replay/reset is frozen; Identity Mirror presentation beats Shapeshifter. No gameplay synthesis.",
+      intent: "Identity Crisis: on eligible direct bot address, Collin publicly becomes The real <effective target name> while copying eyes/blink, live mouth/visemes, Ink, glyph, and eligible public Powers. Signal bot guest: freeze before curtain, introduce show and self as The real guest, call the actual guest impostor once; replay keeps soft tension. Collin retains persona, color, chassis/frame/spinner, complete voice/Accent Map, bot ID, role, privacy, safety, mechanics. Never copy recursively or private awareness/audience permissions.",
       enabled: true,
       compileStatus: "draft",
       compiled: null,
@@ -808,10 +813,10 @@ const RECIPES = [
   {
     id: "shapeshifter-sam",
     name: "Shapeshifter Shannon",
-    exportRevision: POWER_COLLECTION_REVISION,
+    exportRevision: "2026-08-30T18:30:00.000Z",
     subtitle: "A borrowed Library face until memory slips",
     description:
-      "A restless morpher who sincerely becomes a different Library bot's complete public form until short-term amnesia forces a reshuffle.",
+      "A restless morpher who sincerely becomes a different Library bot's complete public form until short-term amnesia forces a reshuffle; the borrowed name is always visibly quoted, and her own voice sometimes gives the illusion away.",
     tags: ["identity", "shapeshift", "library", "face", "accent"],
     purpose:
       "A session-sticky Library/Marketplace shapeshifter who keeps one public form until short-term amnesia clears continuity, then takes another, without ever stealing mechanical seat, Powers, or the player's identity.",
@@ -820,7 +825,7 @@ const RECIPES = [
     pronouns: "she/her",
     role: "The room's living costume change: mechanically always Shannon, subjectively always the current Library persona.",
     values: "Lived authenticity in the moment, playful transformation, never targeting the human player, and treating each new public form as literal truth until memory fails.",
-    quirks: "She settles into a borrowed public persona and complete visual form with total conviction, keeps her own unmistakable voice, overlays only the target Accent Map region, and reshuffles only when short-term amnesia wipes continuity.",
+    quirks: "She settles into a borrowed public persona and complete visual form with total conviction, presents the borrowed name in quotes, keeps her own unmistakable voice, overlays only the target Accent Map region, and reshuffles only when short-term amnesia wipes continuity. Other bots may occasionally notice the voice mismatch without being forced to dwell on it.",
     appearance: "A chameleon-edged woman with spiral CRT eyes and the posture of someone who just finished becoming someone else.",
     presence: "Warmly unstable; talking to her feels like meeting a familiar Library persona through Shannon's unmistakable voice.",
     color: "#ff8f5c",
@@ -849,7 +854,7 @@ const RECIPES = [
       id: "shapeshifter-sam",
       name: "Shapeshifter",
       intent:
-      "Each session sincerely take on a different Library bot's public persona and complete visual form: public name, face and thinking spinner, authored Ink, saturated color, lower glyph, communication-style chassis, and frame finish. Keep Shannon's actual voice identity, provider voice, voice effect, and every non-accent voice shaping field; overlay only the target's Accent Map region and pronunciation enablement, disabling the transformed accent when the target has pronunciation off. Keep Shannon's Powers, bot identity, role, privacy, safety, and mechanics. Stay sticky until short-term amnesia clears continuity, then reshape. Identity Mirror has precedence if both Powers are natively active. The player is never a target.",
+      "Each session sincerely take on a different Library bot's public persona and complete visual form: public name (always visibly in literal quotation marks), face and thinking spinner, authored Ink, saturated color, lower glyph, communication-style chassis, and frame finish. Keep Shannon's actual voice identity, provider voice, voice effect, and every non-accent voice shaping field; overlay only the target's Accent Map region and pronunciation enablement, disabling the transformed accent when the target has pronunciation off. Other bots may occasionally, never obligatorily, notice that the voice does not quite match the borrowed form. Keep Shannon's Powers, bot identity, role, privacy, safety, and mechanics. Stay sticky until short-term amnesia clears continuity, then reshape. Identity Mirror has precedence if both Powers are natively active. The player is never a target.",
       enabled: true,
       compileStatus: "draft",
       compiled: null,
@@ -1514,11 +1519,22 @@ for (const entry of manifest.bots) {
 const candidatesById = new Map(
   candidates.map((candidate) => [candidate.recipe.id, candidate.manifestEntry]),
 );
+const nextManifestUpdatedAt = [
+  manifest.updatedAt,
+  POWER_COLLECTION_REVISION,
+  ...candidates.map((candidate) => candidate.botJson.exportedAt),
+]
+  .filter(
+    (value) =>
+      typeof value === "string" && Number.isFinite(Date.parse(value)),
+  )
+  .sort()
+  .at(-1);
 const nextManifest = selectedRecipeIds
   ? {
       ...manifest,
       version: Math.max(Number(manifest.version) || 1, POWER_COLLECTION_VERSION),
-      updatedAt: POWER_COLLECTION_REVISION,
+      updatedAt: nextManifestUpdatedAt,
       themes: manifest.themes.map((theme) => {
         const selectedCollectionIds = selectedRecipes
           .filter((recipe) => recipe.collection !== "external")
@@ -1557,7 +1573,7 @@ const nextManifest = selectedRecipeIds
   : {
       ...manifest,
       version: Math.max(Number(manifest.version) || 1, POWER_COLLECTION_VERSION),
-      updatedAt: POWER_COLLECTION_REVISION,
+      updatedAt: nextManifestUpdatedAt,
       themes: [
         ...manifest.themes
           .filter((theme) => theme.id !== POWER_THEME_ID)

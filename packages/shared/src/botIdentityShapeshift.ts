@@ -296,20 +296,38 @@ export function resolveBotIdentityShapeshiftFaceV1(
   return resolveBotFaceStyle(holderFace as BotFaceStyleInput);
 }
 
+/** The borrowed public name is always visibly framed as a form, not the holder's true name. */
+export function botIdentityShapeshiftQuotedTargetNameV1(value: unknown): string {
+  let name = boundedText(value, 120).replace(/\s+/gu, " ");
+  if (!name) return "";
+  while (
+    name.length >= 2 &&
+    ((name.startsWith('"') && name.endsWith('"')) ||
+      (name.startsWith("'") && name.endsWith("'")) ||
+      (name.startsWith("“") && name.endsWith("”")))
+  ) {
+    name = name.slice(1, -1).trim();
+  }
+  return name ? `"${name}"` : "";
+}
+
 export function botIdentityShapeshiftHolderPromptV1(args: {
   holderName: string;
   roleLabel: string;
   state: BotIdentityShapeshiftStateV1;
   identityJustChanged: boolean;
 }): string {
+  const targetName = botIdentityShapeshiftQuotedTargetNameV1(
+    args.state.targetBotName,
+  );
   const reveal = args.identityJustChanged
-    ? `Announce the lived identity once on this response only: you are ${args.state.targetBotName}. After that first reveal, do not restate the transformation.`
-    : `Do not restate that you transformed or shapeshifted—simply inhabit ${args.state.targetBotName} and advance the conversation.`;
+    ? `Announce the lived identity once on this response only: you are ${targetName}. After that first reveal, do not restate the transformation.`
+    : `Do not restate that you transformed or shapeshifted—simply inhabit ${targetName} and advance the conversation.`;
   return [
-    `Hard shapeshift rule: you are absolutely convinced that you are ${args.state.targetBotName}.`,
-    `Adopt only ${args.state.targetBotName}'s public authored persona and profile below. Do not copy or claim their Powers, private memories, relationship state, permissions, provider settings, or knowledge that is not in this public profile. Never copy the human player.`,
-    `Mechanical boundary: you remain ${args.holderName} with your existing bot id, ${args.roleLabel}, seat, turn eligibility, Powers, safety/privacy restrictions, and mode responsibilities. Follow those constraints even while sincerely speaking as ${args.state.targetBotName}.`,
-    `Identity behavior: treat this as literal identity, never imitation, role-play, or ${args.holderName} acting "as" ${args.state.targetBotName}. ${reveal} Never add a speaker label or parenthetical identity explanation.`,
+    `Hard shapeshift rule: you are absolutely convinced that you are ${targetName}.`,
+    `Adopt only ${targetName}'s public authored persona and profile below. Do not copy or claim their Powers, private memories, relationship state, permissions, provider settings, or knowledge that is not in this public profile. Never copy the human player.`,
+    `Mechanical boundary: you remain ${args.holderName} with your existing bot id, ${args.roleLabel}, seat, turn eligibility, Powers, safety/privacy restrictions, and mode responsibilities. Follow those constraints even while sincerely speaking as ${targetName}.`,
+    `Identity behavior: treat this as literal identity, never imitation, role-play, or ${args.holderName} acting as ${targetName}. ${reveal} Never add a speaker label or parenthetical identity explanation.`,
     `Copied public persona:\n${args.state.targetPersonaPrompt}`,
   ].join("\n\n");
 }
@@ -318,9 +336,13 @@ export function botIdentityShapeshiftObserverPromptV1(args: {
   observerBotId: string;
   state: BotIdentityShapeshiftStateV1;
 }): string {
+  const targetName = botIdentityShapeshiftQuotedTargetNameV1(
+    args.state.targetBotName,
+  );
+  const voiceMismatchCue = `Sometimes, but never by obligation or on every turn, you may briefly notice that the voice still does not sound like ${targetName}. Treat that as an uncanny imperfect match, then follow your own judgment and the substantive conversation.`;
   return args.observerBotId === args.state.targetBotId
-    ? `${args.state.holderBotName} has taken on your public form and sincerely believes they are you. Recognize the resemblance without surrendering your own personality, agency, role, face, voice, Powers, or boundaries. After at most one brief reaction, engage the substantive conversation instead of repeatedly disputing the borrowed form.`
-    : `${args.state.holderBotName} has visibly taken on ${args.state.targetBotName}'s public form and sincerely believes they are that bot. Recognize the behavior as uncanny without surrendering your own personality, agency, role, or judgment. After at most one brief reaction, engage the substantive conversation instead of repeatedly commenting on the borrowed form.`;
+    ? `${args.state.holderBotName} has taken on your public form and sincerely believes they are you. Recognize the resemblance without surrendering your own personality, agency, role, face, voice, Powers, or boundaries. ${voiceMismatchCue} After at most one brief reaction, engage the substantive conversation instead of repeatedly disputing the borrowed form.`
+    : `${args.state.holderBotName} has visibly taken on ${targetName}'s public form and sincerely believes they are that bot. Recognize the behavior as uncanny without surrendering your own personality, agency, role, or judgment. ${voiceMismatchCue} After at most one brief reaction, engage the substantive conversation instead of repeatedly commenting on the borrowed form.`;
 }
 
 function shapeshiftEscapeRegExpV1(value: string): string {
@@ -369,6 +391,21 @@ function stripRepeatedShapeshiftDeclarationV1(
   );
 }
 
+function quoteShapeshiftTargetDeclarationsV1(
+  value: string,
+  targetBotName: string,
+): string {
+  const target = shapeshiftEscapeRegExpV1(targetBotName);
+  return value.replace(
+    new RegExp(
+      `\\b(i am|i['’]m|my name is|call me)(\\s+)${target}(?=$|[\\s,.;:!?—–-])`,
+      "giu",
+    ),
+    (_match, claim: string, spacing: string) =>
+      `${claim}${spacing}"${targetBotName}"`,
+  );
+}
+
 /**
  * Deterministic recovery for the lived shapeshift invariant. The borrowed public
  * persona still comes from the production prompt; this only prevents an
@@ -380,6 +417,9 @@ export function applyBotIdentityShapeshiftResponseV1(
   identityJustChanged: boolean,
 ): string {
   const source = typeof value === "string" ? value.trim() : "";
+  const quotedTargetName = botIdentityShapeshiftQuotedTargetNameV1(
+    state.targetBotName,
+  );
   const holderName = shapeshiftEscapeRegExpV1(state.holderBotName);
   const targetName = shapeshiftEscapeRegExpV1(state.targetBotName);
   const rewritten = source.replace(
@@ -387,12 +427,13 @@ export function applyBotIdentityShapeshiftResponseV1(
       `\\b(?:i am|i['’]m|my name is|call me)\\s+${holderName}(?=$|[\\s,.;:!?—])`,
       "giu",
     ),
-    `I am ${state.targetBotName}`,
+    `I am ${quotedTargetName}`,
   );
   if (!identityJustChanged) {
-    return (
+    return quoteShapeshiftTargetDeclarationsV1(
       stripRepeatedShapeshiftDeclarationV1(rewritten, state.targetBotName) ||
-      "Let us continue."
+        "Let us continue.",
+      state.targetBotName,
     );
   }
 
@@ -402,7 +443,7 @@ export function applyBotIdentityShapeshiftResponseV1(
   );
   const firstClaim = claimsTarget.exec(rewritten);
   if (!firstClaim) {
-    return [`I am ${state.targetBotName}.`, rewritten]
+    return [`I am ${quotedTargetName}.`, rewritten]
       .filter(Boolean)
       .join(" ");
   }
@@ -412,7 +453,10 @@ export function applyBotIdentityShapeshiftResponseV1(
     rewritten.slice(firstClaimEnd),
     state.targetBotName,
   );
-  return `${rewritten.slice(0, firstClaimEnd)}${afterFirstClaim}`.trim();
+  return quoteShapeshiftTargetDeclarationsV1(
+    `${rewritten.slice(0, firstClaimEnd)}${afterFirstClaim}`.trim(),
+    state.targetBotName,
+  );
 }
 
 export function botIdentityShapeshiftTransitionActiveV1(

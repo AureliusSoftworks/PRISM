@@ -432,6 +432,21 @@
   background-size: cover;
 }
 
+.titleCard[data-first-person-exterior="true"] {
+  padding: 0;
+  background-image: var(--mansion-exterior-image);
+}
+
+.titleCard[data-exterior-entering="true"]::after {
+  position: absolute;
+  z-index: 8;
+  inset: 0;
+  content: "";
+  background: #000;
+  pointer-events: none;
+  animation: exteriorThresholdFade 1.2s ease-in both;
+}
+
 .titleCardContent {
   position: relative;
   z-index: 1;
@@ -494,27 +509,6 @@
   pointer-events: none;
 }
 .mysteryPlayerOrbGlyph { width: 1.35rem; height: 1.35rem; }
-
-.titlePlayerOrb {
-  position: absolute;
-  z-index: 7;
-  top: 82%;
-  left: 50%;
-  width: clamp(2.7rem, 4.2vw, 3.8rem);
-  opacity: 1;
-  transform: translate(-50%, -50%) scale(1);
-  transition:
-    top 1.2s cubic-bezier(.3, .72, .24, 1),
-    left 1.2s cubic-bezier(.3, .72, .24, 1),
-    opacity 1.2s ease,
-    transform 1.2s cubic-bezier(.3, .72, .24, 1);
-}
-.titleCard[data-exterior-entering="true"] .titlePlayerOrb {
-  top: var(--mansion-door-y);
-  left: var(--mansion-door-x);
-  opacity: 0.22;
-  transform: translate(-50%, -50%) scale(0.42);
-}
 
 .caseOpening {
   position: relative;
@@ -630,26 +624,62 @@
   z-index: 2;
   top: var(--mansion-door-y, 54%);
   left: var(--mansion-door-x, 53%);
-  width: clamp(7rem, 14vmin, 12rem);
+  width: clamp(9rem, 18vmin, 15rem);
   aspect-ratio: 1;
   padding: 0;
   border: 0;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.08), rgba(214, 187, 255, 0.025) 46%, transparent 72%);
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.2), rgba(126, 220, 255, 0.09) 28%, rgba(196, 142, 255, 0.045) 52%, transparent 74%);
   cursor: pointer;
   transform: translate(-50%, -50%);
   transition: filter 220ms ease, opacity 220ms ease, transform 220ms ease;
   animation: titleDoorArrival 720ms cubic-bezier(.2, .78, .2, 1) 380ms both;
 }
+.titleDoor::before {
+  position: absolute;
+  inset: 9%;
+  content: "";
+  border: 1px solid rgba(181, 232, 255, 0.5);
+  border-radius: 50%;
+  box-shadow:
+    inset 0 0 2rem rgba(185, 221, 255, 0.12),
+    0 0 2.2rem rgba(126, 220, 255, 0.28),
+    0 0 4.5rem rgba(177, 126, 255, 0.2);
+  animation: titleDoorBeacon 2.4s ease-in-out infinite;
+}
 .titleDoorFocus {
   position: absolute;
-  inset: 31%;
-  border: 1px solid rgba(255, 255, 255, 0.32);
+  inset: 24%;
+  display: grid;
+  place-items: center;
+  border: 2px solid rgba(238, 248, 255, 0.72);
   border-radius: 50%;
-  box-shadow: inset 0 0 1.6rem rgba(255, 255, 255, 0.08), 0 0 2rem rgba(221, 199, 255, 0.18);
-  opacity: 0.72;
+  background: radial-gradient(circle, rgba(221, 246, 255, 0.2), rgba(164, 132, 255, 0.08) 54%, transparent 72%);
+  box-shadow: inset 0 0 1.6rem rgba(255, 255, 255, 0.12), 0 0 2.4rem rgba(173, 225, 255, 0.42);
+  opacity: 0.9;
   transition: border-color 220ms ease, box-shadow 220ms ease, opacity 220ms ease, transform 220ms ease;
   animation: titleDoorBreath 3.2s ease-in-out infinite;
+}
+.titleDoorMark {
+  position: relative;
+  display: block;
+  width: 1.05rem;
+  height: 1.45rem;
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  border-radius: 0.52rem 0.52rem 0.18rem 0.18rem;
+  box-shadow: 0 0 0.8rem rgba(211, 242, 255, 0.78), 0 0 1.7rem rgba(183, 139, 255, 0.5);
+}
+.titleDoorMark::after {
+  position: absolute;
+  top: 52%;
+  right: 0.16rem;
+  width: 0.18rem;
+  aspect-ratio: 1;
+  content: "";
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0.45rem #fff;
 }
 .titleDoor:hover:not(:disabled),
 .titleDoor:focus-visible {
@@ -664,25 +694,10 @@
   opacity: 1;
   transform: scale(0.9);
 }
-.titleDoorHint {
-  position: absolute;
-  z-index: 3;
-  right: 1.5rem;
-  bottom: max(1.5rem, env(safe-area-inset-bottom));
-  left: 1.5rem;
-  margin: 0;
-  color: rgba(247, 244, 255, 0.82);
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-align: center;
-  text-shadow: 0 2px 18px #000;
-  text-transform: uppercase;
-  pointer-events: none;
-}
-.titleDoorHint span { color: rgba(247, 244, 255, 0.46); font-weight: 600; }
 @keyframes titleDoorArrival { from { opacity: 0; transform: translate(-50%, -42%) scale(0.96); } to { opacity: 1; transform: translate(-50%, -50%); } }
 @keyframes titleDoorBreath { 0%, 100% { opacity: 0.55; transform: scale(0.96); } 50% { opacity: 0.9; transform: scale(1.04); } }
+@keyframes titleDoorBeacon { 0%, 100% { opacity: 0.62; transform: scale(0.96); } 50% { opacity: 1; transform: scale(1.04); } }
+@keyframes exteriorThresholdFade { from { opacity: 0; } to { opacity: 1; } }
 
 .investigation,
 .court { position: relative; overflow: hidden; }
@@ -697,9 +712,24 @@
   animation: caseOpeningReveal 780ms cubic-bezier(.2, .78, .2, 1) both;
 }
 
+.investigation[data-exterior-room-reveal="true"]::after {
+  position: absolute;
+  z-index: 30;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  background: #000;
+  animation: exteriorRoomReveal 1.85s cubic-bezier(.16, .74, .2, 1) both;
+}
+
 @keyframes caseOpeningReveal {
   from { opacity: 1; }
   to { opacity: 0; }
+}
+
+@keyframes exteriorRoomReveal {
+  0%, 12% { opacity: 1; }
+  100% { opacity: 0; }
 }
 
 .investigationHeader,
@@ -849,6 +879,32 @@
   perspective: 1100px;
 }
 
+.mansionOutsideTravelTarget {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.mansionOutsideTravelTarget:focus-visible {
+  outline: 2px solid rgba(102, 229, 234, 0.76);
+  outline-offset: -0.45rem;
+}
+.mansionOutsideTravelTarget[data-selected="true"] {
+  background:
+    radial-gradient(ellipse at 50% 50%, transparent 42%, rgba(102, 229, 234, 0.1) 70%, rgba(169, 140, 255, 0.17));
+  box-shadow:
+    inset 0 0 0 2px rgba(102, 229, 234, 0.72),
+    inset 0 0 4rem rgba(102, 229, 234, 0.12),
+    0 0 2rem rgba(102, 229, 234, 0.12);
+}
+.mansionOutsideTravelTarget:disabled { cursor: default; }
+
 .mansionCanvas {
   position: absolute;
   z-index: 2;
@@ -866,6 +922,7 @@
   transform: rotateX(3deg) rotateZ(-0.55deg) scale(0.965);
   transform-style: preserve-3d;
   animation: mansionArrival 360ms cubic-bezier(.2, .78, .2, 1) both;
+  pointer-events: none;
 }
 
 @keyframes mansionArrival {
@@ -894,6 +951,7 @@
     0.35rem 0.42rem 0 rgba(4, 5, 9, 0.76),
     0.6rem 0.8rem 1.25rem rgba(0, 0, 0, 0.34);
   cursor: pointer;
+  pointer-events: auto;
   transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
 }
 .mansionCorridor {
@@ -996,6 +1054,7 @@
   border: 0;
   background: transparent;
   cursor: pointer;
+  pointer-events: auto;
 }
 .mansionTravelSkip span {
   padding: 0.4rem 0.65rem;
@@ -1024,6 +1083,10 @@
   border-radius: 0.8rem;
   background: rgba(7, 9, 15, 0.78);
   backdrop-filter: blur(16px);
+}
+.mansionRoomDetails[data-outside="true"] {
+  border-color: rgba(102, 229, 234, 0.34);
+  background: linear-gradient(135deg, rgba(102, 229, 234, 0.08), rgba(169, 140, 255, 0.08));
 }
 .mansionRoomDetails > div { display: grid; gap: 0.08rem; }
 .mansionRoomDetails > div small, .mansionRoomDetails > div span, .mansionRoomDetails dt { color: var(--mystery-muted); font-size: 0.65rem; letter-spacing: 0.05em; text-transform: uppercase; }
@@ -1485,7 +1548,6 @@
 .fileChargesButton:focus-visible { outline: 2px solid #f4edff; outline-offset: 3px; }
 .investigationCommands button:disabled,
 .courtActions button:disabled { filter: saturate(0.25); opacity: 0.42; transform: none; }
-.sweepHint { position: fixed; z-index: 14; left: 50%; bottom: 8.35rem; width: min(29rem, calc(100vw - 2rem)); padding: 0.45rem 0.7rem; color: #d9d0e7; border: 1px solid rgba(176, 142, 255, 0.28); border-radius: 0.55rem; background: rgba(8, 10, 19, 0.88); font-size: 0.72rem; text-align: center; transform: translateX(-50%); backdrop-filter: blur(14px); }
 
 .choiceTray {
   position: fixed;
@@ -2081,7 +2143,6 @@
   .roomProsecutorCue { left: 0.5rem; bottom: 11.8rem; width: 6.5rem; }
   .dialogueBox { bottom: 7rem; }
   .investigation:has(.fileChargesButton) .dialogueBox { bottom: 10.45rem; }
-  .sweepHint { bottom: 7.1rem; }
   .testimony { bottom: 7.1rem; }
   .theoryHint { display: none; }
   .fileChargesButton { right: 0.7rem; bottom: 6.9rem; }
@@ -2157,8 +2218,9 @@
   .forgeCaseIdentity h1 { animation: none; }
   .titleCardContent { animation: none; }
   .titleDoor,
+  .titleDoor::before,
   .titleDoorFocus { animation: none; }
-  .titlePlayerOrb { transition: none; }
+  .titleCard[data-exterior-entering="true"]::after { animation: none; opacity: 1; }
   .mansionCanvas { animation: none; }
   .mansionRoom { transition: none; }
   .forgePrism i,
@@ -2169,6 +2231,9 @@
   .choiceTray,
   .caseFile,
   .theoryBoard { animation: none; }
+  .investigation[data-exterior-room-reveal="true"]::after {
+    animation: exteriorRoomReveal 320ms ease-out both;
+  }
   .callout { inset: 42% 0 auto; animation: calloutStaticLife 1.65s step-end both; }
   .callout span { animation: none; }
   .courtBackdrop { animation: none; }

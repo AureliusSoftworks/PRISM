@@ -31,51 +31,6 @@ export const WHODUNNIT_TITLE_CARD_MUSIC_MIX = {
   background: 0.075,
 } as const satisfies SessionAtmosphereMix;
 
-export type MysteryInvestigationMusicProgramPhaseV1 = "cell" | "rest" | "accent";
-
-export interface MysteryInvestigationMusicProgramV1 {
-  phase: MysteryInvestigationMusicProgramPhaseV1;
-  audible: boolean;
-  cellDurationMs: number;
-  restDurationMs: number;
-  positionMs: number;
-}
-
-function musicProgramHash(value: string): number {
-  let hash = 2_166_136_261;
-  for (const character of value) {
-    hash ^= character.codePointAt(0) ?? 0;
-    hash = Math.imul(hash, 16_777_619);
-  }
-  return hash >>> 0;
-}
-
-/**
- * The track itself keeps advancing under silence, so each return reveals a
- * different musical region instead of restarting the same opening bar.
- */
-export function mysteryInvestigationMusicProgramV1(args: {
-  seed: string;
-  elapsedMs: number;
-  accentActive?: boolean;
-}): MysteryInvestigationMusicProgramV1 {
-  const cellDurationMs = 8_000 + musicProgramHash(`${args.seed}:cell`) % 8_001;
-  const restDurationMs = 45_000 + musicProgramHash(`${args.seed}:rest`) % 40_001;
-  const cycleMs = cellDurationMs + restDurationMs;
-  const positionMs = Math.max(0, Math.floor(args.elapsedMs)) % cycleMs;
-  if (args.accentActive) {
-    return { phase: "accent", audible: true, cellDurationMs, restDurationMs, positionMs };
-  }
-  const audible = positionMs < cellDurationMs;
-  return {
-    phase: audible ? "cell" : "rest",
-    audible,
-    cellDurationMs,
-    restDurationMs,
-    positionMs,
-  };
-}
-
 export function mysteryInvestigationMusicSessionActive(
   playPhase: DebateMysteryPlayPhase,
 ): boolean {
@@ -97,21 +52,16 @@ export function mysteryCasePreludeMusicMix(
 }
 
 export function mysteryInvestigationMusicMix(args: {
-  theoryBoardOpen: boolean;
-  roomIntroductionActive?: boolean;
-  roomComplete?: boolean;
-  programAudible?: boolean;
-  accentActive?: boolean;
+  caseFileOpen: boolean;
+  outside: boolean;
+  roomComplete: boolean;
+  roomIntroductionActive: boolean;
+  roomView: "mansion" | "room";
 }): SessionAtmosphereMix {
-  if (
-    args.theoryBoardOpen ||
-    args.roomIntroductionActive ||
-    args.roomComplete ||
-    args.programAudible === false
-  ) {
-    return WHODUNNIT_INVESTIGATION_MUSIC_SILENT_MIX;
-  }
-  return args.accentActive
-    ? { ...WHODUNNIT_INVESTIGATION_MUSIC_MIX, background: 0.09 }
+  return args.outside ||
+    args.caseFileOpen ||
+    (args.roomView === "room" &&
+      (args.roomIntroductionActive || args.roomComplete))
+    ? WHODUNNIT_INVESTIGATION_MUSIC_SILENT_MIX
     : WHODUNNIT_INVESTIGATION_MUSIC_MIX;
 }

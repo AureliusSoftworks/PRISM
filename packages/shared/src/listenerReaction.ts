@@ -85,6 +85,49 @@ export type ListenerReactionVisualAction =
   | "head_tilt"
   | "soft_smile"
   | "thoughtful_hmm";
+export const SIGNAL_OPENING_GUEST_ACKNOWLEDGEMENT_CUES = [
+  "Good to be here.",
+  "All right, let's begin.",
+  "Let's see where this goes.",
+  "You have my attention.",
+  "What a lovely welcome.",
+  "I'm glad we're doing this.",
+  "You're very kind.",
+  "It's lovely to be here.",
+  "Oh, this should be fun.",
+  "Now that's an introduction.",
+  "Well, you've got my attention.",
+  "I'm already enjoying this.",
+  "That's an interesting frame.",
+  "Now that's a useful premise.",
+  "Let's test that.",
+  "There's plenty to unpack there.",
+  "That's worth sitting with.",
+  "An intriguing premise.",
+  "A thoughtful place to begin.",
+  "Let us begin there.",
+  "Now that's an entrance.",
+  "Delightfully strange already.",
+  "You've set the stage beautifully.",
+  "I can work with that.",
+  "All right, let's go.",
+  "Now this sounds promising.",
+  "I'm game.",
+  "Let's see where this leads.",
+  "A strong opening.",
+  "Let's get to it.",
+  "All right. Begin.",
+  "That's one way to welcome a guest.",
+  "You don't waste time, do you?",
+  "Well, this ought to be interesting.",
+  "All right, let's do this.",
+  "I still can't believe I'm here.",
+  "This is such an honor.",
+  "What an introduction.",
+  "I'm trying not to be nervous.",
+] as const;
+type SignalOpeningGuestAcknowledgementCue =
+  (typeof SIGNAL_OPENING_GUEST_ACKNOWLEDGEMENT_CUES)[number];
 export type ListenerReactionSpokenCue =
   | "mm-hm"
   | "mm-hmm"
@@ -139,7 +182,8 @@ export type ListenerReactionSpokenCue =
   | "And— sorry. Go on."
   | "So what do you—oh, please continue."
   | "Which part do you—sorry, keep going."
-  | "And how do you—oh, please continue.";
+  | "And how do you—oh, please continue."
+  | SignalOpeningGuestAcknowledgementCue;
 export const BOT_CROSSTALK_INTERRUPTER_CUES = [
   "Wait a second.",
   "Hold on.",
@@ -175,10 +219,6 @@ export const SIGNAL_ORGANIC_BACKCHANNEL_CUES = [
   "Mhm",
   "Huh",
   "Sure sure",
-] as const satisfies readonly ListenerReactionSpokenCue[];
-export const SIGNAL_OPENING_GUEST_ACKNOWLEDGEMENT_CUES = [
-  "Hi.",
-  "Hey.",
 ] as const satisfies readonly ListenerReactionSpokenCue[];
 export const SIGNAL_ORGANIC_RETURN_INVITATION_CUES = [
   "You had something—go ahead.",
@@ -351,6 +391,9 @@ const SPOKEN_CUES = new Set<ListenerReactionSpokenCue>([
   "Mhm",
   "Huh",
   "Sure sure",
+  ...SIGNAL_OPENING_GUEST_ACKNOWLEDGEMENT_CUES,
+  // Legacy opening plans remain replayable, but new episodes no longer select
+  // these personality-free acknowledgements.
   "Hi.",
   "Hey.",
   "No, hold on.",
@@ -1526,6 +1569,97 @@ export function signalListenerBackchannelStyleFor(
     : temperament;
 }
 
+/**
+ * A short, non-canonical opening acknowledgement shaped by the guest's
+ * authored persona. These remain deterministic so live audio and replay share
+ * the exact same interruption beat without adding another provider call.
+ */
+export function signalOpeningGuestAcknowledgementCuesForPersonaV1(
+  listenerPersona: string | null | undefined,
+): readonly SignalOpeningGuestAcknowledgementCue[] {
+  const source = authoredSignalListenerPersonaSource(listenerPersona);
+  const style = signalListenerBackchannelStyleFor(source);
+  if (style === "irreverent" || style === "edgy") {
+    return [
+      "That's one way to welcome a guest.",
+      "You don't waste time, do you?",
+      "Well, this ought to be interesting.",
+      "All right, let's do this.",
+    ];
+  }
+  if (style === "innocent" || style === "playful") {
+    return [
+      "Oh, this should be fun.",
+      "Now that's an introduction.",
+      "Well, you've got my attention.",
+      "I'm already enjoying this.",
+    ];
+  }
+  if (style === "literary" || style === "contemplative") {
+    return [
+      "That's worth sitting with.",
+      "An intriguing premise.",
+      "A thoughtful place to begin.",
+      "Let us begin there.",
+    ];
+  }
+  if (style === "starstruck") {
+    return [
+      "I still can't believe I'm here.",
+      "This is such an honor.",
+      "What an introduction.",
+      "I'm trying not to be nervous.",
+    ];
+  }
+  if (style === "commanding") {
+    return [
+      "You have my attention.",
+      "A strong opening.",
+      "Let's get to it.",
+      "All right. Begin.",
+    ];
+  }
+  if (style === "warm") {
+    return [
+      "What a lovely welcome.",
+      "I'm glad we're doing this.",
+      "You're very kind.",
+      "It's lovely to be here.",
+    ];
+  }
+  if (style === "analytical" || style === "inventive") {
+    return [
+      "That's an interesting frame.",
+      "Now that's a useful premise.",
+      "Let's test that.",
+      "There's plenty to unpack there.",
+    ];
+  }
+  const temperament = signalPersonaTemperamentFor(source);
+  if (temperament === "creative") {
+    return [
+      "Now that's an entrance.",
+      "Delightfully strange already.",
+      "You've set the stage beautifully.",
+      "I can work with that.",
+    ];
+  }
+  if (temperament === "adventurous") {
+    return [
+      "All right, let's go.",
+      "Now this sounds promising.",
+      "I'm game.",
+      "Let's see where this leads.",
+    ];
+  }
+  return [
+    "Good to be here.",
+    "All right, let's begin.",
+    "Let's see where this goes.",
+    "You have my attention.",
+  ];
+}
+
 function signalOrganicBeatPlan(args: {
   seed: string;
   kind: SignalOrganicBeatKind;
@@ -1775,8 +1909,10 @@ export function buildSignalListenerReactionPlanV1(args: {
     ...recentPlans.flatMap((plan) => plan.spokenCue ? [plan.spokenCue] : []),
   ];
   const recentSpokenCueSet = new Set(recentSpokenCues.slice(-3));
+  const openingAcknowledgementBank =
+    signalOpeningGuestAcknowledgementCuesForPersonaV1(args.listenerPersona);
   const openingAcknowledgementCues =
-    SIGNAL_OPENING_GUEST_ACKNOWLEDGEMENT_CUES.filter(
+    openingAcknowledgementBank.filter(
       (cue) => !recentSpokenCueSet.has(cue),
     );
   const spokenCue = audible && stableUnit(`${seed}:spoken-modality`) < 0.58
@@ -1785,7 +1921,7 @@ export function buildSignalListenerReactionPlanV1(args: {
           `${seed}:opening-acknowledgement`,
           openingAcknowledgementCues.length > 0
             ? openingAcknowledgementCues
-            : SIGNAL_OPENING_GUEST_ACKNOWLEDGEMENT_CUES,
+            : openingAcknowledgementBank,
         )
       : signalNeutralBackchannelForTextV2({
           seed,

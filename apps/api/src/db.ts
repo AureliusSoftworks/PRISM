@@ -2338,6 +2338,33 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     );
     CREATE INDEX IF NOT EXISTS idx_debate_mystery_v2_cases_user_updated
       ON debate_mystery_v2_cases(user_id, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS debate_mystery_case_packages (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      source_session_id TEXT,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      story_tags_json TEXT NOT NULL DEFAULT '[]',
+      creator_name TEXT NOT NULL,
+      difficulty TEXT NOT NULL CHECK(difficulty IN ('casual', 'classic', 'mastermind')),
+      trial_type TEXT NOT NULL CHECK(trial_type IN ('bench', 'jury')),
+      suspect_count INTEGER NOT NULL CHECK(suspect_count >= 1),
+      minimum_room_count INTEGER NOT NULL CHECK(minimum_room_count >= 1),
+      minimum_floor_count INTEGER NOT NULL CHECK(minimum_floor_count >= 1),
+      thumbnail_json TEXT NOT NULL,
+      manifest_ciphertext BLOB NOT NULL,
+      manifest_iv BLOB NOT NULL,
+      manifest_tag BLOB NOT NULL,
+      payload_sha256 TEXT NOT NULL,
+      portable_metadata_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(user_id, payload_sha256),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(source_session_id) REFERENCES debate_sessions(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_debate_mystery_case_packages_user_updated
+      ON debate_mystery_case_packages(user_id, updated_at DESC);
     CREATE TABLE IF NOT EXISTS debate_mystery_asset_vault (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -2893,6 +2920,16 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!mysteryV2CaseColumns.has("run_ordinal")) {
     db.exec(
       "ALTER TABLE debate_mystery_v2_cases ADD COLUMN run_ordinal INTEGER NOT NULL DEFAULT 1 CHECK(run_ordinal >= 1);",
+    );
+  }
+  const mysteryCasePackageColumns = new Set(
+    (db.prepare("PRAGMA table_info(debate_mystery_case_packages)").all() as Array<{
+      name: string;
+    }>).map((column) => column.name),
+  );
+  if (!mysteryCasePackageColumns.has("story_tags_json")) {
+    db.exec(
+      "ALTER TABLE debate_mystery_case_packages ADD COLUMN story_tags_json TEXT NOT NULL DEFAULT '[]';",
     );
   }
   db.exec(`

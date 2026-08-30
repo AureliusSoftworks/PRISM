@@ -9,6 +9,8 @@ import {
   DEBATE_MYSTERY_SFX_COOLDOWN_MS,
   debateMysteryDialoguePresentationDismissed,
   debateMysteryDeskItemSfxPlan,
+  debateMysteryPreparedAudioShouldStart,
+  debateMysteryRestoredAudioPerformanceKeyV2,
   debateMysterySfxCueForAction,
   debateMysterySfxVoices,
   debateMysteryTextVoiceShouldStart,
@@ -17,6 +19,68 @@ import {
   playDebateMysteryDeskItemSfx,
   playDebateMysterySfx,
 } from "./debateMysterySfx.ts";
+
+test("keeps the durable Archive checkpoint quiet without muting the next case beat", () => {
+  const restoredKey = debateMysteryRestoredAudioPerformanceKeyV2({
+    playPhase: "investigation",
+    dialogueHistory: [{
+      lineId: "line-briefing",
+      nodeId: "briefing-opening",
+      occurredAt: "2026-08-30T20:00:00.000Z",
+    }],
+    court: null,
+  });
+  assert.equal(
+    restoredKey,
+    "briefing-opening:2026-08-30T20:00:00.000Z:line-briefing",
+  );
+  const playable = {
+    audioEnabled: true,
+    audioVolume: 0.8,
+    interrogationAudioMayStart: true,
+    lastPlayedPerformanceKey: null,
+    lineId: "line-briefing",
+    playbackPerformanceKey: restoredKey!,
+    restoredPerformanceKey: restoredKey,
+    voicesEnabled: true,
+  };
+  assert.equal(debateMysteryPreparedAudioShouldStart(playable), false);
+  assert.equal(
+    debateMysteryPreparedAudioShouldStart({
+      ...playable,
+      lineId: "line-new-answer",
+      playbackPerformanceKey: "talk-answer:next:line-new-answer",
+    }),
+    true,
+    "a newly created dialogue line remains audible",
+  );
+  assert.equal(
+    debateMysteryPreparedAudioShouldStart({
+      ...playable,
+      lastPlayedPerformanceKey: restoredKey,
+      restoredPerformanceKey: null,
+    }),
+    false,
+    "ordinary rerenders still cannot replay the current line",
+  );
+});
+
+test("captures the active trial statement as the restored audio checkpoint", () => {
+  assert.equal(
+    debateMysteryRestoredAudioPerformanceKeyV2({
+      playPhase: "trial",
+      dialogueHistory: [],
+      court: {
+        activeStatementId: "statement-2",
+        statements: [
+          { lineId: "line-1", statementId: "statement-1", version: 1 },
+          { lineId: "line-2", statementId: "statement-2", version: 3 },
+        ],
+      },
+    }),
+    "statement:statement-2:3:line-2",
+  );
+});
 
 test("starts the selected text voice once and never replaces anonymous Casekeeper Babble", () => {
   const narratorBeat = {

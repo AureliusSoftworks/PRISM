@@ -471,6 +471,19 @@ test("social silence holds the visible ellipsis for its marked duration", () => 
   );
 });
 
+test("timed Mute replays legacy rows as six dots while preserving the silent clock", () => {
+  const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+
+  assert.match(
+    source,
+    /const publicContent = message\.botPowerMutePerformance[\s\S]{0,220}botPowerMutePublicResponseAtElapsedV1\([\s\S]{0,180}message\.botPowerMutePerformance\.durationMs/u,
+  );
+  assert.match(
+    source,
+    /return message\.botPowerMutePerformance[\s\S]{0,120}Math\.max\(displayLength, message\.botPowerMutePerformance\.periodCount\)/u,
+  );
+});
+
 test("bot-to-bot cut-ins surface spoken cue text and orphan-guard reveal voice", () => {
   const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
   assert.match(

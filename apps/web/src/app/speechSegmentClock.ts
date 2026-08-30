@@ -38,6 +38,20 @@ function heardSpeechSegments(
   );
 }
 
+function heardAudibleSegments(
+  segments: readonly SpeechSegmentTiming[],
+): SpeechSegmentTiming[] {
+  return segments.filter(
+    (segment) =>
+      segment.heard &&
+      Number.isFinite(segment.startMs) &&
+      Number.isFinite(segment.endMs) &&
+      segment.endMs > segment.startMs &&
+      (segment.kind === "vocal-action" ||
+        segment.sourceEnd > segment.sourceStart),
+  );
+}
+
 /**
  * Map spoken source characters onto the audible clock using heard speech
  * segments only. Clause gaps (heard: false) leave time holes so text and
@@ -86,7 +100,7 @@ export function buildCharacterAlignmentFromSegmentTimings(
 }
 
 /**
- * Voiced windows from heard speech segments only. Gaps stay idle — attack
+ * Voiced windows from heard speech and vocal-action segments. Gaps stay idle — attack
  * never pulls the next clause into silence, and release is capped so short
  * pauses still close the mouth.
  */
@@ -94,17 +108,17 @@ export function buildSpeechActivityWindowsFromHeardSegments(
   segments: readonly SpeechSegmentTiming[],
   durationMs: number,
 ): SpeechActivityWindow[] | null {
-  const speech = heardSpeechSegments(segments);
-  if (speech.length === 0) return null;
+  const audible = heardAudibleSegments(segments);
+  if (audible.length === 0) return null;
   const normalizedDurationMs = Math.max(
     1,
     Math.round(Number.isFinite(durationMs) ? durationMs : 0),
   );
   const windows: SpeechActivityWindow[] = [];
-  for (let index = 0; index < speech.length; index += 1) {
-    const segment = speech[index]!;
-    const next = speech[index + 1] ?? null;
-    const previousSegment = speech[index - 1] ?? null;
+  for (let index = 0; index < audible.length; index += 1) {
+    const segment = audible[index]!;
+    const next = audible[index + 1] ?? null;
+    const previousSegment = audible[index - 1] ?? null;
     const previous = windows.at(-1) ?? null;
     const startMs = speechActivityEnvelopeStartMs({
       rawStartMs: segment.startMs,

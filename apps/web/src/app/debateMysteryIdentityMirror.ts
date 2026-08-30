@@ -2,7 +2,7 @@ import {
   DEBATE_SCHEMA_VERSION,
   applyBotIdentityMirrorFaceV1,
   botDirectlyAddressesBotV1,
-  botIdentityMirrorQuotedTargetNameV1,
+  botIdentityMirrorPublicNameV1,
   type BotFaceStyle,
   type DebateBotSnapshotV1,
   type DebateMysteryIdentityMirrorTargetSnapshotV1,
@@ -50,8 +50,7 @@ export function debateMysteryIdentityMirrorTargetBotSnapshotV1(
   };
 }
 
-export const debateMysteryQuotedIdentityNameV1 =
-  botIdentityMirrorQuotedTargetNameV1;
+export const debateMysteryPublicIdentityNameV1 = botIdentityMirrorPublicNameV1;
 
 /** Complete frozen public face for live, saved, and replayed Whodunnit forms. */
 export function debateMysteryIdentityMirrorFaceV1(

@@ -344,7 +344,7 @@ fn portable_package_path(value: &str) -> Option<String> {
         PathBuf::from(value)
     };
     let extension = path.extension()?.to_str()?.to_ascii_lowercase();
-    if extension != "mansion" && extension != "whodunnit" { return None; }
+    if extension != "case" && extension != "mansion" && extension != "whodunnit" { return None; }
     Some(path.to_string_lossy().into_owned())
 }
 

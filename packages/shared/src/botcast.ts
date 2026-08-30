@@ -1376,7 +1376,7 @@ export interface BotcastPublicReactionSpeechV1 {
   messageId: string;
   botId: string;
   text: string;
-  kind: "interruption";
+  kind: "interruption" | "listener_quip";
 }
 
 /**
@@ -1391,23 +1391,52 @@ export function botcastPublicReactionSpeechForMessage(
   for (const event of events) {
     if (event.kind !== "listener_reaction") continue;
     const plan = normalizeSavedBotcastListenerReactionPlan(event.payload.plan);
-    if (!plan?.interjectionAttempt || plan.messageId !== messageId) continue;
-    const interrupterText = listenerReactionSpokenTextV1(plan);
-    if (interrupterText) {
-      result.push({
-        messageId,
-        botId: plan.listenerBotId,
-        text: interrupterText,
-        kind: "interruption",
-      });
+    if (plan?.interjectionAttempt && plan.messageId === messageId) {
+      const interrupterText = listenerReactionSpokenTextV1(plan);
+      if (interrupterText) {
+        result.push({
+          messageId,
+          botId: plan.listenerBotId,
+          text: interrupterText,
+          kind: "interruption",
+        });
+      }
+      const interruptedText = listenerReactionInterruptedSpeakerTextV1(plan);
+      if (interruptedText) {
+        result.push({
+          messageId,
+          botId: plan.speakerBotId,
+          text: interruptedText,
+          kind: "interruption",
+        });
+      }
+      continue;
     }
-    const interruptedText = listenerReactionInterruptedSpeakerTextV1(plan);
-    if (interruptedText) {
+    if (
+      event.payload.source !== "mute_performance" ||
+      event.payload.messageId !== messageId ||
+      !event.payload.beat ||
+      typeof event.payload.beat !== "object" ||
+      Array.isArray(event.payload.beat)
+    ) {
+      continue;
+    }
+    const beat = event.payload.beat as Record<string, unknown>;
+    const kind = beat.kind === "audible_quip" || beat.kind === "interrupt"
+      ? beat.kind
+      : null;
+    const botId = typeof beat.reactorBotId === "string"
+      ? beat.reactorBotId.trim()
+      : "";
+    const text = typeof beat.quip === "string"
+      ? beat.quip.replace(/\s+/gu, " ").trim().slice(0, 80)
+      : "";
+    if (kind && botId && text) {
       result.push({
         messageId,
-        botId: plan.speakerBotId,
-        text: interruptedText,
-        kind: "interruption",
+        botId,
+        text,
+        kind: kind === "interrupt" ? "interruption" : "listener_quip",
       });
     }
   }

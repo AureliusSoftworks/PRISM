@@ -1190,11 +1190,14 @@ function debateSessionListCastColors(parsed: {
   return colors;
 }
 
-function debateSessionListAdvocateVisuals(parsed: {
-  forAdvocate?: { name?: unknown; color?: unknown; glyph?: unknown };
-  againstAdvocate?: { name?: unknown; color?: unknown; glyph?: unknown };
-}): DebateSessionAdvocateVisualV1[] {
-  return (
+export function debateSessionListAdvocateVisuals(
+  parsed: {
+    forAdvocate?: { name?: unknown; color?: unknown; glyph?: unknown };
+    againstAdvocate?: { name?: unknown; color?: unknown; glyph?: unknown };
+  },
+  mysteryV2: ReturnType<typeof normalizeDebateMysteryFormatStateV2> = null,
+): DebateSessionAdvocateVisualV1[] {
+  const debateVisuals = (
     [
       ["for", parsed.forAdvocate],
       ["against", parsed.againstAdvocate],
@@ -1211,6 +1214,28 @@ function debateSessionListAdvocateVisuals(parsed: {
       },
     ];
   });
+  if (!mysteryV2) return debateVisuals;
+
+  const frozenCourtVisuals = (
+    [
+      ["for", mysteryV2.config.prosecutorBotId],
+      ["against", mysteryV2.config.rivalDefenseBotId],
+    ] as const
+  ).flatMap(([sideId, botId]) => {
+    const frozen = mysteryV2.identityMirrorTargetSnapshots[botId];
+    if (!frozen) return [];
+    return [
+      {
+        sideId,
+        name: frozen.name,
+        color:
+          debateVisuals.find((visual) => visual.sideId === sideId)?.color ??
+          null,
+        glyph: frozen.glyph,
+      } satisfies DebateSessionAdvocateVisualV1,
+    ];
+  });
+  return frozenCourtVisuals.length === 2 ? frozenCourtVisuals : debateVisuals;
 }
 
 interface DebateJsonGeneration {
@@ -4347,6 +4372,9 @@ export function listDebateSessions(
     let mysteryMansionSaveEligible: boolean | undefined;
     let mysteryMansionBundleId: string | null | undefined;
     let mysterySuspectColors: string[] = [];
+    let mysteryV2ArchiveState: ReturnType<
+      typeof normalizeDebateMysteryFormatStateV2
+    > = null;
     try {
       const parsed = JSON.parse(row.session_json) as {
         format?: unknown;
@@ -4400,6 +4428,7 @@ export function listDebateSessions(
       if (format === "whodunnit") {
         const mysteryV2 = normalizeDebateMysteryFormatStateV2(parsed.formatState);
         if (mysteryV2) {
+          mysteryV2ArchiveState = mysteryV2;
           mysteryVersion = 2;
           if (mysteryV2.playPhase === "case_forge") {
             const compilation = mysteryV2.compilation;
@@ -4534,7 +4563,10 @@ export function listDebateSessions(
       for (const color of mysterySuspectColors) {
         if (!castColors.includes(color)) castColors.push(color);
       }
-      advocateVisuals = debateSessionListAdvocateVisuals(parsed);
+      advocateVisuals = debateSessionListAdvocateVisuals(
+        parsed,
+        mysteryV2ArchiveState,
+      );
       exhibitCount = Array.isArray(parsed.evidence?.exhibits)
         ? parsed.evidence.exhibits.length
         : 0;

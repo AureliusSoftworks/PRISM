@@ -498,6 +498,36 @@ describe("Signal public cadence speech", () => {
       { messageId: "message-1", botId: "guest-1", text: "Let me finish.", kind: "interruption" },
     ]);
   });
+
+  it("projects legacy timed-Mute quips into review-visible reaction speech", () => {
+    const events = [{
+      id: "event-mute-reaction",
+      episodeId: "episode-1",
+      sequence: 1,
+      kind: "listener_reaction" as const,
+      occurredAt: "2026-08-30T18:20:48.451Z",
+      payload: {
+        source: "mute_performance",
+        messageId: "message-1",
+        speakerBotId: "guest-1",
+        listenerBotId: "host-1",
+        beat: {
+          atMs: 5_500,
+          reactorBotId: "host-1",
+          kind: "audible_quip",
+          action: "tap_fingers",
+          quip: "Are you finished?",
+        },
+      },
+    }] satisfies BotcastReplayEvent[];
+
+    assert.deepEqual(botcastPublicReactionSpeechForMessage(events, "message-1"), [{
+      messageId: "message-1",
+      botId: "host-1",
+      text: "Are you finished?",
+      kind: "listener_quip",
+    }]);
+  });
 });
 
 describe("Signal producer direct quotes", () => {
@@ -686,7 +716,7 @@ describe("Signal fallback studio accents", () => {
     };
     assert.equal(
       botcastSignalStandardCadenceDurationMs(
-        "......... *9 seconds pass without an audible word.*",
+        "......",
         undefined,
         mutePerformance,
       ),
@@ -694,7 +724,7 @@ describe("Signal fallback studio accents", () => {
     );
     const muteTimeline = botcastReplayTimeline(
       [{
-        content: "......... *9 seconds pass without an audible word.*",
+        content: "......",
         mutePerformance,
       }],
       [],

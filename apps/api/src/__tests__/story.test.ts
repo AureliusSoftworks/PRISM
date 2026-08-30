@@ -1087,10 +1087,8 @@ describe("Story API helpers", () => {
     assert.equal(generated.status, "playing");
     assert.equal(botPowerResponseIsSilentV1(mutedScene?.narration), true);
     assert.ok(mutedScene?.mutePerformance);
-    assert.match(
-      mutedScene?.narration ?? "",
-      /seconds? pass without an audible word/u,
-    );
+    assert.match(mutedScene?.narration ?? "", /\.{6}$/u);
+    assert.doesNotMatch(mutedScene?.narration ?? "", /pass without/u);
     assert.equal(mutedScene?.spritePose, "idle");
   });
 
