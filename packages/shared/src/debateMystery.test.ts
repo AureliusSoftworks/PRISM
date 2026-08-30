@@ -524,6 +524,46 @@ test("access items resolve item, room, and region locks without cycles or public
   assert.ok(validateDebateMysteryCaseBible(cyclic, config.actionBudget).errors.some((error) => error.includes("dependency cycle")));
 });
 
+test("MansionLayoutV2 semantic projections may use corridor links and colon room IDs", () => {
+  const config = resolveDebateMysteryConfig(createConfig("standard", "classic", "layout-v2-projection"));
+  const canonical = compileDeterministicDebateMystery({ config, suspects: suspects(6) });
+  const roomId = (id: string) => `room:${id}`;
+  const blueprint = canonical.rooms.map((room) => ({
+    ...room,
+    id: roomId(room.id),
+    neighborIds: room.neighborIds.map(roomId),
+  }));
+  const sameFloorNonNeighbors = blueprint.flatMap((left) =>
+    blueprint
+      .filter((right) =>
+        right.floor === left.floor &&
+        right.id !== left.id &&
+        !left.neighborIds.includes(right.id) &&
+        !debateMysteryRoomsShareEdge(left, right))
+      .map((right) => [left, right] as const),
+  )[0];
+  assert.ok(sameFloorNonNeighbors, "fixture needs a corridor-style semantic connection");
+  const [left, right] = sameFloorNonNeighbors;
+  left.neighborIds.push(right.id);
+  right.neighborIds.push(left.id);
+  const bible = compileDeterministicDebateMystery({
+    config,
+    suspects: suspects(6),
+    roomBlueprint: blueprint,
+  });
+
+  assert.ok(
+    validateDebateMysteryCaseBible(bible, config.actionBudget).errors.some((error) =>
+      error.includes("does not share an architectural edge")),
+  );
+  assert.deepEqual(
+    validateDebateMysteryCaseBible(bible, config.actionBudget, {
+      architecture: "mansion-layout-v2",
+    }).errors,
+    [],
+  );
+});
+
 test("custom floor counts keep architectural room groups intact", () => {
   for (let totalRooms = 5; totalRooms <= 18; totalRooms += 1) {
     for (let floors = 1; floors <= 3; floors += 1) {

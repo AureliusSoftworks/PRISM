@@ -28,6 +28,7 @@ import {
   type BotPowerV1,
   type DebateEvidencePacketV1,
   type DebateEventV1,
+  type DebateFlytingBoutV1,
   type DebateFormalityId,
   type DebateMotionSlateV1,
   type DebateSessionCreateRequest,
@@ -53,6 +54,7 @@ import {
   endDebateSessionEarly,
   expireDebateParticipantWindow,
   forfeitParticipantDebateSession,
+  generateDebateFlytingForge,
   generateDebateRefractDraft,
   getDebateSession,
   listDebateSessions,
@@ -81,6 +83,7 @@ import {
   restartParticipantDebateAsDraft,
   sealDebateSessionPresentation,
   submitDebateJudgeGavelMessage,
+  submitDebateFlytingAction,
   submitDebateInterjection,
   submitDebateObjectionRuling,
   submitDebatePlayerTurn,
@@ -165,6 +168,64 @@ class DebateProviderStub implements LlmProvider {
 
   public async embedText(): Promise<number[]> {
     return [0.1, 0.2];
+  }
+}
+
+class FlytingProviderStub extends DebateProviderStub {
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("You are the Bout Forge for PRISM Flyting")) {
+      return JSON.stringify({
+        title: "The Holly and the Horn",
+        stakes: "The Hall will name the greater winter legend.",
+        flyters: [
+          {
+            epithet: "The Red Wanderer",
+            legend: [
+              { title: "The Sleigh", claim: "No road bars my passage." },
+              { title: "The List", claim: "I know every secret wish." },
+              { title: "The Dawn", claim: "I leave joy before sunrise." },
+            ],
+          },
+          {
+            epithet: "The Morning Accuser",
+            legend: [
+              { title: "The Bargain", claim: "Every boast has its price." },
+              { title: "The Flame", claim: "I outlast every winter." },
+              { title: "The Fall", claim: "Even heaven remembers me." },
+            ],
+          },
+        ],
+      });
+    }
+    if (text.includes("Judge only whether the public rejoinder")) {
+      return JSON.stringify({
+        resolution: text.includes("Declared maneuver: turn") ? "turned" : "answered",
+        acclamation: "The cups strike oak as the answer lands.",
+      });
+    }
+    if (text.includes("one independent Hall member")) {
+      return JSON.stringify({
+        sideId: "for",
+        acclaim: "The Red Wanderer answered every barb and left one ringing.",
+      });
+    }
+    if (text.includes("Host casting the fifth and deciding Flyting vote")) {
+      return JSON.stringify({
+        sideId: "for",
+        ruling: "The Hall crowns the Red Wanderer, whose answers turned every horn against its blower.",
+      });
+    }
+    if (text.includes("performing in PRISM Flyting")) {
+      return JSON.stringify({
+        content: "I cross the longest night while your proud flame gutters beneath my runners.",
+        deliveryCue: "excited",
+      });
+    }
+    return super.generateResponse(messages, options);
   }
 }
 
@@ -1968,6 +2029,87 @@ async function createTurnaboutForRole(
     },
     debateRuntime,
   );
+}
+
+async function createFlytingTestSession(
+  db: DatabaseSync,
+  playerRole: "participant" | "spectator" | "judge" = "spectator",
+) {
+  const debateRuntime = runtimeWith(new FlytingProviderStub());
+  seedBot(db, "flyting-host", "Skald");
+  seedBot(db, "flyter-for", "Santa Claus");
+  seedBot(db, "flyter-against", "Satan");
+  for (let index = 1; index <= 4; index += 1) {
+    seedBot(db, `hall-${index}`, `Hall Member ${index}`);
+  }
+  const forged = await generateDebateFlytingForge(
+    db,
+    "user-1",
+    {
+      forAdvocateBotId: "flyter-for",
+      againstAdvocateBotId: "flyter-against",
+      rivalrySpark: "Who truly owns the longest night?",
+      forbiddenTopics: ["children"],
+    },
+    debateRuntime,
+  );
+  const motion: DebateMotionSlateV1 = {
+    version: DEBATE_SCHEMA_VERSION,
+    id: forged.bout.id,
+    title: forged.bout.title,
+    motion: forged.bout.stakes,
+    forSide: {
+      label: forged.bout.flyters[0].epithet,
+      brief: forged.bout.flyters[0].legend.map((facet) => facet.claim).join(" "),
+    },
+    againstSide: {
+      label: forged.bout.flyters[1].epithet,
+      brief: forged.bout.flyters[1].legend.map((facet) => facet.claim).join(" "),
+    },
+  };
+  const checks = await checkDebateAdvocacyRoles(
+    db,
+    "user-1",
+    {
+      format: "flyting",
+      formality: "free_for_all",
+      motion,
+      forAdvocateBotId: "flyter-for",
+      againstAdvocateBotId: "flyter-against",
+      playerRole,
+      playerSideId: playerRole === "participant" ? "for" : null,
+    },
+    debateRuntime,
+  );
+  const session = createDebateSession(
+    db,
+    "user-1",
+    {
+      format: "flyting",
+      flyting: { version: 1, bout: forged.bout },
+      formality: "free_for_all",
+      motion,
+      evidence: { version: 1, notes: "", sources: [], exhibits: [], frozenAt: null },
+      moderatorTitle: "Host of the Hall",
+      moderatorBotId: "flyting-host",
+      playerJudgeUsesPrism: playerRole === "judge",
+      forAdvocateBotId: "flyter-for",
+      againstAdvocateBotId: "flyter-against",
+      playerRole,
+      playerSideId: playerRole === "participant" ? "for" : null,
+      jury: {
+        enabled: true,
+        jurorBotIds: ["hall-1", "hall-2", "hall-3", "hall-4"],
+      },
+      advocacyConsent: checks,
+      preferredProvider: "local",
+      responseMode: "local",
+      theme: "dark",
+      idempotencyKey: `create:flyting:${playerRole}`,
+    },
+    debateRuntime,
+  );
+  return { session, debateRuntime, bout: forged.bout };
 }
 
 describe("Debate engine", () => {
@@ -15127,6 +15269,238 @@ describe("Debate engine", () => {
             .get("user-2") as { count: number }
         ).count,
         0,
+      );
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("Flyting V1", () => {
+  it("forges and completes a four-exchange Spectator bout with five final votes", async () => {
+    const db = createTestDb();
+    try {
+      const { session: created, debateRuntime, bout } =
+        await createFlytingTestSession(db, "spectator");
+      assert.equal(created.format, "flyting");
+      assert.equal(created.formatState.format, "flyting");
+      assert.equal(created.formatState.bout?.title, "The Holly and the Horn");
+      assert.equal(created.formatState.bout?.frozenAt !== null, true);
+      assert.deepEqual(bout.forbiddenTopics, ["children"]);
+
+      let session = created;
+      for (let index = 0; index < 32 && session.status !== "completed"; index += 1) {
+        session = await submitDebateFlytingAction(
+          db,
+          "user-1",
+          session.id,
+          {
+            action: "advance",
+            expectedRevision: session.revision,
+            idempotencyKey: `flyting:spectator:${index}`,
+          },
+          debateRuntime,
+        );
+      }
+      assert.equal(session.status, "completed");
+      assert.equal(session.winnerSideId, "for");
+      assert.equal(session.formatState.format, "flyting");
+      assert.equal(session.formatState.exchanges.length, 4);
+      assert.ok(session.formatState.exchanges.every((exchange) =>
+        exchange.boast && exchange.challenge && exchange.resolution,
+      ));
+      assert.equal(session.formatState.hallVotes.length, 4);
+      assert.equal(session.formatState.hostVerdict?.sideId, "for");
+      assert.equal(session.jury.finalBallots.length, 4);
+      assert.equal(session.jury.moderatorBallot?.sideId, "for");
+      assert.equal(
+        getDebateSession(db, "user-1", session.id).formatState.format,
+        "flyting",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("can deterministically skip every automatic beat without stranding the Hall", async () => {
+    const db = createTestDb();
+    try {
+      const { session: created, debateRuntime } =
+        await createFlytingTestSession(db, "spectator");
+      let session = created;
+      for (let index = 0; index < 32 && session.status !== "completed"; index += 1) {
+        session = await submitDebateFlytingAction(
+          db,
+          "user-1",
+          session.id,
+          {
+            action: "advance",
+            skip: true,
+            expectedRevision: session.revision,
+            idempotencyKey: `flyting:skip:${index}`,
+          },
+          debateRuntime,
+        );
+      }
+      assert.equal(session.status, "completed");
+      assert.equal(session.formatState.format, "flyting");
+      assert.equal(session.formatState.hallVotes.length, 4);
+      assert.ok(session.formatState.hostVerdict);
+      assert.ok(session.winnerSideId);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps a coached bot embodied and records a consequential Yield", async () => {
+    const db = createTestDb();
+    try {
+      const { session: created, debateRuntime } =
+        await createFlytingTestSession(db, "participant");
+      assert.equal(debateSessionForPlayer(created).jury.jurors.length, 4);
+      let session = await submitDebateFlytingAction(
+        db,
+        "user-1",
+        created.id,
+        {
+          action: "advance",
+          expectedRevision: created.revision,
+          idempotencyKey: "flyting:participant:intro",
+        },
+        debateRuntime,
+      );
+      assert.equal(session.status, "waiting_for_player");
+      assert.equal(session.forAdvocate.id, "flyter-for");
+      assert.equal(session.formatState.format, "flyting");
+      session = pauseDebateSession(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "flyting:participant:pause-on-floor",
+        quietSave: true,
+      });
+      session = resumeDebateSession(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "flyting:participant:resume-on-floor",
+        quietSave: true,
+      });
+      assert.equal(session.status, "waiting_for_player");
+      const facet = session.formatState.bout!.flyters[0].legend[0]!;
+      session = await submitDebateFlytingAction(
+        db,
+        "user-1",
+        session.id,
+        {
+          action: "boast",
+          legendFacetId: facet.id,
+          content: "My runners cross the longest night before your first ember learns to glow.",
+          authoredMode: "custom",
+          expectedRevision: session.revision,
+          idempotencyKey: "flyting:participant:boast",
+        },
+        debateRuntime,
+      );
+      session = await submitDebateFlytingAction(
+        db,
+        "user-1",
+        session.id,
+        {
+          action: "advance",
+          expectedRevision: session.revision,
+          idempotencyKey: "flyting:participant:challenge",
+        },
+        debateRuntime,
+      );
+      assert.equal(session.status, "waiting_for_player");
+      session = await submitDebateFlytingAction(
+        db,
+        "user-1",
+        session.id,
+        {
+          action: "yield",
+          expectedRevision: session.revision,
+          idempotencyKey: "flyting:participant:yield",
+        },
+        debateRuntime,
+      );
+      assert.equal(session.formatState.format, "flyting");
+      assert.equal(session.formatState.exchanges[0]?.yielded, true);
+      assert.equal(session.formatState.exchanges[0]?.resolution, "unanswered");
+      assert.equal(session.events.at(-1)?.speakerBotId, "flyter-for");
+      assert.equal(session.events.at(-1)?.participantResponseKind, "pass");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("holds the fifth and deciding word for a human Host", async () => {
+    const db = createTestDb();
+    try {
+      const { session: created, debateRuntime } =
+        await createFlytingTestSession(db, "judge");
+      let session = created;
+      for (let index = 0; index < 32 && session.status !== "waiting_for_player"; index += 1) {
+        session = await submitDebateFlytingAction(
+          db,
+          "user-1",
+          session.id,
+          {
+            action: "advance",
+            skip: true,
+            expectedRevision: session.revision,
+            idempotencyKey: `flyting:judge:${index}`,
+          },
+          debateRuntime,
+        );
+      }
+      assert.equal(session.status, "waiting_for_player");
+      assert.equal(session.formatState.format, "flyting");
+      assert.equal(session.formatState.phase, "verdict");
+      assert.equal(session.formatState.hallVotes.length, 4);
+      session = await submitDebateFlytingAction(
+        db,
+        "user-1",
+        session.id,
+        {
+          action: "host_verdict",
+          winnerSideId: "against",
+          content: "The Hall is heard; the sharper answer belongs to the challenger, and the word is given.",
+          authoredMode: "custom",
+          expectedRevision: session.revision,
+          idempotencyKey: "flyting:judge:verdict",
+        },
+        debateRuntime,
+      );
+      assert.equal(session.status, "completed");
+      assert.equal(session.winnerSideId, "against");
+      assert.equal(session.playerVerdict, "against");
+      assert.equal(session.jury.moderatorBallot, null);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps Flyting actions frozen while the Hall is paused", async () => {
+    const db = createTestDb();
+    try {
+      const { session: created, debateRuntime } =
+        await createFlytingTestSession(db, "spectator");
+      const paused = pauseDebateSession(db, "user-1", created.id, {
+        expectedRevision: created.revision,
+        idempotencyKey: "flyting:pause",
+        quietSave: true,
+      });
+      await assert.rejects(
+        submitDebateFlytingAction(
+          db,
+          "user-1",
+          paused.id,
+          {
+            action: "advance",
+            expectedRevision: paused.revision,
+            idempotencyKey: "flyting:advance-while-paused",
+          },
+          debateRuntime,
+        ),
+        /Resume the Flyting bout/u,
       );
     } finally {
       db.close();

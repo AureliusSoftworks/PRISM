@@ -7960,6 +7960,7 @@
   padding: 0;
   box-shadow: none;
   cursor: help;
+  font: inherit;
 }
 
 .panelSectionInfoButton:hover:not(:disabled),
@@ -8907,6 +8908,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.settingsDockRow[data-compact="true"] {
+  justify-content: flex-end;
 }
 
 .settingsDockRow span {

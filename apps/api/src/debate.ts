@@ -6,6 +6,9 @@ import {
   BOT_POWER_CANONICAL_SILENCE_V1,
   DEBATE_CASE_CARDS_PER_SIDE,
   DEBATE_FORMAT_SCHEMA_VERSION,
+  DEBATE_FLYTING_EXCHANGE_COUNT,
+  DEBATE_FLYTING_LINE_MAX_LENGTH,
+  DEBATE_FLYTING_SCHEMA_VERSION,
   DEBATE_JURY_DISCUSSION_TURNS,
   DEBATE_JURY_EARLY_DISCUSSION_TURNS,
   DEBATE_JURY_SIZE,
@@ -112,9 +115,13 @@ import {
   defaultDebateJuryStateV1,
   coerceDebateBallotSideId,
   isDebateFormatId,
+  isDebateFlytingChargeKindV1,
+  isDebateFlytingManeuverV1,
   isDebatePlayerRole,
   isDebateSideId,
   normalizeDebateFormatStateV1,
+  normalizeDebateFlytingBoutV1,
+  normalizeDebateFlytingFormatStateV1,
   normalizeDebateEvidencePacketV1,
   normalizeDebateEvidenceEmoji,
   normalizeDebateFormalityId,
@@ -182,6 +189,21 @@ import {
   type DebateFormalityId,
   type DebateForumFormatStateV1,
   type DebateFormatId,
+  type DebateFlytingActionRequest,
+  type DebateFlytingAuthoredModeV1,
+  type DebateFlytingBoastV1,
+  type DebateFlytingBoutV1,
+  type DebateFlytingChargeKindV1,
+  type DebateFlytingChallengeV1,
+  type DebateFlytingExchangeV1,
+  type DebateFlytingFormatStateV1,
+  type DebateFlytingForgeRequest,
+  type DebateFlytingForgeResponseV1,
+  type DebateFlytingManeuverV1,
+  type DebateFlytingRejoinderV1,
+  type DebateFlytingResolutionV1,
+  type DebateFlytingWieldRequest,
+  type DebateFlytingWieldResponseV1,
   type DebateInterjectionRequest,
   type DebateMysteryCaseBibleV1,
   type DebateJudgeAudienceOrderRequest,
@@ -1387,6 +1409,117 @@ async function generateJson(
   };
 }
 
+function debateFlytingForbiddenTopics(value: unknown): string[] {
+  return Array.isArray(value)
+    ? [...new Set(value.map((topic) => compactText(topic, 120)).filter(Boolean))].slice(0, 12)
+    : [];
+}
+
+export async function generateDebateFlytingForge(
+  db: DatabaseSync,
+  userId: string,
+  request: DebateFlytingForgeRequest,
+  runtime: DebateAiRuntime,
+): Promise<DebateFlytingForgeResponseV1> {
+  const forBotId = compactText(request.forAdvocateBotId, 200);
+  const againstBotId = compactText(request.againstAdvocateBotId, 200);
+  if (!forBotId || !againstBotId || forBotId === againstBotId) {
+    throw new HttpError(400, "Choose two different flyters.");
+  }
+  const rows = botRows(db, userId, [forBotId, againstBotId]);
+  if (rows.length !== 2) {
+    throw new HttpError(404, "One or both flyters were not found.");
+  }
+  const rivalrySpark = multilineText(request.rivalrySpark, 800);
+  const forbiddenTopics = debateFlytingForbiddenTopics(request.forbiddenTopics);
+  const generation = await generateJson(
+    runtime.lanes?.length ? runtime.lanes : [selectedLane(runtime)],
+    [
+      {
+        role: "system",
+        content: [
+          "You are the Bout Forge for PRISM Flyting: a fictional, non-canonical ritual contest of boasts, targeted challenges, answering wit, and Hall acclamation.",
+          "Forge theatrical premises, not factual allegations. Use only the supplied public persona profiles; never imply private memories, relationships, live research, or hidden biography.",
+          "Tone is sporting but cutting. Persona-based vanity, hypocrisy, rivalry, and comic humiliation are welcome. Never target protected identity, trauma, disability, body shape, sexual material, children, self-harm, or alleged real misconduct.",
+          forbiddenTopics.length
+            ? `Additional forbidden subjects: ${forbiddenTopics.join("; ")}.`
+            : "No additional forbidden subjects were added.",
+          "Each Legend facet is a positive or grandiose public claim that its own flyter can boast from. Make the two sets distinct and usable as tactical targets.",
+          "Return JSON only: {title, stakes, flyters:[{epithet, legend:[{title, claim}, {title, claim}, {title, claim}]}, {epithet, legend:[{title, claim}, {title, claim}, {title, claim}]}]}.",
+          "Title <= 120 characters. Stakes <= 600 characters. Epithets <= 96 characters. Each facet title <= 80 characters and claim <= 280 characters.",
+        ].join("\n"),
+      },
+      {
+        role: "user",
+        content: [
+          `Rivalry spark: ${rivalrySpark || "Surprise me with an immediately legible reason these two would clash."}`,
+          ...rows.map((row, index) =>
+            [
+              `Flyter ${index + 1}: ${row.name}`,
+              stripBotProfileMetaSuffix(row.system_prompt).slice(0, 4_000),
+            ].join("\n"),
+          ),
+        ].join("\n\n"),
+      },
+    ],
+    {
+      maxTokens: 1_200,
+      temperature: 0.75,
+      validate: (value) => {
+        const flyters = Array.isArray(value.flyters) ? value.flyters : [];
+        return Boolean(
+          compactText(value.title, 120) &&
+          multilineText(value.stakes, 600) &&
+          flyters.length === 2 &&
+          flyters.every((flyter) => {
+            const row = jsonRecord(flyter);
+            const legend = Array.isArray(row.legend) ? row.legend : [];
+            return Boolean(
+              compactText(row.epithet, 96) &&
+              legend.length === 3 &&
+              legend.every((facet) => {
+                const item = jsonRecord(facet);
+                return compactText(item.title, 80) && multilineText(item.claim, 280);
+              }),
+            );
+          }),
+        );
+      },
+    },
+  );
+  const generatedFlyters = generation.value.flyters as unknown[];
+  const bout = normalizeDebateFlytingBoutV1({
+    version: DEBATE_FLYTING_SCHEMA_VERSION,
+    id: randomUUID(),
+    title: generation.value.title,
+    stakes: generation.value.stakes,
+    rivalrySpark,
+    forbiddenTopics,
+    flyters: rows.map((row, index) => {
+      const generated = jsonRecord(generatedFlyters[index]);
+      return {
+        sideId: index === 0 ? "for" : "against",
+        botId: row.id,
+        name: row.name,
+        epithet: generated.epithet,
+        legend: (generated.legend as unknown[]).map((facet, facetIndex) => ({
+          id: `legend-${index + 1}-${facetIndex + 1}-${randomUUID()}`,
+          ...jsonRecord(facet),
+        })),
+      };
+    }),
+    frozenAt: null,
+  });
+  if (!bout) {
+    throw new HttpError(502, "The Bout Forge returned an incomplete contest. Try again.");
+  }
+  return {
+    bout,
+    provider: generation.provider,
+    model: generation.model,
+  };
+}
+
 export async function generateDebateEvidenceExcerpt(
   runtime: DebateAiRuntime,
   request: DebateEvidenceExcerptGenerationRequest,
@@ -2565,7 +2698,7 @@ export async function checkDebateAdvocacyRoles(
   }
   const forId = compactText(request.forAdvocateBotId, 200);
   const againstId = compactText(request.againstAdvocateBotId, 200);
-  if (participantSideId) {
+  if (participantSideId && format !== "flyting") {
     const opponentSideId: DebateSideId =
       participantSideId === "for" ? "against" : "for";
     const opponentId = opponentSideId === "for" ? forId : againstId;
@@ -3786,14 +3919,17 @@ export function debateSessionForPlayer(
   session: DebateSessionV1,
   perspective: "live" | "replay" = "live",
 ): DebateSessionV1 {
+  const concealParticipantJury =
+    session.jury.enabled &&
+    session.playerRole === "participant" &&
+    session.format !== "flyting";
   const participantJuryBotIds =
-    session.jury.enabled && session.playerRole === "participant"
+    concealParticipantJury
       ? new Set(session.jury.jurors.map((juror) => juror.id))
       : null;
   const events = session.events.flatMap((event) => {
     if (
-      session.jury.enabled &&
-      session.playerRole === "participant" &&
+      concealParticipantJury &&
       (event.kind === "jury_deliberation" ||
         (event.speakerKind === "juror" &&
           (event.kind === "ballot" || event.kind === "reaction")))
@@ -3801,8 +3937,7 @@ export function debateSessionForPlayer(
       return [];
     }
     if (
-      session.jury.enabled &&
-      session.playerRole === "participant" &&
+      concealParticipantJury &&
       event.kind === "jury_verdict"
     ) {
       return [
@@ -3828,7 +3963,7 @@ export function debateSessionForPlayer(
       : { ...ballot, reason: null, privateReason: true },
   );
   const jury =
-    session.jury.enabled && session.playerRole === "participant"
+    concealParticipantJury
       ? {
           ...session.jury,
           jurors: [],
@@ -4494,6 +4629,15 @@ export function createDebateSession(
   const format: DebateFormatId = isDebateFormatId(request.format)
     ? request.format
     : "forum";
+  const flytingBout = format === "flyting"
+    ? normalizeDebateFlytingBoutV1(request.flyting?.bout)
+    : null;
+  if (format === "flyting" && !flytingBout) {
+    throw new HttpError(
+      400,
+      "Review and approve a complete Bout Forge draft before entering the Hall.",
+    );
+  }
   const formality = normalizeDebateFormalityId(request.formality);
   const moderatorTitle = normalizeDebateModeratorTitle(request.moderatorTitle);
   if (!isDebatePlayerRole(request.playerRole)) {
@@ -4536,11 +4680,11 @@ export function createDebateSession(
     200,
   );
   const forAdvocateBotId =
-    playerSideId === "for"
+    playerSideId === "for" && format !== "flyting"
       ? DEBATE_PLAYER_PARTICIPANT_BOT_ID
       : requestedForAdvocateBotId;
   const againstAdvocateBotId =
-    playerSideId === "against"
+    playerSideId === "against" && format !== "flyting"
       ? DEBATE_PLAYER_PARTICIPANT_BOT_ID
       : requestedAgainstAdvocateBotId;
   const castIds = [moderatorBotId, forAdvocateBotId, againstAdvocateBotId].map(
@@ -4554,6 +4698,16 @@ export function createDebateSession(
         : playerJudgeUsesPrism
           ? "Choose two different advocate bots."
           : "Choose exactly three different owned bots.",
+    );
+  }
+  if (
+    flytingBout &&
+    (flytingBout.flyters[0].botId !== forAdvocateBotId ||
+      flytingBout.flyters[1].botId !== againstAdvocateBotId)
+  ) {
+    throw new HttpError(
+      400,
+      "The approved Bout Forge cast no longer matches the selected flyters.",
     );
   }
   const ownedCastIds = castIds.filter(
@@ -4608,7 +4762,7 @@ export function createDebateSession(
         runtime,
       );
   const now = new Date().toISOString();
-  const juryEnabled = request.jury?.enabled === true;
+  const juryEnabled = format === "flyting" || request.jury?.enabled === true;
   const ignoredParticipantSideBotId =
     playerSideId === "for"
       ? requestedForAdvocateBotId
@@ -4670,7 +4824,15 @@ export function createDebateSession(
           rebuttalRoundMode: forumRoundPlan.mode,
           rebuttalRoundRationale: forumRoundPlan.rationale,
         } satisfies DebateForumFormatStateV1)
-      : defaultDebateFormatStateV1(format);
+      : format === "flyting"
+        ? normalizeDebateFlytingFormatStateV1({
+            ...defaultDebateFormatStateV1("flyting"),
+            bout: { ...flytingBout!, frozenAt: now },
+          })
+        : defaultDebateFormatStateV1(format);
+  const flytingJury = format === "flyting"
+    ? { ...jury, discussionTurnTarget: 0, phase: "waiting" as const }
+    : jury;
   const deferStart = request.deferStart === true;
   let session: DebateSessionV1 = {
     version: DEBATE_SCHEMA_VERSION,
@@ -4683,6 +4845,8 @@ export function createDebateSession(
         ? "mystery_compiling"
         : format === "turnabout"
           ? "turnabout_intro"
+          : format === "flyting"
+            ? "flyting_intro"
           : "intro",
     provider: lane.providerName,
     model: lane.model,
@@ -4717,18 +4881,18 @@ export function createDebateSession(
       ? playerJudgeModeratorSnapshot(db, userId, lane)
       : snapshotBot(moderatorRow!, "moderator", null, lane),
     forAdvocate:
-      playerSideId === "for"
+      playerSideId === "for" && format !== "flyting"
         ? playerParticipantAdvocateSnapshot(db, userId, lane, "for")
         : snapshotBot(forRow!, "advocate", "for", lane),
     againstAdvocate:
-      playerSideId === "against"
+      playerSideId === "against" && format !== "flyting"
         ? playerParticipantAdvocateSnapshot(db, userId, lane, "against")
         : snapshotBot(againstRow!, "advocate", "against", lane),
     advocacyConsent,
     powerPlan,
     caseBoard: [],
     ballots: [],
-    jury,
+    jury: flytingJury,
     playerVerdict: null,
     winnerSideId: null,
     judgeGavel: null,
@@ -4736,7 +4900,7 @@ export function createDebateSession(
     objectionRuling: null,
     participantObjection: null,
     participation:
-      request.playerRole === "participant"
+      request.playerRole === "participant" && format !== "flyting"
         ? defaultDebateParticipationStateV1(
             formality,
             normalizeDebateParticipantDifficulty(
@@ -4764,7 +4928,7 @@ export function createDebateSession(
         }
       : {}),
   };
-  if (request.playerRole === "participant") {
+  if (request.playerRole === "participant" && format !== "flyting") {
     const voterPredispositions = inferParticipantVoterPredispositions(session);
     session = {
       ...session,
@@ -4827,7 +4991,11 @@ export async function createDebateSessionWithParticipantPredispositions(
     : undefined;
   if (existing?.id) return getDebateSession(db, userId, existing.id);
   const session = createDebateSession(db, userId, request, runtime);
-  if (session.playerRole !== "participant" || !session.playerSideId) return session;
+  if (
+    session.format === "flyting" ||
+    session.playerRole !== "participant" ||
+    !session.playerSideId
+  ) return session;
   const voters = debateBots(session).filter(
     (bot) => bot.id !== DEBATE_PLAYER_PARTICIPANT_BOT_ID,
   );
@@ -15336,6 +15504,1144 @@ function mysteryTurnaboutNeedsResolution(session: DebateSessionV1): boolean {
   return session.stepKey === "turnabout_ballot_moderator";
 }
 
+function debateFlytingState(session: DebateSessionV1): DebateFlytingFormatStateV1 {
+  if (session.format !== "flyting" || session.formatState.format !== "flyting") {
+    throw new HttpError(409, "This proceeding is not a Flyting bout.");
+  }
+  const state = normalizeDebateFlytingFormatStateV1(session.formatState);
+  if (!state.bout) {
+    throw new HttpError(409, "This Flyting bout has no approved Forge record.");
+  }
+  return state;
+}
+
+function oppositeDebateSide(sideId: DebateSideId): DebateSideId {
+  return sideId === "for" ? "against" : "for";
+}
+
+function flytingPhaseForSession(
+  phase: DebateFlytingFormatStateV1["phase"],
+): DebateSessionV1["phase"] {
+  if (phase === "challenge") return "challenge";
+  if (phase === "rejoinder" || phase === "acclamation") return "rebuttal";
+  if (phase === "final_acclamation" || phase === "verdict" || phase === "complete") {
+    return "verdict";
+  }
+  return "opening";
+}
+
+function flytingStepKey(state: DebateFlytingFormatStateV1): string {
+  if (state.phase === "complete") return "completed";
+  if (state.phase === "intro") return "flyting_intro";
+  if (state.phase === "final_acclamation") {
+    return `flyting_hall_vote_${state.hallVotes.length + 1}`;
+  }
+  if (state.phase === "verdict") return "flyting_host_verdict";
+  return `flyting_${state.phase}_${state.activeExchangeIndex + 1}`;
+}
+
+function flytingPlayerOwnsAction(
+  session: DebateSessionV1,
+  state: DebateFlytingFormatStateV1,
+): boolean {
+  if (
+    session.playerRole === "judge" &&
+    state.expectedAction === "host_verdict"
+  ) return true;
+  return Boolean(
+    session.playerRole === "participant" &&
+    session.playerSideId &&
+    state.floorSideId === session.playerSideId &&
+    (state.expectedAction === "boast" ||
+      state.expectedAction === "challenge" ||
+      state.expectedAction === "rejoinder"),
+  );
+}
+
+function withFlytingState(
+  session: DebateSessionV1,
+  state: DebateFlytingFormatStateV1,
+  winnerSideId: DebateSideId | null = session.winnerSideId,
+): DebateSessionV1 {
+  const completed = state.phase === "complete";
+  const next: DebateSessionV1 = {
+    ...session,
+    formatState: state,
+    phase: flytingPhaseForSession(state.phase),
+    stepKey: flytingStepKey(state),
+    status: completed
+      ? "completed"
+      : flytingPlayerOwnsAction(session, state)
+        ? "waiting_for_player"
+        : "live",
+    winnerSideId,
+    completedAt: completed ? new Date().toISOString() : null,
+  };
+  return next;
+}
+
+function replaceFlytingExchange(
+  state: DebateFlytingFormatStateV1,
+  exchange: DebateFlytingExchangeV1,
+): DebateFlytingFormatStateV1 {
+  return {
+    ...state,
+    exchanges: state.exchanges.map((candidate) =>
+      candidate.index === exchange.index ? exchange : candidate,
+    ),
+  };
+}
+
+function flytingBotForSide(
+  session: DebateSessionV1,
+  sideId: DebateSideId,
+): DebateBotSnapshotV1 {
+  return sideId === "for" ? session.forAdvocate : session.againstAdvocate;
+}
+
+function flytingPublicRecord(state: DebateFlytingFormatStateV1): string {
+  const bout = state.bout!;
+  const flyterName = (sideId: DebateSideId): string =>
+    bout.flyters.find((flyter) => flyter.sideId === sideId)?.name ?? sideId;
+  const lines = state.exchanges.flatMap((exchange) => {
+    if (!exchange.boast) return [];
+    return [
+      `Exchange ${exchange.index + 1} — ${flyterName(exchange.boastingSideId)} boasted: ${exchange.boast.content}`,
+      exchange.challenge
+        ? `${flyterName(exchange.challenge.sideId)} challenged it with ${exchange.challenge.lens}: ${exchange.challenge.content}`
+        : null,
+      exchange.yielded
+        ? `${flyterName(exchange.boastingSideId)} yielded; the charge stands unanswered.`
+        : exchange.rejoinder
+          ? `${flyterName(exchange.rejoinder.sideId)} answered with ${exchange.rejoinder.maneuver}: ${exchange.rejoinder.content}`
+          : null,
+      exchange.resolution ? `Hall record: ${exchange.resolution}.` : null,
+    ].filter((line): line is string => Boolean(line));
+  });
+  return lines.length ? lines.join("\n") : "No claims have yet entered the Hall record.";
+}
+
+function flytingLineBoundaryError(
+  state: DebateFlytingFormatStateV1,
+  rawContent: unknown,
+): string | null {
+  if (typeof rawContent !== "string" || !rawContent.trim()) {
+    return "Write a line before taking the floor, or Yield when answering a charge.";
+  }
+  if (rawContent.trim().length > DEBATE_FLYTING_LINE_MAX_LENGTH) {
+    return `Keep the line within ${DEBATE_FLYTING_LINE_MAX_LENGTH} characters.`;
+  }
+  const content = rawContent.toLocaleLowerCase();
+  if (guidedParticipantChoiceIsUnsafe(content)) {
+    return "Keep the Flyting cutting but sporting; remove threats, slurs, or dangerous instructions.";
+  }
+  const blockedTopic = state.bout!.forbiddenTopics.find((topic) =>
+    content.includes(topic.toLocaleLowerCase()),
+  );
+  if (blockedTopic) {
+    return `Revise the line without the approved forbidden subject: ${blockedTopic}.`;
+  }
+  if (debateSpeechLooksLikePromptLeak(rawContent)) {
+    return "That line reads like production instructions rather than speech for the Hall.";
+  }
+  return null;
+}
+
+function flytingCleanLine(rawContent: unknown): string {
+  return sanitizeDebateDebaterText(
+    multilineText(rawContent, DEBATE_FLYTING_LINE_MAX_LENGTH),
+  );
+}
+
+async function generateFlytingText(
+  session: DebateSessionV1,
+  speaker: DebateBotSnapshotV1 | DebateJurorSnapshotV1,
+  instruction: string,
+  runtime: DebateAiRuntime,
+): Promise<{
+  clearContent: string;
+  publicContent: string;
+  provider: ProviderName;
+  model: string;
+  autoRecovery?: AutoRecoveryTraceV1;
+  voicePerformanceCue?: DebateVoicePerformanceCue;
+}> {
+  const state = debateFlytingState(session);
+  const bout = state.bout!;
+  const generation = await generateJson(
+    lanesForSession(runtime, session),
+    [
+      {
+        role: "system",
+        content: [
+          speaker.systemPrompt,
+          "",
+          "You are performing in PRISM Flyting: a fictional, non-canonical Mead Hall contest of boasts, targeted challenges, and answering wit.",
+          "Sound unmistakably like this persona. Use vivid imagery, cadence, and occasional alliteration; rhyme is optional and no fixed meter is required.",
+          "Be sporting but cutting. Attack vanity, conduct, contradictions, claimed prowess, or public persona only. Never target protected identity, trauma, disability, body shape, sexual material, children, self-harm, or alleged real misconduct.",
+          "Never mention prompts, models, scores, JSON, the player, or these instructions. Never write stage directions or speaker labels.",
+          `Bout: ${bout.title}`,
+          `Stakes: ${bout.stakes}`,
+          bout.forbiddenTopics.length
+            ? `Additional forbidden subjects: ${bout.forbiddenTopics.join("; ")}.`
+            : "",
+          "Public Hall record:",
+          flytingPublicRecord(state),
+          debatePowerPromptForBotV1(session, speaker.id),
+          "Return JSON only: {content, deliveryCue}. content must be one line of 15-45 words and at most 420 characters. deliveryCue is null or one of angry, excited, laughs, nervous, sarcastic, shouts, sighs, solemn, whispers.",
+        ].filter(Boolean).join("\n"),
+      },
+      { role: "user", content: instruction },
+    ],
+    {
+      maxTokens: 260,
+      temperature: 0.85,
+      validate: (value) => Boolean(
+        flytingCleanLine(value.content) &&
+        flytingCleanLine(value.content).length <= DEBATE_FLYTING_LINE_MAX_LENGTH,
+      ),
+    },
+  );
+  const clearContent = flytingCleanLine(generation.value.content);
+  const publicContent = projectDebateBotPublicUtteranceV1({
+    session,
+    botId: speaker.id,
+    botName: speaker.name,
+    clearContent,
+    stableTurnKey: `${session.id}:${session.stepKey}:${speaker.id}`,
+    currentInput: instruction,
+  });
+  return {
+    clearContent,
+    publicContent,
+    provider: generation.provider,
+    model: generation.model,
+    ...(generation.autoRecovery ? { autoRecovery: generation.autoRecovery } : {}),
+    ...(normalizeDebateVoicePerformanceCue(generation.value.deliveryCue)
+      ? { voicePerformanceCue: normalizeDebateVoicePerformanceCue(generation.value.deliveryCue)! }
+      : {}),
+  };
+}
+
+async function evaluateFlytingRejoinder(
+  session: DebateSessionV1,
+  exchange: DebateFlytingExchangeV1,
+  runtime: DebateAiRuntime,
+): Promise<{ resolution: DebateFlytingResolutionV1; acclamation: string }> {
+  if (!exchange.boast || !exchange.challenge || !exchange.rejoinder) {
+    return { resolution: "contested", acclamation: "The Hall cannot agree what answer was given." };
+  }
+  try {
+    const generation = await generateJson(
+      lanesForSession(runtime, session),
+      [
+        {
+          role: "system",
+          content: [
+            "Judge only whether the public rejoinder directly engages the recorded challenge and performs its declared maneuver. Do not judge objective truth, morality, fame, likability, or private biography.",
+            "answered means it directly meets the charge; turned means it successfully reverses the charge; contested means engagement or maneuver fit is genuinely unclear.",
+            "Return JSON only: {resolution, acclamation}. resolution is answered, turned, or contested. acclamation is one short crowd-facing sentence with no numeric score.",
+          ].join("\n"),
+        },
+        {
+          role: "user",
+          content: [
+            `Boast: ${exchange.boast.content}`,
+            `Challenge (${exchange.challenge.lens}): ${exchange.challenge.content}`,
+            `Declared maneuver: ${exchange.rejoinder.maneuver}`,
+            `Rejoinder: ${exchange.rejoinder.content}`,
+          ].join("\n"),
+        },
+      ],
+      {
+        maxTokens: 180,
+        temperature: 0.25,
+        validate: (value) => Boolean(
+          (value.resolution === "answered" || value.resolution === "turned" || value.resolution === "contested") &&
+          compactText(value.acclamation, 300),
+        ),
+      },
+    );
+    return {
+      resolution: generation.value.resolution as DebateFlytingResolutionV1,
+      acclamation: compactText(generation.value.acclamation, 300),
+    };
+  } catch {
+    return {
+      resolution: "contested",
+      acclamation: "The Hall divides; the answer enters the record as contested.",
+    };
+  }
+}
+
+function flytingNextFloorState(
+  session: DebateSessionV1,
+  state: DebateFlytingFormatStateV1,
+  phase: "boast" | "challenge" | "rejoinder",
+  sideId: DebateSideId,
+): DebateFlytingFormatStateV1 {
+  const playerAction =
+    session.playerRole === "participant" && session.playerSideId === sideId;
+  return {
+    ...state,
+    phase,
+    floorSideId: sideId,
+    expectedAction: playerAction ? phase : "advance",
+  };
+}
+
+function flytingLineEvent(
+  session: DebateSessionV1,
+  sideId: DebateSideId,
+  content: string,
+  authoredMode: DebateFlytingAuthoredModeV1,
+  generated?: Awaited<ReturnType<typeof generateFlytingText>>,
+): DebateEventV1 {
+  const bot = flytingBotForSide(session, sideId);
+  return makeEvent(session, {
+    kind: botPowerResponseIsSilentV1(content) ? "silence" : "speech",
+    speakerKind: "advocate",
+    speakerBotId: bot.id,
+    sideId,
+    content,
+    ...(generated && generated.publicContent !== generated.clearContent
+      ? { powerIntendedContent: generated.clearContent }
+      : {}),
+    ...(generated?.provider ? { provider: generated.provider } : {}),
+    ...(generated?.model ? { model: generated.model } : {}),
+    ...(generated?.autoRecovery ? { autoRecovery: generated.autoRecovery } : {}),
+    ...(generated?.voicePerformanceCue
+      ? { voicePerformanceCue: generated.voicePerformanceCue }
+      : {}),
+    ...(authoredMode !== "bot"
+      ? {
+          participantResponseKind: authoredMode === "wielded" ? "guided" : "custom",
+        }
+      : {}),
+  });
+}
+
+async function applyFlytingBoast(
+  session: DebateSessionV1,
+  state: DebateFlytingFormatStateV1,
+  sideId: DebateSideId,
+  legendFacetId: string,
+  authoredMode: DebateFlytingAuthoredModeV1,
+  runtime: DebateAiRuntime,
+  content?: string,
+  skip = false,
+): Promise<{ session: DebateSessionV1; events: DebateEventV1[] }> {
+  const exchange = state.exchanges[state.activeExchangeIndex]!;
+  if (exchange.boast || exchange.boastingSideId !== sideId) {
+    throw new HttpError(409, "That boast no longer owns the floor.");
+  }
+  const flyter = state.bout!.flyters.find((candidate) => candidate.sideId === sideId)!;
+  const usedFacetIds = new Set(
+    state.exchanges.flatMap((candidate) => candidate.boast ? [candidate.boast.legendFacetId] : []),
+  );
+  const facet = flyter.legend.find((candidate) =>
+    candidate.id === legendFacetId && !usedFacetIds.has(candidate.id),
+  );
+  if (!facet) throw new HttpError(409, "Choose an unused Legend facet for this boast.");
+  const generated = content === undefined && !skip
+    ? await generateFlytingText(
+        session,
+        flytingBotForSide(session, sideId),
+        `Make a boast from your Legend facet ${JSON.stringify(facet.title)}: ${facet.claim}`,
+        runtime,
+      )
+    : undefined;
+  const clear = skip ? BOT_POWER_CANONICAL_SILENCE_V1 : (content ?? generated!.clearContent);
+  const publicContent = skip
+    ? BOT_POWER_CANONICAL_SILENCE_V1
+    : content === undefined
+      ? generated!.publicContent
+      : projectDebateBotPublicUtteranceV1({
+          session,
+          botId: flytingBotForSide(session, sideId).id,
+          botName: flytingBotForSide(session, sideId).name,
+          clearContent: clear,
+          stableTurnKey: `${session.id}:${session.stepKey}:${sideId}`,
+        });
+  const event = flytingLineEvent(session, sideId, publicContent, authoredMode, generated ?? (publicContent !== clear ? {
+    clearContent: clear,
+    publicContent,
+    provider: selectedLane(runtime).providerName,
+    model: selectedLane(runtime).model,
+  } : undefined));
+  const boast: DebateFlytingBoastV1 = {
+    id: randomUUID(),
+    sideId,
+    speakerBotId: flytingBotForSide(session, sideId).id,
+    content: publicContent,
+    authoredMode,
+    createdEventId: event.id,
+    legendFacetId: facet.id,
+  };
+  const nextExchange = { ...exchange, boast };
+  const challengedBy = oppositeDebateSide(sideId);
+  const nextState = flytingNextFloorState(
+    session,
+    replaceFlytingExchange(state, nextExchange),
+    "challenge",
+    challengedBy,
+  );
+  return { session: withFlytingState(session, nextState), events: [event] };
+}
+
+async function applyFlytingChallenge(
+  session: DebateSessionV1,
+  state: DebateFlytingFormatStateV1,
+  sideId: DebateSideId,
+  targetClaimId: string,
+  lens: DebateFlytingChargeKindV1,
+  authoredMode: DebateFlytingAuthoredModeV1,
+  runtime: DebateAiRuntime,
+  content?: string,
+  skip = false,
+): Promise<{ session: DebateSessionV1; events: DebateEventV1[] }> {
+  const exchange = state.exchanges[state.activeExchangeIndex]!;
+  if (exchange.challenge || oppositeDebateSide(exchange.boastingSideId) !== sideId) {
+    throw new HttpError(409, "That challenge no longer owns the floor.");
+  }
+  const target = state.exchanges
+    .map((candidate) => candidate.boast)
+    .find((boast) => boast?.id === targetClaimId && boast.sideId !== sideId);
+  if (!target) throw new HttpError(409, "Choose a recorded opponent claim to challenge.");
+  const generated = content === undefined && !skip
+    ? await generateFlytingText(
+        session,
+        flytingBotForSide(session, sideId),
+        `Challenge this exact recorded claim using the ${lens} lens. Claim: ${target.content}`,
+        runtime,
+      )
+    : undefined;
+  const clear = skip ? BOT_POWER_CANONICAL_SILENCE_V1 : (content ?? generated!.clearContent);
+  const publicContent = skip
+    ? BOT_POWER_CANONICAL_SILENCE_V1
+    : content === undefined
+      ? generated!.publicContent
+      : projectDebateBotPublicUtteranceV1({
+          session,
+          botId: flytingBotForSide(session, sideId).id,
+          botName: flytingBotForSide(session, sideId).name,
+          clearContent: clear,
+          stableTurnKey: `${session.id}:${session.stepKey}:${sideId}`,
+          addressedSpeech: target.content,
+          addressedTargetName: flytingBotForSide(session, target.sideId).name,
+        });
+  const event = flytingLineEvent(session, sideId, publicContent, authoredMode, generated ?? (publicContent !== clear ? {
+    clearContent: clear,
+    publicContent,
+    provider: selectedLane(runtime).providerName,
+    model: selectedLane(runtime).model,
+  } : undefined));
+  const challenge: DebateFlytingChallengeV1 = {
+    id: randomUUID(),
+    sideId,
+    speakerBotId: flytingBotForSide(session, sideId).id,
+    content: publicContent,
+    authoredMode,
+    createdEventId: event.id,
+    targetClaimId: target.id,
+    lens,
+  };
+  const nextExchange = { ...exchange, challenge };
+  const nextState = flytingNextFloorState(
+    session,
+    replaceFlytingExchange(state, nextExchange),
+    "rejoinder",
+    exchange.boastingSideId,
+  );
+  return { session: withFlytingState(session, nextState), events: [event] };
+}
+
+async function applyFlytingRejoinder(
+  session: DebateSessionV1,
+  state: DebateFlytingFormatStateV1,
+  sideId: DebateSideId,
+  maneuver: DebateFlytingManeuverV1,
+  returnClaimId: string | null,
+  authoredMode: DebateFlytingAuthoredModeV1,
+  runtime: DebateAiRuntime,
+  content?: string,
+  skip = false,
+): Promise<{ session: DebateSessionV1; events: DebateEventV1[] }> {
+  const exchange = state.exchanges[state.activeExchangeIndex]!;
+  if (!exchange.challenge || exchange.rejoinder || exchange.boastingSideId !== sideId) {
+    throw new HttpError(409, "That rejoinder no longer owns the floor.");
+  }
+  const returnTarget = returnClaimId
+    ? state.exchanges.map((candidate) => candidate.boast).find((boast) =>
+        boast?.id === returnClaimId && boast.sideId !== sideId,
+      ) ?? null
+    : null;
+  if (maneuver === "return" && !returnTarget) {
+    throw new HttpError(409, "Return must name a recorded claim from the challenger.");
+  }
+  if (maneuver !== "return" && returnClaimId) {
+    throw new HttpError(400, "Only Return may target another recorded claim.");
+  }
+  if (skip) {
+    return applyFlytingYield(session, state, sideId);
+  }
+  const generated = content === undefined
+    ? await generateFlytingText(
+        session,
+        flytingBotForSide(session, sideId),
+        [
+          `Answer this exact challenge using the ${maneuver} maneuver: ${exchange.challenge.content}`,
+          returnTarget ? `Return against this recorded claim: ${returnTarget.content}` : "",
+        ].filter(Boolean).join("\n"),
+        runtime,
+      )
+    : undefined;
+  const clear = content ?? generated!.clearContent;
+  const publicContent = content === undefined
+    ? generated!.publicContent
+    : projectDebateBotPublicUtteranceV1({
+        session,
+        botId: flytingBotForSide(session, sideId).id,
+        botName: flytingBotForSide(session, sideId).name,
+        clearContent: clear,
+        stableTurnKey: `${session.id}:${session.stepKey}:${sideId}`,
+        addressedSpeech: exchange.challenge.content,
+        addressedTargetName: flytingBotForSide(session, exchange.challenge.sideId).name,
+      });
+  const event = flytingLineEvent(session, sideId, publicContent, authoredMode, generated ?? (publicContent !== clear ? {
+    clearContent: clear,
+    publicContent,
+    provider: selectedLane(runtime).providerName,
+    model: selectedLane(runtime).model,
+  } : undefined));
+  const rejoinder: DebateFlytingRejoinderV1 = {
+    id: randomUUID(),
+    sideId,
+    speakerBotId: flytingBotForSide(session, sideId).id,
+    content: publicContent,
+    authoredMode,
+    createdEventId: event.id,
+    targetChallengeId: exchange.challenge.id,
+    maneuver,
+    returnClaimId: returnTarget?.id ?? null,
+  };
+  const evaluated = await evaluateFlytingRejoinder(
+    session,
+    { ...exchange, rejoinder },
+    runtime,
+  );
+  const nextExchange: DebateFlytingExchangeV1 = {
+    ...exchange,
+    rejoinder,
+    resolution: evaluated.resolution,
+    acclamation: evaluated.acclamation,
+  };
+  const nextState: DebateFlytingFormatStateV1 = {
+    ...replaceFlytingExchange(state, nextExchange),
+    phase: "acclamation",
+    floorSideId: null,
+    expectedAction: "advance",
+  };
+  return { session: withFlytingState(session, nextState), events: [event] };
+}
+
+function applyFlytingYield(
+  session: DebateSessionV1,
+  state: DebateFlytingFormatStateV1,
+  sideId: DebateSideId,
+): { session: DebateSessionV1; events: DebateEventV1[] } {
+  const exchange = state.exchanges[state.activeExchangeIndex]!;
+  if (!exchange.challenge || exchange.rejoinder || exchange.boastingSideId !== sideId) {
+    throw new HttpError(409, "That charge can no longer be yielded.");
+  }
+  const event = makeEvent(session, {
+    kind: "silence",
+    speakerKind: "advocate",
+    speakerBotId: flytingBotForSide(session, sideId).id,
+    sideId,
+    content: "Yield.",
+    participantResponseKind:
+      session.playerRole === "participant" && session.playerSideId === sideId
+        ? "pass"
+        : undefined,
+  });
+  const nextExchange: DebateFlytingExchangeV1 = {
+    ...exchange,
+    yielded: true,
+    resolution: "unanswered",
+    acclamation: "The Hall strikes the unanswered charge into the record.",
+  };
+  const nextState: DebateFlytingFormatStateV1 = {
+    ...replaceFlytingExchange(state, nextExchange),
+    phase: "acclamation",
+    floorSideId: null,
+    expectedAction: "advance",
+  };
+  return { session: withFlytingState(session, nextState), events: [event] };
+}
+
+async function generateFlytingHallVote(
+  session: DebateSessionV1,
+  state: DebateFlytingFormatStateV1,
+  juror: DebateJurorSnapshotV1,
+  runtime: DebateAiRuntime,
+): Promise<{
+  sideId: DebateSideId;
+  clearAcclaim: string;
+  publicAcclaim: string;
+  provider: ProviderName;
+  model: string;
+  autoRecovery?: AutoRecoveryTraceV1;
+}> {
+  const generation = await generateJson(
+    lanesForSession(runtime, session),
+    [
+      {
+        role: "system",
+        content: [
+          juror.systemPrompt,
+          "You are one independent Hall member casting a final Flyting vote from the complete public record.",
+          "Choose the flyter who answered challenges more memorably and left fewer exposed claims. Persona instinct may color your voice, but use no private knowledge or numeric score.",
+          "Return JSON only: {sideId, acclaim}. sideId is exactly for or against. acclaim is one brief in-character sentence naming why that flyter prevailed.",
+          flytingPublicRecord(state),
+        ].join("\n"),
+      },
+      { role: "user", content: "Cast your vote and acclaim now." },
+    ],
+    {
+      maxTokens: 220,
+      temperature: 0.65,
+      validate: (value) => Boolean(
+        isDebateSideId(value.sideId) && compactText(value.acclaim, 300),
+      ),
+    },
+  );
+  const clearAcclaim = compactText(generation.value.acclaim, 300);
+  const publicAcclaim = projectDebateBotPublicUtteranceV1({
+    session,
+    botId: juror.id,
+    botName: juror.name,
+    clearContent: clearAcclaim,
+    stableTurnKey: `${session.id}:flyting-vote:${juror.id}`,
+  });
+  return {
+    sideId: generation.value.sideId as DebateSideId,
+    clearAcclaim,
+    publicAcclaim,
+    provider: generation.provider,
+    model: generation.model,
+    ...(generation.autoRecovery ? { autoRecovery: generation.autoRecovery } : {}),
+  };
+}
+
+async function generateFlytingHostVerdict(
+  session: DebateSessionV1,
+  state: DebateFlytingFormatStateV1,
+  runtime: DebateAiRuntime,
+): Promise<{
+  sideId: DebateSideId;
+  clearRuling: string;
+  publicRuling: string;
+  provider: ProviderName;
+  model: string;
+  autoRecovery?: AutoRecoveryTraceV1;
+}> {
+  const generation = await generateJson(
+    lanesForSession(runtime, session),
+    [
+      {
+        role: "system",
+        content: [
+          session.moderator.systemPrompt,
+          "You are the Host casting the fifth and deciding Flyting vote after four public Hall votes.",
+          "Crown exactly one winner. Use the complete public record and the Hall votes; break a tie yourself. Never output a tie or numeric score.",
+          "Return JSON only: {sideId, ruling}. sideId is exactly for or against. ruling is one concise ceremonial sentence naming the decisive feat of answering wit.",
+          flytingPublicRecord(state),
+          `Hall votes: ${state.hallVotes.map((vote) => `${vote.voterBotId}=${vote.sideId}: ${vote.acclaim}`).join("\n")}`,
+        ].join("\n"),
+      },
+      { role: "user", content: "Cast the Host's fifth vote and crown the winner." },
+    ],
+    {
+      maxTokens: 240,
+      temperature: 0.5,
+      validate: (value) => Boolean(
+        isDebateSideId(value.sideId) && compactText(value.ruling, DEBATE_FLYTING_LINE_MAX_LENGTH),
+      ),
+    },
+  );
+  const clearRuling = compactText(generation.value.ruling, DEBATE_FLYTING_LINE_MAX_LENGTH);
+  const publicRuling = projectDebateBotPublicUtteranceV1({
+    session,
+    botId: session.moderator.id,
+    botName: session.moderator.name,
+    clearContent: clearRuling,
+    stableTurnKey: `${session.id}:flyting-host-verdict`,
+  });
+  return {
+    sideId: generation.value.sideId as DebateSideId,
+    clearRuling,
+    publicRuling,
+    provider: generation.provider,
+    model: generation.model,
+    ...(generation.autoRecovery ? { autoRecovery: generation.autoRecovery } : {}),
+  };
+}
+
+async function advanceDebateFlyting(
+  session: DebateSessionV1,
+  state: DebateFlytingFormatStateV1,
+  runtime: DebateAiRuntime,
+  skip: boolean,
+): Promise<{ session: DebateSessionV1; events: DebateEventV1[] }> {
+  if (state.expectedAction !== "advance") {
+    throw new HttpError(409, "The Hall is waiting for a player-owned action.");
+  }
+  if (state.phase === "intro") {
+    const generated = skip
+      ? null
+      : await generateFlytingText(
+          session,
+          session.moderator,
+          `Call the Hall to order, name ${state.bout!.title}, state the stakes, and summon both flyters in one concise opening.`,
+          runtime,
+        );
+    const content = generated?.publicContent ??
+      `${state.bout!.title}. The Hall will hear the boasts, the charges, and every answer.`;
+    const event = makeEvent(session, {
+      kind: "intro",
+      speakerKind: session.playerRole === "judge" ? "system" : "moderator",
+      speakerBotId: session.playerRole === "judge" ? null : session.moderator.id,
+      content,
+      ...(generated && generated.publicContent !== generated.clearContent
+        ? { powerIntendedContent: generated.clearContent }
+        : {}),
+      ...(generated ? { provider: generated.provider, model: generated.model } : {}),
+    });
+    const nextState = flytingNextFloorState(session, state, "boast", "for");
+    return { session: withFlytingState(session, nextState), events: [event] };
+  }
+  if (state.phase === "boast" && state.floorSideId) {
+    const flyter = state.bout!.flyters.find((candidate) => candidate.sideId === state.floorSideId)!;
+    const used = new Set(state.exchanges.flatMap((exchange) => exchange.boast ? [exchange.boast.legendFacetId] : []));
+    const facet = flyter.legend.find((candidate) => !used.has(candidate.id)) ?? flyter.legend[0]!;
+    return applyFlytingBoast(session, state, state.floorSideId, facet.id, "bot", runtime, undefined, skip);
+  }
+  if (state.phase === "challenge" && state.floorSideId) {
+    const exchange = state.exchanges[state.activeExchangeIndex]!;
+    return applyFlytingChallenge(
+      session,
+      state,
+      state.floorSideId,
+      exchange.boast!.id,
+      (["doubt", "expose", "belittle", "outdo"] as const)[state.activeExchangeIndex % 4]!,
+      "bot",
+      runtime,
+      undefined,
+      skip,
+    );
+  }
+  if (state.phase === "rejoinder" && state.floorSideId) {
+    const maneuver = (["stand", "own", "turn", "return"] as const)[state.activeExchangeIndex % 4]!;
+    const returnClaim = maneuver === "return"
+      ? state.exchanges.map((exchange) => exchange.boast).find((boast) => boast?.sideId !== state.floorSideId) ?? null
+      : null;
+    return applyFlytingRejoinder(
+      session,
+      state,
+      state.floorSideId,
+      maneuver,
+      returnClaim?.id ?? null,
+      "bot",
+      runtime,
+      undefined,
+      skip,
+    );
+  }
+  if (state.phase === "acclamation") {
+    const exchange = state.exchanges[state.activeExchangeIndex]!;
+    const event = makeEvent(session, {
+      kind: "reaction",
+      speakerKind: "system",
+      content: exchange.acclamation ?? "The Hall answers with divided noise.",
+      audienceReaction:
+        exchange.resolution === "turned"
+          ? { kind: "impressed", intensity: 3, source: "director" }
+          : exchange.resolution === "answered"
+            ? { kind: "impressed", intensity: 2, source: "director" }
+            : exchange.resolution === "unanswered"
+              ? { kind: "laugh", intensity: 2, source: "director" }
+              : { kind: "gasp", intensity: 1, source: "director" },
+    });
+    if (state.activeExchangeIndex + 1 < DEBATE_FLYTING_EXCHANGE_COUNT) {
+      const activeExchangeIndex = state.activeExchangeIndex + 1;
+      const boastingSideId = state.exchanges[activeExchangeIndex]!.boastingSideId;
+      const nextState = flytingNextFloorState(
+        session,
+        { ...state, activeExchangeIndex },
+        "boast",
+        boastingSideId,
+      );
+      return { session: withFlytingState(session, nextState), events: [event] };
+    }
+    return {
+      session: withFlytingState(session, {
+        ...state,
+        phase: "final_acclamation",
+        floorSideId: null,
+        expectedAction: "advance",
+      }),
+      events: [event],
+    };
+  }
+  if (state.phase === "final_acclamation") {
+    const juror = session.jury.jurors[state.hallVotes.length];
+    if (!juror) {
+      const nextState: DebateFlytingFormatStateV1 = {
+        ...state,
+        phase: "verdict",
+        expectedAction: session.playerRole === "judge" ? "host_verdict" : "advance",
+      };
+      return { session: withFlytingState(session, nextState), events: [] };
+    }
+    const skippedVoteSideId: DebateSideId =
+      state.hallVotes.length % 2 === 0 ? "for" : "against";
+    const skippedVoteAcclaim = `By the carved record, I give the word to ${flytingBotForSide(session, skippedVoteSideId).name}.`;
+    const lane = selectedLane(runtime);
+    const vote = skip
+      ? {
+          sideId: skippedVoteSideId,
+          clearAcclaim: skippedVoteAcclaim,
+          publicAcclaim: skippedVoteAcclaim,
+          provider: lane.providerName,
+          model: lane.model,
+        }
+      : await generateFlytingHallVote(session, state, juror, runtime);
+    const event = makeEvent(session, {
+      kind: "ballot",
+      speakerKind: "juror",
+      speakerBotId: juror.id,
+      sideId: vote.sideId,
+      content: vote.publicAcclaim,
+      ...(vote.publicAcclaim !== vote.clearAcclaim
+        ? { powerIntendedContent: vote.clearAcclaim }
+        : {}),
+      provider: vote.provider,
+      model: vote.model,
+      ...(vote.autoRecovery ? { autoRecovery: vote.autoRecovery } : {}),
+    });
+    const hallVote = {
+      voterBotId: juror.id,
+      sideId: vote.sideId,
+      acclaim: vote.publicAcclaim,
+      createdEventId: event.id,
+    };
+    const ballot: DebateJuryBallotV1 = {
+      version: DEBATE_SCHEMA_VERSION,
+      jurorBotId: juror.id,
+      stage: "final",
+      sideId: vote.sideId,
+      confidence: 0.75,
+      personaInstinct: "Hall acclamation",
+      reason: vote.publicAcclaim,
+      ...(vote.publicAcclaim !== vote.clearAcclaim
+        ? { powerIntendedReason: vote.clearAcclaim }
+        : {}),
+      provider: vote.provider,
+      model: vote.model,
+      ...(vote.autoRecovery ? { autoRecovery: vote.autoRecovery } : {}),
+      createdAt: new Date().toISOString(),
+    };
+    const hallVotes = [...state.hallVotes, hallVote];
+    const nextState: DebateFlytingFormatStateV1 = hallVotes.length >= DEBATE_JURY_SIZE
+      ? {
+          ...state,
+          hallVotes,
+          phase: "verdict",
+          expectedAction: session.playerRole === "judge" ? "host_verdict" : "advance",
+        }
+      : { ...state, hallVotes };
+    const nextSession = withFlytingState(
+      {
+        ...session,
+        jury: {
+          ...session.jury,
+          phase: hallVotes.length >= DEBATE_JURY_SIZE ? "final_ballots" : "final_ballots",
+          finalBallots: [...session.jury.finalBallots, ballot],
+        },
+      },
+      nextState,
+    );
+    return { session: nextSession, events: [event] };
+  }
+  if (state.phase === "verdict") {
+    if (skip) {
+      const forVotes = state.hallVotes.filter((vote) => vote.sideId === "for").length;
+      const againstVotes = state.hallVotes.length - forVotes;
+      const sideId: DebateSideId = forVotes >= againstVotes ? "for" : "against";
+      const ruling = `The Hall is heard. ${flytingBotForSide(session, sideId).name} takes the word for the stronger answers carved in this record.`;
+      const lane = selectedLane(runtime);
+      return applyFlytingHostVerdict(
+        session,
+        state,
+        sideId,
+        ruling,
+        "bot",
+        {
+          sideId,
+          clearRuling: ruling,
+          publicRuling: ruling,
+          provider: lane.providerName,
+          model: lane.model,
+        },
+      );
+    }
+    const verdict = await generateFlytingHostVerdict(session, state, runtime);
+    return applyFlytingHostVerdict(
+      session,
+      state,
+      verdict.sideId,
+      verdict.publicRuling,
+      "bot",
+      verdict,
+    );
+  }
+  throw new HttpError(409, "The Flyting bout is already complete.");
+}
+
+function applyFlytingHostVerdict(
+  session: DebateSessionV1,
+  state: DebateFlytingFormatStateV1,
+  winnerSideId: DebateSideId,
+  publicRuling: string,
+  authoredMode: DebateFlytingAuthoredModeV1,
+  generated?: Awaited<ReturnType<typeof generateFlytingHostVerdict>>,
+): { session: DebateSessionV1; events: DebateEventV1[] } {
+  const event = makeEvent(session, {
+    kind: "verdict",
+    speakerKind: authoredMode === "bot" ? "moderator" : "player",
+    speakerBotId: authoredMode === "bot" ? session.moderator.id : null,
+    sideId: winnerSideId,
+    content: publicRuling,
+    ...(generated && generated.publicRuling !== generated.clearRuling
+      ? { powerIntendedContent: generated.clearRuling }
+      : {}),
+    ...(generated ? { provider: generated.provider, model: generated.model } : {}),
+    ...(generated?.autoRecovery ? { autoRecovery: generated.autoRecovery } : {}),
+    ...(authoredMode !== "bot"
+      ? { participantResponseKind: authoredMode === "wielded" ? "guided" : "custom" }
+      : {}),
+  });
+  const nextState: DebateFlytingFormatStateV1 = {
+    ...state,
+    phase: "complete",
+    expectedAction: "complete",
+    floorSideId: null,
+    hostVerdict: {
+      sideId: winnerSideId,
+      ruling: publicRuling,
+      authoredMode,
+      createdEventId: event.id,
+    },
+  };
+  const moderatorBallot: DebateBallotV1 | null = authoredMode === "bot"
+    ? {
+        version: DEBATE_SCHEMA_VERSION,
+        voterBotId: session.moderator.id,
+        sideId: winnerSideId,
+        reason: publicRuling,
+        privateReason: false,
+        ...(generated ? { provider: generated.provider, model: generated.model } : {}),
+        ...(generated?.autoRecovery ? { autoRecovery: generated.autoRecovery } : {}),
+        createdAt: new Date().toISOString(),
+      }
+    : null;
+  const nextSession = withFlytingState(
+    {
+      ...session,
+      playerVerdict: authoredMode === "bot" ? null : winnerSideId,
+      ballots: moderatorBallot ? [...session.ballots, moderatorBallot] : session.ballots,
+      jury: {
+        ...session.jury,
+        phase: "complete",
+        moderatorBallot,
+        majoritySideId: winnerSideId,
+        forVotes:
+          state.hallVotes.filter((vote) => vote.sideId === "for").length +
+          (moderatorBallot?.sideId === "for" ? 1 : 0),
+        againstVotes:
+          state.hallVotes.filter((vote) => vote.sideId === "against").length +
+          (moderatorBallot?.sideId === "against" ? 1 : 0),
+        completedAt: new Date().toISOString(),
+      },
+    },
+    nextState,
+    winnerSideId,
+  );
+  return { session: nextSession, events: [event] };
+}
+
+export async function generateDebateFlytingWield(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  request: DebateFlytingWieldRequest,
+  runtime: DebateAiRuntime,
+): Promise<DebateFlytingWieldResponseV1> {
+  const session = getDebateSession(db, userId, sessionId);
+  if (session.revision !== request.expectedRevision) {
+    throw new HttpError(409, "The Hall record changed. Refresh before Wielding PRISM again.");
+  }
+  const state = debateFlytingState(session);
+  if (!flytingPlayerOwnsAction(session, state) || request.action !== state.expectedAction) {
+    throw new HttpError(409, "Wield PRISM is unavailable for the current floor.");
+  }
+  const sideId = state.floorSideId ?? request.winnerSideId;
+  const speaker = request.action === "host_verdict"
+    ? session.moderator
+    : sideId
+      ? flytingBotForSide(session, sideId)
+      : null;
+  if (!speaker) throw new HttpError(409, "No Flyting speaker owns this floor.");
+  let instruction = "";
+  if (request.action === "boast") {
+    const facet = state.bout!.flyters
+      .find((flyter) => flyter.sideId === sideId)?.legend
+      .find((candidate) => candidate.id === request.legendFacetId);
+    if (!facet) throw new HttpError(409, "Choose an unused Legend facet first.");
+    instruction = `Draft a boast from ${facet.title}: ${facet.claim}`;
+  } else if (request.action === "challenge") {
+    const target = state.exchanges.map((exchange) => exchange.boast)
+      .find((boast) => boast?.id === request.targetClaimId);
+    if (!target || !isDebateFlytingChargeKindV1(request.lens)) {
+      throw new HttpError(409, "Choose a recorded claim and Challenge lens first.");
+    }
+    instruction = `Draft a ${request.lens} challenge against this exact claim: ${target.content}`;
+  } else if (request.action === "rejoinder") {
+    const exchange = state.exchanges[state.activeExchangeIndex]!;
+    if (!exchange.challenge || !isDebateFlytingManeuverV1(request.maneuver)) {
+      throw new HttpError(409, "Choose a Rejoinder maneuver first.");
+    }
+    instruction = `Draft a ${request.maneuver} rejoinder to this exact challenge: ${exchange.challenge.content}`;
+  } else {
+    if (!isDebateSideId(request.winnerSideId)) {
+      throw new HttpError(409, "Choose the winning flyter before Wielding a ruling.");
+    }
+    instruction = `Draft a concise Host ruling crowning ${flytingBotForSide(session, request.winnerSideId).name} from the complete public Hall record.`;
+  }
+  const generated = await generateFlytingText(session, speaker, instruction, runtime);
+  return {
+    content: generated.clearContent,
+    provider: generated.provider,
+    model: generated.model,
+  };
+}
+
+export async function submitDebateFlytingAction(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  request: DebateFlytingActionRequest,
+  runtime: DebateAiRuntime,
+): Promise<DebateSessionV1> {
+  const checked = assertMutation(db, userId, sessionId, request);
+  if (checked.replay) return checked.replay;
+  const session = checked.session;
+  const state = debateFlytingState(session);
+  if (session.status === "completed" || state.phase === "complete") {
+    throw new HttpError(409, "This Flyting bout is already complete.");
+  }
+  if (session.status === "paused") {
+    throw new HttpError(409, "Resume the Flyting bout before taking the floor.");
+  }
+  let result: { session: DebateSessionV1; events: DebateEventV1[] };
+  if (request.action === "advance") {
+    result = await advanceDebateFlyting(session, state, runtime, request.skip === true);
+  } else {
+    if (!flytingPlayerOwnsAction(session, state)) {
+      throw new HttpError(409, "The Hall is not waiting for your action.");
+    }
+    if (request.action !== "yield") {
+      const boundaryError = flytingLineBoundaryError(state, request.content);
+      if (boundaryError) throw new HttpError(400, boundaryError);
+    }
+    const authoredMode: DebateFlytingAuthoredModeV1 =
+      request.authoredMode === "wielded" ? "wielded" : "custom";
+    if (request.action === "boast" && state.expectedAction === "boast" && state.floorSideId) {
+      result = await applyFlytingBoast(
+        session,
+        state,
+        state.floorSideId,
+        compactText(request.legendFacetId, 120),
+        authoredMode,
+        runtime,
+        flytingCleanLine(request.content),
+      );
+    } else if (
+      request.action === "challenge" &&
+      state.expectedAction === "challenge" &&
+      state.floorSideId &&
+      isDebateFlytingChargeKindV1(request.lens)
+    ) {
+      result = await applyFlytingChallenge(
+        session,
+        state,
+        state.floorSideId,
+        compactText(request.targetClaimId, 120),
+        request.lens,
+        authoredMode,
+        runtime,
+        flytingCleanLine(request.content),
+      );
+    } else if (
+      request.action === "rejoinder" &&
+      state.expectedAction === "rejoinder" &&
+      state.floorSideId &&
+      isDebateFlytingManeuverV1(request.maneuver)
+    ) {
+      result = await applyFlytingRejoinder(
+        session,
+        state,
+        state.floorSideId,
+        request.maneuver,
+        compactText(request.returnClaimId, 120) || null,
+        authoredMode,
+        runtime,
+        flytingCleanLine(request.content),
+      );
+    } else if (
+      request.action === "yield" &&
+      state.expectedAction === "rejoinder" &&
+      state.floorSideId
+    ) {
+      result = applyFlytingYield(session, state, state.floorSideId);
+    } else if (
+      request.action === "host_verdict" &&
+      state.expectedAction === "host_verdict" &&
+      session.playerRole === "judge" &&
+      isDebateSideId(request.winnerSideId)
+    ) {
+      result = applyFlytingHostVerdict(
+        session,
+        state,
+        request.winnerSideId,
+        flytingCleanLine(request.content),
+        authoredMode,
+      );
+    } else {
+      throw new HttpError(409, "That Flyting action no longer owns the floor.");
+    }
+  }
+  return commitMutation(
+    db,
+    userId,
+    session,
+    result.session,
+    checked.idempotencyKey,
+    result.events,
+  );
+}
+
 export async function submitDebateTurnaboutAction(
   db: DatabaseSync,
   userId: string,
@@ -21352,11 +22658,15 @@ function resumeDebateSessionOnce(
   const resumedStatus =
     session.stepKey === "completed" && session.completedAt
       ? "completed"
-      : session.judgeGavel?.status === "awaiting_message" ||
-          session.objectionRuling?.status === "awaiting_ruling" ||
-          session.participantObjection?.status === "awaiting_reason"
-        ? "waiting_for_player"
-        : statusForStep(session.stepKey);
+      : session.format === "flyting" && session.formatState.format === "flyting"
+        ? flytingPlayerOwnsAction(session, debateFlytingState(session))
+          ? "waiting_for_player"
+          : "live"
+        : session.judgeGavel?.status === "awaiting_message" ||
+            session.objectionRuling?.status === "awaiting_ruling" ||
+            session.participantObjection?.status === "awaiting_reason"
+          ? "waiting_for_player"
+          : statusForStep(session.stepKey);
   const preparedResumeEvent = session.preparedResumeEventId
     ? (session.events.find(
         (event) => event.id === session.preparedResumeEventId,

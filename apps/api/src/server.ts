@@ -239,6 +239,8 @@ import {
   expireDebateParticipantWindow,
   forfeitParticipantDebateSession,
   generateDebateEvidenceExcerpt,
+  generateDebateFlytingForge,
+  generateDebateFlytingWield,
   generateDebateRefractDraft,
   getDebateSession,
   listDebateSessions,
@@ -267,6 +269,7 @@ import {
   resumeDebateSessionWithPersona,
   sealDebateSessionPresentation,
   submitDebateInterjection,
+  submitDebateFlytingAction,
   submitDebateJudgeGavelMessage,
   submitDebateObjectionRuling,
   submitDebatePlayerTurn,
@@ -10024,8 +10027,10 @@ async function prepareDebateMysteryV2EvidenceAssets(
     "debate_exhibit",
     { provider: "openai" },
   );
-  const online =
-    session.responseMode !== "local" && !userBlocksOnlineCapabilities(user);
+  // The case's synthesis lane is frozen when Case Forge begins. Account mode
+  // may change while the durable job continues in the background, but it must
+  // neither revoke an already-authorized ONLINE pack nor upgrade a LOCAL one.
+  const online = session.responseMode !== "local";
   const userKey = decryptUserKey(args.userId);
   const apiKey = online
     ? getOpenAiApiKeyForUser(args.userId, userKey) ?? config.openAiApiKey
@@ -10198,9 +10203,7 @@ async function prepareDebateMysteryV2MansionExteriorAssetDirect(
     mimeType: "image/png",
   });
   const user = getUserRow(args.userId);
-  const online = args.synthesize &&
-    session.responseMode !== "local" &&
-    !userBlocksOnlineCapabilities(user);
+  const online = args.synthesize && session.responseMode !== "local";
   const selection = resolveTypedAssetGenerationSelection(
     args.userId,
     "debate_exhibit",
@@ -10350,8 +10353,7 @@ async function prepareDebateMysteryV2RoomAssets(
     throw new HttpError(409, "Room preparation requires a Whodunnit V2 case.");
   }
   const user = getUserRow(args.userId);
-  const online =
-    session.responseMode !== "local" && !userBlocksOnlineCapabilities(user);
+  const online = session.responseMode !== "local";
   const userKey = decryptUserKey(args.userId);
   const apiKey = online
     ? getOpenAiApiKeyForUser(args.userId, userKey) ?? config.openAiApiKey
@@ -10546,9 +10548,7 @@ function debateMysteryRoomArtUpgradeStatusV1(
     rowBySubjectId.get(debateMysteryIllustratedRoomSubjectIdV1(roomId))?.status === "fallback");
   const upgradeRunning = mysteryRoomArtUpgradeRuns.has(`${userId}:${sessionId}`);
   const running = upgradeRunning || pendingBaseRoomIds.length > 0;
-  const online =
-    session.responseMode !== "local" &&
-    !userBlocksOnlineCapabilities(getUserRow(userId));
+  const online = session.responseMode !== "local";
   const sourcesReady = pendingBaseRoomIds.length === 0;
   const complete = sourcesReady && (
     requiresUpgradeRoomIds.length === 0 ||
@@ -10591,7 +10591,7 @@ async function prepareDebateMysteryIllustratedRoomsV1(
   }
   const mysteryState = session.formatState;
   const user = getUserRow(userId);
-  if (session.responseMode === "local" || userBlocksOnlineCapabilities(user)) {
+  if (session.responseMode === "local") {
     throw new HttpError(
       409,
       "Illustrated room upgrades require ONLINE. LOCAL never sends mansion art to a remote generator.",
@@ -18429,6 +18429,44 @@ function buildRoutes(): RouteDefinition[] {
       );
       json(ctx.res, 200, { ok: true, slates });
     }),
+    route("POST", "/api/debates/flyting/forge", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const runtime = await debateAiRuntimeForUser(
+        userId,
+        body.preferredProvider,
+        body.modelOverride,
+        body.responseMode,
+        undefined,
+        undefined,
+        {
+          surface: "debate",
+          frozenReasoningEffort: normalizeProviderReasoningEffort(
+            body.reasoningEffort,
+          ),
+          ...(typeof body.turbo === "boolean"
+            ? { frozenTurbo: body.turbo }
+            : {}),
+        },
+      );
+      const result = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "debate",
+          surface: "debate",
+        },
+        () =>
+          generateDebateFlytingForge(
+            db,
+            userId,
+            body as unknown as Parameters<typeof generateDebateFlytingForge>[2],
+            runtime,
+          ),
+      );
+      json(ctx.res, 200, { ok: true, ...result });
+    }),
     route("POST", "/api/debates/setup-suggestion", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
@@ -19349,7 +19387,7 @@ function buildRoutes(): RouteDefinition[] {
         throw new HttpError(409, "Failed visuals can be retried after Case Forge completes.");
       }
       const user = getUserRow(userId);
-      if (session.responseMode === "local" || userBlocksOnlineCapabilities(user)) {
+      if (session.responseMode === "local") {
         throw new HttpError(409, "Visual retries require an ONLINE Whodunnit case.");
       }
       const userKey = decryptUserKey(userId);
@@ -21694,6 +21732,72 @@ function buildRoutes(): RouteDefinition[] {
             userId,
             ctx.params.id,
             ctx.body as Parameters<typeof submitDebateObjectionRuling>[3],
+            runtime,
+          ),
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
+    }),
+    route("POST", "/api/debates/:id/flyting-wield", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      const runtime = await debateAiRuntimeForUser(
+        userId,
+        frozen.provider,
+        frozenDebateModelOverride(frozen),
+        frozen.responseMode,
+        frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
+      );
+      const result = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "debate",
+          surface: "debate",
+        },
+        () =>
+          generateDebateFlytingWield(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.body as Parameters<typeof generateDebateFlytingWield>[3],
+            runtime,
+          ),
+      );
+      json(ctx.res, 200, { ok: true, ...result });
+    }),
+    route("POST", "/api/debates/:id/flyting-action", async (ctx) => {
+      const userId = requireAuth(ctx);
+      invalidateTurnPreparation(userId, "debate", ctx.params.id, "A Flyting action changed the Hall record.");
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      const runtime = await debateAiRuntimeForUser(
+        userId,
+        frozen.provider,
+        frozenDebateModelOverride(frozen),
+        frozen.responseMode,
+        frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
+      );
+      const session = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "debate",
+          surface: "debate",
+        },
+        () =>
+          submitDebateFlytingAction(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.body as Parameters<typeof submitDebateFlytingAction>[3],
             runtime,
           ),
       );

@@ -92,9 +92,12 @@ export const DEBATE_JURY_DISCUSSION_TURNS = 5;
 export const DEBATE_JURY_EARLY_DISCUSSION_TURNS = 3;
 export const DEBATE_FORUM_MIN_REBUTTAL_ROUNDS = 1;
 export const DEBATE_FORUM_MAX_REBUTTAL_ROUNDS = 3;
+export const DEBATE_FLYTING_SCHEMA_VERSION = 1 as const;
+export const DEBATE_FLYTING_EXCHANGE_COUNT = 4 as const;
+export const DEBATE_FLYTING_LINE_MAX_LENGTH = 420 as const;
 
-export type DebateFormatId = "forum" | "turnabout" | "whodunnit";
-export type DebateFormatCatalogId = DebateFormatId | "flyting" | "cypher";
+export type DebateFormatId = "forum" | "turnabout" | "whodunnit" | "flyting";
+export type DebateFormatCatalogId = DebateFormatId | "cypher";
 
 export interface DebateFormatVisualThemeV1 {
   accentDark: string;
@@ -398,7 +401,7 @@ export const DEBATE_FORMAT_CATALOG: readonly DebateFormatCatalogEntryV1[] = [
     summary:
       "A ritual contest of boast, insult, answering verse, and crowd acclamation.",
     cadence: "Boast · Flyte · Rejoinder · Acclamation",
-    availability: "coming_soon",
+    availability: "available",
   },
   {
     id: "cypher",
@@ -597,9 +600,134 @@ export interface DebateTurnaboutFormatStateV1 {
   } | null;
 }
 
+export type DebateFlytingPhaseV1 =
+  | "intro"
+  | "boast"
+  | "challenge"
+  | "rejoinder"
+  | "acclamation"
+  | "final_acclamation"
+  | "verdict"
+  | "complete";
+
+export type DebateFlytingChargeKindV1 =
+  | "doubt"
+  | "expose"
+  | "belittle"
+  | "outdo";
+
+export type DebateFlytingManeuverV1 = "stand" | "own" | "turn" | "return";
+
+export type DebateFlytingResolutionV1 =
+  | "answered"
+  | "turned"
+  | "unanswered"
+  | "contested";
+
+export type DebateFlytingAuthoredModeV1 = "bot" | "custom" | "wielded";
+
+export type DebateFlytingExpectedActionV1 =
+  | "advance"
+  | "boast"
+  | "challenge"
+  | "rejoinder"
+  | "yield"
+  | "host_verdict"
+  | "complete";
+
+export interface DebateFlytingLegendFacetV1 {
+  id: string;
+  title: string;
+  claim: string;
+}
+
+export interface DebateFlytingFlyterV1 {
+  sideId: DebateSideId;
+  botId: string;
+  name: string;
+  epithet: string;
+  legend: DebateFlytingLegendFacetV1[];
+}
+
+/** Player-approved, frozen theatrical framing for one Mead Hall contest. */
+export interface DebateFlytingBoutV1 {
+  version: typeof DEBATE_FLYTING_SCHEMA_VERSION;
+  id: string;
+  title: string;
+  stakes: string;
+  rivalrySpark: string;
+  forbiddenTopics: string[];
+  flyters: [DebateFlytingFlyterV1, DebateFlytingFlyterV1];
+  frozenAt: string | null;
+}
+
+export interface DebateFlytingLineV1 {
+  id: string;
+  sideId: DebateSideId;
+  speakerBotId: string;
+  content: string;
+  authoredMode: DebateFlytingAuthoredModeV1;
+  createdEventId: string;
+}
+
+export interface DebateFlytingBoastV1 extends DebateFlytingLineV1 {
+  legendFacetId: string;
+}
+
+export interface DebateFlytingChallengeV1 extends DebateFlytingLineV1 {
+  targetClaimId: string;
+  lens: DebateFlytingChargeKindV1;
+}
+
+export interface DebateFlytingRejoinderV1 extends DebateFlytingLineV1 {
+  targetChallengeId: string;
+  maneuver: DebateFlytingManeuverV1;
+  returnClaimId: string | null;
+}
+
+export interface DebateFlytingExchangeV1 {
+  id: string;
+  index: number;
+  boastingSideId: DebateSideId;
+  boast: DebateFlytingBoastV1 | null;
+  challenge: DebateFlytingChallengeV1 | null;
+  rejoinder: DebateFlytingRejoinderV1 | null;
+  yielded: boolean;
+  resolution: DebateFlytingResolutionV1 | null;
+  acclamation: string | null;
+}
+
+export interface DebateFlytingHallVoteV1 {
+  voterBotId: string;
+  sideId: DebateSideId;
+  acclaim: string;
+  createdEventId: string;
+}
+
+export interface DebateFlytingHostVerdictV1 {
+  sideId: DebateSideId;
+  ruling: string;
+  authoredMode: DebateFlytingAuthoredModeV1;
+  createdEventId: string;
+}
+
+export interface DebateFlytingFormatStateV1 {
+  version: typeof DEBATE_FLYTING_SCHEMA_VERSION;
+  format: "flyting";
+  phase: DebateFlytingPhaseV1;
+  activeExchangeIndex: number;
+  expectedAction: DebateFlytingExpectedActionV1;
+  floorSideId: DebateSideId | null;
+  bout: DebateFlytingBoutV1 | null;
+  exchanges: DebateFlytingExchangeV1[];
+  hallVotes: DebateFlytingHallVoteV1[];
+  hostVerdict: DebateFlytingHostVerdictV1 | null;
+}
+
 export type DebateFormatStateV1 =
   | DebateForumFormatStateV1
   | DebateTurnaboutFormatStateV1
+  | DebateFlytingFormatStateV1
   | DebateWhodunnitFormatStateV1
   | DebateWhodunnitFormatStateV2;
 
@@ -1687,6 +1815,10 @@ export function resolveDebateForumRoundPlan(args: {
 export interface DebateSessionCreateRequest {
   format?: DebateFormatId;
   whodunnit?: DebateWhodunnitCreateConfigV1 | DebateWhodunnitCreateConfigV2;
+  flyting?: {
+    version: typeof DEBATE_FLYTING_SCHEMA_VERSION;
+    bout: DebateFlytingBoutV1;
+  };
   formality?: DebateFormalityId;
   presetId?: DebateSetupPresetId | "custom";
   jury?: {
@@ -1897,6 +2029,64 @@ export interface DebateTurnaboutActionRequest extends DebateMutationRequest {
   action: DebateTurnaboutAction;
   statementId: string;
   evidenceSourceId?: string | null;
+}
+
+export interface DebateFlytingForgeRequest {
+  forAdvocateBotId: string;
+  againstAdvocateBotId: string;
+  rivalrySpark?: string;
+  forbiddenTopics?: string[];
+  preferredProvider?: LlmProviderName;
+  modelOverride?: string | null;
+  responseMode?: ResponseMode;
+  reasoningEffort?: ProviderReasoningEffort;
+  turbo?: boolean;
+}
+
+export interface DebateFlytingForgeResponseV1 {
+  bout: DebateFlytingBoutV1;
+  provider: LlmProviderName;
+  model: string;
+}
+
+export type DebateFlytingActionV1 =
+  | "advance"
+  | "boast"
+  | "challenge"
+  | "rejoinder"
+  | "yield"
+  | "host_verdict";
+
+export interface DebateFlytingActionRequest extends DebateMutationRequest {
+  action: DebateFlytingActionV1;
+  skip?: boolean;
+  content?: string;
+  authoredMode?: Exclude<DebateFlytingAuthoredModeV1, "bot">;
+  legendFacetId?: string | null;
+  targetClaimId?: string | null;
+  lens?: DebateFlytingChargeKindV1 | null;
+  targetChallengeId?: string | null;
+  maneuver?: DebateFlytingManeuverV1 | null;
+  returnClaimId?: string | null;
+  winnerSideId?: DebateSideId | null;
+}
+
+export interface DebateFlytingWieldRequest {
+  expectedRevision: number;
+  action: "boast" | "challenge" | "rejoinder" | "host_verdict";
+  legendFacetId?: string | null;
+  targetClaimId?: string | null;
+  lens?: DebateFlytingChargeKindV1 | null;
+  targetChallengeId?: string | null;
+  maneuver?: DebateFlytingManeuverV1 | null;
+  returnClaimId?: string | null;
+  winnerSideId?: DebateSideId | null;
+}
+
+export interface DebateFlytingWieldResponseV1 {
+  content: string;
+  provider: LlmProviderName;
+  model: string;
 }
 
 export interface DebateSessionAdvocateVisualV1 {
@@ -3552,11 +3742,42 @@ export function coerceDebateBallotSideId(
 }
 
 export function isDebateFormatId(value: unknown): value is DebateFormatId {
-  return value === "forum" || value === "turnabout" || value === "whodunnit";
+  return (
+    value === "forum" ||
+    value === "turnabout" ||
+    value === "whodunnit" ||
+    value === "flyting"
+  );
 }
 
 export function normalizeDebateFormatId(value: unknown): DebateFormatId {
-  return value === "turnabout" || value === "whodunnit" ? value : "forum";
+  return value === "turnabout" ||
+    value === "whodunnit" ||
+    value === "flyting"
+    ? value
+    : "forum";
+}
+
+export function isDebateFlytingChargeKindV1(
+  value: unknown,
+): value is DebateFlytingChargeKindV1 {
+  return (
+    value === "doubt" ||
+    value === "expose" ||
+    value === "belittle" ||
+    value === "outdo"
+  );
+}
+
+export function isDebateFlytingManeuverV1(
+  value: unknown,
+): value is DebateFlytingManeuverV1 {
+  return (
+    value === "stand" ||
+    value === "own" ||
+    value === "turn" ||
+    value === "return"
+  );
 }
 
 export function isDebateSetupPresetId(
@@ -3780,10 +4001,236 @@ export function normalizeDebateJuryStateV1(value: unknown): DebateJuryStateV1 {
   };
 }
 
+function defaultDebateFlytingExchangesV1(): DebateFlytingExchangeV1[] {
+  return Array.from({ length: DEBATE_FLYTING_EXCHANGE_COUNT }, (_, index) => ({
+    id: `exchange-${index + 1}`,
+    index,
+    boastingSideId: index % 2 === 0 ? "for" : "against",
+    boast: null,
+    challenge: null,
+    rejoinder: null,
+    yielded: false,
+    resolution: null,
+    acclamation: null,
+  }));
+}
+
+export function defaultDebateFlytingFormatStateV1(): DebateFlytingFormatStateV1 {
+  return {
+    version: DEBATE_FLYTING_SCHEMA_VERSION,
+    format: "flyting",
+    phase: "intro",
+    activeExchangeIndex: 0,
+    expectedAction: "advance",
+    floorSideId: null,
+    bout: null,
+    exchanges: defaultDebateFlytingExchangesV1(),
+    hallVotes: [],
+    hostVerdict: null,
+  };
+}
+
+export function normalizeDebateFlytingBoutV1(
+  value: unknown,
+): DebateFlytingBoutV1 | null {
+  const source = value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : {};
+  const rawFlyters = Array.isArray(source.flyters) ? source.flyters : [];
+  const flyters = rawFlyters.slice(0, 2).flatMap((value, index) => {
+    const row = value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+    const botId = normalizedText(row.botId, 200);
+    const name = normalizedText(row.name, 80);
+    const epithet = normalizedText(row.epithet, 96);
+    const rawLegend = Array.isArray(row.legend) ? row.legend : [];
+    const legend = rawLegend.slice(0, 3).flatMap((value, facetIndex) => {
+      const facet = value && typeof value === "object"
+        ? (value as Record<string, unknown>)
+        : {};
+      const title = normalizedText(facet.title, 80);
+      const claim = normalizedMultilineText(facet.claim, 280);
+      if (!title || !claim) return [];
+      return [{
+        id: normalizedText(facet.id, 120) || `legend-${index + 1}-${facetIndex + 1}`,
+        title,
+        claim,
+      } satisfies DebateFlytingLegendFacetV1];
+    });
+    if (!botId || !name || !epithet || legend.length !== 3) return [];
+    return [{
+      sideId: index === 0 ? "for" : "against",
+      botId,
+      name,
+      epithet,
+      legend,
+    } satisfies DebateFlytingFlyterV1];
+  });
+  const title = normalizedText(source.title, DEBATE_TITLE_MAX_LENGTH);
+  const stakes = normalizedMultilineText(source.stakes, 600);
+  if (!title || !stakes || flyters.length !== 2 || flyters[0]!.botId === flyters[1]!.botId) {
+    return null;
+  }
+  return {
+    version: DEBATE_FLYTING_SCHEMA_VERSION,
+    id: normalizedText(source.id, 120) || `flyting-${flyters.map((flyter) => flyter.botId).join("-")}`,
+    title,
+    stakes,
+    rivalrySpark: normalizedMultilineText(source.rivalrySpark, 800),
+    forbiddenTopics: Array.isArray(source.forbiddenTopics)
+      ? [...new Set(source.forbiddenTopics.map((topic) => normalizedText(topic, 120)).filter(Boolean))].slice(0, 12)
+      : [],
+    flyters: [flyters[0]!, flyters[1]!],
+    frozenAt: typeof source.frozenAt === "string" ? source.frozenAt : null,
+  };
+}
+
+function normalizeDebateFlytingLineV1(
+  value: unknown,
+  fallbackSideId: DebateSideId,
+): DebateFlytingLineV1 | null {
+  const source = value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : {};
+  const id = normalizedText(source.id, 120);
+  const speakerBotId = normalizedText(source.speakerBotId, 200);
+  const content = normalizedMultilineText(source.content, DEBATE_FLYTING_LINE_MAX_LENGTH);
+  const createdEventId = normalizedText(source.createdEventId, 120);
+  if (!id || !speakerBotId || !content || !createdEventId) return null;
+  return {
+    id,
+    sideId: isDebateSideId(source.sideId) ? source.sideId : fallbackSideId,
+    speakerBotId,
+    content,
+    authoredMode:
+      source.authoredMode === "custom" || source.authoredMode === "wielded"
+        ? source.authoredMode
+        : "bot",
+    createdEventId,
+  };
+}
+
+export function normalizeDebateFlytingFormatStateV1(
+  value: unknown,
+): DebateFlytingFormatStateV1 {
+  const source = value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : {};
+  const defaults = defaultDebateFlytingExchangesV1();
+  const rawExchanges = Array.isArray(source.exchanges) ? source.exchanges : [];
+  const exchanges = defaults.map((fallback, index) => {
+    const row = rawExchanges[index] && typeof rawExchanges[index] === "object"
+      ? (rawExchanges[index] as Record<string, unknown>)
+      : {};
+    const boastBase = normalizeDebateFlytingLineV1(row.boast, fallback.boastingSideId);
+    const boastSource = row.boast && typeof row.boast === "object"
+      ? (row.boast as Record<string, unknown>)
+      : {};
+    const legendFacetId = normalizedText(boastSource.legendFacetId, 120);
+    const boast = boastBase && legendFacetId
+      ? { ...boastBase, legendFacetId }
+      : null;
+    const challengingSideId: DebateSideId = fallback.boastingSideId === "for" ? "against" : "for";
+    const challengeBase = normalizeDebateFlytingLineV1(row.challenge, challengingSideId);
+    const challengeSource = row.challenge && typeof row.challenge === "object"
+      ? (row.challenge as Record<string, unknown>)
+      : {};
+    const targetClaimId = normalizedText(challengeSource.targetClaimId, 120);
+    const challenge = challengeBase && targetClaimId && isDebateFlytingChargeKindV1(challengeSource.lens)
+      ? { ...challengeBase, targetClaimId, lens: challengeSource.lens }
+      : null;
+    const rejoinderBase = normalizeDebateFlytingLineV1(row.rejoinder, fallback.boastingSideId);
+    const rejoinderSource = row.rejoinder && typeof row.rejoinder === "object"
+      ? (row.rejoinder as Record<string, unknown>)
+      : {};
+    const targetChallengeId = normalizedText(rejoinderSource.targetChallengeId, 120);
+    const rejoinder = rejoinderBase && targetChallengeId && isDebateFlytingManeuverV1(rejoinderSource.maneuver)
+      ? {
+          ...rejoinderBase,
+          targetChallengeId,
+          maneuver: rejoinderSource.maneuver,
+          returnClaimId: normalizedText(rejoinderSource.returnClaimId, 120) || null,
+        }
+      : null;
+    const resolution: DebateFlytingResolutionV1 | null =
+      row.resolution === "answered" ||
+      row.resolution === "turned" ||
+      row.resolution === "unanswered" ||
+      row.resolution === "contested"
+        ? row.resolution
+        : null;
+    return {
+      ...fallback,
+      id: normalizedText(row.id, 120) || fallback.id,
+      boast,
+      challenge,
+      rejoinder,
+      yielded: row.yielded === true,
+      resolution,
+      acclamation: normalizedMultilineText(row.acclamation, 300) || null,
+    };
+  });
+  const rawVotes = Array.isArray(source.hallVotes) ? source.hallVotes : [];
+  const hallVotes = rawVotes.slice(0, DEBATE_JURY_SIZE).flatMap((value) => {
+    const row = value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+    const voterBotId = normalizedText(row.voterBotId, 200);
+    const acclaim = normalizedMultilineText(row.acclaim, 300);
+    const createdEventId = normalizedText(row.createdEventId, 120);
+    if (!voterBotId || !acclaim || !createdEventId || !isDebateSideId(row.sideId)) return [];
+    return [{ voterBotId, sideId: row.sideId, acclaim, createdEventId }];
+  });
+  const verdictSource = source.hostVerdict && typeof source.hostVerdict === "object"
+    ? (source.hostVerdict as Record<string, unknown>)
+    : {};
+  const ruling = normalizedMultilineText(verdictSource.ruling, DEBATE_FLYTING_LINE_MAX_LENGTH);
+  const verdictEventId = normalizedText(verdictSource.createdEventId, 120);
+  const hostVerdict = isDebateSideId(verdictSource.sideId) && ruling && verdictEventId
+    ? {
+        sideId: verdictSource.sideId,
+        ruling,
+        authoredMode:
+          verdictSource.authoredMode === "custom" || verdictSource.authoredMode === "wielded"
+            ? verdictSource.authoredMode
+            : "bot",
+        createdEventId: verdictEventId,
+      } satisfies DebateFlytingHostVerdictV1
+    : null;
+  const phases: DebateFlytingPhaseV1[] = [
+    "intro", "boast", "challenge", "rejoinder", "acclamation",
+    "final_acclamation", "verdict", "complete",
+  ];
+  const actions: DebateFlytingExpectedActionV1[] = [
+    "advance", "boast", "challenge", "rejoinder", "yield", "host_verdict", "complete",
+  ];
+  return {
+    version: DEBATE_FLYTING_SCHEMA_VERSION,
+    format: "flyting",
+    phase: phases.includes(source.phase as DebateFlytingPhaseV1)
+      ? (source.phase as DebateFlytingPhaseV1)
+      : "intro",
+    activeExchangeIndex:
+      typeof source.activeExchangeIndex === "number" && Number.isInteger(source.activeExchangeIndex)
+        ? Math.max(0, Math.min(DEBATE_FLYTING_EXCHANGE_COUNT - 1, source.activeExchangeIndex))
+        : 0,
+    expectedAction: actions.includes(source.expectedAction as DebateFlytingExpectedActionV1)
+      ? (source.expectedAction as DebateFlytingExpectedActionV1)
+      : "advance",
+    floorSideId: isDebateSideId(source.floorSideId) ? source.floorSideId : null,
+    bout: normalizeDebateFlytingBoutV1(source.bout),
+    exchanges,
+    hallVotes,
+    hostVerdict,
+  };
+}
+
 export function defaultDebateFormatStateV1(
   format: DebateFormatId,
 ): DebateFormatStateV1 {
   if (format === "whodunnit") return defaultDebateMysteryFormatStateV1();
+  if (format === "flyting") return defaultDebateFlytingFormatStateV1();
   return format === "turnabout"
     ? {
         version: DEBATE_FORMAT_SCHEMA_VERSION,
@@ -3820,6 +4267,9 @@ export function normalizeDebateFormatStateV1(
     const mysteryV2 = normalizeDebateMysteryFormatStateV2(value);
     if (mysteryV2) return mysteryV2;
     return normalizeDebateMysteryFormatStateV1(value);
+  }
+  if (format === "flyting") {
+    return normalizeDebateFlytingFormatStateV1(value);
   }
   if (format === "forum") {
     const target =

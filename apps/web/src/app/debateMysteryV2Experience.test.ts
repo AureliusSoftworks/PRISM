@@ -137,17 +137,23 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /styles\.mansionDoor/u);
     assert.match(experienceSource, /mysteryMapOccupantPosition/u);
     assert.match(experienceSource, /renderBotGlyph/u);
-    assert.match(experienceSource, /Move through one connected doorway at a time\./u);
+    assert.match(experienceSource, /Discover through connected doors\. Teleport to any visited room\./u);
     assert.match(experienceSource, /mansionSelectedRoomAdjacent/u);
+    assert.match(experienceSource, /mansionSelectedRoom\.visited \|\| mansionSelectedRoomAdjacent/u);
+    assert.match(experienceSource, /Teleport to \$\{mansionSelectedRoom\.name\}/u);
     assert.match(experienceSource, /Not adjacent/u);
     assert.doesNotMatch(experienceSource, /styles\.floorStack/u);
-    assert.doesNotMatch(experienceSource, /--mansion-room-image/u);
+    assert.match(experienceSource, /whodunnitDiscoveredMansionRoomArtV1\(\{[\s\S]*discovered: room\.visited/u);
+    assert.match(experienceSource, /data-room-art=\{roomMapArt\?\.style\}/u);
+    assert.match(experienceSource, /"--mansion-room-image": roomMapArt/u);
     assert.doesNotMatch(experienceSource, /room\.bundledAssetPath \? `url/u);
     assert.match(cssSource, /\.mansionRoom\s*\{[\s\S]*position: absolute/u);
     assert.match(cssSource, /\.mansionViewport\s*\{[\s\S]*aspect-ratio: 4 \/ 3/u);
     assert.match(cssSource, /\.mansionRoom\s*\{[\s\S]*place-items: center/u);
     assert.match(cssSource, /\.mansionRoom::before/u);
     assert.match(cssSource, /\.mansionRoom::after/u);
+    assert.match(cssSource, /\.mansionRoom\[data-room-art\][\s\S]*var\(--mansion-room-image\) center \/ cover no-repeat/u);
+    assert.match(cssSource, /\.mansionRoom\[data-selected="true"\]:not\(\[data-room-art\]\)/u);
     assert.match(cssSource, /rotateX\(3deg\) rotateZ\(-0\.55deg\)/u);
     assert.match(cssSource, /@keyframes roomDescend\s*\{[\s\S]*to\s*\{\s*opacity:\s*1;\s*transform:\s*none/u);
     assert.match(cssSource, /animation:\s*roomDescend[^;]+backwards/u);
@@ -537,6 +543,22 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(cssSource, /\.roomActor\s*\{[\s\S]*left:\s*50%/u);
     assert.match(cssSource, /\.roomActor\s*\{[\s\S]*bottom:\s*19\.5rem/u);
     assert.match(cssSource, /\.roomActor\s*\{[\s\S]*transform:\s*translateX\(-50%\)/u);
+    const roomActorRule = cssSource.match(/\.roomActor\s*\{[\s\S]*?\}/u);
+    assert.ok(roomActorRule);
+    assert.match(roomActorRule[0], /width:\s*min\(30rem,\s*44vw\)/u);
+    assert.match(roomActorRule[0], /bottom:\s*19\.5rem/u);
+    const roomAvatarMiniRule = cssSource.match(
+      /\.roomActor\[data-art-style="mosaic"\]\s*:global\(\[data-chat-mini-bot-avatar="true"\]\[data-size="room"\]\)\s*\{[\s\S]*?\}/u,
+    );
+    assert.ok(roomAvatarMiniRule);
+    assert.match(
+      roomAvatarMiniRule[0],
+      /--chat-mini-bot-render-size:\s*min\(30rem, 44vw, 56vh\)/u,
+    );
+    assert.match(roomAvatarMiniRule[0], /--chat-mini-bot-glyph-size:\s*max\(18px, calc\(var\(--chat-mini-bot-render-size\) \* 0\.12\)\)/u);
+    assert.match(roomAvatarMiniRule[0], /--chat-mini-bot-lower-screen-left:\s*38\.6%/u);
+    assert.match(roomAvatarMiniRule[0], /--chat-mini-bot-lower-screen-height:\s*24\.3%/u);
+    assert.match(roomAvatarMiniRule[0], /transform:\s*scale\(1\.19128713\)/u);
     assert.doesNotMatch(cssSource, /\.roomActor\s*\{[\s\S]{0,240}right:\s*8%/u);
     assert.match(cssSource, /\.roomBackdrop\[data-blurred="true"\]\s*\{[\s\S]*filter:\s*blur\(12px\)/u);
     assert.match(experienceSource, /roomParallaxEnabled/u);
@@ -680,6 +702,10 @@ describe("Whodunnit V2 prosecution experience", () => {
     }
     assert.match(experienceSource, /aria-live="assertive"/u);
     assert.match(experienceSource, /Continue in background/u);
+    assert.match(
+      experienceSource,
+      /window\.scrollTo\(\{ top: 0, left: 0, behavior: "auto" \}\)/u,
+    );
     assert.match(experienceSource, /Only one Whodunnit can cook at a time/u);
     assert.match(cssSource, /prefers-reduced-motion: reduce/u);
     assert.match(cssSource, /\.callout span/u);
@@ -719,7 +745,7 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /Error details copied to clipboard/u);
     assert.match(experienceSource, /Could not copy error details\. Try again\./u);
     assert.match(experienceSource, /Continue without voices/u);
-    assert.match(experienceSource, /Return to setup/u);
+    assert.match(experienceSource, /Return to Archive/u);
     assert.match(experienceSource, /Case preparation stopped/u);
     assert.match(experienceSource, /The Forge is not still running/u);
     assert.match(experienceSource, /resume from the last durable checkpoint/u);

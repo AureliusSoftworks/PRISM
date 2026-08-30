@@ -45,16 +45,17 @@ describe("Whodunnit V2 Case Forge visual progression", () => {
     assert.match(experienceSource, /Case preparation stopped/u);
     assert.match(experienceSource, /Retry preparation/u);
     assert.match(experienceSource, /Copy error details/u);
-    assert.match(experienceSource, /Return to setup/u);
+    assert.match(experienceSource, /Return to Archive/u);
   });
 
-  it("uses the durable title-card checkpoint for completed unstarted cases", () => {
+  it("uses the durable exterior-door checkpoint for completed unstarted cases", () => {
     assert.match(compilationSource, /state\.playPhase = "title_card";[\s\S]{0,900}stage: "complete"/u);
     assert.match(experienceSource, /if \(state\.playPhase === "title_card"\)/u);
-    assert.match(experienceSource, /Start Investigation/u);
-    assert.match(experienceSource, /state\.config\.investigationMode === "court_only" \? "Begin Trial" : spectator \? "Review Prosecutor Findings" : "Start Investigation"/u);
+    assert.match(experienceSource, /data-tutorial-target="whodunnit-enter-mansion"/u);
+    assert.match(experienceSource, /Open the mansion door and enter the foyer/u);
+    assert.match(experienceSource, /beginExteriorEntry/u);
     assert.match(tutorialSource, /Archive reopens a completed, unstarted Participant case/u);
-    assert.match(tutorialSource, /Start Investigation then opens inside the central incident room/u);
+    assert.match(tutorialSource, /Open the glowing door target with a click, Enter, or Space to cross into the Foyer/u);
   });
 
   it("reveals the durable authored case title before the fullscreen exterior", () => {

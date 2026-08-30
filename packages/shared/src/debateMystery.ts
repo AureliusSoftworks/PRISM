@@ -2377,8 +2377,22 @@ export function compileDeterministicDebateMystery(args: {
 
 export interface DebateMysteryValidationResultV1 { valid: boolean; errors: string[] }
 
-export function validateDebateMysteryCaseBible(bible: DebateMysteryCaseBibleV1, actionBudget: number): DebateMysteryValidationResultV1 {
+export interface DebateMysteryCaseBibleValidationOptionsV1 {
+  /**
+   * MansionLayoutV2 owns physical adjacency through doors, corridors, and
+   * vertical connectors. Its V1-compatible room projection is only a semantic
+   * graph, so it must not be reinterpreted as a wall-to-wall floor plan.
+   */
+  architecture?: "legacy-room-grid" | "mansion-layout-v2";
+}
+
+export function validateDebateMysteryCaseBible(
+  bible: DebateMysteryCaseBibleV1,
+  actionBudget: number,
+  options: DebateMysteryCaseBibleValidationOptionsV1 = {},
+): DebateMysteryValidationResultV1 {
   const errors: string[] = [];
+  const validateLegacyArchitecture = options.architecture !== "mansion-layout-v2";
   const actionTokens = bible.actionTokens ?? [];
   if (!bible.weapon || bible.weapon.id !== "canonical-weapon" || !bible.weapon.descriptor.trim()) errors.push("Case must contain exactly one canonical murder weapon.");
   if (bible.suspects.filter((suspect) => suspect.seatId === bible.culpritSeatId).length !== 1) errors.push("Case must contain exactly one culprit seat.");
@@ -2457,45 +2471,51 @@ export function validateDebateMysteryCaseBible(bible: DebateMysteryCaseBibleV1, 
       const right = bible.rooms.find((room) => room.id === neighborId);
       if (!right) errors.push(`Room ${left.id} names a missing neighbor.`);
       else if (!right.neighborIds.includes(left.id)) errors.push(`Room connection ${left.id}/${right.id} is not reciprocal.`);
-      else if (right.floor === left.floor && !debateMysteryRoomsShareEdge(left, right)) errors.push(`Room connection ${left.id}/${right.id} does not share an architectural edge.`);
+      else if (
+        validateLegacyArchitecture &&
+        right.floor === left.floor &&
+        !debateMysteryRoomsShareEdge(left, right)
+      ) errors.push(`Room connection ${left.id}/${right.id} does not share an architectural edge.`);
     }
   }
-  for (const floor of new Set(bible.rooms.map((room) => room.floor))) {
-    const floorRooms = bible.rooms.filter((room) => room.floor === floor);
-    if (floorRooms.length < 3) continue;
-    const usesBothAxes = new Set(floorRooms.map((room) => room.x)).size > 1 &&
-      new Set(floorRooms.map((room) => room.y)).size > 1;
-    if (!usesBothAxes) errors.push(`Floor ${floor} must form a compact two-dimensional room cluster.`);
-    const minimumBranchDegree = floorRooms.length >= 4 ? 3 : 2;
-    const hasBranchingRoom = floorRooms.some((room) => room.neighborIds.filter((neighborId) =>
-      bible.rooms.find((candidate) => candidate.id === neighborId)?.floor === floor,
-    ).length >= minimumBranchDegree);
-    if (!hasBranchingRoom) errors.push(`Floor ${floor} must include branching room adjacency.`);
-  }
-  for (let floor = 1; floor < Math.max(...bible.rooms.map((room) => room.floor)); floor += 1) {
-    const crossings = bible.rooms.flatMap((room) => room.neighborIds
-      .filter((neighborId) => {
-        const neighbor = bible.rooms.find((entry) => entry.id === neighborId);
-        return room.floor === floor && neighbor?.floor === floor + 1;
-      })
-      .map((neighborId) => ({ room, neighbor: bible.rooms.find((entry) => entry.id === neighborId)! })));
-    if (crossings.length !== 1) errors.push(`Floors ${floor} and ${floor + 1} require exactly one stair connection.`);
-    else if (crossings[0]!.room.x !== crossings[0]!.neighbor.x || crossings[0]!.room.y !== crossings[0]!.neighbor.y) {
-      errors.push(`Floors ${floor} and ${floor + 1} require an aligned stair core.`);
+  if (validateLegacyArchitecture) {
+    for (const floor of new Set(bible.rooms.map((room) => room.floor))) {
+      const floorRooms = bible.rooms.filter((room) => room.floor === floor);
+      if (floorRooms.length < 3) continue;
+      const usesBothAxes = new Set(floorRooms.map((room) => room.x)).size > 1 &&
+        new Set(floorRooms.map((room) => room.y)).size > 1;
+      if (!usesBothAxes) errors.push(`Floor ${floor} must form a compact two-dimensional room cluster.`);
+      const minimumBranchDegree = floorRooms.length >= 4 ? 3 : 2;
+      const hasBranchingRoom = floorRooms.some((room) => room.neighborIds.filter((neighborId) =>
+        bible.rooms.find((candidate) => candidate.id === neighborId)?.floor === floor,
+      ).length >= minimumBranchDegree);
+      if (!hasBranchingRoom) errors.push(`Floor ${floor} must include branching room adjacency.`);
     }
+    for (let floor = 1; floor < Math.max(...bible.rooms.map((room) => room.floor)); floor += 1) {
+      const crossings = bible.rooms.flatMap((room) => room.neighborIds
+        .filter((neighborId) => {
+          const neighbor = bible.rooms.find((entry) => entry.id === neighborId);
+          return room.floor === floor && neighbor?.floor === floor + 1;
+        })
+        .map((neighborId) => ({ room, neighbor: bible.rooms.find((entry) => entry.id === neighborId)! })));
+      if (crossings.length !== 1) errors.push(`Floors ${floor} and ${floor + 1} require exactly one stair connection.`);
+      else if (crossings[0]!.room.x !== crossings[0]!.neighbor.x || crossings[0]!.room.y !== crossings[0]!.neighbor.y) {
+        errors.push(`Floors ${floor} and ${floor + 1} require an aligned stair core.`);
+      }
+    }
+    const roomForType = (roomTypeId: string) => bible.rooms.find((room) => room.templateId === roomTypeId);
+    const foyer = roomForType("foyer");
+    if (foyer && foyer.x !== 0 && foyer.y !== 0) errors.push("The foyer must touch the mansion exterior.");
+    const requireTypeAdjacency = (leftTypeId: string, rightTypeId: string, label: string) => {
+      const left = roomForType(leftTypeId);
+      const right = roomForType(rightTypeId);
+      if (left && right && !left.neighborIds.includes(right.id)) errors.push(`${label} must share an architectural edge.`);
+    };
+    requireTypeAdjacency("kitchen", "dining-room", "Kitchen and dining room");
+    requireTypeAdjacency("primary-bedroom", "bathroom", "Bedroom and bathroom");
+    requireTypeAdjacency("foyer", "ballroom", "Foyer and ballroom");
+    requireTypeAdjacency("kitchen", "utility", "Kitchen and garage service access");
   }
-  const roomForType = (roomTypeId: string) => bible.rooms.find((room) => room.templateId === roomTypeId);
-  const foyer = roomForType("foyer");
-  if (foyer && foyer.x !== 0 && foyer.y !== 0) errors.push("The foyer must touch the mansion exterior.");
-  const requireTypeAdjacency = (leftTypeId: string, rightTypeId: string, label: string) => {
-    const left = roomForType(leftTypeId);
-    const right = roomForType(rightTypeId);
-    if (left && right && !left.neighborIds.includes(right.id)) errors.push(`${label} must share an architectural edge.`);
-  };
-  requireTypeAdjacency("kitchen", "dining-room", "Kitchen and dining room");
-  requireTypeAdjacency("primary-bedroom", "bathroom", "Bedroom and bathroom");
-  requireTypeAdjacency("foyer", "ballroom", "Foyer and ballroom");
-  requireTypeAdjacency("kitchen", "utility", "Kitchen and garage service access");
   const topFloor = Math.max(1, ...bible.rooms.map((room) => room.floor));
   for (const room of bible.rooms) {
     if (debateMysteryRoomTypeIsAllowedOnFloorV1(room.templateId, room.floor, topFloor)) continue;
@@ -2548,11 +2568,11 @@ export function validateDebateMysteryCaseBible(bible: DebateMysteryCaseBibleV1, 
     if (!required?.usable) errors.push(`${lock.id} requires a missing or unusable access item.`);
     if (lock.targetKind === "item" && !bible.inventoryItems.some((item) => item.id === lock.targetId && item.locked)) errors.push(`${lock.id} targets a missing locked item.`);
     if (lock.targetKind === "room" && (!roomIds.has(lock.targetId) || lock.targetId === bible.crimeSceneRoomId)) errors.push(`${lock.id} targets an invalid locked room.`);
-    if (lock.targetKind === "region") {
-      const [targetRoomId, ...regionParts] = lock.targetId.split(":");
-      const regionId = regionParts.join(":");
-      if (!bible.activeRegions.some((outcome) => outcome.roomId === targetRoomId && outcome.regionId === regionId)) errors.push(`${lock.id} targets a missing active region.`);
-    }
+    if (
+      lock.targetKind === "region" &&
+      !bible.activeRegions.some((outcome) =>
+        `${outcome.roomId}:${outcome.regionId}` === lock.targetId)
+    ) errors.push(`${lock.id} targets a missing active region.`);
     if (lock.resultInventoryItemIds.some((id) => !knownInventory.has(id))) errors.push(`${lock.id} creates a missing inventory item.`);
     if (lock.requiredAccessItemId === lock.targetId || lock.resultInventoryItemIds.includes(lock.requiredAccessItemId)) errors.push(`${lock.id} self-locks its required item.`);
   }
@@ -2585,7 +2605,12 @@ export function validateDebateMysteryCaseBible(bible: DebateMysteryCaseBibleV1, 
     for (const lock of bible.accessLocks) {
       if (reachableLocks.has(lock.id) || !obtainableItems.has(lock.requiredAccessItemId)) continue;
       if (lock.targetKind === "item" && !obtainableItems.has(lock.targetId)) continue;
-      if (lock.targetKind === "region" && lockedRoomIds.has(lock.targetId.split(":")[0]!)) continue;
+      if (
+        lock.targetKind === "region" &&
+        bible.activeRegions.some((outcome) =>
+          `${outcome.roomId}:${outcome.regionId}` === lock.targetId &&
+          lockedRoomIds.has(outcome.roomId))
+      ) continue;
       reachableLocks.add(lock.id);
       if (lock.targetKind === "room") lockedRoomIds.delete(lock.targetId);
       for (const itemId of lock.resultInventoryItemIds) obtainableItems.add(itemId);

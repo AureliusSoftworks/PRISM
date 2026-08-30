@@ -576,6 +576,13 @@ class MysteryWitnessChapterValidationError extends Error {
   }
 }
 
+class MysteryProsecutionChoiceValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MysteryProsecutionChoiceValidationError";
+  }
+}
+
 function mysteryExaminationValidationExhausted(error: unknown): boolean {
   const cause = error instanceof Error ? error.cause : null;
   if (
@@ -593,6 +600,19 @@ function mysteryWitnessChapterValidationExhausted(error: unknown): boolean {
   const cause = error instanceof Error ? error.cause : null;
   if (
     cause instanceof MysteryWitnessChapterValidationError ||
+    cause instanceof SyntaxError
+  ) return true;
+  return cause instanceof AutoFallbackExhaustedError &&
+    cause.attempts.length > 0 &&
+    cause.attempts.every((attempt) =>
+      attempt.outcome === "failed" && attempt.reason === "invalid_output"
+    );
+}
+
+function mysteryProsecutionChoiceValidationExhausted(error: unknown): boolean {
+  const cause = error instanceof Error ? error.cause : null;
+  if (
+    cause instanceof MysteryProsecutionChoiceValidationError ||
     cause instanceof SyntaxError
   ) return true;
   return cause instanceof AutoFallbackExhaustedError &&
@@ -2654,6 +2674,38 @@ function deterministicAuthoredMysteryExaminationsV2(args: {
   });
 }
 
+function deterministicAuthoredMysteryProsecutionChoicesV2(args: {
+  suspectSeatIds: readonly string[];
+  automatedSpectator: boolean;
+}): AuthoredProsecutionChoiceV2[] {
+  const witnessSeatId = args.suspectSeatIds[0];
+  if (!witnessSeatId) {
+    throw new Error("The frozen case omitted every prosecution witness.");
+  }
+  const options: AuthoredProsecutionChoiceV2["options"] = [
+    {
+      id: "exact-conflict",
+      text: "Answer the contradiction directly. Which part of your account should this court believe?",
+      stageAction: null,
+      reaction: "I have answered as directly as I can. The court may place my account beside the admitted record.",
+      reactionStageAction: null,
+    },
+    {
+      id: "record-comparison",
+      text: "Place your account beside the admitted record and explain why they cannot be reconciled.",
+      stageAction: null,
+      reaction: "My account is before the court. I cannot make the record say anything different.",
+      reactionStageAction: null,
+    },
+  ];
+  return [{
+    id: "deterministic-record-conflict",
+    witnessSeatId,
+    prompt: "Prosecution, identify how this contradiction should be tested.",
+    options: args.automatedSpectator ? options.slice(0, 1) : options,
+  }];
+}
+
 const MYSTERY_INVESTIGATION_COURT_LANGUAGE_RE = /\b(?:(?:the|this|our)\s+court|courtroom|your\s+honou?r|the\s+bench|the\s+jury|witness\s+stand|sworn\s+testimony)\b/iu;
 const MYSTERY_EXACT_NUMERIC_CLOCK_RE =
   /(?<![\p{L}\p{N}:])(?:[01]?\d|2[0-3]):[0-5]\d(?:\s*(?:a\.?\s*m\.?|p\.?\s*m\.?))?(?![\p{L}\p{N}:])/iu;
@@ -3231,10 +3283,14 @@ function authoredProsecutionChoicesFromJson(
       : [];
   });
   if (!prosecutionChoices.length) {
-    throw new Error("The authored trial omitted its prosecution response choice.");
+    throw new MysteryProsecutionChoiceValidationError(
+      "The authored trial omitted its prosecution response choice.",
+    );
   }
   if (prosecutionChoices.some((choice) => !suspectSeatIds.includes(choice.witnessSeatId))) {
-    throw new Error("The authored trial attached a prosecution choice to an unknown witness.");
+    throw new MysteryProsecutionChoiceValidationError(
+      "The authored trial attached a prosecution choice to an unknown witness.",
+    );
   }
   return prosecutionChoices;
 }
@@ -3710,6 +3766,25 @@ async function evaluateMysteryContradictionSemanticsV2(args: {
   }>;
 }): Promise<MysteryV2ContradictionEvaluationV2[]> {
   if (args.pairs.length === 0) return [];
+  const deterministicRepairEvaluation = (
+    pair: (typeof args.pairs)[number],
+  ): MysteryV2ContradictionEvaluationV2 => ({
+    witnessSeatId: pair.witnessSeatId,
+    statementId: pair.statement.id,
+    recordId: mysteryRecordKey(pair.record.reference),
+    verdict: "not_clear",
+    relationship: "none",
+    statementClaim:
+      groundedMysteryContradictionExcerptV2("", pair.statement.text) ||
+      pair.statement.text,
+    recordClaim:
+      groundedMysteryContradictionExcerptV2("", pair.record.text) ||
+      pair.record.text,
+    rationale:
+      "The bounded semantic audit did not return every frozen route, so this route must receive the deterministic exact-claim repair before court.",
+    repairInstruction:
+      "Rewrite statement #2 so it directly denies the assigned record's exact claim under an ordinary literal reading.",
+  });
   const deterministicDenial =
     "The assigned record's exact claim is false.";
   const deterministicByKey = new Map<string, MysteryV2ContradictionEvaluationV2>();
@@ -3935,7 +4010,17 @@ async function evaluateMysteryContradictionSemanticsV2(args: {
       }
       return evaluations;
     },
-  });
+  }).catch(() => null);
+  if (!result) {
+    // The semantic auditor is an extra defense, not the sole owner of court
+    // playability. If a provider times out or omits one of the frozen routes,
+    // mark every unaudited pair for the same deterministic repair used after a
+    // negative audit instead of stranding an otherwise durable Case Forge.
+    return args.pairs.map((pair) => {
+      const key = `${pair.witnessSeatId}:${pair.statement.id}:${mysteryRecordKey(pair.record.reference)}`;
+      return deterministicByKey.get(key) ?? deterministicRepairEvaluation(pair);
+    });
+  }
   const evaluatedByKey = new Map(
     result.value.map((evaluation) => [
       `${evaluation.witnessSeatId}:${evaluation.statementId}:${evaluation.recordId}`,
@@ -4957,21 +5042,23 @@ async function authorMysteryV2(args: {
 
   let prosecutionChoices = args.draft.prosecutionChoices;
   if (!prosecutionChoices) {
-    prosecutionChoices = await generateMysteryAuthoringSectionV2({
-      runtime: args.runtime,
-      label: "The prosecution response section",
-      maxTokens: 2_500,
-      onAttempt: (attempt) => args.onDraft(
-        args.draft,
-        `Writing the Case · Prosecution responses · attempt ${attempt} of ${DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS}`,
-      ),
-      onReceipt: (receipt) =>
-        recordMysterySectionReceipt(
+    let deterministicProsecutionFallback = false;
+    try {
+      prosecutionChoices = await generateMysteryAuthoringSectionV2({
+        runtime: args.runtime,
+        label: "The prosecution response section",
+        maxTokens: 2_500,
+        onAttempt: (attempt) => args.onDraft(
           args.draft,
-          "prosecution_choices",
-          receipt,
+          `Writing the Case · Prosecution responses · attempt ${attempt} of ${DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS}`,
         ),
-      prompt: {
+        onReceipt: (receipt) =>
+          recordMysterySectionReceipt(
+            args.draft,
+            "prosecution_choices",
+            receipt,
+          ),
+        prompt: {
         section: "prosecution_choices",
         setup: {
           trialType: setup.trialType,
@@ -5024,7 +5111,7 @@ async function authorMysteryV2(args: {
           ]),
         ],
       },
-      sourcePrompt: {
+        sourcePrompt: {
         section: "prosecution_choices",
         setup,
         caseFoundation: foundation,
@@ -5038,28 +5125,55 @@ async function authorMysteryV2(args: {
           }),
         ),
       },
-      validate: (value) => assertMysteryIncidentLanguageV2({
-        value: authoredProsecutionChoicesFromJson(
-          value,
-          suspectRequirements.map((entry) => entry.seatId),
-          automatedSpectator ? 1 : 2,
-        ),
+        validate: (value) => assertMysteryIncidentLanguageV2({
+          value: authoredProsecutionChoicesFromJson(
+            value,
+            suspectRequirements.map((entry) => entry.seatId),
+            automatedSpectator ? 1 : 2,
+          ),
+          incidentPlan: args.incidentPlan,
+          section: "Prosecution choice copy",
+        }),
+      });
+      delete args.draft.recoveryBySection.prosecution_choices;
+    } catch (error) {
+      if (!mysteryProsecutionChoiceValidationExhausted(error)) throw error;
+      prosecutionChoices = assertMysteryIncidentLanguageV2({
+        value: deterministicAuthoredMysteryProsecutionChoicesV2({
+          suspectSeatIds: suspectRequirements.map((entry) => entry.seatId),
+          automatedSpectator,
+        }),
         incidentPlan: args.incidentPlan,
-        section: "Prosecution choice copy",
-      }),
-    });
+        section: "Deterministic prosecution choice copy",
+      });
+      deterministicProsecutionFallback = true;
+      delete args.draft.provenanceBySection.prosecution_choices;
+      args.draft.recoveryBySection.prosecution_choices = {
+        kind: "deterministic_fallback",
+        reason: "invalid_output_exhausted",
+        attemptCount: DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
+        source: "frozen_scaffold",
+        sourceHash: factLedger.sourceHash,
+      };
+    }
     args.draft.prosecutionChoices = prosecutionChoices;
-    args.onDraft(args.draft, "Writing the Case · Prosecution responses complete");
+    args.onDraft(
+      args.draft,
+      deterministicProsecutionFallback
+        ? "Writing the Case · Prosecution responses complete with deterministic court copy"
+        : "Writing the Case · Prosecution responses complete",
+    );
     const prosecutionFrozenIds = [
       ...factLedger.frozenIds.suspectSeatIds,
       ...Object.values(factLedger.frozenIds.statementIdsBySeat).flat(),
     ];
-    queueAudit(
-      "prosecution_choices",
-      prosecutionChoices,
-      prosecutionFrozenIds,
-    );
-    targetedRepairs.set("prosecution_choices", async (issues) => {
+    if (!deterministicProsecutionFallback) {
+      queueAudit(
+        "prosecution_choices",
+        prosecutionChoices,
+        prosecutionFrozenIds,
+      );
+      targetedRepairs.set("prosecution_choices", async (issues) => {
       const repaired = await generateMysteryAuthoringSectionV2({
         runtime: args.runtime,
         label: "The prosecution response repair",
@@ -5094,9 +5208,10 @@ async function authorMysteryV2(args: {
             receipt,
           ),
       });
-      args.draft.prosecutionChoices = repaired;
-      args.onDraft(args.draft, "Writing the Case · Prosecution responses repaired");
-    });
+        args.draft.prosecutionChoices = repaired;
+        args.onDraft(args.draft, "Writing the Case · Prosecution responses repaired");
+      });
+    }
   }
 
   await Promise.all(pendingConnectives);
@@ -9280,7 +9395,15 @@ export async function runDebateMysteryCompilationV2(
             }
           : {}),
       });
-      const scaffoldValidation = validateDebateMysteryCaseBible(scaffold, 10_000);
+      const scaffoldValidation = validateDebateMysteryCaseBible(
+        scaffold,
+        10_000,
+        {
+          architecture: config.mansionSnapshot?.layoutV2
+            ? "mansion-layout-v2"
+            : "legacy-room-grid",
+        },
+      );
       if (!scaffoldValidation.valid) throw new Error(scaffoldValidation.errors.join("\n"));
       const boundIncidentPlan = bindMysteryIncidentPlanV1({
         plan: incidentPlan,
@@ -12409,6 +12532,7 @@ export function applyDebateMysteryActionV2(
           if (
             currentRoom &&
             currentRoom.id !== room.id &&
+            !room.visited &&
             !(currentRoom.neighborIds ?? []).includes(room.id) &&
             !(room.neighborIds ?? []).includes(currentRoom.id)
           ) {

@@ -114,6 +114,40 @@ export function whodunnitSavedRoomArtUrl(
   return style === "mosaic" ? `${base}?style=mosaic` : base;
 }
 
+export interface WhodunnitDiscoveredMansionRoomArtV1 {
+  style: WhodunnitInvestigationArtStyle;
+  url: string;
+}
+
+/** Resolve a mansion-board room plate without exposing an undiscovered room.
+ * A missing per-room Illustrated upgrade falls back through the Mosaic route
+ * instead of leaving a discovered block blank. */
+export function whodunnitDiscoveredMansionRoomArtV1(args: {
+  discovered: boolean;
+  activeStyle: WhodunnitInvestigationArtStyle;
+  illustratedReady: boolean;
+  sealedIllustratedUrl?: string | null;
+  sealedMosaicUrl?: string | null;
+  imageId?: string | null;
+  templateId?: string | null;
+  bundledAssetPath?: string | null;
+}): WhodunnitDiscoveredMansionRoomArtV1 | null {
+  if (!args.discovered) return null;
+  const style = args.activeStyle === "illustrated" && args.illustratedReady
+    ? "illustrated"
+    : "mosaic";
+  const sealedUrl = style === "illustrated"
+    ? args.sealedIllustratedUrl
+    : args.sealedMosaicUrl;
+  const url = sealedUrl
+    ?? whodunnitSavedRoomArtUrl(args.imageId, style)
+    ?? whodunnitBundledRoomArtPathForRoom({
+      templateId: args.templateId,
+      bundledAssetPath: args.bundledAssetPath,
+    }, style);
+  return url ? { style, url } : null;
+}
+
 export function whodunnitMansionRoomArtUrl(
   mansionId: string,
   assetId: string,

@@ -147,6 +147,7 @@ import {
   DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE,
   readWhodunnitInvestigationArtStyle,
   whodunnitBundledRoomArtPathForRoom,
+  whodunnitDiscoveredMansionRoomArtV1,
   whodunnitIllustratedRoomSubjectId,
   whodunnitInvestigationAvatarPresentation,
   whodunnitSealedRoomArtUrl,
@@ -761,6 +762,12 @@ export function DebateMysteryV2CompilationResume(
   const mansionExteriorStatus = state.mansionExterior?.status ?? null;
 
   useEffect(() => {
+    // Archive and setup are both long pages. Entering the fullscreen Forge at
+    // their retained scroll offset can crop the case title and current stage.
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [sessionId]);
+
+  useEffect(() => {
     onSessionChangeRef.current = onSessionChange;
   }, [onSessionChange]);
 
@@ -1125,7 +1132,7 @@ export function DebateMysteryV2CompilationResume(
                     ? "Copy failed — try again"
                     : "Copy error details"}
             </button>
-            <button type="button" onClick={props.onExit}>Return to setup</button>
+            <button type="button" onClick={props.onExit}>Return to Archive</button>
           </div>
         ) : null}
         {needsAttention && errorDetailsCopyState !== "idle" ? (
@@ -2098,6 +2105,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         mansionSelectedRoom.id === currentRoom.id ||
         (currentRoom.neighborIds ?? []).includes(mansionSelectedRoom.id) ||
         (mansionSelectedRoom.neighborIds ?? []).includes(currentRoom.id)),
+  );
+  const mansionSelectedRoomReachable = Boolean(
+    mansionSelectedRoom && (mansionSelectedRoom.visited || mansionSelectedRoomAdjacent),
   );
   const mansionGeometry = [
     ...mansionPlacements.map(({ x, y, width, height }) => ({ x, y, width, height })),
@@ -3807,6 +3817,25 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               ))}
               {mansionPlacements.map((placement) => {
                 const room = placement.room;
+                const sealedRoomArtReady = room.sealedAsset?.revealed === true &&
+                  room.sealedAsset.status === "ready";
+                const roomMapArt = whodunnitDiscoveredMansionRoomArtV1({
+                  discovered: room.visited,
+                  activeStyle: effectiveInvestigationArtStyle,
+                  illustratedReady: Boolean(
+                    roomArtUpgradeStatus?.readyRoomIds.includes(room.id),
+                  ),
+                  sealedIllustratedUrl: sealedRoomArtReady
+                    ? sealedAssetObjectUrls[sealedMysteryIllustratedRoomArtKey(room.id)]
+                      ?? sealedAssetObjectUrls[sealedMysteryRoomArtKey(room.id, "illustrated")]
+                    : null,
+                  sealedMosaicUrl: sealedRoomArtReady
+                    ? sealedAssetObjectUrls[sealedMysteryRoomArtKey(room.id, "mosaic")]
+                    : null,
+                  imageId: room.imageId,
+                  templateId: room.templateId,
+                  bundledAssetPath: room.bundledAssetPath,
+                });
                 const roomSuspects = room.visited
                   ? state.suspects.filter((suspect) => suspect.roomId === room.id)
                   : [];
@@ -3818,6 +3847,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                     className={styles.mansionRoom}
                     disabled={busy}
                     data-discovered={room.visited ? "true" : undefined}
+                    data-room-art={roomMapArt?.style}
                     data-current={room.id === currentRoom?.id ? "true" : undefined}
                     data-selected={room.id === mansionSelectedRoom?.id ? "true" : undefined}
                     data-visited={room.visited ? "true" : undefined}
@@ -3831,7 +3861,10 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                       top: `${mansionY(placement.y)}%`,
                       width: `${mansionWidth(placement.width)}%`,
                       height: `${mansionHeight(placement.height)}%`,
-                    }}
+                      "--mansion-room-image": roomMapArt
+                        ? `url("${roomMapArt.url}")`
+                        : "none",
+                    } as CSSProperties}
                   >
                     {room.visited ? <strong>{room.name}</strong> : null}
                     {roomSuspects.map((suspect) => {
@@ -3890,20 +3923,22 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                 <div><dt>Details reviewed</dt><dd>{mansionSelectedRoom.visited ? `${mansionSelectedRoom.hotspots.filter((hotspot) => hotspot.examined).length} / ${mansionSelectedRoom.hotspots.length}` : "Unknown"}</dd></div>
               </dl>
               {mansionSelectedRoomPending ? <p className={styles.securedRoomStatus} role="status" aria-live="polite">The Casekeeper is still securing this room. Try again shortly.</p> : null}
-              <button type="button" disabled={busy || !mansionSelectedRoom.unlocked || mansionSelectedRoomPending || !mansionSelectedRoomAdjacent} onClick={() => void beginMansionTravel(mansionSelectedRoom)}>
+              <button type="button" disabled={busy || !mansionSelectedRoom.unlocked || mansionSelectedRoomPending || !mansionSelectedRoomReachable} onClick={() => void beginMansionTravel(mansionSelectedRoom)}>
                 {mansionSelectedRoomPending
                   ? "Being secured"
                   : !mansionSelectedRoom.unlocked
                     ? "Locked"
-                    : !mansionSelectedRoomAdjacent
+                    : !mansionSelectedRoomReachable
                       ? "Not adjacent"
-                      : mansionSelectedRoom.visited
-                        ? `Enter ${mansionSelectedRoom.name}`
-                        : "Enter room"}
+                      : mansionSelectedRoom.visited && !mansionSelectedRoomAdjacent
+                        ? `Teleport to ${mansionSelectedRoom.name}`
+                        : mansionSelectedRoom.visited
+                          ? `Enter ${mansionSelectedRoom.name}`
+                          : "Enter room"}
               </button>
             </section>
           ) : null}
-          <small className={styles.mansionHint}>Move through one connected doorway at a time.</small>
+          <small className={styles.mansionHint}>Discover through connected doors. Teleport to any visited room.</small>
         </section>
       ) : currentRoom ? (
         <section

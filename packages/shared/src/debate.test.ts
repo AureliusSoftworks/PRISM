@@ -6,6 +6,7 @@ import {
   DEBATE_EVIDENCE_SOURCE_MAX_COUNT,
   DEBATE_FORMAT_CATALOG,
   DEBATE_FORMATS,
+  DEBATE_FLYTING_SCHEMA_VERSION,
   DEBATE_FORMALITY_SPECTRUM,
   DEBATE_FORMAT_SCHEMA_VERSION,
   DEBATE_JURY_DISCUSSION_TURNS,
@@ -503,7 +504,7 @@ test("normalizes the canonical four jurors plus moderator final ballot", () => {
 test("separates executable Debate formats from visible future productions", () => {
   assert.deepEqual(
     DEBATE_FORMATS.map((format) => format.id),
-    ["forum", "turnabout", "whodunnit"],
+    ["forum", "turnabout", "whodunnit", "flyting"],
   );
   assert.deepEqual(
     DEBATE_FORMAT_CATALOG.map(({ id, productionName, availability }) => ({
@@ -530,7 +531,7 @@ test("separates executable Debate formats from visible future productions", () =
       {
         id: "flyting",
         productionName: "Mead Hall",
-        availability: "coming_soon",
+        availability: "available",
       },
       {
         id: "cypher",
@@ -539,8 +540,54 @@ test("separates executable Debate formats from visible future productions", () =
       },
     ],
   );
-  assert.equal(normalizeDebateFormatId("flyting"), "forum");
+  assert.equal(normalizeDebateFormatId("flyting"), "flyting");
   assert.equal(normalizeDebateFormatId("cypher"), "forum");
+});
+
+test("normalizes the versioned four-exchange Flyting record", () => {
+  const state = normalizeDebateFormatStateV1({
+    format: "flyting",
+    phase: "challenge",
+    activeExchangeIndex: 1,
+    expectedAction: "challenge",
+    floorSideId: "for",
+    bout: {
+      title: "The Holly and the Horn",
+      stakes: "The Hall will name the greater winter legend.",
+      rivalrySpark: "Old rivals dispute who owns the longest night.",
+      forbiddenTopics: ["children", "children"],
+      flyters: [
+        {
+          botId: "santa",
+          name: "Santa Claus",
+          epithet: "The Red Wanderer",
+          legend: [
+            { id: "s1", title: "The Sleigh", claim: "No road bars my passage." },
+            { id: "s2", title: "The List", claim: "I know every secret wish." },
+            { id: "s3", title: "The Dawn", claim: "I leave joy before sunrise." },
+          ],
+        },
+        {
+          botId: "satan",
+          name: "Satan",
+          epithet: "The Morning Accuser",
+          legend: [
+            { id: "a1", title: "The Bargain", claim: "Every boast has its price." },
+            { id: "a2", title: "The Flame", claim: "I outlast every winter." },
+            { id: "a3", title: "The Fall", claim: "Even heaven remembers me." },
+          ],
+        },
+      ],
+    },
+  }, "flyting");
+  assert.equal(state.format, "flyting");
+  assert.equal(state.version, DEBATE_FLYTING_SCHEMA_VERSION);
+  assert.equal(state.exchanges.length, 4);
+  assert.deepEqual(state.exchanges.map((exchange) => exchange.boastingSideId), [
+    "for", "against", "for", "against",
+  ]);
+  assert.equal(state.bout?.flyters[0].epithet, "The Red Wanderer");
+  assert.deepEqual(state.bout?.forbiddenTopics, ["children"]);
 });
 
 test("defaults legacy Debate records to Forum and normalizes Turnabout state", () => {

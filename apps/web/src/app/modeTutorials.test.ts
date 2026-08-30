@@ -167,7 +167,8 @@ describe("mode tutorials", () => {
     assert.match(step.body, /visited rooms open immediately with a short physical travel bridge/u);
     assert.match(step.body, /Reduced Motion uses that same immediate bridge/u);
     assert.match(step.body, /one finite visible sweep/u);
-    assert.match(step.body, /one connected doorway at a time/u);
+    assert.match(step.body, /First visits require a connected doorway/u);
+    assert.match(step.body, /discovered rooms can be revisited instantly from anywhere/u);
     assert.match(step.body, /Preparing your mystery to watch/u);
     assert.match(step.body, /Writing the trial, Checking the case, and Recording the cast/u);
     assert.match(step.body, /collapsed Preparation details/u);

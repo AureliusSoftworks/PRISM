@@ -21,10 +21,8 @@ test("Signal presents immersive voice performance as automatic", () => {
   assert.match(pageSource, /activeSettingsScope === "botcast"/u);
   assert.match(pageSource, /data-settings-section="botcast"/u);
   assert.match(pageSource, /Automatic ElevenLabs immersion/u);
-  assert.match(pageSource, /Always on with ElevenLabs v3/u);
-  assert.match(pageSource, /automatically adds sparse/u);
-  assert.match(pageSource, /action floats above/u);
-  assert.match(pageSource, /appears between/u);
+  assert.match(pageSource, /float above the bot/u);
+  assert.match(pageSource, /appear between/u);
   assert.doesNotMatch(pageSource, /settings\.signalImmersiveVoiceEffectsEnabled/u);
   assert.doesNotMatch(pageSource, /Save Signal settings/u);
   assert.match(pageSource, /activeSettingsScope !== "botcast"/u);

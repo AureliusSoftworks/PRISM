@@ -105,7 +105,12 @@ describe("Whodunnit investigation art style", () => {
     assert.match(experience, /Upgrade art · ONLINE/u);
     assert.match(experience, /renderMysteryBotAvatar\(currentBot, investigationAvatarPresentation/u);
     assert.match(experience, /renderMysteryBotAvatar\(courtPresentedWitnessBot, "full"/u);
-    assert.match(css, /roomActor\[data-art-style="mosaic"\][\s\S]*--chat-mini-bot-render-size: min\(18rem, 42vw, 42vh\)/u);
+    const roomAvatarMiniRule = css.match(
+      /roomActor\[data-art-style="mosaic"\]\s*:global\(\[data-chat-mini-bot-avatar="true"\]\[data-size="room"\]\)\s*\{[\s\S]*?\}/u,
+    );
+    assert.ok(roomAvatarMiniRule);
+    assert.match(roomAvatarMiniRule[0], /--chat-mini-bot-render-size:\s*min\(30rem, 44vw, 56vh\)/u);
+    assert.match(roomAvatarMiniRule[0], /transform:\s*scale\(1\.19128713\)/u);
   });
 
   it("ships one Mosaic sibling for every bundled investigation room", () => {

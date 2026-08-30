@@ -1,6 +1,6 @@
-# Debate Formats and Turnabout V1
+# Debate Formats: Turnabout and Flyting V1
 
-Last reviewed: 2026-07-30
+Last reviewed: 2026-08-29
 
 ## Product direction
 
@@ -20,9 +20,13 @@ privacy boundary, durability, and replay machinery.
   **Court of Record** production uses taut examination language and a distinct,
   restrained judicial room response without borrowing protected characters,
   catchphrases, writing, artwork, or presentation.
-- **Flyting / Mead Hall** and **Cypher / The Cypher** are cataloged as disabled
-  future productions. Their IDs are deliberately excluded from the executable
-  server format union until their own rules and validators exist.
+- **Flyting / Mead Hall** is an executable PRISM format rooted visibly in the
+  Norse verbal contest while remaining legible without Norse knowledge. It is
+  a contest of claims, exact challenges, and answering wit—not a rhyme game or
+  a Viking theme over Forum.
+- **Cypher / The Cypher** remains a cataloged future production. Its ID is
+  excluded from the executable server format union until its own musical rules
+  and validators exist.
 
 The neutral moderator controls procedure and rules on evidence. A player in the
 Judge role delivers the final ruling; Participants examine the opposing side;
@@ -40,20 +44,22 @@ The format seam is additive and persisted inside the existing `session_json`.
 No Debate table rewrite is required for V1.
 
 - `packages/shared/src/debate.ts` owns both the executable format registry and
-  the visible production catalog, plus versioned discriminated format state,
-  Turnabout statements and contradictions, event metadata, request contracts,
+  the visible production catalog, plus versioned discriminated Forum,
+  Turnabout, Whodunnit, and Flyting state, event metadata, request contracts,
   and legacy normalization. Catalog previews never become accepted format IDs.
-- `apps/api/src/debate.ts` retains the Forum engine and dispatches Turnabout to
-  its own transitions and action validator. A server-owned production voice
+- `apps/api/src/debate.ts` retains the Forum engine and dispatches Turnabout and
+  Flyting to their own transitions and action validators. A server-owned production voice
   contract reaches every generated speech and ballot while exact quote
   grounding is checked server-side before any objection can be sustained.
-- `apps/api/src/server.ts` exposes the Turnabout action route while reusing the
+- `apps/api/src/server.ts` exposes Turnabout and Flyting Forge, Wield, and action routes while reusing the
   frozen Debate provider/model runtime and action-session accounting. It also
   owns authenticated object-exhibit upload and synthesis routes; generated
   sprites use one server-owned art bible and both paths normalize to a square
   transparent PNG.
 - `apps/web/src/app/DebateExperience.tsx` freezes format during Start, renders
-  the production catalog and Turnabout public record, selects format-specific
+  the production catalog, and hands Flyting to its own setup and live Hall.
+  `apps/web/src/app/DebateFlyting.tsx` owns the Bout Forge and Hall Record while
+  `apps/web/src/app/debateFlytingAudio.ts` owns bounded ritual cues. Debate selects format-specific
   room acoustics, and submits Press, Present Evidence, and Pass actions without
   coupling canonical state to animation or audio timing.
 - `apps/web/src/app/modeTutorials.ts` and first-run onboarding introduce the
@@ -62,7 +68,7 @@ No Debate table rewrite is required for V1.
 Every saved session now records:
 
 ```text
-format: "forum" | "turnabout"
+format: "forum" | "turnabout" | "whodunnit" | "flyting"
 formatVersion: 1
 formatState:
   { version: 1, format: "forum" }
@@ -76,6 +82,19 @@ formatState:
     floorOwnerBotId,
     statements[],
     contradictions[]
+  }
+  or
+  {
+    version: 1,
+    format: "flyting",
+    bout,
+    phase,
+    activeExchangeIndex,
+    floorSideId,
+    expectedAction,
+    exchanges[4],
+    hallVotes[4],
+    hostVerdict
   }
 ```
 
@@ -116,14 +135,46 @@ Mutation revisions and idempotency keys govern every action. Pause/resume,
 retry/skip, saved-session replay, verdict continuity, hard mute, and stable bot
 identity use the same canonical Debate persistence path as Forum.
 
+## Flyting canonical flow
+
+1. **Summon** chooses Participant coach, human Host, or Spectator. Participant
+   selects the real bot they coach; that bot remains the public body and voice.
+2. **Cast** freezes two flyters, four Hall members, and a bot Host unless the
+   player holds the staff. Duplicate seats are rejected.
+3. **Bout Forge** produces editable fictional stakes, epithets, and three public
+   Legend facets per flyter from public bot persona only. It reads no private
+   relationship memory and performs no live research. Both flyters consent to
+   that frozen record before Start or Save.
+4. Four exchanges alternate boasting side A / B / A / B. Each exchange is
+   **Boast → Challenge / Flyte → Rejoinder → Acclamation**.
+5. A Boast must use one unused Legend facet. A Challenge must target one exact
+   recorded opponent claim through **Doubt, Expose, Belittle, or Outdo**.
+6. A Rejoinder must answer that exact challenge through **Stand, Own, Turn, or
+   Return**. Return also targets one recorded challenger claim. The evaluator
+   records answered, turned, or contested; it never scores truth, fame, or
+   private biography.
+7. **Yield** is the only non-answer. It permanently marks that exchange
+   unanswered and cannot be softened into a substitute line.
+8. Four Hall members cast individual public votes from the complete record. A
+   human Host sees those as advisory and must crown one winner. Otherwise the
+   bot Host casts the fifth deciding vote and breaks a 2–2 split.
+9. The Hall Record persists the exact public lines, Power-projected delivery,
+   targets, maneuvers, resolutions, votes, and decisive ruling. Replay performs
+   that frozen record without rerunning Forge or changing the winner.
+
+There is no timer, meter, rhyme requirement, numeric score, continuous music,
+runtime image generation, or private relational lore. The authored Mead Hall
+uses the same bot voice and global Audio controls as Debate, with only brief
+procedural cues at ritual boundaries.
+
 ## Disciplined V1 boundary
 
-V1 proves that one Debate shell can host two genuinely different rulesets:
+V1 proves that one Debate shell can host multiple genuinely different rulesets:
 
 - durable format registry and versioned state;
 - a separate visible production catalog with non-executable future entries;
 - backward-compatible Forum default;
-- distinct Assembly Chamber and Court of Record language and room response;
+- distinct Assembly Chamber, Court of Record, and Mead Hall language and room response;
 - one witness-equivalent advocate per side with two statements each;
 - Judge, Participant, and Spectator adaptations;
 - Press, Object/Present Evidence, and Pass;
@@ -131,13 +182,13 @@ V1 proves that one Debate shell can host two genuinely different rulesets:
   or consistently synthesized transparent sprites;
 - exact frozen-record validation, immediate rulings, one-step reversals, and
   deterministic resolution;
-- a public-record panel and action deck within the current Debate stage;
+- public-record panels and action decks matched to each format;
 - focused shared, API, integration, web, onboarding, and tutorial coverage.
 
-V1 deliberately defers authored per-format environment artwork, arbitrary
+V1 deliberately defers arbitrary
 evidence schemas beyond sources and object exhibits, multiple witnesses,
 cross-session case libraries, custom objection animations, interruptible voice
-choreography, executable Flyting or Cypher rules, and third-party format
+choreography beyond Flyting's bounded ritual cues, executable Cypher rules, alternate Flyting halls, and third-party format
 plugins. Those additions should follow playtesting of the rules, voice, and
 record clarity, not precede it.
 

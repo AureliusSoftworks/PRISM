@@ -601,6 +601,26 @@ class FailingRoomExaminationsV2AuthorProvider extends V2AuthorProvider {
   }
 }
 
+class MissingProsecutionChoicesV2AuthorProvider extends V2AuthorProvider {
+  public invalidChoiceAttempts = 0;
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const request = JSON.parse(messages.at(-1)!.content) as {
+      section?: string;
+    };
+    if (request.section === "prosecution_choices") {
+      this.calls += 1;
+      this.sections.push("prosecution_choices");
+      this.invalidChoiceAttempts += 1;
+      return JSON.stringify({ prosecutionChoices: [] });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
 class ExactClockWithoutRecallV2AuthorProvider extends V2AuthorProvider {
   public override async generateResponse(
     messages: ProviderMessage[],
@@ -1206,6 +1226,31 @@ class LooseSemanticMetadataV2AuthorProvider extends V2AuthorProvider {
         "The route needs a more literal denial before it can be approved.";
       first.repairInstruction = null;
     }
+    return JSON.stringify(parsed);
+  }
+}
+
+class OmittedContradictionEvaluationV2AuthorProvider extends
+  UnrelatedCourtContradictionV2AuthorProvider {
+  public constructor() {
+    super("evidence", true);
+  }
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const response = await super.generateResponse(messages, options);
+    const request = JSON.parse(String(messages.at(-1)?.content ?? "{}")) as {
+      section?: string;
+    };
+    if (request.section !== "contradiction_semantic_validation") {
+      return response;
+    }
+    const parsed = JSON.parse(response) as {
+      evaluations?: Array<Record<string, unknown>>;
+    };
+    parsed.evaluations?.pop();
     return JSON.stringify(parsed);
   }
 }
@@ -2639,6 +2684,34 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     );
   });
 
+  it("repairs every frozen route when the semantic auditor omits an evaluation", async () => {
+    const db = testDb();
+    const provider = new OmittedContradictionEvaluationV2AuthorProvider();
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-omitted-semantic-evaluation",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    const compiled = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+
+    assert.equal(v2State(compiled).compilation.stage, "complete");
+    assert.ok(provider.contradictionRepairRequests.length > 0);
+    assert.equal(
+      getDebateMysteryCaseV2(db, "user-1", compiled.id).privateCase
+        .contradictionSemanticContractVersion,
+      1,
+    );
+  });
+
   it("keeps grand eight-suspect contradiction records discoverable", async () => {
     const db = testDb();
     const provider = new V2AuthorProvider();
@@ -3008,6 +3081,44 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(v2State(session).compilation.stage, "needs_attention");
     assert.match(job.private_error ?? "", /simulated room author provider outage/iu);
     assert.deepEqual(draft.recoveryBySection ?? {}, {});
+  });
+
+  it("keeps court playable when prosecution choice generation exhausts invalid output", async () => {
+    const db = testDb();
+    const provider = new MissingProsecutionChoicesV2AuthorProvider();
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-recovered-prosecution-choice",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    const session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    const state = v2State(session);
+    const { graph, privateCase } = getDebateMysteryCaseV2(
+      db,
+      "user-1",
+      session.id,
+    );
+
+    assert.ok(provider.invalidChoiceAttempts > 0);
+    assert.equal(state.compilation.stage, "complete");
+    assert.equal(session.status, "waiting_for_player");
+    assert.equal(privateCase.graphValidation.valid, true);
+    assert.equal(graph.prosecutionChoices.length, 1);
+    assert.equal(graph.prosecutionChoices[0]?.options.length, 2);
+    assert.equal(
+      privateCase.authoringRecoveryBySection?.prosecution_choices?.kind,
+      "deterministic_fallback",
+    );
+    assert.doesNotMatch(JSON.stringify(session), /authoringRecoveryBySection/iu);
   });
 
   it("fills omitted earlier-format room and repeat performances with deterministic playable contracts", async () => {
@@ -5355,6 +5466,18 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     session = act(db, session, { action: "move" }, "open-map-after-visible-sweep");
     assert.equal(v2State(session).roomView, "mansion");
     session = act(db, session, { action: "move", roomId: privateCase.crimeSceneRoomId }, "return-to-crime-scene");
+    state = v2State(session);
+    const teleportOriginRoom = state.rooms.find((room) => room.id === state.currentRoomId)!;
+    const distantRoom = state.rooms.find((room) =>
+      !room.visited &&
+      room.id !== teleportOriginRoom.id &&
+      !(room.neighborIds ?? []).includes(teleportOriginRoom.id) &&
+      !(teleportOriginRoom.neighborIds ?? []).includes(room.id));
+    assert.ok(distantRoom, "the test mansion needs a nonadjacent undiscovered room");
+    assert.throws(
+      () => act(db, session, { action: "move", roomId: distantRoom.id }, "reject-undiscovered-teleport"),
+      /adjacent doorway/iu,
+    );
 
     const visitedRooms = new Set<string>();
     const walkConnectedRooms = (roomId: string): void => {
@@ -5370,6 +5493,9 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     };
     walkConnectedRooms(privateCase.crimeSceneRoomId);
     assert.equal(visitedRooms.size, v2State(session).rooms.length);
+    session = act(db, session, { action: "move", roomId: distantRoom.id }, "teleport-discovered-room");
+    assert.equal(v2State(session).currentRoomId, distantRoom.id);
+    session = act(db, session, { action: "move", roomId: privateCase.crimeSceneRoomId }, "teleport-back-to-crime-scene");
 
     const moveToRoom = (targetRoomId: string, keyPrefix: string): void => {
       const movementState = v2State(session);
@@ -7182,6 +7308,47 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       /revealDebateMysteryAssetV1/u,
     );
     assert.match(source, /debateMysteryIllustratedRoomSubjectIdV1\(subjectId\)/u);
+  });
+
+  it("keeps the frozen Case Forge asset lane authoritative after account-mode drift", () => {
+    const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+    const functionSlice = (startMarker: string, endMarker: string): string => {
+      const start = serverSource.indexOf(startMarker);
+      const end = serverSource.indexOf(endMarker, start + startMarker.length);
+      assert.ok(start >= 0 && end > start, `${startMarker} has a stable source boundary`);
+      return serverSource.slice(start, end);
+    };
+    const assetPreparers = [
+      functionSlice(
+        "async function prepareDebateMysteryV2EvidenceAssets",
+        "async function prepareDebateMysteryV2MansionExteriorAssetDirect",
+      ),
+      functionSlice(
+        "async function prepareDebateMysteryV2MansionExteriorAssetDirect",
+        "async function adoptDebateMysteryV2MansionExteriorDraft",
+      ),
+      functionSlice(
+        "async function prepareDebateMysteryV2RoomAssets",
+        "function debateMysteryRoomArtUpgradeStatusV1",
+      ),
+      functionSlice(
+        "function debateMysteryRoomArtUpgradeStatusV1",
+        "async function prepareDebateMysteryIllustratedRoomsV1",
+      ),
+      functionSlice(
+        "async function prepareDebateMysteryIllustratedRoomsV1",
+        "function queueDebateMysteryIllustratedRoomsV1",
+      ),
+    ];
+
+    for (const preparer of assetPreparers) {
+      assert.match(preparer, /session\.responseMode/u);
+      assert.doesNotMatch(preparer, /userBlocksOnlineCapabilities/u);
+    }
+    assert.match(
+      serverSource,
+      /mystery-assets\/retry[\s\S]*?session\.responseMode === "local"/u,
+    );
   });
 
   it("keeps pivotal Present authoring generic and contains no runtime provider boundary", () => {

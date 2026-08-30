@@ -34,6 +34,14 @@ const source = readFileSync(
   fileURLToPath(new URL("./DebateExperience.tsx", import.meta.url)),
   "utf8",
 );
+const flytingSource = readFileSync(
+  fileURLToPath(new URL("./DebateFlyting.tsx", import.meta.url)),
+  "utf8",
+);
+const flytingCss = readFileSync(
+  fileURLToPath(new URL("./DebateFlyting.module.css", import.meta.url)),
+  "utf8",
+);
 const evidenceDocumentSource = readFileSync(
   fileURLToPath(new URL("./DebateEvidenceDocument.tsx", import.meta.url)),
   "utf8",
@@ -86,17 +94,20 @@ it("keeps DOM frame diagnostics active for Whodunnit playback", () => {
   );
 });
 
-it("previews inert Flyting beside the available Debate formats", () => {
+it("opens executable Flyting beside the available Debate formats", () => {
   assert.match(
     source,
-    /option\.availability === "available" \|\| option\.id === "flyting"/u,
+    /option\.availability === "available"/u,
   );
-  assert.match(
-    source,
-    /const disabled = comingSoon/u,
-  );
-  assert.match(source, /if \(comingSoon\) return renderFormatCard\(\);/u);
-  assert.match(source, /<b>Coming soon<\/b>/u);
+  assert.match(source, /<DebateFlytingSetup/u);
+  assert.match(source, /<DebateFlytingLive/u);
+  assert.match(source, /"debate-format-flyting"/u);
+  assert.match(flytingSource, /Boast · Flyte · Rejoinder · Acclamation/u);
+  assert.match(flytingSource, /No timer · four exchanges/u);
+  assert.match(flytingSource, /◇ Wield PRISM/u);
+  assert.match(flytingSource, /Yield · leave unanswered/u);
+  assert.match(flytingSource, /Hall Record/u);
+  assert.match(flytingCss, /\.hallStage/u);
 });
 const pageCss = readFileSync(
   fileURLToPath(new URL("./page.module.css", import.meta.url)),

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   memo,
   useCallback,
   useEffect,
@@ -731,6 +732,10 @@ import {
   DebateMysteryV2Play,
   DebateMysteryV2Readiness,
 } from "./DebateMysteryV2Experience";
+import {
+  DebateFlytingLive,
+  DebateFlytingSetup,
+} from "./DebateFlyting";
 import { formatDebateMysteryV2PublicReview } from "./debateMysteryV2Review";
 import { debateMysteryCourtEvidenceAssetUrls } from "./debateMysteryAssetLifecycle";
 import {
@@ -3176,6 +3181,30 @@ function debateArchiveMetaChips(
           : "Investigator",
     ];
   }
+  if (session.format === "flyting") {
+    const chips = [
+      "Flyting",
+      "Mead Hall",
+      "Four exchanges",
+      `${session.moderatorName?.trim() || "PRISM"} · Host of the Hall`,
+      session.status === "completed"
+        ? "The word is given"
+        : session.status === "paused"
+          ? "In recess"
+          : session.status === "waiting_for_player"
+            ? "The Hall awaits you"
+            : "Bout in progress",
+      session.playerRole === "spectator"
+        ? "Spectator"
+        : session.playerRole === "judge"
+          ? "Host"
+          : "Coach",
+    ];
+    if (session.activeDurationMs !== null) {
+      chips.push(debateActiveDurationLabel(session.activeDurationMs));
+    }
+    return chips;
+  }
   const chips = [
     session.format === "turnabout" ? "Turnabout" : "Forum",
     debateProductionName(session.format, session.formality),
@@ -3345,6 +3374,7 @@ function debateProductionName(
   format: DebateFormatId,
   formality: DebateFormalityId,
 ): string {
+  if (format === "flyting") return "Mead Hall";
   if (formality === "parliamentary") {
     return format === "turnabout" ? "Court of Record" : "Assembly Chamber";
   }
@@ -13757,6 +13787,17 @@ export function DebateExperience(
         setView("mystery");
         return;
       }
+      if (
+        session.format === "flyting" &&
+        session.formatState.format === "flyting"
+      ) {
+        activeSessionIdRef.current = session.id;
+        activeSessionRef.current = session;
+        setActiveSession(session);
+        setObserverPerspective("live");
+        setView("live");
+        return;
+      }
       const deferredStartAtOpen = debateSessionAwaitingDeferredStart(session);
       const exhaustedMarker = debateExhaustedRecessRecoveryMarker(session);
       if (
@@ -19437,7 +19478,41 @@ export function DebateExperience(
     );
   };
 
-  const renderLobby = (): React.JSX.Element => (
+  const renderLobby = (): React.JSX.Element => {
+    if (format === "flyting") {
+      return (
+        <DebateFlytingSetup
+          bots={bots}
+          theme={props.theme}
+          preferredProvider={props.preferredProvider}
+          responseMode={props.responseMode}
+          reasoningEffort={props.reasoningEffort}
+          turbo={props.turbo}
+          modelOverride={props.modelOverride}
+          request={request}
+          renderBotGlyph={props.renderBotGlyph}
+          onBackToFormats={() => setFormat("forum")}
+          onExit={props.onExit}
+          onStart={(session) => {
+            activeSessionIdRef.current = session.id;
+            activeSessionRef.current = session;
+            setActiveSession(session);
+            setObserverPerspective("live");
+            setView("live");
+            void loadSessions();
+          }}
+          onSaved={() => {
+            setSetupRestoreNotice(
+              "Flyting bout saved to Archive. Its approved legends and Hall cast are frozen until you open it.",
+            );
+            setStudioPanel("archive");
+            setFormat("forum");
+            void loadSessions();
+          }}
+        />
+      );
+    }
+    return (
     <main
       className={`${styles.lobby} ${styles.dashboard}`}
       data-debate-surface="dashboard"
@@ -19895,7 +19970,8 @@ export function DebateExperience(
         </div>
       ) : null}
     </main>
-  );
+    );
+  };
 
   const renderMysteryCourtStep = (): React.JSX.Element => {
     const pageIndex = Math.max(
@@ -20148,6 +20224,12 @@ export function DebateExperience(
                         <label {...binding} data-selected={format === option.id ? "true" : undefined}>
                           <input type="radio" name="debate-format" value={option.id} checked={format === option.id} onChange={() => {
                             if (option.id === "whodunnit") return;
+                            if (option.id === "flyting") {
+                              setFormat("flyting");
+                              setPlayerRole("participant");
+                              setRoleChecks([]);
+                              return;
+                            }
                             if (option.id === "forum" || option.id === "turnabout") {
                               setFormat(option.id);
                               setPlayerRole((current) =>
@@ -20362,8 +20444,7 @@ export function DebateExperience(
           >
             <legend>Debate format</legend>
             {DEBATE_FORMAT_CATALOG.filter(
-              (option) =>
-                option.availability === "available" || option.id === "flyting",
+              (option) => option.availability === "available",
             ).map((option) => {
               const comingSoon = option.availability === "coming_soon";
               const movesParticipantToJudge =
@@ -20374,7 +20455,6 @@ export function DebateExperience(
               ): React.JSX.Element => (
                 <label
                   {...binding}
-                  key={option.id}
                   data-selected={format === option.id ? "true" : undefined}
                   data-availability={
                     movesParticipantToJudge
@@ -20383,6 +20463,9 @@ export function DebateExperience(
                   }
                   aria-disabled={disabled ? "true" : undefined}
                   tabIndex={disabled ? 0 : undefined}
+                  data-tutorial-target={
+                    option.id === "flyting" ? "debate-format-flyting" : undefined
+                  }
                 >
                   <input
                     type="radio"
@@ -20404,6 +20487,14 @@ export function DebateExperience(
                           current === "plainspoken" ? "structured" : current,
                         );
                         setCastTuningOpen(true);
+                        setRoleChecks([]);
+                        return;
+                      }
+                      if (option.id === "flyting") {
+                        setFormat("flyting");
+                        setPlayerRole((current) =>
+                          current === "investigator" ? "participant" : current,
+                        );
                         setRoleChecks([]);
                         return;
                       }
@@ -20436,7 +20527,9 @@ export function DebateExperience(
                   ) : null}
                 </label>
               );
-              if (comingSoon) return renderFormatCard();
+              if (comingSoon || option.id === "flyting") {
+                return <Fragment key={option.id}>{renderFormatCard()}</Fragment>;
+              }
               return (
                 <PrismRefractTarget
                   target={formatRefractMagic(option.id as DebateFormatId)}
@@ -31794,6 +31887,39 @@ export function DebateExperience(
     mysteryCasePreludeMusicSessionActive(activeSession.formatState.playPhase)
       ? activeSession.formatState.playPhase
       : null;
+  const playFlytingEvent = async (
+    event: DebateEventV1,
+    session: DebateSessionV1,
+  ): Promise<void> => {
+    if (
+      !props.onUtterance ||
+      !props.audioEnabled ||
+      props.audioVolume <= 0 ||
+      event.kind === "reaction"
+    ) {
+      return;
+    }
+    const speaker = bots.find((bot) => bot.id === event.speakerBotId) ?? null;
+    if (speaker?.hardMuted) return;
+    const spokenText = debateSpokenText(event.content).trim();
+    if (!spokenText) return;
+    await settleDebatePresentationCallback(
+      props.onUtterance({
+        event,
+        format: "flyting",
+        sessionId: session.id,
+        speaker,
+        player: event.speakerKind === "player",
+        playerVoice: event.speakerKind === "player",
+        spokenText,
+        voiceSourceBotId: speaker?.id ?? null,
+      }),
+      {
+        stallMs: DEBATE_PRESENTATION_FIRST_VOICE_STALL_MS,
+        maxMs: DEBATE_PRESENTATION_CALLBACK_MAX_MS,
+      },
+    );
+  };
   const experience = view === "mystery" &&
     activeSession?.format === "whodunnit" &&
     activeSession.formatState.format === "whodunnit" ? (
@@ -31883,6 +32009,38 @@ export function DebateExperience(
       {...mysterySharedProps}
       session={activeSession}
       onSessionChange={adoptMysterySessionChange}
+      onExit={() => {
+        activeSessionIdRef.current = null;
+        activeSessionRef.current = null;
+        setActiveSession(null);
+        setView("dashboard");
+        setStudioPanel("archive");
+        void loadSessions();
+      }}
+    />
+  ) : view === "live" &&
+    activeSession?.format === "flyting" &&
+    activeSession.formatState.format === "flyting" ? (
+    <DebateFlytingLive
+      bots={bots}
+      theme={props.theme}
+      preferredProvider={props.preferredProvider}
+      responseMode={props.responseMode}
+      reasoningEffort={props.reasoningEffort}
+      turbo={props.turbo}
+      modelOverride={props.modelOverride}
+      request={request}
+      renderBotGlyph={props.renderBotGlyph}
+      session={activeSession}
+      audioEnabled={props.audioEnabled}
+      audioVolume={props.audioVolume}
+      playEvent={playFlytingEvent}
+      onSessionChange={(session) => {
+        activeSessionIdRef.current = session.id;
+        activeSessionRef.current = session;
+        setActiveSession(session);
+        void loadSessions();
+      }}
       onExit={() => {
         activeSessionIdRef.current = null;
         activeSessionRef.current = null;

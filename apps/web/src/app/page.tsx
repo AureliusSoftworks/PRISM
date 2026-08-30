@@ -11092,7 +11092,7 @@ function PanelSectionInfo({
   id,
   label,
   variant = "section",
-  icon = "info",
+  icon = "help",
   children,
 }: {
   id: string;
@@ -11104,14 +11104,26 @@ function PanelSectionInfo({
   const Icon = icon === "help" ? CircleHelp : Info;
   return (
     <span className={styles.panelSectionInfo} data-variant={variant}>
-      <span
-        className={styles.panelSectionInfoButton}
-        tabIndex={0}
-        aria-label={label}
-        aria-describedby={id}
-      >
-        <Icon size={14} strokeWidth={2.1} aria-hidden="true" />
-      </span>
+      {variant === "control" ? (
+        <span
+          className={styles.panelSectionInfoButton}
+          role="button"
+          tabIndex={0}
+          aria-label={label}
+          aria-describedby={id}
+        >
+          <Icon size={14} strokeWidth={2.1} aria-hidden="true" />
+        </span>
+      ) : (
+        <button
+          type="button"
+          className={styles.panelSectionInfoButton}
+          aria-label={label}
+          aria-describedby={id}
+        >
+          <Icon size={14} strokeWidth={2.1} aria-hidden="true" />
+        </button>
+      )}
       <span
         id={id}
         className={styles.panelSectionInfoTooltip}
@@ -60270,7 +60282,6 @@ function HomeContent(): React.JSX.Element {
             <h4 id={`settings-${mode}-ephemeral-chat-title`}>Ephemeral chat</h4>
           </div>
           <div className={styles.settingsSectionHeaderAside}>
-            <small>Global by default.</small>
             <PanelSectionInfo
               id={`settings-section-info-${mode}-ephemeral-chat`}
               label={`About ${modeLabel} ephemeral chat`}
@@ -60300,13 +60311,6 @@ function HomeContent(): React.JSX.Element {
               <option value="local">Always LOCAL</option>
               <option value="online">Prefer ONLINE</option>
             </select>
-            <small>
-              {preference === "global"
-                ? "Follows the account-wide response toggle."
-                : preference === "local"
-                  ? `Keeps only ${modeLabel} ephemeral chat LOCAL.`
-                  : "Uses ONLINE when the global privacy toggle allows it."}
-            </small>
           </label>
         </div>
       </section>
@@ -64273,7 +64277,7 @@ function HomeContent(): React.JSX.Element {
   ]);
   useEffect(() => {
     if (!activeTutorialMode || typeof document === "undefined") {
-      setActiveTutorialTargetRect(null);
+      setActiveTutorialTargetRect((current) => current === null ? current : null);
       return;
     }
     const tutorial = MODE_TUTORIALS[activeTutorialMode];
@@ -120866,25 +120870,18 @@ function HomeContent(): React.JSX.Element {
                             >
                               Each Coffee Group keeps its own duration, response
                               length, table energy, cross-talk, and
-                              stay-on-thread preferences.
+                              stay-on-thread preferences. Setup, preview,
+                              finished sessions, and replay remain editable;
+                              arriving and live sessions stay locked until they
+                              end.
                             </PanelSectionInfo>
                           </div>
                         </header>
                         <div className={styles.settingsFieldGrid}>
-                          <p
-                            className={`${styles.settingsFieldFull} ${styles.settingsSectionHint}`}
-                          >
-                            Open a Coffee Group and use its settings button
-                            before the session begins. Setup, preview, finished
-                            sessions, and replay remain editable; arriving and
-                            live sessions stay locked until you end them.
-                          </p>
                           <div
                             className={`${styles.settingsFieldFull} ${styles.settingsDockRow}`}
+                            data-compact="true"
                           >
-                            <span>
-                              Manage Coffee Groups and their session behavior.
-                            </span>
                             <button
                               type="button"
                               onClick={() => {
@@ -120919,24 +120916,21 @@ function HomeContent(): React.JSX.Element {
                               )}{" "}
                               voice
                             </small>
+                            <PanelSectionInfo
+                              id="settings-section-info-coffee-presence"
+                              label="About your Coffee table presence"
+                            >
+                              Your Coffee voice follows Default Prism&apos;s Voice
+                              settings in Avatar Studio. Individual bots keep
+                              their own voices, behavior settings, and Powers.
+                            </PanelSectionInfo>
                           </div>
                         </header>
                         <div className={styles.settingsFieldGrid}>
-                          <p
-                            className={`${styles.settingsFieldFull} ${styles.settingsSectionHint}`}
-                          >
-                            Your Coffee voice now follows Default Prism&apos;s
-                            Voice settings in Avatar Studio. Individual bots
-                            keep their own voices, behavior settings, and Powers
-                            in their Avatar Studio profiles.
-                          </p>
                           <div
                             className={`${styles.settingsFieldFull} ${styles.settingsDockRow}`}
+                            data-compact="true"
                           >
-                            <span>
-                              Adjust how you sound when your messages are spoken
-                              at the table.
-                            </span>
                             <button
                               type="button"
                               onClick={openDefaultBotCustomizer}
@@ -120949,11 +120943,10 @@ function HomeContent(): React.JSX.Element {
                     </div>
 
                     <div className={styles.settingsSaveDock}>
-                      <div className={styles.settingsDockRow}>
-                        <span>
-                          Coffee settings are saved with the group or bot they
-                          belong to.
-                        </span>
+                      <div
+                        className={styles.settingsDockRow}
+                        data-compact="true"
+                      >
                         <button
                           type="button"
                           className={styles.linkButton}
@@ -121870,28 +121863,21 @@ function HomeContent(): React.JSX.Element {
                               Lets Signal direct occasional vocal reactions in
                               generated episodes. The reactions are saved with
                               each line so live playback and replay stay
-                              consistent.
+                              consistent. With ElevenLabs v3, actions stay
+                              separate from dialogue, float above the bot, and
+                              appear between asterisks in the transcript. Local
+                              and provider fallbacks speak only the dialogue.
                             </PanelSectionInfo>
                           </div>
                         </header>
-                        <div className={styles.settingsTutorialCard}>
-                          <strong>Always on with ElevenLabs v3</strong>
-                          <span>
-                            Signal automatically adds sparse, context-aware
-                            vocal reactions and keeps them separate from spoken
-                            dialogue. Saved performance tags are sent only when
-                            that bot is actually using an ElevenLabs voice. The
-                            action floats above the bot and appears between
-                            asterisks in the transcript; local and provider
-                            fallbacks speak only the dialogue.
-                          </span>
-                        </div>
                       </section>
                     </div>
 
                     <div className={styles.settingsSaveDock}>
-                      <div className={styles.settingsDockRow}>
-                        <span>Replay Signal’s producer walkthrough.</span>
+                      <div
+                        className={styles.settingsDockRow}
+                        data-compact="true"
+                      >
                         <div className={styles.settingsDockActions}>
                           <button
                             type="button"
@@ -121956,12 +121942,6 @@ function HomeContent(): React.JSX.Element {
                           />
                           <span>
                             <strong>Reuse synthesized exhibits</strong>
-                            <small>
-                              New cases may draw up to two physical props from
-                              your synthesized Debate exhibit library. The
-                              object and artwork return; their previous meaning
-                              does not.
-                            </small>
                           </span>
                         </label>
                       </section>
@@ -121987,7 +121967,20 @@ function HomeContent(): React.JSX.Element {
                           className={styles.settingsFieldFull}
                           data-tutorial-target="whodunnit-text-voice-setting"
                         >
-                          <span>Text-stream accompaniment</span>
+                          <span className={styles.controlLabelWithInfo}>
+                            <span>Text-stream accompaniment</span>
+                            <PanelSectionInfo
+                              id="settings-control-info-debate-whodunnit-text-voice"
+                              label="About Whodunnit text-stream accompaniment"
+                              variant="control"
+                            >
+                              Chooses the voice that follows written Casekeeper
+                              observations and other non-spoken lines while they
+                              appear. Anonymous Casekeeper speech keeps its
+                              authored Babble carrier; character speech keeps
+                              its configured English or Premium voice.
+                            </PanelSectionInfo>
+                          </span>
                           <select
                             value={settings.debateWhodunnitTextVoiceMode}
                             aria-label="Whodunnit text voice"
@@ -122004,13 +121997,6 @@ function HomeContent(): React.JSX.Element {
                             <option value="babble">Babble</option>
                             <option value="bottish">Bottish · Default</option>
                           </select>
-                          <small>
-                            Chooses the voice that follows written Casekeeper
-                            observations and other non-spoken lines while they
-                            appear. Anonymous Casekeeper speech keeps its
-                            authored Babble carrier; character speech keeps its
-                            configured English or Premium voice.
-                          </small>
                         </label>
                       </section>
                       <section
@@ -122035,25 +122021,20 @@ function HomeContent(): React.JSX.Element {
                               Jury. Debate then enters the chamber
                               automatically, prepares all five final reasons
                               behind sealed deliberation, and presents every
-                              ballot in order.
+                              ballot in order. Pause and Resume remain silent;
+                              an interrupted saved ballot restarts from its
+                              beginning when playback resumes.
                             </PanelSectionInfo>
                           </div>
                         </header>
-                        <p className={styles.settingsSectionHint}>
-                          Pause and Resume remain available in the Jury chamber,
-                          but they are silent. If a ballot line is interrupted,
-                          its saved recording restarts from the beginning when
-                          playback resumes.
-                        </p>
                       </section>
                     </div>
 
                     <div className={styles.settingsSaveDock}>
-                      <div className={styles.settingsDockRow}>
-                        <span>
-                          Jury deliberation follows one consistent automatic
-                          ceremony in every Debate.
-                        </span>
+                      <div
+                        className={styles.settingsDockRow}
+                        data-compact="true"
+                      >
                         <div className={styles.settingsDockActions}>
                           <button
                             type="button"
@@ -122093,15 +122074,12 @@ function HomeContent(): React.JSX.Element {
                             >
                               Continuity has its own capability version because
                               its narrative contracts will span projects,
-                              series, background jobs, and exports.
+                              series, background jobs, and exports. It tracks
+                              canon, chronology, character state, and unresolved
+                              threads across a project and series.
                             </PanelSectionInfo>
                           </div>
                         </header>
-                        <p className={styles.settingsCompactCopy}>
-                          Continuity is the private narrative framework being
-                          built to track canon, chronology, character state, and
-                          unresolved threads across a project and series.
-                        </p>
                         <div className={styles.settingsTutorialCard}>
                           <strong>
                             {CONTINUITY_FRAMEWORK.name}{" "}
@@ -122113,22 +122091,6 @@ function HomeContent(): React.JSX.Element {
                             are proven.
                           </span>
                         </div>
-                        <div className={styles.settingsTutorialCard}>
-                          <strong>Slate walkthrough</strong>
-                          <span>
-                            Replay the gentle project, structure, drafting, and
-                            revision introduction whenever you need it.
-                          </span>
-                          <div className={styles.settingsTutorialActions}>
-                            <button
-                              type="button"
-                              className={styles.linkButton}
-                              onClick={() => resetSingleModeTutorial("slate")}
-                            >
-                              Reset Slate tutorial
-                            </button>
-                          </div>
-                        </div>
                       </section>
                       <SlateHemisphereSettingsPanel
                         snapshot={slateHemisphereSettingsSnapshot}
@@ -122136,6 +122098,20 @@ function HomeContent(): React.JSX.Element {
                         error={slateHemisphereSettingsError}
                         onSave={saveSlateHemisphereSettings}
                       />
+                    </div>
+                    <div className={styles.settingsSaveDock}>
+                      <div
+                        className={styles.settingsDockRow}
+                        data-compact="true"
+                      >
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          onClick={() => resetSingleModeTutorial("slate")}
+                        >
+                          Reset Slate tutorial
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -124308,11 +124284,10 @@ function HomeContent(): React.JSX.Element {
                               {panelError}
                             </p>
                           )}
-                          <div className={styles.settingsDockRow}>
-                            <span>
-                              Changes to graphics, keys, chat defaults, and
-                              account behavior use Save.
-                            </span>
+                          <div
+                            className={styles.settingsDockRow}
+                            data-compact="true"
+                          >
                             <button type="submit" disabled={busy}>
                               {busy ? "Saving..." : "Save settings"}
                             </button>
@@ -149869,20 +149844,13 @@ function HomeContent(): React.JSX.Element {
                   // conversation when their actual intent is "let me pick from this
                   // filtered group." Block the click + nudge them to pick a tile.
                   const heroLensPlaceholder = false;
-                  const heroStartLabel = heroBotName
-                    ? `Send a message below, or select the bot to open ${heroBotName}'s panel.`
-                    : immersiveEmptyState
-                      ? "A continuous PRISM-only space for the present thread. Send a message below, or choose a bot from the library."
-                      : "Select the bot to begin, or pick a bot below.";
                   const hint = (() => {
                     if (chatStartupSummaryVisible && chatStartupSummary) {
                       return chatStartupSummary;
                     }
                     if (selectedBotPromptPreview)
                       return selectedBotPromptPreview;
-                    if (descriptionPreview)
-                      return `${descriptionPreview} ${heroStartLabel}`;
-                    return heroStartLabel;
+                    return descriptionPreview;
                   })();
                   const emptyStateClassName = [
                     styles.emptyState,
@@ -150243,7 +150211,9 @@ function HomeContent(): React.JSX.Element {
                                 </div>
                               </div>
                             </div>
-                            <p className={styles.emptyStateHint}>{hint}</p>
+                            {hint ? (
+                              <p className={styles.emptyStateHint}>{hint}</p>
+                            ) : null}
                             {renderZenSplashControls()}
                           </div>
                         </div>
@@ -150283,7 +150253,9 @@ function HomeContent(): React.JSX.Element {
                               </div>
                             </>
                           )}
-                          <p className={styles.emptyStateHint}>{hint}</p>
+                          {hint ? (
+                            <p className={styles.emptyStateHint}>{hint}</p>
+                          ) : null}
                           {renderZenSplashControls()}
                         </div>
                       ) : null}
@@ -151921,17 +151893,6 @@ function HomeContent(): React.JSX.Element {
                   hueDirectoryFilterActive && !heroBot;
                 const forceHeroTrianglePreview =
                   heroLensPlaceholder || lensInteracting;
-                const heroStartLabel = pendingIncognito
-                  ? privateBotName
-                    ? `Select the bot above to begin a private chat with ${privateBotName}.`
-                    : "Select the mark above to begin a private chat."
-                  : heroLensPlaceholder
-                    ? "Pick a bot from the filtered grid below to begin."
-                    : heroBot?.name?.trim()
-                      ? `Select the bot above to have ${heroBot.name.trim()} start the conversation.`
-                      : bots.length > 0
-                        ? "Select the bot to begin, or pick a bot below."
-                        : "Select the mark above to create a bot to get started.";
                 const heroRecentConversations =
                   !pendingIncognito && heroBot?.id
                     ? conversations
@@ -151949,12 +151910,11 @@ function HomeContent(): React.JSX.Element {
                         .slice(0, 8)
                     : [];
                 const hint = (() => {
-                  if (pendingIncognito)
-                    return `${heroStartLabel} No memories are saved.`;
+                  if (pendingIncognito) return "No memories are saved.";
+                  if (heroLensPlaceholder)
+                    return "Pick a bot from the filtered grid.";
                   if (selectedBotPromptPreview) return selectedBotPromptPreview;
-                  if (descriptionPreview)
-                    return `${descriptionPreview} ${heroStartLabel}`;
-                  return heroStartLabel;
+                  return descriptionPreview;
                 })();
                 const emptyStatePickerGeometry =
                   pickerSourceBots.length > 0
@@ -152119,7 +152079,9 @@ function HomeContent(): React.JSX.Element {
                                   </p>
                                 ) : null}
                               </div>
-                              <p className={styles.emptyStateHint}>{hint}</p>
+                              {hint ? (
+                                <p className={styles.emptyStateHint}>{hint}</p>
+                              ) : null}
                             </div>
                           </div>
                         ) : null}
