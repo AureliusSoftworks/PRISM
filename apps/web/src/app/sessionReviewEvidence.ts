@@ -2,6 +2,7 @@ import type {
   ReplayDirectionEventV2,
   ReplayRecordingV1,
   ReplaySurfaceV1,
+  ReplayVoiceTakeRecordV1,
 } from "@localai/shared";
 import {
   replayRecordingDetail,
@@ -23,6 +24,16 @@ export type SessionReviewRecordingEvidence =
       audioDurationMs: number | null;
       timelineDurationMs: number | null;
       direction: ReplayDirectionEventV2[];
+      voiceLineage?: Array<{
+        sourceMessageId: string | null;
+        speakerId: string;
+        channel: string;
+        requestedEngine: string | null;
+        resolvedEngine: string | null;
+        profileFingerprint: string;
+        fallbackReason: string | null;
+        status: string;
+      }>;
       warningPresent: boolean;
       warningDetail: string | null;
       errorPresent: boolean;
@@ -94,6 +105,33 @@ export function sessionReviewStableJson(value: unknown): string {
   return serialized === undefined ? JSON.stringify(String(safe)) : serialized;
 }
 
+function sessionReviewFingerprint(value: unknown): string {
+  const input = sessionReviewStableJson(value);
+  let hash = 2_166_136_261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return `voice-${(hash >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+function sessionReviewVoiceFallbackReason(
+  requestedEngine: string | null,
+  resolvedEngine: string | null,
+): string | null {
+  if (!requestedEngine) return null;
+  if (!resolvedEngine) return "unresolved_or_not_heard";
+  const requested = requestedEngine.toLowerCase();
+  const resolved = resolvedEngine.toLowerCase();
+  if (
+    requested === resolved ||
+    (requested === "builtin" && resolved.startsWith("builtin-"))
+  ) {
+    return null;
+  }
+  return "resolved_engine_differs_from_request";
+}
+
 export function formatSessionReviewDuration(
   durationMs: number | null | undefined,
 ): string {
@@ -111,6 +149,7 @@ export function formatSessionReviewDuration(
 
 export function sessionReviewRecordingEvidenceFromRecording(
   recording: ReplayRecordingV1 | null,
+  takes: readonly ReplayVoiceTakeRecordV1[] = [],
 ): SessionReviewRecordingEvidence {
   if (!recording) return { state: "missing" };
   const manifest = recording.manifest;
@@ -129,6 +168,23 @@ export function sessionReviewRecordingEvidenceFromRecording(
               left.sequence - right.sequence || left.atMs - right.atMs,
           )
         : [],
+    voiceLineage: takes.map((take) => ({
+      sourceMessageId: take.snapshot.sourceMessageId,
+      speakerId: take.snapshot.speakerId,
+      channel: take.snapshot.channel,
+      requestedEngine: take.snapshot.requestedEngine,
+      resolvedEngine: take.snapshot.resolvedEngine,
+      profileFingerprint: sessionReviewFingerprint({
+        profile: take.snapshot.profile,
+        pronunciation: take.snapshot.resolvedPronunciation ?? null,
+        speechprint: take.snapshot.resolvedSpeechprint ?? null,
+      }),
+      fallbackReason: sessionReviewVoiceFallbackReason(
+        take.snapshot.requestedEngine,
+        take.snapshot.resolvedEngine,
+      ),
+      status: take.status,
+    })),
     warningPresent: Boolean(recording.warning),
     // A bare "yes" cannot be diagnosed. Review 2253b390 froze the session and
     // degraded its recording, and the only evidence naming the cause was the
@@ -148,7 +204,10 @@ export async function loadSessionReviewRecordingEvidence(
     if (!recording) return { state: "missing" };
     try {
       const detail = await replayRecordingDetail(recording.id);
-      return sessionReviewRecordingEvidenceFromRecording(detail.recording);
+      return sessionReviewRecordingEvidenceFromRecording(
+        detail.recording,
+        detail.takes,
+      );
     } catch {
       return sessionReviewRecordingEvidenceFromRecording(recording);
     }
@@ -166,6 +225,7 @@ export function sessionReviewRecordingSummaryLines(
   if (evidence.state === "missing") {
     return ["- Recording diagnostics: no recording found"];
   }
+  const voiceLineage = evidence.voiceLineage ?? [];
   const durationAlignment = (() => {
     if (
       evidence.audioDurationMs == null ||
@@ -195,6 +255,11 @@ export function sessionReviewRecordingSummaryLines(
     `- Compiled timeline duration: ${formatSessionReviewDuration(evidence.timelineDurationMs)}`,
     `- Recording duration alignment: ${durationAlignment}`,
     `- Private direction events: ${evidence.direction.length}`,
+    `- Voice take lineage: ${voiceLineage.length}`,
+    ...voiceLineage.map(
+      (take) =>
+        `  - Message ${take.sourceMessageId ?? "None"} | speaker ${take.speakerId} | ${take.channel} | requested ${take.requestedEngine ?? "None"} | resolved ${take.resolvedEngine ?? "None"} | profile ${take.profileFingerprint} | fallback ${take.fallbackReason ?? "none"} | ${take.status}`,
+    ),
     `- Recording warning present: ${evidence.warningPresent ? (evidence.warningDetail ?? "yes (no detail recorded)") : "no"}`,
     `- Recording error present: ${evidence.errorPresent ? (evidence.errorDetail ?? "yes (no detail recorded)") : "no"}`,
   ];

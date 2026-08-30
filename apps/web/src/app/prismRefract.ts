@@ -9,9 +9,17 @@ export type PrismRefractInvocation =
   | "wield-click"
   | "focused-shortcut";
 
+export const PRISM_REFRACT_DEFAULT_PROSE_DIRECTION =
+  "Make this more creative";
+
+export function initialPrismRefractProseDirection(currentValue: string): string {
+  return currentValue.trim() ? PRISM_REFRACT_DEFAULT_PROSE_DIRECTION : "";
+}
+
 export interface PrismRefractGenerationInput {
   currentValue: string;
   rejectedValues: readonly string[];
+  direction?: string;
   signal: AbortSignal;
 }
 
@@ -23,6 +31,11 @@ interface PrismRefractTargetBase {
 
 export interface PrismRefractFieldTarget extends PrismRefractTargetBase {
   kind: "field";
+  /** Optional steering composer shown before the first generated candidate. */
+  steering?: {
+    prompt: string;
+    initialDirection: (currentValue: string) => string;
+  };
   read: () => string;
   preview: (value: string) => void;
   accept: (value: string) => void | Promise<void>;

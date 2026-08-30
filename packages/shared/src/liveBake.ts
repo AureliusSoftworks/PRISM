@@ -119,11 +119,13 @@ export interface LiveBakeArtifactV1 {
 
 export const LIVE_BAKE_MAX_STEPS_DEBATE = 240;
 /**
- * A timed Signal interview may use all 120 public interview utterances, then
- * needs one final host turn to persist its formal closing. Keep that terminal
- * allowance explicit rather than treating it as unbounded extra runway.
+ * A timed Signal interview may use all 120 public interview utterances. One
+ * already-owed conversation repair may land at that boundary before the final
+ * host sign-off, and an eligible episode may then give the guest one
+ * deterministic coda. Keep those terminal allowances explicit rather than
+ * treating them as unbounded extra runway.
  */
-export const LIVE_BAKE_MAX_STEPS_SIGNAL = BOTCAST_TIMED_MAX_UTTERANCES + 1;
+export const LIVE_BAKE_MAX_STEPS_SIGNAL = BOTCAST_TIMED_MAX_UTTERANCES + 3;
 export const LIVE_BAKE_DEFAULT_TIMEOUT_MS = 12 * 60_000;
 /** Debate keeps a long runway because its procedural floor can fan out. */
 export const LIVE_BAKE_UNLOCK_BUFFER_MS = 150_000;

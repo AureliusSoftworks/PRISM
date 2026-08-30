@@ -277,18 +277,18 @@ export type BotPowerEffectV1 =
   /** Grant a canonical placeless speaking style (noir narration, archaic English). */
   | { type: "speech_register"; register: BotSpeechRegisterId }
   /**
-   * Add deterministic strong non-slur profanity to every non-silent public
-   * utterance after semantic/content Powers have finished. Every curseable
-   * spoken sentence receives one to four curse tokens. Clean authored speech
-   * remains private to the holder's own prompt history.
+   * Add deterministic, visibly censored vulgar delivery to every non-silent
+   * public utterance after semantic/content Powers have finished. The public
+   * form contains only structural masks; no hidden uncensored token is created.
+   * Clean authored speech remains private to the holder's own prompt history.
    */
   | {
       type: "cursed_tongue";
-      version: 1;
+      version: 2;
       frequency: "frequent";
       strength: "strong";
-      vocabulary: "uncensored_non_slur";
-      phraseMode: "occasional_2_3_words";
+      vocabulary: "structurally_masked_non_slur";
+      phraseMode: "censor_performance";
     }
   /** Silence exactly half of stable turn attempts and lower the holder's mood. */
   | {
@@ -930,11 +930,11 @@ export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | nu
   if (effect.type === "cursed_tongue") {
     return {
       type: "cursed_tongue",
-      version: 1,
+      version: 2,
       frequency: "frequent",
       strength: "strong",
-      vocabulary: "uncensored_non_slur",
-      phraseMode: "occasional_2_3_words",
+      vocabulary: "structurally_masked_non_slur",
+      phraseMode: "censor_performance",
     };
   }
   if (effect.type === "intermittent_mute") {
@@ -4570,37 +4570,37 @@ export function applyBotPowerMumbledReactionPlanV1(
 type BotPowerProtectedSpeechRangeV1 = { start: number; end: number };
 
 const BOT_POWER_CURSED_TONGUE_OUTBURSTS_V1 = [
-  "What a fucking mess.",
-  "Goddamn.",
-  "Holy fucking shit.",
-  "Fucking hell.",
-  "Well, damn.",
-  "For fuck's sake.",
-  "Shit, here we go.",
-  "What in the goddamn hell.",
+  "What a f•••ing mess.",
+  "G••••••.",
+  "Holy f•••ing s•••.",
+  "F•••ing h•••.",
+  "Well, d•••.",
+  "For f•••’s sake.",
+  "S•••, here we go.",
+  "What in the g•••••• h•••.",
 ] as const;
 
 const BOT_POWER_CURSED_TONGUE_BEFORE_VERB_V1 = [
-  "fucking ",
-  "goddamn ",
-  "damn well ",
-  "actually fucking ",
-  "sure as hell ",
+  "f•••ing ",
+  "g•••••• ",
+  "d••• well ",
+  "actually f•••ing ",
+  "sure as h••• ",
 ] as const;
 
 const BOT_POWER_CURSED_TONGUE_AFTER_AUXILIARY_V1 = [
-  " fucking",
-  " goddamn well",
-  " damn well",
-  " sure as hell",
-  " honestly fucking",
+  " f•••ing",
+  " g•••••• well",
+  " d••• well",
+  " sure as h•••",
+  " honestly f•••ing",
 ] as const;
 
 const BOT_POWER_CURSED_TONGUE_AFTER_DETERMINER_V1 = [
-  " fucking",
-  " goddamn",
-  " damn",
-  " shitty",
+  " f•••ing",
+  " g••••••",
+  " d•••",
+  " s•••ty",
 ] as const;
 
 function botPowerCursedTonguePhraseV1(
@@ -4618,13 +4618,15 @@ function botPowerCursedTongueOutburstV1(seed: string): string {
   ]!;
 }
 
-const BOT_POWER_CURSED_TONGUE_PROFANITY_V1 =
-  /\b(?:fuck(?:ing|ed|er|s)?|shit(?:ty)?|goddamn(?:ed)?|damn|hell|ass(?:hole)?|bastard)\b/giu;
+const BOT_POWER_CURSED_TONGUE_MASK_V2 =
+  /(?<![\p{L}\p{N}])(?:[adfghs]•{2,12}(?:ing|ed|er|s|ty|[’']s)?|[bm]•{4,12}(?:ing|ed|er|s|es|y|[’']s)?)(?![\p{L}\p{N}])/giu;
+const BOT_POWER_CURSED_TONGUE_UNCENSORED_V2 =
+  /\b(?:motherfuck(?:ing|ed|er|s)?|bullshit|bitch(?:es|y)?|fuck(?:ing|ed|er|s|['’]s)?|shit(?:ty)?|goddamn(?:ed)?|damn|hell|ass(?:hole)?|bastard)\b/giu;
 
-/** Public Cursed Tongue density: at least one curse token per spoken sentence. */
-export const BOT_POWER_CURSED_TONGUE_MIN_PER_SENTENCE_V1 = 1;
-/** Public Cursed Tongue density: never add past four curse tokens in one sentence. */
-export const BOT_POWER_CURSED_TONGUE_MAX_PER_SENTENCE_V1 = 4;
+/** Public Cursed Tongue density: one mask somewhere in every curseable utterance. */
+export const BOT_POWER_CURSED_TONGUE_MIN_PER_UTTERANCE_V2 = 1;
+/** Public Cursed Tongue density: never show more than two masks in one sentence. */
+export const BOT_POWER_CURSED_TONGUE_MAX_PER_SENTENCE_V2 = 2;
 
 /**
  * Spoken sentence spans for Cursed Tongue. Headings, lists, and leftover
@@ -4680,20 +4682,84 @@ function botPowerCursedTongueSentenceIsCurseableV1(
   return false;
 }
 
-/** The public curse floor is one token per curseable spoken sentence. */
-export function botPowerCursedTongueMinimumProfanityV1(value: unknown): number {
+/** The public curse floor is one token for an utterance with any curseable speech. */
+export function botPowerCursedTongueMinimumCensorsV2(value: unknown): number {
   const source = typeof value === "string" ? value : "";
   if (!source) return 0;
   const protectedRanges = botPowerProtectedSpeechRangesV1(source);
-  return botPowerCursedTongueSentenceRangesV1(source).filter((range) =>
+  return botPowerCursedTongueSentenceRangesV1(source).some((range) =>
     botPowerCursedTongueSentenceIsCurseableV1(source, range, protectedRanges),
-  ).length * BOT_POWER_CURSED_TONGUE_MIN_PER_SENTENCE_V1;
+  ) ? BOT_POWER_CURSED_TONGUE_MIN_PER_UTTERANCE_V2 : 0;
 }
 
-export function botPowerCursedTongueProfanityCountV1(value: unknown): number {
+export function botPowerCursedTongueCensorCountV2(value: unknown): number {
   return typeof value === "string"
-    ? value.match(BOT_POWER_CURSED_TONGUE_PROFANITY_V1)?.length ?? 0
+    ? value.match(BOT_POWER_CURSED_TONGUE_MASK_V2)?.length ?? 0
     : 0;
+}
+
+function botPowerCursedTongueUnprotectedCensorCountV2(
+  value: string,
+  protectedRanges: readonly BotPowerProtectedSpeechRangeV1[],
+): number {
+  return [...value.matchAll(BOT_POWER_CURSED_TONGUE_MASK_V2)].filter((match) =>
+    !botPowerSpeechIndexIsProtectedV1(match.index ?? -1, protectedRanges)
+  ).length;
+}
+
+function botPowerCursedTongueMaskExistingProfanityV2(
+  value: string,
+  protectedRanges: readonly BotPowerProtectedSpeechRangeV1[],
+): string {
+  return value.replace(BOT_POWER_CURSED_TONGUE_UNCENSORED_V2, (word, offset) => {
+    if (botPowerSpeechIndexIsProtectedV1(offset, protectedRanges)) return word;
+    const lower = word.toLocaleLowerCase().replace(/[’]/gu, "'");
+    const initial = word[0] === word[0]?.toLocaleUpperCase()
+      ? word[0]?.toLocaleUpperCase()
+      : word[0]?.toLocaleLowerCase();
+    const suffix = lower.endsWith("ing")
+      ? "ing"
+      : lower.endsWith("ed")
+        ? "ed"
+        : lower.endsWith("er")
+          ? "er"
+          : lower.endsWith("ty")
+            ? "ty"
+            : lower.endsWith("'s")
+              ? "’s"
+              : lower.endsWith("s") && lower.length <= 5
+                ? "s"
+                : "";
+    const bulletCount = Math.max(2, lower.length - suffix.length - 1);
+    return `${initial ?? value[offset] ?? ""}${"•".repeat(bulletCount)}${suffix}`;
+  });
+}
+
+function botPowerCursedTongueBoundSentenceMasksV2(
+  value: string,
+  protectedRanges: readonly BotPowerProtectedSpeechRangeV1[],
+): string {
+  const removals: { start: number; end: number }[] = [];
+  for (const range of botPowerCursedTongueSentenceRangesV1(value)) {
+    const matches = [...value.slice(range.start, range.end).matchAll(
+      BOT_POWER_CURSED_TONGUE_MASK_V2,
+    )].filter((match) => {
+      const start = range.start + (match.index ?? -1);
+      return start >= range.start &&
+        !botPowerSpeechIndexIsProtectedV1(start, protectedRanges);
+    });
+    for (const match of matches.slice(BOT_POWER_CURSED_TONGUE_MAX_PER_SENTENCE_V2)) {
+      const start = range.start + (match.index ?? -1);
+      if (start >= range.start) {
+        removals.push({ start, end: start + match[0].length });
+      }
+    }
+  }
+  let bounded = value;
+  for (const removal of removals.sort((left, right) => right.start - left.start)) {
+    bounded = `${bounded.slice(0, removal.start)}—${bounded.slice(removal.end)}`;
+  }
+  return bounded;
 }
 
 function botPowerProtectedSpeechRangesV1(source: string): BotPowerProtectedSpeechRangeV1[] {
@@ -4772,9 +4838,16 @@ export function applyBotPowerCursedTongueResponseV1(
   value: unknown,
   seedValue: unknown = "",
 ): string {
-  const source = typeof value === "string" ? value.trim() : "";
-  if (!source || botPowerResponseIsSilentV1(source)) return source;
-  const protectedRanges = botPowerProtectedSpeechRangesV1(source);
+  const cleanSource = typeof value === "string" ? value.trim() : "";
+  if (!cleanSource || botPowerResponseIsSilentV1(cleanSource)) return cleanSource;
+  const protectedRanges = botPowerProtectedSpeechRangesV1(cleanSource);
+  const source = botPowerCursedTongueBoundSentenceMasksV2(
+    botPowerCursedTongueMaskExistingProfanityV2(
+      cleanSource,
+      protectedRanges,
+    ),
+    protectedRanges,
+  );
   const seed = `${String(seedValue ?? "")}\n${source}`;
   type InsertionCandidate = {
     index: number;
@@ -4804,7 +4877,7 @@ export function applyBotPowerCursedTongueResponseV1(
     });
   }
   for (const match of source.matchAll(
-    /\b(?:am|is|are|was|were|be|been|being|can|could|should|would|will|must|do|does|did|have|has|had|i['’]m|i['’]ll|i['’]ve|we['’]re|we['’]ll|we['’]ve|you['’]re|you['’]ll|you['’]ve|they['’]re|they['’]ll|they['’]ve|it['’]s|it['’]ll|that['’]s|that['’]ll|who['’]s|who['’]ll)\b/giu,
+    /\b(?:am|is|are|was|were|be|been|being|can|could|should|would|will|must|do|does|did|have|has|had|i['’]m|i['’]ll|i['’]ve|we['’]re|we['’]ll|we['’]ve|you['’]re|you['’]ll|you['’]ve|they['’]re|they['’]ll|they['’]ve|it['’]s|it['’]ll|that['’]s|that['’]ll|who['’]s|who['’]ll)\b(?!['’]t)/giu,
   )) {
     const afterAuxiliary = (match.index ?? -1) + match[0].length;
     const followingDeterminer = source.slice(afterAuxiliary).match(
@@ -4830,12 +4903,6 @@ export function applyBotPowerCursedTongueResponseV1(
     if (!headingLike) addCandidate({ index, kind: "outburst" });
   }
   candidates.sort((left, right) => left.index - right.index);
-  if (candidates.length === 0) {
-    // A response made entirely from protected material is a record, not an
-    // ordinary spoken line. Leave its outer structure intact rather than
-    // turning JSON, code, a citation, or a bot link into prose plus a record.
-    return source;
-  }
   const phraseForCandidate = (
     candidate: InsertionCandidate,
     phraseIndex: number,
@@ -4865,68 +4932,61 @@ export function applyBotPowerCursedTongueResponseV1(
       ? `${phrase.charAt(0).toLocaleUpperCase()}${phrase.slice(1)}`
       : phrase;
   };
-  const insertions: { index: number; phrase: string }[] = [];
-  for (const range of botPowerCursedTongueSentenceRangesV1(source)) {
-    if (
-      !botPowerCursedTongueSentenceIsCurseableV1(source, range, protectedRanges)
-    ) {
-      continue;
-    }
-    const existing = botPowerCursedTongueProfanityCountV1(
-      source.slice(range.start, range.end),
-    );
-    const room = Math.max(
-      0,
-      BOT_POWER_CURSED_TONGUE_MAX_PER_SENTENCE_V1 - existing,
-    );
-    if (room === 0) continue;
-    const inSentence = candidates.filter(
-      (candidate) =>
-        candidate.index >= range.start && candidate.index < range.end,
-    );
-    const lexical = inSentence.filter((candidate) => candidate.kind !== "outburst");
-    const pool = lexical.length > 0 ? lexical : inSentence;
-    const chosen: InsertionCandidate[] = [];
-    let tokensAdded = 0;
-    let phraseIndex = 0;
-    const tryCandidate = (candidate: InsertionCandidate): boolean => {
+  if (
+    botPowerCursedTongueUnprotectedCensorCountV2(source, protectedRanges) >=
+    botPowerCursedTongueMinimumCensorsV2(source)
+  ) {
+    return source;
+  }
+  const curseableRanges = botPowerCursedTongueSentenceRangesV1(source).filter(
+    (range) =>
+      botPowerCursedTongueSentenceIsCurseableV1(
+        source,
+        range,
+        protectedRanges,
+      ),
+  );
+  const curseableCandidates = candidates.filter((candidate) =>
+    curseableRanges.some(
+      (range) => candidate.index >= range.start && candidate.index < range.end,
+    ),
+  );
+  const lexicalCandidates = curseableCandidates.filter(
+    (candidate) => candidate.kind !== "outburst",
+  );
+  const pool = lexicalCandidates.length > 0
+    ? lexicalCandidates
+    : curseableCandidates;
+  const fallbackRange = curseableRanges[0];
+  let fallbackIndex = -1;
+  if (fallbackRange) {
+    for (let index = fallbackRange.start; index < fallbackRange.end; index += 1) {
       if (
-        chosen.some((existingChoice) =>
-          Math.abs(existingChoice.index - candidate.index) < 12,
-        )
+        /[\p{L}\p{N}]/u.test(source[index] ?? "") &&
+        !botPowerSpeechIndexIsProtectedV1(index, protectedRanges)
       ) {
-        return false;
+        fallbackIndex = index;
+        break;
       }
-      const phrase = phraseForCandidate(candidate, phraseIndex);
-      const tokens = botPowerCursedTongueProfanityCountV1(phrase);
-      if (tokens === 0 || tokensAdded + tokens > room) return false;
-      chosen.push(candidate);
-      insertions.push({ index: candidate.index, phrase });
-      tokensAdded += tokens;
-      phraseIndex += 1;
-      return true;
-    };
-    for (const candidate of pool) {
-      if (tokensAdded >= room) break;
-      tryCandidate(candidate);
-    }
-    if (
-      tokensAdded === 0 &&
-      existing < BOT_POWER_CURSED_TONGUE_MIN_PER_SENTENCE_V1
-    ) {
-      const outburst = inSentence.find((candidate) => candidate.kind === "outburst") ??
-        (botPowerSpeechIndexIsProtectedV1(range.start, protectedRanges)
-          ? null
-          : { index: range.start, kind: "outburst" as const });
-      if (outburst) tryCandidate(outburst);
     }
   }
-  if (insertions.length === 0) return source;
-  let adjusted = source;
-  for (const insertion of insertions.sort((left, right) => right.index - left.index)) {
-    adjusted = `${adjusted.slice(0, insertion.index)}${insertion.phrase}${adjusted.slice(insertion.index)}`;
+  const fallback = fallbackIndex >= 0
+    ? { index: fallbackIndex, kind: "outburst" as const }
+    : null;
+  const candidate = pool.length > 0
+    ? pool[botPowerAddressedInsultHashV1(seed) % pool.length]!
+    : fallback;
+  if (!candidate) return source;
+  const phrase = phraseForCandidate(candidate, 0);
+  if (
+    botPowerCursedTongueCensorCountV2(phrase) <
+      BOT_POWER_CURSED_TONGUE_MIN_PER_UTTERANCE_V2 ||
+    botPowerCursedTongueCensorCountV2(phrase) >
+      BOT_POWER_CURSED_TONGUE_MAX_PER_SENTENCE_V2
+  ) {
+    return source;
   }
-  return adjusted;
+  return `${source.slice(0, candidate.index)}${phrase}${source.slice(candidate.index)}`;
 }
 
 /**

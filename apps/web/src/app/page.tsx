@@ -339,6 +339,11 @@ import {
   compareBotPickerRainbowSortKeys,
   sortBotPickerItems,
 } from "./BotPicker";
+import {
+  botSearchSingletonHint,
+  handleBotSearchSingletonKey,
+  soleActionableBotSearchResult,
+} from "./botSearchKeyboard";
 import ZenHueCableControl, {
   type ZenHueCableNavigationUpdate,
 } from "./ZenHueStringControl";
@@ -764,7 +769,6 @@ import { buildBotMarketplaceThemeVisualStyle } from "./botMarketplaceThemeGradie
 import { BotPowerRune } from "./BotPowerRune";
 import { resolveBotMarketplaceGroupAtmosphere } from "./botMarketplaceGroupAtmosphere";
 import {
-  addBotToLibraryGroup,
   BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS,
   filterBotsByLibraryGroup,
   filterBotsByLibrarySearch,
@@ -786,6 +790,14 @@ import {
 } from "./botFoundryBatch";
 import { buildBotLibraryGroupVisualVariables } from "./botLibraryGroupVisual";
 import { BotLibraryGroupSpectrumTile } from "./BotLibraryGroupSpectrumTile";
+import {
+  botLibraryGroupManagerNameError,
+  createBotLibraryGroupManagerDraft,
+  describeBotLibraryGroupManagerDraft,
+  removeBotLibraryGroupManagerDraft,
+  renameBotLibraryGroupManagerDraft,
+  setBotLibraryGroupManagerMembers,
+} from "./botLibraryGroupManager";
 import {
   normalizeBotLibraryGroupGlyphIdentity,
   type BotLibraryGroupGlyphIdentity,
@@ -1651,6 +1663,9 @@ import {
   requestSignalVoiceWithFallback,
   signalOnlineVoiceTimeoutMs,
   signalPreferredVoiceClipReady,
+  signalVoiceClipMatchesEpisodeEngine,
+  signalVoiceEngineFamily,
+  type SignalVoiceEngineFamily,
 } from "./signalVoiceFallback";
 import { SignalVoicePrefetchScheduler } from "./signalVoicePrefetch";
 import { signalVoiceCompletionFallbackDurationMs } from "./signalLiveCaptions";
@@ -1757,10 +1772,6 @@ import {
   type UniversalNavbarDisabledMap,
   type UniversalNavbarTooltipMap,
 } from "./coffee-shell-policy";
-import {
-  selectBotLibraryAddToGroupDialogBot,
-  selectBotLibraryAddToGroupDialogGroup,
-} from "./botLibraryAddToGroupDialog";
 import {
   coffeeBotVoiceSynthesisSource,
   coffeeVoiceSpokenText,
@@ -11437,7 +11448,11 @@ interface Bot {
   audio_voice_profile_override?: BotAudioVoiceProfileV1 | string | null;
   profile_picture_image_id?: string | null;
   chat_enabled: number;
+  /** 1 for this player's saved Library bots; 0 for catalog-only public bots. */
+  owned?: number;
   powers?: BotPowerV1[];
+  created_at?: string;
+  updated_at?: string;
 }
 
 function coffeeReplayParticipantBot(
@@ -13048,10 +13063,12 @@ type BotLibraryGroupDetailsDialogState =
       error: string | null;
     };
 
-interface BotLibraryAddToGroupDialogState {
-  mode: "pick-group" | "pick-bot";
-  botId: string;
-  groupId: string;
+interface BotLibraryGroupManagerState {
+  groups: BotLibraryGroup[];
+  selectedGroupId: string;
+  focusedBotId: string | null;
+  memberSearchQuery: string;
+  error: string | null;
 }
 
 interface BotGroupRoomAtmosphereDialogState {
@@ -13554,7 +13571,9 @@ function normalizeBotLibraryGroups(raw: unknown): BotLibraryGroup[] {
     builtIn: true,
     name: "Favorites",
   });
-  return pruneBotLibraryGroupsWithFewBots(Array.from(byId.values())).sort(
+  // Empty custom groups are meaningful staging places in the Library manager.
+  // Explicit delete remains the removal path; imports and exports retain them.
+  return Array.from(byId.values()).sort(
     (a, b) => {
       if (a.id === BOT_LIBRARY_FAVORITES_GROUP_ID) return -1;
       if (b.id === BOT_LIBRARY_FAVORITES_GROUP_ID) return 1;
@@ -22362,7 +22381,6 @@ function BotFoundryBatchSlotAvatar({
                 motionMode="mini-led"
                 isTalking={false}
                 mouthShape="closed"
-                forceBlinkPhase="open"
                 onBlinkPhaseChange={onBlinkPhaseChange}
                 scheduleKey={`batch-foundry-${slotIndex}`}
                 baseText={face.text}
@@ -23695,6 +23713,10 @@ function ComposerBotPicker({
     showFilterControls && !!onHueChange && hueLensAvailable;
   const filterSummaryVisible =
     showFilterControls && normalizedBotNameFilter.length > 0;
+  const singletonFilterHint =
+    visibleBots.length === 1
+      ? botSearchSingletonHint(botNameFilter, visibleBots[0]?.name)
+      : null;
   const hueFocusBotId = useMemo(() => {
     if (!filtersEnabled || !hueSortEngaged || hueFilterCenter === null) {
       return null;
@@ -23916,6 +23938,18 @@ function ComposerBotPicker({
                       setBotNameFilter(event.currentTarget.value)
                     }
                     onKeyDown={(event) => {
+                      if (
+                        handleBotSearchSingletonKey({
+                          event,
+                          query: botNameFilter,
+                          results: visibleBots,
+                          getName: (bot) => bot.name,
+                          onSelect: (bot) => pick(bot.id),
+                          onComplete: setBotNameFilter,
+                        })
+                      ) {
+                        return;
+                      }
                       if (event.key === "Enter") {
                         event.preventDefault();
                       }
@@ -23929,7 +23963,8 @@ function ComposerBotPicker({
                       className={styles.composeBotFilterCount}
                       aria-live="polite"
                     >
-                      {visibleBots.length}/{bots.length}
+                      {singletonFilterHint ??
+                        `${visibleBots.length}/${bots.length}`}
                     </span>
                   )}
                 </div>
@@ -32384,48 +32419,48 @@ function FullAvatarCompactFallback({
               style={miniFaceRegistrationStyle}
             >
               <CoffeeSeatPlateEmoji
-            enabled={runtimeEffectsEnabled}
-            pixelated={pixelRasterizationEnabled}
-            hardPixels
-            motionMode={runtimeEffectsEnabled ? "mini-led" : "static"}
-            isTalking={isTalking}
-            mouthShape={miniMouthShape}
-            blinkWhileTalking
-            forceBlinkPhase={forceBlinkPhase}
-            onBlinkPhaseChange={onBlinkPhaseChange}
-            scheduleKey={scheduleKey}
-            showThinkingSpinner={showThinkingSpinner}
-            baseText={miniPlateFace.text}
-            rotateDeg={miniPlateFace.rotateDeg}
-            voicePreset={voicePreset}
-            faceEyesFont={faceStyle.eyesFont}
-            faceEyeCharacter={faceStyle.eyeCharacter}
-            faceEyeMovement="still"
-            faceMouthFont={faceStyle.mouthFont}
-            faceMouthCharacter={faceStyle.mouthCharacter}
-            faceMouthAnimation={faceStyle.mouthAnimation}
-            faceMouthSpeechPoses={faceStyle.mouthSpeechPoses}
-            faceFontWeight={faceStyle.weight}
-            faceEyeScale={faceStyle.eyeScale}
-            faceEyeOffsetX={faceStyle.eyeOffsetX}
-            faceEyeOffsetY={faceStyle.eyeOffsetY}
-            faceEyeRotationDeg={faceStyle.eyeRotationDeg}
-            faceEyeCount={faceStyle.eyeCount}
-            faceBlinkCount={faceStyle.blinkCount}
-            faceMouthScale={faceStyle.mouthScale}
-            faceMouthOffsetX={faceStyle.mouthOffsetX}
-            faceMouthOffsetY={faceStyle.mouthOffsetY}
-            faceMouthRotationDeg={faceStyle.mouthRotationDeg}
-            faceBlinkBar={faceStyle.blinkBar}
-            faceBlinkScale={faceStyle.blinkScale}
-            faceBlinkOffsetX={faceStyle.blinkOffsetX}
-            faceBlinkOffsetY={faceStyle.blinkOffsetY}
-            faceBlinkRotationDeg={faceStyle.blinkRotationDeg}
-            faceThinkingFrames={faceStyle.thinkingFrames}
-            faceThinkingScale={faceStyle.thinkingScale}
-            faceThinkingOffsetX={faceStyle.thinkingOffsetX}
-            faceThinkingOffsetY={faceStyle.thinkingOffsetY}
-            className={`${styles.coffeeSeatPlateEmoji} ${styles.coffeeSeatMiniAvatarFace}`}
+                enabled={runtimeEffectsEnabled}
+                pixelated={pixelRasterizationEnabled}
+                hardPixels
+                motionMode={runtimeEffectsEnabled ? "mini-led" : "static"}
+                isTalking={isTalking}
+                mouthShape={miniMouthShape}
+                blinkWhileTalking
+                forceBlinkPhase={forceBlinkPhase}
+                onBlinkPhaseChange={onBlinkPhaseChange}
+                scheduleKey={scheduleKey}
+                showThinkingSpinner={showThinkingSpinner}
+                baseText={miniPlateFace.text}
+                rotateDeg={miniPlateFace.rotateDeg}
+                voicePreset={voicePreset}
+                faceEyesFont={faceStyle.eyesFont}
+                faceEyeCharacter={faceStyle.eyeCharacter}
+                faceEyeMovement="still"
+                faceMouthFont={faceStyle.mouthFont}
+                faceMouthCharacter={faceStyle.mouthCharacter}
+                faceMouthAnimation={faceStyle.mouthAnimation}
+                faceMouthSpeechPoses={faceStyle.mouthSpeechPoses}
+                faceFontWeight={faceStyle.weight}
+                faceEyeScale={faceStyle.eyeScale}
+                faceEyeOffsetX={faceStyle.eyeOffsetX}
+                faceEyeOffsetY={faceStyle.eyeOffsetY}
+                faceEyeRotationDeg={faceStyle.eyeRotationDeg}
+                faceEyeCount={faceStyle.eyeCount}
+                faceBlinkCount={faceStyle.blinkCount}
+                faceMouthScale={faceStyle.mouthScale}
+                faceMouthOffsetX={faceStyle.mouthOffsetX}
+                faceMouthOffsetY={faceStyle.mouthOffsetY}
+                faceMouthRotationDeg={faceStyle.mouthRotationDeg}
+                faceBlinkBar={faceStyle.blinkBar}
+                faceBlinkScale={faceStyle.blinkScale}
+                faceBlinkOffsetX={faceStyle.blinkOffsetX}
+                faceBlinkOffsetY={faceStyle.blinkOffsetY}
+                faceBlinkRotationDeg={faceStyle.blinkRotationDeg}
+                faceThinkingFrames={faceStyle.thinkingFrames}
+                faceThinkingScale={faceStyle.thinkingScale}
+                faceThinkingOffsetX={faceStyle.thinkingOffsetX}
+                faceThinkingOffsetY={faceStyle.thinkingOffsetY}
+                className={`${styles.coffeeSeatPlateEmoji} ${styles.coffeeSeatMiniAvatarFace}`}
               />
             </span>
           }
@@ -32914,8 +32949,7 @@ function ZenLiveBotMannequin({
     );
   }
   if (renderDetailLevel === "audience" || renderDetailLevel === "debate") {
-    const optimizedFaceEnabled =
-      renderDetailLevel === "debate" || blinkEnabled;
+    const optimizedFaceEnabled = runtimeEffectsEnabled;
     return (
       <span
         ref={presenceBodyRef}
@@ -33057,11 +33091,7 @@ function ZenLiveBotMannequin({
                   blinkWhileTalking={blinkWhileTalking}
                   faceEyesFont={faceStyle.eyesFont}
                   faceEyeCharacter={faceStyle.eyeCharacter}
-                  faceEyeMovement={
-                    renderDetailLevel === "debate"
-                      ? registeredFaceEyeMovement
-                      : "still"
-                  }
+                  faceEyeMovement={registeredFaceEyeMovement}
                   eyeAttentionState={eyeAttentionState}
                   eyeTargetDirection={eyeTargetDirection}
                   eyeTimelineMs={eyeTimelineMs}
@@ -33263,11 +33293,7 @@ function ZenLiveBotMannequin({
                     blinkWhileTalking={blinkWhileTalking}
                     faceEyesFont={faceStyle.eyesFont}
                     faceEyeCharacter={faceStyle.eyeCharacter}
-                    faceEyeMovement={
-                      renderDetailLevel === "full"
-                        ? registeredFaceEyeMovement
-                        : "still"
-                    }
+                    faceEyeMovement={registeredFaceEyeMovement}
                     eyeAttentionState={eyeAttentionState}
                     eyeTargetDirection={eyeTargetDirection}
                     eyeTimelineMs={eyeTimelineMs}
@@ -40131,6 +40157,10 @@ interface BotAvatarCustomizerModalProps {
     currentValue: unknown,
     applyValue: (value: unknown) => void,
   ) => void | Promise<void>;
+  onGenerateAvatarDetailsInk?: (
+    prompt: string,
+    signal: AbortSignal,
+  ) => Promise<BotAvatarDetailsV1>;
   scheduleKey: string;
   /** Real bots.id for Action SFX packs — never the UI scheduleKey seed. */
   actionSfxPackBotId?: string | null;
@@ -42074,7 +42104,7 @@ function BotAvatarPreviewPanel({
                               baseText={miniSeatPlateGlyph.text}
                               rotateDeg={miniSeatPlateGlyph.rotateDeg}
                               voicePreset={voicePreset}
-                              forceBlinkPhase={previewBlink ? "closed" : "open"}
+                              forceBlinkPhase={previewBlink ? "closed" : undefined}
                               onBlinkPhaseChange={onBlinkPhaseChange}
                               faceEyesFont={faceStyle.eyesFont}
                               faceEyeCharacter={faceStyle.eyeCharacter}
@@ -46180,6 +46210,7 @@ function BotAvatarCustomizerModal({
   onBotNamePronunciationChange,
   onRandomizeBotName,
   onRandomizeSemanticField,
+  onGenerateAvatarDetailsInk,
   scheduleKey,
   actionSfxPackBotId = null,
   leadershipGroupCount = 0,
@@ -48019,6 +48050,7 @@ function BotAvatarCustomizerModal({
                     setInkLivePreview(true);
                     setPreviewMode("talking");
                   }}
+                  onGenerateInk={onGenerateAvatarDetailsInk}
                 />
               ) : null}
               {activeControlTab === "powers" && identityControlsVisible
@@ -52674,8 +52706,8 @@ function HomeContent(): React.JSX.Element {
     useState("");
   const [botLibraryGroupDeleteConfirm, setBotLibraryGroupDeleteConfirm] =
     useState<BotLibraryGroup | null>(null);
-  const [botLibraryAddToGroupDialog, setBotLibraryAddToGroupDialog] =
-    useState<BotLibraryAddToGroupDialogState | null>(null);
+  const [botLibraryGroupManager, setBotLibraryGroupManager] =
+    useState<BotLibraryGroupManagerState | null>(null);
   const [botGroupRoomAtmosphereDialog, setBotGroupRoomAtmosphereDialog] =
     useState<BotGroupRoomAtmosphereDialogState | null>(null);
   const [botGroupRoomAtmosphereSynthesisJobs, setBotGroupRoomAtmosphereSynthesisJobs] =
@@ -52719,12 +52751,12 @@ function HomeContent(): React.JSX.Element {
       setBotLibraryGroupMemberSearchQuery("");
     }
   }, [botLibraryGroupDetailsDialog]);
-  const botLibraryAddToGroupDialogPanelRef = useRef<HTMLFormElement>(null);
-  const botLibraryAddToGroupDialogOpenerRef = useRef<HTMLElement | null>(null);
-  const closeBotLibraryAddToGroupDialog = useCallback((): void => {
-    setBotLibraryAddToGroupDialog(null);
-    const opener = botLibraryAddToGroupDialogOpenerRef.current;
-    botLibraryAddToGroupDialogOpenerRef.current = null;
+  const botLibraryGroupManagerPanelRef = useRef<HTMLFormElement>(null);
+  const botLibraryGroupManagerOpenerRef = useRef<HTMLElement | null>(null);
+  const closeBotLibraryGroupManager = useCallback((): void => {
+    setBotLibraryGroupManager(null);
+    const opener = botLibraryGroupManagerOpenerRef.current;
+    botLibraryGroupManagerOpenerRef.current = null;
     queueMicrotask(() => {
       try {
         opener?.focus({ preventScroll: true });
@@ -52929,6 +52961,9 @@ function HomeContent(): React.JSX.Element {
   const signalVoicePrefetchAttemptEpisodeByMessageIdRef = useRef<
     Map<string, string>
   >(new Map());
+  const signalVoiceEngineByEpisodeParticipantRef = useRef<
+    Map<string, SignalVoiceEngineFamily>
+  >(new Map());
   const signalVoicePrefetchSchedulerRef = useRef(
     new SignalVoicePrefetchScheduler<BotcastEnglishVoiceMedia>(),
   );
@@ -53093,6 +53128,7 @@ function HomeContent(): React.JSX.Element {
     signalVoiceClipEpisodeByMessageIdRef.current.clear();
     signalVoiceConsumedEpisodeByMessageIdRef.current.clear();
     signalVoicePrefetchAttemptEpisodeByMessageIdRef.current.clear();
+    signalVoiceEngineByEpisodeParticipantRef.current.clear();
     debateLastVoiceClipRef.current = null;
     listenerReactionVoiceClipCacheRef.current.clear();
     listenerReactionVoiceReadyClipRef.current.clear();
@@ -53123,6 +53159,7 @@ function HomeContent(): React.JSX.Element {
     signalVoiceClipEpisodeByMessageIdRef.current.clear();
     signalVoiceConsumedEpisodeByMessageIdRef.current.clear();
     signalVoicePrefetchAttemptEpisodeByMessageIdRef.current.clear();
+    signalVoiceEngineByEpisodeParticipantRef.current.clear();
     debateLastVoiceClipRef.current = null;
     listenerReactionVoiceClipCacheRef.current.clear();
     listenerReactionVoiceReadyClipRef.current.clear();
@@ -61245,7 +61282,7 @@ function HomeContent(): React.JSX.Element {
             value={botLibraryGroupPickerValue}
             options={botLibraryGroupFilterOptions}
             onChange={applyBotLibraryHeaderFilter}
-            onCreateGroup={() => openCreateBotLibraryGroupDialog([])}
+            onCreateGroup={() => openBotLibraryGroupManager()}
             resolvedTheme={resolvedTheme}
             showCounts={false}
             dismissPopoversSignal={composerPopoverDismissSignal}
@@ -62166,15 +62203,15 @@ function HomeContent(): React.JSX.Element {
   }, [botLibraryGroupDeleteConfirm]);
 
   useEffect(() => {
-    if (!botLibraryAddToGroupDialog) return;
+    if (!botLibraryGroupManager) return;
     const handleWindowKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
         event.preventDefault();
-        closeBotLibraryAddToGroupDialog();
+        closeBotLibraryGroupManager();
         return;
       }
       if (event.key !== "Tab") return;
-      const panel = botLibraryAddToGroupDialogPanelRef.current;
+      const panel = botLibraryGroupManagerPanelRef.current;
       if (!panel) return;
       const focusable = Array.from(
         panel.querySelectorAll<HTMLElement>(
@@ -62197,7 +62234,7 @@ function HomeContent(): React.JSX.Element {
     };
     window.addEventListener("keydown", handleWindowKeyDown);
     return () => window.removeEventListener("keydown", handleWindowKeyDown);
-  }, [botLibraryAddToGroupDialog, closeBotLibraryAddToGroupDialog]);
+  }, [botLibraryGroupManager, closeBotLibraryGroupManager]);
 
   useEffect(() => {
     if (!botGroupRoomAtmosphereDialog?.groupId) return;
@@ -71934,6 +71971,20 @@ function HomeContent(): React.JSX.Element {
       bot.name.toLowerCase().includes(query),
     );
   }, [storyBotsLibrary, storySearch]);
+  const singleActionableStorySearchBot = storySearch.trim()
+    ? soleActionableBotSearchResult(
+        storyFilteredBots,
+        (bot) =>
+          storySelectedBotIds.includes(bot.id) ||
+          storySelectedBotIds.length < STORY_BOT_COUNT_MAX,
+      )
+    : null;
+  const storySearchSingletonHint = singleActionableStorySearchBot
+    ? botSearchSingletonHint(
+        storySearch,
+        singleActionableStorySearchBot.name,
+      )
+    : null;
   const storySelectedBots = useMemo(
     () =>
       storySelectedBotIds
@@ -73081,7 +73132,6 @@ function HomeContent(): React.JSX.Element {
                 roomAcoustics: SIGNAL_STUDIO_VOICE_ROOM_SEND,
                 stereoPan: -stereoPan,
                 channel: "crosstalk",
-                maxDurationMs: 1_900,
                 startDelayMs: retortDelayMs,
                 signal: controller.signal,
                 lifecycle: lifecycles?.interrupted,
@@ -73241,7 +73291,18 @@ function HomeContent(): React.JSX.Element {
       selectedEngine: EnglishVoiceEngine,
       signal?: AbortSignal,
       playbackSurface: "signal" | "debate" = "signal",
+      pinnedSignalEngine: SignalVoiceEngineFamily | null = null,
     ): Promise<BotcastEnglishVoiceMedia> => {
+      if (playbackSurface === "signal" && pinnedSignalEngine) {
+        return requestBotcastEnglishClip(
+          message,
+          profile,
+          pinnedSignalEngine === "elevenlabs",
+          pinnedSignalEngine,
+          signal,
+          playbackSurface,
+        );
+      }
       if (!signalOnlineVoiceEnabled || selectedEngine !== "elevenlabs") {
         return requestBotcastEnglishClip(
           message,
@@ -73349,9 +73410,14 @@ function HomeContent(): React.JSX.Element {
       }
       // Prefetch only the preferred pack. Caching a builtin timeout fallback
       // would force the closing line onto the wrong voice with no retry.
-      const expectedEngine: EnglishVoiceEngine = offlineOnly
-        ? "builtin"
-        : voiceSelection.englishVoiceEngine;
+      const signalVoiceContinuityKey = `${message.episodeId}:${botSummary.id}`;
+      const pinnedSignalEngine = playbackSurface === "signal"
+        ? (signalVoiceEngineByEpisodeParticipantRef.current.get(
+            signalVoiceContinuityKey,
+          ) ?? null)
+        : null;
+      const expectedEngine: EnglishVoiceEngine = pinnedSignalEngine ??
+        (offlineOnly ? "builtin" : voiceSelection.englishVoiceEngine);
       let durableReplayClip = false;
       signalVoicePrefetchAttemptEpisodeByMessageIdRef.current.set(
         message.id,
@@ -73394,7 +73460,9 @@ function HomeContent(): React.JSX.Element {
               return requestBotcastEnglishClip(
                 message,
                 normalizedProfile,
-                !offlineOnly && botSummary.online_enabled !== 0,
+                expectedEngine === "elevenlabs" &&
+                  !offlineOnly &&
+                  botSummary.online_enabled !== 0,
                 expectedEngine,
                 signal,
                 playbackSurface,
@@ -73409,14 +73477,31 @@ function HomeContent(): React.JSX.Element {
           if (
             !resolved ||
             (!durableReplayClip &&
-              !signalPreferredVoiceClipReady(
-                resolved.kind === "clip" ? resolved.clip : resolved,
-                expectedEngine,
-              ))
+              !signalVoiceClipMatchesEpisodeEngine({
+                engineUsed:
+                  resolved.kind === "clip"
+                    ? resolved.clip.engineUsed
+                    : resolved.engineUsed,
+                selectedEngine: expectedEngine,
+                pinnedEngine: pinnedSignalEngine,
+              }))
           ) {
             signalVoiceClipCacheRef.current.delete(message.id);
             signalVoiceClipEpisodeByMessageIdRef.current.delete(message.id);
             return null;
+          }
+          if (playbackSurface === "signal") {
+            const resolvedEngine = signalVoiceEngineFamily(
+              resolved.kind === "clip"
+                ? resolved.clip.engineUsed
+                : resolved.engineUsed,
+            );
+            if (resolvedEngine) {
+              signalVoiceEngineByEpisodeParticipantRef.current.set(
+                signalVoiceContinuityKey,
+                resolvedEngine,
+              );
+            }
           }
           return resolved;
         })
@@ -73479,6 +73564,15 @@ function HomeContent(): React.JSX.Element {
         if (attemptedEpisodeId === episodeId) {
           signalVoicePrefetchAttemptEpisodeByMessageIdRef.current.delete(
             messageId,
+          );
+        }
+      }
+      for (const continuityKey of [
+        ...signalVoiceEngineByEpisodeParticipantRef.current.keys(),
+      ]) {
+        if (continuityKey.startsWith(`${episodeId}:`)) {
+          signalVoiceEngineByEpisodeParticipantRef.current.delete(
+            continuityKey,
           );
         }
       }
@@ -74225,10 +74319,20 @@ function HomeContent(): React.JSX.Element {
         const effectiveEngine: EnglishVoiceEngine = offlineOnly
           ? "builtin"
           : voiceSelection.englishVoiceEngine;
-        let clip = signalPreferredVoiceClipReady(
-          preparedClip?.kind === "clip" ? preparedClip.clip : preparedClip,
-          effectiveEngine,
-        )
+        const signalVoiceContinuityKey = `${message.episodeId}:${botSummary.id}`;
+        const pinnedSignalEngine = playbackSurface === "signal"
+          ? (signalVoiceEngineByEpisodeParticipantRef.current.get(
+              signalVoiceContinuityKey,
+            ) ?? null)
+          : null;
+        let clip = signalVoiceClipMatchesEpisodeEngine({
+          engineUsed:
+            preparedClip?.kind === "clip"
+              ? preparedClip.clip.engineUsed
+              : preparedClip?.engineUsed,
+          selectedEngine: effectiveEngine,
+          pinnedEngine: pinnedSignalEngine,
+        })
           ? preparedClip
           : null;
         if (!clip && !controller.signal.aborted) {
@@ -74239,10 +74343,25 @@ function HomeContent(): React.JSX.Element {
             effectiveEngine,
             controller.signal,
             playbackSurface,
+            pinnedSignalEngine,
           );
         }
         if (!clip || controller.signal.aborted) return false;
         if (playbackSurface === "signal") {
+          const resolvedEngine = signalVoiceEngineFamily(
+            clip.kind === "clip" ? clip.clip.engineUsed : clip.engineUsed,
+          );
+          const currentEngine =
+            signalVoiceEngineByEpisodeParticipantRef.current.get(
+              signalVoiceContinuityKey,
+            );
+          if (currentEngine && resolvedEngine !== currentEngine) return false;
+          if (resolvedEngine) {
+            signalVoiceEngineByEpisodeParticipantRef.current.set(
+              signalVoiceContinuityKey,
+              resolvedEngine,
+            );
+          }
           signalVoiceConsumedEpisodeByMessageIdRef.current.set(
             message.id,
             message.episodeId,
@@ -75075,6 +75194,23 @@ function HomeContent(): React.JSX.Element {
       viewportWidth,
     ],
   );
+  const singleActionableBotFoundryInspiration =
+    botFoundryInspirationSearch.trim()
+      ? soleActionableBotSearchResult(
+          botFoundryInspirationVisibleBots,
+          (bot) =>
+            botFoundryInspirationBotIds.includes(bot.id) ||
+            botFoundryInspirationBotIds.length <
+              BOT_FOUNDRY_INSPIRATION_MAX_SOURCES,
+        )
+      : null;
+  const botFoundryInspirationSearchHint =
+    singleActionableBotFoundryInspiration
+      ? botSearchSingletonHint(
+          botFoundryInspirationSearch,
+          singleActionableBotFoundryInspiration.name,
+        )
+      : null;
   const ungroupedCoffeeBots = useMemo(
     () =>
       filterUngroupedBotsByLibraryGroups(coffeeBotsLibrary, botLibraryGroups),
@@ -75174,6 +75310,22 @@ function HomeContent(): React.JSX.Element {
       }),
     [coffeeGroupFilteredBots, coffeeSearchTerm],
   );
+  const coffeeSingleActionableSearchBot = coffeeSearchTerm
+    ? soleActionableBotSearchResult(
+        coffeeFilteredBots,
+        (bot) =>
+          coffeeSelectedBotIds.includes(bot.id) ||
+          coffeeSelectedBotIds.length < COFFEE_GROUP_MAX_SIZE_CLIENT,
+      )
+    : null;
+  const coffeeSearchResultLabel = coffeeSingleActionableSearchBot
+    ? botSearchSingletonHint(
+        coffeeSearch,
+        coffeeSingleActionableSearchBot.name,
+      )
+    : coffeeSearchTerm
+      ? `${coffeeFilteredBots.length} bot${coffeeFilteredBots.length === 1 ? "" : "s"}`
+      : undefined;
   const coffeeCanvasBotPickerGeometry = useMemo<PickerGeometry | null>(() => {
     if (coffeeFilteredBots.length === 0) return null;
     return pickerGeometry(
@@ -77048,7 +77200,7 @@ function HomeContent(): React.JSX.Element {
     botGroupRoomAtmosphereDialog !== null ||
     imageLightbox !== null ||
     botLibraryGroupDetailsDialog !== null ||
-    botLibraryAddToGroupDialog !== null ||
+    botLibraryGroupManager !== null ||
     botLibraryGroupDeleteConfirm !== null,
   );
   useEffect(() => {
@@ -78372,6 +78524,15 @@ function HomeContent(): React.JSX.Element {
     botGroupBuckets,
     searchedPanelBots,
   ]);
+  const singleVisibleBotPanelSearchResult = normalizedBotLibrarySearchQuery
+    ? soleActionableBotSearchResult(visibleBotPanelBots)
+    : null;
+  const botLibrarySearchSingletonHint = singleVisibleBotPanelSearchResult
+    ? botSearchSingletonHint(
+        botLibrarySearchQuery,
+        singleVisibleBotPanelSearchResult.name,
+      )
+    : null;
 
   const activeBotPanelGroup =
     botPanelGroup !== BOT_LIBRARY_FILTER_ALL
@@ -82361,7 +82522,7 @@ function HomeContent(): React.JSX.Element {
     setBotPanelView("home");
     setImageLightbox(null);
     setBotTransferOverlay(null);
-    setBotLibraryAddToGroupDialog(null);
+    setBotLibraryGroupManager(null);
     setManualAskQuestionModal(null);
     clearViewSwitchOverlayTimers();
     setViewSwitchTarget(null);
@@ -82710,7 +82871,7 @@ function HomeContent(): React.JSX.Element {
     setExpandedPromptShortcutTargetsByMessageId({});
     setConversationGroupOrder([]);
     setBotLibraryGroups(createFactoryResetBotLibraryGroups([]));
-    setBotLibraryAddToGroupDialog(null);
+    setBotLibraryGroupManager(null);
     setConversations([]);
     setSelectedId(null);
     selectedIdRef.current = null;
@@ -99534,12 +99695,22 @@ function HomeContent(): React.JSX.Element {
       pickerSourceBots.length === 0
     )
       return null;
+    const soleVisibleBot = normalizedEmptyStateBotNameFilter
+      ? soleActionableBotSearchResult(filteredBots)
+      : null;
+    const singletonHint = soleVisibleBot
+      ? botSearchSingletonHint(
+          emptyStateBotNameFilter,
+          soleVisibleBot.name,
+        )
+      : null;
     const resultLabel =
-      normalizedEmptyStateBotNameFilter.length === 0
+      singletonHint ??
+      (normalizedEmptyStateBotNameFilter.length === 0
         ? "Start typing to filter bots by name."
         : filteredBots.length === 1
           ? "1 bot found"
-          : `${filteredBots.length} bots found`;
+          : `${filteredBots.length} bots found`);
     return (
       <div
         ref={emptyStateSpotlightRef}
@@ -99560,6 +99731,19 @@ function HomeContent(): React.JSX.Element {
                 setEmptyStateBotNameFilter(event.currentTarget.value)
               }
               onKeyDown={(event) => {
+                if (
+                  handleBotSearchSingletonKey({
+                    event,
+                    query: emptyStateBotNameFilter,
+                    results: filteredBots,
+                    getName: (bot) => bot.name,
+                    onSelect: (bot) =>
+                      commitEmptyStateBotSelection(bot.id),
+                    onComplete: setEmptyStateBotNameFilter,
+                  })
+                ) {
+                  return;
+                }
                 if (event.key === "Escape") {
                   event.preventDefault();
                   closeEmptyStateBotSearch();
@@ -100401,7 +100585,10 @@ function HomeContent(): React.JSX.Element {
             id: "edit-group",
             icon: <PencilLine />,
             label: "Edit details",
-            onSelect: () => editBotLibraryGroup(focusedBotLibraryGroup.id),
+            onSelect: () =>
+              openBotLibraryGroupManager({
+                selectedGroupId: focusedBotLibraryGroup.id,
+              }),
           },
           { id: "delete-group-separator", kind: "separator" },
           {
@@ -100513,9 +100700,10 @@ function HomeContent(): React.JSX.Element {
                 <button
                   type="button"
                   className={styles.botGroupHeroAction}
-                  disabled={groupIsFull || groupAddableBotCount === 0}
                   onClick={() =>
-                    openAddBotFromLibraryGroupDialog(focusedBotLibraryGroup.id)
+                    openBotLibraryGroupManager({
+                      selectedGroupId: focusedBotLibraryGroup.id,
+                    })
                   }
                   aria-label={groupAddBotsTitle}
                   title={groupAddBotsTitle}
@@ -100559,12 +100747,22 @@ function HomeContent(): React.JSX.Element {
       standaloneSpotlightOwnsSearch
     )
       return null;
+    const soleVisibleBot = normalizedEmptyStateBotNameFilter
+      ? soleActionableBotSearchResult(filteredBots)
+      : null;
+    const singletonHint = soleVisibleBot
+      ? botSearchSingletonHint(
+          emptyStateBotNameFilter,
+          soleVisibleBot.name,
+        )
+      : null;
     const resultLabel =
-      normalizedEmptyStateBotNameFilter.length === 0
+      singletonHint ??
+      (normalizedEmptyStateBotNameFilter.length === 0
         ? "Type to filter bots by name."
         : filteredBots.length === 1
           ? "1 bot found"
-          : `${filteredBots.length} bots found`;
+          : `${filteredBots.length} bots found`);
     const botHasCommenced = !!detail && detail.messages.length > 0;
     const botPickerBots = botHasCommenced ? bots : filteredBots;
     const showRailBotPicker = view === "sandbox" || botHasCommenced;
@@ -100601,6 +100799,18 @@ function HomeContent(): React.JSX.Element {
       searchValue: emptyStateBotNameFilter,
       onSearchChange: setEmptyStateBotNameFilter,
       onSearchKeyDown: (event) => {
+        if (
+          handleBotSearchSingletonKey({
+            event,
+            query: emptyStateBotNameFilter,
+            results: filteredBots,
+            getName: (bot) => bot.name,
+            onSelect: (bot) => commitEmptyStateBotSelection(bot.id),
+            onComplete: setEmptyStateBotNameFilter,
+          })
+        ) {
+          return;
+        }
         if (event.key === "Escape") {
           event.preventDefault();
           closeEmptyStateBotSearchAndFocusDraft();
@@ -100614,7 +100824,7 @@ function HomeContent(): React.JSX.Element {
           value={botLibraryGroupPickerValue}
           options={botLibraryGroupFilterOptions}
           onChange={applyBotLibraryHeaderFilter}
-          onCreateGroup={() => openCreateBotLibraryGroupDialog([])}
+          onCreateGroup={() => openBotLibraryGroupManager()}
           resolvedTheme={resolvedTheme}
           showCounts={false}
           dismissPopoversSignal={composerPopoverDismissSignal}
@@ -102204,6 +102414,31 @@ function HomeContent(): React.JSX.Element {
         error instanceof Error ? error.message : "That field stayed unchanged.",
       );
     }
+  }
+
+  async function generateAvatarDetailsInk(
+    prompt: string,
+    signal: AbortSignal,
+  ): Promise<BotAvatarDetailsV1> {
+    const responseMode = responseModeForProvider(
+      settings?.preferredProvider ?? "local",
+    );
+    const result = await api<{
+      ok: true;
+      details: BotAvatarDetailsV1;
+    }>("/api/bots/generate-avatar-details-ink", {
+      method: "POST",
+      signal,
+      body: JSON.stringify({
+        prompt,
+        preferredProvider: settings?.preferredProvider ?? "local",
+        responseMode,
+        ...(botGeneratorModelChoice !== AUTO_MODEL_CHOICE
+          ? { modelOverride: botGeneratorModelChoice }
+          : {}),
+      }),
+    });
+    return normalizeAvatarDetails(result.details);
   }
 
   function applyGeneratedBotDraft(draft: BotGeneratedDraftV1): void {
@@ -103911,122 +104146,213 @@ function HomeContent(): React.JSX.Element {
     });
   }
 
-  function botLibraryAddToGroupOptionsForBot(
-    botId: string,
-  ): Array<{ group: BotLibraryGroup; count: number; botIds: string[] }> {
-    return customBotLibraryGroups
-      .map((group) => {
-        const existingGroupBotIds = group.botIds.filter((candidateBotId) =>
-          existingBotIds.has(candidateBotId),
+  function createDefaultBotGroupNameFor(groups: readonly BotLibraryGroup[]): string {
+    const used = new Set(groups.map((group) => group.name.trim().toLowerCase()));
+    if (!used.has("bot group")) return "Bot Group";
+    let index = 2;
+    while (used.has(`bot group ${index}`)) index += 1;
+    return `Bot Group ${index}`;
+  }
+
+  function openBotLibraryGroupManager(options: {
+    selectedGroupId?: string;
+    focusedBotId?: string | null;
+    selectedBotIds?: readonly string[];
+  } = {}): void {
+    const now = new Date().toISOString();
+    let groups = createBotLibraryGroupManagerDraft(botLibraryGroups);
+    let selectedGroupId = options.selectedGroupId;
+    if (!groups.some((group) => group.id === selectedGroupId && !group.builtIn)) {
+      selectedGroupId = groups.find((group) => !group.builtIn)?.id;
+    }
+    if (!selectedGroupId) {
+      const id = createBotLibraryGroupId();
+      groups = [
+        ...groups,
+        {
+          id,
+          name: createDefaultBotGroupNameFor(groups),
+          description: "",
+          botIds: [],
+          deleteProtected: false,
+          builtIn: false,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ];
+      selectedGroupId = id;
+    }
+    const selectedBotIds = Array.from(new Set(options.selectedBotIds ?? [])).filter(
+      (botId) => existingBotIds.has(botId),
+    );
+    if (selectedBotIds.length > 0) {
+      const selected = groups.find((group) => group.id === selectedGroupId);
+      if (selected && !selected.builtIn) {
+        groups = setBotLibraryGroupManagerMembers(
+          groups,
+          selected.id,
+          [...selected.botIds, ...selectedBotIds].slice(0, BOT_LIBRARY_GROUP_BOT_CAP),
         );
-        return {
-          group,
-          count: existingGroupBotIds.length,
-          botIds: existingGroupBotIds,
-        };
-      })
-      .filter(
-        ({ count, botIds }) =>
-          !botIds.includes(botId) && count < BOT_LIBRARY_GROUP_BOT_CAP,
-      );
-  }
-
-  function openAddBotToGroupDialog(botId: string): void {
-    const options = botLibraryAddToGroupOptionsForBot(botId);
-    const firstGroupId = options[0]?.group.id;
-    if (!firstGroupId) return;
-    botLibraryAddToGroupDialogOpenerRef.current =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-    setPanelError(null);
-    setBotLibraryAddToGroupDialog({
-      mode: "pick-group",
-      botId,
-      groupId: firstGroupId,
-    });
-  }
-
-  function openAddBotFromLibraryGroupDialog(groupId: string): void {
-    const target = botLibraryGroups.find((group) => group.id === groupId);
-    if (!target || target.builtIn) return;
-    const targetBotIds = new Set(
-      target.botIds.filter((botId) => existingBotIds.has(botId)),
-    );
-    if (targetBotIds.size >= BOT_LIBRARY_GROUP_BOT_CAP) {
-      setPanelError(null);
-      setPanelNotice(`"${target.name}" is full.`);
-      return;
-    }
-    const firstEligibleBot = sortedPanelBots.find(
-      (bot) => !targetBotIds.has(bot.id),
-    );
-    if (!firstEligibleBot) {
-      setPanelError(null);
-      setPanelNotice(`Every Library bot is already in "${target.name}".`);
-      return;
-    }
-    botLibraryAddToGroupDialogOpenerRef.current =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-    setPanelError(null);
-    setPanelNotice(null);
-    setBotLibraryAddToGroupDialog({
-      mode: "pick-bot",
-      botId: firstEligibleBot.id,
-      groupId: target.id,
-    });
-  }
-
-  function addBotToExistingLibraryGroup(
-    botId: string,
-    groupId: string,
-    options: { focusGroup?: boolean } = {},
-  ): boolean {
-    const bot = bots.find((candidate) => candidate.id === botId);
-    const target = botLibraryGroups.find((group) => group.id === groupId);
-    if (!bot || !target || target.builtIn) return false;
-
-    const result = addBotToLibraryGroup(botLibraryGroups, {
-      groupId,
-      botId,
-      existingBotIds,
-      maxBots: BOT_LIBRARY_GROUP_BOT_CAP,
-      now: new Date().toISOString(),
-    });
-    if (result.status !== "added") {
-      setPanelError(null);
-      setPanelNotice(
-        result.status === "already-in-group"
-          ? `"${target.name}" already has ${bot.name}.`
-          : result.status === "group-full"
-            ? `"${target.name}" is full.`
-            : "Could not add bot to that group.",
-      );
-      return false;
-    }
-
-    setPanelError(null);
-    setPanelNotice(`Added ${bot.name} to "${target.name}".`);
-    setBotLibraryGroups(normalizeBotLibraryGroups(result.groups));
-    if (options.focusGroup !== false) {
-      setBotLibraryGroupFilterId(groupId);
-      setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
-      if (
-        (view === "chat" || view === "sandbox") &&
-        !detail &&
-        !pendingReplyVisible
-      ) {
-        resetEmptyStateBotSelection();
-        setHueFilterCenter(null);
       }
     }
-    return true;
+    botLibraryGroupManagerOpenerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setPanelError(null);
+    setPanelNotice(null);
+    setBotLibraryGroupManager({
+      groups,
+      selectedGroupId,
+      focusedBotId: options.focusedBotId ?? selectedBotPanelBotId,
+      memberSearchQuery: "",
+      error: null,
+    });
+  }
+
+  function addBotLibraryGroupManagerGroup(): void {
+    setBotLibraryGroupManager((current) => {
+      if (!current) return current;
+      const now = new Date().toISOString();
+      const id = createBotLibraryGroupId();
+      return {
+        ...current,
+        groups: [
+          ...current.groups,
+          {
+            id,
+            name: createDefaultBotGroupNameFor(current.groups),
+            description: "",
+            botIds: [],
+            deleteProtected: false,
+            builtIn: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        selectedGroupId: id,
+        memberSearchQuery: "",
+        error: null,
+      };
+    });
+  }
+
+  function updateBotLibraryGroupManager(
+    patch: Partial<Pick<BotLibraryGroupManagerState, "selectedGroupId" | "memberSearchQuery">>,
+  ): void {
+    setBotLibraryGroupManager((current) =>
+      current ? { ...current, ...patch, error: null } : current,
+    );
+  }
+
+  function renameBotLibraryGroupManagerGroup(groupId: string, name: string): void {
+    setBotLibraryGroupManager((current) =>
+      current
+        ? {
+            ...current,
+            groups: renameBotLibraryGroupManagerDraft(current.groups, groupId, name),
+            error: null,
+          }
+        : current,
+    );
+  }
+
+  function describeBotLibraryGroupManagerGroup(
+    groupId: string,
+    description: string,
+  ): void {
+    setBotLibraryGroupManager((current) =>
+      current
+        ? {
+            ...current,
+            groups: describeBotLibraryGroupManagerDraft(
+              current.groups,
+              groupId,
+              description,
+            ),
+            error: null,
+          }
+        : current,
+    );
+  }
+
+  function removeBotLibraryGroupManagerGroup(groupId: string): void {
+    setBotLibraryGroupManager((current) => {
+      if (!current) return current;
+      const removedIndex = current.groups.findIndex(
+        (group) => group.id === groupId && !group.builtIn,
+      );
+      if (removedIndex < 0) return current;
+      const groups = removeBotLibraryGroupManagerDraft(current.groups, groupId);
+      const selectedGroupId =
+        current.selectedGroupId === groupId
+          ? (groups[Math.min(removedIndex, groups.length - 1)]?.id ??
+            groups[0]?.id ??
+            "")
+          : current.selectedGroupId;
+      return {
+        ...current,
+        groups,
+        selectedGroupId,
+        memberSearchQuery: "",
+        error: null,
+      };
+    });
+  }
+
+  function toggleBotLibraryGroupManagerMember(groupId: string, botId: string): void {
+    setBotLibraryGroupManager((current) => {
+      if (!current) return current;
+      const group = current.groups.find((candidate) => candidate.id === groupId);
+      if (!group || group.builtIn) return current;
+      const selected = group.botIds.includes(botId);
+      if (!selected && group.botIds.length >= BOT_LIBRARY_GROUP_BOT_CAP) {
+        return { ...current, error: `This group is full at ${BOT_LIBRARY_GROUP_BOT_CAP} bots.` };
+      }
+      const botIds = selected
+        ? group.botIds.filter((candidateId) => candidateId !== botId)
+        : [...group.botIds, botId];
+      return {
+        ...current,
+        groups: setBotLibraryGroupManagerMembers(current.groups, groupId, botIds),
+        error: null,
+      };
+    });
+  }
+
+  function saveBotLibraryGroupManager(): void {
+    const manager = botLibraryGroupManager;
+    if (!manager) return;
+    for (const group of manager.groups) {
+      if (group.builtIn) continue;
+      const nameError = botLibraryGroupManagerNameError(manager.groups, group.id, group.name);
+      if (nameError) {
+        setBotLibraryGroupManager({ ...manager, selectedGroupId: group.id, error: nameError });
+        return;
+      }
+      if (group.botIds.length > BOT_LIBRARY_GROUP_BOT_CAP) {
+        setBotLibraryGroupManager({
+          ...manager,
+          selectedGroupId: group.id,
+          error: `Custom bot groups can include up to ${BOT_LIBRARY_GROUP_BOT_CAP} bots.`,
+        });
+        return;
+      }
+    }
+    const now = new Date().toISOString();
+    const saved = manager.groups.map((group) => ({
+      ...group,
+      name: group.name.trim(),
+      description: group.description.trim(),
+      updatedAt: group.builtIn ? group.updatedAt : now,
+    }));
+    setBotLibraryGroups(normalizeBotLibraryGroups(saved));
+    setBotLibraryGroupFilterId(manager.selectedGroupId);
+    setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
+    setPanelNotice("Saved group changes.");
+    closeBotLibraryGroupManager();
   }
 
   function editBotLibraryGroup(groupId: string): void {
-    openEditBotLibraryGroupDialog(groupId);
+    openBotLibraryGroupManager({ selectedGroupId: groupId });
   }
 
   function openBotGroupRoomAtmosphereDialog(groupId: string): void {
@@ -104377,7 +104703,7 @@ function HomeContent(): React.JSX.Element {
     }
     setBotLibraryGroupDetailsDialog(null);
     setBotLibraryGroupDeleteConfirm(null);
-    setBotLibraryAddToGroupDialog(null);
+    setBotLibraryGroupManager(null);
     if (botGroupRoomAtmosphereDialog?.groupId === groupId) {
       closeBotGroupRoomAtmosphereDialog();
     }
@@ -109041,7 +109367,8 @@ function HomeContent(): React.JSX.Element {
           icon: <Plus />,
           label: "Create new group",
           description: `${multiSelectedBotIds.length} selected bots`,
-          onSelect: () => openCreateBotLibraryGroupDialog(multiSelectedBotIds),
+          onSelect: () =>
+            openBotLibraryGroupManager({ selectedBotIds: multiSelectedBotIds }),
         },
         {
           id: "add-selected-to-group",
@@ -109056,10 +109383,10 @@ function HomeContent(): React.JSX.Element {
             : "Create a group first, or make room in an existing group.",
           onSelect: () => {
             if (!existingGroupId) return;
-            openCreateBotLibraryGroupDialog(
-              multiSelectedBotIds,
-              existingGroupId,
-            );
+            openBotLibraryGroupManager({
+              selectedGroupId: existingGroupId,
+              selectedBotIds: multiSelectedBotIds,
+            });
           },
         },
         { id: "selected-group-separator", kind: "separator" },
@@ -109159,15 +109486,16 @@ function HomeContent(): React.JSX.Element {
           description: group.name,
           onSelect: () => removeBotsFromLibraryGroup(group.id, [bot.id]),
         });
-      } else if (
-        !group &&
-        botLibraryAddToGroupOptionsForBot(bot.id).length > 0
-      ) {
+      } else if (!group) {
         entries.push({
           id: "add-to-group",
           icon: <Plus />,
           label: "Add to group",
-          onSelect: () => openAddBotToGroupDialog(bot.id),
+          onSelect: () =>
+            openBotLibraryGroupManager({
+              focusedBotId: bot.id,
+              selectedBotIds: [bot.id],
+            }),
         });
       }
       if (!group) {
@@ -110396,6 +110724,18 @@ function HomeContent(): React.JSX.Element {
             .toLowerCase()
             .includes(normalizedMemberQuery)),
     );
+    const singleFilteredCandidate = normalizedMemberQuery
+      ? soleActionableBotSearchResult(
+          filteredCandidates,
+          () => createBotCount < BOT_LIBRARY_GROUP_BOT_CAP,
+        )
+      : null;
+    const memberSearchSingletonHint = singleFilteredCandidate
+      ? botSearchSingletonHint(
+          botLibraryGroupMemberSearchQuery,
+          singleFilteredCandidate.name,
+        )
+      : null;
     const visibleMembers = [...selectedMembers, ...filteredCandidates];
     const createSummary =
       dialog.mode !== "create"
@@ -110573,6 +110913,20 @@ function HomeContent(): React.JSX.Element {
                               event.currentTarget.value,
                             )
                           }
+                          onKeyDown={(event) => {
+                            handleBotSearchSingletonKey({
+                              event,
+                              query: botLibraryGroupMemberSearchQuery,
+                              results: filteredCandidates,
+                              isActionable: () =>
+                                createBotCount < BOT_LIBRARY_GROUP_BOT_CAP,
+                              getName: (bot) => bot.name,
+                              onSelect: (bot) =>
+                                toggleBotLibraryGroupDialogMember(bot.id),
+                              onComplete:
+                                setBotLibraryGroupMemberSearchQuery,
+                            });
+                          }}
                           placeholder="Search bots"
                           aria-label="Search bots in this group"
                         />
@@ -110594,13 +110948,14 @@ function HomeContent(): React.JSX.Element {
                         role="status"
                         aria-live="polite"
                       >
-                        {normalizedMemberQuery
+                        {memberSearchSingletonHint ??
+                        (normalizedMemberQuery
                           ? filteredCandidates.length > 0
                             ? `${filteredCandidates.length} additional bot${filteredCandidates.length === 1 ? "" : "s"} match. Selected bots remain visible.`
                             : selectedMembers.length > 0
                               ? "No additional bots match. Selected bots remain visible."
                               : "No bots match that search."
-                          : "Selected bots remain visible above the rest of the Library."}
+                          : "Selected bots remain visible above the rest of the Library.")}
                       </p>
                     </div>
                     <div className={styles.botLibraryGroupMemberGrid}>
@@ -110674,157 +111029,261 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
-  const renderBotLibraryAddToGroupDialog = (): React.JSX.Element | null => {
-    if (!botLibraryAddToGroupDialog) return null;
-    const dialog = botLibraryAddToGroupDialog;
-    const pickBotMode = dialog.mode === "pick-bot";
-    const targetGroup = botLibraryGroups.find(
-      (group) => group.id === dialog.groupId,
+  const renderBotLibraryGroupManager = (): React.JSX.Element | null => {
+    if (!botLibraryGroupManager) return null;
+    const manager = botLibraryGroupManager;
+    const selected = manager.groups.find(
+      (group) => group.id === manager.selectedGroupId,
     );
-    const targetGroupBotIds = new Set(
-      (targetGroup?.botIds ?? []).filter((botId) => existingBotIds.has(botId)),
+    if (!selected) return null;
+    const selectedIds = new Set(selected.botIds.filter((botId) => existingBotIds.has(botId)));
+    const missingMemberIds = selected.botIds.filter(
+      (botId) => !existingBotIds.has(botId),
     );
-    const eligibleBots = pickBotMode
-      ? sortBotPickerItems(
-          sortedPanelBots.filter((bot) => !targetGroupBotIds.has(bot.id)),
-          false,
+    const selectedMemberCount = selected.botIds.length;
+    const selectedDisplayName = selected.name.trim() || "Untitled group";
+    const memberBots = sortedPanelBots.filter((bot) => selectedIds.has(bot.id));
+    const query = manager.memberSearchQuery.trim().toLowerCase();
+    const availableBots = sortedPanelBots.filter(
+      (bot) =>
+        !selectedIds.has(bot.id) &&
+        (!query || `${bot.name} ${bot.system_prompt ?? ""}`.toLowerCase().includes(query)),
+    );
+    const selectedGroupBots = bots.filter((bot) => selectedIds.has(bot.id));
+    const editable = !selected.builtIn;
+    const singleAvailableBot = query
+      ? soleActionableBotSearchResult(
+          availableBots,
+          () => editable && selectedMemberCount < BOT_LIBRARY_GROUP_BOT_CAP,
         )
-      : [];
-    const selectedBotId = pickBotMode
-      ? eligibleBots.some((bot) => bot.id === dialog.botId)
-        ? dialog.botId
-        : (eligibleBots[0]?.id ?? "")
-      : dialog.botId;
-    const bot = bots.find((candidate) => candidate.id === selectedBotId);
-    if (!bot) return null;
-    const groupOptions = pickBotMode
-      ? []
-      : botLibraryAddToGroupOptionsForBot(bot.id);
-    if (pickBotMode) {
-      if (
-        !targetGroup ||
-        targetGroup.builtIn ||
-        targetGroupBotIds.size >= BOT_LIBRARY_GROUP_BOT_CAP ||
-        eligibleBots.length === 0
-      ) {
-        return null;
-      }
-    } else if (groupOptions.length === 0) {
-      return null;
-    }
-    const selectedGroupId = pickBotMode
-      ? dialog.groupId
-      : groupOptions.some(({ group }) => group.id === dialog.groupId)
-        ? dialog.groupId
-        : groupOptions[0]!.group.id;
-    const selectedOption = pickBotMode
-      ? targetGroup
-        ? {
-            group: targetGroup,
-            count: targetGroupBotIds.size,
-            botIds: [...targetGroupBotIds],
-          }
-        : null
-      : (groupOptions.find(({ group }) => group.id === selectedGroupId) ??
-        null);
-    const mergedCount = selectedOption
-      ? new Set([...selectedOption.botIds, bot.id]).size
-      : 0;
-    const submitSelection = (): void => {
-      closeBotLibraryAddToGroupDialog();
-      addBotToExistingLibraryGroup(bot.id, selectedGroupId);
-    };
+      : null;
+    const availableBotSearchHint = singleAvailableBot
+      ? botSearchSingletonHint(
+          manager.memberSearchQuery,
+          singleAvailableBot.name,
+        )
+      : null;
+    const focusedBot = manager.focusedBotId
+      ? bots.find((bot) => bot.id === manager.focusedBotId) ?? null
+      : null;
 
     return (
       <div
-        className={styles.deleteAllModalBackdrop}
-        onClick={(event) => {
-          if (event.target === event.currentTarget)
-            closeBotLibraryAddToGroupDialog();
+        className={styles.botPreferredModelsModalBackdrop}
+        role="presentation"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) closeBotLibraryGroupManager();
         }}
       >
         <form
-          ref={botLibraryAddToGroupDialogPanelRef}
-          className={`${styles.deleteAllModalPanel} ${styles.botLibraryAddToGroupDialog}`}
+          ref={botLibraryGroupManagerPanelRef}
+          className={`${styles.botPreferredModelsModal} ${styles.botLibraryGroupManager}`}
           role="dialog"
           aria-modal="true"
-          aria-labelledby="bot-library-add-to-group-title"
-          aria-describedby="bot-library-add-to-group-desc"
+          aria-labelledby="bot-library-group-manager-title"
+          aria-describedby="bot-library-group-manager-summary"
           onClick={(event) => event.stopPropagation()}
           onSubmit={(event) => {
             event.preventDefault();
-            submitSelection();
+            saveBotLibraryGroupManager();
           }}
         >
-          <h2
-            id="bot-library-add-to-group-title"
-            className={styles.deleteAllModalTitle}
-          >
-            {pickBotMode
-              ? `Add a bot to ${selectedOption?.group.name ?? "group"}`
-              : `Add ${bot.name} to group`}
-          </h2>
-          <p
-            id="bot-library-add-to-group-desc"
-            className={styles.deleteAllModalBody}
-          >
-            {pickBotMode
-              ? "Select an eligible bot from your Library."
-              : "Select one saved group for this bot."}
-          </p>
-          <label className={styles.botLibraryGroupDialogField}>
-            <span>{pickBotMode ? "Bot" : "Group"}</span>
-            <select
-              value={pickBotMode ? selectedBotId : selectedGroupId}
-              autoFocus
-              onChange={(event) => {
-                const nextValue = event.currentTarget.value;
-                setBotLibraryAddToGroupDialog((current) =>
-                  pickBotMode
-                    ? selectBotLibraryAddToGroupDialogBot(current, nextValue)
-                    : selectBotLibraryAddToGroupDialogGroup(current, nextValue),
-                );
-              }}
-            >
-              {pickBotMode
-                ? eligibleBots.map((eligibleBot) => (
-                    <option key={eligibleBot.id} value={eligibleBot.id}>
-                      {eligibleBot.name}
-                    </option>
-                  ))
-                : groupOptions.map(({ group, count }) => (
-                    <option key={group.id} value={group.id}>
-                      {group.name} (
-                      {botLibraryGroupCapacityLabel(
-                        count,
-                        BOT_LIBRARY_GROUP_BOT_CAP,
-                      )}
-                      )
-                    </option>
-                  ))}
-            </select>
-          </label>
-          {selectedOption ? (
-            <p className={styles.botLibraryGroupDialogHint}>
-              Result:{" "}
-              {botLibraryGroupCapacityLabel(
-                mergedCount,
-                BOT_LIBRARY_GROUP_BOT_CAP,
+          <header className={styles.botPreferredModelsModalHeader}>
+            <div>
+              <span>Bot Library</span>
+              <h4 id="bot-library-group-manager-title">Manage groups</h4>
+              <p id="bot-library-group-manager-summary">
+                Arrange memberships and names here. Nothing changes in your Library until you save.
+              </p>
+            </div>
+            <button type="button" onClick={closeBotLibraryGroupManager} aria-label="Cancel group changes">
+              ×
+            </button>
+          </header>
+          <div className={styles.botLibraryGroupManagerWorkspace} data-tutorial-target="bot-library-group-manager">
+            <aside className={styles.botLibraryGroupManagerRail} aria-label="Saved groups">
+              <div className={styles.botLibraryGroupManagerRailHeader}>
+                <strong>Groups</strong>
+                <button type="button" onClick={addBotLibraryGroupManagerGroup} aria-label="Create new group">
+                  <Plus size={14} aria-hidden="true" /> New
+                </button>
+              </div>
+              <div className={styles.botLibraryGroupManagerRailList}>
+                {manager.groups.map((group) => {
+                  const groupBots = bots.filter((bot) => group.botIds.includes(bot.id));
+                  const count = group.botIds.length;
+                  const displayName = group.name.trim() || "Untitled group";
+                  return (
+                    <button
+                      key={group.id}
+                      type="button"
+                      className={styles.botLibraryGroupManagerRailItem}
+                      style={botLibraryGroupVisualStyle(group, groupBots, resolvedTheme)}
+                      data-selected={group.id === selected.id ? "true" : undefined}
+                      onClick={() => updateBotLibraryGroupManager({ selectedGroupId: group.id, memberSearchQuery: "" })}
+                    >
+                      <BotLibraryGroupSpectrumTile groupName={displayName} imageUrl={botLibraryGroupSpectrumImageUrl(group)} size={25} />
+                      <span>
+                        <strong>{displayName}</strong>
+                        <small>{count === 1 ? "1 bot" : `${count} bots`}</small>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </aside>
+            <section className={styles.botLibraryGroupManagerDetail}>
+              <div
+                className={styles.botLibraryGroupManagerPreview}
+                style={botLibraryGroupVisualStyle(selected, selectedGroupBots, resolvedTheme)}
+                aria-label={`${selectedDisplayName} gradient preview`}
+                data-group-gradient-preview="true"
+              >
+                <BotLibraryGroupSpectrumTile groupName={selectedDisplayName} imageUrl={botLibraryGroupSpectrumImageUrl(selected)} size={46} />
+                <span>
+                  <strong>{selectedDisplayName}</strong>
+                  <small>
+                    {selectedMemberCount === 1
+                      ? "1 member"
+                      : `${selectedMemberCount} members`}
+                    {missingMemberIds.length > 0
+                      ? ` · ${missingMemberIds.length} unavailable`
+                      : ""}
+                  </small>
+                </span>
+                {editable ? (
+                  <button
+                    type="button"
+                    className={styles.botLibraryGroupManagerRemoveGroup}
+                    onClick={() => removeBotLibraryGroupManagerGroup(selected.id)}
+                  >
+                    <Trash2 size={14} aria-hidden="true" /> Remove group
+                  </button>
+                ) : null}
+              </div>
+              {editable ? (
+                <div className={styles.botLibraryGroupManagerFields}>
+                  <label className={styles.botLibraryGroupDialogField}>
+                    <span>Group name</span>
+                    <input
+                      value={selected.name}
+                      autoFocus
+                      onChange={(event) => renameBotLibraryGroupManagerGroup(selected.id, event.currentTarget.value)}
+                    />
+                  </label>
+                  <label className={styles.botLibraryGroupDialogField}>
+                    <span>Description</span>
+                    <textarea
+                      value={selected.description}
+                      rows={2}
+                      placeholder="What brings this group together?"
+                      onChange={(event) =>
+                        describeBotLibraryGroupManagerGroup(
+                          selected.id,
+                          event.currentTarget.value,
+                        )
+                      }
+                    />
+                  </label>
+                </div>
+              ) : (
+                <p className={styles.botLibraryGroupManagerBuiltIn}>Favorites is managed from each bot’s star.</p>
               )}
-              .
-            </p>
-          ) : null}
-          <div className={styles.deleteAllModalActions}>
-            <button
-              type="button"
-              className={styles.deleteAllModalCancel}
-              onClick={closeBotLibraryAddToGroupDialog}
-            >
-              Cancel
-            </button>
-            <button type="submit" className={styles.deleteAllModalConfirm}>
-              {pickBotMode ? "Add bot" : "Add to group"}
-            </button>
+              {focusedBot ? (
+                <div className={styles.botLibraryGroupManagerFocused} data-focused-bot={focusedBot.id}>
+                  <span>Focused bot</span><strong>{focusedBot.name}</strong>
+                  {editable ? (
+                    <button type="button" onClick={() => toggleBotLibraryGroupManagerMember(selected.id, focusedBot.id)}>
+                      {selectedIds.has(focusedBot.id)
+                        ? "Remove"
+                        : selectedMemberCount >= BOT_LIBRARY_GROUP_BOT_CAP
+                          ? "Group full"
+                          : "Add"}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+              <div className={styles.botLibraryGroupManagerMembers}>
+                <div className={styles.botLibraryGroupManagerSectionHeader}>
+                  <strong>Current members</strong>
+                  <span>
+                    {selectedMemberCount === 1
+                      ? "1 member"
+                      : `${selectedMemberCount} members`}
+                  </span>
+                </div>
+                {memberBots.length > 0 || missingMemberIds.length > 0 ? (
+                  <div className={styles.botLibraryGroupManagerMemberList}>
+                    {memberBots.map((bot) => (
+                      <div key={bot.id}><span>{bot.name}</span>{editable ? <button type="button" onClick={() => toggleBotLibraryGroupManagerMember(selected.id, bot.id)} aria-label={`Remove ${bot.name}`}>Remove</button> : null}</div>
+                    ))}
+                    {missingMemberIds.map((botId) => (
+                      <div key={botId} data-unavailable-bot="true">
+                        <span>Unavailable bot</span>
+                        {editable ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              toggleBotLibraryGroupManagerMember(selected.id, botId)
+                            }
+                            aria-label="Remove unavailable bot"
+                          >
+                            Remove
+                          </button>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : <p className={styles.botLibraryGroupManagerEmpty}>No members yet. Search the Library below to add someone.</p>}
+              </div>
+              <div className={styles.botLibraryGroupManagerAvailable}>
+                <div className={styles.botLibraryGroupManagerSectionHeader}><strong>Add from Library</strong><span>{availableBotSearchHint ?? (editable ? "Search available bots" : "Built-in groups cannot be changed")}</span></div>
+                <label className={styles.botLibraryGroupMemberSearch}>
+                  <Search size={14} aria-hidden="true" />
+                  <input
+                    value={manager.memberSearchQuery}
+                    disabled={!editable}
+                    onChange={(event) =>
+                      updateBotLibraryGroupManager({
+                        memberSearchQuery: event.currentTarget.value,
+                      })
+                    }
+                    onKeyDown={(event) => {
+                      handleBotSearchSingletonKey({
+                        event,
+                        query: manager.memberSearchQuery,
+                        results: availableBots,
+                        isActionable: () =>
+                          editable &&
+                          selectedMemberCount < BOT_LIBRARY_GROUP_BOT_CAP,
+                        getName: (bot) => bot.name,
+                        onSelect: (bot) =>
+                          toggleBotLibraryGroupManagerMember(
+                            selected.id,
+                            bot.id,
+                          ),
+                        onComplete: (memberSearchQuery) =>
+                          updateBotLibraryGroupManager({ memberSearchQuery }),
+                      });
+                    }}
+                    placeholder="Search available bots"
+                    aria-label="Search available bots"
+                  />
+                </label>
+                <div className={styles.botLibraryGroupManagerAvailableList}>
+                  {availableBots.length > 0 ? availableBots.map((bot) => (
+                    <button key={bot.id} type="button" disabled={!editable || selectedMemberCount >= BOT_LIBRARY_GROUP_BOT_CAP} onClick={() => toggleBotLibraryGroupManagerMember(selected.id, bot.id)}>
+                      <span>{bot.name}</span><span aria-hidden="true">+</span>
+                    </button>
+                  )) : <p className={styles.botLibraryGroupManagerEmpty}>{query ? "No available bots match that search." : "Every Library bot is already here."}</p>}
+                </div>
+              </div>
+              {manager.error ? <p className={styles.error} role="alert">{manager.error}</p> : null}
+            </section>
+          </div>
+          <div className={styles.importBotModalPasteActions}>
+            <button type="button" className={styles.deleteAllModalCancel} onClick={closeBotLibraryGroupManager}>Cancel</button>
+            <button type="submit" className={styles.deleteAllModalConfirm}>Save changes</button>
           </div>
         </form>
       </div>
@@ -115979,7 +116438,7 @@ function HomeContent(): React.JSX.Element {
         onOpenDebate={() => navigateToView("debate")}
       />
       {renderBotLibraryGroupDetailsDialog()}
-      {renderBotLibraryAddToGroupDialog()}
+      {renderBotLibraryGroupManager()}
       {renderBotGroupRoomAtmosphereDialog()}
       {renderBotLibraryGroupDeleteModal()}
       {manualAskQuestionModal ? (
@@ -126232,27 +126691,13 @@ function HomeContent(): React.JSX.Element {
                                 </span>
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    if (
-                                      !addBotToExistingLibraryGroup(
-                                        selectedBotPanelBot.id,
-                                        group.id,
-                                        { focusGroup: false },
-                                      )
-                                    ) {
-                                      return;
-                                    }
-                                    setBotPanelGroupSuggestions((current) => ({
-                                      ...current,
-                                      groupIds: current.groupIds.filter(
-                                        (groupId) => groupId !== group.id,
-                                      ),
-                                      status:
-                                        current.groupIds.length <= 1
-                                          ? "empty"
-                                          : current.status,
-                                    }));
-                                  }}
+                                  onClick={() =>
+                                    openBotLibraryGroupManager({
+                                      selectedGroupId: group.id,
+                                      focusedBotId: selectedBotPanelBot.id,
+                                      selectedBotIds: [selectedBotPanelBot.id],
+                                    })
+                                  }
                                   aria-label={`Add ${selectedBotPanelBot.name} to ${group.name}`}
                                 >
                                   Add
@@ -126665,6 +127110,7 @@ function HomeContent(): React.JSX.Element {
                           )
                         }
                         onRandomizeSemanticField={randomizeSemanticBotField}
+                        onGenerateAvatarDetailsInk={generateAvatarDetailsInk}
                         scheduleKey={`bot-avatar-customizer-${
                           editingDefaultBot
                             ? "default"
@@ -127902,9 +128348,10 @@ function HomeContent(): React.JSX.Element {
                             </h4>
                             <div className={styles.botLibraryListHeaderActions}>
                               <span className={styles.botGroupDrilldownCount}>
-                                {visibleBotPanelBots.length === 1
+                                {botLibrarySearchSingletonHint ??
+                                (visibleBotPanelBots.length === 1
                                   ? "1 bot"
-                                  : `${visibleBotPanelBots.length} bots`}
+                                  : `${visibleBotPanelBots.length} bots`)}
                               </span>
                               <div className={styles.botLibraryFilterControls}>
                                 <label className={styles.botLibrarySearchField}>
@@ -127920,6 +128367,19 @@ function HomeContent(): React.JSX.Element {
                                       )
                                     }
                                     onKeyDown={(event) => {
+                                      if (
+                                        handleBotSearchSingletonKey({
+                                          event,
+                                          query: botLibrarySearchQuery,
+                                          results: visibleBotPanelBots,
+                                          getName: (bot) => bot.name,
+                                          onSelect: selectBotPanelShowcase,
+                                          onComplete:
+                                            setBotLibrarySearchQuery,
+                                        })
+                                      ) {
+                                        return;
+                                      }
                                       if (event.key === "Escape") {
                                         setBotLibrarySearchQuery("");
                                         event.currentTarget.blur();
@@ -127949,9 +128409,7 @@ function HomeContent(): React.JSX.Element {
                                   value={botLibraryGroupPickerValue}
                                   options={botLibraryGroupFilterOptions}
                                   onChange={applyBotLibraryHeaderFilter}
-                                  onCreateGroup={() =>
-                                    openCreateBotLibraryGroupDialog([])
-                                  }
+                                  onCreateGroup={() => openBotLibraryGroupManager()}
                                   resolvedTheme={resolvedTheme}
                                 />
                                 {activeBotLibraryGroupFilter &&
@@ -128637,6 +129095,45 @@ function HomeContent(): React.JSX.Element {
                                   aria-label="Search inspiration bots"
                                   onChange={(event) =>
                                     setBotFoundryInspirationSearch(event.currentTarget.value)
+                                  }
+                                  onKeyDown={(event) => {
+                                    handleBotSearchSingletonKey({
+                                      event,
+                                      query: botFoundryInspirationSearch,
+                                      results:
+                                        botFoundryInspirationVisibleBots,
+                                      isActionable: (bot) =>
+                                        botFoundryInspirationBotIds.includes(
+                                          bot.id,
+                                        ) ||
+                                        botFoundryInspirationBotIds.length <
+                                          BOT_FOUNDRY_INSPIRATION_MAX_SOURCES,
+                                      getName: (bot) => bot.name,
+                                      onSelect: (bot) => {
+                                        setBotFoundryInspirationBotIds(
+                                          (current) =>
+                                            current.includes(bot.id)
+                                              ? current.filter(
+                                                  (id) => id !== bot.id,
+                                                )
+                                              : current.length <
+                                                  BOT_FOUNDRY_INSPIRATION_MAX_SOURCES
+                                                ? [...current, bot.id]
+                                                : current,
+                                        );
+                                        setBotFoundryInspirationInfluence(
+                                          (current) => ({
+                                            ...current,
+                                            [bot.id]: current[bot.id] ?? 50,
+                                          }),
+                                        );
+                                      },
+                                      onComplete:
+                                        setBotFoundryInspirationSearch,
+                                    });
+                                  }}
+                                  title={
+                                    botFoundryInspirationSearchHint ?? undefined
                                   }
                                 />
                               </div>
@@ -143079,6 +143576,20 @@ function HomeContent(): React.JSX.Element {
               variant: "coffee",
               searchValue: coffeeSearch,
               onSearchChange: setCoffeeSearch,
+              onSearchKeyDown: (event) => {
+                handleBotSearchSingletonKey({
+                  event,
+                  query: coffeeSearch,
+                  results: coffeeFilteredBots,
+                  isActionable: (bot) =>
+                    coffeeSelectedBotIds.includes(bot.id) ||
+                    coffeeSelectedBotIds.length <
+                      COFFEE_GROUP_MAX_SIZE_CLIENT,
+                  getName: (bot) => bot.name,
+                  onSelect: (bot) => toggleCoffeeBot(bot.id),
+                  onComplete: setCoffeeSearch,
+                });
+              },
               searchPlaceholder: "Search or add bots...",
               searchAriaLabel: "Search bots for Coffee Group",
               botPicker: (
@@ -143108,6 +143619,7 @@ function HomeContent(): React.JSX.Element {
                   dismissPopoversSignal={composerPopoverDismissSignal}
                 />
               ),
+              resultLabel: coffeeSearchResultLabel ?? undefined,
             })}
             {coffeeBotsLibrary.length === 0 ? (
               <div className={styles.coffeePickerEmptyState}>
@@ -145511,6 +146023,16 @@ function HomeContent(): React.JSX.Element {
     setStoryError(null);
   };
 
+  const toggleStoryBotSelection = (botId: string): void => {
+    setStorySelectedBotIds((current) => {
+      if (current.includes(botId)) {
+        return current.filter((id) => id !== botId);
+      }
+      if (current.length >= STORY_BOT_COUNT_MAX) return current;
+      return [...current, botId];
+    });
+  };
+
   const renderStorySetup = (): React.JSX.Element => {
     const selectedCount = storySelectedBotIds.length;
     const offlineNames = storySelectedBots
@@ -145547,8 +146069,22 @@ function HomeContent(): React.JSX.Element {
           value={storySearch}
           maxLength={TEXT_ENTRY_SEARCH_MAX_LENGTH}
             onChange={(event) => setStorySearch(event.target.value)}
+            onKeyDown={(event) => {
+              handleBotSearchSingletonKey({
+                event,
+                query: storySearch,
+                results: storyFilteredBots,
+                isActionable: (bot) =>
+                  storySelectedBotIds.includes(bot.id) ||
+                  storySelectedBotIds.length < STORY_BOT_COUNT_MAX,
+                getName: (bot) => bot.name,
+                onSelect: (bot) => toggleStoryBotSelection(bot.id),
+                onComplete: setStorySearch,
+              });
+            }}
             placeholder="Search bots..."
             aria-label="Search bots for Story Mode"
+            title={storySearchSingletonHint ?? undefined}
           />
         </label>
         {storyBotsLibrary.length === 0 ? (
@@ -145611,17 +146147,7 @@ function HomeContent(): React.JSX.Element {
                         data-selected={selected ? "true" : undefined}
                         disabled={disabled}
                         style={botAccentStyle(bot.color, resolvedTheme)}
-                        onClick={() => {
-                          setStorySelectedBotIds((current) => {
-                            if (current.includes(bot.id)) {
-                              return current.filter((id) => id !== bot.id);
-                            }
-                            if (current.length >= STORY_BOT_COUNT_MAX) {
-                              return current;
-                            }
-                            return [...current, bot.id];
-                          });
-                        }}
+                        onClick={() => toggleStoryBotSelection(bot.id)}
                         aria-selected={selected}
                       >
                         <span
@@ -147588,11 +148114,17 @@ function HomeContent(): React.JSX.Element {
         provider: model.provider,
         supportsImageInput: model.supportsImageInput === true,
       }));
-    const signalBots = bots.map((bot) => ({
+    const signalBots = bots.filter((bot) => bot.owned !== 0).map((bot) => ({
       id: bot.id,
       name: bot.name,
       color: bot.color,
-      glyph: bot.glyph,
+      glyph: resolveCustomBotGlyph(bot.glyph),
+      sourceRevision: bot.updated_at ?? bot.export_hash ?? "",
+      faceStyle: resolveBotFaceStyleForBot(bot),
+      avatarDetails: resolveBotAvatarDetails(bot),
+      avatarVisibilityMode: botPowerAvatarVisibilityModeV1(bot.powers),
+      avatarScaleMode: botPowerAvatarScaleModeV1(bot.powers),
+      avatarColorCycle: botPowerHasAvatarColorCycleV1(bot.powers),
       online_enabled: bot.online_enabled,
       muted: botPowerIsMutedV1(bot.powers),
       echoesAddressedSpeech: botPowerEchoesAddressedSpeechV1(bot.powers),

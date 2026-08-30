@@ -394,7 +394,10 @@ describe("mode tutorials", () => {
     assert.doesNotMatch(step?.body ?? "", /Micro keeps its face|At 28px and below/u);
     assert.match(step?.body ?? "", /At 8px through 2px, the bot resolves to a fixed 4×4 square/u);
     assert.match(step?.body ?? "", /at 1px it becomes one literal identity-color pixel/u);
-    assert.match(step?.body ?? "", /Mini avatars stay fixed/u);
+    assert.match(
+      step?.body ?? "",
+      /Mini avatars keep their authored eyes stationary and continue ordinary blinking/u,
+    );
     assert.match(step?.body ?? "", /same Chassis scale remains selected/u);
     assert.match(step?.body ?? "", /Surprise me auditions a different shared ElevenLabs preview/u);
     assert.match(step?.body ?? "", /Wield Prism onto the Voice Library card/u);
@@ -782,6 +785,10 @@ describe("mode tutorials", () => {
     );
     assert.match(MODE_TUTORIALS.avatar.steps[2]!.body, /Save or Create bot/u);
     assert.match(MODE_TUTORIALS.avatar.steps[2]!.body, /Core for name/u);
+    assert.match(
+      MODE_TUTORIALS.avatar.steps[2]!.body,
+      /Cursed Tongue.*visible bullet masks.*voice path replaces each mask with an electronic censor beep.*without generating or reconstructing an uncensored curse word/u,
+    );
     assert.match(
       MODE_TUTORIALS.avatar.steps[2]!.body,
       /Settings → Appearance → CRT focus can soften or tighten that brush globally without changing any authored shape or color/u,
@@ -3401,11 +3408,15 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalReplayStep.body,
-      /no post-episode camera controls/u,
+      /Replay itself has no separate camera controls/u,
     );
     assert.match(
       signalReplayStep.body,
-      /restores the full transcript beside the saved camera cut/u,
+      /restores the full transcript beside the recorded camera cut/u,
+    );
+    assert.match(
+      signalReplayStep.body,
+      /current Rehearsal placement and screen treatment/u,
     );
     assert.match(
       signalReplayStep.body,
@@ -3583,6 +3594,32 @@ describe("mode tutorials", () => {
     );
   });
 
+  it("teaches current-show replay staging without rewriting the recording", () => {
+    const booking = MODE_TUTORIALS.botcast.steps.find(
+      (step) => step.heading === "Book tonight’s episode",
+    )?.body ?? "";
+    const replay = MODE_TUTORIALS.botcast.steps.find(
+      (step) => step.heading === "Watch the saved cut",
+    )?.body ?? "";
+
+    assert.match(
+      booking,
+      /records each camera cut’s timing and selected shot[\s\S]*latest Rehearsal placement, crop, episode-image geometry, logo placement, floor glows, and screen treatment/u,
+    );
+    assert.match(
+      booking,
+      /without rewriting the recorded audio, utterance timing, or direction track/u,
+    );
+    assert.match(
+      replay,
+      /recorded camera cut, re-staged through the show’s current Rehearsal placement and screen treatment/u,
+    );
+    assert.match(
+      replay,
+      /recorded shot choices and timing stay fixed/u,
+    );
+  });
+
   it("explains that a Signal Power can remove a bot's coffee cup", () => {
     const booking = MODE_TUTORIALS.botcast.steps.find(
       (step) => step.heading === "Book tonight’s episode",
@@ -3615,7 +3652,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       booking?.body ?? "",
-      /freezes this show’s camera and episode-image placement when recording begins[\s\S]*later rehearsal edits never rewrite an earlier episode/u,
+      /records each camera cut’s timing and selected shot[\s\S]*latest Rehearsal placement, crop, episode-image geometry, logo placement, floor glows, and screen treatment[\s\S]*without rewriting the recorded audio, utterance timing, or direction track/u,
     );
     assert.match(
       booking?.body ?? "",
@@ -3872,7 +3909,9 @@ describe("mode tutorials", () => {
       assert.match(body, /Closing the panel restores Prism/u);
       assert.match(body, /ordinary surfaces.*shortcut opens this menu at the orb's current location/u);
       assert.match(body, /any safe editable control/u);
-      assert.match(body, /Text and editor surfaces receive a contextual draft/u);
+      assert.match(body, /Text and editor surfaces first open a one-line steering composer/u);
+      assert.match(body, /selected Make this more creative text/u);
+      assert.match(body, /Space to reroll with that same direction/u);
       assert.match(body, /multi-select choosing exactly one valid option/u);
       assert.match(
         body,

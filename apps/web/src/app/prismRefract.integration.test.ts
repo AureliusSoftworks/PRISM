@@ -303,9 +303,13 @@ describe("Prism Refract integration", () => {
     );
     assert.doesNotMatch(companionSource, /PRISM_REFRACT_TRAVEL_MS/u);
     assert.doesNotMatch(companionSource, /moveToTarget|phase: "traveling"/u);
-    assert.match(
-      companionSource,
-      /phase: target\.kind === "magic" \? "prompting" : "generating"/u,
+    assert.equal(companionSource.includes("const promptsBeforeGeneration ="), true);
+    assert.equal(companionSource.includes("Boolean(target.steering)"), true);
+    assert.equal(
+      companionSource.includes(
+        'phase: promptsBeforeGeneration ? "prompting" : "generating"',
+      ),
+      true,
     );
     assert.match(
       companionSource,
@@ -484,6 +488,41 @@ describe("Prism Refract integration", () => {
     assert.match(
       companionSource,
       /const direction = refractPrompt\.trim\(\);[\s\S]*releasePrismRefract\(false\);[\s\S]*requestAnimationFrame\(\(\) => \{[\s\S]*target\.run\(direction\)/u,
+    );
+  });
+
+  it("steers prose before generation and keeps that direction for rerolls", () => {
+    assert.equal(
+      refractSource.includes('"Make this more creative"'),
+      true,
+    );
+    assert.equal(
+      universalInputSource.includes(
+        "initialDirection: initialPrismRefractProseDirection",
+      ),
+      true,
+    );
+    assert.equal(
+      companionSource.includes("refractPromptRef.current?.select()"),
+      true,
+    );
+    assert.equal(companionSource.includes("const submitPrismRefractPrompt"), true);
+    assert.equal(
+      companionSource.includes("direction: refractPrompt.trim()"),
+      true,
+    );
+    assert.equal(
+      companionSource.includes("generatePrismRefractCandidate(generatingSession)"),
+      true,
+    );
+    assert.equal(
+      companionSource.includes("direction: session.direction"),
+      true,
+    );
+    assert.equal(companionSource.includes("direction,"), true);
+    assert.match(
+      tutorialSource,
+      /Press Enter to generate, then Space to reroll with that same direction/u,
     );
   });
 

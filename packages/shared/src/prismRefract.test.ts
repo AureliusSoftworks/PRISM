@@ -25,6 +25,7 @@ test("normalizes a bounded contextual Prism input target", () => {
     },
     currentValue: "x".repeat(5_000),
     rejectedValues: ["y".repeat(5_000)],
+    direction: `  ${"Make it vivid ".repeat(80)}  `,
   });
   assert.equal(request.target.kind, "prism.input.text");
   if (request.target.kind === "prism.input.text") {
@@ -44,6 +45,8 @@ test("normalizes a bounded contextual Prism input target", () => {
     request.rejectedValues[0]?.length,
     PRISM_REFRACT_INPUT_VALUE_MAX_LENGTH,
   );
+  assert.equal(request.direction.length, PRISM_REFRACT_DIRECTION_MAX_LENGTH);
+  assert.equal(request.direction.startsWith("Make it vivid"), true);
 });
 
 test("registers manual Debate evidence controls as explicit Refract targets", () => {

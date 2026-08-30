@@ -841,6 +841,18 @@ describe("Signal replay video frames", () => {
   });
 
   it("prefers the camera shot captured from the live Signal stage", () => {
+    const manifest = {
+      ...v2BookendManifest,
+      direction: [
+        {
+          sequence: 1,
+          atMs: 3_000,
+          kind: "camera",
+          sourceMessageId: "message-1",
+          payload: { shot: "right" },
+        },
+      ],
+    } as ReplayManifestV2;
     const capturedScene = {
       ...replayScene({
         "host-1": participantScene({ speaking: true }),
@@ -852,12 +864,136 @@ describe("Signal replay video frames", () => {
       episode,
       timeline,
       replayElapsedMs: 4_000,
+      manifest,
       scene: capturedScene,
       activeMessage: episode.messages[0] ?? null,
       preferDirectedCamera: true,
     });
 
     assert.equal(captured.shot, "right");
+  });
+
+  it("rejects a stale captured cue owned by the prior turn and follows the audible speaker", () => {
+    const staleManifest = {
+      ...v2BookendManifest,
+      direction: [
+        {
+          sequence: 1,
+          atMs: 3_000,
+          kind: "camera",
+          sourceMessageId: "message-1",
+          payload: { shot: "left" },
+        },
+      ],
+    } as ReplayManifestV2;
+    const reconstructed = signalFaithfulReplayCameraState({
+      episode,
+      timeline,
+      replayElapsedMs: 7_000,
+      manifest: staleManifest,
+      scene: {
+        ...replayScene({
+          "host-1": participantScene(),
+          "guest-1": participantScene({ speaking: true, audible: true }),
+        }),
+        camera: "left",
+      },
+      activeMessage: episode.messages[1] ?? null,
+      preferDirectedCamera: true,
+    });
+
+    assert.equal(reconstructed.shot, "right");
+  });
+
+  it("treats an unowned legacy cue from the prior turn as stale", () => {
+    const legacyManifest = {
+      ...v2BookendManifest,
+      direction: [
+        {
+          sequence: 1,
+          atMs: 3_000,
+          kind: "camera",
+          sourceMessageId: null,
+          payload: { shot: "left" },
+        },
+      ],
+    } as ReplayManifestV2;
+    const reconstructed = signalFaithfulReplayCameraState({
+      episode,
+      timeline,
+      replayElapsedMs: 7_000,
+      manifest: legacyManifest,
+      scene: {
+        ...replayScene({
+          "guest-1": participantScene({ speaking: true, audible: true }),
+        }),
+        camera: "left",
+      },
+      activeMessage: episode.messages[1] ?? null,
+      preferDirectedCamera: true,
+    });
+
+    assert.equal(reconstructed.shot, "right");
+  });
+
+  it("reconstructs cue ownership after seeks while preserving valid in-turn cutaways", () => {
+    const seekManifest = {
+      ...v2BookendManifest,
+      direction: [
+        {
+          sequence: 1,
+          atMs: 3_000,
+          kind: "camera",
+          sourceMessageId: "message-1",
+          payload: { shot: "left" },
+        },
+        {
+          sequence: 2,
+          atMs: 7_100,
+          kind: "camera",
+          sourceMessageId: "message-2",
+          payload: { shot: "wide" },
+        },
+      ],
+    } as ReplayManifestV2;
+    const sceneAt = (camera: "left" | "right" | "wide") => ({
+      ...replayScene({
+        "host-1": participantScene(),
+        "guest-1": participantScene({ speaking: true, audible: true }),
+      }),
+      camera,
+    });
+    const beforeCutaway = signalFaithfulReplayCameraState({
+      episode,
+      timeline,
+      replayElapsedMs: 7_000,
+      manifest: seekManifest,
+      scene: sceneAt("left"),
+      activeMessage: episode.messages[1] ?? null,
+      preferDirectedCamera: true,
+    });
+    const duringCutaway = signalFaithfulReplayCameraState({
+      episode,
+      timeline,
+      replayElapsedMs: 7_200,
+      manifest: seekManifest,
+      scene: sceneAt("wide"),
+      activeMessage: episode.messages[1] ?? null,
+      preferDirectedCamera: true,
+    });
+    const seekBack = signalFaithfulReplayCameraState({
+      episode,
+      timeline,
+      replayElapsedMs: 7_000,
+      manifest: seekManifest,
+      scene: sceneAt("left"),
+      activeMessage: episode.messages[1] ?? null,
+      preferDirectedCamera: true,
+    });
+
+    assert.equal(beforeCutaway.shot, "right");
+    assert.equal(duringCutaway.shot, "wide");
+    assert.deepEqual(seekBack, beforeCutaway);
   });
 
   it("keeps fixed camera modes fixed during replay speech and thinking", () => {

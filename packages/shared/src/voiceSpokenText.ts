@@ -2,6 +2,69 @@ const MARKED_SPEECH_BLOCK_PATTERN = /(\*{1,3})([^*\r\n]{1,240})\1/gu;
 const BRACKETED_ACTION_PATTERN =
   /(?<![\\[])\[([^\[\]\r\n]{1,240})\](?!\])(?!\s*\()/gu;
 
+const CURSED_TONGUE_MASKED_TOKEN_PATTERN =
+  /(?<![\p{L}\p{N}])(?:[adfghs][•*]{2,12}(?:ing|ed|er|s|ty|[’']s)?|[bm][•*]{4,12}(?:ing|ed|er|s|es|y|[’']s)?)(?![\p{L}\p{N}])/giu;
+
+/** Provider-safe carrier that is always muted beneath PRISM's local tone. */
+export const CURSED_TONGUE_CENSOR_TONE_TEXT = "bleep";
+
+export interface VoiceCensorRangeV1 {
+  /** UTF-16 offset in the provider-safe carrier text. */
+  start: number;
+  /** Exclusive UTF-16 offset in the provider-safe carrier text. */
+  end: number;
+}
+
+export interface VoiceCensorPerformancePlanV1 {
+  text: string;
+  ranges: VoiceCensorRangeV1[];
+}
+
+/**
+ * Convert Cursed Tongue's public structural masks into an intentional spoken
+ * censor. Synthesizers receive only "bleep"; no uncensored token is stored or
+ * reconstructed at the voice boundary. Ordinary text is unchanged.
+ */
+export function voiceCensorPerformancePlan(
+  value: string,
+): VoiceCensorPerformancePlanV1 {
+  const ranges: VoiceCensorRangeV1[] = [];
+  let cursor = 0;
+  let text = "";
+  for (const match of value.matchAll(CURSED_TONGUE_MASKED_TOKEN_PATTERN)) {
+    const sourceStart = match.index;
+    text += value.slice(cursor, sourceStart);
+    const start = text.length;
+    text += CURSED_TONGUE_CENSOR_TONE_TEXT;
+    ranges.push({ start, end: text.length });
+    cursor = sourceStart + match[0].length;
+  }
+  text += value.slice(cursor);
+  return { text, ranges };
+}
+
+export function voiceCensorPerformanceText(value: string): string {
+  return voiceCensorPerformancePlan(value).text;
+}
+
+function protectCursedTongueMasks(value: string): {
+  text: string;
+  restore: (text: string) => string;
+} {
+  const masks: string[] = [];
+  const text = value.replace(CURSED_TONGUE_MASKED_TOKEN_PATTERN, (mask) => {
+    const index = masks.push(mask) - 1;
+    return `\uE000${index}\uE001`;
+  });
+  return {
+    text,
+    restore: (candidate) =>
+      candidate.replace(/\uE000(\d+)\uE001/gu, (placeholder, rawIndex: string) =>
+        masks[Number(rawIndex)] ?? placeholder
+      ),
+  };
+}
+
 const PHYSICAL_ACTION_START_PATTERN =
   /^(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically|hesitantly)\s+)?(?:arches?|arching|arranges?|arranging|eyes?|eyeing|glances?|glancing|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|pinches?|pinching|winces?|wincing|winks?|winking|grimaces?|grimacing|laughs?|laughing|chuckles?|chuckling|snickers?|snickering|snorts?|snorting|gasps?|gasping|screams?|screaming|dances?|dancing|whispers?|whispering|murmurs?|murmuring|pauses?|pausing|hesitates?|hesitating|stares?|staring|glares?|glaring|gestures?|gesturing|offers?|offering|points?|pointing|waves?|waving|blinks?|blinking|rolls?|rolling|shifts?|shifting|tilts?|tilting|crosses?|crossing|folds?|folding|leans?|leaning|turns?|turning|steps?|stepping|reaches?|reaching|lifts?|lifting|raises?|raising|lowers?|lowering|settles?|settling|regards?|regarding|holds?|holding|draws?|drawing|watches?|watching|straightens?|straightening|releases?|releasing|nudges?|nudging|pulls?|pulling|taps?|tapping|clears?|clearing|swallows?|swallowing|coughs?|coughing|rubs?|rubbing|scratches?|scratching|touches?|touching|wipes?|wiping|sniffs?|sniffing|exhales?|exhaling|inhales?|inhaling|squints?|squinting)\b/iu;
 
@@ -165,8 +228,12 @@ export function voiceSpokenText(
   options: VoiceSpokenTextOptions = {},
 ): string {
   if (typeof value !== "string") return "";
-  return collapseRemovedCueWhitespace(
-    normalizeNestedActionQuotes(value)
+  // Protect star masks from Markdown/action parsing while preserving the exact
+  // public transcript. The synthesis boundary later substitutes a harmless
+  // carrier and records its ranges for local tone playback.
+  const protectedMasks = protectCursedTongueMasks(value);
+  return protectedMasks.restore(collapseRemovedCueWhitespace(
+    normalizeNestedActionQuotes(protectedMasks.text)
     .replace(BRACKETED_ACTION_PATTERN, " ")
     .replace(
       MARKED_SPEECH_BLOCK_PATTERN,
@@ -180,7 +247,7 @@ export function voiceSpokenText(
           : inner;
       },
     ),
-  );
+  ));
 }
 
 /**
@@ -192,7 +259,8 @@ export function voicePerformanceTextFromActionCues(
   options: VoicePerformanceTextOptions = {},
 ): string | null {
   if (typeof value !== "string") return null;
-  const normalized = normalizeNestedActionQuotes(value);
+  const protectedMasks = protectCursedTongueMasks(value);
+  const normalized = normalizeNestedActionQuotes(protectedMasks.text);
   let foundActionCue = false;
   const withoutLocalBracketedFoley = normalized.replace(
     BRACKETED_ACTION_PATTERN,
@@ -228,7 +296,7 @@ export function voicePerformanceTextFromActionCues(
     },
   );
   if (!foundActionCue) return null;
-  return collapseRemovedCueWhitespace(performanceText) || null;
+  return protectedMasks.restore(collapseRemovedCueWhitespace(performanceText)) || null;
 }
 
 /**

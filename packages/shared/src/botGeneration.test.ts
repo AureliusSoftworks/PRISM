@@ -5,6 +5,7 @@ import {
   BOT_GENERATION_PROMPT_MAX_LENGTH,
   CURSED_TONGUE_GENERATED_AUTHORING_PROMPT,
   normalizeBotGeneratedDraftV1,
+  normalizeGeneratedAvatarDetailsInkV1,
   normalizeGeneratedBotPowerPromptV1,
   normalizeLeanBotGeneratedDraftV1,
   normalizeBotGenerationPrompt,
@@ -160,6 +161,26 @@ function completeDraft(): Record<string, unknown> {
 }
 
 describe("normalizeBotGeneratedDraftV1", () => {
+  it("shares the bounded semantic rasterizer with standalone Ink refraction", () => {
+    const details = normalizeGeneratedAvatarDetailsInkV1({
+      ink: [{
+        role: "effect",
+        points: [{ x: 35, y: 26 }, { x: 50, y: 20 }, { x: 65, y: 26 }],
+        closed: false,
+        fill: false,
+        size: 2,
+      }],
+      speechInkAnimation: "none",
+    });
+    assert.ok(details?.screen.paintColorMapBase64);
+    assert.equal(normalizeGeneratedAvatarDetailsInkV1({ ink: [] }), null);
+    assert.equal(
+      normalizeGeneratedAvatarDetailsInkV1({
+        ink: [{ role: "effect", points: [{ x: 1, y: 1 }], closed: false, fill: false, size: 1 }],
+      }),
+      null,
+    );
+  });
   it("normalizes a complete generated bot while dropping model-authored pronunciation and deprecated accessory stamps", () => {
     const draft = normalizeBotGeneratedDraftV1(completeDraft());
     assert.ok(draft);

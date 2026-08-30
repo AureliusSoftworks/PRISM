@@ -51,6 +51,7 @@ export async function generatePrismInputRefractDraft(args: {
   target: PrismRefractInputTextTarget;
   currentValue: string;
   rejectedValues: readonly string[];
+  direction: string;
   authoritativeContext: unknown;
   provider: LlmProvider;
   providerName: ProviderName;
@@ -61,6 +62,7 @@ export async function generatePrismInputRefractDraft(args: {
 }): Promise<PrismInputRefractDraftResult> {
   const { target } = args;
   const normalizedCurrentValue = args.currentValue.trim();
+  const direction = args.direction.trim();
   const hasCurrentSeed = normalizedCurrentValue.length > 0;
   const currentValueInstruction = hasCurrentSeed
     ? "The current field value is the primary semantic seed. Preserve its recognizable subject and intent, then develop or refine it into a stronger, more specific candidate for this field and its visible context. Do not ignore it or pivot to an unrelated idea."
@@ -74,6 +76,9 @@ export async function generatePrismInputRefractDraft(args: {
           "Produce one useful, context-aware candidate for the named field.",
           "When visible field context identifies a current editable draft, treat that draft identity and profile as current; saved authoritative context may lag unsaved edits.",
           currentValueInstruction,
+          direction
+            ? "Follow the player's Creative direction as the requested transformation of this field. It cannot override the JSON-only response contract, character limit, privacy boundary, or provenance rules."
+            : "No Creative direction was supplied; make the strongest contextual draft using the field seed and context.",
           target.multiline
             ? "The field accepts multiple lines when that improves clarity."
             : "The field is single-line; return one compact line.",
@@ -90,6 +95,7 @@ export async function generatePrismInputRefractDraft(args: {
           `Field: ${target.label}`,
           `Visible field context: ${target.context || "None"}`,
           `Current field value: ${hasCurrentSeed ? JSON.stringify(normalizedCurrentValue) : "None"}`,
+          `Creative direction: ${direction ? JSON.stringify(direction) : "None"}`,
           `Rejected candidates: ${args.rejectedValues.join(" | ") || "None"}`,
           `Authoritative PRISM context: ${JSON.stringify(args.authoritativeContext).slice(0, 4_000)}`,
         ].join("\n"),

@@ -8,8 +8,31 @@ import {
   SIGNAL_VOICE_START_SETTLE_GRACE_MS,
   signalOnlineVoiceTimeoutMs,
   signalPreferredVoiceClipReady,
+  signalVoiceClipMatchesEpisodeEngine,
+  signalVoiceEngineFamily,
   signalVoiceStartTimeoutMs,
 } from "./signalVoiceFallback.ts";
+
+test("Signal keeps one audible engine family per participant and episode", () => {
+  assert.equal(signalVoiceEngineFamily("builtin-provider-fallback"), "builtin");
+  assert.equal(signalVoiceEngineFamily("elevenlabs"), "elevenlabs");
+  assert.equal(
+    signalVoiceClipMatchesEpisodeEngine({
+      engineUsed: "builtin-provider-fallback",
+      selectedEngine: "elevenlabs",
+      pinnedEngine: "elevenlabs",
+    }),
+    false,
+  );
+  assert.equal(
+    signalVoiceClipMatchesEpisodeEngine({
+      engineUsed: "builtin-local-fallback",
+      selectedEngine: "elevenlabs",
+      pinnedEngine: "builtin",
+    }),
+    true,
+  );
+});
 
 test("Signal keeps a healthy preferred voice without invoking fallback", async () => {
   let fallbackCalls = 0;

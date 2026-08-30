@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  initialPrismRefractProseDirection,
   registerPrismRefractDomTargetResolver,
   registerPrismRefractTarget,
   registeredPrismRefractTarget,
@@ -77,6 +78,7 @@ export interface PrismUniversalInputCandidateRequest {
   field: PrismUniversalInputContext;
   currentValue: string;
   rejectedValues: readonly string[];
+  direction: string;
   signal: AbortSignal;
   element: PrismUniversalInputElement;
 }
@@ -754,6 +756,10 @@ function targetForControl(input: {
   return {
     id,
     kind: "field",
+    steering: {
+      prompt: "How should Prism change this prose?",
+      initialDirection: initialPrismRefractProseDirection,
+    },
     get label() {
       return prismUniversalInputContext(prose).label;
     },
@@ -761,11 +767,12 @@ function targetForControl(input: {
     read: () => readPrismUniversalInputValue(prose),
     preview: (value) => writePrismUniversalInputValue(prose, value),
     accept: (value) => writePrismUniversalInputValue(prose, value, true),
-    generate: ({ currentValue, rejectedValues, signal }) =>
+    generate: ({ currentValue, rejectedValues, direction, signal }) =>
       input.generate({
         field: prismUniversalInputContext(prose),
         currentValue,
         rejectedValues,
+        direction: direction ?? "",
         signal,
         element: prose,
       }),

@@ -86,19 +86,19 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.49",
+    version: "1.50",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.48",
+    version: "1.49",
     status: "active",
   },
   debate: {
     id: "debate",
     name: "Debate",
-    version: "0.54",
+    version: "0.55",
     status: "preview",
   },
   polling: {
@@ -110,13 +110,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.71",
+    version: "2.72",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.90",
+    version: "1.91",
     status: "active",
   },
   feed: {
@@ -134,7 +134,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   story: {
     id: "story",
     name: "Story",
-    version: "0.42",
+    version: "0.43",
     status: "planned",
   },
   gym: {
@@ -763,7 +763,7 @@ export const BOT_POWER_SPEECH_INTENT_REVEAL_MODE_POLICY: Record<
   surf: "deferred",
 };
 
-/** Public profanity is direct in live speech lanes and adapted to formal records. */
+/** Public censor performance is direct in speech lanes and adapted to formal records. */
 export const BOT_POWER_CURSED_TONGUE_MODE_POLICY: Record<
   PrismAppletId,
   BotPowerCursedTongueModePolicy

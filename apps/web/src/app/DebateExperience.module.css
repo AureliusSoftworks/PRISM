@@ -1536,6 +1536,112 @@
   --mystery-role-accent: #65d9e8;
 }
 
+.mysteryCastGroup[data-role-group="courtroom"] > header {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 10px;
+}
+
+.mysteryCastGroup[data-role-group="courtroom"] > header > strong {
+  grid-column: 1;
+}
+
+.mysteryCastGroup[data-role-group="courtroom"] > header > em {
+  grid-column: 2;
+}
+
+.mysteryCastGroup[data-role-group="courtroom"] > header > small {
+  grid-column: 1 / -1;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.mysteryCastGroup[data-role-group="courtroom"] .castSlot {
+  border-color: color-mix(
+    in srgb,
+    var(--debate-cast-color) 16%,
+    var(--debate-studio-line)
+  );
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--debate-cast-color) 7%, transparent),
+      transparent 58%
+    ),
+    var(--debate-studio-surface);
+  box-shadow: inset 0 -2px
+    color-mix(in srgb, var(--debate-cast-color) 58%, transparent);
+}
+
+.mysteryCastGroup[data-role-group="courtroom"] .castSlot[data-active="true"] {
+  border-color: color-mix(
+    in srgb,
+    var(--debate-cast-color) 68%,
+    var(--debate-studio-line-strong)
+  );
+  box-shadow:
+    inset 0 -2px color-mix(in srgb, var(--debate-cast-color) 82%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--debate-cast-color) 12%, transparent);
+}
+
+.mysteryCastGroup[data-role-group="courtroom"] .castSlotSelect {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 5px;
+  padding: 7px;
+}
+
+.mysteryCastGroup[data-role-group="courtroom"] .castSlotGlyph {
+  width: 30px;
+  height: 30px;
+}
+
+.mysteryCastGroup[data-role-group="courtroom"] .castSlotSelect small,
+.mysteryCastGroup[data-role-group="courtroom"] .castSlotSelect strong {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.mysteryCastGroup[data-role-group="courtroom"] .castSlotSelect small {
+  letter-spacing: 0.08em;
+}
+
+.mysteryCastGroup[data-role-group="courtroom"] .castSlotSelect strong {
+  line-height: 1.16;
+}
+
+.mysteryCastGroup[data-role-group="courtroom"] .castSlotClear {
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  border-color: transparent;
+  color: color-mix(in srgb, var(--debate-studio-muted) 74%, transparent);
+  background: transparent;
+  transition:
+    opacity 140ms ease,
+    color 140ms ease,
+    background 140ms ease;
+}
+
+.mysteryCastGroup[data-role-group="courtroom"] .castSlotClear:hover,
+.mysteryCastGroup[data-role-group="courtroom"] .castSlotClear:focus-visible {
+  color: var(--debate-studio-ink);
+  background: color-mix(in srgb, var(--debate-studio-raised) 86%, transparent);
+}
+
+@media (hover: hover) {
+  .mysteryCastGroup[data-role-group="courtroom"] .castSlotClear {
+    opacity: 0;
+  }
+
+  .mysteryCastGroup[data-role-group="courtroom"] .castSlot:hover .castSlotClear,
+  .mysteryCastGroup[data-role-group="courtroom"] .castSlot:focus-within .castSlotClear {
+    opacity: 1;
+  }
+}
+
 .mysteryCastGroup > header {
   display: grid;
   grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
@@ -2043,6 +2149,22 @@
     right: 5px;
     width: 20px;
     height: 20px;
+  }
+
+  .dashboardPanel[data-debate-dashboard-section="cast"][data-debate-format="whodunnit"] .mysteryCastGroup[data-role-group="courtroom"] .castSlotSelect {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+    padding: 7px;
+  }
+
+  .dashboardPanel[data-debate-dashboard-section="cast"][data-debate-format="whodunnit"] .mysteryCastGroup[data-role-group="courtroom"] .castSlotGlyph {
+    width: 30px;
+    height: 30px;
+  }
+
+  .dashboardPanel[data-debate-dashboard-section="cast"][data-debate-format="whodunnit"] .mysteryCastGroup[data-role-group="courtroom"] .castSlotClear {
+    top: 6px;
+    right: 6px;
   }
 
   .dashboardPanel[data-debate-dashboard-section="cast"][data-debate-format="whodunnit"] .castPicker {

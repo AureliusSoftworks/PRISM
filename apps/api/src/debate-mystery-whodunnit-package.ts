@@ -71,6 +71,8 @@ const FORBIDDEN_PACKAGE_KEYS = new Set([
   "inputJson",
   "privateError",
   "provenanceBySection",
+  "recoveryBySection",
+  "authoringRecoveryBySection",
 ]);
 
 export class PortableWhodunnitPackageError extends Error {
@@ -485,6 +487,7 @@ export async function exportPortableWhodunnitPackageV1(args: {
     sanitizeBotSnapshots(replaceStrings(asJson(rawPrivateCase), portableReplacements)),
     "Portable private case",
   );
+  delete privateCase.authoringRecoveryBySection;
   refreshPortableMansionSnapshotHashes(privateCase);
   // Portable replay owns only the performed transcript clips. Even a legacy
   // eager source becomes sparse after export so unused branches do not keep

@@ -193,6 +193,129 @@ export interface MysteryBoundIncidentPlanV1
   complications: MysteryBoundIncidentComplicationV1[];
 }
 
+export interface MysteryCaseTitleValidationV1 {
+  valid: boolean;
+  normalizedTitle: string;
+  errors: string[];
+}
+
+const MYSTERY_CASE_TITLE_STOP_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "at",
+  "for",
+  "in",
+  "of",
+  "on",
+  "the",
+  "to",
+]);
+
+function normalizedMysteryCaseTitle(value: string): string {
+  let title = value.normalize("NFKC").replace(/\s+/gu, " ").trim();
+  const quoted =
+    (title.startsWith('"') && title.endsWith('"')) ||
+    (title.startsWith("“") && title.endsWith("”"));
+  if (quoted) title = title.slice(1, -1).trim();
+  return title.replace(/[.!]+$/u, "").trim();
+}
+
+function mysteryCaseTitleConcept(word: string): string {
+  if (/^(?:disappear|missing|vanish)/u.test(word)) return "disappearance";
+  if (/^(?:dead|death|homicide|kill|murder)/u.test(word)) return "homicide";
+  if (/^(?:heist|rob|steal|stole|stolen|theft)/u.test(word)) return "theft";
+  if (/^(?:counterfeit|embezzl|false|falsif|forg|fraud)/u.test(word)) return "fraud";
+  if (/^(?:disable|sabotage|tamper)/u.test(word)) return "sabotage";
+  if (/^(?:espionage|spy)/u.test(word)) return "espionage";
+  if (/^(?:blackmail|coerc|extort|ransom)/u.test(word)) return "blackmail";
+  return word;
+}
+
+/**
+ * A public title is authored prose, but it still needs a deterministic quality
+ * boundary before it can become the durable Archive identity of a case.
+ */
+export function validateMysteryCaseTitleV1(
+  value: string,
+): MysteryCaseTitleValidationV1 {
+  const normalizedTitle = normalizedMysteryCaseTitle(value);
+  const words = normalizedTitle.toLocaleLowerCase().match(/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu) ?? [];
+  const errors: string[] = [];
+  if (normalizedTitle.length < 6) errors.push("The case title is too short.");
+  if (normalizedTitle.length > 80) errors.push("The case title is too long.");
+  if (words.length < 2 || words.length > 9) {
+    errors.push("The case title must contain between two and nine words.");
+  }
+  if (/\b(?:case title|guilty party|placeholder|responsible party|tbd|todo|untitled)\b/iu.test(normalizedTitle)) {
+    errors.push("The case title contains drafting or spoiler language.");
+  }
+  if (/\b(?:accomplice|culprit|suspect[- ]?\d+)\b/iu.test(normalizedTitle)) {
+    errors.push("The case title exposes a private role or identity.");
+  }
+  const concepts = words
+    .filter((word) => !MYSTERY_CASE_TITLE_STOP_WORDS.has(word))
+    .map(mysteryCaseTitleConcept);
+  if (new Set(concepts).size !== concepts.length) {
+    errors.push("The case title repeats the same subject or incident.");
+  }
+  return { valid: errors.length === 0, normalizedTitle, errors };
+}
+
+/** A polished, spoiler-safe fallback for an invalid or unavailable authored title. */
+export function deterministicMysteryCaseTitleV1(
+  plan: Pick<MysteryIncidentPlanV1, "primary" | "sourceHash">,
+): string {
+  const subject = plan.primary.subject.toLocaleLowerCase();
+  let titles: readonly string[];
+  switch (plan.primary.kind) {
+    case "homicide":
+      titles = ["The Violet Hour", "The Last Light", "The Silent Bell", "The Midnight Room"];
+      break;
+    case "theft":
+      titles = /diamonds?/u.test(subject)
+        ? ["The Diamonds at Dusk", "The Empty Jewel Case", "The Cold-Cut Diamonds"]
+        : /jewels?/u.test(subject)
+          ? ["The Vanished Jewels", "The Empty Jewel Case", "The Jewels After Midnight"]
+          : /painting/u.test(subject)
+            ? ["The Empty Frame", "The Canvas at Midnight", "The Absent Masterpiece"]
+            : /artifact|relic/u.test(subject)
+              ? ["The Silent Relic", "The Empty Pedestal", "The Artifact at Dusk"]
+              : ["The Missing Heirloom", "The Empty Cabinet", "The Theft Before Dawn"];
+      break;
+    case "fraud":
+      titles = /will|testament/u.test(subject)
+        ? ["The Last Testament", "The Will at Midnight", "The Second Signature"]
+        : ["The Midnight Ledger", "The False Signature", "The Altered Account"];
+      break;
+    case "sabotage":
+      titles = ["The Silent Alarm", "The Broken Circuit", "The Clock That Stopped", "The Severed Wire"];
+      break;
+    case "espionage":
+      titles = ["The Stolen Correspondence", "The Cipher After Midnight", "The Letter Behind the Wall", "The Borrowed Secret"];
+      break;
+    case "disappearance":
+      titles = ["The Missing Hour", "The Vanishing Before Dawn", "The Empty Passage", "The Last Known Light"];
+      break;
+    case "blackmail":
+      titles = ["The Letter in the Dark", "The Price of Silence", "The Sealed Demand", "The Threat at Midnight"];
+      break;
+  }
+  return titles[
+    stableHash32(`${plan.sourceHash}:${plan.primary.kind}:${plan.primary.subject}`) % titles.length
+  ]!;
+}
+
+export function resolveMysteryCaseTitleV1(args: {
+  authoredTitle: string | null | undefined;
+  plan: Pick<MysteryIncidentPlanV1, "primary" | "sourceHash">;
+}): string {
+  const validation = validateMysteryCaseTitleV1(args.authoredTitle ?? "");
+  return validation.valid
+    ? validation.normalizedTitle
+    : deterministicMysteryCaseTitleV1(args.plan);
+}
+
 function normalizedSpark(value: string): string {
   return value.normalize("NFKC").replace(/\s+/gu, " ").trim().slice(0, 2_000);
 }

@@ -1,4 +1,7 @@
-import type { DebateMysteryPlayPhase } from "@localai/shared";
+import type {
+  DebateMysteryPlayPhase,
+  DebateMysteryPlayPhaseV2,
+} from "@localai/shared";
 import type { SessionAtmosphereMix } from "./session-atmosphere-audio.ts";
 
 export const WHODUNNIT_INVESTIGATION_MUSIC_URL =
@@ -16,6 +19,16 @@ export const WHODUNNIT_INVESTIGATION_MUSIC_MIX = {
 export const WHODUNNIT_INVESTIGATION_MUSIC_SILENT_MIX = {
   ...WHODUNNIT_INVESTIGATION_MUSIC_MIX,
   background: 0,
+} as const satisfies SessionAtmosphereMix;
+
+export const WHODUNNIT_CASE_FORGE_MUSIC_MIX = {
+  ...WHODUNNIT_INVESTIGATION_MUSIC_MIX,
+  background: 0.055,
+} as const satisfies SessionAtmosphereMix;
+
+export const WHODUNNIT_TITLE_CARD_MUSIC_MIX = {
+  ...WHODUNNIT_INVESTIGATION_MUSIC_MIX,
+  background: 0.075,
 } as const satisfies SessionAtmosphereMix;
 
 export type MysteryInvestigationMusicProgramPhaseV1 = "cell" | "rest" | "accent";
@@ -67,6 +80,20 @@ export function mysteryInvestigationMusicSessionActive(
   playPhase: DebateMysteryPlayPhase,
 ): boolean {
   return playPhase === "investigation";
+}
+
+export function mysteryCasePreludeMusicSessionActive(
+  playPhase: DebateMysteryPlayPhaseV2,
+): boolean {
+  return playPhase === "case_forge" || playPhase === "title_card";
+}
+
+export function mysteryCasePreludeMusicMix(
+  playPhase: DebateMysteryPlayPhaseV2,
+): SessionAtmosphereMix {
+  return playPhase === "title_card"
+    ? WHODUNNIT_TITLE_CARD_MUSIC_MIX
+    : WHODUNNIT_CASE_FORGE_MUSIC_MIX;
 }
 
 export function mysteryInvestigationMusicMix(args: {

@@ -62,6 +62,10 @@ import {
   planAutoCameraCoverage,
   type AutoCameraCoverageBeat,
 } from "./autoCameraDirector.ts";
+import {
+  normalizeSignalVisualRecognitionV1,
+  type SignalVisualRecognitionV1,
+} from "./signalVisualRecognition.ts";
 
 export type BotcastEpisodeSegment = "opening" | "interview" | "closing";
 export type BotcastEpisodeStatus = "live" | "completed" | "cancelled";
@@ -1105,6 +1109,43 @@ export function swapBotcastStudioLayoutSeats(
   };
 }
 
+/** Normalizes the complete reusable Rehearsal/Fine tuning stage contract. */
+export function normalizeBotcastStagePresetSettings(
+  value: unknown,
+  fallback?: Partial<BotcastStagePresetSettings>,
+): BotcastStagePresetSettings {
+  const source =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Partial<BotcastStagePresetSettings>)
+      : {};
+  return {
+    studioLayout: normalizeBotcastStudioLayout(
+      source.studioLayout,
+      fallback?.studioLayout ?? BOTCAST_DEFAULT_STUDIO_LAYOUT,
+    ),
+    cameraFraming: normalizeBotcastCameraFraming(
+      source.cameraFraming,
+      fallback?.cameraFraming ?? BOTCAST_DEFAULT_CAMERA_FRAMING,
+    ),
+    logoPlacement: normalizeBotcastLogoPlacement(
+      source.logoPlacement,
+      fallback?.logoPlacement ?? BOTCAST_DEFAULT_LOGO_PLACEMENT,
+    ),
+    studioGlowTuning: normalizeBotcastStudioGlowTuning(
+      source.studioGlowTuning,
+      fallback?.studioGlowTuning ?? BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
+    ),
+    voiceLevelsByBotId: normalizeBotcastVoiceLevelsByBotId(
+      source.voiceLevelsByBotId,
+      fallback?.voiceLevelsByBotId ?? {},
+    ),
+    atmosphereMix: normalizeBotcastStudioAtmosphereMix(
+      source.atmosphereMix,
+      fallback?.atmosphereMix ?? BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
+    ),
+  };
+}
+
 /**
  * Source-edit instruction for the online Signal daylight render. The canonical
  * night image already carries the persona and set design, so this deliberately
@@ -1936,6 +1977,8 @@ export interface BotcastImageContextV1 {
   discussionMessageIds?: string[];
   /** Latest saved lifecycle decision; earlier decisions remain in prior events. */
   lifecycleEvidence?: BotcastImageLifecycleEvidenceV1 | null;
+  /** Frozen, replay-safe procedural-avatar recognition. Source and atlas pixels are never persisted. */
+  visualRecognition?: SignalVisualRecognitionV1 | null;
 }
 
 export interface BotcastImageLifecycleEvidenceV1 {
@@ -1970,6 +2013,7 @@ export function normalizeBotcastImageContextV1(
     !row.name.trim() ||
     (row.mimeType !== "image/png" && row.mimeType !== "image/jpeg") ||
     (row.provider !== "local" &&
+      row.provider !== "ollama_cloud" &&
       row.provider !== "openai" &&
       row.provider !== "anthropic") ||
     typeof row.model !== "string" ||
@@ -2043,6 +2087,10 @@ export function normalizeBotcastImageContextV1(
         : {}),
     } satisfies BotcastImageLifecycleEvidenceV1;
   })();
+  const visualRecognition = row.visualRecognition == null
+    ? null
+    : normalizeSignalVisualRecognitionV1(row.visualRecognition);
+  if (row.visualRecognition != null && !visualRecognition) return null;
   return {
     v: 1,
     imageId: row.imageId.trim().slice(0, 160),
@@ -2063,6 +2111,7 @@ export function normalizeBotcastImageContextV1(
     hostFollowUpMessageId: messageId(row.hostFollowUpMessageId),
     discussionMessageIds,
     lifecycleEvidence,
+    visualRecognition,
   };
 }
 

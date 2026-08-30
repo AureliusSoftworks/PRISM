@@ -62,6 +62,7 @@ import {
   botFoundryBatchIsLean,
   botFoundryGenerationContextInstruction,
   normalizeBotFoundryBatchGroupIdentityV1,
+  normalizeGeneratedAvatarDetailsInkV1,
   normalizeBotGeneratedDraftV1,
   normalizeLeanBotGeneratedDraftV1,
   normalizeBotFoundryGenerationContextV1,
@@ -70,6 +71,7 @@ import {
   type AutoFallbackModelRef,
   type AutoRecoveryTraceV1,
   type BotGeneratedDraftV1,
+  type BotAvatarDetailsV1,
   type BotGenerationVoiceCatalogV1,
   type BotFoundryBatchGroupIdentityV1,
   type BotFoundryGenerationContextV1,
@@ -129,6 +131,18 @@ export interface GenerateBotFieldArgs extends Omit<
 export interface GenerateBotFieldResult {
   fieldKey: BotGenerationFieldKeyV1;
   value: string | number | boolean | string[];
+  providerNameUsed: ProviderName;
+  modelUsed: string;
+  autoRecovery?: AutoRecoveryTraceV1;
+}
+
+export interface GenerateAvatarDetailsInkArgs extends Omit<
+  GenerateBotDraftArgs,
+  "generationContext" | "includeBatchGroupIdentity" | "voiceCatalog"
+> {}
+
+export interface GenerateAvatarDetailsInkResult {
+  details: BotAvatarDetailsV1;
   providerNameUsed: ProviderName;
   modelUsed: string;
   autoRecovery?: AutoRecoveryTraceV1;
@@ -700,6 +714,72 @@ function extractJsonObject(raw: string): unknown {
   }
 }
 
+function generatedAvatarDetailsInkSchema(): Record<string, unknown> {
+  const point = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      x: { type: "integer", minimum: 0, maximum: 127 },
+      y: { type: "integer", minimum: 0, maximum: 127 },
+    },
+    required: ["x", "y"],
+  };
+  const path = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      role: { type: "string", enum: ["blink", "talking", "effect"] },
+      points: { type: "array", minItems: 2, maxItems: 18, items: point },
+      closed: { type: "boolean" },
+      fill: { type: "boolean" },
+      size: { type: "integer", minimum: 1, maximum: 4 },
+    },
+    required: ["role", "points", "closed", "fill", "size"],
+  };
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      avatarDetails: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          ink: { type: "array", minItems: 1, maxItems: BOT_GENERATED_AVATAR_INK_MAX_PATHS, items: path },
+          speechInkAnimation: { type: "string", enum: [...BOT_AVATAR_DETAILS_SPEECH_INK_ANIMATIONS] },
+        },
+        required: ["ink", "speechInkAnimation"],
+      },
+    },
+    required: ["avatarDetails"],
+  };
+}
+
+function parseGeneratedAvatarDetailsInkText(
+  raw: string,
+  animationRequested: boolean,
+): BotAvatarDetailsV1 | null {
+  const object = extractJsonObject(raw);
+  if (!object || typeof object !== "object" || Array.isArray(object)) return null;
+  const candidate = (object as Record<string, unknown>).avatarDetails;
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return null;
+  }
+  const details = candidate as Record<string, unknown>;
+  return normalizeGeneratedAvatarDetailsInkV1({
+    ...details,
+    ink: Array.isArray(details.ink)
+      ? details.ink.map((primitive) =>
+          animationRequested || !primitive || typeof primitive !== "object"
+            ? primitive
+            : { ...(primitive as Record<string, unknown>), role: "effect" },
+        )
+      : details.ink,
+    speechInkAnimation: animationRequested
+      ? details.speechInkAnimation
+      : "none",
+  });
+}
+
 export function parseGeneratedBotDraftText(
   raw: string,
   lean = false,
@@ -995,6 +1075,127 @@ export async function generateBotDraft(
     providerNameUsed: args.providerName,
     modelUsed: args.model,
   };
+}
+
+/** Generates only bounded semantic Ink primitives, then rasterizes them locally. */
+export async function generateAvatarDetailsInk(
+  args: GenerateAvatarDetailsInkArgs,
+): Promise<GenerateAvatarDetailsInkResult> {
+  const prompt = normalizeBotGenerationPrompt(args.prompt);
+  if (!prompt) {
+    throw new BotGenerationError("invalid_prompt", "Describe the Ink you want first.");
+  }
+  const animationRequested = /\b(?:animate(?:d)?|animation|blink|blink(?:ing)?|speech|talk(?:ing)?|speaking|pulse|spin|flicker|wobble)\b/iu.test(prompt);
+  const schema = generatedAvatarDetailsInkSchema();
+  const messages: ProviderMessage[] = [
+    {
+      role: "system",
+      content: [
+        "You create one small editable Avatar Details Ink draft for PRISM.",
+        "Return structured pixel paths only; never return SVG, images, base64, stamps, code, prose, or a full portrait.",
+        "Ink is a sparse accent layer on a 128 by 128 canvas. Preserve the live eye window x 42-86 y 50-70 and mouth window x 49-85 y 81-98. Never draw a face/head outline, nose, pupils, static teeth, or a filled portrait.",
+        animationRequested
+          ? "The direction explicitly requests animation. Blink or Speech paths are allowed only where they preserve the live face; otherwise prefer Effect. Use a non-default speechInkAnimation only for Speech paths."
+          : "Use Effect paths only. Set speechInkAnimation to none. Do not use Blink or Speech paths unless the player explicitly requests animation.",
+        "Use 1-8 clean paths. Make the resulting Ink visibly non-empty and coherent. Return only the requested JSON object.",
+      ].join(" "),
+    },
+    {
+      role: "user",
+      content: `INK DIRECTION\n---\n${prompt}\n---\nCreate the editable Ink draft now.`,
+    },
+  ];
+  const options = (model: string, signal?: AbortSignal): GenerateOptions => ({
+    model,
+    temperature: 0.72,
+    maxTokens: 1_200,
+    usagePurpose: "bot_generation",
+    jsonMode: true,
+    jsonSchema: schema,
+    jsonSchemaName: "prism_avatar_details_ink_v1",
+    allowFinalLocalFallback: false,
+    signal,
+  });
+  const validate = (raw: string) => {
+    const details = parseGeneratedAvatarDetailsInkText(raw, animationRequested);
+    return details
+      ? { ok: true as const, value: details }
+      : { ok: false as const, reason: "invalid_output" as const };
+  };
+  const primaryAttempt: AutoFallbackModelRef = {
+    provider: args.providerName,
+    model: args.model,
+  };
+  const attempts = autoFallbackResolvedChain(primaryAttempt, args.autoFallbackChain);
+  const providerForAttempt = (attempt: AutoFallbackModelRef): LlmProvider =>
+    attempt.provider === primaryAttempt.provider &&
+    attempt.model.trim().toLowerCase() === primaryAttempt.model.trim().toLowerCase()
+      ? args.provider
+      : (args.providerFactory ?? selectProvider)(
+          attempt.provider,
+          args.openAiApiKey,
+          args.secondaryOllamaHost,
+          args.anthropicApiKey,
+        );
+  if (attempts) {
+    try {
+      const result = await runAutoFallbackChain({
+        attempts: attempts
+          .filter(botGenerationModelSupportsStructuredOutput)
+          .map((attempt) => ({
+            ...attempt,
+            available:
+              (attempt.provider === primaryAttempt.provider &&
+                attempt.model.trim().toLowerCase() ===
+                  primaryAttempt.model.trim().toLowerCase()) ||
+              attempt.provider === "local" ||
+              (attempt.provider === "openai"
+                ? Boolean(args.openAiApiKey)
+                : Boolean(args.anthropicApiKey)),
+            run: (signal) =>
+              providerForAttempt(attempt).generateResponse(
+                messages,
+                options(attempt.model, signal),
+              ),
+          })),
+        perAttemptTimeoutMs: 60_000,
+        totalTimeoutMs: attempts.length * 60_000,
+        signal: args.signal,
+        validate,
+      });
+      return {
+        details: result.value,
+        providerNameUsed: result.provider,
+        modelUsed: result.model,
+        ...(result.recovery ? { autoRecovery: result.recovery } : {}),
+      };
+    } catch (error) {
+      if (error instanceof AutoFallbackExhaustedError) {
+        throw new BotGenerationError(
+          "providers_exhausted",
+          "No model produced valid Ink. Your current draft is unchanged.",
+        );
+      }
+      throw error;
+    }
+  }
+  if (!botGenerationModelSupportsStructuredOutput(primaryAttempt)) {
+    throw new BotGenerationError(
+      "invalid_prompt",
+      "That model cannot create structured Ink. Choose Auto or a newer model.",
+    );
+  }
+  const details = parseGeneratedAvatarDetailsInkText(
+    await args.provider.generateResponse(messages, options(args.model, args.signal)),
+    animationRequested,
+  );
+  if (!details) {
+    throw new BotGenerationError(
+      "invalid_output",
+      "The model did not produce valid Ink. Your current draft is unchanged.",
+    );
+  }
+  return { details, providerNameUsed: args.providerName, modelUsed: args.model };
 }
 
 export async function generateBotField(

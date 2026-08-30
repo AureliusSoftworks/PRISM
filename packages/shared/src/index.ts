@@ -217,10 +217,10 @@ export {
   applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerEchoResponseV1,
   applyBotPowerCursedTongueResponseV1,
-  BOT_POWER_CURSED_TONGUE_MAX_PER_SENTENCE_V1,
-  BOT_POWER_CURSED_TONGUE_MIN_PER_SENTENCE_V1,
-  botPowerCursedTongueMinimumProfanityV1,
-  botPowerCursedTongueProfanityCountV1,
+  BOT_POWER_CURSED_TONGUE_MAX_PER_SENTENCE_V2,
+  BOT_POWER_CURSED_TONGUE_MIN_PER_UTTERANCE_V2,
+  botPowerCursedTongueMinimumCensorsV2,
+  botPowerCursedTongueCensorCountV2,
   botPowerCursedTongueSentenceRangesV1,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMumbledReactionPlanV1,
@@ -1039,6 +1039,7 @@ export {
   BOT_GENERATION_PROMPT_MAX_LENGTH,
   BOT_GENERATION_VOICE_PREVIEW_MAX_LENGTH,
   botGenerationVoiceIdentityOptions,
+  normalizeGeneratedAvatarDetailsInkV1,
   normalizeBotGeneratedDraftV1,
   normalizeLeanBotGeneratedDraftV1,
   normalizeBotGenerationPrompt,
@@ -3866,6 +3867,7 @@ export interface CoffeePollPlayerVoteResponse {
 }
 export * from "./autoCameraDirector.js";
 export * from "./botcast.js";
+export * from "./signalVisualRecognition.js";
 export * from "./producerQuoteReception.js";
 export * from "./actionSfxPack.js";
 export * from "./englishPacingProfile.js";

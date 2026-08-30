@@ -10,6 +10,9 @@ import { strFromU8, unzipSync } from "fflate";
 import {
   BOT_VOICE_PRESET_LABELS,
   DEFAULT_BOT_FACE_BLINK_BAR,
+  applyBotPowerAddressedInsultV1,
+  applyBotPowerCursedTongueResponseV1,
+  botPowerResponseHasAddressedInsultV1,
   botPowerSourceHashV1,
   fullySaturateBotColor,
   hexToHsl,
@@ -29,6 +32,8 @@ import {
   normalizeOptionalBotAudioVoiceProfileV1,
   normalizeBotPowersV1,
   PRISM_BUILTIN_ENGLISH_VOICES,
+  voiceCensorPerformancePlan,
+  voiceSpokenText,
   type BotVoicePreset,
 } from "@localai/shared";
 import {
@@ -473,7 +478,7 @@ describe("bot marketplace static catalog", () => {
         botId
       );
       if (botId === "andy-hominem") {
-        assert.match(entry.subtitle ?? "", /profane personal attack/iu);
+        assert.match(entry.subtitle ?? "", /censor wall/iu);
         assert.match(entry.description ?? "", /bespoke insult/iu);
         assert.deepEqual(
           powers.flatMap((power) => power.compiled?.effects ?? []),
@@ -486,14 +491,34 @@ describe("bot marketplace static catalog", () => {
             },
             {
               type: "cursed_tongue",
-              version: 1,
+              version: 2,
               frequency: "frequent",
               strength: "strong",
-              vocabulary: "uncensored_non_slur",
-              phraseMode: "occasional_2_3_words",
+              vocabulary: "structurally_masked_non_slur",
+              phraseMode: "censor_performance",
             },
           ],
         );
+        const previewLine = bundle.botJson.bot.voicePreviewLine ?? "";
+        assert.match(previewLine, /D•••/u);
+        assert.match(voiceCensorPerformancePlan(voiceSpokenText(previewLine)).text, /bleep/u);
+        assert.doesNotMatch(previewLine, /\b(?:fuck\w*|goddamn|shit\w*|damn|hell|asshole|bastard)\b/iu);
+        const insulted = applyBotPowerAddressedInsultV1(
+          "Your proposal ignores the cost.",
+          "Mira",
+          "shipped-andy-composition",
+        );
+        const censored = applyBotPowerCursedTongueResponseV1(
+          insulted,
+          "shipped-andy-composition",
+        );
+        assert.equal(
+          botPowerResponseHasAddressedInsultV1(censored, "Mira"),
+          true,
+        );
+        assert.match(censored, /(?:f•••|g••••••|s•••|d•••|h•••)/iu);
+        assert.doesNotMatch(censored, /\b(?:fuck\w*|goddamn|shit\w*|damn|hell|asshole|bastard)\b/iu);
+        assert.match(voiceCensorPerformancePlan(voiceSpokenText(censored)).text, /bleep/u);
       }
       if (botId === "hueist-hugh") {
         assert.match(entry.subtitle ?? "", /phosphor color snob/iu);

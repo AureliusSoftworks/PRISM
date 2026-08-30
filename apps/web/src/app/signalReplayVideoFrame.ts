@@ -614,14 +614,48 @@ export function signalFaithfulReplayCameraState(args: {
   episode: BotcastEpisode;
   timeline: ReplayTimelineV1;
   replayElapsedMs: number;
+  manifest?: ReplayManifestV2 | null;
   scene: ReplaySceneSnapshotV2 | null;
   activeMessage: BotcastMessage | null;
   preferDirectedCamera?: boolean;
 }): SignalFaithfulReplayCameraState {
   const eventElapsedMs = signalReplayEventElapsedMs(args);
   const directedCamera = args.scene?.camera;
+  const activeBeat = args.timeline.beats.find(
+    (beat) =>
+      beat.kind === "utterance" &&
+      args.replayElapsedMs >= beat.startMs &&
+      args.replayElapsedMs < beat.endMs,
+  );
+  const capturedCameraCue = args.manifest?.direction.reduce<
+    ReplayManifestV2["direction"][number] | null
+  >((latest, event) => {
+    if (
+      event.kind !== "camera" ||
+      event.atMs > args.replayElapsedMs ||
+      !signalDirectedCameraShot(event.payload.shot)
+    ) {
+      return latest;
+    }
+    if (
+      !latest ||
+      event.atMs > latest.atMs ||
+      (event.atMs === latest.atMs && event.sequence > latest.sequence)
+    ) {
+      return event;
+    }
+    return latest;
+  }, null) ?? null;
+  const capturedCameraOwnsActiveBeat = Boolean(
+    capturedCameraCue &&
+      (!activeBeat ||
+        (capturedCameraCue.sourceMessageId
+          ? capturedCameraCue.sourceMessageId === activeBeat.sourceMessageId
+          : capturedCameraCue.atMs >= activeBeat.startMs)),
+  );
   if (
     args.preferDirectedCamera &&
+    capturedCameraOwnsActiveBeat &&
     (directedCamera === "left" ||
       directedCamera === "right" ||
       directedCamera === "wide")
@@ -668,10 +702,16 @@ export function signalFaithfulReplayCameraState(args: {
       guestParticipant?.speaking === true &&
       guestParticipant.audible !== false,
   );
+  const mediaBeatOwnsSpeaker = Boolean(
+    activeMessage && activeBeat?.sourceMessageId === activeMessage.id,
+  );
+  const sceneOwnsSpeaker = Boolean(
+    speakerParticipant?.speaking === true &&
+      speakerParticipant.audible !== false,
+  );
   const speakingShot =
     activeMessage &&
-    speakerParticipant?.speaking === true &&
-    speakerParticipant.audible !== false &&
+    (args.preferDirectedCamera ? mediaBeatOwnsSpeaker : sceneOwnsSpeaker) &&
     botcastMessageIsAudibleToAudienceV1(activeMessage) &&
     !botPowerResponseIsSilentV1(activeMessage.content)
       ? activeMessage.speakerRole === "host"

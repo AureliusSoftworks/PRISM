@@ -71,7 +71,7 @@ describe("bot group canvas filtering", () => {
     assert.match(heroSource, /label: "Export group"/);
     assert.match(
       heroSource,
-      /openAddBotFromLibraryGroupDialog\(\s*focusedBotLibraryGroup\.id,?\s*\)/,
+      /openBotLibraryGroupManager\(\{[\s\S]*?selectedGroupId: focusedBotLibraryGroup\.id/,
     );
     assert.match(heroSource, />Add bots</);
     assert.match(heroSource, />Group actions</);
@@ -151,39 +151,33 @@ describe("bot group canvas filtering", () => {
     );
   });
 
-  it("returns group-picker focus after selection and focuses the group-first dialog", () => {
+  it("returns group-picker focus after selection and focuses the group manager", () => {
     assert.match(
       pageSource,
       /const pick = \(nextValue: string\): void => \{[\s\S]*?setOpen\(false\);[\s\S]*?triggerRef\.current\?\.focus\(\);/,
     );
     assert.match(
       pageSource,
-      /const pickBotMode = dialog\.mode === "pick-bot"[\s\S]*?<select[\s\S]*?value=\{pickBotMode \? selectedBotId : selectedGroupId\}[\s\S]*?autoFocus/,
+      /className=\{`\$\{styles\.botPreferredModelsModal\} \$\{styles\.botLibraryGroupManager\}`\}[\s\S]*?<input[\s\S]*?autoFocus/,
     );
   });
 
-  it("offers direct group creation with an in-dialog member roster", () => {
-    assert.equal(
-      pageSource.match(
-        /onCreateGroup=\{\(\) => openCreateBotLibraryGroupDialog\(\[\]\)\}/g,
-      )?.length,
-      2,
-    );
+  it("offers direct group creation in the staged manager workspace", () => {
     assert.match(
       pageSource,
       /data-tutorial-target="chat-new-group"[\s\S]*?<Plus/,
     );
-    assert.doesNotMatch(
-      pageSource,
-      /function openCreateBotLibraryGroupDialog\([\s\S]{0,260}uniqueSelected\.length < 2\) return/,
-    );
     assert.match(
       pageSource,
-      /const visibleMembers = \[\.\.\.selectedMembers, \.\.\.filteredCandidates\];[\s\S]*?className=\{styles\.botLibraryGroupMemberGrid\}[\s\S]*?visibleMembers\.map[\s\S]*?toggleBotLibraryGroupDialogMember/,
+      /function openBotLibraryGroupManager[\s\S]*?function addBotLibraryGroupManagerGroup/,
     );
     assert.match(
       cssSource,
-      /\.botLibraryGroupMemberGrid\s*\{[\s\S]*?grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/,
+      /\.botLibraryGroupManagerWorkspace\s*\{[\s\S]*?grid-template-columns: minmax\(190px, 0\.32fr\)/,
+    );
+    assert.match(
+      pageSource,
+      /data-group-gradient-preview="true"[\s\S]*?Current members[\s\S]*?Add from Library/,
     );
     assert.match(
       tutorialSource,

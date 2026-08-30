@@ -611,6 +611,13 @@ import {
 import { useAmbientBotVocalization } from "./ambient-bot-vocalization";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
 import {
+  WHODUNNIT_INVESTIGATION_MUSIC_FADE_MS,
+  WHODUNNIT_INVESTIGATION_MUSIC_TRANSITION_MS,
+  WHODUNNIT_INVESTIGATION_MUSIC_URL,
+  mysteryCasePreludeMusicMix,
+  mysteryCasePreludeMusicSessionActive,
+} from "./debateMysteryMusic";
+import {
   sessionAmbientBotVocalizationCueForKind,
   type SessionAmbientBotVocalizationCue,
   type SessionAmbientFoleyProfile,
@@ -5085,6 +5092,15 @@ export function DebateExperience(
   const [mysteryArtMode, setMysteryArtMode] =
     useState<DebateMysteryArtMode>("bundled");
   const [mysteryInspiration, setMysteryInspiration] = useState("");
+  const [mysteryMansionExteriorDirection, setMysteryMansionExteriorDirection] = useState("");
+  const [mysteryMansionExteriorDraft, setMysteryMansionExteriorDraft] = useState<{
+    imageId: string;
+    displayUrl: string;
+    scaleClass: string;
+    direction: string;
+  } | null>(null);
+  const [mysteryMansionExteriorBusy, setMysteryMansionExteriorBusy] = useState(false);
+  const [mysteryMansionExteriorError, setMysteryMansionExteriorError] = useState<string | null>(null);
   const [mysteryEvidenceAssetSynthesis, setMysteryEvidenceAssetSynthesis] =
     useState(false);
   const [mysteryRoomAssetSynthesis, setMysteryRoomAssetSynthesis] =
@@ -8262,6 +8278,36 @@ export function DebateExperience(
     prosecutorPartnerBotId: mysteryProsecutorBotId,
     rivalDefenseBotId: mysteryRivalDefenseBotId,
   };
+  const refractMansionExterior = async (): Promise<void> => {
+    if (props.responseMode === "local" || mysteryMansionSource !== "new") return;
+    setMysteryMansionExteriorBusy(true);
+    setMysteryMansionExteriorError(null);
+    try {
+      const selection = props.assetRailGeneration?.("debate_exhibit")?.selection;
+      const result = await request<{ image: { id: string; displayUrl: string; scaleClass: string } }>(
+        "/api/debates/mystery-exterior/draft",
+        requestBody({
+          direction: mysteryMansionExteriorDirection,
+          preset: mysteryPreset,
+          floors: mysteryFloors,
+          totalRooms: normalizedMysteryTotalRooms,
+          ...(selection?.provider === "openai" ? { model: selection.model } : {}),
+          responseMode: props.responseMode,
+        }),
+      );
+      setMysteryMansionExteriorDraft({
+        imageId: result.image.id,
+        displayUrl: result.image.displayUrl,
+        scaleClass: result.image.scaleClass,
+        direction: mysteryMansionExteriorDirection.trim(),
+      });
+    } catch (caught) {
+      setMysteryMansionExteriorError(caught instanceof Error ? caught.message : "The current mansion cover is still ready to use.");
+    } finally {
+      setMysteryMansionExteriorBusy(false);
+    }
+  };
+
   const mysteryCreateConfigV2: DebateWhodunnitCreateConfigV2 = {
     version: DEBATE_MYSTERY_V2_SCHEMA_VERSION,
     preset: inspectedMysterySeed || selectedMysteryMansionBundle ? "custom" : mysteryPreset,
@@ -8287,6 +8333,12 @@ export function DebateExperience(
     },
     investigationMode: mysterySkipInvestigation ? "court_only" : "full",
     mansionBundleId: selectedMysteryMansionBundle?.id ?? null,
+    ...(mysteryMansionSource === "new" && mysteryMansionExteriorDraft
+      ? {
+          mansionExteriorImageId: mysteryMansionExteriorDraft.imageId,
+          mansionExteriorDirection: mysteryMansionExteriorDraft.direction,
+        }
+      : {}),
     nonce: mysteryNonce,
     ...(inspectedMysterySeed || selectedMysteryMansionBundle || mysteryPreset === "custom"
       ? {
@@ -8795,6 +8847,10 @@ export function DebateExperience(
     setMysteryDifficulty("classic");
     setMysteryArtMode("bundled");
     setMysteryInspiration("");
+    setMysteryMansionExteriorDirection("");
+    setMysteryMansionExteriorDraft(null);
+    setMysteryMansionExteriorBusy(false);
+    setMysteryMansionExteriorError(null);
     setMysteryEvidenceAssetSynthesis(false);
     setMysteryRoomAssetSynthesis(false);
     setMysteryMusicAssetSynthesis(false);
@@ -8957,6 +9013,64 @@ export function DebateExperience(
       setMysteryRivalDefenseBotId(botId);
     }
     setMysteryNonce(nextMysteryRecipeNonce());
+  };
+
+  const castPickerBotUnavailableReason = (
+    bot: DebateBotSummary,
+  ): string | null => {
+    const selected =
+      activeJurySeatIndex !== null
+        ? preferredJurorBotIds[activeJurySeatIndex] === bot.id
+        : format === "whodunnit"
+          ? mysterySelectedBotId === bot.id
+          : cast[effectiveActiveCastSlot] === bot.id;
+    const otherFloorSlot = selectableCastSlots.find(
+      (slot) =>
+        (activeJurySeatIndex !== null || slot !== effectiveActiveCastSlot) &&
+        cast[slot] === bot.id,
+    );
+    if (otherFloorSlot) return "Already cast";
+    const otherJurySeat =
+      preferredJurorBotIds.findIndex(
+        (id, index) =>
+          id === bot.id &&
+          (activeJurySeatIndex === null || index !== activeJurySeatIndex),
+      ) >= 0;
+    if (otherJurySeat) return "Already on Jury";
+    const mysteryReserved =
+      format === "whodunnit" &&
+      !selected &&
+      [
+        ...mysterySuspectBotIds,
+        mysteryJudgeBotId,
+        mysteryProsecutorBotId,
+        mysteryRivalDefenseBotId,
+      ].includes(bot.id);
+    return mysteryReserved ? "Already cast" : null;
+  };
+
+  const singleActionableCastPickerBot =
+    castPickerSearch.trim() &&
+    visibleCastBots.filter(
+      (bot) => castPickerBotUnavailableReason(bot) === null,
+    ).length === 1
+      ? (visibleCastBots.find(
+          (bot) => castPickerBotUnavailableReason(bot) === null,
+        ) ?? null)
+      : null;
+
+  const chooseCastPickerBot = (botId: string): void => {
+    const bot = botById.get(botId);
+    if (!bot || castPickerBotUnavailableReason(bot)) return;
+    if (activeJurySeatIndex !== null) {
+      assignBotToJurySeat(activeJurySeatIndex, bot.id);
+      return;
+    }
+    if (format === "whodunnit") {
+      assignBotToMysterySeat(bot.id);
+      return;
+    }
+    assignBotToCastSlot(effectiveActiveCastSlot, bot.id);
   };
 
   const clearMysterySeat = (seat: DebateMysteryCastSeat): void => {
@@ -19898,6 +20012,7 @@ export function DebateExperience(
                       onClick={() => {
                         setMysteryMansionSource("new");
                         setMysteryMansionBundleId("");
+                        setMysteryMansionExteriorDraft(null);
                         setMysteryPreset(option.id);
                         setMysteryFloors(option.floors);
                         setMysteryTotalRooms(option.rooms);
@@ -19909,7 +20024,9 @@ export function DebateExperience(
                         className={mysteryStyles.presetThumbnail}
                         aria-hidden="true"
                         style={{
-                          backgroundImage: `url("${DEBATE_MYSTERY_MANSION_EXTERIOR_PATHS_V1["neutral-mansion-v1"][option.id]}")`,
+                          backgroundImage: `url("${mysteryMansionExteriorDraft && mysteryPreset === option.id
+                            ? mysteryMansionExteriorDraft.displayUrl
+                            : DEBATE_MYSTERY_MANSION_EXTERIOR_PATHS_V1["neutral-mansion-v1"][option.id]}")`,
                         }}
                       />
                       <strong>{option.id === "compact" ? "Quick" : option.id[0]!.toUpperCase() + option.id.slice(1)}</strong>
@@ -19923,19 +20040,39 @@ export function DebateExperience(
                     data-selected={!selectedMysteryMansionBundle && mysteryPreset === "custom" ? "true" : undefined}
                     aria-pressed={!selectedMysteryMansionBundle && mysteryPreset === "custom"}
                     disabled={Boolean(inspectedMysterySeed)}
-                    onClick={() => { setMysteryMansionSource("new"); setMysteryMansionBundleId(""); setMysteryPreset("custom"); setMysteryTotalRooms((current) => normalizeWhodunnitCustomMansionRoomCount(current, mysteryCustomSuspectCount)); setMysteryNonce(nextMysteryRecipeNonce()); }}
+                    onClick={() => { setMysteryMansionSource("new"); setMysteryMansionBundleId(""); setMysteryMansionExteriorDraft(null); setMysteryPreset("custom"); setMysteryTotalRooms((current) => normalizeWhodunnitCustomMansionRoomCount(current, mysteryCustomSuspectCount)); setMysteryNonce(nextMysteryRecipeNonce()); }}
                   >
-                    <div className={`${mysteryStyles.presetThumbnail} ${mysteryStyles.presetCustomThumbnail}`} aria-hidden="true"><span>?</span></div>
+                    <div
+                      className={`${mysteryStyles.presetThumbnail}${mysteryMansionExteriorDraft ? "" : ` ${mysteryStyles.presetCustomThumbnail}`}`}
+                      aria-hidden="true"
+                      style={mysteryMansionExteriorDraft ? { backgroundImage: `url("${mysteryMansionExteriorDraft.displayUrl}")` } : undefined}
+                    >{mysteryMansionExteriorDraft ? null : <span>?</span>}</div>
                     <strong>Custom</strong><em>{!selectedMysteryMansionBundle && mysteryPreset === "custom" ? "Selected ✓" : "Choose"}</em><span>2–3 floors · 5–18 rooms</span><small>4–8 suspects</small>
                   </button>
                 </div>
                 {mysteryPreset === "custom" && !inspectedMysterySeed && !selectedMysteryMansionBundle ? (
                   <div className={mysteryStyles.advancedGrid}>
-                    <label>Floors <input type="number" min={2} max={3} value={mysteryFloors} onChange={(event) => { setMysteryFloors(Math.max(2, Math.min(3, Number(event.currentTarget.value) || 2))); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
-                    <label>Rooms <input type="number" min={mysteryCustomRoomMinimum} max={18} value={normalizedMysteryTotalRooms} onChange={(event) => { setMysteryTotalRooms(normalizeWhodunnitCustomMansionRoomCount(event.currentTarget.value, mysteryCustomSuspectCount)); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
-                    <label>Suspects <input type="number" min={4} max={8} value={mysteryCustomSuspectCount} onChange={(event) => { const nextSuspectCount = Math.max(4, Math.min(8, Number(event.currentTarget.value) || 4)); setMysteryCustomSuspectCount(nextSuspectCount); setMysteryTotalRooms((current) => normalizeWhodunnitCustomMansionRoomCount(current, nextSuspectCount)); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
+                    <label>Floors <input type="number" min={2} max={3} value={mysteryFloors} onChange={(event) => { setMysteryMansionExteriorDraft(null); setMysteryFloors(Math.max(2, Math.min(3, Number(event.currentTarget.value) || 2))); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
+                    <label>Rooms <input type="number" min={mysteryCustomRoomMinimum} max={18} value={normalizedMysteryTotalRooms} onChange={(event) => { setMysteryMansionExteriorDraft(null); setMysteryTotalRooms(normalizeWhodunnitCustomMansionRoomCount(event.currentTarget.value, mysteryCustomSuspectCount)); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
+                    <label>Suspects <input type="number" min={4} max={8} value={mysteryCustomSuspectCount} onChange={(event) => { setMysteryMansionExteriorDraft(null); const nextSuspectCount = Math.max(4, Math.min(8, Number(event.currentTarget.value) || 4)); setMysteryCustomSuspectCount(nextSuspectCount); setMysteryTotalRooms((current) => normalizeWhodunnitCustomMansionRoomCount(current, nextSuspectCount)); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
                   </div>
                 ) : null}
+                <section className={`${mysteryStyles.guidedSecondaryAction} ${mysteryStyles.mansionExteriorRefract}`} data-tutorial-target="whodunnit-mansion-exterior">
+                  <div>
+                    <strong>Exterior Refract</strong>
+                    <small>{props.responseMode === "local"
+                      ? "LOCAL keeps this mansion’s bundled exterior and never contacts an image provider."
+                      : "Describe the house you want to see, then Refract its exterior for this case before Story."}</small>
+                  </div>
+                  <label className={mysteryStyles.setupField}>
+                    <span><strong>Visual direction</strong><em>Required to Refract</em></span>
+                    <textarea value={mysteryMansionExteriorDirection} rows={3} maxLength={800} onChange={(event) => setMysteryMansionExteriorDirection(event.currentTarget.value)} placeholder="For example: moonlit Art Deco observatory above a foggy coast" />
+                    <small>{mysteryMansionExteriorDraft ? "This exterior is selected for the case. Refract again only to replace it." : "Mansion size and geography remain authoritative."}</small>
+                  </label>
+                  <button type="button" disabled={props.responseMode === "local" || mysteryMansionExteriorBusy || !mysteryMansionExteriorDirection.trim()} onClick={() => void refractMansionExterior()}>
+                    {mysteryMansionExteriorBusy ? "Refracting exterior…" : mysteryMansionExteriorDraft ? "Refract a replacement" : "Refract exterior · ONLINE"}
+                  </button>
+                </section>
               </div>
             )}
           </>
@@ -19946,8 +20083,8 @@ export function DebateExperience(
             <header className={mysteryStyles.setupStepHeading}><div><small>2</small><h2>Set the story direction</h2></div><span>Optional idea · balanced defaults</span></header>
             <label className={mysteryStyles.setupField} data-tutorial-target="whodunnit-v2-spark">
               <span><strong>Mystery spark</strong><em>Optional</em></span>
-              <textarea value={mysteryInspiration} maxLength={2000} rows={4} onChange={(event) => { setMysteryInspiration(event.currentTarget.value); setMysteryNonce(nextMysteryRecipeNonce()); }} placeholder="Leave blank for Surprise me — or describe a mood, era, setting, or story spark." />
-              <small>PRISM uses this to cast, dress, and compose one coherent case. Deterministic case logic—not the writing model—freezes the truth.</small>
+              <textarea value={mysteryInspiration} maxLength={2000} rows={4} onChange={(event) => { setMysteryInspiration(event.currentTarget.value); setMysteryNonce(nextMysteryRecipeNonce()); }} placeholder="Leave blank for Surprise me — or describe a mood, era, incident, or story spark." />
+              <small>Story owns premise and tone; it may dress the selected mansion but never replaces its house, scale, or geography. Deterministic case logic—not the writing model—freezes the truth.</small>
               <div className={mysteryStyles.sparkInterpretation} aria-live="polite">
                 <span>PRISM heard</span>
                 {mysterySparkMotifs.length ? (
@@ -20041,7 +20178,7 @@ export function DebateExperience(
           </div>
         ) : null}
 
-        {mysterySetupError ? <p className={styles.error}>{mysterySetupError}</p> : null}
+        {mysterySetupError || mysteryMansionExteriorError ? <p className={styles.error}>{mysterySetupError ?? mysteryMansionExteriorError}</p> : null}
         <div className={`${styles.panelAdvance} ${mysteryStyles.guidedSetupFooter}`}>
           <button type="button" disabled={!previousPage} onClick={() => previousPage && goToPage(previousPage.id)}><span aria-hidden="true">←</span> Back</button>
           <span>{!currentPageReady ? "Choose an installed mansion, or switch to Create a new mansion." : pageIndex === WHODUNNIT_SETUP_PAGES.length - 1 ? "Next, choose who will inhabit the case." : `Next: ${WHODUNNIT_SETUP_PAGES[pageIndex + 1]!.label}`}</span>
@@ -20949,7 +21086,6 @@ export function DebateExperience(
                 data-tutorial-target="debate-mystery-courtroom"
               >
                 <header>
-                  <span>Public proceeding</span>
                   <strong>Courtroom</strong>
                   <small>The Judge presides publicly; PRISM keeps sealed case truth backstage.</small>
                   <em>3 seats</em>
@@ -20957,18 +21093,18 @@ export function DebateExperience(
                 <div className={styles.castSlotGrid} data-seat-count="3">
                   {[
                     {
-                      seat: { kind: "judge" } as const,
-                      label: "Presiding Judge",
-                      botId: mysteryJudgeBotId,
-                    },
-                    {
                       seat: { kind: "prosecutor" } as const,
-                      label: "Player Prosecutor",
+                      label: "Prosecution",
                       botId: mysteryProsecutorBotId,
                     },
                     {
+                      seat: { kind: "judge" } as const,
+                      label: "The Bench",
+                      botId: mysteryJudgeBotId,
+                    },
+                    {
                       seat: { kind: "defense" } as const,
-                      label: "Defense counsel",
+                      label: "Opposition",
                       botId: mysteryRivalDefenseBotId,
                     },
                   ].map(renderMysteryCastSlot)}
@@ -21108,6 +21244,8 @@ export function DebateExperience(
           onGroupChange={setCastPickerGroupId}
           groupTheme={props.theme}
           resultLabel={`${visibleCastBots.length} bot${visibleCastBots.length === 1 ? "" : "s"}`}
+          singleActionableResult={singleActionableCastPickerBot}
+          onSingleActionableResultSelect={chooseCastPickerBot}
         />
         <div
           className={styles.castPickerBody}
@@ -21159,36 +21297,8 @@ export function DebateExperience(
                   : format === "whodunnit"
                     ? mysterySelectedBotId === bot.id
                   : cast[effectiveActiveCastSlot] === bot.id;
-              const otherFloorSlot = selectableCastSlots.find(
-                (slot) =>
-                  (activeJurySeatIndex !== null ||
-                    slot !== effectiveActiveCastSlot) &&
-                  cast[slot] === bot.id,
-              );
-              const otherJurySeat =
-                preferredJurorBotIds.findIndex(
-                  (id, index) =>
-                    id === bot.id &&
-                    (activeJurySeatIndex === null ||
-                      index !== activeJurySeatIndex),
-                ) >= 0;
-              const disabledReason = otherFloorSlot
-                ? "Already cast"
-                : otherJurySeat
-                  ? "Already on Jury"
-                  : null;
-              const mysteryReserved =
-                format === "whodunnit" &&
-                !selected &&
-                [
-                  ...mysterySuspectBotIds,
-                  mysteryJudgeBotId,
-                  mysteryProsecutorBotId,
-                  mysteryRivalDefenseBotId,
-                ].includes(bot.id);
-              const effectiveDisabledReason = mysteryReserved
-                ? "Already cast"
-                : disabledReason;
+              const effectiveDisabledReason =
+                castPickerBotUnavailableReason(bot);
               return (
                 <BotPickerTile
                   key={bot.id}
@@ -31638,6 +31748,14 @@ export function DebateExperience(
     turbo: props.turbo,
     modelOverride: props.modelOverride,
   } as const;
+  const mysteryPreludeMusicPhase =
+    view === "mystery" &&
+    activeSession?.format === "whodunnit" &&
+    activeSession.formatState.format === "whodunnit" &&
+    activeSession.formatState.version === 2 &&
+    mysteryCasePreludeMusicSessionActive(activeSession.formatState.playPhase)
+      ? activeSession.formatState.playPhase
+      : null;
   const experience = view === "mystery" &&
     activeSession?.format === "whodunnit" &&
     activeSession.formatState.format === "whodunnit" ? (
@@ -31790,6 +31908,20 @@ export function DebateExperience(
             leaveDebatePortalTarget,
           )
         : null}
+      {mysteryPreludeMusicPhase && activeSession ? (
+        <SessionAtmosphereLayer
+          sessionKey={`whodunnit-v2-prelude:${activeSession.id}`}
+          backgroundUrl={`/api/debates/${encodeURIComponent(activeSession.id)}/mystery-mansion/theme`}
+          backgroundFallbackUrl={WHODUNNIT_INVESTIGATION_MUSIC_URL}
+          active={props.audioEnabled && props.audioVolume > 0}
+          volume={props.audioVolume}
+          mix={mysteryCasePreludeMusicMix(mysteryPreludeMusicPhase)}
+          lifecycleTransitionMs={WHODUNNIT_INVESTIGATION_MUSIC_FADE_MS}
+          mixTransitionMs={WHODUNNIT_INVESTIGATION_MUSIC_TRANSITION_MS}
+          backgroundRecordable={false}
+          ambientFoley={false}
+        />
+      ) : null}
       {experience}
       {blankMansionEditor ? (
         <MansionEditorDialog

@@ -59,10 +59,10 @@
 }
 
 .forge {
-  display: grid;
-  place-items: center;
-  padding: 5rem 1.25rem 2rem;
-  overflow: hidden;
+  display: block;
+  padding: 0;
+  overflow: auto;
+  background: #020308;
 }
 
 .forgeCard {
@@ -77,9 +77,13 @@
 }
 
 .forgeCard[data-exterior-hero="true"] {
-  width: min(82rem, 100%);
-  min-height: min(46rem, calc(100dvh - 7rem));
+  width: 100%;
+  min-height: 100dvh;
+  box-sizing: border-box;
+  padding: clamp(5.5rem, 8vh, 8rem) clamp(2rem, 6vw, 7rem) clamp(3rem, 7vh, 6rem);
   isolation: isolate;
+  border: 0;
+  border-radius: 0;
   background: #090b15;
 }
 
@@ -93,6 +97,10 @@
 
 .forgeCard[data-exterior-hero="true"]::before {
   background: var(--forge-exterior-image) center / cover no-repeat;
+  filter: brightness(var(--forge-exterior-brightness, 0.18)) contrast(var(--forge-exterior-contrast, 0.72)) grayscale(var(--forge-exterior-grayscale, 1)) saturate(var(--forge-exterior-saturation, 0.08)) blur(var(--forge-exterior-blur, 22px));
+  opacity: var(--forge-exterior-opacity, 0);
+  transform: scale(1.055);
+  transition: filter 1.25s cubic-bezier(0.22, 1, 0.36, 1), opacity 1.25s cubic-bezier(0.22, 1, 0.36, 1), transform 1.25s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .forgeCard[data-exterior-hero="true"]::after {
@@ -102,12 +110,47 @@
     linear-gradient(0deg, rgba(4, 6, 12, 0.82), transparent 38%);
 }
 
+.forgeCard[data-exterior-hero="true"][data-forge-complete="true"]::before {
+  transform: scale(1);
+}
+
 .forgeCard[data-exterior-hero="true"] > :not(.forgePrism) {
   position: relative;
   z-index: 2;
   width: min(30rem, 100%);
   margin-right: 0;
   margin-left: auto;
+}
+
+.forgeCard[data-exterior-hero="true"] > .forgeCaseIdentity {
+  position: absolute;
+  left: clamp(2rem, 6vw, 7rem);
+  bottom: clamp(3rem, 10vh, 8rem);
+  width: min(42rem, 48vw);
+  margin: 0;
+  text-wrap: balance;
+}
+
+.forgeCaseIdentity h1 {
+  max-width: 42rem;
+  margin: 0.65rem 0 0;
+  font-size: clamp(3.4rem, 7vw, 7.2rem);
+  line-height: 0.88;
+  letter-spacing: -0.07em;
+  text-shadow: 0 1.2rem 3rem rgba(0, 0, 0, 0.72);
+  animation: forgeTitleReveal 760ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.forgeCaseIdentity[data-title-ready="false"] h1 {
+  max-width: 28rem;
+  color: rgba(235, 231, 247, 0.62);
+  font-size: clamp(2.2rem, 4vw, 4rem);
+  letter-spacing: -0.045em;
+}
+
+@keyframes forgeTitleReveal {
+  from { opacity: 0; transform: translateY(0.6rem); }
+  to { opacity: 1; transform: none; }
 }
 
 .forgeExteriorStatus {
@@ -124,12 +167,42 @@
 
 .forgeExteriorStatus > span { color: #66e5ea; text-shadow: 0 0 0.75rem currentColor; }
 
-.forgeCard h1 {
+.forgeStatusHeading {
   max-width: 26rem;
   margin: 0.5rem 0;
   font-size: clamp(2rem, 6vw, 3.4rem);
   line-height: 0.96;
   letter-spacing: -0.055em;
+}
+
+@media (max-width: 1120px) {
+  .forgeCard[data-exterior-hero="true"] {
+    padding: 5.5rem clamp(1.25rem, 5vw, 3rem) 3rem;
+  }
+
+  .forgeCard[data-exterior-hero="true"]::after {
+    background:
+      linear-gradient(180deg, rgba(4, 6, 12, 0.36), rgba(4, 6, 12, 0.86) 58%, rgba(4, 6, 12, 0.98) 100%),
+      linear-gradient(90deg, rgba(4, 6, 12, 0.16), rgba(4, 6, 12, 0.58));
+  }
+
+  .forgeCard[data-exterior-hero="true"] > :not(.forgePrism) {
+    width: min(38rem, 100%);
+    margin-right: auto;
+    margin-left: auto;
+  }
+
+  .forgeCard[data-exterior-hero="true"] > .forgeCaseIdentity {
+    position: relative;
+    left: auto;
+    bottom: auto;
+    width: min(46rem, 100%);
+    margin: 0 auto clamp(2rem, 7vh, 4.5rem);
+  }
+
+  .forgeCaseIdentity h1 {
+    font-size: clamp(3rem, 10vw, 6rem);
+  }
 }
 
 .forgeMessage { margin: 0.9rem 0 1.25rem; color: #d5d1e1; }
@@ -339,6 +412,7 @@
 .titleCard {
   position: relative;
   display: grid;
+  min-height: 100dvh;
   place-content: center;
   justify-items: center;
   overflow: hidden;
@@ -364,6 +438,12 @@
   background: rgba(5, 7, 15, 0.52);
   box-shadow: 0 2rem 6rem rgba(0, 0, 0, 0.48);
   backdrop-filter: blur(12px);
+  animation: titleCardSettle 720ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes titleCardSettle {
+  from { opacity: 0; transform: translateY(0.7rem) scale(0.985); }
+  to { opacity: 1; transform: none; }
 }
 
 .caseOpening {
@@ -1875,6 +1955,9 @@
 
 @media (prefers-reduced-motion: reduce) {
   .progressTrack span { transition: none; }
+  .forgeCard[data-exterior-hero="true"]::before { transition: none; }
+  .forgeCaseIdentity h1 { animation: none; }
+  .titleCardContent { animation: none; }
   .mansionCanvas { animation: none; }
   .mansionRoom { transition: none; }
   .forgePrism i,

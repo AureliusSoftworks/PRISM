@@ -177,6 +177,37 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /player character/u);
   });
 
+  it("uses the accepted Mansion-step exterior across Forge and the title-card surface", () => {
+    assert.match(experienceSource, /mansionExteriorRevealed[\s\S]*mansionExteriorStatus !== "ready"/u);
+    assert.match(
+      experienceSource,
+      /sealedMysteryAssetApiUrl\([\s\S]*DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1/u,
+    );
+    assert.match(
+      experienceSource,
+      /const forgeExteriorUrl = props\.mansionExteriorUrl \?\? preparedMansionExteriorUrl/u,
+    );
+    assert.match(cssSource, /\.forgeCard\[data-exterior-hero="true"\]::before[\s\S]*var\(--forge-exterior-image\)/u);
+  });
+
+  it("keeps exterior Refract explicit, draft-backed, and subordinate to Mansion topology", () => {
+    const refractStart = setupSource.indexOf("const refractMansionExterior");
+    const refractEnd = setupSource.indexOf("const mysteryCreateConfigV2", refractStart);
+    const refractSource = setupSource.slice(refractStart, refractEnd);
+    assert.ok(refractStart >= 0 && refractEnd > refractStart);
+    assert.match(setupSource, /Refract exterior · ONLINE/u);
+    assert.match(setupSource, /data-tutorial-target="whodunnit-mansion-exterior"/u);
+    assert.match(setupSource, /mysteryMansionExteriorDraft/u);
+    assert.match(setupSource, /mansionExteriorImageId: mysteryMansionExteriorDraft\.imageId/u);
+    assert.match(setupSource, /mansionExteriorDirection: mysteryMansionExteriorDraft\.direction/u);
+    assert.match(setupSource, /mysteryMansionExteriorDraft && mysteryPreset === option\.id/u);
+    assert.match(setupSource, /setMysteryMansionExteriorDraft\(null\); setMysteryFloors/u);
+    assert.match(setupSource, /setMysteryMansionExteriorDraft\(null\); setMysteryTotalRooms/u);
+    assert.doesNotMatch(refractSource, /mysteryInspiration|inspiration:/u);
+    assert.match(setupSource, /LOCAL keeps this mansion’s bundled exterior/u);
+    assert.match(setupSource, /Story owns premise and tone; it may dress the selected mansion but never replaces its house, scale, or geography/u);
+  });
+
   it("routes non-interactive case-opening and investigation clicks through the visible dialogue", () => {
     assert.match(experienceSource, /function mysteryDialogueGestureOriginIsInteractive/u);
     assert.match(experienceSource, /input, textarea, select, button, a, label, \[contenteditable\]/u);

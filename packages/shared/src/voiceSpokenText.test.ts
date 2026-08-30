@@ -2,11 +2,60 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   collapseRemovedCueWhitespace,
+  CURSED_TONGUE_CENSOR_TONE_TEXT,
+  voiceCensorPerformancePlan,
+  voiceCensorPerformanceText,
   voicePerformanceTextFromActionCues,
   voiceSpokenText,
 } from "./voiceSpokenText.ts";
 
 describe("voice spoken text", () => {
+  it("detects Cursed Tongue carrier ranges without mutating the public transcript", () => {
+    const publicText = "That is F***ing ridiculous, you absolute b••••••!";
+    const expected = `That is ${CURSED_TONGUE_CENSOR_TONE_TEXT} ridiculous, you absolute ${CURSED_TONGUE_CENSOR_TONE_TEXT}!`;
+    const plan = voiceCensorPerformancePlan(publicText);
+    assert.equal(voiceCensorPerformanceText(publicText), expected);
+    assert.equal(plan.text, expected);
+    assert.deepEqual(plan.ranges, [
+      { start: 8, end: 13 },
+      { start: 39, end: 44 },
+    ]);
+    assert.equal(voiceSpokenText(publicText), publicText);
+    assert.equal(
+      voicePerformanceTextFromActionCues(`*sighs* ${publicText}`),
+      `[sighs] ${publicText}`,
+    );
+    assert.doesNotMatch(expected, /[•*]/u);
+    assert.doesNotMatch(
+      expected,
+      /\b(?:fuck(?:ing|ed|er|s)?|shit(?:ty)?|goddamn(?:ed)?|damn|hell|ass(?:hole)?|bastard)\b/iu,
+    );
+    // This is a performance-only projection: the saved/rendered transcript is
+    // always the authored public mask, including its punctuation.
+    assert.equal(publicText, "That is F***ing ridiculous, you absolute b••••••!");
+  });
+
+  it("plans multiple punctuated masks while ordinary bleep stays ordinary", () => {
+    const censored = "F***, that s*** is f***ing wild.";
+    assert.equal(
+      voiceCensorPerformancePlan(censored).text,
+      "bleep, that bleep is bleep wild.",
+    );
+    assert.equal(
+      voicePerformanceTextFromActionCues(`*sighs* ${censored}`),
+      `[sighs] ${censored}`,
+    );
+    assert.deepEqual(voiceCensorPerformancePlan("Say bleep, then d•••!").ranges, [
+      { start: 16, end: 21 },
+    ]);
+    assert.equal(voiceCensorPerformancePlan("Say bleep normally.").text, "Say bleep normally.");
+    assert.deepEqual(voiceCensorPerformancePlan("Say bleep normally.").ranges, []);
+    assert.equal(
+      voiceSpokenText("First, focus on the stars *carefully*."),
+      "First, focus on the stars carefully.",
+    );
+  });
+
   it("keeps a leaked Signal physical action off mic", () => {
     assert.equal(
       voiceSpokenText(

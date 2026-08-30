@@ -69,6 +69,17 @@ describe("Bottish speech plan", () => {
     );
   });
 
+  it("replaces only Cursed Tongue masks with a locally gated carrier plan", () => {
+    const source = "Say bleep normally, then d•••!";
+    const plan = buildBottishPlan(source, neutral, "cursed-bottish");
+    assert.equal(plan.alignment.characters.join(""), "Say bleep normally, then bleep!");
+    assert.deepEqual(plan.censorPlan, {
+      textLength: 31,
+      ranges: [{ start: 25, end: 30 }],
+    });
+    assert.equal(source, "Say bleep normally, then d•••!");
+  });
+
   it("turns marked vocal actions into aligned procedural motifs", () => {
     const source = "Well—*laughs nervously*—okay.";
     const performed = bottishPerformanceText(source);

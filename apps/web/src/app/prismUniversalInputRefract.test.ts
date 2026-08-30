@@ -286,10 +286,15 @@ describe("global Refract input capabilities", () => {
     const textInput = new FakeInput();
     textInput.ownerDocument = document;
     textInput.id = "title";
+    textInput.value = "Original title";
     document.nodes = [textInput];
+    let receivedDirection = "";
     const cleanup = installPrismUniversalInputTargets({
       root: document as unknown as Document,
-      generate: async () => "Generated title",
+      generate: async (request) => {
+        receivedDirection = request.direction;
+        return "Generated title";
+      },
     });
     try {
       const registration = resolvePrismRefractTargetForElement(
@@ -297,14 +302,22 @@ describe("global Refract input capabilities", () => {
       );
       assert.equal(registration?.target.kind, "field");
       if (registration?.target.kind !== "field") return;
+      assert.equal(
+        registration.target.steering?.initialDirection(
+          registration.target.read(),
+        ),
+        "Make this more creative",
+      );
       const generated = await registration.target.generate({
-        currentValue: "",
+        currentValue: "Original title",
         rejectedValues: [],
+        direction: "Make this more playful",
         signal: new AbortController().signal,
       });
       registration.target.preview(generated);
       await registration.target.accept(generated);
       assert.equal(textInput.value, "Generated title");
+      assert.equal(receivedDirection, "Make this more playful");
       assert.deepEqual(textInput.events, ["input", "input", "change"]);
     } finally {
       cleanup();
@@ -325,6 +338,12 @@ describe("global Refract input capabilities", () => {
       );
       assert.equal(registration?.target.kind, "field");
       if (registration?.target.kind === "field") {
+        assert.equal(
+          registration.target.steering?.initialDirection(
+            registration.target.read(),
+          ),
+          "",
+        );
         registration.target.preview("Editor prose");
         assert.equal(editor.textContent, "Editor prose");
         assert.deepEqual(editor.events, ["input"]);

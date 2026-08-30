@@ -47,6 +47,11 @@ import {
   decodeLiveVoicePcmOwned,
   type LiveVoicePcm,
 } from "./liveVoiceDecode.ts";
+import {
+  connectVoiceCensorTone,
+  resolveVoiceCensorTimings,
+  type VoiceCensorPlanV1,
+} from "./voiceCensorTone.ts";
 
 export interface VoiceEffectPlan {
   highpassHz: number;
@@ -307,6 +312,11 @@ export interface VoicePlaybackLifecycle {
   ) => void;
   /** Audio-clock progress used to keep visible speech and mouth motion aligned. */
   onProgress?: (elapsedMs: number, durationMs: number) => void;
+  /** Live audible-clock reader for visuals sampling between progress frames. */
+  onPlaybackClock?: (
+    readElapsedMs: (() => number) | null,
+    durationMs: number,
+  ) => void;
   /**
    * Carries synthesizer-authored text separately from the canonical transcript.
    * Babble uses this because the audible pseudo-language differs from the
@@ -615,6 +625,13 @@ export function beginVoicePlaybackProgress(
     started = true;
     startTimer = null;
     lifecycle?.onStart?.(normalizedDurationMs, alignment);
+    lifecycle?.onPlaybackClock?.(
+      () => Math.min(
+        normalizedDurationMs,
+        Math.max(0, currentElapsedMs() - startDelayMs),
+      ),
+      normalizedDurationMs,
+    );
     report(0);
     if (lifecycle?.onProgress) {
       if (livePerformanceBudget) {
@@ -635,6 +652,7 @@ export function beginVoicePlaybackProgress(
   const cancel = () => {
     if (!active) return;
     active = false;
+    lifecycle?.onPlaybackClock?.(null, normalizedDurationMs);
     if (startTimer !== null) window.clearTimeout(startTimer);
     startTimer = null;
     if (frame !== null) window.cancelAnimationFrame(frame);
@@ -1799,6 +1817,7 @@ async function playLivePerformanceVoice(args: {
   channel: VoicePlaybackChannel;
   lifecycle?: VoicePlaybackLifecycle;
   alignment?: VoicePlaybackCharacterAlignment | null;
+  censorPlan?: VoiceCensorPlanV1 | null;
   stereoPan?: number;
   maxDurationMs?: number;
   scheduledStartAtPerformanceMs?: number;
@@ -1851,7 +1870,8 @@ async function playLivePerformanceVoice(args: {
     args.lifecycle?.loudnessNormalization === "interview"
       ? connectLiveInterviewVoiceLeveler(context, source)
       : null;
-  (leveler?.output ?? source).connect(outputGain);
+  const speechInput = leveler?.output ?? source;
+  if (!args.censorPlan) speechInput.connect(outputGain);
   const scheduled: AudioNode[] = [
     source,
     ...(leveler?.nodes ?? []),
@@ -1955,6 +1975,21 @@ async function playLivePerformanceVoice(args: {
               : Number.POSITIVE_INFINITY,
           ),
         );
+        if (args.censorPlan) {
+          scheduled.push(
+            ...connectVoiceCensorTone({
+              context,
+              speechInput,
+              output: outputGain,
+              timings: resolveVoiceCensorTimings({
+                plan: args.censorPlan,
+                alignment: args.alignment,
+                durationMs: articulationDurationMs,
+              }),
+              startAt: context.currentTime,
+            }),
+          );
+        }
         const outputLatencyMs =
           args.compensateLifecycleForOutputLatency && args.lifecycle
             ? estimateVoiceOutputLatencyMs(context)
@@ -2203,6 +2238,8 @@ export async function playRealtimeVoiceBytes(args: {
   baseLowpassHz?: number;
   lifecycle?: VoicePlaybackLifecycle;
   alignment?: VoicePlaybackCharacterAlignment | null;
+  /** Provider-safe carrier ranges that PRISM replaces with a local tone. */
+  censorPlan?: VoiceCensorPlanV1 | null;
   roboticPlan?: VoiceRoboticPlan | null;
   cleanRoboticCarrier?: boolean;
   voiceEffect?: VoiceEffect;
@@ -2229,7 +2266,10 @@ export async function playRealtimeVoiceBytes(args: {
   /** Premium buffered speech uses decoded onset to anchor provider timestamps. */
   alignMouthToDecodedSpeech?: boolean;
 }): Promise<boolean> {
-  const livePerformanceBudget = prismLiveVoicePerformanceBudgetActive();
+  // Censored speech uses the full shared graph so its carrier can be hard
+  // muted under a capture-safe local oscillator on every surface/channel.
+  const livePerformanceBudget =
+    prismLiveVoicePerformanceBudgetActive() && !args.censorPlan;
   const context = contextForPlayback();
   if (
     !context ||
@@ -2251,6 +2291,7 @@ export async function playRealtimeVoiceBytes(args: {
       channel,
       lifecycle: args.lifecycle,
       alignment: args.alignment,
+      censorPlan: args.censorPlan,
       stereoPan: args.stereoPan,
       maxDurationMs: args.maxDurationMs,
       scheduledStartAtPerformanceMs: args.scheduledStartAtPerformanceMs,
@@ -2631,7 +2672,21 @@ export async function playRealtimeVoiceBytes(args: {
   } else {
     lowpass.connect(shaper).connect(speechGain);
   }
-  speechGain.connect(outputGain);
+  const censorTimings = resolveVoiceCensorTimings({
+    plan: args.censorPlan,
+    alignment: playbackAlignment,
+    durationMs: lifecycleArticulationDurationMs,
+  });
+  const censorNodes = censorTimings.length > 0
+    ? connectVoiceCensorTone({
+        context,
+        speechInput: speechGain,
+        output: outputGain,
+        timings: censorTimings,
+        startAt: now,
+      })
+    : [];
+  if (censorNodes.length === 0) speechGain.connect(outputGain);
   outputGain
     .connect(lowShelf)
     .connect(highShelf)
@@ -2679,7 +2734,7 @@ export async function playRealtimeVoiceBytes(args: {
     speechGain.gain.linearRampToValueAtTime(1, end);
   }
 
-  const scheduled: AudioNode[] = [source];
+  const scheduled: AudioNode[] = [source, ...censorNodes];
   if (primaryVoice.transform) scheduled.push(primaryVoice.transform);
   const speechStarts: Array<{
     source: AudioBufferSourceNode;

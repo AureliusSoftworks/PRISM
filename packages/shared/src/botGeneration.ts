@@ -60,7 +60,7 @@ const BOT_GENERATION_ACCENT_DEFINITION_IDS: readonly string[] = [
   ),
 ];
 export const CURSED_TONGUE_GENERATED_AUTHORING_PROMPT =
-  "Every non-silent public spoken reply is involuntarily laced with frequent strong non-slur profanity; their private intended wording stays clean.";
+  "Every non-silent public spoken reply is involuntarily delivered with an unmistakable structurally masked non-slur curse; no hidden uncensored word exists, and their private intended wording stays clean.";
 /** Generated ink is an accent layer, not a fully painted portrait. */
 export const BOT_GENERATED_AVATAR_INK_MAX_PATHS = 8;
 export const BOT_GENERATED_AVATAR_INK_MAX_PAINTED_PIXELS = 900;
@@ -705,7 +705,14 @@ function paintGeneratedInkPath(
   }
 }
 
-function normalizeGeneratedAvatarDetails(value: unknown): BotAvatarDetailsV1 | null {
+/**
+ * Converts untrusted generated primitives into the same bounded, editable
+ * Avatar Details color map used by Ink Display. This intentionally accepts no
+ * image data: the model can only describe a small set of semantic paths.
+ */
+export function normalizeGeneratedAvatarDetailsInkV1(
+  value: unknown,
+): BotAvatarDetailsV1 | null {
   const record = isRecord(value) ? value : {};
   const primitives = Array.isArray(record.ink)
     ? record.ink
@@ -951,7 +958,7 @@ export function normalizeBotGeneratedDraftV1(
     faceInput,
     profile.core.communicationStyle,
   );
-  const avatarDetails = normalizeGeneratedAvatarDetails(value.avatarDetails);
+  const avatarDetails = normalizeGeneratedAvatarDetailsInkV1(value.avatarDetails);
   const face: BotFaceStyle = {
     ...resolvedFace,
     eyeCharacter: faceIntent.customEyes ? resolvedFace.eyeCharacter : null,

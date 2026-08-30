@@ -122,6 +122,7 @@ import {
   formatDebateMysteryForgeElapsed,
   formatDebateMysteryForgeEta,
 } from "./debateMysteryV2ForgeProgress";
+import { debateMysteryForgeVisualState } from "./debateMysteryV2ForgeVisuals";
 import {
   DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE,
   readWhodunnitInvestigationArtStyle,
@@ -830,6 +831,11 @@ export function DebateMysteryV2CompilationResume(
     completedPasses,
     compilation.totalPasses,
   );
+  const forgeVisual = debateMysteryForgeVisualState(
+    completedPasses,
+    compilation.totalPasses,
+    compilation.stage,
+  );
   const etaLabel =
     compilation.etaBasisPasses >= 2 &&
     compilation.approximateRemainingMs !== null &&
@@ -894,15 +900,33 @@ export function DebateMysteryV2CompilationResume(
       <section
         className={styles.forgeCard}
         data-exterior-hero="true"
-        style={{ "--forge-exterior-image": `url("${forgeExteriorUrl}")` } as CSSProperties}
+        data-forge-complete={compilation.stage === "complete" ? "true" : undefined}
+        style={{
+          "--forge-exterior-image": `url("${forgeExteriorUrl}")`,
+          "--forge-exterior-brightness": String(forgeVisual.brightness),
+          "--forge-exterior-contrast": String(forgeVisual.contrast),
+          "--forge-exterior-grayscale": String(forgeVisual.grayscale),
+          "--forge-exterior-saturation": String(forgeVisual.saturation),
+          "--forge-exterior-opacity": String(forgeVisual.opacity),
+          "--forge-exterior-blur": `${forgeVisual.blurPx}px`,
+        } as CSSProperties}
       >
         <div className={styles.forgePrism} aria-hidden="true"><i /><i /><i /></div>
+        <header
+          className={styles.forgeCaseIdentity}
+          data-title-ready={state.caseTitle ? "true" : "false"}
+        >
+          <p className={styles.eyebrow}>{state.caseTitle ? "PRISM presents" : "PRISM / Case Forge"}</p>
+          <h1 key={state.caseTitle ?? "pending-case-title"}>
+            {state.caseTitle ?? "A mystery is taking shape"}
+          </h1>
+        </header>
         <p className={styles.forgeExteriorStatus}>
           <span aria-hidden="true">◇</span>
           Mansion exterior · {state.config.scaleClass}
         </p>
-        <p className={styles.eyebrow}>PRISM / Case Forge</p>
-        <h1>{needsAttention ? "Case preparation stopped" : spectatorForge ? "Preparing your mystery to watch." : "Preparing a prosecution turnabout"}</h1>
+        <p className={styles.eyebrow}>Case Forge</p>
+        <h2 className={styles.forgeStatusHeading}>{needsAttention ? "Case preparation stopped" : spectatorForge ? "Preparing your mystery to watch." : "Preparing a prosecution turnabout"}</h2>
         {!spectatorForge ? <p className={styles.forgeMessage}>{spoilerSafeProgressMessage}</p> : null}
         {compilationActive ? (
           <p className={styles.forgeBackgroundNote}>
@@ -2837,7 +2861,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           <div className={styles.titleMetadata}>
             {state.caseCharge ? <span>{state.caseCharge.title}</span> : null}<span>{state.suspects.length} witnesses</span><span>{state.config.trialType === "jury" ? "Jury Trial" : "Bench Trial"}</span>{state.config.investigationMode === "court_only" ? <span>Court act</span> : null}<span>{state.voicesEnabled ? "Local performance ready" : "Text performance"}</span>
           </div>
-          <button type="button" className={styles.primaryAction} disabled={busy} onClick={() => void sendAction({ action: "move" })}>{state.config.investigationMode === "court_only" ? "Begin Trial" : spectator ? "Review Prosecutor Findings" : "Begin Case"}</button>
+          <button type="button" className={styles.primaryAction} disabled={busy} onClick={() => void sendAction({ action: "move" })}>{state.config.investigationMode === "court_only" ? "Begin Trial" : spectator ? "Review Prosecutor Findings" : "Start Investigation"}</button>
           {error ? <p className={styles.error}>{error}</p> : null}
         </div>
       </main>

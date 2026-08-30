@@ -4,9 +4,9 @@ import {
   botPowerResponseIsSilentV1,
   buildSignalMusicProfile,
   coffeeInterruptionTranscriptSegments,
+  normalizeBotcastStagePresetSettings,
   voiceSpokenText,
   type BotcastEpisode,
-  type BotcastCameraFraming,
   type BotcastReplayEvent,
   type BotcastShow,
   type BotAvatarDetailsV1,
@@ -66,6 +66,17 @@ export interface ReplayBotSnapshotInput {
   replayVisualSnapshot?: ReplayBotVisualSnapshotV1 | null;
 }
 
+function signalShowStagePresentation(show: BotcastShow) {
+  return normalizeBotcastStagePresetSettings({
+    studioLayout: show.studioLayout,
+    cameraFraming: show.cameraFraming,
+    logoPlacement: show.logoPlacement,
+    studioGlowTuning: show.studioGlowTuning,
+    voiceLevelsByBotId: show.voiceLevelsByBotId,
+    atmosphereMix: show.atmosphereMix,
+  });
+}
+
 export function buildSignalReplayManifestV1(args: {
   episode: BotcastEpisode;
   show: BotcastShow;
@@ -75,12 +86,11 @@ export function buildSignalReplayManifestV1(args: {
   audioEnabled?: boolean;
   audioVolume?: number;
   capturedReplayEvents?: readonly BotcastReplayEvent[];
-  /** Frozen at recording start so later rehearsal edits cannot rewrite it. */
-  cameraFraming?: BotcastCameraFraming;
 }): ReplayManifestV1 {
   const botsById = new Map(args.bots.map((bot) => [bot.id, bot]));
   const host = botsById.get(args.episode.hostBotId);
   const guest = botsById.get(args.episode.guestBotId);
+  const showStagePresentation = signalShowStagePresentation(args.show);
   const guestIsProducer = args.episode.guestKind === "producer";
   const participants: ReplayParticipantSnapshotV1[] = [
     {
@@ -246,10 +256,10 @@ export function buildSignalReplayManifestV1(args: {
         showName: args.show.name,
         microphoneTintMaskUrl:
           atmosphere?.microphoneTintMaskUrl ?? null,
-        studioLayout: args.show.studioLayout,
-        cameraFraming: args.cameraFraming ?? args.show.cameraFraming,
-        logoPlacement: args.show.logoPlacement,
-        studioGlowTuning: args.show.studioGlowTuning,
+        studioLayout: showStagePresentation.studioLayout,
+        cameraFraming: showStagePresentation.cameraFraming,
+        logoPlacement: showStagePresentation.logoPlacement,
+        studioGlowTuning: showStagePresentation.studioGlowTuning,
         logoImageUrl: args.show.logo?.imageUrl ?? null,
         runtimeMs: args.episode.runtimeMs,
         introAudioUrl: args.show.introAudio?.audioUrl ?? null,
@@ -262,7 +272,7 @@ export function buildSignalReplayManifestV1(args: {
         outdentAudioDurationMs: args.show.introAudio?.outdentDurationMs ?? null,
         atmosphereAudioUrl: args.show.atmosphereAudio?.audioUrl ?? null,
         atmosphereAudioDurationMs: args.show.atmosphereAudio?.durationMs ?? null,
-        atmosphereMix: args.show.atmosphereMix,
+        atmosphereMix: showStagePresentation.atmosphereMix,
         signalAudioMix: {
           v: 1,
           enabled: args.audioEnabled !== false && masterVolume > 0,
@@ -868,6 +878,34 @@ export function buildSignalReplayManifestV2(
     capturedSpeechActivityTracks,
     voiceSelection,
   );
+}
+
+/**
+ * Applies the current show's reusable Rehearsal presentation to a loaded
+ * archive manifest in memory. Direction, clocks, utterances, mouth tracks,
+ * voice-light tracks, and the faithful audio recording remain untouched.
+ */
+export function restageSignalReplayManifestV2ForShow(
+  manifest: ReplayManifestV2,
+  show: BotcastShow,
+): ReplayManifestV2 {
+  const presentation = signalShowStagePresentation(show);
+  // Voice levels are recording inputs, not visual presentation metadata. A
+  // later Rehearsal balance must never remix the faithful audio master.
+  return {
+    ...manifest,
+    visual: {
+      ...manifest.visual,
+      metadata: {
+        ...(manifest.visual.metadata ?? {}),
+        studioLayout: presentation.studioLayout,
+        cameraFraming: presentation.cameraFraming,
+        logoPlacement: presentation.logoPlacement,
+        studioGlowTuning: presentation.studioGlowTuning,
+        atmosphereMix: presentation.atmosphereMix,
+      },
+    },
+  };
 }
 
 export function buildCoffeeReplayManifestV2(

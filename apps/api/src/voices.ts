@@ -12,6 +12,7 @@ import {
   normalizeVoiceMode,
   normalizeVoiceDeliveryMood,
   voicePerformanceTextFromActionCues,
+  voiceCensorPerformancePlan,
   voiceSpokenText,
   ELEVENLABS_VOICE_STABILITY_DEFAULT,
   applyPlayerNamePronunciation as applySharedPlayerNamePronunciation,
@@ -19,6 +20,7 @@ import {
   type EnglishVoiceEngine,
   type VoiceMode,
   type VoiceDeliveryMood,
+  type VoiceCensorRangeV1,
 } from "@localai/shared";
 
 type AccentIpaResolver = typeof import("./builtin-tts-runtime.ts")["prepareAccentMapTargetIpa"];
@@ -1320,7 +1322,9 @@ export async function requestElevenLabsVoiceCollections(args: {
 
 export type VoiceSynthesisRequest = {
   text: string;
+  textCensorRanges: VoiceCensorRangeV1[];
   elevenLabsText: string | null;
+  elevenLabsCensorRanges: VoiceCensorRangeV1[];
   mode: VoiceMode;
   engine: EnglishVoiceEngine;
   profile: BotAudioVoiceProfileV1;
@@ -1342,7 +1346,9 @@ export function cleanSpeakableAssistantProse(value: unknown): string {
     .replace(/https?:\/\/[^\s)]+/gi, " ")
     .replace(/`([^`]+)`/g, "$1")
     .replace(/^[\s>*#-]+/gm, "")
-    .replace(/\*{1,3}|_{1,3}|~{2}/g, "")
+    // voiceSpokenText already removes Markdown emphasis while preserving
+    // Cursed Tongue star masks for the carrier-plan boundary below.
+    .replace(/_{1,3}|~{2}/g, "")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 4000);
@@ -1357,18 +1363,25 @@ export function applyPlayerNamePronunciation(
 }
 
 export function validateVoiceSynthesisRequest(body: Record<string, unknown>): VoiceSynthesisRequest {
-  const text = cleanSpeakableAssistantProse(body.text);
-  if (!text) throw new Error("Speakable assistant text is required.");
+  const visibleText = cleanSpeakableAssistantProse(body.text);
+  if (!visibleText) throw new Error("Speakable assistant text is required.");
+  const textPlan = voiceCensorPerformancePlan(visibleText);
+  const visibleElevenLabsText = normalizeElevenLabsTaggedText(
+    voicePerformanceTextFromActionCues(body.elevenLabsText),
+    visibleText,
+  );
+  const elevenLabsPlan = visibleElevenLabsText
+    ? voiceCensorPerformancePlan(visibleElevenLabsText)
+    : null;
   const messageId = typeof body.messageId === "string" && body.messageId.trim()
     ? body.messageId.trim().slice(0, 160)
     : null;
   const deliveryMood = normalizeVoiceDeliveryMood(body.moodKey);
   return {
-    text,
-    elevenLabsText: normalizeElevenLabsTaggedText(
-      voicePerformanceTextFromActionCues(body.elevenLabsText),
-      text,
-    ),
+    text: textPlan.text,
+    textCensorRanges: textPlan.ranges,
+    elevenLabsText: elevenLabsPlan?.text ?? null,
+    elevenLabsCensorRanges: elevenLabsPlan?.ranges ?? [],
     mode: normalizeVoiceMode(body.mode),
     engine: normalizeEnglishVoiceEngine(body.engine),
     profile: applyVoiceDeliveryMoodToProfile(
@@ -1419,9 +1432,9 @@ export function resolveFrozenReplayVoiceEngine(args: {
 export function resolveVoiceSynthesisBoundary(args: VoiceSynthesisRequest & {
   persistedMessageProvider?: string | null;
 }):
-  | { ok: true; kind: "builtin-babble"; engineUsed: "builtin-babble"; text: string; profile: BotAudioVoiceProfileV1 }
-  | { ok: true; kind: "builtin-english"; engineUsed: "builtin" | "builtin-local-fallback"; text: string; profile: BotAudioVoiceProfileV1 }
-  | { ok: true; kind: "elevenlabs-stream"; engineUsed: "elevenlabs"; text: string; elevenLabsText: string; profile: BotAudioVoiceProfileV1 }
+  | { ok: true; kind: "builtin-babble"; engineUsed: "builtin-babble"; text: string; censorRanges: VoiceCensorRangeV1[]; profile: BotAudioVoiceProfileV1 }
+  | { ok: true; kind: "builtin-english"; engineUsed: "builtin" | "builtin-local-fallback"; text: string; censorRanges: VoiceCensorRangeV1[]; profile: BotAudioVoiceProfileV1 }
+  | { ok: true; kind: "elevenlabs-stream"; engineUsed: "elevenlabs"; text: string; elevenLabsText: string; censorRanges: VoiceCensorRangeV1[]; profile: BotAudioVoiceProfileV1 }
   | { ok: false; status: 409 | 503; code: "muted" | "procedural-client-only" | "online-context-required" | "english-worker-unavailable" | "elevenlabs-unavailable"; engineUsed?: "builtin-local-fallback" } {
   const localFallback = args.engine === "elevenlabs" && args.persistedMessageProvider === "local";
   const engineUsed = localFallback ? "builtin-local-fallback" : args.engine;
@@ -1437,6 +1450,7 @@ export function resolveVoiceSynthesisBoundary(args: VoiceSynthesisRequest & {
       kind: "builtin-babble",
       engineUsed: "builtin-babble",
       text: args.text,
+      censorRanges: args.textCensorRanges,
       profile: args.profile,
     };
   }
@@ -1446,6 +1460,7 @@ export function resolveVoiceSynthesisBoundary(args: VoiceSynthesisRequest & {
       kind: "builtin-english",
       engineUsed: "builtin-local-fallback",
       text: args.text,
+      censorRanges: args.textCensorRanges,
       profile: args.profile,
     };
   }
@@ -1459,6 +1474,9 @@ export function resolveVoiceSynthesisBoundary(args: VoiceSynthesisRequest & {
       engineUsed: "elevenlabs",
       text: args.text,
       elevenLabsText: args.elevenLabsText ?? args.text,
+      censorRanges: args.elevenLabsText
+        ? args.elevenLabsCensorRanges
+        : args.textCensorRanges,
       profile: args.profile,
     };
   }
@@ -1467,6 +1485,7 @@ export function resolveVoiceSynthesisBoundary(args: VoiceSynthesisRequest & {
     kind: "builtin-english",
     engineUsed: "builtin",
     text: args.text,
+    censorRanges: args.textCensorRanges,
     profile: args.profile,
   };
 }

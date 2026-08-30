@@ -16,7 +16,7 @@ describe("Signal Premium voice readiness contract", () => {
     );
     assert.match(
       pageSource,
-      /const expectedEngine: EnglishVoiceEngine = offlineOnly[\s\S]{0,100}?"builtin"[\s\S]{0,100}?voiceSelection\.englishVoiceEngine/u,
+      /const expectedEngine: EnglishVoiceEngine = pinnedSignalEngine \?\?[\s\S]{0,180}?offlineOnly \? "builtin" : voiceSelection\.englishVoiceEngine/u,
     );
   });
 
@@ -27,7 +27,7 @@ describe("Signal Premium voice readiness contract", () => {
     );
     assert.match(
       pageSource,
-      /const preparedClipPromise = signalVoiceClipCacheRef\.current\.get\([\s\S]{0,760}?signalPreferredVoiceClipReady/u,
+      /const preparedClipPromise = signalVoiceClipCacheRef\.current\.get\([\s\S]{0,760}?signalVoiceClipMatchesEpisodeEngine/u,
     );
     assert.match(
       pageSource,
@@ -47,7 +47,7 @@ describe("Signal Premium voice readiness contract", () => {
     );
     assert.match(
       pageSource,
-      /if \(playbackSurface === "signal"\)[\s\S]{0,180}?signalVoiceConsumedEpisodeByMessageIdRef\.current\.set/u,
+      /if \(playbackSurface === "signal"\)[\s\S]{0,900}?signalVoiceConsumedEpisodeByMessageIdRef\.current\.set/u,
     );
   });
 
@@ -63,6 +63,25 @@ describe("Signal Premium voice readiness contract", () => {
     assert.match(
       signalSource,
       /Promise\.resolve\(onPrefetchUtterance\(message, bot\)\)\.catch\([\s\S]{0,80}?false/u,
+    );
+  });
+
+  it("pins each Signal participant to the first resolved episode voice family", () => {
+    assert.match(
+      pageSource,
+      /signalVoiceEngineByEpisodeParticipantRef = useRef<[\s\S]{0,120}SignalVoiceEngineFamily/u,
+    );
+    assert.match(
+      pageSource,
+      /playbackSurface === "signal" && pinnedSignalEngine[\s\S]{0,360}pinnedSignalEngine === "elevenlabs"/u,
+    );
+    assert.match(
+      pageSource,
+      /const signalVoiceContinuityKey = `\$\{message\.episodeId\}:\$\{botSummary\.id\}`[\s\S]{0,700}signalVoiceClipMatchesEpisodeEngine/u,
+    );
+    assert.match(
+      pageSource,
+      /currentEngine && resolvedEngine !== currentEngine[\s\S]{0,240}signalVoiceEngineByEpisodeParticipantRef\.current\.set/u,
     );
   });
 

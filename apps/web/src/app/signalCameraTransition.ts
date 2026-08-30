@@ -33,6 +33,8 @@ export function signalLiveAutoCameraShot(args: {
   audibleHandoffPreparing?: boolean;
   listenerReactionShot?: SignalDirectedCameraShot | null;
   speakingShot?: SignalDirectedCameraShot | null;
+  /** Opening beat anchored to the voice that has actually started playback. */
+  speakerOwnershipLock?: boolean;
   postSpeechHoldShot?: SignalDirectedCameraShot | null;
   /** Mid-speech Wide breaths, listener glances, and guest introductions. */
   coverageShot?: SignalDirectedCameraShot | null;
@@ -42,8 +44,11 @@ export function signalLiveAutoCameraShot(args: {
   // Crosstalk is a two-person performance. It must outrank every close-up so
   // the audience can read both voices, while manual cameras bypass this helper.
   if (args.audibleVoiceOverlap) return "wide";
-  if (args.audibleHandoffPreparing) return "wide";
   if (args.listenerReactionShot) return args.listenerReactionShot;
+  if (args.speakerOwnershipLock && args.speakingShot) {
+    return args.speakingShot;
+  }
+  if (args.audibleHandoffPreparing) return "wide";
   if (args.coverageShot) return args.coverageShot;
   if (args.speakingShot) return args.speakingShot;
   // A real wait immediately releases the previous speaker; a held reaction

@@ -98,6 +98,7 @@ export interface PrismRefractRequest {
   target: PrismRefractTextTarget;
   currentValue: string;
   rejectedValues: string[];
+  direction: string;
   /**
    * Legacy client routing hints. Refract's server route intentionally ignores
    * them and resolves its saved model inside the account's global privacy lane.
@@ -305,6 +306,7 @@ export function normalizePrismRefractRequest(
         ),
       ).slice(-rejectedCandidateLimit)
     : [];
+  const direction = normalizePrismRefractDirection(value.direction);
   const preferredProvider =
     value.preferredProvider === "local" ||
     value.preferredProvider === "openai" ||
@@ -336,6 +338,7 @@ export function normalizePrismRefractRequest(
     target,
     currentValue,
     rejectedValues,
+    direction,
     ...(preferredProvider ? { preferredProvider } : {}),
     ...(responseMode ? { responseMode } : {}),
     ...(hasModelOverride ? { modelOverride } : {}),

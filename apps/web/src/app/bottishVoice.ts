@@ -4,9 +4,11 @@ import {
   botcastSignalStandardCadenceDurationMs,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotVoiceVolume,
+  voiceCensorPerformancePlan,
   voicePerformancePlanFromText,
   type BotAudioVoiceProfileV1,
 } from "@localai/shared";
+import type { VoiceCensorPlanV1 } from "./voiceCensorTone.ts";
 import {
   beginVoicePlaybackProgress,
   playPreSpeechBreath,
@@ -50,6 +52,7 @@ export interface BottishPlan {
   notes: BottishNote[];
   durationMs: number;
   alignment: VoicePlaybackCharacterAlignment;
+  censorPlan?: VoiceCensorPlanV1 | null;
 }
 
 export interface BottishPlaybackTiming {
@@ -173,7 +176,10 @@ export function buildBottishPlan(
   rawProfile: BotAudioVoiceProfileV1,
   seed = text
 ): BottishPlan {
-  const performanceText = bottishPerformanceText(text);
+  const censorPerformance = voiceCensorPerformancePlan(
+    bottishPerformanceText(text),
+  );
+  const performanceText = censorPerformance.text;
   const profile = normalizeBottishPlaybackProfile(rawProfile);
   const mappedVoice = VOICE_BASES[
     profile.baseVoiceId as keyof typeof VOICE_BASES
@@ -266,6 +272,12 @@ export function buildBottishPlan(
     notes,
     durationMs: notes.length > 0 ? Math.round(cursorMs + 50) : 0,
     alignment,
+    censorPlan: censorPerformance.ranges.length > 0
+      ? {
+          textLength: performanceText.length,
+          ranges: censorPerformance.ranges,
+        }
+      : null,
   };
 }
 
@@ -315,6 +327,7 @@ export function fitBottishPlanToDuration(
   return {
     notes,
     durationMs,
+    censorPlan: plan.censorPlan,
     alignment: {
       characters: [...plan.alignment.characters],
       characterStartTimesSeconds: plan.alignment.characterStartTimesSeconds.map(
@@ -344,6 +357,7 @@ export function scaleBottishPlanForDeliveryRate(
       durationMs: Math.max(8, Math.round(note.durationMs * scale)),
     })),
     durationMs: Math.max(1, Math.round(plan.durationMs * scale)),
+    censorPlan: plan.censorPlan,
     alignment: {
       characters: [...plan.alignment.characters],
       characterStartTimesSeconds: plan.alignment.characterStartTimesSeconds.map(
@@ -480,6 +494,8 @@ const mediaOutputCleanup = new WeakMap<HTMLMediaElement, () => void>();
 function routeBottishMediaOutput(
   audio: HTMLMediaElement,
   lifecycle?: VoicePlaybackLifecycle,
+  plan?: Pick<BottishPlan, "censorPlan"> &
+    Partial<Pick<BottishPlan, "alignment" | "durationMs">>,
 ): void {
   if (mediaOutputCleanup.has(audio)) return;
   const onLevel = lifecycle?.onLevel || lifecycle?.voiceLightTarget
@@ -490,7 +506,13 @@ function routeBottishMediaOutput(
         lifecycle?.onLevel?.(level);
       }
     : undefined;
-  const cleanup = routeAudioElementToPrismOutput(audio, { onLevel });
+  const cleanup = routeAudioElementToPrismOutput(audio, {
+    onLevel,
+    censorPlan: plan?.censorPlan,
+    censorAlignment: plan?.alignment,
+    censorDurationMs: plan?.durationMs,
+    readCensorElapsedMs: () => audio.currentTime * 1_000,
+  });
   if (!cleanup && replayAudioMasterCaptureActive()) {
     throw new Error("Bottish voice could not enter the faithful session mix.");
   }
@@ -567,6 +589,7 @@ function beginMediaUnlock(): void {
   const silentPlan: BottishPlan = {
     notes: [],
     durationMs: 0,
+    censorPlan: null,
     alignment: {
       characters: [],
       characterStartTimesSeconds: [],
@@ -721,7 +744,7 @@ async function playPlanWithMedia(
   audio.preservesPitch = true;
   activeMedia = audio;
   activeMediaUrl = url;
-  routeBottishMediaOutput(audio, lifecycle);
+  routeBottishMediaOutput(audio, lifecycle, plan);
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
@@ -815,6 +838,7 @@ async function playPlan(
     channel,
     lifecycle,
     alignment: plan.alignment,
+    censorPlan: plan.censorPlan,
     compensateLifecycleForOutputLatency: true,
     isCurrent: () => expectedGeneration === generation,
   });
@@ -1063,7 +1087,8 @@ async function playHybridBytesWithMedia(
   bytes: ArrayBuffer,
   profile: BotAudioVoiceProfileV1,
   expectedGeneration: number,
-  lifecycle?: VoicePlaybackLifecycle
+  lifecycle?: VoicePlaybackLifecycle,
+  censorPlan?: VoiceCensorPlanV1 | null,
 ): Promise<void> {
   if (expectedGeneration !== generation) return;
   const url = URL.createObjectURL(new Blob([bytes.slice(0)], { type: "audio/wav" }));
@@ -1079,7 +1104,7 @@ async function playHybridBytesWithMedia(
   audio.preservesPitch = true;
   activeMedia = audio;
   activeMediaUrl = url;
-  routeBottishMediaOutput(audio, lifecycle);
+  routeBottishMediaOutput(audio, lifecycle, { censorPlan });
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
@@ -1161,6 +1186,16 @@ async function playBabble(
 ): Promise<void> {
   if (expectedGeneration !== generation) return;
   const normalized = normalizeBottishPlaybackProfile(profile);
+  const censorPerformance = voiceCensorPerformancePlan(
+    bottishPerformanceText(text),
+  );
+  const censorPlan: VoiceCensorPlanV1 | null =
+    censorPerformance.ranges.length > 0
+      ? {
+          textLength: censorPerformance.text.length,
+          ranges: censorPerformance.ranges,
+        }
+      : null;
   await playPreSpeechBreath({
     plan: preSpeechBreath,
     profile: normalized,
@@ -1182,6 +1217,7 @@ async function playBabble(
     channel,
     lifecycle,
     roboticPlan,
+    censorPlan,
     cleanRoboticCarrier: true,
     compensateLifecycleForOutputLatency: true,
     isCurrent: () => expectedGeneration === generation,
@@ -1192,6 +1228,7 @@ async function playBabble(
       normalized,
       expectedGeneration,
       lifecycle,
+      censorPlan,
     );
   }
 }

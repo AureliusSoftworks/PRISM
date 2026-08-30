@@ -5,6 +5,8 @@ import {
   type BotcastMessage,
 } from "@localai/shared";
 import {
+  startBotcastSpeechReveal,
+  updateBotcastSpeechReveal,
   botcastSpeechRevealVisibleText,
   type BotcastSpeechRevealState,
 } from "./botcastSpeechReveal.ts";
@@ -95,4 +97,26 @@ export function signalLiveCaptionText(
     return "";
   }
   return botcastSpeechRevealVisibleText(reveal).trim();
+}
+
+/** Reconstruct the public caption prefix from the archive's playback clock. */
+export function signalReplayCaptionText(args: {
+  text: string;
+  message: Pick<
+    BotcastMessage,
+    "content" | "socialSilence" | "mutePerformance"
+  >;
+  elapsedMs: number;
+  durationMs: number;
+  playing: boolean;
+}): string {
+  if (!args.playing) return "";
+  const reveal = updateBotcastSpeechReveal(
+    startBotcastSpeechReveal({
+      text: args.text,
+      durationMs: args.durationMs,
+    }),
+    args.elapsedMs,
+  );
+  return signalLiveCaptionText(reveal, args.message);
 }

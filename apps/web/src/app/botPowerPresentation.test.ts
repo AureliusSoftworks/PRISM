@@ -36,11 +36,11 @@ test("Cursed Tongue details keep internal compiler cues out of the player-facing
       observerCue: "PRISM applies an internal public mutation.",
       effects: [{
         type: "cursed_tongue",
-        version: 1,
+        version: 2,
         frequency: "frequent",
         strength: "strong",
-        vocabulary: "uncensored_non_slur",
-        phraseMode: "occasional_2_3_words",
+        vocabulary: "structurally_masked_non_slur",
+        phraseMode: "censor_performance",
       }],
       ruleLabels: [],
     },
@@ -48,7 +48,7 @@ test("Cursed Tongue details keep internal compiler cues out of the player-facing
   assert.equal(details.selfCue, "Iris means to speak normally; the curse changes what others hear.");
   assert.equal(
     details.observerCue,
-    "Every spoken sentence lands with one to four strong, non-slur curse words.",
+    "Every audible reply lands with at least one visibly censored curse, never more than two in a sentence.",
   );
   assert.doesNotMatch(`${details.selfCue}\n${details.observerCue}`, /HARD|PRISM|internal|mutation/iu);
 });

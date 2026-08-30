@@ -302,7 +302,6 @@ import {
   applyDebateMysteryActionV2,
   applyDebateMysteryActionWithPersonaV2,
   attachDebateMysteryEvidenceAssetV2,
-  attachDebateMysteryMansionExteriorAssetV2,
   attachDebateMysteryRoomAssetV2,
   claimDebateMysteryAssetBackgroundLeaseV2,
   cancelDebateMysteryCompilationV2,
@@ -403,7 +402,9 @@ import {
   MANSION_MUSIC_PREVIOUS_LOGICAL_ID_V1,
   PORTABLE_MANSION_PACKAGE_MIME_V1,
   PORTABLE_WHODUNNIT_PACKAGE_MIME_V1,
+  debateMysteryHouseStyleV2,
   debateMysteryMansionExteriorPromptV1,
+  resolveDebateMysteryMansionExteriorScaleClassV1,
 } from "@localai/shared";
 import {
   buildSignalLiveBakeArtifactFromEpisode,
@@ -533,6 +534,10 @@ import {
   SignalAdvanceOperationSupersededError,
   SignalAdvanceOperationTimeoutError,
 } from "./signal-advance-operation.ts";
+import {
+  parseSignalVisualPassportBundleV1,
+  signalVisualPassportLibraryIsCompleteV1,
+} from "./signal-visual-recognition.ts";
 import {
   ElevenLabsMusicError,
   SIGNAL_ELEVENLABS_MUSIC_MODEL,
@@ -926,6 +931,7 @@ import { queueBotSemanticFacetsRefresh } from "./bot-facets.ts";
 import { compileBotPowers } from "./bot-powers.ts";
 import {
   BotGenerationError,
+  generateAvatarDetailsInk,
   generateBotDraft,
   generateBotField,
 } from "./bot-generator.ts";
@@ -7270,6 +7276,7 @@ async function normalizeSignalEpisodeImageForTurn(
   rasterBytes: Buffer;
   presentationReason: string | null;
   replayEmoji: string;
+  visualIdentity: ReturnType<typeof parseSignalVisualPassportBundleV1>;
 }> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new HttpError(400, "Signal image context is missing from this turn.");
@@ -7336,6 +7343,11 @@ async function normalizeSignalEpisodeImageForTurn(
         data: normalized.pngBytes.toString("base64"),
       },
       rasterBytes: normalized.pngBytes,
+      visualIdentity: {
+        v: 1,
+        status: "unavailable",
+        reason: "fresh_proof_required",
+      },
     };
   }
   const imageId =
@@ -7363,6 +7375,56 @@ async function normalizeSignalEpisodeImageForTurn(
     throw new HttpError(400, "Signal image Name cannot be blank.");
   }
   const presentationReason = normalizeBotcastEpisodeImageReason(record.reason);
+  const visualIdentity = record.visualIdentity === undefined
+    ? ({ v: 1, status: "unavailable", reason: "render_failed" } as const)
+    : parseSignalVisualPassportBundleV1(record.visualIdentity);
+  if (!visualIdentity) {
+    throw new HttpError(400, "Signal visual identity references are invalid.");
+  }
+  if (visualIdentity.status === "ready") {
+    const libraryRows = db
+      .prepare(
+        `SELECT id, updated_at
+           FROM bots
+          WHERE user_id = ? AND chat_enabled = 1
+          ORDER BY id ASC`,
+      )
+      .all(userId) as Array<{ id: string; updated_at: string }>;
+    if (!signalVisualPassportLibraryIsCompleteV1(
+      visualIdentity,
+      libraryRows.map((row) => ({ id: row.id, updatedAt: row.updated_at })),
+    )) {
+      throw new HttpError(
+        409,
+        "Signal's visual identity references are incomplete or stale. Please attach the image again.",
+      );
+    }
+    await Promise.all(
+      visualIdentity.pages.map(async (page) => {
+        const bytes = Buffer.from(
+          page.dataUrl.slice("data:image/png;base64,".length),
+          "base64",
+        );
+        const metadata = await sharp(bytes, {
+          failOn: "error",
+          limitInputPixels: 4_194_304,
+        }).metadata();
+        if (
+          metadata.format !== "png" ||
+          metadata.width !== 2048 ||
+          metadata.height !== 2048
+        ) {
+          throw new HttpError(
+            400,
+            "Signal visual identity references must be lossless 2048 px atlas pages.",
+          );
+        }
+      }),
+    ).catch((error) => {
+      if (error instanceof HttpError) throw error;
+      throw new HttpError(400, "Signal could not read its visual identity references.");
+    });
+  }
   const normalized = await normalizeImageAssetUpload(dataUrl, {
     width: 1536,
     height: 1536,
@@ -7392,6 +7454,7 @@ async function normalizeSignalEpisodeImageForTurn(
       data: normalized.pngBytes.toString("base64"),
     },
     rasterBytes: normalized.pngBytes,
+    visualIdentity,
   };
 }
 
@@ -9918,7 +9981,33 @@ async function prepareDebateMysteryV2EvidenceAssets(
  * Case Forge, Installed Mansions, portable preview, and the opening title card.
  * LOCAL never enters the generation branch and resolves to bundled key art.
  */
+const mysteryMansionExteriorPreparationRuns = new Map<
+  string,
+  Promise<import("@localai/shared").DebateMysterySealedAssetRefV1>
+>();
+
+function mysteryMansionExteriorPreparationKey(userId: string, sessionId: string): string {
+  return `${userId}:${sessionId}`;
+}
+
 async function prepareDebateMysteryV2MansionExteriorAsset(
+  args: DebateMysteryMansionExteriorAssetPreparationV2,
+): Promise<import("@localai/shared").DebateMysterySealedAssetRefV1> {
+  const key = mysteryMansionExteriorPreparationKey(args.userId, args.sessionId);
+  const active = mysteryMansionExteriorPreparationRuns.get(key);
+  if (active) return active;
+  const run = prepareDebateMysteryV2MansionExteriorAssetDirect(args);
+  mysteryMansionExteriorPreparationRuns.set(key, run);
+  try {
+    return await run;
+  } finally {
+    if (mysteryMansionExteriorPreparationRuns.get(key) === run) {
+      mysteryMansionExteriorPreparationRuns.delete(key);
+    }
+  }
+}
+
+async function prepareDebateMysteryV2MansionExteriorAssetDirect(
   args: DebateMysteryMansionExteriorAssetPreparationV2,
 ): Promise<import("@localai/shared").DebateMysterySealedAssetRefV1> {
   const session = getDebateSession(db, args.userId, args.sessionId);
@@ -9945,6 +10034,11 @@ async function prepareDebateMysteryV2MansionExteriorAsset(
   const online = args.synthesize &&
     session.responseMode !== "local" &&
     !userBlocksOnlineCapabilities(user);
+  const selection = resolveTypedAssetGenerationSelection(
+    args.userId,
+    "debate_exhibit",
+    { provider: "openai" },
+  );
   const userKey = decryptUserKey(args.userId);
   const apiKey = online
     ? getOpenAiApiKeyForUser(args.userId, userKey) ?? config.openAiApiKey
@@ -9970,7 +10064,8 @@ async function prepareDebateMysteryV2MansionExteriorAsset(
                 : []),
             ].join("\n"),
             apiKey,
-            model: "gpt-image-2",
+            // Reuse the Rooms image-model selection for the canonical cover.
+            model: selection.model ?? "gpt-image-2",
             size: "1536x1024",
             quality: "high",
             signal: attemptSignal,
@@ -10029,6 +10124,55 @@ async function prepareDebateMysteryV2MansionExteriorAsset(
     mimeType: "image/webp",
     reason: failure,
   });
+}
+
+/** Promote the explicit, tenant-owned setup draft into the immutable case vault. */
+async function adoptDebateMysteryV2MansionExteriorDraft(args: {
+  userId: string;
+  sessionId: string;
+  imageId: string;
+}): Promise<import("@localai/shared").DebateMysterySealedAssetRefV1> {
+  const draft = db.prepare(
+    `SELECT local_rel_path, provider, model
+       FROM images
+      WHERE id = ? AND user_id = ? AND purpose = 'whodunnit_mansion_exterior_draft'`,
+  ).get(args.imageId, args.userId) as
+    | { local_rel_path: string | null; provider: string; model: string }
+    | undefined;
+  if (!draft?.local_rel_path) {
+    throw new HttpError(404, "Choose a Mansion-step exterior draft before compiling this case.");
+  }
+  let source: Buffer;
+  try {
+    source = await readGeneratedImageBytesForPromptAttachment(draft.local_rel_path);
+  } catch {
+    throw new HttpError(409, "That mansion exterior draft is no longer available. Keep the bundled cover or Refract a new exterior.");
+  }
+  const normalized = await sharp(source, { failOn: "error" })
+    .rotate()
+    .flatten({ background: { r: 3, g: 8, b: 14 } })
+    .resize(1600, 900, { fit: "cover", position: "centre" })
+    .removeAlpha()
+    .png({ compressionLevel: 9 })
+    .toBuffer();
+  const pixels = await validateDebateMysteryAssetPixelsV1("room", normalized);
+  const sealed = sealDebateMysteryAssetBytesV1(db, decryptUserKey(args.userId), {
+    userId: args.userId,
+    sessionId: args.sessionId,
+    kind: "room",
+    subjectId: DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
+    bytes: normalized,
+    provider: draft.provider,
+    model: draft.model,
+    review: { draftImageId: args.imageId, pixels, acceptedAt: new Date().toISOString() },
+  });
+  return revealDebateMysteryAssetV1(
+    db,
+    args.userId,
+    args.sessionId,
+    "room",
+    DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
+  ) ?? sealed;
 }
 
 async function prepareDebateMysteryV2RoomAssets(
@@ -17922,7 +18066,9 @@ function buildRoutes(): RouteDefinition[] {
         fallbackWhenExplicitModelIsUnavailable: true,
         routingContext: {
           surface: "prism-refract",
-          inputText: request.currentValue,
+          inputText: [request.direction, request.currentValue]
+            .filter(Boolean)
+            .join("\n"),
           structuredOutput: true,
           outputTokens: 1_200,
         },
@@ -17952,6 +18098,7 @@ function buildRoutes(): RouteDefinition[] {
                 target: inputTarget,
                 currentValue: request.currentValue,
                 rejectedValues: request.rejectedValues,
+                direction: request.direction,
                 authoritativeContext: buildPrismCompanionAuthoritativeContext(
                   db,
                   userId,
@@ -18827,6 +18974,58 @@ function buildRoutes(): RouteDefinition[] {
       );
       json(ctx.res, 200, { ok: true, checks });
     }),
+    route("POST", "/api/debates/mystery-exterior/draft", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const user = getUserRow(userId);
+      if (body.responseMode === "local" || userBlocksOnlineCapabilities(user)) {
+        throw new HttpError(409, "Mansion exterior Refract is ONLINE only. LOCAL keeps the bundled house cover.");
+      }
+      const preset = body.preset === "standard" || body.preset === "grand" || body.preset === "custom"
+        ? body.preset
+        : "compact";
+      const scaleClass = resolveDebateMysteryMansionExteriorScaleClassV1({
+        preset,
+        floors: typeof body.floors === "number" ? body.floors : 2,
+        totalRooms: typeof body.totalRooms === "number" ? body.totalRooms : 5,
+      });
+      const direction = normalizePrismRefractDirection(body.direction);
+      if (!direction) {
+        throw new HttpError(400, "Describe the mansion exterior before refracting it.");
+      }
+      const canonicalPrompt = debateMysteryMansionExteriorPromptV1(
+        debateMysteryHouseStyleV2(direction),
+        scaleClass,
+      );
+      const prompt = `${canonicalPrompt}\nCreative direction for this pass: ${direction}`;
+      const selection = resolveTypedAssetGenerationSelection(userId, "debate_exhibit", {
+        provider: "openai",
+        model: typeof body.model === "string" ? body.model : undefined,
+      });
+      const asset = await generateAndPersistStandaloneImageAsset({
+        userId,
+        prompt,
+        persistencePrompt: canonicalPrompt,
+        preferredProvider: selection.provider,
+        requestedImageModel: selection.model,
+        signal: new AbortController().signal,
+        size: "1536x1024",
+        origin: "debate",
+        purpose: "whodunnit_mansion_exterior_draft",
+        featureLabel: "a mansion exterior",
+        normalizeImageBytes: async (bytes) => sharp(bytes, { failOn: "error" })
+          .rotate()
+          .flatten({ background: { r: 3, g: 8, b: 14 } })
+          .resize(1600, 900, { fit: "cover", position: "centre" })
+          .removeAlpha()
+          .png({ compressionLevel: 9 })
+          .toBuffer(),
+      });
+      json(ctx.res, 201, {
+        ok: true,
+        image: { id: asset.imageId, displayUrl: asset.imageUrl, scaleClass },
+      });
+    }),
     route("POST", "/api/debates", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -18870,6 +19069,7 @@ function buildRoutes(): RouteDefinition[] {
                 prepareEvidenceAssets: prepareDebateMysteryV2EvidenceAssets,
                 prepareRoomAssets: prepareDebateMysteryV2RoomAssets,
                 prepareMansionExteriorAsset: prepareDebateMysteryV2MansionExteriorAsset,
+                adoptMansionExteriorDraft: adoptDebateMysteryV2MansionExteriorDraft,
                 onCompilationReady: (ready) =>
                   queueDebateMysteryV2RoomAssetBackground(userId, ready.id),
               },
@@ -23793,6 +23993,10 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("DELETE", "/api/botcast/episodes/:id", async (ctx) => {
       const userId = requireAuth(ctx);
+      signalAdvanceOperations.cancel(
+        `${userId}:${ctx.params.id}`,
+        new DOMException("Signal episode discarded.", "AbortError"),
+      );
       invalidateTurnPreparation(userId, "signal", ctx.params.id, "Signal episode exited.");
       const user = getUserRow(userId);
       const targetEpisode = (() => {
@@ -23838,6 +24042,10 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/botcast/episodes/:id/end", async (ctx) => {
       const userId = requireAuth(ctx);
+      signalAdvanceOperations.cancel(
+        `${userId}:${ctx.params.id}`,
+        new DOMException("Signal show cut.", "AbortError"),
+      );
       invalidateTurnPreparation(userId, "signal", ctx.params.id, "Signal episode ended.");
       const body = (ctx.body ?? {}) as Record<string, unknown>;
       if (
@@ -24053,35 +24261,72 @@ function buildRoutes(): RouteDefinition[] {
         if (typeof body.holdId !== "string" || !body.holdId.trim()) {
           throw new HttpError(400, "holdId is required.");
         }
-        if (body.reason !== "foreground_generation") {
-          throw new HttpError(400, "reason must be foreground_generation.");
-        }
         if (
-          typeof body.durationMs !== "number" ||
-          !Number.isFinite(body.durationMs) ||
-          body.durationMs < 0
+          body.reason !== "foreground_generation" &&
+          body.reason !== "producer_composing"
         ) {
-          throw new HttpError(400, "durationMs must be a non-negative number.");
+          throw new HttpError(
+            400,
+            "reason must be foreground_generation or producer_composing.",
+          );
         }
-        if (
-          body.recovery !== undefined &&
-          body.recovery !== "preparation_timeout"
-        ) {
-          throw new HttpError(400, "recovery must be preparation_timeout.");
+        if (body.reason === "producer_composing") {
+          if (typeof body.active !== "boolean") {
+            throw new HttpError(400, "active (boolean) is required.");
+          }
+          if (
+            body.active === false &&
+            (typeof body.durationMs !== "number" ||
+              !Number.isFinite(body.durationMs) ||
+              body.durationMs < 0)
+          ) {
+            throw new HttpError(
+              400,
+              "durationMs must be a non-negative number when ending a composing hold.",
+            );
+          }
+        } else {
+          if (
+            typeof body.durationMs !== "number" ||
+            !Number.isFinite(body.durationMs) ||
+            body.durationMs < 0
+          ) {
+            throw new HttpError(400, "durationMs must be a non-negative number.");
+          }
+          if (
+            body.recovery !== undefined &&
+            body.recovery !== "preparation_timeout"
+          ) {
+            throw new HttpError(400, "recovery must be preparation_timeout.");
+          }
         }
-        const episode = recordBotcastSessionClockHold(
-          db,
-          userId,
-          ctx.params.id,
-          {
-            holdId: body.holdId,
-            reason: body.reason,
-            durationMs: body.durationMs,
-            ...(body.recovery === "preparation_timeout"
-              ? { recovery: body.recovery }
-              : {}),
-          },
-        );
+        const episode = body.reason === "producer_composing"
+          ? recordBotcastSessionClockHold(
+              db,
+              userId,
+              ctx.params.id,
+              {
+                holdId: body.holdId,
+                reason: "producer_composing",
+                active: body.active as boolean,
+                ...(body.active === false
+                  ? { durationMs: body.durationMs as number }
+                  : {}),
+              },
+            )
+          : recordBotcastSessionClockHold(
+              db,
+              userId,
+              ctx.params.id,
+              {
+                holdId: body.holdId,
+                reason: "foreground_generation",
+                durationMs: body.durationMs as number,
+                ...(body.recovery === "preparation_timeout"
+                  ? { recovery: body.recovery }
+                  : {}),
+              },
+            );
         json(ctx.res, 200, {
           ok: true,
           episode: projectBotcastEpisodeForAudienceV1(episode),
@@ -24768,6 +25013,35 @@ function buildRoutes(): RouteDefinition[] {
               model: runtime.model,
               replayEmoji: signalEpisodeImage.replayEmoji,
               presentationReason: signalEpisodeImage.presentationReason,
+              visualRecognition:
+                signalEpisodeImage.visualIdentity?.status === "ready"
+                  ? {
+                      v: 1,
+                      status: "pending",
+                      candidateCount:
+                        signalEpisodeImage.visualIdentity.candidates.length,
+                      pageCount: signalEpisodeImage.visualIdentity.pages.length,
+                      startedAt: new Date().toISOString(),
+                    }
+                  : signalEpisodeImage.visualIdentity?.reason === "deadline"
+                    ? {
+                        v: 1,
+                        status: "timed_out",
+                        reason: "deadline",
+                        provider: runtime.provider,
+                        model: runtime.model,
+                        completedAt: new Date().toISOString(),
+                      }
+                    : {
+                      v: 1,
+                      status: "unavailable",
+                      reason:
+                        signalEpisodeImage.visualIdentity?.reason ??
+                        "not_requested",
+                      provider: runtime.provider,
+                      model: runtime.model,
+                      completedAt: new Date().toISOString(),
+                    },
               replayProxy: {
                 id: randomId(12),
                 ...replayProxy,
@@ -24903,6 +25177,12 @@ function buildRoutes(): RouteDefinition[] {
                         signalEpisodeImage: {
                           imageId: signalEpisodeImage.imageId,
                           input: signalEpisodeImage.input,
+                          ...(signalEpisodeImage.visualIdentity
+                            ? {
+                                visualIdentity:
+                                  signalEpisodeImage.visualIdentity,
+                              }
+                            : {}),
                           ...(signalEpisodeImage.presentationReason
                             ? {
                                 presentationReason:
@@ -25114,6 +25394,35 @@ function buildRoutes(): RouteDefinition[] {
             model: imageRuntime.model,
             replayEmoji: signalEpisodeImage.replayEmoji,
             presentationReason: signalEpisodeImage.presentationReason,
+            visualRecognition:
+              signalEpisodeImage.visualIdentity?.status === "ready"
+                ? {
+                    v: 1,
+                    status: "pending",
+                    candidateCount:
+                      signalEpisodeImage.visualIdentity.candidates.length,
+                    pageCount: signalEpisodeImage.visualIdentity.pages.length,
+                    startedAt: new Date().toISOString(),
+                  }
+                : signalEpisodeImage.visualIdentity?.reason === "deadline"
+                  ? {
+                      v: 1,
+                      status: "timed_out",
+                      reason: "deadline",
+                      provider: imageRuntime.provider,
+                      model: imageRuntime.model,
+                      completedAt: new Date().toISOString(),
+                    }
+                  : {
+                    v: 1,
+                    status: "unavailable",
+                    reason:
+                      signalEpisodeImage.visualIdentity?.reason ??
+                      "not_requested",
+                    provider: imageRuntime.provider,
+                    model: imageRuntime.model,
+                    completedAt: new Date().toISOString(),
+                  },
             allowWatchBake: true,
             replayProxy: { id: randomId(12), ...replayProxy },
           },
@@ -25131,6 +25440,11 @@ function buildRoutes(): RouteDefinition[] {
                 signalEpisodeImage: {
                   imageId: signalEpisodeImage.imageId,
                   input: signalEpisodeImage.input,
+                  ...(signalEpisodeImage.visualIdentity
+                    ? {
+                        visualIdentity: signalEpisodeImage.visualIdentity,
+                      }
+                    : {}),
                   ...(signalEpisodeImage.presentationReason
                     ? {
                         presentationReason:
@@ -25193,6 +25507,10 @@ function buildRoutes(): RouteDefinition[] {
         );
       }
       liveBakeJobs.cancelSignalBake(userId, ctx.params.id);
+      signalAdvanceOperations.cancel(
+        `${userId}:${ctx.params.id}`,
+        new DOMException("Signal bake cancelled.", "AbortError"),
+      );
       const latest =
         episode.status === "completed"
           ? episode
@@ -30765,6 +31083,25 @@ function buildRoutes(): RouteDefinition[] {
         json(ctx.res, boundary.status, boundary);
         return;
       }
+      const censorCarrierText =
+        boundary.kind === "elevenlabs-stream"
+          ? boundary.elevenLabsText
+          : boundary.text;
+      if (
+        boundary.kind !== "builtin-babble" &&
+        boundary.censorRanges.length > 0
+      ) {
+        ctx.res.setHeader(
+          "x-prism-voice-censors",
+          encodeURIComponent(
+            JSON.stringify({
+              version: 1,
+              textLength: censorCarrierText.length,
+              ranges: boundary.censorRanges,
+            }),
+          ),
+        );
+      }
       if (boundary.kind === "builtin-babble") {
         const controller = new AbortController();
         const onClose = () => controller.abort();
@@ -30801,7 +31138,11 @@ function buildRoutes(): RouteDefinition[] {
             }
           : null;
         try {
-          if (raw.streamChunks === true && !request.includeAlignment) {
+          if (
+            raw.streamChunks === true &&
+            !request.includeAlignment &&
+            boundary.censorRanges.length === 0
+          ) {
             await sendLocalVoiceWaveStream({
               response: ctx.res,
               text: babbleText,
@@ -30858,7 +31199,11 @@ function buildRoutes(): RouteDefinition[] {
           allowOperatingSystemVoices,
         );
         try {
-          if (raw.streamChunks === true && !request.includeAlignment) {
+          if (
+            raw.streamChunks === true &&
+            !request.includeAlignment &&
+            (boundary.censorRanges.length === 0 || !localPerformancePlan)
+          ) {
             await sendLocalVoiceWaveStream({
               response: ctx.res,
               text: boundary.text,
@@ -30962,7 +31307,10 @@ function buildRoutes(): RouteDefinition[] {
           allowOperatingSystemVoices,
         );
         try {
-          if (raw.streamChunks === true) {
+          if (
+            raw.streamChunks === true &&
+            (boundary.censorRanges.length === 0 || !localPerformancePlan)
+          ) {
             await sendLocalVoiceWaveStream({
               response: ctx.res,
               text: boundary.text,
@@ -35470,6 +35818,131 @@ function buildRoutes(): RouteDefinition[] {
         ctx.req.off("close", onClose);
       }
     }),
+    route("POST", "/api/bots/generate-avatar-details-ink", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const prompt = normalizeBotGenerationPrompt(body.prompt);
+      if (!prompt) {
+        throw new HttpError(400, "Describe the Ink you want first.");
+      }
+      const requestedResponseMode = normalizeResponseMode(
+        body.responseMode,
+        user.preferred_provider === "local" ? "local" : "online",
+      );
+      const responseMode =
+        requestedResponseMode === "auto"
+          ? user.preferred_provider === "local"
+            ? "local"
+            : "online"
+          : requestedResponseMode;
+      const requestedProvider = readProvider(body.preferredProvider);
+      const primaryProvider: ProviderName =
+        responseMode === "local"
+          ? "local"
+          : requestedProvider && requestedProvider !== "local"
+            ? requestedProvider
+            : user.preferred_provider !== "local"
+              ? user.preferred_provider
+              : "openai";
+      // LOCAL is a hard offline lane: do not resolve or initialize online keys.
+      const userKey = decryptUserKey(userId);
+      const onlineAllowed = responseMode !== "local";
+      const openAiApiKey = onlineAllowed
+        ? (getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey)
+        : undefined;
+      const anthropicApiKey = onlineAllowed
+        ? (getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey)
+        : undefined;
+      const ollamaCloudApiKey = onlineAllowed
+        ? (getOllamaCloudApiKeyForUser(userId, userKey) ?? config.ollamaApiKey)
+        : undefined;
+      const catalog = await buildModelCatalog(
+        openAiApiKey,
+        user.secondary_ollama_host,
+        anthropicApiKey,
+        ollamaCloudApiKey,
+      );
+      const requestedModelOverride = readModelOverride(body.modelOverride);
+      const resolved = resolveAutoModel({
+        provider: primaryProvider,
+        lane: responseMode,
+        explicitModelOverride:
+          requestedModelOverride?.toLowerCase() === "auto"
+            ? null
+            : requestedModelOverride,
+        hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
+        catalog,
+        onlineAutoProviderBias: clampOnlineAutoProviderBias(
+          user.online_auto_provider_bias,
+        ),
+        onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
+          user.online_auto_provider_weights,
+          user.online_auto_provider_bias,
+        ),
+        onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
+          user.online_auto_quality_posture,
+        ),
+        routingContext: {
+          surface: "bot-generation",
+          inputText: prompt,
+          structuredOutput: true,
+          outputTokens: 1_200,
+        },
+      });
+      const provider = providerFactoryOverride(
+        resolved.provider,
+        openAiApiKey,
+        user.secondary_ollama_host,
+        anthropicApiKey,
+        ollamaCloudApiKey,
+      );
+      const controller = new AbortController();
+      const onClose = () => controller.abort();
+      ctx.req.once("close", onClose);
+      try {
+        const result = await runWithUsageSession(
+          {
+            db,
+            userId,
+            privacyScope: "normal",
+            mode: "system",
+            surface: "bots",
+          },
+          () =>
+            generateAvatarDetailsInk({
+              prompt,
+              provider,
+              providerName: resolved.provider,
+              model: resolved.model,
+              responseMode,
+              autoFallbackChain: parseStoredAutoFallbackChain(
+                user.auto_fallback_chain,
+              ),
+              providerFactory: providerFactoryOverride,
+              openAiApiKey,
+              anthropicApiKey,
+              secondaryOllamaHost: user.secondary_ollama_host,
+              signal: controller.signal,
+            }),
+        );
+        json(ctx.res, 200, { ok: true, ...result });
+      } catch (error) {
+        if (error instanceof BotGenerationError) {
+          throw new HttpError(
+            error.kind === "invalid_prompt" ? 400 : 502,
+            error.message,
+          );
+        }
+        if (controller.signal.aborted) throw error;
+        throw new HttpError(
+          502,
+          "PRISM could not reach the selected Ink model. Your current draft is unchanged.",
+        );
+      } finally {
+        ctx.req.off("close", onClose);
+      }
+    }),
     route("POST", "/api/bots/generate-draft", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
@@ -36112,9 +36585,9 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const rows = db
         .prepare(
-          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_eye_spacing, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_count, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC",
+          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_eye_spacing, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_count, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at, CASE WHEN user_id = ? THEN 1 ELSE 0 END AS owned FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC",
         )
-        .all(userId) as Record<string, unknown>[];
+        .all(userId, userId) as Record<string, unknown>[];
       json(ctx.res, 200, { ok: true, bots: botRowsForResponse(rows) });
     }),
     route("GET", "/api/bots/:id", async (ctx) => {

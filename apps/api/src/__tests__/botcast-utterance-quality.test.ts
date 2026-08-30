@@ -8,6 +8,7 @@ import {
   botcastHostTurnIncludesDirectQuote,
   botcastHostUtteranceIsGenericStall,
   botcastHostUtteranceNeedsInterviewQuestion,
+  botcastProducerCueRecoveryAnchor,
   botcastRecoveryUtteranceIsNearDuplicate,
   botcastUtteranceContainsScreenplayLabels,
   botcastUtteranceIsNearDuplicate,
@@ -20,6 +21,14 @@ const FREUD_SCREENPLAY =
   '"Something feels... off. Not just in the air, but in the way we\'re here. You know what I mean?" **Action:** *leans slightly forward, eyes scanning the room with a quiet intensity.* **Spoken Line:** "Something feels... off. Not just in the air, but in the way we\'re here. You know what I mean?"';
 
 describe("botcast utterance quality", () => {
+  it("reduces a private producer direction to one safe subject anchor", () => {
+    assert.equal(
+      botcastProducerCueRecoveryAnchor("what is written in the notebook"),
+      "notebook",
+    );
+    assert.equal(botcastProducerCueRecoveryAnchor("what about this"), null);
+  });
+
   it("rejects labeled Action / Spoken Line screenplay scaffolding", () => {
     assert.equal(botcastUtteranceContainsScreenplayLabels(FREUD_SCREENPLAY), true);
     assert.equal(botcastUtteranceContainsScreenplayLabels("**Action:**"), true);

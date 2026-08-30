@@ -184,6 +184,22 @@ function expandCueTokens(source: string): Set<string> {
   return tokens;
 }
 
+/**
+ * Return one safe subject word for a deterministic cue-recovery question.
+ * The full private direction stays off air; the final meaningful word is
+ * usually the noun the Producer intended the host to pursue.
+ */
+export function botcastProducerCueRecoveryAnchor(
+  cueDetail: string,
+): string | null {
+  let anchor: string | null = null;
+  for (const word of words(normalizeForDuplicate(cueDetail))) {
+    if (word.length < 4 || BOTCAST_CUE_STOPWORDS.has(word)) continue;
+    anchor = word.slice(0, 40);
+  }
+  return anchor;
+}
+
 function jaccard(left: readonly string[], right: readonly string[]): number {
   const leftSet = new Set(left);
   const rightSet = new Set(right);

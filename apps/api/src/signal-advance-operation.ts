@@ -62,6 +62,17 @@ export class SignalAdvanceOperationRegistry {
     if (this.isCurrent(run)) this.#active.delete(run.key);
   }
 
+  /** Cancels the current owned run without letting stale cleanup touch a successor. */
+  public cancel(key: string, reason?: unknown): boolean {
+    const current = this.#active.get(key);
+    if (!current) return false;
+    current.controller.abort(
+      reason ?? new DOMException("Signal advance cancelled.", "AbortError"),
+    );
+    this.#active.delete(key);
+    return true;
+  }
+
   public async run<T>(
     run: SignalAdvanceOperationRun,
     work: (signal: AbortSignal) => Promise<T>,

@@ -17,6 +17,12 @@ import {
   resumeAudioContextIfNeeded,
 } from "./audioContextRecovery.ts";
 import { createVoiceLightMeter } from "./voiceLightEnvelope.ts";
+import {
+  connectVoiceCensorTone,
+  resolveVoiceCensorTimings,
+  type VoiceCensorPlanV1,
+} from "./voiceCensorTone.ts";
+import type { VoicePlaybackCharacterAlignment } from "./voiceEffects.ts";
 
 export type ReplayAudioMasterCaptureResult = {
   sourceId: string;
@@ -201,7 +207,13 @@ export function prismLocalOnlyAudioOutputNode(context: AudioContext): AudioNode 
  */
 export function routeAudioElementToPrismOutput(
   audio: HTMLMediaElement,
-  options: { onLevel?: (level: number) => void } = {},
+  options: {
+    onLevel?: (level: number) => void;
+    censorPlan?: VoiceCensorPlanV1 | null;
+    censorAlignment?: VoicePlaybackCharacterAlignment | null;
+    censorDurationMs?: number;
+    readCensorElapsedMs?: () => number;
+  } = {},
 ): (() => void) | null {
   const context = prismAudioContext();
   const output = worldOutputForSharedContext();
@@ -217,12 +229,58 @@ export function routeAudioElementToPrismOutput(
     const lightMeter = options.onLevel
       ? createVoiceLightMeter(context, options.onLevel)
       : null;
-    if (lightMeter) source.connect(lightMeter.node).connect(output);
-    else source.connect(output);
+    const routedNodes: AudioNode[] = [];
+    let routed = false;
+    const connectRoute = () => {
+      if (routed) return;
+      routed = true;
+      const nativeDurationMs =
+        Number.isFinite(audio.duration) && audio.duration > 0
+          ? (audio.duration * 1_000) / Math.max(0.01, audio.playbackRate)
+          : 0;
+      const durationMs = Math.max(
+        1,
+        options.censorDurationMs ?? nativeDurationMs,
+      );
+      const timings = resolveVoiceCensorTimings({
+        plan: options.censorPlan,
+        alignment: options.censorAlignment,
+        durationMs,
+      });
+      const routeInput = timings.length > 0 ? context.createGain() : source;
+      if (timings.length > 0) {
+        routedNodes.push(routeInput);
+        routedNodes.push(
+          ...connectVoiceCensorTone({
+            context,
+            speechInput: source,
+            output: routeInput,
+            timings,
+            startAt: context.currentTime,
+            elapsedMs: options.readCensorElapsedMs?.() ?? 0,
+          }),
+        );
+      }
+      if (lightMeter) routeInput.connect(lightMeter.node).connect(output);
+      else routeInput.connect(output);
+    };
+    if (options.censorPlan) audio.addEventListener("playing", connectRoute, { once: true });
+    else connectRoute();
     return () => {
       lightMeter?.stop();
+      if (typeof audio.removeEventListener === "function") {
+        audio.removeEventListener("playing", connectRoute);
+      }
+      for (const node of routedNodes) {
+        try {
+          if ("stop" in node && typeof node.stop === "function") node.stop();
+        } catch {
+          // Scheduled source already ended.
+        }
+      }
       try {
         source.disconnect();
+        for (const node of routedNodes) node.disconnect();
         lightMeter?.node.disconnect();
       } catch {
         // The media element or shared context is already released.
@@ -922,6 +980,8 @@ export function startReplayThinkingPresentation(args: {
 export function endReplayThinkingPresentation(args: {
   sourceId: string;
   participantId: string;
+  resolvedParticipantId?: string | null;
+  resolvedBotId?: string | null;
   followingMessageId?: string | null;
   reason?: ReplayThinkingDirectionPayloadV2["endReason"];
   atMs?: number;
@@ -947,9 +1007,16 @@ export function endReplayThinkingPresentation(args: {
   const presentationDurationMs = compact
     ? Math.max(1, Math.round(nowMs() - active.startedAtWallMs))
     : endMs - active.startMs;
+  const resolvedParticipantId =
+    args.resolvedParticipantId?.trim() || active.participantId;
+  const resolvedBotId =
+    args.resolvedBotId?.trim() ||
+    (args.resolvedParticipantId?.trim()
+      ? resolvedParticipantId
+      : active.botId);
   const payload: ReplayThinkingDirectionPayloadV2 = {
-    participantId: active.participantId,
-    botId: active.botId,
+    participantId: resolvedParticipantId,
+    botId: resolvedBotId,
     startMs: active.startMs,
     endMs,
     presentationDurationMs,
@@ -980,6 +1047,10 @@ export function syncReplayThinkingPresentations(args: {
     segment: string | null;
   }[];
   followingMessageId?: string | null;
+  followingParticipant?: {
+    participantId: string;
+    botId?: string | null;
+  } | null;
   endReason?: ReplayThinkingDirectionPayloadV2["endReason"];
   endingSegment?: string | null;
 }): void {
@@ -1002,6 +1073,8 @@ export function syncReplayThinkingPresentations(args: {
       endReplayThinkingPresentation({
         sourceId: args.sourceId,
         participantId,
+        resolvedParticipantId: args.followingParticipant?.participantId,
+        resolvedBotId: args.followingParticipant?.botId,
         followingMessageId: args.followingMessageId,
         reason: args.endReason ?? "completed",
       });

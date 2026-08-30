@@ -97,11 +97,10 @@ export function signalStudioIncidentCaptionAtProgressV1(args: {
       kind: "dialogue",
     };
   }
-  return {
-    text: args.incident.caption,
-    actorBotId: args.incident.actorBotId,
-    kind: "incident",
-  };
+  // Foley, gain changes, and physical actions belong to the performed stage,
+  // not the speaker-labelled dialogue caption. Keep only genuinely spoken
+  // incident interjections on the CC surface.
+  return null;
 }
 
 /** One saved timeline feeds live capture and faithful replay reconstruction. */

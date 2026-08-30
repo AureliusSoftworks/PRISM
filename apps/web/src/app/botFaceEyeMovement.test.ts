@@ -29,14 +29,14 @@ const ENVELOPES: Record<
 };
 
 describe("bot eye movement modes", () => {
-  it("keeps authored Ink registered while off-mic", () => {
+  it("keeps the saved eye style active with authored Ink while off-mic", () => {
     assert.equal(
       botFaceEyeMovementPreservingInkRegistration({
         movement: "paranoid",
         hasVisibleInk: true,
         talking: false,
       }),
-      "still",
+      "paranoid",
     );
     assert.equal(
       botFaceEyeMovementPreservingInkRegistration({
@@ -262,6 +262,11 @@ describe("bot eye movement modes", () => {
       /setDisplayGaze\(\{\s*xPx:\s*resolvedGazeXPx,\s*yPx:\s*resolvedGazeYPx,\s*transitionMs:\s*resolvedGazeTransitionMs,?\s*\}\)/,
     );
     assert.match(renderer, /data-face-eye-gaze-snap=\{gazeSnapsOpen/);
+    assert.match(renderer, /const blinkEnabled = enabled && !staticFace/);
+    assert.match(
+      renderer,
+      /const normalizedEyeMovement =[\s\S]{0,100}staticFace \|\| motionMode === "mini-led"[\s\S]{0,100}normalizeBotFaceEyeMovement\(faceEyeMovement\)/,
+    );
     assert.match(renderer, /botFaceEyeMovementIsActive\(normalizedEyeMovement\)/);
     assert.match(
       renderer,
@@ -270,13 +275,10 @@ describe("bot eye movement modes", () => {
     assert.match(renderer, /movement: normalizedEyeMovement/);
     assert.match(page, /faceEyeMovement=\{[\s\S]*faceStyle\.eyeAnimation/);
     assert.match(page, /blinkWhileTalking = true/);
+    assert.match(page, /faceEyeMovement=\{registeredFaceEyeMovement\}/);
     assert.match(
       page,
-      /renderDetailLevel === "debate"\s*\? registeredFaceEyeMovement\s*:\s*"still"/,
-    );
-    assert.match(
-      page,
-      /renderDetailLevel === "full"\s*\? registeredFaceEyeMovement\s*:\s*"still"/,
+      /faceEyeMovement="still"/,
     );
     assert.match(
       page,

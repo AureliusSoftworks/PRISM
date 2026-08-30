@@ -63,6 +63,23 @@ describe("Avatar Details Studio integration", () => {
     assert.doesNotMatch(pageSource, /Apply avatar details\?/);
   });
 
+  it("refracts a prompt into one editable, undoable Ink draft without autosaving", () => {
+    assert.match(editorSource, /<strong>Refract Ink<\/strong>/u);
+    assert.match(editorSource, /aria-label="Ink direction"/u);
+    assert.match(editorSource, /onGenerateInk\?:/u);
+    assert.match(editorSource, /const sourceKey = avatarDetailsKey\(workingRef\.current\)/u);
+    assert.match(editorSource, /avatarDetailsKey\(workingRef\.current\) !== sourceKey/u);
+    assert.match(editorSource, /commitMutation\(generated\)/u);
+    assert.match(editorSource, /Undo restores your previous Ink/u);
+    assert.match(editorCss, /\.inkRefract\s*\{[^}]*grid-area:\s*refract/u);
+    assert.match(
+      editorCss,
+      /\.editor\[data-editor-layout="foundry"\] \.paintSection\s*\{[\s\S]*grid-template-areas:\s*"header"\s*"refract"\s*"tools"/u,
+    );
+    assert.match(pageSource, /"\/api\/bots\/generate-avatar-details-ink"/u);
+    assert.match(pageSource, /onGenerateAvatarDetailsInk=\{generateAvatarDetailsInk\}/u);
+  });
+
   it("routes Studio undo and redo to Ink before falling back to the avatar draft", () => {
     assert.match(editorSource, /undo\(\): boolean/);
     assert.match(editorSource, /redo\(\): boolean/);

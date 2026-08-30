@@ -14,6 +14,7 @@ import type {
 } from "@localai/shared";
 import {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  debateMysteryHouseStyleV2,
   debateMysteryTalkTopicMirrorsRecordV2,
   debateMysterySpectatorEvidenceReferencesV2,
   reasoningGenerationBudgetMs,
@@ -448,6 +449,151 @@ class IncompleteFoundationV2AuthorProvider extends V2AuthorProvider {
       this.calls += 1;
       this.sections.push("case_foundation");
       return JSON.stringify({ title: "An Incomplete Local Draft" });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class DurableCaseTitleV2AuthorProvider extends V2AuthorProvider {
+  public foundationAttempts = 0;
+  private roomRequestPaused = false;
+  private releaseRoomRequest: (() => void) | null = null;
+  private readonly roomRequestReached: Promise<void>;
+  private markRoomRequestReached: (() => void) | null = null;
+
+  public constructor() {
+    super();
+    this.roomRequestReached = new Promise<void>((resolve) => {
+      this.markRoomRequestReached = resolve;
+    });
+  }
+
+  public waitForRoomRequest(): Promise<void> {
+    return this.roomRequestReached;
+  }
+
+  public continueRoomAuthoring(): void {
+    this.releaseRoomRequest?.();
+    this.releaseRoomRequest = null;
+  }
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const request = JSON.parse(messages.at(-1)!.content) as { section?: string };
+    if (request.section === "case_foundation") {
+      this.foundationAttempts += 1;
+      const response = JSON.parse(
+        await super.generateResponse(messages, options),
+      ) as Record<string, unknown>;
+      response.title = this.foundationAttempts === 1
+        ? "The Disappearance of an earlier unexplained disappearance"
+        : this.foundationAttempts === 2
+          ? "Vanished in the Vanishing"
+          : "The Missing Hour at Blackwood";
+      return JSON.stringify(response);
+    }
+    if (request.section === "room_examinations" && !this.roomRequestPaused) {
+      this.roomRequestPaused = true;
+      this.markRoomRequestReached?.();
+      this.markRoomRequestReached = null;
+      await new Promise<void>((resolve) => {
+        this.releaseRoomRequest = resolve;
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class ResilientRoomExaminationsV2AuthorProvider extends V2AuthorProvider {
+  public readonly firstBatchTextById = new Map<string, string>();
+  public readonly invalidBatchIds: string[] = [];
+  public invalidBatchAttempts = 0;
+  private readonly batchKeys: string[] = [];
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const request = JSON.parse(messages.at(-1)!.content) as {
+      section?: string;
+      setup?: { examinationIds?: string[] };
+    };
+    if (request.section !== "room_examinations") {
+      return super.generateResponse(messages, options);
+    }
+    const examinationIds = request.setup?.examinationIds ?? [];
+    const batchKey = examinationIds.join("|");
+    if (!this.batchKeys.includes(batchKey)) this.batchKeys.push(batchKey);
+    const batchIndex = this.batchKeys.indexOf(batchKey);
+    this.calls += 1;
+    this.sections.push("room_examinations");
+    if (batchIndex === 0) {
+      const examinationsById = examinationIds.map((id, index) => {
+        const text =
+          `Mapped examination ${index + 1} records a visible material disturbance and its exact position without deciding what the observation proves.`;
+        this.firstBatchTextById.set(id, text);
+        return { id, text };
+      });
+      return JSON.stringify({ examinationsById });
+    }
+    if (batchIndex === 1) {
+      this.invalidBatchAttempts += 1;
+      this.invalidBatchIds.splice(0, this.invalidBatchIds.length, ...examinationIds);
+      return JSON.stringify({ examinationsById: [] });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class ResumableRecoveredRoomExaminationsV2AuthorProvider extends
+  ResilientRoomExaminationsV2AuthorProvider {
+  public permitSecondChapter = false;
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const request = JSON.parse(messages.at(-1)!.content) as {
+      section?: string;
+      suspect?: { seatId?: string };
+    };
+    if (
+      request.section === "suspect_chapter" &&
+      request.suspect?.seatId === "suspect-2" &&
+      !this.permitSecondChapter
+    ) {
+      this.calls += 1;
+      this.sections.push("suspect_chapter:suspect-2");
+      throw new Error("simulated interruption after recovered room authoring");
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class FailingRoomExaminationsV2AuthorProvider extends V2AuthorProvider {
+  public failedBatchAttempts = 0;
+  private readonly batchKeys: string[] = [];
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const request = JSON.parse(messages.at(-1)!.content) as {
+      section?: string;
+      setup?: { examinationIds?: string[] };
+    };
+    if (request.section !== "room_examinations") {
+      return super.generateResponse(messages, options);
+    }
+    const batchKey = (request.setup?.examinationIds ?? []).join("|");
+    if (!this.batchKeys.includes(batchKey)) this.batchKeys.push(batchKey);
+    if (this.batchKeys.indexOf(batchKey) === 1) {
+      this.calls += 1;
+      this.sections.push("room_examinations");
+      this.failedBatchAttempts += 1;
+      throw new Error("simulated room author provider outage");
     }
     return super.generateResponse(messages, options);
   }
@@ -1276,6 +1422,40 @@ function config(): DebateWhodunnitCreateConfigV2 {
   };
 }
 
+it("makes mansion exterior generation explicit and never queues an automatic prewarm", () => {
+  const server = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+  const routeStart = server.indexOf('route("POST", "/api/debates", async (ctx) =>');
+  const routeEnd = server.indexOf('route("POST", "/api/debates/:id/mystery-assets/prepare"', routeStart);
+  const route = server.slice(routeStart, routeEnd);
+  assert.ok(routeStart >= 0 && routeEnd > routeStart);
+  assert.doesNotMatch(route, /queueDebateMysteryV2MansionExteriorBeforeForge/u);
+  assert.doesNotMatch(server, /mysteryMansionExteriorPrewarmRuns/u);
+  assert.match(server, /route\("POST", "\/api\/debates\/mystery-exterior\/draft"[\s\S]*?responseMode === "local"/u);
+  assert.match(server, /purpose: "whodunnit_mansion_exterior_draft"/u);
+  assert.match(server, /adoptMansionExteriorDraft: adoptDebateMysteryV2MansionExteriorDraft/u);
+  const exteriorRouteStart = server.indexOf('route("POST", "/api/debates/mystery-exterior/draft"');
+  const exteriorRouteEnd = server.indexOf('route("POST", "/api/debates", async (ctx) =>', exteriorRouteStart);
+  const exteriorRoute = server.slice(exteriorRouteStart, exteriorRouteEnd);
+  assert.ok(exteriorRouteStart >= 0 && exteriorRouteEnd > exteriorRouteStart);
+  assert.doesNotMatch(exteriorRoute, /body\.inspiration/u);
+  assert.match(exteriorRoute, /debateMysteryHouseStyleV2\(direction\)/u);
+});
+
+it("lets an accepted Mansion direction own house style instead of Story", () => {
+  const resolved = resolveDebateMysteryConfigV2({
+    ...config(),
+    inspiration: "A severe Brutalist winter conspiracy",
+    mansionExteriorImageId: "draft-exterior",
+    mansionExteriorDirection: "Moonlit Art Deco observatory above a foggy coast",
+  });
+  const expected = debateMysteryHouseStyleV2(
+    "Moonlit Art Deco observatory above a foggy coast",
+  );
+  assert.equal(resolved.houseStyle.id, expected.id);
+  assert.equal("mansionExteriorImageId" in resolved, false);
+  assert.equal("mansionExteriorDirection" in resolved, false);
+});
+
 it("uses the embodied participant Persona as the Casekeeper Bottish carrier", () => {
   const participant = resolveDebateMysteryConfigV2({
     ...config(),
@@ -1893,6 +2073,58 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     );
   });
 
+  it("freezes the accepted setup exterior through Case Forge compilation", async () => {
+    const db = testDb();
+    const provider = new V2AuthorProvider();
+    const exterior = {
+      version: 1,
+      id: "accepted-mansion-exterior",
+      kind: "room",
+      status: "ready",
+      source: "synthesized",
+      revealed: true,
+      mimeType: "image/png",
+    } satisfies DebateMysterySealedAssetRefV1;
+    let adoptionCount = 0;
+    let fallbackCount = 0;
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      { ...config(), mansionExteriorImageId: "draft-mansion-exterior" },
+      "create-v2-accepted-mansion-exterior",
+      runtime(provider),
+      {
+        deferBackgroundStart: true,
+        adoptMansionExteriorDraft: async ({ userId, sessionId, imageId }) => {
+          adoptionCount += 1;
+          assert.equal(userId, "user-1");
+          assert.ok(sessionId.length > 0);
+          assert.equal(imageId, "draft-mansion-exterior");
+          return exterior;
+        },
+      },
+    );
+    assert.deepEqual(v2State(created).mansionExterior, exterior);
+
+    const compiled = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      runtime(provider),
+      {
+        generateWave: async () => playableWave(),
+        prepareMansionExteriorAsset: async () => {
+          fallbackCount += 1;
+          throw new Error("accepted setup art must not be replaced");
+        },
+      },
+    );
+    assert.equal(adoptionCount, 1);
+    assert.equal(fallbackCount, 0);
+    assert.equal(v2State(compiled).compilation.stage, "complete");
+    assert.deepEqual(v2State(compiled).mansionExterior, exterior);
+  });
+
   it("recovers exact clock testimony from a witness without exact recall", async () => {
     const db = testDb();
     const provider = new ExactClockWithoutRecallV2AuthorProvider();
@@ -2501,8 +2733,11 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     const session = await pending;
     const state = v2State(session);
     const job = db.prepare(
-      "SELECT private_error FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
-    ).get("user-1", session.id) as { private_error: string | null };
+      "SELECT private_error, checkpoint_json FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
+    ).get("user-1", session.id) as {
+      private_error: string | null;
+      checkpoint_json: string | null;
+    };
 
     assert.equal(provider.calls, 3);
     assert.equal(session.status, "failed");
@@ -2512,6 +2747,10 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(state.compilation.publicFailureStage, "writing_case");
     assert.equal(state.compilation.spoilerSafeMessage, "Case preparation needs attention");
     assert.match(job.private_error ?? "", /did not finish within/iu);
+    const stoppedDraft = JSON.parse(job.checkpoint_json ?? "{}") as {
+      recoveryBySection?: Record<string, unknown>;
+    };
+    assert.deepEqual(stoppedDraft.recoveryBySection ?? {}, {});
     assert.doesNotMatch(
       JSON.stringify(session),
       /sealedCulpritSeatId|sealedAccompliceSeatId|actorAccounts|graphValidation|correctPresentations|privateCase/iu,
@@ -2549,6 +2788,193 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal((state.caseTitle ?? "").length > 0, true);
     assert.equal(privateCase.victimDescription.length > 0, true);
     assert.equal(privateCase.recordItems.every((item) => item.description.length > 0), true);
+  });
+
+  it("rejects repetitive titles and publishes the polished title from the durable foundation checkpoint", async () => {
+    const db = testDb();
+    const provider = new DurableCaseTitleV2AuthorProvider();
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      {
+        ...config(),
+        inspiration: "An unexplained disappearance at a winter lodge",
+      },
+      "create-v2-durable-case-title",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    assert.equal(v2State(created).caseTitle, null);
+
+    const pending = runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    await provider.waitForRoomRequest();
+    try {
+      const inProgress = getDebateSession(db, "user-1", created.id);
+      const state = v2State(inProgress);
+      assert.equal(provider.foundationAttempts, 3);
+      assert.equal(inProgress.status, "live");
+      assert.equal(state.playPhase, "case_forge");
+      assert.equal(state.compilation.stage, "writing_case");
+      assert.equal(state.caseTitle, "The Missing Hour at Blackwood");
+      assert.doesNotMatch(
+        state.caseTitle ?? "",
+        /(?:disappear\w*.*disappear\w*|vanish\w*.*vanish\w*)/iu,
+      );
+      assert.equal(
+        listDebateSessions(db, "user-1").find((entry) => entry.id === created.id)?.title,
+        "The Missing Hour at Blackwood",
+        "Archive should receive the public case identity before the Forge completes",
+      );
+      const checkpoint = db.prepare(
+        "SELECT checkpoint_json FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
+      ).get("user-1", created.id) as { checkpoint_json: string };
+      assert.equal(
+        (JSON.parse(checkpoint.checkpoint_json) as {
+          foundationCore?: { title?: string };
+        }).foundationCore?.title,
+        "The Missing Hour at Blackwood",
+      );
+    } finally {
+      provider.continueRoomAuthoring();
+    }
+
+    const completed = await pending;
+    assert.equal(v2State(completed).caseTitle, "The Missing Hour at Blackwood");
+    assert.equal(v2State(completed).compilation.stage, "complete");
+  });
+
+  it("persists deterministic room recovery through resume without regenerating it", async () => {
+    const db = testDb();
+    const provider = new ResumableRecoveredRoomExaminationsV2AuthorProvider();
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-resilient-room-examinations",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    let session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    assert.equal(v2State(session).compilation.stage, "needs_attention");
+    const stopped = db.prepare(
+      "SELECT checkpoint_json FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
+    ).get("user-1", session.id) as { checkpoint_json: string };
+    const stoppedDraft = JSON.parse(stopped.checkpoint_json) as {
+      contextCapsule?: { sourceHash?: string };
+      recoveryBySection?: Record<string, Record<string, unknown>>;
+    };
+    const stoppedReceipt = stoppedDraft.recoveryBySection?.["examinations:2"];
+    assert.deepEqual(stoppedReceipt, {
+      kind: "deterministic_fallback",
+      reason: "invalid_output_exhausted",
+      attemptCount: 3,
+      source: "frozen_scaffold",
+      sourceHash: stoppedDraft.contextCapsule?.sourceHash,
+    });
+    assert.deepEqual(
+      Object.keys(stoppedReceipt ?? {}).sort(),
+      ["attemptCount", "kind", "reason", "source", "sourceHash"],
+    );
+    assert.match(String(stoppedReceipt?.sourceHash ?? ""), /^[a-f0-9]{64}$/u);
+    assert.doesNotMatch(
+      JSON.stringify(stoppedReceipt),
+      /sealed|culprit|accomplice|suspect-|evidence-|examination-|motive|method/iu,
+    );
+    const roomAttemptsBeforeResume = provider.sections.filter(
+      (section) => section === "room_examinations",
+    ).length;
+
+    provider.permitSecondChapter = true;
+    await retryDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      session.id,
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      session.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    const state = v2State(session);
+    const { graph, privateCase } = getDebateMysteryCaseV2(db, "user-1", session.id);
+    const lineByNodeId = new Map(graph.lines.map((line) => [line.nodeId, line]));
+
+    assert.equal(provider.invalidBatchAttempts, 3);
+    assert.equal(
+      provider.sections.filter((section) => section === "room_examinations").length,
+      roomAttemptsBeforeResume,
+      "resume must reuse the recovered room batch instead of asking the provider again",
+    );
+    assert.equal(state.compilation.stage, "complete");
+    assert.equal(session.status, "waiting_for_player");
+    assert.equal(privateCase.graphValidation.valid, true);
+    assert.deepEqual(
+      privateCase.authoringRecoveryBySection?.["examinations:2"],
+      stoppedReceipt,
+    );
+    assert.doesNotMatch(JSON.stringify(session), /authoringRecoveryBySection/iu);
+    for (const [id, expectedText] of provider.firstBatchTextById) {
+      assert.equal(
+        lineByNodeId.get(privateCase.examineNodeIdByHotspot[id]!)?.spokenText,
+        expectedText,
+      );
+    }
+    for (const id of provider.invalidBatchIds) {
+      assert.ok(
+        (lineByNodeId.get(privateCase.examineNodeIdByHotspot[id]!)?.spokenText.length ?? 0) > 0,
+        "the exhausted batch must retain its frozen deterministic observation",
+      );
+    }
+  });
+
+  it("does not record deterministic recovery for a room provider failure", async () => {
+    const db = testDb();
+    const provider = new FailingRoomExaminationsV2AuthorProvider();
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-failing-room-provider",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    const session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    const job = db.prepare(
+      "SELECT checkpoint_json, private_error FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
+    ).get("user-1", session.id) as {
+      checkpoint_json: string;
+      private_error: string | null;
+    };
+    const draft = JSON.parse(job.checkpoint_json) as {
+      recoveryBySection?: Record<string, unknown>;
+    };
+
+    assert.equal(provider.failedBatchAttempts, 3);
+    assert.equal(v2State(session).compilation.stage, "needs_attention");
+    assert.match(job.private_error ?? "", /simulated room author provider outage/iu);
+    assert.deepEqual(draft.recoveryBySection ?? {}, {});
   });
 
   it("fills omitted earlier-format room and repeat performances with deterministic playable contracts", async () => {

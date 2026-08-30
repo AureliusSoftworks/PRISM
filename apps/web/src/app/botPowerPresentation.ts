@@ -19,7 +19,7 @@ export function botPowerBehaviorDetailsForDisplay(
     return {
       selfCue: `${subject} means to speak normally; the curse changes what others hear.`,
       observerCue:
-        "Every spoken sentence lands with one to four strong, non-slur curse words.",
+        "Every audible reply lands with at least one visibly censored curse, never more than two in a sentence.",
     };
   }
   if (

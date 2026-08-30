@@ -23,6 +23,7 @@ import {
   compileDeterministicDebateMystery,
   bindMysteryIncidentPlanV1,
   composeMysteryIncidentPlanV1,
+  deterministicMysteryCaseTitleV1,
   debateEvidenceExhibitTitle,
   botPowerChromaticBiasColorMatchesV1,
   botPowerChromaticBiasEffectsFromEffectsV1,
@@ -47,6 +48,7 @@ import {
   normalizeDebateEvidencePacketV1,
   normalizeDebateMysteryTalkSubjectV2,
   normalizeDebateMysteryV2ForgeProgressMessage,
+  resolveMysteryCaseTitleV1,
   mysteryIncidentPlanRequiresAccompliceV1,
   mysteryPublicChargeV1,
   parseStoredBotAvatarDetailsV1,
@@ -62,6 +64,7 @@ import {
   validateDebateMysteryDialogueGraphV2,
   validateDebateMysteryStageCuePerformanceV1,
   validateMysteryIncidentPlanV1,
+  validateMysteryCaseTitleV1,
   type BotAudioVoiceProfileV1,
   type DebateMysteryActionRequestV2,
   type DebateEvidenceExhibitV1,
@@ -387,7 +390,7 @@ export interface DebateMysteryMansionExteriorAssetPreparationV2 {
   sessionId: string;
   houseStyle: DebateMysteryHouseStyleV2;
   scaleClass: DebateMysteryMansionExteriorScaleClassV1;
-  /** Mirrors the visible Rooms synthesis choice; LOCAL always resolves bundled. */
+  /** Explicit setup art is adopted before Case Forge; this only resolves fallback art. */
   synthesize: boolean;
   signal?: AbortSignal;
 }
@@ -401,6 +404,11 @@ interface DebateMysteryCompilationOptionsV2 {
   prepareEvidenceAssets?: DebateMysteryEvidenceAssetPreparerV2;
   prepareRoomAssets?: DebateMysteryRoomAssetPreparerV2;
   prepareMansionExteriorAsset?: DebateMysteryMansionExteriorAssetPreparerV2;
+  adoptMansionExteriorDraft?: (args: {
+    userId: string;
+    sessionId: string;
+    imageId: string;
+  }) => Promise<DebateMysterySealedAssetRefV1>;
   onCompilationReady?: (session: DebateSessionV1) => void;
 }
 
@@ -542,11 +550,31 @@ class MysteryFoundationValidationError extends Error {
   }
 }
 
+class MysteryExaminationValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MysteryExaminationValidationError";
+  }
+}
+
 class MysteryWitnessChapterValidationError extends Error {
   constructor(message: string, cause: unknown) {
     super(message, { cause });
     this.name = "MysteryWitnessChapterValidationError";
   }
+}
+
+function mysteryExaminationValidationExhausted(error: unknown): boolean {
+  const cause = error instanceof Error ? error.cause : null;
+  if (
+    cause instanceof MysteryExaminationValidationError ||
+    cause instanceof SyntaxError
+  ) return true;
+  return cause instanceof AutoFallbackExhaustedError &&
+    cause.attempts.length > 0 &&
+    cause.attempts.every((attempt) =>
+      attempt.outcome === "failed" && attempt.reason === "invalid_output"
+    );
 }
 
 function mysteryWitnessChapterValidationExhausted(error: unknown): boolean {
@@ -631,6 +659,15 @@ interface MysteryV2SectionProvenance {
   auditIssues: MysteryV2AuditIssue[];
 }
 
+interface MysteryV2SectionRecoveryReceipt {
+  kind: "deterministic_fallback";
+  reason: "invalid_output_exhausted";
+  attemptCount: number;
+  source: "frozen_scaffold";
+  /** Hash-only linkage to the frozen authoring ledger; never case truth. */
+  sourceHash: string;
+}
+
 interface MysteryV2AuthoringCheckpoint {
   kind: "authoring-v2";
   foundation: AuthoredMysteryFoundationV2 | null;
@@ -646,6 +683,7 @@ interface MysteryV2AuthoringCheckpoint {
   } | null;
   connectiveAdditions: Record<string, Record<string, string>>;
   provenanceBySection: Record<string, MysteryV2SectionProvenance>;
+  recoveryBySection: Record<string, MysteryV2SectionRecoveryReceipt>;
 }
 
 interface PrivateMysteryCaseV2 {
@@ -705,6 +743,8 @@ interface PrivateMysteryCaseV2 {
    * so a compiling case keeps the persona it was built around.
    */
   personaVoiceCardsByBotId?: Record<string, MysteryV2VoiceCard>;
+  /** Spoiler-safe authoring recovery receipts retained for Case Forge review. */
+  authoringRecoveryBySection?: Record<string, MysteryV2SectionRecoveryReceipt>;
   /** Frozen synthesis inputs for runtime-safe single-line repairs. Older
    * cases may recover the same profile by matching their verified manifest
    * hash against other frozen/default candidates. */
@@ -774,6 +814,8 @@ function normalizeMysteryV2AuthoringCheckpoint(
         value.kind === "authoring-v2" ? value.connectiveAdditions ?? {} : {},
       provenanceBySection:
         value.kind === "authoring-v2" ? value.provenanceBySection ?? {} : {},
+      recoveryBySection:
+        value.kind === "authoring-v2" ? value.recoveryBySection ?? {} : {},
     };
   }
   return {
@@ -786,6 +828,7 @@ function normalizeMysteryV2AuthoringCheckpoint(
     contextCapsule: null,
     connectiveAdditions: {},
     provenanceBySection: {},
+    recoveryBySection: {},
   };
 }
 
@@ -1554,6 +1597,12 @@ function authoringCheckpointKeys(
       payload: JSON.stringify(draft.prosecutionChoices),
     });
   }
+  for (const [sectionKey, receipt] of Object.entries(draft.recoveryBySection)) {
+    checkpoints.push({
+      key: `recovery:${sectionKey}`,
+      payload: JSON.stringify(receipt),
+    });
+  }
   return checkpoints;
 }
 
@@ -1880,6 +1929,38 @@ function completeCompilationPass(
   }
 }
 
+function publicCaseTitleFromMysteryV2Checkpoint(
+  row: MysteryV2JobRow,
+): string | null {
+  if (!row.checkpoint_json) return null;
+  try {
+    const stored = JSON.parse(row.checkpoint_json) as unknown;
+    if (isMysteryV2CompiledCheckpoint(stored)) {
+      const validation = validateMysteryCaseTitleV1(
+        stored.publicState.caseTitle ?? "",
+      );
+      return validation.valid ? validation.normalizedTitle : null;
+    }
+    if (!isMysteryV2AuthoringCheckpoint(stored)) return null;
+    const draft = normalizeMysteryV2AuthoringCheckpoint(stored);
+    const authoredTitle = draft.foundationCore?.title ?? draft.foundation?.title;
+    if (!authoredTitle) return null;
+    const incidentPlan = draft.contextCapsule?.factLedger.incidentPlan;
+    if (incidentPlan) {
+      return resolveMysteryCaseTitleV1({
+        authoredTitle,
+        plan: incidentPlan,
+      });
+    }
+    const validation = validateMysteryCaseTitleV1(authoredTitle);
+    return validation.valid ? validation.normalizedTitle : null;
+  } catch {
+    // A damaged private checkpoint must not prevent the spoiler-safe public
+    // session from reporting its last known compilation state.
+    return null;
+  }
+}
+
 function setPublicCompilationStatus(
   db: DatabaseSync,
   userId: string,
@@ -1891,6 +1972,7 @@ function setPublicCompilationStatus(
   if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
     throw new HttpError(409, "This session is not a Whodunnit V2 case.");
   }
+  const checkpointTitle = publicCaseTitleFromMysteryV2Checkpoint(row);
   return persistV2Session(db, userId, {
     ...session,
     status: row.status === "complete"
@@ -1906,6 +1988,7 @@ function setPublicCompilationStatus(
       : null,
   }, {
     ...session.formatState,
+    ...(checkpointTitle ? { caseTitle: checkpointTitle } : {}),
     ...extras,
     compilation: compilationStatus(db, row),
   });
@@ -1915,6 +1998,7 @@ function initialV2State(
   config: DebateMysteryResolvedConfigV2,
   jobId: string,
   now: string,
+  mansionExterior: DebateMysterySealedAssetRefV1 | null = null,
 ): DebateWhodunnitFormatStateV2 {
   const omitInvestigation = mysteryCompilationOmitsInvestigationV2(
     resolveMysteryCompilationScopeV2(config),
@@ -1923,7 +2007,7 @@ function initialV2State(
     version: 2,
     format: "whodunnit",
     playPhase: "case_forge",
-    mansionExterior: null,
+    mansionExterior,
     compilation: {
       version: 2,
       jobId,
@@ -2131,6 +2215,7 @@ export async function createDebateMysterySessionV2(
     prepareEvidenceAssets?: DebateMysteryCompilationOptionsV2["prepareEvidenceAssets"];
     prepareRoomAssets?: DebateMysteryCompilationOptionsV2["prepareRoomAssets"];
     prepareMansionExteriorAsset?: DebateMysteryCompilationOptionsV2["prepareMansionExteriorAsset"];
+    adoptMansionExteriorDraft?: DebateMysteryCompilationOptionsV2["adoptMansionExteriorDraft"];
     onCompilationReady?: DebateMysteryCompilationOptionsV2["onCompilationReady"];
   } = {},
 ): Promise<DebateSessionV1> {
@@ -2146,6 +2231,7 @@ export async function createDebateMysterySessionV2(
     "SELECT id FROM debate_sessions WHERE user_id = ? AND create_idempotency_key = ?",
   ).get(userId, idempotencyKey) as { id?: string } | undefined;
   if (existingForKey?.id) return getDebateSession(db, userId, existingForKey.id);
+  const mansionExteriorImageId = compact(configInput.mansionExteriorImageId, 200) || null;
   if (activeDebateMysteryCompilationV2(db, userId)) {
     throwActiveCaseForgeConflict();
   }
@@ -2172,6 +2258,9 @@ export async function createDebateMysterySessionV2(
     );
   }
   if (config.mansionBundleId) {
+    if (mansionExteriorImageId) {
+      throw new HttpError(400, "Installed and authored mansions keep their existing exterior artwork.");
+    }
     const mansion = getDebateMysteryMansionBundleV2(
       db,
       userId,
@@ -2227,6 +2316,12 @@ export async function createDebateMysterySessionV2(
   if (existingJob?.id) return getDebateSession(db, userId, session.id);
   const now = new Date().toISOString();
   const jobId = randomUUID();
+  if (mansionExteriorImageId && !options.adoptMansionExteriorDraft) {
+    throw new HttpError(500, "Mansion exterior draft adoption is unavailable.");
+  }
+  const mansionExterior = mansionExteriorImageId
+    ? await options.adoptMansionExteriorDraft!({ userId, sessionId: session.id, imageId: mansionExteriorImageId })
+    : null;
   session = persistV2Session(db, userId, {
     ...session,
     status: "live",
@@ -2234,7 +2329,7 @@ export async function createDebateMysterySessionV2(
     stepKey: "mystery_v2_writing_case",
     error: null,
     powerPlan: debatePowerPlanForBots(db, userId, allBotIds, "dark"),
-  }, initialV2State(config, jobId, now));
+  }, initialV2State(config, jobId, now, mansionExterior));
   if (config.mansionSnapshot) {
     retainDebateMysteryMansionSnapshotAssetsV2(
       db,
@@ -2293,8 +2388,15 @@ function performanceDirection(
 function authoredFoundationCoreFromJson(args: {
   value: Record<string, unknown>;
   evidenceIds: readonly string[];
+  incidentPlan: MysteryBoundIncidentPlanV1;
 }): AuthoredMysteryFoundationCoreV2 {
   const title = compact(args.value.title, 120);
+  const titleValidation = validateMysteryCaseTitleV1(title);
+  if (!titleValidation.valid) {
+    throw new MysteryFoundationValidationError(
+      `The authored case title failed its public quality boundary: ${titleValidation.errors.join(" ")}`,
+    );
+  }
   const victimName = compact(args.value.victimName, 100);
   const victimDescription = compact(args.value.victimDescription, 700);
   const publicOpening = compact(args.value.publicOpening, 1_400);
@@ -2323,7 +2425,7 @@ function authoredFoundationCoreFromJson(args: {
     throw new MysteryFoundationValidationError("The authored case did not describe every frozen evidence item exactly once.");
   }
   return {
-    title,
+    title: titleValidation.normalizedTitle,
     victimName,
     victimDescription,
     publicOpening,
@@ -2338,9 +2440,10 @@ function authoredFoundationCoreFromJson(args: {
 function deterministicAuthoredMysteryFoundationCoreV2(args: {
   scaffold: ReturnType<typeof compileDeterministicDebateMystery>;
   eyewitnessSeatId: string | null;
+  incidentPlan: MysteryBoundIncidentPlanV1;
 }): AuthoredMysteryFoundationCoreV2 {
   return {
-    title: args.scaffold.title,
+    title: deterministicMysteryCaseTitleV1(args.incidentPlan),
     victimName: args.scaffold.victim.name,
     victimDescription: args.scaffold.victim.description,
     publicOpening: args.scaffold.publicOpening,
@@ -2377,12 +2480,15 @@ function applyMysteryIncidentPlanToFoundationV2<
   const primary = args.incidentPlan.primary;
   const affectedName = args.foundation.victimName;
   const incidentNoun = primary.title.toLocaleLowerCase();
-  const subjectLabel = primary.subject.replace(/^(?:a|an|the)\s+/iu, "");
+  const caseTitle = resolveMysteryCaseTitleV1({
+    authoredTitle: args.foundation.title,
+    plan: args.incidentPlan,
+  });
   const primaryFoundation = primary.kind === "homicide"
-    ? args.foundation
+    ? { ...args.foundation, title: caseTitle }
     : {
         ...args.foundation,
-        title: `The ${primary.title} of ${subjectLabel}`,
+        title: caseTitle,
         victimDescription:
           `${affectedName} is the person most directly affected by ${primary.subject}, with private relationships to every member of the frozen ensemble.`,
         publicOpening:
@@ -2460,29 +2566,72 @@ function authoredExaminationsFromJson(args: {
   value: Record<string, unknown>;
   examinationIds: readonly string[];
 }): Array<{ id: string; text: string }> {
-  const keyedRows = args.value.examinationsById && typeof args.value.examinationsById === "object"
-    ? Object.entries(args.value.examinationsById as Record<string, unknown>).map(([id, text]) => ({ id, text }))
-    : [];
-  const examinationRows = Array.isArray(args.value.examinations)
-    ? args.value.examinations
-    : Array.isArray(args.value.roomExaminations)
-      ? args.value.roomExaminations
-      : keyedRows;
+  const rowsFromContainer = (container: unknown): Array<Record<string, unknown>> => {
+    if (Array.isArray(container)) {
+      return container.flatMap((value) => {
+        if (Array.isArray(value)) {
+          return value.length >= 2 ? [{ id: value[0], text: value[1] }] : [];
+        }
+        return value && typeof value === "object"
+          ? [value as Record<string, unknown>]
+          : [];
+      });
+    }
+    if (!container || typeof container !== "object") return [];
+    return Object.entries(container as Record<string, unknown>).map(([id, value]) =>
+      value && typeof value === "object" && !Array.isArray(value)
+        ? { ...(value as Record<string, unknown>), id }
+        : { id, text: value });
+  };
+  const examinationRows: Array<Record<string, unknown>> = [
+    ...rowsFromContainer(args.value.examinationsById),
+    ...rowsFromContainer(args.value.examinations),
+    ...rowsFromContainer(args.value.roomExaminations),
+    ...args.examinationIds.flatMap((id) =>
+      Object.prototype.hasOwnProperty.call(args.value, id)
+        ? [{ id, text: args.value[id] } as Record<string, unknown>]
+        : []),
+  ];
   const examinations = examinationRows.flatMap((value) => {
-    if (!value || typeof value !== "object") return [];
-    const row = value as Record<string, unknown>;
-    const id = compact(row.id, 240);
-    const text = compact(row.text, 1_200);
+    const id = compact(
+      value.id ?? value.examinationId ?? value.hotspotId,
+      240,
+    );
+    const text = compact(
+      value.text ??
+        value.result ??
+        value.description ??
+        value.observation ??
+        value.inspectionResponse,
+      1_200,
+    );
     return id && text ? [{ id, text }] : [];
   });
   const byId = new Map(examinations.map((entry) => [entry.id, entry.text]));
   const missingIds = args.examinationIds.filter((id) => !byId.has(id));
   if (missingIds.length) {
-    throw new Error(
+    throw new MysteryExaminationValidationError(
       `The authored case omitted ${missingIds.length} requested room examination result${missingIds.length === 1 ? "" : "s"}: ${missingIds.join(", ")}`,
     );
   }
   return args.examinationIds.map((id) => ({ id, text: byId.get(id)! }));
+}
+
+function deterministicAuthoredMysteryExaminationsV2(args: {
+  scaffold: ReturnType<typeof compileDeterministicDebateMystery>;
+  examinationIds: readonly string[];
+}): Array<{ id: string; text: string }> {
+  const textById = new Map(args.scaffold.activeRegions.map((outcome) => [
+    `${outcome.roomId}:${outcome.regionId}`,
+    outcome.inspectionResponse,
+  ]));
+  return args.examinationIds.map((id) => {
+    const text = compact(textById.get(id), 1_200);
+    if (!text) {
+      throw new Error(`The frozen case omitted its room examination result for ${id}.`);
+    }
+    return { id, text };
+  });
 }
 
 const MYSTERY_INVESTIGATION_COURT_LANGUAGE_RE = /\b(?:(?:the|this|our)\s+court|courtroom|your\s+honou?r|the\s+bench|the\s+jury|witness\s+stand|sworn\s+testimony)\b/iu;
@@ -4076,6 +4225,7 @@ async function authorMysteryV2(args: {
           validate: (value) => authoredFoundationCoreFromJson({
             value,
             evidenceIds: setup.evidenceIds,
+            incidentPlan: args.incidentPlan,
           }),
         });
       } catch (error) {
@@ -4084,6 +4234,7 @@ async function authorMysteryV2(args: {
         foundationCore = deterministicAuthoredMysteryFoundationCoreV2({
           scaffold: args.scaffold,
           eyewitnessSeatId: args.eyewitnessSeatId,
+          incidentPlan: args.incidentPlan,
         });
         deterministicFoundationFallback = true;
       }
@@ -4127,6 +4278,7 @@ async function authorMysteryV2(args: {
             validate: (value) => authoredFoundationCoreFromJson({
               value,
               evidenceIds: setup.evidenceIds,
+              incidentPlan: args.incidentPlan,
             }),
             onReceipt: (receipt) =>
               recordMysterySectionReceipt(args.draft, "foundation", receipt),
@@ -4155,93 +4307,121 @@ async function authorMysteryV2(args: {
       const chunk = examinationChunks[index]!;
       const missingIds = chunk.filter((id) => !compact(examinationsById[id], 1_200));
       if (!missingIds.length) continue;
-      const authoredChunk = await generateMysteryAuthoringSectionV2({
-        runtime: args.runtime,
-        label: `Room examination batch ${index + 1}`,
-        maxTokens: 2_500,
-        onAttempt: (attempt) => args.onDraft(
-          args.draft,
-          `Writing the Case · Drafting room details ${index + 1} of ${examinationChunks.length} · attempt ${attempt} of ${DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS}`,
-        ),
-        onReceipt: (receipt) =>
-          recordMysterySectionReceipt(
-            args.draft,
-            `examinations:${index + 1}`,
-            receipt,
-          ),
-        prompt: {
-          section: "room_examinations",
-          caseFoundation: foundationCore,
-          setup: {
-            roomNames: setup.roomNames,
-            examinationIds: missingIds,
-          },
-          outputContract: {
-            examinationsById: Object.fromEntries(
-              missingIds.map((id) => [id, "sensory, clue-fair text for this exact frozen id"]),
-            ),
-          },
-          qualityRules: [
-            "Keep each examination result under 40 words.",
-            "Describe only what the prosecutor can fairly perceive or record at that hotspot.",
-            ...(caseIncludesHomicide ? [] : [
-              `This is a ${args.incidentPlan.primary.title} case, not a homicide. Never mention murder, killing, death, a corpse, a fatal injury, or a murder weapon.`,
-            ]),
-            "No placeholders, spoilers, deductions on the player's behalf, or copied franchise material.",
-          ],
-        },
-        validate: (value) => assertMysteryIncidentLanguageV2({
-          value: authoredExaminationsFromJson({ value, examinationIds: missingIds }),
-          incidentPlan: args.incidentPlan,
-          section: "Room examination copy",
-        }),
-      });
-      authoredChunk.forEach((entry) => {
-        examinationsById[entry.id] = entry.text;
-      });
-      args.onDraft(
-        args.draft,
-        `Writing the Case · Room details ${index + 1} of ${examinationChunks.length} complete`,
-      );
       const examinationSectionKey = `examinations:${index + 1}`;
-      queueAudit(examinationSectionKey, authoredChunk, missingIds);
-      targetedRepairs.set(examinationSectionKey, async (issues) => {
-        const repaired = await generateMysteryAuthoringSectionV2({
+      let authoredChunk: Array<{ id: string; text: string }>;
+      let deterministicExaminationFallback = false;
+      try {
+        authoredChunk = await generateMysteryAuthoringSectionV2({
           runtime: args.runtime,
-          label: `Room examination batch ${index + 1} repair`,
-          role: "repair",
+          label: `Room examination batch ${index + 1}`,
           maxTokens: 2_500,
-          prompt: {
-            section: "targeted_section_repair",
-            targetSectionKey: examinationSectionKey,
-            frozenLedgerSlice: {
-              sourceHash: factLedger.sourceHash,
-              examinationIds: missingIds,
-            },
-            existingSection: { examinations: authoredChunk },
-            repairDelta: issues,
-            outputContract: "Return a complete examinations array for the exact supplied IDs.",
-          },
-          validate: (value) => assertMysteryIncidentLanguageV2({
-            value: authoredExaminationsFromJson({
-              value,
-              examinationIds: missingIds,
-            }),
-            incidentPlan: args.incidentPlan,
-            section: "Repaired room examination copy",
-          }),
+          onAttempt: (attempt) => args.onDraft(
+            args.draft,
+            `Writing the Case · Drafting room details ${index + 1} of ${examinationChunks.length} · attempt ${attempt} of ${DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS}`,
+          ),
           onReceipt: (receipt) =>
             recordMysterySectionReceipt(
               args.draft,
               examinationSectionKey,
               receipt,
             ),
+          prompt: {
+            section: "room_examinations",
+            caseFoundation: foundationCore,
+            setup: {
+              roomNames: setup.roomNames,
+              examinationIds: missingIds,
+            },
+            outputContract: {
+              examinationsById: Object.fromEntries(
+                missingIds.map((id) => [id, "sensory, clue-fair text for this exact frozen id"]),
+              ),
+            },
+            qualityRules: [
+              "Keep each examination result under 40 words.",
+              "Describe only what the prosecutor can fairly perceive or record at that hotspot.",
+              ...(caseIncludesHomicide ? [] : [
+                `This is a ${args.incidentPlan.primary.title} case, not a homicide. Never mention murder, killing, death, a corpse, a fatal injury, or a murder weapon.`,
+              ]),
+              "No placeholders, spoilers, deductions on the player's behalf, or copied franchise material.",
+            ],
+          },
+          validate: (value) => assertMysteryIncidentLanguageV2({
+            value: authoredExaminationsFromJson({ value, examinationIds: missingIds }),
+            incidentPlan: args.incidentPlan,
+            section: "Room examination copy",
+          }),
         });
-        repaired.forEach((entry) => {
-          args.draft.examinationsById[entry.id] = entry.text;
+        delete args.draft.recoveryBySection[examinationSectionKey];
+      } catch (error) {
+        if (!mysteryExaminationValidationExhausted(error)) throw error;
+        authoredChunk = assertMysteryIncidentLanguageV2({
+          value: deterministicAuthoredMysteryExaminationsV2({
+            scaffold: args.scaffold,
+            examinationIds: missingIds,
+          }),
+          incidentPlan: args.incidentPlan,
+          section: "Deterministic room examination copy",
         });
-        args.onDraft(args.draft, "Writing the Case · Room details repaired");
+        deterministicExaminationFallback = true;
+        delete args.draft.provenanceBySection[examinationSectionKey];
+        args.draft.recoveryBySection[examinationSectionKey] = {
+          kind: "deterministic_fallback",
+          reason: "invalid_output_exhausted",
+          attemptCount: DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
+          source: "frozen_scaffold",
+          sourceHash: factLedger.sourceHash,
+        };
+      }
+      authoredChunk.forEach((entry) => {
+        examinationsById[entry.id] = entry.text;
       });
+      args.onDraft(
+        args.draft,
+        deterministicExaminationFallback
+          ? `Writing the Case · Room details ${index + 1} of ${examinationChunks.length} complete with deterministic case observations`
+          : `Writing the Case · Room details ${index + 1} of ${examinationChunks.length} complete`,
+      );
+      if (!deterministicExaminationFallback) {
+        queueAudit(examinationSectionKey, authoredChunk, missingIds);
+        targetedRepairs.set(examinationSectionKey, async (issues) => {
+          const repaired = await generateMysteryAuthoringSectionV2({
+            runtime: args.runtime,
+            label: `Room examination batch ${index + 1} repair`,
+            role: "repair",
+            maxTokens: 2_500,
+            prompt: {
+              section: "targeted_section_repair",
+              targetSectionKey: examinationSectionKey,
+              frozenLedgerSlice: {
+                sourceHash: factLedger.sourceHash,
+                examinationIds: missingIds,
+              },
+              existingSection: { examinations: authoredChunk },
+              repairDelta: issues,
+              outputContract: "Return a complete examinations array for the exact supplied IDs.",
+            },
+            validate: (value) => assertMysteryIncidentLanguageV2({
+              value: authoredExaminationsFromJson({
+                value,
+                examinationIds: missingIds,
+              }),
+              incidentPlan: args.incidentPlan,
+              section: "Repaired room examination copy",
+            }),
+            onReceipt: (receipt) =>
+              recordMysterySectionReceipt(
+                args.draft,
+                examinationSectionKey,
+                receipt,
+              ),
+          });
+          repaired.forEach((entry) => {
+            args.draft.examinationsById[entry.id] = entry.text;
+          });
+          args.onDraft(args.draft, "Writing the Case · Room details repaired");
+        });
+      }
     }
     foundation = {
       ...foundationCore,
@@ -5448,6 +5628,7 @@ async function polishMysteryPersonaDialogueGraphV2(args: {
 function buildMysteryV2Graph(args: {
   sessionId: string;
   config: DebateMysteryResolvedConfigV2;
+  mansionExterior?: DebateMysterySealedAssetRefV1 | null;
   incidentPlan: MysteryBoundIncidentPlanV1;
   scaffold: ReturnType<typeof compileDeterministicDebateMystery>;
   bots: MysteryV2BotRow[];
@@ -5456,6 +5637,7 @@ function buildMysteryV2Graph(args: {
   alibiSupportDiscoveryIds: string[];
   contradictionBySeat: ReadonlyMap<string, DebateMysteryRecordReferenceV2>;
   personaVoiceCardsByBotId?: Record<string, MysteryV2VoiceCard>;
+  authoringRecoveryBySection?: Record<string, MysteryV2SectionRecoveryReceipt>;
 }): { graph: DebateMysteryDialogueGraphV2; privateCase: PrivateMysteryCaseV2; publicState: DebateWhodunnitFormatStateV2 } {
   const compilationScope = resolveMysteryCompilationScopeV2(args.config);
   const omitInvestigation = mysteryCompilationOmitsInvestigationV2(compilationScope);
@@ -6305,6 +6487,11 @@ function buildMysteryV2Graph(args: {
         cues: [...card.cues],
       }];
     })),
+    authoringRecoveryBySection: Object.fromEntries(
+      Object.entries(args.authoringRecoveryBySection ?? {}).map(
+        ([sectionKey, receipt]) => [sectionKey, { ...receipt }],
+      ),
+    ),
     audioVoiceProfilesByBotId: Object.fromEntries(args.bots.map((bot) => [
       bot.id,
       mysteryBotAudioVoiceProfileV2(bot),
@@ -6317,7 +6504,7 @@ function buildMysteryV2Graph(args: {
   };
   const now = new Date().toISOString();
   const publicState: DebateWhodunnitFormatStateV2 = {
-    ...initialV2State(args.config, "pending", now),
+    ...initialV2State(args.config, "pending", now, args.mansionExterior ?? null),
     caseTitle: args.authored.title,
     caseCharge: mysteryPublicChargeV1(args.incidentPlan),
     victim: { id: args.scaffold.victim.id, name: args.authored.victimName },
@@ -9142,6 +9329,7 @@ export async function runDebateMysteryCompilationV2(
       checkpoint = buildMysteryV2Graph({
         sessionId,
         config,
+        mansionExterior: session.formatState.mansionExterior ?? null,
         incidentPlan: boundIncidentPlan,
         scaffold,
         bots,
@@ -9150,6 +9338,7 @@ export async function runDebateMysteryCompilationV2(
         alibiSupportDiscoveryIds,
         contradictionBySeat,
         personaVoiceCardsByBotId: authoringDraft.contextCapsule?.voiceCardsByBotId,
+        authoringRecoveryBySection: authoringDraft.recoveryBySection,
       });
       requireLease();
       storeCompiledCaseV2(db, userId, sessionId, checkpoint.privateCase, checkpoint.graph);
@@ -9200,7 +9389,10 @@ export async function runDebateMysteryCompilationV2(
           sessionId,
           houseStyle: checkpoint.privateCase.config.houseStyle,
           scaleClass: checkpoint.privateCase.config.scaleClass,
-          synthesize: checkpoint.privateCase.config.assetSynthesis.rooms,
+          // Case Forge may supply only the bundled fallback. Exterior
+          // generation is an explicit Mansion-step decision made before a
+          // session exists.
+          synthesize: false,
           signal: cancellationController.signal,
         });
         checkpoint = withPreparedMansionExteriorAsset(checkpoint, exterior);

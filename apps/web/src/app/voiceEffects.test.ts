@@ -393,7 +393,10 @@ describe("engine-agnostic voice effects", () => {
     assert.match(source, /active\.lightMeter\?\.stop\(\)/u);
     for (const fallbackSource of [englishSource, bottishSource]) {
       assert.match(fallbackSource, /lifecycle\?\.onLevel \|\| lifecycle\?\.voiceLightTarget/u);
-      assert.match(fallbackSource, /routeAudioElementToPrismOutput\(audio, \{ onLevel \}\)/u);
+      assert.match(
+        fallbackSource,
+        /routeAudioElementToPrismOutput\(audio, \{[\s\S]{0,220}onLevel/u,
+      );
       assert.match(
         fallbackSource,
         /audio\.addEventListener\("playing",[\s\S]{0,100}onLevel\(0\.22\)/u,
@@ -538,6 +541,7 @@ describe("voice performance", () => {
     });
 
     try {
+      const audibleClock = { current: null as (() => number) | null };
       const controller = beginVoicePlaybackProgress(
         {
           onStart: (durationMs, receivedAlignment) => {
@@ -546,6 +550,9 @@ describe("voice performance", () => {
             startedAlignment = receivedAlignment;
           },
           onProgress: (elapsed) => progress.push(elapsed),
+          onPlaybackClock: (readElapsedMs) => {
+            audibleClock.current = readElapsedMs;
+          },
         },
         1_000,
         () => elapsedMs,
@@ -561,15 +568,18 @@ describe("voice performance", () => {
       assert.equal(startedDurationMs, 1_000);
       assert.equal(startedAlignment, alignment);
       assert.deepEqual(progress, [0]);
+      assert.equal(audibleClock.current?.(), 0);
 
       elapsedMs = 135;
       const runFrame = animationFrameCallback as FrameRequestCallback | null;
       assert.ok(runFrame);
       runFrame(0);
       assert.deepEqual(progress, [0, 50]);
+      assert.equal(audibleClock.current?.(), 50);
 
       controller.finish();
       assert.equal(progress.at(-1), 1_000);
+      assert.equal(audibleClock.current, null);
     } finally {
       if (originalWindow) {
         Object.defineProperty(globalThis, "window", originalWindow);

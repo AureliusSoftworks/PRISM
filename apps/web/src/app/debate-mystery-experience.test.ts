@@ -925,6 +925,41 @@ describe("Debate Whodunnit experience", () => {
     assert.match(shell, /effectiveDisabledReason/u);
   });
 
+  it("keeps the public courtroom roster readable and stage ordered", () => {
+    const courtroom = shell.slice(
+      shell.indexOf('data-role-group="courtroom"'),
+      shell.indexOf('data-role-group="jury"'),
+    );
+    const courtroomCss = forumCss.slice(
+      forumCss.indexOf('.mysteryCastGroup[data-role-group="courtroom"] > header'),
+      forumCss.indexOf(".mysteryCastGroup > header {"),
+    );
+
+    assert.match(courtroom, /<strong>Courtroom<\/strong>/u);
+    assert.match(courtroom, /The Judge presides publicly; PRISM keeps sealed case truth backstage\./u);
+    assert.doesNotMatch(courtroom, /Public proceeding/u);
+    assert.ok(
+      courtroom.indexOf('label: "Prosecution"') <
+        courtroom.indexOf('label: "The Bench"'),
+    );
+    assert.ok(
+      courtroom.indexOf('label: "The Bench"') <
+        courtroom.indexOf('label: "Opposition"'),
+    );
+    assert.match(
+      courtroomCss,
+      /\.castSlotSelect \{[\s\S]*grid-template-columns: minmax\(0, 1fr\)/u,
+    );
+    assert.match(
+      courtroomCss,
+      /\.castSlotSelect small,[\s\S]*white-space: normal/u,
+    );
+    assert.match(
+      courtroomCss,
+      /@media \(hover: hover\)[\s\S]*\.castSlotClear \{\s*opacity: 0;/u,
+    );
+  });
+
   it("rerolls a Whodunnit container from one group without duplicate or reserved bots", () => {
     assert.deepEqual(
       randomizeWhodunnitGroupBotIds(

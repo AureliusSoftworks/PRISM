@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
+  buildReplaySceneCheckpointsV2,
   compileReplayTimelineV2,
+  replaySceneAtV2,
   replayManifestV1IsValid,
   replayManifestV2IsValid,
   type BotcastEpisode,
@@ -14,6 +16,7 @@ import {
   buildSignalReplayManifestV1,
   buildSignalReplayManifestV2,
   COFFEE_REPLAY_RENDER_CONTRACT,
+  restageSignalReplayManifestV2ForShow,
 } from "./replayManifest.ts";
 
 describe("replay manifests", () => {
@@ -382,9 +385,24 @@ describe("replay manifests", () => {
       },
       studioLayout: {},
       cameraFraming: {
-        left: { zoom: 1.56, panX: -4, panY: 2 },
-        right: { zoom: 1.48, panX: 5, panY: -1 },
-        wide: { zoom: 1.08, panX: 0, panY: 1.5 },
+        left: {
+          zoom: 1.56,
+          panX: -4,
+          panY: 2,
+          episodeImage: { x: 16, y: 70, itemScale: 80, photoScale: 100 },
+        },
+        right: {
+          zoom: 1.48,
+          panX: 5,
+          panY: -1,
+          episodeImage: { x: 84, y: 70, itemScale: 80, photoScale: 100 },
+        },
+        wide: {
+          zoom: 1.08,
+          panX: 0,
+          panY: 1.5,
+          episodeImage: { x: 50, y: 74, itemScale: 95, photoScale: 110 },
+        },
       },
       studioGlowTuning: {
         dark: { opacity: 0.78, blendMode: "screen" },
@@ -420,11 +438,6 @@ describe("replay manifests", () => {
       theme: "dark",
       audioEnabled: true,
       audioVolume: 0.72,
-      cameraFraming: {
-        left: { zoom: 1.56, panX: -4, panY: 2, episodeImage: { x: 16, y: 70, itemScale: 80, photoScale: 100 } },
-        right: { zoom: 1.48, panX: 5, panY: -1, episodeImage: { x: 84, y: 70, itemScale: 80, photoScale: 100 } },
-        wide: { zoom: 1, panX: 0, panY: 0, episodeImage: { x: 50, y: 74, itemScale: 95, photoScale: 110 } },
-      },
       capturedReplayEvents: [
         {
           id: "local-soundboard",
@@ -497,6 +510,208 @@ describe("replay manifests", () => {
       y: 11,
       scale: 115,
     });
+  });
+
+  it("re-stages an archived manifest from the current show while keeping recorded seek direction", () => {
+    const episode = {
+      id: "signal-archived-stage",
+      title: "Archived stage",
+      hostBotId: "host-1",
+      guestBotId: "guest-1",
+      guestKind: "bot",
+      responseMode: "local",
+      messages: [
+        {
+          id: "message-1",
+          episodeId: "signal-archived-stage",
+          speakerRole: "host",
+          botId: "host-1",
+          content: "The recorded direction opens here.",
+          stageActionText: null,
+          voicePerformanceText: null,
+          moodKey: "neutral",
+          createdAt: "2026-08-30T00:00:01.000Z",
+        },
+      ],
+      events: [],
+      createdAt: "2026-08-30T00:00:00.000Z",
+      updatedAt: "2026-08-30T00:00:10.000Z",
+      completedAt: "2026-08-30T00:00:10.000Z",
+    } as unknown as BotcastEpisode;
+    const archivedShow = {
+      id: "show-1",
+      hostBotId: "host-1",
+      name: "Current stage",
+      accentColor: "#55ddff",
+      atmosphereMix: { background: 0.16, grain: 0, foley: 1, filmGrain: 1 },
+      studioLayout: {},
+      cameraFraming: {},
+      logoPlacement: { x: 50, y: 18, scale: 100 },
+      studioGlowTuning: {
+        dark: { opacity: 0.78, blendMode: "screen" },
+        light: { opacity: 0.52, blendMode: "overlay" },
+      },
+      logo: { imageUrl: null },
+      dayAtmosphere: { imageUrl: null },
+      nightAtmosphere: { imageUrl: null },
+    } as unknown as BotcastShow;
+    const archivedManifest = buildSignalReplayManifestV2({
+      episode,
+      show: archivedShow,
+      bots: [
+        { id: "host-1", name: "Host" },
+        { id: "guest-1", name: "Guest" },
+      ],
+      producerName: "Jared",
+      theme: "dark",
+      audioEnabled: true,
+      audioVolume: 0.72,
+      capturedDirection: [
+        {
+          sequence: 1,
+          atMs: 0,
+          kind: "camera",
+          sourceMessageId: null,
+          payload: { shot: "wide" },
+        },
+        {
+          sequence: 2,
+          atMs: 4_000,
+          kind: "camera",
+          sourceMessageId: "message-1",
+          payload: { shot: "left" },
+        },
+      ],
+    });
+    const currentShow = {
+      ...archivedShow,
+      studioLayout: {
+        hostBot: { x: 16, y: 61 },
+        guestBot: { x: 82, y: 71 },
+        hostCup: { x: 29, y: 87 },
+        guestCup: { x: 72, y: 91 },
+        hostFloorGlow: { x: 16, y: 81, scale: 0.5 },
+        guestFloorGlow: { x: 82, y: 90, scale: 0.85 },
+      },
+      cameraFraming: {
+        left: {
+          zoom: 1.7,
+          panX: -12,
+          panY: 5,
+          episodeImage: {
+            x: 13,
+            y: 65,
+            itemScale: 77,
+            photoScale: 117,
+          },
+        },
+        right: {
+          zoom: 1.49,
+          panX: 8,
+          panY: -2,
+          episodeImage: {
+            x: 87,
+            y: 68,
+            itemScale: 73,
+            photoScale: 109,
+          },
+        },
+        wide: {
+          zoom: 1.08,
+          panX: -3,
+          panY: 1,
+          episodeImage: {
+            x: 43,
+            y: 77,
+            itemScale: 92,
+            photoScale: 125,
+          },
+        },
+      },
+      logoPlacement: { x: 62, y: 13, scale: 84 },
+      studioGlowTuning: {
+        dark: { opacity: 0.61, blendMode: "screen" as const },
+        light: { opacity: 0.43, blendMode: "overlay" as const },
+      },
+      atmosphereMix: {
+        background: 0.27,
+        grain: 0,
+        foley: 0.73,
+        filmGrain: 0.35,
+      },
+      voiceLevelsByBotId: { "host-1": 1.2, "guest-1": 0.8 },
+    } as unknown as BotcastShow;
+    const presentationManifest = restageSignalReplayManifestV2ForShow(
+      archivedManifest,
+      currentShow,
+    );
+    const checkpoints = buildReplaySceneCheckpointsV2(
+      presentationManifest,
+      1_000,
+    );
+
+    assert.equal(
+      replaySceneAtV2(presentationManifest, 0, checkpoints).camera,
+      "wide",
+    );
+    assert.equal(
+      replaySceneAtV2(presentationManifest, 4_500, checkpoints).camera,
+      "left",
+    );
+    assert.strictEqual(
+      presentationManifest.direction,
+      archivedManifest.direction,
+    );
+    assert.strictEqual(
+      presentationManifest.utterances,
+      archivedManifest.utterances,
+    );
+    assert.deepEqual(
+      presentationManifest.direction.flatMap((event) =>
+        event.kind === "camera"
+          ? [
+              {
+                atMs: event.atMs,
+                sourceMessageId: event.sourceMessageId,
+                shot: event.payload.shot,
+              },
+            ]
+          : [],
+      ),
+      [
+        { atMs: 0, sourceMessageId: null, shot: "wide" },
+        { atMs: 4_000, sourceMessageId: "message-1", shot: "left" },
+      ],
+    );
+    assert.deepEqual(
+      presentationManifest.visual.metadata?.studioLayout,
+      currentShow.studioLayout,
+    );
+    assert.deepEqual(
+      presentationManifest.visual.metadata?.cameraFraming,
+      currentShow.cameraFraming,
+    );
+    assert.deepEqual(
+      presentationManifest.visual.metadata?.logoPlacement,
+      currentShow.logoPlacement,
+    );
+    assert.deepEqual(
+      presentationManifest.visual.metadata?.studioGlowTuning,
+      currentShow.studioGlowTuning,
+    );
+    assert.deepEqual(
+      presentationManifest.visual.metadata?.atmosphereMix,
+      currentShow.atmosphereMix,
+    );
+    assert.deepEqual(
+      presentationManifest.visual.metadata?.signalAudioMix,
+      archivedManifest.visual.metadata?.signalAudioMix,
+    );
+    assert.notDeepEqual(
+      archivedManifest.visual.metadata?.studioLayout,
+      currentShow.studioLayout,
+      "the stored archive remains unchanged instead of being re-saved",
+    );
   });
 
   it("keeps captured Signal direction authoritative over server-time semantics", () => {

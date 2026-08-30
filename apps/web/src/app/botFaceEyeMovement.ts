@@ -99,17 +99,14 @@ export function botFaceGazeTravel(eyeScale?: number | null): {
   };
 }
 
-/**
- * Authored screen Ink is registered against the centered face canvas. Keep
- * that registration intact while the bot is off-mic, then restore its chosen
- * eye choreography when it speaks.
- */
+/** Authored Ink stays registered to the screen while the eye glyph moves.
+ * Talking controls the mouth, never whether the saved eye style is alive. */
 export function botFaceEyeMovementPreservingInkRegistration(args: {
   movement: BotFaceEyeMovement;
   hasVisibleInk: boolean;
   talking: boolean;
 }): BotFaceEyeMovement {
-  return args.hasVisibleInk && !args.talking ? "still" : args.movement;
+  return args.movement;
 }
 
 /** Live eye-timeline tick rate — busier modes refresh more often. */

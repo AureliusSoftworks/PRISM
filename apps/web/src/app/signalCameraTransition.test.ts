@@ -21,6 +21,32 @@ describe("Signal automatic camera direction", () => {
     );
   });
 
+  it("anchors the opening camera beat to the voice that actually started", () => {
+    assert.equal(
+      signalLiveAutoCameraShot({
+        baseShot: "wide",
+        audibleHandoffPreparing: true,
+        coverageShot: "right",
+        speakingShot: "left",
+        speakerOwnershipLock: true,
+        botThinking: false,
+        producerGuestThinking: false,
+      }),
+      "left",
+    );
+    assert.equal(
+      signalLiveAutoCameraShot({
+        baseShot: "wide",
+        coverageShot: "right",
+        speakingShot: "left",
+        speakerOwnershipLock: false,
+        botThinking: false,
+        producerGuestThinking: false,
+      }),
+      "right",
+    );
+  });
+
   it("holds Wide for true audible crosstalk before reactions or coverage", () => {
     assert.equal(
       signalLiveAutoCameraShot({

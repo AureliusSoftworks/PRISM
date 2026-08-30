@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { ReplayRecordingV1 } from "@localai/shared";
+import type {
+  ReplayRecordingV1,
+  ReplayVoiceTakeRecordV1,
+} from "@localai/shared";
 import {
   sessionReviewDirectionLines,
   sessionReviewTranscriptCoverageLines,
@@ -103,6 +106,43 @@ describe("session review evidence", () => {
     assert.match(summary, /Faithful audio duration: 00:05\.000/u);
     assert.match(summary, /Recording duration alignment: matched \(delta 00:00\.000\)/u);
     assert.doesNotMatch(summary, /private|audio\.webm|video\.mp4/u);
+  });
+
+  it("exports privacy-safe requested and resolved voice lineage", () => {
+    const takes = [
+      {
+        id: "take-1",
+        recordingId: recording.id,
+        status: "captured",
+        snapshot: {
+          sourceMessageId: "message-2",
+          speakerId: "guest-1",
+          channel: "primary",
+          requestedEngine: "elevenlabs",
+          resolvedEngine: "builtin-provider-fallback",
+          profile: {
+            locale: "en-US",
+            accentMapPoint: "private-exact-profile-shape",
+          },
+          resolvedPronunciation: null,
+          resolvedSpeechprint: null,
+        },
+      },
+    ] as unknown as ReplayVoiceTakeRecordV1[];
+    const evidence = sessionReviewRecordingEvidenceFromRecording(
+      recording,
+      takes,
+    );
+    const summary = sessionReviewRecordingSummaryLines(evidence).join("\n");
+
+    assert.match(summary, /Voice take lineage: 1/u);
+    assert.match(
+      summary,
+      /Message message-2 \| speaker guest-1 \| primary \| requested elevenlabs \| resolved builtin-provider-fallback/u,
+    );
+    assert.match(summary, /profile voice-[0-9a-f]{8}/u);
+    assert.match(summary, /fallback resolved_engine_differs_from_request/u);
+    assert.doesNotMatch(summary, /private-exact-profile-shape/u);
   });
 
   it("warns when planned direction materially outlives the faithful master", () => {

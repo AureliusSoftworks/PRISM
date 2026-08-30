@@ -227,8 +227,9 @@ export type CoffeeSeatPlateEmojiProps = {
   /** Uses binary cell alpha for a hard-edged authoring guide. */
   hardPixels?: boolean;
   /**
-   * Speech keeps aligned visemes while stopping autonomous eyes/blinks.
-   * Mini keeps its LED motion; static is reserved for frozen faces.
+   * Speech keeps aligned visemes with bounded autonomous eyes and ordinary
+   * blinking. Mini keeps stationary eyes with ordinary blinking; static is an
+   * explicit frozen face.
    */
   motionMode?: "full" | "mini-led" | "speech" | "static";
   /** Active speaking state for speech-driven mouth sync and blink eligibility. */
@@ -372,8 +373,7 @@ export function CoffeeSeatPlateEmoji({
   const fullMotion = motionMode === "full";
   const staticFace = motionMode === "static";
   const mouthMotionEnabled = !staticFace;
-  const blinkEnabled =
-    enabled && (motionMode === "full" || motionMode === "mini-led");
+  const blinkEnabled = enabled && !staticFace;
   const effectiveTalking = staticFace ? false : isTalking;
   const normalizedThinkingFrames =
     normalizeBotFaceThinkingFrames(faceThinkingFrames) ??
@@ -480,9 +480,9 @@ export function CoffeeSeatPlateEmoji({
   const blinkPhase = blinkState.key === blinkKey ? blinkState.phase : "open";
 
   const normalizedEyeMovement =
-    fullMotion
-      ? (normalizeBotFaceEyeMovement(faceEyeMovement) ?? "still")
-      : "still";
+    staticFace || motionMode === "mini-led"
+      ? "still"
+      : (normalizeBotFaceEyeMovement(faceEyeMovement) ?? "still");
   const eyeMovementActive = botFaceEyeMovementIsActive(normalizedEyeMovement);
   useEffect(() => {
     if (

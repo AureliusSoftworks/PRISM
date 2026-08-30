@@ -937,11 +937,11 @@ describe("bot-locked Chat lane", () => {
               observerCue: "Only adjusted speech is public.",
               effects: [{
                 type: "cursed_tongue",
-                version: 1,
+                version: 2,
                 frequency: "frequent",
                 strength: "strong",
-                vocabulary: "uncensored_non_slur",
-                phraseMode: "occasional_2_3_words",
+                vocabulary: "structurally_masked_non_slur",
+                phraseMode: "censor_performance",
               }],
               ruleLabels: [],
             },
@@ -968,7 +968,8 @@ describe("bot-locked Chat lane", () => {
       result.conversation.messages.at(-1)?.content ?? "",
       /Hello world/iu,
     );
-    assert.match(result.conversation.messages.at(-1)?.content ?? "", /\b(?:fuck\w*|goddamn|damn|hell|shit)\b/iu);
+    assert.match(result.conversation.messages.at(-1)?.content ?? "", /(?:f•••|g••••••|d•••|h•••|s•••)/iu);
+    assert.doesNotMatch(result.conversation.messages.at(-1)?.content ?? "", /\b(?:fuck\w*|goddamn|damn|hell|shit)\b/iu);
   });
 
   it("gives Forgetful Freddie only the current message and responds to the complaint", async () => {
@@ -1437,11 +1438,11 @@ describe("bot-locked Chat lane", () => {
           observerCue: "Only adjusted speech is public.",
           effects: [{
             type: "cursed_tongue",
-            version: 1,
+            version: 2,
             frequency: "frequent",
             strength: "strong",
-            vocabulary: "uncensored_non_slur",
-            phraseMode: "occasional_2_3_words",
+            vocabulary: "structurally_masked_non_slur",
+            phraseMode: "censor_performance",
           }],
           ruleLabels: [],
         },
@@ -1538,11 +1539,11 @@ describe("bot-locked Chat lane", () => {
         observerCue: "Only adjusted speech is public.",
         effects: [{
           type: "cursed_tongue" as const,
-          version: 1 as const,
+          version: 2 as const,
           frequency: "frequent" as const,
           strength: "strong" as const,
-          vocabulary: "uncensored_non_slur" as const,
-          phraseMode: "occasional_2_3_words" as const,
+          vocabulary: "structurally_masked_non_slur" as const,
+          phraseMode: "censor_performance" as const,
         }],
         ruleLabels: [],
       },
@@ -1571,7 +1572,8 @@ describe("bot-locked Chat lane", () => {
       "private-curtis",
     );
     const firstAssistant = first.conversation.messages.at(-1);
-    assert.match(firstAssistant?.content ?? "", /\b(?:fuck\w*|goddamn|damn|hell|shit)\b/iu);
+    assert.match(firstAssistant?.content ?? "", /(?:f•••|g••••••|d•••|h•••|s•••)/iu);
+    assert.doesNotMatch(firstAssistant?.content ?? "", /\b(?:fuck\w*|goddamn|damn|hell|shit)\b/iu);
     assert.equal(
       firstAssistant?.botPowerPrivateIntendedSpeech,
       "I explained the archive plan politely and clearly.",
@@ -1599,7 +1601,8 @@ describe("bot-locked Chat lane", () => {
     assert.ok(secondPrimaryPrompt.every((message) =>
       !message.content.includes("fucking archive plan")
     ));
-    assert.match(second.conversation.messages.at(-1)?.content ?? "", /\b(?:fuck\w*|goddamn|damn|hell|shit)\b/iu);
+    assert.match(second.conversation.messages.at(-1)?.content ?? "", /(?:f•••|g••••••|d•••|h•••|s•••)/iu);
+    assert.doesNotMatch(second.conversation.messages.at(-1)?.content ?? "", /\b(?:fuck\w*|goddamn|damn|hell|shit)\b/iu);
     assert.equal(primaryCalls, primaryPrompts.length);
     assert.equal(primaryChatReplyCalls, 2);
     assert.ok(primaryPrompts.every((messages) =>

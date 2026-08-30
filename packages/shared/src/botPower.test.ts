@@ -11,9 +11,10 @@ import {
   applyBotPowerBotNamesV1,
   applyBotPowerEchoResponseV1,
   applyBotPowerCursedTongueResponseV1,
-  BOT_POWER_CURSED_TONGUE_MAX_PER_SENTENCE_V1,
-  BOT_POWER_CURSED_TONGUE_MIN_PER_SENTENCE_V1,
-  botPowerCursedTongueProfanityCountV1,
+  BOT_POWER_CURSED_TONGUE_MAX_PER_SENTENCE_V2,
+  BOT_POWER_CURSED_TONGUE_MIN_PER_UTTERANCE_V2,
+  botPowerCursedTongueCensorCountV2,
+  botPowerCursedTongueMinimumCensorsV2,
   botPowerCursedTongueSentenceRangesV1,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMumbledReactionPlanV1,
@@ -993,7 +994,7 @@ test("mumbling projects spoken reaction lanes without retaining canned English",
   );
 });
 
-test("Cursed Tongue deterministically layers strong profanity while protecting records", () => {
+test("Cursed Tongue deterministically performs visible censorship while protecting records", () => {
   assert.deepEqual(normalizeBotPowerEffectV1({
     type: "cursed_tongue",
     version: 99,
@@ -1002,11 +1003,11 @@ test("Cursed Tongue deterministically layers strong profanity while protecting r
     vocabulary: "anything",
   }), {
     type: "cursed_tongue",
-    version: 1,
+    version: 2,
     frequency: "frequent",
     strength: "strong",
-    vocabulary: "uncensored_non_slur",
-    phraseMode: "occasional_2_3_words",
+    vocabulary: "structurally_masked_non_slur",
+    phraseMode: "censor_performance",
   });
   const name = "Cursed Tongue";
   const intent = "Every public spoken line gains frequent strong profanity after generation.";
@@ -1038,7 +1039,11 @@ test("Cursed Tongue deterministically layers strong profanity while protecting r
 
   assert.equal(botPowerCursesSpeechV1(powers), true);
   assert.equal(first, second);
-  assert.match(first, /\b(?:fucking|goddamn|motherfucking|shitty|damn)\b/iu);
+  assert.match(first, /(?:f•••ing|g••••••|s•••ty|d•••|h•••)/iu);
+  assert.doesNotMatch(
+    first,
+    /\b(?:fuck(?:ing|ed|er|s)?|shit(?:ty)?|goddamn(?:ed)?|damn|hell|ass(?:hole)?|bastard)\b/iu,
+  );
   for (const protectedText of [
     "*checks the archive*",
     "`const answer = 42`",
@@ -1079,7 +1084,7 @@ test("Cursed Tongue deterministically layers strong profanity while protecting r
       )
   );
   assert.ok(cadenceSamples.some((sample) =>
-    /holy fucking shit|for fuck's sake|goddamn well|sure as hell|honestly fucking/iu.test(sample),
+    /holy f•••ing s•••|for f•••’s sake|g•••••• well|sure as h•••|honestly f•••ing/iu.test(sample),
   ));
   assert.ok(new Set(cadenceSamples).size >= 5);
   assert.ok(cadenceSamples.every((sample) =>
@@ -1087,37 +1092,79 @@ test("Cursed Tongue deterministically layers strong profanity while protecting r
   ));
 });
 
-test("Cursed Tongue keeps one to four curse tokens in every spoken sentence", () => {
+test("Cursed Tongue keeps one censor per curseable utterance and at most two per sentence", () => {
   const source = [
     "The careful plan keeps every protected artifact intact.",
     "Tell Mira the final result plainly.",
-    "I already put one damn marker in this line.",
+    "I already put one d••• marker in this line.",
   ].join(" ");
   const adjusted = applyBotPowerCursedTongueResponseV1(source, "density-floor");
+  assert.ok(
+    botPowerCursedTongueCensorCountV2(adjusted) >=
+      BOT_POWER_CURSED_TONGUE_MIN_PER_UTTERANCE_V2,
+  );
+  assert.equal(
+    botPowerCursedTongueMinimumCensorsV2(adjusted),
+    BOT_POWER_CURSED_TONGUE_MIN_PER_UTTERANCE_V2,
+  );
   const sentences = botPowerCursedTongueSentenceRangesV1(adjusted);
   assert.ok(sentences.length >= 3);
   for (const range of sentences) {
-    const count = botPowerCursedTongueProfanityCountV1(
+    const count = botPowerCursedTongueCensorCountV2(
       adjusted.slice(range.start, range.end),
     );
     assert.ok(
-      count >= BOT_POWER_CURSED_TONGUE_MIN_PER_SENTENCE_V1,
-      `${adjusted.slice(range.start, range.end)} has ${count}`,
-    );
-    assert.ok(
-      count <= BOT_POWER_CURSED_TONGUE_MAX_PER_SENTENCE_V1,
+      count <= BOT_POWER_CURSED_TONGUE_MAX_PER_SENTENCE_V2,
       `${adjusted.slice(range.start, range.end)} has ${count}`,
     );
   }
   const alreadyMaxed = applyBotPowerCursedTongueResponseV1(
-    "This fucking goddamn shitty damn line is already saturated.",
+    "This f•••ing g•••••• line is already saturated.",
     "already-maxed",
   );
   assert.equal(
-    botPowerCursedTongueProfanityCountV1(alreadyMaxed),
-    botPowerCursedTongueProfanityCountV1(
-      "This fucking goddamn shitty damn line is already saturated.",
+    botPowerCursedTongueCensorCountV2(alreadyMaxed),
+    BOT_POWER_CURSED_TONGUE_MAX_PER_SENTENCE_V2,
+  );
+  assert.equal(
+    applyBotPowerCursedTongueResponseV1(
+      "That is fucking ridiculous, you absolute bitch.",
+      "mask-existing",
     ),
+    "That is f•••ing ridiculous, you absolute b••••.",
+  );
+  const overfull = applyBotPowerCursedTongueResponseV1(
+    "This fucking goddamn shitty damn line is already saturated.",
+    "bound-existing",
+  );
+  assert.equal(
+    botPowerCursedTongueCensorCountV2(overfull),
+    BOT_POWER_CURSED_TONGUE_MAX_PER_SENTENCE_V2,
+  );
+  assert.doesNotMatch(
+    overfull,
+    /\b(?:fuck\w*|goddamn|shit\w*|damn|hell|asshole|bastard)\b/iu,
+  );
+  const actionLed = applyBotPowerCursedTongueResponseV1(
+    "*nods once* Plain answer.",
+    "action-led-fallback",
+  );
+  assert.ok(actionLed.includes("*nods once*"));
+  assert.equal(
+    botPowerCursedTongueCensorCountV2(actionLed),
+    BOT_POWER_CURSED_TONGUE_MIN_PER_UTTERANCE_V2,
+  );
+  const negativeContractions = applyBotPowerCursedTongueResponseV1(
+    "That can't be filled, and it shouldn't be ignored.",
+    "negative-contractions",
+  );
+  assert.equal(
+    botPowerCursedTongueCensorCountV2(negativeContractions),
+    BOT_POWER_CURSED_TONGUE_MIN_PER_UTTERANCE_V2,
+  );
+  assert.doesNotMatch(
+    negativeContractions,
+    /\b(?:can|is|are|was|were|could|should|would|will|must|do|does|did|have|has|had)\s+[adfghsbm]•+['’]t\b/iu,
   );
 });
 
@@ -1130,7 +1177,7 @@ test("Cursed Tongue composes after addressed-insult content", () => {
   );
   const adjusted = applyBotPowerCursedTongueResponseV1(insulted, "composition");
   assert.equal(botPowerResponseHasAddressedInsultV1(adjusted, "Mira"), true);
-  assert.match(adjusted, /\b(?:fucking|goddamn|motherfucking|shitty|damn)\b/iu);
+  assert.match(adjusted, /(?:f•••ing|g••••••|s•••ty|d•••|h•••)/iu);
   assert.equal(adjusted.match(/Your proposal/gu)?.length, 1);
   assert.doesNotMatch(adjusted, /[“”]/u);
 });
@@ -1143,12 +1190,12 @@ test("Cursed Tongue preserves compound words and uses adjective-safe determiner 
     )
   );
   assert.ok(compounds.every((sample) => sample.includes("Taste-making")));
-  assert.ok(compounds.every((sample) => !/Taste-(?:fucking|goddamn|damn|shitty)\s*making/iu.test(sample)));
+  assert.ok(compounds.every((sample) => !/Taste-(?:f•••ing|g••••••|d•••|s•••ty)\s*making/iu.test(sample)));
   assert.ok(compounds.every((sample) =>
-    !/\bthe (?:goddamn well|damn well|sure as hell|honestly fucking)\b/iu.test(sample),
+    !/\bthe (?:g•••••• well|d••• well|sure as h•••|honestly f•••ing)\b/iu.test(sample),
   ));
   assert.ok(compounds.every((sample) =>
-    !/^(?:What a fucking mess|Goddamn|Holy fucking shit|Fucking hell|Well, damn|For fuck's sake|Shit, here we go|What in the goddamn hell)\./u.test(sample),
+    !/^(?:What a f•••ing mess|G••••••|Holy f•••ing s•••|F•••ing h•••|Well, d•••|For f•••’s sake|S•••, here we go|What in the g•••••• h•••)\./u.test(sample),
   ));
 });
 
@@ -1166,13 +1213,13 @@ test("Cursed Tongue fallback uses sentence and verb cadence instead of corruptin
   ].join("\n");
   const adjusted = applyBotPowerCursedTongueResponseV1(source, "cake");
 
-  assert.match(adjusted, /\b(?:fucking|goddamn|damn)\b/iu);
+  assert.match(adjusted, /(?:f•••ing|g••••••|d•••)/iu);
   assert.match(adjusted, /(?:^|\n)\*\*Ingredients\*\*/u);
   assert.match(adjusted, /(?:^|\n)\*\*Safety\*\*/u);
   assert.match(adjusted, /(?:^|\n)- 2 cups all-purpose flour/u);
   assert.match(adjusted, /(?:^|\n)- 1 teaspoon salt/u);
   assert.ok(adjusted.includes("Children should have adult supervision. Check every ingredient label for allergies."));
-  assert.doesNotMatch(adjusted, /\*\*[^*]*(?:fuck|damn|shit)[^*]*\*\*/iu);
+  assert.doesNotMatch(adjusted, /\*\*[^*]*(?:f•••|d•••|s•••)[^*]*\*\*/iu);
   assert.doesNotMatch(adjusted, /(?:fuck\w*|goddamn|damn)\s+(?:flour|salt)\b/iu);
 });
 

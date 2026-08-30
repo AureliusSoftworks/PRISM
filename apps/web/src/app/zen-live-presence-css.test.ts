@@ -3372,7 +3372,7 @@ describe("Zen live presence CSS", () => {
     const bodyRule = ruleForExactSelector(".zenLiveBotPresenceBody");
     assert.match(
       bodyRule,
-      /--zen-live-bot-buckle-crt-cell-pitch:\s*clamp\(\s*1px,\s*calc\(var\(--zen-live-bot-body-frame-size\) \* 0\.0078125\),\s*4px\s*\)/,
+      /--zen-live-bot-buckle-crt-cell-pitch:\s*clamp\(\s*1px,\s*calc\(var\(--zen-live-bot-body-frame-size\) \* 0\.00625\),\s*3\.2px\s*\)/,
     );
     assert.match(
       bodyRule,

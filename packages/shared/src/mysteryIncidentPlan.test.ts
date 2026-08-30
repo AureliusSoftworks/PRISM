@@ -3,9 +3,12 @@ import test from "node:test";
 import {
   bindMysteryIncidentPlanV1,
   composeMysteryIncidentPlanV1,
+  deterministicMysteryCaseTitleV1,
   inferMysterySparkMotifsV1,
   mysteryIncidentPlanRequiresAccompliceV1,
   mysteryPublicChargeV1,
+  resolveMysteryCaseTitleV1,
+  validateMysteryCaseTitleV1,
   validateMysteryIncidentPlanV1,
 } from "./mysteryIncidentPlan.ts";
 
@@ -100,4 +103,46 @@ test("an explicit homicide and theft remain one charge with a linked complicatio
   assert.equal(plan.primary.kind, "homicide");
   assert.deepEqual(plan.complications.map((entry) => entry.kind), ["theft"]);
   assert.equal(plan.complications[0]?.actorRole, "accomplice");
+});
+
+test("case titles stay concise, spoiler-safe, and semantically non-repetitive", () => {
+  for (const invalid of [
+    "The Disappearance of an earlier unexplained disappearance",
+    "Vanished in the Vanishing",
+    "The Culprit in the Empty Room",
+    "Untitled mystery case",
+  ]) {
+    assert.equal(validateMysteryCaseTitleV1(invalid).valid, false, invalid);
+  }
+  assert.deepEqual(validateMysteryCaseTitleV1('  “The Missing Hour”  '), {
+    valid: true,
+    normalizedTitle: "The Missing Hour",
+    errors: [],
+  });
+  assert.equal(
+    validateMysteryCaseTitleV1("The Turnabout at Violet Hour").valid,
+    true,
+  );
+});
+
+test("invalid authored titles resolve to a stable incident-specific title", () => {
+  const plan = composeMysteryIncidentPlanV1({
+    spark: "An unexplained disappearance at a winter lodge",
+    difficulty: "classic",
+    nonce: "title-regression",
+  });
+  assert.equal(plan.primary.kind, "disappearance");
+  const fallback = deterministicMysteryCaseTitleV1(plan);
+  assert.equal(validateMysteryCaseTitleV1(fallback).valid, true);
+  assert.equal(
+    resolveMysteryCaseTitleV1({
+      authoredTitle: "The Disappearance of an earlier disappearance",
+      plan,
+    }),
+    fallback,
+  );
+  assert.equal(
+    resolveMysteryCaseTitleV1({ authoredTitle: "The Missing Hour at Blackwood", plan }),
+    "The Missing Hour at Blackwood",
+  );
 });

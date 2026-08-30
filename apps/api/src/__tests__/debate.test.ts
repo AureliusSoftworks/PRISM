@@ -12991,11 +12991,11 @@ describe("Debate engine", () => {
         "Every non-silent public reply gains frequent strong profanity after generation.",
         [{
           type: "cursed_tongue",
-          version: 1,
+          version: 2,
           frequency: "frequent",
           strength: "strong",
-          vocabulary: "uncensored_non_slur",
-          phraseMode: "occasional_2_3_words",
+          vocabulary: "structurally_masked_non_slur",
+          phraseMode: "censor_performance",
         }],
       );
       const addressedPower = readyPower(
@@ -13042,7 +13042,11 @@ describe("Debate engine", () => {
       );
       assert.match(
         intro?.content ?? "",
-        /\b(?:fucking|goddamn|motherfucking|shitty|damn)\b/iu,
+        /(?:f•••|g••••••|s•••|d•••|h•••)/iu,
+      );
+      assert.doesNotMatch(
+        intro?.content ?? "",
+        /\b(?:fuck\w*|goddamn|shit\w*|damn|hell)\b/iu,
       );
       assert.ok(selectedPrompts.every((messages) =>
         messages.every((message) =>

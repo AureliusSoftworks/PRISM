@@ -183,6 +183,11 @@ export interface AvatarDetailsEditorProps {
   onDirtyChange?: (dirty: boolean) => void;
   onPreviewChange?: (details: AvatarDetailsV1) => void;
   onLivePreview?: () => void;
+  /** Returns a locally rasterized, unpersisted semantic Ink draft. */
+  onGenerateInk?: (
+    prompt: string,
+    signal: AbortSignal,
+  ) => Promise<AvatarDetailsV1>;
   onEditStart?: () => void;
   onEquippedStampChange?: (stamp: AvatarDetailsEquippedStamp | null) => void;
   layout?: "panel" | "foundry";
@@ -261,6 +266,7 @@ const AvatarDetailsEditorSession = forwardRef<
     onDirtyChange,
     onPreviewChange,
     onLivePreview,
+    onGenerateInk,
     onEditStart,
     onEquippedStampChange,
     layout = "panel",
@@ -329,6 +335,9 @@ const AvatarDetailsEditorSession = forwardRef<
   const [limitReached, setLimitReached] = useState(false);
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
+  const [inkPrompt, setInkPrompt] = useState("");
+  const [inkGenerationStatus, setInkGenerationStatus] = useState<string | null>(null);
+  const [inkGenerating, setInkGenerating] = useState(false);
   const [inkTemplates, setInkTemplates] = useState<
     AvatarDetailInkTemplateV1[]
   >([]);
@@ -351,6 +360,8 @@ const AvatarDetailsEditorSession = forwardRef<
   const pointerStrokeRef = useRef<AvatarDetailsPointerStroke | null>(null);
   const symmetryAxisPointerRef = useRef<number | null>(null);
   const previewFrameRef = useRef<number | null>(null);
+  const inkGenerationRunRef = useRef(0);
+  const inkGenerationAbortRef = useRef<AbortController | null>(null);
   const pendingPreviewRef = useRef<AvatarDetailsV1 | null>(null);
   const onPreviewChangeRef = useRef(onPreviewChange);
   const queuePreviewRef = useRef<(details: AvatarDetailsV1) => void>(() => {});
@@ -575,6 +586,7 @@ const AvatarDetailsEditorSession = forwardRef<
 
   useEffect(
     () => () => {
+      inkGenerationAbortRef.current?.abort();
       if (previewFrameRef.current !== null) {
         window.cancelAnimationFrame(previewFrameRef.current);
       }
@@ -1389,6 +1401,54 @@ const AvatarDetailsEditorSession = forwardRef<
     commitMutation(avatarDetailsWithPaintColorMap(workingRef.current, colorMap));
   };
 
+  const refractInk = useCallback(async (): Promise<void> => {
+    const prompt = inkPrompt.trim();
+    if (!onGenerateInk) return;
+    if (!prompt) {
+      setInkGenerationStatus("Describe the Ink you want first.");
+      return;
+    }
+    inkGenerationAbortRef.current?.abort();
+    const controller = new AbortController();
+    inkGenerationAbortRef.current = controller;
+    const run = inkGenerationRunRef.current + 1;
+    inkGenerationRunRef.current = run;
+    const sourceKey = avatarDetailsKey(workingRef.current);
+    setInkGenerating(true);
+    setInkGenerationStatus("Refracting editable Ink…");
+    try {
+      const generated = await onGenerateInk(prompt, controller.signal);
+      if (
+        controller.signal.aborted ||
+        inkGenerationRunRef.current !== run
+      ) {
+        return;
+      }
+      if (avatarDetailsKey(workingRef.current) !== sourceKey) {
+        setInkGenerationStatus(
+          "Your Ink changed while Refract was working, so the result was discarded.",
+        );
+        return;
+      }
+      onEditStart?.();
+      commitMutation(generated);
+      setInkPrompt("");
+      setInkGenerationStatus("Refracted Ink is ready to edit. Undo restores your previous Ink.");
+    } catch (error) {
+      if (controller.signal.aborted || inkGenerationRunRef.current !== run) return;
+      setInkGenerationStatus(
+        error instanceof Error
+          ? error.message
+          : "Ink could not be refracted. Your current draft is unchanged.",
+      );
+    } finally {
+      if (inkGenerationRunRef.current === run) {
+        setInkGenerating(false);
+        inkGenerationAbortRef.current = null;
+      }
+    }
+  }, [commitMutation, inkPrompt, onEditStart, onGenerateInk]);
+
   const selectedMoveInkLabel = selectedMoveInkRoles
     .map(
       (role) =>
@@ -1645,6 +1705,43 @@ const AvatarDetailsEditorSession = forwardRef<
             </div>
           </div>
         </header>
+
+        {onGenerateInk ? (
+          <div className={styles.inkRefract}>
+            <label htmlFor="avatar-details-ink-refract-prompt">
+              <strong>Refract Ink</strong>
+              <small>Describe a small editable screen detail. It replaces this Ink draft only after a valid result.</small>
+            </label>
+            <div className={styles.inkRefractControls}>
+              <input
+                id="avatar-details-ink-refract-prompt"
+                value={inkPrompt}
+                maxLength={500}
+                disabled={inkGenerating}
+                onChange={(event) => setInkPrompt(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" || event.shiftKey) return;
+                  event.preventDefault();
+                  void refractInk();
+                }}
+                placeholder="e.g. a sparse comet crown"
+                aria-label="Ink direction"
+              />
+              <button
+                type="button"
+                onClick={() => void refractInk()}
+                disabled={inkGenerating || inkPrompt.trim().length === 0}
+              >
+                {inkGenerating ? "Refracting…" : "Refract Ink"}
+              </button>
+            </div>
+            {inkGenerationStatus ? (
+              <p className={styles.inkRefractStatus} role="status">
+                {inkGenerationStatus}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className={styles.paintTools}>
           <div

@@ -302,12 +302,7 @@ describe("chatMiniBotAvatar", () => {
       assert.match(
         miniFaceCall,
         /faceEyeMovement="still"/,
-        "mini faces must keep their authored geometry stationary inside the small CRT aperture",
-      );
-      assert.doesNotMatch(
-        miniFaceCall,
-        /faceEyeMovement=\{/,
-        "mini faces must not inherit a bot's full-size eye-movement animation",
+        "mini faces keep their authored eye geometry stationary while ordinary blinking remains live",
       );
       assert.match(
         miniFaceCall,

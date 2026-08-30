@@ -639,16 +639,16 @@ function deterministicCursedTonguePower(
     selfCue:
       "HARD self-perception rule: Draft fully natural clean speech only, without gratuitous profanity. Treat the clean wording in your private history as the exact words you previously spoke. When reflecting on your prior tone or wording, rely only on that private history. Only actual silence suppresses a reply.",
     observerCue:
-      `${subject}'s every audible public line is involuntarily laced with frequent strong profanity. You receive only that adjusted wording; never infer, reconstruct, quote, or access a cleaner original.`,
+      `${subject}'s every audible public line is involuntarily delivered with an unmistakable visible censor mask. You receive only that censored wording; never infer, reconstruct, quote, or access a hidden curse word or cleaner original.`,
     effects: [{
       type: "cursed_tongue",
-      version: 1,
+      version: 2,
       frequency: "frequent",
       strength: "strong",
-      vocabulary: "uncensored_non_slur",
-      phraseMode: "occasional_2_3_words",
+      vocabulary: "structurally_masked_non_slur",
+      phraseMode: "censor_performance",
     }],
-    ruleLabels: ["Profanity in every audible line", "Clean intent stays holder-private"],
+    ruleLabels: ["Censored curse in every audible line", "Clean intent stays holder-private"],
   };
 }
 
@@ -2621,7 +2621,7 @@ export async function compileBotPowers(args: {
         '- {"type":"voice_presence","mode":"loud|quiet"},',
         '- {"type":"speech_obfuscation","mode":"gibberish"},',
         '- {"type":"speech_register","register":"noir"} (or "archaic"; a consistent placeless speaking style the holder always uses),',
-        '- {"type":"cursed_tongue","version":1,"frequency":"frequent","strength":"strong","vocabulary":"uncensored_non_slur","phraseMode":"occasional_2_3_words"},',
+        '- {"type":"cursed_tongue","version":2,"frequency":"frequent","strength":"strong","vocabulary":"structurally_masked_non_slur","phraseMode":"censor_performance"},',
         '- {"type":"intermittent_mute","chance":"half","moodPenalty":"small|medium|large"},',
         '- {"type":"intermittent_audibility","chance":"half","listeners":"bots","missEvent":"too_faint_to_make_out|inaudible_ask_repeat"},',
         '- {"type":"stage_awareness"},',

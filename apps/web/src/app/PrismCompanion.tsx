@@ -95,6 +95,7 @@ import {
 } from "./prismCompanionSpeech";
 import { setPrismSystemPause } from "./prismVisualLifecycle";
 import { PrismOrb } from "./PrismOrb";
+import { PrismTetrahedronPrototype } from "./PrismTetrahedronPrototype";
 import { playPrismHotkeyInaccessibleSfx } from "./prismHotkeySfx";
 import { PrismCompanionViewTabs } from "./PrismCompanionViewTabs";
 import {
@@ -214,6 +215,7 @@ interface PrismRefractSession {
   registration: RegisteredPrismRefractTarget;
   invocation: PrismRefractInvocation;
   phase: PrismRefractPhase;
+  direction: string;
   targetWidth: number;
   targetCenter: PrismCompanionPosition;
   originalValue: string;
@@ -2352,6 +2354,7 @@ export default function PrismCompanion({
       field,
       currentValue,
       rejectedValues,
+      direction,
       element,
       signal,
     }: PrismUniversalInputCandidateRequest): Promise<string> => {
@@ -2379,6 +2382,7 @@ export default function PrismCompanion({
           target,
           currentValue,
           rejectedValues,
+          direction,
         }),
         signal,
       });
@@ -2840,6 +2844,7 @@ export default function PrismCompanion({
             run: (generationSignal) => target.generate({
               currentValue: target.read(),
               rejectedValues,
+              direction: session.direction,
               signal: generationSignal,
             }),
           });
@@ -2937,10 +2942,18 @@ export default function PrismCompanion({
       const rect = registration.element.getBoundingClientRect();
       const target = registration.target;
       const originalValue = target.kind === "magic" ? "" : target.read();
+      const initialDirection =
+        target.kind === "field" && target.steering
+          ? target.steering.initialDirection(originalValue)
+          : "";
+      const promptsBeforeGeneration =
+        target.kind === "magic" ||
+        (target.kind === "field" && Boolean(target.steering));
       const session: PrismRefractSession = {
         registration,
         invocation,
-        phase: target.kind === "magic" ? "prompting" : "generating",
+        phase: promptsBeforeGeneration ? "prompting" : "generating",
+        direction: "",
         targetWidth: rect.width,
         targetCenter: {
           x: Math.min(
@@ -2964,7 +2977,7 @@ export default function PrismCompanion({
       }
       markRefractTarget(session, session.phase);
       updateRefractSession(session);
-      setRefractPrompt("");
+      setRefractPrompt(initialDirection);
       setRefractStatus(
         `Prism is refracting ${target.label}. Keep working elsewhere, or click the rainbow sheen to cancel.`,
       );
@@ -2997,6 +3010,14 @@ export default function PrismCompanion({
           );
           window.requestAnimationFrame(() => refractPromptRef.current?.focus());
         }
+      } else if (target.kind === "field" && target.steering) {
+        setRefractStatus(
+          `Tell Prism how to change ${target.label}, then press Enter.`,
+        );
+        window.requestAnimationFrame(() => {
+          refractPromptRef.current?.focus();
+          if (initialDirection) refractPromptRef.current?.select();
+        });
       } else {
         generatePrismRefractCandidate(session);
       }
@@ -3116,6 +3137,32 @@ export default function PrismCompanion({
     refractPrompt,
     refractionGate,
     releasePrismRefract,
+  ]);
+
+  const submitPrismRefractPrompt = useCallback((): void => {
+    const session = refractSessionRef.current;
+    if (!session || session.phase !== "prompting") return;
+    if (session.registration.target.kind === "magic") {
+      submitPrismRefractMagic();
+      return;
+    }
+    if (
+      session.registration.target.kind !== "field" ||
+      !session.registration.target.steering
+    ) {
+      return;
+    }
+    const generatingSession = {
+      ...session,
+      phase: "generating" as const,
+      direction: refractPrompt.trim(),
+    };
+    session.registration.element.focus({ preventScroll: true });
+    generatePrismRefractCandidate(generatingSession);
+  }, [
+    generatePrismRefractCandidate,
+    refractPrompt,
+    submitPrismRefractMagic,
   ]);
 
   const choosePrismRefractMagicChoice = useCallback(
@@ -5444,8 +5491,8 @@ export default function PrismCompanion({
               </div>
             </section>
           ) : null}
-          {refractSession?.phase === "prompting" &&
-          refractSession.registration.target.kind === "magic" ? (
+          {refractSession?.phase === "prompting" ? (
+            refractSession.registration.target.kind === "magic" &&
             refractSession.registration.target.interaction === "choice" ? (
               <section
                 className={styles.refractChoicePicker}
@@ -5473,17 +5520,22 @@ export default function PrismCompanion({
                 </div>
                 <small>Choose again to reroll this container · Escape cancels</small>
               </section>
-            ) : refractSession.registration.target.interaction === "immediate" ? null : (
+            ) : refractSession.registration.target.kind === "magic" &&
+              refractSession.registration.target.interaction === "immediate" ? null : (
               <form
                 className={styles.refractPrompt}
                 data-prism-refract-prompt="true"
+                role="dialog"
+                aria-label={`Steer ${refractSession.registration.target.label}`}
                 onSubmit={(event) => {
                   event.preventDefault();
-                  submitPrismRefractMagic();
+                  submitPrismRefractPrompt();
                 }}
               >
                 <label htmlFor="prism-refract-direction">
-                  How should Prism shape this pass?
+                  {refractSession.registration.target.kind === "field"
+                    ? refractSession.registration.target.steering?.prompt
+                    : "How should Prism shape this pass?"}
                 </label>
                 <input
                   ref={refractPromptRef}
@@ -5500,7 +5552,11 @@ export default function PrismCompanion({
                     }
                   }}
                 />
-                <small>Enter shapes this pass · Escape cancels</small>
+                <small>
+                  {refractSession.registration.target.kind === "field"
+                    ? "Enter refracts this prose · Escape cancels"
+                    : "Enter shapes this pass · Escape cancels"}
+                </small>
               </form>
             )
           ) : null}
@@ -5908,6 +5964,7 @@ export default function PrismCompanion({
                 activeView="chat"
                 synthesisJobCount={softSynthesisUi.jobCount}
               />
+              <PrismTetrahedronPrototype key={surface.surfaceId} />
               <textarea
                 ref={composerRef}
                 value={draft}

@@ -1014,6 +1014,10 @@ test("camera flicker during thinking updates in place without thrashing the reco
       sourceId: "signal-camera",
       presentations: [],
       followingMessageId: "closing-line",
+      followingParticipant: {
+        participantId: "guest",
+        botId: "guest-bot",
+      },
       endReason: "completed",
       endingSegment: "closing",
     });
@@ -1024,6 +1028,8 @@ test("camera flicker during thinking updates in place without thrashing the reco
       (event) => event.kind === "thinking",
     );
     assert.equal(thinking?.sourceMessageId, "closing-line");
+    assert.equal(thinking?.payload.participantId, "guest");
+    assert.equal(thinking?.payload.botId, "guest-bot");
     assert.equal(thinking?.payload.endReason, "completed");
     assert.equal(thinking?.payload.segment, "closing");
   } finally {

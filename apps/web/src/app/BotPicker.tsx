@@ -13,6 +13,10 @@ import { TEXT_ENTRY_SEARCH_MAX_LENGTH } from "@localai/shared";
 import { buildBotLibraryGroupVisualVariables } from "./botLibraryGroupVisual";
 import { placeBotPickerGroupMenu } from "./botPickerGroupMenu";
 import {
+  botSearchSingletonHint,
+  handleBotSearchSingletonKey,
+} from "./botSearchKeyboard";
+import {
   registerPrismRefractTarget,
   type PrismRefractBotDirectedSetupTarget,
 } from "./prismRefract";
@@ -284,6 +288,8 @@ interface BotPickerToolbarProps {
   groupTheme?: BotPickerGroupTheme;
   groupSelectionMode?: "dropdown" | "modal";
   resultLabel?: string;
+  singleActionableResult?: Pick<BotPickerItem, "id" | "name"> | null;
+  onSingleActionableResultSelect?: (botId: string) => void;
   compact?: boolean;
   className?: string;
 }
@@ -300,6 +306,8 @@ export function BotPickerToolbar({
   groupTheme = "dark",
   groupSelectionMode = "dropdown",
   resultLabel,
+  singleActionableResult = null,
+  onSingleActionableResultSelect,
   compact = false,
   className,
 }: BotPickerToolbarProps): React.JSX.Element {
@@ -330,6 +338,9 @@ export function BotPickerToolbar({
         groupTheme,
       )
     : undefined;
+  const singletonHint = singleActionableResult
+    ? botSearchSingletonHint(searchValue, singleActionableResult.name)
+    : null;
 
   useEffect(() => {
     if (!groupMenuOpen || groupSelectionIsModal) return;
@@ -414,6 +425,20 @@ export function BotPickerToolbar({
           maxLength={TEXT_ENTRY_SEARCH_MAX_LENGTH}
           value={searchValue}
           onChange={(event) => onSearchChange(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (!singleActionableResult || !onSingleActionableResultSelect) {
+              return;
+            }
+            handleBotSearchSingletonKey({
+              event,
+              query: searchValue,
+              results: [singleActionableResult],
+              getName: (result) => result.name,
+              onSelect: (result) =>
+                onSingleActionableResultSelect(result.id),
+              onComplete: onSearchChange,
+            });
+          }}
           placeholder={searchPlaceholder}
           aria-label={searchAriaLabel}
         />
@@ -622,9 +647,9 @@ export function BotPickerToolbar({
             : null}
         </div>
       ) : null}
-      {resultLabel ? (
+      {singletonHint || resultLabel ? (
         <small className={sharedStyles.result} role="status">
-          {resultLabel}
+          {singletonHint ?? resultLabel}
         </small>
       ) : null}
     </div>

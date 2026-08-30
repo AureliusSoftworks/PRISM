@@ -6985,11 +6985,11 @@ describe("Coffee group foundation", () => {
           observerCue: "Only adjusted speech is public.",
           effects: [{
             type: "cursed_tongue",
-            version: 1,
+            version: 2,
             frequency: "frequent",
             strength: "strong",
-            vocabulary: "uncensored_non_slur",
-            phraseMode: "occasional_2_3_words",
+            vocabulary: "structurally_masked_non_slur",
+            phraseMode: "censor_performance",
           }],
           ruleLabels: [],
         },
@@ -7091,7 +7091,8 @@ describe("Coffee group foundation", () => {
     ).get(conversationId) as { bot_id: string | null };
     assert.equal(storedSpeaker.bot_id, ALICE.id);
     const publicSpeech = first.conversation.messages.at(-1)?.content ?? "";
-    assert.match(publicSpeech, /\b(?:fucking|goddamn|motherfucking|shitty|damn|hell)\b/iu);
+    assert.match(publicSpeech, /(?:f•••|g••••••|s•••|d•••|h•••)/iu);
+    assert.doesNotMatch(publicSpeech, /\b(?:fuck\w*|goddamn|shit\w*|damn|hell)\b/iu);
     assert.match(publicSpeech, /\[Boris\]\(prism-bot:\/\//u);
 
     const stored = db.prepare(

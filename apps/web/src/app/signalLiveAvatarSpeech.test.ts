@@ -249,6 +249,27 @@ describe("Signal live avatar speech", () => {
     }
   });
 
+  it("samples the premium audible clock instead of projecting wall time", () => {
+    const active = message("premium-clock", "Audible timing owns this mouth.", "host");
+    const speech = liveSpeech(active, 200, { durationMs: 2_800 });
+    let audibleElapsedMs = 320;
+    const clock = {
+      messageId: active.id,
+      elapsedMs: 200,
+      observedAtMs: 1_000,
+      readElapsedMs: () => audibleElapsedMs,
+    };
+    assert.equal(
+      signalLiveSpeechProjectedElapsedMs({ liveSpeech: speech, clock, nowMs: 2_000 }),
+      320,
+    );
+    audibleElapsedMs = 740;
+    assert.equal(
+      signalLiveSpeechProjectedElapsedMs({ liveSpeech: speech, clock, nowMs: 2_000 }),
+      740,
+    );
+  });
+
   it("keeps built-in English voices moving before any segment timing exists", () => {
     for (const role of ["host", "guest"] as const) {
       const active = message(

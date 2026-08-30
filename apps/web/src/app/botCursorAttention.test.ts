@@ -152,7 +152,10 @@ describe("full-size bot cursor attention", () => {
     assert.match(hook, /armIdleRelease\(\)/u);
     assert.match(hook, /prefers-reduced-motion: reduce/u);
     assert.match(tutorials, /Eye movement also sets attention/u);
-    assert.match(tutorials, /Mini avatars stay fixed/u);
+    assert.match(
+      tutorials,
+      /Mini avatars keep their authored eyes stationary and continue ordinary blinking/u,
+    );
     assert.match(tutorials, /lose interest when it rests/u);
   });
 });

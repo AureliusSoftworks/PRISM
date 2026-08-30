@@ -245,13 +245,13 @@ describe("botArchive", () => {
               observerCue: "Only adjusted speech is public.",
               effects: [{
                 type: "cursed_tongue",
-                version: 1,
+                version: 2,
                 frequency: "frequent",
                 strength: "strong",
-                vocabulary: "uncensored_non_slur",
-                phraseMode: "occasional_2_3_words",
+                vocabulary: "structurally_masked_non_slur",
+                phraseMode: "censor_performance",
               }],
-              ruleLabels: ["Frequent public profanity"],
+              ruleLabels: ["Censored curse in every audible line"],
             },
           }],
         },
@@ -263,11 +263,11 @@ describe("botArchive", () => {
       parsePrismBotArchive(archive).botJson.bot.powers?.[0]?.compiled?.effects,
       [{
         type: "cursed_tongue",
-        version: 1,
+        version: 2,
         frequency: "frequent",
         strength: "strong",
-        vocabulary: "uncensored_non_slur",
-        phraseMode: "occasional_2_3_words",
+        vocabulary: "structurally_masked_non_slur",
+        phraseMode: "censor_performance",
       }],
     );
   });

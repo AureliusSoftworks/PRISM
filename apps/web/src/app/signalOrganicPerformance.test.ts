@@ -90,7 +90,7 @@ describe("Signal organic performance presentation", () => {
     assert.equal(played, true);
   });
 
-  it("reconstructs public captions and plural reactions from saved events", () => {
+  it("reconstructs spoken incident captions without projecting action prose", () => {
     assert.deepEqual(signalOrganicCaptionPresentationV1("…"), {
       kind: "animated_ellipsis",
       accessibleText: "hesitating",
@@ -123,9 +123,14 @@ describe("Signal organic performance presentation", () => {
     }
     assert.ok(pluralReactionCount >= 2);
 
-    let captionIncident = null;
-    for (let index = 0; index < 500 && !captionIncident; index += 1) {
-      captionIncident = buildSignalStudioIncidentEventV1({
+    let actionOnlyIncident = null;
+    let dialogueIncident = null;
+    for (
+      let index = 0;
+      index < 1_000 && (!actionOnlyIncident || !dialogueIncident);
+      index += 1
+    ) {
+      const incident = buildSignalStudioIncidentEventV1({
         episodeId: `caption-incident-${index}`,
         showId: "show-1",
         sourceMessageId: "message-1",
@@ -136,13 +141,36 @@ describe("Signal organic performance presentation", () => {
         turnOrdinal: 5,
         alreadyOccurred: false,
       });
+      if (incident?.kind === "headphone_monitor_correction") {
+        actionOnlyIncident = incident;
+      }
+      if (incident?.beats.some((beat) => beat.kind === "dialogue")) {
+        dialogueIncident = incident;
+      }
     }
-    assert.ok(captionIncident);
-    assert.ok(
+    assert.ok(actionOnlyIncident);
+    assert.equal(
       signalStudioIncidentCaptionAtProgressV1({
-        incident: captionIncident,
-        progress: captionIncident.startProgress,
+        incident: actionOnlyIncident,
+        progress: actionOnlyIncident.startProgress + 0.08,
       }),
+      null,
+    );
+    assert.ok(dialogueIncident);
+    const dialogueBeat = dialogueIncident.beats.find(
+      (beat) => beat.kind === "dialogue",
+    );
+    assert.ok(dialogueBeat && dialogueBeat.kind === "dialogue");
+    assert.deepEqual(
+      signalStudioIncidentCaptionAtProgressV1({
+        incident: dialogueIncident,
+        progress: dialogueBeat.atProgress,
+      }),
+      {
+        text: dialogueBeat.text,
+        actorBotId: dialogueBeat.actorBotId,
+        kind: "dialogue",
+      },
     );
 
     assert.match(experienceSource, /botcastVoicePerformanceForMessageV2\(/u);

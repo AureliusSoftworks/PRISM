@@ -63,7 +63,7 @@ describe("Avatar Details face registration", () => {
     );
     assert.match(
       pageSource,
-      /renderDetailLevel === "full"\s*\? registeredFaceEyeMovement\s*:\s*"still"/,
+      /faceEyeMovement=\{registeredFaceEyeMovement\}/,
     );
   });
 

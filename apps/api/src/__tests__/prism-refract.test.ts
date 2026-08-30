@@ -10,6 +10,10 @@ const botcastSource = readFileSync(
   new URL("../botcast.ts", import.meta.url),
   "utf8",
 );
+const inputRefractSource = readFileSync(
+  new URL("../prism-input-refract.ts", import.meta.url),
+  "utf8",
+);
 
 describe("Prism Refract API contract", () => {
   it("requires auth and snapshots the global mode, model, and Effort runtime", () => {
@@ -32,6 +36,8 @@ describe("Prism Refract API contract", () => {
     assert.match(route, /isPrismRefractDebateTextTarget\(request\.target\)/u);
     assert.match(route, /isPrismRefractInputTextTarget\(request\.target\)/u);
     assert.match(route, /generatePrismInputRefractDraft/u);
+    assert.match(route, /direction: request\.direction/u);
+    assert.match(route, /inputText: \[request\.direction, request\.currentValue\]/u);
     assert.match(route, /buildPrismCompanionAuthoritativeContext/u);
     assert.match(route, /surface: "prism-refract"/u);
     assert.match(route, /providerFactoryOverride/u);
@@ -60,6 +66,15 @@ describe("Prism Refract API contract", () => {
     assert.doesNotMatch(
       settingsResponse,
       /prismRefractLocalModel|prismRefractOnlineModel/u,
+    );
+  });
+
+  it("applies prose steering without weakening the bounded draft contract", () => {
+    assert.match(inputRefractSource, /direction: string/u);
+    assert.match(inputRefractSource, /Creative direction:/u);
+    assert.match(
+      inputRefractSource,
+      /cannot override the JSON-only response contract, character limit, privacy boundary, or provenance rules/u,
     );
   });
 

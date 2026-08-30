@@ -45,6 +45,13 @@ const voiceActionCss = readFileSync(
 );
 
 describe("Signal experience shell", () => {
+  it("surfaces sustained automatic recovery without exposing diagnostics", () => {
+    assert.match(source, /signalSessionIsDegraded\(episode\.events\)/u);
+    assert.match(source, /Signal recovering · quality may vary/u);
+    assert.match(source, /className=\{styles\.liveDegradedWarning\} role="status"/u);
+    assert.match(css, /\.liveDegradedWarning\s*\{/u);
+  });
+
   it("restores durable Producer cue state and exposes concise lifecycle feedback", () => {
     assert.match(source, /botcastActiveProducerCueFromEvents\(episode\.events\)/u);
     assert.match(source, /\/producer-cue/u);
@@ -540,6 +547,10 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /botCrosstalkPrimarySpeakerContent\(/u);
     assert.match(pageSource, /startDelayMs: retortDelayMs/u);
+    assert.doesNotMatch(
+      pageSource,
+      /maxDurationMs: 1_900,\s*startDelayMs: retortDelayMs/u,
+    );
     assert.match(
       pageSource,
       /startDelayMs: INTERRUPTED_SPEAKER_RETORT_PAUSE_MS/u,
@@ -1552,6 +1563,25 @@ describe("Signal experience shell", () => {
     );
   });
 
+  it("re-stages saved on-air and studio-cut manifests from the current show", () => {
+    assert.match(
+      source,
+      /const replaySavedPresentationManifestV2 =\s*replayPlaybackSource === "studio-cut"[\s\S]{0,180}studioCut\?\.manifest[\s\S]{0,100}replayManifestV2/u,
+    );
+    assert.match(
+      source,
+      /const replayPresentationManifestV2 = useMemo\([\s\S]{0,260}restageSignalReplayManifestV2ForShow\([\s\S]{0,120}replaySavedPresentationManifestV2,[\s\S]{0,80}selectedShow/u,
+    );
+    assert.match(
+      source,
+      /signalReplayCameraClockFrame\(\{[\s\S]{0,120}manifest: replayPresentationManifestV2/u,
+    );
+    assert.match(
+      source,
+      /renderStage\(\{[\s\S]{0,120}show: selectedShow,[\s\S]{0,320}replay: true/u,
+    );
+  });
+
   it("replays bounded branded bookends and audio-aligned Auto cameras", () => {
     const replayBookendSource = source.slice(
       source.indexOf("function SignalReplayBookend"),
@@ -2164,6 +2194,10 @@ describe("Signal experience shell", () => {
       source,
       /guestInterruption[\s\S]{0,80}\? \{ guestInterruption \}/u,
     );
+    assert.match(
+      source,
+      /requestedCue \|\| hostRedirect \|\| guestInterruption[\s\S]{0,80}\? \{ cueDelivery \}/u,
+    );
     assert.match(source, /interruptionBridgePlayback/u);
     assert.match(source, /playPreparedEpisodeMessage\([\s\S]{0,180}false,/u);
     assert.match(source, /signalHostCueShouldRedirect/u);
@@ -2189,6 +2223,8 @@ describe("Signal experience shell", () => {
       /spokenContent,[\s\S]{0,800}nextHostInterruptionBridge/u,
     );
     assert.match(source, /nextHostInterruptionCrosstalkPlan/u);
+    assert.match(source, /data-signal-caption-overlap="true"/u);
+    assert.match(css, /\.liveCaption\[data-signal-caption-overlap="true"\]/u);
     assert.match(source, /interruptedSpeakerCuePlayback: "crosstalk"/u);
     assert.match(
       source,
@@ -2460,6 +2496,34 @@ describe("Signal experience shell", () => {
     );
   });
 
+  it("pauses Signal time and rundown while the producer composes a cue", () => {
+    assert.match(source, /reason: "producer_composing"/u);
+    assert.match(
+      source,
+      /function beginSignalProducerComposing\(\)[\s\S]{0,900}active: true/u,
+    );
+    assert.match(
+      source,
+      /function finishSignalProducerComposing\(\)[\s\S]{0,900}active: false[\s\S]{0,160}durationMs/u,
+    );
+    assert.match(
+      source,
+      /!autoRun \|\|[\s\S]{0,80}signalProducerComposing \|\|[\s\S]{0,80}busy/u,
+    );
+    assert.match(
+      source,
+      /watchPlaybackReady \|\|[\s\S]{0,100}livePresentedThinkingBot \|\|[\s\S]{0,100}signalProducerComposing \|\|[\s\S]{0,100}signalVoicePreparationPending/u,
+    );
+    assert.match(
+      source,
+      /onInput=\{\(event\) => \{[\s\S]{0,100}beginSignalProducerComposing\(\)/u,
+    );
+    assert.match(
+      source,
+      /onBlur=\{\(\) => \{[\s\S]{0,120}finishSignalProducerComposing\(\)/u,
+    );
+  });
+
   it("shows a live elapsed episode timer and freezes its completed duration", () => {
     assert.match(source, /function signalEpisodeRuntimeMs\(/u);
     assert.match(
@@ -2523,6 +2587,10 @@ describe("Signal experience shell", () => {
     assert.doesNotMatch(
       source.slice(capturedCameraEventAt, capturedCameraEventAt + 120),
       /atMs:/u,
+    );
+    assert.match(
+      source.slice(capturedCameraEventAt, capturedCameraEventAt + 180),
+      /sourceMessageId,/u,
     );
     assert.match(source, /return timeline\.durationMs;/u);
     assert.match(

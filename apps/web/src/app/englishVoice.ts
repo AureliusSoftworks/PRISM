@@ -46,6 +46,11 @@ import {
 } from "./replayAudioMasterCapture.ts";
 import { publishBotVoiceLightLevel } from "./voiceLightEnvelope.ts";
 import { localVocalActionWave } from "./localVocalActions.ts";
+import {
+  readVoiceCensorPlan,
+  voiceCensorPlanWithinSourceRange,
+  type VoiceCensorPlanV1,
+} from "./voiceCensorTone.ts";
 
 export interface EnglishVoicePostProcessing {
   detuneCents: number;
@@ -82,6 +87,16 @@ export interface EnglishVoiceWaveStreamChunk {
   authoredText: string | null;
   sourceStart: number | null;
   sourceEnd: number | null;
+}
+
+const censorPlanByAudioBytes = new WeakMap<ArrayBuffer, VoiceCensorPlanV1>();
+
+function rememberAudioCensorPlan(
+  bytes: ArrayBuffer,
+  plan: VoiceCensorPlanV1 | null,
+): ArrayBuffer {
+  if (plan) censorPlanByAudioBytes.set(bytes, plan);
+  return bytes;
 }
 
 const MEDIA_PLAY_START_TIMEOUT_MS = 1500;
@@ -279,6 +294,7 @@ export async function readEnglishVoiceSynthesisClip(
     response.headers,
   );
   const encodedNotice = response.headers.get("x-prism-voice-notice");
+  const censorPlan = readVoiceCensorPlan(response.headers);
   let notice: string | null = null;
   if (encodedNotice) {
     try {
@@ -288,8 +304,9 @@ export async function readEnglishVoiceSynthesisClip(
     }
   }
   if (!contentType.toLowerCase().includes("application/json")) {
+    const bytes = rememberAudioCensorPlan(await response.arrayBuffer(), censorPlan);
     return {
-      bytes: await response.arrayBuffer(),
+      bytes,
       alignment: null,
       audioContentType: contentType,
       engineUsed,
@@ -303,8 +320,9 @@ export async function readEnglishVoiceSynthesisClip(
   const payload = await response.json() as Record<string, unknown>;
   const audioBase64 = typeof payload.audioBase64 === "string" ? payload.audioBase64.trim() : "";
   if (!audioBase64) throw new Error("Voice synthesis returned no audio.");
+  const bytes = rememberAudioCensorPlan(decodedBase64Bytes(audioBase64), censorPlan);
   return {
-    bytes: decodedBase64Bytes(audioBase64),
+    bytes,
     alignment: normalizedAlignment(payload.alignment),
     audioContentType: typeof payload.audioContentType === "string"
       ? payload.audioContentType
@@ -424,6 +442,9 @@ const mediaOutputCleanup = new WeakMap<HTMLMediaElement, () => void>();
 function routeEnglishMediaOutput(
   audio: HTMLMediaElement,
   lifecycle?: VoicePlaybackLifecycle,
+  censorPlan?: VoiceCensorPlanV1 | null,
+  censorAlignment?: EnglishVoiceCharacterAlignment | null,
+  censorDurationMs?: number,
 ): void {
   if (mediaOutputCleanup.has(audio)) return;
   const onLevel = lifecycle?.onLevel || lifecycle?.voiceLightTarget
@@ -434,7 +455,14 @@ function routeEnglishMediaOutput(
         lifecycle?.onLevel?.(level);
       }
     : undefined;
-  const cleanup = routeAudioElementToPrismOutput(audio, { onLevel });
+  const cleanup = routeAudioElementToPrismOutput(audio, {
+    onLevel,
+    censorPlan,
+    censorAlignment,
+    censorDurationMs,
+    readCensorElapsedMs: () =>
+      englishVoiceMediaElapsedMs(audio.currentTime, audio.playbackRate),
+  });
   if (!cleanup && replayAudioMasterCaptureActive()) {
     throw new Error("English voice could not enter the faithful session mix.");
   }
@@ -679,7 +707,12 @@ async function playBytesWithMedia(
   audio.preservesPitch = true;
   activeMedia = audio;
   activeMediaUrl = url;
-  routeEnglishMediaOutput(audio, lifecycle);
+  routeEnglishMediaOutput(
+    audio,
+    lifecycle,
+    censorPlanByAudioBytes.get(bytes),
+    alignment,
+  );
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
@@ -993,6 +1026,7 @@ async function playStreamingResponseWithMedia(
   lifecycle?: VoicePlaybackLifecycle,
   preSpeechBreath?: PreSpeechBreathPlan | null,
 ): Promise<void> {
+  const censorPlan = readVoiceCensorPlan(response.headers);
   const MediaSourceConstructor = mediaSourceForEnglishStream();
   const body = response.body;
   if (!MediaSourceConstructor || !body || expectedGeneration !== generation) {
@@ -1012,7 +1046,13 @@ async function playStreamingResponseWithMedia(
   audio.preservesPitch = true;
   activeMedia = audio;
   activeMediaUrl = url;
-  routeEnglishMediaOutput(audio, lifecycle);
+  routeEnglishMediaOutput(
+    audio,
+    lifecycle,
+    censorPlan,
+    null,
+    Math.max(1, estimatedDurationMs),
+  );
 
   const reader = body.getReader();
   await new Promise<void>((resolve, reject) => {
@@ -1183,6 +1223,7 @@ async function playAudio(
   const playbackStillValid = (): boolean =>
     expectedGeneration === generation && (isPlaybackStillValid?.() ?? true);
   if (!playbackStillValid()) return;
+  const censorPlan = censorPlanByAudioBytes.get(bytes) ?? null;
   await playPreSpeechBreath({
     plan: preSpeechBreath,
     profile,
@@ -1214,6 +1255,7 @@ async function playAudio(
       channel,
       lifecycle,
       alignment,
+      censorPlan,
       alignMouthToDecodedSpeech: engineUsed === "elevenlabs",
       compensateLifecycleForOutputLatency: true,
       isCurrent: playbackStillValid,
@@ -1340,6 +1382,7 @@ async function playChunkedEnglishResponse(
   pacingProfile?: EnglishPacingProfileV1 | null,
   channel: VoicePlaybackChannel = "primary",
 ): Promise<void> {
+  const streamCensorPlan = readVoiceCensorPlan(response.headers);
   const totalCharacters = Math.max(
     1,
     Number(response.headers.get("x-prism-voice-characters")) || 1,
@@ -1533,6 +1576,12 @@ async function playChunkedEnglishResponse(
             chunk.text?.length ??
               Math.max(0, chunk.characterCount - (chunk.index > 0 ? 1 : 0)),
           );
+    const chunkCensorPlan = voiceCensorPlanWithinSourceRange(
+      streamCensorPlan,
+      sourceStart,
+      sourceEnd,
+    );
+    rememberAudioCensorPlan(chunk.bytes, chunkCensorPlan);
     await playAudio(
       chunk.bytes,
       profile,

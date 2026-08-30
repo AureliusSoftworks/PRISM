@@ -211,7 +211,7 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
   assert.match(miniSource, /botFrameMetalAlloyColor\(voicePreset\)/);
   assert.match(
     miniSource,
-    /forceBlinkPhase=\{previewBlink \? "closed" : "open"\}/,
+    /forceBlinkPhase=\{previewBlink \? "closed" : undefined\}/,
   );
   assert.match(miniSource, /<BotAvatarMicroRenderer/);
   assert.doesNotMatch(

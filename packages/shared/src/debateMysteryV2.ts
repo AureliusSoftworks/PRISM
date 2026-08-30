@@ -494,6 +494,10 @@ export interface DebateWhodunnitCreateConfigV2 {
   assetSynthesis?: Partial<DebateMysteryAssetSynthesisV2>;
   /** Minimal setup seam for an aggregate-owned saved mansion. */
   mansionBundleId?: string | null;
+  /** Accepted, tenant-owned exterior draft for a newly created mansion. */
+  mansionExteriorImageId?: string | null;
+  /** The Mansion-step direction frozen with that accepted exterior. */
+  mansionExteriorDirection?: string | null;
   nonce: string;
   floors?: number;
   totalRooms?: number;
@@ -521,6 +525,8 @@ export interface DebateMysteryResolvedConfigV2
     | "spark"
     | "assetSynthesis"
     | "mansionBundleId"
+    | "mansionExteriorImageId"
+    | "mansionExteriorDirection"
   > {
   floors: number;
   totalRooms: number;
@@ -2317,6 +2323,8 @@ export function resolveDebateMysteryConfigV2(
   const {
     prosecutorPartnerBotId: _legacyProsecutorPartnerBotId,
     prosecutorBotId: _inputProsecutorBotId,
+    mansionExteriorImageId: _mansionExteriorImageId,
+    mansionExteriorDirection: _mansionExteriorDirection,
     ...publicValue
   } = value;
   const spark = (value.spark?.trim() || value.inspiration.trim()).slice(0, 2_000);
@@ -2356,7 +2364,11 @@ export function resolveDebateMysteryConfigV2(
         : null,
     mansionSnapshot: null,
     houseStyle: {
-      ...debateMysteryHouseStyleV2(spark),
+      ...debateMysteryHouseStyleV2(
+        typeof value.mansionExteriorImageId === "string" && value.mansionExteriorImageId.trim()
+          ? value.mansionExteriorDirection?.trim().slice(0, 800) || spark
+          : spark,
+      ),
       bespokeAmbienceRequested: assetSynthesis.ambience,
     },
     nonce: value.nonce.trim().slice(0, 200),

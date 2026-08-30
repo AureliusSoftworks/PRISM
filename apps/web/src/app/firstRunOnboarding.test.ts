@@ -139,6 +139,10 @@ describe("first-run onboarding", () => {
     assert.match(FIRST_RUN_BATCH_FOUNDRY_GUIDANCE, /mini-avatar slot/u);
     assert.match(
       FIRST_RUN_BATCH_FOUNDRY_GUIDANCE,
+      /Cursed Tongue.*visible bullet masks.*voices replace each mask with an electronic censor beep.*without generating a hidden uncensored curse word/u,
+    );
+    assert.match(
+      FIRST_RUN_BATCH_FOUNDRY_GUIDANCE,
       /glyph-only Micro identities inside each generated color-and-glyph orb/u,
     );
     assert.match(pageSource, /FIRST_RUN_BATCH_FOUNDRY_GUIDANCE/u);

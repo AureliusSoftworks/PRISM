@@ -123,6 +123,7 @@
   display: grid;
   grid-template-areas:
     "header"
+    "refract"
     "canvas"
     "tools"
     "palette"
@@ -132,6 +133,60 @@
   border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
   border-radius: var(--editor-radius-section);
   background: color-mix(in srgb, var(--bg-deep) 64%, transparent);
+}
+
+.inkRefract {
+  grid-area: refract;
+  display: grid;
+  gap: var(--prism-space-xs);
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  border-radius: var(--editor-radius-panel);
+  background: color-mix(in srgb, var(--bg-surface) 68%, transparent);
+}
+
+.inkRefract label {
+  display: grid;
+  gap: var(--prism-space-3xs);
+}
+
+.inkRefract small,
+.inkRefractStatus {
+  color: var(--fg-muted);
+  font-size: var(--editor-text-caption);
+  line-height: 1.35;
+}
+
+.inkRefractStatus {
+  margin: 0;
+}
+
+.inkRefractControls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--prism-space-xs);
+}
+
+.inkRefractControls input,
+.inkRefractControls button {
+  min-height: var(--editor-control-h);
+  border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
+  border-radius: var(--editor-radius-control);
+  background: color-mix(in srgb, var(--bg-surface) 86%, transparent);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--editor-text-caption);
+}
+
+.inkRefractControls input {
+  min-width: 0;
+  padding: 5px 8px;
+}
+
+.inkRefractControls button {
+  padding: 4px 8px;
+  cursor: pointer;
+  font-weight: 700;
 }
 
 .templateSection {
@@ -1138,9 +1193,10 @@
 @container (min-width: 720px) {
   .paintSection {
     grid-template-columns: minmax(440px, 1fr) minmax(220px, 250px);
-    grid-template-rows: auto max-content max-content minmax(0, 1fr);
+    grid-template-rows: auto auto max-content max-content minmax(0, 1fr);
     grid-template-areas:
       "header header"
+      "refract refract"
       "canvas tools"
       "canvas palette"
       "canvas coverage";
@@ -1183,9 +1239,10 @@
 
 .editor[data-editor-layout="foundry"] .paintSection {
   grid-template-columns: 1fr;
-  grid-template-rows: auto auto auto auto;
+  grid-template-rows: auto auto auto auto auto;
   grid-template-areas:
     "header"
+    "refract"
     "tools"
     "palette"
     "coverage";

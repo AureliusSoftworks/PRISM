@@ -49,4 +49,18 @@ describe("Signal advance operation ownership", () => {
     );
     registry.finish(timed);
   });
+
+  it("cancels owned recognition or generation work when the show is cut", async () => {
+    const registry = new SignalAdvanceOperationRegistry();
+    const run = registry.begin("user-1:episode-1", { preempt: false });
+    const pending = registry.run(
+      run,
+      async () => new Promise<string>(() => undefined),
+      10_000,
+    );
+
+    assert.equal(registry.cancel("user-1:episode-1"), true);
+    await assert.rejects(pending, /cancelled/iu);
+    assert.equal(registry.cancel("user-1:episode-1"), false);
+  });
 });

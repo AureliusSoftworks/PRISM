@@ -24,6 +24,8 @@ export type SignalLiveSpeechPlaybackClock = {
   messageId: string;
   elapsedMs: number;
   observedAtMs: number;
+  /** Prefer the engine's live audible clock over wall-time projection. */
+  readElapsedMs?: () => number;
 };
 
 /**
@@ -68,8 +70,10 @@ export function signalLiveSpeechProjectedElapsedMs(args: {
   ) {
     return speech?.reveal.elapsedMs ?? 0;
   }
-  const projected =
-    clock.elapsedMs + Math.max(0, args.nowMs - clock.observedAtMs);
+  const sampledElapsedMs = clock.readElapsedMs?.();
+  const projected = Number.isFinite(sampledElapsedMs)
+    ? sampledElapsedMs!
+    : clock.elapsedMs + Math.max(0, args.nowMs - clock.observedAtMs);
   return Math.min(
     speech.reveal.durationMs,
     Math.max(speech.reveal.elapsedMs, projected),

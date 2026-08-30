@@ -93,6 +93,7 @@ describe("voice Phase 1 boundary", () => {
       kind: "builtin-babble",
       engineUsed: "builtin-babble",
       text: "hello",
+      censorRanges: [],
       profile: request.profile,
     });
   });
@@ -108,6 +109,48 @@ describe("voice Phase 1 boundary", () => {
       cleanSpeakableAssistantProse("The *important* part is trust."),
       "The important part is trust.",
     );
+  });
+  it("sends only a harmless carrier plus exact censor ranges to synthesizers", () => {
+    const request = validateVoiceSynthesisRequest({
+      text: "That is f***ing ridiculous, you absolute b••••••.",
+      elevenLabsText:
+        "[sighs] That is f***ing ridiculous, you absolute b••••••.",
+      mode: "english",
+      engine: "elevenlabs",
+      explicitOnlineContext: true,
+    });
+    assert.equal(
+      request.text,
+      "That is bleep ridiculous, you absolute bleep.",
+    );
+    assert.equal(
+      request.elevenLabsText,
+      "[sighs] That is bleep ridiculous, you absolute bleep.",
+    );
+    assert.deepEqual(request.textCensorRanges, [
+      { start: 8, end: 13 },
+      { start: 39, end: 44 },
+    ]);
+    assert.deepEqual(request.elevenLabsCensorRanges, [
+      { start: 16, end: 21 },
+      { start: 47, end: 52 },
+    ]);
+    const local = resolveVoiceSynthesisBoundary({
+      ...request,
+      persistedMessageProvider: "local",
+    });
+    const online = resolveVoiceSynthesisBoundary(request);
+    const synthesisInputs = [
+      local.ok ? local.text : "",
+      online.ok && online.kind === "elevenlabs-stream"
+        ? online.elevenLabsText
+        : "",
+    ];
+    assert.ok(synthesisInputs.every((text) => text.includes("bleep")));
+    assert.ok(synthesisInputs.every((text) => !text.includes("•")));
+    assert.ok(synthesisInputs.every((text) =>
+      !/\b(?:fuck\w*|goddamn|shit\w*|damn|hell|asshole|bastard)\b/iu.test(text)
+    ));
   });
   it("uses a phonetic player name only in synthesized text", () => {
     assert.equal(

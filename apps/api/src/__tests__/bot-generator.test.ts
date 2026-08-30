@@ -5,16 +5,29 @@ import { createDeterministicProvider } from "../test-support.ts";
 import {
   BotGenerationError,
   botGenerationModelSupportsStructuredOutput,
+  generateAvatarDetailsInk,
   generateBotDraft,
   generateBotField,
   parseGeneratedBotDraftText,
   sanitizeBotGenerationFieldContext,
 } from "../bot-generator.ts";
 import type { GenerateOptions, ProviderMessage } from "../providers.ts";
+import { decodeBotAvatarDetailsPaintColorMap } from "@localai/shared";
 
 const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
 
 describe("bot generation route", () => {
+  it("keeps refracted Ink on the selected LOCAL/ONLINE lane without image generation", () => {
+    const routeSource = serverSource.slice(
+      serverSource.indexOf('route("POST", "/api/bots/generate-avatar-details-ink"'),
+      serverSource.indexOf('route("POST", "/api/bots/generate-draft"'),
+    );
+    assert.match(routeSource, /responseMode === "local"\s*\? "local"/u);
+    assert.match(routeSource, /const onlineAllowed = responseMode !== "local"/u);
+    assert.match(routeSource, /getOpenAiApiKeyForUser[\s\S]*: undefined/u);
+    assert.match(routeSource, /generateAvatarDetailsInk\(/u);
+    assert.doesNotMatch(routeSource, /generateImage|\/api\/images\/generate/u);
+  });
   it("honors live navbar model and effort while preserving Auto routing", () => {
     const routeSource = serverSource.slice(
       serverSource.indexOf('route("POST", "/api/bots/generate-draft"'),
@@ -258,6 +271,71 @@ function rawLeanDraft(): Record<string, unknown> {
 }
 
 describe("PRISM bot generator", () => {
+  it("rasterizes valid refracted Ink and rejects malformed output without a fallback mutation", async () => {
+    const valid = await generateAvatarDetailsInk({
+      prompt: "a sparse comet crown",
+      provider: createDeterministicProvider([
+        JSON.stringify({
+          avatarDetails: {
+            ink: [{
+              role: "effect",
+              points: [{ x: 42, y: 28 }, { x: 58, y: 20 }, { x: 74, y: 28 }],
+              closed: false,
+              fill: false,
+              size: 2,
+            }],
+            speechInkAnimation: "none",
+          },
+        }),
+      ]),
+      providerName: "local",
+      model: "llama-local",
+      responseMode: "local",
+    });
+    assert.ok(valid.details.screen.paintColorMapBase64);
+
+    const defaulted = await generateAvatarDetailsInk({
+      prompt: "a sparse comet crown",
+      provider: createDeterministicProvider([
+        JSON.stringify({
+          avatarDetails: {
+            ink: [{
+              role: "talking",
+              points: [{ x: 42, y: 28 }, { x: 58, y: 20 }, { x: 74, y: 28 }],
+              closed: false,
+              fill: false,
+              size: 2,
+            }],
+            speechInkAnimation: "wobble",
+          },
+        }),
+      ]),
+      providerName: "local",
+      model: "llama-local",
+      responseMode: "local",
+    });
+    assert.equal(defaulted.details.screen.speechInkAnimation, undefined);
+    assert.equal(
+      Array.from(
+        decodeBotAvatarDetailsPaintColorMap(
+          defaulted.details.screen.paintColorMapBase64,
+        ),
+      ).some((byte) => [6, 4, 2, 0].some((shift) => ((byte >>> shift) & 0x03) === 2)),
+      false,
+    );
+
+    await assert.rejects(
+      () => generateAvatarDetailsInk({
+        prompt: "a sparse comet crown",
+        provider: createDeterministicProvider(["not json"]),
+        providerName: "local",
+        model: "llama-local",
+        responseMode: "local",
+      }),
+      (error: unknown) =>
+        error instanceof BotGenerationError && error.kind === "invalid_output",
+    );
+  });
   it("hydrates every batch draft with its own persisted Accent Map location", async () => {
     const generate = (batchIndex: number) =>
       generateBotDraft({

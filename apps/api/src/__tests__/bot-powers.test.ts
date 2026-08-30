@@ -359,7 +359,7 @@ test("Noir and Archaic registers compile deterministically into speech_register 
   );
 });
 
-test("Cursed Tongue compiles deterministic post-generation profanity without using the model", async () => {
+test("Cursed Tongue compiles deterministic post-generation censorship without using the model", async () => {
   const result = await compileBotPowers({
     provider: {
       name: "local",
@@ -383,18 +383,18 @@ test("Cursed Tongue compiles deterministic post-generation profanity without usi
   assert.equal(result.powers[0]?.compileStatus, "ready");
   assert.deepEqual(compiled?.effects, [{
     type: "cursed_tongue",
-    version: 1,
+    version: 2,
     frequency: "frequent",
     strength: "strong",
-    vocabulary: "uncensored_non_slur",
-    phraseMode: "occasional_2_3_words",
+    vocabulary: "structurally_masked_non_slur",
+    phraseMode: "censor_performance",
   }]);
   assert.match(compiled?.selfCue ?? "", /draft fully natural clean speech only/iu);
   assert.doesNotMatch(
     compiled?.selfCue ?? "",
     /Cursed Tongue|PRISM adds|public profanity|public mutation/iu,
   );
-  assert.match(compiled?.observerCue ?? "", /only that adjusted wording/iu);
+  assert.match(compiled?.observerCue ?? "", /only that censored wording/iu);
 });
 
 test("Cursed Tongue aliases and clear vulgarity rules compile to exactly its canonical effect", async () => {
@@ -429,14 +429,14 @@ test("Cursed Tongue aliases and clear vulgarity rules compile to exactly its can
     assert.equal(result.powers[0]?.compileStatus, "ready", intent);
     assert.deepEqual(result.powers[0]?.compiled?.effects, [{
       type: "cursed_tongue",
-      version: 1,
+      version: 2,
       frequency: "frequent",
       strength: "strong",
-      vocabulary: "uncensored_non_slur",
-      phraseMode: "occasional_2_3_words",
+      vocabulary: "structurally_masked_non_slur",
+      phraseMode: "censor_performance",
     }], intent);
     assert.deepEqual(result.powers[0]?.compiled?.ruleLabels, [
-      "Profanity in every audible line",
+      "Censored curse in every audible line",
       "Clean intent stays holder-private",
     ], intent);
   }
@@ -455,11 +455,11 @@ test("blank prompt-authored cursed tongue name uses canonical display name", asy
             observerCue: "He curses.",
             effects: [{
               type: "cursed_tongue",
-              version: 1,
+              version: 2,
               frequency: "frequent",
               strength: "strong",
-              vocabulary: "uncensored_non_slur",
-              phraseMode: "occasional_2_3_words",
+              vocabulary: "structurally_masked_non_slur",
+              phraseMode: "censor_performance",
             }],
             ruleLabels: ["Profanity"],
           }],
@@ -927,13 +927,13 @@ test("the model cannot invent Cursed Tongue for an unrelated prompt", async () =
             observerCue: "The weather talk feels oddly cursed.",
             effects: [{
               type: "cursed_tongue",
-              version: 1,
+              version: 2,
               frequency: "frequent",
               strength: "strong",
-              vocabulary: "uncensored_non_slur",
-              phraseMode: "occasional_2_3_words",
+              vocabulary: "structurally_masked_non_slur",
+              phraseMode: "censor_performance",
             }],
-            ruleLabels: ["Profanity in every audible line"],
+            ruleLabels: ["Censored curse in every audible line"],
           }],
         });
       },

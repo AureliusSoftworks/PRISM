@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   createBotDirectedSetupRefractTarget,
+  initialPrismRefractProseDirection,
+  PRISM_REFRACT_DEFAULT_PROSE_DIRECTION,
   PrismRefractGenerationTimeoutError,
   nextPrismRefractChoice,
   prismRefractModifierClickDecision,
@@ -9,6 +11,14 @@ import {
 } from "./prismRefract.ts";
 
 describe("Prism Refract helpers", () => {
+  it("offers replaceable creative steering only when prose already exists", () => {
+    assert.equal(
+      initialPrismRefractProseDirection("A draft paragraph."),
+      PRISM_REFRACT_DEFAULT_PROSE_DIRECTION,
+    );
+    assert.equal(initialPrismRefractProseDirection("   "), "");
+  });
+
   it("carries a captured bot identity through the shared setup target", async () => {
     const calls: Array<{ botId: string; botName: string; direction: string }> = [];
     const target = createBotDirectedSetupRefractTarget({
