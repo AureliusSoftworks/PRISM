@@ -906,7 +906,10 @@ function normalizeGeneratedVoice(
     corporality,
     avatarSfx: null,
     avatarSfxPrompt,
-    accentPronunciationEnabled: record.accentPronunciationEnabled === true,
+    // Generated bots retain their Accent Map, but both synthesis lanes begin
+    // off; imported legacy profiles migrate separately at persistence time.
+    ttsPronunciationEnabled: false,
+    premiumPronunciationEnabled: false,
     accentDefinitionId: resolvedAccentDefinitionId,
     pronunciationMapPoint,
     pronunciationBase: localAccent.pronunciationBase,

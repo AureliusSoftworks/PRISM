@@ -839,6 +839,12 @@ export function CoffeeSeatPlateEmoji({
     normalizedThinkingFrames[
       thinkingSpinnerFrameIndex % normalizedThinkingFrames.length
     ];
+  // Raster masks do not observe a font-weight change that leaves the glyph
+  // box alone. Include the Studio-authored face shape in the key so every
+  // renderer (especially binary Mini pixels) refreshes from its selected font
+  // instead of retaining a previous family/weight silhouette.
+  const faceGlyphRasterKey = (font: BotFaceFontId | null | undefined): string =>
+    `${font ?? "default"}:weight-${normalizedFaceFontWeight ?? "default"}`;
   return (
     <span
       className={className}
@@ -971,7 +977,8 @@ export function CoffeeSeatPlateEmoji({
             content={thinkingSpinnerGlyph}
             enabled={pixelated}
             binaryAlpha={hardPixels}
-            rasterKey={faceMouthFont ?? "default"}
+            rasterKey={faceGlyphRasterKey(faceMouthFont)}
+            data-face-font={faceMouthFont ?? undefined}
           />
         </span>
       ) : questionGlyphActive ? (
@@ -984,7 +991,8 @@ export function CoffeeSeatPlateEmoji({
             content="?"
             enabled={pixelated}
             binaryAlpha={hardPixels}
-            rasterKey={faceMouthFont ?? faceEyesFont ?? "default"}
+            rasterKey={faceGlyphRasterKey(faceMouthFont ?? faceEyesFont)}
+            data-face-font={faceMouthFont ?? faceEyesFont ?? undefined}
           />
         </span>
       ) : (
@@ -1061,14 +1069,16 @@ export function CoffeeSeatPlateEmoji({
                       content={renderedGlyph}
                       enabled={pixelated}
                       binaryAlpha={hardPixels}
-                      rasterKey={partFaceFont ?? "default"}
+                      rasterKey={faceGlyphRasterKey(partFaceFont)}
+                      data-face-font={partFaceFont ?? undefined}
                     />
                     <CrtPixelTextGlyph
                       data-custom-eye-pair-side="right"
                       content={renderedGlyph}
                       enabled={pixelated}
                       binaryAlpha={hardPixels}
-                      rasterKey={partFaceFont ?? "default"}
+                      rasterKey={faceGlyphRasterKey(partFaceFont)}
+                      data-face-font={partFaceFont ?? undefined}
                     />
                   </span>
                 ) : (
@@ -1080,7 +1090,8 @@ export function CoffeeSeatPlateEmoji({
                       !(part === "mouth" && liveMouthGlyphSwapActive)
                     }
                     binaryAlpha={hardPixels}
-                    rasterKey={partFaceFont ?? "default"}
+                    rasterKey={faceGlyphRasterKey(partFaceFont)}
+                    data-face-font={partFaceFont ?? undefined}
                   />
                 )}
               </span>

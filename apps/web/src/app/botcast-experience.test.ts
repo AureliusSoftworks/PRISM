@@ -49,6 +49,17 @@ const voiceActionCss = readFileSync(
 );
 
 describe("Signal experience shell", () => {
+  it("treats a completed Signal show as powered down without fabricating message provenance", () => {
+    assert.match(source, /"○ SHOW ENDED"/u);
+    assert.match(source, /episode\?\.status === "live" \? "On air" : "Off air"/u);
+    assert.match(source, /data-show-ended=\{args\.currentEpisode\.status === "completed"/u);
+    assert.match(source, /signalMessageGenerationLabel\(episode, message\.id\)/u);
+    assert.match(source, /className=\{styles\.producerRailCaptionControls\}/u);
+    assert.match(css, /signalAnnoyanceFlux/u);
+    assert.match(css, /signalHostSignoffExit/u);
+    assert.match(css, /prefers-reduced-motion: reduce[\s\S]*guestAnnoyanceFill[\s\S]*animation: none !important;/u);
+  });
+
   it("keeps a persistent Light and Dark switch in the live session chrome", () => {
     assert.match(
       source,
@@ -91,9 +102,9 @@ describe("Signal experience shell", () => {
     assert.match(source, /botcastActiveProducerCueFromEvents\(episode\.events\)/u);
     assert.match(source, /\/producer-cue/u);
     assert.match(source, /producer-cue\/clear/u);
-    assert.match(source, /Cue not delivered safely\. Revise and send a new host note\./u);
-    assert.match(source, /Cue delivered to the host\./u);
-    assert.match(source, /Requeued for host/u);
+    assert.match(source, /Last cue needs revision/u);
+    assert.match(source, /Last cue delivered/u);
+    assert.doesNotMatch(source, /className=\{styles\.queuedCueStatus\}/u);
   });
 
   it("renders the live Producer controls as a compact accessible cue desk without replacing cue authority", () => {
@@ -281,9 +292,11 @@ describe("Signal experience shell", () => {
       source,
       /signalPendingEpisodeImageCueIsAwaitingHostTurn\(\{[\s\S]{0,240}pendingCue: queuedProducerCueRef\.current[\s\S]{0,160}pendingImage: signalEpisodeImageRef\.current/u,
     );
+    assert.doesNotMatch(source, /getImageData\(/u);
+    assert.doesNotMatch(source, /image\.decode\(\)/u);
     assert.match(
       source,
-      /if \(!hasVisibleTransparency\) descriptor\.kind = "picture"/u,
+      /The API already\s+\/\/ normalizes the source with an input-pixel limit/u,
     );
     assert.match(source, /signalEpisodeStageImageContext/u);
     assert.match(source, /className=\{styles\.episodeImageContext\}/u);
@@ -2365,10 +2378,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /Host note is private context, direction, or a question/u);
     assert.match(source, /compatible host\s+delivers it exactly/u);
     assert.match(source, /without revealing the\s+private Host note/u);
-    assert.match(
-      source,
-      /className=\{styles\.producerCueComposer\}[\s\S]{0,900}queuedCueStatus/u,
-    );
+    assert.match(source, /aria-label="Producer cue delivery status"/u);
     assert.match(css, /\.producerCueActions/u);
     assert.match(css, /\.producerImageAttach/u);
     assert.match(
@@ -2619,7 +2629,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /data-countdown=\{countdown \? "true" : undefined\}/u);
     assert.match(
       source,
-      /props\.durationMinutes \* 60_000 - elapsedMs/u,
+      /durationMinutes \* 60_000 - elapsedMs/u,
     );
     assert.match(source, /\{countdown \? "T− " : "T\+ "\}/u);
     assert.match(
@@ -3001,7 +3011,9 @@ describe("Signal experience shell", () => {
     assert.match(css, /\.liveCaption\s*\{[^}]*grid-template-columns:\s*3px\s+minmax\(0,\s*1fr\)/iu);
     assert.match(css, /\.liveCaption\s*>\s*i\s*\{[^}]*background:\s*linear-gradient/iu);
     assert.match(css, /\.live\[data-theme="light"\] \.liveCaption/iu);
-    assert.match(css, /\.captionControls\s*\{[^}]*top:\s*12px/iu);
+    assert.match(source, /className=\{styles\.producerRailCaptionControls\}/u);
+    assert.match(css, /\.producerRailCaptionControls\s*\{/u);
+    assert.doesNotMatch(source, /className=\{styles\.captionControls\}/u);
     assert.match(
       css,
       /\.shell\[data-caption-size="extra-large"\]\s*\{[^}]*--signal-caption-body-font:\s*clamp\(18px,\s*1\.66vw,\s*24px\)/iu,

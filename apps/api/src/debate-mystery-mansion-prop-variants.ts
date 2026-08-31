@@ -447,6 +447,11 @@ export function cleanupUnreferencedDebateMysteryMansionAssetsV1(
   db: DatabaseSync,
   userId: string,
 ): void {
+  const hasPropVariantTable = Boolean(
+    db.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'debate_mystery_mansion_prop_variants'",
+    ).get(),
+  );
   db.prepare(
     `DELETE FROM debate_mystery_mansion_assets
       WHERE user_id = ?
@@ -454,11 +459,11 @@ export function cleanupUnreferencedDebateMysteryMansionAssetsV1(
           SELECT 1 FROM debate_mystery_mansion_asset_refs AS refs
            WHERE refs.user_id = debate_mystery_mansion_assets.user_id
              AND refs.asset_id = debate_mystery_mansion_assets.id
-        )
+        )${hasPropVariantTable ? `
         AND NOT EXISTS (
           SELECT 1 FROM debate_mystery_mansion_prop_variants AS variants
            WHERE variants.user_id = debate_mystery_mansion_assets.user_id
              AND variants.asset_id = debate_mystery_mansion_assets.id
-        )`,
+        )` : ""}`,
   ).run(userId);
 }

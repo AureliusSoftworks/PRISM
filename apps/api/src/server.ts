@@ -6,7 +6,7 @@ import {
 } from "node:http";
 import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import { createHash, randomInt } from "node:crypto";
+import { createHash, randomInt, randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -276,7 +276,7 @@ import {
   submitDebateTurnaboutAction,
   submitDebateVerdict,
   swingDebateJudgeGavel,
-  synthesizeDebateSlates,
+  synthesizeDebateSlatesWithProvenance,
   synthesizeDebateTitle,
   generateDebateJudgeEvidencePacket,
   suggestDebateSetup,
@@ -351,6 +351,7 @@ import {
 import {
   cloneDebateMysteryMansionBundleV1,
   createBlankDebateMysteryMansionBundleV1,
+  createDebateMysteryVenueBundleV1,
   deleteDebateMysteryMansionBundleV2,
   ensureDebateMysteryMansionPortableRoomAssetsV1,
   getDebateMysteryMansionAssetFileV1,
@@ -430,9 +431,13 @@ import {
   PORTABLE_WHODUNNIT_PACKAGE_MIME_V1,
   WHODUNNIT_PROP_ARCHETYPE_IDS_V1,
   WHODUNNIT_PROP_ARCHETYPES_V1,
+  createMysteryVenueProposalV1,
+  parseMysteryVenueCreativeDraftV1,
   debateMysteryHouseStyleV2,
   debateMysteryMansionExteriorPromptV1,
   resolveDebateMysteryMansionExteriorScaleClassV1,
+  type MysteryVenueProposalV1,
+  type MysteryVenueLengthV1,
 } from "@localai/shared";
 import {
   buildSignalLiveBakeArtifactFromEpisode,
@@ -10567,7 +10572,7 @@ async function prepareDebateMysteryV2MansionExteriorAssetDirect(
             userId: args.userId,
             title: `${args.houseStyle.label} exterior establishing shot`,
             prompt: [
-              debateMysteryMansionExteriorPromptV1(args.houseStyle, args.scaleClass),
+              debateMysteryMansionExteriorPromptV1(args.houseStyle, args.scaleClass, args.venueProfile),
               ...(attempt === 2 && reviewRepairFeedback
                 ? [`Correct these first-pass review findings: ${reviewRepairFeedback}`]
                 : []),
@@ -10591,8 +10596,8 @@ async function prepareDebateMysteryV2MansionExteriorAssetDirect(
             apiKey,
             bytes: normalized,
             kind: "room",
-            requestedSubject: "complete mansion exterior in its geography",
-            houseStyle: debateMysteryMansionExteriorPromptV1(args.houseStyle, args.scaleClass),
+            requestedSubject: `complete ${args.venueProfile?.placeNoun ?? "mansion"} in its geography`,
+            houseStyle: debateMysteryMansionExteriorPromptV1(args.houseStyle, args.scaleClass, args.venueProfile),
             signal: attemptSignal,
           });
           if (!review.approved) {
@@ -11492,7 +11497,9 @@ async function prepareDebateMysteryGeneratedAssets(args: {
           prompt: [
             `Reskin this exact annotated ${template.name.toLowerCase()} composition as an original PRISM murder-mystery room.`,
             "Preserve the exact camera, dimensions, floor line, object silhouettes, and position of every broad physical region so all existing hit polygons remain aligned.",
-            "Premium illustrated adventure-game background, tactile materials, moody refraction light, restrained cinematic detail, no people, no evidence clue, no blood, no text, no symbols, no UI, and no changed or added furniture.",
+            "Create genuine polished high-resolution hand-crafted pixel art: deliberate coherent pixel clusters, crisp stepped edges, tactile materials, moody refraction light, restrained cinematic detail, and the full natural color palette of the scene.",
+            "Do not imitate a realistic painting, photograph, low-resolution enlargement, mosaic grid, pixelation filter, blur, sepia treatment, dithering screen, or screen-door overlay.",
+            "No people, no evidence clue, no blood, no text, no symbols, no UI, and no changed or added furniture.",
           ].join(" "),
           preferredProvider,
           requestedImageModel: selection.model,
@@ -18886,6 +18893,8 @@ function buildRoutes(): RouteDefinition[] {
         value: result.value,
         provider: result.provider,
         model: result.model,
+        reasoningEffort: result.reasoningEffort,
+        turbo: result.turbo,
       });
     }),
     // Debate is an isolated Experience. It snapshots persona, voice, model,
@@ -18910,7 +18919,7 @@ function buildRoutes(): RouteDefinition[] {
             : {}),
         },
       );
-      const slates = await runWithUsageSession(
+      const synthesis = await runWithUsageSession(
         {
           db,
           userId,
@@ -18919,14 +18928,14 @@ function buildRoutes(): RouteDefinition[] {
           surface: "debate",
         },
         () =>
-          synthesizeDebateSlates(
+          synthesizeDebateSlatesWithProvenance(
             body.topic,
             body.formality,
             runtime,
             body.direction,
           ),
       );
-      json(ctx.res, 200, { ok: true, slates });
+      json(ctx.res, 200, { ok: true, ...synthesis });
     }),
     route("POST", "/api/debates/flyting/forge", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -19053,6 +19062,8 @@ function buildRoutes(): RouteDefinition[] {
         suggestion: invent.suggestion,
         provider: invent.provider,
         model: invent.model,
+        reasoningEffort: invent.reasoningEffort,
+        turbo: invent.turbo,
       });
     }),
     route("POST", "/api/debates/judge-evidence", async (ctx) => {
@@ -19716,25 +19727,31 @@ function buildRoutes(): RouteDefinition[] {
       const body = ctx.body as Record<string, unknown>;
       const user = getUserRow(userId);
       if (body.responseMode === "local" || userBlocksOnlineCapabilities(user)) {
-        throw new HttpError(409, "Mansion exterior Refract is ONLINE only. LOCAL keeps the bundled house cover.");
+        throw new HttpError(409, "Mystery Venue exterior Refract is ONLINE only. LOCAL keeps the neutral or accepted cover.");
       }
+      const bundle = typeof body.bundleId === "string" && body.bundleId.trim()
+        ? getDebateMysteryMansionBundleV2(db, userId, body.bundleId.trim())
+        : null;
       const preset = body.preset === "standard" || body.preset === "grand" || body.preset === "custom"
         ? body.preset
         : "compact";
-      const scaleClass = resolveDebateMysteryMansionExteriorScaleClassV1({
+      const scaleClass = bundle?.scaleClass ?? resolveDebateMysteryMansionExteriorScaleClassV1({
         preset,
         floors: typeof body.floors === "number" ? body.floors : 2,
         totalRooms: typeof body.totalRooms === "number" ? body.totalRooms : 5,
       });
       const direction = normalizePrismRefractDirection(body.direction);
-      if (!direction) {
-        throw new HttpError(400, "Describe the mansion exterior before refracting it.");
+      if (!direction && !bundle) {
+        throw new HttpError(400, "Describe the Mystery Venue exterior before refracting it.");
       }
       const canonicalPrompt = debateMysteryMansionExteriorPromptV1(
-        debateMysteryHouseStyleV2(direction),
+        bundle?.houseStyle ?? debateMysteryHouseStyleV2(direction),
         scaleClass,
+        bundle?.layoutV2?.venueProfile,
       );
-      const prompt = `${canonicalPrompt}\nCreative direction for this pass: ${direction}`;
+      const prompt = direction
+        ? `${canonicalPrompt}\nCreative direction for this pass: ${direction}`
+        : canonicalPrompt;
       const selection = resolveTypedAssetGenerationSelection(userId, "debate_exhibit", {
         provider: "openai",
         model: typeof body.model === "string" ? body.model : undefined,
@@ -19749,7 +19766,7 @@ function buildRoutes(): RouteDefinition[] {
         size: "1536x1024",
         origin: "debate",
         purpose: "whodunnit_mansion_exterior_draft",
-        featureLabel: "a mansion exterior",
+        featureLabel: `a ${bundle?.layoutV2?.venueProfile?.placeNoun ?? "mansion"} exterior`,
         normalizeImageBytes: async (bytes) => sharp(bytes, { failOn: "error" })
           .rotate()
           .flatten({ background: { r: 3, g: 8, b: 14 } })
@@ -20133,11 +20150,118 @@ function buildRoutes(): RouteDefinition[] {
         mansions: listDebateMysteryMansionBundlesV2(db, userId),
       });
     }),
+    route("POST", "/api/debates/mystery-mansions/propose", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const description = typeof body.description === "string" ? body.description.slice(0, 2_000) : "";
+      const rawLength = body.length && typeof body.length === "object"
+        ? body.length as Record<string, unknown>
+        : {};
+      const id: MysteryVenueLengthV1["id"] = rawLength.id === "quick" || rawLength.id === "standard" ||
+        rawLength.id === "grand" || rawLength.id === "custom"
+        ? rawLength.id
+        : "standard";
+      const length = {
+        id,
+        rooms: typeof rawLength.rooms === "number" ? rawLength.rooms : 10,
+        suspects: typeof rawLength.suspects === "number" ? rawLength.suspects : 6,
+        tiers: typeof rawLength.tiers === "number" ? rawLength.tiers : undefined,
+      };
+      let creativeDraft = null;
+      try {
+        const user = getUserRow(userId);
+        const requestedResponseMode = body.responseMode === "local" ? "local" : "online";
+        const runtime = await contextualTextRuntimeForUser({
+          userId,
+          user,
+          requestedResponseMode,
+          requestedProvider: requestedResponseMode === "local" ? "local" : undefined,
+          routingContext: {
+            surface: "whodunnit",
+            inputText: description || "Surprise me with an original mystery setting.",
+            outputTokens: 1_800,
+            structuredOutput: true,
+          },
+        });
+        const provider = selectProvider(
+          runtime.provider,
+          runtime.openAiApiKey,
+          user.secondary_ollama_host,
+          runtime.anthropicApiKey,
+          runtime.ollamaCloudApiKey,
+        );
+        const response = await provider.generateResponse([
+          {
+            role: "system",
+            content: [
+              "Design one public, spoiler-free Mystery Venue for a murder-mystery game.",
+              "Return JSON only. Do not provide coordinates, case facts, evidence, victims, culprits, or suspects.",
+              "Use exactly one topology: estate, spine, radial, pods, or linear.",
+              "Use exactly one kind: estate, vessel, habitat, facility, transport, or other.",
+              "Give the setting its own concrete geography and vocabulary; never force a non-estate into mansion, foyer, umbrella, or upstairs language.",
+              "Rooms must be ordinary believable spaces in that setting. Include a semantic entry first and at least five rooms total.",
+              "Each room needs: templateId, name, one emoji, role (entry, circulation, social, private, operations, service, technical, observation, or other), and 2-4 concrete fixture anchors.",
+              "Also return title, kind, kindLabel, placeNoun, topology, tierNoun, exteriorMode (grounds, docked, contained, in-transit, or other), environmentSummary, atmosphere, connectorLabel, and rooms.",
+            ].join("\n"),
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              setting: description || "Surprise me",
+              investigationLength: length,
+              nonce: typeof body.nonce === "string" ? body.nonce.slice(0, 200) : "0",
+            }),
+          },
+        ], {
+          model: runtime.model,
+          reasoningEffort: runtime.reasoningEffort,
+          turbo: runtime.turbo,
+          temperature: 0.82,
+          maxTokens: 1_800,
+          jsonMode: true,
+          usagePurpose: "chat_reply",
+          allowFinalLocalFallback: false,
+          signal: AbortSignal.timeout(12_000),
+          generationWork: {
+            workflow: "whodunnit_venue_proposal",
+            stage: "propose",
+            privacyMode: runtime.responseMode,
+            outputClass: "critical",
+          },
+        });
+        creativeDraft = parseMysteryVenueCreativeDraftV1(JSON.parse(response));
+      } catch {
+        // The deterministic catalog below is the bounded, editable fallback.
+      }
+      const proposal = createMysteryVenueProposalV1({
+        id: randomUUID(),
+        description,
+        nonce: typeof body.nonce === "string" ? body.nonce.slice(0, 200) : "0",
+        length,
+        creativeDraft,
+      });
+      json(ctx.res, 200, { ok: true, proposal });
+    }),
     route("POST", "/api/debates/mystery-mansions", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (body.proposal && typeof body.proposal === "object") {
+        const proposal = body.proposal as MysteryVenueProposalV1;
+        if (typeof body.idempotencyKey !== "string" || body.idempotencyKey !== proposal.id) {
+          throw new HttpError(400, "Mystery Venue acceptance needs its proposal idempotency key.");
+        }
+        json(ctx.res, 201, {
+          ok: true,
+          mansion: createDebateMysteryVenueBundleV1(
+            db,
+            userId,
+            proposal,
+          ),
+        });
+        return;
+      }
       if (Object.keys(body).length > 0) {
-        throw new HttpError(400, "Blank mansion creation does not accept client-authored fields.");
+        throw new HttpError(400, "Mystery Venue creation accepts either an empty blank draft or one server proposal.");
       }
       json(ctx.res, 201, {
         ok: true,
@@ -32009,15 +32133,17 @@ function buildRoutes(): RouteDefinition[] {
       // pipeline. The account-level legacy system-voice default must not
       // silently replace it: operating-system voices have no style surface,
       // so the authored accent would vanish entirely.
-      const synthesisProfile =
-        normalizeBotAudioVoiceProfileForSynthesisV1(requestedProfile);
+      const ttsProfile = normalizeBotAudioVoiceProfileForSynthesisV1(
+        requestedProfile,
+        "tts",
+      );
       const authoredLocalAccentIdentity =
-        Boolean(synthesisProfile.accentDefinitionId) ||
-        (synthesisProfile.speechprintInfluence !== undefined &&
-          synthesisProfile.speechprintInfluence !== "none") ||
-        Boolean(synthesisProfile.pronunciationMapPoint);
+        Boolean(ttsProfile.accentDefinitionId) ||
+        (ttsProfile.speechprintInfluence !== undefined &&
+          ttsProfile.speechprintInfluence !== "none") ||
+        Boolean(ttsProfile.pronunciationMapPoint);
       const profile = normalizeBotAudioVoiceProfileV1({
-        ...synthesisProfile,
+        ...requestedProfile,
         elevenLabsVoiceId: resolvedElevenLabsVoiceId,
         systemVoiceName:
           requestedProfile.systemVoiceName ??
@@ -32375,6 +32501,8 @@ function buildRoutes(): RouteDefinition[] {
         if (request.includeAlignment) {
           const timestamped = await requestElevenLabsSpeechWithTimestamps({
             apiKey,
+            tenantId: userId,
+            privacyMode: "online",
             voiceId,
             model: normalizeElevenLabsTtsModel(user.elevenlabs_voice_model),
             text: boundary.elevenLabsText,
@@ -32422,6 +32550,8 @@ function buildRoutes(): RouteDefinition[] {
         }
         const providerResponse = await requestElevenLabsSpeech({
           apiKey,
+          tenantId: userId,
+          privacyMode: "online",
           voiceId,
           model: normalizeElevenLabsTtsModel(user.elevenlabs_voice_model),
           text: boundary.elevenLabsText,

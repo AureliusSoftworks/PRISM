@@ -39,6 +39,8 @@ test("generates a bounded draft-only contextual input candidate", async () => {
   assert.equal(result.value, "A warm machine with pati");
   assert.equal(result.provider, "local");
   assert.equal(result.model, "test-model");
+  assert.equal(result.reasoningEffort, "auto");
+  assert.equal(result.turbo, false);
 });
 
 test("rejects malformed or repeated contextual input candidates", async () => {
@@ -222,6 +224,8 @@ test("forwards the resolved foreground model, effort, and Turbo state", async ()
 
   assert.equal(result.provider, "openai");
   assert.equal(result.model, "gpt-5.6-terra");
+  assert.equal(result.reasoningEffort, "high");
+  assert.equal(result.turbo, true);
   assert.equal(capturedOptions?.model, "gpt-5.6-terra");
   assert.equal(capturedOptions?.reasoningEffort, "high");
   assert.equal(capturedOptions?.turbo, true);

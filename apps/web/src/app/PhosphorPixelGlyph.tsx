@@ -327,6 +327,8 @@ export const CrtPixelTextGlyph = forwardRef<
      */
     rasterKey?: string | number | null;
     "data-custom-eye-pair-side"?: "left" | "right";
+    /** Keep Avatar Studio's authored family on the exact node rasterized. */
+    "data-face-font"?: string;
   }
 >(function CrtPixelTextGlyph(
   {
@@ -335,6 +337,7 @@ export const CrtPixelTextGlyph = forwardRef<
     binaryAlpha = false,
     rasterKey,
     "data-custom-eye-pair-side": customEyePairSide,
+    "data-face-font": faceFont,
   },
   forwardedRef,
 ): React.JSX.Element {
@@ -469,6 +472,7 @@ export const CrtPixelTextGlyph = forwardRef<
       data-crt-pixel-mask-ready={maskUrl ? "true" : undefined}
       data-crt-pixel-mask-pending={enabled && !maskUrl ? "true" : undefined}
       data-custom-eye-pair-side={customEyePairSide}
+      data-face-font={faceFont}
       style={style}
     >
       {content}

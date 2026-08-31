@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import sharp from "sharp";
+import { CURRENT_MANSION_ROOM_ART_CONTRACT } from "@localai/shared";
 import {
   applyDebateMysteryMosaicPresentationV1,
   buildDebateMysteryIllustratedRoomUpgradePromptV1,
@@ -47,6 +48,7 @@ describe("debate mystery room Pixel Art", () => {
     const second = await renderDebateMysteryRoomArtV1(source);
     assert.deepEqual(first.bytes, second.bytes);
     assert.equal(first.mimeType, "image/webp");
+    assert.equal(first.variant, "mosaic-reference");
 
     const metadata = await sharp(first.bytes).metadata();
     assert.equal(metadata.width, 1920);
@@ -58,21 +60,23 @@ describe("debate mystery room Pixel Art", () => {
       colors.add(`${data[offset]},${data[offset + 1]},${data[offset + 2]}`);
     }
     assert.ok(colors.size > 72, `expected an unrestricted authored palette, found ${colors.size} sampled colors`);
-    assert.equal(DEBATE_MYSTERY_ROOM_ART_CONTRACT_V1.version, 5);
+    assert.equal(DEBATE_MYSTERY_ROOM_ART_CONTRACT_V1.version, 6);
+    assert.equal(DEBATE_MYSTERY_ROOM_ART_CONTRACT_V1.defaultStyle, "pixel-art");
+    assert.equal(DEBATE_MYSTERY_ROOM_ART_CONTRACT_V1.defaultPresentation, "mosaic");
+    assert.equal(DEBATE_MYSTERY_ROOM_ART_CONTRACT_V1.upgradeStyle, "realistic");
     assert.equal(DEBATE_MYSTERY_ROOM_ART_CONTRACT_V1.source, "synthesized-pixel-art");
     assert.equal(DEBATE_MYSTERY_ROOM_ART_CONTRACT_V1.deterministicFilter, false);
-    assert.deepEqual(DEBATE_MYSTERY_ROOM_ART_CONTRACT_V1.mosaicPresentation, {
-      logicalWidth: 320,
-      logicalHeight: 180,
-      blend: "normal",
-      luminanceSplit: "scene-grid-median",
-      lineAlpha: 84,
-      lineDelta: 36,
-      sourcePreserving: true,
-    });
+    assert.equal(
+      DEBATE_MYSTERY_ROOM_ART_CONTRACT_V1.realisticUpgradeSource,
+      "accepted-gridless-pixel-art-upgrade",
+    );
+    assert.deepEqual(
+      DEBATE_MYSTERY_ROOM_ART_CONTRACT_V1.mosaicPresentation,
+      CURRENT_MANSION_ROOM_ART_CONTRACT.pixelArt.grid,
+    );
   });
 
-  it("applies the approved balanced Normal grid without changing non-grid pixels", async () => {
+  it("assigns one logical source sample to every complete Mosaic tessera", async () => {
     const gridless = await renderDebateMysteryRoomArtV1(await colorfulRoomFixture(), {
       variant: "mosaic-reference",
       format: "png",
@@ -85,39 +89,59 @@ describe("debate mystery room Pixel Art", () => {
     assert.equal(mosaic.cellSize, 6);
     assert.equal(mosaic.mimeType, "image/png");
 
-    const [base, presented] = await Promise.all([
-      sharp(gridless.bytes).removeAlpha().raw().toBuffer({ resolveWithObject: true }),
-      sharp(mosaic.bytes).removeAlpha().raw().toBuffer({ resolveWithObject: true }),
-    ]);
-    let nonGridChanged = 0;
+    const presented = await sharp(mosaic.bytes)
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
     let brighter = 0;
     let darker = 0;
-    let signedDelta = 0;
-    for (let y = 0; y < base.info.height; y += 1) {
-      for (let x = 0; x < base.info.width; x += 1) {
-        const offset = (y * base.info.width + x) * base.info.channels;
-        const delta =
-          (presented.data[offset]! - base.data[offset]!) +
-          (presented.data[offset + 1]! - base.data[offset + 1]!) +
-          (presented.data[offset + 2]! - base.data[offset + 2]!);
-        const gridPixel = x % mosaic.cellSize === 0 || y % mosaic.cellSize === 0;
-        if (!gridPixel && delta !== 0) nonGridChanged += 1;
-        if (gridPixel && delta > 0) brighter += 1;
-        if (gridPixel && delta < 0) darker += 1;
-        if (gridPixel) signedDelta += delta / 3;
+    for (let cellY = 0; cellY < mosaic.height; cellY += mosaic.cellSize) {
+      for (let cellX = 0; cellX < mosaic.width; cellX += mosaic.cellSize) {
+        const sampleOffset = ((cellY + 1) * mosaic.width + cellX + 1) * presented.info.channels;
+        for (let y = cellY + 1; y < cellY + mosaic.cellSize; y += 1) {
+          for (let x = cellX + 1; x < cellX + mosaic.cellSize; x += 1) {
+            const offset = (y * mosaic.width + x) * presented.info.channels;
+            assert.deepEqual(
+              [...presented.data.subarray(offset, offset + 3)],
+              [...presented.data.subarray(sampleOffset, sampleOffset + 3)],
+              `sub-cell detail survived inside tessera ${cellX / mosaic.cellSize},${cellY / mosaic.cellSize}`,
+            );
+          }
+        }
+        const gridOffset = (cellY * mosaic.width + cellX) * presented.info.channels;
+        const interiorLuminance = presented.data[sampleOffset]! + presented.data[sampleOffset + 1]! + presented.data[sampleOffset + 2]!;
+        const gridLuminance = presented.data[gridOffset]! + presented.data[gridOffset + 1]! + presented.data[gridOffset + 2]!;
+        if (gridLuminance > interiorLuminance) brighter += 1;
+        if (gridLuminance < interiorLuminance) darker += 1;
       }
     }
-    assert.equal(nonGridChanged, 0);
     assert.ok(brighter > 0);
     assert.ok(darker > 0);
     assert.ok(
       Math.abs(brighter - darker) < (brighter + darker) * 0.08,
       `expected a balanced grid, found ${brighter} brighter and ${darker} darker pixels`,
     );
-    assert.ok(
-      Math.abs(signedDelta / (brighter + darker)) < 1,
-      "balanced grid should not materially shift overall exposure",
+  });
+
+  it("keeps the one-sample-per-tessera invariant in delivered WebP bytes", async () => {
+    const mosaic = await applyDebateMysteryMosaicPresentationV1(
+      await navigationRoomFixture(),
     );
+    assert.equal(mosaic.mimeType, "image/webp");
+    const { data, info } = await sharp(mosaic.bytes)
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    for (let cellY = 0; cellY < info.height; cellY += mosaic.cellSize) {
+      for (let cellX = 0; cellX < info.width; cellX += mosaic.cellSize) {
+        const expected = ((cellY + 1) * info.width + cellX + 1) * info.channels;
+        const corner = ((cellY + 5) * info.width + cellX + 5) * info.channels;
+        assert.deepEqual(
+          [...data.subarray(corner, corner + 3)],
+          [...data.subarray(expected, expected + 3)],
+        );
+      }
+    }
   });
 
   it("keeps the realistic-upgrade reference gridless without quantization or nearest-neighbour filtering", async () => {
@@ -178,6 +202,11 @@ describe("debate mystery room Pixel Art", () => {
     const server = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
     assert.match(server, /size: "1280x720",[\s\S]{0,100}quality: "high"/u);
     assert.match(server, /genuine polished high-resolution hand-crafted pixel art/u);
+    assert.match(
+      server,
+      /Reskin this exact annotated[\s\S]{0,760}genuine polished high-resolution hand-crafted pixel art[\s\S]{0,500}Do not imitate a realistic painting/u,
+    );
+    assert.doesNotMatch(server, /Premium illustrated adventure-game background/u);
     assert.match(server, /generatedPixelArt[\s\S]{0,180}renderDebateMysteryRoomArtV1/u);
     assert.match(server, /ctx\.query\.get\("style"\) === "mosaic"[\s\S]{0,240}applyDebateMysteryMosaicPresentationV1/u);
     assert.ok(

@@ -1,9 +1,6 @@
 export const DEBATE_FLYTING_STAGE_ALIGNMENT_VERSION = 1 as const;
 
-export type DebateFlytingStageAlignmentView =
-  | "wide"
-  | "moderator"
-  | "gallery";
+export type DebateFlytingStageAlignmentView = "wide" | "moderator" | "gallery";
 
 export type DebateFlytingStageAlignmentItem =
   | "wideForBot"
@@ -13,7 +10,6 @@ export type DebateFlytingStageAlignmentItem =
   | "wideModeratorBot"
   | "wideModeratorHelmet"
   | "wideModeratorNameplate"
-  | "wideModeratorHeraldry"
   | "wideAgainstBot"
   | "wideAgainstHelmet"
   | "wideAgainstNameplate"
@@ -22,10 +18,8 @@ export type DebateFlytingStageAlignmentItem =
   | "moderatorModeratorBot"
   | "moderatorModeratorHelmet"
   | "moderatorModeratorNameplate"
-  | "moderatorModeratorHeraldry"
   | "moderatorAgainstHeraldry"
   | "galleryForRugGlyph"
-  | "galleryModeratorRugGlyph"
   | "galleryAgainstRugGlyph";
 
 export interface DebateFlytingStagePlacementV1 {
@@ -59,18 +53,22 @@ export interface DebateFlytingStageAlignmentItemDefinition {
 
 export const DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS: readonly DebateFlytingStageAlignmentItemDefinition[] =
   [
-    { id: "wideForBot", view: "wide", label: "Pro bot" },
+    { id: "wideForBot", view: "wide", label: "Challenger bot" },
     {
       id: "wideForHelmet",
       view: "wide",
-      label: "Pro helmet",
+      label: "Challenger helmet",
       supportsRotation: true,
     },
-    { id: "wideForNameplate", view: "wide", label: "Pro nameplate" },
+    {
+      id: "wideForNameplate",
+      view: "wide",
+      label: "Challenger nameplate",
+    },
     {
       id: "wideForHeraldry",
       view: "wide",
-      label: "Pro banner glyph",
+      label: "Challenger banner glyph",
       supportsRotation: true,
     },
     { id: "wideModeratorBot", view: "wide", label: "Jarl bot" },
@@ -85,34 +83,28 @@ export const DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS: readonly DebateFlytingStageAl
       view: "wide",
       label: "Jarl nameplate",
     },
-    {
-      id: "wideModeratorHeraldry",
-      view: "wide",
-      label: "Jarl banner glyph",
-      supportsRotation: true,
-    },
-    { id: "wideAgainstBot", view: "wide", label: "Con bot" },
+    { id: "wideAgainstBot", view: "wide", label: "Defender bot" },
     {
       id: "wideAgainstHelmet",
       view: "wide",
-      label: "Con helmet",
+      label: "Defender helmet",
       supportsRotation: true,
     },
     {
       id: "wideAgainstNameplate",
       view: "wide",
-      label: "Con nameplate",
+      label: "Defender nameplate",
     },
     {
       id: "wideAgainstHeraldry",
       view: "wide",
-      label: "Con banner glyph",
+      label: "Defender banner glyph",
       supportsRotation: true,
     },
     {
       id: "moderatorForHeraldry",
       view: "moderator",
-      label: "Pro throne banner glyph",
+      label: "Challenger throne banner glyph",
       supportsRotation: true,
     },
     {
@@ -132,35 +124,22 @@ export const DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS: readonly DebateFlytingStageAl
       label: "Jarl throne nameplate",
     },
     {
-      id: "moderatorModeratorHeraldry",
-      view: "moderator",
-      label: "Jarl throne glyph",
-      supportsRotation: true,
-    },
-    {
       id: "moderatorAgainstHeraldry",
       view: "moderator",
-      label: "Con throne banner glyph",
+      label: "Defender throne banner glyph",
       supportsRotation: true,
     },
     {
       id: "galleryForRugGlyph",
       view: "gallery",
-      label: "Pro rug glyph",
-      supportsRotation: true,
-      supportsSkew: true,
-    },
-    {
-      id: "galleryModeratorRugGlyph",
-      view: "gallery",
-      label: "Neutral rug glyph",
+      label: "Challenger rug glyph",
       supportsRotation: true,
       supportsSkew: true,
     },
     {
       id: "galleryAgainstRugGlyph",
       view: "gallery",
-      label: "Con rug glyph",
+      label: "Defender rug glyph",
       supportsRotation: true,
       supportsSkew: true,
     },
@@ -178,10 +157,7 @@ export const DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT: DebateFlytingStageAlignment
         item.id,
         defaultPlacement(),
       ]),
-    ) as Record<
-      DebateFlytingStageAlignmentItem,
-      DebateFlytingStagePlacementV1
-    >,
+    ) as Record<DebateFlytingStageAlignmentItem, DebateFlytingStagePlacementV1>,
   };
 
 function normalizedNumber(
@@ -195,9 +171,7 @@ function normalizedNumber(
   return Math.round(Math.max(minimum, Math.min(maximum, numeric)) * 100) / 100;
 }
 
-function normalizePlacement(
-  value: unknown,
-): DebateFlytingStagePlacementV1 {
+function normalizePlacement(value: unknown): DebateFlytingStagePlacementV1 {
   const candidate =
     typeof value === "object" && value !== null
       ? (value as Record<string, unknown>)
@@ -229,10 +203,7 @@ export function normalizeDebateFlytingStageAlignment(
         item.id,
         normalizePlacement(placements[item.id]),
       ]),
-    ) as Record<
-      DebateFlytingStageAlignmentItem,
-      DebateFlytingStagePlacementV1
-    >,
+    ) as Record<DebateFlytingStageAlignmentItem, DebateFlytingStagePlacementV1>,
   };
 }
 

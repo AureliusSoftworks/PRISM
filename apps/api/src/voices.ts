@@ -22,6 +22,11 @@ import {
   type VoiceDeliveryMood,
   type VoiceCensorRangeV1,
 } from "@localai/shared";
+import {
+  buildElevenLabsPronunciationRulePlan,
+  prepareElevenLabsAccentDictionary,
+  type ElevenLabsPronunciationDictionaryLocator,
+} from "./elevenlabs-pronunciation-dictionaries.ts";
 
 type AccentIpaResolver = typeof import("./builtin-tts-runtime.ts")["prepareAccentMapTargetIpa"];
 
@@ -146,6 +151,18 @@ export interface ElevenLabsTimestampedSpeech {
   alignment: VoiceCharacterAlignment | null;
   normalizedAlignment: VoiceCharacterAlignment | null;
   providerRequestId: string | null;
+  premiumPhonology?: ElevenLabsPremiumPhonologyProvenance;
+}
+
+export interface ElevenLabsPremiumPhonologyProvenance {
+  planSha256: string;
+  rulesetVersion: string;
+  rulesetSha256: string;
+  model: "eleven_v3";
+  direction: string | null;
+  gateEnabled: true;
+  locatorVersionId: string | null;
+  fallback: "dictionary" | "inline-ipa" | "respelling";
 }
 
 type ElevenLabsSpeechArgs = {
@@ -163,6 +180,12 @@ type ElevenLabsSpeechArgs = {
   seed?: number;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
+  /** Required by production dialogue/replay paths that may create or update a
+   * remote Accent Map dictionary. Deliberately opaque to ElevenLabs. */
+  tenantId?: string;
+  privacyMode?: "online" | "local";
+  protectedPronunciationDictionaryLocators?: readonly ElevenLabsPronunciationDictionaryLocator[];
+  pronunciationDictionaryTimeoutMs?: number;
   /** Test seam for deterministic request-contract coverage. Production uses
    * the same provider-neutral Accent Map IPA resolver as Local synthesis. */
   accentIpaResolver?: AccentIpaResolver;
@@ -228,6 +251,8 @@ type ElevenLabsSpeechInput = {
   /** Second projection from expanded speech back to authored spelling. */
   sourceProjectionSegments: readonly ElevenLabsTextProjectionSegment[];
   sourceAlignmentProjected: boolean;
+  pronunciationDictionaryLocators: readonly ElevenLabsPronunciationDictionaryLocator[];
+  premiumPhonology: ElevenLabsPremiumPhonologyProvenance | null;
 };
 
 /**
@@ -340,6 +365,46 @@ async function elevenLabsAccentIpaProjection(
     : null;
 }
 
+function elevenLabsSelectiveIpaProjection(
+  text: string,
+  spans: readonly {
+    sourceStart: number;
+    sourceEnd: number;
+    sourceText: string;
+    targetIpa: string;
+  }[],
+): ElevenLabsTextProjectionSegment[] | null {
+  const selected = [...spans]
+    .filter(
+      (span) =>
+        span.sourceStart >= 0 &&
+        span.sourceEnd > span.sourceStart &&
+        span.sourceEnd <= text.length &&
+        text.slice(span.sourceStart, span.sourceEnd) === span.sourceText,
+    )
+    .sort((left, right) => left.sourceStart - right.sourceStart);
+  if (selected.length === 0) return null;
+  const segments: ElevenLabsTextProjectionSegment[] = [];
+  let cursor = 0;
+  for (const span of selected) {
+    if (span.sourceStart < cursor) continue;
+    if (span.sourceStart > cursor) {
+      const plain = text.slice(cursor, span.sourceStart);
+      segments.push({ providerText: plain, sourceText: plain });
+    }
+    segments.push({
+      providerText: `/${span.targetIpa.replaceAll("/", "").trim()}/`,
+      sourceText: span.sourceText,
+    });
+    cursor = span.sourceEnd;
+  }
+  if (cursor < text.length) {
+    const plain = text.slice(cursor);
+    segments.push({ providerText: plain, sourceText: plain });
+  }
+  return segments;
+}
+
 async function elevenLabsSpeechInput(
   args: ElevenLabsSpeechArgs,
 ): Promise<ElevenLabsSpeechInput> {
@@ -352,7 +417,7 @@ async function elevenLabsSpeechInput(
     text: speechProjection.synthesisText,
   };
   const normalizedProfile =
-    normalizeBotAudioVoiceProfileForSynthesisV1(speechArgs.profile);
+    normalizeBotAudioVoiceProfileForSynthesisV1(speechArgs.profile, "premium");
   const authoredDirection = normalizeElevenLabsVoiceDirection(
     normalizedProfile.elevenLabsDirection,
   );
@@ -363,6 +428,7 @@ async function elevenLabsSpeechInput(
     speechprintInfluence: normalizedProfile.speechprintInfluence,
     speechprintStrength: normalizedProfile.speechprintStrength,
     nativeAccentHint: normalizedProfile.elevenLabsNativeAccentHint,
+    force: normalizedProfile.premiumPronunciationEnabled === true,
   });
   const hasAudioTags = [...speechArgs.text.matchAll(ELEVENLABS_AUDIO_TAG_PATTERN)]
     .length > 0;
@@ -380,7 +446,11 @@ async function elevenLabsSpeechInput(
       .filter(Boolean)
       .join(", ") || null,
   );
-  const model = direction || hasAudioTags
+  const premiumPronunciationActive =
+    normalizedProfile.premiumPronunciationEnabled === true &&
+    Boolean(accentDirection) &&
+    speechArgs.respellAccent !== false;
+  const model = direction || hasAudioTags || premiumPronunciationActive
     ? "eleven_v3"
     : normalizeElevenLabsTtsModel(speechArgs.model);
   const directionPrefix = direction
@@ -389,16 +459,92 @@ async function elevenLabsSpeechInput(
         .map((entry) => `[${entry.trim().replace(/[\[\]]/gu, "")}]`)
         .join(" ")} `
     : "";
-  // The direction carries prosody. On Eleven v3, authoritative IPA supplies
-  // Scottish target phonology; other maps retain the lighter existing
-  // respelling projection. Both remain private to the request.
-  //
-  // No accent direction means the voice already speaks this accent, and
-  // respelling on top of it would double the effect.
-  const ipaProjection =
-    accentDirection && speechArgs.respellAccent !== false
-      ? await elevenLabsAccentIpaProjection(speechArgs, normalizedProfile)
-      : null;
+  let pronunciationDictionaryLocators = [
+    ...(speechArgs.protectedPronunciationDictionaryLocators ?? []),
+  ].slice(0, 3);
+  let premiumPhonology: ElevenLabsPremiumPhonologyProvenance | null = null;
+  let ipaProjection: ElevenLabsTextProjectionSegment[] | null = null;
+  if (premiumPronunciationActive && speechArgs.tenantId) {
+    try {
+      const resolveIpa = speechArgs.accentIpaResolver ?? prepareAccentMapTargetIpaLazily;
+      const protectedAudioTags = [...speechArgs.text.matchAll(ELEVENLABS_AUDIO_TAG_PATTERN)]
+        .map((match) => match[0]);
+      const plan = await resolveIpa({
+        text: speechArgs.text,
+        profile: normalizedProfile,
+        synthesisEngine: "premium",
+        protectedPhrases: [
+          ...(speechArgs.protectedPhrases ?? []),
+          ...protectedAudioTags,
+        ],
+      });
+      const rulePlan = buildElevenLabsPronunciationRulePlan(plan);
+      let fallback: ElevenLabsPremiumPhonologyProvenance["fallback"] = "dictionary";
+      let locator: ElevenLabsPronunciationDictionaryLocator | null = null;
+      if (
+        rulePlan.rules.length > 0 &&
+        speechArgs.tenantId &&
+        pronunciationDictionaryLocators.length < 3
+      ) {
+        try {
+          locator = await prepareElevenLabsAccentDictionary({
+            tenantId: speechArgs.tenantId,
+            apiKey: speechArgs.apiKey,
+            plan,
+            rules: rulePlan.rules,
+            privacyMode: speechArgs.privacyMode ?? "online",
+            fetchImpl: speechArgs.fetchImpl,
+            signal: speechArgs.signal,
+            timeoutMs: speechArgs.pronunciationDictionaryTimeoutMs,
+          });
+        } catch {
+          fallback = "inline-ipa";
+          ipaProjection = elevenLabsSelectiveIpaProjection(
+            speechArgs.text,
+            plan.spans.filter((span) => span.changed && !span.protected),
+          );
+        }
+      } else if (rulePlan.rules.length > 0) {
+        fallback = "inline-ipa";
+        ipaProjection = elevenLabsSelectiveIpaProjection(
+          speechArgs.text,
+          plan.spans.filter((span) => span.changed && !span.protected),
+        );
+      }
+      if (locator) pronunciationDictionaryLocators.push(locator);
+      if (!ipaProjection && rulePlan.conflictingSpans.length > 0) {
+        fallback = "inline-ipa";
+        ipaProjection = elevenLabsSelectiveIpaProjection(
+          speechArgs.text,
+          rulePlan.conflictingSpans,
+        );
+      }
+      premiumPhonology = {
+        planSha256: plan.planSha256,
+        rulesetVersion: plan.rulesetVersion,
+        rulesetSha256: plan.rulesetSha256,
+        model: "eleven_v3",
+        direction,
+        gateEnabled: true,
+        locatorVersionId: locator?.version_id ?? null,
+        fallback,
+      };
+    } catch {
+      // The provider-neutral plan itself is local and normally deterministic.
+      // If it is unavailable, retain the existing safe orthographic fallback.
+    }
+  } else if (
+    ELEVENLABS_AUTHORITATIVE_IPA_ACCENTS.has(
+      normalizedProfile.accentDefinitionId ?? "",
+    ) &&
+    accentDirection &&
+    speechArgs.respellAccent !== false
+  ) {
+    ipaProjection = await elevenLabsAccentIpaProjection(
+      speechArgs,
+      normalizedProfile,
+    );
+  }
   const respelling =
     !ipaProjection && accentDirection && speechArgs.respellAccent !== false
       ? elevenLabsRespelling(speechArgs, normalizedProfile)
@@ -427,6 +573,21 @@ async function elevenLabsSpeechInput(
       }),
     ),
     sourceAlignmentProjected: speechProjection.changed,
+    pronunciationDictionaryLocators,
+    premiumPhonology:
+      premiumPhonology ??
+      (respelling?.respelled
+        ? {
+            planSha256: "",
+            rulesetVersion: "",
+            rulesetSha256: "",
+            model: "eleven_v3",
+            direction,
+            gateEnabled: true,
+            locatorVersionId: null,
+            fallback: "respelling",
+          }
+        : null),
   };
 }
 
@@ -438,6 +599,12 @@ function elevenLabsSpeechRequestBody(
     text: input.text,
     model_id: input.model,
     voice_settings: elevenLabsVoiceSettings(args.profile, input.model),
+    ...(input.pronunciationDictionaryLocators.length === 0
+      ? {}
+      : {
+          pronunciation_dictionary_locators:
+            input.pronunciationDictionaryLocators.slice(0, 3),
+        }),
     ...(args.seed === undefined ? {} : { seed: args.seed }),
   });
 }
@@ -614,6 +781,9 @@ export function voiceCharacterAlignmentIsIncomplete(
 export async function requestElevenLabsSpeech(
   args: ElevenLabsSpeechArgs,
 ): Promise<Response> {
+  if (args.privacyMode === "local") {
+    throw new ElevenLabsVoiceError(400, "ElevenLabs speech is unavailable in LOCAL mode.");
+  }
   const input = await elevenLabsSpeechInput(args);
   const fetchImpl = args.fetchImpl ?? fetch;
   const response = await fetchImpl(
@@ -638,6 +808,9 @@ export async function requestElevenLabsSpeech(
 export async function requestElevenLabsSpeechWithTimestamps(
   args: ElevenLabsSpeechArgs
 ): Promise<ElevenLabsTimestampedSpeech> {
+  if (args.privacyMode === "local") {
+    throw new ElevenLabsVoiceError(400, "ElevenLabs speech is unavailable in LOCAL mode.");
+  }
   const input = await elevenLabsSpeechInput(args);
   const fetchImpl = args.fetchImpl ?? fetch;
   const response = await fetchImpl(
@@ -725,6 +898,9 @@ export async function requestElevenLabsSpeechWithTimestamps(
     alignment: spokenAlignment,
     normalizedAlignment: spokenNormalizedAlignment,
     providerRequestId: response.headers.get("request-id"),
+    ...(input.premiumPhonology
+      ? { premiumPhonology: input.premiumPhonology }
+      : {}),
   };
 }
 
@@ -1385,7 +1561,7 @@ export function validateVoiceSynthesisRequest(body: Record<string, unknown>): Vo
     mode: normalizeVoiceMode(body.mode),
     engine: normalizeEnglishVoiceEngine(body.engine),
     profile: applyVoiceDeliveryMoodToProfile(
-      normalizeBotAudioVoiceProfileForSynthesisV1(body.profile),
+      normalizeBotAudioVoiceProfileV1(body.profile),
       deliveryMood,
     ),
     deliveryMood,

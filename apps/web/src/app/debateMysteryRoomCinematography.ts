@@ -1,3 +1,5 @@
+import { CURRENT_MANSION_ROOM_ART_CONTRACT } from "@localai/shared";
+
 export type MysteryRoomCinematographyArtStyle = "mosaic" | "illustrated";
 
 export interface MysteryRoomLightEmitterV1 {
@@ -194,7 +196,10 @@ export function mysteryRoomCinematographyCanvasSize(
   artStyle: MysteryRoomCinematographyArtStyle,
 ): Readonly<{ width: number; height: number }> {
   return artStyle === "mosaic"
-    ? { width: 480, height: 270 }
+    ? {
+        width: CURRENT_MANSION_ROOM_ART_CONTRACT.pixelArt.grid.logicalWidth,
+        height: CURRENT_MANSION_ROOM_ART_CONTRACT.pixelArt.grid.logicalHeight,
+      }
     : { width: 800, height: 450 };
 }
 

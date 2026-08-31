@@ -689,8 +689,12 @@ export interface BotAudioVoiceProfileV2 {
   /** Provider-neutral Accent Map identity. Legacy profiles resolve from the
    * Speechprint influence and pronunciation foundation instead. */
   accentDefinitionId?: VoiceAccentDefinitionId | null;
-  /** Whether the saved Accent Map is allowed to shape synthesized speech. */
+  /** @deprecated Legacy shared gate. Migrated to the two engine gates below. */
   accentPronunciationEnabled?: boolean;
+  /** Apply the saved Accent Map pronunciation through built-in English TTS. */
+  ttsPronunciationEnabled?: boolean;
+  /** Apply the saved Accent Map pronunciation through Premium ElevenLabs. */
+  premiumPronunciationEnabled?: boolean;
   /** Word-side twin of the Accent pin: shapes what the bot writes, never how
    * text is pronounced. Authored identity; absent means plain speech. */
   vernacularId?: BotVernacularId | null;
@@ -875,6 +879,8 @@ export interface BotLocalVoiceProfileV1 {
   };
   pronunciation?: {
     base: LocalVoicePronunciationBase;
+    ttsPronunciationEnabled?: boolean;
+    /** @deprecated Legacy shared gate, read only for migration. */
     accentPronunciationEnabled?: boolean;
     accentDefinitionId?: VoiceAccentDefinitionId | null;
     vernacularId?: BotVernacularId | null;
@@ -892,6 +898,8 @@ export interface BotPremiumVoiceProfileV1 {
   stability?: number;
   /** Provider-derived catalog metadata; never reinterprets the Accent Map. */
   nativeAccentHint?: string | null;
+  /** Whether this Premium lane applies the saved Accent Map pronunciation. */
+  pronunciationEnabled?: boolean;
   /** Premium-only pitch transform applied after ElevenLabs synthesis. */
   pitch: number;
   /** Premium-only tempo. Pace is the only Feel control that changes duration. */
@@ -1568,6 +1576,8 @@ export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2: Readonly<BotAudioVoiceProfileV2
     accentLocale: "en-US",
     accentMode: "prefer-genuine",
     pronunciationBase: "follow-voice",
+    ttsPronunciationEnabled: false,
+    premiumPronunciationEnabled: false,
     speechprintInfluence: "none",
     speechprintStrength: "balanced",
     speechprintVariationSeed: "natural-v1",
@@ -1590,7 +1600,7 @@ export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V3: Readonly<BotAudioVoiceProfileV3
       archetypeId: "voice-1",
       laughDelimiter: "-",
       accent: { locale: "en-US", mode: "prefer-genuine" },
-      pronunciation: { base: "follow-voice" },
+      pronunciation: { base: "follow-voice", ttsPronunciationEnabled: false },
       speechprint: {
         influence: "none",
         strength: "balanced",
@@ -1609,6 +1619,7 @@ export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V3: Readonly<BotAudioVoiceProfileV3
       },
     },
     premium: {
+      pronunciationEnabled: false,
       pitch: 0,
       pace: 0,
       lilt: 0,
@@ -2068,7 +2079,9 @@ function flattenBotAudioVoiceProfileV3Record(
     accentLocale: accent.locale,
     accentMode: accent.mode,
     pronunciationBase: pronunciation.base,
+    ttsPronunciationEnabled: pronunciation.ttsPronunciationEnabled,
     accentPronunciationEnabled: pronunciation.accentPronunciationEnabled,
+    premiumPronunciationEnabled: premium.pronunciationEnabled,
     accentDefinitionId:
       pronunciation.accentDefinitionId ?? value.accentDefinitionId,
     vernacularId: pronunciation.vernacularId ?? value.vernacularId,
@@ -2195,6 +2208,17 @@ export function normalizeBotAudioVoiceProfileV1(
               fallbackProfile.pronunciationBase ?? "follow-voice",
             ) !== "follow-voice",
         );
+  const ttsPronunciationEnabled =
+    typeof record.ttsPronunciationEnabled === "boolean"
+      ? record.ttsPronunciationEnabled
+      : accentPronunciationEnabled;
+  const premiumPronunciationEnabled =
+    typeof record.premiumPronunciationEnabled === "boolean"
+      ? record.premiumPronunciationEnabled
+      : accentPronunciationEnabled;
+  const hasEnginePronunciationGate =
+    typeof record.ttsPronunciationEnabled === "boolean" ||
+    typeof record.premiumPronunciationEnabled === "boolean";
   return {
     v: 2,
     enabled: legacy ? true : record.enabled !== false,
@@ -2263,8 +2287,11 @@ export function normalizeBotAudioVoiceProfileV1(
       record.pronunciationBase,
       fallbackProfile.pronunciationBase ?? "follow-voice",
     ),
-    ...(typeof record.accentPronunciationEnabled === "boolean" ||
-    accentPronunciationEnabled
+    ttsPronunciationEnabled,
+    premiumPronunciationEnabled,
+    ...( !hasEnginePronunciationGate &&
+    (typeof record.accentPronunciationEnabled === "boolean" ||
+    accentPronunciationEnabled)
       ? { accentPronunciationEnabled }
       : {}),
     ...(accentDefinitionId ? { accentDefinitionId } : {}),
@@ -2495,13 +2522,9 @@ export function normalizeBotAudioVoiceProfileV3(
         ),
         mode: normalizeLocalVoiceAccentMode(profile.accentMode),
       },
-      pronunciation: {
-        base: normalizeLocalVoicePronunciationBase(profile.pronunciationBase),
-        ...(profile.accentPronunciationEnabled !== undefined
-          ? {
-              accentPronunciationEnabled: profile.accentPronunciationEnabled,
-            }
-          : {}),
+    pronunciation: {
+      base: normalizeLocalVoicePronunciationBase(profile.pronunciationBase),
+      ttsPronunciationEnabled: profile.ttsPronunciationEnabled === true,
         ...(profile.accentDefinitionId
           ? { accentDefinitionId: profile.accentDefinitionId }
           : {}),
@@ -2539,6 +2562,7 @@ export function normalizeBotAudioVoiceProfileV3(
       ...(profile.elevenLabsNativeAccentHint
         ? { nativeAccentHint: profile.elevenLabsNativeAccentHint }
         : {}),
+      pronunciationEnabled: profile.premiumPronunciationEnabled === true,
       ...(direction ? { direction } : {}),
       ...(profile.elevenLabsStability === undefined
         ? {}
@@ -2565,13 +2589,56 @@ export function normalizeBotAudioVoiceProfileV3(
   };
 }
 
+export type BotVoicePronunciationEngine = "tts" | "premium";
+
+/**
+ * Returns a migrated profile only when an explicitly enabled legacy map gate
+ * has not yet been replaced by either engine's independent gate. Disabled
+ * legacy profiles are intentionally left untouched.
+ */
+export function migrateLegacyAccentPronunciationEnginesV1(
+  value: unknown,
+): BotAudioVoiceProfileV2 | null {
+  let candidate = value;
+  if (typeof candidate === "string") {
+    try {
+      candidate = JSON.parse(candidate);
+    } catch {
+      return null;
+    }
+  }
+  const record = voiceProfileObject(candidate);
+  const local = voiceProfileObject(record.local);
+  const pronunciation = voiceProfileObject(local.pronunciation);
+  const premium = voiceProfileObject(record.premium);
+  const legacyEnabled =
+    record.accentPronunciationEnabled === true ||
+    pronunciation.accentPronunciationEnabled === true;
+  const hasEngineGate =
+    typeof record.ttsPronunciationEnabled === "boolean" ||
+    typeof record.premiumPronunciationEnabled === "boolean" ||
+    typeof pronunciation.ttsPronunciationEnabled === "boolean" ||
+    typeof premium.pronunciationEnabled === "boolean";
+  if (!legacyEnabled || hasEngineGate) return null;
+  return normalizeBotAudioVoiceProfileV1({
+    ...record,
+    ttsPronunciationEnabled: true,
+    premiumPronunciationEnabled: true,
+  });
+}
+
 /** Keep a saved Accent Map editable while bypassing every pronunciation and
- * Speechprint transform at synthesis when its per-bot switch is off. */
+ * Speechprint transform when the selected synthesis engine has not opted in. */
 export function normalizeBotAudioVoiceProfileForSynthesisV1(
   value: unknown,
+  engine: BotVoicePronunciationEngine = "tts",
 ): BotAudioVoiceProfileV2 {
   const profile = normalizeBotAudioVoiceProfileV1(value);
-  if (profile.accentPronunciationEnabled) return profile;
+  const enabled =
+    engine === "premium"
+      ? profile.premiumPronunciationEnabled === true
+      : profile.ttsPronunciationEnabled === true;
+  if (enabled) return profile;
   const {
     accentDefinitionId: _accentDefinitionId,
     pronunciationMapPoint: _pronunciationMapPoint,
@@ -2716,10 +2783,21 @@ export function botAudioVoiceProfileHasExplicitAccentPronunciationSetting(
     }
   }
   const record = voiceProfileObject(candidate);
+  if (
+    typeof record.ttsPronunciationEnabled === "boolean" ||
+    typeof record.premiumPronunciationEnabled === "boolean"
+  ) {
+    return true;
+  }
   if (typeof record.accentPronunciationEnabled === "boolean") return true;
   const local = voiceProfileObject(record.local);
   const pronunciation = voiceProfileObject(local.pronunciation);
-  return typeof pronunciation.accentPronunciationEnabled === "boolean";
+  const premium = voiceProfileObject(record.premium);
+  return (
+    typeof pronunciation.ttsPronunciationEnabled === "boolean" ||
+    typeof premium.pronunciationEnabled === "boolean" ||
+    typeof pronunciation.accentPronunciationEnabled === "boolean"
+  );
 }
 
 /** Null is a deliberate absence for per-user overrides; malformed values are ignored. */

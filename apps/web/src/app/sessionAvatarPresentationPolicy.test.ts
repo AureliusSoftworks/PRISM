@@ -154,7 +154,7 @@ describe("session avatar presentation policy", () => {
     assert.match(signalRenderer, /signalLivePerformanceAvatar/u);
     assert.match(
       signalRenderer,
-      /pixelRasterizationEnabled: !signalLivePerformanceAvatar/u,
+      /pixelRasterizationEnabled: true/u,
     );
     assert.match(
       signalRenderer,

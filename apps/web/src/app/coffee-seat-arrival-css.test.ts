@@ -199,7 +199,10 @@ describe("Coffee seat arrival CSS", () => {
       pageSource,
       /useState<CoffeeSessionDurationMinutes \| null>\(null\)/,
     );
-    assert.match(pageSource, /Visit: \$\{coffeeSelectedExperienceMode[\s\S]{0,100}· Open-ended/u);
+    assert.match(
+      pageSource,
+      /Visit: \$\{coffeeSelectedExperienceMode[\s\S]{0,100}· Open-ended/u,
+    );
     assert.match(pageSource, /durationMinutes: coffeeSelectedDurationMinutes/);
     assert.match(
       pageSource,
@@ -328,10 +331,7 @@ describe("Coffee seat arrival CSS", () => {
   });
 
   it("uses single-weight Macondo with Noto Sans Mono fallback coverage for the concise face slot", () => {
-    assert.match(
-      layoutSource,
-      /Macondo\(\{[^}]*weight:\s*"400"[^}]*\}\)/,
-    );
+    assert.match(layoutSource, /Macondo\(\{[^}]*weight:\s*"400"[^}]*\}\)/);
     assert.match(
       layoutSource,
       /Noto_Sans_Mono\(\{[^}]*subsets:\s*\["latin",\s*"latin-ext"\][^}]*\}\)/,
@@ -840,8 +840,14 @@ describe("Coffee seat arrival CSS", () => {
   });
 
   it("applies the Studio-authored face weight without changing glow geometry", () => {
-    assert.match(coffeeSeatPlateEmojiSource, /faceFontWeight\?: number \| null/);
-    assert.match(coffeeSeatPlateEmojiSource, /normalizeBotFaceFontWeight\(faceFontWeight\)/);
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /faceFontWeight\?: number \| null/,
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /normalizeBotFaceFontWeight\(faceFontWeight\)/,
+    );
     assert.match(
       coffeeSeatPlateEmojiSource,
       /\["--bot-face-font-weight" as string\]: normalizedFaceFontWeight/,
@@ -881,7 +887,10 @@ describe("Coffee seat arrival CSS", () => {
       css,
       /\.botAvatarFontOptionSample\[data-face-font="neutral"\][\s\S]*?font-weight:\s*var\(--bot-face-font-weight,\s*700\)\s*;[\s\S]*?font-variation-settings:\s*normal\s*;[\s\S]*?font-synthesis:\s*none\s*;/,
     );
-    assert.match(css, /font-weight:\s*var\(--bot-face-font-weight,\s*700\)\s*;/);
+    assert.match(
+      css,
+      /font-weight:\s*var\(--bot-face-font-weight,\s*700\)\s*;/,
+    );
   });
 
   it("keeps WebKit's synchronous font parser out of the CRT route-mount path", () => {
@@ -913,17 +922,24 @@ describe("Coffee seat arrival CSS", () => {
   it("rerasterizes authored face glyphs when their font identity or loaded font changes", () => {
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /<CrtPixelTextGlyph[\s\S]{0,260}rasterKey=\{partFaceFont \?\? "default"\}/,
+      /const partFaceFont = part === "eyes" \? faceEyesFont : faceMouthFont/,
+      "each face part must resolve its own Studio-authored family",
     );
-    assert.match(phosphorPixelGlyphSource, /rasterKey\?: string \| number \| null/);
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /rasterKey=\{faceGlyphRasterKey\(partFaceFont\)\}[\s\S]{0,100}data-face-font=\{partFaceFont \?\? undefined\}/,
+      "the rasterized glyph node must own the Studio-selected font directly",
+    );
+    assert.match(
+      phosphorPixelGlyphSource,
+      /rasterKey\?: string \| number \| null/,
+    );
+    assert.match(phosphorPixelGlyphSource, /data-face-font=\{faceFont\}/);
     // Kick the authored primary family directly, but paint the current
     // computed fallback immediately so an unsettled FontFaceSet promise can
     // never leave the full-size face blank.
     assert.match(phosphorPixelGlyphSource, /phosphorPrimaryFontFamily/);
-    assert.match(
-      phosphorPixelGlyphSource,
-      /font-revision-\$\{fontRevision\}/,
-    );
+    assert.match(phosphorPixelGlyphSource, /font-revision-\$\{fontRevision\}/);
     assert.match(
       phosphorPixelGlyphSource,
       /const fontProbe = phosphorCanvasFontShorthand\([\s\S]{0,120}fontFamily: primaryFontFamily/,
@@ -965,6 +981,11 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(
       phosphorPixelGlyphSource,
       /\[binaryAlpha, content, enabled, rasterKey\]/,
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /`\$\{font \?\? "default"\}:weight-\$\{normalizedFaceFontWeight \?\? "default"\}`/,
+      "Mini and Full HD must invalidate a pixel mask when Studio changes its selected face weight",
     );
   });
 
@@ -1295,7 +1316,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       facePartRule,
-      /--crt-face-glow-filter:\s*var\(--zen-live-bot-idle-face-glow-filter-high\)\s*;/,
+      /--crt-face-glow-filter:\s*var\(--zen-live-bot-shared-phosphor-glow-filter\)\s*;/,
     );
     assert.match(facePartRule, /filter:\s*none\s*;/);
     assert.doesNotMatch(facePartRule, /animation:\s*zenLiveBotIdleLightBreath/);
@@ -1333,7 +1354,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       liveFacePartRule,
-      /--crt-face-glow-filter:\s*var\(--zen-live-bot-idle-face-glow-filter-high\)\s*;/,
+      /--crt-face-glow-filter:\s*var\(--zen-live-bot-shared-phosphor-glow-filter\)\s*;/,
     );
     assert.match(liveFacePartRule, /filter:\s*none\s*;/);
     assert.doesNotMatch(
@@ -1350,10 +1371,7 @@ describe("Coffee seat arrival CSS", () => {
     );
 
     const glyphLayerCrtFlickerRule = ruleForSelectorNeedlesWithBody(
-      [
-        ".zenLiveBotPresenceFaceGlyph",
-        '[data-crt-glyph-layer="true"]',
-      ],
+      [".zenLiveBotPresenceFaceGlyph", '[data-crt-glyph-layer="true"]'],
       "--zen-live-bot-crt-shared-flicker-opacity",
     );
     assert.match(
@@ -1407,12 +1425,9 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       talkingFacePartRule,
-      /--crt-face-glow-filter:\s*var\(--zen-live-bot-talking-face-glow-filter-high\)\s*;/,
+      /--crt-face-glow-filter:\s*var\(--zen-live-bot-shared-phosphor-glow-filter\)\s*;/,
     );
-    assert.match(
-      talkingFacePartRule,
-      /--crt-glyph-emission-opacity:\s*1\s*;/,
-    );
+    assert.match(talkingFacePartRule, /--crt-glyph-emission-opacity:\s*1\s*;/);
     assert.doesNotMatch(talkingFacePartRule, /(?:^|;)\s*filter\s*:/u);
     assert.doesNotMatch(talkingFacePartRule, /animation:/);
 
@@ -1520,10 +1535,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(livePlateRule, /--coffee-seat-emotion-face-scale:\s*1\s*;/);
     assert.doesNotMatch(livePlateRule, /--zen-live-bot-eye-local-x:/);
-    assert.doesNotMatch(
-      livePlateRule,
-      /--coffee-plate-emoji-nudge-y:/,
-    );
+    assert.doesNotMatch(livePlateRule, /--coffee-plate-emoji-nudge-y:/);
     const sharedEyeTransformRule = ruleForSelectorNeedlesWithBody(
       ['[data-coffee-plate-emoji-part="eyes"]'],
       "--bot-face-eye-offset-y",
@@ -2851,10 +2863,7 @@ describe("Coffee seat arrival CSS", () => {
       pageSource,
       /const seatAvatarSfxState: BotAvatarSfxState =\s*isTableTypingThisSeat\s*\? "talking"\s*:\s*seatThinkingVisualActive\s*\? "thinking"\s*:\s*"idle";/,
     );
-    assert.match(
-      pageSource,
-      /showThinkingSpinner:\s*seatThinkingVisualActive/,
-    );
+    assert.match(pageSource, /showThinkingSpinner:\s*seatThinkingVisualActive/);
   });
 
   it("centers the thinking slash spinner within the bot face screen", () => {

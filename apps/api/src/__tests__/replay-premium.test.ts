@@ -11,6 +11,8 @@ import {
   generateReplayPremiumSegment,
   planReplayPremiumSegments,
 } from "../replay-premium.ts";
+import { resetElevenLabsPronunciationDictionaryCacheForTests } from
+  "../elevenlabs-pronunciation-dictionaries.ts";
 
 function fixture(lines: Array<{
   id: string;
@@ -411,6 +413,83 @@ describe("Signal Premium voice planning", () => {
         { strategy: "isolated_tts", messages: ["one"] },
         { strategy: "isolated_tts", messages: ["two"] },
       ],
+    );
+  });
+
+  it("records phonology provenance without coupling replay identity to the remote cache", async () => {
+    resetElevenLabsPronunciationDictionaryCacheForTests();
+    const { manifest, takes } = fixture([{
+      id: "accent-line",
+      speakerId: "host",
+      speakerName: "Host",
+      voiceId: "selected-replay-voice",
+      text: "When the white wizard leaves.",
+    }]);
+    takes[0]!.snapshot.profile = {
+      ...takes[0]!.snapshot.profile,
+      premiumPronunciationEnabled: true,
+      accentDefinitionId: "northern-german-influenced-english",
+    };
+    const segment = planReplayPremiumSegments(manifest, takes, "stable-replay")[0]!;
+    const inputHash = segment.inputHash;
+    const providerBodies: Record<string, unknown>[] = [];
+    const generated = await generateReplayPremiumSegment({
+      segment,
+      apiKey: "test-key",
+      tenantId: "replay-tenant",
+      fetchImpl: (async (input, init) => {
+        const url = String(input);
+        const body = typeof init?.body === "string"
+          ? JSON.parse(init.body) as Record<string, unknown>
+          : {};
+        if (url.includes("page_size=100")) {
+          return Response.json({ pronunciation_dictionaries: [] });
+        }
+        if (url.endsWith("/add-from-rules")) {
+          return Response.json({ id: "remote-dictionary", version_id: "remote-v1" });
+        }
+        providerBodies.push(body);
+        const characters = Array.from(String(body.text));
+        return Response.json({
+          audio_base64: Buffer.from("accent-audio").toString("base64"),
+          normalized_alignment: {
+            characters,
+            character_start_times_seconds: characters.map((_, index) => index * 0.01),
+            character_end_times_seconds: characters.map((_, index) => (index + 1) * 0.01),
+          },
+        }, { headers: { "content-type": "application/json" } });
+      }) as typeof fetch,
+    });
+    assert.match(
+      providerBodies[0]?.text as string,
+      /^\[Northern German accent\] When the white wizard leaves\.$/u,
+    );
+    assert.deepEqual(
+      providerBodies[0]?.pronunciation_dictionary_locators,
+      [{ pronunciation_dictionary_id: "remote-dictionary", version_id: "remote-v1" }],
+    );
+    assert.deepEqual(generated.timings[0]?.premiumPhonology, {
+      planSha256: generated.timings[0]?.premiumPhonology?.planSha256,
+      rulesetVersion: generated.timings[0]?.premiumPhonology?.rulesetVersion,
+      rulesetSha256: generated.timings[0]?.premiumPhonology?.rulesetSha256,
+      model: "eleven_v3",
+      direction: "Northern German accent",
+      gateEnabled: true,
+      fallback: "dictionary",
+    });
+    assert.match(
+      generated.timings[0]?.premiumPhonology?.planSha256 ?? "",
+      /^[a-f0-9]{64}$/u,
+    );
+    assert.equal(
+      "locatorVersionId" in (generated.timings[0]?.premiumPhonology ?? {}),
+      false,
+    );
+
+    resetElevenLabsPronunciationDictionaryCacheForTests();
+    assert.equal(
+      planReplayPremiumSegments(manifest, takes, "stable-replay")[0]?.inputHash,
+      inputHash,
     );
   });
 

@@ -5,7 +5,7 @@ import {
   canonicalPortablePackageJsonV1,
   canonicalMansionLayoutV2,
   debateMysteryAcousticThemePaletteV1,
-  DEFAULT_MANSION_ROOM_ART_CONTRACT_V5,
+  CURRENT_MANSION_ROOM_ART_CONTRACT,
   MANSION_MUSIC_ACTIVE_LOGICAL_ID_V1,
   MANSION_MUSIC_CANDIDATE_LOGICAL_ID_V1,
   MANSION_MUSIC_PREVIOUS_LOGICAL_ID_V1,
@@ -433,6 +433,7 @@ export function exportInternalMansionPackageFromDbV1(args: {
     floorCount: Math.max(1, ...sourceRooms.map((room) => room.floor)),
     scaleClass: frozenSnapshot?.presentation.scaleClass ?? bundle.scaleClass,
     ...(portableLayoutV2 ? { layoutV2: portableLayoutV2 } : {}),
+    ...(portableLayoutV2?.venueProfile ? { venueProfile: portableLayoutV2.venueProfile } : {}),
     rooms: sourceRooms.map((room, roomIndex) => ({
       id: portableRoomIdByStoredId.get(room.id)!,
       templateId: room.templateId,
@@ -478,7 +479,7 @@ export function exportInternalMansionPackageFromDbV1(args: {
       ? bundle.music?.active?.loop ?? null
       : null,
     musicIdentity: sourceHouseStyle.musicIdentity ?? bundle.music?.identity,
-    roomArt: DEFAULT_MANSION_ROOM_ART_CONTRACT_V5,
+    roomArt: CURRENT_MANSION_ROOM_ART_CONTRACT,
     ambience,
     ...(portablePropTheme ? { propTheme: portablePropTheme } : {}),
   };
@@ -563,7 +564,7 @@ export function upgradeInstalledMansionRoomArtFromPackageV1(args: {
        (id, user_id, ciphertext, cipher_iv, cipher_tag, sha256, byte_size,
         mime_type, width, height, duration_ms, provider, model, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'package-upgrade',
-             'balanced-mosaic-v5', ?, ?)
+             'tessera-mosaic-v6', ?, ?)
      ON CONFLICT(user_id, sha256) DO NOTHING`,
   );
   const findAsset = args.db.prepare(
@@ -878,6 +879,19 @@ export function importInternalMansionPackageToDbDetailedV1(args: {
         logicalId = `ambience:${reference.id}`;
       }
       insertRef.run(bundleId, args.userId, stored.id, storedRole, logicalId, now);
+      if (
+        descriptor.id === decoded.manifest.previewAssetId &&
+        storedRole !== "presentation"
+      ) {
+        insertRef.run(
+          bundleId,
+          args.userId,
+          stored.id,
+          "presentation",
+          `package-preview:${descriptor.id}`,
+          now,
+        );
+      }
       if (themedVariant) {
         insertPropVariant.run(
           args.userId,

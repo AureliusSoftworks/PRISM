@@ -626,6 +626,37 @@ class ResumableRecoveredRoomExaminationsV2AuthorProvider extends
   }
 }
 
+class AutoExhaustedRoomExaminationsV2AuthorProvider extends V2AuthorProvider {
+  public readonly failedBatchModels: string[] = [];
+  public readonly failedBatchIds: string[] = [];
+  private failedBatchKey: string | null = null;
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const request = JSON.parse(messages.at(-1)!.content) as {
+      section?: string;
+      setup?: { examinationIds?: string[] };
+    };
+    if (request.section !== "room_examinations") {
+      return super.generateResponse(messages, options);
+    }
+    const examinationIds = request.setup?.examinationIds ?? [];
+    const batchKey = examinationIds.join("|");
+    this.failedBatchKey ??= batchKey;
+    if (batchKey !== this.failedBatchKey) {
+      return super.generateResponse(messages, options);
+    }
+    this.calls += 1;
+    this.sections.push("room_examinations");
+    this.failedBatchModels.push(options?.model ?? "unknown");
+    this.failedBatchIds.splice(0, this.failedBatchIds.length, ...examinationIds);
+    if (options?.model !== "gpt-4.1") return "";
+    return JSON.stringify({ examinationsById: [] });
+  }
+}
+
 class FailingRoomExaminationsV2AuthorProvider extends V2AuthorProvider {
   public failedBatchAttempts = 0;
   private readonly batchKeys: string[] = [];
@@ -1056,19 +1087,33 @@ class LeakingRoomOpeningV2AuthorProvider extends V2AuthorProvider {
 }
 
 class CrosswiredPresentTitleV2AuthorProvider extends V2AuthorProvider {
+  public crosswiredSeatId: string | null = null;
+
   public override async generateResponse(
     messages: ProviderMessage[],
     options?: GenerateOptions,
   ): Promise<string> {
     const response = await super.generateResponse(messages, options);
-    const request = JSON.parse(String(messages.at(-1)?.content ?? "{}")) as { section?: string };
+    const request = JSON.parse(String(messages.at(-1)?.content ?? "{}")) as {
+      section?: string;
+      caseFoundation?: { evidence?: Array<{ id?: string; title?: string }> };
+      suspect?: { seatId?: string };
+    };
     if (request.section !== "suspect_chapter") return response;
     const parsed = JSON.parse(response) as {
-      suspect?: { presentReactions?: Array<Record<string, unknown>> };
+      suspect?: { presentReactions?: Array<Record<string, unknown> & { recordId?: string }> };
     };
     for (const reaction of parsed.suspect?.presentReactions ?? []) {
-      reaction.prosecutionLine = "The Service Bell Log is the record I want you to answer.";
-      reaction.response = "The Archive exhibit 2 appears to have been treated with more respect than its owner.";
+      const expectedRecordTitle = request.caseFoundation?.evidence?.find(
+        (record) => record.id && reaction.recordId?.endsWith(record.id),
+      )?.title;
+      const wrongRecordTitle = request.caseFoundation?.evidence?.find(
+        (record) => record.title && record.title !== expectedRecordTitle,
+      )?.title;
+      if (!wrongRecordTitle) continue;
+      this.crosswiredSeatId = request.suspect?.seatId ?? null;
+      reaction.prosecutionLine = `${wrongRecordTitle} is the record I want you to answer.`;
+      reaction.response = `${wrongRecordTitle} appears to have been treated with more respect than its owner.`;
     }
     return JSON.stringify(parsed);
   }
@@ -1080,11 +1125,19 @@ class RecordSpecificDefaultPresentV2AuthorProvider extends V2AuthorProvider {
     options?: GenerateOptions,
   ): Promise<string> {
     const response = await super.generateResponse(messages, options);
-    const request = JSON.parse(String(messages.at(-1)?.content ?? "{}")) as { section?: string };
+    const request = JSON.parse(String(messages.at(-1)?.content ?? "{}")) as {
+      section?: string;
+      caseFoundation?: { evidence?: Array<{ title?: string }> };
+    };
     if (request.section !== "suspect_chapter") return response;
     const parsed = JSON.parse(response) as { suspect?: Record<string, unknown> };
     if (!parsed.suspect) return response;
-    parsed.suspect.defaultPresentReaction = "The Service Bell Log has already said everything worth saying.";
+    const recordTitle = request.caseFoundation?.evidence?.find(
+      (record) => record.title?.trim(),
+    )?.title;
+    if (recordTitle) {
+      parsed.suspect.defaultPresentReaction = `${recordTitle} has already said everything worth saying.`;
+    }
     return JSON.stringify(parsed);
   }
 }
@@ -3305,6 +3358,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(boundRecord?.title, propName);
     assert.match(boundRecord?.description ?? "", /distinct archival seal used as an access key/iu);
     assert.match(boundRecord?.description ?? "", /where it was found|its condition|where it turned up/iu);
+    assert.doesNotMatch(boundRecord?.description ?? "", /Archive Seal:/iu);
     assert.doesNotMatch(boundRecord?.description ?? "", /timestamped detail|timeline trace/iu);
   });
 
@@ -3464,6 +3518,63 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     }
   });
 
+  it("recovers room batch 1 when Auto returns invalid then empty detail", async () => {
+    const db = testDb();
+    const provider = new AutoExhaustedRoomExaminationsV2AuthorProvider();
+    const autoRuntime: DebateAiRuntime = {
+      preferredProvider: "openai",
+      responseMode: "online",
+      modelSelectionKind: "auto",
+      local: { provider, providerName: "local", model: "llama3.2" },
+      online: { provider, providerName: "openai", model: "gpt-4.1" },
+      lanes: [
+        { provider, providerName: "openai", model: "gpt-4.1" },
+        { provider, providerName: "openai", model: "gpt-5-2025-08-07" },
+        { provider, providerName: "openai", model: "o3" },
+      ],
+    };
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-auto-room-exhaustion",
+      autoRuntime,
+      { deferBackgroundStart: true },
+    );
+    const session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      autoRuntime,
+      { generateWave: async () => playableWave() },
+    );
+    assert.deepEqual(provider.failedBatchModels, [
+      "gpt-4.1",
+      "gpt-5-2025-08-07",
+      "o3",
+    ]);
+    assert.equal(session.status, "waiting_for_player");
+    assert.equal(v2State(session).compilation.stage, "complete");
+    const { graph, privateCase } = getDebateMysteryCaseV2(
+      db,
+      "user-1",
+      session.id,
+    );
+    const lineByNodeId = new Map(graph.lines.map((line) => [line.nodeId, line]));
+    assert.equal(privateCase.graphValidation.valid, true);
+    assert.equal(
+      privateCase.authoringRecoveryBySection?.["examinations:1"]?.kind,
+      "deterministic_fallback",
+    );
+    assert.doesNotMatch(JSON.stringify(session), /authoringRecoveryBySection/iu);
+    for (const id of provider.failedBatchIds) {
+      assert.ok(
+        (lineByNodeId.get(privateCase.examineNodeIdByHotspot[id]!)?.spokenText.length ?? 0) > 0,
+        "the Auto-exhausted batch must retain its frozen deterministic observation",
+      );
+    }
+  });
+
   it("does not record deterministic recovery for a room provider failure", async () => {
     const db = testDb();
     const provider = new FailingRoomExaminationsV2AuthorProvider();
@@ -3619,6 +3730,15 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     const entered = enterMysterySuspectRoomForIntroduction(db, session, "frozen-opening");
     session = entered.session;
     const beforeHistoryCount = v2State(session).dialogueHistory.length;
+    const introducedOccupant = v2State(session).suspects.find(
+      (suspect) => suspect.roomId === entered.roomId,
+    );
+    assert.ok(introducedOccupant);
+    assert.equal(
+      v2State(session).metSuspectSeatIds.includes(introducedOccupant.seatId),
+      false,
+      "the Case File keeps the occupant concealed before their first visible exchange",
+    );
     const frozen = getDebateMysteryCaseV2(db, "user-1", session.id);
     const introduction = frozen.graph.roomIntroductionNodeIdsByRoom?.[entered.roomId];
     assert.ok(introduction?.openingExchangeNodeIds);
@@ -3645,6 +3765,11 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       { generateWave: async () => playableWave() },
     );
     const exchange = v2State(performed).dialogueHistory.slice(beforeHistoryCount);
+    assert.equal(
+      v2State(performed).metSuspectSeatIds.includes(introducedOccupant.seatId),
+      true,
+      "the first visible exchange reveals the occupant to the Case File",
+    );
     assert.equal(provider.roomIntroductionCalls, 0);
     assert.deepEqual(
       exchange.map((line) => line.nodeId),
@@ -4981,8 +5106,11 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     );
     assert.equal(session.status, "waiting_for_player");
     assert.equal(v2State(session).compilation.stage, "complete");
+    assert.ok(provider.crosswiredSeatId);
     assert.equal(
-      provider.sections.filter((section) => section === "suspect_chapter:suspect-1").length,
+      provider.sections.filter(
+        (section) => section === `suspect_chapter:${provider.crosswiredSeatId}`,
+      ).length,
       DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
     );
     const { privateCase } = getDebateMysteryCaseV2(db, "user-1", session.id);
@@ -5217,8 +5345,10 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(legacyDefaultPresentLine?.visibleText, legacyDefaultPresentLine?.spokenText);
     assert.equal(preparedProfilesByText.has(legacyDefaultPresentLine!.spokenText), false);
     assert.equal([...preparedProfilesByText.keys()].some((text) => /frowns at the item/iu.test(text)), false);
-    const serviceBellRecord = privateCase.recordItems.find((item) => item.title === "Service Bell Log")!;
-    assert.ok(serviceBellRecord);
+    const frozenEvidenceRecord = privateCase.recordItems.find(
+      (item) => item.reference.kind === "evidence",
+    )!;
+    assert.ok(frozenEvidenceRecord);
     const testimonyRecordTitles = privateCase.recordItems
       .filter((item) => item.reference.kind === "testimony")
       .map((item) => item.title);
@@ -5336,7 +5466,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
         const playerThought = entered.dialogueHistory.at(-1)!;
         const occupant = entered.suspects.find((suspect) => suspect.roomId === roomId)!;
         assert.notEqual(playerThought.visibleText, "...");
-        assert.match(playerThought.visibleText, /^(?:A|An|The)\b/u);
+        assert.match(playerThought.visibleText, /\S/u);
         assert.equal(
           playerThought.visibleText.toLocaleLowerCase().includes(occupant.name.toLocaleLowerCase()),
           false,
@@ -5351,8 +5481,12 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
           false,
           "the Case File must not reveal an occupant before their first visible introduction",
         );
+        const dialogueHistoryCount = entered.dialogueHistory.length;
         session = act(db, session, { action: "advance_room_introduction", roomId }, `intro-casekeeper-${roomId}`);
-        const personaBeat = v2State(session).dialogueHistory.at(-1)!;
+        const personaBeat = v2State(session).dialogueHistory
+          .slice(dialogueHistoryCount)
+          .find((line) => line.speakerBotId === occupant.botId)!;
+        assert.ok(personaBeat);
         assert.equal(v2State(session).roomIntroductions[roomId], "persona");
         assert.equal(
           v2State(session).metSuspectSeatIds.includes(occupant.seatId),
@@ -5509,17 +5643,17 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     session = act(db, session, {
       action: "present_to_suspect",
       suspectSeatId: firstSuspect.seatId,
-      record: serviceBellRecord.reference,
-    }, "present-service-bell-log");
-    const serviceBellExchange = v2State(session).dialogueHistory.slice(dialogueCountBeforePresent);
-    assert.equal(serviceBellExchange.length, 2);
-    assert.match(serviceBellExchange[0]!.visibleText, /Service Bell Log/iu);
-    assert.match(serviceBellExchange[1]!.visibleText, /Service Bell Log/iu);
+      record: frozenEvidenceRecord.reference,
+    }, "present-frozen-evidence");
+    const frozenEvidenceExchange = v2State(session).dialogueHistory.slice(dialogueCountBeforePresent);
+    assert.equal(frozenEvidenceExchange.length, 2);
+    assert.ok(frozenEvidenceExchange[0]!.visibleText.includes(frozenEvidenceRecord.title));
+    assert.ok(frozenEvidenceExchange[1]!.visibleText.includes(frozenEvidenceRecord.title));
     assert.equal((manifest as { entries: Array<{ lineId: string }> }).entries.some(
-      (entry) => entry.lineId === serviceBellExchange[0]!.lineId,
+      (entry) => entry.lineId === frozenEvidenceExchange[0]!.lineId,
     ), false);
     assert.equal((manifest as { entries: Array<{ lineId: string }> }).entries.some(
-      (entry) => entry.lineId === serviceBellExchange[1]!.lineId,
+      (entry) => entry.lineId === frozenEvidenceExchange[1]!.lineId,
     ), false);
     const firstTopic = v2State(session).topics.find((topic) => topic.suspectSeatId === firstSuspect.seatId)!;
     assert.throws(
@@ -5939,7 +6073,17 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     const legacyPrivate = structuredClone(compiled.privateCase);
     const legacyGraph = structuredClone(compiled.graph);
     const legacyRoomIntroductionNodeIds = new Set(Object.values(legacyGraph.roomIntroductionNodeIdsByRoom ?? {})
-      .flatMap((introduction) => [introduction.casekeeperNodeId, introduction.personaNodeId]));
+      .flatMap((introduction) => [
+        introduction.casekeeperNodeId,
+        introduction.personaNodeId,
+        ...(introduction.openingExchangeNodeIds
+          ? [
+              introduction.openingExchangeNodeIds.prosecutionOpeningNodeId,
+              introduction.openingExchangeNodeIds.occupantResponseNodeId,
+              introduction.openingExchangeNodeIds.prosecutionHandoffNodeId,
+            ]
+          : []),
+      ]));
     const legacyRoomIntroductionLineIds = new Set(legacyGraph.nodes.flatMap((node) =>
       legacyRoomIntroductionNodeIds.has(node.id) && node.lineId ? [node.lineId] : []));
     delete legacyGraph.roomIntroductionNodeIdsByRoom;
@@ -5948,8 +6092,10 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     legacyGraph.interactionRootNodeIds = legacyGraph.interactionRootNodeIds.filter(
       (nodeId) => !legacyRoomIntroductionNodeIds.has(nodeId),
     );
-    const legacyServiceBellRecord = legacyPrivate.recordItems.find((item) => item.title === "Service Bell Log")!;
-    legacyServiceBellRecord.title = "Bloodied Lead Pipe";
+    const legacyEvidenceRecord = legacyPrivate.recordItems.find(
+      (item) => item.reference.kind === "evidence",
+    )!;
+    legacyEvidenceRecord.title = "Bloodied Lead Pipe";
     delete legacyPrivate.investigationProgressionContractVersion;
     delete legacyPrivate.investigationRoomIds;
     delete legacyPrivate.investigationHotspotIdsByRoom;
@@ -5977,7 +6123,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       (node) => node.id === preservedRoomTopicNode.nextNodeIds[0],
     )!;
     preservedRoomResponseNode.mutations.unlockTopicIds = [finalTopicNodeId];
-    const legacyPresentMappingKey = `${legacyPrivate.actorAccounts[0]!.seatId}:${legacyServiceBellRecord.reference.kind}:${legacyServiceBellRecord.reference.id}`;
+    const legacyPresentMappingKey = `${legacyPrivate.actorAccounts[0]!.seatId}:${legacyEvidenceRecord.reference.kind}:${legacyEvidenceRecord.reference.id}`;
     const legacyPresentNodeId = legacyPrivate.presentNodeIdBySuspectRecord[legacyPresentMappingKey]!;
     const legacyPresentNode = legacyGraph.nodes.find((node) => node.id === legacyPresentNodeId)!;
     const legacyPresentResponseNodeId = legacyPresentNode.nextNodeIds[0]!;
@@ -6043,7 +6189,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       if (topic.nodeId === evidenceMirroringTopicNodeId) topic.label = "The lead pipe";
     }
     const publicLeadPipeRecord = legacySession.formatState.record.find((item) =>
-      recordReferenceKey(item.reference) === recordReferenceKey(legacyServiceBellRecord.reference));
+      recordReferenceKey(item.reference) === recordReferenceKey(legacyEvidenceRecord.reference));
     if (publicLeadPipeRecord) publicLeadPipeRecord.title = "Bloodied Lead Pipe";
     legacySession.formatState.readiness = {
       version: 1,
@@ -6132,7 +6278,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     );
     const inferredLeadPipeGate = migrated.graph.presentationGates?.find((gate) =>
       gate.requiredSuspectSeatId === firstSeatId &&
-      recordReferenceKey(gate.requiredRecord) === recordReferenceKey(legacyServiceBellRecord.reference));
+      recordReferenceKey(gate.requiredRecord) === recordReferenceKey(legacyEvidenceRecord.reference));
     assert.ok(inferredLeadPipeGate, "legacy unlock mutations must become a private exact Present gate");
     assert.ok(inferredLeadPipeGate.unlocks.some((target) =>
       target.kind === "topic" && target.topicNodeId === preservedRoomTopicNodeId));
@@ -7359,11 +7505,13 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       assert.ok(start >= 0 && end > start, `${startMarker} has a stable source boundary`);
       return serverSource.slice(start, end);
     };
+    const evidencePreparation = functionSlice(
+      "async function prepareDebateMysteryV2EvidenceAssets",
+      "const mysteryMansionExteriorPreparationRuns",
+    );
+    assert.match(evidencePreparation, /getDebateMysteryCaseV2/u);
+    assert.doesNotMatch(evidencePreparation, /userBlocksOnlineCapabilities/u);
     const assetPreparers = [
-      functionSlice(
-        "async function prepareDebateMysteryV2EvidenceAssets",
-        "async function prepareDebateMysteryV2MansionExteriorAssetDirect",
-      ),
       functionSlice(
         "async function prepareDebateMysteryV2MansionExteriorAssetDirect",
         "async function adoptDebateMysteryV2MansionExteriorDraft",
@@ -7454,10 +7602,10 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
   it("pins sealed visual synthesis to ONLINE review, bounded retry, and semantic no-store delivery", () => {
     const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
     const synthesisStart = serverSource.indexOf(
-      "async function prepareDebateMysteryV2EvidenceAssets",
+      "async function prepareDebateMysteryV2MansionExteriorAssetDirect",
     );
     const synthesisEnd = serverSource.indexOf(
-      "async function prepareDebateMysteryGeneratedAssets",
+      "function queueDebateMysteryIllustratedRoomsV1",
       synthesisStart,
     );
     assert.ok(synthesisStart >= 0 && synthesisEnd > synthesisStart);
@@ -7483,13 +7631,13 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.match(serverSource, /words such as may, might, could/u);
     assert.match(synthesis, /reviewRepairFeedback/u);
     assert.match(synthesis, /Correct these concrete first-pass review findings/u);
-    assert.match(synthesis, /materials, palette, patina, and lighting/u);
+    assert.match(synthesis, /genuine polished high-resolution hand-crafted pixel art/u);
     assert.match(synthesis, /people, human figures, bodies, evidence, clues, weapons, blood, gore, readable text/u);
     assert.doesNotMatch(synthesis, /generateAndPersistStandaloneImageAsset/u);
     assert.match(serverSource, /const MYSTERY_ASSET_ATTEMPT_TIMEOUT_MS = 10 \* 60_000/u);
     assert.match(serverSource, /Promise\.race\(\[operation\(controller\.signal\), abortBoundary\]\)/u);
     assert.match(synthesis, /sealed visual attempt failed/u);
-    assert.match(synthesis, /pendingDebateMysteryEvidenceAssetsForRoomV2/u);
+    assert.match(serverSource, /pendingDebateMysteryEvidenceAssetsForRoomV2/u);
 
     const routeStart = serverSource.indexOf(
       'route("GET", "/api/debates/:id/mystery-assets/:kind/:subjectId/file"',

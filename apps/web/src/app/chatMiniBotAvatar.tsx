@@ -7,6 +7,10 @@ import {
   type BotAvatarFacing,
 } from "./bot-avatar-render-geometry";
 import { BOT_AVATAR_COMPACT_ENTER_MAX_PX } from "./avatarRenderedSizeQuality";
+import {
+  botAvatarScreenPaletteVariables,
+  deriveBotAvatarScreenPalette,
+} from "./botAvatarScreenPalette";
 import styles from "./chatMiniBotAvatar.module.css";
 
 export const CHAT_MINI_BOT_AVATAR_CANONICAL_SCREEN_SIZE = 128;
@@ -28,9 +32,9 @@ export function clampChatMiniBotAvatarRenderSize(size: number): number {
   );
 }
 
-/** Compact bot chassis for identity portraits. Mini screens are deliberately
- * flat LED pixels: the face owns blink + binary mouth state and the chassis
- * never adds speech glow, phosphor, or breathing lights. */
+/** Compact bot chassis for identity portraits. Mini marks remain crisp LED
+ * pixels: the face owns blink + binary mouth state and the chassis never adds
+ * speech glow, phosphor, or breathing lights. */
 export function ChatMiniBotAvatar(props: {
   color?: string | null;
   alloyColor?: string | null;
@@ -68,9 +72,13 @@ export function ChatMiniBotAvatar(props: {
     theme === "light"
       ? CHAT_MINI_BOT_AVATAR_LIGHT_BASE_SRC
       : CHAT_MINI_BOT_AVATAR_DARK_BASE_SRC;
+  const screenPalette = color
+    ? deriveBotAvatarScreenPalette(color, theme)
+    : null;
 
   const rootStyle = {
     ["--chat-mini-bot-color" as string]: color ?? "var(--accent)",
+    ...botAvatarScreenPaletteVariables(screenPalette),
     ["--chat-mini-bot-alloy-color" as string]:
       props.alloyColor?.trim() || "#aeb8c1",
     // AvatarDetailsMask has its own mirror transform. The mini turns the

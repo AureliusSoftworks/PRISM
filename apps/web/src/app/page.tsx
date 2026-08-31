@@ -30,6 +30,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { prismDeveloperAuthoringEnabled } from "./prismDevGating";
+import { recordedMessageGenerationLabel } from "./messageGenerationProvenance";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
@@ -7524,6 +7525,7 @@ interface CoffeeCenterFeedLine {
   botId?: string;
   botTextColor?: string;
   voicePresence?: "loud" | "quiet";
+  generationLabel?: string | null;
 }
 
 /** Local mirror of the Coffee conversation shape returned by `POST /api/coffee/turn`. */
@@ -13230,7 +13232,7 @@ interface ImportBotOptions {
   keepBotsPanelOpen?: boolean;
   openImportedBotInEditor?: boolean;
   generateThinkingSfx?: boolean;
-  accentPronunciationEnabledDefault?: boolean;
+  pronunciationHelpEnabledDefault?: boolean;
   onThinkingSfxError?: (error: Error) => void;
   onProgress?: (event: ImportBotProgressEvent) => void;
 }
@@ -22398,6 +22400,7 @@ function BotFoundryBatchSlotAvatar({
     <MiniAvatarDetailsInk
       details={preview.avatarDetails}
       color={preview.color}
+      theme="dark"
       faceGeometry={batchFaceStyle}
       talking={false}
       thinking={false}
@@ -22570,6 +22573,7 @@ function EmptyStateHeroMiniBot({
     <MiniAvatarDetailsInk
       details={avatarDetails}
       color={normalizedBotColor}
+      theme={resolvedTheme}
       faceGeometry={faceStyle}
       talking={isTalking}
       mouthShape={miniMouthShape}
@@ -22626,6 +22630,7 @@ function EmptyStateHeroMiniBot({
               faceEyeRotationDeg={faceStyle.eyeRotationDeg}
               faceEyeCount={faceStyle.eyeCount}
               faceBlinkCount={faceStyle.blinkCount}
+              faceEyeSpacing={faceStyle.eyeSpacing}
               faceMouthScale={faceStyle.mouthScale}
               faceMouthOffsetX={faceStyle.mouthOffsetX}
               faceMouthOffsetY={faceStyle.mouthOffsetY}
@@ -32435,6 +32440,7 @@ function FullAvatarCompactFallback({
     <MiniAvatarDetailsInk
       details={avatarDetails}
       color={avatarDetailsColor}
+      theme={theme}
       faceGeometry={faceStyle}
       talking={inkTalking ?? isTalking}
       speechInkVisible={speechInkVisible}
@@ -32492,6 +32498,7 @@ function FullAvatarCompactFallback({
                 faceEyeRotationDeg={faceStyle.eyeRotationDeg}
                 faceEyeCount={faceStyle.eyeCount}
                 faceBlinkCount={faceStyle.blinkCount}
+                faceEyeSpacing={faceStyle.eyeSpacing}
                 faceMouthScale={faceStyle.mouthScale}
                 faceMouthOffsetX={faceStyle.mouthOffsetX}
                 faceMouthOffsetY={faceStyle.mouthOffsetY}
@@ -42113,6 +42120,7 @@ function BotAvatarPreviewPanel({
                     <MiniAvatarDetailsInk
                       details={miniAvatarDetails}
                       color={miniAccentColor}
+                      theme={previewTheme}
                       faceGeometry={faceStyle}
                       talking={previewTalking}
                       thinking={previewThinkingSpinnerActive}
@@ -43002,6 +43010,40 @@ function BotVoiceLocalStage({
         onPreview={onPreview}
         onRandomizePreviewLine={onRandomizePreviewLine}
       />
+      <section
+        className={styles.botVoiceFeelSupporting}
+        aria-label="TTS pronunciation help"
+      >
+        <div className={styles.botVoiceSectionHeading}>
+          <div>
+            <span>Pronunciation help</span>
+            <small>Apply this bot’s Accent Map through built-in English TTS.</small>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-label="TTS pronunciation help"
+            aria-checked={normalizedProfile.ttsPronunciationEnabled === true}
+            data-active={
+              normalizedProfile.ttsPronunciationEnabled ? "true" : undefined
+            }
+            onClick={() =>
+              onChange(
+                normalizeBotAudioVoiceProfileV1({
+                  ...normalizedProfile,
+                  ttsPronunciationEnabled:
+                    normalizedProfile.ttsPronunciationEnabled !== true,
+                }),
+                { saveImmediately: true },
+              )
+            }
+          >
+            {normalizedProfile.ttsPronunciationEnabled
+              ? "Pronunciation on"
+              : "Pronunciation off"}
+          </button>
+        </div>
+      </section>
       {laughControlAvailable ? (
         <section
           className={styles.botVoiceLocalLaugh}
@@ -43208,6 +43250,7 @@ function BotVoicePremiumStage({
   const [saveState, setSaveState] = useState<
     { kind: "idle" | "busy" | "success" | "error"; message: string }
   >({ kind: "idle", message: "" });
+  const normalizedProfile = normalizeBotAudioVoiceProfileV1(profile);
   const assignSavedVoice = (voice: PremiumVoiceLibraryEntry): void => {
     onChange({
       ...normalizeBotAudioVoiceProfileV1(profile),
@@ -43378,6 +43421,42 @@ function BotVoicePremiumStage({
           <small>These bookmarks are private to your PRISM account. ElevenLabs may change or revoke shared voices.</small>
         </label>
       ) : null}
+      <section
+        className={styles.botVoiceFeelSupporting}
+        aria-label="Premium pronunciation help"
+      >
+        <div className={styles.botVoiceSectionHeading}>
+          <div>
+            <span>Pronunciation help</span>
+            <small>Force this bot’s Accent Map through its selected Premium voice.</small>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-label="Premium pronunciation help"
+            aria-checked={normalizedProfile.premiumPronunciationEnabled === true}
+            data-active={
+              normalizedProfile.premiumPronunciationEnabled
+                ? "true"
+                : undefined
+            }
+            onClick={() =>
+              onChange(
+                normalizeBotAudioVoiceProfileV1({
+                  ...normalizedProfile,
+                  premiumPronunciationEnabled:
+                    normalizedProfile.premiumPronunciationEnabled !== true,
+                }),
+                { saveImmediately: true },
+              )
+            }
+          >
+            {normalizedProfile.premiumPronunciationEnabled
+              ? "Pronunciation on"
+              : "Pronunciation off"}
+          </button>
+        </div>
+      </section>
       <BotVoiceEditor
         variant="premium"
         profile={profile}
@@ -47060,7 +47139,7 @@ function BotAvatarCustomizerModal({
           : activeControlTab === "voice"
             ? [
                 { value: "pronunciation", label: "1 Accent" },
-                { value: "local", label: "2 Local" },
+                { value: "local", label: "2 TTS" },
                 { value: "premium", label: "3 Premium" },
               ]
             : [];
@@ -47103,26 +47182,12 @@ function BotAvatarCustomizerModal({
       return (
         <PronunciationAtlas
           selection={avatarPronunciationSelection}
-          pronunciationEnabled={
-            normalizeBotAudioVoiceProfileV1(audioVoiceProfile)
-              .accentPronunciationEnabled === true
-          }
-          onPronunciationEnabledChange={(enabled) =>
-            onAudioVoiceProfileChange(
-              normalizeBotAudioVoiceProfileV1({
-                ...normalizeBotAudioVoiceProfileV1(audioVoiceProfile),
-                accentPronunciationEnabled: enabled,
-              }),
-              { saveImmediately: true },
-            )
-          }
           color={activeFoundryModule.color}
           onPreview={(selection) =>
             onAudioVoiceProfileChange(
               profileWithPronunciationAtlasSelection(
                 audioVoiceProfile,
                 selection,
-                { activatePronunciation: false },
               ),
             )
           }
@@ -47138,7 +47203,6 @@ function BotAvatarCustomizerModal({
               profileWithPronunciationAtlasSelection(
                 audioVoiceProfile,
                 selection,
-                { activatePronunciation: false },
               ),
             )
           }
@@ -47156,7 +47220,7 @@ function BotAvatarCustomizerModal({
           <strong>Place the accent pin first</strong>
           <p>
             The map location owns pronunciation. Once it is set, you can shape
-            Local and Premium voices without moving that accent.
+            TTS and Premium voices without moving that accent.
           </p>
           <button
             type="button"
@@ -95928,7 +95992,7 @@ function HomeContent(): React.JSX.Element {
     const parsed = parsePrismBotArchive(archiveBytes);
     const preparedArchive = prepareBotArchivePayload(parsed);
     let createBody = await compileStaleArchivePowers(preparedArchive.body);
-    if (typeof options?.accentPronunciationEnabledDefault === "boolean") {
+    if (typeof options?.pronunciationHelpEnabledDefault === "boolean") {
       const importedOverride = normalizeOptionalBotAudioVoiceProfileV1(
         createBody.audioVoiceProfileOverride,
       );
@@ -95938,15 +96002,18 @@ function HomeContent(): React.JSX.Element {
           ...normalizeBotAudioVoiceProfileV1(
             createBody.authoredAudioVoiceProfile,
           ),
-          accentPronunciationEnabled:
-            options.accentPronunciationEnabledDefault,
+          ttsPronunciationEnabled: options.pronunciationHelpEnabledDefault,
+          premiumPronunciationEnabled:
+            options.pronunciationHelpEnabledDefault,
         }),
         ...(importedOverride
           ? {
               audioVoiceProfileOverride: normalizeBotAudioVoiceProfileV1({
                 ...importedOverride,
-                accentPronunciationEnabled:
-                  options.accentPronunciationEnabledDefault,
+                ttsPronunciationEnabled:
+                  options.pronunciationHelpEnabledDefault,
+                premiumPronunciationEnabled:
+                  options.pronunciationHelpEnabledDefault,
               }),
             }
           : {}),
@@ -96832,8 +96899,12 @@ function HomeContent(): React.JSX.Element {
         ...normalizeBotAudioVoiceProfileV1(
           compiledArchiveBody.authoredAudioVoiceProfile,
         ),
-        accentPronunciationEnabled:
-          marketplaceAccentPronunciationDefault(prepared.entry),
+        ttsPronunciationEnabled: marketplaceAccentPronunciationDefault(
+          prepared.entry,
+        ),
+        premiumPronunciationEnabled: marketplaceAccentPronunciationDefault(
+          prepared.entry,
+        ),
       }),
     };
     const installedOverrideValue = bots.find(
@@ -96851,8 +96922,12 @@ function HomeContent(): React.JSX.Element {
     ) {
       installedOverride = normalizeBotAudioVoiceProfileV1({
         ...installedOverride,
-        accentPronunciationEnabled:
-          marketplaceAccentPronunciationDefault(prepared.entry),
+        ttsPronunciationEnabled: marketplaceAccentPronunciationDefault(
+          prepared.entry,
+        ),
+        premiumPronunciationEnabled: marketplaceAccentPronunciationDefault(
+          prepared.entry,
+        ),
       });
       installedOverrideChanged = true;
     }
@@ -97056,7 +97131,7 @@ function HomeContent(): React.JSX.Element {
         deferRefresh: true,
         keepBotsPanelOpen: true,
         generateThinkingSfx: true,
-        accentPronunciationEnabledDefault:
+        pronunciationHelpEnabledDefault:
           marketplaceAccentPronunciationDefault(bundle.entry),
         onThinkingSfxError: (error) => {
           thinkingSfxFailedForBot = true;
@@ -113833,6 +113908,9 @@ function HomeContent(): React.JSX.Element {
       aria-label="Open All Bots Home"
       title="All Bots Home"
     >
+      <PrismRefractionEmblem
+        className={styles.sharedAppletNavbarCompactBrand}
+      />
       <span className={styles.chatHubWordmarkStack}>
         <PrismWordmarkWithVersion
           size="sm"
@@ -139210,6 +139288,16 @@ function HomeContent(): React.JSX.Element {
                         )
                       : botPowerVoicePresenceModeV1(transcriptBot.powers)
                     : null;
+                const generationLabel = isAssistant
+                  ? recordedMessageGenerationLabel({
+                      model: message.model ?? "",
+                      effort: message.reasoningEffort ?? null,
+                      turbo: message.turbo === true,
+                    })
+                  : null;
+                const generationDescriptionId = generationLabel
+                  ? `coffee-message-generation-${message.id}`
+                  : undefined;
                 return (
                   <li
                     key={message.id}
@@ -139218,6 +139306,9 @@ function HomeContent(): React.JSX.Element {
                     data-power-voice-presence={
                       transcriptVoicePresence ?? undefined
                     }
+                    tabIndex={generationLabel ? 0 : undefined}
+                    title={generationLabel ?? undefined}
+                    aria-describedby={generationDescriptionId}
                   >
                     {isAssistant && (
                       <div
@@ -139284,6 +139375,14 @@ function HomeContent(): React.JSX.Element {
                         recordId={message.id}
                         request={api}
                       />
+                      {generationLabel ? (
+                        <span
+                          id={generationDescriptionId}
+                          className={styles.srOnly}
+                        >
+                          Model and effort: {generationLabel}.
+                        </span>
+                      ) : null}
                     </div>
                   </li>
                 );
@@ -140044,6 +140143,14 @@ function HomeContent(): React.JSX.Element {
                       coffeeBotsById.get(assistantBot.id)?.powers,
                     )) ?? undefined)
               : undefined,
+          generationLabel:
+            message.role === "assistant"
+              ? recordedMessageGenerationLabel({
+                  model: message.model ?? "",
+                  effort: message.reasoningEffort ?? null,
+                  turbo: message.turbo === true,
+                })
+              : null,
         };
       });
     const pendingSubmittedUserLineVisible =
@@ -141335,6 +141442,13 @@ function HomeContent(): React.JSX.Element {
                             data-speaker-break={
                               speakerChanged ? "true" : undefined
                             }
+                            tabIndex={line.generationLabel ? 0 : undefined}
+                            title={line.generationLabel ?? undefined}
+                            aria-describedby={
+                              line.generationLabel
+                                ? `coffee-center-generation-${line.id}`
+                                : undefined
+                            }
                             style={
                               line.botTextColor
                                 ? ({
@@ -141356,6 +141470,14 @@ function HomeContent(): React.JSX.Element {
                               normalizeAccentForTheme,
                               speakerBotId: line.botId,
                             })}
+                            {line.generationLabel ? (
+                              <span
+                                id={`coffee-center-generation-${line.id}`}
+                                className={styles.srOnly}
+                              >
+                                Model and effort: {line.generationLabel}.
+                              </span>
+                            ) : null}
                           </p>
                         );
                       })}
@@ -147507,6 +147629,7 @@ function HomeContent(): React.JSX.Element {
                     <MiniAvatarDetailsInk
                       details={galleryAvatarDetails}
                       color={debateAvatarAccentColor}
+                      theme={resolvedTheme}
                       faceGeometry={faceStyle}
                       talking={authoredMiniPortrait && galleryTalking}
                       thinking={avatarState.thinking}
@@ -147583,6 +147706,7 @@ function HomeContent(): React.JSX.Element {
                               faceEyeRotationDeg={faceStyle.eyeRotationDeg}
                               faceEyeCount={faceStyle.eyeCount}
                               faceBlinkCount={faceStyle.blinkCount}
+                              faceEyeSpacing={faceStyle.eyeSpacing}
                               faceMouthScale={faceStyle.mouthScale}
                               faceMouthOffsetX={faceStyle.mouthOffsetX}
                               faceMouthOffsetY={faceStyle.mouthOffsetY}
@@ -148683,7 +148807,7 @@ function HomeContent(): React.JSX.Element {
               avatarDetailsColor: color,
               leadershipGroupCount: signalMannequinLeadershipGroupCount,
               semanticFaceMotionEnabled: true,
-              pixelRasterizationEnabled: !signalLivePerformanceAvatar,
+              pixelRasterizationEnabled: true,
               runtimeEffectsEnabled: !signalLivePerformanceAvatar,
             };
             const signalMannequinAmbientProps: Omit<

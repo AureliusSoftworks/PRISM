@@ -12,6 +12,7 @@ import {
 } from "next/font/google";
 import { BlockBrowserInspection } from "./BlockBrowserInspection";
 import { ClientInstallCoach } from "./ClientInstallCoach";
+import { DisableNativeTextCorrection } from "./DisableNativeTextCorrection";
 import { DisableNativeTooltips } from "./DisableNativeTooltips";
 import { PrismIntroSequenceProvider } from "./PrismIntroSequence";
 import { PRISM_BRAND_COPY } from "./prismBrand";
@@ -112,6 +113,8 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${uiSans.variable} ${titleSans.variable} ${chatSerif.variable} ${formalSerif.variable} ${playfulDisplay.variable} ${conciseRounded.variable} ${macondoFace.variable} ${technicalMono.variable} ${geistMono.variable}`}
+      spellCheck={false}
+      autoCorrect="off"
       suppressHydrationWarning
     >
       <body>
@@ -119,6 +122,7 @@ export default function RootLayout({
           <PrismIntroSequenceProvider>
             <PrismRefractionGateProvider>
               <RenderPlatformAttribute />
+              <DisableNativeTextCorrection />
               <TextFieldContextMenu />
               <TextEntryLengthDefaults />
               <BlockBrowserInspection />

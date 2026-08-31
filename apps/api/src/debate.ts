@@ -1247,6 +1247,8 @@ interface DebateJsonGeneration {
   value: Record<string, unknown>;
   provider: ProviderName;
   model: string;
+  reasoningEffort: ProviderReasoningEffort;
+  turbo: boolean;
   autoRecovery?: AutoRecoveryTraceV1;
 }
 
@@ -1393,6 +1395,9 @@ async function generateJson(
       }),
       provider: primary.providerName,
       model: options.model ?? primary.model,
+      reasoningEffort:
+        options.reasoningEffort ?? primary.reasoningEffort ?? "auto",
+      turbo: primary.turbo === true,
     };
   }
   const result = await runAutoFallbackChain({
@@ -1431,10 +1436,25 @@ async function generateJson(
     totalTimeoutMs: REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS,
     validate: validateDebateJson,
   });
+  const resolvedLaneIndex = Math.max(
+    0,
+    ordered.findIndex(
+      (lane) =>
+        lane.providerName === result.provider && lane.model === result.model,
+    ),
+  );
+  const resolvedLane = ordered[resolvedLaneIndex] ?? primary;
   return {
     value: result.value,
     provider: result.provider,
     model: result.model,
+    reasoningEffort:
+      autoFallbackReasoningEffort(
+        resolvedLaneIndex,
+        options.reasoningEffort ?? resolvedLane.reasoningEffort,
+        resolvedLane.reasoningEffort,
+      ) ?? "auto",
+    turbo: resolvedLane.turbo === true,
     ...(result.recovery ? { autoRecovery: result.recovery } : {}),
   };
 }
@@ -1603,6 +1623,8 @@ export interface DebateRefractDraftResult {
   generated: boolean;
   provider: ProviderName;
   model: string;
+  reasoningEffort: ProviderReasoningEffort;
+  turbo: boolean;
 }
 
 const DEBATE_EXHIBIT_FALLBACK_EMOJIS = [
@@ -1847,6 +1869,8 @@ export async function generateDebateRefractDraft(
       generated: true,
       provider: "local",
       model: "deterministic-exhibit-draft-v1",
+      reasoningEffort: "none",
+      turbo: false,
     };
   }
   const value = compactText(generation.value.value, limit);
@@ -1868,15 +1892,23 @@ export async function generateDebateRefractDraft(
     generated: Boolean(value && !unavailable),
     provider: generation.provider,
     model: generation.model,
+    reasoningEffort: generation.reasoningEffort,
+    turbo: generation.turbo,
   };
 }
 
-export async function synthesizeDebateSlates(
+export async function synthesizeDebateSlatesWithProvenance(
   topicRaw: unknown,
   formalityRaw: unknown,
   runtime: DebateAiRuntime,
   directionRaw?: unknown,
-): Promise<DebateMotionSlateV1[]> {
+): Promise<{
+  slates: DebateMotionSlateV1[];
+  provider: ProviderName;
+  model: string;
+  reasoningEffort: ProviderReasoningEffort;
+  turbo: boolean;
+}> {
   let topic = compactText(topicRaw, 1_000);
   const formality = normalizeDebateFormalityId(formalityRaw);
   const direction = compactText(directionRaw, 500);
@@ -1948,7 +1980,29 @@ export async function synthesizeDebateSlates(
       "Prism could not produce three complete debate slates.",
     );
   }
-  return slates;
+  return {
+    slates,
+    provider: generation.provider,
+    model: generation.model,
+    reasoningEffort: generation.reasoningEffort,
+    turbo: generation.turbo,
+  };
+}
+
+export async function synthesizeDebateSlates(
+  topicRaw: unknown,
+  formalityRaw: unknown,
+  runtime: DebateAiRuntime,
+  directionRaw?: unknown,
+): Promise<DebateMotionSlateV1[]> {
+  return (
+    await synthesizeDebateSlatesWithProvenance(
+      topicRaw,
+      formalityRaw,
+      runtime,
+      directionRaw,
+    )
+  ).slates;
 }
 
 export async function synthesizeDebateTitle(
@@ -2384,6 +2438,8 @@ export async function suggestDebateSetup(args: {
   suggestion: DebateSetupSuggestionV1;
   provider: ProviderName;
   model: string;
+  reasoningEffort: ProviderReasoningEffort;
+  turbo: boolean;
 }> {
   const roster = args.roster
     .map((bot) => ({
@@ -2594,6 +2650,8 @@ export async function suggestDebateSetup(args: {
     },
     provider: generation.provider,
     model: generation.model,
+    reasoningEffort: generation.reasoningEffort,
+    turbo: generation.turbo,
   };
 }
 
@@ -16449,7 +16507,8 @@ async function advanceDebateFlyting(
     const hallCounts = flytingHallCounts(swayedState);
     const event = makeEvent(session, {
       kind: "reaction",
-      speakerKind: "system",
+      speakerKind: "moderator",
+      speakerBotId: session.moderator.id,
       content: `${exchange.acclamation ?? "The Hall answers with divided noise."} The gallery now leans ${hallCounts.forCount} for, ${hallCounts.neutralCount} unclaimed, and ${hallCounts.againstCount} against.`,
       audienceReaction:
         exchange.resolution === "turned"
@@ -16486,7 +16545,8 @@ async function advanceDebateFlyting(
     const neutralPlurality = flytingNeutralPlurality(state);
     const event = makeEvent(session, {
       kind: "reaction",
-      speakerKind: "system",
+      speakerKind: "moderator",
+      speakerBotId: session.moderator.id,
       content: neutralPlurality
         ? `The Hall will not be won: ${counts.neutralCount} of ${DEBATE_FLYTING_AUDIENCE_COUNT} remain unclaimed. The Jarl's guards hold the center.`
         : `The Hall divides: ${counts.forCount} for ${session.forAdvocate.name}, ${counts.againstCount} for ${session.againstAdvocate.name}, and ${counts.neutralCount} unclaimed. The Jarl's three guards await the word.`,

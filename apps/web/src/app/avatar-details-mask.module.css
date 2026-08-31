@@ -1,7 +1,7 @@
 .layer {
   --avatar-details-phosphor-glow-color: var(
-    --crt-face-edge-color,
-    currentColor
+    --zen-live-bot-shared-phosphor-glow-color,
+    var(--crt-face-edge-color, currentColor)
   );
   position: absolute;
   inset: 0;
@@ -32,8 +32,8 @@
 
 .motionPlane {
   --avatar-details-phosphor-glow-color: var(
-    --crt-face-edge-color,
-    currentColor
+    --zen-live-bot-shared-phosphor-glow-color,
+    var(--crt-face-edge-color, currentColor)
   );
   position: absolute;
   inset: 0;
@@ -181,44 +181,47 @@
       var(--bot-phosphor-beam-softness, 0.45px)
     )
     saturate(1.08)
-    drop-shadow(
-      0 0 var(--bot-phosphor-halo-contact-radius, 0.72px)
-        var(--avatar-details-phosphor-glow-color)
-    )
-    drop-shadow(
-      0 0 var(--bot-phosphor-halo-tight-radius, 1.5px)
-        var(--avatar-details-phosphor-glow-color)
-    )
-    drop-shadow(
-      0 0 var(--bot-phosphor-halo-near-radius, 3px)
-        color-mix(
-          in srgb,
-          var(--avatar-details-phosphor-glow-color) 82%,
-          transparent
+    var(
+      --zen-live-bot-shared-phosphor-glow-filter,
+      drop-shadow(
+          0 0 var(--bot-phosphor-halo-contact-radius, 0.72px)
+            var(--avatar-details-phosphor-glow-color)
         )
-    )
-    drop-shadow(
-      0 0 var(--bot-phosphor-halo-mid-radius, 6px)
-        color-mix(
-          in srgb,
-          var(--avatar-details-phosphor-glow-color) 58%,
-          transparent
+        drop-shadow(
+          0 0 var(--bot-phosphor-halo-tight-radius, 1.5px)
+            var(--avatar-details-phosphor-glow-color)
         )
-    )
-    drop-shadow(
-      0 0 var(--bot-phosphor-halo-far-radius, 12px)
-        color-mix(
-          in srgb,
-          var(--avatar-details-phosphor-glow-color) 36%,
-          transparent
+        drop-shadow(
+          0 0 var(--bot-phosphor-halo-near-radius, 3px)
+            color-mix(
+              in srgb,
+              var(--avatar-details-phosphor-glow-color) 82%,
+              transparent
+            )
         )
-    )
-    drop-shadow(
-      0 0 var(--bot-phosphor-halo-ambient-radius, 21px)
-        color-mix(
-          in srgb,
-          var(--avatar-details-phosphor-glow-color) 22%,
-          transparent
+        drop-shadow(
+          0 0 var(--bot-phosphor-halo-mid-radius, 6px)
+            color-mix(
+              in srgb,
+              var(--avatar-details-phosphor-glow-color) 58%,
+              transparent
+            )
+        )
+        drop-shadow(
+          0 0 var(--bot-phosphor-halo-far-radius, 12px)
+            color-mix(
+              in srgb,
+              var(--avatar-details-phosphor-glow-color) 36%,
+              transparent
+            )
+        )
+        drop-shadow(
+          0 0 var(--bot-phosphor-halo-ambient-radius, 21px)
+            color-mix(
+              in srgb,
+              var(--avatar-details-phosphor-glow-color) 22%,
+              transparent
+            )
         )
     );
 }

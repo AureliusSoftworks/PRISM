@@ -8,6 +8,7 @@ import {
   type AvatarDetailsFaceGeometry,
   type AvatarDetailsV1,
 } from "./avatar-details";
+import { deriveBotAvatarScreenPalette } from "./botAvatarScreenPalette";
 import type { ZenLiveBotMouthShape } from "./zenLiveMouth";
 
 export type MiniAvatarDetailsInkRenderProps = {
@@ -25,6 +26,7 @@ export type MiniAvatarDetailsInkRenderProps = {
 export function MiniAvatarDetailsInk({
   details,
   color,
+  theme = "dark",
   faceGeometry,
   talking,
   speechInkVisible,
@@ -36,6 +38,7 @@ export function MiniAvatarDetailsInk({
 }: {
   details: AvatarDetailsV1 | null | undefined;
   color: string | null | undefined;
+  theme?: "light" | "dark";
   faceGeometry?: Partial<AvatarDetailsFaceGeometry> | null;
   talking: boolean;
   speechInkVisible?: boolean;
@@ -50,6 +53,8 @@ export function MiniAvatarDetailsInk({
     setBlinkPhase((current) => (current === phase ? current : phase));
   }, []);
   const hasAvatarArt = avatarDetailsHasVisuals(details);
+  const inkColor =
+    deriveBotAvatarScreenPalette(color?.trim() ?? "", theme)?.glyph ?? color;
   const renderAvatarDetailsInk = (
     depth: "behind-face" | "above-face",
   ): React.JSX.Element | null =>
@@ -57,7 +62,7 @@ export function MiniAvatarDetailsInk({
       <span className={className} data-avatar-details-depth={depth}>
         <AvatarDetailsMask
           details={details}
-          color={color}
+          color={inkColor}
           detailLevel="audience"
           faceGeometry={faceGeometry}
           blinkPhase={blinkPhase}

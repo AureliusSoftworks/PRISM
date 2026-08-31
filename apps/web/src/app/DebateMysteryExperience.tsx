@@ -640,12 +640,15 @@ export function DebateMysteryPlay(
     occurredAt: string;
   }>>([]);
   useEffect(() => {
-    setInvestigationArtStyle(readWhodunnitInvestigationArtStyle(window.localStorage));
-  }, []);
+    setInvestigationArtStyle(readWhodunnitInvestigationArtStyle(
+      window.localStorage,
+      props.session.id,
+    ));
+  }, [props.session.id]);
   const selectInvestigationArtStyle = useCallback((style: WhodunnitInvestigationArtStyle): void => {
     setInvestigationArtStyle(style);
-    writeWhodunnitInvestigationArtStyle(window.localStorage, style);
-  }, []);
+    writeWhodunnitInvestigationArtStyle(window.localStorage, style, props.session.id);
+  }, [props.session.id]);
 
   const currentRoom =
     state.rooms.find((room) => room.id === state.currentRoomId) ?? state.rooms[0]!;

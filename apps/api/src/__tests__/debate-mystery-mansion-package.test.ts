@@ -135,6 +135,10 @@ describe("portable mansion package", () => {
         password: "correct horse battery staple",
       });
       assert.equal(preview.manifest.scaleClass, "compact");
+      const roomArt = preview.manifest.roomArt;
+      assert.ok(roomArt?.version === 6);
+      assert.equal(roomArt.defaultPresentation, "mosaic");
+      assert.equal(roomArt.upgradeStyle, "realistic");
       const sourceSha = (source.db.prepare(
         "SELECT sha256 FROM debate_mystery_mansion_assets WHERE user_id = 'creator'",
       ).get() as { sha256: string }).sha256;

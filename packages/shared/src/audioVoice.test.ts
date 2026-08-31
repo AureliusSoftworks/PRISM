@@ -30,6 +30,7 @@ import {
   localVoicePronunciationOverrideIsActive,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotAudioVoiceProfileForSynthesisV1,
+  migrateLegacyAccentPronunciationEnginesV1,
   botAudioVoiceProfileHasExplicitAccentPronunciationSetting,
   normalizeBotAudioVoiceProfileV3,
   normalizeBotAvatarSfxV1,
@@ -343,6 +344,8 @@ describe("audio voice normalization", () => {
       pronunciationBase: "follow-voice",
       accentMode: "prefer-genuine",
       speechprintInfluence: "none",
+      ttsPronunciationEnabled: false,
+      premiumPronunciationEnabled: false,
       speechprintStrength: "balanced",
       speechprintVariationSeed: "natural-v1",
       pace: 0.125,
@@ -392,7 +395,7 @@ describe("audio voice normalization", () => {
     assert.equal(v3.local.enginePreference, "voice-plus");
     assert.deepEqual(v3.local.pronunciation, {
       base: "en-US",
-      accentPronunciationEnabled: true,
+      ttsPronunciationEnabled: false,
       accentDefinitionId: "japanese-influenced-english",
       mapPoint: { x: 0.28731, y: 0.29842 },
     });
@@ -403,6 +406,7 @@ describe("audio voice normalization", () => {
       variationSeed: "voice-28-japanese",
     });
     assert.equal(v3.premium.voiceId, "premium-id");
+    assert.equal(v3.premium.pronunciationEnabled, false);
     assert.equal(v3.local.tone.pace, 0.2);
     assert.equal(v3.premium.pace, 0.2);
     assert.equal(v3.delivery.pace, undefined);
@@ -467,36 +471,58 @@ describe("audio voice normalization", () => {
     );
   });
 
-  it("persists the per-bot Accent Map switch and bypasses it only for synthesis", () => {
+  it("migrates an enabled legacy map gate to independent engine gates and keeps disabled bots untouched", () => {
     const authoredLegacyAccent = normalizeBotAudioVoiceProfileV1({
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
       accentDefinitionId: "irish-english",
       pronunciationMapPoint: { x: 0.42, y: 0.31 },
       speechprintInfluence: "irish-english",
+      ttsPronunciationEnabled: undefined,
+      premiumPronunciationEnabled: undefined,
     });
-    assert.equal(authoredLegacyAccent.accentPronunciationEnabled, true);
+    assert.equal(authoredLegacyAccent.ttsPronunciationEnabled, true);
+    assert.equal(authoredLegacyAccent.premiumPronunciationEnabled, true);
 
-    const disabled = normalizeBotAudioVoiceProfileV1({
+    const disabledLegacy = {
       ...authoredLegacyAccent,
       accentPronunciationEnabled: false,
-    });
-    const stored = parseStoredBotAudioVoiceProfileV1(
-      serializeBotAudioVoiceProfileV1(disabled),
+    };
+    assert.equal(
+      migrateLegacyAccentPronunciationEnginesV1(disabledLegacy),
+      null,
     );
-    assert.equal(stored?.accentPronunciationEnabled, false);
+    const migrated = migrateLegacyAccentPronunciationEnginesV1({
+      ...authoredLegacyAccent,
+      accentPronunciationEnabled: true,
+      ttsPronunciationEnabled: undefined,
+      premiumPronunciationEnabled: undefined,
+    });
+    assert.equal(migrated?.ttsPronunciationEnabled, true);
+    assert.equal(migrated?.premiumPronunciationEnabled, true);
+    const stored = parseStoredBotAudioVoiceProfileV1(
+      serializeBotAudioVoiceProfileV1({
+        ...authoredLegacyAccent,
+        ttsPronunciationEnabled: false,
+        premiumPronunciationEnabled: true,
+      }),
+    );
+    assert.equal(stored?.ttsPronunciationEnabled, false);
+    assert.equal(stored?.premiumPronunciationEnabled, true);
     assert.equal(stored?.accentDefinitionId, "irish-english");
     assert.deepEqual(stored?.pronunciationMapPoint, { x: 0.42, y: 0.31 });
 
-    const synthesis = normalizeBotAudioVoiceProfileForSynthesisV1(stored);
-    assert.equal(synthesis.accentPronunciationEnabled, false);
-    assert.equal(synthesis.accentDefinitionId, undefined);
-    assert.equal(synthesis.pronunciationMapPoint, undefined);
-    assert.equal(synthesis.pronunciationBase, "follow-voice");
-    assert.equal(synthesis.speechprintInfluence, "none");
-    assert.equal(
-      botAudioVoiceProfileHasExplicitAccentPronunciationSetting(stored),
-      true,
+    const ttsSynthesis = normalizeBotAudioVoiceProfileForSynthesisV1(
+      stored,
+      "tts",
     );
+    assert.equal(ttsSynthesis.accentDefinitionId, undefined);
+    const premiumSynthesis = normalizeBotAudioVoiceProfileForSynthesisV1(
+      stored,
+      "premium",
+    );
+    assert.equal(premiumSynthesis.accentDefinitionId, "irish-english");
+    assert.equal(migrateLegacyAccentPronunciationEnginesV1(migrated), null);
+    assert.equal(botAudioVoiceProfileHasExplicitAccentPronunciationSetting(stored), true);
     assert.equal(
       botAudioVoiceProfileHasExplicitAccentPronunciationSetting(
         JSON.stringify({

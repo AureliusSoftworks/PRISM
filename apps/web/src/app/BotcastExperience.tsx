@@ -538,6 +538,7 @@ import {
 import { signalReplayOwnerBoundaryTimesMs } from "./signalReplayStageClock";
 import { REPLAY_RECORDING_CHANGED_EVENT } from "./ReplayRenderCoordinator";
 import { ReplayMouthPresentationCapture } from "./ReplayMouthPresentationCapture";
+import { recordedMessageGenerationLabel } from "./messageGenerationProvenance";
 import { SpeechIntentReveal } from "./SpeechIntentReveal";
 import { signalAvatarPresentation } from "./sessionAvatarPresentationPolicy";
 import {
@@ -1978,28 +1979,11 @@ async function readSignalEpisodeImageFile(
     );
   }
   const dataUrl = await readSignalAssetFile(file);
-  if (descriptor.kind === "item") {
-    const image = new window.Image();
-    image.decoding = "async";
-    image.src = dataUrl;
-    await image.decode();
-    const scale = Math.min(1, 1536 / Math.max(image.naturalWidth, image.naturalHeight));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-    const context = canvas.getContext("2d", { willReadFrequently: true });
-    if (!context) throw new Error("Signal could not inspect that PNG.");
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
-    let hasVisibleTransparency = false;
-    for (let index = 3; index < pixels.length; index += 4) {
-      if (pixels[index] !== 255) {
-        hasVisibleTransparency = true;
-        break;
-      }
-    }
-    if (!hasVisibleTransparency) descriptor.kind = "picture";
-  }
+  // Do not decode or scan the full raster on Electron's UI thread. A modest
+  // compressed PNG can expand to millions of pixels and leave Signal unable
+  // to repaint while the file picker has already closed. The API already
+  // normalizes the source with an input-pixel limit and authoritatively
+  // classifies opaque PNGs as pictures before the image enters an episode.
   return { fileName: file.name, dataUrl, descriptor };
 }
 
@@ -2249,9 +2233,9 @@ function SignalEpisodeRuntimeClock(props: {
 
   const elapsedMs = props.runtimeMsAt(nowMs);
   const countdown = props.durationMinutes !== null;
-  const displayMs = countdown
-    ? Math.max(0, props.durationMinutes * 60_000 - elapsedMs)
-    : elapsedMs;
+  const durationMinutes = props.durationMinutes ?? 0;
+  const displayMs =
+    countdown ? Math.max(0, durationMinutes * 60_000 - elapsedMs) : elapsedMs;
   const label = runtimeLabel(displayMs);
   return (
     <span
@@ -2437,6 +2421,26 @@ function hostHasDeparted(episode: BotcastEpisode): boolean {
   return episode.events.some(
     (event) => botcastDepartureSpeakerRole(event) === "host",
   );
+}
+
+function signalMessageGenerationLabel(
+  episode: BotcastEpisode | null,
+  messageId: string | undefined,
+): string | null {
+  if (!messageId) return null;
+  const event = episode?.events.find(
+    (candidate) =>
+      candidate.kind === "utterance" && candidate.payload.messageId === messageId,
+  );
+  if (!event) return null;
+  return recordedMessageGenerationLabel({
+    model: typeof event.payload.model === "string" ? event.payload.model : "",
+    effort:
+      typeof event.payload.reasoningEffort === "string"
+        ? event.payload.reasoningEffort
+        : null,
+    turbo: event.payload.turbo === true,
+  });
 }
 
 function avatarFallback(bot: BotcastBotSummary): ReactNode {
@@ -13238,6 +13242,7 @@ export function BotcastExperience({
         data-audience-guest-visible={guestVisibleToAudience ? "true" : "false"}
         data-signal-power-pressure={socialPressure?.strength}
         data-signal-power-source={socialPressure?.sourceRole}
+        data-show-ended={args.currentEpisode.status === "completed" ? "true" : undefined}
         data-signal-image-context={stageImageVisible ? "visible" : undefined}
         data-signal-image-speaker={
           stageImageVisible ? args.activeMessage?.speakerRole : undefined
@@ -13251,52 +13256,6 @@ export function BotcastExperience({
         style={atmosphereStyle}
         aria-label={`Signal studio, ${args.shot} camera`}
       >
-        <div
-          className={styles.captionControls}
-          aria-label="Signal stage captions"
-        >
-          <button
-            type="button"
-            data-signal-captions-toggle="true"
-            data-selected={liveCaptionsEnabled ? "true" : undefined}
-            aria-pressed={liveCaptionsEnabled}
-            aria-label={liveCaptionsEnabled ? "Hide captions" : "Show captions"}
-            title={liveCaptionsEnabled ? "Hide captions" : "Show captions"}
-            onClick={toggleLiveCaptions}
-          >
-            CC
-          </button>
-          <button
-            type="button"
-            data-signal-caption-size="decrease"
-            aria-label={`Decrease Signal caption size, currently ${liveCaptionSizeDetails(liveCaptionSize).label}`}
-            title="Decrease caption size"
-            disabled={!liveCaptionsEnabled || liveCaptionSize === "small"}
-            onClick={() => adjustLiveCaptionSize(-1)}
-          >
-            A−
-          </button>
-          <output
-            className={styles.captionSizeReadout}
-            aria-label={`Signal caption size ${liveCaptionSizeDetails(liveCaptionSize).label}`}
-            aria-live="polite"
-            data-signal-caption-size-readout="true"
-          >
-            {liveCaptionSizeDetails(liveCaptionSize).percent}%
-          </output>
-          <button
-            type="button"
-            data-signal-caption-size="increase"
-            aria-label={`Increase Signal caption size, currently ${liveCaptionSizeDetails(liveCaptionSize).label}`}
-            title="Increase caption size"
-            disabled={
-              !liveCaptionsEnabled || liveCaptionSize === "extra-large"
-            }
-            onClick={() => adjustLiveCaptionSize(1)}
-          >
-            A+
-          </button>
-        </div>
         {args.replay && replayFaithful && replayCompactThinkingNotice ? (
           <div
             className={styles.replayCompactThinkingNotice}
@@ -13379,6 +13338,11 @@ export function BotcastExperience({
               <div
                 className={styles.avatarRig}
                 data-signal-presence="host"
+                style={
+                  {
+                    "--signal-signoff-exit-x": `${studioLayout.hostBot.x < 50 ? -118 : 118}vw`,
+                  } as CSSProperties
+                }
                 data-departed={hostDeparted ? "true" : undefined}
                 data-talking={roleIsSpeaking("host") ? "true" : undefined}
                 data-thinking={roleIsThinking("host") ? "true" : undefined}
@@ -13489,6 +13453,11 @@ export function BotcastExperience({
               <div
                 className={styles.avatarRig}
                 data-signal-presence="guest"
+                style={
+                  {
+                    "--signal-signoff-exit-x": `${studioLayout.guestBot.x < 50 ? -118 : 118}vw`,
+                  } as CSSProperties
+                }
                 data-departed={guestDeparted ? "true" : undefined}
                 data-talking={roleIsSpeaking("guest") ? "true" : undefined}
                 data-thinking={roleIsThinking("guest") ? "true" : undefined}
@@ -16727,6 +16696,7 @@ export function BotcastExperience({
             id: message.id,
             role: "assistant",
             content: signalVoicePerformanceTranscriptText(message),
+            generationLabel: signalMessageGenerationLabel(episode, message.id),
             botId: message.botId,
             botName:
               message.speakerRole === "host"
@@ -16746,6 +16716,7 @@ export function BotcastExperience({
       }).visibleRows,
     [
       episode?.messages,
+      episode?.events,
       hostBot,
       liveGuestBot,
       selectedShow?.accentColor,
@@ -16787,7 +16758,7 @@ export function BotcastExperience({
           <span>Transcript</span>
           <p>{liveTranscriptRows.length} messages</p>
         </div>
-        <small>On air</small>
+        <small>{episode?.status === "live" ? "On air" : "Off air"}</small>
       </header>
       <section
         ref={signalTranscriptScrollRef}
@@ -16801,21 +16772,39 @@ export function BotcastExperience({
         }}
       >
         <ul className={styles.signalTranscriptMessages}>
-          {liveTranscriptRows.map((message) => (
-            <li
-              key={message.id}
-              className={styles.signalTranscriptMessage}
-              data-role={message.role}
-              style={
-                message.botColor
-                  ? ({ "--signal-transcript-bot-color": message.botColor } as CSSProperties)
-                  : undefined
-              }
-            >
-              <strong>{message.botName ?? "Speaker"}</strong>
-              <span>{message.content}</span>
-            </li>
-          ))}
+          {liveTranscriptRows.map((message) => {
+            const generationDescriptionId = message.generationLabel
+              ? `signal-message-generation-${message.id}`
+              : undefined;
+            return (
+              <li
+                key={message.id}
+                className={styles.signalTranscriptMessage}
+                data-role={message.role}
+                style={
+                  message.botColor
+                    ? ({
+                        "--signal-transcript-bot-color": message.botColor,
+                      } as CSSProperties)
+                    : undefined
+                }
+                tabIndex={message.generationLabel ? 0 : undefined}
+                title={message.generationLabel ?? undefined}
+                aria-describedby={generationDescriptionId}
+              >
+                <strong>{message.botName ?? "Speaker"}</strong>
+                <span>{message.content}</span>
+                {message.generationLabel ? (
+                  <span
+                    id={generationDescriptionId}
+                    className={styles.screenReaderStatus}
+                  >
+                    Model and effort: {message.generationLabel}.
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
         </ul>
       </section>
     </aside>
@@ -18872,31 +18861,8 @@ export function BotcastExperience({
               <span
                 data-live={episode.status === "live" ? "true" : undefined}
               >
-                {episode.status === "live"
-                  ? "● ON AIR"
-                  : "○ OFF AIR"}
+                {episode.status === "live" ? "● ON AIR" : "○ SHOW ENDED"}
               </span>
-              <SignalEpisodeRuntimeClock
-                status={episode.status}
-                durationMinutes={episode.durationMinutes}
-                runtimeMsAt={(nowMs) =>
-                  signalEpisodeRuntimeMs(
-                    episode,
-                    nowMs,
-                    producerGuestThinkingStartedAtRef.current,
-                    producerGuestThinkingEndedAtRef.current,
-                    {
-                      accumulatedMs:
-                        signalAirTimeFreezeAccumulatedMsRef.current,
-                      startedAtMs: signalAirTimeFreezeStartedAtRef.current,
-                    },
-                    signalClientRecordedSessionHoldRef.current.episodeId ===
-                      episode.id
-                      ? signalClientRecordedSessionHoldRef.current.durationMs
-                      : 0,
-                  )
-                }
-              />
                 <strong>
                   {episode.segment === "interview"
                     ? "MAIN INTERVIEW"
@@ -18995,36 +18961,6 @@ export function BotcastExperience({
                         : "Create in Slate"}
                     </button>
                   ) : null}
-                  <button
-                    type="button"
-                    onClick={() => void copyEpisodeForReview(episode)}
-                    disabled={
-                      reviewCopyState?.episodeId === episode.id &&
-                      reviewCopyState.phase === "copying"
-                    }
-                    aria-live="polite"
-                    data-signal-completed-copy="true"
-                  >
-                    {signalReviewCopyLabel(reviewCopyState, episode.id)}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void (completedStudioUsesOutro
-                        ? returnFromEpisodeOutro()
-                        : returnFromCompletedEpisode())
-                    }
-                    disabled={
-                      keepSignalItemSaving ||
-                      watchReplayFinalizingEpisodeId === episode.id
-                    }
-                  >
-                    {keepSignalItemSaving
-                      ? "Saving item…"
-                      : watchReplayFinalizingEpisodeId === episode.id
-                        ? "Finalizing replay…"
-                        : "Return to show"}
-                  </button>
                 </>
               ) : (
                 <>
@@ -19048,18 +18984,20 @@ export function BotcastExperience({
                   </button>
                 </>
               )}
-              <button
-                type="button"
-                className={styles.dangerButton}
+              {episode.status !== "completed" ? (
+                <button
+                  type="button"
+                  className={styles.dangerButton}
                   onClick={(event) =>
                     openEpisodeDeletion(episode, event.currentTarget)
                   }
-                disabled={busy}
-              >
+                  disabled={busy}
+                >
                   {episode.status === "live"
                     ? "Discard episode"
                     : "Delete episode"}
-              </button>
+                </button>
+              ) : null}
               </div>
             )}
             <div
@@ -19077,9 +19015,7 @@ export function BotcastExperience({
               shot: liveShot,
               activeMessage: liveActiveMessage,
               replay: false,
-              empty:
-                episode.status !== "live" &&
-                episode.playbackMode !== "watch",
+              empty: episode.status === "cancelled",
               ...(episode.playbackMode === "watch"
                 ? {
                     guestDeparted:
@@ -19154,6 +19090,9 @@ export function BotcastExperience({
                 data-tutorial-target="botcast-cues"
                 data-signal-producer-desk="true"
                 data-producer-cue-phase={producerCueDeskPhase}
+                data-signal-completed={
+                  episode.status === "completed" ? "true" : undefined
+                }
               >
                 <header className={styles.producerDeskHeader}>
                   <div className={styles.producerDeskPrivateLine}>
@@ -19164,8 +19103,15 @@ export function BotcastExperience({
                     >
                       <i aria-hidden="true" />
                       <span>
-                        <small>Private line · {hostBot?.name ?? "Host"}</small>
-                        <strong>{producerCueDeskReadout}</strong>
+                        <small>
+                          Private line · {hostBot?.name ?? "Host"}
+                          {episode.status === "completed" ? " · Off" : ""}
+                        </small>
+                        <strong>
+                          {episode.status === "completed"
+                            ? "Signal complete"
+                            : producerCueDeskReadout}
+                        </strong>
                       </span>
                     </div>
                     <ol
@@ -19200,34 +19146,162 @@ export function BotcastExperience({
                       </li>
                     </ol>
                     <div className={styles.producerDeskLineActions}>
-                      <button
-                        type="button"
-                        className={styles.producerInterruptButton}
-                        disabled={!queuedCueCanInterruptGuest}
-                        onClick={() => void interruptGuestWithQueuedCue()}
-                        title={
-                          queuedCueInterruptUnavailableReason ??
-                          (hostBot?.muted
-                            ? "Let the muted host attempt the cut in canonical silence."
-                            : hostBot?.echoesAddressedSpeech
-                              ? "Have the echo-bound host cut in by repeating the last audience-heard phrase."
-                              : queuedProducerCue
-                                ? "Have the host take the mic now with this queued cue."
-                                : "Queue a cue before interrupting the guest.")
+                      <div
+                        className={styles.producerRailCaptionControls}
+                        aria-label="Signal captions"
+                      >
+                        <button
+                          type="button"
+                          data-signal-captions-toggle="true"
+                          data-selected={liveCaptionsEnabled ? "true" : undefined}
+                          aria-pressed={liveCaptionsEnabled}
+                          aria-label={
+                            liveCaptionsEnabled
+                              ? "Hide captions"
+                              : "Show captions"
+                          }
+                          title={
+                            liveCaptionsEnabled
+                              ? "Hide captions"
+                              : "Show captions"
+                          }
+                          onClick={toggleLiveCaptions}
+                        >
+                          CC
+                        </button>
+                        <button
+                          type="button"
+                          data-signal-caption-size="decrease"
+                          aria-label={`Decrease Signal caption size, currently ${liveCaptionSizeDetails(liveCaptionSize).label}`}
+                          title="Decrease Signal caption size"
+                          disabled={
+                            !liveCaptionsEnabled || liveCaptionSize === "small"
+                          }
+                          onClick={() => adjustLiveCaptionSize(-1)}
+                        >
+                          A−
+                        </button>
+                        <output
+                          className={styles.captionSizeReadout}
+                          aria-label={`Signal caption size ${liveCaptionSizeDetails(liveCaptionSize).label}`}
+                          aria-live="polite"
+                          data-signal-caption-size-readout="true"
+                        >
+                          {liveCaptionSizeDetails(liveCaptionSize).percent}%
+                        </output>
+                        <button
+                          type="button"
+                          data-signal-caption-size="increase"
+                          aria-label={`Increase Signal caption size, currently ${liveCaptionSizeDetails(liveCaptionSize).label}`}
+                          title="Increase Signal caption size"
+                          disabled={
+                            !liveCaptionsEnabled ||
+                            liveCaptionSize === "extra-large"
+                          }
+                          onClick={() => adjustLiveCaptionSize(1)}
+                        >
+                          A+
+                        </button>
+                      </div>
+                      <SignalEpisodeRuntimeClock
+                        status={episode.status}
+                        durationMinutes={episode.durationMinutes}
+                        runtimeMsAt={(nowMs) =>
+                          signalEpisodeRuntimeMs(
+                            episode,
+                            nowMs,
+                            producerGuestThinkingStartedAtRef.current,
+                            producerGuestThinkingEndedAtRef.current,
+                            {
+                              accumulatedMs:
+                                signalAirTimeFreezeAccumulatedMsRef.current,
+                              startedAtMs: signalAirTimeFreezeStartedAtRef.current,
+                            },
+                            signalClientRecordedSessionHoldRef.current.episodeId ===
+                              episode.id
+                              ? signalClientRecordedSessionHoldRef.current.durationMs
+                              : 0,
+                          )
                         }
-                      >
-                        Interrupt guest now
-                      </button>
-                      <button
-                        ref={producerCueClearButtonRef}
-                        type="button"
-                        className={styles.producerCueClear}
-                        disabled={!producerCuesAreClearable}
-                        onClick={clearProducerCues}
-                        title="Clear both fields and withdraw any queued cue."
-                      >
-                        Clear
-                      </button>
+                      />
+                      {episode.status === "completed" ? (
+                        <div
+                          className={styles.producerRailSessionControls}
+                          aria-label="Completed Signal session controls"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => void copyEpisodeForReview(episode)}
+                            disabled={
+                              reviewCopyState?.episodeId === episode.id &&
+                              reviewCopyState.phase === "copying"
+                            }
+                            aria-live="polite"
+                            data-signal-completed-copy="true"
+                          >
+                            {signalReviewCopyLabel(reviewCopyState, episode.id)}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void (completedStudioUsesOutro
+                                ? returnFromEpisodeOutro()
+                                : returnFromCompletedEpisode())
+                            }
+                            disabled={
+                              keepSignalItemSaving ||
+                              watchReplayFinalizingEpisodeId === episode.id
+                            }
+                          >
+                            {keepSignalItemSaving
+                              ? "Saving item…"
+                              : watchReplayFinalizingEpisodeId === episode.id
+                                ? "Finalizing replay…"
+                                : "Return to show"}
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.dangerButton}
+                            onClick={(event) =>
+                              openEpisodeDeletion(episode, event.currentTarget)
+                            }
+                            disabled={busy}
+                          >
+                            Delete episode
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className={styles.producerInterruptButton}
+                            disabled={!queuedCueCanInterruptGuest}
+                            onClick={() => void interruptGuestWithQueuedCue()}
+                            title={
+                              queuedCueInterruptUnavailableReason ??
+                              (hostBot?.muted
+                                ? "Let the muted host attempt the cut in canonical silence."
+                                : hostBot?.echoesAddressedSpeech
+                                  ? "Have the echo-bound host cut in by repeating the last audience-heard phrase."
+                                  : queuedProducerCue
+                                    ? "Have the host take the mic now with this queued cue."
+                                    : "Queue a cue before interrupting the guest.")
+                            }
+                          >
+                            Interrupt guest now
+                          </button>
+                          <button
+                            ref={producerCueClearButtonRef}
+                            type="button"
+                            className={styles.producerCueClear}
+                            disabled={!producerCuesAreClearable}
+                            onClick={clearProducerCues}
+                            title="Clear both fields and withdraw any queued cue."
+                          >
+                            Clear
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 </header>
@@ -19239,31 +19313,6 @@ export function BotcastExperience({
                     </div>
                     <small className={styles.producerChannelLight}>Host only</small>
                   </header>
-                  {queuedProducerCue ? (
-                    <div className={styles.queuedCueStatus} role="status">
-                      <p>
-                        {queuedCueStatus === "dispatching"
-                          ? "Dispatching"
-                          : queuedCueStatus === "requeued"
-                            ? "Requeued for host"
-                            : "Queued for host"}
-                        : {signalProducerCueLabel(queuedProducerCue)}.
-                      </p>
-                      {queuedCueInterruptUnavailableReason ? (
-                        <small>{queuedCueInterruptUnavailableReason}</small>
-                      ) : null}
-                    </div>
-                  ) : producerCueLifecycleFeedback?.status === "failed" ? (
-                    <div className={styles.queuedCueStatus} role="status">
-                      <p>
-                        Cue not delivered safely. Revise and send a new host note.
-                      </p>
-                    </div>
-                  ) : producerCueLifecycleFeedback?.status === "delivered" ? (
-                    <div className={styles.queuedCueStatus} role="status">
-                      <p>Cue delivered to the host.</p>
-                    </div>
-                  ) : null}
                   <label>
                     Host note…
                     <div>

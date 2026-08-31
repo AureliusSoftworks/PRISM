@@ -5,6 +5,7 @@ import {
   PRISM_BUILTIN_ENGLISH_VOICES,
   applyLocalVoiceSpeechprintToIpa,
   resolveVoiceAccentField,
+  voiceAccentMapPointForCoordinates,
   VOICE_ACCENT_MAP_ANCHORS,
 } from "@localai/shared";
 import {
@@ -19,6 +20,7 @@ import {
 } from "../builtin-tts.ts";
 import {
   preparePrismVoicePackPronunciation,
+  prepareAccentMapTargetIpa,
   protectedSpeechRanges,
 } from "../builtin-tts-runtime.ts";
 import { phonemize } from "phonemizer";
@@ -86,6 +88,71 @@ describe("built-in English audio", () => {
     );
   });
 
+  it("pins Northern German changed-word IPA for the Nietzsche regression", async () => {
+    const sourceText =
+      "Think of when the white wizard thought, then whisk that away.";
+    const plan = await prepareAccentMapTargetIpa({
+      text: sourceText,
+      synthesisEngine: "premium",
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        accentDefinitionId: "northern-german-influenced-english",
+        pronunciationMapPoint: voiceAccentMapPointForCoordinates(10, 53.55),
+        speechprintStrength: "balanced",
+      },
+    });
+    assert.equal(plan.sourceText, sourceText);
+    assert.equal(
+      plan.identity.field[0]?.accentDefinitionId,
+      "northern-german-influenced-english",
+    );
+    assert.deepEqual(
+      plan.spans
+        .filter((span) => span.changed)
+        .map((span) => [
+          span.canonicalGrapheme,
+          span.targetIpa,
+          span.appliedRuleIds,
+        ]),
+      [
+        ["think", "sˈɪŋk", ["northern-german-influenced-english:theta-s"]],
+        ["when", "vˈɛn", ["northern-german-influenced-english:w-labiodental"]],
+        ["the", "zˈə", ["northern-german-influenced-english:eth-z"]],
+        [
+          "white",
+          "vˈaɪt",
+          ["northern-german-influenced-english:w-labiodental"],
+        ],
+        [
+          "wizard",
+          "vˈɪzəʁd",
+          [
+            "northern-german-influenced-english:r-uvular",
+            "northern-german-influenced-english:w-labiodental",
+          ],
+        ],
+        [
+          "thought",
+          "sˈɔːt",
+          ["northern-german-influenced-english:theta-s"],
+        ],
+        ["whisk", "vˈɪsk", ["northern-german-influenced-english:w-labiodental"]],
+        ["that", "zˈæt", ["northern-german-influenced-english:eth-z"]],
+        ["away", "ɐvˈeɪ", ["northern-german-influenced-english:w-labiodental"]],
+      ],
+    );
+    assert.equal(
+      plan.spans.find((span) => span.canonicalGrapheme === "of")?.targetIpa,
+      "ˈʌv",
+    );
+    assert.equal(
+      plan.spans.find((span) => span.canonicalGrapheme === "then")?.targetIpa,
+      "ðˈɛn",
+    );
+    assert.match(plan.planSha256, /^[a-f0-9]{64}$/u);
+  });
+
   it("maps Peter Piper bidirectionally without changing text or voice identity", async () => {
     const sourceText = "Peter Piper picked a peck of pickled peppers.";
     const plan = (
@@ -97,6 +164,7 @@ describe("built-in English audio", () => {
         text: sourceText,
         profile: {
           ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+          ttsPronunciationEnabled: true,
           baseVoiceId,
           accentDefinitionId,
           pronunciationBase: stalePronunciationBase,
@@ -141,6 +209,7 @@ describe("built-in English audio", () => {
     const sourceText = "This thoughtful river runs far from home.";
     const profile = {
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+      ttsPronunciationEnabled: true,
       baseVoiceId: "voice-1" as const,
       accentDefinitionId: "cockney-english",
       pronunciationBase: "en-GB" as const,
@@ -189,6 +258,7 @@ describe("built-in English audio", () => {
     };
     const profile = {
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+      ttsPronunciationEnabled: true,
       baseVoiceId: "voice-1" as const,
       accentDefinitionId: null,
       pronunciationMapPoint,
@@ -224,6 +294,7 @@ describe("built-in English audio", () => {
     const sourceText = "Vincent went to get a bottle of water";
     const profile = {
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+      ttsPronunciationEnabled: true,
       baseVoiceId: "voice-1" as const,
       accentDefinitionId: "cockney-english",
       pronunciationBase: "en-GB" as const,
@@ -261,6 +332,7 @@ describe("built-in English audio", () => {
       text: "Her early birthday work turned out first.",
       profile: {
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        ttsPronunciationEnabled: true,
         baseVoiceId: "voice-4",
         accentDefinitionId: "american-english",
       },
@@ -281,6 +353,7 @@ describe("built-in English audio", () => {
       text: "Park the car forever.",
       profile: {
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        ttsPronunciationEnabled: true,
         baseVoiceId: "voice-4",
         accentDefinitionId: "texas-english",
         // A stale saved base must not drag a Texas pin back to en-GB.
@@ -450,6 +523,7 @@ describe("built-in English audio", () => {
       profile: {
         v: 2,
         enabled: true,
+        ttsPronunciationEnabled: true,
         baseVoiceId: "voice-3",
         speechprintInfluence: "indian-english",
         speechprintStrength: "balanced",
@@ -470,6 +544,7 @@ describe("built-in English audio", () => {
       profile: {
         v: 2,
         enabled: true,
+        ttsPronunciationEnabled: true,
         baseVoiceId: "voice-4",
       },
     });
@@ -503,6 +578,7 @@ describe("built-in English audio", () => {
       profile: {
         v: 2,
         enabled: true,
+        ttsPronunciationEnabled: true,
         baseVoiceId: "voice-1",
         accentLocale: "en-US",
         pronunciationBase: "en-GB",

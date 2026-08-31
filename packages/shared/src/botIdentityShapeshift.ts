@@ -258,8 +258,8 @@ export function resolveBotIdentityShapeshiftVoiceV1(
 
 /**
  * Shapeshifter keeps the holder's complete audible identity and overlays only
- * the target's Accent Map region plus its on/off switch. A disabled target
- * therefore disables transformed accent pronunciation without replacing any
+ * the target's Accent Map region plus its per-engine pronunciation choices.
+ * A disabled engine therefore bypasses transformed accent pronunciation without replacing any
  * holder timbre, provider, effect, Feel, or other shaping.
  */
 export function applyBotIdentityShapeshiftAccentMapV1(
@@ -268,10 +268,13 @@ export function applyBotIdentityShapeshiftAccentMapV1(
 ): NormalizedBotAudioVoiceProfileV1 {
   const holder = normalizeBotAudioVoiceProfileV1(holderValue);
   const target = normalizeBotAudioVoiceProfileV1(targetValue);
-  const enabled = target.accentPronunciationEnabled === true;
+  const ttsEnabled = target.ttsPronunciationEnabled === true;
+  const premiumEnabled = target.premiumPronunciationEnabled === true;
+  const enabled = ttsEnabled || premiumEnabled;
   return normalizeBotAudioVoiceProfileV1({
     ...holder,
-    accentPronunciationEnabled: enabled,
+    ttsPronunciationEnabled: ttsEnabled,
+    premiumPronunciationEnabled: premiumEnabled,
     pronunciationBase: enabled ? target.pronunciationBase : "follow-voice",
     accentDefinitionId: enabled ? (target.accentDefinitionId ?? null) : null,
     pronunciationMapPoint: enabled

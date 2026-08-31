@@ -4,6 +4,11 @@
 .root {
   --chat-mini-bot-color: var(--accent);
   --chat-mini-bot-alloy-color: #aeb8c1;
+  --chat-mini-bot-screen-ink: color-mix(
+    in srgb,
+    var(--chat-mini-bot-color) 88%,
+    #ffffff
+  );
   --chat-mini-bot-render-size: 28px;
   --chat-mini-bot-glyph-size: max(
     7px,
@@ -17,10 +22,12 @@
   );
   --chat-mini-bot-lower-screen-nudge-x: 1px;
   --chat-mini-bot-lower-screen-nudge-y: 0px;
-  --chat-mini-bot-lower-screen-left: 40.6%;
-  --chat-mini-bot-lower-screen-top: 67.2%;
-  --chat-mini-bot-lower-screen-width: 18%;
-  --chat-mini-bot-lower-screen-height: 20.3%;
+  /* Keep the colored lower display within the chassis aperture. Its earlier
+     edge-to-edge fill erased the small, authored alloy bezel at Mini scale. */
+  --chat-mini-bot-lower-screen-left: 41.85%;
+  --chat-mini-bot-lower-screen-top: 68.65%;
+  --chat-mini-bot-lower-screen-width: 15.5%;
+  --chat-mini-bot-lower-screen-height: 17.4%;
   /* The 96px chassis raster is square, just like the HD source. Its aperture
      is already authored slightly wider than tall. Keep the displayed frame
      square so the canonical face plane is not compressed horizontally. */
@@ -103,8 +110,8 @@
   height: var(--chat-mini-bot-frame-height);
   pointer-events: none;
   background: var(--chat-mini-bot-alloy-color);
-  -webkit-mask: url("/bot-frame/bot-frame-mini-metal-mask.png?v=1") center / 100%
-    100% no-repeat;
+  -webkit-mask: url("/bot-frame/bot-frame-mini-metal-mask.png?v=1") center /
+    100% 100% no-repeat;
   mask: url("/bot-frame/bot-frame-mini-metal-mask.png?v=1") center / 100% 100%
     no-repeat;
   /* These alloys are intentionally low-chroma already. Apply the complete hue
@@ -121,7 +128,32 @@
   place-items: center;
   overflow: hidden;
   pointer-events: none;
-  color: color-mix(in srgb, var(--chat-mini-bot-color) 88%, #ffffff);
+  color: var(--chat-mini-bot-screen-ink);
+}
+
+/* The Light Mini is the compact expression of Avatar Studio's screen
+   palette: normalized identity glass with neutral white marks. Dark Minis
+   retain their authored black-screen, identity-LED treatment. */
+.root[data-theme="light"] {
+  --chat-mini-bot-screen-ink: var(--bot-avatar-screen-glyph, #fbfdff);
+  /* The white chassis makes the aperture read optically higher than the
+     authored dark shell. Correct only Light Minis so Dark keeps its approved
+     face registration. */
+  --chat-mini-bot-upper-screen-nudge-y: clamp(
+    2px,
+    calc(var(--chat-mini-bot-render-size) * 0.025),
+    3px
+  );
+}
+
+.root[data-theme="light"] .upperScreen,
+.root[data-theme="light"] .lowerScreen {
+  background: radial-gradient(
+    ellipse at 50% 42%,
+    var(--bot-avatar-screen-center, var(--chat-mini-bot-color)) 0 18%,
+    var(--bot-avatar-screen-mid, var(--chat-mini-bot-color)) 62%,
+    var(--bot-avatar-screen-edge, var(--chat-mini-bot-color)) 100%
+  );
 }
 
 /* Lay out the complete face + Ink stack on the same square chassis coordinate

@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   ELEVENLABS_VOICE_DIRECTION_MAX_CHARACTERS,
   LOCAL_VOICE_SPEECHPRINT_CAPABILITIES,
+  LOCAL_VOICE_SPEECHPRINT_FOUNDATION_PARENTS,
   LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256,
   VOICE_ACCENT_DEFINITIONS,
   VOICE_ACCENT_MAP_ANCHORS,
@@ -12,6 +13,8 @@ import {
   applyLocalVoiceSpeechprintToIpa,
   applyVoiceAccentFieldToIpa,
   enforceAmericanRhoticIpa,
+  localVoiceSpeechprintFoundation,
+  localVoiceSpeechprintFoundationChain,
   premiumVoiceNativeAccentHintFromLabels,
   resolveLocalAccentFallback,
   resolvePremiumAccentDirection,
@@ -67,6 +70,51 @@ describe("local voice Speechprints", () => {
     assert.equal(
       normalizeVoiceAccentDefinitionId("british-english"),
       "modern-rp-english",
+    );
+  });
+
+  it("classifies every Accent Map Speechprint in one acyclic foundation graph", () => {
+    assert.deepEqual(LOCAL_VOICE_SPEECHPRINT_FOUNDATION_PARENTS, {
+      "latin-american-spanish-influenced-english":
+        "spanish-influenced-english",
+      "mexican-spanish-influenced-english":
+        "latin-american-spanish-influenced-english",
+      "andalusian-spanish-influenced-english":
+        "spanish-influenced-english",
+      "parisian-french-influenced-english": "french-influenced-english",
+      "southern-french-influenced-english": "french-influenced-english",
+      "northern-german-influenced-english": "german-influenced-english",
+      "bavarian-german-influenced-english": "german-influenced-english",
+      "northern-italian-influenced-english": "italian-influenced-english",
+      "southern-italian-influenced-english": "italian-influenced-english",
+    });
+    const capabilityIds = new Set(
+      LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.map((capability) => capability.id),
+    );
+    for (const capability of LOCAL_VOICE_SPEECHPRINT_CAPABILITIES) {
+      const foundation = localVoiceSpeechprintFoundation(capability.id);
+      assert.ok(foundation, capability.id);
+      const chain = localVoiceSpeechprintFoundationChain(capability.id);
+      assert.equal(chain[0], capability.id);
+      assert.equal(new Set(chain).size, chain.length, capability.id);
+      assert.ok(chain.every((influence) => capabilityIds.has(influence)));
+      if (foundation.kind === "speechprint") {
+        assert.equal(chain[1], foundation.influence);
+      } else {
+        assert.equal(chain.length, 1);
+      }
+    }
+    assert.deepEqual(localVoiceSpeechprintFoundation("canadian-english"), {
+      kind: "pronunciation-base",
+      pronunciationBase: "en-US",
+    });
+    assert.deepEqual(localVoiceSpeechprintFoundation("cockney-english"), {
+      kind: "pronunciation-base",
+      pronunciationBase: "en-GB",
+    });
+    assert.deepEqual(
+      localVoiceSpeechprintFoundation("russian-influenced-english"),
+      { kind: "standalone" },
     );
   });
 
@@ -840,6 +888,149 @@ describe("local voice Speechprints", () => {
     assert.deepEqual(germanLight.appliedRuleIds, ["w-labiodental"]);
     assert.equal(frenchLight.ipa.includes("ʁ"), false);
     assert.equal(germanLight.ipa.includes("ʁ"), false);
+  });
+
+  it("keeps regional German signatures on top of the German foundation", () => {
+    const speechprint = (
+      influence:
+        | "northern-german-influenced-english"
+        | "bavarian-german-influenced-english",
+    ) =>
+      applyLocalVoiceSpeechprintToIpa({
+        ipa: "θɪs ðə wɪzɚ ɹʌn",
+        speechprint: {
+          influence,
+          strength: "balanced",
+          variationSeed: "natural-v1",
+        },
+      });
+    const northern = speechprint("northern-german-influenced-english");
+    const bavarian = speechprint("bavarian-german-influenced-english");
+
+    assert.equal(northern.ipa, "sɪs zə vɪzɚ ʁʌn");
+    assert.equal(bavarian.ipa, "sɪs zə vɪzɚ ɾʌn");
+    for (const result of [northern, bavarian]) {
+      assert.ok(result.appliedRuleIds.includes("theta-s"));
+      assert.ok(result.appliedRuleIds.includes("eth-z"));
+      assert.ok(result.appliedRuleIds.includes("w-labiodental"));
+    }
+    assert.ok(northern.appliedRuleIds.includes("r-uvular"));
+    assert.ok(bavarian.appliedRuleIds.includes("r-tap"));
+  });
+
+  it("inherits complete regional Romance sound, rhythm, and melody foundations", () => {
+    const source =
+      "θɪs ðʌɹ hɪm ˌɛkspəɹɪmˈɛntəl ˈmɛsɪdʒ ˈfaɪnəli";
+    const speechprint = (
+      influence:
+        | "southern-french-influenced-english"
+        | "northern-italian-influenced-english"
+        | "southern-italian-influenced-english"
+        | "andalusian-spanish-influenced-english"
+        | "latin-american-spanish-influenced-english"
+        | "mexican-spanish-influenced-english",
+    ) =>
+      applyLocalVoiceSpeechprintToIpa({
+        ipa: source,
+        speechprint: {
+          influence,
+          strength: "strong",
+          variationSeed: "foundation-matrix-v1",
+        },
+      });
+    const southernFrench = speechprint(
+      "southern-french-influenced-english",
+    );
+    for (const ruleId of [
+      "eth-z",
+      "strut-open-a",
+      "near-close-i",
+      "h-drop",
+      "rhythm-stress-final",
+      "melody-contour-final-group",
+    ]) {
+      assert.ok(southernFrench.appliedRuleIds.includes(ruleId), ruleId);
+    }
+    const northernItalian = speechprint(
+      "northern-italian-influenced-english",
+    );
+    const southernItalian = speechprint(
+      "southern-italian-influenced-english",
+    );
+    for (const result of [northernItalian, southernItalian]) {
+      assert.ok(result.appliedRuleIds.includes("eth-d"));
+      assert.ok(result.appliedRuleIds.includes("rhythm-stress-penultimate"));
+    }
+    const andalusian = speechprint(
+      "andalusian-spanish-influenced-english",
+    );
+    assert.ok(andalusian.appliedRuleIds.includes("theta-s"));
+    assert.equal(andalusian.appliedRuleIds.includes("theta-t"), false);
+    assert.ok(andalusian.appliedRuleIds.includes("strut-open-a"));
+    assert.ok(andalusian.appliedRuleIds.includes("rhythm-stress-early"));
+    for (const result of [
+      speechprint("latin-american-spanish-influenced-english"),
+      speechprint("mexican-spanish-influenced-english"),
+    ]) {
+      assert.ok(result.appliedRuleIds.includes("near-close-i"));
+      assert.ok(result.appliedRuleIds.includes("melody-contour-peak-edges"));
+    }
+    const melodyPhrase =
+      "ðə sˈʌn ɹˈaɪzᵻz ˌoʊvɚ ðə kɹiːˈeɪɾɪv pˈiːpəl";
+    for (const [influence, contour] of [
+      ["southern-french-influenced-english", "final-group"],
+      ["northern-italian-influenced-english", "wave-final"],
+      ["southern-italian-influenced-english", "wave-final"],
+      ["andalusian-spanish-influenced-english", "peak-edges"],
+    ] as const) {
+      const melody = applyLocalVoiceSpeechprintMelodyToIpa({
+        ipa: melodyPhrase,
+        speechprint: {
+          influence,
+          strength: "balanced",
+          variationSeed: "melody-bench",
+        },
+      });
+      assert.ok(
+        melody.appliedRuleIds.includes(`melody-contour-${contour}`),
+        influence,
+      );
+    }
+  });
+
+  it("lets a regional feature suppress a conflicting parent even when optional", () => {
+    let northernItalianKeptTheta = false;
+    let northernItalianUsedT = false;
+    let bavarianKeptR = false;
+    let bavarianUsedTap = false;
+    for (let index = 0; index < 128; index += 1) {
+      const variationSeed = `foundation-precedence-${index}`;
+      const northernItalian = applyLocalVoiceSpeechprintToIpa({
+        ipa: "θɪŋk ɹʌn",
+        speechprint: {
+          influence: "northern-italian-influenced-english",
+          strength: "balanced",
+          variationSeed,
+        },
+      }).ipa;
+      northernItalianKeptTheta ||= northernItalian.includes("θ");
+      northernItalianUsedT ||= northernItalian.startsWith("t");
+      const bavarian = applyLocalVoiceSpeechprintToIpa({
+        ipa: "θɪŋk ɹʌn",
+        speechprint: {
+          influence: "bavarian-german-influenced-english",
+          strength: "balanced",
+          variationSeed,
+        },
+      }).ipa;
+      bavarianKeptR ||= bavarian.includes("ɹ");
+      bavarianUsedTap ||= bavarian.includes("ɾ");
+      assert.equal(bavarian.includes("ʁ"), false, variationSeed);
+    }
+    assert.equal(northernItalianKeptTheta, true);
+    assert.equal(northernItalianUsedT, true);
+    assert.equal(bavarianKeptR, true);
+    assert.equal(bavarianUsedTap, true);
   });
 
   it("gives Paris-region French a graduated, distinct Strong delivery", () => {

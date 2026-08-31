@@ -36,6 +36,7 @@ import {
   botcastFallbackStudioAccentVariantForSeed,
   botcastImageContextForMessageV1,
   botcastLatestImageContextV1,
+  botcastPreSessionImageRevealHostTurnV1,
   botcastReplayTimeline,
   createBotIdentityMirrorStateV1,
   createBotIdentityShapeshiftStateV1,
@@ -2637,8 +2638,15 @@ describe("Botcast persistence and isolation", () => {
         model: "llava",
         responseMode: "local",
       });
+      let delayedImageId = "watch-image-0";
+      for (let index = 1; botcastPreSessionImageRevealHostTurnV1({
+        episodeId: created.id,
+        imageId: delayedImageId,
+      }) !== 4; index += 1) {
+        delayedImageId = `watch-image-${index}`;
+      }
       queueBotcastEpisodeImageContext(db, "user-1", created.id, {
-        imageId: "watch-image",
+        imageId: delayedImageId,
         kind: "item",
         name: "archive key",
         mimeType: "image/png",
@@ -2654,7 +2662,7 @@ describe("Botcast persistence and isolation", () => {
         episodeId: created.id,
         plannedSynthesisEngine: "local",
         signalEpisodeImage: {
-          imageId: "watch-image",
+          imageId: delayedImageId,
           input: { mimeType: "image/png", data: "AA==" },
         },
         resolveGeneration: async () => {
@@ -2677,7 +2685,7 @@ describe("Botcast persistence and isolation", () => {
         episodeId: created.id,
         plannedSynthesisEngine: "local",
         signalEpisodeImage: {
-          imageId: "watch-image",
+          imageId: delayedImageId,
           input: { mimeType: "image/png", data: "AA==" },
         },
         resolveGeneration: async () => generation(provider),
@@ -11866,7 +11874,10 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.doesNotMatch(holderTurn.message?.content ?? "", /^I am Ivo Stone\./iu);
       assert.doesNotMatch(holderTurn.message?.content ?? "", /impostor/iu);
-      assert.match(holderTurn.message?.content ?? "", /north bearing/iu);
+      assert.equal(
+        holderTurn.message?.content,
+        "The bearing holds under the ridge.",
+      );
 
       const closing = await endBotcastEpisodeOnProducerCut(
         db,
@@ -19268,6 +19279,8 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(result.generated, true);
       assert.equal(result.value, "The Unstored Spectrum");
       assert.equal(result.provider, "local");
+      assert.equal(result.reasoningEffort, "auto");
+      assert.equal(result.turbo, false);
       assert.equal(getBotcastShow(db, "user-1", show.id).name, savedName);
       assert.throws(
         () => getBotcastShow(db, "user-2", show.id),
@@ -19317,6 +19330,8 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(result.generated, true);
       assert.equal(result.provider, "local");
       assert.equal(result.model, "qwen3.5:9b");
+      assert.equal(result.reasoningEffort, "auto");
+      assert.equal(result.turbo, false);
       assert.equal(getBotcastShow(db, "user-1", show.id).name, show.name);
     } finally {
       db.close();
@@ -20330,13 +20345,17 @@ describe("Botcast persistence and isolation", () => {
         targetBotId: "guest-1",
         baseScore: 90,
       });
+      const decayObservedAt = new Date();
+      const decayStartedAt = new Date(
+        decayObservedAt.getTime() - 15 * 24 * 60 * 60 * 1_000,
+      ).toISOString();
       db.prepare(
-        "UPDATE memories SET last_reinforced_at = '2026-08-01T00:00:00.000Z' WHERE conversation_id = ?",
-      ).run(first.id);
+        "UPDATE memories SET last_reinforced_at = ? WHERE conversation_id = ?",
+      ).run(decayStartedAt, first.id);
       materializeShortTermMemoryDecay(
         db,
         "user-1",
-        new Date("2026-08-16T00:00:00.000Z"),
+        decayObservedAt,
       );
       const decayed = db.prepare(
         `SELECT memory.confidence AS confidence, relationship.score AS score

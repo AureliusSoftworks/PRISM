@@ -968,6 +968,7 @@ export async function startReplayPremiumProduction(args: {
         const generated = await generateReplayPremiumSegment({
           segment,
           apiKey: args.apiKey,
+          tenantId: userId,
           signal: args.signal,
           fetchImpl: args.fetchImpl,
           generationSeed,

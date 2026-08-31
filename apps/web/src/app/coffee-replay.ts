@@ -86,6 +86,8 @@ export interface CoffeeReplayMessageLike {
   autoRoute?: AutoRouteDecisionV1;
   reasoningEffort?: ProviderReasoningEffort;
   turbo?: boolean;
+  /** View-only label derived from provenance recorded with the output. */
+  generationLabel?: string | null;
   botPowerExactResponse?:
     | "speech_copy"
     | "hearing_repeat"

@@ -18,6 +18,8 @@ export interface PrismInputRefractDraftResult {
   value: string;
   provider: ProviderName;
   model: string;
+  reasoningEffort: ProviderReasoningEffort;
+  turbo: boolean;
 }
 
 function parsedValue(raw: string): string {
@@ -150,5 +152,7 @@ export async function generatePrismInputRefractDraft(args: {
     value,
     provider: args.providerName,
     model: args.model,
+    reasoningEffort: args.reasoningEffort ?? "auto",
+    turbo: args.turbo === true,
   };
 }

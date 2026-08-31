@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
+import { CURRENT_MANSION_ROOM_ART_CONTRACT } from "@localai/shared";
 import {
   mysteryRoomCinematographyArtStyleV1,
   mysteryRoomCinematographyCanvasSize,
@@ -18,11 +19,14 @@ describe("Whodunnit investigation room cinematography", () => {
     assert.equal(mysteryRoomCinematographyProfileV1({ templateId: "library" }), null);
   });
 
-  it("renders Pixel Art effects on the logical 480 by 270 canvas", () => {
+  it("renders Mosaic effects on the shared logical 320 by 180 tessera canvas", () => {
     assert.equal(mysteryRoomCinematographyArtStyleV1("url(/rooms/foyer-mosaic.webp)"), "mosaic");
     assert.equal(mysteryRoomCinematographyArtStyleV1("url(/api/room/file?style=mosaic)"), "mosaic");
     assert.equal(mysteryRoomCinematographyArtStyleV1("url(/rooms/foyer.webp)"), "illustrated");
-    assert.deepEqual(mysteryRoomCinematographyCanvasSize("mosaic"), { width: 480, height: 270 });
+    assert.deepEqual(mysteryRoomCinematographyCanvasSize("mosaic"), {
+      width: CURRENT_MANSION_ROOM_ART_CONTRACT.pixelArt.grid.logicalWidth,
+      height: CURRENT_MANSION_ROOM_ART_CONTRACT.pixelArt.grid.logicalHeight,
+    });
     assert.deepEqual(mysteryRoomCinematographyCanvasSize("illustrated"), { width: 800, height: 450 });
   });
 
@@ -98,7 +102,9 @@ describe("Whodunnit investigation room cinematography", () => {
     assert.match(experience, /<div className=\{styles\.roomParallaxLayer\}>[\s\S]*?<DebateMysteryRoomCinematographyLayer[\s\S]*?room=\{currentRoom\}[\s\S]*?lights=\{currentRoomLights\}[\s\S]*?templateLightingAligned=\{currentRoomUsesTemplateLightGeometry\}[\s\S]*?blurred=\{roomActorVisible\}[\s\S]*?reducedMotion=\{reducedMotion\}/u);
     assert.match(experience, /mansionLayout\.lights\.filter\(\(light\) => light\.roomId === currentRoom\.id\)/u);
     assert.match(experience, /mysteryRoomUsesTemplateLightGeometryV1\(\{[\s\S]*imageId: currentRoom\.imageId,[\s\S]*acceptedRoomAssetId:[\s\S]*sealedAsset: currentRoom\.sealedAsset/u);
-    assert.match(experience, /whodunnitMansionRoomArtUrl\([\s\S]*state\.config\.mansionSnapshot\.sourceBundleId,[\s\S]*currentRoomLayoutEntity\.acceptedRoomAssetId,[\s\S]*effectiveInvestigationArtStyle/u);
+    assert.match(experience, /const currentRoomMansionAssetId = currentRoomLayoutEntity[\s\S]*effectiveInvestigationArtStyle === "mosaic"[\s\S]*currentRoomLayoutEntity\.acceptedRoomAssetId[\s\S]*currentRoomIllustratedAssetId/u);
+    assert.match(experience, /whodunnitMansionRoomArtUrl\([\s\S]*state\.config\.mansionSnapshot\.sourceBundleId,[\s\S]*currentRoomMansionAssetId,[\s\S]*effectiveInvestigationArtStyle/u);
+    assert.match(experience, /const currentRoomImageUrl = currentRoomAssetUrl[\s\S]*\?\? currentRoomAcceptedAssetUrl[\s\S]*\?\? \(currentRoom\?\.imageId/u);
     assert.match(component, /mansionDynamicLightFrameV2\(light, elapsedMs, reducedMotion\)/u);
     assert.match(component, /data-light-source=\{lightSource\}/u);
     assert.match(component, /window\.cancelAnimationFrame\(animationFrame\)/u);

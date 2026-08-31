@@ -87,7 +87,6 @@ export function pronunciationAtlasSelectionForProfile(
 export function profileWithPronunciationAtlasSelection(
   profile: BotAudioVoiceProfileV1,
   selection: PronunciationAtlasSelection,
-  options?: { activatePronunciation?: boolean },
 ): NormalizedBotAudioVoiceProfileV1 {
   const normalizedProfile = normalizeBotAudioVoiceProfileV1(profile);
   const normalizedSelection = normalizePronunciationAtlasSelection(selection);
@@ -98,10 +97,6 @@ export function profileWithPronunciationAtlasSelection(
   });
   return normalizeBotAudioVoiceProfileV1({
     ...normalizedProfile,
-    accentPronunciationEnabled:
-      options?.activatePronunciation === false
-        ? normalizedProfile.accentPronunciationEnabled === true
-        : true,
     pronunciationBase: localAccent.pronunciationBase,
     accentLocale: normalizedSelection.sourceLocale,
     speechprintInfluence: localAccent.speechprintInfluence,

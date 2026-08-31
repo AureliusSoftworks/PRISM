@@ -220,7 +220,6 @@ function AvatarDetailsEmissionPlanes({
 
   const planeStyle = {
     color: normalizedColor,
-    ["--avatar-details-phosphor-glow-color" as string]: normalizedColor,
     ["--avatar-details-speech-spin-turn-duration" as string]:
       `${ZEN_LIVE_CUSTOM_MOUTH_SPIN_TURN_MS}ms`,
     ["--avatar-details-speech-origin-x" as string]: motionOrigin

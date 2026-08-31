@@ -19,6 +19,46 @@ export type MansionLayoutRotationV2 = 0 | 90;
 export type MansionLayoutEntityKindV2 = "room" | "corridor" | "infill";
 export type MansionLayoutWallV2 = "north" | "east" | "south" | "west";
 
+export type MysteryVenueKindV1 =
+  | "estate"
+  | "vessel"
+  | "habitat"
+  | "facility"
+  | "transport"
+  | "other";
+export type MysteryVenueTopologyV1 = "estate" | "spine" | "radial" | "pods" | "linear";
+export type MysteryVenueRoomRoleV1 =
+  | "entry"
+  | "circulation"
+  | "social"
+  | "private"
+  | "operations"
+  | "service"
+  | "technical"
+  | "observation"
+  | "other";
+
+/** Public setting vocabulary frozen with an accepted venue. It changes how
+ * the same bounded planner is described without changing traversal semantics. */
+export interface MysteryVenueProfileV1 {
+  version: 1;
+  kind: MysteryVenueKindV1;
+  kindLabel: string;
+  placeNoun: string;
+  topology: MysteryVenueTopologyV1;
+  tierLabels: string[];
+  entryRoomId: string;
+  exteriorMode: "grounds" | "docked" | "contained" | "in-transit" | "other";
+  environmentSummary: string;
+}
+
+/** Venue-authored rooms do not need a legacy global mansion template. */
+export interface MysteryVenueRoomContractV1 {
+  version: 1;
+  role: MysteryVenueRoomRoleV1;
+  footprint: { width: number; height: number };
+}
+
 export interface MansionLayoutEnvelopeV2 {
   columns: typeof MANSION_LAYOUT_V2_COLUMNS;
   rows: typeof MANSION_LAYOUT_V2_ROWS;
@@ -42,6 +82,9 @@ export interface MansionLayoutRoomV2 {
   bundledAssetPath: string | null;
   /** Content-addressed aggregate asset. A candidate never replaces this. */
   acceptedRoomAssetId: string | null;
+  venueContract?: MysteryVenueRoomContractV1;
+  /** Accepted art may use authored hotspots only while this still matches. */
+  acceptedRoomArtAnchorSha256?: string | null;
 }
 
 export interface MansionLayoutBlockV2 {
@@ -65,6 +108,7 @@ export interface MansionLayoutDoorV2 {
   bEntityId: string;
   aWall: MansionLayoutWallV2;
   position: number;
+  label?: string;
 }
 
 export type MansionVerticalConnectorKindV2 = "stairs" | "lift" | "ladder" | "portal";
@@ -74,6 +118,7 @@ export interface MansionVerticalConnectorV2 {
   kind: MansionVerticalConnectorKindV2;
   lowerEntityId: string;
   upperEntityId: string;
+  label?: string;
 }
 
 export const MANSION_PLACEMENT_RELATIONS_V2 = [
@@ -172,6 +217,7 @@ export interface MansionLayoutV2 {
   placementAnchors: MansionPlacementAnchorV2[];
   lights: MansionDynamicLightV2[];
   roomArtCandidates: MansionRoomArtCandidateV2[];
+  venueProfile?: MysteryVenueProfileV1;
 }
 
 export interface MansionLayoutLegacyRoomV1 {
@@ -247,8 +293,14 @@ function entityIsTraversable(entity: MansionLayoutEntityV2): boolean {
 }
 
 export function mansionLayoutV2RoomFootprint(
-  room: Pick<MansionLayoutRoomV2, "templateId" | "rotation">,
+  room: Pick<MansionLayoutRoomV2, "templateId" | "rotation" | "venueContract">,
 ): DebateMysteryRoomFootprintV1 {
+  if (room.venueContract) {
+    const { width, height } = room.venueContract.footprint;
+    return room.rotation === 90
+      ? { roomTypeId: room.templateId, width: height, height: width }
+      : { roomTypeId: room.templateId, width, height };
+  }
   const footprint = debateMysteryRoomFootprint(room.templateId);
   return room.rotation === 90
     ? { roomTypeId: footprint.roomTypeId, width: footprint.height, height: footprint.width }
@@ -1386,6 +1438,26 @@ export function validateMansionLayoutV2(
     if (!Array.isArray(layout[key])) errors.push(`Mansion layout V2 ${key} is invalid.`);
   }
   if (errors.length > 0) return [...new Set(errors)];
+  const venueProfile = layout.venueProfile;
+  if (venueProfile) {
+    if (venueProfile.version !== 1 || !venueProfile.kindLabel?.trim() ||
+      !venueProfile.placeNoun?.trim() || !venueProfile.environmentSummary?.trim()) {
+      errors.push("Mystery venue profile is incomplete.");
+    }
+    if (!["estate", "spine", "radial", "pods", "linear"].includes(venueProfile.topology)) {
+      errors.push("Mystery venue topology is unsupported.");
+    }
+    if (!["estate", "vessel", "habitat", "facility", "transport", "other"].includes(venueProfile.kind)) {
+      errors.push("Mystery venue kind is unsupported.");
+    }
+    if (!["grounds", "docked", "contained", "in-transit", "other"].includes(venueProfile.exteriorMode)) {
+      errors.push("Mystery venue exterior mode is unsupported.");
+    }
+    if (!Array.isArray(venueProfile.tierLabels) || venueProfile.tierLabels.length < 1 ||
+      venueProfile.tierLabels.length > 3 || venueProfile.tierLabels.some((label) => !label.trim())) {
+      errors.push("Mystery venues need one to three named tiers.");
+    }
+  }
   if (layout.entities.length > MANSION_LAYOUT_V2_COLUMNS * MANSION_LAYOUT_V2_ROWS * MANSION_LAYOUT_V2_MAX_FLOORS) {
     errors.push("Mansion layout V2 contains more physical blocks than its envelope can hold.");
   }
@@ -1413,12 +1485,18 @@ export function validateMansionLayoutV2(
       }
       const normalizedTemplateId = entity.templateId?.trim().toLowerCase() ?? "";
       const existingRoom = roomByTemplateId.get(normalizedTemplateId);
-      if (normalizedTemplateId && existingRoom) {
+      if (!venueProfile && normalizedTemplateId && existingRoom) {
         errors.push(
           `${entity.name || entity.id} duplicates the ${existingRoom.name || existingRoom.id} room type. Each semantic room type can only be placed once per mansion.`,
         );
       } else if (normalizedTemplateId) {
         roomByTemplateId.set(normalizedTemplateId, entity);
+      }
+      if (venueProfile && (!entity.venueContract || entity.venueContract.version !== 1 ||
+        !Number.isInteger(entity.venueContract.footprint.width) ||
+        !Number.isInteger(entity.venueContract.footprint.height) ||
+        entity.venueContract.footprint.width < 1 || entity.venueContract.footprint.height < 1)) {
+        errors.push(`${entity.name || entity.id} needs a fixed venue room footprint.`);
       }
       if (entity.rotation !== 0 && entity.rotation !== 90) {
         errors.push(`${entity.name || entity.id} must use a 0 or 90 degree rotation.`);
@@ -1453,15 +1531,16 @@ export function validateMansionLayoutV2(
   }
 
   const floors = new Set(rooms.map((room) => room.floor));
-  const requireEditorFloors = options.requireEditorFloors !== false;
+  const requireEditorFloors = options.requireEditorFloors !== false && !venueProfile;
   if (requireEditorFloors && (!floors.has(1) || !floors.has(2))) {
     errors.push("Every edited mansion needs semantic rooms on Floors 1 and 2.");
   }
-  if (floors.has(3) && mansionLayoutV2FloorSemanticRoomCount(layout, 2) < 4) {
+  if (!venueProfile && floors.has(3) && mansionLayoutV2FloorSemanticRoomCount(layout, 2) < 4) {
     errors.push("Floor 2 needs at least 4 semantic rooms before Floor 3 can be used.");
   }
   const rooftopFloor = Math.max(1, ...rooms.map((room) => room.floor));
   for (const room of rooms) {
+    if (venueProfile) continue;
     if (debateMysteryRoomTypeIsAllowedOnFloorV1(room.templateId, room.floor, rooftopFloor)) continue;
     const floorRule = debateMysteryRoomFloorRuleV1(room.templateId);
     if (floorRule === "ground-floor-only") {
@@ -1476,8 +1555,28 @@ export function validateMansionLayoutV2(
   if (typeof options.suspectCount === "number" && rooms.length < options.suspectCount) {
     errors.push(`Keep at least ${options.suspectCount} semantic rooms for this mansion's supported cast.`);
   }
+  if (venueProfile && typeof options.suspectCount === "number" &&
+    rooms.filter((room) => room.suspectSlotId).length !== options.suspectCount) {
+    errors.push(`Mystery venue suspect capacity must be exactly ${options.suspectCount}.`);
+  }
   const foyer = rooms.find((room) => room.floor === 1 && room.templateId === "foyer") ?? null;
   if (requireEditorFloors && !foyer) errors.push("Keep a foyer on the ground floor.");
+  const entryRoom = venueProfile
+    ? rooms.find((room) => room.id === venueProfile.entryRoomId) ?? null
+    : foyer;
+  if (venueProfile) {
+    if (!entryRoom) errors.push("Mystery venue entryRoomId must name a semantic room.");
+    if (entryRoom?.venueContract?.role !== "entry") {
+      errors.push("Mystery venue entryRoomId must name the semantic entry room.");
+    }
+    const occupied = [...floors].sort((a, b) => a - b);
+    if (occupied.some((floor, index) => floor !== index + 1)) {
+      errors.push("Mystery venue tiers must be contiguous from Tier 1.");
+    }
+    if (occupied.length !== venueProfile.tierLabels.length) {
+      errors.push("Mystery venue tier labels must match its occupied tiers.");
+    }
+  }
 
   const doorIds = new Set<string>();
   const doorPairs = new Set<string>();
@@ -1520,10 +1619,10 @@ export function validateMansionLayoutV2(
     }
   }
 
-  if (foyer) {
+  if (entryRoom) {
     const adjacency = traversableAdjacency(layout);
     const visited = new Set<string>();
-    const queue = [foyer.id];
+    const queue = [entryRoom.id];
     while (queue.length > 0) {
       const id = queue.shift()!;
       if (visited.has(id)) continue;
@@ -1531,14 +1630,20 @@ export function validateMansionLayoutV2(
       for (const neighborId of adjacency.get(id) ?? []) queue.push(neighborId);
     }
     if (rooms.some((room) => !visited.has(room.id))) {
-      errors.push("Every semantic room needs a shared-wall door or corridor path to the foyer.");
+      errors.push(venueProfile
+        ? "Every semantic room needs a traversal path to the venue entry."
+        : "Every semantic room needs a shared-wall door or corridor path to the foyer.");
     }
     if (layout.entities.some((entity) => entity.kind === "corridor" && !visited.has(entity.id))) {
-      errors.push("Every corridor must belong to the connected foyer circulation plan.");
+      errors.push(venueProfile
+        ? "Every corridor must belong to the connected venue circulation plan."
+        : "Every corridor must belong to the connected foyer circulation plan.");
     }
     if (floors.size > 1 && !layout.verticalConnectors.some((connector) =>
       visited.has(connector.lowerEntityId) && visited.has(connector.upperEntityId))) {
-      errors.push("Connect the foyer plan to the upstairs with a vertical connector.");
+      errors.push(venueProfile
+        ? "Connect every occupied venue tier with a legal vertical connector."
+        : "Connect the foyer plan to the upstairs with a vertical connector.");
     }
   }
 

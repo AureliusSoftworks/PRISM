@@ -327,11 +327,11 @@ it("opens executable Flyting beside the available Debate formats", () => {
   assert.match(flytingCss, /aspect-ratio:\s*2\.35 \/ 1/u);
   assert.match(
     flytingCss,
-    /\.courtIdentityPosition\[data-role="for"\],[\s\S]{0,100}\.courtIdentityPosition\[data-role="against"\][\s\S]{0,60}top:\s*90%/u,
+    /\.courtIdentityPosition\[data-role="for"\],[\s\S]{0,100}\.courtIdentityPosition\[data-role="against"\][\s\S]{0,100}top:\s*calc\(90% \+ var\(--flyting-align-y, 0%\)\)/u,
   );
   assert.match(
     flytingCss,
-    /data-camera-view="left"\], \[data-camera-view="right"\]\)[\s\S]{0,130}\.courtIdentityPosition:is\([\s\S]{0,120}top:\s*81%/u,
+    /data-camera-view="left"\], \[data-camera-view="right"\]\)[\s\S]{0,130}\.courtIdentityPosition:is\([\s\S]{0,140}top:\s*calc\(81% \+ var\(--flyting-align-y, 0%\)\)/u,
   );
   assert.match(flytingCss, /\.hostShield/u);
   assert.match(flytingCss, /\.flytingCourtGallery/u);
@@ -389,6 +389,40 @@ it("opens executable Flyting beside the available Debate formats", () => {
   assert.match(flytingRightHallKey, /#0000FF/u);
   assert.match(flytingCss, /\.studioReadout/u);
   assert.match(flytingCss, /\.changeFormatAction/u);
+});
+
+it("exports Flyting-native review provenance and voices Jarl acclamations", () => {
+  const formatterStart = source.indexOf(
+    "export function formatDebateVerboseTranscript",
+  );
+  const formatterEnd = source.indexOf(
+    "export function formatDebateCompleteReviewClipboard",
+    formatterStart,
+  );
+  const formatter = source.slice(formatterStart, formatterEnd);
+  assert.match(formatter, /formatDebateFlytingVerboseReview\(session\)/u);
+  assert.match(source, /## Flyting frozen bout/u);
+  assert.match(source, /## Flyting exchange chain/u);
+  assert.match(source, /## Hall movement and Jarl verdict/u);
+  assert.match(source, /targetChallengeId/u);
+  assert.match(source, /returnClaimId/u);
+  assert.match(source, /hallLeaningHistory/u);
+  assert.match(
+    source,
+    /Persisted public line; heard completion not recorded/u,
+  );
+  assert.doesNotMatch(formatter, /Delivery:[\s\S]{0,80}"Complete"/u);
+  assert.match(
+    source,
+    /event\.kind === "reaction" && !event\.speakerBotId/u,
+  );
+  assert.match(flytingSource, /setWithheldRecordEventIds/u);
+  assert.match(
+    flytingSource,
+    /exchange\.challenge\.createdEventId/u,
+  );
+  assert.match(flytingSource, /\{ id: "moderator", label: "Jarl" \}/u);
+  assert.match(flytingSource, /Jarl of the Hall/u);
 });
 const pageCss = readFileSync(
   fileURLToPath(new URL("./page.module.css", import.meta.url)),
@@ -885,6 +919,22 @@ describe("Debate experience", () => {
     assert.match(source, /leave seat on Surprise me/u);
   });
 
+  it("refracts and Space-rerolls every placement grid from its visible Library view", () => {
+    assert.match(source, /type BotPickerPlacementRefractTarget/u);
+    assert.match(source, /randomBotPickerPlacements/u);
+    assert.match(source, /const randomizeVisibleCastPlacements/u);
+    assert.match(source, /visibleBotIds[\s\S]{0,120}visibleCastPlacementCount/u);
+    assert.match(source, /value: "random"[\s\S]{0,120}Random · all/u);
+    assert.match(
+      source,
+      /rerollVisible: \(\) =>[\s\S]{0,160}visibleCastBots\.map/u,
+    );
+    assert.match(
+      source,
+      /placementRefractTarget=\{debateCastPlacementRefractTarget\}/u,
+    );
+  });
+
   it("gives stage alignment a fourth distinct Library bot for the witness", () => {
     assert.deepEqual(
       debateAlignmentPreviewCast(["m", "f", "a", "extra"], () => 0),
@@ -1367,6 +1417,15 @@ describe("Debate experience", () => {
     );
     assert.match(source, /ModelWarmupIntermission/u);
     assert.match(source, /Refraction complete/u);
+    assert.match(source, /prismRefractProvenanceDetail\(result\)/u);
+    assert.match(
+      source,
+      /reasoningEffort:\s*props\.reasoningEffort[\s\S]{0,80}turbo:\s*props\.turbo/u,
+    );
+    assert.match(
+      source,
+      /Model:\s*None|model:\s*null,\s*reasoningEffort:\s*"none"/u,
+    );
     assert.match(source, /DebateNoticeToast/u);
     assert.match(
       source,
@@ -1780,13 +1839,13 @@ describe("Debate experience", () => {
       source,
       /type WhodunnitSetupPage = "mansion" \| "story" \| "experience" \| "production"/u,
     );
-    assert.match(source, /label: "Mansion", detail: "Choose the house"/u);
+    assert.match(source, /label: "Mystery Venue", detail: "Choose the place"/u);
     assert.match(source, /label: "Story", detail: "Set tone and difficulty"/u);
     assert.match(source, /label: "Experience", detail: "Choose how you play"/u);
     assert.match(source, /label: "Production", detail: "Set art and audio"/u);
     assert.ok(
       source.indexOf('{ id: "experience", label: "Experience"') <
-        source.indexOf('{ id: "mansion", label: "Mansion"'),
+        source.indexOf('{ id: "mansion", label: "Mystery Venue"'),
     );
     assert.match(source, /useState<WhodunnitSetupPage>\("experience"\)/u);
     assert.match(source, /setupPage\.id === "mansion"/u);
@@ -1803,19 +1862,21 @@ describe("Debate experience", () => {
     assert.match(source, /mysterySetupPage === "story"/u);
     assert.match(source, /mysterySetupPage === "experience"/u);
     assert.match(source, /mysterySetupPage === "production"/u);
-    assert.match(source, /Installed mansions/u);
-    assert.match(source, /Create a new mansion/u);
-    assert.match(source, /Choose a mansion size/u);
-    assert.match(source, /Quick is the shortest full mansion/u);
-    assert.match(source, /Every new mansion has a functional upstairs/u);
+    assert.match(source, /Installed Mystery Venues/u);
+    assert.match(source, /Create a Mystery Venue/u);
+    assert.match(source, /Setting description/u);
+    assert.match(source, /Choose investigation length/u);
+    assert.match(source, /Propose Venue/u);
+    assert.match(source, /Use Proposal/u);
+    assert.match(source, /Try Another/u);
+    assert.match(source, /Start Blank/u);
     assert.match(
       source,
       /DEBATE_MYSTERY_MANSION_EXTERIOR_PATHS_V1\["neutral-mansion-v1"\]\[option\.id\]/u,
     );
     assert.match(source, /mysteryStyles\.presetCustomThumbnail/u);
-    assert.match(source, /aria-hidden="true"><span>\?<\/span>/u);
     assert.match(source, /<InstalledMansionLibrary/u);
-    assert.match(source, /Install a mansion file/u);
+    assert.match(source, /Install a Mystery Venue/u);
     assert.match(source, /data-tutorial-target="whodunnit-mansion-library"/u);
     assert.match(source, /<strong>Mystery spark<\/strong><em>Optional<\/em>/u);
     assert.match(source, /Classic · balanced/u);
@@ -1853,7 +1914,7 @@ describe("Debate experience", () => {
     assert.match(source, /data-theme=\{props\.theme\}/u);
     assert.match(source, /aria-pressed=\{!selectedMysteryMansionBundle/u);
     assert.match(source, /"Selected ✓" : "Choose"/u);
-    assert.match(source, />Install a mansion file<\/button>/u);
+    assert.match(source, />Install a Mystery Venue<\/button>/u);
     assert.match(source, /className=\{mysteryStyles\.setupField\}/u);
     assert.match(source, /className=\{mysteryStyles\.setupPrimaryAction\}/u);
     assert.match(
@@ -6004,6 +6065,22 @@ describe("Debate experience", () => {
     assert.match(source, /data-debate-main-court-prop-tuner="true"/u);
     assert.match(
       source,
+      /const stageAlignmentMainCourtTunerVisible\s*=\s*stageAlignmentCourtForegroundVisible\s*&&[\s\S]{0,120}stageAlignmentPreviewCamera === "moderator"/u,
+    );
+    assert.match(
+      source,
+      /\{stageAlignmentMainCourtTunerVisible \? \(\s*<section/u,
+    );
+    assert.match(
+      source,
+      /data-court-tuner-view=\{stageAlignmentPreviewCamera\}/u,
+    );
+    assert.match(
+      source,
+      /shared foreground table from this camera/u,
+    );
+    assert.match(
+      source,
       /const stageAlignmentCourtForegroundVisible\s*=\s*stageAlignmentWhodunnitPreview === null && !stageAlignmentJuryPreview/u,
     );
     assert.match(
@@ -6030,6 +6107,20 @@ describe("Debate experience", () => {
     assert.match(source, /updateDebateStageJuryMemberPlacement/u);
     assert.match(source, /updateDebateStageJuryPlacement/u);
     assert.match(source, /Each juror has an independent X, Y, and scale/u);
+    assert.match(
+      source,
+      /const alignmentJuryMemberCount\s*=\s*alignmentJuryCadence === "natural-five" \? 5 : DEBATE_JURY_SIZE/u,
+    );
+    assert.match(
+      source,
+      /:\s*\[moderatorBot, forBot, againstBot, witnessBot\]/u,
+    );
+    assert.match(source, /\{alignmentJuryBots\.map\(\(bot, index\) =>/u);
+    assert.match(source, /data-jury-cadence=\{alignmentJuryCadence\}/u);
+    assert.doesNotMatch(
+      source,
+      /moderatorBot,\s*forBot,\s*againstBot,\s*forBot,\s*againstBot/u,
+    );
     assert.match(
       source,
       /coffee-table\/table_\$\{stageAlignmentPreviewTheme\}\.png/u,

@@ -563,14 +563,20 @@ export function debateMysteryRoomUsesBundledHotspotGeometryV1(room: Pick<
 
 export function debateMysteryRoomPresentationRegionsV1(room: Pick<
   DebateMysteryFloorplanRoomV1,
-  "templateId" | "imageId" | "usesBundledHotspotGeometry"
+  "templateId" | "imageId" | "usesBundledHotspotGeometry" | "presentationRegions"
 > & {
   bundledAssetPath?: string | null;
   acceptedRoomAssetId?: string | null;
 }): DebateMysteryRegionV1[] {
+  if (room.presentationRegions?.length) {
+    return room.presentationRegions.map((region) => ({
+      ...region,
+      keywords: [...region.keywords],
+      polygon: region.polygon.map((point) => ({ ...point })),
+    }));
+  }
   const template = DEBATE_MYSTERY_ROOM_TEMPLATES.find((entry) => entry.id === room.templateId);
-  if (!template) return [];
-  if (debateMysteryRoomUsesBundledHotspotGeometryV1(room)) return template.regions;
+  if (template && debateMysteryRoomUsesBundledHotspotGeometryV1(room)) return template.regions;
   const broadRegions = GENERIC_PRESENTATION_ROOM_REGIONS.map((region) =>
     semanticRoomRegion(
       `${room.templateId}:${region.id}`,
@@ -579,6 +585,43 @@ export function debateMysteryRoomPresentationRegionsV1(room: Pick<
       region.polygon,
     ));
   return [...broadRegions, ...broadRegions.flatMap(mysteryDetailRegions)];
+}
+
+export interface DebateMysteryResolvedRoomPresentationV1 {
+  name: string;
+  emoji: string;
+  footprint: DebateMysteryRoomFootprintV1;
+  regions: DebateMysteryRegionV1[];
+  fixtureLabels: string[];
+}
+
+/** Shared legacy-or-venue presentation boundary. Consumers do not need to
+ * assume that a venue room has a global mansion template. */
+export function resolveDebateMysteryRoomPresentationV1(room: Pick<
+  DebateMysteryFloorplanRoomV1,
+  "templateId" | "imageId" | "usesBundledHotspotGeometry" | "presentationRegions"
+> & {
+  name?: string | null;
+  emoji?: string | null;
+  bundledAssetPath?: string | null;
+  acceptedRoomAssetId?: string | null;
+  venueContract?: { footprint: { width: number; height: number } } | null;
+  placementAnchors?: readonly { name: string }[];
+}): DebateMysteryResolvedRoomPresentationV1 {
+  const template = DEBATE_MYSTERY_ROOM_TEMPLATES.find((entry) => entry.id === room.templateId);
+  const regions = debateMysteryRoomPresentationRegionsV1(room);
+  const anchorLabels = (room.placementAnchors ?? []).map((anchor) => anchor.name.trim()).filter(Boolean);
+  const fallbackName = room.templateId.replace(/^venue:/u, "").replaceAll("-", " ").trim() || "Room";
+  const legacyFootprint = debateMysteryRoomFootprint(room.templateId);
+  return {
+    name: room.name?.trim() || template?.name || fallbackName,
+    emoji: room.emoji?.trim() || template?.emoji || "◇",
+    footprint: room.venueContract
+      ? { roomTypeId: room.templateId, ...room.venueContract.footprint }
+      : legacyFootprint,
+    regions,
+    fixtureLabels: [...new Set(anchorLabels.length > 0 ? anchorLabels : regions.map((region) => region.label))],
+  };
 }
 
 export const DEBATE_MYSTERY_GROUND_FLOOR_ROOM_TYPE_IDS = [
@@ -632,6 +675,8 @@ export interface DebateMysteryFloorplanRoomV1 {
   /** Frozen room presentation. Omitted compiled legacy cases retain their
    * original template hotspot geometry. */
   usesBundledHotspotGeometry?: boolean;
+  /** Frozen venue anchor geometry. Server-owned physical planning derives it. */
+  presentationRegions?: DebateMysteryRegionV1[];
   kind: DebateMysteryRoomKind;
   assignedSuspectSeatId: string | null;
 }
@@ -1945,7 +1990,8 @@ export function compileDeterministicDebateMystery(args: {
     if (
       roomIds.size !== compiledRooms.length ||
       compiledRooms.some((room) =>
-        !DEBATE_MYSTERY_ROOM_TEMPLATES.some((template) => template.id === room.templateId) ||
+        (!DEBATE_MYSTERY_ROOM_TEMPLATES.some((template) => template.id === room.templateId) &&
+          room.usesBundledHotspotGeometry !== false) ||
         !Number.isInteger(room.floor) || room.floor < 1 ||
         !Number.isFinite(room.x) || !Number.isFinite(room.y) ||
         !Number.isFinite(room.width) || room.width <= 0 ||
@@ -2617,8 +2663,8 @@ export function validateDebateMysteryCaseBible(
   })) errors.push("A room cannot activate the same semantic region twice.");
   if (bible.activeRegions.some((outcome) => {
     const room = bible.rooms.find((entry) => entry.id === outcome.roomId);
-    const template = DEBATE_MYSTERY_ROOM_TEMPLATES.find((entry) => entry.id === room?.templateId);
-    return !room || !template?.regions.some((region) => region.id === outcome.regionId);
+    return !room || !debateMysteryRoomPresentationRegionsV1(room)
+      .some((region) => region.id === outcome.regionId);
   })) errors.push("Every active region must reference a declared semantic polygon in its room template.");
   const knownEvidence = new Set(bible.evidence.map((item) => item.id));
   const knownTestimony = new Set(bible.testimony.map((item) => item.id));

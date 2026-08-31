@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { dirname, join, resolve, sep } from "node:path";
 import {
@@ -12,6 +13,8 @@ import {
   protectedSpeechRanges,
   type BuiltinAccentRealizationBlendV1,
   localVoiceSpeechprintIsActive,
+  LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256,
+  LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotAudioVoiceProfileForSynthesisV1,
   normalizeLocalVoiceSpeechprintV1,
@@ -48,6 +51,32 @@ export interface AccentMapTargetIpaPlan {
   sourceText: string;
   targetLocale: "en-US" | "en-GB";
   targetIpa: string | null;
+  identity: {
+    accentDefinitionId: string | null;
+    field: readonly {
+      accentDefinitionId: string;
+      pronunciationBase: string;
+      influence: string;
+      weight: number;
+    }[];
+    strength: string;
+  };
+  rulesetVersion: string;
+  rulesetSha256: string;
+  planSha256: string;
+  spans: readonly AccentMapPhonologySpanV1[];
+}
+
+export interface AccentMapPhonologySpanV1 {
+  sourceStart: number;
+  sourceEnd: number;
+  sourceText: string;
+  canonicalGrapheme: string;
+  baselineIpa: string;
+  targetIpa: string;
+  changed: boolean;
+  protected: boolean;
+  appliedRuleIds: readonly string[];
 }
 
 let kokoroTtsPromise: Promise<import("kokoro-js").KokoroTTS> | null = null;
@@ -226,8 +255,12 @@ export async function prepareAccentMapTargetIpa(args: {
   profile: BotAudioVoiceProfileV1;
   protectedPhrases?: readonly string[];
   voiceLocale?: string;
+  synthesisEngine?: "tts" | "premium";
 }): Promise<AccentMapTargetIpaPlan> {
-  const profile = normalizeBotAudioVoiceProfileForSynthesisV1(args.profile);
+  const profile = normalizeBotAudioVoiceProfileForSynthesisV1(
+    args.profile,
+    args.synthesisEngine ?? "tts",
+  );
   const voiceLocale =
     args.voiceLocale ?? prismBuiltinEnglishVoice(profile.baseVoiceId).locale;
   const localAccent = resolveLocalAccentFallback({
@@ -263,6 +296,39 @@ export async function prepareAccentMapTargetIpa(args: {
       localAccent.pronunciationBase,
       voiceLocale,
     );
+  const identity = {
+    accentDefinitionId: profile.accentDefinitionId ?? null,
+    field: accentField.layers.map((layer) => ({
+      accentDefinitionId: layer.accentDefinitionId,
+      pronunciationBase: layer.pronunciationBase,
+      influence: layer.influence,
+      weight: layer.weight,
+    })),
+    strength: speechprint.strength,
+  };
+  const spans = phonemeControlActive
+    ? await buildAccentMapPhonologySpans({
+        text: args.text,
+        locale: targetLocale,
+        speechprint,
+        accentField,
+        protectedPhrases: args.protectedPhrases,
+      })
+    : [];
+  const planSha256 = createHash("sha256")
+    .update(JSON.stringify({
+      sourceText: args.text,
+      identity,
+      ruleset: LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256,
+      spans: spans.map((span) => ({
+        start: span.sourceStart,
+        end: span.sourceEnd,
+        targetIpa: span.targetIpa,
+        protected: span.protected,
+        rules: span.appliedRuleIds,
+      })),
+    }))
+    .digest("hex");
   return {
     sourceText: args.text,
     targetLocale,
@@ -275,6 +341,11 @@ export async function prepareAccentMapTargetIpa(args: {
           protectedPhrases: args.protectedPhrases,
         })
       : null,
+    identity,
+    rulesetVersion: LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION,
+    rulesetSha256: LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256,
+    planSha256,
+    spans,
   };
 }
 
@@ -335,6 +406,74 @@ async function buildTargetIpa(args: {
     );
   }
   return phonemes.join(" ").replace(/\s+/gu, " ").trim();
+}
+
+function accentMapWordRanges(text: string): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const match of text.matchAll(/[\p{L}]+(?:[’'][\p{L}]+)*/gu)) {
+    if (match.index === undefined) continue;
+    ranges.push({ start: match.index, end: match.index + match[0].length });
+  }
+  return ranges;
+}
+
+function rangeIsProtected(
+  range: { start: number; end: number },
+  protectedRanges: readonly { start: number; end: number }[],
+): boolean {
+  return protectedRanges.some(
+    (protectedRange) =>
+      range.start < protectedRange.end && range.end > protectedRange.start,
+  );
+}
+
+async function buildAccentMapPhonologySpans(args: {
+  text: string;
+  locale: string;
+  speechprint: ReturnType<typeof normalizeLocalVoiceSpeechprintV1>;
+  accentField: VoiceAccentFieldResolutionV1;
+  protectedPhrases?: readonly string[];
+}): Promise<AccentMapPhonologySpanV1[]> {
+  const protectedRanges = protectedSpeechRanges(args.text, args.protectedPhrases);
+  return Promise.all(
+    accentMapWordRanges(args.text).map(async (range) => {
+      const sourceText = args.text.slice(range.start, range.end);
+      const protectedSpan = rangeIsProtected(range, protectedRanges);
+      const phonemized = await phonemizeEnglish(sourceText, args.locale);
+      const baselineIpa =
+        args.locale === "en-GB"
+          ? phonemized
+          : enforceAmericanRhoticIpa(phonemized).ipa;
+      const applied = protectedSpan
+        ? { ipa: baselineIpa, appliedRuleIds: [] as string[] }
+        : args.accentField.legacy
+          ? applyLocalVoiceSpeechprintToIpa({
+              ipa: baselineIpa,
+              speechprint: args.speechprint,
+              // A provider dictionary entry is one isolated lexeme. Phrase
+              // melody and cross-word stress scheduling belong to the full
+              // target-IPA plan and the Premium direction, not every word.
+              includeProsody: false,
+            })
+          : applyVoiceAccentFieldToIpa({
+              ipa: baselineIpa,
+              resolution: args.accentField,
+              strength: args.speechprint.strength,
+              variationSeed: args.speechprint.variationSeed,
+            });
+      return {
+        sourceStart: range.start,
+        sourceEnd: range.end,
+        sourceText,
+        canonicalGrapheme: sourceText.normalize("NFKC").toLocaleLowerCase("en-US"),
+        baselineIpa,
+        targetIpa: applied.ipa,
+        changed: applied.ipa !== baselineIpa,
+        protected: protectedSpan,
+        appliedRuleIds: applied.appliedRuleIds,
+      };
+    }),
+  );
 }
 
 async function generateTargetIpaAudio(args: {

@@ -297,6 +297,64 @@ fn install_shutdown_signal_guard(app: AppHandle) {
 #[cfg(not(unix))]
 fn install_shutdown_signal_guard(_app: AppHandle) {}
 
+// Tauri 2 embeds the platform webview (WKWebView/WebView2/WebKitGTK), not an
+// Electron Chromium session. Run this at document start for every PRISM frame
+// so native spelling and automatic-correction UI cannot win a race with React.
+const PRISM_DISABLE_NATIVE_TEXT_CORRECTION_SCRIPT: &str = r#"
+(() => {
+  globalThis.__PRISM_NATIVE_TEXT_CORRECTION_POLICY__ = true;
+  const selector = 'input, textarea, [contenteditable]:not([contenteditable="false"])';
+  const disable = (element) => {
+    if (!(element instanceof HTMLElement) || !element.matches(selector)) return;
+    if (element.spellcheck !== false) element.spellcheck = false;
+    if (element.getAttribute('spellcheck') !== 'false') {
+      element.setAttribute('spellcheck', 'false');
+    }
+    if (element.getAttribute('autocorrect') !== 'off') {
+      element.setAttribute('autocorrect', 'off');
+    }
+  };
+  const disableWithin = (root) => {
+    if (root instanceof Element) disable(root);
+    root.querySelectorAll?.(selector).forEach(disable);
+  };
+  const disableRoot = () => {
+    const root = document.documentElement;
+    if (!root) return;
+    if (root.spellcheck !== false) root.spellcheck = false;
+    if (root.getAttribute('spellcheck') !== 'false') {
+      root.setAttribute('spellcheck', 'false');
+    }
+    if (root.getAttribute('autocorrect') !== 'off') {
+      root.setAttribute('autocorrect', 'off');
+    }
+  };
+
+  disableRoot();
+  const observer = new MutationObserver((records) => {
+    for (const record of records) {
+      if (record.type === 'attributes') {
+        disable(record.target);
+        continue;
+      }
+      record.addedNodes.forEach((node) => {
+        if (node instanceof Element) disableWithin(node);
+      });
+    }
+  });
+  observer.observe(document, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ['spellcheck', 'autocorrect'],
+  });
+  document.addEventListener('DOMContentLoaded', () => {
+    disableRoot();
+    disableWithin(document);
+  }, { once: true });
+})();
+"#;
+
 use tauri::menu::MenuBuilder;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::utils::config::BackgroundThrottlingPolicy;
@@ -1072,6 +1130,7 @@ fn main() {
                 .maximizable(true)
                 .fullscreen(false)
                 .background_throttling(BackgroundThrottlingPolicy::Disabled)
+                .initialization_script_for_all_frames(PRISM_DISABLE_NATIVE_TEXT_CORRECTION_SCRIPT)
                 .build() {
                     emit_log(&app_handle, "prism", &format!("Window build failed: {error}"));
                 }

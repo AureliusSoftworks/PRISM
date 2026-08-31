@@ -20,7 +20,7 @@ import type {
   MansionMusicLoopV1,
   MansionAtmosphereLibraryStateV1,
 } from "./mansionMusic.js";
-import type { MansionLayoutV2 } from "./mansionLayoutV2.js";
+import type { MansionLayoutV2, MysteryVenueProfileV1 } from "./mansionLayoutV2.js";
 import type {
   EvidencePropBindingV1,
   MansionPropThemeV1,
@@ -3029,29 +3029,41 @@ export function debateMysteryAcousticThemePaletteV1(directionInput: string): str
 export function debateMysteryMansionExteriorPromptV1(
   houseStyle: DebateMysteryHouseStyleV2,
   scaleClass: DebateMysteryMansionExteriorScaleClassV1 = "standard",
+  venueProfile?: MysteryVenueProfileV1 | null,
 ): string {
   const atmosphere = houseStyle.atmosphere;
+  const placeNoun = venueProfile?.placeNoun ?? "mansion";
+  const tierDirection = venueProfile
+    ? `Venue topology: ${venueProfile.topology}. Named tiers: ${venueProfile.tierLabels.join(", ")}. Entry: preserve a readable approach to the semantic entry.`
+    : "Preserve a readable approach to the mansion entrance.";
   const scaleDirection: Record<DebateMysteryMansionExteriorScaleClassV1, string> = {
-    compact:
-      "Compact silhouette: a visibly small two-story footprint with one principal volume, few or no major wings, and intimate grounds.",
-    standard:
-      "Standard silhouette: a materially broader two-story estate with a central block, evident side massing or wings, and a larger approach.",
-    grand:
-      "Grand silhouette: an unmistakably taller three-story and/or dramatically wider compound with multiple major wings, towers or roof volumes, and expansive grounds.",
+    compact: venueProfile
+      ? `Compact silhouette: a visibly concise ${placeNoun} with one principal connected volume and limited secondary massing.`
+      : "Compact silhouette: a visibly small two-story footprint with one principal volume, few or no major wings, and intimate grounds.",
+    standard: venueProfile
+      ? `Standard silhouette: a materially broader ${placeNoun} with a clear primary spine or hub and several readable secondary spaces.`
+      : "Standard silhouette: a materially broader two-story estate with a central block, evident side massing or wings, and a larger approach.",
+    grand: venueProfile
+      ? `Grand silhouette: an unmistakably large ${placeNoun} with multiple major connected volumes and a legible full-site silhouette.`
+      : "Grand silhouette: an unmistakably taller three-story and/or dramatically wider compound with multiple major wings, towers or roof volumes, and expansive grounds.",
   };
   return [
-    `Create one premium 16:9 exterior establishing shot for ${houseStyle.label}.`,
+    `Create one premium 16:9 establishing shot for ${venueProfile?.kindLabel ?? houseStyle.label}.`,
     `Exterior scale family: ${scaleClass}.`,
     scaleDirection[scaleClass],
+    tierDirection,
+    ...(venueProfile ? [venueProfile.environmentSummary] : []),
     houseStyle.promptContract,
     `Geography and world: ${atmosphere.exteriorSetting}.`,
     `Weather: ${atmosphere.weather}. Time of day: ${atmosphere.timeOfDay}.`,
     `House condition: ${atmosphere.houseCondition}. Mood: ${atmosphere.mood}.`,
-    "Show the complete mansion from outside, including its approach or entrance, scale-appropriate vertical floor massing, architecture, surrounding terrain, and how the building occupies its geography.",
+    venueProfile
+      ? `Show the complete ${placeNoun} in its environment, including its approach or entry, scale-appropriate massing, structure, surroundings, and how it occupies its geography.`
+      : "Show the complete mansion from outside, including its approach or entrance, scale-appropriate vertical floor massing, architecture, surrounding terrain, and how the building occupies its geography.",
     "Use a single continuous cinematic view with a readable silhouette and premium high-detail game key-art quality.",
     "Do not use camera zoom or cropping to make different scale families occupy the same apparent size; the silhouette must read Small, Medium, or Large at library-card size.",
     "No interiors, cutaways, room montages, collages, mosaics, split panels, floor plans, people, bodies, evidence, clues, weapons, text, logos, or UI.",
-    "The mansion exterior is the hero and must remain legible when cropped to a library card.",
+    `The complete ${placeNoun} is the hero and must remain legible when cropped to a library card.`,
   ].join("\n");
 }
 

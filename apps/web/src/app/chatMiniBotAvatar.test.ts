@@ -95,13 +95,22 @@ describe("chatMiniBotAvatar", () => {
       /\["--coffee-plate-emoji-face-scale-y" as string\]:\s*BOT_AVATAR_CANONICAL_FACE_SCALE_Y/,
       "the inner punctuation face must remain canonical to avoid a double flip",
     );
-    assert.doesNotMatch(componentSource, /directionIndependentFace|props\.thinking/);
+    assert.doesNotMatch(
+      componentSource,
+      /directionIndependentFace|props\.thinking/,
+    );
     assert.match(
       pageSource,
       /\[avatarFacing, setAvatarFacing\] = useState<ZenLiveAvatarFacing>\(\s*zenLiveBotFacingForCanvasSide\(avatarCanvasSide\)/,
     );
-    assert.match(pageSource, /<EmptyStateHeroMiniBot[\s\S]{0,900}?facing=\{avatarFacing\}/);
-    assert.match(pageSource, /<ZenLiveBotMannequin[\s\S]{0,240}?facing=\{avatarFacing\}/);
+    assert.match(
+      pageSource,
+      /<EmptyStateHeroMiniBot[\s\S]{0,900}?facing=\{avatarFacing\}/,
+    );
+    assert.match(
+      pageSource,
+      /<ZenLiveBotMannequin[\s\S]{0,240}?facing=\{avatarFacing\}/,
+    );
     assert.match(
       pageSource,
       /facing=\{\s*ambientFacing \?\? BOT_AVATAR_CANONICAL_FACING\s*\}/,
@@ -129,16 +138,50 @@ describe("chatMiniBotAvatar", () => {
     );
   });
 
-  it("keeps compact face ink saturated and optically centered", () => {
+  it("uses normalized Light screens with white face, Ink, and glyph marks", () => {
     assert.match(
       cssSource,
       /\.root\s*\{[^}]*--chat-mini-bot-upper-screen-nudge-y:\s*clamp\(\s*1px,\s*calc\(var\(--chat-mini-bot-render-size\) \* 0\.02\),\s*2px\s*\)/,
-      "the shared compact face plane needs a small downward optical correction",
+      "Dark Minis must retain their approved face registration",
     );
     assert.match(
       pageCssSource,
-      /\.coffeeSeatPlateEmoji:is\(\.coffeeSeatMiniAvatarFace, \.emptyStateHeroMiniFace\)\s*\[data-crt-glyph-layer="true"\]\s*\{[^}]*color:\s*var\(--chat-mini-bot-color, var\(--accent\)\)[^}]*background:\s*none[^}]*-webkit-text-fill-color:\s*currentColor/,
-      "compact CRT glyph sources must paint with the bot color instead of the full-size white-hot gradient",
+      /\.coffeeSeatPlateEmoji:is\(\.coffeeSeatMiniAvatarFace, \.emptyStateHeroMiniFace\)\s*\[data-crt-glyph-layer="true"\]\s*\{[^}]*color:\s*var\(\s*--chat-mini-bot-screen-ink,[^}]*background:\s*none[^}]*-webkit-text-fill-color:\s*currentColor/,
+      "every compact face source must consume the shared Mini screen ink",
+    );
+    assert.match(
+      componentSource,
+      /botAvatarScreenPaletteVariables\(screenPalette\)/,
+      "Mini must derive its Light screen from the canonical full-avatar palette",
+    );
+    assert.match(
+      cssSource,
+      /\.root\[data-theme="light"\]\s*\{[^}]*--chat-mini-bot-screen-ink:\s*var\(--bot-avatar-screen-glyph, #fbfdff\)[^}]*--chat-mini-bot-upper-screen-nudge-y:\s*clamp\(\s*2px,\s*calc\(var\(--chat-mini-bot-render-size\) \* 0\.025\),\s*3px\s*\)/,
+      "Light Minis must receive the lower optical registration without moving Dark",
+    );
+    assert.match(
+      cssSource,
+      /\.root\[data-theme="light"\] \.upperScreen,[\s\S]*?\.root\[data-theme="light"\] \.lowerScreen\s*\{[^}]*background:\s*radial-gradient\([^}]*--bot-avatar-screen-center[^}]*--bot-avatar-screen-mid[^}]*--bot-avatar-screen-edge/,
+      "both Mini apertures must paint the normalized identity ramp",
+    );
+    assert.match(
+      cssSource,
+      /--chat-mini-bot-lower-screen-left:\s*41\.85%[^}]*--chat-mini-bot-lower-screen-top:\s*68\.65%[^}]*--chat-mini-bot-lower-screen-width:\s*15\.5%[^}]*--chat-mini-bot-lower-screen-height:\s*17\.4%/,
+      "the colored Mini lower screen must leave the authored chassis bezel visible",
+    );
+    assert.match(
+      miniInkComponentSource,
+      /deriveBotAvatarScreenPalette\(color\?\.trim\(\) \?\? "", theme\)\?\.glyph \?\? color/,
+      "Light Mini Ink must rasterize with the same canonical white glyph token",
+    );
+    assert.match(
+      pageCssSource,
+      /\.coffeeSeatMiniAvatarGlyph\s*\{[^}]*color:\s*var\(\s*--chat-mini-bot-screen-ink,/,
+    );
+    assert.match(
+      pageCssSource,
+      /\.emptyStateHeroMiniGlyph\s*\{[^}]*color:\s*var\(\s*--chat-mini-bot-screen-ink,/,
+      "every Mini lower glyph must consume the same white Light-mode ink",
     );
   });
 
@@ -155,7 +198,11 @@ describe("chatMiniBotAvatar", () => {
     const darkCanonical = pngHeader("bot-frame-base.png");
     const lightCanonical = pngHeader("bot-frame-light-base.png");
     assert.deepEqual(
-      { width: darkMini.width, height: darkMini.height, colorType: darkMini.colorType },
+      {
+        width: darkMini.width,
+        height: darkMini.height,
+        colorType: darkMini.colorType,
+      },
       { width: 96, height: 96, colorType: 6 },
     );
     assert.deepEqual(
@@ -219,10 +266,7 @@ describe("chatMiniBotAvatar", () => {
     assert.match(pageSource, /alloyColor=\{alloyColor\}/);
     assert.match(cssSource, /\.upperScreen/);
     assert.match(cssSource, /\.lowerScreen/);
-    assert.match(
-      cssSource,
-      /\.upperScreen\s*\{[^}]*z-index:\s*7/,
-    );
+    assert.match(cssSource, /\.upperScreen\s*\{[^}]*z-index:\s*7/);
     assert.match(cssSource, /\.frameBase\s*\{[^}]*z-index:\s*2/);
     assert.match(
       cssSource,
@@ -248,14 +292,20 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(cssSource, /\.sizeBadge/);
     assert.doesNotMatch(cssSource, /\.frameOff|\.frameOn/);
-    assert.doesNotMatch(componentSource, /talking\?: boolean|data-talking|talkingGlow/);
+    assert.doesNotMatch(
+      componentSource,
+      /talking\?: boolean|data-talking|talkingGlow/,
+    );
     assert.doesNotMatch(cssSource, /talkingGlow|data-talking/);
     assert.doesNotMatch(componentSource, /data-tint-ready/);
     assert.match(componentSource, /size\?: "badge" \| "room" \| "hero"/);
     assert.match(componentSource, /renderSize\?: number/);
     assert.match(componentSource, /CHAT_MINI_BOT_AVATAR_MIN_RENDER_SIZE = 1/);
     assert.match(componentSource, /clampChatMiniBotAvatarRenderSize/);
-    assert.match(componentSource, /data-render-size=\{renderSize \?\? undefined\}/);
+    assert.match(
+      componentSource,
+      /data-render-size=\{renderSize \?\? undefined\}/,
+    );
     assert.match(
       cssSource,
       /width:\s*var\(--chat-mini-bot-render-size\)[^}]*height:\s*var\(--chat-mini-bot-render-size\)/,
@@ -270,7 +320,10 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(cssSource, /--chat-mini-bot-render-size:\s*140px/);
     assert.doesNotMatch(cssSource, /bot-frame-tint-mask|bot-frame-led/);
-    assert.doesNotMatch(cssSource, /chat-mini-buckle-crt|repeating-linear-gradient/);
+    assert.doesNotMatch(
+      cssSource,
+      /chat-mini-buckle-crt|repeating-linear-gradient/,
+    );
     assert.match(cssSource, /\.lowerScreen\s*\{[^}]*overflow:\s*hidden/);
     assert.doesNotMatch(
       cssSource,
@@ -325,7 +378,10 @@ describe("chatMiniBotAvatar", () => {
       assert.match(miniFaceCall, /\bhardPixels\b/);
       assert.match(miniFaceCall, /motionMode="mini-led"/);
       if (index < 3) {
-        assert.doesNotMatch(miniFaceCall, /showThinkingSpinner|showQuestionMark/);
+        assert.doesNotMatch(
+          miniFaceCall,
+          /showThinkingSpinner|showQuestionMark/,
+        );
       } else {
         assert.match(miniFaceCall, /showThinkingSpinner/);
       }
@@ -345,7 +401,7 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(
       pageCssSource,
-      /\.coffeeSeatPlateEmoji\.emptyStateHeroMiniFace\s*\{[^}]*color:\s*var\(--chat-mini-bot-color, var\(--accent\)\)/,
+      /\.coffeeSeatPlateEmoji\.emptyStateHeroMiniFace\s*\{[^}]*color:\s*var\(\s*--chat-mini-bot-screen-ink,/,
     );
     assert.match(
       pageCssSource,
@@ -409,11 +465,23 @@ describe("chatMiniBotAvatar", () => {
     assert.match(componentSource, /aboveFace\?: ReactNode/);
     assert.match(componentSource, /\{props\.behindFace\}/);
     assert.match(componentSource, /\{props\.aboveFace\}/);
-    assert.match(pageSource, /import \{ MiniAvatarDetailsInk \} from "\.\/MiniAvatarDetailsInk"/);
+    assert.match(
+      pageSource,
+      /import \{ MiniAvatarDetailsInk \} from "\.\/MiniAvatarDetailsInk"/,
+    );
     assert.equal(
       [...pageSource.matchAll(/<MiniAvatarDetailsInk\b/g)].length,
       5,
       "every Mini face surface must share the semantic Ink wrapper",
+    );
+    assert.equal(
+      [
+        ...pageSource.matchAll(
+          /<MiniAvatarDetailsInk\b(?:(?!>)[\s\S])*?\btheme=(?:"dark"|\{(?:resolvedTheme|theme|previewTheme)\})/g,
+        ),
+      ].length,
+      5,
+      "every Mini Ink surface must receive the same theme as its chassis",
     );
     assert.match(
       miniInkComponentSource,
@@ -434,7 +502,8 @@ describe("chatMiniBotAvatar", () => {
       "Mini keeps the shared semantic raster but never enters Full HD Ink motion",
     );
     assert.equal(
-      [...pageSource.matchAll(/onBlinkPhaseChange=\{onBlinkPhaseChange\}/g)].length,
+      [...pageSource.matchAll(/onBlinkPhaseChange=\{onBlinkPhaseChange\}/g)]
+        .length,
       5,
       "each Mini face must feed its displayed blink phase back to Ink",
     );
@@ -473,7 +542,10 @@ describe("chatMiniBotAvatar", () => {
       "Micro glyphs retain the shared white-phosphor contract",
     );
     assert.match(microComponentSource, /data-avatar-render-tier="micro"/);
-    assert.match(microComponentSource, /botAvatarMicroPresentationForSize\(props\.renderSizePx\)/);
+    assert.match(
+      microComponentSource,
+      /botAvatarMicroPresentationForSize\(props\.renderSizePx\)/,
+    );
     assert.match(
       microComponentSource,
       /data-avatar-micro-presentation=\{presentation\}/,
@@ -486,8 +558,14 @@ describe("chatMiniBotAvatar", () => {
     assert.match(microComponentSource, /showIdentityPixel \? \(/);
     assert.match(microComponentSource, /styles\.botAvatarMicroIdentityPixel/);
     assert.match(microComponentSource, /normalizeBotIdentityColor\(color\)/);
-    assert.match(microComponentSource, /normalizeAccentForTheme\(identityColor, "dark"\)/);
-    assert.match(microComponentSource, /normalizeAccentForTheme\(identityColor, "light"\)/);
+    assert.match(
+      microComponentSource,
+      /normalizeAccentForTheme\(identityColor, "dark"\)/,
+    );
+    assert.match(
+      microComponentSource,
+      /normalizeAccentForTheme\(identityColor, "light"\)/,
+    );
     assert.match(microComponentSource, /data-bot-avatar-micro-screen="true"/);
     assert.doesNotMatch(
       microComponentSource,
@@ -502,7 +580,10 @@ describe("chatMiniBotAvatar", () => {
       pageCssSource,
       /\.botAvatarMicroGlyph\s*\{[^}]*place-items:\s*center;[^}]*color:\s*var\(--bot-avatar-micro-glyph-color, #ffffff\)/,
     );
-    assert.match(pageCssSource, /\.botAvatarMicroGlyph > svg\s*\{[^}]*width:\s*64%;[^}]*height:\s*64%/);
+    assert.match(
+      pageCssSource,
+      /\.botAvatarMicroGlyph > svg\s*\{[^}]*width:\s*64%;[^}]*height:\s*64%/,
+    );
     assert.match(
       pageCssSource,
       /data-avatar-micro-presentation="block"[^}]*width:\s*4px;[^}]*height:\s*4px/,
@@ -549,12 +630,18 @@ describe("chatMiniBotAvatar", () => {
       /renderSizePx=\{40\}/,
       "message header micro variants should pass an explicit render size",
     );
-    assert.match(messageMoodFn, /glyph=\{<BotGlyph name=\{props\.glyph\} size=\{16\} \/>\}/);
+    assert.match(
+      messageMoodFn,
+      /glyph=\{<BotGlyph name=\{props\.glyph\} size=\{16\} \/>\}/,
+    );
     assert.match(
       batchSlotFn,
       /renderSizePx=\{40\}/,
       "batch-foundry micro slots should pass an explicit render size",
     );
-    assert.match(batchSlotFn, /glyph=\{<BotGlyph name=\{glyph\} size=\{16\} \/>\}/);
+    assert.match(
+      batchSlotFn,
+      /glyph=\{<BotGlyph name=\{glyph\} size=\{16\} \/>\}/,
+    );
   });
 });

@@ -10,15 +10,22 @@ import {
 } from "./debateFlytingStageAlignment.ts";
 
 describe("Flyting stage alignment", () => {
-  it("covers the stage, throne, heraldry, helmets, nameplates, and rug glyphs", () => {
+  it("presents the two Flyting sides as Challenger and Defender", () => {
+    for (const item of DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS) {
+      if (item.id.includes("For")) assert.match(item.label, /^Challenger/u);
+      if (item.id.includes("Against")) assert.match(item.label, /^Defender/u);
+    }
+  });
+
+  it("covers the stage, throne, competitor heraldry, helmets, nameplates, and rug glyphs", () => {
     const ids = new Set(
       DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS.map((item) => item.id),
     );
-    assert.equal(ids.size, 21);
+    assert.equal(ids.size, 18);
     assert.ok(ids.has("wideForHelmet"));
     assert.ok(ids.has("moderatorModeratorHelmet"));
     assert.ok(ids.has("wideAgainstHeraldry"));
-    assert.ok(ids.has("galleryModeratorRugGlyph"));
+    assert.ok(!new Set<string>(ids).has("galleryModeratorRugGlyph"));
   });
 
   it("updates one placement without disturbing the others", () => {
@@ -59,10 +66,7 @@ describe("Flyting stage alignment", () => {
       rotation: -180,
       skewX: 60,
     });
-    assert.deepEqual(
-      copyDebateFlytingStageAlignment(normalized),
-      normalized,
-    );
+    assert.deepEqual(copyDebateFlytingStageAlignment(normalized), normalized);
     const clipboard = formatDebateFlytingStageAlignmentClipboard(normalized);
     assert.match(clipboard, /DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT/u);
     assert.match(clipboard, /"galleryForRugGlyph"/u);

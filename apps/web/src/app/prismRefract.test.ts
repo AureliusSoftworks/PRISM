@@ -7,10 +7,33 @@ import {
   PrismRefractGenerationTimeoutError,
   nextPrismRefractChoice,
   prismRefractModifierClickDecision,
+  prismRefractProvenanceDetail,
   runPrismRefractGenerationWithTimeout,
 } from "./prismRefract.ts";
 
 describe("Prism Refract helpers", () => {
+  it("names the model and effort in a Refract receipt", () => {
+    assert.equal(
+      prismRefractProvenanceDetail({
+        model: "gpt-5.6-sol",
+        reasoningEffort: "xhigh",
+        turbo: true,
+      }),
+      "Model: gpt-5.6-sol · Effort: Extra High · Turbo.",
+    );
+    assert.equal(
+      prismRefractProvenanceDetail({ model: "llama3.2" }),
+      "Model: llama3.2 · Effort: Default.",
+    );
+    assert.equal(
+      prismRefractProvenanceDetail({
+        model: null,
+        reasoningEffort: "none",
+      }),
+      "Model: None · Effort: None.",
+    );
+  });
+
   it("offers replaceable creative steering only when prose already exists", () => {
     assert.equal(
       initialPrismRefractProseDirection("A draft paragraph."),

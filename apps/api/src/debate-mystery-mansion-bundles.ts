@@ -13,6 +13,7 @@ import {
   canonicalMansionLayoutV2,
   canonicalPortablePackageJsonV1,
   createBlankMansionLayoutV2,
+  createMysteryVenueProposalV1,
   debateMysteryAcousticThemePaletteV1,
   debateMysteryHouseStyleV2,
   deriveMansionMusicIdentityV1,
@@ -34,6 +35,7 @@ import {
   type DebateMysteryMansionSnapshotV2,
   type MansionLayoutRoomV2,
   type MansionLayoutV2,
+  type MysteryVenueProposalV1,
   type MansionMusicRefractLensV1,
   type MansionMusicLoopV1,
   type DebateWhodunnitFormatStateV2,
@@ -911,6 +913,95 @@ export function createBlankDebateMysteryMansionBundleV1(
   return getDebateMysteryMansionBundleV2(db, userId, id);
 }
 
+/** Canonicalizes an accepted public proposal and uses its server-issued ID as
+ * the bundle key, making retries idempotent without adding a database column. */
+export function createDebateMysteryVenueBundleV1(
+  db: DatabaseSync,
+  userId: string,
+  proposed: MysteryVenueProposalV1,
+): DebateMysteryMansionBundleSummaryV1 {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(proposed.id)) {
+    throw new HttpError(400, "Mystery Venue proposal ID is invalid.");
+  }
+  const existing = db.prepare(
+    "SELECT user_id FROM debate_mystery_mansion_bundles WHERE id = ? LIMIT 1",
+  ).get(proposed.id) as { user_id: string } | undefined;
+  if (existing) {
+    if (existing.user_id !== userId) throw new HttpError(409, "That venue proposal is no longer available.");
+    return getDebateMysteryMansionBundleV2(db, userId, proposed.id);
+  }
+  const proposal = createMysteryVenueProposalV1({
+    id: proposed.id,
+    description: proposed.description,
+    length: proposed.length,
+    nonce: proposed.nonce,
+    creativeDraft: proposed.creativeDraft,
+  });
+  const errors = validateMansionLayoutV2(proposal.layout, {
+    suspectCount: proposal.length.suspects,
+    requireEditorFloors: false,
+  });
+  if (errors.length > 0) throw new HttpError(400, `Mystery Venue proposal is invalid: ${errors.join(" ")}`);
+  const now = new Date().toISOString();
+  const rooms = mansionLayoutV2ToLegacyRooms(proposal.layout);
+  const baseHouseStyle = debateMysteryHouseStyleV2(
+    `${proposal.profile.kindLabel}. ${proposal.profile.environmentSummary} ${proposal.atmosphere}`,
+  );
+  const houseStyle: DebateMysteryHouseStyleV2 = {
+    ...baseHouseStyle,
+    label: proposal.profile.kindLabel,
+    promptContract: baseHouseStyle.promptContract
+      .replaceAll("One-house", "One-venue")
+      .replaceAll("the same mansion", `the same ${proposal.profile.placeNoun}`)
+      .replaceAll("this mansion", `this ${proposal.profile.placeNoun}`),
+    atmosphere: {
+      ...baseHouseStyle.atmosphere,
+      exteriorSetting: proposal.profile.environmentSummary,
+    },
+  };
+  const derivation: DebateMysteryMansionDerivationV1 = {
+    version: 1,
+    sourceBundleId: null,
+    sourceTitle: "Mystery Venue proposal",
+    sourcePackageId: null,
+    acceptedExteriorScaleClass: resolveDebateMysteryMansionExteriorScaleClassV1({
+      floors: proposal.length.tiers,
+      totalRooms: proposal.length.rooms,
+    }),
+    createdAt: now,
+  };
+  const library: SavedMansionLibraryMetadataV1 = {
+    version: 1,
+    title: proposal.title,
+    description: proposal.profile.environmentSummary,
+    thumbnailAssetId: null,
+    music: null,
+    atmosphere: null,
+  };
+  db.prepare(
+    `INSERT INTO debate_mystery_mansion_bundles
+       (id, user_id, source_session_id, name, floors, total_rooms,
+        suspect_count, style_json, layout_json, library_metadata_json,
+        derivation_metadata_json, portable_metadata_json, portable_payload_sha256,
+        created_at, updated_at)
+     VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
+  ).run(
+    proposal.id,
+    userId,
+    proposal.title,
+    proposal.length.tiers,
+    rooms.length,
+    proposal.length.suspects,
+    JSON.stringify(houseStyle),
+    canonicalMansionLayoutV2(proposal.layout),
+    JSON.stringify(library),
+    JSON.stringify(derivation),
+    now,
+    now,
+  );
+  return getDebateMysteryMansionBundleV2(db, userId, proposal.id);
+}
+
 function migrateLegacyRoomArtRefsToLayoutV2(
   layout: MansionLayoutV2,
   assets: DebateMysteryMansionAssetV1[],
@@ -1156,7 +1247,7 @@ function normalizeMansionEditorLayoutV2(
     const existing = existingById.get(entity.id);
     const existingV2 = existingV2ById.get(entity.id);
     const template = knownTemplates.get(entity.templateId);
-    if (!template && existing?.templateId !== entity.templateId) {
+    if (!source.venueProfile && !template && existing?.templateId !== entity.templateId) {
       throw new HttpError(400, `${entity.name || entity.id} uses an unsupported room type.`);
     }
     const name = entity.name.replace(/\s+/gu, " ").trim().slice(0, 80);

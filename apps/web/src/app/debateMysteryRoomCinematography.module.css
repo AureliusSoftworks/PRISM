@@ -68,6 +68,20 @@
   image-rendering: pixelated;
 }
 
+.root[data-art-style="mosaic"] {
+  inset: 0;
+  transform: none;
+}
+
+.root[data-art-style="mosaic"][data-blurred="true"] {
+  transform: none;
+}
+
+.root[data-art-style="mosaic"] .grade,
+.root[data-art-style="mosaic"] .vignette {
+  display: none;
+}
+
 .root[data-art-style="mosaic"] .lighting {
   mix-blend-mode: hard-light;
 }

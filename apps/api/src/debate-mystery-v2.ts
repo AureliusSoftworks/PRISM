@@ -58,6 +58,7 @@ import {
   REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS,
   reasoningGenerationBudgetMs,
   resolveDebateMysteryLineDeliveryV2,
+  resolveDebateMysteryRoomPresentationV1,
   resolveDebateMysteryConfigV2,
   resolveDebateMysteryMansionExteriorScaleClassV1,
   validateDebateMysteryAudioManifestV1,
@@ -103,6 +104,7 @@ import {
   type MysteryBoundIncidentPlanV1,
   type MysteryIncidentPlanV1,
   type MysteryPublicChargeV1,
+  type MansionLayoutV2,
 } from "@localai/shared";
 import { generateBuiltinEnglishWave, isPlayablePcmWave } from "./builtin-tts.ts";
 import { buildBabbleSpeechText } from "./babble-text.ts";
@@ -427,6 +429,7 @@ export interface DebateMysteryMansionExteriorAssetPreparationV2 {
   sessionId: string;
   houseStyle: DebateMysteryHouseStyleV2;
   scaleClass: DebateMysteryMansionExteriorScaleClassV1;
+  venueProfile?: MansionLayoutV2["venueProfile"];
   /** Explicit setup art is adopted before Case Forge; this only resolves fallback art. */
   synthesize: boolean;
   signal?: AbortSignal;
@@ -616,17 +619,22 @@ class MysteryProsecutionChoiceValidationError extends Error {
   }
 }
 
+function mysteryAuthoringOutputExhausted(error: unknown): boolean {
+  return error instanceof AutoFallbackExhaustedError &&
+    error.attempts.length > 0 &&
+    error.attempts.every((attempt) =>
+      attempt.outcome === "failed" &&
+      (attempt.reason === "invalid_output" || attempt.reason === "empty")
+    );
+}
+
 function mysteryExaminationValidationExhausted(error: unknown): boolean {
   const cause = error instanceof Error ? error.cause : null;
   if (
     cause instanceof MysteryExaminationValidationError ||
     cause instanceof SyntaxError
   ) return true;
-  return cause instanceof AutoFallbackExhaustedError &&
-    cause.attempts.length > 0 &&
-    cause.attempts.every((attempt) =>
-      attempt.outcome === "failed" && attempt.reason === "invalid_output"
-    );
+  return mysteryAuthoringOutputExhausted(cause);
 }
 
 function mysteryWitnessChapterValidationExhausted(error: unknown): boolean {
@@ -635,11 +643,7 @@ function mysteryWitnessChapterValidationExhausted(error: unknown): boolean {
     cause instanceof MysteryWitnessChapterValidationError ||
     cause instanceof SyntaxError
   ) return true;
-  return cause instanceof AutoFallbackExhaustedError &&
-    cause.attempts.length > 0 &&
-    cause.attempts.every((attempt) =>
-      attempt.outcome === "failed" && attempt.reason === "invalid_output"
-    );
+  return mysteryAuthoringOutputExhausted(cause);
 }
 
 function mysteryProsecutionChoiceValidationExhausted(error: unknown): boolean {
@@ -648,11 +652,7 @@ function mysteryProsecutionChoiceValidationExhausted(error: unknown): boolean {
     cause instanceof MysteryProsecutionChoiceValidationError ||
     cause instanceof SyntaxError
   ) return true;
-  return cause instanceof AutoFallbackExhaustedError &&
-    cause.attempts.length > 0 &&
-    cause.attempts.every((attempt) =>
-      attempt.outcome === "failed" && attempt.reason === "invalid_output"
-    );
+  return mysteryAuthoringOutputExhausted(cause);
 }
 
 interface MysteryV2AuthoringCheckpointV1 {
@@ -950,10 +950,13 @@ function deterministicMysteryIncidentSceneRoomV2<T extends {
   id: string;
   templateId: string;
   assignedSuspectSeatId?: string | null;
-}>(rooms: readonly T[], nonce: string): T | null {
+}>(rooms: readonly T[], nonce: string, entryRoomId?: string | null): T | null {
   const nonFoyer = rooms.filter((room) =>
-    room.templateId.trim().toLocaleLowerCase() !== "foyer" &&
-    !/(?:^|[-_:])foyer(?:$|[-_:])/iu.test(room.id),
+    room.id !== entryRoomId &&
+    (entryRoomId
+      ? true
+      : room.templateId.trim().toLocaleLowerCase() !== "foyer" &&
+        !/(?:^|[-_:])foyer(?:$|[-_:])/iu.test(room.id)),
   );
   const candidates = (nonFoyer.length > 0 ? nonFoyer : rooms)
     .slice()
@@ -4774,7 +4777,8 @@ async function authorMysteryV2(args: {
   const incidentSceneName = incidentSceneRoom
     ? DEBATE_MYSTERY_ROOM_TEMPLATES.find(
         (template) => template.id === incidentSceneRoom.templateId,
-      )?.name ?? incidentSceneRoom.templateId.replaceAll("-", " ")
+      )?.name ?? args.config.mansionSnapshot?.rooms.find((room) => room.id === incidentSceneRoom.id)?.name ??
+        incidentSceneRoom.templateId.replace(/^venue:/u, "").replaceAll("-", " ")
     : "incident scene";
   const setup = {
     investigationMode: args.config.investigationMode,
@@ -4792,7 +4796,9 @@ async function authorMysteryV2(args: {
     timeline: authoredTimeline,
     roomNames: omitInvestigation ? [] : args.scaffold.rooms.map((room) => ({
       roomId: room.id,
-      name: DEBATE_MYSTERY_ROOM_TEMPLATES.find((template) => template.id === room.templateId)?.name ?? room.templateId,
+      name: DEBATE_MYSTERY_ROOM_TEMPLATES.find((template) => template.id === room.templateId)?.name ??
+        args.config.mansionSnapshot?.rooms.find((candidate) => candidate.id === room.id)?.name ??
+        room.templateId.replace(/^venue:/u, "").replaceAll("-", " "),
     })),
     incidentScene: omitInvestigation ? null : {
       roomId: args.scaffold.crimeSceneRoomId,
@@ -5006,7 +5012,9 @@ async function authorMysteryV2(args: {
             : "ambient" as const,
           room: {
             id: outcome.roomId,
-            name: roomTemplate?.name ?? outcome.roomId,
+            name: roomTemplate?.name ??
+              args.config.mansionSnapshot?.rooms.find((candidate) => candidate.id === outcome.roomId)?.name ??
+              outcome.roomId,
             mansionAnchors,
           },
           hotspot: {
@@ -6532,9 +6540,15 @@ function buildMysteryV2Graph(args: {
       throw new Error(`Frozen prop binding ${evidenceId} has no authored evidence record.`);
     }
     const exactIdentity = binding.chosenIdentity.displayName.trim();
+    const appearanceDescription = binding.chosenIdentity.appearanceDescription.trim();
     if (
       evidence.title !== exactIdentity ||
-      !evidence.description.toLocaleLowerCase().includes(exactIdentity.toLocaleLowerCase())
+      (
+        appearanceDescription.length > 0 &&
+        !evidence.description.toLocaleLowerCase().includes(
+          appearanceDescription.toLocaleLowerCase(),
+        )
+      )
     ) {
       throw new Error(`Frozen prop identity drifted during authoring: ${exactIdentity}.`);
     }
@@ -6542,7 +6556,9 @@ function buildMysteryV2Graph(args: {
   const authoredExaminations = new Map(args.authored.examinations.map((entry) => [entry.id, entry.text]));
   const talkSubjectRooms = args.scaffold.rooms.map((room) => ({
     id: room.id,
-    name: DEBATE_MYSTERY_ROOM_TEMPLATES.find((template) => template.id === room.templateId)?.name ?? room.templateId,
+    name: DEBATE_MYSTERY_ROOM_TEMPLATES.find((template) => template.id === room.templateId)?.name ??
+      args.config.mansionSnapshot?.rooms.find((candidate) => candidate.id === room.id)?.name ??
+      room.templateId.replace(/^venue:/u, "").replaceAll("-", " "),
   }));
   const talkSubjectPeople = [
     { id: args.scaffold.victim.id, name: args.authored.victimName },
@@ -6852,19 +6868,42 @@ function buildMysteryV2Graph(args: {
       const roomTemplate = scaffoldRoom
         ? DEBATE_MYSTERY_ROOM_TEMPLATES.find((template) => template.id === scaffoldRoom.templateId)
         : null;
+      const venueRoom = args.config.mansionSnapshot?.rooms.find((room) => room.id === suspectRoomId);
+      const venueLayoutRoom = args.config.mansionSnapshot?.layoutV2?.entities.find(
+        (entity) => entity.kind === "room" && entity.id === suspectRoomId,
+      );
+      const venueAnchors = args.config.mansionSnapshot?.layoutV2?.placementAnchors
+        .filter((anchor) => anchor.roomId === suspectRoomId) ?? [];
+      const roomPresentation = scaffoldRoom
+        ? resolveDebateMysteryRoomPresentationV1({
+            ...scaffoldRoom,
+            name: venueRoom?.name,
+            emoji: venueRoom?.emoji,
+            ...(venueRoom || venueLayoutRoom?.kind === "room"
+              ? {
+                  bundledAssetPath: venueRoom?.bundledAssetPath ?? roomTemplate?.bundledAssetPath ?? null,
+                  acceptedRoomAssetId: venueLayoutRoom?.kind === "room"
+                    ? venueLayoutRoom.acceptedRoomAssetId
+                    : null,
+                  venueContract: venueLayoutRoom?.kind === "room" ? venueLayoutRoom.venueContract : null,
+                }
+              : {}),
+            placementAnchors: venueAnchors,
+          })
+        : null;
       const suspectBot = botById.get(botIdBySeat.get(suspect.seatId) ?? "") ?? null;
       const suspectBotId = botIdBySeat.get(suspect.seatId) ?? null;
       const suspectName = nameBySeat.get(suspect.seatId) ?? null;
       const casekeeperNarration = mysteryRoomNarrationForBotV2({
         bot: suspectBot,
-        fixtureLabels: roomTemplate?.regions.map((region) => region.label) ?? [],
+        fixtureLabels: roomPresentation?.fixtureLabels ?? roomTemplate?.regions.map((region) => region.label) ?? [],
       });
-      if (!scaffoldRoom || !roomTemplate || !suspectBotId || !suspectName) {
+      if (!scaffoldRoom || !suspectBotId || !suspectName) {
         throw new Error(`Room introduction ${suspectRoomId} is missing its frozen performance identity.`);
       }
       const stageCue = roomIntroductionStageCueV1({
         roomId: suspectRoomId,
-        roomName: roomTemplate.name,
+        roomName: roomPresentation?.name ?? roomTemplate?.name ?? venueRoom?.name ?? scaffoldRoom.templateId,
         speakerBotId: suspectBotId,
         speakerName: suspectName,
       });
@@ -7487,24 +7526,45 @@ function buildMysteryV2Graph(args: {
     victim: { id: args.scaffold.victim.id, name: args.authored.victimName },
     suspects: args.scaffold.suspects.map(({ roomId: _roomId, ...suspect }) => ({ ...suspect, roomId: _roomId })),
     rooms: omitInvestigation ? [] : args.scaffold.rooms.map((room) => {
-      const template = DEBATE_MYSTERY_ROOM_TEMPLATES.find((entry) => entry.id === room.templateId)!;
-      const presentationRegions = debateMysteryRoomPresentationRegionsV1(room);
+      const template = DEBATE_MYSTERY_ROOM_TEMPLATES.find((entry) => entry.id === room.templateId);
+      const venueRoom = args.config.mansionSnapshot?.rooms.find((entry) => entry.id === room.id);
+      const venueLayoutRoom = args.config.mansionSnapshot?.layoutV2?.entities.find(
+        (entity) => entity.kind === "room" && entity.id === room.id,
+      );
+      const roomPresentation = resolveDebateMysteryRoomPresentationV1({
+        ...room,
+        name: venueRoom?.name,
+        emoji: venueRoom?.emoji,
+        ...(venueRoom || venueLayoutRoom?.kind === "room"
+          ? {
+              bundledAssetPath: venueRoom?.bundledAssetPath ?? template?.bundledAssetPath ?? null,
+              acceptedRoomAssetId: venueLayoutRoom?.kind === "room"
+                ? venueLayoutRoom.acceptedRoomAssetId
+                : null,
+              venueContract: venueLayoutRoom?.kind === "room" ? venueLayoutRoom.venueContract : null,
+            }
+          : {}),
+        placementAnchors: args.config.mansionSnapshot?.layoutV2?.placementAnchors.filter(
+          (anchor) => anchor.roomId === room.id,
+        ),
+      });
+      const presentationRegions = roomPresentation.regions;
       const activeRegionIds = new Set(
         args.scaffold.activeRegions.filter((outcome) => outcome.roomId === room.id).map((outcome) => outcome.regionId),
       );
       return {
         id: room.id,
         templateId: room.templateId,
-        name: template.name,
+        name: roomPresentation.name,
         floor: room.floor,
         x: room.x,
         y: room.y,
         width: room.width,
         height: room.height,
         neighborIds: [...room.neighborIds],
-        emoji: template.emoji,
+        emoji: roomPresentation.emoji,
         imageId: room.imageId,
-        bundledAssetPath: template.bundledAssetPath ?? null,
+        bundledAssetPath: template?.bundledAssetPath ?? venueRoom?.bundledAssetPath ?? null,
         unlocked: true,
         visited: false,
         accessState: "hidden" as const,
@@ -10395,7 +10455,11 @@ export async function runDebateMysteryCompilationV2(
           ).rooms
         : null;
       const crimeSceneRoom = savedMansionRooms
-        ? deterministicMysteryIncidentSceneRoomV2(savedMansionRooms, config.nonce)
+        ? deterministicMysteryIncidentSceneRoomV2(
+            savedMansionRooms,
+            config.nonce,
+            config.mansionSnapshot?.layoutV2?.venueProfile?.entryRoomId,
+          )
         : null;
       const orderedMansionRooms = savedMansionRooms && crimeSceneRoom
         ? [crimeSceneRoom, ...savedMansionRooms.filter((room) => room.id !== crimeSceneRoom.id)]
@@ -10415,6 +10479,20 @@ export async function runDebateMysteryCompilationV2(
                 const layoutRoom = config.mansionSnapshot?.layoutV2?.entities.find(
                   (entity) => entity.kind === "room" && entity.id === room.id,
                 );
+                const venueAnchors = config.mansionSnapshot?.layoutV2?.placementAnchors
+                  .filter((anchor) => anchor.roomId === room.id)
+                  .slice()
+                  .sort((left, right) => left.id.localeCompare(right.id)) ?? [];
+                const currentAnchorSha256 = sha256(JSON.stringify(venueAnchors.map((anchor) => ({
+                  id: anchor.id,
+                  name: anchor.name,
+                  relation: anchor.relation,
+                  point: { x: anchor.point.x, y: anchor.point.y },
+                }))));
+                const venueAnchorGeometryIsCurrent = layoutRoom?.kind === "room" &&
+                  Boolean(layoutRoom.venueContract) &&
+                  (!layoutRoom.acceptedRoomAssetId ||
+                    layoutRoom.acceptedRoomArtAnchorSha256 === currentAnchorSha256);
                 return {
                   id: room.id,
                   floor: room.floor,
@@ -10429,8 +10507,27 @@ export async function runDebateMysteryCompilationV2(
                     ? {
                         usesBundledHotspotGeometry:
                           !room.imageId &&
-                          !layoutRoom.acceptedRoomAssetId &&
-                          Boolean(layoutRoom.bundledAssetPath),
+                          !layoutRoom.acceptedRoomAssetId,
+                        ...(venueAnchorGeometryIsCurrent && venueAnchors.length > 0
+                          ? {
+                              presentationRegions: venueAnchors.map((anchor) => {
+                                const x = Math.max(7, Math.min(93, anchor.point.x * 100));
+                                const y = Math.max(7, Math.min(93, anchor.point.y * 100));
+                                return {
+                                  id: `venue-anchor:${anchor.id}`,
+                                  label: anchor.name,
+                                  keywords: [...new Set(anchor.name.toLocaleLowerCase().split(/\s+/gu).filter(Boolean))],
+                                  physicalAnchor: `${anchor.relation} ${anchor.name}`,
+                                  polygon: [
+                                    { x: x - 7, y: y - 7 },
+                                    { x: x + 7, y: y - 7 },
+                                    { x: x + 7, y: y + 7 },
+                                    { x: x - 7, y: y + 7 },
+                                  ],
+                                };
+                              }),
+                            }
+                          : {}),
                       }
                     : {}),
                   kind: room.assignedSuspectSeatId
@@ -10652,6 +10749,7 @@ export async function runDebateMysteryCompilationV2(
           sessionId,
           houseStyle: checkpoint.privateCase.config.houseStyle,
           scaleClass: checkpoint.privateCase.config.scaleClass,
+          venueProfile: checkpoint.privateCase.config.mansionSnapshot?.layoutV2?.venueProfile,
           // Case Forge may supply only the bundled fallback. Exterior
           // generation is an explicit Mansion-step decision made before a
           // session exists.
@@ -11532,6 +11630,8 @@ export function importDebateMysteryV2BackupV1(
       roomIds: privateCase.investigationRoomIds,
       personIds: privateCase.investigationPersonIds,
       hotspotIdsByRoom: privateCase.investigationHotspotIdsByRoom,
+      prosecutorBotId: privateCase.config.prosecutorBotId,
+      rivalDefenseBotId: privateCase.config.rivalDefenseBotId,
       eyewitnessSeatId: privateCase.eyewitnessSeatId,
       accusedAlibiSupportDiscoveryIds: privateCase.accusedAlibiSupportDiscoveryIds,
     });

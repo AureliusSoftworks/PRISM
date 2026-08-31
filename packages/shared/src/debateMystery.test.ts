@@ -602,14 +602,11 @@ test("MansionLayoutV2 semantic projections may use corridor links and colon room
 test("accepted mansion plates use neutral examination regions instead of PRISM template props", () => {
   const config = resolveDebateMysteryConfig(createConfig("standard", "classic", "accepted-room-regions"));
   const bundled = compileDeterministicDebateMystery({ config, suspects: suspects(6) });
-  const blueprint = bundled.rooms.map((room) => room.templateId === "foyer"
-    ? {
-        ...room,
-        imageId: "accepted-observatory-foyer",
-        usesBundledHotspotGeometry: false,
-      }
-    : room,
-  );
+  const blueprint = bundled.rooms.map((room) => ({
+    ...room,
+    imageId: null,
+    usesBundledHotspotGeometry: false,
+  }));
   const caseWithAcceptedPlate = compileDeterministicDebateMystery({
     config,
     suspects: suspects(6),
@@ -623,6 +620,19 @@ test("accepted mansion plates use neutral examination regions instead of PRISM t
   assert.ok(foyerRegionIds.length >= 12);
   assert.ok(foyerRegionIds.every((id) => id.startsWith("foyer:scene-")));
   assert.ok(!foyerRegionIds.some((id) => id.includes("umbrella")));
+  assert.deepEqual(
+    validateDebateMysteryCaseBible(caseWithAcceptedPlate, config.actionBudget).errors,
+    [],
+  );
+
+  const invalidRegionCase = structuredClone(caseWithAcceptedPlate);
+  invalidRegionCase.activeRegions.find((region) => region.roomId === foyer.id)!.regionId =
+    "foyer:scene-not-declared";
+  assert.ok(
+    validateDebateMysteryCaseBible(invalidRegionCase, config.actionBudget).errors.includes(
+      "Every active region must reference a declared semantic polygon in its room template.",
+    ),
+  );
 });
 
 test("custom floor counts keep architectural room groups intact", () => {

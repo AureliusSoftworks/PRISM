@@ -1539,7 +1539,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       glyphPartRule,
-      /--crt-face-glow-filter:\s*var\(--zen-live-bot-idle-face-glow-filter-high\)\s*;/,
+      /--crt-face-glow-filter:\s*var\(--zen-live-bot-shared-phosphor-glow-filter\)\s*;/,
     );
     assert.doesNotMatch(glyphPartRule, /zenLiveBotIdleLightBreath/);
 
@@ -3198,7 +3198,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       sharedTalkingFacePartRule,
-      /--crt-face-glow-filter:\s*var\(--zen-live-bot-talking-face-glow-filter-high\)\s*;/,
+      /--crt-face-glow-filter:\s*var\(--zen-live-bot-shared-phosphor-glow-filter\)\s*;/,
     );
     assert.doesNotMatch(
       sharedTalkingFacePartRule,

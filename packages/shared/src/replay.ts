@@ -424,11 +424,26 @@ export interface ReplayStudioCutEligibilityV1 {
   missingSpeakers: string[];
 }
 
+/** Diagnostic-only provenance for newly synthesized Studio Cut speech.
+ * The locator itself is intentionally omitted: saved audio must remain usable
+ * after a provider dictionary version changes or the local cache is empty. */
+export interface ReplayPremiumPhonologyV1 {
+  planSha256: string;
+  rulesetVersion: string;
+  rulesetSha256: string;
+  model: "eleven_v3";
+  direction: string | null;
+  gateEnabled: true;
+  fallback: "dictionary" | "inline-ipa" | "respelling";
+}
+
 export interface ReplayPremiumVoiceTimingV1 {
   sourceMessageId: string;
   startMs: number;
   endMs: number;
   alignment: ReplaySpeechAlignmentV1 | null;
+  /** Absent on dialogue batches and recordings created before provenance. */
+  premiumPhonology?: ReplayPremiumPhonologyV1;
 }
 
 export interface ReplayPremiumSegmentV1 {

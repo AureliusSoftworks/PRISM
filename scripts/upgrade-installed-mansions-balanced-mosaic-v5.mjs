@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { backup, DatabaseSync } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
 import {
   freezeDebateMysteryMansionSnapshotV2,
   getDebateMysteryMansionBundleV2,
@@ -49,9 +49,22 @@ function option(name, fallback) {
 
 const databasePath = resolve(option("--db", defaultDatabasePath));
 const packageDirectory = resolve(option("--package-dir", defaultPackageDirectory));
-const masterSecret = process.env.ENCRYPTION_MASTER_KEY;
+const secretsPath = option("--secrets-env", null);
+let masterSecret = process.env.ENCRYPTION_MASTER_KEY ?? null;
+if (!masterSecret && secretsPath) {
+  const line = (await readFile(resolve(secretsPath), "utf8"))
+    .split(/\r?\n/u)
+    .find((candidate) => candidate.startsWith("ENCRYPTION_MASTER_KEY="));
+  if (line) {
+    const raw = line.slice("ENCRYPTION_MASTER_KEY=".length).trim();
+    masterSecret = (
+      (raw.startsWith('"') && raw.endsWith('"')) ||
+      (raw.startsWith("'") && raw.endsWith("'"))
+    ) ? raw.slice(1, -1) : raw;
+  }
+}
 if (!masterSecret) {
-  throw new Error("ENCRYPTION_MASTER_KEY is required. Run this script through with-secrets.");
+  throw new Error("ENCRYPTION_MASTER_KEY is required.");
 }
 
 const database = new DatabaseSync(databasePath);
@@ -61,9 +74,52 @@ const backupDirectory = join(repositoryRoot, ".codex/output/backups");
 await mkdir(backupDirectory, { recursive: true });
 const backupPath = join(
   backupDirectory,
-  `${basename(databasePath)}.before-balanced-mosaic-v5.${timestamp}.db`,
+  `${basename(databasePath)}.before-balanced-mosaic-v5.${timestamp}.json`,
 );
-await backup(database, backupPath);
+const installedRows = database.prepare(
+  `SELECT id, user_id, name FROM debate_mystery_mansion_bundles ORDER BY created_at`,
+).all();
+const targetsByPackage = new Map();
+for (const job of jobs) {
+  const targets = installedRows.filter((row) => job.matches(row.name));
+  if (targets.length === 0) {
+    throw new Error(`No installed mansion matches ${job.packageName}.`);
+  }
+  targetsByPackage.set(job.packageName, targets);
+}
+const targetBundleIds = new Set(
+  [...targetsByPackage.values()].flatMap((targets) => targets.map((target) => target.id)),
+);
+const sessionRows = database.prepare(
+  `SELECT id, user_id, revision, status, session_json, updated_at
+     FROM debate_sessions
+    WHERE status IN ('live', 'waiting_for_player', 'paused')`,
+).all();
+const affectedSessionRows = sessionRows.filter((row) => {
+  const session = JSON.parse(row.session_json);
+  const sourceBundleId = session.formatState?.format === "whodunnit"
+    ? session.formatState.config?.mansionSnapshot?.sourceBundleId
+    : null;
+  return targetBundleIds.has(sourceBundleId);
+});
+const rollbackSnapshot = {
+  version: 1,
+  createdAt: new Date().toISOString(),
+  databasePath,
+  bundles: [...targetBundleIds].map((bundleId) => database.prepare(
+    `SELECT id, user_id, layout_json, updated_at
+       FROM debate_mystery_mansion_bundles WHERE id = ?`,
+  ).get(bundleId)),
+  roomRefs: [...targetBundleIds].flatMap((bundleId) => database.prepare(
+    `SELECT bundle_id, user_id, asset_id, role, logical_id, created_at
+       FROM debate_mystery_mansion_asset_refs
+      WHERE bundle_id = ? AND role = 'room'`,
+  ).all(bundleId)),
+  sessions: affectedSessionRows,
+};
+await writeFile(backupPath, `${JSON.stringify(rollbackSnapshot, null, 2)}\n`, {
+  mode: 0o600,
+});
 
 const masterKey = deriveMasterKey(masterSecret);
 const userKeyById = new Map();
@@ -86,12 +142,7 @@ function userKey(userId) {
 
 const upgradedBundles = [];
 for (const job of jobs) {
-  const targets = database.prepare(
-    `SELECT id, user_id, name FROM debate_mystery_mansion_bundles ORDER BY created_at`,
-  ).all().filter((row) => job.matches(row.name));
-  if (targets.length === 0) {
-    throw new Error(`No installed mansion matches ${job.packageName}.`);
-  }
+  const targets = targetsByPackage.get(job.packageName);
   const envelope = openPortableMysteryEnvelopeV1({
     envelope: await readFile(join(packageDirectory, job.packageName)),
   });
@@ -114,12 +165,7 @@ for (const job of jobs) {
 
 const upgradedBundleIds = new Set(upgradedBundles.map((bundle) => bundle.id));
 const refreshedSessions = [];
-const sessionRows = database.prepare(
-  `SELECT id, user_id, revision, status, session_json
-     FROM debate_sessions
-    WHERE status IN ('live', 'waiting_for_player', 'paused')`,
-).all();
-for (const row of sessionRows) {
+for (const row of affectedSessionRows) {
   const session = JSON.parse(row.session_json);
   const snapshot = session.formatState?.format === "whodunnit"
     ? session.formatState.config?.mansionSnapshot

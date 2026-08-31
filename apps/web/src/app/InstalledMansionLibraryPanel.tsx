@@ -32,6 +32,12 @@ export interface MansionSoundscapeMutationResultV1 {
   error: string | null;
 }
 
+export interface MansionExteriorCandidateV1 {
+  id: string;
+  displayUrl: string;
+  scaleClass: string;
+}
+
 export interface InstalledMansionLibraryProps {
   theme: "light" | "dark";
   mansions: DebateMysteryMansionBundleSummaryV1[];
@@ -47,6 +53,10 @@ export interface InstalledMansionLibraryProps {
     mansion: DebateMysteryMansionBundleSummaryV1,
     update: InstalledMansionLibraryUpdateV1,
   ) => Promise<boolean>;
+  onRefractExterior: (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+    direction: string,
+  ) => Promise<MansionExteriorCandidateV1 | null>;
   onClone: (
     mansion: DebateMysteryMansionBundleSummaryV1,
   ) => Promise<DebateMysteryMansionBundleSummaryV1 | null>;
@@ -94,7 +104,7 @@ function readMansionThumbnail(file: File): Promise<string> {
     return Promise.reject(new Error("Choose a PNG, JPEG, or WebP exterior cover."));
   }
   if (file.size > 8 * 1024 * 1024) {
-    return Promise.reject(new Error("Mansion exterior covers must be 8 MB or smaller."));
+    return Promise.reject(new Error("Mystery Venue exterior covers must be 8 MB or smaller."));
   }
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -118,6 +128,7 @@ export default function InstalledMansionLibrary({
   onSelect,
   onRandom,
   onUpdate,
+  onRefractExterior,
   onClone,
   onSaveTopology,
   onGenerateRoomArt,
@@ -140,6 +151,9 @@ export default function InstalledMansionLibrary({
   const [editor, setEditor] = useState<MansionEditorDraftV1 | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [editorSaving, setEditorSaving] = useState(false);
+  const [exteriorDirection, setExteriorDirection] = useState("");
+  const [exteriorCandidate, setExteriorCandidate] = useState<MansionExteriorCandidateV1 | null>(null);
+  const [exteriorBusy, setExteriorBusy] = useState(false);
   const [soundscapeTab, setSoundscapeTab] = useState<"music" | "atmosphere">("music");
   const [removeConfirmation, setRemoveConfirmation] =
     useState<DebateMysteryMansionBundleSummaryV1 | null>(null);
@@ -164,7 +178,44 @@ export default function InstalledMansionLibrary({
       thumbnailDataUrl: null,
     });
     setSoundscapeTab("music");
+    setExteriorDirection("");
+    setExteriorCandidate(null);
     setEditorError(null);
+  };
+
+  const refractExterior = async (): Promise<void> => {
+    if (!editingMansion || responseMode === "local") return;
+    setExteriorBusy(true);
+    setEditorError(null);
+    try {
+      setExteriorCandidate(await onRefractExterior(editingMansion, exteriorDirection));
+    } catch (caught) {
+      setEditorError(caught instanceof Error ? caught.message : "That venue exterior could not be refracted.");
+    } finally {
+      setExteriorBusy(false);
+    }
+  };
+
+  const acceptExteriorCandidate = async (): Promise<void> => {
+    if (!editingMansion || !exteriorCandidate) return;
+    setExteriorBusy(true);
+    setEditorError(null);
+    try {
+      const response = await fetch(exteriorCandidate.displayUrl);
+      if (!response.ok) throw new Error("The exterior preview is no longer available.");
+      const thumbnailDataUrl = await readMansionThumbnail(
+        new File([await response.blob()], "mystery-venue-exterior.png", { type: "image/png" }),
+      );
+      const saved = await onUpdate(editingMansion, { thumbnailDataUrl });
+      if (saved) {
+        setExteriorCandidate(null);
+        setEditor((current) => current ? { ...current, thumbnailAction: "keep", thumbnailDataUrl: null } : current);
+      }
+    } catch (caught) {
+      setEditorError(caught instanceof Error ? caught.message : "That venue exterior could not be accepted.");
+    } finally {
+      setExteriorBusy(false);
+    }
   };
 
   const chooseThumbnail = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
@@ -263,8 +314,8 @@ export default function InstalledMansionLibrary({
       <header className={styles.installedMansionsHeader}>
         <div>
           <small>Installed library</small>
-          <h3>Installed Mansions</h3>
-          <p>Choose a house for this case, or edit how it appears in your library.</p>
+          <h3>Mystery Venues</h3>
+          <p>Choose a place for this case, or edit how it appears in your library.</p>
         </div>
         <button
           type="button"
@@ -274,7 +325,7 @@ export default function InstalledMansionLibrary({
           onClick={onRandom}
         >
           <span aria-hidden="true">✦</span>
-          Random installed mansion
+          Random Mystery Venue
         </button>
       </header>
 
@@ -282,8 +333,8 @@ export default function InstalledMansionLibrary({
         <div className={styles.installedMansionsEmpty}>
           <span aria-hidden="true">◇</span>
           <div>
-            <strong>No mansions installed yet</strong>
-            <small>Import a .mansion below, or finish exploring a house and save its mansion level.</small>
+            <strong>No Mystery Venues installed yet</strong>
+            <small>Import a Mystery Venue (.mansion), or create one from a setting description.</small>
           </div>
         </div>
       ) : (
@@ -317,7 +368,7 @@ export default function InstalledMansionLibrary({
                 <div className={styles.installedMansionCopy}>
                   <h4>{presentation.title}</h4>
                   <p>{presentation.description}</p>
-                  <small>{mansion.floors} floor{mansion.floors === 1 ? "" : "s"} · {mansion.totalRooms} rooms · {mansion.suspectCount} suspects</small>
+                  <small>{mansion.layoutV2?.venueProfile?.tierLabels.join(" · ") ?? `${mansion.floors} floor${mansion.floors === 1 ? "" : "s"}`} · {mansion.totalRooms} rooms · {mansion.suspectCount} suspects</small>
                   <small data-tutorial-target="whodunnit-mansion-prop-theme">
                     {mansion.propTheme
                       ? "16/16 themed props"
@@ -334,7 +385,7 @@ export default function InstalledMansionLibrary({
                     disabled={busy}
                     onClick={() => onSelect(mansion.id)}
                   >
-                    {selected ? "Selected ✓" : "Use this mansion"}
+                    {selected ? "Selected ✓" : "Use this venue"}
                   </button>
                   <button
                     type="button"
@@ -357,8 +408,8 @@ export default function InstalledMansionLibrary({
           id="installed-mansion-editor"
           theme={theme}
           eyebrow="Library details"
-          title="Edit mansion details"
-          description="Customize its exterior cover, title, description, and sharing details in your Installed Mansions library."
+          title="Edit venue details"
+          description="Customize its exterior cover, title, description, and sharing details in your Mystery Venues library."
           size="wide"
           busy={editorSaving}
           onClose={() => setEditor(null)}
@@ -366,11 +417,11 @@ export default function InstalledMansionLibrary({
         <section className={styles.installedMansionEditor}>
           <div className={styles.installedMansionEditorGrid}>
             <div className={styles.installedMansionThumbnailEditor}>
-              {editorThumbnailUrl ? <img src={editorThumbnailUrl} alt="Current mansion exterior cover" /> : <span aria-hidden="true">{editingMansion.rooms[0]?.emoji ?? "◇"}</span>}
+              {editorThumbnailUrl ? <img src={editorThumbnailUrl} alt="Current venue exterior cover" /> : <span aria-hidden="true">{editingMansion.rooms[0]?.emoji ?? "◇"}</span>}
               <div>
                 <label htmlFor="installed-mansion-thumbnail">Choose exterior cover</label>
                 <input id="installed-mansion-thumbnail" type="file" accept="image/png,image/jpeg,image/webp" disabled={editorSaving} onChange={(event) => void chooseThumbnail(event)} />
-                <small>Use one high-quality outside view that shows the complete mansion in its geography.</small>
+                <small>Use one high-quality establishing view that shows the complete venue in its environment.</small>
                 <button
                   type="button"
                   disabled={editorSaving}
@@ -378,6 +429,30 @@ export default function InstalledMansionLibrary({
                 >
                   Use {editingMansion.portable ? "package" : "original"} exterior
                 </button>
+                <label htmlFor="installed-mansion-exterior-direction">Exterior Refract direction</label>
+                <input
+                  id="installed-mansion-exterior-direction"
+                  value={exteriorDirection}
+                  maxLength={1_200}
+                  disabled={editorSaving || exteriorBusy || responseMode === "local"}
+                  placeholder={`Optional direction for this ${editingMansion.layoutV2?.venueProfile?.placeNoun ?? "estate"}`}
+                  onChange={(event) => setExteriorDirection(event.currentTarget.value)}
+                />
+                <button
+                  type="button"
+                  disabled={editorSaving || exteriorBusy || responseMode === "local"}
+                  onClick={() => void refractExterior()}
+                >
+                  {exteriorBusy ? "Refracting…" : "Refract exterior"}
+                </button>
+                <small>{responseMode === "local" ? "ONLINE only · LOCAL keeps the neutral or accepted exterior." : "Creates a candidate only. Your accepted exterior stays unchanged until you choose Use this exterior."}</small>
+                {exteriorCandidate ? (
+                  <div>
+                    <img src={exteriorCandidate.displayUrl} alt="Mystery Venue exterior candidate" />
+                    <button type="button" disabled={editorSaving || exteriorBusy} onClick={() => void acceptExteriorCandidate()}>Use this exterior</button>
+                    <button type="button" disabled={editorSaving || exteriorBusy} onClick={() => setExteriorCandidate(null)}>Discard candidate</button>
+                  </div>
+                ) : null}
               </div>
             </div>
             <div className={styles.installedMansionEditorFields}>
@@ -422,7 +497,7 @@ export default function InstalledMansionLibrary({
           >
             <header className={styles.installedMansionSoundscapeHeader}>
               <div>
-                <small>Mansion evidence wardrobe</small>
+                <small>Venue evidence wardrobe</small>
                 <h4>{editingMansion.propTheme ? "16/16 themed props" : "Themed evidence props"}</h4>
                 <p>
                   One reusable visual replacement for every functional role. Recipients use this pack offline without adding it to their Asset Library.
@@ -441,7 +516,7 @@ export default function InstalledMansionLibrary({
                   disabled={busy || editorSaving || responseMode === "local"}
                   onClick={() => void runSoundscapeMutation(
                     onGenerateProps,
-                    "That mansion prop pack could not be started.",
+                    "That venue prop pack could not be started.",
                   )}
                 >
                   {editingMansion.propThemeProgress?.readyCount
@@ -477,12 +552,12 @@ export default function InstalledMansionLibrary({
           >
             <header className={styles.installedMansionSoundscapeHeader}>
               <div>
-                <small>Mansion soundscape</small>
+                <small>Venue soundscape</small>
                 <h4>Music and atmosphere</h4>
                 <p>Audition the score separately from the continuous environmental bed and room acoustics.</p>
               </div>
             </header>
-            <div className={styles.installedMansionSoundscapeTabs} role="tablist" aria-label="Mansion soundscape">
+            <div className={styles.installedMansionSoundscapeTabs} role="tablist" aria-label="Venue soundscape">
               <button
                 type="button"
                 role="tab"
@@ -515,25 +590,25 @@ export default function InstalledMansionLibrary({
                 <SanctumAudioPlayer
                   src={themePreviewSource}
                   label={themePreview?.title ?? "The Midnight Clue"}
-                  kicker={editingMansion.music?.candidate ? "Music preview" : editingMansion.music?.active ? "Mansion theme" : "PRISM fallback"}
+                  kicker={editingMansion.music?.candidate ? "Music preview" : editingMansion.music?.active ? "Venue theme" : "PRISM fallback"}
                   volume={audioVolume}
                 />
                 {editingMansion.music?.candidate ? (
                   <div className={styles.installedMansionMusicDecision}>
-                    <button type="button" disabled={busy || editorSaving} onClick={() => void runSoundscapeMutation(onAcceptTheme, "That mansion music could not be accepted.")}>Use this version</button>
-                    <button type="button" disabled={busy || editorSaving} onClick={() => void runSoundscapeMutation(onDiscardTheme, "That mansion music preview could not be discarded.")}>Discard</button>
+                    <button type="button" disabled={busy || editorSaving} onClick={() => void runSoundscapeMutation(onAcceptTheme, "That venue music could not be accepted.")}>Use this version</button>
+                    <button type="button" disabled={busy || editorSaving} onClick={() => void runSoundscapeMutation(onDiscardTheme, "That venue music preview could not be discarded.")}>Discard</button>
                   </div>
                 ) : (
                   <div className={styles.installedMansionMusicControls}>
                     <button
                       type="button"
                       disabled={busy || editorSaving || responseMode === "local"}
-                      onClick={() => void runSoundscapeMutation(onGenerateTheme, "That mansion music could not be synthesized.")}
+                      onClick={() => void runSoundscapeMutation(onGenerateTheme, "That venue music could not be synthesized.")}
                     >
                       {editingMansion.music?.active ? "Resynthesize music" : "Synthesize music"}
                     </button>
                     {editingMansion.music?.previous ? (
-                      <button type="button" disabled={busy || editorSaving} onClick={() => void runSoundscapeMutation(onUndoTheme, "The previous mansion music could not be restored.")}>Undo previous version</button>
+                      <button type="button" disabled={busy || editorSaving} onClick={() => void runSoundscapeMutation(onUndoTheme, "The previous venue music could not be restored.")}>Undo previous version</button>
                     ) : null}
                   </div>
                 )}
@@ -548,7 +623,7 @@ export default function InstalledMansionLibrary({
                 <header>
                   <div>
                     <small>Continuous atmosphere</small>
-                    <h4>{editingMansion.atmosphere?.candidate ? "Atmosphere preview" : editingMansion.atmosphere?.active || ambienceManifest?.bespokeSynthesisRequested ? "Mansion identity bed" : "Bundled theme palette"}</h4>
+                    <h4>{editingMansion.atmosphere?.candidate ? "Atmosphere preview" : editingMansion.atmosphere?.active || ambienceManifest?.bespokeSynthesisRequested ? "Venue identity bed" : "Bundled theme palette"}</h4>
                     <p>The world bed continues across rooms while exposure, filtering, emitters, and speech ducking crossfade around it.</p>
                   </div>
                   <span>{ambienceManifest ? `${ambienceManifest.roomProfiles.length} room profiles` : "Automatic"}</span>
@@ -557,7 +632,7 @@ export default function InstalledMansionLibrary({
                   <SanctumAudioPlayer
                     src={atmospherePreviewSource}
                     label={atmosphereTrack?.title ?? `${editingMansion.houseStyle.atmosphere.weather} · ${editingMansion.houseStyle.atmosphere.timeOfDay}`}
-                    kicker={editingMansion.atmosphere?.candidate ? "Atmosphere preview" : editingMansion.atmosphere?.active || ambienceManifest?.bespokeSynthesisRequested ? "Mansion atmosphere" : "PRISM acoustic library"}
+                    kicker={editingMansion.atmosphere?.candidate ? "Atmosphere preview" : editingMansion.atmosphere?.active || ambienceManifest?.bespokeSynthesisRequested ? "Venue atmosphere" : "PRISM acoustic library"}
                     volume={audioVolume}
                   />
                 ) : (
@@ -571,27 +646,27 @@ export default function InstalledMansionLibrary({
                 </dl>
                 {editingMansion.atmosphere?.candidate ? (
                   <div className={styles.installedMansionMusicDecision}>
-                    <button type="button" disabled={busy || editorSaving} onClick={() => void runSoundscapeMutation(onAcceptAtmosphere, "That mansion atmosphere could not be accepted.")}>Use this version</button>
-                    <button type="button" disabled={busy || editorSaving} onClick={() => void runSoundscapeMutation(onDiscardAtmosphere, "That mansion atmosphere preview could not be discarded.")}>Discard</button>
+                    <button type="button" disabled={busy || editorSaving} onClick={() => void runSoundscapeMutation(onAcceptAtmosphere, "That venue atmosphere could not be accepted.")}>Use this version</button>
+                    <button type="button" disabled={busy || editorSaving} onClick={() => void runSoundscapeMutation(onDiscardAtmosphere, "That venue atmosphere preview could not be discarded.")}>Discard</button>
                   </div>
                 ) : (
                   <div className={styles.installedMansionMusicControls}>
                     <button
                       type="button"
                       disabled={busy || editorSaving || responseMode === "local"}
-                      onClick={() => void runSoundscapeMutation(onGenerateAtmosphere, "That mansion atmosphere could not be synthesized.")}
+                      onClick={() => void runSoundscapeMutation(onGenerateAtmosphere, "That venue atmosphere could not be synthesized.")}
                     >
                       {editingMansion.atmosphere?.active ? "Resynthesize atmosphere" : "Synthesize atmosphere"}
                     </button>
                     {editingMansion.atmosphere?.previous ? (
-                      <button type="button" disabled={busy || editorSaving} onClick={() => void runSoundscapeMutation(onUndoAtmosphere, "The previous mansion atmosphere could not be restored.")}>Undo previous version</button>
+                      <button type="button" disabled={busy || editorSaving} onClick={() => void runSoundscapeMutation(onUndoAtmosphere, "The previous venue atmosphere could not be restored.")}>Undo previous version</button>
                     ) : null}
                   </div>
                 )}
                 <small className={styles.installedMansionMusicPrivacy}>
                   {responseMode === "local"
                     ? "LOCAL uses packaged or bundled beds and procedural room mixing without contacting an online generator."
-                    : "ONLINE can synthesize one seamless mansion-wide bed. Only non-semantic environmental layers may play automatically; clue-bearing sounds require a sealed stage cue."}
+                    : "ONLINE can synthesize one seamless venue-wide bed. Only non-semantic environmental layers may play automatically; clue-bearing sounds require a sealed stage cue."}
                 </small>
               </div>
             )}
@@ -606,10 +681,10 @@ export default function InstalledMansionLibrary({
                 disabled={busy || editorSaving}
                 onClick={() => void openMansionEditor()}
               >
-                {editingMansion.derivation ? "Open Mansion Editor" : "Duplicate & edit mansion"}
+                {editingMansion.derivation ? "Open Venue Editor" : "Duplicate & edit venue"}
               </button>
               <label>Optional export password<input type="password" value={exportPassword} autoComplete="new-password" disabled={editorSaving} onChange={(event) => onExportPasswordChange(event.currentTarget.value)} /></label>
-              <button type="button" disabled={busy || editorSaving || editingMansion.portable?.license.allowsRedistribution === false} onClick={() => onExport(editingMansion)}>Export Mansion</button>
+              <button type="button" disabled={busy || editorSaving || editingMansion.portable?.license.allowsRedistribution === false} onClick={() => onExport(editingMansion)}>Export Mystery Venue</button>
               <button
                 type="button"
                 className={styles.savedMansionRemove}
@@ -645,9 +720,9 @@ export default function InstalledMansionLibrary({
           open
           id="installed-mansion-remove"
           theme={theme}
-          eyebrow="Remove installed mansion"
+          eyebrow="Remove installed venue"
           title={`Remove ${resolveInstalledMansionPresentationV1(removeConfirmation).title}?`}
-          description="This removes the local installed copy and its library details. Export it first if you want to keep the mansion file."
+          description="This removes the local installed copy and its library details. Export it first if you want to keep the Mystery Venue file."
           role="alertdialog"
           busy={busy}
           onClose={() => setRemoveConfirmation(null)}
@@ -658,7 +733,7 @@ export default function InstalledMansionLibrary({
               disabled={busy}
               onClick={() => setRemoveConfirmation(null)}
             >
-              Keep mansion
+              Keep venue
             </button>
             <button
               type="button"

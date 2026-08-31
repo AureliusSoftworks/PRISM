@@ -12,6 +12,12 @@ function signalPowersTutorialBody(): string {
 }
 
 describe("mode tutorials", () => {
+  it("explains model and effort receipts for every Refract toast", () => {
+    const body = MODE_TUTORIALS.debate.steps[0]?.body ?? "";
+    assert.match(body, /Every successful Refract toast names the model and Effort/u);
+    assert.match(body, /local shuffles name None for both/u);
+  });
+
   it("explains Signal's producer-only guest annoyance estimate without exposing private reasoning", () => {
     const body = MODE_TUTORIALS.botcast.steps.find(
       (step) => step.heading === "Produce from the control room",
@@ -73,101 +79,42 @@ describe("mode tutorials", () => {
     assert.match(step.body, /frozen case pre-fills/u);
     assert.match(step.body, /existing Theory Board to review frozen Prosecutor findings/u);
     assert.match(step.body, /explicitly file the conclusion/u);
-    assert.match(step.body, /Spectator cannot return to the mansion/u);
+    assert.match(step.body, /Spectator cannot return to the venue/u);
     assert.match(step.body, /Unused clues, sealed case fields, graph internals/u);
-    assert.match(step.body, /Participant keeps the full mansion/u);
+    assert.match(step.body, /Participant keeps the full venue/u);
     assert.match(step.body, /guided five-step path/u);
-    assert.match(step.body, /Experience, Mansion, Story, Production, then Cast/u);
-    assert.match(step.body, /Only the current step's decisions are shown/u);
-    assert.match(step.body, /prompt-free group picker/u);
-    assert.match(step.body, /prompt-free random bot replacement/u);
-    assert.match(step.body, /Back and Continue preserve the draft/u);
-    assert.match(step.body, /create a new Quick, Standard, Grand, or Custom house/u);
-    assert.match(step.body, /Quick uses the compact exterior family/u);
-    assert.match(step.body, /matching PRISM House exterior covers/u);
-    assert.match(step.body, /Custom uses a question-mark cover/u);
-    assert.match(step.body, /Custom derives its family from the frozen public floor and room count/u);
-    assert.match(step.body, /whether to use Installed Mansions/u);
-    assert.match(step.body, /Use this mansion/u);
-    assert.match(step.body, /Random installed mansion/u);
-    assert.match(step.body, /contained dialog for the local library exterior, title, and description/u);
-    assert.match(step.body, /package or original default/u);
-    assert.match(step.body, /quiet origin badge/u);
-    assert.match(step.body, /Imported means it came from a portable \.mansion package/u);
-    assert.match(step.body, /Created here means it was saved from a PRISM mansion level/u);
-    assert.match(step.body, /Derived marks an editable local copy/u);
-    assert.match(step.body, /Duplicate & edit mansion preserves that source/u);
-    assert.match(step.body, /full-screen Mansion Editor/u);
+    assert.match(step.body, /Experience, Mystery Venue, Story, Production, then Cast/u);
+    assert.match(step.body, /optional description/u);
+    assert.match(step.body, /explicit Quick, Standard, Grand, or Custom investigation length/u);
+    assert.match(step.body, /Propose Venue returns text and a topology preview without creating art or a library item/u);
+    assert.match(step.body, /Use Proposal creates and selects the venue/u);
+    assert.match(step.body, /Try Another rerolls the structured draft/u);
+    assert.match(step.body, /Start Blank retains the estate editor path/u);
+    assert.match(step.body, /one-to-three-tier limit/u);
+    assert.match(step.body, /own tier labels, semantic entry, repeated room archetypes, anchors, and connector vocabulary/u);
+    assert.match(step.body, /Legacy estates retain their Foyer and room-template rules/u);
+    assert.match(step.body, /Art remains optional/u);
+    assert.match(step.body, /Mystery Spark may dress the accepted venue but cannot replace its topology, geography, room program, or entry/u);
     assert.match(step.body, /fixed 16 by 12 planner/u);
-    assert.match(step.body, /existing footprint and silhouette/u);
-    assert.match(step.body, /room type can be placed only once across the whole mansion, regardless of floor/u);
-    assert.match(step.body, /placed types remain visible but unavailable/u);
-    assert.match(step.body, /Double-click a room to enter its Room Editor/u);
-    assert.match(step.body, /counterclockwise and clockwise arrows/u);
-    assert.match(step.body, /Undo restores the previous architectural layout step/u);
-    assert.match(step.body, /collisions move nearby blocks to the closest legal connected position/u);
-    assert.match(step.body, /only a move that creates an island returns/u);
-    assert.match(step.body, /Corridors are traversable, resizable circulation blocks/u);
-    assert.match(step.body, /Shared-wall doors appear as thick yellow marks/u);
-    assert.match(step.body, /auto-center when a block joins the plan/u);
-    assert.match(step.body, /neighbor compatibility comes from this geometry/u);
-    assert.match(step.body, /Open Room Editor to drill in/u);
-    assert.match(step.body, /Pixel Art is a separate authored asset, never a filtered preview/u);
-    assert.match(step.body, /balanced, hue-preserving grid without baking that grid into the accepted source/u);
-    assert.match(step.body, /Choose Place anchor, then click the room image/u);
-    assert.match(step.body, /Each room can carry at most eight seeded fire, omni, directional, or freehand-neon lights/u);
-    assert.match(step.body, /drag to move, and use the edge handle to resize/u);
-    assert.match(step.body, /Reduced Motion freezes their deterministic animation/u);
-    assert.match(step.body, /static mansion presentation in this release/u);
-    assert.match(step.body, /Open Mansion Editor/u);
-    assert.match(step.body, /smallest valid connected two-floor plan/u);
-    assert.match(step.body, /complete semantic room-block palette runs from Ballroom through Garage/u);
-    assert.match(step.body, /Foyer, Basement, and Garage stay on Floor 1/u);
-    assert.match(step.body, /Attic and Rooftop Lounge stay on the highest occupied floor/u);
-    assert.match(step.body, /impossible choices visible but disabled/u);
-    assert.match(step.body, /remove it from the right inspector/u);
-    assert.match(step.body, /informative full-screen blocker/u);
-    assert.match(step.body, /returns to the mansion map/u);
-    assert.match(step.body, /Regenerate room asset/u);
-    assert.match(step.body, /clears that room's anchors, lights, and staged art/u);
-    assert.match(step.body, /Synthesize Pixel Art/u);
-    assert.match(step.body, /existing high-resolution room as a strict composition reference/u);
-    assert.match(step.body, /Accept candidate/u);
-    assert.match(step.body, /LOCAL cannot synthesize new room art/u);
-    assert.match(step.body, /Floor 3 stays disabled until Floor 2 has at least four semantic rooms/u);
-    assert.match(step.body, /functional foyer staircase/u);
-    assert.match(step.body, /saved derivative becomes the mansion selected for this case/u);
-    assert.match(step.body, /high-quality exterior establishing cover/u);
-    assert.match(step.body, /interiors and room plates are never cover fallbacks/u);
-    assert.match(step.body, /Install a mansion file/u);
-    assert.match(step.body, /separate inspection dialog instead of expanding setup/u);
-    assert.match(step.body, /Experience first establishes the court tone/u);
-    assert.match(step.body, /Production holds custom art, audio, recipe controls/u);
-    assert.match(step.body, /Cast begins with the Jury Trial toggle/u);
-    assert.match(step.body, /four juror seats appear only while it is on/u);
-    assert.match(step.body, /Bench Trial hides them/u);
-    assert.match(step.body, /Select a role card first, then choose a Library bot/u);
-    assert.match(step.body, /clicking a role card never changes its current bot/u);
-    assert.match(step.body, /Mansion idea/u);
+    assert.match(step.body, /one-to-three-tier limit/u);
+    assert.match(step.body, /Legacy estates retain their Foyer and room-template rules/u);
+    assert.match(step.body, /explicit candidate acceptance/u);
+    assert.match(step.body, /Mystery Spark/u);
     assert.doesNotMatch(step.body, /Theme \/ Spark/u);
     assert.match(step.body, /Participant setup offers Skip investigation/u);
     assert.match(step.body, /Spectator setup calls the same direct-court choice Start directly in court/u);
     assert.match(step.body, /keeps Evidence image synthesis optional in ONLINE/u);
-    assert.match(step.body, /In ONLINE, Evidence and Rooms are opt-in/u);
-    assert.match(step.body, /In LOCAL, Evidence image synthesis is unavailable/u);
-    assert.match(step.body, /text and symbolic evidence card/u);
-    assert.match(step.body, /rooms use bundled PRISM art or artwork already installed/u);
     assert.match(step.body, /Personalize local ambience/u);
     assert.match(step.body, /without an online request or new audio file/u);
     assert.match(step.body, /encrypted case vault—not Images, Generated Images, or the Library/u);
     assert.match(step.body, /Save image is the explicit action/u);
-    assert.match(step.body, /fullscreen title card waits outside the mansion/u);
+    assert.match(step.body, /fullscreen title card waits outside the venue/u);
     assert.match(step.body, /Choose Start to clear the title, all copy, and vignette/u);
     assert.match(step.body, /intro music fall silent/u);
     assert.match(step.body, /first-person exterior/u);
-    assert.match(step.body, /click the glowing mansion entrance/u);
+    assert.match(step.body, /click the glowing venue entrance/u);
     assert.match(step.body, /embodied Prosecutor thinks through the spoiler-safe briefing/u);
-    assert.match(step.body, /badge walks from the unvisited foyer threshold to the incident room/u);
+    assert.match(step.body, /badge walks from the unvisited semantic entry to the incident room/u);
     assert.match(step.body, /scene slowly fades in there/u);
     assert.match(step.body, /arrival never spends an extra discovery action/u);
     assert.match(step.body, /Upgrade every room to Realistic/u);
@@ -179,10 +126,10 @@ describe("mode tutorials", () => {
     assert.match(step.body, /imported package stays unchanged/u);
     assert.match(step.body, /click the exterior or yard to select the entire outside region/u);
     assert.match(step.body, /choose Go outside in the normal destination bar/u);
-    assert.match(step.body, /click its entrance to return directly to the Foyer/u);
+    assert.match(step.body, /click its entrance to return directly to the venue entry/u);
     assert.match(step.body, /without losing investigation progress/u);
     assert.match(step.body, /Inside the Move map, the selected Prosecutor's glyph and normalized color appear in the player orb/u);
-    assert.match(step.body, /first visits follow it through the mansion's doors, corridors, and floor connectors/u);
+    assert.match(step.body, /first visits follow it through the venue's doors, corridors, and floor connectors/u);
     assert.match(step.body, /visited rooms open immediately with a short physical travel bridge/u);
     assert.match(step.body, /Reduced Motion uses that same immediate bridge/u);
     assert.match(step.body, /Move is immediately available after the room introduction/u);
@@ -190,22 +137,14 @@ describe("mode tutorials", () => {
     assert.match(step.body, /return to unfinished details whenever you like/u);
     assert.match(step.body, /First visits require a connected doorway/u);
     assert.match(step.body, /discovered rooms can be revisited instantly from anywhere/u);
-    assert.match(step.body, /Preparing your mystery to watch/u);
-    assert.match(step.body, /Writing the trial, Checking the case, and Recording the cast/u);
-    assert.match(step.body, /collapsed Preparation details/u);
-    assert.match(step.body, /Participant Case Forge retains its detailed six stages/u);
-    assert.match(step.body, /last durable checkpoint/u);
-    assert.match(step.body, /Choose Continue in background/u);
-    assert.match(step.body, /other PRISM synthesis or start another Debate/u);
-    assert.match(step.body, /only one Whodunnit at a time/u);
-    assert.match(step.body, /Installed Mansion details owns one Soundscape surface/u);
+    assert.match(step.body, /Mystery Venue details owns one Soundscape surface/u);
     assert.match(step.body, /packaged layer or PRISM fallback/u);
     assert.match(step.body, /brief noir phrases and long quiet intervals/u);
     assert.match(step.body, /substantial near-silence and quiet loop boundaries/u);
     assert.doesNotMatch(step.body, /Shadow, Pulse, or Atmosphere/u);
     assert.match(step.body, /Use this version/u);
     assert.match(step.body, /Soundscape surface with separate Music and Atmosphere tabs/u);
-    assert.match(step.body, /one seamless mansion-wide environmental bed/u);
+    assert.match(step.body, /one seamless venue-wide environmental bed/u);
     assert.match(step.body, /LOCAL can play packaged and fallback music and ambience but never contacts ElevenLabs/u);
     assert.match(step.body, /Settings → Assets opens separate Music, Effects, and Ambience libraries/u);
     assert.match(step.body, /Settings → Storage remains byte accounting and protected cleanup/u);
@@ -213,21 +152,17 @@ describe("mode tutorials", () => {
     assert.match(step.body, /wrong place at the wrong time/u);
     assert.match(step.body, /explicit accomplice or conspiracy motif can bind a second responsible party/u);
     assert.match(step.body, /room art defaults to genuine synthesized Pixel Art/u);
-    assert.match(step.body, /320×180-relative grid uses ordinary Normal blending/u);
+    assert.match(step.body, /one 320×180 logical source sample owns each complete tessera/u);
+    assert.match(step.body, /lossless nearest-neighbor scaling/u);
+    assert.match(step.body, /ordinary Normal-blend separator grid/u);
     assert.match(step.body, /authored source stays gridless/u);
-    assert.match(step.body, /genuine synthesized Pixel Art[\s\S]*never pixelates or palette-filters/u);
     assert.match(step.body, /Upgrade to Realistic · ONLINE/u);
     assert.match(step.body, /LOCAL never sends a room to a remote generator/u);
     assert.match(step.body, /Realistic uses Full avatars at the same stage footprint/u);
-    assert.match(step.body, /completion, safe failure, or cancellation releases the Forge/u);
-    assert.match(step.body, /Archive shows its spoiler-safe durable progress/u);
-    assert.match(step.body, /Save mansion level preserves the layout/u);
-    assert.match(step.body, /Writing the Case/u);
-    assert.match(step.body, /Testing Contradictions/u);
-    assert.match(step.body, /Preparing Local Voices/u);
+    assert.match(step.body, /Save venue level preserves the layout/u);
     assert.match(step.body, /Continue without voices/u);
     assert.match(step.body, /no Actions or token economy/u);
-    assert.match(step.body, /Move returns to PRISM’s shallow-isometric mansion/u);
+    assert.match(step.body, /Move returns to PRISM’s shallow-isometric venue/u);
     assert.match(step.body, /Unvisited rooms reveal no occupant glyph/u);
     assert.match(step.body, /embodied Prosecutor's thought beat settles/u);
     assert.match(step.body, /name, glyph, normalized color, subtle glow/u);
@@ -988,7 +923,9 @@ describe("mode tutorials", () => {
     assert.match(copy, /Wield Prism onto Stage layout to open the lab with a shuffled preview cast/u);
     assert.match(copy, /Main is also the Whodunnit courtroom establishing view/u);
     assert.match(copy, /Table and Witness switch/u);
+    assert.match(copy, /shared foreground while looking through the Moderator camera/u);
     assert.match(copy, /fourth shuffled Library bot/u);
+    assert.match(copy, /Jury preview uses those four distinct bodies/u);
     assert.match(copy, /without inventing or erasing history/u);
     assert.match(copy, /Tune the room keeps the proceeding preset/u);
     assert.match(copy, /always visible while you shape the Debate/u);
@@ -1081,14 +1018,14 @@ describe("mode tutorials", () => {
       /LOCAL blocks research and page reading before network access/u,
     );
     assert.match(copy, /Powers never make a bot ineligible for a role/u);
-    assert.match(copy, /Pro flyter on the left/u);
-    assert.match(copy, /Con flyter on the right/u);
+    assert.match(copy, /Challenger on the left/u);
+    assert.match(copy, /Defender on the right/u);
     assert.match(copy, /fifteen generic PRISM spectators plus three Jarl guards/u);
     assert.match(copy, /allegiance persists in saves and replay/u);
-    assert.match(copy, /complete Pro, Con, and Host avatars/u);
+    assert.match(copy, /complete Challenger, Defender, and Host avatars/u);
     assert.match(copy, /Auto, Left, Host, Right, and Wide court cameras/u);
     assert.match(copy, /dedicated Jarl’s-throne view/u);
-    assert.match(copy, /authored red, green, and blue rugs visibly mark Pro, neutral, and Con territory/u);
+    assert.match(copy, /authored red, green, and blue rugs visibly mark Challenger, neutral, and Defender territory/u);
     assert.match(copy, /Flyt desk spans beneath the Hall/u);
     assert.match(copy, /open central pit and flickering candlelight carry the room/u);
     assert.match(copy, /clean bot silhouettes rather than Court chairs/u);
@@ -4100,7 +4037,7 @@ describe("mode tutorials", () => {
 
     assert.match(
       signalBody,
-      /A− and A\+ controls resize every Signal caption from 85% through 140%/u,
+      /Private Line rail keeps CC beside its A− and A\+ controls/u,
     );
     assert.match(signalBody, /live play, replay, and rehearsal soundchecks/u);
     assert.match(

@@ -74,28 +74,84 @@ test("the canonical full avatar style feeds one palette to both screen sizes", (
   );
   for (const token of [
     "--bot-avatar-screen-glass-overlay",
+    "--bot-avatar-screen-radial-geometry",
+    "--bot-avatar-screen-radial-stops",
     "--bot-avatar-screen-center",
     "--bot-avatar-screen-mid",
     "--bot-avatar-screen-edge",
     "transparent",
     "--zen-presence-face-bg",
     "--bot-avatar-screen-dark-base",
+    "transparent 100%",
+    "--bot-face-screen-glass-blend-mode: plus-lighter",
+    "--zen-live-bot-screen-specular-opacity: 0.22",
+    "--bot-avatar-screen-bottom-reflection",
+    "--bot-face-screen-bottom-reflection-opacity: 0.46",
+    "--zen-live-bot-shared-phosphor-glow-color",
   ]) {
     assert.ok(lightPlateRule.includes(token), `light face rule should include ${token}`);
   }
   for (const token of [
     "--zen-live-bot-buckle-rim-screen-stops",
-    "--bot-avatar-screen-center",
-    "--bot-avatar-screen-mid",
-    "--bot-avatar-screen-edge",
-    "transparent",
-    "--zen-live-bot-buckle-rim-screen-base: linear-gradient",
+    "--bot-avatar-buckle-screen-radial-stops",
+    "--zen-live-bot-buckle-screen-radial-geometry: ellipse 72% 80% at 50% 44%",
+    "--zen-live-bot-buckle-rim-screen-base: var(--bot-avatar-screen-dark-base)",
   ]) {
     assert.ok(lightBodyRule.includes(token), `light lower display should include ${token}`);
   }
   assert.match(
     lightEmissionRule,
     /background:[\s\S]*--bot-avatar-screen-glass-overlay[\s\S]*--bot-avatar-screen-dark-base/,
+  );
+  assert.match(
+    lightPlateRule,
+    /--bot-avatar-screen-radial-geometry:\s*ellipse 46% 54% at 50% 42%/,
+    "the face identity field must darken before the circular aperture edge",
+  );
+  assert.match(
+    lightPlateRule,
+    /--bot-avatar-screen-radial-stops:[\s\S]*?97%,\s*white 3%[\s\S]*?100%,\s*transparent[\s\S]*?0 14%[\s\S]*?100%,\s*transparent[\s\S]*?32%[\s\S]*?72%,\s*transparent[\s\S]*?58%[\s\S]*?28%,\s*transparent[\s\S]*?78%,\s*transparent 100%/,
+    "the face identity light must stay bright through the large aperture before falling to the CRT substrate",
+  );
+  assert.match(
+    lightPlateRule,
+    /--bot-avatar-screen-glass-overlay:\s*radial-gradient\(\s*var\(--bot-avatar-screen-radial-geometry\),/,
+    "the face must use the explicitly sized shared identity field",
+  );
+  assert.match(
+    lightBodyRule,
+    /--zen-live-bot-buckle-rim-screen-stops:\s*var\(\s*--bot-avatar-buckle-screen-radial-stops\s*\)/,
+    "the lower display must retain its independently broader identity light",
+  );
+  assert.match(
+    lightPlateRule,
+    /--bot-avatar-buckle-screen-radial-stops:[\s\S]*?18%,\s*transparent[\s\S]*?78%,\s*transparent 100%/,
+    "the approved lower-screen edge falloff must remain broader than the face",
+  );
+  assert.match(
+    cssSource,
+    /\.zenLiveBotPresenceBody::before\s*\{[\s\S]*?radial-gradient\([\s\S]*?--zen-live-bot-buckle-screen-radial-geometry/,
+    "the lower display must consume its independently enlarged identity field",
+  );
+  assert.doesNotMatch(
+    lightPlateRule.match(/--bot-avatar-screen-dark-base:[\s\S]*?\);/)?.[0] ?? "",
+    /--coffee-bot-color/,
+    "the black substrate must stay neutral beneath the identity light",
+  );
+  assert.match(
+    cssSource,
+    /\.botFaceScreenGlass::after\s*\{[\s\S]*?mix-blend-mode:\s*screen\s*;/,
+    "the retained white specular uses an optical screen blend",
+  );
+  assert.match(
+    cssSource,
+    /\.botFaceScreenGlass::before\s*\{[\s\S]*?background:\s*var\(--bot-avatar-screen-bottom-reflection, none\)[\s\S]*?opacity:\s*var\(--bot-face-screen-bottom-reflection-opacity, 0\)/,
+    "the shared glass renderer must support the Light bezel reflection without a surface override",
+  );
+  assert.match(
+    cssSource,
+    /--bot-face-screen-specular-opacity:\s*var\(\s*--zen-live-bot-screen-specular-opacity,\s*0\.055\s*\)/,
+    "the shared lens must consume the bounded Light-only specular opacity",
   );
   assert.ok(bodyGlyphRule.includes("--bot-avatar-screen-glow"));
   assert.ok(

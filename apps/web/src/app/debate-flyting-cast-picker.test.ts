@@ -32,6 +32,34 @@ describe("Flyting cast picker", () => {
     assert.match(flyting, /const fixedPlayerHost = seat === "host" && !needsBotHost/u);
   });
 
+  it("orders the cast and floor readout as Pro, Jarl, then Con", () => {
+    const roster = flyting.slice(
+      flyting.indexOf('className={`${studioStyles.castSlotGrid} ${styles.flytingPrincipalCast}`}'),
+      flyting.indexOf('className={styles.gallerySeed}', flyting.indexOf('className={`${studioStyles.castSlotGrid} ${styles.flytingPrincipalCast}`}')),
+    );
+    assert.ok(roster.indexOf('seat: "for"') < roster.indexOf('seat: "host"'));
+    assert.ok(roster.indexOf('seat: "host"') < roster.indexOf('seat: "against"'));
+    const schematic = flyting.slice(
+      flyting.indexOf('aria-label="Mead Hall schematic"'),
+      flyting.indexOf("</aside>", flyting.indexOf('aria-label="Mead Hall schematic"')),
+    );
+    assert.ok(
+      schematic.indexOf('label="Pro · left"') <
+        schematic.indexOf('label="Jarl"'),
+    );
+    assert.ok(
+      schematic.indexOf('label="Jarl"') <
+        schematic.indexOf('label="Con · right"'),
+    );
+  });
+
+  it("uses the shared visible-grid placement contract for Refract and Space rerolls", () => {
+    assert.match(flyting, /randomBotPickerPlacements/u);
+    assert.match(flyting, /placementRefractTarget=\{flytingCastPlacementRefractTarget\}/u);
+    assert.match(flyting, /value: "random"[\s\S]{0,120}Random · all/u);
+    assert.match(flyting, /rerollVisible: \(\) =>[\s\S]{0,160}visibleCastBots\.map/u);
+  });
+
   it("inherits Library groups and bot context actions from Debate Studio", () => {
     assert.match(debate, /<DebateFlytingSetup[\s\S]{0,180}botGroups=\{botGroups\}/u);
     assert.match(
@@ -47,8 +75,8 @@ describe("Flyting cast picker", () => {
       tutorials.indexOf("const FLYTING_TUTORIAL_STEP"),
       tutorials.indexOf("// Keep this dense tutorial", tutorials.indexOf("const FLYTING_TUTORIAL_STEP")),
     );
-    assert.match(flytingTutorial, /select the Pro flyter on the left/u);
-    assert.match(flytingTutorial, /Con flyter on the right/u);
+    assert.match(flytingTutorial, /select Pro on the left/u);
+    assert.match(flytingTutorial, /Con on the right/u);
     assert.match(flytingTutorial, /fifteen generic PRISM spectators/u);
     assert.match(flytingTutorial, /three Jarl guards/u);
     assert.match(flytingTutorial, /shared Library grid/u);

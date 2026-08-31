@@ -406,7 +406,15 @@ export function planReplayPremiumSegments(
   let dialogueCharacters = 0;
   const flushDialogue = (): void => {
     if (dialogueInputs.length === 0) return;
-    if (new Set(dialogueInputs.map((input) => input.voiceId)).size > 1) {
+    const needsPerVoicePhonology = dialogueInputs.some(
+      (input) =>
+        normalizeBotAudioVoiceProfileV1(input.take.snapshot.profile)
+          .premiumPronunciationEnabled === true,
+    );
+    if (
+      !needsPerVoicePhonology &&
+      new Set(dialogueInputs.map((input) => input.voiceId)).size > 1
+    ) {
       groups.push({ strategy: "dialogue", inputs: dialogueInputs });
     } else {
       groups.push(
@@ -471,6 +479,7 @@ function alignmentDurationMs(alignment: {
 export async function generateReplayPremiumSegment(args: {
   segment: ReplayPremiumPlannedSegment;
   apiKey: string;
+  tenantId?: string;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
   generationSeed?: string;
@@ -582,6 +591,8 @@ export async function generateReplayPremiumSegment(args: {
   if (!input) throw new Error("Premium segment is empty.");
   const speech = await requestElevenLabsSpeechWithTimestamps({
     apiKey: args.apiKey,
+    tenantId: args.tenantId,
+    privacyMode: "online",
     voiceId: input.voiceId,
     model: "eleven_v3",
     text: premiumSavedSpeechText(input.take),
@@ -602,6 +613,19 @@ export async function generateReplayPremiumSegment(args: {
       startMs: 0,
       endMs: durationMs,
       alignment,
+      ...(speech.premiumPhonology
+        ? {
+            premiumPhonology: {
+              planSha256: speech.premiumPhonology.planSha256,
+              rulesetVersion: speech.premiumPhonology.rulesetVersion,
+              rulesetSha256: speech.premiumPhonology.rulesetSha256,
+              model: speech.premiumPhonology.model,
+              direction: speech.premiumPhonology.direction,
+              gateEnabled: speech.premiumPhonology.gateEnabled,
+              fallback: speech.premiumPhonology.fallback,
+            },
+          }
+        : {}),
     }],
     characterCost: Array.from(input.text).length,
   };

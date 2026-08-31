@@ -8,6 +8,8 @@ import {
   DEFAULT_MANSION_ROOM_ART_CONTRACT_V3,
   DEFAULT_MANSION_ROOM_ART_CONTRACT_V4,
   DEFAULT_MANSION_ROOM_ART_CONTRACT_V5,
+  DEFAULT_MANSION_ROOM_ART_CONTRACT_V6,
+  CURRENT_MANSION_ROOM_ART_CONTRACT,
   portableMysteryPackageMajorIsSupportedV1,
   validateMansionPackageHeaderV1,
   validateMansionPackageManifestV1,
@@ -231,6 +233,14 @@ test("mansion manifests carry an optional titled, sealed music identity while le
 
 test("mansion manifests carry synthesized Pixel Art, retain legacy Mosaic compatibility, and accept optional realistic plates", () => {
   const manifest = mansionManifest();
+  assert.equal(CURRENT_MANSION_ROOM_ART_CONTRACT, DEFAULT_MANSION_ROOM_ART_CONTRACT_V6);
+  assert.equal(CURRENT_MANSION_ROOM_ART_CONTRACT.defaultStyle, "pixel-art");
+  assert.equal(CURRENT_MANSION_ROOM_ART_CONTRACT.defaultPresentation, "mosaic");
+  assert.equal(CURRENT_MANSION_ROOM_ART_CONTRACT.upgradeStyle, "realistic");
+  assert.equal(
+    CURRENT_MANSION_ROOM_ART_CONTRACT.realistic.source,
+    "accepted-gridless-pixel-art-upgrade",
+  );
   const illustratedHash = "b".repeat(64);
   (manifest.assets as Array<Record<string, unknown>>).push({
     ...(manifest.assets as Array<Record<string, unknown>>)[0],
@@ -243,6 +253,9 @@ test("mansion manifests carry synthesized Pixel Art, retain legacy Mosaic compat
   });
   (manifest.rooms as Array<Record<string, unknown>>)[0]!.illustratedRoomAssetId =
     "room-art-illustrated";
+  manifest.roomArt = DEFAULT_MANSION_ROOM_ART_CONTRACT_V6;
+  assert.deepEqual(validateMansionPackageManifestV1(manifest), []);
+
   manifest.roomArt = DEFAULT_MANSION_ROOM_ART_CONTRACT_V5;
   assert.deepEqual(validateMansionPackageManifestV1(manifest), []);
 
@@ -267,6 +280,15 @@ test("mansion manifests carry synthesized Pixel Art, retain legacy Mosaic compat
   manifest.roomArt = {
     ...DEFAULT_MANSION_ROOM_ART_CONTRACT_V4,
     pixelArt: { ...DEFAULT_MANSION_ROOM_ART_CONTRACT_V4.pixelArt, deterministicFilter: true },
+  };
+  assert.match(validateMansionPackageManifestV1(manifest).join("\n"), /roomArt is invalid/u);
+
+  manifest.roomArt = {
+    ...DEFAULT_MANSION_ROOM_ART_CONTRACT_V6,
+    pixelArt: {
+      ...DEFAULT_MANSION_ROOM_ART_CONTRACT_V6.pixelArt,
+      grid: { ...DEFAULT_MANSION_ROOM_ART_CONTRACT_V6.pixelArt.grid, resampling: "lanczos" },
+    },
   };
   assert.match(validateMansionPackageManifestV1(manifest).join("\n"), /roomArt is invalid/u);
 

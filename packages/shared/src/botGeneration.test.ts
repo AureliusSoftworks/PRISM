@@ -226,7 +226,8 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.equal(draft.audioVoiceProfile.elevenLabsVoiceInitialized, true);
     assert.ok(draft.audioVoiceProfile.accentDefinitionId);
     assert.ok(draft.audioVoiceProfile.pronunciationMapPoint);
-    assert.equal(draft.audioVoiceProfile.accentPronunciationEnabled, false);
+    assert.equal(draft.audioVoiceProfile.ttsPronunciationEnabled, false);
+    assert.equal(draft.audioVoiceProfile.premiumPronunciationEnabled, false);
     assert.ok(["light", "balanced", "strong"].includes(draft.audioVoiceProfile.speechprintStrength ?? ""));
     assert.equal(draft.audioVoiceProfile.systemVoiceName, undefined);
     assert.equal(draft.audioVoiceProfile.elevenLabsDirection, "hushed, wry, deliberate");
@@ -274,20 +275,22 @@ describe("normalizeBotGeneratedDraftV1", () => {
     const draft = normalizeBotGeneratedDraftV1(source, undefined, () => 0);
     assert.ok(draft);
     assert.equal(draft.audioVoiceProfile.accentDefinitionId, "irish-english");
-    assert.equal(draft.audioVoiceProfile.accentPronunciationEnabled, false);
+    assert.equal(draft.audioVoiceProfile.ttsPronunciationEnabled, false);
+    assert.equal(draft.audioVoiceProfile.premiumPronunciationEnabled, false);
   });
 
-  it("enables Accent Map pronunciation for an explicitly historical casting", () => {
+  it("leaves generated Accent Map pronunciation help off", () => {
     const source = completeDraft();
     source.voice = {
       ...(source.voice as Record<string, unknown>),
       accentDefinitionId: "irish-english",
-      accentPronunciationEnabled: true,
+      pronunciationHelpEnabled: true,
     };
     const draft = normalizeBotGeneratedDraftV1(source, undefined, () => 0);
     assert.ok(draft);
     assert.equal(draft.audioVoiceProfile.accentDefinitionId, "irish-english");
-    assert.equal(draft.audioVoiceProfile.accentPronunciationEnabled, true);
+    assert.equal(draft.audioVoiceProfile.ttsPronunciationEnabled, false);
+    assert.equal(draft.audioVoiceProfile.premiumPronunciationEnabled, false);
   });
 
   it("forces Prism when the model invents an unrequested alternate voice effect", () => {

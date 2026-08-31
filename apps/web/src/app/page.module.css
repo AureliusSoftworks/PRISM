@@ -13472,6 +13472,60 @@
   margin: 0;
 }
 
+.sharedAppletNavbarCompactBrand {
+  display: none;
+  width: 32px;
+  height: 32px;
+  color: var(--fg);
+  overflow: visible;
+}
+
+/* The authored desktop navbar carries several independent instruments. At
+   laptop widths, preserve every control without letting their contents paint
+   through a flex-shrunk parent: the primary refraction emblem becomes the
+   compact Home affordance and the wide pickers receive explicit, bounded
+   measures. The full wordmark returns automatically when the room exists. */
+@media (min-width: 721px) and (max-width: 1600px) {
+  .sharedAppletHeader .sharedAppletNavbarBrand .sidebarWordmarkButton {
+    width: 36px;
+    height: 36px;
+    padding: 2px;
+    overflow: visible;
+  }
+
+  .sharedAppletHeader
+    .sharedAppletNavbarBrand
+    .sidebarWordmarkButton
+    > .chatHubWordmarkStack {
+    display: none;
+  }
+
+  .sharedAppletHeader .sharedAppletNavbarCompactBrand {
+    display: block;
+  }
+
+  .sharedAppletHeader .chatHeaderModelPicker .composeModelControl {
+    width: clamp(132px, 14vw, 196px);
+    min-width: 132px;
+    max-width: 196px;
+  }
+
+  .sharedAppletHeader .chatHeaderModelPicker .voiceModeSelector {
+    width: clamp(118px, 12vw, 172px);
+    max-width: 172px;
+  }
+
+  .sharedAppletHeader .chatHeaderModelPicker .botLibraryGroupControl {
+    width: clamp(92px, 10vw, 138px);
+    max-width: 138px;
+    flex-basis: clamp(92px, 10vw, 138px);
+  }
+
+  .sharedAppletHeader .chatHeaderActions {
+    gap: 2px;
+  }
+}
+
 .sharedAppletHeader::after {
   content: "";
   position: absolute;
@@ -19009,9 +19063,18 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font-variant-ligatures: none;
   position: relative;
   z-index: 2;
-  --crt-face-edge-color: var(--chat-mini-bot-color, var(--accent));
-  --zen-live-bot-face-phosphor-ink: var(--chat-mini-bot-color, var(--accent));
-  color: var(--chat-mini-bot-color, var(--accent));
+  --crt-face-edge-color: var(
+    --chat-mini-bot-screen-ink,
+    var(--chat-mini-bot-color, var(--accent))
+  );
+  --zen-live-bot-face-phosphor-ink: var(
+    --chat-mini-bot-screen-ink,
+    var(--chat-mini-bot-color, var(--accent))
+  );
+  color: var(
+    --chat-mini-bot-screen-ink,
+    var(--chat-mini-bot-color, var(--accent))
+  );
   filter: none;
   text-shadow: none;
   transform-origin: center center;
@@ -19046,7 +19109,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .coffeeSeatMiniAvatarGlyph {
   width: var(--chat-mini-bot-glyph-size, 12px);
   height: var(--chat-mini-bot-glyph-size, 12px);
-  color: color-mix(in srgb, var(--chat-mini-bot-color, var(--accent)) 88%, #ffffff);
+  color: var(
+    --chat-mini-bot-screen-ink,
+    color-mix(
+      in srgb,
+      var(--chat-mini-bot-color, var(--accent)) 88%,
+      #ffffff
+    )
+  );
   filter: none;
 }
 
@@ -19066,20 +19136,32 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font-variant-ligatures: none;
   position: relative;
   z-index: 2;
-  --crt-face-edge-color: var(--chat-mini-bot-color, var(--accent));
-  --zen-live-bot-face-phosphor-ink: var(--chat-mini-bot-color, var(--accent));
-  color: var(--chat-mini-bot-color, var(--accent));
+  --crt-face-edge-color: var(
+    --chat-mini-bot-screen-ink,
+    var(--chat-mini-bot-color, var(--accent))
+  );
+  --zen-live-bot-face-phosphor-ink: var(
+    --chat-mini-bot-screen-ink,
+    var(--chat-mini-bot-color, var(--accent))
+  );
+  color: var(
+    --chat-mini-bot-screen-ink,
+    var(--chat-mini-bot-color, var(--accent))
+  );
   filter: none;
   text-shadow: none;
   transform-origin: center center;
 }
 
-/* Compact faces are identity-color LEDs, not white-hot CRT previews. Paint
-   the glyph source itself with the Mini's bot color so scaled custom eye
-   pairs cannot expose the full-size CRT gradient beneath the colored core. */
+/* Compact face marks share the Mini screen ink token. It remains the authored
+   identity LED color in Dark mode and becomes neutral white over normalized
+   identity glass in Light mode. */
 .coffeeSeatPlateEmoji:is(.coffeeSeatMiniAvatarFace, .emptyStateHeroMiniFace)
   [data-crt-glyph-layer="true"] {
-  color: var(--chat-mini-bot-color, var(--accent));
+  color: var(
+    --chat-mini-bot-screen-ink,
+    var(--chat-mini-bot-color, var(--accent))
+  );
   background: none;
   -webkit-background-clip: border-box;
   background-clip: border-box;
@@ -19117,7 +19199,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .emptyStateHeroMiniGlyph {
   width: var(--chat-mini-bot-glyph-size, clamp(14px, 1.35vw, 17px));
   height: var(--chat-mini-bot-glyph-size, clamp(14px, 1.35vw, 17px));
-  color: color-mix(in srgb, var(--chat-mini-bot-color, var(--accent)) 88%, #ffffff);
+  color: var(
+    --chat-mini-bot-screen-ink,
+    color-mix(
+      in srgb,
+      var(--chat-mini-bot-color, var(--accent)) 88%,
+      #ffffff
+    )
+  );
   filter: none;
 }
 
@@ -27456,6 +27545,37 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 }
 
+/* Short desktop windows need a vertical escape hatch. The composer floats
+   over the canvas by design, so the empty Home owns scrolling and reserves a
+   full composer runway at its end. This keeps the hero composed at rest while
+   making every bot tile reachable, including after the draft grows. */
+@media (min-width: 721px) and (max-height: 800px) {
+  .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+    .messages.messagesEmptyState[data-chat-ephemeral="true"] {
+    --zen-empty-state-top-reserve: 24px;
+    --zen-empty-state-bottom-reserve: max(
+      152px,
+      calc(env(safe-area-inset-bottom, 0px) + 132px)
+    );
+    align-items: stretch;
+    justify-content: flex-start;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+    scrollbar-gutter: stable;
+  }
+
+  .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+    .messagesEmptyState
+    > .emptyState.emptyStateHubPicker {
+    min-height: max-content;
+    padding-block-start: 24px;
+    padding-bottom: 24px;
+    translate: 0 0;
+  }
+}
+
 .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
   .messagesEmptyState
   .emptyStateIconButton {
@@ -29276,7 +29396,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border-radius: 50%;
   background:
     radial-gradient(
-        circle at 50% 48%,
+        var(
+          --zen-live-bot-buckle-screen-radial-geometry,
+          var(
+            --bot-avatar-screen-radial-geometry,
+            circle at 50% 48%
+          )
+        ),
         var(--zen-live-bot-buckle-rim-screen-stops)
       )
       content-box,
@@ -29365,42 +29491,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     --bot-avatar-screen-edge,
     var(--coffee-bot-color)
   );
-  --zen-live-bot-buckle-rim-screen-stops:
-    color-mix(
-        in srgb,
-        color-mix(
-            in oklch,
-            var(--bot-avatar-screen-center, var(--coffee-bot-color)) 92%,
-            white 8%
-          )
-          82%,
-        transparent
-      )
-      0 18%,
-    color-mix(
-        in srgb,
-        var(--bot-avatar-screen-center, var(--coffee-bot-color)) 76%,
-        transparent
-      )
-      38%,
-    color-mix(
-        in srgb,
-        var(--bot-avatar-screen-mid, var(--coffee-bot-color)) 68%,
-        transparent
-      )
-      58%,
-    color-mix(
-        in srgb,
-        var(--bot-avatar-screen-edge, var(--coffee-bot-color)) 56%,
-        transparent
-      )
-      74%;
-  --zen-live-bot-buckle-rim-screen-base: linear-gradient(
-    180deg,
-    color-mix(in srgb, #010404 92%, var(--coffee-bot-color) 8%),
-    #000203 64%,
-    #000101
+  --zen-live-bot-buckle-rim-screen-stops: var(
+    --bot-avatar-buckle-screen-radial-stops
   );
+  /* The buckle aperture is much smaller than the face, so let the same
+     identity light reach farther before revealing the black CRT substrate. */
+  --zen-live-bot-buckle-screen-radial-geometry: ellipse 72% 80% at 50% 44%;
+  --zen-live-bot-buckle-rim-screen-base: var(--bot-avatar-screen-dark-base);
   --zen-live-bot-buckle-rim-base-metal: #b9c4ce;
   --zen-live-bot-buckle-rim-highlight: #f8fbff;
   --zen-live-bot-buckle-rim-mid-highlight: #d4dee7;
@@ -29524,6 +29621,57 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     --coffee-seat-emotion-color,
     var(--coffee-bot-color, currentColor)
   );
+  /* Avatar Studio owns the full-screen phosphor recipe. Both the built-in
+     face and authored Ink inherit this same color and glow envelope. */
+  --zen-live-bot-shared-phosphor-glow-color: var(
+    --zen-live-bot-face-crt-border-color,
+    var(--coffee-bot-color, var(--bot-face-crt-color, currentColor))
+  );
+  --zen-live-bot-shared-phosphor-glow-filter:
+    drop-shadow(
+      0 0 calc(0.72px * var(--bot-phosphor-focus-radius-scale, 1))
+        var(--zen-live-bot-shared-phosphor-glow-color)
+    )
+    drop-shadow(
+      0 0 calc(1.5px * var(--bot-phosphor-focus-radius-scale, 1))
+        var(--zen-live-bot-shared-phosphor-glow-color)
+    )
+    drop-shadow(
+      0 0 calc(3px * var(--bot-phosphor-focus-radius-scale, 1))
+        color-mix(
+          in srgb,
+          var(--zen-live-bot-shared-phosphor-glow-color)
+            var(--crt-face-screen-wash-tight-opacity, 82%),
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 calc(6px * var(--bot-phosphor-focus-radius-scale, 1))
+        color-mix(
+          in srgb,
+          var(--zen-live-bot-shared-phosphor-glow-color)
+            var(--crt-face-screen-wash-near-opacity, 58%),
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 calc(12px * var(--bot-phosphor-focus-radius-scale, 1))
+        color-mix(
+          in srgb,
+          var(--zen-live-bot-shared-phosphor-glow-color)
+            var(--crt-face-screen-wash-mid-opacity, 36%),
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 calc(21px * var(--bot-phosphor-focus-radius-scale, 1))
+        color-mix(
+          in srgb,
+          var(--zen-live-bot-shared-phosphor-glow-color)
+            var(--crt-face-screen-wash-far-opacity, 22%),
+          transparent
+        )
+    );
   --crt-strength: 1;
   --crt-core-opacity: 0.82;
   --crt-beam-softness: var(--bot-phosphor-beam-softness, 0.45px);
@@ -30649,7 +30797,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     --zen-live-bot-screen-glare-overlay-opacity,
     0.24
   );
-  --bot-face-screen-specular-opacity: 0.055;
+  --bot-face-screen-specular-opacity: var(
+    --zen-live-bot-screen-specular-opacity,
+    0.055
+  );
   --bot-face-screen-glass-shadow:
     inset 0 0 0 1px rgb(255 255 255 / 0.025),
     inset 0 10px 18px rgb(255 255 255 / 0.005),
@@ -30918,7 +31069,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
      live throughout speech instead of relying on a wrapper filter, which can
      be reset by presentation states without touching the white face core. */
   --crt-glyph-emission-opacity: 1;
-  --crt-face-glow-filter: var(--zen-live-bot-talking-face-glow-filter-high);
+  --crt-face-glow-filter: var(--zen-live-bot-shared-phosphor-glow-filter);
   opacity: 1;
 }
 
@@ -31592,7 +31743,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-live-bot-idle-face-glow-filter: var(
     --zen-live-bot-idle-face-glow-filter-high
   );
-  --crt-face-glow-filter: var(--zen-live-bot-idle-face-glow-filter-high);
+  --crt-face-glow-filter: var(--zen-live-bot-shared-phosphor-glow-filter);
   /* The glyph bloom clone already applies this filter. Reapplying it to the
      whole feature composites the core and bloom a second time, making the
      built-in face float above authored ink in the same CRT root. */
@@ -32849,16 +33000,50 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .themeLight .zenLiveBotPresencePlate,
 .zenLiveBotPresencePlate[data-theme="light"] {
   --bot-face-crt-screen-texture-blend-mode: overlay;
-  /* Glass is a translucent identity layer over the original near-black CRT.
-     The phosphor mesh remains above both layers in the emission mask. */
+  /* Light-only display stack: black CRT substrate, then an identity field that
+     goes completely clear before the aperture edge. The phosphor mesh and
+     white glyph/Ink remain independent layers above both. */
   --bot-avatar-screen-dark-base: linear-gradient(
     180deg,
-    color-mix(in srgb, #010404 92%, var(--coffee-bot-color) 8%),
+    #010304,
     #000203 64%,
     #000101
   );
-  --bot-avatar-screen-glass-overlay: radial-gradient(
-    circle at 44% 30%,
+  --bot-avatar-screen-radial-geometry: ellipse 46% 54% at 50% 42%;
+  --bot-avatar-screen-radial-stops:
+    color-mix(
+        in srgb,
+        color-mix(
+            in oklch,
+            var(--bot-avatar-screen-center, var(--coffee-bot-color)) 97%,
+            white 3%
+          )
+          100%,
+        transparent
+      )
+      0 14%,
+    color-mix(
+        in srgb,
+        var(--bot-avatar-screen-center, var(--coffee-bot-color)) 100%,
+        transparent
+      )
+      32%,
+    color-mix(
+        in srgb,
+        var(--bot-avatar-screen-mid, var(--coffee-bot-color)) 72%,
+        transparent
+      )
+      58%,
+    color-mix(
+        in srgb,
+        var(--bot-avatar-screen-edge, var(--coffee-bot-color)) 28%,
+        transparent
+      )
+      78%,
+    transparent 100%;
+  /* The lower screen keeps its approved broader field while the face aperture
+     now falls to black sooner at the rim. */
+  --bot-avatar-buckle-screen-radial-stops:
     color-mix(
         in srgb,
         color-mix(
@@ -32866,28 +33051,32 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
             var(--bot-avatar-screen-center, var(--coffee-bot-color)) 92%,
             white 8%
           )
-          82%,
+          94%,
         transparent
       )
-      0 18%,
+      0 14%,
     color-mix(
         in srgb,
-        var(--bot-avatar-screen-center, var(--coffee-bot-color)) 76%,
+        var(--bot-avatar-screen-center, var(--coffee-bot-color)) 86%,
         transparent
       )
-      40%,
+      32%,
     color-mix(
         in srgb,
-        var(--bot-avatar-screen-mid, var(--coffee-bot-color)) 68%,
+        var(--bot-avatar-screen-mid, var(--coffee-bot-color)) 62%,
         transparent
       )
-      70%,
+      56%,
     color-mix(
         in srgb,
-        var(--bot-avatar-screen-edge, var(--coffee-bot-color)) 56%,
+        var(--bot-avatar-screen-edge, var(--coffee-bot-color)) 18%,
         transparent
       )
-      100%
+      78%,
+    transparent 100%;
+  --bot-avatar-screen-glass-overlay: radial-gradient(
+    var(--bot-avatar-screen-radial-geometry),
+    var(--bot-avatar-screen-radial-stops)
   );
   --zen-live-bot-face-phosphor-ink: var(
     --bot-avatar-screen-glyph,
@@ -32896,8 +33085,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-live-bot-face-ink: var(--bot-avatar-screen-glyph, #f8fbff);
   --zen-live-bot-glyph-ink: var(--bot-avatar-screen-glyph, #f8fbff);
   --zen-live-bot-face-crt-border-color: var(
-    --bot-avatar-screen-glow,
-    var(--coffee-bot-color)
+    --bot-avatar-screen-glyph,
+    #fbfdff
+  );
+  --zen-live-bot-shared-phosphor-glow-color: var(
+    --bot-avatar-screen-glyph,
+    #fbfdff
   );
   --zen-presence-face-bg:
     var(--bot-avatar-screen-glass-overlay),
@@ -32926,6 +33119,18 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
         transparent
       );
   --zen-presence-face-ink: var(--bot-avatar-screen-glyph, #f8fbff);
+  /* The lens remains a bounded white reflection above the colored field.
+     Additive compositing keeps it visible over the black CRT without painting
+     the complete aperture pale. */
+  --bot-face-screen-glass-blend-mode: plus-lighter;
+  --zen-live-bot-screen-specular-opacity: 0.22;
+  --bot-avatar-screen-bottom-reflection: radial-gradient(
+    ellipse 48% 13% at 50% 106%,
+    rgb(255 255 255 / 0.56) 0%,
+    rgb(255 255 255 / 0.16) 44%,
+    transparent 76%
+  );
+  --bot-face-screen-bottom-reflection-opacity: 0.46;
   --zen-presence-pill-bg: color-mix(
     in srgb,
     #f8fbff 70%,
@@ -54747,6 +54952,7 @@ a.settingsCreditItem:focus-visible {
 .coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame][data-face-font="neutral"],
 .coffeeSeatPlateEmoji [data-coffee-plate-question-frame][data-face-font="neutral"],
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="neutral"],
+.coffeeSeatPlateEmoji [data-crt-glyph-layer="true"][data-face-font="neutral"],
 .messageMoodCoffeeFace [data-coffee-plate-question-frame][data-face-font="neutral"],
 .messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="neutral"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-question-frame][data-face-font="neutral"],
@@ -54762,6 +54968,7 @@ a.settingsCreditItem:focus-visible {
 .coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame][data-face-font="warm"],
 .coffeeSeatPlateEmoji [data-coffee-plate-question-frame][data-face-font="warm"],
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="warm"],
+.coffeeSeatPlateEmoji [data-crt-glyph-layer="true"][data-face-font="warm"],
 .messageMoodCoffeeFace [data-coffee-plate-question-frame][data-face-font="warm"],
 .messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="warm"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-question-frame][data-face-font="warm"],
@@ -54778,6 +54985,7 @@ a.settingsCreditItem:focus-visible {
 .coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame][data-face-font="concise"],
 .coffeeSeatPlateEmoji [data-coffee-plate-question-frame][data-face-font="concise"],
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="concise"],
+.coffeeSeatPlateEmoji [data-crt-glyph-layer="true"][data-face-font="concise"],
 .messageMoodCoffeeFace [data-coffee-plate-question-frame][data-face-font="concise"],
 .messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="concise"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-question-frame][data-face-font="concise"],
@@ -54793,6 +55001,7 @@ a.settingsCreditItem:focus-visible {
 .coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame][data-face-font="playful"],
 .coffeeSeatPlateEmoji [data-coffee-plate-question-frame][data-face-font="playful"],
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="playful"],
+.coffeeSeatPlateEmoji [data-crt-glyph-layer="true"][data-face-font="playful"],
 .messageMoodCoffeeFace [data-coffee-plate-question-frame][data-face-font="playful"],
 .messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="playful"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-question-frame][data-face-font="playful"],
@@ -54809,6 +55018,7 @@ a.settingsCreditItem:focus-visible {
 .coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame][data-face-font="formal"],
 .coffeeSeatPlateEmoji [data-coffee-plate-question-frame][data-face-font="formal"],
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="formal"],
+.coffeeSeatPlateEmoji [data-crt-glyph-layer="true"][data-face-font="formal"],
 .messageMoodCoffeeFace [data-coffee-plate-question-frame][data-face-font="formal"],
 .messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="formal"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-question-frame][data-face-font="formal"],
@@ -75391,8 +75601,10 @@ a.settingsCreditItem:focus-visible {
 }
 
 .botFaceScreenGlass::before {
-  background: none;
-  opacity: 0;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--bot-avatar-screen-bottom-reflection, none);
+  opacity: var(--bot-face-screen-bottom-reflection-opacity, 0);
   filter: none;
 }
 

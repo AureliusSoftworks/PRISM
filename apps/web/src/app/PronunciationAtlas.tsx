@@ -41,8 +41,6 @@ interface PronunciationAtlasPadValue {
 
 export interface PronunciationAtlasProps {
   selection: PronunciationAtlasSelection;
-  pronunciationEnabled?: boolean;
-  onPronunciationEnabledChange?: (enabled: boolean) => void;
   onPreview: (selection: PronunciationAtlasSelection) => void;
   onCommit: (selection: PronunciationAtlasSelection) => void;
   onCancel?: (selection: PronunciationAtlasSelection) => void;
@@ -116,8 +114,6 @@ function PronunciationAtlasMap({
 
 export function PronunciationAtlas({
   selection,
-  pronunciationEnabled = true,
-  onPronunciationEnabledChange,
   onPreview,
   onCommit,
   onCancel,
@@ -214,28 +210,9 @@ export function PronunciationAtlas({
       <div className={styles.heading}>
         <span>
           <strong>{label}</strong>
-          <small>
-            {pronunciationEnabled
-              ? "Regional pronunciation is active"
-              : "Saved pin is bypassed during speech"}
-          </small>
+          <small>Choose the regional pronunciation this bot owns.</small>
         </span>
         <span className={styles.headingActions}>
-          {onPronunciationEnabledChange ? (
-            <button
-              type="button"
-              role="switch"
-              aria-label="Accent Map pronunciation"
-              aria-checked={pronunciationEnabled}
-              data-active={pronunciationEnabled ? "true" : undefined}
-              data-tutorial-target="avatar-accent-pronunciation-toggle"
-              onClick={() =>
-                onPronunciationEnabledChange(!pronunciationEnabled)
-              }
-            >
-              {pronunciationEnabled ? "Pronunciation on" : "Pronunciation off"}
-            </button>
-          ) : null}
           <output aria-live="polite">{summary}</output>
         </span>
       </div>

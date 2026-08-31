@@ -58,7 +58,8 @@ function shapeshiftState() {
       speechprintInfluence: "irish-english",
       speechprintStrength: "strong",
       speechprintVariationSeed: "terry-irish-v1",
-      accentPronunciationEnabled: true,
+      ttsPronunciationEnabled: true,
+      premiumPronunciationEnabled: true,
     },
     targetColor: "#ff00aa",
     targetGlyph: "lucideOrbit",
@@ -175,16 +176,22 @@ test("identity shapeshift retains Shannon voice identity and overlays only Terry
   assert.equal(voice.speechprintInfluence, "irish-english");
   assert.equal(voice.speechprintStrength, "strong");
   assert.equal(voice.speechprintVariationSeed, "terry-irish-v1");
-  assert.equal(voice.accentPronunciationEnabled, true);
+  assert.equal(voice.ttsPronunciationEnabled, true);
+  assert.equal(voice.premiumPronunciationEnabled, true);
 
   const disabled = applyBotIdentityShapeshiftAccentMapV1(
     state.holderVoice,
-    { ...state.targetVoice, accentPronunciationEnabled: false },
+    {
+      ...state.targetVoice,
+      ttsPronunciationEnabled: false,
+      premiumPronunciationEnabled: false,
+    },
   );
   assert.equal(disabled.baseVoiceId, "voice-2");
   assert.equal(disabled.elevenLabsVoiceId, "shannon-provider-voice");
   assert.equal(disabled.elevenLabsEffect, "echo");
-  assert.equal(disabled.accentPronunciationEnabled, false);
+  assert.equal(disabled.ttsPronunciationEnabled, false);
+  assert.equal(disabled.premiumPronunciationEnabled, false);
   assert.equal(disabled.accentDefinitionId, undefined);
   assert.equal(disabled.pronunciationMapPoint, undefined);
   assert.equal(disabled.pronunciationBase, "follow-voice");

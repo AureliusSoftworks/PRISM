@@ -7,7 +7,7 @@ import type {
   KeyboardEvent,
   ReactNode,
 } from "react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { TEXT_ENTRY_SEARCH_MAX_LENGTH } from "@localai/shared";
 import { buildBotLibraryGroupVisualVariables } from "./botLibraryGroupVisual";
@@ -19,6 +19,7 @@ import {
 import {
   registerPrismRefractTarget,
   type PrismRefractBotDirectedSetupTarget,
+  type PrismRefractMagicTarget,
 } from "./prismRefract";
 import sharedStyles from "./BotPicker.module.css";
 import pickerStyles from "./page.module.css";
@@ -80,10 +81,18 @@ export type BotPickerGlyphRenderer = (
   options: BotPickerGlyphRenderOptions,
 ) => ReactNode;
 
+export interface BotPickerPlacementRefractTarget
+  extends PrismRefractMagicTarget {
+  /** Prompt-free reroll used by Space while this visible grid has focus. */
+  rerollVisible: () => void;
+}
+
 interface BotPickerGridProps extends HTMLAttributes<HTMLElement> {
   ariaLabel: string;
   as?: "div" | "ul";
   children: ReactNode;
+  /** Optional shared placement contract for a Wieldable, rerollable grid. */
+  placementRefractTarget?: BotPickerPlacementRefractTarget;
 }
 
 export function BotPickerGrid({
@@ -93,11 +102,44 @@ export function BotPickerGrid({
   className,
   role = "listbox",
   onKeyDown,
+  placementRefractTarget,
   ...props
 }: BotPickerGridProps): React.JSX.Element {
+  const placementTargetRef = useRef(placementRefractTarget);
+  const placementGridRef = useRef<HTMLElement | null>(null);
+  const placementTargetId = placementRefractTarget?.id;
+  const rememberPlacementGrid = useCallback(
+    (element: HTMLDivElement | HTMLUListElement | null): void => {
+      placementGridRef.current = element;
+    },
+    [],
+  );
+  useEffect(() => {
+    placementTargetRef.current = placementRefractTarget;
+  }, [placementRefractTarget]);
+  useEffect(() => {
+    if (!placementTargetId) return;
+    return registerPrismRefractTarget(placementTargetId, {
+      descriptor: () => placementTargetRef.current!,
+      element: () => placementGridRef.current,
+    });
+  }, [placementTargetId]);
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
     onKeyDown?.(event);
     if (event.defaultPrevented) return;
+    if (
+      event.code === "Space" &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.shiftKey &&
+      placementTargetRef.current &&
+      !placementTargetRef.current.disabled?.()
+    ) {
+      event.preventDefault();
+      placementTargetRef.current.rerollVisible();
+      return;
+    }
     const delta =
       event.key === "ArrowRight" || event.key === "ArrowDown"
         ? 1
@@ -122,12 +164,15 @@ export function BotPickerGrid({
   const Element = as;
   return (
     <Element
+      ref={placementTargetId ? rememberPlacementGrid : undefined}
       {...props}
       className={[pickerStyles.chatBotPicker, className]
         .filter(Boolean)
         .join(" ")}
       role={role}
       aria-label={ariaLabel}
+      aria-keyshortcuts={placementTargetId ? "Space" : undefined}
+      data-prism-refract-id={placementTargetId}
       onKeyDown={handleKeyDown}
     >
       {children}

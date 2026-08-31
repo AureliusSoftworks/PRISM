@@ -51,7 +51,7 @@ test("routes only written text through the selected bounded voice lifecycle", ()
   );
   assert.match(
     mysterySource,
-    /playDebateMysteryTextVoice\(\{[\s\S]{0,260}signal: controller\.signal,[\s\S]{0,220}play: props\.playMysteryTextVoice/u,
+    /playDebateMysteryTextVoice\(\{[\s\S]{0,420}signal: controller\.signal,[\s\S]{0,320}play: props\.playMysteryTextVoice/u,
   );
   assert.match(mysterySource, /instant: roomPlayerObservationActive/u);
   assert.match(pageSource, /preferProceduralBabble: instant === true/u);

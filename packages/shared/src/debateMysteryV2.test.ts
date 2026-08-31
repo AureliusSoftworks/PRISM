@@ -21,6 +21,7 @@ import {
   validateDebateMysteryAudioManifestV1,
   validateDebateMysteryDialogueGraphV2,
   validateDebateMysteryStageCuePerformanceV1,
+  resolveDebateMysteryAssetSynthesisV2,
   resolveDebateMysteryConfigV2,
   resolveDebateMysteryMansionExteriorScaleClassV1,
   splitDebateMysteryStageActionTextV2,
@@ -822,6 +823,21 @@ test("new V2 mansions keep a two-floor minimum while compact stays easiest", () 
 });
 
 test("Theme, asset synthesis, and reusable mansion eligibility freeze deterministically", () => {
+  const pixelArtFirst = resolveDebateMysteryAssetSynthesisV2({
+    investigationMode: "full",
+    mansionBundleId: null,
+    assetSynthesis: { rooms: true, illustratedRooms: false },
+  });
+  assert.equal(pixelArtFirst.rooms, true);
+  assert.equal(pixelArtFirst.illustratedRooms, false);
+  const explicitRealisticUpgrade = resolveDebateMysteryAssetSynthesisV2({
+    investigationMode: "full",
+    mansionBundleId: null,
+    assetSynthesis: { rooms: true, illustratedRooms: true },
+  });
+  assert.equal(explicitRealisticUpgrade.rooms, true);
+  assert.equal(explicitRealisticUpgrade.illustratedRooms, true);
+
   const resolved = resolveDebateMysteryConfigV2({
     version: 2,
     preset: "compact",

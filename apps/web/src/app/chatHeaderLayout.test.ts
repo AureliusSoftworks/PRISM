@@ -210,6 +210,40 @@ describe("Chat shell header layout", () => {
     }
   });
 
+  it("compacts the shared navbar before its independent controls can overlap", () => {
+    assert.match(
+      pageSource,
+      /<PrismRefractionEmblem\s+className=\{styles\.sharedAppletNavbarCompactBrand\}/,
+    );
+    assert.match(
+      cssSource,
+      /@media \(min-width:\s*721px\) and \(max-width:\s*1600px\)[\s\S]*\.sharedAppletHeader[\s\S]*\.sharedAppletNavbarCompactBrand\s*\{[\s\S]*display:\s*block;/,
+    );
+    assert.match(
+      cssSource,
+      /\.sharedAppletHeader \.chatHeaderModelPicker \.composeModelControl\s*\{[\s\S]*min-width:\s*132px;/,
+    );
+    assert.match(
+      cssSource,
+      /\.sharedAppletHeader \.chatHeaderModelPicker \.voiceModeSelector\s*\{[\s\S]*max-width:\s*172px;/,
+    );
+  });
+
+  it("gives short empty Homes a composer-safe internal scroll owner", () => {
+    assert.match(
+      cssSource,
+      /@media \(min-width:\s*721px\) and \(max-height:\s*800px\)[\s\S]*\.messages\.messagesEmptyState\[data-chat-ephemeral="true"\][\s\S]*overflow-y:\s*auto;[\s\S]*overscroll-behavior-y:\s*contain;/,
+    );
+    assert.match(
+      cssSource,
+      /--zen-empty-state-bottom-reserve:\s*max\([\s\S]*152px[\s\S]*env\(safe-area-inset-bottom, 0px\)/,
+    );
+    assert.match(
+      cssSource,
+      /> \.emptyState\.emptyStateHubPicker\s*\{[\s\S]*min-height:\s*max-content;[\s\S]*translate:\s*0 0;/,
+    );
+  });
+
   it("includes safe-area padding and lets long localized title parts wrap", () => {
     assert.match(
       cssSource,

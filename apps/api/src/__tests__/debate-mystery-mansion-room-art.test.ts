@@ -15,6 +15,8 @@ import {
   regenerateMansionRoomAssetV2,
   stageMansionRoomArtCandidateV2,
 } from "../debate-mystery-mansion-room-art.ts";
+import { renderDebateMysteryRoomArtV1 } from "../debate-mystery-room-art.ts";
+import { decryptBytes } from "../security.ts";
 import { initializeDatabase } from "../db.ts";
 
 function room(
@@ -249,6 +251,23 @@ describe("mansion-owned room-art candidates", () => {
     const retried = await stage();
     assert.equal(retried.id, first.id, "retry keeps the stable candidate identity");
     assert.notEqual(retried.assetId, first.assetId);
+    const storedCandidate = db.prepare(
+      `SELECT ciphertext, cipher_iv, cipher_tag
+         FROM debate_mystery_mansion_assets
+        WHERE id = ? AND user_id = 'owner'`,
+    ).get(retried.assetId) as { ciphertext: Buffer; cipher_iv: Buffer; cipher_tag: Buffer };
+    assert.deepEqual(
+      decryptBytes({
+        ciphertext: storedCandidate.ciphertext,
+        iv: storedCandidate.cipher_iv,
+        tag: storedCandidate.cipher_tag,
+      }, Buffer.alloc(32, 7)),
+      (await renderDebateMysteryRoomArtV1(secondBytes, {
+        variant: "mosaic-reference",
+        format: "webp",
+      })).bytes,
+      "Mansion Editor candidates use the canonical clean Pixel Art source normalizer",
+    );
     layout = storedLayout(db);
     study = layout.entities.find(
       (entry): entry is MansionLayoutRoomV2 => entry.kind === "room" && entry.id === "study",

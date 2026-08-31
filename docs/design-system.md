@@ -23,6 +23,10 @@ global 1280×900 minimum, a blocking narrow-viewport cover, or whole-app
 - 720px and below: the phone-width shell owns navigation and safe-area chrome.
 - Short viewports: fixed shell regions stay bounded and dense content scrolls
   inside its owning panel rather than increasing the outer app height.
+- Shared applet navbars compact the brand to the refraction emblem and bound
+  their independent picker widths before controls can overlap. Zen/Chat empty
+  Homes own vertical scrolling below 800px logical height and reserve enough
+  trailing space to lift every bot tile above a grown composer.
 - Immersive applets may contain an authored stage ratio locally, but app chrome,
   dialogs, pointer coordinates, and typography remain in unscaled CSS pixels.
 

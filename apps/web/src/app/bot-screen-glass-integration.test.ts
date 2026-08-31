@@ -41,7 +41,7 @@ test("full avatars mount authored residue and distortion above phosphor", () => 
   );
   assert.match(
     fullSizeGlassRule,
-    /--bot-face-screen-specular-opacity:\s*0\.055\s*;/u,
+    /--bot-face-screen-specular-opacity:\s*var\(\s*--zen-live-bot-screen-specular-opacity,\s*0\.055\s*\)\s*;/u,
   );
   assert.doesNotMatch(fullSizeGlassRule, /linear-gradient\(/u);
   const curvatureRule = cssSource.match(

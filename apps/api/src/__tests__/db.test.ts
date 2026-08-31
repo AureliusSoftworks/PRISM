@@ -11,6 +11,50 @@ import {
   resolveDbPath,
 } from "../db.ts";
 
+describe("Accent Map pronunciation engine migration", () => {
+  it("updates only legacy enabled bot profiles and remains idempotent", () => {
+    const db = new DatabaseSync(":memory:");
+    initializeDatabase(db);
+    db.prepare(
+      "INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run(
+      "voice-user", "voice@example.com", "Voice", "hash", "salt", "cipher", "iv", "tag",
+      "2026-08-31T00:00:00.000Z", "2026-08-31T00:00:00.000Z",
+    );
+    const legacyOn = JSON.stringify({
+      v: 2, enabled: true, baseVoiceId: "voice-1", elevenLabsEffect: "clean",
+      pitch: 0, warmth: 0, pace: 0, lilt: 0, bottishTone: 0.45, volume: 1,
+      texture: { preset: "clean", amount: 0, bandwidth: 1, noise: 0, instability: 0, distortion: 0, damage: 0 },
+      accentPronunciationEnabled: true, accentDefinitionId: "irish-english",
+      pronunciationMapPoint: { x: 0.42, y: 0.31 }, speechprintInfluence: "irish-english",
+    });
+    const legacyOff = legacyOn.replace('"accentPronunciationEnabled":true', '"accentPronunciationEnabled":false');
+    const insert = db.prepare(
+      "INSERT INTO bots (id, user_id, name, authored_audio_voice_profile, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    insert.run("voice-on", "voice-user", "On", legacyOn, "2026-08-31T00:00:00.000Z", "2026-08-31T00:00:00.000Z");
+    insert.run("voice-off", "voice-user", "Off", legacyOff, "2026-08-31T00:00:00.000Z", "2026-08-31T00:00:00.000Z");
+
+    initializeDatabase(db);
+    const rows = db.prepare(
+      "SELECT id, authored_audio_voice_profile FROM bots WHERE user_id = ? ORDER BY id",
+    ).all("voice-user") as Array<{ id: string; authored_audio_voice_profile: string }>;
+    const onRow = rows.find((row) => row.id === "voice-on")!;
+    const offRow = rows.find((row) => row.id === "voice-off")!;
+    const on = JSON.parse(onRow.authored_audio_voice_profile) as Record<string, unknown>;
+    assert.equal((on.local as { pronunciation: { ttsPronunciationEnabled: boolean } }).pronunciation.ttsPronunciationEnabled, true);
+    assert.equal((on.premium as { pronunciationEnabled: boolean }).pronunciationEnabled, true);
+    assert.equal(offRow.authored_audio_voice_profile, legacyOff);
+    const migrated = onRow.authored_audio_voice_profile;
+    initializeDatabase(db);
+    assert.equal(
+      (db.prepare("SELECT authored_audio_voice_profile FROM bots WHERE id = ?").get("voice-on") as { authored_audio_voice_profile: string }).authored_audio_voice_profile,
+      migrated,
+    );
+    db.close();
+  });
+});
+
 describe("Signal retry image Reason migration", () => {
   it("adds private Reason storage to legacy proxy rows with a blank default", () => {
     const db = new DatabaseSync(":memory:");

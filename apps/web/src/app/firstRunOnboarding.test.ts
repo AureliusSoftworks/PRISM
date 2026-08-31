@@ -152,6 +152,8 @@ describe("first-run onboarding", () => {
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /hold Option/u);
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /stays fixed/u);
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /nothing begins/u);
+    assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /Mystery Venue can propose an estate, vessel, habitat, facility, transport, or stranger setting/u);
+    assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /proposal creates no art or library item until you choose Use Proposal/u);
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /prompt-free Library group picker/u);
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /random Library bot/u);
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /named stage presets/u);

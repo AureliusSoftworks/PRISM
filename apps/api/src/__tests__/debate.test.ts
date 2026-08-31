@@ -90,7 +90,7 @@ import {
   submitDebateTurnaboutAction,
   submitDebateVerdict,
   swingDebateJudgeGavel,
-  synthesizeDebateSlates,
+  synthesizeDebateSlatesWithProvenance,
   synthesizeDebateTitle,
   suggestDebateSetup,
   debateCaseBoardClaimSummary,
@@ -3473,6 +3473,8 @@ describe("Debate engine", () => {
         "Weathered || transit map || The eastern route is circled in red. || 🗺️",
       );
       assert.equal(result.generated, true);
+      assert.equal(result.reasoningEffort, "auto");
+      assert.equal(result.turbo, false);
       assert.match(prompt, /Museum ethics/u);
       assert.match(prompt, /player's requested physical exhibit/u);
       assert.match(prompt, /adjective.*object name.*observable description.*emoji/u);
@@ -3643,6 +3645,8 @@ describe("Debate engine", () => {
         generated: true,
         provider: "local",
         model: "deterministic-exhibit-draft-v1",
+        reasoningEffort: "none",
+        turbo: false,
       });
     } finally {
       db.close();
@@ -7731,13 +7735,17 @@ describe("Debate engine", () => {
       },
     };
 
-    const slates = await synthesizeDebateSlates(
+    const synthesis = await synthesizeDebateSlatesWithProvenance(
       "Should {NAME} live downtown?",
       "plainspoken",
       runtimeWith(provider),
     );
+    const { slates } = synthesis;
     assert.equal(slates.length, 3);
     assert.equal(slates[0]?.title, "Welcome Home or Keep Quiet?");
+    assert.equal(synthesis.model, "debate-test");
+    assert.equal(synthesis.reasoningEffort, "auto");
+    assert.equal(synthesis.turbo, false);
     assert.equal(
       prompts.some((prompt) =>
         /concise 2–8 word public program title/u.test(prompt),
@@ -7887,6 +7895,8 @@ describe("Debate engine", () => {
     assert.equal(suggestion.moderatorTitle, "Keeper of the Lots");
     assert.ok(invent.provider);
     assert.ok(invent.model);
+    assert.equal(invent.reasoningEffort, "auto");
+    assert.equal(invent.turbo, false);
     assert.equal(webCalls, 0);
     assert.equal(scholarCalls, 0);
   });
@@ -15399,6 +15409,17 @@ describe("Flyting V1", () => {
       ));
       assert.equal(session.formatState.hallVotes.length, 0);
       assert.equal(session.formatState.hallLeaningHistory.length, 4);
+      const jarlAcclamations = session.events.filter(
+        (event) => event.kind === "reaction",
+      );
+      assert.equal(jarlAcclamations.length, 5);
+      assert.ok(
+        jarlAcclamations.every(
+          (event) =>
+            event.speakerKind === "moderator" &&
+            event.speakerBotId === session.moderator.id,
+        ),
+      );
       assert.equal(session.formatState.hostVerdict?.sideId, "for");
       assert.equal(session.formatState.hostVerdict?.outcome, "for");
       assert.equal(session.formatState.finalTally?.jarlSideId, "for");

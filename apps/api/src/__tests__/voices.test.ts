@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
   VOICE_ACCENT_MAP_ANCHORS,
+  voiceAccentMapPointForCoordinates,
 } from "@localai/shared";
 import {
   ElevenLabsVoiceError,
@@ -26,6 +27,8 @@ import {
   resolveVoiceSynthesisBoundary,
   validateVoiceSynthesisRequest,
 } from "../voices.ts";
+import { resetElevenLabsPronunciationDictionaryCacheForTests } from
+  "../elevenlabs-pronunciation-dictionaries.ts";
 
 describe("voice Phase 1 boundary", () => {
   it("regenerates replay speech only with the frozen resolved engine", () => {
@@ -515,15 +518,19 @@ describe("voice Phase 1 boundary", () => {
   it("bypasses Accent Map direction and phonology when the bot switch is off", async () => {
     let requestBody: Record<string, unknown> | null = null;
     let ipaResolverCalled = false;
+    const calls: string[] = [];
     const text = "Peter Piper picked a peck of pickled peppers.";
     await requestElevenLabsSpeech({
       apiKey: "secret-key",
+      tenantId: "tenant-disabled",
+      privacyMode: "online",
       voiceId: "british-premium-voice",
       model: "eleven_flash_v2_5",
       text,
       profile: {
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
         accentPronunciationEnabled: false,
+        premiumPronunciationEnabled: false,
         accentDefinitionId: "american-english",
         pronunciationMapPoint: { x: 0.28, y: 0.31 },
         speechprintInfluence: "american-english",
@@ -532,7 +539,8 @@ describe("voice Phase 1 boundary", () => {
         ipaResolverCalled = true;
         throw new Error("disabled Accent Map must not resolve IPA");
       },
-      fetchImpl: (async (_url, init) => {
+      fetchImpl: (async (url, init) => {
+        calls.push(String(url));
         requestBody = JSON.parse(String(init?.body));
         return new Response(new Uint8Array([1]), { status: 200 });
       }) as typeof fetch,
@@ -541,6 +549,504 @@ describe("voice Phase 1 boundary", () => {
     assert.equal(ipaResolverCalled, false);
     assert.equal(requestBody?.model_id, "eleven_flash_v2_5");
     assert.equal(requestBody?.text, text);
+    assert.equal(requestBody?.pronunciation_dictionary_locators, undefined);
+    assert.deepEqual(calls.filter((url) => url.includes("pronunciation-dictionaries")), []);
+  });
+
+  it("forces Accent Map pronunciation on a Premium voice that would otherwise be native-eligible", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "german-premium-voice",
+      model: "eleven_flash_v2_5",
+      text: "Walter waits.",
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        elevenLabsNativeAccentHint: "German",
+        accentDefinitionId: "german-influenced-english",
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(requestBody?.model_id, "eleven_v3");
+    assert.equal(requestBody?.text, "[German accent] Walter waits.");
+  });
+
+  it("attaches Accent Map IPA to the streaming request without changing its voice", async () => {
+    resetElevenLabsPronunciationDictionaryCacheForTests();
+    const calls: Array<{ url: string; body: Record<string, unknown> | null }> = [];
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      tenantId: "tenant-stream",
+      privacyMode: "online",
+      voiceId: "stream-selected-voice",
+      model: "eleven_flash_v2_5",
+      text: "When.",
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        accentDefinitionId: "northern-german-influenced-english",
+      },
+      accentIpaResolver: async () => ({
+        sourceText: "When.", targetLocale: "en-US", targetIpa: "vˈɛn",
+        identity: {
+          accentDefinitionId: "northern-german-influenced-english",
+          field: [{
+            accentDefinitionId: "northern-german-influenced-english",
+            pronunciationBase: "en-US",
+            influence: "northern-german-influenced-english",
+            weight: 1,
+          }],
+          strength: "balanced",
+        },
+        rulesetVersion: "test-v1",
+        rulesetSha256: "e".repeat(64),
+        planSha256: "f".repeat(64),
+        spans: [{
+          sourceStart: 0, sourceEnd: 4, sourceText: "When",
+          canonicalGrapheme: "when", baselineIpa: "wˈɛn", targetIpa: "vˈɛn",
+          changed: true, protected: false, appliedRuleIds: ["w-labiodental"],
+        }],
+      }),
+      fetchImpl: (async (url, init) => {
+        const requestUrl = String(url);
+        const body = typeof init?.body === "string"
+          ? JSON.parse(init.body) as Record<string, unknown>
+          : null;
+        calls.push({ url: requestUrl, body });
+        if (requestUrl.includes("page_size=100")) {
+          return Response.json({ pronunciation_dictionaries: [] });
+        }
+        if (requestUrl.endsWith("/add-from-rules")) {
+          return Response.json({ id: "stream-map", version_id: "stream-v1" });
+        }
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+    const providerCall = calls.find((call) => call.url.includes("text-to-speech"));
+    assert.match(providerCall?.url ?? "", /stream-selected-voice\/stream/u);
+    assert.equal(providerCall?.body?.model_id, "eleven_v3");
+    assert.equal(providerCall?.body?.text, "[Northern German accent] When.");
+    assert.deepEqual(providerCall?.body?.pronunciation_dictionary_locators, [{
+      pronunciation_dictionary_id: "stream-map",
+      version_id: "stream-v1",
+    }]);
+  });
+
+  it("sends the reported Northern German prose with its national phonology and regional R", async () => {
+    resetElevenLabsPronunciationDictionaryCacheForTests();
+    const sourceText =
+      "The weary watchmaker thought for a moment, turned toward the old harbor, and watched bright birds circle above the stone tower as the whole valley grew wonderfully still.";
+    const calls: Array<{ url: string; body: Record<string, unknown> | null }> = [];
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      tenantId: "tenant-northern-german-prose",
+      privacyMode: "online",
+      voiceId: "selected-american-voice",
+      model: "eleven_flash_v2_5",
+      text: sourceText,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        accentDefinitionId: "northern-german-influenced-english",
+        pronunciationMapPoint: voiceAccentMapPointForCoordinates(10, 53.55),
+        speechprintStrength: "balanced",
+      },
+      fetchImpl: (async (url, init) => {
+        const requestUrl = String(url);
+        const body = typeof init?.body === "string"
+          ? JSON.parse(init.body) as Record<string, unknown>
+          : null;
+        calls.push({ url: requestUrl, body });
+        if (requestUrl.includes("page_size=100")) {
+          return Response.json({ pronunciation_dictionaries: [] });
+        }
+        if (requestUrl.endsWith("/add-from-rules")) {
+          return Response.json({ id: "regional-map", version_id: "regional-v1" });
+        }
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    const dictionaryCall = calls.find((call) =>
+      call.url.endsWith("/add-from-rules"),
+    );
+    const rules = Array.isArray(dictionaryCall?.body?.rules)
+      ? dictionaryCall.body.rules as Array<Record<string, unknown>>
+      : [];
+    const phonemeByWord = new Map(rules.map((rule) => [
+      String(rule.string_to_replace),
+      String(rule.phoneme),
+    ]));
+    assert.equal(phonemeByWord.get("the"), "zˈə");
+    assert.equal(phonemeByWord.get("thought"), "sˈɔːt");
+    assert.equal(phonemeByWord.get("weary"), "vˈɪɹi");
+    assert.equal(phonemeByWord.get("harbor"), "hˈɑʁbəʁ");
+    assert.equal(phonemeByWord.get("birds"), "bˈɜʁdz");
+    const providerCall = calls.find((call) =>
+      call.url.includes("text-to-speech"),
+    );
+    assert.match(providerCall?.url ?? "", /selected-american-voice\/stream/u);
+    assert.equal(providerCall?.body?.model_id, "eleven_v3");
+    assert.equal(providerCall?.body?.text, `[Northern German accent] ${sourceText}`);
+    assert.deepEqual(providerCall?.body?.pronunciation_dictionary_locators, [{
+      pronunciation_dictionary_id: "regional-map",
+      version_id: "regional-v1",
+    }]);
+  });
+
+  it("attaches inherited regional-family IPA across Premium Accent Map voices", async () => {
+    const sourceText =
+      "This thoughtful river runs under another hidden arch.";
+    const cases = [
+      {
+        accentDefinitionId: "southern-french-influenced-english",
+        expected: {
+          this: "zˈis",
+          runs: "ʁˈanz",
+          hidden: "ˈiden",
+        },
+      },
+      {
+        accentDefinitionId: "northern-italian-influenced-english",
+        expected: {
+          this: "dˈis",
+          runs: "ɾˈanzə",
+          another: "ɐnˈadəɾə",
+        },
+      },
+      {
+        accentDefinitionId: "southern-italian-influenced-english",
+        expected: {
+          this: "dˈɪsə",
+          runs: "ɾˈanzə",
+          another: "ɐnˈadəɾə",
+        },
+      },
+      {
+        accentDefinitionId: "andalusian-spanish-influenced-english",
+        expected: {
+          thoughtful: "sˈɔːtfəl",
+          runs: "ɾˈanz",
+          hidden: "hˈidən",
+        },
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      resetElevenLabsPronunciationDictionaryCacheForTests();
+      const point = VOICE_ACCENT_MAP_ANCHORS.find(
+        (anchor) =>
+          anchor.accentDefinitionId === testCase.accentDefinitionId,
+      )?.point;
+      assert.ok(point, testCase.accentDefinitionId);
+      const calls: Array<{
+        url: string;
+        body: Record<string, unknown> | null;
+      }> = [];
+      await requestElevenLabsSpeech({
+        apiKey: "secret-key",
+        tenantId: `tenant-${testCase.accentDefinitionId}`,
+        privacyMode: "online",
+        voiceId: "selected-premium-voice",
+        model: "eleven_flash_v2_5",
+        text: sourceText,
+        profile: {
+          ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+          premiumPronunciationEnabled: true,
+          accentDefinitionId: testCase.accentDefinitionId,
+          pronunciationMapPoint: point,
+          speechprintStrength: "strong",
+        },
+        fetchImpl: (async (url, init) => {
+          const requestUrl = String(url);
+          const body = typeof init?.body === "string"
+            ? JSON.parse(init.body) as Record<string, unknown>
+            : null;
+          calls.push({ url: requestUrl, body });
+          if (requestUrl.includes("page_size=100")) {
+            return Response.json({ pronunciation_dictionaries: [] });
+          }
+          if (requestUrl.endsWith("/add-from-rules")) {
+            return Response.json({
+              id: `map-${testCase.accentDefinitionId}`,
+              version_id: "regional-v1",
+            });
+          }
+          return new Response(new Uint8Array([1]), { status: 200 });
+        }) as typeof fetch,
+      });
+
+      const dictionaryCall = calls.find((call) =>
+        call.url.endsWith("/add-from-rules"),
+      );
+      const rules = Array.isArray(dictionaryCall?.body?.rules)
+        ? dictionaryCall.body.rules as Array<Record<string, unknown>>
+        : [];
+      const phonemeByWord = new Map(rules.map((rule) => [
+        String(rule.string_to_replace),
+        String(rule.phoneme),
+      ]));
+      for (const [word, phoneme] of Object.entries(testCase.expected)) {
+        assert.equal(
+          phonemeByWord.get(word),
+          phoneme,
+          `${testCase.accentDefinitionId}:${word}`,
+        );
+      }
+      const providerCall = calls.find((call) =>
+        call.url.includes("text-to-speech"),
+      );
+      assert.match(providerCall?.url ?? "", /selected-premium-voice\/stream/u);
+      assert.equal(providerCall?.body?.model_id, "eleven_v3");
+      assert.equal(String(providerCall?.body?.text).endsWith(sourceText), true);
+      assert.deepEqual(providerCall?.body?.pronunciation_dictionary_locators, [{
+        pronunciation_dictionary_id: `map-${testCase.accentDefinitionId}`,
+        version_id: "regional-v1",
+      }]);
+    }
+  });
+
+  it("keeps three protected locators in caller order and falls Accent Map back inline", async () => {
+    let dictionaryCalls = 0;
+    let providerBody: Record<string, unknown> | null = null;
+    const protectedLocators = [
+      { pronunciation_dictionary_id: "first", version_id: "v1" },
+      { pronunciation_dictionary_id: "second", version_id: "v2" },
+      { pronunciation_dictionary_id: "third", version_id: "v3" },
+      { pronunciation_dictionary_id: "ignored", version_id: "v4" },
+    ];
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      tenantId: "tenant-cap",
+      privacyMode: "online",
+      voiceId: "voice-cap",
+      model: "eleven_flash_v2_5",
+      text: "When.",
+      protectedPronunciationDictionaryLocators: protectedLocators,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        accentDefinitionId: "german-influenced-english",
+      },
+      accentIpaResolver: async () => ({
+        sourceText: "When.", targetLocale: "en-US", targetIpa: "vˈɛn",
+        identity: {
+          accentDefinitionId: "german-influenced-english",
+          field: [{
+            accentDefinitionId: "german-influenced-english",
+            pronunciationBase: "en-US",
+            influence: "german-influenced-english",
+            weight: 1,
+          }],
+          strength: "balanced",
+        },
+        rulesetVersion: "test-v1",
+        rulesetSha256: "1".repeat(64),
+        planSha256: "2".repeat(64),
+        spans: [{
+          sourceStart: 0, sourceEnd: 4, sourceText: "When",
+          canonicalGrapheme: "when", baselineIpa: "wˈɛn", targetIpa: "vˈɛn",
+          changed: true, protected: false, appliedRuleIds: ["w-labiodental"],
+        }],
+      }),
+      fetchImpl: (async (url, init) => {
+        if (String(url).includes("pronunciation-dictionaries")) dictionaryCalls += 1;
+        providerBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(dictionaryCalls, 0);
+    assert.equal(providerBody?.text, "[German accent] /vˈɛn/.");
+    assert.deepEqual(
+      providerBody?.pronunciation_dictionary_locators,
+      protectedLocators.slice(0, 3),
+    );
+  });
+
+  it("keeps canonical Premium text and voice identity while attaching the tenant Accent Map locator last", async () => {
+    resetElevenLabsPronunciationDictionaryCacheForTests();
+    const sourceText = "When Walter waits.";
+    const calls: Array<{ url: string; body: Record<string, unknown> | null }> = [];
+    const speech = await requestElevenLabsSpeechWithTimestamps({
+      apiKey: "secret-key",
+      tenantId: "tenant-a",
+      privacyMode: "online",
+      voiceId: "selected-premium-voice",
+      model: "eleven_flash_v2_5",
+      text: sourceText,
+      protectedPhrases: ["Walter"],
+      protectedPronunciationDictionaryLocators: [
+        { pronunciation_dictionary_id: "player-name", version_id: "player-v1" },
+        { pronunciation_dictionary_id: "bot-name", version_id: "bot-v2" },
+      ],
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        accentDefinitionId: "northern-german-influenced-english",
+      },
+      accentIpaResolver: async () => ({
+        sourceText,
+        targetLocale: "en-US",
+        targetIpa: "vˈɛn vˈɔltəɹ vˈeɪts",
+        identity: {
+          accentDefinitionId: "northern-german-influenced-english",
+          field: [{
+            accentDefinitionId: "northern-german-influenced-english",
+            pronunciationBase: "en-US",
+            influence: "northern-german-influenced-english",
+            weight: 1,
+          }],
+          strength: "balanced",
+        },
+        rulesetVersion: "test-v1",
+        rulesetSha256: "a".repeat(64),
+        planSha256: "b".repeat(64),
+        spans: [
+          {
+            sourceStart: 0, sourceEnd: 4, sourceText: "When",
+            canonicalGrapheme: "when", baselineIpa: "wˈɛn", targetIpa: "vˈɛn",
+            changed: true, protected: false, appliedRuleIds: ["w-labiodental"],
+          },
+          {
+            sourceStart: 5, sourceEnd: 11, sourceText: "Walter",
+            canonicalGrapheme: "walter", baselineIpa: "wˈɔltəɹ", targetIpa: "wˈɔltəɹ",
+            changed: false, protected: true, appliedRuleIds: [],
+          },
+          {
+            sourceStart: 12, sourceEnd: 17, sourceText: "waits",
+            canonicalGrapheme: "waits", baselineIpa: "wˈeɪts", targetIpa: "vˈeɪts",
+            changed: true, protected: false, appliedRuleIds: ["w-labiodental"],
+          },
+        ],
+      }),
+      fetchImpl: (async (url, init) => {
+        const requestUrl = String(url);
+        const body = typeof init?.body === "string"
+          ? JSON.parse(init.body) as Record<string, unknown>
+          : null;
+        calls.push({ url: requestUrl, body });
+        if (requestUrl.includes("page_size=100")) {
+          return Response.json({ pronunciation_dictionaries: [] });
+        }
+        if (requestUrl.endsWith("/add-from-rules")) {
+          return Response.json({ id: "accent-map", version_id: "accent-v1" });
+        }
+        assert.match(requestUrl, /selected-premium-voice\/with-timestamps/u);
+        assert.equal(body?.model_id, "eleven_v3");
+        assert.equal(body?.text, "[Northern German accent] When Walter waits.");
+        assert.deepEqual(body?.pronunciation_dictionary_locators, [
+          { pronunciation_dictionary_id: "player-name", version_id: "player-v1" },
+          { pronunciation_dictionary_id: "bot-name", version_id: "bot-v2" },
+          { pronunciation_dictionary_id: "accent-map", version_id: "accent-v1" },
+        ]);
+        const characters = Array.from(String(body?.text));
+        return Response.json({
+          audio_base64: "AQID",
+          alignment: {
+            characters,
+            character_start_times_seconds: characters.map((_, index) => index * 0.01),
+            character_end_times_seconds: characters.map((_, index) => (index + 1) * 0.01),
+          },
+        });
+      }) as typeof fetch,
+    });
+    assert.equal(speech.alignment?.characters.join(""), sourceText);
+    assert.deepEqual(speech.premiumPhonology, {
+      planSha256: "b".repeat(64),
+      rulesetVersion: "test-v1",
+      rulesetSha256: "a".repeat(64),
+      model: "eleven_v3",
+      direction: "Northern German accent",
+      gateEnabled: true,
+      locatorVersionId: "accent-v1",
+      fallback: "dictionary",
+    });
+    assert.equal(calls.filter((call) => call.url.includes("text-to-speech")).length, 1);
+  });
+
+  it("bounds dictionary failure and restores timestamp alignment after selective inline v3 IPA", async () => {
+    resetElevenLabsPronunciationDictionaryCacheForTests();
+    const sourceText = "When now.";
+    let providerBody: Record<string, unknown> | null = null;
+    const speech = await requestElevenLabsSpeechWithTimestamps({
+      apiKey: "secret-key",
+      tenantId: "tenant-timeout",
+      privacyMode: "online",
+      voiceId: "voice-id",
+      model: "eleven_flash_v2_5",
+      text: sourceText,
+      pronunciationDictionaryTimeoutMs: 50,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        accentDefinitionId: "german-influenced-english",
+      },
+      accentIpaResolver: async () => ({
+        sourceText,
+        targetLocale: "en-US",
+        targetIpa: "vˈɛn nˈaʊ",
+        identity: {
+          accentDefinitionId: "german-influenced-english",
+          field: [{ accentDefinitionId: "german-influenced-english", pronunciationBase: "en-US", influence: "german-influenced-english", weight: 1 }],
+          strength: "balanced",
+        },
+        rulesetVersion: "test-v1",
+        rulesetSha256: "c".repeat(64),
+        planSha256: "d".repeat(64),
+        spans: [{
+          sourceStart: 0, sourceEnd: 4, sourceText: "When", canonicalGrapheme: "when",
+          baselineIpa: "wˈɛn", targetIpa: "vˈɛn", changed: true, protected: false,
+          appliedRuleIds: ["w-labiodental"],
+        }],
+      }),
+      fetchImpl: (async (url, init) => {
+        if (String(url).includes("pronunciation-dictionaries")) {
+          return new Promise<Response>(() => {});
+        }
+        providerBody = JSON.parse(String(init?.body));
+        const characters = Array.from(String(providerBody.text));
+        return Response.json({
+          audio_base64: "AQID",
+          alignment: {
+            characters,
+            character_start_times_seconds: characters.map((_, index) => index * 0.01),
+            character_end_times_seconds: characters.map((_, index) => (index + 1) * 0.01),
+          },
+        });
+      }) as typeof fetch,
+    });
+    assert.equal(providerBody?.text, "[German accent] /vˈɛn/ now.");
+    assert.equal(speech.alignment?.characters.join(""), sourceText);
+    assert.equal(speech.premiumPhonology?.fallback, "inline-ipa");
+  });
+
+  it("rejects direct ElevenLabs synthesis in LOCAL mode before any provider or dictionary egress", async () => {
+    let calls = 0;
+    await assert.rejects(
+      requestElevenLabsSpeech({
+        apiKey: "secret-key",
+        tenantId: "tenant",
+        privacyMode: "local",
+        voiceId: "voice-id",
+        model: "eleven_v3",
+        text: "When.",
+        profile: {
+          ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+          premiumPronunciationEnabled: true,
+          accentDefinitionId: "german-influenced-english",
+        },
+        fetchImpl: (async () => {
+          calls += 1;
+          return new Response("audio");
+        }) as typeof fetch,
+      }),
+      /LOCAL mode/u,
+    );
+    assert.equal(calls, 0);
   });
 
   it("normalizes umbrella profiles to concrete directions and reserves target IPA for Scottish", async () => {
@@ -583,6 +1089,7 @@ describe("voice Phase 1 boundary", () => {
         text: sourceText,
         profile: {
           ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+          premiumPronunciationEnabled: true,
           elevenLabsNativeAccentHint: testCase.nativeAccent,
           accentDefinitionId: testCase.accentDefinitionId,
         },
@@ -635,6 +1142,7 @@ describe("voice Phase 1 boundary", () => {
       text,
       profile: {
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
         accentDefinitionId: null,
         pronunciationMapPoint,
         pronunciationBase: "en-US",
@@ -669,6 +1177,7 @@ describe("voice Phase 1 boundary", () => {
       text,
       profile: {
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
         accentDefinitionId: null,
         pronunciationMapPoint: bavaria.point,
         pronunciationBase: "en-US",
@@ -696,6 +1205,7 @@ describe("voice Phase 1 boundary", () => {
       text,
       profile: {
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
         elevenLabsNativeAccentHint: "American",
         accentDefinitionId: "british-english",
       },
@@ -724,6 +1234,7 @@ describe("voice Phase 1 boundary", () => {
       text,
       profile: {
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
         elevenLabsNativeAccentHint: "American",
         accentDefinitionId: "parisian-french-influenced-english",
         speechprintStrength: "strong",
@@ -751,6 +1262,7 @@ describe("voice Phase 1 boundary", () => {
       text: "Walter waits.",
       profile: {
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
         accentDefinitionId: "german-influenced-english",
         speechprintStrength: "balanced",
       },
@@ -1098,6 +1610,7 @@ describe("voice Phase 1 boundary", () => {
       text: sourceText,
       profile: {
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
         elevenLabsNativeAccentHint: "British",
         accentDefinitionId: "american-english",
       },
@@ -1140,6 +1653,7 @@ describe("voice Phase 1 boundary", () => {
       text: sourceText,
       profile: {
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
         elevenLabsNativeAccentHint: "British",
         elevenLabsDirection: "hushed",
         accentDefinitionId: "american-english",
@@ -1196,6 +1710,7 @@ describe("voice Phase 1 boundary", () => {
       text: sourceText,
       profile: {
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
         elevenLabsNativeAccentHint: "American",
         accentDefinitionId: "cockney-english",
         speechprintStrength: "strong" as const,
@@ -1268,6 +1783,7 @@ describe("voice Phase 1 boundary", () => {
       protectedPhrases: ["Thistle"],
       profile: {
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
         elevenLabsNativeAccentHint: "American",
         accentDefinitionId: "irish-english",
         speechprintStrength: "strong" as const,

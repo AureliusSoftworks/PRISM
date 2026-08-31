@@ -741,11 +741,24 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.doesNotMatch(maskSource, /data-avatar-details-emission="bloom"/);
     assert.match(
       maskCss,
-      /--avatar-details-phosphor-glow-color:\s*var\(\s*--crt-face-edge-color,\s*currentColor\s*\)/,
+      /--avatar-details-phosphor-glow-color:\s*var\(\s*--zen-live-bot-shared-phosphor-glow-color,\s*var\(\s*--crt-face-edge-color,\s*currentColor\s*\)\s*\)/,
     );
-    assert.match(
+    assert.doesNotMatch(
       maskSource,
       /\["--avatar-details-phosphor-glow-color" as string\]: normalizedColor/,
+    );
+    assert.match(
+      pageCss,
+      /\.zenLiveBotPresenceFaceEmissionMask\s*\{[\s\S]*?--zen-live-bot-shared-phosphor-glow-color:[\s\S]*?--zen-live-bot-shared-phosphor-glow-filter:/,
+    );
+    assert.match(
+      maskCss,
+      /\.glow\s*\{[\s\S]*?--zen-live-bot-shared-phosphor-glow-filter/,
+    );
+    assert.ok(
+      (pageCss.match(/--crt-face-glow-filter:\s*var\(--zen-live-bot-shared-phosphor-glow-filter\)/gu) ?? [])
+        .length >= 2,
+      "idle and talking face states must consume the same phosphor glow contract as Ink",
     );
     assert.match(maskCss, /\.glowPlane[\s\S]*mix-blend-mode: screen/);
     assert.match(

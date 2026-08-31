@@ -9,6 +9,7 @@ import {
 } from "@localai/shared";
 import sharp from "sharp";
 import { editImage, generateImage } from "./image-provider.ts";
+import { renderDebateMysteryRoomArtV1 } from "./debate-mystery-room-art.ts";
 import { decryptBytes, encryptBytes } from "./security.ts";
 import { HttpError } from "./utils.http.ts";
 
@@ -102,8 +103,21 @@ function styleDirection(styleJson: string): string {
       .trim()
       .slice(0, 1_200);
   } catch {
-    return "A restrained, coherent PRISM mystery mansion interior.";
+    return "A restrained, coherent PRISM mystery venue interior.";
   }
+}
+
+function roomAnchorContractSha256(layout: MansionLayoutV2, roomId: string): string {
+  const anchors = layout.placementAnchors
+    .filter((anchor) => anchor.roomId === roomId)
+    .map((anchor) => ({
+      id: anchor.id,
+      name: anchor.name,
+      relation: anchor.relation,
+      point: { x: anchor.point.x, y: anchor.point.y },
+    }))
+    .sort((left, right) => left.id.localeCompare(right.id));
+  return createHash("sha256").update(JSON.stringify(anchors)).digest("hex");
 }
 
 export function buildMansionRoomArtCandidatePromptV2(args: {
@@ -118,6 +132,9 @@ export function buildMansionRoomArtCandidatePromptV2(args: {
     .join("; ");
   return [
     `Synthesize an unoccupied 16:9 high-resolution hand-crafted Pixel Art establishing plate for the ${args.room.name} in ${args.mansionName}.`,
+    ...(args.layout.venueProfile
+      ? [`Venue: ${args.layout.venueProfile.kindLabel}. ${args.layout.venueProfile.environmentSummary}`]
+      : []),
     styleDirection(args.styleJson),
     `Room type: ${args.room.templateId}.`,
     anchors ? `Spoiler-free authoring anchors: ${anchors}.` : "Keep the composition spacious and usable for later authoring.",
@@ -126,7 +143,7 @@ export function buildMansionRoomArtCandidatePromptV2(args: {
     "Do not create a realistic plate and then downsample, quantize, posterize, pixelate, blur, add a mosaic grid, CRT treatment, scanlines, or any other pixel filter.",
     "Use a balanced full palette with distinct environmental accent colors and clear cool-versus-warm light separation. Do not impose a global sepia, brown, monochrome, grayscale, or desaturated cast.",
     "Do not include people, characters, bodies, clues, evidence, blood, weapons, readable text, logos, symbols, or case-specific facts.",
-    "This is mansion-owned Pixel Art presentation, not a hotspot map. Preserve navigable negative space and return one polished room plate.",
+    "This is venue-owned Pixel Art presentation, not a hotspot map. Preserve navigable negative space and return one polished room plate.",
   ].join(" ");
 }
 
@@ -246,12 +263,10 @@ function acceptedCompositionReference(
 }
 
 async function normalizeGeneratedRoomArt(bytes: Buffer): Promise<Buffer> {
-  const normalized = await sharp(bytes, { failOn: "error" })
-    .rotate()
-    .flatten({ background: "#080d16" })
-    .resize(1920, 1080, { fit: "cover", position: "centre" })
-    .webp({ quality: 92, effort: 5 })
-    .toBuffer();
+  const normalized = (await renderDebateMysteryRoomArtV1(bytes, {
+    variant: "mosaic-reference",
+    format: "webp",
+  })).bytes;
   if (!normalized.length || normalized.byteLength > MANSION_ROOM_ART_MAX_STORED_BYTES_V2) {
     throw new Error("Generated room art is outside the protected storage boundary.");
   }
@@ -407,7 +422,11 @@ export function acceptMansionRoomArtCandidateV2(
   const next: MansionLayoutV2 = {
     ...withCandidate(layout, null, roomId),
     entities: layout.entities.map((entity) => entity.id === roomId && entity.kind === "room"
-      ? { ...entity, acceptedRoomAssetId: candidate.assetId }
+      ? {
+          ...entity,
+          acceptedRoomAssetId: candidate.assetId,
+          acceptedRoomArtAnchorSha256: roomAnchorContractSha256(layout, roomId),
+        }
       : entity),
   };
   const now = new Date().toISOString();
@@ -485,7 +504,7 @@ export function regenerateMansionRoomAssetV2(
   const next: MansionLayoutV2 = {
     ...layout,
     entities: layout.entities.map((entity) => entity.id === roomId && entity.kind === "room"
-      ? { ...entity, imageId: null, acceptedRoomAssetId: null }
+      ? { ...entity, imageId: null, acceptedRoomAssetId: null, acceptedRoomArtAnchorSha256: null }
       : entity),
     placementAnchors: layout.placementAnchors.filter((anchor) => anchor.roomId !== roomId),
     lights: layout.lights.filter((light) => light.roomId !== roomId),

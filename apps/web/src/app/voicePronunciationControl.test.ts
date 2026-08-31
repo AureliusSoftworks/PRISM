@@ -24,7 +24,7 @@ const atlasMap = new URL(
 describe("cross-accent local voice pronunciation controls", () => {
   it("uses the Foundry adjustment console for bots and Default PRISM", () => {
     assert.match(pageSource, /value: "pronunciation", label: "1 Accent"/u);
-    assert.match(pageSource, /value: "local", label: "2 Local"/u);
+    assert.match(pageSource, /value: "local", label: "2 TTS"/u);
     assert.match(pageSource, /value: "premium", label: "3 Premium"/u);
     assert.match(pageSource, /data-bot-voice-local-stage="true"/u);
     assert.match(pageSource, /data-bot-voice-premium-stage="true"/u);
@@ -32,24 +32,13 @@ describe("cross-accent local voice pronunciation controls", () => {
     assert.match(pageSource, /<PronunciationAtlas/u);
     assert.match(pageSource, /data-adjustment-target=/u);
     assert.match(atlasSource, /label = "Accent map"/u);
-    assert.match(atlasSource, /aria-label="Accent Map pronunciation"/u);
-    assert.match(
-      atlasSource,
-      /data-tutorial-target="avatar-accent-pronunciation-toggle"/u,
-    );
-    assert.match(pageSource, /accentPronunciationEnabled: enabled/u);
-    assert.match(
-      atlasModelSource,
-      /accentPronunciationEnabled:[\s\S]*?activatePronunciation === false[\s\S]*?: true,[\s\S]*?pronunciationBase:/u,
-    );
-    assert.match(
-      pageSource,
-      /onPreview=\{\(selection\)[\s\S]*?activatePronunciation: false/u,
-    );
-    assert.match(
-      pageSource,
-      /onCancel=\{\(selection\)[\s\S]*?activatePronunciation: false/u,
-    );
+    assert.doesNotMatch(atlasSource, /Accent Map pronunciation/u);
+    assert.doesNotMatch(atlasSource, /role="switch"/u);
+    assert.match(pageSource, /aria-label="TTS pronunciation help"/u);
+    assert.match(pageSource, /ttsPronunciationEnabled:/u);
+    assert.match(pageSource, /aria-label="Premium pronunciation help"/u);
+    assert.match(pageSource, /premiumPronunciationEnabled:/u);
+    assert.doesNotMatch(atlasModelSource, /activatePronunciation/u);
     assert.doesNotMatch(
       pageSource,
       /activeAdjustmentTarget === "pronunciation" \? null : activeAdjustmentOptions/,
@@ -58,7 +47,7 @@ describe("cross-accent local voice pronunciation controls", () => {
 
   it("applies curated Marketplace pronunciation defaults without losing imported overrides", () => {
     const defaultStart = pageSource.indexOf(
-      'if (typeof options?.accentPronunciationEnabledDefault === "boolean")',
+      'if (typeof options?.pronunciationHelpEnabledDefault === "boolean")',
     );
     const defaultEnd = pageSource.indexOf(
       "if (options?.generateThinkingSfx)",
@@ -70,18 +59,17 @@ describe("cross-accent local voice pronunciation controls", () => {
     assert.match(defaultSource, /audioVoiceProfileOverride/u);
     assert.equal(
       defaultSource.match(
-        /accentPronunciationEnabled:\s*options\.accentPronunciationEnabledDefault/gu,
+        /(?:tts|premium)PronunciationEnabled:\s*options\.pronunciationHelpEnabledDefault/gu,
       )?.length,
-      2,
+      4,
     );
     assert.match(
       pageSource,
-      /generateThinkingSfx: true,[\s\S]*?accentPronunciationEnabledDefault:[\s\S]*?marketplaceAccentPronunciationDefault\(bundle\.entry\)/u,
+      /generateThinkingSfx: true,[\s\S]*?pronunciationHelpEnabledDefault:[\s\S]*?marketplaceAccentPronunciationDefault\(bundle\.entry\)/u,
     );
-    assert.match(
-      pageSource,
-      /botAudioVoiceProfileHasExplicitAccentPronunciationSetting\([\s\S]*?installedOverrideValue[\s\S]*?marketplaceAccentPronunciationDefault\(prepared\.entry\)/u,
-    );
+    assert.match(pageSource, /botAudioVoiceProfileHasExplicitAccentPronunciationSetting\([\s\S]*?installedOverrideValue/u);
+    assert.match(pageSource, /premiumPronunciationEnabled:[\s\S]*?marketplaceAccentPronunciationDefault\(/u);
+    assert.match(pageSource, /marketplaceAccentPronunciationDefault\(\s*prepared\.entry,/u);
     assert.match(
       pageSource,
       /if \(installedOverride && installedOverrideChanged\)[\s\S]*?marketplacePatch\.audioVoiceProfileOverride = installedOverride/u,

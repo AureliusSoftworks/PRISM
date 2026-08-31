@@ -28,10 +28,12 @@ import {
   createPrismTutorialProgress,
   directionalIrritationEdgeKey,
   fullySaturateBotColor,
+  migrateLegacyAccentPronunciationEnginesV1,
   normalizeBotNamePronunciation,
   normalizeBotFaceCustomSpeechPoses,
   normalizeDirectionalIrritationIntensity,
   sanitizePrismMoodState,
+  serializeBotAudioVoiceProfileV1,
   serializeBotFaceCustomSpeechPosesForStorage,
   type CoffeeSessionDurationMinutes,
 } from "@localai/shared";
@@ -5889,6 +5891,54 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   ensureImageAssetLibrarySchema(db);
   ensureItemCapabilityCardSchema(db);
   ensureAudioAssetCatalogSchema(db);
+  // The Accent Map remains authored identity. Only legacy profiles that had
+  // actively enabled its former shared gate receive the two explicit engine
+  // gates; disabled maps and already-migrated profiles are never rewritten.
+  const legacyPronunciationProfiles = db
+    .prepare(
+      `SELECT id, user_id, authored_audio_voice_profile, audio_voice_profile_override
+         FROM bots
+        WHERE authored_audio_voice_profile IS NOT NULL
+           OR audio_voice_profile_override IS NOT NULL`,
+    )
+    .all() as Array<{
+    id: string;
+    user_id: string;
+    authored_audio_voice_profile: string | null;
+    audio_voice_profile_override: string | null;
+  }>;
+  const migrateAuthoredPronunciation = db.prepare(
+    `UPDATE bots
+        SET authored_audio_voice_profile = ?
+      WHERE id = ? AND user_id = ?`,
+  );
+  const migrateOverridePronunciation = db.prepare(
+    `UPDATE bots
+        SET audio_voice_profile_override = ?
+      WHERE id = ? AND user_id = ?`,
+  );
+  for (const bot of legacyPronunciationProfiles) {
+    const authored = migrateLegacyAccentPronunciationEnginesV1(
+      bot.authored_audio_voice_profile,
+    );
+    if (authored) {
+      migrateAuthoredPronunciation.run(
+        serializeBotAudioVoiceProfileV1(authored),
+        bot.id,
+        bot.user_id,
+      );
+    }
+    const override = migrateLegacyAccentPronunciationEnginesV1(
+      bot.audio_voice_profile_override,
+    );
+    if (override) {
+      migrateOverridePronunciation.run(
+        serializeBotAudioVoiceProfileV1(override),
+        bot.id,
+        bot.user_id,
+      );
+    }
+  }
   for (const row of db.prepare("SELECT id FROM users").all() as Array<{
     id: string;
   }>) {

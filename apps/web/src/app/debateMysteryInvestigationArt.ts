@@ -1,10 +1,14 @@
+import { CURRENT_MANSION_ROOM_ART_CONTRACT } from "@localai/shared";
+
 export const WHODUNNIT_INVESTIGATION_ART_STYLE_STORAGE_KEY =
   "prism.whodunnit.investigation-art-style.v1";
 
 export type WhodunnitInvestigationArtStyle = "mosaic" | "illustrated";
 
-export const DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE = "mosaic" as const;
-export const WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION = 5 as const;
+export const DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE =
+  CURRENT_MANSION_ROOM_ART_CONTRACT.defaultPresentation;
+export const WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION =
+  CURRENT_MANSION_ROOM_ART_CONTRACT.version;
 
 function withPixelArtPresentationVersion(url: string): string {
   if (/[?&]pixelArt=\d+/u.test(url)) {
@@ -17,6 +21,13 @@ function withPixelArtPresentationVersion(url: string): string {
   return `${url}${separator}pixelArt=${WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION}`;
 }
 
+function whodunnitInvestigationArtStyleStorageKey(scopeId?: string): string {
+  const scope = scopeId?.trim();
+  return scope
+    ? `${WHODUNNIT_INVESTIGATION_ART_STYLE_STORAGE_KEY}:${scope}`
+    : WHODUNNIT_INVESTIGATION_ART_STYLE_STORAGE_KEY;
+}
+
 export function normalizeWhodunnitInvestigationArtStyle(
   value: unknown,
 ): WhodunnitInvestigationArtStyle {
@@ -25,11 +36,12 @@ export function normalizeWhodunnitInvestigationArtStyle(
 
 export function readWhodunnitInvestigationArtStyle(
   storage: Pick<Storage, "getItem"> | null | undefined,
+  scopeId?: string,
 ): WhodunnitInvestigationArtStyle {
   if (!storage) return DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE;
   try {
     return normalizeWhodunnitInvestigationArtStyle(
-      storage.getItem(WHODUNNIT_INVESTIGATION_ART_STYLE_STORAGE_KEY),
+      storage.getItem(whodunnitInvestigationArtStyleStorageKey(scopeId)),
     );
   } catch {
     return DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE;
@@ -39,10 +51,11 @@ export function readWhodunnitInvestigationArtStyle(
 export function writeWhodunnitInvestigationArtStyle(
   storage: Pick<Storage, "setItem"> | null | undefined,
   style: WhodunnitInvestigationArtStyle,
+  scopeId?: string,
 ): void {
   if (!storage) return;
   try {
-    storage.setItem(WHODUNNIT_INVESTIGATION_ART_STYLE_STORAGE_KEY, style);
+    storage.setItem(whodunnitInvestigationArtStyleStorageKey(scopeId), style);
   } catch {
     // A blocked storage surface must never interrupt an investigation.
   }

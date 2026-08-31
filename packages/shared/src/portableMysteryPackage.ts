@@ -8,6 +8,7 @@ import {
   mansionLayoutV2ToLegacyRooms,
   validateMansionLayoutV2,
   type MansionLayoutV2,
+  type MysteryVenueProfileV1,
 } from "./mansionLayoutV2.ts";
 import {
   WHODUNNIT_PROP_ARCHETYPE_IDS_V1,
@@ -17,7 +18,7 @@ import {
 } from "./whodunnitProps.ts";
 
 export const PORTABLE_MYSTERY_PACKAGE_FORMAT_MAJOR_V1 = 1 as const;
-export const PORTABLE_MYSTERY_PACKAGE_FORMAT_MINOR_V1 = 1 as const;
+export const PORTABLE_MYSTERY_PACKAGE_FORMAT_MINOR_V1 = 2 as const;
 export const PORTABLE_MYSTERY_PACKAGE_MAGIC_V1 = "PRISMPKG" as const;
 export const PORTABLE_MANSION_PACKAGE_MIME_V1 = "application/vnd.prism.mansion" as const;
 export const PORTABLE_WHODUNNIT_PACKAGE_MIME_V1 = "application/vnd.prism.whodunnit" as const;
@@ -393,6 +394,86 @@ export const DEFAULT_MANSION_ROOM_ART_CONTRACT_V5: MansionRoomArtContractV5 = {
   avatars: { pixelArt: "mini", realistic: "full", footprint: "unchanged" },
 };
 
+/** Mosaic V6 makes tessera ownership explicit. A presentation renderer must
+ * first resolve one 320x180 logical sample per cell, expand only with nearest
+ * neighbour scaling, and preserve those exact samples with lossless output. */
+export interface MansionRoomArtContractV6 {
+  version: 6;
+  defaultStyle: "pixel-art";
+  defaultPresentation: "mosaic";
+  upgradeStyle: "realistic";
+  derivationSource: "synthesized-from-composition-reference";
+  pixelArt: {
+    outputWidth: 1920;
+    outputHeight: 1080;
+    source: "generative-style-transfer";
+    compositionReference: "high-resolution-room-plate";
+    deterministicFilter: false;
+    grid: {
+      application: "presentation-only";
+      logicalWidth: 320;
+      logicalHeight: 180;
+      blend: "normal";
+      luminanceSplit: "scene-grid-median";
+      lineAlpha: 84;
+      lineDelta: 36;
+      preserveSourceHue: true;
+      sampleOwnership: "one-logical-pixel-per-tessera";
+      resampling: "nearest-neighbor";
+      encoding: "lossless";
+    };
+  };
+  realistic: {
+    outputWidth: 1600;
+    outputHeight: 900;
+    source: "accepted-gridless-pixel-art-upgrade";
+  };
+  avatars: {
+    pixelArt: "mini";
+    realistic: "full";
+    footprint: "unchanged";
+  };
+}
+
+export const DEFAULT_MANSION_ROOM_ART_CONTRACT_V6: MansionRoomArtContractV6 = {
+  version: 6,
+  defaultStyle: "pixel-art",
+  defaultPresentation: "mosaic",
+  upgradeStyle: "realistic",
+  derivationSource: "synthesized-from-composition-reference",
+  pixelArt: {
+    outputWidth: 1920,
+    outputHeight: 1080,
+    source: "generative-style-transfer",
+    compositionReference: "high-resolution-room-plate",
+    deterministicFilter: false,
+    grid: {
+      application: "presentation-only",
+      logicalWidth: 320,
+      logicalHeight: 180,
+      blend: "normal",
+      luminanceSplit: "scene-grid-median",
+      lineAlpha: 84,
+      lineDelta: 36,
+      preserveSourceHue: true,
+      sampleOwnership: "one-logical-pixel-per-tessera",
+      resampling: "nearest-neighbor",
+      encoding: "lossless",
+    },
+  },
+  realistic: {
+    outputWidth: 1600,
+    outputHeight: 900,
+    source: "accepted-gridless-pixel-art-upgrade",
+  },
+  avatars: { pixelArt: "mini", realistic: "full", footprint: "unchanged" },
+};
+
+/** Single authoring/runtime seam for all newly created mansion packages and
+ * room presentations. Versioned constants above remain for legacy decoding. */
+export const CURRENT_MANSION_ROOM_ART_CONTRACT =
+  DEFAULT_MANSION_ROOM_ART_CONTRACT_V6;
+
 export type MansionAtmosphereWeatherV1 =
   | "clear"
   | "fog"
@@ -522,6 +603,8 @@ export interface MansionPackageManifestV1 {
   /** Additive connected planner contract. `rooms` remains the V1-compatible
    * semantic projection so older PRISM installs can still play the package. */
   layoutV2?: MansionLayoutV2;
+  /** Additive public venue vocabulary for package previews and older layout readers. */
+  venueProfile?: MysteryVenueProfileV1;
   rooms: MansionPackageRoomV1[];
   houseStyle: {
     id: string;
@@ -540,7 +623,7 @@ export interface MansionPackageManifestV1 {
   /** Sealed mansion-only musical identity; legacy packages derive one on install. */
   musicIdentity?: MansionMusicIdentityV1;
   /** Additive: legacy packages derive room art with PRISM defaults. */
-  roomArt?: MansionRoomArtContractV1 | MansionRoomArtContractV2 | MansionRoomArtContractV3 | MansionRoomArtContractV4 | MansionRoomArtContractV5;
+  roomArt?: MansionRoomArtContractV1 | MansionRoomArtContractV2 | MansionRoomArtContractV3 | MansionRoomArtContractV4 | MansionRoomArtContractV5 | MansionRoomArtContractV6;
   /** Optional so legacy one-floor and pre-ambience packages stay valid. */
   ambience?: MansionAmbienceManifestV1 | null;
   /** Additive complete replacement pack. Legacy anonymous room props remain separate. */
@@ -915,9 +998,9 @@ export function validateMansionPackageManifestV1(value: unknown): string[] {
   errors.push(...assetCollection.errors);
   if (value.propTheme !== undefined) {
     if (!isRecord(value.formatVersion) || !isNonNegativeInteger(value.formatVersion.minor) ||
-        value.formatVersion.minor < PORTABLE_MYSTERY_PACKAGE_FORMAT_MINOR_V1) {
+        value.formatVersion.minor < 1) {
       errors.push(
-        `manifest.propTheme requires package minor ${PORTABLE_MYSTERY_PACKAGE_FORMAT_MINOR_V1} or newer.`,
+        "manifest.propTheme requires package minor 1 or newer.",
       );
     }
     if (!isRecord(value.propTheme)) {
@@ -1139,6 +1222,12 @@ export function validateMansionPackageManifestV1(value: unknown): string[] {
       }
     }
   }
+  if (value.venueProfile !== undefined) {
+    if (!isRecord(value.venueProfile) || !isRecord(value.layoutV2) ||
+      JSON.stringify(value.venueProfile) !== JSON.stringify(value.layoutV2.venueProfile)) {
+      errors.push("manifest.venueProfile must match manifest.layoutV2.venueProfile.");
+    }
+  }
   if (value.roomArt !== undefined) {
     const roomArt = value.roomArt;
     const validV1 = isRecord(roomArt) &&
@@ -1248,7 +1337,39 @@ export function validateMansionPackageManifestV1(value: unknown): string[] {
       roomArt.avatars.pixelArt === "mini" &&
       roomArt.avatars.realistic === "full" &&
       roomArt.avatars.footprint === "unchanged";
-    if (!validV1 && !validV2 && !validV3 && !validV4 && !validV5) {
+    const validV6 = isRecord(roomArt) &&
+      roomArt.version === 6 &&
+      roomArt.defaultStyle === "pixel-art" &&
+      roomArt.defaultPresentation === "mosaic" &&
+      roomArt.upgradeStyle === "realistic" &&
+      roomArt.derivationSource === "synthesized-from-composition-reference" &&
+      isRecord(roomArt.pixelArt) &&
+      roomArt.pixelArt.outputWidth === 1920 &&
+      roomArt.pixelArt.outputHeight === 1080 &&
+      roomArt.pixelArt.source === "generative-style-transfer" &&
+      roomArt.pixelArt.compositionReference === "high-resolution-room-plate" &&
+      roomArt.pixelArt.deterministicFilter === false &&
+      isRecord(roomArt.pixelArt.grid) &&
+      roomArt.pixelArt.grid.application === "presentation-only" &&
+      roomArt.pixelArt.grid.logicalWidth === 320 &&
+      roomArt.pixelArt.grid.logicalHeight === 180 &&
+      roomArt.pixelArt.grid.blend === "normal" &&
+      roomArt.pixelArt.grid.luminanceSplit === "scene-grid-median" &&
+      roomArt.pixelArt.grid.lineAlpha === 84 &&
+      roomArt.pixelArt.grid.lineDelta === 36 &&
+      roomArt.pixelArt.grid.preserveSourceHue === true &&
+      roomArt.pixelArt.grid.sampleOwnership === "one-logical-pixel-per-tessera" &&
+      roomArt.pixelArt.grid.resampling === "nearest-neighbor" &&
+      roomArt.pixelArt.grid.encoding === "lossless" &&
+      isRecord(roomArt.realistic) &&
+      roomArt.realistic.outputWidth === 1600 &&
+      roomArt.realistic.outputHeight === 900 &&
+      roomArt.realistic.source === "accepted-gridless-pixel-art-upgrade" &&
+      isRecord(roomArt.avatars) &&
+      roomArt.avatars.pixelArt === "mini" &&
+      roomArt.avatars.realistic === "full" &&
+      roomArt.avatars.footprint === "unchanged";
+    if (!validV1 && !validV2 && !validV3 && !validV4 && !validV5 && !validV6) {
       errors.push("manifest.roomArt is invalid.");
     }
   }

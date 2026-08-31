@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { describe, it } from "node:test";
+import { CURRENT_MANSION_ROOM_ART_CONTRACT } from "@localai/shared";
 import {
   DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE,
   WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION,
@@ -18,21 +19,37 @@ import {
 describe("Whodunnit investigation art style", () => {
   it("defaults invalid and unavailable preferences to Pixel Art", () => {
     assert.equal(DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE, "mosaic");
+    assert.equal(
+      WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION,
+      CURRENT_MANSION_ROOM_ART_CONTRACT.version,
+    );
     assert.equal(readWhodunnitInvestigationArtStyle(null), "mosaic");
     assert.equal(readWhodunnitInvestigationArtStyle({ getItem: () => "unknown" }), "mosaic");
     assert.equal(readWhodunnitInvestigationArtStyle({ getItem: () => "illustrated" }), "illustrated");
   });
 
-  it("persists the player presentation choice without touching case state", () => {
+  it("defaults every new case to Mosaic and persists upgrades only within that case", () => {
     const writes: Array<[string, string]> = [];
-    writeWhodunnitInvestigationArtStyle({ setItem: (key, value) => { writes.push([key, value]); } }, "illustrated");
-    assert.deepEqual(writes, [["prism.whodunnit.investigation-art-style.v1", "illustrated"]]);
+    writeWhodunnitInvestigationArtStyle(
+      { setItem: (key, value) => { writes.push([key, value]); } },
+      "illustrated",
+      "case-1",
+    );
+    assert.deepEqual(writes, [[
+      "prism.whodunnit.investigation-art-style.v1:case-1",
+      "illustrated",
+    ]]);
+    const storage = {
+      getItem: (key: string) => key.endsWith(":case-1") ? "illustrated" : null,
+    };
+    assert.equal(readWhodunnitInvestigationArtStyle(storage, "case-1"), "illustrated");
+    assert.equal(readWhodunnitInvestigationArtStyle(storage, "case-2"), "mosaic");
   });
 
   it("resolves bundled, sealed, and avatar variants as one presentation contract", () => {
     assert.equal(
       whodunnitBundledRoomArtPath("/debate/mystery/rooms/foyer.webp", "mosaic"),
-      "/debate/mystery/rooms/foyer-mosaic.webp?pixelArt=5",
+      "/debate/mystery/rooms/foyer-mosaic.webp?pixelArt=6",
     );
     assert.equal(
       whodunnitBundledRoomArtPath("/debate/mystery/rooms/foyer.webp", "illustrated"),
@@ -43,7 +60,7 @@ describe("Whodunnit investigation art style", () => {
         "/debate/mystery/rooms/attic-mosaic.webp?pixelArt=2",
         "mosaic",
       ),
-      "/debate/mystery/rooms/attic-mosaic.webp?pixelArt=5",
+      "/debate/mystery/rooms/attic-mosaic.webp?pixelArt=6",
       "already-Mosaic paths receive the current presentation cache version",
     );
     assert.equal(
@@ -51,7 +68,7 @@ describe("Whodunnit investigation art style", () => {
         { templateId: "guest-bedroom", bundledAssetPath: null },
         "mosaic",
       ),
-      "/debate/mystery/rooms/bedroom-mosaic.webp?pixelArt=5",
+      "/debate/mystery/rooms/bedroom-mosaic.webp?pixelArt=6",
       "legacy and imported Guest Bedrooms keep a bundled backdrop",
     );
     assert.equal(
@@ -74,11 +91,11 @@ describe("Whodunnit investigation art style", () => {
     assert.equal(whodunnitIllustratedRoomSubjectId("room-2"), "room-2:illustrated-v1");
     assert.equal(
       whodunnitSealedRoomArtUrl({ sessionId: "case / 1", subjectId: "room / 2", style: "mosaic" }),
-      "/api/debates/case%20%2F%201/mystery-assets/room/room%20%2F%202/file?style=mosaic&pixelArt=5",
+      "/api/debates/case%20%2F%201/mystery-assets/room/room%20%2F%202/file?style=mosaic&pixelArt=6",
     );
     assert.equal(
       whodunnitSavedRoomArtUrl("jungle / room", "mosaic"),
-      "/api/images/jungle%20%2F%20room/file?style=mosaic&pixelArt=5",
+      "/api/images/jungle%20%2F%20room/file?style=mosaic&pixelArt=6",
     );
     const illustratedMansionRoom = whodunnitMansionRoomArtUrl(
       "banyan / copy",
@@ -106,8 +123,16 @@ describe("Whodunnit investigation art style", () => {
       new URL("./DebateMysteryV2Experience.tsx", import.meta.url),
       "utf8",
     );
+    const legacyExperience = readFileSync(
+      new URL("./DebateMysteryExperience.tsx", import.meta.url),
+      "utf8",
+    );
     const css = readFileSync(new URL("./debateMysteryV2.module.css", import.meta.url), "utf8");
     assert.match(experience, /data-tutorial-target="mystery-v2-room-art-style"/u);
+    assert.match(experience, /readWhodunnitInvestigationArtStyle\([\s\S]{0,100}window\.localStorage,[\s\S]{0,100}props\.session\.id/u);
+    assert.match(experience, /writeWhodunnitInvestigationArtStyle\(window\.localStorage, style, props\.session\.id\)/u);
+    assert.match(legacyExperience, /readWhodunnitInvestigationArtStyle\([\s\S]{0,100}window\.localStorage,[\s\S]{0,100}props\.session\.id/u);
+    assert.match(legacyExperience, /writeWhodunnitInvestigationArtStyle\(window\.localStorage, style, props\.session\.id\)/u);
     assert.match(experience, /whodunnitBundledRoomArtPathForRoom/u);
     assert.match(experience, /const currentRoomImageUrl = currentRoomAssetUrl/u);
     assert.match(experience, /className=\{styles\.roomBackdropImage\}/u);
@@ -116,6 +141,8 @@ describe("Whodunnit investigation art style", () => {
     assert.match(experience, /roomBackdropImage[\s\S]*roomParallaxLayer/u);
     assert.match(css, /\.roomBackdropImage[\s\S]*z-index: 1;[\s\S]*width: 100vw;[\s\S]*height: 100dvh;/u);
     assert.match(css, /\.roomBackdropImage\[data-art-style="mosaic"\][\s\S]*image-rendering: pixelated/u);
+    assert.match(css, /\.roomBackdrop\[data-art-style="mosaic"\][\s\S]*display: none/u);
+    assert.match(css, /\.roomScene\[data-art-style="mosaic"\] \.roomParallaxLayer[\s\S]*transform: none/u);
     assert.match(experience, /Upgrade to Realistic · ONLINE/u);
     assert.match(experience, /renderMysteryBotAvatar\(currentBot, investigationAvatarPresentation/u);
     assert.match(experience, /renderMysteryBotAvatar\(courtPresentedWitnessBot, "full"/u);
@@ -140,11 +167,11 @@ describe("Whodunnit investigation art style", () => {
     const room = { templateId: "attic", bundledAssetPath: null };
     assert.equal(
       whodunnitBundledRoomArtPathForRoom(room, "mosaic"),
-      "/debate/mystery/rooms/attic-mosaic.webp?pixelArt=5",
+      "/debate/mystery/rooms/attic-mosaic.webp?pixelArt=6",
     );
     assert.equal(
       whodunnitBundledRoomArtPathForRoom(room, "illustrated"),
-      "/debate/mystery/rooms/attic-mosaic.webp?pixelArt=5",
+      "/debate/mystery/rooms/attic-mosaic.webp?pixelArt=6",
     );
   });
 });

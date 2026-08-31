@@ -147,12 +147,19 @@ export function voiceIntonationContourForAccentDefinition(
  * Legacy profiles that stored only a Speechprint influence still resolve.
  */
 export function voiceIntonationPlanForProfile(profile: {
+  ttsPronunciationEnabled?: unknown;
   accentPronunciationEnabled?: unknown;
   accentDefinitionId?: unknown;
   speechprintInfluence?: unknown;
   speechprintStrength?: unknown;
 }): VoiceIntonationPlanV1 | null {
-  if (profile.accentPronunciationEnabled === false) return null;
+  if (
+    profile.ttsPronunciationEnabled === false ||
+    (profile.ttsPronunciationEnabled !== true &&
+      profile.accentPronunciationEnabled === false)
+  ) {
+    return null;
+  }
   const contourId =
     voiceIntonationContourForAccentDefinition(profile.accentDefinitionId) ??
     voiceIntonationContourForAccentDefinition(

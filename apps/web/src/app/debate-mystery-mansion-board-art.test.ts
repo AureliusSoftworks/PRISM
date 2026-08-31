@@ -51,7 +51,7 @@ describe("Whodunnit discovered mansion room art", () => {
       templateId: "dining-room",
     }), {
       style: "mosaic",
-      url: "/debate/mystery/rooms/dining-room-mosaic.webp?pixelArt=5",
+      url: "/debate/mystery/rooms/dining-room-mosaic.webp?pixelArt=6",
     });
   });
 });

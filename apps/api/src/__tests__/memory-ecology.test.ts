@@ -469,8 +469,20 @@ describe("memory acquisition receipts", () => {
   it("persists unread state and resolves the latest notified player memory exactly", () => {
     const db = createDb();
     try {
-      insertMemory(db, { id: "older", confidence: 0.8, botId: "bot-a" });
-      insertMemory(db, { id: "latest", confidence: 0.82, botId: "bot-a" });
+      const latestAt = new Date();
+      const olderAt = new Date(latestAt.getTime() - 1_000);
+      insertMemory(db, {
+        id: "older",
+        confidence: 0.8,
+        botId: "bot-a",
+        lastReinforcedAt: olderAt.toISOString(),
+      });
+      insertMemory(db, {
+        id: "latest",
+        confidence: 0.82,
+        botId: "bot-a",
+        lastReinforcedAt: latestAt.toISOString(),
+      });
       createMemoryAcquisitionReceipt({
         db,
         userId: USER_ID,
@@ -478,7 +490,7 @@ describe("memory acquisition receipts", () => {
         learnerBotId: "bot-a",
         conversationId: "conversation-1",
         kind: "player_memory",
-        createdAt: "2026-08-01T00:00:00.000Z",
+        createdAt: olderAt.toISOString(),
       });
       const latestReceipt = createMemoryAcquisitionReceipt({
         db,
@@ -487,7 +499,7 @@ describe("memory acquisition receipts", () => {
         learnerBotId: "bot-a",
         conversationId: "conversation-1",
         kind: "player_memory",
-        createdAt: "2026-08-02T00:00:00.000Z",
+        createdAt: latestAt.toISOString(),
       });
       assert.equal(
         latestPlayerMemoryReceipt({

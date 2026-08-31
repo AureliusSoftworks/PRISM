@@ -12,10 +12,10 @@ import {
   type VoiceAccentDefinitionId,
 } from "./audioVoice.ts";
 
-export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.17.3";
+export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.31.2";
 /** SHA-256 of the qualified Instant IPA matrix (see speechprint-runtime.test.ts). */
 export const LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256 =
-  "e20a85599130ba2888330759230591882a0e414a207730b3f870b76ad79f2241";
+  "dffae46f16f13f36331a361784386f165cd86010bb321d4736f92db2ab0c8fc6";
 
 export interface LocalVoiceSpeechprintCapabilityV1 {
   id: Exclude<LocalVoiceSpeechprintInfluence, "none">;
@@ -1226,6 +1226,8 @@ export function resolvePremiumAccentDirection(args: {
   speechprintInfluence: unknown;
   speechprintStrength: unknown;
   nativeAccentHint?: unknown;
+  /** A player explicitly opted this Premium lane into Accent Map help. */
+  force?: boolean;
 }): string | null {
   const field = normalizeVoiceAccentMapPoint(args.point)
     ? resolveVoiceAccentField({
@@ -1274,7 +1276,7 @@ export function resolvePremiumAccentDirection(args: {
         target.premiumNativeAccentAliases,
       )
     : false;
-  if (matchesNative && strength === "balanced") return null;
+  if (!args.force && matchesNative && strength === "balanced") return null;
   const intensity =
     strength === "light"
       ? "subtle "
@@ -2631,6 +2633,122 @@ const SPEECHPRINT_RULES: Record<
   ],
 };
 
+/**
+ * A qualified regional point refines a national L2-English foundation; it
+ * does not replace that foundation with two or three isolated regional
+ * features. Apply the regional rules first so its signature wins whenever a
+ * parent rule targets the same source phoneme, then fill in the remaining
+ * national pronunciation behavior. This is provider-neutral: Instant and
+ * Premium dictionaries are built from the same resulting IPA.
+ */
+export const LOCAL_VOICE_SPEECHPRINT_FOUNDATION_PARENTS: Readonly<Partial<
+  Record<
+    Exclude<LocalVoiceSpeechprintInfluence, "none">,
+    Exclude<LocalVoiceSpeechprintInfluence, "none">
+  >
+>> = {
+  "latin-american-spanish-influenced-english": "spanish-influenced-english",
+  "mexican-spanish-influenced-english":
+    "latin-american-spanish-influenced-english",
+  "andalusian-spanish-influenced-english": "spanish-influenced-english",
+  "parisian-french-influenced-english": "french-influenced-english",
+  "southern-french-influenced-english": "french-influenced-english",
+  "northern-german-influenced-english": "german-influenced-english",
+  "bavarian-german-influenced-english": "german-influenced-english",
+  "northern-italian-influenced-english": "italian-influenced-english",
+  "southern-italian-influenced-english": "italian-influenced-english",
+};
+
+export type LocalVoiceSpeechprintFoundationV1 =
+  | {
+      kind: "speechprint";
+      influence: Exclude<LocalVoiceSpeechprintInfluence, "none">;
+    }
+  | { kind: "pronunciation-base"; pronunciationBase: "en-US" | "en-GB" }
+  | { kind: "standalone" };
+
+/**
+ * Every profile has one explicit foundation classification. A Speechprint
+ * parent is reserved for a qualified L2-English regional variant. Native
+ * English regions inherit their pinned phonemizer base. National L2-English
+ * profiles and independent English varieties are self-contained.
+ */
+export function localVoiceSpeechprintFoundation(
+  value: unknown,
+): LocalVoiceSpeechprintFoundationV1 | null {
+  const influence = normalizeLocalVoiceSpeechprintInfluence(value);
+  if (influence === "none") return null;
+  const parent = LOCAL_VOICE_SPEECHPRINT_FOUNDATION_PARENTS[influence];
+  if (parent) return { kind: "speechprint", influence: parent };
+  if (AMERICAN_PRONUNCIATION_BASE_INFLUENCES.has(influence)) {
+    return { kind: "pronunciation-base", pronunciationBase: "en-US" };
+  }
+  if (BRITISH_PRONUNCIATION_BASE_INFLUENCES.has(influence)) {
+    return { kind: "pronunciation-base", pronunciationBase: "en-GB" };
+  }
+  return { kind: "standalone" };
+}
+
+/** Child first, then every inherited Speechprint foundation. The visited set
+ * is a runtime backstop; the full static graph is cycle-tested. */
+export function localVoiceSpeechprintFoundationChain(
+  value: unknown,
+): readonly Exclude<LocalVoiceSpeechprintInfluence, "none">[] {
+  const influence = normalizeLocalVoiceSpeechprintInfluence(value);
+  if (influence === "none") return [];
+  const chain: Exclude<LocalVoiceSpeechprintInfluence, "none">[] = [];
+  const visited = new Set<Exclude<LocalVoiceSpeechprintInfluence, "none">>();
+  let current: Exclude<LocalVoiceSpeechprintInfluence, "none"> | undefined =
+    influence;
+  while (current && !visited.has(current)) {
+    chain.push(current);
+    visited.add(current);
+    current = LOCAL_VOICE_SPEECHPRINT_FOUNDATION_PARENTS[current];
+  }
+  return chain;
+}
+
+/** Rules sharing one articulatory feature are alternatives, not cumulative.
+ * A child claiming that feature suppresses every parent alternative even when
+ * its own rule is optional and deterministically skips this word. */
+function speechprintRuleFeature(rule: SpeechprintRule): string {
+  if (/^theta-/u.test(rule.id)) return "theta";
+  if (/^eth-/u.test(rule.id)) return "eth";
+  if (/^r-(?:uvular|tap|trill|retroflex|glide|lateral)$/u.test(rule.id)) {
+    return "r-quality";
+  }
+  return rule.id;
+}
+
+function speechprintRules(
+  influence: Exclude<LocalVoiceSpeechprintInfluence, "none">,
+): readonly SpeechprintRule[] {
+  const rules: SpeechprintRule[] = [];
+  const claimedFeatures = new Set<string>();
+  for (const layer of localVoiceSpeechprintFoundationChain(influence)) {
+    const layerRules = SPEECHPRINT_RULES[layer];
+    const layerFeatures = new Set(layerRules.map(speechprintRuleFeature));
+    for (const rule of layerRules) {
+      if (!claimedFeatures.has(speechprintRuleFeature(rule))) rules.push(rule);
+    }
+    for (const feature of layerFeatures) claimedFeatures.add(feature);
+  }
+  return rules;
+}
+
+function speechprintFoundationProfile<T>(
+  profiles: Partial<
+    Record<Exclude<LocalVoiceSpeechprintInfluence, "none">, T>
+  >,
+  influence: Exclude<LocalVoiceSpeechprintInfluence, "none">,
+): T | undefined {
+  for (const layer of localVoiceSpeechprintFoundationChain(influence)) {
+    const profile = profiles[layer];
+    if (profile) return profile;
+  }
+  return undefined;
+}
+
 const TIER_WEIGHT: Record<SpeechprintRuleTier, number> = {
   light: 0,
   balanced: 1,
@@ -3137,7 +3255,7 @@ export function applyLocalVoiceSpeechprintMelodyToIpa(args: {
     args.speechprint.influence,
   );
   if (influence === "none") return { ipa: args.ipa, appliedRuleIds: [] };
-  const profile = MELODY_PROFILES[influence];
+  const profile = speechprintFoundationProfile(MELODY_PROFILES, influence);
   if (!profile) return { ipa: args.ipa, appliedRuleIds: [] };
 
   const strength = normalizeLocalVoiceSpeechprintStrength(
@@ -3249,7 +3367,7 @@ export function applyLocalVoiceSpeechprintToIpa(args: {
       if (!word || /^\s+$/u.test(word)) return word;
       if (shouldSkipPhonemeRules(word)) return word;
       let result = word;
-      for (const rule of SPEECHPRINT_RULES[influence]) {
+      for (const rule of speechprintRules(influence)) {
         if (TIER_WEIGHT[rule.tier] > maximumTier) continue;
         if (activationWeight < 1) {
           const probability =
@@ -3275,7 +3393,10 @@ export function applyLocalVoiceSpeechprintToIpa(args: {
     return { ipa: afterSwaps, appliedRuleIds: [...appliedRuleIds].sort() };
   }
 
-  const rhythmProfile = STRESS_RHYTHM_PROFILES[influence];
+  const rhythmProfile = speechprintFoundationProfile(
+    STRESS_RHYTHM_PROFILES,
+    influence,
+  );
   const afterRhythm = rhythmProfile
     ? afterSwaps
         .split(/(\s+)/gu)

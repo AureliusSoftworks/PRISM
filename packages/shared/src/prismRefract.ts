@@ -115,6 +115,8 @@ export interface PrismRefractResponse {
   value: string;
   provider: EphemeralChatResolvedProvider;
   model: string | null;
+  reasoningEffort: ProviderReasoningEffort;
+  turbo: boolean;
 }
 
 export function normalizePrismRefractDirection(value: unknown): string {

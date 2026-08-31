@@ -1,5 +1,6 @@
 "use client";
 
+import type { ProviderReasoningEffort } from "@localai/shared";
 import { useEffect, useRef, type ReactNode } from "react";
 
 export const PRISM_REFRACT_TARGET_ATTRIBUTE = "data-prism-refract-id";
@@ -11,6 +12,33 @@ export type PrismRefractInvocation =
 
 export const PRISM_REFRACT_DEFAULT_PROSE_DIRECTION =
   "Make this more creative";
+
+const PRISM_REFRACT_EFFORT_LABELS: Readonly<
+  Record<ProviderReasoningEffort, string>
+> = {
+  auto: "Auto",
+  none: "None",
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra High",
+  max: "Max",
+};
+
+export function prismRefractProvenanceDetail(input: {
+  model?: string | null;
+  reasoningEffort?: ProviderReasoningEffort | null;
+  turbo?: boolean;
+}): string {
+  const model = input.model?.trim() || "None";
+  const effort = input.reasoningEffort
+    ? PRISM_REFRACT_EFFORT_LABELS[input.reasoningEffort]
+    : model === "None"
+      ? "None"
+      : "Default";
+  return `Model: ${model} · Effort: ${effort}${input.turbo ? " · Turbo" : ""}.`;
+}
 
 export function initialPrismRefractProseDirection(currentValue: string): string {
   return currentValue.trim() ? PRISM_REFRACT_DEFAULT_PROSE_DIRECTION : "";

@@ -697,7 +697,11 @@ describe("Debate Whodunnit private/public boundary", () => {
     assert.ok(emptyRegions.some((region) => region.inspectionResponse.startsWith("Warm light slides across ")));
     assert.ok(emptyRegions.some((region) => !region.inspectionResponse.startsWith("Warm light slides across ")));
     assert.ok(emptyRegions.every((region) => !/blood|culprit|weapon/iu.test(region.inspectionResponse)));
-    const suspect = bible.suspects[0]!;
+    const suspect = bible.suspects.find((candidate) =>
+      session.formatState.rooms.some(
+        (room) => room.id === candidate.roomId && !room.discovered,
+      ),
+    )!;
     const suspectRoom = bible.rooms.find((room) => room.id === suspect.roomId)!;
     const beforeTravel = session.formatState.actionsRemaining;
     session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "free-travel", action: "travel", roomId: suspectRoom.id }, runtime(provider));
@@ -1995,7 +1999,7 @@ describe("Debate Whodunnit private/public boundary", () => {
     session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "muted-interview", action: "interview", suspectSeatId: culprit.seatId, question: "State your alibi." }, runtime(provider));
     assert.equal(session.formatState.format, "whodunnit");
     assert.equal(session.formatState.testimony.some((item) => item.speakerSeatId === culprit.seatId), true);
-    assert.equal(listDebateMysteryActions(db, "user-1", session.id).at(-1)!.payload.answer, "...");
+    assert.equal(listDebateMysteryActions(db, "user-1", session.id).at(-1)!.payload.answer, "......");
     assert.equal(provider.actorCalls, 0);
     assert.equal(validateDebateMysteryCaseBible(bible, session.formatState.config.actionBudget).valid, true);
   });

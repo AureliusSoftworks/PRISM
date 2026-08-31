@@ -92,7 +92,7 @@ test("MacBook Pro is the primary Signal live layout gate", () => {
   );
 });
 
-test("completed Signal sessions become an off-air empty studio with review copy", () => {
+test("completed Signal sessions remain visible for the sign-off, then power down in the rail", () => {
   assert.match(
     page,
     /data-live-workspace=\{[\s\S]{0,120}episode\.playbackMode !== "watch" \? "true" : undefined/u,
@@ -103,7 +103,7 @@ test("completed Signal sessions become an off-air empty studio with review copy"
   );
   assert.match(
     page,
-    /empty:\s*episode\.status !== "live"[\s\S]{0,160}episode\.playbackMode !== "watch"/u,
+    /empty:\s*episode\.status === "cancelled"/u,
   );
   assert.match(
     page,
@@ -111,7 +111,7 @@ test("completed Signal sessions become an off-air empty studio with review copy"
   );
   assert.match(
     page,
-    /hostVisibleToAudience =\s*!args\.empty/u,
+    /hostVisibleToAudience =\s*!args\.empty && !hostDeparted/u,
   );
   assert.match(
     page,
@@ -119,7 +119,7 @@ test("completed Signal sessions become an off-air empty studio with review copy"
   );
   assert.match(
     page,
-    /episode\.status === "live"\s*\? "● ON AIR"\s*:\s*"○ OFF AIR"/u,
+    /episode\.status === "live"\s*\? "● ON AIR"\s*:\s*"○ SHOW ENDED"/u,
   );
   assert.match(
     page,
@@ -133,6 +133,11 @@ test("completed Signal sessions become an off-air empty studio with review copy"
     page,
     /data-signal-completed-copy="true"/u,
   );
+  assert.match(page, /aria-label="Completed Signal session controls"/u);
+  assert.match(page, /Private line · \{hostBot\?\.name \?\? "Host"\}/u);
+  assert.match(page, /episode\.status === "completed"\s*\? "Signal complete"/u);
+  assert.match(css, /signalGuestSignoffExit/u);
+  assert.match(css, /signalHostSignoffExit/u);
   assert.match(
     page,
     /completedStudioUsesOutro\s*\? returnFromEpisodeOutro\(\)\s*:\s*returnFromCompletedEpisode\(\)/u,

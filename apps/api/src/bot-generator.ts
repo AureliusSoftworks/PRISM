@@ -531,7 +531,7 @@ function generatedBotJsonSchema(
       type: "string",
       enum: VOICE_ACCENT_DEFINITIONS.map((definition) => definition.id),
     },
-    accentPronunciationEnabled: { type: "boolean" },
+    pronunciationHelpEnabled: { type: "boolean" },
     speechprintStrength: { type: "string", enum: ["light", "balanced", "strong"] },
     elevenLabsEffect: { type: "string", enum: [...VOICE_EFFECTS] },
     elevenLabsDirection: { type: ["string", "null"], maxLength: 180 },
@@ -625,7 +625,7 @@ function generationMessages(
       ? "OS and Premium identities listed above are eligible only for this account; do not invent another identity."
       : "No account-specific OS or Premium identity is eligible for this run.",
     `Author voice.elevenLabsDirection as null or 1-3 comma-separated delivery cues. Each cue must be a complete phrase of 1-${ELEVENLABS_VOICE_DIRECTION_MAX_CHARACTERS} characters, use word boundaries, and never end mid-word; do not return a prose sentence or bracketed instructions.`,
-    "Choose the named local PRISM Voice Pack timbre or another eligible identity as one persona-aware performance, including pitch, pace, and lilt; never use arbitrary noise. Choose an Accent Map pin and strength deliberately from established origin, language background, or cultural context, but set voice.accentPronunciationEnabled true only for a historically or biographically accurate real person whose regional pronunciation is part of that portrayal. Set it false for every fictional character and original persona, including characters with a canonical regional voice; the saved pin remains available if the player turns pronunciation on. For an original persona without a geographic cue, choose a restrained neutral anchor at Light or Balanced strength; never randomize the persona's accent. Name pronunciation is player-authored only when speech gets a name wrong; do not return a namePronunciation field. Default generated avatars to the Prism (chorus) effect; use another effect only when the brief explicitly requests it.",
+    "Choose the named local PRISM Voice Pack timbre or another eligible identity as one persona-aware performance, including pitch, pace, and lilt; never use arbitrary noise. Choose an Accent Map pin and strength deliberately from established origin, language background, or cultural context, but leave pronunciation help off for every generated bot. The saved pin remains available if the player enables pronunciation help in the TTS or Premium tab. For an original persona without a geographic cue, choose a restrained neutral anchor at Light or Balanced strength; never randomize the persona's accent. Name pronunciation is player-authored only when speech gets a name wrong; do not return a namePronunciation field. Default generated avatars to the Prism (chorus) effect; use another effect only when the brief explicitly requests it.",
   ].join(" ");
   if (lean) {
     return [

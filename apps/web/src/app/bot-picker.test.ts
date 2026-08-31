@@ -60,6 +60,14 @@ describe("shared bot picker", () => {
     );
   });
 
+  it("offers a reusable placement-Refract contract with an in-grid Space reroll", () => {
+    assert.match(source, /export interface BotPickerPlacementRefractTarget/u);
+    assert.match(source, /placementRefractTarget\?: BotPickerPlacementRefractTarget/u);
+    assert.match(source, /registerPrismRefractTarget\(placementTargetId/u);
+    assert.match(source, /event\.code === "Space"[\s\S]{0,500}rerollVisible\(\)/u);
+    assert.match(source, /aria-keyshortcuts=\{placementTargetId \? "Space" : undefined\}/u);
+  });
+
   it("keeps an unknown group non-destructive and supports all bots", () => {
     assert.equal(filterBotPickerItems(bots, "", "missing", groups).length, 3);
     assert.equal(filterBotPickerItems(bots, "", "all", groups).length, 3);

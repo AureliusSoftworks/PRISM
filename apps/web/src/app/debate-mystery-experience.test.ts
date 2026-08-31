@@ -40,6 +40,10 @@ const source = readFileSync(
   new URL("./DebateMysteryExperience.tsx", import.meta.url),
   "utf8",
 );
+const v2Source = readFileSync(
+  new URL("./DebateMysteryV2Experience.tsx", import.meta.url),
+  "utf8",
+);
 const shell = readFileSync(new URL("./DebateExperience.tsx", import.meta.url), "utf8");
 const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 const css = readFileSync(new URL("./debateMystery.module.css", import.meta.url), "utf8");
@@ -76,6 +80,16 @@ function webpDimensions(file: Buffer): { width: number; height: number } {
   }
   throw new Error("Expected a VP8 or VP8L WebP frame");
 }
+
+it("uses the accepted venue entry and adaptive tier vocabulary in Investigation", () => {
+  assert.match(v2Source, /mansionLayout\?\.venueProfile/u);
+  assert.match(v2Source, /room\.id === venueProfile\.entryRoomId/u);
+  assert.match(v2Source, /mansionLayoutV2TraversalRoute\(mansionLayout, entryRoom\.id, incidentScene\.id\)/u);
+  assert.match(v2Source, /venueProfile\?\.tierLabels\[floor - 1\]/u);
+  assert.match(v2Source, /aria-label="Mystery Venue Move map"/u);
+  assert.match(v2Source, /verticalConnector\?\.label/u);
+  assert.doesNotMatch(v2Source, /The mansion foyer is unavailable/u);
+});
 
 describe("Whodunnit Desk drag and drop", () => {
   it("round-trips a typed Desk reference without breaking ids that contain colons", () => {
@@ -604,11 +618,11 @@ describe("Debate Whodunnit experience", () => {
     assert.equal(mysteryRoomArtworkSrc(null, template), "/debate/mystery/rooms/kitchen.webp");
     assert.equal(
       whodunnitSavedRoomArtUrl("generated / room", "mosaic"),
-      "/api/images/generated%20%2F%20room/file?style=mosaic&pixelArt=5",
+      "/api/images/generated%20%2F%20room/file?style=mosaic&pixelArt=6",
     );
     assert.equal(
       whodunnitBundledRoomArtPath(template.bundledAssetPath, "mosaic"),
-      "/debate/mystery/rooms/kitchen-mosaic.webp?pixelArt=5",
+      "/debate/mystery/rooms/kitchen-mosaic.webp?pixelArt=6",
     );
     assert.match(source, /whodunnitSavedRoomArtUrl\(currentRoom\.imageId, investigationArtStyle\)/u);
     assert.match(source, /renderMysteryBotAvatar\(mysteryBotForSuspect\(currentSuspect\), interviewAvatarPresentation/u);

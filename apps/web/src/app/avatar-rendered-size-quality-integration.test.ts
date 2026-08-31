@@ -78,15 +78,15 @@ test("Signal keeps authored full mannequins live while shedding only runtime eff
   assert.doesNotMatch(signalAvatarRenderer, /signalLiveCompactAvatar/u);
   assert.doesNotMatch(signalAvatarRenderer, /data-signal-live-compact-avatar/u);
   assert.equal(signalStageMannequins.length, 2);
-  // Signal spends its two-bot budget on the authored full CRT, static CSS
-  // phosphor bloom, faithful mouth state, and semantic gaze/blinks. The
-  // renderer shares typed prop objects rather than repeating the complete prop
-  // list in both JSX branches.
+  // Signal spends its two-bot budget on the authored full CRT, including the
+  // Studio pixel mask and emission treatment. Runtime-only animation/audio
+  // effects may still yield while live. The renderer shares typed prop objects
+  // rather than repeating the complete prop list in both JSX branches.
   assert.match(signalAvatarRenderer, /detailLevel: "full"/u);
   assert.match(signalAvatarRenderer, /minimumRenderedSizeTier: "full"/u);
   assert.match(
     signalAvatarRenderer,
-    /pixelRasterizationEnabled: !signalLivePerformanceAvatar/u,
+    /pixelRasterizationEnabled: true/u,
   );
   assert.match(
     signalAvatarRenderer,
