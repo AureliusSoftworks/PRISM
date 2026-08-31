@@ -1094,6 +1094,7 @@ interface ActiveVoiceChannelState {
   outputGain: GainNode | null;
   lightMeter: VoiceLightMeter | null;
   releaseTimer: number | null;
+  sourceEnded: boolean;
 }
 
 const activeVoiceChannels: Record<
@@ -1112,6 +1113,7 @@ const activeVoiceChannels: Record<
     outputGain: null,
     lightMeter: null,
     releaseTimer: null,
+    sourceEnded: false,
   },
   handoff: {
     nodes: [],
@@ -1125,6 +1127,7 @@ const activeVoiceChannels: Record<
     outputGain: null,
     lightMeter: null,
     releaseTimer: null,
+    sourceEnded: false,
   },
   presence: {
     nodes: [],
@@ -1138,6 +1141,7 @@ const activeVoiceChannels: Record<
     outputGain: null,
     lightMeter: null,
     releaseTimer: null,
+    sourceEnded: false,
   },
   reaction: {
     nodes: [],
@@ -1151,6 +1155,7 @@ const activeVoiceChannels: Record<
     outputGain: null,
     lightMeter: null,
     releaseTimer: null,
+    sourceEnded: false,
   },
   crosstalk: {
     nodes: [],
@@ -1164,6 +1169,7 @@ const activeVoiceChannels: Record<
     outputGain: null,
     lightMeter: null,
     releaseTimer: null,
+    sourceEnded: false,
   },
 };
 
@@ -1307,6 +1313,7 @@ export async function playPreSpeechBreath(args: {
   });
   const scheduled: AudioScheduledSourceNode[] = [source];
   active.nodes = scheduled;
+  active.sourceEnded = false;
   active.outputGain = gain;
 
   await new Promise<void>((resolve) => {
@@ -1329,7 +1336,10 @@ export async function playPreSpeechBreath(args: {
       for (const node of scheduled) {
         try { node.disconnect(); } catch { /* already disconnected */ }
       }
-      if (active.nodes === scheduled) active.nodes = [];
+      if (active.nodes === scheduled) {
+        active.nodes = [];
+        active.sourceEnded = false;
+      }
       if (active.outputGain === gain) active.outputGain = null;
       releaseVoice();
     };
@@ -1403,6 +1413,7 @@ export function teardownRealtimeVoiceAudioImmediately(
   active.roomConnection = null;
   active.resolve?.();
   active.resolve = null;
+  active.sourceEnded = false;
   if (!options.preserveCompletedTails) {
     for (const stopTail of [...completedVoiceTailStops[channel]]) {
       stopTail();
@@ -1455,6 +1466,7 @@ export function releaseRealtimeVoiceAudio(
   active.roomConnection = null;
   active.outputGain = null;
   active.lightMeter = null;
+  active.sourceEnded = false;
   const durationMs = Math.max(0, Math.round(fadeOutMs));
   let finished = false;
   const finish = (): void => {
@@ -1492,10 +1504,21 @@ export function releaseRealtimeVoiceAudio(
 
 /** Public stop is a semantic release: callers may invalidate ownership at
  * once, but an audible channel always gets a short detached tail. */
+export function realtimeVoiceStopShouldPreserveEndedTail(
+  preserveCompletedTails: boolean,
+  sourceEnded: boolean,
+): boolean {
+  return preserveCompletedTails && sourceEnded;
+}
+
 export function stopRealtimeVoiceAudio(
   channel: VoicePlaybackChannel = "primary",
   options: { preserveCompletedTails?: boolean; fadeOutMs?: number } = {},
 ): void {
+  if (realtimeVoiceStopShouldPreserveEndedTail(
+    options.preserveCompletedTails === true,
+    activeVoiceChannels[channel].sourceEnded,
+  )) return;
   releaseRealtimeVoiceAudio(channel, options.fadeOutMs ?? 160);
 }
 
@@ -1695,6 +1718,7 @@ async function playWorkletLivePerformanceVoice(args: {
     outputGain.connect(prismAudioOutputNode(context));
   }
   active.nodes = scheduled;
+  active.sourceEnded = false;
   active.outputGain = outputGain;
   active.roomConnection = null;
   active.lightMeter = null;
@@ -1714,7 +1738,10 @@ async function playWorkletLivePerformanceVoice(args: {
       else progress?.cancel();
       if (active.progress === progress) active.progress = null;
       if (active.resolve === cancel) active.resolve = null;
-      if (active.nodes === scheduled) active.nodes = [];
+      if (active.nodes === scheduled) {
+        active.nodes = [];
+        active.sourceEnded = false;
+      }
       if (active.outputGain === outputGain) active.outputGain = null;
       for (const scheduledNode of scheduled) {
         try {
@@ -1886,6 +1913,7 @@ async function playLivePerformanceVoice(args: {
     outputGain.connect(prismAudioOutputNode(context));
   }
   active.nodes = scheduled;
+  active.sourceEnded = false;
   active.media = audio;
   active.mediaUrl = url;
   active.outputGain = outputGain;
@@ -1899,6 +1927,7 @@ async function playLivePerformanceVoice(args: {
     let performanceTimer: number | null = null;
     let hesitationTimer: number | null = null;
     let hesitationTriggered = false;
+    let playbackOutputLatencyMs = 0;
     const performancePlan = normalizeVoicePerformancePlanV2(
       args.lifecycle?.performancePlan,
     );
@@ -1928,17 +1957,16 @@ async function playLivePerformanceVoice(args: {
       else progress?.cancel();
       if (active.progress === progress) active.progress = null;
       if (active.resolve === cancel) active.resolve = null;
-      if (active.nodes === scheduled) active.nodes = [];
+      if (active.nodes === scheduled) {
+        active.nodes = [];
+        active.sourceEnded = false;
+      }
       if (active.outputGain === outputGain) active.outputGain = null;
-      if (active.media === audio) {
-        active.media = null;
-        audio.pause();
-        audio.removeAttribute("src");
-      }
-      if (active.mediaUrl === url) {
-        active.mediaUrl = null;
-        URL.revokeObjectURL(url);
-      }
+      if (active.media === audio) active.media = null;
+      audio.pause();
+      audio.removeAttribute("src");
+      if (active.mediaUrl === url) active.mediaUrl = null;
+      URL.revokeObjectURL(url);
       for (const node of scheduled) {
         try {
           node.disconnect();
@@ -1956,7 +1984,19 @@ async function playLivePerformanceVoice(args: {
     };
     const cancel = () => finish("cancelled");
     active.resolve = cancel;
-    audio.addEventListener("ended", () => finish("completed"), { once: true });
+    audio.addEventListener(
+      "ended",
+      () => {
+        if (active.mediaEndTimer !== null) {
+          window.clearTimeout(active.mediaEndTimer);
+        }
+        active.mediaEndTimer = window.setTimeout(() => {
+          active.mediaEndTimer = null;
+          finish("completed");
+        }, Math.max(playbackOutputLatencyMs, VOICE_PLAYBACK_TAIL_FLUSH_MS));
+      },
+      { once: true },
+    );
     audio.addEventListener("error", () => finish("failed"), { once: true });
     audio.addEventListener(
       "playing",
@@ -1994,6 +2034,7 @@ async function playLivePerformanceVoice(args: {
           args.compensateLifecycleForOutputLatency && args.lifecycle
             ? estimateVoiceOutputLatencyMs(context)
             : 0;
+        playbackOutputLatencyMs = outputLatencyMs;
         progress = beginVoicePlaybackProgress(
           args.lifecycle,
           articulationDurationMs,
@@ -2176,6 +2217,7 @@ async function playDecodedLivePerformanceVoice(args: {
     outputGain.connect(prismAudioOutputNode(context));
   }
   active.nodes = scheduled;
+  active.sourceEnded = false;
   active.outputGain = outputGain;
   active.roomConnection = null;
   active.lightMeter = null;
@@ -2183,14 +2225,20 @@ async function playDecodedLivePerformanceVoice(args: {
   await new Promise<void>((resolve) => {
     let settled = false;
     let progress: VoicePlaybackProgressController | null = null;
+    let endTimer: number | null = null;
     const finish = (completed: boolean) => {
       if (settled) return;
       settled = true;
+      if (endTimer !== null) window.clearTimeout(endTimer);
+      endTimer = null;
       if (completed) progress?.finish();
       else progress?.cancel();
       if (active.progress === progress) active.progress = null;
       if (active.resolve === cancel) active.resolve = null;
-      if (active.nodes === scheduled) active.nodes = [];
+      if (active.nodes === scheduled) {
+        active.nodes = [];
+        active.sourceEnded = false;
+      }
       if (active.outputGain === outputGain) active.outputGain = null;
       for (const node of scheduled) {
         try {
@@ -2205,7 +2253,16 @@ async function playDecodedLivePerformanceVoice(args: {
     };
     const cancel = () => finish(false);
     active.resolve = cancel;
-    source.addEventListener("ended", () => finish(true), { once: true });
+    source.addEventListener(
+      "ended",
+      () => {
+        endTimer = window.setTimeout(
+          () => finish(true),
+          Math.max(outputLatencyMs, VOICE_PLAYBACK_TAIL_FLUSH_MS),
+        );
+      },
+      { once: true },
+    );
     progress = beginVoicePlaybackProgress(
       args.lifecycle,
       articulationDurationMs,
@@ -2892,6 +2949,7 @@ export async function playRealtimeVoiceBytes(args: {
     scheduled.push(oscillator);
   }
   active.nodes = scheduled;
+  active.sourceEnded = false;
   active.roomConnection = roomConnection;
   active.outputGain = outputGain;
   active.lightMeter = lightMeter;
@@ -2939,7 +2997,10 @@ export async function playRealtimeVoiceBytes(args: {
       progress = null;
       if (active.resolve === cancel) active.resolve = null;
       const ownsChannel = active.nodes === scheduled;
-      if (ownsChannel) active.nodes = [];
+      if (ownsChannel) {
+        active.nodes = [];
+        active.sourceEnded = false;
+      }
       if (active.outputGain === outputGain) active.outputGain = null;
       lightMeter?.stop();
       if (active.lightMeter === lightMeter) active.lightMeter = null;
@@ -2972,6 +3033,7 @@ export async function playRealtimeVoiceBytes(args: {
       "ended",
       () => {
         if (settled) return;
+        if (active.nodes === scheduled) active.sourceEnded = true;
         const delayMs = Math.max(lifecycleOutputLatencyMs, tailFlushMs);
         if (delayMs > 0) {
           endTimer = window.setTimeout(() => finish(true), delayMs);

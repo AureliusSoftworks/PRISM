@@ -372,7 +372,7 @@ describe("installed mansion library", () => {
     assert.match(topologyEditor, /Editor breadcrumb/u);
     assert.match(topologyEditor, /Mansion Editor/u);
     assert.match(topologyEditor, /data-tutorial-target="whodunnit-room-mosaic-preview"/u);
-    assert.match(topologyEditor, /Mosaic changes this preview only/u);
+    assert.match(topologyEditor, /Pixel Art is newly synthesized/u);
     assert.match(topologyEditor, /data-tutorial-target="whodunnit-room-anchors"/u);
     assert.match(topologyEditor, /MANSION_LAYOUT_V2_MAX_ANCHORS_PER_ROOM/u);
     assert.match(topologyEditor, /Authoring context · not hotspots/u);
@@ -380,7 +380,7 @@ describe("installed mansion library", () => {
     assert.match(topologyEditor, /MANSION_LAYOUT_V2_MAX_LIGHTS/u);
     assert.match(topologyEditor, /\["fire", "omni", "directional", "neon"\]/u);
     assert.match(topologyEditor, /Stable IDs seed animation; Reduced Motion freezes it/u);
-    assert.match(topologyEditor, /Upgrade this room to Illustrated · ONLINE/u);
+    assert.match(topologyEditor, /Synthesize Pixel Art · ONLINE/u);
     assert.match(topologyEditor, /Accept candidate/u);
     assert.match(topologyEditor, /Regenerate room asset/u);
     assert.match(topologyEditor, /Discard candidate/u);

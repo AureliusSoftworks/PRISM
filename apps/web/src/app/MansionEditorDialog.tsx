@@ -188,7 +188,15 @@ function roomAssetUrl(
 ): string | null {
   const style = mosaic ? "mosaic" : "illustrated";
   if (room.acceptedRoomAssetId) {
-    return whodunnitMansionRoomArtUrl(mansion.id, room.acceptedRoomAssetId, style);
+    if (mosaic) {
+      return whodunnitMansionRoomArtUrl(mansion.id, room.acceptedRoomAssetId, style);
+    }
+    const sourcePlate = (mansion.assets ?? []).find(
+      (asset) => asset.role === "room" && asset.logicalId === `${room.id}:illustrated-v1`,
+    );
+    return sourcePlate
+      ? whodunnitMansionRoomArtUrl(mansion.id, sourcePlate.id, style)
+      : whodunnitMansionRoomArtUrl(mansion.id, room.acceptedRoomAssetId, style);
   }
   return whodunnitBundledRoomArtPathForRoom(room, style);
 }
@@ -197,7 +205,7 @@ function candidateAssetUrl(
   mansion: DebateMysteryMansionBundleSummaryV1,
   assetId: string,
 ): string {
-  return `/api/debates/mystery-mansions/${encodeURIComponent(mansion.id)}/assets/${encodeURIComponent(assetId)}/file`;
+  return whodunnitMansionRoomArtUrl(mansion.id, assetId, "mosaic");
 }
 
 function findPlacement(
@@ -593,7 +601,7 @@ export default function MansionEditorDialog({
 
   const openRoomEditor = (roomId: string): void => {
     if (!roomRefinementReady) {
-      setNotice("Continue to generate the Mosaic before entering individual rooms.");
+      setNotice("Continue to prepare Pixel Art before entering individual rooms.");
       return;
     }
     setRoomArtNotice(null);
@@ -663,7 +671,7 @@ export default function MansionEditorDialog({
       if (updated && action === "regenerate") {
         setSelectedLightId(null);
         setRegenerateConfirmationRoomId(null);
-        setRoomArtNotice("This room returned to its bundled Mosaic plate; its anchors and lights were cleared.");
+        setRoomArtNotice("This room returned to its bundled Pixel Art plate; its anchors and lights were cleared.");
       }
     } finally {
       setRoomArtBusy(false);
@@ -1091,7 +1099,7 @@ export default function MansionEditorDialog({
         setCreationPrepared(true);
         setLayoutHistory([]);
         setRoomEditorId(null);
-        setNotice("Mosaic silhouettes are ready. Review the mansion map, then use this mansion.");
+        setNotice("Pixel Art rooms are ready. Review the mansion map, then use this mansion.");
       } else {
         onClose();
       }
@@ -1217,7 +1225,7 @@ export default function MansionEditorDialog({
           <div className={styles.mansionEditorCanvasActions}>
             <span>{roomRefinementReady
               ? "Drag to arrange. Collisions reflow nearby blocks; only an island returns. Double-click a room to enter it."
-              : "Arrange structural placeholders, then Continue to generate Mosaic silhouettes before entering rooms."}</span>
+              : "Arrange structural placeholders, then Continue to prepare Pixel Art rooms before entering them."}</span>
             <button type="button" disabled={!selectedRoom || !roomRefinementReady} onClick={() => selectedRoom && openRoomEditor(selectedRoom.id)}>Open Room Editor</button>
           </div>
         </div>
@@ -1303,7 +1311,7 @@ export default function MansionEditorDialog({
                   </select>
                 </label>
                 <label>Room name<input value={selectedRoom.name} maxLength={80} onChange={(event) => updateRoom(selectedRoom.id, { name: event.currentTarget.value })} /></label>
-                <button type="button" disabled={!roomRefinementReady} title={roomRefinementReady ? undefined : "Generate the Mosaic before refining rooms"} onClick={() => openRoomEditor(selectedRoom.id)}>Room art, anchors & lights</button>
+                <button type="button" disabled={!roomRefinementReady} title={roomRefinementReady ? undefined : "Prepare Pixel Art before refining rooms"} onClick={() => openRoomEditor(selectedRoom.id)}>Room art, anchors & lights</button>
               </>
             ) : null}
 
@@ -1362,7 +1370,7 @@ export default function MansionEditorDialog({
         {creationReady ? (
           <button type="button" className={styles.installedMansionSave} disabled={busy || saving} onClick={onClose}>Use this mansion</button>
         ) : (
-          <button type="button" className={styles.installedMansionSave} disabled={busy || saving || validationErrors.length > 0} onClick={() => void save()}>{saving ? "Preparing Mosaic…" : creationFlow ? "Continue" : "Save mansion plan"}</button>
+          <button type="button" className={styles.installedMansionSave} disabled={busy || saving || validationErrors.length > 0} onClick={() => void save()}>{saving ? "Preparing Pixel Art…" : creationFlow ? "Continue" : "Save mansion plan"}</button>
         )}
       </footer>
     </section>
@@ -1377,8 +1385,8 @@ export default function MansionEditorDialog({
           <strong>{roomEditorRoom.name}</strong>
         </nav>
         <div role="group" aria-label="Room art preview style" data-tutorial-target="whodunnit-room-mosaic-preview">
-          <button type="button" aria-pressed={mosaicPreview} onClick={() => setMosaicPreview(true)}>Mosaic</button>
-          <button type="button" aria-pressed={!mosaicPreview} onClick={() => setMosaicPreview(false)}>Illustrated</button>
+          <button type="button" aria-pressed={mosaicPreview} onClick={() => setMosaicPreview(true)}>Pixel Art</button>
+          <button type="button" aria-pressed={!mosaicPreview} onClick={() => setMosaicPreview(false)}>Source / Realistic</button>
         </div>
       </header>
 
@@ -1441,7 +1449,7 @@ export default function MansionEditorDialog({
       <aside className={styles.mansionRoomEditorTools}>
         <section>
           <header><small>Room presentation</small><h3>{roomEditorRoom.name}</h3></header>
-          <p>New rooms use their bundled room-type art. Mosaic changes this preview only; it never changes geometry, hotspots, evidence, or the saved source plate.</p>
+          <p>Pixel Art is newly synthesized from the room&apos;s composition reference—not made with a pixel filter. The high-resolution source stays intact for comparison and later Realistic upgrades.</p>
           {roomArtNotice ? <p className={styles.mansionRoomEditorNotice} role="status">{roomArtNotice}</p> : null}
           {(() => {
             const candidate = layout.roomArtCandidates.find((entry) => entry.roomId === roomEditorRoom.id) ?? null;
@@ -1461,20 +1469,20 @@ export default function MansionEditorDialog({
                     }
                   }}
                 >{regenerateConfirmationRoomId === roomEditorRoom.id ? "Confirm reset room asset" : "Regenerate room asset"}</button>
-                <small>Resets this room to its bundled Mosaic plate and clears only this room&apos;s anchors, lights, and staged art.</small>
+                <small>Resets this room to its bundled Pixel Art plate and clears only this room&apos;s anchors, lights, and staged art.</small>
                 {candidate?.status === "ready" ? (
                   <>
                     <button type="button" disabled={busy || roomArtBusy || !roomArtMutationReady} onClick={() => void mutateRoomArt("accept", roomEditorRoom.id)}>Accept candidate</button>
-                    <button type="button" disabled={busy || roomArtBusy || responseMode === "local" || !roomArtMutationReady} onClick={() => void mutateRoomArt("generate", roomEditorRoom.id)}>Retry Illustrated candidate</button>
+                    <button type="button" disabled={busy || roomArtBusy || responseMode === "local" || !roomArtMutationReady} onClick={() => void mutateRoomArt("generate", roomEditorRoom.id)}>Retry Pixel Art candidate</button>
                     <button type="button" disabled={busy || roomArtBusy || !roomArtMutationReady} onClick={() => void mutateRoomArt("discard", roomEditorRoom.id)}>Discard candidate</button>
                   </>
                 ) : (
-                  <button type="button" disabled={busy || roomArtBusy || responseMode === "local" || !roomArtMutationReady || !onGenerateRoomArt} onClick={() => void mutateRoomArt("generate", roomEditorRoom.id)}>Upgrade this room to Illustrated · ONLINE</button>
+                  <button type="button" disabled={busy || roomArtBusy || responseMode === "local" || !roomArtMutationReady || !onGenerateRoomArt} onClick={() => void mutateRoomArt("generate", roomEditorRoom.id)}>Synthesize Pixel Art · ONLINE</button>
                 )}
                 <small>{responseMode === "local"
                   ? "LOCAL is server-rejected and uses bundled or accepted art."
                   : roomArtMutationReady
-                    ? "Only this open room is upgraded. Generation stages a content-addressed candidate; accepted art is never overwritten until Accept candidate."
+                    ? "Only this open room is synthesized. Generation stages a content-addressed Pixel Art candidate; the source and accepted art remain intact until Accept candidate."
                     : "Save the current mansion plan before generating or changing its mansion-owned candidate."}</small>
               </div>
             );
@@ -1622,7 +1630,7 @@ export default function MansionEditorDialog({
         eyebrow={roomEditor ? "Room Editor" : "Mansion Editor"}
         title={presentation.title}
         description={creationFlow
-          ? "Build a tenant-owned mansion from a compact connected two-floor draft. Continue derives its local Mosaic room silhouettes."
+          ? "Build a tenant-owned mansion from a compact connected two-floor draft. Continue prepares its authored Pixel Art room plates."
           : `Editing a local derivative of ${mansion.derivation?.sourceTitle ?? mansion.name}. The source remains unchanged.`}
         size="screen"
         busy={busy || saving || roomArtBusy}
@@ -1635,8 +1643,8 @@ export default function MansionEditorDialog({
         placement="fullscreen"
         theme={theme}
         eyebrow="PRISM / Mansion Editor"
-        title="Building Mosaic room plates"
-        detail="PRISM is mapping each semantic room to its bundled or accepted source, deriving the 24-color silhouettes, and checking both floors remain connected."
+        title="Building Pixel Art room plates"
+        detail="PRISM is mapping each semantic room to its bundled or accepted source, deriving crisp high-resolution pixel art, and checking both floors remain connected."
         stepLabel="Preparing the mansion map"
         progress={0.72}
         footer="LOCAL stays local. No case truth or mansion art leaves this device."

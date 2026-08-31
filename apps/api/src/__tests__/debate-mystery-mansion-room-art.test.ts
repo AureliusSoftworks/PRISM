@@ -137,6 +137,9 @@ describe("mansion-owned room-art candidates", () => {
     });
     assert.match(prompt, /beside writing desk at normalized \(0\.72, 0\.61\)/u);
     assert.match(prompt, /not a hotspot map/u);
+    assert.match(prompt, /high-resolution hand-crafted Pixel Art/u);
+    assert.match(prompt, /Do not create a realistic plate and then downsample/u);
+    assert.match(prompt, /Do not impose a global sepia/u);
     assert.match(prompt, /Do not include people.*clues.*case-specific facts/u);
   });
 

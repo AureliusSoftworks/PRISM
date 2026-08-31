@@ -15,6 +15,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import { flushSync } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -388,6 +389,7 @@ import {
   signalThinkingFollowingMessageId,
   signalThinkingPresentationEndReason,
 } from "./signalThinkingPresentation";
+import { signalEpisodeBeforeResponseIsHeard } from "./signalTensionPresentation";
 import {
   ModelWarmupIntermission,
   type ModelWarmupIntermissionPhase,
@@ -419,6 +421,7 @@ import {
   signalCupVisualSipCountV1,
 } from "./signalCupSipSchedule";
 import { buildSignalReviewTranscript } from "./signalReviewTranscript";
+import { projectCoffeePublicTranscript } from "./coffee-replay";
 import {
   signalVoicePerformanceActionPresentationAtProgress,
   signalVoicePerformanceTranscriptText,
@@ -431,6 +434,7 @@ import {
   signalEpisodeImageScale,
   signalEpisodeStageImageContext,
   signalPendingEpisodeImageCueIsAwaitingHostTurn,
+  signalPreSessionEpisodeImageCueForNextTurn,
   signalQueuedProducerCueIsServerOwned,
   signalVisualIdentityNotice,
 } from "./signalEpisodeImagePresentation";
@@ -524,6 +528,7 @@ import {
   signalReplayIntroLandingFadeMs,
   signalReplayCapturedPresentationElapsedMs,
   signalReplayIntroVisualOffsetMs,
+  signalReplayMouthSampleElapsedMs,
   signalReplayMediaElapsedMs,
 } from "./signalReplayVideoFrame";
 import {
@@ -1608,9 +1613,32 @@ type SignalEpisodeImageUpload = {
   reason: string;
   /** Ephemeral, opaque procedural references. API strips these before persistence. */
   visualIdentity: SignalVisualPassportBundleV1;
+  /** Setup-only timing contract; live Producer uploads remain immediate. */
+  preSessionReveal?: boolean;
   /** Exact-upload library status; absent for pictures and archival-proxy retries. */
   assetLibraryInspection?: SignalItemLibraryInspection;
 };
+
+function signalEpisodeImageRequestPayload(image: SignalEpisodeImageUpload) {
+  return {
+    imageId: image.imageId,
+    fileName: image.fileName,
+    dataUrl: image.dataUrl,
+    ...(image.archivalProxyEpisodeId
+      ? { archivalProxyEpisodeId: image.archivalProxyEpisodeId }
+      : {}),
+    name: image.descriptor.name,
+    replayEmoji: image.replayEmoji,
+    visualIdentity: image.archivalProxyEpisodeId
+      ? {
+          v: 1 as const,
+          status: "unavailable" as const,
+          reason: "fresh_proof_required" as const,
+        }
+      : image.visualIdentity,
+    ...(image.reason ? { reason: image.reason } : {}),
+  };
+}
 
 type SignalSetupEpisodeImage = Omit<SignalEpisodeImageUpload, "episodeId">;
 
@@ -2206,6 +2234,7 @@ function signalEpisodeRuntimeMs(
  */
 function SignalEpisodeRuntimeClock(props: {
   status: BotcastEpisode["status"];
+  durationMinutes: BotcastEpisode["durationMinutes"];
   runtimeMsAt: (nowMs: number) => number;
 }): ReactNode {
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -2218,17 +2247,28 @@ function SignalEpisodeRuntimeClock(props: {
     return () => window.clearInterval(timer);
   }, [props.status]);
 
-  const label = runtimeLabel(props.runtimeMsAt(nowMs));
+  const elapsedMs = props.runtimeMsAt(nowMs);
+  const countdown = props.durationMinutes !== null;
+  const displayMs = countdown
+    ? Math.max(0, props.durationMinutes * 60_000 - elapsedMs)
+    : elapsedMs;
+  const label = runtimeLabel(displayMs);
   return (
     <span
       className={styles.liveTimer}
       data-running={props.status === "live" ? "true" : undefined}
+      data-countdown={countdown ? "true" : undefined}
       aria-label={
-        props.status === "live"
-          ? `Episode live for ${label}`
-          : `Final episode duration ${label}`
+        countdown
+          ? props.status === "live"
+            ? `Episode has ${label} remaining`
+            : `Timed episode ended with ${label} remaining`
+          : props.status === "live"
+            ? `Episode live for ${label}`
+            : `Final episode duration ${label}`
       }
     >
+      {countdown ? "T− " : "T+ "}
       {label}
     </span>
   );
@@ -3411,10 +3451,9 @@ export function BotcastExperience({
         imageContext: botcastLatestImageContextV1(episode.events),
       })
     ) {
-      // A pre-show image is intentionally introduced on the next eligible
-      // host turn. The ordinary guest response between the welcome and that
-      // turn updates the episode without creating server cue state; do not let
-      // that update erase the client-owned image and its required host beat.
+      // A live Producer image is introduced on the next eligible host turn.
+      // An intervening guest response updates the episode without creating
+      // server cue state; do not erase the client-owned image before it airs.
       return;
     }
     assignQueuedProducerCue(activeCue?.cue ?? null, activeCue?.status ?? null);
@@ -7579,6 +7618,7 @@ export function BotcastExperience({
         setupImageUpload = {
           episodeId: response.episode.id,
           ...launchSetupEpisodeImage,
+          preSessionReveal: true,
           descriptor: {
             ...launchSetupEpisodeImage.descriptor,
             name: launchSetupEpisodeImage.descriptor.name.trim(),
@@ -7659,29 +7699,10 @@ export function BotcastExperience({
           theme,
           ...(setupImageUpload
             ? {
-              episodeImage: {
-                imageId: setupImageUpload.imageId,
-                fileName: setupImageUpload.fileName,
-                dataUrl: setupImageUpload.dataUrl,
-                ...(setupImageUpload.archivalProxyEpisodeId
-                  ? {
-                      archivalProxyEpisodeId:
-                        setupImageUpload.archivalProxyEpisodeId,
-                    }
-                  : {}),
-                name: setupImageUpload.descriptor.name,
-                reason: setupImageUpload.reason,
-                replayEmoji: setupImageUpload.replayEmoji,
-                visualIdentity: setupImageUpload.archivalProxyEpisodeId
-                  ? {
-                      v: 1,
-                      status: "unavailable",
-                      reason: "fresh_proof_required",
-                    }
-                  : setupImageUpload.visualIdentity,
-                },
-              }
-            : {}),
+              episodeImage:
+                signalEpisodeImageRequestPayload(setupImageUpload),
+            }
+          : {}),
         };
         const startBake = await request<{
           episode: BotcastEpisode;
@@ -7833,6 +7854,13 @@ export function BotcastExperience({
         return;
       }
       let opening: BotcastEpisodeAdvanceResponse | null = null;
+      const openingImageCue = signalPreSessionEpisodeImageCueForNextTurn({
+        episodeId: response.episode.id,
+        messages: response.episode.messages,
+        pendingImage: setupImageUpload,
+        imageContext: botcastLatestImageContextV1(response.episode.events),
+        higherPriorityCuePending: false,
+      });
       for (
         let attempt = 0;
         attempt < SIGNAL_OPENING_ADVANCE_ATTEMPTS;
@@ -7843,7 +7871,17 @@ export function BotcastExperience({
           {
             method: "POST",
             signal: controller.signal,
-            body: JSON.stringify({ theme }),
+            body: JSON.stringify({
+              theme,
+              ...(openingImageCue && setupImageUpload
+                ? {
+                    cue: openingImageCue,
+                    cueDelivery: "next_host_turn",
+                    episodeImage:
+                      signalEpisodeImageRequestPayload(setupImageUpload),
+                  }
+                : {}),
+            }),
           },
         );
         if (opening.message || opening.episode.status === "completed") break;
@@ -7879,10 +7917,6 @@ export function BotcastExperience({
       );
       if (!episodeOperationIsCurrent(controller, runId)) return;
       if (setupImageUpload) {
-        assignQueuedProducerCue({
-          kind: "present_image",
-          imageId: setupImageUpload.imageId,
-        });
         setSetupEpisodeImage(null);
       }
       setAutoRun(true);
@@ -8969,22 +9003,20 @@ export function BotcastExperience({
             elapsedMs: 0,
             observedAtMs: playbackObservedAtMs,
           };
-          startTransition(() => {
-            setSignalPreSpeechPresenceMessageId((current) =>
-              current === message.id ? null : current,
-            );
-          });
-          if (!presentationDeferred) notifyPlaybackStart();
-          clearLiveCameraPostSpeechHold();
           const resolvedDurationMs =
             durationMs ??
             signalVoiceCompletionFallbackDurationMs(
               primarySpokenContent || message.content,
             );
-          playProducerGuestActionSfxAt(0, resolvedDurationMs, alignment);
-          armVoiceCompletionWatchdog(resolvedDurationMs);
-          armListenerReactionTiming(message, resolvedDurationMs, alignment);
-          startTransition(() => {
+          // Audio has just crossed its audible start boundary. Do not defer
+          // the owner of the avatar mouth into a transition: the sound source
+          // is already scheduled and this state is also captured for replay.
+          // Flushing it here lets the DOM and capture clock agree before the
+          // browser can render the first audible quantum.
+          flushSync(() => {
+            setSignalPreSpeechPresenceMessageId((current) =>
+              current === message.id ? null : current,
+            );
             setLiveSpeech({
               messageId: message.id,
               message: playbackMessage,
@@ -9001,6 +9033,11 @@ export function BotcastExperience({
               }),
             });
           });
+          if (!presentationDeferred) notifyPlaybackStart();
+          clearLiveCameraPostSpeechHold();
+          playProducerGuestActionSfxAt(0, resolvedDurationMs, alignment);
+          armVoiceCompletionWatchdog(resolvedDurationMs);
+          armListenerReactionTiming(message, resolvedDurationMs, alignment);
         },
         onSegmentTiming: (timing) => {
           if (
@@ -9442,6 +9479,16 @@ export function BotcastExperience({
         (advanceInFlightRef.current && cueDelivery !== "interrupt_guest")
       )
         return false;
+      const scheduledPreSessionImageCue =
+        signalPreSessionEpisodeImageCueForNextTurn({
+          episodeId: episode.id,
+          messages: episode.messages,
+          pendingImage: signalEpisodeImageRef.current,
+          imageContext: botcastLatestImageContextV1(episode.events),
+          higherPriorityCuePending: Boolean(
+            cue || queuedProducerCueRef.current || producerGuestMessage,
+          ),
+        });
       const queuedCue =
         !producerGuestMessage &&
         episode.guestKind !== "producer" &&
@@ -9452,7 +9499,7 @@ export function BotcastExperience({
           segment: episode.segment,
           guestDeparted: guestHasDeparted(episode),
         }) === "host"
-          ? queuedProducerCueRef.current
+          ? (queuedProducerCueRef.current ?? scheduledPreSessionImageCue)
           : null;
       const requestedCue = cue ?? queuedCue ?? undefined;
       let finishResponseCue: (() => Promise<void>) | null = null;
@@ -9731,29 +9778,8 @@ export function BotcastExperience({
                   : {}),
                 ...(episodeImageForTurn
                   ? {
-                      episodeImage: {
-                        imageId: episodeImageForTurn.imageId,
-                        fileName: episodeImageForTurn.fileName,
-                        dataUrl: episodeImageForTurn.dataUrl,
-                        ...(episodeImageForTurn.archivalProxyEpisodeId
-                          ? {
-                              archivalProxyEpisodeId:
-                                episodeImageForTurn.archivalProxyEpisodeId,
-                            }
-                          : {}),
-                        name: episodeImageForTurn.descriptor.name,
-                        replayEmoji: episodeImageForTurn.replayEmoji,
-                        visualIdentity: episodeImageForTurn.archivalProxyEpisodeId
-                          ? {
-                              v: 1,
-                              status: "unavailable",
-                              reason: "fresh_proof_required",
-                            }
-                          : episodeImageForTurn.visualIdentity,
-                        ...(episodeImageForTurn.reason
-                          ? { reason: episodeImageForTurn.reason }
-                          : {}),
-                      },
+                      episodeImage:
+                        signalEpisodeImageRequestPayload(episodeImageForTurn),
                     }
                   : {}),
               }),
@@ -9915,7 +9941,13 @@ export function BotcastExperience({
         }
         await waitForSignalUserInputIdle(controller.signal);
         if (!episodeOperationIsCurrent(controller, runId)) return false;
-        startTransition(() => setEpisode(response.episode));
+        const episodeBeforeResponseIsHeard =
+          signalEpisodeBeforeResponseIsHeard({
+            previousEpisode: episode,
+            committedEpisode: response.episode,
+            responseMessage: response.message,
+          });
+        startTransition(() => setEpisode(episodeBeforeResponseIsHeard));
         if (response.message) {
           const message = response.message;
           prepareEpisodeMessage(message, response.episode);
@@ -9973,6 +10005,12 @@ export function BotcastExperience({
             );
           } else {
             void completeForegroundGenerationHold();
+          }
+          if (
+            message.speakerRole === "host" &&
+            episodeOperationIsCurrent(controller, runId)
+          ) {
+            startTransition(() => setEpisode(response.episode));
           }
         } else {
           void completeForegroundGenerationHold();
@@ -10420,6 +10458,20 @@ export function BotcastExperience({
           randomValue: Math.random(),
         }))
     ) {
+      // Accept the direction into the episode-owned queue before beginning a
+      // live redirect. The redirect pipeline may wait for model readiness;
+      // leaving the cue only in that pending request makes the desk look inert
+      // and lets a replaced operation lose the Producer's press entirely.
+      // Images already have their own server-owned queued context and continue
+      // through the existing atomic presentation path.
+      if (cue.kind !== "present_image" && !(await queueProducerCue(cue))) {
+        return;
+      }
+      const redirectCue =
+        cue.kind === "present_image"
+          ? cue
+          : queuedProducerCueRef.current;
+      if (!redirectCue) return;
       invalidateEpisodeOperation();
       setEpisode((current) =>
         current?.id === episode.id
@@ -10445,7 +10497,7 @@ export function BotcastExperience({
       setAutoRun(true);
       onPrepareUtterance?.();
       void advanceEpisode(
-        cue,
+        redirectCue,
         "redirect_host",
         {
           messageId: activeHostMessage.id,
@@ -11967,6 +12019,8 @@ export function BotcastExperience({
     shot: "left" | "right" | "wide";
     activeMessage: BotcastMessage | null;
     replay: boolean;
+    /** The completed off-air studio keeps the set, but clears both chairs. */
+    empty?: boolean;
     guestDeparted?: boolean;
     hostDeparted?: boolean;
   }): React.JSX.Element => {
@@ -12020,9 +12074,9 @@ export function BotcastExperience({
         : args.guest
       : null;
     const hostVisibleToAudience =
-      !hostDeparted && audienceParticipants?.host.visible !== false;
+      !args.empty && !hostDeparted && audienceParticipants?.host.visible !== false;
     const guestVisibleToAudience =
-      !guestDeparted && audienceParticipants?.guest.visible !== false;
+      !args.empty && !guestDeparted && audienceParticipants?.guest.visible !== false;
     const guestHiddenFromAudience = !guestDeparted && !guestVisibleToAudience;
     const guestPresentOnStage = guestVisibleToAudience;
     const signalStageVisibleBotCount =
@@ -13099,11 +13153,22 @@ export function BotcastExperience({
                 mediaDurationMs: replayIntrinsicMediaDurationMs,
                 capturedDurationMs: replayCapturedDurationMs,
               });
+              const mouthSampleElapsedMs =
+                replayFaithfulBeat &&
+                args.activeMessage?.speakerRole === role
+                  ? signalReplayMouthSampleElapsedMs({
+                      manifest: replayPresentationManifestV2,
+                      participantId,
+                      replayElapsedMs: mediaElapsedMs,
+                      speechStartMs: replayFaithfulBeat.startMs,
+                      speechEndMs: replayFaithfulBeat.endMs,
+                    })
+                  : mediaElapsedMs;
               const sampledMouthShape =
                 replayMouthShapeAtV2(
                   replayPresentationManifestV2,
                   participantId,
-                  mediaElapsedMs,
+                  mouthSampleElapsedMs,
                 ) ??
                 (talking && args.activeMessage && speechDurationMs > 0
                   ? crtSpeechMouthShapeAtAlignedElapsedMs({
@@ -13166,6 +13231,7 @@ export function BotcastExperience({
         data-shot={args.shot}
         data-camera-transitions={stageCameraTransitionMode}
         data-replay={args.replay ? "true" : undefined}
+        data-signal-studio-state={args.empty ? "empty" : "occupied"}
         data-session-bot-visual-quality={signalStageBotVisualQuality}
         data-session-visible-bot-count={signalStageVisibleBotCount}
         data-guest-presence={args.currentEpisode.guestPresenceMode}
@@ -13291,8 +13357,8 @@ export function BotcastExperience({
             aria-hidden="true"
           />
           <div className={styles.signalFloorGlowLayer} aria-hidden="true">
-            {floorGlow("host", args.host?.color)}
-            {floorGlow("guest", args.guest?.color)}
+            {!args.empty ? floorGlow("host", args.host?.color) : null}
+            {!args.empty ? floorGlow("guest", args.guest?.color) : null}
           </div>
           {socialPressure ? (
             <div
@@ -13553,11 +13619,12 @@ export function BotcastExperience({
             ) : null}
           </div>
         </div>
-        <div
-          className={styles.stageNameplates}
-          data-shot={args.shot}
-          aria-label="Signal stage identities"
-        >
+        {!args.empty ? (
+          <div
+            className={styles.stageNameplates}
+            data-shot={args.shot}
+            aria-label="Signal stage identities"
+          >
           <strong
             className={`${styles.nameplate} ${styles.hostNameplate} ${
               signalStudioNameplateSide(studioLayout, "host") === "left"
@@ -13567,8 +13634,10 @@ export function BotcastExperience({
             data-role="host"
             data-departed={hostDeparted ? "true" : undefined}
           >
-            <span>Host</span>
-            {stagePublicName(args.host, "Host")}
+            <span className={styles.nameplateRole}>Host</span>
+            <span className={styles.nameplateName}>
+              {stagePublicName(args.host, "Host")}
+            </span>
           </strong>
           <strong
             className={`${styles.nameplate} ${styles.guestNameplate} ${
@@ -13580,21 +13649,29 @@ export function BotcastExperience({
             data-departed={guestDeparted ? "true" : undefined}
             data-audience-hidden={guestHiddenFromAudience ? "true" : undefined}
           >
-            <span>{guestHiddenFromAudience ? "Booked guest" : "Guest"}</span>
-            {stagePublicName(args.guest, "Guest")}
+            <span className={styles.nameplateRole}>
+              {guestHiddenFromAudience ? "Booked guest" : "Guest"}
+            </span>
+            <span className={styles.nameplateName}>
+              {stagePublicName(args.guest, "Guest")}
+            </span>
           </strong>
-        </div>
-        <SignalEpisodeImagePresence
-          context={stageImageVisible ? stageImageContext : null}
-          episodeId={args.currentEpisode.id}
-          replay={args.replay}
-          ephemeralDataUrl={stageEpisodeImage?.dataUrl}
-          speakerRole={args.activeMessage?.speakerRole}
-          messageId={args.activeMessage?.id}
-          shot={args.shot}
-          placement={activeCameraFrame.episodeImage}
-        />
-        {liveCaptionsEnabled &&
+          </div>
+        ) : null}
+        {!args.empty ? (
+          <SignalEpisodeImagePresence
+            context={stageImageVisible ? stageImageContext : null}
+            episodeId={args.currentEpisode.id}
+            replay={args.replay}
+            ephemeralDataUrl={stageEpisodeImage?.dataUrl}
+            speakerRole={args.activeMessage?.speakerRole}
+            messageId={args.activeMessage?.id}
+            shot={args.shot}
+            placement={activeCameraFrame.episodeImage}
+          />
+        ) : null}
+        {!args.empty &&
+        liveCaptionsEnabled &&
         !args.replay &&
         speechReveal?.phase === "playing" &&
         liveReactionCaption &&
@@ -13622,7 +13699,8 @@ export function BotcastExperience({
             </div>
           </div>
         ) : null}
-        {liveCaptionsEnabled && organicCaptionPresentation && args.activeMessage ? (
+        {!args.empty &&
+        liveCaptionsEnabled && organicCaptionPresentation && args.activeMessage ? (
           <div
             className={styles.liveCaption}
             style={{
@@ -13653,7 +13731,8 @@ export function BotcastExperience({
               </span>
             </div>
           </div>
-        ) : liveCaptionsEnabled &&
+        ) : !args.empty &&
+        liveCaptionsEnabled &&
         liveReactionCaption &&
         liveReactionCaptionSpeaker &&
         liveReactionCaptionPage.text &&
@@ -13680,7 +13759,8 @@ export function BotcastExperience({
               </span>
             </div>
           </div>
-        ) : presenceBeat?.surface === "signal" &&
+        ) : !args.empty &&
+        presenceBeat?.surface === "signal" &&
         presenceBeat.sessionId === args.currentEpisode.id &&
         presenceBeat.completion === "playing" ? (
           <div
@@ -13706,7 +13786,8 @@ export function BotcastExperience({
               </span>
             </div>
           </div>
-        ) : !args.replay &&
+        ) : !args.empty &&
+          !args.replay &&
           args.activeMessage &&
           speechReveal?.phase === "playing" ? (
           <SignalLiveVisualSampler
@@ -13786,7 +13867,8 @@ export function BotcastExperience({
               ) : null
             }
           />
-        ) : liveCaptionsEnabled &&
+        ) : !args.empty &&
+        liveCaptionsEnabled &&
         args.replay &&
         delayedLiveCaption &&
         !muteSilenceMarkVisible &&
@@ -13823,7 +13905,8 @@ export function BotcastExperience({
               </span>
             </div>
           </div>
-        ) : liveCaptionsEnabled &&
+        ) : !args.empty &&
+          liveCaptionsEnabled &&
           producerGuestHostPromptMessage &&
           producerGuestHostPromptText ? (
           <div
@@ -13852,7 +13935,8 @@ export function BotcastExperience({
             </div>
           </div>
         ) : null}
-        {!args.replay &&
+        {!args.empty &&
+        !args.replay &&
         args.activeMessage?.speechIntentRevealAvailable === true &&
         speechReveal?.phase === "ended" ? (
           <SpeechIntentReveal
@@ -13863,7 +13947,8 @@ export function BotcastExperience({
             request={request}
           />
         ) : null}
-        {args.replay &&
+        {!args.empty &&
+        args.replay &&
         muteSilenceMarkVisible &&
         args.activeMessage?.mutePerformance ? (
           <span
@@ -16625,6 +16710,116 @@ export function BotcastExperience({
     speakingMessageId,
     episodeMessages: episode?.messages ?? [],
   });
+  // Signal shares Coffee's canonical public transcript projection. Signal first
+  // applies its audience-delivery privacy boundary, then adapts its public
+  // turns to the projection rather than maintaining a second transcript
+  // visibility contract.
+  const liveTranscriptRows = useMemo(
+    () =>
+      projectCoffeePublicTranscript({
+        messages: (episode?.messages ?? [])
+          .filter(
+            (message) =>
+              message.id !== speakingMessageId &&
+              botcastMessageIsAudibleToAudienceV1(message),
+          )
+          .map((message) => ({
+            id: message.id,
+            role: "assistant",
+            content: signalVoicePerformanceTranscriptText(message),
+            botId: message.botId,
+            botName:
+              message.speakerRole === "host"
+                ? (hostBot?.name ?? "Host")
+                : (liveGuestBot?.name ?? "Guest"),
+            botColor: normalizeAccentForTheme(
+              (message.speakerRole === "host" ? hostBot : liveGuestBot)
+                ?.color ??
+                selectedShow?.accentColor ??
+                "#7c3aed",
+              theme,
+            ),
+            speechIntentRevealAvailable: message.speechIntentRevealAvailable,
+            socialSilence: message.socialSilence,
+            botPowerMutePerformance: message.mutePerformance,
+          })),
+      }).visibleRows,
+    [
+      episode?.messages,
+      hostBot,
+      liveGuestBot,
+      selectedShow?.accentColor,
+      speakingMessageId,
+      theme,
+    ],
+  );
+  const signalTranscriptScrollRef = useRef<HTMLElement | null>(null);
+  const signalTranscriptFollowsLatestRef = useRef(true);
+  const signalTranscriptMessageCountRef = useRef(0);
+  const signalTranscriptEpisodeIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const rail = signalTranscriptScrollRef.current;
+    if (signalTranscriptEpisodeIdRef.current !== (episode?.id ?? null)) {
+      signalTranscriptEpisodeIdRef.current = episode?.id ?? null;
+      signalTranscriptMessageCountRef.current = 0;
+      signalTranscriptFollowsLatestRef.current = true;
+    }
+    const previousCount = signalTranscriptMessageCountRef.current;
+    signalTranscriptMessageCountRef.current = liveTranscriptRows.length;
+    if (
+      !rail ||
+      liveTranscriptRows.length <= previousCount ||
+      !signalTranscriptFollowsLatestRef.current
+    ) {
+      return;
+    }
+    rail.scrollTop = rail.scrollHeight;
+  }, [episode?.id, liveTranscriptRows.length]);
+  const renderLiveTranscript = (): React.JSX.Element => (
+    <aside
+      className={styles.signalTranscriptRail}
+      aria-label="Signal transcript"
+      data-signal-transcript="true"
+      data-tutorial-target="botcast-transcript"
+    >
+      <header className={styles.signalTranscriptHeader}>
+        <div>
+          <span>Transcript</span>
+          <p>{liveTranscriptRows.length} messages</p>
+        </div>
+        <small>On air</small>
+      </header>
+      <section
+        ref={signalTranscriptScrollRef}
+        className={styles.signalTranscriptThread}
+        aria-live="polite"
+        aria-label="Audience-heard transcript"
+        onScroll={(event) => {
+          const rail = event.currentTarget;
+          signalTranscriptFollowsLatestRef.current =
+            rail.scrollHeight - rail.scrollTop - rail.clientHeight < 56;
+        }}
+      >
+        <ul className={styles.signalTranscriptMessages}>
+          {liveTranscriptRows.map((message) => (
+            <li
+              key={message.id}
+              className={styles.signalTranscriptMessage}
+              data-role={message.role}
+              style={
+                message.botColor
+                  ? ({ "--signal-transcript-bot-color": message.botColor } as CSSProperties)
+                  : undefined
+              }
+            >
+              <strong>{message.botName ?? "Speaker"}</strong>
+              <span>{message.content}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </aside>
+  );
   const liveStageImageContext = episode
     ? signalEpisodeStageImageContext({
         events: episode.events,
@@ -17914,6 +18109,25 @@ export function BotcastExperience({
     episodeOutro !== null ||
     episode?.status === "completed" ||
     episode?.status === "cancelled";
+  // Once the final card has played, Produce returns to the same workspace in
+  // an off-air state. Keep the outro record mounted until Return to show so
+  // its optional item-save handoff remains available.
+  const completedStudioUsesOutro = Boolean(
+    episode &&
+      episodeOutro?.episodeId === episode.id &&
+      episodeOutro.phase === "complete" &&
+      !episodeOutro.discarded &&
+      episodeOutro.episode.playbackMode !== "watch",
+  );
+  const episodeOutroVisible = Boolean(
+    episodeOutro &&
+      !(
+        episodeOutro.phase === "complete" &&
+        episodeOutro.episode.status === "completed" &&
+        !episodeOutro.discarded &&
+        episodeOutro.episode.playbackMode !== "watch"
+      ),
+  );
   const returnFromEpisodeOutro = async (): Promise<void> => {
     if (
       !episodeOutro ||
@@ -18154,6 +18368,7 @@ export function BotcastExperience({
       data-botcast-mode="true"
       data-theme={theme}
       data-live-episode={liveSessionActive ? "true" : undefined}
+      data-replay-episode={replayEpisode ? "true" : undefined}
       data-producer-guest={
         episode?.guestKind === "producer" ? "true" : undefined
       }
@@ -18411,7 +18626,7 @@ export function BotcastExperience({
             ) : null}
         </section>
       ) : null}
-      {episodeOutro && selectedShow ? (
+      {episodeOutro && episodeOutroVisible && selectedShow ? (
         <section
           className={`${styles.episodePreRoll} ${styles.episodeOutro}`}
           data-phase={episodeOutro.phase}
@@ -18533,7 +18748,7 @@ export function BotcastExperience({
           </div>
         </section>
       ) : null}
-      {!liveSessionActive ? renderLibrary() : null}
+      {!liveSessionActive && !replayEpisode ? renderLibrary() : null}
       <section
         className={styles.main}
           style={
@@ -18654,15 +18869,16 @@ export function BotcastExperience({
               </div>
             ) : (
               <div className={styles.liveTopline}>
-                <span
-                  data-live={episode.status === "live" ? "true" : undefined}
-                >
-                  {episode.status === "live"
-                    ? "● ON AIR"
-                    : episodeOutcomeLabel(episode)}
+              <span
+                data-live={episode.status === "live" ? "true" : undefined}
+              >
+                {episode.status === "live"
+                  ? "● ON AIR"
+                  : "○ OFF AIR"}
               </span>
               <SignalEpisodeRuntimeClock
                 status={episode.status}
+                durationMinutes={episode.durationMinutes}
                 runtimeMsAt={(nowMs) =>
                   signalEpisodeRuntimeMs(
                     episode,
@@ -18705,7 +18921,9 @@ export function BotcastExperience({
                 />
               )}
               <span>
-                  {episode.guestKind === "producer"
+                  {episode.status !== "live"
+                    ? "Studio clear"
+                    : episode.guestKind === "producer"
                     ? "Producer on mic"
                     : episode.tensionStage === "calm"
                     ? "Guest settled"
@@ -18735,6 +18953,80 @@ export function BotcastExperience({
                   <span>{theme === "light" ? "Light" : "Dark"}</span>
                 </button>
               ) : null}
+              {episode.status === "completed" ? (
+                <>
+                  {completedStudioUsesOutro &&
+                  signalEpisodeImage?.episodeId === episode.id &&
+                  signalEpisodeImage.descriptor.kind === "item" &&
+                  signalEpisodeImage.assetLibraryInspection?.alreadySaved ===
+                    false ? (
+                    <label className={styles.liveCompletedKeepItem}>
+                      <input
+                        type="checkbox"
+                        checked={keepSignalItem}
+                        disabled={keepSignalItemSaving}
+                        onChange={(event) =>
+                          setKeepSignalItem(event.target.checked)
+                        }
+                      />
+                      <span>
+                        Keep {signalEpisodeImage.descriptor.name} in Items
+                      </span>
+                    </label>
+                  ) : null}
+                  {completedStudioUsesOutro &&
+                  signalEpisodeImage?.episodeId === episode.id &&
+                  signalEpisodeImage.descriptor.kind === "item" &&
+                  signalEpisodeImage.assetLibraryInspection?.alreadySaved ===
+                    true ? (
+                    <span className={styles.liveCompletedItemStatus}>
+                      Item already in Items
+                    </span>
+                  ) : null}
+                  {onCreateSlateStory ? (
+                    <button
+                      type="button"
+                      onClick={() => void createEpisodeStoryInSlate(episode)}
+                      disabled={slateStoryEpisodeId !== null}
+                      data-tutorial-target="botcast-create-slate-story"
+                    >
+                      {slateStoryEpisodeId === episode.id
+                        ? "Creating in Slate…"
+                        : "Create in Slate"}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => void copyEpisodeForReview(episode)}
+                    disabled={
+                      reviewCopyState?.episodeId === episode.id &&
+                      reviewCopyState.phase === "copying"
+                    }
+                    aria-live="polite"
+                    data-signal-completed-copy="true"
+                  >
+                    {signalReviewCopyLabel(reviewCopyState, episode.id)}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void (completedStudioUsesOutro
+                        ? returnFromEpisodeOutro()
+                        : returnFromCompletedEpisode())
+                    }
+                    disabled={
+                      keepSignalItemSaving ||
+                      watchReplayFinalizingEpisodeId === episode.id
+                    }
+                  >
+                    {keepSignalItemSaving
+                      ? "Saving item…"
+                      : watchReplayFinalizingEpisodeId === episode.id
+                        ? "Finalizing replay…"
+                        : "Return to show"}
+                  </button>
+                </>
+              ) : (
                 <>
                   <button
                     type="button"
@@ -18742,7 +19034,6 @@ export function BotcastExperience({
                       if (!autoRun) onPrepareUtterance?.();
                       setAutoRun((value) => !value);
                     }}
-                    disabled={episode.status === "completed"}
                   >
                     {autoRun ? "Pause rundown" : "Resume rundown"}
                   </button>
@@ -18756,6 +19047,7 @@ export function BotcastExperience({
                     {cuttingShow ? "■ Cut now" : "■ Cut show"}
                   </button>
                 </>
+              )}
               <button
                 type="button"
                 className={styles.dangerButton}
@@ -18770,6 +19062,13 @@ export function BotcastExperience({
               </button>
               </div>
             )}
+            <div
+              className={styles.liveWorkspace}
+              data-live-workspace={
+                episode.playbackMode !== "watch" ? "true" : undefined
+              }
+            >
+            <div className={styles.liveWorkspaceStageColumn}>
             {renderStage({
               show: selectedShow,
               currentEpisode: episode,
@@ -18778,6 +19077,9 @@ export function BotcastExperience({
               shot: liveShot,
               activeMessage: liveActiveMessage,
               replay: false,
+              empty:
+                episode.status !== "live" &&
+                episode.playbackMode !== "watch",
               ...(episode.playbackMode === "watch"
                 ? {
                     guestDeparted:
@@ -19437,25 +19739,23 @@ export function BotcastExperience({
                 {signalMemoryReceiptDetail}
               </section>
             ) : null}
-            {episode.status === "completed" && !watchReplayPresentation ? (
-              <button
-                type="button"
-                className={styles.returnButton}
-                onClick={() => void returnFromCompletedEpisode()}
-                disabled={watchReplayFinalizingEpisodeId === episode.id}
-              >
-                {watchReplayFinalizingEpisodeId === episode.id
-                  ? "Finalizing replay…"
-                  : "Return to show"}
-              </button>
-            ) : null}
+            </div>
+            {episode.playbackMode !== "watch" ? renderLiveTranscript() : null}
+            </div>
           </div>
         ) : replayEpisode && selectedShow ? (
-          <div className={styles.replayLayout}>
+          <div
+            className={styles.replayLayout}
+            data-signal-replay="true"
+            data-signal-watch-replay={
+              watchReplayPresentation ? "true" : undefined
+            }
+          >
             <div className={styles.replayHeader}>
-              <div>
-                <span className={styles.eyebrow}>From the archive</span>
-                <h2>{replayEpisode.title}</h2>
+              <div className={styles.replayHeading}>
+                <div>
+                  <span className={styles.eyebrow}>From the archive</span>
+                  <h2>{replayEpisode.title}</h2>
                   <p>
                     {new Date(replayEpisode.startedAt).toLocaleString()} ·{" "}
                     {episodeModeLabel(replayEpisode)} ·{" "}
@@ -19465,6 +19765,38 @@ export function BotcastExperience({
                       : "Auto"}{" "}
                     · {episodeOutcomeLabel(replayEpisode)}
                   </p>
+                </div>
+                {replayEpisode.personaReview ? (
+                  <article
+                    className={styles.replayReviewChip}
+                    data-signal-replay-review="true"
+                    style={
+                      {
+                        ["--signal-rating-color" as string]:
+                          signalAudienceRatingColor(
+                            replayEpisode.personaReview.rating,
+                          ) ?? undefined,
+                      } as CSSProperties
+                    }
+                    aria-label={`Listener review from ${replayEpisode.personaReview.reviewerName}, ${replayEpisode.personaReview.rating.toFixed(1)} out of 5 stars`}
+                  >
+                    <span
+                      className={styles.replayReviewStar}
+                      aria-hidden="true"
+                    >
+                      ★
+                    </span>
+                    <span className={styles.replayReviewIdentity}>
+                      <small>Listener review</small>
+                      <strong>{replayEpisode.personaReview.reviewerName}</strong>
+                    </span>
+                    <strong className={styles.replayReviewRating}>
+                      {replayEpisode.personaReview.rating.toFixed(1)}
+                      <span aria-hidden="true"> ★</span>
+                    </strong>
+                    <q>{replayEpisode.personaReview.comment}</q>
+                  </article>
+                ) : null}
               </div>
               <div className={styles.replayHeaderActions}>
                 {onCreateSlateStory ? (
@@ -19514,99 +19846,110 @@ export function BotcastExperience({
                 </button>
               </div>
             </div>
-            <div
-              className={styles.replayStage}
-              data-playback={replayPlaying ? "playing" : "paused"}
-              data-intro-pending={
-                replayBookend?.kind === "intro" && !replayIntroRevealed
-                  ? "true"
-                  : undefined
-              }
+            <section
+              className={styles.replayRoom}
+              data-signal-replay-room="true"
+              data-playing={replayPlaying ? "true" : undefined}
+              aria-label="Signal replay"
             >
-              {renderStage({
-                show: selectedShow,
-                currentEpisode: replayEpisode,
-                host: replayHostBot,
-                guest: replayGuestBot,
-                shot: replayShot,
-                activeMessage: replayActiveMessage,
-                replay: true,
-                guestDeparted: replayGuestDeparted,
-                hostDeparted: replayHostDeparted,
-              })}
-              {replayBookend ? (
-                <SignalReplayBookend
-                  kind={replayBookend.kind}
-                  show={selectedShow}
-                  episode={replayEpisode}
-                  guestName={
-                      replayGuestBot?.name ?? replayEpisode.guestName ?? "Guest"
-                  }
-                  introSource={
-                      replayPresentationManifestV2?.visual.metadata
-                        ?.introAudioSource === "elevenlabs"
-                      ? "elevenlabs"
-                      : selectedShow.introAudio.source
-                  }
-                  playing={replayPlaying}
-                  revealed={replayIntroRevealed}
-                  phase={replayIntroLandingActive ? "landing" : undefined}
-                  landingFadeMs={
-                    replayBookend.kind === "intro"
-                      ? replayIntroAutomaticFadeMs
-                      : undefined
-                  }
-                  pictureStartMs={
-                    replayBookend.kind === "intro"
-                      ? replayIntroAutomaticOffsetMs
-                      : undefined
-                  }
-                />
-              ) : null}
-              {!replayPlaying ? (
-                <button
-                  type="button"
-                  className={styles.replayPauseChrome}
-                  onClick={() => {
-                    startReplayPlayback();
-                  }}
-                  aria-label={
+              <div className={styles.replayScreen}>
+                <div
+                  className={styles.replayStage}
+                  data-playback={replayPlaying ? "playing" : "paused"}
+                  data-intro-pending={
                     replayBookend?.kind === "intro" && !replayIntroRevealed
-                      ? "Play episode"
-                      : "Resume playback"
+                      ? "true"
+                      : undefined
                   }
                 >
-                  {replayBookend?.kind === "intro" && !replayIntroRevealed ? (
-                      <span
-                        className={styles.replayPauseGlyph}
-                        data-kind="play"
-                        aria-hidden="true"
-                      >
-                      <svg viewBox="0 0 24 24" width="36" height="36">
-                        <path fill="currentColor" d="M8 5v14l11-7z" />
-                      </svg>
-                    </span>
-                  ) : (
-                    <>
-                      <span className={styles.replayPausedLabel}>Paused</span>
-                      <span
-                        className={styles.replayPauseGlyph}
-                        data-kind="pause"
-                        aria-hidden="true"
-                      >
-                        <svg viewBox="0 0 24 24" width="34" height="34">
-                            <path
-                              fill="currentColor"
-                              d="M6 5h4v14H6zm8 0h4v14h-4z"
-                            />
-                        </svg>
-                      </span>
-                      <small>Click to resume</small>
-                    </>
-                  )}
-                </button>
-              ) : null}
-            </div>
+                  {renderStage({
+                    show: selectedShow,
+                    currentEpisode: replayEpisode,
+                    host: replayHostBot,
+                    guest: replayGuestBot,
+                    shot: replayShot,
+                    activeMessage: replayActiveMessage,
+                    replay: true,
+                    guestDeparted: replayGuestDeparted,
+                    hostDeparted: replayHostDeparted,
+                  })}
+                  {replayBookend ? (
+                    <SignalReplayBookend
+                      kind={replayBookend.kind}
+                      show={selectedShow}
+                      episode={replayEpisode}
+                      guestName={
+                        replayGuestBot?.name ??
+                        replayEpisode.guestName ??
+                        "Guest"
+                      }
+                      introSource={
+                        replayPresentationManifestV2?.visual.metadata
+                          ?.introAudioSource === "elevenlabs"
+                          ? "elevenlabs"
+                          : selectedShow.introAudio.source
+                      }
+                      playing={replayPlaying}
+                      revealed={replayIntroRevealed}
+                      phase={replayIntroLandingActive ? "landing" : undefined}
+                      landingFadeMs={
+                        replayBookend.kind === "intro"
+                          ? replayIntroAutomaticFadeMs
+                          : undefined
+                      }
+                      pictureStartMs={
+                        replayBookend.kind === "intro"
+                          ? replayIntroAutomaticOffsetMs
+                          : undefined
+                      }
+                    />
+                  ) : null}
+                  {!replayPlaying ? (
+                    <button
+                      type="button"
+                      className={styles.replayPauseChrome}
+                      onClick={() => {
+                        startReplayPlayback();
+                      }}
+                      aria-label={
+                        replayBookend?.kind === "intro" && !replayIntroRevealed
+                          ? "Play episode"
+                          : "Resume playback"
+                      }
+                    >
+                      {replayBookend?.kind === "intro" &&
+                      !replayIntroRevealed ? (
+                        <span
+                          className={styles.replayPauseGlyph}
+                          data-kind="play"
+                          aria-hidden="true"
+                        >
+                          <svg viewBox="0 0 24 24" width="36" height="36">
+                            <path fill="currentColor" d="M8 5v14l11-7z" />
+                          </svg>
+                        </span>
+                      ) : (
+                        <>
+                          <span className={styles.replayPausedLabel}>Paused</span>
+                          <span
+                            className={styles.replayPauseGlyph}
+                            data-kind="pause"
+                            aria-hidden="true"
+                          >
+                            <svg viewBox="0 0 24 24" width="34" height="34">
+                              <path
+                                fill="currentColor"
+                                d="M6 5h4v14H6zm8 0h4v14h-4z"
+                              />
+                            </svg>
+                          </span>
+                          <small>Click to resume</small>
+                        </>
+                      )}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
               {replayFaithful && replayActiveAudioUrl ? (
                 <audio
                   ref={replayAudioRef}
@@ -19891,107 +20234,141 @@ export function BotcastExperience({
                   </span>
                 ) : null}
               </section>
-            <div className={styles.replayTranscript}>
-              {replayIntroDurationMs > 0 ? (
-                <button
-                  type="button"
-                  data-botcast-replay-intro-row="true"
-                  data-active={
-                    replayCapturedPresentationElapsedMs < replayIntroCardEndMs
-                      ? "true"
-                      : undefined
-                  }
-                  onClick={() => seekFaithfulReplay(0)}
-                  disabled={!replayFaithful}
-                  aria-label={`Play Signal intro, ${runtimeLabel(replayIntroCardEndMs)}`}
+              <section className={styles.replayProgram}>
+                <header className={styles.replayProgramHeader}>
+                  <span>Now</span>
+                  <small>Adjacent lines seek</small>
+                </header>
+                <div
+                  className={styles.replayTranscript}
+                  role="region"
+                  aria-label="Episode transcript and cue sheet"
                 >
-                  <strong>Signal intro</strong>
-                  <span>
-                    Opening video · {runtimeLabel(replayIntroCardEndMs)}
-                  </span>
-                </button>
-              ) : null}
-              {replayEpisode.messages.map((message, index) => {
-                const messageBot =
-                  message.speakerRole === "host"
-                    ? replayHostBot
-                    : replayGuestBot;
-                const publicReactionSpeech = botcastPublicReactionSpeechForMessage(
-                  replayEpisode.events,
-                  message.id,
-                );
-                return botcastMessageIsAudibleToAudienceV1(message) ? (
-                  <Fragment key={message.id}>
+                  {replayIntroDurationMs > 0 ? (
                     <button
                       type="button"
-                      data-botcast-replay-row="true"
+                      data-botcast-replay-intro-row="true"
                       data-active={
-                        index === replayMessageIndex ? "true" : undefined
+                        replayCapturedPresentationElapsedMs <
+                        replayIntroCardEndMs
+                          ? "true"
+                          : undefined
                       }
-                      data-power-voice-presence={
-                        messageBot?.voicePresence ?? undefined
-                      }
-                      onClick={() => {
-                        const nextMs =
-                          replayActiveTimeline?.beats.find(
-                            (beat) => beat.sourceMessageId === message.id,
-                          )?.startMs ??
-                            replayTimeline.messageStartMs[index] ??
-                            0;
-                        seekFaithfulReplay(
-                          signalReplayMediaElapsedMs({
-                            capturedElapsedMs: nextMs,
-                            mediaDurationMs: replayIntrinsicMediaDurationMs,
-                            capturedDurationMs: replayCapturedDurationMs,
-                          }),
-                        );
-                      }}
+                      onClick={() => seekFaithfulReplay(0)}
                       disabled={!replayFaithful}
+                      aria-label={`Play Signal intro, ${runtimeLabel(replayIntroCardEndMs)}`}
                     >
-                      <strong>
-                        {botsById.get(message.botId)?.name ??
-                          message.speakerRole}
-                      </strong>
+                      <strong>Signal intro</strong>
                       <span>
-                        {signalVoicePerformanceTranscriptText(message)}
+                        Opening video · {runtimeLabel(replayIntroCardEndMs)}
                       </span>
                     </button>
-                    <SpeechIntentReveal
-                      available={
-                        message.speechIntentRevealAvailable === true
-                      }
-                      mode="signal"
-                      scopeId={replayEpisode.id}
-                      recordId={message.id}
-                      request={request}
-                    />
-                    {publicReactionSpeech.map((speech, reactionIndex) => (
-                      <div
-                        key={`${message.id}:reaction:${reactionIndex}`}
-                        data-botcast-replay-reaction-row="true"
-                        data-signal-transcript-speech="true"
-                      >
-                        <strong>
-                          {botsById.get(speech.botId)?.name ?? "Speaker"}
-                        </strong>
-                        <span>{speech.text}</span>
-                      </div>
-                    ))}
-                  </Fragment>
-                ) : null;
-              })}
-              {visiblePresenceBeats.flatMap((beat) => {
-                const heard = beat.text.slice(0, beat.heardCharacterCount);
-                return heard
-                  ? [
-                      <div key={beat.id}>
-                        <strong>{beat.speaker.name}</strong>
-                        <span>{heard}</span>
-                      </div>,
-                    ]
-                  : [];
-              })}
-            </div>
+                  ) : null}
+                  {replayEpisode.messages.map((message, index) => {
+                    const cueDistance = index - replayMessageIndex;
+                    if (
+                      (replayMessageIndex >= 0 && Math.abs(cueDistance) > 1) ||
+                      (replayMessageIndex < 0 && index > 1)
+                    ) {
+                      return null;
+                    }
+                    const messageBot =
+                      message.speakerRole === "host"
+                        ? replayHostBot
+                        : replayGuestBot;
+                    const publicReactionSpeech =
+                      botcastPublicReactionSpeechForMessage(
+                        replayEpisode.events,
+                        message.id,
+                      );
+                    return botcastMessageIsAudibleToAudienceV1(message) ? (
+                      <Fragment key={message.id}>
+                        <button
+                          type="button"
+                          data-botcast-replay-row="true"
+                          data-active={
+                            index === replayMessageIndex ? "true" : undefined
+                          }
+                          data-replay-cue-position={
+                            index === replayMessageIndex
+                              ? "current"
+                              : index < replayMessageIndex
+                                ? "previous"
+                                : "next"
+                          }
+                          data-power-voice-presence={
+                            messageBot?.voicePresence ?? undefined
+                          }
+                          onClick={() => {
+                            const nextMs =
+                              replayActiveTimeline?.beats.find(
+                                (beat) => beat.sourceMessageId === message.id,
+                              )?.startMs ??
+                              replayTimeline.messageStartMs[index] ??
+                              0;
+                            seekFaithfulReplay(
+                              signalReplayMediaElapsedMs({
+                                capturedElapsedMs: nextMs,
+                                mediaDurationMs: replayIntrinsicMediaDurationMs,
+                                capturedDurationMs: replayCapturedDurationMs,
+                              }),
+                            );
+                          }}
+                          disabled={!replayFaithful}
+                        >
+                          <strong>
+                            {botsById.get(message.botId)?.name ??
+                              message.speakerRole}
+                          </strong>
+                          <span>
+                            {signalVoicePerformanceTranscriptText(message)}
+                          </span>
+                        </button>
+                        {index === replayMessageIndex ? (
+                          <>
+                            <SpeechIntentReveal
+                              available={
+                                message.speechIntentRevealAvailable === true
+                              }
+                              mode="signal"
+                              scopeId={replayEpisode.id}
+                              recordId={message.id}
+                              request={request}
+                            />
+                            {publicReactionSpeech.map(
+                              (speech, reactionIndex) => (
+                                <div
+                                  key={`${message.id}:reaction:${reactionIndex}`}
+                                  data-botcast-replay-reaction-row="true"
+                                  data-signal-transcript-speech="true"
+                                >
+                                  <strong>
+                                    {botsById.get(speech.botId)?.name ??
+                                      "Speaker"}
+                                  </strong>
+                                  <span>{speech.text}</span>
+                                </div>
+                              ),
+                            )}
+                          </>
+                        ) : null}
+                      </Fragment>
+                    ) : null;
+                  })}
+                  {visiblePresenceBeats.slice(-1).flatMap((beat) => {
+                    const heard = beat.text.slice(0, beat.heardCharacterCount);
+                    return heard
+                      ? [
+                          <div key={beat.id}>
+                            <strong>{beat.speaker.name}</strong>
+                            <span>{heard}</span>
+                          </div>,
+                        ]
+                      : [];
+                  })}
+                </div>
+              </section>
+            </section>
           </div>
         ) : selectedShow && showHasVacantHost ? (
           <div className={styles.showDashboard} data-signal-vacant-host-recovery="true">

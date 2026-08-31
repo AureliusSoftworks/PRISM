@@ -301,6 +301,14 @@ use tauri::menu::MenuBuilder;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::utils::config::BackgroundThrottlingPolicy;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+
+// PRISM is composed at a 16:10 reference size, but the native shell must fit
+// the monitor's logical work area after OS scaling, docks, and taskbars. The
+// web shell owns responsive composition below the reference size.
+const PRISM_WINDOW_REFERENCE_WIDTH: f64 = 1440.0;
+const PRISM_WINDOW_REFERENCE_HEIGHT: f64 = 900.0;
+const PRISM_WINDOW_MIN_WIDTH: f64 = 800.0;
+const PRISM_WINDOW_MIN_HEIGHT: f64 = 520.0;
 use url::Url;
 
 const DEFAULT_API_PORT: u16 = 19787;
@@ -1053,11 +1061,16 @@ fn main() {
                     WebviewUrl::External(web_url.clone()),
                 )
                 .title("PRISM")
-                .inner_size(1400.0, 948.0)
-                .min_inner_size(1280.0, 900.0)
+                .inner_size(
+                    PRISM_WINDOW_REFERENCE_WIDTH,
+                    PRISM_WINDOW_REFERENCE_HEIGHT,
+                )
+                .min_inner_size(PRISM_WINDOW_MIN_WIDTH, PRISM_WINDOW_MIN_HEIGHT)
+                .center()
+                .prevent_overflow()
                 .resizable(true)
                 .maximizable(true)
-                .fullscreen(true)
+                .fullscreen(false)
                 .background_throttling(BackgroundThrottlingPolicy::Disabled)
                 .build() {
                     emit_log(&app_handle, "prism", &format!("Window build failed: {error}"));

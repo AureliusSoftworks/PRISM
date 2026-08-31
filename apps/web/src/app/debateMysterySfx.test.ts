@@ -1,18 +1,24 @@
 import assert from "node:assert/strict";
 import { statSync } from "node:fs";
 import test from "node:test";
+import {
+  DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  type BotAudioVoiceProfileV1,
+} from "@localai/shared";
 
 import {
   DEBATE_MYSTERY_TEXT_VOICE_VOLUME_RATIO,
   DEBATE_MYSTERY_DESK_ITEM_PICKUP_VOLUME_RATIO,
   DEBATE_MYSTERY_EVIDENCE_CHIME,
   DEBATE_MYSTERY_SFX_COOLDOWN_MS,
+  debateMysteryCaptionFallbackShouldStart,
   debateMysteryDialoguePresentationDismissed,
   debateMysteryDeskItemSfxPlan,
   debateMysteryPreparedAudioShouldStart,
   debateMysteryRestoredAudioPerformanceKeyV2,
   debateMysterySfxCueForAction,
   debateMysterySfxVoices,
+  debateMysteryTextVoiceModeForPresentation,
   debateMysteryTextVoiceShouldStart,
   debateMysteryTextVoiceShouldStop,
   playDebateMysteryTextVoice,
@@ -65,6 +71,29 @@ test("keeps the durable Archive checkpoint quiet without muting the next case be
   );
 });
 
+test("holds streamed text for prepared Babble until the local clip starts or fails", () => {
+  assert.equal(debateMysteryCaptionFallbackShouldStart({
+    preparedAudioExpected: true,
+    preparedAudioStatus: "idle",
+  }), false);
+  assert.equal(debateMysteryCaptionFallbackShouldStart({
+    preparedAudioExpected: true,
+    preparedAudioStatus: "pending",
+  }), false);
+  assert.equal(debateMysteryCaptionFallbackShouldStart({
+    preparedAudioExpected: true,
+    preparedAudioStatus: "started",
+  }), false);
+  assert.equal(debateMysteryCaptionFallbackShouldStart({
+    preparedAudioExpected: true,
+    preparedAudioStatus: "unavailable",
+  }), true);
+  assert.equal(debateMysteryCaptionFallbackShouldStart({
+    preparedAudioExpected: false,
+    preparedAudioStatus: "idle",
+  }), true);
+});
+
 test("captures the active trial statement as the restored audio checkpoint", () => {
   assert.equal(
     debateMysteryRestoredAudioPerformanceKeyV2({
@@ -88,6 +117,7 @@ test("starts the selected text voice once and never replaces anonymous Casekeepe
     delivery: "text_only" as const,
     key: "observation:1",
     mode: "bottish" as const,
+    playerObservation: false,
     startedKey: null,
     startedMode: null,
     streaming: true,
@@ -125,11 +155,46 @@ test("starts the selected text voice once and never replaces anonymous Casekeepe
     debateMysteryTextVoiceShouldStart({ ...narratorBeat, streaming: false }),
     false,
   );
+  const playerObservation = {
+    ...narratorBeat,
+    mode: "babble" as const,
+    playerObservation: true,
+    visibleText: "The n",
+  };
+  assert.equal(
+    debateMysteryTextVoiceShouldStart(playerObservation),
+    true,
+    "player Babble acquires the line while its visible caption is streaming",
+  );
+  assert.equal(
+    debateMysteryTextVoiceShouldStart({ ...playerObservation, streaming: false }),
+    false,
+    "player Babble never starts late after the caption has completed",
+  );
   assert.equal(
     debateMysteryTextVoiceShouldStart({ ...narratorBeat, mode: "off" }),
     false,
   );
   assert.equal(DEBATE_MYSTERY_TEXT_VOICE_VOLUME_RATIO, 0.28);
+});
+
+test("uses player Babble for observations while preserving an explicit Off choice", () => {
+  assert.equal(debateMysteryTextVoiceModeForPresentation({
+    configuredMode: "bottish",
+    playerObservation: true,
+  }), "babble");
+  assert.equal(debateMysteryTextVoiceModeForPresentation({
+    configuredMode: "babble",
+    playerObservation: true,
+  }), "babble");
+  assert.equal(debateMysteryTextVoiceModeForPresentation({
+    configuredMode: "off",
+    playerObservation: true,
+  }), "off");
+  assert.equal(debateMysteryTextVoiceModeForPresentation({
+    configuredMode: "bottish",
+    playerObservation: false,
+  }), "bottish");
 });
 
 test("stops the active text voice on completion, replacement, or mode change without touching TTS", () => {
@@ -138,6 +203,7 @@ test("stops the active text voice on completion, replacement, or mode change wit
     delivery: "text_only" as const,
     key: "observation:1",
     mode: "bottish" as const,
+    playerObservation: false,
     startedKey: "observation:1",
     startedMode: "bottish" as const,
     streaming: true,
@@ -147,6 +213,17 @@ test("stops the active text voice on completion, replacement, or mode change wit
     debateMysteryTextVoiceShouldStop({ ...activeTextBeat, streaming: false }),
     true,
     "the final visible character ends Bottish",
+  );
+  assert.equal(
+    debateMysteryTextVoiceShouldStop({
+      ...activeTextBeat,
+      mode: "babble",
+      playerObservation: true,
+      startedMode: "babble",
+      streaming: false,
+    }),
+    false,
+    "a player observation keeps Babble alive until its explicit dismissal",
   );
   assert.equal(
     debateMysteryTextVoiceShouldStop({ ...activeTextBeat, key: "observation:2" }),
@@ -164,6 +241,7 @@ test("stops the active text voice on completion, replacement, or mode change wit
       delivery: "spoken",
       key: "statement:1",
       mode: "babble",
+      playerObservation: false,
       startedKey: null,
       startedMode: null,
       streaming: true,
@@ -179,15 +257,23 @@ test("stops the active text voice on completion, replacement, or mode change wit
 });
 
 test("dispatches Babble, Bottish, and Off through one bounded presentation contract", async () => {
+  const playerVoiceProfile = {
+    ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+    baseVoiceId: "voice-8" as const,
+  };
   const played: Array<{
+    instant?: boolean;
     mode: "babble" | "bottish";
+    voiceProfile: BotAudioVoiceProfileV1 | null;
     seed: string;
     signal?: AbortSignal;
     text: string;
     volume: number;
   }> = [];
   const play = async (args: {
+    instant?: boolean;
     mode: "babble" | "bottish";
+    voiceProfile: BotAudioVoiceProfileV1 | null;
     seed: string;
     signal?: AbortSignal;
     text: string;
@@ -196,10 +282,22 @@ test("dispatches Babble, Bottish, and Off through one bounded presentation contr
     played.push(args);
     return true;
   };
+  assert.equal(await playDebateMysteryTextVoice({
+    enabled: true,
+    mode: "babble",
+    voiceProfile: null,
+    seed: "missing-player-voice",
+    text: "The corridor answers.",
+    volume: 0.5,
+    play,
+  }), false, "player Babble never falls through to Heart/default voice");
+  assert.equal(played.length, 0);
   for (const mode of ["babble", "bottish"] as const) {
     assert.equal(await playDebateMysteryTextVoice({
       enabled: true,
+      instant: mode === "babble",
       mode,
+      voiceProfile: playerVoiceProfile,
       seed: "casekeeper",
       text: "The corridor answers.",
       volume: 0.5,
@@ -209,6 +307,7 @@ test("dispatches Babble, Bottish, and Off through one bounded presentation contr
   assert.equal(await playDebateMysteryTextVoice({
     enabled: true,
     mode: "off",
+    voiceProfile: playerVoiceProfile,
     seed: "casekeeper",
     text: "The corridor answers.",
     volume: 0.5,
@@ -216,7 +315,9 @@ test("dispatches Babble, Bottish, and Off through one bounded presentation contr
   }), false);
   assert.deepEqual(played, [
     {
+      instant: true,
       mode: "babble",
+      voiceProfile: playerVoiceProfile,
       seed: "casekeeper",
       signal: undefined,
       text: "The corridor answers.",
@@ -224,7 +325,9 @@ test("dispatches Babble, Bottish, and Off through one bounded presentation contr
       roomAcoustics: undefined,
     },
     {
+      instant: false,
       mode: "bottish",
+      voiceProfile: playerVoiceProfile,
       seed: "casekeeper",
       signal: undefined,
       text: "The corridor answers.",

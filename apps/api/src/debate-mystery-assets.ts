@@ -658,10 +658,11 @@ export async function validateDebateMysteryAssetPixelsV1(
     !(
       (width === 1536 && height === 1024) ||
       (width === 1280 && height === 720) ||
-      (width === 1600 && height === 900)
+      (width === 1600 && height === 900) ||
+      (width === 1920 && height === 1080)
     )
   ) {
-    throw new Error("Room synthesis must preserve an approved 1536×1024 legacy, 1280×720 Mosaic-source, or 1600×900 Illustrated canvas.");
+    throw new Error("Room synthesis must preserve an approved 1536×1024 legacy, 1280×720 source, 1920×1080 Pixel Art, or 1600×900 Realistic canvas.");
   }
   if (kind === "evidence" && (width !== 1024 || height !== 1024)) {
     throw new Error("Evidence synthesis must normalize to 1024×1024.");

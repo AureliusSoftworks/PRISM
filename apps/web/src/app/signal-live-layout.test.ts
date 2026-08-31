@@ -17,6 +17,8 @@ describe("Signal live viewport layout", () => {
     assert.match(source, /data-shot=\{args\.shot\}/u);
     assert.match(source, /styles\.hostNameplate/u);
     assert.match(source, /styles\.guestNameplate/u);
+    assert.match(source, /className=\{styles\.nameplateRole\}>Host<\/span>/u);
+    assert.match(source, /className=\{styles\.nameplateName\}/u);
     assert.match(
       source,
       /signalStudioNameplateSide\(studioLayout, "host"\)[\s\S]{0,160}styles\.leftNameplate[\s\S]{0,80}styles\.rightNameplate/u,
@@ -36,6 +38,10 @@ describe("Signal live viewport layout", () => {
     assert.match(css, /\.nameplate\s*\{[^}]*bottom:\s*clamp\(58px,\s*8\.5%,\s*72px\)/iu);
     assert.match(css, /\.leftNameplate\s*\{[^}]*left:\s*clamp\(/iu);
     assert.match(css, /\.rightNameplate\s*\{[^}]*right:\s*clamp\(/iu);
+    assert.match(
+      css,
+      /\.nameplateName\s*\{[^}]*max-inline-size:\s*15ch;[^}]*text-wrap:\s*balance;[^}]*white-space:\s*normal/iu,
+    );
     assert.match(css, /\.stageNameplates\[data-shot="left"\] \.guestNameplate/iu);
     assert.match(css, /\.stageNameplates\[data-shot="right"\] \.hostNameplate/iu);
     assert.match(css, /\.liveCaption\s*\{[^}]*z-index:\s*18/iu);
@@ -44,11 +50,11 @@ describe("Signal live viewport layout", () => {
   it("gives the desktop stage a wider runway above a compact, reachable producer desk", () => {
     assert.match(
       css,
-      /\.liveLayout\s*\{[^}]*--signal-live-stage-max-width:\s*1680px;[^}]*--signal-live-desk-max-width:\s*1320px;[^}]*--signal-live-inline-gutter:\s*clamp\(8px,\s*1vw,\s*18px\)/iu,
+      /\.liveLayout\s*\{[^}]*--signal-live-content-max-width:\s*1680px;[^}]*--signal-live-inline-gutter:\s*clamp\(8px,\s*1vw,\s*18px\)/iu,
     );
     assert.match(
       css,
-      /@media \(min-width:\s*901px\)[\s\S]*?\.shell\[data-live-episode="true"\] \.liveLayout\s*\{[^}]*padding-inline:\s*var\(--signal-live-inline-gutter\)[^}]*\}[\s\S]*?\.shell\[data-live-episode="true"\] \.liveTopline,[\s\S]*?\.shell\[data-live-episode="true"\] \.liveCameraControls,[\s\S]*?\.shell\[data-live-episode="true"\] \.liveLayout \.stageViewport\s*\{[^}]*width:\s*min\(100%,\s*var\(--signal-live-stage-max-width\)\);[^}]*max-width:\s*none/iu,
+      /@media \(min-width:\s*901px\)[\s\S]*?\.shell\[data-live-episode="true"\] \.liveLayout\s*\{[^}]*padding-inline:\s*var\(--signal-live-inline-gutter\)[^}]*\}[\s\S]*?\.shell\[data-live-episode="true"\] \.liveTopline,[\s\S]*?\.shell\[data-live-episode="true"\] \.liveCameraControls,[\s\S]*?\.shell\[data-live-episode="true"\] \.liveLayout \.stageViewport\s*\{[^}]*width:\s*100%;[^}]*max-width:\s*none/iu,
     );
     assert.match(
       css,
@@ -58,15 +64,15 @@ describe("Signal live viewport layout", () => {
     assert.match(css, /\.controlRoom\s*\{[^}]*margin:\s*8px auto 0/iu);
     assert.match(
       css,
-      /\.liveLayout \.controlRoom\s*\{[^}]*max-width:\s*var\(--signal-live-desk-max-width\)/iu,
+      /\.liveLayout \.controlRoom\s*\{[^}]*max-width:\s*var\(--signal-live-content-max-width\)/iu,
     );
     assert.match(
       css,
-      /\.signalMemoryReceiptDetail\s*\{[^}]*max-width:\s*var\(--signal-live-desk-max-width,\s*1320px\)/iu,
+      /\.signalMemoryReceiptDetail\s*\{[^}]*max-width:\s*var\(--signal-live-content-max-width,\s*1680px\)/iu,
     );
     assert.match(
       css,
-      /\.producerGuestComposerDock\s*\{[^}]*max-width:\s*var\(--signal-live-desk-max-width,\s*1320px\)/iu,
+      /\.producerGuestComposerDock\s*\{[^}]*max-width:\s*var\(--signal-live-content-max-width,\s*1680px\)/iu,
     );
     assert.match(css, /\.producerControls\s*\{[^}]*gap:\s*10px;[^}]*padding:\s*12px/iu);
     assert.match(css, /\.producerDeskPrivateLine\s*\{[^}]*min-height:\s*48px/iu);

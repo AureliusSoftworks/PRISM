@@ -343,6 +343,7 @@ import {
   type DebateMysteryAssetVisionReviewV1,
 } from "./debate-mystery-assets.ts";
 import {
+  applyDebateMysteryMosaicPresentationV1,
   buildDebateMysteryIllustratedRoomUpgradePromptV1,
   debateMysteryIllustratedRoomSubjectIdV1,
   renderDebateMysteryRoomArtV1,
@@ -10749,10 +10750,12 @@ async function prepareDebateMysteryV2RoomAssets(
             const generated = await generateRawDebateMysteryCandidate({
               userId: args.userId,
               title: `${room.name} room`,
-              prompt: [
-                `Edit this exact annotated room template into an unoccupied, furnished ${room.name} interior in the same mansion.`,
+            prompt: [
+                `Redraw this exact annotated room template as an unoccupied, furnished ${room.name} interior in genuine polished high-resolution hand-crafted pixel art.`,
                 args.houseStyle.promptContract,
                 "Preserve the exact 1280×720 dimensions, room geometry, grounded player-height camera, major architectural divisions, and broad interaction anchors.",
+                "This must be newly authored Pixel Art with deliberate coherent pixel clusters and crisp stepped edges—not a realistic room with a pixelation, downsampling, quantization, posterization, mosaic-grid, CRT, or scanline filter.",
+                "Retain and clarify the mansion's natural full palette, environmental accent colors, and cool-versus-warm lighting separation. Do not impose a global sepia, brown, monochrome, grayscale, or desaturated cast.",
                 "Remove every annotation shape. Do not add electric magenta, people, human figures, bodies, evidence, clues, weapons, blood, gore, readable text, signs, captions, logos, borders, or UI.",
                 "Use ordinary room-specific furniture, vessels, statues, books, plants, table settings, and lived-in environmental dressing freely; these are atmosphere, not evidence.",
                 "This is presentation-only atmosphere. Do not imply any case fact.",
@@ -10767,13 +10770,17 @@ async function prepareDebateMysteryV2RoomAssets(
               apiKey,
               model: "gpt-image-2",
               size: "1280x720",
-              quality: "low",
+              quality: "high",
               signal: attemptSignal,
             });
-            const normalized = await normalizeDebateMysteryRoomReskin(
+            const generatedPixelArt = await normalizeDebateMysteryRoomReskin(
               generated.bytes,
               { width: 1280, height: 720 },
             );
+            const normalized = (await renderDebateMysteryRoomArtV1(
+              generatedPixelArt,
+              { variant: "mosaic", format: "png" },
+            )).bytes;
             const pixels = await validateDebateMysteryAssetPixelsV1("room", normalized);
             const review = await reviewDebateMysteryAssetWithVision({
               apiKey,
@@ -10866,20 +10873,9 @@ function debateMysteryRoomArtUpgradeStatusV1(
   const pendingBaseRoomIds = mysteryState.rooms
     .filter((room) => rowBySubjectId.get(room.id)?.status === "pending")
     .map((room) => room.id);
-  const requiresUpgradeRoomIds = mysteryState.rooms.flatMap((room) => {
-    const base = rowBySubjectId.get(room.id);
-    if (!base || base.status !== "ready") return [];
-    try {
-      const review = JSON.parse(base.review_json) as {
-        pixels?: { width?: unknown; height?: unknown };
-      };
-      return review.pixels?.width === 1280 && review.pixels?.height === 720
-        ? [room.id]
-        : [];
-    } catch {
-      return [];
-    }
-  });
+  const requiresUpgradeRoomIds = mysteryState.rooms
+    .filter((room) => rowBySubjectId.get(room.id)?.status === "ready")
+    .map((room) => room.id);
   const readyRoomIds = requiresUpgradeRoomIds.filter((roomId) =>
     rowBySubjectId.get(debateMysteryIllustratedRoomSubjectIdV1(roomId))?.status === "ready");
   const failedRoomIds = requiresUpgradeRoomIds.filter((roomId) =>
@@ -10914,7 +10910,7 @@ function debateMysteryRoomArtUpgradeStatusV1(
       ? null
       : online
         ? null
-        : "Illustrated room upgrades require an explicit ONLINE mansion.",
+        : "Realistic room upgrades require an explicit ONLINE mansion.",
   };
 }
 
@@ -10932,7 +10928,7 @@ async function prepareDebateMysteryIllustratedRoomsV1(
   if (session.responseMode === "local") {
     throw new HttpError(
       409,
-      "Illustrated room upgrades require ONLINE. LOCAL never sends mansion art to a remote generator.",
+      "Realistic room upgrades require ONLINE. LOCAL never sends mansion art to a remote generator.",
     );
   }
   const userKey = decryptUserKey(userId);
@@ -10971,13 +10967,13 @@ async function prepareDebateMysteryIllustratedRoomsV1(
           "room",
           room.id,
         );
-        const reference = await renderDebateMysteryRoomArtV1(source.bytes, {
-          variant: "mosaic-reference",
-          format: "png",
-        });
+            const reference = await renderDebateMysteryRoomArtV1(source.bytes, {
+              variant: "mosaic-reference",
+              format: "png",
+            });
         const generated = await generateRawDebateMysteryCandidate({
           userId,
-          title: `${room.name} Illustrated room upgrade`,
+          title: `${room.name} Realistic room upgrade`,
           prompt: buildDebateMysteryIllustratedRoomUpgradePromptV1({
             roomName: room.name,
             houseStylePrompt: mysteryState.config.houseStyle.promptContract,
@@ -11009,7 +11005,7 @@ async function prepareDebateMysteryIllustratedRoomsV1(
         });
         if (!review.approved) {
           throw new Error(
-            `Vision review rejected the Illustrated room: ${review.reasons.join("; ") || "no reason supplied"}`,
+            `Vision review rejected the Realistic room: ${review.reasons.join("; ") || "no reason supplied"}`,
           );
         }
         const sealed = sealDebateMysteryAssetBytesV1(db, userKey, {
@@ -19963,11 +19959,15 @@ function buildRoutes(): RouteDefinition[] {
         kind,
         ctx.params.subjectId,
       );
-      const presentation = kind === "room" && ctx.query.get("style") === "mosaic"
-        ? await renderDebateMysteryRoomArtV1(file.bytes)
+      // Keep the authored Pixel Art source gridless for Realistic upgrades;
+      // Mosaic adds only the approved presentation grid at delivery.
+      const mosaic = kind === "room" && ctx.query.get("style") === "mosaic"
+        ? await applyDebateMysteryMosaicPresentationV1(file.bytes, {
+            format: file.mimeType === "image/webp" ? "webp" : "png",
+          })
         : null;
-      const bytes = presentation?.bytes ?? file.bytes;
-      const mimeType = presentation?.mimeType ?? file.mimeType;
+      const bytes = mosaic?.bytes ?? file.bytes;
+      const mimeType = mosaic?.mimeType ?? file.mimeType;
       ctx.res.statusCode = 200;
       ctx.res.setHeader("content-type", mimeType);
       ctx.res.setHeader("content-length", String(bytes.byteLength));
@@ -19996,7 +19996,7 @@ function buildRoutes(): RouteDefinition[] {
         return;
       }
       if (before.status === "unavailable") {
-        throw new HttpError(409, before.reason ?? "Illustrated room upgrades are unavailable.");
+        throw new HttpError(409, before.reason ?? "Realistic room upgrades are unavailable.");
       }
       queueDebateMysteryIllustratedRoomsV1(userId, ctx.params.id);
       ctx.res.setHeader("cache-control", "private, no-store");
@@ -20485,16 +20485,14 @@ function buildRoutes(): RouteDefinition[] {
         ctx.params.id,
         ctx.params.assetId,
       );
-      const isRoomAsset = ctx.query.get("style") === "mosaic" && Boolean(db.prepare(
-        `SELECT 1 FROM debate_mystery_mansion_asset_refs
-          WHERE bundle_id = ? AND user_id = ? AND asset_id = ? AND role = 'room'
-          LIMIT 1`,
-      ).get(ctx.params.id, userId, ctx.params.assetId));
-      const presentation = isRoomAsset && file.mimeType.startsWith("image/")
-        ? await renderDebateMysteryRoomArtV1(file.bytes)
-        : null;
-      const bytes = presentation?.bytes ?? file.bytes;
-      const mimeType = presentation?.mimeType ?? file.mimeType;
+      const mosaic =
+        ctx.query.get("style") === "mosaic" && file.mimeType.startsWith("image/")
+          ? await applyDebateMysteryMosaicPresentationV1(file.bytes, {
+              format: file.mimeType === "image/webp" ? "webp" : "png",
+            })
+          : null;
+      const bytes = mosaic?.bytes ?? file.bytes;
+      const mimeType = mosaic?.mimeType ?? file.mimeType;
       ctx.res.statusCode = 200;
       ctx.res.setHeader("content-type", mimeType);
       ctx.res.setHeader("content-length", String(bytes.byteLength));
@@ -36523,18 +36521,17 @@ function buildRoutes(): RouteDefinition[] {
       } catch {
         throw new HttpError(404, "Image file not found.");
       }
-      const presentation =
-        row.purpose === "whodunnit_room" && ctx.query.get("style") === "mosaic"
-          ? await renderDebateMysteryRoomArtV1(bytes)
-          : null;
-      bytes = presentation?.bytes ?? bytes;
+      const sourceMimeType = contentTypeForGeneratedImageRelativePath(rel);
+      const mosaic = ctx.query.get("style") === "mosaic"
+        ? await applyDebateMysteryMosaicPresentationV1(bytes, {
+            format: sourceMimeType === "image/webp" ? "webp" : "png",
+          })
+        : null;
+      const responseBytes = mosaic?.bytes ?? bytes;
       ctx.res.statusCode = 200;
-      ctx.res.setHeader(
-        "content-type",
-        presentation?.mimeType ?? contentTypeForGeneratedImageRelativePath(rel),
-      );
+      ctx.res.setHeader("content-type", mosaic?.mimeType ?? sourceMimeType);
       ctx.res.setHeader("cache-control", "private, max-age=3600");
-      ctx.res.end(bytes);
+      ctx.res.end(responseBytes);
     }),
     route("DELETE", "/api/images", async (ctx) => {
       const userId = requireAuth(ctx);

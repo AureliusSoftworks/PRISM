@@ -11,6 +11,7 @@ import {
   buildVoiceDamageSchedule,
   decodedVoiceSpeechActivityStartMs,
   estimateVoiceOutputLatencyMs,
+  realtimeVoiceStopShouldPreserveEndedTail,
   resolveElevenLabsVoiceEffectPlan,
   resolveVoiceEffectPlan,
   resolveVoiceTexture,
@@ -65,6 +66,17 @@ describe("engine-agnostic voice effects", () => {
     assert.ok(voiceReleaseGainAt(0.8, 1) < 0.000_001);
   });
 
+  it("preserves only naturally ended audio while its device tail drains", () => {
+    assert.equal(
+      realtimeVoiceStopShouldPreserveEndedTail(true, true),
+      true,
+    );
+    assert.equal(
+      realtimeVoiceStopShouldPreserveEndedTail(true, false),
+      false,
+    );
+  });
+
   it("releases every foreground reaction channel through the same fade", () => {
     const source = readFileSync(new URL("./voiceEffects.ts", import.meta.url), "utf8");
     assert.match(
@@ -73,9 +85,9 @@ describe("engine-agnostic voice effects", () => {
     );
   });
 
-  it("keeps ordinary Signal listener words at half gain without lowering interruption crosstalk", () => {
-    assert.equal(SIGNAL_LISTENER_REACTION_VOICE_GAIN, 0.5);
-    assert.equal(signalListenerReactionVoiceGain({ spokenCue: "Hmm." }), 0.5);
+  it("keeps ordinary Signal listener words beneath the floor owner without lowering interruption crosstalk", () => {
+    assert.equal(SIGNAL_LISTENER_REACTION_VOICE_GAIN, 0.32);
+    assert.equal(signalListenerReactionVoiceGain({ spokenCue: "Hmm." }), 0.32);
     assert.equal(
       signalListenerReactionVoiceGain({
         spokenCue: "Hold on.",
@@ -421,7 +433,7 @@ describe("engine-agnostic voice effects", () => {
     );
     assert.match(
       source,
-      /export function stopRealtimeVoiceAudio\([\s\S]{0,260}releaseRealtimeVoiceAudio\(channel, options\.fadeOutMs \?\? 160\)/u,
+      /export function stopRealtimeVoiceAudio\([\s\S]{0,520}releaseRealtimeVoiceAudio\(channel, options\.fadeOutMs \?\? 160\)/u,
     );
     assert.match(
       source,

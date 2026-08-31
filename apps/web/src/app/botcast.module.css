@@ -322,6 +322,26 @@
 .shell[data-live-episode="true"] .episodePreRoll {
   grid-column: 1;
 }
+.shell[data-replay-episode="true"] {
+  height: 100dvh;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+  background: #020307;
+  color-scheme: dark;
+}
+.shell[data-replay-episode="true"] .library,
+.shell[data-replay-episode="true"] .mainNavigation {
+  display: none;
+}
+.shell[data-replay-episode="true"] .main {
+  grid-column: 1;
+  grid-row: 1;
+  height: 100dvh;
+  overflow: hidden;
+  background: #020307;
+}
 .header { min-height: 130px; display: flex; justify-content: space-between; gap: 24px; padding: 25px 34px 20px; border-bottom: 1px solid color-mix(in srgb, var(--botcast-host-accent) 18%, var(--botcast-line)); background: radial-gradient(circle at 88% 0%, color-mix(in srgb, var(--botcast-host-accent) 12%, transparent), transparent 38%), linear-gradient(90deg, color-mix(in srgb, var(--botcast-host-accent) 3%, transparent), transparent 48%), var(--botcast-chrome); backdrop-filter: blur(24px) saturate(1.18); }
 .header > div:first-child { min-width: 0; }
 .eyebrow { display: block; font: 750 .67rem/1.2 system-ui; letter-spacing: .16em; text-transform: uppercase; }
@@ -863,21 +883,97 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .episodeGrid span, .episodeGrid small { color: var(--botcast-muted); }
 .episodeNumber { color: var(--botcast-host-accent) !important; font: 750 .66rem/1 system-ui; letter-spacing: .12em; }
 
-.liveLayout { --signal-live-stage-max-width: 1680px; --signal-live-desk-max-width: 1320px; --signal-live-inline-gutter: clamp(8px, 1vw, 18px); padding: 12px 18px; }
+.liveLayout { --signal-live-content-max-width: 1680px; --signal-live-inline-gutter: clamp(8px, 1vw, 18px); --signal-live-vertical-reserve: 420px; --signal-transcript-min-width: 300px; padding: 12px 18px; }
+.liveWorkspace { display: contents; }
+.liveWorkspaceStageColumn { min-width: 0; }
+.signalTranscriptRail { min-width: 0; min-height: 0; display: none; grid-template-rows: auto minmax(0, 1fr); gap: 10px; overflow: hidden; box-sizing: border-box; border: 1px solid var(--botcast-line); border-radius: 15px; padding: 14px; background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.018)), var(--botcast-panel); box-shadow: 0 18px 44px var(--botcast-shadow); }
+.signalTranscriptHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.signalTranscriptHeader span { color: var(--botcast-ink); font: 800 .68rem/1 system-ui; letter-spacing: .13em; text-transform: uppercase; }
+.signalTranscriptHeader p { margin: 6px 0 0; color: var(--botcast-muted); font: 650 .73rem/1.2 system-ui; }
+.signalTranscriptHeader small { border: 1px solid color-mix(in srgb, var(--prism-s) 26%, var(--botcast-line)); border-radius: 999px; padding: 5px 8px; color: var(--prism-s); font: 750 .58rem/1 system-ui; letter-spacing: .09em; text-transform: uppercase; }
+.signalTranscriptThread { min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
+.signalTranscriptMessages { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.signalTranscriptMessage { --signal-transcript-bot-color: var(--botcast-accent); display: grid; gap: 5px; width: fit-content; max-width: min(94%, 64ch); border-left: 3px solid var(--signal-transcript-bot-color); border-radius: 11px; padding: 9px 11px; background: color-mix(in srgb, var(--signal-transcript-bot-color) 8%, rgba(255,255,255,.045)); }
+.signalTranscriptMessage strong { color: var(--signal-transcript-bot-color); font: 760 .68rem/1.1 system-ui; letter-spacing: .045em; text-transform: uppercase; }
+.signalTranscriptMessage span { color: var(--botcast-ink); font: 570 .84rem/1.43 system-ui; overflow-wrap: anywhere; white-space: pre-wrap; }
 .replayLayout { padding: 18px 28px 40px; }
-.replayStage { position: relative; max-width: 1180px; margin: 0 auto; }
-.replayStage > .stageViewport { max-width: none; margin: 0; }
+.replayLayout[data-signal-replay="true"] {
+  --signal-replay-gutter: clamp(8px, 1.3vw, 18px);
+  --botcast-canvas: #020307;
+  --botcast-panel: #0d1018;
+  --botcast-soft-panel: #111520;
+  --botcast-field: #080b12;
+  --botcast-ink: #f2f4fb;
+  --botcast-muted: #929aab;
+  --botcast-line: rgba(255, 255, 255, .12);
+  position: relative;
+  isolation: isolate;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+  max-height: 100dvh;
+  padding: clamp(8px, 1.4vh, 14px) var(--signal-replay-gutter);
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: clamp(7px, 1.2vh, 12px);
+  color: var(--botcast-ink);
+  background:
+    radial-gradient(circle at 16% 0%, rgba(67, 80, 112, .15), transparent 38%),
+    radial-gradient(circle at 78% 30%, rgba(34, 23, 61, .13), transparent 45%),
+    linear-gradient(180deg, #080a10 0%, #020307 74%);
+}
+.replayRoom {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(270px, clamp(290px, 24vw, 390px));
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: clamp(8px, 1vw, 14px);
+  overflow: hidden;
+}
+.replayScreen {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: clamp(8px, 1vw, 14px);
+  background: #000;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 28px 72px rgba(0,0,0,.56);
+}
+.replayStage { position: relative; width: 100%; max-width: 100%; max-height: 100%; aspect-ratio: 16 / 9; margin: 0; }
+.replayScreen .replayStage > .stageViewport { width: 100%; max-width: none; max-height: 100%; margin: 0; border-radius: clamp(8px, 1vw, 14px); box-shadow: none; }
+.replayRoom > audio { display: none; }
+.replayRoom > .replayPlayer { grid-column: 1; grid-row: 2; margin: 0; }
+.replayRoom > .replayProgram { grid-column: 2; grid-row: 1 / 3; min-height: 0; margin: 0; }
 .episodePreRoll.replayBookend { position: absolute; inset: 0; z-index: 40; min-width: 0; min-height: 0; border: 1px solid rgba(255,255,255,.14); border-radius: 20px; }
-.replayBookend[data-kind="outro"] { background: var(--botcast-curtain); }
+.replayBookend[data-kind="outro"] {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--botcast-accent) 16%, #03050a),
+    color-mix(in srgb, var(--botcast-accent) 8%, #020409)
+  );
+}
 .replayBookend[data-kind="outro"] .preRollSignalField { opacity: .32; }
 /* Pre-play: solid black until the first Play fades the intro in. */
 .replayBookend[data-kind="intro"][data-reveal="pending"] {
-  background: #010104;
+  background: radial-gradient(
+    circle at 50% 44%,
+    color-mix(in srgb, var(--botcast-accent) 16%, #030408) 0%,
+    #020307 78%
+  );
   border-color: rgba(255,255,255,.08);
 }
 .replayBookend[data-kind="intro"][data-reveal="pending"]::after {
-  opacity: 1;
+  opacity: .9;
   animation: none;
+  background: radial-gradient(
+    circle at 50% 44%,
+    color-mix(in srgb, var(--botcast-accent) 14%, #020304) 0%,
+    transparent 72%
+  );
 }
 .replayBookend[data-kind="intro"][data-reveal="pending"]::before,
 .replayBookend[data-kind="intro"][data-reveal="pending"] .preRollSignalField,
@@ -890,7 +986,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
   animation: none !important;
   background: #010104;
 }
-/* After Play: curtain lifts and lockup motions run; pause freezes mid-frame. */
+/* After Play: the intro reveal begins and pause freezes the current frame. */
 .replayBookend[data-kind="intro"][data-reveal="open"][data-playback="paused"]::after,
 .replayBookend[data-kind="intro"][data-reveal="open"][data-playback="paused"] .preRollSignalField i,
 .replayBookend[data-kind="intro"][data-reveal="open"][data-playback="paused"] .preRollEyebrow,
@@ -971,6 +1067,9 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 }
 .liveTopline { max-width: 1320px; margin: 0 auto 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; color: var(--botcast-muted); font-size: .7rem; letter-spacing: .08em; }
 .liveTopline span[data-live="true"] { color: #ff604f; font-weight: 800; }
+.liveTopline .liveCompletedKeepItem { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; border: 1px solid color-mix(in srgb, var(--botcast-accent) 34%, var(--botcast-line)); border-radius: 7px; padding: 0 9px; color: var(--botcast-ink); background: color-mix(in srgb, var(--botcast-accent) 8%, var(--botcast-soft-panel)); font: 700 .64rem/1.1 system-ui; letter-spacing: .02em; cursor: pointer; }
+.liveCompletedKeepItem input { flex: 0 0 auto; accent-color: var(--botcast-accent); }
+.liveTopline .liveCompletedItemStatus { border: 1px solid color-mix(in srgb, var(--botcast-accent) 28%, var(--botcast-line)); border-radius: 7px; padding: 7px 9px; color: var(--botcast-muted); background: var(--botcast-soft-panel); font: 700 .62rem/1 system-ui; letter-spacing: .02em; }
 .liveTimer { min-width: 4.3em; border: 1px solid color-mix(in srgb, var(--botcast-line) 82%, transparent); border-radius: 999px; padding: 5px 8px; color: var(--botcast-ink); background: color-mix(in srgb, var(--botcast-soft-panel) 84%, transparent); font: 800 .68rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; letter-spacing: .04em; text-align: center; }
 .liveTimer[data-running="true"] { border-color: rgba(255,96,79,.42); color: #ff8b7e; box-shadow: inset 0 0 0 1px rgba(255,96,79,.08), 0 0 14px rgba(255,96,79,.08); }
 .liveTopline strong { margin-right: auto; color: #dce7ef; }
@@ -995,7 +1094,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
    entire blended studio behind it. The former 140ms jitter forced an expensive
    full-stage repaint while voice and avatar state were already updating. */
 .stageViewport::after { position: absolute; inset: -10%; z-index: 40; content: ""; background-image: repeating-linear-gradient(to bottom, rgba(255,255,255,.1) 0 1px, rgba(5,7,12,.12) 1px 2px, transparent 2px 4px), url("/signal-film-grain.svg"); background-repeat: repeat; background-size: 100% 4px, 96px 96px; background-blend-mode: soft-light, normal; mix-blend-mode: overlay; filter: contrast(1.45) saturate(.45); opacity: calc(var(--signal-film-grain-level) * .36); pointer-events: none; }
-.liveLayout .stageViewport { max-width: 1320px; }
+.liveLayout .stageViewport { max-width: var(--signal-live-content-max-width); }
 .atmosphereMixer { max-width: 1180px; margin: 10px auto 14px; display: grid; grid-template-columns: minmax(220px, .55fr) minmax(0, 1fr); align-items: center; gap: 14px; box-sizing: border-box; border: 1px solid color-mix(in srgb, var(--prism-s) 34%, var(--botcast-line)); border-radius: 12px; padding: 10px 12px; background: color-mix(in srgb, var(--prism-s) 4%, var(--botcast-panel)); box-shadow: inset 3px 0 color-mix(in srgb, var(--prism-s) 42%, transparent); }
 .atmosphereMixerHeader { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 3px 9px; }
 .atmosphereMixerHeader > div { min-width: 0; display: grid; gap: 3px; }
@@ -1204,6 +1303,8 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .stageViewport[data-model-warmup] .stageScene *,
 .stageViewport[data-model-warmup] .stageScene *::before,
 .stageViewport[data-model-warmup] .stageScene *::after { animation-play-state: paused !important; }
+.stageViewport[data-signal-studio-state="empty"] .studioGlow { opacity: .42; filter: saturate(.72); }
+.stageViewport[data-signal-studio-state="empty"] .captionControls { opacity: .58; }
 .atmosphere { position: absolute; inset: -5%; overflow: hidden; background-color: #11121a; background-size: cover; background-position: center; filter: saturate(1.08) contrast(1.04); }
 .stageScene > img.atmosphere { width: 110%; height: 110%; object-fit: cover; pointer-events: none; }
 .signalMicrophoneTintLayer { position: absolute; inset: -5%; z-index: 1; isolation: isolate; pointer-events: none; }
@@ -1297,7 +1398,8 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .stageNameplates[data-shot="left"] .guestNameplate,
 .stageNameplates[data-shot="right"] .hostNameplate { opacity: 0; transform: translateY(6px); }
 .nameplate[data-departed="true"] { opacity: .5; }
-.nameplate span { color: rgba(255,255,255,.48); font: 760 .48rem/1 system-ui; letter-spacing: .14em; text-transform: uppercase; }
+.nameplateRole { color: rgba(255,255,255,.48); font: 760 .48rem/1 system-ui; letter-spacing: .14em; text-transform: uppercase; }
+.nameplateName { display: block; max-inline-size: 15ch; overflow-wrap: break-word; color: inherit; font: inherit; letter-spacing: normal; line-height: 1.08; text-transform: none; text-wrap: balance; white-space: normal; }
 .stageMug { position: absolute; z-index: 9; width: max(6.2%, 58px); aspect-ratio: 8 / 9; display: grid; place-items: end center; transform: translate(-50%, -50%); pointer-events: none; will-change: transform; }
 .stageMug[data-sipping="true"] { animation: signalStageMugSip var(--signal-cup-sip-duration-ms, 1400ms) ease-in-out 1 both; }
 .stageMug[data-returning="true"] { animation: signalStageMugInterruptedReturn 320ms cubic-bezier(.22,.72,.2,1) 1 both; }
@@ -1339,8 +1441,8 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .emptyChairLabel { position: absolute; z-index: 4; top: 47%; max-width: 150px; border: 1px solid rgba(255,255,255,.1); border-radius: 999px; padding: 7px 11px; color: rgba(255,255,255,.58); background: rgba(7,8,12,.52); backdrop-filter: blur(8px); text-align: center; font-size: .64rem; animation: signalEmptyChairReveal 260ms ease-out 640ms both; }
 
 .controlRoom { max-width: 1180px; margin: 8px auto 0; }
-.liveLayout .controlRoom { max-width: var(--signal-live-desk-max-width); }
-.signalMemoryReceiptDetail { max-width: var(--signal-live-desk-max-width, 1320px); margin: 12px auto 0; }
+.liveLayout .controlRoom { max-width: var(--signal-live-content-max-width); }
+.signalMemoryReceiptDetail { max-width: var(--signal-live-content-max-width, 1680px); margin: 12px auto 0; }
 .producerControls, .replayTranscript { border: 1px solid var(--botcast-line); border-radius: 15px; background: var(--botcast-panel); box-shadow: 0 18px 44px var(--botcast-shadow); }
 .replayTranscript button[data-power-voice-presence="loud"] { --power-message-font-scale: 1.12; }
 .replayTranscript button[data-power-voice-presence="quiet"] { --power-message-font-scale: .88; }
@@ -1448,7 +1550,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .guestAnnoyanceMeterHeader span { color: var(--botcast-ink); font: 720 .66rem/1.1 system-ui; letter-spacing: .09em; text-transform: uppercase; }
 .guestAnnoyanceMeterHeader small { color: var(--botcast-muted); font: 620 .56rem/1.25 system-ui; }
 .guestAnnoyanceTrack { position: relative; min-width: 0; height: 10px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--signal-guest-annoyance-color) 26%, rgba(255,255,255,.16)); border-radius: 999px; background: rgba(0,0,0,.34); box-shadow: inset 0 1px 3px rgba(0,0,0,.56); }
-.guestAnnoyanceFill { display: block; width: var(--signal-guest-annoyance-percent); height: 100%; border-radius: inherit; background: linear-gradient(90deg, color-mix(in srgb, var(--signal-guest-annoyance-color) 64%, #ffd66e), var(--signal-guest-annoyance-color)); box-shadow: 0 0 12px color-mix(in srgb, var(--signal-guest-annoyance-color) 48%, transparent); transition: width 180ms ease; }
+.guestAnnoyanceFill { display: block; width: var(--signal-guest-annoyance-percent); height: 100%; border-radius: inherit; background: linear-gradient(90deg, color-mix(in srgb, var(--signal-guest-annoyance-color) 64%, #ffd66e), var(--signal-guest-annoyance-color)); box-shadow: 0 0 12px color-mix(in srgb, var(--signal-guest-annoyance-color) 48%, transparent); transition: width 680ms cubic-bezier(0.22, 1, 0.36, 1); }
 .guestAnnoyanceStatus { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--botcast-muted); font: 620 .56rem/1.2 system-ui; }
 .guestAnnoyanceStatus strong { color: color-mix(in srgb, var(--signal-guest-annoyance-color) 72%, white); font: 750 .59rem/1.2 system-ui; text-align: right; }
 .queuedCueStatus { display: grid; align-items: center; gap: 5px; margin: 0; border: 1px solid color-mix(in srgb, var(--botcast-accent) 28%, var(--botcast-line)); border-radius: 10px; padding: 7px 8px; color: color-mix(in srgb, var(--botcast-accent) 72%, white); background: color-mix(in srgb, var(--botcast-accent) 8%, transparent); font-size: .7rem; line-height: 1.35; }
@@ -1457,7 +1559,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 @keyframes signalCueQueued { from { transform: scale(.94); } 58% { transform: scale(1.025); } to { transform: scale(1); } }
 @keyframes signalProducerLineFlight { from { left: -30%; opacity: 0; } 16% { opacity: 1; } 84% { opacity: 1; } to { left: 104%; opacity: 0; } }
 .returnButton { display: block; margin: 16px auto; }
-.producerGuestComposerDock { position: sticky; bottom: 0; z-index: 18; max-width: var(--signal-live-desk-max-width, 1320px); margin: 0 auto; padding-top: 10px; background: linear-gradient(180deg, transparent, var(--botcast-canvas) 18%); }
+.producerGuestComposerDock { position: sticky; bottom: 0; z-index: 18; max-width: var(--signal-live-content-max-width, 1680px); margin: 0 auto; padding-top: 10px; background: linear-gradient(180deg, transparent, var(--botcast-canvas) 18%); }
 .producerGuestActionRail { display: flex; justify-content: flex-end; margin: 0 0 7px; }
 .producerGuestSipButton { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 28%, var(--botcast-line)); border-radius: 999px; padding: 6px 12px; color: var(--botcast-ink); background: color-mix(in srgb, var(--botcast-canvas) 92%, transparent); box-shadow: 0 8px 22px color-mix(in srgb, var(--botcast-host-accent) 8%, transparent); font: 760 .68rem/1 system-ui; cursor: pointer; transition: transform 150ms ease, border-color 150ms ease, background 150ms ease; }
 .producerGuestSipButton:hover:not(:disabled) { transform: translateY(-1px); border-color: color-mix(in srgb, var(--botcast-host-accent) 58%, var(--botcast-line)); background: color-mix(in srgb, var(--botcast-host-accent) 10%, var(--botcast-canvas)); }
@@ -1469,10 +1571,24 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .producerGuestFallbackComposer textarea { min-height: 48px; resize: vertical; border: 1px solid var(--botcast-line); border-radius: 10px; padding: 10px 12px; color: var(--botcast-ink); background: var(--botcast-field); }
 .producerGuestFallbackComposer button { align-self: stretch; border: 0; border-radius: 10px; padding: 0 18px; color: #fff; background: linear-gradient(135deg, var(--botcast-host-accent), var(--prism-m)); font-weight: 800; }
 
-.replayHeader { max-width: 1180px; margin: 0 auto 12px; display: flex; justify-content: space-between; align-items: end; gap: 20px; }
-.replayHeader h2 { margin: 6px 0; }.replayHeader p { margin: 0; color: var(--botcast-muted); font-size: .78rem; }
-.replayHeaderActions { display: flex; gap: 8px; }
-.replayPlayer { position: relative; isolation: isolate; max-width: 1180px; margin: 12px auto; overflow: hidden; border: 1px solid color-mix(in srgb, var(--prism-s) 16%, var(--botcast-line)); border-radius: 18px; padding: 17px 18px 14px; background: radial-gradient(circle at 4% -12%, color-mix(in srgb, var(--prism-m) 12%, transparent), transparent 34%), linear-gradient(180deg, color-mix(in srgb, #fff 3.5%, transparent), transparent 46%), var(--botcast-panel); box-shadow: 0 18px 46px var(--botcast-shadow), inset 0 1px rgba(255,255,255,.055); }
+.replayHeader { min-width: 0; max-width: none; margin: 0; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.replayHeading { min-width: 0; flex: 1 1 auto; display: flex; align-items: center; gap: 14px; }
+.replayHeading > div { min-width: 0; }
+.replayHeader h2 { overflow: hidden; margin: 2px 0 3px; font-size: clamp(1rem, 1.7vw, 1.35rem); line-height: 1.08; text-overflow: ellipsis; white-space: nowrap; }
+.replayHeader p { overflow: hidden; margin: 0; color: var(--botcast-muted); font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
+.replayHeaderActions { flex: 0 0 auto; display: flex; flex-wrap: nowrap; justify-content: flex-end; gap: 6px; }
+.replayHeaderActions button { min-height: 31px; padding: 6px 9px; font-size: .64rem; }
+.replayHeaderActions button { box-shadow: inset 0 1px rgba(255,255,255,.06), 0 3px 0 color-mix(in srgb, var(--botcast-line) 70%, #030409); transition: color 140ms ease, border-color 140ms ease, background 140ms ease, transform 90ms ease, box-shadow 90ms ease; }
+.replayHeaderActions button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--prism-s) 34%, var(--botcast-line)); background: color-mix(in srgb, var(--prism-s) 7%, var(--botcast-soft-panel)); }
+.replayHeaderActions button:active:not(:disabled) { transform: translateY(2px); box-shadow: inset 0 1px rgba(255,255,255,.05), 0 1px 0 color-mix(in srgb, var(--botcast-line) 70%, #030409); }
+.replayReviewChip { --signal-rating-color: var(--prism-i); width: fit-content; max-width: min(520px, 46vw); box-sizing: border-box; display: grid; grid-template-columns: 32px max-content max-content minmax(80px, 1fr); align-items: center; gap: 8px; border: 1px solid color-mix(in srgb, var(--signal-rating-color) 34%, var(--botcast-line)); border-radius: 999px; padding: 4px 10px 4px 4px; background: radial-gradient(circle at 20px 5px, color-mix(in srgb, var(--signal-rating-color) 16%, transparent), transparent 34%), linear-gradient(180deg, color-mix(in srgb, #fff 4%, transparent), transparent), color-mix(in srgb, var(--botcast-soft-panel) 94%, transparent); box-shadow: inset 0 1px rgba(255,255,255,.08), 0 8px 24px rgba(0,0,0,.22); }
+.replayReviewStar { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--signal-rating-color) 54%, var(--botcast-line)); border-radius: 50%; color: var(--signal-rating-color); background: radial-gradient(circle at 34% 25%, color-mix(in srgb, var(--signal-rating-color) 30%, #fff), transparent 28%), color-mix(in srgb, var(--signal-rating-color) 13%, var(--botcast-field)); box-shadow: inset 0 1px rgba(255,255,255,.18), 0 0 14px color-mix(in srgb, var(--signal-rating-color) 16%, transparent); font-size: .82rem; }
+.replayReviewIdentity { min-width: 0; display: grid; gap: 3px; padding-right: 2px; }
+.replayReviewIdentity small { color: color-mix(in srgb, var(--signal-rating-color) 74%, var(--botcast-muted)); font: 800 .51rem/1 system-ui; letter-spacing: .13em; text-transform: uppercase; }
+.replayReviewIdentity strong { overflow: hidden; color: var(--botcast-ink); font: 780 .69rem/1.05 system-ui; text-overflow: ellipsis; white-space: nowrap; }
+.replayReviewRating { border: 1px solid color-mix(in srgb, var(--signal-rating-color) 28%, var(--botcast-line)); border-radius: 999px; padding: 6px 9px; color: var(--signal-rating-color); background: color-mix(in srgb, var(--signal-rating-color) 8%, var(--botcast-field)); box-shadow: inset 0 1px rgba(255,255,255,.06); font: 850 .75rem/1 system-ui; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.replayReviewChip q { min-width: 0; overflow: hidden; padding-left: 2px; color: color-mix(in srgb, var(--botcast-ink) 78%, var(--botcast-muted)); font: 650 .7rem/1.35 system-ui; text-overflow: ellipsis; white-space: nowrap; }
+.replayPlayer { position: relative; isolation: isolate; max-width: none; margin: 0; overflow: hidden; border: 1px solid color-mix(in srgb, var(--prism-s) 16%, var(--botcast-line)); border-radius: 12px; padding: 10px 12px 8px; background: radial-gradient(circle at 4% -12%, color-mix(in srgb, var(--prism-m) 12%, transparent), transparent 34%), linear-gradient(180deg, color-mix(in srgb, #fff 3.5%, transparent), transparent 46%), var(--botcast-panel); box-shadow: inset 0 1px rgba(255,255,255,.075), inset 0 -14px 28px rgba(0,0,0,.12), 0 12px 30px rgba(0,0,0,.26); }
 .replayPlayer::before { content: ""; position: absolute; inset: 0 12% auto; z-index: -1; height: 1px; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--prism-p) 52%, transparent), color-mix(in srgb, var(--prism-i) 56%, transparent), color-mix(in srgb, var(--prism-s) 52%, transparent), transparent); opacity: .72; pointer-events: none; }
 .replayPlayerHeader { display: flex; align-items: center; justify-content: space-between; gap: 20px; min-width: 0; }
 .replayPlayerIdentity { min-width: 0; display: flex; align-items: center; gap: 12px; }
@@ -1497,10 +1613,10 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .replayVersionMenu .replayVersionRemove { min-height: 32px; color: color-mix(in srgb, var(--prism-p) 58%, var(--botcast-muted)); font: 720 .65rem/1 system-ui; }
 .replayVersionMenu button:disabled { opacity: .46; cursor: default; }
 .replaySourceBadge { flex: 0 0 auto; border: 1px solid var(--botcast-line); border-radius: 999px; padding: 6px 11px; color: var(--botcast-muted); background: color-mix(in srgb, var(--botcast-field) 78%, transparent); font: 780 .65rem/1 system-ui; }
-.replayTransport { --replay-progress: 0%; position: relative; display: grid; grid-template-columns: 38px max-content minmax(80px, 1fr); align-items: center; gap: 10px; min-width: 0; min-height: 48px; margin-top: 14px; border: 1px solid color-mix(in srgb, var(--botcast-line) 88%, transparent); border-radius: 999px; padding: 4px 7px 4px 5px; background: radial-gradient(circle at 13% 0%, color-mix(in srgb, var(--prism-m) 10%, transparent), transparent 43%), linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.015)), color-mix(in srgb, var(--botcast-field) 90%, transparent); box-shadow: inset 0 1px rgba(255,255,255,.06), inset 0 -1px rgba(0,0,0,.34), 0 9px 24px rgba(0,0,0,.2); transition: border-color 180ms ease, box-shadow 180ms ease; }
+.replayTransport { --replay-progress: 0%; position: relative; display: grid; grid-template-columns: 34px max-content minmax(80px, 1fr); align-items: center; gap: 9px; min-width: 0; min-height: 42px; margin-top: 8px; border: 1px solid color-mix(in srgb, var(--botcast-line) 88%, transparent); border-radius: 999px; padding: 3px 7px 3px 4px; background: radial-gradient(circle at 13% 0%, color-mix(in srgb, var(--prism-m) 10%, transparent), transparent 43%), linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.015)), color-mix(in srgb, var(--botcast-field) 90%, transparent); box-shadow: inset 0 1px rgba(255,255,255,.06), inset 0 -1px rgba(0,0,0,.34), 0 9px 24px rgba(0,0,0,.2); transition: border-color 180ms ease, box-shadow 180ms ease; }
 .replayTransport::after { content: ""; position: absolute; top: -1px; left: 14%; width: 72%; height: 1px; border-radius: 999px; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--prism-p) 42%, transparent), color-mix(in srgb, var(--prism-i) 52%, transparent), color-mix(in srgb, var(--prism-s) 48%, transparent), transparent); opacity: .66; pointer-events: none; }
 .replayPlayer[data-playing="true"] .replayTransport { border-color: color-mix(in srgb, var(--prism-s) 30%, var(--botcast-line)); box-shadow: inset 0 1px rgba(255,255,255,.07), inset 0 -1px rgba(0,0,0,.32), 0 9px 25px rgba(0,0,0,.24), 0 0 24px color-mix(in srgb, var(--prism-s) 8%, transparent); }
-.replayPlayButton { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--botcast-line) 88%, transparent); border-radius: 999px; padding: 0; color: color-mix(in srgb, var(--botcast-ink) 86%, var(--prism-s)); background: radial-gradient(circle at 34% 26%, rgba(255,255,255,.11), transparent 42%), rgba(255,255,255,.045); box-shadow: inset 0 1px rgba(255,255,255,.06); cursor: pointer; transition: color 150ms ease, border-color 150ms ease, background 150ms ease, box-shadow 150ms ease; }
+.replayPlayButton { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--botcast-line) 88%, transparent); border-radius: 999px; padding: 0; color: color-mix(in srgb, var(--botcast-ink) 86%, var(--prism-s)); background: radial-gradient(circle at 34% 26%, rgba(255,255,255,.11), transparent 42%), rgba(255,255,255,.045); box-shadow: inset 0 1px rgba(255,255,255,.06); cursor: pointer; transition: color 150ms ease, border-color 150ms ease, background 150ms ease, box-shadow 150ms ease; }
 .replayPlayButton svg { width: 16px; height: 16px; fill: currentColor; }
 .replayPlayButton svg[data-lucide="play"] { transform: translateX(1px); }
 .replayPlayButton:hover:not(:disabled) { color: #fff; border-color: color-mix(in srgb, var(--prism-s) 50%, var(--botcast-line)); background: color-mix(in srgb, var(--prism-s) 12%, rgba(255,255,255,.05)); box-shadow: inset 0 1px rgba(255,255,255,.1), 0 0 16px color-mix(in srgb, var(--prism-s) 14%, transparent); }
@@ -1521,7 +1637,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .replayProgress:hover input::-webkit-slider-thumb, .replayProgress:focus-within input::-webkit-slider-thumb { opacity: 1; }
 .replayProgress:hover input::-moz-range-thumb, .replayProgress:focus-within input::-moz-range-thumb { opacity: 1; }
 .replayProgress input:disabled { cursor: default; }
-.replayPlayerFooter { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 11px; padding: 0 3px; }
+.replayPlayerFooter { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 6px; padding: 0 3px; }
 .replayFileActions, .replayQuality { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
 .replayQuality { justify-content: flex-end; color: var(--botcast-muted); font: 720 .68rem/1.2 system-ui; }
 .replayQuality > span { display: inline-flex; align-items: center; gap: 7px; }
@@ -1540,12 +1656,18 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .replayRemoveAction:hover:not(:disabled) { color: color-mix(in srgb, var(--prism-p) 72%, var(--botcast-ink)); border-color: color-mix(in srgb, var(--prism-p) 36%, var(--botcast-line)); background: color-mix(in srgb, var(--prism-p) 8%, var(--botcast-soft-panel)); }
 .replayStatus { display: block; margin: 10px 3px 0; color: var(--botcast-muted); font: 680 .68rem/1.4 system-ui; }
 .replayPlayer button:focus-visible, .replayPlayer a:focus-visible, .replayPlayer summary:focus-visible, .replayProgress input:focus-visible { outline: 2px solid color-mix(in srgb, var(--prism-s) 76%, #fff); outline-offset: 2px; }
-.replayTranscript { max-width: 1180px; max-height: 320px; margin: 0 auto; overflow: auto; padding: 8px; }
-.replayTranscript button { width: 100%; display: grid; grid-template-columns: 110px 1fr; gap: 14px; text-align: left; border: 0; border-radius: 7px; padding: 9px 10px; color: var(--botcast-ink); background: transparent; cursor: pointer; }
+.replayProgram { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); margin: 0; overflow: hidden; border: 1px solid color-mix(in srgb, var(--botcast-line) 92%, transparent); border-radius: 12px; background: radial-gradient(circle at 6% -20%, color-mix(in srgb, var(--prism-m) 8%, transparent), transparent 38%), var(--botcast-panel); box-shadow: inset 0 1px rgba(255,255,255,.065), inset 0 -10px 20px rgba(0,0,0,.1), 0 12px 28px rgba(0,0,0,.24); }
+.replayProgramHeader { min-height: 39px; display: flex; align-items: baseline; gap: 9px; border-bottom: 1px solid var(--botcast-line); padding: 0 16px; background: linear-gradient(180deg, color-mix(in srgb, #fff 4%, transparent), transparent); }
+.replayProgramHeader > span { color: color-mix(in srgb, var(--botcast-ink) 82%, var(--prism-m)); font: 820 .61rem/1 system-ui; letter-spacing: .15em; text-transform: uppercase; }
+.replayProgramHeader > small { color: var(--botcast-muted); font: 650 .64rem/1 system-ui; }
+.replayProgram .replayTranscript { min-height: 0; max-width: none; max-height: none; display: grid; align-content: center; gap: 4px; margin: 0; overflow: hidden; border: 0; border-radius: 0; padding: 8px; background: transparent; box-shadow: none; }
+.replayTranscript button { width: 100%; min-height: 0; display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 9px; text-align: left; border: 0; border-radius: 7px; padding: 8px 9px; color: var(--botcast-ink); background: transparent; cursor: pointer; }
+.replayTranscript button[data-replay-cue-position="previous"], .replayTranscript button[data-replay-cue-position="next"] { opacity: .48; }
+.replayTranscript button[data-replay-cue-position="previous"] span, .replayTranscript button[data-replay-cue-position="next"] span { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .replayTranscript button[data-botcast-replay-intro-row="true"] { margin-bottom: 5px; border: 1px solid color-mix(in srgb, var(--prism-m) 18%, var(--botcast-line)); color: var(--botcast-muted); background: color-mix(in srgb, var(--prism-m) 5%, transparent); box-shadow: inset 3px 0 color-mix(in srgb, var(--prism-m) 48%, transparent); }
 .replayTranscript button[data-active="true"] { background: color-mix(in srgb, var(--prism-m) 12%, transparent); }
 .replayTranscript strong { color: var(--prism-m); font-size: .72rem; }
-.replayTranscript span { font-size: calc(.82rem * var(--power-message-font-scale, 1)); line-height: 1.4; }
+.replayTranscript span { font-size: calc(.78rem * var(--power-message-font-scale, 1)); line-height: 1.36; }
 .emptyStudio { min-height: calc(100dvh - 130px); display: grid; place-content: center; justify-items: center; text-align: center; color: var(--botcast-muted); }
 .emptyStudio .logoMark { width: 70px; height: 60px; }
 .emptyStudio h1 { color: var(--botcast-ink); margin-bottom: 6px; }
@@ -1693,10 +1815,15 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 
 .shell[data-theme="light"] .productionDesk,
 .shell[data-theme="light"] .episodeOpenButton,
-.shell[data-theme="light"] .producerControls,
-.shell[data-theme="light"] .replayTranscript {
+.shell[data-theme="light"] .producerControls {
   box-shadow: 0 22px 64px var(--botcast-shadow), inset 0 1px rgba(255,255,255,.78);
 }
+.shell[data-theme="light"] .replayHeaderActions button { box-shadow: inset 0 1px #fff, 0 3px 0 #b3bdca; }
+.shell[data-theme="light"] .replayHeaderActions button:active:not(:disabled) { box-shadow: inset 0 1px #fff, 0 1px 0 #b3bdca; }
+.shell[data-theme="light"] .replayReviewChip { box-shadow: inset 0 1px #fff, 0 4px 0 color-mix(in srgb, var(--signal-rating-color) 12%, #b5bfcb), 0 10px 24px rgba(55,68,91,.12); }
+.shell[data-theme="light"] .replayReviewStar,
+.shell[data-theme="light"] .replayReviewRating { color: color-mix(in srgb, var(--signal-rating-color) 58%, #18210c); }
+.shell[data-theme="light"] .replayReviewIdentity small { color: color-mix(in srgb, var(--signal-rating-color) 48%, #3c441d); }
 .shell[data-theme="light"] .liveTopline strong { color: var(--botcast-ink); }
 .shell[data-theme="light"] .liveTimer[data-running="true"] { color: #a82d29; }
 .shell[data-theme="light"] .productionHeading button,
@@ -1732,12 +1859,66 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .shell[data-theme="light"] .producerDeskLineActions .producerInterruptButton:not(:disabled) { border-color: rgba(184,56,50,.62); color: #fff; background: linear-gradient(180deg, #813b38, #492126); box-shadow: inset 0 1px rgba(255,255,255,.16), 0 3px 0 #210b0d, 0 0 16px rgba(184,56,50,.14); }
 .shell[data-theme="light"] .liveCameraControls button[data-selected="true"] { border-color: transparent; color: #fff; background: linear-gradient(120deg, color-mix(in srgb, var(--botcast-host-accent) 76%, var(--prism-p)), var(--prism-m)); }
 .shell[data-theme="light"] .liveTopline .cutShowButton { border-color: rgba(164,42,37,.5); color: #fff; background: linear-gradient(135deg, #a82d29, #e24b3f); box-shadow: 0 7px 18px rgba(166,42,36,.2), inset 0 1px rgba(255,255,255,.16); }
+.shell[data-theme="light"][data-replay-episode="true"] .replayHeaderActions button,
+.shell[data-theme="light"][data-replay-episode="true"] .replayHeader button {
+  border-color: rgba(255,255,255,.13);
+  color: var(--botcast-ink);
+  background: rgba(255,255,255,.055);
+  box-shadow: inset 0 1px rgba(255,255,255,.06);
+}
+.shell[data-theme="light"][data-replay-episode="true"] .replayReviewChip {
+  background: radial-gradient(circle at 18px 4px, color-mix(in srgb, var(--signal-rating-color) 18%, transparent), transparent 36%), #0e1119;
+  box-shadow: inset 0 1px rgba(255,255,255,.07), 0 10px 26px rgba(0,0,0,.28);
+}
+.shell[data-theme="light"][data-replay-episode="true"] .replayReviewIdentity strong,
+.shell[data-theme="light"][data-replay-episode="true"] .replayReviewChip q {
+  color: var(--botcast-ink);
+}
+.shell[data-theme="light"][data-replay-episode="true"] .replayReviewStar,
+.shell[data-theme="light"][data-replay-episode="true"] .replayReviewRating,
+.shell[data-theme="light"][data-replay-episode="true"] .replayReviewIdentity small {
+  color: var(--signal-rating-color);
+}
 
 @media (min-width: 901px) {
   .shell[data-live-episode="true"] .liveLayout { padding-inline: var(--signal-live-inline-gutter); }
   .shell[data-live-episode="true"] .liveTopline,
   .shell[data-live-episode="true"] .liveCameraControls,
-  .shell[data-live-episode="true"] .liveLayout .stageViewport { box-sizing: border-box; width: min(100%, var(--signal-live-stage-max-width)); max-width: none; }
+  .shell[data-live-episode="true"] .liveLayout .stageViewport { box-sizing: border-box; width: 100%; max-width: none; }
+  .shell[data-live-episode="true"] .liveWorkspace[data-live-workspace="true"] {
+    --signal-live-stage-column-width: min(
+      calc(100% - var(--signal-transcript-min-width) - var(--signal-live-inline-gutter)),
+      max(0px, calc((100dvh - var(--signal-live-vertical-reserve)) * 1.7778))
+    );
+    width: 100%;
+    max-width: none;
+    display: grid;
+    grid-template-columns: minmax(0, var(--signal-live-stage-column-width)) minmax(var(--signal-transcript-min-width), 1fr);
+    align-items: start;
+    gap: var(--signal-live-inline-gutter);
+    margin: 0;
+  }
+  .shell[data-live-episode="true"] .liveWorkspaceStageColumn {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+  }
+  .shell[data-live-episode="true"] .liveWorkspaceStageColumn .stageViewport,
+  .shell[data-live-episode="true"] .liveWorkspaceStageColumn .controlRoom,
+  .shell[data-live-episode="true"] .liveWorkspaceStageColumn .producerGuestComposerDock,
+  .shell[data-live-episode="true"] .liveWorkspaceStageColumn .signalMemoryReceiptDetail {
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
+    margin-inline: 0;
+  }
+  .shell[data-live-episode="true"] .liveWorkspaceStageColumn .controlRoom { margin-top: 0; }
+  .signalTranscriptRail {
+    height: clamp(360px, calc(100dvh - var(--app-navbar-height, 66px) - 76px), 1120px);
+    position: sticky;
+    top: 0;
+    display: grid;
+  }
 }
 
 @media (min-width: 901px) and (min-height: 760px) {
@@ -1747,6 +1928,12 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
   .shell[data-live-episode="true"] .producerCueComposer > small { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .shell[data-producer-guest="true"] .main { overflow-y: auto; }
   .shell[data-producer-guest="true"] .liveLayout { height: auto; min-height: 100%; overflow: visible; padding-bottom: 0; }
+
+}
+
+@media (min-width: 901px) and (max-width: 1220px) {
+  .shell[data-live-episode="true"] .liveWorkspace[data-live-workspace="true"] { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .shell[data-live-episode="true"] .signalTranscriptRail { position: relative; top: auto; width: auto; height: min(360px, 42dvh); display: grid; margin-top: 4px; }
 }
 
 @media (min-width: 901px) and (max-width: 1220px) {
@@ -1771,6 +1958,25 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
   .showTitleRow { align-items: flex-start; flex-direction: column; gap: 8px; }
   .showNameActions { width: 100%; }
   .showDashboard, .liveLayout, .replayLayout { padding-inline: 12px; }
+  .replayHeader { align-items: stretch; flex-direction: column; gap: 14px; }
+  .replayHeaderActions { justify-content: flex-start; }
+  .replayPlayer, .replayProgram { border-radius: 13px; }
+  .shell[data-replay-episode="true"] .replayLayout { padding-inline: clamp(7px, 1.8vw, 12px); }
+  .shell[data-replay-episode="true"] .replayHeader { align-items: center; flex-direction: row; gap: 10px; }
+  .shell[data-replay-episode="true"] .replayHeading { gap: 9px; }
+  .shell[data-replay-episode="true"] .replayReviewChip { max-width: 270px; grid-template-columns: 32px minmax(0, 1fr) max-content; }
+  .shell[data-replay-episode="true"] .replayReviewChip q { display: none; }
+  .shell[data-replay-episode="true"] .replayRoom { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .shell[data-replay-episode="true"] .replayRoom > .replayProgram { display: none; }
+  .shell[data-replay-episode="true"] .replayRoom > .replayPlayer { grid-column: 1; grid-row: 2; }
+  .shell[data-replay-episode="true"] .replayPlayerHeader,
+  .shell[data-replay-episode="true"] .replayPlayerFooter { align-items: center; flex-direction: row; }
+  .shell[data-replay-episode="true"] .replayPlayerIdentity,
+  .shell[data-replay-episode="true"] .replayPlayerIdentity > div { align-items: center; flex-direction: row; }
+  .shell[data-replay-episode="true"] .replayFileActions,
+  .shell[data-replay-episode="true"] .replayQuality { width: auto; }
+  .shell[data-replay-episode="true"] .replayQuality { justify-content: flex-end; }
+  .shell[data-live-episode="true"] .signalTranscriptRail { width: 100%; height: min(360px, 42dvh); display: grid; box-sizing: border-box; margin-top: 12px; }
   .showBrandPreview, .showBrandContent { min-height: 340px; }
   .showBrandPreview[data-identity-settings-open="true"] { height: auto; }
   .showBrandContent { align-content: flex-start; flex-wrap: wrap; gap: 18px; padding: 26px 196px 26px 26px; }
@@ -1865,6 +2071,28 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 }
 
 @media (max-width: 580px) {
+  .replayHeaderActions button { flex: 1 1 calc(50% - 4px); }
+  .replayReviewChip { width: 100%; grid-template-columns: 38px minmax(0, 1fr) max-content; border-radius: 17px; padding: 7px 10px 8px 7px; }
+  .replayReviewChip q { grid-column: 2 / -1; overflow: visible; padding: 1px 0 0; white-space: normal; }
+  .replayPlayer { padding: 14px 12px 12px; }
+  .replayProgramHeader { padding-inline: 12px; }
+  .replayTranscript button { grid-template-columns: 82px minmax(0, 1fr); gap: 9px; padding-inline: 7px; }
+  .shell[data-replay-episode="true"] .replayHeader { align-items: stretch; flex-direction: column; gap: 6px; }
+  .shell[data-replay-episode="true"] .replayHeading { justify-content: space-between; }
+  .shell[data-replay-episode="true"] .replayHeading > div { flex: 1 1 auto; }
+  .shell[data-replay-episode="true"] .replayReviewChip { flex: 0 0 auto; width: auto; max-width: 190px; grid-template-columns: 26px minmax(0, 1fr) max-content; border-radius: 999px; padding: 3px 7px 3px 3px; }
+  .shell[data-replay-episode="true"] .replayReviewStar { width: 24px; height: 24px; }
+  .shell[data-replay-episode="true"] .replayReviewIdentity small { display: none; }
+  .shell[data-replay-episode="true"] .replayReviewIdentity strong { font-size: .61rem; }
+  .shell[data-replay-episode="true"] .replayReviewRating { border: 0; padding: 0; background: transparent; }
+  .shell[data-replay-episode="true"] .replayHeaderActions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .shell[data-replay-episode="true"] .replayHeaderActions button { min-width: 0; padding-inline: 5px; font-size: .57rem; }
+  .shell[data-replay-episode="true"] .replayPlayer { padding: 8px; }
+  .shell[data-replay-episode="true"] .replayPlayerHeader { display: none; }
+  .shell[data-replay-episode="true"] .replayTransport { margin-top: 0; }
+  .shell[data-replay-episode="true"] .replayPlayerFooter { gap: 7px; }
+  .shell[data-replay-episode="true"] .replayAction { padding-inline: 6px; font-size: .58rem; }
+  .shell[data-replay-episode="true"] .replayQuality > span:first-child { display: none; }
   .producerControls { gap: 12px; padding: 12px; }
   .producerDeskHeader { margin: -12px -12px 0; }
   .producerDeskPrivateLine { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 13px; }
@@ -1898,6 +2126,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
   .episodePreRoll[data-kind="intro"]::after { opacity: 0; animation: none !important; }
   .episodeOutro { opacity: 1; animation: none !important; }
   .producerControls button, .producerGuestSipButton { transition: none !important; }
+  .replayHeaderActions button, .replayPlayButton, .replayAction { transition: none !important; }
   .producerControls button[data-queued="true"] { animation: none !important; }
   .producerControls[data-producer-cue-phase="dispatching"] .producerDeskPrivateLine::after { animation: none !important; }
   .cueKey, .cueKeyCap { transition: none !important; }

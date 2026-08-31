@@ -5,11 +5,88 @@ import {
   signalEpisodeImageScale,
   signalEpisodeStageImageContext,
   signalPendingEpisodeImageCueIsAwaitingHostTurn,
+  signalPreSessionEpisodeImageCueForNextTurn,
   signalQueuedProducerCueIsServerOwned,
   signalVisualIdentityNotice,
 } from "./signalEpisodeImagePresentation.ts";
 
 describe("Signal episode image presentation", () => {
+  it("schedules only pre-session uploads on their stable host reveal turn", () => {
+    const opening = {
+      episodeId: "episode-2",
+      imageId: "image-2",
+      preSessionReveal: true,
+    };
+    const later = {
+      episodeId: "episode-1",
+      imageId: "image-1",
+      preSessionReveal: true,
+    };
+
+    assert.deepEqual(
+      signalPreSessionEpisodeImageCueForNextTurn({
+        episodeId: opening.episodeId,
+        messages: [],
+        pendingImage: opening,
+        imageContext: null,
+        higherPriorityCuePending: false,
+      }),
+      { kind: "present_image", imageId: opening.imageId },
+    );
+    assert.equal(
+      signalPreSessionEpisodeImageCueForNextTurn({
+        episodeId: later.episodeId,
+        messages: [
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+        ],
+        pendingImage: later,
+        imageContext: null,
+        higherPriorityCuePending: false,
+      }),
+      null,
+    );
+    assert.deepEqual(
+      signalPreSessionEpisodeImageCueForNextTurn({
+        episodeId: later.episodeId,
+        messages: [
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+        ],
+        pendingImage: later,
+        imageContext: null,
+        higherPriorityCuePending: false,
+      }),
+      { kind: "present_image", imageId: later.imageId },
+    );
+    assert.equal(
+      signalPreSessionEpisodeImageCueForNextTurn({
+        episodeId: opening.episodeId,
+        messages: [],
+        pendingImage: { ...opening, preSessionReveal: false },
+        imageContext: null,
+        higherPriorityCuePending: false,
+      }),
+      null,
+      "a live Producer upload keeps its immediate cue path",
+    );
+    assert.equal(
+      signalPreSessionEpisodeImageCueForNextTurn({
+        episodeId: opening.episodeId,
+        messages: [],
+        pendingImage: opening,
+        imageContext: null,
+        higherPriorityCuePending: true,
+      }),
+      null,
+      "explicit live direction keeps priority and displaces the reveal safely",
+    );
+  });
+
   it("keeps visual identity status silent for ordinary images and unavailable checks", () => {
     assert.equal(
       signalVisualIdentityNotice({
@@ -69,7 +146,7 @@ describe("Signal episode image presentation", () => {
     );
   });
 
-  it("keeps a pre-show image cue queued across the guest turn before its host introduction", () => {
+  it("keeps a client-owned live image cue queued across a guest turn", () => {
     const pendingCue = { kind: "present_image", imageId: "image-1" } as const;
     const pendingImage = { episodeId: "episode-1", imageId: "image-1" };
 

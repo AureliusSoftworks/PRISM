@@ -196,7 +196,7 @@ describe("Signal thinking presentation", () => {
     );
   });
 
-  it("keeps ordinary generation and voice preparation off-stage", () => {
+  it("shows voice preparation on the bot whose line is being synthesized", () => {
     assert.equal(
       signalStageThinkingRole({
         presentedThinkingRole: "host",
@@ -205,7 +205,7 @@ describe("Signal thinking presentation", () => {
         voicePreparationPending: true,
         voicePreparationRole: "host",
       }),
-      null,
+      "host",
     );
   });
 

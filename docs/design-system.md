@@ -7,6 +7,29 @@ not re-author faces, radii, or spacing locally.
 
 `apps/web/src/app/design-tokens-contract.test.ts` pins this contract.
 
+## Viewport contract
+
+PRISM is desktop-first, not fixed-resolution. The native window uses a
+**1440×900 logical-pixel reference composition**, then stays inside the current
+monitor's usable work area after OS scaling, docks, and taskbars. Its compact
+native minimum is **800×520**; this is a safety boundary, not an alternate art
+resolution.
+
+The web shell always fills the real logical viewport. It must not restore a
+global 1280×900 minimum, a blocking narrow-viewport cover, or whole-app
+`zoom`/`transform` scaling. Width and height adapt independently:
+
+- 1080px and below: the permanent sidebar becomes the existing edge drawer.
+- 720px and below: the phone-width shell owns navigation and safe-area chrome.
+- Short viewports: fixed shell regions stay bounded and dense content scrolls
+  inside its owning panel rather than increasing the outer app height.
+- Immersive applets may contain an authored stage ratio locally, but app chrome,
+  dialogs, pointer coordinates, and typography remain in unscaled CSS pixels.
+
+Viewport changes must be checked at 800×520, 1024×640, 1280×720, 1280×800,
+1440×900, 1920×1080, and an ultrawide size. Include a scaled-display case;
+physical monitor resolution is not the same as the CSS viewport.
+
 ## What is deliberately _not_ unified
 
 Per-applet accent hue is authored intent, not drift. `docs/brand-ethos.md` is

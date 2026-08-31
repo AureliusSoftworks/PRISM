@@ -29,7 +29,7 @@ describe("Whodunnit discovered mansion room art", () => {
     });
   });
 
-  it("falls back to Mosaic when a discovered room lacks its upgrade", () => {
+  it("falls back to Pixel Art when a discovered room lacks its Realistic upgrade", () => {
     assert.deepEqual(whodunnitDiscoveredMansionRoomArtV1({
       discovered: true,
       activeStyle: "illustrated",
@@ -51,7 +51,7 @@ describe("Whodunnit discovered mansion room art", () => {
       templateId: "dining-room",
     }), {
       style: "mosaic",
-      url: "/debate/mystery/rooms/dining-room-mosaic.webp",
+      url: "/debate/mystery/rooms/dining-room-mosaic.webp?pixelArt=5",
     });
   });
 });

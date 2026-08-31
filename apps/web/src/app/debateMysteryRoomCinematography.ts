@@ -194,7 +194,7 @@ export function mysteryRoomCinematographyCanvasSize(
   artStyle: MysteryRoomCinematographyArtStyle,
 ): Readonly<{ width: number; height: number }> {
   return artStyle === "mosaic"
-    ? { width: 320, height: 180 }
+    ? { width: 480, height: 270 }
     : { width: 800, height: 450 };
 }
 

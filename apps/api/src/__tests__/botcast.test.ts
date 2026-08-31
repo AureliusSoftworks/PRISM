@@ -109,6 +109,7 @@ import {
   recordBotcastProducerCutAudienceHandoff,
   recordBotcastProducerGuestAudienceHandoff,
   ensureBotcastEpisodePersonaReview,
+  extractBotcastGuestTensionDecisionV1,
   extractBotcastImageSemanticDecisionV1,
   forceEndBotcastEpisode,
   generateBotcastBookingSuggestion,
@@ -2106,6 +2107,74 @@ describe("Botcast persistence and isolation", () => {
         decision: null,
       },
     );
+  });
+
+  it("keeps Signal guest tension decisions private and rejects ambiguous evidence", () => {
+    assert.deepEqual(
+      extractBotcastGuestTensionDecisionV1(
+        "That accusation is cheap, and I am not accepting it.\n[[signal_guest_tension:raise]]",
+      ),
+      {
+        content: "That accusation is cheap, and I am not accepting it.",
+        decision: "raise",
+      },
+    );
+    assert.deepEqual(
+      extractBotcastGuestTensionDecisionV1(
+        "Let's keep going.\n[[signal_guest_tension:ease]]\n[[signal_guest_tension:steady]]",
+      ),
+      {
+        content: "Let's keep going.",
+        decision: null,
+      },
+    );
+  });
+
+  it("lets a guest's private reaction move tension without leaking on air", async () => {
+    const db = fixture();
+    const provider = recordingProvider(
+      [
+        "Welcome to the show. I am Mara Vale, and Ivo Stone joins me to talk about public trust. What do institutions still owe people?",
+        "They owe people evidence, not your smug little insinuations.\n[[signal_guest_tension:raise]]",
+      ],
+      [],
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Public trust",
+        preferredProvider: "local",
+        model: "llava",
+        responseMode: "local",
+      });
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      const reaction = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      assert.doesNotMatch(reaction.message?.content ?? "", /signal_guest_tension/u);
+      assert.equal(reaction.episode.tensionStage, "resistance");
+      assert.equal(
+        reaction.episode.events.some(
+          (event) =>
+            event.kind === "tension" &&
+            event.payload.cause === "guest_semantic_reaction",
+        ),
+        true,
+      );
+    } finally {
+      db.close();
+    }
   });
 
   it("keeps every active image-discussion lifecycle turn substantive", async () => {

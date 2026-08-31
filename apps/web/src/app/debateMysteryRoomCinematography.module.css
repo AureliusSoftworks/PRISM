@@ -68,6 +68,18 @@
   image-rendering: pixelated;
 }
 
+.root[data-art-style="mosaic"] .lighting {
+  mix-blend-mode: hard-light;
+}
+
+.root[data-art-style="mosaic"] .grain {
+  opacity: calc(var(--room-cinema-grain-opacity) * 0.35);
+}
+
+.root[data-art-style="mosaic"] .vignette {
+  opacity: calc(var(--room-cinema-vignette-opacity) * 0.72);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .root {
     transition: none;

@@ -10855,11 +10855,11 @@
 /* ── App shell ── */
 .appLayout {
   /* Prevent grid/flex descendants with large intrinsic widths (compose rail,
-     empty-state picker) from forcing horizontal overflow + asymmetric clipping
-     against html/body overflow-x: hidden. */
-  width: max(100vw, 1280px);
+     empty-state picker) from forcing horizontal overflow. The shell follows
+     the real logical viewport; compact layouts own their reflow below. */
+  width: 100%;
   max-width: none;
-  min-width: 1280px;
+  min-width: 0;
   /* Instrument Sans keeps body/supporting text flexible and readable while
      Raleway carries the thin Prism-line title treatment. */
   --font-size-conversation-title: 0.875rem;
@@ -10873,8 +10873,9 @@
   background: var(--bg);
   background-image: var(--app-gradient);
   color: var(--fg);
-  min-height: 900px;
-  height: max(100dvh, 900px);
+  min-height: 0;
+  height: 100vh;
+  height: 100dvh;
   display: grid;
   grid-template-columns: 280px 1fr;
   grid-template-rows: 1fr;
@@ -10978,74 +10979,6 @@
 .debateJudgeComposerHeader button:disabled {
   cursor: wait;
   opacity: 0.55;
-}
-
-.desktopViewportNotice {
-  display: none;
-}
-
-@media (max-width: 1279px) {
-  .desktopViewportNotice {
-    position: fixed;
-    inset: 0;
-    z-index: 100000;
-    display: grid;
-    place-items: center;
-    width: 100vw;
-    height: 100vh;
-    height: 100svh;
-    height: 100dvh;
-    padding: 32px;
-    overflow: hidden;
-    background: #07090f;
-    color: #f8fafc;
-    text-align: center;
-    cursor: default;
-  }
-
-  body:has([data-foundry="true"]) .desktopViewportNotice,
-  body:has([data-avatar-foundry="true"]) .desktopViewportNotice {
-    display: none;
-  }
-
-  .desktopViewportNoticeInner {
-    display: grid;
-    gap: 14px;
-    width: min(520px, 100%);
-  }
-
-  .desktopViewportNoticeKicker {
-    margin: 0;
-    color: #9fb0c9;
-    font-size: 12px;
-    font-weight: 800;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-  }
-
-  .desktopViewportNoticeTitle {
-    margin: 0;
-    color: #ffffff;
-    font-family:
-      var(--font-title-sans), var(--font-ui-sans), system-ui, sans-serif;
-    font-size: 32px;
-    font-weight: 700;
-    line-height: 1.05;
-    letter-spacing: 0;
-  }
-
-  .desktopViewportNoticeBody,
-  .desktopViewportNoticeSoon {
-    margin: 0;
-    color: #d7deea;
-    font-size: 16px;
-    font-weight: 600;
-    line-height: 1.5;
-  }
-
-  .desktopViewportNoticeSoon {
-    color: #aebbd0;
-  }
 }
 
 .appLayout:not([data-chat-sidebar-hidden="true"]) .chatHeaderWordmarkColumn {
@@ -29245,6 +29178,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     #020507
   );
   --zen-live-bot-buckle-rim-screen-edge: #020507;
+  --zen-live-bot-buckle-rim-screen-stops:
+    var(--zen-live-bot-buckle-rim-screen-center),
+    var(--zen-live-bot-buckle-rim-screen-edge) 74%;
+  --zen-live-bot-buckle-rim-screen-base: linear-gradient(
+    transparent,
+    transparent
+  );
   --zen-live-bot-buckle-rim-highlight: #d7dce1;
   --zen-live-bot-buckle-rim-mid-highlight: #aeb5bc;
   --zen-live-bot-buckle-rim-shadow: #080a0d;
@@ -29337,10 +29277,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background:
     radial-gradient(
         circle at 50% 48%,
-        var(--zen-live-bot-buckle-rim-screen-center),
-        var(--zen-live-bot-buckle-rim-screen-edge) 74%
+        var(--zen-live-bot-buckle-rim-screen-stops)
       )
       content-box,
+    var(--zen-live-bot-buckle-rim-screen-base) content-box,
     radial-gradient(
       circle,
       transparent 0 61%,
@@ -29394,7 +29334,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
         )
         360deg
     );
-  background-clip: content-box, border-box, border-box, border-box;
+  background-clip:
+    content-box,
+    content-box,
+    border-box,
+    border-box,
+    border-box;
   box-shadow:
     0 2px 3px var(--zen-live-bot-buckle-rim-cast),
     0 5px 9px var(--zen-live-bot-buckle-rim-ambient),
@@ -29409,6 +29354,53 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
    shared while giving light mode its own diffuse, softly defined metal. */
 .zenLiveBotPresencePlate[data-theme="light"] .zenLiveBotPresenceBody,
 .themeLight .zenLiveBotPresenceBody {
+  --bot-phosphor-focus-radius-scale: calc(
+    var(--prism-crt-focus-radius-scale, 1) * 0.72
+  );
+  --zen-live-bot-buckle-rim-screen-center: var(
+    --bot-avatar-screen-center,
+    var(--coffee-bot-color)
+  );
+  --zen-live-bot-buckle-rim-screen-edge: var(
+    --bot-avatar-screen-edge,
+    var(--coffee-bot-color)
+  );
+  --zen-live-bot-buckle-rim-screen-stops:
+    color-mix(
+        in srgb,
+        color-mix(
+            in oklch,
+            var(--bot-avatar-screen-center, var(--coffee-bot-color)) 92%,
+            white 8%
+          )
+          82%,
+        transparent
+      )
+      0 18%,
+    color-mix(
+        in srgb,
+        var(--bot-avatar-screen-center, var(--coffee-bot-color)) 76%,
+        transparent
+      )
+      38%,
+    color-mix(
+        in srgb,
+        var(--bot-avatar-screen-mid, var(--coffee-bot-color)) 68%,
+        transparent
+      )
+      58%,
+    color-mix(
+        in srgb,
+        var(--bot-avatar-screen-edge, var(--coffee-bot-color)) 56%,
+        transparent
+      )
+      74%;
+  --zen-live-bot-buckle-rim-screen-base: linear-gradient(
+    180deg,
+    color-mix(in srgb, #010404 92%, var(--coffee-bot-color) 8%),
+    #000203 64%,
+    #000101
+  );
   --zen-live-bot-buckle-rim-base-metal: #b9c4ce;
   --zen-live-bot-buckle-rim-highlight: #f8fbff;
   --zen-live-bot-buckle-rim-mid-highlight: #d4dee7;
@@ -29979,17 +29971,34 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .zenLiveBotPresencePlate[data-theme="light"]
   .zenLiveBotPresenceFaceEmissionMask,
 .themeLight .zenLiveBotPresencePlate .zenLiveBotPresenceFaceEmissionMask {
-  --crt-core-opacity: 0.88;
-  --crt-bloom-narrow-strength: 0.22;
-  --crt-bloom-wide-strength: 0.045;
+  --crt-core-opacity: 0.94;
+  --crt-bloom-narrow-strength: 0.18;
+  --crt-bloom-wide-strength: 0.025;
   --crt-phosphor-opacity: 0.18;
   --crt-phosphor-midtone-strength: 0.42;
   --crt-phosphor-bright-strength: 0.16;
   --crt-unlit-phosphor-opacity: 0.022;
   --crt-scanline-opacity: 0.052;
   --crt-static-opacity: 0.018;
-  --crt-vignette-strength: 0.16;
+  --crt-vignette-strength: 0.1;
   --crt-fresnel-strength: 0.23;
+  /* The shared CRT mask owns the final opaque screen layer. Recolor that
+     layer in light mode so it reveals the same identity-glass ramp as the
+     underlying face fill instead of covering it with the dark-mode black. */
+  background:
+    radial-gradient(
+      ellipse 74% 62% at 49% 45%,
+      rgba(255, 255, 255, 0.055),
+      transparent 62%
+    ),
+    radial-gradient(
+      ellipse 108% 104% at 50% 52%,
+      transparent 56%,
+      rgba(0, 0, 0, calc(var(--crt-vignette-strength) * 0.58)) 86%,
+      rgba(0, 0, 0, var(--crt-vignette-strength)) 100%
+    ),
+    var(--bot-avatar-screen-glass-overlay),
+    var(--bot-avatar-screen-dark-base);
 }
 
 .zenLiveBotPresencePlate[data-theme="dark"]
@@ -32615,11 +32624,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border: 0;
   border-radius: 0;
   background: transparent;
-  --zen-live-bot-glyph-glow-color: var(--coffee-bot-color);
+  --zen-live-bot-glyph-glow-color: var(
+    --bot-avatar-screen-glow,
+    var(--coffee-bot-color)
+  );
   --zen-live-bot-glyph-crt-border-color: var(--zen-live-bot-glyph-glow-color);
   /* White-hot phosphor core; the bot's normalized color belongs to the edge
      and bloom so the mark stays crisp without losing identity. */
-  color: #ffffff;
+  color: var(--bot-avatar-screen-glyph, #ffffff);
   filter: drop-shadow(
       0 0 var(--bot-phosphor-halo-contact-radius, 0.72px)
         var(--zen-live-bot-glyph-crt-border-color)
@@ -32837,26 +32849,83 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .themeLight .zenLiveBotPresencePlate,
 .zenLiveBotPresencePlate[data-theme="light"] {
   --bot-face-crt-screen-texture-blend-mode: overlay;
-  --zen-presence-face-bg:
-    radial-gradient(
-      circle at 42% 24%,
-      rgba(255, 255, 255, 0.96),
-      transparent 34%
-    ),
-    radial-gradient(
-      circle at 50% 62%,
-      color-mix(in srgb, #f8fbff 78%, var(--coffee-bot-color) 22%),
-      color-mix(in srgb, #e6f1fa 70%, var(--coffee-bot-color) 30%) 66%,
-      color-mix(in srgb, #d2e3ef 56%, var(--coffee-bot-color) 44%) 100%
-    );
-  --zen-presence-face-border: color-mix(
-    in srgb,
-    var(--coffee-bot-color) 66%,
-    rgba(69, 52, 38, 0.28)
+  /* Glass is a translucent identity layer over the original near-black CRT.
+     The phosphor mesh remains above both layers in the emission mask. */
+  --bot-avatar-screen-dark-base: linear-gradient(
+    180deg,
+    color-mix(in srgb, #010404 92%, var(--coffee-bot-color) 8%),
+    #000203 64%,
+    #000101
   );
-  --zen-presence-face-ring: rgba(255, 255, 255, 0.78);
-  --zen-presence-face-shadow: none;
-  --zen-presence-face-ink: var(--coffee-bot-color);
+  --bot-avatar-screen-glass-overlay: radial-gradient(
+    circle at 44% 30%,
+    color-mix(
+        in srgb,
+        color-mix(
+            in oklch,
+            var(--bot-avatar-screen-center, var(--coffee-bot-color)) 92%,
+            white 8%
+          )
+          82%,
+        transparent
+      )
+      0 18%,
+    color-mix(
+        in srgb,
+        var(--bot-avatar-screen-center, var(--coffee-bot-color)) 76%,
+        transparent
+      )
+      40%,
+    color-mix(
+        in srgb,
+        var(--bot-avatar-screen-mid, var(--coffee-bot-color)) 68%,
+        transparent
+      )
+      70%,
+    color-mix(
+        in srgb,
+        var(--bot-avatar-screen-edge, var(--coffee-bot-color)) 56%,
+        transparent
+      )
+      100%
+  );
+  --zen-live-bot-face-phosphor-ink: var(
+    --bot-avatar-screen-glyph,
+    #f8fbff
+  );
+  --zen-live-bot-face-ink: var(--bot-avatar-screen-glyph, #f8fbff);
+  --zen-live-bot-glyph-ink: var(--bot-avatar-screen-glyph, #f8fbff);
+  --zen-live-bot-face-crt-border-color: var(
+    --bot-avatar-screen-glow,
+    var(--coffee-bot-color)
+  );
+  --zen-presence-face-bg:
+    var(--bot-avatar-screen-glass-overlay),
+    var(--bot-avatar-screen-dark-base);
+  --zen-presence-face-border: color-mix(
+    in oklch,
+    var(--bot-avatar-screen-glow, var(--coffee-bot-color)) 72%,
+    white 28%
+  );
+  --zen-presence-face-ring: color-mix(
+    in oklch,
+    var(--bot-avatar-screen-glow, var(--coffee-bot-color)) 32%,
+    white 68%
+  );
+  --zen-presence-face-shadow:
+    0 0 10px
+      color-mix(
+        in oklch,
+        var(--bot-avatar-screen-glow, var(--coffee-bot-color)) 34%,
+        transparent
+      ),
+    0 0 20px
+      color-mix(
+        in oklch,
+        var(--bot-avatar-screen-glow, var(--coffee-bot-color)) 16%,
+        transparent
+      );
+  --zen-presence-face-ink: var(--bot-avatar-screen-glyph, #f8fbff);
   --zen-presence-pill-bg: color-mix(
     in srgb,
     #f8fbff 70%,
@@ -39721,7 +39790,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .panel {
-  --panel-width: min(479px, calc(max(100vw, 1280px) - 32px));
+  --panel-width: min(479px, calc(100vw - 32px));
   position: fixed;
   /* Sit under the shared navbar so its controls are never covered. */
   top: var(
@@ -39790,7 +39859,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .panelSettings {
-  --panel-width: min(1040px, calc(max(100vw, 1280px) - 32px));
+  --panel-width: min(1040px, calc(100vw - 32px));
   grid-template-rows: auto minmax(0, 1fr);
   align-content: stretch;
   overflow: hidden;
@@ -39832,7 +39901,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .panelUsage {
-  --panel-width: min(560px, calc(max(100vw, 1280px) - 32px));
+  --panel-width: min(560px, calc(100vw - 32px));
   grid-template-rows: auto minmax(0, 1fr);
   align-content: stretch;
   overflow: hidden;
@@ -42161,8 +42230,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .panelBots[data-bot-panel-view="library"] {
   --panel-width: min(
     940px,
-    max(620px, calc(max(100vw, 1280px) - 420px)),
-    calc(max(100vw, 1280px) - 32px)
+    max(620px, calc(100vw - 420px)),
+    calc(100vw - 32px)
   );
 }
 
@@ -42170,15 +42239,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --panel-width: min(
     1120px,
     max(760px, calc(100vw - 440px)),
-    calc(max(100vw, 1280px) - 32px)
+    calc(100vw - 32px)
   );
 }
 
 .panelBots[data-bot-panel-view="create"] {
   --panel-width: min(
     1120px,
-    max(620px, calc(max(100vw, 1280px) - 480px)),
-    calc(max(100vw, 1280px) - 32px)
+    max(620px, calc(100vw - 480px)),
+    calc(100vw - 32px)
   );
 }
 
@@ -42374,8 +42443,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .panel.panelImages {
     --panel-width: min(
       880px,
-      max(620px, calc(max(100vw, 1280px) - 430px)),
-      calc(max(100vw, 1280px) - 32px)
+      max(620px, calc(100vw - 430px)),
+      calc(100vw - 32px)
     );
   }
 }
@@ -42452,7 +42521,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .imagePanelToolsDock {
   --image-tools-gap: 14px;
-  --panel-width: min(479px, calc(max(100vw, 1280px) - 32px));
+  --panel-width: min(479px, calc(100vw - 32px));
   position: fixed;
   top: calc(
     var(
@@ -42462,7 +42531,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   );
   right: calc(var(--panel-width) + var(--image-tools-gap));
   bottom: 20px;
-  width: min(340px, calc(max(100vw, 1280px) - var(--panel-width) - 52px));
+  width: min(340px, calc(100vw - var(--panel-width) - 52px));
   min-width: 280px;
   border: 1px solid
     color-mix(in srgb, var(--line-strong) 76%, var(--accent-ink) 24%);
@@ -45848,8 +45917,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     ) {
     right: min(
       940px,
-      max(620px, calc(max(100vw, 1280px) - 420px)),
-      calc(max(100vw, 1280px) - 32px)
+      max(620px, calc(100vw - 420px)),
+      calc(100vw - 32px)
     );
   }
 
@@ -45857,15 +45926,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     right: min(
       1120px,
       max(760px, calc(100vw - 440px)),
-      calc(max(100vw, 1280px) - 32px)
+      calc(100vw - 32px)
     );
   }
 
   .botPanelHubShowcase[data-panel="images"] {
     right: min(
       880px,
-      max(620px, calc(max(100vw, 1280px) - 430px)),
-      calc(max(100vw, 1280px) - 32px)
+      max(620px, calc(100vw - 430px)),
+      calc(100vw - 32px)
     );
   }
 }
@@ -48661,7 +48730,7 @@ a.settingsCreditItem:focus-visible {
   grid-template-rows: auto minmax(0, 1fr);
   width: min(
     600px,
-    calc(max(100vw, 1280px) - var(--panel-width, 479px) - 56px)
+    calc(100vw - var(--panel-width, 479px) - 56px)
   );
   border-radius: 12px;
   background: linear-gradient(
@@ -48984,9 +49053,9 @@ a.settingsCreditItem:focus-visible {
   right: calc(var(--panel-width, 479px) + 28px);
   width: min(
     560px,
-    calc(max(100vw, 1280px) - var(--panel-width, 479px) - 56px)
+    calc(100vw - var(--panel-width, 479px) - 56px)
   );
-  max-height: calc(max(100dvh, 900px) - 40px);
+  max-height: calc(100dvh - 40px);
   border: 1px solid
     color-mix(in srgb, var(--bot-profile-page-accent) 26%, var(--line));
   border-radius: 18px;
@@ -49064,7 +49133,7 @@ a.settingsCreditItem:focus-visible {
 .botProfileBuilder.botAiParameterBuilder {
   width: min(
     660px,
-    calc(max(100vw, 1280px) - var(--panel-width, 479px) - 56px)
+    calc(100vw - var(--panel-width, 479px) - 56px)
   );
   border-radius: 12px;
   grid-template-columns: minmax(0, 1fr);
@@ -50163,9 +50232,9 @@ a.settingsCreditItem:focus-visible {
   right: calc(var(--panel-width, 479px) + 28px);
   width: min(
     560px,
-    calc(max(100vw, 1280px) - var(--panel-width, 479px) - 56px)
+    calc(100vw - var(--panel-width, 479px) - 56px)
   );
-  max-height: calc(max(100dvh, 900px) - 40px);
+  max-height: calc(100dvh - 40px);
   border: 1px solid var(--line);
   border-radius: 18px;
   background: color-mix(in srgb, var(--bg-surface) 96%, transparent);
@@ -61082,8 +61151,8 @@ a.settingsCreditItem:focus-visible {
   .panelMemories[data-memory-scope="default"] {
     --panel-width: min(
       900px,
-      max(620px, calc(max(100vw, 1280px) - 420px)),
-      calc(max(100vw, 1280px) - 32px)
+      max(620px, calc(100vw - 420px)),
+      calc(100vw - 32px)
     );
   }
 

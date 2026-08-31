@@ -277,6 +277,12 @@ function validateCaseManifest(manifest: PortableCasePackageManifestV1): void {
         ? [entry.reference as Parameters<typeof validateDebateMysteryDialogueGraphV2>[0]["recordReferences"][number]]
         : []),
     playerRole: config?.playerRole === "spectator" ? "spectator" : "participant",
+    prosecutorBotId: typeof config?.prosecutorBotId === "string"
+      ? config.prosecutorBotId
+      : null,
+    rivalDefenseBotId: typeof config?.rivalDefenseBotId === "string"
+      ? config.rivalDefenseBotId
+      : null,
     roomIds: manifest.mansionRequirements.rooms.map((room) => room.id),
     personIds: Array.isArray(privateCase.investigationPersonIds)
       ? privateCase.investigationPersonIds.filter(
@@ -652,6 +658,12 @@ export function portableCaseManifestFromSessionV1(args: {
         ? [entry.reference as Parameters<typeof validateDebateMysteryDialogueGraphV2>[0]["recordReferences"][number]]
         : []),
     playerRole: normalizedConfig?.playerRole === "spectator" ? "spectator" : "participant",
+    prosecutorBotId: typeof normalizedConfig?.prosecutorBotId === "string"
+      ? normalizedConfig.prosecutorBotId
+      : null,
+    rivalDefenseBotId: typeof normalizedConfig?.rivalDefenseBotId === "string"
+      ? normalizedConfig.rivalDefenseBotId
+      : null,
     roomIds: requirementRooms.map((room) => room.id),
     personIds: Array.isArray(normalizedPrivate.investigationPersonIds)
       ? normalizedPrivate.investigationPersonIds.filter(
@@ -1145,6 +1157,7 @@ export function assemblePortableCasePackageV1(args: {
   const privateRecordItems = Array.isArray(finalPrivate.recordItems)
     ? finalPrivate.recordItems as Array<{ reference?: unknown }>
     : [];
+  const finalConfig = asRecord(finalPrivate.config, "Assembled case config");
   const graphValidation = validateDebateMysteryDialogueGraphV2({
     graph: finalGraph as unknown as Parameters<typeof validateDebateMysteryDialogueGraphV2>[0]["graph"],
     suspectSeatIds: privateActorAccounts.flatMap((entry) =>
@@ -1154,6 +1167,12 @@ export function assemblePortableCasePackageV1(args: {
         ? [entry.reference as Parameters<typeof validateDebateMysteryDialogueGraphV2>[0]["recordReferences"][number]]
         : []),
     playerRole: finalSession.playerRole === "spectator" ? "spectator" : "participant",
+    prosecutorBotId: typeof finalConfig.prosecutorBotId === "string"
+      ? finalConfig.prosecutorBotId
+      : null,
+    rivalDefenseBotId: typeof finalConfig.rivalDefenseBotId === "string"
+      ? finalConfig.rivalDefenseBotId
+      : null,
     roomIds: Array.isArray(finalPrivate.investigationRoomIds)
       ? finalPrivate.investigationRoomIds.filter((entry): entry is string => typeof entry === "string")
       : [],

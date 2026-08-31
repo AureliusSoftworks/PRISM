@@ -527,6 +527,60 @@ export const DEBATE_MYSTERY_ROOM_TEMPLATES: readonly DebateMysteryRoomTemplateV1
     };
   });
 
+/** Custom/accepted plates cannot honestly reuse object-level PRISM template
+ * regions. These neutral scene regions preserve the same dense Examine grid. */
+const GENERIC_PRESENTATION_ROOM_REGIONS: ReadonlyArray<{
+  id: string;
+  label: string;
+  physicalAnchor: string;
+  polygon: readonly DebateMysteryPointV1[];
+}> = [
+  { id: "scene-left-wall", label: "left wall", physicalAnchor: "the left wall of the room", polygon: [{ x: 0, y: 16 }, { x: 28, y: 14 }, { x: 29, y: 86 }, { x: 0, y: 88 }] },
+  { id: "scene-center-surface", label: "center surface", physicalAnchor: "the center of the room", polygon: [{ x: 28, y: 24 }, { x: 73, y: 23 }, { x: 75, y: 79 }, { x: 26, y: 81 }] },
+  { id: "scene-right-wall", label: "right wall", physicalAnchor: "the right wall of the room", polygon: [{ x: 72, y: 15 }, { x: 100, y: 14 }, { x: 100, y: 87 }, { x: 71, y: 88 }] },
+  { id: "scene-foreground", label: "foreground", physicalAnchor: "the foreground of the room", polygon: [{ x: 12, y: 72 }, { x: 88, y: 71 }, { x: 91, y: 100 }, { x: 9, y: 100 }] },
+];
+
+/** One frozen decision drives art-aware click regions, authored observation
+ * subjects, and deterministic placement fallbacks. */
+export function debateMysteryRoomUsesBundledHotspotGeometryV1(room: Pick<
+  DebateMysteryFloorplanRoomV1,
+  "imageId" | "usesBundledHotspotGeometry"
+> & {
+  bundledAssetPath?: string | null;
+  acceptedRoomAssetId?: string | null;
+}): boolean {
+  if (room.usesBundledHotspotGeometry !== undefined) {
+    return room.usesBundledHotspotGeometry;
+  }
+  // The original deterministic scaffold did not carry presentation metadata.
+  // Keep those compiled/portable V1 shapes on their historical templates.
+  if (room.bundledAssetPath === undefined && room.acceptedRoomAssetId === undefined) {
+    return true;
+  }
+  return !room.imageId && !room.acceptedRoomAssetId && Boolean(room.bundledAssetPath);
+}
+
+export function debateMysteryRoomPresentationRegionsV1(room: Pick<
+  DebateMysteryFloorplanRoomV1,
+  "templateId" | "imageId" | "usesBundledHotspotGeometry"
+> & {
+  bundledAssetPath?: string | null;
+  acceptedRoomAssetId?: string | null;
+}): DebateMysteryRegionV1[] {
+  const template = DEBATE_MYSTERY_ROOM_TEMPLATES.find((entry) => entry.id === room.templateId);
+  if (!template) return [];
+  if (debateMysteryRoomUsesBundledHotspotGeometryV1(room)) return template.regions;
+  const broadRegions = GENERIC_PRESENTATION_ROOM_REGIONS.map((region) =>
+    semanticRoomRegion(
+      `${room.templateId}:${region.id}`,
+      region.label,
+      region.physicalAnchor,
+      region.polygon,
+    ));
+  return [...broadRegions, ...broadRegions.flatMap(mysteryDetailRegions)];
+}
+
 export const DEBATE_MYSTERY_GROUND_FLOOR_ROOM_TYPE_IDS = [
   "foyer",
   "cellar",
@@ -575,6 +629,9 @@ export interface DebateMysteryFloorplanRoomV1 {
   neighborIds: string[];
   templateId: string;
   imageId: string | null;
+  /** Frozen room presentation. Omitted compiled legacy cases retain their
+   * original template hotspot geometry. */
+  usesBundledHotspotGeometry?: boolean;
   kind: DebateMysteryRoomKind;
   assignedSuspectSeatId: string | null;
 }
@@ -1874,20 +1931,20 @@ export function compileDeterministicDebateMystery(args: {
   // Large custom floorplans can occasionally paint a greedy layout into a
   // corner. Retry from seed-derived candidates so generation stays stable and
   // never depends on runtime timing or an unseeded fallback.
-  const rooms = args.roomBlueprint
+  const compiledRooms = args.roomBlueprint
     ? args.roomBlueprint.map((room) => ({
         ...room,
         neighborIds: [...room.neighborIds],
       }))
     : compileMansionRooms(args.config, recipeSeed);
   if (args.roomBlueprint) {
-    if (rooms.length !== args.config.totalRooms) {
+    if (compiledRooms.length !== args.config.totalRooms) {
       throw new Error("The reusable mansion room count no longer matches this case setup.");
     }
-    const roomIds = new Set(rooms.map((room) => room.id));
+    const roomIds = new Set(compiledRooms.map((room) => room.id));
     if (
-      roomIds.size !== rooms.length ||
-      rooms.some((room) =>
+      roomIds.size !== compiledRooms.length ||
+      compiledRooms.some((room) =>
         !DEBATE_MYSTERY_ROOM_TEMPLATES.some((template) => template.id === room.templateId) ||
         !Number.isInteger(room.floor) || room.floor < 1 ||
         !Number.isFinite(room.x) || !Number.isFinite(room.y) ||
@@ -1897,20 +1954,40 @@ export function compileDeterministicDebateMystery(args: {
     ) {
       throw new Error("The reusable mansion layout failed structural validation.");
     }
-    const assignedRooms = rooms
+    const assignedRooms = compiledRooms
       .filter((room) => room.assignedSuspectSeatId)
       .sort((left, right) =>
         (left.assignedSuspectSeatId ?? "").localeCompare(right.assignedSuspectSeatId ?? ""));
     if (assignedRooms.length !== args.suspects.length) {
       throw new Error("The reusable mansion requires the same number of suspect rooms.");
     }
-    rooms.forEach((room) => {
+    compiledRooms.forEach((room) => {
       room.assignedSuspectSeatId = null;
     });
     assignedRooms.forEach((room, index) => {
       room.assignedSuspectSeatId = `suspect-${index + 1}`;
     });
   }
+  const authoredIncidentScene = args.roomBlueprint
+    ? compiledRooms.find((room) => room.kind === "crime_scene") ?? null
+    : null;
+  const incidentSceneCandidates = compiledRooms.filter((room) =>
+    room.templateId !== "foyer",
+  );
+  const incidentScene = authoredIncidentScene ?? choose(
+    incidentSceneCandidates.length > 0
+      ? incidentSceneCandidates
+      : compiledRooms,
+    seededRandom(`${recipeSeed}:incident-scene`),
+  );
+  const rooms = compiledRooms;
+  rooms.forEach((room) => {
+    room.kind = room.id === incidentScene.id
+      ? "crime_scene"
+      : room.assignedSuspectSeatId
+        ? "suspect"
+        : "search";
+  });
   const suspects = args.suspects.map((suspect, index) => ({
     ...suspect,
     seatId: `suspect-${index + 1}`,
@@ -1930,13 +2007,16 @@ export function compileDeterministicDebateMystery(args: {
   // occupant and searching its outcome-neutral regions are separate,
   // player-controlled activities. Each room exposes several deterministic
   // areas so the same art supports different investigative texture per case.
-  const searchableRooms = rooms;
+  const searchableRooms = [
+    incidentScene,
+    ...rooms.filter((room) => room.id !== incidentScene.id),
+  ];
   const activeRegions: DebateMysteryActiveRegionOutcomeV1[] = [];
   const evidence: DebateMysteryEvidenceItemV1[] = [];
   searchableRooms.forEach((room, index) => {
-    const template = DEBATE_MYSTERY_ROOM_TEMPLATES.find((candidate) => candidate.id === room.templateId)!;
-    const detailRegions = template.regions.filter((region) => region.id.includes(":detail-"));
-    const shuffledRegions = shuffled(detailRegions.length ? detailRegions : template.regions, random);
+    const presentationRegions = debateMysteryRoomPresentationRegionsV1(room);
+    const detailRegions = presentationRegions.filter((region) => region.id.includes(":detail-"));
+    const shuffledRegions = shuffled(detailRegions.length ? detailRegions : presentationRegions, random);
     const region = shuffledRegions[0]!;
     const mustBeClue = index < Math.min(4, searchableRooms.length);
     const kind: DebateMysteryRegionOutcomeKind = mustBeClue ? "clue" : random() < 0.34 ? "subplot" : "empty";
@@ -2069,7 +2149,7 @@ export function compileDeterministicDebateMystery(args: {
     outcome.inspectionResponse = `You recover ${item.title.toLowerCase()} ${outcome.hidingMechanism}. ${item.description}`;
     return item;
   };
-  const crimeSceneRegionIds = [rooms[0]!.id];
+  const crimeSceneRegionIds = [incidentScene.id];
 
   const goldKey = placeInventoryItem({
     id: "access-delicate-gold-key",
@@ -2159,7 +2239,7 @@ export function compileDeterministicDebateMystery(args: {
     proofCritical: true,
   });
 
-  const unoccupiedRooms = rooms.filter((room) => room.id !== rooms[0]!.id && !room.assignedSuspectSeatId);
+  const unoccupiedRooms = rooms.filter((room) => room.id !== incidentScene.id && !room.assignedSuspectSeatId);
   const lockableRoom = unoccupiedRooms.find((room) => room.templateId === "conservatory") ??
     unoccupiedRooms.find((room) => room.templateId === "utility") ??
     unoccupiedRooms.at(-1) ?? null;
@@ -2192,7 +2272,7 @@ export function compileDeterministicDebateMystery(args: {
     });
   }
 
-  const safeRoom = rooms.find((room) => room.id !== rooms[0]!.id && room.id !== lockableRoom?.id) ?? rooms[0]!;
+  const safeRoom = rooms.find((room) => room.id !== incidentScene.id && room.id !== lockableRoom?.id) ?? incidentScene;
   const safeOutcome = claimInventoryOutcome([safeRoom.id]);
   safeOutcome.kind = "empty";
   safeOutcome.inspectionResponse = "A minute break in the surface suggests a concealed safe. Its keypad is dark, and no contents are visible.";
@@ -2360,7 +2440,7 @@ export function compileDeterministicDebateMystery(args: {
     ],
     suspects,
     rooms,
-    crimeSceneRoomId: rooms[0]!.id,
+    crimeSceneRoomId: incidentScene.id,
     activeRegions,
     actionTokens,
     inventoryItems,
@@ -2370,7 +2450,7 @@ export function compileDeterministicDebateMystery(args: {
     actorKnowledge,
     proofBundles,
     leadDefinitions,
-    publicOpening: `A storm has closed the road to the estate. ${victimName} has been found dead${weapon.revealedAtOpening ? `; the first report names ${weapon.descriptor} as the weapon` : "; the murder weapon has not yet been identified"}, and every selected suspect remains inside. You are the lead investigator.`,
+    publicOpening: `A storm has closed the road to the estate. ${victimName} has been found dead${weapon.revealedAtOpening ? `; the first report names ${weapon.descriptor} as the weapon` : "; the murder weapon has not yet been identified"}, and every selected suspect remains inside. I am the lead investigator.`,
     fallbackProseUsed: true,
   };
 }
@@ -2400,7 +2480,7 @@ export function validateDebateMysteryCaseBible(
   if (bible.proofBundles.length !== 3 || new Set(bible.proofBundles.map((bundle) => bundle.id)).size !== 3) errors.push("Case must contain exactly three distinct proof bundles.");
   if (new Set(bible.proofBundles.map((bundle) => bundle.grade)).size !== 3) errors.push("Each proof bundle must have a distinct route grade.");
   if (bible.rooms.filter((room) => room.kind === "crime_scene").length !== 1 || !bible.rooms.some((room) => room.id === bible.crimeSceneRoomId && room.kind === "crime_scene")) errors.push("Case must contain exactly one canonical crime scene.");
-  if (bible.rooms.filter((room) => room.kind === "suspect").length !== bible.suspects.length) errors.push("Every suspect requires one fixed suspect room.");
+  if (bible.rooms.filter((room) => room.assignedSuspectSeatId).length !== bible.suspects.length) errors.push("Every suspect requires one fixed suspect room.");
   if (new Set(bible.suspects.map((suspect) => suspect.seatId)).size !== bible.suspects.length || new Set(bible.suspects.map((suspect) => suspect.roomId)).size !== bible.suspects.length) errors.push("Suspect seats and rooms must be unique.");
   if (!Array.isArray(bible.leadDefinitions) || bible.leadDefinitions.length < 3 || new Set(bible.leadDefinitions.map((lead) => lead.id)).size !== bible.leadDefinitions.length) errors.push("Case must contain multiple distinct lead definitions.");
   const evidenceIds = new Set(bible.evidence.map((item) => item.id));

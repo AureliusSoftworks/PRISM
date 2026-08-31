@@ -8,8 +8,8 @@ import {
   type MansionRoomArtCandidateV2,
 } from "@localai/shared";
 import sharp from "sharp";
-import { generateImage } from "./image-provider.ts";
-import { encryptBytes } from "./security.ts";
+import { editImage, generateImage } from "./image-provider.ts";
+import { decryptBytes, encryptBytes } from "./security.ts";
 import { HttpError } from "./utils.http.ts";
 
 export const MANSION_ROOM_ART_CANDIDATE_LOGICAL_SUFFIX_V2 = "candidate-v2";
@@ -40,7 +40,7 @@ export interface StageMansionRoomArtCandidateV2Args {
   apiKey: string | null;
   model?: string | null;
   fetchImpl?: typeof fetch;
-  generate?: (prompt: string) => Promise<GeneratedMansionRoomArtV2>;
+  generate?: (prompt: string, compositionReference?: Buffer | null) => Promise<GeneratedMansionRoomArtV2>;
 }
 
 const generationsInFlight = new Set<string>();
@@ -117,13 +117,16 @@ export function buildMansionRoomArtCandidatePromptV2(args: {
     .map((anchor) => `${anchor.relation} ${anchor.name} at normalized (${anchor.point.x.toFixed(2)}, ${anchor.point.y.toFixed(2)})`)
     .join("; ");
   return [
-    `Create an unoccupied 16:9 establishing plate for the ${args.room.name} in ${args.mansionName}.`,
+    `Synthesize an unoccupied 16:9 high-resolution hand-crafted Pixel Art establishing plate for the ${args.room.name} in ${args.mansionName}.`,
     styleDirection(args.styleJson),
     `Room type: ${args.room.templateId}.`,
     anchors ? `Spoiler-free authoring anchors: ${anchors}.` : "Keep the composition spacious and usable for later authoring.",
     "Use a fixed room-art silhouette with clear walls, doors, circulation openings, furniture masses, foreground, middle ground, and background.",
+    "Author the architecture, furnishings, materials, reflections, foliage, and light as deliberate coherent pixel clusters with crisp stepped edges.",
+    "Do not create a realistic plate and then downsample, quantize, posterize, pixelate, blur, add a mosaic grid, CRT treatment, scanlines, or any other pixel filter.",
+    "Use a balanced full palette with distinct environmental accent colors and clear cool-versus-warm light separation. Do not impose a global sepia, brown, monochrome, grayscale, or desaturated cast.",
     "Do not include people, characters, bodies, clues, evidence, blood, weapons, readable text, logos, symbols, or case-specific facts.",
-    "This is mansion-owned presentation art, not a hotspot map. Preserve navigable negative space and return one polished room plate.",
+    "This is mansion-owned Pixel Art presentation, not a hotspot map. Preserve navigable negative space and return one polished room plate.",
   ].join(" ");
 }
 
@@ -189,14 +192,21 @@ function cleanupUnreferencedRoomArt(db: DatabaseSync, userId: string): void {
 async function defaultGenerate(
   args: StageMansionRoomArtCandidateV2Args,
   prompt: string,
+  compositionReference: Buffer | null,
 ): Promise<GeneratedMansionRoomArtV2> {
-  const generated = await generateImage(prompt, args.apiKey ?? undefined, {
-    model: args.model?.trim() || undefined,
-    size: "1536x1024",
-    quality: "low",
-    background: "opaque",
-    fetchImpl: args.fetchImpl,
-  });
+  const generated = compositionReference
+    ? await editImage(prompt, compositionReference, args.apiKey ?? undefined, {
+        model: args.model?.trim() || undefined,
+        size: "1536x1024",
+        quality: "high",
+      })
+    : await generateImage(prompt, args.apiKey ?? undefined, {
+        model: args.model?.trim() || undefined,
+        size: "1536x1024",
+        quality: "high",
+        background: "opaque",
+        fetchImpl: args.fetchImpl,
+      });
   let bytes = generated.imageBytes;
   if (!bytes && generated.url) {
     const response = await (args.fetchImpl ?? fetch)(generated.url);
@@ -209,11 +219,37 @@ async function defaultGenerate(
   return { bytes, provider: "openai", model: generated.model };
 }
 
+function acceptedCompositionReference(
+  args: StageMansionRoomArtCandidateV2Args,
+  room: MansionLayoutRoomV2,
+): Buffer | null {
+  if (!room.acceptedRoomAssetId) return null;
+  const row = args.db.prepare(
+    `SELECT ciphertext, cipher_iv, cipher_tag, sha256
+       FROM debate_mystery_mansion_assets
+      WHERE id = ? AND user_id = ? AND mime_type LIKE 'image/%'`,
+  ).get(room.acceptedRoomAssetId, args.userId) as {
+    ciphertext: Buffer;
+    cipher_iv: Buffer;
+    cipher_tag: Buffer;
+    sha256: string;
+  } | undefined;
+  if (!row) return null;
+  const bytes = decryptBytes(
+    { ciphertext: row.ciphertext, iv: row.cipher_iv, tag: row.cipher_tag },
+    args.userKey,
+  );
+  if (createHash("sha256").update(bytes).digest("hex") !== row.sha256) {
+    throw new Error("The accepted room composition reference failed its integrity check.");
+  }
+  return bytes;
+}
+
 async function normalizeGeneratedRoomArt(bytes: Buffer): Promise<Buffer> {
   const normalized = await sharp(bytes, { failOn: "error" })
     .rotate()
     .flatten({ background: "#080d16" })
-    .resize(1600, 900, { fit: "cover", position: "centre" })
+    .resize(1920, 1080, { fit: "cover", position: "centre" })
     .webp({ quality: 92, effort: 5 })
     .toBuffer();
   if (!normalized.length || normalized.byteLength > MANSION_ROOM_ART_MAX_STORED_BYTES_V2) {
@@ -245,7 +281,7 @@ function storeReadyCandidate(args: {
       `INSERT INTO debate_mystery_mansion_assets
          (id, user_id, ciphertext, cipher_iv, cipher_tag, sha256, byte_size,
           mime_type, width, height, duration_ms, provider, model, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'image/webp', 1600, 900, NULL, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'image/webp', 1920, 1080, NULL, ?, ?, ?, ?)
        ON CONFLICT(user_id, sha256) DO UPDATE SET updated_at = excluded.updated_at`,
     ).run(
       proposedAssetId,
@@ -330,9 +366,10 @@ export async function stageMansionRoomArtCandidateV2(
   }
   generationsInFlight.add(generationKey);
   try {
+    const compositionReference = acceptedCompositionReference(args, room);
     const generated = await (args.generate
-      ? args.generate(prompt)
-      : defaultGenerate(args, prompt));
+      ? args.generate(prompt, compositionReference)
+      : defaultGenerate(args, prompt, compositionReference));
     const bytes = await normalizeGeneratedRoomArt(generated.bytes);
     return storeReadyCandidate({ ...args, prompt, generated, bytes });
   } catch (error) {
@@ -355,7 +392,7 @@ export function acceptMansionRoomArtCandidateV2(
 ): void {
   const row = readBundle(db, userId, bundleId);
   const layout = parseLayout(row);
-  roomFromLayout(layout, roomId);
+  const room = roomFromLayout(layout, roomId);
   const candidate = layout.roomArtCandidates.find((entry) => entry.roomId === roomId);
   if (candidate?.status !== "ready" || !candidate.assetId) {
     throw new HttpError(409, "Generate a ready room-art candidate before accepting it.");
@@ -376,6 +413,14 @@ export function acceptMansionRoomArtCandidateV2(
   const now = new Date().toISOString();
   db.exec("BEGIN IMMEDIATE");
   try {
+    if (room.acceptedRoomAssetId && room.acceptedRoomAssetId !== candidate.assetId) {
+      db.prepare(
+        `INSERT INTO debate_mystery_mansion_asset_refs
+           (bundle_id, user_id, asset_id, role, logical_id, created_at)
+         VALUES (?, ?, ?, 'room', ?, ?)
+         ON CONFLICT(bundle_id, role, logical_id) DO NOTHING`,
+      ).run(bundleId, userId, room.acceptedRoomAssetId, `${roomId}:illustrated-v1`, now);
+    }
     db.prepare(
       `INSERT INTO debate_mystery_mansion_asset_refs
          (bundle_id, user_id, asset_id, role, logical_id, created_at)
@@ -425,7 +470,7 @@ export function discardMansionRoomArtCandidateV2(
   }
 }
 
-/** Returns exactly one room to its canonical bundled Mosaic source. This is a
+/** Returns exactly one room to its canonical bundled Pixel Art source. This is a
  * local reset, not image generation: it clears only that room's accepted and
  * candidate art plus authored anchors/lights, and never touches another room. */
 export function regenerateMansionRoomAssetV2(

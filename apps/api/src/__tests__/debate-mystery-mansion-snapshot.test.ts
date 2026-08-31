@@ -128,6 +128,16 @@ describe("immutable mansion Case snapshots", () => {
     assert.equal(snapshot.presentation.title, "Frozen title");
     assert.equal(snapshot.layoutV2?.roomArtCandidates.length, 0);
     assert.ok(snapshot.layoutV2?.placementAnchors.length);
+    assert.ok(
+      snapshot.layoutV2?.placementAnchors.some((anchor) =>
+        anchor.roomId === "foyer" && anchor.name === "left wall"),
+      "an accepted non-default room plate gets neutral frozen placement anchors",
+    );
+    assert.ok(
+      !snapshot.layoutV2?.placementAnchors.some((anchor) =>
+        anchor.roomId === "foyer" && anchor.name === "umbrella stand"),
+      "an accepted non-default foyer must not inherit PRISM's umbrella hotspot",
+    );
     assert.ok(snapshot.layoutV2?.lights.length);
     assert.deepEqual(snapshot.presentation.assets.map((asset) => asset.id), [
       "accepted-room", "active-music", "cover",

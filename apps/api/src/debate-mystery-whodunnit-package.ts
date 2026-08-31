@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, linkSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
   canonicalPortablePackageJsonV1,
@@ -12,6 +13,7 @@ import {
   type MansionPackageHeaderV1,
   type MansionLayoutV2,
   type DebateMysteryMansionSnapshotV2,
+  type DebateMysteryDialogueGraphV2,
   type PortableMansionInstallationMetadataV1,
   type PortableMysteryAssetDescriptorV1,
   type PortableMysteryEncryptionModeV1,
@@ -33,6 +35,7 @@ import {
 import { exportPortableMansionPackageV1 } from "./debate-mystery-mansion-package.ts";
 import {
   decodeInternalCasePackageV1,
+  encodeInternalCasePackageV1,
   exportPortableCasePackageV1,
   portableWhodunnitCompositionRecordV1,
 } from "./debate-mystery-case-package.ts";
@@ -358,6 +361,74 @@ function evidenceAssignments(privateCase: Record<string, PortablePackageJsonValu
     "crimeSceneRoomId", "investigationRoomIds", "investigationHotspotIdsByRoom",
   ];
   return Object.fromEntries(keys.filter((key) => key in privateCase).map((key) => [key, privateCase[key]!]));
+}
+
+function courtContract(
+  graph: Record<string, PortablePackageJsonValueV1>,
+): Record<string, PortablePackageJsonValueV1> {
+  return asRecord(asJson({
+    witnessChapters: graph.witnessChapters ?? [],
+    prosecutionChoices: graph.prosecutionChoices ?? [],
+    verdictNodeIds: graph.verdictNodeIds ?? [],
+  }), "Portable court contract");
+}
+
+function graphValidationForPortableCase(
+  privateCase: Record<string, PortablePackageJsonValueV1>,
+  graph: Record<string, PortablePackageJsonValueV1>,
+): ReturnType<typeof validateDebateMysteryDialogueGraphV2> {
+  const config = privateCase.config && typeof privateCase.config === "object" &&
+      !Array.isArray(privateCase.config)
+    ? privateCase.config as Record<string, unknown>
+    : undefined;
+  const actorAccounts = Array.isArray(privateCase.actorAccounts)
+    ? privateCase.actorAccounts as Array<{ seatId?: unknown }>
+    : [];
+  const recordItems = Array.isArray(privateCase.recordItems)
+    ? privateCase.recordItems as Array<{ reference?: unknown }>
+    : [];
+  // Older portable graphs were certified before exact player-bot ownership
+  // became part of graph validation. Preserve their readable input boundary;
+  // current cutscene graphs opt into the stronger ownership contract.
+  const validatesOpeningExchangeOwnership = openingExchangeCount(graph) > 0;
+  return validateDebateMysteryDialogueGraphV2({
+    graph: graph as unknown as DebateMysteryDialogueGraphV2,
+    suspectSeatIds: actorAccounts.flatMap((entry) =>
+      typeof entry.seatId === "string" ? [entry.seatId] : []),
+    recordReferences: recordItems.flatMap((entry) =>
+      entry.reference && typeof entry.reference === "object"
+        ? [entry.reference as Parameters<typeof validateDebateMysteryDialogueGraphV2>[0]["recordReferences"][number]]
+        : []),
+    playerRole: config?.playerRole === "spectator" ? "spectator" : "participant",
+    roomIds: Array.isArray(privateCase.investigationRoomIds)
+      ? privateCase.investigationRoomIds.filter(
+          (entry): entry is string => typeof entry === "string",
+        )
+      : undefined,
+    personIds: Array.isArray(privateCase.investigationPersonIds)
+      ? privateCase.investigationPersonIds.filter(
+          (entry): entry is string => typeof entry === "string",
+        )
+      : undefined,
+    hotspotIdsByRoom:
+      privateCase.investigationHotspotIdsByRoom as Record<string, string[]> | undefined,
+    prosecutorBotId: validatesOpeningExchangeOwnership &&
+        typeof config?.prosecutorBotId === "string"
+      ? config.prosecutorBotId
+      : null,
+    rivalDefenseBotId: validatesOpeningExchangeOwnership &&
+        typeof config?.rivalDefenseBotId === "string"
+      ? config.rivalDefenseBotId
+      : null,
+    eyewitnessSeatId: typeof privateCase.eyewitnessSeatId === "string"
+      ? privateCase.eyewitnessSeatId
+      : null,
+    accusedAlibiSupportDiscoveryIds: Array.isArray(privateCase.accusedAlibiSupportDiscoveryIds)
+      ? privateCase.accusedAlibiSupportDiscoveryIds.filter(
+          (entry): entry is string => typeof entry === "string",
+        )
+      : [],
+  });
 }
 
 function sourceBundleId(db: DatabaseSync, userId: string, sessionId: string, configured: string | null): string {
@@ -831,28 +902,10 @@ async function openAndValidateWhodunnit(args: { envelope: Uint8Array; password?:
     manifest: { ...decoded.manifest.mansionManifest, assets: decoded.manifest.assets },
     assets: decoded.assets,
   });
-  const privateCase = decoded.manifest.privateCase as Record<string, unknown>;
-  const graph = decoded.manifest.dialogueGraph as unknown as Parameters<typeof validateDebateMysteryDialogueGraphV2>[0]["graph"];
-  const config = privateCase.config as Record<string, unknown> | undefined;
-  const actorAccounts = Array.isArray(privateCase.actorAccounts)
-    ? privateCase.actorAccounts as Array<{ seatId?: unknown }> : [];
-  const recordItems = Array.isArray(privateCase.recordItems)
-    ? privateCase.recordItems as Array<{ reference?: unknown }> : [];
-  const validation = validateDebateMysteryDialogueGraphV2({
-    graph,
-    suspectSeatIds: actorAccounts.flatMap((entry) => typeof entry.seatId === "string" ? [entry.seatId] : []),
-    recordReferences: recordItems.flatMap((entry) => entry.reference && typeof entry.reference === "object"
-      ? [entry.reference as Parameters<typeof validateDebateMysteryDialogueGraphV2>[0]["recordReferences"][number]] : []),
-    playerRole: config?.playerRole === "spectator" ? "spectator" : "participant",
-    roomIds: Array.isArray(privateCase.investigationRoomIds)
-      ? privateCase.investigationRoomIds.filter((entry): entry is string => typeof entry === "string") : undefined,
-    personIds: Array.isArray(privateCase.investigationPersonIds)
-      ? privateCase.investigationPersonIds.filter((entry): entry is string => typeof entry === "string") : undefined,
-    hotspotIdsByRoom: privateCase.investigationHotspotIdsByRoom as Record<string, string[]> | undefined,
-    eyewitnessSeatId: typeof privateCase.eyewitnessSeatId === "string" ? privateCase.eyewitnessSeatId : null,
-    accusedAlibiSupportDiscoveryIds: Array.isArray(privateCase.accusedAlibiSupportDiscoveryIds)
-      ? privateCase.accusedAlibiSupportDiscoveryIds.filter((entry): entry is string => typeof entry === "string") : [],
-  });
+  const validation = graphValidationForPortableCase(
+    decoded.manifest.privateCase,
+    decoded.manifest.dialogueGraph,
+  );
   if (!validation.valid) throw new PortableWhodunnitPackageError("Whodunnit dialogue graph is not playable.");
   if (
     canonicalPortablePackageJsonV1(asJson(decoded.manifest.proofContract)) !==
@@ -875,6 +928,469 @@ export async function previewPortableWhodunnitPackageV1(args: {
     header, title: decoded.manifest.title, description: decoded.manifest.description,
     creatorName: decoded.manifest.creator.name, castCount: decoded.manifest.cast.length,
     silent: decoded.manifest.silent,
+  };
+}
+
+export type PortableWhodunnitRoomCutsceneGraphMigrationV1 = (args: {
+  scope: "whodunnit" | "case";
+  graph: DebateMysteryDialogueGraphV2;
+  prosecutorBotId: string;
+}) => { graph: DebateMysteryDialogueGraphV2; changed: boolean };
+
+export interface PortableWhodunnitRoomCutsceneUpgradeResultV1 {
+  envelope: Uint8Array;
+  changed: boolean;
+  sourcePackageId: string;
+  packageId: string;
+  upgradedRoomCount: number;
+}
+
+const ROOM_CUTSCENE_MIGRATION_PROVENANCE_V1 =
+  "PRISM Whodunnit first-entry room cutscenes v1";
+
+function prosecutorBotIdForPortableCase(
+  privateCase: Record<string, PortablePackageJsonValueV1>,
+): string {
+  const config = privateCase.config;
+  const prosecutorBotId = config && typeof config === "object" && !Array.isArray(config) &&
+      typeof config.prosecutorBotId === "string"
+    ? config.prosecutorBotId.trim()
+    : "";
+  if (!prosecutorBotId) {
+    throw new PortableWhodunnitPackageError(
+      "Whodunnit package has no frozen Prosecutor bot for room cutscenes.",
+    );
+  }
+  return prosecutorBotId;
+}
+
+function openingExchangeCount(graph: Record<string, PortablePackageJsonValueV1>): number {
+  const introductions = graph.roomIntroductionNodeIdsByRoom;
+  if (!introductions || typeof introductions !== "object" || Array.isArray(introductions)) return 0;
+  return Object.values(introductions).filter((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const exchange = value.openingExchangeNodeIds;
+    return Boolean(
+      exchange && typeof exchange === "object" && !Array.isArray(exchange) &&
+      typeof exchange.prosecutionOpeningNodeId === "string" &&
+      typeof exchange.occupantResponseNodeId === "string" &&
+      typeof exchange.prosecutionHandoffNodeId === "string",
+    );
+  }).length;
+}
+
+function openingExchangeSemantics(
+  graph: Record<string, PortablePackageJsonValueV1>,
+): string[] {
+  const introductions = graph.roomIntroductionNodeIdsByRoom;
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  const lines = Array.isArray(graph.lines) ? graph.lines : [];
+  const nodeById = new Map(nodes.flatMap((value) =>
+    value && typeof value === "object" && !Array.isArray(value) && typeof value.id === "string"
+      ? [[value.id, value] as const]
+      : []));
+  const lineById = new Map(lines.flatMap((value) =>
+    value && typeof value === "object" && !Array.isArray(value) && typeof value.id === "string"
+      ? [[value.id, value] as const]
+      : []));
+  if (!introductions || typeof introductions !== "object" || Array.isArray(introductions)) return [];
+  const lineSemantics = (nodeId: PortablePackageJsonValueV1 | undefined) => {
+    const node = typeof nodeId === "string" ? nodeById.get(nodeId) : null;
+    const line = node && typeof node.lineId === "string" ? lineById.get(node.lineId) : null;
+    if (!line) return null;
+    return {
+      speakerKind: line.speakerKind ?? null,
+      stageActionText: line.stageActionText ?? null,
+      visibleText: line.visibleText ?? null,
+      spokenText: line.spokenText ?? null,
+      performance: line.performance ?? null,
+      mode: line.mode ?? null,
+    };
+  };
+  return Object.values(introductions).flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const exchange = value.openingExchangeNodeIds;
+    if (!exchange || typeof exchange !== "object" || Array.isArray(exchange)) return [];
+    return [canonicalPortablePackageJsonV1(asJson({
+      opening: lineSemantics(exchange.prosecutionOpeningNodeId),
+      occupant: lineSemantics(exchange.occupantResponseNodeId),
+      handoff: lineSemantics(exchange.prosecutionHandoffNodeId),
+    }))];
+  }).sort();
+}
+
+function verifiedRoomCutsceneGraphMigration(args: {
+  scope: "whodunnit" | "case";
+  graph: Record<string, PortablePackageJsonValueV1>;
+  privateCase: Record<string, PortablePackageJsonValueV1>;
+  migrateGraph: PortableWhodunnitRoomCutsceneGraphMigrationV1;
+}): { graph: Record<string, PortablePackageJsonValueV1>; changed: boolean } {
+  const beforeCanonical = canonicalPortablePackageJsonV1(asJson(args.graph));
+  const prosecutorBotId = prosecutorBotIdForPortableCase(args.privateCase);
+  const migrated = args.migrateGraph({
+    scope: args.scope,
+    graph: asJson(args.graph) as unknown as DebateMysteryDialogueGraphV2,
+    prosecutorBotId,
+  });
+  const graph = asRecord(asJson(migrated.graph), `${args.scope} migrated dialogue graph`);
+  const afterCanonical = canonicalPortablePackageJsonV1(asJson(graph));
+  if (migrated.changed !== (beforeCanonical !== afterCanonical)) {
+    throw new PortableWhodunnitPackageError(
+      `The ${args.scope} room-cutscene migration reported an inconsistent change result.`,
+    );
+  }
+  const repeated = args.migrateGraph({
+    scope: args.scope,
+    graph: asJson(graph) as unknown as DebateMysteryDialogueGraphV2,
+    prosecutorBotId,
+  });
+  if (
+    repeated.changed ||
+    canonicalPortablePackageJsonV1(asJson(repeated.graph)) !== afterCanonical
+  ) {
+    throw new PortableWhodunnitPackageError(
+      `The ${args.scope} room-cutscene migration is not idempotent.`,
+    );
+  }
+  return { graph, changed: migrated.changed };
+}
+
+function withRoomCutsceneProvenance(args: {
+  provenance: WhodunnitPackageManifestV1["provenance"];
+  prismVersion: string;
+  createdAt: string;
+}): WhodunnitPackageManifestV1["provenance"] {
+  const generatedWith = Array.isArray(args.provenance.generatedWith)
+    ? args.provenance.generatedWith.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  return {
+    ...args.provenance,
+    createdAt: args.createdAt,
+    prismVersion: args.prismVersion,
+    generatedWith: [
+      ...generatedWith.filter(
+        (entry) => entry !== ROOM_CUTSCENE_MIGRATION_PROVENANCE_V1,
+      ),
+      ROOM_CUTSCENE_MIGRATION_PROVENANCE_V1,
+    ],
+  };
+}
+
+function canonicalWithoutGraphValidation(
+  privateCase: Record<string, PortablePackageJsonValueV1>,
+): string {
+  const preserved = asRecord(asJson(privateCase), "Portable private case");
+  delete preserved.graphValidation;
+  return canonicalPortablePackageJsonV1(asJson(preserved));
+}
+
+function assertCanonicalPreserved(label: string, before: unknown, after: unknown): void {
+  if (
+    canonicalPortablePackageJsonV1(asJson(before)) !==
+    canonicalPortablePackageJsonV1(asJson(after))
+  ) {
+    throw new PortableWhodunnitPackageError(
+      `Room-cutscene upgrade changed protected ${label}.`,
+    );
+  }
+}
+
+/** Authenticates and upgrades both the flattened replay graph and embedded
+ * certified `.case` graph. This boundary performs no provider or network work. */
+export async function upgradePortableWhodunnitRoomCutscenesV1(args: {
+  envelope: Uint8Array;
+  password?: string;
+  prismVersion: string;
+  migrateGraph: PortableWhodunnitRoomCutsceneGraphMigrationV1;
+}): Promise<PortableWhodunnitRoomCutsceneUpgradeResultV1> {
+  const authenticated = await openAndValidateWhodunnit({
+    envelope: args.envelope,
+    password: args.password,
+  });
+  const source = authenticated.decoded;
+  const composition = source.manifest.composition;
+  const caseArchive = composition && source.components?.get(composition.case.archivePath);
+  const mansionArchive = composition && source.components?.get(composition.mansion.archivePath);
+  if (!composition || !caseArchive || !mansionArchive) {
+    throw new PortableWhodunnitPackageError(
+      "Room-cutscene upgrade requires a composed Whodunnit with certified case and mansion components.",
+    );
+  }
+
+  const openedCase = openPortableMysteryEnvelopeV1({ envelope: caseArchive });
+  if (openedCase.header.packageType !== "case") {
+    throw new PortableWhodunnitPackageError("The embedded case component is invalid.");
+  }
+  const casePreflight = preflightPortableMysteryArchiveV1(openedCase.payload);
+  const sourceCase = decodeInternalCasePackageV1(openedCase.payload);
+  if (
+    openedCase.header.expandedBytes !== casePreflight.expandedBytes ||
+    openedCase.header.assetCount !== 0 ||
+    casePreflight.entryCount !== 1 ||
+    openedCase.header.title !== sourceCase.title ||
+    openedCase.header.creatorName !== sourceCase.creator.name ||
+    JSON.stringify(openedCase.header.compatibility) !== JSON.stringify(sourceCase.compatibility) ||
+    JSON.stringify(openedCase.header.contentWarnings) !== JSON.stringify(sourceCase.contentWarnings)
+  ) {
+    throw new PortableWhodunnitPackageError(
+      "The embedded case header does not match its authenticated contents.",
+    );
+  }
+
+  const parentMigration = verifiedRoomCutsceneGraphMigration({
+    scope: "whodunnit",
+    graph: source.manifest.dialogueGraph,
+    privateCase: source.manifest.privateCase,
+    migrateGraph: args.migrateGraph,
+  });
+  const caseMigration = verifiedRoomCutsceneGraphMigration({
+    scope: "case",
+    graph: sourceCase.dialogueGraph,
+    privateCase: sourceCase.privateCase,
+    migrateGraph: args.migrateGraph,
+  });
+  if (parentMigration.changed !== caseMigration.changed) {
+    throw new PortableWhodunnitPackageError(
+      "Flattened Whodunnit and embedded case require different room-cutscene migrations.",
+    );
+  }
+  if (!parentMigration.changed) {
+    return {
+      envelope: Uint8Array.from(args.envelope),
+      changed: false,
+      sourcePackageId: source.manifest.packageId,
+      packageId: source.manifest.packageId,
+      upgradedRoomCount: openingExchangeCount(source.manifest.dialogueGraph),
+    };
+  }
+
+  const parentBeforeCount = openingExchangeCount(source.manifest.dialogueGraph);
+  const caseBeforeCount = openingExchangeCount(sourceCase.dialogueGraph);
+  const parentAfterCount = openingExchangeCount(parentMigration.graph);
+  const caseAfterCount = openingExchangeCount(caseMigration.graph);
+  if (
+    parentAfterCount <= parentBeforeCount ||
+    caseAfterCount <= caseBeforeCount ||
+    parentAfterCount - parentBeforeCount !== caseAfterCount - caseBeforeCount ||
+    parentAfterCount !== caseAfterCount ||
+    canonicalPortablePackageJsonV1(asJson(openingExchangeSemantics(parentMigration.graph))) !==
+      canonicalPortablePackageJsonV1(asJson(openingExchangeSemantics(caseMigration.graph)))
+  ) {
+    throw new PortableWhodunnitPackageError(
+      "Flattened Whodunnit and embedded case produced different room-cutscene coverage.",
+    );
+  }
+
+  const parentPrivate = asRecord(asJson(source.manifest.privateCase), "Whodunnit private case");
+  const parentValidation = graphValidationForPortableCase(parentPrivate, parentMigration.graph);
+  if (!parentValidation.valid) {
+    throw new PortableWhodunnitPackageError(
+      `Upgraded Whodunnit dialogue graph is not playable: ${parentValidation.errors.join(" ")}`,
+    );
+  }
+  parentPrivate.graphValidation = asJson(parentValidation);
+  const embeddedPrivate = asRecord(asJson(sourceCase.privateCase), "Embedded private case");
+  const embeddedValidation = graphValidationForPortableCase(embeddedPrivate, caseMigration.graph);
+  if (!embeddedValidation.valid) {
+    throw new PortableWhodunnitPackageError(
+      `Upgraded embedded case dialogue graph is not playable: ${embeddedValidation.errors.join(" ")}`,
+    );
+  }
+  embeddedPrivate.graphValidation = asJson(embeddedValidation);
+  if (
+    canonicalWithoutGraphValidation(source.manifest.privateCase) !==
+      canonicalWithoutGraphValidation(parentPrivate) ||
+    canonicalWithoutGraphValidation(sourceCase.privateCase) !==
+      canonicalWithoutGraphValidation(embeddedPrivate)
+  ) {
+    throw new PortableWhodunnitPackageError("Room-cutscene upgrade changed sealed case truth.");
+  }
+
+  const createdAt = new Date().toISOString();
+  const embeddedPrivateCanonical = canonicalPortablePackageJsonV1(asJson(embeddedPrivate));
+  const embeddedGraphCanonical = canonicalPortablePackageJsonV1(asJson(caseMigration.graph));
+  const upgradedCase = {
+    ...sourceCase,
+    packageId: randomUUID(),
+    provenance: withRoomCutsceneProvenance({
+      provenance: sourceCase.provenance,
+      prismVersion: args.prismVersion,
+      createdAt,
+    }),
+    privateCase: embeddedPrivate,
+    proofContract: proofContract(embeddedPrivate),
+    dialogueGraph: caseMigration.graph,
+    court: courtContract(caseMigration.graph),
+    evidenceAssignments: evidenceAssignments(embeddedPrivate),
+    certification: {
+      ...sourceCase.certification,
+      caseHash: sha256(embeddedPrivateCanonical),
+      graphHash: sha256(embeddedGraphCanonical),
+      graphValid: true as const,
+    },
+  };
+  const upgradedCasePayload = encodeInternalCasePackageV1(upgradedCase);
+  const upgradedCasePreflight = preflightPortableMysteryArchiveV1(upgradedCasePayload);
+  const upgradedCaseArchive = sealPortableMysteryEnvelopeV1({
+    payload: upgradedCasePayload,
+    mode: openedCase.header.encryptionMode,
+    metadata: {
+      packageType: "case",
+      title: upgradedCase.title,
+      creatorName: upgradedCase.creator.name,
+      compatibility: upgradedCase.compatibility,
+      expandedBytes: upgradedCasePreflight.expandedBytes,
+      assetCount: 0,
+      contentWarnings: upgradedCase.contentWarnings,
+    },
+  });
+
+  const upgradedComposition = portableWhodunnitCompositionRecordV1({
+    caseArchive: upgradedCaseArchive,
+    mansionArchive,
+  });
+  const runtimeAudioManifest = source.manifest.runtime.audioManifest
+    ? asRecord(asJson(source.manifest.runtime.audioManifest), "Whodunnit audio manifest")
+    : null;
+  if (runtimeAudioManifest) {
+    runtimeAudioManifest.caseHash = sha256(JSON.stringify(parentPrivate));
+    runtimeAudioManifest.dialogueGraphHash = sha256(JSON.stringify(parentMigration.graph));
+    runtimeAudioManifest.preparationMode = "lazy-on-demand-v1";
+  }
+  const upgradedManifest: WhodunnitPackageManifestV1 = {
+    ...source.manifest,
+    packageId: randomUUID(),
+    provenance: withRoomCutsceneProvenance({
+      provenance: source.manifest.provenance,
+      prismVersion: args.prismVersion,
+      createdAt,
+    }),
+    composition: upgradedComposition,
+    privateCase: parentPrivate,
+    proofContract: proofContract(parentPrivate),
+    dialogueGraph: parentMigration.graph,
+    court: courtContract(parentMigration.graph),
+    evidenceAssignments: evidenceAssignments(parentPrivate),
+    runtime: { ...source.manifest.runtime, audioManifest: runtimeAudioManifest },
+  };
+
+  assertCanonicalPreserved("mansion", source.manifest.mansionManifest, upgradedManifest.mansionManifest);
+  assertCanonicalPreserved("cast", source.manifest.cast, upgradedManifest.cast);
+  assertCanonicalPreserved("public case", source.manifest.publicCase, upgradedManifest.publicCase);
+  assertCanonicalPreserved(
+    "compiled public state",
+    source.manifest.runtime.compiledPublicState,
+    upgradedManifest.runtime.compiledPublicState,
+  );
+  assertCanonicalPreserved(
+    "completed playthrough",
+    source.manifest.runtime.completedPlaythrough ?? null,
+    upgradedManifest.runtime.completedPlaythrough ?? null,
+  );
+  assertCanonicalPreserved("assets", source.manifest.assets, upgradedManifest.assets);
+  assertCanonicalPreserved("embedded case public state", sourceCase.publicCase, upgradedCase.publicCase);
+  assertCanonicalPreserved("embedded case requirements", sourceCase.mansionRequirements, upgradedCase.mansionRequirements);
+  assertCanonicalPreserved("embedded case cast", sourceCase.cast, upgradedCase.cast);
+
+  const components = new Map(source.components);
+  components.set(upgradedComposition.case.archivePath, upgradedCaseArchive);
+  components.set(upgradedComposition.mansion.archivePath, mansionArchive);
+  const upgradedPayload = encodeInternalWhodunnitPackageV1({
+    manifest: upgradedManifest,
+    assets: source.assets,
+    components,
+  });
+  const upgradedPreflight = preflightPortableMysteryArchiveV1(upgradedPayload);
+  const envelope = sealPortableMysteryEnvelopeV1({
+    payload: upgradedPayload,
+    mode: authenticated.header.encryptionMode,
+    password: args.password,
+    metadata: {
+      packageType: "whodunnit",
+      title: upgradedManifest.title,
+      creatorName: upgradedManifest.creator.name,
+      compatibility: upgradedManifest.compatibility,
+      expandedBytes: upgradedPreflight.expandedBytes,
+      assetCount: upgradedManifest.assets.length,
+      contentWarnings: upgradedManifest.contentWarnings,
+    },
+  });
+  const verified = await openAndValidateWhodunnit({ envelope, password: args.password });
+  if (verified.decoded.manifest.packageId !== upgradedManifest.packageId) {
+    throw new PortableWhodunnitPackageError("Upgraded package identity failed verification.");
+  }
+  return {
+    envelope,
+    changed: true,
+    sourcePackageId: source.manifest.packageId,
+    packageId: upgradedManifest.packageId,
+    upgradedRoomCount: parentAfterCount,
+  };
+}
+
+/** Writes only a newly authenticated sibling package. Existing files and the
+ * source path are never replaced. */
+export async function upgradePortableWhodunnitRoomCutscenesFileV1(args: {
+  inputPath: string;
+  outputPath: string;
+  password?: string;
+  prismVersion: string;
+  migrateGraph: PortableWhodunnitRoomCutsceneGraphMigrationV1;
+}): Promise<PortableWhodunnitRoomCutsceneUpgradeResultV1 & {
+  inputSha256: string;
+  outputSha256: string | null;
+  written: boolean;
+}> {
+  const inputPath = resolve(args.inputPath);
+  const outputPath = resolve(args.outputPath);
+  if (inputPath === outputPath) {
+    throw new PortableWhodunnitPackageError(
+      "Room-cutscene upgrade output must be a sibling path, never the source package.",
+    );
+  }
+  if (existsSync(outputPath)) {
+    throw new PortableWhodunnitPackageError(
+      "Room-cutscene upgrade output already exists; no file was changed.",
+    );
+  }
+  const sourceBytes = Uint8Array.from(readFileSync(inputPath));
+  const inputSha256 = sha256(sourceBytes);
+  const upgraded = await upgradePortableWhodunnitRoomCutscenesV1({
+    envelope: sourceBytes,
+    password: args.password,
+    prismVersion: args.prismVersion,
+    migrateGraph: args.migrateGraph,
+  });
+  if (!upgraded.changed) {
+    return {
+      ...upgraded,
+      inputSha256,
+      outputSha256: null,
+      written: false,
+    };
+  }
+  const temporaryPath = join(
+    dirname(outputPath),
+    `.${basename(outputPath)}.${randomUUID()}.tmp`,
+  );
+  try {
+    writeFileSync(temporaryPath, upgraded.envelope, { flag: "wx" });
+    linkSync(temporaryPath, outputPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new PortableWhodunnitPackageError(
+        "Room-cutscene upgrade output already exists; no file was changed.",
+      );
+    }
+    throw error;
+  } finally {
+    if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+  }
+  return {
+    ...upgraded,
+    inputSha256,
+    outputSha256: sha256(upgraded.envelope),
+    written: true,
   };
 }
 

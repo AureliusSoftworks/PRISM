@@ -489,6 +489,29 @@ test("V2 graph validation requires a private bot carrier for anonymous Babble", 
   assert.ok(missingCarrier.errors.some((error) => error.includes("no private bot carrier")));
 });
 
+test("V2 graph validation makes persona Babble a public embodied-player thought", () => {
+  const graph = validGraph();
+  const playerThought = graph.lines[0]!;
+  playerThought.mode = "persona_babble";
+  playerThought.speakerKind = "player";
+  playerThought.speakerBotId = "prosecutor-1";
+  const valid = validateDebateMysteryDialogueGraphV2({
+    graph,
+    suspectSeatIds: ["seat-1", "seat-2"],
+    recordReferences: validationRecordReferences,
+  });
+  assert.equal(valid.valid, true, valid.errors.join("\n"));
+
+  playerThought.speakerBotId = null;
+  const missingEmbodiedSpeaker = validateDebateMysteryDialogueGraphV2({
+    graph,
+    suspectSeatIds: ["seat-1", "seat-2"],
+    recordReferences: validationRecordReferences,
+  });
+  assert.equal(missingEmbodiedSpeaker.valid, false);
+  assert.ok(missingEmbodiedSpeaker.errors.some((error) => error.includes("no embodied bot speaker")));
+});
+
 test("V2 graph validation permits one automated Spectator prosecution option only", () => {
   const graph = validGraph();
   const prompt = node("spectator-choice-prompt", "prosecution_choice", {

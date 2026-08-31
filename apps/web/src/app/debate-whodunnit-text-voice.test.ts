@@ -53,15 +53,22 @@ test("routes only written text through the selected bounded voice lifecycle", ()
     mysterySource,
     /playDebateMysteryTextVoice\(\{[\s\S]{0,260}signal: controller\.signal,[\s\S]{0,220}play: props\.playMysteryTextVoice/u,
   );
+  assert.match(mysterySource, /instant: roomPlayerObservationActive/u);
+  assert.match(pageSource, /preferProceduralBabble: instant === true/u);
 });
 
-test("keeps anonymous Casekeeper Babble and spoken character TTS distinct", () => {
+test("keeps embodied player Babble and spoken character TTS distinct", () => {
   assert.match(
     tutorialSource,
-    /Bottish is the default; anonymous Casekeeper speech keeps its authored Babble carrier, and spoken character TTS is unchanged/u,
+    /Room observations are attributed to the player character, use Babble whenever written accompaniment is on/u,
   );
+  assert.match(tutorialSource, /spoken character TTS is unchanged/u);
   assert.match(
     pageSource,
-    /Anonymous Casekeeper speech keeps its[\s\S]{0,80}authored Babble carrier; character speech keeps its[\s\S]{0,80}configured English or Premium voice/u,
+    /Player-attributed room observations use Babble[\s\S]{0,300}character speech keeps its\s*configured English or\s*Premium voice/u,
+  );
+  assert.match(
+    mysterySource,
+    /voiceProfile: roomPlayerObservationActive\s*\? prosecutorBot\?\.voiceProfile \?\? null\s*: null/u,
   );
 });

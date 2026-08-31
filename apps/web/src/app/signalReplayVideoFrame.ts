@@ -53,6 +53,60 @@ export const SIGNAL_REPLAY_DEFAULT_INTRO_DURATION_MS = 8_750;
 export const SIGNAL_REPLAY_INTRO_LANDING_FADE_MS = 650;
 /** Must match the live Signal camera move in botcast.module.css. */
 export const SIGNAL_REPLAY_CAMERA_TRANSITION_MS = 900;
+/**
+ * A saved mouth track is allowed one short visual frame to settle after its
+ * authoritative speech beat. Beyond that, the track was captured after the
+ * audible source had already begun and must be sampled forward on replay.
+ */
+export const SIGNAL_REPLAY_MOUTH_CAPTURE_DRIFT_TOLERANCE_MS = 80;
+
+/**
+ * Replays normally use the captured mouth track verbatim. Older recordings
+ * can contain a render-scheduling gap at the start of a spoken beat, though:
+ * the recorded master has audible speech while both its mouth and semantic
+ * speech-activity tracks begin later. Rebase only that proven initial gap so
+ * the mouth follows the audio transport without altering normal phoneme rests.
+ */
+export function signalReplayMouthSampleElapsedMs(args: {
+  manifest: ReplayManifestV2;
+  participantId: string;
+  replayElapsedMs: number;
+  speechStartMs: number;
+  speechEndMs: number;
+}): number {
+  const speechStartMs = Math.max(0, Math.round(args.speechStartMs));
+  const speechEndMs = Math.max(
+    speechStartMs + 1,
+    Math.round(args.speechEndMs),
+  );
+  const replayElapsedMs = Math.max(0, Math.round(args.replayElapsedMs));
+  if (replayElapsedMs < speechStartMs || replayElapsedMs >= speechEndMs) {
+    return replayElapsedMs;
+  }
+  const speechActivityTrack = args.manifest.presentation?.speechActivityTracks?.find(
+    (track) => track.participantId === args.participantId,
+  );
+  const mouthTrack = args.manifest.presentation?.mouthTracks.find(
+    (track) => track.participantId === args.participantId,
+  );
+  const capturedStartMs =
+    speechActivityTrack?.cues.find(
+      (cue) =>
+        cue.active && cue.atMs >= speechStartMs && cue.atMs < speechEndMs,
+    )?.atMs ??
+    mouthTrack?.cues.find(
+      (cue) =>
+        cue.shape !== "closed" &&
+        cue.atMs >= speechStartMs &&
+        cue.atMs < speechEndMs,
+    )?.atMs;
+  if (capturedStartMs === undefined) return replayElapsedMs;
+  const driftMs = Math.max(0, capturedStartMs - speechStartMs);
+  if (driftMs <= SIGNAL_REPLAY_MOUTH_CAPTURE_DRIFT_TOLERANCE_MS) {
+    return replayElapsedMs;
+  }
+  return Math.min(speechEndMs - 1, replayElapsedMs + driftMs);
+}
 
 /**
  * True when a media-clock sample passed a saved semantic boundary. The replay

@@ -15,10 +15,12 @@ import type {
 import {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
+  compileDeterministicDebateMystery,
   debateMysteryHouseStyleV2,
   debateMysteryTalkTopicMirrorsRecordV2,
   debateMysterySpectatorEvidenceReferencesV2,
   reasoningGenerationBudgetMs,
+  resolveDebateMysteryConfig,
   resolveDebateMysteryConfigV2,
 } from "@localai/shared";
 import { initializeDatabase } from "../db.ts";
@@ -26,6 +28,8 @@ import { buildBabbleSpeechText } from "../babble-text.ts";
 import { exportUserSnapshot, importUserSnapshot } from "../backup.ts";
 import {
   activeDebateMysteryCompilationV2,
+  assertMysteryExaminationDiscoveryGroundingV2,
+  assertMysteryObservationCopyV2,
   applyDebateMysteryActionV2,
   applyDebateMysteryActionWithPersonaV2,
   cancelDebateMysteryCompilationV2,
@@ -36,9 +40,12 @@ import {
   getDebateMysteryAudioClipV2,
   getDebateMysteryCaseV2,
   getDebateMysteryCompilationStatusV2,
+  deterministicMysteryAmbientObservationV2,
   mysteryCasekeeperVoiceBotIdV2,
+  mysteryUnstructuredActionableDiscoveryV2,
   mysteryRoomIntroductionPersonaCadenceV2,
   mysteryRoomIntroductionPersonaDialogueV2,
+  migrateDebateMysteryRoomOpeningCutscenesV2,
   mysteryV2CriticalAuthoringAttemptTimeoutMs,
   playDebateMysteryV2Again,
   restartDebateMysteryCourtV2,
@@ -162,11 +169,27 @@ class V2AuthorProvider implements LlmProvider {
         };
       }>;
       lines?: Array<{ lineId: string; speakerBotId: string; canonicalText: string }>;
+      observationWritingBrief?: {
+        name: string;
+        frozenVoiceCues: string[];
+        sourceHash: string;
+      };
       setup: {
         eyewitnessSeatId: string | null;
         victimId: string;
         evidenceIds: string[];
         examinationIds: string[];
+        examinationTargets?: Array<{
+          id: string;
+          outcome: "consequential" | "ambient";
+          room: {
+            id: string;
+            name: string;
+            mansionAnchors: Array<{ name: string; relation: string }>;
+          };
+          hotspot: { id: string; label: string; physicalAnchor: string };
+          requiredPublicFacts: string[];
+        }>;
         roomNames: Array<{ roomId: string; name: string }>;
         suspects: Array<{
           seatId: string;
@@ -254,10 +277,17 @@ class V2AuthorProvider implements LlmProvider {
       });
     }
     if (request.section === "room_examinations") {
+      const targetById = new Map(
+        (request.setup.examinationTargets ?? []).map((target) => [target.id, target]),
+      );
       return JSON.stringify({
         examinations: request.setup.examinationIds.map((id, index) => ({
           id,
-          text: `Examination ${index + 1} reveals a specific material disturbance, documents its position, and updates the Case File without guessing what it means.`,
+          text: targetById.get(id)?.outcome === "consequential"
+            ? `At the ${targetById.get(id)!.hotspot.physicalAnchor}: ${targetById.get(id)!.requiredPublicFacts.join(" ")}`
+            : index % 2 === 0
+              ? `Hmm… Nothing unusual about the ${targetById.get(id)?.hotspot.physicalAnchor ?? "area"}.`
+              : `Just an ordinary ${targetById.get(id)?.hotspot.label ?? "corner"}.`,
         })),
       });
     }
@@ -527,7 +557,15 @@ class ResilientRoomExaminationsV2AuthorProvider extends V2AuthorProvider {
   ): Promise<string> {
     const request = JSON.parse(messages.at(-1)!.content) as {
       section?: string;
-      setup?: { examinationIds?: string[] };
+      setup?: {
+        examinationIds?: string[];
+        examinationTargets?: Array<{
+          id: string;
+          outcome: "consequential" | "ambient";
+          hotspot: { label: string; physicalAnchor: string };
+          requiredPublicFacts: string[];
+        }>;
+      };
     };
     if (request.section !== "room_examinations") {
       return super.generateResponse(messages, options);
@@ -539,9 +577,16 @@ class ResilientRoomExaminationsV2AuthorProvider extends V2AuthorProvider {
     this.calls += 1;
     this.sections.push("room_examinations");
     if (batchIndex === 0) {
+      const targetById = new Map(
+        (request.setup?.examinationTargets ?? []).map((target) => [target.id, target]),
+      );
       const examinationsById = examinationIds.map((id, index) => {
-        const text =
-          `Mapped examination ${index + 1} records a visible material disturbance and its exact position without deciding what the observation proves.`;
+        const target = targetById.get(id);
+        const text = target?.outcome === "consequential"
+          ? `At the ${target.hotspot.physicalAnchor}: ${target.requiredPublicFacts.join(" ")}`
+          : index % 2 === 0
+            ? `Hmm… Nothing unusual about the ${target?.hotspot.physicalAnchor ?? "area"}.`
+            : `Just an ordinary ${target?.hotspot.label ?? "corner"}.`;
         this.firstBatchTextById.set(id, text);
         return { id, text };
       });
@@ -987,6 +1032,25 @@ class CourtroomInvestigationV2AuthorProvider extends V2AuthorProvider {
     const parsed = JSON.parse(response) as { suspect?: Record<string, unknown> };
     if (!parsed.suspect) return response;
     parsed.suspect.roomIntroduction = "The Court has no patience for games, so ask your questions carefully.";
+    return JSON.stringify(parsed);
+  }
+}
+
+class LeakingRoomOpeningV2AuthorProvider extends V2AuthorProvider {
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const response = await super.generateResponse(messages, options);
+    const request = JSON.parse(String(messages.at(-1)?.content ?? "{}")) as { section?: string };
+    if (request.section !== "suspect_chapter") return response;
+    const parsed = JSON.parse(response) as { suspect?: Record<string, unknown> };
+    if (!parsed.suspect) return response;
+    parsed.suspect.roomOpeningExchange = {
+      prosecutionOpening: "The hidden evidence proves who the culprit is.",
+      occupantResponse: "My alibi is that I was in the library before the alarm.",
+      prosecutionHandoff: "Unlock the record and mark this room complete.",
+    };
     return JSON.stringify(parsed);
   }
 }
@@ -1476,6 +1540,279 @@ function config(): DebateWhodunnitCreateConfigV2 {
   };
 }
 
+it("rejects invented access tools and codes outside frozen Examine targets", () => {
+  const scaffold = compileDeterministicDebateMystery({
+    config: resolveDebateMysteryConfig({
+      version: 1,
+      preset: "compact",
+      difficulty: "classic",
+      artMode: "bundled",
+      inspiration: "A violet-hour archive mystery",
+      nonce: "grounded-examinations",
+      suspectBotIds: ["bot-1", "bot-2", "bot-3", "bot-4"],
+      prosecutorPartnerBotId: "bot-5",
+      rivalDefenseBotId: "bot-6",
+    }),
+    suspects: [1, 2, 3, 4].map((index) => ({
+      botId: `bot-${index}`,
+      exportHash: `export-${index}`,
+      name: `Actor ${index}`,
+      color: null,
+      glyph: null,
+    })),
+  });
+  const contextual = scaffold.activeRegions.find(
+    (outcome) => !outcome.evidenceId && !outcome.inventoryItemId,
+  )!;
+  assert.throws(() => assertMysteryExaminationDiscoveryGroundingV2({
+    scaffold,
+    entries: [{
+      id: `${contextual.roomId}:${contextual.regionId}`,
+      text: "A brass key bears the access code 4-1-9.",
+    }],
+  }), /invented an actionable object or access code/iu);
+
+  const itemOutcome = scaffold.activeRegions.find((outcome) => outcome.inventoryItemId)!;
+  const item = scaffold.inventoryItems.find((candidate) => candidate.id === itemOutcome.inventoryItemId)!;
+  assert.doesNotThrow(() => assertMysteryExaminationDiscoveryGroundingV2({
+    scaffold,
+    entries: [{
+      id: `${itemOutcome.roomId}:${itemOutcome.regionId}`,
+      text: `You recover ${item.title}. ${item.description}`,
+    }],
+  }));
+  assert.equal(mysteryUnstructuredActionableDiscoveryV2("A key detail is the dust pattern."), false);
+});
+
+it("accepts mundane observations and direct facts while rejecting generic forensic filler", () => {
+  const target = (
+    id: string,
+    outcome: "ambient" | "consequential",
+    requiredPublicFacts: string[] = [],
+  ) => ({
+    id,
+    outcome,
+    room: { id: "room-foyer", name: "Foyer", mansionAnchors: [] },
+    hotspot: {
+      id: "banister",
+      label: "Banister",
+      physicalAnchor: "banister",
+    },
+    requiredPublicFacts,
+  });
+
+  assert.doesNotThrow(() => assertMysteryObservationCopyV2({
+    targets: [target("smooth", "ambient")],
+    entries: [{ id: "smooth", text: "The banister is smooth to the touch." }],
+  }));
+  assert.doesNotThrow(() => assertMysteryObservationCopyV2({
+    targets: [target("nothing", "ambient")],
+    entries: [{ id: "nothing", text: "Hmm… Nothing over here." }],
+  }));
+  assert.doesNotThrow(() => assertMysteryObservationCopyV2({
+    targets: [target("shelves", "ambient")],
+    entries: [{ id: "shelves", text: "Just some ordinary shelves." }],
+  }));
+  assert.doesNotThrow(() => assertMysteryObservationCopyV2({
+    targets: [target("quiet", "ambient")],
+    entries: [{ id: "quiet", text: "…" }],
+  }));
+  assert.doesNotThrow(() => assertMysteryObservationCopyV2({
+    targets: [target("humor", "ambient")],
+    entries: [{ id: "humor", text: "This chandelier is trying very hard." }],
+  }));
+
+  const directFacts = [
+    "This window has a latch.",
+    "It has been opened recently.",
+  ];
+  assert.doesNotThrow(() => assertMysteryObservationCopyV2({
+    targets: [target("window", "consequential", directFacts)],
+    entries: [{ id: "window", text: directFacts.join(" ") }],
+  }));
+
+  for (const [index, text] of [
+    "Faint smudges gather around the latch.",
+    "A single fiber clings to the shelf.",
+    "There is a dust-free patch below the frame.",
+    "The slightly compressed cushion suggests repeated handling.",
+    "Recent oily handling marks the knob.",
+    "The immaculate surface proves someone wiped it clean.",
+    "A mark bends as if from a hurried shoe.",
+    "Fingerprints clustered around the latch indicate repeated use.",
+  ].entries()) {
+    assert.throws(() => assertMysteryObservationCopyV2({
+      targets: [target(`filler-${index}`, "ambient")],
+      entries: [{ id: `filler-${index}`, text }],
+    }), /generic forensic filler|invented an implication/iu);
+  }
+
+  assert.throws(() => assertMysteryObservationCopyV2({
+    targets: [target("invented", "ambient")],
+    entries: [{
+      id: "invented",
+      text: "The latch was recently handled and proves the suspect returned.",
+    }],
+  }), /invented an implication/iu);
+
+  const discouragedButFrozen = "A faint smudge crosses the latch.";
+  assert.doesNotThrow(() => assertMysteryObservationCopyV2({
+    targets: [target("frozen-smudge", "consequential", [discouragedButFrozen])],
+    entries: [{ id: "frozen-smudge", text: discouragedButFrozen }],
+  }));
+});
+
+it("keeps deterministic ambient observation fallback ordinary and anchor-grounded", () => {
+  const observation = deterministicMysteryAmbientObservationV2({
+    anchor: "the ordinary shelves",
+    personaSourceHash: digest("frozen-prosecutor-persona"),
+  });
+  assert.match(observation, /ordinary shelves/iu);
+  assert.doesNotMatch(
+    observation,
+    /smudge|gleam|fiber|hair|thread|dust|compressed|oily|immaculate|hurried shoe/iu,
+  );
+  assert.equal(
+    observation,
+    deterministicMysteryAmbientObservationV2({
+      anchor: "the ordinary shelves",
+      personaSourceHash: digest("frozen-prosecutor-persona"),
+    }),
+  );
+});
+
+it("keeps deterministic observation fallback aligned with broad frozen persona cues", () => {
+  assert.equal(
+    deterministicMysteryAmbientObservationV2({
+      anchor: "mantel clock",
+      personaName: "Quiet Tim",
+      frozenVoiceCues: ["He is reserved and laconic."],
+      personaSourceHash: digest("quiet-persona"),
+    }),
+    "…",
+  );
+  const dryObservation = deterministicMysteryAmbientObservationV2({
+    anchor: "mantel clock",
+    personaName: "Morgan",
+    frozenVoiceCues: ["Morgan is wry, playful, and impatient."],
+    personaSourceHash: digest("dry-persona"),
+  });
+  assert.match(dryObservation, /mantel clock/iu);
+  assert.doesNotMatch(
+    dryObservation,
+    /smudge|gleam|fiber|hair|thread|dust|compressed|oily|immaculate|hurried shoe/iu,
+  );
+});
+
+it("sends the frozen Prosecutor brief and exact room and hotspot anchors to observation authoring", async () => {
+  const db = testDb();
+  const provider = new V2AuthorProvider();
+  const created = await createDebateMysterySessionV2(
+    db,
+    "user-1",
+    config(),
+    "observation-authoring-contract",
+    runtime(provider),
+    { deferBackgroundStart: true },
+  );
+  const session = await runDebateMysteryCompilationV2(
+    db,
+    "user-1",
+    created.id,
+    runtime(provider),
+    { generateWave: async () => playableWave() },
+  );
+  assert.equal(session.status, "waiting_for_player");
+  const requests = provider.requests.filter(
+    (request) => request.section === "room_examinations",
+  ) as Array<{
+    observationWritingBrief?: {
+      name?: string;
+      frozenVoiceCues?: string[];
+      sourceHash?: string;
+    };
+    setup?: {
+      examinationTargets?: Array<{
+        id?: string;
+        room?: { id?: string; name?: string; mansionAnchors?: unknown[] };
+        hotspot?: { id?: string; label?: string; physicalAnchor?: string };
+      }>;
+    };
+    qualityRules?: string[];
+  }>;
+  assert.ok(requests.length > 0);
+  assert.equal(requests[0]?.observationWritingBrief?.name, "Actor 5");
+  assert.deepEqual(
+    requests[0]?.observationWritingBrief?.frozenVoiceCues,
+    ["Actor 5 is observant, theatrical, and exacting under pressure."],
+  );
+  assert.match(requests[0]?.observationWritingBrief?.sourceHash ?? "", /^[a-f0-9]{64}$/u);
+  const targets = requests.flatMap(
+    (request) => request.setup?.examinationTargets ?? [],
+  );
+  assert.ok(targets.length > 0);
+  assert.equal(targets.every((entry) => Boolean(
+    entry.id &&
+    entry.room?.id &&
+    entry.room.name &&
+    Array.isArray(entry.room.mansionAnchors) &&
+    entry.hotspot?.id &&
+    entry.hotspot.label &&
+    entry.hotspot.physicalAnchor
+  )), true);
+  const qualityRules = requests.flatMap((request) => request.qualityRules ?? []).join(" ");
+  assert.match(qualityRules, /optional humor.*frozen persona/iu);
+  assert.match(qualityRules, /deliberate ellipsis/iu);
+  assert.match(qualityRules, /never force a quip|canned comedy/iu);
+});
+
+it("recovers a frozen Examine access item into the public Case Kit", async () => {
+  const db = testDb();
+  const provider = new V2AuthorProvider();
+  let session = await createDebateMysterySessionV2(
+    db,
+    "user-1",
+    config(),
+    "create-case-kit-bridge",
+    runtime(provider),
+    { deferBackgroundStart: true },
+  );
+  session = await runDebateMysteryCompilationV2(
+    db,
+    "user-1",
+    session.id,
+    runtime(provider),
+    { generateWave: async () => playableWave() },
+  );
+  const { graph, privateCase } = getDebateMysteryCaseV2(db, "user-1", session.id);
+  assert.deepEqual(v2State(session).caseKit, []);
+  const itemNode = graph.nodes.find((node) =>
+    node.locationId === privateCase.crimeSceneRoomId &&
+    (node.mutations.acquireItemIds?.length ?? 0) > 0);
+  assert.ok(itemNode, "the opening room should contain a frozen access item");
+  const itemId = itemNode.mutations.acquireItemIds![0]!;
+  assert.equal(privateCase.caseKitItemIdByExamineNodeId?.[itemNode.id], itemId);
+  assert.ok(privateCase.caseKitItems?.some((item) => item.id === itemId));
+
+  session = act(db, session, { action: "move" }, "case-kit-begin");
+  session = act(db, session, { action: "dismiss_case_opening" }, "case-kit-dismiss-opening");
+  const roomId = privateCase.crimeSceneRoomId;
+  if (v2State(session).roomIntroductions[roomId] === "casekeeper") {
+    session = act(db, session, { action: "advance_room_introduction", roomId }, "case-kit-intro-casekeeper");
+    session = act(db, session, { action: "complete_room_introduction", roomId }, "case-kit-intro-persona");
+  }
+  const hotspotKey = Object.entries(privateCase.examineNodeIdByHotspot)
+    .find(([, nodeId]) => nodeId === itemNode.id)?.[0];
+  assert.ok(hotspotKey?.startsWith(`${roomId}:`));
+  const hotspotId = hotspotKey!.slice(roomId.length + 1);
+  session = act(db, session, { action: "examine", roomId, hotspotId }, "case-kit-examine");
+  const recovered = v2State(session).caseKit?.find((item) => item.id === itemId);
+  assert.ok(recovered);
+  assert.equal(recovered.sourceRoomId, roomId);
+  assert.ok(recovered.acquiredAt);
+  assert.equal(v2State(session).dialogueHistory.at(-1)?.caseFileRelevant, true);
+});
+
 it("makes mansion exterior generation explicit and never queues an automatic prewarm", () => {
   const server = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
   const routeStart = server.indexOf('route("POST", "/api/debates", async (ctx) =>');
@@ -1532,7 +1869,7 @@ it("lets an accepted Mansion direction own house style instead of Story", () => 
   assert.equal("mansionExteriorDirection" in resolved, false);
 });
 
-it("uses the embodied participant Persona as the Casekeeper Bottish carrier", () => {
+it("uses the embodied participant Persona as the player-thought Babble voice", () => {
   const participant = resolveDebateMysteryConfigV2({
     ...config(),
     judgeBotId: "bot-11",
@@ -2966,7 +3303,9 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
         item.reference.id === boundEvidenceId,
     );
     assert.equal(boundRecord?.title, propName);
-    assert.match(boundRecord?.description ?? "", /Archive Seal/iu);
+    assert.match(boundRecord?.description ?? "", /distinct archival seal used as an access key/iu);
+    assert.match(boundRecord?.description ?? "", /where it was found|its condition|where it turned up/iu);
+    assert.doesNotMatch(boundRecord?.description ?? "", /timestamped detail|timeline trace/iu);
   });
 
   it("rejects repetitive titles and publishes the polished title from the durable foundation checkpoint", async () => {
@@ -3229,6 +3568,24 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
         personaLine.stageCue.deterministicFallbackText,
         "the playable line is the cue's deterministic fallback before runtime performance",
       );
+      assert.ok(introduction.openingExchangeNodeIds);
+      assert.equal(
+        introduction.openingExchangeNodeIds.occupantResponseNodeId,
+        introduction.personaNodeId,
+      );
+      const orderedNodeIds = [
+        introduction.openingExchangeNodeIds.prosecutionOpeningNodeId,
+        introduction.openingExchangeNodeIds.occupantResponseNodeId,
+        introduction.openingExchangeNodeIds.prosecutionHandoffNodeId,
+      ];
+      assert.deepEqual(
+        orderedNodeIds.map((nodeId) => lineByNodeId.get(nodeId)?.speakerKind),
+        ["player", "bot", "player"],
+      );
+      assert.deepEqual(
+        orderedNodeIds.map((nodeId) => lineByNodeId.get(nodeId)?.speakerBotId),
+        [state.config.prosecutorBotId, personaLine.speakerBotId, state.config.prosecutorBotId],
+      );
     }
     const repeatGroups = Object.values(graph.repeatResponseNodeIdsByTopic ?? {});
     assert.ok(repeatGroups.length > 0);
@@ -3236,6 +3593,130 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(
       repeatGroups.flat().every((nodeId) => Boolean(lineByNodeId.get(nodeId)?.spokenText)),
       true,
+    );
+  });
+
+  it("plays the frozen three-line room opening without a first-entry authoring call", async () => {
+    const db = testDb();
+    const provider = new RoomIntroductionPersonaV2AuthorProvider("valid", true);
+    let session = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-frozen-room-opening",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      session.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    session = act(db, session, { action: "move" }, "frozen-opening-title");
+    session = act(db, session, { action: "dismiss_case_opening" }, "frozen-opening-briefing");
+    const entered = enterMysterySuspectRoomForIntroduction(db, session, "frozen-opening");
+    session = entered.session;
+    const beforeHistoryCount = v2State(session).dialogueHistory.length;
+    const frozen = getDebateMysteryCaseV2(db, "user-1", session.id);
+    const introduction = frozen.graph.roomIntroductionNodeIdsByRoom?.[entered.roomId];
+    assert.ok(introduction?.openingExchangeNodeIds);
+    assert.deepEqual(
+      migrateDebateMysteryRoomOpeningCutscenesV2({
+        graph: frozen.graph,
+        prosecutorBotId: v2State(session).config.prosecutorBotId,
+      }),
+      { graph: frozen.graph, changed: false },
+      "the canonical cutscene migration is idempotent",
+    );
+    const performed = await applyDebateMysteryActionWithPersonaV2(
+      db,
+      "user-1",
+      session.id,
+      {
+        version: 2,
+        expectedRevision: session.revision,
+        idempotencyKey: "frozen-opening-advance",
+        action: "advance_room_introduction",
+        roomId: entered.roomId,
+      },
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    const exchange = v2State(performed).dialogueHistory.slice(beforeHistoryCount);
+    assert.equal(provider.roomIntroductionCalls, 0);
+    assert.deepEqual(
+      exchange.map((line) => line.nodeId),
+      [
+        introduction.openingExchangeNodeIds.prosecutionOpeningNodeId,
+        introduction.openingExchangeNodeIds.occupantResponseNodeId,
+        introduction.openingExchangeNodeIds.prosecutionHandoffNodeId,
+      ],
+    );
+    assert.deepEqual(
+      exchange.map((line) => line.speakerBotId),
+      [
+        v2State(performed).config.prosecutorBotId,
+        v2State(performed).suspects.find((suspect) => suspect.roomId === entered.roomId)?.botId,
+        v2State(performed).config.prosecutorBotId,
+      ],
+    );
+    assert.equal(v2State(performed).roomIntroductions[entered.roomId], "persona");
+    assert.equal(
+      getDebateMysteryCaseV2(db, "user-1", session.id).privateCase
+        .roomIntroductionPersonaPolishByRoom?.[entered.roomId],
+      undefined,
+    );
+    const completed = act(
+      db,
+      performed,
+      { action: "complete_room_introduction", roomId: entered.roomId },
+      "frozen-opening-complete",
+    );
+    assert.equal(v2State(completed).roomIntroductions[entered.roomId], "complete");
+  });
+
+  it("rejects sealed room-opening copy and freezes the deterministic public fallback", async () => {
+    const db = testDb();
+    const provider = new LeakingRoomOpeningV2AuthorProvider();
+    let session = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-public-room-opening-fallback",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      session.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    assert.equal(v2State(session).compilation.stage, "complete");
+    assert.equal(
+      provider.sections.filter((section) => section === "suspect_chapter:suspect-1").length,
+      DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
+    );
+    const { graph } = getDebateMysteryCaseV2(db, "user-1", session.id);
+    const introduction = Object.values(graph.roomIntroductionNodeIdsByRoom ?? {})[0];
+    assert.ok(introduction?.openingExchangeNodeIds);
+    const nodeIds = [
+      introduction.openingExchangeNodeIds.prosecutionOpeningNodeId,
+      introduction.openingExchangeNodeIds.occupantResponseNodeId,
+      introduction.openingExchangeNodeIds.prosecutionHandoffNodeId,
+    ];
+    const lines = nodeIds.map((nodeId) => {
+      const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+      return graph.lines.find((line) => line.id === node?.lineId)!;
+    });
+    assert.deepEqual(lines.map((line) => line.speakerKind), ["player", "bot", "player"]);
+    assert.ok(lines.every((line) => line.visibleText === line.stageCue?.deterministicFallbackText));
+    assert.doesNotMatch(
+      lines.map((line) => line.visibleText).join("\n"),
+      /alibi|culprit|evidence|unlock|mark this room complete/iu,
     );
   });
 
@@ -4452,703 +4933,6 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     }
   });
 
-  it("persona-directs a room introduction through the selected Auto lane and persists matching text and audio", async () => {
-    const db = testDb();
-    const provider = new RoomIntroductionPersonaV2AuthorProvider("valid", true);
-    let session = await createDebateMysterySessionV2(
-      db,
-      "user-1",
-      config(),
-      "create-v2-live-room-persona",
-      runtime(provider),
-      { deferBackgroundStart: true },
-    );
-    session = await runDebateMysteryCompilationV2(
-      db,
-      "user-1",
-      session.id,
-      runtime(provider),
-      { generateWave: async () => playableWave() },
-    );
-    session = act(db, session, { action: "move" }, "live-room-persona-title");
-    session = act(db, session, { action: "dismiss_case_opening" }, "live-room-persona-opening");
-    const entered = enterMysterySuspectRoomForIntroduction(
-      db,
-      session,
-      "live-room-persona",
-    );
-    session = entered.session;
-    const roomId = entered.roomId;
-    const before = getDebateMysteryCaseV2(db, "user-1", session.id);
-    const introduction = before.graph.roomIntroductionNodeIdsByRoom?.[roomId];
-    const personaNode = before.graph.nodes.find((node) => node.id === introduction?.personaNodeId)!;
-    const canonicalLine = before.graph.lines.find((line) => line.id === personaNode.lineId)!;
-    assert.equal(canonicalLine.visibleText, canonicalLine.stageCue?.deterministicFallbackText);
-    const frozenSpeakerProfile = before.privateCase.audioVoiceProfilesByBotId?.[
-      canonicalLine.speakerBotId!
-    ];
-    assert.ok(frozenSpeakerProfile);
-    const initialManifestRow = db.prepare(
-      "SELECT manifest_json FROM debate_mystery_audio_manifests WHERE user_id = ? AND session_id = ?",
-    ).get("user-1", session.id) as { manifest_json: string };
-    const initialManifest = JSON.parse(initialManifestRow.manifest_json) as {
-      preparationMode?: string;
-      entries: Array<{ lineId: string; voiceProfileHash: string }>;
-    };
-    assert.equal(initialManifest.preparationMode, "lazy-on-demand-v1");
-    assert.equal(initialManifest.entries.length, 1);
-    assert.equal(
-      initialManifest.entries.find((entry) => entry.lineId === canonicalLine.id),
-      undefined,
-    );
-    const frozenVoiceProfileHash = digest(JSON.stringify(frozenSpeakerProfile));
-    db.prepare(
-      "UPDATE bots SET audio_voice_profile_override = ? WHERE user_id = ? AND id = ?",
-    ).run(JSON.stringify({
-      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
-      baseVoiceId: "voice-8",
-      pitch: 0.71,
-    }), "user-1", canonicalLine.speakerBotId);
-    const originalReference = db.prepare(
-      `SELECT cache_key FROM debate_mystery_audio_refs
-        WHERE user_id = ? AND session_id = ? AND line_id = ?`,
-    ).get("user-1", session.id, canonicalLine.id) as { cache_key: string } | undefined;
-    assert.equal(originalReference, undefined);
-    const autoRuntime: DebateAiRuntime = {
-      preferredProvider: "openai",
-      responseMode: "online",
-      modelSelectionKind: "auto",
-      local: { provider, providerName: "local", model: "unused-local" },
-      online: { provider, providerName: "openai", model: "global-auto-room-model" },
-      lanes: [{ provider, providerName: "openai", model: "global-auto-room-model" }],
-    };
-    const request: DebateMysteryActionRequestV2 = {
-      version: 2,
-      expectedRevision: session.revision,
-      idempotencyKey: "live-room-persona-advance",
-      action: "advance_room_introduction",
-      roomId,
-    };
-    let stagedVoiceProfile: unknown = null;
-    const performed = await applyDebateMysteryActionWithPersonaV2(
-      db,
-      "user-1",
-      session.id,
-      request,
-      autoRuntime,
-      {
-        generateWave: async ({ profile }) => {
-          stagedVoiceProfile = profile;
-          return playableWave();
-        },
-      },
-    );
-    const personaBeat = v2State(performed).dialogueHistory.at(-1)!;
-    assert.equal(provider.roomIntroductionCalls, 1);
-    assert.equal(
-      provider.roomIntroductionRequests[0]?.section,
-      "room_introduction_stage_cue_performance",
-    );
-    assert.deepEqual(
-      provider.roomIntroductionRequests[0]?.personaStyleCues,
-      ["Actor 1 is observant, theatrical, and exacting under pressure."],
-    );
-    const roomName = v2State(session).rooms.find((room) => room.id === roomId)!.name;
-    const expectedPersonaText =
-      `I am Actor 1. Take a careful look around ${roomName}. Ask what you need; I will answer only what I know.`;
-    assert.equal(personaBeat.visibleText, expectedPersonaText);
-    assert.deepEqual(stagedVoiceProfile, frozenSpeakerProfile);
-    assert.notEqual(personaBeat.visibleText, canonicalLine.visibleText);
-    assert.match(personaBeat.visibleText, /careful look/iu);
-    assert.match(personaBeat.visibleText, /only what I know/iu);
-    const stageCuePrompt = provider.roomIntroductionRequests[0]?.stageCue as {
-      allowedFacts?: Array<{ statement?: string }>;
-      requiredBeats?: Array<{ id?: string }>;
-      forbiddenDisclosures?: unknown;
-    };
-    assert.ok(stageCuePrompt.allowedFacts?.some((fact) =>
-      fact.statement?.includes("Actor 1")));
-    assert.equal(stageCuePrompt.requiredBeats?.length, 3);
-    assert.equal(stageCuePrompt.forbiddenDisclosures, undefined);
-
-    const persisted = getDebateMysteryCaseV2(db, "user-1", session.id);
-    assert.equal(
-      persisted.privateCase.roomIntroductionPersonaPolishByRoom?.[roomId]?.outcome,
-      "polished",
-    );
-    assert.equal(
-      persisted.privateCase.roomIntroductionPersonaPolishByRoom?.[roomId]
-        ?.stageCueVersion,
-      1,
-    );
-    const persistedLine = persisted.graph.lines.find((line) => line.id === canonicalLine.id)!;
-    assert.equal(persistedLine.visibleText, personaBeat.visibleText);
-    assert.equal(persistedLine.spokenText, expectedPersonaText);
-    const manifestRow = db.prepare(
-      "SELECT manifest_json FROM debate_mystery_audio_manifests WHERE user_id = ? AND session_id = ?",
-    ).get("user-1", session.id) as { manifest_json: string };
-    const manifest = JSON.parse(manifestRow.manifest_json) as {
-      entries: Array<{ lineId: string; textHash: string; voiceProfileHash: string }>;
-    };
-    assert.equal(
-      manifest.entries.find((entry) => entry.lineId === canonicalLine.id)?.textHash,
-      digest(persistedLine.spokenText),
-    );
-    assert.equal(
-      manifest.entries.find((entry) => entry.lineId === canonicalLine.id)?.voiceProfileHash,
-      frozenVoiceProfileHash,
-    );
-    const polishedReference = db.prepare(
-      `SELECT cache_key FROM debate_mystery_audio_refs
-        WHERE user_id = ? AND session_id = ? AND line_id = ?`,
-    ).get("user-1", session.id, canonicalLine.id) as { cache_key: string };
-    assert.ok(polishedReference.cache_key);
-    assert.ok(getDebateMysteryAudioClipV2(db, "user-1", session.id, canonicalLine.id).byteSize > 0);
-    const publicJson = (db.prepare(
-      "SELECT session_json FROM debate_sessions WHERE user_id = ? AND id = ?",
-    ).get("user-1", session.id) as { session_json: string }).session_json;
-    assert.doesNotMatch(
-      publicJson,
-      /personaStyleCues|stageCue|allowedFacts|forbiddenDisclosures|system_prompt/iu,
-    );
-
-    const idempotent = await applyDebateMysteryActionWithPersonaV2(
-      db,
-      "user-1",
-      session.id,
-      request,
-      autoRuntime,
-      { generateWave: async () => { throw new Error("idempotent replay must not synthesize"); } },
-    );
-    assert.equal(idempotent.revision, performed.revision);
-    assert.equal(provider.roomIntroductionCalls, 1);
-
-    let restarted = restartDebateMysteryInvestigationV2(
-      db,
-      "user-1",
-      session.id,
-      {
-        expectedRevision: performed.revision,
-        idempotencyKey: "live-room-persona-restart",
-      },
-    );
-    restarted = act(db, restarted, { action: "move" }, "live-room-persona-replay-title");
-    restarted = act(db, restarted, { action: "dismiss_case_opening" }, "live-room-persona-replay-opening");
-    restarted = enterMysterySuspectRoomForIntroduction(
-      db,
-      restarted,
-      "live-room-persona-replay",
-      roomId,
-    ).session;
-    const replayed = await applyDebateMysteryActionWithPersonaV2(
-      db,
-      "user-1",
-      session.id,
-      {
-        version: 2,
-        expectedRevision: restarted.revision,
-        idempotencyKey: "live-room-persona-replay-advance",
-        action: "advance_room_introduction",
-        roomId,
-      },
-      autoRuntime,
-      { generateWave: async () => { throw new Error("durable replay must not synthesize"); } },
-    );
-    assert.equal(v2State(replayed).dialogueHistory.at(-1)?.visibleText, personaBeat.visibleText);
-    assert.equal(provider.roomIntroductionCalls, 1);
-
-    const completed = structuredClone(replayed);
-    completed.status = "completed";
-    completed.phase = "verdict";
-    completed.stepKey = "mystery_v2_verdict";
-    completed.completedAt = NOW;
-    if (completed.formatState.format !== "whodunnit" || completed.formatState.version !== 2) {
-      throw new Error("Expected a Whodunnit V2 replay fixture.");
-    }
-    completed.formatState.playPhase = "verdict";
-    db.prepare(
-      `UPDATE debate_sessions
-          SET status = 'completed', phase = 'verdict', step_key = 'mystery_v2_verdict',
-              session_json = ?, completed_at = ?, updated_at = ?
-        WHERE user_id = ? AND id = ?`,
-    ).run(JSON.stringify(completed), NOW, NOW, "user-1", session.id);
-    const playedAgain = playDebateMysteryV2Again(
-      db,
-      "user-1",
-      session.id,
-      {
-        version: 2,
-        idempotencyKey: "live-room-persona-play-again",
-        audioMode: "reuse",
-      },
-    ).session;
-    const replayCase = getDebateMysteryCaseV2(db, "user-1", playedAgain.id);
-    assert.equal(
-      replayCase.privateCase.roomIntroductionPersonaPolishByRoom?.[roomId]?.outcome,
-      "polished",
-    );
-    assert.equal(
-      replayCase.privateCase.roomIntroductionPersonaPolishByRoom?.[roomId]
-        ?.stageCueVersion,
-      1,
-    );
-    assert.equal(
-      replayCase.graph.lines.find((line) => line.id === canonicalLine.id)?.visibleText,
-      personaBeat.visibleText,
-    );
-    const replayReference = db.prepare(
-      `SELECT cache_key FROM debate_mystery_audio_refs
-        WHERE user_id = ? AND session_id = ? AND line_id = ?`,
-    ).get("user-1", playedAgain.id, canonicalLine.id) as { cache_key: string };
-    assert.equal(replayReference.cache_key, polishedReference.cache_key);
-    assert.ok(getDebateMysteryAudioClipV2(
-      db,
-      "user-1",
-      playedAgain.id,
-      canonicalLine.id,
-    ).byteSize > 0);
-    let replayRun = act(db, playedAgain, { action: "move" }, "live-room-persona-play-again-title");
-    replayRun = act(db, replayRun, { action: "dismiss_case_opening" }, "live-room-persona-play-again-opening");
-    replayRun = enterMysterySuspectRoomForIntroduction(
-      db,
-      replayRun,
-      "live-room-persona-play-again",
-      roomId,
-    ).session;
-    const replayPerformance = await applyDebateMysteryActionWithPersonaV2(
-      db,
-      "user-1",
-      playedAgain.id,
-      {
-        version: 2,
-        expectedRevision: replayRun.revision,
-        idempotencyKey: "live-room-persona-play-again-advance",
-        action: "advance_room_introduction",
-        roomId,
-      },
-      autoRuntime,
-      { generateWave: async () => { throw new Error("Play Again must reuse the frozen performance"); } },
-    );
-    assert.equal(
-      v2State(replayPerformance).dialogueHistory.at(-1)?.visibleText,
-      personaBeat.visibleText,
-    );
-    assert.equal(provider.roomIntroductionCalls, 1);
-  });
-
-  it("rejects case-bearing room persona copy and durably falls back to the canonical line", async () => {
-    const db = testDb();
-    const provider = new RoomIntroductionPersonaV2AuthorProvider("content_bearing");
-    let session = await createDebateMysterySessionV2(
-      db,
-      "user-1",
-      config(),
-      "create-v2-live-room-persona-invalid",
-      runtime(provider),
-      { deferBackgroundStart: true },
-    );
-    session = await runDebateMysteryCompilationV2(
-      db,
-      "user-1",
-      session.id,
-      runtime(provider),
-      { generateWave: async () => playableWave() },
-    );
-    session = act(db, session, { action: "move" }, "invalid-room-persona-title");
-    session = act(db, session, { action: "dismiss_case_opening" }, "invalid-room-persona-opening");
-    const entered = enterMysterySuspectRoomForIntroduction(
-      db,
-      session,
-      "invalid-room-persona",
-    );
-    session = entered.session;
-    const roomId = entered.roomId;
-    const before = getDebateMysteryCaseV2(db, "user-1", session.id);
-    const introduction = before.graph.roomIntroductionNodeIdsByRoom?.[roomId];
-    const personaNode = before.graph.nodes.find((node) => node.id === introduction?.personaNodeId)!;
-    const canonicalLine = before.graph.lines.find((line) => line.id === personaNode.lineId)!;
-    const performed = await applyDebateMysteryActionWithPersonaV2(
-      db,
-      "user-1",
-      session.id,
-      {
-        version: 2,
-        expectedRevision: session.revision,
-        idempotencyKey: "invalid-room-persona-advance",
-        action: "advance_room_introduction",
-        roomId,
-      },
-      runtime(provider),
-      { generateWave: async () => { throw new Error("invalid copy must retain compiled audio"); } },
-    );
-    assert.equal(v2State(performed).dialogueHistory.at(-1)?.visibleText, canonicalLine.visibleText);
-    const persisted = getDebateMysteryCaseV2(db, "user-1", session.id);
-    assert.equal(
-      persisted.privateCase.roomIntroductionPersonaPolishByRoom?.[roomId]?.outcome,
-      "canonical",
-    );
-    assert.equal(provider.roomIntroductionCalls, 2);
-  });
-
-  it("pins LOCAL stage-cue performance to the local lane even when an online lane is supplied", async () => {
-    const db = testDb();
-    const localProvider = new RoomIntroductionPersonaV2AuthorProvider();
-    const onlineProvider = new RoomIntroductionPersonaV2AuthorProvider();
-    let session = await createDebateMysterySessionV2(
-      db,
-      "user-1",
-      config(),
-      "create-v2-local-stage-cue-lane",
-      runtime(localProvider),
-      { deferBackgroundStart: true },
-    );
-    session = await runDebateMysteryCompilationV2(
-      db,
-      "user-1",
-      session.id,
-      runtime(localProvider),
-      { generateWave: async () => playableWave() },
-    );
-    session = act(db, session, { action: "move" }, "local-stage-cue-title");
-    session = act(db, session, { action: "dismiss_case_opening" }, "local-stage-cue-opening");
-    const entered = enterMysterySuspectRoomForIntroduction(
-      db,
-      session,
-      "local-stage-cue",
-    );
-    session = entered.session;
-    const localRuntime: DebateAiRuntime = {
-      preferredProvider: "local",
-      responseMode: "local",
-      modelSelectionKind: "auto",
-      local: {
-        provider: localProvider,
-        providerName: "local",
-        model: "local-stage-cue-model",
-      },
-      online: {
-        provider: onlineProvider,
-        providerName: "openai",
-        model: "must-not-run",
-      },
-      lanes: [{
-        provider: onlineProvider,
-        providerName: "openai",
-        model: "must-not-run",
-      }],
-    };
-    const performed = await applyDebateMysteryActionWithPersonaV2(
-      db,
-      "user-1",
-      session.id,
-      {
-        version: 2,
-        expectedRevision: session.revision,
-        idempotencyKey: "local-stage-cue-perform",
-        action: "advance_room_introduction",
-        roomId: entered.roomId,
-      },
-      localRuntime,
-      { generateWave: async () => playableWave() },
-    );
-    assert.equal(localProvider.roomIntroductionCalls, 1);
-    assert.equal(onlineProvider.roomIntroductionCalls, 0);
-    assert.match(
-      v2State(performed).dialogueHistory.at(-1)?.visibleText ?? "",
-      /only what I know/iu,
-    );
-  });
-
-  it("upgrades a cadence-only saved receipt to stronger dialogue on its next unresolved reveal", async () => {
-    const db = testDb();
-    const provider = new RoomIntroductionPersonaV2AuthorProvider();
-    let session = await createDebateMysterySessionV2(
-      db,
-      "user-1",
-      config(),
-      "create-v2-live-room-persona-upgrade",
-      runtime(provider),
-      { deferBackgroundStart: true },
-    );
-    session = await runDebateMysteryCompilationV2(
-      db,
-      "user-1",
-      session.id,
-      runtime(provider),
-      { generateWave: async () => playableWave() },
-    );
-    session = act(db, session, { action: "move" }, "upgrade-room-persona-title");
-    session = act(db, session, { action: "dismiss_case_opening" }, "upgrade-room-persona-opening");
-    const entered = enterMysterySuspectRoomForIntroduction(
-      db,
-      session,
-      "upgrade-room-persona",
-    );
-    session = entered.session;
-    const stored = getDebateMysteryCaseV2(db, "user-1", session.id);
-    const introduction = stored.graph.roomIntroductionNodeIdsByRoom?.[entered.roomId];
-    const personaNode = stored.graph.nodes.find((node) =>
-      node.id === introduction?.personaNodeId)!;
-    const canonicalLine = stored.graph.lines.find((line) =>
-      line.id === personaNode.lineId)!;
-    const archivedTextHash = digest(JSON.stringify([
-      canonicalLine.visibleText,
-      canonicalLine.spokenText,
-    ]));
-    stored.privateCase.roomIntroductionPersonaPolishByRoom = {
-      ...(stored.privateCase.roomIntroductionPersonaPolishByRoom ?? {}),
-      [entered.roomId]: {
-        version: 1,
-        lineId: canonicalLine.id,
-        sourceTextHash: archivedTextHash,
-        appliedTextHash: archivedTextHash,
-        outcome: "polished",
-        leadIn: "With theatrical precision,",
-      },
-    };
-    const privateJson = JSON.stringify(stored.privateCase);
-    db.prepare(
-      `UPDATE debate_mystery_v2_cases
-          SET private_case_json = ?, case_hash = ?
-        WHERE user_id = ? AND session_id = ?`,
-    ).run(privateJson, digest(privateJson), "user-1", session.id);
-    const jobRow = db.prepare(
-      `SELECT checkpoint_json FROM debate_mystery_v2_jobs
-        WHERE user_id = ? AND session_id = ?`,
-    ).get("user-1", session.id) as { checkpoint_json: string };
-    const checkpoint = JSON.parse(jobRow.checkpoint_json) as {
-      privateCase: typeof stored.privateCase;
-    };
-    checkpoint.privateCase = stored.privateCase;
-    db.prepare(
-      `UPDATE debate_mystery_v2_jobs SET checkpoint_json = ?
-        WHERE user_id = ? AND session_id = ?`,
-    ).run(JSON.stringify(checkpoint), "user-1", session.id);
-    const manifestRow = db.prepare(
-      `SELECT manifest_json FROM debate_mystery_audio_manifests
-        WHERE user_id = ? AND session_id = ?`,
-    ).get("user-1", session.id) as { manifest_json: string };
-    const manifest = JSON.parse(manifestRow.manifest_json) as { caseHash: string };
-    manifest.caseHash = digest(privateJson);
-    db.prepare(
-      `UPDATE debate_mystery_audio_manifests SET manifest_json = ?
-        WHERE user_id = ? AND session_id = ?`,
-    ).run(JSON.stringify(manifest), "user-1", session.id);
-
-    const upgraded = await applyDebateMysteryActionWithPersonaV2(
-      db,
-      "user-1",
-      session.id,
-      {
-        version: 2,
-        expectedRevision: session.revision,
-        idempotencyKey: "upgrade-cadence-only-room-persona",
-        action: "advance_room_introduction",
-        roomId: entered.roomId,
-      },
-      runtime(provider),
-      { generateWave: async () => playableWave() },
-    );
-    assert.equal(provider.roomIntroductionCalls, 1);
-    assert.notEqual(v2State(upgraded).dialogueHistory.at(-1)?.visibleText, canonicalLine.visibleText);
-    assert.equal(
-      getDebateMysteryCaseV2(db, "user-1", session.id)
-        .privateCase.roomIntroductionPersonaPolishByRoom?.[entered.roomId]
-        ?.stageCueVersion,
-      1,
-    );
-  });
-
-  it("uses frozen session voice continuity when a legacy Casekeeper bot row is unavailable", async () => {
-    const db = testDb();
-    const provider = new RoomIntroductionPersonaV2AuthorProvider();
-    const benchConfig: DebateWhodunnitCreateConfigV2 = {
-      ...config(),
-      trialType: "bench",
-      judgeBotId: "bot-7",
-      jurorBotIds: [],
-    };
-    let session = await createDebateMysterySessionV2(
-      db,
-      "user-1",
-      benchConfig,
-      "create-v2-live-room-persona-missing-casekeeper",
-      runtime(provider),
-      { deferBackgroundStart: true },
-    );
-    session = await runDebateMysteryCompilationV2(
-      db,
-      "user-1",
-      session.id,
-      runtime(provider),
-      { generateWave: async () => playableWave() },
-    );
-    assert.equal(v2State(session).compilation.stage, "complete");
-
-    const stored = getDebateMysteryCaseV2(db, "user-1", session.id);
-    const legacyPrivate = structuredClone(stored.privateCase);
-    delete legacyPrivate.audioVoiceProfilesByBotId;
-    const privateJson = JSON.stringify(legacyPrivate);
-    db.prepare(
-      `UPDATE debate_mystery_v2_cases
-          SET private_case_json = ?, case_hash = ?
-        WHERE user_id = ? AND session_id = ?`,
-    ).run(privateJson, digest(privateJson), "user-1", session.id);
-    const jobRow = db.prepare(
-      `SELECT checkpoint_json FROM debate_mystery_v2_jobs
-        WHERE user_id = ? AND session_id = ?`,
-    ).get("user-1", session.id) as { checkpoint_json: string };
-    const checkpoint = JSON.parse(jobRow.checkpoint_json) as {
-      privateCase: typeof legacyPrivate;
-    };
-    checkpoint.privateCase = legacyPrivate;
-    db.prepare(
-      `UPDATE debate_mystery_v2_jobs SET checkpoint_json = ?
-        WHERE user_id = ? AND session_id = ?`,
-    ).run(JSON.stringify(checkpoint), "user-1", session.id);
-    const manifestRow = db.prepare(
-      `SELECT manifest_json FROM debate_mystery_audio_manifests
-        WHERE user_id = ? AND session_id = ?`,
-    ).get("user-1", session.id) as { manifest_json: string };
-    const manifest = JSON.parse(manifestRow.manifest_json) as { caseHash: string };
-    manifest.caseHash = digest(privateJson);
-    db.prepare(
-      `UPDATE debate_mystery_audio_manifests SET manifest_json = ?
-        WHERE user_id = ? AND session_id = ?`,
-    ).run(JSON.stringify(manifest), "user-1", session.id);
-
-    db.prepare("DELETE FROM bots WHERE user_id = ? AND id = ?")
-      .run("user-1", benchConfig.judgeBotId);
-    session = act(db, session, { action: "move" }, "missing-casekeeper-title");
-    session = act(db, session, { action: "dismiss_case_opening" }, "missing-casekeeper-opening");
-    const entered = enterMysterySuspectRoomForIntroduction(
-      db,
-      session,
-      "missing-casekeeper",
-    );
-    session = entered.session;
-    const performed = await applyDebateMysteryActionWithPersonaV2(
-      db,
-      "user-1",
-      session.id,
-      {
-        version: 2,
-        expectedRevision: session.revision,
-        idempotencyKey: "missing-casekeeper-persona-advance",
-        action: "advance_room_introduction",
-        roomId: entered.roomId,
-      },
-      runtime(provider),
-      { generateWave: async () => playableWave() },
-    );
-    assert.equal(
-      getDebateMysteryCaseV2(db, "user-1", session.id)
-        .privateCase.roomIntroductionPersonaPolishByRoom?.[entered.roomId]?.outcome,
-      "polished",
-    );
-    assert.equal(v2State(performed).readiness.status, "ready");
-    const stillReady = await ensureDebateMysteryPlayReadyV2(db, "user-1", session.id, {
-      generateWave: async () => {
-        throw new Error("the verified frozen Casekeeper voice must not be rebuilt");
-      },
-    });
-    assert.equal(
-      v2State(stillReady).readiness.status,
-      "ready",
-      v2State(stillReady).localAudioFailure ?? undefined,
-    );
-  });
-
-  it("bounds a non-cooperative room persona provider and reuses the persisted fallback", async () => {
-    const db = testDb();
-    const provider = new RoomIntroductionPersonaV2AuthorProvider("hanging");
-    let session = await createDebateMysterySessionV2(
-      db,
-      "user-1",
-      config(),
-      "create-v2-live-room-persona-timeout",
-      runtime(provider),
-      { deferBackgroundStart: true },
-    );
-    session = await runDebateMysteryCompilationV2(
-      db,
-      "user-1",
-      session.id,
-      runtime(provider),
-      { generateWave: async () => playableWave() },
-    );
-    session = act(db, session, { action: "move" }, "timeout-room-persona-title");
-    session = act(db, session, { action: "dismiss_case_opening" }, "timeout-room-persona-opening");
-    const entered = enterMysterySuspectRoomForIntroduction(
-      db,
-      session,
-      "timeout-room-persona",
-    );
-    session = entered.session;
-    const roomId = entered.roomId;
-    const before = getDebateMysteryCaseV2(db, "user-1", session.id);
-    const introduction = before.graph.roomIntroductionNodeIdsByRoom?.[roomId];
-    const personaNode = before.graph.nodes.find((node) => node.id === introduction?.personaNodeId)!;
-    const canonicalLine = before.graph.lines.find((line) => line.id === personaNode.lineId)!;
-    const request: DebateMysteryActionRequestV2 = {
-      version: 2,
-      expectedRevision: session.revision,
-      idempotencyKey: "timeout-room-persona-advance",
-      action: "advance_room_introduction",
-      roomId,
-    };
-    const readinessBefore = structuredClone(v2State(session).readiness);
-    const startedAt = Date.now();
-    const performed = await applyDebateMysteryActionWithPersonaV2(
-      db,
-      "user-1",
-      session.id,
-      request,
-      runtime(provider),
-      {
-        personaPolishTimeoutMs: 15,
-        generateWave: async () => playableWave(),
-      },
-    );
-    assert.ok(Date.now() - startedAt < 1_000, "a hanging provider must not hold the room reveal");
-    assert.equal(provider.roomIntroductionSignal?.aborted, true);
-    assert.equal(v2State(performed).dialogueHistory.at(-1)?.visibleText, canonicalLine.visibleText);
-    assert.equal(
-      getDebateMysteryCaseV2(db, "user-1", session.id)
-        .privateCase.roomIntroductionPersonaPolishByRoom?.[roomId]?.outcome,
-      "canonical",
-    );
-    assert.deepEqual(v2State(performed).readiness, readinessBefore);
-    const manifestStatus = db.prepare(
-      `SELECT status FROM debate_mystery_audio_manifests
-        WHERE user_id = ? AND session_id = ?`,
-    ).get("user-1", session.id) as { status: string };
-    assert.equal(manifestStatus.status, "complete");
-    assert.ok(getDebateMysteryAudioClipV2(
-      db,
-      "user-1",
-      session.id,
-      canonicalLine.id,
-    ).byteSize > 0);
-    const stillReady = await ensureDebateMysteryPlayReadyV2(
-      db,
-      "user-1",
-      session.id,
-      { generateWave: async () => { throw new Error("canonical fallback keeps the verified pack valid"); } },
-    );
-    assert.equal(v2State(stillReady).readiness.status, "ready");
-    const replayed = await applyDebateMysteryActionWithPersonaV2(
-      db,
-      "user-1",
-      session.id,
-      request,
-      runtime(provider),
-      { personaPolishTimeoutMs: 15 },
-    );
-    assert.equal(replayed.revision, performed.revision);
-    assert.equal(provider.roomIntroductionCalls, 1);
-  });
-
   it("recovers courtroom language in investigation dialogue before sealing", async () => {
     const db = testDb();
     const provider = new CourtroomInvestigationV2AuthorProvider();
@@ -5320,29 +5104,34 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     }
     const callsAfterCompile = provider.calls;
     const { privateCase, graph } = getDebateMysteryCaseV2(db, "user-1", session.id);
-    const casekeeperLine = graph.lines.find((line) => line.nodeId === "briefing-opening");
-    const publicCasekeeperLine = state.dialogueHistory.find((line) => line.nodeId === "briefing-opening");
-    assert.equal(casekeeperLine?.mode, "anonymous_babble");
-    assert.equal(casekeeperLine?.speakerKind, "narrator");
-    assert.equal(casekeeperLine?.speakerBotId, "bot-5");
-    assert.equal(publicCasekeeperLine?.delivery, "anonymous_babble");
-    assert.equal(publicCasekeeperLine?.speakerBotId, null, "the Babble carrier stays server-private");
-    const casekeeperBabbleText = buildBabbleSpeechText({
-      text: casekeeperLine!.spokenText,
-      seed: `${privateCase.config.nonce}:${casekeeperLine!.id}:${casekeeperLine!.speakerBotId}`,
+    const playerThoughtLine = graph.lines.find((line) => line.nodeId === "briefing-opening");
+    const publicPlayerThought = state.dialogueHistory.find((line) => line.nodeId === "briefing-opening");
+    assert.equal(playerThoughtLine?.mode, "persona_babble");
+    assert.equal(playerThoughtLine?.speakerKind, "player");
+    assert.equal(playerThoughtLine?.speakerBotId, "bot-5");
+    assert.equal(publicPlayerThought?.delivery, "persona_babble");
+    assert.equal(publicPlayerThought?.speakerBotId, "bot-5", "the embodied Prosecutor owns its public internal thought");
+    const playerThoughtBabbleText = buildBabbleSpeechText({
+      text: playerThoughtLine!.spokenText,
+      seed: `${privateCase.config.nonce}:${playerThoughtLine!.id}:${playerThoughtLine!.speakerBotId}`,
     });
-    assert.notEqual(casekeeperBabbleText, casekeeperLine?.spokenText);
-    assert.equal(preparedProfilesByText.has(casekeeperLine!.spokenText), false);
+    assert.notEqual(playerThoughtBabbleText, playerThoughtLine?.spokenText);
+    assert.equal(preparedProfilesByText.has(playerThoughtLine!.spokenText), false);
     assert.equal(
-      preparedProfilesByText.get(casekeeperBabbleText)?.baseVoiceId,
+      preparedProfilesByText.get(playerThoughtBabbleText)?.baseVoiceId,
       casekeeperVoiceProfile.baseVoiceId,
-      "anonymous Babble retains the frozen carrier bot's authored voice",
+      "the embodied player thought uses the selected Prosecutor's frozen bot voice",
+    );
+    assert.notEqual(
+      preparedProfilesByText.get(playerThoughtBabbleText)?.baseVoiceId,
+      prismVoiceProfile.baseVoiceId,
+      "the embodied player thought never falls back to the account-wide Prism voice",
     );
     assert.equal(
       provider.personaDialogueRequests.flatMap((request) => request.lines)
-        .some((line) => line.lineId === casekeeperLine?.id),
+        .some((line) => line.lineId === playerThoughtLine?.id),
       false,
-      "anonymous Babble must not expose its carrier to persona text polishing",
+      "the foundation's already persona-authored opening must not be rewritten by cadence polishing",
     );
     const presentationGate = graph.presentationGates?.[0];
     assert.ok(presentationGate, "a case with reachable evidence must compile a meaningful Present gate");
@@ -5463,6 +5252,18 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     const examinationNodeIds = new Set(
       graph.nodes.filter((node) => node.kind === "examination_result").map((node) => node.id),
     );
+    const caseKitExaminationNodes = graph.nodes.filter(
+      (node) => (node.mutations.acquireItemIds?.length ?? 0) > 0,
+    );
+    assert.ok(caseKitExaminationNodes.length > 0, "the mansion's frozen access items must bridge into Examine");
+    assert.deepEqual(state.caseKit, []);
+    assert.equal(
+      Object.keys(privateCase.caseKitItemIdByExamineNodeId ?? {}).length,
+      caseKitExaminationNodes.length,
+    );
+    assert.ok((privateCase.caseKitItems?.length ?? 0) >= caseKitExaminationNodes.length);
+    assert.ok(caseKitExaminationNodes.every((node) =>
+      node.mutations.acquireItemIds?.[0] === privateCase.caseKitItemIdByExamineNodeId?.[node.id]));
     const examinationLines = graph.lines.filter((line) => examinationNodeIds.has(line.nodeId));
     assert.ok(examinationLines.length > 0);
     assert.equal(examinationLines.every((line) => line.mode === "text_only"), true);
@@ -5512,7 +5313,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     );
     assert.throws(
       () => act(db, session, { action: "move", roomId: privateCase.crimeSceneRoomId }, "opening-enter-room"),
-      /dismiss the Casekeeper briefing/iu,
+      /finish the opening thought/iu,
     );
     session = act(db, session, { action: "dismiss_case_opening" }, "dismiss-casekeeper-opening");
     state = v2State(session);
@@ -5532,20 +5333,32 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     const finishRoom = (roomId: string): void => {
       const entered = v2State(session);
       if (entered.roomIntroductions[roomId] === "casekeeper") {
-        const silentBeat = entered.dialogueHistory.at(-1)!;
+        const playerThought = entered.dialogueHistory.at(-1)!;
         const occupant = entered.suspects.find((suspect) => suspect.roomId === roomId)!;
-        assert.notEqual(silentBeat.visibleText, "...");
-        assert.match(silentBeat.visibleText, /^(?:A|An|The)\b/u);
+        assert.notEqual(playerThought.visibleText, "...");
+        assert.match(playerThought.visibleText, /^(?:A|An|The)\b/u);
         assert.equal(
-          silentBeat.visibleText.toLocaleLowerCase().includes(occupant.name.toLocaleLowerCase()),
+          playerThought.visibleText.toLocaleLowerCase().includes(occupant.name.toLocaleLowerCase()),
           false,
-          "the Casekeeper tableau stays anonymous until the persona appears",
+          "the spoiler-safe player thought does not identify the occupant before they appear",
         );
-        assert.equal(silentBeat.delivery, "text_only");
-        assert.equal(silentBeat.lineId, "line-room-introduction-" + roomId + "-casekeeper");
+        assert.equal(playerThought.delivery, "persona_babble");
+        assert.equal(playerThought.speakerKind, "player");
+        assert.equal(playerThought.speakerBotId, entered.config.prosecutorBotId);
+        assert.equal(playerThought.lineId, "line-room-introduction-" + roomId + "-casekeeper");
+        assert.equal(
+          entered.metSuspectSeatIds.includes(occupant.seatId),
+          false,
+          "the Case File must not reveal an occupant before their first visible introduction",
+        );
         session = act(db, session, { action: "advance_room_introduction", roomId }, `intro-casekeeper-${roomId}`);
         const personaBeat = v2State(session).dialogueHistory.at(-1)!;
         assert.equal(v2State(session).roomIntroductions[roomId], "persona");
+        assert.equal(
+          v2State(session).metSuspectSeatIds.includes(occupant.seatId),
+          true,
+          "the first visible occupant introduction reveals that witness to the Case File",
+        );
         assert.equal(personaBeat.delivery, "spoken");
         assert.ok(personaBeat.lineId?.includes(`room-introduction-${roomId}-persona`));
         assert.equal(personaBeat.speakerBotId, entered.suspects.find((suspect) => suspect.roomId === roomId)?.botId);
@@ -5564,16 +5377,23 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
           (entry) => entry.lineId === personaBeat.lineId,
         ), false);
         assert.equal((manifest as { entries: Array<{ lineId: string }> }).entries.some(
-          (entry) => entry.lineId === silentBeat.lineId,
+          (entry) => entry.lineId === playerThought.lineId,
         ), false);
         session = act(db, session, { action: "complete_room_introduction", roomId }, `intro-persona-${roomId}`);
         assert.equal(v2State(session).roomIntroductions[roomId], "complete");
       }
       for (const hotspot of v2State(session).rooms.find((entry) => entry.id === roomId)!.hotspots.filter((entry) => !entry.examined)) {
+        const examineNode = graph.nodes.find((node) => node.id === `examine-${roomId}-${hotspot.id}`)!;
         session = act(db, session, { action: "examine", roomId, hotspotId: hotspot.id }, `examine-${roomId}-${hotspot.id}`);
         const observation = v2State(session).dialogueHistory.at(-1)!;
         assert.equal(observation.delivery, "text_only");
         assert.equal(observation.lineId, null);
+        for (const itemId of examineNode.mutations.acquireItemIds ?? []) {
+          assert.ok(
+            v2State(session).caseKit?.some((item) => item.id === itemId),
+            `examining ${roomId}:${hotspot.id} should recover ${itemId} into the Case Kit`,
+          );
+        }
       }
     };
     finishRoom(privateCase.crimeSceneRoomId);
@@ -7398,7 +7218,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(provider.calls, callsAfterCompile);
   });
 
-  it("crosses the exterior door into the foyer before normal Participant investigation", async () => {
+  it("crosses the exterior threshold into a random incident room without visiting the foyer", async () => {
     const db = testDb();
     const provider = new V2AuthorProvider();
     let session = await createDebateMysterySessionV2(
@@ -7412,9 +7232,20 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     session = await runDebateMysteryCompilationV2(db, "user-1", session.id, runtime(provider), {
       generateWave: async () => playableWave(),
     });
-    const foyer = v2State(session).rooms.find((room) => room.templateId === "foyer");
-    assert.ok(foyer);
+    const compiledState = v2State(session);
+    const foyer = compiledState.rooms.find((room) => room.templateId === "foyer");
+    const incidentScene = compiledState.rooms.find((room) => room.id === compiledState.crimeSceneRoomId);
+    assert.ok(foyer, "the compiled mansion retains its foyer as an explorable room");
+    assert.ok(incidentScene);
+    assert.notEqual(incidentScene.id, foyer.id, "the foyer is never the automatic incident scene");
+    const openingThought = compiledState.dialogueHistory.find(
+      (entry) => entry.nodeId === "briefing-opening",
+    );
+    assert.ok(openingThought?.visibleText.toLocaleLowerCase().includes(
+      incidentScene.name.toLocaleLowerCase(),
+    ), "the player's opening thought narratively identifies the incident destination");
     const illustratedFoyerSubjectId = debateMysteryIllustratedRoomSubjectIdV1(foyer.id);
+    const illustratedIncidentSubjectId = debateMysteryIllustratedRoomSubjectIdV1(incidentScene.id);
     setDebateMysteryAssetFallbackV1(db, {
       userId: "user-1",
       sessionId: session.id,
@@ -7422,43 +7253,53 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       subjectId: illustratedFoyerSubjectId,
       reason: "test sealed Illustrated foyer",
     });
-    const illustratedReveal = (): string | null => (db.prepare(
+    setDebateMysteryAssetFallbackV1(db, {
+      userId: "user-1",
+      sessionId: session.id,
+      kind: "room",
+      subjectId: illustratedIncidentSubjectId,
+      reason: "test sealed Illustrated incident scene",
+    });
+    const illustratedReveal = (subjectId: string): string | null => (db.prepare(
       `SELECT revealed_at
          FROM debate_mystery_asset_vault
         WHERE user_id = ? AND session_id = ? AND kind = 'room' AND subject_id = ?`,
-    ).get("user-1", session.id, illustratedFoyerSubjectId) as { revealed_at: string | null }).revealed_at;
-    assert.equal(illustratedReveal(), null);
+    ).get("user-1", session.id, subjectId) as { revealed_at: string | null }).revealed_at;
+    assert.equal(illustratedReveal(illustratedFoyerSubjectId), null);
+    assert.equal(illustratedReveal(illustratedIncidentSubjectId), null);
     session = act(db, session, { action: "enter_mansion" }, "participant-enter-mansion-door");
     let state = v2State(session);
     assert.equal(state.playPhase, "case_opening");
-    assert.equal(state.currentRoomId, foyer.id);
+    assert.equal(state.currentRoomId, incidentScene.id);
     assert.equal(state.roomView, "room");
-    assert.equal(state.rooms.find((room) => room.id === foyer.id)?.visited, true);
-    assert.ok(illustratedReveal());
+    assert.equal(state.rooms.find((room) => room.id === foyer.id)?.visited, false);
+    assert.equal(state.rooms.find((room) => room.id === incidentScene.id)?.visited, true);
+    assert.equal(illustratedReveal(illustratedFoyerSubjectId), null);
+    assert.ok(illustratedReveal(illustratedIncidentSubjectId));
     assert.ok(state.rooms.length > 0);
     session = act(
       db,
       session,
       { action: "dismiss_case_opening" },
-      "participant-dismiss-foyer-casekeeper",
+      "participant-finish-opening-thought",
     );
     state = v2State(session);
     assert.equal(state.playPhase, "investigation");
-    assert.equal(state.currentRoomId, foyer.id);
-    session = act(db, session, { action: "move" }, "participant-open-map-before-foyer-sweep");
+    assert.equal(state.currentRoomId, incidentScene.id);
+    session = act(db, session, { action: "move" }, "participant-open-map-before-incident-sweep");
     assert.equal(v2State(session).roomView, "mansion");
-    const adjacentFoyerRoomId = v2State(session).rooms.find((room) =>
-      room.id !== foyer.id &&
-      ((room.neighborIds ?? []).includes(foyer.id) || (foyer.neighborIds ?? []).includes(room.id))
+    const adjacentIncidentRoomId = v2State(session).rooms.find((room) =>
+      room.id !== incidentScene.id &&
+      ((room.neighborIds ?? []).includes(incidentScene.id) || (incidentScene.neighborIds ?? []).includes(room.id))
     )?.id;
-    assert.ok(adjacentFoyerRoomId, "the authored foyer needs an adjacent room");
+    assert.ok(adjacentIncidentRoomId, "the authored incident scene needs an adjacent room");
     session = act(
       db,
       session,
-      { action: "move", roomId: adjacentFoyerRoomId },
-      "participant-enter-adjacent-room-before-foyer-sweep",
+      { action: "move", roomId: adjacentIncidentRoomId },
+      "participant-enter-adjacent-room-before-incident-sweep",
     );
-    assert.equal(v2State(session).currentRoomId, adjacentFoyerRoomId);
+    assert.equal(v2State(session).currentRoomId, adjacentIncidentRoomId);
     const restarted = restartDebateMysteryInvestigationV2(
       db,
       "user-1",
@@ -7475,14 +7316,16 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       "participant-resume-exterior-door",
     );
     assert.equal(v2State(resumed).playPhase, "case_opening");
-    assert.equal(v2State(resumed).currentRoomId, foyer.id);
+    assert.equal(v2State(resumed).currentRoomId, incidentScene.id);
+    assert.equal(v2State(resumed).rooms.find((room) => room.id === foyer.id)?.visited, false);
     const resumedInside = act(
       db,
       resumed,
       { action: "dismiss_case_opening" },
-      "participant-resume-dismiss-foyer-casekeeper",
+      "participant-resume-finish-opening-thought",
     );
     assert.equal(v2State(resumedInside).playPhase, "investigation");
+    assert.equal(v2State(resumedInside).currentRoomId, incidentScene.id);
     assert.equal(state.theory, null);
     assert.throws(
       () => act(db, resumedInside, { action: "advance_spectator_trial" }, "participant-auto-advance"),

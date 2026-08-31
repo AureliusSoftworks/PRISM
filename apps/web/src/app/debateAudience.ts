@@ -88,6 +88,43 @@ export function debateAudienceDepartureXPercent(seed: string): number {
   return direction * distance;
 }
 
+export interface DebateFlytingAudienceMillingPlan {
+  offsetXPercent: number;
+  offsetYPercent: number;
+  driftXPercent: number;
+  driftYPercent: number;
+  durationMs: number;
+  delayMs: number;
+  depthScale: number;
+  layer: number;
+}
+
+/**
+ * Stable, low-cost crowd motion for the Mead Hall. Each body keeps its place
+ * across renders while gently milling inside its current allegiance cluster.
+ */
+export function debateFlytingAudienceMillingPlan(
+  seed: string,
+  depthRow: DebateAudienceDepthRow,
+): DebateFlytingAudienceMillingPlan {
+  const random = debateAudienceRandom(`${seed}:flyting-milling-v1`);
+  const signed = (magnitude: number): number =>
+    Math.round((random() * 2 - 1) * magnitude * 10) / 10;
+  const depthMinimum = depthRow === "rear" ? 0.78 : 0.92;
+  const depthRange = depthRow === "rear" ? 0.13 : 0.12;
+
+  return {
+    offsetXPercent: signed(13),
+    offsetYPercent: signed(7),
+    driftXPercent: signed(10),
+    driftYPercent: signed(5),
+    durationMs: 4_200 + Math.round(random() * 2_700),
+    delayMs: -Math.round(random() * 6_900),
+    depthScale: Math.round((depthMinimum + random() * depthRange) * 100) / 100,
+    layer: 1 + Math.floor(random() * 4),
+  };
+}
+
 export function debateAudienceBotCount(
   graphicsQuality: GraphicsQuality,
 ): number {
@@ -260,6 +297,24 @@ function generatedAudienceSnapshot(
   };
 }
 
+/**
+ * Generic, deterministic PRISM bodies for Flyting's non-Library Hall crowd.
+ * Indices 0-14 are swayable spectators; 15-17 are the Jarl's guards.
+ */
+export function debateFlytingHallNpcBots(
+  sessionId: string,
+  count: number,
+): DebateBotSnapshotV1[] {
+  const safeCount = Math.max(0, Math.floor(count));
+  return Array.from({ length: safeCount }, (_, index) =>
+    generatedAudienceSnapshot(
+      `${sessionId}:flyting-hall`,
+      index,
+      debateAudienceRandom(`${sessionId}:flyting-hall:${index}`),
+    ),
+  );
+}
+
 export function debateAudienceBotsForSession(args: {
   sessionId: string;
   count: number;
@@ -269,7 +324,8 @@ export function debateAudienceBotsForSession(args: {
 }): DebateBotSnapshotV1[] {
   const count = Math.max(0, Math.floor(args.count));
   const spectatorPrism =
-    args.spectatorPrism && debateAudienceBotIsPlayerSpectator(args.spectatorPrism)
+    args.spectatorPrism &&
+    debateAudienceBotIsPlayerSpectator(args.spectatorPrism)
       ? args.spectatorPrism
       : null;
   const fillerCount = spectatorPrism ? Math.max(0, count - 1) : count;
@@ -293,7 +349,9 @@ export function debateAudienceBotsForSession(args: {
     ];
   }
 
-  const audience = libraryBots.slice(0, fillerCount).map(libraryAudienceSnapshot);
+  const audience = libraryBots
+    .slice(0, fillerCount)
+    .map(libraryAudienceSnapshot);
   while (audience.length < fillerCount) {
     audience.push(
       generatedAudienceSnapshot(args.sessionId, audience.length, random),

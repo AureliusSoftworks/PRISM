@@ -9872,6 +9872,46 @@ function persistProducerCue(
   return after;
 }
 
+function botcastMessageHasProducerTensionTransitionV1(
+  episode: BotcastEpisode,
+  messageId: string,
+): boolean {
+  const utteranceIndex = episode.events.findIndex(
+    (event) =>
+      event.kind === "utterance" && event.payload.messageId === messageId,
+  );
+  if (utteranceIndex < 0) return false;
+  for (let index = utteranceIndex - 1; index >= 0; index -= 1) {
+    const event = episode.events[index]!;
+    if (event.kind === "utterance") break;
+    if (
+      event.kind === "tension" &&
+      typeof event.payload.cue === "string"
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function applyBotcastGuestTensionDecisionV1(
+  current: BotcastTensionState,
+  decision: BotcastGuestTensionDecisionV1,
+): BotcastTensionState {
+  const delta = decision === "raise" ? 1 : decision === "ease" ? -1 : 0;
+  const level = Math.max(0, Math.min(3, current.level + delta)) as
+    | 0
+    | 1
+    | 2
+    | 3;
+  const enteredWarning = current.level < 2 && level >= 2;
+  return {
+    level,
+    warningCount: current.warningCount + (enteredWarning ? 1 : 0),
+    stage: botcastTensionStageForLevel(level),
+  };
+}
+
 /** Queue is episode-owned so a reload, a new tab, or a delayed handoff cannot lose it. */
 export function queueBotcastProducerCue(
   db: DatabaseSync,
@@ -10241,8 +10281,13 @@ export type BotcastImageSemanticDecisionV1 =
   | "dismiss_after"
   | "move_on";
 
+export type BotcastGuestTensionDecisionV1 = "raise" | "steady" | "ease";
+
 const BOTCAST_IMAGE_SEMANTIC_MARKER_PATTERN =
   /\[\[signal_image_context:(continue|dismiss_after|move_on)\]\]/giu;
+
+const BOTCAST_GUEST_TENSION_MARKER_PATTERN =
+  /\[\[signal_guest_tension:(raise|steady|ease)\]\]/giu;
 
 /**
  * The source title remains conversational metadata, never identity evidence.
@@ -10283,6 +10328,41 @@ export function extractBotcastImageSemanticDecisionV1(raw: string): {
     content,
     decision: decisions.length === 1 ? decisions[0]! : null,
   };
+}
+
+/**
+ * Separates the guest model's private reaction state from canonical speech.
+ * The marker describes the guest's response to the host line they just heard;
+ * it is never audience-facing dialogue or a sentiment guess over saved text.
+ */
+export function extractBotcastGuestTensionDecisionV1(raw: string): {
+  content: string;
+  decision: BotcastGuestTensionDecisionV1 | null;
+} {
+  const decisions: BotcastGuestTensionDecisionV1[] = [];
+  const content = raw
+    .replace(
+      BOTCAST_GUEST_TENSION_MARKER_PATTERN,
+      (_match, candidate: string) => {
+        decisions.push(
+          candidate.toLowerCase() as BotcastGuestTensionDecisionV1,
+        );
+        return "";
+      },
+    )
+    .replace(/[ \t]+\n/gu, "\n")
+    .replace(/\n{3,}/gu, "\n\n")
+    .trim();
+  return {
+    content,
+    decision: decisions.length === 1 ? decisions[0]! : null,
+  };
+}
+
+function botcastSpokenContentForValidationV1(raw: string): string {
+  return extractBotcastGuestTensionDecisionV1(
+    extractBotcastImageSemanticDecisionV1(raw).content,
+  ).content;
 }
 
 function botcastRelationshipTone(
@@ -12331,6 +12411,18 @@ export function buildBotcastSpeakerPrompt(
           "The token is private metadata: never speak, quote, explain, or otherwise refer to it in the on-air words.",
         ].join(" ")
       : null;
+  const guestTensionDecisionRule =
+    args.speakerRole === "guest" &&
+    args.episode.guestKind === "bot" &&
+    args.episode.messages.at(-1)?.speakerRole === "host"
+      ? [
+          "Private Signal guest-reaction metadata: end the response with exactly one token on its own line:",
+          "[[signal_guest_tension:raise]] when the host line you just heard genuinely made this guest more irritated, defensive, or boundary-conscious;",
+          "[[signal_guest_tension:ease]] when that host line genuinely soothed, reassured, or de-escalated this guest;",
+          "[[signal_guest_tension:steady]] when it did neither.",
+          "Judge from this guest's private persona and the actual just-heard host line, not from generic keyword sentiment. The token is private metadata: never speak, quote, explain, or otherwise refer to it in the on-air words.",
+        ].join(" ")
+      : null;
   const privateImagePresentationRule =
     args.speakerRole === "host" &&
     imageContext &&
@@ -12869,6 +12961,7 @@ export function buildBotcastSpeakerPrompt(
         ...(liveCueAdjustmentRule ? [liveCueAdjustmentRule] : []),
         ...(imageDiscussionRule ? [imageDiscussionRule] : []),
         ...(imageSemanticDecisionRule ? [imageSemanticDecisionRule] : []),
+        ...(guestTensionDecisionRule ? [guestTensionDecisionRule] : []),
         ...(privateImagePresentationRule ? [privateImagePresentationRule] : []),
         ...(askAboutCueRule ? [askAboutCueRule] : []),
         ...(refocusCueRule ? [refocusCueRule] : []),
@@ -17746,6 +17839,13 @@ export async function advanceBotcastEpisode(
     speakerRole === "host" &&
     episode.segment === "opening" &&
     episode.messages.length === 0;
+  const firstGuestOpeningReply = Boolean(
+    speakerRole === "guest" &&
+      episode.segment === "opening" &&
+      episode.messages.length === 1 &&
+      episode.messages[0]?.speakerRole === "host" &&
+      !botPowerIsMutedV1(host.powers),
+  );
   const speakerIsMuted = botPowerIsMutedV1(speakerSpeechPowers);
   const speakerQuietIgnored = botPowerIntermittentMuteTurnIsIgnoredV1(
     speakerSpeechPowers,
@@ -18405,11 +18505,23 @@ export async function advanceBotcastEpisode(
   const basePrompt = firstHostOpening
     ? buildBotcastOpeningIntroPrompt(promptArgs)
     : buildBotcastSpeakerPrompt(promptArgs);
-  const signalTurnOutputContract =
-    imageDiscussionTurn === "host_follow_up" ||
+  const guestTensionDecisionRequired = Boolean(
+    speakerRole === "guest" &&
+      episode.guestKind === "bot" &&
+      latestOnAirMessage?.speakerRole === "host",
+  );
+  const privateSignalOutputTokens = [
+    ...(imageDiscussionTurn === "host_follow_up" ||
     imageDiscussionTurn === "continued_discussion"
-      ? "Write only the next on-air Signal utterance in the assigned role, followed by exactly one required private signal_image_context lifecycle token; preserve cue, interruption, Power, and closing rules."
-      : "Write only the next on-air Signal utterance in the assigned role; preserve cue, interruption, Power, and closing rules.";
+      ? ["one required private signal_image_context lifecycle token"]
+      : []),
+    ...(guestTensionDecisionRequired
+      ? ["one required private signal_guest_tension reaction token"]
+      : []),
+  ];
+  const signalTurnOutputContract = privateSignalOutputTokens.length > 0
+    ? `Write only the next on-air Signal utterance in the assigned role, followed by ${privateSignalOutputTokens.join(" and ")}; preserve cue, interruption, Power, and closing rules.`
+    : "Write only the next on-air Signal utterance in the assigned role; preserve cue, interruption, Power, and closing rules.";
   const hostClosingTurn =
     speakerRole === "host" && episode.segment === "closing";
   const hostClosingRequiresFormalThanks =
@@ -18993,7 +19105,7 @@ export async function advanceBotcastEpisode(
           : {
               validate: (candidate: string) => {
                 const validation = validateBotcastAutoSpeakerUtterance({
-                  raw: extractBotcastImageSemanticDecisionV1(candidate).content,
+                  raw: botcastSpokenContentForValidationV1(candidate),
                   speakerName: speaker.name,
                   peerName: peer.name,
                   speakerRole,
@@ -19119,7 +19231,7 @@ export async function advanceBotcastEpisode(
               : {}),
             validate: (candidate) => {
               const validation = validateBotcastAutoSpeakerUtterance({
-                raw: extractBotcastImageSemanticDecisionV1(candidate).content,
+                raw: botcastSpokenContentForValidationV1(candidate),
                 speakerName: speaker.name,
                 peerName: peer.name,
                 speakerRole,
@@ -19282,7 +19394,7 @@ export async function advanceBotcastEpisode(
               (activeFalseNameState && !firstHostOpening)) &&
             !speakerIsMutedForTurn &&
             !validateBotcastAutoSpeakerUtterance({
-              raw: extractBotcastImageSemanticDecisionV1(value).content,
+              raw: botcastSpokenContentForValidationV1(value),
               speakerName: speaker.name,
               peerName: peer.name,
               speakerRole,
@@ -19317,7 +19429,7 @@ export async function advanceBotcastEpisode(
               timeoutMs,
             });
             const retryValidation = validateBotcastAutoSpeakerUtterance({
-              raw: extractBotcastImageSemanticDecisionV1(retry.value).content,
+              raw: botcastSpokenContentForValidationV1(retry.value),
               speakerName: speaker.name,
               peerName: peer.name,
               speakerRole,
@@ -19460,7 +19572,11 @@ export async function advanceBotcastEpisode(
   const imageSemanticEnvelope = imageDiscussionTurn
     ? extractBotcastImageSemanticDecisionV1(raw)
     : { content: raw, decision: null };
-  raw = imageSemanticEnvelope.content;
+  const guestTensionEnvelope =
+    speakerRole === "guest"
+      ? extractBotcastGuestTensionDecisionV1(imageSemanticEnvelope.content)
+      : { content: imageSemanticEnvelope.content, decision: null };
+  raw = guestTensionEnvelope.content;
   const openingSubject =
     episode.topic.replace(/[.!?]+$/u, "").trim() || episode.topic;
   const topicWithPunctuation = /[.!?]$/u.test(episode.topic.trim())
@@ -19480,13 +19596,6 @@ export async function advanceBotcastEpisode(
       episode.messages.length === 1 &&
       episode.messages[0]?.speakerRole === "host" &&
       botPowerIsMutedV1(host.powers),
-  );
-  const firstGuestOpeningReply = Boolean(
-    speakerRole === "guest" &&
-      episode.segment === "opening" &&
-      episode.messages.length === 1 &&
-      episode.messages[0]?.speakerRole === "host" &&
-      !botPowerIsMutedV1(host.powers),
   );
   const silentGuestFallback =
     speakerRole === "guest" && silentPeerTurnCount > 0
@@ -20669,6 +20778,30 @@ export async function advanceBotcastEpisode(
           : onlineTurn?.validationFailureClause === "guest_coda_role"
             ? "guest_coda_role"
           : null;
+  const guestTensionDecision =
+    speakerRole === "guest" &&
+    episode.guestKind === "bot" &&
+    latestOnAirMessage?.speakerRole === "host" &&
+    guestTensionEnvelope.decision &&
+    providerUsed !== "deterministic" &&
+    !socialSilenceMarker &&
+    !speakerIsMutedForTurn &&
+    !speakerRepeatsForHearingPower &&
+    !speakerReadsProducerQuote &&
+    !speakerEchoesForTurn &&
+    !generatedUtterance.repairReason &&
+    !onlineFormalThanksRepairApplied &&
+    !closingContractRepaired &&
+    !freshContactRepairApplied &&
+    !prematureSignoffRepairApplied &&
+    !postPowerGuestRepairApplied &&
+    !guestCodaRoleRepairApplied &&
+    !botcastMessageHasProducerTensionTransitionV1(
+      episode,
+      latestOnAirMessage.id,
+    )
+      ? guestTensionEnvelope.decision
+      : null;
   recordEvent(
     db,
     userId,
@@ -20834,6 +20967,7 @@ export async function advanceBotcastEpisode(
           }
       : {}),
     ...(autoRecovery ? { autoRecovery } : {}),
+    ...(guestTensionDecision ? { guestTensionDecision } : {}),
     // Intentional silence/mute already owns the on-air content; ellipsis cleanup
     // must not look like a failed model repair in the production log.
     ...((generatedUtterance.repairReason ||
@@ -20914,6 +21048,53 @@ export async function advanceBotcastEpisode(
     },
     now,
   );
+  if (guestTensionDecision && guestTensionDecision !== "steady") {
+    const before = currentTension(episode);
+    const after = applyBotcastGuestTensionDecisionV1(
+      before,
+      guestTensionDecision,
+    );
+    if (
+      after.level !== before.level ||
+      after.warningCount !== before.warningCount
+    ) {
+      db.prepare(
+        `UPDATE botcast_episodes
+            SET tension_level = ?, warning_count = ?, updated_at = ?
+          WHERE id = ? AND user_id = ?`,
+      ).run(after.level, after.warningCount, now, episode.id, userId);
+      recordEvent(
+        db,
+        userId,
+        episode.id,
+        "tension",
+        {
+          from: before.stage,
+          to: after.stage,
+          cause: "guest_semantic_reaction",
+          decision: guestTensionDecision,
+          sourceMessageId: latestOnAirMessage!.id,
+          reactionMessageId: messageId,
+        },
+        now,
+      );
+      if (after.warningCount > before.warningCount) {
+        recordEvent(
+          db,
+          userId,
+          episode.id,
+          "warning",
+          {
+            warningCount: after.warningCount,
+            cause: "guest_semantic_reaction",
+            sourceMessageId: latestOnAirMessage!.id,
+          },
+          now,
+        );
+      }
+      tension = after;
+    }
+  }
   if (mutePerformance) {
     recordBotcastMutePerformanceDirection({
       db,

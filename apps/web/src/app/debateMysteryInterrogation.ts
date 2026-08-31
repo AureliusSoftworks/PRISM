@@ -13,13 +13,31 @@ export const WHODUNNIT_INVESTIGATION_DIALOGUE_GRACE_MS = {
   reducedMotionExtra: 400,
 } as const;
 
+export const WHODUNNIT_DIALOGUE_TYPEWRITER = {
+  minDurationMs: 720,
+  msPerCharacter: 42,
+} as const;
+
+/**
+ * A deliberately readable Phoenix Wright-style caption clock. Every visible
+ * Whodunnit line uses this when prepared speech is absent or intentionally
+ * suppressed; a player gesture can still settle the line immediately.
+ */
+export function whodunnitDialogueTypewriterDurationMs(text: string): number {
+  return Math.max(
+    WHODUNNIT_DIALOGUE_TYPEWRITER.minDurationMs,
+    whodunnitCaptionSpeechText(text).length *
+      WHODUNNIT_DIALOGUE_TYPEWRITER.msPerCharacter,
+  );
+}
+
 /**
  * Spoken lines need only a short caption hold after their real audio ends.
  * Text-only lines earn additional reading time from their actual visible
  * length because the player has no voice cadence to carry comprehension.
  */
 export function whodunnitInvestigationDialogueGraceMs(args: {
-  delivery: "spoken" | "text_only" | "anonymous_babble";
+  delivery: "spoken" | "text_only" | "persona_babble" | "anonymous_babble";
   reducedMotion: boolean;
   text: string;
 }): number {
@@ -40,11 +58,13 @@ export function whodunnitInvestigationDialogueGraceMs(args: {
   );
 }
 
-/** Only presentation-complete, non-interactive Investigation dialogue closes itself. */
+/** Only presentation-complete ordinary Investigation dialogue closes itself.
+ * Player-authored observations always wait for an explicit gesture. */
 export function whodunnitInvestigationDialogueShouldAutoAdvance(args: {
   busy: boolean;
   hasActiveAudio: boolean;
   hasDialogue: boolean;
+  isPlayerObservation: boolean;
   playPhase: string;
   requiresPlayerInput: boolean;
   roomView: string;
@@ -53,6 +73,7 @@ export function whodunnitInvestigationDialogueShouldAutoAdvance(args: {
   return args.playPhase === "investigation" &&
     args.roomView === "room" &&
     args.hasDialogue &&
+    !args.isPlayerObservation &&
     !args.busy &&
     !args.hasActiveAudio &&
     !args.requiresPlayerInput &&
@@ -112,10 +133,23 @@ export function startWhodunnitInterrogation(
   prosecutorBotId: string,
   suspectSeatId: string,
 ): WhodunnitInterrogationPhase | null {
-  const first = entries[0];
-  if (!first) return null;
-  if (first.speakerBotId === prosecutorBotId) return "prosecutor_entrance";
-  if (first.speakerSeatId === suspectSeatId) return "suspect_entrance";
+  return whodunnitInterrogationEntrancePhaseForEntry(
+    entries[0] ?? null,
+    prosecutorBotId,
+    suspectSeatId,
+  );
+}
+
+/** Resolve every queued handoff from the next frozen speaker, rather than
+ * assuming all room exchanges end after one Prosecutor/witness pair. */
+export function whodunnitInterrogationEntrancePhaseForEntry(
+  entry: WhodunnitInterrogationEntry | null,
+  prosecutorBotId: string,
+  suspectSeatId: string,
+): WhodunnitInterrogationPhase | null {
+  if (!entry) return null;
+  if (entry.speakerBotId === prosecutorBotId) return "prosecutor_entrance";
+  if (entry.speakerSeatId === suspectSeatId) return "suspect_entrance";
   return null;
 }
 

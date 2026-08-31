@@ -25,6 +25,7 @@ import {
   signalReplayIntroLandingRemainingMs,
   signalReplayCapturedPresentationElapsedMs,
   signalReplayMediaElapsedMs,
+  signalReplayMouthSampleElapsedMs,
   signalReplayIntroVisualElapsedMs,
   signalReplayIntroVisualOffsetMs,
   signalReplayVideoEventElapsedMs,
@@ -554,6 +555,79 @@ describe("Signal replay video frames", () => {
     assert.equal(
       replayCameraPresentationAtV2(bakedManifest, guestAudioElapsedMs).shot,
       "right",
+    );
+  });
+
+  it("rebases only a provably late captured mouth start onto audible speech", () => {
+    const lateMouthManifest: ReplayManifestV2 = {
+      v: 2,
+      surface: "signal",
+      sourceId: "late-mouth",
+      title: "Late mouth",
+      createdAt: "2026-07-26T00:00:00.000Z",
+      completedAt: "2026-07-26T00:00:12.000Z",
+      privacyMode: "local",
+      participants: [],
+      utterances: [],
+      initialScene: replayScene({ "host-1": participantScene() }),
+      direction: [],
+      presentation: {
+        mouthTracks: [{
+          participantId: "host-1",
+          cues: [
+            { atMs: 0, shape: "closed" },
+            { atMs: 2_700, shape: "open-wide" },
+            { atMs: 6_000, shape: "closed" },
+          ],
+        }],
+        speechActivityTracks: [{
+          participantId: "host-1",
+          cues: [
+            { atMs: 2_700, active: true },
+            { atMs: 6_000, active: false },
+          ],
+        }],
+      },
+      visual: {
+        theme: "dark",
+        accentColor: null,
+        atmosphereImageUrl: null,
+      },
+    };
+    const correctedElapsedMs = signalReplayMouthSampleElapsedMs({
+      manifest: lateMouthManifest,
+      participantId: "host-1",
+      replayElapsedMs: 2_000,
+      speechStartMs: 2_000,
+      speechEndMs: 6_000,
+    });
+    assert.equal(correctedElapsedMs, 2_700);
+    assert.equal(
+      replayMouthShapeAtV2(lateMouthManifest, "host-1", correctedElapsedMs),
+      "open-wide",
+      "the first audible host frame must not wait for a delayed React capture",
+    );
+    assert.equal(
+      signalReplayMouthSampleElapsedMs({
+        manifest: lateMouthManifest,
+        participantId: "host-1",
+        replayElapsedMs: 6_100,
+        speechStartMs: 2_000,
+        speechEndMs: 6_000,
+      }),
+      6_100,
+      "the correction remains within the spoken beat",
+    );
+    assert.equal(
+      signalReplayMouthSampleElapsedMs({
+        manifest: lateMouthManifest,
+        participantId: "host-1",
+        replayElapsedMs: 2_640,
+        speechStartMs: 2_640,
+        speechEndMs: 6_000,
+      }),
+      2_640,
+      "normal one-frame mouth settling remains faithful",
     );
   });
 

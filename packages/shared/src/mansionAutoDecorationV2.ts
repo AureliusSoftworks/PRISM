@@ -1,4 +1,7 @@
-import { DEBATE_MYSTERY_ROOM_TEMPLATES } from "./debateMystery.ts";
+import {
+  DEBATE_MYSTERY_ROOM_TEMPLATES,
+  debateMysteryRoomPresentationRegionsV1,
+} from "./debateMystery.ts";
 import {
   MANSION_LAYOUT_V2_MAX_ANCHORS_PER_ROOM,
   MANSION_LAYOUT_V2_MAX_LIGHTS,
@@ -23,13 +26,6 @@ interface SemanticDecorationRegionV2 {
   point: { x: number; y: number };
   bounds: { width: number; height: number };
 }
-
-const GENERIC_ROOM_REGIONS: readonly SemanticDecorationRegionV2[] = [
-  { key: "left-wall", label: "left wall", lightHint: "left wall", point: { x: 0.16, y: 0.46 }, bounds: { width: 0.22, height: 0.52 } },
-  { key: "center-surface", label: "center surface", lightHint: "center surface", point: { x: 0.5, y: 0.62 }, bounds: { width: 0.34, height: 0.2 } },
-  { key: "right-wall", label: "right wall", lightHint: "right wall", point: { x: 0.84, y: 0.46 }, bounds: { width: 0.22, height: 0.52 } },
-  { key: "foreground", label: "foreground", lightHint: "foreground", point: { x: 0.5, y: 0.86 }, bounds: { width: 0.48, height: 0.2 } },
-] as const;
 
 function normalizedText(value: string): string {
   return value.trim().toLocaleLowerCase();
@@ -75,15 +71,8 @@ function stableGeneratedId(
 }
 
 function roomRegions(room: MansionLayoutRoomV2): readonly SemanticDecorationRegionV2[] {
-  // Custom/accepted art owns its own coordinate system, while a room without
-  // any plate has no trustworthy template geometry. Reusing template polygons
-  // in either state would visibly align effects to the wrong scene.
-  if (room.imageId || room.acceptedRoomAssetId || !room.bundledAssetPath) {
-    return GENERIC_ROOM_REGIONS;
-  }
-  const template = DEBATE_MYSTERY_ROOM_TEMPLATES.find((entry) => entry.id === room.templateId);
-  if (!template) return GENERIC_ROOM_REGIONS;
-  const broadRegions = template.regions.filter((region) => !region.id.includes(":detail-"));
+  const broadRegions = debateMysteryRoomPresentationRegionsV1(room)
+    .filter((region) => !region.id.includes(":detail-"));
   return broadRegions.map((region) => {
     const xs = region.polygon.map((point) => clamp(point.x / 100, 0, 1));
     const ys = region.polygon.map((point) => clamp(point.y / 100, 0, 1));

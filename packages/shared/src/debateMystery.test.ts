@@ -120,6 +120,15 @@ test("keeps sparse generator-v1 Case Bibles valid while generator-v2 cases requi
   );
 });
 
+test("writes the deterministic player-Prosecutor opening in first person", () => {
+  const config = resolveDebateMysteryConfig(
+    createConfig("compact", "classic", "first-person-opening"),
+  );
+  const bible = compileDeterministicDebateMystery({ config, suspects: suspects(4) });
+  assert.match(bible.publicOpening, /\bI am the lead investigator\./u);
+  assert.doesNotMatch(bible.publicOpening, /\bYou are the lead investigator\./u);
+});
+
 test("locks weapon category and opening-reveal probability boundaries deterministically", () => {
   assert.equal(resolveDebateMysteryWeaponCategory(0), "poison");
   assert.equal(resolveDebateMysteryWeaponCategory(0.249999), "poison");
@@ -149,6 +158,32 @@ test("locks weapon category and opening-reveal probability boundaries determinis
   assert.equal(hiddenState.discoveredEvidence.length, 0);
   assert.ok(!hiddenState.rooms.find((room) => room.id === hiddenBible.crimeSceneRoomId)!
     .inspectedRegionIds.includes(canonicalWeapon.regionId));
+});
+
+test("chooses a deterministic non-foyer incident scene", () => {
+  const config = resolveDebateMysteryConfig(
+    createConfig("standard", "classic", "random-incident-room"),
+  );
+  const first = compileDeterministicDebateMystery({ config, suspects: suspects(6) });
+  const replay = compileDeterministicDebateMystery({ config, suspects: suspects(6) });
+  const incidentScene = first.rooms.find((room) => room.id === first.crimeSceneRoomId);
+  assert.ok(incidentScene);
+  assert.notEqual(incidentScene.templateId, "foyer");
+  assert.equal(incidentScene.kind, "crime_scene");
+  assert.equal(replay.crimeSceneRoomId, first.crimeSceneRoomId);
+  assert.equal(first.rooms.filter((room) => room.kind === "crime_scene").length, 1);
+  const incidentSceneIds = new Set(
+    Array.from({ length: 12 }, (_, index) => {
+      const seededConfig = resolveDebateMysteryConfig(
+        createConfig("standard", "classic", `random-incident-room-${index}`),
+      );
+      return compileDeterministicDebateMystery({
+        config: seededConfig,
+        suspects: suspects(6),
+      }).crimeSceneRoomId;
+    }),
+  );
+  assert.ok(incidentSceneIds.size > 1, "different case seeds distribute incidents across the mansion");
 });
 
 test("uses the classic action budgets and freezes one hidden recovery token per five rooms", () => {
@@ -562,6 +597,32 @@ test("MansionLayoutV2 semantic projections may use corridor links and colon room
     }).errors,
     [],
   );
+});
+
+test("accepted mansion plates use neutral examination regions instead of PRISM template props", () => {
+  const config = resolveDebateMysteryConfig(createConfig("standard", "classic", "accepted-room-regions"));
+  const bundled = compileDeterministicDebateMystery({ config, suspects: suspects(6) });
+  const blueprint = bundled.rooms.map((room) => room.templateId === "foyer"
+    ? {
+        ...room,
+        imageId: "accepted-observatory-foyer",
+        usesBundledHotspotGeometry: false,
+      }
+    : room,
+  );
+  const caseWithAcceptedPlate = compileDeterministicDebateMystery({
+    config,
+    suspects: suspects(6),
+    roomBlueprint: blueprint,
+  });
+  const foyer = blueprint.find((room) => room.templateId === "foyer")!;
+  const foyerRegionIds = caseWithAcceptedPlate.activeRegions
+    .filter((region) => region.roomId === foyer.id)
+    .map((region) => region.regionId);
+
+  assert.ok(foyerRegionIds.length >= 12);
+  assert.ok(foyerRegionIds.every((id) => id.startsWith("foyer:scene-")));
+  assert.ok(!foyerRegionIds.some((id) => id.includes("umbrella")));
 });
 
 test("custom floor counts keep architectural room groups intact", () => {

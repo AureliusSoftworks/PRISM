@@ -18,11 +18,11 @@ describe("Whodunnit investigation room cinematography", () => {
     assert.equal(mysteryRoomCinematographyProfileV1({ templateId: "library" }), null);
   });
 
-  it("renders Mosaic effects on the logical 320 by 180 grid", () => {
+  it("renders Pixel Art effects on the logical 480 by 270 canvas", () => {
     assert.equal(mysteryRoomCinematographyArtStyleV1("url(/rooms/foyer-mosaic.webp)"), "mosaic");
     assert.equal(mysteryRoomCinematographyArtStyleV1("url(/api/room/file?style=mosaic)"), "mosaic");
     assert.equal(mysteryRoomCinematographyArtStyleV1("url(/rooms/foyer.webp)"), "illustrated");
-    assert.deepEqual(mysteryRoomCinematographyCanvasSize("mosaic"), { width: 320, height: 180 });
+    assert.deepEqual(mysteryRoomCinematographyCanvasSize("mosaic"), { width: 480, height: 270 });
     assert.deepEqual(mysteryRoomCinematographyCanvasSize("illustrated"), { width: 800, height: 450 });
   });
 
@@ -105,7 +105,9 @@ describe("Whodunnit investigation room cinematography", () => {
     assert.match(component, /stageObserver\?\.disconnect\(\)/u);
     assert.match(component, /data-light-motion=\{props\.reducedMotion \? "frozen" : "live"\}/u);
     assert.match(css, /mix-blend-mode:\s*overlay/u);
+    assert.match(css, /data-art-style="mosaic"[\s\S]*\.lighting[\s\S]*mix-blend-mode:\s*hard-light/u);
     assert.match(css, /data-art-style="mosaic"[\s\S]*image-rendering:\s*pixelated/u);
+    assert.match(css, /data-art-style="mosaic"[\s\S]*\.grain[\s\S]*opacity:\s*calc\(var\(--room-cinema-grain-opacity\) \* 0\.35\)/u);
     assert.match(css, /pointer-events:\s*none/u);
     assert.match(tutorial, /Investigation lighting stays room-scoped:[\s\S]*Custom or generated room art never borrows positional lights from a bundled PRISM room/u);
   });

@@ -128,6 +128,7 @@ import {
   type DebateTurnaboutFormatStateV1,
   type DebateWhodunnitCreateConfigV1,
   type DebateWhodunnitCreateConfigV2,
+  type BotAudioVoiceProfileV1,
   type DebateTurnaboutStatementV1,
   type BotPowerAvatarScaleMode,
   type BotPowerMuteReactionBeatV1,
@@ -889,7 +890,9 @@ export interface DebateExperienceProps {
   audioVolume: number;
   whodunnitTextVoiceMode?: WhodunnitTextVoiceMode;
   playMysteryTextVoice?: (args: {
+    instant?: boolean;
     mode: Exclude<WhodunnitTextVoiceMode, "off">;
+    voiceProfile: BotAudioVoiceProfileV1 | null;
     seed: string;
     signal?: AbortSignal;
     text: string;
@@ -20684,7 +20687,7 @@ export function DebateExperience(
               {!selectedMysteryMansionBundle && mysteryRoomAssetSynthesis ? (
                 <label data-enabled={!mysterySkipInvestigation && props.responseMode === "online" ? "true" : undefined} aria-disabled={mysterySkipInvestigation || props.responseMode !== "online"}>
                   <input type="checkbox" checked={mysteryIllustratedRoomSynthesis && !mysterySkipInvestigation && props.responseMode !== "local"} disabled={mysterySkipInvestigation || props.responseMode !== "online"} onChange={(event) => { setMysteryIllustratedRoomSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
-                  <span><strong>Upgrade every room to Illustrated</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases have no room pack." : props.responseMode === "local" ? "ONLINE only · LOCAL never sends mansion art to a remote generator." : "Keep Case Forge open while it turns every Mosaic source into the full high-detail room set, then begin Investigation in Illustrated view."}</small></span>
+                  <span><strong>Upgrade every room to Realistic</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases have no room pack." : props.responseMode === "local" ? "ONLINE only · LOCAL never sends mansion art to a remote generator." : "Keep Case Forge open while it restores realistic materials and depth from every Pixel Art room, then begin Investigation in Realistic view."}</small></span>
                 </label>
               ) : null}
               <label data-enabled={!mysterySkipInvestigation && props.responseMode !== "local" ? "true" : undefined} aria-disabled={mysterySkipInvestigation || props.responseMode === "local"}>
@@ -32531,14 +32534,6 @@ export function DebateExperience(
         activeSessionIdRef.current = session.id;
         activeSessionRef.current = session;
         setActiveSession(session);
-        void loadSessions();
-      }}
-      onExit={() => {
-        activeSessionIdRef.current = null;
-        activeSessionRef.current = null;
-        setActiveSession(null);
-        setView("dashboard");
-        setStudioPanel("archive");
         void loadSessions();
       }}
     />

@@ -200,6 +200,8 @@ describe("Debate Whodunnit experience", () => {
     assert.match(css, /\.investigationLens/u);
     assert.match(css, /border-radius: 50%/u);
     assert.match(css, /--lens-proximity/u);
+    assert.match(source, /data-targeted=\{lens\.proximity > 0 && lens\.regionId/u);
+    assert.match(css, /\.investigationLens\[data-targeted="true"\]::after[\s\S]*prismGlintSweep/u);
     assert.match(css, /\.hotspot[\s\S]*background: transparent/u);
     assert.doesNotMatch(css, /sparkle/iu);
     assert.match(css, /\.hotspot:focus-visible/u);
@@ -554,7 +556,7 @@ describe("Debate Whodunnit experience", () => {
     assert.match(css, /\.play\[data-phase="investigation"\] \.leadNotebook,[\s\S]*grid-template-columns: minmax\(0, 1fr\)/u);
   });
 
-  it("ships Illustrated and Mosaic 1600x900 WebP variants for all sixteen bundled rooms", () => {
+  it("ships sixteen Realistic pairs plus the synthesized-only Attic Mosaic", () => {
     const directory = fileURLToPath(
       new URL("../../public/debate/mystery/rooms/", import.meta.url),
     );
@@ -579,11 +581,17 @@ describe("Debate Whodunnit experience", () => {
     const expected = originals.flatMap((filename) => [
       filename,
       filename.replace(/\.webp$/u, "-mosaic.webp"),
-    ]).sort();
+    ]).concat("attic-mosaic.webp").sort();
     assert.deepEqual(readdirSync(directory).sort(), expected);
     for (const filename of expected) {
       const dimensions = webpDimensions(readFileSync(path.join(directory, filename)));
-      assert.deepEqual(dimensions, { width: 1600, height: 900 }, filename);
+      assert.deepEqual(
+        dimensions,
+        filename.endsWith("-mosaic.webp")
+          ? { width: 1920, height: 1080 }
+          : { width: 1600, height: 900 },
+        filename,
+      );
     }
   });
 
@@ -596,15 +604,16 @@ describe("Debate Whodunnit experience", () => {
     assert.equal(mysteryRoomArtworkSrc(null, template), "/debate/mystery/rooms/kitchen.webp");
     assert.equal(
       whodunnitSavedRoomArtUrl("generated / room", "mosaic"),
-      "/api/images/generated%20%2F%20room/file?style=mosaic",
+      "/api/images/generated%20%2F%20room/file?style=mosaic&pixelArt=5",
     );
     assert.equal(
       whodunnitBundledRoomArtPath(template.bundledAssetPath, "mosaic"),
-      "/debate/mystery/rooms/kitchen-mosaic.webp",
+      "/debate/mystery/rooms/kitchen-mosaic.webp?pixelArt=5",
     );
     assert.match(source, /whodunnitSavedRoomArtUrl\(currentRoom\.imageId, investigationArtStyle\)/u);
     assert.match(source, /renderMysteryBotAvatar\(mysteryBotForSuspect\(currentSuspect\), interviewAvatarPresentation/u);
-    assert.match(source, /<img className=\{styles\.generatedRoom\} src=\{roomArtworkSrc\}/u);
+    assert.match(source, /<img className=\{styles\.generatedRoom\} data-art-style=\{investigationArtStyle\} src=\{roomArtworkSrc\}/u);
+    assert.match(css, /\.generatedRoom\[data-art-style="mosaic"\][\s\S]*image-rendering: pixelated/u);
     assert.match(css, /\.roomScene\[data-blurred="true"\][\s\S]*\.generatedRoom/u);
   });
 

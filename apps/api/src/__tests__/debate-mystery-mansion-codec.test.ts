@@ -15,8 +15,12 @@ import {
   encodeInternalMansionPackageV1,
   exportInternalMansionPackageFromDbV1,
   importInternalMansionPackageToDbV1,
+  upgradeInstalledMansionRoomArtFromPackageV1,
 } from "../debate-mystery-mansion-codec.ts";
-import { getDebateMysteryMansionBundleV2 } from "../debate-mystery-mansion-bundles.ts";
+import {
+  freezeDebateMysteryMansionSnapshotV2,
+  getDebateMysteryMansionBundleV2,
+} from "../debate-mystery-mansion-bundles.ts";
 import { initializeDatabase } from "../db.ts";
 import { decryptBytes, encryptBytes } from "../security.ts";
 import { portableOggOpusDurationMsV1 } from "../debate-mystery-package-safety.ts";
@@ -138,6 +142,105 @@ describe("internal mansion codec", () => {
         assets: new Map([[roomPath, roomBytes], [`assets/${"b".repeat(64)}.png`, Buffer.from("extra")]]),
       }),
       /undeclared asset/u,
+    );
+  });
+
+  it("upgrades an installed legacy mansion to authored Pixel Art while preserving its Realistic plate", () => {
+    const db = initializeDatabase(new DatabaseSync(":memory:"));
+    const now = "2026-08-31T00:00:00.000Z";
+    db.prepare(
+      `INSERT INTO users
+         (id, email, display_name, password_hash, password_salt,
+          wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
+          preferred_provider, created_at, last_active_at)
+       VALUES ('recipient', 'recipient@example.com', 'Player', 'hash', 'salt',
+               'cipher', 'iv', 'tag', 'local', ?, ?)`,
+    ).run(now, now);
+    const key = Buffer.alloc(32, 7);
+    const bundleId = importInternalMansionPackageToDbV1({
+      db,
+      userKey: key,
+      userId: "recipient",
+      archive: encodeInternalMansionPackageV1({
+        manifest: manifest(),
+        assets: new Map([[roomPath, roomBytes]]),
+      }),
+    });
+    const installed = getDebateMysteryMansionBundleV2(db, "recipient", bundleId);
+    const installedRoomId = installed.rooms[0]!.id;
+
+    const pixelBytes = Buffer.from("authored low-resolution room master");
+    const pixelHash = createHash("sha256").update(pixelBytes).digest("hex");
+    const pixelPath = `assets/${pixelHash}.webp`;
+    const upgradedManifest = manifest();
+    upgradedManifest.rooms[0]!.roomAssetId = "pixel-room";
+    upgradedManifest.rooms[0]!.illustratedRoomAssetId = "asset-room";
+    upgradedManifest.assets.push({
+      id: "pixel-room",
+      role: "room",
+      archivePath: pixelPath,
+      sha256: pixelHash,
+      byteLength: pixelBytes.byteLength,
+      mimeType: "image/webp",
+      width: 1920,
+      height: 1080,
+      durationMs: null,
+    });
+    upgradeInstalledMansionRoomArtFromPackageV1({
+      db,
+      userKey: key,
+      userId: "recipient",
+      bundleId,
+      archive: encodeInternalMansionPackageV1({
+        manifest: upgradedManifest,
+        assets: new Map([[roomPath, roomBytes], [pixelPath, pixelBytes]]),
+      }),
+    });
+
+    const refs = db.prepare(
+      `SELECT refs.logical_id, refs.asset_id, assets.sha256, assets.ciphertext,
+              assets.cipher_iv, assets.cipher_tag
+         FROM debate_mystery_mansion_asset_refs AS refs
+         JOIN debate_mystery_mansion_assets AS assets ON assets.id = refs.asset_id
+        WHERE refs.bundle_id = ? AND refs.role = 'room'
+        ORDER BY refs.logical_id`,
+    ).all(bundleId) as Array<{
+      logical_id: string;
+      asset_id: string;
+      sha256: string;
+      ciphertext: Buffer;
+      cipher_iv: Buffer;
+      cipher_tag: Buffer;
+    }>;
+    assert.equal(
+      refs.find((ref) => ref.logical_id === installedRoomId)?.sha256,
+      pixelHash,
+    );
+    assert.equal(
+      refs.find((ref) => ref.logical_id === `${installedRoomId}:accepted-v2`)?.sha256,
+      pixelHash,
+    );
+    assert.equal(
+      refs.find((ref) => ref.logical_id === `${installedRoomId}:illustrated-v1`)?.sha256,
+      roomHash,
+    );
+    const accepted = refs.find((ref) => ref.logical_id === `${installedRoomId}:accepted-v2`)!;
+    assert.deepEqual(
+      decryptBytes({
+        ciphertext: accepted.ciphertext,
+        iv: accepted.cipher_iv,
+        tag: accepted.cipher_tag,
+      }, key),
+      pixelBytes,
+    );
+    const upgradedSnapshot = freezeDebateMysteryMansionSnapshotV2(
+      getDebateMysteryMansionBundleV2(db, "recipient", bundleId),
+    );
+    assert.equal(
+      upgradedSnapshot.layoutV2?.entities.find(
+        (entity) => entity.kind === "room" && entity.id === installedRoomId,
+      )?.acceptedRoomAssetId,
+      accepted.asset_id,
     );
   });
 

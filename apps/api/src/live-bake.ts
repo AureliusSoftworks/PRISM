@@ -14,6 +14,7 @@ import {
   LIVE_BAKE_MAX_STEPS_SIGNAL,
   debateSessionFloorIsSettled,
   botcastLatestImageContextV1,
+  botcastPreSessionImageShouldPresentOnNextTurnV1,
   type DebateSessionV1,
   type LiveBakeArtifactV1,
   type LiveBakeStatusV1,
@@ -616,14 +617,16 @@ export async function bakeBotcastWatchEpisode(args: {
         signal: args.signal,
       };
       const imageContext = botcastLatestImageContextV1(episode.events);
-      const lastMessage = episode.messages.at(-1);
-      // Watch never exposes a producer cue. A setup image waits until the
-      // normal host welcome and guest reply have aired, then enters only on
-      // that next eligible host turn.
+      // Watch never exposes a producer cue. Its setup image uses a stable
+      // episode/image-derived host slot: sometimes it opens with the guest,
+      // sometimes it waits for a later natural host handoff.
       const internalImageCue =
         imageContext?.phase === "queued" &&
-        episode.messages.some((message) => message.speakerRole === "host") &&
-        lastMessage?.speakerRole === "guest"
+        botcastPreSessionImageShouldPresentOnNextTurnV1({
+          episodeId: episode.id,
+          imageId: imageContext.imageId,
+          messages: episode.messages,
+        })
           ? { kind: "present_image" as const, imageId: imageContext.imageId }
           : undefined;
       await runWithUsageSession(

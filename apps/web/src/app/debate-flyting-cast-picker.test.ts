@@ -11,8 +11,9 @@ const debate = read("./DebateExperience.tsx");
 const tutorials = read("./modeTutorials.ts");
 
 describe("Flyting cast picker", () => {
-  it("uses the shared role-card and Library-grid vocabulary for every Hall seat", () => {
-    assert.match(flyting, /const FLYTING_HALL_CAST_SEATS/u);
+  it("uses the shared role-card and Library-grid vocabulary for the three stage seats", () => {
+    assert.match(flyting, /type FlytingCastSeat = "for" \| "against" \| "host"/u);
+    assert.doesNotMatch(flyting, /FLYTING_HALL_CAST_SEATS/u);
     assert.match(flyting, /renderFlytingCastSeat/u);
     assert.match(flyting, /<BotPickerToolbar/u);
     assert.match(flyting, /<BotPickerGrid/u);
@@ -21,14 +22,13 @@ describe("Flyting cast picker", () => {
     assert.match(flyting, /ariaLabel=\{`Bot for \$\{activeCastSeatLabel\}`\}/u);
   });
 
-  it("keeps Hall Surprise seats editable and freezes manual pins with the proceeding", () => {
-    assert.match(
-      flyting,
-      /Array\.from\(\{ length: DEBATE_JURY_SIZE \}, \(\) => null\)/u,
-    );
-    assert.match(flyting, /Already seated in the Hall/u);
+  it("draws the Hall gallery automatically and freezes only the three stage seats", () => {
+    assert.match(flyting, /PRISM fills the gallery automatically/u);
+    assert.match(flyting, /Fifteen generic Hall spectators/u);
+    assert.match(flyting, /Jarl's three guards/u);
+    assert.match(flyting, /Already seated in the contest/u);
     assert.match(flyting, /"aria-disabled": unavailableReason/u);
-    assert.match(flyting, /jurorBotIds,\s*\n\s*\},/u);
+    assert.doesNotMatch(flyting, /jurorBotIds/u);
     assert.match(flyting, /const fixedPlayerHost = seat === "host" && !needsBotHost/u);
   });
 
@@ -42,15 +42,17 @@ describe("Flyting cast picker", () => {
     assert.match(flyting, /props\.onBotContextLongPressStart/u);
   });
 
-  it("teaches role-first assignment, search, groups, hue, and Surprise behavior", () => {
+  it("teaches role-first stage assignment and automatic gallery casting", () => {
     const flytingTutorial = tutorials.slice(
       tutorials.indexOf("const FLYTING_TUTORIAL_STEP"),
       tutorials.indexOf("// Keep this dense tutorial", tutorials.indexOf("const FLYTING_TUTORIAL_STEP")),
     );
-    assert.match(flytingTutorial, /select the Pro, Con, Host, or one of four Hall role cards/u);
+    assert.match(flytingTutorial, /select the Pro flyter on the left/u);
+    assert.match(flytingTutorial, /Con flyter on the right/u);
+    assert.match(flytingTutorial, /fifteen generic PRISM spectators/u);
+    assert.match(flytingTutorial, /three Jarl guards/u);
     assert.match(flytingTutorial, /shared Library grid/u);
     assert.match(flytingTutorial, /filter by saved group/u);
     assert.match(flytingTutorial, /vertical hue lens/u);
-    assert.match(flytingTutorial, /Hall seats begin on Surprise me/u);
   });
 });

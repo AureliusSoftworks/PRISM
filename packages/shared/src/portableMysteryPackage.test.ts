@@ -4,6 +4,10 @@ import test from "node:test";
 import {
   canonicalPortablePackageJsonV1,
   DEFAULT_MANSION_ROOM_ART_CONTRACT_V1,
+  DEFAULT_MANSION_ROOM_ART_CONTRACT_V2,
+  DEFAULT_MANSION_ROOM_ART_CONTRACT_V3,
+  DEFAULT_MANSION_ROOM_ART_CONTRACT_V4,
+  DEFAULT_MANSION_ROOM_ART_CONTRACT_V5,
   portableMysteryPackageMajorIsSupportedV1,
   validateMansionPackageHeaderV1,
   validateMansionPackageManifestV1,
@@ -225,7 +229,7 @@ test("mansion manifests carry an optional titled, sealed music identity while le
   );
 });
 
-test("mansion manifests carry one derivable Mosaic contract and optional Illustrated plates", () => {
+test("mansion manifests carry synthesized Pixel Art, retain legacy Mosaic compatibility, and accept optional realistic plates", () => {
   const manifest = mansionManifest();
   const illustratedHash = "b".repeat(64);
   (manifest.assets as Array<Record<string, unknown>>).push({
@@ -239,12 +243,39 @@ test("mansion manifests carry one derivable Mosaic contract and optional Illustr
   });
   (manifest.rooms as Array<Record<string, unknown>>)[0]!.illustratedRoomAssetId =
     "room-art-illustrated";
+  manifest.roomArt = DEFAULT_MANSION_ROOM_ART_CONTRACT_V5;
+  assert.deepEqual(validateMansionPackageManifestV1(manifest), []);
+
+  manifest.roomArt = DEFAULT_MANSION_ROOM_ART_CONTRACT_V4;
+  assert.deepEqual(validateMansionPackageManifestV1(manifest), []);
+
+  manifest.roomArt = DEFAULT_MANSION_ROOM_ART_CONTRACT_V3;
+  assert.deepEqual(validateMansionPackageManifestV1(manifest), []);
+
+  manifest.roomArt = DEFAULT_MANSION_ROOM_ART_CONTRACT_V2;
+  assert.deepEqual(validateMansionPackageManifestV1(manifest), []);
+
   manifest.roomArt = DEFAULT_MANSION_ROOM_ART_CONTRACT_V1;
   assert.deepEqual(validateMansionPackageManifestV1(manifest), []);
 
   manifest.roomArt = {
-    ...DEFAULT_MANSION_ROOM_ART_CONTRACT_V1,
-    mosaic: { ...DEFAULT_MANSION_ROOM_ART_CONTRACT_V1.mosaic, paletteColors: 16 },
+    ...DEFAULT_MANSION_ROOM_ART_CONTRACT_V3,
+    pixelArt: { ...DEFAULT_MANSION_ROOM_ART_CONTRACT_V3.pixelArt, paletteColors: 16 },
+  };
+  assert.match(validateMansionPackageManifestV1(manifest).join("\n"), /roomArt is invalid/u);
+
+  manifest.roomArt = {
+    ...DEFAULT_MANSION_ROOM_ART_CONTRACT_V4,
+    pixelArt: { ...DEFAULT_MANSION_ROOM_ART_CONTRACT_V4.pixelArt, deterministicFilter: true },
+  };
+  assert.match(validateMansionPackageManifestV1(manifest).join("\n"), /roomArt is invalid/u);
+
+  manifest.roomArt = {
+    ...DEFAULT_MANSION_ROOM_ART_CONTRACT_V5,
+    pixelArt: {
+      ...DEFAULT_MANSION_ROOM_ART_CONTRACT_V5.pixelArt,
+      grid: { ...DEFAULT_MANSION_ROOM_ART_CONTRACT_V5.pixelArt.grid, blend: "exclusion" },
+    },
   };
   assert.match(validateMansionPackageManifestV1(manifest).join("\n"), /roomArt is invalid/u);
 });

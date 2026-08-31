@@ -5,6 +5,7 @@ import {
   WHODUNNIT_INVESTIGATION_DIALOGUE_GRACE_MS,
   nextWhodunnitInterrogationPhase,
   startWhodunnitInterrogation,
+  whodunnitInterrogationEntrancePhaseForEntry,
   whodunnitActorDriftTiming,
   whodunnitCaptionRevealIsPending,
   whodunnitCaptionSpeechText,
@@ -15,6 +16,7 @@ import {
   whodunnitCourtPresentedWitnessSeatId,
   whodunnitDialogueGestureControlIsInteractive,
   whodunnitDialogueGestureDecision,
+  whodunnitDialogueTypewriterDurationMs,
   whodunnitInvestigationDialogueGraceMs,
   whodunnitInvestigationDialogueShouldAutoAdvance,
   whodunnitInterrogationAudioOwnsMouth,
@@ -23,6 +25,19 @@ import {
   whodunnitInterrogationFinishDecision,
   whodunnitInterrogationMayStartAudio,
 } from "./debateMysteryInterrogation.ts";
+
+test("gives every caption a deliberate, uncapped typewriter clock", () => {
+  assert.equal(whodunnitDialogueTypewriterDurationMs("No."), 720);
+  assert.equal(
+    whodunnitDialogueTypewriterDurationMs("A".repeat(100)),
+    4_200,
+  );
+  assert.equal(
+    whodunnitDialogueTypewriterDurationMs('“I am the lead investigator.”'),
+    1_134,
+    "matched presentation quotes do not make the visible cadence faster",
+  );
+});
 
 test("holds spoken dialogue briefly and scales text-only grace with visible length", () => {
   assert.equal(whodunnitInvestigationDialogueGraceMs({
@@ -57,6 +72,7 @@ test("auto-advances only settled non-interactive Investigation dialogue", () => 
     busy: false,
     hasActiveAudio: false,
     hasDialogue: true,
+    isPlayerObservation: false,
     playPhase: "investigation",
     requiresPlayerInput: false,
     roomView: "room",
@@ -65,6 +81,7 @@ test("auto-advances only settled non-interactive Investigation dialogue", () => 
   assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance(settled), true);
   assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance({ ...settled, hasActiveAudio: true }), false);
   assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance({ ...settled, streaming: true }), false);
+  assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance({ ...settled, isPlayerObservation: true }), false);
   assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance({ ...settled, requiresPlayerInput: true }), false);
   assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance({ ...settled, playPhase: "trial" }), false);
   assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance({ ...settled, roomView: "mansion" }), false);
@@ -158,6 +175,30 @@ test("paces a current Talk graph from Prosecutor entrance through witness respon
   assert.equal(whodunnitInterrogationBeatMs("suspect_entrance"), WHODUNNIT_INTERROGATION_BEAT_MS.suspectEntrance);
   assert.equal(nextWhodunnitInterrogationPhase("suspect_entrance"), "suspect_speaking");
   assert.equal(nextWhodunnitInterrogationPhase("suspect_speaking"), "complete");
+});
+
+test("resolves a three-line room opening from each actual next speaker", () => {
+  const exchange = [
+    { speakerBotId: "prosecutor", speakerSeatId: null },
+    { speakerBotId: "witness-bot", speakerSeatId: "witness" },
+    { speakerBotId: "prosecutor", speakerSeatId: null },
+  ];
+  assert.equal(
+    whodunnitInterrogationEntrancePhaseForEntry(exchange[0]!, "prosecutor", "witness"),
+    "prosecutor_entrance",
+  );
+  assert.equal(
+    whodunnitInterrogationEntrancePhaseForEntry(exchange[1]!, "prosecutor", "witness"),
+    "suspect_entrance",
+  );
+  assert.equal(
+    whodunnitInterrogationEntrancePhaseForEntry(exchange[2]!, "prosecutor", "witness"),
+    "prosecutor_entrance",
+  );
+  assert.equal(
+    whodunnitInterrogationEntrancePhaseForEntry(null, "prosecutor", "witness"),
+    null,
+  );
 });
 
 test("keeps mouths idle until local audio has actually started", () => {

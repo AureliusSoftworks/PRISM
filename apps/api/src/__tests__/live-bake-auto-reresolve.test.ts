@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
+import {
+  botcastPreSessionImageRevealHostTurnV1,
+  botcastPreSessionImageShouldPresentOnNextTurnV1,
+} from "@localai/shared";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -38,11 +42,55 @@ describe("live bake Auto re-resolve", () => {
     assert.match(source, /surface: "signal"/u);
     assert.match(
       source,
-      /imageContext\?\.phase === "queued"[\s\S]{0,420}lastMessage\?\.speakerRole === "guest"/u,
+      /botcastPreSessionImageShouldPresentOnNextTurnV1\(/u,
     );
     assert.match(
       source,
       /internalImageCue \? \{ cue: internalImageCue \} : \{\}[\s\S]{0,180}internalImageCue \? \{ allowWatchBake: true \} : \{\}/u,
+    );
+  });
+
+  it("varies queued setup-image reveals across stable eligible host turns", () => {
+    const opening = { episodeId: "episode-2", imageId: "image-2" };
+    const later = { episodeId: "episode-1", imageId: "image-1" };
+
+    assert.equal(botcastPreSessionImageRevealHostTurnV1(opening), 1);
+    assert.equal(botcastPreSessionImageRevealHostTurnV1(later), 4);
+    assert.equal(
+      botcastPreSessionImageRevealHostTurnV1(opening),
+      botcastPreSessionImageRevealHostTurnV1({ ...opening }),
+      "the saved episode/image identity always chooses the same replay slot",
+    );
+    assert.equal(
+      botcastPreSessionImageShouldPresentOnNextTurnV1({
+        ...opening,
+        messages: [],
+      }),
+      true,
+      "an opening slot presents with the first host introduction",
+    );
+    assert.equal(
+      botcastPreSessionImageShouldPresentOnNextTurnV1({
+        ...later,
+        messages: [
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+        ],
+      }),
+      true,
+      "a later slot waits for its fourth eligible host handoff",
+    );
+    assert.equal(
+      botcastPreSessionImageShouldPresentOnNextTurnV1({
+        ...later,
+        messages: [{ speakerRole: "host" }, { speakerRole: "guest" }],
+      }),
+      false,
+      "later schedules cannot pull an image onto the old second host turn",
     );
   });
 

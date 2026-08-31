@@ -118,7 +118,7 @@ describe("Whodunnit prop binding selection", () => {
       evidence: [{ id: "weapon", adjective: "recovered", object: "hunting knife", title: "Recovered hunting knife", observation: "The hunting knife was hidden beneath the desk.", keywords: ["knife"], isCanonicalWeapon: true }],
     }, selected.bindingsByEvidenceId);
     assert.equal(rebound.evidence[0]?.title, "Red Lightsaber");
-    assert.match(rebound.evidence[0]?.observation ?? "", /Its function in this world: Cuts and pierces/u);
+    assert.match(rebound.evidence[0]?.observation ?? "", /It cuts and pierces/u);
     assert.equal(rebound.method, "a fatal blow from a Red Lightsaber");
     assert.equal(rebound.publicOpening, "The first report names a Red Lightsaber as the weapon.");
     assert.equal(rebound.weapon.descriptor, "Red Lightsaber");

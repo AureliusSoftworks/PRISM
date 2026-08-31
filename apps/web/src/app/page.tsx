@@ -50,6 +50,10 @@ import {
 } from "./botFrameFinish";
 import { botAvatarIdentityMaterialStyle } from "./botAvatarIdentityMaterial";
 import {
+  botAvatarScreenPaletteVariables,
+  deriveBotAvatarScreenPalette,
+} from "./botAvatarScreenPalette";
+import {
   AVATAR_STUDIO_VIEWPORT_CSS_PROPERTIES,
 } from "./avatarStudioViewportLayout";
 import {
@@ -19929,6 +19933,8 @@ async function enqueueRobotVoiceMode(args: {
   lifecycle?: Parameters<typeof enqueueBottishVoice>[5];
   proceduralTiming?: Parameters<typeof enqueueBottishVoice>[6];
   allowBabbleFallback?: boolean;
+  /** Skip synthesis and start the local procedural Babble carrier immediately. */
+  preferProceduralBabble?: boolean;
   prepare?: boolean;
   includeAlignment?: boolean;
   streamChunks?: boolean;
@@ -19954,7 +19960,7 @@ async function enqueueRobotVoiceMode(args: {
       (args.proceduralTiming?.deliveryRate ?? 1) *
       voiceDeliveryRateForMood(args.moodKey),
   };
-  if (args.mode === "bottish") {
+  if (args.mode === "bottish" || args.preferProceduralBabble) {
     return enqueueBottishVoice(
       spokenSourceText,
       args.profile,
@@ -40649,6 +40655,9 @@ function botAvatarFullScaleIdentityStyle(
   if (options.prismPersona) return prismDefaultAccentStyle(resolvedTheme);
   return {
     ...accentStyle,
+    ...botAvatarScreenPaletteVariables(
+      deriveBotAvatarScreenPalette(rawHex, resolvedTheme),
+    ),
     ...botAvatarIdentityMaterialStyle({
       privateMode: options.privateMode,
       voicePreset: options.voicePreset,
@@ -49961,30 +49970,6 @@ function BotProfileBuilder({
           {renderPage()}
         </div>
       </section>
-    </div>
-  );
-}
-
-function DesktopViewportNotice(): React.JSX.Element {
-  return (
-    <div
-      className={styles.desktopViewportNotice}
-      role="status"
-      aria-live="polite"
-    >
-      <div className={styles.desktopViewportNoticeInner}>
-        <p className={styles.desktopViewportNoticeKicker}>Desktop viewport</p>
-        <h1 className={styles.desktopViewportNoticeTitle}>
-          Scale your viewport up
-        </h1>
-        <p className={styles.desktopViewportNoticeBody}>
-          PRISM needs a 1280px-wide desktop canvas right now. Enlarge the window
-          or switch to fullscreen to continue.
-        </p>
-        <p className={styles.desktopViewportNoticeSoon}>
-          PRISM will support mobile devices soon.
-        </p>
-      </div>
     </div>
   );
 }
@@ -121959,11 +121944,11 @@ function HomeContent(): React.JSX.Element {
                               label="About Whodunnit text-stream accompaniment"
                               variant="control"
                             >
-                              Chooses the voice that follows written Casekeeper
-                              observations and other non-spoken lines while they
-                              appear. Anonymous Casekeeper speech keeps its
-                              authored Babble carrier; character speech keeps
-                              its configured English or Premium voice.
+                              Player-attributed room observations use Babble
+                              whenever accompaniment is on. This choice governs
+                              other non-spoken lines while they appear;
+                              character speech keeps its configured English or
+                              Premium voice.
                             </PanelSectionInfo>
                           </span>
                           <select
@@ -146916,6 +146901,10 @@ function HomeContent(): React.JSX.Element {
         color: bot.color,
         glyph: bot.glyph,
         avatarDetails: bot.avatarDetails ?? null,
+        voiceProfile: resolveBotAudioVoiceProfileV1(
+          bot.authored_audio_voice_profile,
+          bot.audio_voice_profile_override,
+        ),
         powers: bot.powers,
         systemPrompt: bot.system_prompt,
         roomNarrationAppearance: {
@@ -147302,7 +147291,9 @@ function HomeContent(): React.JSX.Element {
                 settings?.debateWhodunnitTextVoiceMode,
               )}
               playMysteryTextVoice={async ({
+                instant,
                 mode,
+                voiceProfile,
                 seed,
                 signal,
                 text,
@@ -147314,12 +147305,13 @@ function HomeContent(): React.JSX.Element {
                     mode,
                     source: { text },
                     sourceText: text,
-                    profile: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+                    profile: voiceProfile ?? DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
                     seed,
                     signal,
                     effectsEnabled: settings?.voiceEffectsEnabled !== false,
                     globalVolume: volume,
                     allowBabbleFallback: true,
+                    preferProceduralBabble: instant === true,
                     roomAcoustics,
                   });
                   return signal?.aborted !== true;
@@ -153458,7 +153450,6 @@ export default function Home(): React.JSX.Element {
       <FpsCounter />
       <PrismAdaptiveDomQualityGovernor />
       <PrismVisualLifecycleBridge />
-      <DesktopViewportNotice />
       <Suspense fallback={null}>
         <HomeContent />
       </Suspense>

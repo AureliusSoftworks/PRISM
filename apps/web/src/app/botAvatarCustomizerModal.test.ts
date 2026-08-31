@@ -39,21 +39,6 @@ const microAvatarSource = readFileSync(
   resolve(appDir, "BotAvatarMicro.tsx"),
   "utf8",
 ).replace(/\s+/gu, " ");
-const tauriConfig = JSON.parse(
-  readFileSync(
-    resolve(appDir, "../../../desktop/src-tauri/tauri.conf.json"),
-    "utf8",
-  ),
-) as {
-  app?: {
-    windows?: Array<{
-      fullscreen?: boolean;
-      minWidth?: number;
-      minHeight?: number;
-    }>;
-  };
-};
-
 function normalizeCssFormatting(value: string): string {
   return value
     .replace(/\s+/gu, " ")
@@ -2147,10 +2132,13 @@ test("avatar preview uses the canonical full-scale identity contract", () => {
   const bodyGlyphRule =
     cssSource.match(/^\.zenLiveBotPresenceBotGlyph\s*\{([\s\S]*?)\n\}/m)?.[1] ??
     "";
-  assert.match(bodyGlyphRule, /color:\s*#ffffff\s*;/);
   assert.match(
     bodyGlyphRule,
-    /--zen-live-bot-glyph-glow-color:\s*var\(--coffee-bot-color\)\s*;/,
+    /color:\s*var\(--bot-avatar-screen-glyph,\s*#ffffff\)\s*;/,
+  );
+  assert.match(
+    bodyGlyphRule,
+    /--zen-live-bot-glyph-glow-color:\s*var\(\s*--bot-avatar-screen-glow,\s*var\(--coffee-bot-color\)\s*\)\s*;/,
   );
   const previewFaceRule = cssRuleBody(
     '.zenLiveBotPresencePlate[data-avatar-customizer-preview="true"] .zenLiveBotPresenceFaceGlyph',
@@ -2644,39 +2632,6 @@ test("identity color/glyph popover is never trapped by studio panel chrome", () 
   const popoverRule =
     cssSource.match(/^\.colorGlyphPopover\s*\{([\s\S]*?)\n\}/m)?.[1] ?? "";
   assert.match(popoverRule, /position:\s*fixed;/);
-});
-
-test("desktop kiosk shell uses a fixed 1280x900 clipping floor and fullscreen launch", () => {
-  assert.match(cssSource, /min-width:\s*1280px/);
-  assert.match(cssSource, /min-height:\s*900px/);
-  assert.match(cssSource, /max\(100vw,\s*1280px\)/);
-  const mainWindow = tauriConfig.app?.windows?.[0];
-  assert.equal(mainWindow?.fullscreen, true);
-  assert.equal(mainWindow?.minWidth, 1280);
-  assert.equal(mainWindow?.minHeight, 900);
-});
-
-test("desktop kiosk shell shows a full-screen notice below the viewport floor", () => {
-  assert.match(pageSource, /function DesktopViewportNotice\(/);
-  assert.match(pageSource, /Scale your viewport up/);
-  assert.match(pageSource, /PRISM will support mobile devices soon\./);
-  assert.match(cssSource, /\.desktopViewportNotice\s*\{\s*display:\s*none;/);
-  assert.match(
-    cssSource,
-    /@media\s*\(max-width:\s*1279px\)[\s\S]*\.desktopViewportNotice\s*\{[\s\S]*position:\s*fixed;/,
-  );
-  assert.match(
-    cssSource,
-    /@media\s*\(max-width:\s*1279px\)[\s\S]*\.desktopViewportNotice\s*\{[\s\S]*inset:\s*0;/,
-  );
-  assert.match(
-    cssSource,
-    /body:has\(\[data-foundry="true"\]\) \.desktopViewportNotice,[\s\S]*body:has\(\[data-avatar-foundry="true"\]\) \.desktopViewportNotice\s*\{[\s\S]*display:\s*none;/,
-  );
-  assert.match(
-    cssSource,
-    /@media \(max-width: 1180px\)[\s\S]*\.botAvatarCustomizer\[data-foundry="true"\] \.botAvatarControlStack\s*\{[\s\S]*left:\s*12px;[\s\S]*max-height:\s*43dvh;/,
-  );
 });
 
 test("Powers read as an app-wide bot trait across active surfaces", () => {

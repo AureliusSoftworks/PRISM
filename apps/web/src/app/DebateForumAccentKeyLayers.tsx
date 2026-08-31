@@ -64,13 +64,16 @@ function paintForumAccentKeys(
 
 export function DebateForumAccentKeys(props: {
   againstColor: unknown;
+  className?: string;
   depth: keyof typeof DEBATE_FORUM_ACCENT_KEY_SOURCE;
+  fallback?: boolean;
   forColor: unknown;
   moderatorColor: unknown;
+  source?: string;
 }): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [readyKey, setReadyKey] = useState<string | null>(null);
-  const source = DEBATE_FORUM_ACCENT_KEY_SOURCE[props.depth];
+  const source = props.source ?? DEBATE_FORUM_ACCENT_KEY_SOURCE[props.depth];
   const forColor = normalizedDebateForumAccentColor(props.forColor, "for");
   const moderatorColor = normalizedDebateForumAccentColor(
     props.moderatorColor,
@@ -108,7 +111,7 @@ export function DebateForumAccentKeys(props: {
     props.depth === "foreground" ? ` ${styles.lightMaskForeground}` : "";
   return (
     <div
-      className={styles.forumAccentKeyStack}
+      className={`${styles.forumAccentKeyStack}${props.className ? ` ${props.className}` : ""}`}
       data-depth={props.depth}
       data-ready={readyKey === paintKey ? "true" : "false"}
       data-source={source}
@@ -126,17 +129,19 @@ export function DebateForumAccentKeys(props: {
         className={styles.forumAccentKeyLayer}
         data-role="all"
       />
-      <span className={styles.forumAccentKeyFallback}>
-        <span
-          className={`${styles.lightMaskFor}${foregroundFallbackClass}`}
-        />
-        <span
-          className={`${styles.lightMaskModerator}${foregroundFallbackClass}`}
-        />
-        <span
-          className={`${styles.lightMaskAgainst}${foregroundFallbackClass}`}
-        />
-      </span>
+      {props.fallback === false ? null : (
+        <span className={styles.forumAccentKeyFallback}>
+          <span
+            className={`${styles.lightMaskFor}${foregroundFallbackClass}`}
+          />
+          <span
+            className={`${styles.lightMaskModerator}${foregroundFallbackClass}`}
+          />
+          <span
+            className={`${styles.lightMaskAgainst}${foregroundFallbackClass}`}
+          />
+        </span>
+      )}
     </div>
   );
 }

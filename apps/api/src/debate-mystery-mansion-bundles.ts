@@ -855,7 +855,8 @@ function availableBlankMansionTitle(db: DatabaseSync, userId: string): string {
 }
 
 /** Starts one editable tenant-owned house without creating or mutating an
- * installed source package. The initial plates are bundled Mosaic sources, so
+ * installed source package. The initial plates derive local Pixel Art from
+ * bundled sources, so
  * this path is deterministic and fully available in hard LOCAL mode. */
 export function createBlankDebateMysteryMansionBundleV1(
   db: DatabaseSync,

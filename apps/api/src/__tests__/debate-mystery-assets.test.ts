@@ -567,7 +567,7 @@ describe("sealed Whodunnit asset vault", () => {
     );
     await assert.rejects(
       validateDebateMysteryAssetPixelsV1("room", evidence),
-      /1536×1024 legacy, 1280×720 Mosaic-source, or 1600×900 Illustrated/iu,
+      /1536×1024 legacy, 1280×720 source, or 1600×900 Realistic/iu,
     );
   });
 });

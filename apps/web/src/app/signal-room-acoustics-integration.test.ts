@@ -62,7 +62,7 @@ describe("Signal room acoustics integration", () => {
     );
     assert.match(
       voiceSource,
-      /export function stopRealtimeVoiceAudio\([\s\S]{0,280}releaseRealtimeVoiceAudio/u,
+      /export function stopRealtimeVoiceAudio\([\s\S]{0,520}releaseRealtimeVoiceAudio/u,
     );
   });
 

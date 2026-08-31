@@ -10,6 +10,8 @@ import {
   markReplayMouthShape,
   markReplaySpeechActivity,
   markReplayVoiceLightLevel,
+  PRISM_WORLD_AUDIO_LIMITER_RATIO,
+  PRISM_WORLD_AUDIO_LIMITER_THRESHOLD_DBFS,
   prismAudioContext,
   prismAudioOutputNode,
   reconcileReplaySpeechDirection,
@@ -42,8 +44,21 @@ class FakeAudioNode {
   }
 }
 
+class FakeAudioParam {
+  value = 0;
+}
+
+class FakeDynamicsCompressorNode extends FakeAudioNode {
+  readonly threshold = new FakeAudioParam();
+  readonly knee = new FakeAudioParam();
+  readonly ratio = new FakeAudioParam();
+  readonly attack = new FakeAudioParam();
+  readonly release = new FakeAudioParam();
+}
+
 class FakeAudioContext {
   static created = 0;
+  static lastLimiter: FakeDynamicsCompressorNode | null = null;
   static lastMediaElementSource: FakeAudioNode | null = null;
   state: AudioContextState = "running";
   readonly destination = new FakeAudioNode();
@@ -55,6 +70,12 @@ class FakeAudioContext {
 
   createGain(): FakeAudioNode {
     return new FakeAudioNode();
+  }
+
+  createDynamicsCompressor(): FakeDynamicsCompressorNode {
+    const limiter = new FakeDynamicsCompressorNode();
+    FakeAudioContext.lastLimiter = limiter;
+    return limiter;
   }
 
   createMediaStreamDestination(): FakeAudioNode & { stream: object } {
@@ -197,6 +218,15 @@ test("the replay master captures the same shared output bus that reaches the dev
       liveContext as unknown as AudioContext,
     ) as unknown as FakeAudioNode;
     assert.equal(output.connections.size, 1);
+    assert.equal(
+      FakeAudioContext.lastLimiter?.threshold.value,
+      PRISM_WORLD_AUDIO_LIMITER_THRESHOLD_DBFS,
+    );
+    assert.equal(
+      FakeAudioContext.lastLimiter?.ratio.value,
+      PRISM_WORLD_AUDIO_LIMITER_RATIO,
+    );
+    assert.equal(FakeAudioContext.lastLimiter?.knee.value, 0);
 
     primeReplayAudioMasterCapture();
     assert.equal(

@@ -303,16 +303,10 @@ class FlytingProviderStub extends DebateProviderStub {
         acclamation: "The cups strike oak as the answer lands.",
       });
     }
-    if (text.includes("one independent Hall member")) {
+    if (text.includes("Jarl casting the final Flyting vote")) {
       return JSON.stringify({
         sideId: "for",
-        acclaim: "The Red Wanderer answered every barb and left one ringing.",
-      });
-    }
-    if (text.includes("Host casting the fifth and deciding Flyting vote")) {
-      return JSON.stringify({
-        sideId: "for",
-        ruling: "The Hall crowns the Red Wanderer, whose answers turned every horn against its blower.",
+        ruling: "My three guards stand with the Red Wanderer, whose answers turned every horn against its blower.",
       });
     }
     if (text.includes("performing in PRISM Flyting")) {
@@ -15366,7 +15360,7 @@ describe("Debate engine", () => {
 });
 
 describe("Flyting V1", () => {
-  it("forges and completes a four-exchange Spectator bout with five final votes", async () => {
+  it("forges and completes a four-exchange Spectator bout with fifteen persistent leanings and three Jarl guards", async () => {
     const db = createTestDb();
     try {
       const { session: created, debateRuntime, bout } =
@@ -15376,11 +15370,11 @@ describe("Flyting V1", () => {
       assert.equal(created.formatState.bout?.title, "The Holly and the Horn");
       assert.equal(created.formatState.bout?.frozenAt !== null, true);
       assert.deepEqual(bout.forbiddenTopics, ["children"]);
-      assert.deepEqual(
-        new Set(created.jury.jurors.map((juror) => juror.id)),
-        new Set(["hall-1", "hall-2", "hall-3", "hall-4"]),
-      );
-      assert.ok(created.jury.jurors.every((juror) => juror.source === "library"));
+      assert.equal(created.jury.jurors.length, 0);
+      assert.equal(created.formatState.hallMembers.length, 15);
+      assert.ok(created.formatState.hallMembers.every((member) => member.leaning === "neutral"));
+      assert.equal(created.formatState.jarlGuards.length, 3);
+      assert.ok(created.formatState.jarlGuards.every((guard) => guard.sideId === null));
 
       let session = created;
       for (let index = 0; index < 32 && session.status !== "completed"; index += 1) {
@@ -15403,9 +15397,13 @@ describe("Flyting V1", () => {
       assert.ok(session.formatState.exchanges.every((exchange) =>
         exchange.boast && exchange.challenge && exchange.resolution,
       ));
-      assert.equal(session.formatState.hallVotes.length, 4);
+      assert.equal(session.formatState.hallVotes.length, 0);
+      assert.equal(session.formatState.hallLeaningHistory.length, 4);
       assert.equal(session.formatState.hostVerdict?.sideId, "for");
-      assert.equal(session.jury.finalBallots.length, 4);
+      assert.equal(session.formatState.hostVerdict?.outcome, "for");
+      assert.equal(session.formatState.finalTally?.jarlSideId, "for");
+      assert.ok(session.formatState.jarlGuards.every((guard) => guard.sideId === "for"));
+      assert.equal(session.jury.finalBallots.length, 0);
       assert.equal(session.jury.moderatorBallot?.sideId, "for");
       assert.equal(
         getDebateSession(db, "user-1", session.id).formatState.format,
@@ -15438,9 +15436,12 @@ describe("Flyting V1", () => {
       }
       assert.equal(session.status, "completed");
       assert.equal(session.formatState.format, "flyting");
-      assert.equal(session.formatState.hallVotes.length, 4);
+      assert.equal(session.formatState.hallLeaningHistory.length, 4);
       assert.ok(session.formatState.hostVerdict);
-      assert.ok(session.winnerSideId);
+      assert.equal(session.formatState.jarlGuards.length, 3);
+      assert.equal(session.formatState.hostVerdict?.outcome, "double_loss");
+      assert.equal(session.winnerSideId, null);
+      assert.ok(session.formatState.jarlGuards.every((guard) => guard.sideId === null));
     } finally {
       db.close();
     }
@@ -15451,7 +15452,7 @@ describe("Flyting V1", () => {
     try {
       const { session: created, debateRuntime } =
         await createFlytingTestSession(db, "participant");
-      assert.equal(debateSessionForPlayer(created).jury.jurors.length, 4);
+      assert.equal(debateSessionForPlayer(created).jury.jurors.length, 0);
       let session = await submitDebateFlytingAction(
         db,
         "user-1",
@@ -15525,7 +15526,7 @@ describe("Flyting V1", () => {
     }
   });
 
-  it("holds the fifth and deciding word for a human Host", async () => {
+  it("holds the Jarl's weight-three guard vote for a human Host", async () => {
     const db = createTestDb();
     try {
       const { session: created, debateRuntime } =
@@ -15538,7 +15539,6 @@ describe("Flyting V1", () => {
           session.id,
           {
             action: "advance",
-            skip: true,
             expectedRevision: session.revision,
             idempotencyKey: `flyting:judge:${index}`,
           },
@@ -15548,7 +15548,7 @@ describe("Flyting V1", () => {
       assert.equal(session.status, "waiting_for_player");
       assert.equal(session.formatState.format, "flyting");
       assert.equal(session.formatState.phase, "verdict");
-      assert.equal(session.formatState.hallVotes.length, 4);
+      assert.equal(session.formatState.hallLeaningHistory.length, 4);
       session = await submitDebateFlytingAction(
         db,
         "user-1",
@@ -15567,6 +15567,7 @@ describe("Flyting V1", () => {
       assert.equal(session.winnerSideId, "against");
       assert.equal(session.playerVerdict, "against");
       assert.equal(session.jury.moderatorBallot, null);
+      assert.ok(session.formatState.jarlGuards.every((guard) => guard.sideId === "against"));
     } finally {
       db.close();
     }

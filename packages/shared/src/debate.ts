@@ -94,6 +94,8 @@ export const DEBATE_FORUM_MIN_REBUTTAL_ROUNDS = 1;
 export const DEBATE_FORUM_MAX_REBUTTAL_ROUNDS = 3;
 export const DEBATE_FLYTING_SCHEMA_VERSION = 1 as const;
 export const DEBATE_FLYTING_EXCHANGE_COUNT = 4 as const;
+export const DEBATE_FLYTING_AUDIENCE_COUNT = 15 as const;
+export const DEBATE_FLYTING_JARL_GUARD_COUNT = 3 as const;
 export const DEBATE_FLYTING_LINE_MAX_LENGTH = 420 as const;
 
 export type DebateFormatId = "forum" | "turnabout" | "whodunnit" | "flyting";
@@ -704,8 +706,37 @@ export interface DebateFlytingHallVoteV1 {
   createdEventId: string;
 }
 
+export type DebateFlytingHallLeaningV1 = DebateSideId | "neutral";
+
+export interface DebateFlytingHallMemberV1 {
+  id: string;
+  leaning: DebateFlytingHallLeaningV1;
+}
+
+export interface DebateFlytingHallLeaningSnapshotV1 {
+  exchangeIndex: number;
+  members: DebateFlytingHallMemberV1[];
+}
+
+export interface DebateFlytingJarlGuardV1 {
+  id: string;
+  sideId: DebateSideId | null;
+}
+
+export interface DebateFlytingFinalTallyV1 {
+  forCount: number;
+  neutralCount: number;
+  againstCount: number;
+  jarlSideId: DebateSideId | null;
+  finalForCount: number;
+  finalAgainstCount: number;
+}
+
+export type DebateFlytingOutcomeV1 = DebateSideId | "double_loss";
+
 export interface DebateFlytingHostVerdictV1 {
-  sideId: DebateSideId;
+  sideId: DebateSideId | null;
+  outcome: DebateFlytingOutcomeV1;
   ruling: string;
   authoredMode: DebateFlytingAuthoredModeV1;
   createdEventId: string;
@@ -720,6 +751,11 @@ export interface DebateFlytingFormatStateV1 {
   floorSideId: DebateSideId | null;
   bout: DebateFlytingBoutV1 | null;
   exchanges: DebateFlytingExchangeV1[];
+  hallMembers: DebateFlytingHallMemberV1[];
+  hallLeaningHistory: DebateFlytingHallLeaningSnapshotV1[];
+  jarlGuards: DebateFlytingJarlGuardV1[];
+  finalTally: DebateFlytingFinalTallyV1 | null;
+  /** Legacy four-juror ballots retained for old Hall Records. */
   hallVotes: DebateFlytingHallVoteV1[];
   hostVerdict: DebateFlytingHostVerdictV1 | null;
 }
@@ -4015,6 +4051,20 @@ function defaultDebateFlytingExchangesV1(): DebateFlytingExchangeV1[] {
   }));
 }
 
+function defaultDebateFlytingHallMembersV1(): DebateFlytingHallMemberV1[] {
+  return Array.from({ length: DEBATE_FLYTING_AUDIENCE_COUNT }, (_, index) => ({
+    id: `hall-${index + 1}`,
+    leaning: "neutral",
+  }));
+}
+
+function defaultDebateFlytingJarlGuardsV1(): DebateFlytingJarlGuardV1[] {
+  return Array.from({ length: DEBATE_FLYTING_JARL_GUARD_COUNT }, (_, index) => ({
+    id: `guard-${index + 1}`,
+    sideId: null,
+  }));
+}
+
 export function defaultDebateFlytingFormatStateV1(): DebateFlytingFormatStateV1 {
   return {
     version: DEBATE_FLYTING_SCHEMA_VERSION,
@@ -4025,6 +4075,10 @@ export function defaultDebateFlytingFormatStateV1(): DebateFlytingFormatStateV1 
     floorSideId: null,
     bout: null,
     exchanges: defaultDebateFlytingExchangesV1(),
+    hallMembers: defaultDebateFlytingHallMembersV1(),
+    hallLeaningHistory: [],
+    jarlGuards: defaultDebateFlytingJarlGuardsV1(),
+    finalTally: null,
     hallVotes: [],
     hostVerdict: null,
   };
@@ -4182,14 +4236,117 @@ export function normalizeDebateFlytingFormatStateV1(
     if (!voterBotId || !acclaim || !createdEventId || !isDebateSideId(row.sideId)) return [];
     return [{ voterBotId, sideId: row.sideId, acclaim, createdEventId }];
   });
+  const defaultHallMembers = defaultDebateFlytingHallMembersV1();
+  const normalizeHallMembers = (
+    value: unknown,
+  ): DebateFlytingHallMemberV1[] => {
+    const rows = Array.isArray(value) ? value : [];
+    const normalized = rows.slice(0, DEBATE_FLYTING_AUDIENCE_COUNT).map((value, index) => {
+      const row = value && typeof value === "object"
+        ? (value as Record<string, unknown>)
+        : {};
+      return {
+        id: normalizedText(row.id, 120) || defaultHallMembers[index]!.id,
+        leaning:
+          row.leaning === "for" || row.leaning === "against" || row.leaning === "neutral"
+            ? row.leaning
+            : "neutral",
+      } satisfies DebateFlytingHallMemberV1;
+    });
+    for (let index = normalized.length; index < DEBATE_FLYTING_AUDIENCE_COUNT; index += 1) {
+      normalized.push(defaultHallMembers[index]!);
+    }
+    return normalized;
+  };
+  const hallMembers = normalizeHallMembers(source.hallMembers);
+  const rawHistory = Array.isArray(source.hallLeaningHistory)
+    ? source.hallLeaningHistory
+    : [];
+  const hallLeaningHistory = rawHistory
+    .slice(0, DEBATE_FLYTING_EXCHANGE_COUNT)
+    .flatMap((value) => {
+      const row = value && typeof value === "object"
+        ? (value as Record<string, unknown>)
+        : {};
+      if (
+        typeof row.exchangeIndex !== "number" ||
+        !Number.isInteger(row.exchangeIndex) ||
+        row.exchangeIndex < 0 ||
+        row.exchangeIndex >= DEBATE_FLYTING_EXCHANGE_COUNT
+      ) return [];
+      return [{
+        exchangeIndex: row.exchangeIndex,
+        members: normalizeHallMembers(row.members),
+      } satisfies DebateFlytingHallLeaningSnapshotV1];
+    });
+  const defaultJarlGuards = defaultDebateFlytingJarlGuardsV1();
+  const rawJarlGuards = Array.isArray(source.jarlGuards) ? source.jarlGuards : [];
+  const jarlGuards = rawJarlGuards
+    .slice(0, DEBATE_FLYTING_JARL_GUARD_COUNT)
+    .map((value, index) => {
+      const row = value && typeof value === "object"
+        ? (value as Record<string, unknown>)
+        : {};
+      return {
+        id: normalizedText(row.id, 120) || defaultJarlGuards[index]!.id,
+        sideId: isDebateSideId(row.sideId) ? row.sideId : null,
+      } satisfies DebateFlytingJarlGuardV1;
+    });
+  for (let index = jarlGuards.length; index < DEBATE_FLYTING_JARL_GUARD_COUNT; index += 1) {
+    jarlGuards.push(defaultJarlGuards[index]!);
+  }
+  const tallySource = source.finalTally && typeof source.finalTally === "object"
+    ? (source.finalTally as Record<string, unknown>)
+    : {};
+  const tallyCount = (value: unknown, maximum: number): number | null =>
+    typeof value === "number" && Number.isInteger(value)
+      ? Math.max(0, Math.min(maximum, value))
+      : null;
+  const forCount = tallyCount(tallySource.forCount, DEBATE_FLYTING_AUDIENCE_COUNT);
+  const neutralCount = tallyCount(tallySource.neutralCount, DEBATE_FLYTING_AUDIENCE_COUNT);
+  const againstCount = tallyCount(tallySource.againstCount, DEBATE_FLYTING_AUDIENCE_COUNT);
+  const finalForCount = tallyCount(
+    tallySource.finalForCount,
+    DEBATE_FLYTING_AUDIENCE_COUNT + DEBATE_FLYTING_JARL_GUARD_COUNT,
+  );
+  const finalAgainstCount = tallyCount(
+    tallySource.finalAgainstCount,
+    DEBATE_FLYTING_AUDIENCE_COUNT + DEBATE_FLYTING_JARL_GUARD_COUNT,
+  );
+  const finalTally =
+    forCount !== null &&
+    neutralCount !== null &&
+    againstCount !== null &&
+    finalForCount !== null &&
+    finalAgainstCount !== null
+      ? {
+          forCount,
+          neutralCount,
+          againstCount,
+          jarlSideId: isDebateSideId(tallySource.jarlSideId)
+            ? tallySource.jarlSideId
+            : null,
+          finalForCount,
+          finalAgainstCount,
+        } satisfies DebateFlytingFinalTallyV1
+      : null;
   const verdictSource = source.hostVerdict && typeof source.hostVerdict === "object"
     ? (source.hostVerdict as Record<string, unknown>)
     : {};
   const ruling = normalizedMultilineText(verdictSource.ruling, DEBATE_FLYTING_LINE_MAX_LENGTH);
   const verdictEventId = normalizedText(verdictSource.createdEventId, 120);
-  const hostVerdict = isDebateSideId(verdictSource.sideId) && ruling && verdictEventId
+  const verdictOutcome: DebateFlytingOutcomeV1 | null =
+    verdictSource.outcome === "double_loss"
+      ? "double_loss"
+      : isDebateSideId(verdictSource.outcome)
+        ? verdictSource.outcome
+        : isDebateSideId(verdictSource.sideId)
+          ? verdictSource.sideId
+          : null;
+  const hostVerdict = verdictOutcome && ruling && verdictEventId
     ? {
-        sideId: verdictSource.sideId,
+        sideId: verdictOutcome === "double_loss" ? null : verdictOutcome,
+        outcome: verdictOutcome,
         ruling,
         authoredMode:
           verdictSource.authoredMode === "custom" || verdictSource.authoredMode === "wielded"
@@ -4221,6 +4378,10 @@ export function normalizeDebateFlytingFormatStateV1(
     floorSideId: isDebateSideId(source.floorSideId) ? source.floorSideId : null,
     bout: normalizeDebateFlytingBoutV1(source.bout),
     exchanges,
+    hallMembers,
+    hallLeaningHistory,
+    jarlGuards,
+    finalTally,
     hallVotes,
     hostVerdict,
   };

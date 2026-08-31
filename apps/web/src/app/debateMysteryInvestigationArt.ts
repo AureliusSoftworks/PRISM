@@ -4,6 +4,18 @@ export const WHODUNNIT_INVESTIGATION_ART_STYLE_STORAGE_KEY =
 export type WhodunnitInvestigationArtStyle = "mosaic" | "illustrated";
 
 export const DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE = "mosaic" as const;
+export const WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION = 5 as const;
+
+function withPixelArtPresentationVersion(url: string): string {
+  if (/[?&]pixelArt=\d+/u.test(url)) {
+    return url.replace(
+      /([?&]pixelArt=)\d+/u,
+      `$1${WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION}`,
+    );
+  }
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}pixelArt=${WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION}`;
+}
 
 export function normalizeWhodunnitInvestigationArtStyle(
   value: unknown,
@@ -41,10 +53,13 @@ export function whodunnitBundledRoomArtPath(
   style: WhodunnitInvestigationArtStyle,
 ): string | null {
   if (!bundledAssetPath) return null;
+  if (/-mosaic\.webp(?:\?|$)/iu.test(bundledAssetPath)) {
+    return withPixelArtPresentationVersion(bundledAssetPath);
+  }
   if (style === "illustrated") return bundledAssetPath;
   const match = bundledAssetPath.match(/^(.*?)(\.(?:png|jpe?g|webp))(\?.*)?$/iu);
   if (!match) return bundledAssetPath;
-  return `${match[1]}-mosaic.webp${match[3] ?? ""}`;
+  return withPixelArtPresentationVersion(`${match[1]}-mosaic.webp${match[3] ?? ""}`);
 }
 
 const WHODUNNIT_BUNDLED_ROOM_ART_BY_TEMPLATE: Readonly<Record<string, string>> =
@@ -63,6 +78,7 @@ const WHODUNNIT_BUNDLED_ROOM_ART_BY_TEMPLATE: Readonly<Record<string, string>> =
     cellar: "/debate/mystery/rooms/basement.webp",
     "wine-room": "/debate/mystery/rooms/lounge.webp",
     utility: "/debate/mystery/rooms/garage.webp",
+    attic: "/debate/mystery/rooms/attic-mosaic.webp",
     theater: "/debate/mystery/rooms/theater.webp",
     pool: "/debate/mystery/rooms/pool.webp",
     "rooftop-lounge": "/debate/mystery/rooms/rooftop-lounge.webp",
@@ -102,7 +118,9 @@ export function whodunnitSealedRoomArtUrl(args: {
   style: WhodunnitInvestigationArtStyle;
 }): string {
   const base = `/api/debates/${encodeURIComponent(args.sessionId)}/mystery-assets/room/${encodeURIComponent(args.subjectId)}/file`;
-  return args.style === "mosaic" ? `${base}?style=mosaic` : base;
+  return args.style === "mosaic"
+    ? `${base}?style=mosaic&pixelArt=${WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION}`
+    : base;
 }
 
 export function whodunnitSavedRoomArtUrl(
@@ -111,7 +129,9 @@ export function whodunnitSavedRoomArtUrl(
 ): string | null {
   if (!imageId) return null;
   const base = `/api/images/${encodeURIComponent(imageId)}/file`;
-  return style === "mosaic" ? `${base}?style=mosaic` : base;
+  return style === "mosaic"
+    ? `${base}?style=mosaic&pixelArt=${WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION}`
+    : base;
 }
 
 export interface WhodunnitDiscoveredMansionRoomArtV1 {
@@ -120,7 +140,7 @@ export interface WhodunnitDiscoveredMansionRoomArtV1 {
 }
 
 /** Resolve a mansion-board room plate without exposing an undiscovered room.
- * A missing per-room Illustrated upgrade falls back through the Mosaic route
+ * A missing per-room Realistic upgrade falls back through the Pixel Art route
  * instead of leaving a discovered block blank. */
 export function whodunnitDiscoveredMansionRoomArtV1(args: {
   discovered: boolean;
@@ -154,5 +174,7 @@ export function whodunnitMansionRoomArtUrl(
   style: WhodunnitInvestigationArtStyle,
 ): string {
   const base = `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}/assets/${encodeURIComponent(assetId)}/file`;
-  return style === "mosaic" ? `${base}?style=mosaic` : base;
+  return style === "mosaic"
+    ? `${base}?style=mosaic&pixelArt=${WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION}`
+    : base;
 }

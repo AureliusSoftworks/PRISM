@@ -112,7 +112,8 @@ describe("mode tutorials", () => {
     assert.match(step.body, /auto-center when a block joins the plan/u);
     assert.match(step.body, /neighbor compatibility comes from this geometry/u);
     assert.match(step.body, /Open Room Editor to drill in/u);
-    assert.match(step.body, /Mosaic is preview-only/u);
+    assert.match(step.body, /Pixel Art is a separate authored asset, never a filtered preview/u);
+    assert.match(step.body, /balanced, hue-preserving grid without baking that grid into the accepted source/u);
     assert.match(step.body, /Choose Place anchor, then click the room image/u);
     assert.match(step.body, /Each room can carry at most eight seeded fire, omni, directional, or freehand-neon lights/u);
     assert.match(step.body, /drag to move, and use the edge handle to resize/u);
@@ -129,15 +130,15 @@ describe("mode tutorials", () => {
     assert.match(step.body, /returns to the mansion map/u);
     assert.match(step.body, /Regenerate room asset/u);
     assert.match(step.body, /clears that room's anchors, lights, and staged art/u);
-    assert.match(step.body, /Upgrade this room to Illustrated/u);
-    assert.match(step.body, /There is no all-room upgrade in Mansion Editor/u);
+    assert.match(step.body, /Synthesize Pixel Art/u);
+    assert.match(step.body, /existing high-resolution room as a strict composition reference/u);
     assert.match(step.body, /Accept candidate/u);
-    assert.match(step.body, /LOCAL disables Illustrated generation/u);
+    assert.match(step.body, /LOCAL cannot synthesize new room art/u);
     assert.match(step.body, /Floor 3 stays disabled until Floor 2 has at least four semantic rooms/u);
     assert.match(step.body, /functional foyer staircase/u);
     assert.match(step.body, /saved derivative becomes the mansion selected for this case/u);
     assert.match(step.body, /high-quality exterior establishing cover/u);
-    assert.match(step.body, /interiors and room mosaics are never cover fallbacks/u);
+    assert.match(step.body, /interiors and room plates are never cover fallbacks/u);
     assert.match(step.body, /Install a mansion file/u);
     assert.match(step.body, /separate inspection dialog instead of expanding setup/u);
     assert.match(step.body, /Experience first establishes the court tone/u);
@@ -165,13 +166,14 @@ describe("mode tutorials", () => {
     assert.match(step.body, /intro music fall silent/u);
     assert.match(step.body, /first-person exterior/u);
     assert.match(step.body, /click the glowing mansion entrance/u);
-    assert.match(step.body, /cross into the Foyer/u);
-    assert.match(step.body, /Casekeeper briefing then hands off/u);
-    assert.match(step.body, /threshold never spends an extra discovery action/u);
-    assert.match(step.body, /Upgrade every room to Illustrated/u);
+    assert.match(step.body, /embodied Prosecutor thinks through the spoiler-safe briefing/u);
+    assert.match(step.body, /badge walks from the unvisited foyer threshold to the incident room/u);
+    assert.match(step.body, /scene slowly fades in there/u);
+    assert.match(step.body, /arrival never spends an extra discovery action/u);
+    assert.match(step.body, /Upgrade every room to Realistic/u);
     assert.match(step.body, /keep the Forge open while it prepares the entire high-detail set/u);
-    assert.match(step.body, /active investigation switches to Illustrated automatically/u);
-    assert.match(step.body, /missing and legacy art keeps its Mosaic fallback/u);
+    assert.match(step.body, /active investigation switches to Realistic automatically/u);
+    assert.match(step.body, /missing and legacy art keeps its Pixel Art fallback/u);
     assert.match(step.body, /Case Forge deterministically attempts to fill only those gaps/u);
     assert.match(step.body, /authored placements remain authoritative/u);
     assert.match(step.body, /imported package stays unchanged/u);
@@ -179,7 +181,7 @@ describe("mode tutorials", () => {
     assert.match(step.body, /choose Go outside in the normal destination bar/u);
     assert.match(step.body, /click its entrance to return directly to the Foyer/u);
     assert.match(step.body, /without losing investigation progress/u);
-    assert.match(step.body, /Inside the Move map, your profile glyph and color appear in the player orb/u);
+    assert.match(step.body, /Inside the Move map, the selected Prosecutor's glyph and normalized color appear in the player orb/u);
     assert.match(step.body, /first visits follow it through the mansion's doors, corridors, and floor connectors/u);
     assert.match(step.body, /visited rooms open immediately with a short physical travel bridge/u);
     assert.match(step.body, /Reduced Motion uses that same immediate bridge/u);
@@ -210,11 +212,13 @@ describe("mode tutorials", () => {
     assert.match(step.body, /a little after ten/u);
     assert.match(step.body, /wrong place at the wrong time/u);
     assert.match(step.body, /explicit accomplice or conspiracy motif can bind a second responsible party/u);
-    assert.match(step.body, /room art defaults to Mosaic/u);
-    assert.match(step.body, /24-color 320×180 logical plate reconstructed at 1600×900/u);
-    assert.match(step.body, /Upgrade art · ONLINE/u);
-    assert.match(step.body, /LOCAL cannot start that upgrade/u);
-    assert.match(step.body, /Full avatars at the same footprint/u);
+    assert.match(step.body, /room art defaults to genuine synthesized Pixel Art/u);
+    assert.match(step.body, /320×180-relative grid uses ordinary Normal blending/u);
+    assert.match(step.body, /authored source stays gridless/u);
+    assert.match(step.body, /genuine synthesized Pixel Art[\s\S]*never pixelates or palette-filters/u);
+    assert.match(step.body, /Upgrade to Realistic · ONLINE/u);
+    assert.match(step.body, /LOCAL never sends a room to a remote generator/u);
+    assert.match(step.body, /Realistic uses Full avatars at the same stage footprint/u);
     assert.match(step.body, /completion, safe failure, or cancellation releases the Forge/u);
     assert.match(step.body, /Archive shows its spoiler-safe durable progress/u);
     assert.match(step.body, /Save mansion level preserves the layout/u);
@@ -225,25 +229,27 @@ describe("mode tutorials", () => {
     assert.match(step.body, /no Actions or token economy/u);
     assert.match(step.body, /Move returns to PRISM’s shallow-isometric mansion/u);
     assert.match(step.body, /Unvisited rooms reveal no occupant glyph/u);
-    assert.match(step.body, /Casekeeper’s dot beat grows from "\." to "\.\." to "\.\.\."/u);
-    assert.match(step.body, /second Casekeeper box: an anonymous narrative tableau/u);
-    assert.match(step.body, /frozen public appearance and a visible fixture/u);
-    assert.match(step.body, /no name, color card, or sigil/u);
-    assert.match(step.body, /sealed persona cue then performs/u);
-    assert.match(step.body, /exact accepted line is persisted and its local voice is cached on demand/u);
-    assert.match(step.body, /archived case keeps its existing replay-stable wording/u);
-    assert.match(step.body, /up to two seconds on one optional Auto-routed cadence choice/u);
-    assert.match(step.body, /frozen LOCAL or ONLINE privacy lane/u);
-    assert.match(step.body, /uses the deterministic line and remains in the selected LOCAL or ONLINE privacy lane/u);
-    assert.doesNotMatch(step.body, /No gameplay action calls an LLM or synthesizes a voice/u);
-    assert.match(step.body, /Controls return only after that exact performance ends; revisits skip it/u);
-    assert.match(step.body, /Examine is a silent room-art viewing mode/u);
+    assert.match(step.body, /embodied Prosecutor's thought beat settles/u);
+    assert.match(step.body, /name, glyph, normalized color, subtle glow/u);
+    assert.match(step.body, /persona-specific wording, and Babble voice/u);
+    assert.match(step.body, /frozen three-line opening/u);
+    assert.match(step.body, /selected Prosecutor speaks first in its exact portrait and voice/u);
+    assert.match(step.body, /the occupant answers, and the Prosecutor hands control back/u);
+    assert.match(step.body, /next gesture advances exactly one beat/u);
+    assert.match(step.body, /no dialogue choices or automatic skip/u);
+    assert.match(step.body, /Music remains silent/u);
+    assert.match(step.body, /first entry never calls an authoring model/u);
+    assert.match(step.body, /Revisits skip the sequence/u);
+    assert.match(step.body, /Examine is a first-person room-art viewing mode/u);
     assert.match(step.body, /lens cursor and proximity glow/u);
     assert.match(step.body, /When the lens glows, select anywhere in the room scene/u);
-    assert.match(step.body, /Ordinary Investigation dialogue closes itself/u);
-    assert.match(step.body, /written observations remain through their final character and a length-aware reading interval/u);
-    assert.match(step.body, /Click, Space, or Return can still finish or advance a line early/u);
-    assert.match(step.body, /prompts that need your decision remain open/u);
+    assert.match(step.body, /authored observation types in with the player character’s Babble/u);
+    assert.match(step.body, /Only observations that produce a durable public case consequence/u);
+    assert.match(step.body, /enter the Case Kit with an immediate acquisition cue/u);
+    assert.match(step.body, /Ordinary spoken Investigation dialogue closes itself/u);
+    assert.match(step.body, /Written observations never auto-close/u);
+    assert.match(step.body, /remain until you click, press Space, or press Return/u);
+    assert.match(step.body, /Choices, evidence selection, and other prompts that need your decision also remain open/u);
     assert.match(step.body, /fills the local voice cache only for lines that were actually spoken/u);
     assert.match(step.body, /Talk groups finite authored subjects about people, motives, alibis, general questions, and rooms/u);
     assert.match(step.body, /room subjects name their location/u);
@@ -271,7 +277,7 @@ describe("mode tutorials", () => {
     assert.match(step.body, /GUILTY or NOT GUILTY for each filed defendant/u);
     assert.match(step.body, /truth\/proof grade and juror breakdown/u);
     assert.match(step.body, /Reduced Motion/u);
-    assert.match(step.body, /Archive and replay reuse the persisted result without another model or voice call/u);
+    assert.match(step.body, /persists the exact accepted transcript, and fills the local voice cache only for lines that were actually spoken/u);
     assert.match(step.body, /Identity Crisis knowingly presents as The real <effective target name> after the latest eligible direct address/u);
     assert.match(step.body, /that target’s eligible public Powers and consequences/u);
     assert.match(step.body, /Identity Crisis never copies recursively/u);
@@ -296,6 +302,24 @@ describe("mode tutorials", () => {
     assert.match(debateSource, /data-tutorial-target="debate-mystery-family-runs"/u);
     assert.match(debateSource, /data-tutorial-target="debate-mystery-play-again-confirm"/u);
     assert.doesNotMatch(step.body, /action token|freeform interview|twitch timer/iu);
+  });
+
+  it("documents the frozen Whodunnit first-entry cutscene contract", () => {
+    const body = MODE_TUTORIALS.debate.steps.find(
+      (step) => step.heading === "Investigate a Whodunnit",
+    )?.body ?? "";
+    assert.match(body, /frozen three-line opening/u);
+    assert.match(body, /selected Prosecutor speaks first in its exact portrait and voice/u);
+    assert.match(body, /the occupant answers, and the Prosecutor hands control back/u);
+    assert.match(body, /Click, Enter, or Space completes the current line/u);
+    assert.match(body, /Every dialogue caption types out at a deliberate courtroom-game pace/u);
+    assert.match(body, /Babble or spoken performance follows that reveal/u);
+    assert.match(body, /then use the next gesture to advance/u);
+    assert.match(body, /no dialogue choices or automatic skip/u);
+    assert.match(body, /Music remains silent/u);
+    assert.match(body, /Talk, Present, Examine, Move, Case File, and Theory stay locked/u);
+    assert.match(body, /first entry never calls an authoring model/u);
+    assert.match(body, /Revisits skip the sequence/u);
   });
 
   it("teaches quiet pre-session alignment through each applet's native room", () => {
@@ -1057,11 +1081,19 @@ describe("mode tutorials", () => {
       /LOCAL blocks research and page reading before network access/u,
     );
     assert.match(copy, /Powers never make a bot ineligible for a role/u);
-    assert.match(copy, /Pro, Con, Host, or one of four Hall role cards/u);
-    assert.match(copy, /choose that exact seat from the shared Library grid/u);
-    assert.match(copy, /Hall seats begin on Surprise me/u);
-    assert.match(copy, /draws every unresolved Hall member from the remaining Library/u);
-    assert.match(copy, /complete distinct cast then freezes with the proceeding/u);
+    assert.match(copy, /Pro flyter on the left/u);
+    assert.match(copy, /Con flyter on the right/u);
+    assert.match(copy, /fifteen generic PRISM spectators plus three Jarl guards/u);
+    assert.match(copy, /allegiance persists in saves and replay/u);
+    assert.match(copy, /complete Pro, Con, and Host avatars/u);
+    assert.match(copy, /Auto, Left, Host, Right, and Wide court cameras/u);
+    assert.match(copy, /dedicated Jarl’s-throne view/u);
+    assert.match(copy, /authored red, green, and blue rugs visibly mark Pro, neutral, and Con territory/u);
+    assert.match(copy, /Flyt desk spans beneath the Hall/u);
+    assert.match(copy, /open central pit and flickering candlelight carry the room/u);
+    assert.match(copy, /clean bot silhouettes rather than Court chairs/u);
+    assert.match(copy, /count as a weight-three final vote/u);
+    assert.match(copy, /dismisses both flyters, and both lose/u);
     assert.match(copy, /inaccessible speech never enters captions, voice/u);
     assert.match(copy, /shared case board, or listener-facing ballot reasons/u);
     assert.match(copy, /sparse replay-stable roll/u);
@@ -2483,6 +2515,19 @@ describe("mode tutorials", () => {
     );
   });
 
+  it("teaches the live Signal Transcript rail", () => {
+    const transcript = MODE_TUTORIALS.botcast.steps.find(
+      (step) => step.heading === "Follow the transcript",
+    );
+
+    assert.match(transcript?.body ?? "", /narrow, scrollable Transcript/u);
+    assert.match(transcript?.body ?? "", /without moving the controls/u);
+    assert.equal(
+      transcript?.targetSelector,
+      '[data-tutorial-target="botcast-transcript"]',
+    );
+  });
+
   it("clamps restored progress to a valid step", () => {
     assert.equal(modeTutorialStep("zen", -1).heading, "Choose a relationship");
     assert.equal(
@@ -3414,7 +3459,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalControlRoomStep.body,
-      /full transcript stays out of the initial play and returns with playback/u,
+      /Completed lines collect in the Transcript beside the stage[\s\S]*replay restores the same conversation beside playback/u,
     );
     assert.match(
       signalControlRoomStep.body,
@@ -3462,7 +3507,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalReplayStep.body,
-      /restores the full transcript beside the recorded camera cut/u,
+      /takes over the full viewport and darkens the surrounding room/u,
     );
     assert.match(
       signalReplayStep.body,
@@ -3470,7 +3515,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalReplayStep.body,
-      /play, pause, scrub/u,
+      /focused cue sheet holds the current line between adjacent seekable lines without creating a page or panel scrollbar/u,
     );
     assert.match(
       signalReplayStep.body,
@@ -3749,7 +3794,10 @@ describe("mode tutorials", () => {
       booking,
       /cached episode image with its editable Name and private Reason/u,
     );
-    assert.match(booking, /automatically presents the image/u);
+    assert.match(booking, /surprise host moment/u);
+    assert.match(booking, /during the opening introduction/u);
+    assert.match(booking, /later natural handoff/u);
+    assert.match(booking, /late reveal can become the conversation’s final subject/u);
     assert.match(booking, /bytes remain session-only/u);
     assert.match(controlRoom, /at least the guest’s response and the host’s follow-up/u);
     assert.match(controlRoom, /every further related turn/u);

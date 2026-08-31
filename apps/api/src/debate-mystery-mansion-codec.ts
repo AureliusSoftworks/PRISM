@@ -5,7 +5,7 @@ import {
   canonicalPortablePackageJsonV1,
   canonicalMansionLayoutV2,
   debateMysteryAcousticThemePaletteV1,
-  DEFAULT_MANSION_ROOM_ART_CONTRACT_V1,
+  DEFAULT_MANSION_ROOM_ART_CONTRACT_V5,
   MANSION_MUSIC_ACTIVE_LOGICAL_ID_V1,
   MANSION_MUSIC_CANDIDATE_LOGICAL_ID_V1,
   MANSION_MUSIC_PREVIOUS_LOGICAL_ID_V1,
@@ -449,7 +449,10 @@ export function exportInternalMansionPackageFromDbV1(args: {
         ? [{ id: `slot-${String(++slotIndex).padStart(3, "0")}`, x: 0.5, y: 0.5 }]
         : [],
       emoji: room.emoji,
-      roomAssetId: roomAssetByLogicalId.get(room.id) ?? null,
+      roomAssetId:
+        roomAssetByLogicalId.get(`${room.id}:accepted-v2`) ??
+        roomAssetByLogicalId.get(room.id) ??
+        null,
       illustratedRoomAssetId:
         roomAssetByLogicalId.get(`${room.id}:illustrated-v1`) ?? null,
       // Preserve presentation art without retaining original evidence placement.
@@ -475,7 +478,7 @@ export function exportInternalMansionPackageFromDbV1(args: {
       ? bundle.music?.active?.loop ?? null
       : null,
     musicIdentity: sourceHouseStyle.musicIdentity ?? bundle.music?.identity,
-    roomArt: DEFAULT_MANSION_ROOM_ART_CONTRACT_V1,
+    roomArt: DEFAULT_MANSION_ROOM_ART_CONTRACT_V5,
     ambience,
     ...(portablePropTheme ? { propTheme: portablePropTheme } : {}),
   };
@@ -492,6 +495,202 @@ export function importInternalMansionPackageToDbV1(args: {
   manageTransaction?: boolean;
 }): string {
   return importInternalMansionPackageToDbDetailedV1(args).bundleId;
+}
+
+export interface UpgradedInstalledMansionRoomArtV1 {
+  bundleId: string;
+  updatedRoomIds: readonly string[];
+  acceptedAssetIds: ReadonlyMap<string, string>;
+  illustratedAssetIds: ReadonlyMap<string, string>;
+}
+
+/** Promotes the authored Pixel Art and Realistic room plates from a portable
+ * mansion into an already-installed copy without replacing its identity,
+ * topology, music, ambience, props, or active-case references. This is the
+ * compatibility seam for mansions installed before the dual-style contract. */
+export function upgradeInstalledMansionRoomArtFromPackageV1(args: {
+  db: DatabaseSync;
+  userKey: Buffer;
+  userId: string;
+  bundleId: string;
+  archive: Uint8Array;
+}): UpgradedInstalledMansionRoomArtV1 {
+  const decoded = decodeInternalMansionPackageV1(args.archive);
+  const mansion = getDebateMysteryMansionBundleV2(args.db, args.userId, args.bundleId);
+  if (mansion.rooms.length !== decoded.manifest.rooms.length) {
+    throw new DebateMysteryMansionCodecError(
+      `Room-art upgrade expected ${mansion.rooms.length} rooms but the package contains ${decoded.manifest.rooms.length}.`,
+    );
+  }
+
+  const unusedRoomIds = new Set(mansion.rooms.map((room) => room.id));
+  const packageRoomByInstalledId = new Map<string, MansionPackageManifestV1["rooms"][number]>();
+  for (const sourceRoom of decoded.manifest.rooms) {
+    const available = mansion.rooms.filter((room) => unusedRoomIds.has(room.id));
+    const exact = available.filter(
+      (room) => room.templateId === sourceRoom.templateId && room.name === sourceRoom.name,
+    );
+    const sameTemplate = available.filter((room) => room.templateId === sourceRoom.templateId);
+    const sameName = available.filter((room) => room.name === sourceRoom.name);
+    const installedRoom = exact.length === 1
+      ? exact[0]
+      : sameTemplate.length === 1
+        ? sameTemplate[0]
+        : sameName.length === 1
+          ? sameName[0]
+          : null;
+    if (!installedRoom) {
+      throw new DebateMysteryMansionCodecError(
+        `Could not safely match package room ${sourceRoom.name} to the installed mansion.`,
+      );
+    }
+    unusedRoomIds.delete(installedRoom.id);
+    packageRoomByInstalledId.set(installedRoom.id, sourceRoom);
+  }
+
+  const bundleRow = args.db.prepare(
+    `SELECT layout_json FROM debate_mystery_mansion_bundles
+      WHERE id = ? AND user_id = ?`,
+  ).get(args.bundleId, args.userId) as { layout_json: string } | undefined;
+  if (!bundleRow) throw new DebateMysteryMansionCodecError("Installed mansion was not found.");
+  const storedLayout = JSON.parse(bundleRow.layout_json) as unknown;
+  const assetByPortableId = new Map(decoded.manifest.assets.map((asset) => [asset.id, asset]));
+  const acceptedAssetIds = new Map<string, string>();
+  const illustratedAssetIds = new Map<string, string>();
+  const now = new Date().toISOString();
+  const insertAsset = args.db.prepare(
+    `INSERT INTO debate_mystery_mansion_assets
+       (id, user_id, ciphertext, cipher_iv, cipher_tag, sha256, byte_size,
+        mime_type, width, height, duration_ms, provider, model, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'package-upgrade',
+             'balanced-mosaic-v5', ?, ?)
+     ON CONFLICT(user_id, sha256) DO NOTHING`,
+  );
+  const findAsset = args.db.prepare(
+    "SELECT id FROM debate_mystery_mansion_assets WHERE user_id = ? AND sha256 = ?",
+  );
+  const upsertRef = args.db.prepare(
+    `INSERT INTO debate_mystery_mansion_asset_refs
+       (bundle_id, user_id, asset_id, role, logical_id, created_at)
+     VALUES (?, ?, ?, 'room', ?, ?)
+     ON CONFLICT(bundle_id, role, logical_id) DO UPDATE SET
+       asset_id = excluded.asset_id,
+       created_at = excluded.created_at`,
+  );
+  const storeAsset = (portableAssetId: string): string => {
+    const descriptor = assetByPortableId.get(portableAssetId);
+    if (!descriptor || descriptor.role !== "room") {
+      throw new DebateMysteryMansionCodecError(
+        `Room-art upgrade references missing room asset ${portableAssetId}.`,
+      );
+    }
+    const source = decoded.assets.get(descriptor.archivePath);
+    if (!source) {
+      throw new DebateMysteryMansionCodecError(
+        `Room-art upgrade is missing ${descriptor.archivePath}.`,
+      );
+    }
+    const bytes = Buffer.from(source);
+    const encrypted = encryptBytes(bytes, args.userKey);
+    insertAsset.run(
+      randomUUID(),
+      args.userId,
+      encrypted.ciphertext,
+      encrypted.iv,
+      encrypted.tag,
+      descriptor.sha256,
+      bytes.byteLength,
+      descriptor.mimeType,
+      descriptor.width,
+      descriptor.height,
+      descriptor.durationMs,
+      now,
+      now,
+    );
+    const stored = findAsset.get(args.userId, descriptor.sha256) as { id: string } | undefined;
+    if (!stored) throw new DebateMysteryMansionCodecError("Upgraded room asset was not stored.");
+    return stored.id;
+  };
+
+  args.db.exec("BEGIN IMMEDIATE");
+  try {
+    for (const [installedRoomId, sourceRoom] of packageRoomByInstalledId) {
+      if (!sourceRoom.roomAssetId) {
+        throw new DebateMysteryMansionCodecError(
+          `Package room ${sourceRoom.name} has no authored Pixel Art asset.`,
+        );
+      }
+      const acceptedAssetId = storeAsset(sourceRoom.roomAssetId);
+      acceptedAssetIds.set(installedRoomId, acceptedAssetId);
+      upsertRef.run(args.bundleId, args.userId, acceptedAssetId, installedRoomId, now);
+      upsertRef.run(
+        args.bundleId,
+        args.userId,
+        acceptedAssetId,
+        `${installedRoomId}:accepted-v2`,
+        now,
+      );
+      if (sourceRoom.illustratedRoomAssetId) {
+        const illustratedAssetId = storeAsset(sourceRoom.illustratedRoomAssetId);
+        illustratedAssetIds.set(installedRoomId, illustratedAssetId);
+        upsertRef.run(
+          args.bundleId,
+          args.userId,
+          illustratedAssetId,
+          `${installedRoomId}:illustrated-v1`,
+          now,
+        );
+      }
+    }
+
+    const upgradedLayout = Array.isArray(storedLayout)
+      ? storedLayout.map((entry) => {
+          if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
+          const room = entry as Record<string, unknown>;
+          const acceptedRoomAssetId = typeof room.id === "string"
+            ? acceptedAssetIds.get(room.id)
+            : null;
+          return acceptedRoomAssetId ? { ...room, acceptedRoomAssetId } : room;
+        })
+      : storedLayout && typeof storedLayout === "object" &&
+          (storedLayout as { version?: unknown }).version === 2
+        ? {
+            ...(storedLayout as MansionLayoutV2),
+            entities: (storedLayout as MansionLayoutV2).entities.map((entity) =>
+              entity.kind === "room" && acceptedAssetIds.has(entity.id)
+                ? { ...entity, acceptedRoomAssetId: acceptedAssetIds.get(entity.id)! }
+                : entity
+            ),
+          }
+        : null;
+    if (!upgradedLayout) {
+      throw new DebateMysteryMansionCodecError("Installed mansion layout is invalid.");
+    }
+    args.db.prepare(
+      `UPDATE debate_mystery_mansion_bundles
+          SET layout_json = ?, updated_at = ?
+        WHERE id = ? AND user_id = ?`,
+    ).run(
+      typeof upgradedLayout === "object" && !Array.isArray(upgradedLayout) &&
+          (upgradedLayout as { version?: unknown }).version === 2
+        ? canonicalMansionLayoutV2(upgradedLayout as MansionLayoutV2)
+        : JSON.stringify(upgradedLayout),
+      now,
+      args.bundleId,
+      args.userId,
+    );
+    args.db.exec("COMMIT");
+  } catch (error) {
+    if (args.db.isTransaction) args.db.exec("ROLLBACK");
+    throw error;
+  }
+
+  return {
+    bundleId: args.bundleId,
+    updatedRoomIds: [...packageRoomByInstalledId.keys()],
+    acceptedAssetIds,
+    illustratedAssetIds,
+  };
 }
 
 export function importInternalMansionPackageToDbDetailedV1(args: {

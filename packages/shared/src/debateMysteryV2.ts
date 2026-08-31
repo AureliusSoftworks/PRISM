@@ -114,7 +114,7 @@ export interface DebateMysteryAssetSynthesisV2 {
   evidence: boolean;
   /** ONLINE-only template edits. LOCAL cases retain bundled room art. */
   rooms: boolean;
-  /** Upgrade the complete synthesized room pack to Illustrated before play. */
+  /** Upgrade the complete synthesized room pack from Pixel Art to Realistic before play. */
   illustratedRooms: boolean;
   /** ONLINE-only instrumental mansion theme. Failure keeps the bundled bed. */
   music: boolean;
@@ -459,7 +459,7 @@ export interface DebateMysteryCompilationSubstepV2 {
 export type DebateMysteryPlayPhaseV2 =
   | "case_forge"
   | "title_card"
-  /** The pre-authored Casekeeper briefing between the title card and the map. */
+  /** The embodied player's pre-authored internal briefing before scene arrival. */
   | "case_opening"
   | "investigation"
   | "theory"
@@ -469,8 +469,11 @@ export type DebateMysteryLineModeV2 =
   | "spoken"
   | "text_only"
   | "player_selected"
+  /** The player's frozen embodied bot performs an internal thought through
+   * Babble while remaining publicly identified as the speaker. */
+  | "persona_babble"
   /** A real frozen bot performs this line through Babble, while its identity
-   * remains absent from the public dialogue projection. */
+   * remains absent from the public dialogue projection. Legacy only. */
   | "anonymous_babble";
 export type DebateMysteryRecordKindV2 = "evidence" | "testimony";
 export type DebateMysteryCourtCalloutV2 =
@@ -707,8 +710,8 @@ export interface DebateMysterySpokenLineV2 {
   id: string;
   nodeId: string;
   speakerKind: "bot" | "judge" | "player" | "narrator";
-  /** For anonymous_babble this private graph field owns the real carrier voice;
-   * public dialogue entries must project it as null. */
+  /** For persona_babble this is the public embodied speaker. For legacy
+   * anonymous_babble it remains the private carrier and projects as null. */
   speakerBotId: string | null;
   stageActionText: string | null;
   visibleText: string;
@@ -732,6 +735,9 @@ export interface DebateMysteryDialogueMutationV2 {
   discoverIds: string[];
   unlockTopicIds: string[];
   admitRecordIds: string[];
+  /** Additive V2 bridge for the deterministic mansion access-item graph.
+   * Older frozen cases omit it and continue with an empty Case Kit. */
+  acquireItemIds?: string[];
   choices: Array<{ choiceId: string; optionId: string }>;
 }
 
@@ -800,13 +806,20 @@ export interface DebateMysteryDialogueGraphV2 {
   lines: DebateMysterySpokenLineV2[];
   witnessChapters: DebateMysteryWitnessChapterV2[];
   prosecutionChoices: DebateMysteryProsecutionChoiceV2[];
-  /** One finite, two-step reveal for each suspect room. The Casekeeper node is
-   * text-only; the persona node is locally voiced when it enters the canonical
-   * transcript. */
+  /** One finite reveal for each occupied room. `casekeeperNodeId` is the legacy
+   * storage key for the embodied player's opening thought. Older graphs move
+   * directly from the text-only tableau to the persona node. Current graphs add a
+   * frozen Prosecution -> occupant -> Prosecution opening exchange while
+   * retaining personaNodeId as the occupant-response compatibility alias. */
   roomIntroductionNodeIdsByRoom?: Record<string, {
     casekeeperNodeId: string;
     personaNodeId: string;
     suspectSeatId: string;
+    openingExchangeNodeIds?: {
+      prosecutionOpeningNodeId: string;
+      occupantResponseNodeId: string;
+      prosecutionHandoffNodeId: string;
+    };
   }>;
   talkTopicNodeIdsBySuspect: Record<string, string[]>;
   /** Private, exact Present routes and their bounded public unlocks. */
@@ -1136,9 +1149,9 @@ function mysteryNarrationActionV2(
 }
 
 /**
- * A stable, name-free Casekeeper tableau assembled only from the frozen/public
+ * A stable, name-free first impression assembled only from the frozen/public
  * appearance profile and visible room fixtures. It contains no case facts and
- * is safe to persist in the replay graph before the persona speaks.
+ * is safe to persist as the embodied player's thought before the occupant speaks.
  */
 export function debateMysteryRoomNarrationTextV2(args: {
   appearance?: DebateMysteryRoomNarrationAppearanceV2 | null;
@@ -1176,6 +1189,18 @@ export interface DebateMysteryPublicRecordItemV2 {
   updatedAt: string;
 }
 
+export interface DebateMysteryCaseKitItemV2 {
+  id: string;
+  title: string;
+  description: string;
+  emoji: string;
+  kind: "key" | "code" | "remote" | "container" | "artifact";
+  usable: boolean;
+  locked: boolean;
+  sourceRoomId: string;
+  acquiredAt: string;
+}
+
 export interface DebateMysteryPublicTopicV2 {
   nodeId: string;
   suspectSeatId: string;
@@ -1190,7 +1215,7 @@ export interface DebateMysteryPublicDialogueEntryV2 {
   lineId: string | null;
   /** Text-only delivery is intentionally silent even when an older frozen case
    * still has a local audio clip for the authored line. */
-  delivery?: "spoken" | "text_only" | "anonymous_babble";
+  delivery?: "spoken" | "text_only" | "persona_babble" | "anonymous_babble";
   stageActionText?: string | null;
   visibleText: string;
   speakerSeatId: string | null;
@@ -1201,6 +1226,12 @@ export interface DebateMysteryPublicDialogueEntryV2 {
   /** Recorded only when the authored graph explicitly addresses a bot. */
   intendedRecipientSeatId?: string | null;
   intendedRecipientBotId?: string | null;
+  /**
+   * Spoiler-safe projection for an Examine result that changed durable public
+   * investigation state (a record, Case Kit item, or unlocked public lead).
+   * It intentionally carries no sealed graph or truth data.
+   */
+  caseFileRelevant?: boolean;
   occurredAt: string;
 }
 
@@ -1410,6 +1441,9 @@ export interface DebateWhodunnitFormatStateV2 {
   metSuspectSeatIds: string[];
   discoveryIds: string[];
   record: DebateMysteryPublicRecordItemV2[];
+  /** Physical access items recovered during Examine. Additive for archived
+   * cases compiled before the V2 Case Kit bridge. */
+  caseKit?: DebateMysteryCaseKitItemV2[];
   topics: DebateMysteryPublicTopicV2[];
   dialogueHistory: DebateMysteryPublicDialogueEntryV2[];
   /** Frozen visual/name targets for exact live, Archive, and play-again replay. */
@@ -1757,8 +1791,15 @@ export function validateDebateMysteryDialogueGraphV2(args: {
       errors.push(`Anonymous Babble line ${line.id} has no private bot carrier.`);
     }
     if (
+      line.mode === "persona_babble" &&
+      (line.speakerKind !== "player" || !line.speakerBotId)
+    ) {
+      errors.push(`Player thought ${line.id} has no embodied bot speaker.`);
+    }
+    if (
       args.prosecutorBotId &&
       line.mode !== "text_only" &&
+      line.mode !== "persona_babble" &&
       line.mode !== "anonymous_babble" &&
       line.speakerBotId &&
       !line.stageActionText?.trim()
@@ -1782,18 +1823,49 @@ export function validateDebateMysteryDialogueGraphV2(args: {
     const persona = nodeById.get(introduction.personaNodeId);
     const casekeeperLine = casekeeper?.lineId ? lineById.get(casekeeper.lineId) : null;
     const personaLine = persona?.lineId ? lineById.get(persona.lineId) : null;
+    const openingExchange = introduction.openingExchangeNodeIds;
+    const prosecutionOpening = openingExchange
+      ? nodeById.get(openingExchange.prosecutionOpeningNodeId)
+      : null;
+    const occupantResponse = openingExchange
+      ? nodeById.get(openingExchange.occupantResponseNodeId)
+      : null;
+    const prosecutionHandoff = openingExchange
+      ? nodeById.get(openingExchange.prosecutionHandoffNodeId)
+      : null;
+    const prosecutionOpeningLine = prosecutionOpening?.lineId
+      ? lineById.get(prosecutionOpening.lineId)
+      : null;
+    const occupantResponseLine = occupantResponse?.lineId
+      ? lineById.get(occupantResponse.lineId)
+      : null;
+    const prosecutionHandoffLine = prosecutionHandoff?.lineId
+      ? lineById.get(prosecutionHandoff.lineId)
+      : null;
+    const expectedCasekeeperNextNodeId = openingExchange?.prosecutionOpeningNodeId ??
+      introduction.personaNodeId;
+    const playerThoughtIsValid = Boolean(
+      casekeeperLine?.mode === "persona_babble" &&
+      casekeeperLine.speakerKind === "player" &&
+      casekeeperLine.speakerBotId &&
+      (!args.prosecutorBotId || casekeeperLine.speakerBotId === args.prosecutorBotId),
+    );
+    const legacyTableauIsValid = Boolean(
+      casekeeperLine?.mode === "text_only" &&
+      casekeeperLine.speakerKind === "narrator" &&
+      casekeeperLine.speakerBotId === null,
+    );
     if (
       casekeeper?.kind !== "room_introduction" ||
-      casekeeperLine?.mode !== "text_only" ||
-      casekeeperLine.speakerKind !== "narrator" ||
-      casekeeperLine.speakerBotId !== null ||
+      (!playerThoughtIsValid && !legacyTableauIsValid) ||
+      !casekeeperLine ||
       !casekeeperLine.visibleText.trim() ||
       casekeeperLine.visibleText !== casekeeperLine.spokenText ||
       Boolean(casekeeperLine.stageActionText?.trim()) ||
       casekeeper.nextNodeIds.length !== 1 ||
-      casekeeper.nextNodeIds[0] !== introduction.personaNodeId
+      casekeeper.nextNodeIds[0] !== expectedCasekeeperNextNodeId
     ) {
-      errors.push(`Room introduction ${roomId} has no exact text-only Casekeeper tableau.`);
+      errors.push(`Room introduction ${roomId} has no exact embodied-player thought.`);
     }
     if (
       persona?.kind !== "room_introduction" ||
@@ -1803,6 +1875,34 @@ export function validateDebateMysteryDialogueGraphV2(args: {
       !personaLine.stageActionText?.trim()
     ) {
       errors.push(`Room introduction ${roomId} has no finite voiced persona reveal.`);
+    }
+    if (openingExchange && (
+      openingExchange.occupantResponseNodeId !== introduction.personaNodeId ||
+      prosecutionOpening?.kind !== "room_introduction" ||
+      prosecutionOpening?.locationId !== roomId ||
+      prosecutionOpening?.speakerSeatId !== null ||
+      prosecutionOpening?.intendedRecipientSeatId !== introduction.suspectSeatId ||
+      prosecutionOpeningLine?.mode !== "spoken" ||
+      prosecutionOpeningLine.speakerKind !== "player" ||
+      prosecutionOpeningLine.speakerBotId !== args.prosecutorBotId ||
+      !prosecutionOpeningLine.stageActionText?.trim() ||
+      prosecutionOpening.nextNodeIds.length !== 1 ||
+      prosecutionOpening.nextNodeIds[0] !== openingExchange.occupantResponseNodeId ||
+      occupantResponse?.id !== introduction.personaNodeId ||
+      occupantResponse?.nextNodeIds.length !== 1 ||
+      occupantResponse.nextNodeIds[0] !== openingExchange.prosecutionHandoffNodeId ||
+      occupantResponseLine?.speakerBotId !== personaLine?.speakerBotId ||
+      prosecutionHandoff?.kind !== "room_introduction" ||
+      prosecutionHandoff?.locationId !== roomId ||
+      prosecutionHandoff?.speakerSeatId !== null ||
+      prosecutionHandoff?.intendedRecipientSeatId !== introduction.suspectSeatId ||
+      prosecutionHandoffLine?.mode !== "spoken" ||
+      prosecutionHandoffLine.speakerKind !== "player" ||
+      prosecutionHandoffLine.speakerBotId !== args.prosecutorBotId ||
+      !prosecutionHandoffLine.stageActionText?.trim() ||
+      prosecutionHandoff.nextNodeIds.length !== 0
+    )) {
+      errors.push(`Room introduction ${roomId} has no exact frozen Prosecution opening exchange.`);
     }
     if (!graph.interactionRootNodeIds.includes(introduction.casekeeperNodeId)) {
       errors.push(`Room introduction ${roomId} is not reachable from the finite graph.`);

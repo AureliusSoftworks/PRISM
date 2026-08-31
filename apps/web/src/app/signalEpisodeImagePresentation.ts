@@ -1,11 +1,39 @@
 import {
   botcastImageContextForMessageV1,
   botcastLatestImageContextV1,
+  botcastPreSessionImageShouldPresentOnNextTurnV1,
   type BotcastEpisodeImagePlacement,
   type BotcastImageContextV1,
   type BotcastProducerCue,
   type SignalVisualRecognitionV1,
 } from "@localai/shared";
+
+export function signalPreSessionEpisodeImageCueForNextTurn(args: {
+  episodeId: string;
+  messages: readonly { speakerRole: "host" | "guest" }[];
+  pendingImage: {
+    episodeId: string;
+    imageId: string;
+    preSessionReveal?: boolean;
+  } | null;
+  imageContext: Pick<BotcastImageContextV1, "imageId"> | null;
+  higherPriorityCuePending: boolean;
+}): BotcastProducerCue | null {
+  if (
+    args.higherPriorityCuePending ||
+    args.imageContext ||
+    args.pendingImage?.preSessionReveal !== true ||
+    args.pendingImage.episodeId !== args.episodeId ||
+    !botcastPreSessionImageShouldPresentOnNextTurnV1({
+      episodeId: args.episodeId,
+      imageId: args.pendingImage.imageId,
+      messages: args.messages,
+    })
+  ) {
+    return null;
+  }
+  return { kind: "present_image", imageId: args.pendingImage.imageId };
+}
 
 /**
  * Identity is an exceptional bot-image result, not a status surface for every

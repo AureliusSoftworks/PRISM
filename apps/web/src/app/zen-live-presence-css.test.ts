@@ -856,8 +856,8 @@ describe("Zen live presence CSS", () => {
     const lightCrtRule = ruleForNormalizedSelector(
       '.zenLiveBotPresencePlate[data-theme="light"] .zenLiveBotPresenceFaceEmissionMask',
     );
-    assert.match(lightCrtRule, /--crt-core-opacity:\s*0\.88\s*;/);
-    assert.match(lightCrtRule, /--crt-bloom-wide-strength:\s*0\.045\s*;/);
+    assert.match(lightCrtRule, /--crt-core-opacity:\s*0\.94\s*;/);
+    assert.match(lightCrtRule, /--crt-bloom-wide-strength:\s*0\.025\s*;/);
     assert.match(lightCrtRule, /--crt-static-opacity:\s*0\.018\s*;/);
     const darkCrtRule = ruleForExactSelector(
       '.zenLiveBotPresencePlate[data-theme="dark"] .zenLiveBotPresenceFaceEmissionMask',
@@ -3351,13 +3351,16 @@ describe("Zen live presence CSS", () => {
     assert.match(glyphRule, /background:\s*transparent\s*;/);
     assert.match(
       glyphRule,
-      /--zen-live-bot-glyph-glow-color:\s*var\(--coffee-bot-color\)\s*;/,
+      /--zen-live-bot-glyph-glow-color:\s*var\(\s*--bot-avatar-screen-glow,\s*var\(--coffee-bot-color\)\s*\)\s*;/,
     );
     assert.match(
       glyphRule,
       /--zen-live-bot-glyph-crt-border-color:\s*var\(--zen-live-bot-glyph-glow-color\)\s*;/,
     );
-    assert.match(glyphRule, /color:\s*#ffffff\s*;/);
+    assert.match(
+      glyphRule,
+      /color:\s*var\(--bot-avatar-screen-glyph,\s*#ffffff\)\s*;/,
+    );
     assert.match(
       glyphRule,
       /filter:\s*[\s\S]*var\(--bot-phosphor-halo-contact-radius,\s*0\.72px\)[\s\S]*var\(--bot-phosphor-halo-tight-radius,\s*1\.5px\)[\s\S]*var\(--bot-phosphor-halo-ambient-radius,\s*21px\)/,
@@ -3414,7 +3417,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       orbRule,
-      /background-clip:\s*content-box,\s*border-box,\s*border-box,\s*border-box\s*;/,
+      /background-clip:\s*content-box,\s*content-box,\s*border-box,\s*border-box,\s*border-box\s*;/,
     );
     assert.match(
       orbRule,
@@ -3506,9 +3509,9 @@ describe("Zen live presence CSS", () => {
     const lightRimRule = ruleForExactSelector(
       ".themeLight .zenLiveBotPresenceBody",
     );
-    assert.doesNotMatch(
+    assert.match(
       lightRimRule,
-      /--zen-live-bot-buckle-rim-screen-(?:center|edge)\s*:/,
+      /--zen-live-bot-buckle-rim-screen-center:\s*var\(\s*--bot-avatar-screen-center,\s*var\(--coffee-bot-color\)\s*\)\s*;[\s\S]*--zen-live-bot-buckle-rim-screen-edge:\s*var\(\s*--bot-avatar-screen-edge,\s*var\(--coffee-bot-color\)\s*\)\s*;/,
     );
 
     const orbRule = ruleForExactSelector(".zenLiveBotPresenceBody::before");

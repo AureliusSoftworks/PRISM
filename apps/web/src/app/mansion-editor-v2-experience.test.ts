@@ -37,9 +37,9 @@ describe("Mansion Editor V2 experience", () => {
     assert.match(editorSource, /lowerTopFloorRoom/u);
   });
 
-  it("drills into a room for click placement, direct lighting, and preview-only Mosaic", () => {
+  it("drills into a room for click placement, direct lighting, and source-preserving Pixel Art", () => {
     assert.match(editorSource, /data-tutorial-target="whodunnit-room-editor"/u);
-    assert.match(editorSource, /Mosaic changes this preview only/u);
+    assert.match(editorSource, /Pixel Art is newly synthesized/u);
     assert.match(
       editorSource,
       /const style = mosaic \? "mosaic" : "illustrated";[\s\S]{0,220}whodunnitMansionRoomArtUrl\(mansion\.id, room\.acceptedRoomAssetId, style\)/u,
@@ -63,17 +63,21 @@ describe("Mansion Editor V2 experience", () => {
 
   it("keeps generated art explicit, tenant-owned, and visibly unavailable in LOCAL", () => {
     assert.match(editorSource, /Accept candidate/u);
-    assert.match(editorSource, /Retry Illustrated candidate/u);
+    assert.match(editorSource, /Retry Pixel Art candidate/u);
     assert.match(editorSource, /Discard candidate/u);
-    assert.match(editorSource, /Upgrade this room to Illustrated · ONLINE/u);
-    assert.match(editorSource, /Only this open room is upgraded/u);
+    assert.match(editorSource, /Synthesize Pixel Art · ONLINE/u);
+    assert.match(editorSource, /Only this open room is synthesized/u);
     assert.match(editorSource, /Regenerate room asset/u);
     assert.match(editorSource, /clears only this room.*anchors, lights, and staged art/u);
     assert.match(editorSource, /persistedLayoutMatchesDraft/u);
     assert.match(editorSource, /LOCAL is server-rejected and uses bundled or accepted art/u);
+    assert.match(
+      editorSource,
+      /function candidateAssetUrl[\s\S]{0,220}whodunnitMansionRoomArtUrl\(mansion\.id, assetId, "mosaic"\)/u,
+    );
   });
 
-  it("opens the existing editor from new mansion creation and prepares Mosaic under a blocker", () => {
+  it("opens the existing editor from new mansion creation and prepares Pixel Art under a blocker", () => {
     assert.match(debateSource, /data-tutorial-target="whodunnit-create-mansion-editor"/u);
     assert.match(debateSource, /Open Mansion Editor/u);
     assert.match(debateSource, /\/api\/debates\/mystery-mansions/u);
@@ -85,12 +89,12 @@ describe("Mansion Editor V2 experience", () => {
     assert.match(editorSource, /mansionEditorInspector[\s\S]{0,420}mansionEditorRoomPalette/u);
     assert.match(editorSource, /Remove \{selectedRoom \? "room" : "block"\}/u);
     assert.match(editorSource, /disabled=\{!selectedEntityCanBeRemoved\}/u);
-    assert.match(editorSource, /Continue to generate the Mosaic before entering individual rooms/u);
-    assert.match(editorSource, /title="Building Mosaic room plates"/u);
+    assert.match(editorSource, /Continue to prepare Pixel Art before entering individual rooms/u);
+    assert.match(editorSource, /title="Building Pixel Art room plates"/u);
     assert.match(editorSource, /stepLabel="Preparing the mansion map"/u);
     assert.match(editorSource, /CREATION_MOSAIC_MINIMUM_LOADER_MS = 900/u);
     assert.match(editorSource, /window\.setTimeout\(resolve, remainingLoaderTime\)/u);
-    assert.match(editorSource, /Mosaic silhouettes are ready.*mansion map/u);
+    assert.match(editorSource, /Pixel Art rooms are ready.*mansion map/u);
     assert.match(editorSource, /mansionRoomEditorNotice.*role="status"/u);
   });
 

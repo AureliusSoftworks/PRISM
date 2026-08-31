@@ -5,9 +5,16 @@ import { describe, it } from "node:test";
 import type { MansionTraversalRouteV1 } from "@localai/shared";
 import {
   MYSTERY_MANSION_TRAVEL_AUDIO,
+  MYSTERY_MANSION_TRAVEL_ASSET_LEVELS,
+  MYSTERY_MANSION_TRAVEL_DOOR_TARGET_LUFS,
+  MYSTERY_MANSION_TRAVEL_FOOTSTEP_TARGET_LUFS,
+  MYSTERY_MANSION_TRAVEL_MAX_MEDIA_VOLUME,
+  MYSTERY_MANSION_TRAVEL_TRUE_PEAK_CEILING_DBFS,
   mysteryMansionTravelCuePlanV1,
   mysteryMansionTravelDurationMs,
   mysteryMansionTravelFoleyPlanV1,
+  mysteryMansionTravelNormalizedGainV1,
+  mysteryMansionTravelPlaybackVolumeV1,
   mysteryMansionTravelPointAtProgress,
 } from "./debateMysteryMansionTravel.ts";
 
@@ -46,6 +53,10 @@ const crossFloorRoute: MansionTraversalRouteV1 = {
     { kind: "entity_center", floor: 2, x: 8, y: 2, entityId: "study", edgeId: "door-study", connectorKind: null },
   ],
 };
+
+function gainDb(gain: number): number {
+  return 20 * Math.log10(gain);
+}
 
 describe("Whodunnit mansion travel", () => {
   it("bounds first-visit travel duration and interpolates the authored route", () => {
@@ -100,6 +111,18 @@ describe("Whodunnit mansion travel", () => {
     assert.ok(compact[1]?.url.includes("footstep-stone"));
   });
 
+  it("can preserve the door threshold while deferring footsteps to the interior journey", () => {
+    const threshold = mysteryMansionTravelFoleyPlanV1({
+      route,
+      seed: "case:first-threshold:1",
+      footstepMaterial: "stone",
+      compact: true,
+      includeFootsteps: false,
+    });
+    assert.deepEqual(threshold.map((cue) => cue.kind), ["door_open", "door_close"]);
+    assert.deepEqual(threshold.map((cue) => cue.atMs), [0, 285]);
+  });
+
   it("expresses movement, thresholds, floor changes, steps, and arrival as timed cues", () => {
     const plan = mysteryMansionTravelCuePlanV1({ route: crossFloorRoute });
     assert.ok(plan.some((cue) => cue.kind === "movement"));
@@ -124,5 +147,55 @@ describe("Whodunnit mansion travel", () => {
       assert.equal(existsSync(file), true, url);
       assert.ok(statSync(file).size > 1_000, url);
     }
+  });
+
+  it("calibrates every bundled cue beneath one safe peak ceiling", () => {
+    const doors = Object.values(MYSTERY_MANSION_TRAVEL_AUDIO.doors).flatMap((door) => [
+      ...door.open,
+      ...door.close,
+    ]);
+    const footsteps = Object.values(MYSTERY_MANSION_TRAVEL_AUDIO.footsteps).flat();
+    const allUrls = [...doors, ...footsteps];
+    assert.deepEqual(
+      Object.keys(MYSTERY_MANSION_TRAVEL_ASSET_LEVELS).sort(),
+      [...allUrls].sort(),
+      "a new bundled cue cannot bypass source-level calibration",
+    );
+
+    const projectedLoudness = (url: string, kind: "door_open" | "footstep") => {
+      const level = MYSTERY_MANSION_TRAVEL_ASSET_LEVELS[
+        url as keyof typeof MYSTERY_MANSION_TRAVEL_ASSET_LEVELS
+      ];
+      const gain = mysteryMansionTravelNormalizedGainV1({ kind, url });
+      assert.ok(gain > 0 && gain <= MYSTERY_MANSION_TRAVEL_MAX_MEDIA_VOLUME);
+      assert.ok(
+        level.truePeakDbfs + gainDb(gain) <= MYSTERY_MANSION_TRAVEL_TRUE_PEAK_CEILING_DBFS + 0.001,
+        `${url} exceeds the travel peak ceiling`,
+      );
+      return level.integratedLufs + gainDb(gain);
+    };
+    const doorLoudness = doors.map((url) => projectedLoudness(url, "door_open"));
+    const footstepLoudness = footsteps.map((url) => projectedLoudness(url, "footstep"));
+    assert.ok(Math.max(...doorLoudness) - Math.min(...doorLoudness) < 4);
+    assert.ok(Math.max(...footstepLoudness) - Math.min(...footstepLoudness) < 3);
+    assert.ok(Math.max(...doorLoudness) <= MYSTERY_MANSION_TRAVEL_DOOR_TARGET_LUFS + 0.001);
+    assert.ok(Math.max(...footstepLoudness) <= MYSTERY_MANSION_TRAVEL_FOOTSTEP_TARGET_LUFS + 0.001);
+  });
+
+  it("turns down the observatory door while lifting quieter travel details", () => {
+    const mechanicalOpen = "/audio/debate/whodunnit/travel/door-mechanical-open-01.mp3";
+    const woodClose = "/audio/debate/whodunnit/travel/door-wood-close-01.mp3";
+    const mechanicalGain = mysteryMansionTravelNormalizedGainV1({
+      kind: "door_open",
+      url: mechanicalOpen,
+    });
+    const quietDoorGain = mysteryMansionTravelNormalizedGainV1({
+      kind: "door_close",
+      url: woodClose,
+    });
+    assert.ok(mechanicalGain < 0.15, "the observatory door is no longer the dominant transient");
+    assert.ok(quietDoorGain > 0.7, "quiet doors receive measured upward normalization");
+    assert.equal(mysteryMansionTravelPlaybackVolumeV1(2, 2), MYSTERY_MANSION_TRAVEL_MAX_MEDIA_VOLUME);
+    assert.equal(mysteryMansionTravelPlaybackVolumeV1(-1, quietDoorGain), 0);
   });
 });

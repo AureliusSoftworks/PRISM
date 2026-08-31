@@ -101,7 +101,7 @@ type ReplayThinkingPresentation = {
 
 let sharedAudioContext: AudioContext | null = null;
 let sharedAudioContextConstructor: typeof AudioContext | null = null;
-let sharedWorldOutput: GainNode | null = null;
+let sharedWorldOutput: AudioNode | null = null;
 let sharedLocalOnlyOutput: GainNode | null = null;
 let activeCapture: ReplayAudioMasterCaptureSession | null = null;
 let releaseSharedAudioContextRecovery: (() => void) | null = null;
@@ -148,11 +148,26 @@ export function prismAudioContext(): AudioContext | null {
   return sharedAudioContext;
 }
 
-function worldOutputForSharedContext(): GainNode | null {
+export const PRISM_WORLD_AUDIO_LIMITER_THRESHOLD_DBFS = -6;
+export const PRISM_WORLD_AUDIO_LIMITER_RATIO = 20;
+
+function worldOutputForSharedContext(): AudioNode | null {
   const context = prismAudioContext();
   if (!context) return null;
   if (!sharedWorldOutput) {
-    sharedWorldOutput = context.createGain();
+    if (typeof context.createDynamicsCompressor === "function") {
+      const limiter = context.createDynamicsCompressor();
+      limiter.threshold.value = PRISM_WORLD_AUDIO_LIMITER_THRESHOLD_DBFS;
+      limiter.knee.value = 0;
+      limiter.ratio.value = PRISM_WORLD_AUDIO_LIMITER_RATIO;
+      limiter.attack.value = 0.002;
+      limiter.release.value = 0.12;
+      sharedWorldOutput = limiter;
+    } else {
+      // Older Web Audio shims retain sound, while supported browsers always
+      // install the final safety limiter.
+      sharedWorldOutput = context.createGain();
+    }
     sharedWorldOutput.connect(context.destination);
   }
   return sharedWorldOutput;

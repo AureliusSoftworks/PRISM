@@ -128,7 +128,7 @@ export interface MansionPackageRoomV1 {
   slots: MansionPackageRoomSlotV1[];
   emoji: string;
   roomAssetId: string | null;
-  /** Optional high-detail plate. Missing means Mosaic is derived from roomAssetId. */
+  /** Optional Realistic plate. V4 packages use roomAssetId for authored Pixel Art. */
   illustratedRoomAssetId?: string | null;
   propAssetIds: string[];
 }
@@ -179,6 +179,218 @@ export const DEFAULT_MANSION_ROOM_ART_CONTRACT_V1: MansionRoomArtContractV1 = {
     source: "generative-upgrade",
   },
   avatars: { mosaic: "mini", illustrated: "full", footprint: "unchanged" },
+};
+
+/** First source-preserving Pixel Art presentation. V1 and V2 remain readable
+ * so older portable mansions can be installed. */
+export interface MansionRoomArtContractV2 {
+  version: 2;
+  defaultStyle: "pixel-art";
+  derivationSource: "accepted-room-plate";
+  pixelArt: {
+    logicalWidth: 640;
+    logicalHeight: 360;
+    outputWidth: 1920;
+    outputHeight: 1080;
+    paletteColors: 96;
+    dither: false;
+    displayScale: 3;
+    grid: false;
+  };
+  realistic: {
+    outputWidth: 1600;
+    outputHeight: 900;
+    source: "accepted-or-generative-upgrade";
+  };
+  avatars: {
+    pixelArt: "mini";
+    realistic: "full";
+    footprint: "unchanged";
+  };
+}
+
+export const DEFAULT_MANSION_ROOM_ART_CONTRACT_V2: MansionRoomArtContractV2 = {
+  version: 2,
+  defaultStyle: "pixel-art",
+  derivationSource: "accepted-room-plate",
+  pixelArt: {
+    logicalWidth: 640,
+    logicalHeight: 360,
+    outputWidth: 1920,
+    outputHeight: 1080,
+    paletteColors: 96,
+    dither: false,
+    displayScale: 3,
+    grid: false,
+  },
+  realistic: {
+    outputWidth: 1600,
+    outputHeight: 900,
+    source: "accepted-or-generative-upgrade",
+  },
+  avatars: { pixelArt: "mini", realistic: "full", footprint: "unchanged" },
+};
+
+/** Current, more visibly pixelated presentation. It keeps the same canonical
+ * source plate and output footprint as V2 while using exact 4px clusters. */
+export interface MansionRoomArtContractV3 {
+  version: 3;
+  defaultStyle: "pixel-art";
+  derivationSource: "accepted-room-plate";
+  pixelArt: {
+    logicalWidth: 480;
+    logicalHeight: 270;
+    outputWidth: 1920;
+    outputHeight: 1080;
+    paletteColors: 72;
+    dither: false;
+    displayScale: 4;
+    grid: false;
+  };
+  realistic: {
+    outputWidth: 1600;
+    outputHeight: 900;
+    source: "accepted-or-generative-upgrade";
+  };
+  avatars: {
+    pixelArt: "mini";
+    realistic: "full";
+    footprint: "unchanged";
+  };
+}
+
+export const DEFAULT_MANSION_ROOM_ART_CONTRACT_V3: MansionRoomArtContractV3 = {
+  version: 3,
+  defaultStyle: "pixel-art",
+  derivationSource: "accepted-room-plate",
+  pixelArt: {
+    logicalWidth: 480,
+    logicalHeight: 270,
+    outputWidth: 1920,
+    outputHeight: 1080,
+    paletteColors: 72,
+    dither: false,
+    displayScale: 4,
+    grid: false,
+  },
+  realistic: {
+    outputWidth: 1600,
+    outputHeight: 900,
+    source: "accepted-or-generative-upgrade",
+  },
+  avatars: { pixelArt: "mini", realistic: "full", footprint: "unchanged" },
+};
+
+/** Current authored-art contract. Pixel Art is a synthesized primary asset,
+ * never a deterministic filter over a Realistic plate. A later Realistic
+ * upgrade uses the accepted Pixel Art composition as its source reference. */
+export interface MansionRoomArtContractV4 {
+  version: 4;
+  defaultStyle: "pixel-art";
+  derivationSource: "synthesized-from-composition-reference";
+  pixelArt: {
+    outputWidth: 1920;
+    outputHeight: 1080;
+    source: "generative-style-transfer";
+    compositionReference: "high-resolution-room-plate";
+    deterministicFilter: false;
+    grid: false;
+  };
+  realistic: {
+    outputWidth: 1600;
+    outputHeight: 900;
+    source: "accepted-pixel-art-upgrade";
+  };
+  avatars: {
+    pixelArt: "mini";
+    realistic: "full";
+    footprint: "unchanged";
+  };
+}
+
+export const DEFAULT_MANSION_ROOM_ART_CONTRACT_V4: MansionRoomArtContractV4 = {
+  version: 4,
+  defaultStyle: "pixel-art",
+  derivationSource: "synthesized-from-composition-reference",
+  pixelArt: {
+    outputWidth: 1920,
+    outputHeight: 1080,
+    source: "generative-style-transfer",
+    compositionReference: "high-resolution-room-plate",
+    deterministicFilter: false,
+    grid: false,
+  },
+  realistic: {
+    outputWidth: 1600,
+    outputHeight: 900,
+    source: "accepted-pixel-art-upgrade",
+  },
+  avatars: { pixelArt: "mini", realistic: "full", footprint: "unchanged" },
+};
+
+/** Current source-preserving room-art contract. Authored Pixel Art remains
+ * gridless in the package so Realistic upgrades receive a clean reference;
+ * Mosaic adds the approved balanced Normal-blend grid only for presentation. */
+export interface MansionRoomArtContractV5 {
+  version: 5;
+  defaultStyle: "pixel-art";
+  derivationSource: "synthesized-from-composition-reference";
+  pixelArt: {
+    outputWidth: 1920;
+    outputHeight: 1080;
+    source: "generative-style-transfer";
+    compositionReference: "high-resolution-room-plate";
+    deterministicFilter: false;
+    grid: {
+      application: "presentation-only";
+      logicalWidth: 320;
+      logicalHeight: 180;
+      blend: "normal";
+      luminanceSplit: "scene-grid-median";
+      lineAlpha: 84;
+      lineDelta: 36;
+      preserveSourceHue: true;
+    };
+  };
+  realistic: {
+    outputWidth: 1600;
+    outputHeight: 900;
+    source: "accepted-gridless-pixel-art-upgrade";
+  };
+  avatars: {
+    pixelArt: "mini";
+    realistic: "full";
+    footprint: "unchanged";
+  };
+}
+
+export const DEFAULT_MANSION_ROOM_ART_CONTRACT_V5: MansionRoomArtContractV5 = {
+  version: 5,
+  defaultStyle: "pixel-art",
+  derivationSource: "synthesized-from-composition-reference",
+  pixelArt: {
+    outputWidth: 1920,
+    outputHeight: 1080,
+    source: "generative-style-transfer",
+    compositionReference: "high-resolution-room-plate",
+    deterministicFilter: false,
+    grid: {
+      application: "presentation-only",
+      logicalWidth: 320,
+      logicalHeight: 180,
+      blend: "normal",
+      luminanceSplit: "scene-grid-median",
+      lineAlpha: 84,
+      lineDelta: 36,
+      preserveSourceHue: true,
+    },
+  },
+  realistic: {
+    outputWidth: 1600,
+    outputHeight: 900,
+    source: "accepted-gridless-pixel-art-upgrade",
+  },
+  avatars: { pixelArt: "mini", realistic: "full", footprint: "unchanged" },
 };
 
 export type MansionAtmosphereWeatherV1 =
@@ -328,7 +540,7 @@ export interface MansionPackageManifestV1 {
   /** Sealed mansion-only musical identity; legacy packages derive one on install. */
   musicIdentity?: MansionMusicIdentityV1;
   /** Additive: legacy packages derive room art with PRISM defaults. */
-  roomArt?: MansionRoomArtContractV1;
+  roomArt?: MansionRoomArtContractV1 | MansionRoomArtContractV2 | MansionRoomArtContractV3 | MansionRoomArtContractV4 | MansionRoomArtContractV5;
   /** Optional so legacy one-floor and pre-ambience packages stay valid. */
   ambience?: MansionAmbienceManifestV1 | null;
   /** Additive complete replacement pack. Legacy anonymous room props remain separate. */
@@ -929,27 +1141,114 @@ export function validateMansionPackageManifestV1(value: unknown): string[] {
   }
   if (value.roomArt !== undefined) {
     const roomArt = value.roomArt;
-    if (
-      !isRecord(roomArt) ||
-      roomArt.version !== 1 ||
-      roomArt.defaultStyle !== "mosaic" ||
-      !isRecord(roomArt.source) ||
-      roomArt.source.width !== 1280 ||
-      roomArt.source.height !== 720 ||
-      roomArt.source.quality !== "low" ||
-      !isRecord(roomArt.mosaic) ||
-      roomArt.mosaic.logicalWidth !== 320 ||
-      roomArt.mosaic.logicalHeight !== 180 ||
-      roomArt.mosaic.outputWidth !== 1600 ||
-      roomArt.mosaic.outputHeight !== 900 ||
-      roomArt.mosaic.paletteColors !== 24 ||
-      roomArt.mosaic.dither !== false ||
-      roomArt.mosaic.cellSize !== 5 ||
-      !isRecord(roomArt.illustrated) ||
-      roomArt.illustrated.outputWidth !== 1600 ||
-      roomArt.illustrated.outputHeight !== 900 ||
-      roomArt.illustrated.source !== "generative-upgrade"
-    ) {
+    const validV1 = isRecord(roomArt) &&
+      roomArt.version === 1 &&
+      roomArt.defaultStyle === "mosaic" &&
+      isRecord(roomArt.source) &&
+      roomArt.source.width === 1280 &&
+      roomArt.source.height === 720 &&
+      roomArt.source.quality === "low" &&
+      isRecord(roomArt.mosaic) &&
+      roomArt.mosaic.logicalWidth === 320 &&
+      roomArt.mosaic.logicalHeight === 180 &&
+      roomArt.mosaic.outputWidth === 1600 &&
+      roomArt.mosaic.outputHeight === 900 &&
+      roomArt.mosaic.paletteColors === 24 &&
+      roomArt.mosaic.dither === false &&
+      roomArt.mosaic.cellSize === 5 &&
+      isRecord(roomArt.illustrated) &&
+      roomArt.illustrated.outputWidth === 1600 &&
+      roomArt.illustrated.outputHeight === 900 &&
+      roomArt.illustrated.source === "generative-upgrade";
+    const validV2 = isRecord(roomArt) &&
+      roomArt.version === 2 &&
+      roomArt.defaultStyle === "pixel-art" &&
+      roomArt.derivationSource === "accepted-room-plate" &&
+      isRecord(roomArt.pixelArt) &&
+      roomArt.pixelArt.logicalWidth === 640 &&
+      roomArt.pixelArt.logicalHeight === 360 &&
+      roomArt.pixelArt.outputWidth === 1920 &&
+      roomArt.pixelArt.outputHeight === 1080 &&
+      roomArt.pixelArt.paletteColors === 96 &&
+      roomArt.pixelArt.dither === false &&
+      roomArt.pixelArt.displayScale === 3 &&
+      roomArt.pixelArt.grid === false &&
+      isRecord(roomArt.realistic) &&
+      roomArt.realistic.outputWidth === 1600 &&
+      roomArt.realistic.outputHeight === 900 &&
+      roomArt.realistic.source === "accepted-or-generative-upgrade" &&
+      isRecord(roomArt.avatars) &&
+      roomArt.avatars.pixelArt === "mini" &&
+      roomArt.avatars.realistic === "full" &&
+      roomArt.avatars.footprint === "unchanged";
+    const validV3 = isRecord(roomArt) &&
+      roomArt.version === 3 &&
+      roomArt.defaultStyle === "pixel-art" &&
+      roomArt.derivationSource === "accepted-room-plate" &&
+      isRecord(roomArt.pixelArt) &&
+      roomArt.pixelArt.logicalWidth === 480 &&
+      roomArt.pixelArt.logicalHeight === 270 &&
+      roomArt.pixelArt.outputWidth === 1920 &&
+      roomArt.pixelArt.outputHeight === 1080 &&
+      roomArt.pixelArt.paletteColors === 72 &&
+      roomArt.pixelArt.dither === false &&
+      roomArt.pixelArt.displayScale === 4 &&
+      roomArt.pixelArt.grid === false &&
+      isRecord(roomArt.realistic) &&
+      roomArt.realistic.outputWidth === 1600 &&
+      roomArt.realistic.outputHeight === 900 &&
+      roomArt.realistic.source === "accepted-or-generative-upgrade" &&
+      isRecord(roomArt.avatars) &&
+      roomArt.avatars.pixelArt === "mini" &&
+      roomArt.avatars.realistic === "full" &&
+      roomArt.avatars.footprint === "unchanged";
+    const validV4 = isRecord(roomArt) &&
+      roomArt.version === 4 &&
+      roomArt.defaultStyle === "pixel-art" &&
+      roomArt.derivationSource === "synthesized-from-composition-reference" &&
+      isRecord(roomArt.pixelArt) &&
+      roomArt.pixelArt.outputWidth === 1920 &&
+      roomArt.pixelArt.outputHeight === 1080 &&
+      roomArt.pixelArt.source === "generative-style-transfer" &&
+      roomArt.pixelArt.compositionReference === "high-resolution-room-plate" &&
+      roomArt.pixelArt.deterministicFilter === false &&
+      roomArt.pixelArt.grid === false &&
+      isRecord(roomArt.realistic) &&
+      roomArt.realistic.outputWidth === 1600 &&
+      roomArt.realistic.outputHeight === 900 &&
+      roomArt.realistic.source === "accepted-pixel-art-upgrade" &&
+      isRecord(roomArt.avatars) &&
+      roomArt.avatars.pixelArt === "mini" &&
+      roomArt.avatars.realistic === "full" &&
+      roomArt.avatars.footprint === "unchanged";
+    const validV5 = isRecord(roomArt) &&
+      roomArt.version === 5 &&
+      roomArt.defaultStyle === "pixel-art" &&
+      roomArt.derivationSource === "synthesized-from-composition-reference" &&
+      isRecord(roomArt.pixelArt) &&
+      roomArt.pixelArt.outputWidth === 1920 &&
+      roomArt.pixelArt.outputHeight === 1080 &&
+      roomArt.pixelArt.source === "generative-style-transfer" &&
+      roomArt.pixelArt.compositionReference === "high-resolution-room-plate" &&
+      roomArt.pixelArt.deterministicFilter === false &&
+      isRecord(roomArt.pixelArt.grid) &&
+      roomArt.pixelArt.grid.application === "presentation-only" &&
+      roomArt.pixelArt.grid.logicalWidth === 320 &&
+      roomArt.pixelArt.grid.logicalHeight === 180 &&
+      roomArt.pixelArt.grid.blend === "normal" &&
+      roomArt.pixelArt.grid.luminanceSplit === "scene-grid-median" &&
+      roomArt.pixelArt.grid.lineAlpha === 84 &&
+      roomArt.pixelArt.grid.lineDelta === 36 &&
+      roomArt.pixelArt.grid.preserveSourceHue === true &&
+      isRecord(roomArt.realistic) &&
+      roomArt.realistic.outputWidth === 1600 &&
+      roomArt.realistic.outputHeight === 900 &&
+      roomArt.realistic.source === "accepted-gridless-pixel-art-upgrade" &&
+      isRecord(roomArt.avatars) &&
+      roomArt.avatars.pixelArt === "mini" &&
+      roomArt.avatars.realistic === "full" &&
+      roomArt.avatars.footprint === "unchanged";
+    if (!validV1 && !validV2 && !validV3 && !validV4 && !validV5) {
       errors.push("manifest.roomArt is invalid.");
     }
   }

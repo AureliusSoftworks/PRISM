@@ -63,7 +63,7 @@ export function debateFlytingHallPresentation(
     }
   }
   for (const vote of state.hallVotes) add(vote.sideId, 2);
-  if (state.hostVerdict) add(state.hostVerdict.sideId, 3);
+  if (state.hostVerdict?.sideId) add(state.hostVerdict.sideId, 3);
 
   const total = Math.max(1, forContribution + againstContribution);
   const leadingSideId = forContribution >= againstContribution ? "for" : "against";

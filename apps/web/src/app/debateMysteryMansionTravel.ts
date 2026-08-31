@@ -84,8 +84,85 @@ export const MYSTERY_MANSION_TRAVEL_AUDIO = {
   },
 } as const;
 
+export interface MysteryMansionTravelAssetLevelV1 {
+  integratedLufs: number;
+  truePeakDbfs: number;
+}
+
+/**
+ * Offline EBU R128 measurements for the bundled travel set. Keeping the
+ * calibration beside the asset registry makes playback deterministic and
+ * prevents a hot replacement clip from inheriting the same gain as a quiet
+ * one. Every registered travel asset is required to have an entry below.
+ */
+export const MYSTERY_MANSION_TRAVEL_ASSET_LEVELS = {
+  "/audio/debate/whodunnit/travel/door-mechanical-close-01.mp3": { integratedLufs: -14.8, truePeakDbfs: -2.8 },
+  "/audio/debate/whodunnit/travel/door-mechanical-open-01.mp3": { integratedLufs: -8.4, truePeakDbfs: -0.7 },
+  "/audio/debate/whodunnit/travel/door-wood-close-01.mp3": { integratedLufs: -25.6, truePeakDbfs: -6 },
+  "/audio/debate/whodunnit/travel/door-wood-close-02.mp3": { integratedLufs: -23.6, truePeakDbfs: -6.9 },
+  "/audio/debate/whodunnit/travel/door-wood-open-01.mp3": { integratedLufs: -19.3, truePeakDbfs: -0.4 },
+  "/audio/debate/whodunnit/travel/door-wood-open-02.mp3": { integratedLufs: -24.3, truePeakDbfs: -8 },
+  "/audio/debate/whodunnit/travel/footstep-metal-01.mp3": { integratedLufs: -26, truePeakDbfs: -6.8 },
+  "/audio/debate/whodunnit/travel/footstep-metal-02.mp3": { integratedLufs: -27, truePeakDbfs: -8 },
+  "/audio/debate/whodunnit/travel/footstep-stone-01.mp3": { integratedLufs: -28.1, truePeakDbfs: -6.2 },
+  "/audio/debate/whodunnit/travel/footstep-stone-02.mp3": { integratedLufs: -28.7, truePeakDbfs: -4.1 },
+  "/audio/debate/whodunnit/travel/footstep-wood-01.mp3": { integratedLufs: -25.4, truePeakDbfs: -8.2 },
+  "/audio/debate/whodunnit/travel/footstep-wood-02.mp3": { integratedLufs: -25.2, truePeakDbfs: -8 },
+} as const satisfies Record<string, MysteryMansionTravelAssetLevelV1>;
+
+export const MYSTERY_MANSION_TRAVEL_TRUE_PEAK_CEILING_DBFS = -9;
+export const MYSTERY_MANSION_TRAVEL_MAX_MEDIA_VOLUME = 0.9;
+export const MYSTERY_MANSION_TRAVEL_DOOR_TARGET_LUFS = -25;
+export const MYSTERY_MANSION_TRAVEL_FOOTSTEP_TARGET_LUFS = -31;
+const MYSTERY_MANSION_TRAVEL_UNCALIBRATED_GAIN = 0.18;
+
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value));
+}
+
+function amplitudeForDb(deltaDb: number): number {
+  return 10 ** (deltaDb / 20);
+}
+
+export function mysteryMansionTravelNormalizedGainV1(args: {
+  kind: MysteryMansionTravelFoleyKindV1;
+  url: string;
+}): number {
+  const level = MYSTERY_MANSION_TRAVEL_ASSET_LEVELS[
+    args.url as keyof typeof MYSTERY_MANSION_TRAVEL_ASSET_LEVELS
+  ];
+  if (!level) return MYSTERY_MANSION_TRAVEL_UNCALIBRATED_GAIN;
+  const targetLufs = args.kind === "footstep"
+    ? MYSTERY_MANSION_TRAVEL_FOOTSTEP_TARGET_LUFS
+    : MYSTERY_MANSION_TRAVEL_DOOR_TARGET_LUFS;
+  const loudnessGain = amplitudeForDb(targetLufs - level.integratedLufs);
+  const peakSafeGain = amplitudeForDb(
+    MYSTERY_MANSION_TRAVEL_TRUE_PEAK_CEILING_DBFS - level.truePeakDbfs,
+  );
+  return clamp(
+    Math.min(loudnessGain, peakSafeGain),
+    0,
+    MYSTERY_MANSION_TRAVEL_MAX_MEDIA_VOLUME,
+  );
+}
+
+export function mysteryMansionTravelPlaybackVolumeV1(
+  masterVolume: number,
+  cueGain: number,
+): number {
+  return (
+    clamp(masterVolume, 0, 1) *
+    clamp(cueGain, 0, MYSTERY_MANSION_TRAVEL_MAX_MEDIA_VOLUME)
+  );
+}
+
+function travelFoleyCueV1(
+  cue: Omit<MysteryMansionTravelFoleyCueV1, "gain">,
+): MysteryMansionTravelFoleyCueV1 {
+  return {
+    ...cue,
+    gain: mysteryMansionTravelNormalizedGainV1(cue),
+  };
 }
 
 function segmentDistance(
@@ -279,6 +356,7 @@ export function mysteryMansionTravelFoleyPlanV1(args: {
   footstepMaterial: MysteryMansionFoleyMaterialV1;
   mechanicalDoors?: boolean;
   compact?: boolean;
+  includeFootsteps?: boolean;
 }): MysteryMansionTravelFoleyCueV1[] {
   const durationMs = args.compact
     ? 520
@@ -286,11 +364,20 @@ export function mysteryMansionTravelFoleyPlanV1(args: {
   const door = MYSTERY_MANSION_TRAVEL_AUDIO.doors[doorFamily(args.mechanicalDoors === true)];
   const footsteps = MYSTERY_MANSION_TRAVEL_AUDIO.footsteps[args.footstepMaterial];
   if (args.compact) {
-    return [
-      { id: "compact-open", kind: "door_open", atMs: 0, acousticRole: "outgoing", url: variant(args.seed, "compact-open", door.open), gain: 0.44 },
-      { id: "compact-step", kind: "footstep", atMs: 125, acousticRole: "corridor", url: variant(args.seed, "compact-step", footsteps), gain: 0.36 },
-      { id: "compact-close", kind: "door_close", atMs: 285, acousticRole: "destination", url: variant(args.seed, "compact-close", door.close), gain: 0.4 },
+    const compactCues: MysteryMansionTravelFoleyCueV1[] = [
+      travelFoleyCueV1({ id: "compact-open", kind: "door_open", atMs: 0, acousticRole: "outgoing", url: variant(args.seed, "compact-open", door.open) }),
+      travelFoleyCueV1({ id: "compact-close", kind: "door_close", atMs: 285, acousticRole: "destination", url: variant(args.seed, "compact-close", door.close) }),
     ];
+    if (args.includeFootsteps !== false) {
+      compactCues.splice(1, 0, travelFoleyCueV1({
+        id: "compact-step",
+        kind: "footstep",
+        atMs: 125,
+        acousticRole: "corridor",
+        url: variant(args.seed, "compact-step", footsteps),
+      }));
+    }
+    return compactCues;
   }
 
   const cues: MysteryMansionTravelFoleyCueV1[] = [];
@@ -309,39 +396,38 @@ export function mysteryMansionTravelFoleyPlanV1(args: {
     const atMs = clamp((elapsedWeight / totalWeight) * durationMs, 80, durationMs - 220);
     const role = routeEntityAcousticRole(args.route, waypoint.entityId);
     const enteredEntityId = args.route.waypoints[index + 1]?.entityId ?? args.route.toRoomId;
-    cues.push({
+    cues.push(travelFoleyCueV1({
       id: `door-open-${doorOrdinal}`,
       kind: "door_open",
       atMs: Math.round(Math.max(0, atMs - 95)),
       acousticRole: role,
       url: variant(args.seed, `door-open-${doorOrdinal}`, door.open),
-      gain: 0.42,
-    });
-    cues.push({
+    }));
+    cues.push(travelFoleyCueV1({
       id: `door-close-${doorOrdinal}`,
       kind: "door_close",
       atMs: Math.round(Math.min(durationMs - 30, atMs + 145)),
       acousticRole: routeEntityAcousticRole(args.route, enteredEntityId),
       url: variant(args.seed, `door-close-${doorOrdinal}`, door.close),
-      gain: 0.38,
-    });
+    }));
     doorOrdinal += 1;
   }
   if (doorOrdinal === 0) {
-    cues.push({ id: "threshold-open", kind: "door_open", atMs: 0, acousticRole: "outgoing", url: variant(args.seed, "threshold-open", door.open), gain: 0.42 });
-    cues.push({ id: "threshold-close", kind: "door_close", atMs: durationMs - 180, acousticRole: "destination", url: variant(args.seed, "threshold-close", door.close), gain: 0.38 });
+    cues.push(travelFoleyCueV1({ id: "threshold-open", kind: "door_open", atMs: 0, acousticRole: "outgoing", url: variant(args.seed, "threshold-open", door.open) }));
+    cues.push(travelFoleyCueV1({ id: "threshold-close", kind: "door_close", atMs: durationMs - 180, acousticRole: "destination", url: variant(args.seed, "threshold-close", door.close) }));
   }
-  const stepCues = travelCues.filter((cue) => cue.kind === "step");
+  const stepCues = args.includeFootsteps === false
+    ? []
+    : travelCues.filter((cue) => cue.kind === "step");
   for (let index = 0; index < stepCues.length; index += 1) {
     const step = stepCues[index]!;
-    cues.push({
+    cues.push(travelFoleyCueV1({
       id: `step-${index}`,
       kind: "footstep",
       atMs: step.atMs,
       acousticRole: step.acousticRole,
       url: variant(args.seed, `step-${index}`, footsteps),
-      gain: 0.34,
-    });
+    }));
   }
   return cues.sort((left, right) => left.atMs - right.atMs || left.id.localeCompare(right.id));
 }
@@ -361,6 +447,7 @@ export function playMysteryMansionTravelFoleyV1(args: {
   destination: MysteryMansionRoomAcousticsV1;
   mechanicalDoors?: boolean;
   compact?: boolean;
+  includeFootsteps?: boolean;
   durationMs?: number;
 }): MysteryMansionTravelFoleyHandleV1 {
   const durationMs = args.compact
@@ -376,6 +463,7 @@ export function playMysteryMansionTravelFoleyV1(args: {
     footstepMaterial: args.corridor.foleyMaterial,
     mechanicalDoors: args.mechanicalDoors,
     compact: args.compact,
+    includeFootsteps: args.includeFootsteps,
   });
   const timers = new Set<number>();
   const active = new Set<{
@@ -392,7 +480,7 @@ export function playMysteryMansionTravelFoleyV1(args: {
     if (cancelled) return;
     const audio = new Audio(cue.url);
     audio.preload = "auto";
-    audio.volume = clamp(args.volume * cue.gain, 0, 1);
+    audio.volume = mysteryMansionTravelPlaybackVolumeV1(args.volume, cue.gain);
     const cleanup = routeAudioElementToPrismOutput(audio, {
       roomAcoustics: acoustics[cue.acousticRole].foley,
     });

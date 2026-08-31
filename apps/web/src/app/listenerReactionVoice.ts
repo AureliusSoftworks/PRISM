@@ -36,7 +36,7 @@ import type { RoomAcousticsSend } from "./roomAcoustics.ts";
 export type ListenerReactionVoiceMode = "english" | "bottish" | "babble";
 
 /** Ordinary Signal backchannels sit beneath the line that owns the mic. */
-export const SIGNAL_LISTENER_REACTION_VOICE_GAIN = 0.5;
+export const SIGNAL_LISTENER_REACTION_VOICE_GAIN = 0.32;
 
 /** Interrupting a turn is crosstalk, not a quiet listener acknowledgement. */
 export function signalListenerReactionVoiceGain(

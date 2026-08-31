@@ -7,6 +7,8 @@ import {
   DEBATE_CASE_CARDS_PER_SIDE,
   DEBATE_FORMAT_SCHEMA_VERSION,
   DEBATE_FLYTING_EXCHANGE_COUNT,
+  DEBATE_FLYTING_AUDIENCE_COUNT,
+  DEBATE_FLYTING_JARL_GUARD_COUNT,
   DEBATE_FLYTING_LINE_MAX_LENGTH,
   DEBATE_FLYTING_SCHEMA_VERSION,
   DEBATE_JURY_DISCUSSION_TURNS,
@@ -197,6 +199,9 @@ import {
   type DebateFlytingChallengeV1,
   type DebateFlytingExchangeV1,
   type DebateFlytingFormatStateV1,
+  type DebateFlytingHallLeaningV1,
+  type DebateFlytingHallMemberV1,
+  type DebateFlytingFinalTallyV1,
   type DebateFlytingForgeRequest,
   type DebateFlytingForgeResponseV1,
   type DebateFlytingManeuverV1,
@@ -4875,7 +4880,9 @@ export function createDebateSession(
         runtime,
       );
   const now = new Date().toISOString();
-  const juryEnabled = format === "flyting" || request.jury?.enabled === true;
+  // Flyting owns a generic fifteen-member Hall plus three Jarl guards in its
+  // format state. It must not silently cast Library jurors into that crowd.
+  const juryEnabled = format === "flyting" ? false : request.jury?.enabled === true;
   const ignoredParticipantSideBotId =
     playerSideId === "for"
       ? requestedForAdvocateBotId
@@ -15657,7 +15664,7 @@ function flytingStepKey(state: DebateFlytingFormatStateV1): string {
   if (state.phase === "complete") return "completed";
   if (state.phase === "intro") return "flyting_intro";
   if (state.phase === "final_acclamation") {
-    return `flyting_hall_vote_${state.hallVotes.length + 1}`;
+    return "flyting_final_acclamation";
   }
   if (state.phase === "verdict") return "flyting_host_verdict";
   return `flyting_${state.phase}_${state.activeExchangeIndex + 1}`;
@@ -15713,6 +15720,115 @@ function replaceFlytingExchange(
       candidate.index === exchange.index ? exchange : candidate,
     ),
   };
+}
+
+function flytingHallStableRank(seed: string): number {
+  return createHash("sha256").update(seed).digest().readUInt32BE(0);
+}
+
+function flytingHallLeaningToward(
+  current: DebateFlytingHallLeaningV1,
+  sideId: DebateSideId,
+): DebateFlytingHallLeaningV1 {
+  if (current === sideId) return current;
+  return current === "neutral" ? sideId : "neutral";
+}
+
+/**
+ * Move a stable subset of the fifteen Hall members after one resolved
+ * exchange. Opposing spectators cross neutral before switching allegiance so
+ * the crowd reads as persuaded rather than randomly recolored.
+ */
+export function applyDebateFlytingHallSwayV1(
+  state: DebateFlytingFormatStateV1,
+  exchange: DebateFlytingExchangeV1,
+): DebateFlytingFormatStateV1 {
+  if (
+    exchange.resolution === null ||
+    state.hallLeaningHistory.some((snapshot) =>
+      snapshot.exchangeIndex === exchange.index
+    )
+  ) return state;
+
+  const winningSideId = exchange.resolution === "unanswered"
+    ? oppositeDebateSide(exchange.boastingSideId)
+    : exchange.resolution === "answered" || exchange.resolution === "turned"
+      ? exchange.boastingSideId
+      : null;
+  const moveCount = exchange.resolution === "turned" || exchange.resolution === "unanswered"
+    ? 6
+    : exchange.resolution === "answered"
+      ? 4
+      : 3;
+  const eligible = state.hallMembers
+    .filter((member) =>
+      winningSideId ? member.leaning !== winningSideId : member.leaning !== "neutral"
+    )
+    .sort((left, right) =>
+      flytingHallStableRank(`${exchange.id}:${exchange.index}:${left.id}`) -
+      flytingHallStableRank(`${exchange.id}:${exchange.index}:${right.id}`)
+    );
+  const movedIds = new Set(eligible.slice(0, moveCount).map((member) => member.id));
+  const hallMembers = state.hallMembers.map((member) => {
+    if (!movedIds.has(member.id)) return member;
+    return {
+      ...member,
+      leaning: winningSideId
+        ? flytingHallLeaningToward(member.leaning, winningSideId)
+        : "neutral",
+    } satisfies DebateFlytingHallMemberV1;
+  });
+  return {
+    ...state,
+    hallMembers,
+    hallLeaningHistory: [
+      ...state.hallLeaningHistory,
+      {
+        exchangeIndex: exchange.index,
+        members: hallMembers.map((member) => ({ ...member })),
+      },
+    ],
+  };
+}
+
+function flytingHallCounts(
+  state: DebateFlytingFormatStateV1,
+): Pick<DebateFlytingFinalTallyV1, "forCount" | "neutralCount" | "againstCount"> {
+  return {
+    forCount: state.hallMembers.filter((member) => member.leaning === "for").length,
+    neutralCount: state.hallMembers.filter((member) => member.leaning === "neutral").length,
+    againstCount: state.hallMembers.filter((member) => member.leaning === "against").length,
+  };
+}
+
+function flytingNeutralPlurality(state: DebateFlytingFormatStateV1): boolean {
+  const counts = flytingHallCounts(state);
+  return counts.neutralCount > counts.forCount &&
+    counts.neutralCount > counts.againstCount;
+}
+
+function flytingFinalTally(
+  state: DebateFlytingFormatStateV1,
+  jarlSideId: DebateSideId | null,
+): DebateFlytingFinalTallyV1 {
+  const counts = flytingHallCounts(state);
+  return {
+    ...counts,
+    jarlSideId,
+    finalForCount: counts.forCount +
+      (jarlSideId === "for" ? DEBATE_FLYTING_JARL_GUARD_COUNT : 0),
+    finalAgainstCount: counts.againstCount +
+      (jarlSideId === "against" ? DEBATE_FLYTING_JARL_GUARD_COUNT : 0),
+  };
+}
+
+function flytingWeightedWinner(
+  tally: DebateFlytingFinalTallyV1,
+): DebateSideId {
+  if (tally.finalForCount === tally.finalAgainstCount && tally.jarlSideId) {
+    return tally.jarlSideId;
+  }
+  return tally.finalForCount >= tally.finalAgainstCount ? "for" : "against";
 }
 
 function flytingBotForSide(
@@ -16203,60 +16319,6 @@ function applyFlytingYield(
   return { session: withFlytingState(session, nextState), events: [event] };
 }
 
-async function generateFlytingHallVote(
-  session: DebateSessionV1,
-  state: DebateFlytingFormatStateV1,
-  juror: DebateJurorSnapshotV1,
-  runtime: DebateAiRuntime,
-): Promise<{
-  sideId: DebateSideId;
-  clearAcclaim: string;
-  publicAcclaim: string;
-  provider: ProviderName;
-  model: string;
-  autoRecovery?: AutoRecoveryTraceV1;
-}> {
-  const generation = await generateJson(
-    lanesForSession(runtime, session),
-    [
-      {
-        role: "system",
-        content: [
-          juror.systemPrompt,
-          "You are one independent Hall member casting a final Flyting vote from the complete public record.",
-          "Choose the flyter who answered challenges more memorably and left fewer exposed claims. Persona instinct may color your voice, but use no private knowledge or numeric score.",
-          "Return JSON only: {sideId, acclaim}. sideId is exactly for or against. acclaim is one brief in-character sentence naming why that flyter prevailed.",
-          flytingPublicRecord(state),
-        ].join("\n"),
-      },
-      { role: "user", content: "Cast your vote and acclaim now." },
-    ],
-    {
-      maxTokens: 220,
-      temperature: 0.65,
-      validate: (value) => Boolean(
-        isDebateSideId(value.sideId) && compactText(value.acclaim, 300),
-      ),
-    },
-  );
-  const clearAcclaim = compactText(generation.value.acclaim, 300);
-  const publicAcclaim = projectDebateBotPublicUtteranceV1({
-    session,
-    botId: juror.id,
-    botName: juror.name,
-    clearContent: clearAcclaim,
-    stableTurnKey: `${session.id}:flyting-vote:${juror.id}`,
-  });
-  return {
-    sideId: generation.value.sideId as DebateSideId,
-    clearAcclaim,
-    publicAcclaim,
-    provider: generation.provider,
-    model: generation.model,
-    ...(generation.autoRecovery ? { autoRecovery: generation.autoRecovery } : {}),
-  };
-}
-
 async function generateFlytingHostVerdict(
   session: DebateSessionV1,
   state: DebateFlytingFormatStateV1,
@@ -16276,14 +16338,14 @@ async function generateFlytingHostVerdict(
         role: "system",
         content: [
           session.moderator.systemPrompt,
-          "You are the Host casting the fifth and deciding Flyting vote after four public Hall votes.",
-          "Crown exactly one winner. Use the complete public record and the Hall votes; break a tie yourself. Never output a tie or numeric score.",
-          "Return JSON only: {sideId, ruling}. sideId is exactly for or against. ruling is one concise ceremonial sentence naming the decisive feat of answering wit.",
+          "You are the Jarl casting the final Flyting vote. Your decision sends three visible guards to one flyter's side, so your vote has weight three.",
+          "Use the complete public record and the current Hall leanings. Choose exactly one side for your guards. Never output a tie or numeric score.",
+          "Return JSON only: {sideId, ruling}. sideId is exactly for or against. ruling is one concise ceremonial sentence explaining where you send your guards and why.",
           flytingPublicRecord(state),
-          `Hall votes: ${state.hallVotes.map((vote) => `${vote.voterBotId}=${vote.sideId}: ${vote.acclaim}`).join("\n")}`,
+          `Current Hall leanings: ${JSON.stringify(flytingHallCounts(state))}`,
         ].join("\n"),
       },
-      { role: "user", content: "Cast the Host's fifth vote and crown the winner." },
+      { role: "user", content: "Send the Jarl's three guards and give the word." },
     ],
     {
       maxTokens: 240,
@@ -16383,10 +16445,12 @@ async function advanceDebateFlyting(
   }
   if (state.phase === "acclamation") {
     const exchange = state.exchanges[state.activeExchangeIndex]!;
+    const swayedState = applyDebateFlytingHallSwayV1(state, exchange);
+    const hallCounts = flytingHallCounts(swayedState);
     const event = makeEvent(session, {
       kind: "reaction",
       speakerKind: "system",
-      content: exchange.acclamation ?? "The Hall answers with divided noise.",
+      content: `${exchange.acclamation ?? "The Hall answers with divided noise."} The gallery now leans ${hallCounts.forCount} for, ${hallCounts.neutralCount} unclaimed, and ${hallCounts.againstCount} against.`,
       audienceReaction:
         exchange.resolution === "turned"
           ? { kind: "impressed", intensity: 3, source: "director" }
@@ -16401,7 +16465,7 @@ async function advanceDebateFlyting(
       const boastingSideId = state.exchanges[activeExchangeIndex]!.boastingSideId;
       const nextState = flytingNextFloorState(
         session,
-        { ...state, activeExchangeIndex },
+        { ...swayedState, activeExchangeIndex },
         "boast",
         boastingSideId,
       );
@@ -16409,7 +16473,7 @@ async function advanceDebateFlyting(
     }
     return {
       session: withFlytingState(session, {
-        ...state,
+        ...swayedState,
         phase: "final_acclamation",
         floorSideId: null,
         expectedAction: "advance",
@@ -16418,91 +16482,47 @@ async function advanceDebateFlyting(
     };
   }
   if (state.phase === "final_acclamation") {
-    const juror = session.jury.jurors[state.hallVotes.length];
-    if (!juror) {
-      const nextState: DebateFlytingFormatStateV1 = {
-        ...state,
-        phase: "verdict",
-        expectedAction: session.playerRole === "judge" ? "host_verdict" : "advance",
-      };
-      return { session: withFlytingState(session, nextState), events: [] };
-    }
-    const skippedVoteSideId: DebateSideId =
-      state.hallVotes.length % 2 === 0 ? "for" : "against";
-    const skippedVoteAcclaim = `By the carved record, I give the word to ${flytingBotForSide(session, skippedVoteSideId).name}.`;
-    const lane = selectedLane(runtime);
-    const vote = skip
-      ? {
-          sideId: skippedVoteSideId,
-          clearAcclaim: skippedVoteAcclaim,
-          publicAcclaim: skippedVoteAcclaim,
-          provider: lane.providerName,
-          model: lane.model,
-        }
-      : await generateFlytingHallVote(session, state, juror, runtime);
+    const counts = flytingHallCounts(state);
+    const neutralPlurality = flytingNeutralPlurality(state);
     const event = makeEvent(session, {
-      kind: "ballot",
-      speakerKind: "juror",
-      speakerBotId: juror.id,
-      sideId: vote.sideId,
-      content: vote.publicAcclaim,
-      ...(vote.publicAcclaim !== vote.clearAcclaim
-        ? { powerIntendedContent: vote.clearAcclaim }
-        : {}),
-      provider: vote.provider,
-      model: vote.model,
-      ...(vote.autoRecovery ? { autoRecovery: vote.autoRecovery } : {}),
-    });
-    const hallVote = {
-      voterBotId: juror.id,
-      sideId: vote.sideId,
-      acclaim: vote.publicAcclaim,
-      createdEventId: event.id,
-    };
-    const ballot: DebateJuryBallotV1 = {
-      version: DEBATE_SCHEMA_VERSION,
-      jurorBotId: juror.id,
-      stage: "final",
-      sideId: vote.sideId,
-      confidence: 0.75,
-      personaInstinct: "Hall acclamation",
-      reason: vote.publicAcclaim,
-      ...(vote.publicAcclaim !== vote.clearAcclaim
-        ? { powerIntendedReason: vote.clearAcclaim }
-        : {}),
-      provider: vote.provider,
-      model: vote.model,
-      ...(vote.autoRecovery ? { autoRecovery: vote.autoRecovery } : {}),
-      createdAt: new Date().toISOString(),
-    };
-    const hallVotes = [...state.hallVotes, hallVote];
-    const nextState: DebateFlytingFormatStateV1 = hallVotes.length >= DEBATE_JURY_SIZE
-      ? {
-          ...state,
-          hallVotes,
-          phase: "verdict",
-          expectedAction: session.playerRole === "judge" ? "host_verdict" : "advance",
-        }
-      : { ...state, hallVotes };
-    const nextSession = withFlytingState(
-      {
-        ...session,
-        jury: {
-          ...session.jury,
-          phase: hallVotes.length >= DEBATE_JURY_SIZE ? "final_ballots" : "final_ballots",
-          finalBallots: [...session.jury.finalBallots, ballot],
-        },
+      kind: "reaction",
+      speakerKind: "system",
+      content: neutralPlurality
+        ? `The Hall will not be won: ${counts.neutralCount} of ${DEBATE_FLYTING_AUDIENCE_COUNT} remain unclaimed. The Jarl's guards hold the center.`
+        : `The Hall divides: ${counts.forCount} for ${session.forAdvocate.name}, ${counts.againstCount} for ${session.againstAdvocate.name}, and ${counts.neutralCount} unclaimed. The Jarl's three guards await the word.`,
+      audienceReaction: {
+        kind: neutralPlurality ? "gasp" : "impressed",
+        intensity: neutralPlurality ? 2 : 3,
+        source: "director",
       },
-      nextState,
-    );
-    return { session: nextSession, events: [event] };
+    });
+    const nextState: DebateFlytingFormatStateV1 = {
+      ...state,
+      phase: "verdict",
+      floorSideId: null,
+      expectedAction:
+        !neutralPlurality && session.playerRole === "judge"
+          ? "host_verdict"
+          : "advance",
+      finalTally: neutralPlurality ? flytingFinalTally(state, null) : null,
+    };
+    return { session: withFlytingState(session, nextState), events: [event] };
   }
   if (state.phase === "verdict") {
+    if (flytingNeutralPlurality(state)) {
+      const ruling = "Neither tongue moved this Hall. You have mistaken noise for wit; both of you sit down, and let the fire remember nothing.";
+      return applyFlytingHostVerdict(
+        session,
+        state,
+        null,
+        ruling,
+        "bot",
+      );
+    }
     if (skip) {
-      const forVotes = state.hallVotes.filter((vote) => vote.sideId === "for").length;
-      const againstVotes = state.hallVotes.length - forVotes;
-      const sideId: DebateSideId = forVotes >= againstVotes ? "for" : "against";
-      const ruling = `The Hall is heard. ${flytingBotForSide(session, sideId).name} takes the word for the stronger answers carved in this record.`;
+      const counts = flytingHallCounts(state);
+      const sideId: DebateSideId = counts.forCount >= counts.againstCount ? "for" : "against";
+      const ruling = `My guards go to ${flytingBotForSide(session, sideId).name}. Let their weight join the Hall's judgment.`;
       const lane = selectedLane(runtime);
       return applyFlytingHostVerdict(
         session,
@@ -16535,18 +16555,25 @@ async function advanceDebateFlyting(
 function applyFlytingHostVerdict(
   session: DebateSessionV1,
   state: DebateFlytingFormatStateV1,
-  winnerSideId: DebateSideId,
+  jarlSideId: DebateSideId | null,
   publicRuling: string,
   authoredMode: DebateFlytingAuthoredModeV1,
   generated?: Awaited<ReturnType<typeof generateFlytingHostVerdict>>,
 ): { session: DebateSessionV1; events: DebateEventV1[] } {
+  const tally = flytingFinalTally(state, jarlSideId);
+  const outcome = jarlSideId === null ? "double_loss" : flytingWeightedWinner(tally);
+  const winnerSideId: DebateSideId | null = outcome === "double_loss" ? null : outcome;
+  const ruling =
+    jarlSideId && winnerSideId && jarlSideId !== winnerSideId
+      ? `My guards stand with ${flytingBotForSide(session, jarlSideId).name}, but even their weight cannot overturn the Hall. ${flytingBotForSide(session, winnerSideId).name} carries the greater acclaim.`
+      : publicRuling;
   const event = makeEvent(session, {
     kind: "verdict",
     speakerKind: authoredMode === "bot" ? "moderator" : "player",
     speakerBotId: authoredMode === "bot" ? session.moderator.id : null,
     sideId: winnerSideId,
-    content: publicRuling,
-    ...(generated && generated.publicRuling !== generated.clearRuling
+    content: ruling,
+    ...(generated && ruling === generated.publicRuling && generated.publicRuling !== generated.clearRuling
       ? { powerIntendedContent: generated.clearRuling }
       : {}),
     ...(generated ? { provider: generated.provider, model: generated.model } : {}),
@@ -16562,17 +16589,23 @@ function applyFlytingHostVerdict(
     floorSideId: null,
     hostVerdict: {
       sideId: winnerSideId,
-      ruling: publicRuling,
+      outcome,
+      ruling,
       authoredMode,
       createdEventId: event.id,
     },
+    jarlGuards: state.jarlGuards.map((guard) => ({
+      ...guard,
+      sideId: jarlSideId,
+    })),
+    finalTally: tally,
   };
-  const moderatorBallot: DebateBallotV1 | null = authoredMode === "bot"
+  const moderatorBallot: DebateBallotV1 | null = authoredMode === "bot" && jarlSideId
     ? {
         version: DEBATE_SCHEMA_VERSION,
         voterBotId: session.moderator.id,
-        sideId: winnerSideId,
-        reason: publicRuling,
+        sideId: jarlSideId,
+        reason: ruling,
         privateReason: false,
         ...(generated ? { provider: generated.provider, model: generated.model } : {}),
         ...(generated?.autoRecovery ? { autoRecovery: generated.autoRecovery } : {}),
@@ -16582,19 +16615,15 @@ function applyFlytingHostVerdict(
   const nextSession = withFlytingState(
     {
       ...session,
-      playerVerdict: authoredMode === "bot" ? null : winnerSideId,
+      playerVerdict: authoredMode === "bot" ? null : jarlSideId,
       ballots: moderatorBallot ? [...session.ballots, moderatorBallot] : session.ballots,
       jury: {
         ...session.jury,
         phase: "complete",
         moderatorBallot,
         majoritySideId: winnerSideId,
-        forVotes:
-          state.hallVotes.filter((vote) => vote.sideId === "for").length +
-          (moderatorBallot?.sideId === "for" ? 1 : 0),
-        againstVotes:
-          state.hallVotes.filter((vote) => vote.sideId === "against").length +
-          (moderatorBallot?.sideId === "against" ? 1 : 0),
+        forVotes: tally.finalForCount,
+        againstVotes: tally.finalAgainstCount,
         completedAt: new Date().toISOString(),
       },
     },
@@ -16648,9 +16677,9 @@ export async function generateDebateFlytingWield(
     instruction = `Draft a ${request.maneuver} rejoinder to this exact challenge: ${exchange.challenge.content}`;
   } else {
     if (!isDebateSideId(request.winnerSideId)) {
-      throw new HttpError(409, "Choose the winning flyter before Wielding a ruling.");
+      throw new HttpError(409, "Choose where to send the Jarl's guards before Wielding a ruling.");
     }
-    instruction = `Draft a concise Host ruling crowning ${flytingBotForSide(session, request.winnerSideId).name} from the complete public Hall record.`;
+    instruction = `Draft a concise Jarl ruling sending three guards to ${flytingBotForSide(session, request.winnerSideId).name} from the complete public Hall record.`;
   }
   const generated = await generateFlytingText(session, speaker, instruction, runtime);
   return {

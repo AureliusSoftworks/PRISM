@@ -35,6 +35,7 @@ import {
   debateMysteryPremiumAvailableV2,
   debateMysteryRoomNarrationNamesPersonaV2,
   debateMysteryRoomNarrationTextV2,
+  debateMysteryRoomPresentationRegionsV1,
   debateMysteryAccusationMatchesV2,
   debateMysterySpectatorEvidenceReferencesV2,
   debateMysteryTalkTopicMirrorsRecordV2,
@@ -73,6 +74,7 @@ import {
   type DebateMysteryCompilationStageV2,
   type DebateMysteryCompilationStatusV2,
   type DebateMysteryCompilationSubstepV2,
+  type DebateMysteryCaseKitItemV2,
   type DebateMysteryHouseStyleV2,
   type DebateMysteryIdentityMirrorTargetSnapshotV1,
   type DebateMysteryDialogueGraphV2,
@@ -528,9 +530,15 @@ interface AuthoredSuspectV2 {
   seatId: string;
   relationship: string;
   alibi: string;
+  roomOpeningProsecutionLine: string;
+  roomOpeningProsecutionStageAction: string | null;
+  roomOpeningProsecutionPerformance: Partial<DebateMysteryPerformanceDirectionV2>;
   roomIntroduction: string;
   roomIntroductionStageAction: string | null;
   roomIntroductionPerformance: Partial<DebateMysteryPerformanceDirectionV2>;
+  roomOpeningHandoffLine: string;
+  roomOpeningHandoffStageAction: string | null;
+  roomOpeningHandoffPerformance: Partial<DebateMysteryPerformanceDirectionV2>;
   chapterOpening: string;
   chapterCompletion: string;
   defaultPresentProsecutionLine: string;
@@ -696,6 +704,28 @@ interface MysteryV2VoiceCard {
   cues: string[];
 }
 
+interface MysteryObservationWritingBriefV2 {
+  name: string;
+  frozenVoiceCues: string[];
+  sourceHash: string;
+}
+
+export interface MysteryExaminationAuthoringTargetV2 {
+  id: string;
+  outcome: "consequential" | "ambient";
+  room: {
+    id: string;
+    name: string;
+    mansionAnchors: Array<{ name: string; relation: string }>;
+  };
+  hotspot: {
+    id: string;
+    label: string;
+    physicalAnchor: string;
+  };
+  requiredPublicFacts: string[];
+}
+
 interface MysteryV2AuditIssue {
   fieldPath: string;
   code: string;
@@ -784,6 +814,11 @@ interface PrivateMysteryCaseV2 {
     imageId?: string | null;
     sealedAsset?: DebateMysterySealedAssetRefV1 | null;
   }>;
+  /** Frozen mansion access items. Older compiled cases omit this and still
+   * preserve their examination prose in the public Observation Log. */
+  caseKitItems?: Array<Omit<DebateMysteryCaseKitItemV2, "acquiredAt">>;
+  /** Exact bridge from an Examine node to the frozen item it recovers. */
+  caseKitItemIdByExamineNodeId?: Record<string, string>;
   /** Sanitized identity/capability snapshots selected before prose authoring. */
   evidencePropBindingsById?: Record<string, EvidencePropBindingV1>;
   /** Private presentation routing only; never serialized into the public case state. */
@@ -911,12 +946,32 @@ function sha256(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function deterministicMysteryIncidentSceneRoomV2<T extends {
+  id: string;
+  templateId: string;
+  assignedSuspectSeatId?: string | null;
+}>(rooms: readonly T[], nonce: string): T | null {
+  const nonFoyer = rooms.filter((room) =>
+    room.templateId.trim().toLocaleLowerCase() !== "foyer" &&
+    !/(?:^|[-_:])foyer(?:$|[-_:])/iu.test(room.id),
+  );
+  const candidates = (nonFoyer.length > 0 ? nonFoyer : rooms)
+    .slice()
+    .sort((left, right) => left.id.localeCompare(right.id));
+  if (candidates.length === 0) return null;
+  const ordinal = Number.parseInt(
+    sha256(`${nonce}:incident-scene:${candidates.map((room) => room.id).join("|")}`).slice(0, 8),
+    16,
+  );
+  return candidates[ordinal % candidates.length] ?? candidates[0]!;
+}
+
 export function mysteryCasekeeperVoiceBotIdV2(
   config: DebateMysteryResolvedConfigV2,
   bots: readonly Pick<MysteryV2BotRow, "id">[],
 ): string {
   const available = new Set(bots.map((bot) => bot.id));
-  // The Casekeeper's Bottish should feel like the player's embodied Persona.
+  // Internal Babble belongs to the player's embodied Persona.
   // In participant cases the Prosecutor seat is that frozen player identity,
   // even when a bot Judge presides. Keep the legacy carrier fallback for
   // spectator cases and archived cases whose player Persona row is unavailable.
@@ -932,16 +987,17 @@ export function mysteryCasekeeperVoiceBotIdV2(
     ...config.suspectBotIds,
     ...config.jurorBotIds,
   ].find((botId) => available.has(botId));
-  if (!preferred) throw new Error("The frozen Casekeeper has no bot voice carrier.");
+  if (!preferred) throw new Error("The frozen player thought has no embodied bot voice.");
   return preferred;
 }
 
 function publicMysteryLineDeliveryV2(
   line: DebateMysterySpokenLineV2,
   nodeKind?: DebateMysteryDialogueNodeV2["kind"],
-): "spoken" | "text_only" | "anonymous_babble" {
+): "spoken" | "text_only" | "persona_babble" | "anonymous_babble" {
   if (nodeKind === "examination_result" || line.mode === "text_only") return "text_only";
-  return line.mode === "anonymous_babble" ? "anonymous_babble" : "spoken";
+  if (line.mode === "persona_babble" || line.mode === "anonymous_babble") return line.mode;
+  return "spoken";
 }
 
 function publicMysteryLineSpeakerBotIdV2(
@@ -950,20 +1006,24 @@ function publicMysteryLineSpeakerBotIdV2(
   return line.mode === "anonymous_babble" ? null : line.speakerBotId;
 }
 
+function mysteryLineUsesBabbleV2(line: DebateMysterySpokenLineV2): boolean {
+  return line.mode === "persona_babble" || line.mode === "anonymous_babble";
+}
+
 function mysteryLineVoiceTreatmentV2(
   line: DebateMysterySpokenLineV2,
 ): "english" | "babble" {
-  return line.mode === "anonymous_babble" ? "babble" : "english";
+  return mysteryLineUsesBabbleV2(line) ? "babble" : "english";
 }
 
 function mysteryLineSynthesisTextV2(
   line: DebateMysterySpokenLineV2,
   privateCase: PrivateMysteryCaseV2,
 ): string {
-  if (line.mode !== "anonymous_babble") return line.spokenText;
+  if (!mysteryLineUsesBabbleV2(line)) return line.spokenText;
   return buildBabbleSpeechText({
     text: line.spokenText,
-    seed: `${privateCase.config.nonce}:${line.id}:${line.speakerBotId ?? "casekeeper"}`,
+    seed: `${privateCase.config.nonce}:${line.id}:${line.speakerBotId ?? "player-thought"}`,
   });
 }
 
@@ -2471,7 +2531,9 @@ function authoredFoundationCoreFromJson(args: {
   }
   const victimName = compact(args.value.victimName, 100);
   const victimDescription = compact(args.value.victimDescription, 700);
-  const publicOpening = compact(args.value.publicOpening, 1_400);
+  const publicOpening = normalizeProsecutorOpeningPerspectiveV2(
+    compact(args.value.publicOpening, 1_400),
+  );
   const motive = compact(args.value.motive, 800);
   const method = compact(args.value.method, 800);
   const prosecutorInternalReasoning =
@@ -2509,16 +2571,33 @@ function authoredFoundationCoreFromJson(args: {
   };
 }
 
+function normalizeProsecutorOpeningPerspectiveV2(text: string): string {
+  return text.replace(
+    /\bYou are the lead investigator\b/giu,
+    "I am the lead investigator",
+  );
+}
+
 function deterministicAuthoredMysteryFoundationCoreV2(args: {
   scaffold: ReturnType<typeof compileDeterministicDebateMystery>;
   eyewitnessSeatId: string | null;
   incidentPlan: MysteryBoundIncidentPlanV1;
 }): AuthoredMysteryFoundationCoreV2 {
+  const incidentRoom = args.scaffold.rooms.find(
+    (room) => room.id === args.scaffold.crimeSceneRoomId,
+  );
+  const incidentRoomName = incidentRoom
+    ? DEBATE_MYSTERY_ROOM_TEMPLATES.find(
+        (template) => template.id === incidentRoom.templateId,
+      )?.name ?? incidentRoom.templateId.replaceAll("-", " ")
+    : "incident scene";
   return {
     title: deterministicMysteryCaseTitleV1(args.incidentPlan),
     victimName: args.scaffold.victim.name,
     victimDescription: args.scaffold.victim.description,
-    publicOpening: args.scaffold.publicOpening,
+    publicOpening:
+      `${args.scaffold.publicOpening.replace(/\s*(?:You are|I am) the lead investigator\.?$/iu, "")} ` +
+      `I am the lead investigator. The first report points to the ${incidentRoomName}. I need to begin there.`,
     motive: args.scaffold.motive,
     method: args.scaffold.method,
     prosecutorInternalReasoning:
@@ -2556,15 +2635,42 @@ function applyMysteryIncidentPlanToFoundationV2<
     authoredTitle: args.foundation.title,
     plan: args.incidentPlan,
   });
+  const incidentRoom = args.scaffold.rooms.find(
+    (room) => room.id === args.scaffold.crimeSceneRoomId,
+  );
+  const incidentRoomName = incidentRoom
+    ? DEBATE_MYSTERY_ROOM_TEMPLATES.find(
+        (template) => template.id === incidentRoom.templateId,
+      )?.name ?? incidentRoom.templateId.replaceAll("-", " ")
+    : "incident scene";
+  const authoredPublicOpening = normalizeProsecutorOpeningPerspectiveV2(
+    args.foundation.publicOpening.trim(),
+  );
+  const sceneGroundedPublicOpening = authoredPublicOpening
+    .toLocaleLowerCase()
+    .includes(incidentRoomName.toLocaleLowerCase())
+    ? authoredPublicOpening
+    : `${authoredPublicOpening} The first report points to the ${incidentRoomName}. I need to begin there.`;
+  const safePersonaOpening = sceneGroundedPublicOpening &&
+    !/\b(?:murder|murdered|murderer|killing|killed|corpse|body|dead|death|fatal|weapon)\b/iu.test(sceneGroundedPublicOpening)
+    ? sceneGroundedPublicOpening
+    : null;
   const primaryFoundation = primary.kind === "homicide"
-    ? { ...args.foundation, title: caseTitle }
+    ? {
+        ...args.foundation,
+        title: caseTitle,
+        publicOpening: sceneGroundedPublicOpening,
+      }
     : {
         ...args.foundation,
         title: caseTitle,
         victimDescription:
           `${affectedName} is the person most directly affected by ${primary.subject}, with private relationships to every member of the frozen ensemble.`,
         publicOpening:
-          `A suspected ${incidentNoun} involving ${primary.subject} has drawn every selected suspect into the same mansion. The decisive facts are hidden in its rooms, records, and testimony. You are the lead investigator.`,
+          safePersonaOpening ?? (
+            `A suspected ${incidentNoun} involving ${primary.subject} has drawn every selected suspect into the same mansion. ` +
+            `The first report points to the ${incidentRoomName}. I need to begin there.`
+          ),
         motive:
           `Control of ${primary.subject}, and the consequences of its discovery, supplied the decisive motive.`,
         method: primary.method,
@@ -2572,16 +2678,14 @@ function applyMysteryIncidentPlanToFoundationV2<
           "Follow the admitted physical record and testimony, test each contradiction against the frozen incident window, and leave the player's accusation and courtroom strategy to them.",
         evidence: args.foundation.evidence.map((entry, index) => ({
           ...entry,
-          title: index === 0
-            ? `${primary.title} access record`
+          // Keep the frozen physical evidence identity and observation intact.
+          // Incident normalization adds relevance; it must not turn an object
+          // such as a thread, key, or receipt into a generic timeline record.
+          description: `${entry.description} ${index === 0
+            ? `Where it was found helps show who could get to ${primary.subject}.`
             : index === 1
-              ? `${primary.title} material trace`
-              : `${primary.title} timeline trace ${index}`,
-          description: index === 0
-            ? `A preserved access record establishes who could reach ${primary.subject} during the incident window.`
-            : index === 1
-              ? `A material trace links ${primary.subject} to a deliberate act during the incident window.`
-              : `A timestamped detail narrows the opportunity surrounding ${primary.subject} without identifying the responsible party by itself.`,
+              ? `Its condition connects it to ${primary.subject}.`
+              : "Where it turned up narrows down who had the chance to act. It is not proof by itself."}`,
         })),
       };
   const suspectNameBySeat = new Map(
@@ -2631,11 +2735,17 @@ function applyFrozenEvidencePropBindingsToFoundationV1<
     const binding = args.bindingsByEvidenceId[entry.id];
     if (!binding) return entry;
     const exactIdentity = binding.chosenIdentity.displayName.trim();
-    const description = entry.description.toLocaleLowerCase().includes(
-      exactIdentity.toLocaleLowerCase(),
-    )
+    const appearanceDescription = compact(
+      binding.chosenIdentity.appearanceDescription,
+      320,
+    );
+    const descriptionHasAppearance = appearanceDescription &&
+      entry.description.toLocaleLowerCase().includes(
+        appearanceDescription.toLocaleLowerCase(),
+      );
+    const description = !appearanceDescription || descriptionHasAppearance
       ? entry.description
-      : `${exactIdentity}: ${entry.description}`;
+      : `${appearanceDescription} ${entry.description}`.trim();
     if (entry.title === exactIdentity && description === entry.description) {
       return entry;
     }
@@ -2730,21 +2840,301 @@ function authoredExaminationsFromJson(args: {
   return args.examinationIds.map((id) => ({ id, text: byId.get(id)! }));
 }
 
-function deterministicAuthoredMysteryExaminationsV2(args: {
-  scaffold: ReturnType<typeof compileDeterministicDebateMystery>;
-  examinationIds: readonly string[];
-}): Array<{ id: string; text: string }> {
-  const textById = new Map(args.scaffold.activeRegions.map((outcome) => [
-    `${outcome.roomId}:${outcome.regionId}`,
-    outcome.inspectionResponse,
-  ]));
-  return args.examinationIds.map((id) => {
-    const text = compact(textById.get(id), 1_200);
-    if (!text) {
-      throw new Error(`The frozen case omitted its room examination result for ${id}.`);
+const MYSTERY_OBSERVATION_GENERIC_FORENSIC_FILLER_RES = [
+  /\bfaint\s+(?:smudges?|gleams?)\b/giu,
+  /\b(?:single|stray|lone)\s+(?:fibers?|hairs?|threads?)\b/giu,
+  /\bdust[- ]free\s+(?:patch|outline|spot|area)\b/giu,
+  /\bslightly\s+compressed\s+(?:cushion|pillow|seat|upholstery)\b/giu,
+  /\brecent(?:ly)?\s+oily\s+(?:handling|touch|residue|print)\b/giu,
+  /\bimmaculate\s+(?:surface|finish|interior|exterior)\b/giu,
+  /\bas if from (?:a|the) hurried shoe\b/giu,
+  /\bfingerprints?\s+(?:clustered|gathered)\s+(?:around|near)\b/giu,
+  /\b(?:suggests?|indicat(?:es|ing)|consistent with)\s+(?:recent|repeated)\s+(?:use|handling|contact)\b/giu,
+];
+
+const MYSTERY_OBSERVATION_UNAUTHORIZED_IMPLICATION_RES = [
+  /\b(?:someone|somebody|no one|nobody)\b/giu,
+  /\b(?:a|the)\s+(?:person|guest|occupant)\s+(?:was|is|has been|had been|stood|waited|sat|entered|left)\b/giu,
+  /\b(?:belongs?|belonged)\s+to\b/giu,
+  /\b(?:came|comes)\s+from\b/giu,
+  /\b(?:proves?|implicates?|confirms?)\s+(?:the|a|that|who|someone|somebody)\b/giu,
+  /\b(?:clue|evidence|culprit|suspect|case[- ]relevant|important to the case)\b/giu,
+  /\b(?:fresh(?:ly)?|newly|recent(?:ly)?)\s+(?:used|opened|closed|moved|handled|touched|disturbed|left)\b/giu,
+  /\b(?:repeated|recent)\s+(?:use|handling|contact)\b/giu,
+  /\b(?:handled|handling|touched)\b/giu,
+];
+
+function normalizedMysteryObservationFactV2(value: string): string {
+  return value
+    .normalize("NFKC")
+    .replace(/[\u2018\u2019]/gu, "'")
+    .replace(/[\u201c\u201d]/gu, '"')
+    .replace(/\s+/gu, " ")
+    .trim()
+    .toLocaleLowerCase();
+}
+
+function mysteryObservationMatchIsRequiredFactV2(
+  match: string,
+  requiredPublicFacts: readonly string[],
+): boolean {
+  const normalizedMatch = normalizedMysteryObservationFactV2(match);
+  return requiredPublicFacts.some((fact) =>
+    normalizedMysteryObservationFactV2(fact).includes(normalizedMatch)
+  );
+}
+
+function mysteryObservationUnauthorizedMatchV2(args: {
+  text: string;
+  requiredPublicFacts: readonly string[];
+  patterns: readonly RegExp[];
+}): string | null {
+  for (const pattern of args.patterns) {
+    pattern.lastIndex = 0;
+    for (const match of args.text.matchAll(pattern)) {
+      const value = match[0] ?? "";
+      if (
+        value &&
+        !mysteryObservationMatchIsRequiredFactV2(value, args.requiredPublicFacts)
+      ) return value;
     }
-    return { id, text };
+  }
+  return null;
+}
+
+export function assertMysteryObservationCopyV2(args: {
+  entries: Array<{ id: string; text: string }>;
+  targets: readonly MysteryExaminationAuthoringTargetV2[];
+}): Array<{ id: string; text: string }> {
+  const targetById = new Map(args.targets.map((target) => [target.id, target]));
+  for (const entry of args.entries) {
+    const target = targetById.get(entry.id);
+    if (!target) {
+      throw new MysteryExaminationValidationError(
+        `The authored examination references an unknown observation target: ${entry.id}.`,
+      );
+    }
+    const wordCount = entry.text.match(/[\p{L}\p{N}'’-]+/gu)?.length ?? 0;
+    const sentenceCount = entry.text.match(/[.!?…]+(?=\s|$)/gu)?.length ?? 0;
+    const requiredFactText = target.requiredPublicFacts.join(" ");
+    const requiredFactWordCount =
+      requiredFactText.match(/[\p{L}\p{N}'’-]+/gu)?.length ?? 0;
+    const requiredFactSentenceCount =
+      requiredFactText.match(/[.!?…]+(?=\s|$)/gu)?.length ?? 0;
+    const maximumWordCount = target.outcome === "ambient"
+      ? 24
+      : Math.max(72, requiredFactWordCount + 12);
+    const maximumSentenceCount = target.outcome === "ambient"
+      ? 2
+      : Math.max(2, requiredFactSentenceCount);
+    if (wordCount > maximumWordCount || sentenceCount > maximumSentenceCount) {
+      throw new MysteryExaminationValidationError(
+        `The authored ${target.outcome} observation for ${entry.id} is not concise.`,
+      );
+    }
+    for (const fact of target.requiredPublicFacts) {
+      if (
+        !normalizedMysteryObservationFactV2(entry.text).includes(
+          normalizedMysteryObservationFactV2(fact),
+        )
+      ) {
+        throw new MysteryExaminationValidationError(
+          `The authored consequential observation for ${entry.id} omitted a frozen public fact: ${fact}`,
+        );
+      }
+    }
+    const filler = mysteryObservationUnauthorizedMatchV2({
+      text: entry.text,
+      requiredPublicFacts: target.requiredPublicFacts,
+      patterns: MYSTERY_OBSERVATION_GENERIC_FORENSIC_FILLER_RES,
+    });
+    if (filler) {
+      throw new MysteryExaminationValidationError(
+        `The authored observation for ${entry.id} used generic forensic filler: ${filler}`,
+      );
+    }
+    const implication = mysteryObservationUnauthorizedMatchV2({
+      text: entry.text,
+      requiredPublicFacts: target.requiredPublicFacts,
+      patterns: MYSTERY_OBSERVATION_UNAUTHORIZED_IMPLICATION_RES,
+    });
+    if (implication) {
+      throw new MysteryExaminationValidationError(
+        `The authored observation for ${entry.id} invented an implication not present in its frozen public facts: ${implication}`,
+      );
+    }
+    if (
+      target.outcome === "ambient" &&
+      mysteryUnstructuredActionableDiscoveryV2(entry.text)
+    ) {
+      throw new MysteryExaminationValidationError(
+        `The authored ambient observation for ${entry.id} invented an access object or code.`,
+      );
+    }
+  }
+  return args.entries;
+}
+
+function mysteryObservationAnchorV2(
+  target: MysteryExaminationAuthoringTargetV2,
+): string {
+  return compact(
+    target.hotspot.physicalAnchor || target.hotspot.label,
+    120,
+  ).replace(/^the\s+/iu, "");
+}
+
+export function deterministicMysteryAmbientObservationV2(args: {
+  anchor: string;
+  personaSourceHash: string;
+  personaName?: string;
+  frozenVoiceCues?: readonly string[];
+}): string {
+  const anchor = compact(args.anchor, 120).replace(/^the\s+/iu, "") || "area";
+  const capitalizedAnchor = `${anchor[0]!.toLocaleUpperCase()}${anchor.slice(1)}`;
+  const personaCues = compact(
+    [args.personaName, ...(args.frozenVoiceCues ?? [])].filter(Boolean).join(" "),
+    1_200,
+  ).toLocaleLowerCase();
+  const personaTone = /\b(?:quiet|silent|wordless|laconic|terse|shy|withdrawn|minimal)\b/iu
+    .test(personaCues)
+    ? "quiet"
+    : /\b(?:wry|dry|sarcastic|snarky|irreverent|playful|comic|funny|humou?r|jok(?:e|es|ing|ester))\b/iu
+        .test(personaCues)
+      ? "dry"
+      : /\b(?:warm|gentle|cheerful|optimistic|enthusiastic|delighted|kindly)\b/iu
+          .test(personaCues)
+        ? "warm"
+        : "plain";
+  const variants = personaTone === "quiet"
+    ? ["…"]
+    : personaTone === "dry"
+      ? [
+          `The ${anchor}. Riveting.`,
+          `${capitalizedAnchor}. A triumph of decorating.`,
+          `Behold: the ${anchor}.`,
+        ]
+      : personaTone === "warm"
+        ? [
+            `The ${anchor}. Nice, actually.`,
+            `I like the ${anchor}. That's all.`,
+            `Just the ${anchor}. Kind of charming.`,
+          ]
+        : [
+            `Hmm… Nothing unusual about the ${anchor}.`,
+            `Just the ${anchor}. Nothing more.`,
+            `Nothing over here but the ${anchor}.`,
+            `${capitalizedAnchor}. Ordinary.`,
+          ];
+  const index = Number.parseInt(
+    sha256(`${args.personaSourceHash}:${anchor}`).slice(0, 8),
+    16,
+  ) % variants.length;
+  return variants[index]!;
+}
+
+function deterministicAuthoredMysteryExaminationsV2(args: {
+  examinationIds: readonly string[];
+  targets: readonly MysteryExaminationAuthoringTargetV2[];
+  persona: MysteryObservationWritingBriefV2;
+}): Array<{ id: string; text: string }> {
+  const targetById = new Map(args.targets.map((target) => [target.id, target]));
+  return args.examinationIds.map((id) => {
+    const target = targetById.get(id);
+    if (!target) {
+      throw new Error(`The frozen case omitted its room observation target for ${id}.`);
+    }
+    if (target.outcome === "ambient") {
+      return {
+        id,
+        text: deterministicMysteryAmbientObservationV2({
+          anchor: mysteryObservationAnchorV2(target),
+          personaSourceHash: args.persona.sourceHash,
+          personaName: args.persona.name,
+          frozenVoiceCues: args.persona.frozenVoiceCues,
+        }),
+      };
+    }
+    const anchor = mysteryObservationAnchorV2(target);
+    const personaCues = compact(
+      [args.persona.name, ...args.persona.frozenVoiceCues].join(" "),
+      1_200,
+    ).toLocaleLowerCase();
+    const prefix = /\b(?:quiet|silent|wordless|laconic|terse|minimal)\b/iu
+      .test(personaCues)
+      ? ""
+      : /\b(?:wry|dry|sarcastic|snarky|irreverent|playful|comic|funny|humou?r|jok(?:e|es|ing|ester))\b/iu
+          .test(personaCues)
+        ? "Naturally: "
+        : /\b(?:warm|gentle|cheerful|optimistic|enthusiastic|delighted|kindly)\b/iu
+            .test(personaCues)
+          ? "All right: "
+          : `At the ${anchor}: `;
+    return {
+      id,
+      text: `${prefix}${target.requiredPublicFacts.join(" ")}`,
+    };
   });
+}
+
+const MYSTERY_UNSTRUCTURED_ACTIONABLE_DISCOVERY_RE = new RegExp(
+  [
+    String.raw`\b(?:a|an|the|this)\s+(?:[\p{L}\d-]+\s+){0,3}key\b(?!\s+(?:detail|point|factor|question|word)\b)`,
+    String.raw`\b(?:keycard|key\s+fob|passcode|password|lockpick|access\s+card|access\s+credential)\b`,
+    String.raw`\b(?:a|an|the|this)\s+(?:garage\s+|door\s+)?remote(?:\s+control)?\b`,
+    String.raw`\b(?:safe|door|entry|security|alarm|keypad|access)\s+(?:code|combination|pin)\b`,
+    String.raw`\b(?:code|combination|pin)\s*(?:is|reads|:|=)?\s*[#"']?[\d-]{3,}\b`,
+    String.raw`\blocked\s+(?:box|case|container)\b`,
+  ].join("|"),
+  "iu",
+);
+
+export function mysteryUnstructuredActionableDiscoveryV2(text: string): boolean {
+  return MYSTERY_UNSTRUCTURED_ACTIONABLE_DISCOVERY_RE.test(text);
+}
+
+export function assertMysteryExaminationDiscoveryGroundingV2(args: {
+  entries: Array<{ id: string; text: string }>;
+  scaffold: ReturnType<typeof compileDeterministicDebateMystery>;
+}): Array<{ id: string; text: string }> {
+  const outcomeById = new Map(args.scaffold.activeRegions.map((outcome) => [
+    `${outcome.roomId}:${outcome.regionId}`,
+    outcome,
+  ]));
+  const inventoryById = new Map(
+    args.scaffold.inventoryItems.map((item) => [item.id, item]),
+  );
+  for (const entry of args.entries) {
+    const outcome = outcomeById.get(entry.id);
+    if (!outcome) {
+      throw new MysteryExaminationValidationError(
+        `The authored examination references an unknown frozen hotspot: ${entry.id}.`,
+      );
+    }
+    if (outcome.inventoryItemId) {
+      const item = inventoryById.get(outcome.inventoryItemId);
+      if (!item) {
+        throw new MysteryExaminationValidationError(
+          `The frozen hotspot ${entry.id} references a missing Case Kit item.`,
+        );
+      }
+      if (
+        mysteryUnstructuredActionableDiscoveryV2(entry.text) &&
+        !entry.text.toLocaleLowerCase().includes(item.title.toLocaleLowerCase())
+      ) {
+        throw new MysteryExaminationValidationError(
+          `The authored examination for ${entry.id} described an actionable object other than its frozen Case Kit item: ${item.title}.`,
+        );
+      }
+      continue;
+    }
+    if (!outcome.evidenceId && mysteryUnstructuredActionableDiscoveryV2(entry.text)) {
+      throw new MysteryExaminationValidationError(
+        `The authored examination for ${entry.id} invented an actionable object or access code without a frozen item or evidence record.`,
+      );
+    }
+  }
+  return args.entries;
 }
 
 function deterministicAuthoredMysteryProsecutionChoicesV2(args: {
@@ -2825,9 +3215,45 @@ function assertMysteryTemporalRecallV2(args: {
 function assertMysteryInvestigationDialogueStaysInPhaseV2(args: {
   seatId: string;
   suspect: AuthoredSuspectV2;
+  openingForbiddenFacts?: readonly string[];
+  recordTitles?: readonly string[];
 }): void {
-  const lines: Array<{ field: string; text: string }> = [
+  const openingLines = [
+    { field: "room opening prosecution line", text: args.suspect.roomOpeningProsecutionLine },
     { field: "room introduction", text: args.suspect.roomIntroduction },
+    { field: "room opening handoff line", text: args.suspect.roomOpeningHandoffLine },
+  ];
+  const normalizeOpeningWords = (value: string): string[] => value
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .match(/[\p{L}\p{N}]+/gu) ?? [];
+  const forbiddenFactPhrases = (args.openingForbiddenFacts ?? []).flatMap((fact) => {
+    const words = normalizeOpeningWords(fact);
+    return words.length < 4
+      ? []
+      : Array.from({ length: words.length - 3 }, (_, index) => words.slice(index, index + 4).join(" "));
+  });
+  const forbiddenOpeningLanguage = /\b(?:accus\w*|alibi|culprit|deduc\w*|evidence|guilty|hidden\s+(?:clue|evidence|record)|innocent|killer|motive|murderer|proof|responsible\s+(?:person|party)|testimony|timeline|weapon)\b|\b(?:this|that)\s+(?:proves|means)\b|\b(?:i\s+(?:killed|murdered|poisoned)|i\s+was\s+(?:at|in)\s+.+\s+(?:before|during|after)|i\s+(?:did\s+not|never)\s+leave)\b/iu;
+  const stateMutationLanguage = /\b(?:add(?:ed|s|ing)?\s+to\s+(?:the\s+)?(?:case\s+file|record)|mark(?:ed|s|ing)?\s+.+\s+complete|remove(?:d|s|ing)?\s+from|reveal(?:ed|s|ing)?\s+(?:the\s+)?(?:clue|evidence|record)|unlock(?:ed|s|ing)?)\b/iu;
+  for (const line of openingLines) {
+    const normalizedLine = normalizeOpeningWords(line.text).join(" ");
+    const namesRecord = (args.recordTitles ?? []).some((title) =>
+      presentRecordTitleMentionedV2(line.text, title));
+    const repeatsSealedFact = forbiddenFactPhrases.some((phrase) =>
+      normalizedLine.includes(phrase));
+    if (
+      forbiddenOpeningLanguage.test(line.text) ||
+      stateMutationLanguage.test(line.text) ||
+      namesRecord ||
+      repeatsSealedFact
+    ) {
+      throw new Error(
+        `The authored ${line.field} for ${args.seatId} crossed the public-only first-entry boundary.`,
+      );
+    }
+  }
+  const lines: Array<{ field: string; text: string }> = [
+    ...openingLines,
     { field: "default Present prompt", text: args.suspect.defaultPresentProsecutionLine },
     { field: "default Present response", text: args.suspect.defaultPresentReaction },
     ...args.suspect.talkTopics.flatMap((topic) => [
@@ -2897,6 +3323,7 @@ function authoredSuspectFromJson(args: {
   rooms: readonly { id: string; name: string }[];
   people: readonly { id: string; name: string }[];
   knowledge: MysteryV2SuspectKnowledge;
+  openingForbiddenFacts?: readonly string[];
   courtOnly?: boolean;
 }): AuthoredSuspectV2 {
   const row = args.value.suspect && typeof args.value.suspect === "object"
@@ -3162,10 +3589,28 @@ function authoredSuspectFromJson(args: {
     seatId,
     relationship,
     alibi,
+    roomOpeningProsecutionLine:
+      compact(
+        row.roomOpeningExchange && typeof row.roomOpeningExchange === "object"
+          ? (row.roomOpeningExchange as Record<string, unknown>).prosecutionOpening
+          : row.roomOpeningProsecutionLine,
+        700,
+      ) || "Before we begin, tell me what you noticed in this room—and only what you know firsthand.",
+    roomOpeningProsecutionStageAction:
+      compact(row.roomOpeningProsecutionStageAction, 180) || null,
+    roomOpeningProsecutionPerformance:
+      row.roomOpeningProsecutionPerformance && typeof row.roomOpeningProsecutionPerformance === "object"
+        ? row.roomOpeningProsecutionPerformance as Partial<DebateMysteryPerformanceDirectionV2>
+        : {},
     // Room introductions are presentation polish, not proof-bearing case
     // logic. Keep a valid earlier-format chapter playable when its authoring
     // model has not yet learned this optional V2 field.
-    roomIntroduction: compact(row.roomIntroduction, 900) || (() => {
+    roomIntroduction: compact(
+      row.roomOpeningExchange && typeof row.roomOpeningExchange === "object"
+        ? (row.roomOpeningExchange as Record<string, unknown>).occupantResponse
+        : row.roomIntroduction,
+      900,
+    ) || (() => {
       const suspectName = args.people.find((person) => person.id === args.seatId)?.name ?? "I";
       return `I am ${suspectName}. The house has given everyone reasons to be careful; ask what you need, and I will answer.`;
     })(),
@@ -3173,6 +3618,19 @@ function authoredSuspectFromJson(args: {
     roomIntroductionPerformance:
       row.roomIntroductionPerformance && typeof row.roomIntroductionPerformance === "object"
         ? row.roomIntroductionPerformance as Partial<DebateMysteryPerformanceDirectionV2>
+        : {},
+    roomOpeningHandoffLine:
+      compact(
+        row.roomOpeningExchange && typeof row.roomOpeningExchange === "object"
+          ? (row.roomOpeningExchange as Record<string, unknown>).prosecutionHandoff
+          : row.roomOpeningHandoffLine,
+        700,
+      ) || "Understood. We will take this one detail at a time.",
+    roomOpeningHandoffStageAction:
+      compact(row.roomOpeningHandoffStageAction, 180) || null,
+    roomOpeningHandoffPerformance:
+      row.roomOpeningHandoffPerformance && typeof row.roomOpeningHandoffPerformance === "object"
+        ? row.roomOpeningHandoffPerformance as Partial<DebateMysteryPerformanceDirectionV2>
         : {},
     chapterOpening:
       compact(row.chapterOpening, 700) ||
@@ -3292,6 +3750,8 @@ function authoredSuspectFromJson(args: {
     assertMysteryInvestigationDialogueStaysInPhaseV2({
       seatId: args.seatId,
       suspect,
+      openingForbiddenFacts: args.openingForbiddenFacts,
+      recordTitles: args.recordItems.map((item) => item.title),
     });
     assertMysteryPresentDialogueMatchesRecordTitlesV2({
       seatId: args.seatId,
@@ -4308,6 +4768,14 @@ async function authorMysteryV2(args: {
             ? `The discrepancy involving ${args.incidentPlan.primary.subject} was discovered.`
             : `A material event narrowed the incident window without establishing responsibility by itself.`,
       }));
+  const incidentSceneRoom = args.scaffold.rooms.find(
+    (room) => room.id === args.scaffold.crimeSceneRoomId,
+  ) ?? args.scaffold.rooms[0];
+  const incidentSceneName = incidentSceneRoom
+    ? DEBATE_MYSTERY_ROOM_TEMPLATES.find(
+        (template) => template.id === incidentSceneRoom.templateId,
+      )?.name ?? incidentSceneRoom.templateId.replaceAll("-", " ")
+    : "incident scene";
   const setup = {
     investigationMode: args.config.investigationMode,
     inspiration: args.config.inspiration,
@@ -4326,6 +4794,10 @@ async function authorMysteryV2(args: {
       roomId: room.id,
       name: DEBATE_MYSTERY_ROOM_TEMPLATES.find((template) => template.id === room.templateId)?.name ?? room.templateId,
     })),
+    incidentScene: omitInvestigation ? null : {
+      roomId: args.scaffold.crimeSceneRoomId,
+      name: incidentSceneName,
+    },
     evidenceIds: args.scaffold.evidence.map((item) => item.id),
     examinationIds: omitInvestigation ? [] : args.examinationIds,
     identityMirrorHolders: Object.entries(args.powerPlan.bots).flatMap(
@@ -4353,6 +4825,13 @@ async function authorMysteryV2(args: {
       voiceCard: voiceCardsByBotId[suspect.botId],
     })),
   };
+  const prosecutorVoiceCard =
+    voiceCardsByBotId[prosecutor.id] ?? deterministicMysteryVoiceCard(prosecutor);
+  const observationWritingBrief: MysteryObservationWritingBriefV2 = {
+    name: prosecutor.name,
+    frozenVoiceCues: [...prosecutorVoiceCard.cues],
+    sourceHash: prosecutorVoiceCard.sourceHash,
+  };
 
   let foundation = args.draft.foundation;
   if (!foundation) {
@@ -4379,7 +4858,7 @@ async function authorMysteryV2(args: {
               victimDescription: "specific original identity and stakes",
               publicOpening: omitInvestigation
                 ? "spoiler-safe prosecution case summary suitable for a court title card"
-                : "crime-scene briefing without naming the culprit",
+                : "spoiler-safe first-person thought in the selected Prosecutor persona; state the public incident and why the investigator is heading to the exact incidentScene name without naming the culprit or hidden evidence",
               motive: "sealed motive",
               method: "sealed method",
               prosecutorInternalReasoning: "spoiler-free first-person internal reasoning in the selected Prosecutor persona; it reviews the record but never chooses strategy for the player",
@@ -4397,6 +4876,7 @@ async function authorMysteryV2(args: {
               "Keep the public opening, victim description, motive, method, and Prosecutor internal reasoning under 120 words each.",
               "Keep each evidence description under 55 words.",
               "Keep public prose free of culprit labels and private proof-route metadata.",
+              "Write publicOpening in the selected Prosecutor's distinct voice using its frozen voiceCard. Preserve every public fact exactly, add no deductions, and name the supplied incidentScene as the immediate destination.",
               "Identity Crisis is presentation-only. Its cues must never change the sealed culprit, evidence, alibis, or proof routes.",
               "No placeholders, TODOs, bracketed alternatives, or copied franchise characters.",
             ],
@@ -4487,6 +4967,57 @@ async function authorMysteryV2(args: {
       const missingIds = chunk.filter((id) => !compact(examinationsById[id], 1_200));
       if (!missingIds.length) continue;
       const examinationSectionKey = `examinations:${index + 1}`;
+      const examinationTargets = missingIds.map((id) => {
+        const outcome = args.scaffold.activeRegions.find(
+          (candidate) => `${candidate.roomId}:${candidate.regionId}` === id,
+        );
+        if (!outcome) {
+          throw new MysteryExaminationValidationError(
+            `The frozen case omitted its room examination target for ${id}.`,
+          );
+        }
+        const room = args.scaffold.rooms.find((candidate) => candidate.id === outcome.roomId);
+        const roomTemplate = room
+          ? DEBATE_MYSTERY_ROOM_TEMPLATES.find((candidate) => candidate.id === room.templateId)
+          : null;
+        const hotspot = room
+          ? debateMysteryRoomPresentationRegionsV1(room).find(
+              (candidate) => candidate.id === outcome.regionId,
+            )
+          : null;
+        const item = outcome.inventoryItemId
+          ? args.scaffold.inventoryItems.find((candidate) => candidate.id === outcome.inventoryItemId)
+          : null;
+        const evidence = outcome.evidenceId
+          ? foundationCore.evidence.find((candidate) => candidate.id === outcome.evidenceId)
+          : null;
+        const mansionAnchors = args.config.mansionSnapshot?.layoutV2?.placementAnchors
+          .filter((anchor) => anchor.roomId === outcome.roomId)
+          .map((anchor) => ({ name: anchor.name, relation: anchor.relation })) ?? [];
+        const requiredPublicFacts = item
+          ? [item.title, item.description]
+          : evidence
+            ? [evidence.title, evidence.description]
+            : [];
+        return {
+          id,
+          outcome: requiredPublicFacts.length > 0
+            ? "consequential" as const
+            : "ambient" as const,
+          room: {
+            id: outcome.roomId,
+            name: roomTemplate?.name ?? outcome.roomId,
+            mansionAnchors,
+          },
+          hotspot: {
+            id: outcome.regionId,
+            label: hotspot?.label ?? outcome.regionId,
+            physicalAnchor:
+              hotspot?.physicalAnchor ?? hotspot?.label ?? outcome.regionId,
+          },
+          requiredPublicFacts,
+        } satisfies MysteryExaminationAuthoringTargetV2;
+      });
       let authoredChunk: Array<{ id: string; text: string }>;
       let deterministicExaminationFallback = false;
       try {
@@ -4507,40 +5038,70 @@ async function authorMysteryV2(args: {
           prompt: {
             section: "room_examinations",
             caseFoundation: foundationCore,
+            observationWritingBrief,
             setup: {
               roomNames: setup.roomNames,
               examinationIds: missingIds,
+              examinationTargets,
             },
             outputContract: {
               examinationsById: Object.fromEntries(
-                missingIds.map((id) => [id, "sensory, clue-fair text for this exact frozen id"]),
+                missingIds.map((id) => [
+                  id,
+                  "player-character internal observation for this exact frozen id",
+                ]),
               ),
             },
             qualityRules: [
-              "Keep each examination result under 40 words.",
-              "Describe only what the prosecutor can fairly perceive or record at that hotspot.",
+              "The room and hotspot anchors determine the concrete subject of each observation, not its voice. Do not turn anchor copy into generic detective narration.",
+              "Roughly ninety percent of the creative expression should come from the frozen player-character brief: attention, vocabulary, rhythm, attitude, humor, uncertainty, sensory preference, and judgment.",
+              "Write as the player character's first-person or internal thought. Do not force every line to begin with I; natural fragments are welcome.",
+              "For ambient targets, prefer one short sentence or fragment under 24 words. Honest dead ends, ordinary sensory impressions, casual associations, and simple descriptions are desirable at a healthy share.",
+              "Optional humor is welcome only when it grows naturally from the frozen persona and the specific anchor. Character-appropriate association, appetite, disgust, vanity, impatience, deadpan understatement, absurdity, or refusal may be funnier than a formal joke. Never force a quip or reuse canned comedy.",
+              "A genuinely quiet, withdrawn, or extremely minimal persona may answer an ambient target with a deliberate ellipsis. Preserve intentional silence instead of expanding it into generic detective prose.",
+              "Ambient targets may not invent clues, access objects or codes, people being present or absent, recency, handling, provenance, or case relevance.",
+              "For consequential targets, state every requiredPublicFacts string plainly and completely, then add only compatible persona flavor. Use no more than two concise sentences.",
+              "State visible properties and supplied consequences in plain clauses. Avoid forensic circumlocution, pseudo-inference, and lab-report diction.",
+              "Do not manufacture faint smudges or gleams, single fibers/hairs/threads, dust-free patches, compressed cushions, oily handling, immaculate surfaces, hurried-shoe marks, or repeated-handling inferences unless requiredPublicFacts contains that exact fact.",
+              "Use only the supplied structured target. An ambient target may not invent a portable object, key, code, combination, PIN, password, remote, credential, lockpick, or locked container.",
               ...(caseIncludesHomicide ? [] : [
                 `This is a ${args.incidentPlan.primary.title} case, not a homicide. Never mention murder, killing, death, a corpse, a fatal injury, or a murder weapon.`,
               ]),
               "No placeholders, spoilers, deductions on the player's behalf, or copied franchise material.",
             ],
           },
-          validate: (value) => assertMysteryIncidentLanguageV2({
-            value: authoredExaminationsFromJson({ value, examinationIds: missingIds }),
-            incidentPlan: args.incidentPlan,
-            section: "Room examination copy",
+          validate: (value) => assertMysteryExaminationDiscoveryGroundingV2({
+            entries: assertMysteryObservationCopyV2({
+              entries: assertMysteryIncidentLanguageV2({
+                value: authoredExaminationsFromJson({
+                  value,
+                  examinationIds: missingIds,
+                }),
+                incidentPlan: args.incidentPlan,
+                section: "Room examination copy",
+              }),
+              targets: examinationTargets,
+            }),
+            scaffold: args.scaffold,
           }),
         });
         delete args.draft.recoveryBySection[examinationSectionKey];
       } catch (error) {
         if (!mysteryExaminationValidationExhausted(error)) throw error;
-        authoredChunk = assertMysteryIncidentLanguageV2({
-          value: deterministicAuthoredMysteryExaminationsV2({
-            scaffold: args.scaffold,
-            examinationIds: missingIds,
+        authoredChunk = assertMysteryExaminationDiscoveryGroundingV2({
+          entries: assertMysteryObservationCopyV2({
+            entries: assertMysteryIncidentLanguageV2({
+              value: deterministicAuthoredMysteryExaminationsV2({
+                examinationIds: missingIds,
+                targets: examinationTargets,
+                persona: observationWritingBrief,
+              }),
+              incidentPlan: args.incidentPlan,
+              section: "Deterministic room examination copy",
+            }),
+            targets: examinationTargets,
           }),
-          incidentPlan: args.incidentPlan,
-          section: "Deterministic room examination copy",
+          scaffold: args.scaffold,
         });
         deterministicExaminationFallback = true;
         delete args.draft.provenanceBySection[examinationSectionKey];
@@ -4572,21 +5133,36 @@ async function authorMysteryV2(args: {
             prompt: {
               section: "targeted_section_repair",
               targetSectionKey: examinationSectionKey,
+              observationWritingBrief,
               frozenLedgerSlice: {
                 sourceHash: factLedger.sourceHash,
-                examinationIds: missingIds,
+                examinationTargets,
               },
               existingSection: { examinations: authoredChunk },
               repairDelta: issues,
+              qualityRules: [
+                "The anchors determine subject, not voice. Rewrite every line as the frozen player character's concise internal thought.",
+                "Keep humor optional and persona-specific. Casual associations, disgust, appetite, vanity, impatience, understatement, absurdity, and refusal are allowed when the frozen voice supports them; remove canned quips.",
+                "Allow a deliberate ellipsis for an ambient result when the frozen voice is genuinely quiet or minimal; do not fill that silence with detective boilerplate.",
+                "Preserve every requiredPublicFacts string exactly and add no fact, implication, object, person, recency, handling, provenance, or case relevance that is not supplied.",
+                "Ambient results should often be mundane or honest dead ends. Remove generic forensic smudges, gleams, fibers, hairs, threads, dust patterns, compressed cushions, oily handling, immaculate surfaces, and pseudo-inference.",
+                "Use one short sentence or fragment for ambient results and no more than two concise sentences for consequential results.",
+              ],
               outputContract: "Return a complete examinations array for the exact supplied IDs.",
             },
-            validate: (value) => assertMysteryIncidentLanguageV2({
-              value: authoredExaminationsFromJson({
-                value,
-                examinationIds: missingIds,
+            validate: (value) => assertMysteryExaminationDiscoveryGroundingV2({
+              entries: assertMysteryObservationCopyV2({
+                entries: assertMysteryIncidentLanguageV2({
+                  value: authoredExaminationsFromJson({
+                    value,
+                    examinationIds: missingIds,
+                  }),
+                  incidentPlan: args.incidentPlan,
+                  section: "Repaired room examination copy",
+                }),
+                targets: examinationTargets,
               }),
-              incidentPlan: args.incidentPlan,
-              section: "Repaired room examination copy",
+              scaffold: args.scaffold,
             }),
             onReceipt: (receipt) =>
               recordMysterySectionReceipt(
@@ -4768,6 +5344,18 @@ async function authorMysteryV2(args: {
               })),
             ],
             knowledge: suspectKnowledgeBySeat[requirement.seatId]!,
+            openingForbiddenFacts: [
+              validatedFoundation.motive,
+              validatedFoundation.method,
+              validatedFoundation.eyewitnessResolution ?? "",
+              ...validatedFoundation.evidence.flatMap((evidence) => [
+                evidence.title,
+                evidence.description,
+              ]),
+              args.scaffold.actorKnowledge.find(
+                (account) => account.seatId === requirement.seatId,
+              )?.alibi ?? "",
+            ],
             courtOnly: omitInvestigation,
           }),
           incidentPlan: args.incidentPlan,
@@ -4932,6 +5520,11 @@ async function authorMysteryV2(args: {
             seatId: requirement.seatId,
             relationship: "complete relationship to the victim",
             alibi: "specific authored alibi",
+            roomOpeningExchange: {
+              prosecutionOpening: "one concise in-character Prosecutor line that opens this room interview using only public room and identity context",
+              occupantResponse: "one concise in-character response that welcomes direct questions without volunteering a clue, alibi, accusation, or deduction",
+              prosecutionHandoff: "one concise in-character Prosecutor line that hands control to the normal Talk, Present, and Examine investigation",
+            },
             talkTopics: "1-3 concise non-evidence subjects with only id, short menu label, category (person, general, motive, alibi, or room), subjectId for person/room, an in-character Prosecutor question, and the suspect response. PRISM supplies safe relationship/alibi subjects when fewer than 3 survive. Room subjectId must be an exact setup roomId; person subjectId must be the victim ID or an exact suspect seatId. Never make a Case File evidence/testimony title into a Talk subject.",
             presentationGate: requiredPresentationGateRecord
               ? {
@@ -4966,12 +5559,14 @@ async function authorMysteryV2(args: {
           ...(omitInvestigation ? [
             "This compilation omits investigation. Do not write room, mansion, investigation, Talk, or Present dialogue.",
           ] : [
+            "roomOpeningExchange is a linear first-entry cutscene, never a choice. Write exactly Prosecution, occupant, Prosecution in that order and keep each line under 45 words.",
+            "The room opening may use only the public room name, visible atmosphere, and speaker identities. It must not reveal or imply the culprit, motive, method, alibi, timeline, hidden evidence, accusation, proof route, or any fact the player has not discovered.",
             "Each Talk question is a natural, specific way for the prosecution to ask about its typed person, general, motive, alibi, or room subject and stays under 25 words.",
           "Talk never contains a physical evidence or sworn-testimony record as its subject. A room topic names and references one exact setup roomId.",
           requiredPresentationGateRecord
             ? "You may nominate one authored Talk topic as the pivotal evidence follow-up through presentationGate.unlockTopicId. Do not echo a gate id or record id: PRISM binds the exact frozen record, moves a valid topic to the final position, or supplies a safe follow-up from the required Present response."
             : "Do not invent a presentation gate for this witness.",
-          "Do not author repeat responses, stage actions, performance directions, generic Present copy, chapter transitions, or defendant reactions. PRISM owns those presentation-only fallbacks.",
+          "Do not author repeat responses, stage actions, performance directions, generic Present copy, chapter transitions, or defendant reactions. PRISM owns those presentation-only fallbacks and freezes them around the three room-opening lines.",
           "The investigation happens before court. In Talk and Present responses, never refer to the Court, a courtroom, the bench, a jury, a witness stand, sworn testimony, or 'Your Honor'. Use the room, house, investigation, Case File, and direct questions instead; courtroom language belongs only to trial dialogue.",
           "Each required Present response addresses only its exact supplied record. PRISM materializes the public Case File title; never name a different record or expose sealed reasoning.",
           "Write Talk questions only in the frozen Prosecutor persona and Defense rebuttals only in the frozen Defense Counsel persona. The accused is never their own attorney.",
@@ -5429,6 +6024,18 @@ async function authorMysteryV2(args: {
           })),
         ],
         knowledge: suspectKnowledgeBySeat[requirement.seatId]!,
+        openingForbiddenFacts: [
+          (args.draft.foundation ?? validatedFoundation).motive,
+          (args.draft.foundation ?? validatedFoundation).method,
+          (args.draft.foundation ?? validatedFoundation).eyewitnessResolution ?? "",
+          ...(args.draft.foundation ?? validatedFoundation).evidence.flatMap((evidence) => [
+            evidence.title,
+            evidence.description,
+          ]),
+          args.scaffold.actorKnowledge.find(
+            (account) => account.seatId === requirement.seatId,
+          )?.alibi ?? "",
+        ],
         courtOnly: omitInvestigation,
       });
     const buildDeterministicRepair = (): AuthoredSuspectV2 => {
@@ -5736,13 +6343,25 @@ async function polishMysteryPersonaDialogueGraphV2(args: {
 }): Promise<DebateMysteryDialogueGraphV2> {
   const roomIntroductionLineIds = new Set(
     Object.values(args.graph.roomIntroductionNodeIdsByRoom ?? {}).flatMap((entry) => {
-      const node = args.graph.nodes.find((candidate) => candidate.id === entry.personaNodeId);
-      return node?.lineId ? [node.lineId] : [];
+      const nodeIds = entry.openingExchangeNodeIds
+        ? [
+            entry.openingExchangeNodeIds.prosecutionOpeningNodeId,
+            entry.openingExchangeNodeIds.occupantResponseNodeId,
+            entry.openingExchangeNodeIds.prosecutionHandoffNodeId,
+          ]
+        : [entry.personaNodeId];
+      return nodeIds.flatMap((nodeId) => {
+        const node = args.graph.nodes.find((candidate) => candidate.id === nodeId);
+        return node?.lineId ? [node.lineId] : [];
+      });
     }),
   );
   const eligibleLines = args.graph.lines.filter((line) =>
     Boolean(line.speakerBotId) &&
-    line.mode === "spoken" &&
+    (
+      line.mode === "spoken" ||
+      (line.mode === "persona_babble" && line.nodeId.startsWith("room-introduction-"))
+    ) &&
     line.visibleText.trim().length >= 12 &&
     line.reusableCalloutKey === null &&
     !roomIntroductionLineIds.has(line.id),
@@ -5895,6 +6514,18 @@ function buildMysteryV2Graph(args: {
   const nameBySeat = new Map(args.scaffold.suspects.map((suspect) => [suspect.seatId, suspect.name]));
   const nameByBotId = new Map(args.bots.map((bot) => [bot.id, bot.name]));
   const authoredEvidence = new Map(args.authored.evidence.map((entry) => [entry.id, entry]));
+  const caseKitItems: Array<Omit<DebateMysteryCaseKitItemV2, "acquiredAt">> =
+    args.scaffold.inventoryItems.map((item) => ({
+      id: item.id,
+      title: item.title,
+      description: item.description,
+      emoji: item.emoji,
+      kind: item.kind,
+      usable: item.usable,
+      locked: item.locked,
+      sourceRoomId: item.sourceRoomId,
+    }));
+  const caseKitItemIdByExamineNodeId: Record<string, string> = {};
   for (const [evidenceId, binding] of Object.entries(args.evidencePropBindingsById ?? {})) {
     const evidence = authoredEvidence.get(evidenceId);
     if (!evidence) {
@@ -6113,6 +6744,7 @@ function buildMysteryV2Graph(args: {
       materializeFallback: Boolean(
         speakerBotId &&
         (options.mode ?? "spoken") !== "text_only" &&
+        (options.mode ?? "spoken") !== "persona_babble" &&
         (options.mode ?? "spoken") !== "anonymous_babble"
       ),
     });
@@ -6140,9 +6772,9 @@ function buildMysteryV2Graph(args: {
     kind: "briefing",
     scene: "investigation",
     text: args.authored.publicOpening,
-    speakerKind: "narrator",
+    speakerKind: "player",
     speakerBotId: casekeeperVoiceBotId,
-    mode: "anonymous_babble",
+    mode: "persona_babble",
     mutations: { discoverIds: ["briefing:complete"] },
     terminal: "return_to_room",
   });
@@ -6175,6 +6807,9 @@ function buildMysteryV2Graph(args: {
       const nodeId = `examine-${room.id}-${outcome.regionId}`;
       const evidence = outcome.evidenceId ? authoredEvidence.get(outcome.evidenceId) : null;
       const record = outcome.evidenceId ? { kind: "evidence" as const, id: outcome.evidenceId } : null;
+      if (outcome.inventoryItemId) {
+        caseKitItemIdByExamineNodeId[nodeId] = outcome.inventoryItemId;
+      }
       addLineNode({
         id: nodeId,
         kind: "examination_result",
@@ -6187,6 +6822,9 @@ function buildMysteryV2Graph(args: {
         mutations: {
           discoverIds: [`hotspot:${key}`],
           admitRecordIds: record ? [`evidence:${record.id}`] : [],
+          ...(outcome.inventoryItemId
+            ? { acquireItemIds: [outcome.inventoryItemId] }
+            : {}),
         },
         records: record ? [record] : [],
         terminal: "return_to_room",
@@ -6230,16 +6868,94 @@ function buildMysteryV2Graph(args: {
         speakerBotId: suspectBotId,
         speakerName: suspectName,
       });
+      const safeOccupantOpening = validateDebateMysteryStageCuePerformanceV1({
+        cue: stageCue,
+        text: suspect.roomIntroduction,
+      });
+      const prosecutionCue = (options: {
+        id: "opening" | "handoff";
+        text: string;
+        objective: string;
+      }): DebateMysteryStageCueV1 => ({
+        version: 1,
+        id: `stage-cue:room-introduction:${suspectRoomId}:prosecution-${options.id}`,
+        objective: options.objective,
+        emotionalState: "Focused, composed, and attentive to the room occupant.",
+        knownFactIds: [],
+        allowedFacts: [],
+        requiredBeats: [],
+        forbiddenDisclosures: stageCue.forbiddenDisclosures,
+        contradictionTrigger: null,
+        exitCondition: "Advance the finite room-opening exchange without changing the case record.",
+        deterministicFallbackText: options.text,
+        maxCharacters: 420,
+      });
+      const prosecutionOpeningCue = prosecutionCue({
+        id: "opening",
+        text: "Before we begin, tell me what you noticed in this room—and only what you know firsthand.",
+        objective: "Open the room interview and invite a bounded firsthand response.",
+      });
+      const prosecutionHandoffCue = prosecutionCue({
+        id: "handoff",
+        text: "Understood. We will take this one detail at a time.",
+        objective: "Acknowledge the occupant and hand control to ordinary investigation.",
+      });
+      const safeProsecutionOpening = validateDebateMysteryStageCuePerformanceV1({
+        cue: prosecutionOpeningCue,
+        text: suspect.roomOpeningProsecutionLine,
+      });
+      const safeProsecutionHandoff = validateDebateMysteryStageCuePerformanceV1({
+        cue: prosecutionHandoffCue,
+        text: suspect.roomOpeningHandoffLine,
+      });
+      const prosecutionHandoffNode = addLineNode({
+        id: `room-introduction-${suspectRoomId}-prosecution-handoff`,
+        kind: "room_introduction",
+        scene: "investigation",
+        text: safeProsecutionHandoff.valid
+          ? safeProsecutionHandoff.normalizedText
+          : prosecutionHandoffCue.deterministicFallbackText,
+        stageAction: suspect.roomOpeningHandoffStageAction,
+        speakerKind: "player",
+        speakerBotId: args.config.prosecutorBotId,
+        intendedRecipientSeatId: suspect.seatId,
+        locationId: suspectRoomId,
+        performance: suspect.roomOpeningHandoffPerformance,
+        stageCue: prosecutionHandoffCue,
+        root: false,
+        terminal: "return_to_room",
+      });
       const personaNode = addLineNode({
         id: `room-introduction-${suspectRoomId}-persona`,
         kind: "room_introduction",
         scene: "investigation",
-        text: stageCue.deterministicFallbackText,
+        text: safeOccupantOpening.valid
+          ? safeOccupantOpening.normalizedText
+          : stageCue.deterministicFallbackText,
         stageAction: suspect.roomIntroductionStageAction,
         speakerSeatId: suspect.seatId,
         locationId: suspectRoomId,
         performance: suspect.roomIntroductionPerformance,
         stageCue,
+        next: [prosecutionHandoffNode.id],
+        root: false,
+        terminal: "return_to_room",
+      });
+      const prosecutionOpeningNode = addLineNode({
+        id: `room-introduction-${suspectRoomId}-prosecution-opening`,
+        kind: "room_introduction",
+        scene: "investigation",
+        text: safeProsecutionOpening.valid
+          ? safeProsecutionOpening.normalizedText
+          : prosecutionOpeningCue.deterministicFallbackText,
+        stageAction: suspect.roomOpeningProsecutionStageAction,
+        speakerKind: "player",
+        speakerBotId: args.config.prosecutorBotId,
+        intendedRecipientSeatId: suspect.seatId,
+        locationId: suspectRoomId,
+        performance: suspect.roomOpeningProsecutionPerformance,
+        stageCue: prosecutionOpeningCue,
+        next: [personaNode.id],
         root: false,
         terminal: "return_to_room",
       });
@@ -6248,16 +6964,22 @@ function buildMysteryV2Graph(args: {
         kind: "room_introduction",
         scene: "investigation",
         text: casekeeperNarration,
-        speakerKind: "narrator",
-        mode: "text_only",
+        speakerKind: "player",
+        speakerBotId: args.config.prosecutorBotId,
+        mode: "persona_babble",
         locationId: suspectRoomId,
-        next: [personaNode.id],
+        next: [prosecutionOpeningNode.id],
         terminal: "return_to_room",
       });
       roomIntroductionNodeIdsByRoom[suspectRoomId] = {
         casekeeperNodeId: casekeeperNode.id,
         personaNodeId: personaNode.id,
         suspectSeatId: suspect.seatId,
+        openingExchangeNodeIds: {
+          prosecutionOpeningNodeId: prosecutionOpeningNode.id,
+          occupantResponseNodeId: personaNode.id,
+          prosecutionHandoffNodeId: prosecutionHandoffNode.id,
+        },
       };
     }
     const gatedTopicId = suspect.presentationGate?.unlockTopicId ?? null;
@@ -6707,6 +7429,8 @@ function buildMysteryV2Graph(args: {
         emoji: "💬",
       };
     }),
+    caseKitItems,
+    caseKitItemIdByExamineNodeId,
     evidencePropBindingsById: Object.fromEntries(
       Object.entries(args.evidencePropBindingsById ?? {}).map(
         ([evidenceId, binding]) => [evidenceId, structuredClone(binding)],
@@ -6764,6 +7488,7 @@ function buildMysteryV2Graph(args: {
     suspects: args.scaffold.suspects.map(({ roomId: _roomId, ...suspect }) => ({ ...suspect, roomId: _roomId })),
     rooms: omitInvestigation ? [] : args.scaffold.rooms.map((room) => {
       const template = DEBATE_MYSTERY_ROOM_TEMPLATES.find((entry) => entry.id === room.templateId)!;
+      const presentationRegions = debateMysteryRoomPresentationRegionsV1(room);
       const activeRegionIds = new Set(
         args.scaffold.activeRegions.filter((outcome) => outcome.roomId === room.id).map((outcome) => outcome.regionId),
       );
@@ -6783,7 +7508,7 @@ function buildMysteryV2Graph(args: {
         unlocked: true,
         visited: false,
         accessState: "hidden" as const,
-        hotspots: template.regions.filter((region) => activeRegionIds.has(region.id)).map((region) => ({
+        hotspots: presentationRegions.filter((region) => activeRegionIds.has(region.id)).map((region) => ({
           id: region.id,
           label: region.label,
           polygon: region.polygon,
@@ -6801,6 +7526,7 @@ function buildMysteryV2Graph(args: {
     currentRoomId: omitInvestigation ? null : args.scaffold.crimeSceneRoomId,
     discoveryIds: initialDiscoveryIds,
     record: publicRecord,
+    caseKit: [],
     topics: omitInvestigation ? [] : authoredSuspects.flatMap((suspect) =>
       suspect.talkTopics.map((topic, index) => ({
         nodeId: `talk-${suspect.seatId}-${topic.id}`,
@@ -6813,12 +7539,12 @@ function buildMysteryV2Graph(args: {
     dialogueHistory: openingNode ? [{
       nodeId: openingNode.id,
       lineId: openingNode.lineId,
-      delivery: "anonymous_babble",
+      delivery: "persona_babble",
       stageActionText: null,
       visibleText: args.authored.publicOpening,
       speakerSeatId: null,
-      speakerBotId: null,
-      speakerKind: "narrator",
+      speakerBotId: casekeeperVoiceBotId,
+      speakerKind: "player",
       occurredAt: now,
     }] : [],
     identityMirrorTargetSnapshots: Object.fromEntries(
@@ -7034,6 +7760,139 @@ function presentResponseWithRecordTitleV2(text: string, title: string): string {
     : `Regarding the ${title}: ${contextualText}`;
 }
 
+/**
+ * Add the finite first-entry Prosecution exchange without consulting a model
+ * or reading sealed case truth. This pure migration is shared by active-case
+ * readiness, portable-package resealing, and earlier-format imports.
+ */
+export function migrateDebateMysteryRoomOpeningCutscenesV2(args: {
+  graph: DebateMysteryDialogueGraphV2;
+  prosecutorBotId: string;
+}): { graph: DebateMysteryDialogueGraphV2; changed: boolean } {
+  const graph = structuredClone(args.graph);
+  const prosecutorBotId = compact(args.prosecutorBotId, 200);
+  if (!prosecutorBotId) throw new Error("The frozen case has no Prosecutor bot for room openings.");
+  const usedNodeIds = new Set(graph.nodes.map((node) => node.id));
+  const usedLineIds = new Set(graph.lines.map((line) => line.id));
+  const nodeById = (): Map<string, DebateMysteryDialogueNodeV2> =>
+    new Map(graph.nodes.map((node) => [node.id, node]));
+  const lineById = (): Map<string, DebateMysterySpokenLineV2> =>
+    new Map(graph.lines.map((line) => [line.id, line]));
+  let changed = false;
+  const createProsecutionBeat = (options: {
+    roomId: string;
+    suspectSeatId: string;
+    suffix: "opening" | "handoff";
+    text: string;
+    mood: string;
+    objective: string;
+  }): { node: DebateMysteryDialogueNodeV2; line: DebateMysterySpokenLineV2 } => {
+    const nodeId = uniqueFrozenId(
+      `room-introduction-${options.roomId}-prosecution-${options.suffix}`,
+      usedNodeIds,
+    );
+    const lineId = uniqueFrozenId(`line-${nodeId}`, usedLineIds);
+    const performance = performanceDirection(undefined, options.mood);
+    const delivery = resolveDebateMysteryLineDeliveryV2({
+      value: options.text,
+      stableId: lineId,
+      performance,
+      materializeFallback: true,
+    });
+    const stageCue: DebateMysteryStageCueV1 = {
+      version: 1,
+      id: `stage-cue:${nodeId}`,
+      objective: options.objective,
+      emotionalState: options.mood,
+      knownFactIds: [],
+      allowedFacts: [],
+      requiredBeats: [],
+      forbiddenDisclosures: [
+        "i killed",
+        "i murdered",
+        "the culprit is",
+        "the murderer is",
+        "the killer is",
+      ],
+      contradictionTrigger: null,
+      exitCondition: "Advance the finite room-opening exchange without changing the case record.",
+      deterministicFallbackText: delivery.spokenText,
+      maxCharacters: 420,
+    };
+    return {
+      node: {
+        id: nodeId,
+        kind: "room_introduction",
+        scene: "investigation",
+        speakerSeatId: null,
+        intendedRecipientSeatId: options.suspectSeatId,
+        lineId,
+        label: null,
+        locationId: options.roomId,
+        talkSubject: null,
+        requirements: emptyDebateMysteryRequirementsV2(),
+        mutations: emptyDebateMysteryMutationsV2(),
+        recordReferences: [],
+        nextNodeIds: [],
+        terminalOutcome: "return_to_room",
+      },
+      line: {
+        id: lineId,
+        nodeId,
+        speakerKind: "player",
+        speakerBotId: prosecutorBotId,
+        stageActionText: delivery.stageActionText,
+        visibleText: delivery.spokenText,
+        spokenText: delivery.spokenText,
+        performance,
+        stageCue,
+        mode: "spoken",
+        reusableCalloutKey: null,
+      },
+    };
+  };
+
+  for (const [roomId, introduction] of Object.entries(
+    graph.roomIntroductionNodeIdsByRoom ?? {},
+  )) {
+    if (introduction.openingExchangeNodeIds) continue;
+    const casekeeperNode = nodeById().get(introduction.casekeeperNodeId);
+    const occupantNode = nodeById().get(introduction.personaNodeId);
+    const occupantLine = occupantNode?.lineId ? lineById().get(occupantNode.lineId) : null;
+    if (!casekeeperNode || !occupantNode || !occupantLine?.speakerBotId) {
+      throw new Error(`Room introduction ${roomId} cannot be upgraded safely.`);
+    }
+    const opening = createProsecutionBeat({
+      roomId,
+      suspectSeatId: introduction.suspectSeatId,
+      suffix: "opening",
+      text: "Before we begin, tell me what you noticed in this room—and only what you know firsthand.",
+      mood: "focused opening",
+      objective: "Open the room interview and invite a bounded firsthand response.",
+    });
+    const handoff = createProsecutionBeat({
+      roomId,
+      suspectSeatId: introduction.suspectSeatId,
+      suffix: "handoff",
+      text: "Understood. We will take this one detail at a time.",
+      mood: "measured handoff",
+      objective: "Acknowledge the occupant and hand control to ordinary investigation.",
+    });
+    opening.node.nextNodeIds = [occupantNode.id];
+    occupantNode.nextNodeIds = [handoff.node.id];
+    casekeeperNode.nextNodeIds = [opening.node.id];
+    graph.nodes.push(opening.node, handoff.node);
+    graph.lines.push(opening.line, handoff.line);
+    introduction.openingExchangeNodeIds = {
+      prosecutionOpeningNodeId: opening.node.id,
+      occupantResponseNodeId: occupantNode.id,
+      prosecutionHandoffNodeId: handoff.node.id,
+    };
+    changed = true;
+  }
+  return { graph, changed };
+}
+
 function migrateDebateMysteryPlayerRoleContractV2(args: {
   privateCase: PrivateMysteryCaseV2;
   graph: DebateMysteryDialogueGraphV2;
@@ -7112,16 +7971,44 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
   const lineById = (): Map<string, DebateMysterySpokenLineV2> =>
     new Map(graph.lines.map((line) => [line.id, line]));
   const casekeeperOpening = graph.lines.find((line) => line.nodeId === "briefing-opening");
+  if (casekeeperOpening) {
+    const normalizedVisibleText = normalizeProsecutorOpeningPerspectiveV2(
+      casekeeperOpening.visibleText,
+    );
+    const normalizedSpokenText = normalizeProsecutorOpeningPerspectiveV2(
+      casekeeperOpening.spokenText,
+    );
+    if (
+      normalizedVisibleText !== casekeeperOpening.visibleText ||
+      normalizedSpokenText !== casekeeperOpening.spokenText
+    ) {
+      casekeeperOpening.visibleText = normalizedVisibleText;
+      casekeeperOpening.spokenText = normalizedSpokenText;
+      changed = true;
+    }
+    const publicOpening = publicState.dialogueHistory.find(
+      (entry) => entry.nodeId === "briefing-opening",
+    );
+    if (publicOpening) {
+      const normalizedPublicText = normalizeProsecutorOpeningPerspectiveV2(
+        publicOpening.visibleText,
+      );
+      if (normalizedPublicText !== publicOpening.visibleText) {
+        publicOpening.visibleText = normalizedPublicText;
+        changed = true;
+      }
+    }
+  }
   if (
     casekeeperOpening &&
     (
-      casekeeperOpening.mode !== "anonymous_babble" ||
-      casekeeperOpening.speakerKind !== "narrator" ||
+      casekeeperOpening.mode !== "persona_babble" ||
+      casekeeperOpening.speakerKind !== "player" ||
       casekeeperOpening.speakerBotId !== casekeeperVoiceBotId
     )
   ) {
-    casekeeperOpening.mode = "anonymous_babble";
-    casekeeperOpening.speakerKind = "narrator";
+    casekeeperOpening.mode = "persona_babble";
+    casekeeperOpening.speakerKind = "player";
     casekeeperOpening.speakerBotId = casekeeperVoiceBotId;
     changed = true;
   }
@@ -7143,6 +8030,7 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
       materializeFallback: Boolean(
         line.speakerBotId &&
         line.mode !== "text_only" &&
+        line.mode !== "persona_babble" &&
         line.mode !== "anonymous_babble"
       ),
     });
@@ -7834,13 +8722,13 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
     graph.lines.push({
       id: casekeeperLineId,
       nodeId: casekeeperNodeId,
-      speakerKind: "narrator",
-      speakerBotId: null,
+      speakerKind: "player",
+      speakerBotId: prosecutorBotId,
       stageActionText: null,
       visibleText: "...",
       spokenText: "...",
       performance: performanceDirection(undefined, "silent observation"),
-      mode: "text_only",
+      mode: "persona_babble",
       reusableCalloutKey: null,
     });
     graph.interactionRootNodeIds.push(casekeeperNodeId);
@@ -7857,6 +8745,21 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
     const suspectBotId = botIdBySeat.get(introduction.suspectSeatId) ?? null;
     const suspectBot = suspectBotId ? botRowById.get(suspectBotId) : null;
     const visibleText = casekeeperLine?.visibleText.trim() ?? "";
+    if (
+      casekeeperLine &&
+      (
+        casekeeperLine.mode !== "persona_babble" ||
+        casekeeperLine.speakerKind !== "player" ||
+        casekeeperLine.speakerBotId !== prosecutorBotId ||
+        Boolean(casekeeperLine.stageActionText)
+      )
+    ) {
+      casekeeperLine.mode = "persona_babble";
+      casekeeperLine.speakerKind = "player";
+      casekeeperLine.speakerBotId = prosecutorBotId;
+      casekeeperLine.stageActionText = null;
+      changed = true;
+    }
     const legacyNamedCard = Boolean(
       casekeeperLine && (
         /\b(?:color and sigil|own account comes next|room occupant)\b/iu.test(visibleText) ||
@@ -7878,7 +8781,20 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
     casekeeperLine.visibleText = narration;
     casekeeperLine.spokenText = narration;
     casekeeperLine.stageActionText = null;
-    casekeeperLine.mode = "text_only";
+    casekeeperLine.mode = "persona_babble";
+    casekeeperLine.speakerKind = "player";
+    casekeeperLine.speakerBotId = prosecutorBotId;
+    changed = true;
+  }
+  const roomOpeningMigration = migrateDebateMysteryRoomOpeningCutscenesV2({
+    graph,
+    prosecutorBotId,
+  });
+  if (roomOpeningMigration.changed) {
+    graph.nodes = roomOpeningMigration.graph.nodes;
+    graph.lines = roomOpeningMigration.graph.lines;
+    graph.roomIntroductionNodeIdsByRoom =
+      roomOpeningMigration.graph.roomIntroductionNodeIdsByRoom;
     changed = true;
   }
   const normalizedRoomIntroductionState = Object.fromEntries(publicState.rooms.map((room) => {
@@ -9478,7 +10394,9 @@ export async function runDebateMysteryCompilationV2(
             config.mansionBundleId,
           ).rooms
         : null;
-      const crimeSceneRoom = savedMansionRooms?.find((room) => !room.assignedSuspectSeatId) ?? null;
+      const crimeSceneRoom = savedMansionRooms
+        ? deterministicMysteryIncidentSceneRoomV2(savedMansionRooms, config.nonce)
+        : null;
       const orderedMansionRooms = savedMansionRooms && crimeSceneRoom
         ? [crimeSceneRoom, ...savedMansionRooms.filter((room) => room.id !== crimeSceneRoom.id)]
         : savedMansionRooms;
@@ -9493,23 +10411,36 @@ export async function runDebateMysteryCompilationV2(
         })),
         ...(orderedMansionRooms
           ? {
-              roomBlueprint: orderedMansionRooms.map((room, index) => ({
-                id: room.id,
-                floor: room.floor,
-                x: room.x,
-                y: room.y,
-                width: room.width,
-                height: room.height,
-                neighborIds: [...room.neighborIds],
-                templateId: room.templateId,
-                imageId: room.imageId,
-                kind: room.assignedSuspectSeatId
-                  ? "suspect" as const
-                  : index === 0
-                    ? "crime_scene" as const
-                    : "search" as const,
-                assignedSuspectSeatId: room.assignedSuspectSeatId,
-              })),
+              roomBlueprint: orderedMansionRooms.map((room, index) => {
+                const layoutRoom = config.mansionSnapshot?.layoutV2?.entities.find(
+                  (entity) => entity.kind === "room" && entity.id === room.id,
+                );
+                return {
+                  id: room.id,
+                  floor: room.floor,
+                  x: room.x,
+                  y: room.y,
+                  width: room.width,
+                  height: room.height,
+                  neighborIds: [...room.neighborIds],
+                  templateId: room.templateId,
+                  imageId: room.imageId,
+                  ...(layoutRoom?.kind === "room"
+                    ? {
+                        usesBundledHotspotGeometry:
+                          !room.imageId &&
+                          !layoutRoom.acceptedRoomAssetId &&
+                          Boolean(layoutRoom.bundledAssetPath),
+                      }
+                    : {}),
+                  kind: room.assignedSuspectSeatId
+                    ? "suspect" as const
+                    : index === 0
+                      ? "crime_scene" as const
+                      : "search" as const,
+                  assignedSuspectSeatId: room.assignedSuspectSeatId,
+                };
+              }),
             }
           : {}),
       });
@@ -9806,7 +10737,7 @@ export async function runDebateMysteryCompilationV2(
         options.prepareIllustratedRooms
       ) {
         currentJob = updateJob(db, userId, sessionId, {
-          publicMessage: "Upgrading every room to Illustrated",
+          publicMessage: "Upgrading every room to Realistic",
         });
         setPublicCompilationStatus(db, userId, sessionId, currentJob, {
           ...checkpoint.publicState,
@@ -10873,6 +11804,15 @@ function executeDialogueNodeV2(args: {
     if (!item || record.some((candidate) => mysteryRecordKey(candidate.reference) === key)) continue;
     record.push({ ...item, admitted: true, updatedAt: now });
   }
+  const caseKit = [...(args.state.caseKit ?? [])];
+  for (const itemId of node.mutations.acquireItemIds ?? []) {
+    if (caseKit.some((item) => item.id === itemId)) continue;
+    const item = args.privateCase.caseKitItems?.find((candidate) => candidate.id === itemId);
+    if (!item) {
+      throw new HttpError(409, "That recovered Case Kit item is unavailable.");
+    }
+    caseKit.push({ ...item, acquiredAt: now });
+  }
   const topics = args.state.topics.map((topic) => ({ ...topic }));
   for (const topicNodeId of node.mutations.unlockTopicIds) {
     const existingTopic = topics.find((topic) => topic.nodeId === topicNodeId);
@@ -10904,6 +11844,7 @@ function executeDialogueNodeV2(args: {
     ...args.state,
     discoveryIds,
     record,
+    caseKit,
     topics,
     activeDialogueNodeId: node.id,
     dialogueHistory: line
@@ -10923,6 +11864,13 @@ function executeDialogueNodeV2(args: {
             : {}),
           ...(node.intendedRecipientBotId
             ? { intendedRecipientBotId: node.intendedRecipientBotId }
+            : {}),
+          ...(node.kind === "examination_result" && (
+            node.mutations.admitRecordIds.length > 0 ||
+            (node.mutations.acquireItemIds?.length ?? 0) > 0 ||
+            node.mutations.unlockTopicIds.length > 0
+          )
+            ? { caseFileRelevant: true }
             : {}),
           occurredAt: now,
         }]
@@ -11896,6 +12844,10 @@ async function prepareMysteryRoomIntroductionPersonaV2(args: {
     return null;
   }
   const introduction = graph.roomIntroductionNodeIdsByRoom?.[args.roomId];
+  // Current three-line room openings are authored and frozen during Case
+  // Forge. Only earlier two-node graphs retain their bounded persona-polish
+  // compatibility path; first entry into a current room never calls a model.
+  if (introduction?.openingExchangeNodeIds) return null;
   const personaNode = introduction
     ? graph.nodes.find((node) => node.id === introduction.personaNodeId)
     : null;
@@ -12638,18 +13590,26 @@ export function applyDebateMysteryActionV2(
     if (spectator || courtOnly || state.playPhase !== "title_card") {
       throw new HttpError(409, "The mansion door is not available right now.");
     }
-    const foyer = state.rooms.find((room) => room.templateId === "foyer")
-      ?? state.rooms.find((room) => room.id === state.currentRoomId)
-      ?? state.rooms[0];
-    if (!foyer) throw new HttpError(409, "The mansion foyer is unavailable.");
-    // A fresh Run crosses this one threshold before normal discovery rules.
-    // Legacy malformed layouts retain their compiled opening-room fallback.
-    foyer.visited = true;
-    foyer.accessState = "visited";
+    const incidentScene = state.rooms.find(
+      (room) => room.id === (state.crimeSceneRoomId ?? privateCase.crimeSceneRoomId),
+    );
+    if (!incidentScene) throw new HttpError(409, "The authored incident scene is unavailable.");
+    if (incidentScene.sealedAsset?.status === "pending") {
+      throw new HttpError(
+        409,
+        "The incident scene is still being prepared. Try again shortly.",
+        "MYSTERY_ROOM_BEING_SECURED",
+      );
+    }
+    // The client keeps this room behind black while the embodied-player
+    // briefing and foyer-to-scene map journey play. The foyer remains unseen
+    // and unvisited until the investigator deliberately explores it later.
+    incidentScene.visited = true;
+    incidentScene.accessState = "visited";
     state.playPhase = "case_opening";
-    state.currentRoomId = foyer.id;
+    state.currentRoomId = incidentScene.id;
     state.roomView = "room";
-    authorizeAsset("room", foyer.id);
+    authorizeAsset("room", incidentScene.id);
   } else if (request.action === "move") {
     if (state.playPhase === "title_card" && courtOnly) {
       state = prepareCourtOnlyTrialV2({ state, graph, privateCase });
@@ -12657,7 +13617,7 @@ export function applyDebateMysteryActionV2(
       state = prepareSpectatorTheoryV2({ state, graph, privateCase });
     } else if (state.playPhase === "title_card") {
       if (request.roomId) {
-        throw new HttpError(409, "Dismiss the Casekeeper briefing before entering a room.");
+        throw new HttpError(409, "Finish the opening thought before entering a room.");
       }
       state.playPhase = "case_opening";
       const crimeScene = state.rooms.find(
@@ -12667,7 +13627,7 @@ export function applyDebateMysteryActionV2(
       if (crimeScene.sealedAsset?.status === "pending") {
         throw new HttpError(
           409,
-          "The Casekeeper is still securing this room. Try again shortly.",
+          "The incident scene is still being prepared. Try again shortly.",
           "MYSTERY_ROOM_BEING_SECURED",
         );
       }
@@ -12675,9 +13635,9 @@ export function applyDebateMysteryActionV2(
       crimeScene.accessState = "visited";
       state.currentRoomId = crimeScene.id;
       state.roomView = "room";
-      if (crimeScene.sealedAsset) authorizeAsset("room", crimeScene.id);
+      authorizeAsset("room", crimeScene.id);
     } else if (state.playPhase === "case_opening") {
-      throw new HttpError(409, "Dismiss the Casekeeper briefing before moving through the mansion.");
+      throw new HttpError(409, "Finish the opening thought before moving through the mansion.");
     }
     if (!spectator && !courtOnly) {
       if (state.playPhase === "case_opening") {
@@ -12694,7 +13654,7 @@ export function applyDebateMysteryActionV2(
           if (room.sealedAsset?.status === "pending") {
             throw new HttpError(
               409,
-              "The Casekeeper is still securing this room. Try again shortly.",
+              "This room is still being prepared. Try again shortly.",
               "MYSTERY_ROOM_BEING_SECURED",
             );
           }
@@ -12716,7 +13676,7 @@ export function applyDebateMysteryActionV2(
           room.accessState = "visited";
           state.currentRoomId = room.id;
           state.roomView = "room";
-          if (room.sealedAsset) authorizeAsset("room", room.id);
+          authorizeAsset("room", room.id);
           const introduction = graph.roomIntroductionNodeIdsByRoom?.[room.id];
           if (introduction && state.roomIntroductions[room.id] === "unseen") {
             state = executeDialogueNodeV2({
@@ -12732,7 +13692,7 @@ export function applyDebateMysteryActionV2(
     }
   } else if (request.action === "dismiss_case_opening") {
     if (spectator || courtOnly || state.playPhase !== "case_opening") {
-      throw new HttpError(409, "The Casekeeper briefing is not awaiting dismissal.");
+      throw new HttpError(409, "The opening thought is not awaiting dismissal.");
     }
     state.playPhase = "investigation";
     state.roomView = "room";
@@ -12765,9 +13725,21 @@ export function applyDebateMysteryActionV2(
     }
     const introduction = graph.roomIntroductionNodeIdsByRoom?.[request.roomId];
     if (!introduction || state.roomIntroductions[request.roomId] !== "casekeeper") {
-      throw new HttpError(409, "That room introduction is not waiting for the Casekeeper beat.");
+      throw new HttpError(409, "That room introduction is not waiting for the player's thought beat.");
     }
-    state = executeDialogueNodeV2({ state, graph, privateCase, nodeId: introduction.personaNodeId });
+    const openingNodeIds = introduction.openingExchangeNodeIds
+      ? [
+          introduction.openingExchangeNodeIds.prosecutionOpeningNodeId,
+          introduction.openingExchangeNodeIds.occupantResponseNodeId,
+          introduction.openingExchangeNodeIds.prosecutionHandoffNodeId,
+        ]
+      : [introduction.personaNodeId];
+    for (const nodeId of openingNodeIds) {
+      state = executeDialogueNodeV2({ state, graph, privateCase, nodeId });
+    }
+    state.metSuspectSeatIds = [
+      ...new Set([...state.metSuspectSeatIds, introduction.suspectSeatId]),
+    ];
     state.roomIntroductions = { ...state.roomIntroductions, [request.roomId]: "persona" };
   } else if (request.action === "complete_room_introduction") {
     if (state.playPhase !== "investigation" || state.roomView !== "room" || state.currentRoomId !== request.roomId) {

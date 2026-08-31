@@ -588,6 +588,12 @@ test("normalizes the versioned four-exchange Flyting record", () => {
   ]);
   assert.equal(state.bout?.flyters[0].epithet, "The Red Wanderer");
   assert.deepEqual(state.bout?.forbiddenTopics, ["children"]);
+  assert.equal(state.hallMembers.length, 15);
+  assert.ok(state.hallMembers.every((member) => member.leaning === "neutral"));
+  assert.equal(state.jarlGuards.length, 3);
+  assert.ok(state.jarlGuards.every((guard) => guard.sideId === null));
+  assert.deepEqual(state.hallLeaningHistory, []);
+  assert.equal(state.finalTally, null);
 });
 
 test("defaults legacy Debate records to Forum and normalizes Turnabout state", () => {

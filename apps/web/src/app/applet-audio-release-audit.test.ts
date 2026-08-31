@@ -12,7 +12,7 @@ type ReleasePath = {
  * Silent preparation, natural-ended cleanup, recorders, animation handles,
  * and scheduled source ends are intentionally outside this matrix. */
 const APPLET_AUDIO_RELEASE_PATHS: readonly ReleasePath[] = [
-  { owner: "shared realtime voice", file: "voiceEffects.ts", evidence: /export function stopRealtimeVoiceAudio\([\s\S]{0,280}releaseRealtimeVoiceAudio/u },
+  { owner: "shared realtime voice", file: "voiceEffects.ts", evidence: /export function stopRealtimeVoiceAudio\([\s\S]{0,520}releaseRealtimeVoiceAudio/u },
   { owner: "English voice", file: "englishVoice.ts", evidence: /export function stopEnglishVoice\([\s\S]{0,180}releaseEnglishVoice\(options\)/u },
   { owner: "Bottish voice", file: "bottishVoice.ts", evidence: /export function stopBottishVoice\([\s\S]{0,180}releaseBottishVoice\(options\)/u },
   { owner: "Signal ident and outro", file: "signalIntroAudio.ts", evidence: /export function stopSignalIntroAudio\(\): void \{\s*releaseSignalIntroAudio\(\)/u },

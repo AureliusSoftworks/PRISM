@@ -9,6 +9,8 @@ import {
   debateAudienceConversationFacing,
   debateAudienceDepartureXPercent,
   debateAudienceFrontRowCenterIndex,
+  debateFlytingHallNpcBots,
+  debateFlytingAudienceMillingPlan,
   debateAudienceRandom,
   debateAudienceSeatLayout,
   debateAudienceSeatIsTalker,
@@ -44,6 +46,16 @@ describe("Debate audience casting", () => {
     assert.equal(debateAudienceBotCount("low"), 9);
     assert.equal(debateAudienceBotCount("medium"), 13);
     assert.equal(debateAudienceBotCount("high"), 15);
+  });
+
+  it("seeds Flyting's fifteen spectators and three guards as generic stable PRISM bodies", () => {
+    const first = debateFlytingHallNpcBots("flyting-session", 18);
+    const second = debateFlytingHallNpcBots("flyting-session", 18);
+    assert.deepEqual(first, second);
+    assert.equal(first.length, 18);
+    assert.equal(new Set(first.map((bot) => bot.id)).size, 18);
+    assert.ok(first.every(debateAudienceBotIsGenerated));
+    assert.ok(first.every((bot) => bot.systemPrompt === ""));
   });
 
   it("interleaves a slightly smaller rear row behind the foreground audience", () => {
@@ -195,6 +207,42 @@ describe("Debate audience casting", () => {
     assert.ok(paths.some((path) => path > 0));
     assert.ok(
       paths.every((path) => Math.abs(path) >= 175 && Math.abs(path) <= 325),
+    );
+  });
+
+  it("gives Flyting spectators stable, varied motion within their crowd row", () => {
+    const frontPlans = Array.from({ length: 18 }, (_, index) =>
+      debateFlytingAudienceMillingPlan(`hall:seat-${index}`, "front"),
+    );
+    const rearPlans = Array.from({ length: 18 }, (_, index) =>
+      debateFlytingAudienceMillingPlan(`hall:seat-${index}`, "rear"),
+    );
+
+    assert.deepEqual(
+      frontPlans,
+      Array.from({ length: 18 }, (_, index) =>
+        debateFlytingAudienceMillingPlan(`hall:seat-${index}`, "front"),
+      ),
+    );
+    assert.ok(new Set(frontPlans.map((plan) => plan.offsetXPercent)).size > 8);
+    assert.ok(frontPlans.every((plan) => Math.abs(plan.offsetXPercent) <= 13));
+    assert.ok(frontPlans.every((plan) => Math.abs(plan.offsetYPercent) <= 7));
+    assert.ok(frontPlans.every((plan) => Math.abs(plan.driftXPercent) <= 10));
+    assert.ok(frontPlans.every((plan) => Math.abs(plan.driftYPercent) <= 5));
+    assert.ok(
+      frontPlans.every(
+        (plan) => plan.durationMs >= 4_200 && plan.durationMs <= 6_900,
+      ),
+    );
+    assert.ok(
+      frontPlans.every(
+        (plan) => plan.depthScale >= 0.92 && plan.depthScale <= 1.04,
+      ),
+    );
+    assert.ok(
+      rearPlans.every(
+        (plan) => plan.depthScale >= 0.78 && plan.depthScale <= 0.91,
+      ),
     );
   });
 });

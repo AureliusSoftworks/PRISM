@@ -2,14 +2,16 @@
 
 import {
   DEBATE_FLYTING_LINE_MAX_LENGTH,
+  DEBATE_FLYTING_AUDIENCE_COUNT,
+  DEBATE_FLYTING_JARL_GUARD_COUNT,
   DEBATE_FORMAT_CATALOG,
   DEBATE_FORMALITY_SPECTRUM,
   DEBATE_FORMAT_VISUAL_THEMES,
-  DEBATE_JURY_SIZE,
   DEBATE_SCHEMA_VERSION,
   debateSpokenText,
   hexToHsl,
   normalizeBotIdentityColor,
+  normalizeDebateFlytingFormatStateV1,
   DEBATE_SETUP_PRESETS,
   type DebateAdvocacyConsent,
   type DebateBotSnapshotV1,
@@ -19,6 +21,7 @@ import {
   type DebateFlytingBoutV1,
   type DebateFlytingChargeKindV1,
   type DebateFlytingFormatStateV1,
+  type DebateFlytingHallLeaningV1,
   type DebateFlytingManeuverV1,
   type DebateSessionV1,
   type DebateSideId,
@@ -53,6 +56,29 @@ import {
   debateFlytingRitualCueForEvent,
   playDebateFlytingRitualCue,
 } from "./debateFlytingAudio";
+import {
+  DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT,
+  DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS,
+  copyDebateFlytingStageAlignment,
+  formatDebateFlytingStageAlignmentClipboard,
+  updateDebateFlytingStagePlacement,
+  type DebateFlytingStageAlignmentItem,
+  type DebateFlytingStageAlignmentV1,
+  type DebateFlytingStageAlignmentView,
+  type DebateFlytingStagePlacementV1,
+} from "./debateFlytingStageAlignment";
+import {
+  debateAudienceConversationFacing,
+  debateFlytingAudienceMillingPlan,
+  debateAudienceSeatLayout,
+  debateFlytingHallNpcBots,
+} from "./debateAudience";
+import { prismDeveloperAuthoringEnabled } from "./prismDevGating";
+import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
+import {
+  DEBATE_AUDIENCE_CROSSTALK_URL,
+  DEBATE_AUDIENCE_MURMUR_URL,
+} from "./debateFoley";
 import { debateFlytingHallPresentation } from "./debateFlytingHallPresentation";
 import type { DebateBotAvatarState } from "./DebateExperience";
 import type { VoicePlaybackCharacterAlignment } from "./voiceEffects";
@@ -116,7 +142,6 @@ export interface DebateFlytingLiveProps extends FlytingRuntimeProps {
     lifecycle?: FlytingVoiceLifecycle,
   ) => Promise<void>;
   onSessionChange: (session: DebateSessionV1) => void;
-  onExit: () => void;
 }
 
 interface FlytingVoiceLifecycle {
@@ -132,6 +157,93 @@ interface FlytingVoiceLifecycle {
 type FlytingSetupStep = "summon" | "cast" | "forge" | "review";
 type FlytingPlayerRole = "participant" | "judge" | "spectator";
 type FlytingCastSeat = "for" | "against" | "host";
+type FlytingCameraView = "wide" | "left" | "moderator" | "right";
+type FlytingCameraMode = "auto" | FlytingCameraView;
+type FlytingStageRole = "for" | "moderator" | "against";
+
+const DEBATE_FLYTING_STAGE_LAYOUT_AUTHORING_ENABLED =
+  prismDeveloperAuthoringEnabled({
+    NODE_ENV: process.env.NODE_ENV,
+    NEXT_PUBLIC_PRISM_BRANCH: process.env.NEXT_PUBLIC_PRISM_BRANCH,
+  });
+
+const FLYTING_ALIGNMENT_BY_ROLE = {
+  wide: {
+    for: {
+      bot: "wideForBot",
+      helmet: "wideForHelmet",
+      nameplate: "wideForNameplate",
+      heraldry: "wideForHeraldry",
+    },
+    moderator: {
+      bot: "wideModeratorBot",
+      helmet: "wideModeratorHelmet",
+      nameplate: "wideModeratorNameplate",
+      heraldry: "wideModeratorHeraldry",
+    },
+    against: {
+      bot: "wideAgainstBot",
+      helmet: "wideAgainstHelmet",
+      nameplate: "wideAgainstNameplate",
+      heraldry: "wideAgainstHeraldry",
+    },
+  },
+  moderator: {
+    for: { heraldry: "moderatorForHeraldry" },
+    moderator: {
+      bot: "moderatorModeratorBot",
+      helmet: "moderatorModeratorHelmet",
+      nameplate: "moderatorModeratorNameplate",
+      heraldry: "moderatorModeratorHeraldry",
+    },
+    against: { heraldry: "moderatorAgainstHeraldry" },
+  },
+  gallery: {
+    for: { rugGlyph: "galleryForRugGlyph" },
+    moderator: { rugGlyph: "galleryModeratorRugGlyph" },
+    against: { rugGlyph: "galleryAgainstRugGlyph" },
+  },
+} as const satisfies Record<
+  DebateFlytingStageAlignmentView,
+  Partial<
+    Record<
+      FlytingStageRole,
+      Partial<
+        Record<
+          "bot" | "helmet" | "nameplate" | "heraldry" | "rugGlyph",
+          DebateFlytingStageAlignmentItem
+        >
+      >
+    >
+  >
+>;
+
+function flytingStageAlignmentItemFor(
+  view: DebateFlytingStageAlignmentView,
+  role: FlytingStageRole,
+  kind: "bot" | "helmet" | "nameplate" | "heraldry" | "rugGlyph",
+): DebateFlytingStageAlignmentItem | null {
+  const roleMap = FLYTING_ALIGNMENT_BY_ROLE[view][role] as
+    | Partial<
+        Record<
+          "bot" | "helmet" | "nameplate" | "heraldry" | "rugGlyph",
+          DebateFlytingStageAlignmentItem
+        >
+      >
+    | undefined;
+  return roleMap?.[kind] ?? null;
+}
+
+const FLYTING_CAMERA_VIEWS: ReadonlyArray<{
+  id: FlytingCameraMode;
+  label: string;
+}> = [
+  { id: "auto", label: "Auto" },
+  { id: "left", label: "Left" },
+  { id: "moderator", label: "Host" },
+  { id: "right", label: "Right" },
+  { id: "wide", label: "Wide" },
+];
 
 const FLYTING_SETUP_STEPS: ReadonlyArray<{
   id: FlytingSetupStep;
@@ -150,7 +262,11 @@ const CHALLENGE_LENSES: ReadonlyArray<{
   detail: string;
 }> = [
   { id: "doubt", label: "Doubt", detail: "Question its truth or scale" },
-  { id: "expose", label: "Expose", detail: "Reveal contradiction or hypocrisy" },
+  {
+    id: "expose",
+    label: "Expose",
+    detail: "Reveal contradiction or hypocrisy",
+  },
   { id: "belittle", label: "Belittle", detail: "Make the strength look small" },
   { id: "outdo", label: "Outdo", detail: "Answer with a greater boast" },
 ];
@@ -201,7 +317,62 @@ function botColor(
   bot: { color: string | null } | undefined,
   fallback: string,
 ): string {
-  return normalizeBotIdentityColor(bot?.color) ?? normalizeBotIdentityColor(fallback) ?? fallback;
+  return (
+    normalizeBotIdentityColor(bot?.color) ??
+    normalizeBotIdentityColor(fallback) ??
+    fallback
+  );
+}
+
+function flytingKeyVisibilityBoost(color: string): number {
+  const { h, s, l } = hexToHsl(color);
+  const isWarmRed = s >= 18 && (h >= 340 || h <= 38);
+  if (!isWarmRed) return 1;
+  return l < 42 ? 1.28 : 1.18;
+}
+
+function flytingAlignmentStyle(
+  placement: DebateFlytingStagePlacementV1,
+): CSSProperties {
+  return {
+    "--flyting-align-x": `${placement.x}%`,
+    "--flyting-align-y": `${placement.y}%`,
+    "--flyting-align-scale": placement.scale / 100,
+    "--flyting-align-rotation": `${placement.rotation}deg`,
+    "--flyting-align-skew-x": `${placement.skewX}deg`,
+  } as CSSProperties;
+}
+
+async function writeFlytingAlignmentClipboard(text: string): Promise<void> {
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Local HTTP authoring can still use the explicit copy fallback.
+    }
+  }
+
+  const previouslyFocused =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  try {
+    if (!document.execCommand("copy")) {
+      throw new Error("Clipboard copy command failed.");
+    }
+  } finally {
+    textarea.remove();
+    previouslyFocused?.focus();
+  }
 }
 
 function flytingCastBotHue(bot: { color: string | null }): number | null {
@@ -254,9 +425,13 @@ function FlytingStudioSeat(props: {
       style={{ "--flyting-bot-color": color } as CSSProperties}
     >
       <span aria-hidden="true">
-        {props.symbol ?? (props.bot
-          ? props.renderBotGlyph(props.bot.glyph, { size: 25, strokeWidth: 1.2 })
-          : "◇")}
+        {props.symbol ??
+          (props.bot
+            ? props.renderBotGlyph(props.bot.glyph, {
+                size: 25,
+                strokeWidth: 1.2,
+              })
+            : "◇")}
       </span>
       <small>{props.label}</small>
       <strong>{props.name}</strong>
@@ -273,10 +448,12 @@ function FlytingAtmosphereControl(): React.JSX.Element {
       data-disabled="true"
       data-tutorial-target="debate-rowdiness"
       aria-disabled="true"
-      style={{
-        "--debate-rowdiness-accent": "var(--debate-studio-accent)",
-        "--debate-rowdiness-progress": "100%",
-      } as CSSProperties}
+      style={
+        {
+          "--debate-rowdiness-accent": "var(--debate-studio-accent)",
+          "--debate-rowdiness-progress": "100%",
+        } as CSSProperties
+      }
     >
       <div className={studioStyles.rowdinessReadout}>
         <span>Atmosphere</span>
@@ -295,7 +472,9 @@ function FlytingAtmosphereControl(): React.JSX.Element {
                 <i
                   key={level.id}
                   data-reached="true"
-                  data-current={index === lastAtmosphereIndex ? "true" : undefined}
+                  data-current={
+                    index === lastAtmosphereIndex ? "true" : undefined
+                  }
                 />
               ))}
             </span>
@@ -331,8 +510,7 @@ export function DebateFlytingSetup(
   const [forBotId, setForBotId] = useState(props.bots[0]?.id ?? "");
   const [againstBotId, setAgainstBotId] = useState(props.bots[1]?.id ?? "");
   const [hostBotId, setHostBotId] = useState(props.bots[2]?.id ?? "");
-  const [activeCastSeat, setActiveCastSeat] =
-    useState<FlytingCastSeat>("for");
+  const [activeCastSeat, setActiveCastSeat] = useState<FlytingCastSeat>("for");
   const [castPickerSearch, setCastPickerSearch] = useState("");
   const [castPickerGroupId, setCastPickerGroupId] = useState("all");
   const [castHueLensCenter, setCastHueLensCenter] = useState<number | null>(
@@ -368,9 +546,12 @@ export function DebateFlytingSetup(
     (!needsBotHost ||
       (hostBot && hostBot.id !== forBot.id && hostBot.id !== againstBot.id)),
   );
-  const consentReady = checks.length === 2 && checks.every((check) =>
-    check.status === "accept" || check.status === "devils_advocate",
-  );
+  const consentReady =
+    checks.length === 2 &&
+    checks.every(
+      (check) =>
+        check.status === "accept" || check.status === "devils_advocate",
+    );
   const stepReady: Record<FlytingSetupStep, boolean> = {
     summon: true,
     cast: castReady,
@@ -378,18 +559,19 @@ export function DebateFlytingSetup(
     review: consentReady,
   };
   const readinessCount = Object.values(stepReady).filter(Boolean).length;
-  const roleLabel = playerRole === "participant"
-    ? `Coach · ${playerSideId === "for" ? "Pro" : "Con"}`
-    : playerRole === "judge"
-      ? "Host of the Hall"
-      : "Spectator";
-  const hostName = playerRole === "judge"
-    ? "You"
-    : hostBot?.name ?? "Surprise";
+  const roleLabel =
+    playerRole === "participant"
+      ? `Coach · ${playerSideId === "for" ? "Pro" : "Con"}`
+      : playerRole === "judge"
+        ? "Host of the Hall"
+        : "Spectator";
+  const hostName =
+    playerRole === "judge" ? "You" : (hostBot?.name ?? "Surprise");
   const flytingTheme = DEBATE_FORMAT_VISUAL_THEMES.flyting;
-  const setupAccent = props.theme === "light"
-    ? flytingTheme.accentLight
-    : flytingTheme.accentDark;
+  const setupAccent =
+    props.theme === "light"
+      ? flytingTheme.accentLight
+      : flytingTheme.accentDark;
   const proceedingTitle = consentReady
     ? "Ready to open"
     : bout
@@ -453,10 +635,7 @@ export function DebateFlytingSetup(
           rightHue !== null &&
           castHueLensCenter !== null
         ) {
-          const leftDistance = circularHueDistance(
-            leftHue,
-            castHueLensCenter,
-          );
+          const leftDistance = circularHueDistance(leftHue, castHueLensCenter);
           const rightDistance = circularHueDistance(
             rightHue,
             castHueLensCenter,
@@ -519,8 +698,7 @@ export function DebateFlytingSetup(
     bot: FlytingBotSummary,
   ): string | null =>
     occupiedCastSeats.some(
-      ([seat, botId]) =>
-        seat !== effectiveActiveCastSeat && botId === bot.id,
+      ([seat, botId]) => seat !== effectiveActiveCastSeat && botId === bot.id,
     )
       ? "Already seated in the contest"
       : null;
@@ -540,10 +718,7 @@ export function DebateFlytingSetup(
         ? "Con flyter"
         : "Host of the Hall";
 
-  const assignBotToCastSeat = (
-    seat: FlytingCastSeat,
-    botId: string,
-  ): void => {
+  const assignBotToCastSeat = (seat: FlytingCastSeat, botId: string): void => {
     const bot = botById.get(botId);
     if (!bot || castPickerBotUnavailableReason(bot)) return;
     if (seat === "for") setForBotId(bot.id);
@@ -582,11 +757,7 @@ export function DebateFlytingSetup(
   }): React.JSX.Element => {
     const fixedPlayerHost = seat === "host" && !needsBotHost;
     const botId =
-      seat === "for"
-        ? forBotId
-        : seat === "against"
-          ? againstBotId
-          : hostBotId;
+      seat === "for" ? forBotId : seat === "against" ? againstBotId : hostBotId;
     const bot = fixedPlayerHost ? undefined : botById.get(botId);
     const active = !fixedPlayerHost && effectiveActiveCastSeat === seat;
     const emptyName = seat === "host" ? "Choose a Host" : "Choose a flyter";
@@ -618,7 +789,9 @@ export function DebateFlytingSetup(
           </span>
           <span>
             <small>{label}</small>
-            <strong>{fixedPlayerHost ? "You" : bot?.name ?? emptyName}</strong>
+            <strong>
+              {fixedPlayerHost ? "You" : (bot?.name ?? emptyName)}
+            </strong>
             {fixedPlayerHost ? <em>Final ruling · Fixed</em> : null}
             {bot?.hardMuted ? <em>Hard-muted</em> : null}
           </span>
@@ -638,12 +811,18 @@ export function DebateFlytingSetup(
   };
 
   const chooseStep = (next: FlytingSetupStep): void => {
-    const index = FLYTING_SETUP_STEPS.findIndex((candidate) => candidate.id === next);
-    const current = FLYTING_SETUP_STEPS.findIndex((candidate) => candidate.id === step);
-    if (index <= current ||
-      (next === "cast") ||
+    const index = FLYTING_SETUP_STEPS.findIndex(
+      (candidate) => candidate.id === next,
+    );
+    const current = FLYTING_SETUP_STEPS.findIndex(
+      (candidate) => candidate.id === step,
+    );
+    if (
+      index <= current ||
+      next === "cast" ||
       (next === "forge" && castReady) ||
-      (next === "review" && bout)) {
+      (next === "review" && bout)
+    ) {
       setStep(next);
     }
   };
@@ -677,7 +856,11 @@ export function DebateFlytingSetup(
       setBout(result.bout);
       setStep("review");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The Bout Forge could not temper this contest.");
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The Bout Forge could not temper this contest.",
+      );
     } finally {
       setBusy(false);
     }
@@ -715,7 +898,11 @@ export function DebateFlytingSetup(
       setChecks(result.checks);
       return result.checks;
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The flyters could not review their roles.");
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The flyters could not review their roles.",
+      );
       return null;
     } finally {
       setBusy(false);
@@ -727,9 +914,14 @@ export function DebateFlytingSetup(
     let acceptedChecks = checks;
     if (!consentReady) {
       const refreshed = await secureConsent();
-      if (!refreshed || !refreshed.every((check) =>
-        check.status === "accept" || check.status === "devils_advocate",
-      )) return;
+      if (
+        !refreshed ||
+        !refreshed.every(
+          (check) =>
+            check.status === "accept" || check.status === "devils_advocate",
+        )
+      )
+        return;
       acceptedChecks = refreshed;
     }
     setBusy(true);
@@ -758,8 +950,7 @@ export function DebateFlytingSetup(
           playerRole,
           playerSideId: playerRole === "participant" ? playerSideId : null,
           jury: {
-            enabled: true,
-            cadence: "four-plus-moderator",
+            enabled: false,
           },
           advocacyConsent: acceptedChecks,
           preferredProvider:
@@ -774,13 +965,19 @@ export function DebateFlytingSetup(
         }),
       );
       if (deferStart) {
-        setSavedNotice("Saved to Archive · Open. The approved legends and Hall cast are frozen.");
+        setSavedNotice(
+          "Saved to Archive · Open. The approved legends and Hall cast are frozen.",
+        );
         props.onSaved(result.session);
       } else {
         props.onStart(result.session);
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The Hall doors would not open.");
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The Hall doors would not open.",
+      );
     } finally {
       setBusy(false);
     }
@@ -840,8 +1037,8 @@ export function DebateFlytingSetup(
               data-complete={stepReady[item.id] ? "true" : undefined}
               aria-pressed={step === item.id}
               disabled={
-                item.id === "forge" && !castReady ||
-                item.id === "review" && !bout
+                (item.id === "forge" && !castReady) ||
+                (item.id === "review" && !bout)
               }
               onClick={() => chooseStep(item.id)}
             >
@@ -861,7 +1058,8 @@ export function DebateFlytingSetup(
             <span>↳</span>
             <strong>Archive</strong>
             <small>
-              {props.archiveCount} proceeding{props.archiveCount === 1 ? "" : "s"}
+              {props.archiveCount} proceeding
+              {props.archiveCount === 1 ? "" : "s"}
             </small>
             <i aria-hidden="true">›</i>
           </button>
@@ -875,9 +1073,11 @@ export function DebateFlytingSetup(
             </strong>
             <div aria-hidden="true">
               <i
-                style={{
-                  "--debate-readiness": `${readinessCount / 4}`,
-                } as CSSProperties}
+                style={
+                  {
+                    "--debate-readiness": `${readinessCount / 4}`,
+                  } as CSSProperties
+                }
               />
             </div>
           </div>
@@ -888,474 +1088,737 @@ export function DebateFlytingSetup(
             className={`${studioStyles.setupPanel} ${studioStyles.dashboardPanel} ${styles.setupPanel}`}
             data-debate-dashboard-section={step}
           >
-          {step === "summon" ? (
-            <>
-              <header className={styles.panelHeading}>
-                <div>
-                  <small>01 / Summon</small>
-                  <h2>Choose your place in the Hall</h2>
-                  <p>Choose whether you coach a voice, hold the final word, or watch the contest unfold.</p>
-                </div>
-                <span>No timer · four exchanges</span>
-              </header>
-              <section
-                className={studioStyles.roomTuning}
-                data-tutorial-target="debate-room"
-                data-flyting-selector="true"
-              >
-                <header>
-                  <span aria-hidden="true">◇</span>
-                  <span>
-                    <strong>Tune the Hall</strong>
-                    <small>Flyting · Mead Hall · Four exchanges</small>
-                  </span>
-                  <em>Always visible</em>
-                </header>
-                <div className={studioStyles.roomTuningBody}>
-                  <div
-                    className={studioStyles.proceedingPresets}
-                    data-tutorial-target="debate-presets"
-                  >
-                    <div>
-                      <span>Proceeding preset</span>
-                      <strong>Custom</strong>
-                    </div>
-                    <div role="group" aria-label="Debate proceeding presets">
-                      {DEBATE_SETUP_PRESETS.map((preset) => (
-                        <button
-                          type="button"
-                          key={preset.id}
-                          className={styles.flytingPresetControl}
-                          disabled
-                          title="Presets tune Forum and Turnabout; Flyting keeps its own Hall rules."
-                        >
-                          {preset.name}
-                        </button>
-                      ))}
-                      <span className={studioStyles.customPresetChip}>Custom</span>
-                    </div>
-                  </div>
-                  <FlytingAtmosphereControl />
-                  <fieldset
-                    className={`${studioStyles.formatPicker} ${styles.flytingFormatPicker}`}
-                    data-tutorial-target="debate-format"
-                  >
-                    <legend>Debate format</legend>
-                    {DEBATE_FORMAT_CATALOG.filter(
-                      (option) => option.availability === "available",
-                    ).map((option) => (
-                      <label
-                        key={option.id}
-                        data-selected={option.id === "flyting" ? "true" : undefined}
-                        data-tutorial-target={
-                          option.id === "flyting" ? "debate-format-flyting" : undefined
-                        }
-                      >
-                        <input
-                          type="radio"
-                          name="flyting-debate-format"
-                          value={option.id}
-                          checked={option.id === "flyting"}
-                          onChange={() => {
-                            if (option.id !== "flyting") {
-                              props.onFormatChange(option.id as DebateFormatId);
-                            }
-                          }}
-                        />
-                        <strong>
-                          {option.name}
-                          <em>{option.productionName}</em>
-                        </strong>
-                        <span>{option.summary}</span>
-                        <small>{option.cadence}</small>
-                      </label>
-                    ))}
-                  </fieldset>
-                  <div
-                    className={`${studioStyles.proceedingPresets} ${styles.flytingCoachChoice}`}
-                    data-tutorial-target="debate-flyting-side"
-                  >
-                    <div>
-                      <span>Which flyter will you coach?</span>
-                      <strong>
-                        {playerRole === "participant"
-                          ? playerSideId === "for" ? "Pro · left" : "Con · right"
-                          : "Not assigned"}
-                      </strong>
-                    </div>
-                    {playerRole === "participant" ? (
-                      <div
-                        className={styles.flytingCoachChoiceControls}
-                        role="radiogroup"
-                        aria-label="Which flyter will you coach"
-                      >
-                        <label data-selected={playerSideId === "for" ? "true" : undefined}>
-                          <input
-                            type="radio"
-                            name="flyting-side-selector"
-                            value="for"
-                            checked={playerSideId === "for"}
-                            onChange={() => { setPlayerSideId("for"); setChecks([]); }}
-                          />
-                          Pro · left
-                        </label>
-                        <label data-selected={playerSideId === "against" ? "true" : undefined}>
-                          <input
-                            type="radio"
-                            name="flyting-side-selector"
-                            value="against"
-                            checked={playerSideId === "against"}
-                            onChange={() => { setPlayerSideId("against"); setChecks([]); }}
-                          />
-                          Con · right
-                        </label>
-                      </div>
-                    ) : (
-                      <span className={styles.flytingCoachChoiceUnavailable}>
-                        Host or watch the rite
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </section>
-              <div className={styles.roleCards} role="radiogroup" aria-label="Flyting role">
-                {([
-                  ["participant", "Coach a flyter", "Choose tactics, author or Wield a line, and hear your bot perform it."],
-                  ["judge", "Host the contest", "Hear four Hall votes, then crown the winner yourself."],
-                  ["spectator", "Watch the rite", "Let both flyters and the Host carry the full contest."],
-                ] as const).map(([id, label, detail]) => (
-                  <label key={id} data-selected={playerRole === id ? "true" : undefined}>
-                    <input
-                      type="radio"
-                      name="flyting-role"
-                      value={id}
-                      checked={playerRole === id}
-                      onChange={() => choosePlayerRole(id)}
-                    />
-                    <strong>{label}</strong>
-                    <span>{detail}</span>
-                  </label>
-                ))}
-              </div>
-              <label className={styles.field}>
-                <span><strong>Rivalry Spark</strong><em>Optional</em></span>
-                <textarea
-                  rows={4}
-                  value={rivalrySpark}
-                  maxLength={800}
-                  placeholder="Leave blank for Surprise me—or name the absurd grudge, disputed glory, or impossible pairing."
-                  onChange={(event) => { setRivalrySpark(event.currentTarget.value); invalidateForge(); }}
-                />
-              </label>
-              <label className={styles.field}>
-                <span><strong>Subjects the Hall must avoid</strong><em>Optional · one per line</em></span>
-                <textarea
-                  rows={3}
-                  value={forbiddenTopics}
-                  maxLength={900}
-                  placeholder="Add boundaries beyond PRISM’s permanent sporting-but-cutting rules."
-                  onChange={(event) => { setForbiddenTopics(event.currentTarget.value); invalidateForge(); }}
-                />
-              </label>
-              <footer className={styles.panelActions}>
-                <button type="button" className={styles.primaryAction} onClick={() => setStep("cast")}>Enter the Cast</button>
-              </footer>
-            </>
-          ) : null}
-
-          {step === "cast" ? (
-            <>
-              <header className={styles.panelHeading}>
-                <div>
-                  <small>02 / Cast</small>
-                  <h2>Seat the contest</h2>
-                  <p>Select Pro, Con, or the Host, then choose that voice from the Library. PRISM fills the gallery automatically.</p>
-                </div>
-                <span>{activeCastSeatLabel} · Active seat</span>
-              </header>
-              <div
-                className={styles.flytingCastRoster}
-                data-tutorial-target="debate-flyting-cast"
-              >
-                <div
-                  className={`${studioStyles.castSlotGrid} ${styles.flytingPrincipalCast}`}
-                  data-seat-count="3"
-                >
-                  {renderFlytingCastSeat({
-                    seat: "for",
-                    label: "Pro · left",
-                    fallback: "#d8b25d",
-                  })}
-                  {renderFlytingCastSeat({
-                    seat: "against",
-                    label: "Con · right",
-                    fallback: "#c56b53",
-                  })}
-                  {renderFlytingCastSeat({
-                    seat: "host",
-                    label: "Host · fifth vote",
-                    fallback: "#78c8b2",
-                  })}
-                </div>
-                <div className={styles.gallerySeed}>
-                  <span aria-hidden="true">᛫ ᛫</span>
+            {step === "summon" ? (
+              <>
+                <header className={styles.panelHeading}>
                   <div>
-                    <strong>PRISM fills the gallery.</strong>
-                    <small>Four distinct eligible library bots are drawn when you Save or open the Hall, then frozen with the proceeding.</small>
+                    <small>01 / Summon</small>
+                    <h2>Choose your place in the Hall</h2>
+                    <p>
+                      Choose whether you coach a voice, hold the final word, or
+                      watch the contest unfold.
+                    </p>
                   </div>
-                </div>
-              </div>
-              <div className={`${studioStyles.castPicker} ${styles.flytingCastPicker}`}>
-                <BotPickerToolbar
-                  searchValue={castPickerSearch}
-                  onSearchChange={setCastPickerSearch}
-                  searchAriaLabel="Search bots for Flyting"
-                  searchPlaceholder="Search the Library…"
-                  groups={flytingPickerGroups}
-                  groupItems={props.bots}
-                  groupValue={effectiveCastPickerGroupId}
-                  onGroupChange={setCastPickerGroupId}
-                  groupTheme={props.theme}
-                  resultLabel={`${visibleCastBots.length} bot${visibleCastBots.length === 1 ? "" : "s"}`}
-                  singleActionableResult={singleActionableCastPickerBot}
-                  onSingleActionableResultSelect={chooseCastPickerBot}
-                />
-                <div
-                  className={studioStyles.castPickerBody}
-                  data-hue-lens={castHueLensAvailable ? "true" : undefined}
+                  <span>No timer · four exchanges</span>
+                </header>
+                <section
+                  className={studioStyles.roomTuning}
+                  data-tutorial-target="debate-room"
+                  data-flyting-selector="true"
                 >
-                  {visibleCastBots.length > 0 ? (
+                  <header>
+                    <span aria-hidden="true">◇</span>
+                    <span>
+                      <strong>Tune the Hall</strong>
+                      <small>Flyting · Mead Hall · Four exchanges</small>
+                    </span>
+                    <em>Always visible</em>
+                  </header>
+                  <div className={studioStyles.roomTuningBody}>
                     <div
-                      ref={castPickerGridShellRef}
-                      className={studioStyles.castPickerGridShell}
+                      className={studioStyles.proceedingPresets}
+                      data-tutorial-target="debate-presets"
                     >
-                      <BotPickerGrid
-                        className={`${studioStyles.castPickerGrid} ${styles.flytingCastPickerGrid}`}
-                        role="radiogroup"
-                        ariaLabel={`Bot for ${activeCastSeatLabel}`}
-                        style={
-                          {
-                            "--tile-size": "82px",
-                            "--tile-gap": "9px",
-                            "--tile-hover-scale": "1.055",
-                          } as CSSProperties
-                        }
-                      >
-                        {visibleCastBots.map((bot) => {
-                          const selected = activeCastBotId === bot.id;
-                          const unavailableReason =
-                            castPickerBotUnavailableReason(bot);
-                          return (
-                            <BotPickerTile
-                              key={bot.id}
-                              item={bot}
-                              selected={selected}
-                              forceName
-                              accentColor={bot.color ?? "#8f7cff"}
-                              geometry={{
-                                tileSize: 82,
-                                glyphSize: 29,
-                                glyphStroke: 1.65,
-                                namedFlatTile: true,
-                              }}
-                              renderGlyph={props.renderBotGlyph}
-                              className={`${studioStyles.castPickerTile} ${styles.flytingCastPickerTile}`}
-                              buttonProps={{
-                                role: "radio",
-                                "aria-checked": selected,
-                                "aria-disabled": unavailableReason
-                                  ? true
-                                  : undefined,
-                                "aria-label": unavailableReason
-                                  ? `${bot.name}, ${unavailableReason}`
-                                  : `${bot.name}${selected ? ", selected" : ""}`,
-                                title: unavailableReason ?? undefined,
-                                onPointerDown: (event) =>
-                                  props.onBotContextLongPressStart?.(
-                                    event,
-                                    bot.id,
-                                  ),
-                                onPointerUp: props.onBotContextLongPressEnd,
-                                onPointerCancel: props.onBotContextLongPressEnd,
-                                onPointerMove: props.onBotContextLongPressMove,
-                                onContextMenu: (event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  props.onBotContextMenu?.(
-                                    bot.id,
-                                    event.clientX,
-                                    event.clientY,
-                                  );
-                                },
-                                onClick: () => {
-                                  if (unavailableReason) return;
-                                  chooseCastPickerBot(bot.id);
-                                },
+                      <div>
+                        <span>Proceeding preset</span>
+                        <strong>Custom</strong>
+                      </div>
+                      <div role="group" aria-label="Debate proceeding presets">
+                        {DEBATE_SETUP_PRESETS.map((preset) => (
+                          <button
+                            type="button"
+                            key={preset.id}
+                            className={styles.flytingPresetControl}
+                            disabled
+                            title="Presets tune Forum and Turnabout; Flyting keeps its own Hall rules."
+                          >
+                            {preset.name}
+                          </button>
+                        ))}
+                        <span className={studioStyles.customPresetChip}>
+                          Custom
+                        </span>
+                      </div>
+                    </div>
+                    <FlytingAtmosphereControl />
+                    <fieldset
+                      className={`${studioStyles.formatPicker} ${styles.flytingFormatPicker}`}
+                      data-tutorial-target="debate-format"
+                    >
+                      <legend>Debate format</legend>
+                      {DEBATE_FORMAT_CATALOG.filter(
+                        (option) => option.availability === "available",
+                      ).map((option) => (
+                        <label
+                          key={option.id}
+                          data-selected={
+                            option.id === "flyting" ? "true" : undefined
+                          }
+                          data-tutorial-target={
+                            option.id === "flyting"
+                              ? "debate-format-flyting"
+                              : undefined
+                          }
+                        >
+                          <input
+                            type="radio"
+                            name="flyting-debate-format"
+                            value={option.id}
+                            checked={option.id === "flyting"}
+                            onChange={() => {
+                              if (option.id !== "flyting") {
+                                props.onFormatChange(
+                                  option.id as DebateFormatId,
+                                );
+                              }
+                            }}
+                          />
+                          <strong>
+                            {option.name}
+                            <em>{option.productionName}</em>
+                          </strong>
+                          <span>{option.summary}</span>
+                          <small>{option.cadence}</small>
+                        </label>
+                      ))}
+                    </fieldset>
+                    <div
+                      className={`${studioStyles.proceedingPresets} ${styles.flytingCoachChoice}`}
+                      data-tutorial-target="debate-flyting-side"
+                    >
+                      <div>
+                        <span>Which flyter will you coach?</span>
+                        <strong>
+                          {playerRole === "participant"
+                            ? playerSideId === "for"
+                              ? "Pro · left"
+                              : "Con · right"
+                            : "Not assigned"}
+                        </strong>
+                      </div>
+                      {playerRole === "participant" ? (
+                        <div
+                          className={styles.flytingCoachChoiceControls}
+                          role="radiogroup"
+                          aria-label="Which flyter will you coach"
+                        >
+                          <label
+                            data-selected={
+                              playerSideId === "for" ? "true" : undefined
+                            }
+                          >
+                            <input
+                              type="radio"
+                              name="flyting-side-selector"
+                              value="for"
+                              checked={playerSideId === "for"}
+                              onChange={() => {
+                                setPlayerSideId("for");
+                                setChecks([]);
                               }}
                             />
-                          );
-                        })}
-                      </BotPickerGrid>
+                            Pro · left
+                          </label>
+                          <label
+                            data-selected={
+                              playerSideId === "against" ? "true" : undefined
+                            }
+                          >
+                            <input
+                              type="radio"
+                              name="flyting-side-selector"
+                              value="against"
+                              checked={playerSideId === "against"}
+                              onChange={() => {
+                                setPlayerSideId("against");
+                                setChecks([]);
+                              }}
+                            />
+                            Con · right
+                          </label>
+                        </div>
+                      ) : (
+                        <span className={styles.flytingCoachChoiceUnavailable}>
+                          Host or watch the rite
+                        </span>
+                      )}
                     </div>
-                  ) : (
-                    <p className={studioStyles.castPickerEmpty}>
-                      No bots match this view.
-                    </p>
-                  )}
-                  {castHueLensAvailable ? (
-                    <div
-                      className={studioStyles.castPickerHueLens}
-                      data-active={
-                        castHueLensCenter !== null ? "true" : undefined
-                      }
-                      data-tutorial-target="debate-flyting-cast-hue-lens"
+                  </div>
+                </section>
+                <div
+                  className={styles.roleCards}
+                  role="radiogroup"
+                  aria-label="Flyting role"
+                >
+                  {(
+                    [
+                      [
+                        "participant",
+                        "Coach a flyter",
+                        "Choose tactics, author or Wield a line, and hear your bot perform it.",
+                      ],
+                      [
+                        "judge",
+                        "Host the contest",
+                        "Hear the Hall, then send your three guards as the final vote.",
+                      ],
+                      [
+                        "spectator",
+                        "Watch the rite",
+                        "Let both flyters and the Host carry the full contest.",
+                      ],
+                    ] as const
+                  ).map(([id, label, detail]) => (
+                    <label
+                      key={id}
+                      data-selected={playerRole === id ? "true" : undefined}
                     >
-                      <span aria-hidden="true">Hue</span>
                       <input
-                        type="range"
-                        min={0}
-                        max={359}
-                        step={1}
-                        value={debateCastLensSliderInputValue(
-                          castHueLensCenter,
-                        )}
-                        onChange={(event) =>
-                          setCastHueLensCenter(
-                            debateCastHueFromLensSliderInput(
-                              Number(event.currentTarget.value),
-                            ),
-                          )
-                        }
-                        aria-label="Browse Flyting cast bots by hue"
+                        type="radio"
+                        name="flyting-role"
+                        value={id}
+                        checked={playerRole === id}
+                        onChange={() => choosePlayerRole(id)}
                       />
-                      <button
-                        type="button"
-                        onClick={() => setCastHueLensCenter(null)}
-                        disabled={castHueLensCenter === null}
-                        aria-label="Clear Flyting cast hue lens"
-                      >
-                        ×
-                      </button>
+                      <strong>{label}</strong>
+                      <span>{detail}</span>
+                    </label>
+                  ))}
+                </div>
+                <label className={styles.field}>
+                  <span>
+                    <strong>Rivalry Spark</strong>
+                    <em>Optional</em>
+                  </span>
+                  <textarea
+                    rows={4}
+                    value={rivalrySpark}
+                    maxLength={800}
+                    placeholder="Leave blank for Surprise me—or name the absurd grudge, disputed glory, or impossible pairing."
+                    onChange={(event) => {
+                      setRivalrySpark(event.currentTarget.value);
+                      invalidateForge();
+                    }}
+                  />
+                </label>
+                <label className={styles.field}>
+                  <span>
+                    <strong>Subjects the Hall must avoid</strong>
+                    <em>Optional · one per line</em>
+                  </span>
+                  <textarea
+                    rows={3}
+                    value={forbiddenTopics}
+                    maxLength={900}
+                    placeholder="Add boundaries beyond PRISM’s permanent sporting-but-cutting rules."
+                    onChange={(event) => {
+                      setForbiddenTopics(event.currentTarget.value);
+                      invalidateForge();
+                    }}
+                  />
+                </label>
+                <footer className={styles.panelActions}>
+                  <button
+                    type="button"
+                    className={styles.primaryAction}
+                    onClick={() => setStep("cast")}
+                  >
+                    Enter the Cast
+                  </button>
+                </footer>
+              </>
+            ) : null}
+
+            {step === "cast" ? (
+              <>
+                <header className={styles.panelHeading}>
+                  <div>
+                    <small>02 / Cast</small>
+                    <h2>Seat the contest</h2>
+                    <p>
+                      Select Pro, Con, or the Host, then choose that voice from
+                      the Library. PRISM fills the gallery automatically.
+                    </p>
+                  </div>
+                  <span>{activeCastSeatLabel} · Active seat</span>
+                </header>
+                <div
+                  className={styles.flytingCastRoster}
+                  data-tutorial-target="debate-flyting-cast"
+                >
+                  <div
+                    className={`${studioStyles.castSlotGrid} ${styles.flytingPrincipalCast}`}
+                    data-seat-count="3"
+                  >
+                    {renderFlytingCastSeat({
+                      seat: "for",
+                      label: "Pro · left",
+                      fallback: "#d8b25d",
+                    })}
+                    {renderFlytingCastSeat({
+                      seat: "against",
+                      label: "Con · right",
+                      fallback: "#c56b53",
+                    })}
+                    {renderFlytingCastSeat({
+                      seat: "host",
+                      label: "Jarl · guard vote ×3",
+                      fallback: "#78c8b2",
+                    })}
+                  </div>
+                  <div className={styles.gallerySeed}>
+                    <span aria-hidden="true">᛫ ᛫</span>
+                    <div>
+                      <strong>PRISM fills the gallery.</strong>
+                      <small>
+                        Fifteen generic Hall spectators and the Jarl's three
+                        guards arrive with the proceeding. No Library casting is
+                        required.
+                      </small>
                     </div>
-                  ) : null}
+                  </div>
                 </div>
-              </div>
-              <footer className={styles.panelActions}>
-                <button type="button" onClick={() => setStep("summon")}>Back</button>
-                <button type="button" className={styles.primaryAction} disabled={!castReady} onClick={() => setStep("forge")}>Approach the Forge</button>
-              </footer>
-            </>
-          ) : null}
-
-          {step === "forge" ? (
-            <>
-              <header className={styles.panelHeading}>
-                <div>
-                  <small>03 / Forge</small>
-                  <h2>Temper the bout</h2>
-                  <p>PRISM shapes public legends and stakes around this frozen cast; everything remains editable before consent.</p>
-                </div>
-                <span>Editable before Start</span>
-              </header>
-              <div className={styles.forgePreview}>
-                <div><FlytingBotMark bot={forBot} fallback="#d8b25d" renderBotGlyph={props.renderBotGlyph} size={56} /><strong>{forBot?.name}</strong></div>
-                <span>Boast · Flyte · Rejoinder · Acclamation</span>
-                <div><FlytingBotMark bot={againstBot} fallback="#c56b53" renderBotGlyph={props.renderBotGlyph} size={56} /><strong>{againstBot?.name}</strong></div>
-              </div>
-              <p className={styles.forgeCopy}>PRISM will forge one title, one set of stakes, an epithet, and three boastable Legend facets for each flyter. No private relationship memory or live research enters the Hall.</p>
-              <footer className={styles.panelActions}>
-                <button type="button" onClick={() => setStep("cast")}>Back</button>
-                <button type="button" className={styles.primaryAction} disabled={!castReady || busy} onClick={() => void forgeBout()}>{busy ? "Forging…" : bout ? "Reforge the bout" : "Forge the bout"}</button>
-              </footer>
-            </>
-          ) : null}
-
-          {step === "review" && bout ? (
-            <>
-              <header className={styles.panelHeading}>
-                <div>
-                  <small>04 / Review</small>
-                  <h2>{bout.title}</h2>
-                  <p>Review the public record, secure both flyters’ consent, then open the Mead Hall.</p>
-                </div>
-                <span>Fictional · non-canonical</span>
-              </header>
-              <label className={styles.field}>
-                <span><strong>Bout title</strong><em>Public</em></span>
-                <input value={bout.title} maxLength={120} onChange={(event) => updateBout({ ...bout, title: event.currentTarget.value })} />
-              </label>
-              <label className={styles.field}>
-                <span><strong>Stakes</strong><em>What the Hall will decide</em></span>
-                <textarea rows={3} value={bout.stakes} maxLength={600} onChange={(event) => updateBout({ ...bout, stakes: event.currentTarget.value })} />
-              </label>
-              <div className={styles.legendColumns}>
-                {bout.flyters.map((flyter, flyterIndex) => (
-                  <section key={flyter.botId} style={{ "--flyting-bot-color": botColor(props.bots.find((bot) => bot.id === flyter.botId), flyterIndex === 0 ? "#d8b25d" : "#c56b53") } as CSSProperties}>
-                    <header><strong>{flyter.name}</strong><input value={flyter.epithet} maxLength={96} aria-label={`${flyter.name} epithet`} onChange={(event) => {
-                      const flyters = [...bout.flyters] as DebateFlytingBoutV1["flyters"];
-                      flyters[flyterIndex] = { ...flyter, epithet: event.currentTarget.value };
-                      updateBout({ ...bout, flyters });
-                    }} /></header>
-                    {flyter.legend.map((facet, facetIndex) => (
-                      <div key={facet.id}>
-                        <input value={facet.title} maxLength={80} aria-label={`${flyter.name} Legend ${facetIndex + 1} title`} onChange={(event) => {
-                          const flyters = [...bout.flyters] as DebateFlytingBoutV1["flyters"];
-                          const legend = flyter.legend.map((candidate, index) => index === facetIndex ? { ...candidate, title: event.currentTarget.value } : candidate);
-                          flyters[flyterIndex] = { ...flyter, legend };
-                          updateBout({ ...bout, flyters });
-                        }} />
-                        <textarea value={facet.claim} rows={2} maxLength={280} aria-label={`${flyter.name} Legend ${facetIndex + 1} claim`} onChange={(event) => {
-                          const flyters = [...bout.flyters] as DebateFlytingBoutV1["flyters"];
-                          const legend = flyter.legend.map((candidate, index) => index === facetIndex ? { ...candidate, claim: event.currentTarget.value } : candidate);
-                          flyters[flyterIndex] = { ...flyter, legend };
-                          updateBout({ ...bout, flyters });
-                        }} />
+                <div
+                  className={`${studioStyles.castPicker} ${styles.flytingCastPicker}`}
+                >
+                  <BotPickerToolbar
+                    searchValue={castPickerSearch}
+                    onSearchChange={setCastPickerSearch}
+                    searchAriaLabel="Search bots for Flyting"
+                    searchPlaceholder="Search the Library…"
+                    groups={flytingPickerGroups}
+                    groupItems={props.bots}
+                    groupValue={effectiveCastPickerGroupId}
+                    onGroupChange={setCastPickerGroupId}
+                    groupTheme={props.theme}
+                    resultLabel={`${visibleCastBots.length} bot${visibleCastBots.length === 1 ? "" : "s"}`}
+                    singleActionableResult={singleActionableCastPickerBot}
+                    onSingleActionableResultSelect={chooseCastPickerBot}
+                  />
+                  <div
+                    className={studioStyles.castPickerBody}
+                    data-hue-lens={castHueLensAvailable ? "true" : undefined}
+                  >
+                    {visibleCastBots.length > 0 ? (
+                      <div
+                        ref={castPickerGridShellRef}
+                        className={studioStyles.castPickerGridShell}
+                      >
+                        <BotPickerGrid
+                          className={`${studioStyles.castPickerGrid} ${styles.flytingCastPickerGrid}`}
+                          role="radiogroup"
+                          ariaLabel={`Bot for ${activeCastSeatLabel}`}
+                          style={
+                            {
+                              "--tile-size": "82px",
+                              "--tile-gap": "9px",
+                              "--tile-hover-scale": "1.055",
+                            } as CSSProperties
+                          }
+                        >
+                          {visibleCastBots.map((bot) => {
+                            const selected = activeCastBotId === bot.id;
+                            const unavailableReason =
+                              castPickerBotUnavailableReason(bot);
+                            return (
+                              <BotPickerTile
+                                key={bot.id}
+                                item={bot}
+                                selected={selected}
+                                forceName
+                                accentColor={bot.color ?? "#8f7cff"}
+                                geometry={{
+                                  tileSize: 82,
+                                  glyphSize: 29,
+                                  glyphStroke: 1.65,
+                                  namedFlatTile: true,
+                                }}
+                                renderGlyph={props.renderBotGlyph}
+                                className={`${studioStyles.castPickerTile} ${styles.flytingCastPickerTile}`}
+                                buttonProps={{
+                                  role: "radio",
+                                  "aria-checked": selected,
+                                  "aria-disabled": unavailableReason
+                                    ? true
+                                    : undefined,
+                                  "aria-label": unavailableReason
+                                    ? `${bot.name}, ${unavailableReason}`
+                                    : `${bot.name}${selected ? ", selected" : ""}`,
+                                  title: unavailableReason ?? undefined,
+                                  onPointerDown: (event) =>
+                                    props.onBotContextLongPressStart?.(
+                                      event,
+                                      bot.id,
+                                    ),
+                                  onPointerUp: props.onBotContextLongPressEnd,
+                                  onPointerCancel:
+                                    props.onBotContextLongPressEnd,
+                                  onPointerMove:
+                                    props.onBotContextLongPressMove,
+                                  onContextMenu: (event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    props.onBotContextMenu?.(
+                                      bot.id,
+                                      event.clientX,
+                                      event.clientY,
+                                    );
+                                  },
+                                  onClick: () => {
+                                    if (unavailableReason) return;
+                                    chooseCastPickerBot(bot.id);
+                                  },
+                                }}
+                              />
+                            );
+                          })}
+                        </BotPickerGrid>
                       </div>
-                    ))}
-                  </section>
-                ))}
-              </div>
-              <div className={styles.reviewLock}>
-                <div><span>Privacy</span><strong>{props.responseMode === "local" ? "LOCAL · never leaves this device" : "ONLINE · approved provider"}</strong></div>
-                <div><span>Delivery</span><strong>Cadenced · no timer · no required rhyme</strong></div>
-                <div><span>Record</span><strong>Four exchanges · one decisive winner</strong></div>
-              </div>
-              <section className={styles.consentPanel}>
-                <header><div><strong>Flyter consent</strong><small>Each bot privately reviews its role and frozen legends.</small></div><button type="button" disabled={busy} onClick={() => void secureConsent()}>{busy ? "Asking…" : checks.length ? "Ask again" : "Secure consent"}</button></header>
-                {checks.length ? (
-                  <ul>{checks.map((check) => <li key={check.botId} data-status={check.status}><span>{props.bots.find((bot) => bot.id === check.botId)?.name ?? check.botId}</span><strong>{check.status === "accept" ? "Accepts" : check.status === "devils_advocate" ? "Accepts as Devil’s Advocate" : "Declines"}</strong><small>{check.reason}</small></li>)}</ul>
-                ) : <p>Start will remain sealed until both flyters answer.</p>}
-              </section>
-              <footer className={styles.panelActions}>
-                <button type="button" onClick={() => setStep("forge")}>Back</button>
-                <span>Save and Start are waiting in the Proceeding Card.</span>
-                <button
-                  type="button"
-                  className={styles.mobileReviewAction}
-                  disabled={busy || !consentReady}
-                  onClick={() => void createBout(true)}
-                >
-                  Save for later
-                </button>
-                <button
-                  type="button"
-                  className={`${styles.primaryAction} ${styles.mobileReviewAction}`}
-                  disabled={busy || !consentReady}
-                  onClick={() => void createBout(false)}
-                >
-                  Open the Hall
-                </button>
-              </footer>
-            </>
-          ) : null}
+                    ) : (
+                      <p className={studioStyles.castPickerEmpty}>
+                        No bots match this view.
+                      </p>
+                    )}
+                    {castHueLensAvailable ? (
+                      <div
+                        className={studioStyles.castPickerHueLens}
+                        data-active={
+                          castHueLensCenter !== null ? "true" : undefined
+                        }
+                        data-tutorial-target="debate-flyting-cast-hue-lens"
+                      >
+                        <span aria-hidden="true">Hue</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={359}
+                          step={1}
+                          value={debateCastLensSliderInputValue(
+                            castHueLensCenter,
+                          )}
+                          onChange={(event) =>
+                            setCastHueLensCenter(
+                              debateCastHueFromLensSliderInput(
+                                Number(event.currentTarget.value),
+                              ),
+                            )
+                          }
+                          aria-label="Browse Flyting cast bots by hue"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setCastHueLensCenter(null)}
+                          disabled={castHueLensCenter === null}
+                          aria-label="Clear Flyting cast hue lens"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+                <footer className={styles.panelActions}>
+                  <button type="button" onClick={() => setStep("summon")}>
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.primaryAction}
+                    disabled={!castReady}
+                    onClick={() => setStep("forge")}
+                  >
+                    Approach the Forge
+                  </button>
+                </footer>
+              </>
+            ) : null}
 
-          {error ? <p className={styles.error} role="alert">{error}</p> : null}
-          {savedNotice ? <p className={styles.notice} role="status">{savedNotice}</p> : null}
+            {step === "forge" ? (
+              <>
+                <header className={styles.panelHeading}>
+                  <div>
+                    <small>03 / Forge</small>
+                    <h2>Temper the bout</h2>
+                    <p>
+                      PRISM shapes public legends and stakes around this frozen
+                      cast; everything remains editable before consent.
+                    </p>
+                  </div>
+                  <span>Editable before Start</span>
+                </header>
+                <div className={styles.forgePreview}>
+                  <div>
+                    <FlytingBotMark
+                      bot={forBot}
+                      fallback="#d8b25d"
+                      renderBotGlyph={props.renderBotGlyph}
+                      size={56}
+                    />
+                    <strong>{forBot?.name}</strong>
+                  </div>
+                  <span>Boast · Flyte · Rejoinder · Acclamation</span>
+                  <div>
+                    <FlytingBotMark
+                      bot={againstBot}
+                      fallback="#c56b53"
+                      renderBotGlyph={props.renderBotGlyph}
+                      size={56}
+                    />
+                    <strong>{againstBot?.name}</strong>
+                  </div>
+                </div>
+                <p className={styles.forgeCopy}>
+                  PRISM will forge one title, one set of stakes, an epithet, and
+                  three boastable Legend facets for each flyter. No private
+                  relationship memory or live research enters the Hall.
+                </p>
+                <footer className={styles.panelActions}>
+                  <button type="button" onClick={() => setStep("cast")}>
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.primaryAction}
+                    disabled={!castReady || busy}
+                    onClick={() => void forgeBout()}
+                  >
+                    {busy
+                      ? "Forging…"
+                      : bout
+                        ? "Reforge the bout"
+                        : "Forge the bout"}
+                  </button>
+                </footer>
+              </>
+            ) : null}
+
+            {step === "review" && bout ? (
+              <>
+                <header className={styles.panelHeading}>
+                  <div>
+                    <small>04 / Review</small>
+                    <h2>{bout.title}</h2>
+                    <p>
+                      Review the public record, secure both flyters’ consent,
+                      then open the Mead Hall.
+                    </p>
+                  </div>
+                  <span>Fictional · non-canonical</span>
+                </header>
+                <label className={styles.field}>
+                  <span>
+                    <strong>Bout title</strong>
+                    <em>Public</em>
+                  </span>
+                  <input
+                    value={bout.title}
+                    maxLength={120}
+                    onChange={(event) =>
+                      updateBout({ ...bout, title: event.currentTarget.value })
+                    }
+                  />
+                </label>
+                <label className={styles.field}>
+                  <span>
+                    <strong>Stakes</strong>
+                    <em>What the Hall will decide</em>
+                  </span>
+                  <textarea
+                    rows={3}
+                    value={bout.stakes}
+                    maxLength={600}
+                    onChange={(event) =>
+                      updateBout({ ...bout, stakes: event.currentTarget.value })
+                    }
+                  />
+                </label>
+                <div className={styles.legendColumns}>
+                  {bout.flyters.map((flyter, flyterIndex) => (
+                    <section
+                      key={flyter.botId}
+                      style={
+                        {
+                          "--flyting-bot-color": botColor(
+                            props.bots.find((bot) => bot.id === flyter.botId),
+                            flyterIndex === 0 ? "#d8b25d" : "#c56b53",
+                          ),
+                        } as CSSProperties
+                      }
+                    >
+                      <header>
+                        <strong>{flyter.name}</strong>
+                        <input
+                          value={flyter.epithet}
+                          maxLength={96}
+                          aria-label={`${flyter.name} epithet`}
+                          onChange={(event) => {
+                            const flyters = [
+                              ...bout.flyters,
+                            ] as DebateFlytingBoutV1["flyters"];
+                            flyters[flyterIndex] = {
+                              ...flyter,
+                              epithet: event.currentTarget.value,
+                            };
+                            updateBout({ ...bout, flyters });
+                          }}
+                        />
+                      </header>
+                      {flyter.legend.map((facet, facetIndex) => (
+                        <div key={facet.id}>
+                          <input
+                            value={facet.title}
+                            maxLength={80}
+                            aria-label={`${flyter.name} Legend ${facetIndex + 1} title`}
+                            onChange={(event) => {
+                              const flyters = [
+                                ...bout.flyters,
+                              ] as DebateFlytingBoutV1["flyters"];
+                              const legend = flyter.legend.map(
+                                (candidate, index) =>
+                                  index === facetIndex
+                                    ? {
+                                        ...candidate,
+                                        title: event.currentTarget.value,
+                                      }
+                                    : candidate,
+                              );
+                              flyters[flyterIndex] = { ...flyter, legend };
+                              updateBout({ ...bout, flyters });
+                            }}
+                          />
+                          <textarea
+                            value={facet.claim}
+                            rows={2}
+                            maxLength={280}
+                            aria-label={`${flyter.name} Legend ${facetIndex + 1} claim`}
+                            onChange={(event) => {
+                              const flyters = [
+                                ...bout.flyters,
+                              ] as DebateFlytingBoutV1["flyters"];
+                              const legend = flyter.legend.map(
+                                (candidate, index) =>
+                                  index === facetIndex
+                                    ? {
+                                        ...candidate,
+                                        claim: event.currentTarget.value,
+                                      }
+                                    : candidate,
+                              );
+                              flyters[flyterIndex] = { ...flyter, legend };
+                              updateBout({ ...bout, flyters });
+                            }}
+                          />
+                        </div>
+                      ))}
+                    </section>
+                  ))}
+                </div>
+                <div className={styles.reviewLock}>
+                  <div>
+                    <span>Privacy</span>
+                    <strong>
+                      {props.responseMode === "local"
+                        ? "LOCAL · never leaves this device"
+                        : "ONLINE · approved provider"}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Delivery</span>
+                    <strong>Cadenced · no timer · no required rhyme</strong>
+                  </div>
+                  <div>
+                    <span>Record</span>
+                    <strong>Four exchanges · one decisive winner</strong>
+                  </div>
+                </div>
+                <section className={styles.consentPanel}>
+                  <header>
+                    <div>
+                      <strong>Flyter consent</strong>
+                      <small>
+                        Each bot privately reviews its role and frozen legends.
+                      </small>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void secureConsent()}
+                    >
+                      {busy
+                        ? "Asking…"
+                        : checks.length
+                          ? "Ask again"
+                          : "Secure consent"}
+                    </button>
+                  </header>
+                  {checks.length ? (
+                    <ul>
+                      {checks.map((check) => (
+                        <li key={check.botId} data-status={check.status}>
+                          <span>
+                            {props.bots.find((bot) => bot.id === check.botId)
+                              ?.name ?? check.botId}
+                          </span>
+                          <strong>
+                            {check.status === "accept"
+                              ? "Accepts"
+                              : check.status === "devils_advocate"
+                                ? "Accepts as Devil’s Advocate"
+                                : "Declines"}
+                          </strong>
+                          <small>{check.reason}</small>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p>Start will remain sealed until both flyters answer.</p>
+                  )}
+                </section>
+                <footer className={styles.panelActions}>
+                  <button type="button" onClick={() => setStep("forge")}>
+                    Back
+                  </button>
+                  <span>
+                    Save and Start are waiting in the Proceeding Card.
+                  </span>
+                  <button
+                    type="button"
+                    className={styles.mobileReviewAction}
+                    disabled={busy || !consentReady}
+                    onClick={() => void createBout(true)}
+                  >
+                    Save for later
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.primaryAction} ${styles.mobileReviewAction}`}
+                    disabled={busy || !consentReady}
+                    onClick={() => void createBout(false)}
+                  >
+                    Open the Hall
+                  </button>
+                </footer>
+              </>
+            ) : null}
+
+            {error ? (
+              <p className={styles.error} role="alert">
+                {error}
+              </p>
+            ) : null}
+            {savedNotice ? (
+              <p className={styles.notice} role="status">
+                {savedNotice}
+              </p>
+            ) : null}
           </section>
         </div>
 
         <aside className={studioStyles.dashboardRail}>
-          <section className={styles.studioReadout} aria-label="Mead Hall schematic">
+          <section
+            className={styles.studioReadout}
+            aria-label="Mead Hall schematic"
+          >
             <header>
               <span>Mead Hall floor</span>
               <strong>Flyting</strong>
@@ -1386,35 +1849,60 @@ export function DebateFlytingSetup(
               />
             </div>
             <p>{bout?.stakes || "The bout has not been forged yet."}</p>
-            <small>Sporting · cutting · four exchanges · one decisive winner</small>
+            <small>
+              Sporting · cutting · four exchanges · one decisive winner
+            </small>
           </section>
 
-          <section className={`${studioStyles.readinessPanel} ${styles.proceedingCard}`}>
+          <section
+            className={`${studioStyles.readinessPanel} ${styles.proceedingCard}`}
+          >
             <div className={studioStyles.setupCopy}>
               <p className={studioStyles.eyebrow}>Proceeding card</p>
               <h2>{proceedingTitle}</h2>
-              <p>Summon, Cast, Forge, and Review form one editable Flyting contest. Start freezes the Hall and its public record.</p>
+              <p>
+                Summon, Cast, Forge, and Review form one editable Flyting
+                contest. Start freezes the Hall and its public record.
+              </p>
             </div>
             <div className={studioStyles.reviewGrid}>
               <article>
                 <span>Role</span>
                 <strong>{roleLabel}</strong>
-                <p>{playerRole === "judge" ? "Your ruling is the fifth word" : playerRole === "participant" ? "Write through a bot body and voice" : "The cast carries every exchange"}</p>
+                <p>
+                  {playerRole === "judge"
+                    ? "Your ruling is the fifth word"
+                    : playerRole === "participant"
+                      ? "Write through a bot body and voice"
+                      : "The cast carries every exchange"}
+                </p>
               </article>
               <article>
                 <span>Cast</span>
-                <strong>{castReady ? "Duel cast ready" : "Choose Pro and Con"}</strong>
-                <p>Pro · {forBot?.name ?? "Uncast"} · Con · {againstBot?.name ?? "Uncast"}</p>
+                <strong>
+                  {castReady ? "Duel cast ready" : "Choose Pro and Con"}
+                </strong>
+                <p>
+                  Pro · {forBot?.name ?? "Uncast"} · Con ·{" "}
+                  {againstBot?.name ?? "Uncast"}
+                </p>
               </article>
               <article>
                 <span>Bout</span>
                 <strong>{bout?.title || "Not yet forged"}</strong>
-                <p>{bout ? "Editable legends and stakes" : "PRISM will shape the public record"}</p>
+                <p>
+                  {bout
+                    ? "Editable legends and stakes"
+                    : "PRISM will shape the public record"}
+                </p>
               </article>
               <article>
                 <span>Room</span>
                 <strong>Flyting · Mead Hall</strong>
-                <p>No timer · four exchanges · four Hall votes</p>
+                <p>
+                  No timer · four exchanges · fifteen swayed voices · three Jarl
+                  guards
+                </p>
               </article>
             </div>
             <div className={studioStyles.setupActions}>
@@ -1453,15 +1941,22 @@ function flytingState(session: DebateSessionV1): DebateFlytingFormatStateV1 {
   if (session.formatState.format !== "flyting") {
     throw new Error("Expected a Flyting session.");
   }
-  return session.formatState;
+  // Archive list rows may hold the exact schema that was saved before the
+  // fifteen-member Hall existed. Normalize again at the presentation boundary
+  // so old replays gain the new neutral crowd without a destructive migration.
+  return normalizeDebateFlytingFormatStateV1(session.formatState);
 }
 
 function sideName(session: DebateSessionV1, sideId: DebateSideId): string {
-  return sideId === "for" ? session.forAdvocate.name : session.againstAdvocate.name;
+  return sideId === "for"
+    ? session.forAdvocate.name
+    : session.againstAdvocate.name;
 }
 
 function resolutionLabel(value: string | null): string {
-  return value ? value.charAt(0).toUpperCase() + value.slice(1) : "Awaiting answer";
+  return value
+    ? value.charAt(0).toUpperCase() + value.slice(1)
+    : "Awaiting answer";
 }
 
 export function DebateFlytingLive(
@@ -1473,11 +1968,41 @@ export function DebateFlytingLive(
   const [presentingEvent, setPresentingEvent] = useState<DebateEventV1 | null>(
     null,
   );
-  const [speechTiming, setSpeechTiming] = useState<
-    DebateBotAvatarState["speechTiming"]
-  >(null);
+  const [speechTiming, setSpeechTiming] =
+    useState<DebateBotAvatarState["speechTiming"]>(null);
+  const [voiceActiveEventId, setVoiceActiveEventId] = useState<string | null>(
+    null,
+  );
+  const [fallbackMouthPhase, setFallbackMouthPhase] = useState(0);
+  const [galleryMouthPhase, setGalleryMouthPhase] = useState(0);
+  const [galleryHopWave, setGalleryHopWave] = useState(0);
+  const [cameraMode, setCameraMode] = useState<FlytingCameraMode>("auto");
+  const [stageAlignmentOpen, setStageAlignmentOpen] = useState(false);
+  const [stageAlignmentView, setStageAlignmentView] =
+    useState<DebateFlytingStageAlignmentView>("wide");
+  const [stageAlignmentItem, setStageAlignmentItem] =
+    useState<DebateFlytingStageAlignmentItem>("wideForBot");
+  const [stageAlignmentDraft, setStageAlignmentDraft] =
+    useState<DebateFlytingStageAlignmentV1>(() =>
+      copyDebateFlytingStageAlignment(
+        DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT,
+      ),
+    );
+  const [stageAlignmentCopyState, setStageAlignmentCopyState] = useState<
+    "idle" | "copied" | "failed"
+  >("idle");
+  const stageAlignmentDragRef = useRef<{
+    item: DebateFlytingStageAlignmentItem;
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+    parentWidth: number;
+    parentHeight: number;
+    placement: DebateFlytingStagePlacementV1;
+  } | null>(null);
   const [draft, setDraft] = useState("");
-  const [authoredMode, setAuthoredMode] = useState<Exclude<DebateFlytingAuthoredModeV1, "bot">>("custom");
+  const [authoredMode, setAuthoredMode] =
+    useState<Exclude<DebateFlytingAuthoredModeV1, "bot">>("custom");
   const [facetId, setFacetId] = useState("");
   const [targetClaimId, setTargetClaimId] = useState("");
   const [lens, setLens] = useState<DebateFlytingChargeKindV1>("doubt");
@@ -1485,23 +2010,169 @@ export function DebateFlytingLive(
   const [returnClaimId, setReturnClaimId] = useState("");
   const [winnerSideId, setWinnerSideId] = useState<DebateSideId>("for");
   const autoTimerRef = useRef<number | null>(null);
-  const mutateRef = useRef<(
-    body: Record<string, unknown>,
-    label: string,
-  ) => Promise<void>>(async () => undefined);
+  const mutateRef = useRef<
+    (body: Record<string, unknown>, label: string) => Promise<void>
+  >(async () => undefined);
+
+  const stageAlignmentItems = useMemo(
+    () =>
+      DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS.filter(
+        (item) => item.view === stageAlignmentView,
+      ),
+    [stageAlignmentView],
+  );
+  const stageAlignmentDefinition =
+    DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS.find(
+      (item) => item.id === stageAlignmentItem,
+    ) ?? DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS[0]!;
+  const stageAlignmentPlacement =
+    stageAlignmentDraft.placements[stageAlignmentItem];
+
+  const chooseStageAlignmentView = useCallback(
+    (view: DebateFlytingStageAlignmentView): void => {
+      setStageAlignmentView(view);
+      setStageAlignmentItem(
+        DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS.find(
+          (item) => item.view === view,
+        )!.id,
+      );
+      setCameraMode(view === "moderator" ? "moderator" : "wide");
+    },
+    [],
+  );
+
+  const updateStageAlignmentPlacement = useCallback(
+    (
+      item: DebateFlytingStageAlignmentItem,
+      update: Partial<DebateFlytingStagePlacementV1>,
+    ): void => {
+      setStageAlignmentDraft((current) =>
+        updateDebateFlytingStagePlacement(current, item, update),
+      );
+      setStageAlignmentCopyState("idle");
+    },
+    [],
+  );
+
+  const beginStageAlignmentDrag = useCallback(
+    (
+      event: ReactPointerEvent<HTMLElement>,
+      item: DebateFlytingStageAlignmentItem,
+    ): void => {
+      if (!stageAlignmentOpen || event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const parent = event.currentTarget.offsetParent;
+      if (!(parent instanceof HTMLElement)) return;
+      const parentBounds = parent.getBoundingClientRect();
+      stageAlignmentDragRef.current = {
+        item,
+        pointerId: event.pointerId,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        parentWidth: Math.max(1, parentBounds.width),
+        parentHeight: Math.max(1, parentBounds.height),
+        placement: stageAlignmentDraft.placements[item],
+      };
+      setStageAlignmentItem(item);
+      event.currentTarget.setPointerCapture(event.pointerId);
+    },
+    [stageAlignmentDraft.placements, stageAlignmentOpen],
+  );
+
+  const moveStageAlignmentDrag = useCallback(
+    (event: ReactPointerEvent<HTMLElement>): void => {
+      const drag = stageAlignmentDragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      updateStageAlignmentPlacement(drag.item, {
+        x:
+          drag.placement.x +
+          ((event.clientX - drag.clientX) / drag.parentWidth) * 100,
+        y:
+          drag.placement.y +
+          ((event.clientY - drag.clientY) / drag.parentHeight) * 100,
+      });
+    },
+    [updateStageAlignmentPlacement],
+  );
+
+  const endStageAlignmentDrag = useCallback(
+    (event: ReactPointerEvent<HTMLElement>): void => {
+      const drag = stageAlignmentDragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      stageAlignmentDragRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    },
+    [],
+  );
+
+  const stageAlignmentHandleProps = (
+    item: DebateFlytingStageAlignmentItem,
+  ): {
+    "data-flyting-alignment-handle"?: "true";
+    "data-flyting-alignment-selected"?: "true";
+    onPointerDown?: (event: ReactPointerEvent<HTMLElement>) => void;
+    onPointerMove?: (event: ReactPointerEvent<HTMLElement>) => void;
+    onPointerUp?: (event: ReactPointerEvent<HTMLElement>) => void;
+    onPointerCancel?: (event: ReactPointerEvent<HTMLElement>) => void;
+  } =>
+    stageAlignmentOpen &&
+    DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS.some(
+      (definition) =>
+        definition.id === item && definition.view === stageAlignmentView,
+    )
+      ? {
+          "data-flyting-alignment-handle": "true",
+          "data-flyting-alignment-selected":
+            stageAlignmentItem === item ? "true" : undefined,
+          onPointerDown: (event) => beginStageAlignmentDrag(event, item),
+          onPointerMove: moveStageAlignmentDrag,
+          onPointerUp: endStageAlignmentDrag,
+          onPointerCancel: endStageAlignmentDrag,
+        }
+      : {};
+
+  const copyStageAlignment = useCallback(async (): Promise<void> => {
+    try {
+      await writeFlytingAlignmentClipboard(
+        formatDebateFlytingStageAlignmentClipboard(stageAlignmentDraft),
+      );
+      setStageAlignmentCopyState("copied");
+    } catch {
+      setStageAlignmentCopyState("failed");
+    }
+  }, [stageAlignmentDraft]);
 
   const activeExchange = state.exchanges[state.activeExchangeIndex];
   const floorFlyter = state.floorSideId
     ? state.bout?.flyters.find((flyter) => flyter.sideId === state.floorSideId)
     : null;
-  const unusedFacets = floorFlyter?.legend.filter((facet) =>
-    !state.exchanges.some((exchange) => exchange.boast?.legendFacetId === facet.id),
-  ) ?? [];
+  const unusedFacets =
+    floorFlyter?.legend.filter(
+      (facet) =>
+        !state.exchanges.some(
+          (exchange) => exchange.boast?.legendFacetId === facet.id,
+        ),
+    ) ?? [];
   const opponentClaims = state.exchanges
     .map((exchange) => exchange.boast)
     .filter((boast): boast is NonNullable<typeof boast> =>
       Boolean(boast && boast.sideId !== state.floorSideId),
     );
+
+  useEffect(() => {
+    if (voiceActiveEventId === null || speechTiming !== null) return;
+    const intervalId = window.setInterval(() => {
+      setFallbackMouthPhase((current) => (current + 1) % 2);
+    }, 150);
+    return () => window.clearInterval(intervalId);
+  }, [speechTiming, voiceActiveEventId]);
 
   useEffect(() => {
     setDraft("");
@@ -1511,82 +2182,107 @@ export function DebateFlytingLive(
     setLens("doubt");
     setManeuver("stand");
     setReturnClaimId(opponentClaims[0]?.id ?? "");
-    setWinnerSideId(state.hallVotes.filter((vote) => vote.sideId === "for").length >= state.hallVotes.filter((vote) => vote.sideId === "against").length ? "for" : "against");
+    setWinnerSideId(
+      state.hallMembers.filter((member) => member.leaning === "for").length >=
+        state.hallMembers.filter((member) => member.leaning === "against")
+          .length
+        ? "for"
+        : "against",
+    );
   }, [props.session.revision]);
 
-  const adoptWithPresentation = useCallback(async (
-    next: DebateSessionV1,
-    priorSequence: number,
-  ): Promise<void> => {
-    props.onSessionChange(next);
-    const events = next.events.filter((event) => event.sequence > priorSequence);
-    for (const event of events) {
-      const cue = debateFlytingRitualCueForEvent(event);
-      if (cue && props.audioEnabled) {
-        playDebateFlytingRitualCue(cue, props.audioVolume);
-      }
-      const spokenText = debateSpokenText(event.content).trim();
-      if (event.speakerBotId && spokenText) {
-        setPresentingEvent(event);
-        setSpeechTiming(null);
-      }
-      const clearPresentation = (): void => {
-        setPresentingEvent((current) => current?.id === event.id ? null : current);
-        setSpeechTiming(null);
-      };
-      try {
-        await props.playEvent(event, next, {
-          onStart: (durationMs, alignment) => {
-            if (!event.speakerBotId || !spokenText || durationMs === null) return;
-            setSpeechTiming({
-              text: spokenText,
-              elapsedMs: 0,
-              durationMs,
-              alignment: alignment ?? null,
-            });
-          },
-          onProgress: (elapsedMs, durationMs) => {
-            if (!event.speakerBotId || !spokenText) return;
-            setSpeechTiming((current) => ({
-              text: spokenText,
-              elapsedMs,
-              durationMs,
-              alignment: current?.alignment ?? null,
-            }));
-          },
-          onEnd: clearPresentation,
-          onCancel: clearPresentation,
-        });
-      } finally {
-        clearPresentation();
-      }
-    }
-  }, [props.audioEnabled, props.audioVolume, props.onSessionChange, props.playEvent]);
-
-  const mutate = useCallback(async (
-    body: Record<string, unknown>,
-    label: string,
-  ): Promise<void> => {
-    if (busy) return;
-    setBusy(true);
-    setError(null);
-    const priorSequence = props.session.events.at(-1)?.sequence ?? 0;
-    try {
-      const result = await props.request<{ session: DebateSessionV1 }>(
-        `/api/debates/${encodeURIComponent(props.session.id)}/flyting-action`,
-        jsonBody({
-          ...body,
-          expectedRevision: props.session.revision,
-          idempotencyKey: flytingMutationKey(label),
-        }),
+  const adoptWithPresentation = useCallback(
+    async (next: DebateSessionV1, priorSequence: number): Promise<void> => {
+      props.onSessionChange(next);
+      const events = next.events.filter(
+        (event) => event.sequence > priorSequence,
       );
-      await adoptWithPresentation(result.session, priorSequence);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The Hall could not record that action.");
-    } finally {
-      setBusy(false);
-    }
-  }, [adoptWithPresentation, busy, props.request, props.session]);
+      for (const event of events) {
+        const cue = debateFlytingRitualCueForEvent(event);
+        if (cue && props.audioEnabled) {
+          playDebateFlytingRitualCue(cue, props.audioVolume);
+        }
+        const spokenText = debateSpokenText(event.content).trim();
+        if (event.speakerBotId && spokenText) {
+          setPresentingEvent(event);
+          setSpeechTiming(null);
+        }
+        const clearPresentation = (): void => {
+          setPresentingEvent((current) =>
+            current?.id === event.id ? null : current,
+          );
+          setVoiceActiveEventId((current) =>
+            current === event.id ? null : current,
+          );
+          setSpeechTiming(null);
+        };
+        try {
+          await props.playEvent(event, next, {
+            onStart: (durationMs, alignment) => {
+              if (!event.speakerBotId || !spokenText) return;
+              setVoiceActiveEventId(event.id);
+              if (durationMs === null) return;
+              setSpeechTiming({
+                text: spokenText,
+                elapsedMs: 0,
+                durationMs,
+                alignment: alignment ?? null,
+              });
+            },
+            onProgress: (elapsedMs, durationMs) => {
+              if (!event.speakerBotId || !spokenText) return;
+              setVoiceActiveEventId(event.id);
+              setSpeechTiming((current) => ({
+                text: spokenText,
+                elapsedMs,
+                durationMs,
+                alignment: current?.alignment ?? null,
+              }));
+            },
+            onEnd: clearPresentation,
+            onCancel: clearPresentation,
+          });
+        } finally {
+          clearPresentation();
+        }
+      }
+    },
+    [
+      props.audioEnabled,
+      props.audioVolume,
+      props.onSessionChange,
+      props.playEvent,
+    ],
+  );
+
+  const mutate = useCallback(
+    async (body: Record<string, unknown>, label: string): Promise<void> => {
+      if (busy) return;
+      setBusy(true);
+      setError(null);
+      const priorSequence = props.session.events.at(-1)?.sequence ?? 0;
+      try {
+        const result = await props.request<{ session: DebateSessionV1 }>(
+          `/api/debates/${encodeURIComponent(props.session.id)}/flyting-action`,
+          jsonBody({
+            ...body,
+            expectedRevision: props.session.revision,
+            idempotencyKey: flytingMutationKey(label),
+          }),
+        );
+        await adoptWithPresentation(result.session, priorSequence);
+      } catch (caught) {
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "The Hall could not record that action.",
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [adoptWithPresentation, busy, props.request, props.session],
+  );
 
   useEffect(() => {
     mutateRef.current = mutate;
@@ -1597,16 +2293,23 @@ export function DebateFlytingLive(
       busy ||
       props.session.status !== "live" ||
       state.expectedAction !== "advance"
-    ) return;
+    )
+      return;
     autoTimerRef.current = window.setTimeout(() => {
       autoTimerRef.current = null;
       void mutateRef.current({ action: "advance" }, "advance");
     }, 720);
     return () => {
-      if (autoTimerRef.current !== null) window.clearTimeout(autoTimerRef.current);
+      if (autoTimerRef.current !== null)
+        window.clearTimeout(autoTimerRef.current);
       autoTimerRef.current = null;
     };
-  }, [busy, props.session.status, props.session.revision, state.expectedAction]);
+  }, [
+    busy,
+    props.session.status,
+    props.session.revision,
+    state.expectedAction,
+  ]);
 
   const wield = async (): Promise<void> => {
     if (busy) return;
@@ -1624,13 +2327,18 @@ export function DebateFlytingLive(
           targetChallengeId: activeExchange?.challenge?.id ?? null,
           maneuver,
           returnClaimId: maneuver === "return" ? returnClaimId || null : null,
-          winnerSideId: state.expectedAction === "host_verdict" ? winnerSideId : null,
+          winnerSideId:
+            state.expectedAction === "host_verdict" ? winnerSideId : null,
         }),
       );
       setDraft(result.content);
       setAuthoredMode("wielded");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "PRISM could not shape a draft.");
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "PRISM could not shape a draft.",
+      );
     } finally {
       setBusy(false);
     }
@@ -1638,20 +2346,43 @@ export function DebateFlytingLive(
 
   const submitPlayerAction = (): void => {
     if (state.expectedAction === "boast") {
-      void mutate({ action: "boast", legendFacetId: facetId, content: draft, authoredMode }, "boast");
+      void mutate(
+        {
+          action: "boast",
+          legendFacetId: facetId,
+          content: draft,
+          authoredMode,
+        },
+        "boast",
+      );
     } else if (state.expectedAction === "challenge") {
-      void mutate({ action: "challenge", targetClaimId, lens, content: draft, authoredMode }, "challenge");
+      void mutate(
+        {
+          action: "challenge",
+          targetClaimId,
+          lens,
+          content: draft,
+          authoredMode,
+        },
+        "challenge",
+      );
     } else if (state.expectedAction === "rejoinder") {
-      void mutate({
-        action: "rejoinder",
-        targetChallengeId: activeExchange?.challenge?.id ?? null,
-        maneuver,
-        returnClaimId: maneuver === "return" ? returnClaimId : null,
-        content: draft,
-        authoredMode,
-      }, "rejoinder");
+      void mutate(
+        {
+          action: "rejoinder",
+          targetChallengeId: activeExchange?.challenge?.id ?? null,
+          maneuver,
+          returnClaimId: maneuver === "return" ? returnClaimId : null,
+          content: draft,
+          authoredMode,
+        },
+        "rejoinder",
+      );
     } else if (state.expectedAction === "host_verdict") {
-      void mutate({ action: "host_verdict", winnerSideId, content: draft, authoredMode }, "host-verdict");
+      void mutate(
+        { action: "host_verdict", winnerSideId, content: draft, authoredMode },
+        "host-verdict",
+      );
     }
   };
 
@@ -1672,47 +2403,141 @@ export function DebateFlytingLive(
       );
       props.onSessionChange(result.session);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The Hall could not change its pace.");
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The Hall could not change its pace.",
+      );
     } finally {
       setBusy(false);
     }
   };
 
-  const leaveHall = async (): Promise<void> => {
-    if (props.session.status === "live" || props.session.status === "waiting_for_player") {
-      try {
-        const result = await props.request<{ session: DebateSessionV1 }>(
-          `/api/debates/${encodeURIComponent(props.session.id)}/pause`,
-          jsonBody({
-            expectedRevision: props.session.revision,
-            idempotencyKey: flytingMutationKey("leave"),
-            presentationEventId: props.session.events.at(-1)?.id ?? null,
-            quietSave: true,
-          }),
-        );
-        props.onSessionChange(result.session);
-      } catch {
-        // The session is already durable; leaving must never trap the player.
-      }
-    }
-    props.onExit();
-  };
-
   const forColor = botColor(props.session.forAdvocate, "#d8b25d");
   const againstColor = botColor(props.session.againstAdvocate, "#c56b53");
   const hostColor = botColor(props.session.moderator, "#9f8a68");
-  const hallPresentation = debateFlytingHallPresentation(state, props.session.status);
-  const fireColor = hallPresentation.fireSeatId === "host"
-    ? hostColor
-    : hallPresentation.fireSeatId === "for"
-      ? forColor
-      : againstColor;
-  const fireSeatName = hallPresentation.fireSeatId === "host"
-    ? props.session.moderator.name
-    : sideName(props.session, hallPresentation.fireSeatId);
-  const exchangeProgress = state.phase === "final_acclamation" || state.phase === "verdict" || state.phase === "complete"
-    ? 4
-    : state.activeExchangeIndex + 1;
+  const hallPresentation = debateFlytingHallPresentation(
+    state,
+    props.session.status,
+  );
+  const galleryIsSubdued =
+    hallPresentation.galleryIsQuiet || voiceActiveEventId !== null;
+  const hallNpcBots = useMemo(
+    () =>
+      debateFlytingHallNpcBots(
+        props.session.id,
+        DEBATE_FLYTING_AUDIENCE_COUNT + DEBATE_FLYTING_JARL_GUARD_COUNT,
+      ),
+    [props.session.id],
+  );
+  const hallAudienceMilling = useMemo(
+    () =>
+      Array.from(
+        {
+          length:
+            DEBATE_FLYTING_AUDIENCE_COUNT + DEBATE_FLYTING_JARL_GUARD_COUNT,
+        },
+        (_, index) =>
+          debateFlytingAudienceMillingPlan(
+            `${props.session.id}:hall-seat-${index}`,
+            debateAudienceSeatLayout(
+              index,
+              DEBATE_FLYTING_AUDIENCE_COUNT + DEBATE_FLYTING_JARL_GUARD_COUNT,
+            ).depthRow,
+          ),
+      ),
+    [props.session.id],
+  );
+  const hallAudienceSeats = useMemo(
+    () => [
+      ...state.hallMembers.map((member, index) => ({
+        id: member.id,
+        bot: hallNpcBots[index]!,
+        index,
+        leaning: member.leaning,
+        guard: false,
+      })),
+      ...state.jarlGuards.map((guard, guardIndex) => ({
+        id: guard.id,
+        bot: hallNpcBots[DEBATE_FLYTING_AUDIENCE_COUNT + guardIndex]!,
+        index: DEBATE_FLYTING_AUDIENCE_COUNT + guardIndex,
+        leaning: (guard.sideId ?? "neutral") as DebateFlytingHallLeaningV1,
+        guard: true,
+      })),
+    ],
+    [hallNpcBots, state.hallMembers, state.jarlGuards],
+  );
+  const hallLeaningCounts = useMemo(
+    () => ({
+      for: state.hallMembers.filter((member) => member.leaning === "for")
+        .length,
+      neutral: state.hallMembers.filter(
+        (member) => member.leaning === "neutral",
+      ).length,
+      against: state.hallMembers.filter(
+        (member) => member.leaning === "against",
+      ).length,
+    }),
+    [state.hallMembers],
+  );
+  const fireColor =
+    hallPresentation.fireSeatId === "host"
+      ? hostColor
+      : hallPresentation.fireSeatId === "for"
+        ? forColor
+        : againstColor;
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setGalleryMouthPhase((current) => (current + 1) % 4);
+    }, 170);
+    return () => window.clearInterval(intervalId);
+  }, []);
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setGalleryHopWave((current) => (current + 1) % 198);
+    }, 1_450);
+    return () => window.clearInterval(intervalId);
+  }, []);
+  const exchangeProgress =
+    state.phase === "final_acclamation" ||
+    state.phase === "verdict" ||
+    state.phase === "complete"
+      ? 4
+      : state.activeExchangeIndex + 1;
+  const voiceActiveEvent =
+    voiceActiveEventId === presentingEvent?.id ? presentingEvent : null;
+  const activeRole: FlytingCameraView | null =
+    voiceActiveEvent?.speakerBotId === props.session.forAdvocate.id
+      ? "left"
+      : voiceActiveEvent?.speakerBotId === props.session.againstAdvocate.id
+        ? "right"
+        : voiceActiveEvent?.speakerBotId === props.session.moderator.id
+          ? "moderator"
+          : state.expectedAction === "host_verdict"
+            ? "moderator"
+            : state.floorSideId === "for"
+              ? "left"
+              : state.floorSideId === "against"
+                ? "right"
+                : null;
+  const cameraView: FlytingCameraView =
+    cameraMode === "auto" ? (activeRole ?? "wide") : cameraMode;
+  const activeStageRole =
+    activeRole === "left"
+      ? "for"
+      : activeRole === "right"
+        ? "against"
+        : activeRole === "moderator"
+          ? "moderator"
+          : null;
+  const fallbackMouthShape: DebateBotAvatarState["foleyMouthShape"] =
+    voiceActiveEvent && speechTiming === null
+      ? fallbackMouthPhase === 0
+        ? "open-small"
+        : "speech-closed"
+      : null;
+  const eventIsAudiblyActive = (botId: string): boolean =>
+    voiceActiveEvent?.speakerBotId === botId;
   const renderHallAvatar = (
     bot: DebateBotSnapshotV1,
     role: "for" | "against" | "moderator" | "audience",
@@ -1724,236 +2549,1177 @@ export function DebateFlytingLive(
       facing?: DebateBotAvatarState["facing"];
       listenerReaction?: DebateBotAvatarState["listenerReaction"];
     },
-  ): ReactNode => props.renderBotAvatar?.(bot, {
-    role,
-    lookAtRole:
-      role === "for"
-        ? "against"
-        : role === "against"
-          ? "for"
-          : role === "moderator"
-            ? state.floorSideId
-            : null,
-    consumer: role === "audience" ? "gallery" : "forum",
-    presentation: options.presentation,
-    talking: options.talking === true,
-    thinking: options.thinking === true,
-    voiceLevel: 1,
-    colorCycle: false,
-    speechTiming: options.talking ? speechTiming : null,
-    foleyMouthShape: options.foleyMouthShape ?? null,
-    listenerReaction: options.listenerReaction ?? null,
-    blinkEnabled: true,
-    facing: options.facing,
-    speechInkVisible: options.talking === true,
-  }) ?? props.renderBotGlyph(bot.glyph, {
-    size: options.presentation === "full" ? 84 : 21,
-    strokeWidth: 1.2,
-  });
+  ): ReactNode =>
+    props.renderBotAvatar?.(bot, {
+      role,
+      lookAtRole:
+        role === "for"
+          ? "against"
+          : role === "against"
+            ? "for"
+            : role === "moderator"
+              ? state.floorSideId
+              : null,
+      consumer: role === "audience" ? "gallery" : "forum",
+      presentation: options.presentation,
+      talking: options.talking === true,
+      thinking: options.thinking === true,
+      voiceLevel: 1,
+      colorCycle: false,
+      speechTiming: options.talking ? speechTiming : null,
+      foleyMouthShape:
+        options.foleyMouthShape ??
+        (options.talking ? fallbackMouthShape : null),
+      listenerReaction: options.listenerReaction ?? null,
+      blinkEnabled: true,
+      facing: options.facing,
+      speechInkVisible: options.talking === true,
+    }) ??
+    props.renderBotGlyph(bot.glyph, {
+      size: options.presentation === "full" ? 84 : 21,
+      strokeWidth: 1.2,
+    });
 
   return (
     <main
-      className={styles.liveShell}
-      data-theme={props.theme}
+      className={`${studioStyles.live} ${styles.liveShell}`}
+      data-debate-surface="live"
+      data-debate-format="flyting"
+      data-theme="dark"
       data-status={props.session.status}
+      data-session-status={props.session.status}
       data-tutorial-target="debate-flyting-live"
-      style={{
-        "--flyting-for": forColor,
-        "--flyting-against": againstColor,
-        // The RGB authoring keys resolve here, before anything reaches the
-        // playable Hall: left → Pro, host → Host, right → Con.
-        "--flyting-lane-left": forColor,
-        "--flyting-lane-host": hostColor,
-        "--flyting-lane-right": againstColor,
-        "--flyting-fire-color": fireColor,
-        "--flyting-prism-for": `${hallPresentation.prism.forPercent}%`,
-        "--flyting-prism-against": `${hallPresentation.prism.againstPercent}%`,
-        "--flyting-prism-against-start": `${100 - hallPresentation.prism.againstPercent}%`,
-        "--flyting-prism-dominance": `${hallPresentation.prism.dominance}%`,
-      } as CSSProperties}
+      style={
+        {
+          "--flyting-for": forColor,
+          "--flyting-against": againstColor,
+          "--debate-active-color": fireColor,
+          "--debate-for-color": forColor,
+          "--debate-against-color": againstColor,
+          "--debate-moderator-color": hostColor,
+          // The authored color keys resolve here, before anything reaches the
+          // playable Hall: left → Pro, host → Host, right → Con.
+          "--flyting-lane-left": forColor,
+          "--flyting-lane-host": hostColor,
+          "--flyting-lane-right": againstColor,
+          "--flyting-lane-left-key-boost": flytingKeyVisibilityBoost(forColor),
+          "--flyting-lane-host-key-boost": flytingKeyVisibilityBoost(hostColor),
+          "--flyting-lane-right-key-boost":
+            flytingKeyVisibilityBoost(againstColor),
+        } as CSSProperties
+      }
     >
-      <header className={styles.liveHeader}>
-        <button type="button" onClick={() => void leaveHall()}>← Leave Hall</button>
-        <div><p>Flyting · Mead Hall</p><h1>{state.bout?.title ?? props.session.motion.title}</h1><span>{state.bout?.stakes}</span></div>
+      <SessionAtmosphereLayer
+        active={props.audioEnabled && props.audioVolume > 0}
+        sessionKey={`debate-flyting-gallery:${props.session.id}`}
+        volume={props.audioVolume}
+        backgroundUrl={DEBATE_AUDIENCE_MURMUR_URL}
+        grainUrl={DEBATE_AUDIENCE_CROSSTALK_URL}
+        backgroundTone="warm-low"
+        mix={
+          galleryIsSubdued
+            ? { background: 0.08, grain: 0.018, foley: 0 }
+            : { background: 0.15, grain: 0.085, foley: 0 }
+        }
+        mixTransitionMs={260}
+        lifecycleTransitionMs={320}
+        ambientFoley={false}
+      />
+      <header className={`${studioStyles.liveHeader} ${styles.liveHeader}`}>
+        <div className={styles.liveHeaderDockSpace} aria-hidden="true" />
+        <div>
+          <p>Flyting · Mead Hall</p>
+          <h1>
+            {props.session.forAdvocate.name} vs.{" "}
+            {props.session.againstAdvocate.name}
+          </h1>
+          <span>{state.bout?.stakes}</span>
+        </div>
         <div className={styles.liveHeaderActions}>
           <span>Exchange {exchangeProgress} / 4</span>
-          {props.session.status !== "completed" ? <button type="button" onClick={() => void pauseOrResume()} disabled={busy}>{props.session.status === "paused" ? "Resume" : "Pause"}</button> : <strong>Recorded</strong>}
+          {props.session.status !== "completed" ? (
+            <button
+              type="button"
+              onClick={() => void pauseOrResume()}
+              disabled={busy}
+            >
+              {props.session.status === "paused" ? "Resume" : "Pause"}
+            </button>
+          ) : (
+            <strong>Recorded</strong>
+          )}
         </div>
       </header>
 
-      <section className={styles.hallStage} aria-label="Mead Hall stage">
-        <div className={styles.hallAccentKeys} aria-hidden="true">
-          <span data-key="left" />
-          <span data-key="host" />
-          <span data-key="right" />
-        </div>
-        <div className={styles.hallRoof} aria-hidden="true"><span /><span /><span /></div>
-        <div
-          className={styles.hallFire}
-          data-intensity={hallPresentation.fireIntensity}
-          data-side={hallPresentation.fireSeatId}
-          aria-label={`${hallPresentation.fireIntensity} hearth, held by ${fireSeatName}`}
-          role="img"
-        ><i /><b /><em /></div>
-        <div
-          className={styles.hallPrism}
-          data-leading={hallPresentation.prism.leadingSideId}
-          role="img"
-          aria-label={`Hall prism: ${hallPresentation.prism.forPercent}% ${sideName(props.session, "for")} contribution and ${hallPresentation.prism.againstPercent}% ${sideName(props.session, "against")} contribution. ${sideName(props.session, hallPresentation.prism.leadingSideId)} currently holds the stronger record.`}
-        >
-          <span className={styles.prismCore} aria-hidden="true" />
-          <span className={styles.prismMeasure} aria-hidden="true"><i /><b /></span>
-        </div>
-        <div className={styles.hallHost} style={{ "--flyting-bot-color": hostColor } as CSSProperties}>
-          <div className={styles.hostAvatarPresence} data-flyting-bot-avatar="host">
-            {renderHallAvatar(props.session.moderator, "moderator", {
-              presentation: "full",
-              talking:
-                presentingEvent?.speakerBotId === props.session.moderator.id &&
-                speechTiming !== null,
-              thinking:
-                busy &&
-                presentingEvent === null &&
-                state.expectedAction === "host_verdict",
-            })}
-          </div>
-          <span className={styles.hostShield} data-flyting-hall-asset="shield" aria-hidden="true">{props.renderBotGlyph(props.session.moderator.glyph, { size: 31, strokeWidth: 1.3 })}</span>
-          <strong>{props.session.playerRole === "judge" ? "You hold the Hall" : props.session.moderator.name}</strong>
-          <small>{state.phase === "complete" ? "The word is given" : "Host of the Hall"}</small>
-        </div>
-        {([
-          ["for", props.session.forAdvocate, forColor],
-          ["against", props.session.againstAdvocate, againstColor],
-        ] as const).map(([sideId, bot, color]) => {
-          const flyter = state.bout?.flyters.find((candidate) => candidate.sideId === sideId);
-          const speaking = state.floorSideId === sideId || props.session.events.at(-1)?.speakerBotId === bot.id;
-          const talking = presentingEvent?.speakerBotId === bot.id && speechTiming !== null;
-          return (
-            <article key={sideId} className={styles.flyterPodium} data-side={sideId} data-speaking={speaking ? "true" : undefined} style={{ "--flyting-bot-color": color, "--flyting-lane-color": color } as CSSProperties}>
-              <div className={styles.flyterAvatarPresence} data-flyting-bot-avatar={sideId}>
-                {renderHallAvatar(bot, sideId, {
-                  presentation: "full",
-                  talking,
-                  thinking:
-                    busy &&
-                    presentingEvent === null &&
-                    state.floorSideId === sideId,
+      <div className={`${studioStyles.liveWorkspace} ${styles.courtWorkspace}`}>
+        <div className={studioStyles.stageColumn}>
+          <section
+            className={`${studioStyles.forum} ${styles.hallStage} ${styles.courtStage}`}
+            aria-label="Mead Hall stage"
+            data-debate-stage-viewport="live"
+          >
+            <div
+              className={`${studioStyles.forumCamera} ${styles.hallCamera}`}
+              data-camera-view={cameraView}
+              data-camera-mode={cameraMode}
+              data-camera-transition={cameraMode === "auto" ? "cut" : "move"}
+              data-active-role={activeStageRole ?? undefined}
+            >
+              <div
+                className={`${studioStyles.receiverMatte} ${styles.hallReceiverMatte}`}
+                aria-hidden="true"
+              />
+              <div className={styles.hallAccentKeys} aria-hidden="true">
+                <span data-key="left" />
+                <span data-key="host" />
+                <span data-key="right" />
+              </div>
+              <div className={styles.hallHeraldryGlyphs} aria-hidden="true">
+                {(
+                  [
+                    ["for", props.session.forAdvocate, forColor],
+                    ["moderator", props.session.moderator, hostColor],
+                    ["against", props.session.againstAdvocate, againstColor],
+                  ] as const
+                ).map(([role, bot, color]) => {
+                  const item = flytingStageAlignmentItemFor(
+                    cameraView === "moderator" ? "moderator" : "wide",
+                    role,
+                    "heraldry",
+                  );
+                  const placement = item
+                    ? stageAlignmentDraft.placements[item]
+                    : DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements
+                        .wideForHeraldry;
+                  return (
+                    <span
+                      data-role={role}
+                      key={`banner-glyph:${role}:${bot.id}`}
+                      style={
+                        {
+                          "--flyting-bot-color": color,
+                          ...flytingAlignmentStyle(placement),
+                        } as CSSProperties
+                      }
+                      {...(item ? stageAlignmentHandleProps(item) : {})}
+                    >
+                      {props.renderBotGlyph(bot.glyph, {
+                        size: 52,
+                        strokeWidth: 1.55,
+                      })}
+                    </span>
+                  );
                 })}
               </div>
-              <div className={styles.banner} data-flyting-hall-asset="banner"><span>{props.renderBotGlyph(bot.glyph, { size: 84, strokeWidth: 1.15 })}</span></div>
-              <div>
-                <small>{sideId === "for" ? "Pro" : "Con"}{flyter?.epithet ? ` · ${flyter.epithet}` : ""}</small>
-                <strong>{bot.name}</strong>
-              </div>
-            </article>
-          );
-        })}
-      </section>
-      <section className={styles.hallGallery} data-quiet={hallPresentation.galleryIsQuiet ? "true" : undefined} aria-label="Hall members beneath the stage">
-        <p><span>Hall gallery</span><strong>{hallPresentation.galleryIsQuiet ? "Listening" : "Rowdy"}</strong></p>
-        <div>
-          {props.session.jury.jurors.map((juror, index) => (
-            <span key={juror.id} data-voted={state.hallVotes[index] ? "true" : undefined} style={{ "--flyting-bot-color": botColor(juror, "#9f8a68"), "--flyting-gallery-index": index } as CSSProperties} title={juror.name} aria-label={`${juror.name}${state.hallVotes[index] ? ", vote carved" : ", in the Hall"}`}>
-              <i data-flyting-hall-asset="helmet" aria-hidden="true" />
-              <b data-flyting-gallery-avatar="true" aria-hidden="true">
-                {renderHallAvatar(juror, "audience", {
-                  presentation: "mini",
-                  talking: !hallPresentation.galleryIsQuiet,
-                  foleyMouthShape: hallPresentation.galleryIsQuiet
+              <div className={styles.hallFixtureLight} aria-hidden="true" />
+              {(
+                [
+                  ["for", props.session.forAdvocate, forColor, "Pro"],
+                  ["moderator", props.session.moderator, hostColor, "Host"],
+                  [
+                    "against",
+                    props.session.againstAdvocate,
+                    againstColor,
+                    "Con",
+                  ],
+                ] as const
+              ).map(([role, bot, color, roleLabel]) => {
+                const flyter =
+                  role === "moderator"
                     ? null
-                    : index % 2 === 0
-                      ? "open-small"
-                      : "speech-closed",
-                  facing: index % 2 === 0 ? "right" : "left",
-                  listenerReaction: "attentive",
+                    : state.bout?.flyters.find(
+                        (candidate) => candidate.sideId === role,
+                      );
+                const talking = eventIsAudiblyActive(bot.id);
+                const thinking =
+                  busy &&
+                  presentingEvent === null &&
+                  (role === "moderator"
+                    ? state.expectedAction === "host_verdict"
+                    : state.floorSideId === role);
+                const avatarPresentation =
+                  role === "moderator" && cameraView !== "moderator"
+                    ? "mini"
+                    : "full";
+                const alignmentCameraView =
+                  cameraView === "moderator" ? "moderator" : "wide";
+                const botItem =
+                  flytingStageAlignmentItemFor(
+                    alignmentCameraView,
+                    role,
+                    "bot",
+                  ) ??
+                  flytingStageAlignmentItemFor("wide", role, "bot")!;
+                const helmetItem =
+                  flytingStageAlignmentItemFor(
+                    alignmentCameraView,
+                    role,
+                    "helmet",
+                  ) ??
+                  flytingStageAlignmentItemFor("wide", role, "helmet")!;
+                const nameplateItem =
+                  flytingStageAlignmentItemFor(
+                    alignmentCameraView,
+                    role,
+                    "nameplate",
+                  ) ??
+                  flytingStageAlignmentItemFor("wide", role, "nameplate")!;
+                const botPlacement = stageAlignmentDraft.placements[botItem];
+                const helmetPlacement =
+                  stageAlignmentDraft.placements[helmetItem];
+                const nameplatePlacement =
+                  stageAlignmentDraft.placements[nameplateItem];
+                return (
+                  <div key={`stage:${role}:${bot.id}`}>
+                    <div
+                      className={`${studioStyles.botPosition} ${styles.courtBotPosition}`}
+                      data-role={role}
+                      style={
+                        {
+                          "--flyting-bot-color": color,
+                          ...flytingAlignmentStyle(botPlacement),
+                        } as CSSProperties
+                      }
+                      {...stageAlignmentHandleProps(botItem)}
+                    >
+                      <div
+                        className={studioStyles.botStagePresence}
+                        data-speaking={talking ? "true" : undefined}
+                        data-thinking={thinking ? "true" : undefined}
+                        data-debate-stage-compact={
+                          avatarPresentation === "mini" ? "true" : undefined
+                        }
+                        data-flyting-bot-avatar={
+                          role === "moderator" ? "host" : role
+                        }
+                        style={
+                          {
+                            "--debate-presence-scale":
+                              botPlacement.scale / 100,
+                          } as CSSProperties
+                        }
+                      >
+                        {role !== "moderator" ? (
+                          <span
+                            className={styles.keyedVikingHelmet}
+                            data-flyting-hall-asset="participant-helmet"
+                            style={flytingAlignmentStyle(helmetPlacement)}
+                            {...stageAlignmentHandleProps(helmetItem)}
+                            aria-hidden="true"
+                          />
+                        ) : cameraView === "moderator" ? (
+                          <span
+                            className={styles.moderatorVikingHelmet}
+                            data-flyting-hall-asset="moderator-helmet"
+                            style={flytingAlignmentStyle(helmetPlacement)}
+                            {...stageAlignmentHandleProps(helmetItem)}
+                            aria-hidden="true"
+                          />
+                        ) : (
+                          <span
+                            className={styles.moderatorPixelVikingHelmet}
+                            data-flyting-hall-asset="mini-pixel-crown"
+                            style={flytingAlignmentStyle(helmetPlacement)}
+                            {...stageAlignmentHandleProps(helmetItem)}
+                            aria-hidden="true"
+                          />
+                        )}
+                        {renderHallAvatar(bot, role, {
+                          presentation: avatarPresentation,
+                          talking,
+                          thinking,
+                        })}
+                      </div>
+                    </div>
+                    <div
+                      className={`${studioStyles.botIdentityPosition} ${styles.courtIdentityPosition}`}
+                      data-role={role}
+                      data-speaking={talking ? "true" : undefined}
+                      style={flytingAlignmentStyle(nameplatePlacement)}
+                      {...stageAlignmentHandleProps(nameplateItem)}
+                    >
+                      <div className={studioStyles.botIdentityPlate}>
+                        <strong>
+                          {role === "moderator" &&
+                          props.session.playerRole === "judge"
+                            ? "You hold the Hall"
+                            : bot.name}
+                        </strong>
+                        <small>
+                          {roleLabel}
+                          {flyter?.epithet ? ` · ${flyter.epithet}` : ""}
+                        </small>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div
+              className={studioStyles.debaterFocusDepthOverlay}
+              data-blur-side="right"
+              data-camera-transition={cameraMode === "auto" ? "cut" : "move"}
+              data-visible={cameraView === "left" ? "true" : "false"}
+              aria-hidden="true"
+            />
+            <div
+              className={studioStyles.debaterFocusDepthOverlay}
+              data-blur-side="left"
+              data-camera-transition={cameraMode === "auto" ? "cut" : "move"}
+              data-visible={cameraView === "right" ? "true" : "false"}
+              aria-hidden="true"
+            />
+            {voiceActiveEvent ? (
+              <div
+                className={styles.flytingCaption}
+                role="status"
+                aria-live="polite"
+              >
+                <strong>
+                  {voiceActiveEvent.speakerBotId === props.session.moderator.id
+                    ? props.session.moderator.name
+                    : voiceActiveEvent.sideId
+                      ? sideName(props.session, voiceActiveEvent.sideId)
+                      : "The Hall"}
+                </strong>
+                <span>{debateSpokenText(voiceActiveEvent.content)}</span>
+              </div>
+            ) : null}
+            <div
+              className={studioStyles.floorStatus}
+              data-kind={voiceActiveEvent?.kind ?? "waiting"}
+              aria-live="polite"
+            >
+              <span>{voiceActiveEvent ? "On the floor" : "Mead Hall"}</span>
+              <strong>
+                {voiceActiveEvent?.speakerBotId === props.session.moderator.id
+                  ? props.session.moderator.name
+                  : activeRole === "left"
+                    ? props.session.forAdvocate.name
+                    : activeRole === "right"
+                      ? props.session.againstAdvocate.name
+                      : "The Hall awaits the word"}
+              </strong>
+            </div>
+            <div
+              className={studioStyles.cameraControls}
+              aria-label="Flyting stage cameras"
+              data-tutorial-target="debate-camera"
+            >
+              <span>Camera</span>
+              {FLYTING_CAMERA_VIEWS.map((camera) => (
+                <button
+                  type="button"
+                  data-selected={cameraMode === camera.id ? "true" : undefined}
+                  aria-pressed={cameraMode === camera.id}
+                  onClick={() => setCameraMode(camera.id)}
+                  key={camera.id}
+                >
+                  {camera.label}
+                </button>
+              ))}
+              {DEBATE_FLYTING_STAGE_LAYOUT_AUTHORING_ENABLED ? (
+                <button
+                  type="button"
+                  className={styles.stageAlignmentLaunchButton}
+                  data-selected={stageAlignmentOpen ? "true" : undefined}
+                  aria-pressed={stageAlignmentOpen}
+                  onClick={() => {
+                    if (stageAlignmentOpen) {
+                      setStageAlignmentOpen(false);
+                      return;
+                    }
+                    setStageAlignmentOpen(true);
+                    chooseStageAlignmentView("wide");
+                  }}
+                >
+                  Align
+                </button>
+              ) : null}
+            </div>
+            {props.session.status !== "completed" ? (
+              <div
+                className={studioStyles.stageTransportControls}
+                aria-label="Flyting stage transport"
+              >
+                <button
+                  type="button"
+                  className={studioStyles.stagePauseButton}
+                  onClick={() => void pauseOrResume()}
+                  disabled={busy}
+                >
+                  {props.session.status === "paused" ? "Play" : "Pause"}
+                </button>
+              </div>
+            ) : null}
+          </section>
+          <section
+            className={`${studioStyles.debateAudienceRow} ${styles.flytingCourtGallery}`}
+            data-debate-audience="true"
+            data-audience-placement="below-screen"
+            data-audience-chattering="true"
+            data-audience-talking-audio={
+              props.audioEnabled ? "audible" : "silent"
+            }
+            data-audience-pressure={galleryIsSubdued ? "settled" : "restless"}
+            data-audience-count={hallAudienceSeats.length}
+            aria-label={`${DEBATE_FLYTING_AUDIENCE_COUNT} Hall spectators and ${DEBATE_FLYTING_JARL_GUARD_COUNT} Jarl guards`}
+          >
+            <div className={studioStyles.debateAudienceStatus}>
+              <div
+                className={studioStyles.debateAudienceIdentity}
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                <span>Hall gallery</span>
+                <strong>{galleryIsSubdued ? "Muttering" : "Rowdy"}</strong>
+              </div>
+              <span
+                className={studioStyles.debateAudienceMeter}
+                role="meter"
+                aria-label="Hall rowdiness"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={galleryIsSubdued ? 42 : 100}
+                aria-valuetext={galleryIsSubdued ? "Muttering" : "Rowdy"}
+              >
+                {[0, 1, 2, 3].map((level) => (
+                  <i
+                    key={level}
+                    data-active={
+                      galleryIsSubdued && level > 1 ? undefined : "true"
+                    }
+                    aria-hidden="true"
+                  />
+                ))}
+              </span>
+            </div>
+            <div className={styles.galleryRugAccentKeys} aria-hidden="true">
+              <span data-key="left" />
+              <span data-key="host" />
+              <span data-key="right" />
+            </div>
+            <div className={styles.galleryRugGlyphs} aria-hidden="true">
+              {(
+                [
+                  ["for", props.session.forAdvocate, forColor],
+                  ["moderator", props.session.moderator, hostColor],
+                  ["against", props.session.againstAdvocate, againstColor],
+                ] as const
+              ).map(([role, bot, color]) => {
+                const item = flytingStageAlignmentItemFor(
+                  "gallery",
+                  role,
+                  "rugGlyph",
+                )!;
+                return (
+                  <span
+                    data-role={role}
+                    key={`rug-glyph:${role}:${bot.id}`}
+                    style={
+                      {
+                        "--flyting-bot-color": color,
+                        ...flytingAlignmentStyle(
+                          stageAlignmentDraft.placements[item],
+                        ),
+                      } as CSSProperties
+                    }
+                    {...stageAlignmentHandleProps(item)}
+                  >
+                    {props.renderBotGlyph(bot.glyph, {
+                      size: 58,
+                      strokeWidth: 1.45,
+                    })}
+                  </span>
+                );
+              })}
+            </div>
+            {(["rear", "front"] as const).map((depthRow) => (
+              <span
+                className={`${studioStyles.debateAudienceLayer} ${styles.flytingAudienceLayer}`}
+                data-depth-row={depthRow}
+                key={depthRow}
+                aria-hidden="true"
+              >
+                {(["for", "neutral", "against"] as const).map((leaning) => {
+                  const clusterSeats = hallAudienceSeats.filter(
+                    (seat) =>
+                      seat.leaning === leaning &&
+                      debateAudienceSeatLayout(
+                        seat.index,
+                        hallAudienceSeats.length,
+                      ).depthRow === depthRow,
+                  );
+                  return (
+                    <span
+                      className={styles.flytingAudienceCluster}
+                      data-flyting-leaning={leaning}
+                      key={`${depthRow}:${leaning}`}
+                    >
+                      {clusterSeats.map((seat, clusterIndex) => {
+                        const talking = galleryIsSubdued
+                          ? (seat.index + galleryMouthPhase) % 9 === 0
+                          : (seat.index + galleryMouthPhase) % 4 !== 0;
+                        const hopping =
+                          (seat.index * 5 + galleryHopWave) % 13 === 0;
+                        const facing = debateAudienceConversationFacing(
+                          clusterIndex,
+                          clusterSeats.length,
+                        );
+                        const seatColor =
+                          seat.leaning === "for"
+                            ? forColor
+                            : seat.leaning === "against"
+                              ? againstColor
+                              : hostColor;
+                        const milling = hallAudienceMilling[seat.index]!;
+                        return (
+                          <span
+                            className={styles.flytingAudienceMillingSlot}
+                            key={seat.id}
+                            style={
+                              {
+                                "--flyting-gallery-offset-x": `${milling.offsetXPercent}%`,
+                                "--flyting-gallery-offset-y": `${milling.offsetYPercent}%`,
+                                "--flyting-gallery-drift-x": `${milling.driftXPercent}%`,
+                                "--flyting-gallery-drift-y": `${milling.driftYPercent}%`,
+                                "--flyting-gallery-mill-duration": `${milling.durationMs}ms`,
+                                "--flyting-gallery-mill-delay": `${milling.delayMs}ms`,
+                                "--flyting-gallery-layer": milling.layer,
+                              } as CSSProperties
+                            }
+                          >
+                            <span
+                              className={`${studioStyles.debateAudienceBotPortrait} ${styles.flytingAudiencePortrait}`}
+                              data-talking={talking ? "true" : undefined}
+                              data-audience-bounce={
+                                hopping ? "true" : undefined
+                              }
+                              data-conversation-facing={facing}
+                              data-gallery-arrived="true"
+                              data-flyting-leaning={seat.leaning}
+                              data-flyting-guard={
+                                seat.guard ? "true" : undefined
+                              }
+                              style={
+                                {
+                                  "--flyting-bot-color": seatColor,
+                                  "--debate-audience-depth": milling.depthScale,
+                                  "--debate-audience-index": seat.index,
+                                  "--debate-gallery-enter-x": "0%",
+                                  "--debate-gallery-exit-x": "0%",
+                                } as CSSProperties
+                              }
+                              title={
+                                seat.guard ? "Jarl guard" : "Hall spectator"
+                              }
+                            >
+                              <span
+                                className={styles.galleryVikingHelmet}
+                                data-flyting-hall-asset="mini-pixel-crown"
+                                aria-hidden="true"
+                              />
+                              {renderHallAvatar(seat.bot, "audience", {
+                                presentation: "mini",
+                                talking: false,
+                                foleyMouthShape: talking
+                                  ? (seat.index + galleryMouthPhase) % 2 === 0
+                                    ? "open-small"
+                                    : "speech-closed"
+                                  : null,
+                                facing,
+                                listenerReaction: hopping
+                                  ? "divided"
+                                  : "attentive",
+                              })}
+                              {seat.guard ? (
+                                <span
+                                  className={styles.jarlGuardMark}
+                                  aria-hidden="true"
+                                >
+                                  III
+                                </span>
+                              ) : null}
+                              {talking ? (
+                                <span
+                                  className={
+                                    studioStyles.debateAudienceChatterChip
+                                  }
+                                  aria-hidden="true"
+                                >
+                                  ...
+                                </span>
+                              ) : null}
+                            </span>
+                          </span>
+                        );
+                      })}
+                    </span>
+                  );
                 })}
-              </b>
-            </span>
-          ))}
+              </span>
+            ))}
+          </section>
         </div>
-      </section>
 
-      <div className={styles.liveLayout}>
-        <section className={styles.hallRecord} data-tutorial-target="debate-flyting-record">
-          <header><div><small>Carved before the Hall</small><h2>Hall Record</h2></div><span>{state.exchanges.filter((exchange) => exchange.resolution).length} answered exchanges</span></header>
-          <div className={styles.exchangeTrack}>
-            {state.exchanges.map((exchange) => (
-              <article key={exchange.id} data-active={exchange.index === state.activeExchangeIndex && state.phase !== "complete" ? "true" : undefined} data-resolution={exchange.resolution ?? undefined}>
-                <header><span>Rune {exchange.index + 1}</span><strong>{sideName(props.session, exchange.boastingSideId)} boasts</strong><em>{resolutionLabel(exchange.resolution)}</em></header>
-                {exchange.boast ? <p><b>Boast</b>{exchange.boast.content}</p> : <p className={styles.emptyRune}>The wood is unmarked.</p>}
-                {exchange.challenge ? <p><b>{CHALLENGE_LENSES.find((candidate) => candidate.id === exchange.challenge?.lens)?.label ?? "Challenge"}</b>{exchange.challenge.content}</p> : null}
-                {exchange.yielded ? <p className={styles.yieldRune}><b>Yield</b>The charge stands unanswered.</p> : exchange.rejoinder ? <p><b>{REJOINDER_MANEUVERS.find((candidate) => candidate.id === exchange.rejoinder?.maneuver)?.label ?? "Rejoinder"}</b>{exchange.rejoinder.content}</p> : null}
-                {exchange.acclamation ? <blockquote>{exchange.acclamation}</blockquote> : null}
-              </article>
+        <div className={`${styles.liveLayout} ${styles.courtRail}`}>
+          <section
+            className={styles.hallRecord}
+            data-tutorial-target="debate-flyting-record"
+          >
+            <header>
+              <div>
+                <small>Live transcript</small>
+                <h2>Hall Record</h2>
+              </div>
+              <span>
+                {
+                  state.exchanges.filter((exchange) => exchange.resolution)
+                    .length
+                }{" "}
+                answered exchanges
+              </span>
+            </header>
+            <div className={styles.exchangeTrack}>
+              {state.exchanges.map((exchange) => (
+                <article
+                  key={exchange.id}
+                  data-active={
+                    exchange.index === state.activeExchangeIndex &&
+                    state.phase !== "complete"
+                      ? "true"
+                      : undefined
+                  }
+                  data-resolution={exchange.resolution ?? undefined}
+                >
+                  <header>
+                    <span>Rune {exchange.index + 1}</span>
+                    <strong>
+                      {sideName(props.session, exchange.boastingSideId)} boasts
+                    </strong>
+                    <em>{resolutionLabel(exchange.resolution)}</em>
+                  </header>
+                  {exchange.boast ? (
+                    <p>
+                      <b>Boast</b>
+                      {exchange.boast.content}
+                    </p>
+                  ) : (
+                    <p className={styles.emptyRune}>The wood is unmarked.</p>
+                  )}
+                  {exchange.challenge ? (
+                    <p>
+                      <b>
+                        {CHALLENGE_LENSES.find(
+                          (candidate) =>
+                            candidate.id === exchange.challenge?.lens,
+                        )?.label ?? "Challenge"}
+                      </b>
+                      {exchange.challenge.content}
+                    </p>
+                  ) : null}
+                  {exchange.yielded ? (
+                    <p className={styles.yieldRune}>
+                      <b>Yield</b>The charge stands unanswered.
+                    </p>
+                  ) : exchange.rejoinder ? (
+                    <p>
+                      <b>
+                        {REJOINDER_MANEUVERS.find(
+                          (candidate) =>
+                            candidate.id === exchange.rejoinder?.maneuver,
+                        )?.label ?? "Rejoinder"}
+                      </b>
+                      {exchange.rejoinder.content}
+                    </p>
+                  ) : null}
+                  {exchange.acclamation ? (
+                    <blockquote>{exchange.acclamation}</blockquote>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+            {state.hallLeaningHistory.length ? (
+              <section className={styles.voteRecord}>
+                <h3>Hall Leaning</h3>
+                <p>
+                  <strong>
+                    {hallLeaningCounts.for} Pro · {hallLeaningCounts.neutral}{" "}
+                    Neutral · {hallLeaningCounts.against} Con
+                  </strong>
+                  <span>
+                    {state.finalTally?.jarlSideId
+                      ? `The Jarl sent three guards to ${sideName(props.session, state.finalTally.jarlSideId)}.`
+                      : "The Jarl's three guards hold the center."}
+                  </span>
+                </p>
+              </section>
+            ) : null}
+            {state.hostVerdict ? (
+              <section className={styles.finalVerdict}>
+                <small>The Jarl gives the word</small>
+                <h3>
+                  {state.hostVerdict.outcome === "double_loss" ||
+                  !state.hostVerdict.sideId
+                    ? "Both flyters are dismissed"
+                    : `${sideName(props.session, state.hostVerdict.sideId)} prevails`}
+                </h3>
+                <p>{state.hostVerdict.ruling}</p>
+              </section>
+            ) : null}
+          </section>
+
+          <aside
+            className={styles.floorPanel}
+            data-tutorial-target="debate-flyting-actions"
+          >
+            <header className={styles.flytDeskHeader}>
+              <div>
+                <small>Flyt desk</small>
+                <strong>
+                  {state.expectedAction === "host_verdict"
+                    ? "The Jarl's ruling"
+                    : "Shape the next exchange"}
+                </strong>
+              </div>
+              <span>
+                <b>{hallLeaningCounts.for}</b> Pro
+                <i aria-hidden="true">·</i>
+                <b>{hallLeaningCounts.neutral}</b> Neutral
+                <i aria-hidden="true">·</i>
+                <b>{hallLeaningCounts.against}</b> Con
+              </span>
+            </header>
+            {props.session.status === "paused" ? (
+              <div className={styles.waitingPanel}>
+                <span>ᛉ</span>
+                <h2>The Hall is held.</h2>
+                <p>Resume when you are ready. No clock is running.</p>
+              </div>
+            ) : props.session.status === "completed" ? (
+              <div className={styles.waitingPanel}>
+                <span>◇</span>
+                <h2>The contest is carved.</h2>
+                <p>
+                  Every claim, answer, vote, and delivered Power remains in the
+                  replayable record.
+                </p>
+              </div>
+            ) : props.session.status === "waiting_for_player" ? (
+              <>
+                <header className={styles.floorHeading}>
+                  <small>
+                    {state.expectedAction === "challenge"
+                      ? "Challenge / Flyte"
+                      : state.expectedAction === "rejoinder"
+                        ? "Answer / Rejoinder"
+                        : state.expectedAction === "host_verdict"
+                          ? "Rule / Give the word"
+                          : "Claim / Boast"}
+                  </small>
+                  <h2>
+                    {state.expectedAction === "host_verdict"
+                      ? "The Hall awaits your ruling."
+                      : `${floorFlyter?.name ?? "Your flyter"} awaits your direction.`}
+                  </h2>
+                  <p>
+                    {state.expectedAction === "challenge"
+                      ? "Choose the exact boast and how to attack it."
+                      : state.expectedAction === "rejoinder"
+                        ? "Meet the charge—or Yield and let it stand."
+                        : state.expectedAction === "host_verdict"
+                          ? "The fifteen Hall members have leaned. Send your three guards to the flyter you judge best; their vote carries weight three."
+                          : "Choose an unused Legend facet, then give it voice."}
+                  </p>
+                </header>
+                {state.expectedAction === "boast" ? (
+                  <div className={styles.tacticGrid}>
+                    {unusedFacets.map((facet) => (
+                      <button
+                        type="button"
+                        key={facet.id}
+                        data-selected={
+                          facetId === facet.id ? "true" : undefined
+                        }
+                        onClick={() => setFacetId(facet.id)}
+                      >
+                        <strong>{facet.title}</strong>
+                        <span>{facet.claim}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {state.expectedAction === "challenge" ? (
+                  <>
+                    <label className={styles.floorSelect}>
+                      <span>Targeted claim</span>
+                      <select
+                        value={targetClaimId}
+                        onChange={(event) =>
+                          setTargetClaimId(event.currentTarget.value)
+                        }
+                      >
+                        {opponentClaims.map((claim) => (
+                          <option key={claim.id} value={claim.id}>
+                            {claim.content}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className={styles.tacticGrid}>
+                      {CHALLENGE_LENSES.map((candidate) => (
+                        <button
+                          type="button"
+                          key={candidate.id}
+                          data-selected={
+                            lens === candidate.id ? "true" : undefined
+                          }
+                          onClick={() => setLens(candidate.id)}
+                        >
+                          <strong>{candidate.label}</strong>
+                          <span>{candidate.detail}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                ) : null}
+                {state.expectedAction === "rejoinder" ? (
+                  <>
+                    <blockquote className={styles.activeCharge}>
+                      {activeExchange?.challenge?.content}
+                    </blockquote>
+                    <div className={styles.tacticGrid}>
+                      {REJOINDER_MANEUVERS.map((candidate) => (
+                        <button
+                          type="button"
+                          key={candidate.id}
+                          data-selected={
+                            maneuver === candidate.id ? "true" : undefined
+                          }
+                          onClick={() => setManeuver(candidate.id)}
+                        >
+                          <strong>{candidate.label}</strong>
+                          <span>{candidate.detail}</span>
+                        </button>
+                      ))}
+                    </div>
+                    {maneuver === "return" ? (
+                      <label className={styles.floorSelect}>
+                        <span>Return against</span>
+                        <select
+                          value={returnClaimId}
+                          onChange={(event) =>
+                            setReturnClaimId(event.currentTarget.value)
+                          }
+                        >
+                          {opponentClaims.map((claim) => (
+                            <option key={claim.id} value={claim.id}>
+                              {claim.content}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                  </>
+                ) : null}
+                {state.expectedAction === "host_verdict" ? (
+                  <div className={styles.winnerChoice}>
+                    {(["for", "against"] as const).map((sideId) => (
+                      <button
+                        type="button"
+                        key={sideId}
+                        data-selected={
+                          winnerSideId === sideId ? "true" : undefined
+                        }
+                        onClick={() => setWinnerSideId(sideId)}
+                      >
+                        <strong>
+                          Send guards to {sideName(props.session, sideId)}
+                        </strong>
+                        <span>
+                          {
+                            state.hallMembers.filter(
+                              (member) => member.leaning === sideId,
+                            ).length
+                          }{" "}
+                          Hall members · +3 Jarl guards
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                <label className={styles.composer}>
+                  <span>
+                    <strong>Your line</strong>
+                    <em>
+                      {draft.length} / {DEBATE_FLYTING_LINE_MAX_LENGTH}
+                    </em>
+                  </span>
+                  <textarea
+                    value={draft}
+                    rows={5}
+                    maxLength={DEBATE_FLYTING_LINE_MAX_LENGTH}
+                    placeholder="The line begins blank. Write it yourself or Wield PRISM once for an editable draft."
+                    onChange={(event) => {
+                      setDraft(event.currentTarget.value);
+                      if (!event.currentTarget.value) setAuthoredMode("custom");
+                    }}
+                  />
+                </label>
+                <div className={styles.composerActions}>
+                  {state.expectedAction === "rejoinder" ? (
+                    <button
+                      type="button"
+                      className={styles.yieldAction}
+                      disabled={busy}
+                      onClick={() => void mutate({ action: "yield" }, "yield")}
+                    >
+                      Yield · leave unanswered
+                    </button>
+                  ) : (
+                    <span />
+                  )}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void wield()}
+                  >
+                    {busy ? "Wielding…" : "◇ Wield PRISM"}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.primaryAction}
+                    disabled={
+                      busy ||
+                      !draft.trim() ||
+                      (state.expectedAction === "boast" && !facetId) ||
+                      (state.expectedAction === "challenge" &&
+                        !targetClaimId) ||
+                      (state.expectedAction === "rejoinder" &&
+                        maneuver === "return" &&
+                        !returnClaimId)
+                    }
+                    onClick={submitPlayerAction}
+                  >
+                    {state.expectedAction === "host_verdict"
+                      ? "Give the word"
+                      : "Send to the floor"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className={styles.waitingPanel}>
+                <span>ᚦ</span>
+                <h2>
+                  {busy ? "The word is taking shape…" : "The Hall listens."}
+                </h2>
+                <p>
+                  {state.phase === "final_acclamation"
+                    ? "The fifteen helmets settle into their final leanings."
+                    : state.phase === "verdict"
+                      ? "The Jarl weighs the Hall and readies three guards."
+                      : "Boast, challenge, and answer remain bound to the carved record."}
+                </p>
+              </div>
+            )}
+            {error ? (
+              <div className={styles.liveError} role="alert">
+                <p>{error}</p>
+                <div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setError(null);
+                      void mutate({ action: "advance" }, "retry");
+                    }}
+                  >
+                    Retry
+                  </button>
+                  {state.expectedAction === "advance" ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        setError(null);
+                        void mutate({ action: "advance", skip: true }, "skip");
+                      }}
+                    >
+                      Skip this beat
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+          </aside>
+        </div>
+      </div>
+      {stageAlignmentOpen && DEBATE_FLYTING_STAGE_LAYOUT_AUTHORING_ENABLED ? (
+        <aside
+          className={styles.stageAlignmentPanel}
+          data-flyting-stage-alignment="true"
+          aria-label="Flyting stage alignment"
+        >
+          <header>
+            <div>
+              <span>Developer authoring</span>
+              <h2>Flyting alignment</h2>
+            </div>
+            <button
+              type="button"
+              aria-label="Close Flyting alignment"
+              onClick={() => setStageAlignmentOpen(false)}
+            >
+              ×
+            </button>
+          </header>
+
+          <div className={styles.stageAlignmentTabs} role="tablist">
+            {(
+              [
+                ["wide", "Wide"],
+                ["moderator", "Jarl"],
+                ["gallery", "Gallery"],
+              ] as const
+            ).map(([view, label]) => (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={stageAlignmentView === view}
+                data-selected={stageAlignmentView === view ? "true" : undefined}
+                onClick={() => chooseStageAlignmentView(view)}
+                key={view}
+              >
+                {label}
+              </button>
             ))}
           </div>
-          {state.hallVotes.length ? (
-            <section className={styles.voteRecord}>
-              <h3>Final Acclamation</h3>
-              {state.hallVotes.map((vote) => <p key={vote.voterBotId}><strong>{props.session.jury.jurors.find((juror) => juror.id === vote.voterBotId)?.name ?? "Hall member"} · {sideName(props.session, vote.sideId)}</strong><span>{vote.acclaim}</span></p>)}
-            </section>
-          ) : null}
-          {state.hostVerdict ? (
-            <section className={styles.finalVerdict}><small>The Host gives the word</small><h3>{sideName(props.session, state.hostVerdict.sideId)} prevails</h3><p>{state.hostVerdict.ruling}</p></section>
-          ) : null}
-        </section>
 
-        <aside className={styles.floorPanel} data-tutorial-target="debate-flyting-actions">
-          {props.session.status === "paused" ? (
-            <div className={styles.waitingPanel}><span>ᛉ</span><h2>The Hall is held.</h2><p>Resume when you are ready. No clock is running.</p></div>
-          ) : props.session.status === "completed" ? (
-            <div className={styles.waitingPanel}><span>◇</span><h2>The contest is carved.</h2><p>Every claim, answer, vote, and delivered Power remains in the replayable record.</p></div>
-          ) : props.session.status === "waiting_for_player" ? (
-            <>
-              <header className={styles.floorHeading}>
-                <small>{state.expectedAction === "challenge" ? "Challenge / Flyte" : state.expectedAction === "rejoinder" ? "Answer / Rejoinder" : state.expectedAction === "host_verdict" ? "Rule / Give the word" : "Claim / Boast"}</small>
-                <h2>{state.expectedAction === "host_verdict" ? "The Hall awaits your ruling." : `${floorFlyter?.name ?? "Your flyter"} awaits your direction.`}</h2>
-                <p>{state.expectedAction === "challenge" ? "Choose the exact boast and how to attack it." : state.expectedAction === "rejoinder" ? "Meet the charge—or Yield and let it stand." : state.expectedAction === "host_verdict" ? "The four votes advise you. Crown one winner; ties do not leave the Hall." : "Choose an unused Legend facet, then give it voice."}</p>
-              </header>
-              {state.expectedAction === "boast" ? (
-                <div className={styles.tacticGrid}>{unusedFacets.map((facet) => <button type="button" key={facet.id} data-selected={facetId === facet.id ? "true" : undefined} onClick={() => setFacetId(facet.id)}><strong>{facet.title}</strong><span>{facet.claim}</span></button>)}</div>
-              ) : null}
-              {state.expectedAction === "challenge" ? (
-                <>
-                  <label className={styles.floorSelect}><span>Targeted claim</span><select value={targetClaimId} onChange={(event) => setTargetClaimId(event.currentTarget.value)}>{opponentClaims.map((claim) => <option key={claim.id} value={claim.id}>{claim.content}</option>)}</select></label>
-                  <div className={styles.tacticGrid}>{CHALLENGE_LENSES.map((candidate) => <button type="button" key={candidate.id} data-selected={lens === candidate.id ? "true" : undefined} onClick={() => setLens(candidate.id)}><strong>{candidate.label}</strong><span>{candidate.detail}</span></button>)}</div>
-                </>
-              ) : null}
-              {state.expectedAction === "rejoinder" ? (
-                <>
-                  <blockquote className={styles.activeCharge}>{activeExchange?.challenge?.content}</blockquote>
-                  <div className={styles.tacticGrid}>{REJOINDER_MANEUVERS.map((candidate) => <button type="button" key={candidate.id} data-selected={maneuver === candidate.id ? "true" : undefined} onClick={() => setManeuver(candidate.id)}><strong>{candidate.label}</strong><span>{candidate.detail}</span></button>)}</div>
-                  {maneuver === "return" ? <label className={styles.floorSelect}><span>Return against</span><select value={returnClaimId} onChange={(event) => setReturnClaimId(event.currentTarget.value)}>{opponentClaims.map((claim) => <option key={claim.id} value={claim.id}>{claim.content}</option>)}</select></label> : null}
-                </>
-              ) : null}
-              {state.expectedAction === "host_verdict" ? (
-                <div className={styles.winnerChoice}>{(["for", "against"] as const).map((sideId) => <button type="button" key={sideId} data-selected={winnerSideId === sideId ? "true" : undefined} onClick={() => setWinnerSideId(sideId)}><strong>{sideName(props.session, sideId)}</strong><span>{state.hallVotes.filter((vote) => vote.sideId === sideId).length} Hall votes</span></button>)}</div>
-              ) : null}
-              <label className={styles.composer}>
-                <span><strong>Your line</strong><em>{draft.length} / {DEBATE_FLYTING_LINE_MAX_LENGTH}</em></span>
-                <textarea
-                  value={draft}
-                  rows={5}
-                  maxLength={DEBATE_FLYTING_LINE_MAX_LENGTH}
-                  placeholder="The line begins blank. Write it yourself or Wield PRISM once for an editable draft."
-                  onChange={(event) => {
-                    setDraft(event.currentTarget.value);
-                    if (!event.currentTarget.value) setAuthoredMode("custom");
-                  }}
+          <label className={styles.stageAlignmentSelect}>
+            <span>Element</span>
+            <select
+              value={stageAlignmentItem}
+              onChange={(event) =>
+                setStageAlignmentItem(
+                  event.currentTarget.value as DebateFlytingStageAlignmentItem,
+                )
+              }
+            >
+              {stageAlignmentItems.map((item) => (
+                <option value={item.id} key={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <p className={styles.stageAlignmentHint}>
+            Drag the outlined element, then use exact values for the final
+            nudge.
+          </p>
+
+          <div className={styles.stageAlignmentFields}>
+            {(
+              [
+                ["x", "X", 0.25],
+                ["y", "Y", 0.25],
+                ["scale", "Scale", 1],
+              ] as const
+            ).map(([field, label, step]) => (
+              <label key={field}>
+                <span>{label}</span>
+                <input
+                  type="number"
+                  value={stageAlignmentPlacement[field]}
+                  step={step}
+                  onChange={(event) =>
+                    updateStageAlignmentPlacement(stageAlignmentItem, {
+                      [field]: Number(event.currentTarget.value),
+                    })
+                  }
                 />
+                <em>{field === "scale" ? "%" : "%"}</em>
               </label>
-              <div className={styles.composerActions}>
-                {state.expectedAction === "rejoinder" ? <button type="button" className={styles.yieldAction} disabled={busy} onClick={() => void mutate({ action: "yield" }, "yield")}>Yield · leave unanswered</button> : <span />}
-                <button type="button" disabled={busy} onClick={() => void wield()}>{busy ? "Wielding…" : "◇ Wield PRISM"}</button>
-                <button type="button" className={styles.primaryAction} disabled={busy || !draft.trim() || (state.expectedAction === "boast" && !facetId) || (state.expectedAction === "challenge" && !targetClaimId) || (state.expectedAction === "rejoinder" && maneuver === "return" && !returnClaimId)} onClick={submitPlayerAction}>{state.expectedAction === "host_verdict" ? "Give the word" : "Send to the floor"}</button>
-              </div>
-            </>
-          ) : (
-            <div className={styles.waitingPanel}><span>ᚦ</span><h2>{busy ? "The word is taking shape…" : "The Hall listens."}</h2><p>{state.phase === "final_acclamation" ? `Hall vote ${Math.min(DEBATE_JURY_SIZE, state.hallVotes.length + 1)} of ${DEBATE_JURY_SIZE}` : state.phase === "verdict" ? "The Host weighs the full public record." : "Boast, challenge, and answer remain bound to the carved record."}</p></div>
-          )}
-          {error ? <div className={styles.liveError} role="alert"><p>{error}</p><div><button type="button" disabled={busy} onClick={() => { setError(null); void mutate({ action: "advance" }, "retry"); }}>Retry</button>{state.expectedAction === "advance" ? <button type="button" disabled={busy} onClick={() => { setError(null); void mutate({ action: "advance", skip: true }, "skip"); }}>Skip this beat</button> : null}</div></div> : null}
+            ))}
+            {stageAlignmentDefinition.supportsRotation ? (
+              <label>
+                <span>Rotate</span>
+                <input
+                  type="number"
+                  value={stageAlignmentPlacement.rotation}
+                  step={0.25}
+                  onChange={(event) =>
+                    updateStageAlignmentPlacement(stageAlignmentItem, {
+                      rotation: Number(event.currentTarget.value),
+                    })
+                  }
+                />
+                <em>°</em>
+              </label>
+            ) : null}
+            {stageAlignmentDefinition.supportsSkew ? (
+              <label>
+                <span>Skew X</span>
+                <input
+                  type="number"
+                  value={stageAlignmentPlacement.skewX}
+                  step={0.25}
+                  onChange={(event) =>
+                    updateStageAlignmentPlacement(stageAlignmentItem, {
+                      skewX: Number(event.currentTarget.value),
+                    })
+                  }
+                />
+                <em>°</em>
+              </label>
+            ) : null}
+          </div>
+
+          <div className={styles.stageAlignmentActions}>
+            <button
+              type="button"
+              onClick={() =>
+                updateStageAlignmentPlacement(
+                  stageAlignmentItem,
+                  DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements[
+                    stageAlignmentItem
+                  ],
+                )
+              }
+            >
+              Reset element
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setStageAlignmentDraft(
+                  copyDebateFlytingStageAlignment(
+                    DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT,
+                  ),
+                );
+                setStageAlignmentCopyState("idle");
+              }}
+            >
+              Reset all
+            </button>
+          </div>
+          <button
+            type="button"
+            className={styles.stageAlignmentCopyButton}
+            onClick={() => void copyStageAlignment()}
+          >
+            {stageAlignmentCopyState === "copied"
+              ? "Copied — send me the values"
+              : stageAlignmentCopyState === "failed"
+                ? "Copy failed — retry"
+                : "Copy alignment values"}
+          </button>
+          <small>
+            Preview-only. Copied values are source-ready; normal Flyting stays
+            unchanged until they are codified.
+          </small>
         </aside>
-      </div>
+      ) : null}
     </main>
   );
 }

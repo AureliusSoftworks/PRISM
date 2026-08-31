@@ -58,6 +58,8 @@ import {
   botcastInterruptionBridgeMessageId,
   botcastEpisodeImageDescriptorFromFileName,
   botcastEpisodeImageSpokenReference,
+  botcastPreSessionImageRevealHostTurnV1,
+  botcastPreSessionImageShouldPresentOnNextTurnV1,
   botcastMessageIsEphemeralInterruptionBridge,
   botcastListenerReactionForMessage,
   botcastImageContextForMessageV1,
@@ -417,6 +419,78 @@ describe("Signal public cadence speech", () => {
       },
     ]);
     assert.equal(proxied?.replayProxyId, "proxy-1");
+  });
+
+  it("varies pre-session image entrances without rerolling saved episode identity", () => {
+    const opening = { episodeId: "episode-2", imageId: "image-2" };
+    const later = { episodeId: "episode-1", imageId: "image-1" };
+
+    assert.equal(botcastPreSessionImageRevealHostTurnV1(opening), 1);
+    assert.equal(botcastPreSessionImageRevealHostTurnV1(later), 4);
+    assert.equal(
+      botcastPreSessionImageRevealHostTurnV1(opening),
+      botcastPreSessionImageRevealHostTurnV1({ ...opening }),
+    );
+    const distribution = new Map<number, number>();
+    for (let index = 0; index < 400; index += 1) {
+      const slot = botcastPreSessionImageRevealHostTurnV1({
+        episodeId: `episode-${index}`,
+        imageId: `image-${index}`,
+      });
+      distribution.set(slot, (distribution.get(slot) ?? 0) + 1);
+    }
+    assert.deepEqual([...distribution.keys()].sort(), [1, 2, 3, 4]);
+    assert.ok(
+      [...distribution.values()].every((count) => count >= 70 && count <= 130),
+    );
+    assert.equal(
+      botcastPreSessionImageShouldPresentOnNextTurnV1({
+        ...opening,
+        messages: [],
+      }),
+      true,
+    );
+    assert.equal(
+      botcastPreSessionImageShouldPresentOnNextTurnV1({
+        ...later,
+        messages: [
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+        ],
+      }),
+      false,
+    );
+    assert.equal(
+      botcastPreSessionImageShouldPresentOnNextTurnV1({
+        ...later,
+        messages: [
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+        ],
+      }),
+      true,
+    );
+    assert.equal(
+      botcastPreSessionImageShouldPresentOnNextTurnV1({
+        ...later,
+        messages: [
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+        ],
+      }),
+      true,
+      "a displaced reveal remains eligible at the next natural host handoff",
+    );
   });
 
   it("selects the latest other-bot spoken Foley as Signal's Copycat source", () => {

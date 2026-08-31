@@ -1989,6 +1989,51 @@ export function botcastEpisodeImageDescriptorFromFileName(
   };
 }
 
+export type BotcastPreSessionImageRevealHostTurnV1 = 1 | 2 | 3 | 4;
+
+/**
+ * Gives a pre-session image a varied but episode-stable entrance. The first
+ * slot folds it into the host's opening; later slots wait for an ordinary
+ * guest-to-host handoff. Replay consumes the resulting saved image context,
+ * so it never rerolls this choice.
+ */
+export function botcastPreSessionImageRevealHostTurnV1(args: {
+  episodeId: string;
+  imageId: string;
+}): BotcastPreSessionImageRevealHostTurnV1 {
+  let hash = 2166136261;
+  for (const character of `${args.episodeId}:${args.imageId}`) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  // Avalanche the low bits before taking the four-way slot. Raw FNV low bits
+  // skew badly when episode and image ids share a numeric suffix.
+  hash ^= hash >>> 16;
+  hash = Math.imul(hash, 0x85ebca6b);
+  hash ^= hash >>> 13;
+  hash = Math.imul(hash, 0xc2b2ae35);
+  hash ^= hash >>> 16;
+  return ((hash >>> 0) % 4 + 1) as BotcastPreSessionImageRevealHostTurnV1;
+}
+
+export function botcastPreSessionImageShouldPresentOnNextTurnV1(args: {
+  episodeId: string;
+  imageId: string;
+  messages: readonly Pick<BotcastMessage, "speakerRole">[];
+}): boolean {
+  const hostTurnsAired = args.messages.filter(
+    (message) => message.speakerRole === "host",
+  ).length;
+  const revealHostTurn = botcastPreSessionImageRevealHostTurnV1(args);
+  if (hostTurnsAired + 1 < revealHostTurn) return false;
+
+  // If a higher-priority live direction occupied the chosen slot, the image
+  // remains eligible at the next natural host handoff instead of disappearing.
+  return hostTurnsAired === 0
+    ? args.messages.length === 0
+    : args.messages.at(-1)?.speakerRole === "guest";
+}
+
 export function botcastEpisodeImageSpokenReference(
   image: Pick<BotcastEpisodeImageDescriptor, "kind" | "name">,
 ): string {

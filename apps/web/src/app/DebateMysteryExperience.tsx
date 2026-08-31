@@ -2157,8 +2157,8 @@ export function DebateMysteryPlay(
               <div><p className={styles.eyebrow}>{(currentRoom.kind ?? "room").replace("_", " ")}</p><h2>{currentRoom.name ?? "Undiscovered room"}</h2></div>
               <div className={styles.roomHeaderActions}>
                 <div className={styles.roomArtStyleToggle} role="group" aria-label="Investigation room art" data-tutorial-target="mystery-v2-room-art-style">
-                  <button type="button" aria-pressed={investigationArtStyle === "mosaic"} onClick={() => selectInvestigationArtStyle("mosaic")}>Mosaic</button>
-                  <button type="button" aria-pressed={investigationArtStyle === "illustrated"} onClick={() => selectInvestigationArtStyle("illustrated")}>Illustrated</button>
+                  <button type="button" aria-pressed={investigationArtStyle === "mosaic"} onClick={() => selectInvestigationArtStyle("mosaic")}>Pixel Art</button>
+                  <button type="button" aria-pressed={investigationArtStyle === "illustrated"} onClick={() => selectInvestigationArtStyle("illustrated")}>Realistic</button>
                 </div>
                 {suspectRoomFocus === "search" ? <button type="button" className={styles.leaveInvestigation} data-ui-sfx="none" disabled={busy} onClick={() => void finishActiveActivity()}>← Return to room</button> : suspectRoomFocus === "observe" ? <button type="button" className={styles.backToMansion} data-ui-sfx="none" onClick={showMansion}>← Mansion</button> : null}
               </div>
@@ -2214,7 +2214,7 @@ export function DebateMysteryPlay(
               onPointerLeave={() => setLens((current) => ({ ...current, visible: false }))}
             >
               {roomArtworkSrc ? (
-                <img className={styles.generatedRoom} src={roomArtworkSrc} alt="" />
+                <img className={styles.generatedRoom} data-art-style={investigationArtStyle} src={roomArtworkSrc} alt="" />
               ) : (
                 <>
                   <div className={styles.roomArchitecture} aria-hidden="true"><span /><span /><span /><i /><i /></div>
@@ -2281,6 +2281,7 @@ export function DebateMysteryPlay(
                 className={styles.investigationLens}
                 aria-hidden="true"
                 data-visible={lens.visible ? "true" : undefined}
+                data-targeted={lens.proximity > 0 && lens.regionId ? "true" : undefined}
                 style={{ left: `${lens.x}%`, top: `${lens.y}%`, "--lens-proximity": lens.proximity } as CSSProperties}
               /> : null}
               {currentSuspect && suspectRoomFocus === "observe" ? (

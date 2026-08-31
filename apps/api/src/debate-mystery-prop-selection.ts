@@ -275,6 +275,13 @@ function replaceObjectIdentity(
   return value.replace(new RegExp(`\\b${escaped}\\b`, "giu"), displayName);
 }
 
+function propCapabilitySentence(value: string): string {
+  const capability = value.trim().replace(/[.!?]+$/gu, "");
+  if (!capability) return "";
+  if (/^it\b/iu.test(capability)) return `${capability}.`;
+  return `It ${capability[0]!.toLocaleLowerCase()}${capability.slice(1)}.`;
+}
+
 /** Applies the frozen identity before any prose-writing context is assembled. */
 export function applyWhodunnitPropBindingsToScaffoldV1<
   T extends {
@@ -310,12 +317,15 @@ export function applyWhodunnitPropBindingsToScaffoldV1<
       item.object,
       displayName,
     );
+    const capability = propCapabilitySentence(
+      binding.capabilitySnapshot.whatItDoes,
+    );
     return {
       ...item,
       adjective: "recovered",
       object: displayName,
       title: displayName,
-      observation: `${rewrittenObservation} Its function in this world: ${binding.capabilitySnapshot.whatItDoes}`,
+      observation: `${rewrittenObservation} ${capability}`.trim(),
       keywords: Array.from(new Set([
         ...item.keywords,
         ...normalizedTokens(displayName),

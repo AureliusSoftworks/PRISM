@@ -1,5 +1,6 @@
 import {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  type BotAudioVoiceProfileV1,
   type WhodunnitTextVoiceMode,
 } from "@localai/shared";
 import { enqueueBottishVoice } from "./bottishVoice.ts";
@@ -37,6 +38,14 @@ export const DEBATE_MYSTERY_TEXT_VOICE_VOLUME_RATIO = 0.28;
 /** @deprecated Prefer the mode-neutral text voice ratio. */
 export const DEBATE_MYSTERY_TEXT_BOTTISH_VOLUME_RATIO =
   DEBATE_MYSTERY_TEXT_VOICE_VOLUME_RATIO;
+
+export function debateMysteryTextVoiceModeForPresentation(args: {
+  configuredMode: WhodunnitTextVoiceMode;
+  playerObservation: boolean;
+}): WhodunnitTextVoiceMode {
+  if (args.configuredMode === "off") return "off";
+  return args.playerObservation ? "babble" : args.configuredMode;
+}
 
 type DebateMysteryRestoredPlaybackStateV2 = {
   playPhase: string;
@@ -94,11 +103,20 @@ export function debateMysteryPreparedAudioShouldStart(args: {
   );
 }
 
+/** Prepared local speech owns the caption clock once it becomes audible. */
+export function debateMysteryCaptionFallbackShouldStart(args: {
+  preparedAudioExpected: boolean;
+  preparedAudioStatus: "idle" | "pending" | "started" | "unavailable";
+}): boolean {
+  return !args.preparedAudioExpected || args.preparedAudioStatus === "unavailable";
+}
+
 export function debateMysteryTextVoiceShouldStart(args: {
   audible: boolean;
-  delivery?: "spoken" | "text_only" | "anonymous_babble";
+  delivery?: "spoken" | "text_only" | "persona_babble" | "anonymous_babble";
   key: string | null;
   mode: WhodunnitTextVoiceMode;
+  playerObservation: boolean;
   startedKey: string | null;
   startedMode: WhodunnitTextVoiceMode | null;
   streaming: boolean;
@@ -117,9 +135,10 @@ export function debateMysteryTextVoiceShouldStart(args: {
 
 export function debateMysteryTextVoiceShouldStop(args: {
   audible: boolean;
-  delivery?: "spoken" | "text_only" | "anonymous_babble";
+  delivery?: "spoken" | "text_only" | "persona_babble" | "anonymous_babble";
   key: string | null;
   mode: WhodunnitTextVoiceMode;
+  playerObservation: boolean;
   startedKey: string | null;
   startedMode: WhodunnitTextVoiceMode | null;
   streaming: boolean;
@@ -131,7 +150,7 @@ export function debateMysteryTextVoiceShouldStop(args: {
       args.mode === "off" ||
       args.startedMode !== args.mode ||
       args.delivery !== "text_only" ||
-      !args.streaming ||
+      (!args.streaming && !args.playerObservation) ||
       args.audible
     ),
   );
@@ -139,14 +158,18 @@ export function debateMysteryTextVoiceShouldStop(args: {
 
 export async function playDebateMysteryTextVoice(args: {
   enabled: boolean;
+  instant?: boolean;
   mode: WhodunnitTextVoiceMode;
+  voiceProfile: BotAudioVoiceProfileV1 | null;
   seed: string;
   signal?: AbortSignal;
   text: string;
   volume: number;
   roomAcoustics?: RoomAcousticsSend;
   play?: (args: {
+    instant?: boolean;
     mode: Exclude<WhodunnitTextVoiceMode, "off">;
+    voiceProfile: BotAudioVoiceProfileV1 | null;
     seed: string;
     signal?: AbortSignal;
     text: string;
@@ -158,6 +181,7 @@ export async function playDebateMysteryTextVoice(args: {
   if (
     !args.enabled ||
     args.mode === "off" ||
+    (args.mode === "babble" && !args.voiceProfile) ||
     volume <= 0 ||
     !args.text.trim()
   ) return false;
@@ -165,7 +189,9 @@ export async function playDebateMysteryTextVoice(args: {
     const playbackVolume = volume * DEBATE_MYSTERY_TEXT_VOICE_VOLUME_RATIO;
     if (args.play) {
       return args.play({
+        instant: args.instant,
         mode: args.mode,
+        voiceProfile: args.voiceProfile,
         seed: args.seed,
         signal: args.signal,
         text: args.text,
@@ -176,7 +202,7 @@ export async function playDebateMysteryTextVoice(args: {
     if (args.mode !== "bottish") return false;
     await enqueueBottishVoice(
       args.text,
-      DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      args.voiceProfile ?? DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
       args.seed,
       true,
       playbackVolume,

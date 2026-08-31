@@ -186,6 +186,20 @@ describe("Signal experience shell", () => {
   });
 
   it("gates one ephemeral Producer image and stages items vs pictures", () => {
+    assert.match(source, /preSessionReveal:\s*true/u);
+    assert.match(
+      source,
+      /const openingImageCue = signalPreSessionEpisodeImageCueForNextTurn\(/u,
+    );
+    assert.match(
+      source,
+      /const scheduledPreSessionImageCue =\s*signalPreSessionEpisodeImageCueForNextTurn\(/u,
+    );
+    assert.match(
+      source,
+      /queuedProducerCueRef\.current \?\? scheduledPreSessionImageCue/u,
+    );
+    assert.match(source, /signalEpisodeImageRequestPayload\(setupImageUpload\)/u);
     assert.match(source, /supportsImageInput\?: boolean/u);
     assert.match(
       source,
@@ -195,11 +209,17 @@ describe("Signal experience shell", () => {
     assert.match(source, /SIGNAL_EPISODE_IMAGE_ACCEPT = "\.png,\.jpg"/u);
     assert.match(source, /Signal allows one image upload per episode/u);
     assert.match(source, /className=\{styles\.producerImageAttachWrap\}[\s\S]{0,100}title=\{producerImageTooltip\}/u);
-    assert.match(source, /episodeImage: \{/u);
-    assert.match(source, /dataUrl: episodeImageForTurn\.dataUrl/u);
     assert.match(
       source,
-      /archivalProxyEpisodeId:[\s\S]{0,120}episodeImageForTurn\.archivalProxyEpisodeId/u,
+      /episodeImage:\s*signalEpisodeImageRequestPayload\(episodeImageForTurn\)/u,
+    );
+    assert.match(
+      source,
+      /function signalEpisodeImageRequestPayload[\s\S]{0,240}dataUrl: image\.dataUrl/u,
+    );
+    assert.match(
+      source,
+      /archivalProxyEpisodeId:[\s\S]{0,120}image\.archivalProxyEpisodeId/u,
     );
     assert.match(
       source,
@@ -236,7 +256,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /\{setupImageModeEligible \? \(/u);
     assert.match(
       source,
-      /const watchBakeRequestBody = \{[\s\S]{0,900}episodeImage: \{[\s\S]{0,260}dataUrl: setupImageUpload\.dataUrl/u,
+      /const watchBakeRequestBody = \{[\s\S]{0,300}episodeImage:\s*signalEpisodeImageRequestPayload\(setupImageUpload\)/u,
     );
     assert.match(
       source,
@@ -248,14 +268,14 @@ describe("Signal experience shell", () => {
     assert.match(source, /id="signal-setup-image-name"/u);
     assert.match(source, /id="signal-setup-image-reason"/u);
     assert.match(source, /Reason <span>optional · private to the host<\/span>/u);
-    assert.match(source, /name: episodeImageForTurn\.descriptor\.name/u);
-    assert.match(source, /replayEmoji: episodeImageForTurn\.replayEmoji/u);
-    assert.match(source, /reason: episodeImageForTurn\.reason/u);
+    assert.match(source, /name: image\.descriptor\.name/u);
+    assert.match(source, /replayEmoji: image\.replayEmoji/u);
+    assert.match(source, /reason: image\.reason/u);
     assert.doesNotMatch(source, /\/api\/botcast\/episode-image\/emoji/u);
     assert.match(source, /debateEvidenceEmojiForObject/u);
     assert.match(
       source,
-      /if \(setupImageUpload\) \{[\s\S]{0,180}assignQueuedProducerCue\(\{[\s\S]{0,100}kind: "present_image"/u,
+      /if \(setupImageUpload\) \{\s*setSetupEpisodeImage\(null\);\s*\}/u,
     );
     assert.match(
       source,
@@ -1238,7 +1258,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       css,
-      /\.liveLayout \.controlRoom\s*\{[^}]*max-width:\s*1320px/u,
+      /\.liveWorkspaceStageColumn \.stageViewport,[\s\S]{0,220}\.liveWorkspaceStageColumn \.controlRoom,[\s\S]{0,220}width:\s*100%;[\s\S]{0,80}max-width:\s*none/u,
     );
     assert.match(
       source,
@@ -1250,7 +1270,10 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /const watchBakeActive = watchBakeLabel !== null/u);
     assert.match(source, /data-live-episode=\{liveSessionActive/u);
-    assert.match(source, /!liveSessionActive \? renderLibrary\(\) : null/u);
+    assert.match(
+      source,
+      /!liveSessionActive && !replayEpisode \? renderLibrary\(\) : null/u,
+    );
     assert.match(
       css,
       /\.shell\[data-live-episode="true"\]\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/iu,
@@ -1265,8 +1288,9 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       css,
-      /\.shell\[data-live-episode="true"\] \.liveLayout \.stageViewport\s*\{[^}]*calc\(\(100dvh - 412px\) \* 1\.7778\)/iu,
+      /--signal-live-workspace-left-width:\s*min\([\s\S]{0,240}calc\(\(100dvh - 620px\) \* 1\.7778\)/iu,
     );
+    assert.match(source, /data-signal-transcript="true"/u);
     assert.doesNotMatch(source, /className=\{styles\.transcript\}/u);
     assert.match(source, /className=\{styles\.replayTranscript\}/u);
   });
@@ -2013,7 +2037,10 @@ describe("Signal experience shell", () => {
     );
     assert.match(completedReturnSource, /await finalizeSignalRecording/u);
     assert.match(completedReturnSource, /finally \{[\s\S]{0,260}setEpisode\(null\)/u);
-    assert.match(source, /onClick=\{\(\) => void returnFromCompletedEpisode\(\)\}/u);
+    assert.match(
+      source,
+      /completedStudioUsesOutro\s*\? returnFromEpisodeOutro\(\)\s*:\s*returnFromCompletedEpisode\(\)/u,
+    );
   });
 
   it("builds a coherent random booking around the selected guest", () => {
@@ -2580,7 +2607,7 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("shows a live elapsed episode timer and freezes its completed duration", () => {
+  it("counts timed Signal episodes down and open-ended episodes up", () => {
     assert.match(source, /function signalEpisodeRuntimeMs\(/u);
     assert.match(
       source,
@@ -2589,11 +2616,22 @@ describe("Signal experience shell", () => {
     assert.match(source, /episode\.modelWarmupHoldDurationMs/u);
     assert.match(source, /className=\{styles\.liveTimer\}/u);
     assert.match(source, /data-running=\{props\.status === "live"/u);
-    assert.match(source, /<SignalEpisodeRuntimeClock[\s\S]{0,240}status=\{episode\.status\}/u);
+    assert.match(source, /data-countdown=\{countdown \? "true" : undefined\}/u);
+    assert.match(
+      source,
+      /props\.durationMinutes \* 60_000 - elapsedMs/u,
+    );
+    assert.match(source, /\{countdown \? "T− " : "T\+ "\}/u);
+    assert.match(
+      source,
+      /<SignalEpisodeRuntimeClock[\s\S]{0,220}durationMinutes=\{episode\.durationMinutes\}/u,
+    );
     assert.match(
       source,
       /Episode live for \$\{label\}/u,
     );
+    assert.match(source, /Episode has \$\{label\} remaining/u);
+    assert.match(source, /Timed episode ended with \$\{label\} remaining/u);
     assert.match(
       source,
       /Final episode duration \$\{label\}/u,
@@ -2866,13 +2904,18 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("reserves the full transcript and playback controls for replay", () => {
+  it("keeps the live Transcript separate from replay playback controls", () => {
     assert.doesNotMatch(source, /className=\{styles\.transcript\}/u);
     assert.doesNotMatch(source, /signalTranscriptFollowingRef/u);
+    assert.match(source, /data-signal-transcript="true"/u);
+    assert.match(source, /projectCoffeePublicTranscript\(\{/u);
     assert.match(source, /className=\{styles\.replayPlayer\}/u);
     assert.match(source, /className=\{styles\.replayTranscript\}/u);
     assert.match(css, /\.replayPlayer\s*\{[^}]*var\(--botcast-panel\)/u);
-    assert.match(css, /\.replayTranscript\s*\{[^}]*max-height:\s*320px/u);
+    assert.match(
+      css,
+      /\.replayProgram \.replayTranscript\s*\{[^}]*max-height:\s*none;[^}]*overflow:\s*hidden/u,
+    );
     assert.match(
       source,
       /signalReplayIntroDurationMs\(replayActiveTimeline\)/u,
@@ -2887,7 +2930,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /data-botcast-replay-intro-row="true"/u);
     assert.match(
       source,
-      /replayCapturedPresentationElapsedMs < replayIntroCardEndMs[\s\S]{0,80}\? "true"/u,
+      /replayCapturedPresentationElapsedMs\s*<\s*replayIntroCardEndMs[\s\S]{0,100}\? "true"/u,
     );
     assert.match(
       source,

@@ -12,7 +12,7 @@ export type DebateMysteryRoomIntroductionGestureV2 =
 
 /**
  * The first room-entry click belongs to presentation only. The second click
- * advances the durable graph into the frozen, voiced persona introduction.
+ * advances the durable graph into the frozen, voiced opening exchange.
  */
 export function debateMysteryRoomIntroductionGestureV2(args: {
   casekeeperNarrationVisible: boolean;
@@ -25,9 +25,8 @@ export function debateMysteryRoomIntroductionGestureV2(args: {
 }
 
 /**
- * A naturally settled persona performance has no held dismissal beat. Let the
- * durable room phase complete immediately so controls return without a spare
- * click; a player-skipped line remains held until its explicit dismissal.
+ * Once the player has explicitly dismissed the final frozen line, the empty
+ * queue can complete the durable room phase immediately and restore controls.
  */
 export function debateMysteryRoomIntroductionShouldAutoCompleteV2(args: {
   busy: boolean;
