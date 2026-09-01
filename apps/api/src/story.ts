@@ -1,4 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
+import {
+  OwnerScopedNotFoundError,
+  createOwnerFirstRepository,
+} from "./owner-first-repository.ts";
 import { composeBotRuntimePersona } from "./bot-global-mood.ts";
 import {
   PRISM_DEFAULT_STORY_THEME,
@@ -580,7 +584,7 @@ export function loadStoryBotProfiles(
   return botIds.map((botId) => {
     const row = byId.get(botId);
     if (!row || row.chat_enabled !== 1) {
-      throw new Error("One or more Story bots are unavailable.");
+      throw new OwnerScopedNotFoundError();
     }
     return {
       id: row.id,
@@ -613,6 +617,19 @@ export function createStorySession(
   input: CreateStorySessionInput
 ): StorySessionDetail {
   const botIds = normalizeStoryCreateBotIds(input.botIds);
+  const ownedBots = createOwnerFirstRepository<{
+    id: string;
+    chat_enabled: number;
+  }>(db, {
+    table: "bots",
+    columns: ["id", "chat_enabled"],
+  }).findManyById(userId, botIds);
+  if (
+    ownedBots.length !== botIds.length ||
+    ownedBots.some((bot) => bot.chat_enabled !== 1)
+  ) {
+    throw new OwnerScopedNotFoundError();
+  }
   const now = new Date().toISOString();
   const id = randomId(12);
   const premise = input.premise?.trim() || null;

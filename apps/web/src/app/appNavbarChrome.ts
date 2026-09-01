@@ -1,6 +1,7 @@
 /**
- * App-wide shared navbar chrome: idle auto-hide, Prism summon pin, and Wield reveal.
- * Driven from page shells + PrismCompanion without prop drilling.
+ * App-wide shared navbar chrome state. The navbar is a permanent instrument:
+ * these compatibility hooks may annotate companion and input state, but no
+ * caller may hide or collapse the bar.
  */
 
 export const APP_NAVBAR_REVEAL_EDGE_PX = 72;
@@ -19,28 +20,15 @@ export type AppNavbarChromeSnapshot = {
 
 type Listener = () => void;
 
-let visible = true;
-let autoHideArmed = false;
-let autoHideEnabled = true;
-/** Live Coffee / Debate / Signal sits, plus Avatar Foundry: collapse the shared navbar entirely. */
-let sessionHidden = false;
 let pinned = false;
 let dropdownHoldCount = 0;
 let controlHoldCount = 0;
 let companionOpen = false;
 let wielding = false;
-let autoHideTimer: ReturnType<typeof setTimeout> | null = null;
 const listeners = new Set<Listener>();
 
 function emit(): void {
   for (const listener of listeners) listener();
-}
-
-function clearAutoHideTimer(): void {
-  if (autoHideTimer !== null) {
-    clearTimeout(autoHideTimer);
-    autoHideTimer = null;
-  }
 }
 
 function isDropdownHeld(): boolean {
@@ -49,25 +37,6 @@ function isDropdownHeld(): boolean {
 
 function isControlHeld(): boolean {
   return controlHoldCount > 0;
-}
-
-/** True when any explicit hold should keep the bar painted. */
-function isVisibilityHeld(): boolean {
-  return pinned || isDropdownHeld() || isControlHeld();
-}
-
-/** True when idle tuck should wait (menus, Control-root, companion pin). */
-function blocksIdleHide(): boolean {
-  return companionOpen || isVisibilityHeld();
-}
-
-function computeHidden(): boolean {
-  if (companionOpen) return false;
-  // Explicit holds always keep shortcut targets in view.
-  if (isVisibilityHeld()) return false;
-  // Wield is a Zen visibility hold; other modes already keep the bar present.
-  if (wielding) return false;
-  return !visible;
 }
 
 function syncDocumentAttributes(): void {
@@ -87,13 +56,10 @@ function syncDocumentAttributes(): void {
   } else {
     root.removeAttribute("data-app-navbar-control-held");
   }
-  if (computeHidden()) root.setAttribute("data-app-navbar-hidden", "true");
-  else root.removeAttribute("data-app-navbar-hidden");
-  if (sessionHidden) {
-    root.setAttribute("data-app-navbar-session-hidden", "true");
-  } else {
-    root.removeAttribute("data-app-navbar-session-hidden");
-  }
+  // Clear attributes left by an older bundle during hot reload. Permanent
+  // navbar visibility is enforced here as well as in CSS/layout.
+  root.removeAttribute("data-app-navbar-hidden");
+  root.removeAttribute("data-app-navbar-session-hidden");
 }
 
 function commit(): void {
@@ -101,27 +67,16 @@ function commit(): void {
   emit();
 }
 
-function maybeScheduleAfterRelease(): void {
-  if (
-    autoHideEnabled &&
-    autoHideArmed &&
-    !wielding &&
-    !blocksIdleHide()
-  ) {
-    scheduleAppNavbarAutoHide();
-  }
-}
-
 export function getAppNavbarChromeSnapshot(): AppNavbarChromeSnapshot {
   return {
-    hidden: computeHidden() || sessionHidden,
-    sessionHidden,
+    hidden: false,
+    sessionHidden: false,
     companionOpen,
     wielding,
     pinned,
     dropdownHeld: isDropdownHeld(),
     controlHeld: isControlHeld(),
-    autoHideEnabled,
+    autoHideEnabled: false,
   };
 }
 
@@ -134,25 +89,18 @@ export function getAppNavbarChromeServerSnapshot(): AppNavbarChromeSnapshot {
     pinned: false,
     dropdownHeld: false,
     controlHeld: false,
-    autoHideEnabled: true,
+    autoHideEnabled: false,
   };
 }
 
-/**
- * Fully hide and collapse the shared navbar for locked live applet sessions
- * (Coffee arriving/live, Debate baking/live, Signal on-air) and Avatar
- * Foundry. Independent of Zen idle tuck — restores when the sit ends.
- */
+/** Compatibility no-op: session surfaces lock controls instead of hiding. */
 export function setAppNavbarSessionHidden(hidden: boolean): void {
-  if (sessionHidden === hidden) return;
-  sessionHidden = hidden;
+  void hidden;
   commit();
 }
 
-/** Drain session-hide between unit tests. */
+/** Clear any stale DOM attribute left by an older hot-reloaded bundle. */
 export function clearAppNavbarSessionHiddenForTests(): void {
-  if (!sessionHidden) return;
-  sessionHidden = false;
   commit();
 }
 
@@ -161,8 +109,6 @@ export function clearAppNavbarDropdownHoldsForTests(): void {
   if (dropdownHoldCount === 0 && controlHoldCount === 0) return;
   dropdownHoldCount = 0;
   controlHoldCount = 0;
-  clearAutoHideTimer();
-  visible = true;
   commit();
 }
 
@@ -171,30 +117,15 @@ export function subscribeAppNavbarChrome(listener: Listener): () => void {
   return () => listeners.delete(listener);
 }
 
-/**
- * Idle auto-hide and Wield reveal are Zen-only for now.
- * Chat, Signal, Debate, Coffee, Slate, and other shells keep a persistent bar.
- */
+/** Compatibility no-op: auto-hide is permanently disabled. */
 export function setAppNavbarAutoHideEnabled(enabled: boolean): void {
-  if (autoHideEnabled === enabled) return;
-  autoHideEnabled = enabled;
-  if (!enabled) {
-    autoHideArmed = false;
-    clearAutoHideTimer();
-    visible = true;
-  }
+  void enabled;
   commit();
 }
 
 export function pinAppNavbar(next: boolean): void {
   if (pinned === next) return;
   pinned = next;
-  if (pinned) {
-    clearAutoHideTimer();
-    visible = true;
-  } else {
-    maybeScheduleAfterRelease();
-  }
   commit();
 }
 
@@ -205,14 +136,9 @@ export function pinAppNavbar(next: boolean): void {
  */
 export function holdAppNavbarForDropdown(): () => void {
   dropdownHoldCount += 1;
-  clearAutoHideTimer();
-  visible = true;
   commit();
   return () => {
     dropdownHoldCount = Math.max(0, dropdownHoldCount - 1);
-    if (!isVisibilityHeld()) {
-      maybeScheduleAfterRelease();
-    }
     commit();
   };
 }
@@ -223,14 +149,9 @@ export function holdAppNavbarForDropdown(): () => void {
  */
 export function holdAppNavbarForControlShortcuts(): () => void {
   controlHoldCount += 1;
-  clearAutoHideTimer();
-  visible = true;
   commit();
   return () => {
     controlHoldCount = Math.max(0, controlHoldCount - 1);
-    if (!isVisibilityHeld()) {
-      maybeScheduleAfterRelease();
-    }
     commit();
   };
 }
@@ -240,111 +161,49 @@ export function holdAppNavbarForControlShortcuts(): () => void {
  * Prefer this immediately before opening a picker or flipping a toggle.
  */
 export function revealAppNavbarForShortcutAction(): void {
-  clearAutoHideTimer();
-  visible = true;
   commit();
 }
 
 export function setAppNavbarCompanionOpen(open: boolean): void {
   if (companionOpen === open) return;
   companionOpen = open;
-  if (open) {
-    clearAutoHideTimer();
-    visible = true;
-  } else {
-    maybeScheduleAfterRelease();
-  }
   commit();
 }
 
 export function setAppNavbarWielding(next: boolean): void {
   if (wielding === next) return;
   wielding = next;
-  if (next) {
-    clearAutoHideTimer();
-    visible = true;
-    if (autoHideEnabled) autoHideArmed = true;
-  } else {
-    visible = true;
-    if (autoHideEnabled && autoHideArmed && !blocksIdleHide()) {
-      scheduleAppNavbarAutoHide();
-    } else if (!autoHideEnabled) {
-      autoHideArmed = false;
-      clearAutoHideTimer();
-    }
-  }
   commit();
 }
 
 export function revealAppNavbarTemporarily(): void {
-  clearAutoHideTimer();
-  visible = true;
   commit();
-  if (
-    autoHideEnabled &&
-    autoHideArmed &&
-    !wielding &&
-    !blocksIdleHide()
-  ) {
-    scheduleAppNavbarAutoHide();
-  }
 }
 
 export function revealAppNavbarForFreshSurface(): void {
-  autoHideArmed = false;
-  clearAutoHideTimer();
-  visible = true;
   commit();
 }
 
 /** Keep the bar up while the pointer/focus is in the navbar itself. */
 export function showAppNavbarWhileInteracting(): void {
-  clearAutoHideTimer();
-  visible = true;
   commit();
 }
 
+/** Compatibility no-op: immersion never removes global navigation. */
 export function hideAppNavbarForImmersion(): void {
-  if (!autoHideEnabled) return;
-  if (blocksIdleHide()) {
-    autoHideArmed = true;
-    return;
-  }
-  autoHideArmed = true;
-  clearAutoHideTimer();
-  visible = false;
   commit();
 }
 
-/** Arm idle tuck without forcing an immediate hide. */
+/** Compatibility no-op: idle tuck is permanently disabled. */
 export function armAppNavbarAutoHide(): void {
-  if (!autoHideEnabled) return;
-  autoHideArmed = true;
-  if (!wielding && !blocksIdleHide()) {
-    scheduleAppNavbarAutoHide();
-  }
+  commit();
 }
 
 export function scheduleAppNavbarAutoHide(): void {
-  if (
-    !autoHideEnabled ||
-    !autoHideArmed ||
-    wielding ||
-    blocksIdleHide()
-  ) {
-    return;
-  }
-  clearAutoHideTimer();
-  autoHideTimer = setTimeout(() => {
-    autoHideTimer = null;
-    if (!autoHideEnabled || wielding || blocksIdleHide()) return;
-    visible = false;
-    commit();
-  }, APP_NAVBAR_REVEAL_HOLD_MS);
+  commit();
 }
 
 export function revealAppNavbarFromPointerClientY(clientY: number): void {
-  if (!computeHidden()) return;
-  if (clientY > APP_NAVBAR_REVEAL_EDGE_PX) return;
-  revealAppNavbarTemporarily();
+  void clientY;
+  commit();
 }

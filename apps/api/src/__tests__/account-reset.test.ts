@@ -424,6 +424,16 @@ function seedResetFixture(db: DatabaseSync): void {
     "2026-01-01T00:00:00.000Z"
   );
   db.prepare(
+    "INSERT INTO bots (id, user_id, name, system_prompt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+  ).run(
+    "bot-2",
+    "user-1",
+    "Bot Two",
+    "Prompt",
+    "2026-01-01T00:00:00.000Z",
+    "2026-01-01T00:00:00.000Z"
+  );
+  db.prepare(
     "INSERT INTO coffee_groups (id, user_id, name, coffee_settings, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
   ).run(
     "coffee-group-1",

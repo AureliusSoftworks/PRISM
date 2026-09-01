@@ -698,11 +698,16 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.match(maskSource, /resamplePhosphorRgbaForPresentation\(/);
     assert.match(
       maskSource,
-      /const resampleMode = pixelPerfectInk \? "nearest" : "coverage"/,
+      /const resampleMode =[\s\S]*?pixelPerfectInk \|\| crispPresentation \? "nearest" : "coverage"/,
     );
     assert.match(
       maskSource,
-      /data-avatar-details-rendering=\{[\s\S]*?rasterSize === AVATAR_DETAILS_CANVAS_SIZE[\s\S]*?"nearest-neighbor"[\s\S]*?: "coverage-sampled"/,
+      /data-avatar-details-rendering=\{[\s\S]*?crispPresentation[\s\S]*?rasterSize === AVATAR_DETAILS_CANVAS_SIZE[\s\S]*?"nearest-neighbor"[\s\S]*?: "coverage-sampled"/,
+    );
+    assert.equal(
+      (pageSource.match(/crispPresentation=\{theme === "light"\}/g) ?? []).length,
+      4,
+      "only the four canonical full-screen Ink planes should harden resampling in Light mode",
     );
     assert.match(maskCss, /image-rendering: pixelated/);
     assert.match(maskCss, /\.behindFace\s*\{[\s\S]*z-index:\s*5/);

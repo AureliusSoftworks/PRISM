@@ -86,6 +86,16 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Experience, Mystery Venue, Story, Production, then Cast/u);
     assert.match(step.body, /optional description/u);
     assert.match(step.body, /explicit Quick, Standard, Grand, or Custom investigation length/u);
+    assert.match(step.body, /Venue Intent freezes the requested archetype, era, physical scale, and exclusions/u);
+    assert.match(step.body, /modern full-size passenger cruise ship never silently becomes a yacht/u);
+    assert.match(step.body, /Suspect count is separately editable from four to eight/u);
+    assert.match(step.body, /Grand investigation can still use six suspects/u);
+    assert.match(step.body, /stern left, bow right, port at the top, starboard at the bottom/u);
+    assert.match(step.body, /D1, D2, and D3 controls keep each full semantic deck name visible/u);
+    assert.match(step.body, /Production Readiness with exact counts/u);
+    assert.match(step.body, /case-scoped and never overwrite an installed Mystery Venue/u);
+    assert.match(step.body, /This attempt separately from Total/u);
+    assert.match(step.body, /white in Light mode or black in Dark mode/u);
     assert.match(step.body, /Propose Venue returns text and a topology preview without creating art or a library item/u);
     assert.match(step.body, /Use Proposal creates and selects the venue/u);
     assert.match(step.body, /Try Another rerolls the structured draft/u);
@@ -117,10 +127,10 @@ describe("mode tutorials", () => {
     assert.match(step.body, /badge walks from the unvisited semantic entry to the incident room/u);
     assert.match(step.body, /scene slowly fades in there/u);
     assert.match(step.body, /arrival never spends an extra discovery action/u);
-    assert.match(step.body, /Upgrade every room to Realistic/u);
+    assert.match(step.body, /choose Upgraded/u);
     assert.match(step.body, /keep the Forge open while it prepares the entire high-detail set/u);
-    assert.match(step.body, /active investigation switches to Realistic automatically/u);
-    assert.match(step.body, /missing and legacy art keeps its Pixel Art fallback/u);
+    assert.match(step.body, /initial upgrade state/u);
+    assert.match(step.body, /original Mosaic appears automatically/u);
     assert.match(step.body, /Case Forge deterministically attempts to fill only those gaps/u);
     assert.match(step.body, /authored placements remain authoritative/u);
     assert.match(step.body, /imported package stays unchanged/u);
@@ -151,14 +161,14 @@ describe("mode tutorials", () => {
     assert.match(step.body, /a little after ten/u);
     assert.match(step.body, /wrong place at the wrong time/u);
     assert.match(step.body, /explicit accomplice or conspiracy motif can bind a second responsible party/u);
-    assert.match(step.body, /room art defaults to genuine synthesized Pixel Art/u);
-    assert.match(step.body, /one 320×180 logical source sample owns each complete tessera/u);
+    assert.match(step.body, /Mosaic is the sole authored base/u);
+    assert.match(step.body, /One 320×180 logical source sample owns each complete tessera/u);
     assert.match(step.body, /lossless nearest-neighbor scaling/u);
     assert.match(step.body, /ordinary Normal-blend separator grid/u);
     assert.match(step.body, /authored source stays gridless/u);
-    assert.match(step.body, /Upgrade to Realistic · ONLINE/u);
+    assert.match(step.body, /Upgraded is one on\/off presentation state/u);
     assert.match(step.body, /LOCAL never sends a room to a remote generator/u);
-    assert.match(step.body, /Realistic uses Full avatars at the same stage footprint/u);
+    assert.match(step.body, /original Mosaic remains instantly recoverable/u);
     assert.match(step.body, /Save venue level preserves the layout/u);
     assert.match(step.body, /Continue without voices/u);
     assert.match(step.body, /no Actions or token economy/u);
@@ -176,8 +186,8 @@ describe("mode tutorials", () => {
     assert.match(step.body, /first entry never calls an authoring model/u);
     assert.match(step.body, /Revisits skip the sequence/u);
     assert.match(step.body, /Examine is a first-person room-art viewing mode/u);
-    assert.match(step.body, /lens cursor and proximity glow/u);
-    assert.match(step.body, /When the lens glows, select anywhere in the room scene/u);
+    assert.match(step.body, /quietly confirms an available inspectable region only while it is inside that region/u);
+    assert.match(step.body, /Mosaic adds a 24×15 scene grid/u);
     assert.match(step.body, /authored observation types in with the player character’s Babble/u);
     assert.match(step.body, /Only observations that produce a durable public case consequence/u);
     assert.match(step.body, /enter the Case Kit with an immediate acquisition cue/u);
@@ -684,7 +694,8 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /both screens fill upward/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /crests both screens white/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /generated drafts/u);
-    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /shared navbar hides/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /shared navbar stays visible/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /global Theme control/u);
     assert.match(
       MODE_TUTORIALS.avatar.steps[0]!.body,
       /global Model and Effort settings active when generation begins/u,
@@ -1355,7 +1366,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /Auto resolves model and Effort again for each work item/u);
     assert.match(
       copy,
-      /LOCAL\/ONLINE, model, and Effort stay locked for the whole sit/u,
+      /shared navbar stays visible as a locked instrument; LOCAL\/ONLINE, model, and Effort stay fixed for the whole sit/u,
     );
     assert.match(
       copy,
@@ -2200,10 +2211,10 @@ describe("mode tutorials", () => {
       /freezes the selected speaking type and engine/u,
     );
     assert.match(routing?.body ?? "", /new session opens at topic selection/u);
-    assert.match(routing?.body ?? "", /hides the shared navbar and locks routing, model, Effort, Voice/u);
+    assert.match(routing?.body ?? "", /keeps the shared navbar visible while locking routing, model, Effort, Voice/u);
     assert.match(
       routing?.body ?? "",
-      /quiet model · effort chip stays with the topic/u,
+      /real top Model and Effort controls stay visible but disabled/u,
     );
     assert.match(
       routing?.body ?? "",
@@ -2217,8 +2228,9 @@ describe("mode tutorials", () => {
     assert.match(routing?.body ?? "", /unsent player draft remains intact/u);
     assert.match(
       routing?.body ?? "",
-      /entire utility strip for the table/u,
+      /session navigation/u,
     );
+    assert.match(routing?.body ?? "", /Theme remains available/u);
     assert.match(
       routing?.body ?? "",
       /Only a terminal model failure temporarily unlocks the model picker/u,
@@ -2231,7 +2243,7 @@ describe("mode tutorials", () => {
 
   it("explains frozen server-authoritative Auto provenance", () => {
     const copy = MODE_TUTORIALS.zen.steps.map((step) => step.body).join(" ");
-    assert.match(copy, /Auto → Awaiting first turn/u);
+    assert.match(copy, /control stays Auto until a server-completed route exists/u);
     assert.match(copy, /it never substitutes a preview/u);
     assert.match(copy, /later route cannot rewrite history/u);
   });
@@ -2327,7 +2339,7 @@ describe("mode tutorials", () => {
     assert.match(topicStep?.body ?? "", /table stays waiting until you choose one/);
     assert.match(
       topicStep?.body ?? "",
-      /shared navbar hides as soon as this new-session topic picker opens/,
+      /shared navbar stays visible as the new-session topic picker opens/,
     );
     assert.match(topicStep?.body ?? "", /short branded Coffee curtain/);
     assert.match(topicStep?.body ?? "", /short cleaned title for that topic/);
@@ -2963,7 +2975,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalPowersTutorialBody(),
-      /Chat\/Zen is the default Home and does not appear as a selectable applet[\s\S]*LOCAL\/ONLINE privacy lane, Model, Effort, bot, and Voice controls stay in that navbar before and throughout a conversation[\s\S]*hero keeps only the Private chat toggle[\s\S]*navbar shows Private chat as locked status rather than a switch/u,
+      /Chat is an explicit destination in the applet picker[\s\S]*clicking the PRISM wordmark returns to the current applet's Home[\s\S]*LOCAL\/ONLINE privacy lane, Model, Effort, bot, and Voice controls stay in that navbar before and throughout a conversation[\s\S]*hero keeps only the Private chat toggle[\s\S]*navbar shows Private chat as locked status rather than a switch/u,
     );
     assert.match(
       signalPowersTutorialBody(),
@@ -3370,7 +3382,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalControlRoomStep.body,
-      /shared navbar fully hides[\s\S]*Cut on stage ends the sit[\s\S]*through the closing card until you Return to show[\s\S]*quiet model · effort chip stays in the live topline/u,
+      /shared navbar stays visible with its real Model and Effort controls locked[\s\S]*Cut on stage ends the sit[\s\S]*through the closing card until you Return to show[\s\S]*live topline stays focused on on-air state, the current segment, and transport or terminal actions[\s\S]*model provenance remains in the real top picker/u,
     );
     assert.match(
       signalControlRoomStep.body,
@@ -4064,7 +4076,7 @@ describe("mode tutorials", () => {
     assert.match(debateBody, /a \.mansion owns the rooms, artwork, music, ambience/u);
     assert.match(debateBody, /skips Case Forge synthesis and Cast setup entirely/u);
     assert.match(debateBody, /rendered procedurally and locally/u);
-    assert.match(debateBody, /only after the mansion investigation is complete/u);
+    assert.match(debateBody, /only after the venue investigation is complete/u);
     assert.match(debateBody, /contains independently authenticated \.case and \.mansion components/u);
   });
 });

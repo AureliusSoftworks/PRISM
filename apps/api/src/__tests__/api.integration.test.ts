@@ -8243,19 +8243,57 @@ describe("API request integration", () => {
     db.prepare("UPDATE bots SET visibility = 'public' WHERE id = ?").run(
       originalId,
     );
+    const otherList = await otherClient.request("/api/bots");
+    assert.equal(otherList.status, 200);
+    assert.equal(
+      (await json(otherList)).bots.some(
+        (bot: { id?: unknown }) => bot.id === originalId,
+      ),
+      false,
+    );
+    const crossOwnerGet = await otherClient.request(
+      `/api/bots/${encodeURIComponent(originalId)}`,
+    );
+    const missingGet = await otherClient.request("/api/bots/missing-guessed-id");
+    assert.equal(crossOwnerGet.status, 404);
+    assert.equal(missingGet.status, 404);
+    assert.deepEqual(await json(crossOwnerGet), await json(missingGet));
+
     const publicSourceClone = await otherClient.request(
       "/api/bots",
       jsonInit({ name: "Public Original Copy", cloneSourceBotId: originalId }),
     );
-    assert.equal(publicSourceClone.status, 201);
-    const publicSourceCloneId = String((await json(publicSourceClone)).bot.id);
+    assert.equal(publicSourceClone.status, 404);
+
+    const providerCallsBeforeGuesses = deterministicProvider.calls.length;
+    const crossOwnerChat = await otherClient.request(
+      "/api/chat",
+      jsonInit({
+        message: "Do not run this cross-owner bot.",
+        mode: "chat",
+        botId: originalId,
+        preferredProvider: "local",
+        incognito: true,
+        ephemeralMessages: [],
+      }),
+    );
+    const missingChat = await otherClient.request(
+      "/api/chat",
+      jsonInit({
+        message: "Do not run this missing bot.",
+        mode: "chat",
+        botId: "missing-guessed-id",
+        preferredProvider: "local",
+        incognito: true,
+        ephemeralMessages: [],
+      }),
+    );
+    assert.equal(crossOwnerChat.status, 404);
+    assert.equal(missingChat.status, 404);
+    assert.deepEqual(await json(crossOwnerChat), await json(missingChat));
     assert.equal(
-      (
-        db
-          .prepare("SELECT clone_family_id FROM bots WHERE id = ?")
-          .get(publicSourceCloneId) as { clone_family_id: string | null }
-      ).clone_family_id,
-      originalId,
+      deterministicProvider.calls.length,
+      providerCallsBeforeGuesses,
     );
   });
 });

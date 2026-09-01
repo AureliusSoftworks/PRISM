@@ -5,6 +5,7 @@ import { normalizeDebateMysteryV2ForgeProgressMessage } from "@localai/shared";
 import {
   debateMysteryV2ExaminationCompletesRoom,
   debateMysteryV2LensClickTarget,
+  debateMysteryV2LensMosaicCellIndexes,
   debateMysteryV2RoomComplete,
   resolveDebateMysteryV2Lens,
 } from "./debateMysteryV2Lens.ts";
@@ -48,6 +49,22 @@ const tutorialSource = readFileSync(
   new URL("./modeTutorials.ts", import.meta.url),
   "utf8",
 );
+
+function relativeLuminance(hex: string): number {
+  const channels = hex.match(/[0-9a-f]{2}/giu)?.map((value) => Number.parseInt(value, 16) / 255) ?? [];
+  const [red = 0, green = 0, blue = 0] = channels.map((value) =>
+    value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+  );
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+}
+
+function contrastRatio(foreground: string, background: string): number {
+  const foregroundLuminance = relativeLuminance(foreground);
+  const backgroundLuminance = relativeLuminance(background);
+  const lighter = Math.max(foregroundLuminance, backgroundLuminance);
+  const darker = Math.min(foregroundLuminance, backgroundLuminance);
+  return (lighter + 0.05) / (darker + 0.05);
+}
 
 describe("Whodunnit V2 prosecution experience", () => {
   it("presents investigation and court actions as one tactile command-console system", () => {
@@ -186,22 +203,45 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(cssSource, /animation:\s*roomDescend[^;]+backwards/u);
   });
 
+  it("renders case-scoped ambient architecture as inert venue massing", () => {
+    assert.match(experienceSource, /state\.spatialProjection\?\.ambientSpaces\.filter/u);
+    assert.match(experienceSource, /mansionAmbientSpaces\.map\(\(space\) => \(/u);
+    assert.match(experienceSource, /aria-hidden="true"[\s\S]{0,100}styles\.mansionAmbientSpace/u);
+    assert.match(experienceSource, /mansionGeometry[\s\S]{0,500}mansionAmbientSpaces/u);
+    assert.match(
+      experienceSource,
+      /new Set\(state\.rooms\.map\(\(room\) => room\.floor\)\)/u,
+      "only playable case rooms may create deck controls",
+    );
+    assert.match(cssSource, /\.mansionAmbientSpace\s*\{[\s\S]*pointer-events:\s*none/u);
+    assert.doesNotMatch(experienceSource, /mansionAmbientSpaces[\s\S]{0,500}onClick/u);
+    assert.match(experienceSource, /point\.x \* MANSION_LAYOUT_V2_COLUMNS/u);
+    assert.match(experienceSource, /point\.y \* MANSION_LAYOUT_V2_ROWS/u);
+  });
+
   it("starts on the title card, then clears to a first-person exterior door threshold", () => {
     assert.match(experienceSource, /openingOrMapPlaybackSuppressed = state\.playPhase === "title_card"/u);
     assert.match(experienceSource, /preparedMansionExteriorUrl/u);
     assert.match(experienceSource, /DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1/u);
     assert.match(experienceSource, /--mansion-exterior-image/u);
-    assert.match(cssSource, /\.titleCard\s*\{[\s\S]*var\(--mansion-exterior-image\)/u);
+    assert.match(experienceSource, /className=\{styles\.titleCoverMedia\}/u);
+    assert.match(cssSource, /\.titleCoverMedia\s*\{[\s\S]*background-image:\s*var\(--mansion-exterior-image\)[\s\S]*background-size:\s*cover/u);
+    assert.equal(cssSource.match(/background-image:\s*var\(--mansion-exterior-image\)/gu)?.length, 1);
+    assert.match(cssSource, /\.titleCoverMedia\s*\{[^}]*z-index:\s*0[^}]*pointer-events:\s*none/u);
+    assert.doesNotMatch(cssSource, /\.titleCard\s*\{[^}]*background-image/u);
     assert.match(experienceSource, /data-tutorial-target="whodunnit-start"/u);
     assert.match(experienceSource, />Start<\/button>/u);
     assert.match(experienceSource, /data-first-person-exterior=\{firstPersonExterior/u);
-    assert.match(cssSource, /\.titleCard\[data-first-person-exterior="true"\]\s*\{[\s\S]*background-image:\s*var\(--mansion-exterior-image\)/u);
+    assert.doesNotMatch(cssSource, /\.titleCard\[data-theme="light"\][^{]*\{[^}]*background-image/u);
+    assert.match(experienceSource, /<SceneMediaVignette[\s\S]{0,100}theme=\{props\.theme\}/u);
     assert.match(experienceSource, /className=\{styles\.titleDoor\}/u);
+    assert.match(cssSource, /\.titleDoor\s*\{[^}]*z-index:\s*2/u);
     assert.match(experienceSource, /data-door-threshold=\{mansionDoorEntry/u);
     assert.match(experienceSource, /data-tutorial-target="whodunnit-enter-mansion"/u);
     assert.match(experienceSource, /className=\{styles\.titleDoorFocus\}/u);
     assert.match(experienceSource, /className=\{styles\.titleDoorMark\}/u);
-    assert.match(experienceSource, /"Enter the mansion"/u);
+    assert.match(experienceSource, /venueProfile\?\.presentation\?\.entryAction\?\.trim\(\)/u);
+    assert.match(experienceSource, /className=\{styles\.titleEntryAction\}>\{venueEntryAction\}/u);
     assert.match(experienceSource, /action: "enter_mansion"/u);
     assert.match(cssSource, /\.titleDoor:focus-visible/u);
     assert.match(cssSource, /\.titleDoor::before\s*\{[\s\S]*titleDoorBeacon/u);
@@ -223,7 +263,7 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.doesNotMatch(experienceSource, /className=\{styles\.caseOpeningDialogue\}[\s\S]{0,280}onClick=/u);
     assert.match(experienceSource, /action: "dismiss_case_opening"/u);
     assert.match(experienceSource, /const beginCaseOpeningJourney = useCallback/u);
-    assert.match(experienceSource, /mansionLayoutV2TraversalRoute\(mansionLayout, foyer\.id, incidentScene\.id\)/u);
+    assert.match(experienceSource, /mansionLayoutV2TraversalRoute\(mansionLayout, entryRoom\.id, incidentScene\.id\)/u);
     assert.match(experienceSource, /openingArrival: true/u);
     assert.match(experienceSource, /className=\{styles\.caseOpeningJourney\}/u);
     assert.match(experienceSource, /mysteryMansionTravelPointAtProgress/u);
@@ -295,13 +335,14 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(cssSource, /\.forgeCard\[data-exterior-hero="true"\]::before[\s\S]*var\(--forge-exterior-image\)/u);
   });
 
-  it("freezes the all-room Realistic upgrade in Forge and prefers it once ready", () => {
-    assert.match(setupSource, /Upgrade every room to Realistic/u);
-    assert.match(setupSource, /mysteryRoomAssetSynthesis \? \(/u);
-    assert.match(setupSource, /restores realistic materials and depth from every Pixel Art room/u);
+  it("freezes optional Upgraded derivatives in Forge without overriding the case switch", () => {
+    assert.match(setupSource, /<strong>Upgraded<\/strong>/u);
+    assert.match(setupSource, /HD interpretation of each room's Mosaic/u);
     assert.match(setupSource, /illustratedRooms:\s*\n\s*mysteryRoomAssetSynthesis/u);
-    assert.match(experienceSource, /forgeIllustratedRoomsRequested && illustratedRoomArtAvailable/u);
-    assert.match(experienceSource, /\? "illustrated"/u);
+    assert.match(experienceSource, /readWhodunnitRoomUpgradeEnabled/u);
+    assert.match(experienceSource, /state\.config\.assetSynthesis\.illustratedRooms/u);
+    assert.match(experienceSource, /whodunnitRoomArtStyleForUpgrade\(/u);
+    assert.doesNotMatch(experienceSource, /forgeIllustratedRoomsRequested && illustratedRoomArtAvailable/u);
   });
 
   it("keeps exterior Refract explicit, draft-backed, and subordinate to Mansion topology", () => {
@@ -640,9 +681,8 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /roomDisplayedDialogue \? \([\s\S]*className=\{styles\.dialogueBox\}/u);
     assert.match(experienceSource, /function hotspotSpotStyle\(/u);
     assert.match(experienceSource, /style=\{hotspotSpotStyle\(hotspot\.polygon\)\}/u);
-    assert.doesNotMatch(experienceSource, /clipPath: `polygon/u);
-    assert.match(cssSource, /\.hotspots button\s*\{[\s\S]*width:\s*clamp\(3\.25rem, 4\.5vw, 5rem\)/u);
-    assert.match(cssSource, /\.hotspots button\s*\{[\s\S]*border-radius:\s*50%/u);
+    assert.match(experienceSource, /clipPath: `polygon/u);
+    assert.match(cssSource, /\.hotspots button\s*\{[\s\S]*inset:\s*0/u);
     assert.match(cssSource, /\.roomActor\s*\{[\s\S]*left:\s*50%/u);
     assert.match(cssSource, /\.roomActor\s*\{[\s\S]*bottom:\s*19\.5rem/u);
     assert.match(cssSource, /\.roomActor\s*\{[\s\S]*transform:\s*translateX\(-50%\)/u);
@@ -765,29 +805,43 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.doesNotMatch(cssSource, /\.hotspots button::before/u);
     assert.doesNotMatch(experienceSource, /<span>\{hotspot\.label\}<\/span>/u);
     assert.match(cssSource, /\.investigationLens\s*\{[\s\S]*pointer-events:\s*none/u);
-    assert.match(cssSource, /--lens-proximity/u);
+    assert.match(experienceSource, /debateMysteryV2LensMosaicCellIndexes/u);
     assert.match(cssSource, /width:\s*3\.4rem/u);
-    assert.match(cssSource, /box-shadow:\s*[\s\S]*rgba\(102, 229, 234, 0\.42\)/u);
-    assert.match(experienceSource, /data-targeted=\{debateMysteryV2LensClickTarget\(investigationLens\) \? "true" : undefined\}/u);
-    assert.match(cssSource, /\.investigationLens\[data-targeted="true"\][\s\S]*rgba\(102, 229, 234, calc\(0\.3 \+ var\(--lens-proximity, 0\) \* 0\.7\)\)[\s\S]*scale\(0\.9\)/u);
-    assert.match(cssSource, /\.investigationLens\[data-targeted="true"\]::after[\s\S]*prismGlintSweep/u);
+    assert.match(cssSource, /\.investigationLens\s*\{[\s\S]*?box-shadow:\s*0 0 0\.34rem rgba\(102, 229, 234, 0\.2\)/u);
+    assert.match(experienceSource, /data-targeted=\{targetedHotspotId \? "true" : undefined\}/u);
+    assert.match(cssSource, /\.investigationLens\[data-targeted="true"\][\s\S]*scale\(0\.9\)/u);
+    assert.match(cssSource, /\.investigationLens\[data-targeted="true"\]\[data-art-style="illustrated"\]::after[\s\S]*prismGlintSweep/u);
     assert.match(cssSource, /\.roomComplete\s*\{/u);
 
     const hotspots = [
-      { id: "locked-near", polygon: [{ x: 49, y: 49 }, { x: 51, y: 51 }], unlocked: false, examined: false },
-      { id: "open-far", polygon: [{ x: 69, y: 49 }, { x: 71, y: 51 }], unlocked: true, examined: false },
-      { id: "reviewed", polygon: [{ x: 54, y: 49 }, { x: 56, y: 51 }], unlocked: true, examined: true },
+      { id: "locked-near", polygon: [{ x: 49, y: 49 }, { x: 51, y: 49 }, { x: 51, y: 51 }, { x: 49, y: 51 }], unlocked: false, examined: false },
+      { id: "open-far", polygon: [{ x: 69, y: 49 }, { x: 71, y: 49 }, { x: 71, y: 51 }, { x: 69, y: 51 }], unlocked: true, examined: false },
+      { id: "reviewed", polygon: [{ x: 54, y: 49 }, { x: 56, y: 49 }, { x: 56, y: 51 }, { x: 54, y: 51 }], unlocked: true, examined: true },
     ];
     const lens = resolveDebateMysteryV2Lens(50, 50, hotspots);
-    assert.equal(lens.hotspotId, "open-far");
-    assert.ok(lens.proximity > 0 && lens.proximity < 1);
-    assert.deepEqual(resolveDebateMysteryV2Lens(70, 50, hotspots), {
+    assert.equal(lens.hotspotId, null);
+    assert.equal(lens.proximity, 0);
+    const overlappingHotspots = [
+      { id: "large", polygon: [{ x: 20, y: 20 }, { x: 80, y: 20 }, { x: 80, y: 80 }, { x: 20, y: 80 }], unlocked: true, examined: false },
+      { id: "small", polygon: [{ x: 45, y: 45 }, { x: 55, y: 45 }, { x: 55, y: 55 }, { x: 45, y: 55 }], unlocked: true, examined: false },
+    ];
+    const overlapLens = resolveDebateMysteryV2Lens(50, 50, overlappingHotspots);
+    assert.equal(debateMysteryV2LensClickTarget(overlapLens), "small");
+    assert.deepEqual(
+      debateMysteryV2LensMosaicCellIndexes(overlapLens, overlappingHotspots, 24, 15),
+      [155, 156, 179, 180],
+    );
+    const openLens = resolveDebateMysteryV2Lens(70, 50, hotspots);
+    assert.deepEqual(openLens, {
       x: 70,
       y: 50,
       proximity: 1,
       hotspotId: "open-far",
     });
-    assert.equal(debateMysteryV2LensClickTarget(lens), "open-far");
+    assert.equal(debateMysteryV2LensClickTarget(openLens), "open-far");
+    assert.equal(resolveDebateMysteryV2Lens(69, 50, hotspots).hotspotId, "open-far");
+    const tinyHotspot = [{ id: "tiny", polygon: [{ x: 49.8, y: 49.8 }, { x: 50.2, y: 49.8 }, { x: 50.2, y: 50.2 }, { x: 49.8, y: 50.2 }], unlocked: true, examined: false }];
+    assert.deepEqual(debateMysteryV2LensMosaicCellIndexes(resolveDebateMysteryV2Lens(50, 50, tinyHotspot), tinyHotspot), [28_960]);
     assert.equal(debateMysteryV2LensClickTarget(resolveDebateMysteryV2Lens(2, 2, hotspots)), null);
     assert.equal(
       debateMysteryV2LensClickTarget(resolveDebateMysteryV2Lens(70, 50, hotspots.map((hotspot) => hotspot.id === "open-far" ? { ...hotspot, examined: true } : hotspot))),
@@ -916,6 +970,22 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /usePrefersReducedMotion/u);
     assert.match(cssSource, /\.forgeSubsteps/u);
     assert.match(cssSource, /\.forgeTip/u);
+  });
+
+  it("keeps the Light Case Forge image white-faded at top and bottom and its small copy AA-dark", () => {
+    assert.match(
+      cssSource,
+      /\.forge\[data-theme="light"\]\s*\{[\s\S]*?--forge-title-ink:\s*#101923;[\s\S]*?--forge-copy-ink:\s*#364b60;[\s\S]*?--forge-note-label-ink:\s*#17697e;[\s\S]*?--forge-note-copy-ink:\s*#31495f;/u,
+    );
+    assert.match(cssSource, /\.forge\[data-theme="light"\] \.forgeCard\[data-exterior-hero="true"\]::after\s*\{\s*background:\s*none;/u);
+    assert.doesNotMatch(cssSource, /--scene-vignette-(?:left|right)-clear/u);
+    assert.match(cssSource, /\.forge\[data-theme="light"\] \.forgeCard\[data-exterior-hero="true"\] \.forgeCaseIdentity h1\s*\{\s*color:\s*var\(--forge-title-ink\);/u);
+    assert.match(cssSource, /\.forge\[data-theme="light"\] \.forgeExteriorStatus\s*\{\s*color:\s*var\(--forge-exterior-label-ink\);/u);
+    assert.match(cssSource, /\.forge\[data-theme="light"\] \.forgeTip > span\s*\{[^}]*color:\s*var\(--forge-note-label-ink\);/u);
+    assert.match(experienceSource, /className=\{styles\.forgeSceneVignette\}/u);
+    for (const ink of ["#513890", "#4a386c", "#364b60", "#42586e", "#465b70", "#3e625a", "#513f78", "#17697e", "#31495f"]) {
+      assert.ok(contrastRatio(ink, "#ebf3f9") >= 4.5, `${ink} must remain AA against the Light Forge raised surface`);
+    }
   });
 
   it("formats only public Case Forge failure details for copying", () => {

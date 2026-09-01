@@ -23,3 +23,10 @@ test("FPS counter stays tiny and pinned to the bottom-left", () => {
     /\.fpsCounter\s*\{[\s\S]*position:\s*fixed;[\s\S]*bottom:\s*4px;[\s\S]*left:\s*6px;[\s\S]*font:\s*600 9px/u,
   );
 });
+
+test("FPS counter uses black text in Light Mode", () => {
+  assert.match(
+    cssSource,
+    /:global\(body\[data-prism-theme="light"\]\) \.fpsCounter\s*\{\s*color:\s*#000;/u,
+  );
+});

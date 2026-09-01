@@ -175,14 +175,14 @@ function assertReplaySourceOwned(
   const row = surface === "signal"
     ? db
         .prepare(
-          "SELECT id FROM botcast_episodes WHERE id = ? AND user_id = ? AND status != 'cancelled'",
+          "SELECT id FROM botcast_episodes WHERE user_id = ? AND id = ? AND status != 'cancelled'",
         )
-        .get(sourceId, userId)
+        .get(userId, sourceId)
     : db
         .prepare(
-          "SELECT id FROM conversations WHERE id = ? AND user_id = ? AND conversation_mode = 'coffee'",
+          "SELECT id FROM conversations WHERE user_id = ? AND id = ? AND conversation_mode = 'coffee'",
         )
-        .get(sourceId, userId);
+        .get(userId, sourceId);
   if (!row) throw new Error(`Unknown ${surface} replay source.`);
 }
 
@@ -391,8 +391,8 @@ function recordingRow(
   recordingId: string,
 ): ReplayRecordingRow | null {
   return (db
-    .prepare("SELECT * FROM replay_recordings WHERE id = ? AND user_id = ?")
-    .get(recordingId, userId) as ReplayRecordingRow | undefined) ?? null;
+    .prepare("SELECT * FROM replay_recordings WHERE user_id = ? AND id = ?")
+    .get(userId, recordingId) as ReplayRecordingRow | undefined) ?? null;
 }
 
 export function replayVoiceTakesForRecording(
@@ -526,9 +526,11 @@ export function upsertReplayVoiceTake(
   const recording = ensureReplayRecording(db, userId, surface, sourceId);
   const existing = db
     .prepare(
-      "SELECT * FROM replay_voice_takes WHERE recording_id = ? AND source_key = ?",
+      "SELECT * FROM replay_voice_takes WHERE user_id = ? AND recording_id = ? AND source_key = ?",
     )
-    .get(recording.id, snapshot.sourceKey) as ReplayVoiceTakeRow | undefined;
+    .get(userId, recording.id, snapshot.sourceKey) as
+    | ReplayVoiceTakeRow
+    | undefined;
   if (existing) return mapVoiceTakeRow(existing);
   const id = replayId();
   const now = new Date().toISOString();
@@ -549,7 +551,9 @@ export function upsertReplayVoiceTake(
     now,
   );
   return mapVoiceTakeRow(
-    db.prepare("SELECT * FROM replay_voice_takes WHERE id = ?").get(id) as ReplayVoiceTakeRow,
+    db
+      .prepare("SELECT * FROM replay_voice_takes WHERE user_id = ? AND id = ?")
+      .get(userId, id) as ReplayVoiceTakeRow,
   );
 }
 
@@ -687,7 +691,9 @@ export function updateReplayVoiceTakeSnapshot(
       WHERE id = ? AND recording_id = ? AND user_id = ?`,
   ).run(next.sourceMessageId, JSON.stringify(next), now, takeId, recordingId, userId);
   return mapVoiceTakeRow(
-    db.prepare("SELECT * FROM replay_voice_takes WHERE id = ?").get(takeId) as ReplayVoiceTakeRow,
+    db
+      .prepare("SELECT * FROM replay_voice_takes WHERE user_id = ? AND id = ?")
+      .get(userId, takeId) as ReplayVoiceTakeRow,
   );
 }
 
@@ -723,7 +729,9 @@ export function storeReplayVoiceTakeAudio(
       WHERE id = ? AND recording_id = ? AND user_id = ?`,
   ).run(relativePath, contentType, bytes.byteLength, now, takeId, recordingId, userId);
   return mapVoiceTakeRow(
-    db.prepare("SELECT * FROM replay_voice_takes WHERE id = ?").get(takeId) as ReplayVoiceTakeRow,
+    db
+      .prepare("SELECT * FROM replay_voice_takes WHERE user_id = ? AND id = ?")
+      .get(userId, takeId) as ReplayVoiceTakeRow,
   );
 }
 

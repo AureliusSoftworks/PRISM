@@ -99,6 +99,9 @@ export interface DebateFlytingAudienceMillingPlan {
   layer: number;
 }
 
+export const DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT = 30;
+export const DEBATE_FLYTING_GALLERY_AUTHORING_MAX_VERTICAL_ROAM_PERCENT = 60;
+
 /**
  * Stable, low-cost crowd motion for the Mead Hall. Each body keeps its place
  * across renders while gently milling inside its current allegiance cluster.
@@ -115,9 +118,9 @@ export function debateFlytingAudienceMillingPlan(
 
   return {
     offsetXPercent: signed(13),
-    offsetYPercent: signed(7),
+    offsetYPercent: signed(12),
     driftXPercent: signed(10),
-    driftYPercent: signed(5),
+    driftYPercent: signed(18),
     durationMs: 4_200 + Math.round(random() * 2_700),
     delayMs: -Math.round(random() * 6_900),
     depthScale: Math.round((depthMinimum + random() * depthRange) * 100) / 100,

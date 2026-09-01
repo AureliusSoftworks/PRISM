@@ -103,52 +103,11 @@ export function ModelWarmupIntermission(props: {
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
-    const siblings = Array.from(document.body.children)
-      .filter(
-        (element): element is HTMLElement =>
-          element instanceof HTMLElement && element !== root,
-      )
-      .map((element) => ({
-        element,
-        wasInert: element.hasAttribute("inert"),
-      }));
-    siblings.forEach(({ element }) => element.setAttribute("inert", ""));
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     root.focus({ preventScroll: true });
-    const trapTab = (event: KeyboardEvent): void => {
-      if (event.key !== "Tab") return;
-      const focusable = Array.from(
-        root.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
-        ),
-      );
-      if (focusable.length === 0) {
-        event.preventDefault();
-        root.focus({ preventScroll: true });
-        return;
-      }
-      const first = focusable[0]!;
-      const last = focusable[focusable.length - 1]!;
-      const active = document.activeElement;
-      if (
-        event.shiftKey &&
-        (active === first || active === root || !root.contains(active))
-      ) {
-        event.preventDefault();
-        last.focus({ preventScroll: true });
-      } else if (!event.shiftKey && active === last) {
-        event.preventDefault();
-        first.focus({ preventScroll: true });
-      }
-    };
-    root.addEventListener("keydown", trapTab);
 
     return () => {
-      root.removeEventListener("keydown", trapTab);
-      siblings.forEach(({ element, wasInert }) => {
-        if (!wasInert) element.removeAttribute("inert");
-      });
       document.body.style.overflow = previousOverflow;
       if (previouslyFocused?.isConnected) {
         previouslyFocused.focus({ preventScroll: true });

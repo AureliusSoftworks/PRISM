@@ -820,6 +820,16 @@ test("new V2 mansions keep a two-floor minimum while compact stays easiest", () 
     preset: "custom",
     floors: 1,
   }).floors, 2);
+  const grandWithSix = resolveDebateMysteryConfigV2({
+    ...base,
+    preset: "grand",
+    suspectBotIds: [
+      "suspect-1", "suspect-2", "suspect-3", "suspect-4", "suspect-5", "suspect-6",
+    ],
+  });
+  assert.equal(grandWithSix.floors, 3);
+  assert.equal(grandWithSix.totalRooms, 15);
+  assert.equal(grandWithSix.suspectBotIds.length, 6);
 });
 
 test("Theme, asset synthesis, and reusable mansion eligibility freeze deterministically", () => {
@@ -857,10 +867,10 @@ test("Theme, asset synthesis, and reusable mansion eligibility freeze determinis
   assert.equal(resolved.spark, "Rainy art-deco observatory");
   assert.deepEqual(resolved.assetSynthesis, {
     evidence: true,
-    rooms: false,
-    illustratedRooms: false,
+    rooms: true,
+    illustratedRooms: true,
     music: true,
-    ambience: false,
+    ambience: true,
   });
   assert.equal(resolved.investigationMode, "full");
   const courtOnly = resolveDebateMysteryConfigV2({

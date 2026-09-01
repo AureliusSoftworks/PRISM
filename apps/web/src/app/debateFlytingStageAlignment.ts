@@ -2,6 +2,11 @@ export const DEBATE_FLYTING_STAGE_ALIGNMENT_VERSION = 1 as const;
 
 export type DebateFlytingStageAlignmentView = "wide" | "moderator" | "gallery";
 
+export type DebateFlytingStageRehearsalView = Exclude<
+  DebateFlytingStageAlignmentView,
+  "gallery"
+>;
+
 export type DebateFlytingStageAlignmentItem =
   | "wideForBot"
   | "wideForHelmet"
@@ -10,6 +15,7 @@ export type DebateFlytingStageAlignmentItem =
   | "wideModeratorBot"
   | "wideModeratorHelmet"
   | "wideModeratorNameplate"
+  | "wideModeratorHeraldry"
   | "wideAgainstBot"
   | "wideAgainstHelmet"
   | "wideAgainstNameplate"
@@ -18,6 +24,7 @@ export type DebateFlytingStageAlignmentItem =
   | "moderatorModeratorBot"
   | "moderatorModeratorHelmet"
   | "moderatorModeratorNameplate"
+  | "moderatorModeratorHeraldry"
   | "moderatorAgainstHeraldry"
   | "galleryForRugGlyph"
   | "galleryAgainstRugGlyph";
@@ -83,6 +90,12 @@ export const DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS: readonly DebateFlytingStageAl
       view: "wide",
       label: "Jarl nameplate",
     },
+    {
+      id: "wideModeratorHeraldry",
+      view: "wide",
+      label: "Jarl banner glyph",
+      supportsRotation: true,
+    },
     { id: "wideAgainstBot", view: "wide", label: "Defender bot" },
     {
       id: "wideAgainstHelmet",
@@ -124,6 +137,12 @@ export const DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS: readonly DebateFlytingStageAl
       label: "Jarl throne nameplate",
     },
     {
+      id: "moderatorModeratorHeraldry",
+      view: "moderator",
+      label: "Jarl throne banner glyph",
+      supportsRotation: true,
+    },
+    {
       id: "moderatorAgainstHeraldry",
       view: "moderator",
       label: "Defender throne banner glyph",
@@ -144,6 +163,20 @@ export const DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS: readonly DebateFlytingStageAl
       supportsSkew: true,
     },
   ];
+
+export function debateFlytingStageRehearsalViewForItem(
+  item: Pick<DebateFlytingStageAlignmentItemDefinition, "view">,
+): DebateFlytingStageRehearsalView {
+  return item.view === "gallery" ? "wide" : item.view;
+}
+
+export function debateFlytingStageRehearsalItems(
+  view: DebateFlytingStageRehearsalView,
+): readonly DebateFlytingStageAlignmentItemDefinition[] {
+  return DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS.filter(
+    (item) => debateFlytingStageRehearsalViewForItem(item) === view,
+  );
+}
 
 function defaultPlacement(): DebateFlytingStagePlacementV1 {
   return { x: 0, y: 0, scale: 100, rotation: 0, skewX: 0 };
@@ -230,9 +263,38 @@ export function updateDebateFlytingStagePlacement(
 
 export function formatDebateFlytingStageAlignmentClipboard(
   alignment: DebateFlytingStageAlignmentV1,
+  rehearsal?: {
+    galleryBotScale: number;
+    galleryMaxVerticalRoam: number;
+  },
 ): string {
-  return [
+  const lines = [
     "export const DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT: DebateFlytingStageAlignmentV1 =",
     `${JSON.stringify(normalizeDebateFlytingStageAlignment(alignment), null, 2)};`,
-  ].join("\n");
+  ];
+  if (rehearsal) {
+    lines.push(
+      "",
+      "export const DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS =",
+      `${JSON.stringify(
+        {
+          galleryBotScale: normalizedNumber(
+            rehearsal.galleryBotScale,
+            60,
+            160,
+            100,
+          ),
+          galleryMaxVerticalRoam: normalizedNumber(
+            rehearsal.galleryMaxVerticalRoam,
+            0,
+            30,
+            12,
+          ),
+        },
+        null,
+        2,
+      )} as const;`,
+    );
+  }
+  return lines.join("\n");
 }

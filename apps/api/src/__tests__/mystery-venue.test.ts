@@ -154,14 +154,20 @@ describe("Mystery Venue proposal route", () => {
     const fetchCallsBefore = fetchRecorder.calls.length;
 
     const proposedResponse = await request("/api/debates/mystery-mansions/propose", {
-      description: "A midnight cruise aboard a vintage yacht",
-      length: { id: "quick", rooms: 5, suspects: 4, tiers: 1 },
+      description: "A modern full-size passenger cruise ship, not a yacht, manor, or estate",
+      length: { id: "standard", rooms: 10, suspects: 6, tiers: 2 },
       nonce: "local-route",
       responseMode: "local",
     });
     assert.equal(proposedResponse.status, 200);
     const proposed = (await proposedResponse.json()) as Record<string, any>;
     assert.equal(proposed.proposal.profile.kind, "vessel");
+    assert.equal(proposed.proposal.profile.intent.archetype, "passenger_cruise_ship");
+    assert.equal(proposed.proposal.profile.kindLabel, "Passenger Cruise Ship");
+    assert.equal(proposed.proposal.profile.physicalScaleClass, "grand");
+    assert.equal(proposed.proposal.profile.presentation.entryAction, "Board the ship");
+    assert.equal(proposed.proposal.length.id, "standard");
+    assert.equal(proposed.proposal.length.suspects, 6);
     assert.equal(proposed.proposal.source, "catalog");
     assert.match(proposed.proposal.editableDraftNotice, /editable structured draft/u);
     assert.equal(Number((routeDb.prepare(
@@ -184,6 +190,9 @@ describe("Mystery Venue proposal route", () => {
       idempotencyKey: proposed.proposal.id,
     });
     assert.equal(acceptedResponse.status, 201);
+    const accepted = (await acceptedResponse.json()) as Record<string, any>;
+    assert.equal(accepted.mansion.layoutV2.venueProfile.intent.archetype, "passenger_cruise_ship");
+    assert.equal(accepted.mansion.houseStyle.acousticThemePaletteId, "maritime-passenger-v1");
     assert.equal(Number((routeDb.prepare(
       "SELECT COUNT(*) AS count FROM debate_mystery_mansion_bundles",
     ).get() as { count: number }).count), rowsBefore + 1);

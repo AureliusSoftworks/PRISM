@@ -41,8 +41,8 @@ async function navigationRoomFixture(): Promise<Buffer> {
   return sharp(pixels, { raw: { width, height, channels: 3 } }).png().toBuffer();
 }
 
-describe("debate mystery room Pixel Art", () => {
-  it("normalizes authored Pixel Art deterministically without reducing it to a fixed palette", async () => {
+describe("debate mystery room Mosaic and Upgraded derivatives", () => {
+  it("normalizes the authored Mosaic base deterministically without reducing it to a fixed palette", async () => {
     const source = await colorfulRoomFixture();
     const first = await renderDebateMysteryRoomArtV1(source);
     const second = await renderDebateMysteryRoomArtV1(source);
@@ -144,7 +144,7 @@ describe("debate mystery room Pixel Art", () => {
     }
   });
 
-  it("keeps the realistic-upgrade reference gridless without quantization or nearest-neighbour filtering", async () => {
+  it("keeps the Upgraded derivative reference gridless without quantization or nearest-neighbour filtering", async () => {
     const result = await renderDebateMysteryRoomArtV1(await colorfulRoomFixture(), {
       variant: "mosaic-reference",
       format: "png",
@@ -179,15 +179,15 @@ describe("debate mystery room Pixel Art", () => {
     assert.ok(Math.abs(brightXs.at(-1)! - 1151) <= 6, `right edge moved to ${brightXs.at(-1)}`);
   });
 
-  it("defines a spoiler-safe Realistic upgrade performance contract", () => {
+  it("defines a spoiler-safe HD-derivative performance contract", () => {
     const prompt = buildDebateMysteryIllustratedRoomUpgradePromptV1({
       roomName: "Castle Foyer",
       houseStylePrompt: "A moonlit stone castle.",
       roomBrief: "A broad staircase rises behind the entry hall.",
     });
     assert.match(prompt, /strict composition and geometry reference/i);
-    assert.match(prompt, /realistic version/i);
-    assert.match(prompt, /high-resolution pixel-art room image/i);
+    assert.match(prompt, /high-definition interpretation/i);
+    assert.match(prompt, /high-resolution Mosaic room image/i);
     assert.match(prompt, /photographic depth/i);
     assert.match(prompt, /without changing navigation/i);
     assert.match(prompt, /inventing clues/i);
@@ -198,13 +198,13 @@ describe("debate mystery room Pixel Art", () => {
     );
   });
 
-  it("wires future Pixel Art synthesis and shared Mosaic presentation delivery", () => {
+  it("wires Mosaic synthesis and shared presentation delivery", () => {
     const server = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
     assert.match(server, /size: "1280x720",[\s\S]{0,100}quality: "high"/u);
-    assert.match(server, /genuine polished high-resolution hand-crafted pixel art/u);
+    assert.match(server, /newly authored Mosaic room plate/u);
     assert.match(
       server,
-      /Reskin this exact annotated[\s\S]{0,760}genuine polished high-resolution hand-crafted pixel art[\s\S]{0,500}Do not imitate a realistic painting/u,
+      /Reskin this exact annotated[\s\S]{0,760}genuine polished high-resolution hand-crafted Mosaic plate[\s\S]{0,500}Do not imitate a painting/u,
     );
     assert.doesNotMatch(server, /Premium illustrated adventure-game background/u);
     assert.match(server, /generatedPixelArt[\s\S]{0,180}renderDebateMysteryRoomArtV1/u);
@@ -214,6 +214,6 @@ describe("debate mystery room Pixel Art", () => {
       "sealed, installed-mansion, and saved room delivery should share the Mosaic presentation",
     );
     assert.match(server, /mystery-room-art\/upgrade/u);
-    assert.match(server, /session\.responseMode === "local"[\s\S]{0,180}LOCAL never sends mansion art/u);
+    assert.match(server, /session\.responseMode === "local"[\s\S]{0,220}LOCAL never sends venue art/u);
   });
 });

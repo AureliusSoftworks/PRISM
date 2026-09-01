@@ -482,10 +482,7 @@ test("keeps the app shell crisp behind a local focus orb while pausing motion", 
     globalCss,
     /html\[data-prism-companion-open="true"\][\s\S]*z-index: 860/u,
   );
-  assert.match(
-    globalCss,
-    /html\[data-app-navbar-hidden="true"\][\s\S]*pointer-events: none/u,
-  );
+  assert.doesNotMatch(globalCss, /data-app-navbar-hidden/u);
   assert.match(
     page,
     /document\.visibilityState === "visible" && !prismSystemPaused/u,
@@ -499,10 +496,9 @@ test("keeps the app shell crisp behind a local focus orb while pausing motion", 
   assert.match(page, /const prismPresentationSuspended = usePrismPresentationSuspended\(\)/u);
   assert.match(page, /prismPresentationSuspendedRef\.current/u);
   assert.match(page, /<PrismVisualLifecycleBridge \/>/u);
-  assert.match(page, /armAppNavbarAutoHide\(\)/u);
-  assert.match(page, /hideAppNavbarForImmersion\(\)/u);
-  assert.match(page, /zenAutoHide = chatPresentation === "zen"/u);
-  assert.match(page, /setAppNavbarAutoHideEnabled\(zenAutoHide\)/u);
+  assert.doesNotMatch(page, /armAppNavbarAutoHide\(\)/u);
+  assert.doesNotMatch(page, /hideAppNavbarForImmersion\(\)/u);
+  assert.doesNotMatch(page, /setAppNavbarAutoHideEnabled/u);
 
   const navHeaderLayer = Number(
     pageCss.match(/\.chatHeader\s*\{[\s\S]*?z-index:\s*(\d+);/u)?.[1],

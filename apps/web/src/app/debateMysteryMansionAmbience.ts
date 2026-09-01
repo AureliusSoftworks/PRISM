@@ -40,6 +40,13 @@ export const WHODUNNIT_ACOUSTIC_ASSETS_V1: readonly WhodunnitAcousticAssetV1[] =
     url: "/audio/debate/whodunnit/shared/spacecraft-hull-v1.ogg",
     sha256: PRISM_MANSION_ACOUSTIC_ASSETS_V1.spacecraftHull.sha256,
   },
+  {
+    id: PRISM_MANSION_ACOUSTIC_ASSETS_V1.passengerShip.id,
+    scope: "theme",
+    semanticRole: "world_bed",
+    url: "/audio/debate/whodunnit/shared/maritime-passenger-world-bed-v1.ogg",
+    sha256: PRISM_MANSION_ACOUSTIC_ASSETS_V1.passengerShip.sha256,
+  },
 ] as const;
 
 function acousticAssetById(id: string | null | undefined): WhodunnitAcousticAssetV1 | null {
@@ -68,6 +75,9 @@ export function mysteryMansionAmbienceAssetV1(
   if (packagedFallback) return packagedFallback;
   if (houseStyle.acousticThemePaletteId === "spacecraft-industrial-v1") {
     return acousticAssetById(PRISM_MANSION_ACOUSTIC_ASSETS_V1.spacecraftHull.id);
+  }
+  if (houseStyle.acousticThemePaletteId === "maritime-passenger-v1") {
+    return acousticAssetById(PRISM_MANSION_ACOUSTIC_ASSETS_V1.passengerShip.id);
   }
   if (houseStyle.atmosphere.weather === "storm" || houseStyle.atmosphere.weather === "rain") {
     return acousticAssetById(PRISM_MANSION_ACOUSTIC_ASSETS_V1.rainStorm.id);

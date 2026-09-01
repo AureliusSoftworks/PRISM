@@ -62,17 +62,18 @@ test("every active applet consumes the Debate PRISM navbar contract", () => {
   );
   assert.match(navbarHelper, /data-shared-app-navbar="true"/);
   assert.match(navbarHelper, /data-live-session-locked=/);
+  assert.match(navbarHelper, /brandAppletId: PrismAppletId/u);
   assert.match(
     navbarHelper,
-    /options\.brandAppletId[\s\S]*renderSharedAppletBrand\(options\.brandAppletId\)/u,
+    /renderSharedAppletBrand\([\s\S]{0,80}options\.brandAppletId,[\s\S]{0,80}options\.liveSessionActive === true/u,
   );
 
-  for (const appletId of ["coffee", "debate", "botcast", "slate"]) {
+  for (const appletId of ["coffee", "story", "debate", "botcast", "slate"]) {
     assert.match(pageSource, new RegExp(`brandAppletId:\\s*"${appletId}"`));
   }
   assert.match(
     pageSource,
-    /brandAppletId: sidebarOpen \? undefined : "zen"/,
+    /brandAppletId: chatPresentation === "zen" \? "zen" : "chat"/,
   );
   assert.match(
     pageSource,
@@ -107,20 +108,15 @@ test("every active applet consumes the Debate PRISM navbar contract", () => {
   );
   assert.match(
     pageSource,
-    /renderSharedAppletNavbar\("Chat tools", \{[\s\S]*brandAppletId: sidebarOpen \? undefined : "zen"[\s\S]*headerRef: chatHeaderRef[\s\S]*controlRail: renderHeaderModelPicker\(\{[\s\S]{0,100}disabled: botFoundryGenerationLocked/u,
+    /renderSharedAppletNavbar\("Chat tools", \{[\s\S]*brandAppletId: chatPresentation === "zen" \? "zen" : "chat"[\s\S]*headerRef: chatHeaderRef[\s\S]*controlRail: renderHeaderModelPicker\(\{[\s\S]{0,100}disabled: botFoundryGenerationLocked/u,
   );
   assert.doesNotMatch(pageSource, /data-zen-header-hidden=/u);
-  assert.match(pageSource, /armAppNavbarAutoHide\(\)/u);
-  assert.match(pageSource, /hideAppNavbarForImmersion\(\)/u);
-  assert.match(pageSource, /showAppNavbarWhileInteracting\(\)/u);
+  assert.doesNotMatch(pageSource, /armAppNavbarAutoHide\(\)/u);
+  assert.doesNotMatch(pageSource, /hideAppNavbarForImmersion\(\)/u);
+  assert.doesNotMatch(pageSource, /setAppNavbarAutoHideEnabled/u);
   assert.match(
     pageSource,
-    /zenAutoHide = chatPresentation === "zen"/u,
-  );
-  assert.match(pageSource, /setAppNavbarAutoHideEnabled\(zenAutoHide\)/u);
-  assert.match(
-    pageSource,
-    /onPointerEnter=\{[\s\S]*showAppNavbarWhileInteracting\(\)/u,
+    /renderSharedAppletNavbar\("Story tools", \{[\s\S]{0,200}brandAppletId: "story"[\s\S]{0,200}liveSessionActive: storyLiveSessionActive/u,
   );
   assert.match(
     pageCss,
@@ -182,7 +178,7 @@ test("Signal gives the shared navbar the complete full-width shell row", () => {
   assert.doesNotMatch(signalSource, /libraryBrand|headerActions/);
   assert.match(
     signalCss,
-    /\.shell\s*\{[\s\S]*grid-template-columns:\s*286px minmax\(0, 1fr\);[\s\S]*grid-template-rows:\s*var\(--app-navbar-height,\s*66px\) minmax\(0, 1fr\);/,
+    /\.shell\s*\{[\s\S]*grid-template-columns:\s*286px minmax\(0, 1fr\);[\s\S]*grid-template-rows:[\s\S]*var\(--app-shell-top-nav-height[\s\S]*minmax\(0, 1fr\);/,
   );
   assert.match(
     signalCss,

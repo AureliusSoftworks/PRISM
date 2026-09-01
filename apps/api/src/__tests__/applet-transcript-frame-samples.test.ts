@@ -20,6 +20,11 @@ describe("applet transcript frame samples", () => {
        VALUES ('user-1', 'one@example.test', 'One', 'hash', 'salt',
                'cipher', 'iv', 'tag', 'now', 'now')`,
     ).run();
+    db.prepare(
+      `INSERT INTO conversations
+         (id, user_id, title, conversation_mode, created_at, updated_at)
+       VALUES ('session-1', 'user-1', 'Coffee', 'coffee', 'now', 'now')`,
+    ).run();
     recordAppletTranscriptFrameSample(
       db,
       "user-1",

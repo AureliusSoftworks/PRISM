@@ -7,9 +7,123 @@ import {
   resolveDebateMysteryConfig,
 } from "./debateMystery.ts";
 import { mansionLayoutV2ToLegacyRooms, validateMansionLayoutV2 } from "./mansionLayoutV2.ts";
-import { createMysteryVenueProposalV1, parseMysteryVenueCreativeDraftV1 } from "./mysteryVenue.ts";
+import {
+  createMysteryVenueProposalV1,
+  deriveMysteryVenueIntentV1,
+  parseMysteryVenueCreativeDraftV1,
+} from "./mysteryVenue.ts";
 
 describe("Mystery Venue proposals", () => {
+  it("freezes a modern full-size passenger ship separately from yachts and estates", () => {
+    const intent = deriveMysteryVenueIntentV1(
+      "A modern full-size passenger cruise ship, not a yacht, manor, or estate.",
+    );
+    assert.equal(intent.archetype, "passenger_cruise_ship");
+    assert.equal(intent.era, "modern");
+    assert.equal(intent.physicalScaleClass, "grand");
+    assert.deepEqual(intent.excludedArchetypes, ["vintage_yacht", "private_estate"]);
+
+    const ship = createMysteryVenueProposalV1({
+      id: "proposal:modern-passenger-ship",
+      description: "A modern full-size passenger cruise ship, not a yacht, manor, or estate.",
+      length: { id: "standard", rooms: 10, suspects: 6 },
+    });
+    assert.equal(ship.profile.kindLabel, "Passenger Cruise Ship");
+    assert.equal(ship.profile.placeNoun, "ship");
+    assert.equal(ship.profile.physicalScaleClass, "grand");
+    assert.equal(ship.profile.presentation?.familyId, "maritime-passenger-v1");
+    assert.equal(ship.profile.presentation?.entryAction, "Board the ship");
+    assert.equal(ship.profile.presentation?.mapStyle, "hull-deck-v1");
+    assert.equal(ship.profile.presentation?.mapOrientation.fore, "right");
+    assert.equal(ship.profile.presentation?.mapOrientation.port, "top");
+    assert.equal(ship.length.id, "standard");
+    assert.equal(ship.length.suspects, 6);
+
+    const yacht = createMysteryVenueProposalV1({
+      id: "proposal:vintage-yacht",
+      description: "A vintage private yacht",
+      length: { id: "standard", rooms: 10, suspects: 6 },
+    });
+    assert.equal(yacht.intent.archetype, "vintage_yacht");
+    assert.equal(yacht.profile.kindLabel, "Vintage Yacht");
+  });
+
+  it("rejects mismatched model identity and discloses the compatible passenger catalog replacement", () => {
+    const yachtDraft = parseMysteryVenueCreativeDraftV1({
+      title: "The Little Gilded Wake",
+      archetype: "vintage_yacht",
+      era: "historic",
+      physicalScaleClass: "compact",
+      kind: "vessel",
+      kindLabel: "Vintage Yacht",
+      placeNoun: "yacht",
+      topology: "spine",
+      tierNoun: "Deck",
+      exteriorMode: "in-transit",
+      environmentSummary: "A small private yacht.",
+      atmosphere: "Polished brass and dark water.",
+      connectorLabel: "ladder",
+      rooms: Array.from({ length: 5 }, (_, index) => ({
+        templateId: `venue:yacht-${index}`,
+        name: index === 0 ? "Gangway" : `Cabin ${index}`,
+        emoji: "⚓",
+        role: index === 0 ? "entry" : "private",
+        anchors: ["brass fitting"],
+      })),
+    });
+    const proposal = createMysteryVenueProposalV1({
+      id: "proposal:mismatch",
+      description: "Modern full-size passenger cruise ship, never a yacht",
+      length: { id: "standard", rooms: 10, suspects: 6 },
+      creativeDraft: yachtDraft,
+    });
+    assert.equal(proposal.source, "catalog");
+    assert.equal(proposal.match.status, "matched");
+    assert.match(proposal.editableDraftNotice ?? "", /did not match the frozen brief/u);
+    assert.equal(proposal.profile.intent?.archetype, "passenger_cruise_ship");
+    assert.equal(proposal.layout.verticalConnectors.some((connector) => connector.kind === "ladder"), false);
+  });
+
+  it("builds hull-bounded semantic decks with zoned rooms and aligned ship shafts", () => {
+    for (const [id, rooms, suspects, expectedLabels] of [
+      ["quick", 5, 4, ["Embarkation & Promenade Deck"]],
+      ["standard", 10, 6, ["Embarkation & Service Deck", "Command & Promenade Deck"]],
+      ["grand", 15, 6, ["Lower Service Deck", "Embarkation Deck", "Promenade & Command Deck"]],
+    ] as const) {
+      const proposal = createMysteryVenueProposalV1({
+        id: `proposal:ship:${id}`,
+        description: "modern full-size passenger cruise ship",
+        length: { id, rooms, suspects },
+      });
+      assert.deepEqual(proposal.profile.tierLabels, expectedLabels);
+      assert.equal(proposal.length.suspects, suspects);
+      assert.equal(proposal.layout.venuePresentation?.tierOutlines.length, expectedLabels.length);
+      assert.deepEqual(validateMansionLayoutV2(proposal.layout, { suspectCount: suspects }), []);
+      const venueRooms = proposal.layout.entities.filter((entity) => entity.kind === "room");
+      const bridge = venueRooms.find((entry) => entry.templateId === "venue:bridge");
+      const engine = venueRooms.find((entry) => entry.templateId === "venue:engine");
+      const gangway = venueRooms.find((entry) => entry.templateId === "venue:gangway");
+      const promenade = venueRooms.find((entry) => entry.templateId === "venue:promenade");
+      if (id !== "quick") {
+        assert.equal(bridge?.venueContract?.spatial?.longitudinal, "fore");
+        assert.equal(engine?.venueContract?.spatial?.longitudinal, "aft");
+      }
+      assert.equal(gangway?.venueContract?.spatial?.transverse, "starboard");
+      assert.equal(promenade?.venueContract?.spatial?.exposure, "open-deck");
+      assert.equal((promenade?.venueContract?.footprint.width ?? 0) > 2, true);
+      assert.equal(proposal.layout.verticalConnectors.some((connector) => connector.kind === "ladder"), false);
+      const shaftGroups = new Map<string | undefined, typeof proposal.layout.verticalConnectors>();
+      for (const connector of proposal.layout.verticalConnectors) {
+        shaftGroups.set(connector.shaftId, [...(shaftGroups.get(connector.shaftId) ?? []), connector]);
+      }
+      for (const connectors of shaftGroups.values()) {
+        if (connectors.length < 2) continue;
+        assert.equal(new Set(connectors.map((entry) => JSON.stringify(entry.lowerPoint))).size, 1);
+        assert.equal(new Set(connectors.map((entry) => JSON.stringify(entry.upperPoint))).size, 1);
+      }
+    }
+  });
+
   for (const [description, kind, topology, entry] of [
     ["A midnight cruise aboard a vintage yacht", "vessel", "spine", "Gangway"],
     ["A remote lunar module", "habitat", "radial", "Main Airlock"],

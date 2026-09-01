@@ -5,21 +5,24 @@ import { describe, it } from "node:test";
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 const cssSource = readFileSync(new URL("./page.module.css", import.meta.url), "utf8");
 
-describe("panel theme toggle", () => {
-  it("reuses one accessible theme control in every shared panel header", () => {
-    assert.match(pageSource, /const renderPanelThemeToggle = \(\): React\.JSX\.Element =>/);
-    assert.match(pageSource, /data-prism-panel-theme-toggle="true"/);
-    assert.match(pageSource, /aria-label=\{themeAriaLabel\}/);
+describe("global navbar theme toggle", () => {
+  it("keeps one accessible Theme control in the navbar instead of panel duplicates", () => {
+    assert.doesNotMatch(pageSource, /const renderPanelThemeToggle/);
+    assert.doesNotMatch(pageSource, /data-prism-panel-theme-toggle="true"/);
+    assert.match(pageSource, /aria-label=\{actionTooltip\("theme", themeAriaLabel\)\}/);
     assert.match(pageSource, /<ThemeGlyph mode=\{effectiveThemeMode\} \/>/);
-    assert.equal(pageSource.match(/\{renderPanelThemeToggle\(\)\}/g)?.length, 6);
-  });
-
-  it("keeps the control visually aligned with panel header actions", () => {
     assert.match(
       pageSource,
-      /className=\{`\$\{styles\.panelHeaderIconButton\} \$\{styles\.panelHeaderThemeButton\}`\}/
+      /const actionDisabled = \(action: UniversalNavbarAction\): boolean =>\s*action === "theme" \? false/u,
     );
-    assert.match(cssSource, /\.panelHeaderThemeButton:focus-visible/);
-    assert.doesNotMatch(cssSource, /\.settingsHeaderThemeButton/);
+  });
+
+  it("keeps the navbar interactive above open panels", () => {
+    assert.match(pageSource, /const gearHidden = false/u);
+    assert.doesNotMatch(cssSource, /\.panelHeaderThemeButton/);
+    assert.match(
+      cssSource,
+      /\.appLayout\[data-right-panel-open="true"\] \[data-shared-app-navbar="true"\][\s\S]{0,180}z-index:\s*200;[\s\S]{0,80}pointer-events:\s*auto/u,
+    );
   });
 });

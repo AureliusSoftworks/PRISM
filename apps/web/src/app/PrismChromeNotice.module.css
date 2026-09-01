@@ -1,6 +1,8 @@
 .viewport {
   position: fixed;
-  top: calc(var(--app-navbar-height, 66px) - 1px);
+  top: calc(
+    var(--app-shell-top-nav-height, var(--app-navbar-height, 66px)) - 1px
+  );
   left: 50%;
   z-index: 880;
   display: grid;

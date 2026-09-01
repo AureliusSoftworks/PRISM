@@ -26,6 +26,32 @@ test("Blackwood and Space Odyssey freeze categorically distinct acoustic fixture
   assert.notEqual(mansionAmbienceWorldBedV1(blackwood).id, mansionAmbienceWorldBedV1(space).id);
 });
 
+test("passenger ships use an ocean-and-machinery palette without mansion fallbacks", () => {
+  const ship = debateMysteryHouseStyleV2(
+    "A modern full-size passenger cruise ship with a gangway and promenade deck.",
+  );
+  assert.equal(ship.acousticThemePaletteId, "maritime-passenger-v1");
+  assert.match(ship.atmosphere.exteriorSetting, /passenger ship at sea/u);
+  const ambience = buildMansionAmbienceManifestV1({
+    houseStyle: ship,
+    rooms: [
+      { id: "engine", name: "Engine Control Room", floor: 1 },
+      { id: "promenade", name: "Promenade Deck", floor: 2 },
+      { id: "cabin", name: "Passenger Cabin", floor: 2 },
+    ],
+    promptContractHash: hash,
+    variationSeed: "passenger-ship-fixture",
+  });
+  assert.equal(ambience.assets[0]?.sharedAssetId, "prism.theme.maritime-passenger.engine-ocean.v1");
+  assert.equal(ambience.assets[0]?.fallbackSharedAssetId, "prism.theme.maritime-passenger.engine-ocean.v1");
+  assert.deepEqual(
+    ambience.roomProfiles.map((room) => room.acousticPresetId),
+    ["ship-service-v1", "ocean-deck-v1", "passenger-cabin-v1"],
+  );
+  assert.equal(ambience.surfaceMappings.some((mapping) => mapping.materialId === "wood"), false);
+  assert.equal(ambience.fallbackSharedAssetIds.includes("prism.shared.fallback.indoor-room-tone.v1"), false);
+});
+
 test("portable ambience references shared roles without embedding reusable beds", () => {
   const houseStyle = debateMysteryHouseStyleV2(
     "Blackwood House, a rain-lashed Gothic mansion with a glass arboretum.",

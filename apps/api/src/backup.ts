@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
+import { OWNER_CONSTRAINT_ERROR } from "./account-owner-boundaries.ts";
 import {
   decryptJson,
   decryptText,
@@ -2802,9 +2803,9 @@ export function exportUserSnapshot(
   const sessionNotes = db
     .prepare(
       `SELECT surface, session_id, body, captures_json, created_at, updated_at
-         FROM applet_session_notes
+       FROM applet_session_notes
         WHERE user_id = ?
-        ORDER BY updated_at, rowid`,
+        ORDER BY updated_at, surface, session_id`,
     )
     .all(userId) as Array<Record<string, unknown>>;
   const transcriptFrameSamples = db
@@ -3542,9 +3543,6 @@ function assertSnapshotIdsStayWithinTenant(
     idColumn: "id" | "project_id" | "session_id" | "cache_key" = "id",
   ): void => {
     const seen = new Set<string>();
-    const findOwner = db.prepare(
-      `SELECT user_id FROM ${table} WHERE ${idColumn} = ?`,
-    );
     for (const rawId of ids) {
       const id = rawId.trim();
       if (!id) continue;
@@ -3552,10 +3550,6 @@ function assertSnapshotIdsStayWithinTenant(
         throw new Error(`Account backup contains a duplicate ${table} id.`);
       }
       seen.add(id);
-      const row = findOwner.get(id) as { user_id?: string } | undefined;
-      if (row?.user_id && row.user_id !== userId) {
-        throw new Error(`Account backup ${table} id belongs to another user.`);
-      }
     }
   };
 
@@ -3586,19 +3580,15 @@ function assertSnapshotIdsStayWithinTenant(
         : [],
     ),
   );
-  const findCoffeeGroupOwner = db.prepare(
-    "SELECT user_id FROM coffee_groups WHERE id = ?",
+  const findOwnedCoffeeGroup = db.prepare(
+    "SELECT 1 AS owned FROM coffee_groups WHERE user_id = ? AND id = ?",
   );
   for (const conversation of conversations) {
     const groupId = conversation?.coffee?.groupId?.trim();
     if (!groupId || coffeeGroupIds.has(groupId)) continue;
-    const owner = findCoffeeGroupOwner.get(groupId) as
-      | { user_id: string }
-      | undefined;
-    if (owner && owner.user_id !== userId) {
-      throw new Error(
-        "Account backup Coffee Group reference belongs to another user.",
-      );
+    const owned = findOwnedCoffeeGroup.get(userId, groupId);
+    if (!owned) {
+      throw new Error("Account backup contains an unavailable owner-bound reference.");
     }
   }
   assertIds(
@@ -3777,7 +3767,7 @@ function assertSnapshotIdsStayWithinTenant(
       let findOwner = ownerStatements.get(rule.targetTable);
       if (!findOwner) {
         findOwner = db.prepare(
-          `SELECT user_id FROM ${rule.targetTable} WHERE id = ?`,
+          `SELECT 1 AS owned FROM ${rule.targetTable} WHERE user_id = ? AND id = ?`,
         );
         ownerStatements.set(rule.targetTable, findOwner);
       }
@@ -3794,16 +3784,9 @@ function assertSnapshotIdsStayWithinTenant(
           );
         }
         if (targetIds.has(value)) continue;
-        const owner = findOwner.get(value) as { user_id?: string } | undefined;
-        if (owner?.user_id && owner.user_id !== userId) {
-          throw new Error(
-            `Account backup ${rule.targetTable} reference belongs to another user.`,
-          );
-        }
-        if (!owner?.user_id) {
-          throw new Error(
-            `Account backup ${rule.source}.${rule.field} references missing ${rule.targetTable} data.`,
-          );
+        const owned = findOwner.get(userId, value);
+        if (!owned) {
+          throw new Error("Account backup contains an unavailable owner-bound reference.");
         }
       }
     }
@@ -3842,7 +3825,11 @@ export function importUserSnapshot(
   const preparedAssets = projectOwnedAssets
     ? prepareProjectOwnedAssetImport(userId, snapshot, projectOwnedAssets, {
         imageIdExists: (imageId) =>
-          Boolean(db.prepare("SELECT 1 FROM images WHERE id = ?").get(imageId)),
+          Boolean(
+            db
+              .prepare("SELECT 1 FROM images WHERE user_id = ? AND id = ?")
+              .get(userId, imageId),
+          ),
       })
     : null;
   let transactionStarted = false;
@@ -3870,6 +3857,13 @@ export function importUserSnapshot(
   } catch (error) {
     if (transactionStarted) db.exec("ROLLBACK;");
     if (preparedAssets) cleanupPreparedProjectOwnedAssetFiles(preparedAssets);
+    const message = error instanceof Error ? error.message : "";
+    if (
+      message.includes(OWNER_CONSTRAINT_ERROR) ||
+      message.includes("UNIQUE constraint failed")
+    ) {
+      throw new Error("Account backup contains unavailable owner-bound data.");
+    }
     throw error;
   }
 }

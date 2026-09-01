@@ -124,7 +124,9 @@ export function prepareSlateHandoff(
            JOIN conversations
              ON conversations.id = messages.conversation_id
             AND conversations.user_id = messages.user_id
-           LEFT JOIN bots ON bots.id = messages.bot_id
+           LEFT JOIN bots
+             ON bots.id = messages.bot_id
+            AND bots.user_id = messages.user_id
           WHERE messages.id = ?
             AND messages.conversation_id = ?
             AND messages.user_id = ?

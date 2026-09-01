@@ -104,7 +104,7 @@ test("builds tenant-safe metadata context without source material", () => {
   });
   assert.deepEqual(
     context.bots.map((bot) => bot.id),
-    ["owned", "public"],
+    ["owned"],
   );
   assert.equal(context.conversation?.incognito, true);
   assert.equal(context.slate?.sectionTitle, "Chapter One");

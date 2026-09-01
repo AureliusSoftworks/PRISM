@@ -635,6 +635,51 @@ test("accepted mansion plates use neutral examination regions instead of PRISM t
   );
 });
 
+test("sparse venue anchors keep fixture hotspots and gain a dense neutral examination grid", () => {
+  const config = resolveDebateMysteryConfig(createConfig("standard", "classic", "venue-anchor-regions"));
+  const bundled = compileDeterministicDebateMystery({ config, suspects: suspects(6) });
+  const anchoredRoom = bundled.rooms[0]!;
+  const anchorRegions = [
+    {
+      id: "venue-anchor:helm",
+      label: "helm",
+      keywords: ["helm"],
+      physicalAnchor: "at the helm",
+      polygon: [{ x: 30, y: 30 }, { x: 44, y: 30 }, { x: 44, y: 44 }, { x: 30, y: 44 }],
+    },
+    {
+      id: "venue-anchor:chart-table",
+      label: "chart table",
+      keywords: ["chart", "table"],
+      physicalAnchor: "beside the chart table",
+      polygon: [{ x: 56, y: 50 }, { x: 70, y: 50 }, { x: 70, y: 64 }, { x: 56, y: 64 }],
+    },
+  ];
+  const blueprint = bundled.rooms.map((room) => ({
+    ...room,
+    imageId: null,
+    usesBundledHotspotGeometry: false,
+    ...(room.id === anchoredRoom.id ? { presentationRegions: anchorRegions } : {}),
+  }));
+  const bible = compileDeterministicDebateMystery({
+    config,
+    suspects: suspects(6),
+    roomBlueprint: blueprint,
+  });
+  const roomRegionIds = bible.activeRegions
+    .filter((region) => region.roomId === anchoredRoom.id)
+    .map((region) => region.regionId);
+
+  assert.ok(roomRegionIds.length >= 12);
+  assert.ok(roomRegionIds.includes("venue-anchor:helm"));
+  assert.ok(roomRegionIds.includes("venue-anchor:chart-table"));
+  assert.ok(roomRegionIds.some((id) => id.includes(":scene-") && id.includes(":detail-")));
+  assert.deepEqual(
+    validateDebateMysteryCaseBible(bible, config.actionBudget).errors,
+    [],
+  );
+});
+
 test("custom floor counts keep architectural room groups intact", () => {
   for (let totalRooms = 5; totalRooms <= 18; totalRooms += 1) {
     for (let floors = 1; floors <= 3; floors += 1) {

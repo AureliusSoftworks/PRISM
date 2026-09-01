@@ -44,14 +44,14 @@ test("Avatar Studio carries the resolved app theme through its portal", () => {
   );
 });
 
-test("Avatar Studio includes the app-wide theme cycle control", () => {
-  assert.match(pageSource, /themeMode: Theme;/);
-  assert.match(pageSource, /onThemeCycle: \(\) => void \| Promise<void>;/);
-  assert.match(pageSource, /data-avatar-customizer-theme-toggle="true"/);
-  assert.match(pageSource, /onClick=\{\(\) => void onThemeCycle\(\)\}/);
-  assert.match(pageSource, /<ThemeGlyph mode=\{themeMode\} \/>/);
-  assert.match(pageSource, /themeMode=\{effectiveThemeMode\}/);
-  assert.match(pageSource, /onThemeCycle=\{cycleThemeMode\}/);
+test("Avatar Studio relies on the permanent app navbar theme control", () => {
+  assert.doesNotMatch(pageSource, /themeMode: Theme;/);
+  assert.doesNotMatch(pageSource, /onThemeCycle: \(\) => void \| Promise<void>;/);
+  assert.doesNotMatch(pageSource, /data-avatar-customizer-theme-toggle="true"/);
+  assert.match(
+    cssSource,
+    /\.botAvatarCustomizerBackdrop\[data-avatar-foundry="true"\][\s\S]{0,180}inset:[\s\S]{0,100}var\(--app-shell-top-nav-height/u,
+  );
 });
 
 test("Avatar Studio Light Mode is a shared-token palette, not a duplicated component", () => {

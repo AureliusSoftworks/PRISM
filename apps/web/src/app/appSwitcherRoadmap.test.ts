@@ -22,13 +22,18 @@ describe("living-shell applet navigation", () => {
     assert.doesNotMatch(pageSource, /aria-label="Current PRISM location"/u);
     assert.doesNotMatch(pageSource, /aria-label="Session status"/u);
     assert.match(pageSource, /data-shared-applet-brand=\{appletId\}/u);
-    assert.match(pageSource, /onClick=\{openLivingShellHome\}/u);
-    assert.match(pageSource, /aria-label="Open All Bots Home"/u);
+    assert.match(pageSource, /onClick=\{\(\) => openCurrentAppletHome\(appletId\)\}/u);
+    assert.match(pageSource, /aria-label=\{`Open \$\{PRISM_APPLETS\[appletId\]\.name\} home`\}/u);
+    assert.match(pageSource, /disabled=\{disabled\}[\s\S]{0,120}data-shared-applet-brand/u);
     assert.match(pageSource, /const renderAppSwitcher =/u);
     assert.match(pageSource, /label: "Switch Prism app"/u);
     assert.match(
       pageSource,
-      /prismTopLevelSwitcherApplets\(\)\.filter\([\s\S]*applet\.id !== "chat" && applet\.id !== "zen"[\s\S]*\)/u,
+      /prismTopLevelSwitcherApplets\(\)\.filter\([\s\S]*applet\.id !== "zen"[\s\S]*\)/u,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /prismTopLevelSwitcherApplets\(\)\.filter\([\s\S]{0,120}applet\.id !== "chat" &&/u,
     );
     assert.match(
       pageSource,
@@ -39,6 +44,10 @@ describe("living-shell applet navigation", () => {
       /: chatPresentation === "zen"\s*\? "zen"\s*: "chat";/u,
     );
     assert.ok((pageSource.match(/renderAppSwitcher\(/gu)?.length ?? 0) > 1);
+    assert.match(
+      pageSource,
+      /const openCurrentAppletHome =[\s\S]{0,1000}resetCoffeeToPicker\(\)[\s\S]{0,300}resetStoryToSetup\(\)[\s\S]{0,500}setAppletHomeRequestTokens/u,
+    );
   });
 
   it("keeps the dormant Story implementation behind the release gate", () => {

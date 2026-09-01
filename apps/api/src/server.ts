@@ -21,6 +21,10 @@ import {
   upsertPrismMoodState,
 } from "./db.ts";
 import {
+  OwnerScopedNotFoundError,
+  createOwnerFirstRepository,
+} from "./owner-first-repository.ts";
+import {
   composeBotRuntimePersona,
   neutralizeGlobalBotMood,
 } from "./bot-global-mood.ts";
@@ -65,6 +69,15 @@ import {
   resolveAskQuestionTimeoutApplicability,
 } from "./ask-question-timeout.ts";
 import { buildHealthResponse } from "./health.ts";
+import {
+  AccountVaultMaintenanceGate,
+  buildAccountVaultMaintenanceStatusPayload,
+  buildAccountVaultMaintenanceUnavailablePayload,
+} from "./account-vault-maintenance.ts";
+import {
+  coreContentVaultIsActiveV2,
+  initializeCoreContentVaultOwnerV2,
+} from "./core-content-vault.ts";
 import {
   validateApiKeyCredential,
   type ApiKeyValidationProvider,
@@ -305,9 +318,11 @@ import {
   applyDebateMysteryActionV2,
   applyDebateMysteryActionWithPersonaV2,
   attachDebateMysteryEvidenceAssetV2,
+  attachDebateMysteryMansionExteriorAssetV2,
   attachDebateMysteryRoomAssetV2,
   claimDebateMysteryAssetBackgroundLeaseV2,
   cancelDebateMysteryCompilationV2,
+  continueDebateMysteryProductionWithFallbacksV1,
   continueDebateMysteryV2WithoutVoices,
   createDebateMysterySessionV2,
   cleanupUnreferencedDebateMysteryAudioV2,
@@ -318,6 +333,7 @@ import {
   getDebateMysteryCaseV2,
   pendingDebateMysteryEvidenceAssetsForRoomV2,
   playDebateMysteryV2Again,
+  refreshDebateMysteryProductionReadinessV1,
   releaseDebateMysteryAssetBackgroundLeaseV2,
   restartDebateMysteryCourtV2,
   restartDebateMysteryInvestigationV2,
@@ -432,10 +448,12 @@ import {
   WHODUNNIT_PROP_ARCHETYPE_IDS_V1,
   WHODUNNIT_PROP_ARCHETYPES_V1,
   createMysteryVenueProposalV1,
+  deriveMysteryVenueIntentV1,
   parseMysteryVenueCreativeDraftV1,
   debateMysteryHouseStyleV2,
   debateMysteryMansionExteriorPromptV1,
   resolveDebateMysteryMansionExteriorScaleClassV1,
+  resolveDebateMysteryProductionCapabilitiesV1,
   type MysteryVenueProposalV1,
   type MysteryVenueLengthV1,
 } from "@localai/shared";
@@ -1573,7 +1591,7 @@ import {
   writeMemoryEcologySettings,
 } from "./memory-ecology.ts";
 let config: AppConfig = getAppConfig();
-let db: DatabaseSync = createDatabase();
+let db: DatabaseSync = createDatabase(config.encryptionMasterKey);
 let detachedBackgroundJobsAllowed = true;
 const signalArtworkJobs = new SignalArtworkJobManager();
 const softAssetJobs = new SoftAssetJobManager();
@@ -3435,6 +3453,7 @@ function route(
   method: string,
   pathTemplate: string,
   handler: RouteDefinition["handler"],
+  maintenanceAccess: RouteDefinition["maintenanceAccess"] = "account-content",
 ): RouteDefinition {
   const keys: string[] = [];
   const pattern = new RegExp(
@@ -3447,7 +3466,7 @@ function route(
         }) +
       "$",
   );
-  return { method, pattern, keys, handler };
+  return { method, pattern, keys, maintenanceAccess, handler };
 }
 
 function parseParams(
@@ -3704,30 +3723,45 @@ function getOrCreateLocalOwnerUser(): string {
   const wrappedUserKey = encryptText(userKey.toString("base64"), masterKey);
   const createdAt = new Date().toISOString();
 
-  db.prepare(
-    `
-    INSERT INTO users (
-      id, email, display_name, password_hash, password_salt,
-      wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
-      theme, preferred_provider, auto_memory,
-      prism_default_bot_face_mouth_coffee_pucker,
-      voice_mode, english_voice_engine, created_at, last_active_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'system', 'local', 1, ?, 'english', 'builtin', ?, ?)
-  `,
-  ).run(
-    userId,
-    LOCAL_OWNER_USERNAME,
-    LOCAL_OWNER_DISPLAY_NAME,
-    passwordHash,
-    salt,
-    wrappedUserKey.ciphertext,
-    wrappedUserKey.iv,
-    wrappedUserKey.tag,
-    DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER ? 1 : 0,
-    createdAt,
-    createdAt,
-  );
-  createPendingLivingShellAccountProgress(db, userId, createdAt);
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare(
+      `
+      INSERT INTO users (
+        id, email, display_name, password_hash, password_salt,
+        wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
+        theme, preferred_provider, auto_memory,
+        prism_default_bot_face_mouth_coffee_pucker,
+        voice_mode, english_voice_engine, created_at, last_active_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'system', 'local', 1, ?, 'english', 'builtin', ?, ?)
+    `,
+    ).run(
+      userId,
+      LOCAL_OWNER_USERNAME,
+      LOCAL_OWNER_DISPLAY_NAME,
+      passwordHash,
+      salt,
+      wrappedUserKey.ciphertext,
+      wrappedUserKey.iv,
+      wrappedUserKey.tag,
+      DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER ? 1 : 0,
+      createdAt,
+      createdAt,
+    );
+    if (coreContentVaultIsActiveV2(db)) {
+      initializeCoreContentVaultOwnerV2({
+        db,
+        ownerUserId: userId,
+        legacyUserDek: userKey,
+        createdAt,
+      });
+    }
+    createPendingLivingShellAccountProgress(db, userId, createdAt);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 
   return userId;
 }
@@ -8587,7 +8621,7 @@ function rejectUnsupportedBotAvatarPayload(
   }
 }
 
-function botRowForResponse(row: Record<string, unknown>): Record<
+function botRowForResponse(userId: string, row: Record<string, unknown>): Record<
   string,
   unknown
 > & {
@@ -8600,9 +8634,9 @@ function botRowForResponse(row: Record<string, unknown>): Record<
       ? (
           db
             .prepare(
-              "SELECT face_mouth_speech_poses FROM bots WHERE id = ?",
+              "SELECT face_mouth_speech_poses FROM bots WHERE user_id = ? AND id = ?",
             )
-            .get(row.id) as
+            .get(userId, row.id) as
             | { face_mouth_speech_poses?: string | null }
             | undefined
         )?.face_mouth_speech_poses
@@ -8641,8 +8675,8 @@ function botRowForResponse(row: Record<string, unknown>): Record<
   };
 }
 
-function botRowsForResponse(rows: Record<string, unknown>[]) {
-  return rows.map(botRowForResponse);
+function botRowsForResponse(userId: string, rows: Record<string, unknown>[]) {
+  return rows.map((row) => botRowForResponse(userId, row));
 }
 
 function normalizeDefaultBotSettingsForResponse(user: UserDbRow) {
@@ -8790,7 +8824,7 @@ type ZenWallpaperDbRow = {
 
 function resetZenWallpaperMetadataForEmptyConversation<
   T extends ZenWallpaperDbRow,
->(conversationId: string, row: T, totalMessageCount: number): T {
+>(userId: string, conversationId: string, row: T, totalMessageCount: number): T {
   if (totalMessageCount !== 0) return row;
   const storedHistory = row.zen_wallpaper_history?.trim() ?? "";
   const hasWallpaperMetadata = Boolean(
@@ -8810,8 +8844,8 @@ function resetZenWallpaperMetadataForEmptyConversation<
             zen_wallpaper_message_count = NULL,
             zen_wallpaper_status = 'idle',
             zen_wallpaper_history = '[]'
-      WHERE id = ?`,
-  ).run(conversationId);
+      WHERE user_id = ? AND id = ?`,
+  ).run(userId, conversationId);
   return {
     ...row,
     zen_wallpaper_image_id: null,
@@ -8823,6 +8857,7 @@ function resetZenWallpaperMetadataForEmptyConversation<
 }
 
 function zenWallpaperResponseForConversation(
+  userId: string,
   conversationId: string,
 ): ReturnType<typeof mapZenWallpaperMetadata> {
   const row = db
@@ -8831,18 +8866,19 @@ function zenWallpaperResponseForConversation(
               zen_wallpaper_prompt_seed, zen_wallpaper_message_count,
               zen_wallpaper_status, zen_wallpaper_history
          FROM conversations
-        WHERE id = ?`,
+        WHERE user_id = ? AND id = ?`,
     )
-    .get(conversationId) as ZenWallpaperDbRow | undefined;
+    .get(userId, conversationId) as ZenWallpaperDbRow | undefined;
   const totalMessageCount =
     (
       db
-        .prepare("SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ?")
-        .get(conversationId) as { n?: number } | undefined
+        .prepare("SELECT COUNT(*) AS n FROM messages WHERE user_id = ? AND conversation_id = ?")
+        .get(userId, conversationId) as { n?: number } | undefined
     )?.n ?? 0;
   const metadata = mapZenWallpaperMetadata(
     row
       ? resetZenWallpaperMetadataForEmptyConversation(
+          userId,
           conversationId,
           row,
           totalMessageCount,
@@ -9947,6 +9983,7 @@ async function reviewDebateMysteryAssetWithVision(args: {
         "Approve only if image 2 is one coherent, unoccupied furnished interior and preserves image 1's camera, floor line, major architectural divisions, and the broad spatial regions marked by its interaction overlays.",
         "The source overlays are annotations rather than furniture. Image 2 must remove those overlays while keeping their underlying spatial layout usable.",
         "Ordinary room-appropriate furniture, plants, tableware, books, art, and decorative objects are welcome. Reject only a visually isolated object that reads as case evidence or a clue, not normal environmental dressing.",
+        "Room-defining built-in fixtures named by the requested room are required environmental architecture, not clues. Approve context-appropriate ship bridge navigation consoles, engine-control panels, galley equipment, security desks or cameras, cabin berths, railings, lifebuoys, and promenade safety fixtures unless they contain a separately prohibited element.",
         "Do not speculate that ordinary containers, statues, vessels, books, table settings, tools, luggage, plants, art, or signs of everyday use could become clues. They are environmental dressing unless the image explicitly marks them as forensic evidence with blood, an evidence marker, a weapon, a label, readable text, or conspicuous clue framing.",
         "An unoccupied room may still look lived-in. Normal food, drink, open books, and other non-forensic signs of use are acceptable and do not imply a case fact.",
         "Image 2 must contain no people, human bodies, evidence objects, clues, unrequested gore, readable text, captions, logos, borders, or UI.",
@@ -10528,7 +10565,7 @@ async function prepareDebateMysteryV2MansionExteriorAssetDirect(
 ): Promise<import("@localai/shared").DebateMysterySealedAssetRefV1> {
   const session = getDebateSession(db, args.userId, args.sessionId);
   if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
-    throw new HttpError(409, "Mansion exterior preparation requires a Whodunnit V2 case.");
+    throw new HttpError(409, "Venue exterior preparation requires a Whodunnit V2 case.");
   }
   const existing = getDebateMysterySealedAssetRefV1(
     db,
@@ -10562,7 +10599,7 @@ async function prepareDebateMysteryV2MansionExteriorAssetDirect(
   let prepared: import("@localai/shared").DebateMysterySealedAssetRefV1 | null = null;
   let failure = online && apiKey
     ? "generation failed"
-    : "LOCAL or bundled art selection uses the curated mansion exterior";
+    : "LOCAL or bundled art selection uses the compatible curated venue exterior";
   let reviewRepairFeedback: string | null = null;
   if (online && apiKey) {
     for (let attempt = 1; attempt <= 2 && !prepared; attempt += 1) {
@@ -10602,7 +10639,7 @@ async function prepareDebateMysteryV2MansionExteriorAssetDirect(
           });
           if (!review.approved) {
             throw new Error(
-              `Vision review rejected the mansion exterior: ${review.reasons.join("; ") || "no reason supplied"}`,
+              `Vision review rejected the venue exterior: ${review.reasons.join("; ") || "no reason supplied"}`,
             );
           }
           const sealed = sealDebateMysteryAssetBytesV1(db, userKey, {
@@ -10654,13 +10691,13 @@ async function adoptDebateMysteryV2MansionExteriorDraft(args: {
     | { local_rel_path: string | null; provider: string; model: string }
     | undefined;
   if (!draft?.local_rel_path) {
-    throw new HttpError(404, "Choose a Mansion-step exterior draft before compiling this case.");
+    throw new HttpError(404, "Choose a venue exterior draft before compiling this case.");
   }
   let source: Buffer;
   try {
     source = await readGeneratedImageBytesForPromptAttachment(draft.local_rel_path);
   } catch {
-    throw new HttpError(409, "That mansion exterior draft is no longer available. Keep the bundled cover or Refract a new exterior.");
+    throw new HttpError(409, "That venue exterior draft is no longer available. Keep the compatible cover or Refract a new exterior.");
   }
   const normalized = await sharp(source, { failOn: "error" })
     .rotate()
@@ -10696,6 +10733,7 @@ async function prepareDebateMysteryV2RoomAssets(
   if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
     throw new HttpError(409, "Room preparation requires a Whodunnit V2 case.");
   }
+  const mysteryState = session.formatState;
   const user = getUserRow(args.userId);
   const online = session.responseMode !== "local";
   const userKey = decryptUserKey(args.userId);
@@ -10748,19 +10786,39 @@ async function prepareDebateMysteryV2RoomAssets(
       for (let attempt = 1; attempt <= 2 && !prepared; attempt += 1) {
         try {
           prepared = await runMysteryAssetAttempt(signal, async (attemptSignal) => {
-            const templateBytes = await debateMysteryRoomTemplatePng(
-              room.templateId!,
-              { width: 1280, height: 720 },
+            const usesBundledTemplate = DEBATE_MYSTERY_ROOM_TEMPLATES.some(
+              (template) => template.id === room.templateId,
             );
+            const templateBytes = usesBundledTemplate
+              ? await debateMysteryRoomTemplatePng(
+                  room.templateId!,
+                  { width: 1280, height: 720 },
+                )
+              : undefined;
+            const venueLayout = mysteryState.config.mansionSnapshot?.layoutV2 ?? null;
+            const roomEntity = venueLayout?.entities.find(
+              (entity) => entity.kind === "room" && entity.id === room.id,
+            );
+            const spatial = roomEntity?.kind === "room"
+              ? roomEntity.venueContract?.spatial
+              : undefined;
+            const spatialBrief = spatial
+              ? `Architectural placement: ${spatial.longitudinal} along the venue, ${spatial.transverse}, ${spatial.exposure.replaceAll("_", " ")}, on ${spatial.deckBand.replaceAll("_", " ")}.`
+              : "Preserve a clear, traversable investigation-room composition with its doorway and interaction areas legible.";
             const generated = await generateRawDebateMysteryCandidate({
               userId: args.userId,
               title: `${room.name} room`,
             prompt: [
-                `Redraw this exact annotated room template as an unoccupied, furnished ${room.name} interior in genuine polished high-resolution hand-crafted pixel art.`,
+                templateBytes
+                  ? `Redraw this exact annotated room template as an unoccupied, furnished ${room.name} interior in genuine polished high-resolution hand-crafted pixel art.`
+                  : `Create an unoccupied, furnished ${room.name} scene for this ${venueLayout?.venueProfile?.placeNoun ?? "mystery venue"} in genuine polished high-resolution hand-crafted pixel art.`,
                 args.houseStyle.promptContract,
-                "Preserve the exact 1280×720 dimensions, room geometry, grounded player-height camera, major architectural divisions, and broad interaction anchors.",
-                "This must be newly authored Pixel Art with deliberate coherent pixel clusters and crisp stepped edges—not a realistic room with a pixelation, downsampling, quantization, posterization, mosaic-grid, CRT, or scanline filter.",
-                "Retain and clarify the mansion's natural full palette, environmental accent colors, and cool-versus-warm lighting separation. Do not impose a global sepia, brown, monochrome, grayscale, or desaturated cast.",
+                spatialBrief,
+                templateBytes
+                  ? "Preserve the exact 1280×720 dimensions, room geometry, grounded player-height camera, major architectural divisions, and broad interaction anchors."
+                  : "Use exact 1280×720 dimensions and a grounded player-height camera. Keep major architectural divisions, the central travel path, and broad interaction anchors visually clear.",
+                "This must be a newly authored Mosaic room plate with deliberate coherent pixel clusters and crisp stepped edges—not a filtered or downsampled photograph, painting, CRT, or scanline treatment.",
+                "Retain and clarify the venue's natural full palette, environmental accent colors, and cool-versus-warm lighting separation. Do not impose a global sepia, brown, monochrome, grayscale, or desaturated cast.",
                 "Remove every annotation shape. Do not add electric magenta, people, human figures, bodies, evidence, clues, weapons, blood, gore, readable text, signs, captions, logos, borders, or UI.",
                 "Use ordinary room-specific furniture, vessels, statues, books, plants, table settings, and lived-in environmental dressing freely; these are atmosphere, not evidence.",
                 "This is presentation-only atmosphere. Do not imply any case fact.",
@@ -10771,7 +10829,7 @@ async function prepareDebateMysteryV2RoomAssets(
                   ? [`Correct these concrete first-pass review findings: ${reviewRepairFeedback}`]
                   : []),
               ].join(" "),
-              sourceImageBytes: templateBytes,
+              ...(templateBytes ? { sourceImageBytes: templateBytes } : {}),
               apiKey,
               model: "gpt-image-2",
               size: "1280x720",
@@ -10790,7 +10848,7 @@ async function prepareDebateMysteryV2RoomAssets(
             const review = await reviewDebateMysteryAssetWithVision({
               apiKey,
               bytes: normalized,
-              sourceBytes: templateBytes,
+              ...(templateBytes ? { sourceBytes: templateBytes } : {}),
               kind: "room",
               requestedSubject: room.name,
               houseStyle: args.houseStyle.promptContract,
@@ -10915,7 +10973,7 @@ function debateMysteryRoomArtUpgradeStatusV1(
       ? null
       : online
         ? null
-        : "Realistic room upgrades require an explicit ONLINE mansion.",
+        : "Upgraded room derivatives require an explicit ONLINE venue.",
   };
 }
 
@@ -10933,7 +10991,7 @@ async function prepareDebateMysteryIllustratedRoomsV1(
   if (session.responseMode === "local") {
     throw new HttpError(
       409,
-      "Realistic room upgrades require ONLINE. LOCAL never sends mansion art to a remote generator.",
+      "Upgraded room derivatives require ONLINE. LOCAL never sends venue art to a remote generator.",
     );
   }
   const userKey = decryptUserKey(userId);
@@ -10978,7 +11036,7 @@ async function prepareDebateMysteryIllustratedRoomsV1(
             });
         const generated = await generateRawDebateMysteryCandidate({
           userId,
-          title: `${room.name} Realistic room upgrade`,
+          title: `${room.name} Upgraded room derivative`,
           prompt: buildDebateMysteryIllustratedRoomUpgradePromptV1({
             roomName: room.name,
             houseStylePrompt: mysteryState.config.houseStyle.promptContract,
@@ -11010,7 +11068,7 @@ async function prepareDebateMysteryIllustratedRoomsV1(
         });
         if (!review.approved) {
           throw new Error(
-            `Vision review rejected the Realistic room: ${review.reasons.join("; ") || "no reason supplied"}`,
+            `Vision review rejected the Upgraded room derivative: ${review.reasons.join("; ") || "no reason supplied"}`,
           );
         }
         const sealed = sealDebateMysteryAssetBytesV1(db, userKey, {
@@ -11053,7 +11111,18 @@ function queueDebateMysteryIllustratedRoomsV1(userId: string, sessionId: string)
   const key = `${userId}:${sessionId}`;
   if (mysteryRoomArtUpgradeRuns.has(key)) return;
   const run = prepareDebateMysteryIllustratedRoomsV1(userId, sessionId)
-    .finally(() => mysteryRoomArtUpgradeRuns.delete(key));
+    .finally(() => {
+      mysteryRoomArtUpgradeRuns.delete(key);
+      try {
+        const upgrade = debateMysteryRoomArtUpgradeStatusV1(userId, sessionId);
+        refreshDebateMysteryProductionReadinessV1(db, userId, sessionId, {
+          illustratedRoomsGenerated: upgrade.status === "ready",
+        });
+      } catch {
+        // The readiness screen also exposes a manual recount if this races a
+        // simultaneous player action.
+      }
+    });
   mysteryRoomArtUpgradeRuns.set(key, run);
   void run.catch((error) => {
     console.warn("[debate-mystery-v2] Illustrated mansion upgrade stopped", {
@@ -11455,6 +11524,15 @@ function queueDebateMysteryV2RoomAssetBackground(
     ) {
       queueDebateMysteryIllustratedRoomsV1(userId, sessionId);
     }
+    try {
+      const upgrade = debateMysteryRoomArtUpgradeStatusV1(userId, sessionId);
+      refreshDebateMysteryProductionReadinessV1(db, userId, sessionId, {
+        illustratedRoomsGenerated: upgrade.status === "ready",
+      });
+    } catch {
+      // The durable assets remain available for the readiness screen's next
+      // explicit refresh.
+    }
   });
   mysteryRoomAssetBackgroundRuns.set(key, { controller, promise });
 }
@@ -11497,8 +11575,8 @@ async function prepareDebateMysteryGeneratedAssets(args: {
           prompt: [
             `Reskin this exact annotated ${template.name.toLowerCase()} composition as an original PRISM murder-mystery room.`,
             "Preserve the exact camera, dimensions, floor line, object silhouettes, and position of every broad physical region so all existing hit polygons remain aligned.",
-            "Create genuine polished high-resolution hand-crafted pixel art: deliberate coherent pixel clusters, crisp stepped edges, tactile materials, moody refraction light, restrained cinematic detail, and the full natural color palette of the scene.",
-            "Do not imitate a realistic painting, photograph, low-resolution enlargement, mosaic grid, pixelation filter, blur, sepia treatment, dithering screen, or screen-door overlay.",
+            "Create a genuine polished high-resolution hand-crafted Mosaic plate: deliberate coherent pixel clusters, crisp stepped edges, tactile materials, moody refraction light, restrained cinematic detail, and the full natural color palette of the scene.",
+            "Do not imitate a painting, photograph, low-resolution enlargement, pixelation filter, blur, sepia treatment, dithering screen, or screen-door overlay.",
             "No people, no evidence clue, no blood, no text, no symbols, no UI, and no changed or added furniture.",
           ].join(" "),
           preferredProvider,
@@ -12015,7 +12093,9 @@ function mapElevenLabsLibraryError(error: ElevenLabsVoiceError): HttpError {
   return new HttpError(status, error.message);
 }
 
-function buildRoutes(): RouteDefinition[] {
+function buildRoutes(
+  vaultMaintenanceGate: AccountVaultMaintenanceGate,
+): RouteDefinition[] {
   return [
     route("GET", "/api/setup/ollama-status", async (ctx) => {
       requireLoopback(ctx);
@@ -12174,6 +12254,14 @@ function buildRoutes(): RouteDefinition[] {
           createdAt,
           createdAt,
         );
+        if (coreContentVaultIsActiveV2(db)) {
+          initializeCoreContentVaultOwnerV2({
+            db,
+            ownerUserId: userId,
+            legacyUserDek: userKey,
+            createdAt,
+          });
+        }
         db.prepare(
           `
           INSERT INTO legal_acceptances (
@@ -14969,15 +15057,18 @@ function buildRoutes(): RouteDefinition[] {
                   c.parent_id, c.archived_at, c.incognito, c.created_at, c.updated_at,
                   (SELECT m.bot_id FROM messages m
                      WHERE m.conversation_id = c.id
+                       AND m.user_id = c.user_id
                        AND m.role = 'assistant'
                      ORDER BY m.created_at DESC LIMIT 1) AS last_bot_id,
                   (SELECT b.color FROM messages m
-                     LEFT JOIN bots b ON b.id = m.bot_id
+                     LEFT JOIN bots b ON b.id = m.bot_id AND b.user_id = m.user_id
                      WHERE m.conversation_id = c.id
+                       AND m.user_id = c.user_id
                        AND m.role = 'assistant'
                      ORDER BY m.created_at DESC LIMIT 1) AS last_bot_color,
                   EXISTS (SELECT 1 FROM messages m
                             WHERE m.conversation_id = c.id
+                              AND m.user_id = c.user_id
                               AND m.role = 'assistant') AS has_assistant_reply
              FROM conversations c
             WHERE c.id = ? AND c.user_id = ?`,
@@ -15026,7 +15117,7 @@ function buildRoutes(): RouteDefinition[] {
           `SELECT m.id, m.role, m.content, m.provider, m.model, m.bot_id, m.tool_payload, m.created_at,
                   b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
            FROM messages m
-           LEFT JOIN bots b ON b.id = m.bot_id
+           LEFT JOIN bots b ON b.id = m.bot_id AND b.user_id = m.user_id
            WHERE m.conversation_id = ? AND m.user_id = ?
            ORDER BY m.created_at ${conversationModeForMessages === "zen" ? "DESC" : "ASC"}
            LIMIT ?`,
@@ -15266,6 +15357,7 @@ function buildRoutes(): RouteDefinition[] {
       const conversationForWallpaper =
         conversationModeOut === "zen"
           ? resetZenWallpaperMetadataForEmptyConversation(
+              userId,
               conversation.id,
               conversation,
               totalMessageCount,
@@ -15505,7 +15597,7 @@ function buildRoutes(): RouteDefinition[] {
       ) {
         json(ctx.res, 200, {
           ok: true,
-          zenWallpaper: zenWallpaperResponseForConversation(conversationId),
+          zenWallpaper: zenWallpaperResponseForConversation(userId, conversationId),
         });
         return;
       }
@@ -15542,7 +15634,7 @@ function buildRoutes(): RouteDefinition[] {
         ).run(conversationId, userId);
         json(ctx.res, 200, {
           ok: true,
-          zenWallpaper: zenWallpaperResponseForConversation(conversationId),
+          zenWallpaper: zenWallpaperResponseForConversation(userId, conversationId),
         });
         return;
       }
@@ -15574,14 +15666,14 @@ function buildRoutes(): RouteDefinition[] {
       if (messageCount === 0) {
         json(ctx.res, 200, {
           ok: true,
-          zenWallpaper: zenWallpaperResponseForConversation(conversationId),
+          zenWallpaper: zenWallpaperResponseForConversation(userId, conversationId),
         });
         return;
       }
       if (!generationRequested) {
         json(ctx.res, 200, {
           ok: true,
-          zenWallpaper: zenWallpaperResponseForConversation(conversationId),
+          zenWallpaper: zenWallpaperResponseForConversation(userId, conversationId),
         });
         return;
       }
@@ -15613,7 +15705,7 @@ function buildRoutes(): RouteDefinition[] {
       if (!needsGeneration) {
         json(ctx.res, 200, {
           ok: true,
-          zenWallpaper: zenWallpaperResponseForConversation(conversationId),
+          zenWallpaper: zenWallpaperResponseForConversation(userId, conversationId),
         });
         return;
       }
@@ -15737,7 +15829,7 @@ function buildRoutes(): RouteDefinition[] {
         ) {
           json(ctx.res, 200, {
             ok: true,
-            zenWallpaper: zenWallpaperResponseForConversation(conversationId),
+            zenWallpaper: zenWallpaperResponseForConversation(userId, conversationId),
           });
           return;
         }
@@ -15812,7 +15904,7 @@ function buildRoutes(): RouteDefinition[] {
           ).run(conversationId, userId);
           json(ctx.res, 200, {
             ok: true,
-            zenWallpaper: zenWallpaperResponseForConversation(conversationId),
+            zenWallpaper: zenWallpaperResponseForConversation(userId, conversationId),
           });
           return;
         }
@@ -15836,7 +15928,7 @@ function buildRoutes(): RouteDefinition[] {
         json(ctx.res, 200, {
           ok: true,
           image: { id: imageId },
-          zenWallpaper: zenWallpaperResponseForConversation(conversationId),
+          zenWallpaper: zenWallpaperResponseForConversation(userId, conversationId),
         });
       };
 
@@ -17094,9 +17186,9 @@ function buildRoutes(): RouteDefinition[] {
       ) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, semantic_facets, powers_json, color, authored_audio_voice_profile, audio_voice_profile_override, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
+            "SELECT name, system_prompt, semantic_facets, powers_json, color, authored_audio_voice_profile, audio_voice_profile_override, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE user_id = ? AND id = ?",
           )
-          .get(effectiveBotId, userId) as
+          .get(userId, effectiveBotId) as
           | {
               name?: string;
               system_prompt?: string;
@@ -17317,9 +17409,9 @@ function buildRoutes(): RouteDefinition[] {
       if (request.activeBotId) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, powers_json, color, authored_audio_voice_profile, audio_voice_profile_override, flirt_enabled FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
+            "SELECT name, system_prompt, powers_json, color, authored_audio_voice_profile, audio_voice_profile_override, flirt_enabled FROM bots WHERE user_id = ? AND id = ?",
           )
-          .get(request.activeBotId, userId) as
+          .get(userId, request.activeBotId) as
           | {
               name?: string;
               system_prompt?: string;
@@ -17330,6 +17422,7 @@ function buildRoutes(): RouteDefinition[] {
               flirt_enabled?: number | null;
             }
           | undefined;
+        if (!bot) throw new HttpError(404, "Bot not found.");
         if (bot) {
           personaName = bot.name?.trim() || personaName;
           personaSystemPrompt = composeBotSystemPrompt(
@@ -17945,9 +18038,9 @@ function buildRoutes(): RouteDefinition[] {
       if (runtimeBotId) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, powers_json, color, authored_audio_voice_profile, audio_voice_profile_override, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
+            "SELECT name, system_prompt, powers_json, color, authored_audio_voice_profile, audio_voice_profile_override, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE user_id = ? AND id = ?",
           )
-          .get(runtimeBotId, userId) as
+          .get(userId, runtimeBotId) as
           | {
               name?: string;
               system_prompt?: string;
@@ -17964,6 +18057,7 @@ function buildRoutes(): RouteDefinition[] {
               repetition_penalty?: number | null;
             }
           | undefined;
+        if (!bot) throw new HttpError(404, "Bot not found.");
         if (bot) {
           runtimeBotPowers = bot.powers_json ?? null;
           runtimeBotMumbleMapPoint = resolveBotPronunciationMapPointV1(
@@ -19914,23 +20008,45 @@ function buildRoutes(): RouteDefinition[] {
       if (!(getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey)) {
         throw new HttpError(409, "Connect OpenAI before retrying synthesized visuals.");
       }
-      const enabledKinds = [
-        ...(session.formatState.config.assetSynthesis.evidence
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const category = body.category === "exterior" ||
+          body.category === "clue_props" ||
+          body.category === "mosaic_rooms"
+        ? body.category
+        : null;
+      const enabledKinds = category === "exterior"
+        ? ["room" as const]
+        : category === "clue_props"
           ? ["evidence" as const]
-          : []),
-        ...(session.formatState.config.assetSynthesis.rooms
-          ? ["room" as const]
-          : []),
-      ];
+          : category === "mosaic_rooms"
+            ? ["room" as const]
+            : [
+                ...(session.formatState.config.assetSynthesis.evidence
+                  ? ["evidence" as const]
+                  : []),
+                ...(session.formatState.config.assetSynthesis.rooms
+                  ? ["room" as const]
+                  : []),
+              ];
       if (enabledKinds.length === 0) {
         throw new HttpError(409, "This case did not request synthesized visuals.");
       }
+      const allowedSubjectIds = category === "exterior"
+        ? new Set([DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1])
+        : category === "clue_props"
+          ? new Set(session.formatState.record
+              .filter((item) => item.reference.kind === "evidence")
+              .map((item) => item.reference.id))
+          : category === "mosaic_rooms"
+            ? new Set(session.formatState.rooms.map((room) => room.id))
+            : undefined;
       const retried = requeueRetryableDebateMysteryAssetFallbacksV1(
         db,
         userId,
         session.id,
         3,
         enabledKinds,
+        allowedSubjectIds,
       );
       for (const item of retried) {
         if (item.kind === "room") {
@@ -19951,13 +20067,42 @@ function buildRoutes(): RouteDefinition[] {
           );
         }
       }
-      if (retried.length > 0) {
+      const exteriorRetry = retried.find((item) =>
+        item.kind === "room" &&
+        item.subjectId === DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1);
+      if (exteriorRetry) {
+        const exterior = await prepareDebateMysteryV2MansionExteriorAsset({
+          userId,
+          sessionId: session.id,
+          houseStyle: session.formatState.config.houseStyle,
+          scaleClass: session.formatState.config.scaleClass,
+          venueProfile: session.formatState.config.mansionSnapshot?.layoutV2?.venueProfile,
+          synthesize: true,
+        });
+        attachDebateMysteryMansionExteriorAssetV2(
+          db,
+          userId,
+          session.id,
+          exterior,
+        );
+      }
+      if (retried.some((item) =>
+        item.subjectId !== DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1)) {
         queueDebateMysteryV2RoomAssetBackground(userId, session.id);
       }
+      const refreshed = refreshDebateMysteryProductionReadinessV1(
+        db,
+        userId,
+        session.id,
+        {
+          illustratedRoomsGenerated:
+            debateMysteryRoomArtUpgradeStatusV1(userId, session.id).status === "ready",
+        },
+      );
       json(ctx.res, 202, {
         ok: true,
         requeued: retried.length,
-        session: debateSessionForPlayer(getDebateSession(db, userId, session.id)),
+        session: debateSessionForPlayer(refreshed),
       });
     }),
     route("GET", "/api/debates/:id/mystery-assets/:kind/:subjectId/file", async (ctx) => {
@@ -19976,8 +20121,9 @@ function buildRoutes(): RouteDefinition[] {
         kind,
         ctx.params.subjectId,
       );
-      // Keep the authored Pixel Art source gridless for Realistic upgrades;
-      // Mosaic adds only the approved presentation grid at delivery.
+      // The stored Mosaic base stays gridless so its optional HD derivative
+      // can preserve the same composition without inheriting display lines.
+      // Delivery adds the approved Mosaic presentation grid only at the edge.
       const mosaic = kind === "room" && ctx.query.get("style") === "mosaic"
         ? await applyDebateMysteryMosaicPresentationV1(file.bytes, {
             format: file.mimeType === "image/webp" ? "webp" : "png",
@@ -20013,7 +20159,7 @@ function buildRoutes(): RouteDefinition[] {
         return;
       }
       if (before.status === "unavailable") {
-        throw new HttpError(409, before.reason ?? "Realistic room upgrades are unavailable.");
+        throw new HttpError(409, before.reason ?? "Upgraded room derivatives are unavailable.");
       }
       queueDebateMysteryIllustratedRoomsV1(userId, ctx.params.id);
       ctx.res.setHeader("cache-control", "private, no-store");
@@ -20150,6 +20296,22 @@ function buildRoutes(): RouteDefinition[] {
         mansions: listDebateMysteryMansionBundlesV2(db, userId),
       });
     }),
+    route("POST", "/api/debates/mystery-production/capabilities", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const requestedMode = body.responseMode === "local" ? "local" : "online";
+      const responseMode = requestedMode === "online" && !userBlocksOnlineCapabilities(user)
+        ? "online"
+        : "local";
+      json(ctx.res, 200, {
+        ok: true,
+        ...resolveDebateMysteryProductionCapabilitiesV1({
+          responseMode,
+          localVoiceAvailable: true,
+        }),
+      });
+    }),
     route("POST", "/api/debates/mystery-mansions/propose", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
@@ -20167,6 +20329,14 @@ function buildRoutes(): RouteDefinition[] {
         suspects: typeof rawLength.suspects === "number" ? rawLength.suspects : 6,
         tiers: typeof rawLength.tiers === "number" ? rawLength.tiers : undefined,
       };
+      const intent = deriveMysteryVenueIntentV1(description);
+      const architecturalSkeleton = createMysteryVenueProposalV1({
+        id: randomUUID(),
+        description,
+        nonce: typeof body.nonce === "string" ? body.nonce.slice(0, 200) : "0",
+        length,
+        intent,
+      });
       let creativeDraft = null;
       try {
         const user = getUserRow(userId);
@@ -20198,17 +20368,31 @@ function buildRoutes(): RouteDefinition[] {
               "Return JSON only. Do not provide coordinates, case facts, evidence, victims, culprits, or suspects.",
               "Use exactly one topology: estate, spine, radial, pods, or linear.",
               "Use exactly one kind: estate, vessel, habitat, facility, transport, or other.",
+              "The server-provided intent, physical scale, topology, tier labels, room template IDs, room roles, and room order are immutable.",
+              "You may rename and dress the supplied room slots, but must not replace the requested archetype with a related smaller or older venue.",
               "Give the setting its own concrete geography and vocabulary; never force a non-estate into mansion, foyer, umbrella, or upstairs language.",
               "Rooms must be ordinary believable spaces in that setting. Include a semantic entry first and at least five rooms total.",
               "Each room needs: templateId, name, one emoji, role (entry, circulation, social, private, operations, service, technical, observation, or other), and 2-4 concrete fixture anchors.",
-              "Also return title, kind, kindLabel, placeNoun, topology, tierNoun, exteriorMode (grounds, docked, contained, in-transit, or other), environmentSummary, atmosphere, connectorLabel, and rooms.",
+              "Also return title, archetype, era, physicalScaleClass, kind, kindLabel, placeNoun, topology, tierNoun, exteriorMode (grounds, docked, contained, in-transit, or other), environmentSummary, atmosphere, connectorLabel, and rooms.",
             ].join("\n"),
           },
           {
             role: "user",
             content: JSON.stringify({
               setting: description || "Surprise me",
+              frozenIntent: intent,
               investigationLength: length,
+              architecturalSkeleton: {
+                topology: architecturalSkeleton.profile.topology,
+                tierLabels: architecturalSkeleton.profile.tierLabels,
+                roomSlots: architecturalSkeleton.layout.entities
+                  .filter((entity) => entity.kind === "room")
+                  .map((room) => ({
+                    templateId: room.templateId,
+                    role: room.venueContract?.role,
+                    spatial: room.venueContract?.spatial,
+                  })),
+              },
               nonce: typeof body.nonce === "string" ? body.nonce.slice(0, 200) : "0",
             }),
           },
@@ -20221,7 +20405,7 @@ function buildRoutes(): RouteDefinition[] {
           jsonMode: true,
           usagePurpose: "chat_reply",
           allowFinalLocalFallback: false,
-          signal: AbortSignal.timeout(12_000),
+          signal: AbortSignal.timeout(requestedResponseMode === "online" ? 60_000 : 12_000),
           generationWork: {
             workflow: "whodunnit_venue_proposal",
             stage: "propose",
@@ -20239,6 +20423,7 @@ function buildRoutes(): RouteDefinition[] {
         nonce: typeof body.nonce === "string" ? body.nonce.slice(0, 200) : "0",
         length,
         creativeDraft,
+        intent,
       });
       json(ctx.res, 200, { ok: true, proposal });
     }),
@@ -20250,12 +20435,25 @@ function buildRoutes(): RouteDefinition[] {
         if (typeof body.idempotencyKey !== "string" || body.idempotencyKey !== proposal.id) {
           throw new HttpError(400, "Mystery Venue acceptance needs its proposal idempotency key.");
         }
+        const revalidatedProposal = createMysteryVenueProposalV1({
+          id: proposal.id,
+          description: proposal.description,
+          length: proposal.length,
+          nonce: proposal.nonce,
+          creativeDraft: proposal.creativeDraft,
+        });
+        if (revalidatedProposal.match.status === "rejected") {
+          throw new HttpError(409, "This venue no longer matches its frozen brief. Retry or edit the venue before accepting it.");
+        }
+        if (revalidatedProposal.match.status === "confirmation_required" && body.acknowledgeFallback !== true) {
+          throw new HttpError(409, "Confirm the disclosed generic fallback before accepting this venue.");
+        }
         json(ctx.res, 201, {
           ok: true,
           mansion: createDebateMysteryVenueBundleV1(
             db,
             userId,
-            proposal,
+            revalidatedProposal,
           ),
         });
         return;
@@ -21183,6 +21381,33 @@ function buildRoutes(): RouteDefinition[] {
         db,
         userId,
         ctx.params.id,
+      );
+      if (
+        session.formatState.format === "whodunnit" &&
+        session.formatState.version === 2 &&
+        session.formatState.playPhase === "case_forge"
+      ) {
+        queueDebateMysteryV2CompilationInBackground(userId, session.id);
+      }
+      json(ctx.res, 200, { ok: true, session: debateSessionForPlayer(session) });
+    }),
+    route("POST", "/api/debates/:id/mystery-production/continue-with-fallbacks", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const session = continueDebateMysteryProductionWithFallbacksV1(
+        db,
+        userId,
+        ctx.params.id,
+      );
+      json(ctx.res, 200, { ok: true, session: debateSessionForPlayer(session) });
+    }),
+    route("POST", "/api/debates/:id/mystery-production/refresh", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const upgrade = debateMysteryRoomArtUpgradeStatusV1(userId, ctx.params.id);
+      const session = refreshDebateMysteryProductionReadinessV1(
+        db,
+        userId,
+        ctx.params.id,
+        { illustratedRoomsGenerated: upgrade.status === "ready" },
       );
       json(ctx.res, 200, { ok: true, session: debateSessionForPlayer(session) });
     }),
@@ -31573,9 +31798,9 @@ function buildRoutes(): RouteDefinition[] {
         if (segment.botId) {
           const bot = db
             .prepare(
-              "SELECT powers_json FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
+              "SELECT powers_json FROM bots WHERE user_id = ? AND id = ?",
             )
-            .get(segment.botId, userId) as
+            .get(userId, segment.botId) as
             { powers_json?: string | null } | undefined;
           sourceBotMuted = botPowerIsMutedV1(bot?.powers_json);
         }
@@ -31646,7 +31871,9 @@ function buildRoutes(): RouteDefinition[] {
             `SELECT message.content, message.provider, message.role, message.bot_id,
                     message.tool_payload, bot.powers_json
                FROM messages AS message
-               LEFT JOIN bots AS bot ON bot.id = message.bot_id
+               LEFT JOIN bots AS bot
+                 ON bot.id = message.bot_id
+                AND bot.user_id = message.user_id
               WHERE message.id = ? AND message.user_id = ?`,
           )
           .get(ordinaryMessageId, userId) as
@@ -31690,9 +31917,9 @@ function buildRoutes(): RouteDefinition[] {
         ) {
           const listenerBot = db
             .prepare(
-              "SELECT powers_json FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
+              "SELECT powers_json FROM bots WHERE user_id = ? AND id = ?",
             )
-            .get(requestedSpeakerBotId, userId) as
+            .get(userId, requestedSpeakerBotId) as
             { powers_json?: string | null } | undefined;
           sourceBotMuted = botPowerIsMutedV1(listenerBot?.powers_json);
           const storedPayload = parseStoredAssistantToolPayload(
@@ -31770,12 +31997,15 @@ function buildRoutes(): RouteDefinition[] {
              JOIN botcast_episodes AS episode
                ON episode.id = message.episode_id
               AND episode.user_id = message.user_id
-             LEFT JOIN bots AS bot ON bot.id = message.bot_id
+             LEFT JOIN bots AS bot
+               ON bot.id = message.bot_id
+              AND bot.user_id = message.user_id
              LEFT JOIN bots AS listener_bot
                ON listener_bot.id = CASE message.speaker_role
                  WHEN 'host' THEN episode.guest_bot_id
                  ELSE episode.host_bot_id
                END
+              AND listener_bot.user_id = message.user_id
             WHERE message.id = ?
               AND message.user_id = ?`,
           )
@@ -31830,9 +32060,9 @@ function buildRoutes(): RouteDefinition[] {
           }
           const speakerPowers = db
             .prepare(
-              "SELECT powers_json FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
+              "SELECT powers_json FROM bots WHERE user_id = ? AND id = ?",
             )
-            .get(provisional.speakerBotId, userId) as
+            .get(userId, provisional.speakerBotId) as
             { powers_json: string | null } | undefined;
           const listenerBotId =
             speakerRole === "host"
@@ -31849,9 +32079,9 @@ function buildRoutes(): RouteDefinition[] {
           }
           const listenerPowers = db
             .prepare(
-              "SELECT powers_json, system_prompt FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
+              "SELECT powers_json, system_prompt FROM bots WHERE user_id = ? AND id = ?",
             )
-            .get(listenerBotId, userId) as
+            .get(userId, listenerBotId) as
             { powers_json: string | null; system_prompt: string | null } | undefined;
           signalMessage = {
             content: provisional.text,
@@ -32135,10 +32365,10 @@ function buildRoutes(): RouteDefinition[] {
         .prepare(
           `SELECT id, name, name_pronunciation, self_referral
            FROM bots
-          WHERE user_id = ? OR visibility = 'public'
-          ORDER BY CASE WHEN user_id = ? THEN 0 ELSE 1 END, LENGTH(name) DESC`,
+          WHERE user_id = ?
+          ORDER BY LENGTH(name) DESC`,
         )
-        .all(userId, userId) as Array<{
+        .all(userId) as Array<{
         id: string;
         name: string;
         name_pronunciation: string | null;
@@ -36004,7 +36234,7 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         image: { id: member.imageId },
-        zenWallpaper: zenWallpaperResponseForConversation(conversation.id),
+        zenWallpaper: zenWallpaperResponseForConversation(userId, conversation.id),
       });
     }),
     route("POST", "/api/coffee/groups/:id/atmosphere/assets/:assetId/reuse", async (ctx) => {
@@ -36721,10 +36951,10 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const imageId = ctx.params.id;
       const row = db
-        .prepare("SELECT user_id, local_rel_path FROM images WHERE id = ?")
-        .get(imageId) as
-        { user_id: string; local_rel_path: string | null } | undefined;
-      if (!row || row.user_id !== userId) {
+        .prepare("SELECT local_rel_path FROM images WHERE user_id = ? AND id = ?")
+        .get(userId, imageId) as
+        { local_rel_path: string | null } | undefined;
+      if (!row) {
         throw new HttpError(404, "Image not found.");
       }
       const rel = row.local_rel_path?.trim();
@@ -36746,10 +36976,10 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const imageId = ctx.params.id;
       const row = db
-        .prepare("SELECT user_id, local_rel_path, purpose FROM images WHERE id = ?")
-        .get(imageId) as
-        { user_id: string; local_rel_path: string | null; purpose: string } | undefined;
-      if (!row || row.user_id !== userId) {
+        .prepare("SELECT local_rel_path, purpose FROM images WHERE user_id = ? AND id = ?")
+        .get(userId, imageId) as
+        { local_rel_path: string | null; purpose: string } | undefined;
+      if (!row) {
         throw new HttpError(404, "Image not found.");
       }
       const rel = row.local_rel_path?.trim();
@@ -36969,7 +37199,7 @@ function buildRoutes(): RouteDefinition[] {
         .get(botId, userId) as Record<string, unknown>;
       json(ctx.res, 200, {
         ok: true,
-        bot: botRowForResponse(updatedBot),
+        bot: botRowForResponse(userId, updatedBot),
         image: {
           id: imageId,
           url: displayUrl,
@@ -37804,12 +38034,13 @@ function buildRoutes(): RouteDefinition[] {
         ) {
           throw new HttpError(400, "Clone source bot is required.");
         }
-        const source = db
-          .prepare(
-            "SELECT id, clone_family_id FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
-          )
-          .get(body.cloneSourceBotId.trim(), userId) as
-          { id: string; clone_family_id: string | null } | undefined;
+        const source = createOwnerFirstRepository<{
+          id: string;
+          clone_family_id: string | null;
+        }>(db, {
+          table: "bots",
+          columns: ["id", "clone_family_id"],
+        }).findById(userId, body.cloneSourceBotId.trim());
         if (!source) {
           throw new HttpError(404, "Clone source bot not found.");
         }
@@ -38171,20 +38402,18 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const rows = db
         .prepare(
-          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_eye_spacing, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_count, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at, CASE WHEN user_id = ? THEN 1 ELSE 0 END AS owned FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC",
+          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_eye_spacing, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_count, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at, 1 AS owned FROM bots WHERE user_id = ? ORDER BY updated_at DESC",
         )
-        .all(userId, userId) as Record<string, unknown>[];
-      json(ctx.res, 200, { ok: true, bots: botRowsForResponse(rows) });
+        .all(userId) as Record<string, unknown>[];
+      json(ctx.res, 200, { ok: true, bots: botRowsForResponse(userId, rows) });
     }),
     route("GET", "/api/bots/:id", async (ctx) => {
       const userId = requireAuth(ctx);
-      const row = db
-        .prepare(
-          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_eye_spacing, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_count, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
-        )
-        .get(ctx.params.id, userId) as Record<string, unknown> | undefined;
+      const row = createOwnerFirstRepository(db, {
+        table: "bots",
+      }).findById(userId, ctx.params.id);
       if (!row) throw new HttpError(404, "Bot not found.");
-      json(ctx.res, 200, { ok: true, bot: botRowForResponse(row) });
+      json(ctx.res, 200, { ok: true, bot: botRowForResponse(userId, row) });
     }),
     route("POST", "/api/bots/:id/mood/neutralize", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -38348,7 +38577,7 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         updated: result.updated,
-        bots: botRowsForResponse(updatedBots),
+        bots: botRowsForResponse(userId, updatedBots),
         actionRun: run,
       });
     }),
@@ -38404,7 +38633,7 @@ function buildRoutes(): RouteDefinition[] {
           .get(botId, userId) as Record<string, unknown>;
         json(ctx.res, 200, {
           ok: true,
-          bot: botRowForResponse(updatedBot),
+          bot: botRowForResponse(userId, updatedBot),
           actionRun: run,
         });
         return;
@@ -38987,7 +39216,7 @@ function buildRoutes(): RouteDefinition[] {
           "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_eye_spacing, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_count, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
         )
         .get(botId, userId) as Record<string, unknown>;
-      json(ctx.res, 200, { ok: true, bot: botRowForResponse(updatedBot) });
+      json(ctx.res, 200, { ok: true, bot: botRowForResponse(userId, updatedBot) });
     }),
     route("DELETE", "/api/bots/selected", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -39284,7 +39513,7 @@ function buildRoutes(): RouteDefinition[] {
           .prepare(
             `SELECT id, name
              FROM bots
-            WHERE (user_id = ? OR visibility = 'public') AND id IN (${placeholders})`,
+            WHERE user_id = ? AND id IN (${placeholders})`,
           )
           .all(userId, ...coffeeBotIds) as Array<{
           id: string;
@@ -39320,7 +39549,7 @@ function buildRoutes(): RouteDefinition[] {
                 `SELECT m.id, m.role, m.content, m.bot_id, m.created_at,
                       b.name AS bot_name, b.color AS bot_color
                  FROM messages m
-                 LEFT JOIN bots b ON b.id = m.bot_id
+                 LEFT JOIN bots b ON b.id = m.bot_id AND b.user_id = m.user_id
                 WHERE m.conversation_id = ? AND m.user_id = ?
                 ORDER BY m.created_at ASC`,
               )
@@ -39588,9 +39817,9 @@ function buildRoutes(): RouteDefinition[] {
       if (forkMessageId) {
         const cutoff = db
           .prepare(
-            "SELECT created_at FROM messages WHERE id = ? AND conversation_id = ?",
+            "SELECT created_at FROM messages WHERE user_id = ? AND id = ? AND conversation_id = ?",
           )
-          .get(forkMessageId, parentId) as { created_at: string } | undefined;
+          .get(userId, forkMessageId, parentId) as { created_at: string } | undefined;
         if (cutoff) {
           messages = db
             .prepare(messageQuery + " ")
@@ -39693,13 +39922,30 @@ function buildRoutes(): RouteDefinition[] {
       }
       json(ctx.res, 201, { ok: true, conversationId: forkId });
     }),
-    route("GET", "/api/health", async (ctx) => {
-      json(
-        ctx.res,
-        200,
-        await buildHealthResponse(db, config, process.uptime()),
-      );
-    }),
+    route(
+      "GET",
+      "/api/vault-maintenance/status",
+      async (ctx) => {
+        json(
+          ctx.res,
+          200,
+          buildAccountVaultMaintenanceStatusPayload(vaultMaintenanceGate),
+        );
+      },
+      "maintenance-safe",
+    ),
+    route(
+      "GET",
+      "/api/health",
+      async (ctx) => {
+        json(
+          ctx.res,
+          200,
+          await buildHealthResponse(db, config, process.uptime()),
+        );
+      },
+      "maintenance-safe",
+    ),
     route("GET", "/", async (ctx) => {
       html(
         ctx.res,
@@ -39714,7 +39960,8 @@ function buildRoutes(): RouteDefinition[] {
   ];
 }
 
-const routes = buildRoutes();
+export const accountVaultMaintenanceGate = new AccountVaultMaintenanceGate();
+const routes = buildRoutes(accountVaultMaintenanceGate);
 
 export interface PrismRequestHandlerOptions {
   /** Isolated database used by integration tests. */
@@ -39729,12 +39976,15 @@ export interface PrismRequestHandlerOptions {
   auxiliaryProviderFactory?: typeof getAuxiliaryProvider;
   /** Optional deterministic system-speech boundary for cross-platform integration tests. */
   builtinVoiceWaveGenerator?: typeof generateBuiltinEnglishWave;
+  /** Dormant by default; the future Vault migrator flips this fail-closed gate. */
+  vaultMaintenanceGate?: AccountVaultMaintenanceGate;
 }
 
 async function dispatchRequest(
   req: IncomingMessage,
   res: ServerResponse<IncomingMessage>,
   routeTable: RouteDefinition[],
+  vaultMaintenanceGate: AccountVaultMaintenanceGate,
 ): Promise<void> {
   try {
     setCorsHeaders(res, req.headers.origin as string | undefined);
@@ -39750,6 +40000,23 @@ async function dispatchRequest(
     );
     const pathname = url.pathname;
     const method = req.method ?? "GET";
+    const maintenanceRoute = routeTable.find(
+      (candidate) =>
+        candidate.method === method && candidate.pattern.test(pathname),
+    );
+    if (
+      !vaultMaintenanceGate.allows(
+        maintenanceRoute?.maintenanceAccess ?? "account-content",
+      )
+    ) {
+      res.setHeader("retry-after", "5");
+      json(
+        res,
+        503,
+        buildAccountVaultMaintenanceUnavailablePayload(vaultMaintenanceGate),
+      );
+      return;
+    }
     const slateArchiveUpload =
       method === "POST" &&
       (pathname === "/api/slate/archives/preview" ||
@@ -39858,11 +40125,20 @@ async function dispatchRequest(
       return;
     }
     const message = error instanceof Error ? error.message : "Unexpected error";
-    const status = error instanceof HttpError ? error.statusCode : 400;
+    const status =
+      error instanceof HttpError
+        ? error.statusCode
+        : error instanceof OwnerScopedNotFoundError
+          ? 404
+          : 400;
     json(res, status, {
       ok: false,
       error: message,
-      ...(error instanceof HttpError && error.code ? { code: error.code } : {}),
+      ...(error instanceof HttpError && error.code
+        ? { code: error.code }
+        : error instanceof OwnerScopedNotFoundError
+          ? { code: error.code }
+          : {}),
     });
   }
 }
@@ -39880,6 +40156,11 @@ export function createPrismRequestHandler(
   res: ServerResponse<IncomingMessage>,
 ) => Promise<void> {
   interruptUnfinishedSlateWritingOperations(options.db ?? db);
+  const requestVaultMaintenanceGate =
+    options.vaultMaintenanceGate ?? accountVaultMaintenanceGate;
+  const requestRoutes = options.vaultMaintenanceGate
+    ? buildRoutes(requestVaultMaintenanceGate)
+    : routes;
   return async (req, res) => {
     const previousDb = db;
     const previousConfig = config;
@@ -39905,7 +40186,12 @@ export function createPrismRequestHandler(
       builtinVoiceWaveGeneratorOverride = options.builtinVoiceWaveGenerator;
     }
     try {
-      await dispatchRequest(req, res, routes);
+      await dispatchRequest(
+        req,
+        res,
+        requestRoutes,
+        requestVaultMaintenanceGate,
+      );
     } finally {
       db = previousDb;
       config = previousConfig;

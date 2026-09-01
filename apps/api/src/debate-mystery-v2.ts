@@ -21,6 +21,7 @@ import {
   DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
   DEBATE_MYSTERY_V2_SCHEMA_VERSION,
   compileDeterministicDebateMystery,
+  createDebateMysteryProductionReadinessV1,
   bindMysteryIncidentPlanV1,
   composeMysteryIncidentPlanV1,
   deterministicMysteryCaseTitleV1,
@@ -55,6 +56,7 @@ import {
   parseStoredBotAvatarDetailsV1,
   parseStoredBotAudioVoiceProfileV1,
   parseStoredBotPrompt,
+  projectDebateMysteryVenueSpatialV1,
   REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS,
   reasoningGenerationBudgetMs,
   resolveDebateMysteryLineDeliveryV2,
@@ -81,6 +83,8 @@ import {
   type DebateMysteryDialogueGraphV2,
   type DebateMysteryDialogueNodeV2,
   type DebateMysteryPerformanceDirectionV2,
+  type DebateMysteryProductionCategoryReadinessV1,
+  type DebateMysteryProductionReadinessV1,
   type DebateMysteryPlayAgainRequestV2,
   type DebateMysteryPresentationGateV2,
   type DebateMysteryPresentationUnlockTargetV2,
@@ -334,6 +338,10 @@ interface MysteryV2JobRow {
   lease_owner: string | null;
   leased_until: string | null;
   cancellation_requested: number;
+  attempt_started_at: string | null;
+  last_attempt_started_at: string | null;
+  last_attempt_elapsed_ms: number;
+  cumulative_elapsed_ms: number;
   created_at: string;
   updated_at: string;
 }
@@ -763,6 +771,12 @@ interface MysteryV2AuthoringCheckpoint {
   foundationCore: AuthoredMysteryFoundationCoreV2 | null;
   examinationsById: Record<string, string>;
   suspectsBySeatId: Record<string, AuthoredSuspectV2>;
+  /** Additive resumable form. Older checkpoints retain the complete array
+   * below and are normalized into this map on read. */
+  prosecutionChoicesByWitnessSeatId: Record<
+    string,
+    AuthoredProsecutionChoiceV2[]
+  >;
   prosecutionChoices: AuthoredProsecutionChoiceV2[] | null;
   contextCapsule: {
     version: 1;
@@ -897,6 +911,22 @@ function normalizeMysteryV2AuthoringCheckpoint(
   value: unknown,
 ): MysteryV2AuthoringCheckpoint {
   if (isMysteryV2AuthoringCheckpoint(value)) {
+    const legacyChoices = value.prosecutionChoices ?? null;
+    const choicesByWitness = value.kind === "authoring-v2" &&
+        "prosecutionChoicesByWitnessSeatId" in value &&
+        value.prosecutionChoicesByWitnessSeatId &&
+        typeof value.prosecutionChoicesByWitnessSeatId === "object"
+      ? value.prosecutionChoicesByWitnessSeatId as Record<
+          string,
+          AuthoredProsecutionChoiceV2[]
+        >
+      : Object.fromEntries(
+          [...new Set((legacyChoices ?? []).map((choice) => choice.witnessSeatId))]
+            .map((seatId) => [
+              seatId,
+              (legacyChoices ?? []).filter((choice) => choice.witnessSeatId === seatId),
+            ]),
+        );
     return {
       kind: "authoring-v2",
       evidencePropBindingsById:
@@ -905,7 +935,8 @@ function normalizeMysteryV2AuthoringCheckpoint(
       foundationCore: value.foundationCore ?? null,
       examinationsById: value.examinationsById ?? {},
       suspectsBySeatId: value.suspectsBySeatId ?? {},
-      prosecutionChoices: value.prosecutionChoices ?? null,
+      prosecutionChoicesByWitnessSeatId: choicesByWitness,
+      prosecutionChoices: legacyChoices,
       contextCapsule:
         value.kind === "authoring-v2" ? value.contextCapsule ?? null : null,
       connectiveAdditions:
@@ -923,6 +954,7 @@ function normalizeMysteryV2AuthoringCheckpoint(
     foundationCore: null,
     examinationsById: {},
     suspectsBySeatId: {},
+    prosecutionChoicesByWitnessSeatId: {},
     prosecutionChoices: null,
     contextCapsule: null,
     connectiveAdditions: {},
@@ -1412,6 +1444,22 @@ function compilationStatus(
   db: DatabaseSync,
   row: MysteryV2JobRow,
 ): DebateMysteryCompilationStatusV2 {
+  const failureText = `${row.public_message} ${row.private_error ?? ""}`.toLocaleLowerCase();
+  const publicFailureCode: DebateMysteryCompilationStatusV2["publicFailureCode"] =
+    row.status !== "needs_attention" ? null
+      : row.public_message === "Local voice preparation needs attention"
+        ? "CASE_FORGE_LOCAL_AUDIO_FAILED"
+        : /\b(?:timeout|timed out|time limit|deadline)\b/u.test(failureText)
+          ? "CASE_FORGE_TIMEOUT"
+          : /\b(?:empty output|empty response|returned nothing)\b/u.test(failureText)
+            ? "CASE_FORGE_EMPTY_OUTPUT"
+            : /\b(?:invalid json|json parse|invalid structure|malformed)\b/u.test(failureText)
+              ? "CASE_FORGE_INVALID_STRUCTURE"
+              : /\b(?:validation|validator|contradiction check)\b/u.test(failureText)
+                ? "CASE_FORGE_VALIDATION_FAILED"
+                : /\b(?:image|asset|mosaic|realistic|illustrated room)\b/u.test(failureText)
+                  ? "CASE_FORGE_ASSET_GENERATION_FAILED"
+                  : "CASE_FORGE_COMPILATION_STOPPED";
   const publicFailureStage = row.status !== "needs_attention"
     ? null
     : row.completed_passes <= 0
@@ -1430,6 +1478,15 @@ function compilationStatus(
   const elapsedEnd = terminal ? Date.parse(row.updated_at) : Date.now();
   const elapsedMs = Math.max(0, elapsedEnd - Date.parse(row.created_at));
   const normalizedElapsedMs = Number.isFinite(elapsedMs) ? Math.round(elapsedMs) : 0;
+  const attemptStartedAt = row.attempt_started_at ?? row.last_attempt_started_at ?? row.updated_at;
+  const activeAttemptElapsed = row.attempt_started_at
+    ? Math.max(0, elapsedEnd - Date.parse(row.attempt_started_at))
+    : row.last_attempt_elapsed_ms;
+  const attemptElapsedMs = Number.isFinite(activeAttemptElapsed)
+    ? Math.round(activeAttemptElapsed)
+    : 0;
+  const cumulativeElapsedMs = row.cumulative_elapsed_ms +
+    (row.attempt_started_at ? attemptElapsedMs : 0);
   const timing = completedPassTiming(db, row, normalizedElapsedMs);
   return {
     version: 2,
@@ -1442,16 +1499,15 @@ function compilationStatus(
     requiredAudioCount: row.required_audio_count,
     substeps: compilationSubsteps(db, row),
     retryable: row.status === "needs_attention",
-    publicFailureCode: row.status !== "needs_attention"
-      ? null
-      : row.public_message === "Local voice preparation needs attention"
-        ? "CASE_FORGE_LOCAL_AUDIO_FAILED"
-        : "CASE_FORGE_COMPILATION_STOPPED",
+    publicFailureCode,
     publicFailureStage,
     spoilerSafeMessage: normalizeDebateMysteryV2ForgeProgressMessage(
       row.public_message,
     ),
     startedAt: row.created_at,
+    attemptStartedAt,
+    attemptElapsedMs,
+    cumulativeElapsedMs,
     elapsedMs: normalizedElapsedMs,
     approximateRemainingMs: timing.approximateRemainingMs,
     etaBasisPasses: timing.basisPasses,
@@ -1465,7 +1521,9 @@ function jobRow(db: DatabaseSync, userId: string, sessionId: string): MysteryV2J
             completed_passes, total_passes, prepared_audio_count,
             required_audio_count, public_message, private_error, input_json,
             checkpoint_json, lease_owner, leased_until,
-            cancellation_requested, created_at, updated_at
+            cancellation_requested, attempt_started_at,
+            last_attempt_started_at, last_attempt_elapsed_ms,
+            cumulative_elapsed_ms, created_at, updated_at
        FROM debate_mystery_v2_jobs
       WHERE user_id = ? AND session_id = ?`,
   ).get(userId, sessionId) as MysteryV2JobRow | undefined;
@@ -1645,16 +1703,25 @@ function updateJob(
   const current = jobRow(db, userId, sessionId);
   const stage = values.stage ?? current.stage;
   const now = new Date().toISOString();
+  const nextStatus = values.status ?? current.status;
+  const terminalAttempt = nextStatus === "complete" || nextStatus === "cancelled" || nextStatus === "needs_attention";
+  const attemptElapsed = terminalAttempt && current.attempt_started_at
+    ? Math.max(0, Date.parse(now) - Date.parse(current.attempt_started_at))
+    : 0;
+  const cumulativeElapsedMs = current.cumulative_elapsed_ms +
+    (Number.isFinite(attemptElapsed) ? Math.round(attemptElapsed) : 0);
   db.prepare(
     `UPDATE debate_mystery_v2_jobs
         SET stage = ?, status = ?, completed_passes = ?,
             prepared_audio_count = ?, required_audio_count = ?,
             public_message = ?, private_error = ?, checkpoint_json = ?,
-            lease_owner = ?, leased_until = ?, updated_at = ?
+            lease_owner = ?, leased_until = ?, attempt_started_at = ?,
+            last_attempt_started_at = ?, last_attempt_elapsed_ms = ?,
+            cumulative_elapsed_ms = ?, updated_at = ?
       WHERE user_id = ? AND session_id = ?`,
   ).run(
     stage,
-    values.status ?? current.status,
+    nextStatus,
     values.completedPasses ?? current.completed_passes,
     values.preparedAudioCount ?? current.prepared_audio_count,
     values.requiredAudioCount ?? current.required_audio_count,
@@ -1665,6 +1732,14 @@ function updateJob(
     values.checkpointJson === undefined ? current.checkpoint_json : values.checkpointJson,
     values.clearLease ? null : current.lease_owner,
     values.clearLease ? null : current.leased_until,
+    terminalAttempt ? null : current.attempt_started_at,
+    terminalAttempt
+      ? current.attempt_started_at ?? current.last_attempt_started_at
+      : current.last_attempt_started_at,
+    terminalAttempt && current.attempt_started_at
+      ? Number.isFinite(attemptElapsed) ? Math.round(attemptElapsed) : 0
+      : current.last_attempt_elapsed_ms,
+    cumulativeElapsedMs,
     now,
     userId,
     sessionId,
@@ -1717,6 +1792,15 @@ function authoringCheckpointKeys(
   }
   for (const [seatId, suspect] of Object.entries(draft.suspectsBySeatId)) {
     checkpoints.push({ key: `section:witness:${seatId}`, payload: JSON.stringify(suspect) });
+  }
+  for (const [seatId, choices] of Object.entries(
+    draft.prosecutionChoicesByWitnessSeatId,
+  )) {
+    if (!choices.length) continue;
+    checkpoints.push({
+      key: `section:prosecution-choices:${seatId}`,
+      payload: JSON.stringify(choices),
+    });
   }
   if (draft.prosecutionChoices) {
     checkpoints.push({
@@ -1845,6 +1929,152 @@ function withPreparedMansionExteriorAsset(
     ...checkpoint,
     publicState: { ...checkpoint.publicState, mansionExterior: asset },
   };
+}
+
+function productionCategoryFromSealedAssetsV1(args: {
+  requested: boolean;
+  requestedCount: number;
+  assets: Array<DebateMysterySealedAssetRefV1 | null | undefined>;
+  generatedReason: string;
+  fallbackReason: string;
+}): DebateMysteryProductionCategoryReadinessV1 {
+  if (!args.requested) {
+    return {
+      requestedCount: 0,
+      generatedCount: 0,
+      reusedCount: 0,
+      fallbackCount: 0,
+      unavailableCount: 0,
+      sourceCode: "not_requested",
+      publicReason: "Not requested for this case.",
+    };
+  }
+  let generatedCount = 0;
+  let reusedCount = 0;
+  let fallbackCount = 0;
+  let unavailableCount = 0;
+  for (let index = 0; index < args.requestedCount; index += 1) {
+    const asset = args.assets[index];
+    if (!asset || asset.status === "pending") {
+      unavailableCount += 1;
+    } else if (asset.status === "fallback" || asset.source === "bundled") {
+      fallbackCount += 1;
+    } else if (asset.source === "synthesized") {
+      generatedCount += 1;
+    } else {
+      reusedCount += 1;
+    }
+  }
+  const sourceCode = unavailableCount > 0 ? "generation_failed" as const
+    : fallbackCount > 0 ? "bundled_compatible" as const
+      : reusedCount > 0 ? "reused_venue_asset" as const
+        : "generated" as const;
+  return {
+    requestedCount: args.requestedCount,
+    generatedCount,
+    reusedCount,
+    fallbackCount,
+    unavailableCount,
+    sourceCode,
+    publicReason: generatedCount === args.requestedCount
+      ? args.generatedReason
+      : args.fallbackReason,
+  };
+}
+
+function productionReadinessFromCheckpointV1(args: {
+  checkpoint: MysteryV2Checkpoint;
+  illustratedRoomsGenerated: boolean;
+  voicesEnabled: boolean;
+  preparedVoiceCount: number;
+}): DebateMysteryProductionReadinessV1 {
+  const config = args.checkpoint.privateCase.config;
+  const evidenceItems = args.checkpoint.privateCase.recordItems.filter(
+    (item) => item.reference.kind === "evidence",
+  );
+  const roomAssets = args.checkpoint.publicState.rooms.map((room) => room.sealedAsset);
+  const musicRequested = config.assetSynthesis.music === true;
+  const musicReused = Boolean(config.mansionSnapshot?.presentation.investigationThemeLoop);
+  const ambienceRequested = config.assetSynthesis.ambience === true;
+  const worldBed = config.houseStyle.ambience?.assets.find((asset) => asset.semanticRole === "world_bed");
+  const ambienceReused = worldBed?.scope === "mansion";
+  const voicesRequested = config.assetSynthesis.voices === true;
+  const readiness = createDebateMysteryProductionReadinessV1({
+    exterior: productionCategoryFromSealedAssetsV1({
+      requested: config.assetSynthesis.exterior === true,
+      requestedCount: 1,
+      assets: [args.checkpoint.publicState.mansionExterior],
+      generatedReason: "The case exterior was generated for this production.",
+      fallbackReason: "The case is using a compatible venue exterior or abstract cover.",
+    }),
+    clue_props: productionCategoryFromSealedAssetsV1({
+      requested: config.assetSynthesis.evidence === true,
+      requestedCount: evidenceItems.length,
+      assets: evidenceItems.map((item) => item.sealedAsset),
+      generatedReason: "Every requested clue prop was generated for this case.",
+      fallbackReason: "One or more clue props use a compatible reusable or bundled presentation.",
+    }),
+    mosaic_rooms: productionCategoryFromSealedAssetsV1({
+      requested: config.assetSynthesis.rooms === true,
+      requestedCount: roomAssets.length,
+      assets: roomAssets,
+      generatedReason: "Every investigation room has case-scoped Mosaic source art.",
+      fallbackReason: "One or more rooms use compatible reusable or abstract scene art.",
+    }),
+    realistic_rooms: config.assetSynthesis.illustratedRooms
+      ? {
+          requestedCount: roomAssets.length,
+          generatedCount: args.illustratedRoomsGenerated ? roomAssets.length : 0,
+          reusedCount: 0,
+          fallbackCount: 0,
+          unavailableCount: args.illustratedRoomsGenerated ? 0 : roomAssets.length,
+          sourceCode: args.illustratedRoomsGenerated ? "generated" : "generation_failed",
+          publicReason: args.illustratedRoomsGenerated
+            ? "Every requested HD room derivative is ready."
+            : "One or more HD room derivatives could not be prepared; the original Mosaic remains available.",
+        }
+      : undefined,
+    music: musicRequested
+      ? {
+          requestedCount: 1,
+          generatedCount: 0,
+          reusedCount: musicReused ? 1 : 0,
+          fallbackCount: musicReused ? 0 : 1,
+          unavailableCount: 0,
+          sourceCode: musicReused ? "reused_venue_asset" : "bundled_compatible",
+          publicReason: musicReused
+            ? "The case is using the frozen venue music loop."
+            : "The case is using PRISM's compatible investigation music.",
+        }
+      : undefined,
+    ambience: ambienceRequested
+      ? {
+          requestedCount: 1,
+          generatedCount: 0,
+          reusedCount: ambienceReused ? 1 : 0,
+          fallbackCount: ambienceReused ? 0 : 1,
+          unavailableCount: 0,
+          sourceCode: ambienceReused ? "reused_venue_asset" : "bundled_compatible",
+          publicReason: ambienceReused
+            ? "The case is using the frozen venue ambience; the reusable venue record was not changed."
+            : "The case is using a compatible authored acoustic palette.",
+        }
+      : undefined,
+    voices: voicesRequested
+      ? {
+          requestedCount: Math.max(1, args.preparedVoiceCount),
+          generatedCount: args.voicesEnabled ? Math.max(1, args.preparedVoiceCount) : 0,
+          reusedCount: 0,
+          fallbackCount: 0,
+          unavailableCount: args.voicesEnabled ? 0 : Math.max(1, args.preparedVoiceCount),
+          sourceCode: args.voicesEnabled ? "generated" : "provider_unavailable",
+          publicReason: args.voicesEnabled
+            ? "The frozen performance voice pack is ready."
+            : "Performance voices are unavailable; the case can continue text-only.",
+        }
+      : undefined,
+  });
+  return readiness;
 }
 
 /** Publishes the title-card exterior after a retry or background preparation. */
@@ -2157,6 +2387,9 @@ function initialV2State(
       publicFailureStage: null,
       spoilerSafeMessage: V2_SPOILER_SAFE_MESSAGES.writing_case,
       startedAt: now,
+      attemptStartedAt: now,
+      attemptElapsedMs: 0,
+      cumulativeElapsedMs: 0,
       elapsedMs: 0,
       approximateRemainingMs: null,
       etaBasisPasses: 0,
@@ -2169,6 +2402,7 @@ function initialV2State(
     victim: null,
     suspects: [],
     rooms: [],
+    spatialProjection: null,
     crimeSceneRoomId: null,
     openingSweepComplete: omitInvestigation,
     roomIntroductions: {},
@@ -2193,6 +2427,7 @@ function initialV2State(
       contractHash: null,
       checkedAt: null,
     },
+    productionReadiness: null,
     audioReady: false,
     voicesEnabled: true,
     localAudioFailure: null,
@@ -2450,7 +2685,7 @@ export async function createDebateMysterySessionV2(
   const now = new Date().toISOString();
   const jobId = randomUUID();
   if (mansionExteriorImageId && !options.adoptMansionExteriorDraft) {
-    throw new HttpError(500, "Mansion exterior draft adoption is unavailable.");
+    throw new HttpError(500, "Venue exterior draft adoption is unavailable.");
   }
   const mansionExterior = mansionExteriorImageId
     ? await options.adoptMansionExteriorDraft!({ userId, sessionId: session.id, imageId: mansionExteriorImageId })
@@ -2658,6 +2893,7 @@ function applyMysteryIncidentPlanToFoundationV2<
     !/\b(?:murder|murdered|murderer|killing|killed|corpse|body|dead|death|fatal|weapon)\b/iu.test(sceneGroundedPublicOpening)
     ? sceneGroundedPublicOpening
     : null;
+  const venuePlaceNoun = "venue";
   const primaryFoundation = primary.kind === "homicide"
     ? {
         ...args.foundation,
@@ -2671,7 +2907,7 @@ function applyMysteryIncidentPlanToFoundationV2<
           `${affectedName} is the person most directly affected by ${primary.subject}, with private relationships to every member of the frozen ensemble.`,
         publicOpening:
           safePersonaOpening ?? (
-            `A suspected ${incidentNoun} involving ${primary.subject} has drawn every selected suspect into the same mansion. ` +
+            `A suspected ${incidentNoun} involving ${primary.subject} has drawn every selected suspect into the same ${venuePlaceNoun}. ` +
             `The first report points to the ${incidentRoomName}. I need to begin there.`
           ),
         motive:
@@ -3082,7 +3318,7 @@ function deterministicAuthoredMysteryExaminationsV2(args: {
 
 const MYSTERY_UNSTRUCTURED_ACTIONABLE_DISCOVERY_RE = new RegExp(
   [
-    String.raw`\b(?:a|an|the|this)\s+(?:[\p{L}\d-]+\s+){0,3}key\b(?!\s+(?:detail|point|factor|question|word)\b)`,
+    String.raw`\b(?:a|an|the|this)\s+(?:[\p{L}\d-]+\s+){0,3}key\b(?!\s+(?:control|detail|point|factor|question|word)\b)`,
     String.raw`\b(?:keycard|key\s+fob|passcode|password|lockpick|access\s+card|access\s+credential)\b`,
     String.raw`\b(?:a|an|the|this)\s+(?:garage\s+|door\s+)?remote(?:\s+control)?\b`,
     String.raw`\b(?:safe|door|entry|security|alarm|keypad|access)\s+(?:code|combination|pin)\b`,
@@ -4968,10 +5204,18 @@ async function authorMysteryV2(args: {
     for (let index = 0; index < setup.examinationIds.length; index += examinationChunkSize) {
       examinationChunks.push(setup.examinationIds.slice(index, index + examinationChunkSize));
     }
-    for (let index = 0; index < examinationChunks.length && !omitInvestigation; index += 1) {
+    const examinationFoundationCore = foundationCore;
+    if (!examinationFoundationCore) {
+      throw new Error("The resumable case draft is missing its foundation core.");
+    }
+    const authorExaminationChunk = async (
+      index: number,
+      onChunkDraft: typeof args.onDraft,
+    ): Promise<void> => {
+      if (omitInvestigation) return;
       const chunk = examinationChunks[index]!;
       const missingIds = chunk.filter((id) => !compact(examinationsById[id], 1_200));
-      if (!missingIds.length) continue;
+      if (!missingIds.length) return;
       const examinationSectionKey = `examinations:${index + 1}`;
       const examinationTargets = missingIds.map((id) => {
         const outcome = args.scaffold.activeRegions.find(
@@ -4995,7 +5239,7 @@ async function authorMysteryV2(args: {
           ? args.scaffold.inventoryItems.find((candidate) => candidate.id === outcome.inventoryItemId)
           : null;
         const evidence = outcome.evidenceId
-          ? foundationCore.evidence.find((candidate) => candidate.id === outcome.evidenceId)
+          ? examinationFoundationCore.evidence.find((candidate) => candidate.id === outcome.evidenceId)
           : null;
         const mansionAnchors = args.config.mansionSnapshot?.layoutV2?.placementAnchors
           .filter((anchor) => anchor.roomId === outcome.roomId)
@@ -5033,7 +5277,7 @@ async function authorMysteryV2(args: {
           runtime: args.runtime,
           label: `Room examination batch ${index + 1}`,
           maxTokens: 2_500,
-          onAttempt: (attempt) => args.onDraft(
+          onAttempt: (attempt) => onChunkDraft(
             args.draft,
             `Writing the Case · Drafting room details ${index + 1} of ${examinationChunks.length} · attempt ${attempt} of ${DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS}`,
           ),
@@ -5045,7 +5289,7 @@ async function authorMysteryV2(args: {
             ),
           prompt: {
             section: "room_examinations",
-            caseFoundation: foundationCore,
+            caseFoundation: examinationFoundationCore,
             observationWritingBrief,
             setup: {
               roomNames: setup.roomNames,
@@ -5124,7 +5368,7 @@ async function authorMysteryV2(args: {
       authoredChunk.forEach((entry) => {
         examinationsById[entry.id] = entry.text;
       });
-      args.onDraft(
+      onChunkDraft(
         args.draft,
         deterministicExaminationFallback
           ? `Writing the Case · Room details ${index + 1} of ${examinationChunks.length} complete with deterministic case observations`
@@ -5185,9 +5429,31 @@ async function authorMysteryV2(args: {
           args.onDraft(args.draft, "Writing the Case · Room details repaired");
         });
       }
+    };
+    for (let index = 0; index < examinationChunks.length; index += 2) {
+      const wave = [index, index + 1].filter(
+        (candidate) => candidate < examinationChunks.length,
+      );
+      const settled = await Promise.allSettled(wave.map(async (chunkIndex) => {
+        const messages: string[] = [];
+        await authorExaminationChunk(
+          chunkIndex,
+          (_draft, message) => messages.push(message),
+        );
+        return { chunkIndex, messages };
+      }));
+      const completed = settled.flatMap((result) =>
+        result.status === "fulfilled" ? [result.value] : []);
+      completed.sort((left, right) => left.chunkIndex - right.chunkIndex).forEach(
+        ({ messages }) => {
+          for (const message of messages) args.onDraft(args.draft, message);
+        },
+      );
+      const failed = settled.find((result) => result.status === "rejected");
+      if (failed?.status === "rejected") throw failed.reason;
     }
     foundation = {
-      ...foundationCore,
+      ...examinationFoundationCore,
       examinations: setup.examinationIds.map((id) => ({ id, text: examinationsById[id]! })),
     };
     if (args.eyewitnessSeatId && !foundation.eyewitnessResolution) {
@@ -5199,6 +5465,7 @@ async function authorMysteryV2(args: {
   if (!foundation) {
     throw new Error("The resumable case draft is missing its foundation.");
   }
+  const witnessFoundation = foundation;
   const groundedFoundation = applyMysteryIncidentPlanToFoundationV2({
     foundation,
     incidentPlan: args.incidentPlan,
@@ -5229,8 +5496,11 @@ async function authorMysteryV2(args: {
   }
   const validatedFoundation = foundation;
 
-  for (let index = 0; index < suspectRequirements.length; index += 1) {
-    const requirement = suspectRequirements[index]!;
+  const authorWitnessChapter = async (
+    requirement: (typeof suspectRequirements)[number],
+    index: number,
+    onWitnessDraft: typeof args.onDraft,
+  ): Promise<void> => {
     const requiredRecord = args.requiredContradictionBySeat.get(requirement.seatId)!;
     const requiredContradictionRecord: MysteryV2ContradictionRecordV2 | null =
       requiredRecord.kind === "evidence"
@@ -5311,16 +5581,16 @@ async function authorMysteryV2(args: {
       },
     };
     const suspectFoundationPacket = {
-      title: foundation.title,
-      victimName: foundation.victimName,
-      victimDescription: foundation.victimDescription,
-      motive: foundation.motive,
-      method: foundation.method,
+      title: witnessFoundation.title,
+      victimName: witnessFoundation.victimName,
+      victimDescription: witnessFoundation.victimDescription,
+      motive: witnessFoundation.motive,
+      method: witnessFoundation.method,
       eyewitnessResolution:
         requirement.seatId === args.eyewitnessSeatId
-          ? foundation.eyewitnessResolution
+          ? witnessFoundation.eyewitnessResolution
           : null,
-      evidence: foundation.evidence.filter((evidence) =>
+      evidence: witnessFoundation.evidence.filter((evidence) =>
         relevantEvidenceIds.has(evidence.id),
       ),
     };
@@ -5565,7 +5835,7 @@ async function authorMysteryV2(args: {
               ? "This suspect remembers time only approximately. Never give them an exact clock minute such as 10:13 or 'ten thirteen in the morning'; use natural uncertainty such as 'a little after ten', 'around ten', 'before the alarm', or 'not long after I arrived'."
               : "This suspect has no clock-time recall. Never give them an exact or approximate clock reading; anchor their account only to events they noticed, or let them truthfully say they do not know when something happened.",
           ...(omitInvestigation ? [
-            "This compilation omits investigation. Do not write room, mansion, investigation, Talk, or Present dialogue.",
+            "This compilation omits investigation. Do not write room, venue, investigation, Talk, or Present dialogue.",
           ] : [
             "roomOpeningExchange is a linear first-entry cutscene, never a choice. Write exactly Prosecution, occupant, Prosecution in that order and keep each line under 45 words.",
             "The room opening may use only the public room name, visible atmosphere, and speaker identities. It must not reveal or imply the culprit, motive, method, alibi, timeline, hidden evidence, accusation, proof route, or any fact the player has not discovered.",
@@ -5575,7 +5845,7 @@ async function authorMysteryV2(args: {
             ? "You may nominate one authored Talk topic as the pivotal evidence follow-up through presentationGate.unlockTopicId. Do not echo a gate id or record id: PRISM binds the exact frozen record, moves a valid topic to the final position, or supplies a safe follow-up from the required Present response."
             : "Do not invent a presentation gate for this witness.",
           "Do not author repeat responses, stage actions, performance directions, generic Present copy, chapter transitions, or defendant reactions. PRISM owns those presentation-only fallbacks and freezes them around the three room-opening lines.",
-          "The investigation happens before court. In Talk and Present responses, never refer to the Court, a courtroom, the bench, a jury, a witness stand, sworn testimony, or 'Your Honor'. Use the room, house, investigation, Case File, and direct questions instead; courtroom language belongs only to trial dialogue.",
+          `The investigation happens before court. In Talk and Present responses, never refer to the Court, a courtroom, the bench, a jury, a witness stand, sworn testimony, or 'Your Honor'. Use the room, ${args.config.mansionSnapshot?.layoutV2?.venueProfile?.placeNoun ?? "venue"}, investigation, Case File, and direct questions instead; courtroom language belongs only to trial dialogue.`,
           "Each required Present response addresses only its exact supplied record. PRISM materializes the public Case File title; never name a different record or expose sealed reasoning.",
           "Write Talk questions only in the frozen Prosecutor persona and Defense rebuttals only in the frozen Defense Counsel persona. The accused is never their own attorney.",
           "Keep each Talk response, statement, Press answer, rebuttal, revision, and reaction under 75 words.",
@@ -5606,7 +5876,7 @@ async function authorMysteryV2(args: {
         deterministicWitnessFallback = true;
       }
       args.draft.suspectsBySeatId[requirement.seatId] = suspect;
-      args.onDraft(
+      onWitnessDraft(
         args.draft,
         deterministicWitnessFallback
           ? `Writing the Case · Witness chapter ${index + 1} of ${suspectRequirements.length} recovered from frozen case facts`
@@ -5729,181 +5999,269 @@ async function authorMysteryV2(args: {
         );
       });
     }
+  };
+
+  const pendingWitnesses = suspectRequirements.map((requirement, index) => ({
+    requirement,
+    index,
+  }));
+  while (pendingWitnesses.length > 0) {
+    const readyWitnesses = pendingWitnesses.filter(({ requirement }) => {
+      const proof = args.requiredContradictionBySeat.get(requirement.seatId);
+      if (!proof || proof.kind === "evidence") return true;
+      return Object.values(args.draft.suspectsBySeatId).some((suspect) =>
+        suspect.testimony.some((statement) => statement.id === proof.id));
+    });
+    const wave = readyWitnesses.slice(0, 2);
+    if (wave.length === 0) {
+      throw new Error("The frozen witness dependencies cannot be authored in a stable order.");
+    }
+    const settled = await Promise.allSettled(wave.map(async (entry) => {
+      const messages: string[] = [];
+      await authorWitnessChapter(
+        entry.requirement,
+        entry.index,
+        (_draft, message) => messages.push(message),
+      );
+      return { ...entry, messages };
+    }));
+    const completed = settled.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : []);
+    completed.sort((left, right) => left.index - right.index).forEach((entry) => {
+      for (const message of entry.messages) args.onDraft(args.draft, message);
+      const pendingIndex = pendingWitnesses.findIndex(
+        (candidate) => candidate.index === entry.index,
+      );
+      if (pendingIndex >= 0) pendingWitnesses.splice(pendingIndex, 1);
+    });
+    const failed = settled.find((result) => result.status === "rejected");
+    if (failed?.status === "rejected") throw failed.reason;
   }
 
-  let prosecutionChoices = args.draft.prosecutionChoices;
-  if (!prosecutionChoices) {
-    let deterministicProsecutionFallback = false;
-    try {
-      prosecutionChoices = await generateMysteryAuthoringSectionV2({
-        runtime: args.runtime,
-        label: "The prosecution response section",
-        maxTokens: 2_500,
-        onAttempt: (attempt) => args.onDraft(
-          args.draft,
-          `Writing the Case · Prosecution responses · attempt ${attempt} of ${DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS}`,
+  const rebuildProsecutionChoices = (): AuthoredProsecutionChoiceV2[] => {
+    const seenChoiceIds = new Set<string>();
+    return suspectRequirements.flatMap((requirement) =>
+      (args.draft.prosecutionChoicesByWitnessSeatId[requirement.seatId] ?? []).map(
+        (choice, choiceIndex) => {
+          let id = choice.id;
+          if (seenChoiceIds.has(id)) {
+            const stableBase = `${requirement.seatId}-${id}`;
+            id = stableBase;
+            let suffix = choiceIndex + 1;
+            while (seenChoiceIds.has(id)) {
+              id = `${stableBase}-${suffix}`;
+              suffix += 1;
+            }
+          }
+          seenChoiceIds.add(id);
+          return id === choice.id ? choice : { ...choice, id };
+        },
+      ));
+  };
+  const decodedLegacyProsecutionChoices =
+    args.draft.prosecutionChoices !== null &&
+    Object.keys(args.draft.prosecutionChoicesByWitnessSeatId).length > 0;
+  for (let index = 0; index < suspectRequirements.length; index += 1) {
+    const requirement = suspectRequirements[index]!;
+    const sectionKey = `prosecution_choices:${requirement.seatId}`;
+    const witnessChapter = args.draft.suspectsBySeatId[requirement.seatId]!;
+    const prosecutionFrozenIds = [
+      requirement.seatId,
+      ...factLedger.frozenIds.statementIdsBySeat[requirement.seatId] ?? [],
+    ];
+    const validateChoices = (value: Record<string, unknown>) =>
+      assertMysteryIncidentLanguageV2({
+        value: authoredProsecutionChoicesFromJson(
+          value,
+          [requirement.seatId],
+          automatedSpectator ? 1 : 2,
         ),
-        onReceipt: (receipt) =>
-          recordMysterySectionReceipt(
+        incidentPlan: args.incidentPlan,
+        section: `Prosecution choice copy for witness ${index + 1}`,
+      });
+    let choices: AuthoredProsecutionChoiceV2[] | undefined =
+      args.draft.prosecutionChoicesByWitnessSeatId[
+      requirement.seatId
+    ];
+    if (choices?.length) {
+      try {
+        choices = validateChoices({ prosecutionChoices: choices });
+        args.draft.prosecutionChoicesByWitnessSeatId[requirement.seatId] = choices;
+      } catch {
+        delete args.draft.prosecutionChoicesByWitnessSeatId[requirement.seatId];
+        delete args.draft.provenanceBySection[sectionKey];
+        delete args.draft.recoveryBySection[sectionKey];
+        choices = undefined;
+      }
+    }
+    // Old authoring-v1 checkpoints legitimately carried one full-array court
+    // choice rather than one section per witness. Preserve that frozen shape
+    // instead of calling a provider to reinterpret an interrupted old case.
+    if (!choices?.length && decodedLegacyProsecutionChoices) continue;
+    let deterministicProsecutionFallback = false;
+    if (!choices?.length) {
+      try {
+        choices = await generateMysteryAuthoringSectionV2({
+          runtime: args.runtime,
+          label: `Prosecution responses for witness ${index + 1}`,
+          maxTokens: debateMysteryProsecutionChoiceMaxTokensV2({
+            suspectCount: 1,
+            automatedSpectator,
+          }),
+          onAttempt: (attempt) => args.onDraft(
             args.draft,
-            "prosecution_choices",
-            receipt,
+            `Writing the Case · Prosecution responses ${index + 1} of ${suspectRequirements.length} · attempt ${attempt} of ${DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS}`,
           ),
-        prompt: {
-        section: "prosecution_choices",
-        setup: {
-          trialType: setup.trialType,
-          victimId: setup.victimId,
-          eyewitnessSeatId: setup.eyewitnessSeatId,
-          roomNames: setup.roomNames,
-          evidenceIds: setup.evidenceIds,
-          examinationIds: setup.examinationIds,
-          identityMirrorHolders: setup.identityMirrorHolders,
-          prosecutor: setup.prosecutor,
-          defenseCounsel: setup.defenseCounsel,
-          suspects: setup.suspects,
-        },
-        caseFoundation: {
-          title: foundation.title,
-          victimName: foundation.victimName,
-        },
-        witnessChapters: Object.values(args.draft.suspectsBySeatId).map((entry) => ({
-          seatId: entry.seatId,
-          testimony: entry.testimony.map((statement) => ({ id: statement.id, text: statement.text })),
-        })),
-        outputContract: {
-          prosecutionChoices: {
-            minimumItems: 1,
-            itemShape: {
-              id: "stable choice id",
-              witnessSeatId: "exact suspect seatId",
-              prompt: "court prompt",
-              options: {
-                minimumItems: automatedSpectator ? 1 : 2,
-                maximumItems: automatedSpectator ? 1 : 4,
+          onReceipt: (receipt) =>
+            recordMysterySectionReceipt(args.draft, sectionKey, receipt),
+          prompt: {
+            section: "prosecution_choices",
+            setup: {
+              trialType: setup.trialType,
+              victimId: setup.victimId,
+              eyewitnessSeatId: setup.eyewitnessSeatId,
+              roomNames: setup.roomNames,
+              evidenceIds: setup.evidenceIds,
+              examinationIds: setup.examinationIds,
+              identityMirrorHolders: setup.identityMirrorHolders,
+              prosecutor: setup.prosecutor,
+              defenseCounsel: setup.defenseCounsel,
+              suspects: setup.suspects.filter(
+                (suspect) => suspect.seatId === requirement.seatId,
+              ),
+            },
+            caseFoundation: {
+              title: foundation.title,
+              victimName: foundation.victimName,
+            },
+            witnessChapters: [{
+              seatId: witnessChapter.seatId,
+              testimony: witnessChapter.testimony.map((statement) => ({
+                id: statement.id,
+                text: statement.text,
+              })),
+            }],
+            outputContract: {
+              prosecutionChoices: {
+                minimumItems: 1,
+                witnessSeatId: requirement.seatId,
                 itemShape: {
-                  id: "stable option id",
-                  text: "selected Prosecutor spoken line",
-                  stageAction: "short visual-only Prosecutor beat",
-                  reaction: "witness spoken reaction",
-                  reactionStageAction: "short visual-only witness beat",
+                  id: "stable choice id",
+                  witnessSeatId: "the exact supplied suspect seatId",
+                  prompt: "court prompt",
+                  options: {
+                    minimumItems: automatedSpectator ? 1 : 2,
+                    maximumItems: automatedSpectator ? 1 : 4,
+                    itemShape: {
+                      id: "stable option id",
+                      text: "selected Prosecutor spoken line",
+                      stageAction: "short visual-only Prosecutor beat",
+                      reaction: "witness spoken reaction",
+                      reactionStageAction: "short visual-only witness beat",
+                    },
+                  },
                 },
               },
             },
+            qualityRules: [
+              automatedSpectator
+                ? "Author exactly one complete response for this automated Spectator prosecution choice."
+                : "The player chooses the option. Never choose or recommend an option in authored text.",
+              "Every returned choice must use the one supplied witnessSeatId.",
+              "Write each option in the frozen Prosecutor persona and keep every nonverbal beat out of spoken text.",
+              ...(caseIncludesHomicide ? [] : [
+                `This is a ${args.incidentPlan.primary.title} prosecution, not a homicide. Never mention murder, killing, death, a corpse, a fatal injury, or a murder weapon.`,
+              ]),
+            ],
           },
-        },
-        qualityRules: [
-          automatedSpectator
-            ? "Author exactly one complete response for each automated Spectator prosecution choice."
-            : "The player chooses the option. Never choose or recommend an option in authored text.",
-          "Write each option in the frozen Prosecutor persona and keep every nonverbal beat out of spoken text.",
-          ...(caseIncludesHomicide ? [] : [
-            `This is a ${args.incidentPlan.primary.title} prosecution, not a homicide. Never mention murder, killing, death, a corpse, a fatal injury, or a murder weapon.`,
-          ]),
-        ],
-      },
-        sourcePrompt: {
-        section: "prosecution_choices",
-        setup,
-        caseFoundation: foundation,
-        witnessChapters: Object.values(args.draft.suspectsBySeatId).map(
-          (entry) => ({
-            seatId: entry.seatId,
-            testimony: entry.testimony.map((statement) => ({
-              id: statement.id,
-              text: statement.text,
-            })),
+          sourcePrompt: {
+            section: "prosecution_choices",
+            setup,
+            caseFoundation: foundation,
+            witnessChapters: [{
+              seatId: witnessChapter.seatId,
+              testimony: witnessChapter.testimony.map((statement) => ({
+                id: statement.id,
+                text: statement.text,
+              })),
+            }],
+          },
+          validate: validateChoices,
+        });
+        delete args.draft.recoveryBySection[sectionKey];
+      } catch (error) {
+        if (!mysteryProsecutionChoiceValidationExhausted(error)) throw error;
+        choices = assertMysteryIncidentLanguageV2({
+          value: deterministicAuthoredMysteryProsecutionChoicesV2({
+            suspectSeatIds: [requirement.seatId],
+            automatedSpectator,
           }),
-        ),
-      },
-        validate: (value) => assertMysteryIncidentLanguageV2({
-          value: authoredProsecutionChoicesFromJson(
-            value,
-            suspectRequirements.map((entry) => entry.seatId),
-            automatedSpectator ? 1 : 2,
-          ),
           incidentPlan: args.incidentPlan,
-          section: "Prosecution choice copy",
-        }),
-      });
-      delete args.draft.recoveryBySection.prosecution_choices;
-    } catch (error) {
-      if (!mysteryProsecutionChoiceValidationExhausted(error)) throw error;
-      prosecutionChoices = assertMysteryIncidentLanguageV2({
-        value: deterministicAuthoredMysteryProsecutionChoicesV2({
-          suspectSeatIds: suspectRequirements.map((entry) => entry.seatId),
-          automatedSpectator,
-        }),
-        incidentPlan: args.incidentPlan,
-        section: "Deterministic prosecution choice copy",
-      });
-      deterministicProsecutionFallback = true;
-      delete args.draft.provenanceBySection.prosecution_choices;
-      args.draft.recoveryBySection.prosecution_choices = {
-        kind: "deterministic_fallback",
-        reason: "invalid_output_exhausted",
-        attemptCount: DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
-        source: "frozen_scaffold",
-        sourceHash: factLedger.sourceHash,
-      };
-    }
-    args.draft.prosecutionChoices = prosecutionChoices;
-    args.onDraft(
-      args.draft,
-      deterministicProsecutionFallback
-        ? "Writing the Case · Prosecution responses complete with deterministic court copy"
-        : "Writing the Case · Prosecution responses complete",
-    );
-    const prosecutionFrozenIds = [
-      ...factLedger.frozenIds.suspectSeatIds,
-      ...Object.values(factLedger.frozenIds.statementIdsBySeat).flat(),
-    ];
-    if (!deterministicProsecutionFallback) {
-      queueAudit(
-        "prosecution_choices",
-        prosecutionChoices,
-        prosecutionFrozenIds,
+          section: `Deterministic prosecution choice copy for witness ${index + 1}`,
+        });
+        deterministicProsecutionFallback = true;
+        delete args.draft.provenanceBySection[sectionKey];
+        args.draft.recoveryBySection[sectionKey] = {
+          kind: "deterministic_fallback",
+          reason: "invalid_output_exhausted",
+          attemptCount: DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
+          source: "frozen_scaffold",
+          sourceHash: factLedger.sourceHash,
+        };
+      }
+      args.draft.prosecutionChoicesByWitnessSeatId[requirement.seatId] = choices;
+      args.draft.prosecutionChoices = null;
+      args.onDraft(
+        args.draft,
+        deterministicProsecutionFallback
+          ? `Writing the Case · Prosecution responses ${index + 1} of ${suspectRequirements.length} recovered from frozen case facts`
+          : `Writing the Case · Prosecution responses ${index + 1} of ${suspectRequirements.length} complete`,
       );
-      targetedRepairs.set("prosecution_choices", async (issues) => {
-      const repaired = await generateMysteryAuthoringSectionV2({
-        runtime: args.runtime,
-        label: "The prosecution response repair",
-        role: "repair",
-        maxTokens: 2_500,
-        prompt: {
-          section: "targeted_section_repair",
-          targetSectionKey: "prosecution_choices",
-          frozenLedgerSlice: {
-            sourceHash: factLedger.sourceHash,
-            relevantFrozenIds: prosecutionFrozenIds,
+    }
+    if (!deterministicProsecutionFallback) {
+      queueAudit(sectionKey, choices, prosecutionFrozenIds);
+      targetedRepairs.set(sectionKey, async (issues) => {
+        const repaired = await generateMysteryAuthoringSectionV2({
+          runtime: args.runtime,
+          label: `Prosecution response ${index + 1} repair`,
+          role: "repair",
+          maxTokens: debateMysteryProsecutionChoiceMaxTokensV2({
+            suspectCount: 1,
+            automatedSpectator,
+          }),
+          prompt: {
+            section: "targeted_section_repair",
+            targetSectionKey: sectionKey,
+            frozenLedgerSlice: {
+              sourceHash: factLedger.sourceHash,
+              relevantFrozenIds: prosecutionFrozenIds,
+            },
+            existingSection: { prosecutionChoices: choices },
+            repairDelta: issues,
+            outputContract: "Return the complete prosecutionChoices array for this witness in the same schema. Change only fields named by the repair delta.",
           },
-          existingSection: {
-            prosecutionChoices: args.draft.prosecutionChoices,
-          },
-          repairDelta: issues,
-          outputContract: "Return the complete prosecutionChoices array in the same schema. Change only fields named by the repair delta.",
-        },
-        validate: (value) => assertMysteryIncidentLanguageV2({
-          value: authoredProsecutionChoicesFromJson(
-            value,
-            suspectRequirements.map((entry) => entry.seatId),
-            automatedSpectator ? 1 : 2,
-          ),
-          incidentPlan: args.incidentPlan,
-          section: "Repaired prosecution choice copy",
-        }),
-        onReceipt: (receipt) =>
-          recordMysterySectionReceipt(
-            args.draft,
-            "prosecution_choices",
-            receipt,
-          ),
-      });
-        args.draft.prosecutionChoices = repaired;
-        args.onDraft(args.draft, "Writing the Case · Prosecution responses repaired");
+          validate: validateChoices,
+          onReceipt: (receipt) =>
+            recordMysterySectionReceipt(args.draft, sectionKey, receipt),
+        });
+        args.draft.prosecutionChoicesByWitnessSeatId[requirement.seatId] = repaired;
+        args.draft.prosecutionChoices = rebuildProsecutionChoices();
+        args.onDraft(
+          args.draft,
+          `Writing the Case · Prosecution response ${index + 1} repaired`,
+        );
       });
     }
   }
+  let prosecutionChoices = rebuildProsecutionChoices();
+  if (
+    prosecutionChoices.length <
+      (decodedLegacyProsecutionChoices ? 1 : suspectRequirements.length)
+  ) {
+    throw new Error("The resumable case draft is missing a witness prosecution response.");
+  }
+  args.draft.prosecutionChoices = prosecutionChoices;
+  args.onDraft(args.draft, "Writing the Case · Prosecution responses complete");
 
   await Promise.all(pendingConnectives);
   const auditResults = await Promise.all(pendingAudits);
@@ -7519,6 +7877,10 @@ function buildMysteryV2Graph(args: {
     contradictionSemanticContractVersion: 1,
   };
   const now = new Date().toISOString();
+  const caseGatedRoomIds = [...new Set(presentationGates.flatMap((gate) =>
+    gate.unlocks.flatMap((target) => target.kind === "room" ? [target.roomId] : [])
+  ))];
+  const caseGatedRoomIdSet = new Set(caseGatedRoomIds);
   const publicState: DebateWhodunnitFormatStateV2 = {
     ...initialV2State(args.config, "pending", now, args.mansionExterior ?? null),
     caseTitle: args.authored.title,
@@ -7565,7 +7927,7 @@ function buildMysteryV2Graph(args: {
         emoji: roomPresentation.emoji,
         imageId: room.imageId,
         bundledAssetPath: template?.bundledAssetPath ?? venueRoom?.bundledAssetPath ?? null,
-        unlocked: true,
+        unlocked: !caseGatedRoomIdSet.has(room.id),
         visited: false,
         accessState: "hidden" as const,
         hotspots: presentationRegions.filter((region) => activeRegionIds.has(region.id)).map((region) => ({
@@ -7577,6 +7939,15 @@ function buildMysteryV2Graph(args: {
         })),
       };
     }),
+    spatialProjection: omitInvestigation
+      ? null
+      : projectDebateMysteryVenueSpatialV1({
+          layout: args.config.mansionSnapshot?.layoutV2,
+          activeRoomIds: args.scaffold.rooms
+            .filter((room) => !caseGatedRoomIdSet.has(room.id))
+            .map((room) => room.id),
+          gatedRoomIds: caseGatedRoomIds,
+        }),
     crimeSceneRoomId: omitInvestigation ? null : args.scaffold.crimeSceneRoomId,
     openingSweepComplete: omitInvestigation,
     roomIntroductions: omitInvestigation ? {} : Object.fromEntries(args.scaffold.rooms.map((room) => [
@@ -10254,14 +10625,29 @@ function claimCompilationJob(
   if (current.status === "needs_attention") return null;
   const owner = randomUUID();
   const leasedUntil = new Date(now.getTime() + V2_JOB_LEASE_MS).toISOString();
+  const previousAttemptElapsed = current.attempt_started_at
+    ? Math.max(0, now.getTime() - Date.parse(current.attempt_started_at))
+    : 0;
+  const cumulativeElapsedMs = current.cumulative_elapsed_ms +
+    (Number.isFinite(previousAttemptElapsed) ? Math.round(previousAttemptElapsed) : 0);
   const result = db.prepare(
     `UPDATE debate_mystery_v2_jobs
         SET status = 'running', attempt = attempt + 1, lease_owner = ?,
-            leased_until = ?, private_error = NULL, updated_at = ?
+            leased_until = ?, private_error = NULL, attempt_started_at = ?,
+            cumulative_elapsed_ms = ?, updated_at = ?
       WHERE user_id = ? AND session_id = ?
         AND status IN ('queued', 'running')
         AND (leased_until IS NULL OR leased_until <= ?)`,
-  ).run(owner, leasedUntil, now.toISOString(), userId, sessionId, now.toISOString());
+  ).run(
+    owner,
+    leasedUntil,
+    now.toISOString(),
+    cumulativeElapsedMs,
+    now.toISOString(),
+    userId,
+    sessionId,
+    now.toISOString(),
+  );
   return Number(result.changes) === 1
     ? { row: jobRow(db, userId, sessionId), owner }
     : null;
@@ -10316,6 +10702,24 @@ function deterministicEyewitnessSeat(
   return suspects.find((suspect) => suspect.seatId !== culpritSeatId)?.seatId ?? null;
 }
 
+export function debateMysteryRoomUsesBundledHotspotGeometryV2(args: {
+  templateId: string;
+  imageId: string | null;
+  acceptedRoomAssetId?: string | null;
+}): boolean {
+  return !args.imageId && !args.acceptedRoomAssetId &&
+    DEBATE_MYSTERY_ROOM_TEMPLATES.some((template) => template.id === args.templateId);
+}
+
+export function debateMysteryProsecutionChoiceMaxTokensV2(args: {
+  suspectCount: number;
+  automatedSpectator: boolean;
+}): number {
+  const suspectCount = Math.max(1, Math.floor(args.suspectCount));
+  const tokensPerSuspect = args.automatedSpectator ? 500 : 1_250;
+  return Math.min(9_000, Math.max(2_500, suspectCount * tokensPerSuspect));
+}
+
 function compilationFailure(
   db: DatabaseSync,
   userId: string,
@@ -10355,6 +10759,7 @@ export async function runDebateMysteryCompilationV2(
   if (!claimed) return getDebateSession(db, userId, sessionId);
   let localAudioStage = false;
   let leaseLost = false;
+  let illustratedRoomsGenerated = false;
   const cancellationController = new AbortController();
   const heartbeat = setInterval(() => {
     try {
@@ -10395,6 +10800,34 @@ export async function runDebateMysteryCompilationV2(
       ...config.jurorBotIds,
     ];
     const bots = botRows(db, userId, castIds);
+    const voiceCalibrationComplete = Boolean(db.prepare(
+      `SELECT 1 AS present
+         FROM debate_mystery_v2_checkpoints
+        WHERE user_id = ? AND session_id = ? AND checkpoint_key = ?
+        LIMIT 1`,
+    ).get(userId, sessionId, "preflight:local-voice-calibration"));
+    if (config.assetSynthesis.voices === true && !voiceCalibrationComplete) {
+      localAudioStage = true;
+      const calibrationWave = await (options.generateWave ?? generateBuiltinEnglishWave)({
+        text: "The case is ready.",
+        profile: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        allowOperatingSystemVoices: false,
+        deliveryMood: "calm and clear",
+        signal: cancellationController.signal,
+      });
+      if (!isPlayablePcmWave(calibrationWave)) {
+        throw new Error("Local voice calibration produced an unplayable sample.");
+      }
+      recordCompilationCheckpoint(db, currentJob, {
+        key: "preflight:local-voice-calibration",
+        stage: "writing_case",
+        payload: JSON.stringify({
+          durationMs: pcmWaveDurationMs(calibrationWave),
+          sha256: sha256(calibrationWave),
+        }),
+      });
+      localAudioStage = false;
+    }
     const storedCheckpoint = currentJob.checkpoint_json
       ? JSON.parse(currentJob.checkpoint_json) as unknown
       : null;
@@ -10506,8 +10939,11 @@ export async function runDebateMysteryCompilationV2(
                   ...(layoutRoom?.kind === "room"
                     ? {
                         usesBundledHotspotGeometry:
-                          !room.imageId &&
-                          !layoutRoom.acceptedRoomAssetId,
+                          debateMysteryRoomUsesBundledHotspotGeometryV2({
+                            templateId: room.templateId,
+                            imageId: room.imageId,
+                            acceptedRoomAssetId: layoutRoom.acceptedRoomAssetId,
+                          }),
                         ...(venueAnchorGeometryIsCurrent && venueAnchors.length > 0
                           ? {
                               presentationRegions: venueAnchors.map((anchor) => {
@@ -10750,10 +11186,9 @@ export async function runDebateMysteryCompilationV2(
           houseStyle: checkpoint.privateCase.config.houseStyle,
           scaleClass: checkpoint.privateCase.config.scaleClass,
           venueProfile: checkpoint.privateCase.config.mansionSnapshot?.layoutV2?.venueProfile,
-          // Case Forge may supply only the bundled fallback. Exterior
-          // generation is an explicit Mansion-step decision made before a
-          // session exists.
-          synthesize: false,
+          // Presentation generation is case-scoped. The reusable venue
+          // remains immutable even when this request succeeds.
+          synthesize: checkpoint.privateCase.config.assetSynthesis.exterior === true,
           signal: cancellationController.signal,
         });
         checkpoint = withPreparedMansionExteriorAsset(checkpoint, exterior);
@@ -10835,7 +11270,7 @@ export async function runDebateMysteryCompilationV2(
         options.prepareIllustratedRooms
       ) {
         currentJob = updateJob(db, userId, sessionId, {
-          publicMessage: "Upgrading every room to Realistic",
+          publicMessage: "Preparing Upgraded room derivatives",
         });
         setPublicCompilationStatus(db, userId, sessionId, currentJob, {
           ...checkpoint.publicState,
@@ -10846,6 +11281,7 @@ export async function runDebateMysteryCompilationV2(
           sessionId,
           signal: cancellationController.signal,
         });
+        illustratedRoomsGenerated = true;
         requireLease();
       }
       requireLease();
@@ -10870,17 +11306,35 @@ export async function runDebateMysteryCompilationV2(
       });
       setPublicCompilationStatus(db, userId, sessionId, currentJob);
     }
-    localAudioStage = true;
+    const voicesEnabled = config.assetSynthesis.voices !== false;
+    localAudioStage = voicesEnabled;
     if (currentJob.completed_passes < 4) {
-      const preparedManifest = await prepareLocalAudioPackV2({
-        db,
-        userId,
-        sessionId,
-        graph: checkpoint.graph,
-        privateCase: checkpoint.privateCase,
-        botRows: bots,
-        generateWave: options.generateWave,
-      });
+      const preparedManifest: DebateMysteryAudioManifestV1 = voicesEnabled
+        ? await prepareLocalAudioPackV2({
+            db,
+            userId,
+            sessionId,
+            graph: checkpoint.graph,
+            privateCase: checkpoint.privateCase,
+            botRows: bots,
+            generateWave: options.generateWave,
+          })
+        : {
+            version: 1,
+            preparationMode: "lazy-on-demand-v1",
+            caseId: sessionId,
+            caseHash: sha256(JSON.stringify(checkpoint.privateCase)),
+            scriptHash: sha256("silent"),
+            dialogueGraphHash: sha256(JSON.stringify(checkpoint.graph)),
+            engine: "prism-instant-local",
+            model: PRISM_INSTANT_VOICE_MODEL_ID,
+            modelVersion: "q8-pinned-1",
+            entries: [],
+            complete: false,
+            completedAt: null,
+            verifiedAt: null,
+          };
+      if (!voicesEnabled) storeAudioManifest(db, userId, sessionId, preparedManifest, "silent");
       requireLease();
       currentJob = completeCompilationPass(db, userId, sessionId, {
         passNumber: 4,
@@ -10894,11 +11348,13 @@ export async function runDebateMysteryCompilationV2(
     }
     const manifest = loadAudioManifest(db, userId, sessionId);
     if (!manifest) throw new Error("The local audio manifest disappeared before final verification.");
-    const audioValidation = validateDebateMysteryAudioManifestV1({
-      graph: checkpoint.graph,
-      manifest,
-      reachableSpokenLineIds: checkpoint.privateCase.graphValidation.reachableSpokenLineIds,
-    });
+    const audioValidation = voicesEnabled
+      ? validateDebateMysteryAudioManifestV1({
+          graph: checkpoint.graph,
+          manifest,
+          reachableSpokenLineIds: checkpoint.privateCase.graphValidation.reachableSpokenLineIds,
+        })
+      : { valid: true, errors: [] };
     if (!audioValidation.valid) throw new Error(audioValidation.errors.join("\n"));
     requireLease();
     currentJob = completeCompilationPass(db, userId, sessionId, {
@@ -10920,20 +11376,31 @@ export async function runDebateMysteryCompilationV2(
       botRows: bots,
       manifest,
     });
+    const productionReadiness = productionReadinessFromCheckpointV1({
+      checkpoint,
+      illustratedRoomsGenerated,
+      voicesEnabled,
+      preparedVoiceCount: manifest.entries.length,
+    });
     const readySession = setPublicCompilationStatus(db, userId, sessionId, currentJob, {
       ...checkpoint.publicState,
       compilation: compilationStatus(db, currentJob),
-      playPhase: "title_card",
+      playPhase: productionReadiness.status === "review_required"
+        ? "production_review"
+        : "title_card",
+      productionReadiness,
       caseTitle: checkpoint.publicState.caseTitle,
       readiness: {
         version: DEBATE_MYSTERY_PLAY_READINESS_VERSION,
         status: "ready",
-        spoilerSafeMessage: "The finite local case pack is ready",
+        spoilerSafeMessage: voicesEnabled
+          ? "The finite local case pack is ready"
+          : "The finite text case is ready",
         contractHash: playContractHash,
         checkedAt: new Date().toISOString(),
       },
-      audioReady: true,
-      voicesEnabled: true,
+      audioReady: voicesEnabled,
+      voicesEnabled,
       localAudioFailure: null,
     });
     options.onCompilationReady?.(readySession);
@@ -11076,6 +11543,53 @@ export function continueDebateMysteryV2WithoutVoices(
       !completed.formatState.voicesEnabled
     ) return completed;
   }
+  const earlyCheckpoint = row.checkpoint_json ? JSON.parse(row.checkpoint_json) as unknown : null;
+  if (
+    row.status === "needs_attention" &&
+    row.public_message === "Local voice preparation needs attention" &&
+    !isMysteryV2CompiledCheckpoint(earlyCheckpoint)
+  ) {
+    const session = getDebateSession(db, userId, sessionId);
+    if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
+      throw new HttpError(409, "This session is not a Whodunnit V2 case.");
+    }
+    const now = new Date().toISOString();
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.prepare(
+        `UPDATE debate_mystery_v2_jobs
+            SET status = 'queued', stage = 'writing_case', public_message = ?,
+                private_error = NULL, lease_owner = NULL, leased_until = NULL,
+                cancellation_requested = 0, updated_at = ?
+          WHERE user_id = ? AND session_id = ? AND status = 'needs_attention'`,
+      ).run(V2_SPOILER_SAFE_MESSAGES.writing_case, now, userId, sessionId);
+      const queued = jobRow(db, userId, sessionId);
+      const next = persistV2Session(db, userId, {
+        ...session,
+        status: "live",
+        stepKey: "mystery_v2_writing_case",
+        error: null,
+      }, {
+        ...session.formatState,
+        playPhase: "case_forge",
+        config: {
+          ...session.formatState.config,
+          assetSynthesis: {
+            ...session.formatState.config.assetSynthesis,
+            voices: false,
+          },
+        },
+        compilation: compilationStatus(db, queued),
+        voicesEnabled: false,
+        localAudioFailure: null,
+      });
+      db.exec("COMMIT");
+      return next;
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
   if (!row.checkpoint_json) throw new HttpError(409, "The validated text case is not ready.");
   if (row.status !== "needs_attention") throw new HttpError(409, "Silent continuation is only available after local voice preparation fails.");
   const storedCheckpoint = JSON.parse(row.checkpoint_json) as unknown;
@@ -11106,10 +11620,19 @@ export function continueDebateMysteryV2WithoutVoices(
     privateError: null,
     clearLease: true,
   });
+  const productionReadiness = productionReadinessFromCheckpointV1({
+    checkpoint,
+    illustratedRoomsGenerated: false,
+    voicesEnabled: false,
+    preparedVoiceCount: 1,
+  });
   return setPublicCompilationStatus(db, userId, sessionId, complete, {
     ...checkpoint.publicState,
     compilation: compilationStatus(db, complete),
-    playPhase: "title_card",
+    playPhase: productionReadiness.status === "review_required"
+      ? "production_review"
+      : "title_card",
+    productionReadiness,
     readiness: {
       version: DEBATE_MYSTERY_PLAY_READINESS_VERSION,
       status: "ready",
@@ -11133,6 +11656,122 @@ export function continueDebateMysteryV2WithoutVoices(
     voicesEnabled: false,
     localAudioFailure: null,
   });
+}
+
+/** Accepts only presentation fallbacks. The compiled graph and sealed truth
+ * remain byte-identical, and the acknowledgment is copied into the durable
+ * checkpoint for Archive/replay. */
+export function continueDebateMysteryProductionWithFallbacksV1(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+): DebateSessionV1 {
+  const session = getDebateSession(db, userId, sessionId);
+  if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
+    throw new HttpError(409, "Production readiness requires a Whodunnit V2 case.");
+  }
+  const readiness = session.formatState.productionReadiness;
+  if (session.formatState.playPhase !== "production_review" || readiness?.status !== "review_required") {
+    if (readiness?.status === "accepted_with_fallbacks") return session;
+    throw new HttpError(409, "This case is not waiting for production fallback acknowledgment.");
+  }
+  const now = new Date().toISOString();
+  const nextState: DebateWhodunnitFormatStateV2 = {
+    ...session.formatState,
+    playPhase: "title_card",
+    productionReadiness: {
+      ...readiness,
+      status: "accepted_with_fallbacks",
+      fallbackAcknowledgedAt: now,
+    },
+  };
+  const job = jobRow(db, userId, sessionId);
+  const stored = job.checkpoint_json ? JSON.parse(job.checkpoint_json) as unknown : null;
+  if (job.status !== "complete" || !isMysteryV2CompiledCheckpoint(stored)) {
+    throw new HttpError(409, "The completed case checkpoint is unavailable.");
+  }
+  const checkpoint: MysteryV2Checkpoint = {
+    ...stored,
+    publicState: nextState,
+  };
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const next = persistV2Session(db, userId, session, nextState);
+    const updated = db.prepare(
+      `UPDATE debate_mystery_v2_jobs
+          SET checkpoint_json = ?, updated_at = ?
+        WHERE user_id = ? AND session_id = ? AND status = 'complete'`,
+    ).run(JSON.stringify(checkpoint), now, userId, sessionId);
+    if (Number(updated.changes) !== 1) {
+      throw new HttpError(409, "The production checkpoint changed in another window.");
+    }
+    db.exec("COMMIT");
+    return next;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+/** Recounts presentation sources after a bounded category retry. This reads
+ * the current sealed asset refs but never rewrites the dialogue graph, frozen
+ * roles, or private incident truth. */
+export function refreshDebateMysteryProductionReadinessV1(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  options: { illustratedRoomsGenerated?: boolean } = {},
+): DebateSessionV1 {
+  const session = getDebateSession(db, userId, sessionId);
+  if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
+    throw new HttpError(409, "Production readiness requires a Whodunnit V2 case.");
+  }
+  if (session.formatState.playPhase !== "production_review") return session;
+  const job = jobRow(db, userId, sessionId);
+  const stored = job.checkpoint_json ? JSON.parse(job.checkpoint_json) as unknown : null;
+  if (job.status !== "complete" || !isMysteryV2CompiledCheckpoint(stored)) {
+    throw new HttpError(409, "The completed case checkpoint is unavailable.");
+  }
+  const compiled = getDebateMysteryCaseV2(db, userId, sessionId);
+  const checkpoint: MysteryV2Checkpoint = {
+    ...stored,
+    privateCase: compiled.privateCase,
+    graph: compiled.graph,
+    publicState: session.formatState,
+  };
+  const readiness = productionReadinessFromCheckpointV1({
+    checkpoint,
+    illustratedRoomsGenerated: options.illustratedRoomsGenerated === true,
+    voicesEnabled: session.formatState.voicesEnabled,
+    preparedVoiceCount: job.prepared_audio_count,
+  });
+  const nextState: DebateWhodunnitFormatStateV2 = {
+    ...session.formatState,
+    playPhase: readiness.status === "complete" ? "title_card" : "production_review",
+    productionReadiness: readiness,
+  };
+  const nextCheckpoint: MysteryV2Checkpoint = {
+    ...checkpoint,
+    publicState: nextState,
+  };
+  const now = new Date().toISOString();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const next = persistV2Session(db, userId, session, nextState);
+    const updated = db.prepare(
+      `UPDATE debate_mystery_v2_jobs
+          SET checkpoint_json = ?, updated_at = ?
+        WHERE user_id = ? AND session_id = ? AND status = 'complete'`,
+    ).run(JSON.stringify(nextCheckpoint), now, userId, sessionId);
+    if (Number(updated.changes) !== 1) {
+      throw new HttpError(409, "The production checkpoint changed in another window.");
+    }
+    db.exec("COMMIT");
+    return next;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 /**

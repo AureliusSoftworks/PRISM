@@ -315,10 +315,15 @@ export function recordImageAssetAccess(
         .prepare(
           `SELECT COUNT(*) AS count
              FROM image_asset_set_items items
-             JOIN images ON images.id = items.image_id
+             JOIN image_asset_sets sets
+               ON sets.user_id = ?
+              AND sets.id = items.set_id
+             JOIN images
+               ON images.user_id = sets.user_id
+              AND images.id = items.image_id
             WHERE items.set_id = ?`,
         )
-        .get(row.set_id) as { count: number | bigint }
+        .get(userId, row.set_id) as { count: number | bigint }
     ).count,
   );
   // usageCount above is member count; reuse score uses access + reference proxy.
@@ -612,10 +617,15 @@ export function previewSmartTidyCandidates(
       .prepare(
         `SELECT images.local_rel_path
            FROM image_asset_set_items items
-           JOIN images ON images.id = items.image_id
+           JOIN image_asset_sets sets
+             ON sets.user_id = ?
+            AND sets.id = items.set_id
+           JOIN images
+             ON images.user_id = sets.user_id
+            AND images.id = items.image_id
           WHERE items.set_id = ?`,
       )
-      .all(row.id) as Array<{ local_rel_path: string | null }>;
+      .all(userId, row.id) as Array<{ local_rel_path: string | null }>;
     const bytes = memberPaths.reduce(
       (total, member) =>
         total +

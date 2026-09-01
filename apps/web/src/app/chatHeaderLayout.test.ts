@@ -24,6 +24,7 @@ describe("Chat shell header layout", () => {
   });
 
   it("publishes the live navigation height from the shared header observer", () => {
+    assert.match(pageSource, /ref=\{options\.headerRef \?\? chatHeaderRef\}/u);
     assert.match(
       pageSource,
       /appShellTopNavHeightCssValue\(\s*header\.getBoundingClientRect\(\)\.height,?\s*\)/,
@@ -46,13 +47,13 @@ describe("Chat shell header layout", () => {
     );
   });
 
-  it("moves Home navigation onto the PRISM wordmarks", () => {
+  it("moves current-applet Home navigation onto the PRISM wordmarks", () => {
     assert.doesNotMatch(pageSource, /renderLocationStrip/);
     assert.doesNotMatch(pageSource, /livingShellLocation/);
     assert.doesNotMatch(cssSource, /\.locationStrip(?:Home|Copy|Status)?\b/);
     assert.match(
       pageSource,
-      /const renderSharedAppletBrand =[\s\S]*?onClick=\{openLivingShellHome\}[\s\S]*?data-shared-applet-brand=\{appletId\}[\s\S]*?aria-label="Open All Bots Home"/,
+      /const renderSharedAppletBrand =[\s\S]*?onClick=\{\(\) => openCurrentAppletHome\(appletId\)\}[\s\S]*?data-shared-applet-brand=\{appletId\}[\s\S]*?aria-label=\{`Open \$\{PRISM_APPLETS\[appletId\]\.name\} home`\}/,
     );
     assert.match(
       pageSource,
@@ -73,7 +74,7 @@ describe("Chat shell header layout", () => {
   it("keeps Chat and Zen routing controls in the navbar before and during a conversation", () => {
     assert.match(
       pageSource,
-      /renderSharedAppletNavbar\("Chat tools", \{[\s\S]*brandAppletId: sidebarOpen \? undefined : "zen"/,
+      /renderSharedAppletNavbar\("Chat tools", \{[\s\S]*brandAppletId: chatPresentation === "zen" \? "zen" : "chat"/,
     );
     assert.match(
       pageSource,
@@ -172,6 +173,20 @@ describe("Chat shell header layout", () => {
     );
     const pickerSource = pageSource.slice(pickerStart, pickerEnd);
     assert.match(pageSource, /const autoLabelShown = autoRouteLabel\?\.trim\(\) \|\| "Auto";/u);
+    assert.match(
+      pageSource,
+      /autoSelected \? ` \$\{styles\.composeModelTriggerNameAuto\}` : ""/u,
+    );
+    assert.doesNotMatch(pageSource, /composeModelTriggerNameModel/u);
+    assert.match(
+      pageSource,
+      /composeModelOptionName\}>\s*Auto\s*<\/span>/u,
+    );
+    assert.match(cssSource, /\.composeModelTriggerNameAuto/u);
+    assert.match(
+      cssSource,
+      /\.themeLight \.composeModelTriggerNameAuto\s*\{[\s\S]{0,240}#207052[\s\S]{0,160}#a92373/u,
+    );
     assert.match(pageSource, /function AutoEffortIcon/u);
     assert.match(
       pageSource,

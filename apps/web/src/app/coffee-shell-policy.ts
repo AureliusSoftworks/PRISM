@@ -22,7 +22,11 @@ export type UniversalNavbarTooltipMap = Partial<
   Record<UniversalNavbarAction, string>
 >;
 
-export type LiveSessionChromeName = "Coffee" | "Debate" | "Signal";
+export type LiveSessionChromeName =
+  | "Coffee"
+  | "Debate"
+  | "Signal"
+  | "Story";
 
 export interface LiveSessionChromePolicy {
   lockMessage: string;
@@ -38,7 +42,9 @@ export function liveSessionChromePolicy(
       ? "End the Coffee session"
       : sessionName === "Debate"
         ? "Return to the Debate lobby"
-      : "Cut or finish the Signal session";
+        : sessionName === "Story"
+          ? "Start a new Story"
+          : "Cut or finish the Signal session";
   const lockMessage =
     sessionName === "Debate"
       ? "This Debate is sealed to its saved LOCAL/ONLINE lane, model, Effort or Max, and Turbo setting. Return to the Debate lobby to configure a new Duel."
@@ -54,7 +60,6 @@ export function liveSessionChromePolicy(
       memories: true,
       images: true,
       bots: true,
-      theme: true,
     },
     disabledNavbarActionTooltips: {
       promptCenter: `${exitInstruction} before opening Prompt Center.`,
@@ -68,7 +73,6 @@ export function liveSessionChromePolicy(
       memories: `${exitInstruction} before opening Memories.`,
       images: `${exitInstruction} before opening Images.`,
       bots: `${exitInstruction} before changing bots.`,
-      theme: `${exitInstruction} before changing Theme.`,
     },
   };
 }
@@ -98,7 +102,7 @@ export function coffeeShellPolicy(args: {
   return {
     liveSessionActive,
     reviewActive,
-    /* End lives on the live table chrome so the shared navbar can fully hide. */
+    /* End lives on the table chrome; the visible app switcher stays disabled. */
     showEndSessionInSwitcher: false,
     disabledNavbarActions: liveChromePolicy?.disabledNavbarActions ?? {},
     disabledNavbarActionTooltips:

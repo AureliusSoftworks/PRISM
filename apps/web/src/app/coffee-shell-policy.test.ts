@@ -6,7 +6,7 @@ import {
 } from "./coffee-shell-policy.ts";
 
 describe("Coffee shell policy", () => {
-  it("locks the full Coffee utility strip once the new session opens", () => {
+  it("locks Coffee navigation while keeping Appearance available", () => {
     for (const phase of ["topic", "arriving", "live"] as const) {
       const policy = coffeeShellPolicy({ conversationActive: true, phase });
       assert.equal(policy.liveSessionActive, true);
@@ -15,7 +15,7 @@ describe("Coffee shell policy", () => {
       assert.equal(policy.disabledNavbarActions.voice, true);
       assert.equal(policy.disabledNavbarActions.memories, true);
       assert.equal(policy.disabledNavbarActions.usage, true);
-      assert.equal(policy.disabledNavbarActions.theme, true);
+      assert.equal(policy.disabledNavbarActions.theme, undefined);
       assert.deepEqual(policy.disabledNavbarActions, {
         promptCenter: true,
         refresh: true,
@@ -25,7 +25,6 @@ describe("Coffee shell policy", () => {
         memories: true,
         images: true,
         bots: true,
-        theme: true,
       });
       assert.equal(
         policy.disabledNavbarActionTooltips.settings,
@@ -38,12 +37,12 @@ describe("Coffee shell policy", () => {
     }
   });
 
-  it("locks the full Signal utility strip including Voice while recording", () => {
+  it("locks Signal navigation including Voice while keeping Appearance available", () => {
     const policy = liveSessionChromePolicy("Signal");
     assert.equal(policy.disabledNavbarActions.voice, true);
     assert.equal(policy.disabledNavbarActions.memories, true);
     assert.equal(policy.disabledNavbarActions.usage, true);
-    assert.equal(policy.disabledNavbarActions.theme, true);
+    assert.equal(policy.disabledNavbarActions.theme, undefined);
     assert.deepEqual(policy.disabledNavbarActions, {
       promptCenter: true,
       refresh: true,
@@ -53,7 +52,6 @@ describe("Coffee shell policy", () => {
       memories: true,
       images: true,
       bots: true,
-      theme: true,
     });
     assert.match(
       policy.disabledNavbarActionTooltips.voice ?? "",
@@ -74,6 +72,13 @@ describe("Coffee shell policy", () => {
       policy.disabledNavbarActionTooltips.voice ?? "",
       /frozen for this Duel/u,
     );
+  });
+
+  it("locks Story chrome while generation or playback owns the session", () => {
+    const policy = liveSessionChromePolicy("Story");
+    assert.match(policy.lockMessage, /Start a new Story/u);
+    assert.equal(policy.disabledNavbarActions.settings, true);
+    assert.equal(policy.disabledNavbarActions.theme, undefined);
   });
 
   it("treats a loaded finished conversation as review before replay starts", () => {

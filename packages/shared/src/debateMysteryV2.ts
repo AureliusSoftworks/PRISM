@@ -20,7 +20,12 @@ import type {
   MansionMusicLoopV1,
   MansionAtmosphereLibraryStateV1,
 } from "./mansionMusic.js";
-import type { MansionLayoutV2, MysteryVenueProfileV1 } from "./mansionLayoutV2.js";
+import {
+  MANSION_LAYOUT_V2_COLUMNS,
+  MANSION_LAYOUT_V2_ROWS,
+  type MansionLayoutV2,
+  type MysteryVenueProfileV1,
+} from "./mansionLayoutV2.js";
 import type {
   EvidencePropBindingV1,
   MansionPropThemeV1,
@@ -111,15 +116,185 @@ export const DEBATE_MYSTERY_V2_PRESETS: readonly DebateMysteryPresetV2[] = [
 ] as const;
 
 export interface DebateMysteryAssetSynthesisV2 {
+  /** Case-scoped establishing art. Reusable venue sources remain immutable. */
+  exterior?: boolean;
   evidence: boolean;
   /** ONLINE-only template edits. LOCAL cases retain bundled room art. */
   rooms: boolean;
-  /** Upgrade the complete synthesized room pack from Pixel Art to Realistic before play. */
+  /** Prepare optional HD derivatives from the complete Mosaic room pack before play. */
   illustratedRooms: boolean;
   /** ONLINE-only instrumental mansion theme. Failure keeps the bundled bed. */
   music: boolean;
   /** Optional mansion identity. LOCAL uses deterministic procedural/shared acoustics only. */
   ambience: boolean;
+  /** Prepare the frozen cast's performance voices before prose authoring. */
+  voices?: boolean;
+}
+
+export const DEBATE_MYSTERY_PRODUCTION_CATEGORIES_V1 = [
+  "exterior",
+  "clue_props",
+  "mosaic_rooms",
+  "realistic_rooms",
+  "music",
+  "ambience",
+  "voices",
+] as const;
+export type DebateMysteryProductionCategoryV1 = typeof DEBATE_MYSTERY_PRODUCTION_CATEGORIES_V1[number];
+export type DebateMysteryProductionSourceCodeV1 =
+  | "generated"
+  | "reused_case_asset"
+  | "reused_venue_asset"
+  | "bundled_compatible"
+  | "abstract_compatible"
+  | "provider_unavailable"
+  | "privacy_mode_unavailable"
+  | "generation_failed"
+  | "not_requested";
+
+export interface DebateMysteryProductionCategoryReadinessV1 {
+  requestedCount: number;
+  generatedCount: number;
+  reusedCount: number;
+  fallbackCount: number;
+  unavailableCount: number;
+  sourceCode: DebateMysteryProductionSourceCodeV1;
+  publicReason: string;
+}
+
+export interface DebateMysteryProductionReadinessV1 {
+  version: 1;
+  status: "complete" | "review_required" | "accepted_with_fallbacks";
+  categories: Record<DebateMysteryProductionCategoryV1, DebateMysteryProductionCategoryReadinessV1>;
+  fallbackAcknowledgedAt: string | null;
+}
+
+export interface DebateMysteryAmbientSpaceV1 {
+  id: string;
+  floor: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  pattern: "outboard-band" | "inboard-compartment" | "closed-volume";
+}
+
+/** Case-scoped public massing. Ambient shapes are deliberately anonymous and
+ * carry no traversal, art, clue, focus, or authored venue-room identity. */
+export interface DebateMysterySpatialProjectionV1 {
+  version: 1;
+  activeRoomIds: string[];
+  gatedRoomIds: string[];
+  ambientSpaces: DebateMysteryAmbientSpaceV1[];
+  promotedAmbientSpaces: Array<{
+    ambientId: string;
+    roomId: string;
+    floor: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }>;
+}
+
+function pointInsideVenueOutlineV1(
+  x: number,
+  y: number,
+  points: readonly { x: number; y: number }[],
+): boolean {
+  let inside = false;
+  for (let index = 0, previous = points.length - 1; index < points.length; previous = index++) {
+    const a = points[index]!;
+    const b = points[previous]!;
+    if ((a.y > y) !== (b.y > y) && x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+export function projectDebateMysteryVenueSpatialV1(args: {
+  layout: MansionLayoutV2 | null | undefined;
+  activeRoomIds: readonly string[];
+  gatedRoomIds?: readonly string[];
+  promotions?: readonly { ambientId: string; roomId: string }[];
+}): DebateMysterySpatialProjectionV1 | null {
+  const layout = args.layout;
+  if (!layout?.venueProfile) return null;
+  const reusableRoomIds = new Set(layout.entities.flatMap((entity) =>
+    entity.kind === "room" ? [entity.id] : []
+  ));
+  const gatedRoomIds = [...new Set(args.gatedRoomIds ?? [])].filter((id) => reusableRoomIds.has(id));
+  const gatedRoomIdSet = new Set(gatedRoomIds);
+  const activeRoomIds = [...new Set(args.activeRoomIds)].filter((id) =>
+    reusableRoomIds.has(id) && !gatedRoomIdSet.has(id)
+  );
+  const spaces: DebateMysteryAmbientSpaceV1[] = [];
+  for (let floor = 1; floor <= layout.venueProfile.tierLabels.length; floor += 1) {
+    const occupied = new Set<string>();
+    for (const entity of layout.entities.filter((candidate) => candidate.floor === floor)) {
+      const width = entity.kind === "room" && entity.rotation === 90
+        ? entity.venueContract?.footprint.height ?? 1
+        : entity.kind === "room" ? entity.venueContract?.footprint.width ?? 1 : entity.width;
+      const height = entity.kind === "room" && entity.rotation === 90
+        ? entity.venueContract?.footprint.width ?? 1
+        : entity.kind === "room" ? entity.venueContract?.footprint.height ?? 1 : entity.height;
+      for (let y = entity.y; y < entity.y + height; y += 1) {
+        for (let x = entity.x; x < entity.x + width; x += 1) occupied.add(`${x}:${y}`);
+      }
+    }
+    const outline = layout.venuePresentation?.tierOutlines.find((entry) => entry.floor === floor)?.points ?? null;
+    const runs: Array<Omit<DebateMysteryAmbientSpaceV1, "id">> = [];
+    for (let y = 0; y < MANSION_LAYOUT_V2_ROWS; y += 1) {
+      let start = -1;
+      for (let x = 0; x <= MANSION_LAYOUT_V2_COLUMNS; x += 1) {
+        const within = x < MANSION_LAYOUT_V2_COLUMNS &&
+          (outline ? pointInsideVenueOutlineV1((x + 0.5) / MANSION_LAYOUT_V2_COLUMNS, (y + 0.5) / MANSION_LAYOUT_V2_ROWS, outline) : true) &&
+          !occupied.has(`${x}:${y}`);
+        if (within && start < 0) start = x;
+        if ((!within || x === MANSION_LAYOUT_V2_COLUMNS) && start >= 0) {
+          const width = x - start;
+          if (width > 0) runs.push({
+            floor, x: start, y, width, height: 1,
+            pattern: y <= 2 || y >= MANSION_LAYOUT_V2_ROWS - 3
+              ? "outboard-band"
+              : start <= 4 ? "inboard-compartment" : "closed-volume",
+          });
+          start = -1;
+        }
+      }
+    }
+    for (const run of runs) {
+      const previous = spaces.at(-1);
+      if (previous && previous.floor === run.floor && previous.x === run.x && previous.width === run.width &&
+        previous.pattern === run.pattern && previous.y + previous.height === run.y) {
+        previous.height += 1;
+      } else {
+        spaces.push({ ...run, id: `ambient:${floor}:${run.x}:${run.y}:${run.width}` });
+      }
+    }
+  }
+  const promotionByAmbientId = new Map((args.promotions ?? []).map((entry) => [entry.ambientId, entry.roomId]));
+  const promotedAmbientSpaces = spaces.flatMap((space) => {
+    const roomId = promotionByAmbientId.get(space.id);
+    return roomId ? [{ ambientId: space.id, roomId, floor: space.floor, x: space.x, y: space.y, width: space.width, height: space.height }] : [];
+  });
+  return {
+    version: 1,
+    activeRoomIds: [...activeRoomIds, ...promotedAmbientSpaces.map((entry) => entry.roomId)],
+    gatedRoomIds,
+    ambientSpaces: spaces.filter((space) => !promotionByAmbientId.has(space.id)),
+    promotedAmbientSpaces,
+  };
+}
+
+export interface DebateMysteryProductionCapabilityV1 {
+  category: DebateMysteryProductionCategoryV1;
+  available: boolean;
+  publicReason: string;
+}
+
+export interface DebateMysteryProductionCapabilitiesV1 {
+  version: 1;
+  capabilities: DebateMysteryProductionCapabilityV1[];
 }
 
 export type DebateMysterySealedAssetKindV1 = "evidence" | "room";
@@ -458,6 +633,7 @@ export interface DebateMysteryCompilationSubstepV2 {
 }
 export type DebateMysteryPlayPhaseV2 =
   | "case_forge"
+  | "production_review"
   | "title_card"
   /** The embodied player's pre-authored internal briefing before scene arrival. */
   | "case_opening"
@@ -859,7 +1035,15 @@ export interface DebateMysteryCompilationStatusV2 {
   substeps: DebateMysteryCompilationSubstepV2[];
   retryable: boolean;
   /** Stable public diagnostic code. Never derived from the private compiler error. */
-  publicFailureCode?: "CASE_FORGE_COMPILATION_STOPPED" | "CASE_FORGE_LOCAL_AUDIO_FAILED" | null;
+  publicFailureCode?:
+    | "CASE_FORGE_COMPILATION_STOPPED"
+    | "CASE_FORGE_EMPTY_OUTPUT"
+    | "CASE_FORGE_INVALID_STRUCTURE"
+    | "CASE_FORGE_TIMEOUT"
+    | "CASE_FORGE_VALIDATION_FAILED"
+    | "CASE_FORGE_LOCAL_AUDIO_FAILED"
+    | "CASE_FORGE_ASSET_GENERATION_FAILED"
+    | null;
   /** Last spoiler-safe work stage before recovery. Optional for frozen legacy cases. */
   publicFailureStage?: Exclude<
     DebateMysteryCompilationStageV2,
@@ -868,6 +1052,10 @@ export interface DebateMysteryCompilationStatusV2 {
   spoilerSafeMessage: string;
   /** Stable start time used for a live elapsed clock across reloads/restarts. */
   startedAt: string;
+  /** Additive retry clocks. Legacy cases continue to use startedAt/elapsedMs. */
+  attemptStartedAt?: string;
+  attemptElapsedMs?: number;
+  cumulativeElapsedMs?: number;
   /** Server snapshot; clients may advance it from startedAt while work is active. */
   elapsedMs: number;
   /** Spoiler-safe estimate derived only from completed durable pass history. */
@@ -1429,6 +1617,7 @@ export interface DebateWhodunnitFormatStateV2 {
   victim: { id: string; name: string } | null;
   suspects: DebateMysteryPublicSuspectSnapshotV1[];
   rooms: DebateMysteryRoomV2[];
+  spatialProjection?: DebateMysterySpatialProjectionV1 | null;
   /** Immediate, spoiler-safe exterior establishing shot for the title card. */
   mansionExterior?: DebateMysterySealedAssetRefV1 | null;
   /** Public because the opening scene is visible; never derived from a clue. */
@@ -1458,6 +1647,8 @@ export interface DebateWhodunnitFormatStateV2 {
   court: DebateMysteryCourtStateV2 | null;
   verdict: DebateMysteryVerdictV2 | null;
   readiness: DebateMysteryPlayReadinessV1;
+  /** Presentation-only generation ledger. Missing on legacy and imported cases. */
+  productionReadiness?: DebateMysteryProductionReadinessV1 | null;
   audioReady: boolean;
   voicesEnabled: boolean;
   localAudioFailure: string | null;
@@ -2400,24 +2591,24 @@ export function debateMysteryPremiumAvailableV2(): false {
   return false;
 }
 
-/** Case Forge may add evidence and music to an installed mansion, but never
- * replace that reusable mansion's rooms or ambience. */
+/** Production assets are case-scoped even when their venue came from the
+ * reusable library. The installed source record is never mutated. */
 export function resolveDebateMysteryAssetSynthesisV2(input: {
   assetSynthesis?: Partial<DebateMysteryAssetSynthesisV2> | Record<string, unknown>;
   investigationMode?: DebateMysteryInvestigationModeV2;
   mansionBundleId?: string | null;
 }): DebateMysteryAssetSynthesisV2 {
-  const hasInstalledMansion = Boolean(input.mansionBundleId?.trim());
   const includesInvestigation = input.investigationMode !== "court_only";
   return {
+    ...(input.assetSynthesis && "exterior" in input.assetSynthesis
+      ? { exterior: includesInvestigation && input.assetSynthesis.exterior === true }
+      : {}),
     evidence: input.assetSynthesis?.evidence === true,
     rooms:
       includesInvestigation &&
-      !hasInstalledMansion &&
       input.assetSynthesis?.rooms === true,
     illustratedRooms:
       includesInvestigation &&
-      !hasInstalledMansion &&
       input.assetSynthesis?.rooms === true &&
       input.assetSynthesis?.illustratedRooms === true,
     music:
@@ -2425,8 +2616,81 @@ export function resolveDebateMysteryAssetSynthesisV2(input: {
       input.assetSynthesis?.music === true,
     ambience:
       includesInvestigation &&
-      !hasInstalledMansion &&
       input.assetSynthesis?.ambience === true,
+    ...(input.assetSynthesis && "voices" in input.assetSynthesis
+      ? { voices: input.assetSynthesis.voices === true }
+      : {}),
+  };
+}
+
+export function resolveDebateMysteryProductionCapabilitiesV1(args: {
+  responseMode: "local" | "online";
+  localVoiceAvailable: boolean;
+}): DebateMysteryProductionCapabilitiesV1 {
+  const online = args.responseMode === "online";
+  return {
+    version: 1,
+    capabilities: DEBATE_MYSTERY_PRODUCTION_CATEGORIES_V1.map((category) => {
+      if (category === "voices") {
+        return {
+          category,
+          available: args.localVoiceAvailable,
+          publicReason: args.localVoiceAvailable
+            ? "A short local calibration will verify the frozen cast before Case Forge."
+            : "The local performance voice service is unavailable; continue text-only or return to Production.",
+        };
+      }
+      if (category === "music" || category === "ambience") {
+        return {
+          category,
+          available: online,
+          publicReason: online
+            ? "This request is audited at Production Readiness; any venue audio reuse or compatible fallback is disclosed before Start."
+            : "This category needs ONLINE generation; LOCAL keeps only compatible packaged fallbacks.",
+        };
+      }
+      return {
+        category,
+        available: online,
+        publicReason: online
+          ? "Available as a case-scoped production asset."
+          : "This category needs ONLINE generation; LOCAL keeps only compatible packaged fallbacks.",
+      };
+    }),
+  };
+}
+
+export function createDebateMysteryProductionReadinessV1(
+  categories: Partial<Record<DebateMysteryProductionCategoryV1, Partial<DebateMysteryProductionCategoryReadinessV1>>>,
+): DebateMysteryProductionReadinessV1 {
+  const normalized = Object.fromEntries(DEBATE_MYSTERY_PRODUCTION_CATEGORIES_V1.map((category) => {
+    const source = categories[category] ?? {};
+    const requestedCount = Math.max(0, Math.floor(source.requestedCount ?? 0));
+    const generatedCount = Math.max(0, Math.floor(source.generatedCount ?? 0));
+    const reusedCount = Math.max(0, Math.floor(source.reusedCount ?? 0));
+    const fallbackCount = Math.max(0, Math.floor(source.fallbackCount ?? 0));
+    const unavailableCount = Math.max(0, Math.floor(source.unavailableCount ?? 0));
+    return [category, {
+      requestedCount,
+      generatedCount,
+      reusedCount,
+      fallbackCount,
+      unavailableCount,
+      sourceCode: source.sourceCode ?? (requestedCount > 0 ? "generation_failed" : "not_requested"),
+      publicReason: source.publicReason ?? (requestedCount > 0
+        ? "This requested production category needs review."
+        : "Not requested for this case."),
+    } satisfies DebateMysteryProductionCategoryReadinessV1];
+  })) as Record<DebateMysteryProductionCategoryV1, DebateMysteryProductionCategoryReadinessV1>;
+  const reviewRequired = Object.values(normalized).some((category) =>
+    category.requestedCount > 0 &&
+    (category.reusedCount > 0 || category.fallbackCount > 0 || category.unavailableCount > 0)
+  );
+  return {
+    version: 1,
+    status: reviewRequired ? "review_required" : "complete",
+    categories: normalized,
+    fallbackAcknowledgedAt: null,
   };
 }
 
@@ -2443,9 +2707,6 @@ export function resolveDebateMysteryConfigV2(
   const suspectBotIds = value.suspectBotIds.map((id) => id.trim()).filter(Boolean);
   if (suspectBotIds.length < 4 || suspectBotIds.length > 8) {
     throw new Error("Whodunnit V2 requires four to eight suspects.");
-  }
-  if (preset !== "custom" && suspectBotIds.length !== presetDefaults.suspects) {
-    throw new Error(`${preset} Whodunnit requires ${presetDefaults.suspects} suspects.`);
   }
   const trialType: DebateMysteryTrialTypeV2 = value.trialType === "bench" ? "bench" : "jury";
   const jurorBotIds = value.jurorBotIds.map((id) => id.trim()).filter(Boolean);
@@ -2476,6 +2737,9 @@ export function resolveDebateMysteryConfigV2(
   const totalRooms = preset === "custom"
     ? Math.min(18, Math.max(suspectBotIds.length + 1, Math.floor(value.totalRooms ?? 10)))
     : presetDefaults.rooms;
+  if (suspectBotIds.length >= totalRooms) {
+    throw new Error("Whodunnit V2 requires fewer suspects than investigation rooms.");
+  }
   const {
     prosecutorPartnerBotId: _legacyProsecutorPartnerBotId,
     prosecutorBotId: _inputProsecutorBotId,
@@ -2774,6 +3038,88 @@ export function normalizeDebateMysteryFormatStateV2(
           contractHash: null,
           checkedAt: null,
         };
+  const productionReadinessSource = source.productionReadiness &&
+    typeof source.productionReadiness === "object"
+    ? source.productionReadiness as Partial<DebateMysteryProductionReadinessV1>
+    : null;
+  const normalizedProductionReadiness = productionReadinessSource?.version === 1 &&
+    productionReadinessSource.categories && typeof productionReadinessSource.categories === "object"
+    ? (() => {
+        const normalized = createDebateMysteryProductionReadinessV1(
+          productionReadinessSource.categories,
+        );
+        return {
+          ...normalized,
+          status: productionReadinessSource.status === "accepted_with_fallbacks"
+            ? "accepted_with_fallbacks" as const
+            : normalized.status,
+          fallbackAcknowledgedAt:
+            typeof productionReadinessSource.fallbackAcknowledgedAt === "string"
+              ? productionReadinessSource.fallbackAcknowledgedAt
+              : null,
+        };
+      })()
+    : null;
+  const spatialProjectionSource = source.spatialProjection &&
+    typeof source.spatialProjection === "object"
+    ? source.spatialProjection as Partial<DebateMysterySpatialProjectionV1>
+    : null;
+  const normalizeProjectionRect = (value: unknown) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const candidate = value as Record<string, unknown>;
+    const floor = Number(candidate.floor);
+    const x = Number(candidate.x);
+    const y = Number(candidate.y);
+    const width = Number(candidate.width);
+    const height = Number(candidate.height);
+    return [floor, x, y, width, height].every(Number.isInteger) && floor >= 1 &&
+      x >= 0 && y >= 0 && width > 0 && height > 0 &&
+      x + width <= MANSION_LAYOUT_V2_COLUMNS && y + height <= MANSION_LAYOUT_V2_ROWS
+      ? { floor, x, y, width, height }
+      : null;
+  };
+  const normalizedSpatialProjection: DebateMysterySpatialProjectionV1 | null =
+    spatialProjectionSource?.version === 1 &&
+    Array.isArray(spatialProjectionSource.activeRoomIds) &&
+    Array.isArray(spatialProjectionSource.gatedRoomIds) &&
+    Array.isArray(spatialProjectionSource.ambientSpaces) &&
+    Array.isArray(spatialProjectionSource.promotedAmbientSpaces)
+      ? (() => {
+          const gatedRoomIds = [...new Set(spatialProjectionSource.gatedRoomIds.flatMap(
+            (id) => typeof id === "string" && id.trim() ? [id.trim().slice(0, 160)] : [],
+          ))].slice(0, 18);
+          const gatedRoomIdSet = new Set(gatedRoomIds);
+          return {
+          version: 1,
+          activeRoomIds: [...new Set(spatialProjectionSource.activeRoomIds.flatMap(
+            (id) => typeof id === "string" && id.trim() && !gatedRoomIdSet.has(id.trim())
+              ? [id.trim().slice(0, 160)]
+              : [],
+          ))].slice(0, 18),
+          gatedRoomIds,
+          ambientSpaces: spatialProjectionSource.ambientSpaces.slice(0, 256).flatMap((value) => {
+            const rect = normalizeProjectionRect(value);
+            const candidate = value as Partial<DebateMysteryAmbientSpaceV1>;
+            return rect && typeof candidate.id === "string" && candidate.id.trim() &&
+              (candidate.pattern === "outboard-band" || candidate.pattern === "inboard-compartment" || candidate.pattern === "closed-volume")
+              ? [{ id: candidate.id.trim().slice(0, 160), pattern: candidate.pattern, ...rect }]
+              : [];
+          }),
+          promotedAmbientSpaces: spatialProjectionSource.promotedAmbientSpaces.slice(0, 18).flatMap((value) => {
+            const rect = normalizeProjectionRect(value);
+            const candidate = value as { ambientId?: unknown; roomId?: unknown };
+            return rect && typeof candidate.ambientId === "string" && candidate.ambientId.trim() &&
+              typeof candidate.roomId === "string" && candidate.roomId.trim()
+              ? [{
+                  ambientId: candidate.ambientId.trim().slice(0, 160),
+                  roomId: candidate.roomId.trim().slice(0, 160),
+                  ...rect,
+                }]
+              : [];
+          }),
+        };
+        })()
+      : null;
   const rawCompilationSubsteps = (
     source.compilation as unknown as Record<string, unknown>
   ).substeps;
@@ -2903,6 +3249,26 @@ export function normalizeDebateMysteryFormatStateV2(
         typeof source.compilation.startedAt === "string"
           ? source.compilation.startedAt
           : source.compilation.updatedAt,
+      attemptStartedAt:
+        typeof source.compilation.attemptStartedAt === "string"
+          ? source.compilation.attemptStartedAt
+          : typeof source.compilation.startedAt === "string"
+            ? source.compilation.startedAt
+            : source.compilation.updatedAt,
+      attemptElapsedMs:
+        typeof source.compilation.attemptElapsedMs === "number" &&
+        Number.isFinite(source.compilation.attemptElapsedMs)
+          ? Math.max(0, Math.round(source.compilation.attemptElapsedMs))
+          : typeof source.compilation.elapsedMs === "number" && Number.isFinite(source.compilation.elapsedMs)
+            ? Math.max(0, Math.round(source.compilation.elapsedMs))
+            : 0,
+      cumulativeElapsedMs:
+        typeof source.compilation.cumulativeElapsedMs === "number" &&
+        Number.isFinite(source.compilation.cumulativeElapsedMs)
+          ? Math.max(0, Math.round(source.compilation.cumulativeElapsedMs))
+          : typeof source.compilation.elapsedMs === "number" && Number.isFinite(source.compilation.elapsedMs)
+            ? Math.max(0, Math.round(source.compilation.elapsedMs))
+            : 0,
       elapsedMs:
         typeof source.compilation.elapsedMs === "number" &&
         Number.isFinite(source.compilation.elapsedMs)
@@ -2920,6 +3286,8 @@ export function normalizeDebateMysteryFormatStateV2(
           : 0,
     },
     identityMirrorTargetSnapshots,
+    productionReadiness: normalizedProductionReadiness,
+    spatialProjection: normalizedSpatialProjection,
     crimeSceneRoomId:
       typeof source.crimeSceneRoomId === "string" &&
       source.rooms.some((room) => room.id === source.crimeSceneRoomId)
@@ -3009,6 +3377,9 @@ function mysteryStyleHash(value: string): string {
 
 export function debateMysteryAcousticThemePaletteV1(directionInput: string): string {
   const direction = directionInput.toLocaleLowerCase();
+  if (/\b(?:passenger cruise ship|cruise ship|cruise liner|ocean liner|promenade deck|gangway)\b/u.test(direction)) {
+    return "maritime-passenger-v1";
+  }
   if (/\b(?:space|spacecraft|starship|spaceship|orbital|airlock|reactor|hull)\b/u.test(direction)) {
     return "spacecraft-industrial-v1";
   }
@@ -3075,6 +3446,7 @@ export function debateMysteryAtmosphereContractV1(
   const lower = direction.toLocaleLowerCase();
   const isSpace = /\b(?:space|spacecraft|starship|spaceship|orbital|airlock|reactor|hull)\b/u.test(lower);
   const isJungle = /\b(?:jungle|wilderness|canopy|rainforest|foliage|swamp)\b/u.test(lower);
+  const isPassengerShip = /\b(?:passenger cruise ship|cruise ship|cruise liner|ocean liner|promenade deck|gangway)\b/u.test(lower);
   const weather: MansionAtmosphereContractV1["weather"] =
     /\b(?:storm|thunder|tempest|rain-lashed)\b/u.test(lower) ? "storm"
       : /\b(?:rain|drizzle|downpour)\b/u.test(lower) ? "rain"
@@ -3094,11 +3466,15 @@ export function debateMysteryAtmosphereContractV1(
     timeOfDay,
     exteriorSetting: isSpace
       ? "a sealed vessel beyond a planetary atmosphere"
+      : isPassengerShip
+        ? "a full-size passenger ship at sea with ocean exposure beyond its working decks"
       : isJungle
         ? "dense wet wilderness surrounding the structure"
         : "the mansion grounds and surrounding landscape",
     houseCondition: isSpace
       ? "operational pressure vessel with lived-in mechanical systems"
+      : isPassengerShip
+        ? "operational passenger ship with steel decks, service machinery, and weather-facing promenades"
       : /\b(?:ruin|decay|derelict|abandoned|crumbling)\b/u.test(lower)
         ? "weathered structure with audible age"
         : "lived-in structure with coherent materials",
@@ -3106,6 +3482,8 @@ export function debateMysteryAtmosphereContractV1(
       ? "restrained unease"
       : isSpace
         ? "isolated technological calm"
+        : isPassengerShip
+          ? "open-ocean isolation under calm passenger polish"
         : isJungle
           ? "humid watchfulness"
           : "cinematic mystery",

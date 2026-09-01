@@ -55,13 +55,15 @@ function clampByte(value: number): number {
   return Math.max(0, Math.min(255, Math.round(value)));
 }
 
-/** Apply the approved presentation-only Mosaic grid to a gridless authored
- * Pixel Art plate. Each 320x180 logical sample owns one complete tessera and
+/** Apply the approved presentation-only grid to the authored Mosaic base.
+ * Each 320x180 logical sample owns one complete tessera and
  * is expanded with nearest-neighbour resampling before separators are drawn.
  * The line color is derived from its adjacent logical source sample, then
  * shifted gently lighter or darker around the scene's own median grid
  * luminance. Normal/over blending preserves hue and avoids an exposure lift.
- * The grid is never used as a Realistic-upgrade reference. */
+ * The stored gridless source remains the same authored Mosaic composition so
+ * an HD derivative can recover smooth detail without introducing a second
+ * player-selectable room-art style. */
 export async function applyDebateMysteryMosaicPresentationV1(
   input: Buffer,
   options: { format?: DebateMysteryRoomArtFormatV1 } = {},
@@ -182,9 +184,9 @@ export async function applyDebateMysteryMosaicPresentationV1(
   };
 }
 
-/** Normalize an already-authored Pixel Art plate for storage or a Realistic
- * upgrade reference. This deliberately does not create Pixel Art from a
- * realistic image: no quantization, palette reduction, posterization, or
+/** Normalize an already-authored Mosaic base for storage or an HD-derivative
+ * reference. This deliberately does not create Mosaic art from another room
+ * image: no quantization, palette reduction, posterization, or
  * nearest-neighbour resampling occurs here. The legacy variant names remain
  * internal compatibility seams for saved preferences and URLs. */
 export async function renderDebateMysteryRoomArtV1(
@@ -228,10 +230,10 @@ export function buildDebateMysteryIllustratedRoomUpgradePromptV1(args: {
   roomBrief: string;
 }): string {
   return [
-    `Create a polished realistic version of this exact ${args.roomName} investigation room.`,
+    `Create a polished high-definition interpretation of this exact ${args.roomName} investigation room Mosaic.`,
     args.houseStylePrompt.trim(),
     args.roomBrief.trim(),
-    "Treat the supplied high-resolution pixel-art room image as a strict composition and geometry reference.",
+    "Treat the supplied high-resolution Mosaic room image as the sole strict composition and geometry reference.",
     "Preserve its camera, walls, floor divisions, stairs, doors, traversal openings, furniture anchors, inspection regions, and evidence-safe sightlines.",
     "Restore believable natural materials, photographic depth, nuanced lighting, and smooth edges without changing navigation, introducing people, or inventing clues, text, symbols, blood, weapons, or case facts.",
     "Return an unoccupied 16:9 room plate. Presentation changes only; the mystery remains immutable.",

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
@@ -24,7 +24,17 @@ import {
   validateDebateMysteryAssetPixelsV1,
 } from "../debate-mystery-assets.ts";
 
+const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+
 describe("sealed mystery asset vision review", () => {
+  it("treats venue-specific built-ins as architecture rather than evidence", () => {
+    assert.match(
+      serverSource,
+      /ship bridge navigation consoles, engine-control panels, galley equipment, security desks or cameras, cabin berths, railings, lifebuoys, and promenade safety fixtures/u,
+    );
+    assert.match(serverSource, /unless they contain a separately prohibited element/u);
+  });
+
   it("discards speculative objections but preserves concrete visual defects", () => {
     assert.deepEqual(
       normalizeDebateMysteryAssetVisionReviewV1({

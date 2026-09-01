@@ -924,10 +924,9 @@ export function createDebateMysteryVenueBundleV1(
     throw new HttpError(400, "Mystery Venue proposal ID is invalid.");
   }
   const existing = db.prepare(
-    "SELECT user_id FROM debate_mystery_mansion_bundles WHERE id = ? LIMIT 1",
-  ).get(proposed.id) as { user_id: string } | undefined;
+    "SELECT user_id FROM debate_mystery_mansion_bundles WHERE user_id = ? AND id = ? LIMIT 1",
+  ).get(userId, proposed.id) as { user_id: string } | undefined;
   if (existing) {
-    if (existing.user_id !== userId) throw new HttpError(409, "That venue proposal is no longer available.");
     return getDebateMysteryMansionBundleV2(db, userId, proposed.id);
   }
   const proposal = createMysteryVenueProposalV1({
@@ -950,6 +949,8 @@ export function createDebateMysteryVenueBundleV1(
   const houseStyle: DebateMysteryHouseStyleV2 = {
     ...baseHouseStyle,
     label: proposal.profile.kindLabel,
+    acousticThemePaletteId:
+      proposal.profile.presentation?.compatibleAcousticFamilies[0] ?? baseHouseStyle.acousticThemePaletteId,
     promptContract: baseHouseStyle.promptContract
       .replaceAll("One-house", "One-venue")
       .replaceAll("the same mansion", `the same ${proposal.profile.placeNoun}`)
@@ -965,6 +966,9 @@ export function createDebateMysteryVenueBundleV1(
     sourceTitle: "Mystery Venue proposal",
     sourcePackageId: null,
     acceptedExteriorScaleClass: resolveDebateMysteryMansionExteriorScaleClassV1({
+      preset: proposal.profile.physicalScaleClass === "compact" ? "compact"
+        : proposal.profile.physicalScaleClass === "grand" ? "grand"
+          : "standard",
       floors: proposal.length.tiers,
       totalRooms: proposal.length.rooms,
     }),

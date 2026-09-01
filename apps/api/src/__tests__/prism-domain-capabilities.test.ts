@@ -333,6 +333,14 @@ describe("Prism Marketplace capability", () => {
   it("installs one exact bundled bot into server-backed Library state and undoes it", async () => {
     const db = fixture();
     try {
+      db.prepare(
+        `INSERT INTO users
+          (id, email, display_name, password_hash, password_salt,
+           wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
+           created_at, last_active_at)
+         VALUES ('u2', 'marketplace-u2@example.com', 'Marketplace U2', 'hash',
+                 'salt', 'cipher', 'iv', 'tag', ?, ?)`,
+      ).run("2026-07-26T01:00:00.000Z", "2026-07-26T01:00:00.000Z");
       const registry = createPrismDomainCapabilityRegistry();
       const marketplaceContext = {
         ...context(db),
@@ -376,6 +384,31 @@ describe("Prism Marketplace capability", () => {
         1,
       );
 
+      const secondOwnerContext = {
+        ...marketplaceContext,
+        userId: "u2",
+        userKey: Buffer.alloc(32, 10),
+      };
+      const secondProposal = await registry.createPreparedProposal({
+        context: secondOwnerContext,
+        capabilityId: "marketplace.install",
+        input: { query: "Install Silent Jack from the Marketplace" },
+      });
+      const secondRun = await registry.executeProposal({
+        context: secondOwnerContext,
+        proposalId: secondProposal.id,
+        confirmation: true,
+        idempotencyKey: "marketplace-silent-jack-u2",
+      });
+      assert.equal(secondRun.status, "committed");
+      const secondInstalled = db
+        .prepare(
+          "SELECT id, export_hash FROM bots WHERE user_id = 'u2' AND name = 'Silent Simon'",
+        )
+        .get() as { id: string; export_hash: string };
+      assert.notEqual(secondInstalled.id, installed.id);
+      assert.equal(secondInstalled.export_hash, installed.export_hash);
+
       const undone = registry.undo({
         context: {
           ...marketplaceContext,
@@ -395,6 +428,16 @@ describe("Prism Marketplace capability", () => {
             .get(installed.id) as { n: number }
         ).n,
         0,
+      );
+      assert.equal(
+        (
+          db
+            .prepare(
+              "SELECT COUNT(*) AS n FROM bots WHERE user_id = 'u2' AND id = ?",
+            )
+            .get(secondInstalled.id) as { n: number }
+        ).n,
+        1,
       );
     } finally {
       closeTestDatabase(db);

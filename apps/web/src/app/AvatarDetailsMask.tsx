@@ -51,6 +51,8 @@ export interface AvatarDetailsMaskProps {
   staticRaster?: boolean;
   coreColor?: "phosphor" | "ink";
   rasterSize?: number;
+  /** Uses hard source-cell expansion while retaining the normal phosphor glow. */
+  crispPresentation?: boolean;
   /** Hard nearest-neighbor cells; used when the Studio pixel grid is visible. */
   pixelPerfectInk?: boolean;
 }
@@ -72,6 +74,7 @@ interface AvatarDetailsEmissionPlanesProps {
   staticRaster?: boolean;
   coreColor: "phosphor" | "ink";
   rasterSize: number;
+  crispPresentation?: boolean;
   pixelPerfectInk?: boolean;
 }
 
@@ -87,12 +90,14 @@ function AvatarDetailsEmissionPlanes({
   staticRaster = false,
   coreColor,
   rasterSize,
+  crispPresentation = false,
   pixelPerfectInk = false,
 }: AvatarDetailsEmissionPlanesProps): React.JSX.Element | null {
   const glowCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const coreCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [staticRasterUrl, setStaticRasterUrl] = useState<string | null>(null);
-  const resampleMode = pixelPerfectInk ? "nearest" : "coverage";
+  const resampleMode =
+    pixelPerfectInk || crispPresentation ? "nearest" : "coverage";
   const rasterizedGlowPixels = useMemo(
     () =>
       rasterSize === AVATAR_DETAILS_CANVAS_SIZE
@@ -266,6 +271,7 @@ function AvatarDetailsEmissionPlanes({
         data-avatar-details-mask="true"
         data-avatar-details-emission="core"
         data-avatar-details-rendering="static-raster"
+        data-avatar-details-resampling={resampleMode}
         data-avatar-details-depth={depth}
         data-avatar-details-ink-role={inkRole}
         data-avatar-details-render-detail={detailLevel}
@@ -320,10 +326,13 @@ function AvatarDetailsEmissionPlanes({
             data-avatar-details-mask="true"
             data-avatar-details-raster="core"
             data-avatar-details-rendering={
-              pixelPerfectInk || rasterSize === AVATAR_DETAILS_CANVAS_SIZE
+              pixelPerfectInk ||
+              crispPresentation ||
+              rasterSize === AVATAR_DETAILS_CANVAS_SIZE
                 ? "nearest-neighbor"
                 : "coverage-sampled"
             }
+            data-avatar-details-resampling={resampleMode}
             data-avatar-details-mask-size={rasterSize}
             aria-hidden
           />
@@ -354,6 +363,7 @@ export function AvatarDetailsMask({
   staticRaster = false,
   coreColor = "phosphor",
   rasterSize = AVATAR_DETAILS_CANVAS_SIZE,
+  crispPresentation = false,
   pixelPerfectInk = false,
 }: AvatarDetailsMaskProps): React.JSX.Element | null {
   const normalizedRasterSize = Number.isFinite(rasterSize)
@@ -458,6 +468,7 @@ export function AvatarDetailsMask({
         staticRaster={staticRaster}
         coreColor={coreColor}
         rasterSize={normalizedRasterSize}
+        crispPresentation={crispPresentation}
         pixelPerfectInk={pixelPerfectInk}
       />
       {speechPixels && speechMotion ? (
@@ -473,6 +484,7 @@ export function AvatarDetailsMask({
           staticRaster={staticRaster}
           coreColor={coreColor}
           rasterSize={normalizedRasterSize}
+          crispPresentation={crispPresentation}
           pixelPerfectInk={pixelPerfectInk}
         />
       ) : null}

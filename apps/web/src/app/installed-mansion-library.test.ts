@@ -285,27 +285,27 @@ describe("installed mansion library", () => {
     const dialog = readFileSync(new URL("./WhodunnitSetupDialog.tsx", import.meta.url), "utf8");
     const experience = readFileSync(new URL("./DebateExperience.tsx", import.meta.url), "utf8");
     const styles = readFileSync(new URL("./debateMystery.module.css", import.meta.url), "utf8");
-    assert.match(component, /Installed Mansions/u);
+    assert.match(component, /Mystery Venues/u);
     assert.match(component, /data-tutorial-target="whodunnit-installed-mansions"/u);
     assert.match(component, /data-tutorial-target="whodunnit-random-mansion"/u);
-    assert.match(component, /Random installed mansion/u);
-    assert.match(component, /Use this mansion/u);
+    assert.match(component, /Random Mystery Venue/u);
+    assert.match(component, /Use this venue/u);
     assert.match(component, /className=\{styles\.installedMansionOrigin\}/u);
     assert.match(component, /origin\.kind === "derived" \? "↗" : "✦"/u);
     assert.match(component, /data-tutorial-target="whodunnit-edit-mansion"/u);
     assert.match(component, /Choose exterior cover/u);
-    assert.match(component, /title="Edit mansion details"/u);
-    assert.match(component, /Duplicate & edit mansion/u);
-    assert.match(component, /Open Mansion Editor/u);
+    assert.match(component, /title="Edit venue details"/u);
+    assert.match(component, /Duplicate & edit venue/u);
+    assert.match(component, /Open Venue Editor/u);
     assert.match(component, /data-tutorial-target="whodunnit-mansion-soundscape"/u);
     assert.match(component, /data-tutorial-target="whodunnit-mansion-prop-theme"/u);
     assert.match(component, /16\/16 themed props/u);
     assert.match(component, /Uses PRISM prop fallbacks/u);
-    assert.match(component, /Mansion evidence wardrobe/u);
+    assert.match(component, /Venue evidence wardrobe/u);
     assert.match(component, /Recipients use this pack offline without adding it to their Asset Library/u);
     assert.match(component, /Generate themed prop pack/u);
     assert.match(component, /Retry/u);
-    assert.match(component, /role="tablist" aria-label="Mansion soundscape"/u);
+    assert.match(component, /role="tablist" aria-label="Venue soundscape"/u);
     assert.match(component, /data-soundscape-panel="music"/u);
     assert.match(component, /data-soundscape-panel="atmosphere"/u);
     assert.match(component, /<SanctumAudioPlayer/u);
@@ -348,13 +348,30 @@ describe("installed mansion library", () => {
     assert.match(styles, /\.installedMansionOrigin\[data-origin="imported"\]/u);
     assert.match(styles, /\.installedMansionOrigin\[data-origin="created"\]/u);
     assert.match(styles, /\.installedMansionOrigin\[data-origin="derived"\]/u);
+    assert.match(
+      styles,
+      /\.setup\[data-theme="light"\] \.installedMansionThumbnail img\s*\{[\s\S]{0,500}(?:-webkit-)?mask-image:\s*linear-gradient/u,
+    );
+    assert.match(
+      styles,
+      /\.setup\[data-theme="light"\] \.installedMansionThumbnail img\s*\{[^}]*opacity:\s*0\.72/u,
+    );
+    assert.match(
+      styles,
+      /\.setup\[data-theme="light"\] \.installedMansionThumbnail::after\s*\{[\s\S]{0,900}var\(--mystery-panel-strong\) 100%/u,
+    );
+    assert.doesNotMatch(
+      styles,
+      /(?<!\.setup\[data-theme="light"\] )\.installedMansionThumbnail img\s*\{[^}]*mask-image/u,
+      "Dark Mode must retain the authored full-bleed thumbnail",
+    );
     assert.match(styles, /\.installedMansionEditor/u);
     assert.match(styles, /\.installedMansionSoundscapeTabs/u);
     assert.match(styles, /\.installedMansionAtmosphereFacts/u);
     assert.match(styles, /\.mansionTopologyEditor/u);
     assert.match(topologyEditor, /data-tutorial-target="whodunnit-mansion-editor"/u);
     assert.match(topologyEditor, /data-layout-version="2"/u);
-    assert.match(topologyEditor, /Save mansion plan/u);
+    assert.match(topologyEditor, /Save venue plan/u);
     assert.match(topologyEditor, /MANSION_LAYOUT_V2_COLUMNS/u);
     assert.match(topologyEditor, /MANSION_LAYOUT_V2_ROWS/u);
     assert.match(topologyEditor, /fixed silhouettes/u);
@@ -365,14 +382,14 @@ describe("installed mansion library", () => {
     assert.match(topologyEditor, /slideMansionLayoutV2Door/u);
     assert.match(topologyEditor, /removeMansionLayoutV2Door/u);
     assert.match(topologyEditor, /\+ Corridor/u);
-    assert.match(topologyEditor, /disabled=\{floor === 3 && !thirdFloorAccessible\}/u);
+    assert.match(topologyEditor, /disabled=\{!venueProfile && floor === 3 && !thirdFloorAccessible\}/u);
     assert.match(topologyEditor, /Floor 2 needs at least four semantic rooms/u);
     assert.match(topologyEditor, /roomAssetUrl\(mansion, entity, true\)/u);
     assert.match(topologyEditor, /data-tutorial-target="whodunnit-room-editor"/u);
     assert.match(topologyEditor, /Editor breadcrumb/u);
-    assert.match(topologyEditor, /Mansion Editor/u);
+    assert.match(topologyEditor, /Venue Editor/u);
     assert.match(topologyEditor, /data-tutorial-target="whodunnit-room-mosaic-preview"/u);
-    assert.match(topologyEditor, /Pixel Art is newly synthesized/u);
+    assert.match(topologyEditor, /Mosaic is the sole playable room-art base/u);
     assert.match(topologyEditor, /data-tutorial-target="whodunnit-room-anchors"/u);
     assert.match(topologyEditor, /MANSION_LAYOUT_V2_MAX_ANCHORS_PER_ROOM/u);
     assert.match(topologyEditor, /Authoring context · not hotspots/u);
@@ -380,7 +397,7 @@ describe("installed mansion library", () => {
     assert.match(topologyEditor, /MANSION_LAYOUT_V2_MAX_LIGHTS/u);
     assert.match(topologyEditor, /\["fire", "omni", "directional", "neon"\]/u);
     assert.match(topologyEditor, /Stable IDs seed animation; Reduced Motion freezes it/u);
-    assert.match(topologyEditor, /Synthesize Pixel Art · ONLINE/u);
+    assert.match(topologyEditor, /Synthesize Mosaic · ONLINE/u);
     assert.match(topologyEditor, /Accept candidate/u);
     assert.match(topologyEditor, /Regenerate room asset/u);
     assert.match(topologyEditor, /Discard candidate/u);

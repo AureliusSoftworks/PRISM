@@ -109,15 +109,22 @@ export function formatSignalAudienceViews(totalViews: number): string {
 /**
  * Returns the shared performance color for a five-point audience rating.
  * Ratings interpolate continuously from red (0) through yellow (2.5) to
- * green (5), while missing or malformed ratings remain uncolored.
+ * green (5), while missing or malformed ratings remain uncolored. Light mode
+ * uses the same hue interpolation at a darker lightness for contrast.
  */
 export function signalAudienceRatingColor(
   rating: number | null | undefined,
+  theme: "dark" | "light" = "dark",
 ): string | null {
   if (typeof rating !== "number" || !Number.isFinite(rating)) return null;
   const boundedRating = Math.max(0, Math.min(5, rating));
   const hue = Math.round((boundedRating / 5) * 120);
-  return `hsl(${hue} 84% 60%)`;
+  // The light-mode palette keeps the same red → yellow → green hue sweep,
+  // but lowers lightness so every intermediate rating remains legible on a
+  // pale Signal surface.
+  return theme === "light"
+    ? `hsl(${hue} 78% 26%)`
+    : `hsl(${hue} 84% 60%)`;
 }
 
 function signalShowAudienceRating(

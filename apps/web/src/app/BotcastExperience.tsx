@@ -220,9 +220,7 @@ import {
   LoaderCircle,
   Pause,
   Play,
-  Moon,
   Sparkles,
-  Sun,
   Trash2,
 } from "lucide-react";
 import {
@@ -395,7 +393,6 @@ import {
   type ModelWarmupIntermissionPhase,
 } from "./ModelWarmupIntermission";
 import {
-  LiveSessionModelChip,
   LiveSessionPrismWatermark,
   type LiveSessionRoutingChipLabels,
 } from "./liveSessionChrome";
@@ -1029,8 +1026,6 @@ export interface BotcastExperienceProps {
   reasoningEffort?: ProviderReasoningEffort;
   responseMode: BotcastEpisodeResponseMode;
   theme?: "light" | "dark";
-  /** Persist an explicit app theme while Signal's shared navbar is hidden. */
-  onThemeChange?: (theme: "light" | "dark") => void | Promise<void>;
   liveConversationPanelExpanded?: boolean;
   renderBotGlyph: BotPickerGlyphRenderer;
   /** Library bot chip menu — same surface as Zen/Chat bot chips. */
@@ -1140,7 +1135,7 @@ export interface BotcastExperienceProps {
   introAudioVolume?: number;
   recordingVoiceSelection: ReplayVoiceSelectionSnapshotV2;
   onRecordingStateChange?: (active: boolean) => void;
-  /** Notify the app shell when Signal locks live chrome (navbar collapse). */
+  /** Notify the app shell when Signal locks its visible shared chrome. */
   onLiveSessionActiveChange?: (
     active: boolean,
     sessionId: string | null,
@@ -1177,6 +1172,8 @@ export interface BotcastExperienceProps {
         };
         /** Latest server-persisted Auto completion for this exact episode. */
         activeAutoRoute: SignalActiveAutoRoute | null;
+        /** Frozen fixed effort stored with this episode's routing event. */
+        lockedReasoningEffort: ProviderReasoningEffort | null;
       }) => ReactNode);
   onCreateSlateStory?: (source: {
     episodeId: string;
@@ -2694,7 +2691,6 @@ export function BotcastExperience({
   reasoningEffort,
   responseMode,
   theme = "dark",
-  onThemeChange,
   liveConversationPanelExpanded = false,
   renderBotGlyph,
   onBotContextMenu,
@@ -14282,7 +14278,8 @@ export function BotcastExperience({
                     theme,
                   ),
                   ["--show-rating-color" as string]:
-                    signalAudienceRatingColor(audienceRating) ?? undefined,
+                    signalAudienceRatingColor(audienceRating, theme) ??
+                    undefined,
                 } as CSSProperties
               }
               data-botcast-show-id={show.id}
@@ -18290,6 +18287,7 @@ export function BotcastExperience({
             disabledReason: episodeModelControlDisabledReason,
           },
           activeAutoRoute,
+          lockedReasoningEffort,
         })
       : navigationHeader;
   const copySignalErrorToast = async (): Promise<void> => {
@@ -18866,119 +18864,87 @@ export function BotcastExperience({
                 </div>
               </div>
             ) : (
-              <div className={styles.liveTopline}>
-              <span
-                data-live={episode.status === "live" ? "true" : undefined}
+              <div
+                className={styles.liveTopline}
+                data-routing-model={resolvedLockedRoutingChip?.modelLabel}
               >
-                {episode.status === "live" ? "● ON AIR" : "○ SHOW ENDED"}
-              </span>
-                <strong>
+                <div className={styles.liveToplineStatus}>
+                  <span
+                    data-live={episode.status === "live" ? "true" : undefined}
+                  >
+                    {episode.status === "live" ? "● ON AIR" : "○ SHOW ENDED"}
+                  </span>
+                  <span>
+                    {episode.status !== "live"
+                      ? "Studio clear"
+                      : episode.guestKind === "producer"
+                        ? "Producer on mic"
+                        : episode.tensionStage === "calm"
+                          ? "Guest settled"
+                          : `Guest: ${episode.tensionStage}`}
+                  </span>
+                  {signalDegradedSession ? (
+                    <span className={styles.liveDegradedWarning} role="status">
+                      Signal recovering · quality may vary
+                    </span>
+                  ) : null}
+                </div>
+                <strong className={styles.liveToplineIdentity}>
                   {episode.segment === "interview"
                     ? "MAIN INTERVIEW"
                     : episode.segment.toUpperCase()}
                 </strong>
-              {resolvedLockedRoutingChip ? (
-                <LiveSessionModelChip
-                  {...resolvedLockedRoutingChip}
-                  className={styles.liveRoutingChip}
-                />
-              ) : (
-                <LiveSessionModelChip
-                  modelLabel={`${episode.model ? (modelLabels.get(episode.model) ?? episode.model) : "Model"}${botcastEpisodeModelSelectionKind(episode) === "auto" || episode.responseMode === "auto" ? " [auto]" : ""}`}
-                  effortLabel="Default"
-                  effortKey="auto"
-                  automatic={
-                    botcastEpisodeModelSelectionKind(episode) === "auto" ||
-                    episode.responseMode === "auto"
-                  }
-                  turbo={false}
-                  className={styles.liveRoutingChip}
-                />
-              )}
-              <span>
-                  {episode.status !== "live"
-                    ? "Studio clear"
-                    : episode.guestKind === "producer"
-                    ? "Producer on mic"
-                    : episode.tensionStage === "calm"
-                    ? "Guest settled"
-                    : `Guest: ${episode.tensionStage}`}
-              </span>
-              {signalDegradedSession ? (
-                <span className={styles.liveDegradedWarning} role="status">
-                  Signal recovering · quality may vary
-                </span>
-              ) : null}
-              {onThemeChange ? (
-                <button
-                  type="button"
-                  className={styles.liveThemeToggle}
-                  onClick={() =>
-                    void onThemeChange(theme === "light" ? "dark" : "light")
-                  }
-                  aria-label={`Switch Signal to ${theme === "light" ? "Dark" : "Light"} Mode`}
-                  title={`Switch to ${theme === "light" ? "Dark" : "Light"} Mode`}
-                  data-theme-mode={theme}
-                >
-                  {theme === "light" ? (
-                    <Sun size={14} strokeWidth={2.2} aria-hidden="true" />
+                <div className={styles.liveToplineActions}>
+                  {episode.status === "completed" ? (
+                    onCreateSlateStory ? (
+                      <button
+                        type="button"
+                        onClick={() => void createEpisodeStoryInSlate(episode)}
+                        disabled={slateStoryEpisodeId !== null}
+                        data-tutorial-target="botcast-create-slate-story"
+                      >
+                        {slateStoryEpisodeId === episode.id
+                          ? "Creating in Slate…"
+                          : "Create in Slate"}
+                      </button>
+                    ) : null
                   ) : (
-                    <Moon size={14} strokeWidth={2.2} aria-hidden="true" />
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!autoRun) onPrepareUtterance?.();
+                          setAutoRun((value) => !value);
+                        }}
+                      >
+                        {autoRun ? "Pause rundown" : "Resume rundown"}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.cutShowButton}
+                        onClick={() => void cutShow()}
+                        disabled={episode.status !== "live"}
+                        aria-label="Cut the live show"
+                      >
+                        {cuttingShow ? "■ Cut now" : "■ Cut show"}
+                      </button>
+                    </>
                   )}
-                  <span>{theme === "light" ? "Light" : "Dark"}</span>
-                </button>
-              ) : null}
-              {episode.status === "completed" ? (
-                <>
-                  {onCreateSlateStory ? (
+                  {episode.status !== "completed" ? (
                     <button
                       type="button"
-                      onClick={() => void createEpisodeStoryInSlate(episode)}
-                      disabled={slateStoryEpisodeId !== null}
-                      data-tutorial-target="botcast-create-slate-story"
+                      className={styles.dangerButton}
+                      onClick={(event) =>
+                        openEpisodeDeletion(episode, event.currentTarget)
+                      }
+                      disabled={busy}
                     >
-                      {slateStoryEpisodeId === episode.id
-                        ? "Creating in Slate…"
-                        : "Create in Slate"}
+                      {episode.status === "live"
+                        ? "Discard episode"
+                        : "Delete episode"}
                     </button>
                   ) : null}
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!autoRun) onPrepareUtterance?.();
-                      setAutoRun((value) => !value);
-                    }}
-                  >
-                    {autoRun ? "Pause rundown" : "Resume rundown"}
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.cutShowButton}
-                    onClick={() => void cutShow()}
-                    disabled={episode.status !== "live"}
-                    aria-label="Cut the live show"
-                  >
-                    {cuttingShow ? "■ Cut now" : "■ Cut show"}
-                  </button>
-                </>
-              )}
-              {episode.status !== "completed" ? (
-                <button
-                  type="button"
-                  className={styles.dangerButton}
-                  onClick={(event) =>
-                    openEpisodeDeletion(episode, event.currentTarget)
-                  }
-                  disabled={busy}
-                >
-                  {episode.status === "live"
-                    ? "Discard episode"
-                    : "Delete episode"}
-                </button>
-              ) : null}
+                </div>
               </div>
             )}
             <div
@@ -19805,6 +19771,7 @@ export function BotcastExperience({
                         ["--signal-rating-color" as string]:
                           signalAudienceRatingColor(
                             replayEpisode.personaReview.rating,
+                            theme,
                           ) ?? undefined,
                       } as CSSProperties
                     }
@@ -20538,6 +20505,7 @@ export function BotcastExperience({
                                   ["--signal-rating-color" as string]:
                                     signalAudienceRatingColor(
                                       showAudienceRating,
+                                      theme,
                                     ) ?? undefined,
                                 } as CSSProperties
                               }
@@ -21136,7 +21104,7 @@ export function BotcastExperience({
                     style={
                           {
                             ["--signal-rating-color" as string]:
-                          signalAudienceRatingColor(showAudienceRating) ??
+                          signalAudienceRatingColor(showAudienceRating, theme) ??
                           undefined,
                           } as CSSProperties
                         }
@@ -21170,7 +21138,7 @@ export function BotcastExperience({
                           style={
                             {
                               ["--signal-rating-color" as string]:
-                                signalAudienceRatingColor(review.rating) ??
+                                signalAudienceRatingColor(review.rating, theme) ??
                                 undefined,
                             } as CSSProperties
                           }

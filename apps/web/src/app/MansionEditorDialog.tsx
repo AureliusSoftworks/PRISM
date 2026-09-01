@@ -59,7 +59,7 @@ import WhodunnitSetupDialog from "./WhodunnitSetupDialog";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
 import styles from "./debateMystery.module.css";
 
-const CREATION_MOSAIC_MINIMUM_LOADER_MS = 900;
+const CREATION_VALIDATION_MINIMUM_LOADER_MS = 900;
 
 interface MansionEditorDialogProps {
   theme: "light" | "dark";
@@ -546,14 +546,23 @@ export default function MansionEditorDialog({
   const creationReady = creationPrepared && persistedLayoutMatchesDraft;
   const roomRefinementReady = !creationFlow || creationReady;
   const presentation = resolveInstalledMansionPresentationV1(mansion);
+  const venueProfile = layout.venueProfile ?? null;
+  const venueArchitectureLocked = venueProfile !== null;
+  const venueMapStyle = venueProfile?.presentation?.mapStyle ?? "estate-grid-v1";
   const semanticRoomCount = mansionLayoutV2SemanticRoomCount(layout);
   const tierLabel = (floor: number): string =>
-    layout.venueProfile?.tierLabels[floor - 1] ?? `Floor ${floor}`;
+    venueProfile?.tierLabels[floor - 1] ?? `Floor ${floor}`;
+  const editorTierIds = venueProfile
+    ? Array.from({ length: venueProfile.tierLabels.length }, (_, index) => index + 1)
+    : [...FLOOR_IDS];
+  const tierUnit = venueProfile?.kind === "vessel" ? "decks"
+    : venueProfile ? "tiers" : "floors";
   const draftFloors = Math.max(1, ...layout.entities.map((entity) => entity.floor));
-  const draftScaleClass = resolveDebateMysteryMansionExteriorScaleClassV1({
-    floors: draftFloors,
-    totalRooms: semanticRoomCount,
-  });
+  const draftScaleClass = venueProfile?.physicalScaleClass ??
+    resolveDebateMysteryMansionExteriorScaleClassV1({
+      floors: draftFloors,
+      totalRooms: semanticRoomCount,
+    });
   const exterior = installedMansionExteriorPreviewV1({
     mansion,
     assetId: presentation.thumbnailAssetId,
@@ -572,12 +581,14 @@ export default function MansionEditorDialog({
         requireEditorFloors: true,
       })
     : [];
-  const selectedRemovalBlockedReason = selectedRoom?.id === layout.venueProfile?.entryRoomId ||
+  const selectedRemovalBlockedReason = venueArchitectureLocked
+    ? "The accepted venue architecture is fixed. Rename or dress rooms without changing its topology."
+    : selectedRoom?.id === layout.venueProfile?.entryRoomId ||
     (!layout.venueProfile && selectedRoom?.templateId === "foyer")
     ? "The venue entry is required structure."
     : selectedRemovalErrors[0] ?? null;
   const selectedEntityCanBeRemoved = Boolean(selectedEntity && !selectedRemovalBlockedReason);
-  const thirdFloorAccessible = Boolean(layout.venueProfile) || mansionLayoutV2FloorSemanticRoomCount(layout, 2) >= 4;
+  const thirdFloorAccessible = !venueProfile && mansionLayoutV2FloorSemanticRoomCount(layout, 2) >= 4;
   const rooftopFloor = mansionLayoutV2RooftopFloor(layout);
   const paletteTopFloor = Math.max(rooftopFloor, selectedFloor);
   const usedRoomTemplateIds = useMemo(
@@ -674,7 +685,7 @@ export default function MansionEditorDialog({
       if (updated && action === "regenerate") {
         setSelectedLightId(null);
         setRegenerateConfirmationRoomId(null);
-        setRoomArtNotice("This room returned to its bundled Pixel Art plate; its anchors and lights were cleared.");
+        setRoomArtNotice("This room returned to its bundled Mosaic; its anchors and lights were cleared.");
       }
     } finally {
       setRoomArtBusy(false);
@@ -963,6 +974,10 @@ export default function MansionEditorDialog({
     event: ReactPointerEvent<HTMLButtonElement>,
     entity: MansionLayoutEntityV2,
   ): void => {
+    if (venueArchitectureLocked) {
+      setSelectedEntityId(entity.id);
+      return;
+    }
     const canvas = canvasRef.current;
     if (!canvas) return;
     const bounds = canvas.getBoundingClientRect();
@@ -1012,6 +1027,7 @@ export default function MansionEditorDialog({
     entity: MansionLayoutBlockV2 & { kind: "corridor" },
     edge: CorridorResizeV2["edge"],
   ): void => {
+    if (venueArchitectureLocked) return;
     event.preventDefault();
     event.stopPropagation();
     setSelectedEntityId(entity.id);
@@ -1098,7 +1114,7 @@ export default function MansionEditorDialog({
       if (!saved) return;
       replaceLayoutFromMansion(saved);
       if (creationFlow) {
-        const remainingLoaderTime = CREATION_MOSAIC_MINIMUM_LOADER_MS - (Date.now() - loaderStartedAt);
+        const remainingLoaderTime = CREATION_VALIDATION_MINIMUM_LOADER_MS - (Date.now() - loaderStartedAt);
         if (remainingLoaderTime > 0) {
           await new Promise<void>((resolve) => window.setTimeout(resolve, remainingLoaderTime));
         }
@@ -1126,35 +1142,51 @@ export default function MansionEditorDialog({
         {exterior.stale ? (
           <p><strong>Exterior needs review</strong>The retained custom cover was accepted for a different venue scale. It will not be overwritten.</p>
         ) : (
-          <p><strong>{exterior.switchesWithTopology ? "Included family" : "Accepted exterior"}</strong>{exterior.switchesWithTopology ? "The cover follows semantic room count and floor scale automatically." : "This protected cover stays with the derivative."}</p>
+          <p><strong>{exterior.switchesWithTopology ? "Included family" : "Accepted exterior"}</strong>{exterior.switchesWithTopology ? "The cover follows semantic room count and venue scale automatically." : "This protected cover stays with the derivative."}</p>
         )}
-        <p><strong>Planner contract</strong>Rooms keep fixed silhouettes. Corridors shape the house and carry traversal without counting as rooms.</p>
+        <p><strong>Planner contract</strong>{venueArchitectureLocked
+          ? `${venueProfile?.kindLabel ?? "Venue"} architecture is frozen to the accepted intent. Rename and dress rooms without replacing its topology.`
+          : "Rooms keep fixed silhouettes. Corridors shape the estate and carry traversal without counting as rooms."}</p>
       </aside>
 
       <div className={styles.mansionEditorWorkspace}>
         <header className={styles.mansionEditorFloorBar}>
           <nav aria-label="Venue tiers">
-            {FLOOR_IDS.map((floor) => (
+            {editorTierIds.map((floor) => (
               <button
                 key={floor}
                 type="button"
                 aria-pressed={selectedFloor === floor}
-                disabled={floor === 3 && !thirdFloorAccessible}
-                title={floor === 3 && !thirdFloorAccessible ? "Floor 2 needs at least four rooms" : undefined}
+                disabled={!venueProfile && floor === 3 && !thirdFloorAccessible}
+                title={!venueProfile && floor === 3 && !thirdFloorAccessible ? "Floor 2 needs at least four rooms" : undefined}
                 onClick={() => setSelectedFloor(floor)}
               >
                 {tierLabel(floor)}<small>{mansionLayoutV2FloorSemanticRoomCount(layout, floor)} rooms</small>
               </button>
             ))}
           </nav>
-          <div>
-            <button type="button" onClick={() => addRoom()}>+ Room</button>
-            <button type="button" onClick={addCorridor}>+ Corridor</button>
-          </div>
+          {venueArchitectureLocked
+            ? <span className={styles.mansionEditorArchitectureLock}>Validated architecture · names and presentation remain editable</span>
+            : <div>
+                <button type="button" onClick={() => addRoom()}>+ Room</button>
+                <button type="button" onClick={addCorridor}>+ Corridor</button>
+              </div>}
         </header>
 
         <div className={styles.mansionEditorCanvasShell}>
-          <div ref={canvasRef} className={styles.mansionEditorCanvas} aria-label={`${tierLabel(selectedFloor)} 16 by 12 plan`}>
+          <div
+            ref={canvasRef}
+            className={styles.mansionEditorCanvas}
+            aria-label={`${tierLabel(selectedFloor)} 16 by 12 plan`}
+            data-map-style={venueMapStyle}
+            data-architecture-locked={venueArchitectureLocked ? "true" : undefined}
+          >
+            {venueMapStyle === "hull-deck-v1" ? (
+              <svg className={styles.mansionEditorHullOutline} viewBox="0 0 160 120" preserveAspectRatio="none" aria-hidden="true">
+                <path d="M7 18 L126 10 Q146 18 156 60 Q146 102 126 110 L7 102 Q2 82 2 60 Q2 38 7 18 Z" />
+                <path d="M18 60 H139" />
+              </svg>
+            ) : null}
             {layout.entities.filter((entity) => entity.floor === selectedFloor).map((entity) => {
               const rect = mansionLayoutV2EntityRect(entity);
               const preview = drag?.id === entity.id
@@ -1188,7 +1220,7 @@ export default function MansionEditorDialog({
                   <span aria-hidden="true">{entity.kind === "room" ? entity.emoji : "⇄"}</span>
                   <strong>{entity.kind === "room" ? entity.name : "Corridor"}</strong>
                   <small>{entity.kind === "room" ? `${rect.width}×${rect.height} · ${entity.rotation}°` : `${rect.width}×${rect.height}`}</small>
-                  {entity.kind === "corridor" ? (["north", "east", "south", "west"] as const).map((edge) => (
+                  {entity.kind === "corridor" && !venueArchitectureLocked ? (["north", "east", "south", "west"] as const).map((edge) => (
                     <span
                       key={edge}
                       className={styles.mansionEditorCorridorResizeHandle}
@@ -1229,19 +1261,29 @@ export default function MansionEditorDialog({
             })}
           </div>
           <div className={styles.mansionEditorCanvasActions}>
-            <span>{roomRefinementReady
+            <span>{venueArchitectureLocked
+              ? "The validated architecture stays fixed. Select a room to rename it or prepare its presentation."
+              : roomRefinementReady
               ? "Drag to arrange. Collisions reflow nearby blocks; only an island returns. Double-click a room to enter it."
-              : "Arrange structural placeholders, then Continue to prepare Pixel Art rooms before entering them."}</span>
+              : "Arrange structural placeholders, then Continue to prepare Mosaic rooms before entering them."}</span>
             <button type="button" disabled={!selectedRoom || !roomRefinementReady} onClick={() => selectedRoom && openRoomEditor(selectedRoom.id)}>Open Room Editor</button>
           </div>
         </div>
       </div>
 
       <aside className={styles.mansionEditorInspector}>
-        <section className={styles.mansionEditorRoomPalette} aria-label="Semantic room palette">
-          <header><strong>Room blocks</strong><small>Add to Floor {selectedFloor}</small></header>
+        <section className={styles.mansionEditorRoomPalette} aria-label={venueArchitectureLocked ? "Venue room program" : "Semantic room palette"}>
+          <header><strong>{venueArchitectureLocked ? "Venue room program" : "Room blocks"}</strong><small>{venueArchitectureLocked ? tierLabel(selectedFloor) : `Add to Floor ${selectedFloor}`}</small></header>
           <div>
-            {DEBATE_MYSTERY_ROOM_TEMPLATES.map((template) => {
+            {venueArchitectureLocked ? layout.entities
+              .filter((entity): entity is MansionLayoutRoomV2 => entity.kind === "room" && entity.floor === selectedFloor)
+              .map((room) => (
+                <button key={room.id} type="button" aria-pressed={room.id === selectedEntityId} onClick={() => setSelectedEntityId(room.id)}>
+                  <span aria-hidden="true">{room.emoji}</span>
+                  <strong>{room.name}</strong>
+                  <small>{room.venueContract?.role ?? "room"}</small>
+                </button>
+              )) : DEBATE_MYSTERY_ROOM_TEMPLATES.map((template) => {
               const floorRule = roomFloorRulePresentation(template.id, paletteTopFloor);
               const alreadyPlaced = usedRoomTemplateIds.has(template.id);
               const floorUnavailable = !debateMysteryRoomTypeIsAllowedOnFloorV1(
@@ -1283,6 +1325,7 @@ export default function MansionEditorDialog({
             <div className={styles.mansionEditorTransformActions}>
               <button
                 type="button"
+                disabled={venueArchitectureLocked}
                 aria-label={`Rotate ${selectedRoom ? "room" : "corridor"} counterclockwise`}
                 title="Rotate counterclockwise"
                 onClick={() => rotateEntity(selectedEntity, "counterclockwise")}
@@ -1290,6 +1333,7 @@ export default function MansionEditorDialog({
               <span>{selectedRoom ? `${selectedRoom.rotation}°` : `${selectedBlock?.width ?? 0}×${selectedBlock?.height ?? 0}`}</span>
               <button
                 type="button"
+                disabled={venueArchitectureLocked}
                 aria-label={`Rotate ${selectedRoom ? "room" : "corridor"} clockwise`}
                 title="Rotate clockwise"
                 onClick={() => rotateEntity(selectedEntity, "clockwise")}
@@ -1298,7 +1342,9 @@ export default function MansionEditorDialog({
             </div>
             {selectedRoom ? (
               <>
-                <label>Room type
+                {venueArchitectureLocked ? (
+                  <label>Venue role<input readOnly value={selectedRoom.venueContract?.role ?? "room"} /></label>
+                ) : <label>Room type
                   <select value={selectedRoom.templateId} onChange={(event) => changeRoomTemplate(selectedRoom, event.currentTarget.value)}>
                     {!DEBATE_MYSTERY_ROOM_TEMPLATES.some((template) => template.id === selectedRoom.templateId)
                       ? <option value={selectedRoom.templateId}>{selectedRoom.name} · imported type</option>
@@ -1315,17 +1361,17 @@ export default function MansionEditorDialog({
                       return <option key={template.id} value={template.id} disabled={alreadyPlaced || floorUnavailable}>{template.name}{alreadyPlaced ? " · already placed" : floorRule ? ` · ${floorRule.label}` : ""}</option>;
                     })}
                   </select>
-                </label>
+                </label>}
                 <label>Room name<input value={selectedRoom.name} maxLength={80} onChange={(event) => updateRoom(selectedRoom.id, { name: event.currentTarget.value })} /></label>
-                <button type="button" disabled={!roomRefinementReady} title={roomRefinementReady ? undefined : "Prepare Pixel Art before refining rooms"} onClick={() => openRoomEditor(selectedRoom.id)}>Room art, anchors & lights</button>
+                <button type="button" disabled={!roomRefinementReady} title={roomRefinementReady ? undefined : "Prepare Mosaic before refining rooms"} onClick={() => openRoomEditor(selectedRoom.id)}>Room art, anchors & lights</button>
               </>
             ) : null}
 
             <fieldset className={styles.mansionEditorGeometry}>
               <legend>{selectedRoom ? "Fixed silhouette" : "Block geometry"}</legend>
-              <div><span>Horizontal</span><button type="button" onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x - 1, y: selectedEntity.y }))}>←</button><output>{selectedEntity.x + 1}</output><button type="button" onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x + 1, y: selectedEntity.y }))}>→</button></div>
-              <div><span>Vertical</span><button type="button" onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x, y: selectedEntity.y - 1 }))}>↑</button><output>{selectedEntity.y + 1}</output><button type="button" onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x, y: selectedEntity.y + 1 }))}>↓</button></div>
-              <p>{selectedRoom ? "Fixed room silhouette" : `${selectedBlock?.width ?? 0}×${selectedBlock?.height ?? 0} corridor · drag an edge to resize`}</p>
+              <div><span>Horizontal</span><button type="button" disabled={venueArchitectureLocked} onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x - 1, y: selectedEntity.y }))}>←</button><output>{selectedEntity.x + 1}</output><button type="button" disabled={venueArchitectureLocked} onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x + 1, y: selectedEntity.y }))}>→</button></div>
+              <div><span>Vertical</span><button type="button" disabled={venueArchitectureLocked} onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x, y: selectedEntity.y - 1 }))}>↑</button><output>{selectedEntity.y + 1}</output><button type="button" disabled={venueArchitectureLocked} onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x, y: selectedEntity.y + 1 }))}>↓</button></div>
+              <p>{venueArchitectureLocked ? "Position frozen by the accepted venue architecture" : selectedRoom ? "Fixed room silhouette" : `${selectedBlock?.width ?? 0}×${selectedBlock?.height ?? 0} corridor · drag an edge to resize`}</p>
             </fieldset>
 
             <fieldset className={styles.mansionEditorConnections}>
@@ -1336,15 +1382,15 @@ export default function MansionEditorDialog({
                 return (
                   <div key={door.id} className={styles.mansionEditorDoorControl}>
                     <span><strong>{other?.kind === "room" ? other.name : other?.kind ?? "Route"}</strong><small>Shared-wall door</small></span>
-                    <input aria-label={`Door position toward ${otherId}`} type="range" min="0" max="1" step="0.01" value={door.position} onChange={(event) => commitLayout(slideMansionLayoutV2Door(layout, door.id, Number(event.currentTarget.value)))} />
-                    <button type="button" onClick={() => commitLayout(removeMansionLayoutV2Door(layout, door.id))}>Remove</button>
+                    <input disabled={venueArchitectureLocked} aria-label={`Door position toward ${otherId}`} type="range" min="0" max="1" step="0.01" value={door.position} onChange={(event) => commitLayout(slideMansionLayoutV2Door(layout, door.id, Number(event.currentTarget.value)))} />
+                    <button type="button" disabled={venueArchitectureLocked} onClick={() => commitLayout(removeMansionLayoutV2Door(layout, door.id))}>Remove</button>
                   </div>
                 );
               })}
               {layout.doors.every((door) => door.aEntityId !== selectedEntity.id && door.bEntityId !== selectedEntity.id)
                 ? <p>No wall doors. Save will reject an inaccessible semantic room.</p>
                 : null}
-              {layout.entities.filter((other) => {
+              {!venueArchitectureLocked ? layout.entities.filter((other) => {
                 if (other.id === selectedEntity.id || selectedEntity.kind === "infill" || other.kind === "infill") return false;
                 if (!mansionLayoutV2SharedWall(selectedEntity, other)) return false;
                 return !layout.doors.some((door) =>
@@ -1354,7 +1400,7 @@ export default function MansionEditorDialog({
                 <button key={other.id} type="button" onClick={() => addDoorBetween(selectedEntity.id, other.id)}>
                   Add centered door to {other.kind === "room" ? other.name : "corridor"}
                 </button>
-              ))}
+              )) : null}
             </fieldset>
 
             {layout.verticalConnectors.filter((connector) => connector.lowerEntityId === selectedEntity.id || connector.upperEntityId === selectedEntity.id).map((connector) => (
@@ -1369,14 +1415,14 @@ export default function MansionEditorDialog({
 
       <footer className={styles.mansionEditorFooter}>
         <div>
-          <strong>{semanticRoomCount} semantic rooms · {draftFloors} floors · {draftScaleClass}</strong>
+          <strong>{semanticRoomCount} semantic rooms · {draftFloors} {tierUnit} · {draftScaleClass}</strong>
           {notice ? <span role="status">{notice}</span> : validationErrors.length > 0 ? <span role="alert">{validationErrors[0]}{validationErrors.length > 1 ? ` · ${validationErrors.length - 1} more` : ""}</span> : <span data-valid="true">Plan is connected and ready to save.</span>}
         </div>
         <button type="button" disabled={busy || saving} onClick={onClose}>{creationFlow ? "Return to setup" : "Close"}</button>
         {creationReady ? (
           <button type="button" className={styles.installedMansionSave} disabled={busy || saving} onClick={onClose}>Use this venue</button>
         ) : (
-          <button type="button" className={styles.installedMansionSave} disabled={busy || saving || validationErrors.length > 0} onClick={() => void save()}>{saving ? "Preparing Pixel Art…" : creationFlow ? "Continue" : "Save venue plan"}</button>
+          <button type="button" className={styles.installedMansionSave} disabled={busy || saving || validationErrors.length > 0} onClick={() => void save()}>{saving ? "Validating venue…" : creationFlow ? "Continue" : "Save venue plan"}</button>
         )}
       </footer>
     </section>
@@ -1390,9 +1436,9 @@ export default function MansionEditorDialog({
           <span aria-hidden="true">/</span>
           <strong>{roomEditorRoom.name}</strong>
         </nav>
-        <div role="group" aria-label="Room art preview style" data-tutorial-target="whodunnit-room-mosaic-preview">
-          <button type="button" aria-pressed={mosaicPreview} onClick={() => setMosaicPreview(true)}>Pixel Art</button>
-          <button type="button" aria-pressed={!mosaicPreview} onClick={() => setMosaicPreview(false)}>Source / Realistic</button>
+        <div role="group" aria-label="Room art authoring view" data-tutorial-target="whodunnit-room-mosaic-preview">
+          <button type="button" aria-pressed={mosaicPreview} onClick={() => setMosaicPreview(true)}>Mosaic</button>
+          <button type="button" aria-pressed={!mosaicPreview} onClick={() => setMosaicPreview(false)}>Composition reference</button>
         </div>
       </header>
 
@@ -1455,7 +1501,7 @@ export default function MansionEditorDialog({
       <aside className={styles.mansionRoomEditorTools}>
         <section>
           <header><small>Room presentation</small><h3>{roomEditorRoom.name}</h3></header>
-          <p>Pixel Art is newly synthesized from the room&apos;s composition reference—not made with a pixel filter. The high-resolution source stays intact for comparison and later Realistic upgrades.</p>
+          <p>Mosaic is the sole playable room-art base. Its composition reference stays authoring-only; an optional Upgraded derivative is created from the accepted Mosaic without replacing it.</p>
           {roomArtNotice ? <p className={styles.mansionRoomEditorNotice} role="status">{roomArtNotice}</p> : null}
           {(() => {
             const candidate = layout.roomArtCandidates.find((entry) => entry.roomId === roomEditorRoom.id) ?? null;
@@ -1475,20 +1521,20 @@ export default function MansionEditorDialog({
                     }
                   }}
                 >{regenerateConfirmationRoomId === roomEditorRoom.id ? "Confirm reset room asset" : "Regenerate room asset"}</button>
-                <small>Resets this room to its bundled Pixel Art plate and clears only this room&apos;s anchors, lights, and staged art.</small>
+                <small>Resets this room to its bundled Mosaic and clears only this room&apos;s anchors, lights, and staged art.</small>
                 {candidate?.status === "ready" ? (
                   <>
                     <button type="button" disabled={busy || roomArtBusy || !roomArtMutationReady} onClick={() => void mutateRoomArt("accept", roomEditorRoom.id)}>Accept candidate</button>
-                    <button type="button" disabled={busy || roomArtBusy || responseMode === "local" || !roomArtMutationReady} onClick={() => void mutateRoomArt("generate", roomEditorRoom.id)}>Retry Pixel Art candidate</button>
+                    <button type="button" disabled={busy || roomArtBusy || responseMode === "local" || !roomArtMutationReady} onClick={() => void mutateRoomArt("generate", roomEditorRoom.id)}>Retry Mosaic candidate</button>
                     <button type="button" disabled={busy || roomArtBusy || !roomArtMutationReady} onClick={() => void mutateRoomArt("discard", roomEditorRoom.id)}>Discard candidate</button>
                   </>
                 ) : (
-                  <button type="button" disabled={busy || roomArtBusy || responseMode === "local" || !roomArtMutationReady || !onGenerateRoomArt} onClick={() => void mutateRoomArt("generate", roomEditorRoom.id)}>Synthesize Pixel Art · ONLINE</button>
+                  <button type="button" disabled={busy || roomArtBusy || responseMode === "local" || !roomArtMutationReady || !onGenerateRoomArt} onClick={() => void mutateRoomArt("generate", roomEditorRoom.id)}>Synthesize Mosaic · ONLINE</button>
                 )}
                 <small>{responseMode === "local"
                   ? "LOCAL is server-rejected and uses bundled or accepted art."
                   : roomArtMutationReady
-                    ? "Only this open room is synthesized. Generation stages a content-addressed Pixel Art candidate; the source and accepted art remain intact until Accept candidate."
+                    ? "Only this open room is synthesized. Generation stages a content-addressed Mosaic candidate; the composition reference and accepted Mosaic remain intact until Accept candidate."
                     : "Save the current venue plan before generating or changing its venue-owned candidate."}</small>
               </div>
             );
@@ -1637,8 +1683,8 @@ export default function MansionEditorDialog({
         title={presentation.title}
         description={creationFlow
           ? layout.venueProfile
-            ? `Shape this ${layout.venueProfile.placeNoun} across ${layout.venueProfile.tierLabels.join(", ")}. Art remains optional and explicit.`
-            : "Build a tenant-owned estate from the connected blank draft. Continue prepares its authored Pixel Art room plates."
+            ? `Dress this ${layout.venueProfile.placeNoun} across ${layout.venueProfile.tierLabels.join(", ")}. Its accepted architecture remains fixed; art stays optional and explicit.`
+            : "Build a tenant-owned estate from the connected blank draft. Continue prepares its authored Mosaic room plates."
           : `Editing a local derivative of ${mansion.derivation?.sourceTitle ?? mansion.name}. The source remains unchanged.`}
         size="screen"
         busy={busy || saving || roomArtBusy}

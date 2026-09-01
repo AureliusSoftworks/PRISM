@@ -2663,8 +2663,8 @@ function botDeleteCapability(): PrismCapabilityDefinition {
         throw new Error("The bot quarantine data is invalid.");
       }
       const conflict = context.db
-        .prepare("SELECT 1 FROM bots WHERE id = ?")
-        .get(bot.id);
+        .prepare("SELECT 1 FROM bots WHERE user_id = ? AND id = ?")
+        .get(context.userId, bot.id);
       if (conflict) {
         throw new Error("A bot with this identity already exists.");
       }

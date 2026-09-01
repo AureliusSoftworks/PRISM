@@ -177,6 +177,13 @@ describe("Signal audience pulse", () => {
     assert.equal(signalAudienceRatingColor(99), "hsl(120 84% 60%)");
   });
 
+  it("uses a dark, contrast-safe interpolation for Light mode", () => {
+    assert.equal(signalAudienceRatingColor(0, "light"), "hsl(0 78% 26%)");
+    assert.equal(signalAudienceRatingColor(2.5, "light"), "hsl(60 78% 26%)");
+    assert.equal(signalAudienceRatingColor(5, "light"), "hsl(120 78% 26%)");
+    assert.equal(signalAudienceRatingColor(null, "light"), null);
+  });
+
   it("ranks reviewed shows by rating, then confidence, before unrated shows", () => {
     const ranked = signalShowsByAudienceRating([
       {

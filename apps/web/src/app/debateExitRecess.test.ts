@@ -125,6 +125,10 @@ test("Leave Debate stays portal-mounted, enabled, and requires two activations",
   );
   const dockCss = cssSource.slice(dockCssStart, dockCssEnd);
   assert.match(dockCss, /position: fixed;/u);
+  assert.match(
+    dockCss,
+    /top:\s*calc\([\s\S]{0,120}var\(--app-shell-top-nav-height/u,
+  );
   assert.match(dockCss, /z-index: 2147483647;/u);
   assert.match(dockCss, /pointer-events: auto;/u);
   assert.match(

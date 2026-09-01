@@ -48,14 +48,17 @@ describe("Whodunnit V2 Case Forge visual progression", () => {
     assert.match(experienceSource, /Return to Archive/u);
   });
 
-  it("uses the durable exterior-door checkpoint for completed unstarted cases", () => {
+  it("uses the durable venue-entry checkpoint for completed unstarted cases", () => {
     assert.match(compilationSource, /state\.playPhase = "title_card";[\s\S]{0,900}stage: "complete"/u);
-    assert.match(experienceSource, /if \(state\.playPhase === "title_card"\)/u);
+    assert.match(experienceSource, /if \(state\.playPhase === "title_card" \|\| visitingExterior\)/u);
+    assert.match(experienceSource, /venueProfile\?\.presentation\?\.entryAction\?\.trim\(\)/u);
     assert.match(experienceSource, /data-tutorial-target="whodunnit-enter-mansion"/u);
-    assert.match(experienceSource, /Open the mansion door and enter the foyer/u);
+    assert.match(experienceSource, /className=\{styles\.titleEntryAction\}>\{venueEntryAction\}/u);
+    assert.doesNotMatch(experienceSource, /Open the mansion door and enter the foyer/u);
     assert.match(experienceSource, /beginExteriorEntry/u);
     assert.match(tutorialSource, /Archive reopens a completed, unstarted Participant case/u);
-    assert.match(tutorialSource, /Open the glowing door target with a click, Enter, or Space to cross into the Foyer/u);
+    assert.match(tutorialSource, /\.replaceAll\("unvisited foyer threshold", "unvisited semantic entry"\)/u);
+    assert.match(tutorialSource, /Passenger-ship maps keep every accessible deck inside a lightly pitched hull/u);
   });
 
   it("reveals the durable authored case title before the fullscreen exterior", () => {
@@ -64,6 +67,10 @@ describe("Whodunnit V2 Case Forge visual progression", () => {
     assert.match(experienceSource, /"--forge-exterior-opacity": String\(forgeVisual\.opacity\)/u);
     assert.match(cssSource, /\.forgeCard\[data-exterior-hero="true"\] \{[\s\S]*min-height: 100dvh/u);
     assert.match(cssSource, /opacity: var\(--forge-exterior-opacity, 0\)/u);
+    assert.match(cssSource, /\.titleCard\[data-theme="light"\] \{[\s\S]*--title-card-title-ink: #101923/u);
+    assert.match(cssSource, /\.titleCard\[data-theme="light"\] \.titleCardContent \{[\s\S]*z-index: 7/u);
+    assert.match(cssSource, /\.titleCard\[data-theme="light"\] \.titleCardContent h1 \{[\s\S]*color: var\(--title-card-title-ink\)/u);
+    assert.match(cssSource, /\.titleCard\[data-theme="light"\] \.titleCardContent \.eyebrow \{[\s\S]*color: var\(--title-card-eyebrow-ink\)/u);
   });
 
   it("honors reduced motion while retaining the stage-derived image state", () => {

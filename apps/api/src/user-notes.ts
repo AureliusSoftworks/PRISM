@@ -56,7 +56,7 @@ export function ensureUserNotesSchema(db: DatabaseSync): void {
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
-    CREATE INDEX IF NOT EXISTS idx_user_notes_user_updated
+    CREATE INDEX IF NOT EXISTS main.idx_user_notes_user_updated
       ON user_notes (user_id, updated_at DESC);
   `);
 }

@@ -524,8 +524,8 @@ function fallbackPersonaCheckpointText(transcript: string): string {
 function resolvePersonaName(db: DatabaseSync, userId: string, botId: string | null): string {
   if (!botId) return "Prism";
   const row = db
-    .prepare("SELECT name FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public') LIMIT 1")
-    .get(botId, userId) as { name?: string | null } | undefined;
+    .prepare("SELECT name FROM bots WHERE user_id = ? AND id = ? LIMIT 1")
+    .get(userId, botId) as { name?: string | null } | undefined;
   return row?.name?.trim() || "Facet";
 }
 

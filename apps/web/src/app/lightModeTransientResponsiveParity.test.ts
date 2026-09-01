@@ -53,9 +53,10 @@ describe("Light-mode transient, responsive, and accessibility parity", () => {
   it("authors warmup Light, failure, busy, keyboard, and short-height states", () => {
     assert.match(warmup, /role=\{failed \? "alert" : "status"\}/u);
     assert.match(warmup, /aria-busy=\{!failed && props\.phase !== "releasing"\}/u);
-    assert.match(warmup, /element\.setAttribute\("inert", ""\)/u);
-    assert.match(warmup, /root\.addEventListener\("keydown", trapTab\)/u);
+    assert.doesNotMatch(warmup, /element\.setAttribute\("inert", ""\)/u);
+    assert.doesNotMatch(warmup, /root\.addEventListener\("keydown", trapTab\)/u);
     assert.match(warmup, /tabIndex=\{-1\}/u);
+    assert.match(warmupCss, /var\(--app-shell-top-nav-height/u);
     assert.match(warmupCss, /\.overlay\[data-theme="light"\]/u);
     assert.match(warmupCss, /color-scheme: light/u);
     assert.match(warmupCss, /\.actions button:focus-visible/u);

@@ -26,6 +26,7 @@
 
 import { createHash } from "node:crypto";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
+import { OwnerScopedNotFoundError } from "./owner-first-repository.ts";
 import { composeBotRuntimePersona } from "./bot-global-mood.ts";
 import { coffeeGroupSoundtrackMetadata } from "./coffee-soundtrack.ts";
 import { LIBRARY_FAVORITES_GROUP_ID } from "./library-groups.ts";
@@ -6420,7 +6421,7 @@ export function loadCoffeeSessionMemoryChangeLines(
       `SELECT m.id, m.bot_id, m.ciphertext, m.iv, m.tag, m.source, m.category, m.tier, m.created_at,
               b.name AS bot_name
          FROM memories m
-         LEFT JOIN bots b ON b.id = m.bot_id
+         LEFT JOIN bots b ON b.id = m.bot_id AND b.user_id = m.user_id
         WHERE m.user_id = ? AND m.conversation_id = ?
         ORDER BY m.created_at ASC
         LIMIT 24`
@@ -7979,10 +7980,10 @@ function loadCoffeeGroupProfileRows(
               ${selectOptionalBotColumn("repetition_penalty")},
               semantic_facets, semantic_facets_source_hash, semantic_facets_updated_at
          FROM bots
-        WHERE id IN (${placeholders})
-          AND (user_id = ? OR visibility = 'public')`
+        WHERE user_id = ?
+          AND id IN (${placeholders})`
     )
-    .all(...botIds, userId) as CoffeeBotProfileRow[];
+    .all(userId, ...botIds) as CoffeeBotProfileRow[];
   return new Map(rows.map((row) => [row.id, row]));
 }
 
@@ -8032,7 +8033,7 @@ export function loadCoffeeGroupProfiles(
     options,
   );
   if (missingBotIds.length > 0) {
-    throw new Error("One or more bots in this Coffee group could not be found.");
+    throw new OwnerScopedNotFoundError();
   }
   return profiles;
 }
@@ -8056,10 +8057,10 @@ function loadCoffeeBotNamesById(
     .prepare(
       `SELECT id, name
          FROM bots
-        WHERE id IN (${placeholders})
-          AND (user_id = ? OR visibility = 'public')`
+        WHERE user_id = ?
+          AND id IN (${placeholders})`
     )
-    .all(...uniqueIds, userId) as Array<{ id: string; name: string | null }>;
+    .all(userId, ...uniqueIds) as Array<{ id: string; name: string | null }>;
   const names = new Map<string, string>();
   for (const row of rows) {
     const name = typeof row.name === "string" ? row.name.trim() : "";
@@ -15542,7 +15543,7 @@ function loadMessages(
               m.tool_payload, m.coffee_audience_bot_ids,
               b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
          FROM messages m
-         LEFT JOIN bots b ON b.id = m.bot_id
+         LEFT JOIN bots b ON b.id = m.bot_id AND b.user_id = m.user_id
         WHERE m.conversation_id = ? AND m.user_id = ?
         ORDER BY m.created_at DESC, m.rowid DESC
         LIMIT ?`
@@ -15634,7 +15635,7 @@ function loadAllMessages(
               m.tool_payload, m.coffee_audience_bot_ids,
               b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
          FROM messages m
-         LEFT JOIN bots b ON b.id = m.bot_id
+         LEFT JOIN bots b ON b.id = m.bot_id AND b.user_id = m.user_id
         WHERE m.conversation_id = ? AND m.user_id = ?
         ORDER BY m.created_at ASC, m.rowid ASC`
     )
@@ -16346,10 +16347,16 @@ export function coffeePreparedTurnCursor(
     row.incognito === 1
       ? {}
       : loadBotRelationshipsForBots(db, userId, groupIds);
+  const stableOrderBy: Readonly<Record<string, string>> = {
+    coffee_bot_social_state: "bot_id",
+    coffee_directional_irritation: "subject_bot_id, target_bot_id",
+    coffee_directional_irritation_ledger: "transition_id",
+    coffee_cup_top_offs: "bot_id",
+  };
   const scopedRows = (tableName: string): unknown[] =>
     db
       .prepare(
-        `SELECT * FROM ${tableName} WHERE user_id = ? AND conversation_id = ? ORDER BY rowid`,
+        `SELECT * FROM ${tableName} WHERE user_id = ? AND conversation_id = ? ORDER BY ${stableOrderBy[tableName] ?? "rowid"}`,
       )
       .all(userId, conversationId);
   const promptState = {
@@ -16706,7 +16713,7 @@ function loadCoffeePollBotNames(
     .prepare(
       `SELECT id, name
          FROM bots
-        WHERE (user_id = ? OR visibility = 'public') AND id IN (${placeholders})`
+        WHERE user_id = ? AND id IN (${placeholders})`
     )
     .all(userId, ...ids) as Array<{ id: string; name: string | null }>;
   return new Map(

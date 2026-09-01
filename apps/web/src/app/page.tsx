@@ -43,6 +43,7 @@ import {
   PrismChromeNoticeViewport,
 } from "./PrismChromeNotice";
 import IdentityPresentationBlackout from "./IdentityPresentationBlackout";
+import SceneMediaVignette from "./SceneMediaVignette";
 import {
   BOT_FRAME_FINISH_RECIPES,
   PRISM_FACTORY_CLEAN_FRAME_SEED,
@@ -92,6 +93,12 @@ import {
   type AuthReauthRequiredDetail,
 } from "./authReauth";
 import { decideAuthBootstrapFailure, isAbortLikeError } from "./authBootstrap";
+import {
+  AccountOwnerGenerationBoundary,
+  runAccountOwnerWork,
+  type AccountOwnerGenerationTicket,
+  type AccountOwnerWorkResult,
+} from "./accountOwnerGeneration";
 import {
   attachWebRequestDiagnostic,
   webRequestDiagnosticFor,
@@ -230,16 +237,9 @@ import PrismCompanion, {
   type PrismCompanionFocusedChatHandoff,
 } from "./PrismCompanion";
 import {
-  armAppNavbarAutoHide,
-  hideAppNavbarForImmersion,
   holdAppNavbarForDropdown,
   revealAppNavbarForFreshSurface,
   revealAppNavbarForShortcutAction,
-  revealAppNavbarFromPointerClientY,
-  scheduleAppNavbarAutoHide,
-  setAppNavbarAutoHideEnabled,
-  setAppNavbarSessionHidden,
-  showAppNavbarWhileInteracting,
 } from "./appNavbarChrome";
 import {
   CoffeeIntroCurtain,
@@ -24480,12 +24480,14 @@ interface ComposerModelPickerProps {
   showAutoOption?: boolean;
   /** Value emitted by the synthetic Auto row. Defaults to `auto`. */
   autoOptionValue?: string;
-  /** Visible label for the contextual Auto row. */
+  /** @deprecated The shared Auto row is always labeled exactly "Auto". */
   autoOptionLabel?: string;
   /** Replaces the default Auto subtitle when a surface needs context-specific copy. */
   autoOptionMetaOverride?: string;
-  /** Server-observed Auto status for this applet/session; never a catalog preview. */
+  /** Server-observed Auto model label for this applet/session; never a catalog preview. */
   autoRouteLabel?: string;
+  /** Locked/observed session effort shown by the real effort control. */
+  sessionEffort?: ProviderReasoningEffort | null;
   /** Synthetic value used by batch edit when selected bots disagree. */
   mixedOptionValue?: string;
   /** Visible label for the synthetic mixed state. */
@@ -24629,6 +24631,7 @@ function ComposerModelPicker({
   autoOptionLabel: _autoOptionLabel = "Auto",
   autoOptionMetaOverride,
   autoRouteLabel,
+  sessionEffort,
   mixedOptionValue,
   mixedOptionLabel = BOT_BATCH_MIXED_LABEL,
   effortControl,
@@ -24664,6 +24667,8 @@ function ComposerModelPicker({
     ? autoOptionValue
     : value;
   const autoSelected = normalizedValue === autoOptionValue;
+  const autoRouteResolved =
+    autoSelected && autoLabelShown.trim().toLowerCase() !== "auto";
   const interactionDisabled = disabled || loading;
   const autoTurboButtonInteractive =
     autoSelected &&
@@ -24695,12 +24700,12 @@ function ComposerModelPicker({
     options.find((model) => model.isDefault) ??
     options[0] ??
     null;
-  const selectedLabel = loading
-    ? "Loading models…"
-    : mixedSelected
-      ? mixedOptionLabel
-      : autoSelected
-        ? autoLabelShown
+  const selectedLabel = mixedSelected
+    ? mixedOptionLabel
+    : autoSelected
+      ? autoLabelShown
+      : loading
+        ? "Loading models…"
         : (matchedSelectedModel?.label ?? modelLabelFromId(normalizedValue));
   const visualProvider =
     selectedProvider ?? selectedModel?.provider ?? provider;
@@ -24713,6 +24718,7 @@ function ComposerModelPicker({
     placement,
   );
   const effortInteractionDisabled =
+    disabled ||
     loading ||
     autoSelected ||
     !effortControl ||
@@ -24725,6 +24731,7 @@ function ComposerModelPicker({
     ? autoSelected
       ? "Effort is chosen automatically for each request."
       : (effortControl?.disabledReason ??
+      (disabled ? title : undefined) ??
       effortControl?.capability.disabledReason ??
       (loading ? "Models are still loading." : "Effort is unavailable."))
     : undefined;
@@ -24784,7 +24791,11 @@ function ComposerModelPicker({
     effortControl.capability.supportsMax === true;
   const maxEffortUnlocked =
     maxEffortAvailable && effortControl?.value === "xhigh";
-  const maxEffortActive = effortControl?.maxEnabled === true;
+  const presentedEffort =
+    sessionEffort && sessionEffort !== "auto" ? sessionEffort : null;
+  const maxEffortActive = presentedEffort
+    ? presentedEffort === "max"
+    : !autoSelected && effortControl?.maxEnabled === true;
   const effortProvenanceLabel =
     effortControl?.capability.mode === "simulated"
       ? "Prism simulated"
@@ -25526,7 +25537,16 @@ function ComposerModelPicker({
         aria-busy={loading ? "true" : undefined}
       >
         <span className={styles.composeControlLabel}>Model</span>
-        <span className={styles.composeModelTriggerName}>{selectedLabel}</span>
+        <span
+          className={`${styles.composeModelTriggerName}${
+            autoSelected ? ` ${styles.composeModelTriggerNameAuto}` : ""
+          }`}
+          data-auto-selected={autoSelected ? "true" : undefined}
+          data-auto-route-resolved={autoRouteResolved ? "true" : undefined}
+          aria-live={autoSelected ? "polite" : undefined}
+        >
+          {selectedLabel}
+        </span>
         <span className={styles.composeModelTriggerChevron} aria-hidden="true">
           <svg
             width="10"
@@ -25588,7 +25608,9 @@ function ComposerModelPicker({
                 ? "true"
                 : "false"
             }
-            data-effort-level={maxEffortActive ? "max" : effortControl.value}
+            data-effort-level={
+              presentedEffort ?? (maxEffortActive ? "max" : effortControl.value)
+            }
             data-generating={generating ? "true" : undefined}
             data-turbo={turboVisuallyActive ? "true" : undefined}
             data-auto-turbo-toggle={
@@ -25659,15 +25681,24 @@ function ComposerModelPicker({
                 : autoLocalTurboPreviewAvailable
                   ? "Auto effort. Turbo requires ONLINE. Click for a failed ignition."
                   : autoSelected
-                    ? "Effort chosen automatically"
+                    ? presentedEffort
+                      ? `Auto effort currently ${providerReasoningEffortLabel(presentedEffort)}`
+                      : "Effort chosen automatically"
                     : `Effort: ${effortLabel} · ${effortProvenanceLabel}${
                         turboVisuallyActive ? ". Turbo on" : ""
                       }`
             }
             aria-busy={generating ? "true" : undefined}
           >
-            {autoSelected ? (
+            {autoSelected && !presentedEffort ? (
               <AutoEffortIcon />
+            ) : presentedEffort === "max" ? (
+              <MaxEffortIcon />
+            ) : presentedEffort ? (
+              <ModelEffortIcon
+                level={presentedEffort}
+                mode={effortControl.capability.mode}
+              />
             ) : maxEffortActive ? (
               <MaxEffortIcon />
             ) : (
@@ -25676,7 +25707,11 @@ function ComposerModelPicker({
                 mode={effortControl.capability.mode}
               />
             )}
-            <span className={styles.srOnly}>{effortLabel}</span>
+            <span className={styles.srOnly} aria-live={autoSelected ? "polite" : undefined}>
+              {presentedEffort
+                ? providerReasoningEffortLabel(presentedEffort)
+                : effortLabel}
+            </span>
             {!autoSelected &&
             effortControl.capability.mode !== "unavailable" ? (
               <span
@@ -25784,7 +25819,7 @@ function ComposerModelPicker({
                 >
                   <span className={styles.composeModelOptionMain}>
                     <span className={styles.composeModelOptionName}>
-                      {autoLabelShown}
+                      Auto
                     </span>
                     <span className={styles.composeModelOptionMeta}>
                       {autoMetaShown}
@@ -33113,6 +33148,7 @@ function ZenLiveBotMannequin({
                   depth="behind-face"
                   staticRaster={renderDetailLevel === "audience"}
                   coreColor={avatarDetailsCoreColor}
+                  crispPresentation={theme === "light"}
                   pixelPerfectInk={pixelPerfectInk}
                 />
               ) : null}
@@ -33190,6 +33226,7 @@ function ZenLiveBotMannequin({
                   depth="above-face"
                   staticRaster={renderDetailLevel === "audience"}
                   coreColor={avatarDetailsCoreColor}
+                  crispPresentation={theme === "light"}
                   pixelPerfectInk={pixelPerfectInk}
                 />
               ) : null}
@@ -33315,6 +33352,7 @@ function ZenLiveBotMannequin({
                     mouthShape={displayedMouthShape}
                     depth="behind-face"
                     coreColor={avatarDetailsCoreColor}
+                    crispPresentation={theme === "light"}
                     pixelPerfectInk={pixelPerfectInk}
                   />
                 ) : null}
@@ -33394,6 +33432,7 @@ function ZenLiveBotMannequin({
                     mouthShape={displayedMouthShape}
                     depth="above-face"
                     coreColor={avatarDetailsCoreColor}
+                    crispPresentation={theme === "light"}
                     pixelPerfectInk={pixelPerfectInk}
                   />
                 ) : null}
@@ -40233,7 +40272,6 @@ interface BotAvatarCustomizerModalProps {
   powersPanel?: React.ReactNode;
   colorPickerOpen: boolean;
   resolvedTheme: "light" | "dark";
-  themeMode: Theme;
   faceEyesFont: BotFaceFontId;
   faceEyeCharacter: string | null;
   faceEyeAnimation: BotFaceEyeMovement;
@@ -40305,7 +40343,6 @@ interface BotAvatarCustomizerModalProps {
   onRedo: () => void;
   onDiscard: () => void;
   onCancelSavePrompt: () => void;
-  onThemeCycle: () => void | Promise<void>;
   onColorChange: (next: string) => void;
   onAccentColorChange: (next: string | null) => void;
   onGlyphChange: (next: BotGlyphName) => void;
@@ -46356,7 +46393,6 @@ function BotAvatarCustomizerModal({
   powersPanel,
   colorPickerOpen,
   resolvedTheme,
-  themeMode,
   faceEyesFont,
   faceEyeCharacter,
   faceEyeAnimation,
@@ -46421,7 +46457,6 @@ function BotAvatarCustomizerModal({
   onRedo,
   onDiscard,
   onCancelSavePrompt,
-  onThemeCycle,
   onColorChange,
   onAccentColorChange,
   onGlyphChange,
@@ -47001,14 +47036,6 @@ function BotAvatarCustomizerModal({
         : draftMode
           ? "Draft"
           : "Saved";
-  const themeAriaLabel =
-    themeMode === "system"
-      ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(themeMode)]}.`
-      : `Theme: ${THEME_LABEL[themeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(themeMode)]}.`;
-  const themeTooltip =
-    themeMode === "system"
-      ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
-      : `Theme: ${THEME_LABEL[themeMode]}`;
   const faceIsDefault = botAvatarFaceIsDefault({
     faceEyesFont,
     faceEyeCharacter,
@@ -47660,16 +47687,6 @@ function BotAvatarCustomizerModal({
                 {saving ? "Saving..." : draftMode ? "Create bot" : "Save"}
               </button>
             ) : null}
-            <button
-              type="button"
-              className={`${styles.botAvatarCustomizerCloseButton} ${styles.botAvatarCustomizerThemeButton}`}
-              onClick={() => void onThemeCycle()}
-              aria-label={themeAriaLabel}
-              title={themeTooltip}
-              data-avatar-customizer-theme-toggle="true"
-            >
-              <ThemeGlyph mode={themeMode} />
-            </button>
             <button
               type="button"
               className={styles.botAvatarCustomizerCloseButton}
@@ -50187,6 +50204,11 @@ function HomeContent(): React.JSX.Element {
   const debateVoiceSurfaceActiveRef = useRef(view === "debate");
   const coffeeVoiceSurfaceActiveRef = useRef(view === "coffee");
   const [appSwitcherOpen, setAppSwitcherOpen] = useState(false);
+  const [appletHomeRequestTokens, setAppletHomeRequestTokens] = useState({
+    debate: 0,
+    botcast: 0,
+    slate: 0,
+  });
   useEffect(() => {
     if (!appSwitcherOpen) return;
     return holdAppNavbarForDropdown();
@@ -50215,6 +50237,12 @@ function HomeContent(): React.JSX.Element {
   );
   const [debateActualAutoRoute, setDebateActualAutoRoute] =
     useState<ActualAppletRoute | null>(null);
+  const [debateLiveModelSelection, setDebateLiveModelSelection] = useState<{
+    responseMode: ResponseMode;
+    provider: Provider;
+    modelChoice: string;
+    reasoningEffort: ProviderReasoningEffort | null;
+  } | null>(null);
   const [slateActualAutoRoute, setSlateActualAutoRoute] =
     useState<ActualAppletRoute | null>(null);
   const [signalLiveSessionActive, setSignalLiveSessionActive] = useState(false);
@@ -50259,28 +50287,12 @@ function HomeContent(): React.JSX.Element {
   const disableTurboForSafetyTransitionRef = useRef<
     (reason: "applet" | "session") => void
   >(() => {});
-  // Kept as call-site seams for conversation transitions and shared chrome.
+  // Conversation transitions explicitly reaffirm the permanent shared chrome.
   const revealZenHeaderForFreshSurface = useCallback(() => {
     revealAppNavbarForFreshSurface();
   }, []);
-  const hideZenHeaderForConversationAction = useCallback(() => {
-    hideAppNavbarForImmersion();
-  }, []);
-  useEffect(() => {
-    const onPointerMove = (event: PointerEvent): void => {
-      if (event.pointerType && event.pointerType !== "mouse") return;
-      revealAppNavbarFromPointerClientY(event.clientY);
-    };
-    const onPointerDown = (event: PointerEvent): void => {
-      if (event.pointerType === "mouse") return;
-      revealAppNavbarFromPointerClientY(event.clientY);
-    };
-    window.addEventListener("pointermove", onPointerMove, { passive: true });
-    window.addEventListener("pointerdown", onPointerDown, { passive: true });
-    return () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerdown", onPointerDown);
-    };
+  const keepZenHeaderVisibleForConversationAction = useCallback(() => {
+    revealAppNavbarForFreshSurface();
   }, []);
   const clearViewSwitchOverlayTimers = useCallback(() => {
     if (viewSwitchOverlayHideTimerRef.current) {
@@ -50487,6 +50499,32 @@ function HomeContent(): React.JSX.Element {
   const [user, setUser] = useState<SessionUser | null>(null);
   const userRef = useRef<SessionUser | null>(null);
   userRef.current = user;
+  const accountOwnerGenerationBoundaryRef = useRef(
+    new AccountOwnerGenerationBoundary(),
+  );
+  const authBootstrapRequestGenerationRef = useRef(0);
+  const captureAccountOwnerGeneration = useCallback(
+    (): AccountOwnerGenerationTicket | null =>
+      accountOwnerGenerationBoundaryRef.current.capture(),
+    [],
+  );
+  const isCurrentAccountOwnerGeneration = useCallback(
+    (ticket: AccountOwnerGenerationTicket | null | undefined): boolean =>
+      accountOwnerGenerationBoundaryRef.current.isCurrent(ticket),
+    [],
+  );
+  const runForAccountOwner = useCallback(
+    <T,>(
+      ticket: AccountOwnerGenerationTicket,
+      work: () => Promise<T>,
+    ): Promise<AccountOwnerWorkResult<T>> =>
+      runAccountOwnerWork(
+        accountOwnerGenerationBoundaryRef.current,
+        ticket,
+        work,
+      ),
+    [],
+  );
   const [keyboardShortcutPlatform, setKeyboardShortcutPlatform] = useState("");
   const [keyboardShortcuts, setKeyboardShortcuts] =
     useState<PrismKeyboardShortcutPreferencesV1>(() =>
@@ -50776,6 +50814,8 @@ function HomeContent(): React.JSX.Element {
   const globalModelSelectionMutationVersionRef = useRef(0);
   const persistModelEffortPreference = useCallback(
     (target: ActiveModelEffortTarget, nextValue: ReasoningEffort): void => {
+      const ownerGeneration = captureAccountOwnerGeneration();
+      if (!ownerGeneration) return;
       if (nextValue !== "xhigh") {
         clearMaxEffortOverdrive();
       }
@@ -50815,22 +50855,28 @@ function HomeContent(): React.JSX.Element {
       const mutation = previousMutation
         .catch(() => undefined)
         .then(() =>
-          api<{
-            ok: true;
-            modelEffortPreferences: ModelReasoningEffortPreferenceV1[];
-          }>("/api/model-effort-preferences", {
-            method: "PUT",
-            body: JSON.stringify({
-              provider: target.provider,
-              modelId: target.modelId,
-              effort: normalized ?? "default",
+          runForAccountOwner(ownerGeneration, () =>
+            api<{
+              ok: true;
+              modelEffortPreferences: ModelReasoningEffortPreferenceV1[];
+            }>("/api/model-effort-preferences", {
+              method: "PUT",
+              body: JSON.stringify({
+                provider: target.provider,
+                modelId: target.modelId,
+                effort: normalized ?? "default",
+              }),
             }),
-          }),
+          ),
         )
-        .then((response) => {
-          if (modelEffortMutationVersionRef.current.get(key) !== version) {
+        .then((result) => {
+          if (
+            result.status === "stale" ||
+            modelEffortMutationVersionRef.current.get(key) !== version
+          ) {
             return;
           }
+          const response = result.value;
           setSettings((current) =>
             current
               ? {
@@ -50841,7 +50887,10 @@ function HomeContent(): React.JSX.Element {
           );
         })
         .catch((error) => {
-          if (modelEffortMutationVersionRef.current.get(key) !== version) {
+          if (
+            !isCurrentAccountOwnerGeneration(ownerGeneration) ||
+            modelEffortMutationVersionRef.current.get(key) !== version
+          ) {
             return;
           }
           setSettings((current) =>
@@ -50858,13 +50907,21 @@ function HomeContent(): React.JSX.Element {
         });
       modelEffortMutationQueueRef.current.set(key, mutation);
     },
-    [clearMaxEffortOverdrive, settings],
+    [
+      captureAccountOwnerGeneration,
+      clearMaxEffortOverdrive,
+      isCurrentAccountOwnerGeneration,
+      runForAccountOwner,
+      settings,
+    ],
   );
   const persistModelTurboPreference = useCallback(
     (
       target: Pick<ActiveModelEffortTarget, "provider" | "modelId" | "turboSupported">,
       turbo: boolean,
     ): void => {
+      const ownerGeneration = captureAccountOwnerGeneration();
+      if (!ownerGeneration) return;
       if (!target.turboSupported) return;
       const key = modelReasoningEffortPreferenceKey(
         target.provider,
@@ -50902,20 +50959,27 @@ function HomeContent(): React.JSX.Element {
         ...(previousMutation ? [previousMutation] : []),
       ])
         .then(() =>
-          api<{
-            ok: true;
-            modelTurboPreferences: ModelTurboPreferenceV1[];
-          }>("/api/model-turbo-preferences", {
-            method: "PUT",
-            body: JSON.stringify({
-              provider: target.provider,
-              modelId: target.modelId,
-              turbo,
+          runForAccountOwner(ownerGeneration, () =>
+            api<{
+              ok: true;
+              modelTurboPreferences: ModelTurboPreferenceV1[];
+            }>("/api/model-turbo-preferences", {
+              method: "PUT",
+              body: JSON.stringify({
+                provider: target.provider,
+                modelId: target.modelId,
+                turbo,
+              }),
             }),
-          }),
+          ),
         )
-        .then((response) => {
-          if (modelTurboMutationVersionRef.current.get(key) !== version) return;
+        .then((result) => {
+          if (
+            result.status === "stale" ||
+            modelTurboMutationVersionRef.current.get(key) !== version
+          )
+            return;
+          const response = result.value;
           setSettings((current) =>
             current
               ? {
@@ -50926,7 +50990,11 @@ function HomeContent(): React.JSX.Element {
           );
         })
         .catch((error) => {
-          if (modelTurboMutationVersionRef.current.get(key) !== version) return;
+          if (
+            !isCurrentAccountOwnerGeneration(ownerGeneration) ||
+            modelTurboMutationVersionRef.current.get(key) !== version
+          )
+            return;
           setSettings((current) =>
             current
               ? { ...current, modelTurboPreferences: previousPreferences }
@@ -50941,7 +51009,12 @@ function HomeContent(): React.JSX.Element {
         });
       modelTurboMutationQueueRef.current.set(key, mutation);
     },
-    [settings],
+    [
+      captureAccountOwnerGeneration,
+      isCurrentAccountOwnerGeneration,
+      runForAccountOwner,
+      settings,
+    ],
   );
   const persistAutoTurboPreference = useCallback(
     (turbo: boolean): void =>
@@ -50957,6 +51030,8 @@ function HomeContent(): React.JSX.Element {
   );
   const resetAllModelTurboPreferences = useCallback(
     (reason: "applet" | "model" | "session"): void => {
+      const ownerGeneration = captureAccountOwnerGeneration();
+      if (!ownerGeneration) return;
       const previousPreferences = settings?.modelTurboPreferences ?? [];
       if (previousPreferences.length === 0) return;
       const resetVersion = modelTurboResetVersionRef.current + 1;
@@ -50980,13 +51055,20 @@ function HomeContent(): React.JSX.Element {
         ...pendingWrites,
       ])
         .then(() =>
-          api<{
-            ok: true;
-            modelTurboPreferences: ModelTurboPreferenceV1[];
-          }>("/api/model-turbo-preferences", { method: "DELETE" }),
+          runForAccountOwner(ownerGeneration, () =>
+            api<{
+              ok: true;
+              modelTurboPreferences: ModelTurboPreferenceV1[];
+            }>("/api/model-turbo-preferences", { method: "DELETE" }),
+          ),
         )
-        .then((response) => {
-          if (modelTurboResetVersionRef.current !== resetVersion) return;
+        .then((result) => {
+          if (
+            result.status === "stale" ||
+            modelTurboResetVersionRef.current !== resetVersion
+          )
+            return;
+          const response = result.value;
           setSettings((current) =>
             current
               ? {
@@ -50997,7 +51079,11 @@ function HomeContent(): React.JSX.Element {
           );
         })
         .catch((error) => {
-          if (modelTurboResetVersionRef.current !== resetVersion) return;
+          if (
+            !isCurrentAccountOwnerGeneration(ownerGeneration) ||
+            modelTurboResetVersionRef.current !== resetVersion
+          )
+            return;
           setSettings((current) =>
             current
               ? { ...current, modelTurboPreferences: previousPreferences }
@@ -51007,11 +51093,18 @@ function HomeContent(): React.JSX.Element {
         });
       modelTurboResetQueueRef.current = reset;
     },
-    [settings?.modelTurboPreferences],
+    [
+      captureAccountOwnerGeneration,
+      isCurrentAccountOwnerGeneration,
+      runForAccountOwner,
+      settings?.modelTurboPreferences,
+    ],
   );
   disableTurboForSafetyTransitionRef.current = (reason) =>
     resetAllModelTurboPreferences(reason);
   const resetAllModelEffortPreferences = useCallback((): void => {
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
     clearMaxEffortOverdrive();
     let previousPreferences: ModelReasoningEffortPreferenceV1[] = [];
     setSettings((current) => {
@@ -51022,12 +51115,16 @@ function HomeContent(): React.JSX.Element {
     const pendingWrites = [...modelEffortMutationQueueRef.current.values()];
     void Promise.allSettled(pendingWrites)
       .then(() =>
-        api<{
-          ok: true;
-          modelEffortPreferences: ModelReasoningEffortPreferenceV1[];
-        }>("/api/model-effort-preferences", { method: "DELETE" }),
+        runForAccountOwner(ownerGeneration, () =>
+          api<{
+            ok: true;
+            modelEffortPreferences: ModelReasoningEffortPreferenceV1[];
+          }>("/api/model-effort-preferences", { method: "DELETE" }),
+        ),
       )
-      .then((response) => {
+      .then((result) => {
+        if (result.status === "stale") return;
+        const response = result.value;
         modelEffortMutationVersionRef.current.clear();
         setSettings((current) =>
           current
@@ -51039,6 +51136,7 @@ function HomeContent(): React.JSX.Element {
         );
       })
       .catch((error) => {
+        if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
         setSettings((current) =>
           current
             ? { ...current, modelEffortPreferences: previousPreferences }
@@ -51046,11 +51144,19 @@ function HomeContent(): React.JSX.Element {
         );
         console.warn("[effort] reset failed", error);
       });
-  }, [clearMaxEffortOverdrive]);
+  }, [
+    captureAccountOwnerGeneration,
+    clearMaxEffortOverdrive,
+    isCurrentAccountOwnerGeneration,
+    runForAccountOwner,
+  ]);
   const notifySimulatedEffortEducation = useCallback(() => {
-    if (typeof window === "undefined") return;
-    const storageKey = "prism:simulated-effort-toast:v1";
+    if (typeof window === "undefined" || !user?.id) return;
+    const storageKey = `prism:simulated-effort-toast:v1:${encodeURIComponent(
+      user.id,
+    )}`;
     try {
+      window.sessionStorage.removeItem("prism:simulated-effort-toast:v1");
       if (window.sessionStorage.getItem(storageKey) === "1") return;
       window.sessionStorage.setItem(storageKey, "1");
     } catch {
@@ -51060,7 +51166,7 @@ function HomeContent(): React.JSX.Element {
       "LOCAL simulated thinking",
       "This local model has no built-in Effort dial. Prism runs private planning passes on your configured Ollama provider before the reply — higher Effort means more passes and a longer wait.",
     );
-  }, []);
+  }, [user?.id]);
   const effortControlForTarget = useCallback(
     (
       target: ActiveModelEffortTarget | null,
@@ -51909,17 +52015,24 @@ function HomeContent(): React.JSX.Element {
     : 0;
   const refreshElevenLabsCreditBalance = useCallback(async () => {
     if (!elevenLabsCreditAvailability.canCheck) return;
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
     setElevenLabsCreditStatus("checking");
     setElevenLabsCreditError(null);
     try {
-      const response = await api<ElevenLabsCreditsResponse>(
-        "/api/settings/elevenlabs-credits",
-        { cache: "no-store" },
+      const creditResult = await runForAccountOwner(ownerGeneration, () =>
+        api<ElevenLabsCreditsResponse>(
+          "/api/settings/elevenlabs-credits",
+          { cache: "no-store" },
+        ),
       );
+      if (creditResult.status === "stale") return;
+      const response = creditResult.value;
       setElevenLabsCreditBalance(response.balance);
-      setElevenLabsCreditOwnerUserId(user?.id ?? null);
+      setElevenLabsCreditOwnerUserId(ownerGeneration.ownerId);
       setElevenLabsCreditStatus("ready");
     } catch (error) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       setElevenLabsCreditError(
         error instanceof Error
           ? error.message
@@ -51927,7 +52040,12 @@ function HomeContent(): React.JSX.Element {
       );
       setElevenLabsCreditStatus("error");
     }
-  }, [elevenLabsCreditAvailability.canCheck, user?.id]);
+  }, [
+    captureAccountOwnerGeneration,
+    elevenLabsCreditAvailability.canCheck,
+    isCurrentAccountOwnerGeneration,
+    runForAccountOwner,
+  ]);
   const clearSettingsApiKeyDrafts = useCallback(
     (
       providers: ApiKeyValidationProvider[] = [
@@ -52600,6 +52718,7 @@ function HomeContent(): React.JSX.Element {
     value: string,
   ): () => void {
     const trimmed = value.trim();
+    const ownerGeneration = captureAccountOwnerGeneration();
     if (panel !== "settings" || !trimmed) {
       setApiKeyDraftValidation((previous) => {
         const current = previous[provider];
@@ -52617,6 +52736,7 @@ function HomeContent(): React.JSX.Element {
       });
       return () => {};
     }
+    if (!ownerGeneration) return () => {};
 
     setApiKeyDraftValidation((previous) => {
       const current = previous[provider];
@@ -52630,26 +52750,33 @@ function HomeContent(): React.JSX.Element {
 
     const controller = new AbortController();
     const timerId = window.setTimeout(() => {
-      void api<ApiKeyStatusResponse>("/api/settings/api-key-status", {
-        method: "POST",
-        body: JSON.stringify({ provider, apiKey: trimmed }),
-        signal: controller.signal,
-      })
+      void runForAccountOwner(ownerGeneration, () =>
+        api<ApiKeyStatusResponse>("/api/settings/api-key-status", {
+          method: "POST",
+          body: JSON.stringify({ provider, apiKey: trimmed }),
+          signal: controller.signal,
+        }),
+      )
         .then((result) => {
+          if (result.status === "stale") return;
           setApiKeyDraftValidation((previous) => {
             if (previous[provider].value !== trimmed) return previous;
             return {
               ...previous,
               [provider]: {
                 value: trimmed,
-                status: result.status.reachable ? "connected" : "error",
-                detail: result.status.detail ?? null,
+                status: result.value.status.reachable ? "connected" : "error",
+                detail: result.value.status.detail ?? null,
               },
             };
           });
         })
         .catch((err) => {
-          if (isAbortLikeError(err)) return;
+          if (
+            isAbortLikeError(err) ||
+            !isCurrentAccountOwnerGeneration(ownerGeneration)
+          )
+            return;
           setApiKeyDraftValidation((previous) => {
             if (previous[provider].value !== trimmed) return previous;
             return {
@@ -52672,23 +52799,23 @@ function HomeContent(): React.JSX.Element {
   }
   useEffect(
     () => scheduleApiKeyDraftValidation("ollama_cloud", ollamaCloudKey),
-    [panel, ollamaCloudKey],
+    [panel, ollamaCloudKey, user?.id],
   );
   useEffect(
     () => scheduleApiKeyDraftValidation("openai", openAiKey),
-    [panel, openAiKey],
+    [panel, openAiKey, user?.id],
   );
   useEffect(
     () => scheduleApiKeyDraftValidation("anthropic", anthropicKey),
-    [panel, anthropicKey],
+    [panel, anthropicKey, user?.id],
   );
   useEffect(
     () => scheduleApiKeyDraftValidation("elevenlabs", elevenLabsKey),
-    [panel, elevenLabsKey],
+    [panel, elevenLabsKey, user?.id],
   );
   useEffect(
     () => scheduleApiKeyDraftValidation("brave", braveSearchKey),
-    [panel, braveSearchKey],
+    [panel, braveSearchKey, user?.id],
   );
   const refreshUsageReport = useCallback(
     async (
@@ -52936,10 +53063,6 @@ function HomeContent(): React.JSX.Element {
   const chatPresentation = chatPresentationForSurface(view, sidebarOpen);
   useEffect(() => {
     revealAppNavbarForFreshSurface();
-    // Idle auto-hide and the Wield visibility hold are Zen-only for now.
-    const zenAutoHide = chatPresentation === "zen";
-    setAppNavbarAutoHideEnabled(zenAutoHide);
-    if (zenAutoHide) armAppNavbarAutoHide();
   }, [chatPresentation, view]);
   const zenCanvasTypingDelayMultiplier =
     chatTurnStreamRateMultiplier(chatPresentation, zenCanvasTypingSpeed);
@@ -57379,6 +57502,8 @@ function HomeContent(): React.JSX.Element {
       advanceDesktopFirstRunStep();
       return;
     }
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
 
     const patch: Record<string, unknown> = {};
     let keyProvider: ApiKeyValidationProvider | null = null;
@@ -57409,13 +57534,16 @@ function HomeContent(): React.JSX.Element {
     setDesktopFirstRunStepError(null);
     try {
       if (keyProvider && keyValue) {
-        const validation = await api<ApiKeyStatusResponse>(
-          "/api/settings/api-key-status",
-          {
-            method: "POST",
-            body: JSON.stringify({ provider: keyProvider, apiKey: keyValue }),
-          },
+        const validationResult = await runForAccountOwner(
+          ownerGeneration,
+          () =>
+            api<ApiKeyStatusResponse>("/api/settings/api-key-status", {
+              method: "POST",
+              body: JSON.stringify({ provider: keyProvider, apiKey: keyValue }),
+            }),
         );
+        if (validationResult.status === "stale") return;
+        const validation = validationResult.value;
         if (!validation.status.reachable) {
           throw new Error(
             validation.status.detail ||
@@ -57424,15 +57552,19 @@ function HomeContent(): React.JSX.Element {
         }
       }
       if (Object.keys(patch).length > 0) {
-        await api("/api/settings", {
-          method: "PATCH",
-          body: JSON.stringify(patch),
-        });
-        await refreshSettings();
+        const saveResult = await runForAccountOwner(ownerGeneration, () =>
+          api("/api/settings", {
+            method: "PATCH",
+            body: JSON.stringify(patch),
+          }),
+        );
+        if (saveResult.status === "stale") return;
+        await refreshSettings(ownerGeneration);
         if (keyProvider) {
-          await refreshModels();
+          await refreshModels(undefined, false, ownerGeneration);
         }
       }
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       if (step.id === "atmosphere" || step.id === "openai") {
         void requestHubAtmosphereGeneration(desktopFirstRunAtmosphereStyle, {
           force: step.id !== "atmosphere",
@@ -57447,13 +57579,16 @@ function HomeContent(): React.JSX.Element {
       if (keyProvider) clearSettingsApiKeyDrafts([keyProvider]);
       advanceDesktopFirstRunStep();
     } catch (error) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       setDesktopFirstRunStepError(
         error instanceof Error
           ? error.message
           : "That setup step could not be saved.",
       );
     } finally {
-      setDesktopFirstRunStepBusy(false);
+      if (isCurrentAccountOwnerGeneration(ownerGeneration)) {
+        setDesktopFirstRunStepBusy(false);
+      }
     }
   }
 
@@ -57973,6 +58108,82 @@ function HomeContent(): React.JSX.Element {
     }, 260);
     return () => window.clearTimeout(timer);
   }, [panel, comfyUiDraftHost]);
+
+  const transitionAccountOwnerGeneration = useCallback(
+    (nextOwnerId: string | null): boolean => {
+      const boundary = accountOwnerGenerationBoundaryRef.current;
+      const changed = nextOwnerId
+        ? boundary.setOwner(nextOwnerId)
+        : (boundary.clear(), true);
+      if (!changed) return false;
+
+      // Queued promise chains retain closures even after their map entries are
+      // removed. Their captured owner tickets prevent execution under the next
+      // cookie; clearing here also keeps new-owner queues independent of them.
+      modelEffortMutationVersionRef.current.clear();
+      modelEffortMutationQueueRef.current.clear();
+      modelTurboMutationVersionRef.current.clear();
+      modelTurboMutationQueueRef.current.clear();
+      modelTurboResetQueueRef.current = Promise.resolve();
+      modelTurboResetVersionRef.current += 1;
+      globalModelSelectionMutationVersionRef.current += 1;
+      modelCatalogRefreshTokenRef.current += 1;
+
+      if (modelEffortHudTimerRef.current !== null) {
+        window.clearTimeout(modelEffortHudTimerRef.current);
+        modelEffortHudTimerRef.current = null;
+      }
+      activeModelEffortTargetRef.current = null;
+      setModelEffortHudTarget(null);
+      clearMaxEffortOverdrive();
+
+      const defaultModelChoices = createDefaultChatModelChoiceByProvider();
+      globalModelChoiceByProviderRef.current = defaultModelChoices;
+      setGlobalModelChoiceByProvider(defaultModelChoices);
+      setSettings(null);
+      setModelCatalog(null);
+      setModelCatalogStatus("idle");
+      setModelCatalogRefreshFeedback("idle");
+      setComfyUiModelsPayload({
+        configured: false,
+        reachable: false,
+        checkpoints: [],
+        allCheckpoints: [],
+      });
+      setSecondaryOllamaStatus(null);
+      setDualOllamaWorkloadStatus(null);
+      setSecondaryOllamaStatusChecking(false);
+      setComfyUiStatus(null);
+      setComfyUiStatusChecking(false);
+      setProviderKeyStatus(null);
+      setProviderKeyStatusChecking(false);
+      setModelDisplayNameEdit(null);
+      updateAutoFallbackDrag(null);
+      setAutoFallbackReorderAnnouncement("");
+
+      setOpenAiKey("");
+      setAnthropicKey("");
+      setOllamaCloudKey("");
+      setElevenLabsKey("");
+      setBraveSearchKey("");
+      setApiKeyDraftValidation(createApiKeyDraftValidationMap());
+      setApiKeyInputResetToken((current) => current + 1);
+      setElevenLabsCreditBalance(null);
+      setElevenLabsCreditOwnerUserId(null);
+      setElevenLabsCreditStatus("idle");
+      setElevenLabsCreditError(null);
+      voiceModeSelectionBusyRef.current = false;
+      setEphemeralChatPreferenceSavingMode(null);
+      setDesktopFirstRunStepBusy(false);
+      setDesktopFirstRunStepError(null);
+      setBusy(false);
+      setPanelError(null);
+      setPanelNotice(null);
+      setSettingsHostsModalOpen(false);
+      return true;
+    },
+    [clearMaxEffortOverdrive, updateAutoFallbackDrag],
+  );
 
   // Derive the --accent / --accent-text / --accent-ink triad written
   // onto the app shell. A selected/active bot owns this single-color
@@ -59092,6 +59303,8 @@ function HomeContent(): React.JSX.Element {
       nextProvider: Provider,
     ): void => {
       if (!settings) return;
+      const ownerGeneration = captureAccountOwnerGeneration();
+      if (!ownerGeneration) return;
       const version = globalModelSelectionMutationVersionRef.current + 1;
       globalModelSelectionMutationVersionRef.current = version;
       const previousSettings = settings;
@@ -59143,18 +59356,21 @@ function HomeContent(): React.JSX.Element {
             }
           : current,
       );
-      void api<{ ok: true; settings?: Partial<UserSettings> }>(
-        "/api/settings",
-        {
+      void runForAccountOwner(ownerGeneration, () =>
+        api<{ ok: true; settings?: Partial<UserSettings> }>("/api/settings", {
           method: "PATCH",
           body: JSON.stringify({
             preferredProvider: nextProvider,
             preferredLocalModel,
             preferredOnlineModel,
           }),
-        },
+        }),
       ).catch((error) => {
-        if (globalModelSelectionMutationVersionRef.current !== version) return;
+        if (
+          !isCurrentAccountOwnerGeneration(ownerGeneration) ||
+          globalModelSelectionMutationVersionRef.current !== version
+        )
+          return;
         globalModelChoiceByProviderRef.current = previousChoices;
         setGlobalModelChoiceByProvider(previousChoices);
         setSettings((current) =>
@@ -59170,7 +59386,14 @@ function HomeContent(): React.JSX.Element {
         console.warn("[model] global selection failed", error);
       });
     },
-    [clearMaxEffortOverdrive, resetAllModelTurboPreferences, settings],
+    [
+      captureAccountOwnerGeneration,
+      clearMaxEffortOverdrive,
+      isCurrentAccountOwnerGeneration,
+      resetAllModelTurboPreferences,
+      runForAccountOwner,
+      settings,
+    ],
   );
   const botGeneratorResponseMode = responseModeForProvider(
     effectivePreferredProvider,
@@ -60974,6 +61197,19 @@ function HomeContent(): React.JSX.Element {
             ? autoPresentation.modelLabel
             : undefined
         }
+        sessionEffort={
+          coffeeConfigurationLocked
+            ? visibleModelChoice === AUTO_MODEL_CHOICE
+              ? autoPresentation.effort
+              : effortTarget
+                ? effectiveModelReasoningEffortForRequest(
+                    settings,
+                    effortTarget,
+                    maxEffortTargetKey,
+                  )
+                : null
+            : null
+        }
         effortControl={effortControlForTarget(effortTarget, {
           autoSelected: visibleModelChoice === AUTO_MODEL_CHOICE,
         })}
@@ -62601,16 +62837,13 @@ function HomeContent(): React.JSX.Element {
   const hideChatChromeAfterThreadScroll = useCallback(() => {
     if (!effectiveChatPresentation) return;
     chatChromeAutoHiddenRef.current = true;
-    hideAppNavbarForImmersion();
-    if (!chatHeaderChromePinned) {
-      setChatHeaderChromeVisibleState(false);
-    }
+    revealAppNavbarForFreshSurface();
+    setChatHeaderChromeVisibleState(true);
     if (!chatComposerChromePinned) {
       setChatComposerChromeVisibleState(false);
     }
   }, [
     chatComposerChromePinned,
-    chatHeaderChromePinned,
     effectiveChatPresentation,
     setChatComposerChromeVisibleState,
     setChatHeaderChromeVisibleState,
@@ -66502,27 +66735,6 @@ function HomeContent(): React.JSX.Element {
     return acquirePrismLivingSession("coffee", ownerId);
   }, [coffeeConversation?.id, coffeeSessionPhase]);
   useEffect(() => {
-    const sessionHidden =
-      botGeneratorOpen ||
-      botAvatarCustomizerOpen ||
-      (view === "coffee" &&
-        (coffeeChromePolicy.liveSessionActive || coffeeIntroPlaying)) ||
-      (view === "debate" && debateLiveSessionActive) ||
-      (view === "botcast" && signalLiveSessionActive);
-    setAppNavbarSessionHidden(sessionHidden);
-    return () => {
-      setAppNavbarSessionHidden(false);
-    };
-  }, [
-    botAvatarCustomizerOpen,
-    botGeneratorOpen,
-    view,
-    coffeeChromePolicy.liveSessionActive,
-    coffeeIntroPlaying,
-    debateLiveSessionActive,
-    signalLiveSessionActive,
-  ]);
-  useEffect(() => {
     if (!coffeeConfigurationLocked) return;
     setBotAvatarCustomizerOpen(false);
     setBotAvatarSavePromptOpen(false);
@@ -68323,6 +68535,7 @@ function HomeContent(): React.JSX.Element {
       storage,
       previousContext,
       nextContext,
+      user.id,
     );
     turboAppletContextRef.current = nextContext;
     if (shouldDisableTurbo) {
@@ -72095,6 +72308,8 @@ function HomeContent(): React.JSX.Element {
   const storyModelProvider = storyResolvedChoice.provider;
   const storyVisibleModelChoice = storyResolvedChoice.modelChoice;
   const storyEffectiveModelChoice = storyVisibleModelChoice;
+  const storyLiveSessionActive =
+    storySession?.status === "generating" || storySession?.status === "playing";
   const storyModelOptions =
     storyResponseMode === "local"
       ? chatModelOptionsForProvider(modelCatalog, settings, "local")
@@ -78915,6 +79130,8 @@ function HomeContent(): React.JSX.Element {
   ]);
 
   const bootstrap = useCallback(async (): Promise<SessionUser | null> => {
+    const requestGeneration = authBootstrapRequestGenerationRef.current + 1;
+    authBootstrapRequestGenerationRef.current = requestGeneration;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
     try {
@@ -78922,10 +79139,17 @@ function HomeContent(): React.JSX.Element {
         user: SessionUser | null;
         hasAnyAccounts?: boolean;
       }>("/api/auth/me", { signal: controller.signal });
+      if (authBootstrapRequestGenerationRef.current !== requestGeneration) {
+        return userRef.current;
+      }
       setHasAnyAccounts(d.hasAnyAccounts !== false);
+      transitionAccountOwnerGeneration(d.user?.id ?? null);
       setUser(d.user);
       return d.user;
     } catch (err) {
+      if (authBootstrapRequestGenerationRef.current !== requestGeneration) {
+        return userRef.current;
+      }
       const decision = decideAuthBootstrapFailure(err, userRef.current, {
         path: "/api/auth/me",
       });
@@ -78934,12 +79158,13 @@ function HomeContent(): React.JSX.Element {
         setBackendUnavailable(decision.detail);
         return decision.user;
       }
+      transitionAccountOwnerGeneration(null);
       setUser(null);
       return null;
     } finally {
       clearTimeout(timeout);
     }
-  }, [requestApiWithLoopbackFallback]);
+  }, [requestApiWithLoopbackFallback, transitionAccountOwnerGeneration]);
 
   useEffect(() => {
     if (!CLIENT_ACCESS_REQUIRED) {
@@ -78963,6 +79188,8 @@ function HomeContent(): React.JSX.Element {
           return;
         }
         setClientAccessState("blocked");
+        authBootstrapRequestGenerationRef.current += 1;
+        transitionAccountOwnerGeneration(null);
         setUser(null);
       }
     }
@@ -78971,7 +79198,7 @@ function HomeContent(): React.JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [transitionAccountOwnerGeneration]);
 
   useEffect(() => {
     if (clientAccessState !== "allowed") return;
@@ -80709,27 +80936,32 @@ function HomeContent(): React.JSX.Element {
   }, [view]);
 
   async function refreshAll(options: { includeModels?: boolean } = {}) {
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
     const includeModels = options.includeModels !== false;
     try {
       // Models request must see the same ComfyUI host as GET /api/settings — avoid racing
       // refreshSettings (setState is async) so refreshModels never calls /api/models with a stale host.
-      const settingsPromise = refreshSettings();
+      const settingsPromise = refreshSettings(ownerGeneration);
       await Promise.all([
         refreshConversations(),
         refreshMemories(),
         refreshBots(),
         view === "chat" ? refreshImagesChatCanvasDirectory() : refreshImages(),
       ]);
-      const { comfyUiHost } = await settingsPromise;
+      const refreshedSettings = await settingsPromise;
+      if (!refreshedSettings) return;
+      const { comfyUiHost } = refreshedSettings;
       if (includeModels) {
-        await refreshModels(comfyUiHost);
+        await refreshModels(comfyUiHost, false, ownerGeneration);
       }
     } catch (err) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       /** Never toast the overlay for startup races (user may still browse cached UI). */
       console.warn("[refreshAll]", err);
       if (!includeModels) return;
       try {
-        await refreshModels();
+        await refreshModels(undefined, false, ownerGeneration);
       } catch {
         /* secondary attempt — refreshModels tolerates failures but keep this belt-and-suspenders */
       }
@@ -81165,11 +81397,19 @@ function HomeContent(): React.JSX.Element {
       titleRefreshInFlightRef.current.delete(conversationId);
     }
   }
-  async function refreshSettings(): Promise<{
+  async function refreshSettings(
+    ownerGeneration: AccountOwnerGenerationTicket | null =
+      captureAccountOwnerGeneration(),
+  ): Promise<{
     comfyUiHost: string;
     keySettings: SavedApiKeySettingsState;
-  }> {
-    const d = await api<{ settings: UserSettings }>("/api/settings");
+  } | null> {
+    if (!ownerGeneration) return null;
+    const settingsResult = await runForAccountOwner(ownerGeneration, () =>
+      api<{ settings: UserSettings }>("/api/settings"),
+    );
+    if (settingsResult.status === "stale") return null;
+    const d = settingsResult.value;
     const secondaryHost =
       typeof d.settings.secondaryOllamaHost === "string"
         ? d.settings.secondaryOllamaHost
@@ -81198,10 +81438,12 @@ function HomeContent(): React.JSX.Element {
     // auxiliary model has been given its persistent Ollama residency lease.
     // Runtime/model failures stay non-blocking so PRISM can still open and
     // explain the underlying local-service problem.
-    await requestApiWithLoopbackFallback(
-      "/api/models/auxiliary/keep-warm",
-      { method: "POST" },
+    await runForAccountOwner(ownerGeneration, () =>
+      requestApiWithLoopbackFallback("/api/models/auxiliary/keep-warm", {
+        method: "POST",
+      }),
     ).catch(() => undefined);
+    if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return null;
     setZenPersonaTransitionChoice(zenPersonaTransitionChoice);
     setCommittedGraphicsQuality(savedGraphicsQuality);
     setSettings({
@@ -81518,6 +81760,8 @@ function HomeContent(): React.JSX.Element {
     modelId: string,
   ) {
     if (!settings) return;
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
     const stored =
       modelId === AUTO_MODEL_CHOICE
         ? ""
@@ -81525,14 +81769,17 @@ function HomeContent(): React.JSX.Element {
           ? normalizeOnlineImageModelPreference(modelId)
           : modelId.trim();
     try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify(
-          provider === "local"
-            ? { preferredLocalImageModel: stored }
-            : { preferredOpenAiImageModel: stored },
-        ),
-      });
+      const saveResult = await runForAccountOwner(ownerGeneration, () =>
+        api("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify(
+            provider === "local"
+              ? { preferredLocalImageModel: stored }
+              : { preferredOpenAiImageModel: stored },
+          ),
+        }),
+      );
+      if (saveResult.status === "stale") return;
       setSettings((prev) =>
         prev
           ? {
@@ -81558,6 +81805,8 @@ function HomeContent(): React.JSX.Element {
     rawFromSelect: string,
   ) {
     if (!settings) return;
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
     const isOpenAiField =
       field === "preferredOpenAiImageModel" ||
       field === "preferredZenWallpaperOpenAiImageModel";
@@ -81566,18 +81815,22 @@ function HomeContent(): React.JSX.Element {
         ? normalizeOnlineImageModelPreference(rawFromSelect)
         : rawFromSelect.trim();
     try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify({ [field]: stored }),
-      });
+      const saveResult = await runForAccountOwner(ownerGeneration, () =>
+        api("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify({ [field]: stored }),
+        }),
+      );
+      if (saveResult.status === "stale") return;
       setSettings((prev) => (prev ? { ...prev, [field]: stored } : prev));
     } catch (err) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       setPanelError(
         err instanceof Error
           ? err.message
           : "Could not save this image default.",
       );
-      await refreshSettings();
+      await refreshSettings(ownerGeneration);
     }
   }
 
@@ -81586,18 +81839,23 @@ function HomeContent(): React.JSX.Element {
     provider: "" | "local" | "openai",
   ): Promise<void> {
     if (!settings) return;
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
     const storedModel =
       provider === "openai" && modelId.trim().length > 0
         ? normalizeOnlineImageModelPreference(modelId)
         : modelId.trim();
     try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify({
-          preferredHomeAtmosphereImageModel: storedModel,
-          preferredHomeAtmosphereImageProvider: provider || null,
+      const saveResult = await runForAccountOwner(ownerGeneration, () =>
+        api("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify({
+            preferredHomeAtmosphereImageModel: storedModel,
+            preferredHomeAtmosphereImageProvider: provider || null,
+          }),
         }),
-      });
+      );
+      if (saveResult.status === "stale") return;
       setSettings((prev) =>
         prev
           ? {
@@ -81608,40 +81866,50 @@ function HomeContent(): React.JSX.Element {
           : prev,
       );
     } catch (err) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       setPanelError(
         err instanceof Error
           ? err.message
           : "Could not save the Home atmosphere image model.",
       );
-      await refreshSettings();
+      await refreshSettings(ownerGeneration);
     }
   }
 
   async function persistZenWallpaperOpacityField(rawOpacity: unknown) {
     if (!settings) return;
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
     const stored = normalizeZenWallpaperOpacitySetting(rawOpacity);
     try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify({ zenWallpaperOpacity: stored }),
-      });
+      const saveResult = await runForAccountOwner(ownerGeneration, () =>
+        api("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify({ zenWallpaperOpacity: stored }),
+        }),
+      );
+      if (saveResult.status === "stale") return;
       setSettings((prev) =>
         prev ? { ...prev, zenWallpaperOpacity: stored } : prev,
       );
     } catch (err) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       setPanelError(
         err instanceof Error
           ? err.message
           : "Could not save Atmosphere opacity.",
       );
-      await refreshSettings();
+      await refreshSettings(ownerGeneration);
     }
   }
 
   async function refreshModels(
     comfyUiHostOverride?: string,
     forceDiscovery = false,
+    ownerGeneration: AccountOwnerGenerationTicket | null =
+      captureAccountOwnerGeneration(),
   ) {
+    if (!ownerGeneration) return;
     const refreshToken = modelCatalogRefreshTokenRef.current + 1;
     modelCatalogRefreshTokenRef.current = refreshToken;
     setModelCatalogStatus("checking");
@@ -81656,18 +81924,22 @@ function HomeContent(): React.JSX.Element {
       ? `/api/models${qs}${qs ? "&" : "?"}refresh=1`
       : `/api/models${qs}`;
     try {
-      const d = await api<{
-        catalog: ModelCatalog;
-        comfyUi?: {
-          configured: boolean;
-          reachable: boolean;
-          checkpoints: ModelCatalogEntry[];
-          allCheckpoints?: ModelCatalogEntry[];
-        };
-        hiddenBotModelIds?: string[];
-        hiddenGlobalPickerModelIds?: string[];
-        hiddenComfyUiWorkflowIds?: string[];
-      }>(modelsUrl);
+      const catalogResult = await runForAccountOwner(ownerGeneration, () =>
+        api<{
+          catalog: ModelCatalog;
+          comfyUi?: {
+            configured: boolean;
+            reachable: boolean;
+            checkpoints: ModelCatalogEntry[];
+            allCheckpoints?: ModelCatalogEntry[];
+          };
+          hiddenBotModelIds?: string[];
+          hiddenGlobalPickerModelIds?: string[];
+          hiddenComfyUiWorkflowIds?: string[];
+        }>(modelsUrl),
+      );
+      if (catalogResult.status === "stale") return;
+      const d = catalogResult.value;
       if (modelCatalogRefreshTokenRef.current !== refreshToken) return;
       setModelCatalog(d.catalog);
       setModelCatalogStatus("ready");
@@ -81715,6 +81987,7 @@ function HomeContent(): React.JSX.Element {
         },
       );
     } catch (err) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       console.warn("[refreshModels]", err);
       if (modelCatalogRefreshTokenRef.current !== refreshToken) return;
       setModelCatalogStatus("error");
@@ -81728,20 +82001,30 @@ function HomeContent(): React.JSX.Element {
       });
     }
   }
-  async function refreshSecondaryOllamaStatus(hostOverride?: string) {
+  async function refreshSecondaryOllamaStatus(
+    hostOverride?: string,
+    ownerGeneration: AccountOwnerGenerationTicket | null =
+      captureAccountOwnerGeneration(),
+  ) {
+    if (!ownerGeneration) return;
     setSecondaryOllamaStatusChecking(true);
     try {
       const statusUrl =
         hostOverride !== undefined
           ? `/api/settings/secondary-ollama-status?host=${encodeURIComponent(hostOverride)}`
           : "/api/settings/secondary-ollama-status";
-      const d = await api<{
-        status: SecondaryOllamaStatus;
-        dualWorkload?: DualOllamaWorkloadStatus;
-      }>(statusUrl);
+      const statusResult = await runForAccountOwner(ownerGeneration, () =>
+        api<{
+          status: SecondaryOllamaStatus;
+          dualWorkload?: DualOllamaWorkloadStatus;
+        }>(statusUrl),
+      );
+      if (statusResult.status === "stale") return;
+      const d = statusResult.value;
       setSecondaryOllamaStatus(d.status);
       setDualOllamaWorkloadStatus(d.dualWorkload ?? null);
     } catch {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       setSecondaryOllamaStatus({
         configured: Boolean(hostOverride?.trim()),
         reachable: false,
@@ -81749,36 +82032,59 @@ function HomeContent(): React.JSX.Element {
       });
       setDualOllamaWorkloadStatus(null);
     } finally {
-      setSecondaryOllamaStatusChecking(false);
+      if (isCurrentAccountOwnerGeneration(ownerGeneration)) {
+        setSecondaryOllamaStatusChecking(false);
+      }
     }
   }
-  async function refreshComfyUiStatus(hostOverride?: string) {
+  async function refreshComfyUiStatus(
+    hostOverride?: string,
+    ownerGeneration: AccountOwnerGenerationTicket | null =
+      captureAccountOwnerGeneration(),
+  ) {
+    if (!ownerGeneration) return;
     setComfyUiStatusChecking(true);
     try {
       const statusUrl =
         hostOverride !== undefined
           ? `/api/settings/comfyui-status?host=${encodeURIComponent(hostOverride)}`
           : "/api/settings/comfyui-status";
-      const d = await api<{ status: SecondaryOllamaStatus }>(statusUrl);
+      const statusResult = await runForAccountOwner(ownerGeneration, () =>
+        api<{ status: SecondaryOllamaStatus }>(statusUrl),
+      );
+      if (statusResult.status === "stale") return;
+      const d = statusResult.value;
       setComfyUiStatus(d.status);
     } catch {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       setComfyUiStatus({
         configured: Boolean(hostOverride?.trim()),
         reachable: false,
         modelCount: 0,
       });
     } finally {
-      setComfyUiStatusChecking(false);
+      if (isCurrentAccountOwnerGeneration(ownerGeneration)) {
+        setComfyUiStatusChecking(false);
+      }
     }
   }
-  async function refreshProviderKeyStatus() {
+  async function refreshProviderKeyStatus(
+    ownerGeneration: AccountOwnerGenerationTicket | null =
+      captureAccountOwnerGeneration(),
+  ) {
+    if (!ownerGeneration) return;
     setProviderKeyStatusChecking(true);
     try {
-      const d = await api<{ status: ProviderApiKeyStatusPayload }>(
-        "/api/settings/provider-key-status",
+      const statusResult = await runForAccountOwner(ownerGeneration, () =>
+        api<{ status: ProviderApiKeyStatusPayload }>(
+          "/api/settings/provider-key-status",
+        ),
       );
+      if (statusResult.status === "stale") return;
+      const d = statusResult.value;
       setProviderKeyStatus(d.status);
     } catch {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       setProviderKeyStatus({
         ollamaCloud: {
           configured: Boolean(settings?.hasOllamaCloudApiKey),
@@ -81806,7 +82112,9 @@ function HomeContent(): React.JSX.Element {
         },
       });
     } finally {
-      setProviderKeyStatusChecking(false);
+      if (isCurrentAccountOwnerGeneration(ownerGeneration)) {
+        setProviderKeyStatusChecking(false);
+      }
     }
   }
   async function refreshMemories() {
@@ -82615,6 +82923,8 @@ function HomeContent(): React.JSX.Element {
   }
 
   const clearAuthenticatedSessionState = useCallback(() => {
+    authBootstrapRequestGenerationRef.current += 1;
+    transitionAccountOwnerGeneration(null);
     clearNativeSessionToken();
     botLibraryGroupsCanPruneRef.current = false;
     setBotLibraryGroupsHydratedUserId(null);
@@ -82648,7 +82958,7 @@ function HomeContent(): React.JSX.Element {
     setViewSwitchTarget(null);
     setViewSwitchOverlayPhase("hidden");
     router.replace("/?mode=login");
-  }, [clearViewSwitchOverlayTimers, router]);
+  }, [clearViewSwitchOverlayTimers, router, transitionAccountOwnerGeneration]);
 
   useEffect(() => {
     const handleAuthReauthRequired = (event: Event): void => {
@@ -83244,18 +83554,24 @@ function HomeContent(): React.JSX.Element {
       setPanelError("Profile name cannot be empty.");
       return;
     }
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
     setBusy(true);
     try {
-      const response = await api<{
-        ok: true;
-        settings?: Partial<UserSettings>;
-      }>("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify({
-          displayName: nextDisplayName,
-          playerNamePronunciation: nextPlayerNamePronunciation,
+      const saveResult = await runForAccountOwner(ownerGeneration, () =>
+        api<{
+          ok: true;
+          settings?: Partial<UserSettings>;
+        }>("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify({
+            displayName: nextDisplayName,
+            playerNamePronunciation: nextPlayerNamePronunciation,
+          }),
         }),
-      });
+      );
+      if (saveResult.status === "stale") return;
+      const response = saveResult.value;
       const savedDisplayName =
         typeof response.settings?.displayName === "string" &&
         response.settings.displayName.trim().length > 0
@@ -83287,22 +83603,32 @@ function HomeContent(): React.JSX.Element {
       setProfileNameDraft("");
       setProfileNamePronunciationDraft("");
       setPanelNotice("Profile name updated.");
-      await refreshSettings();
+      await refreshSettings(ownerGeneration);
     } catch (err) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       setPanelError(
         err instanceof Error ? err.message : "Profile name change failed.",
       );
     } finally {
-      setBusy(false);
+      if (isCurrentAccountOwnerGeneration(ownerGeneration)) {
+        setBusy(false);
+      }
     }
   }
 
   async function deleteAccountConfirmed() {
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
     setBusy(true);
     setPanelError(null);
     try {
-      await api("/api/account", { method: "DELETE" });
+      const deleteResult = await runForAccountOwner(ownerGeneration, () =>
+        api("/api/account", { method: "DELETE" }),
+      );
+      if (deleteResult.status === "stale") return;
       setDeleteAccountArmed(false);
+      authBootstrapRequestGenerationRef.current += 1;
+      transitionAccountOwnerGeneration(null);
       setUser(null);
       setPreAuthChecklistComplete(false);
       setConversations([]);
@@ -83316,11 +83642,14 @@ function HomeContent(): React.JSX.Element {
       setImages([]);
       window.location.href = "/?mode=register";
     } catch (err) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       setPanelError(
         err instanceof Error ? err.message : "Account deletion failed.",
       );
     } finally {
-      setBusy(false);
+      if (isCurrentAccountOwnerGeneration(ownerGeneration)) {
+        setBusy(false);
+      }
     }
   }
 
@@ -85857,7 +86186,7 @@ function HomeContent(): React.JSX.Element {
       clearComposerDraftNow();
       setComposerSendTintActive(false);
       setError(null);
-      hideZenHeaderForConversationAction();
+      keepZenHeaderVisibleForConversationAction();
       window.requestAnimationFrame(() => {
         const scrollRoot = messagesScrollRef.current;
         const row = scrollRoot
@@ -86276,7 +86605,7 @@ function HomeContent(): React.JSX.Element {
     }
     if (!isStarterPrompt && trimmed.length > 0 && view === "chat") {
       if (activeTrollOrdinaryInterruptionImmune()) {
-        hideZenHeaderForConversationAction();
+        keepZenHeaderVisibleForConversationAction();
         setQueuedChatPrompts((previous) => [
           ...previous,
           {
@@ -86349,7 +86678,7 @@ function HomeContent(): React.JSX.Element {
       !canSendTextWhileReplyPending()
     ) {
       if (!isStarterPrompt && trimmed.length > 0) {
-        hideZenHeaderForConversationAction();
+        keepZenHeaderVisibleForConversationAction();
         setQueuedChatPrompts((previous) => [
           ...previous,
           {
@@ -86413,7 +86742,7 @@ function HomeContent(): React.JSX.Element {
     }
     if (editingMessageId && !isStarterPrompt) {
       const editMessageId = editingMessageId;
-      hideZenHeaderForConversationAction();
+      keepZenHeaderVisibleForConversationAction();
       clearComposerDraftNow();
       setEditingMessageId(null);
       setEditingOriginalText("");
@@ -86553,7 +86882,7 @@ function HomeContent(): React.JSX.Element {
       playChatPlayerActionSfx(displayTrimmed);
     }
     if (!isZenAutonomy && !isZenLiveActionInterrupt) {
-      hideZenHeaderForConversationAction();
+      keepZenHeaderVisibleForConversationAction();
       // Any typed/chosen follow-up supersedes the starter quick-replies row.
       if (!isStarterPrompt) {
         setConversationStarterPrompts(null);
@@ -88341,7 +88670,7 @@ function HomeContent(): React.JSX.Element {
       revealChoiceComposerForOther(chip.otherSource);
       return;
     }
-    hideZenHeaderForConversationAction();
+    keepZenHeaderVisibleForConversationAction();
     resumeChatModeAutoscrollForOutgoingTurn(detail?.id ?? selectedId);
     setConversationStarterPrompts(null);
     setStarterComposerRevealed(false);
@@ -89771,7 +90100,7 @@ function HomeContent(): React.JSX.Element {
     source: ComposerChip["otherSource"],
     options: { flushRender?: boolean } = {},
   ): void {
-    hideZenHeaderForConversationAction();
+    keepZenHeaderVisibleForConversationAction();
     resumeChatModeAutoscrollForOutgoingTurn(detail?.id ?? selectedId);
     askQuestionComposerHiddenForReadingKeyRef.current = null;
     const reveal = (): void => {
@@ -91954,34 +92283,44 @@ function HomeContent(): React.JSX.Element {
   async function saveZenModeSettings(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!settings) return;
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
     const payload = buildZenModeSettingsPayload(settings);
     setBusy(true);
     setPanelError(null);
     setPanelNotice(null);
     try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify(payload),
-      });
+      const saveResult = await runForAccountOwner(ownerGeneration, () =>
+        api("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        }),
+      );
+      if (saveResult.status === "stale") return;
       setSettings((previous) =>
         previous ? ({ ...previous, ...payload } as UserSettings) : previous,
       );
-      await refreshSettings();
+      await refreshSettings(ownerGeneration);
       setPanelNotice("Zen Mode settings saved.");
     } catch (err) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       setPanelError(
         err instanceof Error
           ? err.message
           : "Zen Mode settings failed to save.",
       );
-      await refreshSettings();
+      await refreshSettings(ownerGeneration);
     } finally {
-      setBusy(false);
+      if (isCurrentAccountOwnerGeneration(ownerGeneration)) {
+        setBusy(false);
+      }
     }
   }
 
   async function restoreZenModeDefaults() {
     if (!settings) return;
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
     const payload = {
       ...defaultZenModeSettings(),
       preferredZenWallpaperLocalImageModel: "",
@@ -91991,10 +92330,13 @@ function HomeContent(): React.JSX.Element {
     setPanelError(null);
     setPanelNotice(null);
     try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify(payload),
-      });
+      const saveResult = await runForAccountOwner(ownerGeneration, () =>
+        api("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        }),
+      );
+      if (saveResult.status === "stale") return;
       setZenInitialAtmosphereWaitPreference(false);
       try {
         if (zenInitialAtmosphereWaitStorageKey) {
@@ -92009,15 +92351,18 @@ function HomeContent(): React.JSX.Element {
       setSettings((previous) =>
         previous ? ({ ...previous, ...payload } as UserSettings) : previous,
       );
-      await refreshSettings();
+      await refreshSettings(ownerGeneration);
       setPanelNotice("Zen Mode defaults restored.");
     } catch (err) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       setPanelError(
         err instanceof Error ? err.message : "Could not restore Zen defaults.",
       );
-      await refreshSettings();
+      await refreshSettings(ownerGeneration);
     } finally {
-      setBusy(false);
+      if (isCurrentAccountOwnerGeneration(ownerGeneration)) {
+        setBusy(false);
+      }
     }
   }
 
@@ -92048,6 +92393,8 @@ function HomeContent(): React.JSX.Element {
       previousEnglishVoiceEngine,
     );
     if (nextChoice === previousChoice) return;
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
     if (
       nextChoice === "premium" &&
       settings.elevenLabsApiKeySource === "none"
@@ -92085,14 +92432,18 @@ function HomeContent(): React.JSX.Element {
       "Applies to the next line without cutting off speech already playing.",
     );
     try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify(nextSettings),
-      });
+      const saveResult = await runForAccountOwner(ownerGeneration, () =>
+        api("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify(nextSettings),
+        }),
+      );
+      if (saveResult.status === "stale") return;
       if (nextChoice === "premium") {
         void initializePremiumVoiceDefaultsForAccount(true);
       }
     } catch (err) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       voicePlaybackSelectionRef.current = {
         voiceMode: previousMode,
         englishVoiceEngine: previousEnglishVoiceEngine,
@@ -92113,7 +92464,9 @@ function HomeContent(): React.JSX.Element {
           : "Prism kept the previous voice setting.",
       );
     } finally {
-      voiceModeSelectionBusyRef.current = false;
+      if (isCurrentAccountOwnerGeneration(ownerGeneration)) {
+        voiceModeSelectionBusyRef.current = false;
+      }
     }
   }
 
@@ -92297,6 +92650,8 @@ function HomeContent(): React.JSX.Element {
       );
       return;
     }
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
     const payload = {
       voiceMode: normalizeVoiceMode(settings.voiceMode),
       voiceEffectsEnabled: settings.voiceEffectsEnabled !== false,
@@ -92313,12 +92668,15 @@ function HomeContent(): React.JSX.Element {
     setPanelError(null);
     setPanelNotice(null);
     try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify(payload),
-      });
+      const saveResult = await runForAccountOwner(ownerGeneration, () =>
+        api("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        }),
+      );
+      if (saveResult.status === "stale") return;
       elevenLabsVoiceCatalogAttemptKeyRef.current = null;
-      await refreshSettings();
+      await refreshSettings(ownerGeneration);
       if (
         voicePlaybackChoice(payload.voiceMode, payload.englishVoiceEngine) ===
         "premium"
@@ -92327,12 +92685,15 @@ function HomeContent(): React.JSX.Element {
       }
       setPanelNotice("Voice settings saved.");
     } catch (err) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       setPanelError(
         err instanceof Error ? err.message : "Voice settings failed to save.",
       );
-      await refreshSettings();
+      await refreshSettings(ownerGeneration);
     } finally {
-      setBusy(false);
+      if (isCurrentAccountOwnerGeneration(ownerGeneration)) {
+        setBusy(false);
+      }
     }
   }
 
@@ -93375,6 +93736,8 @@ function HomeContent(): React.JSX.Element {
   ) {
     e.preventDefault();
     if (!settings) return;
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
     setBusy(true);
     setPanelError(null);
     setPanelNotice(null);
@@ -93536,9 +93899,16 @@ function HomeContent(): React.JSX.Element {
       if (trimmedBraveSearchKey.length > 0) {
         body.braveSearchApiKey = trimmedBraveSearchKey;
       }
-      const saved = await api<{
-        settings?: Partial<SavedApiKeySettingsState>;
-      }>("/api/settings", { method: "PATCH", body: JSON.stringify(body) });
+      const saveResult = await runForAccountOwner(ownerGeneration, () =>
+        api<{
+          settings?: Partial<SavedApiKeySettingsState>;
+        }>("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        }),
+      );
+      if (saveResult.status === "stale") return false;
+      const saved = saveResult.value;
       let confirmedKeySettings: SavedApiKeySettingsState | null = null;
       if (saved.settings) {
         const keySettings = normalizeSavedApiKeySettingsState(saved.settings);
@@ -93552,8 +93922,9 @@ function HomeContent(): React.JSX.Element {
             : previous,
         );
       }
-      const { comfyUiHost: savedComfyHost, keySettings } =
-        await refreshSettings();
+      const refreshedSettings = await refreshSettings(ownerGeneration);
+      if (!refreshedSettings) return false;
+      const { comfyUiHost: savedComfyHost, keySettings } = refreshedSettings;
       confirmedKeySettings = keySettings;
       const missingSavedKeys = [
         trimmedKey.length > 0 && !confirmedKeySettings.hasOpenAiApiKey
@@ -93591,11 +93962,13 @@ function HomeContent(): React.JSX.Element {
         elevenLabsVoiceCatalogAttemptKeyRef.current = null;
         await loadElevenLabsVoiceCatalog(true);
       }
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return false;
       clearSettingsApiKeyDrafts();
-      await refreshModels(savedComfyHost);
-      await refreshProviderKeyStatus();
-      await refreshSecondaryOllamaStatus();
-      await refreshComfyUiStatus();
+      await refreshModels(savedComfyHost, false, ownerGeneration);
+      await refreshProviderKeyStatus(ownerGeneration);
+      await refreshSecondaryOllamaStatus(undefined, ownerGeneration);
+      await refreshComfyUiStatus(undefined, ownerGeneration);
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return false;
       if (
         settings.hubAtmosphereEnabled &&
         (!settings.hubAtmosphereImageId ||
@@ -93610,10 +93983,13 @@ function HomeContent(): React.JSX.Element {
         setSettingsHostsModalOpen(false);
       }
     } catch (err) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return false;
       setPanelError(err instanceof Error ? err.message : "Save failed.");
       return false;
     } finally {
-      setBusy(false);
+      if (isCurrentAccountOwnerGeneration(ownerGeneration)) {
+        setBusy(false);
+      }
     }
   }
 
@@ -93721,6 +94097,8 @@ function HomeContent(): React.JSX.Element {
 
   async function saveTextModelDisplayName(): Promise<void> {
     if (!settings || !modelDisplayNameEdit) return;
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
     const { provider, modelId, value } = modelDisplayNameEdit;
     const key = textModelDisplayNameKey(provider, modelId);
     const next = { ...settings.textModelDisplayNames };
@@ -93735,10 +94113,13 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify({ textModelDisplayNames: normalized }),
-      });
+      const saveResult = await runForAccountOwner(ownerGeneration, () =>
+        api("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify({ textModelDisplayNames: normalized }),
+        }),
+      );
+      if (saveResult.status === "stale") return;
       setSettings((previous) =>
         previous
           ? { ...previous, textModelDisplayNames: normalized }
@@ -93746,6 +94127,7 @@ function HomeContent(): React.JSX.Element {
       );
       setModelDisplayNameEdit(null);
     } catch (err) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       setPanelError(
         err instanceof Error ? err.message : "Could not save this display name.",
       );
@@ -93793,18 +94175,24 @@ function HomeContent(): React.JSX.Element {
 
   async function switchProvider(provider: Provider) {
     if (!settings || settings.preferredProvider === provider) return;
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
     const previous = settings;
     // Optimistically flip the UI; a failed PATCH rolls back.
     setSettings({ ...settings, preferredProvider: provider });
     setError(null);
     setPanelError(null);
     try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify({ preferredProvider: provider }),
-      });
-      await refreshSettings();
+      const saveResult = await runForAccountOwner(ownerGeneration, () =>
+        api("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify({ preferredProvider: provider }),
+        }),
+      );
+      if (saveResult.status === "stale") return;
+      await refreshSettings(ownerGeneration);
     } catch (err) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       setSettings(previous);
       setError(err instanceof Error ? err.message : "Provider switch failed.");
     }
@@ -93821,6 +94209,8 @@ function HomeContent(): React.JSX.Element {
     ) {
       return;
     }
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
     const previous = settings;
     const ephemeralChatProviderPreferences = {
       ...settings.ephemeralChatProviderPreferences,
@@ -93831,10 +94221,13 @@ function HomeContent(): React.JSX.Element {
     setPanelError(null);
     setPanelNotice(null);
     try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify({ ephemeralChatProviderPreferences }),
-      });
+      const saveResult = await runForAccountOwner(ownerGeneration, () =>
+        api("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify({ ephemeralChatProviderPreferences }),
+        }),
+      );
+      if (saveResult.status === "stale") return;
       setPanelNotice(
         preference === "global"
           ? "Ephemeral chat now follows the global response toggle."
@@ -93843,6 +94236,7 @@ function HomeContent(): React.JSX.Element {
             : "Ephemeral chat in this mode prefers ONLINE when global privacy allows it.",
       );
     } catch (err) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       setSettings(previous);
       setPanelError(
         err instanceof Error
@@ -93850,7 +94244,9 @@ function HomeContent(): React.JSX.Element {
           : "Ephemeral chat setting failed to save.",
       );
     } finally {
-      setEphemeralChatPreferenceSavingMode(null);
+      if (isCurrentAccountOwnerGeneration(ownerGeneration)) {
+        setEphemeralChatPreferenceSavingMode(null);
+      }
     }
   }
 
@@ -93858,22 +94254,28 @@ function HomeContent(): React.JSX.Element {
     debateWhodunnitTextVoiceMode: WhodunnitTextVoiceMode,
   ) {
     if (!settings || busy) return;
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
     const previous = settings;
     setSettings({ ...settings, debateWhodunnitTextVoiceMode });
     setBusy(true);
     setPanelError(null);
     setPanelNotice(null);
     try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify({ debateWhodunnitTextVoiceMode }),
-      });
+      const saveResult = await runForAccountOwner(ownerGeneration, () =>
+        api("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify({ debateWhodunnitTextVoiceMode }),
+        }),
+      );
+      if (saveResult.status === "stale") return;
       setPanelNotice(
         debateWhodunnitTextVoiceMode === "off"
           ? "Written Whodunnit dialogue is now silent."
           : `Written Whodunnit dialogue now uses ${debateWhodunnitTextVoiceMode === "babble" ? "Babble" : "Bottish"}.`,
       );
     } catch (err) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       setSettings(previous);
       setPanelError(
         err instanceof Error
@@ -93881,28 +94283,36 @@ function HomeContent(): React.JSX.Element {
           : "Could not update the Whodunnit text voice.",
       );
     } finally {
-      setBusy(false);
+      if (isCurrentAccountOwnerGeneration(ownerGeneration)) {
+        setBusy(false);
+      }
     }
   }
 
   async function switchImageProvider(provider: ImageProviderName) {
     if (!settings || settings.preferredImageProvider === provider) return;
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
     const previous = settings;
     setSettings({ ...settings, preferredImageProvider: provider });
     setError(null);
     setPanelError(null);
     try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify({ preferredImageProvider: provider }),
-      });
+      const saveResult = await runForAccountOwner(ownerGeneration, () =>
+        api("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify({ preferredImageProvider: provider }),
+        }),
+      );
+      if (saveResult.status === "stale") return;
       setPanelNotice(
         provider === "openai"
           ? "Images are ONLINE. Image prompts and required visual context go to OpenAI; chat routing is unchanged."
           : "Images are LOCAL. Image prompts stay with your configured local image service.",
       );
-      await refreshSettings();
+      await refreshSettings(ownerGeneration);
     } catch (err) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       setSettings(previous);
       setPanelError(
         err instanceof Error ? err.message : "Image provider switch failed.",
@@ -93912,17 +94322,23 @@ function HomeContent(): React.JSX.Element {
 
   async function applyThemeMode(nextTheme: Theme) {
     if (settings) {
+      const ownerGeneration = captureAccountOwnerGeneration();
+      if (!ownerGeneration) return;
       // Logged in: persist the choice server-side, optimistically update the UI.
       const previous = settings;
       setSettings({ ...settings, theme: nextTheme });
       setError(null);
       try {
-        await api("/api/settings", {
-          method: "PATCH",
-          body: JSON.stringify({ theme: nextTheme }),
-        });
-        await refreshSettings();
+        const saveResult = await runForAccountOwner(ownerGeneration, () =>
+          api("/api/settings", {
+            method: "PATCH",
+            body: JSON.stringify({ theme: nextTheme }),
+          }),
+        );
+        if (saveResult.status === "stale") return;
+        await refreshSettings(ownerGeneration);
       } catch (err) {
+        if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
         setSettings(previous);
         setError(err instanceof Error ? err.message : "Theme switch failed.");
       }
@@ -93964,25 +94380,31 @@ function HomeContent(): React.JSX.Element {
       `Remove the saved ${providerName} API key from this account? ${fallbackCopy}`,
     );
     if (!confirmed) return;
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
     setBusy(true);
     setPanelError(null);
     try {
-      const saved = await api<{
-        settings?: Partial<SavedApiKeySettingsState>;
-      }>("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify(
-          provider === "ollama_cloud"
-            ? { ollamaCloudApiKey: null }
-            : provider === "openai"
-            ? { openAiApiKey: null }
-            : provider === "anthropic"
-              ? { anthropicApiKey: null }
-              : provider === "elevenlabs"
-                ? { elevenLabsApiKey: null }
-                : { braveSearchApiKey: null },
-        ),
-      });
+      const saveResult = await runForAccountOwner(ownerGeneration, () =>
+        api<{
+          settings?: Partial<SavedApiKeySettingsState>;
+        }>("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify(
+            provider === "ollama_cloud"
+              ? { ollamaCloudApiKey: null }
+              : provider === "openai"
+              ? { openAiApiKey: null }
+              : provider === "anthropic"
+                ? { anthropicApiKey: null }
+                : provider === "elevenlabs"
+                  ? { elevenLabsApiKey: null }
+                  : { braveSearchApiKey: null },
+          ),
+        }),
+      );
+      if (saveResult.status === "stale") return;
+      const saved = saveResult.value;
       if (saved.settings) {
         const keySettings = normalizeSavedApiKeySettingsState(saved.settings);
         setSettings((previous) =>
@@ -94009,12 +94431,20 @@ function HomeContent(): React.JSX.Element {
       } else {
         clearSettingsApiKeyDrafts(["brave"]);
       }
-      const { comfyUiHost } = await refreshSettings();
-      await refreshModels(comfyUiHost);
+      const refreshedSettings = await refreshSettings(ownerGeneration);
+      if (!refreshedSettings) return;
+      await refreshModels(
+        refreshedSettings.comfyUiHost,
+        false,
+        ownerGeneration,
+      );
     } catch (err) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       setPanelError(err instanceof Error ? err.message : "Clear failed.");
     } finally {
-      setBusy(false);
+      if (isCurrentAccountOwnerGeneration(ownerGeneration)) {
+        setBusy(false);
+      }
     }
   }
 
@@ -99517,15 +99947,21 @@ function HomeContent(): React.JSX.Element {
         : previous,
     );
     if (!settings) return;
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
     setError(null);
     setPanelError(null);
     try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify({ zenPersonaTransitionChoice: normalized }),
-      });
-      await refreshSettings();
+      const saveResult = await runForAccountOwner(ownerGeneration, () =>
+        api("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify({ zenPersonaTransitionChoice: normalized }),
+        }),
+      );
+      if (saveResult.status === "stale") return;
+      await refreshSettings(ownerGeneration);
     } catch (err) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
       setZenPersonaTransitionChoice(previousChoice);
       setSettings((previous) =>
         previous
@@ -112313,10 +112749,40 @@ function HomeContent(): React.JSX.Element {
     void openZenMode();
   };
 
+  const openCurrentAppletHome = (appletId: PrismAppletId): void => {
+    setAppSwitcherOpen(false);
+    setPanel(null);
+    if (appletId === "chat" || appletId === "zen") {
+      if (view !== "chat") navigateToView("chat");
+      else openLivingShellHome();
+      return;
+    }
+    if (appletId === "coffee") {
+      resetCoffeeToPicker();
+      return;
+    }
+    if (appletId === "story") {
+      resetStoryToSetup();
+      return;
+    }
+    if (appletId === "debate" || appletId === "botcast" || appletId === "slate") {
+      setAppletHomeRequestTokens((current) => ({
+        ...current,
+        [appletId]: current[appletId] + 1,
+      }));
+    }
+  };
+
   const switchToSelectableApplet = (appletId: PrismAppletId): void => {
     setAppSwitcherOpen(false);
+    if (appletId === "chat" || appletId === "zen") {
+      if (view !== "chat") navigateToView("chat");
+      else openLivingShellHome();
+      return;
+    }
     if (appletId === "coffee") {
       if (view !== "coffee") navigateToView("coffee");
+      else openCurrentAppletHome("coffee");
       return;
     }
     if (appletId === "debate") {
@@ -112326,23 +112792,24 @@ function HomeContent(): React.JSX.Element {
             ? "/?view=chat"
             : `${window.location.pathname}${window.location.search}${window.location.hash}`;
         navigateToView("debate");
-      }
+      } else openCurrentAppletHome("debate");
       return;
     }
     if (appletId === "botcast") {
       if (view !== "botcast") navigateToView("botcast");
+      else openCurrentAppletHome("botcast");
       return;
     }
     if (appletId === "story") {
       if (view !== "story") navigateToView("story");
+      else openCurrentAppletHome("story");
       return;
     }
     if (appletId === "slate") {
       if (view !== "slate") navigateToView("slate");
+      else openCurrentAppletHome("slate");
       return;
     }
-    // Chat and Zen are owned by the Home surface and are intentionally not
-    // offered by this sibling-applet switcher.
   };
 
   const prismCompanionSurfaceReference = (): PrismCompanionSurfaceReference => {
@@ -113536,10 +114003,10 @@ function HomeContent(): React.JSX.Element {
   const renderAppSwitcher = (
     options: { disabled?: boolean; disabledReason?: string } = {},
   ): React.JSX.Element => {
-    // Chat/Zen is the canonical default. The Home glyph owns that navigation,
-    // so this menu only lists sibling experiences and studios.
+    // Chat is an explicit applet destination. Zen remains a presentation of
+    // Chat rather than a sibling applet in this picker.
     const applets = prismTopLevelSwitcherApplets().filter(
-      (applet) => applet.id !== "chat" && applet.id !== "zen",
+      (applet) => applet.id !== "zen",
     );
     const roadmapApplets = prismPlannedRoadmapApplets();
     const currentAppletId: PrismAppletId =
@@ -113718,12 +114185,12 @@ function HomeContent(): React.JSX.Element {
             ? "debate"
             : "connections";
     const actionDisabled = (action: UniversalNavbarAction): boolean =>
-      disabled || disabledActions[action] === true;
+      action === "theme" ? false : disabled || disabledActions[action] === true;
     const actionTooltip = (
       action: UniversalNavbarAction,
       fallback: string,
     ): string =>
-      disabledActions[action] === true
+      action !== "theme" && disabledActions[action] === true
         ? (disabledActionTooltips[action] ?? fallback)
         : fallback;
     const runAction = (action: () => void): void => {
@@ -113893,14 +114360,20 @@ function HomeContent(): React.JSX.Element {
 
   const renderSharedAppletBrand = (
     appletId: PrismAppletId,
+    disabled = false,
   ): React.JSX.Element => (
     <button
       type="button"
       className={`${styles.coffeeHubButton} ${styles.sidebarWordmarkButton}`}
-      onClick={openLivingShellHome}
+      onClick={() => openCurrentAppletHome(appletId)}
+      disabled={disabled}
       data-shared-applet-brand={appletId}
-      aria-label="Open All Bots Home"
-      title="All Bots Home"
+      aria-label={`Open ${PRISM_APPLETS[appletId].name} home`}
+      title={
+        disabled
+          ? "Finish the active session before returning home."
+          : `${PRISM_APPLETS[appletId].name} home`
+      }
     >
       <PrismRefractionEmblem
         className={styles.sharedAppletNavbarCompactBrand}
@@ -113929,14 +114402,14 @@ function HomeContent(): React.JSX.Element {
         onClick: () => void;
       };
       modelControls?: React.ReactNode;
-      brandAppletId?: PrismAppletId;
+      brandAppletId: PrismAppletId;
       voiceLocalPremiumFallback?: boolean;
       liveSessionName?: LiveSessionChromeName;
       voiceTutorialTarget?: string;
       recordedReplay?: boolean;
       utilityLead?: React.ReactNode;
       zenDragExclusion?: boolean;
-    } = {},
+    },
   ): React.JSX.Element => {
     const liveChromePolicy = options.liveSessionActive
       ? liveSessionChromePolicy(options.liveSessionName ?? "Signal")
@@ -113949,7 +114422,7 @@ function HomeContent(): React.JSX.Element {
     };
     return (
       <header
-        ref={options.headerRef}
+        ref={options.headerRef ?? chatHeaderRef}
         className={`${styles.chatHeader} ${styles.sharedAppletHeader}`}
         data-app-shell-header="true"
         data-shared-app-navbar="true"
@@ -113960,32 +114433,14 @@ function HomeContent(): React.JSX.Element {
         data-zen-live-bot-drag-exclusion={
           options.zenDragExclusion ? "top-bar" : undefined
         }
-        onPointerEnter={(event) => {
-          if (event.pointerType !== "mouse") return;
-          showAppNavbarWhileInteracting();
-        }}
-        onPointerLeave={(event) => {
-          if (event.pointerType !== "mouse") return;
-          scheduleAppNavbarAutoHide();
-        }}
-        onFocusCapture={() => showAppNavbarWhileInteracting()}
-        onBlurCapture={(event) => {
-          const nextFocus = event.relatedTarget;
-          if (
-            nextFocus instanceof Node &&
-            event.currentTarget.contains(nextFocus)
-          ) {
-            return;
-          }
-          scheduleAppNavbarAutoHide();
-        }}
       >
         <div className={styles.chatHeaderIdentityGroup}>
-          {options.brandAppletId ? (
-            <span className={styles.sharedAppletNavbarBrand}>
-              {renderSharedAppletBrand(options.brandAppletId)}
-            </span>
-          ) : null}
+          <span className={styles.sharedAppletNavbarBrand}>
+            {renderSharedAppletBrand(
+              options.brandAppletId,
+              options.liveSessionActive === true,
+            )}
+          </span>
           {options.liveSessionActive && options.liveSessionExit ? (
             <button
               type="button"
@@ -114005,23 +114460,23 @@ function HomeContent(): React.JSX.Element {
         </div>
         {options.controlRail ??
           (options.recordedReplay ? (
-          <div
-            className={styles.recordedReplayBadge}
-            data-recorded-replay="true"
-            aria-label="Recorded replay. Routing, model, and voice are baked into this recording."
-            title="Routing, model, and voice controls do not affect recorded replays."
-          >
-            Recorded replay
-          </div>
-        ) : options.modelControls ? (
-          <div className={styles.chatHeaderModelPicker}>
-            {options.modelControls}
-            {options.showVoiceSelector
-              ? renderVoiceModeSelector(voiceSelectorOptions)
-              : null}
-          </div>
-        ) : options.showVoiceSelector ? (
-          renderVoiceModeSelector(voiceSelectorOptions)
+            <div
+              className={styles.recordedReplayBadge}
+              data-recorded-replay="true"
+              aria-label="Recorded replay. Routing, model, and voice are baked into this recording."
+              title="Routing, model, and voice controls do not affect recorded replays."
+            >
+              Recorded replay
+            </div>
+          ) : options.modelControls ? (
+            <div className={styles.chatHeaderModelPicker}>
+              {options.modelControls}
+              {options.showVoiceSelector
+                ? renderVoiceModeSelector(voiceSelectorOptions)
+                : null}
+            </div>
+          ) : options.showVoiceSelector ? (
+            renderVoiceModeSelector(voiceSelectorOptions)
           ) : null)}
         <h2 className={styles.chatHeaderTitlePlaceholder} aria-hidden="true" />
         <div className={styles.chatHeaderActions} aria-label={toolsLabel}>
@@ -114056,7 +114511,9 @@ function HomeContent(): React.JSX.Element {
     const showChatThemeButton = view === "chat" || view === "sandbox";
     const showSandboxHubButton = false;
     const isZenSurface = view === "chat";
-    const gearHidden = panel !== null;
+    // The shared navbar stays above right-side panels so its buttons can switch
+    // drawers directly. Active sessions apply their own per-action lock map.
+    const gearHidden = false;
     const deleteArmed = pendingDeleteKey === HEADER_DELETE_KEY;
     const canBotActions = true;
     const canMemoryActions = true;
@@ -115501,30 +115958,6 @@ function HomeContent(): React.JSX.Element {
     </section>
   );
 
-  const renderPanelThemeToggle = (): React.JSX.Element => {
-    const themeAriaLabel =
-      effectiveThemeMode === "system"
-        ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
-        : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`;
-    const themeTooltip =
-      effectiveThemeMode === "system"
-        ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
-        : `Theme: ${THEME_LABEL[effectiveThemeMode]}`;
-
-    return (
-      <button
-        type="button"
-        className={`${styles.panelHeaderIconButton} ${styles.panelHeaderThemeButton}`}
-        onClick={() => void cycleThemeMode()}
-        aria-label={themeAriaLabel}
-        data-glyph-tooltip={themeTooltip}
-        data-prism-panel-theme-toggle="true"
-      >
-        <ThemeGlyph mode={effectiveThemeMode} />
-      </button>
-    );
-  };
-
   const renderUsagePanel = (): React.JSX.Element | null => {
     if (panel !== "usage") return null;
     const totals = usageReport?.totals;
@@ -115588,7 +116021,6 @@ function HomeContent(): React.JSX.Element {
             >
               <RotateCcw size={14} aria-hidden="true" />
             </button>
-            {renderPanelThemeToggle()}
             <button
               className={styles.panelClose}
               onClick={closePanel}
@@ -116788,7 +117220,6 @@ function HomeContent(): React.JSX.Element {
               </h3>
             </div>
             <div className={styles.panelHeaderActions}>
-              {renderPanelThemeToggle()}
               <button
                 type="button"
                 className={styles.panelClose}
@@ -117855,7 +118286,6 @@ function HomeContent(): React.JSX.Element {
                     <IconUpload />
                   </span>
                 </button>
-                {renderPanelThemeToggle()}
                 <button
                   type="button"
                   className={styles.panelClose}
@@ -120591,7 +121021,6 @@ function HomeContent(): React.JSX.Element {
             scope={settingsScope}
             settingsLoaded={Boolean(settings)}
             panelClosing={panelClosing}
-            headerAction={renderPanelThemeToggle()}
             onScopeChange={setSettingsScope}
             onClose={closePanel}
             renderScopeContent={(activeSettingsScope: SettingsLeafScope) => (
@@ -125884,7 +126313,6 @@ function HomeContent(): React.JSX.Element {
                       </span>
                     </button>
                   ) : null}
-                  {renderPanelThemeToggle()}
                   <button
                     type="button"
                     className={styles.panelClose}
@@ -127378,7 +127806,6 @@ function HomeContent(): React.JSX.Element {
                         }
                         colorPickerOpen={colorWheelOpen}
                         resolvedTheme={resolvedTheme}
-                        themeMode={effectiveThemeMode}
                         faceEyesFont={newBotFaceEyesFont}
                         faceEyeCharacter={newBotFaceEyeCharacter}
                         faceEyeAnimation={newBotFaceEyeAnimation}
@@ -127533,7 +127960,6 @@ function HomeContent(): React.JSX.Element {
                         onCancelSavePrompt={() =>
                           setBotAvatarSavePromptOpen(false)
                         }
-                        onThemeCycle={cycleThemeMode}
                         onColorChange={(next) => {
                           pushBotAvatarUndoSnapshot("color");
                           handleNewBotColorChange(next);
@@ -129846,7 +130272,6 @@ function HomeContent(): React.JSX.Element {
                         <IconTrash />
                       </span>
                     </button>
-                    {renderPanelThemeToggle()}
                     <button
                       type="button"
                       className={styles.panelClose}
@@ -145899,6 +146324,7 @@ function HomeContent(): React.JSX.Element {
 
   const renderStoryProviderModeToggle = (): React.ReactNode => {
     const lockedByProtectedBot = storyAnyOfflineProtected;
+    const sessionLocked = storyLiveSessionActive;
     const responseMode = responseModeForProvider(storyEffectiveProvider);
     const isLocal = responseMode === "local";
     const nextMode = nextResponseMode(responseMode);
@@ -145917,10 +146343,12 @@ function HomeContent(): React.JSX.Element {
     const providerDisabled =
       !settings ||
       storyBusy ||
-      storySession?.status === "generating" ||
+      sessionLocked ||
       lockedByProtectedBot;
     const lockTitle = lockedByProtectedBot
       ? "Locked to LOCAL — at least one selected bot is set to Offline only."
+      : sessionLocked
+        ? "Start a new Story before changing its routing."
       : !settings
         ? "Loading settings."
         : null;
@@ -146010,9 +146438,15 @@ function HomeContent(): React.JSX.Element {
         renderTheme={resolvedTheme}
         loading={modelCatalogLoading}
         disabled={
-          !settings || storyBusy || storySession?.status === "generating"
+          !settings ||
+          storyBusy ||
+          storyLiveSessionActive
         }
-        title={`Story model (${responseModeShortLabel(storyResponseMode)})`}
+        title={
+          storyLiveSessionActive
+            ? "Start a new Story before changing its model or Effort."
+            : `Story model (${responseModeShortLabel(storyResponseMode)})`
+        }
         ariaLabel={`Story generation model for ${
           storyResponseMode === "local" ? "local" : "online"
         } episodes`}
@@ -146048,6 +146482,19 @@ function HomeContent(): React.JSX.Element {
                 choosing: storyBusy || storySession?.status === "generating",
               }).modelLabel
             : undefined
+        }
+        sessionEffort={
+          storyLiveSessionActive
+            ? storyEffectiveModelChoice === AUTO_MODEL_CHOICE
+              ? storySession.routing?.autoRoute?.reasoningEffort ?? null
+              : storyEffortTarget
+                ? effectiveModelReasoningEffortForRequest(
+                    settings,
+                    storyEffortTarget,
+                    maxEffortTargetKey,
+                  )
+                : null
+            : null
         }
         effortControl={effortControlForTarget(storyEffortTarget, {
           autoSelected: storyEffectiveModelChoice === AUTO_MODEL_CHOICE,
@@ -146135,15 +146582,12 @@ function HomeContent(): React.JSX.Element {
           <strong>{PRISM_DEFAULT_STORY_THEME.label}</strong>
           <small>Bundled · immutable</small>
         </div>
-        <div className={styles.storyProviderBar}>
-          <span>
-            Generation
-            {offlineNames.length > 0 ? (
-              <small>Local locked for {offlineNames.join(", ")}</small>
-            ) : null}
-          </span>
-          {renderStoryGenerationControls()}
-        </div>
+        {offlineNames.length > 0 ? (
+          <p className={styles.storyNotice}>
+            Generation is LOCAL because {offlineNames.join(", ")} is set to
+            Offline only.
+          </p>
+        ) : null}
         <label className={styles.storySearchBar}>
           <span aria-hidden="true">⌕</span>
         <input
@@ -146317,10 +146761,6 @@ function HomeContent(): React.JSX.Element {
             storyError ??
             "The model did not return a valid Story manifest."}
         </p>
-      </div>
-      <div className={styles.storyProviderBar}>
-        <span>Retry with</span>
-        {renderStoryGenerationControls()}
       </div>
       <div className={styles.storySetupFooter}>
         <button
@@ -146800,19 +147240,13 @@ function HomeContent(): React.JSX.Element {
         style={appShellStyle ?? undefined}
         onContextMenu={handleStoryShellContextMenu}
       >
+        {renderSharedAppletNavbar("Story tools", {
+          brandAppletId: "story",
+          liveSessionActive: storyLiveSessionActive,
+          liveSessionName: "Story",
+          controlRail: renderStoryGenerationControls(),
+        })}
         <aside className={styles.storySidebar} data-viewport-safe-area="left">
-          <button
-            type="button"
-            className={styles.storyHomeButton}
-            onClick={() => navigateToView("chat")}
-            aria-label="Open Chat"
-            title="Open Chat"
-          >
-            <PrismWordmarkWithVersion
-              size="sm"
-              className={styles.hubHomeWordmark}
-            />
-          </button>
           <div className={styles.storySidebarHeader}>
             <span className={styles.sectionLabel}>Stories</span>
             <button
@@ -146849,13 +147283,6 @@ function HomeContent(): React.JSX.Element {
               </p>
             </div>
             <div className={styles.storyHeaderActions}>
-              {renderAppSwitcher({
-                disabled: storySession?.status === "generating",
-                disabledReason:
-                  storySession?.status === "generating"
-                    ? "Finish the current story generation first."
-                    : undefined,
-              })}
               <button
                 type="button"
                 className={styles.storyIconButton}
@@ -146894,9 +147321,6 @@ function HomeContent(): React.JSX.Element {
                 <MessageBubbleGlyph />
                 <span className={styles.storyActionLabel}>Log</span>
               </button>
-              {renderUniversalNavbarButtons({
-                onHub: () => navigateToView("chat"),
-              })}
             </div>
           </header>
           {storyError ? (
@@ -146957,14 +147381,19 @@ function HomeContent(): React.JSX.Element {
     });
     const debateModelProvider = debateResolvedChoice.provider;
     const debateModelChoice = debateResolvedChoice.modelChoice;
+    const debateNavbarModelProvider =
+      debateLiveModelSelection?.provider ?? debateModelProvider;
+    const debateNavbarModelChoice =
+      debateLiveModelSelection?.modelChoice ?? debateModelChoice;
     const debatePrimaryForAuto = resolvedAutoPrimaryForComposer(
       modelCatalog,
       settings,
-      debateModelProvider,
-      debateModelChoice,
+      debateNavbarModelProvider,
+      debateNavbarModelChoice,
     );
     const debateResponseMode = debateBinaryResponseMode;
-    const debateNavbarResponseMode = debateBinaryResponseMode;
+    const debateNavbarResponseMode =
+      debateLiveModelSelection?.responseMode ?? debateBinaryResponseMode;
     const debateEffectiveProvider = debateModelProvider;
     const debateModelOptions = markStructuredOutputModelsUnavailable(
       includeSelectedResponseModeModelOption(
@@ -146976,14 +147405,14 @@ function HomeContent(): React.JSX.Element {
           settings,
           debateNavbarResponseMode,
         ),
-        debateModelChoice,
-        debateModelProvider,
+        debateNavbarModelChoice,
+        debateNavbarModelProvider,
       ),
       "Debate and Whodunnit",
     );
     const debateEffortTarget = modelEffortTargetForSelection({
-      provider: debatePrimaryForAuto?.provider ?? debateModelProvider,
-      modelId: debatePrimaryForAuto?.model ?? debateModelChoice,
+      provider: debatePrimaryForAuto?.provider ?? debateNavbarModelProvider,
+      modelId: debatePrimaryForAuto?.model ?? debateNavbarModelChoice,
       options: debateModelOptions,
       simulatedEffortEnabled: true,
     });
@@ -147018,10 +147447,12 @@ function HomeContent(): React.JSX.Element {
       : null;
     const debateLiveRoutingChip = debateLiveSessionActive
       ? buildLiveSessionRoutingChip({
-          modelChoice: debateModelChoice,
-          modelProvider: debateModelProvider,
+          modelChoice: debateNavbarModelChoice,
+          modelProvider: debateNavbarModelProvider,
           modelOptions: debateModelOptions,
           actualAutoRoute: debateActualAutoRoute,
+          lockedReasoningEffort:
+            debateLiveModelSelection?.reasoningEffort ?? null,
           settings,
         })
       : null;
@@ -147327,7 +147758,7 @@ function HomeContent(): React.JSX.Element {
                   ))}
                 </div>
                 <ComposerModelPicker
-                  value={debateModelChoice}
+                  value={debateNavbarModelChoice}
                   onChange={(nextChoice) => {
                     const applied = applyModelChoiceForResponseMode({
                       responseMode: debateNavbarResponseMode,
@@ -147343,10 +147774,10 @@ function HomeContent(): React.JSX.Element {
                   }}
                   options={debateModelOptions}
                   provider={
-                    debateModelProvider === "local" ? "local" : "online"
+                    debateNavbarModelProvider === "local" ? "local" : "online"
                   }
                   renderTheme={resolvedTheme}
-                  selectedProvider={debateModelProvider}
+                  selectedProvider={debateNavbarModelProvider}
                   loading={modelCatalogLoading}
                   disabled={!settings || debateLiveSessionActive}
                   title={
@@ -147359,12 +147790,22 @@ function HomeContent(): React.JSX.Element {
                   navbarPicker
                   autoOptionMetaOverride="Picks model & effort"
                   autoRouteLabel={
-                    debateModelChoice === AUTO_MODEL_CHOICE
+                    debateNavbarModelChoice === AUTO_MODEL_CHOICE
                       ? debateLiveRoutingChip?.modelLabel
                       : undefined
                   }
+                  sessionEffort={
+                    debateLiveSessionActive
+                      ? debateNavbarModelChoice === AUTO_MODEL_CHOICE
+                        ? debateActualAutoRoute?.effort ?? null
+                        : debateLiveModelSelection?.reasoningEffort ??
+                          debateReasoningEffort ??
+                          null
+                      : null
+                  }
                   effortControl={effortControlForTarget(debateEffortTarget, {
-                    autoSelected: debateModelChoice === AUTO_MODEL_CHOICE,
+                    autoSelected:
+                      debateNavbarModelChoice === AUTO_MODEL_CHOICE,
                   })}
                   dismissPopoversSignal={composerPopoverDismissSignal}
                 />
@@ -147376,6 +147817,7 @@ function HomeContent(): React.JSX.Element {
             data-debate-scroll-region="true"
           >
             <DebateExperience
+              key={`debate-home:${appletHomeRequestTokens.debate}`}
               bots={debateBots}
               botGroups={botLibraryGroups.map((group) => ({
                 id: group.id,
@@ -148120,6 +148562,7 @@ function HomeContent(): React.JSX.Element {
                 if (!active) setDebateActualAutoRoute(null);
               }}
               onActualAutoRouteChange={setDebateActualAutoRoute}
+              onLiveModelSelectionChange={setDebateLiveModelSelection}
               onCompanionContextChange={setDebateCompanionContext}
               onResetTutorial={() => resetSingleModeTutorial("debate")}
               expandComposerDraft={expandComposerDraftOperative}
@@ -148234,7 +148677,7 @@ function HomeContent(): React.JSX.Element {
     return (
       <div className={themeClass} onContextMenu={handleAppContextMenu}>
         <BotcastExperience
-          key={`signal:${signalOrchestrationEpoch}`}
+          key={`signal:${signalOrchestrationEpoch}:${appletHomeRequestTokens.botcast}`}
           bots={signalBots}
           botGroups={botLibraryGroups.map((group) => ({
             id: group.id,
@@ -148273,7 +148716,6 @@ function HomeContent(): React.JSX.Element {
             })
           }
           responseMode={signalEpisodeResponseMode}
-          onThemeChange={applyThemeMode}
           recordingVoiceSelection={voicePlaybackSelectionRef.current}
           onRecordingStateChange={handleSignalRecordingStateChange}
           onLiveSessionActiveChange={(active, sessionId) => {
@@ -148936,6 +149378,7 @@ function HomeContent(): React.JSX.Element {
             liveSessionActive,
             episodeModelControl,
             activeAutoRoute,
+            lockedReasoningEffort,
           }) => {
             const liveChromePolicy = liveSessionActive
               ? liveSessionChromePolicy("Signal")
@@ -149013,6 +149456,13 @@ function HomeContent(): React.JSX.Element {
                         ? episodeAutoPresentation.modelLabel
                         : undefined
                     }
+                    sessionEffort={
+                      liveSessionActive
+                        ? episodeModelChoice === AUTO_MODEL_CHOICE
+                          ? episodeAutoPresentation.effort
+                          : lockedReasoningEffort
+                        : null
+                    }
                     effortControl={effortControlForTarget(episodeEffortTarget, {
                       autoSelected: episodeModelChoice === AUTO_MODEL_CHOICE,
                     })}
@@ -149039,6 +149489,7 @@ function HomeContent(): React.JSX.Element {
     return (
       <div className={themeClass} data-slate-shell="true">
         <SlateWorkspace
+          key={`slate-home:${appletHomeRequestTokens.slate}`}
           className={themeClass}
           theme={resolvedTheme}
           navigationHeader={renderSharedAppletNavbar("Slate tools", {
@@ -149621,9 +150072,7 @@ function HomeContent(): React.JSX.Element {
             {relationshipDepthAnnouncement}
           </p>
           {renderSharedAppletNavbar("Chat tools", {
-            // Convo panel already carries the Chat wordmark — keep the navbar
-            // brand for immersive Zen only (sidebar closed).
-            brandAppletId: sidebarOpen ? undefined : "zen",
+            brandAppletId: chatPresentation === "zen" ? "zen" : "chat",
             headerRef: chatHeaderRef,
             controlRail: renderHeaderModelPicker({
               disabled: botFoundryGenerationLocked,
@@ -149787,6 +150236,12 @@ function HomeContent(): React.JSX.Element {
                     />
                   );
                 })}
+                <SceneMediaVignette
+                  theme={resolvedTheme}
+                  style={{
+                    "--scene-vignette-opacity": `calc(1 - 0.42 * var(--zen-atmosphere-color-amount, 0))`,
+                  } as React.CSSProperties}
+                />
               </div>
             ) : null}
             {zenAtmosphereWallpaperVisible ? (
@@ -151680,31 +152135,11 @@ function HomeContent(): React.JSX.Element {
           }
           data-viewport-safe-area="top"
           data-zen-live-bot-drag-exclusion="top-bar"
-          onPointerEnter={(event) => {
-            if (event.pointerType !== "mouse") return;
-            showAppNavbarWhileInteracting();
-            revealChatHeaderChrome();
-          }}
-          onPointerLeave={(event) => {
-            if (event.pointerType !== "mouse") return;
-            scheduleAppNavbarAutoHide();
-          }}
-          onFocusCapture={() => {
-            showAppNavbarWhileInteracting();
-            revealChatHeaderChrome();
-          }}
-          onBlurCapture={(event) => {
-            const nextFocus = event.relatedTarget;
-            if (
-              nextFocus instanceof Node &&
-              event.currentTarget.contains(nextFocus)
-            ) {
-              return;
-            }
-            scheduleAppNavbarAutoHide();
-          }}
         >
           <div className={styles.chatHeaderIdentityGroup}>
+            <span className={styles.sharedAppletNavbarBrand}>
+              {renderSharedAppletBrand("chat")}
+            </span>
             {headerIdentity ? (
               <button
                 type="button"

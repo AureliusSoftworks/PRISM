@@ -15102,11 +15102,16 @@
 }
 
 .alignmentModalBackdrop {
-  inset: var(--app-navbar-height, 66px) 0 0;
+  inset:
+    var(--app-shell-top-nav-height, var(--app-navbar-height, 66px))
+    0 0;
 }
 
 .alignmentModal {
-  height: calc(100dvh - var(--app-navbar-height, 66px));
+  height: calc(
+    100dvh -
+      var(--app-shell-top-nav-height, var(--app-navbar-height, 66px))
+  );
 }
 
 @media (min-width: 1181px) {
@@ -18923,7 +18928,10 @@
    choices, loaders, and ceremony overlays can never cover or disable it. */
 .persistentLeaveDock {
   position: fixed;
-  top: max(12px, env(safe-area-inset-top, 0px));
+  top: calc(
+    var(--app-shell-top-nav-height, var(--app-navbar-height, 66px)) +
+      max(12px, env(safe-area-inset-top, 0px))
+  );
   left: max(12px, env(safe-area-inset-left, 0px));
   z-index: 2147483647;
   display: flex;

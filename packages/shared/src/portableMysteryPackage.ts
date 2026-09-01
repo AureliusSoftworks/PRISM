@@ -18,7 +18,7 @@ import {
 } from "./whodunnitProps.ts";
 
 export const PORTABLE_MYSTERY_PACKAGE_FORMAT_MAJOR_V1 = 1 as const;
-export const PORTABLE_MYSTERY_PACKAGE_FORMAT_MINOR_V1 = 2 as const;
+export const PORTABLE_MYSTERY_PACKAGE_FORMAT_MINOR_V1 = 3 as const;
 export const PORTABLE_MYSTERY_PACKAGE_MAGIC_V1 = "PRISMPKG" as const;
 export const PORTABLE_MANSION_PACKAGE_MIME_V1 = "application/vnd.prism.mansion" as const;
 export const PORTABLE_WHODUNNIT_PACKAGE_MIME_V1 = "application/vnd.prism.whodunnit" as const;
@@ -129,7 +129,7 @@ export interface MansionPackageRoomV1 {
   slots: MansionPackageRoomSlotV1[];
   emoji: string;
   roomAssetId: string | null;
-  /** Optional Realistic plate. V4 packages use roomAssetId for authored Pixel Art. */
+  /** Optional HD derivative. The legacy field name remains readable in older packages. */
   illustratedRoomAssetId?: string | null;
   propAssetIds: string[];
 }
@@ -329,9 +329,9 @@ export const DEFAULT_MANSION_ROOM_ART_CONTRACT_V4: MansionRoomArtContractV4 = {
   avatars: { pixelArt: "mini", realistic: "full", footprint: "unchanged" },
 };
 
-/** Current source-preserving room-art contract. Authored Pixel Art remains
- * gridless in the package so Realistic upgrades receive a clean reference;
- * Mosaic adds the approved balanced Normal-blend grid only for presentation. */
+/** Source-preserving room-art contract. The legacy `pixel-art` and `realistic`
+ * wire values decode as the authored Mosaic base and its optional Upgraded HD
+ * derivative; they are not independent player-selectable styles. */
 export interface MansionRoomArtContractV5 {
   version: 5;
   defaultStyle: "pixel-art";
@@ -394,7 +394,9 @@ export const DEFAULT_MANSION_ROOM_ART_CONTRACT_V5: MansionRoomArtContractV5 = {
   avatars: { pixelArt: "mini", realistic: "full", footprint: "unchanged" },
 };
 
-/** Mosaic V6 makes tessera ownership explicit. A presentation renderer must
+/** Mosaic V6 makes tessera ownership explicit. Its legacy style identifiers
+ * remain frozen for package compatibility: the public runtime exposes one
+ * Mosaic base plus an Upgraded on/off state. A presentation renderer must
  * first resolve one 320x180 logical sample per cell, expand only with nearest
  * neighbour scaling, and preserve those exact samples with lossless output. */
 export interface MansionRoomArtContractV6 {
@@ -1175,7 +1177,8 @@ export function validateMansionPackageManifestV1(value: unknown): string[] {
       errors.push("manifest.layoutV2 is invalid.");
     } else {
       const layoutErrors = validateMansionLayoutV2(value.layoutV2, {
-        requireEditorFloors: true,
+        requireEditorFloors:
+          !value.layoutV2.venueProfile || value.layoutV2.venueProfile.kind === "estate",
       });
       errors.push(...layoutErrors.map((error) => `manifest.layoutV2: ${error}`));
       if (layoutErrors.length === 0 && Array.isArray(value.rooms)) {

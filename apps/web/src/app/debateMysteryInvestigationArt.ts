@@ -1,12 +1,14 @@
 import { CURRENT_MANSION_ROOM_ART_CONTRACT } from "@localai/shared";
 
-export const WHODUNNIT_INVESTIGATION_ART_STYLE_STORAGE_KEY =
+const LEGACY_WHODUNNIT_INVESTIGATION_ART_STYLE_STORAGE_KEY =
   "prism.whodunnit.investigation-art-style.v1";
+export const WHODUNNIT_ROOM_UPGRADE_STORAGE_KEY =
+  "prism.whodunnit.room-upgrade-enabled.v1";
 
+/** Internal asset-route variant. Player preference is the Upgraded boolean. */
 export type WhodunnitInvestigationArtStyle = "mosaic" | "illustrated";
 
-export const DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE =
-  CURRENT_MANSION_ROOM_ART_CONTRACT.defaultPresentation;
+export const DEFAULT_WHODUNNIT_ROOM_UPGRADE_ENABLED = false;
 export const WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION =
   CURRENT_MANSION_ROOM_ART_CONTRACT.version;
 
@@ -21,41 +23,55 @@ function withPixelArtPresentationVersion(url: string): string {
   return `${url}${separator}pixelArt=${WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION}`;
 }
 
-function whodunnitInvestigationArtStyleStorageKey(scopeId?: string): string {
+function scopedStorageKey(key: string, scopeId?: string): string {
   const scope = scopeId?.trim();
-  return scope
-    ? `${WHODUNNIT_INVESTIGATION_ART_STYLE_STORAGE_KEY}:${scope}`
-    : WHODUNNIT_INVESTIGATION_ART_STYLE_STORAGE_KEY;
+  return scope ? `${key}:${scope}` : key;
 }
 
-export function normalizeWhodunnitInvestigationArtStyle(
-  value: unknown,
+export function whodunnitRoomArtStyleForUpgrade(
+  upgradeEnabled: boolean,
+  upgradeReady: boolean,
 ): WhodunnitInvestigationArtStyle {
-  return value === "illustrated" ? "illustrated" : "mosaic";
+  return upgradeEnabled && upgradeReady ? "illustrated" : "mosaic";
 }
 
-export function readWhodunnitInvestigationArtStyle(
+export function readWhodunnitRoomUpgradeEnabled(
   storage: Pick<Storage, "getItem"> | null | undefined,
   scopeId?: string,
-): WhodunnitInvestigationArtStyle {
-  if (!storage) return DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE;
+  initialEnabled = DEFAULT_WHODUNNIT_ROOM_UPGRADE_ENABLED,
+): boolean {
+  if (!storage) return initialEnabled;
   try {
-    return normalizeWhodunnitInvestigationArtStyle(
-      storage.getItem(whodunnitInvestigationArtStyleStorageKey(scopeId)),
+    const saved = storage.getItem(
+      scopedStorageKey(WHODUNNIT_ROOM_UPGRADE_STORAGE_KEY, scopeId),
     );
+    if (saved === "on") return true;
+    if (saved === "off") return false;
+
+    // Preserve an explicit selection made before the control became one
+    // Upgraded switch. Absence still defers to the frozen Forge request.
+    const legacy = storage.getItem(
+      scopedStorageKey(LEGACY_WHODUNNIT_INVESTIGATION_ART_STYLE_STORAGE_KEY, scopeId),
+    );
+    if (legacy === "illustrated") return true;
+    if (legacy === "mosaic") return false;
+    return initialEnabled;
   } catch {
-    return DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE;
+    return initialEnabled;
   }
 }
 
-export function writeWhodunnitInvestigationArtStyle(
+export function writeWhodunnitRoomUpgradeEnabled(
   storage: Pick<Storage, "setItem"> | null | undefined,
-  style: WhodunnitInvestigationArtStyle,
+  enabled: boolean,
   scopeId?: string,
 ): void {
   if (!storage) return;
   try {
-    storage.setItem(whodunnitInvestigationArtStyleStorageKey(scopeId), style);
+    storage.setItem(
+      scopedStorageKey(WHODUNNIT_ROOM_UPGRADE_STORAGE_KEY, scopeId),
+      enabled ? "on" : "off",
+    );
   } catch {
     // A blocked storage surface must never interrupt an investigation.
   }
@@ -153,11 +169,11 @@ export interface WhodunnitDiscoveredMansionRoomArtV1 {
 }
 
 /** Resolve a mansion-board room plate without exposing an undiscovered room.
- * A missing per-room Realistic upgrade falls back through the Pixel Art route
- * instead of leaving a discovered block blank. */
+ * A missing per-room HD derivative falls back through the original Mosaic
+ * route instead of leaving a discovered block blank. */
 export function whodunnitDiscoveredMansionRoomArtV1(args: {
   discovered: boolean;
-  activeStyle: WhodunnitInvestigationArtStyle;
+  upgradeEnabled: boolean;
   illustratedReady: boolean;
   sealedIllustratedUrl?: string | null;
   sealedMosaicUrl?: string | null;
@@ -166,9 +182,10 @@ export function whodunnitDiscoveredMansionRoomArtV1(args: {
   bundledAssetPath?: string | null;
 }): WhodunnitDiscoveredMansionRoomArtV1 | null {
   if (!args.discovered) return null;
-  const style = args.activeStyle === "illustrated" && args.illustratedReady
-    ? "illustrated"
-    : "mosaic";
+  const style = whodunnitRoomArtStyleForUpgrade(
+    args.upgradeEnabled,
+    args.illustratedReady,
+  );
   const sealedUrl = style === "illustrated"
     ? args.sealedIllustratedUrl
     : args.sealedMosaicUrl;

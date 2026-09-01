@@ -346,10 +346,10 @@ function availableBots(
     .prepare(
       `SELECT id, name, user_id
          FROM bots
-        WHERE id IN (${placeholders})
-          AND (user_id = ? OR visibility = 'public')`,
+        WHERE user_id = ?
+          AND id IN (${placeholders})`,
     )
-    .all(...botIds, userId) as unknown as BotRow[];
+    .all(userId, ...botIds) as unknown as BotRow[];
   const byId = new Map(rows.map((row) => [row.id, row]));
   return botIds.flatMap((id) => {
     const row = byId.get(id);

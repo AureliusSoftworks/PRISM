@@ -4,6 +4,7 @@ import {
   type DebateMysteryRoomV2,
   type MansionAmbienceRoomProfileV1,
   type MansionLayoutBlockV2,
+  type MysteryVenueProfileV1,
 } from "@localai/shared";
 import type { RoomAcousticsProfile, RoomAcousticsSend } from "./roomAcoustics.ts";
 
@@ -43,6 +44,18 @@ function authoredOrInferredRoomProfile(
 ): MansionAmbienceRoomProfileV1 {
   return houseStyle.ambience?.roomProfiles.find((profile) => profile.roomId === room.id) ??
     mansionAmbienceRoomProfileV1(room, houseStyle);
+}
+
+function venueResolvedHouseStyle(
+  houseStyle: DebateMysteryHouseStyleV2,
+  venueProfile?: Pick<MysteryVenueProfileV1, "presentation"> | null,
+): DebateMysteryHouseStyleV2 {
+  const acousticFamily = venueProfile?.presentation?.compatibleAcousticFamilies.find(
+    (family) => family !== "universal-abstract-v1",
+  );
+  return acousticFamily
+    ? { ...houseStyle, acousticThemePaletteId: acousticFamily }
+    : houseStyle;
 }
 
 function roomAcousticsFromProfile(args: {
@@ -113,33 +126,38 @@ function roomAcousticsFromProfile(args: {
 export function mysteryMansionRoomAcousticsV1(args: {
   room: DebateMysteryRoomV2;
   houseStyle: DebateMysteryHouseStyleV2;
+  venueProfile?: Pick<MysteryVenueProfileV1, "presentation"> | null;
 }): MysteryMansionRoomAcousticsV1 {
+  const houseStyle = venueResolvedHouseStyle(args.houseStyle, args.venueProfile);
   const width = finiteDimension(args.room.width, 3);
   const height = finiteDimension(args.room.height, 2);
   return roomAcousticsFromProfile({
-    houseStyle: args.houseStyle,
+    houseStyle,
     identity: args.room.id,
     name: args.room.name,
     width,
     height,
-    authored: authoredOrInferredRoomProfile(args.room, args.houseStyle),
+    authored: authoredOrInferredRoomProfile(args.room, houseStyle),
   });
 }
 
 export function mysteryMansionCorridorAcousticsV1(args: {
   corridor: MansionLayoutBlockV2;
   houseStyle: DebateMysteryHouseStyleV2;
+  venueProfile?: Pick<MysteryVenueProfileV1, "presentation"> | null;
 }): MysteryMansionRoomAcousticsV1 {
-  const spacecraft = args.houseStyle.acousticThemePaletteId === "spacecraft-industrial-v1";
+  const houseStyle = venueResolvedHouseStyle(args.houseStyle, args.venueProfile);
+  const spacecraft = houseStyle.acousticThemePaletteId === "spacecraft-industrial-v1";
+  const passengerShip = houseStyle.acousticThemePaletteId === "maritime-passenger-v1";
   const authored = mansionAmbienceRoomProfileV1({
     id: args.corridor.id,
-    name: spacecraft ? "Metal corridor" : "Hall corridor",
+    name: spacecraft ? "Metal corridor" : passengerShip ? "Ship passage" : "Hall corridor",
     floor: args.corridor.floor,
-  }, args.houseStyle);
+  }, houseStyle);
   return roomAcousticsFromProfile({
-    houseStyle: args.houseStyle,
+    houseStyle,
     identity: args.corridor.id,
-    name: spacecraft ? "Metal corridor" : "Hall corridor",
+    name: spacecraft ? "Metal corridor" : passengerShip ? "Ship passage" : "Hall corridor",
     width: args.corridor.width,
     height: args.corridor.height,
     authored,

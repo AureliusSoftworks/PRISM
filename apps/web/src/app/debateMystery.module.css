@@ -591,6 +591,49 @@
   pointer-events: none;
 }
 
+.investigationLengthDiagram {
+  display: grid;
+  align-content: center;
+  gap: 0.45rem;
+  padding: 1rem 1.25rem;
+  background:
+    radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--mystery-cyan) 12%, transparent), transparent 48%),
+    linear-gradient(145deg, color-mix(in srgb, var(--mystery-violet) 7%, var(--mystery-panel-strong)), var(--mystery-panel-strong));
+  filter: none;
+}
+
+.investigationLengthDiagram::before {
+  content: "INVESTIGATION AREA";
+  color: color-mix(in srgb, var(--mystery-text) 64%, var(--mystery-muted));
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-align: center;
+}
+
+.investigationLengthDiagram::after {
+  background: radial-gradient(ellipse at center, transparent 40%, color-mix(in srgb, var(--mystery-panel-strong) 46%, transparent));
+}
+
+.investigationLengthDiagram i {
+  display: block;
+  width: 64%;
+  height: 0.48rem;
+  margin: 0 auto;
+  border: 1px solid color-mix(in srgb, var(--mystery-cyan) 42%, var(--mystery-line));
+  border-radius: 999px 40% 40% 999px;
+  background: color-mix(in srgb, var(--mystery-cyan) 12%, var(--mystery-panel-strong));
+  box-shadow: 0 0 0.7rem color-mix(in srgb, var(--mystery-cyan) 10%, transparent);
+}
+
+.investigationLengthDiagram[data-length="compact"] i:nth-of-type(n + 2),
+.investigationLengthDiagram[data-length="standard"] i:nth-of-type(n + 3) {
+  opacity: 0.16;
+}
+
+.investigationLengthDiagram[data-length="standard"] i { width: 76%; }
+.investigationLengthDiagram[data-length="grand"] i { width: 88%; }
+
 .presetGrid button:hover:not(:disabled) .presetThumbnail,
 .presetGrid button:focus-visible .presetThumbnail,
 .presetGrid button[data-selected="true"] .presetThumbnail {
@@ -943,10 +986,76 @@
   font-size: 2.2rem;
 }
 .installedMansionThumbnail img { width: 100%; height: 100%; object-fit: cover; }
+
+/* Nocturnal venue art should feel seated in the pale library card rather than
+   pasted onto it. Light Mode keeps the focal architecture intact, then lets
+   the environmental foreground dissolve into the card material. Dark Mode
+   deliberately retains the authored full-bleed image. */
+.setup[data-theme="light"] .installedMansionThumbnail {
+  isolation: isolate;
+  border-bottom-color: transparent;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--mystery-cyan) 7%, var(--mystery-panel-strong)),
+    var(--mystery-panel-strong)
+  );
+}
+
+.setup[data-theme="light"] .installedMansionThumbnail img {
+  position: relative;
+  z-index: 0;
+  opacity: 0.72;
+  filter: saturate(0.94) brightness(1.03) contrast(0.98);
+  transform: scale(1.012);
+  -webkit-mask-image: linear-gradient(
+    180deg,
+    #000 0%,
+    #000 76%,
+    rgba(0, 0, 0, 0.96) 83%,
+    rgba(0, 0, 0, 0.58) 92%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    180deg,
+    #000 0%,
+    #000 76%,
+    rgba(0, 0, 0, 0.96) 83%,
+    rgba(0, 0, 0, 0.58) 92%,
+    transparent 100%
+  );
+}
+
+.setup[data-theme="light"] .installedMansionThumbnail::after {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  content: "";
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--mystery-panel-strong) 28%, transparent),
+      transparent 7%,
+      transparent 93%,
+      color-mix(in srgb, var(--mystery-panel-strong) 28%, transparent)
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--mystery-cyan) 5%, transparent),
+      transparent 28%,
+      transparent 76%,
+      color-mix(in srgb, var(--mystery-panel-strong) 18%, transparent) 86%,
+      var(--mystery-panel-strong) 100%
+    );
+  box-shadow: inset 0 0 1.1rem
+    color-mix(in srgb, var(--mystery-panel-strong) 18%, transparent);
+  pointer-events: none;
+}
+
 .installedMansionOrigin {
   position: absolute;
   top: 0.48rem;
   right: 0.48rem;
+  z-index: 2;
   display: inline-flex;
   min-height: 1.55rem;
   align-items: center;
@@ -1130,6 +1239,7 @@
 .mansionEditorFloorBar nav button { display: grid; gap: 0.08rem; min-width: 5.2rem; text-align: left; }
 .mansionEditorFloorBar nav button[aria-pressed="true"] { border-color: var(--mystery-violet); background: color-mix(in srgb, var(--mystery-violet) 19%, var(--mystery-panel-strong)); }
 .mansionEditorFloorBar nav small { color: var(--mystery-muted); font-size: 0.6rem; font-weight: 500; }
+.mansionEditorArchitectureLock { max-width: 22rem; color: var(--mystery-muted); font-size: 0.66rem; line-height: 1.35; text-align: right; }
 
 .mansionEditorCanvasShell { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; padding: 1rem; }
 .mansionEditorCanvas {
@@ -1147,7 +1257,24 @@
   box-shadow: inset 0 0 3rem rgb(0 0 0 / 20%);
   touch-action: none;
 }
+.mansionEditorCanvas[data-map-style="hull-deck-v1"] {
+  background-color: color-mix(in srgb, var(--mystery-panel-strong) 90%, var(--mystery-cyan) 10%);
+}
+.mansionEditorHullOutline {
+  position: absolute;
+  z-index: 0;
+  inset: 2.5%;
+  width: 95%;
+  height: 95%;
+  overflow: visible;
+  color: color-mix(in srgb, var(--mystery-cyan) 62%, var(--mystery-violet));
+  pointer-events: none;
+  filter: drop-shadow(0 0 0.65rem color-mix(in srgb, var(--mystery-cyan) 22%, transparent));
+}
+.mansionEditorHullOutline path:first-child { fill: color-mix(in srgb, var(--mystery-cyan) 5%, transparent); stroke: currentcolor; stroke-width: 1.8; vector-effect: non-scaling-stroke; }
+.mansionEditorHullOutline path:last-child { fill: none; stroke: color-mix(in srgb, currentcolor 55%, transparent); stroke-width: 1; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
 .mansionEditorCanvas > button { position: relative; z-index: 1; display: grid; align-content: center; justify-items: center; min-width: 0; min-height: 0; margin: 0.16rem; padding: 0.25rem; overflow: hidden; color: var(--mystery-text); border: 1px solid color-mix(in srgb, var(--mystery-violet) 52%, var(--mystery-line)); border-radius: 0.5rem; background: linear-gradient(145deg, color-mix(in srgb, var(--mystery-violet) 17%, var(--mystery-panel-strong)), var(--mystery-panel-strong)); box-shadow: 0 0.32rem 0.75rem rgb(0 0 0 / 22%); font: inherit; cursor: grab; user-select: none; }
+.mansionEditorCanvas[data-architecture-locked="true"] > button { cursor: default; }
 .mansionEditorCanvas > button:active { cursor: grabbing; }
 .mansionEditorCanvas > button[data-selected="true"] { z-index: 2; border-color: var(--mystery-cyan); box-shadow: 0 0 0 2px color-mix(in srgb, var(--mystery-cyan) 32%, transparent), 0 0.5rem 1rem rgb(0 0 0 / 28%); }
 .mansionEditorCanvas > button > span { font-size: 1.05rem; }
@@ -1439,6 +1566,19 @@
   color: var(--mystery-text);
 }
 
+.setup[data-theme="light"] .quickStartNote small,
+.setup[data-theme="light"] .setupDisclosure small,
+.setup[data-theme="light"] .setupSection > p,
+.setup[data-theme="light"] .setupField small,
+.setup[data-theme="light"] .advancedGrid label,
+.setup[data-theme="light"] .assetForgeChoices small,
+.setup[data-theme="light"] .assetForgeChoices > p,
+.setup[data-theme="light"] .guidedSetupProgress small {
+  color: #625a6d;
+  font-size: max(0.75rem, 12px);
+  line-height: 1.45;
+}
+
 .setupAside {
   position: sticky;
   top: 1rem;
@@ -1655,8 +1795,15 @@
 
 .compiler > .exitButton {
   position: fixed;
-  top: 1.2rem;
-  left: 1.2rem;
+  top: calc(
+    var(--app-shell-top-nav-height, var(--app-navbar-height, 66px)) +
+      max(0.75rem, env(safe-area-inset-top, 0px))
+  );
+  left: max(0.75rem, env(safe-area-inset-left, 0px));
+  width: fit-content;
+  max-width: calc(100vw - 1.5rem);
+  line-height: 1.1;
+  white-space: nowrap;
 }
 
 .compilerCard {

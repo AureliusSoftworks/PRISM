@@ -36,6 +36,39 @@ function createDb(): DatabaseSync {
      VALUES (?, 'memory@example.com', 'Memory', 'hash', 'salt',
              'cipher', 'iv', 'tag', ?, ?)`,
   ).run(USER_ID, "2026-08-01T00:00:00.000Z", "2026-08-01T00:00:00.000Z");
+  for (const [botId, name] of [
+    ["bot-a", "Bot A"],
+    ["bot-b", "Bot B"],
+  ] as const) {
+    db.prepare(
+      `INSERT INTO bots (id, user_id, name, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(
+      botId,
+      USER_ID,
+      name,
+      "2026-08-01T00:00:00.000Z",
+      "2026-08-01T00:00:00.000Z",
+    );
+  }
+  for (const conversationId of [
+    "conversation-1",
+    "conversation-2",
+    "signal-episode-1",
+    "coffee-session-1",
+  ]) {
+    db.prepare(
+      `INSERT INTO conversations
+        (id, user_id, title, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(
+      conversationId,
+      USER_ID,
+      conversationId,
+      "2026-08-01T00:00:00.000Z",
+      "2026-08-01T00:00:00.000Z",
+    );
+  }
   return db;
 }
 

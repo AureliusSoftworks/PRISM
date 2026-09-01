@@ -196,7 +196,7 @@ test("closing regeneration preserves the current unsaved draft", () => {
   assert.match(pageSource, /Keep current draft/u);
 });
 
-test("foundry generation hides the shared navbar and cancels from foundry close", () => {
+test("foundry generation keeps the shared navbar and cancels from foundry close", () => {
   assert.match(
     pageSource,
     /const botFoundryGenerationLocked = botGeneratorOpen && botGeneratorBusy;/u,
@@ -222,17 +222,13 @@ test("foundry generation hides the shared navbar and cancels from foundry close"
     /applyBotAvatarDraftSnapshot\(generationSnapshot\.draft\)/u,
   );
   assert.match(pageSource, /botFoundryGenerationLockIsActive\(\)/u);
-  assert.match(
-    pageSource,
-    /botGeneratorOpen \|\|[\s\S]{0,80}botAvatarCustomizerOpen \|\|[\s\S]{0,80}view === "coffee"/u,
-  );
-  assert.match(pageSource, /setAppNavbarSessionHidden\(sessionHidden\)/u);
+  assert.doesNotMatch(pageSource, /setAppNavbarSessionHidden/u);
 });
 
-test("the generator fills the viewport without shared navbar chrome and has a responsive review surface", () => {
+test("the generator fills the workspace below shared navbar chrome and has a responsive review surface", () => {
   assert.match(
     cssSource,
-    /\.botGeneratorBackdrop\[data-avatar-foundry="true"\]\s*\{[\s\S]*?inset:\s*0;[\s\S]*?z-index:\s*170/u,
+    /\.botGeneratorBackdrop\[data-avatar-foundry="true"\]\s*\{[\s\S]*?inset:[\s\S]*?var\(--app-shell-top-nav-height[\s\S]*?z-index:\s*170/u,
   );
   assert.match(pageSource, /styles\.botAvatarStudioThemeScope/u);
   assert.doesNotMatch(

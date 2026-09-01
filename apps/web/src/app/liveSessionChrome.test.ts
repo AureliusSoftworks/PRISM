@@ -22,7 +22,7 @@ test("live session routing chip shows the server-observed Auto route", () => {
       },
     }),
     {
-      modelLabel: "Auto → GPT-4o",
+      modelLabel: "GPT-4o",
       effortLabel: "High",
       effortKey: "high",
       automatic: true,
@@ -31,7 +31,7 @@ test("live session routing chip shows the server-observed Auto route", () => {
   );
 });
 
-test("live Auto waits or chooses without substituting a client preview", () => {
+test("live Auto stays visible until a server route resolves it", () => {
   assert.equal(
     liveSessionRoutingChipLabels({
       modelIsAuto: true,
@@ -39,7 +39,7 @@ test("live Auto waits or chooses without substituting a client preview", () => {
       effort: "medium",
       lane: "online",
     }).modelLabel,
-    "Auto → Awaiting first turn",
+    "Auto",
   );
   assert.equal(
     liveSessionRoutingChipLabels({
@@ -49,7 +49,7 @@ test("live Auto waits or chooses without substituting a client preview", () => {
       lane: "online",
       choosing: true,
     }).modelLabel,
-    "Auto → Choosing…",
+    "Auto",
   );
 });
 
@@ -62,7 +62,7 @@ test("LOCAL ignores stale online routes", () => {
       lane: "local",
       actualRoute: { provider: "openai", model: "gpt-5.6" },
     }).modelLabel,
-    "Auto → Awaiting first turn",
+    "Auto",
   );
 });
 
@@ -177,6 +177,44 @@ test("live session chrome mounts model chip and theme-aware watermark", () => {
   assert.match(
     pageSource,
     /autoRouteLabel=\{[\s\S]{0,180}debateLiveRoutingChip\?\.modelLabel/u,
+  );
+  assert.match(
+    pageSource,
+    /data-auto-route-resolved=\{autoRouteResolved \? "true" : undefined\}/u,
+  );
+  assert.match(
+    pageSource,
+    /composeModelTriggerNameAuto[\s\S]{0,500}data-auto-route-resolved/u,
+  );
+  assert.match(
+    pageSource,
+    /autoSelected && !presentedEffort[\s\S]{0,220}<AutoEffortIcon \/>[\s\S]{0,300}<ModelEffortIcon[\s\S]{0,120}level=\{presentedEffort\}/u,
+  );
+  assert.match(
+    pageSource,
+    /const effortInteractionDisabled =\s*disabled \|\|\s*loading \|\|/u,
+    "disabling the live model picker must also disable the adjacent fixed-model effort control",
+  );
+  assert.match(
+    pageSource,
+    /renderCoffeeHeaderModelPicker[\s\S]{0,5200}sessionEffort=\{[\s\S]{0,500}autoPresentation\.effort/u,
+  );
+  assert.match(
+    pageSource,
+    /debateLiveSessionActive[\s\S]{0,3600}sessionEffort=\{[\s\S]{0,260}debateActualAutoRoute\?\.effort/u,
+  );
+  assert.match(
+    debateSource,
+    /onLiveModelSelectionChange\?\.\([\s\S]{0,500}modelChoice:[\s\S]{0,180}activeSession\.modelSelectionKind === "auto"[\s\S]{0,180}activeSession\.model[\s\S]{0,180}lastReasoningEffort/u,
+  );
+  assert.match(
+    pageSource,
+    /debateNavbarModelChoice =\s*debateLiveModelSelection\?\.modelChoice \?\? debateModelChoice/u,
+  );
+  assert.match(pageSource, /value=\{debateNavbarModelChoice\}/u);
+  assert.match(
+    pageSource,
+    /navigationHeader=\{\(\{[\s\S]{0,800}lockedReasoningEffort[\s\S]{0,6000}sessionEffort=\{[\s\S]{0,500}episodeAutoPresentation\.effort/u,
   );
   assert.match(
     signalSource,

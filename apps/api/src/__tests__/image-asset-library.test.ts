@@ -298,11 +298,24 @@ describe("local image asset catalog", () => {
       seedBot(db, "user-1", "alpha", "Alpha");
       seedBot(db, "user-1", "beta", "Beta");
       seedBot(db, "user-2", "other", "Alpha");
+      assert.throws(
+        () =>
+          seedImage(db, {
+            id: "cross-owner-exhibit",
+            userId: "user-1",
+            botId: "alpha",
+            relatedBotIds: ["alpha", "beta", "other"],
+            origin: "debate",
+            purpose: "debate_exhibit",
+            prompt: "Cross-owner provenance must fail closed",
+          }),
+        /owner_constraint_violation/u,
+      );
       seedImage(db, {
         id: "shared-exhibit",
         userId: "user-1",
         botId: "alpha",
-        relatedBotIds: ["alpha", "beta", "other"],
+        relatedBotIds: ["alpha", "beta"],
         origin: "debate",
         purpose: "debate_exhibit",
         prompt: "Beta appears only as authored provenance",
@@ -503,14 +516,6 @@ describe("local image asset catalog", () => {
       }
       seedBot(db, "user-2", "other-tenant-bot", "Chat Bot");
 
-      seedImage(db, {
-        id: "chat-direct",
-        userId: "user-1",
-        conversationId: "chat-1",
-        origin: "images_panel",
-        purpose: "gallery",
-        prompt: "Legacy Chat image without bot provenance",
-      });
       for (const id of ["zen-current", "zen-history", "chat-atmosphere"]) {
         seedImage(db, {
           id,
@@ -533,6 +538,14 @@ describe("local image asset catalog", () => {
         NOW,
         NOW,
       );
+      seedImage(db, {
+        id: "chat-direct",
+        userId: "user-1",
+        conversationId: "chat-1",
+        origin: "images_panel",
+        purpose: "gallery",
+        prompt: "Legacy Chat image without bot provenance",
+      });
       db.prepare(
         `UPDATE bots
             SET chat_atmosphere_image_id = 'chat-atmosphere'
@@ -581,13 +594,24 @@ describe("local image asset catalog", () => {
            (id, user_id, name, atmosphere_json, created_at, updated_at)
          VALUES ('club-1', 'user-1', 'Club', ?, ?, ?)`,
       ).run(JSON.stringify({ imageId: "group-room" }), NOW, NOW);
-      for (const botId of ["group-a", "group-b", "other-tenant-bot"]) {
+      for (const botId of ["group-a", "group-b"]) {
         db.prepare(
           `INSERT INTO library_group_members
              (user_id, group_id, bot_id, added_at, updated_at)
            VALUES ('user-1', 'club-1', ?, ?, ?)`,
         ).run(botId, NOW, NOW);
       }
+      assert.throws(
+        () =>
+          db
+            .prepare(
+              `INSERT INTO library_group_members
+                 (user_id, group_id, bot_id, added_at, updated_at)
+               VALUES ('user-1', 'club-1', 'other-tenant-bot', ?, ?)`,
+            )
+            .run(NOW, NOW),
+        /owner_constraint_violation/u,
+      );
 
       seedImage(db, {
         id: "coffee-room",

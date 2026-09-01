@@ -22,6 +22,10 @@ export const PRISM_MANSION_ACOUSTIC_ASSETS_V1 = {
     id: "prism.theme.spacecraft.hull-life-support.v1",
     sha256: "d3de0019d5b2b37ea1d5a2a707301b140787c2517c462cdd30ec864759767b9f",
   },
+  passengerShip: {
+    id: "prism.theme.maritime-passenger.engine-ocean.v1",
+    sha256: "36c53887057817c949143466cbe4b340de754442369096438249fdc09e6a5965",
+  },
 } as const;
 
 export interface MansionAcousticRoomInputV1 {
@@ -45,6 +49,16 @@ function roomAcousticPreset(
 ): { preset: string; material: string; exposure: number; dampening: number; reverb: number; lowPass: number } {
   const name = room.name.toLocaleLowerCase();
   const spacecraft = houseStyle.acousticThemePaletteId === "spacecraft-industrial-v1";
+  const passengerShip = houseStyle.acousticThemePaletteId === "maritime-passenger-v1";
+  if (passengerShip && /promenade|open deck|gangway/u.test(name)) {
+    return { preset: "ocean-deck-v1", material: "steel-deck", exposure: 1, dampening: 0.04, reverb: 0.1, lowPass: 18_000 };
+  }
+  if (passengerShip && /engine|machinery|laundry|service|galley|stores/u.test(name)) {
+    return { preset: "ship-service-v1", material: "steel-grate", exposure: 0.18, dampening: 0.68, reverb: 0.3, lowPass: 5_200 };
+  }
+  if (passengerShip && /cabin|dayroom|quarters/u.test(name)) {
+    return { preset: "passenger-cabin-v1", material: "carpet-over-steel", exposure: 0.44, dampening: 0.7, reverb: 0.16, lowPass: 6_800 };
+  }
   if (/rooftop|roof|balcony|terrace/u.test(name)) {
     return { preset: "outdoors-v1", material: spacecraft ? "metal-plate" : "stone", exposure: 1, dampening: 0.02, reverb: 0.08, lowPass: 20_000 };
   }
@@ -93,6 +107,9 @@ export function mansionAmbienceWorldBedV1(houseStyle: DebateMysteryHouseStyleV2)
   if (houseStyle.acousticThemePaletteId === "spacecraft-industrial-v1") {
     return { ...PRISM_MANSION_ACOUSTIC_ASSETS_V1.spacecraftHull, scope: "theme" };
   }
+  if (houseStyle.acousticThemePaletteId === "maritime-passenger-v1") {
+    return { ...PRISM_MANSION_ACOUSTIC_ASSETS_V1.passengerShip, scope: "theme" };
+  }
   if (houseStyle.atmosphere.weather === "storm" || houseStyle.atmosphere.weather === "rain") {
     return { ...PRISM_MANSION_ACOUSTIC_ASSETS_V1.rainStorm, scope: "shared" };
   }
@@ -121,21 +138,29 @@ export function buildMansionAmbienceManifestV1(args: {
       sharedAssetId: worldBed.id,
       packageAssetId: null,
       contentSha256: worldBed.sha256,
-      fallbackSharedAssetId: PRISM_MANSION_ACOUSTIC_ASSETS_V1.indoorRoomTone.id,
+        fallbackSharedAssetId: args.houseStyle.acousticThemePaletteId === "maritime-passenger-v1"
+          ? PRISM_MANSION_ACOUSTIC_ASSETS_V1.passengerShip.id
+          : PRISM_MANSION_ACOUSTIC_ASSETS_V1.indoorRoomTone.id,
       generation: { source: "procedural", provider: null, model: null },
     }],
     surfaceMappings: [
       {
         interaction: "footstep",
-        materialId: args.houseStyle.acousticThemePaletteId === "spacecraft-industrial-v1" ? "metal-plate" : "wood",
-        sharedAssetIds: args.houseStyle.acousticThemePaletteId === "spacecraft-industrial-v1"
+        materialId: args.houseStyle.acousticThemePaletteId === "spacecraft-industrial-v1" ? "metal-plate"
+          : args.houseStyle.acousticThemePaletteId === "maritime-passenger-v1" ? "steel-deck"
+            : "wood",
+        sharedAssetIds: args.houseStyle.acousticThemePaletteId === "spacecraft-industrial-v1" ||
+          args.houseStyle.acousticThemePaletteId === "maritime-passenger-v1"
           ? ["prism.shared.footstep.metal-plate.v1"]
           : ["prism.shared.footstep.wood.v1"],
       },
       {
         interaction: "door",
-        materialId: args.houseStyle.acousticThemePaletteId === "spacecraft-industrial-v1" ? "powered-servo" : "heavy-wood",
-        sharedAssetIds: args.houseStyle.acousticThemePaletteId === "spacecraft-industrial-v1"
+        materialId: args.houseStyle.acousticThemePaletteId === "spacecraft-industrial-v1" ? "powered-servo"
+          : args.houseStyle.acousticThemePaletteId === "maritime-passenger-v1" ? "marine-steel"
+            : "heavy-wood",
+        sharedAssetIds: args.houseStyle.acousticThemePaletteId === "spacecraft-industrial-v1" ||
+          args.houseStyle.acousticThemePaletteId === "maritime-passenger-v1"
           ? ["prism.shared.portal.powered-servo.v1"]
           : ["prism.shared.door.heavy-wood.v1"],
       },
@@ -145,7 +170,9 @@ export function buildMansionAmbienceManifestV1(args: {
     speechDucking: { gain: 0.46, attackMs: 120, releaseMs: 480 },
     stageCueStingerAllowlist: [],
     fallbackSharedAssetIds: [
-      PRISM_MANSION_ACOUSTIC_ASSETS_V1.indoorRoomTone.id,
+      args.houseStyle.acousticThemePaletteId === "maritime-passenger-v1"
+        ? PRISM_MANSION_ACOUSTIC_ASSETS_V1.passengerShip.id
+        : PRISM_MANSION_ACOUSTIC_ASSETS_V1.indoorRoomTone.id,
       "prism.shared.fallback.silence.v1",
     ],
   };

@@ -528,12 +528,9 @@ export function recordRelationshipProjectionBase(args: {
   if (!sourceBotId || !targetBotId || sourceBotId === targetBotId) return;
   args.db
     .prepare(
-      `INSERT INTO memory_relationship_projections
+      `INSERT OR REPLACE INTO memory_relationship_projections
         (user_id, source_bot_id, target_bot_id, base_score, updated_at)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(user_id, source_bot_id, target_bot_id) DO UPDATE SET
-         base_score = excluded.base_score,
-         updated_at = excluded.updated_at`,
+       VALUES (?, ?, ?, ?, ?)`,
     )
     .run(
       args.userId,

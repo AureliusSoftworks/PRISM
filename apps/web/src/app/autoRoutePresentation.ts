@@ -18,6 +18,8 @@ export interface ActualAppletRoute {
 
 export interface AutoRouteLivePresentation {
   modelLabel: string;
+  /** Server-observed Auto effort; null until a concrete route completes. */
+  effort: ProviderReasoningEffort | null;
   actualRoute: ActualAppletRoute | null;
   automatic: boolean;
   choosing: boolean;
@@ -118,9 +120,10 @@ export function latestActualAppletRoute(
 }
 
 /**
- * Produces the small, shared live status without consulting catalogues or
- * starting discovery. `actualRoute` must be from persisted/session payloads,
- * never a contextual client preview.
+ * Produces the compact, shared model-control label without consulting
+ * catalogues or starting discovery. `actualRoute` must be from
+ * persisted/session payloads, never a contextual client preview. Auto remains
+ * the selection; a resolved model name is presentation only.
  */
 export function presentAppletModelRoute(args: {
   modelIsAuto: boolean;
@@ -134,6 +137,7 @@ export function presentAppletModelRoute(args: {
   if (!args.modelIsAuto) {
     return {
       modelLabel: args.fixedModelLabel.trim() || "Model",
+      effort: null,
       actualRoute: null,
       automatic: false,
       choosing: false,
@@ -143,7 +147,8 @@ export function presentAppletModelRoute(args: {
   if (routeMatchesAppletLane(actualRoute, args.lane)) {
     const actualModelLabel = args.actualModelLabel?.trim() || actualRoute.model;
     return {
-      modelLabel: `Auto → ${actualModelLabel}`,
+      modelLabel: actualModelLabel,
+      effort: actualRoute.effort ?? null,
       actualRoute,
       automatic: true,
       choosing: false,
@@ -151,7 +156,8 @@ export function presentAppletModelRoute(args: {
   }
   const choosing = args.choosing === true;
   return {
-    modelLabel: choosing ? "Auto → Choosing…" : "Auto → Awaiting first turn",
+    modelLabel: "Auto",
+    effort: null,
     actualRoute: null,
     automatic: true,
     choosing,

@@ -28,7 +28,7 @@ describe("shared PRISM chrome notices", () => {
   it("keeps transient feedback compact, chrome-bound, and one-line", () => {
     assert.match(
       css,
-      /\.viewport\s*\{[\s\S]{0,240}top:\s*calc\(var\(--app-navbar-height, 66px\) - 1px\)/u,
+      /\.viewport\s*\{[\s\S]{0,280}top:\s*calc\([\s\S]{0,100}var\(--app-shell-top-nav-height/u,
     );
     assert.match(css, /width:\s*min\(620px, calc\(100vw - 24px\)\)/u);
     assert.match(css, /\.notice\s*\{[\s\S]{0,520}min-height:\s*38px/u);

@@ -25,22 +25,49 @@ test("recovery final wins the initial Auto route", () => {
   });
 });
 
-test("Auto status is applet/lane isolated and never discovers a model", () => {
+test("Auto label is applet/lane isolated and never discovers a model", () => {
   const local = presentAppletModelRoute({
     modelIsAuto: true,
     fixedModelLabel: "should not be used",
     lane: "local",
     actualRoute: { provider: "openai", model: "gpt-online" },
   });
-  assert.equal(local.modelLabel, "Auto → Awaiting first turn");
+  assert.equal(local.modelLabel, "Auto");
+  assert.equal(local.effort, null);
   const online = presentAppletModelRoute({
     modelIsAuto: true,
     fixedModelLabel: "should not be used",
     actualModelLabel: "Claude Sonnet 4.6",
     lane: "online",
-    actualRoute: { provider: "anthropic", model: "claude-routed" },
+    actualRoute: {
+      provider: "anthropic",
+      model: "claude-routed",
+      effort: "high",
+    },
   });
-  assert.equal(online.modelLabel, "Auto → Claude Sonnet 4.6");
+  assert.equal(online.modelLabel, "Claude Sonnet 4.6");
+  assert.equal(online.effort, "high");
+});
+
+test("observed Auto effort updates with each completed route", () => {
+  const first = presentAppletModelRoute({
+    modelIsAuto: true,
+    fixedModelLabel: "Auto",
+    lane: "online",
+    actualRoute: { provider: "openai", model: "gpt-first", effort: "low" },
+  });
+  const later = presentAppletModelRoute({
+    modelIsAuto: true,
+    fixedModelLabel: "Auto",
+    lane: "online",
+    actualRoute: {
+      provider: "anthropic",
+      model: "claude-later",
+      effort: "xhigh",
+    },
+  });
+  assert.equal(first.effort, "low");
+  assert.equal(later.effort, "xhigh");
 });
 
 test("newest persisted completion wins and freezes its recovery final", () => {

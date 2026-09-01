@@ -1,6 +1,7 @@
 export type BotAvatarScreenTheme = "light" | "dark";
 
 export interface BotAvatarScreenPalette {
+  deep: string;
   edge: string;
   mid: string;
   center: string;
@@ -9,9 +10,14 @@ export interface BotAvatarScreenPalette {
 }
 
 const LIGHT_GLYPH = "#fbfdff";
-// These are large emissive marks rather than body text. A 3:1 floor lets the
-// glass reach the mockup's illuminated lightness while preserving clear form.
-const MIN_WHITE_GLYPH_CONTRAST = 3;
+// These are large emissive marks rather than body text. The brightest field
+// remains above the 3:1 graphic-contrast floor while darker stops add depth.
+const LIGHT_SCREEN_CONTRAST_TARGETS = {
+  deep: 15.5,
+  edge: 10.9,
+  mid: 6,
+  center: 3.25,
+} as const;
 
 function parseHex(raw: string): [number, number, number] | null {
   const clean = raw.replace(/^#/, "").trim();
@@ -94,14 +100,31 @@ function gamutSafeOklchHex(lightness: number, requestedChroma: number, hue: numb
   return `#${channels.map((channel) => byteHex(linearToSrgb(channel))).join("")}`;
 }
 
-function contrastSafeTone(initialLightness: number, chroma: number, hue: number): string {
-  let lightness = initialLightness;
-  let result = gamutSafeOklchHex(lightness, chroma, hue);
-  while (lightness > 0.22 && botAvatarScreenContrastRatio(LIGHT_GLYPH, result) < MIN_WHITE_GLYPH_CONTRAST) {
-    lightness -= 0.01;
-    result = gamutSafeOklchHex(lightness, chroma, hue);
+function contrastMatchedTone(targetContrast: number, chroma: number, hue: number): string {
+  let low = 0.08;
+  let high = 0.78;
+  let best = gamutSafeOklchHex(low, chroma, hue);
+  let bestDistance = Math.abs(
+    botAvatarScreenContrastRatio(LIGHT_GLYPH, best) - targetContrast,
+  );
+
+  for (let index = 0; index < 20; index += 1) {
+    const lightness = (low + high) / 2;
+    const candidate = gamutSafeOklchHex(lightness, chroma, hue);
+    const contrast = botAvatarScreenContrastRatio(LIGHT_GLYPH, candidate);
+    const distance = Math.abs(contrast - targetContrast);
+    if (distance < bestDistance) {
+      best = candidate;
+      bestDistance = distance;
+    }
+    if (contrast > targetContrast) {
+      low = lightness;
+    } else {
+      high = lightness;
+    }
   }
-  return result;
+
+  return best;
 }
 
 /**
@@ -117,9 +140,28 @@ export function deriveBotAvatarScreenPalette(identityColor: string, theme: BotAv
       ? identity.chroma
       : Math.max(0.11, Math.min(0.21, identity.chroma * 1.08));
   return {
-    edge: contrastSafeTone(0.36, chroma, identity.hue),
-    mid: contrastSafeTone(0.5, chroma * 0.96, identity.hue),
-    center: contrastSafeTone(0.65, chroma * 0.88, identity.hue),
+    // Match objective exposure before compositing so high-energy reds and
+    // oranges do not bloom hotter than greens, cyans, or violets.
+    deep: contrastMatchedTone(
+      LIGHT_SCREEN_CONTRAST_TARGETS.deep,
+      chroma * 0.56,
+      identity.hue,
+    ),
+    edge: contrastMatchedTone(
+      LIGHT_SCREEN_CONTRAST_TARGETS.edge,
+      chroma,
+      identity.hue,
+    ),
+    mid: contrastMatchedTone(
+      LIGHT_SCREEN_CONTRAST_TARGETS.mid,
+      chroma * 0.96,
+      identity.hue,
+    ),
+    center: contrastMatchedTone(
+      LIGHT_SCREEN_CONTRAST_TARGETS.center,
+      chroma * 0.88,
+      identity.hue,
+    ),
     glyph: LIGHT_GLYPH,
     glow: gamutSafeOklchHex(
       0.86,
@@ -132,6 +174,7 @@ export function deriveBotAvatarScreenPalette(identityColor: string, theme: BotAv
 export function botAvatarScreenPaletteVariables(palette: BotAvatarScreenPalette | null): Record<string, string> {
   if (!palette) return {};
   return {
+    "--bot-avatar-screen-deep": palette.deep,
     "--bot-avatar-screen-edge": palette.edge,
     "--bot-avatar-screen-mid": palette.mid,
     "--bot-avatar-screen-center": palette.center,

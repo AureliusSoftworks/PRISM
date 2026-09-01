@@ -289,14 +289,18 @@ export function saveAppletSessionNote(
     return null;
   }
   const now = new Date().toISOString();
-  db.prepare(
-    `INSERT INTO applet_session_notes
+  const updated = db.prepare(
+    `UPDATE applet_session_notes
+        SET body = ?, updated_at = ?
+      WHERE user_id = ? AND surface = ? AND session_id = ?`,
+  ).run(normalizedBody, now, userId, surface, normalizedSessionId);
+  if (Number(updated.changes) === 0) {
+    db.prepare(
+      `INSERT INTO applet_session_notes
        (user_id, surface, session_id, body, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(user_id, surface, session_id) DO UPDATE SET
-       body = excluded.body,
-       updated_at = excluded.updated_at`,
-  ).run(userId, surface, normalizedSessionId, normalizedBody, now, now);
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(userId, surface, normalizedSessionId, normalizedBody, now, now);
+  }
   return getAppletSessionNote(
     db,
     userId,
@@ -348,23 +352,33 @@ export function appendAppletSessionNote(
   };
   const captures = [...(existing?.captures ?? []), capture].slice(-400);
   const now = committedAt;
-  db.prepare(
-    `INSERT INTO applet_session_notes
-       (user_id, surface, session_id, body, captures_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(user_id, surface, session_id) DO UPDATE SET
-       body = excluded.body,
-       captures_json = excluded.captures_json,
-       updated_at = excluded.updated_at`,
+  const updated = db.prepare(
+    `UPDATE applet_session_notes
+        SET body = ?, captures_json = ?, updated_at = ?
+      WHERE user_id = ? AND surface = ? AND session_id = ?`,
   ).run(
-    userId,
-    surface,
-    sessionId.trim(),
     nextBody,
     JSON.stringify(captures),
     now,
-    now,
+    userId,
+    surface,
+    sessionId.trim(),
   );
+  if (Number(updated.changes) === 0) {
+    db.prepare(
+      `INSERT INTO applet_session_notes
+       (user_id, surface, session_id, body, captures_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      userId,
+      surface,
+      sessionId.trim(),
+      nextBody,
+      JSON.stringify(captures),
+      now,
+      now,
+    );
+  }
   const saved = getAppletSessionNote(db, userId, surface, sessionId);
   if (!saved) throw new Error("Session note could not be added.");
   return saved;

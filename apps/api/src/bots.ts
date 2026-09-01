@@ -330,10 +330,8 @@ export function resolveBotExportHashForCreate(options: {
  *   - Deletes memories scoped to this bot. Bot memories are only meaningful
  *     while their owner bot exists; otherwise the Memories panel would show
  *     orphaned/default Prism memory clusters.
- *   - Public bots can still only be deleted by their owner; other users that
- *     have interacted with the public bot keep their message history intact
- *     (their `bot_id` is left pointing at the now-deleted row, which the
- *     LEFT JOIN resolves to NULL the same way).
+ *   - Account-owned bot rows are never shared across owners. Historical rows
+ *     are scoped and detached only inside the same owner Vault.
  */
 export function deleteBot(
   db: DatabaseSync,
@@ -388,9 +386,8 @@ export function deleteBot(
  *     LEFT JOIN.
  *   - Deletes bot-scoped memories for the deleted bots. Global/default
  *     memories with `bot_id IS NULL` are preserved.
- *   - Strictly scoped to `userId` via `WHERE user_id = ?` on every
- *     statement so other users' bots (including public bots they don't
- *     own) are never touched.
+ *   - Strictly scoped to `userId` via `WHERE user_id = ?` on every statement,
+ *     so another owner's bot can never be touched.
  *   - Returns the count of bots removed (0 if the user had none).
  *
  * Intended for the user-facing Bots panel press-and-hold "delete all" flow.

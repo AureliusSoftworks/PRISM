@@ -323,19 +323,19 @@ export const ABOUT_CREDIT_GROUPS: readonly AboutCreditGroup[] = [
         id: "the-midnight-clue",
         name: "The Midnight Clue",
         description:
-          "Bundled instrumental music bed for Whodunnit mansion investigation, supplied and curated for PRISM.",
+          "Bundled instrumental music bed for Whodunnit venue investigation, supplied and curated for PRISM.",
         license: "PRISM production asset",
       },
       {
         id: "prism-mansion-acoustics",
-        name: "PRISM Mansion Acoustics",
+        name: "PRISM Mystery Venue Acoustics",
         description:
-          "Locally produced, clue-neutral Opus atmosphere fixtures and the content-addressed acoustic-template system used by Whodunnit mansions.",
+          "Locally produced, clue-neutral Opus atmosphere fixtures, including passenger-ship engine and ocean resonance, and the content-addressed acoustic-template system used by Whodunnit venues.",
         license: "PRISM production asset",
       },
       {
         id: "whodunnit-traversal-foley",
-        name: "Whodunnit Mansion Traversal Foley",
+        name: "Whodunnit Venue Traversal Foley",
         description:
           "Original footsteps and door performances generated with ElevenLabs Sound Effects, technically reviewed, curated, and integrated as offline PRISM production assets.",
         license: "PRISM production asset",

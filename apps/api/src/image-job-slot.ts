@@ -498,7 +498,7 @@ function fetchHydratedMessagesByIds(
       `SELECT m.id, m.role, m.content, m.provider, m.model, m.tool_payload, m.created_at,
               b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
          FROM messages m
-         LEFT JOIN bots b ON b.id = m.bot_id
+         LEFT JOIN bots b ON b.id = m.bot_id AND b.user_id = m.user_id
         WHERE m.user_id = ? AND m.id IN (${placeholders})
         ORDER BY m.created_at ASC`,
     )

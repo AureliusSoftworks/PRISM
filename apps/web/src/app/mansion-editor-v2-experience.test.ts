@@ -25,7 +25,7 @@ describe("Mansion Editor V2 experience", () => {
     assert.match(editorSource, /mansionEditorCorridorResizeHandle/u);
     assert.match(editorSource, /usedRoomTemplateIds/u);
     assert.match(editorSource, /No unused room type is available on this floor/u);
-    assert.match(editorSource, /already placed in this mansion\. Each room type can only be used once/u);
+    assert.match(editorSource, /already placed in this legacy estate\. Each room type can only be used once/u);
     assert.match(editorSource, /<small>Placed<\/small>/u);
     assert.match(editorSource, /template\.id !== selectedRoom\.templateId/u);
     assert.match(editorSource, /debateMysteryRoomFloorRuleV1/u);
@@ -39,7 +39,7 @@ describe("Mansion Editor V2 experience", () => {
 
   it("drills into a room for click placement, direct lighting, and source-preserving Pixel Art", () => {
     assert.match(editorSource, /data-tutorial-target="whodunnit-room-editor"/u);
-    assert.match(editorSource, /Pixel Art is newly synthesized/u);
+    assert.match(editorSource, /Mosaic is the sole playable room-art base/u);
     assert.match(
       editorSource,
       /const style = mosaic \? "mosaic" : "illustrated";[\s\S]{0,220}whodunnitMansionRoomArtUrl\(mansion\.id, room\.acceptedRoomAssetId, style\)/u,
@@ -63,9 +63,9 @@ describe("Mansion Editor V2 experience", () => {
 
   it("keeps generated art explicit, tenant-owned, and visibly unavailable in LOCAL", () => {
     assert.match(editorSource, /Accept candidate/u);
-    assert.match(editorSource, /Retry Pixel Art candidate/u);
+    assert.match(editorSource, /Retry Mosaic candidate/u);
     assert.match(editorSource, /Discard candidate/u);
-    assert.match(editorSource, /Synthesize Pixel Art · ONLINE/u);
+    assert.match(editorSource, /Synthesize Mosaic · ONLINE/u);
     assert.match(editorSource, /Only this open room is synthesized/u);
     assert.match(editorSource, /Regenerate room asset/u);
     assert.match(editorSource, /clears only this room.*anchors, lights, and staged art/u);
@@ -77,9 +77,9 @@ describe("Mansion Editor V2 experience", () => {
     );
   });
 
-  it("opens the existing editor from new mansion creation and prepares Pixel Art under a blocker", () => {
+  it("opens the existing editor from new venue creation and validates its map under a blocker", () => {
     assert.match(debateSource, /data-tutorial-target="whodunnit-create-mansion-editor"/u);
-    assert.match(debateSource, /Open Mansion Editor/u);
+    assert.match(debateSource, /Start Blank/u);
     assert.match(debateSource, /\/api\/debates\/mystery-mansions/u);
     assert.match(debateSource, /<MansionEditorDialog[\s\S]{0,260}creationFlow/u);
     assert.match(editorSource, /Semantic room palette/u);
@@ -89,13 +89,29 @@ describe("Mansion Editor V2 experience", () => {
     assert.match(editorSource, /mansionEditorInspector[\s\S]{0,420}mansionEditorRoomPalette/u);
     assert.match(editorSource, /Remove \{selectedRoom \? "room" : "block"\}/u);
     assert.match(editorSource, /disabled=\{!selectedEntityCanBeRemoved\}/u);
-    assert.match(editorSource, /Continue to prepare Pixel Art before entering individual rooms/u);
-    assert.match(editorSource, /title="Building Pixel Art room plates"/u);
-    assert.match(editorSource, /stepLabel="Preparing the mansion map"/u);
-    assert.match(editorSource, /CREATION_MOSAIC_MINIMUM_LOADER_MS = 900/u);
+    assert.match(editorSource, /Continue to prepare Mosaic rooms before entering them/u);
+    assert.match(editorSource, /title="Validating the venue plan"/u);
+    assert.match(editorSource, /stepLabel="Preparing the venue map"/u);
+    assert.match(editorSource, /CREATION_VALIDATION_MINIMUM_LOADER_MS = 900/u);
     assert.match(editorSource, /window\.setTimeout\(resolve, remainingLoaderTime\)/u);
-    assert.match(editorSource, /Pixel Art rooms are ready.*mansion map/u);
+    assert.match(editorSource, /Venue plan is ready\. Review the map/u);
     assert.match(editorSource, /mansionRoomEditorNotice.*role="status"/u);
+  });
+
+  it("renders accepted venue architecture without leaking the legacy estate planner", () => {
+    assert.match(editorSource, /const venueArchitectureLocked = venueProfile !== null/u);
+    assert.match(editorSource, /Array\.from\(\{ length: venueProfile\.tierLabels\.length \}/u);
+    assert.match(editorSource, /venueProfile\?\.kind === "vessel" \? "decks"/u);
+    assert.match(editorSource, /venueProfile\?\.physicalScaleClass \?\?/u);
+    assert.match(editorSource, /data-map-style=\{venueMapStyle\}/u);
+    assert.match(editorSource, /venueMapStyle === "hull-deck-v1"/u);
+    assert.match(editorSource, /mansionEditorHullOutline/u);
+    assert.match(editorSource, /Venue room program/u);
+    assert.match(editorSource, /Validated architecture · names and presentation remain editable/u);
+    assert.match(editorSource, /disabled=\{venueArchitectureLocked\}/u);
+    assert.match(editorSource, /Its accepted architecture remains fixed/u);
+    assert.match(mysteryCss, /mansionEditorCanvas\[data-map-style="hull-deck-v1"\]/u);
+    assert.match(mysteryCss, /mansionEditorHullOutline \{[^}]*pointer-events: none;/u);
   });
 
   it("renders deterministic overlays and freezes them for Reduced Motion", () => {

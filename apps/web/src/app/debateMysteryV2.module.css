@@ -84,11 +84,35 @@
 .archiveButton {
   position: fixed;
   z-index: 20;
-  top: 1rem;
-  left: 1rem;
+  top: calc(
+    var(--app-shell-top-nav-height, var(--app-navbar-height, 66px)) +
+      max(0.75rem, env(safe-area-inset-top, 0px))
+  );
+  left: max(0.75rem, env(safe-area-inset-left, 0px));
+  width: fit-content;
+  max-width: calc(100vw - 1.5rem);
+  line-height: 1.1;
+  white-space: nowrap;
 }
 
 .forge {
+  --forge-scene-canvas: #090b15;
+  --forge-title-ink: #f7f5ff;
+  --forge-title-pending: rgba(235, 231, 247, 0.62);
+  --forge-title-shadow: 0 1.2rem 3rem rgba(0, 0, 0, 0.72);
+  --forge-eyebrow-ink: color-mix(in srgb, var(--v2-accent) 72%, var(--v2-muted));
+  --forge-exterior-label-ink: #d6caef;
+  --forge-copy-ink: #d5d1e1;
+  --forge-meta-ink: #8e899e;
+  --forge-waiting-ink: #716e7d;
+  --forge-complete-ink: #aaa7b7;
+  --forge-current-work-ink: #aaa0c7;
+  --forge-substep-ink: #817c91;
+  --forge-substep-complete-ink: #c3bed0;
+  --forge-note-label-ink: #82dce8;
+  --forge-note-copy-ink: #c8cedc;
+  --forge-notice-ink: #c9c4da;
+  --forge-raised-surface: rgba(6, 7, 17, 0.3);
   display: block;
   padding: 0;
   overflow: auto;
@@ -118,7 +142,7 @@
   isolation: isolate;
   border: 0;
   border-radius: 0;
-  background: #090b15;
+  background: var(--forge-scene-canvas);
 }
 
 .forgeCard[data-exterior-hero="true"]::before,
@@ -172,13 +196,14 @@
   font-size: clamp(3.4rem, 7vw, 7.2rem);
   line-height: 0.88;
   letter-spacing: -0.07em;
-  text-shadow: 0 1.2rem 3rem rgba(0, 0, 0, 0.72);
+  color: var(--forge-title-ink);
+  text-shadow: var(--forge-title-shadow);
   animation: forgeTitleReveal 760ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .forgeCaseIdentity[data-title-ready="false"] h1 {
   max-width: 28rem;
-  color: rgba(235, 231, 247, 0.62);
+  color: var(--forge-title-pending);
   font-size: clamp(2.2rem, 4vw, 4rem);
   letter-spacing: -0.045em;
 }
@@ -193,7 +218,7 @@
   align-items: center;
   gap: 0.45rem;
   margin: 0 0 0.7rem;
-  color: #d6caef;
+  color: var(--forge-exterior-label-ink);
   font-size: 0.72rem;
   font-weight: 760;
   letter-spacing: 0.08em;
@@ -240,14 +265,14 @@
   }
 }
 
-.forgeMessage { margin: 0.9rem 0 1.25rem; color: #d5d1e1; }
+.forgeMessage { margin: 0.9rem 0 1.25rem; color: var(--forge-copy-ink); }
 .forgeBackgroundNote {
   margin: 0.2rem 0 1.2rem;
   padding: 0.75rem 0.85rem;
   border: 1px solid rgba(101, 219, 255, 0.2);
   border-radius: 0.8rem;
-  color: #c9c4da;
-  background: rgba(24, 43, 66, 0.34);
+  color: var(--forge-notice-ink);
+  background: var(--forge-raised-surface);
   font-size: 0.86rem;
   line-height: 1.45;
 }
@@ -314,7 +339,7 @@
   justify-content: space-between;
   gap: 1rem;
   margin-top: 0.55rem;
-  color: #8e899e;
+  color: var(--forge-meta-ink);
   font-size: 0.72rem;
   font-variant-numeric: tabular-nums;
 }
@@ -332,7 +357,7 @@
   align-items: center;
   gap: 0.75rem;
   min-height: 2.4rem;
-  color: #716e7d;
+  color: var(--forge-waiting-ink);
 }
 
 .forgeStages li span {
@@ -345,7 +370,7 @@
   font-size: 0.68rem;
 }
 
-.forgeStages li[data-state="complete"] { color: #aaa7b7; }
+.forgeStages li[data-state="complete"] { color: var(--forge-complete-ink); }
 .forgeStages li[data-state="complete"] span { color: #b8f9e5; border-color: rgba(95, 225, 188, 0.4); }
 .forgeStages li[data-state="active"] { color: white; }
 .forgeStages li[data-state="active"] span { color: white; border-color: #b08aff; box-shadow: 0 0 1rem rgba(167, 126, 255, 0.5); }
@@ -357,12 +382,12 @@
   padding: 0.8rem 0.9rem;
   border: 1px solid rgba(184, 153, 255, 0.16);
   border-radius: 0.75rem;
-  background: rgba(6, 7, 17, 0.3);
+  background: var(--forge-raised-surface);
 }
 
 .forgeSubsteps > p {
   margin: 0 0 0.45rem;
-  color: #aaa0c7;
+  color: var(--forge-current-work-ink);
   font-size: 0.68rem;
   font-weight: 800;
   letter-spacing: 0.11em;
@@ -370,9 +395,9 @@
 }
 
 .forgeSubsteps ol { display: grid; gap: 0.34rem; margin: 0; padding: 0; list-style: none; }
-.forgeSubsteps li { display: flex; align-items: baseline; gap: 0.52rem; color: #817c91; font-size: 0.8rem; }
+.forgeSubsteps li { display: flex; align-items: baseline; gap: 0.52rem; color: var(--forge-substep-ink); font-size: 0.8rem; }
 .forgeSubsteps li > span { width: 0.8rem; color: #8d859f; text-align: center; }
-.forgeSubsteps li[data-state="complete"] { color: #c3bed0; }
+.forgeSubsteps li[data-state="complete"] { color: var(--forge-substep-complete-ink); }
 .forgeSubsteps li[data-state="complete"] > span { color: #9ee8d0; }
 .forgeSubsteps li[data-state="active"] { color: #fff; font-weight: 700; }
 .forgeSubsteps li[data-state="active"] > span { color: #c6a9ff; animation: forgeSubstepPulse 1.8s ease-in-out infinite; }
@@ -409,8 +434,8 @@
   background: rgba(57, 140, 158, 0.08);
 }
 
-.forgeTip > span { color: #82dce8; font-size: 0.67rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
-.forgeTip > p { margin: 0; color: #c8cedc; font-size: 0.82rem; line-height: 1.4; animation: forgeTipReveal 360ms ease-out both; }
+.forgeTip > span { color: var(--forge-note-label-ink); font-size: 0.67rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+.forgeTip > p { margin: 0; color: var(--forge-note-copy-ink); font-size: 0.82rem; line-height: 1.4; animation: forgeTipReveal 360ms ease-out both; }
 
 @keyframes forgeSubstepPulse {
   0%, 100% { opacity: 0.42; transform: scale(0.9); }
@@ -444,8 +469,78 @@
 .forgeActions, .verdictActions { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 1rem; }
 .error { color: #ffadbd; }
 
+.productionReadinessCard {
+  width: min(68rem, calc(100vw - 2rem));
+}
+
+.productionReadinessList {
+  display: grid;
+  gap: 0.65rem;
+  margin: 1.1rem 0;
+}
+
+.productionReadinessList article {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) minmax(22rem, 1.5fr) auto;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.8rem;
+  border: 1px solid rgba(184, 153, 255, 0.18);
+  border-radius: 0.8rem;
+  background: rgba(6, 7, 17, 0.32);
+}
+
+.productionReadinessList article[data-complete="true"] {
+  border-color: rgba(95, 225, 188, 0.28);
+}
+
+.productionReadinessList article > div:first-child {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.productionReadinessList article small {
+  color: var(--v2-muted);
+  line-height: 1.35;
+}
+
+.productionReadinessList dl {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.productionReadinessList dl > div {
+  display: grid;
+  justify-items: center;
+  gap: 0.12rem;
+  padding: 0.4rem;
+  border-radius: 0.5rem;
+  background: rgba(128, 118, 174, 0.08);
+}
+
+.productionReadinessList dt {
+  color: var(--v2-muted);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+}
+
+.productionReadinessList dd {
+  margin: 0;
+  color: var(--v2-text);
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+@media (max-width: 760px) {
+  .productionReadinessList article { grid-template-columns: 1fr; }
+  .productionReadinessList dl { grid-template-columns: repeat(5, minmax(3.5rem, 1fr)); overflow-x: auto; }
+}
+
 .titleCard {
   position: relative;
+  isolation: isolate;
   display: grid;
   min-height: 100dvh;
   place-content: center;
@@ -454,17 +549,22 @@
   padding: 5rem 1.5rem;
   text-align: center;
   background-color: #05070d;
-  background-image:
-    linear-gradient(180deg, rgba(3, 5, 12, 0.14), rgba(3, 5, 12, 0.58) 55%, rgba(3, 5, 12, 0.9)),
-    radial-gradient(circle at 50% 42%, rgba(4, 6, 13, 0.03), rgba(4, 6, 13, 0.5) 72%),
-    var(--mansion-exterior-image);
+}
+
+.titleCoverMedia {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background-color: #05070d;
+  background-image: var(--mansion-exterior-image);
   background-position: center;
+  background-repeat: no-repeat;
   background-size: cover;
+  pointer-events: none;
 }
 
 .titleCard[data-first-person-exterior="true"] {
   padding: 0;
-  background-image: var(--mansion-exterior-image);
 }
 
 .titleCard[data-exterior-entering="true"]::after {
@@ -816,6 +916,23 @@
   background: #fff;
   box-shadow: 0 0 0.45rem #fff;
 }
+.titleEntryAction {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 50%;
+  min-width: max-content;
+  padding: 0.42rem 0.68rem;
+  color: #fff;
+  border: 1px solid rgba(218, 237, 255, 0.38);
+  border-radius: 999px;
+  background: rgba(4, 8, 16, 0.68);
+  box-shadow: 0 0.5rem 1.4rem rgba(0, 0, 0, 0.32);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  transform: translateX(-50%);
+  backdrop-filter: blur(8px);
+}
 .titleDoor:hover:not(:disabled),
 .titleDoor:focus-visible {
   outline: none;
@@ -896,9 +1013,25 @@
 
 .investigationHeaderActions {
   display: flex;
+  min-width: 0;
+  max-width: min(48vw, 38rem);
+  flex-wrap: wrap;
   align-items: center;
   justify-self: end;
+  justify-content: flex-end;
   gap: 0.55rem;
+}
+
+@media (max-width: 1120px) {
+  .investigationHeader {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .investigationHeaderActions {
+    grid-column: 1 / -1;
+    width: 100%;
+    max-width: none;
+  }
 }
 
 .roomArtStyleToggle {
@@ -1000,6 +1133,24 @@
   background: #e9c77e;
   box-shadow: 0 0 1.2rem rgba(233, 199, 126, 0.28);
 }
+.mansionFloorPicker button[data-deck-control="true"] {
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 0.38rem;
+  width: auto;
+  min-width: 8.6rem;
+  padding: 0.38rem 0.62rem;
+  border-radius: 0.65rem;
+  text-align: left;
+}
+.mansionFloorPicker button[data-deck-control="true"] > span { font-weight: 900; }
+.mansionFloorPicker button[data-deck-control="true"] > small {
+  overflow: hidden;
+  max-width: 8rem;
+  color: inherit;
+  font-size: 0.67rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .mansionViewport {
   position: relative;
@@ -1066,6 +1217,70 @@
   pointer-events: none;
 }
 
+.mansionCanvas[data-map-style="hull-deck-v1"] {
+  background:
+    linear-gradient(rgba(102, 229, 234, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(102, 229, 234, 0.025) 1px, transparent 1px),
+    radial-gradient(ellipse at 50% 48%, rgba(40, 115, 135, 0.2), transparent 68%);
+  background-size: 28px 28px, 28px 28px, auto;
+  transform: rotateX(3deg) rotateZ(-1.8deg) scale(0.955);
+}
+
+.venueHullOutline {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.venueHullOutline polygon {
+  fill: rgba(27, 43, 53, 0.82);
+  stroke: rgba(116, 224, 231, 0.54);
+  stroke-width: 0.42;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0.5rem 0.75rem 0.6rem rgba(0, 0, 0, 0.4));
+}
+
+.venueMapOrientation {
+  position: absolute;
+  z-index: 6;
+  inset: 0;
+  color: rgba(151, 228, 234, 0.7);
+  font-size: 0.58rem;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  pointer-events: none;
+}
+
+.venueMapOrientation span,
+.venueMapOrientation strong { position: absolute; }
+.venueMapOrientation [data-edge="top"] { top: 0.8%; left: 50%; transform: translateX(-50%); }
+.venueMapOrientation [data-edge="right"] { top: 50%; right: -0.3rem; transform: translateY(-50%) rotate(90deg); }
+.venueMapOrientation [data-edge="bottom"] { bottom: 0.4%; left: 50%; transform: translateX(-50%); }
+.venueMapOrientation [data-edge="left"] { top: 50%; left: -0.8rem; transform: translateY(-50%) rotate(-90deg); }
+.venueMapOrientation strong { top: 4%; left: 4%; color: rgba(239, 230, 255, 0.74); letter-spacing: 0.06em; }
+
+.venueConnectorLanding {
+  position: absolute;
+  z-index: 4;
+  display: grid;
+  width: 1.25rem;
+  height: 1.25rem;
+  place-items: center;
+  color: #d8fbff;
+  border: 1px solid rgba(102, 229, 234, 0.68);
+  border-radius: 0.32rem;
+  background: rgba(11, 37, 47, 0.92);
+  box-shadow: 0 0 0 3px rgba(102, 229, 234, 0.08), 0 0 1rem rgba(102, 229, 234, 0.22);
+  font-size: 0.82rem;
+  font-style: normal;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
 @keyframes mansionArrival {
   from { transform: rotateX(3deg) rotateZ(-0.55deg) translateY(0.65rem) scale(0.95); }
 }
@@ -1106,6 +1321,31 @@
     linear-gradient(145deg, rgba(33, 35, 44, 0.94), rgba(13, 16, 22, 0.96));
   box-shadow: inset 0 0 1rem rgba(255, 225, 170, 0.035), 0.25rem 0.3rem 0 rgba(4, 5, 9, 0.62);
   pointer-events: none;
+}
+.mansionAmbientSpace {
+  position: absolute;
+  z-index: 0;
+  display: block;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1px solid rgba(166, 194, 199, 0.16);
+  border-radius: 0.18rem;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 0.55rem, rgba(151, 218, 224, 0.07) 0.55rem 0.61rem),
+    linear-gradient(145deg, rgba(23, 35, 42, 0.76), rgba(9, 16, 21, 0.84));
+  box-shadow: inset 0 0 1rem rgba(159, 227, 233, 0.025);
+  opacity: 0.82;
+  pointer-events: none;
+  user-select: none;
+}
+.mansionAmbientSpace[data-pattern="inboard-compartment"] {
+  background:
+    repeating-linear-gradient(0deg, transparent 0 0.7rem, rgba(204, 189, 163, 0.06) 0.7rem 0.76rem),
+    linear-gradient(145deg, rgba(26, 29, 37, 0.78), rgba(10, 13, 18, 0.86));
+}
+.mansionAmbientSpace[data-pattern="closed-volume"] {
+  border-color: rgba(204, 189, 163, 0.11);
+  background: linear-gradient(145deg, rgba(22, 25, 32, 0.74), rgba(8, 11, 15, 0.82));
 }
 .mansionRoom::before {
   position: absolute;
@@ -1328,6 +1568,13 @@
 .roomBackdropImage[data-art-style="mosaic"] {
   image-rendering: pixelated;
 }
+.roomBackdropImage[data-upgrade-layer="true"] {
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+.roomBackdropImage[data-upgrade-layer="true"][data-loaded="true"] {
+  opacity: 1;
+}
 .roomParallaxLayer {
   position: absolute;
   z-index: 1;
@@ -1339,8 +1586,8 @@
 .roomScene[data-art-style="mosaic"] .roomParallaxLayer {
   transform: none;
 }
-.roomShade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(6, 8, 15, 0.1), rgba(6, 8, 15, 0.14) 58%, rgba(6, 8, 15, 0.93)); pointer-events: none; }
-.roomScene[data-art-style="mosaic"] .roomShade { background: rgba(6, 8, 15, 0.22); }
+.roomShade { position: absolute; z-index: 3; inset: auto 0 0; height: 46%; background: linear-gradient(180deg, transparent, rgba(6, 8, 15, 0.24) 38%, rgba(6, 8, 15, 0.93)); pointer-events: none; }
+.roomScene[data-art-style="mosaic"] .roomShade { background: linear-gradient(180deg, transparent, rgba(6, 8, 15, 0.22) 42%, rgba(6, 8, 15, 0.88)); }
 .roomTitle { position: absolute; z-index: 2; top: 1.4rem; left: 1.4rem; padding: 0.65rem 0.85rem; border-left: 2px solid #ae8cff; background: rgba(6, 8, 15, 0.63); backdrop-filter: blur(12px); }
 .roomTitle h1 { margin: 0.1rem 0 0; }
 .roomTitle small { color: #bbb2ce; }
@@ -1416,14 +1663,11 @@
 .roomScene[data-lens-active="true"] .hotspots button { cursor: none; }
 .hotspots button {
   position: absolute;
-  width: clamp(3.25rem, 4.5vw, 5rem);
-  aspect-ratio: 1;
+  inset: 0;
   padding: 0;
   border: 0;
-  border-radius: 50%;
   background: transparent;
   box-shadow: none;
-  transform: translate(-50%, -50%);
   transition: opacity 150ms ease;
   cursor: inherit;
   pointer-events: auto;
@@ -1442,17 +1686,15 @@
   border: 2px solid rgba(238, 252, 255, 0.96);
   border-radius: 50%;
   background: rgba(5, 13, 20, 0.18);
-  box-shadow:
-    0 0 0.65rem rgba(102, 229, 234, 0.42),
-    inset 0 0 0.42rem rgba(169, 140, 255, 0.28);
+  box-shadow: 0 0 0.34rem rgba(102, 229, 234, 0.2), inset 0 0 0.28rem rgba(169, 140, 255, 0.14);
   transform: translate(-50%, -50%) scale(1);
   transition: opacity 80ms ease, box-shadow 90ms linear, transform 90ms linear;
 }
 .investigationLens[data-visible="true"] { opacity: 1; }
 .investigationLens[data-targeted="true"] {
   box-shadow:
-    0 0 calc(0.7rem + var(--lens-proximity, 0) * 1.9rem) rgba(102, 229, 234, calc(0.3 + var(--lens-proximity, 0) * 0.7)),
-    inset 0 0 calc(0.42rem + var(--lens-proximity, 0) * 0.95rem) rgba(169, 140, 255, calc(0.16 + var(--lens-proximity, 0) * 0.44));
+    0 0 1.7rem rgba(102, 229, 234, 0.82),
+    inset 0 0 0.85rem rgba(169, 140, 255, 0.52);
   transform: translate(-50%, -50%) scale(0.9);
 }
 .investigationLens::after {
@@ -1481,14 +1723,38 @@
     drop-shadow(0.18rem 0 0.32rem rgba(255, 100, 191, 0.72));
   transform: translate(-50%, -50%) scale(0.16) rotate(-20deg);
 }
-.investigationLens[data-targeted="true"]::after {
-  animation: prismGlintSweep 620ms cubic-bezier(0.16, 0.8, 0.25, 1) both;
+.investigationLens[data-targeted="true"][data-art-style="illustrated"]::after {
+  animation: prismGlintSweep 1.8s cubic-bezier(0.16, 0.8, 0.25, 1) infinite;
 }
 @keyframes prismGlintSweep {
   0% { opacity: 0; transform: translate(-68%, -38%) scale(0.16) rotate(-20deg); }
   32% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(0deg); }
   66% { opacity: 0.82; transform: translate(-32%, -64%) scale(0.72) rotate(14deg); }
   100% { opacity: 0; transform: translate(-18%, -72%) scale(0.28) rotate(22deg); }
+}
+
+.mosaicLensGrid {
+  position: absolute;
+  z-index: 6;
+  inset: 0;
+  overflow: hidden;
+  background-image:
+    linear-gradient(to right, transparent calc(100% - 1px), rgba(255, 255, 255, 0.13) calc(100% - 1px)),
+    linear-gradient(to bottom, transparent calc(100% - 1px), rgba(0, 0, 0, 0.24) calc(100% - 1px));
+  background-size:
+    var(--mosaic-lens-cell-width) 100%,
+    100% var(--mosaic-lens-cell-height);
+  pointer-events: none;
+}
+.mosaicLensGrid i {
+  position: absolute;
+  background: rgba(150, 242, 255, 0.3);
+  box-shadow: inset 0 0 0.18rem rgba(224, 255, 255, 0.85), 0 0 0.22rem rgba(105, 229, 255, 0.42);
+  transition: background 160ms ease, box-shadow 240ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .investigationLens[data-targeted="true"][data-art-style="illustrated"]::after { opacity: 1; animation: none; transform: translate(-50%, -50%) scale(0.76); }
+  .mosaicLensGrid i { transition: none; }
 }
 
 .roomComplete { position: absolute; z-index: 7; inset: 0; display: grid; align-content: center; justify-items: center; padding: 2rem; color: #f5f1ff; text-align: center; pointer-events: none; text-shadow: 0 0.25rem 1.25rem rgba(0, 0, 0, 0.94); animation: roomCompleteDissolve 600ms ease 2.8s forwards; }
@@ -2349,16 +2615,34 @@
 /* Light-mode shell and control palettes. Photographic rooms, the threshold
    walk, CRT projection, and the courtroom stage remain authored scene fields;
    their surrounding navigation and every actionable surface stay Light. */
-.titleCard[data-theme="light"] {
-  background-color: #05070d;
-  background-image:
-    linear-gradient(180deg, rgba(3, 5, 12, 0.14), rgba(3, 5, 12, 0.58) 55%, rgba(3, 5, 12, 0.9)),
-    radial-gradient(circle at 50% 42%, rgba(4, 6, 13, 0.03), rgba(4, 6, 13, 0.5) 72%),
-    var(--mansion-exterior-image);
+.forge[data-theme="light"] {
+  --forge-scene-canvas: #fff;
+  --forge-title-ink: #101923;
+  --forge-title-pending: #354a5f;
+  --forge-title-shadow: 0 1px rgba(255, 255, 255, 0.94), 0 0.45rem 1.4rem rgba(255, 255, 255, 0.82);
+  --forge-eyebrow-ink: #513890;
+  --forge-exterior-label-ink: #4a386c;
+  --forge-copy-ink: #364b60;
+  --forge-meta-ink: #42586e;
+  --forge-waiting-ink: #465b70;
+  --forge-complete-ink: #3e625a;
+  --forge-current-work-ink: #513f78;
+  --forge-substep-ink: #465b70;
+  --forge-substep-complete-ink: #3e625a;
+  --forge-note-label-ink: #17697e;
+  --forge-note-copy-ink: #31495f;
+  --forge-notice-ink: #364b60;
+  --forge-raised-surface: rgba(235, 243, 249, 0.98);
 }
 
-.titleCard[data-theme="light"][data-first-person-exterior="true"] {
-  background-image: var(--mansion-exterior-image);
+.forge[data-theme="light"] .forgeCard[data-exterior-hero="true"]::after {
+  background: none;
+}
+
+.titleCard[data-theme="light"] {
+  --title-card-title-ink: #101923;
+  --title-card-eyebrow-ink: #513890;
+  background-color: #05070d;
 }
 
 .caseOpening[data-theme="light"] {
@@ -2383,6 +2667,18 @@
   box-shadow: var(--v2-shadow), inset 0 1px rgba(255, 255, 255, 0.76);
 }
 
+.titleCard[data-theme="light"] .titleCardContent {
+  z-index: 7;
+}
+
+.titleCard[data-theme="light"] .titleCardContent h1 {
+  color: var(--title-card-title-ink);
+}
+
+.titleCard[data-theme="light"] .titleCardContent .eyebrow {
+  color: var(--title-card-eyebrow-ink);
+}
+
 .forge[data-theme="light"] .forgeCard[data-exterior-hero="true"] .forgePanel {
   box-sizing: border-box;
   border: 1px solid rgba(255, 255, 255, 0.72);
@@ -2392,13 +2688,19 @@
 }
 
 .forge[data-theme="light"] .forgeCard[data-exterior-hero="true"] > .forgeCaseIdentity {
-  --v2-text: #f7f5ff;
-  --v2-muted: #d1ccdc;
-  color: var(--v2-text);
+  color: var(--forge-title-ink);
 }
 
 .forge[data-theme="light"] .forgeCard[data-exterior-hero="true"] .forgeCaseIdentity h1 {
-  color: var(--v2-text);
+  color: var(--forge-title-ink);
+}
+
+.forge[data-theme="light"] .eyebrow {
+  color: var(--forge-eyebrow-ink);
+}
+
+.forge[data-theme="light"] .forgeExteriorStatus {
+  color: var(--forge-exterior-label-ink);
 }
 
 .forge[data-theme="light"] :is(
@@ -2411,7 +2713,50 @@
     .forgeDetails > summary,
     .forgeTip > p
   ) {
-  color: var(--v2-muted);
+  color: var(--forge-copy-ink);
+}
+
+.forge[data-theme="light"] .forgeTiming { color: var(--forge-meta-ink); font-size: 0.75rem; }
+.forge[data-theme="light"] .forgeStages li { color: var(--forge-waiting-ink); }
+.forge[data-theme="light"] .forgeStages li[data-state="complete"] { color: var(--forge-complete-ink); }
+.forge[data-theme="light"] .forgeSubsteps > p { color: var(--forge-current-work-ink); font-size: 0.72rem; }
+.forge[data-theme="light"] .forgeSubsteps li { color: var(--forge-substep-ink); }
+.forge[data-theme="light"] .forgeSubsteps li[data-state="complete"] { color: var(--forge-substep-complete-ink); }
+.forge[data-theme="light"] .forgeTip {
+  border-left-color: rgba(23, 105, 126, 0.66);
+  background: rgba(222, 239, 245, 0.92);
+}
+.forge[data-theme="light"] .forgeTip > span { color: var(--forge-note-label-ink); font-size: 0.72rem; }
+.forge[data-theme="light"] .forgeTip > p { color: var(--forge-note-copy-ink); }
+.forge[data-theme="light"] .forgeBackgroundNote { color: var(--forge-notice-ink); }
+.forge[data-theme="light"] .forgeRecovery { color: #7c2f45; background: rgba(251, 238, 242, 0.96); }
+.forge[data-theme="light"] .localVoiceNotice > span { color: var(--forge-note-label-ink); }
+.forge[data-theme="light"] :is(.localVoiceNotice small, .forgePanel > small) { color: var(--forge-meta-ink); }
+
+.forge[data-theme="light"] .forgeStages li > span {
+  border-color: rgba(54, 75, 96, 0.3);
+  color: var(--forge-meta-ink);
+}
+
+.forge[data-theme="light"] .forgeStages li[data-state="complete"] > span,
+.forge[data-theme="light"] .forgeSubsteps li[data-state="complete"] > span {
+  border-color: rgba(36, 114, 95, 0.38);
+  color: #24725f;
+}
+
+.forge[data-theme="light"] .forgeStages li[data-state="active"] > span {
+  border-color: #7658b5;
+  color: #513890;
+  background: rgba(106, 75, 192, 0.09);
+}
+
+.forge[data-theme="light"] .forgeSubsteps li[data-state="active"] > span {
+  color: #6545a7;
+}
+
+.forge[data-theme="light"] .forgeExteriorStatus > span {
+  color: var(--forge-note-label-ink);
+  text-shadow: none;
 }
 
 .forge[data-theme="light"] :is(
@@ -2421,7 +2766,16 @@
     .localVoiceNotice
   ) {
   border-color: var(--v2-edge);
-  background: var(--v2-raised);
+  background: var(--forge-raised-surface);
+}
+
+.forge[data-theme="light"] .productionReadinessList article {
+  border-color: var(--v2-edge);
+  background: var(--forge-raised-surface);
+}
+
+.forge[data-theme="light"] .productionReadinessList dl > div {
+  background: rgba(210, 225, 237, 0.66);
 }
 
 .forge[data-theme="light"] .progressTrack {
@@ -2561,6 +2915,45 @@
     linear-gradient(90deg, rgba(79, 105, 128, 0.08) 1px, transparent 1px),
     radial-gradient(ellipse at 50% 40%, rgba(106, 75, 192, 0.08), transparent 62%);
   background-size: 28px 28px, 28px 28px, auto;
+}
+
+.investigation[data-theme="light"] .venueHullOutline polygon {
+  fill: rgba(232, 243, 248, 0.92);
+  stroke: rgba(20, 126, 136, 0.58);
+  filter: drop-shadow(0.45rem 0.65rem 0.55rem rgba(49, 70, 91, 0.2));
+}
+
+.investigation[data-theme="light"] .venueMapOrientation {
+  color: rgba(20, 105, 116, 0.78);
+}
+
+.investigation[data-theme="light"] .venueMapOrientation strong {
+  color: rgba(48, 36, 72, 0.72);
+}
+
+.investigation[data-theme="light"] .venueConnectorLanding {
+  color: #174b55;
+  border-color: rgba(20, 126, 136, 0.5);
+  background: rgba(245, 252, 255, 0.94);
+  box-shadow: 0 0 0 3px rgba(20, 126, 136, 0.08), 0 0 0.8rem rgba(20, 126, 136, 0.16);
+}
+
+.investigation[data-theme="light"] .mansionAmbientSpace {
+  border-color: rgba(70, 120, 130, 0.2);
+  background:
+    repeating-linear-gradient(90deg, transparent 0 0.55rem, rgba(43, 112, 122, 0.09) 0.55rem 0.61rem),
+    linear-gradient(145deg, rgba(213, 233, 236, 0.86), rgba(184, 211, 216, 0.92));
+  box-shadow: inset 0 0 1rem rgba(255, 255, 255, 0.56);
+}
+
+.investigation[data-theme="light"] .mansionAmbientSpace[data-pattern="inboard-compartment"] {
+  background:
+    repeating-linear-gradient(0deg, transparent 0 0.7rem, rgba(79, 105, 128, 0.08) 0.7rem 0.76rem),
+    linear-gradient(145deg, rgba(222, 231, 238, 0.86), rgba(198, 211, 221, 0.92));
+}
+
+.investigation[data-theme="light"] .mansionAmbientSpace[data-pattern="closed-volume"] {
+  background: linear-gradient(145deg, rgba(218, 228, 236, 0.82), rgba(194, 207, 218, 0.9));
 }
 
 .investigation[data-theme="light"] .mansionRoom:not([data-room-art]) {

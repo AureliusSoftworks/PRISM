@@ -294,13 +294,10 @@ it("opens executable Flyting beside the available Debate formats", () => {
   assert.match(flytingSource, /"--flyting-lane-left": forColor/u);
   assert.match(flytingSource, /"--flyting-lane-host": hostColor/u);
   assert.match(flytingSource, /"--flyting-lane-right": againstColor/u);
-  assert.match(flytingSource, /flytingKeyVisibilityBoost/u);
-  assert.match(flytingCss, /--flyting-lane-right-key-boost/u);
+  assert.match(flytingSource, /remapFlytingRgbKeyPixels/u);
   assert.match(flytingSource, /normalizeBotIdentityColor/u);
   assert.doesNotMatch(flytingSource, /#(?:ff0000|00ff00|0000ff)/iu);
   assert.match(flytingCss, /\.hallStage/u);
-  assert.match(flytingCss, /mead-hall-keyed-base\.webp/u);
-  assert.match(flytingCss, /jarl-throne-keyed-base\.webp/u);
   assert.match(flytingCss, /viking-participant-helmet-base\.png/u);
   assert.match(flytingCss, /viking-participant-helmet-accent-key\.png/u);
   assert.match(flytingCss, /viking-pixel-crown-base\.png/u);
@@ -379,21 +376,24 @@ it("opens executable Flyting beside the available Debate formats", () => {
   assert.match(flytingSource, /className=\{styles\.hallFixtureLight\}/u);
   assert.doesNotMatch(flytingSource, /data-candle=/u);
   assert.doesNotMatch(flytingSource, /hearth-fire-proof\.gif/u);
-  assert.match(flytingSource, /className=\{styles\.galleryRugAccentKeys\}/u);
-  assert.match(flytingCss, /mead-hall-gallery-left-key\.svg/u);
-  assert.match(flytingCss, /mead-hall-gallery-host-key\.svg/u);
-  assert.match(flytingCss, /mead-hall-gallery-right-key\.svg/u);
+  assert.match(flytingSource, /<FlytingRgbKeyedBackdrop/u);
+  assert.match(flytingSource, /scene="gallery"/u);
+  assert.match(flytingSource, /remapFlytingRgbKeyPixels/u);
   assert.doesNotMatch(flytingSource, /<DebateForumAccentKeys/u);
   assert.match(flytingSource, /Flyt desk/u);
   assert.match(flytingSource, /Live transcript/u);
-  assert.match(flytingSource, /className=\{styles\.hallAccentKeys\}/u);
-  assert.match(flytingCss, /mead-hall-left-key\.png/u);
-  assert.match(flytingCss, /mead-hall-host-key\.png/u);
-  assert.match(flytingCss, /mead-hall-right-key\.png/u);
-  assert.match(flytingCss, /jarl-throne-left-key\.png/u);
-  assert.match(flytingCss, /jarl-throne-host-key\.png/u);
-  assert.match(flytingCss, /jarl-throne-right-key\.png/u);
-  assert.match(flytingCss, /background-blend-mode:\s*overlay/u);
+  assert.match(
+    flytingSource,
+    /scene=\{cameraView === "moderator" \? "jarl" : "wide"\}/u,
+  );
+  assert.doesNotMatch(
+    flytingSource,
+    /hallAccentKeys|galleryRugAccentKeys|hallReceiverMatte/u,
+  );
+  assert.doesNotMatch(
+    flytingCss,
+    /mead-hall-(?:left|host|right)-key|jarl-throne-(?:left|host|right)-key/u,
+  );
   assert.doesNotMatch(flytingCss, /mix-blend-mode:\s*overlay/u);
   assert.doesNotMatch(flytingSource, /className=\{styles\.hallPrism\}/u);
   assert.ok(existsSync(flytingMeadHallPath));
@@ -431,20 +431,11 @@ it("exports Flyting-native review provenance and voices Jarl acclamations", () =
   assert.match(source, /targetChallengeId/u);
   assert.match(source, /returnClaimId/u);
   assert.match(source, /hallLeaningHistory/u);
-  assert.match(
-    source,
-    /Persisted public line; heard completion not recorded/u,
-  );
+  assert.match(source, /Persisted public line; heard completion not recorded/u);
   assert.doesNotMatch(formatter, /Delivery:[\s\S]{0,80}"Complete"/u);
-  assert.match(
-    source,
-    /event\.kind === "reaction" && !event\.speakerBotId/u,
-  );
+  assert.match(source, /event\.kind === "reaction" && !event\.speakerBotId/u);
   assert.match(flytingSource, /setWithheldRecordEventIds/u);
-  assert.match(
-    flytingSource,
-    /exchange\.challenge\.createdEventId/u,
-  );
+  assert.match(flytingSource, /exchange\.challenge\.createdEventId/u);
   assert.match(flytingSource, /\{ id: "moderator", label: "Jarl" \}/u);
   assert.match(flytingSource, /Jarl of the Hall/u);
 });
@@ -947,7 +938,10 @@ describe("Debate experience", () => {
     assert.match(source, /type BotPickerPlacementRefractTarget/u);
     assert.match(source, /randomBotPickerPlacements/u);
     assert.match(source, /const randomizeVisibleCastPlacements/u);
-    assert.match(source, /visibleBotIds[\s\S]{0,120}visibleCastPlacementCount/u);
+    assert.match(
+      source,
+      /visibleBotIds[\s\S]{0,120}visibleCastPlacementCount/u,
+    );
     assert.match(source, /value: "random"[\s\S]{0,120}Random · all/u);
     assert.match(
       source,
@@ -4533,16 +4527,28 @@ describe("Debate experience", () => {
       /className=\{styles\.podiumForeground\}[\s\S]{0,500}<DebateForumLightMasks[\s\S]{0,180}depth="foreground"/u,
     );
     assert.match(source, /<DebateForumAccentKeys/u);
-    assert.match(forumAccentKeysSource, /data-source=\{props\.source \?\? "forum-architecture"\}/u);
+    assert.match(
+      forumAccentKeysSource,
+      /data-source=\{props\.source \?\? "forum-architecture"\}/u,
+    );
     assert.match(forumAccentKeysSource, /viewBox="0 0 1672 941"/u);
     assert.match(forumAccentKeysSource, /data-role="for"/u);
     assert.match(forumAccentKeysSource, /data-role="moderator"/u);
     assert.match(forumAccentKeysSource, /data-role="against"/u);
     assert.doesNotMatch(forumAccentKeysSource, /<canvas/u);
-    assert.match(css, /\.forumAccentArchitecture[\s\S]{0,400}mix-blend-mode:\s*screen/u);
+    assert.match(
+      css,
+      /\.forumAccentArchitecture[\s\S]{0,400}mix-blend-mode:\s*screen/u,
+    );
     assert.match(css, /\.forumAccentRoleFor[\s\S]{0,100}--debate-for-color/u);
-    assert.match(css, /\.forumCamera\[data-active-role="for"\]\s+\.forumAccentRoleFor/u);
-    assert.match(css, /\.forumCamera\[data-camera-view="moderator"\]\s+\.forumAccentArchitecture\s*\{[^}]*opacity:\s*0/u);
+    assert.match(
+      css,
+      /\.forumCamera\[data-active-role="for"\]\s+\.forumAccentRoleFor/u,
+    );
+    assert.match(
+      css,
+      /\.forumCamera\[data-camera-view="moderator"\]\s+\.forumAccentArchitecture\s*\{[^}]*opacity:\s*0/u,
+    );
     assert.match(
       css,
       /data-debate-material-quality="minimal"\][\s\S]{0,180}\.forumAccentArchitecture/u,
@@ -6115,10 +6121,7 @@ describe("Debate experience", () => {
       source,
       /data-court-tuner-view=\{stageAlignmentPreviewCamera\}/u,
     );
-    assert.match(
-      source,
-      /shared foreground table from this camera/u,
-    );
+    assert.match(source, /shared foreground table from this camera/u);
     assert.match(
       source,
       /const stageAlignmentCourtForegroundVisible\s*=\s*stageAlignmentWhodunnitPreview === null && !stageAlignmentJuryPreview/u,

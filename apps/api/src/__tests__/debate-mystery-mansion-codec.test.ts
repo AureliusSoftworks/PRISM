@@ -291,7 +291,7 @@ describe("internal mansion codec", () => {
         prismVersion: "0.15.1",
       }),
     );
-    assert.equal(reexported.manifest.formatVersion.minor, 1);
+    assert.equal(reexported.manifest.formatVersion.minor, 3);
     assert.deepEqual(
       reexported.manifest.propTheme?.variants.map((variant) => variant.archetypeId),
       WHODUNNIT_PROP_ARCHETYPE_IDS_V1,

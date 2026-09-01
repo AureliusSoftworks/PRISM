@@ -13,29 +13,49 @@ const IDENTITIES = {
 } as const;
 
 test("light avatar screens derive saturated non-black glass with white glyph contrast", () => {
+  const exposureByTone = {
+    deep: [] as number[],
+    edge: [] as number[],
+    mid: [] as number[],
+    center: [] as number[],
+  };
   for (const [name, identity] of Object.entries(IDENTITIES)) {
     const palette = deriveBotAvatarScreenPalette(identity, "light");
     assert.ok(palette, `${name} should derive a light-mode palette`);
-    for (const tone of [palette.edge, palette.mid, palette.center]) {
+    for (const tone of [palette.deep, palette.edge, palette.mid, palette.center]) {
       assert.notEqual(tone, "#000000", `${name} must not collapse to black`);
       assert.ok(botAvatarScreenContrastRatio(palette.glyph, tone) >= 3, `${name} glyph should keep 3:1 graphic contrast on ${tone}`);
     }
+    const deepContrast = botAvatarScreenContrastRatio(palette.glyph, palette.deep);
     const edgeContrast = botAvatarScreenContrastRatio(palette.glyph, palette.edge);
     const midContrast = botAvatarScreenContrastRatio(palette.glyph, palette.mid);
     const centerContrast = botAvatarScreenContrastRatio(palette.glyph, palette.center);
     const centerToEdgeContrast = botAvatarScreenContrastRatio(palette.center, palette.edge);
+    exposureByTone.deep.push(deepContrast);
+    exposureByTone.edge.push(edgeContrast);
+    exposureByTone.mid.push(midContrast);
+    exposureByTone.center.push(centerContrast);
+    assert.ok(deepContrast > edgeContrast, `${name} deep field should be darker than its edge`);
     assert.ok(edgeContrast > midContrast, `${name} middle should be brighter than its edge`);
     assert.ok(midContrast > centerContrast, `${name} center should be brighter than its middle`);
     assert.ok(centerToEdgeContrast >= 3.25, `${name} center should separate clearly from its edge`);
     assert.ok(centerContrast < 4.6, `${name} center should read as illuminated colored glass rather than near-black`);
     assert.equal(palette.glyph, "#fbfdff");
     assert.deepEqual(Object.keys(botAvatarScreenPaletteVariables(palette)), [
+      "--bot-avatar-screen-deep",
       "--bot-avatar-screen-edge",
       "--bot-avatar-screen-mid",
       "--bot-avatar-screen-center",
       "--bot-avatar-screen-glyph",
       "--bot-avatar-screen-glow",
     ]);
+  }
+  for (const [tone, contrasts] of Object.entries(exposureByTone)) {
+    const exposureSpread = Math.max(...contrasts) - Math.min(...contrasts);
+    assert.ok(
+      exposureSpread <= 0.1,
+      `${tone} exposure should stay perceptually even across identity hues`,
+    );
   }
 });
 
@@ -78,17 +98,21 @@ test("the canonical full avatar style feeds one palette to both screen sizes", (
     "--bot-avatar-screen-glass-overlay",
     "--bot-avatar-screen-radial-geometry",
     "--bot-avatar-screen-radial-stops",
+    "--bot-avatar-screen-inner-orb",
+    "--bot-avatar-screen-deep",
     "--bot-avatar-screen-center",
     "--bot-avatar-screen-mid",
     "--bot-avatar-screen-edge",
     "transparent",
     "--zen-presence-face-bg",
     "--bot-avatar-screen-dark-base",
-    "transparent 90%",
     "--bot-face-screen-glass-blend-mode: plus-lighter",
     "--zen-live-bot-screen-specular-opacity: 0.22",
     "--bot-avatar-screen-bottom-reflection",
+    "--bot-avatar-screen-arc-reflection",
     "--zen-live-bot-shared-phosphor-glow-color",
+    "--bot-avatar-buckle-screen-core-opacity",
+    "--zen-live-bot-glyph-opacity",
   ]) {
     assert.ok(lightPlateRule.includes(token), `light face rule should include ${token}`);
   }
@@ -96,22 +120,24 @@ test("the canonical full avatar style feeds one palette to both screen sizes", (
     "--zen-live-bot-buckle-rim-screen-stops",
     "--bot-avatar-buckle-screen-radial-stops",
     "--zen-live-bot-buckle-screen-radial-geometry: ellipse 58% 64% at 50% 44%",
+    "--zen-live-bot-buckle-rim-screen-orb",
     "--zen-live-bot-buckle-rim-screen-base: var(--bot-avatar-screen-dark-base)",
   ]) {
     assert.ok(lightBodyRule.includes(token), `light lower display should include ${token}`);
   }
   assert.match(
     lightEmissionRule,
-    /background:[\s\S]*--bot-avatar-screen-glass-overlay[\s\S]*--bot-avatar-screen-dark-base/,
+    /background:[\s\S]*--bot-avatar-screen-inner-orb[\s\S]*--bot-avatar-screen-glass-overlay[\s\S]*--bot-avatar-screen-dark-base/,
+    "the internal lamp must sit behind the phosphor content and above the identity-color field",
   );
   for (const token of [
-    "--bot-face-glow-strength-scale: 0.68",
-    "--zen-live-bot-shared-phosphor-contact-opacity: 78%",
-    "--zen-live-bot-shared-phosphor-tight-opacity: 62%",
-    "--crt-face-screen-wash-tight-opacity: 44%",
-    "--crt-face-screen-wash-near-opacity: 27%",
-    "--crt-face-screen-wash-mid-opacity: 14%",
-    "--crt-face-screen-wash-far-opacity: 7%",
+    "--bot-face-glow-strength-scale: 0.6",
+    "--zen-live-bot-shared-phosphor-contact-opacity: 70%",
+    "--zen-live-bot-shared-phosphor-tight-opacity: 50%",
+    "--crt-face-screen-wash-tight-opacity: 36%",
+    "--crt-face-screen-wash-near-opacity: 22%",
+    "--crt-face-screen-wash-mid-opacity: 11%",
+    "--crt-face-screen-wash-far-opacity: 5%",
   ]) {
     assert.ok(
       lightEmissionRule.includes(token),
@@ -125,13 +151,18 @@ test("the canonical full avatar style feeds one palette to both screen sizes", (
   );
   assert.match(
     lightPlateRule,
-    /--bot-avatar-screen-radial-geometry:\s*ellipse 46% 54% at 50% 42%/,
-    "the face identity field must darken before the circular aperture edge",
+    /--bot-avatar-screen-radial-geometry:\s*ellipse 56% 58% at 50% 48%/,
+    "the face identity field must reach the full circular aperture",
   );
   assert.match(
     lightPlateRule,
-    /--bot-avatar-screen-radial-stops:[\s\S]*?93%,\s*white 7%[\s\S]*?98%,\s*transparent[\s\S]*?0 8%[\s\S]*?92%,\s*transparent[\s\S]*?22%[\s\S]*?58%,\s*transparent[\s\S]*?48%[\s\S]*?16%,\s*transparent[\s\S]*?70%,\s*transparent 90%/,
-    "the face identity light must peak in a compact bright core and fall to the CRT substrate before the aperture edge",
+    /--bot-avatar-screen-radial-stops:[\s\S]*?--bot-avatar-screen-center[\s\S]*?0 18%[\s\S]*?--bot-avatar-screen-mid[\s\S]*?46%[\s\S]*?--bot-avatar-screen-edge[\s\S]*?72%[\s\S]*?--bot-avatar-screen-deep[\s\S]*?100%/,
+    "the face field must fall through darker identity colors instead of transparency over black",
+  );
+  assert.match(
+    lightPlateRule,
+    /--bot-avatar-screen-inner-orb:\s*radial-gradient\([\s\S]*?ellipse 34% 31% at 50% 43%[\s\S]*?--bot-avatar-screen-glow[\s\S]*?white 38%[\s\S]*?transparent 70%/,
+    "a compact identity-tinted lamp must glow from behind the face and Ink",
   );
   assert.match(
     lightPlateRule,
@@ -145,18 +176,23 @@ test("the canonical full avatar style feeds one palette to both screen sizes", (
   );
   assert.match(
     lightPlateRule,
-    /--bot-avatar-buckle-screen-radial-stops:[\s\S]*?14%,\s*transparent[\s\S]*?72%,\s*transparent 92%/,
-    "the lower screen must retain a colored center while revealing a darker perimeter",
+    /--bot-avatar-buckle-screen-radial-stops:[\s\S]*?--bot-avatar-screen-center[\s\S]*?--bot-avatar-screen-mid[\s\S]*?--bot-avatar-screen-edge[\s\S]*?--bot-avatar-screen-deep[\s\S]*?100%/,
+    "the lower screen must share the opaque color-to-deep-color falloff",
+  );
+  assert.match(
+    lightPlateRule,
+    /--bot-avatar-buckle-screen-inner-orb:\s*radial-gradient\([\s\S]*?--bot-avatar-buckle-screen-core-opacity[\s\S]*?transparent 82%/,
+    "the lower display must retain a weaker independently metered inner lamp",
   );
   assert.match(
     cssSource,
     /\.zenLiveBotPresenceBody::before\s*\{[\s\S]*?radial-gradient\([\s\S]*?--zen-live-bot-buckle-screen-radial-geometry/,
     "the lower display must consume its independently enlarged identity field",
   );
-  assert.doesNotMatch(
-    lightPlateRule.match(/--bot-avatar-screen-dark-base:[\s\S]*?\);/)?.[0] ?? "",
-    /--coffee-bot-color/,
-    "the black substrate must stay neutral beneath the identity light",
+  assert.match(
+    lightPlateRule.match(/--bot-avatar-screen-dark-base:[\s\S]*?;\n/)?.[0] ?? "",
+    /--bot-avatar-screen-deep[\s\S]*?--bot-avatar-screen-edge[\s\S]*?black 8%/,
+    "the near-black substrate must preserve identity hue rather than turning neutral black",
   );
   assert.match(
     cssSource,
@@ -165,7 +201,7 @@ test("the canonical full avatar style feeds one palette to both screen sizes", (
   );
   assert.match(
     cssSource,
-    /\.botFaceScreenGlass::after\s*\{[\s\S]*?background:[\s\S]*?--bot-avatar-screen-bottom-reflection[\s\S]*?--bot-face-screen-glare-x[\s\S]*?mix-blend-mode:\s*screen\s*;/,
+    /\.botFaceScreenGlass::after\s*\{[\s\S]*?background:[\s\S]*?--bot-avatar-screen-bottom-reflection[\s\S]*?--bot-avatar-screen-arc-reflection[\s\S]*?--bot-face-screen-glare-x[\s\S]*?mix-blend-mode:\s*screen\s*;/,
     "the Light bezel reflection must composite in the same foreground specular pass as the existing glare",
   );
   assert.match(

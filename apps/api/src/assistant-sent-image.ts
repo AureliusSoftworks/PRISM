@@ -164,7 +164,7 @@ function loadRecentImageContextLines(
     .prepare(
       `SELECT m.role, m.content, b.name AS bot_name
          FROM messages m
-         LEFT JOIN bots b ON b.id = m.bot_id
+         LEFT JOIN bots b ON b.id = m.bot_id AND b.user_id = m.user_id
         WHERE m.user_id = ? AND m.conversation_id = ?
           AND TRIM(m.content) <> ''
         ORDER BY m.created_at DESC

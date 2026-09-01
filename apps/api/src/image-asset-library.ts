@@ -1067,7 +1067,12 @@ function rebuildSearchIndex(db: DatabaseSync, userId: string): void {
   const promptRows = db.prepare(
     `SELECT images.prompt, images.revised_prompt
        FROM image_asset_set_items items
-       JOIN images ON images.id = items.image_id
+       JOIN image_asset_sets sets
+         ON sets.user_id = ?
+        AND sets.id = items.set_id
+       JOIN images
+         ON images.user_id = sets.user_id
+        AND images.id = items.image_id
       WHERE items.set_id = ? ORDER BY items.ordinal`,
   );
   const insert = db.prepare(
@@ -1076,7 +1081,7 @@ function rebuildSearchIndex(db: DatabaseSync, userId: string): void {
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const set of sets) {
-    const prompts = promptRows.all(set.id) as Array<{
+    const prompts = promptRows.all(userId, set.id) as Array<{
       prompt: string;
       revised_prompt: string | null;
     }>;
@@ -1321,10 +1326,17 @@ function usageForSets(
   if (setIds.length === 0) return new Map();
   const itemRows = db
     .prepare(
-      `SELECT set_id, image_id FROM image_asset_set_items
-        WHERE set_id IN (${setIds.map(() => "?").join(",")})`,
+      `SELECT items.set_id, items.image_id
+         FROM image_asset_set_items items
+         JOIN image_asset_sets sets
+           ON sets.user_id = ?
+          AND sets.id = items.set_id
+         JOIN images
+           ON images.user_id = sets.user_id
+          AND images.id = items.image_id
+        WHERE items.set_id IN (${setIds.map(() => "?").join(",")})`,
     )
-    .all(...setIds) as Array<{ set_id: string; image_id: string }>;
+    .all(userId, ...setIds) as Array<{ set_id: string; image_id: string }>;
   const usageByImage = imageAssetUsageLabels(
     db,
     userId,
@@ -1347,6 +1359,7 @@ function usageForSets(
 
 function membersForSets(
   db: DatabaseSync,
+  userId: string,
   setIds: readonly string[],
 ): Map<string, ImageAssetMember[]> {
   if (setIds.length === 0) return new Map();
@@ -1357,12 +1370,16 @@ function membersForSets(
               images.size, images.local_rel_path, images.created_at,
               sets.updated_at AS set_updated_at
          FROM image_asset_set_items items
-         JOIN image_asset_sets sets ON sets.id = items.set_id
-         JOIN images ON images.id = items.image_id
+         JOIN image_asset_sets sets
+           ON sets.user_id = ?
+          AND sets.id = items.set_id
+         JOIN images
+           ON images.user_id = sets.user_id
+          AND images.id = items.image_id
         WHERE items.set_id IN (${setIds.map(() => "?").join(",")})
         ORDER BY items.set_id, items.ordinal, images.id`,
     )
-    .all(...setIds) as Array<{
+    .all(userId, ...setIds) as Array<{
     set_id: string;
     role: ImageAssetMemberRole;
     id: string;
@@ -1455,7 +1472,7 @@ function mapAssetSetRows(
   rows: readonly AssetSetRow[],
 ): ImageAssetSet[] {
   const ids = rows.map((row) => row.id);
-  const members = membersForSets(db, ids);
+  const members = membersForSets(db, userId, ids);
   const usage = usageForSets(db, userId, ids);
   const magentaRevisionState = magentaRevisionStateForSets(db, userId, ids);
   const capabilityCards = itemCapabilityCardsForAssetSets(
@@ -2017,17 +2034,25 @@ export function deleteUnusedImageAssetSet(
   const rows = db
     .prepare(
       `SELECT images.* FROM image_asset_set_items items
-         JOIN images ON images.id = items.image_id
+         JOIN image_asset_sets sets
+           ON sets.user_id = ?
+          AND sets.id = items.set_id
+         JOIN images
+           ON images.user_id = sets.user_id
+          AND images.id = items.image_id
         WHERE items.set_id = ? ORDER BY items.ordinal`,
     )
-    .all(assetSetId) as unknown as CatalogImageRow[];
+    .all(userId, assetSetId) as unknown as CatalogImageRow[];
   const itemMetadata = db
     .prepare(
-      `SELECT image_id, role, ordinal
-         FROM image_asset_set_items
-        WHERE set_id = ? ORDER BY ordinal, image_id`,
+      `SELECT items.image_id, items.role, items.ordinal
+         FROM image_asset_set_items items
+         JOIN image_asset_sets sets
+           ON sets.user_id = ?
+          AND sets.id = items.set_id
+        WHERE items.set_id = ? ORDER BY items.ordinal, items.image_id`,
     )
-    .all(assetSetId) as Array<{
+    .all(userId, assetSetId) as Array<{
     image_id: string;
     role: string;
     ordinal: number | bigint;

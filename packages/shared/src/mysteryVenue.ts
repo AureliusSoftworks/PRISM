@@ -5,7 +5,13 @@ import {
   type MansionLayoutRoomV2,
   type MansionLayoutV2,
   type MysteryVenueKindV1,
+  type MysteryVenueArchetypeV1,
+  type MysteryVenueEraV1,
+  type MysteryVenueIntentV1,
+  type MysteryVenuePhysicalScaleClassV1,
   type MysteryVenueProfileV1,
+  type MysteryVenueProposalMatchV1,
+  type MysteryVenueRoomSpatialV1,
   type MysteryVenueRoomRoleV1,
   type MysteryVenueTopologyV1,
 } from "./mansionLayoutV2.ts";
@@ -26,7 +32,9 @@ export interface MysteryVenueProposalV1 {
   title: string;
   description: string;
   atmosphere: string;
-  source: "catalog" | "model";
+  source: "catalog" | "model" | "hybrid";
+  intent: MysteryVenueIntentV1;
+  match: MysteryVenueProposalMatchV1;
   /** Public, spoiler-free language ingredients used to reproduce the
    * server-owned geometry when the proposal is accepted. Not persisted. */
   creativeDraft?: MysteryVenueCreativeDraftV1;
@@ -48,6 +56,9 @@ export interface MysteryVenueCreativeRoomDraftV1 {
 /** Spoiler-safe model contribution. Geometry is intentionally absent. */
 export interface MysteryVenueCreativeDraftV1 {
   title: string;
+  archetype?: MysteryVenueArchetypeV1;
+  era?: MysteryVenueEraV1;
+  physicalScaleClass?: MysteryVenuePhysicalScaleClassV1;
   kind: MysteryVenueKindV1;
   kindLabel: string;
   placeNoun: string;
@@ -66,9 +77,14 @@ interface VenueSeedRoom {
   emoji: string;
   role: MysteryVenueRoomRoleV1;
   anchors: string[];
+  spatial?: MysteryVenueRoomSpatialV1;
+  preferredTier?: number;
 }
 
 interface VenueSeed {
+  archetype: MysteryVenueArchetypeV1;
+  era: MysteryVenueEraV1;
+  physicalScaleClass: MysteryVenuePhysicalScaleClassV1;
   kind: MysteryVenueKindV1;
   kindLabel: string;
   noun: string;
@@ -86,6 +102,12 @@ const VENUE_KINDS = new Set<MysteryVenueKindV1>(["estate", "vessel", "habitat", 
 const VENUE_TOPOLOGIES = new Set<MysteryVenueTopologyV1>(["estate", "spine", "radial", "pods", "linear"]);
 const VENUE_ROLES = new Set<MysteryVenueRoomRoleV1>(["entry", "circulation", "social", "private", "operations", "service", "technical", "observation", "other"]);
 const VENUE_EXTERIOR_MODES = new Set<MysteryVenueProfileV1["exteriorMode"]>(["grounds", "docked", "contained", "in-transit", "other"]);
+const VENUE_ARCHETYPES = new Set<MysteryVenueArchetypeV1>([
+  "private_estate", "vintage_yacht", "passenger_cruise_ship", "lunar_habitat",
+  "underwater_facility", "night_train", "custom",
+]);
+const VENUE_ERAS = new Set<MysteryVenueEraV1>(["historic", "modern", "futuristic", "unspecified"]);
+const VENUE_PHYSICAL_SCALES = new Set<MysteryVenuePhysicalScaleClassV1>(["compact", "standard", "grand"]);
 
 function compactDraftText(value: unknown, max: number): string {
   return typeof value === "string" ? value.replace(/\s+/gu, " ").trim().slice(0, max) : "";
@@ -117,6 +139,15 @@ export function parseMysteryVenueCreativeDraftV1(value: unknown): MysteryVenueCr
   });
   const result: MysteryVenueCreativeDraftV1 = {
     title: compactDraftText(draft.title, 120),
+    ...(VENUE_ARCHETYPES.has(compactDraftText(draft.archetype, 40) as MysteryVenueArchetypeV1)
+      ? { archetype: compactDraftText(draft.archetype, 40) as MysteryVenueArchetypeV1 }
+      : {}),
+    ...(VENUE_ERAS.has(compactDraftText(draft.era, 20) as MysteryVenueEraV1)
+      ? { era: compactDraftText(draft.era, 20) as MysteryVenueEraV1 }
+      : {}),
+    ...(VENUE_PHYSICAL_SCALES.has(compactDraftText(draft.physicalScaleClass, 20) as MysteryVenuePhysicalScaleClassV1)
+      ? { physicalScaleClass: compactDraftText(draft.physicalScaleClass, 20) as MysteryVenuePhysicalScaleClassV1 }
+      : {}),
     kind,
     kindLabel: compactDraftText(draft.kindLabel, 80),
     placeNoun: compactDraftText(draft.placeNoun, 40),
@@ -144,10 +175,122 @@ const room = (
   ...anchors: string[]
 ): VenueSeedRoom => ({ templateId, name, emoji, role, anchors });
 
+function mentionedArchetypes(text: string): MysteryVenueArchetypeV1[] {
+  const found: MysteryVenueArchetypeV1[] = [];
+  if (/\b(?:passenger|ocean|full[- ]?size|large|modern)?\s*(?:cruise ship|cruise liner|ocean liner)\b/u.test(text)) {
+    found.push("passenger_cruise_ship");
+  }
+  if (/\b(?:yacht|schooner|private vessel)\b/u.test(text)) found.push("vintage_yacht");
+  if (/\b(?:house|mansion|manor|estate|castle|chateau|villa)\b/u.test(text)) found.push("private_estate");
+  if (/\b(?:moon|lunar|space|orbital|mars)\b/u.test(text)) found.push("lunar_habitat");
+  if (/\b(?:underwater|subsea|seafloor)\b/u.test(text)) found.push("underwater_facility");
+  if (/\b(?:train|rail|carriage|express)\b/u.test(text)) found.push("night_train");
+  return [...new Set(found)];
+}
+
+export function deriveMysteryVenueIntentV1(description: string): MysteryVenueIntentV1 {
+  const text = description.toLocaleLowerCase();
+  const excludedText = [...text.matchAll(/\b(?:not|never|exclude|without)\s+(?:an?\s+|the\s+)?([^.;]+)/gu)]
+    .map((match) => match[1] ?? "").join(" ");
+  const excludedArchetypes = mentionedArchetypes(excludedText);
+  const requested = mentionedArchetypes(text).find((archetype) => !excludedArchetypes.includes(archetype));
+  const archetype = requested ?? (/\b(?:ship|liner|vessel)\b/u.test(text)
+    ? "passenger_cruise_ship"
+    : "custom");
+  const era: MysteryVenueEraV1 = /\b(?:modern|contemporary|present[- ]day|current)\b/u.test(text)
+    ? "modern"
+    : /\b(?:vintage|historic|victorian|edwardian|old[- ]world)\b/u.test(text)
+      ? "historic"
+      : /\b(?:future|futuristic|sci[- ]?fi)\b/u.test(text)
+        ? "futuristic"
+        : "unspecified";
+  const physicalScaleClass: MysteryVenuePhysicalScaleClassV1 =
+    archetype === "passenger_cruise_ship" || /\b(?:full[- ]?size|large[- ]scale|massive|grand)\b/u.test(text)
+      ? "grand"
+      : /\b(?:small|compact|intimate)\b/u.test(text)
+        ? "compact"
+        : "standard";
+  return { version: 1, archetype, era, physicalScaleClass, excludedArchetypes };
+}
+
+function draftArchetype(draft: MysteryVenueCreativeDraftV1): MysteryVenueArchetypeV1 {
+  if (draft.archetype) return draft.archetype;
+  return deriveMysteryVenueIntentV1([
+    draft.kindLabel, draft.placeNoun, draft.title, draft.environmentSummary,
+  ].join(" ")).archetype;
+}
+
+export function matchMysteryVenueCreativeDraftV1(
+  intent: MysteryVenueIntentV1,
+  draft: MysteryVenueCreativeDraftV1 | null,
+): MysteryVenueProposalMatchV1 {
+  if (!draft) {
+    return {
+      version: 1,
+      status: intent.archetype === "custom" ? "confirmation_required" : "matched",
+      reasons: intent.archetype === "custom"
+        ? ["PRISM supplied a generic structured venue draft; confirm or edit it before acceptance."]
+        : ["PRISM supplied a compatible catalog venue because model dressing was unavailable."],
+    };
+  }
+  const candidateArchetype = draftArchetype(draft);
+  const reasons: string[] = [];
+  if (candidateArchetype !== intent.archetype) {
+    reasons.push(`The generated ${candidateArchetype.replaceAll("_", " ")} does not match the requested ${intent.archetype.replaceAll("_", " ")}.`);
+  }
+  if (intent.excludedArchetypes.includes(candidateArchetype)) {
+    reasons.push(`The generated venue uses an explicitly excluded ${candidateArchetype.replaceAll("_", " ")}.`);
+  }
+  if (intent.archetype === "passenger_cruise_ship" && (draft.kind !== "vessel" || draft.topology !== "spine")) {
+    reasons.push("A passenger cruise ship must retain PRISM's vessel and deck-spine architecture.");
+  }
+  if (draft.physicalScaleClass && draft.physicalScaleClass !== intent.physicalScaleClass) {
+    reasons.push("The generated physical scale does not match the frozen venue brief.");
+  }
+  if (draft.era && intent.era !== "unspecified" && draft.era !== intent.era) {
+    reasons.push("The generated era does not match the frozen venue brief.");
+  }
+  return {
+    version: 1,
+    status: reasons.length > 0 ? "rejected" : "matched",
+    reasons: reasons.length > 0 ? reasons : ["The generated dressing matches the frozen venue brief."],
+  };
+}
+
 function venueSeed(description: string): VenueSeed {
   const text = description.toLocaleLowerCase();
-  if (/yacht|cruise|ship|liner|boat|steamer|schooner/u.test(text)) {
+  if (/\b(?:cruise ship|cruise liner|ocean liner|passenger ship|full[- ]?size ship)\b/u.test(text) ||
+    (/\bship\b/u.test(text) && !/\b(?:yacht|schooner)\b/u.test(text))) {
     return {
+      archetype: "passenger_cruise_ship", era: /\b(?:vintage|historic)\b/u.test(text) ? "historic" : "modern",
+      physicalScaleClass: "grand",
+      kind: "vessel", kindLabel: "Passenger Cruise Ship", noun: "ship", topology: "spine",
+      tierNoun: "Deck", exteriorMode: "docked", connector: "ship lift",
+      title: "The Meridian Passage",
+      summary: "A full-size passenger cruise ship with public decks, working service spaces, and unopened decks beyond the investigation area.",
+      atmosphere: "Ocean light crosses steel and glass while engines resonate through the deck beneath each footstep.",
+      rooms: [
+        room("venue:gangway", "Gangway Lobby", "⚓", "entry", "boarding checkpoint", "outboard gangway doors"),
+        room("venue:engine", "Engine Control Room", "⚙️", "technical", "engine telemetry wall", "machinery access door"),
+        room("venue:galley", "Main Galley", "🍽️", "service", "service line", "cold preparation counter"),
+        room("venue:crew", "Crew Quarters", "🧳", "private", "bunk alcoves", "crew lockers"),
+        room("venue:stores", "Provisions Store", "📦", "service", "supply racks", "cold room door"),
+        room("venue:atrium", "Reception Atrium", "◇", "social", "reception desk", "deck directory"),
+        room("venue:medical", "Medical Centre", "✚", "service", "treatment bay", "medicine cabinet"),
+        room("venue:security", "Security Office", "🔒", "operations", "camera wall", "key control desk"),
+        room("venue:cabin", "Passenger Cabin", "🛏️", "private", "window berth", "wardrobe"),
+        room("venue:lounge", "Ocean Lounge", "🥂", "social", "panoramic windows", "cocktail bar"),
+        room("venue:promenade", "Promenade Deck", "🌊", "observation", "port rail", "lifeboat station"),
+        room("venue:bridge", "Navigation Bridge", "🧭", "operations", "helm console", "forward windows"),
+        room("venue:observation", "Observation Lounge", "🔭", "observation", "forward glazing", "chart display"),
+        room("venue:captain", "Captain's Dayroom", "🗺️", "private", "navigation desk", "private balcony"),
+        room("venue:radio", "Communications Room", "📻", "operations", "radio console", "message rack"),
+      ],
+    };
+  }
+  if (/\b(?:yacht|schooner|private vessel|steamer)\b/u.test(text)) {
+    return {
+      archetype: "vintage_yacht", era: "historic", physicalScaleClass: "compact",
       kind: "vessel", kindLabel: "Vintage Yacht", noun: "yacht", topology: "spine",
       tierNoun: "Deck", exteriorMode: "in-transit", connector: "companionway",
       title: "The Midnight Passage",
@@ -170,6 +313,7 @@ function venueSeed(description: string): VenueSeed {
   }
   if (/moon|lunar|space|orbital|module|mars|station/u.test(text)) {
     return {
+      archetype: "lunar_habitat", era: "futuristic", physicalScaleClass: "standard",
       kind: "habitat", kindLabel: "Lunar Habitat", noun: "habitat", topology: "radial",
       tierNoun: "Module", exteriorMode: "contained", connector: "transfer tube",
       title: "The Silent Horizon",
@@ -191,6 +335,7 @@ function venueSeed(description: string): VenueSeed {
   }
   if (/underwater|subsea|ocean|abyss|marine|submerged|seafloor/u.test(text)) {
     return {
+      archetype: "underwater_facility", era: "modern", physicalScaleClass: "standard",
       kind: "facility", kindLabel: "Underwater Facility", noun: "facility", topology: "pods",
       tierNoun: "Sector", exteriorMode: "contained", connector: "pressure lift",
       title: "The Pressure Line",
@@ -212,6 +357,7 @@ function venueSeed(description: string): VenueSeed {
   }
   if (/train|rail|carriage|express/u.test(text)) {
     return {
+      archetype: "night_train", era: "historic", physicalScaleClass: "standard",
       kind: "transport", kindLabel: "Night Train", noun: "train", topology: "linear",
       tierNoun: "Car", exteriorMode: "in-transit", connector: "vestibule",
       title: "The Last Express",
@@ -229,6 +375,7 @@ function venueSeed(description: string): VenueSeed {
   }
   if (description.trim() && !/house|mansion|manor|estate|castle|chateau|villa/u.test(text)) {
     return {
+      archetype: "custom", era: "unspecified", physicalScaleClass: "standard",
       kind: "other", kindLabel: "Custom Setting", noun: "venue", topology: "pods",
       tierNoun: "Zone", exteriorMode: "other", connector: "transfer point",
       title: "A Curious Place",
@@ -247,6 +394,7 @@ function venueSeed(description: string): VenueSeed {
     };
   }
   return {
+    archetype: "private_estate", era: "historic", physicalScaleClass: "standard",
     kind: "estate", kindLabel: "Private Estate", noun: "estate", topology: "estate",
     tierNoun: "Floor", exteriorMode: "grounds", connector: "staircase",
     title: description.trim() ? "A Curious Place" : "The House at Prism's Edge",
@@ -268,11 +416,16 @@ function venueSeed(description: string): VenueSeed {
 }
 
 export function normalizeMysteryVenueLengthV1(value: MysteryVenueLengthV1): Required<MysteryVenueLengthV1> {
-  if (value.id === "quick") return { id: "quick", rooms: 5, suspects: 4, tiers: 1 };
-  if (value.id === "standard") return { id: "standard", rooms: 10, suspects: 6, tiers: 2 };
-  if (value.id === "grand") return { id: "grand", rooms: 15, suspects: 8, tiers: 3 };
-  const rooms = Math.max(5, Math.min(18, Math.round(value.rooms || 10)));
-  const suspects = Math.max(4, Math.min(8, Math.round(value.suspects || 6)));
+  const preset = value.id === "quick"
+    ? { rooms: 5, suspects: 4, tiers: 1 }
+    : value.id === "standard"
+      ? { rooms: 10, suspects: 6, tiers: 2 }
+      : value.id === "grand"
+        ? { rooms: 15, suspects: 8, tiers: 3 }
+        : null;
+  const rooms = preset?.rooms ?? Math.max(5, Math.min(18, Math.round(value.rooms || 10)));
+  const suspects = Math.max(4, Math.min(8, rooms - 1, Math.round(value.suspects || preset?.suspects || 6)));
+  if (preset) return { id: value.id, rooms, suspects, tiers: preset.tiers };
   const tiers = Math.max(1, Math.min(3, Math.round(value.tiers || Math.ceil(rooms / 6))));
   return { id: "custom", rooms, suspects, tiers };
 }
@@ -303,6 +456,148 @@ interface VenueTierRoomPlacement {
 interface VenueTierGeometry {
   corridors: MansionLayoutBlockV2[];
   rooms: VenueTierRoomPlacement[];
+}
+
+interface PlannedVenueRoom {
+  source: VenueSeedRoom;
+  tier: number;
+  spatial?: MysteryVenueRoomSpatialV1;
+}
+
+function shipSpatial(
+  templateId: string,
+  tier: number,
+  tiers: number,
+): MysteryVenueRoomSpatialV1 {
+  const deckBand = tiers === 1 ? "embarkation" as const
+    : tier === 1 ? "lower" as const
+      : tier === tiers ? "upper" as const
+        : "embarkation" as const;
+  if (templateId === "venue:bridge") {
+    return { version: 1, longitudinal: "fore", transverse: "center", exposure: "window", deckBand: "upper" };
+  }
+  if (templateId === "venue:engine") {
+    return { version: 1, longitudinal: "aft", transverse: "center", exposure: "interior", deckBand: "lower" };
+  }
+  if (templateId === "venue:gangway") {
+    return { version: 1, longitudinal: "midships", transverse: "starboard", exposure: "open-deck", deckBand: "embarkation" };
+  }
+  if (templateId === "venue:promenade") {
+    return { version: 1, longitudinal: "midships", transverse: "perimeter", exposure: "open-deck", deckBand: "upper" };
+  }
+  if (/cabin|captain|lounge|observation/u.test(templateId)) {
+    return {
+      version: 1,
+      longitudinal: templateId === "venue:observation" ? "fore" : "midships",
+      transverse: templateId === "venue:captain" ? "starboard" : "port",
+      exposure: templateId === "venue:captain" ? "balcony" : "window",
+      deckBand,
+    };
+  }
+  if (/galley|stores|crew|laundry/u.test(templateId)) {
+    return { version: 1, longitudinal: "aft", transverse: "center", exposure: "interior", deckBand };
+  }
+  return { version: 1, longitudinal: "midships", transverse: "center", exposure: "interior", deckBand };
+}
+
+function passengerCruiseRoomPlan(
+  seed: VenueSeed,
+  length: Required<MysteryVenueLengthV1>,
+): PlannedVenueRoom[] {
+  const byTemplate = new Map(seed.rooms.map((entry) => [entry.templateId, entry]));
+  const source = (templateId: string, fallback = 0, overrides: Partial<VenueSeedRoom> = {}): VenueSeedRoom => ({
+    ...(byTemplate.get(templateId) ?? seed.rooms[fallback % seed.rooms.length]!),
+    ...overrides,
+  });
+  const plan: Array<[VenueSeedRoom, number]> = length.id === "quick"
+    ? [
+        [source("venue:gangway"), 1],
+        [source("venue:atrium"), 1],
+        [source("venue:promenade"), 1],
+        [source("venue:lounge"), 1],
+        [source("venue:security"), 1],
+      ]
+    : length.id === "grand" || length.tiers === 3
+      ? [
+          [source("venue:gangway"), 2],
+          [source("venue:engine"), 1],
+          [source("venue:galley"), 1],
+          [source("venue:crew"), 1],
+          [source("venue:stores"), 1],
+          [source("venue:laundry", 2, {
+            templateId: "venue:laundry", name: "Ship's Laundry", emoji: "🧺", role: "service",
+            anchors: ["linen carts", "industrial washers"],
+          }), 1],
+          [source("venue:atrium"), 2],
+          [source("venue:medical"), 2],
+          [source("venue:security"), 2],
+          [source("venue:cabin"), 2],
+          [source("venue:promenade"), 3],
+          [source("venue:bridge"), 3],
+          [source("venue:observation"), 3],
+          [source("venue:captain"), 3],
+          [source("venue:radio"), 3],
+        ]
+      : [
+          [source("venue:gangway"), 1],
+          [source("venue:engine"), 1],
+          [source("venue:galley"), 1],
+          [source("venue:crew"), 1],
+          [source("venue:stores"), 1],
+          [source("venue:promenade"), 2],
+          [source("venue:bridge"), 2],
+          [source("venue:observation"), 2],
+          [source("venue:cabin"), 2],
+          [source("venue:security"), 2],
+        ];
+  const expanded = [...plan];
+  while (expanded.length < length.rooms) {
+    const original = seed.rooms[expanded.length % seed.rooms.length]!;
+    expanded.push([{
+      ...original,
+      templateId: `${original.templateId}-${expanded.length + 1}`,
+      name: `${original.name} ${expanded.length + 1}`,
+    }, (expanded.length % length.tiers) + 1]);
+  }
+  return expanded.slice(0, length.rooms).map(([entry, tier]) => ({
+    source: entry,
+    tier,
+    spatial: shipSpatial(entry.templateId, tier, length.tiers),
+  }));
+}
+
+function passengerShipTierGeometry(plans: readonly PlannedVenueRoom[], tier: number): VenueTierGeometry {
+  const roomsOnTier = plans.filter((entry) => entry.tier === tier);
+  const promenadeIndex = roomsOnTier.findIndex((entry) => entry.source.templateId === "venue:promenade");
+  const placements: VenueTierRoomPlacement[] = Array.from({ length: roomsOnTier.length });
+  const candidates = [
+    { x: 2, y: 3 }, { x: 6, y: 3 }, { x: 10, y: 3 },
+    { x: 2, y: 7 }, { x: 6, y: 7 }, { x: 10, y: 7 },
+  ];
+  const used = new Set<string>();
+  if (promenadeIndex >= 0) {
+    placements[promenadeIndex] = { x: 3, y: 3, width: 7, height: 2 };
+    for (const key of ["2:3", "6:3"]) used.add(key);
+  }
+  for (let index = 0; index < roomsOnTier.length; index += 1) {
+    if (index === promenadeIndex) continue;
+    const spatial = roomsOnTier[index]!.spatial;
+    const targetX = spatial?.longitudinal === "fore" ? 10
+      : spatial?.longitudinal === "aft" ? 2 : 6;
+    const targetY = spatial?.transverse === "starboard" ? 7 : 3;
+    const choice = candidates
+      .filter((candidate) => !used.has(`${candidate.x}:${candidate.y}`))
+      .sort((left, right) =>
+        (Math.abs(left.x - targetX) * 2 + Math.abs(left.y - targetY)) -
+        (Math.abs(right.x - targetX) * 2 + Math.abs(right.y - targetY))
+      )[0]!;
+    used.add(`${choice.x}:${choice.y}`);
+    placements[index] = { ...choice, width: 2, height: 2 };
+  }
+  return {
+    corridors: [{ kind: "corridor", id: `corridor:tier-${tier}`, floor: tier, x: 2, y: 5, width: 12, height: 2 }],
+    rooms: placements,
+  };
 }
 
 function denseVenueTierGeometry(tier: number, count: number): VenueTierGeometry {
@@ -394,34 +689,117 @@ function venueTierGeometry(
   return denseVenueTierGeometry(tier, count);
 }
 
+function venueTierLabels(
+  seed: VenueSeed,
+  length: Required<MysteryVenueLengthV1>,
+): string[] {
+  if (seed.archetype !== "passenger_cruise_ship") {
+    return Array.from({ length: length.tiers }, (_, index) => `${seed.tierNoun} ${index + 1}`);
+  }
+  if (length.tiers === 1) return ["Embarkation & Promenade Deck"];
+  if (length.tiers === 2) return ["Embarkation & Service Deck", "Command & Promenade Deck"];
+  return ["Lower Service Deck", "Embarkation Deck", "Promenade & Command Deck"];
+}
+
+function venuePresentation(seed: VenueSeed, physicalScaleClass: MysteryVenuePhysicalScaleClassV1) {
+  if (seed.archetype === "passenger_cruise_ship") {
+    return {
+      version: 1 as const,
+      familyId: "maritime-passenger-v1",
+      mapStyle: "hull-deck-v1" as const,
+      physicalScaleClass,
+      entryAction: "Board the ship",
+      compatibleExteriorFamilies: ["maritime-passenger-v1", "universal-abstract-v1"],
+      compatibleAcousticFamilies: ["maritime-passenger-v1", "universal-abstract-v1"],
+      mapOrientation: { fore: "right" as const, port: "top" as const, pitchDegrees: -2 },
+    };
+  }
+  const familyId = seed.archetype === "vintage_yacht" ? "maritime-yacht-v1"
+    : seed.archetype === "private_estate" ? "estate-v1"
+      : `${seed.archetype.replaceAll("_", "-")}-v1`;
+  const mapStyle = seed.topology === "estate" ? "estate-grid-v1" as const
+    : seed.topology === "radial" ? "radial-module-v1" as const
+      : seed.topology === "pods" ? "pod-network-v1" as const
+        : seed.topology === "linear" ? "linear-carriage-v1" as const
+          : "abstract-venue-v1" as const;
+  return {
+    version: 1 as const,
+    familyId,
+    mapStyle,
+    physicalScaleClass,
+    entryAction: seed.exteriorMode === "grounds" ? `Enter the ${seed.noun}` : `Enter the ${seed.noun}`,
+    compatibleExteriorFamilies: [familyId, "universal-abstract-v1"],
+    compatibleAcousticFamilies: [familyId, "universal-abstract-v1"],
+    mapOrientation: { fore: "right" as const, port: "top" as const, pitchDegrees: 0 },
+  };
+}
+
+const PASSENGER_HULL_OUTLINE = [
+  { x: 0.04, y: 0.34 }, { x: 0.14, y: 0.16 }, { x: 0.67, y: 0.08 }, { x: 0.9, y: 0.22 }, { x: 0.97, y: 0.5 },
+  { x: 0.9, y: 0.78 }, { x: 0.67, y: 0.92 }, { x: 0.14, y: 0.84 }, { x: 0.04, y: 0.66 },
+];
+
 export function createMysteryVenueProposalV1(args: {
   id: string;
   description?: string;
   length: MysteryVenueLengthV1;
   nonce?: string;
   creativeDraft?: MysteryVenueCreativeDraftV1 | null;
+  intent?: MysteryVenueIntentV1;
 }): MysteryVenueProposalV1 {
   const description = args.description?.trim() ?? "";
+  const intent = args.intent ?? deriveMysteryVenueIntentV1(description);
   const catalogSeed = venueSeed(description);
   const creativeDraft = parseMysteryVenueCreativeDraftV1(args.creativeDraft);
-  const seed: VenueSeed = creativeDraft
+  const draftMatch = matchMysteryVenueCreativeDraftV1(intent, creativeDraft);
+  const acceptedDraft = draftMatch.status === "matched" ? creativeDraft : null;
+  const seed: VenueSeed = acceptedDraft && intent.archetype === "custom"
     ? {
-        kind: creativeDraft.kind,
-        kindLabel: creativeDraft.kindLabel,
-        noun: creativeDraft.placeNoun,
-        topology: creativeDraft.topology,
-        tierNoun: creativeDraft.tierNoun,
-        exteriorMode: creativeDraft.exteriorMode,
-        title: creativeDraft.title,
-        summary: creativeDraft.environmentSummary,
-        atmosphere: creativeDraft.atmosphere,
-        connector: creativeDraft.connectorLabel,
-        rooms: creativeDraft.rooms,
+        archetype: "custom",
+        era: intent.era,
+        physicalScaleClass: intent.physicalScaleClass,
+        kind: acceptedDraft.kind,
+        kindLabel: acceptedDraft.kindLabel,
+        noun: acceptedDraft.placeNoun,
+        topology: acceptedDraft.topology,
+        tierNoun: acceptedDraft.tierNoun,
+        exteriorMode: acceptedDraft.exteriorMode,
+        title: acceptedDraft.title,
+        summary: acceptedDraft.environmentSummary,
+        atmosphere: acceptedDraft.atmosphere,
+        connector: acceptedDraft.connectorLabel,
+        rooms: acceptedDraft.rooms,
       }
-    : catalogSeed;
+    : acceptedDraft
+      ? {
+          ...catalogSeed,
+          archetype: intent.archetype,
+          era: intent.era,
+          physicalScaleClass: intent.physicalScaleClass,
+          title: acceptedDraft.title,
+          summary: acceptedDraft.environmentSummary,
+          atmosphere: acceptedDraft.atmosphere,
+          rooms: catalogSeed.rooms.map((serverRoom, index) => {
+            const dressing = acceptedDraft.rooms[index];
+            return dressing
+              ? {
+                  ...serverRoom,
+                  name: dressing.name,
+                  emoji: dressing.emoji,
+                  role: dressing.role,
+                  anchors: dressing.anchors,
+                }
+              : serverRoom;
+          }),
+        }
+      : {
+          ...catalogSeed,
+          archetype: intent.archetype === "custom" ? catalogSeed.archetype : intent.archetype,
+          era: intent.era === "unspecified" ? catalogSeed.era : intent.era,
+          physicalScaleClass: intent.physicalScaleClass,
+        };
   const length = normalizeMysteryVenueLengthV1(args.length);
-  const tierLabels = Array.from({ length: length.tiers }, (_, index) => `${seed.tierNoun} ${index + 1}`);
-  const seeds = expandedRooms(seed, length.rooms);
+  const tierLabels = venueTierLabels(seed, length);
   const entities: MansionLayoutEntityV2[] = [];
   const rooms: MansionLayoutRoomV2[] = [];
   const baseRoomsPerTier = Math.floor(length.rooms / length.tiers);
@@ -430,16 +808,30 @@ export function createMysteryVenueProposalV1(args: {
     { length: length.tiers },
     (_, index) => baseRoomsPerTier + (index < remainderRooms ? 1 : 0),
   );
-  const tierGeometries = tierCounts.map((count, index) => venueTierGeometry(seed.topology, index + 1, count));
+  const plannedRooms: PlannedVenueRoom[] = seed.archetype === "passenger_cruise_ship"
+    ? passengerCruiseRoomPlan(seed, length)
+    : expandedRooms(seed, length.rooms).map((source, index) => {
+        const tier = tierCounts.findIndex((_, tierIndex) =>
+          index < tierCounts.slice(0, tierIndex + 1).reduce((sum, count) => sum + count, 0)
+        ) + 1;
+        return { source, tier };
+      });
+  const actualTierCounts = Array.from({ length: length.tiers }, (_, index) =>
+    plannedRooms.filter((entry) => entry.tier === index + 1).length
+  );
+  const tierGeometries = actualTierCounts.map((count, index) =>
+    seed.archetype === "passenger_cruise_ship"
+      ? passengerShipTierGeometry(plannedRooms, index + 1)
+      : venueTierGeometry(seed.topology, index + 1, count)
+  );
   for (let tier = 1; tier <= length.tiers; tier += 1) {
     entities.push(...tierGeometries[tier - 1]!.corridors);
   }
-  seeds.forEach((source, index) => {
-    const tier = tierCounts.findIndex((_, tierIndex) =>
-      index < tierCounts.slice(0, tierIndex + 1).reduce((sum, count) => sum + count, 0)
-    ) + 1;
-    const priorRooms = tierCounts.slice(0, tier - 1).reduce((sum, count) => sum + count, 0);
-    const placement = tierGeometries[tier - 1]!.rooms[index - priorRooms]!;
+  const tierRoomOffsets = new Map<number, number>();
+  plannedRooms.forEach(({ source, tier, spatial }, index) => {
+    const tierIndex = tierRoomOffsets.get(tier) ?? 0;
+    tierRoomOffsets.set(tier, tierIndex + 1);
+    const placement = tierGeometries[tier - 1]!.rooms[tierIndex]!;
     const venueRoom: MansionLayoutRoomV2 = {
       kind: "room",
       id: `room:venue-${index + 1}`,
@@ -459,11 +851,13 @@ export function createMysteryVenueProposalV1(args: {
         version: 1,
         role: index === 0 ? "entry" : source.role,
         footprint: { width: placement.width, height: placement.height },
+        ...(spatial ? { spatial } : {}),
       },
     };
     rooms.push(venueRoom);
     entities.push(venueRoom);
   });
+  const presentation = venuePresentation(seed, intent.physicalScaleClass);
   const profile: MysteryVenueProfileV1 = {
     version: 1,
     kind: seed.kind,
@@ -474,21 +868,52 @@ export function createMysteryVenueProposalV1(args: {
     entryRoomId: rooms[0]!.id,
     exteriorMode: seed.exteriorMode,
     environmentSummary: seed.summary,
+    intent,
+    physicalScaleClass: intent.physicalScaleClass,
+    presentation,
   };
+  const verticalConnectors = seed.archetype === "passenger_cruise_ship"
+    ? Array.from({ length: Math.max(0, length.tiers - 1) }, (_, index) => {
+        const lowerTier = index + 1;
+        const upperTier = index + 2;
+        return [
+          {
+            id: `connector:forward-lift:${lowerTier}-${upperTier}`,
+            kind: "lift" as const,
+            lowerEntityId: `corridor:tier-${lowerTier}`,
+            upperEntityId: `corridor:tier-${upperTier}`,
+            label: "Forward lifts",
+            shaftId: "shaft:forward-lifts",
+            lowerPoint: { x: 0.78, y: 0.5 },
+            upperPoint: { x: 0.78, y: 0.5 },
+          },
+          {
+            id: `connector:aft-stairs:${lowerTier}-${upperTier}`,
+            kind: "stairs" as const,
+            lowerEntityId: `corridor:tier-${lowerTier}`,
+            upperEntityId: `corridor:tier-${upperTier}`,
+            label: "Aft stairs",
+            shaftId: "shaft:aft-stairs",
+            lowerPoint: { x: 0.24, y: 0.5 },
+            upperPoint: { x: 0.24, y: 0.5 },
+          },
+        ];
+      }).flat()
+    : Array.from({ length: Math.max(0, length.tiers - 1) }, (_, index) => ({
+        id: `connector:tier-${index + 1}-${index + 2}`,
+        kind: seed.archetype === "vintage_yacht" ? "ladder" as const : "lift" as const,
+        lowerEntityId: `corridor:tier-${index + 1}`,
+        upperEntityId: `corridor:tier-${index + 2}`,
+        label: seed.connector,
+      }));
   let layout: MansionLayoutV2 = {
     version: 2,
     envelope: { columns: 16, rows: 12 },
     entities,
     doors: [],
-    verticalConnectors: Array.from({ length: Math.max(0, length.tiers - 1) }, (_, index) => ({
-      id: `connector:tier-${index + 1}-${index + 2}`,
-      kind: seed.kind === "vessel" ? "ladder" as const : "lift" as const,
-      lowerEntityId: `corridor:tier-${index + 1}`,
-      upperEntityId: `corridor:tier-${index + 2}`,
-      label: seed.connector,
-    })),
+    verticalConnectors,
     placementAnchors: rooms.flatMap((venueRoom, index) => {
-      const source = seeds[index]!;
+      const source = plannedRooms[index]!.source;
       return source.anchors.map((name, anchorIndex) => ({
         id: `anchor:${index + 1}:${anchorIndex + 1}`,
         roomId: venueRoom.id,
@@ -500,6 +925,15 @@ export function createMysteryVenueProposalV1(args: {
     lights: [],
     roomArtCandidates: [],
     venueProfile: profile,
+    venuePresentation: seed.archetype === "passenger_cruise_ship"
+      ? {
+          version: 1,
+          tierOutlines: Array.from({ length: length.tiers }, (_, index) => ({
+            floor: index + 1,
+            points: PASSENGER_HULL_OUTLINE.map((point) => ({ ...point })),
+          })),
+        }
+      : undefined,
   };
   for (const entity of entities) layout = addAutoCenteredMansionLayoutV2Doors(layout, entity.id);
   return {
@@ -509,10 +943,22 @@ export function createMysteryVenueProposalV1(args: {
     title: seed.title,
     description: description || seed.summary,
     atmosphere: seed.atmosphere,
-    source: creativeDraft ? "model" : "catalog",
-    ...(creativeDraft
-      ? { creativeDraft }
-      : { editableDraftNotice: "The model was unavailable or returned an invalid plan, so PRISM supplied an editable structured draft without generating art." }),
+    source: acceptedDraft ? (intent.archetype === "custom" ? "model" : "hybrid") : "catalog",
+    intent,
+    match: acceptedDraft
+      ? draftMatch
+      : {
+          version: 1,
+          status: intent.archetype === "custom" ? "confirmation_required" : "matched",
+          reasons: creativeDraft && draftMatch.status === "rejected"
+            ? [...draftMatch.reasons, "PRISM replaced it with the compatible catalog venue shown here."]
+            : draftMatch.reasons,
+        },
+    ...(acceptedDraft
+      ? { creativeDraft: acceptedDraft }
+      : { editableDraftNotice: creativeDraft && draftMatch.status === "rejected"
+          ? "The generated venue did not match the frozen brief. PRISM replaced it with this compatible editable structured draft from the catalog."
+          : "The model was unavailable or returned an invalid plan, so PRISM supplied this compatible editable structured draft from the catalog without generating art." }),
     length,
     profile,
     layout,

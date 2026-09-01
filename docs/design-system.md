@@ -27,6 +27,17 @@ global 1280×900 minimum, a blocking narrow-viewport cover, or whole-app
   their independent picker widths before controls can overlap. Zen/Chat empty
   Homes own vertical scrolling below 800px logical height and reserve enough
   trailing space to lift every bot tile above a grown composer.
+- The shared navbar is permanent on every authenticated applet surface and
+  always identifies PRISM plus the active applet. Full-screen authoring and
+  live sessions reserve its height instead of covering or collapsing it.
+  Sessions disable navigation and configuration controls, but Appearance
+  remains available so Light/Dark mode can change anywhere. Right-side panels
+  stay beneath the navbar and do not duplicate its theme toggle. Outside a
+  session, the PRISM wordmark returns to the current applet's home; Chat is an
+  explicit destination in the applet picker. Applet-local session chrome never
+  claims viewport `top: 0`; fixed stage actions and blocking transitions begin
+  below the measured shared-navbar height so zoomed, wrapped, and narrow bars
+  cannot collide with them.
 - Immersive applets may contain an authored stage ratio locally, but app chrome,
   dialogs, pointer coordinates, and typography remain in unscaled CSS pixels.
 

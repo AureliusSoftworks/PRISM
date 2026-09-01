@@ -971,15 +971,18 @@ export function listConversationSummaries(
               ${zenWallpaperSelect}
               (SELECT m.bot_id FROM messages m
                  WHERE m.conversation_id = c.id
+                   AND m.user_id = c.user_id
                    AND m.role = 'assistant'
                  ORDER BY m.created_at DESC LIMIT 1) AS last_bot_id,
               (SELECT b.color FROM messages m
-                 LEFT JOIN bots b ON b.id = m.bot_id
+                 LEFT JOIN bots b ON b.id = m.bot_id AND b.user_id = m.user_id
                  WHERE m.conversation_id = c.id
+                   AND m.user_id = c.user_id
                    AND m.role = 'assistant'
                  ORDER BY m.created_at DESC LIMIT 1) AS last_bot_color,
               EXISTS (SELECT 1 FROM messages m
                         WHERE m.conversation_id = c.id
+                          AND m.user_id = c.user_id
                           AND m.role = 'assistant') AS has_assistant_reply
          FROM conversations c
         WHERE c.user_id = ?

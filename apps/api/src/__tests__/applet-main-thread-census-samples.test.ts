@@ -20,6 +20,31 @@ function fixture(): DatabaseSync {
      VALUES ('user-1', 'census@example.com', 'Producer', 'hash', 'salt',
              'cipher', 'iv', 'tag', ?, ?)`,
   ).run("2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
+  db.prepare(
+    `INSERT INTO bots (id, user_id, name, created_at, updated_at)
+     VALUES ('host-1', 'user-1', 'Host', 'now', 'now'),
+            ('guest-1', 'user-1', 'Guest', 'now', 'now')`,
+  ).run();
+  db.prepare(
+    `INSERT INTO conversations
+       (id, user_id, title, conversation_mode, created_at, updated_at)
+     VALUES ('s-1', 'user-1', 'Coffee one', 'coffee', 'now', 'now'),
+            ('s-2', 'user-1', 'Coffee two', 'coffee', 'now', 'now')`,
+  ).run();
+  db.prepare(
+    `INSERT INTO botcast_shows
+       (id, user_id, host_bot_id, name, premise, hosting_style, accent_color,
+        created_at, updated_at)
+     VALUES ('show-1', 'user-1', 'host-1', 'Show', 'Premise', 'Direct',
+             '#abcdef', 'now', 'now')`,
+  ).run();
+  db.prepare(
+    `INSERT INTO botcast_episodes
+       (id, user_id, show_id, host_bot_id, guest_bot_id, guest_kind,
+        guest_name, title, topic, started_at, created_at, updated_at)
+     VALUES ('s-1', 'user-1', 'show-1', 'host-1', 'guest-1', 'bot',
+             'Guest', 'Episode', 'Topic', 'now', 'now', 'now')`,
+  ).run();
   return db;
 }
 

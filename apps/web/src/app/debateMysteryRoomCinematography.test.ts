@@ -102,9 +102,10 @@ describe("Whodunnit investigation room cinematography", () => {
     assert.match(experience, /<div className=\{styles\.roomParallaxLayer\}>[\s\S]*?<DebateMysteryRoomCinematographyLayer[\s\S]*?room=\{currentRoom\}[\s\S]*?lights=\{currentRoomLights\}[\s\S]*?templateLightingAligned=\{currentRoomUsesTemplateLightGeometry\}[\s\S]*?blurred=\{roomActorVisible\}[\s\S]*?reducedMotion=\{reducedMotion\}/u);
     assert.match(experience, /mansionLayout\.lights\.filter\(\(light\) => light\.roomId === currentRoom\.id\)/u);
     assert.match(experience, /mysteryRoomUsesTemplateLightGeometryV1\(\{[\s\S]*imageId: currentRoom\.imageId,[\s\S]*acceptedRoomAssetId:[\s\S]*sealedAsset: currentRoom\.sealedAsset/u);
-    assert.match(experience, /const currentRoomMansionAssetId = currentRoomLayoutEntity[\s\S]*effectiveInvestigationArtStyle === "mosaic"[\s\S]*currentRoomLayoutEntity\.acceptedRoomAssetId[\s\S]*currentRoomIllustratedAssetId/u);
-    assert.match(experience, /whodunnitMansionRoomArtUrl\([\s\S]*state\.config\.mansionSnapshot\.sourceBundleId,[\s\S]*currentRoomMansionAssetId,[\s\S]*effectiveInvestigationArtStyle/u);
-    assert.match(experience, /const currentRoomImageUrl = currentRoomAssetUrl[\s\S]*\?\? currentRoomAcceptedAssetUrl[\s\S]*\?\? \(currentRoom\?\.imageId/u);
+    assert.match(experience, /const currentRoomMosaicMansionAssetId = currentRoomLayoutEntity[\s\S]*currentRoomLayoutEntity\.acceptedRoomAssetId/u);
+    assert.match(experience, /const currentRoomAcceptedUpgradeUrl = currentRoomIllustratedAssetId[\s\S]*currentRoomHasIllustratedUpgrade/u);
+    assert.match(experience, /const currentRoomMosaicUrl = currentRoomMosaicAssetUrl[\s\S]*\?\? currentRoomAcceptedMosaicUrl[\s\S]*\?\? \(currentRoom\?\.imageId/u);
+    assert.match(experience, /const currentRoomImageUrl = currentRoomArtStyle === "illustrated"[\s\S]*currentRoomUpgradeAssetUrl \?\? currentRoomAcceptedUpgradeUrl \?\? currentRoomMosaicUrl/u);
     assert.match(component, /mansionDynamicLightFrameV2\(light, elapsedMs, reducedMotion\)/u);
     assert.match(component, /data-light-source=\{lightSource\}/u);
     assert.match(component, /window\.cancelAnimationFrame\(animationFrame\)/u);

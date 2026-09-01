@@ -4066,7 +4066,7 @@ export async function refreshConversationTitle(
       `SELECT c.id, c.title, c.incognito, c.updated_at,
               (SELECT b.name
                  FROM messages m
-                 LEFT JOIN bots b ON b.id = m.bot_id
+                 LEFT JOIN bots b ON b.id = m.bot_id AND b.user_id = m.user_id
                 WHERE m.conversation_id = c.id
                   AND m.user_id = c.user_id
                   AND m.role = 'assistant'
@@ -5639,9 +5639,6 @@ export async function buildMentionedBotPromptContexts(args: {
   const pronunciationSelect = botColumns.has("name_pronunciation")
     ? "name_pronunciation"
     : "NULL AS name_pronunciation";
-  const visibilityPredicate = botColumns.has("visibility")
-    ? "(user_id = ? OR visibility = 'public')"
-    : "user_id = ?";
   const chatEnabledPredicate = botColumns.has("chat_enabled")
     ? " AND chat_enabled = 1"
     : "";
@@ -5651,10 +5648,10 @@ export async function buildMentionedBotPromptContexts(args: {
       .prepare(
         `SELECT id, name, ${pronunciationSelect}, ${systemPromptSelect}, ${powersSelect}
          FROM bots
-         WHERE id IN (${placeholders})
-           AND ${visibilityPredicate}${chatEnabledPredicate}`
+         WHERE user_id = ?
+           AND id IN (${placeholders})${chatEnabledPredicate}`
       )
-      .all(...mentionIds, args.userId) as unknown as MentionedBotContextRow[];
+      .all(args.userId, ...mentionIds) as unknown as MentionedBotContextRow[];
   } catch {
     return { contexts: [], overflowNames: [], targetNames: [] };
   }
@@ -7163,8 +7160,8 @@ function readBotNameForZenPersona(
 ): string {
   if (!botId) return "PRISM";
   const row = db
-    .prepare("SELECT name FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')")
-    .get(botId, userId) as { name?: string | null } | undefined;
+    .prepare("SELECT name FROM bots WHERE user_id = ? AND id = ?")
+    .get(userId, botId) as { name?: string | null } | undefined;
   return row?.name?.trim() || "the selected Facet";
 }
 
@@ -7237,7 +7234,7 @@ function zenAutonomyPersonaCandidates(
     .prepare(
       `SELECT id, name
          FROM bots
-        WHERE (user_id = ? OR visibility = 'public')
+        WHERE user_id = ?
           ${chatEnabledPredicate}
         ORDER BY ${orderBy}
         LIMIT 40`
@@ -7263,7 +7260,7 @@ function recentZenAutonomyContextLines(
     .prepare(
       `SELECT m.role, m.content, COALESCE(b.name, '') AS bot_name
          FROM messages m
-         LEFT JOIN bots b ON b.id = m.bot_id
+         LEFT JOIN bots b ON b.id = m.bot_id AND b.user_id = m.user_id
         WHERE m.conversation_id = ?
           AND m.user_id = ?
           AND m.role IN ('user', 'assistant')
@@ -7623,19 +7620,9 @@ export function upsertBotOpinion(args: {
   const { db, userId, botId, score, trend, lastReason, recentReasons, repairCount, updatedAt } = args;
   const opinion = buildBotOpinion(score, trend, lastReason, recentReasons, repairCount, updatedAt);
   db.prepare(
-    `INSERT INTO bot_opinions (
+    `INSERT OR REPLACE INTO bot_opinions (
       user_id, bot_scope_key, bot_id, score, band, boundary_level, trend, last_reason, recent_reasons, repair_count, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(user_id, bot_scope_key) DO UPDATE SET
-      bot_id = excluded.bot_id,
-      score = excluded.score,
-      band = excluded.band,
-      boundary_level = excluded.boundary_level,
-      trend = excluded.trend,
-      last_reason = excluded.last_reason,
-      recent_reasons = excluded.recent_reasons,
-      repair_count = excluded.repair_count,
-      updated_at = excluded.updated_at`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     userId,
     opinionScopeKey(botId),
@@ -7848,17 +7835,9 @@ function upsertSessionOpinion(args: {
     ...(existing?.recentReasons ?? []),
   ].slice(0, OPINION_REASON_LIMIT);
   db.prepare(
-    `INSERT INTO session_opinions (
+    `INSERT OR REPLACE INTO session_opinions (
       user_id, conversation_id, bot_scope_key, bot_id, score, band, trend, last_reason, recent_reasons, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(user_id, conversation_id, bot_scope_key) DO UPDATE SET
-      bot_id = excluded.bot_id,
-      score = excluded.score,
-      band = excluded.band,
-      trend = excluded.trend,
-      last_reason = excluded.last_reason,
-      recent_reasons = excluded.recent_reasons,
-      updated_at = excluded.updated_at`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     userId,
     conversationId,
@@ -8429,15 +8408,18 @@ export function loadPersistedConversationForChatResponse(args: {
               ${zenWallpaperSelect}
               (SELECT m.bot_id FROM messages m
                  WHERE m.conversation_id = c.id
+                   AND m.user_id = c.user_id
                    AND m.role = 'assistant'
                  ORDER BY m.created_at DESC LIMIT 1) AS last_bot_id,
               (SELECT b.color FROM messages m
-                 LEFT JOIN bots b ON b.id = m.bot_id
+                 LEFT JOIN bots b ON b.id = m.bot_id AND b.user_id = m.user_id
                  WHERE m.conversation_id = c.id
+                   AND m.user_id = c.user_id
                    AND m.role = 'assistant'
                  ORDER BY m.created_at DESC LIMIT 1) AS last_bot_color,
               EXISTS (SELECT 1 FROM messages m
                         WHERE m.conversation_id = c.id
+                          AND m.user_id = c.user_id
                           AND m.role = 'assistant') AS has_assistant_reply
          FROM conversations c
         WHERE c.id = ? AND c.user_id = ?`
@@ -8482,7 +8464,7 @@ export function loadPersistedConversationForChatResponse(args: {
       `SELECT m.id, m.role, m.content, m.provider, m.model, m.bot_id, m.tool_payload, m.created_at,
               b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
        FROM messages m
-       LEFT JOIN bots b ON b.id = m.bot_id
+       LEFT JOIN bots b ON b.id = m.bot_id AND b.user_id = m.user_id
        WHERE m.conversation_id = ? AND m.user_id = ?
        ORDER BY m.created_at ${conversationModeOut === "zen" ? "DESC" : "ASC"},
                 m.rowid ${conversationModeOut === "zen" ? "DESC" : "ASC"}
@@ -9922,7 +9904,7 @@ export async function processChatMessage(
       `SELECT m.id, m.role, m.content, m.provider, m.model, m.bot_id, m.tool_payload, m.created_at,
               b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
        FROM messages m
-       LEFT JOIN bots b ON b.id = m.bot_id
+       LEFT JOIN bots b ON b.id = m.bot_id AND b.user_id = m.user_id
        WHERE m.conversation_id = ? AND m.user_id = ?
          AND (? IS NULL OR m.created_at > ?)
        ORDER BY m.created_at DESC
@@ -11914,15 +11896,18 @@ export async function processChatMessage(
               ${zenWallpaperSelect}
               (SELECT m.bot_id FROM messages m
                  WHERE m.conversation_id = c.id
+                   AND m.user_id = c.user_id
                    AND m.role = 'assistant'
                  ORDER BY m.created_at DESC LIMIT 1) AS last_bot_id,
               (SELECT b.color FROM messages m
-                 LEFT JOIN bots b ON b.id = m.bot_id
+                 LEFT JOIN bots b ON b.id = m.bot_id AND b.user_id = m.user_id
                  WHERE m.conversation_id = c.id
+                   AND m.user_id = c.user_id
                    AND m.role = 'assistant'
                  ORDER BY m.created_at DESC LIMIT 1) AS last_bot_color,
               EXISTS (SELECT 1 FROM messages m
                         WHERE m.conversation_id = c.id
+                          AND m.user_id = c.user_id
                           AND m.role = 'assistant') AS has_assistant_reply
          FROM conversations c
         WHERE c.id = ? AND c.user_id = ?`
@@ -11962,7 +11947,7 @@ export async function processChatMessage(
       `SELECT m.id, m.role, m.content, m.provider, m.model, m.bot_id, m.tool_payload, m.created_at,
               b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
        FROM messages m
-       LEFT JOIN bots b ON b.id = m.bot_id
+       LEFT JOIN bots b ON b.id = m.bot_id AND b.user_id = m.user_id
        WHERE m.conversation_id = ? AND m.user_id = ?
        ORDER BY m.created_at ${conversationModeOut === "zen" ? "DESC" : "ASC"},
                 m.rowid ${conversationModeOut === "zen" ? "DESC" : "ASC"}

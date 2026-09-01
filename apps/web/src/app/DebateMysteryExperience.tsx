@@ -52,13 +52,12 @@ import {
 } from "./debateMysteryMusic";
 import { mysteryInvestigationTargetAt } from "./debateMysteryRoomArt";
 import {
-  DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE,
-  readWhodunnitInvestigationArtStyle,
+  readWhodunnitRoomUpgradeEnabled,
   whodunnitBundledRoomArtPath,
   whodunnitInvestigationAvatarPresentation,
+  whodunnitRoomArtStyleForUpgrade,
   whodunnitSavedRoomArtUrl,
-  writeWhodunnitInvestigationArtStyle,
-  type WhodunnitInvestigationArtStyle,
+  writeWhodunnitRoomUpgradeEnabled,
 } from "./debateMysteryInvestigationArt";
 import {
   debateMysteryBundledEvidenceAssetPath,
@@ -607,8 +606,10 @@ export function DebateMysteryPlay(
   const [notebook, setNotebook] = useState<DebateMysteryNotebookV2 | null>(null);
   const [deskOpen, setDeskOpen] = useState(false);
   const [caseFileOpen, setCaseFileOpen] = useState(false);
-  const [investigationArtStyle, setInvestigationArtStyle] =
-    useState<WhodunnitInvestigationArtStyle>(DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE);
+  const [roomUpgradeEnabled, setRoomUpgradeEnabled] = useState(false);
+  const [failedUpgradeRoomIds, setFailedUpgradeRoomIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [spatialView, setSpatialView] = useState<"mansion" | "room">(
     state.activeActivity ? "room" : "mansion",
   );
@@ -640,14 +641,15 @@ export function DebateMysteryPlay(
     occurredAt: string;
   }>>([]);
   useEffect(() => {
-    setInvestigationArtStyle(readWhodunnitInvestigationArtStyle(
+    setRoomUpgradeEnabled(readWhodunnitRoomUpgradeEnabled(
       window.localStorage,
       props.session.id,
     ));
+    setFailedUpgradeRoomIds(new Set());
   }, [props.session.id]);
-  const selectInvestigationArtStyle = useCallback((style: WhodunnitInvestigationArtStyle): void => {
-    setInvestigationArtStyle(style);
-    writeWhodunnitInvestigationArtStyle(window.localStorage, style, props.session.id);
+  const selectRoomUpgradeEnabled = useCallback((enabled: boolean): void => {
+    setRoomUpgradeEnabled(enabled);
+    writeWhodunnitRoomUpgradeEnabled(window.localStorage, enabled, props.session.id);
   }, [props.session.id]);
 
   const currentRoom =
@@ -661,6 +663,10 @@ export function DebateMysteryPlay(
   const selectedRoom =
     state.rooms.find((room) => room.id === selectedRoomId) ?? currentRoom;
   const template = roomTemplate(currentRoom.templateId);
+  const investigationArtStyle = whodunnitRoomArtStyleForUpgrade(
+    roomUpgradeEnabled,
+    !failedUpgradeRoomIds.has(currentRoom.id),
+  );
   const roomArtworkSrc = currentRoom.imageId
     ? whodunnitSavedRoomArtUrl(currentRoom.imageId, investigationArtStyle)
     : whodunnitBundledRoomArtPath(template.bundledAssetPath, investigationArtStyle);
@@ -2159,9 +2165,8 @@ export function DebateMysteryPlay(
             <header>
               <div><p className={styles.eyebrow}>{(currentRoom.kind ?? "room").replace("_", " ")}</p><h2>{currentRoom.name ?? "Undiscovered room"}</h2></div>
               <div className={styles.roomHeaderActions}>
-                <div className={styles.roomArtStyleToggle} role="group" aria-label="Investigation room art" data-tutorial-target="mystery-v2-room-art-style">
-                  <button type="button" aria-pressed={investigationArtStyle === "mosaic"} onClick={() => selectInvestigationArtStyle("mosaic")}>Pixel Art</button>
-                  <button type="button" aria-pressed={investigationArtStyle === "illustrated"} onClick={() => selectInvestigationArtStyle("illustrated")}>Realistic</button>
+                <div className={styles.roomArtStyleToggle} role="group" aria-label="Upgraded room art" data-tutorial-target="mystery-v2-room-art-upgrade">
+                  <button type="button" aria-pressed={roomUpgradeEnabled} onClick={() => selectRoomUpgradeEnabled(!roomUpgradeEnabled)}>Upgraded</button>
                 </div>
                 {suspectRoomFocus === "search" ? <button type="button" className={styles.leaveInvestigation} data-ui-sfx="none" disabled={busy} onClick={() => void finishActiveActivity()}>← Return to room</button> : suspectRoomFocus === "observe" ? <button type="button" className={styles.backToMansion} data-ui-sfx="none" onClick={showMansion}>← Mansion</button> : null}
               </div>
@@ -2217,7 +2222,10 @@ export function DebateMysteryPlay(
               onPointerLeave={() => setLens((current) => ({ ...current, visible: false }))}
             >
               {roomArtworkSrc ? (
-                <img className={styles.generatedRoom} data-art-style={investigationArtStyle} src={roomArtworkSrc} alt="" />
+                <img className={styles.generatedRoom} data-art-style={investigationArtStyle} src={roomArtworkSrc} alt="" onError={() => {
+                  if (investigationArtStyle !== "illustrated") return;
+                  setFailedUpgradeRoomIds((current) => new Set([...current, currentRoom.id]));
+                }} />
               ) : (
                 <>
                   <div className={styles.roomArchitecture} aria-hidden="true"><span /><span /><span /><i /><i /></div>

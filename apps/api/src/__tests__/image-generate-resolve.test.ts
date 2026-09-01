@@ -469,11 +469,15 @@ describe("helpers", () => {
   it("conversationHasAssistantWithBotId detects assistant rows", () => {
     const db = makeDb();
     assert.equal(
-      conversationHasAssistantWithBotId(db, "conv1", "bot-b"),
+      conversationHasAssistantWithBotId(db, "u1", "conv1", "bot-b"),
       true
     );
     assert.equal(
-      conversationHasAssistantWithBotId(db, "conv1", "bot-a"),
+      conversationHasAssistantWithBotId(db, "u1", "conv1", "bot-a"),
+      false
+    );
+    assert.equal(
+      conversationHasAssistantWithBotId(db, "other", "conv1", "bot-b"),
       false
     );
   });

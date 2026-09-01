@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { OwnerScopedNotFoundError } from "./owner-first-repository.ts";
 import {
   composeBotRuntimePersona,
   listSafeLibraryBotMetadata,
@@ -3576,7 +3577,7 @@ function loadBotProfile(
         repetition_penalty: number | null;
       }
     | undefined;
-  if (!row) throw new Error("Bot not found or is not eligible for Signal.");
+  if (!row) throw new OwnerScopedNotFoundError();
   return {
     id: row.id,
     name: row.name,

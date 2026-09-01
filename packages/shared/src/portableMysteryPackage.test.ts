@@ -15,6 +15,8 @@ import {
   validateMansionPackageManifestV1,
   validateWhodunnitPackageManifestV1,
 } from "./portableMysteryPackage.ts";
+import { mansionLayoutV2ToLegacyRooms } from "./mansionLayoutV2.ts";
+import { createMysteryVenueProposalV1 } from "./mysteryVenue.ts";
 import { deriveMansionMusicIdentityV1 } from "./mansionMusic.ts";
 import {
   WHODUNNIT_PROP_ARCHETYPE_IDS_V1,
@@ -97,6 +99,57 @@ test("mansion manifests accept optional exterior scale while keeping V1 packages
   assert.match(
     validateMansionPackageManifestV1({ ...legacy, scaleClass: "colossal" }).join("\n"),
     /scaleClass is invalid/u,
+  );
+});
+
+test("minor-3 packages preserve ship presentation and reject hostile spatial metadata", () => {
+  const proposal = createMysteryVenueProposalV1({
+    id: "proposal:portable-passenger-ship",
+    description: "A modern full-size passenger cruise ship, not a yacht or estate",
+    length: { id: "standard", rooms: 10, suspects: 6 },
+  });
+  const manifest = mansionManifest();
+  manifest.formatVersion = { major: 1, minor: 3 };
+  manifest.title = proposal.title;
+  manifest.floorCount = 2;
+  manifest.layoutV2 = proposal.layout;
+  manifest.venueProfile = proposal.profile;
+  manifest.rooms = mansionLayoutV2ToLegacyRooms(proposal.layout).map((room) => {
+    const { assignedSuspectSeatId: _assignedSuspectSeatId, ...portableRoom } = room;
+    return {
+      ...portableRoom,
+      slots: room.slots ?? [],
+      roomAssetId: "room-art",
+      propAssetIds: [],
+    };
+  });
+  assert.deepEqual(validateMansionPackageManifestV1(manifest), []);
+  const decoded = structuredClone(manifest);
+  assert.deepEqual(decoded.venueProfile, proposal.profile);
+  assert.deepEqual(decoded.layoutV2.venuePresentation, proposal.layout.venuePresentation);
+  assert.deepEqual(decoded.layoutV2.verticalConnectors, proposal.layout.verticalConnectors);
+
+  const hostileOutline = structuredClone(manifest);
+  hostileOutline.layoutV2.venuePresentation.tierOutlines[0].points[0].x = 1.5;
+  assert.match(
+    validateMansionPackageManifestV1(hostileOutline).join("\n"),
+    /outline|normalized|bounds/iu,
+  );
+
+  const hostileLanding = structuredClone(manifest);
+  const connector = hostileLanding.layoutV2.verticalConnectors[0];
+  if (connector) connector.lowerPoint = { x: -0.1, y: 0.5 };
+  assert.match(
+    validateMansionPackageManifestV1(hostileLanding).join("\n"),
+    /landing|normalized|bounds/iu,
+  );
+
+  const hostileFamily = structuredClone(manifest);
+  hostileFamily.layoutV2.venueProfile.presentation.familyId = "../mansion";
+  hostileFamily.venueProfile.presentation.familyId = "../mansion";
+  assert.match(
+    validateMansionPackageManifestV1(hostileFamily).join("\n"),
+    /family|presentation/iu,
   );
 });
 
@@ -231,7 +284,7 @@ test("mansion manifests carry an optional titled, sealed music identity while le
   );
 });
 
-test("mansion manifests carry synthesized Pixel Art, retain legacy Mosaic compatibility, and accept optional realistic plates", () => {
+test("mansion manifests carry a Mosaic base, retain legacy wire compatibility, and accept optional Upgraded derivatives", () => {
   const manifest = mansionManifest();
   assert.equal(CURRENT_MANSION_ROOM_ART_CONTRACT, DEFAULT_MANSION_ROOM_ART_CONTRACT_V6);
   assert.equal(CURRENT_MANSION_ROOM_ART_CONTRACT.defaultStyle, "pixel-art");

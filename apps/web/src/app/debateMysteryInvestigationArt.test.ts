@@ -3,47 +3,58 @@ import { readFileSync, readdirSync } from "node:fs";
 import { describe, it } from "node:test";
 import { CURRENT_MANSION_ROOM_ART_CONTRACT } from "@localai/shared";
 import {
-  DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE,
+  DEFAULT_WHODUNNIT_ROOM_UPGRADE_ENABLED,
   WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION,
-  readWhodunnitInvestigationArtStyle,
+  WHODUNNIT_ROOM_UPGRADE_STORAGE_KEY,
+  readWhodunnitRoomUpgradeEnabled,
   whodunnitBundledRoomArtPath,
   whodunnitBundledRoomArtPathForRoom,
   whodunnitInvestigationAvatarPresentation,
   whodunnitIllustratedRoomSubjectId,
   whodunnitMansionRoomArtUrl,
+  whodunnitRoomArtStyleForUpgrade,
   whodunnitSealedRoomArtUrl,
   whodunnitSavedRoomArtUrl,
-  writeWhodunnitInvestigationArtStyle,
+  writeWhodunnitRoomUpgradeEnabled,
+  whodunnitDiscoveredMansionRoomArtV1,
 } from "./debateMysteryInvestigationArt.ts";
 
-describe("Whodunnit investigation art style", () => {
-  it("defaults invalid and unavailable preferences to Pixel Art", () => {
-    assert.equal(DEFAULT_WHODUNNIT_INVESTIGATION_ART_STYLE, "mosaic");
+describe("Whodunnit room-art upgrade state", () => {
+  it("keeps Mosaic as the sole base and uses Forge only as an initial default", () => {
+    assert.equal(DEFAULT_WHODUNNIT_ROOM_UPGRADE_ENABLED, false);
     assert.equal(
       WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION,
       CURRENT_MANSION_ROOM_ART_CONTRACT.version,
     );
-    assert.equal(readWhodunnitInvestigationArtStyle(null), "mosaic");
-    assert.equal(readWhodunnitInvestigationArtStyle({ getItem: () => "unknown" }), "mosaic");
-    assert.equal(readWhodunnitInvestigationArtStyle({ getItem: () => "illustrated" }), "illustrated");
+    assert.equal(readWhodunnitRoomUpgradeEnabled(null, "case-1", true), true);
+    assert.equal(readWhodunnitRoomUpgradeEnabled({ getItem: () => "unknown" }, "case-1", false), false);
+    assert.equal(readWhodunnitRoomUpgradeEnabled({ getItem: () => null }, "case-1", true), true);
+    assert.equal(whodunnitRoomArtStyleForUpgrade(false, true), "mosaic");
+    assert.equal(whodunnitRoomArtStyleForUpgrade(true, true), "illustrated");
+    assert.equal(whodunnitRoomArtStyleForUpgrade(true, false), "mosaic");
   });
 
-  it("defaults every new case to Mosaic and persists upgrades only within that case", () => {
+  it("persists the Upgraded switch per case and migrates the former style preference", () => {
     const writes: Array<[string, string]> = [];
-    writeWhodunnitInvestigationArtStyle(
+    writeWhodunnitRoomUpgradeEnabled(
       { setItem: (key, value) => { writes.push([key, value]); } },
-      "illustrated",
+      true,
       "case-1",
     );
     assert.deepEqual(writes, [[
-      "prism.whodunnit.investigation-art-style.v1:case-1",
-      "illustrated",
+      `${WHODUNNIT_ROOM_UPGRADE_STORAGE_KEY}:case-1`,
+      "on",
     ]]);
     const storage = {
-      getItem: (key: string) => key.endsWith(":case-1") ? "illustrated" : null,
+      getItem: (key: string) => key === `${WHODUNNIT_ROOM_UPGRADE_STORAGE_KEY}:case-1`
+        ? "off"
+        : key === "prism.whodunnit.investigation-art-style.v1:legacy-case"
+          ? "illustrated"
+          : null,
     };
-    assert.equal(readWhodunnitInvestigationArtStyle(storage, "case-1"), "illustrated");
-    assert.equal(readWhodunnitInvestigationArtStyle(storage, "case-2"), "mosaic");
+    assert.equal(readWhodunnitRoomUpgradeEnabled(storage, "case-1", true), false);
+    assert.equal(readWhodunnitRoomUpgradeEnabled(storage, "case-2", false), false);
+    assert.equal(readWhodunnitRoomUpgradeEnabled(storage, "legacy-case", false), true);
   });
 
   it("resolves bundled, sealed, and avatar variants as one presentation contract", () => {
@@ -118,7 +129,7 @@ describe("Whodunnit investigation art style", () => {
     assert.notEqual(mosaicMansionRoom, illustratedMansionRoom);
   });
 
-  it("wires the presentation-only toggle and leaves Court on its authored cameras", () => {
+  it("wires one Upgraded switch, per-room load fallback, and leaves Court on its authored cameras", () => {
     const experience = readFileSync(
       new URL("./DebateMysteryV2Experience.tsx", import.meta.url),
       "utf8",
@@ -128,22 +139,31 @@ describe("Whodunnit investigation art style", () => {
       "utf8",
     );
     const css = readFileSync(new URL("./debateMysteryV2.module.css", import.meta.url), "utf8");
-    assert.match(experience, /data-tutorial-target="mystery-v2-room-art-style"/u);
-    assert.match(experience, /readWhodunnitInvestigationArtStyle\([\s\S]{0,100}window\.localStorage,[\s\S]{0,100}props\.session\.id/u);
-    assert.match(experience, /writeWhodunnitInvestigationArtStyle\(window\.localStorage, style, props\.session\.id\)/u);
-    assert.match(legacyExperience, /readWhodunnitInvestigationArtStyle\([\s\S]{0,100}window\.localStorage,[\s\S]{0,100}props\.session\.id/u);
-    assert.match(legacyExperience, /writeWhodunnitInvestigationArtStyle\(window\.localStorage, style, props\.session\.id\)/u);
+    assert.match(experience, /data-tutorial-target="mystery-v2-room-art-upgrade"/u);
+    assert.match(experience, /aria-label="Upgraded room art"/u);
+    assert.match(experience, /readWhodunnitRoomUpgradeEnabled\([\s\S]{0,140}window\.localStorage,[\s\S]{0,140}props\.session\.id,[\s\S]{0,140}state\.config\.assetSynthesis\.illustratedRooms/u);
+    assert.match(experience, /writeWhodunnitRoomUpgradeEnabled\(window\.localStorage, enabled, props\.session\.id\)/u);
+    assert.match(legacyExperience, /readWhodunnitRoomUpgradeEnabled\([\s\S]{0,140}window\.localStorage,[\s\S]{0,140}props\.session\.id/u);
+    assert.match(legacyExperience, /writeWhodunnitRoomUpgradeEnabled\(window\.localStorage, enabled, props\.session\.id\)/u);
+    assert.doesNotMatch(experience, />Pixel Art<|>Realistic</u);
+    assert.doesNotMatch(legacyExperience, />Pixel Art<|>Realistic</u);
     assert.match(experience, /whodunnitBundledRoomArtPathForRoom/u);
-    assert.match(experience, /const currentRoomImageUrl = currentRoomAssetUrl/u);
-    assert.match(experience, /className=\{styles\.roomBackdropImage\}/u);
-    assert.match(experience, /data-art-style=\{effectiveInvestigationArtStyle\}/u);
-    assert.match(experience, /src=\{currentRoomImageUrl\}/u);
+    assert.match(experience, /const currentRoomMosaicUrl = currentRoomMosaicAssetUrl/u);
+    assert.match(experience, /const currentRoomImageUrl = currentRoomArtStyle === "illustrated"/u);
+    assert.match(experience, /const currentRoomMosaicAssetUrl = currentRoom\?\.sealedAsset\?\.revealed[\s\S]{0,320}whodunnitSealedRoomArtUrl\(\{[\s\S]{0,180}subjectId: currentRoom\.id,[\s\S]{0,100}style: "mosaic"/u);
+    assert.match(experience, /const currentRoomUpgradeAssetUrl = currentRoom && currentRoomHasIllustratedUpgrade[\s\S]{0,320}subjectId: whodunnitIllustratedRoomSubjectId\(currentRoom\.id\),[\s\S]{0,100}style: "illustrated"/u);
+    assert.doesNotMatch(experience, /sealedAssetObjectUrls\[sealedMysteryRoomArtKey/u);
+    assert.doesNotMatch(experience, /sealedAssetObjectUrls\[sealedMysteryIllustratedRoomArtKey/u);
+    assert.match(experience, /data-art-style="mosaic"[\s\S]{0,180}src=\{currentRoomMosaicUrl\}/u);
+    assert.match(experience, /data-upgrade-layer="true"[\s\S]{0,420}onLoad=\{handleCurrentRoomUpgradeArtLoad\}[\s\S]{0,120}onError=\{handleCurrentRoomArtLoadError\}/u);
+    assert.match(experience, /loadedUpgradeRoomIds\.has\(currentRoom\.id\)/u);
     assert.match(experience, /roomBackdropImage[\s\S]*roomParallaxLayer/u);
     assert.match(css, /\.roomBackdropImage[\s\S]*z-index: 1;[\s\S]*width: 100vw;[\s\S]*height: 100dvh;/u);
     assert.match(css, /\.roomBackdropImage\[data-art-style="mosaic"\][\s\S]*image-rendering: pixelated/u);
+    assert.match(css, /\.roomBackdropImage\[data-upgrade-layer="true"\][\s\S]*opacity: 0;[\s\S]*data-loaded="true"[\s\S]*opacity: 1;/u);
     assert.match(css, /\.roomBackdrop\[data-art-style="mosaic"\][\s\S]*display: none/u);
     assert.match(css, /\.roomScene\[data-art-style="mosaic"\] \.roomParallaxLayer[\s\S]*transform: none/u);
-    assert.match(experience, /Upgrade to Realistic · ONLINE/u);
+    assert.match(experience, />Upgraded<\/button>/u);
     assert.match(experience, /renderMysteryBotAvatar\(currentBot, investigationAvatarPresentation/u);
     assert.match(experience, /renderMysteryBotAvatar\(courtPresentedWitnessBot, "full"/u);
     const roomAvatarMiniRule = css.match(
@@ -154,7 +174,31 @@ describe("Whodunnit investigation art style", () => {
     assert.match(roomAvatarMiniRule[0], /transform:\s*scale\(1\.19128713\)/u);
   });
 
-  it("ships one Pixel Art sibling for every bundled investigation room", () => {
+  it("resolves ten playable cruise rooms while ambient architecture stays outside art coverage", () => {
+    const playableRooms = Array.from({ length: 10 }, (_, index) => ({
+      id: `active-${index + 1}`,
+      sealedMosaicUrl: index < 7 ? `blob:generated-mosaic-${index + 1}` : null,
+      bundledAssetPath: index >= 7 ? `/ship/compatible-${index + 1}-mosaic.webp` : null,
+    }));
+    const ambientSpaces = Array.from({ length: 42 }, (_, index) => ({ id: `ambient-${index + 1}` }));
+    const resolved = playableRooms.map((room) => ({
+      id: room.id,
+      art: whodunnitDiscoveredMansionRoomArtV1({
+        discovered: true,
+        upgradeEnabled: false,
+        illustratedReady: false,
+        sealedMosaicUrl: room.sealedMosaicUrl,
+        bundledAssetPath: room.bundledAssetPath,
+      }),
+    }));
+    assert.equal(resolved.length, 10);
+    assert.equal(resolved.filter((room) => room.art?.url.startsWith("blob:generated")).length, 7);
+    assert.equal(resolved.filter((room) => room.art?.url.startsWith("/ship/compatible")).length, 3);
+    assert.ok(resolved.every((room) => room.art?.style === "mosaic"));
+    assert.equal(resolved.filter((room) => ambientSpaces.some((space) => space.id === room.id)).length, 0);
+  });
+
+  it("ships one Mosaic base for every bundled investigation room", () => {
     const names = readdirSync(new URL("../../public/debate/mystery/rooms", import.meta.url));
     const originals = names.filter((name) => name.endsWith(".webp") && !name.endsWith("-mosaic.webp"));
     assert.equal(originals.length, 16);

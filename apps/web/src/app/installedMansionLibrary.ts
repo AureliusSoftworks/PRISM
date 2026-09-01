@@ -44,10 +44,14 @@ function legacyDefaultThumbnailAssetId(
 export function resolveInstalledMansionPresentationV1(
   mansion: DebateMysteryMansionBundleSummaryV1,
 ): InstalledMansionPresentationV1 {
+  const venueProfile = mansion.layoutV2?.venueProfile;
+  const venueDefaultDescription = venueProfile
+    ? `${venueProfile.placeNoun} · ${venueProfile.tierLabels.length} ${venueProfile.kind === "vessel" ? "deck" : "tier"}${venueProfile.tierLabels.length === 1 ? "" : "s"} · ${mansion.totalRooms} rooms.`
+    : `${mansion.houseStyle.label} mansion · ${mansion.floors} floor${mansion.floors === 1 ? "" : "s"} · ${mansion.totalRooms} rooms.`;
   const defaultTitle = mansion.library?.defaults.title?.trim() || mansion.name;
   const defaultDescription = mansion.library?.defaults.description?.trim() ||
     mansion.portable?.description?.trim() ||
-    `${mansion.houseStyle.label} mansion · ${mansion.floors} floor${mansion.floors === 1 ? "" : "s"} · ${mansion.totalRooms} rooms.`;
+    venueDefaultDescription;
   const presentationAssetIds = new Set(
     (mansion.assets ?? []).filter((asset) => asset.role === "presentation").map((asset) => asset.id),
   );
@@ -145,7 +149,11 @@ export function installedMansionExteriorPreviewV1(args: {
     };
   }
   return {
-    url: debateMysteryMansionExteriorFallbackV1(mansion.houseStyle, resolvedScaleClass),
+    url: debateMysteryMansionExteriorFallbackV1(
+      mansion.houseStyle,
+      resolvedScaleClass,
+      mansion.layoutV2?.venueProfile,
+    ),
     scaleClass: resolvedScaleClass,
     switchesWithTopology: true,
     stale: false,

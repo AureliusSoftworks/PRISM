@@ -569,11 +569,26 @@ export function debateMysteryRoomPresentationRegionsV1(room: Pick<
   acceptedRoomAssetId?: string | null;
 }): DebateMysteryRegionV1[] {
   if (room.presentationRegions?.length) {
-    return room.presentationRegions.map((region) => ({
+    const authoredRegions = room.presentationRegions.map((region) => ({
       ...region,
       keywords: [...region.keywords],
       polygon: region.polygon.map((point) => ({ ...point })),
     }));
+    if (authoredRegions.length >= 12) return authoredRegions;
+    const authoredRegionIds = new Set(authoredRegions.map((region) => region.id));
+    const neutralRegions = GENERIC_PRESENTATION_ROOM_REGIONS.map((region) =>
+      semanticRoomRegion(
+        `${room.templateId}:${region.id}`,
+        region.label,
+        region.physicalAnchor,
+        region.polygon,
+      )
+    );
+    return [
+      ...authoredRegions,
+      ...[...neutralRegions, ...neutralRegions.flatMap(mysteryDetailRegions)]
+        .filter((region) => !authoredRegionIds.has(region.id)),
+    ];
   }
   const template = DEBATE_MYSTERY_ROOM_TEMPLATES.find((entry) => entry.id === room.templateId);
   if (template && debateMysteryRoomUsesBundledHotspotGeometryV1(room)) return template.regions;
@@ -2061,7 +2076,12 @@ export function compileDeterministicDebateMystery(args: {
   const evidence: DebateMysteryEvidenceItemV1[] = [];
   searchableRooms.forEach((room, index) => {
     const presentationRegions = debateMysteryRoomPresentationRegionsV1(room);
-    const detailRegions = presentationRegions.filter((region) => region.id.includes(":detail-"));
+    const authoredRegionIds = new Set(
+      room.presentationRegions?.map((region) => region.id) ?? [],
+    );
+    const detailRegions = presentationRegions.filter((region) =>
+      region.id.includes(":detail-") || authoredRegionIds.has(region.id)
+    );
     const shuffledRegions = shuffled(detailRegions.length ? detailRegions : presentationRegions, random);
     const region = shuffledRegions[0]!;
     const mustBeClue = index < Math.min(4, searchableRooms.length);

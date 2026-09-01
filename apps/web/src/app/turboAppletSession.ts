@@ -4,6 +4,13 @@ export const TURBO_APPLET_SESSION_CONTEXT_STORAGE_KEY =
 export interface TurboAppletSessionStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+  removeItem?(key: string): void;
+}
+
+export function turboAppletSessionContextStorageKey(ownerId: string): string {
+  return `${TURBO_APPLET_SESSION_CONTEXT_STORAGE_KEY}:${encodeURIComponent(
+    ownerId,
+  )}`;
 }
 
 /**
@@ -14,13 +21,13 @@ export function syncTurboAppletSessionContext(
   storage: TurboAppletSessionStorage | null,
   previousRuntimeContext: string | null,
   nextContext: string,
+  ownerId: string,
 ): boolean {
+  const ownerStorageKey = turboAppletSessionContextStorageKey(ownerId);
   let previousContext = previousRuntimeContext;
   if (previousContext === null && storage) {
     try {
-      previousContext = storage.getItem(
-        TURBO_APPLET_SESSION_CONTEXT_STORAGE_KEY,
-      );
+      previousContext = storage.getItem(ownerStorageKey);
     } catch {
       previousContext = null;
     }
@@ -28,7 +35,10 @@ export function syncTurboAppletSessionContext(
 
   if (storage) {
     try {
-      storage.setItem(TURBO_APPLET_SESSION_CONTEXT_STORAGE_KEY, nextContext);
+      // Never read the pre-namespace value. Removing it prevents a legacy
+      // account identifier from remaining visible to later owners.
+      storage.removeItem?.(TURBO_APPLET_SESSION_CONTEXT_STORAGE_KEY);
+      storage.setItem(ownerStorageKey, nextContext);
     } catch {
       // A blocked session store keeps the conservative fresh-load reset below.
     }

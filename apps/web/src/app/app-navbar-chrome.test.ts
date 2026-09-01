@@ -30,128 +30,52 @@ function resetChrome(): void {
   revealAppNavbarForFreshSurface();
 }
 
-test("companion open pins the navbar visible over immersion hide", () => {
+test("legacy hide requests cannot hide the permanent applet navbar", () => {
   resetChrome();
   hideAppNavbarForImmersion();
-  assert.equal(getAppNavbarChromeSnapshot().hidden, true);
-  setAppNavbarCompanionOpen(true);
-  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
-  assert.equal(getAppNavbarChromeSnapshot().companionOpen, true);
-  setAppNavbarCompanionOpen(false);
-});
-
-test("wielding reveals and holds the Zen navbar", () => {
-  resetChrome();
-  setAppNavbarAutoHideEnabled(true);
-  hideAppNavbarForImmersion();
-  assert.equal(getAppNavbarChromeSnapshot().hidden, true);
-  setAppNavbarWielding(true);
-  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
-  setAppNavbarWielding(false);
-  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
-});
-
-test("top-edge pointer reveals a hidden navbar", () => {
-  resetChrome();
-  hideAppNavbarForImmersion();
-  assert.equal(getAppNavbarChromeSnapshot().hidden, true);
-  revealAppNavbarFromPointerClientY(APP_NAVBAR_REVEAL_EDGE_PX + 1);
-  assert.equal(getAppNavbarChromeSnapshot().hidden, true);
-  revealAppNavbarFromPointerClientY(APP_NAVBAR_REVEAL_EDGE_PX);
-  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
-});
-
-test("pinned chrome stays visible during immersion hide requests", () => {
-  resetChrome();
-  pinAppNavbar(true);
-  hideAppNavbarForImmersion();
-  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
-  pinAppNavbar(false);
-});
-
-test("non-Zen surfaces skip idle auto-hide while Wield stays visible", () => {
-  resetChrome();
-  setAppNavbarAutoHideEnabled(false);
-  hideAppNavbarForImmersion();
-  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
-  assert.equal(getAppNavbarChromeSnapshot().autoHideEnabled, false);
-  setAppNavbarWielding(true);
-  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
-  setAppNavbarWielding(false);
-  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
-  setAppNavbarAutoHideEnabled(true);
-});
-
-test("open navbar dropdown holds the bar against idle tuck", () => {
-  resetChrome();
   armAppNavbarAutoHide();
-  const release = holdAppNavbarForDropdown();
-  assert.equal(getAppNavbarChromeSnapshot().dropdownHeld, true);
   scheduleAppNavbarAutoHide();
-  hideAppNavbarForImmersion();
-  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
-  release();
-  assert.equal(getAppNavbarChromeSnapshot().dropdownHeld, false);
+  revealAppNavbarFromPointerClientY(APP_NAVBAR_REVEAL_EDGE_PX + 1);
+  setAppNavbarSessionHidden(true);
+
+  assert.deepEqual(getAppNavbarChromeSnapshot(), {
+    hidden: false,
+    pinned: false,
+    autoHideEnabled: false,
+    companionOpen: false,
+    wielding: false,
+    dropdownHeld: false,
+    controlHeld: false,
+    sessionHidden: false,
+  });
 });
 
-test("dropdown and Control holds remain visible during Zen Wield", () => {
+test("navbar interaction annotations remain observable without affecting visibility", () => {
   resetChrome();
-  hideAppNavbarForImmersion();
+  setAppNavbarCompanionOpen(true);
   setAppNavbarWielding(true);
-  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
+  pinAppNavbar(true);
   const releaseDropdown = holdAppNavbarForDropdown();
-  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
-  releaseDropdown();
-  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
   const releaseControl = holdAppNavbarForControlShortcuts();
-  assert.equal(getAppNavbarChromeSnapshot().controlHeld, true);
-  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
-  releaseControl();
-  assert.equal(getAppNavbarChromeSnapshot().controlHeld, false);
-  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
-  setAppNavbarWielding(false);
-});
 
-test("shortcut actions can force a tucked navbar back into view", () => {
-  resetChrome();
+  assert.deepEqual(getAppNavbarChromeSnapshot(), {
+    hidden: false,
+    pinned: true,
+    autoHideEnabled: false,
+    companionOpen: true,
+    wielding: true,
+    dropdownHeld: true,
+    controlHeld: true,
+    sessionHidden: false,
+  });
+
   hideAppNavbarForImmersion();
-  assert.equal(getAppNavbarChromeSnapshot().hidden, true);
   revealAppNavbarForShortcutAction();
   assert.equal(getAppNavbarChromeSnapshot().hidden, false);
-});
 
-test("overlapping dropdown holds release independently", () => {
-  resetChrome();
-  const releaseA = holdAppNavbarForDropdown();
-  const releaseB = holdAppNavbarForDropdown();
-  assert.equal(getAppNavbarChromeSnapshot().dropdownHeld, true);
-  releaseA();
-  assert.equal(getAppNavbarChromeSnapshot().dropdownHeld, true);
-  hideAppNavbarForImmersion();
-  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
-  releaseB();
-  assert.equal(getAppNavbarChromeSnapshot().dropdownHeld, false);
-});
-
-test("side-panel holds reveal a tucked navbar and block immersion hide", () => {
-  resetChrome();
-  hideAppNavbarForImmersion();
-  assert.equal(getAppNavbarChromeSnapshot().hidden, true);
-  const release = holdAppNavbarForDropdown();
-  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
-  hideAppNavbarForImmersion();
-  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
-  release();
-});
-
-test("session hide collapses live applet chrome independently of Zen tuck", () => {
-  resetChrome();
-  setAppNavbarAutoHideEnabled(false);
-  assert.equal(getAppNavbarChromeSnapshot().sessionHidden, false);
-  setAppNavbarSessionHidden(true);
-  assert.equal(getAppNavbarChromeSnapshot().sessionHidden, true);
-  assert.equal(getAppNavbarChromeSnapshot().hidden, true);
-  setAppNavbarSessionHidden(false);
-  assert.equal(getAppNavbarChromeSnapshot().sessionHidden, false);
-  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
+  releaseDropdown();
+  releaseControl();
+  setAppNavbarCompanionOpen(false);
+  setAppNavbarWielding(false);
+  pinAppNavbar(false);
 });

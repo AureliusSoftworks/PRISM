@@ -12,7 +12,10 @@ const tutorials = read("./modeTutorials.ts");
 
 describe("Flyting cast picker", () => {
   it("uses the shared role-card and Library-grid vocabulary for the three stage seats", () => {
-    assert.match(flyting, /type FlytingCastSeat = "for" \| "against" \| "host"/u);
+    assert.match(
+      flyting,
+      /type FlytingCastSeat = "for" \| "against" \| "host"/u,
+    );
     assert.doesNotMatch(flyting, /FLYTING_HALL_CAST_SEATS/u);
     assert.match(flyting, /renderFlytingCastSeat/u);
     assert.match(flyting, /<BotPickerToolbar/u);
@@ -29,19 +32,34 @@ describe("Flyting cast picker", () => {
     assert.match(flyting, /Already seated in the contest/u);
     assert.match(flyting, /"aria-disabled": unavailableReason/u);
     assert.doesNotMatch(flyting, /jurorBotIds/u);
-    assert.match(flyting, /const fixedPlayerHost = seat === "host" && !needsBotHost/u);
+    assert.match(
+      flyting,
+      /const fixedPlayerHost = seat === "host" && !needsBotHost/u,
+    );
   });
 
   it("orders the cast and floor readout as Pro, Jarl, then Con", () => {
     const roster = flyting.slice(
-      flyting.indexOf('className={`${studioStyles.castSlotGrid} ${styles.flytingPrincipalCast}`}'),
-      flyting.indexOf('className={styles.gallerySeed}', flyting.indexOf('className={`${studioStyles.castSlotGrid} ${styles.flytingPrincipalCast}`}')),
+      flyting.indexOf(
+        "className={`${studioStyles.castSlotGrid} ${styles.flytingPrincipalCast}`}",
+      ),
+      flyting.indexOf(
+        "className={styles.gallerySeed}",
+        flyting.indexOf(
+          "className={`${studioStyles.castSlotGrid} ${styles.flytingPrincipalCast}`}",
+        ),
+      ),
     );
     assert.ok(roster.indexOf('seat: "for"') < roster.indexOf('seat: "host"'));
-    assert.ok(roster.indexOf('seat: "host"') < roster.indexOf('seat: "against"'));
+    assert.ok(
+      roster.indexOf('seat: "host"') < roster.indexOf('seat: "against"'),
+    );
     const schematic = flyting.slice(
       flyting.indexOf('aria-label="Mead Hall schematic"'),
-      flyting.indexOf("</aside>", flyting.indexOf('aria-label="Mead Hall schematic"')),
+      flyting.indexOf(
+        "</aside>",
+        flyting.indexOf('aria-label="Mead Hall schematic"'),
+      ),
     );
     assert.ok(
       schematic.indexOf('label="Pro · left"') <
@@ -55,13 +73,30 @@ describe("Flyting cast picker", () => {
 
   it("uses the shared visible-grid placement contract for Refract and Space rerolls", () => {
     assert.match(flyting, /randomBotPickerPlacements/u);
-    assert.match(flyting, /placementRefractTarget=\{flytingCastPlacementRefractTarget\}/u);
+    assert.match(
+      flyting,
+      /placementRefractTarget=\{\s*flytingCastPlacementRefractTarget\s*\}/u,
+    );
     assert.match(flyting, /value: "random"[\s\S]{0,120}Random · all/u);
-    assert.match(flyting, /rerollVisible: \(\) =>[\s\S]{0,160}visibleCastBots\.map/u);
+    assert.match(
+      flyting,
+      /rerollVisible: \(\) =>[\s\S]{0,160}visibleCastBots\.map/u,
+    );
+    assert.match(
+      flyting,
+      /data-tutorial-target="debate-flyting-shuffle-cast"/u,
+    );
+    assert.match(
+      flyting,
+      /Shuffle cast[\s\S]{0,360}randomizeFlytingCastPlacements|randomizeFlytingCastPlacements[\s\S]{0,360}Shuffle cast/u,
+    );
   });
 
   it("inherits Library groups and bot context actions from Debate Studio", () => {
-    assert.match(debate, /<DebateFlytingSetup[\s\S]{0,180}botGroups=\{botGroups\}/u);
+    assert.match(
+      debate,
+      /<DebateFlytingSetup[\s\S]{0,180}botGroups=\{botGroups\}/u,
+    );
     assert.match(
       debate,
       /<DebateFlytingSetup[\s\S]{0,700}onBotContextMenu=\{props\.onBotContextMenu\}/u,
@@ -73,7 +108,10 @@ describe("Flyting cast picker", () => {
   it("teaches role-first stage assignment and automatic gallery casting", () => {
     const flytingTutorial = tutorials.slice(
       tutorials.indexOf("const FLYTING_TUTORIAL_STEP"),
-      tutorials.indexOf("// Keep this dense tutorial", tutorials.indexOf("const FLYTING_TUTORIAL_STEP")),
+      tutorials.indexOf(
+        "// Keep this dense tutorial",
+        tutorials.indexOf("const FLYTING_TUTORIAL_STEP"),
+      ),
     );
     assert.match(flytingTutorial, /select Pro on the left/u);
     assert.match(flytingTutorial, /Con on the right/u);
@@ -82,5 +120,10 @@ describe("Flyting cast picker", () => {
     assert.match(flytingTutorial, /shared Library grid/u);
     assert.match(flytingTutorial, /filter by saved group/u);
     assert.match(flytingTutorial, /vertical hue lens/u);
+    assert.match(
+      flytingTutorial,
+      /Shuffle cast seats a fresh Pro, Jarl, and Con/u,
+    );
+    assert.match(flytingTutorial, /current visible Library view/u);
   });
 });

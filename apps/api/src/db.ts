@@ -44,6 +44,17 @@ import {
 import { ensureItemCapabilityCardSchema } from "./image-asset-capability-cards.ts";
 import { ensureAudioAssetCatalogSchema } from "./audio-asset-catalog.ts";
 import { ensureUserNotesSchema } from "./user-notes.ts";
+import { ensureUserVaultKeyringSchema } from "./user-vault-keyring.ts";
+import { ensureAccountOwnerBoundarySchema } from "./account-owner-boundaries.ts";
+import {
+  activateCoreContentVaultV2,
+  coreContentVaultContractIsCompleteV2,
+  coreContentVaultIsActiveV2,
+  ensureCoreContentVaultStorageSchemaV2,
+  installCoreContentVaultViewsV2,
+  resumeCoreContentVaultViewsV2,
+  suspendCoreContentVaultViewsV2,
+} from "./core-content-vault.ts";
 
 export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
 
@@ -188,7 +199,10 @@ export function resolveDbPath(): string {
  * production. This prevents handwritten fixtures from drifting as columns are
  * added to the application database.
  */
-export function initializeDatabase(db: DatabaseSync): DatabaseSync {
+export function initializeDatabase(
+  db: DatabaseSync,
+  coreContentVaultMasterSecret?: string,
+): DatabaseSync {
   db.exec(`
     PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};
     PRAGMA foreign_keys = ON;
@@ -1874,9 +1888,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       user_id TEXT NOT NULL,
       bot_id TEXT NOT NULL,
       mood_key TEXT NOT NULL DEFAULT 'neutral'
-        CHECK (mood_key IN ('joyful', 'warm', 'neutral', 'guarded', 'strained')),
+        CHECK (typeof(mood_key) = 'blob' OR mood_key IN ('joyful', 'warm', 'neutral', 'guarded', 'strained')),
       source TEXT NOT NULL DEFAULT 'signal_feedback'
-        CHECK (source IN ('signal_feedback', 'backup_restore')),
+        CHECK (typeof(source) = 'blob' OR source IN ('signal_feedback', 'backup_restore')),
       updated_at TEXT NOT NULL,
       PRIMARY KEY (user_id, bot_id),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -2419,6 +2433,10 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       lease_owner TEXT,
       leased_until TEXT,
       cancellation_requested INTEGER NOT NULL DEFAULT 0 CHECK(cancellation_requested IN (0, 1)),
+      attempt_started_at TEXT,
+      last_attempt_started_at TEXT,
+      last_attempt_elapsed_ms INTEGER NOT NULL DEFAULT 0 CHECK(last_attempt_elapsed_ms >= 0),
+      cumulative_elapsed_ms INTEGER NOT NULL DEFAULT 0 CHECK(cumulative_elapsed_ms >= 0),
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -2866,6 +2884,34 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
   `);
+  // A reopened encrypted database must expose owner-bound cleartext views
+  // before legacy additive normalizers inspect core content. A legacy or new
+  // database remains physical/plain only inside initialization and reaches the
+  // explicit resumable migration at the end of this function.
+  ensureCoreContentVaultStorageSchemaV2(db);
+  ensureUserVaultKeyringSchema(db);
+  if (
+    coreContentVaultMasterSecret &&
+    coreContentVaultContractIsCompleteV2(db)
+  ) {
+    const resumed = resumeCoreContentVaultViewsV2({
+      db,
+      masterSecret: coreContentVaultMasterSecret,
+    });
+    if (!resumed) {
+      // An interrupted V2 migration can inherit the pre-envelope version of
+      // this persisted owner trigger. Migration only replaces encrypted
+      // content, and the current owner guard is reinstalled near the end of
+      // initialization before the API begins serving requests.
+      db.exec(
+        "DROP TRIGGER IF EXISTS main.owner_guard_coffee_context_sparks_update;",
+      );
+      activateCoreContentVaultV2({
+        db,
+        masterSecret: coreContentVaultMasterSecret,
+      });
+    }
+  }
   const botcastImageProxyColumns = new Set(
     (
       db.prepare("PRAGMA table_info(botcast_episode_image_proxies)").all() as Array<{
@@ -3266,6 +3312,26 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     "TEXT NOT NULL DEFAULT ''",
   );
   addColumnIfMissing(
+    "debate_mystery_v2_jobs",
+    "attempt_started_at",
+    "TEXT",
+  );
+  addColumnIfMissing(
+    "debate_mystery_v2_jobs",
+    "last_attempt_started_at",
+    "TEXT",
+  );
+  addColumnIfMissing(
+    "debate_mystery_v2_jobs",
+    "last_attempt_elapsed_ms",
+    "INTEGER NOT NULL DEFAULT 0 CHECK(last_attempt_elapsed_ms >= 0)",
+  );
+  addColumnIfMissing(
+    "debate_mystery_v2_jobs",
+    "cumulative_elapsed_ms",
+    "INTEGER NOT NULL DEFAULT 0 CHECK(cumulative_elapsed_ms >= 0)",
+  );
+  addColumnIfMissing(
     "slate_section_annotations",
     "idempotency_key",
     "TEXT NOT NULL DEFAULT ''",
@@ -3382,7 +3448,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     db.exec("ALTER TABLE zen_session_memories ADD COLUMN bot_id TEXT;");
   }
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_zen_session_memories_user_bot_created ON zen_session_memories(user_id, bot_id, created_at DESC);",
+    "CREATE INDEX IF NOT EXISTS main.idx_zen_session_memories_user_bot_created ON zen_session_memories(user_id, bot_id, created_at DESC);",
   );
   const hasLastActiveAt = userColumns.some(
     (column) => column.name === "last_active_at",
@@ -4694,13 +4760,13 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       PRIMARY KEY (user_id, source_bot_id, target_bot_id),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
-    CREATE INDEX IF NOT EXISTS idx_memory_evidence_inferred
+    CREATE INDEX IF NOT EXISTS main.idx_memory_evidence_inferred
       ON memory_evidence_links(user_id, inferred_memory_id);
-    CREATE INDEX IF NOT EXISTS idx_memory_evidence_source
+    CREATE INDEX IF NOT EXISTS main.idx_memory_evidence_source
       ON memory_evidence_links(user_id, evidence_memory_id);
-    CREATE INDEX IF NOT EXISTS idx_memory_receipts_unread_bot
+    CREATE INDEX IF NOT EXISTS main.idx_memory_receipts_unread_bot
       ON memory_acquisition_receipts(user_id, learner_bot_id, read_at, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_memory_receipts_conversation
+    CREATE INDEX IF NOT EXISTS main.idx_memory_receipts_conversation
       ON memory_acquisition_receipts(user_id, conversation_id, created_at DESC);
   `);
   db.exec(`
@@ -4980,18 +5046,25 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     // Null is Auto. Legacy rows resolve at runtime and are never backfilled.
     db.exec("ALTER TABLE bots ADD COLUMN accent_color TEXT;");
   }
-  const storedBotColors = db
-    .prepare(
-      "SELECT id, color FROM bots WHERE color IS NOT NULL AND TRIM(color) <> ''",
-    )
-    .all() as Array<{ id: string; color: string }>;
-  const updateStoredBotColor = db.prepare(
-    "UPDATE bots SET color = ? WHERE id = ?",
+  const legacyNormalizationOwnerIds = db
+    .prepare("SELECT id FROM users ORDER BY id")
+    .all() as Array<{ id: string }>;
+  const storedBotColorsByOwner = db.prepare(
+    "SELECT id, color FROM bots WHERE user_id = ? AND color IS NOT NULL AND TRIM(color) <> ''",
   );
-  for (const row of storedBotColors) {
-    const saturated = fullySaturateBotColor(row.color);
-    if (saturated !== row.color) {
-      updateStoredBotColor.run(saturated, row.id);
+  const updateStoredBotColor = db.prepare(
+    "UPDATE bots SET color = ? WHERE user_id = ? AND id = ?",
+  );
+  for (const owner of legacyNormalizationOwnerIds) {
+    const storedBotColors = storedBotColorsByOwner.all(owner.id) as Array<{
+      id: string;
+      color: string;
+    }>;
+    for (const row of storedBotColors) {
+      const saturated = fullySaturateBotColor(row.color);
+      if (saturated !== row.color) {
+        updateStoredBotColor.run(saturated, owner.id, row.id);
+      }
     }
   }
   const hasBotGlyphColumn = botColumns.some(
@@ -5054,26 +5127,26 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasBotFaceMouthSpeechPosesColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_mouth_speech_poses TEXT;");
   }
-  const legacyBotSpeechRows = db
-    .prepare(
-      "SELECT id, user_id, face_mouth_character FROM bots WHERE face_mouth_animation = 'custom' AND face_mouth_speech_poses IS NULL",
-    )
-    .all() as Array<{
+  const legacyBotSpeechRowsByOwner = db.prepare(
+    "SELECT id, face_mouth_character FROM bots WHERE user_id = ? AND face_mouth_animation = 'custom' AND face_mouth_speech_poses IS NULL",
+  );
+  const migrateLegacyBotSpeech = db.prepare(
+    "UPDATE bots SET face_mouth_character = ?, face_mouth_animation = 'none', face_mouth_speech_poses = ? WHERE user_id = ? AND id = ?",
+  );
+  for (const owner of legacyNormalizationOwnerIds) {
+    const legacyBotSpeechRows = legacyBotSpeechRowsByOwner.all(owner.id) as Array<{
     id: string;
-    user_id: string;
     face_mouth_character: string | null;
   }>;
-  const migrateLegacyBotSpeech = db.prepare(
-    "UPDATE bots SET face_mouth_character = ?, face_mouth_animation = 'none', face_mouth_speech_poses = ? WHERE id = ? AND user_id = ?",
-  );
-  for (const row of legacyBotSpeechRows) {
-    const poses = normalizeBotFaceCustomSpeechPoses(row.face_mouth_character);
-    migrateLegacyBotSpeech.run(
-      poses?.[0] ?? row.face_mouth_character,
-      serializeBotFaceCustomSpeechPosesForStorage(poses),
-      row.id,
-      row.user_id,
-    );
+    for (const row of legacyBotSpeechRows) {
+      const poses = normalizeBotFaceCustomSpeechPoses(row.face_mouth_character);
+      migrateLegacyBotSpeech.run(
+        poses?.[0] ?? row.face_mouth_character,
+        serializeBotFaceCustomSpeechPosesForStorage(poses),
+        owner.id,
+        row.id,
+      );
+    }
   }
   const legacyUserSpeechRows = db
     .prepare(
@@ -5572,43 +5645,43 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     WHERE export_hash IS NULL OR trim(export_hash) = '';
   `);
   db.exec(
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_bots_user_export_hash ON bots (user_id, export_hash) WHERE export_hash IS NOT NULL;",
+    "CREATE UNIQUE INDEX IF NOT EXISTS main.idx_bots_user_export_hash ON bots (user_id, export_hash) WHERE export_hash IS NOT NULL;",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_session_opinions_user_conversation ON session_opinions (user_id, conversation_id);",
+    "CREATE INDEX IF NOT EXISTS main.idx_session_opinions_user_conversation ON session_opinions (user_id, conversation_id);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_session_opinions_user_bot ON session_opinions (user_id, bot_id);",
+    "CREATE INDEX IF NOT EXISTS main.idx_session_opinions_user_bot ON session_opinions (user_id, bot_id);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_bot_opinions_user_bot ON bot_opinions (user_id, bot_id);",
+    "CREATE INDEX IF NOT EXISTS main.idx_bot_opinions_user_bot ON bot_opinions (user_id, bot_id);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_bot_global_moods_user_bot ON bot_global_moods (user_id, bot_id);",
+    "CREATE INDEX IF NOT EXISTS main.idx_bot_global_moods_user_bot ON bot_global_moods (user_id, bot_id);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_bot_relationships_user_source ON bot_relationships (user_id, source_bot_id);",
+    "CREATE INDEX IF NOT EXISTS main.idx_bot_relationships_user_source ON bot_relationships (user_id, source_bot_id);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_bot_relationships_user_target ON bot_relationships (user_id, target_bot_id);",
+    "CREATE INDEX IF NOT EXISTS main.idx_bot_relationships_user_target ON bot_relationships (user_id, target_bot_id);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_coffee_social_user_conversation ON coffee_bot_social_state (user_id, conversation_id);",
+    "CREATE INDEX IF NOT EXISTS main.idx_coffee_social_user_conversation ON coffee_bot_social_state (user_id, conversation_id);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_coffee_directional_irritation_user_conversation ON coffee_directional_irritation (user_id, conversation_id);",
+    "CREATE INDEX IF NOT EXISTS main.idx_coffee_directional_irritation_user_conversation ON coffee_directional_irritation (user_id, conversation_id);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_coffee_directional_irritation_ledger_user_conversation ON coffee_directional_irritation_ledger (user_id, conversation_id);",
+    "CREATE INDEX IF NOT EXISTS main.idx_coffee_directional_irritation_ledger_user_conversation ON coffee_directional_irritation_ledger (user_id, conversation_id);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_coffee_cup_top_offs_user_conversation ON coffee_cup_top_offs (user_id, conversation_id);",
+    "CREATE INDEX IF NOT EXISTS main.idx_coffee_cup_top_offs_user_conversation ON coffee_cup_top_offs (user_id, conversation_id);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_prism_mood_user_conversation ON prism_mood_state (user_id, conversation_id);",
+    "CREATE INDEX IF NOT EXISTS main.idx_prism_mood_user_conversation ON prism_mood_state (user_id, conversation_id);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_prism_mood_events_user_conversation ON prism_mood_events (user_id, conversation_id, created_at DESC);",
+    "CREATE INDEX IF NOT EXISTS main.idx_prism_mood_events_user_conversation ON prism_mood_events (user_id, conversation_id, created_at DESC);",
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_usage_events_user_created ON usage_events (user_id, created_at DESC);",
@@ -5719,7 +5792,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     "CREATE INDEX IF NOT EXISTS idx_botcast_events_episode_sequence ON botcast_events (user_id, episode_id, sequence);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_conversations_coffee_group ON conversations (user_id, coffee_group_id, updated_at DESC);",
+    "CREATE INDEX IF NOT EXISTS main.idx_conversations_coffee_group ON conversations (user_id, coffee_group_id, updated_at DESC);",
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_story_sessions_user_updated ON story_sessions (user_id, updated_at DESC);",
@@ -5872,21 +5945,22 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     "CREATE INDEX IF NOT EXISTS idx_coffee_poll_votes_poll ON coffee_poll_votes (user_id, poll_id, updated_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_conversations_user_updated ON conversations (user_id, updated_at DESC);",
+    "CREATE INDEX IF NOT EXISTS main.idx_conversations_user_updated ON conversations (user_id, updated_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_messages_user_created ON messages (user_id, created_at DESC);",
+    "CREATE INDEX IF NOT EXISTS main.idx_messages_user_created ON messages (user_id, created_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_memories_user_created ON memories (user_id, created_at DESC);",
+    "CREATE INDEX IF NOT EXISTS main.idx_memories_user_created ON memories (user_id, created_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_memories_user_pair_created ON memories (user_id, bot_id, target_bot_id, created_at DESC);",
+    "CREATE INDEX IF NOT EXISTS main.idx_memories_user_pair_created ON memories (user_id, bot_id, target_bot_id, created_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_user_notes_user_updated ON user_notes (user_id, updated_at DESC);",
+    "CREATE INDEX IF NOT EXISTS main.idx_user_notes_user_updated ON user_notes (user_id, updated_at DESC);",
   );
 
+  ensureUserVaultKeyringSchema(db);
   ensureUserNotesSchema(db);
   ensureImageAssetLibrarySchema(db);
   ensureItemCapabilityCardSchema(db);
@@ -5894,19 +5968,13 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   // The Accent Map remains authored identity. Only legacy profiles that had
   // actively enabled its former shared gate receive the two explicit engine
   // gates; disabled maps and already-migrated profiles are never rewritten.
-  const legacyPronunciationProfiles = db
-    .prepare(
-      `SELECT id, user_id, authored_audio_voice_profile, audio_voice_profile_override
-         FROM bots
-        WHERE authored_audio_voice_profile IS NOT NULL
-           OR audio_voice_profile_override IS NOT NULL`,
-    )
-    .all() as Array<{
-    id: string;
-    user_id: string;
-    authored_audio_voice_profile: string | null;
-    audio_voice_profile_override: string | null;
-  }>;
+  const legacyPronunciationProfilesByOwner = db.prepare(
+    `SELECT id, authored_audio_voice_profile, audio_voice_profile_override
+       FROM bots
+      WHERE user_id = ?
+        AND (authored_audio_voice_profile IS NOT NULL
+         OR audio_voice_profile_override IS NOT NULL)`,
+  );
   const migrateAuthoredPronunciation = db.prepare(
     `UPDATE bots
         SET authored_audio_voice_profile = ?
@@ -5917,26 +5985,35 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
         SET audio_voice_profile_override = ?
       WHERE id = ? AND user_id = ?`,
   );
-  for (const bot of legacyPronunciationProfiles) {
-    const authored = migrateLegacyAccentPronunciationEnginesV1(
-      bot.authored_audio_voice_profile,
-    );
-    if (authored) {
-      migrateAuthoredPronunciation.run(
-        serializeBotAudioVoiceProfileV1(authored),
-        bot.id,
-        bot.user_id,
+  for (const owner of legacyNormalizationOwnerIds) {
+    const legacyPronunciationProfiles = legacyPronunciationProfilesByOwner.all(
+      owner.id,
+    ) as Array<{
+      id: string;
+      authored_audio_voice_profile: string | null;
+      audio_voice_profile_override: string | null;
+    }>;
+    for (const bot of legacyPronunciationProfiles) {
+      const authored = migrateLegacyAccentPronunciationEnginesV1(
+        bot.authored_audio_voice_profile,
       );
-    }
-    const override = migrateLegacyAccentPronunciationEnginesV1(
-      bot.audio_voice_profile_override,
-    );
-    if (override) {
-      migrateOverridePronunciation.run(
-        serializeBotAudioVoiceProfileV1(override),
-        bot.id,
-        bot.user_id,
+      if (authored) {
+        migrateAuthoredPronunciation.run(
+          serializeBotAudioVoiceProfileV1(authored),
+          bot.id,
+          owner.id,
+        );
+      }
+      const override = migrateLegacyAccentPronunciationEnginesV1(
+        bot.audio_voice_profile_override,
       );
+      if (override) {
+        migrateOverridePronunciation.run(
+          serializeBotAudioVoiceProfileV1(override),
+          bot.id,
+          owner.id,
+        );
+      }
     }
   }
   for (const row of db.prepare("SELECT id FROM users").all() as Array<{
@@ -5945,13 +6022,33 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     synchronizeImageAssetCatalog(db, row.id);
   }
 
+  // Owner-parent guards are installed only after legacy additive migrations
+  // and normalizers finish. They constrain every subsequent account-content
+  // write without rebuilding or rewriting live tables in this ownership child.
+  const coreVaultViewsWereInstalled = suspendCoreContentVaultViewsV2(db);
+  ensureAccountOwnerBoundarySchema(db);
+  if (coreVaultViewsWereInstalled) installCoreContentVaultViewsV2(db);
+
+  if (
+    coreContentVaultMasterSecret &&
+    !coreContentVaultIsActiveV2(db)
+  ) {
+    activateCoreContentVaultV2({
+      db,
+      masterSecret: coreContentVaultMasterSecret,
+    });
+  }
+
   return db;
 }
 
-export function createDatabase(): DatabaseSync {
+export function createDatabase(coreContentVaultMasterSecret?: string): DatabaseSync {
   const dbPath = resolveDbPath();
   mkdirSync(dirname(dbPath), { recursive: true });
-  return initializeDatabase(new DatabaseSync(dbPath));
+  return initializeDatabase(
+    new DatabaseSync(dbPath),
+    coreContentVaultMasterSecret,
+  );
 }
 
 export function mapUserProfile(row: DbUserRecord): UserProfile {
@@ -6256,18 +6353,10 @@ export function upsertBotRelationship(args: {
   };
   args.db
     .prepare(
-      `INSERT INTO bot_relationships (
+      `INSERT OR REPLACE INTO bot_relationships (
         user_id, source_bot_id, target_bot_id, score, band, mood_key,
         trend, last_reason, recent_reasons, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(user_id, source_bot_id, target_bot_id) DO UPDATE SET
-        score = excluded.score,
-        band = excluded.band,
-        mood_key = excluded.mood_key,
-        trend = excluded.trend,
-        last_reason = excluded.last_reason,
-        recent_reasons = excluded.recent_reasons,
-        updated_at = excluded.updated_at`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       args.userId,
@@ -6332,16 +6421,9 @@ export function upsertCoffeeBotSocialState(
   const entries = Object.entries(stateByBotId);
   if (entries.length === 0) return;
   const statement = db.prepare(
-    `INSERT INTO coffee_bot_social_state (
+    `INSERT OR REPLACE INTO coffee_bot_social_state (
       user_id, conversation_id, bot_id, disposition, values_friction, restraint, engagement, leave_pressure, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(user_id, conversation_id, bot_id) DO UPDATE SET
-      disposition = excluded.disposition,
-      values_friction = excluded.values_friction,
-      restraint = excluded.restraint,
-      engagement = excluded.engagement,
-      leave_pressure = excluded.leave_pressure,
-      updated_at = excluded.updated_at`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const [botId, snapshot] of entries) {
     statement.run(
@@ -6404,14 +6486,9 @@ export function upsertCoffeeCupTopOffState(
   const entries = Object.entries(stateByBotId);
   if (entries.length === 0) return;
   const statement = db.prepare(
-    `INSERT INTO coffee_cup_top_offs (
+    `INSERT OR REPLACE INTO coffee_cup_top_offs (
       user_id, conversation_id, bot_id, progress_before, progress_after, topped_off_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(user_id, conversation_id, bot_id) DO UPDATE SET
-      progress_before = excluded.progress_before,
-      progress_after = excluded.progress_after,
-      topped_off_at = excluded.topped_off_at,
-      updated_at = excluded.updated_at`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const [botId, snapshot] of entries) {
     statement.run(
@@ -6524,13 +6601,9 @@ export function persistCoffeeDirectionalIrritationTransition(
     ) as { changes?: number | bigint };
   if (Number(ledgerResult.changes ?? 0) === 0) return;
   db.prepare(
-    `INSERT INTO coffee_directional_irritation (
+    `INSERT OR REPLACE INTO coffee_directional_irritation (
       user_id, conversation_id, subject_bot_id, target_bot_id, intensity, updated_at, last_transition_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(user_id, conversation_id, subject_bot_id, target_bot_id) DO UPDATE SET
-      intensity = excluded.intensity,
-      updated_at = excluded.updated_at,
-      last_transition_id = excluded.last_transition_id`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     userId,
     conversationId,
@@ -6632,25 +6705,11 @@ export function upsertPrismMoodState(
 ): PrismMoodSnapshot {
   const mood = sanitizePrismMoodState(state, state.mode, state.lastUpdatedAt);
   db.prepare(
-    `INSERT INTO prism_mood_state (
+    `INSERT OR REPLACE INTO prism_mood_state (
       user_id, conversation_id, mode, mood_key, confidence, annoyance, warmth,
       engagement, restraint, recent_deltas, ignore_until, ignore_cooldown_ms,
       ignore_forgiveness_chance, ignore_penalty_level, frozen, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(user_id, conversation_id, mode) DO UPDATE SET
-      mood_key = excluded.mood_key,
-      confidence = excluded.confidence,
-      annoyance = excluded.annoyance,
-      warmth = excluded.warmth,
-      engagement = excluded.engagement,
-      restraint = excluded.restraint,
-      recent_deltas = excluded.recent_deltas,
-      ignore_until = excluded.ignore_until,
-      ignore_cooldown_ms = excluded.ignore_cooldown_ms,
-      ignore_forgiveness_chance = excluded.ignore_forgiveness_chance,
-      ignore_penalty_level = excluded.ignore_penalty_level,
-      frozen = excluded.frozen,
-      updated_at = excluded.updated_at`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     userId,
     conversationId,

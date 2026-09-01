@@ -22,13 +22,13 @@ describe("Flyting stage authoring", () => {
     assert.match(flytingSource, /Copy alignment values/u);
     assert.match(flytingSource, /data-tutorial-target="debate-stage-layout"/u);
     assert.match(flytingSource, /title="Place every Mead Hall stage element/u);
-    assert.match(flytingSource, /<h2>Stage layout<\/h2>/u);
+    assert.match(flytingSource, /<span>Fine tuning<\/span>/u);
   });
 
   it("opens the setup tool with a cast-bound Mead Hall preview", () => {
     assert.match(
       flytingSource,
-      /onClick=\{\(\) => setStageLayoutOpen\(true\)\}/u,
+      /setStagePreviewTheme\(props\.theme\);\s*setStageLayoutOpen\(true\)/u,
     );
     assert.match(flytingSource, /<FlytingSetupStageAlignmentPreview/u);
     assert.match(flytingSource, /forBot=\{forBot\}/u);
@@ -41,34 +41,216 @@ describe("Flyting stage authoring", () => {
       flytingSource,
       /data-debate-stage-viewport="authoring-preview"/u,
     );
-    assert.match(flytingSource, /Hall gallery alignment preview/u);
+    assert.match(flytingSource, /generic PRISM spectators/u);
+    assert.match(flytingSource, /data-flyting-stage-rehearsal="true"/u);
+    assert.match(flytingSource, /aria-modal="true"/u);
+    assert.match(flytingSource, /createPortal\(/u);
+    assert.match(flytingSource, /document\.body/u);
+    assert.match(flytingSource, /Rehearse the Mead Hall/u);
+    assert.match(flytingSource, />\s*Done\s*<\/button>/u);
     assert.match(
       flytingStyles,
-      /\.stageAlignmentPreview\s*\{[\s\S]{0,260}position:\s*fixed/u,
+      /\.stageAlignmentModal\s*\{[\s\S]{0,900}position:\s*fixed;[\s\S]{0,120}inset:\s*0/u,
     );
   });
 
-  it("keys competitor rugs through the same normalized lane contract as the Hall banners", () => {
-    assert.match(flytingSource, /className=\{styles\.galleryRugAccentKeys\}/u);
-    assert.match(flytingSource, /<span data-key="left" \/>/u);
-    assert.match(flytingSource, /<span data-key="host" \/>/u);
-    assert.match(flytingSource, /<span data-key="right" \/>/u);
-    assert.match(flytingStyles, /mead-hall-gallery-floor\.webp/u);
-    assert.match(flytingSource, /\["for", props\.session\.forAdvocate, forColor\]/u);
+  it("stacks a populated, resizable gallery under the Wide preview", () => {
     assert.match(
       flytingSource,
-      /\["against", props\.session\.againstAdvocate, againstColor\]/u,
+      /debateFlytingHallNpcBots\([\s\S]{0,160}"flyting-stage-authoring-preview"/u,
     );
     assert.match(
       flytingSource,
-      /"--flyting-rug-key-color":\s*role === "for"[\s\S]{0,180}var\(--flyting-lane-left\)[\s\S]{0,180}var\(--flyting-lane-right\)/u,
+      /props\.view === "wide" \? previewGallery : null/u,
     );
-    assert.match(flytingStyles, /var\(--flyting-rug-key-color\)/u);
-    assert.match(flytingStyles, /mead-hall-gallery-left-key\.svg/u);
-    assert.match(flytingStyles, /mead-hall-gallery-host-key\.svg/u);
-    assert.match(flytingStyles, /mead-hall-gallery-right-key\.svg/u);
-    assert.match(flytingStyles, /background-blend-mode:\s*color/u);
+    assert.match(flytingSource, /data-flyting-preview-gallery="true"/u);
+    assert.match(flytingSource, /data-flyting-preview-gallery-scale="true"/u);
+    assert.match(flytingSource, /aria-label="Gallery bot size"/u);
+    assert.match(
+      flytingStyles,
+      /\.stageAlignmentPreviewGallery \.flytingAudienceMillingSlot\s*\{\s*scale:\s*var\(--flyting-preview-gallery-bot-scale/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.flytingCourtGallery \.flytingAudienceLayer\[data-depth-row="front"\]\s*\{\s*bottom:\s*16%/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.flytingCourtGallery \.flytingAudienceLayer\[data-depth-row="rear"\]\s*\{\s*bottom:\s*38%/u,
+    );
+    assert.match(flytingSource, /data-flyting-preview-vote-controls="true"/u);
+    assert.match(flytingSource, /stageAlignmentGalleryControls/u);
+    assert.match(flytingSource, /Add one gallery vote for/u);
+    assert.match(flytingSource, />↑<\/b>/u);
+    assert.match(
+      flytingSource,
+      /DEBATE_FLYTING_AUDIENCE_COUNT - current\.for - current\.against/u,
+    );
+  });
+
+  it("merges every gallery tuning control into Wide and removes the Gallery tab", () => {
+    assert.doesNotMatch(flytingSource, /\["gallery", "Gallery"\]/u);
+    assert.match(
+      flytingSource,
+      /debateFlytingStageRehearsalItems\(stageLayoutView\)/u,
+    );
+    assert.match(
+      flytingSource,
+      /aria-label="Maximum random gallery vertical roam"/u,
+    );
+    assert.match(
+      flytingSource,
+      /max=\{\s*DEBATE_FLYTING_GALLERY_AUTHORING_MAX_VERTICAL_ROAM_PERCENT\s*\}/u,
+    );
+    assert.match(
+      flytingSource,
+      /useState\(DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT\)/u,
+    );
+    assert.match(flytingSource, /galleryMaxVerticalRoam/u);
+    assert.match(
+      flytingStyles,
+      /\.stageAlignmentTabs\s*\{[^}]*grid-template-columns:\s*repeat\(2,/u,
+    );
+  });
+
+  it("keeps fields, pointer drag, and copied values on one live draft", () => {
+    assert.match(flytingSource, /alignmentDragRef/u);
+    assert.match(flytingSource, /onPointerDown:/u);
+    assert.match(flytingSource, /setPointerCapture/u);
+    assert.match(flytingSource, /props\.onUpdatePlacement\(drag\.item/u);
+    assert.match(
+      flytingSource,
+      /value=\{stageLayoutPlacement\[field\]\}[\s\S]{0,260}updateStageLayoutPlacement\(stageLayoutItem/u,
+    );
+    assert.match(
+      flytingSource,
+      /formatDebateFlytingStageAlignmentClipboard\(stageLayoutDraft, \{[\s\S]{0,160}galleryBotScale:[\s\S]{0,120}galleryMaxVerticalRoam:/u,
+    );
+  });
+
+  it("locally previews both venue themes without changing the app theme", () => {
+    assert.match(flytingSource, /stagePreviewTheme/u);
+    assert.match(flytingSource, /data-flyting-preview-theme-toggle="true"/u);
+    assert.match(flytingSource, /Preview dark/u);
+    assert.match(flytingSource, /Preview light/u);
+    assert.match(flytingSource, /data-theme=\{stagePreviewTheme\}/u);
+  });
+
+  it("uses a neutral authoring canvas instead of the sepia preview wash", () => {
+    assert.match(
+      flytingStyles,
+      /\.stageAlignmentModal\[data-theme="light"\]\s*\{[\s\S]{0,700}--hall-authoring-preview-surface:\s*#f5f7fa/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.stageAlignmentPreview\s*\{[\s\S]{0,700}background:\s*var\(--hall-authoring-preview-surface\)/u,
+    );
+    assert.doesNotMatch(
+      flytingStyles,
+      /\.stageAlignmentPreview\s*\{[\s\S]{0,700}color-mix\(in srgb, var\(--flyting-lane-host\)/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.stageAlignmentModal \.stageAlignmentPanel\s*\{[\s\S]{0,420}background:\s*var\(--hall-authoring-surface\)/u,
+    );
+  });
+
+  it("docks fine tuning beside the complete interactive stage footprint", () => {
+    assert.match(
+      flytingStyles,
+      /\.stageAlignmentModal\s*\{[\s\S]{0,1100}display:\s*grid;[\s\S]{0,180}grid-template-columns:\s*minmax\(0, 1fr\) minmax\(300px, 340px\)/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.stageAlignmentPreview\s*\{[\s\S]{0,240}position:\s*relative;[\s\S]{0,180}grid-column:\s*1/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.stageAlignmentModal \.stageAlignmentPanel\s*\{[\s\S]{0,240}position:\s*relative;[\s\S]{0,220}grid-column:\s*2/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.stageAlignmentPreviewCanvas\s*\{[\s\S]{0,300}container-type:\s*inline-size/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.stageAlignmentPreviewStage[\s\S]{0,260}\[data-flyting-bot-avatar="for"\][\s\S]{0,180}width:\s*clamp\(145px, 12\.4cqw, 194px\)/u,
+    );
+  });
+
+  it("removes the rejected heraldry and rug repaint layers", () => {
+    assert.doesNotMatch(
+      flytingSource,
+      /hallAccentKeys|galleryRugAccentKeys|hallReceiverMatte/u,
+    );
+    assert.doesNotMatch(
+      flytingStyles,
+      /\.hallAccentKeys|\.galleryRugAccentKeys|\.hallReceiverMatte/u,
+    );
+    assert.doesNotMatch(flytingStyles, /heraldry-key\.svg/u);
+    assert.doesNotMatch(
+      flytingStyles,
+      /mead-hall-gallery-(?:left|host|right)-key/u,
+    );
+    assert.doesNotMatch(flytingStyles, /mix-blend-mode:\s*color/u);
+  });
+
+  it("uses one shared per-pixel RGB-key backdrop in preview and live scenes", () => {
+    assert.match(flytingSource, /function FlytingRgbKeyedBackdrop/u);
+    assert.match(flytingSource, /remapFlytingRgbKeyPixels/u);
+    assert.equal(
+      [...flytingSource.matchAll(/<FlytingRgbKeyedBackdrop\b/gu)].length,
+      4,
+    );
+    assert.equal([...flytingSource.matchAll(/scene="gallery"/gu)].length, 2);
+    assert.equal(
+      [
+        ...flytingSource.matchAll(
+          /scene=\{cameraView === "moderator" \? "jarl" : "wide"\}/gu,
+        ),
+      ].length,
+      2,
+    );
+    assert.match(flytingSource, /data-flyting-rgb-key-source=\{asset\.src\}/u);
+    assert.match(flytingSource, /--flyting-rgb-key-source/u);
+    assert.match(flytingSource, /Object\.values\(FLYTING_RGB_KEY_ASSETS\)/u);
+    assert.match(
+      flytingStyles,
+      /background-image:\s*var\(--flyting-rgb-key-source\)/u,
+    );
+    assert.match(
+      flytingSource,
+      /normalizeAccentForTheme\(botColor\(bot, fallback\), theme\)/u,
+    );
+  });
+
+  it("keeps the full gallery floor and rugs in one pixel-remapped backdrop", () => {
+    assert.match(
+      flytingStyles,
+      /\.liveShell\[data-debate-format="flyting"\] \.flytingCourtGallery\s*\{[\s\S]{0,180}--debate-gallery-atmosphere:\s*none/u,
+    );
+    assert.doesNotMatch(
+      flytingStyles,
+      /url\("\/debate\/flyting\/mead-hall-gallery-floor/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.flytingRgbKeyedBackdrop\[data-flyting-rgb-key-scene="gallery"\]\s*\{[^}]*object-position:\s*center 58%/u,
+    );
+    assert.match(flytingSource, /"--flyting-rug-glyph-color": color/u);
+    assert.match(flytingStyles, /var\(--flyting-rug-glyph-color\)/u);
     assert.doesNotMatch(flytingSource, /galleryModeratorRugGlyph/u);
+  });
+
+  it("aligns Flyting mini eyes and enlarges gallery buckle glyphs", () => {
+    assert.match(
+      flytingStyles,
+      /\.liveShell[\s\S]{0,160}\[data-chat-mini-bot-avatar="true"\][\s\S]{0,120}\[data-coffee-plate-emoji-part="eyes"\][\s\S]{0,80}translate:\s*0 3px/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.flytingAudiencePortrait > \[data-chat-mini-bot-avatar="true"\][\s\S]{0,180}--chat-mini-bot-glyph-size:\s*max\(\s*10px,\s*calc\(var\(--chat-mini-bot-render-size\) \* 0\.16\)\s*\) !important/u,
+    );
   });
 
   it("enlarges and reflows the gallery without shrinking authored avatars", () => {
@@ -84,14 +266,14 @@ describe("Flyting stage authoring", () => {
       flytingStyles,
       /\.flytingAudienceCluster\s*\{[\s\S]{0,420}flex-wrap:\s*wrap/u,
     );
-    assert.doesNotMatch(flytingStyles, /flex:\s*0 1 clamp\(48px, 5\.1vw, 76px\)/u);
+    assert.doesNotMatch(
+      flytingStyles,
+      /flex:\s*0 1 clamp\(48px, 5\.1vw, 76px\)/u,
+    );
   });
 
-  it("centers competitor heraldry on banner surfaces and follows the rugs' shared floor plane", () => {
-    assert.match(
-      flytingStyles,
-      /\[data-role="for"\] \{\s*top: calc\(45\.5%/u,
-    );
+  it("centers complete heraldry on banner surfaces and follows the rugs' shared floor plane", () => {
+    assert.match(flytingStyles, /\[data-role="for"\] \{\s*top: calc\(45\.5%/u);
     assert.match(
       flytingStyles,
       /left: calc\(35\.25% \+ var\(--flyting-align-x/u,
@@ -100,10 +282,11 @@ describe("Flyting stage authoring", () => {
       flytingStyles,
       /left: calc\(64\.75% \+ var\(--flyting-align-x/u,
     );
-    assert.match(
-      flytingStyles,
-      /perspective\(180px\) rotateX\(61deg\)/u,
-    );
+    assert.match(flytingSource, /wideModeratorHeraldry/u);
+    assert.match(flytingSource, /moderatorModeratorHeraldry/u);
+    assert.match(flytingStyles, /perspective\(170px\) rotateX\(61deg\)/u);
+    assert.match(flytingStyles, /left: calc\(17\.25%/u);
+    assert.match(flytingStyles, /left: calc\(82\.75%/u);
     assert.doesNotMatch(
       flytingStyles,
       /\[data-role="for"\][\s\S]{0,160}--flyting-rug-glyph-skew/u,
@@ -111,6 +294,17 @@ describe("Flyting stage authoring", () => {
     assert.doesNotMatch(
       flytingStyles,
       /\[data-role="against"\][\s\S]{0,160}--flyting-rug-glyph-skew/u,
+    );
+  });
+
+  it("keeps stage nameplates on one Wide baseline and lets helmets overflow", () => {
+    assert.match(
+      flytingStyles,
+      /\.hallCamera\[data-camera-view="wide"\] \.courtIdentityPosition\s*\{\s*top:\s*auto;\s*bottom:\s*calc\(20%/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.courtBotPosition,[\s\S]{0,160}\.flytingAudiencePortrait\s*\{\s*overflow:\s*visible/u,
     );
   });
 

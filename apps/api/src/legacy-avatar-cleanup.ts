@@ -288,11 +288,13 @@ export async function cleanupLegacyAvatarData(
       }
       const clearedBotReferences = currentPlan.botReferences.length;
       const deleteImage = currentPlan.hasImagesTable
-        ? db.prepare("DELETE FROM images WHERE id = ?")
+        ? db.prepare("DELETE FROM images WHERE user_id = ? AND id = ?")
         : null;
       let deletedImageRows = 0;
       for (const row of currentPlan.imageRows) {
-        deletedImageRows += Number(deleteImage?.run(row.id).changes ?? 0);
+        deletedImageRows += Number(
+          deleteImage?.run(row.userId, row.id).changes ?? 0,
+        );
       }
       if (deletedImageRows !== currentPlan.imageRows.length) {
         throw new Error("Legacy avatar image row count changed during cleanup.");

@@ -84,12 +84,12 @@ test("player wiring keeps ambience separate, stable across rooms, and visible in
   assert.match(experience, /backgroundRecordable=\{false\}[\s\S]{0,80}ambientFoley=\{false\}/u);
   assert.doesNotMatch(experience, /whodunnit-v2-mansion-ambience:[^`]*currentRoom/u);
   assert.match(setup, /data-tutorial-target="whodunnit-v2-ambience-synthesis"/u);
-  assert.match(setup, /"Personalize local ambience" : "Ambience"/u);
-  assert.match(setup, /no online generator or new audio file/u);
-  assert.match(setup, /Off still uses matching bundled ambience/u);
-  assert.match(tutorial, /installed mansion brings its rooms and ambience with it/u);
-  assert.match(tutorial, /Production offers only case-owned Evidence and Music/u);
-  assert.match(tutorial, /Rooms and Ambience appear there only while creating a new mansion/u);
+  assert.match(setup, /<strong>Ambience<\/strong>/u);
+  assert.match(setup, /productionReason\("ambience"\)/u);
+  assert.match(setup, /Unavailable · court-only cases exclude venue ambience\./u);
+  assert.match(tutorial, /installed venue/u);
+  assert.match(tutorial, /Production checks capability before Forge for Exterior/u);
+  assert.match(tutorial, /These assets stay case-scoped and never overwrite an installed Mystery Venue/u);
   assert.match(tutorial, /without an online request or new audio file/u);
   assert.match(tutorial, /global Audio—not this setup choice—is the silence control/u);
 });
@@ -99,7 +99,7 @@ test("soundscape failures remain visible inside the installed mansion editor", (
   const setup = readSource("DebateExperience.tsx");
   assert.match(library, /runSoundscapeMutation/u);
   assert.match(library, /if \(!result\.ok\) setEditorError\(result\.error \?\? fallback\)/u);
-  assert.match(library, /That mansion music could not be synthesized\./u);
-  assert.match(library, /That mansion atmosphere could not be synthesized\./u);
+  assert.match(library, /That venue music could not be synthesized\./u);
+  assert.match(library, /That venue atmosphere could not be synthesized\./u);
   assert.match(setup, /return \{ ok: false, error: message \}/u);
 });

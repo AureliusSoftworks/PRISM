@@ -651,8 +651,8 @@ function insertSourceWithinTransaction(
     createdAt,
   );
   return db
-    .prepare("SELECT * FROM slate_continuity_sources WHERE id = ?")
-    .get(id) as unknown as SourceRow;
+    .prepare("SELECT * FROM slate_continuity_sources WHERE user_id = ? AND id = ?")
+    .get(input.userId, id) as unknown as SourceRow;
 }
 
 function sourceFromRow(row: SourceRow): SlateContinuitySource {
@@ -2225,8 +2225,8 @@ export function createSlateContinuityEntity(
       );
     }
     const row = db
-      .prepare("SELECT * FROM slate_continuity_entities WHERE id = ?")
-      .get(id) as unknown as EntityRow;
+      .prepare("SELECT * FROM slate_continuity_entities WHERE user_id = ? AND id = ?")
+      .get(userId, id) as unknown as EntityRow;
     db.exec("COMMIT");
     return entityFromRow(db, row);
   } catch (error) {
@@ -2353,8 +2353,8 @@ export function createSlateContinuityClaim(
   return claimFromRow(
     db,
     db
-      .prepare("SELECT * FROM slate_continuity_claims WHERE id = ?")
-      .get(id) as unknown as ClaimRow,
+      .prepare("SELECT * FROM slate_continuity_claims WHERE user_id = ? AND id = ?")
+      .get(userId, id) as unknown as ClaimRow,
   );
 }
 

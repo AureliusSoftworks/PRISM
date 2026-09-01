@@ -213,6 +213,7 @@ export function requeueRetryableDebateMysteryAssetFallbacksV1(
   sessionId: string,
   maxRetryCount = 1,
   allowedKinds: readonly DebateMysterySealedAssetKindV1[] = ["evidence", "room"],
+  allowedSubjectIds?: ReadonlySet<string>,
 ): DebateMysteryRequeuedAssetV1[] {
   const rows = db.prepare(
     `SELECT * FROM debate_mystery_asset_vault
@@ -240,6 +241,7 @@ export function requeueRetryableDebateMysteryAssetFallbacksV1(
     const retryCount = retryCountFromReviewJson(row.review_json);
     if (
       !allowedKindSet.has(row.kind) ||
+      (allowedSubjectIds && !allowedSubjectIds.has(row.subject_id)) ||
       retryCount >= maxRetryCount ||
       !RETRYABLE_FALLBACK_REASON_CODES.has(reasonCode)
     ) continue;

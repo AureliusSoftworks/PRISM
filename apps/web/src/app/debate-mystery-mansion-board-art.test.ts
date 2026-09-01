@@ -7,7 +7,7 @@ describe("Whodunnit discovered mansion room art", () => {
   it("never resolves room art before authoritative discovery", () => {
     assert.equal(whodunnitDiscoveredMansionRoomArtV1({
       discovered: false,
-      activeStyle: "illustrated",
+      upgradeEnabled: true,
       illustratedReady: true,
       sealedIllustratedUrl: "blob:sealed-kitchen",
       imageId: "saved-kitchen",
@@ -15,10 +15,10 @@ describe("Whodunnit discovered mansion room art", () => {
     }), null);
   });
 
-  it("uses the discovered room's selected Illustrated plate when ready", () => {
+  it("uses the discovered room's Upgraded derivative when ready", () => {
     assert.deepEqual(whodunnitDiscoveredMansionRoomArtV1({
       discovered: true,
-      activeStyle: "illustrated",
+      upgradeEnabled: true,
       illustratedReady: true,
       sealedIllustratedUrl: "blob:illustrated-kitchen",
       sealedMosaicUrl: "blob:mosaic-kitchen",
@@ -29,10 +29,10 @@ describe("Whodunnit discovered mansion room art", () => {
     });
   });
 
-  it("falls back to Pixel Art when a discovered room lacks its Realistic upgrade", () => {
+  it("falls back to the original Mosaic when a discovered room lacks its upgrade", () => {
     assert.deepEqual(whodunnitDiscoveredMansionRoomArtV1({
       discovered: true,
-      activeStyle: "illustrated",
+      upgradeEnabled: true,
       illustratedReady: false,
       sealedIllustratedUrl: "blob:incomplete-illustrated-kitchen",
       sealedMosaicUrl: "blob:mosaic-kitchen",
@@ -46,7 +46,7 @@ describe("Whodunnit discovered mansion room art", () => {
   it("keeps imported and legacy discovered rooms on their bundled fallback", () => {
     assert.deepEqual(whodunnitDiscoveredMansionRoomArtV1({
       discovered: true,
-      activeStyle: "mosaic",
+      upgradeEnabled: false,
       illustratedReady: false,
       templateId: "dining-room",
     }), {

@@ -19,11 +19,16 @@
   --warmup-quiet-fg: rgba(255, 255, 255, 0.78);
   --warmup-focus: rgba(176, 225, 255, 0.96);
   position: fixed;
-  inset: 0;
+  inset:
+    var(--app-shell-top-nav-height, var(--app-navbar-height, 66px))
+    0 0;
   z-index: var(--prism-z-blocking, 4900);
   display: grid;
   place-items: center;
-  min-height: 100dvh;
+  min-height: calc(
+    100dvh -
+      var(--app-shell-top-nav-height, var(--app-navbar-height, 66px))
+  );
   padding:
     max(clamp(22px, 5vw, 64px), env(safe-area-inset-top))
     max(clamp(22px, 5vw, 64px), env(safe-area-inset-right))
@@ -68,7 +73,9 @@
 .card {
   width: min(680px, 100%);
   max-height: calc(
-    100dvh - 44px - env(safe-area-inset-top) - env(safe-area-inset-bottom)
+    100dvh -
+      var(--app-shell-top-nav-height, var(--app-navbar-height, 66px)) - 44px -
+      env(safe-area-inset-bottom)
   );
   display: grid;
   justify-items: center;

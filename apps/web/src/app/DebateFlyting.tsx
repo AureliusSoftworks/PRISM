@@ -10,6 +10,7 @@ import {
   DEBATE_SCHEMA_VERSION,
   debateSpokenText,
   hexToHsl,
+  normalizeAccentForTheme,
   normalizeBotIdentityColor,
   normalizeDebateFlytingFormatStateV1,
   DEBATE_SETUP_PRESETS,
@@ -38,6 +39,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import styles from "./DebateFlyting.module.css";
 import studioStyles from "./DebateExperience.module.css";
 import {
@@ -63,14 +65,25 @@ import {
   DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT,
   DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS,
   copyDebateFlytingStageAlignment,
+  debateFlytingStageRehearsalItems,
+  debateFlytingStageRehearsalViewForItem,
   formatDebateFlytingStageAlignmentClipboard,
   updateDebateFlytingStagePlacement,
   type DebateFlytingStageAlignmentItem,
   type DebateFlytingStageAlignmentV1,
   type DebateFlytingStageAlignmentView,
   type DebateFlytingStagePlacementV1,
+  type DebateFlytingStageRehearsalView,
 } from "./debateFlytingStageAlignment";
 import {
+  FLYTING_RGB_KEY_ASSETS,
+  remapFlytingRgbKeyPixels,
+  type FlytingRgbKeyAsset,
+  type FlytingRgbKeyScene,
+} from "./debateFlytingRgbKey";
+import {
+  DEBATE_FLYTING_GALLERY_AUTHORING_MAX_VERTICAL_ROAM_PERCENT,
+  DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT,
   debateAudienceConversationFacing,
   debateFlytingAudienceMillingPlan,
   debateAudienceSeatLayout,
@@ -187,6 +200,7 @@ const FLYTING_ALIGNMENT_BY_ROLE = {
       bot: "wideModeratorBot",
       helmet: "wideModeratorHelmet",
       nameplate: "wideModeratorNameplate",
+      heraldry: "wideModeratorHeraldry",
     },
     against: {
       bot: "wideAgainstBot",
@@ -201,6 +215,7 @@ const FLYTING_ALIGNMENT_BY_ROLE = {
       bot: "moderatorModeratorBot",
       helmet: "moderatorModeratorHelmet",
       nameplate: "moderatorModeratorNameplate",
+      heraldry: "moderatorModeratorHeraldry",
     },
     against: { heraldry: "moderatorAgainstHeraldry" },
   },
@@ -334,11 +349,143 @@ function botColor(
   );
 }
 
-function flytingKeyVisibilityBoost(color: string): number {
-  const { h, s, l } = hexToHsl(color);
-  const isWarmRed = s >= 18 && (h >= 340 || h <= 38);
-  if (!isWarmRed) return 1;
-  return l < 42 ? 1.28 : 1.18;
+function flytingStageColor(
+  bot: { color: string | null } | undefined,
+  fallback: string,
+  theme: "light" | "dark",
+): string {
+  return normalizeAccentForTheme(botColor(bot, fallback), theme);
+}
+
+interface FlytingRgbKeySourcePixels {
+  data: Uint8ClampedArray;
+  width: number;
+  height: number;
+}
+
+const flytingRgbKeySourceCache = new Map<
+  string,
+  Promise<FlytingRgbKeySourcePixels>
+>();
+
+function loadFlytingRgbKeySource(
+  asset: Pick<FlytingRgbKeyAsset, "src" | "width" | "height">,
+): Promise<FlytingRgbKeySourcePixels> {
+  const cached = flytingRgbKeySourceCache.get(asset.src);
+  if (cached) return cached;
+
+  const pending = new Promise<FlytingRgbKeySourcePixels>((resolve, reject) => {
+    const image = new window.Image();
+    image.decoding = "async";
+    image.onload = () => {
+      try {
+        if (
+          image.naturalWidth !== asset.width ||
+          image.naturalHeight !== asset.height
+        ) {
+          throw new Error(
+            `Flyting RGB-key source dimensions drifted: ${asset.src}`,
+          );
+        }
+        const scratch = document.createElement("canvas");
+        scratch.width = asset.width;
+        scratch.height = asset.height;
+        const context = scratch.getContext("2d", {
+          willReadFrequently: true,
+        });
+        if (!context) {
+          throw new Error("Flyting RGB-key canvas is unavailable");
+        }
+        context.drawImage(image, 0, 0);
+        resolve({
+          data: new Uint8ClampedArray(
+            context.getImageData(0, 0, asset.width, asset.height).data,
+          ),
+          width: asset.width,
+          height: asset.height,
+        });
+      } catch (error) {
+        reject(error);
+      }
+    };
+    image.onerror = () => {
+      reject(new Error(`Flyting RGB-key source failed to load: ${asset.src}`));
+    };
+    image.src = asset.src;
+  });
+  flytingRgbKeySourceCache.set(asset.src, pending);
+  void pending.catch(() => {
+    if (flytingRgbKeySourceCache.get(asset.src) === pending) {
+      flytingRgbKeySourceCache.delete(asset.src);
+    }
+  });
+  return pending;
+}
+
+function FlytingRgbKeyedBackdrop(props: {
+  conColor: string;
+  jarlColor: string;
+  proColor: string;
+  scene: FlytingRgbKeyScene;
+  theme: "light" | "dark";
+}): React.JSX.Element {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const asset = FLYTING_RGB_KEY_ASSETS[props.scene][props.theme];
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    let cancelled = false;
+    canvas.dataset.flytingRgbKeyReady = "false";
+    canvas.dataset.flytingRgbKeyState = "loading";
+    const context = canvas.getContext("2d");
+    context?.clearRect(0, 0, canvas.width, canvas.height);
+
+    void loadFlytingRgbKeySource(asset)
+      .then((source) => {
+        if (cancelled) return;
+        const currentContext = canvas.getContext("2d");
+        if (!currentContext) return;
+        const output = currentContext.createImageData(
+          source.width,
+          source.height,
+        );
+        output.data.set(
+          remapFlytingRgbKeyPixels(source.data, source.width, source.height, {
+            pro: props.proColor,
+            jarl: props.jarlColor,
+            con: props.conColor,
+          }),
+        );
+        currentContext.putImageData(output, 0, 0);
+        canvas.dataset.flytingRgbKeyReady = "true";
+        canvas.dataset.flytingRgbKeyState = "ready";
+      })
+      .catch(() => {
+        if (!cancelled) canvas.dataset.flytingRgbKeyState = "error";
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [asset, props.conColor, props.jarlColor, props.proColor]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className={styles.flytingRgbKeyedBackdrop}
+      data-flyting-rgb-key-scene={props.scene}
+      data-flyting-rgb-key-source={asset.src}
+      style={
+        {
+          "--flyting-rgb-key-source": `url("${asset.src}")`,
+        } as CSSProperties
+      }
+      width={asset.width}
+      height={asset.height}
+      aria-hidden="true"
+    />
+  );
 }
 
 function flytingAlignmentStyle(
@@ -475,17 +622,64 @@ function flytingAlignmentPreviewSnapshot(
   };
 }
 
+function flytingPreviewGalleryVoteCounts(
+  votes: Record<DebateSideId, number>,
+): { for: number; neutral: number; against: number } {
+  const forVotes = Math.max(
+    0,
+    Math.min(DEBATE_FLYTING_AUDIENCE_COUNT, votes.for),
+  );
+  const againstVotes = Math.max(
+    0,
+    Math.min(DEBATE_FLYTING_AUDIENCE_COUNT - forVotes, votes.against),
+  );
+  return {
+    for: forVotes,
+    neutral: DEBATE_FLYTING_AUDIENCE_COUNT - forVotes - againstVotes,
+    against: againstVotes,
+  };
+}
+
+function flytingPreviewGalleryVerticalMotion(
+  offsetYPercent: number,
+  driftYPercent: number,
+  maximumPercent: number,
+): { offsetYPercent: number; driftYPercent: number } {
+  const maximum = Math.max(
+    0,
+    Math.min(
+      DEBATE_FLYTING_GALLERY_AUTHORING_MAX_VERTICAL_ROAM_PERCENT,
+      maximumPercent,
+    ),
+  );
+  const scale =
+    maximum / DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT;
+  return {
+    offsetYPercent: Math.round(offsetYPercent * scale * 10) / 10,
+    driftYPercent: Math.round(driftYPercent * scale * 10) / 10,
+  };
+}
+
 function FlytingSetupStageAlignmentPreview(props: {
   againstBot: FlytingBotSummary | undefined;
   alignment: DebateFlytingStageAlignmentV1;
   forBot: FlytingBotSummary | undefined;
+  galleryBotScale: number;
+  galleryMaxVerticalRoam: number;
+  galleryVotes: Record<DebateSideId, number>;
   hostBot: FlytingBotSummary | undefined;
   item: DebateFlytingStageAlignmentItem;
+  onClose: () => void;
   onSelectItem: (item: DebateFlytingStageAlignmentItem) => void;
+  onToggleTheme: () => void;
+  onUpdatePlacement: (
+    item: DebateFlytingStageAlignmentItem,
+    update: Partial<DebateFlytingStagePlacementV1>,
+  ) => void;
   renderBotAvatar?: FlytingRuntimeProps["renderBotAvatar"];
   renderBotGlyph: FlytingRuntimeProps["renderBotGlyph"];
   theme: FlytingRuntimeProps["theme"];
-  view: DebateFlytingStageAlignmentView;
+  view: DebateFlytingStageRehearsalView;
 }): React.JSX.Element {
   const forBot = props.forBot ?? {
     id: "flyting-alignment-preview-for",
@@ -508,9 +702,9 @@ function FlytingSetupStageAlignmentPreview(props: {
     glyph: "triangle",
     hardMuted: true,
   };
-  const forColor = botColor(forBot, "#d8b25d");
-  const hostColor = botColor(hostBot, "#9f8a68");
-  const againstColor = botColor(againstBot, "#c56b53");
+  const forColor = flytingStageColor(forBot, "#d8b25d", props.theme);
+  const hostColor = flytingStageColor(hostBot, "#9f8a68", props.theme);
+  const againstColor = flytingStageColor(againstBot, "#c56b53", props.theme);
   const cameraView: FlytingCameraView =
     props.view === "moderator" ? "moderator" : "wide";
   const previewBots = [
@@ -537,31 +731,141 @@ function FlytingSetupStageAlignmentPreview(props: {
       color: againstColor,
     },
   ];
+  const previewHallBots = useMemo(
+    () =>
+      debateFlytingHallNpcBots(
+        "flyting-stage-authoring-preview",
+        DEBATE_FLYTING_AUDIENCE_COUNT + DEBATE_FLYTING_JARL_GUARD_COUNT,
+      ),
+    [],
+  );
+  const previewHallMilling = useMemo(
+    () =>
+      Array.from(
+        {
+          length:
+            DEBATE_FLYTING_AUDIENCE_COUNT + DEBATE_FLYTING_JARL_GUARD_COUNT,
+        },
+        (_, index) =>
+          debateFlytingAudienceMillingPlan(
+            `flyting-stage-authoring-preview:hall-seat-${index}`,
+            debateAudienceSeatLayout(
+              index,
+              DEBATE_FLYTING_AUDIENCE_COUNT + DEBATE_FLYTING_JARL_GUARD_COUNT,
+            ).depthRow,
+          ),
+      ),
+    [],
+  );
+  const previewVotes = flytingPreviewGalleryVoteCounts(props.galleryVotes);
+  const previewHallSeats = previewHallBots.map((bot, index) => {
+    const guard = index >= DEBATE_FLYTING_AUDIENCE_COUNT;
+    const leaning: DebateFlytingHallLeaningV1 = guard
+      ? "neutral"
+      : index < previewVotes.for
+        ? "for"
+        : index >= DEBATE_FLYTING_AUDIENCE_COUNT - previewVotes.against
+          ? "against"
+          : "neutral";
+    return {
+      id: `flyting-stage-authoring-preview:${index}`,
+      bot,
+      index,
+      leaning,
+      guard,
+    };
+  });
+  const alignmentDragRef = useRef<{
+    item: DebateFlytingStageAlignmentItem;
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+    parentWidth: number;
+    parentHeight: number;
+    placement: DebateFlytingStagePlacementV1;
+  } | null>(null);
   const alignmentHandleProps = (
     item: DebateFlytingStageAlignmentItem,
   ): {
     "data-flyting-alignment-handle": "true";
+    "data-flyting-alignment-item": DebateFlytingStageAlignmentItem;
     "data-flyting-alignment-selected"?: "true";
     onClick: (event: React.MouseEvent<HTMLElement>) => void;
+    onPointerDown: (event: ReactPointerEvent<HTMLElement>) => void;
+    onPointerMove: (event: ReactPointerEvent<HTMLElement>) => void;
+    onPointerUp: (event: ReactPointerEvent<HTMLElement>) => void;
+    onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => void;
   } => ({
     "data-flyting-alignment-handle": "true",
+    "data-flyting-alignment-item": item,
     "data-flyting-alignment-selected": props.item === item ? "true" : undefined,
     onClick: (event) => {
       event.preventDefault();
       event.stopPropagation();
       props.onSelectItem(item);
     },
+    onPointerDown: (event) => {
+      if (event.button !== 0) return;
+      const parent = event.currentTarget.offsetParent;
+      if (!(parent instanceof HTMLElement)) return;
+      const bounds = parent.getBoundingClientRect();
+      event.preventDefault();
+      event.stopPropagation();
+      props.onSelectItem(item);
+      alignmentDragRef.current = {
+        item,
+        pointerId: event.pointerId,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        parentWidth: Math.max(1, bounds.width),
+        parentHeight: Math.max(1, bounds.height),
+        placement: props.alignment.placements[item],
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+    },
+    onPointerMove: (event) => {
+      const drag = alignmentDragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      props.onUpdatePlacement(drag.item, {
+        x:
+          drag.placement.x +
+          ((event.clientX - drag.clientX) / drag.parentWidth) * 100,
+        y:
+          drag.placement.y +
+          ((event.clientY - drag.clientY) / drag.parentHeight) * 100,
+      });
+    },
+    onPointerUp: (event) => {
+      const drag = alignmentDragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      alignmentDragRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    },
+    onPointerCancel: (event) => {
+      if (alignmentDragRef.current?.pointerId !== event.pointerId) return;
+      alignmentDragRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    },
   });
   const renderPreviewAvatar = (
     bot: DebateBotSnapshotV1,
-    role: FlytingStageRole,
+    role: DebateBotAvatarState["role"],
     presentation: "full" | "mini",
+    facing?: DebateBotAvatarState["facing"],
   ): ReactNode =>
     props.renderBotAvatar?.(bot, {
       role,
       lookAtRole:
         role === "for" ? "against" : role === "against" ? "for" : null,
-      consumer: "forum",
+      consumer: role === "audience" ? "gallery" : "forum",
       presentation,
       talking: false,
       thinking: false,
@@ -570,13 +874,167 @@ function FlytingSetupStageAlignmentPreview(props: {
       speechTiming: null,
       foleyMouthShape: null,
       listenerReaction: null,
-      blinkEnabled: true,
+      blinkEnabled: false,
+      facing,
       speechInkVisible: false,
     }) ??
     props.renderBotGlyph(bot.glyph, {
       size: presentation === "full" ? 84 : 21,
       strokeWidth: 1.2,
     });
+
+  const previewGallery = (
+    <section
+      className={`${studioStyles.debateAudienceRow} ${styles.flytingCourtGallery} ${styles.stageAlignmentPreviewGallery}`}
+      data-debate-audience="true"
+      data-audience-placement="below-screen"
+      data-flyting-preview-gallery="true"
+      aria-label={`${DEBATE_FLYTING_AUDIENCE_COUNT} generic PRISM spectators and ${DEBATE_FLYTING_JARL_GUARD_COUNT} Jarl guards`}
+      style={
+        {
+          "--flyting-preview-gallery-bot-scale": props.galleryBotScale / 100,
+        } as CSSProperties
+      }
+    >
+      <FlytingRgbKeyedBackdrop
+        scene="gallery"
+        theme={props.theme}
+        proColor={forColor}
+        jarlColor={hostColor}
+        conColor={againstColor}
+      />
+      <div className={styles.galleryRugGlyphs} aria-hidden="true">
+        {(
+          [
+            ["for", forBot, forColor],
+            ["against", againstBot, againstColor],
+          ] as const
+        ).map(([role, bot, color]) => {
+          const item = flytingStageAlignmentItemFor(
+            "gallery",
+            role,
+            "rugGlyph",
+          )!;
+          return (
+            <span
+              data-role={role}
+              key={`preview-rug-glyph:${role}:${bot.id}`}
+              style={
+                {
+                  "--flyting-bot-color": color,
+                  "--flyting-rug-glyph-color": color,
+                  ...flytingAlignmentStyle(props.alignment.placements[item]),
+                } as CSSProperties
+              }
+              {...alignmentHandleProps(item)}
+            >
+              {props.renderBotGlyph(bot.glyph, {
+                size: 58,
+                strokeWidth: 1.45,
+              })}
+            </span>
+          );
+        })}
+      </div>
+      {(["rear", "front"] as const).map((depthRow) => (
+        <span
+          className={`${studioStyles.debateAudienceLayer} ${styles.flytingAudienceLayer}`}
+          data-depth-row={depthRow}
+          key={depthRow}
+          aria-hidden="true"
+        >
+          {(["for", "neutral", "against"] as const).map((leaning) => {
+            const clusterSeats = previewHallSeats.filter(
+              (seat) =>
+                seat.leaning === leaning &&
+                debateAudienceSeatLayout(seat.index, previewHallSeats.length)
+                  .depthRow === depthRow,
+            );
+            return (
+              <span
+                className={styles.flytingAudienceCluster}
+                data-flyting-leaning={leaning}
+                key={`${depthRow}:${leaning}`}
+              >
+                {clusterSeats.map((seat, clusterIndex) => {
+                  const facing = debateAudienceConversationFacing(
+                    clusterIndex,
+                    clusterSeats.length,
+                  );
+                  const seatColor =
+                    seat.leaning === "for"
+                      ? forColor
+                      : seat.leaning === "against"
+                        ? againstColor
+                        : hostColor;
+                  const milling = previewHallMilling[seat.index]!;
+                  const verticalMotion = flytingPreviewGalleryVerticalMotion(
+                    milling.offsetYPercent,
+                    milling.driftYPercent,
+                    props.galleryMaxVerticalRoam,
+                  );
+                  return (
+                    <span
+                      className={styles.flytingAudienceMillingSlot}
+                      key={seat.id}
+                      style={
+                        {
+                          "--flyting-gallery-offset-x": `${milling.offsetXPercent}%`,
+                          "--flyting-gallery-offset-y": `${verticalMotion.offsetYPercent}%`,
+                          "--flyting-gallery-drift-x": `${milling.driftXPercent}%`,
+                          "--flyting-gallery-drift-y": `${verticalMotion.driftYPercent}%`,
+                          "--flyting-gallery-mill-duration": `${milling.durationMs}ms`,
+                          "--flyting-gallery-mill-delay": `${milling.delayMs}ms`,
+                          "--flyting-gallery-layer": milling.layer,
+                        } as CSSProperties
+                      }
+                    >
+                      <span
+                        className={`${studioStyles.debateAudienceBotPortrait} ${styles.flytingAudiencePortrait}`}
+                        data-conversation-facing={facing}
+                        data-gallery-arrived="true"
+                        data-flyting-leaning={seat.leaning}
+                        data-flyting-guard={seat.guard ? "true" : undefined}
+                        style={
+                          {
+                            "--flyting-bot-color": seatColor,
+                            "--debate-audience-depth": milling.depthScale,
+                            "--debate-audience-index": seat.index,
+                            "--debate-gallery-enter-x": "0%",
+                            "--debate-gallery-exit-x": "0%",
+                          } as CSSProperties
+                        }
+                      >
+                        <span
+                          className={styles.galleryVikingHelmet}
+                          data-flyting-hall-asset="mini-pixel-crown"
+                          aria-hidden="true"
+                        />
+                        {renderPreviewAvatar(
+                          seat.bot,
+                          "audience",
+                          "mini",
+                          facing,
+                        )}
+                        {seat.guard ? (
+                          <span
+                            className={styles.jarlGuardMark}
+                            aria-hidden="true"
+                          >
+                            III
+                          </span>
+                        ) : null}
+                      </span>
+                    </span>
+                  );
+                })}
+              </span>
+            );
+          })}
+        </span>
+      ))}
+    </section>
+  );
 
   return (
     <section
@@ -596,62 +1054,77 @@ function FlytingSetupStageAlignmentPreview(props: {
           "--flyting-lane-left": forColor,
           "--flyting-lane-host": hostColor,
           "--flyting-lane-right": againstColor,
-          "--flyting-lane-left-key-boost": flytingKeyVisibilityBoost(forColor),
-          "--flyting-lane-host-key-boost": flytingKeyVisibilityBoost(hostColor),
-          "--flyting-lane-right-key-boost":
-            flytingKeyVisibilityBoost(againstColor),
         } as CSSProperties
       }
     >
       <header className={styles.stageAlignmentPreviewHeader}>
         <div>
-          <span>Live authoring preview</span>
-          <strong>
+          <span>Rehearsal mode</span>
+          <strong>Rehearse the Mead Hall</strong>
+        </div>
+        <div className={styles.stageAlignmentPreviewTools}>
+          <small>
             {props.view === "moderator"
               ? "Jarl throne"
-              : props.view === "gallery"
-                ? "Hall gallery"
-                : "Wide Mead Hall"}
-          </strong>
-        </div>
-        <small>Click an outlined element, then tune it in Stage layout.</small>
-      </header>
-      <div className={styles.stageAlignmentPreviewCanvas}>
-        {props.view === "gallery" ? (
-          <section
-            className={`${studioStyles.debateAudienceRow} ${styles.flytingCourtGallery} ${styles.stageAlignmentPreviewGallery}`}
-            data-debate-audience="true"
-            data-audience-placement="below-screen"
-            aria-label="Hall gallery alignment preview"
+              : "Wide hall and gallery"}
+            {" · Click an outlined element, then fine-tune it."}
+          </small>
+          <button
+            type="button"
+            data-flyting-preview-theme-toggle="true"
+            aria-pressed={props.theme === "light"}
+            onClick={props.onToggleTheme}
           >
-            <div className={styles.galleryRugAccentKeys} aria-hidden="true">
-              <span data-key="left" />
-              <span data-key="host" />
-              <span data-key="right" />
-            </div>
-            <div className={styles.galleryRugGlyphs}>
+            {props.theme === "light" ? "Preview dark" : "Preview light"}
+          </button>
+          <button type="button" onClick={props.onClose}>
+            Done
+          </button>
+        </div>
+      </header>
+      <div
+        className={styles.stageAlignmentPreviewCanvas}
+        data-gallery-stacked={props.view === "wide" ? "true" : undefined}
+      >
+        <section
+          className={`${studioStyles.forum} ${styles.hallStage} ${styles.courtStage} ${styles.stageAlignmentPreviewStage}`}
+          aria-label="Mead Hall stage alignment preview"
+          data-debate-stage-viewport="authoring-preview"
+        >
+          <div
+            className={`${studioStyles.forumCamera} ${styles.hallCamera}`}
+            data-camera-view={cameraView}
+            data-camera-mode="manual"
+            data-camera-transition="cut"
+          >
+            <FlytingRgbKeyedBackdrop
+              scene={cameraView === "moderator" ? "jarl" : "wide"}
+              theme={props.theme}
+              proColor={forColor}
+              jarlColor={hostColor}
+              conColor={againstColor}
+            />
+            <div className={styles.hallHeraldryGlyphs}>
               {(
                 [
                   ["for", forBot, forColor],
+                  ["moderator", hostBot, hostColor],
                   ["against", againstBot, againstColor],
                 ] as const
               ).map(([role, bot, color]) => {
                 const item = flytingStageAlignmentItemFor(
-                  "gallery",
+                  cameraView === "moderator" ? "moderator" : "wide",
                   role,
-                  "rugGlyph",
-                )!;
+                  "heraldry",
+                );
+                if (!item) return null;
                 return (
                   <span
                     data-role={role}
-                    key={`preview-rug-glyph:${role}:${bot.id}`}
+                    key={`preview-banner-glyph:${role}:${bot.id}`}
                     style={
                       {
                         "--flyting-bot-color": color,
-                        "--flyting-rug-key-color":
-                          role === "for"
-                            ? "var(--flyting-lane-left)"
-                            : "var(--flyting-lane-right)",
                         ...flytingAlignmentStyle(
                           props.alignment.placements[item],
                         ),
@@ -660,167 +1133,108 @@ function FlytingSetupStageAlignmentPreview(props: {
                     {...alignmentHandleProps(item)}
                   >
                     {props.renderBotGlyph(bot.glyph, {
-                      size: 58,
-                      strokeWidth: 1.45,
+                      size: role === "moderator" ? 30 : 38,
+                      strokeWidth: 1.35,
                     })}
                   </span>
                 );
               })}
             </div>
-          </section>
-        ) : (
-          <section
-            className={`${studioStyles.forum} ${styles.hallStage} ${styles.courtStage} ${styles.stageAlignmentPreviewStage}`}
-            aria-label="Mead Hall stage alignment preview"
-            data-debate-stage-viewport="authoring-preview"
-          >
-            <div
-              className={`${studioStyles.forumCamera} ${styles.hallCamera}`}
-              data-camera-view={cameraView}
-              data-camera-mode="manual"
-              data-camera-transition="cut"
-            >
-              <div className={styles.hallReceiverMatte} aria-hidden="true" />
-              <div className={styles.hallAccentKeys} aria-hidden="true">
-                <span data-key="left" />
-                <span data-key="host" />
-                <span data-key="right" />
-              </div>
-              <div className={styles.hallHeraldryGlyphs}>
-                {(
-                  [
-                    ["for", forBot, forColor],
-                    ["against", againstBot, againstColor],
-                  ] as const
-                ).map(([role, bot, color]) => {
-                  const item = flytingStageAlignmentItemFor(
-                    cameraView === "moderator" ? "moderator" : "wide",
-                    role,
-                    "heraldry",
-                  );
-                  if (!item) return null;
-                  return (
-                    <span
-                      data-role={role}
-                      key={`preview-banner-glyph:${role}:${bot.id}`}
-                      style={
-                        {
-                          "--flyting-bot-color": color,
-                          ...flytingAlignmentStyle(
-                            props.alignment.placements[item],
-                          ),
-                        } as CSSProperties
-                      }
-                      {...alignmentHandleProps(item)}
-                    >
-                      {props.renderBotGlyph(bot.glyph, {
-                        size: 52,
-                        strokeWidth: 1.55,
-                      })}
-                    </span>
-                  );
-                })}
-              </div>
-              <div className={styles.hallFixtureLight} aria-hidden="true" />
-              {previewBots.map(({ role, roleLabel, snapshot, color }) => {
-                const alignmentView =
-                  cameraView === "moderator" ? "moderator" : "wide";
-                const botItem =
-                  flytingStageAlignmentItemFor(alignmentView, role, "bot") ??
-                  flytingStageAlignmentItemFor("wide", role, "bot")!;
-                const helmetItem =
-                  flytingStageAlignmentItemFor(alignmentView, role, "helmet") ??
-                  flytingStageAlignmentItemFor("wide", role, "helmet")!;
-                const nameplateItem =
-                  flytingStageAlignmentItemFor(
-                    alignmentView,
-                    role,
-                    "nameplate",
-                  ) ?? flytingStageAlignmentItemFor("wide", role, "nameplate")!;
-                const botPlacement = props.alignment.placements[botItem];
-                const helmetPlacement = props.alignment.placements[helmetItem];
-                const nameplatePlacement =
-                  props.alignment.placements[nameplateItem];
-                const avatarPresentation =
-                  role === "moderator" && cameraView !== "moderator"
-                    ? "mini"
-                    : "full";
-                return (
-                  <div key={`preview-stage:${role}:${snapshot.id}`}>
+            <div className={styles.hallFixtureLight} aria-hidden="true" />
+            {previewBots.map(({ role, roleLabel, snapshot, color }) => {
+              const alignmentView =
+                cameraView === "moderator" ? "moderator" : "wide";
+              const botItem =
+                flytingStageAlignmentItemFor(alignmentView, role, "bot") ??
+                flytingStageAlignmentItemFor("wide", role, "bot")!;
+              const helmetItem =
+                flytingStageAlignmentItemFor(alignmentView, role, "helmet") ??
+                flytingStageAlignmentItemFor("wide", role, "helmet")!;
+              const nameplateItem =
+                flytingStageAlignmentItemFor(
+                  alignmentView,
+                  role,
+                  "nameplate",
+                ) ?? flytingStageAlignmentItemFor("wide", role, "nameplate")!;
+              const botPlacement = props.alignment.placements[botItem];
+              const helmetPlacement = props.alignment.placements[helmetItem];
+              const nameplatePlacement =
+                props.alignment.placements[nameplateItem];
+              const avatarPresentation =
+                role === "moderator" && cameraView !== "moderator"
+                  ? "mini"
+                  : "full";
+              return (
+                <div key={`preview-stage:${role}:${snapshot.id}`}>
+                  <div
+                    className={`${studioStyles.botPosition} ${styles.courtBotPosition}`}
+                    data-role={role}
+                    style={
+                      {
+                        "--flyting-bot-color": color,
+                        ...flytingAlignmentStyle(botPlacement),
+                      } as CSSProperties
+                    }
+                    {...alignmentHandleProps(botItem)}
+                  >
                     <div
-                      className={`${studioStyles.botPosition} ${styles.courtBotPosition}`}
-                      data-role={role}
-                      style={
-                        {
-                          "--flyting-bot-color": color,
-                          ...flytingAlignmentStyle(botPlacement),
-                        } as CSSProperties
+                      className={studioStyles.botStagePresence}
+                      data-debate-stage-compact={
+                        avatarPresentation === "mini" ? "true" : undefined
                       }
-                      {...alignmentHandleProps(botItem)}
+                      data-flyting-bot-avatar={
+                        role === "moderator" ? "host" : role
+                      }
                     >
-                      <div
-                        className={studioStyles.botStagePresence}
-                        data-debate-stage-compact={
-                          avatarPresentation === "mini" ? "true" : undefined
-                        }
-                        data-flyting-bot-avatar={
-                          role === "moderator" ? "host" : role
-                        }
-                        style={
-                          {
-                            "--debate-presence-scale": botPlacement.scale / 100,
-                          } as CSSProperties
-                        }
-                      >
-                        {role !== "moderator" ? (
-                          <span
-                            className={styles.keyedVikingHelmet}
-                            data-flyting-hall-asset="participant-helmet"
-                            style={flytingAlignmentStyle(helmetPlacement)}
-                            {...alignmentHandleProps(helmetItem)}
-                            aria-hidden="true"
-                          />
-                        ) : cameraView === "moderator" ? (
-                          <span
-                            className={styles.moderatorVikingHelmet}
-                            data-flyting-hall-asset="moderator-helmet"
-                            style={flytingAlignmentStyle(helmetPlacement)}
-                            {...alignmentHandleProps(helmetItem)}
-                            aria-hidden="true"
-                          />
-                        ) : (
-                          <span
-                            className={styles.moderatorPixelVikingHelmet}
-                            data-flyting-hall-asset="mini-pixel-crown"
-                            style={flytingAlignmentStyle(helmetPlacement)}
-                            {...alignmentHandleProps(helmetItem)}
-                            aria-hidden="true"
-                          />
-                        )}
-                        {renderPreviewAvatar(
-                          snapshot,
-                          role,
-                          avatarPresentation,
-                        )}
-                      </div>
-                    </div>
-                    <div
-                      className={`${studioStyles.botIdentityPosition} ${styles.courtIdentityPosition}`}
-                      data-role={role}
-                      style={flytingAlignmentStyle(nameplatePlacement)}
-                      {...alignmentHandleProps(nameplateItem)}
-                    >
-                      <div className={studioStyles.botIdentityPlate}>
-                        <strong>{snapshot.name}</strong>
-                        <small>{roleLabel}</small>
-                      </div>
+                      {role !== "moderator" ? (
+                        <span
+                          className={styles.keyedVikingHelmet}
+                          data-flyting-hall-asset="participant-helmet"
+                          style={flytingAlignmentStyle(helmetPlacement)}
+                          {...alignmentHandleProps(helmetItem)}
+                          aria-hidden="true"
+                        />
+                      ) : cameraView === "moderator" ? (
+                        <span
+                          className={styles.moderatorVikingHelmet}
+                          data-flyting-hall-asset="moderator-helmet"
+                          style={flytingAlignmentStyle(helmetPlacement)}
+                          {...alignmentHandleProps(helmetItem)}
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <span
+                          className={styles.moderatorPixelVikingHelmet}
+                          data-flyting-hall-asset="mini-pixel-crown"
+                          style={flytingAlignmentStyle(helmetPlacement)}
+                          {...alignmentHandleProps(helmetItem)}
+                          aria-hidden="true"
+                        />
+                      )}
+                      {renderPreviewAvatar(
+                        snapshot,
+                        role,
+                        avatarPresentation,
+                      )}
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          </section>
-        )}
+                  <div
+                    className={`${studioStyles.botIdentityPosition} ${styles.courtIdentityPosition}`}
+                    data-role={role}
+                    style={flytingAlignmentStyle(nameplatePlacement)}
+                    {...alignmentHandleProps(nameplateItem)}
+                  >
+                    <div className={studioStyles.botIdentityPlate}>
+                      <strong>{snapshot.name}</strong>
+                      <small>{roleLabel}</small>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+        {props.view === "wide" ? previewGallery : null}
       </div>
     </section>
   );
@@ -886,6 +1300,15 @@ function FlytingAtmosphereControl(): React.JSX.Element {
 export function DebateFlytingSetup(
   props: DebateFlytingSetupProps,
 ): React.JSX.Element {
+  useEffect(() => {
+    for (const sceneAssets of Object.values(FLYTING_RGB_KEY_ASSETS)) {
+      void loadFlytingRgbKeySource(sceneAssets[props.theme]).catch(() => {
+        // The visible canvas owns retry/error state. This speculative warmup
+        // only keeps a first Jarl or Gallery switch from flashing blank.
+      });
+    }
+  }, [props.theme]);
+
   const defaultJudge = props.bots.length < 3;
   const [step, setStep] = useState<FlytingSetupStep>("summon");
   const [playerRole, setPlayerRole] = useState<FlytingPlayerRole>(
@@ -905,13 +1328,22 @@ export function DebateFlytingSetup(
   );
   const [stageLayoutOpen, setStageLayoutOpen] = useState(false);
   const [stageLayoutView, setStageLayoutView] =
-    useState<DebateFlytingStageAlignmentView>("wide");
+    useState<DebateFlytingStageRehearsalView>("wide");
   const [stageLayoutItem, setStageLayoutItem] =
     useState<DebateFlytingStageAlignmentItem>("wideForBot");
   const [stageLayoutDraft, setStageLayoutDraft] =
     useState<DebateFlytingStageAlignmentV1>(() =>
       copyDebateFlytingStageAlignment(DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT),
     );
+  const [stageGalleryBotScale, setStageGalleryBotScale] = useState(100);
+  const [stageGalleryMaxVerticalRoam, setStageGalleryMaxVerticalRoam] =
+    useState(DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT);
+  const [stageGalleryVotes, setStageGalleryVotes] = useState<
+    Record<DebateSideId, number>
+  >({ for: 0, against: 0 });
+  const [stagePreviewTheme, setStagePreviewTheme] = useState<"light" | "dark">(
+    props.theme,
+  );
   const [stageLayoutCopyState, setStageLayoutCopyState] = useState<
     "idle" | "copied" | "failed"
   >("idle");
@@ -1057,10 +1489,7 @@ export function DebateFlytingSetup(
     props.bots,
   ]);
   const stageLayoutItems = useMemo(
-    () =>
-      DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS.filter(
-        (item) => item.view === stageLayoutView,
-      ),
+    () => debateFlytingStageRehearsalItems(stageLayoutView),
     [stageLayoutView],
   );
   const stageLayoutDefinition =
@@ -1068,6 +1497,9 @@ export function DebateFlytingSetup(
       (item) => item.id === stageLayoutItem,
     ) ?? DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS[0]!;
   const stageLayoutPlacement = stageLayoutDraft.placements[stageLayoutItem];
+  const stageGalleryVoteCounts = flytingPreviewGalleryVoteCounts(
+    stageGalleryVotes,
+  );
 
   useEffect(() => {
     if (needsBotHost || activeCastSeat !== "host") return;
@@ -1164,6 +1596,28 @@ export function DebateFlytingSetup(
     [invalidateForge, needsBotHost],
   );
 
+  const addStageGalleryVote = (sideId: DebateSideId): void => {
+    setStageGalleryVotes((current) => {
+      const neutralCount =
+        DEBATE_FLYTING_AUDIENCE_COUNT - current.for - current.against;
+      if (sideId === "for") {
+        if (current.for >= DEBATE_FLYTING_AUDIENCE_COUNT) return current;
+        return {
+          for: current.for + 1,
+          against:
+            neutralCount > 0
+              ? current.against
+              : Math.max(0, current.against - 1),
+        };
+      }
+      if (current.against >= DEBATE_FLYTING_AUDIENCE_COUNT) return current;
+      return {
+        for: neutralCount > 0 ? current.for : Math.max(0, current.for - 1),
+        against: current.against + 1,
+      };
+    });
+  };
+
   const flytingCastPlacementRefractTarget =
     useMemo<BotPickerPlacementRefractTarget>(
       () => ({
@@ -1222,12 +1676,11 @@ export function DebateFlytingSetup(
   };
 
   const chooseStageLayoutView = (
-    view: DebateFlytingStageAlignmentView,
+    view: DebateFlytingStageRehearsalView,
   ): void => {
     setStageLayoutView(view);
     setStageLayoutItem(
-      DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS.find((item) => item.view === view)!
-        .id,
+      debateFlytingStageRehearsalItems(view)[0]!.id,
     );
   };
 
@@ -1244,7 +1697,10 @@ export function DebateFlytingSetup(
   const copyStageLayout = async (): Promise<void> => {
     try {
       await writeFlytingAlignmentClipboard(
-        formatDebateFlytingStageAlignmentClipboard(stageLayoutDraft),
+        formatDebateFlytingStageAlignmentClipboard(stageLayoutDraft, {
+          galleryBotScale: stageGalleryBotScale,
+          galleryMaxVerticalRoam: stageGalleryMaxVerticalRoam,
+        }),
       );
       setStageLayoutCopyState("copied");
     } catch {
@@ -1583,7 +2039,10 @@ export function DebateFlytingSetup(
               className={studioStyles.studioUtilityButton}
               data-tutorial-target="debate-stage-layout"
               data-selected={stageLayoutOpen ? "true" : undefined}
-              onClick={() => setStageLayoutOpen(true)}
+              onClick={() => {
+                setStagePreviewTheme(props.theme);
+                setStageLayoutOpen(true);
+              }}
               aria-label="Edit stage layout"
               title="Place every Mead Hall stage element and copy source-ready defaults."
             >
@@ -1936,7 +2395,9 @@ export function DebateFlytingSetup(
                           className={`${studioStyles.castPickerGrid} ${styles.flytingCastPickerGrid}`}
                           role="radiogroup"
                           ariaLabel={`Bot for ${activeCastSeatLabel}`}
-                          placementRefractTarget={flytingCastPlacementRefractTarget}
+                          placementRefractTarget={
+                            flytingCastPlacementRefractTarget
+                          }
                           style={
                             {
                               "--tile-size": "82px",
@@ -2049,6 +2510,20 @@ export function DebateFlytingSetup(
                 <footer className={styles.panelActions}>
                   <button type="button" onClick={() => setStep("summon")}>
                     Back
+                  </button>
+                  <button
+                    type="button"
+                    data-tutorial-target="debate-flyting-shuffle-cast"
+                    disabled={
+                      busy || visibleCastBots.length < (needsBotHost ? 3 : 2)
+                    }
+                    onClick={() =>
+                      randomizeFlytingCastPlacements(
+                        visibleCastBots.map((bot) => bot.id),
+                      )
+                    }
+                  >
+                    Shuffle cast
                   </button>
                   <button
                     type="button"
@@ -2409,9 +2884,7 @@ export function DebateFlytingSetup(
               <article>
                 <span>Cast</span>
                 <strong>
-                  {castReady
-                    ? "Duel cast ready"
-                    : "Choose Pro and Con"}
+                  {castReady ? "Duel cast ready" : "Choose Pro and Con"}
                 </strong>
                 <p>
                   Pro · {forBot?.name ?? "Uncast"} · Con ·{" "}
@@ -2464,177 +2937,306 @@ export function DebateFlytingSetup(
           </section>
         </aside>
       </div>
-      {stageLayoutOpen && DEBATE_FLYTING_STAGE_LAYOUT_AUTHORING_ENABLED ? (
-        <FlytingSetupStageAlignmentPreview
-          forBot={forBot}
-          hostBot={needsBotHost ? hostBot : undefined}
-          againstBot={againstBot}
-          view={stageLayoutView}
-          item={stageLayoutItem}
-          alignment={stageLayoutDraft}
-          onSelectItem={setStageLayoutItem}
-          renderBotAvatar={props.renderBotAvatar}
-          renderBotGlyph={props.renderBotGlyph}
-          theme={props.theme}
-        />
-      ) : null}
-      {stageLayoutOpen && DEBATE_FLYTING_STAGE_LAYOUT_AUTHORING_ENABLED ? (
-        <aside
-          className={styles.stageAlignmentPanel}
-          data-flyting-stage-alignment="true"
-          aria-label="Flyting stage alignment"
-        >
-          <header>
-            <div>
-              <span>Developer authoring</span>
-              <h2>Stage layout</h2>
-            </div>
-            <button
-              type="button"
-              aria-label="Close Flyting stage layout"
-              onClick={() => setStageLayoutOpen(false)}
+      {stageLayoutOpen &&
+      DEBATE_FLYTING_STAGE_LAYOUT_AUTHORING_ENABLED &&
+      typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className={styles.stageAlignmentModal}
+              data-theme={stagePreviewTheme}
+              data-flyting-stage-rehearsal="true"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Rehearse the Mead Hall"
             >
-              ×
-            </button>
-          </header>
-          <div className={styles.stageAlignmentTabs} role="tablist">
-            {(
-              [
-                ["wide", "Wide"],
-                ["moderator", "Jarl"],
-                ["gallery", "Gallery"],
-              ] as const
-            ).map(([view, label]) => (
-              <button
-                type="button"
-                role="tab"
-                aria-selected={stageLayoutView === view}
-                data-selected={stageLayoutView === view ? "true" : undefined}
-                onClick={() => chooseStageLayoutView(view)}
-                key={view}
+              <FlytingSetupStageAlignmentPreview
+                forBot={forBot}
+                hostBot={needsBotHost ? hostBot : undefined}
+                againstBot={againstBot}
+                view={stageLayoutView}
+                item={stageLayoutItem}
+                alignment={stageLayoutDraft}
+                galleryBotScale={stageGalleryBotScale}
+                galleryMaxVerticalRoam={stageGalleryMaxVerticalRoam}
+                galleryVotes={stageGalleryVotes}
+                onClose={() => setStageLayoutOpen(false)}
+                onSelectItem={setStageLayoutItem}
+                onToggleTheme={() =>
+                  setStagePreviewTheme((current) =>
+                    current === "light" ? "dark" : "light",
+                  )
+                }
+                onUpdatePlacement={updateStageLayoutPlacement}
+                renderBotAvatar={props.renderBotAvatar}
+                renderBotGlyph={props.renderBotGlyph}
+                theme={stagePreviewTheme}
+              />
+              <aside
+                className={styles.stageAlignmentPanel}
+                data-flyting-stage-alignment="true"
+                data-flyting-stage-alignment-context="setup"
+                aria-label="Flyting stage fine tuning"
               >
-                {label}
-              </button>
-            ))}
-          </div>
-          <label className={styles.stageAlignmentSelect}>
-            <span>Element</span>
-            <select
-              value={stageLayoutItem}
-              onChange={(event) =>
-                setStageLayoutItem(
-                  event.currentTarget.value as DebateFlytingStageAlignmentItem,
-                )
-              }
-            >
-              {stageLayoutItems.map((item) => (
-                <option value={item.id} key={item.id}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <p className={styles.stageAlignmentHint}>
-            Choose a view and element, then use the fields for the final
-            nudge. Copy alignment values gives you one source-ready block.
-          </p>
-          <div className={styles.stageAlignmentFields}>
-            {(
-              [
-                ["x", "X", 0.25],
-                ["y", "Y", 0.25],
-                ["scale", "Scale", 1],
-              ] as const
-            ).map(([field, label, step]) => (
-              <label key={field}>
-                <span>{label}</span>
-                <input
-                  type="number"
-                  value={stageLayoutPlacement[field]}
-                  step={step}
-                  onChange={(event) =>
-                    updateStageLayoutPlacement(stageLayoutItem, {
-                      [field]: Number(event.currentTarget.value),
-                    })
-                  }
-                />
-                <em>%</em>
-              </label>
-            ))}
-            {stageLayoutDefinition.supportsRotation ? (
-              <label>
-                <span>Rotate</span>
-                <input
-                  type="number"
-                  value={stageLayoutPlacement.rotation}
-                  step={0.25}
-                  onChange={(event) =>
-                    updateStageLayoutPlacement(stageLayoutItem, {
-                      rotation: Number(event.currentTarget.value),
-                    })
-                  }
-                />
-                <em>°</em>
-              </label>
-            ) : null}
-            {stageLayoutDefinition.supportsSkew ? (
-              <label>
-                <span>Skew X</span>
-                <input
-                  type="number"
-                  value={stageLayoutPlacement.skewX}
-                  step={0.25}
-                  onChange={(event) =>
-                    updateStageLayoutPlacement(stageLayoutItem, {
-                      skewX: Number(event.currentTarget.value),
-                    })
-                  }
-                />
-                <em>°</em>
-              </label>
-            ) : null}
-          </div>
-          <div className={styles.stageAlignmentActions}>
-            <button
-              type="button"
-              onClick={() =>
-                updateStageLayoutPlacement(
-                  stageLayoutItem,
-                  DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements[
-                    stageLayoutItem
-                  ],
-                )
-              }
-            >
-              Reset element
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setStageLayoutDraft(
-                  copyDebateFlytingStageAlignment(
-                    DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT,
-                  ),
-                );
-                setStageLayoutCopyState("idle");
-              }}
-            >
-              Reset all
-            </button>
-          </div>
-          <button
-            type="button"
-            className={styles.stageAlignmentCopyButton}
-            onClick={() => void copyStageLayout()}
-          >
-            {stageLayoutCopyState === "copied"
-              ? "Copied — send me the values"
-              : stageLayoutCopyState === "failed"
-                ? "Copy failed — retry"
-                : "Copy alignment values"}
-          </button>
-        </aside>
-      ) : null}
+                <header>
+                  <div>
+                    <span>Fine tuning</span>
+                    <h2>
+                      {stageLayoutView === "moderator"
+                        ? "Jarl layout"
+                        : "Wide + gallery layout"}
+                    </h2>
+                  </div>
+                </header>
+                <div className={styles.stageAlignmentTabs} role="tablist">
+                  {(
+                    [
+                      ["wide", "Wide"],
+                      ["moderator", "Jarl"],
+                    ] as const
+                  ).map(([view, label]) => (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={stageLayoutView === view}
+                      data-selected={
+                        stageLayoutView === view ? "true" : undefined
+                      }
+                      onClick={() => chooseStageLayoutView(view)}
+                      key={view}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {stageLayoutView === "wide" ? (
+                  <section
+                    className={styles.stageAlignmentGalleryControls}
+                    aria-label="Gallery rehearsal controls"
+                  >
+                    <div
+                      className={`${styles.stageAlignmentVoteControls} ${styles.stageAlignmentPanelVotes}`}
+                      data-flyting-preview-vote-controls="true"
+                    >
+                      <button
+                        type="button"
+                        data-side="for"
+                        disabled={
+                          stageGalleryVoteCounts.for >=
+                          DEBATE_FLYTING_AUDIENCE_COUNT
+                        }
+                        onClick={() => addStageGalleryVote("for")}
+                        aria-label={`Add one gallery vote for ${forBot?.name ?? "the Pro flyter"}`}
+                        style={
+                          {
+                            "--flyting-vote-color": flytingStageColor(
+                              forBot,
+                              "#d8b25d",
+                              stagePreviewTheme,
+                            ),
+                          } as CSSProperties
+                        }
+                      >
+                        <span>{forBot?.name ?? "Pro"}</span>
+                        <b aria-hidden="true">↑</b>
+                        <em>{stageGalleryVoteCounts.for}</em>
+                      </button>
+                      <output>{stageGalleryVoteCounts.neutral} neutral</output>
+                      <button
+                        type="button"
+                        data-side="against"
+                        disabled={
+                          stageGalleryVoteCounts.against >=
+                          DEBATE_FLYTING_AUDIENCE_COUNT
+                        }
+                        onClick={() => addStageGalleryVote("against")}
+                        aria-label={`Add one gallery vote for ${againstBot?.name ?? "the Con flyter"}`}
+                        style={
+                          {
+                            "--flyting-vote-color": flytingStageColor(
+                              againstBot,
+                              "#c56b53",
+                              stagePreviewTheme,
+                            ),
+                          } as CSSProperties
+                        }
+                      >
+                        <span>{againstBot?.name ?? "Con"}</span>
+                        <b aria-hidden="true">↑</b>
+                        <em>{stageGalleryVoteCounts.against}</em>
+                      </button>
+                    </div>
+                    <label
+                      className={styles.stageAlignmentGalleryScale}
+                      data-flyting-preview-gallery-scale="true"
+                    >
+                      <span>Gallery bot size</span>
+                      <div>
+                        <input
+                          type="range"
+                          min={60}
+                          max={160}
+                          step={5}
+                          value={stageGalleryBotScale}
+                          onChange={(event) =>
+                            setStageGalleryBotScale(
+                              Number(event.currentTarget.value),
+                            )
+                          }
+                          aria-label="Gallery bot size"
+                        />
+                        <output>{stageGalleryBotScale}%</output>
+                      </div>
+                    </label>
+                    <label className={styles.stageAlignmentGalleryScale}>
+                      <span>Maximum vertical roam</span>
+                      <div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={
+                            DEBATE_FLYTING_GALLERY_AUTHORING_MAX_VERTICAL_ROAM_PERCENT
+                          }
+                          step={1}
+                          value={stageGalleryMaxVerticalRoam}
+                          onChange={(event) =>
+                            setStageGalleryMaxVerticalRoam(
+                              Number(event.currentTarget.value),
+                            )
+                          }
+                          aria-label="Maximum random gallery vertical roam"
+                        />
+                        <output>{stageGalleryMaxVerticalRoam}%</output>
+                      </div>
+                    </label>
+                  </section>
+                ) : null}
+                <label className={styles.stageAlignmentSelect}>
+                  <span>Element</span>
+                  <select
+                    value={stageLayoutItem}
+                    onChange={(event) =>
+                      setStageLayoutItem(
+                        event.currentTarget
+                          .value as DebateFlytingStageAlignmentItem,
+                      )
+                    }
+                  >
+                    {stageLayoutItems.map((item) => (
+                      <option value={item.id} key={item.id}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p className={styles.stageAlignmentHint}>
+                  Drag the selected outline onstage, then use these fields for
+                  the final nudge.
+                </p>
+                <div className={styles.stageAlignmentFields}>
+                  {(
+                    [
+                      ["x", "X", 0.25],
+                      ["y", "Y", 0.25],
+                      ["scale", "Scale", 1],
+                    ] as const
+                  ).map(([field, label, step]) => (
+                    <label key={field}>
+                      <span>{label}</span>
+                      <input
+                        type="number"
+                        value={stageLayoutPlacement[field]}
+                        step={step}
+                        onChange={(event) =>
+                          updateStageLayoutPlacement(stageLayoutItem, {
+                            [field]: Number(event.currentTarget.value),
+                          })
+                        }
+                      />
+                      <em>%</em>
+                    </label>
+                  ))}
+                  {stageLayoutDefinition.supportsRotation ? (
+                    <label>
+                      <span>Rotate</span>
+                      <input
+                        type="number"
+                        value={stageLayoutPlacement.rotation}
+                        step={0.25}
+                        onChange={(event) =>
+                          updateStageLayoutPlacement(stageLayoutItem, {
+                            rotation: Number(event.currentTarget.value),
+                          })
+                        }
+                      />
+                      <em>°</em>
+                    </label>
+                  ) : null}
+                  {stageLayoutDefinition.supportsSkew ? (
+                    <label>
+                      <span>Skew X</span>
+                      <input
+                        type="number"
+                        value={stageLayoutPlacement.skewX}
+                        step={0.25}
+                        onChange={(event) =>
+                          updateStageLayoutPlacement(stageLayoutItem, {
+                            skewX: Number(event.currentTarget.value),
+                          })
+                        }
+                      />
+                      <em>°</em>
+                    </label>
+                  ) : null}
+                </div>
+                <div className={styles.stageAlignmentActions}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateStageLayoutPlacement(
+                        stageLayoutItem,
+                        DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements[
+                          stageLayoutItem
+                        ],
+                      )
+                    }
+                  >
+                    Reset element
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStageLayoutDraft(
+                        copyDebateFlytingStageAlignment(
+                          DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT,
+                        ),
+                      );
+                      setStageGalleryBotScale(100);
+                      setStageGalleryMaxVerticalRoam(
+                        DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT,
+                      );
+                      setStageGalleryVotes({ for: 0, against: 0 });
+                      setStageLayoutCopyState("idle");
+                    }}
+                  >
+                    Reset all
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className={styles.stageAlignmentCopyButton}
+                  onClick={() => void copyStageLayout()}
+                >
+                  {stageLayoutCopyState === "copied"
+                    ? "Copied — send me the values"
+                    : stageLayoutCopyState === "failed"
+                      ? "Copy failed — retry"
+                      : "Copy alignment values"}
+                </button>
+              </aside>
+            </div>,
+            document.body,
+          )
+        : null}
     </main>
   );
 }
@@ -2684,7 +3286,7 @@ export function DebateFlytingLive(
   const [cameraMode, setCameraMode] = useState<FlytingCameraMode>("auto");
   const [stageAlignmentOpen, setStageAlignmentOpen] = useState(false);
   const [stageAlignmentView, setStageAlignmentView] =
-    useState<DebateFlytingStageAlignmentView>("wide");
+    useState<DebateFlytingStageRehearsalView>("wide");
   const [stageAlignmentItem, setStageAlignmentItem] =
     useState<DebateFlytingStageAlignmentItem>("wideForBot");
   const [stageAlignmentDraft, setStageAlignmentDraft] =
@@ -2718,10 +3320,7 @@ export function DebateFlytingLive(
   >(async () => undefined);
 
   const stageAlignmentItems = useMemo(
-    () =>
-      DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS.filter(
-        (item) => item.view === stageAlignmentView,
-      ),
+    () => debateFlytingStageRehearsalItems(stageAlignmentView),
     [stageAlignmentView],
   );
   const stageAlignmentDefinition =
@@ -2732,12 +3331,9 @@ export function DebateFlytingLive(
     stageAlignmentDraft.placements[stageAlignmentItem];
 
   const chooseStageAlignmentView = useCallback(
-    (view: DebateFlytingStageAlignmentView): void => {
+    (view: DebateFlytingStageRehearsalView): void => {
       setStageAlignmentView(view);
-      setStageAlignmentItem(
-        DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS.find((item) => item.view === view)!
-          .id,
-      );
+      setStageAlignmentItem(debateFlytingStageRehearsalItems(view)[0]!.id);
       setCameraMode(view === "moderator" ? "moderator" : "wide");
     },
     [],
@@ -2827,7 +3423,9 @@ export function DebateFlytingLive(
     stageAlignmentOpen &&
     DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS.some(
       (definition) =>
-        definition.id === item && definition.view === stageAlignmentView,
+        definition.id === item &&
+        debateFlytingStageRehearsalViewForItem(definition) ===
+          stageAlignmentView,
     )
       ? {
           "data-flyting-alignment-handle": "true",
@@ -3128,9 +3726,21 @@ export function DebateFlytingLive(
     }
   };
 
-  const forColor = botColor(props.session.forAdvocate, "#d8b25d");
-  const againstColor = botColor(props.session.againstAdvocate, "#c56b53");
-  const hostColor = botColor(props.session.moderator, "#9f8a68");
+  const forColor = flytingStageColor(
+    props.session.forAdvocate,
+    "#d8b25d",
+    props.theme,
+  );
+  const againstColor = flytingStageColor(
+    props.session.againstAdvocate,
+    "#c56b53",
+    props.theme,
+  );
+  const hostColor = flytingStageColor(
+    props.session.moderator,
+    "#9f8a68",
+    props.theme,
+  );
   const hallPresentation = debateFlytingHallPresentation(
     state,
     props.session.status,
@@ -3311,10 +3921,6 @@ export function DebateFlytingLive(
           "--flyting-lane-left": forColor,
           "--flyting-lane-host": hostColor,
           "--flyting-lane-right": againstColor,
-          "--flyting-lane-left-key-boost": flytingKeyVisibilityBoost(forColor),
-          "--flyting-lane-host-key-boost": flytingKeyVisibilityBoost(hostColor),
-          "--flyting-lane-right-key-boost":
-            flytingKeyVisibilityBoost(againstColor),
         } as CSSProperties
       }
     >
@@ -3374,16 +3980,18 @@ export function DebateFlytingLive(
               data-camera-transition={cameraMode === "auto" ? "cut" : "move"}
               data-active-role={activeStageRole ?? undefined}
             >
-              <div className={styles.hallReceiverMatte} aria-hidden="true" />
-              <div className={styles.hallAccentKeys} aria-hidden="true">
-                <span data-key="left" />
-                <span data-key="host" />
-                <span data-key="right" />
-              </div>
+              <FlytingRgbKeyedBackdrop
+                scene={cameraView === "moderator" ? "jarl" : "wide"}
+                theme={props.theme}
+                proColor={forColor}
+                jarlColor={hostColor}
+                conColor={againstColor}
+              />
               <div className={styles.hallHeraldryGlyphs} aria-hidden="true">
                 {(
                   [
                     ["for", props.session.forAdvocate, forColor],
+                    ["moderator", props.session.moderator, hostColor],
                     ["against", props.session.againstAdvocate, againstColor],
                   ] as const
                 ).map(([role, bot, color]) => {
@@ -3409,8 +4017,8 @@ export function DebateFlytingLive(
                       {...(item ? stageAlignmentHandleProps(item) : {})}
                     >
                       {props.renderBotGlyph(bot.glyph, {
-                        size: 52,
-                        strokeWidth: 1.55,
+                        size: role === "moderator" ? 30 : 38,
+                        strokeWidth: 1.35,
                       })}
                     </span>
                   );
@@ -3419,12 +4027,7 @@ export function DebateFlytingLive(
               <div className={styles.hallFixtureLight} aria-hidden="true" />
               {(
                 [
-                  [
-                    "for",
-                    props.session.forAdvocate,
-                    forColor,
-                    "Pro",
-                  ],
+                  ["for", props.session.forAdvocate, forColor, "Pro"],
                   ["moderator", props.session.moderator, hostColor, "Jarl"],
                   [
                     "against",
@@ -3498,11 +4101,6 @@ export function DebateFlytingLive(
                         }
                         data-flyting-bot-avatar={
                           role === "moderator" ? "host" : role
-                        }
-                        style={
-                          {
-                            "--debate-presence-scale": botPlacement.scale / 100,
-                          } as CSSProperties
                         }
                       >
                         {role !== "moderator" ? (
@@ -3697,11 +4295,13 @@ export function DebateFlytingLive(
                 ))}
               </span>
             </div>
-            <div className={styles.galleryRugAccentKeys} aria-hidden="true">
-              <span data-key="left" />
-              <span data-key="host" />
-              <span data-key="right" />
-            </div>
+            <FlytingRgbKeyedBackdrop
+              scene="gallery"
+              theme={props.theme}
+              proColor={forColor}
+              jarlColor={hostColor}
+              conColor={againstColor}
+            />
             <div className={styles.galleryRugGlyphs} aria-hidden="true">
               {(
                 [
@@ -3721,10 +4321,7 @@ export function DebateFlytingLive(
                     style={
                       {
                         "--flyting-bot-color": color,
-                        "--flyting-rug-key-color":
-                          role === "for"
-                            ? "var(--flyting-lane-left)"
-                            : "var(--flyting-lane-right)",
+                        "--flyting-rug-glyph-color": color,
                         ...flytingAlignmentStyle(
                           stageAlignmentDraft.placements[item],
                         ),
@@ -3906,9 +4503,7 @@ export function DebateFlytingLive(
                     <em>{resolutionLabel(exchange.resolution)}</em>
                   </header>
                   {exchange.boast &&
-                  !withheldRecordEventIds.has(
-                    exchange.boast.createdEventId,
-                  ) ? (
+                  !withheldRecordEventIds.has(exchange.boast.createdEventId) ? (
                     <p>
                       <b>Boast</b>
                       {exchange.boast.content}
@@ -3959,9 +4554,8 @@ export function DebateFlytingLive(
                 <h3>Hall Leaning</h3>
                 <p>
                   <strong>
-                    {hallLeaningCounts.for} Pro ·{" "}
-                    {hallLeaningCounts.neutral} Neutral ·{" "}
-                    {hallLeaningCounts.against} Con
+                    {hallLeaningCounts.for} Pro · {hallLeaningCounts.neutral}{" "}
+                    Neutral · {hallLeaningCounts.against} Con
                   </strong>
                   <span>
                     {state.finalTally?.jarlSideId
@@ -4295,7 +4889,6 @@ export function DebateFlytingLive(
               [
                 ["wide", "Wide"],
                 ["moderator", "Jarl"],
-                ["gallery", "Gallery"],
               ] as const
             ).map(([view, label]) => (
               <button

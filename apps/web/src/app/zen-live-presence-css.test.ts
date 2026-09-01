@@ -2427,7 +2427,12 @@ describe("Zen live presence CSS", () => {
     assert.match(aliveSpillRule, /display:\s*block\s*;/);
     assert.match(
       aliveSpillRule,
-      /opacity:\s*calc\(0\.22 \+ var\(--bot-voice-light-level\) \* var\(--bot-voice-light-glow-lift\)\)/,
+      /opacity:\s*calc\(\s*var\(--bot-voice-light-rest-opacity,\s*0\.22\) \+\s*var\(--bot-voice-light-level\) \* var\(--bot-voice-light-glow-lift\)\s*\)/,
+    );
+    assert.match(
+      css,
+      /data-theme="light"\] \.zenLiveBotPresenceBody,[\s\S]{0,500}--bot-voice-light-rest-opacity:\s*0\.14\s*;/,
+      "Light chassis spill should stay localized at rest",
     );
     assert.match(aliveSpillRule, /mix-blend-mode:\s*screen\s*;/);
     assert.match(aliveSpillRule, /saturate\(1\.12\) brightness\(0\.98\)/);
@@ -3413,11 +3418,15 @@ describe("Zen live presence CSS", () => {
     assert.match(orbRule, /background:[\s\S]*content-box,[\s\S]*conic-gradient/);
     assert.match(
       orbRule,
+      /var\(--zen-live-bot-buckle-rim-screen-orb\) content-box/,
+    );
+    assert.match(
+      orbRule,
       /var\(--zen-live-bot-buckle-rim-alloy-color\)/,
     );
     assert.match(
       orbRule,
-      /background-clip:\s*content-box,\s*content-box,\s*border-box,\s*border-box,\s*border-box\s*;/,
+      /background-clip:\s*content-box,\s*content-box,\s*content-box,\s*border-box,\s*border-box,\s*border-box\s*;/,
     );
     assert.match(
       orbRule,

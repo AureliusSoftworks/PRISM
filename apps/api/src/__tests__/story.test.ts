@@ -416,6 +416,7 @@ describe("Story API helpers", () => {
   it("persists a frozen Auto routing snapshot and preserves Anthropic provenance", () => {
     const db = createTestDb();
     try {
+      seedBot(db, "bot-a", "Alice");
       const autoRoute = {
         v: 1 as const,
         lane: "online" as const,

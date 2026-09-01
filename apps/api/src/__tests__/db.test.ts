@@ -60,6 +60,36 @@ describe("Signal retry image Reason migration", () => {
     const db = new DatabaseSync(":memory:");
     initializeDatabase(db);
     db.exec(`
+      INSERT INTO users
+        (id, email, display_name, password_hash, password_salt,
+         wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
+         created_at, last_active_at)
+      VALUES
+        ('legacy-user', 'legacy@example.com', 'Legacy', 'hash', 'salt',
+         'cipher', 'iv', 'tag', '2026-08-29T00:00:00.000Z',
+         '2026-08-29T00:00:00.000Z');
+      INSERT INTO bots (id, user_id, name, created_at, updated_at)
+      VALUES
+        ('legacy-host', 'legacy-user', 'Host', '2026-08-29T00:00:00.000Z',
+         '2026-08-29T00:00:00.000Z'),
+        ('legacy-guest', 'legacy-user', 'Guest', '2026-08-29T00:00:00.000Z',
+         '2026-08-29T00:00:00.000Z');
+      INSERT INTO botcast_shows
+        (id, user_id, host_bot_id, name, premise, hosting_style, accent_color,
+         created_at, updated_at)
+      VALUES
+        ('legacy-show', 'legacy-user', 'legacy-host', 'Legacy Show', '', '',
+         '#abcdef', '2026-08-29T00:00:00.000Z', '2026-08-29T00:00:00.000Z');
+      INSERT INTO botcast_episodes
+        (id, user_id, show_id, host_bot_id, guest_bot_id, guest_kind,
+         guest_name, title, topic, started_at, created_at, updated_at)
+      VALUES
+        ('legacy-episode', 'legacy-user', 'legacy-show', 'legacy-host',
+         'legacy-guest', 'bot', 'Guest', 'Legacy Episode', 'Legacy Topic',
+         '2026-08-29T00:00:00.000Z', '2026-08-29T00:00:00.000Z',
+         '2026-08-29T00:00:00.000Z');
+    `);
+    db.exec(`
       PRAGMA foreign_keys = OFF;
       ALTER TABLE botcast_episode_image_proxies DROP COLUMN presentation_reason;
       INSERT INTO botcast_episode_image_proxies
@@ -1035,9 +1065,18 @@ describe("createDatabase bot export hash migration", () => {
         .get("bot-1") as { export_hash: string | null } | undefined;
       assert.ok(row?.export_hash);
       assert.match(row!.export_hash!, /^[a-f0-9]{32}$/);
+      reopened.prepare(
+        "INSERT INTO images (id, user_id, prompt, url, created_at) VALUES (?, ?, ?, ?, ?)",
+      ).run(
+        "img-profile",
+        "user-1",
+        "Profile picture",
+        "/images/img-profile",
+        "2026-01-01T00:00:00.000Z",
+      );
       reopened
         .prepare(
-          "UPDATE bots SET face_eyes_font = ?, face_eye_character = ?, face_mouth_font = ?, face_mouth_character = ?, face_font_weight = ?, face_eye_scale = ?, face_eye_offset_x = ?, face_eye_offset_y = ?, face_mouth_scale = ?, face_mouth_offset_x = ?, face_mouth_offset_y = ?, face_mouth_rotation_deg = ?, face_blink_bar = ?, face_thinking_frames = ?, profile_picture_image_id = ? WHERE id = ?"
+          "UPDATE bots SET face_eyes_font = ?, face_eye_character = ?, face_mouth_font = ?, face_mouth_character = ?, face_font_weight = ?, face_eye_scale = ?, face_eye_offset_x = ?, face_eye_offset_y = ?, face_mouth_scale = ?, face_mouth_offset_x = ?, face_mouth_offset_y = ?, face_mouth_rotation_deg = ?, face_blink_bar = ?, face_thinking_frames = ?, profile_picture_image_id = ? WHERE user_id = ? AND id = ?"
         )
         .run(
           "warm",
@@ -1055,6 +1094,7 @@ describe("createDatabase bot export hash migration", () => {
           "¦",
           '[".","o","O","o"]',
           "img-profile",
+          "user-1",
           "bot-1"
         );
       const avatarRow = reopened
@@ -1149,6 +1189,15 @@ describe("createDatabase image provenance migration", () => {
         "2026-01-01T00:00:00.000Z",
         "2026-01-01T00:00:00.000Z"
       );
+      db.prepare(
+        "INSERT INTO bots (id, user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+      ).run(
+        "bot-9",
+        "user-1",
+        "Image Bot",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+      );
       const columns = db
         .prepare("PRAGMA table_info(images)")
         .all() as Array<{ name: string }>;
@@ -1211,6 +1260,9 @@ describe("createDatabase image provenance migration", () => {
         now,
         now,
       );
+      db.prepare(
+        "INSERT INTO bots (id, user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+      ).run("bob-ross", "user-signal", "Bob Ross", now, now);
       for (const imageId of ["studio-image", "logo-image"]) {
         db.prepare(
           "INSERT INTO images (id, user_id, prompt, url, created_at) VALUES (?, ?, ?, ?, ?)",

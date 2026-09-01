@@ -77,19 +77,23 @@ test("active Coffee centrally locks configuration while preserving End Session",
   );
   assert.match(pageSource, /beginCoffeeLiveWithIntro/u);
   assert.match(pageSource, /CoffeeIntroCurtain/u);
-  assert.match(pageSource, /setAppNavbarSessionHidden/u);
+  assert.doesNotMatch(pageSource, /setAppNavbarSessionHidden/u);
   assert.match(
     pageSource,
     /data-live-session-locked=\{[\s\S]*options\.liveSessionActive/u,
   );
 });
 
-test("Coffee's PRISM wordmark returns to All Bots Home", () => {
+test("Coffee's PRISM wordmark returns to Coffee Home", () => {
   assert.match(
     pageSource,
     /renderSharedAppletNavbar\("Coffee tools", \{[\s\S]*brandAppletId: "coffee"/u,
   );
   assert.doesNotMatch(pageSource, /returnToCoffeeStart/u);
+  assert.match(
+    pageSource,
+    /const openCurrentAppletHome =[\s\S]{0,1000}appletId === "coffee"[\s\S]{0,120}resetCoffeeToPicker\(\)/u,
+  );
 });
 
 test("leaving the Coffee topic picker discards its placeholder session", () => {

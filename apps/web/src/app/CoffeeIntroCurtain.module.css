@@ -22,7 +22,9 @@
   --coffee-curtain-skip-hover-ink: #fff;
   --coffee-curtain-skip-hover-surface: rgba(255, 255, 255, 0.1);
   position: fixed;
-  inset: 0;
+  inset:
+    var(--app-shell-top-nav-height, var(--app-navbar-height, 66px))
+    0 0;
   z-index: 920;
   display: grid;
   place-items: center;

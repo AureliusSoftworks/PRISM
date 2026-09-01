@@ -14,6 +14,8 @@ import {
   type PrismJsonValue,
 } from "@localai/shared";
 import { decryptJson, encryptJson, randomId } from "./security.ts";
+import { VaultEnvelopeMalformedError } from "./vault-envelope-v2.ts";
+import { prismActionIdempotencyDigestV2 } from "./core-content-vault.ts";
 
 interface ProposalRow {
   id: string;
@@ -116,8 +118,9 @@ function decryptedInputJson(
       ? (decrypted as PrismJsonObject)
       : {};
   }
-  // Compatibility for proposals written before encrypted action inputs.
-  return parseJson<PrismJsonObject>(value, {});
+  // Legacy plaintext is accepted and rewritten only by the resumable core
+  // Vault migrator. Ordinary repository reads never fall back to it.
+  throw new VaultEnvelopeMalformedError("invalid_input");
 }
 
 function proposalFromRow(
@@ -303,7 +306,9 @@ export function readPrismActionRunByIdempotency(
          FROM prism_action_runs
         WHERE user_id = ? AND idempotency_key = ?`,
     )
-    .get(userId, idempotencyKey) as RunRow | undefined;
+    .get(userId, prismActionIdempotencyDigestV2(userId, idempotencyKey)) as
+    | RunRow
+    | undefined;
   return row ? runFromRow(row, now) : null;
 }
 
@@ -341,7 +346,7 @@ export function beginPrismActionRun(args: {
       args.descriptor.id,
       args.descriptor.version,
       args.source,
-      args.idempotencyKey,
+      prismActionIdempotencyDigestV2(args.userId, args.idempotencyKey),
       encryptedInputJson(args.input, args.userKey),
       createdAt,
     );

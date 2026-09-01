@@ -829,8 +829,8 @@ function insertClarification(
     input.createdAt,
   );
   const row = db
-    .prepare("SELECT * FROM slate_clarification_requests WHERE id = ?")
-    .get(id) as unknown as ClarificationRow;
+    .prepare("SELECT * FROM slate_clarification_requests WHERE user_id = ? AND id = ?")
+    .get(input.userId, id) as unknown as ClarificationRow;
   return clarificationFromRow(row);
 }
 

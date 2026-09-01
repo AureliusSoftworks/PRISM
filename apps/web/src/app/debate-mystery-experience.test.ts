@@ -630,8 +630,9 @@ describe("Debate Whodunnit experience", () => {
       "/debate/mystery/rooms/kitchen-mosaic.webp?pixelArt=6",
     );
     assert.match(source, /whodunnitSavedRoomArtUrl\(currentRoom\.imageId, investigationArtStyle\)/u);
+    assert.match(source, /whodunnitRoomArtStyleForUpgrade\([\s\S]*roomUpgradeEnabled/u);
     assert.match(source, /renderMysteryBotAvatar\(mysteryBotForSuspect\(currentSuspect\), interviewAvatarPresentation/u);
-    assert.match(source, /<img className=\{styles\.generatedRoom\} data-art-style=\{investigationArtStyle\} src=\{roomArtworkSrc\}/u);
+    assert.match(source, /<img className=\{styles\.generatedRoom\} data-art-style=\{investigationArtStyle\} src=\{roomArtworkSrc\} alt="" onError=/u);
     assert.match(css, /\.generatedRoom\[data-art-style="mosaic"\][\s\S]*image-rendering: pixelated/u);
     assert.match(css, /\.roomScene\[data-blurred="true"\][\s\S]*\.generatedRoom/u);
   });

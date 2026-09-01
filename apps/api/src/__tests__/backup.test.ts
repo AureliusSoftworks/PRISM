@@ -272,6 +272,11 @@ describe("backup memory ecology", () => {
                 memory_inferred_threshold = 0.76
           WHERE id = 'user-1'`,
       ).run();
+      db.prepare(
+        `INSERT INTO bots (id, user_id, name, created_at, updated_at)
+         VALUES ('bot-a', 'user-1', 'Calvin', 'now', 'now'),
+                ('bot-b', 'user-1', 'Morgan', 'now', 'now')`,
+      ).run();
       const direct = encryptJson({ text: "Calvin interrupted twice." }, userKey);
       const derived = encryptJson({ text: "Calvin can be impatient." }, userKey);
       db.prepare(
@@ -383,6 +388,17 @@ describe("backup response cues", () => {
   it("round-trips the audience-heard presentation beat", () => {
     withBackupDatabase((db, userKey) => {
       const createdAt = "2026-08-01T20:00:00.000Z";
+      db.prepare(
+        `INSERT INTO bots (id, user_id, name, created_at, updated_at)
+         VALUES ('bot-1', 'user-1', 'Jane', ?, ?)`,
+      ).run(createdAt, createdAt);
+      db.prepare(
+        `INSERT INTO debate_sessions
+           (id, user_id, status, phase, step_key, player_role,
+            create_idempotency_key, motion, session_json, created_at, updated_at)
+         VALUES ('debate-1', 'user-1', 'live', 'opening', 'intro', 'spectator',
+                 'response-cue-backup', 'Motion', '{}', ?, ?)`,
+      ).run(createdAt, createdAt);
       db.prepare(
         `INSERT INTO bot_presence_beats
            (id, user_id, surface, session_id, response_id, speaker_bot_id,
@@ -1714,6 +1730,8 @@ describe("backup bot avatar face style", () => {
             premiumPitch: 0,
             pitch: 0,
             pronunciationBase: "follow-voice",
+            ttsPronunciationEnabled: false,
+            premiumPronunciationEnabled: false,
             resonance: 0,
             speechprintInfluence: "none",
             speechprintStrength: "balanced",
@@ -2043,7 +2061,7 @@ describe("backup bot avatar face style", () => {
 
       assert.throws(
         () => importUserSnapshot(db, "user-1", snapshot, userKey),
-        /belongs to another user/i
+        /unavailable owner-bound data/i
       );
       const retained = db
         .prepare("SELECT user_id, name FROM bots WHERE id = ?")
@@ -2288,7 +2306,7 @@ describe("backup Slate account data", () => {
 
       assert.throws(
         () => importUserSnapshot(db, "user-1", snapshot, userKey),
-        /belongs to another user/i,
+        /unavailable owner-bound reference/i,
       );
       assert.equal(
         (
@@ -2380,6 +2398,16 @@ function seedSlateBackupFixture(
   db.prepare(
     "INSERT INTO slate_series (id, user_id, title, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
   ).run(seriesId, userId, "The Long Saga", "A restored saga.", now, now);
+  db.prepare(
+    `INSERT INTO conversations
+       (id, user_id, title, conversation_mode, created_at, updated_at)
+     VALUES (?, ?, 'Source conversation', 'zen', ?, ?)`,
+  ).run(`${prefix}-conversation`, userId, now, now);
+  db.prepare(
+    `INSERT INTO messages
+       (id, conversation_id, user_id, role, content, created_at)
+     VALUES (?, ?, ?, 'assistant', 'The restored source.', ?)`,
+  ).run(`${prefix}-message`, `${prefix}-conversation`, userId, now);
   db.prepare(
     `INSERT INTO slate_projects (
       id, user_id, series_id, book_ordinal, title, title_origin, spark, spark_wildcards_json,

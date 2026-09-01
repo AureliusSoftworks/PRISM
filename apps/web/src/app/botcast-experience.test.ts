@@ -63,33 +63,16 @@ describe("Signal experience shell", () => {
   });
 
   it("keeps a persistent Light and Dark switch in the live session chrome", () => {
-    assert.match(
-      source,
-      /onThemeChange\?: \(theme: "light" \| "dark"\) => void \| Promise<void>/u,
-    );
-    assert.match(
-      source,
-      /void onThemeChange\(theme === "light" \? "dark" : "light"\)/u,
-    );
-    assert.match(
-      source,
-      /aria-label=\{`Switch Signal to \$\{theme === "light" \? "Dark" : "Light"\} Mode`\}/u,
-    );
-    assert.match(source, /data-theme-mode=\{theme\}/u);
-    assert.match(pageSource, /async function applyThemeMode\(nextTheme: Theme\)/u);
-    assert.match(pageSource, /onThemeChange=\{applyThemeMode\}/u);
+    assert.doesNotMatch(source, /onThemeChange|liveThemeToggle/u);
+    assert.doesNotMatch(css, /liveThemeToggle/u);
+    assert.match(pageSource, /action === "theme" \? false/u);
     assert.match(
       pageSource,
-      /body: JSON\.stringify\(\{ theme: nextTheme \}\)/u,
-    );
-    assert.match(css, /\.liveTopline \.liveThemeToggle\s*\{/u);
-    assert.match(
-      css,
-      /\.shell\[data-theme="light"\] \.liveTopline \.liveThemeToggle\s*\{/u,
+      /className=\{styles\.themeToggleButton\}[\s\S]{0,400}onClick=\{\(\) => runAsyncAction\(cycleThemeMode\)\}/u,
     );
     assert.match(
       tutorials,
-      /The compact Light\/Dark control remains in the live topline and changes only PRISM’s appearance; it never alters the episode, recording, or replay\./u,
+      /The compact Light\/Dark control remains in the shared navbar and changes only PRISM’s appearance; it never alters the episode, recording, or replay\./u,
     );
   });
 
@@ -508,7 +491,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /signalAudienceRatingColor\(showAudienceRating\)\s*\?\?/u,
+      /signalAudienceRatingColor\(showAudienceRating,\s*theme\)\s*\?\?/u,
     );
     assert.match(
       source,
@@ -518,6 +501,37 @@ describe("Signal experience shell", () => {
     assert.doesNotMatch(
       source,
       /showAudience\.rating === null/u,
+    );
+  });
+
+  it("keeps Signal rating colors theme-aware and smoothly interpolated", () => {
+    assert.match(
+      source,
+      /signalAudienceRatingColor\(audienceRating,\s*theme\)/u,
+    );
+    assert.match(
+      source,
+      /signalAudienceRatingColor\(\s*replayEpisode\.personaReview\.rating,\s*theme,?\s*\)/u,
+    );
+    assert.match(
+      source,
+      /signalAudienceRatingColor\(\s*showAudienceRating,\s*theme\s*\)/u,
+    );
+    assert.match(
+      source,
+      /signalAudienceRatingColor\(review\.rating,\s*theme\)/u,
+    );
+    assert.match(
+      css,
+      /\.showRowRating\s*\{[^}]*transition:\s*color 220ms ease/u,
+    );
+    assert.match(
+      css,
+      /\.showAudienceMetric strong\.showAudienceRatingValue\s*\{[^}]*transition:\s*color 220ms ease/u,
+    );
+    assert.match(
+      css,
+      /\.audiencePulseReview > header > strong\s*\{[^}]*transition:\s*color 220ms ease/u,
     );
   });
 
@@ -1958,7 +1972,7 @@ describe("Signal experience shell", () => {
     assert.doesNotMatch(css, /\.shell\[data-episode-outro="true"\]/u);
     assert.match(
       css,
-      /\.episodeOutro\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*var\(--app-navbar-height,\s*66px\)\s*0\s*0\s*0;[^}]*contain:\s*layout paint;[^}]*background:\s*var\(--botcast-curtain\)/iu,
+      /\.episodeOutro\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*var\(--app-shell-top-nav-height,[^;]*\)\s*0\s*0\s*0;[^}]*contain:\s*layout paint;[^}]*background:\s*var\(--botcast-curtain\)/iu,
     );
     assert.match(css, /@keyframes signalOutroCurtainIn/u);
     assert.match(
@@ -1967,7 +1981,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       css,
-      /@media \(max-width: 900px\)[\s\S]*?\.episodeOutro\s*\{[^}]*inset:\s*var\(--app-navbar-height,\s*66px\)\s*0\s*0;[^}]*min-height:\s*0/iu,
+      /@media \(max-width: 900px\)[\s\S]*?\.episodeOutro\s*\{[^}]*inset:\s*var\(--app-shell-top-nav-height,[^;]*\)\s*0\s*0;[^}]*min-height:\s*0/iu,
     );
     assert.match(
       source,

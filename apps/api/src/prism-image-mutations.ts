@@ -27,8 +27,8 @@ function imageRow(
   imageId: string,
 ): Record<string, unknown> {
   const row = db
-    .prepare("SELECT * FROM images WHERE id = ? AND user_id = ?")
-    .get(imageId, userId) as Record<string, unknown> | undefined;
+    .prepare("SELECT * FROM images WHERE user_id = ? AND id = ?")
+    .get(userId, imageId) as Record<string, unknown> | undefined;
   if (!row) throw new Error("Image not found.");
   return row;
 }
@@ -88,9 +88,13 @@ function assertReusableImageIsUnused(
     ? (
         db
           .prepare(
-            "SELECT image_id FROM image_asset_set_items WHERE set_id = ? ORDER BY ordinal, image_id",
+            `SELECT items.image_id
+               FROM image_asset_set_items AS items
+               JOIN image_asset_sets AS sets ON sets.id = items.set_id
+              WHERE sets.user_id = ? AND items.set_id = ?
+              ORDER BY items.ordinal, items.image_id`,
           )
-          .all(membership.set_id) as Array<{ image_id: string }>
+          .all(userId, membership.set_id) as Array<{ image_id: string }>
       ).map((member) => member.image_id)
     : [];
   if (memberIds.length > 1) {
@@ -212,8 +216,8 @@ export function undoPrismImageDeletion(args: {
   }
   if (
     args.db
-      .prepare("SELECT 1 AS present FROM images WHERE id = ?")
-      .get(imageId)
+      .prepare("SELECT 1 AS present FROM images WHERE user_id = ? AND id = ?")
+      .get(args.userId, imageId)
   ) {
     throw new Error("An image now occupies this restore target.");
   }

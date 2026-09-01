@@ -1,0 +1,44 @@
+.vignette {
+  --scene-vignette-top-clear: 17%;
+  --scene-vignette-bottom-clear: 76%;
+  position: absolute;
+  z-index: var(--scene-vignette-z, 6);
+  inset: 0;
+  display: block;
+  overflow: hidden;
+  pointer-events: none;
+  isolation: isolate;
+}
+
+.vignette::before,
+.vignette::after {
+  position: absolute;
+  inset: -1px;
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    currentColor 0%,
+    color-mix(in srgb, currentColor 72%, transparent) 5%,
+    transparent var(--scene-vignette-top-clear) var(--scene-vignette-bottom-clear),
+    color-mix(in srgb, currentColor 78%, transparent) 95%,
+    currentColor 100%
+  );
+  opacity: 0;
+  transition: opacity 420ms cubic-bezier(0.18, 0.72, 0.22, 1);
+}
+
+.vignette::before { color: #000; }
+.vignette::after { color: #fff; }
+
+.vignette[data-theme="dark"]::before,
+.vignette[data-theme="light"]::after {
+  opacity: var(--scene-vignette-opacity, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vignette::before,
+  .vignette::after {
+    transition: none;
+  }
+}

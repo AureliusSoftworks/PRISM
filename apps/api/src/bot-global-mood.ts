@@ -132,13 +132,9 @@ export function setGlobalBotMood(
     return { botId, moodKey: "neutral", updatedAt: nowIso };
   }
   db.prepare(
-    `INSERT INTO bot_global_moods
+    `INSERT OR REPLACE INTO bot_global_moods
        (user_id, bot_id, mood_key, source, updated_at)
-     VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(user_id, bot_id) DO UPDATE SET
-       mood_key = excluded.mood_key,
-       source = excluded.source,
-       updated_at = excluded.updated_at`,
+     VALUES (?, ?, ?, ?, ?)`,
   ).run(userId, botId, normalized, source, nowIso);
   return { botId, moodKey: normalized, updatedAt: nowIso };
 }

@@ -1369,7 +1369,7 @@ export function retrieveBotPairNarrativeMemories(args: {
             last_reinforced_at, created_at
        FROM memories
       WHERE user_id = ? AND bot_id = ? AND target_bot_id = ?
-      ORDER BY created_at DESC, rowid DESC
+      ORDER BY created_at DESC, id DESC
       LIMIT ?`,
   ).all(args.userId, sourceBotId, targetBotId, limit) as MemoryRow[];
   return rows.map((row) => {
@@ -1722,7 +1722,7 @@ export async function persistMemoryCandidates(
             last_reinforced_at = ?,
             created_at = ?,
             target_bot_id = ?
-        WHERE id = ?
+        WHERE user_id = ? AND id = ?
       `).run(
         conversationId,
         encrypted.ciphertext,
@@ -1740,6 +1740,7 @@ export async function persistMemoryCandidates(
         createdAt,
         createdAt,
         targetBotId,
+        userId,
         target.id
       );
       const reinforcedMemory: StoredMemoryWithEmbedding = {

@@ -16,6 +16,7 @@ const debate = read("./DebateExperience.tsx");
 const debateCss = read("./DebateExperience.module.css");
 const flyting = read("./DebateFlyting.tsx");
 const flytingCss = read("./DebateFlyting.module.css");
+const flytingRgbKey = read("./debateFlytingRgbKey.ts");
 const mystery = read("./DebateMysteryExperience.tsx");
 const mysteryCss = read("./debateMystery.module.css");
 const mysteryV2 = read("./DebateMysteryV2Experience.tsx");
@@ -24,20 +25,14 @@ const mysteryV2Css = read("./debateMysteryV2.module.css");
 describe("social and experiential applet Light parity", () => {
   it("propagates the resolved theme through every formerly forced-Dark applet root", () => {
     assert.doesNotMatch(flyting, /data-theme="dark"/u);
-    assert.equal(
-      flyting.match(/data-theme=\{props\.theme\}/gu)?.length,
-      3,
-    );
+    assert.equal(flyting.match(/data-theme=\{props\.theme\}/gu)?.length, 4);
     assert.match(
       flyting,
       /<FlytingSetupStageAlignmentPreview[\s\S]*?theme=\{props\.theme\}/u,
     );
 
     assert.doesNotMatch(mystery, /data-theme="dark"/u);
-    assert.equal(
-      mystery.match(/data-theme=\{props\.theme\}/gu)?.length,
-      2,
-    );
+    assert.equal(mystery.match(/data-theme=\{props\.theme\}/gu)?.length, 2);
     assert.match(
       mystery,
       /<DebateEvidenceDocument[\s\S]{0,420}theme=\{props\.theme\}/u,
@@ -83,7 +78,10 @@ describe("social and experiential applet Light parity", () => {
     );
     assert.match(sharedCss, /\.themeLight \.zenInitialThinkingOverlay\s*\{/u);
     assert.match(sharedCss, /\.themeLight\.coffeeShell\s*\{/u);
-    assert.match(sharedCss, /\.coffeePollPlayerOption\[data-selected="true"\]/u);
+    assert.match(
+      sharedCss,
+      /\.coffeePollPlayerOption\[data-selected="true"\]/u,
+    );
     assert.match(sharedCss, /\.coffeeReplayIconButton:disabled/u);
     assert.match(sharedCss, /\.coffeeTopicChip:focus-visible/u);
 
@@ -178,18 +176,11 @@ describe("social and experiential applet Light parity", () => {
       /\.liveShell\[data-theme="light"\]\s*\{[\s\S]*--hall-header-surface:[\s\S]*--hall-authoring-surface:[\s\S]*--hall-authoring-ink:/u,
     );
     assert.match(flytingCss, /\[data-theme="light"\] \.hallStage\s*\{/u);
-    assert.match(
-      flytingCss,
-      /\.liveShell\[data-theme="light"\] \.hallReceiverMatte\s*\{[^}]*mead-hall-keyed-base-light\.webp/u,
-    );
-    assert.match(
-      flytingCss,
-      /\.liveShell\[data-theme="light"\][\s\S]{0,160}\.hallCamera\[data-camera-view="moderator"\][\s\S]{0,120}\.hallReceiverMatte\s*\{[^}]*jarl-throne-keyed-base-light\.webp/u,
-    );
-    assert.match(
-      flytingCss,
-      /\.liveShell\[data-theme="light"\] \.flytingCourtGallery\s*\{[^}]*mead-hall-gallery-floor-light\.webp/u,
-    );
+    assert.match(flyting, /<FlytingRgbKeyedBackdrop/u);
+    assert.match(flyting, /theme=\{props\.theme\}/u);
+    assert.match(flytingRgbKey, /mead-hall-keyed-base-light\.webp/u);
+    assert.match(flytingRgbKey, /jarl-throne-keyed-base-light\.webp/u);
+    assert.match(flytingRgbKey, /mead-hall-gallery-floor-light\.webp/u);
     assert.doesNotMatch(
       flyting,
       /className=\{`\$\{studioStyles\.receiverMatte\} \$\{styles\.hallReceiverMatte\}`\}/u,
@@ -201,9 +192,18 @@ describe("social and experiential applet Light parity", () => {
       mysteryCss,
       /\.play\[data-theme="light"\]\s*\{[\s\S]*--mystery-ui-surface:[\s\S]*--mystery-map-room-selected:[\s\S]*color-scheme:\s*light;/u,
     );
-    assert.match(mysteryCss, /\.play\[data-theme="light"\] \.mapRoom\[data-selected="true"\]/u);
-    assert.match(mysteryCss, /\.play\[data-theme="light"\][\s\S]{0,10000}:focus-visible/u);
-    assert.match(mysteryCss, /\.play\[data-theme="light"\][\s\S]{0,12000}:disabled/u);
+    assert.match(
+      mysteryCss,
+      /\.play\[data-theme="light"\] \.mapRoom\[data-selected="true"\]/u,
+    );
+    assert.match(
+      mysteryCss,
+      /\.play\[data-theme="light"\][\s\S]{0,10000}:focus-visible/u,
+    );
+    assert.match(
+      mysteryCss,
+      /\.play\[data-theme="light"\][\s\S]{0,12000}:disabled/u,
+    );
 
     assert.match(
       mysteryV2Css,
@@ -213,8 +213,17 @@ describe("social and experiential applet Light parity", () => {
       mysteryV2Css,
       /\.investigation\[data-theme="light"\] \.mansionRoom\[data-selected="true"\]/u,
     );
-    assert.match(mysteryV2Css, /\[data-theme="light"\][\s\S]{0,4200}:hover:not\(:disabled\)/u);
-    assert.match(mysteryV2Css, /\[data-theme="light"\][\s\S]{0,5200}:focus-visible/u);
-    assert.match(mysteryV2Css, /\[data-theme="light"\][\s\S]{0,5800}:disabled/u);
+    assert.match(
+      mysteryV2Css,
+      /\[data-theme="light"\][\s\S]{0,4200}:hover:not\(:disabled\)/u,
+    );
+    assert.match(
+      mysteryV2Css,
+      /\[data-theme="light"\][\s\S]{0,5200}:focus-visible/u,
+    );
+    assert.match(
+      mysteryV2Css,
+      /\[data-theme="light"\][\s\S]{0,5800}:disabled/u,
+    );
   });
 });

@@ -26,8 +26,8 @@ export type LiveSessionRoutingChipLabels = {
 };
 
 /**
- * Quiet routing summary for live Coffee / Debate / Signal sits. Auto resolves
- * to the concrete route while retaining provenance in visible prose.
+ * Quiet routing summary for live Coffee / Debate / Signal sits. Auto remains
+ * visible until a server-persisted route supplies the concrete model name.
  */
 export function liveSessionRoutingChipLabels(args: {
   modelIsAuto: boolean;

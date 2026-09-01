@@ -32,6 +32,11 @@ function fixture(): DatabaseSync {
              'cipher', 'iv', 'tag', ?, ?)`,
   ).run(now, now);
   db.prepare(
+    `INSERT INTO bots (id, user_id, name, created_at, updated_at)
+     VALUES ('host-1', 'user-1', 'Host', ?, ?),
+            ('guest-1', 'user-1', 'Guest', ?, ?)`,
+  ).run(now, now, now, now);
+  db.prepare(
     `INSERT INTO botcast_shows
       (id, user_id, host_bot_id, name, premise, hosting_style, accent_color,
        atmosphere_json, created_at, updated_at)

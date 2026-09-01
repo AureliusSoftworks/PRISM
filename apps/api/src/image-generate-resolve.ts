@@ -130,16 +130,17 @@ export function imageContextIncludesOfflineOnlyBot(
 
 export function conversationHasAssistantWithBotId(
   db: DatabaseSync,
+  userId: string,
   conversationId: string,
   botId: string
 ): boolean {
   const row = db
     .prepare(
       `SELECT 1 AS ok FROM messages
-       WHERE conversation_id = ? AND role = 'assistant' AND bot_id = ?
+       WHERE user_id = ? AND conversation_id = ? AND role = 'assistant' AND bot_id = ?
        LIMIT 1`
     )
-    .get(conversationId, botId) as { ok?: number } | undefined;
+    .get(userId, conversationId, botId) as { ok?: number } | undefined;
   return Boolean(row?.ok);
 }
 
@@ -177,6 +178,7 @@ export function resolveSandboxImageBotAttribution(options: {
     options.conversationLockedBotId === botId;
   const spokeInThread = conversationHasAssistantWithBotId(
     options.db,
+    options.userId,
     options.conversationId,
     botId
   );

@@ -27,6 +27,23 @@ export type MysteryVenueKindV1 =
   | "transport"
   | "other";
 export type MysteryVenueTopologyV1 = "estate" | "spine" | "radial" | "pods" | "linear";
+export type MysteryVenueArchetypeV1 =
+  | "private_estate"
+  | "vintage_yacht"
+  | "passenger_cruise_ship"
+  | "lunar_habitat"
+  | "underwater_facility"
+  | "night_train"
+  | "custom";
+export type MysteryVenueEraV1 = "historic" | "modern" | "futuristic" | "unspecified";
+export type MysteryVenuePhysicalScaleClassV1 = "compact" | "standard" | "grand";
+export type MysteryVenueMapStyleV1 =
+  | "estate-grid-v1"
+  | "hull-deck-v1"
+  | "radial-module-v1"
+  | "pod-network-v1"
+  | "linear-carriage-v1"
+  | "abstract-venue-v1";
 export type MysteryVenueRoomRoleV1 =
   | "entry"
   | "circulation"
@@ -37,6 +54,37 @@ export type MysteryVenueRoomRoleV1 =
   | "technical"
   | "observation"
   | "other";
+
+/** Frozen before provider work. This is public, spoiler-safe venue intent;
+ * model-authored dressing may not rewrite it. */
+export interface MysteryVenueIntentV1 {
+  version: 1;
+  archetype: MysteryVenueArchetypeV1;
+  era: MysteryVenueEraV1;
+  physicalScaleClass: MysteryVenuePhysicalScaleClassV1;
+  excludedArchetypes: MysteryVenueArchetypeV1[];
+}
+
+export interface MysteryVenueProposalMatchV1 {
+  version: 1;
+  status: "matched" | "confirmation_required" | "rejected";
+  reasons: string[];
+}
+
+export interface MysteryVenuePresentationV1 {
+  version: 1;
+  familyId: string;
+  mapStyle: MysteryVenueMapStyleV1;
+  physicalScaleClass: MysteryVenuePhysicalScaleClassV1;
+  entryAction: string;
+  compatibleExteriorFamilies: string[];
+  compatibleAcousticFamilies: string[];
+  mapOrientation: {
+    fore: "left" | "right" | "top" | "bottom";
+    port: "left" | "right" | "top" | "bottom";
+    pitchDegrees: number;
+  };
+}
 
 /** Public setting vocabulary frozen with an accepted venue. It changes how
  * the same bounded planner is described without changing traversal semantics. */
@@ -50,6 +98,18 @@ export interface MysteryVenueProfileV1 {
   entryRoomId: string;
   exteriorMode: "grounds" | "docked" | "contained" | "in-transit" | "other";
   environmentSummary: string;
+  /** Additive venue identity. Absent on minor-1/2 packages. */
+  intent?: MysteryVenueIntentV1;
+  physicalScaleClass?: MysteryVenuePhysicalScaleClassV1;
+  presentation?: MysteryVenuePresentationV1;
+}
+
+export interface MysteryVenueRoomSpatialV1 {
+  version: 1;
+  longitudinal: "fore" | "midships" | "aft";
+  transverse: "port" | "center" | "starboard" | "perimeter";
+  exposure: "interior" | "window" | "balcony" | "open-deck";
+  deckBand: "lower" | "embarkation" | "upper" | "other";
 }
 
 /** Venue-authored rooms do not need a legacy global mansion template. */
@@ -57,6 +117,17 @@ export interface MysteryVenueRoomContractV1 {
   version: 1;
   role: MysteryVenueRoomRoleV1;
   footprint: { width: number; height: number };
+  spatial?: MysteryVenueRoomSpatialV1;
+}
+
+export interface MysteryVenueTierOutlineV1 {
+  floor: number;
+  points: Array<{ x: number; y: number }>;
+}
+
+export interface MysteryVenueLayoutPresentationV1 {
+  version: 1;
+  tierOutlines: MysteryVenueTierOutlineV1[];
 }
 
 export interface MansionLayoutEnvelopeV2 {
@@ -119,6 +190,11 @@ export interface MansionVerticalConnectorV2 {
   lowerEntityId: string;
   upperEntityId: string;
   label?: string;
+  /** Shared shaft and normalized landings are additive presentation metadata.
+   * Endpoints remain authoritative for traversal. */
+  shaftId?: string;
+  lowerPoint?: { x: number; y: number };
+  upperPoint?: { x: number; y: number };
 }
 
 export const MANSION_PLACEMENT_RELATIONS_V2 = [
@@ -218,6 +294,7 @@ export interface MansionLayoutV2 {
   lights: MansionDynamicLightV2[];
   roomArtCandidates: MansionRoomArtCandidateV2[];
   venueProfile?: MysteryVenueProfileV1;
+  venuePresentation?: MysteryVenueLayoutPresentationV1;
 }
 
 export interface MansionLayoutLegacyRoomV1 {
@@ -1457,6 +1534,63 @@ export function validateMansionLayoutV2(
       venueProfile.tierLabels.length > 3 || venueProfile.tierLabels.some((label) => !label.trim())) {
       errors.push("Mystery venues need one to three named tiers.");
     }
+    if (venueProfile.intent) {
+      if (venueProfile.intent.version !== 1 ||
+        !["private_estate", "vintage_yacht", "passenger_cruise_ship", "lunar_habitat", "underwater_facility", "night_train", "custom"]
+          .includes(venueProfile.intent.archetype) ||
+        !["historic", "modern", "futuristic", "unspecified"].includes(venueProfile.intent.era) ||
+        !["compact", "standard", "grand"].includes(venueProfile.intent.physicalScaleClass) ||
+        !Array.isArray(venueProfile.intent.excludedArchetypes) ||
+        venueProfile.intent.excludedArchetypes.some((entry) =>
+          !["private_estate", "vintage_yacht", "passenger_cruise_ship", "lunar_habitat", "underwater_facility", "night_train", "custom"].includes(entry)
+        )) {
+        errors.push("Mystery venue intent is invalid.");
+      }
+    }
+    if (venueProfile.physicalScaleClass !== undefined &&
+      !["compact", "standard", "grand"].includes(venueProfile.physicalScaleClass)) {
+      errors.push("Mystery venue physical scale is invalid.");
+    }
+    if (venueProfile.intent && venueProfile.physicalScaleClass &&
+      venueProfile.intent.physicalScaleClass !== venueProfile.physicalScaleClass) {
+      errors.push("Mystery venue physical scale must match its frozen intent.");
+    }
+    if (venueProfile.presentation) {
+      const presentation = venueProfile.presentation;
+      if (presentation.version !== 1 || !presentation.familyId?.trim() || presentation.familyId.length > 100 ||
+        !ID_PATTERN.test(presentation.familyId) ||
+        !["estate-grid-v1", "hull-deck-v1", "radial-module-v1", "pod-network-v1", "linear-carriage-v1", "abstract-venue-v1"]
+          .includes(presentation.mapStyle) ||
+        !["compact", "standard", "grand"].includes(presentation.physicalScaleClass) ||
+        !presentation.entryAction?.trim() || presentation.entryAction.length > 80 ||
+        !Array.isArray(presentation.compatibleExteriorFamilies) ||
+        !Array.isArray(presentation.compatibleAcousticFamilies) ||
+        presentation.compatibleExteriorFamilies.length < 1 || presentation.compatibleExteriorFamilies.length > 8 ||
+        presentation.compatibleAcousticFamilies.length < 1 || presentation.compatibleAcousticFamilies.length > 8 ||
+        [...presentation.compatibleExteriorFamilies, ...presentation.compatibleAcousticFamilies]
+          .some((entry) =>
+            typeof entry !== "string" || !entry.trim() || entry.length > 100 || !ID_PATTERN.test(entry)) ||
+        !["left", "right", "top", "bottom"].includes(presentation.mapOrientation?.fore) ||
+        !["left", "right", "top", "bottom"].includes(presentation.mapOrientation?.port) ||
+        !Number.isFinite(presentation.mapOrientation?.pitchDegrees) ||
+        Math.abs(presentation.mapOrientation.pitchDegrees) > 12) {
+        errors.push("Mystery venue presentation is invalid.");
+      }
+      if (presentation.physicalScaleClass !== (venueProfile.physicalScaleClass ?? presentation.physicalScaleClass)) {
+        errors.push("Mystery venue presentation scale must match its profile.");
+      }
+    }
+  }
+  if (layout.venuePresentation) {
+    if (layout.venuePresentation.version !== 1 || !Array.isArray(layout.venuePresentation.tierOutlines) ||
+      layout.venuePresentation.tierOutlines.length < 1 || layout.venuePresentation.tierOutlines.length > 3 ||
+      layout.venuePresentation.tierOutlines.some((outline) =>
+        !Number.isInteger(outline.floor) || outline.floor < 1 || outline.floor > 3 ||
+        !Array.isArray(outline.points) || outline.points.length < 3 || outline.points.length > 16 ||
+        outline.points.some((point) => !isFiniteNormalized(point?.x) || !isFiniteNormalized(point?.y))
+      )) {
+      errors.push("Mystery venue tier outlines are invalid.");
+    }
   }
   if (layout.entities.length > MANSION_LAYOUT_V2_COLUMNS * MANSION_LAYOUT_V2_ROWS * MANSION_LAYOUT_V2_MAX_FLOORS) {
     errors.push("Mansion layout V2 contains more physical blocks than its envelope can hold.");
@@ -1497,6 +1631,15 @@ export function validateMansionLayoutV2(
         !Number.isInteger(entity.venueContract.footprint.height) ||
         entity.venueContract.footprint.width < 1 || entity.venueContract.footprint.height < 1)) {
         errors.push(`${entity.name || entity.id} needs a fixed venue room footprint.`);
+      }
+      if (entity.venueContract?.spatial && (
+        entity.venueContract.spatial.version !== 1 ||
+        !["fore", "midships", "aft"].includes(entity.venueContract.spatial.longitudinal) ||
+        !["port", "center", "starboard", "perimeter"].includes(entity.venueContract.spatial.transverse) ||
+        !["interior", "window", "balcony", "open-deck"].includes(entity.venueContract.spatial.exposure) ||
+        !["lower", "embarkation", "upper", "other"].includes(entity.venueContract.spatial.deckBand)
+      )) {
+        errors.push(`${entity.name || entity.id} has invalid venue spatial metadata.`);
       }
       if (entity.rotation !== 0 && entity.rotation !== 90) {
         errors.push(`${entity.name || entity.id} must use a 0 or 90 degree rotation.`);
@@ -1576,6 +1719,14 @@ export function validateMansionLayoutV2(
     if (occupied.length !== venueProfile.tierLabels.length) {
       errors.push("Mystery venue tier labels must match its occupied tiers.");
     }
+    if (layout.venuePresentation) {
+      const outlineFloors = layout.venuePresentation.tierOutlines.map((outline) => outline.floor);
+      if (new Set(outlineFloors).size !== outlineFloors.length ||
+        occupied.some((floor) => !outlineFloors.includes(floor)) ||
+        outlineFloors.some((floor) => !occupied.includes(floor))) {
+        errors.push("Mystery venue outlines must match its occupied tiers exactly.");
+      }
+    }
   }
 
   const doorIds = new Set<string>();
@@ -1616,6 +1767,18 @@ export function validateMansionLayoutV2(
     }
     if (!["stairs", "lift", "ladder", "portal"].includes(connector.kind)) {
       errors.push(`${connector.id || "A vertical connector"} has an unsupported kind.`);
+    }
+    if (connector.shaftId !== undefined &&
+      (!connector.shaftId.trim() || connector.shaftId.length > 200 || !ID_PATTERN.test(connector.shaftId))) {
+      errors.push(`${connector.id || "A vertical connector"} has an invalid shaft ID.`);
+    }
+    for (const [label, point] of [["lower", connector.lowerPoint], ["upper", connector.upperPoint]] as const) {
+      if (point !== undefined && (!isFiniteNormalized(point.x) || !isFiniteNormalized(point.y))) {
+        errors.push(`${connector.id || "A vertical connector"} has an invalid ${label} landing point.`);
+      }
+    }
+    if ((connector.lowerPoint === undefined) !== (connector.upperPoint === undefined)) {
+      errors.push(`${connector.id || "A vertical connector"} must define both landing points or neither.`);
     }
   }
 
