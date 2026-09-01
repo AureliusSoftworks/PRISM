@@ -13471,6 +13471,28 @@ export function resolveCoffeePlayerPlainTextAddresseeV1(args: {
   return resolvedBotId;
 }
 
+/**
+ * A clearly conversational second-person follow-up belongs to the bot who
+ * just spoke. Keep this narrower than generic scenario-setting "you" prose so
+ * an open table prompt such as "You find yourself on a balloon" stays open.
+ */
+export function coffeePlayerFollowupAddressesPriorSpeakerV1(
+  line: string,
+): boolean {
+  const normalized = line.normalize("NFKC").replace(/\s+/gu, " ").trim();
+  if (!normalized) return false;
+  if (
+    /\b(?:all|any|either|none|some)\s+of\s+you\b|\byou\s+(?:all|both|guys)\b/iu.test(
+      normalized,
+    )
+  ) {
+    return false;
+  }
+  return /\b(?:you\s+tell\s+me|tell\s+me\s+what\s+you\b|what\s+do\s+you\s+(?:think|mean|believe|make\s+of)|do\s+you\s+(?:think|mean|believe|agree|know|remember|want)|(?:can|could|would|will)\s+you\s+(?:explain|answer|tell|clarify|show)|why\s+(?:do|did|would)\s+you\b|how\s+(?:do|did|would|could)\s+you\b)/iu.test(
+    normalized,
+  );
+}
+
 export function resolveCoffeeMoodBoostRecipientIdsV1(args: {
   line: string;
   speakerBotId: string;
@@ -19485,6 +19507,9 @@ async function generateCoffeeBotReply(args: {
       ? directedSpeakerBotId
       : null;
   const explicitDirectedSpeaker = pickDirectedSpeaker(routableTurnGroup, effectiveDirectedSpeakerBotId);
+  const priorAssistantSpeakerBotId = latestAssistantBeforeTurn
+    ? resolveAssistantSpeakerBotId(latestAssistantBeforeTurn, group)
+    : null;
   const userActionOnly = turnKind === "user" && coffeeUserMessageIsActionOnly(tableFocus);
   const currentUserMentionedBotId =
     !explicitDirectedSpeaker && turnKind === "user"
@@ -19501,13 +19526,30 @@ async function generateCoffeeBotReply(args: {
           seatedBots: routableTurnGroup,
         })
       : null;
+  const currentUserFollowupAddressedBotId =
+    !explicitDirectedSpeaker &&
+    turnKind === "user" &&
+    !currentUserMentionedBotId &&
+    !currentUserPlainTextAddressedBotId &&
+    priorAssistantSpeakerBotId &&
+    seatedBotIds.has(priorAssistantSpeakerBotId) &&
+    coffeePlayerFollowupAddressesPriorSpeakerV1(tableFocus)
+      ? priorAssistantSpeakerBotId
+      : null;
   const currentUserAddressedBotId =
-    currentUserMentionedBotId ?? currentUserPlainTextAddressedBotId;
+    currentUserMentionedBotId ??
+    currentUserPlainTextAddressedBotId ??
+    currentUserFollowupAddressedBotId;
+  const currentUserPlayerAddressKind: CoffeeTurnRouteV1["playerAddressKind"] =
+    currentUserMentionedBotId
+      ? "mention"
+      : currentUserPlainTextAddressedBotId
+        ? "plain_text"
+        : currentUserFollowupAddressedBotId
+          ? "followup"
+          : undefined;
   const currentUserAddressedSpeaker = currentUserAddressedBotId
     ? routableTurnGroup.find((bot) => bot.id === currentUserAddressedBotId) ?? null
-    : null;
-  const priorAssistantSpeakerBotId = latestAssistantBeforeTurn
-    ? resolveAssistantSpeakerBotId(latestAssistantBeforeTurn, group)
     : null;
   const addressedBotId = latestAssistantBeforeTurn
     ? extractLastAddressedBotId({
@@ -19705,7 +19747,9 @@ async function generateCoffeeBotReply(args: {
     ...(currentUserAddressedBotId
       ? {
           addressedBotId: currentUserAddressedBotId,
-          playerAddressKind: currentUserMentionedBotId ? "mention" : "plain_text",
+          ...(currentUserPlayerAddressKind
+            ? { playerAddressKind: currentUserPlayerAddressKind }
+            : {}),
         }
       : addressedBotId
         ? { addressedBotId }

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Turnabout Review"
+  short_description: "Review Turnabout records and systemic failures"
+  default_prompt: "Use $turnabout-review to trace this PRISM Turnabout proceeding and make focused systemic fixes unless I ask for review-only."

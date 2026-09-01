@@ -60,6 +60,11 @@
   outline-offset: 2px;
 }
 
+.automaticToggle:hover:not(:has(input:disabled)) {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-surface));
+}
+
 .automaticToggle:has(input:disabled) {
   cursor: wait;
   opacity: 0.72;
@@ -302,6 +307,20 @@
   cursor: pointer;
 }
 
+.state button:hover:not(:disabled),
+.state button:focus-visible,
+.confirmActions button:hover:not(:disabled),
+.confirmActions button:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 56%, var(--line-strong));
+  background: var(--bg-hover);
+}
+
+.state button:focus-visible,
+.confirmActions button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 68%, transparent);
+  outline-offset: 2px;
+}
+
 .notice,
 .error {
   margin: 0;
@@ -328,7 +347,7 @@
   display: grid;
   place-items: center;
   padding: 24px;
-  background: color-mix(in srgb, #000 54%, transparent);
+  background: var(--prism-document-modal-backdrop, rgba(0, 0, 0, 0.54));
   backdrop-filter: blur(8px);
 }
 
@@ -374,6 +393,12 @@
   border-color: var(--danger);
   background: var(--danger);
   color: white;
+}
+
+.confirmActions .confirmDelete:hover:not(:disabled),
+.confirmActions .confirmDelete:focus-visible {
+  border-color: color-mix(in srgb, var(--danger) 76%, var(--fg));
+  background: color-mix(in srgb, var(--danger) 86%, #000 14%);
 }
 
 .confirmActions button:disabled {

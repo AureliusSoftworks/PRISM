@@ -156,6 +156,28 @@
   scrollbar-width: thin;
 }
 
+.groupModalBackdrop[data-theme="light"],
+:global(body[data-prism-theme="light"]) .groupModalBackdrop {
+  color-scheme: light;
+  background: var(--prism-document-modal-backdrop, rgba(41, 58, 79, 0.3));
+}
+
+.groupModalBackdrop[data-theme="light"] .groupModal,
+:global(body[data-prism-theme="light"]) .groupModal {
+  border-color: color-mix(in srgb, #7967c9 30%, var(--line-strong));
+  background:
+    radial-gradient(
+      circle at 12% 0%,
+      color-mix(in srgb, #8b78da 8%, transparent),
+      transparent 42%
+    ),
+    color-mix(in srgb, var(--bg-surface) 97%, transparent);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.92) inset,
+    0 28px 78px rgba(38, 57, 78, 0.2);
+  backdrop-filter: blur(20px) saturate(1.04);
+}
+
 @keyframes groupModalBackdropIn {
   from { opacity: 0; }
   to { opacity: 1; }

@@ -95,7 +95,7 @@ export function PrismBlockingLoader({
   stepLabel,
   progress = null,
   startedAt = null,
-  theme = "dark",
+  theme,
   placement = "fullscreen",
   eyebrow = "PRISM is working",
   onCancel,

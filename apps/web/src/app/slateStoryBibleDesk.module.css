@@ -1,6 +1,26 @@
 .desk {
+  --surface: var(--slate-paper-surface, #fff);
+  --text: var(--slate-paper-ink, #191714);
   display: grid;
   gap: 18px;
+  padding: 14px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  border-radius: 16px;
+}
+
+.desk :is(button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--slate-s, #50d5c8) 64%, var(--text));
+  outline-offset: 2px;
+}
+
+.desk button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--slate-s, #50d5c8) 34%, currentColor);
+}
+
+.desk :is(button, input, select, textarea):disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
 }
 
 .liveWire {

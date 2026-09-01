@@ -5152,6 +5152,9 @@ export function DebateExperience(
   const [mysteryMansionSource, setMysteryMansionSource] =
     useState<WhodunnitMansionSource>("installed");
   const [mansionImportOpen, setMansionImportOpen] = useState(false);
+  const [portablePackageDropTarget, setPortablePackageDropTarget] = useState<
+    "mansion" | "case" | null
+  >(null);
   const [legacySeedImportOpen, setLegacySeedImportOpen] = useState(false);
   const [motionTuningOpen, setMotionTuningOpen] = useState(false);
   const [castTuningOpen, setCastTuningOpen] = useState(false);
@@ -21104,9 +21107,41 @@ export function DebateExperience(
           title="Install a Mystery Venue"
           description="Inspect a shared Mystery Venue (.mansion), its creator, protection, size, and compatibility before adding it to your library."
           busy={mansionPackageState !== "idle"}
-          onClose={() => setMansionImportOpen(false)}
+          onClose={() => {
+            setPortablePackageDropTarget(null);
+            setMansionImportOpen(false);
+          }}
         >
-          <section className={mysteryStyles.mansionPackageWorkbench} data-tutorial-target="whodunnit-mansion-import" onDragOver={(event) => event.preventDefault()} onDrop={dropMansionPackage}>
+          <section
+            className={mysteryStyles.mansionPackageWorkbench}
+            data-tutorial-target="whodunnit-mansion-import"
+            data-drop-active={
+              portablePackageDropTarget === "mansion" ? "true" : undefined
+            }
+            onDragEnter={(event) => {
+              event.preventDefault();
+              setPortablePackageDropTarget("mansion");
+            }}
+            onDragOver={(event) => {
+              event.preventDefault();
+              if (portablePackageDropTarget !== "mansion") {
+                setPortablePackageDropTarget("mansion");
+              }
+            }}
+            onDragLeave={(event) => {
+              const nextTarget = event.relatedTarget;
+              if (
+                !(nextTarget instanceof Node) ||
+                !event.currentTarget.contains(nextTarget)
+              ) {
+                setPortablePackageDropTarget(null);
+              }
+            }}
+            onDrop={(event) => {
+              setPortablePackageDropTarget(null);
+              dropMansionPackage(event);
+            }}
+          >
             <div className={mysteryStyles.mansionPackageDropzone}>
               <div><strong>Bring in a Mystery Venue</strong><span>Drop a .mansion here, or open one from this device.</span></div>
               <button type="button" disabled={mansionPackageState !== "idle"} onClick={() => mansionPackageInputRef.current?.click()}>{mansionPackageState === "inspecting" ? "Inspecting…" : "Choose Venue"}</button>
@@ -21146,9 +21181,46 @@ export function DebateExperience(
           title="Install a reusable case"
           description="Inspect a sealed .case before adding its certified logic and local abstract cover to your library."
           busy={casePackageState !== "idle"}
-          onClose={() => setCaseImportOpen(false)}
+          onClose={() => {
+            setPortablePackageDropTarget(null);
+            setCaseImportOpen(false);
+          }}
         >
-          <section className={mysteryStyles.mansionPackageWorkbench} data-tutorial-target="whodunnit-case-import" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const file = event.dataTransfer.files.item(0); if (file) { setCasePackagePassword(""); void inspectCasePackage(file); } }}>
+          <section
+            className={mysteryStyles.mansionPackageWorkbench}
+            data-tutorial-target="whodunnit-case-import"
+            data-drop-active={
+              portablePackageDropTarget === "case" ? "true" : undefined
+            }
+            onDragEnter={(event) => {
+              event.preventDefault();
+              setPortablePackageDropTarget("case");
+            }}
+            onDragOver={(event) => {
+              event.preventDefault();
+              if (portablePackageDropTarget !== "case") {
+                setPortablePackageDropTarget("case");
+              }
+            }}
+            onDragLeave={(event) => {
+              const nextTarget = event.relatedTarget;
+              if (
+                !(nextTarget instanceof Node) ||
+                !event.currentTarget.contains(nextTarget)
+              ) {
+                setPortablePackageDropTarget(null);
+              }
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              setPortablePackageDropTarget(null);
+              const file = event.dataTransfer.files.item(0);
+              if (file) {
+                setCasePackagePassword("");
+                void inspectCasePackage(file);
+              }
+            }}
+          >
             <div className={mysteryStyles.mansionPackageDropzone}>
               <div><strong>Bring in a sealed case</strong><span>Drop a .case here, or open one from this device.</span></div>
               <button type="button" disabled={casePackageState !== "idle"} onClick={() => casePackageInputRef.current?.click()}>{casePackageState === "inspecting" ? "Inspecting…" : "Choose Case"}</button>

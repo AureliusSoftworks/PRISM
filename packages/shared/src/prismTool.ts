@@ -681,7 +681,9 @@ function normalizeCoffeeTurnRouteV1(value: unknown): CoffeeTurnRouteV1 | undefin
   const addressedBotId =
     typeof row.addressedBotId === "string" ? row.addressedBotId.trim() : "";
   const playerAddressKind =
-    row.playerAddressKind === "mention" || row.playerAddressKind === "plain_text"
+    row.playerAddressKind === "mention" ||
+    row.playerAddressKind === "plain_text" ||
+    row.playerAddressKind === "followup"
       ? row.playerAddressKind
       : undefined;
   return {

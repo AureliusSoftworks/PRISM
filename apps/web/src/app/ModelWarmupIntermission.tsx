@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type {
   ModelPreparationExperience,
@@ -10,6 +10,7 @@ import { modelPreparationFailureMessage } from "./modelPreparation";
 import { PrismOrb } from "./PrismOrb";
 import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
 import { beginPrismFullscreenBlockingAudioMute } from "./prismFullscreenBlockingAudio.ts";
+import { usePrismDocumentTheme } from "./usePrismDocumentTheme";
 import styles from "./model-warmup-intermission.module.css";
 
 export type ModelWarmupIntermissionPhase =
@@ -74,6 +75,8 @@ export function ModelWarmupIntermission(props: {
   onExit?: () => void;
   exitLabel?: string;
 }): React.JSX.Element | null {
+  const resolvedTheme = usePrismDocumentTheme();
+  const rootRef = useRef<HTMLElement | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [mounted, setMounted] = useState(false);
   const startedAtMs = props.startedAt ? Date.parse(props.startedAt) : nowMs;
@@ -92,6 +95,66 @@ export function ModelWarmupIntermission(props: {
     if (props.phase === "releasing") return;
     return beginPrismFullscreenBlockingAudioMute();
   }, [props.phase]);
+  useEffect(() => {
+    if (!mounted) return;
+    const root = rootRef.current;
+    if (!root) return;
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const siblings = Array.from(document.body.children)
+      .filter(
+        (element): element is HTMLElement =>
+          element instanceof HTMLElement && element !== root,
+      )
+      .map((element) => ({
+        element,
+        wasInert: element.hasAttribute("inert"),
+      }));
+    siblings.forEach(({ element }) => element.setAttribute("inert", ""));
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    root.focus({ preventScroll: true });
+    const trapTab = (event: KeyboardEvent): void => {
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        root.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      if (focusable.length === 0) {
+        event.preventDefault();
+        root.focus({ preventScroll: true });
+        return;
+      }
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      const active = document.activeElement;
+      if (
+        event.shiftKey &&
+        (active === first || active === root || !root.contains(active))
+      ) {
+        event.preventDefault();
+        last.focus({ preventScroll: true });
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus({ preventScroll: true });
+      }
+    };
+    root.addEventListener("keydown", trapTab);
+
+    return () => {
+      root.removeEventListener("keydown", trapTab);
+      siblings.forEach(({ element, wasInert }) => {
+        if (!wasInert) element.removeAttribute("inert");
+      });
+      document.body.style.overflow = previousOverflow;
+      if (previouslyFocused?.isConnected) {
+        previouslyFocused.focus({ preventScroll: true });
+      }
+    };
+  }, [mounted]);
 
   const failed = props.phase === "failed";
   const context = props.context ?? "session";
@@ -117,13 +180,18 @@ export function ModelWarmupIntermission(props: {
 
   return createPortal(
     <section
+      ref={rootRef}
       className={styles.overlay}
       data-phase={props.phase}
       data-prism-model-warmup="true"
+      data-prism-document-theme-surface="true"
       data-warmup-context={context}
+      data-theme={resolvedTheme}
       role={failed ? "alert" : "status"}
       aria-live={failed ? "assertive" : "polite"}
       aria-atomic="true"
+      aria-busy={!failed && props.phase !== "releasing"}
+      tabIndex={-1}
     >
       <PrismCompanionPresenceBoundary
         reason={`${props.experience}-model-warmup`}

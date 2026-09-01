@@ -14,12 +14,24 @@ export function signalEpisodeBeforeResponseIsHeard(args: {
   const tensionChanged =
     previousEpisode.tensionStage !== committedEpisode.tensionStage ||
     previousEpisode.warningCount !== committedEpisode.warningCount;
-  if (!tensionChanged || responseMessage?.speakerRole !== "host") {
+  const statusChanged = previousEpisode.status !== committedEpisode.status;
+  const hostCarriesTension =
+    responseMessage?.speakerRole === "host" && tensionChanged;
+  const responseCarriesCompletion = responseMessage !== null && statusChanged;
+  if (!hostCarriesTension && !responseCarriesCompletion) {
     return committedEpisode;
   }
   return {
     ...committedEpisode,
-    tensionStage: previousEpisode.tensionStage,
-    warningCount: previousEpisode.warningCount,
+    ...(hostCarriesTension
+      ? {
+          tensionStage: previousEpisode.tensionStage,
+          warningCount: previousEpisode.warningCount,
+        }
+      : {}),
+    // A final Host sign-off or Guest coda is still live presentation.
+    // Publishing completed before that response is heard clears both chairs,
+    // stops camera-direction capture, and can truncate the faithful ending.
+    ...(responseCarriesCompletion ? { status: previousEpisode.status } : {}),
   };
 }

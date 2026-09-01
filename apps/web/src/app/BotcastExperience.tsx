@@ -1491,6 +1491,7 @@ function SignalBotDropdown({
             onSearchChange={onSearchChange}
             searchAriaLabel={`Search ${ariaLabel.toLocaleLowerCase()}`}
             searchPlaceholder="Search bots…"
+            groupTheme={theme}
             resultLabel={resultLabel}
             singleActionableResult={
               !disabled && visibleBots.length === 1 ? visibleBots[0] : null
@@ -1592,7 +1593,7 @@ function SignalBotDropdown({
 
 const SIGNAL_ASSET_ACCEPT = "image/png,image/jpeg,image/webp";
 const SIGNAL_ASSET_UPLOAD_MAX_BYTES = 16 * 1024 * 1024;
-const SIGNAL_EPISODE_IMAGE_ACCEPT = ".png,.jpg";
+const SIGNAL_EPISODE_IMAGE_ACCEPT = "image/png,image/jpeg,image/webp";
 
 type SignalItemLibraryInspection = {
   contentSha256: string;
@@ -1974,16 +1975,14 @@ async function readSignalEpisodeImageFile(
     file.type,
   );
   if (!descriptor) {
-    throw new Error(
-      "Choose a .png or .jpg file. Signal does not accept .jpeg or other image formats here.",
-    );
+    throw new Error("Choose a PNG, JPEG, or WebP image.");
   }
   const dataUrl = await readSignalAssetFile(file);
   // Do not decode or scan the full raster on Electron's UI thread. A modest
   // compressed PNG can expand to millions of pixels and leave Signal unable
   // to repaint while the file picker has already closed. The API already
   // normalizes the source with an input-pixel limit and authoritatively
-  // classifies opaque PNGs as pictures before the image enters an episode.
+  // classifies opaque sources as pictures before the image enters an episode.
   return { fileName: file.name, dataUrl, descriptor };
 }
 
@@ -10010,10 +10009,11 @@ export function BotcastExperience({
           } else {
             void completeForegroundGenerationHold();
           }
-          if (
-            message.speakerRole === "host" &&
-            episodeOperationIsCurrent(controller, runId)
-          ) {
+          // The staged audience state is released only after the response has
+          // actually finished presenting. This includes a final Guest coda:
+          // the server may commit completion on that response, and applying it
+          // before playback clears both chairs while the show is still on air.
+          if (episodeOperationIsCurrent(controller, runId)) {
             startTransition(() => setEpisode(response.episode));
           }
         } else {
@@ -10527,7 +10527,12 @@ export function BotcastExperience({
       // hold the model while the cued turn waits behind it.
       discardPreparedAdvance("A Producer cue redirects the host's next turn.");
     }
-    if (!busy && speakingMessageId === null && nextRole === "host") {
+    // An accepted cue also acts as an explicit nudge for an idle guest-next
+    // floor. The cue remains server-owned for the following Host turn, but we
+    // must not rely only on a React state effect to restart the intervening
+    // guest turn: review eab3bcd138d3f6432c97634d preserved a multi-minute
+    // blank after an ask-about cue was queued in exactly this state.
+    if (!busy && speakingMessageId === null) {
       onPrepareUtterance?.();
       void advanceEpisode();
     }
@@ -17934,26 +17939,13 @@ export function BotcastExperience({
     setError(null);
     try {
       const fileInput = await readSignalEpisodeImageFile(file);
-      const assetLibraryInspection =
-        fileInput.descriptor.kind === "item"
-          ? await request<SignalItemLibraryInspection>(
-              "/api/assets/signal-item/inspect",
-              {
-                method: "POST",
-                body: JSON.stringify({
-                  title: fileInput.descriptor.name,
-                  dataUrl: fileInput.dataUrl,
-                }),
-              },
-            )
-          : undefined;
       const imageId = crypto.randomUUID();
       const replayMetadata = await acquireSignalEpisodeImageReplayMetadata(
         fileInput,
       );
       setNotice("Preparing the episode image…");
       const visualIdentity = await buildEpisodeVisualIdentity(episode);
-      const upload: SignalEpisodeImageUpload = {
+      const pendingUpload: SignalEpisodeImageUpload = {
         episodeId: episode.id,
         imageId,
         ...fileInput,
@@ -17961,16 +17953,57 @@ export function BotcastExperience({
         replayEmoji: replayMetadata.replayEmoji,
         reason: "",
         visualIdentity,
-        ...(assetLibraryInspection ? { assetLibraryInspection } : {}),
       };
+      const attached = await request<{
+        episode: BotcastEpisode;
+        imageContext: BotcastImageContextV1;
+      }>(`/api/botcast/episodes/${encodeURIComponent(episode.id)}/image`, {
+        method: "POST",
+        body: JSON.stringify({
+          episodeImage: signalEpisodeImageRequestPayload(pendingUpload),
+        }),
+      });
+      const descriptor = {
+        kind: attached.imageContext.kind,
+        name: attached.imageContext.name,
+        mimeType: attached.imageContext.mimeType,
+      };
+      const upload: SignalEpisodeImageUpload = {
+        ...pendingUpload,
+        descriptor,
+        replayEmoji: attached.imageContext.replayEmoji,
+      };
+      setEpisode(attached.episode);
       signalEpisodeImageRef.current = upload;
       setSignalEpisodeImage(upload);
       setKeepSignalItem(false);
-      discardPreparedAdvance(
-        "An ephemeral Producer image replaced the prepared Signal turn.",
-      );
-      setNotice(`${replayMetadata.descriptor.name} is queued for the host.`);
+      setNotice(`${descriptor.name} is on the Signal table.`);
       sendCue({ kind: "present_image", imageId: upload.imageId });
+      // Decoded pixels, rather than the filename, decide whether this is an
+      // Item. The optional Library inspection runs only after the on-air cue,
+      // so save affordances can never delay the live discussion.
+      if (descriptor.kind === "item") {
+        const assetLibraryInspection = await request<SignalItemLibraryInspection>(
+          "/api/assets/signal-item/inspect",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              title: descriptor.name,
+              dataUrl: fileInput.dataUrl,
+            }),
+          },
+        ).catch(() => undefined);
+        if (assetLibraryInspection) {
+          const inspectedUpload = { ...upload, assetLibraryInspection };
+          signalEpisodeImageRef.current = inspectedUpload;
+          setSignalEpisodeImage((current) =>
+            current?.episodeId === inspectedUpload.episodeId &&
+            current.imageId === inspectedUpload.imageId
+              ? inspectedUpload
+              : current,
+          );
+        }
+      }
     } catch (caught) {
       setError(signalErrorToast("Add image to Signal", caught));
     } finally {

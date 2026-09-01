@@ -176,6 +176,7 @@ export function ComposerBotMentionPopover({
     <div
       ref={menuRef}
       className={`${styles.composeBotMenu} ${styles.composeCommandMenu}`}
+      data-theme={resolvedTheme}
       style={adjustedStyle}
     >
       <div

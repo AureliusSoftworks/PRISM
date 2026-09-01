@@ -27,6 +27,7 @@ import {
   type PrismIntroAudioController,
   type PrismIntroAudioPlaybackState,
 } from "./prismIntroAudio";
+import { usePrismDocumentTheme } from "./usePrismDocumentTheme";
 import styles from "./PrismIntroSequence.module.css";
 
 type PrismIntroSequenceMode = "first-run" | "replay";
@@ -130,6 +131,7 @@ function PrismIntroSequenceDialog({
     resolution: Exclude<PrismIntroResolution, "pending">,
   ) => void;
 }): React.JSX.Element | null {
+  const resolvedTheme = usePrismDocumentTheme();
   const [sceneIndex, setSceneIndex] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [audioPlaybackState, setAudioPlaybackState] =
@@ -274,14 +276,17 @@ function PrismIntroSequenceDialog({
       className={styles.backdrop}
       style={sceneStyle}
       data-prism-intro-sequence="true"
+      data-prism-document-theme-surface="true"
       data-prism-intro-mode={mode}
       data-prism-intro-scene={scene.id}
+      data-theme={resolvedTheme}
       data-final-scene={isFinalScene ? "true" : undefined}
       data-transitioning={isTransitioning ? "true" : undefined}
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
       aria-describedby={`${bodyId} ${visualDescriptionId}`}
+      aria-busy={isTransitioning}
       tabIndex={-1}
       onPointerMove={(event) => {
         const root = rootRef.current;

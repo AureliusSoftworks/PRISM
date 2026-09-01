@@ -1,11 +1,13 @@
 .canvas {
   position: fixed;
   inset: 0;
-  z-index: 940;
+  z-index: var(--prism-z-first-run, 940);
   display: grid;
   place-items: center;
+  min-height: 100dvh;
   overflow: hidden;
   color: rgba(248, 250, 255, 0.96);
+  color-scheme: dark;
   background: #020207;
   isolation: isolate;
 }
@@ -164,11 +166,28 @@
   border-radius: 999px;
   background: rgba(248, 250, 255, 0.96);
   cursor: pointer;
+  transition: transform 180ms ease, box-shadow 180ms ease;
 }
 
-.primary:hover {
+.primary:hover:not(:disabled) {
   transform: translateY(-1px);
   box-shadow: 0 12px 34px rgba(139, 218, 255, 0.2);
+}
+
+.primary:active:not(:disabled) {
+  transform: translateY(0) scale(0.985);
+}
+
+.primary:focus-visible,
+.choice:focus-visible {
+  outline: 3px solid rgba(170, 229, 255, 0.96);
+  outline-offset: 4px;
+}
+
+.primary:disabled,
+.choice:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
 }
 
 .choices {
@@ -230,6 +249,10 @@
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.14), rgba(113, 197, 255, 0.045));
 }
 
+.choice:active:not(:disabled) {
+  transform: translateY(-2px) scale(0.99);
+}
+
 .choiceGlyph {
   width: 42px;
   height: 42px;
@@ -247,6 +270,87 @@
 .choice > span:last-child {
   color: rgba(220, 226, 238, 0.66);
   line-height: 1.5;
+}
+
+/* The orb remains a luminous physical instrument in either theme. Light mode
+   changes only the surrounding living-shell material and interaction chrome. */
+.canvas[data-theme="light"] {
+  color: #172638;
+  color-scheme: light;
+  background: #edf5fc;
+}
+
+.canvas[data-theme="light"] .darkness {
+  background:
+    radial-gradient(circle at 50% 62%, rgba(109, 190, 235, 0.2), transparent 32%),
+    linear-gradient(180deg, #f8fbff 0%, #e4eef7 100%);
+}
+
+.canvas[data-theme="light"] .arrivalLight {
+  background: radial-gradient(
+    circle at 50% 58%,
+    rgba(255, 255, 255, 0.98) 0%,
+    rgba(113, 211, 255, 0.28) 12%,
+    rgba(176, 116, 255, 0.14) 26%,
+    rgba(226, 238, 248, 0.08) 58%,
+    transparent 76%
+  );
+}
+
+.canvas[data-theme="light"] .eyebrow {
+  color: #637a90;
+}
+
+.canvas[data-theme="light"] .awakeningCopy p:not(.eyebrow),
+.canvas[data-theme="light"] .choiceHeading p:not(.eyebrow) {
+  color: #50677e;
+}
+
+.canvas[data-theme="light"] .primary {
+  color: #ffffff;
+  background: #172638;
+  box-shadow: 0 10px 28px rgba(31, 74, 112, 0.16);
+}
+
+.canvas[data-theme="light"] .primary:hover:not(:disabled) {
+  box-shadow: 0 14px 34px rgba(31, 108, 153, 0.22);
+}
+
+.canvas[data-theme="light"] .choice {
+  border-color: rgba(95, 126, 153, 0.26);
+  background: linear-gradient(
+    145deg,
+    rgba(255, 255, 255, 0.94),
+    rgba(235, 244, 251, 0.8)
+  );
+  box-shadow:
+    0 24px 70px rgba(31, 74, 112, 0.14),
+    inset 0 1px rgba(255, 255, 255, 0.96);
+}
+
+.canvas[data-theme="light"] .choice:hover,
+.canvas[data-theme="light"] .choice:focus-visible {
+  border-color: rgba(50, 111, 153, 0.52);
+  background: linear-gradient(
+    145deg,
+    #ffffff,
+    rgba(220, 239, 251, 0.9)
+  );
+}
+
+.canvas[data-theme="light"] .choiceGlyph {
+  color: #203a52;
+  background: rgba(218, 234, 246, 0.92);
+  box-shadow: 0 0 22px rgba(42, 153, 207, 0.16);
+}
+
+.canvas[data-theme="light"] .choice > span:last-child {
+  color: #5b7186;
+}
+
+.canvas[data-theme="light"] :is(.primary, .choice):focus-visible {
+  outline-color: #12618b;
+  box-shadow: 0 0 0 5px rgba(18, 97, 139, 0.14);
 }
 
 @keyframes orbArrival {
@@ -272,12 +376,104 @@
 }
 
 @media (max-width: 760px) {
-  .awakening { grid-template-columns: 1fr; text-align: center; }
+  .canvas {
+    padding:
+      max(18px, env(safe-area-inset-top))
+      max(18px, env(safe-area-inset-right))
+      max(18px, env(safe-area-inset-bottom))
+      max(18px, env(safe-area-inset-left));
+  }
+  .awakening { width: 100%; grid-template-columns: 1fr; text-align: center; }
   .orbStage { width: 180px; justify-self: center; }
   .awakeningCopy p:not(.eyebrow) { margin-inline: auto; }
-  .choices { padding-top: 24px; }
+  .choices { width: 100%; padding-top: 24px; }
   .choiceField { grid-template-columns: 1fr; max-height: 55vh; overflow-y: auto; }
   .choiceRay { display: none; }
+}
+
+@media (max-width: 760px) and (max-height: 700px) {
+  .canvas {
+    place-items: start center;
+    overflow-y: auto;
+  }
+
+  .choices {
+    max-height: calc(
+      100dvh - 36px - env(safe-area-inset-top) - env(safe-area-inset-bottom)
+    );
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    padding-top: 0;
+  }
+
+  .choiceOrbStage {
+    width: 48px;
+    margin-bottom: 8px;
+  }
+
+  .choiceHeading p:not(.eyebrow) {
+    margin-top: 8px;
+  }
+
+  .choiceField {
+    min-height: 0;
+    max-height: none;
+    margin-top: 18px;
+    padding: 4px;
+    overflow-y: auto;
+  }
+
+  .choice {
+    min-height: 132px;
+  }
+}
+
+@media (max-height: 700px) and (min-width: 761px) {
+  .canvas {
+    place-items: start center;
+    overflow-y: auto;
+    padding:
+      max(16px, env(safe-area-inset-top))
+      max(24px, env(safe-area-inset-right))
+      max(16px, env(safe-area-inset-bottom))
+      max(24px, env(safe-area-inset-left));
+  }
+
+  .awakening {
+    min-height: calc(
+      100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom)
+    );
+  }
+
+  .orbStage {
+    width: min(220px, 38vh);
+  }
+
+  .choices {
+    width: min(1040px, 100%);
+    max-height: calc(
+      100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom)
+    );
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    padding-top: 8px;
+  }
+
+  .choiceOrbStage {
+    width: 52px;
+    margin-bottom: 12px;
+  }
+
+  .choiceField {
+    min-height: 0;
+    margin-top: 30px;
+    padding: 4px;
+    overflow-y: auto;
+  }
+
+  .choice {
+    min-height: 148px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -291,5 +487,53 @@
     opacity: 1;
     transform: none;
   }
+  .primary,
   .choice { transition: none; }
+}
+
+@media (forced-colors: active) {
+  .canvas,
+  .canvas[data-theme="light"] {
+    color: CanvasText;
+    background: Canvas;
+  }
+
+  .darkness,
+  .arrivalLight,
+  .orbHalo {
+    display: none;
+  }
+
+  .eyebrow,
+  .title,
+  .subtitle,
+  .prompt,
+  .canvas[data-theme="light"] :is(.eyebrow, .title, .subtitle, .prompt),
+  .canvas[data-theme="light"] .choice > span:last-child {
+    color: CanvasText;
+    text-shadow: none;
+  }
+
+  .orbGlass,
+  .canvas[data-theme="light"] .orbGlass,
+  .orbCore,
+  .canvas[data-theme="light"] .orbCore,
+  .primary,
+  .canvas[data-theme="light"] .primary,
+  .choice,
+  .canvas[data-theme="light"] .choice,
+  .choiceGlyph,
+  .canvas[data-theme="light"] .choiceGlyph {
+    color: ButtonText;
+    border: 1px solid ButtonText;
+    background: ButtonFace;
+    box-shadow: none;
+  }
+
+  .primary:focus-visible,
+  .choice:focus-visible,
+  .canvas[data-theme="light"] :is(.primary, .choice):focus-visible {
+    outline: 3px solid Highlight;
+    box-shadow: none;
+  }
 }

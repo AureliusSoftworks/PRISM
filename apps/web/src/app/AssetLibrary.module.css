@@ -128,12 +128,12 @@
 
 .assetTile[aria-pressed="true"],
 .assetCard[data-selected="true"] {
-  border-color: color-mix(in srgb, var(--accent, #a78bfa) 76%, white);
+  border-color: color-mix(in srgb, var(--accent, #a78bfa) 76%, var(--fg, white));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #a78bfa) 55%, transparent);
 }
 
 .assetCard[data-active="true"] {
-  outline: 2px solid color-mix(in srgb, var(--accent, #a78bfa) 62%, white);
+  outline: 2px solid color-mix(in srgb, var(--accent, #a78bfa) 62%, var(--fg, white));
   outline-offset: -2px;
 }
 
@@ -297,29 +297,47 @@
   --accent-ink: #bda8ff;
   --danger: #ff9a9a;
   --danger-soft: rgba(255, 122, 122, 0.12);
+  --asset-status-bg: #342828;
   --shadow-lg: 0 26px 58px rgba(0, 0, 0, 0.36);
   z-index: 900;
+  color-scheme: dark;
 }
 
 .modalBackdrop[data-theme="light"] {
-  --bg: #f2f1f5;
-  --bg-surface: #faf9fc;
+  --bg: #edf5fc;
+  --bg-surface: #f8fbff;
   --bg-elevated: #ffffff;
-  --bg-hover: #ebe8f1;
-  --fg: #25212b;
-  --fg-muted: #736c7b;
-  --fg-subtle: #8d8694;
-  --line: rgba(53, 44, 68, 0.13);
-  --line-strong: rgba(77, 63, 105, 0.24);
+  --bg-hover: #e8f1f9;
+  --fg: #172638;
+  --fg-muted: #5c7186;
+  --fg-subtle: #8496a6;
+  --line: #cfdce7;
+  --line-strong: #b7c9d8;
   --accent: #705bc4;
   --accent-hover: #5e49b4;
   --accent-soft: rgba(112, 91, 196, 0.1);
   --accent-glow: rgba(112, 91, 196, 0.18);
   --accent-text: #ffffff;
   --accent-ink: #5e49b4;
-  --danger: #a43f58;
-  --danger-soft: rgba(164, 63, 88, 0.1);
-  --shadow-lg: 0 26px 58px rgba(52, 43, 64, 0.2);
+  --danger: #b42342;
+  --danger-soft: rgba(180, 35, 66, 0.09);
+  --asset-status-bg: color-mix(in srgb, var(--danger) 9%, var(--bg-elevated));
+  --shadow-lg: 0 26px 58px rgba(31, 74, 112, 0.16);
+  color-scheme: light;
+}
+
+.railShell :is(button, select):focus-visible,
+.modalBackdrop :is(button, a[href], input, textarea, select, summary, [tabindex]):focus-visible,
+.actionSheetBackdrop :is(button, [tabindex]):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent, #8b5cf6) 68%, var(--fg));
+  outline-offset: 2px;
+}
+
+.railShell :is(button, select):disabled,
+.modalBackdrop :is(button, input, textarea, select):disabled,
+.actionSheetBackdrop button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .modal {
@@ -391,7 +409,7 @@
 .assetCard > span:not(.studioPreview) { display: grid; gap: 0.2rem; padding: 0.65rem; }
 .assetCard strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .assetCard small { color: var(--fg-muted); }
-.assetCard em { position: absolute; top: 0.5rem; right: 0.5rem; padding: 0.2rem 0.4rem; border-radius: 999px; background: #342828; font-size: 0.65rem; }
+.assetCard em { position: absolute; top: 0.5rem; right: 0.5rem; padding: 0.2rem 0.4rem; border-radius: 999px; color: var(--danger); background: var(--asset-status-bg); font-size: 0.65rem; }
 
 .detail {
   align-content: start;
@@ -670,7 +688,7 @@
   flex-wrap: wrap;
   gap: 0.55rem;
 }
-.clearUnusedButton { color: #ffb5b5; }
+.clearUnusedButton { color: var(--danger); }
 .footerNotice { color: var(--fg-muted); }
 .cleanupConfirmation {
   display: flex;

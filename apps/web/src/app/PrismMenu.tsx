@@ -623,7 +623,7 @@ export function PrismMenuSurface({
         className={`${styles.menu} ${className}`.trim()}
         role="menu"
         aria-label={request.label}
-        data-theme={request.theme ?? "dark"}
+        data-theme={request.theme}
         data-prism-menu-owner={rootOwnerId}
         data-navbar-picker-surface={navbarPicker ? "true" : undefined}
         data-placement={position.placement}
@@ -749,7 +749,7 @@ export function PrismMenuSurface({
       {feedback ? (
         <div
           className={styles.feedback}
-          data-theme={request.theme ?? "dark"}
+          data-theme={request.theme}
           role="status"
           aria-live="polite"
           style={{

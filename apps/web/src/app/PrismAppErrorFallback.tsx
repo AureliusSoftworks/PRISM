@@ -1,8 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
 import styles from "./page.module.css";
+import {
+  currentPrismDocumentTheme,
+  type PrismResolvedDocumentTheme,
+} from "./prismDocumentTheme.ts";
 import {
   buildWebDiagnosticReport,
   writeDiagnosticClipboard,
@@ -28,6 +32,38 @@ export function PrismAppErrorFallback({
   surface = "App",
 }: PrismAppErrorFallbackProps): React.JSX.Element {
   const [errorCopyState, setErrorCopyState] = useState<ErrorCopyState>(null);
+  const [resolvedTheme, setResolvedTheme] =
+    useState<PrismResolvedDocumentTheme>("dark");
+
+  useEffect(() => {
+    const updateTheme = (): void => {
+      setResolvedTheme(currentPrismDocumentTheme());
+    };
+    updateTheme();
+
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const observer = new MutationObserver(updateTheme);
+    observer.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["data-prism-theme"],
+    });
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", updateTheme);
+    } else {
+      media.addListener?.(updateTheme);
+    }
+    window.addEventListener("storage", updateTheme);
+    return () => {
+      observer.disconnect();
+      if (typeof media.removeEventListener === "function") {
+        media.removeEventListener("change", updateTheme);
+      } else {
+        media.removeListener?.(updateTheme);
+      }
+      window.removeEventListener("storage", updateTheme);
+    };
+  }, []);
+
   const copyError = async (): Promise<void> => {
     setErrorCopyState("copying");
     try {
@@ -49,7 +85,13 @@ export function PrismAppErrorFallback({
   };
 
   return (
-    <main className={`${styles.authLayout} ${styles.themeDark}`}>
+    <main
+      className={`${styles.authLayout} ${
+        resolvedTheme === "light" ? styles.themeLight : styles.themeDark
+      } ${styles.documentThemeSurface}`}
+      data-theme={resolvedTheme}
+      data-prism-document-theme-surface="true"
+    >
       <section className={`${styles.card} ${styles.appErrorCard}`} role="alert">
         <div className={styles.appErrorBrand}>
           <div className={styles.brandIconShell} aria-hidden="true">

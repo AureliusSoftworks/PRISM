@@ -3,13 +3,14 @@
   --prism-intro-light-y: 52vh;
   position: fixed;
   inset: 0;
-  z-index: 2200;
+  z-index: var(--prism-z-cinematic, 2200);
   min-width: 0;
   min-height: 100dvh;
   overflow: hidden;
   isolation: isolate;
   background: #050505;
   color: #f5f3ef;
+  color-scheme: dark;
   font-family: var(--font-ui-sans), system-ui, sans-serif;
   outline: none;
 }
@@ -195,6 +196,17 @@
   transform: translateY(-1px);
 }
 
+.audioButton:focus-visible,
+.skipButton:focus-visible {
+  border-radius: 7px;
+  box-shadow: 0 0 0 2px rgba(214, 239, 255, 0.92);
+}
+
+.audioButton:active,
+.skipButton:active {
+  transform: translateY(0) scale(0.98);
+}
+
 .copyStage {
   position: absolute;
   z-index: 5;
@@ -276,6 +288,8 @@
 }
 
 .lightTarget:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
   pointer-events: none;
 }
 
@@ -302,6 +316,11 @@
   outline: none;
   filter: brightness(1.28);
   transform: translate(-50%, -50%) scale(1.025);
+}
+
+.lightTarget:focus-visible {
+  outline: 3px solid rgba(226, 243, 255, 0.92);
+  outline-offset: 5px;
 }
 
 .lightTarget:hover .targetFocus,
@@ -351,6 +370,150 @@
 
 .backdrop[data-transitioning="true"] .interactionHint {
   opacity: 0;
+}
+
+/* Artwork remains the authored cinematic plate. Light mode changes the
+   structural veil, copy, controls, and target material so it reads as a bright
+   threshold instead of placing fixed-Dark chrome over the selected shell. */
+.backdrop[data-theme="light"] {
+  color: #172638;
+  color-scheme: light;
+  background: #edf5fc;
+}
+
+.backdrop[data-theme="light"] .imageLayer {
+  background: #e4eef7;
+}
+
+.backdrop[data-theme="light"] .sceneImage {
+  filter: contrast(0.98) saturate(0.9) brightness(1.04);
+}
+
+.backdrop[data-theme="light"][data-transitioning="true"] .sceneImage {
+  opacity: 0.24;
+  filter: contrast(0.96) saturate(0.68) brightness(1.18) blur(3px);
+}
+
+.backdrop[data-theme="light"] .imageScrim {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(247, 251, 255, 0.97) 0%,
+      rgba(242, 248, 253, 0.87) 26%,
+      rgba(235, 244, 251, 0.52) 50%,
+      rgba(235, 244, 251, 0.08) 78%
+    ),
+    linear-gradient(
+      0deg,
+      rgba(237, 245, 252, 0.84) 0%,
+      rgba(237, 245, 252, 0.3) 31%,
+      rgba(237, 245, 252, 0.08) 68%,
+      rgba(237, 245, 252, 0.45) 100%
+    );
+}
+
+.backdrop[data-theme="light"] .paperVeil {
+  opacity: 0.3;
+  mix-blend-mode: multiply;
+}
+
+.backdrop[data-theme="light"] .cursorLight {
+  background: #ffffff;
+  box-shadow:
+    0 0 0 1px rgba(35, 77, 108, 0.42),
+    0 0 8px 2px rgba(255, 255, 255, 0.96),
+    0 0 32px 12px rgba(70, 181, 231, 0.28),
+    0 0 90px 36px rgba(118, 100, 236, 0.12);
+  mix-blend-mode: normal;
+}
+
+.backdrop[data-theme="light"] .audioButton,
+.backdrop[data-theme="light"] .skipButton {
+  color: rgba(23, 38, 56, 0.68);
+}
+
+.backdrop[data-theme="light"] .audioIndicator {
+  background: #326c8f;
+  box-shadow: 0 0 12px rgba(48, 142, 190, 0.3);
+}
+
+.backdrop[data-theme="light"] .audioButton[data-audio-state="blocked"] .audioIndicator {
+  background: #9b5b00;
+  box-shadow: 0 0 12px rgba(180, 105, 0, 0.2);
+}
+
+.backdrop[data-theme="light"] .audioButton[data-audio-state="muted"] .audioIndicator {
+  background: rgba(23, 38, 56, 0.36);
+}
+
+.backdrop[data-theme="light"] .skipButton kbd {
+  color: #304a62;
+  border-color: rgba(63, 91, 116, 0.34);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.backdrop[data-theme="light"] :is(.audioButton, .skipButton):is(:hover, :focus-visible) {
+  color: #102235;
+}
+
+.backdrop[data-theme="light"] :is(.audioButton, .skipButton):focus-visible {
+  box-shadow: 0 0 0 2px #12618b;
+}
+
+.backdrop[data-theme="light"] .eyebrow {
+  color: #62788d;
+}
+
+.backdrop[data-theme="light"] .copyStage h1 {
+  color: #14263a;
+  text-shadow: 0 3px 24px rgba(255, 255, 255, 0.9);
+}
+
+.backdrop[data-theme="light"] .bodyCopy {
+  color: #425a72;
+  text-shadow: 0 2px 18px rgba(255, 255, 255, 0.94);
+}
+
+.backdrop[data-theme="light"] .lightTarget {
+  background: radial-gradient(
+    circle,
+    rgba(43, 117, 158, 0.11),
+    rgba(65, 128, 169, 0.04) 48%,
+    transparent 72%
+  );
+}
+
+.backdrop[data-theme="light"] .targetFocus {
+  border-color: rgba(35, 77, 108, 0.28);
+  box-shadow:
+    inset 0 0 25px rgba(67, 150, 194, 0.06),
+    0 0 28px rgba(48, 142, 190, 0.1);
+}
+
+.backdrop[data-theme="light"] .lightTarget:hover .targetFocus,
+.backdrop[data-theme="light"] .lightTarget:focus-visible .targetFocus {
+  border-color: rgba(18, 97, 139, 0.78);
+  box-shadow:
+    inset 0 0 35px rgba(54, 141, 188, 0.12),
+    0 0 48px rgba(48, 142, 190, 0.22),
+    0 0 96px rgba(118, 100, 236, 0.1);
+}
+
+.backdrop[data-theme="light"] .lightTarget:focus-visible {
+  outline-color: #12618b;
+}
+
+.backdrop[data-theme="light"] .interactionHint {
+  color: #50677e;
+  text-shadow: 0 2px 18px rgba(255, 255, 255, 0.96);
+}
+
+.backdrop[data-theme="light"] .interactionHint span {
+  color: #7a8da0;
+}
+
+.backdrop[data-theme="light"] .lightTarget:is(:hover, :focus-visible) + .interactionHint {
+  color: #172638;
 }
 
 @keyframes sceneArrival {
@@ -410,6 +573,17 @@
         rgba(3, 3, 3, 0.08) 74%
       ),
       linear-gradient(90deg, rgba(3, 3, 3, 0.32), transparent 82%);
+  }
+
+  .backdrop[data-theme="light"] .imageScrim {
+    background:
+      linear-gradient(
+        0deg,
+        rgba(247, 251, 255, 0.97) 0%,
+        rgba(242, 248, 253, 0.84) 44%,
+        rgba(235, 244, 251, 0.12) 76%
+      ),
+      linear-gradient(90deg, rgba(237, 245, 252, 0.42), transparent 82%);
   }
 
   .topRail {
@@ -530,23 +704,71 @@
 }
 
 @media (forced-colors: active) {
-  .backdrop {
+  .backdrop,
+  .backdrop[data-theme="light"] {
     background: Canvas;
     color: CanvasText;
   }
 
-  .imageScrim {
-    background: rgba(0, 0, 0, 0.72);
+  .imageScrim,
+  .backdrop[data-theme="light"] .imageScrim {
+    background: Canvas;
+    opacity: 0.9;
+  }
+
+  .sceneImage,
+  .backdrop[data-theme="light"] .sceneImage {
+    opacity: 0.18;
+  }
+
+  .copyStage h1,
+  .backdrop[data-theme="light"] .copyStage h1,
+  .bodyCopy,
+  .backdrop[data-theme="light"] .bodyCopy,
+  .eyebrow,
+  .backdrop[data-theme="light"] .eyebrow,
+  .interactionHint,
+  .backdrop[data-theme="light"] .interactionHint,
+  .audioButton,
+  .backdrop[data-theme="light"] .audioButton,
+  .skipButton,
+  .backdrop[data-theme="light"] .skipButton {
+    color: CanvasText;
+    text-shadow: none;
   }
 
   .skipButton,
   .audioButton,
   .lightTarget,
-  .targetFocus {
+  .targetFocus,
+  .backdrop[data-theme="light"] .skipButton,
+  .backdrop[data-theme="light"] .audioButton,
+  .backdrop[data-theme="light"] .lightTarget,
+  .backdrop[data-theme="light"] .targetFocus {
     border: 1px solid ButtonText;
   }
 
   .cursorLight {
-    background: Highlight;
+    display: none;
+  }
+
+  .backdrop,
+  .audioButton,
+  .skipButton,
+  .lightTarget {
+    cursor: auto;
+  }
+
+  .audioButton,
+  .skipButton,
+  .lightTarget {
+    cursor: pointer;
+  }
+
+  .audioButton:focus-visible,
+  .skipButton:focus-visible,
+  .lightTarget:focus-visible {
+    outline: 3px solid Highlight !important;
+    box-shadow: none !important;
   }
 }

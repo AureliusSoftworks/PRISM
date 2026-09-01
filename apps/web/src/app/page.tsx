@@ -2048,6 +2048,7 @@ import {
   COFFEE_DELIVERY_MAX_DURATION_MS,
   COFFEE_DELIVERY_MIN_DURATION_MS,
   COFFEE_DELIVERY_MOOD_CHARACTERS_PER_SECOND,
+  COFFEE_VOICE_START_FAILSAFE_MS,
   coffeeDeliveryIsHoldingAtMs,
   coffeeDeliveryVisibleLengthAtMs,
   coffeeVoiceStartedDurationMs,
@@ -6828,8 +6829,6 @@ const COFFEE_CUP_REFILL_SIP_LOCK_MS = 3_200;
 const COFFEE_TURN_JOB_POLL_INTERVAL_MS = 600;
 /** No generated state is presented until the person's latest input has painted. */
 const COFFEE_USER_INPUT_QUIET_WINDOW_MS = 160;
-/** Player voice prep that has not started audio by now reveals silently. */
-const COFFEE_PLAYER_VOICE_START_FAILSAFE_MS = 12_000;
 /** A thinking seat with no in-flight work self-recovers after this long. */
 const COFFEE_STUCK_THINKING_WATCHDOG_MS = 45_000;
 // How often the stall watchdog re-evaluates. Slow on purpose: it exists to
@@ -57866,11 +57865,6 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     if (typeof document === "undefined") return;
     document.body.dataset.prismTheme = resolvedTheme;
-    return () => {
-      if (document.body.dataset.prismTheme === resolvedTheme) {
-        delete document.body.dataset.prismTheme;
-      }
-    };
   }, [resolvedTheme]);
 
   useEffect(() => {
@@ -131122,14 +131116,21 @@ function HomeContent(): React.JSX.Element {
     };
     const started = new Promise<number | null>((resolve) => {
       let settled = false;
+      let voiceStartExpired = false;
+      let voiceStartFailsafeTimer: number | null = null;
       // Voice preparation keeps the bot visibly thinking until playback
       // actually starts. A newer reveal still invalidates this work through
       // the delivery epoch, but a merely slow valid voice is never discarded
       // into a silent follow-on line.
-      const revealVoiceStillValid = (): boolean => revealVoiceIsCurrent();
+      const revealVoiceStillValid = (): boolean =>
+        !voiceStartExpired && revealVoiceIsCurrent();
       const settle = (durationMs: number | null) => {
         if (settled) return;
         settled = true;
+        if (voiceStartFailsafeTimer !== null) {
+          window.clearTimeout(voiceStartFailsafeTimer);
+          voiceStartFailsafeTimer = null;
+        }
         resolve(durationMs && durationMs > 0 ? durationMs : null);
       };
       const cancelStaleRevealVoice = (): boolean => {
@@ -131146,6 +131147,17 @@ function HomeContent(): React.JSX.Element {
         settle(null);
         return true;
       };
+      // A persisted reply must not sit behind a thinking face forever when
+      // synthesis neither rejects nor reaches playback start. Fall back to
+      // the deterministic silent reveal; once onStart fires, natural onEnd
+      // remains the sole owner of audible completion.
+      voiceStartFailsafeTimer = window.setTimeout(() => {
+        voiceStartFailsafeTimer = null;
+        voiceStartExpired = true;
+        controller.abort();
+        releaseCoffeeVoicePlayback();
+        settle(null);
+      }, COFFEE_VOICE_START_FAILSAFE_MS);
       const lifecycle = {
         deliveryEnvelope: NEUTRAL_COFFEE_VOICE_DELIVERY_ENVELOPE,
         onStart: (
@@ -131618,7 +131630,7 @@ function HomeContent(): React.JSX.Element {
         voiceStartFailsafeTimer = null;
         controller.abort();
         settle(null);
-      }, COFFEE_PLAYER_VOICE_START_FAILSAFE_MS);
+      }, COFFEE_VOICE_START_FAILSAFE_MS);
       const lifecycle = {
         deliveryEnvelope: NEUTRAL_COFFEE_VOICE_DELIVERY_ENVELOPE,
         onStart: (
@@ -141129,6 +141141,7 @@ function HomeContent(): React.JSX.Element {
         ) : null}
         {coffeeIntroPlaying ? (
           <CoffeeIntroCurtain
+            theme={resolvedTheme}
             tableName={
               coffeeSelectedGroup?.name ??
               coffeeConversation?.title ??
@@ -141144,6 +141157,7 @@ function HomeContent(): React.JSX.Element {
         {coffeeOutroPlaying ? (
           <CoffeeIntroCurtain
             kind="outro"
+            theme={resolvedTheme}
             tableName={
               coffeeSelectedGroup?.name ??
               coffeeConversation?.title ??
@@ -141154,6 +141168,7 @@ function HomeContent(): React.JSX.Element {
         {coffeeReplayActive && coffeeReplayBookend ? (
           <CoffeeIntroCurtain
             kind={coffeeReplayBookend}
+            theme={resolvedTheme}
             tableName={
               coffeeSelectedGroup?.name ??
               coffeeConversation?.title ??

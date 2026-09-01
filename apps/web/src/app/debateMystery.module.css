@@ -10,6 +10,32 @@
   --mystery-violet: #a98cff;
   --mystery-cyan: #66e5ea;
   --mystery-gold: #e3bd71;
+  --mystery-ui-surface: rgba(9, 11, 21, 0.96);
+  --mystery-ui-surface-soft: rgba(17, 20, 35, 0.86);
+  --mystery-ui-surface-subtle: rgba(5, 11, 20, 0.42);
+  --mystery-ui-field: rgba(5, 11, 20, 0.62);
+  --mystery-ui-backdrop: rgba(2, 3, 7, 0.32);
+  --mystery-ui-shadow: 0 1.4rem 3.4rem rgba(0, 0, 0, 0.34);
+  --mystery-map-surface: linear-gradient(
+    180deg,
+    rgba(31, 36, 49, 0.64),
+    rgba(4, 6, 10, 0.9)
+  );
+  --mystery-map-room: linear-gradient(
+    150deg,
+    rgba(47, 49, 59, 0.96),
+    rgba(20, 24, 31, 0.98)
+  );
+  --mystery-map-room-hidden: linear-gradient(
+    145deg,
+    rgba(13, 15, 20, 0.94),
+    rgba(5, 6, 9, 0.98)
+  );
+  --mystery-map-room-selected: linear-gradient(
+    145deg,
+    rgba(59, 52, 67, 0.98),
+    rgba(23, 30, 38, 0.98)
+  );
   min-height: 100%;
   color: var(--mystery-text);
   background:
@@ -29,6 +55,18 @@
   --mystery-muted: #6f6879;
   --mystery-violet: #7650df;
   --mystery-cyan: #147e88;
+  --mystery-gold: #926b19;
+  --mystery-ui-surface: rgba(248, 251, 255, 0.97);
+  --mystery-ui-surface-soft: rgba(235, 243, 249, 0.94);
+  --mystery-ui-surface-subtle: rgba(220, 234, 244, 0.68);
+  --mystery-ui-field: rgba(255, 255, 255, 0.86);
+  --mystery-ui-backdrop: rgba(70, 90, 110, 0.18);
+  --mystery-ui-shadow: 0 1.4rem 3.4rem rgba(49, 70, 91, 0.2);
+  --mystery-map-surface: linear-gradient(180deg, #f8fbff, #dce9f2);
+  --mystery-map-room: linear-gradient(150deg, #fbfdff, #e2edf5);
+  --mystery-map-room-hidden: linear-gradient(145deg, #dbe5ed, #cbd8e2);
+  --mystery-map-room-selected: linear-gradient(145deg, #f4effc, #ded3f1);
+  color-scheme: light;
 }
 
 .whodunnitDialogScrim {
@@ -694,6 +732,29 @@
   border: 1px solid var(--mystery-line);
   border-radius: 0.85rem;
   background: color-mix(in srgb, var(--mystery-panel-strong) 82%, transparent);
+}
+
+.mansionPackageWorkbench {
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.mansionPackageWorkbench[data-drop-active="true"] {
+  border-color: var(--mystery-cyan);
+  background: color-mix(
+    in srgb,
+    var(--mystery-cyan) 9%,
+    var(--mystery-panel-strong)
+  );
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--mystery-cyan) 22%, transparent),
+    inset 0 0 2rem color-mix(in srgb, var(--mystery-cyan) 8%, transparent);
+}
+
+.mansionPackageWorkbench[data-drop-active="true"] .mansionPackageDropzone {
+  border-color: var(--mystery-cyan);
 }
 
 .mansionPackageDropzone {
@@ -5698,6 +5759,217 @@
 .investigatorDesk[data-surface="investigation"][data-open="true"] .deskSurface {
   height: min(68dvh, 42rem);
   max-height: none;
+}
+
+/* Light keeps the room photography, evidence objects, interview stage, and
+   physical investigator desk cinematic. Everything used to navigate, read,
+   recover, select, or act is authored as Light chrome around those fields. */
+.play[data-theme="light"]:is(
+    [data-phase="investigation"],
+    [data-phase="continuance"]
+  ) {
+  background:
+    radial-gradient(ellipse at 50% 16%, rgba(89, 127, 158, 0.16), transparent 42%),
+    linear-gradient(180deg, #edf5fc 0%, #dce8f2 100%);
+}
+
+.play[data-theme="light"] .floorplan {
+  border-color: color-mix(in srgb, var(--mystery-gold) 30%, var(--mystery-line));
+  background:
+    radial-gradient(ellipse at 50% 12%, rgba(20, 126, 136, 0.09), transparent 38%),
+    var(--mystery-ui-surface);
+  box-shadow: var(--mystery-ui-shadow), inset 0 0 5rem rgba(118, 80, 223, 0.05);
+}
+
+.play[data-theme="light"] .floorplan::before {
+  opacity: 0.22;
+  mix-blend-mode: multiply;
+}
+
+.play[data-theme="light"] .floorplan > header button,
+.play[data-theme="light"] .hudControls > button,
+.play[data-theme="light"] .roomModeControls button,
+.play[data-theme="light"] .roomPanel > header .backToMansion,
+.play[data-theme="light"] .roomPanel > header .leaveInvestigation {
+  border-color: var(--mystery-line) !important;
+  color: var(--mystery-text) !important;
+  background: var(--mystery-ui-field) !important;
+  box-shadow: 0 0.45rem 1.1rem rgba(49, 70, 91, 0.14);
+}
+
+.play[data-theme="light"] .floorplan > header button[data-selected="true"],
+.play[data-theme="light"] .roomModeControls button:last-child:not(:disabled) {
+  border-color: color-mix(in srgb, var(--mystery-gold) 58%, var(--mystery-line)) !important;
+  color: #172638 !important;
+  background: color-mix(in srgb, var(--mystery-gold) 22%, white) !important;
+}
+
+.play[data-theme="light"] .mapViewport {
+  background: var(--mystery-map-surface);
+  box-shadow: 0 1.6rem 3.4rem rgba(49, 70, 91, 0.18), inset 0 0 0 1px rgba(92, 113, 134, 0.16);
+}
+
+.play[data-theme="light"] .mapCanvas {
+  background:
+    linear-gradient(rgba(79, 105, 128, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(79, 105, 128, 0.08) 1px, transparent 1px),
+    radial-gradient(ellipse at 50% 40%, rgba(118, 80, 223, 0.08), transparent 62%);
+  background-size: 28px 28px, 28px 28px, auto;
+}
+
+.play[data-theme="light"] .mapRoom {
+  border-color: rgba(91, 108, 126, 0.3);
+  background: var(--mystery-map-room);
+  box-shadow:
+    inset 0 0 1.7rem rgba(255, 255, 255, 0.5),
+    0.25rem 0.3rem 0 rgba(112, 130, 147, 0.22),
+    0.55rem 0.7rem 1.2rem rgba(49, 70, 91, 0.16);
+}
+
+.play[data-theme="light"] .mapRoom::before {
+  border-color: rgba(255, 255, 255, 0.72) transparent transparent rgba(174, 191, 205, 0.42);
+}
+
+.play[data-theme="light"] .mapRoom::after {
+  background: linear-gradient(180deg, #c4d2dd, #9fb1c0);
+}
+
+.play[data-theme="light"] .mapRoom:not([data-discovered="true"]) {
+  color: var(--mystery-muted);
+  border-color: rgba(91, 108, 126, 0.18);
+  background: var(--mystery-map-room-hidden);
+}
+
+.play[data-theme="light"] .mapRoom[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--mystery-violet) 46%, var(--mystery-line));
+  background: var(--mystery-map-room-selected);
+  box-shadow: 0 0 0 1px rgba(118, 80, 223, 0.12), 0.55rem 0.72rem 1.6rem rgba(49, 70, 91, 0.2);
+}
+
+.play[data-theme="light"] .mapRoom strong {
+  text-shadow: none;
+}
+
+.play[data-theme="light"] .mapRoom .mapOccupant {
+  background: #f8fbff;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.76), 0 0 1rem color-mix(in srgb, currentColor 24%, transparent);
+}
+
+.play[data-theme="light"] .mapDetails,
+.play[data-theme="light"] .actionToast,
+.play[data-theme="light"] .roomCaseKit,
+.play[data-theme="light"] .evidenceMentionMenu,
+.play[data-theme="light"] .caseRail,
+.play[data-theme="light"] .notebook,
+.play[data-theme="light"] .cleanupPreview {
+  border-color: var(--mystery-line);
+  color: var(--mystery-text);
+  background: var(--mystery-ui-surface);
+  box-shadow: var(--mystery-ui-shadow);
+}
+
+.play[data-theme="light"] .caseRail {
+  box-shadow: -1.5rem 0 4rem rgba(49, 70, 91, 0.2), 0 0 0 100vmax var(--mystery-ui-backdrop);
+}
+
+.play[data-theme="light"] .roomPanel > header {
+  border-color: rgba(255, 255, 255, 0.72);
+  color: var(--mystery-text);
+  background: linear-gradient(180deg, rgba(248, 251, 255, 0.94), rgba(229, 240, 248, 0.8));
+  box-shadow: 0 0.8rem 2rem rgba(49, 70, 91, 0.16);
+}
+
+.play[data-theme="light"] .interviewViewport,
+.play[data-theme="light"] .stagePartnerProse,
+.play[data-theme="light"] .stageActionLine,
+.play[data-theme="light"] .evidenceExhibit,
+.play[data-theme="light"] .leadJournal,
+.play[data-theme="light"] .accessInventory article,
+.play[data-theme="light"] .theoryAccusation,
+.play[data-theme="light"] .theoryRecord,
+.play[data-theme="light"] .theorySuspectChoices button,
+.play[data-theme="light"] .theoryAccusation select,
+.play[data-theme="light"] .theoryEmptyState,
+.play[data-theme="light"] .testimonyRail,
+.play[data-theme="light"] .courtRecord article,
+.play[data-theme="light"] .suspectFolderRack,
+.play[data-theme="light"] .suspectFolder {
+  border-color: var(--mystery-line);
+  color: var(--mystery-text);
+  background: var(--mystery-ui-surface-soft);
+  box-shadow: 0 0.6rem 1.5rem rgba(49, 70, 91, 0.12);
+}
+
+.play[data-theme="light"] .assignmentChoices > button,
+.play[data-theme="light"] .assignmentChoices > .partnerAssignmentChoice {
+  border-color: var(--mystery-line);
+  color: var(--mystery-text);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--mystery-violet) 8%, var(--mystery-ui-surface)),
+    var(--mystery-ui-surface)
+  );
+}
+
+.play[data-theme="light"] .assignmentChoices > button:is(:hover, :focus-visible),
+.play[data-theme="light"] .assignmentChoices > .partnerAssignmentChoice:is(:hover, :focus-visible),
+.play[data-theme="light"] .theorySuspectChoices button:is(:hover, :focus-visible) {
+  border-color: color-mix(in srgb, var(--mystery-violet) 48%, var(--mystery-line));
+  background: color-mix(in srgb, var(--mystery-violet) 12%, var(--mystery-ui-surface));
+}
+
+.play[data-theme="light"] :is(
+    .leadAnnotation textarea,
+    .leadAnnotationDraft textarea,
+    .authoredBlockDraft textarea,
+    .verdict > textarea,
+    .replayRecord,
+    .suspectDeskFile textarea
+  ) {
+  border-color: var(--mystery-line);
+  color: var(--mystery-text);
+  background: var(--mystery-ui-field);
+}
+
+.play[data-theme="light"] :is(.notebook > footer, .cleanupPreview > footer) {
+  border-color: var(--mystery-line);
+  background: var(--mystery-ui-surface-soft);
+}
+
+.play[data-theme="light"] .suspectFolder:not([data-revealed="true"]) {
+  color: var(--mystery-muted);
+  background: var(--mystery-ui-surface-subtle);
+}
+
+/* These are physical scene materials. Give their controls a local readable
+   ink contract without repainting the authored wood, silhouette, or footage. */
+.play[data-theme="light"] :is(
+    .roomScene,
+    .interviewStage,
+    .investigatorDesk,
+    .deskSurface,
+    .folderUnknown
+  ) {
+  --mystery-text: #f7f4ff;
+  --mystery-muted: #c7c2d0;
+  color: var(--mystery-text);
+}
+
+.play[data-theme="light"] :is(
+    button,
+    input,
+    select,
+    textarea,
+    summary
+  ):focus-visible {
+  outline: 2px solid var(--mystery-cyan);
+  outline-offset: 2px;
+}
+
+.play[data-theme="light"] :is(button, input, select, textarea):disabled {
+  color: color-mix(in srgb, var(--mystery-muted) 72%, transparent);
+  border-color: color-mix(in srgb, var(--mystery-line) 72%, transparent);
+  cursor: not-allowed;
 }
 
 @media (max-width: 1380px) {

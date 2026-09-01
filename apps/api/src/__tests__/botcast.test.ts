@@ -1623,6 +1623,14 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.match(
         serverSource,
+        /route\("POST", "\/api\/botcast\/episodes\/:id\/image"[\s\S]{0,2800}normalizeSignalEpisodeImageForTurn[\s\S]{0,1800}queueBotcastEpisodeImageContext/u,
+      );
+      assert.match(
+        serverSource,
+        /A newly uploaded Signal image replaced the prepared turn\./u,
+      );
+      assert.match(
+        serverSource,
         /requiresImageInput: true,[\s\S]{0,800}supportsImageInput/u,
       );
       assert.match(

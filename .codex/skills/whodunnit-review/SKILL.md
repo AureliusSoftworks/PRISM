@@ -5,10 +5,14 @@ description: Review PRISM Whodunnit Case Forge jobs, compiled cases, playable se
 
 # Whodunnit Review
 
+Read [the shared PRISM review core](../references/prism-review-core.md) before
+applet-specific work. Sealed case truth is private internal diagnostic evidence,
+never an experienced review artifact.
+
 ## Workflow
 
 1. Read the complete supplied record before judging it. Start with exact session, case/job, package, and archive references. If the user supplies only a public Case Forge error, resolve the durable compilation job and public session state read-only; do not treat the first visible attempt snapshot as the final persisted attempt count or cause.
-2. Record the frozen setup and provenance available without opening sealed truth: format/version, premise and mansion preset, player role, difficulty, trial type, cast IDs and roles, provider/model/Effort and LOCAL/ONLINE lane, compilation status/stage/attempt budget, public failure code/stage, timestamps, source revision or installed build when known, and archive/package availability.
+2. Record the frozen setup and provenance available without opening sealed truth: format/version, premise and mansion preset, mansion source/derived/installed identity and revision, package origin, player role, difficulty, trial type, cast IDs and roles, provider/model/Effort and LOCAL/ONLINE lane, compilation status/stage/attempt budget, public failure code/stage, timestamps, current source/running API/desktop bundle/installed build, and archive/package availability.
 3. Build an evidence ledger for every finding:
    - observed public text, heard audio, visible state, or durable diagnostic;
    - session, case/job, revision, stage, attempt, event, room, evidence, testimony, ruling, and package/archive IDs when available;
@@ -16,7 +20,7 @@ description: Review PRISM Whodunnit Case Forge jobs, compiled cases, playable se
    - responsible layer: frozen setup, deterministic scaffold, authoring provider, section validation, fallback, contradiction/proof compilation, orchestration, persistence, public projection, mansion/assets, investigation, Theory Board, Court, verdict, archive/replay, or package import/export;
    - confidence: `observed`, `inferred`, or `unknown`.
 4. Trace Case Forge failures through `frozen setup -> deterministic scaffold -> bounded section generation -> typed validation -> permitted fallback -> graph/contradiction compile -> performance/audio/asset preparation -> durable job state -> spoiler-safe public projection -> Case Forge recovery UI`. Never call a public error the raw provider failure without preserved cause evidence.
-5. Trace play failures through `compiled sealed case -> mansion/rooms -> public clues and testimony -> investigation state -> Theory Board -> Court/rulings -> verdict -> Archive -> saved reopen/replay -> optional package export/import`. Identify the first layer where durable state and player-visible behavior diverge.
+5. Trace play failures through `compiled sealed case -> mansion library/install revision -> cloned or derived topology -> room-art source and installed selection -> public rooms/clues/testimony -> investigation state -> Theory Board -> Court/rulings -> verdict -> Archive -> saved reopen/replay -> optional package export/import`. Identify the first layer where durable state and player-visible behavior diverge.
 6. Audit three separate axes:
    - **Case integrity:** validator-confirmed coherence, reachable proof routes, clue/testimony consistency, no impossible progression, and a fair public basis for the verdict. Report validator outcomes without revealing culprit, solution, proof graph, hidden motives, private alibis, or unrevealed evidence.
    - **System integrity:** bounded attempts, typed failure handling, idempotent retry/resume, stable frozen IDs and truth, correct lifecycle stages, tenant isolation, LOCAL zero-egress, asset/audio separation, archive continuity, replay fidelity, and atomic package behavior.
@@ -35,8 +39,11 @@ description: Review PRISM Whodunnit Case Forge jobs, compiled cases, playable se
 - Casekeeper identity, any private voice carrier, culprit, proof graph, solution, hidden evidence, and unrevealed testimony stay sealed. Public captions, audio, copied records, and reviews must not expose them.
 - Persona, Powers, avatar, and voice may shape permitted performances after the case is frozen; relationship memory and learned continuity must not read from or write into Whodunnit.
 - Do not call a case replayable from source tests or an unsaved verdict screen. Verify an Archive artifact can be reopened and replayed.
-- Real player-surface QA uses Case Forge, mansion rooms/assets, investigation, Theory Board, Court, Archive, and reopen. Never create or use a synthetic/local QA account without explicit approval.
+- Real player-surface QA uses Case Forge, mansion rooms/assets, investigation, Theory Board, Court, Archive, and reopen. Reuse the single `codex_qa_admin` account and keep it LOCAL; never create another QA account or use Jared's real account as a fixture without explicit approval.
 - For portable `.mansion` or `.whodunnit` acceptance, export before completing the source, recoverably delete it, import and play in a clean case, then export/delete/import the completed package. Preserve existing files on collisions and keep imports atomic.
+- Installed mansions and archived cases are immutable sources. Topology edits require a tenant-owned duplicate/Derived record; verify floor connectivity, room-type uniqueness, asset references, and that editing the derivative cannot mutate the installed source.
+- Track room art from package/source asset through content-addressed installation to the actual rendered room selection. Generated transforms or source tests do not prove the installed bundle contains or displays the intended art.
+- On name, identity, or asset collisions, preserve the existing library entry and report the imported result's resolved identity. Never overwrite an installed mansion or partially install a package.
 - A source fix does not update an already-running request or an older packaged app. Distinguish current source, running API, desktop bundle, and installed build before asking the user to retry.
 - Prefer validators, typed failure causes, bounded fallback, orchestration, serialization, and recovery UI fixes over model-specific prompt hacks, manual database edits, or rewriting a saved mystery.
 

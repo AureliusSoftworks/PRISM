@@ -250,7 +250,7 @@ describe("Coffee live immersion", () => {
     // SpongeBob's reply stayed invisible until a player poke).
     assert.match(
       pageSource,
-      /voiceStartFailsafeTimer = window\.setTimeout\(\(\) => \{\s*voiceStartFailsafeTimer = null;\s*controller\.abort\(\);\s*settle\(null\);\s*\}, COFFEE_PLAYER_VOICE_START_FAILSAFE_MS\)/u,
+      /voiceStartFailsafeTimer = window\.setTimeout\(\(\) => \{\s*voiceStartFailsafeTimer = null;\s*controller\.abort\(\);\s*settle\(null\);\s*\}, COFFEE_VOICE_START_FAILSAFE_MS\)/u,
     );
     // A botThinking seat with no in-flight work self-recovers and hands the
     // floor back to the stalled speaker (Plankton's 138s dangling question).

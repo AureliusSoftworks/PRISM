@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { PrismOnboardingStage } from "@localai/shared";
+import { usePrismDocumentTheme } from "./usePrismDocumentTheme";
 import styles from "./PrismFirstRunLivingLayer.module.css";
 
 export const PRISM_AUTHORED_WELCOME =
@@ -42,7 +43,35 @@ function useModalCanvas(rootRef: RefObject<HTMLDivElement | null>): void {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     root.focus({ preventScroll: true });
+    const trapTab = (event: KeyboardEvent): void => {
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        root.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      if (focusable.length === 0) {
+        event.preventDefault();
+        root.focus({ preventScroll: true });
+        return;
+      }
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      const active = document.activeElement;
+      if (
+        event.shiftKey &&
+        (active === first || active === root || !root.contains(active))
+      ) {
+        event.preventDefault();
+        last.focus({ preventScroll: true });
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus({ preventScroll: true });
+      }
+    };
+    root.addEventListener("keydown", trapTab);
     return () => {
+      root.removeEventListener("keydown", trapTab);
       siblings.forEach(({ element, wasInert }) => {
         if (!wasInert) element.removeAttribute("inert");
       });
@@ -67,6 +96,7 @@ export default function PrismFirstRunLivingLayer({
   onChoice: (choice: PrismFirstRunChoice) => void;
   onWelcome?: (text: string) => void | Promise<void>;
 }): React.JSX.Element | null {
+  const resolvedTheme = usePrismDocumentTheme();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const headingId = useId();
   const descriptionId = useId();
@@ -89,6 +119,8 @@ export default function PrismFirstRunLivingLayer({
       ref={rootRef}
       className={styles.canvas}
       data-stage={stage}
+      data-theme={resolvedTheme}
+      data-prism-document-theme-surface="true"
       role="dialog"
       aria-modal="true"
       aria-labelledby={headingId}
@@ -115,7 +147,11 @@ export default function PrismFirstRunLivingLayer({
       ) : (
         <section className={styles.choices}>
           <PrismOrbVisual className={styles.choiceOrbStage} />
-          <div className={styles.choiceHeading}>
+          <div
+            className={styles.choiceHeading}
+            aria-live="polite"
+            aria-atomic="true"
+          >
             <p className={styles.eyebrow}>WHERE SHALL WE BEGIN?</p>
             <h1 id={headingId}>Your spectrum is waiting.</h1>
             <p id={descriptionId}>

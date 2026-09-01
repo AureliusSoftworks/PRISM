@@ -1,6 +1,6 @@
 # Debate Formats: Turnabout and Flyting V1
 
-Last reviewed: 2026-08-29
+Last reviewed: 2026-08-31
 
 ## Product direction
 
@@ -93,8 +93,11 @@ formatState:
     floorSideId,
     expectedAction,
     exchanges[4],
-    hallVotes[4],
-    hostVerdict
+    hallMembers[15],
+    hallLeaningHistory[],
+    jarlGuards[3],
+    finalTally,
+    hostVerdict // legacy field name; player-facing authority is the Jarl
   }
 ```
 
@@ -137,10 +140,11 @@ identity use the same canonical Debate persistence path as Forum.
 
 ## Flyting canonical flow
 
-1. **Summon** chooses Participant coach, human Host, or Spectator. Participant
+1. **Summon** chooses Participant coach, human Jarl, or Spectator. Participant
    selects the real bot they coach; that bot remains the public body and voice.
-2. **Cast** freezes two flyters, four Hall members, and a bot Host unless the
-   player holds the staff. Duplicate seats are rejected.
+2. **Cast** freezes two flyters and a bot Jarl unless the player holds the staff.
+   The Hall itself is fifteen generic spectators plus three Jarl guards;
+   duplicate flyter/Jarl seats are rejected.
 3. **Bout Forge** produces editable fictional stakes, epithets, and three public
    Legend facets per flyter from public bot persona only. It reads no private
    relationship memory and performs no live research. Both flyters consent to
@@ -155,11 +159,15 @@ identity use the same canonical Debate persistence path as Forum.
    private biography.
 7. **Yield** is the only non-answer. It permanently marks that exchange
    unanswered and cannot be softened into a substitute line.
-8. Four Hall members cast individual public votes from the complete record. A
-   human Host sees those as advisory and must crown one winner. Otherwise the
-   bot Host casts the fifth deciding vote and breaks a 2–2 split.
-9. The Hall Record persists the exact public lines, Power-projected delivery,
-   targets, maneuvers, resolutions, votes, and decisive ruling. Replay performs
+8. The fifteen spectators move among `for`, `neutral`, and `against` after each
+   exchange. If neutral holds a strict plurality at the end, both flyters lose
+   and the three guards hold the center. Otherwise the human or bot Jarl sends
+   all three guards to one side. Those guards add weight three; the weighted
+   Hall total decides the winner, and the Jarl's side breaks an exact weighted
+   tie without overturning a larger opposing majority.
+9. The Hall Record persists the exact Power-projected public lines,
+   targets, maneuvers, resolutions, Jarl-authored acclamations, crowd-sway
+   history, guard placement, final tally, and decisive ruling. Replay performs
    that frozen record without rerunning Forge or changing the winner.
 
 There is no timer, meter, rhyme requirement, numeric score, continuous music,

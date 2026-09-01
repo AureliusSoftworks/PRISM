@@ -1,4 +1,26 @@
 .curtain {
+  --coffee-curtain-ink: #f7f4ef;
+  --coffee-curtain-eyebrow: rgba(247, 244, 239, 0.62);
+  --coffee-curtain-copy: rgba(247, 244, 239, 0.78);
+  --coffee-curtain-caption: rgba(247, 244, 239, 0.48);
+  --coffee-curtain-reveal: #000;
+  --coffee-curtain-field-warm: rgba(255, 168, 92, 0.22);
+  --coffee-curtain-field-cool: rgba(65, 220, 255, 0.12);
+  --coffee-curtain-field-white: rgba(255, 255, 255, 0.06);
+  --coffee-curtain-mark-surface: linear-gradient(
+    145deg,
+    rgba(255, 168, 92, 0.28),
+    rgba(255, 255, 255, 0.05)
+  );
+  --coffee-curtain-mark-edge: rgba(255, 255, 255, 0.14);
+  --coffee-curtain-mark-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  --coffee-curtain-mark-ink: rgba(255, 214, 170, 0.92);
+  --coffee-curtain-skip-edge: rgba(255, 255, 255, 0.19);
+  --coffee-curtain-skip-ink: rgba(255, 255, 255, 0.72);
+  --coffee-curtain-skip-surface: rgba(255, 255, 255, 0.055);
+  --coffee-curtain-skip-hover-edge: rgba(255, 255, 255, 0.38);
+  --coffee-curtain-skip-hover-ink: #fff;
+  --coffee-curtain-skip-hover-surface: rgba(255, 255, 255, 0.1);
   position: fixed;
   inset: 0;
   z-index: 920;
@@ -6,7 +28,7 @@
   place-items: center;
   overflow: hidden;
   isolation: isolate;
-  color: #f7f4ef;
+  color: var(--coffee-curtain-ink);
   background:
     radial-gradient(
       circle at 50% 42%,
@@ -17,12 +39,45 @@
   animation: coffeeIntroHold var(--coffee-intro-duration, 2200ms) ease both;
 }
 
+.curtain[data-theme="light"] {
+  --coffee-curtain-ink: #172638;
+  --coffee-curtain-eyebrow: #5c7186;
+  --coffee-curtain-copy: #344b61;
+  --coffee-curtain-caption: #657c91;
+  --coffee-curtain-reveal: #edf5fc;
+  --coffee-curtain-field-warm: rgba(112, 178, 224, 0.2);
+  --coffee-curtain-field-cool: rgba(47, 211, 227, 0.14);
+  --coffee-curtain-field-white: rgba(255, 255, 255, 0.46);
+  --coffee-curtain-mark-surface: linear-gradient(
+    145deg,
+    rgba(255, 255, 255, 0.92),
+    rgba(210, 229, 243, 0.74)
+  );
+  --coffee-curtain-mark-edge: rgba(93, 133, 166, 0.28);
+  --coffee-curtain-mark-shadow: 0 12px 32px rgba(57, 86, 111, 0.18);
+  --coffee-curtain-mark-ink: #346b91;
+  --coffee-curtain-skip-edge: rgba(64, 91, 116, 0.24);
+  --coffee-curtain-skip-ink: #496177;
+  --coffee-curtain-skip-surface: rgba(255, 255, 255, 0.6);
+  --coffee-curtain-skip-hover-edge: rgba(52, 107, 145, 0.44);
+  --coffee-curtain-skip-hover-ink: #172638;
+  --coffee-curtain-skip-hover-surface: rgba(255, 255, 255, 0.88);
+  color-scheme: light;
+  background:
+    radial-gradient(
+      circle at 50% 42%,
+      rgba(112, 178, 224, 0.2),
+      transparent 34%
+    ),
+    radial-gradient(circle at 50% 58%, #f8fbff 0%, #e5f0f8 62%, #d8e7f2 100%);
+}
+
 .curtain::after {
   position: absolute;
   inset: 0;
   z-index: 2;
   content: "";
-  background: #000;
+  background: var(--coffee-curtain-reveal);
   pointer-events: none;
   animation: coffeeIntroReveal 720ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
@@ -52,7 +107,7 @@
   position: absolute;
   border-radius: 999px;
   filter: blur(28px);
-  background: rgba(255, 168, 92, 0.22);
+  background: var(--coffee-curtain-field-warm);
 }
 
 .field i:nth-child(1) {
@@ -67,7 +122,7 @@
   height: 28vw;
   right: 14%;
   bottom: 18%;
-  background: rgba(65, 220, 255, 0.12);
+  background: var(--coffee-curtain-field-cool);
 }
 
 .field i:nth-child(3) {
@@ -75,7 +130,7 @@
   height: 18vw;
   left: 46%;
   top: 58%;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--coffee-curtain-field-white);
 }
 
 .lockup {
@@ -95,7 +150,7 @@
   text-transform: uppercase;
   font-size: 0.68rem;
   font-weight: 720;
-  color: rgba(247, 244, 239, 0.62);
+  color: var(--coffee-curtain-eyebrow);
 }
 
 .mark {
@@ -104,13 +159,9 @@
   border-radius: 16px;
   display: grid;
   place-items: center;
-  background: linear-gradient(
-    145deg,
-    rgba(255, 168, 92, 0.28),
-    rgba(255, 255, 255, 0.05)
-  );
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  background: var(--coffee-curtain-mark-surface);
+  border: 1px solid var(--coffee-curtain-mark-edge);
+  box-shadow: var(--coffee-curtain-mark-shadow);
 }
 
 .mark span {
@@ -118,7 +169,7 @@
   height: 0;
   border-left: 11px solid transparent;
   border-right: 11px solid transparent;
-  border-bottom: 19px solid rgba(255, 214, 170, 0.92);
+  border-bottom: 19px solid var(--coffee-curtain-mark-ink);
 }
 
 .lockup h1 {
@@ -133,7 +184,7 @@
   max-width: min(34rem, 86vw);
   font-size: clamp(0.95rem, 1.8vw, 1.18rem);
   font-weight: 560;
-  color: rgba(247, 244, 239, 0.78);
+  color: var(--coffee-curtain-copy);
   line-height: 1.35;
 }
 
@@ -142,7 +193,7 @@
   letter-spacing: 0.22em;
   text-transform: uppercase;
   font-size: 0.66rem;
-  color: rgba(247, 244, 239, 0.48);
+  color: var(--coffee-curtain-caption);
 }
 
 .skip {
@@ -150,20 +201,29 @@
   top: 24px;
   right: 28px;
   z-index: 3;
-  border: 1px solid rgba(255, 255, 255, 0.19);
+  border: 1px solid var(--coffee-curtain-skip-edge);
   border-radius: 999px;
   padding: 8px 12px;
-  color: rgba(255, 255, 255, 0.72);
-  background: rgba(255, 255, 255, 0.055);
+  color: var(--coffee-curtain-skip-ink);
+  background: var(--coffee-curtain-skip-surface);
   font: 700 0.68rem / 1 system-ui;
   cursor: pointer;
   backdrop-filter: blur(12px);
 }
 
 .skip:hover {
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.38);
-  background: rgba(255, 255, 255, 0.1);
+  color: var(--coffee-curtain-skip-hover-ink);
+  border-color: var(--coffee-curtain-skip-hover-edge);
+  background: var(--coffee-curtain-skip-hover-surface);
+}
+
+.skip:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--coffee-curtain-mark-ink) 74%, white);
+  outline-offset: 3px;
+}
+
+.skip:active {
+  transform: translateY(1px);
 }
 
 @keyframes coffeeIntroReveal {

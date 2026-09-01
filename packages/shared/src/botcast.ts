@@ -1895,7 +1895,7 @@ export interface BotcastEpisodeImageDescriptor {
   kind: BotcastEpisodeImageKind;
   /** Human-readable subject derived only from the original filename stem. */
   name: string;
-  mimeType: "image/png" | "image/jpeg";
+  mimeType: "image/png" | "image/jpeg" | "image/webp";
 }
 
 export function botcastEpisodeImageFallbackEmoji(
@@ -1954,10 +1954,11 @@ export function normalizeBotcastEpisodeImageReason(
 }
 
 /**
- * Signal deliberately accepts only PNG and .jpg files. This filename-only
- * descriptor is refined by the API after pixel inspection: a fully opaque PNG
- * becomes a picture, while a PNG with visible transparency remains an item.
- * Image bytes remain ephemeral unless the producer explicitly saves an item.
+ * Signal accepts the same common still-image formats as the asset library.
+ * This filename-only descriptor is refined by the API after pixel inspection:
+ * a fully opaque PNG or WebP becomes a picture, while visible transparency
+ * makes it an item. Image bytes remain ephemeral unless the producer explicitly
+ * saves an item.
  */
 export function botcastEpisodeImageDescriptorFromFileName(
   fileName: string,
@@ -1969,9 +1970,11 @@ export function botcastEpisodeImageDescriptorFromFileName(
   const extension = extensionMatch[1]!.toLowerCase();
   const normalizedMimeType = mimeType.trim().toLowerCase();
   const kind: BotcastEpisodeImageKind | null =
-    extension === "png" && normalizedMimeType === "image/png"
+    ((extension === "png" && normalizedMimeType === "image/png") ||
+      (extension === "webp" && normalizedMimeType === "image/webp"))
       ? "item"
-      : extension === "jpg" && normalizedMimeType === "image/jpeg"
+      : (extension === "jpg" || extension === "jpeg") &&
+          normalizedMimeType === "image/jpeg"
         ? "picture"
         : null;
   if (!kind) return null;
@@ -1985,7 +1988,12 @@ export function botcastEpisodeImageDescriptorFromFileName(
   return {
     kind,
     name,
-    mimeType: kind === "item" ? "image/png" : "image/jpeg",
+    mimeType:
+      normalizedMimeType === "image/webp"
+        ? "image/webp"
+        : kind === "item"
+          ? "image/png"
+          : "image/jpeg",
   };
 }
 
@@ -2069,7 +2077,7 @@ export interface BotcastImageContextV1 {
   imageId: string;
   kind: BotcastEpisodeImageKind;
   name: string;
-  mimeType: "image/png" | "image/jpeg";
+  mimeType: "image/png" | "image/jpeg" | "image/webp";
   provider: BotcastEpisodeProvider;
   model: string;
   /** Legacy contextual replay stand-in; new records prefer replayProxyId. */
@@ -2124,7 +2132,9 @@ export function normalizeBotcastImageContextV1(
     (row.kind !== "item" && row.kind !== "picture") ||
     typeof row.name !== "string" ||
     !row.name.trim() ||
-    (row.mimeType !== "image/png" && row.mimeType !== "image/jpeg") ||
+    (row.mimeType !== "image/png" &&
+      row.mimeType !== "image/jpeg" &&
+      row.mimeType !== "image/webp") ||
     (row.provider !== "local" &&
       row.provider !== "ollama_cloud" &&
       row.provider !== "openai" &&

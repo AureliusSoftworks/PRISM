@@ -291,7 +291,7 @@ export function PrismRefractionGateProvider(props: {
         stepLabel={loader?.stepLabel ?? "Working"}
         progress={null}
         startedAt={loaderStartedAt}
-        theme={loader?.theme ?? "dark"}
+        theme={loader?.theme}
         footer={
           loader?.footer ?? "Keep this window open while the light takes shape."
         }

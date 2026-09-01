@@ -219,8 +219,17 @@ describe("Signal experience shell", () => {
       /activeEpisodeImageCapability\?\.supportsImageInput !== true/u,
     );
     assert.match(source, /\/image-capability/u);
-    assert.match(source, /SIGNAL_EPISODE_IMAGE_ACCEPT = "\.png,\.jpg"/u);
+    assert.match(
+      source,
+      /SIGNAL_EPISODE_IMAGE_ACCEPT = "image\/png,image\/jpeg,image\/webp"/u,
+    );
     assert.match(source, /Signal allows one image upload per episode/u);
+    assert.match(
+      source,
+      /\/api\/botcast\/episodes\/\$\{encodeURIComponent\(episode\.id\)\}\/image/u,
+    );
+    assert.match(source, /setEpisode\(attached\.episode\)/u);
+    assert.match(source, /Decoded pixels, rather than the filename, decide whether this is an/u);
     assert.match(source, /className=\{styles\.producerImageAttachWrap\}[\s\S]{0,100}title=\{producerImageTooltip\}/u);
     assert.match(
       source,
@@ -1583,7 +1592,7 @@ describe("Signal experience shell", () => {
     assert.doesNotMatch(preparationHoldSource, /setEpisodePreRoll\(null\)/u);
   });
 
-  it("keeps Auto labeled Auto on the locked Signal model control", () => {
+  it("keeps Auto persisted while the locked Signal control resolves its concrete route", () => {
     assert.match(
       source,
       /const episodeModelControlValue = signalEpisodeModelPickerValue\(\{/u,
@@ -2824,7 +2833,12 @@ describe("Signal experience shell", () => {
     assert.match(source, /episodeOperationIsCurrent\(controller, runId\)/u);
     assert.match(
       source,
-      /if \(!busy && speakingMessageId === null && nextRole === "host"\) \{[\s\S]{0,100}onPrepareUtterance\?\.\(\);[\s\S]{0,80}advanceEpisode\(\)/u,
+      /if \(!busy && speakingMessageId === null\) \{[\s\S]{0,100}onPrepareUtterance\?\.\(\);[\s\S]{0,80}advanceEpisode\(\)/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /if \(!busy && speakingMessageId === null && nextRole === "host"\)/u,
+      "an accepted Host cue must also restart an idle guest-next floor",
     );
     assert.match(
       source,
@@ -3587,7 +3601,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       css,
-      /\.shell\[data-theme="light"\] \.showBrandContent h2\s*\{[^}]*color:\s*var\(--botcast-ink\)/iu,
+      /\.showBrandContent h2\s*\{[^}]*color:\s*var\(--botcast-show-hero-ink\)/iu,
     );
   });
 
@@ -3628,7 +3642,16 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       css,
-      /\.shell\[data-theme="light"\] \.showAudiencePulse\s*\{/u,
+      /\.shell\[data-theme="light"\]\s*\{[\s\S]{0,2400}--botcast-show-audience-surface:/u,
+    );
+    assert.match(
+      css,
+      /--botcast-show-hero-veil:\s*linear-gradient\(90deg, rgba\(252,253,255,\.96\)/u,
+    );
+    assert.match(css, /--botcast-show-row-meta:\s*#505262/u);
+    assert.match(
+      css,
+      /\.showRowRating\s*\{[^}]*var\(--botcast-show-row-rating\)/u,
     );
     assert.match(css, /\.audiencePulseDialog\s*\{/u);
     assert.match(css, /\.audiencePulseReviewList\s*\{[^}]*overflow:\s*auto/iu);

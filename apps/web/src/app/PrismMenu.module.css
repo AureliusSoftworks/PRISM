@@ -267,7 +267,9 @@
 }
 
 .menu[data-theme="light"],
-.feedback[data-theme="light"] {
+.feedback[data-theme="light"],
+:global(body[data-prism-theme="light"]) .menu,
+:global(body[data-prism-theme="light"]) .feedback {
   --prism-menu-bg: #f8fbfe;
   --prism-menu-fg: #172638;
   --prism-menu-muted: #637386;
@@ -280,7 +282,8 @@
   -webkit-backdrop-filter: none;
 }
 
-.menu[data-theme="light"] .item[data-tone="danger"] {
+.menu[data-theme="light"] .item[data-tone="danger"],
+:global(body[data-prism-theme="light"]) .menu .item[data-tone="danger"] {
   color: #a92b3a;
 }
 

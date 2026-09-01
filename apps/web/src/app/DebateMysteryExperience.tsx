@@ -547,7 +547,7 @@ export function DebateMysteryCompilationResume(
   }, [attempt, onSessionChange, request, sessionId]);
 
   return (
-    <main className={styles.compiler} data-theme="dark">
+    <main className={styles.compiler} data-theme={props.theme}>
       <button type="button" onClick={props.onExit} className={styles.exitButton}>← Archive</button>
       <section className={styles.compilerCard} aria-live="polite">
         <div className={styles.casePrism} aria-hidden="true">◇</div>
@@ -1724,7 +1724,7 @@ export function DebateMysteryPlay(
         snippet={reference.detail}
         rotationDeg={debateEvidencePropRotationDeg(reference.id) / (location === "tray" ? 2 : 3)}
         presentation="desk"
-        theme="dark"
+        theme={props.theme}
       /> : evidence ? <span className={styles.deskEvidenceObject}><MysteryEvidenceVisual item={evidence} className={styles.deskEvidenceAsset} /><strong>{reference.label}</strong></span> : null;
     const dragReference = (event: ReactDragEvent<HTMLElement>): void => {
       const payload = encodeDebateMysteryDeskDragPayload({ kind: reference.kind, id: reference.id });
@@ -1856,7 +1856,7 @@ export function DebateMysteryPlay(
   );
 
   return (
-    <main ref={investigationAssetRootRef} className={styles.play} data-theme="dark" data-phase={state.playPhase}>
+    <main ref={investigationAssetRootRef} className={styles.play} data-theme={props.theme} data-phase={state.playPhase}>
       <SessionAtmosphereLayer
         active={Boolean(
           props.audioEnabled &&

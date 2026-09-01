@@ -70,6 +70,30 @@
   text-overflow: ellipsis;
 }
 
+/* This layer portals to body, so the canonical document marker—not an app
+   shell ancestor—owns its Light material. Dark declarations above remain the
+   authored default for theme-independent first paint. */
+:global(body[data-prism-theme="light"]) .guide {
+  border-color: rgba(89, 116, 142, 0.2);
+  background: rgba(248, 251, 255, 0.94);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.92) inset,
+    0 10px 26px rgba(38, 67, 94, 0.16);
+}
+
+:global(body[data-prism-theme="light"]) .title {
+  color: #5c7186;
+}
+
+:global(body[data-prism-theme="light"]) .chip {
+  color: #30465b;
+}
+
+:global(body[data-prism-theme="light"]) .chipKbd {
+  color: #415a72;
+  background: rgba(69, 96, 122, 0.08);
+}
+
 @media (max-width: 640px) {
   .guide {
     gap: 4px;

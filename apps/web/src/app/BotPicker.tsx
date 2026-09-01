@@ -330,7 +330,7 @@ interface BotPickerToolbarProps {
   groupItems?: readonly BotPickerItem[];
   groupValue?: string;
   onGroupChange?: (groupId: string) => void;
-  groupTheme?: BotPickerGroupTheme;
+  groupTheme: BotPickerGroupTheme;
   groupSelectionMode?: "dropdown" | "modal";
   resultLabel?: string;
   singleActionableResult?: Pick<BotPickerItem, "id" | "name"> | null;
@@ -348,7 +348,7 @@ export function BotPickerToolbar({
   groupItems = [],
   groupValue,
   onGroupChange,
-  groupTheme = "dark",
+  groupTheme,
   groupSelectionMode = "dropdown",
   resultLabel,
   singleActionableResult = null,
@@ -546,6 +546,7 @@ export function BotPickerToolbar({
                       ? sharedStyles.groupModalBackdrop
                       : `${pickerStyles.composeBotMenu} ${pickerStyles.botLibraryGroupMenu} ${sharedStyles.groupMenuPortal}`
                   }
+                  data-theme={groupTheme}
                   style={
                     groupSelectionIsModal ? undefined : groupMenuStyle ?? undefined
                   }

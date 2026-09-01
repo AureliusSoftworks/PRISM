@@ -110,10 +110,18 @@
 }
 
 .shell button.spaceLensRow:hover,
+.shell button.spaceLensRow:focus-visible,
 .shell button.spaceLensRow[data-active="true"] {
   border-color: color-mix(in srgb, var(--orb-color, var(--settings-section-color, #7ec8b8)) 42%, var(--line, transparent));
   background: color-mix(in srgb, var(--orb-color, var(--settings-section-color, #7ec8b8)) 14%, transparent);
   color: var(--fg, inherit);
+}
+
+.shell button.spaceLensRow:focus-visible,
+.shell button.actionTidy:focus-visible,
+.shell button.actionAudit:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--settings-section-color, #7ec8b8) 68%, var(--fg));
+  outline-offset: 2px;
 }
 
 .spaceLensSwatch {

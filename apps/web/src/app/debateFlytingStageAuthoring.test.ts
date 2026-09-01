@@ -25,6 +25,29 @@ describe("Flyting stage authoring", () => {
     assert.match(flytingSource, /<h2>Stage layout<\/h2>/u);
   });
 
+  it("opens the setup tool with a cast-bound Mead Hall preview", () => {
+    assert.match(
+      flytingSource,
+      /onClick=\{\(\) => setStageLayoutOpen\(true\)\}/u,
+    );
+    assert.match(flytingSource, /<FlytingSetupStageAlignmentPreview/u);
+    assert.match(flytingSource, /forBot=\{forBot\}/u);
+    assert.match(flytingSource, /againstBot=\{againstBot\}/u);
+    assert.match(flytingSource, /view=\{stageLayoutView\}/u);
+    assert.match(flytingSource, /alignment=\{stageLayoutDraft\}/u);
+    assert.match(flytingSource, /onSelectItem=\{setStageLayoutItem\}/u);
+    assert.match(flytingSource, /data-flyting-stage-preview=\{props\.view\}/u);
+    assert.match(
+      flytingSource,
+      /data-debate-stage-viewport="authoring-preview"/u,
+    );
+    assert.match(flytingSource, /Hall gallery alignment preview/u);
+    assert.match(
+      flytingStyles,
+      /\.stageAlignmentPreview\s*\{[\s\S]{0,260}position:\s*fixed/u,
+    );
+  });
+
   it("keys competitor rugs through the same normalized lane contract as the Hall banners", () => {
     assert.match(flytingSource, /className=\{styles\.galleryRugAccentKeys\}/u);
     assert.match(flytingSource, /<span data-key="left" \/>/u);

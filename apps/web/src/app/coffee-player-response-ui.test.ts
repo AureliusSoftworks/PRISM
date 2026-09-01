@@ -325,6 +325,18 @@ describe("Coffee player response UI wiring", () => {
       /setCoffeeLiveAvatarSpeech\(\{[\s\S]*?durationMs: resolvedDurationMs,[\s\S]*?\}\);[\s\S]*?settle\(resolvedDurationMs\)/,
     );
     assert.match(
+      botVoice,
+      /voiceStartFailsafeTimer = window\.setTimeout\(\(\) => \{\s*voiceStartFailsafeTimer = null;\s*voiceStartExpired = true;\s*controller\.abort\(\);\s*releaseCoffeeVoicePlayback\(\);\s*settle\(null\);\s*\}, COFFEE_VOICE_START_FAILSAFE_MS\)/u,
+    );
+    assert.match(
+      botVoice,
+      /const settle = \(durationMs: number \| null\) => \{[\s\S]{0,300}window\.clearTimeout\(voiceStartFailsafeTimer\)/u,
+    );
+    assert.match(
+      botVoice,
+      /const revealVoiceStillValid = \(\): boolean =>\s*!voiceStartExpired && revealVoiceIsCurrent\(\)/u,
+    );
+    assert.match(
       pageSource,
       /coffeeTurnRhythmStateRef\.current = "tableTyping";\s*startTransition\(\(\) => \{\s*setCoffeeTurnRhythmState\("tableTyping"\);[\s\S]{0,360}setCoffeeSipTalkGateEpochByBotId/,
       "player input must be able to preempt the bot voice-to-face handoff",

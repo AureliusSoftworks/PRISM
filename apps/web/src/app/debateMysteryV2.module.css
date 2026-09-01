@@ -10,11 +10,41 @@
   --v2-text: #f7f5ff;
   --v2-muted: #aca8bd;
   --v2-accent: #a98cff;
+  --v2-chrome: rgba(9, 11, 21, 0.96);
+  --v2-raised: rgba(15, 18, 32, 0.94);
+  --v2-soft: rgba(255, 255, 255, 0.045);
+  --v2-field: rgba(9, 10, 19, 0.72);
+  --v2-backdrop: rgba(2, 3, 8, 0.58);
+  --v2-shadow: 0 1.4rem 3.4rem rgba(0, 0, 0, 0.34);
   min-height: 100dvh;
   color: var(--v2-text);
   background:
     radial-gradient(circle at 50% -10%, rgba(116, 73, 227, 0.22), transparent 48%),
     linear-gradient(160deg, #070912, #0c0d18 54%, #07080e);
+}
+
+.forge[data-theme="light"],
+.titleCard[data-theme="light"],
+.caseOpening[data-theme="light"],
+.investigation[data-theme="light"],
+.court[data-theme="light"],
+.verdict[data-theme="light"] {
+  --v2-bg: #edf5fc;
+  --v2-panel: rgba(248, 251, 255, 0.96);
+  --v2-edge: rgba(69, 91, 113, 0.22);
+  --v2-text: #172638;
+  --v2-muted: #5c7186;
+  --v2-accent: #6a4bc0;
+  --v2-chrome: rgba(248, 251, 255, 0.97);
+  --v2-raised: rgba(235, 243, 249, 0.96);
+  --v2-soft: rgba(220, 234, 244, 0.68);
+  --v2-field: rgba(255, 255, 255, 0.88);
+  --v2-backdrop: rgba(70, 90, 110, 0.2);
+  --v2-shadow: 0 1.4rem 3.4rem rgba(49, 70, 91, 0.2);
+  color-scheme: light;
+  background:
+    radial-gradient(circle at 50% -10%, rgba(106, 75, 192, 0.1), transparent 48%),
+    linear-gradient(160deg, #edf5fc, #f8fbff 54%, #dce8f2);
 }
 
 .forge button,
@@ -31,7 +61,7 @@
 
 .eyebrow {
   margin: 0;
-  color: #aa9fcf;
+  color: color-mix(in srgb, var(--v2-accent) 72%, var(--v2-muted));
   font-size: 0.68rem;
   font-weight: 800;
   letter-spacing: 0.18em;
@@ -47,7 +77,7 @@
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 0.7rem;
   padding: 0.65rem 0.85rem;
-  background: rgba(9, 10, 19, 0.72);
+  background: var(--v2-field);
   cursor: pointer;
 }
 
@@ -2315,6 +2345,397 @@
 .ballots article span { color: #b89cff; font-weight: 800; text-transform: uppercase; }
 .ballots article p, .ballots article small { grid-column: 1 / -1; margin: 0; color: #aaa5b4; }
 .ballots article small { color: #ff9cca; }
+
+/* Light-mode shell and control palettes. Photographic rooms, the threshold
+   walk, CRT projection, and the courtroom stage remain authored scene fields;
+   their surrounding navigation and every actionable surface stay Light. */
+.titleCard[data-theme="light"] {
+  background-color: #05070d;
+  background-image:
+    linear-gradient(180deg, rgba(3, 5, 12, 0.14), rgba(3, 5, 12, 0.58) 55%, rgba(3, 5, 12, 0.9)),
+    radial-gradient(circle at 50% 42%, rgba(4, 6, 13, 0.03), rgba(4, 6, 13, 0.5) 72%),
+    var(--mansion-exterior-image);
+}
+
+.titleCard[data-theme="light"][data-first-person-exterior="true"] {
+  background-image: var(--mansion-exterior-image);
+}
+
+.caseOpening[data-theme="light"] {
+  background: #000;
+}
+
+.court[data-theme="light"] {
+  background: #05060b;
+}
+
+.forge[data-theme="light"] .forgeCard:not([data-exterior-hero="true"]),
+.forge[data-theme="light"] .forgeCard[data-exterior-hero="true"] .forgePanel,
+.titleCard[data-theme="light"] .titleCardContent,
+.verdict[data-theme="light"] :is(
+    .truthGrade,
+    .defendantVerdicts article,
+    .ballots article
+  ) {
+  border-color: var(--v2-edge);
+  color: var(--v2-text);
+  background: var(--v2-chrome);
+  box-shadow: var(--v2-shadow), inset 0 1px rgba(255, 255, 255, 0.76);
+}
+
+.forge[data-theme="light"] .forgeCard[data-exterior-hero="true"] .forgePanel {
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 1.1rem;
+  padding: clamp(1rem, 2vw, 1.4rem);
+  backdrop-filter: blur(18px) saturate(1.06);
+}
+
+.forge[data-theme="light"] .forgeCard[data-exterior-hero="true"] > .forgeCaseIdentity {
+  --v2-text: #f7f5ff;
+  --v2-muted: #d1ccdc;
+  color: var(--v2-text);
+}
+
+.forge[data-theme="light"] .forgeCard[data-exterior-hero="true"] .forgeCaseIdentity h1 {
+  color: var(--v2-text);
+}
+
+.forge[data-theme="light"] :is(
+    .forgeMessage,
+    .forgeBackgroundNote,
+    .forgeRecovery,
+    .forgeTiming,
+    .forgeStages li,
+    .forgeSubsteps li,
+    .forgeDetails > summary,
+    .forgeTip > p
+  ) {
+  color: var(--v2-muted);
+}
+
+.forge[data-theme="light"] :is(
+    .forgeBackgroundNote,
+    .forgeSubsteps,
+    .forgeDetails,
+    .localVoiceNotice
+  ) {
+  border-color: var(--v2-edge);
+  background: var(--v2-raised);
+}
+
+.forge[data-theme="light"] .progressTrack {
+  background: rgba(69, 91, 113, 0.14);
+}
+
+.forge[data-theme="light"] :is(
+    .forgeStages li[data-state="active"],
+    .forgeSubsteps li[data-state="active"]
+  ) {
+  color: var(--v2-text);
+}
+
+.forge[data-theme="light"] :is(
+    .forgeStages li[data-state="error"],
+    .forgeSubsteps li[data-state="attention"],
+    .error
+  ) {
+  color: #a62c4c;
+}
+
+.titleCard[data-theme="light"] .titleCardContent > p:not(.eyebrow),
+.titleCard[data-theme="light"] .titleMetadata span,
+.verdict[data-theme="light"] :is(
+    .truthGrade p,
+    .ballots article p,
+    .ballots article small
+  ) {
+  color: var(--v2-muted);
+}
+
+.caseOpening[data-theme="light"] :is(
+    .caseOpeningDialogue,
+    .caseOpeningJourney
+  ) {
+  border-color: var(--v2-edge);
+  color: var(--v2-text);
+  background: var(--v2-chrome);
+  box-shadow: var(--v2-shadow);
+}
+
+.caseOpening[data-theme="light"] .caseOpeningJourney > header :is(small, strong),
+.caseOpening[data-theme="light"] .caseOpeningJourneyStatus {
+  color: var(--v2-text);
+}
+
+.caseOpening[data-theme="light"] .caseOpeningJourneyRoom {
+  border-color: var(--v2-edge);
+  background: linear-gradient(145deg, #f8fbff, #dce9f2);
+  box-shadow: 0.28rem 0.34rem 0 rgba(112, 130, 147, 0.22), inset 0 0 1.2rem rgba(255, 255, 255, 0.52);
+}
+
+.caseOpening[data-theme="light"] .caseOpeningJourneyRoom[data-route="true"],
+.caseOpening[data-theme="light"] .mansionCorridor[data-route="true"] {
+  border-color: color-mix(in srgb, var(--v2-accent) 42%, var(--v2-edge));
+  background: linear-gradient(145deg, #f4effc, #ded3f1);
+}
+
+.caseOpening[data-theme="light"] .caseOpeningJourneyRoom[data-destination="true"] {
+  color: var(--v2-text);
+}
+
+.caseOpening[data-theme="light"] .caseOpeningJourneyRoom strong {
+  text-shadow: none;
+}
+
+.investigation[data-theme="light"] .investigationHeader,
+.court[data-theme="light"] .courtHeader {
+  border-bottom-color: var(--v2-edge);
+  color: var(--v2-text);
+  background: var(--v2-chrome);
+  box-shadow: 0 0.7rem 2rem rgba(49, 70, 91, 0.14);
+}
+
+.forge[data-theme="light"] :is(
+    .archiveButton,
+    .forgeActions button
+  ),
+.titleCard[data-theme="light"] .archiveButton,
+.investigation[data-theme="light"] :is(
+    .investigationHeader > button,
+    .investigationHeaderActions > button
+  ),
+.court[data-theme="light"] .courtHeader > button,
+.verdict[data-theme="light"] :is(
+    .archiveButton,
+    .verdictActions button
+  ) {
+  border-color: var(--v2-edge);
+  color: var(--v2-text);
+  background: var(--v2-field);
+  box-shadow: 0 0.4rem 1rem rgba(49, 70, 91, 0.12);
+}
+
+.investigation[data-theme="light"] .mansionBoard {
+  --mystery-panel: rgba(248, 251, 255, 0.96);
+  --mystery-line: rgba(69, 91, 113, 0.22);
+  --mystery-text: #172638;
+  --mystery-muted: #5c7186;
+  --mystery-violet: #6a4bc0;
+  --mystery-cyan: #147e88;
+  --mystery-gold: #926b19;
+  border-color: color-mix(in srgb, var(--mystery-gold) 30%, var(--mystery-line));
+  background:
+    radial-gradient(ellipse at 50% 12%, rgba(20, 126, 136, 0.08), transparent 38%),
+    var(--v2-chrome);
+  box-shadow: var(--v2-shadow), inset 0 0 5rem rgba(106, 75, 192, 0.05);
+}
+
+.investigation[data-theme="light"] .mansionBoard::before {
+  opacity: 0.2;
+  mix-blend-mode: multiply;
+}
+
+.investigation[data-theme="light"] .mansionFloorPicker button,
+.investigation[data-theme="light"] .mansionRoomDetails,
+.investigation[data-theme="light"] .mansionTravelSkip span {
+  border-color: var(--v2-edge);
+  color: var(--v2-text);
+  background: var(--v2-field);
+}
+
+.investigation[data-theme="light"] .mansionFloorPicker button[data-selected="true"] {
+  color: #172638;
+  border-color: color-mix(in srgb, var(--mystery-gold) 58%, var(--v2-edge));
+  background: color-mix(in srgb, var(--mystery-gold) 22%, white);
+}
+
+.investigation[data-theme="light"] .mansionViewport {
+  background: linear-gradient(180deg, #f8fbff, #dce9f2);
+  box-shadow: 0 1.6rem 3.4rem rgba(49, 70, 91, 0.18), inset 0 0 0 1px rgba(92, 113, 134, 0.16);
+}
+
+.investigation[data-theme="light"] .mansionCanvas {
+  background:
+    linear-gradient(rgba(79, 105, 128, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(79, 105, 128, 0.08) 1px, transparent 1px),
+    radial-gradient(ellipse at 50% 40%, rgba(106, 75, 192, 0.08), transparent 62%);
+  background-size: 28px 28px, 28px 28px, auto;
+}
+
+.investigation[data-theme="light"] .mansionRoom:not([data-room-art]) {
+  border-color: rgba(91, 108, 126, 0.3);
+  color: var(--v2-text);
+  background: linear-gradient(150deg, #fbfdff, #e2edf5);
+  box-shadow: 0.25rem 0.3rem 0 rgba(112, 130, 147, 0.22), 0.55rem 0.7rem 1.2rem rgba(49, 70, 91, 0.16);
+}
+
+.investigation[data-theme="light"] .mansionRoom:not([data-discovered="true"]):not([data-room-art]) {
+  color: var(--v2-muted);
+  background: linear-gradient(145deg, #dbe5ed, #cbd8e2);
+}
+
+.investigation[data-theme="light"] .mansionRoom[data-selected="true"]:not([data-room-art]) {
+  border-color: color-mix(in srgb, var(--v2-accent) 46%, var(--v2-edge));
+  background: linear-gradient(145deg, #f4effc, #ded3f1);
+}
+
+.investigation[data-theme="light"] .mansionOccupant {
+  background: #f8fbff;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.76), 0 0 1rem color-mix(in srgb, currentColor 24%, transparent);
+}
+
+.investigation[data-theme="light"] :is(
+    .partnerFindings,
+    .choiceTray,
+    .acquisitionNotice,
+    .caseFile,
+    .theoryBoard
+  ),
+.court[data-theme="light"] :is(
+    .choiceTray,
+    .acquisitionNotice,
+    .caseFile,
+    .theoryBoard,
+    .testimony,
+    .prosecutionChoice
+  ) {
+  border-color: var(--v2-edge);
+  color: var(--v2-text);
+  background: var(--v2-chrome);
+  box-shadow: var(--v2-shadow);
+}
+
+.investigation[data-theme="light"] .caseFileBackdrop,
+.court[data-theme="light"] .caseFileBackdrop {
+  background: var(--v2-backdrop);
+}
+
+.investigation[data-theme="light"] :is(.dialogueBox, .courtReaction) {
+  border-color: color-mix(in srgb, var(--dialogue-accent) 46%, var(--v2-edge));
+  color: var(--v2-text);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--dialogue-accent), transparent 91%), transparent 42%),
+    var(--v2-chrome);
+  box-shadow: var(--v2-shadow);
+}
+
+.investigation[data-theme="light"] .dialogueBox[data-speaker="persona"] {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--dialogue-accent, #6a4bc0), transparent 91%), transparent 42%),
+    var(--v2-chrome);
+}
+
+.investigation[data-theme="light"] .investigationCommands,
+.court[data-theme="light"] .courtActions {
+  border-color: var(--v2-edge);
+  color: var(--v2-text);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), transparent 0.42rem),
+    radial-gradient(circle at 12% 0, rgba(95, 221, 255, 0.08), transparent 28%),
+    radial-gradient(circle at 88% 0, rgba(255, 99, 181, 0.07), transparent 28%),
+    linear-gradient(145deg, #f8fbff, #dce9f2);
+  box-shadow: var(--v2-shadow), inset 0 1px rgba(255, 255, 255, 0.84);
+}
+
+.investigation[data-theme="light"] .investigationCommands button,
+.court[data-theme="light"] .courtActions button,
+.investigation[data-theme="light"] .choiceTray button,
+.court[data-theme="light"] :is(.choiceTray, .prosecutionChoice) button {
+  border-color: var(--v2-edge);
+  color: var(--v2-text);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), #dce7ef 74%);
+  box-shadow: 0 0.35rem 0.9rem rgba(49, 70, 91, 0.13);
+}
+
+.investigation[data-theme="light"] .investigationCommands button:is(:active, [data-active="true"]),
+.court[data-theme="light"] .courtActions button:is(:active, [data-active="true"]) {
+  border-color: color-mix(in srgb, var(--command-accent) 52%, var(--v2-edge));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--command-accent) 12%, white), transparent 46%),
+    linear-gradient(180deg, #f8fbff, #d6e3ed);
+}
+
+/* The room and Court are scene media. Keep their light-independent art while
+   pinning every caption and projection overlay to readable scene ink. */
+.investigation[data-theme="light"] :is(
+    .roomScene,
+    .roomSecuring,
+    .roomTitle,
+    .roomActorDrift > strong,
+    .roomProsecutorCue > strong
+  ),
+.court[data-theme="light"] :is(
+    .courtStage,
+    .wideCourtPresence small,
+    .galleryRail,
+    .counselIdentity,
+    .counselGlyph,
+    .courtPodiumIdentity,
+    .courtEvidenceProjection,
+    .courtEvidenceVisual
+  ) {
+  --v2-text: #f7f5ff;
+  --v2-muted: #aca8bd;
+  color: var(--v2-text);
+}
+
+.court[data-theme="light"] .courtEvidenceProjectors {
+  color: #f7f5ff;
+}
+
+.verdict[data-theme="light"] :is(.defendantVerdicts article, .ballots article) {
+  background: var(--v2-raised);
+}
+
+.verdict[data-theme="light"] .verdictActions button:hover:not(:disabled),
+.forge[data-theme="light"] :is(.archiveButton, .forgeActions button):hover:not(:disabled),
+.titleCard[data-theme="light"] .archiveButton:hover:not(:disabled),
+.investigation[data-theme="light"] :is(
+    .investigationHeader > button,
+    .investigationHeaderActions > button,
+    .investigationCommands button,
+    .choiceTray button
+  ):hover:not(:disabled),
+.court[data-theme="light"] :is(
+    .courtHeader > button,
+    .courtActions button,
+    .choiceTray button,
+    .prosecutionChoice button
+  ):hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--v2-accent) 48%, var(--v2-edge));
+  background-color: color-mix(in srgb, var(--v2-accent) 8%, white);
+}
+
+:is(
+    .forge,
+    .titleCard,
+    .caseOpening,
+    .investigation,
+    .court,
+    .verdict
+  )[data-theme="light"] :is(
+    button,
+    input,
+    select,
+    textarea,
+    [role="button"]
+  ):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--v2-accent) 72%, #147e88);
+  outline-offset: 2px;
+}
+
+:is(
+    .forge,
+    .titleCard,
+    .investigation,
+    .court,
+    .verdict
+  )[data-theme="light"] :is(button, input, select, textarea):disabled {
+  color: color-mix(in srgb, var(--v2-muted) 72%, transparent);
+  border-color: color-mix(in srgb, var(--v2-edge) 72%, transparent);
+  cursor: not-allowed;
+}
 
 @media (max-width: 760px) {
   .forge { padding: 4.5rem 0.65rem 1rem; }

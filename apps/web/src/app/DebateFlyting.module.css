@@ -36,6 +36,15 @@
     transparent
   );
   --hall-border: var(--debate-studio-line-strong, rgba(194, 181, 229, 0.22));
+  --hall-header-surface: color-mix(in srgb, #0d0b11 96%, transparent);
+  --hall-authoring-surface: rgba(7, 6, 9, 0.96);
+  --hall-authoring-raised: rgba(8, 7, 11, 0.72);
+  --hall-authoring-edge: rgba(235, 191, 96, 0.28);
+  --hall-authoring-edge-soft: rgba(235, 191, 96, 0.18);
+  --hall-authoring-ink: #f5eee4;
+  --hall-authoring-muted: rgba(244, 238, 230, 0.58);
+  --hall-authoring-label: #efbd5e;
+  --hall-authoring-shadow: 0 28px 80px rgba(0, 0, 0, 0.68);
   min-height: 100%;
   color: var(--hall-ink);
   background:
@@ -55,6 +64,15 @@
   --hall-panel: rgba(255, 249, 235, 0.93);
   --hall-panel-soft: rgba(242, 224, 190, 0.65);
   --hall-border: rgba(111, 76, 19, 0.24);
+  --hall-header-surface: rgba(255, 249, 235, 0.94);
+  --hall-authoring-surface: rgba(255, 251, 242, 0.97);
+  --hall-authoring-raised: rgba(255, 255, 255, 0.78);
+  --hall-authoring-edge: rgba(111, 76, 19, 0.3);
+  --hall-authoring-edge-soft: rgba(111, 76, 19, 0.18);
+  --hall-authoring-ink: #281b13;
+  --hall-authoring-muted: #705e4d;
+  --hall-authoring-label: #7b5515;
+  --hall-authoring-shadow: 0 28px 70px rgba(85, 59, 25, 0.24);
   background:
     radial-gradient(circle at 50% 8%, rgba(224, 155, 66, 0.2), transparent 32%),
     linear-gradient(145deg, #f4ead6 0%, #dfcaab 52%, #f8f0df 100%);
@@ -84,7 +102,7 @@
     );
   gap: 16px;
   padding-block: 13px;
-  background: color-mix(in srgb, #0d0b11 96%, transparent);
+  background: var(--hall-header-surface);
 }
 
 .setupHeader > div,
@@ -456,8 +474,8 @@
   border: 1px solid color-mix(in srgb, currentColor 13%, transparent);
   border-radius: 999px;
   padding: 6px 9px;
-  color: #aaa2b3;
-  background: color-mix(in srgb, #211c2a 74%, transparent);
+  color: var(--hall-muted);
+  background: color-mix(in srgb, var(--hall-panel-soft) 74%, transparent);
   font: inherit;
   font-size: 9px;
   cursor: pointer;
@@ -470,7 +488,11 @@
     transparent
   );
   color: var(--debate-studio-ink);
-  background: color-mix(in srgb, var(--debate-studio-accent) 18%, #211c2a);
+  background: color-mix(
+    in srgb,
+    var(--debate-studio-accent) 18%,
+    var(--hall-panel-soft)
+  );
   box-shadow: 0 0 18px
     color-mix(in srgb, var(--debate-studio-accent) 12%, transparent);
 }
@@ -3127,6 +3149,112 @@
   box-shadow: 0 0 0 4px rgba(255, 42, 96, 0.22);
 }
 
+.stageAlignmentPreview {
+  position: fixed;
+  z-index: 1190;
+  top: 126px;
+  right: 376px;
+  bottom: 18px;
+  left: 208px;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  overflow: hidden;
+  border: 1px solid var(--hall-authoring-edge);
+  border-radius: 16px;
+  padding: 14px;
+  background:
+    radial-gradient(
+      circle at 50% -10%,
+      color-mix(in srgb, var(--flyting-lane-host) 14%, transparent),
+      transparent 42%
+    ),
+    var(--hall-authoring-surface);
+  box-shadow: var(--hall-authoring-shadow);
+  backdrop-filter: blur(20px) saturate(1.08);
+}
+
+.stageAlignmentPreviewHeader {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--hall-authoring-edge-soft);
+  padding: 2px 4px 12px;
+}
+
+.stageAlignmentPreviewHeader > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.stageAlignmentPreviewHeader span {
+  color: var(--hall-authoring-label);
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.stageAlignmentPreviewHeader strong {
+  overflow: hidden;
+  color: var(--hall-authoring-ink);
+  font-size: 0.94rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stageAlignmentPreviewHeader small {
+  max-width: 330px;
+  color: var(--hall-authoring-muted);
+  font-size: 0.68rem;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.stageAlignmentPreviewCanvas {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  align-items: center;
+  overflow: auto;
+  padding: clamp(4px, 1.2vw, 18px);
+}
+
+.stageAlignmentPreviewStage {
+  width: min(100%, 1180px);
+  margin: auto;
+  box-shadow: 0 18px 58px rgba(0, 0, 0, 0.54);
+}
+
+.stageAlignmentPreviewGallery {
+  --debate-gallery-atmosphere: url("/debate/flyting/mead-hall-gallery-floor.webp");
+  --debate-gallery-fog-core: rgba(12, 8, 7, 0.16);
+  --debate-gallery-fog-mid: rgba(8, 6, 6, 0.08);
+  --debate-gallery-fog-floor: rgba(3, 2, 2, 0.14);
+  --debate-gallery-fog-opacity: 0.09;
+  width: min(100%, 1180px);
+  height: min(52vh, 420px);
+  min-height: 260px;
+  margin: auto;
+  background-color: #080504;
+  background-position:
+    center,
+    center,
+    center 58%;
+  background-size: cover, cover, cover;
+  box-shadow: 0 18px 58px rgba(0, 0, 0, 0.54);
+}
+
+.stageAlignmentPreview [data-flyting-alignment-handle="true"] {
+  cursor: pointer;
+}
+
 .stageAlignmentPanel {
   position: fixed;
   z-index: 1200;
@@ -3138,16 +3266,18 @@
   box-sizing: border-box;
   gap: 12px;
   overflow: auto;
-  border: 1px solid rgba(235, 191, 96, 0.34);
+  border: 1px solid var(--hall-authoring-edge);
   border-radius: 15px;
   padding: 15px;
-  color: #f4eee6;
+  color: var(--hall-authoring-ink);
   background:
-    linear-gradient(145deg, rgba(38, 16, 20, 0.98), rgba(12, 10, 15, 0.98)),
-    #100c10;
-  box-shadow:
-    0 26px 70px rgba(0, 0, 0, 0.62),
-    inset 0 1px rgba(255, 255, 255, 0.05);
+    radial-gradient(
+      circle at 8% 0%,
+      color-mix(in srgb, var(--flyting-lane-host) 12%, transparent),
+      transparent 38%
+    ),
+    var(--hall-authoring-surface);
+  box-shadow: var(--hall-authoring-shadow);
   backdrop-filter: blur(18px);
   font-family: var(--font-ui-sans, ui-sans-serif, system-ui, sans-serif);
 }
@@ -3160,7 +3290,7 @@
 }
 
 .stageAlignmentPanel > header span {
-  color: #efbd5e;
+  color: var(--hall-authoring-label);
   font-size: 0.58rem;
   font-weight: 800;
   letter-spacing: 0.16em;
@@ -3176,10 +3306,10 @@
 .stageAlignmentPanel button,
 .stageAlignmentPanel select,
 .stageAlignmentPanel input {
-  border: 1px solid rgba(235, 225, 241, 0.16);
+  border: 1px solid var(--hall-authoring-edge-soft);
   border-radius: 8px;
-  color: #f4eee6;
-  background: rgba(8, 7, 11, 0.72);
+  color: var(--hall-authoring-ink);
+  background: var(--hall-authoring-raised);
   font: inherit;
 }
 
@@ -3216,7 +3346,7 @@
 
 .stageAlignmentSelect > span,
 .stageAlignmentFields label > span {
-  color: rgba(244, 238, 230, 0.66);
+  color: var(--hall-authoring-muted);
   font-size: 0.61rem;
   font-weight: 750;
   letter-spacing: 0.1em;
@@ -3231,7 +3361,7 @@
 
 .stageAlignmentHint {
   margin: -2px 0 0;
-  color: rgba(244, 238, 230, 0.58);
+  color: var(--hall-authoring-muted);
   font-size: 0.69rem;
   line-height: 1.4;
 }
@@ -3260,7 +3390,7 @@
   position: absolute;
   right: 10px;
   bottom: 10px;
-  color: rgba(244, 238, 230, 0.42);
+  color: color-mix(in srgb, var(--hall-authoring-muted) 72%, transparent);
   font-size: 0.65rem;
   font-style: normal;
   pointer-events: none;
@@ -3280,7 +3410,7 @@
 }
 
 .stageAlignmentPanel > small {
-  color: rgba(244, 238, 230, 0.48);
+  color: var(--hall-authoring-muted);
   font-size: 0.62rem;
   line-height: 1.45;
 }
@@ -3311,6 +3441,12 @@
     top: 92px;
     max-height: calc(100vh - 110px);
   }
+
+  .stageAlignmentPreview {
+    top: 92px;
+    right: 376px;
+    left: 18px;
+  }
 }
 
 @media (max-width: 720px) {
@@ -3326,6 +3462,27 @@
   .flytingCaption {
     right: 12%;
     left: 12%;
+  }
+
+  .stageAlignmentPanel {
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    width: auto;
+    max-height: 44vh;
+  }
+
+  .stageAlignmentPreview {
+    top: 82px;
+    right: 12px;
+    bottom: calc(44vh + 24px);
+    left: 12px;
+    padding: 9px;
+  }
+
+  .stageAlignmentPreviewHeader small {
+    display: none;
   }
 }
 

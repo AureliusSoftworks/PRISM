@@ -4,6 +4,10 @@
   --slate-i: #b7e63a;
   --slate-s: #2fd3e3;
   --slate-m: #7b5cff;
+  --slate-paper-surface: #ffffff;
+  --slate-paper-ink: #191714;
+  --slate-paper-muted: #655f58;
+  --slate-focus-ring: color-mix(in srgb, var(--slate-s) 66%, var(--fg));
   min-height: 100dvh;
   height: 100dvh;
   display: grid;
@@ -17,6 +21,7 @@
     radial-gradient(circle at 72% 18%, color-mix(in srgb, var(--slate-i) 7%, transparent), transparent 36%),
     radial-gradient(circle at 48% 110%, color-mix(in srgb, var(--slate-s) 6%, transparent), transparent 40%),
     var(--bg, #0b0a09);
+  color-scheme: dark;
   font-family: var(--font-ui-sans), system-ui, sans-serif;
 }
 
@@ -81,12 +86,16 @@
 }
 
 .shell[data-theme="light"] {
+  --slate-paper-surface: var(--bg-elevated, #ffffff);
+  --slate-paper-ink: var(--fg, #172638);
+  --slate-paper-muted: var(--fg-muted, #5c7186);
   background:
     radial-gradient(circle at 9% -8%, color-mix(in srgb, var(--slate-p) 8%, transparent), transparent 32%),
     radial-gradient(circle at 88% 1%, color-mix(in srgb, var(--slate-m) 8%, transparent), transparent 34%),
     radial-gradient(circle at 72% 16%, color-mix(in srgb, var(--slate-i) 6%, transparent), transparent 36%),
     radial-gradient(circle at 48% 110%, color-mix(in srgb, var(--slate-s) 7%, transparent), transparent 42%),
     linear-gradient(180deg, var(--bg-surface, #ffffff), var(--bg, #edf5fc));
+  color-scheme: light;
 }
 
 /* Slate's cockpit controls inherit its UI type, but the shared navbar keeps
@@ -100,6 +109,25 @@
 
 .shell > :not(.mainNavigation) button {
   color: inherit;
+}
+
+.shell
+  > :not(.mainNavigation)
+  :where(button, a[href], input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--slate-focus-ring);
+  outline-offset: 2px;
+}
+
+.shell
+  > :not(.mainNavigation)
+  :where(button, input, textarea, select):disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.shell > :not(.mainNavigation) :where(input, textarea, select) {
+  accent-color: var(--slate-s);
+  caret-color: var(--fg, #edf3f8);
 }
 
 .quietButton,

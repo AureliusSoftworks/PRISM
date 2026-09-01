@@ -48,3 +48,33 @@ test("Signal durably accepts a live Host redirect before model readiness", () =>
     "model preparation begins only after durable cue acceptance",
   );
 });
+
+test("Signal restarts an idle guest-next floor after accepting a Host cue", () => {
+  const sendCue = signalSource.slice(
+    signalSource.indexOf("const sendCue = async"),
+    signalSource.indexOf(
+      "const interruptGuestWithQueuedCue",
+      signalSource.indexOf("const sendCue = async") + 1,
+    ),
+  );
+  const acceptedCueAt = sendCue.lastIndexOf("await queueProducerCue(cue)");
+  const idleAdvanceAt = sendCue.indexOf(
+    "if (!busy && speakingMessageId === null)",
+    acceptedCueAt,
+  );
+  const hostOnlyAdvanceAt = sendCue.indexOf(
+    'if (!busy && speakingMessageId === null && nextRole === "host")',
+    acceptedCueAt,
+  );
+
+  assert.ok(acceptedCueAt >= 0, "the ordinary cue is accepted durably");
+  assert.ok(
+    idleAdvanceAt > acceptedCueAt,
+    "cue acceptance explicitly advances any idle next-speaker floor",
+  );
+  assert.equal(
+    hostOnlyAdvanceAt,
+    -1,
+    "guest-next must not depend only on a later React auto-run effect",
+  );
+});

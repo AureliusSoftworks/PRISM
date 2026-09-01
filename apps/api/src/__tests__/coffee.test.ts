@@ -77,6 +77,7 @@ import {
   coffeeSpeakerMaxTokensForTurn,
   coffeeTopicRequiresDirectPersonalAnswer,
   coffeePlayerPlainlyAddressesBot,
+  coffeePlayerFollowupAddressesPriorSpeakerV1,
   coffeeSocialSilenceChanceV1,
   coffeeUserMessageIsActionOnly,
   collectCoffeePollVotes,
@@ -15709,6 +15710,33 @@ describe("pickDirectedSpeaker", () => {
 });
 
 describe("Coffee direct mention routing helpers", () => {
+  it("keeps explicit second-person follow-ups with the prior speaker", () => {
+    assert.equal(
+      coffeePlayerFollowupAddressesPriorSpeakerV1(
+        "Well, you are the smartest guy in the universe. You tell me. Is it true?",
+      ),
+      true,
+    );
+    assert.equal(
+      coffeePlayerFollowupAddressesPriorSpeakerV1(
+        "What do you think about the evidence?",
+      ),
+      true,
+    );
+    assert.equal(
+      coffeePlayerFollowupAddressesPriorSpeakerV1(
+        "You find yourself stranded on top of a runaway hot air balloon.",
+      ),
+      false,
+    );
+    assert.equal(
+      coffeePlayerFollowupAddressesPriorSpeakerV1(
+        "Do any of you think this is a simulation?",
+      ),
+      false,
+    );
+  });
+
   it("resolves the exact plain-text direct calls without hijacking third-person references", () => {
     const roster = [
       { ...CARA, id: "squidward", name: "Squidward" },
@@ -15797,6 +15825,61 @@ describe("Coffee direct mention routing helpers", () => {
       addressedBotId: PLANKTON.id,
       playerAddressKind: "plain_text",
     }, stored.tool_payload ?? "missing tool payload");
+  });
+
+  it("hard-routes an explicit follow-up to the immediately prior speaker", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-followup-address";
+    for (const bot of [ALICE, BORIS]) seedCoffeeBot(db, userId, bot);
+    const session = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      initialTopic: "Are we in a simulation?",
+    });
+
+    await withMockedCoffeeFetch(
+      "The model is plausible, but the evidence is nowhere near decisive.",
+      () =>
+        processCoffeeTurn(
+          db,
+          userId,
+          {
+            conversationId: session.conversation.id,
+            message: `[Alice](prism-bot://${ALICE.id}), what do you think?`,
+          },
+          { preferredProvider: "local", sessionRemainingMs: 240_000 },
+        ),
+    );
+    const turn = await withMockedCoffeeFetch(
+      "I still would not call it established fact.",
+      () =>
+        processCoffeeTurn(
+          db,
+          userId,
+          {
+            conversationId: session.conversation.id,
+            message: "You tell me: is it true, or is it just a theory?",
+          },
+          { preferredProvider: "local", sessionRemainingMs: 240_000 },
+        ),
+    );
+    const stored = db
+      .prepare(
+        "SELECT tool_payload FROM messages WHERE conversation_id = ? AND role = 'assistant' ORDER BY rowid DESC LIMIT 1",
+      )
+      .get(session.conversation.id) as { tool_payload: string | null };
+    const route = parseStoredAssistantToolPayload(
+      stored.tool_payload,
+    ).coffeeTurnRoute;
+
+    assert.equal(turn.speakerBotId, ALICE.id);
+    assert.deepEqual(route, {
+      v: 1,
+      name: "coffeeTurnRoute",
+      source: "player_direct_address",
+      selectedSpeakerBotId: ALICE.id,
+      addressedBotId: ALICE.id,
+      playerAddressKind: "followup",
+    });
   });
 
   it("separates direct bot address from broad name tagging and excludes the player", () => {

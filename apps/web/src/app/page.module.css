@@ -4681,6 +4681,40 @@
   --wildcard-slot-badge-selected-border: #ffffff;
 }
 
+/* Route/global recovery can render before the app shell owns a theme class.
+   The synchronous body marker supplies the same semantic palette before first
+   paint; this higher-specificity bridge prevents a saved Light recovery view
+   from briefly using the authored Dark fallback. */
+.documentThemeSurface {
+  color-scheme: var(--prism-document-color-scheme);
+}
+
+:global(body[data-prism-theme="light"]) .documentThemeSurface {
+  --bg: var(--prism-document-bg);
+  --bg-deep: var(--prism-document-bg-deep);
+  --bg-surface: var(--prism-document-bg-surface);
+  --bg-elevated: var(--prism-document-bg-elevated);
+  --bg-hover: var(--prism-document-bg-hover);
+  --bg-active: var(--prism-document-bg-active);
+  --fg: var(--prism-document-fg);
+  --fg-muted: var(--prism-document-fg-muted);
+  --fg-subtle: var(--prism-document-fg-subtle);
+  --line: var(--prism-document-line);
+  --line-strong: var(--prism-document-line-strong);
+  --accent: var(--prism-document-accent);
+  --accent-hover: color-mix(in srgb, var(--accent) 85%, #000000 15%);
+  --accent-soft: color-mix(in srgb, var(--accent) 9%, var(--bg) 91%);
+  --accent-glow: color-mix(in srgb, var(--accent) 11%, transparent);
+  --accent-text: var(--prism-document-accent-text);
+  --accent-ink: var(--accent);
+  --danger: var(--prism-document-danger);
+  --danger-soft: var(--prism-document-danger-soft);
+  --shadow-sm: var(--prism-document-shadow-sm);
+  --shadow-md: var(--prism-document-shadow-md);
+  --shadow-lg: var(--prism-document-shadow-lg);
+  --app-gradient: var(--prism-document-app-gradient);
+}
+
 /* ── Shared primitives ── */
 .muted {
   color: var(--fg-muted);
@@ -38109,23 +38143,27 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
      blur + opacity would fight the opaque fill requirement. */
 }
 
-.themeLight .composeBotListbox {
+.themeLight .composeBotListbox,
+:global(body[data-prism-theme="light"]) .composeBotListbox {
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, var(--fg) 4%, transparent),
     var(--shadow-sm);
 }
 
-.themeLight .composeBotFilters {
+.themeLight .composeBotFilters,
+:global(body[data-prism-theme="light"]) .composeBotFilters {
   border-bottom-color: var(--line-strong);
   background: color-mix(in srgb, var(--bg) 88%, var(--fg) 12%);
 }
 
-.themeLight .composeBotSearch {
+.themeLight .composeBotSearch,
+:global(body[data-prism-theme="light"]) .composeBotSearch {
   border-color: var(--line-strong);
   background: var(--bg-deep);
 }
 
-.themeLight .composeBotSearch:focus {
+.themeLight .composeBotSearch:focus,
+:global(body[data-prism-theme="light"]) .composeBotSearch:focus {
   background: var(--bg-surface);
 }
 
@@ -38194,7 +38232,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .themeLight .composeBotOption:hover,
-.themeLight .composeBotOption:focus-visible {
+.themeLight .composeBotOption:focus-visible,
+:global(body[data-prism-theme="light"]) .composeBotOption:hover,
+:global(body[data-prism-theme="light"]) .composeBotOption:focus-visible {
   background: color-mix(
     in srgb,
     var(--bot-color, var(--bg-hover)) 14%,
@@ -38202,7 +38242,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   );
 }
 
-.themeLight .composeBotOption[aria-selected="true"] {
+.themeLight .composeBotOption[aria-selected="true"],
+:global(body[data-prism-theme="light"])
+  .composeBotOption[aria-selected="true"] {
   background: color-mix(
     in srgb,
     var(--bot-color, var(--bg-active)) 18%,
@@ -38211,7 +38253,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .themeLight .composeBotOption[aria-selected="true"]:hover,
-.themeLight .composeBotOption[aria-selected="true"]:focus-visible {
+.themeLight .composeBotOption[aria-selected="true"]:focus-visible,
+:global(body[data-prism-theme="light"])
+  .composeBotOption[aria-selected="true"]:hover,
+:global(body[data-prism-theme="light"])
+  .composeBotOption[aria-selected="true"]:focus-visible {
   background: color-mix(
     in srgb,
     var(--bot-color, var(--bg-active)) 22%,
@@ -38923,15 +38969,23 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .themeLight .composeBotOptionGlyph,
-.themeLight .composeBotOptionName {
+.themeLight .composeBotOptionName,
+:global(body[data-prism-theme="light"]) .composeBotOptionGlyph,
+:global(body[data-prism-theme="light"]) .composeBotOptionName {
   color: var(--bot-menu-color, var(--fg));
 }
 
-.themeLight .composeBotOptionDefault .composeBotOptionName {
+.themeLight .composeBotOptionDefault .composeBotOptionName,
+:global(body[data-prism-theme="light"])
+  .composeBotOptionDefault
+  .composeBotOptionName {
   color: var(--fg-muted);
 }
 
 .themeLight
+  .composeBotOptionDefault[aria-selected="true"]
+  .composeBotOptionName,
+:global(body[data-prism-theme="light"])
   .composeBotOptionDefault[aria-selected="true"]
   .composeBotOptionName {
   color: var(--fg);

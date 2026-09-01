@@ -1110,6 +1110,19 @@ describe("hydrateAssistantMessageParts", () => {
       route,
     );
     assert.equal(
+      hydrateAssistantMessageParts({
+        content: "I am still answering your follow-up.",
+        toolPayload: JSON.stringify({
+          v: 1,
+          coffeeTurnRoute: {
+            ...route,
+            playerAddressKind: "followup",
+          },
+        }),
+      }).coffeeTurnRoute?.playerAddressKind,
+      "followup",
+    );
+    assert.equal(
       parseStoredAssistantToolPayload(
         JSON.stringify({
           v: 1,

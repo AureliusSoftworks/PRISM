@@ -28,6 +28,16 @@ const transparentPng = await sharp({
 })
   .png()
   .toBuffer();
+const transparentWebp = await sharp({
+  create: {
+    width: 4,
+    height: 4,
+    channels: 4,
+    background: { r: 220, g: 80, b: 140, alpha: 0 },
+  },
+})
+  .webp({ lossless: true })
+  .toBuffer();
 const opaquePng = await sharp({
   create: {
     width: 4,
@@ -56,7 +66,9 @@ const config = {
   sessionCookieName: "prism_signal_item_association_session",
   lanAccessEnabled: false,
   discoveryEnabled: false,
-  openAiApiKey: "",
+  // The live-image route resolves a fixed vision-capable model before it
+  // records context. This is a local catalog fixture, not a real provider key.
+  openAiApiKey: "signal-image-route-test-key",
 };
 const { createPrismRequestHandler } = await import("../server.ts");
 const server = createServer(
@@ -100,7 +112,10 @@ function jsonInit(body: Record<string, unknown>): RequestInit {
   };
 }
 
-function dataUrl(bytes: Buffer, mimeType: "image/png" | "image/jpeg"): string {
+function dataUrl(
+  bytes: Buffer,
+  mimeType: "image/png" | "image/jpeg" | "image/webp",
+): string {
   return `data:${mimeType};base64,${bytes.toString("base64")}`;
 }
 
@@ -194,6 +209,128 @@ after(() => {
 });
 
 describe("Signal kept item persona associations", () => {
+  it("immediately records an active upload as a picture or item from decoded pixels", async () => {
+    const client = createClient();
+    const userId = await register(client, "signal-live-image-owner@example.com");
+    db.prepare("UPDATE users SET preferred_provider = 'openai' WHERE id = ?").run(
+      userId,
+    );
+    const opaqueEpisode = createBotGuestEpisode(userId, "live-opaque");
+    const transparentEpisode = createBotGuestEpisode(userId, "live-transparent");
+    db.prepare(
+      `UPDATE botcast_episodes
+          SET provider = 'openai', model = 'gpt-4o', response_mode = 'online'
+        WHERE user_id = ?`,
+    ).run(userId);
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input, init) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
+      if (url.startsWith(baseUrl)) return originalFetch(input, init);
+      return new Response(JSON.stringify({ data: [{ id: "gpt-4o" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    try {
+      const attach = async (
+        episodeId: string,
+        imageId: string,
+        fileName: string,
+        bytes: Buffer,
+        mimeType: "image/png" | "image/webp",
+      ) => {
+        const response = await client.request(
+          `/api/botcast/episodes/${encodeURIComponent(episodeId)}/image`,
+          jsonInit({
+            episodeImage: {
+              imageId,
+              fileName,
+              dataUrl: dataUrl(bytes, mimeType),
+              replayEmoji: "🪻",
+            },
+          }),
+        );
+        const payload = (await response.json()) as {
+          imageContext: { imageId: string; kind: string; mimeType: string };
+        };
+        assert.equal(response.status, 201, JSON.stringify(payload));
+        return {
+          imageId: payload.imageContext.imageId,
+          kind: payload.imageContext.kind,
+          mimeType: payload.imageContext.mimeType,
+        };
+      };
+
+      const opaque = await attach(
+        opaqueEpisode.episodeId,
+        "opaque-live-image",
+        "opaque-flower.png",
+        opaquePng,
+        "image/png",
+      );
+      assert.deepEqual(opaque, {
+        imageId: "opaque-live-image",
+        kind: "picture",
+        mimeType: "image/png",
+      });
+
+      const transparent = await attach(
+        transparentEpisode.episodeId,
+        "transparent-live-image",
+        "transparent-flower.webp",
+        transparentWebp,
+        "image/webp",
+      );
+      assert.deepEqual(transparent, {
+        imageId: "transparent-live-image",
+        kind: "item",
+        mimeType: "image/webp",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    const proxies = db
+      .prepare(
+        `SELECT episode_id, image_id, content_type, width, height
+           FROM botcast_episode_image_proxies
+          WHERE user_id = ?
+          ORDER BY episode_id`,
+      )
+      .all(userId) as Array<{
+      episode_id: string;
+      image_id: string;
+      content_type: string;
+      width: number;
+      height: number;
+    }>;
+    assert.deepEqual(
+      proxies.map((proxy) => ({
+        imageId: proxy.image_id,
+        contentType: proxy.content_type,
+        archivalSoft: proxy.width <= 128 && proxy.height <= 128,
+      })).sort((left, right) => left.imageId.localeCompare(right.imageId)),
+      [
+        {
+          imageId: "opaque-live-image",
+          contentType: "image/webp",
+          archivalSoft: true,
+        },
+        {
+          imageId: "transparent-live-image",
+          contentType: "image/webp",
+          archivalSoft: true,
+        },
+      ],
+    );
+  });
+
   it("associates an explicitly kept transparent item with only its authenticated bot guest", async () => {
     const client = createClient();
     const userId = await register(client, "signal-item-owner@example.com");

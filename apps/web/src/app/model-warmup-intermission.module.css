@@ -1,17 +1,65 @@
 .overlay {
+  --warmup-overlay-bg: rgba(5, 6, 11, 0.34);
+  --warmup-overlay-enter-bg: rgba(5, 6, 11, 0.38);
+  --warmup-overlay-filter: grayscale(1) brightness(0.72) blur(1.5px);
+  --warmup-card-bg: rgba(10, 11, 18, 0.78);
+  --warmup-card-border: rgba(255, 255, 255, 0.15);
+  --warmup-card-shadow:
+    0 30px 90px rgba(0, 0, 0, 0.48),
+    inset 0 1px rgba(255, 255, 255, 0.08);
+  --warmup-heading: #f7f7fb;
+  --warmup-copy: rgba(255, 255, 255, 0.7);
+  --warmup-eyebrow: rgba(255, 255, 255, 0.58);
+  --warmup-model: rgba(255, 255, 255, 0.9);
+  --warmup-elapsed: rgba(255, 255, 255, 0.44);
+  --warmup-action-bg: #f7f7fb;
+  --warmup-action-fg: #15131d;
+  --warmup-action-border: rgba(255, 255, 255, 0.2);
+  --warmup-quiet-bg: rgba(255, 255, 255, 0.06);
+  --warmup-quiet-fg: rgba(255, 255, 255, 0.78);
+  --warmup-focus: rgba(176, 225, 255, 0.96);
   position: fixed;
   inset: 0;
-  z-index: 4900;
+  z-index: var(--prism-z-blocking, 4900);
   display: grid;
   place-items: center;
-  padding: clamp(22px, 5vw, 64px);
-  color: #f7f7fb;
+  min-height: 100dvh;
+  padding:
+    max(clamp(22px, 5vw, 64px), env(safe-area-inset-top))
+    max(clamp(22px, 5vw, 64px), env(safe-area-inset-right))
+    max(clamp(22px, 5vw, 64px), env(safe-area-inset-bottom))
+    max(clamp(22px, 5vw, 64px), env(safe-area-inset-left));
+  color: var(--warmup-heading);
+  color-scheme: dark;
   /* Desaturate the whole app behind the modal while the local model warms. */
-  background: rgba(5, 6, 11, 0.34);
-  backdrop-filter: grayscale(1) brightness(0.72) blur(1.5px);
-  -webkit-backdrop-filter: grayscale(1) brightness(0.72) blur(1.5px);
+  background: var(--warmup-overlay-bg);
+  backdrop-filter: var(--warmup-overlay-filter);
+  -webkit-backdrop-filter: var(--warmup-overlay-filter);
   opacity: 1;
   transition: opacity 260ms ease, background 600ms ease;
+}
+
+.overlay[data-theme="light"] {
+  --warmup-overlay-bg: rgba(219, 231, 241, 0.5);
+  --warmup-overlay-enter-bg: rgba(219, 231, 241, 0.58);
+  --warmup-overlay-filter: grayscale(1) brightness(1.06) blur(1.5px);
+  --warmup-card-bg: rgba(249, 252, 255, 0.92);
+  --warmup-card-border: rgba(87, 116, 142, 0.24);
+  --warmup-card-shadow:
+    0 30px 90px rgba(31, 74, 112, 0.18),
+    inset 0 1px rgba(255, 255, 255, 0.96);
+  --warmup-heading: #172638;
+  --warmup-copy: #50677e;
+  --warmup-eyebrow: #657b90;
+  --warmup-model: #263d53;
+  --warmup-elapsed: #71869a;
+  --warmup-action-bg: #172638;
+  --warmup-action-fg: #ffffff;
+  --warmup-action-border: rgba(23, 38, 56, 0.28);
+  --warmup-quiet-bg: rgba(226, 237, 246, 0.86);
+  --warmup-quiet-fg: #304a62;
+  --warmup-focus: #12618b;
+  color-scheme: light;
 }
 
 .overlay[data-phase="entering"] { animation: modelWarmupOverlayIn 600ms ease both; }
@@ -19,20 +67,24 @@
 
 .card {
   width: min(680px, 100%);
+  max-height: calc(
+    100dvh - 44px - env(safe-area-inset-top) - env(safe-area-inset-bottom)
+  );
   display: grid;
   justify-items: center;
   gap: 13px;
   padding: clamp(28px, 5vw, 54px);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  overflow: auto;
+  border: 1px solid var(--warmup-card-border);
   border-radius: 28px;
   text-align: center;
-  background: rgba(10, 11, 18, 0.78);
-  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.48), inset 0 1px rgba(255, 255, 255, 0.08);
+  background: var(--warmup-card-bg);
+  box-shadow: var(--warmup-card-shadow);
   backdrop-filter: blur(24px);
 }
 
 .eyebrow {
-  color: rgba(255, 255, 255, 0.58);
+  color: var(--warmup-eyebrow);
   font: 760 0.68rem/1 system-ui;
   letter-spacing: 0.28em;
 }
@@ -43,20 +95,65 @@
 }
 
 .card h2 { margin: 4px 0 0; font: 820 clamp(1.65rem, 4vw, 3.4rem)/1.02 system-ui; letter-spacing: -0.045em; text-wrap: balance; }
-.card p { max-width: 570px; margin: 0; color: rgba(255, 255, 255, 0.7); font: 560 clamp(0.88rem, 1.5vw, 1.05rem)/1.5 system-ui; text-wrap: balance; }
-.model { margin-top: 4px; color: rgba(255, 255, 255, 0.9); font: 700 0.78rem/1.2 ui-monospace, monospace; }
-.elapsed { color: rgba(255, 255, 255, 0.44); font: 650 0.67rem/1 system-ui; font-variant-numeric: tabular-nums; }
+.card p { max-width: 570px; margin: 0; color: var(--warmup-copy); font: 560 clamp(0.88rem, 1.5vw, 1.05rem)/1.5 system-ui; text-wrap: balance; }
+.model { margin-top: 4px; color: var(--warmup-model); font: 700 0.78rem/1.2 ui-monospace, monospace; }
+.elapsed { color: var(--warmup-elapsed); font: 650 0.67rem/1 system-ui; font-variant-numeric: tabular-nums; }
 .actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 9px; margin-top: 10px; }
-.actions button { border: 1px solid rgba(255,255,255,.2); border-radius: 999px; padding: 9px 14px; color: #15131d; background: #f7f7fb; font: 760 .72rem/1 system-ui; cursor: pointer; }
-.actions button[data-kind="quiet"] { color: rgba(255,255,255,.78); background: rgba(255,255,255,.06); }
-.actions button:hover { transform: translateY(-1px); }
+.actions button { border: 1px solid var(--warmup-action-border); border-radius: 999px; padding: 9px 14px; color: var(--warmup-action-fg); background: var(--warmup-action-bg); font: 760 .72rem/1 system-ui; cursor: pointer; transition: transform 160ms ease, box-shadow 160ms ease; }
+.actions button[data-kind="quiet"] { color: var(--warmup-quiet-fg); background: var(--warmup-quiet-bg); }
+.actions button:hover:not(:disabled) { transform: translateY(-1px); }
+.actions button:active:not(:disabled) { transform: translateY(0) scale(0.98); }
+.actions button:focus-visible { outline: 2px solid var(--warmup-focus); outline-offset: 3px; box-shadow: 0 0 0 4px color-mix(in srgb, var(--warmup-focus) 18%, transparent); }
+.actions button:disabled { cursor: not-allowed; opacity: 0.52; }
 
 @keyframes modelWarmupOverlayIn {
   from { opacity: 0; background: rgba(5, 6, 11, 0); }
-  to { opacity: 1; background: rgba(5, 6, 11, 0.38); }
+  to { opacity: 1; background: var(--warmup-overlay-enter-bg); }
+}
+
+@media (max-height: 560px) {
+  .card {
+    gap: 9px;
+    padding-block: 20px;
+  }
+
+  .prismOrb {
+    --prism-orb-size: 48px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .overlay, .overlay[data-phase="entering"] { animation: none; transition-duration: 120ms; }
+  .actions button { transition: none; }
   .actions button:hover { transform: none; }
+}
+
+@media (forced-colors: active) {
+  .overlay,
+  .overlay[data-theme="light"] {
+    color: CanvasText;
+    background: Canvas;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .eyebrow,
+  .model,
+  .elapsed,
+  .card p {
+    color: CanvasText;
+  }
+
+  .card,
+  .actions button,
+  .actions button[data-kind="quiet"] {
+    color: CanvasText;
+    border: 1px solid CanvasText;
+    background: Canvas;
+    box-shadow: none;
+  }
+
+  .actions button:focus-visible {
+    outline: 3px solid Highlight;
+  }
 }

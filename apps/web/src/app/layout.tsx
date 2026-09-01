@@ -17,6 +17,7 @@ import { DisableNativeTooltips } from "./DisableNativeTooltips";
 import { PrismIntroSequenceProvider } from "./PrismIntroSequence";
 import { PRISM_BRAND_COPY } from "./prismBrand";
 import { PrismMenuProvider } from "./PrismMenu";
+import { PRISM_DOCUMENT_THEME_BOOTSTRAP_SCRIPT } from "./prismDocumentTheme";
 import { PrismRefractionGateProvider } from "./prismRefractionGate";
 import { RenderPlatformAttribute } from "./RenderPlatformAttribute";
 import { ReplayRenderCoordinator } from "./ReplayRenderCoordinator";
@@ -117,7 +118,13 @@ export default function RootLayout({
       autoCorrect="off"
       suppressHydrationWarning
     >
-      <body>
+      <body suppressHydrationWarning>
+        <script
+          id="prism-document-theme-bootstrap"
+          dangerouslySetInnerHTML={{
+            __html: PRISM_DOCUMENT_THEME_BOOTSTRAP_SCRIPT,
+          }}
+        />
         <PrismMenuProvider>
           <PrismIntroSequenceProvider>
             <PrismRefractionGateProvider>

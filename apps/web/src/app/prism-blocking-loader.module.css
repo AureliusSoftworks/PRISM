@@ -209,8 +209,8 @@
 
 .backdrop[data-theme="light"],
 .docked[data-theme="light"],
-:global(html[data-theme="light"]) .backdrop,
-:global(html[data-theme="light"]) .docked {
+:global(body[data-prism-theme="light"]) .backdrop,
+:global(body[data-prism-theme="light"]) .docked {
   --loader-bg: rgba(246, 246, 252, .82);
   --loader-card: rgba(255, 255, 255, .88);
   --loader-ink: #181725;
@@ -219,13 +219,13 @@
   --loader-shadow: rgba(63, 58, 108, .18);
 }
 
-/* Portaled loaders may omit `theme`, so the document theme is also an
-   authoritative light-mode source. These selectors intentionally outrank the
-   component's default data-theme="dark" without changing a dark document. */
+/* Portaled loaders may omit `theme`, so the canonical body theme marker is
+   also authoritative. These selectors intentionally outrank the component's
+   default data-theme="dark" without changing a dark document. */
 .backdrop[data-theme="light"] .card,
 .docked[data-theme="light"] .card,
-:global(html[data-theme="light"]) .backdrop .card,
-:global(html[data-theme="light"]) .docked .card {
+:global(body[data-prism-theme="light"]) .backdrop .card,
+:global(body[data-prism-theme="light"]) .docked .card {
   border-color: color-mix(in srgb, var(--prism-s) 31%, #8094aa52);
   background:
     radial-gradient(circle at 12% -8%, color-mix(in srgb, var(--prism-s) 16%, transparent), transparent 42%),

@@ -7581,7 +7581,7 @@ async function normalizeSignalEpisodeImageForTurn(
     typeof record.fileName === "string" ? record.fileName.trim().slice(0, 240) : "";
   const dataUrl = typeof record.dataUrl === "string" ? record.dataUrl : "";
   const mimeType =
-    dataUrl.match(/^data:(image\/(?:png|jpeg));base64,/iu)?.[1]?.toLowerCase() ?? "";
+    dataUrl.match(/^data:(image\/(?:png|jpeg|webp));base64,/iu)?.[1]?.toLowerCase() ?? "";
   const fileDescriptor = botcastEpisodeImageDescriptorFromFileName(
     fileName,
     mimeType,
@@ -7589,7 +7589,7 @@ async function normalizeSignalEpisodeImageForTurn(
   if (!imageId || !fileDescriptor) {
     throw new HttpError(
       400,
-      "Signal accepts only .png or .jpg files whose file type matches the extension.",
+      "Signal accepts PNG, JPEG, or WebP images whose file type matches the extension.",
     );
   }
   const requestedName =
@@ -25831,6 +25831,118 @@ function buildRoutes(): RouteDefinition[] {
                 normalizeBotcastEpisodeImageReason(row.presentation_reason) ?? "",
             }
           : null,
+      });
+    }),
+    route("POST", "/api/botcast/episodes/:id/image", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const episode = getBotcastEpisode(db, userId, ctx.params.id);
+      if (episode.status !== "live") {
+        throw new HttpError(409, "Signal images can only join a live episode.");
+      }
+      if (episode.playbackMode === "watch" || episode.guestKind !== "bot") {
+        throw new HttpError(
+          409,
+          "Signal image context is available only while producing a live bot interview.",
+        );
+      }
+      if (botcastLatestImageContextV1(episode.events)) {
+        throw new HttpError(409, "Signal accepts one image per episode.");
+      }
+
+      const signalEpisodeImage = await normalizeSignalEpisodeImageForTurn(
+        body.episodeImage,
+        userId,
+      );
+      const runtime = await contextualSignalRuntimeForEpisode({
+        userId,
+        user,
+        episode,
+        requiresImageInput: true,
+      });
+      const supportsImageInput = await providerModelSupportsImageInput(
+        runtime.provider,
+        runtime.model,
+        { secondaryOllamaHost: user.secondary_ollama_host },
+      );
+      if (!supportsImageInput) {
+        throw new HttpError(
+          409,
+          "The active Signal model does not support image input. Choose a vision-capable model for a new episode.",
+        );
+      }
+
+      let replayProxy: Awaited<
+        ReturnType<typeof encodeSignalReplayImageProxyFromRasterBytes>
+      >;
+      try {
+        replayProxy = await encodeSignalReplayImageProxyFromRasterBytes(
+          signalEpisodeImage.rasterBytes,
+        );
+      } catch {
+        throw new HttpError(
+          400,
+          "Signal could not prepare the low-resolution replay image.",
+        );
+      }
+      invalidateTurnPreparation(
+        userId,
+        "signal",
+        episode.id,
+        "A newly uploaded Signal image replaced the prepared turn.",
+      );
+      const updatedEpisode = queueBotcastEpisodeImageContext(
+        db,
+        userId,
+        episode.id,
+        {
+          imageId: signalEpisodeImage.imageId,
+          ...signalEpisodeImage.descriptor,
+          provider: runtime.provider,
+          model: runtime.model,
+          replayEmoji: signalEpisodeImage.replayEmoji,
+          presentationReason: signalEpisodeImage.presentationReason,
+          visualRecognition:
+            signalEpisodeImage.visualIdentity?.status === "ready"
+              ? {
+                  v: 1,
+                  status: "pending",
+                  candidateCount:
+                    signalEpisodeImage.visualIdentity.candidates.length,
+                  pageCount: signalEpisodeImage.visualIdentity.pages.length,
+                  startedAt: new Date().toISOString(),
+                }
+              : signalEpisodeImage.visualIdentity?.reason === "deadline"
+                ? {
+                    v: 1,
+                    status: "timed_out",
+                    reason: "deadline",
+                    provider: runtime.provider,
+                    model: runtime.model,
+                    completedAt: new Date().toISOString(),
+                  }
+                : {
+                    v: 1,
+                    status: "unavailable",
+                    reason:
+                      signalEpisodeImage.visualIdentity?.reason ??
+                      "not_requested",
+                    provider: runtime.provider,
+                    model: runtime.model,
+                    completedAt: new Date().toISOString(),
+                  },
+          replayProxy: { id: randomId(12), ...replayProxy },
+        },
+      );
+      const imageContext = botcastLatestImageContextV1(updatedEpisode.events);
+      if (!imageContext) {
+        throw new Error("Signal image context was not recorded.");
+      }
+      json(ctx.res, 201, {
+        ok: true,
+        episode: projectBotcastEpisodeForAudienceV1(updatedEpisode),
+        imageContext,
       });
     }),
     route("POST", "/api/botcast/episodes/:id/producer-cue", async (ctx) => {

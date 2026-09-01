@@ -4,8 +4,9 @@
   z-index: 1100;
   box-sizing: border-box;
   padding: max(0.75rem, env(safe-area-inset-top, 0px)) max(0.75rem, env(safe-area-inset-right, 0px)) max(0.75rem, env(safe-area-inset-bottom, 0px)) max(0.75rem, env(safe-area-inset-left, 0px));
-  background: rgba(5, 5, 10, 0.9);
+  background: var(--prism-document-modal-backdrop-strong, rgba(5, 5, 10, 0.9));
   backdrop-filter: blur(18px);
+  color-scheme: var(--prism-document-color-scheme, dark);
 }
 
 .modal {
@@ -20,7 +21,17 @@
   border: 1px solid color-mix(in srgb, var(--audio-accent) 58%, var(--line, rgba(255, 255, 255, 0.14)));
   border-radius: 1.25rem;
   background: color-mix(in srgb, var(--bg-surface, #111018) 97%, var(--audio-accent) 3%);
-  box-shadow: 0 24px 90px rgba(0, 0, 0, 0.65), 0 0 48px var(--audio-accent-soft);
+  box-shadow: var(--shadow-lg, 0 24px 90px rgba(0, 0, 0, 0.65)), 0 0 48px var(--audio-accent-soft);
+}
+
+.modal :is(button, input, select, [tabindex]):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--audio-accent) 68%, var(--fg));
+  outline-offset: 2px;
+}
+
+.modal :is(button, input, select):disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 .modal[data-audio-library-bin="music"] {
@@ -45,7 +56,7 @@
 
 .modalHeader small,
 .modalHeader h2 {
-  color: color-mix(in srgb, var(--audio-accent) 78%, white);
+  color: color-mix(in srgb, var(--audio-accent) 78%, var(--fg, white));
 }
 
 .toolbar {
@@ -75,6 +86,11 @@
 .metadata input:focus {
   outline: 2px solid color-mix(in srgb, var(--audio-accent) 60%, transparent);
   outline-offset: 1px;
+}
+
+.toolbar input::placeholder,
+.metadata input::placeholder {
+  color: var(--fg-subtle, rgba(255, 255, 255, 0.42));
 }
 
 .compactFilter {
@@ -111,8 +127,9 @@
 }
 
 .keywordChips button:hover,
+.keywordChips button:focus-visible,
 .keywordChips button[data-active="true"] {
-  color: color-mix(in srgb, var(--audio-accent) 72%, white);
+  color: color-mix(in srgb, var(--audio-accent) 72%, var(--fg, white));
   border-color: color-mix(in srgb, var(--audio-accent) 58%, transparent);
   background: var(--audio-accent-soft);
 }
@@ -139,6 +156,20 @@
 .saveTags {
   border-color: color-mix(in srgb, var(--audio-accent) 58%, transparent);
   background: var(--audio-accent-soft);
+}
+
+.sourceFilters button:focus-visible,
+.saveTags:focus-visible,
+.clipRow:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--audio-accent) 68%, transparent);
+  outline-offset: 2px;
+}
+
+.sourceFilters button:disabled,
+.saveTags:disabled,
+.keywordChips button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 .count {
@@ -236,8 +267,13 @@
 }
 
 .clipRow:hover,
+.clipRow:focus-visible,
 .clipRow[data-active="true"] {
-  border-color: color-mix(in srgb, var(--audio-accent) 62%, white 8%);
+  border-color: color-mix(
+    in srgb,
+    var(--audio-accent) 62%,
+    var(--fg, white) 8%
+  );
   background: var(--audio-accent-soft);
 }
 
@@ -293,7 +329,14 @@
 
 .error {
   grid-column: 1 / -1;
-  color: #ff8f9a;
+  color: var(--danger, #ff8f9a);
+}
+
+:global(body[data-prism-theme="light"]) .modal {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.94) inset,
+    0 26px 72px rgba(37, 57, 78, 0.22),
+    0 0 42px color-mix(in srgb, var(--audio-accent) 12%, transparent);
 }
 
 @media (max-width: 900px) {

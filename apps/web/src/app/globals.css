@@ -9,9 +9,65 @@
   --prism-type-body: 0.8125rem;
   --prism-type-body-large: 1rem;
   --prism-type-title: 1.0625rem;
-  /* Baseline colors so the body doesn't flash before the themed shell paints. */
-  --baseline-bg: #0a0c12;
-  --baseline-fg: #e8ecf5;
+
+  /* Document-owned semantic palette. App-shell classes still own authored
+     in-tree presentation; these values give body portals, route failures, and
+     pre-shell paint the same contract instead of a fixed-Dark fallback. */
+  --prism-document-color-scheme: dark;
+  --prism-document-bg: #0b0a09;
+  --prism-document-bg-deep: #060504;
+  --prism-document-bg-surface: #151311;
+  --prism-document-bg-elevated: #1b1816;
+  --prism-document-bg-hover: #211e1b;
+  --prism-document-bg-active: #2b2723;
+  --prism-document-fg: #edf3f8;
+  --prism-document-fg-muted: #93a2af;
+  --prism-document-fg-subtle: #667684;
+  --prism-document-line: #25211e;
+  --prism-document-line-strong: #342f2a;
+  --prism-document-accent: #cbd8e3;
+  --prism-document-accent-text: #0c0a08;
+  --prism-document-danger: #f57a8b;
+  --prism-document-danger-soft: #3a1821;
+  --prism-document-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --prism-document-shadow-md: 0 6px 24px rgba(0, 0, 0, 0.4);
+  --prism-document-shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.55);
+  --prism-document-selection-bg: rgba(110, 168, 255, 0.3);
+  --prism-document-selection-fg: inherit;
+  --prism-document-modal-backdrop: rgba(4, 5, 12, 0.72);
+  --prism-document-modal-backdrop-strong: rgba(5, 5, 10, 0.9);
+  --prism-document-focus-ring: #b8e6ff;
+  --prism-document-focus-halo: rgba(91, 193, 238, 0.24);
+  --prism-document-disabled-opacity: 0.52;
+  --prism-document-drag-ring: #8fdcff;
+  --prism-document-drop-fill: rgba(64, 174, 224, 0.12);
+  --prism-document-status-info: #78c9ee;
+  --prism-document-status-success: #68e6a6;
+  --prism-document-status-warning: #ffcc76;
+  --prism-document-status-error: #f57a8b;
+  --prism-safe-top: env(safe-area-inset-top, 0px);
+  --prism-safe-right: env(safe-area-inset-right, 0px);
+  --prism-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --prism-safe-left: env(safe-area-inset-left, 0px);
+  --prism-z-first-run: 940;
+  --prism-z-cinematic: 2200;
+  --prism-z-blocking: 4900;
+  --prism-document-app-gradient:
+    radial-gradient(
+      ellipse at top left,
+      color-mix(in srgb, var(--prism-document-accent) 22%, transparent),
+      transparent 55%
+    ),
+    radial-gradient(
+      ellipse at bottom right,
+      color-mix(in srgb, var(--prism-document-accent) 10%, transparent),
+      transparent 55%
+    );
+
+  /* Baseline colors resolve through the document palette so the body does not
+     flash the opposite theme before the app shell paints. */
+  --baseline-bg: var(--prism-document-bg);
+  --baseline-fg: var(--prism-document-fg);
   /* Shared applet navbar band; collapses to 0 during locked live sessions. */
   --app-navbar-height: 66px;
 
@@ -99,7 +155,54 @@ body {
 }
 
 body {
+  color-scheme: var(--prism-document-color-scheme);
+  --bg: var(--prism-document-bg);
+  --bg-deep: var(--prism-document-bg-deep);
+  --bg-surface: var(--prism-document-bg-surface);
+  --bg-elevated: var(--prism-document-bg-elevated);
+  --bg-hover: var(--prism-document-bg-hover);
+  --bg-active: var(--prism-document-bg-active);
+  --fg: var(--prism-document-fg);
+  --fg-muted: var(--prism-document-fg-muted);
+  --fg-subtle: var(--prism-document-fg-subtle);
+  --line: var(--prism-document-line);
+  --line-strong: var(--prism-document-line-strong);
+  --border: var(--prism-document-line);
+  --surface: var(--prism-document-bg-surface);
+  --panel: var(--prism-document-bg-surface);
+  --muted: var(--prism-document-fg-muted);
+  --text-primary: var(--prism-document-fg);
+  --text-muted: var(--prism-document-fg-muted);
+  --accent: var(--prism-document-accent);
+  --accent-hover: color-mix(
+    in srgb,
+    var(--prism-document-accent) 88%,
+    #ffffff 12%
+  );
+  --accent-soft: color-mix(
+    in srgb,
+    var(--prism-document-accent) 18%,
+    var(--prism-document-bg) 82%
+  );
+  --accent-glow: color-mix(
+    in srgb,
+    var(--prism-document-accent) 22%,
+    transparent
+  );
+  --accent-text: var(--prism-document-accent-text);
+  --accent-ink: var(--prism-document-accent);
+  --danger: var(--prism-document-danger);
+  --danger-soft: var(--prism-document-danger-soft);
+  --shadow-sm: var(--prism-document-shadow-sm);
+  --shadow-md: var(--prism-document-shadow-md);
+  --shadow-lg: var(--prism-document-shadow-lg);
+  --app-gradient: var(--prism-document-app-gradient);
+  --provider-accent-openai: #57b9d9;
+  --provider-accent-anthropic: #d97757;
+  --provider-accent-local: #68e6a6;
+  --provider-accent-elevenlabs: #b8b2aa;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   min-height: 100%;
   display: flex;
@@ -115,6 +218,8 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
@@ -223,6 +328,70 @@ html[data-prism-companion-open="true"] [data-app-shell-header="true"] {
 }
 
 body[data-prism-theme="light"] {
+  --prism-document-color-scheme: light;
+  --prism-document-bg: #edf5fc;
+  --prism-document-bg-deep: #dce8f2;
+  --prism-document-bg-surface: #f8fbff;
+  --prism-document-bg-elevated: #ffffff;
+  --prism-document-bg-hover: #e8f1f9;
+  --prism-document-bg-active: #d8e5ef;
+  --prism-document-fg: #172638;
+  --prism-document-fg-muted: #5c7186;
+  --prism-document-fg-subtle: #8496a6;
+  --prism-document-line: #cfdce7;
+  --prism-document-line-strong: #b7c9d8;
+  --prism-document-accent: #172638;
+  --prism-document-accent-text: #ffffff;
+  --prism-document-danger: #dc2626;
+  --prism-document-danger-soft: #fde7e3;
+  --prism-document-shadow-sm: 0 1px 2px rgba(23, 38, 56, 0.08);
+  --prism-document-shadow-md: 0 10px 30px rgba(31, 74, 112, 0.1);
+  --prism-document-shadow-lg: 0 26px 58px rgba(31, 74, 112, 0.14);
+  --prism-document-selection-bg: rgba(67, 111, 255, 0.24);
+  --prism-document-selection-fg: #102235;
+  --prism-document-modal-backdrop: rgba(41, 58, 79, 0.3);
+  --prism-document-modal-backdrop-strong: rgba(41, 58, 79, 0.4);
+  --prism-document-focus-ring: #12618b;
+  --prism-document-focus-halo: rgba(18, 97, 139, 0.16);
+  --prism-document-disabled-opacity: 0.5;
+  --prism-document-drag-ring: #176f9d;
+  --prism-document-drop-fill: rgba(32, 126, 177, 0.1);
+  --prism-document-status-info: #176f9d;
+  --prism-document-status-success: #147a4f;
+  --prism-document-status-warning: #8a5400;
+  --prism-document-status-error: #c92828;
+  --prism-document-app-gradient:
+    radial-gradient(
+      ellipse 68% 58% at top left,
+      color-mix(in srgb, var(--prism-document-accent) 11%, transparent),
+      transparent 56%
+    ),
+    radial-gradient(
+      ellipse 52% 42% at 92% 8%,
+      color-mix(in srgb, #2fd3e3 4%, transparent),
+      transparent 62%
+    ),
+    radial-gradient(
+      ellipse 58% 48% at 8% 92%,
+      color-mix(in srgb, #ff4d6d 3%, transparent),
+      transparent 62%
+    );
+  --accent-hover: color-mix(
+    in srgb,
+    var(--prism-document-accent) 85%,
+    #000000 15%
+  );
+  --accent-soft: color-mix(
+    in srgb,
+    var(--prism-document-accent) 9%,
+    var(--prism-document-bg) 91%
+  );
+  --accent-glow: color-mix(
+    in srgb,
+    var(--prism-document-accent) 11%,
+    transparent
+  );
+  --provider-accent-elevenlabs: #777169;
   --prism-tooltip-bg: #ffffff;
   --prism-tooltip-fg: #172638;
   --prism-tooltip-border: #b7c9d8;
@@ -335,9 +504,100 @@ select,
   user-select: text;
 }
 
+/* Shared native interaction floor. Component styles can keep richer authored
+   states, while unstyled or portaled controls still receive a theme-native
+   keyboard ring, disabled/busy affordance, and native form color contract. */
+:where(
+  button,
+  a[href],
+  input,
+  select,
+  textarea,
+  summary,
+  [role="button"],
+  [role="menuitem"],
+  [role="option"],
+  [role="tab"],
+  [role="switch"],
+  [tabindex]:not([tabindex="-1"])
+):focus-visible {
+  outline: 2px solid var(--prism-document-focus-ring);
+  outline-offset: 2px;
+}
+
+:where(button, input, select, textarea, optgroup, option):disabled,
+:where(
+  [role="button"],
+  [role="menuitem"],
+  [role="option"],
+  [role="tab"],
+  [role="switch"]
+)[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: var(--prism-document-disabled-opacity);
+}
+
+:where([aria-busy="true"], [data-busy="true"]) {
+  cursor: progress;
+}
+
+/* Native resize handles stay useful inside authored dialogs without allowing a
+   field to grow beyond the viewport and strand the dialog controls. Component
+   limits retain precedence because this shared ceiling has zero specificity. */
+:where([role="dialog"], [role="alertdialog"], [aria-modal="true"]) {
+  overscroll-behavior: contain;
+}
+
+:where([role="dialog"], [role="alertdialog"], [aria-modal="true"])
+  :where(textarea) {
+  max-inline-size: 100%;
+  max-block-size: max(
+    8rem,
+    calc(
+      100dvh - 10rem - var(--prism-safe-top) - var(--prism-safe-bottom)
+    )
+  );
+}
+
+:where(input[type="checkbox"], input[type="radio"], input[type="range"], progress) {
+  accent-color: var(--prism-document-accent);
+}
+
+input[type="file"] {
+  color: var(--prism-document-fg-muted);
+}
+
+input[type="file"]::file-selector-button {
+  margin-inline-end: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--prism-document-accent-text);
+  border: 1px solid var(--prism-document-line-strong);
+  border-radius: var(--prism-radius-pill);
+  background: var(--prism-document-accent);
+  cursor: pointer;
+}
+
+input[type="file"]::file-selector-button:hover {
+  background: var(--accent-hover);
+}
+
+input[type="file"]::file-selector-button:active {
+  transform: translateY(1px);
+}
+
+:where([aria-grabbed="true"], [data-dragging="true"]) {
+  cursor: grabbing;
+}
+
+:where([data-drag-over="true"], [data-drop-active="true"]) {
+  outline: 2px solid var(--prism-document-drag-ring);
+  outline-offset: 2px;
+  background-color: var(--prism-document-drop-fill);
+}
+
 ::selection {
-  background: rgba(110, 168, 255, 0.3);
-  color: inherit;
+  background: var(--prism-document-selection-bg);
+  color: var(--prism-document-selection-fg);
 }
 
 /* Keep scroll behavior but hide visual scrollbar rails/pills globally. */
@@ -348,6 +608,64 @@ select,
 *::-webkit-scrollbar {
   width: 0;
   height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:focus-within,
+  [data-prism-scroll-follow="true"] {
+    scroll-behavior: auto;
+  }
+
+  input[type="file"]::file-selector-button {
+    transition: none;
+  }
+
+  input[type="file"]::file-selector-button:active {
+    transform: none;
+  }
+}
+
+@media (forced-colors: active) {
+  :where(
+    button,
+    a[href],
+    input,
+    select,
+    textarea,
+    summary,
+    [role="button"],
+    [role="menuitem"],
+    [role="option"],
+    [role="tab"],
+    [role="switch"],
+    [tabindex]:not([tabindex="-1"])
+  ):focus-visible {
+    outline: 3px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  :where(button, input, select, textarea):disabled,
+  :where(
+    [role="button"],
+    [role="menuitem"],
+    [role="option"],
+    [role="tab"],
+    [role="switch"]
+  )[aria-disabled="true"] {
+    color: GrayText;
+    opacity: 1;
+  }
+
+  :where([data-drag-over="true"], [data-drop-active="true"]) {
+    outline-color: Highlight;
+    background: Canvas;
+  }
+
+  input[type="file"]::file-selector-button {
+    color: ButtonText;
+    border-color: ButtonText;
+    background: ButtonFace;
+  }
 }
 
 /* Native View Transitions for relationship-depth navigation. Only the named

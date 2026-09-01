@@ -79,7 +79,7 @@
 
 /* The blocked-pull cue needs the same contrast inversion as the rest of the
    cable: white on the dark canvas, black on the Light Mode canvas. */
-:global(.themeLight) .whiteout {
+:global(body[data-prism-theme="light"]) .whiteout {
   stroke: #000000;
 }
 

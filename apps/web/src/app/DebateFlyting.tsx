@@ -91,6 +91,11 @@ export interface FlytingBotSummary {
   name: string;
   color: string | null;
   glyph: string | null;
+  avatarDetails?: DebateBotSnapshotV1["avatarDetails"];
+  voiceProfile?: DebateBotSnapshotV1["voiceProfile"];
+  replayVisualSnapshot?: DebateBotSnapshotV1["replayVisualSnapshot"];
+  powers?: DebateBotSnapshotV1["powers"];
+  systemPrompt?: string;
   hardMuted: boolean;
 }
 
@@ -441,6 +446,386 @@ function FlytingStudioSeat(props: {
       <small>{props.label}</small>
       <strong>{props.name}</strong>
     </div>
+  );
+}
+
+function flytingAlignmentPreviewSnapshot(
+  bot: FlytingBotSummary,
+  role: DebateBotSnapshotV1["role"],
+  sideId: DebateSideId | null,
+): DebateBotSnapshotV1 {
+  return {
+    version: DEBATE_SCHEMA_VERSION,
+    id: bot.id,
+    name: bot.name,
+    systemPrompt: bot.systemPrompt ?? "",
+    role,
+    sideId,
+    color: bot.color,
+    glyph: bot.glyph,
+    avatarDetails: bot.avatarDetails ?? null,
+    voiceProfile: bot.voiceProfile ?? null,
+    ...(bot.replayVisualSnapshot
+      ? { replayVisualSnapshot: bot.replayVisualSnapshot }
+      : {}),
+    powers: bot.powers ?? [],
+    provider: "local",
+    model: "flyting-alignment-preview",
+    revision: `flyting-alignment-preview:${bot.id}`,
+  };
+}
+
+function FlytingSetupStageAlignmentPreview(props: {
+  againstBot: FlytingBotSummary | undefined;
+  alignment: DebateFlytingStageAlignmentV1;
+  forBot: FlytingBotSummary | undefined;
+  hostBot: FlytingBotSummary | undefined;
+  item: DebateFlytingStageAlignmentItem;
+  onSelectItem: (item: DebateFlytingStageAlignmentItem) => void;
+  renderBotAvatar?: FlytingRuntimeProps["renderBotAvatar"];
+  renderBotGlyph: FlytingRuntimeProps["renderBotGlyph"];
+  theme: FlytingRuntimeProps["theme"];
+  view: DebateFlytingStageAlignmentView;
+}): React.JSX.Element {
+  const forBot = props.forBot ?? {
+    id: "flyting-alignment-preview-for",
+    name: "Pro flyter",
+    color: "#d8b25d",
+    glyph: "triangle",
+    hardMuted: true,
+  };
+  const hostBot = props.hostBot ?? {
+    id: "flyting-alignment-preview-host",
+    name: "PRISM",
+    color: "#9f8a68",
+    glyph: "triangle",
+    hardMuted: true,
+  };
+  const againstBot = props.againstBot ?? {
+    id: "flyting-alignment-preview-against",
+    name: "Con flyter",
+    color: "#c56b53",
+    glyph: "triangle",
+    hardMuted: true,
+  };
+  const forColor = botColor(forBot, "#d8b25d");
+  const hostColor = botColor(hostBot, "#9f8a68");
+  const againstColor = botColor(againstBot, "#c56b53");
+  const cameraView: FlytingCameraView =
+    props.view === "moderator" ? "moderator" : "wide";
+  const previewBots = [
+    {
+      role: "for" as const,
+      roleLabel: "Pro",
+      snapshot: flytingAlignmentPreviewSnapshot(forBot, "advocate", "for"),
+      color: forColor,
+    },
+    {
+      role: "moderator" as const,
+      roleLabel: "Jarl",
+      snapshot: flytingAlignmentPreviewSnapshot(hostBot, "moderator", null),
+      color: hostColor,
+    },
+    {
+      role: "against" as const,
+      roleLabel: "Con",
+      snapshot: flytingAlignmentPreviewSnapshot(
+        againstBot,
+        "advocate",
+        "against",
+      ),
+      color: againstColor,
+    },
+  ];
+  const alignmentHandleProps = (
+    item: DebateFlytingStageAlignmentItem,
+  ): {
+    "data-flyting-alignment-handle": "true";
+    "data-flyting-alignment-selected"?: "true";
+    onClick: (event: React.MouseEvent<HTMLElement>) => void;
+  } => ({
+    "data-flyting-alignment-handle": "true",
+    "data-flyting-alignment-selected": props.item === item ? "true" : undefined,
+    onClick: (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      props.onSelectItem(item);
+    },
+  });
+  const renderPreviewAvatar = (
+    bot: DebateBotSnapshotV1,
+    role: FlytingStageRole,
+    presentation: "full" | "mini",
+  ): ReactNode =>
+    props.renderBotAvatar?.(bot, {
+      role,
+      lookAtRole:
+        role === "for" ? "against" : role === "against" ? "for" : null,
+      consumer: "forum",
+      presentation,
+      talking: false,
+      thinking: false,
+      voiceLevel: 1,
+      colorCycle: false,
+      speechTiming: null,
+      foleyMouthShape: null,
+      listenerReaction: null,
+      blinkEnabled: true,
+      speechInkVisible: false,
+    }) ??
+    props.renderBotGlyph(bot.glyph, {
+      size: presentation === "full" ? 84 : 21,
+      strokeWidth: 1.2,
+    });
+
+  return (
+    <section
+      className={`${studioStyles.live} ${styles.liveShell} ${styles.stageAlignmentPreview}`}
+      data-debate-format="flyting"
+      data-flyting-stage-preview={props.view}
+      data-theme={props.theme}
+      aria-label={`Flyting ${props.view === "moderator" ? "Jarl" : props.view} stage layout preview`}
+      style={
+        {
+          "--flyting-for": forColor,
+          "--flyting-against": againstColor,
+          "--debate-active-color": hostColor,
+          "--debate-for-color": forColor,
+          "--debate-against-color": againstColor,
+          "--debate-moderator-color": hostColor,
+          "--flyting-lane-left": forColor,
+          "--flyting-lane-host": hostColor,
+          "--flyting-lane-right": againstColor,
+          "--flyting-lane-left-key-boost": flytingKeyVisibilityBoost(forColor),
+          "--flyting-lane-host-key-boost": flytingKeyVisibilityBoost(hostColor),
+          "--flyting-lane-right-key-boost":
+            flytingKeyVisibilityBoost(againstColor),
+        } as CSSProperties
+      }
+    >
+      <header className={styles.stageAlignmentPreviewHeader}>
+        <div>
+          <span>Live authoring preview</span>
+          <strong>
+            {props.view === "moderator"
+              ? "Jarl throne"
+              : props.view === "gallery"
+                ? "Hall gallery"
+                : "Wide Mead Hall"}
+          </strong>
+        </div>
+        <small>Click an outlined element, then tune it in Stage layout.</small>
+      </header>
+      <div className={styles.stageAlignmentPreviewCanvas}>
+        {props.view === "gallery" ? (
+          <section
+            className={`${studioStyles.debateAudienceRow} ${styles.flytingCourtGallery} ${styles.stageAlignmentPreviewGallery}`}
+            data-debate-audience="true"
+            data-audience-placement="below-screen"
+            aria-label="Hall gallery alignment preview"
+          >
+            <div className={styles.galleryRugAccentKeys} aria-hidden="true">
+              <span data-key="left" />
+              <span data-key="host" />
+              <span data-key="right" />
+            </div>
+            <div className={styles.galleryRugGlyphs}>
+              {(
+                [
+                  ["for", forBot, forColor],
+                  ["against", againstBot, againstColor],
+                ] as const
+              ).map(([role, bot, color]) => {
+                const item = flytingStageAlignmentItemFor(
+                  "gallery",
+                  role,
+                  "rugGlyph",
+                )!;
+                return (
+                  <span
+                    data-role={role}
+                    key={`preview-rug-glyph:${role}:${bot.id}`}
+                    style={
+                      {
+                        "--flyting-bot-color": color,
+                        "--flyting-rug-key-color":
+                          role === "for"
+                            ? "var(--flyting-lane-left)"
+                            : "var(--flyting-lane-right)",
+                        ...flytingAlignmentStyle(
+                          props.alignment.placements[item],
+                        ),
+                      } as CSSProperties
+                    }
+                    {...alignmentHandleProps(item)}
+                  >
+                    {props.renderBotGlyph(bot.glyph, {
+                      size: 58,
+                      strokeWidth: 1.45,
+                    })}
+                  </span>
+                );
+              })}
+            </div>
+          </section>
+        ) : (
+          <section
+            className={`${studioStyles.forum} ${styles.hallStage} ${styles.courtStage} ${styles.stageAlignmentPreviewStage}`}
+            aria-label="Mead Hall stage alignment preview"
+            data-debate-stage-viewport="authoring-preview"
+          >
+            <div
+              className={`${studioStyles.forumCamera} ${styles.hallCamera}`}
+              data-camera-view={cameraView}
+              data-camera-mode="manual"
+              data-camera-transition="cut"
+            >
+              <div
+                className={`${studioStyles.receiverMatte} ${styles.hallReceiverMatte}`}
+                aria-hidden="true"
+              />
+              <div className={styles.hallAccentKeys} aria-hidden="true">
+                <span data-key="left" />
+                <span data-key="host" />
+                <span data-key="right" />
+              </div>
+              <div className={styles.hallHeraldryGlyphs}>
+                {(
+                  [
+                    ["for", forBot, forColor],
+                    ["against", againstBot, againstColor],
+                  ] as const
+                ).map(([role, bot, color]) => {
+                  const item = flytingStageAlignmentItemFor(
+                    cameraView === "moderator" ? "moderator" : "wide",
+                    role,
+                    "heraldry",
+                  );
+                  if (!item) return null;
+                  return (
+                    <span
+                      data-role={role}
+                      key={`preview-banner-glyph:${role}:${bot.id}`}
+                      style={
+                        {
+                          "--flyting-bot-color": color,
+                          ...flytingAlignmentStyle(
+                            props.alignment.placements[item],
+                          ),
+                        } as CSSProperties
+                      }
+                      {...alignmentHandleProps(item)}
+                    >
+                      {props.renderBotGlyph(bot.glyph, {
+                        size: 52,
+                        strokeWidth: 1.55,
+                      })}
+                    </span>
+                  );
+                })}
+              </div>
+              <div className={styles.hallFixtureLight} aria-hidden="true" />
+              {previewBots.map(({ role, roleLabel, snapshot, color }) => {
+                const alignmentView =
+                  cameraView === "moderator" ? "moderator" : "wide";
+                const botItem =
+                  flytingStageAlignmentItemFor(alignmentView, role, "bot") ??
+                  flytingStageAlignmentItemFor("wide", role, "bot")!;
+                const helmetItem =
+                  flytingStageAlignmentItemFor(alignmentView, role, "helmet") ??
+                  flytingStageAlignmentItemFor("wide", role, "helmet")!;
+                const nameplateItem =
+                  flytingStageAlignmentItemFor(
+                    alignmentView,
+                    role,
+                    "nameplate",
+                  ) ?? flytingStageAlignmentItemFor("wide", role, "nameplate")!;
+                const botPlacement = props.alignment.placements[botItem];
+                const helmetPlacement = props.alignment.placements[helmetItem];
+                const nameplatePlacement =
+                  props.alignment.placements[nameplateItem];
+                const avatarPresentation =
+                  role === "moderator" && cameraView !== "moderator"
+                    ? "mini"
+                    : "full";
+                return (
+                  <div key={`preview-stage:${role}:${snapshot.id}`}>
+                    <div
+                      className={`${studioStyles.botPosition} ${styles.courtBotPosition}`}
+                      data-role={role}
+                      style={
+                        {
+                          "--flyting-bot-color": color,
+                          ...flytingAlignmentStyle(botPlacement),
+                        } as CSSProperties
+                      }
+                      {...alignmentHandleProps(botItem)}
+                    >
+                      <div
+                        className={studioStyles.botStagePresence}
+                        data-debate-stage-compact={
+                          avatarPresentation === "mini" ? "true" : undefined
+                        }
+                        data-flyting-bot-avatar={
+                          role === "moderator" ? "host" : role
+                        }
+                        style={
+                          {
+                            "--debate-presence-scale": botPlacement.scale / 100,
+                          } as CSSProperties
+                        }
+                      >
+                        {role !== "moderator" ? (
+                          <span
+                            className={styles.keyedVikingHelmet}
+                            data-flyting-hall-asset="participant-helmet"
+                            style={flytingAlignmentStyle(helmetPlacement)}
+                            {...alignmentHandleProps(helmetItem)}
+                            aria-hidden="true"
+                          />
+                        ) : cameraView === "moderator" ? (
+                          <span
+                            className={styles.moderatorVikingHelmet}
+                            data-flyting-hall-asset="moderator-helmet"
+                            style={flytingAlignmentStyle(helmetPlacement)}
+                            {...alignmentHandleProps(helmetItem)}
+                            aria-hidden="true"
+                          />
+                        ) : (
+                          <span
+                            className={styles.moderatorPixelVikingHelmet}
+                            data-flyting-hall-asset="mini-pixel-crown"
+                            style={flytingAlignmentStyle(helmetPlacement)}
+                            {...alignmentHandleProps(helmetItem)}
+                            aria-hidden="true"
+                          />
+                        )}
+                        {renderPreviewAvatar(
+                          snapshot,
+                          role,
+                          avatarPresentation,
+                        )}
+                      </div>
+                    </div>
+                    <div
+                      className={`${studioStyles.botIdentityPosition} ${styles.courtIdentityPosition}`}
+                      data-role={role}
+                      style={flytingAlignmentStyle(nameplatePlacement)}
+                      {...alignmentHandleProps(nameplateItem)}
+                    >
+                      <div className={studioStyles.botIdentityPlate}>
+                        <strong>{snapshot.name}</strong>
+                        <small>{roleLabel}</small>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -2083,6 +2468,20 @@ export function DebateFlytingSetup(
         </aside>
       </div>
       {stageLayoutOpen && DEBATE_FLYTING_STAGE_LAYOUT_AUTHORING_ENABLED ? (
+        <FlytingSetupStageAlignmentPreview
+          forBot={forBot}
+          hostBot={needsBotHost ? hostBot : undefined}
+          againstBot={againstBot}
+          view={stageLayoutView}
+          item={stageLayoutItem}
+          alignment={stageLayoutDraft}
+          onSelectItem={setStageLayoutItem}
+          renderBotAvatar={props.renderBotAvatar}
+          renderBotGlyph={props.renderBotGlyph}
+          theme={props.theme}
+        />
+      ) : null}
+      {stageLayoutOpen && DEBATE_FLYTING_STAGE_LAYOUT_AUTHORING_ENABLED ? (
         <aside
           className={styles.stageAlignmentPanel}
           data-flyting-stage-alignment="true"
@@ -2898,7 +3297,7 @@ export function DebateFlytingLive(
       className={`${studioStyles.live} ${styles.liveShell}`}
       data-debate-surface="live"
       data-debate-format="flyting"
-      data-theme="dark"
+      data-theme={props.theme}
       data-status={props.session.status}
       data-session-status={props.session.status}
       data-tutorial-target="debate-flyting-live"

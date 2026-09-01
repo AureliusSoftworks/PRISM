@@ -1810,7 +1810,7 @@ export interface CoffeeTurnRouteV1 {
   source: CoffeeTurnRouteSourceV1;
   selectedSpeakerBotId: string;
   addressedBotId?: string;
-  playerAddressKind?: "mention" | "plain_text";
+  playerAddressKind?: "mention" | "plain_text" | "followup";
 }
 
 export interface ChatMessage {

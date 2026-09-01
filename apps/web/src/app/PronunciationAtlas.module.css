@@ -141,7 +141,7 @@
   background: color-mix(
     in srgb,
     var(--pronunciation-atlas-color) 72%,
-    #ffffff 10%
+    var(--fg, #ffffff) 10%
   );
   -webkit-mask-image: url("/voice/pronunciation-atlas-borders-equirectangular-v1.svg");
   mask-image: url("/voice/pronunciation-atlas-borders-equirectangular-v1.svg");
@@ -200,7 +200,11 @@
   position: absolute;
   left: 3px;
   bottom: calc(100% + 2px);
-  color: color-mix(in srgb, var(--pronunciation-atlas-color) 72%, #ffffff 18%);
+  color: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 72%,
+    var(--fg, #ffffff) 18%
+  );
   font-size: 7px;
   font-weight: 790;
   letter-spacing: 0.1em;
@@ -214,7 +218,7 @@
   border-color: color-mix(
     in srgb,
     var(--pronunciation-atlas-color) 78%,
-    #ffffff 12%
+    var(--fg, #ffffff) 12%
   );
   background: color-mix(
     in srgb,
@@ -331,12 +335,12 @@
   border-color: color-mix(
     in srgb,
     var(--pronunciation-atlas-color) 58%,
-    #ffffff 12%
+    var(--fg, #ffffff) 12%
   );
   background: color-mix(
     in srgb,
     var(--pronunciation-atlas-color) 16%,
-    rgba(255, 255, 255, 0.035)
+    color-mix(in srgb, var(--fg, #ffffff) 3.5%, transparent)
   );
 }
 
@@ -357,7 +361,7 @@
     );
   border-radius: 999px;
   color: var(--fg-muted, #8e9bab);
-  background: rgba(255, 255, 255, 0.022);
+  background: color-mix(in srgb, var(--fg, #ffffff) 2.2%, transparent);
   font: inherit;
   font-size: 9px;
   font-weight: 740;
@@ -371,12 +375,12 @@
   border-color: color-mix(
     in srgb,
     var(--pronunciation-atlas-color) 58%,
-    #ffffff 12%
+    var(--fg, #ffffff) 12%
   );
   background: color-mix(
     in srgb,
     var(--pronunciation-atlas-color) 16%,
-    rgba(255, 255, 255, 0.035)
+    color-mix(in srgb, var(--fg, #ffffff) 3.5%, transparent)
   );
 }
 
@@ -406,7 +410,7 @@
     );
   border-radius: 7px;
   color: var(--fg-muted, #8e9bab);
-  background: rgba(255, 255, 255, 0.025);
+  background: color-mix(in srgb, var(--fg, #ffffff) 2.5%, transparent);
   font-size: 10px;
   font-weight: 750;
   cursor: pointer;
@@ -419,16 +423,16 @@
 
 .strength button[data-active="true"],
 .previewBar button[data-primary="true"] {
-  color: #ffffff;
+  color: var(--fg, #ffffff);
   border-color: color-mix(
     in srgb,
     var(--pronunciation-atlas-color) 58%,
-    #ffffff
+    var(--fg, #ffffff)
   );
   background: color-mix(
     in srgb,
     var(--pronunciation-atlas-color) 22%,
-    rgba(255, 255, 255, 0.04)
+    color-mix(in srgb, var(--fg, #ffffff) 4%, transparent)
   );
 }
 
@@ -436,7 +440,11 @@
 .previewBar button:focus-visible,
 .listFallback summary:focus-visible {
   outline: 2px solid
-    color-mix(in srgb, var(--pronunciation-atlas-color) 64%, #ffffff);
+    color-mix(
+      in srgb,
+      var(--pronunciation-atlas-color) 64%,
+      var(--fg, #ffffff)
+    );
   outline-offset: 2px;
 }
 

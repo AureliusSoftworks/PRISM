@@ -35,4 +35,29 @@ describe("Signal tension presentation", () => {
     });
     assert.equal(staged, committed);
   });
+
+  it("keeps the final Host sign-off live until its presentation completes", () => {
+    const committed = episode({ status: "completed" });
+    const staged = signalEpisodeBeforeResponseIsHeard({
+      previousEpisode: episode({ status: "live" }),
+      committedEpisode: committed,
+      responseMessage: message("host"),
+    });
+
+    assert.equal(staged.status, "live");
+    assert.equal(committed.status, "completed");
+  });
+
+  it("keeps a final Guest coda live until its presentation completes", () => {
+    const committed = episode({ status: "completed" });
+    const staged = signalEpisodeBeforeResponseIsHeard({
+      previousEpisode: episode({ status: "live" }),
+      committedEpisode: committed,
+      responseMessage: message("guest"),
+    });
+
+    assert.equal(staged.status, "live");
+    assert.equal(staged.tensionStage, committed.tensionStage);
+    assert.equal(committed.status, "completed");
+  });
 });

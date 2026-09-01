@@ -132,6 +132,66 @@
   will-change: left, top;
 }
 
+:global(body[data-prism-theme="light"]) .pad,
+:global([data-editor-theme="light"]) .pad {
+  border-color: color-mix(
+    in srgb,
+    var(--adjustment-pad-color) 34%,
+    var(--line-strong, #b7c9d8)
+  );
+  background:
+    linear-gradient(
+      90deg,
+      transparent calc(50% - 0.75px),
+      color-mix(in srgb, var(--adjustment-pad-color) 46%, transparent) 50%,
+      transparent calc(50% + 0.75px)
+    ),
+    linear-gradient(
+      0deg,
+      transparent calc(50% - 0.75px),
+      color-mix(in srgb, var(--adjustment-pad-color) 46%, transparent) 50%,
+      transparent calc(50% + 0.75px)
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(38, 59, 80, 0.055) 0 1px,
+      transparent 1px 16px
+    ),
+    repeating-linear-gradient(
+      0deg,
+      rgba(38, 59, 80, 0.05) 0 1px,
+      transparent 1px 16px
+    ),
+    radial-gradient(
+      circle at 50% 50%,
+      color-mix(in srgb, var(--adjustment-pad-color) 16%, transparent),
+      transparent 68%
+    ),
+    color-mix(in srgb, var(--bg-elevated, #fff) 86%, var(--bg-hover, #e8f1f9));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    inset 0 -12px 26px rgba(66, 89, 111, 0.035);
+}
+
+:global(body[data-prism-theme="light"]) .thumb,
+:global([data-editor-theme="light"]) .thumb {
+  border-color: color-mix(
+    in srgb,
+    var(--adjustment-pad-color) 76%,
+    var(--fg, #172638)
+  );
+  background:
+    radial-gradient(
+      circle at 42% 36%,
+      rgba(255, 255, 255, 0.82),
+      transparent 35%
+    ),
+    color-mix(in srgb, var(--adjustment-pad-color) 40%, #f8fbff);
+  box-shadow:
+    0 0 0 4px rgba(52, 75, 98, 0.14),
+    0 5px 18px color-mix(in srgb, var(--adjustment-pad-color) 28%, transparent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pad,
   .thumb {

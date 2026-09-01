@@ -14,6 +14,7 @@ export const COFFEE_OUTRO_CURTAIN_MS = COFFEE_OUTRO_FADE_MS + COFFEE_OUTRO_CARD_
 export function CoffeeIntroCurtain(props: {
   kind?: "intro" | "outro";
   tableName?: string | null;
+  theme: "light" | "dark";
   topic?: string | null;
   onSkip?: () => void;
 }): JSX.Element | null {
@@ -34,6 +35,7 @@ export function CoffeeIntroCurtain(props: {
       className={styles.curtain}
       data-coffee-intro-curtain="true"
       data-coffee-bookend={kind}
+      data-theme={props.theme}
       role="status"
       aria-live="polite"
       aria-label={`${tableLabel} table ${kind}`}

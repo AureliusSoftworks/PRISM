@@ -1257,7 +1257,7 @@
    inverted ground: without this the cyan and rose speaker labels sat at
    near-zero contrast on a white table. */
 :global([data-theme="light"]) .anchor,
-:global(html[data-theme="light"]) .anchor {
+:global(body[data-prism-theme="light"]) .anchor {
   --companion-spectrum-p: color-mix(in srgb, var(--companion-p) 62%, #2b0c1c);
   --companion-spectrum-r: color-mix(in srgb, var(--companion-r) 48%, #3a2405);
   --companion-spectrum-i: color-mix(in srgb, var(--companion-i) 42%, #1b2a05);
@@ -1288,19 +1288,19 @@
 
 .homeBaseRadialBackdrop[data-theme="light"],
 :global([data-theme="light"]) .homeBaseRadialBackdrop,
-:global(html[data-theme="light"]) .homeBaseRadialBackdrop {
+:global(body[data-prism-theme="light"]) .homeBaseRadialBackdrop {
   background: #eef7ff80;
   backdrop-filter: blur(12px) brightness(.93) saturate(.78);
   -webkit-backdrop-filter: blur(12px) brightness(.93) saturate(.78);
 }
 
 :global([data-theme="light"]) .homeBaseRadialTarget,
-:global(html[data-theme="light"]) .homeBaseRadialTarget {
+:global(body[data-prism-theme="light"]) .homeBaseRadialTarget {
   color: #18324c;
 }
 
 :global([data-theme="light"]) .homeBaseRadialTargetGlass,
-:global(html[data-theme="light"]) .homeBaseRadialTargetGlass {
+:global(body[data-prism-theme="light"]) .homeBaseRadialTargetGlass {
   background:
     radial-gradient(circle at 34% 27%, #fff 0 5%, transparent 18%),
     radial-gradient(circle, transparent 0 47%, hsl(var(--home-radial-hue) 88% 55% / .08) 68%, #ffffff99 100%);
@@ -1312,12 +1312,12 @@
 }
 
 :global([data-theme="light"]) .homeBaseRadialTargetLabel,
-:global(html[data-theme="light"]) .homeBaseRadialTargetLabel {
+:global(body[data-prism-theme="light"]) .homeBaseRadialTargetLabel {
   text-shadow: 0 1px 8px #fff, 0 1px 2px #fff;
 }
 
 :global([data-theme="light"]) .homeBaseRadialHandoffLabel,
-:global(html[data-theme="light"]) .homeBaseRadialHandoffLabel {
+:global(body[data-prism-theme="light"]) .homeBaseRadialHandoffLabel {
   border-color: #5f789133;
   color: #18324c;
   background: #f8fcffe6;
@@ -1336,11 +1336,11 @@
 /* The 28px grabbed state needs its own small-scale separation treatment on
    white canvases. Keep the pearl center while tightening the spectrum into a
    readable rim instead of introducing a dark outline. */
-:global(html[data-theme="light"]) .anchor[data-wielding="true"] .avatar {
+:global(body[data-prism-theme="light"]) .anchor[data-wielding="true"] .avatar {
   filter: drop-shadow(0 2px 5px #668ca066);
 }
 
-:global(html[data-theme="light"]) .anchor[data-wielding="true"] .avatar::before {
+:global(body[data-prism-theme="light"]) .anchor[data-wielding="true"] .avatar::before {
   background: conic-gradient(
     from 18deg,
     #ff7894,
@@ -1354,7 +1354,7 @@
   filter: blur(2px);
 }
 
-:global(html[data-theme="light"]) .anchor[data-wielding="true"] .avatar::after {
+:global(body[data-prism-theme="light"]) .anchor[data-wielding="true"] .avatar::after {
   border-color: #a8bed0;
   background: radial-gradient(
     circle at 35% 30%,

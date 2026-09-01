@@ -74,10 +74,29 @@
 }
 
 .shell {
+  --surface: var(--slate-paper-surface, #fff);
+  --text: var(--slate-paper-ink, #191714);
   display: grid;
   gap: 18px;
   overflow: hidden auto;
   padding: 22px 24px 52px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.focusedDesk
+  :is(button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--slate-s, #50d5c8) 68%, var(--fg));
+  outline-offset: 2px;
+}
+
+.focusedDesk button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--slate-s, #50d5c8) 38%, currentColor);
+}
+
+.focusedDesk :is(button, input, select, textarea):disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 .deskTabs {
@@ -181,7 +200,7 @@
 }
 
 .composer button:disabled {
-  cursor: default;
+  cursor: not-allowed;
   opacity: 0.42;
 }
 

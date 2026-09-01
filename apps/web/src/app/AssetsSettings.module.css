@@ -72,8 +72,17 @@
 .card:hover,
 .card:focus-visible {
   transform: translateY(-2px);
-  border-color: color-mix(in srgb, var(--asset-accent) 78%, white 8%);
+  border-color: color-mix(
+    in srgb,
+    var(--asset-accent) 78%,
+    var(--fg, white) 8%
+  );
   box-shadow: 0 14px 32px color-mix(in srgb, var(--asset-accent) 18%, transparent);
+}
+
+.card:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--asset-accent) 64%, transparent);
+  outline-offset: 2px;
 }
 
 .glyph {
@@ -81,7 +90,7 @@
   place-items: center;
   width: 2.5rem;
   height: 2.5rem;
-  color: color-mix(in srgb, var(--asset-accent) 78%, white);
+  color: color-mix(in srgb, var(--asset-accent) 78%, var(--fg, white));
   border: 1px solid color-mix(in srgb, var(--asset-accent) 64%, transparent);
   border-radius: 0.75rem;
   background: color-mix(in srgb, var(--asset-accent) 16%, transparent);
@@ -95,7 +104,7 @@
 }
 
 .cardCopy strong {
-  color: color-mix(in srgb, var(--asset-accent) 72%, white);
+  color: color-mix(in srgb, var(--asset-accent) 72%, var(--fg, white));
   font-size: 1.15rem;
 }
 

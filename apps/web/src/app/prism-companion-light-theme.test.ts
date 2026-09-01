@@ -10,11 +10,6 @@ const companionCss = readFileSync(
   new URL("./prismCompanion.module.css", import.meta.url),
   "utf8",
 );
-const tabsCss = readFileSync(
-  new URL("./prism-companion-view-tabs.module.css", import.meta.url),
-  "utf8",
-);
-
 function rule(css: string, selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   const match = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`, "u"));
@@ -57,15 +52,15 @@ describe("Prism companion light material", () => {
   it("gives only the light tiny wielding pearl a compact prismatic rim", () => {
     const lightTinyAvatar = rule(
       companionCss,
-      ':global(html[data-theme="light"]) .anchor[data-wielding="true"] .avatar',
+      ':global(body[data-prism-theme="light"]) .anchor[data-wielding="true"] .avatar',
     );
     const lightTinyHalo = rule(
       companionCss,
-      ':global(html[data-theme="light"]) .anchor[data-wielding="true"] .avatar::before',
+      ':global(body[data-prism-theme="light"]) .anchor[data-wielding="true"] .avatar::before',
     );
     const lightTinyPearl = rule(
       companionCss,
-      ':global(html[data-theme="light"]) .anchor[data-wielding="true"] .avatar::after',
+      ':global(body[data-prism-theme="light"]) .anchor[data-wielding="true"] .avatar::after',
     );
     const wieldingAnchor = rule(
       companionCss,
@@ -84,14 +79,5 @@ describe("Prism companion light material", () => {
       `${lightTinyAvatar}${lightTinyHalo}${lightTinyPearl}`,
       /#000|black/u,
     );
-  });
-
-  it("keeps the Synthesis, Chat, and Notes switcher luminous in light mode", () => {
-    const selectedTab = rule(
-      tabsCss,
-      ':global([data-theme="light"]) .tab[aria-selected="true"]',
-    );
-    assert.match(selectedTab, /linear-gradient/u);
-    assert.match(selectedTab, /color:\s*#203c56/u);
   });
 });

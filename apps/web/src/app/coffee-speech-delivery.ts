@@ -24,6 +24,8 @@ export interface CoffeeDeliveryCharacterAlignment {
 
 export const COFFEE_DELIVERY_MIN_DURATION_MS = 280;
 export const COFFEE_DELIVERY_MAX_DURATION_MS = 18_000;
+/** Voice preparation may fail without rejecting or ever reporting playback start. */
+export const COFFEE_VOICE_START_FAILSAFE_MS = 12_000;
 export const COFFEE_VOICE_REVEAL_TAIL_GRACE_MS = 2_000;
 
 export const COFFEE_DELIVERY_MOOD_CHARACTERS_PER_SECOND: Record<CoffeeDeliveryMood, number> = {

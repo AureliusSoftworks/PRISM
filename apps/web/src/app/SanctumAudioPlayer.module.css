@@ -134,6 +134,13 @@
   background: color-mix(in srgb, var(--prism-s) 12%, rgba(255, 255, 255, 0.05));
 }
 
+.toggle:focus-visible,
+.mute:focus-visible,
+.progress input:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--prism-s) 68%, transparent);
+  outline-offset: 2px;
+}
+
 .toggle:disabled,
 .mute:disabled,
 .progress input:disabled {
@@ -304,6 +311,64 @@
 
 .player[data-muted="true"] .muteMark {
   opacity: 1;
+}
+
+:global(body[data-prism-theme="light"]) .player {
+  border-color: color-mix(in srgb, var(--line-strong) 82%, transparent);
+  background:
+    radial-gradient(
+      circle at 13% 0%,
+      color-mix(in srgb, var(--prism-m) 9%, transparent),
+      transparent 44%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.82),
+      rgba(232, 241, 249, 0.72)
+    ),
+    color-mix(in srgb, var(--bg-surface) 94%, transparent);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.94),
+    inset 0 -1px rgba(63, 86, 108, 0.12),
+    0 9px 24px rgba(43, 66, 88, 0.14);
+}
+
+:global(body[data-prism-theme="light"]) .player[data-playing="true"] {
+  border-color: color-mix(in srgb, var(--prism-s) 42%, var(--line-strong));
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.96),
+    0 9px 26px rgba(43, 66, 88, 0.16),
+    0 0 20px color-mix(in srgb, var(--prism-s) 10%, transparent);
+}
+
+:global(body[data-prism-theme="light"]) :is(.toggle, .mute) {
+  color: color-mix(in srgb, var(--fg) 84%, var(--prism-s));
+  border-color: color-mix(in srgb, var(--line-strong) 82%, transparent);
+  background:
+    radial-gradient(
+      circle at 34% 26%,
+      rgba(255, 255, 255, 0.88),
+      transparent 44%
+    ),
+    color-mix(in srgb, var(--bg-elevated) 82%, var(--bg-hover));
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.92);
+}
+
+:global(body[data-prism-theme="light"]) :is(.toggle, .mute):hover:not(:disabled) {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--prism-s) 46%, var(--line-strong));
+  background: color-mix(in srgb, var(--prism-s) 9%, var(--bg-elevated));
+}
+
+:global(body[data-prism-theme="light"]) .progressTrack {
+  background: color-mix(in srgb, var(--line-strong) 52%, transparent);
+}
+
+:global(body[data-prism-theme="light"])
+  .progress
+  input::-webkit-slider-thumb,
+:global(body[data-prism-theme="light"]) .progress input::-moz-range-thumb {
+  background: var(--fg);
 }
 
 @keyframes player-loading {

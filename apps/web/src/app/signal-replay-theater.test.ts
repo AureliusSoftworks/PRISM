@@ -16,7 +16,7 @@ const tutorials = readFileSync(
 );
 
 describe("Fullscreen Signal replay", () => {
-  it("joins the recorded stage, transport, and focused cue sheet into one dark room", () => {
+  it("joins the recorded stage, transport, and focused cue sheet into one replay room", () => {
     const replayBranch = source.slice(
       source.indexOf("replayEpisode && selectedShow"),
       source.indexOf("selectedShow && showHasVacantHost"),
@@ -97,11 +97,20 @@ describe("Fullscreen Signal replay", () => {
     );
   });
 
-  it("keeps the dark room fixed and usable in light and narrow layouts", () => {
+  it("themes replay chrome while keeping the recorded screen cinematic in narrow layouts", () => {
     assert.match(
       css,
-      /\.shell\[data-theme="light"\]\[data-replay-episode="true"\] \.replayHeaderActions button/u,
+      /\.shell\[data-theme="light"\]\s*\{[\s\S]*--signal-replay-canvas:\s*#edf5fc;[\s\S]*--signal-replay-color-scheme:\s*light;/u,
     );
+    assert.match(
+      css,
+      /\.shell\[data-replay-episode="true"\]\s*\{[^}]*background:\s*var\(--signal-replay-shell-background\);[^}]*color-scheme:\s*var\(--signal-replay-color-scheme\);/u,
+    );
+    assert.match(
+      css,
+      /\.shell\[data-theme="light"\]\[data-replay-episode="true"\] \.replayTransport/u,
+    );
+    assert.match(css, /\.replayScreen\s*\{[^}]*background:\s*#000;/u);
     assert.match(
       css,
       /@media \(max-width:\s*900px\)[\s\S]*?\.shell\[data-replay-episode="true"\] \.replayRoom\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/iu,
