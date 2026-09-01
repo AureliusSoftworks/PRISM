@@ -13242,7 +13242,6 @@ export function BotcastExperience({
         data-audience-guest-visible={guestVisibleToAudience ? "true" : "false"}
         data-signal-power-pressure={socialPressure?.strength}
         data-signal-power-source={socialPressure?.sourceRole}
-        data-show-ended={args.currentEpisode.status === "completed" ? "true" : undefined}
         data-signal-image-context={stageImageVisible ? "visible" : undefined}
         data-signal-image-speaker={
           stageImageVisible ? args.activeMessage?.speakerRole : undefined
@@ -13338,11 +13337,6 @@ export function BotcastExperience({
               <div
                 className={styles.avatarRig}
                 data-signal-presence="host"
-                style={
-                  {
-                    "--signal-signoff-exit-x": `${studioLayout.hostBot.x < 50 ? -118 : 118}vw`,
-                  } as CSSProperties
-                }
                 data-departed={hostDeparted ? "true" : undefined}
                 data-talking={roleIsSpeaking("host") ? "true" : undefined}
                 data-thinking={roleIsThinking("host") ? "true" : undefined}
@@ -13453,11 +13447,6 @@ export function BotcastExperience({
               <div
                 className={styles.avatarRig}
                 data-signal-presence="guest"
-                style={
-                  {
-                    "--signal-signoff-exit-x": `${studioLayout.guestBot.x < 50 ? -118 : 118}vw`,
-                  } as CSSProperties
-                }
                 data-departed={guestDeparted ? "true" : undefined}
                 data-talking={roleIsSpeaking("guest") ? "true" : undefined}
                 data-thinking={roleIsThinking("guest") ? "true" : undefined}
@@ -18098,25 +18087,6 @@ export function BotcastExperience({
     episodeOutro !== null ||
     episode?.status === "completed" ||
     episode?.status === "cancelled";
-  // Once the final card has played, Produce returns to the same workspace in
-  // an off-air state. Keep the outro record mounted until Return to show so
-  // its optional item-save handoff remains available.
-  const completedStudioUsesOutro = Boolean(
-    episode &&
-      episodeOutro?.episodeId === episode.id &&
-      episodeOutro.phase === "complete" &&
-      !episodeOutro.discarded &&
-      episodeOutro.episode.playbackMode !== "watch",
-  );
-  const episodeOutroVisible = Boolean(
-    episodeOutro &&
-      !(
-        episodeOutro.phase === "complete" &&
-        episodeOutro.episode.status === "completed" &&
-        !episodeOutro.discarded &&
-        episodeOutro.episode.playbackMode !== "watch"
-      ),
-  );
   const returnFromEpisodeOutro = async (): Promise<void> => {
     if (
       !episodeOutro ||
@@ -18615,7 +18585,7 @@ export function BotcastExperience({
             ) : null}
         </section>
       ) : null}
-      {episodeOutro && episodeOutroVisible && selectedShow ? (
+      {episodeOutro && selectedShow ? (
         <section
           className={`${styles.episodePreRoll} ${styles.episodeOutro}`}
           data-phase={episodeOutro.phase}
@@ -18921,34 +18891,6 @@ export function BotcastExperience({
               ) : null}
               {episode.status === "completed" ? (
                 <>
-                  {completedStudioUsesOutro &&
-                  signalEpisodeImage?.episodeId === episode.id &&
-                  signalEpisodeImage.descriptor.kind === "item" &&
-                  signalEpisodeImage.assetLibraryInspection?.alreadySaved ===
-                    false ? (
-                    <label className={styles.liveCompletedKeepItem}>
-                      <input
-                        type="checkbox"
-                        checked={keepSignalItem}
-                        disabled={keepSignalItemSaving}
-                        onChange={(event) =>
-                          setKeepSignalItem(event.target.checked)
-                        }
-                      />
-                      <span>
-                        Keep {signalEpisodeImage.descriptor.name} in Items
-                      </span>
-                    </label>
-                  ) : null}
-                  {completedStudioUsesOutro &&
-                  signalEpisodeImage?.episodeId === episode.id &&
-                  signalEpisodeImage.descriptor.kind === "item" &&
-                  signalEpisodeImage.assetLibraryInspection?.alreadySaved ===
-                    true ? (
-                    <span className={styles.liveCompletedItemStatus}>
-                      Item already in Items
-                    </span>
-                  ) : null}
                   {onCreateSlateStory ? (
                     <button
                       type="button"
@@ -19015,7 +18957,9 @@ export function BotcastExperience({
               shot: liveShot,
               activeMessage: liveActiveMessage,
               replay: false,
-              empty: episode.status === "cancelled",
+              empty:
+                episode.status !== "live" &&
+                episode.playbackMode !== "watch",
               ...(episode.playbackMode === "watch"
                 ? {
                     guestDeparted:
@@ -19244,9 +19188,7 @@ export function BotcastExperience({
                           <button
                             type="button"
                             onClick={() =>
-                              void (completedStudioUsesOutro
-                                ? returnFromEpisodeOutro()
-                                : returnFromCompletedEpisode())
+                              void returnFromCompletedEpisode()
                             }
                             disabled={
                               keepSignalItemSaving ||

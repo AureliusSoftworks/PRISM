@@ -659,8 +659,7 @@ describe("Whodunnit V2 prosecution experience", () => {
       /--chat-mini-bot-render-size:\s*min\(30rem, 44vw, 56vh\)/u,
     );
     assert.match(roomAvatarMiniRule[0], /--chat-mini-bot-glyph-size:\s*max\(18px, calc\(var\(--chat-mini-bot-render-size\) \* 0\.12\)\)/u);
-    assert.match(roomAvatarMiniRule[0], /--chat-mini-bot-lower-screen-left:\s*38\.6%/u);
-    assert.match(roomAvatarMiniRule[0], /--chat-mini-bot-lower-screen-height:\s*24\.3%/u);
+    assert.doesNotMatch(roomAvatarMiniRule[0], /--chat-mini-bot-lower-screen-/u);
     assert.match(roomAvatarMiniRule[0], /transform:\s*scale\(1\.19128713\)/u);
     assert.doesNotMatch(cssSource, /\.roomActor\s*\{[\s\S]{0,240}right:\s*8%/u);
     assert.match(cssSource, /\.roomBackdrop\[data-blurred="true"\]\s*\{[\s\S]*filter:\s*blur\(12px\)/u);

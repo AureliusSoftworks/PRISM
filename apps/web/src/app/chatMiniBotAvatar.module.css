@@ -22,12 +22,10 @@
   );
   --chat-mini-bot-lower-screen-nudge-x: 1px;
   --chat-mini-bot-lower-screen-nudge-y: 0px;
-  /* Keep the colored lower display within the chassis aperture. Its earlier
-     edge-to-edge fill erased the small, authored alloy bezel at Mini scale. */
-  --chat-mini-bot-lower-screen-left: 41.85%;
-  --chat-mini-bot-lower-screen-top: 68.65%;
-  --chat-mini-bot-lower-screen-width: 15.5%;
-  --chat-mini-bot-lower-screen-height: 17.4%;
+  --chat-mini-bot-lower-screen-left: 40.6%;
+  --chat-mini-bot-lower-screen-top: 67.2%;
+  --chat-mini-bot-lower-screen-width: 18%;
+  --chat-mini-bot-lower-screen-height: 20.3%;
   /* The 96px chassis raster is square, just like the HD source. Its aperture
      is already authored slightly wider than tall. Keep the displayed frame
      square so the canonical face plane is not compressed horizontally. */
@@ -144,6 +142,13 @@
     calc(var(--chat-mini-bot-render-size) * 0.025),
     3px
   );
+  /* The Light identity plane must remain inside the authored lower aperture.
+     Its top edge now starts below the upper screen crop, leaving a real alloy
+     bridge and the complete small-orb bezel visible. */
+  --chat-mini-bot-lower-screen-left: 43.25%;
+  --chat-mini-bot-lower-screen-top: 73.1%;
+  --chat-mini-bot-lower-screen-width: 13.5%;
+  --chat-mini-bot-lower-screen-height: 14%;
 }
 
 .root[data-theme="light"] .upperScreen,
@@ -202,7 +207,8 @@
     scaleX(var(--chat-mini-bot-lower-screen-facing-scale-x, 1));
 }
 
-/* Lower glyph screen: (52,86)-(74,111) on 128px → ~41%/67%/18%/20% */
+/* Lower glyph screen: Dark keeps the authored aperture; Light uses the
+   tighter theme override above to reveal the pale bezel and metal bridge. */
 .lowerScreen {
   left: var(--chat-mini-bot-lower-screen-left);
   top: var(--chat-mini-bot-lower-screen-top);

@@ -25,16 +25,43 @@ describe("Flyting stage authoring", () => {
     assert.match(flytingSource, /<h2>Stage layout<\/h2>/u);
   });
 
-  it("keeps the authored RGB rugs clean and maps only the competitors to their planes", () => {
-    assert.doesNotMatch(flytingSource, /galleryRugAccentKeys/u);
-    assert.doesNotMatch(flytingStyles, /galleryRugAccentKeys/u);
+  it("keys competitor rugs through the same normalized lane contract as the Hall banners", () => {
+    assert.match(flytingSource, /className=\{styles\.galleryRugAccentKeys\}/u);
+    assert.match(flytingSource, /<span data-key="left" \/>/u);
+    assert.match(flytingSource, /<span data-key="host" \/>/u);
+    assert.match(flytingSource, /<span data-key="right" \/>/u);
     assert.match(flytingStyles, /mead-hall-gallery-floor\.webp/u);
     assert.match(flytingSource, /\["for", props\.session\.forAdvocate, forColor\]/u);
     assert.match(
       flytingSource,
       /\["against", props\.session\.againstAdvocate, againstColor\]/u,
     );
+    assert.match(
+      flytingSource,
+      /"--flyting-rug-key-color":\s*role === "for"[\s\S]{0,180}var\(--flyting-lane-left\)[\s\S]{0,180}var\(--flyting-lane-right\)/u,
+    );
+    assert.match(flytingStyles, /var\(--flyting-rug-key-color\)/u);
+    assert.match(flytingStyles, /mead-hall-gallery-left-key\.svg/u);
+    assert.match(flytingStyles, /mead-hall-gallery-host-key\.svg/u);
+    assert.match(flytingStyles, /mead-hall-gallery-right-key\.svg/u);
+    assert.match(flytingStyles, /background-blend-mode:\s*color/u);
     assert.doesNotMatch(flytingSource, /galleryModeratorRugGlyph/u);
+  });
+
+  it("enlarges and reflows the gallery without shrinking authored avatars", () => {
+    assert.match(
+      flytingStyles,
+      /\.flytingCourtGallery\s*\{[\s\S]{0,620}height:\s*clamp\(188px, 14vw, 244px\)/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.flytingAudienceMillingSlot\s*\{[\s\S]{0,420}flex:\s*0 0 clamp\(48px, 5\.1vw, 76px\)/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.flytingAudienceCluster\s*\{[\s\S]{0,420}flex-wrap:\s*wrap/u,
+    );
+    assert.doesNotMatch(flytingStyles, /flex:\s*0 1 clamp\(48px, 5\.1vw, 76px\)/u);
   });
 
   it("centers competitor heraldry on banner surfaces and follows the rugs' shared floor plane", () => {

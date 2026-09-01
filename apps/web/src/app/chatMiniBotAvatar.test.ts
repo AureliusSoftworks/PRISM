@@ -166,8 +166,13 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(
       cssSource,
-      /--chat-mini-bot-lower-screen-left:\s*41\.85%[^}]*--chat-mini-bot-lower-screen-top:\s*68\.65%[^}]*--chat-mini-bot-lower-screen-width:\s*15\.5%[^}]*--chat-mini-bot-lower-screen-height:\s*17\.4%/,
-      "the colored Mini lower screen must leave the authored chassis bezel visible",
+      /\.root\s*\{[^}]*--chat-mini-bot-lower-screen-left:\s*40\.6%[^}]*--chat-mini-bot-lower-screen-top:\s*67\.2%[^}]*--chat-mini-bot-lower-screen-width:\s*18%[^}]*--chat-mini-bot-lower-screen-height:\s*20\.3%/,
+      "Dark Minis must retain the authored lower aperture geometry",
+    );
+    assert.match(
+      cssSource,
+      /\.root\[data-theme="light"\]\s*\{[^}]*--chat-mini-bot-lower-screen-left:\s*43\.25%[^}]*--chat-mini-bot-lower-screen-top:\s*73\.1%[^}]*--chat-mini-bot-lower-screen-width:\s*13\.5%[^}]*--chat-mini-bot-lower-screen-height:\s*14%/,
+      "the Light lower identity plane must stay below the upper aperture and inside the authored orb bezel",
     );
     assert.match(
       miniInkComponentSource,

@@ -3621,18 +3621,18 @@
   z-index: 5;
 }
 
-.forumAccentKeyLayer {
+.forumAccentArchitecture {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  --debate-forum-key-base-opacity: 0.2;
+  --debate-forum-key-base-opacity: 0.78;
   --debate-forum-key-opacity-factor: var(
     --debate-light-mask-opacity-dark-factor,
     1
   );
-  mix-blend-mode: var(--debate-light-blend-mode-dark, hard-light);
+  overflow: visible;
+  mix-blend-mode: screen;
   opacity: calc(
     var(--debate-forum-key-base-opacity) *
       var(--debate-forum-key-opacity-factor)
@@ -3640,65 +3640,67 @@
   transition: opacity 520ms ease;
 }
 
-.forumAccentKeyStack[data-ready="false"] .forumAccentKeyLayer,
+.forumAccentArchitecture :is(
+  .forumAccentRoleFor,
+  .forumAccentRoleModerator,
+  .forumAccentRoleAgainst
+) {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 4;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.48;
+  filter: drop-shadow(0 0 2px currentColor) drop-shadow(0 0 10px currentColor);
+  transition: opacity 520ms ease, filter 520ms ease;
+}
+
+.forumAccentRoleFor {
+  color: var(--debate-for-color);
+}
+
+.forumAccentRoleModerator {
+  color: var(--debate-moderator-color);
+}
+
+.forumAccentRoleAgainst {
+  color: var(--debate-against-color);
+}
+
+.forumAccentArchitecture .forumAccentFineLine {
+  stroke-width: 1.5;
+  opacity: 0.72;
+}
+
 .forumAccentKeyStack[data-ready="true"]
   .forumAccentKeyFallback
   :is(.lightMaskFor, .lightMaskAgainst, .lightMaskModerator) {
   opacity: 0;
 }
 
-.forumCamera:not([data-camera-view="moderator"])[data-active-role="for"]
-  .forumAccentKeyStack[data-ready="true"]
-  .forumAccentKeyFallback
-  .lightMaskFor,
-.forumCamera:not([data-camera-view="moderator"])[data-active-role="against"]
-  .forumAccentKeyStack[data-ready="true"]
-  .forumAccentKeyFallback
-  .lightMaskAgainst,
-.forumCamera:not([data-camera-view="moderator"])[data-active-role="moderator"]
-  .forumAccentKeyStack[data-ready="true"]
-  .forumAccentKeyFallback
-  .lightMaskModerator {
-  --debate-light-mask-base-opacity: 0.08;
-  opacity: calc(
-    var(--debate-light-mask-base-opacity) *
-      var(--debate-light-mask-opacity-factor)
-  );
+.forumCamera[data-active-role="for"] .forumAccentRoleFor,
+.forumCamera[data-active-role="moderator"] .forumAccentRoleModerator,
+.forumCamera[data-active-role="against"] .forumAccentRoleAgainst {
+  opacity: 0.9;
+  filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 14px currentColor);
 }
 
-.live[data-theme="light"] .forumAccentKeyLayer {
-  --debate-forum-key-base-opacity: 0.16;
+.live[data-theme="light"] .forumAccentArchitecture {
+  --debate-forum-key-base-opacity: 0.58;
   --debate-forum-key-opacity-factor: var(
     --debate-light-mask-opacity-light-factor,
     1
   );
-  mix-blend-mode: var(--debate-light-blend-mode-light, color);
+  mix-blend-mode: multiply;
 }
 
-.live[data-theme="light"]
-  .forumCamera:not([data-camera-view="moderator"])[data-active-role="for"]
-  .forumAccentKeyStack[data-ready="true"]
-  .forumAccentKeyFallback
-  .lightMaskFor,
-.live[data-theme="light"]
-  .forumCamera:not([data-camera-view="moderator"])[data-active-role="against"]
-  .forumAccentKeyStack[data-ready="true"]
-  .forumAccentKeyFallback
-  .lightMaskAgainst,
-.live[data-theme="light"]
-  .forumCamera:not([data-camera-view="moderator"])[data-active-role="moderator"]
-  .forumAccentKeyStack[data-ready="true"]
-  .forumAccentKeyFallback
-  .lightMaskModerator {
-  --debate-light-mask-base-opacity: 0.06;
-}
-
-.forumCamera[data-camera-view="moderator"] .forumAccentKeyLayer {
+.forumCamera[data-camera-view="moderator"] .forumAccentArchitecture {
   opacity: 0;
 }
 
 /* The close moderator camera has its own authored mask. Keep that proven
-   fallback while the exact-key Forum overlays own every wide/side view. */
+   fallback while the architectural accents own every wide/side view. */
 .forumCamera[data-camera-view="moderator"]
   .forumAccentKeyStack[data-ready="true"]
   .forumAccentKeyFallback
@@ -6171,7 +6173,9 @@
 .live[data-debate-material-quality="minimal"] .lightMaskFor,
 .live[data-debate-material-quality="minimal"] .lightMaskAgainst,
 .live[data-debate-material-quality="minimal"] .lightMaskModerator,
-.live[data-debate-material-quality="minimal"] .forumAccentKeyLayer {
+.live[data-debate-material-quality="minimal"] .forumAccentArchitecture,
+.live[data-debate-material-quality="minimal"] .forumAccentArchitecture
+  :is(.forumAccentRoleFor, .forumAccentRoleModerator, .forumAccentRoleAgainst) {
   filter: none;
   mix-blend-mode: normal;
 }
@@ -9105,7 +9109,9 @@
   .lightMaskFor,
   .lightMaskAgainst,
   .lightMaskModerator,
-  .forumAccentKeyLayer,
+  .forumAccentArchitecture,
+  .forumAccentArchitecture
+    :is(.forumAccentRoleFor, .forumAccentRoleModerator, .forumAccentRoleAgainst),
   .forumCamera,
   .debaterFocusDepthOverlay,
   .botStagePresence,

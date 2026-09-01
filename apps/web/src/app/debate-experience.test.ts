@@ -361,7 +361,10 @@ it("opens executable Flyting beside the available Debate formats", () => {
   assert.match(flytingSource, /className=\{styles\.hallFixtureLight\}/u);
   assert.doesNotMatch(flytingSource, /data-candle=/u);
   assert.doesNotMatch(flytingSource, /hearth-fire-proof\.gif/u);
-  assert.doesNotMatch(flytingSource, /mead-hall-gallery-rug-keys\.svg/u);
+  assert.match(flytingSource, /className=\{styles\.galleryRugAccentKeys\}/u);
+  assert.match(flytingCss, /mead-hall-gallery-left-key\.svg/u);
+  assert.match(flytingCss, /mead-hall-gallery-host-key\.svg/u);
+  assert.match(flytingCss, /mead-hall-gallery-right-key\.svg/u);
   assert.doesNotMatch(flytingSource, /<DebateForumAccentKeys/u);
   assert.match(flytingSource, /Flyt desk/u);
   assert.match(flytingSource, /Live transcript/u);
@@ -4509,8 +4512,24 @@ describe("Debate experience", () => {
       /className=\{styles\.podiumForeground\}[\s\S]{0,500}<DebateForumLightMasks[\s\S]{0,180}depth="foreground"/u,
     );
     assert.match(source, /<DebateForumAccentKeys/u);
-    assert.match(forumAccentKeysSource, /data-source=\{source\}/u);
-    assert.match(forumAccentKeysSource, /renderDebateForumAccentPixels/u);
+    assert.match(forumAccentKeysSource, /data-source=\{props\.source \?\? "forum-architecture"\}/u);
+    assert.match(forumAccentKeysSource, /viewBox="0 0 1672 941"/u);
+    assert.match(forumAccentKeysSource, /data-role="for"/u);
+    assert.match(forumAccentKeysSource, /data-role="moderator"/u);
+    assert.match(forumAccentKeysSource, /data-role="against"/u);
+    assert.doesNotMatch(forumAccentKeysSource, /<canvas/u);
+    assert.match(css, /\.forumAccentArchitecture[\s\S]{0,400}mix-blend-mode:\s*screen/u);
+    assert.match(css, /\.forumAccentRoleFor[\s\S]{0,100}--debate-for-color/u);
+    assert.match(css, /\.forumCamera\[data-active-role="for"\]\s+\.forumAccentRoleFor/u);
+    assert.match(css, /\.forumCamera\[data-camera-view="moderator"\]\s+\.forumAccentArchitecture\s*\{[^}]*opacity:\s*0/u);
+    assert.match(
+      css,
+      /data-debate-material-quality="minimal"\][\s\S]{0,180}\.forumAccentArchitecture/u,
+    );
+    assert.match(
+      css,
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]{0,500}\.forumAccentArchitecture/u,
+    );
     assert.match(source, /data-active-role=\{activeRole \?\? undefined\}/u);
     assert.doesNotMatch(source, /<DebateForumScene/u);
     assert.doesNotMatch(css, /\.lightMaskFor\s*\{[^}]*clip-path:\s*polygon/u);

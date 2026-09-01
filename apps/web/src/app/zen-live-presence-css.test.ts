@@ -4151,6 +4151,33 @@ describe("Zen live presence CSS", () => {
       /font-size:\s*var\(\s*--zen-live-bot-avatar-thinking-glyph-size,\s*27\.5cqw\s*\)/,
     );
     assert.doesNotMatch(zenSpinnerGlyphRule, /#55ffe0|#0aa996/);
+    const lightSpinnerRule = ruleForSelectorNeedlesWithBody(
+      [
+        '.zenLiveBotPresencePlate[data-theme="light"]',
+        ".zenLiveBotPresenceThinkingGlyph",
+        '[data-coffee-plate-thinking-spinner="true"]',
+      ],
+      "--zen-live-bot-shared-phosphor-glow-filter",
+    );
+    assert.match(
+      lightSpinnerRule,
+      /--zen-live-bot-spinner-glow-color:\s*var\(\s*--zen-live-bot-shared-phosphor-glow-color/,
+    );
+    assert.match(
+      lightSpinnerRule,
+      /--crt-face-glow-filter:\s*var\(--zen-live-bot-shared-phosphor-glow-filter\)\s*;/,
+    );
+    assert.match(lightSpinnerRule, /--crt-bloom-narrow-strength:\s*0\.22\s*;/);
+    assert.match(lightSpinnerRule, /--crt-bloom-wide-strength:\s*0\.06\s*;/);
+    const lightSpinnerFrameRule = ruleForSelectorNeedlesWithBody(
+      [
+        '.zenLiveBotPresencePlate[data-theme="light"]',
+        ".zenLiveBotPresenceThinkingGlyph",
+        "[data-coffee-plate-thinking-frame]",
+      ],
+      "text-shadow: none",
+    );
+    assert.match(lightSpinnerFrameRule, /text-shadow:\s*none\s*;/);
     assert.match(
       css,
       /\.coffeeSeatPlateEmoji \[data-coffee-plate-thinking-frame\]\[data-face-font="warm"\]/,

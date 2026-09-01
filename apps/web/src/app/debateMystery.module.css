@@ -2836,13 +2836,6 @@
 .roomSuspectPresence :global([data-chat-mini-bot-avatar="true"][data-size="room"]) {
   --chat-mini-bot-render-size: min(18rem, 25vh);
   --chat-mini-bot-glyph-size: max(18px, calc(var(--chat-mini-bot-render-size) * 0.12));
-  /* Whodunnit needs the evidence-room CRT to read from across the floorplan.
-     Expand the aperture around its existing center, while keeping the shared
-     glyph-size token above unchanged. */
-  --chat-mini-bot-lower-screen-left: 38.6%;
-  --chat-mini-bot-lower-screen-top: 65.2%;
-  --chat-mini-bot-lower-screen-width: 22%;
-  --chat-mini-bot-lower-screen-height: 24.3%;
 }
 
 .interviewStage {

@@ -372,7 +372,12 @@ describe("Debate Whodunnit experience", () => {
     assert.match(css, /\.roomSuspectPresence[\s\S]*width: min\(28rem, 38%, 52vh\)/u);
     assert.match(css, /\[data-debate-avatar-quality="mini"\][\s\S]*--zen-live-bot-mini-size: min\(24rem, 100%\)[\s\S]*width: min\(24rem, 100%\)/u);
     assert.match(css, /\[data-chat-mini-bot-avatar="true"\]\[data-size="room"\][\s\S]*--chat-mini-bot-render-size: min\(18rem, 25vh\)/u);
-    assert.match(css, /\[data-chat-mini-bot-avatar="true"\]\[data-size="room"\][\s\S]*--chat-mini-bot-glyph-size: max\(18px, calc\(var\(--chat-mini-bot-render-size\) \* 0\.12\)\)[\s\S]*--chat-mini-bot-lower-screen-width: 22%[\s\S]*--chat-mini-bot-lower-screen-height: 24\.3%/u);
+    const roomMiniRule = css.match(
+      /\.roomSuspectPresence :global\(\[data-chat-mini-bot-avatar="true"\]\[data-size="room"\]\)\s*\{[\s\S]*?\}/u,
+    );
+    assert.ok(roomMiniRule);
+    assert.match(roomMiniRule[0], /--chat-mini-bot-glyph-size: max\(18px, calc\(var\(--chat-mini-bot-render-size\) \* 0\.12\)\)/u);
+    assert.doesNotMatch(roomMiniRule[0], /--chat-mini-bot-lower-screen-/u);
     assert.doesNotMatch(source, /className=\{styles\.roomSuspectName\}/u);
     assert.doesNotMatch(css, /\.roomSuspectName/u);
     assert.match(css, /@keyframes mysterySuspectRoomWalk[\s\S]*transform: translate\(-50%, -50%\)[\s\S]*--suspect-walk-waypoint/u);

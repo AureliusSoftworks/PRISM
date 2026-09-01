@@ -86,7 +86,6 @@ test("the canonical full avatar style feeds one palette to both screen sizes", (
     "--bot-face-screen-glass-blend-mode: plus-lighter",
     "--zen-live-bot-screen-specular-opacity: 0.22",
     "--bot-avatar-screen-bottom-reflection",
-    "--bot-face-screen-bottom-reflection-opacity: 0.46",
     "--zen-live-bot-shared-phosphor-glow-color",
   ]) {
     assert.ok(lightPlateRule.includes(token), `light face rule should include ${token}`);
@@ -102,6 +101,25 @@ test("the canonical full avatar style feeds one palette to both screen sizes", (
   assert.match(
     lightEmissionRule,
     /background:[\s\S]*--bot-avatar-screen-glass-overlay[\s\S]*--bot-avatar-screen-dark-base/,
+  );
+  for (const token of [
+    "--bot-face-glow-strength-scale: 0.68",
+    "--zen-live-bot-shared-phosphor-contact-opacity: 78%",
+    "--zen-live-bot-shared-phosphor-tight-opacity: 62%",
+    "--crt-face-screen-wash-tight-opacity: 44%",
+    "--crt-face-screen-wash-near-opacity: 27%",
+    "--crt-face-screen-wash-mid-opacity: 14%",
+    "--crt-face-screen-wash-far-opacity: 7%",
+  ]) {
+    assert.ok(
+      lightEmissionRule.includes(token),
+      `Light face and Ink glow should include ${token}`,
+    );
+  }
+  assert.match(
+    cssSource,
+    /--zen-live-bot-shared-phosphor-glow-filter:[\s\S]*?--zen-live-bot-shared-phosphor-contact-opacity[\s\S]*?--zen-live-bot-shared-phosphor-tight-opacity/,
+    "the shared face and Ink filter must expose Light-only close-halo controls",
   );
   assert.match(
     lightPlateRule,
@@ -145,8 +163,13 @@ test("the canonical full avatar style feeds one palette to both screen sizes", (
   );
   assert.match(
     cssSource,
-    /\.botFaceScreenGlass::before\s*\{[\s\S]*?background:\s*var\(--bot-avatar-screen-bottom-reflection, none\)[\s\S]*?opacity:\s*var\(--bot-face-screen-bottom-reflection-opacity, 0\)/,
-    "the shared glass renderer must support the Light bezel reflection without a surface override",
+    /\.botFaceScreenGlass::after\s*\{[\s\S]*?background:[\s\S]*?--bot-avatar-screen-bottom-reflection[\s\S]*?--bot-face-screen-glare-x[\s\S]*?mix-blend-mode:\s*screen\s*;/,
+    "the Light bezel reflection must composite in the same foreground specular pass as the existing glare",
+  );
+  assert.match(
+    cssSource,
+    /\.botFaceScreenGlass::before\s*\{[\s\S]*?background:\s*none\s*;[\s\S]*?opacity:\s*0\s*;/,
+    "the background glass pseudo must not carry the white bezel reflection",
   );
   assert.match(
     cssSource,

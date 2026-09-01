@@ -2096,8 +2096,6 @@ const DEBATE_SCENE_RASTERS_BY_THEME: Record<"dark" | "light", string[]> = {
   dark: [
     "/debate/forum-dark.webp",
     "/debate/forum-dark-foreground.png",
-    "/debate/forum-accent-keys.png",
-    "/debate/forum-accent-keys-foreground.png",
     "/debate/forum-light-mask.png",
     "/debate/forum-light-mask-foreground.png",
     "/debate/moderator-dark.webp",
@@ -2110,8 +2108,6 @@ const DEBATE_SCENE_RASTERS_BY_THEME: Record<"dark" | "light", string[]> = {
   light: [
     "/debate/forum-light.webp",
     "/debate/forum-light-foreground.png",
-    "/debate/forum-accent-keys.png",
-    "/debate/forum-accent-keys-foreground.png",
     "/debate/forum-light-mask.png",
     "/debate/forum-light-mask-foreground.png",
     "/debate/moderator-light.webp",

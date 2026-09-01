@@ -29630,11 +29630,21 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-live-bot-shared-phosphor-glow-filter:
     drop-shadow(
       0 0 calc(0.72px * var(--bot-phosphor-focus-radius-scale, 1))
-        var(--zen-live-bot-shared-phosphor-glow-color)
+        color-mix(
+          in srgb,
+          var(--zen-live-bot-shared-phosphor-glow-color)
+            var(--zen-live-bot-shared-phosphor-contact-opacity, 100%),
+          transparent
+        )
     )
     drop-shadow(
       0 0 calc(1.5px * var(--bot-phosphor-focus-radius-scale, 1))
-        var(--zen-live-bot-shared-phosphor-glow-color)
+        color-mix(
+          in srgb,
+          var(--zen-live-bot-shared-phosphor-glow-color)
+            var(--zen-live-bot-shared-phosphor-tight-opacity, 100%),
+          transparent
+        )
     )
     drop-shadow(
       0 0 calc(3px * var(--bot-phosphor-focus-radius-scale, 1))
@@ -30119,6 +30129,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .zenLiveBotPresencePlate[data-theme="light"]
   .zenLiveBotPresenceFaceEmissionMask,
 .themeLight .zenLiveBotPresencePlate .zenLiveBotPresenceFaceEmissionMask {
+  /* Keep the white phosphor cores crisp while reducing the surrounding halo
+     shared by eyes, mouth, thinking frames, and authored Avatar Details Ink. */
+  --bot-face-glow-strength-scale: 0.68;
+  --zen-live-bot-shared-phosphor-contact-opacity: 78%;
+  --zen-live-bot-shared-phosphor-tight-opacity: 62%;
+  --crt-face-screen-wash-tight-opacity: 44%;
+  --crt-face-screen-wash-near-opacity: 27%;
+  --crt-face-screen-wash-mid-opacity: 14%;
+  --crt-face-screen-wash-far-opacity: 7%;
   --crt-core-opacity: 0.94;
   --crt-bloom-narrow-strength: 0.18;
   --crt-bloom-wide-strength: 0.025;
@@ -32017,7 +32036,29 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .zenLiveBotPresencePlate[data-theme="light"]
   .zenLiveBotPresenceThinkingGlyph[data-coffee-plate-thinking-spinner="true"] {
   color: var(--zen-live-bot-face-phosphor-ink, #ffffff);
-  --crt-face-glow-strength-scale: 0.72;
+  /* Thinking is another screen glyph, not a separate colored lamp. Reuse the
+     exact Light face/Ink emission envelope and its reduced bloom strength. */
+  --zen-live-bot-spinner-glow-color: var(
+    --zen-live-bot-shared-phosphor-glow-color,
+    var(--bot-avatar-screen-glyph, #fbfdff)
+  );
+  --crt-face-edge-color: var(--zen-live-bot-spinner-glow-color);
+  --crt-bloom-narrow-strength: 0.22;
+  --crt-bloom-wide-strength: 0.06;
+  --crt-glyph-bloom-wide-inner-opacity: 8%;
+  --crt-glyph-bloom-wide-outer-opacity: 3%;
+  --crt-face-glow-filter: var(--zen-live-bot-shared-phosphor-glow-filter);
+}
+
+.themeLight
+  .zenLiveBotPresenceThinkingGlyph
+  [data-coffee-plate-thinking-frame],
+.zenLiveBotPresencePlate[data-theme="light"]
+  .zenLiveBotPresenceThinkingGlyph
+  [data-coffee-plate-thinking-frame] {
+  /* The shared CRT glyph layers already own the core and halo. Remove the
+     spinner-only inherited shadow so thinking matches eyes and mouth. */
+  text-shadow: none;
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"] .botFaceFrameTint {
@@ -33130,7 +33171,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     rgb(255 255 255 / 0.16) 44%,
     transparent 76%
   );
-  --bot-face-screen-bottom-reflection-opacity: 0.46;
   --zen-presence-pill-bg: color-mix(
     in srgb,
     #f8fbff 70%,
@@ -75601,15 +75641,20 @@ a.settingsCreditItem:focus-visible {
 }
 
 .botFaceScreenGlass::before {
-  inset: 0;
-  border-radius: inherit;
-  background: var(--bot-avatar-screen-bottom-reflection, none);
-  opacity: var(--bot-face-screen-bottom-reflection-opacity, 0);
+  background: none;
+  opacity: 0;
   filter: none;
 }
 
 .botFaceScreenGlass::after {
   background:
+    /* The Light bezel reflection is optical glare, so it belongs in this
+       foreground specular pass with the existing glare—not beneath the face,
+       Ink, mesh, or glass residue. */
+    var(
+      --bot-avatar-screen-bottom-reflection,
+      linear-gradient(transparent, transparent)
+    ),
     radial-gradient(
       circle at var(--bot-face-screen-glare-x, 34%)
         var(--bot-face-screen-glare-y, 30%),

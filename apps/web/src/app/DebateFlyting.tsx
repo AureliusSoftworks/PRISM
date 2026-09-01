@@ -58,6 +58,7 @@ import {
   debateFlytingRitualCueForEvent,
   playDebateFlytingRitualCue,
 } from "./debateFlytingAudio";
+import { flytingAutoCameraView } from "./debateFlytingCamera";
 import {
   DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT,
   DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS,
@@ -2824,28 +2825,22 @@ export function DebateFlytingLive(
       : state.activeExchangeIndex + 1;
   const voiceActiveEvent =
     voiceActiveEventId === presentingEvent?.id ? presentingEvent : null;
-  const activeRole: FlytingCameraView | null =
-    voiceActiveEvent?.speakerBotId === props.session.forAdvocate.id
-      ? "left"
-      : voiceActiveEvent?.speakerBotId === props.session.againstAdvocate.id
-        ? "right"
-        : voiceActiveEvent?.speakerBotId === props.session.moderator.id
-          ? "moderator"
-          : state.expectedAction === "host_verdict"
-            ? "moderator"
-            : state.floorSideId === "for"
-              ? "left"
-              : state.floorSideId === "against"
-                ? "right"
-                : null;
+  const autoCameraView = flytingAutoCameraView(
+    voiceActiveEvent?.speakerBotId ?? null,
+    {
+      forBotId: props.session.forAdvocate.id,
+      againstBotId: props.session.againstAdvocate.id,
+      moderatorBotId: props.session.moderator.id,
+    },
+  );
   const cameraView: FlytingCameraView =
-    cameraMode === "auto" ? (activeRole ?? "wide") : cameraMode;
+    cameraMode === "auto" ? autoCameraView : cameraMode;
   const activeStageRole =
-    activeRole === "left"
+    autoCameraView === "left"
       ? "for"
-      : activeRole === "right"
+      : autoCameraView === "right"
         ? "against"
-        : activeRole === "moderator"
+        : autoCameraView === "moderator"
           ? "moderator"
           : null;
   const fallbackMouthShape: DebateBotAvatarState["foleyMouthShape"] =
@@ -3209,9 +3204,9 @@ export function DebateFlytingLive(
               <strong>
                 {voiceActiveEvent?.speakerBotId === props.session.moderator.id
                   ? props.session.moderator.name
-                  : activeRole === "left"
+                  : autoCameraView === "left"
                     ? props.session.forAdvocate.name
-                    : activeRole === "right"
+                    : autoCameraView === "right"
                       ? props.session.againstAdvocate.name
                       : "The Hall awaits the word"}
               </strong>
@@ -3309,6 +3304,11 @@ export function DebateFlytingLive(
                 ))}
               </span>
             </div>
+            <div className={styles.galleryRugAccentKeys} aria-hidden="true">
+              <span data-key="left" />
+              <span data-key="host" />
+              <span data-key="right" />
+            </div>
             <div className={styles.galleryRugGlyphs} aria-hidden="true">
               {(
                 [
@@ -3328,6 +3328,10 @@ export function DebateFlytingLive(
                     style={
                       {
                         "--flyting-bot-color": color,
+                        "--flyting-rug-key-color":
+                          role === "for"
+                            ? "var(--flyting-lane-left)"
+                            : "var(--flyting-lane-right)",
                         ...flytingAlignmentStyle(
                           stageAlignmentDraft.placements[item],
                         ),

@@ -92,7 +92,7 @@ test("MacBook Pro is the primary Signal live layout gate", () => {
   );
 });
 
-test("completed Signal sessions remain visible for the sign-off, then power down in the rail", () => {
+test("completed Signal sessions keep the closing card until Return to show", () => {
   assert.match(
     page,
     /data-live-workspace=\{[\s\S]{0,120}episode\.playbackMode !== "watch" \? "true" : undefined/u,
@@ -103,7 +103,7 @@ test("completed Signal sessions remain visible for the sign-off, then power down
   );
   assert.match(
     page,
-    /empty:\s*episode\.status === "cancelled"/u,
+    /empty:\s*episode\.status !== "live" &&\s*episode\.playbackMode !== "watch"/u,
   );
   assert.match(
     page,
@@ -123,12 +123,9 @@ test("completed Signal sessions remain visible for the sign-off, then power down
   );
   assert.match(
     page,
-    /const episodeOutroVisible = Boolean\([\s\S]{0,520}episodeOutro\.phase === "complete"[\s\S]{0,420}episodeOutro\.episode\.playbackMode !== "watch"/u,
+    /\{episodeOutro && selectedShow \? \(/u,
   );
-  assert.match(
-    page,
-    /episodeOutro && episodeOutroVisible && selectedShow/u,
-  );
+  assert.doesNotMatch(page, /episodeOutroVisible/u);
   assert.match(
     page,
     /data-signal-completed-copy="true"/u,
@@ -136,11 +133,12 @@ test("completed Signal sessions remain visible for the sign-off, then power down
   assert.match(page, /aria-label="Completed Signal session controls"/u);
   assert.match(page, /Private line · \{hostBot\?\.name \?\? "Host"\}/u);
   assert.match(page, /episode\.status === "completed"\s*\? "Signal complete"/u);
-  assert.match(css, /signalGuestSignoffExit/u);
-  assert.match(css, /signalHostSignoffExit/u);
+  assert.doesNotMatch(page, /data-show-ended/u);
+  assert.doesNotMatch(css, /signalGuestSignoffExit/u);
+  assert.doesNotMatch(css, /signalHostSignoffExit/u);
   assert.match(
     page,
-    /completedStudioUsesOutro\s*\? returnFromEpisodeOutro\(\)\s*:\s*returnFromCompletedEpisode\(\)/u,
+    /onClick=\{\(\) => void returnFromEpisodeOutro\(\)\}/u,
   );
   assert.doesNotMatch(
     page,

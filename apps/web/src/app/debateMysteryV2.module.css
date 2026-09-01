@@ -1348,10 +1348,6 @@
 .roomActor[data-art-style="mosaic"] :global([data-chat-mini-bot-avatar="true"][data-size="room"]) {
   --chat-mini-bot-render-size: min(30rem, 44vw, 56vh);
   --chat-mini-bot-glyph-size: max(18px, calc(var(--chat-mini-bot-render-size) * 0.12));
-  --chat-mini-bot-lower-screen-left: 38.6%;
-  --chat-mini-bot-lower-screen-top: 65.2%;
-  --chat-mini-bot-lower-screen-width: 22%;
-  --chat-mini-bot-lower-screen-height: 24.3%;
   /* Mini's authored chassis occupies 78.90625% of its square while the Full
      HD Debate body occupies 94%. Compensate for that transparent inset so the
      two visible metal frames—not merely their layout boxes—share a footprint. */

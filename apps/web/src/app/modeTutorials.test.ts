@@ -1018,14 +1018,21 @@ describe("mode tutorials", () => {
       /LOCAL blocks research and page reading before network access/u,
     );
     assert.match(copy, /Powers never make a bot ineligible for a role/u);
-    assert.match(copy, /Challenger on the left/u);
-    assert.match(copy, /Defender on the right/u);
+    assert.match(copy, /Pro on the left/u);
+    assert.match(copy, /Con on the right/u);
     assert.match(copy, /fifteen generic PRISM spectators plus three Jarl guards/u);
     assert.match(copy, /allegiance persists in saves and replay/u);
-    assert.match(copy, /complete Challenger, Defender, and Host avatars/u);
-    assert.match(copy, /Auto, Left, Host, Right, and Wide court cameras/u);
-    assert.match(copy, /dedicated Jarl’s-throne view/u);
-    assert.match(copy, /authored red, green, and blue rugs visibly mark Challenger, neutral, and Defender territory/u);
+    assert.match(copy, /complete Pro, Jarl, and Con avatars/u);
+    assert.match(copy, /Auto, Left, Jarl, Right, and Wide court cameras/u);
+    assert.match(copy, /Jarl opens the dedicated throne view/u);
+    assert.match(
+      copy,
+      /three keyed rugs inherit the normalized Pro, Jarl, and Con colors/u,
+    );
+    assert.match(
+      copy,
+      /Auto cuts to the audible speaker and returns to the complete Hall between lines/u,
+    );
     assert.match(copy, /Flyt desk spans beneath the Hall/u);
     assert.match(copy, /open central pit and flickering candlelight carry the room/u);
     assert.match(copy, /clean bot silhouettes rather than Court chairs/u);

@@ -49,14 +49,16 @@ const voiceActionCss = readFileSync(
 );
 
 describe("Signal experience shell", () => {
-  it("treats a completed Signal show as powered down without fabricating message provenance", () => {
+  it("keeps the completed end card mounted without powering down archived replay", () => {
     assert.match(source, /"○ SHOW ENDED"/u);
     assert.match(source, /episode\?\.status === "live" \? "On air" : "Off air"/u);
-    assert.match(source, /data-show-ended=\{args\.currentEpisode\.status === "completed"/u);
+    assert.match(source, /\{episodeOutro && selectedShow \? \(/u);
+    assert.doesNotMatch(source, /episodeOutroVisible/u);
+    assert.doesNotMatch(source, /data-show-ended/u);
     assert.match(source, /signalMessageGenerationLabel\(episode, message\.id\)/u);
     assert.match(source, /className=\{styles\.producerRailCaptionControls\}/u);
     assert.match(css, /signalAnnoyanceFlux/u);
-    assert.match(css, /signalHostSignoffExit/u);
+    assert.doesNotMatch(css, /signalHostSignoffExit/u);
     assert.match(css, /prefers-reduced-motion: reduce[\s\S]*guestAnnoyanceFill[\s\S]*animation: none !important;/u);
   });
 
@@ -2050,10 +2052,8 @@ describe("Signal experience shell", () => {
     );
     assert.match(completedReturnSource, /await finalizeSignalRecording/u);
     assert.match(completedReturnSource, /finally \{[\s\S]{0,260}setEpisode\(null\)/u);
-    assert.match(
-      source,
-      /completedStudioUsesOutro\s*\? returnFromEpisodeOutro\(\)\s*:\s*returnFromCompletedEpisode\(\)/u,
-    );
+    assert.match(source, /onClick=\{\(\) => void returnFromEpisodeOutro\(\)\}/u);
+    assert.match(source, /void returnFromCompletedEpisode\(\)/u);
   });
 
   it("builds a coherent random booking around the selected guest", () => {
