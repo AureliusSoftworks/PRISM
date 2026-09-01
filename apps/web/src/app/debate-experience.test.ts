@@ -99,6 +99,24 @@ const flytingMeadHallPath = fileURLToPath(
     import.meta.url,
   ),
 );
+const flytingLightJarlThronePath = fileURLToPath(
+  new URL(
+    "../../public/debate/flyting/jarl-throne-keyed-base-light.webp",
+    import.meta.url,
+  ),
+);
+const flytingLightMeadHallPath = fileURLToPath(
+  new URL(
+    "../../public/debate/flyting/mead-hall-keyed-base-light.webp",
+    import.meta.url,
+  ),
+);
+const flytingLightGalleryPath = fileURLToPath(
+  new URL(
+    "../../public/debate/flyting/mead-hall-gallery-floor-light.webp",
+    import.meta.url,
+  ),
+);
 const flytingParticipantHelmetBasePath = fileURLToPath(
   new URL(
     "../../public/debate/flyting/viking-participant-helmet-base.png",
@@ -380,6 +398,9 @@ it("opens executable Flyting beside the available Debate formats", () => {
   assert.doesNotMatch(flytingSource, /className=\{styles\.hallPrism\}/u);
   assert.ok(existsSync(flytingMeadHallPath));
   assert.ok(existsSync(flytingJarlThronePath));
+  assert.ok(existsSync(flytingLightMeadHallPath));
+  assert.ok(existsSync(flytingLightJarlThronePath));
+  assert.ok(existsSync(flytingLightGalleryPath));
   assert.ok(existsSync(flytingParticipantHelmetBasePath));
   assert.ok(existsSync(flytingParticipantHelmetKeyPath));
   assert.ok(existsSync(flytingMiniPixelCrownBasePath));

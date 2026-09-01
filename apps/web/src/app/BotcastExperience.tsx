@@ -10013,7 +10013,10 @@ export function BotcastExperience({
           // actually finished presenting. This includes a final Guest coda:
           // the server may commit completion on that response, and applying it
           // before playback clears both chairs while the show is still on air.
-          if (episodeOperationIsCurrent(controller, runId)) {
+          if (
+            response.episode.status !== "completed" &&
+            episodeOperationIsCurrent(controller, runId)
+          ) {
             startTransition(() => setEpisode(response.episode));
           }
         } else {
@@ -10023,11 +10026,14 @@ export function BotcastExperience({
           assignQueuedProducerCue(null);
           setAutoRun(false);
           if (selectedShow) {
-            void playEpisodeOutro({
+            await playEpisodeOutro({
               episode: response.episode,
               show: selectedShow,
               forced: false,
             });
+          }
+          if (episodeOperationIsCurrent(controller, runId)) {
+            startTransition(() => setEpisode(response.episode));
           }
           if (selectedShowId)
             void loadEpisodes(selectedShowId).catch(() => undefined);

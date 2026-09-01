@@ -1180,7 +1180,8 @@
       transparent 24% 76%,
       color-mix(in srgb, var(--flyting-lane-right) 8%, transparent)
     ),
-    url("/debate/flyting/mead-hall-light-v2.webp") center / cover no-repeat;
+    url("/debate/flyting/mead-hall-keyed-base-light.webp") center / cover
+      no-repeat;
 }
 
 .hallAccentKeys {
@@ -2361,11 +2362,19 @@
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.03), rgba(0, 0, 0, 0.28));
 }
 
-.hallCamera .hallReceiverMatte {
+.hallReceiverMatte {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
   background-image: url("/debate/flyting/mead-hall-keyed-base.webp");
   background-position: center;
   background-size: cover;
   filter: brightness(0.92) saturate(0.9);
+}
+
+.liveShell[data-theme="light"] .hallReceiverMatte {
+  background-image: url("/debate/flyting/mead-hall-keyed-base-light.webp");
+  filter: brightness(0.98) saturate(0.92);
 }
 
 .hallCamera[data-camera-view="moderator"] .hallReceiverMatte {
@@ -2374,10 +2383,32 @@
   filter: brightness(0.88) saturate(0.82);
 }
 
+.liveShell[data-theme="light"]
+  .hallCamera[data-camera-view="moderator"]
+  .hallReceiverMatte {
+  background-image: url("/debate/flyting/jarl-throne-keyed-base-light.webp");
+  filter: brightness(0.98) saturate(0.92);
+}
+
+.liveShell[data-theme="light"] .hallAccentKeys span {
+  --flyting-key-base: url("/debate/flyting/mead-hall-keyed-base-light.webp");
+  --flyting-key-brightness: 0.98;
+  --flyting-key-saturation: 0.92;
+}
+
 .hallCamera[data-camera-view="moderator"] .hallAccentKeys span {
   --flyting-key-base: url("/debate/flyting/jarl-throne-keyed-base.webp");
   --flyting-key-brightness: 0.88;
   --flyting-key-saturation: 0.82;
+}
+
+.liveShell[data-theme="light"]
+  .hallCamera[data-camera-view="moderator"]
+  .hallAccentKeys
+  span {
+  --flyting-key-base: url("/debate/flyting/jarl-throne-keyed-base-light.webp");
+  --flyting-key-brightness: 0.98;
+  --flyting-key-saturation: 0.92;
 }
 
 .hallCamera[data-camera-view="moderator"]
@@ -2674,6 +2705,15 @@
   background-size: cover, cover, cover;
 }
 
+.liveShell[data-theme="light"] .flytingCourtGallery {
+  --debate-gallery-atmosphere: url("/debate/flyting/mead-hall-gallery-floor-light.webp");
+  --debate-gallery-fog-core: rgba(132, 96, 54, 0.08);
+  --debate-gallery-fog-mid: rgba(106, 76, 42, 0.04);
+  --debate-gallery-fog-floor: rgba(73, 49, 27, 0.08);
+  --debate-gallery-fog-opacity: 0.04;
+  background-color: #c4a984;
+}
+
 .galleryRugAccentKeys {
   position: absolute;
   z-index: 1;
@@ -2693,6 +2733,13 @@
   filter: brightness(var(--flyting-rug-key-visibility-boost, 1)) saturate(0.9);
   -webkit-mask: var(--flyting-rug-key-mask) center 58% / cover no-repeat;
   mask: var(--flyting-rug-key-mask) center 58% / cover no-repeat;
+}
+
+.liveShell[data-theme="light"] .galleryRugAccentKeys span {
+  background-image:
+    linear-gradient(var(--flyting-rug-key-color), var(--flyting-rug-key-color)),
+    url("/debate/flyting/mead-hall-gallery-floor-light.webp");
+  filter: brightness(var(--flyting-rug-key-visibility-boost, 1)) saturate(0.82);
 }
 
 .galleryRugAccentKeys span[data-key="left"] {

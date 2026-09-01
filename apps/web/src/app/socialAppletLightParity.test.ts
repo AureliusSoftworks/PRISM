@@ -178,6 +178,22 @@ describe("social and experiential applet Light parity", () => {
       /\.liveShell\[data-theme="light"\]\s*\{[\s\S]*--hall-header-surface:[\s\S]*--hall-authoring-surface:[\s\S]*--hall-authoring-ink:/u,
     );
     assert.match(flytingCss, /\[data-theme="light"\] \.hallStage\s*\{/u);
+    assert.match(
+      flytingCss,
+      /\.liveShell\[data-theme="light"\] \.hallReceiverMatte\s*\{[^}]*mead-hall-keyed-base-light\.webp/u,
+    );
+    assert.match(
+      flytingCss,
+      /\.liveShell\[data-theme="light"\][\s\S]{0,160}\.hallCamera\[data-camera-view="moderator"\][\s\S]{0,120}\.hallReceiverMatte\s*\{[^}]*jarl-throne-keyed-base-light\.webp/u,
+    );
+    assert.match(
+      flytingCss,
+      /\.liveShell\[data-theme="light"\] \.flytingCourtGallery\s*\{[^}]*mead-hall-gallery-floor-light\.webp/u,
+    );
+    assert.doesNotMatch(
+      flyting,
+      /className=\{`\$\{studioStyles\.receiverMatte\} \$\{styles\.hallReceiverMatte\}`\}/u,
+    );
     assert.match(flytingCss, /\.flytingCastSeatButton:hover:not\(:disabled\)/u);
     assert.match(flytingCss, /\.flytingCastSeatButton:focus-visible/u);
 

@@ -10177,6 +10177,13 @@ function applyBotcastGuestInterruption(
       latest.content,
       spokenContent,
     );
+    const persistedAudiencePrefix = latest.content.endsWith("—")
+      ? latest.content.slice(0, -1)
+      : null;
+    const alreadyPersistedAudienceCut = Boolean(
+      persistedAudiencePrefix &&
+        spokenContent.startsWith(persistedAudiencePrefix),
+    );
     if (interruptedContent && interruptedContent !== latest.content) {
       // Keep the stock crosstalk retort on the producer_cue / plan only. Canonical
       // message content is the audience-heard prefix ending at the cut.
@@ -10200,11 +10207,15 @@ function applyBotcastGuestInterruption(
       db.prepare(
         "DELETE FROM botcast_messages WHERE id = ? AND user_id = ? AND episode_id = ?",
       ).run(latest.id, userId, episode.id);
-    } else if (!interruptedContent) {
+    } else if (!interruptedContent && !alreadyPersistedAudienceCut) {
       throw new Error(
         "A guest interruption must preserve an audience-heard prefix of the current line.",
       );
     }
+    // A cancelled operation can requeue the cue after the first request has
+    // already saved its exact audience cut. The retry may arrive from a stale
+    // client snapshot whose reveal advanced slightly farther; keep the first
+    // durable prefix and continue the handoff instead of rejecting redelivery.
     // If the final word lands while the saved bridge is preparing, keep the
     // completed guest line and continue as an immediate host pivot. The audible
     // handoff has already begun, so rejecting this timing race would strand the

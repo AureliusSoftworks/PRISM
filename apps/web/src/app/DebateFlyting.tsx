@@ -680,10 +680,7 @@ function FlytingSetupStageAlignmentPreview(props: {
               data-camera-mode="manual"
               data-camera-transition="cut"
             >
-              <div
-                className={`${studioStyles.receiverMatte} ${styles.hallReceiverMatte}`}
-                aria-hidden="true"
-              />
+              <div className={styles.hallReceiverMatte} aria-hidden="true" />
               <div className={styles.hallAccentKeys} aria-hidden="true">
                 <span data-key="left" />
                 <span data-key="host" />
@@ -3377,10 +3374,7 @@ export function DebateFlytingLive(
               data-camera-transition={cameraMode === "auto" ? "cut" : "move"}
               data-active-role={activeStageRole ?? undefined}
             >
-              <div
-                className={`${studioStyles.receiverMatte} ${styles.hallReceiverMatte}`}
-                aria-hidden="true"
-              />
+              <div className={styles.hallReceiverMatte} aria-hidden="true" />
               <div className={styles.hallAccentKeys} aria-hidden="true">
                 <span data-key="left" />
                 <span data-key="host" />

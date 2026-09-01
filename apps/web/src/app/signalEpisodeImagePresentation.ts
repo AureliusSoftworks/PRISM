@@ -58,10 +58,12 @@ export function signalPendingEpisodeImageCueIsAwaitingHostTurn(args: {
   episodeId: string;
   pendingCue: Pick<BotcastProducerCue, "kind" | "imageId"> | null;
   pendingImage: { episodeId: string; imageId: string } | null;
-  imageContext: Pick<BotcastImageContextV1, "imageId"> | null;
+  imageContext: Pick<BotcastImageContextV1, "imageId" | "phase"> | null;
 }): boolean {
   return Boolean(
-    !args.imageContext &&
+    (!args.imageContext ||
+      (args.imageContext.phase === "queued" &&
+        args.imageContext.imageId === args.pendingCue?.imageId)) &&
       args.pendingCue?.kind === "present_image" &&
       args.pendingCue.imageId &&
       args.pendingImage?.episodeId === args.episodeId &&

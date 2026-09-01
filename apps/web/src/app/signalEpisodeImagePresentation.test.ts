@@ -164,7 +164,16 @@ describe("Signal episode image presentation", () => {
         episodeId: "episode-1",
         pendingCue,
         pendingImage,
-        imageContext: { imageId: "image-1" },
+        imageContext: { imageId: "image-1", phase: "queued" },
+      }),
+      true,
+    );
+    assert.equal(
+      signalPendingEpisodeImageCueIsAwaitingHostTurn({
+        episodeId: "episode-1",
+        pendingCue,
+        pendingImage,
+        imageContext: { imageId: "image-1", phase: "presented" },
       }),
       false,
     );

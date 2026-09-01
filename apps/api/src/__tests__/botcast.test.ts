@@ -28517,6 +28517,79 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("redelivers a Producer interruption after its audience prefix was already saved", async () => {
+    const db = fixture();
+    const provider = recordingProvider(
+      [
+        "A quick opening.",
+        "The guest answer keeps going long enough for a retry to see a later stale reveal.",
+        "The host takes the floor without exposing an unheard ending.",
+      ],
+      [],
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Idempotent Producer interruption redelivery",
+      });
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      const guest = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      const words = guest.message!.content.split(/\s+/u);
+      const savedPrefix = words.slice(0, 4).join(" ");
+      const laterStalePrefix = words.slice(0, 8).join(" ");
+      db.prepare(
+        "UPDATE botcast_messages SET content = ? WHERE id = ? AND user_id = ?",
+      ).run(`${savedPrefix}—`, guest.message!.id, "user-1");
+
+      const redelivered = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {
+          cue: { kind: "refocus" },
+          cueDelivery: "interrupt_guest",
+          guestInterruption: {
+            messageId: guest.message!.id,
+            spokenContent: laterStalePrefix,
+            bridgeLine: show.hostInterruptionLines[0]!,
+          },
+        },
+        generation(provider),
+      );
+
+      assert.equal(redelivered.message?.speakerRole, "host");
+      assert.equal(
+        redelivered.episode.messages.find(
+          (message) => message.id === guest.message!.id,
+        )?.content,
+        `${savedPrefix}—`,
+      );
+      assert.equal(
+        redelivered.episode.events.findLast(
+          (event) =>
+            event.kind === "producer_cue" &&
+            event.payload.delivery === "interrupt_guest",
+        )?.payload.interruptedMessageId,
+        guest.message!.id,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("omits the interrupted-speaker retort when a live guest delivered at least 85 percent", async () => {
     const db = fixture();
     const guestLine =
