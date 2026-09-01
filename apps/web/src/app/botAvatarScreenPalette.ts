@@ -117,9 +117,9 @@ export function deriveBotAvatarScreenPalette(identityColor: string, theme: BotAv
       ? identity.chroma
       : Math.max(0.11, Math.min(0.21, identity.chroma * 1.08));
   return {
-    edge: contrastSafeTone(0.43, chroma, identity.hue),
-    mid: contrastSafeTone(0.55, chroma * 0.96, identity.hue),
-    center: contrastSafeTone(0.64, chroma * 0.88, identity.hue),
+    edge: contrastSafeTone(0.36, chroma, identity.hue),
+    mid: contrastSafeTone(0.5, chroma * 0.96, identity.hue),
+    center: contrastSafeTone(0.65, chroma * 0.88, identity.hue),
     glyph: LIGHT_GLYPH,
     glow: gamutSafeOklchHex(
       0.86,

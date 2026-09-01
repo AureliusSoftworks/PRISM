@@ -23,6 +23,7 @@ const slateBibleCss = read("./slateStoryBibleDesk.module.css");
 const assetLibrary = read("./AssetLibrary.tsx");
 const assetCss = read("./AssetLibrary.module.css");
 const audioCss = read("./AudioLibrary.module.css");
+const assetsSettingsCss = read("./AssetsSettings.module.css");
 const memoryCss = read("./MemorySettings.module.css");
 const storageCss = read("./StorageSettings.module.css");
 const eula = read("./EulaAgreement.tsx");
@@ -119,6 +120,8 @@ describe("creator, library, administration, legal, and utility Light parity", ()
 
   it("authors image, asset, audio, and storage interaction states in Light", () => {
     assert.match(assetLibrary, /data-theme=\{theme\}/u);
+    assert.match(assetLibrary, /usePrismDocumentTheme\(\)/u);
+    assert.match(assetLibrary, /const theme = requestedTheme \?\? documentTheme;/u);
     assert.match(
       assetCss,
       /\.modalBackdrop\[data-theme="light"\]\s*\{[\s\S]*--bg:\s*#edf5fc;[\s\S]*color-scheme:\s*light;/u,
@@ -128,6 +131,14 @@ describe("creator, library, administration, legal, and utility Light parity", ()
     assert.match(assetCss, /\.assetCard\[data-selected="true"\]/u);
     assert.match(assetCss, /\.assetCard\[data-active="true"\]/u);
     assert.match(assetCss, /\.cleanupConfirmation/u);
+    assert.match(
+      assetCss,
+      /:global\(body\[data-prism-theme="light"\]\) \.railShell\s*\{[\s\S]*--bg-surface:\s*#f8fbff;[\s\S]*color:\s*var\(--fg\)/u,
+    );
+    assert.match(
+      assetCss,
+      /:global\(body\[data-prism-theme="light"\]\) \.addTile\s*\{\s*color:\s*var\(--fg\)/u,
+    );
 
     assert.match(audioCss, /var\(--prism-document-modal-backdrop-strong/u);
     assert.match(audioCss, /color-scheme:\s*var\(--prism-document-color-scheme/u);
@@ -135,6 +146,24 @@ describe("creator, library, administration, legal, and utility Light parity", ()
     assert.match(audioCss, /\.modal :is\([^)]+\):disabled/u);
     assert.match(audioCss, /\.clipRow\[data-active="true"\]/u);
     assert.match(audioCss, /\.error\s*\{/u);
+    assert.match(
+      audioCss,
+      /:global\(body\[data-prism-theme="light"\]\) \.modal\s*\{[\s\S]*--fg:\s*#1c2a3a;[\s\S]*--bg-surface:\s*#fbfdff;[\s\S]*color:\s*var\(--fg\)/u,
+    );
+    assert.match(
+      audioCss,
+      /:global\(body\[data-prism-theme="light"\]\) \.clipRow\[data-active="true"\]/u,
+    );
+
+    assert.match(
+      assetsSettingsCss,
+      /:global\(body\[data-prism-theme="light"\]\) \.card\s*\{[\s\S]*linear-gradient\([\s\S]*#ffffff/u,
+    );
+    assert.match(
+      assetsSettingsCss,
+      /:global\(body\[data-prism-theme="light"\]\) \.card:(?:hover|focus-visible)/u,
+    );
+    assert.match(assetsSettingsCss, /\.card:active\s*\{/u);
 
     assert.match(memoryCss, /\.state\[data-state="error"\]/u);
     assert.match(memoryCss, /\.confirmBackdrop\s*\{/u);
@@ -156,6 +185,14 @@ describe("creator, library, administration, legal, and utility Light parity", ()
     assert.match(sharedCss, /\.settingsNavItem\[data-active="true"\]/u);
     assert.match(sharedCss, /\.settingsHubCard:hover:not\(:disabled\)/u);
     assert.match(sharedCss, /\.settingsHubCard:disabled/u);
+    assert.match(
+      sharedCss,
+      /\.settingsAtmosphereControl\[data-home-atmosphere-settings="true"\]\s*\{[\s\S]*grid-template-columns:\s*minmax\(14rem, 0\.62fr\) minmax\(20rem, 1fr\)/u,
+    );
+    assert.doesNotMatch(
+      sharedCss,
+      /\.settingsAtmosphereControl button\s*\{[\s\S]{0,120}min-width:\s*160px/u,
+    );
     assert.match(sharedCss, /\.imageGrid/u);
     assert.match(sharedCss, /\.imageThumbWrap/u);
     assert.match(sharedCss, /\.botLibraryGroupTrigger/u);

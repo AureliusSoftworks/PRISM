@@ -23,8 +23,10 @@ test("light avatar screens derive saturated non-black glass with white glyph con
     const edgeContrast = botAvatarScreenContrastRatio(palette.glyph, palette.edge);
     const midContrast = botAvatarScreenContrastRatio(palette.glyph, palette.mid);
     const centerContrast = botAvatarScreenContrastRatio(palette.glyph, palette.center);
+    const centerToEdgeContrast = botAvatarScreenContrastRatio(palette.center, palette.edge);
     assert.ok(edgeContrast > midContrast, `${name} middle should be brighter than its edge`);
     assert.ok(midContrast > centerContrast, `${name} center should be brighter than its middle`);
+    assert.ok(centerToEdgeContrast >= 3.25, `${name} center should separate clearly from its edge`);
     assert.ok(centerContrast < 4.6, `${name} center should read as illuminated colored glass rather than near-black`);
     assert.equal(palette.glyph, "#fbfdff");
     assert.deepEqual(Object.keys(botAvatarScreenPaletteVariables(palette)), [
@@ -82,7 +84,7 @@ test("the canonical full avatar style feeds one palette to both screen sizes", (
     "transparent",
     "--zen-presence-face-bg",
     "--bot-avatar-screen-dark-base",
-    "transparent 100%",
+    "transparent 90%",
     "--bot-face-screen-glass-blend-mode: plus-lighter",
     "--zen-live-bot-screen-specular-opacity: 0.22",
     "--bot-avatar-screen-bottom-reflection",
@@ -93,7 +95,7 @@ test("the canonical full avatar style feeds one palette to both screen sizes", (
   for (const token of [
     "--zen-live-bot-buckle-rim-screen-stops",
     "--bot-avatar-buckle-screen-radial-stops",
-    "--zen-live-bot-buckle-screen-radial-geometry: ellipse 72% 80% at 50% 44%",
+    "--zen-live-bot-buckle-screen-radial-geometry: ellipse 58% 64% at 50% 44%",
     "--zen-live-bot-buckle-rim-screen-base: var(--bot-avatar-screen-dark-base)",
   ]) {
     assert.ok(lightBodyRule.includes(token), `light lower display should include ${token}`);
@@ -128,8 +130,8 @@ test("the canonical full avatar style feeds one palette to both screen sizes", (
   );
   assert.match(
     lightPlateRule,
-    /--bot-avatar-screen-radial-stops:[\s\S]*?97%,\s*white 3%[\s\S]*?100%,\s*transparent[\s\S]*?0 14%[\s\S]*?100%,\s*transparent[\s\S]*?32%[\s\S]*?72%,\s*transparent[\s\S]*?58%[\s\S]*?28%,\s*transparent[\s\S]*?78%,\s*transparent 100%/,
-    "the face identity light must stay bright through the large aperture before falling to the CRT substrate",
+    /--bot-avatar-screen-radial-stops:[\s\S]*?93%,\s*white 7%[\s\S]*?98%,\s*transparent[\s\S]*?0 8%[\s\S]*?92%,\s*transparent[\s\S]*?22%[\s\S]*?58%,\s*transparent[\s\S]*?48%[\s\S]*?16%,\s*transparent[\s\S]*?70%,\s*transparent 90%/,
+    "the face identity light must peak in a compact bright core and fall to the CRT substrate before the aperture edge",
   );
   assert.match(
     lightPlateRule,
@@ -143,8 +145,8 @@ test("the canonical full avatar style feeds one palette to both screen sizes", (
   );
   assert.match(
     lightPlateRule,
-    /--bot-avatar-buckle-screen-radial-stops:[\s\S]*?18%,\s*transparent[\s\S]*?78%,\s*transparent 100%/,
-    "the approved lower-screen edge falloff must remain broader than the face",
+    /--bot-avatar-buckle-screen-radial-stops:[\s\S]*?14%,\s*transparent[\s\S]*?72%,\s*transparent 92%/,
+    "the lower screen must retain a colored center while revealing a darker perimeter",
   );
   assert.match(
     cssSource,

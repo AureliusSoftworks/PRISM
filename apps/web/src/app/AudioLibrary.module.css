@@ -333,10 +333,46 @@
 }
 
 :global(body[data-prism-theme="light"]) .modal {
+  --fg: #1c2a3a;
+  --fg-muted: #566678;
+  --fg-subtle: #748397;
+  --bg: #edf4fa;
+  --bg-surface: #fbfdff;
+  --line: rgba(52, 74, 99, 0.18);
+  color: var(--fg);
+  background:
+    radial-gradient(
+      circle at 8% 0%,
+      color-mix(in srgb, var(--audio-accent) 8%, transparent),
+      transparent 32%
+    ),
+    linear-gradient(145deg, #ffffff, #f1f6fb);
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.94) inset,
     0 26px 72px rgba(37, 57, 78, 0.22),
     0 0 42px color-mix(in srgb, var(--audio-accent) 12%, transparent);
+}
+
+:global(body[data-prism-theme="light"]) .toolbar input,
+:global(body[data-prism-theme="light"]) .compactFilter select,
+:global(body[data-prism-theme="light"]) .metadata input {
+  background: rgba(246, 250, 254, 0.94);
+  box-shadow: inset 0 1px 2px rgba(38, 58, 82, 0.05);
+}
+
+:global(body[data-prism-theme="light"]) .detailPane {
+  background: color-mix(in srgb, var(--audio-accent) 3%, #f8fbfe);
+}
+
+:global(body[data-prism-theme="light"]) .clipRow {
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 6px 18px rgba(45, 65, 88, 0.05);
+}
+
+:global(body[data-prism-theme="light"]) .clipRow:hover,
+:global(body[data-prism-theme="light"]) .clipRow:focus-visible,
+:global(body[data-prism-theme="light"]) .clipRow[data-active="true"] {
+  background: color-mix(in srgb, var(--audio-accent) 12%, #ffffff);
 }
 
 @media (max-width: 900px) {

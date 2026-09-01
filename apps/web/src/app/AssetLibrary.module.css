@@ -4,6 +4,17 @@
   min-width: 0;
 }
 
+:global(body[data-prism-theme="light"]) .railShell {
+  --fg: #172638;
+  --fg-muted: #5c7186;
+  --fg-subtle: #8496a6;
+  --line: #cfdce7;
+  --bg-surface: #f8fbff;
+  --bg-elevated: #ffffff;
+  --accent: #705bc4;
+  color: var(--fg);
+}
+
 .railShell > header {
   display: flex;
   align-items: end;
@@ -98,6 +109,29 @@
 .assetTile {
   aspect-ratio: 1;
   background: color-mix(in srgb, var(--bg-surface, #17171b) 90%, transparent);
+}
+
+:global(body[data-prism-theme="light"]) .addTile,
+:global(body[data-prism-theme="light"]) .assetTile {
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--line));
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--accent) 4%, #ffffff),
+    #f1f6fb
+  );
+  box-shadow:
+    0 7px 18px rgba(40, 61, 85, 0.07),
+    inset 0 1px rgba(255, 255, 255, 0.94);
+}
+
+:global(body[data-prism-theme="light"]) .addTile {
+  color: var(--fg);
+}
+
+:global(body[data-prism-theme="light"]) .addTile:hover:not(:disabled),
+:global(body[data-prism-theme="light"]) .addTile:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
+  background: color-mix(in srgb, var(--accent) 9%, #ffffff);
 }
 
 .addTile {

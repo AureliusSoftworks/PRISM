@@ -34,6 +34,7 @@ import sharedStyles from "./page.module.css";
 import styles from "./AssetLibrary.module.css";
 import { resolveAssetLibraryInitialSelection } from "./assetLibraryInitialSelection";
 import { useViewportAssetSrc } from "./useViewportAssetSrc";
+import { usePrismDocumentTheme } from "./usePrismDocumentTheme";
 
 interface AssetApiResponse extends ImageAssetCatalogPage {
   ok: boolean;
@@ -546,12 +547,14 @@ export interface BotAssetLibraryIndexProps {
  */
 export function BotAssetLibraryIndex({
   index,
-  theme = "dark",
+  theme: requestedTheme,
   loading = false,
   error = null,
   emptyMessage = "No linked assets yet.",
   onRetry,
 }: BotAssetLibraryIndexProps) {
+  const documentTheme = usePrismDocumentTheme();
+  const theme = requestedTheme ?? documentTheme;
   const [openLibrary, setOpenLibrary] = useState<{
     kind: ImageAssetKind;
     initialAssetId: string | null;
@@ -679,7 +682,7 @@ export interface AssetLibraryModalProps {
 
 export function AssetLibraryModal({
   kind,
-  theme = "dark",
+  theme: requestedTheme,
   context,
   botId,
   initialAssetId,
@@ -690,6 +693,8 @@ export function AssetLibraryModal({
   onClose,
   onSelect,
 }: AssetLibraryModalProps) {
+  const documentTheme = usePrismDocumentTheme();
+  const theme = requestedTheme ?? documentTheme;
   const headingId = useId();
   const modalRootRef = useRef<HTMLDivElement | null>(null);
   const detailRef = useRef<HTMLElement | null>(null);

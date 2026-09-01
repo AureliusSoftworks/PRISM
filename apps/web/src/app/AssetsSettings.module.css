@@ -59,6 +59,28 @@
   transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
 }
 
+:global(body[data-prism-theme="light"]) .card {
+  border-color: color-mix(
+    in srgb,
+    var(--asset-accent) 34%,
+    rgba(42, 57, 78, 0.14)
+  );
+  background:
+    radial-gradient(
+      circle at 14% 0%,
+      color-mix(in srgb, var(--asset-accent) 11%, transparent),
+      transparent 48%
+    ),
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--asset-accent) 5%, #ffffff),
+      color-mix(in srgb, var(--asset-accent) 2%, #eef4fa)
+    );
+  box-shadow:
+    0 10px 28px rgba(45, 65, 88, 0.08),
+    inset 0 1px rgba(255, 255, 255, 0.92);
+}
+
 .card[data-audio-asset-category="effects"] {
   --asset-accent: #d28a36;
   --asset-soft: rgba(184, 111, 33, 0.17);
@@ -78,6 +100,18 @@
     var(--fg, white) 8%
   );
   box-shadow: 0 14px 32px color-mix(in srgb, var(--asset-accent) 18%, transparent);
+}
+
+:global(body[data-prism-theme="light"]) .card:hover,
+:global(body[data-prism-theme="light"]) .card:focus-visible {
+  border-color: color-mix(in srgb, var(--asset-accent) 62%, #53647a);
+  box-shadow:
+    0 16px 34px color-mix(in srgb, var(--asset-accent) 14%, transparent),
+    inset 0 1px rgba(255, 255, 255, 0.96);
+}
+
+.card:active {
+  transform: translateY(0) scale(0.99);
 }
 
 .card:focus-visible {

@@ -1157,10 +1157,10 @@ export const PRISM_LIGHT_MODE_PHASE_FIVE_SIGNAL_BASELINES = [
   },
   {
     groupId: "libraries-and-settings",
-    interaction: { files: 9, count: 100 },
+    interaction: { files: 9, count: 109 },
     lifecycle: { files: 4, count: 14 },
     responsive: { files: 6, count: 37 },
-    accessibility: { files: 9, count: 44 },
+    accessibility: { files: 9, count: 47 },
   },
   {
     groupId: "identity-and-avatar",

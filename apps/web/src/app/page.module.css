@@ -8163,9 +8163,32 @@
   margin: 0;
 }
 
-.settingsAtmosphereControl button {
+.settingsAtmosphereControl > button {
   flex: 0 0 auto;
   min-width: 160px;
+}
+
+.settingsAtmosphereControl[data-home-atmosphere-settings="true"] {
+  display: grid;
+  grid-template-columns: minmax(14rem, 0.62fr) minmax(20rem, 1fr);
+  align-items: start;
+}
+
+.settingsAtmosphereControl[data-home-atmosphere-settings="true"]
+  > .settingsInlineToggle {
+  grid-column: 1;
+}
+
+.settingsAtmosphereControl[data-home-atmosphere-settings="true"]
+  > [data-asset-rail-kind="home_atmosphere"] {
+  grid-column: 2;
+  min-width: 0;
+}
+
+.settingsAtmosphereControl[data-home-atmosphere-settings="true"]
+  > .settingsModelPairRow {
+  grid-column: 1 / -1;
+  width: 100%;
 }
 
 .settingsSection .settingsAtmosphereStyleOption {
@@ -9130,8 +9153,17 @@
     flex-direction: column;
   }
 
-  .settingsAtmosphereControl button {
+  .settingsAtmosphereControl > button {
     width: 100%;
+  }
+
+  .settingsAtmosphereControl[data-home-atmosphere-settings="true"] {
+    grid-template-columns: 1fr;
+  }
+
+  .settingsAtmosphereControl[data-home-atmosphere-settings="true"]
+    > :is(.settingsInlineToggle, [data-asset-rail-kind="home_atmosphere"], .settingsModelPairRow) {
+    grid-column: 1;
   }
 
   .settingsShell {
@@ -29528,9 +29560,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-live-bot-buckle-rim-screen-stops: var(
     --bot-avatar-buckle-screen-radial-stops
   );
-  /* The buckle aperture is much smaller than the face, so let the same
-     identity light reach farther before revealing the black CRT substrate. */
-  --zen-live-bot-buckle-screen-radial-geometry: ellipse 72% 80% at 50% 44%;
+  /* The buckle aperture is smaller than the face, so keep a slightly broader
+     core while still revealing the black CRT substrate around its perimeter. */
+  --zen-live-bot-buckle-screen-radial-geometry: ellipse 58% 64% at 50% 44%;
   --zen-live-bot-buckle-rim-screen-base: var(--bot-avatar-screen-dark-base);
   --zen-live-bot-buckle-rim-base-metal: #b9c4ce;
   --zen-live-bot-buckle-rim-highlight: #f8fbff;
@@ -33075,9 +33107,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .themeLight .zenLiveBotPresencePlate,
 .zenLiveBotPresencePlate[data-theme="light"] {
   --bot-face-crt-screen-texture-blend-mode: overlay;
-  /* Light-only display stack: black CRT substrate, then an identity field that
-     goes completely clear before the aperture edge. The phosphor mesh and
-     white glyph/Ink remain independent layers above both. */
+  /* Light-only display stack: black CRT substrate, then a compact identity
+     light that peaks in the center and falls clearly darker at the aperture
+     edge. The phosphor mesh and white glyph/Ink remain independent above it. */
   --bot-avatar-screen-dark-base: linear-gradient(
     180deg,
     #010304,
@@ -33090,34 +33122,34 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
         in srgb,
         color-mix(
             in oklch,
-            var(--bot-avatar-screen-center, var(--coffee-bot-color)) 97%,
-            white 3%
+            var(--bot-avatar-screen-center, var(--coffee-bot-color)) 93%,
+            white 7%
           )
-          100%,
+          98%,
         transparent
       )
-      0 14%,
+      0 8%,
     color-mix(
         in srgb,
-        var(--bot-avatar-screen-center, var(--coffee-bot-color)) 100%,
+        var(--bot-avatar-screen-center, var(--coffee-bot-color)) 92%,
         transparent
       )
-      32%,
+      22%,
     color-mix(
         in srgb,
-        var(--bot-avatar-screen-mid, var(--coffee-bot-color)) 72%,
+        var(--bot-avatar-screen-mid, var(--coffee-bot-color)) 58%,
         transparent
       )
-      58%,
+      48%,
     color-mix(
         in srgb,
-        var(--bot-avatar-screen-edge, var(--coffee-bot-color)) 28%,
+        var(--bot-avatar-screen-edge, var(--coffee-bot-color)) 16%,
         transparent
       )
-      78%,
-    transparent 100%;
-  /* The lower screen keeps its approved broader field while the face aperture
-     now falls to black sooner at the rim. */
+      70%,
+    transparent 90%;
+  /* The lower screen keeps a slightly broader pool of light for legibility,
+     but now follows the face screen's bright-center, dark-edge character. */
   --bot-avatar-buckle-screen-radial-stops:
     color-mix(
         in srgb,
@@ -33126,29 +33158,29 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
             var(--bot-avatar-screen-center, var(--coffee-bot-color)) 92%,
             white 8%
           )
-          94%,
+          96%,
         transparent
       )
-      0 14%,
+      0 10%,
     color-mix(
         in srgb,
-        var(--bot-avatar-screen-center, var(--coffee-bot-color)) 86%,
+        var(--bot-avatar-screen-center, var(--coffee-bot-color)) 88%,
         transparent
       )
-      32%,
+      26%,
     color-mix(
         in srgb,
-        var(--bot-avatar-screen-mid, var(--coffee-bot-color)) 62%,
+        var(--bot-avatar-screen-mid, var(--coffee-bot-color)) 54%,
         transparent
       )
-      56%,
+      50%,
     color-mix(
         in srgb,
-        var(--bot-avatar-screen-edge, var(--coffee-bot-color)) 18%,
+        var(--bot-avatar-screen-edge, var(--coffee-bot-color)) 14%,
         transparent
       )
-      78%,
-    transparent 100%;
+      72%,
+    transparent 92%;
   --bot-avatar-screen-glass-overlay: radial-gradient(
     var(--bot-avatar-screen-radial-geometry),
     var(--bot-avatar-screen-radial-stops)
