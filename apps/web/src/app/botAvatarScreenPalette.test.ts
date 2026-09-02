@@ -67,7 +67,7 @@ test("dark avatar screens preserve the existing authored palette", () => {
   }
 });
 
-test("the canonical full avatar style feeds one palette to both screen sizes", () => {
+test("the canonical full avatar style keeps the face palette and complete lower-screen stack", () => {
   const appDirectory = fileURLToPath(new URL(".", import.meta.url));
   const pageSource = readFileSync(`${appDirectory}/page.tsx`, "utf8");
   const cssSource = readFileSync(`${appDirectory}/page.module.css`, "utf8");
@@ -82,13 +82,19 @@ test("the canonical full avatar style feeds one palette to both screen sizes", (
   assert.notEqual(styleStart, -1);
   const styleSource = pageSource.slice(styleStart, styleStart + 2_000);
   const lightPlateRule = cssRuleFrom(".themeLight .zenLiveBotPresencePlate,");
-  const lightBodyRule = cssRuleFrom(
-    '.zenLiveBotPresencePlate[data-theme="light"] .zenLiveBotPresenceBody,',
-  );
   const lightEmissionRule = cssRuleFrom(
     '.zenLiveBotPresencePlate[data-theme="light"]\n  .zenLiveBotPresenceFaceEmissionMask,',
   );
+  const lightInkGlowRule = cssRuleFrom(
+    '.zenLiveBotPresencePlate[data-theme="light"]\n  .zenLiveBotPresenceFaceEmissionMask\n  [data-avatar-details-emission="glow"],',
+  );
+  const lowerOrbRule = cssRuleFrom("\n.zenLiveBotPresenceBody::before {");
+  const lowerLatticeRule = cssRuleFrom("\n.zenLiveBotPresenceBody::after {");
+  const lowerGlassRule = cssRuleFrom("\n.botAvatarFoundryBuckleGlass {");
   const bodyGlyphRule = cssRuleFrom("\n.zenLiveBotPresenceBotGlyph {");
+  const lightBodyGlyphRule = cssRuleFrom(
+    '.zenLiveBotPresencePlate[data-theme="light"] .zenLiveBotPresenceBotGlyph,',
+  );
 
   assert.match(
     styleSource,
@@ -98,6 +104,7 @@ test("the canonical full avatar style feeds one palette to both screen sizes", (
     "--bot-avatar-screen-glass-overlay",
     "--bot-avatar-screen-radial-geometry",
     "--bot-avatar-screen-radial-stops",
+    "--bot-avatar-screen-black-edge: #010203",
     "--bot-avatar-screen-inner-orb",
     "--bot-avatar-screen-deep",
     "--bot-avatar-screen-center",
@@ -111,19 +118,8 @@ test("the canonical full avatar style feeds one palette to both screen sizes", (
     "--bot-avatar-screen-bottom-reflection",
     "--bot-avatar-screen-arc-reflection",
     "--zen-live-bot-shared-phosphor-glow-color",
-    "--bot-avatar-buckle-screen-core-opacity",
-    "--zen-live-bot-glyph-opacity",
   ]) {
     assert.ok(lightPlateRule.includes(token), `light face rule should include ${token}`);
-  }
-  for (const token of [
-    "--zen-live-bot-buckle-rim-screen-stops",
-    "--bot-avatar-buckle-screen-radial-stops",
-    "--zen-live-bot-buckle-screen-radial-geometry: ellipse 58% 64% at 50% 44%",
-    "--zen-live-bot-buckle-rim-screen-orb",
-    "--zen-live-bot-buckle-rim-screen-base: var(--bot-avatar-screen-dark-base)",
-  ]) {
-    assert.ok(lightBodyRule.includes(token), `light lower display should include ${token}`);
   }
   assert.match(
     lightEmissionRule,
@@ -131,9 +127,10 @@ test("the canonical full avatar style feeds one palette to both screen sizes", (
     "the internal lamp must sit behind the phosphor content and above the identity-color field",
   );
   for (const token of [
-    "--bot-face-glow-strength-scale: 0.6",
-    "--zen-live-bot-shared-phosphor-contact-opacity: 70%",
-    "--zen-live-bot-shared-phosphor-tight-opacity: 50%",
+    "--bot-face-glow-strength-scale: 0.74",
+    "--zen-live-bot-shared-phosphor-white-glow-opacity: 26%",
+    "--zen-live-bot-shared-phosphor-contact-opacity: 82%",
+    "--zen-live-bot-shared-phosphor-tight-opacity: 64%",
     "--crt-face-screen-wash-tight-opacity: 36%",
     "--crt-face-screen-wash-near-opacity: 22%",
     "--crt-face-screen-wash-mid-opacity: 11%",
@@ -146,18 +143,23 @@ test("the canonical full avatar style feeds one palette to both screen sizes", (
   }
   assert.match(
     cssSource,
-    /--zen-live-bot-shared-phosphor-glow-filter:[\s\S]*?--zen-live-bot-shared-phosphor-contact-opacity[\s\S]*?--zen-live-bot-shared-phosphor-tight-opacity/,
-    "the shared face and Ink filter must expose Light-only close-halo controls",
+    /--zen-live-bot-shared-phosphor-glow-filter:[\s\S]*?--zen-live-bot-shared-phosphor-white-glow-opacity[\s\S]*?--zen-live-bot-shared-phosphor-contact-opacity[\s\S]*?--zen-live-bot-shared-phosphor-tight-opacity/,
+    "the shared face and Ink filter must expose a tight white halo plus close-halo controls",
+  );
+  assert.match(
+    lightInkGlowRule,
+    /--zen-live-bot-shared-phosphor-glow-color:\s*#ffffff;[\s\S]*--avatar-details-phosphor-glow-color:\s*#ffffff;[\s\S]*mix-blend-mode:\s*plus-lighter;/,
+    "Light authored Ink must emit a linear-dodge white rather than identity-colored halo",
   );
   assert.match(
     lightPlateRule,
-    /--bot-avatar-screen-radial-geometry:\s*ellipse 56% 58% at 50% 48%/,
-    "the face identity field must reach the full circular aperture",
+    /--bot-avatar-screen-black-edge:\s*#010203;[\s\S]*?--bot-avatar-screen-radial-geometry:\s*ellipse 52% 54% at 50% 48%/,
+    "the face identity field must contract before the black screen edge",
   );
   assert.match(
     lightPlateRule,
-    /--bot-avatar-screen-radial-stops:[\s\S]*?--bot-avatar-screen-center[\s\S]*?0 18%[\s\S]*?--bot-avatar-screen-mid[\s\S]*?46%[\s\S]*?--bot-avatar-screen-edge[\s\S]*?72%[\s\S]*?--bot-avatar-screen-deep[\s\S]*?100%/,
-    "the face field must fall through darker identity colors instead of transparency over black",
+    /--bot-avatar-screen-radial-stops:[\s\S]*?--bot-avatar-screen-center[\s\S]*?0 16%[\s\S]*?--bot-avatar-screen-mid[\s\S]*?40%[\s\S]*?--bot-avatar-screen-edge[\s\S]*?62%[\s\S]*?24%[\s\S]*?--bot-avatar-screen-black-edge[\s\S]*?76%[\s\S]*?78%[\s\S]*?--bot-avatar-screen-black-edge[\s\S]*?100%/,
+    "the face field must fade from a smaller identity pool into the black screen edge",
   );
   assert.match(
     lightPlateRule,
@@ -169,25 +171,18 @@ test("the canonical full avatar style feeds one palette to both screen sizes", (
     /--bot-avatar-screen-glass-overlay:\s*radial-gradient\(\s*var\(--bot-avatar-screen-radial-geometry\),/,
     "the face must use the explicitly sized shared identity field",
   );
+  assert.match(lowerOrbRule, /content:\s*""\s*;/);
+  assert.match(lowerLatticeRule, /content:\s*""\s*;/);
+  assert.doesNotMatch(lowerGlassRule, /display:\s*none\s*;/);
   assert.match(
-    lightBodyRule,
-    /--zen-live-bot-buckle-rim-screen-stops:\s*var\(\s*--bot-avatar-buckle-screen-radial-stops\s*\)/,
-    "the lower display must retain its independently broader identity light",
+    lightBodyGlyphRule,
+    /color:\s*var\(--coffee-bot-color\)\s*;[\s\S]*?opacity:\s*1\s*;[\s\S]*?filter:\s*none\s*;/,
+    "the Light lower glyph must use the normalized bot color without phosphor glow",
   );
   assert.match(
-    lightPlateRule,
-    /--bot-avatar-buckle-screen-radial-stops:[\s\S]*?--bot-avatar-screen-center[\s\S]*?--bot-avatar-screen-mid[\s\S]*?--bot-avatar-screen-edge[\s\S]*?--bot-avatar-screen-deep[\s\S]*?100%/,
-    "the lower screen must share the opaque color-to-deep-color falloff",
-  );
-  assert.match(
-    lightPlateRule,
-    /--bot-avatar-buckle-screen-inner-orb:\s*radial-gradient\([\s\S]*?--bot-avatar-buckle-screen-core-opacity[\s\S]*?transparent 82%/,
-    "the lower display must retain a weaker independently metered inner lamp",
-  );
-  assert.match(
-    cssSource,
-    /\.zenLiveBotPresenceBody::before\s*\{[\s\S]*?radial-gradient\([\s\S]*?--zen-live-bot-buckle-screen-radial-geometry/,
-    "the lower display must consume its independently enlarged identity field",
+    pageSource,
+    /<PhosphorPixelSvgGlyph[\s\S]{0,180}className=\{styles\.zenLiveBotPresenceBotGlyph\}[\s\S]{0,180}enabled=\{pixelRasterizationEnabled && theme === "dark"\}/,
+    "the lower glyph rasterizer must remain enabled only for Dark Mode",
   );
   assert.match(
     lightPlateRule.match(/--bot-avatar-screen-dark-base:[\s\S]*?;\n/)?.[0] ?? "",

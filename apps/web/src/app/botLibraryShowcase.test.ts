@@ -37,6 +37,24 @@ describe("selected bot library showcase", () => {
     );
   });
 
+  it("keeps the populated drawer painted above its showcase after WebKit settles the entrance animation", () => {
+    const panelRule = normalizedCssSource.slice(
+      normalizedCssSource.indexOf(".panel {"),
+      normalizedCssSource.indexOf('.panel[data-closing="true"]'),
+    );
+    const showcaseRule = normalizedCssSource.slice(
+      normalizedCssSource.indexOf(".botPanelHubShowcase {"),
+      normalizedCssSource.indexOf(
+        '.botPanelHubShowcase[data-panel="bots"][data-bot-view="botHub"]',
+      ),
+    );
+
+    assert.match(panelRule, /z-index:\s*102;/u);
+    assert.match(panelRule, /transform:\s*translateX\(0\);/u);
+    assert.match(panelRule, /opacity:\s*1;/u);
+    assert.match(showcaseRule, /z-index:\s*100;/u);
+  });
+
   it("matches the Avatar Editor alloy and buckle proportions", () => {
     assert.match(
       normalizedCssSource,
@@ -285,6 +303,42 @@ describe("selected bot library showcase", () => {
     assert.match(
       pageSource,
       /if \(event\.key === "Escape"\) \{[\s\S]*?closePanel\(\);/
+    );
+  });
+
+  it("refreshes the current account's bots whenever the library opens", () => {
+    const refreshBotsSource = pageSource.slice(
+      pageSource.indexOf("async function refreshBots"),
+      pageSource.indexOf(
+        "async function refreshImages",
+        pageSource.indexOf("async function refreshBots"),
+      ),
+    );
+    const openLibrarySource = pageSource.slice(
+      pageSource.indexOf("function openExistingBotLibrary"),
+      pageSource.indexOf("function selectBotPanelShowcase"),
+    );
+
+    assert.match(refreshBotsSource, /captureAccountOwnerGeneration\(\)/u);
+    assert.match(refreshBotsSource, /runForAccountOwner\(ownerGeneration/u);
+    assert.match(
+      refreshBotsSource,
+      /if \(botsResult\.status === "stale"\) return \[\];/u,
+    );
+    assert.match(
+      openLibrarySource,
+      /openRightPanel\("bots"\);[\s\S]*?void refreshBots\(\)\s*\.catch/u,
+    );
+    assert.match(openLibrarySource, /isPrismBackendUnavailableError\(err\)/u);
+    assert.match(openLibrarySource, /setBotLibraryRefreshing\(true\)/u);
+    assert.match(openLibrarySource, /\.finally\(\(\) =>/u);
+    assert.match(
+      pageSource,
+      /botLibraryRefreshing\s*\?\s*"Loading library…"/u,
+    );
+    assert.match(
+      pageSource,
+      /botLibraryRefreshing && bots\.length === 0[\s\S]*?role="status"[\s\S]*?Loading your bots…/u,
     );
   });
 

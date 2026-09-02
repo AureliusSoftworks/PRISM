@@ -126,7 +126,13 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(
       cssSource,
-      /\.root\s*\{[^}]*--chat-mini-bot-lower-screen-nudge-x:\s*1px[^}]*--chat-mini-bot-lower-screen-nudge-y:\s*0px/,
+      /\.root\s*\{[^}]*--chat-mini-bot-lower-screen-anchor-x:\s*50%[^}]*--chat-mini-bot-lower-screen-anchor-y:\s*75\.4%[^}]*--chat-mini-bot-lower-screen-nudge-x:\s*0px[^}]*--chat-mini-bot-lower-screen-nudge-y:\s*0px/,
+      "the lower glyph must use one chassis-relative center anchor at every Mini scale",
+    );
+    assert.doesNotMatch(
+      cssSource,
+      /--chat-mini-bot-lower-screen-nudge-[xy]:[^;]*(?:clamp|chat-mini-bot-render-size)/,
+      "the buckle anchor must not drift through size-dependent pixel nudges",
     );
     assert.match(
       pageCssSource,
@@ -138,11 +144,21 @@ describe("chatMiniBotAvatar", () => {
     );
   });
 
-  it("uses normalized Light screens with white face, Ink, and glyph marks", () => {
+  it("uses keyed solid identity color with only the face and glyph overlaid", () => {
     assert.match(
       cssSource,
       /\.root\s*\{[^}]*--chat-mini-bot-upper-screen-nudge-y:\s*clamp\(\s*1px,\s*calc\(var\(--chat-mini-bot-render-size\) \* 0\.02\),\s*2px\s*\)/,
       "Dark Minis must retain their approved face registration",
+    );
+    assert.match(
+      cssSource,
+      /--chat-mini-bot-eye-nudge-y:\s*clamp\(\s*0px,\s*calc\(var\(--chat-mini-bot-render-size\) \* 0\.006\),\s*1\.5px\s*\)/,
+      "Mini eyes receive one proportional optical drop without moving the mouth or Ink",
+    );
+    assert.match(
+      pageCssSource,
+      /--bot-face-eye-shift-y:\s*calc\([^;]*var\(--chat-mini-bot-eye-nudge-y, 0px\)/,
+      "the shared eye transform consumes the Mini-only optical nudge",
     );
     assert.match(
       pageCssSource,
@@ -152,27 +168,47 @@ describe("chatMiniBotAvatar", () => {
     assert.match(
       componentSource,
       /botAvatarScreenPaletteVariables\(screenPalette\)/,
-      "Mini must derive its Light screen from the canonical full-avatar palette",
+      "Mini face and Ink must retain the canonical theme-aware glyph token",
+    );
+    assert.match(
+      componentSource,
+      /normalizeAccentForTheme\(\s*normalizeBotIdentityColor\(color\) \?\? "#7c6cff",\s*theme,\s*\)/,
+      "both Mini themes must key the sprite with their normalized identity color",
     );
     assert.match(
       cssSource,
-      /\.root\[data-theme="light"\]\s*\{[^}]*--chat-mini-bot-screen-ink:\s*var\(--bot-avatar-screen-glyph, #fbfdff\)[^}]*--chat-mini-bot-upper-screen-nudge-y:\s*clamp\(\s*2px,\s*calc\(var\(--chat-mini-bot-render-size\) \* 0\.025\),\s*3px\s*\)/,
+      /\.root\[data-theme="light"\]\s*\{[^}]*--chat-mini-bot-screen-ink:\s*var\(--bot-avatar-screen-glyph, #fbfdff\)[^}]*--chat-mini-bot-lower-screen-ink:\s*var\(\s*--chat-mini-bot-normalized-color,[^}]*--chat-mini-bot-upper-screen-nudge-y:\s*clamp\(\s*2px,\s*calc\(var\(--chat-mini-bot-render-size\) \* 0\.025\),\s*3px\s*\)/,
       "Light Minis must receive the lower optical registration without moving Dark",
     );
     assert.match(
       cssSource,
-      /\.root\[data-theme="light"\] \.upperScreen,[\s\S]*?\.root\[data-theme="light"\] \.lowerScreen\s*\{[^}]*background:\s*radial-gradient\([^}]*--bot-avatar-screen-center[^}]*--bot-avatar-screen-mid[^}]*--bot-avatar-screen-edge/,
-      "both Mini apertures must paint the normalized identity ramp",
+      /\.frameIdentityColor\s*\{[^}]*background:\s*var\(\s*--chat-mini-bot-normalized-color,[^}]*bot-frame-mini-dark-color-key-mask\.png/,
+      "the Dark source must restore only its keyed LEDs with one solid identity color",
     );
     assert.match(
       cssSource,
-      /\.root\s*\{[^}]*--chat-mini-bot-lower-screen-left:\s*40\.6%[^}]*--chat-mini-bot-lower-screen-top:\s*67\.2%[^}]*--chat-mini-bot-lower-screen-width:\s*18%[^}]*--chat-mini-bot-lower-screen-height:\s*20\.3%/,
-      "Dark Minis must retain the authored lower aperture geometry",
+      /\.root\[data-theme="light"\] \.frameIdentityColor\s*\{[^}]*bot-frame-mini-light-color-key-mask\.png/,
+      "the Light source must restore its keyed face field and LEDs with the same solid identity color",
+    );
+    assert.doesNotMatch(
+      cssSource,
+      /\.root\[data-theme="(?:light|dark)"\] \.upperScreen\s*\{[^}]*gradient/,
+      "neither Mini theme may paint a procedural screen gradient",
     );
     assert.match(
       cssSource,
-      /\.root\[data-theme="light"\]\s*\{[^}]*--chat-mini-bot-lower-screen-left:\s*43\.25%[^}]*--chat-mini-bot-lower-screen-top:\s*73\.1%[^}]*--chat-mini-bot-lower-screen-width:\s*13\.5%[^}]*--chat-mini-bot-lower-screen-height:\s*14%/,
-      "the Light lower identity plane must stay below the upper aperture and inside the authored orb bezel",
+      /\.root\[data-theme="light"\] \.lowerScreen\s*\{[^}]*color:\s*var\(--chat-mini-bot-lower-screen-ink\);[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/,
+      "the Mini lower identity must have no receiving-disc material",
+    );
+    assert.match(
+      cssSource,
+      /\.root\s*\{[^}]*--chat-mini-bot-lower-screen-anchor-x:\s*50%[^}]*--chat-mini-bot-lower-screen-anchor-y:\s*75\.4%[^}]*--chat-mini-bot-lower-screen-width:\s*13\.5%[^}]*--chat-mini-bot-lower-screen-height:\s*14%/,
+      "Light and Dark must share one chassis-relative lower-glyph geometry",
+    );
+    assert.doesNotMatch(
+      cssSource,
+      /\.root\[data-theme="light"\]\s*\{[^}]*--chat-mini-bot-lower-screen-(?:anchor|left|top|width|height)/,
+      "Light must not override the shared lower-glyph registration",
     );
     assert.match(
       miniInkComponentSource,
@@ -181,18 +217,24 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(
       pageCssSource,
-      /\.coffeeSeatMiniAvatarGlyph\s*\{[^}]*color:\s*var\(\s*--chat-mini-bot-screen-ink,/,
+      /\.coffeeSeatMiniAvatarGlyph\s*\{[^}]*color:\s*var\(\s*--chat-mini-bot-lower-screen-ink,/,
     );
     assert.match(
       pageCssSource,
-      /\.emptyStateHeroMiniGlyph\s*\{[^}]*color:\s*var\(\s*--chat-mini-bot-screen-ink,/,
-      "every Mini lower glyph must consume the same white Light-mode ink",
+      /\.emptyStateHeroMiniGlyph\s*\{[^}]*color:\s*var\(\s*--chat-mini-bot-lower-screen-ink,/,
+      "every Mini lower glyph must consume the normalized identity ink",
     );
   });
 
   it("switches between dedicated low-resolution dark and light pixel chassis", () => {
-    assert.match(componentSource, /\/bot-frame\/bot-frame-mini-dark\.png/);
-    assert.match(componentSource, /\/bot-frame\/bot-frame-mini-light\.png/);
+    assert.match(
+      componentSource,
+      /\/bot-frame\/bot-frame-mini-dark-clean\.png/,
+    );
+    assert.match(
+      componentSource,
+      /\/bot-frame\/bot-frame-mini-light-clean\.png/,
+    );
     assert.doesNotMatch(componentSource, /\/bot-frame\/bot-frame-base\.png/);
     assert.doesNotMatch(
       componentSource,
@@ -200,6 +242,14 @@ describe("chatMiniBotAvatar", () => {
     );
     const darkMini = pngHeader("bot-frame-mini-dark.png");
     const lightMini = pngHeader("bot-frame-mini-light.png");
+    const darkMiniClean = pngHeader("bot-frame-mini-dark-clean.png");
+    const lightMiniClean = pngHeader("bot-frame-mini-light-clean.png");
+    const darkMiniColorKeyMask = pngHeader(
+      "bot-frame-mini-dark-color-key-mask.png",
+    );
+    const lightMiniColorKeyMask = pngHeader(
+      "bot-frame-mini-light-color-key-mask.png",
+    );
     const darkCanonical = pngHeader("bot-frame-base.png");
     const lightCanonical = pngHeader("bot-frame-light-base.png");
     assert.deepEqual(
@@ -210,6 +260,21 @@ describe("chatMiniBotAvatar", () => {
       },
       { width: 96, height: 96, colorType: 6 },
     );
+    for (const derivedMiniAsset of [
+      darkMiniClean,
+      lightMiniClean,
+      darkMiniColorKeyMask,
+      lightMiniColorKeyMask,
+    ]) {
+      assert.deepEqual(
+        {
+          width: derivedMiniAsset.width,
+          height: derivedMiniAsset.height,
+          colorType: derivedMiniAsset.colorType,
+        },
+        { width: 96, height: 96, colorType: 6 },
+      );
+    }
     assert.deepEqual(
       {
         width: lightMini.width,
@@ -247,7 +312,14 @@ describe("chatMiniBotAvatar", () => {
 
   it("keeps alloy identity while removing compact glow, phosphor, and breathing", () => {
     assert.match(cssSource, /\.frameBase/);
+    assert.match(cssSource, /\.frameIdentityColor/);
     assert.match(cssSource, /\.frameAlloy/);
+    assert.match(
+      cssSource,
+      /\.frameIdentityColor\s*\{[^}]*z-index:\s*4/,
+      "solid keyed pixels must sit above the overlapping alloy mask so every authored LED stays on",
+    );
+    assert.match(cssSource, /\.frameAlloy\s*\{[^}]*z-index:\s*3/);
     assert.match(cssSource, /bot-frame-mini-metal-mask\.png/);
     assert.doesNotMatch(cssSource, /bot-frame-metal-mask\.png/);
     const miniMetalMask = pngHeader("bot-frame-mini-metal-mask.png");
@@ -317,6 +389,11 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.doesNotMatch(componentSource, /lightMode|frameLight/);
     assert.doesNotMatch(cssSource, /frameLight|data-light-mode|Breath|Ignite/);
+    assert.doesNotMatch(
+      pageCssSource,
+      /data-chat-mini-frame-light/,
+      "Mini LEDs must come only from the keyed sprite pixels, never a separate light overlay",
+    );
     assert.doesNotMatch(cssSource, /\.root\[data-size="hero"\]::before/);
     assert.match(cssSource, /\.root\[data-size="hero"\]::after/);
     assert.match(
@@ -329,7 +406,21 @@ describe("chatMiniBotAvatar", () => {
       cssSource,
       /chat-mini-buckle-crt|repeating-linear-gradient/,
     );
-    assert.match(cssSource, /\.lowerScreen\s*\{[^}]*overflow:\s*hidden/);
+    assert.match(
+      cssSource,
+      /\/\* Light and Dark share this exact bare-glyph registration\.[\s\S]*?\.lowerScreen\s*\{[^}]*overflow:\s*visible/,
+      "the bare Mini glyph must not be clipped while moving toward the HD registration",
+    );
+    assert.match(
+      cssSource,
+      /\.lowerScreen\s*\{[^}]*left:\s*var\(--chat-mini-bot-lower-screen-anchor-x\)[^}]*top:\s*var\(--chat-mini-bot-lower-screen-anchor-y\)[^}]*transform:\s*translate\(-50%, -50%\)/,
+      "the glyph box must be centered on the shared anchor instead of positioned from a drifting corner",
+    );
+    assert.match(
+      cssSource,
+      /\.upperScreen,\s*\.lowerScreen\s*\{[^}]*overflow:\s*hidden/,
+      "shared screen defaults may clip, but the later bare-glyph rule must override them",
+    );
     assert.doesNotMatch(
       cssSource,
       /\.root\[data-size="badge"\][^{]*\.lowerScreen::before/,
@@ -544,9 +635,12 @@ describe("chatMiniBotAvatar", () => {
     assert.match(
       microComponentSource,
       /--bot-avatar-micro-glyph-color[\s\S]{0,100}BOT_AVATAR_MICRO_GLYPH_COLOR/,
-      "Micro glyphs retain the shared white-phosphor contract",
+      "Dark Micro glyphs retain the shared white-mark contract",
     );
-    assert.match(microComponentSource, /data-avatar-render-tier="micro"/);
+    assert.match(
+      microComponentSource,
+      /data-avatar-render-tier=\{atomicAvatar \? "atomic" : "micro"\}/,
+    );
     assert.match(
       microComponentSource,
       /botAvatarMicroPresentationForSize\(props\.renderSizePx\)/,
@@ -587,6 +681,16 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(
       pageCssSource,
+      /\.themeLight \.botAvatarMicroGlyph\s*\{[^}]*color:\s*var\(--bot-avatar-micro-identity-color-light, #5f50d8\)/,
+      "Light Micro glyphs must use the normalized identity color",
+    );
+    assert.match(
+      pageCssSource,
+      /\.themeLight\s+\.messageMoodBadge\[data-face="coffee"\]\[data-variant="micro"\]\s*\{[^}]*--bot-avatar-micro-identity-color:[^}]*--bot-avatar-micro-identity-color-light[^}]*background:[^}]*circle at 32% 20%[^}]*#ffffff 0 58%[^}]*#dfe8ee 100%[^}]*border-color:\s*var\(--bot-avatar-micro-identity-color\);[^}]*box-shadow:[^}]*inset 0 -5px 8px rgba\(72, 89, 104, 0\.18\)/,
+      "Light Micro must keep its white-glass material with a normalized identity rim",
+    );
+    assert.match(
+      pageCssSource,
       /\.botAvatarMicroGlyph > svg\s*\{[^}]*width:\s*64%;[^}]*height:\s*64%/,
     );
     assert.match(
@@ -599,7 +703,17 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(
       pageCssSource,
-      /\.themeLight \.botAvatarMicroIdentityPixel\s*\{[^}]*--bot-avatar-micro-identity-color-light/,
+      /data-avatar-micro-presentation="atomic"\]\s*\{[^}]*background:\s*transparent;[^}]*border:\s*0;[^}]*box-shadow:\s*none;/,
+      "Atomic avatars must be bare glyphs without an orb",
+    );
+    assert.match(
+      pageCssSource,
+      /data-avatar-micro-presentation="atomic"\]\s*\.botAvatarMicroGlyph\s*\{[^}]*--bot-avatar-micro-identity-color-dark/,
+      "Atomic avatars must use the normalized identity color in Dark Mode",
+    );
+    assert.match(
+      pageCssSource,
+      /\.themeLight \.botAvatarMicroIdentityPixel\s*\{[^}]*background:\s*var\(--bot-avatar-micro-identity-color, #5f50d8\)/,
     );
     assert.match(
       pageCssSource,

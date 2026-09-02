@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT,
+  DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS,
   DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS,
   copyDebateFlytingStageAlignment,
   debateFlytingStageRehearsalItems,
@@ -22,13 +23,28 @@ describe("Flyting stage alignment", () => {
     const ids = new Set(
       DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS.map((item) => item.id),
     );
-    assert.equal(ids.size, 20);
+    assert.equal(ids.size, 21);
     assert.ok(ids.has("wideForHelmet"));
     assert.ok(ids.has("moderatorModeratorHelmet"));
     assert.ok(ids.has("wideAgainstHeraldry"));
     assert.ok(ids.has("wideModeratorHeraldry"));
     assert.ok(ids.has("moderatorModeratorHeraldry"));
-    assert.ok(!new Set<string>(ids).has("galleryModeratorRugGlyph"));
+    assert.ok(ids.has("galleryModeratorRugGlyph"));
+  });
+
+  it("lets each independently authored helmet rotate and skew", () => {
+    const items = new Map(
+      DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS.map((item) => [item.id, item]),
+    );
+    for (const id of [
+      "wideForHelmet",
+      "wideAgainstHelmet",
+      "wideModeratorHelmet",
+      "moderatorModeratorHelmet",
+    ] as const) {
+      assert.equal(items.get(id)?.supportsRotation, true);
+      assert.equal(items.get(id)?.supportsSkew, true);
+    }
   });
 
   it("merges gallery rug tuning into the Wide rehearsal view", () => {
@@ -38,12 +54,45 @@ describe("Flyting stage alignment", () => {
     assert.ok(wideIds.has("wideForBot"));
     assert.ok(wideIds.has("wideModeratorHeraldry"));
     assert.ok(wideIds.has("galleryForRugGlyph"));
+    assert.ok(wideIds.has("galleryModeratorRugGlyph"));
     assert.ok(wideIds.has("galleryAgainstRugGlyph"));
     assert.ok(
       debateFlytingStageRehearsalItems("moderator").every(
         (item) => item.view === "moderator",
       ),
     );
+  });
+
+  it("installs the approved rug placements and gallery controls", () => {
+    assert.deepEqual(
+      DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements.galleryForRugGlyph,
+      {
+        x: 0.02,
+        y: -8.45,
+        scale: 100,
+        rotation: 0,
+        skewX: -20,
+      },
+    );
+    assert.deepEqual(
+      DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements
+        .galleryModeratorRugGlyph,
+      { x: 0, y: 0, scale: 100, rotation: 0, skewX: 0 },
+    );
+    assert.deepEqual(
+      DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements.galleryAgainstRugGlyph,
+      {
+        x: 0.59,
+        y: -4.84,
+        scale: 100,
+        rotation: 0,
+        skewX: 20,
+      },
+    );
+    assert.deepEqual(DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS, {
+      galleryBotScale: 60,
+      galleryMaxVerticalRoam: 30,
+    });
   });
 
   it("updates one placement without disturbing the others", () => {
@@ -91,10 +140,8 @@ describe("Flyting stage alignment", () => {
     });
     assert.match(clipboard, /DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT/u);
     assert.match(clipboard, /"galleryForRugGlyph"/u);
-    assert.match(
-      clipboard,
-      /DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS/u,
-    );
+    assert.match(clipboard, /"galleryModeratorRugGlyph"/u);
+    assert.match(clipboard, /DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS/u);
     assert.match(clipboard, /"galleryBotScale": 135/u);
     assert.match(clipboard, /"galleryMaxVerticalRoam": 18/u);
   });

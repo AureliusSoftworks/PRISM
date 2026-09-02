@@ -1020,7 +1020,7 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("adds an off-canvas spotlight and drives the shared Zen bot refraction", () => {
+  it("adds an off-canvas spotlight without restyling canonical avatars", () => {
     assert.match(source, /function SignalStudioSpotlight\(\)/u);
     assert.match(source, /className=\{styles\.studioSpotlight\}/u);
     assert.match(source, /data-prism-decorative-motion="true"/u);
@@ -1047,27 +1047,16 @@ describe("Signal experience shell", () => {
       pageSource,
       /const signalMannequinAmbientProps:[\s\S]{0,500}isTalking: signalMannequinTalking[\s\S]{0,4000}<BotAmbientPresenceRig \{\.\.\.signalMannequinAmbientProps\}>/u,
     );
-    assert.match(
+    assert.doesNotMatch(pageCss, /--signal-bot-(?:metal|screen)/iu);
+    assert.doesNotMatch(
       pageCss,
-      /\.signalBotPresencePlate\s*\{[^}]*--bot-face-metal-light-rotation:\s*var\(--signal-bot-metal-light-rotation\)/iu,
+      /\.signalBotPresencePlate\s*\{[^}]*(?:--bot-face-(?:metal|screen|crt)|animation:)/iu,
     );
-    assert.match(
-      pageCss,
-      /\.signalBotPresencePlate\s*\{[^}]*--bot-face-screen-glare-x:\s*var\(--signal-bot-screen-glare-x\)/iu,
-    );
-    assert.match(
-      pageCss,
-      /\.signalBotPresencePlate\s*\{[^}]*signalBotZenSpotlightRefraction 7\.2s/iu,
-    );
-    assert.match(pageCss, /@keyframes signalBotZenSpotlightRefraction/iu);
+    assert.doesNotMatch(pageCss, /@keyframes signalBotZenSpotlightRefraction/iu);
     assert.doesNotMatch(pageCss, /signalBotStudio(?:Metal|Paint|Glare)/iu);
     assert.doesNotMatch(
       pageCss,
       /\.signalBotPresencePlate \.botFaceFrameMetalLightRaster::before\s*\{/iu,
-    );
-    assert.match(
-      pageCss,
-      /prefers-reduced-motion[\s\S]*?\.signalBotPresencePlate\s*\{[^}]*animation:\s*none/iu,
     );
   });
 

@@ -2,6 +2,10 @@
 
 import { type CSSProperties, type ReactNode } from "react";
 import {
+  normalizeAccentForTheme,
+  normalizeBotIdentityColor,
+} from "@localai/shared";
+import {
   BOT_AVATAR_CANONICAL_FACING,
   botAvatarScreenFacingScaleX,
   type BotAvatarFacing,
@@ -15,9 +19,9 @@ import styles from "./chatMiniBotAvatar.module.css";
 
 export const CHAT_MINI_BOT_AVATAR_CANONICAL_SCREEN_SIZE = 128;
 export const CHAT_MINI_BOT_AVATAR_DARK_BASE_SRC =
-  "/bot-frame/bot-frame-mini-dark.png?v=2";
+  "/bot-frame/bot-frame-mini-dark-clean.png?v=1";
 export const CHAT_MINI_BOT_AVATAR_LIGHT_BASE_SRC =
-  "/bot-frame/bot-frame-mini-light.png?v=2";
+  "/bot-frame/bot-frame-mini-light-clean.png?v=1";
 export const CHAT_MINI_BOT_AVATAR_MIN_RENDER_SIZE = 1;
 export const CHAT_MINI_BOT_AVATAR_MAX_RENDER_SIZE =
   BOT_AVATAR_COMPACT_ENTER_MAX_PX - 1;
@@ -75,9 +79,14 @@ export function ChatMiniBotAvatar(props: {
   const screenPalette = color
     ? deriveBotAvatarScreenPalette(color, theme)
     : null;
+  const normalizedIdentityColor = normalizeAccentForTheme(
+    normalizeBotIdentityColor(color) ?? "#7c6cff",
+    theme,
+  );
 
   const rootStyle = {
     ["--chat-mini-bot-color" as string]: color ?? "var(--accent)",
+    ["--chat-mini-bot-normalized-color" as string]: normalizedIdentityColor,
     ...botAvatarScreenPaletteVariables(screenPalette),
     ["--chat-mini-bot-alloy-color" as string]:
       props.alloyColor?.trim() || "#aeb8c1",
@@ -134,6 +143,7 @@ export function ChatMiniBotAvatar(props: {
         alt=""
         draggable={false}
       />
+      <span className={styles.frameIdentityColor} aria-hidden="true" />
       <span className={styles.frameAlloy} aria-hidden="true" />
       <span
         className={styles.upperScreen}

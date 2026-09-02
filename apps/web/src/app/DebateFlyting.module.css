@@ -2568,7 +2568,7 @@
   background: url("/debate/flyting/viking-participant-helmet-base.png") center /
     contain no-repeat;
   filter: drop-shadow(0 8px 9px rgba(0, 0, 0, 0.62));
-  transform: translateX(-50%);
+  transform: translateX(-50%) skewX(var(--flyting-align-skew-x, 0deg));
   scale: var(--flyting-align-scale, 1);
   rotate: var(--flyting-align-rotation, 0deg);
 }
@@ -2582,7 +2582,8 @@
   background: url("/debate/flyting/viking-participant-helmet-base.png") center /
     contain no-repeat;
   filter: drop-shadow(0 7px 8px rgba(0, 0, 0, 0.58));
-  transform: translateX(-50%) scaleY(0.86);
+  transform: translateX(-50%) scaleY(0.86)
+    skewX(var(--flyting-align-skew-x, 0deg));
   transform-origin: 50% 50%;
   scale: var(--flyting-align-scale, 1);
   rotate: var(--flyting-align-rotation, 0deg);
@@ -2736,6 +2737,10 @@
   left: calc(17.25% + var(--flyting-align-x, 0%));
 }
 
+.galleryRugGlyphs > span[data-role="moderator"] {
+  left: calc(50% + var(--flyting-align-x, 0%));
+}
+
 .galleryRugGlyphs > span[data-role="against"] {
   left: calc(82.75% + var(--flyting-align-x, 0%));
 }
@@ -2752,6 +2757,7 @@
   align-items: end;
   animation: flyting-gallery-milling var(--flyting-gallery-mill-duration, 5.4s)
     ease-in-out var(--flyting-gallery-mill-delay, 0ms) infinite alternate;
+  scale: var(--flyting-gallery-bot-scale, 1);
   transform-origin: 50% 100%;
 }
 
@@ -2903,16 +2909,19 @@
 }
 
 .galleryVikingHelmet {
-  top: -38%;
+  /* The native pixel crown already contains horns, but its old 134% / 0.86
+     fit tucked their sparse outer pixels inside the wider mini chassis. */
+  top: -54%;
   left: 50%;
   z-index: 7;
-  width: 134%;
+  width: 166%;
   aspect-ratio: 1;
   background: url("/debate/flyting/viking-pixel-crown-base.png") center /
     contain no-repeat;
+  filter: drop-shadow(0 4px 5px rgba(0, 0, 0, 0.62));
   image-rendering: pixelated;
   transform: translateX(-50%) scaleX(var(--debate-audience-facing-scale))
-    scaleY(0.86);
+    scaleY(0.92);
   transform-origin: 50% 50%;
 }
 
@@ -2926,7 +2935,8 @@
     contain no-repeat;
   filter: drop-shadow(0 5px 7px rgba(0, 0, 0, 0.62));
   image-rendering: pixelated;
-  transform: translateX(-50%) scaleY(0.86);
+  transform: translateX(-50%) scaleY(0.86)
+    skewX(var(--flyting-align-skew-x, 0deg));
   transform-origin: 50% 50%;
   scale: var(--flyting-align-scale, 1);
   rotate: var(--flyting-align-rotation, 0deg);
@@ -3111,7 +3121,8 @@
 
 .liveShell [data-flyting-alignment-handle="true"] {
   z-index: 24 !important;
-  outline: 1px dashed rgba(235, 191, 96, 0.54);
+  outline: 1px dashed
+    var(--hall-authoring-handle-outline, rgba(235, 191, 96, 0.54));
   outline-offset: 3px;
   cursor: grab;
   pointer-events: auto !important;
@@ -3123,8 +3134,9 @@
 }
 
 .liveShell [data-flyting-alignment-selected="true"] {
-  outline: 2px solid #f2c76d;
-  box-shadow: 0 0 0 4px rgba(255, 42, 96, 0.22);
+  outline: 2px solid var(--hall-authoring-selection-outline, #f2c76d);
+  box-shadow: 0 0 0 4px
+    var(--hall-authoring-selection-glow, rgba(255, 42, 96, 0.22));
 }
 
 .stageAlignmentModal {
@@ -3143,6 +3155,27 @@
   --hall-authoring-preview-muted: #929aaa;
   --hall-authoring-preview-label: #b5bdca;
   --hall-authoring-preview-shadow: none;
+  --hall-authoring-stage-shadow: 0 18px 58px rgba(0, 0, 0, 0.54);
+  --hall-authoring-strong-ink: #fff;
+  --hall-authoring-hover-base: #090a0d;
+  --hall-authoring-handle-outline: rgba(235, 191, 96, 0.54);
+  --hall-authoring-selection-outline: #f2c76d;
+  --hall-authoring-selection-glow: rgba(255, 42, 96, 0.22);
+  --hall-authoring-selected-edge: rgba(255, 70, 106, 0.62);
+  --hall-authoring-selected-ink: #fff;
+  --hall-authoring-selected-surface: rgba(166, 25, 58, 0.52);
+  --hall-authoring-selected-glow: rgba(255, 61, 103, 0.16);
+  --hall-authoring-copy-edge: rgba(239, 189, 94, 0.64);
+  --hall-authoring-copy-ink: #1c1012;
+  --hall-authoring-copy-start: #f6d17d;
+  --hall-authoring-copy-end: #e5a84a;
+  --hall-authoring-gallery-background: #080504;
+  --hall-authoring-gallery-fog-core: rgba(12, 8, 7, 0.16);
+  --hall-authoring-gallery-fog-mid: rgba(8, 6, 6, 0.08);
+  --hall-authoring-gallery-fog-floor: rgba(3, 2, 2, 0.14);
+  --hall-authoring-gallery-fog-opacity: 0.09;
+  --hall-authoring-vote-shadow: 0 5px 18px rgba(0, 0, 0, 0.3);
+  color-scheme: dark;
   position: fixed;
   z-index: 1180;
   inset: 0;
@@ -3173,6 +3206,27 @@
   --hall-authoring-preview-ink: #1f2937;
   --hall-authoring-preview-muted: #657083;
   --hall-authoring-preview-label: #526175;
+  --hall-authoring-stage-shadow: 0 18px 48px rgba(31, 41, 55, 0.24);
+  --hall-authoring-strong-ink: #1f2937;
+  --hall-authoring-hover-base: #f3f5f8;
+  --hall-authoring-handle-outline: rgba(114, 72, 12, 0.7);
+  --hall-authoring-selection-outline: #8b5b08;
+  --hall-authoring-selection-glow: rgba(181, 43, 72, 0.22);
+  --hall-authoring-selected-edge: rgba(153, 31, 57, 0.7);
+  --hall-authoring-selected-ink: #fff;
+  --hall-authoring-selected-surface: #a52643;
+  --hall-authoring-selected-glow: rgba(181, 43, 72, 0.14);
+  --hall-authoring-copy-edge: rgba(116, 76, 12, 0.46);
+  --hall-authoring-copy-ink: #251708;
+  --hall-authoring-copy-start: #f3ca69;
+  --hall-authoring-copy-end: #dfa13f;
+  --hall-authoring-gallery-background: #c4a984;
+  --hall-authoring-gallery-fog-core: rgba(132, 96, 54, 0.08);
+  --hall-authoring-gallery-fog-mid: rgba(106, 76, 42, 0.04);
+  --hall-authoring-gallery-fog-floor: rgba(73, 49, 27, 0.08);
+  --hall-authoring-gallery-fog-opacity: 0.04;
+  --hall-authoring-vote-shadow: 0 5px 16px rgba(31, 41, 55, 0.18);
+  color-scheme: light;
 }
 
 .stageAlignmentPreview {
@@ -3290,45 +3344,37 @@
   width: min(100%, 1160px);
   max-width: 100%;
   margin: auto;
-  box-shadow: 0 18px 58px rgba(0, 0, 0, 0.54);
+  box-shadow: var(--hall-authoring-stage-shadow);
 }
 
-.stageAlignmentPreviewStage
-  .hallCamera
-  [data-flyting-bot-avatar="for"],
-.stageAlignmentPreviewStage
-  .hallCamera
-  [data-flyting-bot-avatar="against"] {
+.stageAlignmentPreviewStage .hallCamera [data-flyting-bot-avatar="for"],
+.stageAlignmentPreviewStage .hallCamera [data-flyting-bot-avatar="against"] {
   width: clamp(145px, 12.4cqw, 194px);
 }
 
 .stageAlignmentPreviewGallery {
   --debate-gallery-atmosphere: none;
-  --debate-gallery-fog-core: rgba(12, 8, 7, 0.16);
-  --debate-gallery-fog-mid: rgba(8, 6, 6, 0.08);
-  --debate-gallery-fog-floor: rgba(3, 2, 2, 0.14);
-  --debate-gallery-fog-opacity: 0.09;
+  --debate-gallery-fog-core: var(--hall-authoring-gallery-fog-core);
+  --debate-gallery-fog-mid: var(--hall-authoring-gallery-fog-mid);
+  --debate-gallery-fog-floor: var(--hall-authoring-gallery-fog-floor);
+  --debate-gallery-fog-opacity: var(--hall-authoring-gallery-fog-opacity);
   width: min(100%, 1160px);
   height: min(52vh, 420px);
   min-height: 260px;
   margin: auto;
-  background-color: #080504;
+  background-color: var(--hall-authoring-gallery-background);
   background-position:
     center,
     center,
     center 58%;
   background-size: cover, cover, cover;
-  box-shadow: 0 18px 58px rgba(0, 0, 0, 0.54);
+  box-shadow: var(--hall-authoring-stage-shadow);
 }
 
 .stageAlignmentPreviewCanvas[data-gallery-stacked="true"]
   .stageAlignmentPreviewGallery {
   height: clamp(210px, 21vw, 290px);
   min-height: 210px;
-}
-
-.stageAlignmentPreviewGallery .flytingAudienceMillingSlot {
-  scale: var(--flyting-preview-gallery-bot-scale, 1);
 }
 
 .stageAlignmentVoteControls {
@@ -3351,9 +3397,13 @@
     color-mix(in srgb, var(--flyting-vote-color) 62%, transparent);
   border-radius: 999px;
   padding: 5px 8px 5px 12px;
-  color: #fff;
-  background: color-mix(in srgb, #090a0d 82%, transparent);
-  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.3);
+  color: var(--hall-authoring-strong-ink);
+  background: color-mix(
+    in srgb,
+    var(--hall-authoring-hover-base) 82%,
+    transparent
+  );
+  box-shadow: var(--hall-authoring-vote-shadow);
   backdrop-filter: blur(10px);
   cursor: pointer;
 }
@@ -3363,7 +3413,11 @@
 }
 
 .stageAlignmentVoteControls button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--flyting-vote-color) 28%, #090a0d);
+  background: color-mix(
+    in srgb,
+    var(--flyting-vote-color) 28%,
+    var(--hall-authoring-hover-base)
+  );
 }
 
 .stageAlignmentVoteControls button:disabled {
@@ -3380,7 +3434,11 @@
 }
 
 .stageAlignmentVoteControls button b {
-  color: color-mix(in srgb, var(--flyting-vote-color) 78%, #fff);
+  color: color-mix(
+    in srgb,
+    var(--flyting-vote-color) 78%,
+    var(--hall-authoring-strong-ink)
+  );
   font-size: 1rem;
   line-height: 1;
 }
@@ -3392,7 +3450,7 @@
 }
 
 .stageAlignmentVoteControls output {
-  color: rgba(255, 255, 255, 0.72);
+  color: color-mix(in srgb, var(--hall-authoring-strong-ink) 72%, transparent);
   font-size: 0.58rem;
   font-weight: 720;
   letter-spacing: 0.07em;
@@ -3406,11 +3464,7 @@
   border: 1px solid var(--hall-authoring-edge-soft);
   border-radius: 10px;
   padding: 10px;
-  background: color-mix(
-    in srgb,
-    var(--hall-authoring-raised) 76%,
-    transparent
-  );
+  background: color-mix(in srgb, var(--hall-authoring-raised) 76%, transparent);
 }
 
 .stageAlignmentPanelVotes {
@@ -3532,10 +3586,18 @@
 }
 
 .stageAlignmentTabs button[data-selected="true"] {
-  border-color: rgba(255, 70, 106, 0.62);
-  color: #fff;
-  background: rgba(166, 25, 58, 0.52);
-  box-shadow: inset 0 0 14px rgba(255, 61, 103, 0.16);
+  border-color: var(--hall-authoring-selected-edge);
+  color: var(--hall-authoring-selected-ink);
+  background: var(--hall-authoring-selected-surface);
+  box-shadow: inset 0 0 14px var(--hall-authoring-selected-glow);
+}
+
+.stageAlignmentPreviewTools button:focus-visible,
+.stageAlignmentPanel button:focus-visible,
+.stageAlignmentPanel select:focus-visible,
+.stageAlignmentPanel input:focus-visible {
+  outline: 2px solid var(--hall-authoring-selection-outline);
+  outline-offset: 2px;
 }
 
 .stageAlignmentSelect {
@@ -3627,9 +3689,13 @@
 }
 
 .stageAlignmentCopyButton {
-  border-color: rgba(239, 189, 94, 0.64) !important;
-  color: #1c1012 !important;
-  background: linear-gradient(135deg, #f6d17d, #e5a84a) !important;
+  border-color: var(--hall-authoring-copy-edge) !important;
+  color: var(--hall-authoring-copy-ink) !important;
+  background: linear-gradient(
+    135deg,
+    var(--hall-authoring-copy-start),
+    var(--hall-authoring-copy-end)
+  ) !important;
   font-weight: 800 !important;
 }
 

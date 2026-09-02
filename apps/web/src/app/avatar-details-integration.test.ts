@@ -63,10 +63,15 @@ describe("Avatar Details Studio integration", () => {
     assert.doesNotMatch(pageSource, /Apply avatar details\?/);
   });
 
-  it("keeps the editor face guide out of the unmasked expanded-preview repaint", () => {
+  it("keeps authored custom eyes and the editor guide on their raster masks", () => {
     assert.match(
       pageCss,
-      /\.zenLiveBotPresencePlate\[data-avatar-customizer-preview="true"\][\s\S]*?\.signalBotPresencePlate[\s\S]*?:is\(\s*\.zenLiveBotPresenceScreenContentRig,\s*\.zenLiveBotPresenceThinkingGlyphAnchor\s*\)[\s\S]*?\[data-crt-glyph-layer="true"\]\[data-crt-pixel-mask-ready="true"\]::before\s*\{[\s\S]*?-webkit-mask-image:\s*none;[\s\S]*?mask-image:\s*none;/u,
+      /\.zenLiveBotPresencePlate\[data-avatar-full-scale-identity="canonical"\][\s\S]*?\.zenLiveBotPresenceFaceGlyph\[data-face-eye-character\][\s\S]*?\[data-coffee-plate-emoji-part="eyes"\][\s\S]*?\[data-crt-glyph-layer="true"\]\[data-crt-pixel-mask-ready="true"\]::before\s*\{[\s\S]*?-webkit-mask-image:\s*var\(--crt-phosphor-pixel-mask\);[\s\S]*?mask-image:\s*var\(--crt-phosphor-pixel-mask\);/u,
+    );
+    assert.match(
+      pageCss,
+      /\.zenLiveBotPresencePlate\[data-avatar-full-scale-identity="canonical"\][\s\S]*?\.zenLiveBotPresenceFaceGlyph\[data-face-eye-character\][\s\S]*?\[data-coffee-plate-emoji-part="eyes"\][\s\S]*?\[data-crt-glyph-layer="true"\]\[data-crt-pixel-mask-ready="true"\]::before\s*\{[\s\S]*?filter:\s*blur\(var\(--crt-glyph-beam-softness\)\)\s*var\(--crt-face-glow-filter\);/u,
+      "masked custom eyes must emit the shared HD phosphor bloom",
     );
     assert.match(
       editorSource,

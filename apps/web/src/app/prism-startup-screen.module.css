@@ -1,0 +1,605 @@
+.veil {
+  --startup-accent: #2fd3e3;
+  --startup-fg: #e8edf2;
+  --startup-muted: #7a8898;
+  --startup-deep: #05070b;
+  --startup-bg: #080c12;
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  isolation: isolate;
+  overflow: hidden;
+  color: var(--startup-fg);
+  background:
+    radial-gradient(
+      circle at 50% 40%,
+      color-mix(in srgb, #5de6ff 14%, transparent) 0 18%,
+      transparent 44%
+    ),
+    radial-gradient(
+      circle at 36% 58%,
+      color-mix(in srgb, #ff4d6d 9%, transparent) 0 22%,
+      transparent 50%
+    ),
+    radial-gradient(
+      circle at 64% 60%,
+      color-mix(in srgb, #ff9f1c 8%, transparent) 0 20%,
+      transparent 46%
+    ),
+    var(--startup-deep);
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
+  user-select: none;
+  cursor: wait;
+}
+
+.center {
+  --startup-center-padding-y: 32px;
+  --startup-halo-size: clamp(96px, 17dvh, 132px);
+  --startup-halo-radius: clamp(48px, 8.5dvh, 66px);
+  position: relative;
+  z-index: 3;
+  width: min(88vw, 680px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: 32px 24px;
+}
+
+.focusMask {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 48% 46% at center,
+    color-mix(in srgb, var(--startup-deep) 98%, transparent) 0 48%,
+    color-mix(in srgb, var(--startup-deep) 90%, transparent) 64%,
+    color-mix(in srgb, var(--startup-deep) 54%, transparent) 80%,
+    color-mix(in srgb, var(--startup-deep) 18%, transparent) 92%,
+    transparent 100%
+  );
+}
+
+.focusMask::after {
+  position: absolute;
+  left: 50%;
+  top: 63%;
+  width: min(58vw, 540px);
+  height: clamp(110px, 17dvh, 170px);
+  border-radius: 999px;
+  content: "";
+  transform: translate(-50%, -50%);
+  background: radial-gradient(
+    ellipse at center,
+    color-mix(in srgb, var(--startup-deep) 98%, transparent) 0 48%,
+    color-mix(in srgb, var(--startup-deep) 74%, transparent) 68%,
+    transparent 100%
+  );
+}
+
+.optics {
+  position: absolute;
+  z-index: -1;
+  left: 50%;
+  top: calc(var(--startup-center-padding-y) + var(--startup-halo-radius));
+  width: 100vw;
+  height: clamp(190px, 42dvh, 360px);
+  overflow: visible;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  mix-blend-mode: screen;
+}
+
+.incomingTrack,
+.incomingBeam {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 50%;
+  transform: translateY(-50%);
+  transform-origin: left center;
+}
+
+.incomingTrack {
+  height: 1px;
+  opacity: 0.34;
+  background: linear-gradient(
+    90deg,
+    transparent 0,
+    color-mix(in srgb, var(--startup-muted) 42%, transparent) 12%,
+    color-mix(in srgb, var(--startup-fg) 58%, transparent) 100%
+  );
+}
+
+.incomingBeam {
+  height: 1.5px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, #fff 24%, transparent) 0,
+    color-mix(in srgb, #fff 54%, transparent) 28%,
+    #fff 50%,
+    color-mix(in srgb, #fff 58%, transparent) 72%,
+    color-mix(in srgb, #fff 24%, transparent) 100%
+  );
+  background-size: 220% 100%;
+  box-shadow:
+    0 0 4px color-mix(in srgb, #fff 54%, transparent),
+    0 0 13px color-mix(in srgb, #5de6ff 26%, transparent);
+  clip-path: inset(0 var(--prism-startup-beam-remainder, 100%) 0 0);
+  animation: incomingFlow 7.2s linear infinite;
+  animation-delay: var(--prism-startup-optics-flow-phase, 0ms);
+  transition: clip-path 1600ms linear;
+}
+
+.contactFlare {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  opacity: var(--prism-startup-spectrum-progress, 0);
+  transform: translate(-50%, -50%);
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, #fff 88%, transparent) 0 5%,
+    color-mix(in srgb, #5de6ff 44%, transparent) 24%,
+    transparent 72%
+  );
+  filter: blur(0.35px);
+  transition: opacity 1200ms linear;
+}
+
+.spectrum {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 50%;
+  height: 100%;
+  overflow: visible;
+  opacity: 0.78;
+  clip-path: inset(0 var(--prism-startup-spectrum-remainder, 100%) 0 0);
+  transition: clip-path 1800ms linear;
+  filter: drop-shadow(0 0 5px color-mix(in srgb, #5de6ff 20%, transparent));
+}
+
+.spectrumRay {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.spectrumRed {
+  color: #ff4d6d;
+}
+.spectrumAmber {
+  color: #ff9f1c;
+}
+.spectrumLime {
+  color: #b7e63a;
+}
+.spectrumCyan {
+  color: #2fd3e3;
+}
+.spectrumViolet {
+  color: #7b5cff;
+}
+
+.spectrumGlint {
+  fill: none;
+  stroke: color-mix(in srgb, currentColor 46%, #fff);
+  stroke-width: 0.7;
+  stroke-linecap: round;
+  stroke-dasharray: 0.075 0.925;
+  vector-effect: non-scaling-stroke;
+  animation: spectrumFlow 7.2s linear infinite;
+  animation-delay: var(--prism-startup-optics-flow-phase, 0ms);
+}
+
+.halo {
+  position: relative;
+  width: var(--startup-halo-size);
+  height: var(--startup-halo-size);
+  display: grid;
+  place-items: center;
+  isolation: isolate;
+  border-radius: 999px;
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.07) 0 45%,
+    transparent 70%
+  );
+  box-shadow:
+    0 24px 76px rgba(0, 0, 0, 0.36),
+    0 0 60px color-mix(in srgb, #5de6ff 22%, transparent),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.13);
+  animation: haloDrift 2.6s ease-in-out infinite;
+  animation-delay: var(--prism-startup-halo-phase, 0ms);
+}
+
+.ring {
+  position: absolute;
+  z-index: -1;
+  inset: -14px;
+  border-radius: 999px;
+  padding: 2px;
+  opacity: 0.86;
+  background: conic-gradient(
+    from 18deg,
+    #ff4d6d,
+    #ff9f1c,
+    #b7e63a,
+    #2fd3e3,
+    #7b5cff,
+    #ff4d6d
+  );
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  animation: ringSpin 4.8s linear infinite;
+  animation-delay: var(--prism-startup-ring-phase, 0ms);
+}
+
+.aura {
+  position: absolute;
+  z-index: -2;
+  inset: -44px;
+  border-radius: 999px;
+  opacity: 0.4;
+  background: conic-gradient(
+    from 120deg,
+    color-mix(in srgb, #ff4d6d 38%, transparent),
+    color-mix(in srgb, #2fd3e3 38%, transparent),
+    color-mix(in srgb, #7b5cff 34%, transparent),
+    color-mix(in srgb, #ff9f1c 34%, transparent),
+    color-mix(in srgb, #ff4d6d 38%, transparent)
+  );
+  filter: blur(28px);
+  animation: auraPulse 2.8s ease-in-out infinite;
+  animation-delay: var(--prism-startup-aura-phase, 0ms);
+}
+
+.glyph {
+  width: clamp(42px, 7.2dvh, 56px);
+  height: clamp(42px, 7.2dvh, 56px);
+  color: color-mix(in srgb, var(--startup-fg) 92%, #5de6ff 8%);
+  filter: drop-shadow(
+      0 0 16px color-mix(in srgb, currentColor 32%, transparent)
+    )
+    drop-shadow(0 3px 10px rgba(0, 0, 0, 0.34));
+  animation: glyphPulse 1.55s ease-in-out infinite;
+  animation-delay: var(--prism-startup-glyph-phase, 0ms);
+}
+
+.label {
+  min-height: 1.4em;
+  color: color-mix(in srgb, var(--startup-fg) 86%, var(--startup-muted));
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.24),
+    0 0 18px color-mix(in srgb, #5de6ff 16%, transparent);
+  animation: handoffDetailIn 240ms ease-out both;
+}
+
+.services {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  animation: handoffDetailIn 240ms ease-out both;
+}
+
+.service {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, #b7e63a 36%, transparent);
+  border-radius: 999px;
+  padding: 4px 10px 4px 7px;
+  color: color-mix(in srgb, var(--startup-fg) 82%, #b7e63a);
+  background: color-mix(in srgb, var(--startup-bg) 72%, transparent);
+  font-size: 0.72rem;
+  font-weight: 640;
+  letter-spacing: 0.02em;
+}
+
+.serviceDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #b7e63a;
+  box-shadow: 0 0 7px color-mix(in srgb, #b7e63a 56%, transparent);
+}
+
+.retry {
+  min-height: 34px;
+  border: 1px solid color-mix(in srgb, #ff4d6d 42%, transparent);
+  border-radius: 999px;
+  padding: 0 16px;
+  color: var(--startup-fg);
+  background: color-mix(in srgb, #ff4d6d 12%, var(--startup-bg));
+  font:
+    700 0.75rem/1 system-ui,
+    sans-serif;
+  cursor: pointer;
+}
+
+.retry:focus-visible {
+  outline: 2px solid var(--startup-accent);
+  outline-offset: 3px;
+}
+
+.console {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  opacity: 0.82;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, #000 18%, transparent) 0%,
+    transparent 24%,
+    transparent 72%,
+    color-mix(in srgb, #000 26%, transparent) 100%
+  );
+}
+
+.consoleHeader {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 13px 18px 8px;
+  color: var(--startup-muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.58;
+}
+
+.consoleSigil {
+  flex: 0 0 auto;
+  width: 54px;
+  height: 12px;
+  margin-right: 10px;
+  overflow: visible;
+  filter: drop-shadow(
+    0 0 5px color-mix(in srgb, var(--startup-accent) 22%, transparent)
+  );
+}
+
+.consoleRay,
+.consolePrism,
+.consoleSpectrum {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.consoleRay {
+  stroke: color-mix(in srgb, var(--startup-fg) 58%, var(--startup-muted));
+  stroke-width: 1;
+}
+
+.consolePrism {
+  fill: color-mix(in srgb, var(--startup-accent) 7%, transparent);
+  stroke: color-mix(in srgb, var(--startup-fg) 72%, var(--startup-accent));
+  stroke-width: 1;
+}
+
+.consoleSpectrum {
+  stroke-width: 1.25;
+}
+
+.consoleBrand {
+  color: color-mix(in srgb, var(--startup-fg) 78%, var(--startup-muted));
+  letter-spacing: 0.14em;
+}
+
+.consoleDivider {
+  margin: 0 7px;
+  color: color-mix(in srgb, var(--startup-accent) 46%, var(--startup-muted));
+  font-weight: 500;
+}
+
+.consoleTitle {
+  letter-spacing: 0.1em;
+}
+
+.consoleRule {
+  flex: 1 1 auto;
+  min-width: 24px;
+  height: 1px;
+  margin-left: 12px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--startup-accent) 34%, transparent),
+    color-mix(in srgb, #7b5cff 16%, transparent) 48%,
+    transparent 100%
+  );
+}
+
+.consoleLines {
+  flex: 1 1 auto;
+  overflow: hidden;
+  padding: 0 0 18px;
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 42px,
+    #000 calc(100% - 32px),
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 42px,
+    #000 calc(100% - 32px),
+    transparent 100%
+  );
+  animation: handoffDetailIn 240ms ease-out both;
+}
+
+.logLine {
+  display: flex;
+  align-items: baseline;
+  padding: 1px 18px;
+  font:
+    clamp(10px, 1.18dvh, 13px)/1.52 ui-monospace,
+    "Cascadia Code",
+    "Fira Code",
+    "Menlo",
+    monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.logSource {
+  flex: 0 0 auto;
+  min-width: 3.6ch;
+  margin-right: 8px;
+  font-weight: 700;
+}
+
+.logLine[data-spectrum="0"] .logSource {
+  color: #ff4d6d;
+}
+.logLine[data-spectrum="1"] .logSource {
+  color: #ff9f1c;
+}
+.logLine[data-spectrum="2"] .logSource {
+  color: #b7e63a;
+}
+.logLine[data-spectrum="3"] .logSource {
+  color: #2fd3e3;
+}
+.logLine[data-spectrum="4"] .logSource {
+  color: #7b5cff;
+}
+
+.logText {
+  flex: 1 1 auto;
+  color: #fff;
+}
+
+@keyframes handoffDetailIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes haloDrift {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-9px) scale(1.025);
+  }
+}
+@keyframes ringSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes auraPulse {
+  0%,
+  100% {
+    opacity: 0.32;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 0.52;
+    transform: scale(1.06);
+  }
+}
+@keyframes glyphPulse {
+  0%,
+  100% {
+    opacity: 0.82;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+}
+@keyframes incomingFlow {
+  from {
+    background-position: 120% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
+}
+@keyframes spectrumFlow {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .veil,
+  .center,
+  .label,
+  .services,
+  .consoleLines,
+  .halo,
+  .ring,
+  .aura,
+  .glyph {
+    animation: none !important;
+  }
+
+  .incomingBeam,
+  .spectrumGlint,
+  .contactFlare,
+  .spectrum {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@media (max-width: 560px), (max-height: 520px) {
+  .center {
+    --startup-center-padding-y: 24px;
+    gap: 16px;
+    padding: 24px 18px;
+  }
+  .focusMask::after {
+    width: min(78vw, 440px);
+    height: 128px;
+  }
+  .optics {
+    height: clamp(150px, 38dvh, 230px);
+  }
+  .services {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+}

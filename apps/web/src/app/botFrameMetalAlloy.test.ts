@@ -7,6 +7,7 @@ import {
 } from "@localai/shared";
 
 import {
+  BOT_FRAME_LED_LIT_COLOR,
   BOT_FRAME_LED_UNLIT_COLOR,
   BOT_FRAME_METAL_ALLOY_BY_VOICE,
   BOT_FRAME_METAL_ALLOY_IDLE_MIX,
@@ -105,8 +106,9 @@ describe("botFrameMetalAlloyStyle", () => {
 });
 
 describe("botFrameLedPaintColor", () => {
-  it("paints silent LEDs dark gray and restores accent while talking", () => {
+  it("paints silent LEDs dark gray and lit LEDs white", () => {
     assert.equal(BOT_FRAME_LED_UNLIT_COLOR, "#3A3F46");
+    assert.equal(BOT_FRAME_LED_LIT_COLOR, "#FFFFFF");
     assert.equal(
       botFrameLedPaintColor({
         isTalking: false,
@@ -119,17 +121,17 @@ describe("botFrameLedPaintColor", () => {
         isTalking: true,
         accentColor: "#42d9ff",
       }),
-      "#42d9ff",
+      BOT_FRAME_LED_LIT_COLOR,
     );
   });
 
-  it("falls back to unlit gray when talking without an accent", () => {
+  it("keeps lit LEDs white even without an accent", () => {
     assert.equal(
       botFrameLedPaintColor({
         isTalking: true,
         accentColor: "   ",
       }),
-      BOT_FRAME_LED_UNLIT_COLOR,
+      BOT_FRAME_LED_LIT_COLOR,
     );
   });
 });

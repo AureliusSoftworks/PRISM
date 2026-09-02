@@ -4743,7 +4743,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       pageCss,
-      /\.debateBotPresencePlate\[data-talking="true"\] \.botFaceFrameLed\s*\{[^}]*background-color:\s*var\(--coffee-bot-color\)[^}]*drop-shadow/u,
+      /\.debateBotPresencePlate\[data-talking="true"\] \.botFaceFrameLed\s*\{[^}]*background-color:\s*#fff[^}]*filter:\s*none/u,
     );
     assert.match(
       pageCss,

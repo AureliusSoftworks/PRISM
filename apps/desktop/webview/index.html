@@ -4,6 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Prism</title>
+    <script>
+      (() => {
+        const now = Date.now();
+        const root = document.documentElement;
+        root.style.setProperty("--prism-startup-ring-phase", `-${now % 4800}ms`);
+        root.style.setProperty("--prism-startup-halo-phase", `-${now % 2600}ms`);
+        root.style.setProperty("--prism-startup-aura-phase", `-${now % 2800}ms`);
+        root.style.setProperty("--prism-startup-glyph-phase", `-${now % 1550}ms`);
+        root.style.setProperty("--prism-startup-optics-flow-phase", `-${now % 7200}ms`);
+      })();
+    </script>
     <style>
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -15,6 +26,10 @@
         --bg:       #080c12;
         --mono:     ui-monospace, "Cascadia Code", "Fira Code", "Menlo", monospace;
         --sans:     system-ui, -apple-system, sans-serif;
+        --prism-startup-beam-progress: 0;
+        --prism-startup-beam-remainder: 100%;
+        --prism-startup-spectrum-progress: 0;
+        --prism-startup-spectrum-remainder: 100%;
       }
 
       html, body {
@@ -45,6 +60,9 @@
 
       /* ── Center section (logo + status) ── */
       .center {
+        --startup-center-padding-y: 32px;
+        --startup-halo-size: clamp(96px, 17dvh, 132px);
+        --startup-halo-radius: clamp(48px, 8.5dvh, 66px);
         position: relative;
         z-index: 3;
         width: min(88vw, 680px);
@@ -60,20 +78,16 @@
       .focus-mask {
         position: absolute;
         z-index: 2;
-        left: 50%;
-        top: 50%;
-        width: min(74vw, 720px);
-        height: clamp(280px, 44dvh, 440px);
-        transform: translate(-50%, -50%);
+        inset: 0;
         pointer-events: none;
         background:
-          radial-gradient(ellipse at center,
-            color-mix(in srgb, var(--bg-deep) 96%, transparent) 0 34%,
-            color-mix(in srgb, var(--bg-deep) 88%, transparent) 46%,
-            color-mix(in srgb, var(--bg-deep) 52%, transparent) 64%,
-            transparent 82%
+          radial-gradient(ellipse 48% 46% at center,
+            color-mix(in srgb, var(--bg-deep) 98%, transparent) 0 48%,
+            color-mix(in srgb, var(--bg-deep) 90%, transparent) 64%,
+            color-mix(in srgb, var(--bg-deep) 54%, transparent) 80%,
+            color-mix(in srgb, var(--bg-deep) 18%, transparent) 92%,
+            transparent 100%
           );
-        filter: blur(2px);
       }
 
       .focus-mask::after {
@@ -93,11 +107,122 @@
           );
       }
 
+      .optics {
+        position: absolute;
+        z-index: -1;
+        left: 50%;
+        top: calc(var(--startup-center-padding-y) + var(--startup-halo-radius));
+        width: 100vw;
+        height: clamp(190px, 42dvh, 360px);
+        overflow: visible;
+        pointer-events: none;
+        transform: translate(-50%, -50%);
+        mix-blend-mode: screen;
+      }
+
+      .incoming-track,
+      .incoming-beam {
+        position: absolute;
+        left: 0;
+        top: 50%;
+        width: 50%;
+        transform: translateY(-50%);
+        transform-origin: left center;
+      }
+
+      .incoming-track {
+        height: 1px;
+        opacity: 0.34;
+        background: linear-gradient(
+          90deg,
+          transparent 0,
+          color-mix(in srgb, var(--fg-muted) 42%, transparent) 12%,
+          color-mix(in srgb, var(--fg) 58%, transparent) 100%
+        );
+      }
+
+      .incoming-beam {
+        height: 1.5px;
+        background: linear-gradient(
+          90deg,
+          color-mix(in srgb, #fff 24%, transparent) 0,
+          color-mix(in srgb, #fff 54%, transparent) 28%,
+          #fff 50%,
+          color-mix(in srgb, #fff 58%, transparent) 72%,
+          color-mix(in srgb, #fff 24%, transparent) 100%
+        );
+        background-size: 220% 100%;
+        box-shadow:
+          0 0 4px color-mix(in srgb, #fff 54%, transparent),
+          0 0 13px color-mix(in srgb, #5de6ff 26%, transparent);
+        clip-path: inset(0 var(--prism-startup-beam-remainder, 100%) 0 0);
+        animation: incomingFlow 7.2s linear infinite;
+        animation-delay: var(--prism-startup-optics-flow-phase, 0ms);
+        transition: clip-path 1600ms linear;
+      }
+
+      .contact-flare {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 20px;
+        height: 20px;
+        border-radius: 999px;
+        opacity: var(--prism-startup-spectrum-progress, 0);
+        transform: translate(-50%, -50%);
+        background: radial-gradient(
+          circle,
+          color-mix(in srgb, #fff 88%, transparent) 0 5%,
+          color-mix(in srgb, #5de6ff 44%, transparent) 24%,
+          transparent 72%
+        );
+        filter: blur(0.35px);
+        transition: opacity 1200ms linear;
+      }
+
+      .spectrum {
+        position: absolute;
+        left: 50%;
+        top: 0;
+        width: 50%;
+        height: 100%;
+        overflow: visible;
+        opacity: 0.78;
+        clip-path: inset(0 var(--prism-startup-spectrum-remainder, 100%) 0 0);
+        transition: clip-path 1800ms linear;
+        filter: drop-shadow(0 0 5px color-mix(in srgb, #5de6ff 20%, transparent));
+      }
+
+      .spectrum-ray {
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.4;
+        stroke-linecap: round;
+        vector-effect: non-scaling-stroke;
+      }
+
+      .spectrum-red { color: #ff4d6d; }
+      .spectrum-amber { color: #ff9f1c; }
+      .spectrum-lime { color: #b7e63a; }
+      .spectrum-cyan { color: #2fd3e3; }
+      .spectrum-violet { color: #7b5cff; }
+
+      .spectrum-glint {
+        fill: none;
+        stroke: color-mix(in srgb, currentColor 46%, #fff);
+        stroke-width: 0.7;
+        stroke-linecap: round;
+        stroke-dasharray: 0.075 0.925;
+        vector-effect: non-scaling-stroke;
+        animation: spectrumFlow 7.2s linear infinite;
+        animation-delay: var(--prism-startup-optics-flow-phase, 0ms);
+      }
+
       /* ── Halo orbit ── */
       .halo {
         position: relative;
-        width: clamp(96px, 17dvh, 132px);
-        height: clamp(96px, 17dvh, 132px);
+        width: var(--startup-halo-size);
+        height: var(--startup-halo-size);
         border-radius: 999px;
         display: grid;
         place-items: center;
@@ -108,6 +233,7 @@
           0 0 60px color-mix(in srgb, #5de6ff 22%, transparent),
           inset 0 0 0 1px rgba(255,255,255,0.13);
         animation: haloDrift 2.6s ease-in-out infinite;
+        animation-delay: var(--prism-startup-halo-phase, 0ms);
       }
 
       /* spinning rainbow ring */
@@ -124,6 +250,7 @@
         opacity: 0.86;
         z-index: -1;
         animation: ringSpin 4.8s linear infinite;
+        animation-delay: var(--prism-startup-ring-phase, 0ms);
       }
 
       /* blurred conic aura */
@@ -143,6 +270,7 @@
         opacity: 0.4;
         z-index: -2;
         animation: auraPulse 2.8s ease-in-out infinite;
+        animation-delay: var(--prism-startup-aura-phase, 0ms);
       }
 
       /* Prism triangle glyph */
@@ -154,6 +282,7 @@
           drop-shadow(0 0 16px color-mix(in srgb, currentColor 32%, transparent))
           drop-shadow(0 3px 10px rgba(0,0,0,0.34));
         animation: glyphPulse 1.55s ease-in-out infinite;
+        animation-delay: var(--prism-startup-glyph-phase, 0ms);
       }
 
       /* ── Status label ── */
@@ -258,20 +387,74 @@
         flex: 0 0 auto;
         display: flex;
         align-items: center;
-        gap: 6px;
-        padding: 14px 18px 5px;
+        gap: 0;
+        padding: 13px 18px 8px;
         color: var(--fg-muted);
         font-size: 0.66rem;
         font-weight: 700;
         letter-spacing: 0.08em;
         text-transform: uppercase;
-        opacity: 0.42;
+        opacity: 0.58;
       }
 
-      .console-dot { width: 5px; height: 5px; border-radius: 999px; }
-      .console-dot:nth-child(1) { background: #ff5f57; }
-      .console-dot:nth-child(2) { background: #febc2e; }
-      .console-dot:nth-child(3) { background: #28c840; }
+      .console-sigil {
+        flex: 0 0 auto;
+        width: 54px;
+        height: 12px;
+        margin-right: 10px;
+        overflow: visible;
+        filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent) 22%, transparent));
+      }
+
+      .console-ray,
+      .console-prism,
+      .console-spectrum {
+        fill: none;
+        vector-effect: non-scaling-stroke;
+      }
+
+      .console-ray {
+        stroke: color-mix(in srgb, var(--fg) 58%, var(--fg-muted));
+        stroke-width: 1;
+      }
+
+      .console-prism {
+        fill: color-mix(in srgb, var(--accent) 7%, transparent);
+        stroke: color-mix(in srgb, var(--fg) 72%, var(--accent));
+        stroke-width: 1;
+      }
+
+      .console-spectrum {
+        stroke-width: 1.25;
+      }
+
+      .console-brand {
+        color: color-mix(in srgb, var(--fg) 78%, var(--fg-muted));
+        letter-spacing: 0.14em;
+      }
+
+      .console-divider {
+        margin: 0 7px;
+        color: color-mix(in srgb, var(--accent) 46%, var(--fg-muted));
+        font-weight: 500;
+      }
+
+      .console-title {
+        letter-spacing: 0.1em;
+      }
+
+      .console-rule {
+        flex: 1 1 auto;
+        min-width: 24px;
+        height: 1px;
+        margin-left: 12px;
+        background: linear-gradient(
+          90deg,
+          color-mix(in srgb, var(--accent) 34%, transparent),
+          color-mix(in srgb, #7b5cff 16%, transparent) 48%,
+          transparent 100%
+        );
+      }
 
       .console-lines {
         flex: 1 1 auto;
@@ -303,14 +486,15 @@
         margin-right: 8px;
         min-width: 3.6ch;
       }
-      .log-src[data-src="api"]    { color: var(--accent); }
-      .log-src[data-src="web"]    { color: #7b5cff; }
-      .log-src[data-src="qdrant"] { color: #ff9f1c; }
-      .log-src[data-src="prism"]  { color: color-mix(in srgb, var(--fg) 60%, var(--fg-muted)); }
+      .log-line[data-spectrum="0"] .log-src { color: #ff4d6d; }
+      .log-line[data-spectrum="1"] .log-src { color: #ff9f1c; }
+      .log-line[data-spectrum="2"] .log-src { color: #b7e63a; }
+      .log-line[data-spectrum="3"] .log-src { color: #2fd3e3; }
+      .log-line[data-spectrum="4"] .log-src { color: #7b5cff; }
 
       .log-text {
         flex: 1 1 auto;
-        color: color-mix(in srgb, var(--fg) 30%, var(--fg-muted));
+        color: #fff;
       }
 
       /* ── Keyframes ── */
@@ -321,26 +505,32 @@
       @keyframes auraPulse { 0%,100% { opacity: 0.32; transform: scale(0.96); } 50% { opacity: 0.52; transform: scale(1.06); } }
       @keyframes glyphPulse{ 0%,100% { opacity: 0.82; transform: scale(0.96); } 50% { opacity: 1; transform: scale(1.06); } }
       @keyframes dotPulse  { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+      @keyframes incomingFlow { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+      @keyframes spectrumFlow { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -1; } }
 
       @media (prefers-reduced-motion: reduce) {
         .halo, .ring, .aura, .glyph, .svc-dot { animation: none !important; }
         .veil, .center { animation: none !important; }
+        .incoming-beam, .spectrum-glint, .contact-flare, .spectrum {
+          animation: none !important;
+          transition: none !important;
+        }
       }
 
       @media (max-width: 560px), (max-height: 520px) {
         .center {
+          --startup-center-padding-y: 24px;
           gap: 16px;
           padding: 24px 18px;
-        }
-
-        .focus-mask {
-          width: min(92vw, 560px);
-          height: clamp(240px, 56dvh, 360px);
         }
 
         .focus-mask::after {
           width: min(78vw, 440px);
           height: 128px;
+        }
+
+        .optics {
+          height: clamp(150px, 38dvh, 230px);
         }
 
         .services {
@@ -355,7 +545,33 @@
       <div class="focus-mask" aria-hidden="true"></div>
 
       <div class="center">
-        <div class="halo" aria-hidden="true">
+          <div
+            class="optics"
+            id="startup-optics"
+            role="progressbar"
+            aria-label="Opening Prism"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="6"
+          >
+            <span class="incoming-track" aria-hidden="true"></span>
+            <span class="incoming-beam" aria-hidden="true"></span>
+            <span class="contact-flare" aria-hidden="true"></span>
+            <svg class="spectrum" viewBox="0 0 1000 320" preserveAspectRatio="none" aria-hidden="true">
+              <path class="spectrum-ray spectrum-red" d="M0 160L1000 18"></path>
+              <path class="spectrum-ray spectrum-amber" d="M0 160L1000 82"></path>
+              <path class="spectrum-ray spectrum-lime" d="M0 160L1000 142"></path>
+              <path class="spectrum-ray spectrum-cyan" d="M0 160L1000 222"></path>
+              <path class="spectrum-ray spectrum-violet" d="M0 160L1000 302"></path>
+              <path class="spectrum-glint spectrum-red" d="M0 160L1000 18" pathLength="1"></path>
+              <path class="spectrum-glint spectrum-amber" d="M0 160L1000 82" pathLength="1"></path>
+              <path class="spectrum-glint spectrum-lime" d="M0 160L1000 142" pathLength="1"></path>
+              <path class="spectrum-glint spectrum-cyan" d="M0 160L1000 222" pathLength="1"></path>
+              <path class="spectrum-glint spectrum-violet" d="M0 160L1000 302" pathLength="1"></path>
+            </svg>
+          </div>
+
+        <div class="halo">
           <div class="aura"></div>
           <div class="ring"></div>
           <svg class="glyph" viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg" fill="none" aria-hidden="true">
@@ -380,10 +596,24 @@
 
       <div class="console" role="log" aria-label="Boot log">
         <div class="console-header">
-          <span class="console-dot"></span>
-          <span class="console-dot"></span>
-          <span class="console-dot"></span>
-          <span style="margin-left:4px">Prism Boot Log</span>
+          <svg class="console-sigil" viewBox="0 0 58 12" aria-hidden="true">
+            <defs>
+              <linearGradient id="prism-startup-spectrum" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0" stop-color="#ff4d6d" />
+                <stop offset="0.25" stop-color="#ff9f1c" />
+                <stop offset="0.5" stop-color="#b7e63a" />
+                <stop offset="0.72" stop-color="#2fd3e3" />
+                <stop offset="1" stop-color="#7b5cff" />
+              </linearGradient>
+            </defs>
+            <path class="console-ray" d="M1 6H13" />
+            <path class="console-prism" d="M18 1.5 23 10.5H13L18 1.5Z" />
+            <path class="console-spectrum" d="M23 6H57" stroke="url(#prism-startup-spectrum)" />
+          </svg>
+          <span class="console-brand">Prism</span>
+          <span class="console-divider">/</span>
+          <span class="console-title">Startup Trace</span>
+          <span class="console-rule" aria-hidden="true"></span>
         </div>
         <div class="console-lines" id="lines"></div>
       </div>
@@ -392,32 +622,131 @@
     <script>
       const linesEl = document.getElementById("lines");
       const labelEl = document.getElementById("label");
+      const startupOpticsEl = document.getElementById("startup-optics");
       let autoScroll = true;
+      const STARTUP_REFRACTION_CONTACT_PROGRESS = 0.72;
+      const STARTUP_SERVICE_PROGRESS = {
+        "qdrant:starting": 0.12,
+        "qdrant:running": 0.22,
+        "api:starting": 0.28,
+        "api:running": 0.36,
+        "api:preparing": 0.48,
+        "api:ready": 0.58,
+        "web:starting": 0.62,
+        "web:running": 0.67,
+        "web:ready": 0.72,
+      };
+      let startupProgress = 0;
+      const STARTUP_FLAVOR_INITIAL_DELAY_MS = 2800;
+      const STARTUP_FLAVOR_INTERVAL_MS = 3200;
+      const STARTUP_FLAVOR_LINES = [
+        "Calibrating the spectrum...",
+        "Aligning the mirrors...",
+        "Waking the local engines...",
+        "Rolling out the welcome mat...",
+        "Counting all the colors...",
+        "Polishing the prism...",
+        "Tuning the glass...",
+        "Finding the first ray of light...",
+        "Opening the observatory...",
+        "Making a little room for wonder...",
+        "Checking the color wheel...",
+        "Letting the light through...",
+      ];
+      let startupFlavorCursor = 0;
+      let startupSpectrumIndex = 3;
+      let nextStartupFlavorAt = Date.now() + STARTUP_FLAVOR_INITIAL_DELAY_MS;
+
+      function nextStartupSpectrumIndex() {
+        const nonRepeatingOffset = 1 + Math.floor(Math.random() * 4);
+        startupSpectrumIndex = (startupSpectrumIndex + nonRepeatingOffset) % 5;
+        return startupSpectrumIndex;
+      }
+
+      function startupTraceText(text) {
+        return String(text).trimEnd().replace(/[.…]+$/u, "") + "...";
+      }
+
+      function setStartupProgress(value) {
+        if (!Number.isFinite(value)) return;
+        startupProgress = Math.max(startupProgress, Math.min(1, Math.max(0, value)));
+        const beamProgress = Math.min(
+          1,
+          startupProgress / STARTUP_REFRACTION_CONTACT_PROGRESS,
+        );
+        const spectrumProgress = Math.min(
+          1,
+          Math.max(
+            0,
+            (startupProgress - STARTUP_REFRACTION_CONTACT_PROGRESS) /
+              (1 - STARTUP_REFRACTION_CONTACT_PROGRESS),
+          ),
+        );
+        const root = document.documentElement;
+        root.style.setProperty("--prism-startup-beam-progress", String(beamProgress));
+        root.style.setProperty(
+          "--prism-startup-beam-remainder",
+          `${(1 - beamProgress) * 100}%`,
+        );
+        root.style.setProperty(
+          "--prism-startup-spectrum-progress",
+          String(spectrumProgress),
+        );
+        root.style.setProperty(
+          "--prism-startup-spectrum-remainder",
+          `${(1 - spectrumProgress) * 100}%`,
+        );
+        startupOpticsEl?.setAttribute(
+          "aria-valuenow",
+          String(Math.round(startupProgress * 100)),
+        );
+      }
+
+      setStartupProgress(0.06);
 
       linesEl.addEventListener("scroll", () => {
         const { scrollTop, scrollHeight, clientHeight } = linesEl;
         autoScroll = scrollHeight - scrollTop - clientHeight < 32;
       });
 
-      function appendLog(source, text) {
+      function appendLog(source, text, kind = "status") {
+        if (kind !== "flavor") {
+          nextStartupFlavorAt = Date.now() + STARTUP_FLAVOR_INITIAL_DELAY_MS;
+        }
         const line = document.createElement("div");
         line.className = "log-line";
+        line.dataset.kind = kind;
+        line.dataset.spectrum = String(nextStartupSpectrumIndex());
+        if (kind === "flavor") line.setAttribute("aria-hidden", "true");
         const src = document.createElement("span");
         src.className = "log-src";
         src.dataset.src = source;
         src.textContent = source;
         const msg = document.createElement("span");
         msg.className = "log-text";
-        msg.textContent = text;
+        msg.textContent = startupTraceText(text);
         line.appendChild(src);
         line.appendChild(msg);
         linesEl.appendChild(line);
         if (autoScroll) linesEl.scrollTop = linesEl.scrollHeight;
       }
 
+      window.setInterval(() => {
+        const now = Date.now();
+        if (now < nextStartupFlavorAt) return;
+        const flavor = STARTUP_FLAVOR_LINES[
+          startupFlavorCursor % STARTUP_FLAVOR_LINES.length
+        ];
+        startupFlavorCursor += 1;
+        appendLog("prism", flavor, "flavor");
+        nextStartupFlavorAt = now + STARTUP_FLAVOR_INTERVAL_MS;
+      }, 250);
+
       function setService(id, state) {
         const el = document.getElementById("svc-" + id);
         if (el) el.dataset.state = state;
+        const milestone = STARTUP_SERVICE_PROGRESS[id + ":" + state];
+        if (milestone !== undefined) setStartupProgress(milestone);
       }
 
       const LABELS = {

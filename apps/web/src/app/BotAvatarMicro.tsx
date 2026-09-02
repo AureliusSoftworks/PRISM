@@ -10,12 +10,13 @@ import {
 import { botAvatarMicroPresentationForSize } from "./avatarRenderedSizeQuality";
 import styles from "./page.module.css";
 
-/** Micro is a glyph-only identity fallback: color belongs to its orb only. */
+/** Dark Micro keeps its white mark; Light reverses to identity ink on glass. */
 export const BOT_AVATAR_MICRO_GLYPH_COLOR = "#ffffff";
 
 /**
- * Shared micro LOD. A genuine micro bot is its identity glyph only: no facial
- * art, Avatar Details Ink, eyes, mouth, animation, or scheduled work.
+ * Shared Micro/Atomic LOD. Micro is a glass identity orb; Atomic is its bare
+ * normalized glyph. Neither carries facial art, Avatar Details Ink, or
+ * scheduled work; the shared talking flag only drives its CSS identity pulse.
  */
 export function BotAvatarMicro(props: {
   moodKey?: BotMoodKey;
@@ -23,6 +24,8 @@ export function BotAvatarMicro(props: {
   color?: string | null;
   /** Identity glyph shown at every readable Micro size. */
   glyph?: ReactNode;
+  /** Real speech playback state for the size-appropriate identity pulse. */
+  talking?: boolean;
   renderSizePx?: number;
   className?: string;
 }): React.JSX.Element {
@@ -33,7 +36,9 @@ export function BotAvatarMicro(props: {
   const identityColorDark = normalizeAccentForTheme(identityColor, "dark");
   const identityColorLight = normalizeAccentForTheme(identityColor, "light");
   const presentation = botAvatarMicroPresentationForSize(props.renderSizePx);
-  const showIdentityPixel = presentation === "block" || presentation === "pixel";
+  const showIdentityPixel =
+    presentation === "block" || presentation === "pixel";
+  const atomicAvatar = presentation !== "glyph";
 
   return (
     <span
@@ -42,7 +47,8 @@ export function BotAvatarMicro(props: {
       data-placement={placement}
       data-face="coffee"
       data-variant="micro"
-      data-avatar-render-tier="micro"
+      data-talking={props.talking === true ? "true" : undefined}
+      data-avatar-render-tier={atomicAvatar ? "atomic" : "micro"}
       data-avatar-micro-presentation={presentation}
       style={
         {

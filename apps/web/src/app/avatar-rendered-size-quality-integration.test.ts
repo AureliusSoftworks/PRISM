@@ -98,6 +98,42 @@ test("Signal keeps authored full mannequins live while shedding only runtime eff
   assert.match(pageSource, /data-prism-priority-phosphor="true"/u);
 });
 
+test("Signal consumes Avatar Studio's canonical full-scale style and surface theme", () => {
+  const signalExperienceStart = pageSource.indexOf("<BotcastExperience");
+  const signalAvatarStart = pageSource.indexOf(
+    "renderAvatar={(botSummary, avatarState) => {",
+    signalExperienceStart,
+  );
+  const signalAvatarEnd = pageSource.indexOf(
+    "renderMug={(botSummary, mugState) => {",
+    signalAvatarStart,
+  );
+  const signalAvatarRenderer = pageSource.slice(
+    signalAvatarStart,
+    signalAvatarEnd,
+  );
+
+  assert.equal(
+    signalAvatarRenderer.match(/\.\.\.botAvatarFullScaleIdentityStyle\(/gu)
+      ?.length,
+    2,
+  );
+  assert.equal(
+    signalAvatarRenderer.match(
+      /data-avatar-full-scale-identity="canonical"/gu,
+    )?.length,
+    2,
+  );
+  assert.equal(signalAvatarRenderer.match(/theme: renderTheme/gu)?.length, 4);
+  assert.doesNotMatch(signalAvatarRenderer, /theme: resolvedTheme/u);
+  assert.doesNotMatch(signalAvatarRenderer, /\.\.\.botAccentStyle\(/u);
+  assert.doesNotMatch(signalAvatarRenderer, /\.\.\.prismDefaultAccentStyle\(/u);
+  assert.doesNotMatch(
+    pageCss,
+    /\.signalBotPresencePlate\s*\{[^}]*(?:--bot-face-(?:metal|screen|crt)|animation:)/iu,
+  );
+});
+
 test("live load shedding never substitutes a generic avatar token", () => {
   assert.doesNotMatch(pageCss, /data-prism-adaptive-quality/u);
   assert.doesNotMatch(signalCss, /data-prism-adaptive-quality/u);

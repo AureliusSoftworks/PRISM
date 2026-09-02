@@ -102,6 +102,23 @@ test("Avatar Studio keeps developer performance layers local to its live preview
   assert.match(pageSource, /setPerformanceEffects\(\(current\) => \(\{[\s\S]*?\[effect\]: enabled/);
   assert.match(pageSource, /setPerformanceEffects\(AVATAR_STUDIO_PERFORMANCE_EFFECTS_ENABLED\)/);
   assert.match(pageSource, /data-avatar-performance-phosphor=/);
+  assert.match(pageSource, /data-avatar-optical-bench=/);
+  assert.match(pageSource, /<span>CRT texture blend<\/span>/);
+  assert.match(pageSource, /value as AvatarStudioCrtTextureBlendMode/);
+  assert.match(pageSource, /CRT texture · \{Math\.round\(opticalTrial\.crtTextureOpacity \* 100\)\}%/);
+  assert.match(
+    pageSource,
+    /"--bot-avatar-crt-texture-blend" as string[^;]*opticalTrial\.crtTextureBlend/,
+  );
+  assert.match(
+    pageSource,
+    /"--bot-avatar-crt-texture-opacity" as string[^;]*opticalTrial\.crtTextureOpacity/,
+  );
+  assert.match(
+    pageSource,
+    /"--bot-avatar-optical-glow-control" as string[^;]*opticalTrial\.glowStrength/,
+  );
+  assert.match(pageSource, /style=\{resolvedAvatarStyle\}/);
   assert.match(pageSource, /data-avatar-performance-glass=/);
   assert.match(pageSource, /data-avatar-performance-metal=/);
   assert.match(pageSource, /data-avatar-performance-crt-texture=/);
@@ -111,7 +128,23 @@ test("Avatar Studio keeps developer performance layers local to its live preview
   assert.match(pageSource, /data-avatar-performance-backdrop=/);
   assert.match(
     cssSource,
-    /data-avatar-performance-phosphor="false"[\s\S]*?--crt-phosphor-opacity:\s*0 !important/,
+    /data-avatar-performance-phosphor="false"[\s\S]*?--crt-strength:\s*0 !important[\s\S]*?--crt-phosphor-opacity:\s*0 !important/,
+  );
+  assert.match(
+    cssSource,
+    /data-avatar-performance-phosphor="false"[\s\S]*?zenLiveBotPresenceFaceEmissionMask::before[\s\S]*?opacity:\s*0 !important/,
+  );
+  assert.match(
+    cssSource,
+    /data-avatar-performance-phosphor="false"[\s\S]*?data-crt-glyph-layer="true"[\s\S]*?--crt-glyph-phosphor-midtone-strength:\s*0 !important/,
+  );
+  assert.match(
+    cssSource,
+    /data-avatar-optical-bench="true"[\s\S]*?--bot-avatar-optical-glow-strength:\s*var\([\s\S]*?--bot-avatar-optical-glow-control[\s\S]*?--bot-phosphor-focus-radius-scale:\s*var\([\s\S]*?--bot-avatar-optical-glow-control/,
+  );
+  assert.match(
+    cssSource,
+    /\.botFaceScreenHardLightTexture\s*\{[\s\S]*?opacity:\s*var\(\s*--bot-avatar-crt-texture-opacity,\s*1\s*\)[\s\S]*?mix-blend-mode:\s*var\(\s*--bot-avatar-crt-texture-blend,\s*soft-light\s*\)/,
   );
   assert.match(
     cssSource,
@@ -1206,6 +1239,11 @@ test("default Prism bot card opens an avatar-only customizer path", () => {
   );
   assert.match(
     pageSource,
+    /triangle:\s*\{[\s\S]{0,320}?transform="translate\(0 -2\)"/,
+    "the Default Prism triangle should carry one shared upward optical offset",
+  );
+  assert.match(
+    pageSource,
     /const zenDefaultPrismGlyph = DEFAULT_PRISM_BOT_GLYPH;/,
   );
   assert.doesNotMatch(
@@ -1997,7 +2035,7 @@ test("avatar preview uses the canonical full-scale identity contract", () => {
   );
   assert.match(
     pageSource,
-    /if \(options\.prismPersona\) return prismDefaultAccentStyle\(resolvedTheme\);/,
+    /if \(options\.prismPersona\) \{[\s\S]*?prismDefaultAccentStyle\(resolvedTheme\),[\s\S]*?canonicalScreenStyle/,
   );
   assert.match(
     pageSource,
@@ -2013,6 +2051,10 @@ test("avatar preview uses the canonical full-scale identity contract", () => {
   assert.match(
     pageSource,
     /botAvatarIdentityMaterialStyle\(\{\s*privateMode: options\.privateMode,\s*voicePreset: options\.voicePreset/,
+  );
+  assert.match(
+    pageSource,
+    /const canonicalScreenStyle = \{[\s\S]*?--bot-face-crt-screen-texture-blend-mode[\s\S]*?resolvedTheme === "light" \? "overlay" : "luminosity"[\s\S]*?--zen-live-bot-glyph-compositor-glow-filter/,
   );
   assert.match(
     pageSource,
@@ -2046,7 +2088,7 @@ test("avatar preview uses the canonical full-scale identity contract", () => {
     /metalAlloyEnabled=\{!isDefaultPrismBot\}/,
     "Default Prism must not receive a Communication Style alloy in Avatar Studio",
   );
-  assert.match(
+  assert.doesNotMatch(
     pageSource,
     /"--bot-face-crt-screen-texture-blend-mode":\s*previewTheme === "light" \? "overlay" : "luminosity"/,
   );

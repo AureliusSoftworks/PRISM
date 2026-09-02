@@ -390,11 +390,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       step?.body ?? "",
-      /Mini from 81px through 299px, and the first Micro stage at 80px and below/u,
+      /Mini from 81px through 299px, Micro from 31px through 80px, and Atomic at 30px and below/u,
     );
     assert.match(
       step?.body ?? "",
-      /Micro uses its identity glyph throughout the readable Micro tier/u,
+      /Micro is the glass identity orb/u,
     );
     assert.match(
       step?.body ?? "",
@@ -402,7 +402,15 @@ describe("mode tutorials", () => {
     );
     assert.match(
       step?.body ?? "",
-      /Micro uses its identity glyph throughout the readable Micro tier, so it has no face, mouth animation, or Avatar Details Ink/u,
+      /normalized-color rim pulses while the bot talks in Light or Dark mode/u,
+    );
+    assert.match(
+      step?.body ?? "",
+      /Atomic removes the orb, border, and shadow so only the bot's normalized identity glyph remains, then shifts that glyph's opacity slightly during speech/u,
+    );
+    assert.match(
+      step?.body ?? "",
+      /4×4 block and literal 1px pixel switch between the normalized identity color and a lighter shade while talking/u,
     );
     assert.doesNotMatch(step?.body ?? "", /resting mouth for closures/u);
     assert.doesNotMatch(step?.body ?? "", /Micro keeps its face|At 28px and below/u);
@@ -733,11 +741,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.avatar.steps[1]!.body,
-      /first Micro stage/u,
+      /Micro from 31px through 80px/u,
     );
     assert.match(
       MODE_TUTORIALS.avatar.steps[1]!.body,
-      /80px and below/u,
+      /Atomic at 30px and below/u,
     );
     assert.match(
       MODE_TUTORIALS.avatar.steps[1]!.body,
@@ -753,7 +761,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.avatar.steps[1]!.body,
-      /buckle and Micro screens stay grid-free/u,
+      /buckle and compact identity tiers stay grid-free/u,
     );
     assert.match(
       MODE_TUTORIALS.avatar.steps[1]!.body,

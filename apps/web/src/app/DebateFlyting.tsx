@@ -63,6 +63,7 @@ import {
 import { flytingAutoCameraView } from "./debateFlytingCamera";
 import {
   DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT,
+  DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS,
   DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS,
   copyDebateFlytingStageAlignment,
   debateFlytingStageRehearsalItems,
@@ -221,7 +222,7 @@ const FLYTING_ALIGNMENT_BY_ROLE = {
   },
   gallery: {
     for: { rugGlyph: "galleryForRugGlyph" },
-    moderator: {},
+    moderator: { rugGlyph: "galleryModeratorRugGlyph" },
     against: { rugGlyph: "galleryAgainstRugGlyph" },
   },
 } as const satisfies Record<
@@ -622,9 +623,11 @@ function flytingAlignmentPreviewSnapshot(
   };
 }
 
-function flytingPreviewGalleryVoteCounts(
-  votes: Record<DebateSideId, number>,
-): { for: number; neutral: number; against: number } {
+function flytingPreviewGalleryVoteCounts(votes: Record<DebateSideId, number>): {
+  for: number;
+  neutral: number;
+  against: number;
+} {
   const forVotes = Math.max(
     0,
     Math.min(DEBATE_FLYTING_AUDIENCE_COUNT, votes.for),
@@ -892,7 +895,7 @@ function FlytingSetupStageAlignmentPreview(props: {
       aria-label={`${DEBATE_FLYTING_AUDIENCE_COUNT} generic PRISM spectators and ${DEBATE_FLYTING_JARL_GUARD_COUNT} Jarl guards`}
       style={
         {
-          "--flyting-preview-gallery-bot-scale": props.galleryBotScale / 100,
+          "--flyting-gallery-bot-scale": props.galleryBotScale / 100,
         } as CSSProperties
       }
     >
@@ -907,6 +910,7 @@ function FlytingSetupStageAlignmentPreview(props: {
         {(
           [
             ["for", forBot, forColor],
+            ["moderator", hostBot, hostColor],
             ["against", againstBot, againstColor],
           ] as const
         ).map(([role, bot, color]) => {
@@ -1211,11 +1215,7 @@ function FlytingSetupStageAlignmentPreview(props: {
                           aria-hidden="true"
                         />
                       )}
-                      {renderPreviewAvatar(
-                        snapshot,
-                        role,
-                        avatarPresentation,
-                      )}
+                      {renderPreviewAvatar(snapshot, role, avatarPresentation)}
                     </div>
                   </div>
                   <div
@@ -1335,7 +1335,9 @@ export function DebateFlytingSetup(
     useState<DebateFlytingStageAlignmentV1>(() =>
       copyDebateFlytingStageAlignment(DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT),
     );
-  const [stageGalleryBotScale, setStageGalleryBotScale] = useState(100);
+  const [stageGalleryBotScale, setStageGalleryBotScale] = useState<number>(
+    DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS.galleryBotScale,
+  );
   const [stageGalleryMaxVerticalRoam, setStageGalleryMaxVerticalRoam] =
     useState(DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT);
   const [stageGalleryVotes, setStageGalleryVotes] = useState<
@@ -1497,9 +1499,8 @@ export function DebateFlytingSetup(
       (item) => item.id === stageLayoutItem,
     ) ?? DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS[0]!;
   const stageLayoutPlacement = stageLayoutDraft.placements[stageLayoutItem];
-  const stageGalleryVoteCounts = flytingPreviewGalleryVoteCounts(
-    stageGalleryVotes,
-  );
+  const stageGalleryVoteCounts =
+    flytingPreviewGalleryVoteCounts(stageGalleryVotes);
 
   useEffect(() => {
     if (needsBotHost || activeCastSeat !== "host") return;
@@ -1679,9 +1680,7 @@ export function DebateFlytingSetup(
     view: DebateFlytingStageRehearsalView,
   ): void => {
     setStageLayoutView(view);
-    setStageLayoutItem(
-      debateFlytingStageRehearsalItems(view)[0]!.id,
-    );
+    setStageLayoutItem(debateFlytingStageRehearsalItems(view)[0]!.id);
   };
 
   const updateStageLayoutPlacement = (
@@ -2944,6 +2943,7 @@ export function DebateFlytingSetup(
             <div
               className={styles.stageAlignmentModal}
               data-theme={stagePreviewTheme}
+              data-flyting-preview-theme={stagePreviewTheme}
               data-flyting-stage-rehearsal="true"
               role="dialog"
               aria-modal="true"
@@ -2973,6 +2973,7 @@ export function DebateFlytingSetup(
               />
               <aside
                 className={styles.stageAlignmentPanel}
+                data-theme={stagePreviewTheme}
                 data-flyting-stage-alignment="true"
                 data-flyting-stage-alignment-context="setup"
                 aria-label="Flyting stage fine tuning"
@@ -3210,7 +3211,9 @@ export function DebateFlytingSetup(
                           DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT,
                         ),
                       );
-                      setStageGalleryBotScale(100);
+                      setStageGalleryBotScale(
+                        DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS.galleryBotScale,
+                      );
                       setStageGalleryMaxVerticalRoam(
                         DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT,
                       );
@@ -4265,6 +4268,13 @@ export function DebateFlytingLive(
             data-audience-pressure={galleryIsSubdued ? "settled" : "restless"}
             data-audience-count={hallAudienceSeats.length}
             aria-label={`${DEBATE_FLYTING_AUDIENCE_COUNT} Hall spectators and ${DEBATE_FLYTING_JARL_GUARD_COUNT} Jarl guards`}
+            style={
+              {
+                "--flyting-gallery-bot-scale":
+                  DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS.galleryBotScale /
+                  100,
+              } as CSSProperties
+            }
           >
             <div className={studioStyles.debateAudienceStatus}>
               <div
@@ -4306,6 +4316,7 @@ export function DebateFlytingLive(
               {(
                 [
                   ["for", props.session.forAdvocate, forColor],
+                  ["moderator", props.session.moderator, hostColor],
                   ["against", props.session.againstAdvocate, againstColor],
                 ] as const
               ).map(([role, bot, color]) => {

@@ -251,7 +251,8 @@ html[data-prism-system-paused="true"]
   > :not([data-prism-system-pause-exempt="true"]),
 html[data-prism-system-paused="true"]
   body
-  > :not([data-prism-system-pause-exempt="true"]) *,
+  > :not([data-prism-system-pause-exempt="true"])
+  *,
 html[data-prism-system-paused="true"]
   body
   > :not([data-prism-system-pause-exempt="true"])::before,
@@ -394,10 +395,8 @@ body[data-prism-theme="light"] [data-navbar-picker-surface="true"] {
    Low also freezes explicitly decorative motion and drops authored GPU filters.
    Semantic arrivals, speech, clocks, and input feedback are never tagged as
    decorative, so quality settings cannot hide product state. */
-html[data-prism-graphics-quality="medium"]
-  [data-prism-expensive-effect="true"],
-html[data-prism-graphics-quality="low"]
-  [data-prism-expensive-effect="true"],
+html[data-prism-graphics-quality="medium"] [data-prism-expensive-effect="true"],
+html[data-prism-graphics-quality="low"] [data-prism-expensive-effect="true"],
 html[data-prism-runtime-quality="balanced"]
   [data-prism-expensive-effect="true"],
 html[data-prism-runtime-quality="minimal"]
@@ -448,8 +447,7 @@ html[data-prism-graphics-quality="low"]
   filter: none !important;
 }
 
-html[data-prism-runtime-quality="minimal"]
-  [data-prism-expensive-effect="true"],
+html[data-prism-runtime-quality="minimal"] [data-prism-expensive-effect="true"],
 html[data-prism-runtime-quality="minimal"]
   [data-prism-expensive-effect="true"]::before,
 html[data-prism-runtime-quality="minimal"]
@@ -526,13 +524,16 @@ select,
   max-inline-size: 100%;
   max-block-size: max(
     8rem,
-    calc(
-      100dvh - 10rem - var(--prism-safe-top) - var(--prism-safe-bottom)
-    )
+    calc(100dvh - 10rem - var(--prism-safe-top) - var(--prism-safe-bottom))
   );
 }
 
-:where(input[type="checkbox"], input[type="radio"], input[type="range"], progress) {
+:where(
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="range"],
+  progress
+) {
   accent-color: var(--prism-document-accent);
 }
 
@@ -659,26 +660,71 @@ html[data-relationship-depth-motion]::view-transition-new(root) {
   animation-name: relationship-depth-atmosphere-in;
 }
 
-html[data-relationship-depth-motion="shared-anchor"][data-relationship-depth-direction="forward"]::view-transition-group(relationship-depth-anchor) {
+/* Let the completed startup refraction resolve before Home appears beneath it.
+   The root snapshots keep the handoff atomic while producing a true crossfade. */
+html[data-prism-startup-handoff]::view-transition-old(root),
+html[data-prism-startup-handoff]::view-transition-new(root) {
+  animation-duration: var(--prism-startup-handoff-duration, 800ms);
+  animation-fill-mode: both;
+  animation-timing-function: cubic-bezier(0.22, 0.7, 0.18, 1);
+}
+
+html[data-prism-startup-handoff]::view-transition-old(root) {
+  animation-name: prism-startup-handoff-out;
+}
+
+html[data-prism-startup-handoff]::view-transition-new(root) {
+  animation-name: prism-startup-handoff-in;
+}
+
+@keyframes prism-startup-handoff-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes prism-startup-handoff-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+html[data-relationship-depth-motion="shared-anchor"][data-relationship-depth-direction="forward"]::view-transition-group(
+    relationship-depth-anchor
+  ) {
   animation-duration: 360ms;
   animation-timing-function: cubic-bezier(0.22, 0.7, 0.18, 1);
 }
 
-html[data-relationship-depth-motion="shared-anchor"][data-relationship-depth-direction="reverse"]::view-transition-group(relationship-depth-anchor) {
+html[data-relationship-depth-motion="shared-anchor"][data-relationship-depth-direction="reverse"]::view-transition-group(
+    relationship-depth-anchor
+  ) {
   animation-duration: 300ms;
   animation-timing-function: cubic-bezier(0.3, 0.62, 0.2, 1);
 }
 
-html[data-relationship-depth-motion="pullback-swap"]::view-transition-group(relationship-depth-anchor) {
+html[data-relationship-depth-motion="pullback-swap"]::view-transition-group(
+    relationship-depth-anchor
+  ) {
   animation-duration: 280ms;
   animation-timing-function: cubic-bezier(0.3, 0.62, 0.2, 1);
 }
 
-html[data-relationship-depth-motion="pullback-swap"]::view-transition-old(relationship-depth-anchor) {
+html[data-relationship-depth-motion="pullback-swap"]::view-transition-old(
+    relationship-depth-anchor
+  ) {
   animation: relationship-depth-pull-away 140ms ease-in both;
 }
 
-html[data-relationship-depth-motion="pullback-swap"]::view-transition-new(relationship-depth-anchor) {
+html[data-relationship-depth-motion="pullback-swap"]::view-transition-new(
+    relationship-depth-anchor
+  ) {
   animation: relationship-depth-push-in 160ms 120ms ease-out both;
 }
 
@@ -735,14 +781,24 @@ html[data-relationship-depth-motion="pullback-swap"]::view-transition-new(relati
     animation-timing-function: ease;
     transform: none;
   }
+
+  html[data-prism-startup-handoff]::view-transition-old(root),
+  html[data-prism-startup-handoff]::view-transition-new(root) {
+    animation-duration: 160ms;
+    animation-timing-function: ease;
+    transform: none;
+  }
 }
 
 [data-prism-refract-wield-hover="true"] {
   outline: 1px solid color-mix(in srgb, var(--prism-i, #b7e63a) 68%, white);
   outline-offset: 3px;
-  filter:
-    drop-shadow(0 0 5px color-mix(in srgb, var(--prism-i, #b7e63a) 58%, transparent))
-    drop-shadow(0 0 13px color-mix(in srgb, var(--prism-s, #2fd3e3) 30%, transparent));
+  filter: drop-shadow(
+      0 0 5px color-mix(in srgb, var(--prism-i, #b7e63a) 58%, transparent)
+    )
+    drop-shadow(
+      0 0 13px color-mix(in srgb, var(--prism-s, #2fd3e3) 30%, transparent)
+    );
 }
 
 [data-prism-refract-state="queued"] {
@@ -760,7 +816,9 @@ html[data-relationship-depth-motion="pullback-swap"]::view-transition-new(relati
 /* Every registered prose field and choice gets this same visible generation
    contract. Surface styles may tune the resting field color through the custom
    property, but must not layer a second competing rainbow over this sheen. */
-:root body [data-prism-refract-sheen="true"][data-prism-refract-state="generating"] {
+:root
+  body
+  [data-prism-refract-sheen="true"][data-prism-refract-state="generating"] {
   --prism-refract-sheen-surface: color-mix(
     in srgb,
     var(--bg-surface, var(--baseline-bg)) 88%,
@@ -773,14 +831,40 @@ html[data-relationship-depth-motion="pullback-swap"]::view-transition-new(relati
   background:
     linear-gradient(
         115deg,
-        color-mix(in srgb, var(--prism-p, #ff4d6d) 18%, var(--prism-refract-sheen-surface)) 0%,
-        color-mix(in srgb, var(--prism-r, #ff9f1c) 15%, var(--prism-refract-sheen-surface)) 15%,
+        color-mix(
+            in srgb,
+            var(--prism-p, #ff4d6d) 18%,
+            var(--prism-refract-sheen-surface)
+          )
+          0%,
+        color-mix(
+            in srgb,
+            var(--prism-r, #ff9f1c) 15%,
+            var(--prism-refract-sheen-surface)
+          )
+          15%,
         color-mix(in srgb, #f4f86a 12%, var(--prism-refract-sheen-surface)) 30%,
         color-mix(in srgb, #36f0b2 14%, var(--prism-refract-sheen-surface)) 45%,
-        color-mix(in srgb, var(--prism-i, #b7e63a) 17%, var(--prism-refract-sheen-surface)) 60%,
-        color-mix(in srgb, var(--prism-s, #2fd3e3) 17%, var(--prism-refract-sheen-surface)) 78%,
-        color-mix(in srgb, var(--prism-m, #7b5cff) 18%, var(--prism-refract-sheen-surface)) 100%
-      ) padding-box,
+        color-mix(
+            in srgb,
+            var(--prism-i, #b7e63a) 17%,
+            var(--prism-refract-sheen-surface)
+          )
+          60%,
+        color-mix(
+            in srgb,
+            var(--prism-s, #2fd3e3) 17%,
+            var(--prism-refract-sheen-surface)
+          )
+          78%,
+        color-mix(
+            in srgb,
+            var(--prism-m, #7b5cff) 18%,
+            var(--prism-refract-sheen-surface)
+          )
+          100%
+      )
+      padding-box,
     linear-gradient(
         90deg,
         var(--prism-p, #ff4d6d),
@@ -791,7 +875,8 @@ html[data-relationship-depth-motion="pullback-swap"]::view-transition-new(relati
         var(--prism-s, #2fd3e3),
         var(--prism-m, #7b5cff),
         var(--prism-p, #ff4d6d)
-      ) border-box !important;
+      )
+      border-box !important;
   background-repeat: repeat-x !important;
   background-size:
     var(--prism-refract-sheen-period) 100%,
@@ -811,7 +896,11 @@ html[data-relationship-depth-motion="pullback-swap"]::view-transition-new(relati
 }
 
 @keyframes prismRefractSheenFlow {
-  from { background-position: 0 0, 0 0; }
+  from {
+    background-position:
+      0 0,
+      0 0;
+  }
   to {
     background-position:
       var(--prism-refract-sheen-period) 0,
@@ -820,12 +909,18 @@ html[data-relationship-depth-motion="pullback-swap"]::view-transition-new(relati
 }
 
 @keyframes prismRefractSheenPulse {
-  from { filter: saturate(1.06) brightness(1.01); }
-  to { filter: saturate(1.2) brightness(1.08); }
+  from {
+    filter: saturate(1.06) brightness(1.01);
+  }
+  to {
+    filter: saturate(1.2) brightness(1.08);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :root body [data-prism-refract-sheen="true"][data-prism-refract-state="generating"] {
+  :root
+    body
+    [data-prism-refract-sheen="true"][data-prism-refract-state="generating"] {
     animation: none !important;
   }
 }

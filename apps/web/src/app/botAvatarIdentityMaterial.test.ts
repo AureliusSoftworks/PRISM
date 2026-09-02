@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  BOT_FRAME_LED_LIT_COLOR,
   BOT_FRAME_LED_UNLIT_COLOR,
   BOT_FRAME_METAL_ALLOY_BY_VOICE,
   BOT_FRAME_METAL_ALLOY_IDLE_MIX,
@@ -10,10 +11,10 @@ import {
 import { botAvatarIdentityMaterialStyle } from "./botAvatarIdentityMaterial.ts";
 
 describe("botAvatarIdentityMaterialStyle", () => {
-  it("uses the normalized bot color for the shared frame, LEDs, and ink glow", () => {
+  it("keeps LEDs white while identity color drives the frame glow and ink", () => {
     assert.deepEqual(botAvatarIdentityMaterialStyle(), {
       "--zen-live-bot-frame-tint-color": "var(--coffee-bot-color)",
-      "--bot-face-frame-led-color": "var(--coffee-bot-color)",
+      "--bot-face-frame-led-color": BOT_FRAME_LED_LIT_COLOR,
       "--zen-live-bot-face-phosphor-ink":
         "color-mix(in srgb, var(--coffee-bot-color) 82%, #ffffff 18%)",
       "--zen-live-bot-face-ink": "var(--coffee-bot-color)",
@@ -31,7 +32,7 @@ describe("botAvatarIdentityMaterialStyle", () => {
       botAvatarIdentityMaterialStyle({ voicePreset: "warm" }),
       {
         "--zen-live-bot-frame-tint-color": "var(--coffee-bot-color)",
-        "--bot-face-frame-led-color": "var(--coffee-bot-color)",
+        "--bot-face-frame-led-color": BOT_FRAME_LED_LIT_COLOR,
         "--zen-live-bot-face-phosphor-ink":
           "color-mix(in srgb, var(--coffee-bot-color) 82%, #ffffff 18%)",
         "--zen-live-bot-face-ink": "var(--coffee-bot-color)",
@@ -48,7 +49,7 @@ describe("botAvatarIdentityMaterialStyle", () => {
   it("neutralizes every identity-colored material in private mode", () => {
     assert.deepEqual(botAvatarIdentityMaterialStyle(true), {
       "--zen-live-bot-frame-tint-color": "#e8eee8",
-      "--bot-face-frame-led-color": "#e8eee8",
+      "--bot-face-frame-led-color": BOT_FRAME_LED_LIT_COLOR,
       "--zen-live-bot-face-phosphor-ink": "#e8eee8",
       "--zen-live-bot-face-ink": "#e8eee8",
       "--zen-live-bot-glyph-ink":

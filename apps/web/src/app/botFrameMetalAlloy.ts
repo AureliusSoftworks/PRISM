@@ -27,6 +27,9 @@ export const BOT_FRAME_METAL_ALLOY_IDLE_MIX = "42%";
  */
 export const BOT_FRAME_LED_UNLIT_COLOR = "#3A3F46";
 
+/** Lit bulb glass is neutral; identity color belongs to the separate glow mask. */
+export const BOT_FRAME_LED_LIT_COLOR = "#FFFFFF";
+
 /** Private / neutralized chassis stays on brushed steel. */
 export const BOT_FRAME_METAL_ALLOY_PRIVATE = BOT_FRAME_METAL_ALLOY_BY_VOICE.neutral;
 
@@ -112,16 +115,13 @@ export function botFrameIdentityPaintColor(options: {
 }
 
 /**
- * Choose the baked LED bulb paint: accent while talking, dark-gray unlit glass
- * while silent. Always returns a concrete color so unlit bulbs stay opaque above
- * the alloy chassis.
+ * Choose the baked LED bulb paint: white while lit, dark-gray unlit glass while
+ * silent. Identity color is painted by the separate tint/glow mask.
  */
 export function botFrameLedPaintColor(options: {
   isTalking: boolean;
   accentColor: string | null | undefined;
 }): string {
   if (!options.isTalking) return BOT_FRAME_LED_UNLIT_COLOR;
-  const accent =
-    typeof options.accentColor === "string" ? options.accentColor.trim() : "";
-  return accent || BOT_FRAME_LED_UNLIT_COLOR;
+  return BOT_FRAME_LED_LIT_COLOR;
 }

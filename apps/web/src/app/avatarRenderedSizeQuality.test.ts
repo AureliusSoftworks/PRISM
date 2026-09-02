@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   BOT_AVATAR_COMPACT_ENTER_MAX_PX,
   BOT_AVATAR_COMPACT_EXIT_MIN_PX,
+  BOT_AVATAR_ATOMIC_MAX_PX,
   BOT_AVATAR_MICRO_ENTER_MAX_PX,
   BOT_AVATAR_MICRO_EXIT_MIN_PX,
   BOT_AVATAR_MICRO_BLOCK_MAX_PX,
@@ -136,6 +137,7 @@ test("global thresholds stay fixed at 300px/299px and 81px/80px boundaries", () 
   assert.equal(BOT_AVATAR_MICRO_ENTER_MAX_PX, 80);
   assert.equal(BOT_AVATAR_MICRO_EXIT_MIN_PX, 81);
   assert.equal(BOT_AVATAR_MICRO_FEATURES_HIDE_MAX_PX, 28);
+  assert.equal(BOT_AVATAR_ATOMIC_MAX_PX, 30);
   assert.equal(BOT_AVATAR_MICRO_BLOCK_MAX_PX, 8);
   assert.equal(BOT_AVATAR_MICRO_PIXEL_MAX_PX, 1);
   assert.equal(
@@ -180,12 +182,14 @@ test("global thresholds stay fixed at 300px/299px and 81px/80px boundaries", () 
   );
 });
 
-test("micro presentation stays glyph-only until it becomes a block or pixel", () => {
+test("micro becomes a glyph-only Atomic avatar at 30px before block and pixel fallbacks", () => {
   assert.equal(botAvatarMicroPresentationForSize(undefined), "glyph");
   assert.equal(botAvatarMicroPresentationForSize(80), "glyph");
-  assert.equal(botAvatarMicroPresentationForSize(29), "glyph");
-  assert.equal(botAvatarMicroPresentationForSize(28), "glyph");
-  assert.equal(botAvatarMicroPresentationForSize(9), "glyph");
+  assert.equal(botAvatarMicroPresentationForSize(31), "glyph");
+  assert.equal(botAvatarMicroPresentationForSize(30), "atomic");
+  assert.equal(botAvatarMicroPresentationForSize(29), "atomic");
+  assert.equal(botAvatarMicroPresentationForSize(28), "atomic");
+  assert.equal(botAvatarMicroPresentationForSize(9), "atomic");
   assert.equal(botAvatarMicroPresentationForSize(8), "block");
   assert.equal(botAvatarMicroPresentationForSize(2), "block");
   assert.equal(botAvatarMicroPresentationForSize(1), "pixel");

@@ -1,6 +1,9 @@
 import type { BotVoicePreset } from "@localai/shared";
 
-import { botFrameMetalAlloyStyle } from "./botFrameMetalAlloy.ts";
+import {
+  BOT_FRAME_LED_LIT_COLOR,
+  botFrameMetalAlloyStyle,
+} from "./botFrameMetalAlloy.ts";
 
 export type BotAvatarIdentityMaterialStyle = Record<`--${string}`, string>;
 
@@ -19,8 +22,8 @@ export interface BotAvatarIdentityMaterialOptions {
  * live Chat/Zen. Keep identity color on normal alpha-composited layers so the
  * result stays consistent in Chromium and the macOS Tauri WebKit renderer.
  * Communication Style adds a soft metal-alloy wash on the frame body only;
- * idle LEDs paint dark-gray unlit glass above that wash; talking LEDs and
- * phosphor ink stay on the identity color.
+ * idle LEDs paint dark-gray unlit glass above that wash; lit LEDs stay white,
+ * while the separate glow mask and phosphor halo retain identity color.
  */
 export function botAvatarIdentityMaterialStyle(
   privateModeOrOptions: boolean | BotAvatarIdentityMaterialOptions = false,
@@ -39,7 +42,7 @@ export function botAvatarIdentityMaterialStyle(
 
   return {
     "--zen-live-bot-frame-tint-color": identityColor,
-    "--bot-face-frame-led-color": identityColor,
+    "--bot-face-frame-led-color": BOT_FRAME_LED_LIT_COLOR,
     "--zen-live-bot-face-phosphor-ink": phosphorInk,
     "--zen-live-bot-face-ink": identityColor,
     "--zen-live-bot-glyph-ink": "var(--zen-live-bot-face-phosphor-ink)",

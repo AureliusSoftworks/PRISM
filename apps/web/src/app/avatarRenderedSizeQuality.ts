@@ -3,6 +3,8 @@ export type AvatarRenderedSizeTier = "full" | "compact" | "micro";
 export const BOT_AVATAR_MICRO_ENTER_MAX_PX = 80;
 export const BOT_AVATAR_MICRO_EXIT_MIN_PX = 81;
 export const BOT_AVATAR_MICRO_FEATURES_HIDE_MAX_PX = 28;
+/** Atomic is the glyph-only sub-tier below the readable Micro glass orb. */
+export const BOT_AVATAR_ATOMIC_MAX_PX = 30;
 export const BOT_AVATAR_MICRO_BLOCK_MAX_PX = 8;
 export const BOT_AVATAR_MICRO_PIXEL_MAX_PX = 1;
 // Avatar Studio owns the exact tier boundary: Full starts at 300px, Mini
@@ -12,6 +14,7 @@ export const BOT_AVATAR_COMPACT_EXIT_MIN_PX = 300;
 
 export type BotAvatarMicroPresentation =
   | "glyph"
+  | "atomic"
   | "block"
   | "pixel";
 
@@ -21,6 +24,7 @@ export function botAvatarMicroPresentationForSize(
   if (!Number.isFinite(renderedSizePx ?? Number.NaN)) return "glyph";
   if (renderedSizePx! <= BOT_AVATAR_MICRO_PIXEL_MAX_PX) return "pixel";
   if (renderedSizePx! <= BOT_AVATAR_MICRO_BLOCK_MAX_PX) return "block";
+  if (renderedSizePx! <= BOT_AVATAR_ATOMIC_MAX_PX) return "atomic";
   return "glyph";
 }
 

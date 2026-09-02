@@ -1557,8 +1557,14 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> =
                 ? {
                     ...accentContinuumTutorialStep,
                     body: accentContinuumTutorialStep.body.replace(
+                      "Mini from 81px through 299px, and the first Micro stage at 80px and below.",
+                      "Mini from 81px through 299px, Micro from 31px through 80px, and Atomic at 30px and below.",
+                    ).replace(
                       "Micro uses its identity glyph throughout the readable Micro tier; facial features and Avatar Details Ink stay in Mini and Full HD.",
-                      "Mini keeps the full live mouth-shape stream. Micro uses its identity glyph throughout the readable Micro tier, so it has no face, mouth animation, or Avatar Details Ink.",
+                      "Mini keeps the full live mouth-shape stream. Micro is the glass identity orb, with no face, mouth animation, or Avatar Details Ink; its normalized-color rim pulses while the bot talks in Light or Dark mode. Atomic removes the orb, border, and shadow so only the bot's normalized identity glyph remains, then shifts that glyph's opacity slightly during speech. The 4×4 block and literal 1px pixel switch between the normalized identity color and a lighter shade while talking.",
+                    ).replace(
+                      "while the buckle and Micro screens stay grid-free",
+                      "while the buckle and compact identity tiers stay grid-free",
                     ).replace(
                       "Only Save to Library bookmarks the result in the private PRISM account library and assigns it to the current draft.",
                       "Use for this bot assigns an audition only to the current draft. Save to Library separately bookmarks it in the private PRISM account library and also assigns it to the draft.",

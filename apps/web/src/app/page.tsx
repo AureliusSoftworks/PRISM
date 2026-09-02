@@ -101,6 +101,15 @@ import {
   type AccountOwnerWorkResult,
 } from "./accountOwnerGeneration";
 import {
+  ACCOUNT_WORKSPACE_PRIMARY_RESOURCES,
+  createAccountWorkspaceStartupProgress,
+  formatAccountWorkspaceStartupResources,
+  pendingAccountWorkspaceStartupResources,
+  settleAccountWorkspaceStartupResources,
+  type AccountWorkspaceStartupProgress,
+  type AccountWorkspaceStartupResource,
+} from "./accountWorkspaceStartup";
+import {
   attachWebRequestDiagnostic,
   webRequestDiagnosticFor,
   writeDiagnosticClipboard,
@@ -267,6 +276,22 @@ import {
 import { playSpatialUiSfx, registerSpatialUiSfx } from "./spatialUiSfx";
 import PrismHandoffCanvas from "./PrismHandoffCanvas";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
+import {
+  PrismStartupScreen,
+  type PrismStartupLogLine,
+  type PrismStartupLogSource,
+} from "./PrismStartupScreen";
+import {
+  nextPrismStartupFlavorLine,
+  nextPrismStartupSpectrumIndex,
+  PRISM_STARTUP_FLAVOR_INITIAL_DELAY_MS,
+  PRISM_STARTUP_FLAVOR_INTERVAL_MS,
+} from "./prismStartupFlavor";
+import {
+  appendPrismStartupLogWithStatusRetention,
+  PRISM_STARTUP_COMPLETION_HOLD_MS,
+  PRISM_STARTUP_CROSSFADE_MS,
+} from "./prismStartupProgress";
 import {
   zenInitialCeremonyCanReveal,
   zenInitialCeremonyShouldStart,
@@ -6246,6 +6271,15 @@ type PanelView =
   | "command-center";
 type MemoryPanelScope = "bot" | "default" | "session" | "all";
 type ClientAccessState = "checking" | "allowed" | "blocked";
+type AccountWorkspaceStartupState =
+  | { phase: "checking-session"; ownerId: null; error: null }
+  | { phase: "loading-workspace"; ownerId: string; error: null }
+  | { phase: "ready"; ownerId: string | null; error: null }
+  | { phase: "error"; ownerId: string; error: string };
+type AccountWorkspaceRefreshProgress = AccountWorkspaceStartupProgress & {
+  comfyUiHost: string | null;
+};
+const ACCOUNT_WORKSPACE_STARTUP_RETRY_DELAYS_MS = [1200, 2600] as const;
 const AUTO_TITLE_REFRESH_DELAYS_MS = [1500, 4000, 8000] as const;
 const VIEW_SWITCH_OVERLAY_MIN_VISIBLE_MS = 320;
 const VIEW_SWITCH_OVERLAY_FADE_OUT_MS = 280;
@@ -19073,6 +19107,7 @@ function BotAvatarMicroRenderer(props: {
   color?: string | null;
   glyph?: ReactNode;
   className?: string;
+  talking?: boolean;
   renderSizePx?: number;
 }): React.JSX.Element {
   return (
@@ -19082,6 +19117,7 @@ function BotAvatarMicroRenderer(props: {
       color={props.color}
       glyph={props.glyph}
       className={props.className}
+      talking={props.talking}
       renderSizePx={props.renderSizePx}
     />
   );
@@ -19111,6 +19147,7 @@ function MessageMoodFace(props: {
         placement={props.placement}
         color={props.color}
         glyph={<BotGlyph name={props.glyph} size={16} />}
+        talking={props.isTalking}
         renderSizePx={40}
       />
     );
@@ -21911,7 +21948,10 @@ const INLINE_BOT_GLYPHS: Record<string, InlineBotGlyphDefinition> = {
   },
   triangle: {
     label: "Triangle",
-    paths: <path d="M12 3l10 18H2L12 3z" />,
+    // Default Prism exclusively owns this mark. Lift the path inside its
+    // shared viewBox so every Full, Mini, Micro, and library rendering gets
+    // the same optical correction without moving other bots' glyph slots.
+    paths: <path d="M12 3l10 18H2L12 3z" transform="translate(0 -2)" />,
   },
   diamond: {
     label: "Diamond",
@@ -22680,6 +22720,7 @@ const BotGroupWaitingRoomPresenceAvatar = memo(
         color={bot.color}
         glyph={<BotGlyph name={bot.glyph} size={16} />}
         className={styles.botGroupWaitingRoomMicroBot}
+        talking={talking}
         renderSizePx={renderSize}
       />
     );
@@ -32958,6 +32999,7 @@ function ZenLiveBotMannequin({
           color={avatarDetailsColor ?? frameIdentityColor}
           glyph={<BotGlyph name={glyph} size={16} />}
           className={styles.zenLiveBotPresenceMicroAvatar}
+          talking={isTalking}
           renderSizePx={renderedSizePx}
         />
       </span>
@@ -33476,7 +33518,7 @@ function ZenLiveBotMannequin({
       ) : null}
       <PhosphorPixelSvgGlyph
         className={styles.zenLiveBotPresenceBotGlyph}
-        enabled={pixelRasterizationEnabled}
+        enabled={pixelRasterizationEnabled && theme === "dark"}
       >
         <BotGlyph name={glyph} size={18} strokeWidth={1.95} />
       </PhosphorPixelSvgGlyph>
@@ -33539,6 +33581,7 @@ const BotHubVoicePreviewAvatarPlate = memo(
     return (
       <span
         className={`${styles.zenLiveBotPresencePlate} ${styles.botPanelHubAvatarPlate}`}
+        data-avatar-full-scale-identity="canonical"
         data-bot-hub-mouth-renderer="isolated"
         data-mood="warm"
         data-prism-mood="warm"
@@ -34844,6 +34887,9 @@ function ZenLiveBotPresencePlate({
     <div
       ref={avatarRef}
       className={styles.zenLiveBotPresencePlate}
+      data-avatar-full-scale-identity={
+        avatarRenderMode === "full" ? "canonical" : undefined
+      }
       data-theme={resolvedTheme}
       data-atmosphere-active={atmosphereActive ? "true" : undefined}
       data-mood={moodHint}
@@ -34974,6 +35020,7 @@ function ZenLiveBotPresencePlate({
                     : null
               }
               glyph={<BotGlyph name={liveBotGlyphName} size={16} />}
+              talking={handlingVisualEmissionActive}
               renderSizePx={bodySize}
             />
           </span>
@@ -40679,9 +40726,19 @@ function botAvatarFullScaleIdentityStyle(
   resolvedTheme: "light" | "dark",
   options: BotAvatarFullScaleIdentityOptions = {},
 ): CSSProperties {
+  const canonicalScreenStyle = {
+    ["--bot-face-crt-screen-texture-blend-mode" as string]:
+      resolvedTheme === "light" ? "overlay" : "luminosity",
+    ["--zen-live-bot-glyph-compositor-glow-filter" as string]: "opacity(1)",
+  } as CSSProperties;
   const accentStyle =
     botAccentStyle(rawHex, resolvedTheme, options.privateMode) ?? {};
-  if (options.prismPersona) return prismDefaultAccentStyle(resolvedTheme);
+  if (options.prismPersona) {
+    return {
+      ...prismDefaultAccentStyle(resolvedTheme),
+      ...canonicalScreenStyle,
+    };
+  }
   return {
     ...accentStyle,
     ...botAvatarScreenPaletteVariables(
@@ -40692,6 +40749,7 @@ function botAvatarFullScaleIdentityStyle(
       voicePreset: options.voicePreset,
       metalAlloyEnabled: true,
     }),
+    ...canonicalScreenStyle,
   } as CSSProperties;
 }
 
@@ -40717,6 +40775,64 @@ type AvatarStudioPerformanceEffect =
   | "motion"
   | "ambient-glow"
   | "backdrop";
+
+type AvatarStudioOpticalBlendMode =
+  | "plus-lighter"
+  | "screen"
+  | "normal"
+  | "overlay"
+  | "soft-light";
+
+type AvatarStudioCrtTextureBlendMode =
+  | AvatarStudioOpticalBlendMode
+  | "hard-light"
+  | "multiply"
+  | "luminosity";
+
+interface AvatarStudioOpticalTrial {
+  reflectionBlend: AvatarStudioOpticalBlendMode;
+  reflectionOpacity: number;
+  crtTextureBlend: AvatarStudioCrtTextureBlendMode;
+  crtTextureOpacity: number;
+  inkGlowBlend: AvatarStudioOpticalBlendMode;
+  inkGlowColor: "white" | "identity";
+  glowStrength: number;
+}
+
+const AVATAR_STUDIO_CURRENT_OPTICAL_TRIAL: AvatarStudioOpticalTrial = {
+  reflectionBlend: "plus-lighter",
+  reflectionOpacity: 0.3,
+  crtTextureBlend: "soft-light",
+  crtTextureOpacity: 1,
+  inkGlowBlend: "plus-lighter",
+  inkGlowColor: "white",
+  glowStrength: 1,
+};
+
+const AVATAR_STUDIO_OPTICAL_BLEND_OPTIONS = [
+  { value: "plus-lighter", label: "Linear Dodge" },
+  { value: "screen", label: "Screen" },
+  { value: "normal", label: "Normal" },
+  { value: "overlay", label: "Overlay" },
+  { value: "soft-light", label: "Soft Light" },
+] as const satisfies readonly {
+  value: AvatarStudioOpticalBlendMode;
+  label: string;
+}[];
+
+const AVATAR_STUDIO_CRT_TEXTURE_BLEND_OPTIONS = [
+  { value: "soft-light", label: "Soft Light" },
+  { value: "overlay", label: "Overlay" },
+  { value: "hard-light", label: "Hard Light" },
+  { value: "screen", label: "Screen" },
+  { value: "plus-lighter", label: "Linear Dodge" },
+  { value: "multiply", label: "Multiply" },
+  { value: "luminosity", label: "Luminosity" },
+  { value: "normal", label: "Normal" },
+] as const satisfies readonly {
+  value: AvatarStudioCrtTextureBlendMode;
+  label: string;
+}[];
 
 const AVATAR_STUDIO_PERFORMANCE_EFFECTS = [
   {
@@ -41454,8 +41570,6 @@ function botAvatarFoundryPreviewStyle(
     "--zen-live-bot-avatar-body-size": `${bodySize}px`,
     "--zen-live-bot-glyph-x-anchor": "0px",
     "--zen-live-bot-glyph-y-anchor": `${Math.round(bodySize * 0.37)}px`,
-    "--bot-face-crt-screen-texture-blend-mode":
-      previewTheme === "light" ? "overlay" : "luminosity",
   } as CSSProperties;
 }
 
@@ -41499,6 +41613,7 @@ function BotAvatarPreviewPanel({
   leadershipGroupCount = 0,
   performanceEffects = AVATAR_STUDIO_PERFORMANCE_EFFECTS_ENABLED,
   onPerformanceEffectChange,
+  opticalBenchEnabled = false,
 }: {
   titleName: string;
   glyph: BotGlyphName;
@@ -41543,6 +41658,7 @@ function BotAvatarPreviewPanel({
     effect: AvatarStudioPerformanceEffect,
     enabled: boolean,
   ) => void;
+  opticalBenchEnabled?: boolean;
 }): React.JSX.Element {
   const [compactPreviewRenderSize, setCompactPreviewRenderSize] =
     useState(122);
@@ -41550,6 +41666,9 @@ function BotAvatarPreviewPanel({
     useState<BotAvatarFoundryViewport>(BOT_AVATAR_FOUNDRY_DEFAULT_VIEWPORT);
   const [compactPreviewRenderSizeTier, setCompactPreviewRenderSizeTier] =
     useState<AvatarRenderedSizeTier>("compact");
+  const [opticalTrialEnabled, setOpticalTrialEnabled] = useState(true);
+  const [opticalTrial, setOpticalTrial] =
+    useState<AvatarStudioOpticalTrial>(AVATAR_STUDIO_CURRENT_OPTICAL_TRIAL);
   const foundryViewportRef = useRef<BotAvatarFoundryViewport>(
     BOT_AVATAR_FOUNDRY_DEFAULT_VIEWPORT,
   );
@@ -41640,6 +41759,37 @@ function BotAvatarPreviewPanel({
         "--foundry-user-zoom": foundryViewport.zoom,
       } as CSSProperties)
     : undefined;
+  const opticalTrialStyle =
+    opticalBenchEnabled && opticalTrialEnabled
+      ? ({
+          ["--bot-avatar-light-reflection-blend" as string]:
+            opticalTrial.reflectionBlend,
+          ["--bot-avatar-light-reflection-opacity" as string]:
+            opticalTrial.reflectionOpacity,
+          ["--bot-avatar-crt-texture-blend" as string]:
+            opticalTrial.crtTextureBlend,
+          ["--bot-avatar-crt-texture-opacity" as string]:
+            opticalTrial.crtTextureOpacity,
+          ["--bot-avatar-light-ink-glow-blend" as string]:
+            opticalTrial.inkGlowBlend,
+          ["--bot-avatar-light-ink-glow-color" as string]:
+            opticalTrial.inkGlowColor === "white"
+              ? "#ffffff"
+              : "var(--bot-avatar-screen-halo, var(--coffee-bot-color))",
+          ["--bot-avatar-optical-glow-control" as string]:
+            opticalTrial.glowStrength,
+        } as CSSProperties)
+      : undefined;
+  const resolvedAvatarStyle = {
+    ...avatarStyle,
+    ...opticalTrialStyle,
+  } as CSSProperties;
+  function updateOpticalTrial<Key extends keyof AvatarStudioOpticalTrial>(
+    key: Key,
+    value: AvatarStudioOpticalTrial[Key],
+  ): void {
+    setOpticalTrial((current) => ({ ...current, [key]: value }));
+  }
   const writeFoundryViewport = (
     viewport: BotAvatarFoundryViewport,
   ): BotAvatarFoundryViewport => {
@@ -41898,6 +42048,7 @@ function BotAvatarPreviewPanel({
         data-avatar-performance-phosphor={
           performanceEffects.phosphor ? "true" : "false"
         }
+        data-avatar-optical-bench={opticalBenchEnabled ? "true" : undefined}
         data-avatar-performance-glass={
           performanceEffects.glass ? "true" : "false"
         }
@@ -41983,7 +42134,7 @@ function BotAvatarPreviewPanel({
           ref={foundryCameraRigRef}
           className={styles.botAvatarFoundryCameraRig}
           data-spatial-camera-rig={spatialControls ? "true" : undefined}
-          style={spatialControls ? avatarStyle : undefined}
+          style={spatialControls ? resolvedAvatarStyle : undefined}
         >
           {spatialControls ? (
             <div
@@ -42018,11 +42169,12 @@ function BotAvatarPreviewPanel({
               data-canvas-side="left"
               data-body-sized="true"
               data-zen-live-bot-presence-plate="true"
+              data-avatar-full-scale-identity="canonical"
               data-avatar-customizer-preview="true"
               data-avatar-preview-theme={previewTheme}
               data-avatar-preview-mode={previewMode}
               data-avatar-preview-mood={previewMood}
-              style={avatarStyle}
+              style={resolvedAvatarStyle}
               role="img"
               aria-label={`${titleName} avatar preview`}
             >
@@ -42088,9 +42240,175 @@ function BotAvatarPreviewPanel({
           <fieldset
             className={styles.avatarStudioPerformanceWidget}
             data-avatar-studio-performance-widget="true"
+            data-optical-bench={opticalBenchEnabled ? "true" : undefined}
           >
-            <legend>Developer · Performance layers</legend>
-            <span>Preview only</span>
+            <legend>
+              {opticalBenchEnabled
+                ? "HD optics · real renderer"
+                : "Developer · Performance layers"}
+            </legend>
+            <span>
+              {opticalBenchEnabled
+                ? "Temporary Avatar Studio preview"
+                : "Preview only"}
+            </span>
+            {opticalBenchEnabled ? (
+              <div className={styles.avatarStudioOpticalControls}>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={opticalTrialEnabled}
+                    onChange={(event) =>
+                      setOpticalTrialEnabled(event.currentTarget.checked)
+                    }
+                  />
+                  Trial overrides
+                </label>
+                <label>
+                  <span>Reflection blend</span>
+                  <select
+                    value={opticalTrial.reflectionBlend}
+                    disabled={!opticalTrialEnabled}
+                    onChange={(event) =>
+                      updateOpticalTrial(
+                        "reflectionBlend",
+                        event.currentTarget
+                          .value as AvatarStudioOpticalBlendMode,
+                      )
+                    }
+                  >
+                    {AVATAR_STUDIO_OPTICAL_BLEND_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>
+                    Reflection · {Math.round(opticalTrial.reflectionOpacity * 100)}%
+                  </span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={opticalTrial.reflectionOpacity}
+                    disabled={!opticalTrialEnabled}
+                    onChange={(event) =>
+                      updateOpticalTrial(
+                        "reflectionOpacity",
+                        Number(event.currentTarget.value),
+                      )
+                    }
+                  />
+                </label>
+                <label>
+                  <span>CRT texture blend</span>
+                  <select
+                    value={opticalTrial.crtTextureBlend}
+                    disabled={!opticalTrialEnabled}
+                    onChange={(event) =>
+                      updateOpticalTrial(
+                        "crtTextureBlend",
+                        event.currentTarget
+                          .value as AvatarStudioCrtTextureBlendMode,
+                      )
+                    }
+                  >
+                    {AVATAR_STUDIO_CRT_TEXTURE_BLEND_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>
+                    CRT texture · {Math.round(opticalTrial.crtTextureOpacity * 100)}%
+                  </span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={opticalTrial.crtTextureOpacity}
+                    disabled={!opticalTrialEnabled}
+                    onChange={(event) =>
+                      updateOpticalTrial(
+                        "crtTextureOpacity",
+                        Number(event.currentTarget.value),
+                      )
+                    }
+                  />
+                </label>
+                <label>
+                  <span>Ink glow blend</span>
+                  <select
+                    value={opticalTrial.inkGlowBlend}
+                    disabled={!opticalTrialEnabled}
+                    onChange={(event) =>
+                      updateOpticalTrial(
+                        "inkGlowBlend",
+                        event.currentTarget
+                          .value as AvatarStudioOpticalBlendMode,
+                      )
+                    }
+                  >
+                    {AVATAR_STUDIO_OPTICAL_BLEND_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>Ink glow color</span>
+                  <select
+                    value={opticalTrial.inkGlowColor}
+                    disabled={!opticalTrialEnabled}
+                    onChange={(event) =>
+                      updateOpticalTrial(
+                        "inkGlowColor",
+                        event.currentTarget.value as "white" | "identity",
+                      )
+                    }
+                  >
+                    <option value="white">White</option>
+                    <option value="identity">Identity hue</option>
+                  </select>
+                </label>
+                <label>
+                  <span>
+                    Face + Ink glow · {Math.round(opticalTrial.glowStrength * 100)}%
+                  </span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1.8"
+                    step="0.05"
+                    value={opticalTrial.glowStrength}
+                    disabled={!opticalTrialEnabled}
+                    onChange={(event) =>
+                      updateOpticalTrial(
+                        "glowStrength",
+                        Number(event.currentTarget.value),
+                      )
+                    }
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpticalTrialEnabled(true);
+                    setOpticalTrial(AVATAR_STUDIO_CURRENT_OPTICAL_TRIAL);
+                  }}
+                >
+                  Reset to current
+                </button>
+              </div>
+            ) : null}
+            {opticalBenchEnabled ? <span>Layer visibility</span> : null}
             {AVATAR_STUDIO_PERFORMANCE_EFFECTS.map((effect) => (
               <label key={effect.value} title={effect.description}>
                 <input
@@ -42135,6 +42453,7 @@ function BotAvatarPreviewPanel({
                       <BotAvatarMicroRenderer
                         color={miniAccentColor}
                         glyph={<BotGlyph name={glyph} size={16} />}
+                        talking={previewTalking}
                         renderSizePx={compactPreviewRenderSize}
                       />
                     </div>
@@ -42333,6 +42652,131 @@ function BotAvatarPreviewPanel({
         </div>
       ) : null}
       {voiceTestDock}
+    </section>
+  );
+}
+
+const AVATAR_HD_BENCH_DETAILS: BotAvatarDetailsV1 = {
+  version: 1,
+  screen: {
+    stamps: [
+      { id: "circuit-mark", offsetX: 0, offsetY: -2, scalePct: 108 },
+      { id: "cheek-stripes", offsetX: -1, offsetY: 1, scalePct: 92 },
+    ],
+    paintMaskBase64: null,
+  },
+};
+
+function AvatarHdBenchSurface(): React.JSX.Element {
+  const [previewTheme, setPreviewTheme] = useState<"light" | "dark">("light");
+  const [identityColor, setIdentityColor] = useState("#ef1745");
+  const [previewMode, setPreviewMode] = useState<BotAvatarPreviewMode>("idle");
+  const [performanceEffects, setPerformanceEffects] = useState<
+    Readonly<Record<AvatarStudioPerformanceEffect, boolean>>
+  >(AVATAR_STUDIO_PERFORMANCE_EFFECTS_ENABLED);
+  const avatarStyle = botAvatarFoundryPreviewStyle(
+    identityColor,
+    false,
+    previewTheme,
+    "neutral",
+  );
+  const previewTalking = previewMode === "talking";
+
+  return (
+    <section
+      className={`${styles.botProfileBuilder} ${styles.botAvatarCustomizer} ${styles.avatarHdBenchSurface} ${previewTheme === "light" ? styles.themeLight : ""}`}
+      data-foundry="true"
+      style={
+        {
+          ...avatarStyle,
+          "--editor-bot-color": identityColor,
+        } as CSSProperties
+      }
+      aria-label="HD Avatar optics bench"
+    >
+      <header
+        className={`${styles.botProfileBuilderHeader} ${styles.avatarHdBenchHeader}`}
+      >
+        <div>
+          <span>Avatar Studio · Production renderer</span>
+          <div className={styles.botAvatarStudioTitleRow}>
+            <h4>HD Avatar Optics</h4>
+          </div>
+        </div>
+        <div className={styles.avatarHdBenchHeaderControls}>
+          <label className={styles.avatarHdBenchColorControl}>
+            <span>Identity hue</span>
+            <input
+              type="color"
+              value={identityColor}
+              onChange={(event) => setIdentityColor(event.currentTarget.value)}
+            />
+          </label>
+          <div
+            className={styles.botAvatarPreviewThemeToggle}
+            role="group"
+            aria-label="Preview theme"
+          >
+            <button
+              type="button"
+              data-active={previewTheme === "dark" ? "true" : undefined}
+              aria-pressed={previewTheme === "dark"}
+              onClick={() => setPreviewTheme("dark")}
+            >
+              <Moon size={13} strokeWidth={2.2} aria-hidden="true" />
+              Dark
+            </button>
+            <button
+              type="button"
+              data-active={previewTheme === "light" ? "true" : undefined}
+              aria-pressed={previewTheme === "light"}
+              onClick={() => setPreviewTheme("light")}
+            >
+              <Sun size={13} strokeWidth={2.2} aria-hidden="true" />
+              Light
+            </button>
+          </div>
+        </div>
+      </header>
+      <div
+        className={`${styles.botAvatarCustomizerBody} ${styles.avatarHdBenchBody}`}
+        data-avatar-foundry-height-owner="true"
+        data-active-control-tab="face"
+        data-camera-mode="overview"
+        data-foundry-module="screen"
+        style={AVATAR_STUDIO_VIEWPORT_CSS_PROPERTIES as CSSProperties}
+      >
+        <BotAvatarPreviewPanel
+          titleName="HD Avatar"
+          glyph={DEFAULT_BOT_GLYPH}
+          scheduleKey="qa-avatar-hd-production-renderer"
+          screenMaterialSeed="qa-avatar-hd-screen"
+          frameMaterialSeed="qa-avatar-hd-frame"
+          isDefaultPrismBot={false}
+          previewTheme={previewTheme}
+          previewMode={previewMode}
+          previewMood="warm"
+          previewTalking={previewTalking}
+          voicePreset="neutral"
+          avatarSfx={null}
+          displayedPreviewMouthShape={previewTalking ? "open-small" : "closed"}
+          avatarStyle={avatarStyle}
+          faceStyle={DEFAULT_BOT_FACE_STYLE}
+          avatarDetails={AVATAR_HD_BENCH_DETAILS}
+          avatarDetailsColor={identityColor}
+          onPreviewThemeChange={setPreviewTheme}
+          onPreviewModeChange={setPreviewMode}
+          spatialControls
+          performanceEffects={performanceEffects}
+          onPerformanceEffectChange={(effect, enabled) =>
+            setPerformanceEffects((current) => ({
+              ...current,
+              [effect]: enabled,
+            }))
+          }
+          opticalBenchEnabled
+        />
+      </div>
     </section>
   );
 }
@@ -50154,6 +50598,7 @@ function HomeContent(): React.JSX.Element {
   notePrismRender("home");
   const searchParams = useSearchParams();
   const router = useRouter();
+  const avatarHdBenchRequested = searchParams.get("qaAvatarHd") === "1";
   const { openMenu } = usePrismMenu();
   const { requestFirstRunPrismIntro, replayPrismIntro } =
     usePrismIntroSequence();
@@ -50486,6 +50931,81 @@ function HomeContent(): React.JSX.Element {
   const [user, setUser] = useState<SessionUser | null>(null);
   const userRef = useRef<SessionUser | null>(null);
   userRef.current = user;
+  const [accountWorkspaceStartup, setAccountWorkspaceStartup] =
+    useState<AccountWorkspaceStartupState>({
+      phase: "checking-session",
+      ownerId: null,
+      error: null,
+    });
+  const accountWorkspaceStartupRunRef = useRef(0);
+  const accountWorkspaceStartupLogIdRef = useRef(3);
+  const accountWorkspaceStartupFlavorCursorRef = useRef(0);
+  const accountWorkspaceStartupSpectrumIndexRef = useRef(3);
+  const accountWorkspaceStartupNextFlavorAtRef = useRef(
+    Date.now() + PRISM_STARTUP_FLAVOR_INITIAL_DELAY_MS,
+  );
+  const [accountWorkspaceStartupLogs, setAccountWorkspaceStartupLogs] =
+    useState<PrismStartupLogLine[]>([
+      { id: 1, source: "prism", text: "Boot log continuing in the workspace." },
+      { id: 2, source: "web", text: "Web interface ready." },
+      { id: 3, source: "api", text: "Checking saved account session..." },
+    ]);
+  const nextAccountWorkspaceStartupSpectrumIndex = useCallback((): number => {
+    const nextIndex = nextPrismStartupSpectrumIndex(
+      accountWorkspaceStartupSpectrumIndexRef.current,
+    );
+    accountWorkspaceStartupSpectrumIndexRef.current = nextIndex;
+    return nextIndex;
+  }, []);
+  const appendAccountWorkspaceStartupLog = useCallback(
+    (source: PrismStartupLogSource, text: string): void => {
+      accountWorkspaceStartupNextFlavorAtRef.current =
+        Date.now() + PRISM_STARTUP_FLAVOR_INITIAL_DELAY_MS;
+      accountWorkspaceStartupLogIdRef.current += 1;
+      const line: PrismStartupLogLine = {
+        id: accountWorkspaceStartupLogIdRef.current,
+        source,
+        text,
+        spectrumIndex: nextAccountWorkspaceStartupSpectrumIndex(),
+      };
+      setAccountWorkspaceStartupLogs((current) =>
+        appendPrismStartupLogWithStatusRetention(current, line),
+      );
+    },
+    [nextAccountWorkspaceStartupSpectrumIndex],
+  );
+  const appendAccountWorkspaceStartupFlavorLog = useCallback((): void => {
+    const flavor = nextPrismStartupFlavorLine(
+      accountWorkspaceStartupFlavorCursorRef.current,
+    );
+    accountWorkspaceStartupFlavorCursorRef.current = flavor.nextCursor;
+    accountWorkspaceStartupLogIdRef.current += 1;
+    const line: PrismStartupLogLine = {
+      id: accountWorkspaceStartupLogIdRef.current,
+      source: "prism",
+      text: flavor.text,
+      kind: "flavor",
+      spectrumIndex: nextAccountWorkspaceStartupSpectrumIndex(),
+    };
+    setAccountWorkspaceStartupLogs((current) =>
+      appendPrismStartupLogWithStatusRetention(current, line),
+    );
+  }, [nextAccountWorkspaceStartupSpectrumIndex]);
+  useEffect(() => {
+    const flavorEnabled =
+      accountWorkspaceStartup.phase === "checking-session" ||
+      accountWorkspaceStartup.phase === "loading-workspace";
+    if (!flavorEnabled) return;
+
+    const intervalId = window.setInterval(() => {
+      const now = Date.now();
+      if (now < accountWorkspaceStartupNextFlavorAtRef.current) return;
+      appendAccountWorkspaceStartupFlavorLog();
+      accountWorkspaceStartupNextFlavorAtRef.current =
+        now + PRISM_STARTUP_FLAVOR_INTERVAL_MS;
+    }, 250);
+    return () => window.clearInterval(intervalId);
+  }, [accountWorkspaceStartup.phase, appendAccountWorkspaceStartupFlavorLog]);
   const accountOwnerGenerationBoundaryRef = useRef(
     new AccountOwnerGenerationBoundary(),
   );
@@ -53027,6 +53547,8 @@ function HomeContent(): React.JSX.Element {
   ] = useState<string | null>(null);
   const [botLibraryExpanded, setBotLibraryExpanded] = useState(false);
   const [botLibraryClosing, setBotLibraryClosing] = useState(false);
+  const [botLibraryRefreshing, setBotLibraryRefreshing] = useState(false);
+  const botLibraryRefreshRunRef = useRef(0);
   const botLibraryCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -79132,6 +79654,22 @@ function HomeContent(): React.JSX.Element {
       setHasAnyAccounts(d.hasAnyAccounts !== false);
       transitionAccountOwnerGeneration(d.user?.id ?? null);
       setUser(d.user);
+      accountWorkspaceStartupRunRef.current += 1;
+      if (d.user) {
+        appendAccountWorkspaceStartupLog(
+          "api",
+          "Saved account session verified.",
+        );
+      }
+      setAccountWorkspaceStartup(
+        d.user
+          ? {
+              phase: "loading-workspace",
+              ownerId: d.user.id,
+              error: null,
+            }
+          : { phase: "ready", ownerId: null, error: null },
+      );
       return d.user;
     } catch (err) {
       if (authBootstrapRequestGenerationRef.current !== requestGeneration) {
@@ -79146,12 +79684,22 @@ function HomeContent(): React.JSX.Element {
         return decision.user;
       }
       transitionAccountOwnerGeneration(null);
+      accountWorkspaceStartupRunRef.current += 1;
+      setAccountWorkspaceStartup({
+        phase: "ready",
+        ownerId: null,
+        error: null,
+      });
       setUser(null);
       return null;
     } finally {
       clearTimeout(timeout);
     }
-  }, [requestApiWithLoopbackFallback, transitionAccountOwnerGeneration]);
+  }, [
+    appendAccountWorkspaceStartupLog,
+    requestApiWithLoopbackFallback,
+    transitionAccountOwnerGeneration,
+  ]);
 
   useEffect(() => {
     if (!CLIENT_ACCESS_REQUIRED) {
@@ -79177,6 +79725,12 @@ function HomeContent(): React.JSX.Element {
         setClientAccessState("blocked");
         authBootstrapRequestGenerationRef.current += 1;
         transitionAccountOwnerGeneration(null);
+        accountWorkspaceStartupRunRef.current += 1;
+        setAccountWorkspaceStartup({
+          phase: "ready",
+          ownerId: null,
+          error: null,
+        });
         setUser(null);
       }
     }
@@ -79196,7 +79750,7 @@ function HomeContent(): React.JSX.Element {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!user) return;
-    void refreshAll();
+    void hydrateAccountWorkspaceForStartup(user);
   }, [user]);
   useEffect(() => {
     if (!user?.id || !settings) {
@@ -80922,37 +81476,250 @@ function HomeContent(): React.JSX.Element {
     };
   }, [view]);
 
-  async function refreshAll(options: { includeModels?: boolean } = {}) {
-    const ownerGeneration = captureAccountOwnerGeneration();
-    if (!ownerGeneration) return;
+  async function refreshAll(
+    options: {
+      includeModels?: boolean;
+      ownerGeneration?: AccountOwnerGenerationTicket | null;
+      startupProgress?: AccountWorkspaceRefreshProgress;
+      onStartupProgress?: (
+        source: PrismStartupLogSource,
+        text: string,
+      ) => void;
+    } = {},
+  ): Promise<boolean> {
+    const ownerGeneration =
+      options.ownerGeneration ?? captureAccountOwnerGeneration();
+    if (!ownerGeneration) return false;
     const includeModels = options.includeModels !== false;
-    try {
-      // Models request must see the same ComfyUI host as GET /api/settings — avoid racing
-      // refreshSettings (setState is async) so refreshModels never calls /api/models with a stale host.
-      const settingsPromise = refreshSettings(ownerGeneration);
-      await Promise.all([
-        refreshConversations(),
-        refreshMemories(),
-        refreshBots(),
-        view === "chat" ? refreshImagesChatCanvasDirectory() : refreshImages(),
-      ]);
-      const refreshedSettings = await settingsPromise;
-      if (!refreshedSettings) return;
-      const { comfyUiHost } = refreshedSettings;
-      if (includeModels) {
-        await refreshModels(comfyUiHost, false, ownerGeneration);
+    const onStartupProgress = options.onStartupProgress;
+    const progress =
+      options.startupProgress ??
+      ({
+        ...createAccountWorkspaceStartupProgress(),
+        comfyUiHost: null,
+      } satisfies AccountWorkspaceRefreshProgress);
+    let loadedBotCount: number | null = null;
+    const startMessage = (
+      resource: AccountWorkspaceStartupResource,
+    ): string => {
+      switch (resource) {
+        case "settings":
+          return "Decrypting account settings...";
+        case "conversations":
+          return "Loading conversations...";
+        case "memories":
+          return "Loading private memories...";
+        case "bots":
+          return "Loading bot library...";
+        case "images":
+          return "Loading account asset library...";
+        case "models":
+          return "Preparing model catalog...";
       }
-    } catch (err) {
-      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
-      /** Never toast the overlay for startup races (user may still browse cached UI). */
-      console.warn("[refreshAll]", err);
-      if (!includeModels) return;
-      try {
-        await refreshModels(undefined, false, ownerGeneration);
-      } catch {
-        /* secondary attempt — refreshModels tolerates failures but keep this belt-and-suspenders */
+    };
+    const readyMessage = (
+      resource: AccountWorkspaceStartupResource,
+    ): string => {
+      switch (resource) {
+        case "settings":
+          return "Account settings ready.";
+        case "conversations":
+          return "Conversations ready.";
+        case "memories":
+          return "Private memories ready.";
+        case "bots":
+          return `Bot library ready · ${loadedBotCount ?? 0} bots.`;
+        case "images":
+          return "Account asset library ready.";
+        case "models":
+          return "Model catalog ready.";
       }
+    };
+    const loadResource = async (
+      resource: AccountWorkspaceStartupResource,
+    ): Promise<void> => {
+      switch (resource) {
+        case "settings": {
+          // Models must see the host from this exact account-settings load.
+          const result = await refreshSettings(ownerGeneration);
+          if (!result) throw new Error("Account settings became stale.");
+          progress.comfyUiHost = result.comfyUiHost;
+          return;
+        }
+        case "conversations":
+          await refreshConversations();
+          return;
+        case "memories":
+          await refreshMemories();
+          return;
+        case "bots": {
+          const result = await refreshBots(ownerGeneration);
+          loadedBotCount = result.length;
+          return;
+        }
+        case "images":
+          await (view === "chat"
+            ? refreshImagesChatCanvasDirectory()
+            : refreshImages());
+          return;
+        case "models":
+          await refreshModels(
+            progress.comfyUiHost ?? undefined,
+            false,
+            ownerGeneration,
+          );
+      }
+    };
+    const settle = (
+      resources: readonly AccountWorkspaceStartupResource[],
+    ): Promise<AccountWorkspaceStartupResource[]> =>
+      settleAccountWorkspaceStartupResources({
+        progress,
+        resources,
+        load: async (resource) => {
+          await loadResource(resource);
+          if (!isCurrentAccountOwnerGeneration(ownerGeneration)) {
+            throw new Error("Account owner changed during workspace startup.");
+          }
+        },
+        onStarted: (resource) =>
+          onStartupProgress?.("api", startMessage(resource)),
+        onCompleted: (resource) =>
+          onStartupProgress?.("api", readyMessage(resource)),
+        onFailed: (resource, error) => {
+          if (isCurrentAccountOwnerGeneration(ownerGeneration)) {
+            console.warn(`[refreshAll:${resource}]`, error);
+          }
+        },
+      });
+
+    // Wait for every sibling to settle. A failed fast request must not leave
+    // slower account loads running underneath a second complete attempt.
+    await settle(ACCOUNT_WORKSPACE_PRIMARY_RESOURCES);
+    if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return false;
+    if (includeModels && progress.completed.has("settings")) {
+      await settle(["models"]);
+    } else if (!includeModels) {
+      progress.completed.add("models");
     }
+    return (
+      isCurrentAccountOwnerGeneration(ownerGeneration) &&
+      pendingAccountWorkspaceStartupResources(progress).length === 0
+    );
+  }
+
+  async function hydrateAccountWorkspaceForStartup(
+    activeUser: SessionUser,
+  ): Promise<void> {
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration || ownerGeneration.ownerId !== activeUser.id) return;
+    const runId = accountWorkspaceStartupRunRef.current + 1;
+    accountWorkspaceStartupRunRef.current = runId;
+    setAccountWorkspaceStartup({
+      phase: "loading-workspace",
+      ownerId: activeUser.id,
+      error: null,
+    });
+    appendAccountWorkspaceStartupLog(
+      "prism",
+      "Opening this account's private workspace...",
+    );
+
+    const startupStillCurrent = (): boolean =>
+      accountWorkspaceStartupRunRef.current === runId &&
+      isCurrentAccountOwnerGeneration(ownerGeneration) &&
+      userRef.current?.id === activeUser.id;
+    const startupProgress: AccountWorkspaceRefreshProgress = {
+      ...createAccountWorkspaceStartupProgress(),
+      comfyUiHost: null,
+    };
+    let lastPendingSignature = "";
+    let ready = false;
+    for (
+      let attempt = 0;
+      attempt <= ACCOUNT_WORKSPACE_STARTUP_RETRY_DELAYS_MS.length;
+      attempt += 1
+    ) {
+      if (attempt > 0) {
+        const pending = pendingAccountWorkspaceStartupResources(startupProgress);
+        const pendingSignature = pending.join(",");
+        if (pendingSignature !== lastPendingSignature) {
+          appendAccountWorkspaceStartupLog(
+            "prism",
+            `Still opening ${formatAccountWorkspaceStartupResources(pending)}...`,
+          );
+          lastPendingSignature = pendingSignature;
+        }
+      }
+      ready = await refreshAll({
+        ownerGeneration,
+        startupProgress,
+        onStartupProgress: appendAccountWorkspaceStartupLog,
+      });
+      if (!startupStillCurrent()) return;
+      if (ready) break;
+      const retryDelayMs = ACCOUNT_WORKSPACE_STARTUP_RETRY_DELAYS_MS[attempt];
+      if (retryDelayMs === undefined) break;
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, retryDelayMs);
+      });
+      if (!startupStillCurrent()) return;
+    }
+    if (ready) {
+      appendAccountWorkspaceStartupLog("prism", "Private workspace ready.");
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, PRISM_STARTUP_COMPLETION_HOLD_MS);
+      });
+      if (!startupStillCurrent()) return;
+
+      const readyState: AccountWorkspaceStartupState = {
+        phase: "ready",
+        ownerId: activeUser.id,
+        error: null,
+      };
+      const transitionDocument = document as PrismViewTransitionDocument;
+      const root = document.documentElement;
+      let committed = false;
+      const revealWorkspace = (): void => {
+        if (committed) return;
+        committed = true;
+        flushSync(() => setAccountWorkspaceStartup(readyState));
+      };
+
+      if (!transitionDocument.startViewTransition) {
+        revealWorkspace();
+        return;
+      }
+
+      root.dataset.prismStartupHandoff = "true";
+      root.style.setProperty(
+        "--prism-startup-handoff-duration",
+        `${PRISM_STARTUP_CROSSFADE_MS}ms`,
+      );
+      try {
+        const transition = transitionDocument.startViewTransition(revealWorkspace);
+        void transition.ready?.catch(() => undefined);
+        await transition.finished.catch(() => undefined);
+      } catch {
+        revealWorkspace();
+      } finally {
+        revealWorkspace();
+        delete root.dataset.prismStartupHandoff;
+        root.style.removeProperty("--prism-startup-handoff-duration");
+      }
+      return;
+    }
+
+    appendAccountWorkspaceStartupLog(
+      "prism",
+      "Workspace readiness paused. Use Try again to continue.",
+    );
+    setAccountWorkspaceStartup({
+      phase: "error",
+      ownerId: activeUser.id,
+      error:
+        "Prism could not finish loading this account's workspace. Your account data stayed closed.",
+    });
   }
 
   const recoverBackendConnection = useCallback((): Promise<void> => {
@@ -80982,6 +81749,19 @@ function HomeContent(): React.JSX.Element {
     );
     return attempt;
   }, [bootstrap, requestApiWithLoopbackFallback]);
+
+  async function retryAccountWorkspaceStartup(): Promise<void> {
+    const activeUser = userRef.current;
+    if (!activeUser) return;
+    if (backendUnavailable) {
+      try {
+        await recoverBackendConnection();
+      } catch {
+        // The startup gate remains actionable; the next retry probes again.
+      }
+    }
+    await hydrateAccountWorkspaceForStartup(activeUser);
+  }
 
   // Keep server status current even when the user is only navigating local UI.
   // Without this heartbeat, a stopped API remains invisible until some later
@@ -82229,8 +83009,16 @@ function HomeContent(): React.JSX.Element {
       // Developer-only surface; ignore read failures.
     }
   }
-  async function refreshBots(): Promise<Bot[]> {
-    const d = await api<{ bots: Bot[] }>("/api/bots");
+  async function refreshBots(
+    ownerGeneration: AccountOwnerGenerationTicket | null =
+      captureAccountOwnerGeneration(),
+  ): Promise<Bot[]> {
+    if (!ownerGeneration) return [];
+    const botsResult = await runForAccountOwner(ownerGeneration, () =>
+      api<{ bots: Bot[] }>("/api/bots"),
+    );
+    if (botsResult.status === "stale") return [];
+    const d = botsResult.value;
     botLibraryGroupsCanPruneRef.current = true;
     setBots(d.bots);
     return d.bots;
@@ -82912,6 +83700,12 @@ function HomeContent(): React.JSX.Element {
   const clearAuthenticatedSessionState = useCallback(() => {
     authBootstrapRequestGenerationRef.current += 1;
     transitionAccountOwnerGeneration(null);
+    accountWorkspaceStartupRunRef.current += 1;
+    setAccountWorkspaceStartup({
+      phase: "ready",
+      ownerId: null,
+      error: null,
+    });
     clearLegacyBrowserBearerCredentials();
     botLibraryGroupsCanPruneRef.current = false;
     setBotLibraryGroupsHydratedUserId(null);
@@ -82929,6 +83723,8 @@ function HomeContent(): React.JSX.Element {
     setSettings(null);
     setModelCatalog(null);
     setBots([]);
+    botLibraryRefreshRunRef.current += 1;
+    setBotLibraryRefreshing(false);
     setImages([]);
     setError(null);
     setPanelError(null);
@@ -103599,6 +104395,21 @@ function HomeContent(): React.JSX.Element {
     setBotPanelView("library");
     setBotLibraryExpanded(true);
     openRightPanel("bots");
+    const refreshRunId = botLibraryRefreshRunRef.current + 1;
+    botLibraryRefreshRunRef.current = refreshRunId;
+    setBotLibraryRefreshing(true);
+    void refreshBots()
+      .catch((err) => {
+        if (isPrismBackendUnavailableError(err)) return;
+        setPanelError(
+          err instanceof Error ? err.message : "Bot library refresh failed.",
+        );
+      })
+      .finally(() => {
+        if (botLibraryRefreshRunRef.current === refreshRunId) {
+          setBotLibraryRefreshing(false);
+        }
+      });
   }
 
   function selectBotPanelShowcase(bot: Bot | null): void {
@@ -109207,6 +110018,10 @@ function HomeContent(): React.JSX.Element {
   const shouldShowAuthForm =
     !user && (hasAnyAccounts || preAuthChecklistComplete);
 
+  if (avatarHdBenchRequested) {
+    return <AvatarHdBenchSurface />;
+  }
+
   if (!user && backendUnavailable) {
     return (
       <main className={`${styles.authLayout} ${themeClass}`}>
@@ -109244,6 +110059,41 @@ function HomeContent(): React.JSX.Element {
         </div>
         <GlyphTooltipLayer />
       </main>
+    );
+  }
+
+  const accountWorkspaceStartupOwnerMismatch = Boolean(
+    user && accountWorkspaceStartup.ownerId !== user.id,
+  );
+  const accountWorkspaceStartupBlocked =
+    accountWorkspaceStartup.phase === "checking-session" ||
+    accountWorkspaceStartupOwnerMismatch ||
+    Boolean(
+      user &&
+        (accountWorkspaceStartup.phase === "loading-workspace" ||
+          accountWorkspaceStartup.phase === "error"),
+    );
+  if (accountWorkspaceStartupBlocked) {
+    const startupFailed =
+      accountWorkspaceStartup.phase === "error" &&
+      accountWorkspaceStartup.ownerId === user?.id;
+    return (
+      <PrismStartupScreen
+        label={
+          startupFailed
+            ? "Prism needs another moment..."
+            : user
+              ? "Opening your private workspace..."
+              : "Checking your saved session..."
+        }
+        logs={accountWorkspaceStartupLogs}
+        failed={startupFailed}
+        onRetry={
+          startupFailed
+            ? () => void retryAccountWorkspaceStartup()
+            : undefined
+        }
+      />
     );
   }
 
@@ -125899,8 +126749,11 @@ function HomeContent(): React.JSX.Element {
             "openai",
           );
           const botLibraryTotal = bots.length + 1;
-          const botLibrarySummary =
-            botLibraryTotal === 1 ? "Default only" : `${botLibraryTotal} bots`;
+          const botLibrarySummary = botLibraryRefreshing
+            ? "Loading library…"
+            : botLibraryTotal === 1
+              ? "Default only"
+              : `${botLibraryTotal} bots`;
           const defaultBotCardName = "Default";
           const defaultBotCardGlyph = DEFAULT_PRISM_BOT_GLYPH;
           const defaultBotCardStyle = undefined;
@@ -128693,6 +129546,15 @@ function HomeContent(): React.JSX.Element {
                           </div>
                         </button>
                       </div>
+
+                      {botLibraryRefreshing && bots.length === 0 ? (
+                        <p
+                          className={styles.botLibraryEmptyFilter}
+                          role="status"
+                        >
+                          Loading your bots…
+                        </p>
+                      ) : null}
 
                       {searchedPanelBots.length > 0 &&
                         botPanelDashboardActive && (
@@ -149023,7 +149885,7 @@ function HomeContent(): React.JSX.Element {
               const signalPrismMannequinProps: ZenLiveBotMannequinProps = {
                 glyph: zenDefaultPrismGlyph,
                 faceStyle: signalPrismFaceStyle,
-                theme: resolvedTheme,
+                theme: renderTheme,
                 faceScaleY,
                 voicePreset: "warm",
                 isTalking: signalPrismTalking,
@@ -149081,6 +149943,7 @@ function HomeContent(): React.JSX.Element {
                   data-signal-surface={avatarState.surface}
                   data-prism-decorative-motion="true"
                   data-zen-live-bot-presence-plate="true"
+                  data-avatar-full-scale-identity="canonical"
                   data-body-sized="true"
                   data-source="prism"
                   data-prism-persona="true"
@@ -149095,7 +149958,14 @@ function HomeContent(): React.JSX.Element {
                       : undefined
                   }
                   style={{
-                    ...prismDefaultAccentStyle(renderTheme),
+                    ...botAvatarFullScaleIdentityStyle(
+                      prismDefaultAccentForTheme(renderTheme),
+                      renderTheme,
+                      {
+                        prismPersona: true,
+                        voicePreset: "warm",
+                      },
+                    ),
                     ["--coffee-plate-emoji-face-scale-y" as string]: faceScaleY,
                     ["--avatar-details-facing-scale-x" as string]:
                       botAvatarDetailsFacingScaleX(faceScaleY),
@@ -149215,7 +150085,7 @@ function HomeContent(): React.JSX.Element {
             const signalMannequinProps: ZenLiveBotMannequinProps = {
               glyph,
               faceStyle: signalMannequinFaceStyle,
-              theme: resolvedTheme,
+              theme: renderTheme,
               faceScaleY,
               voicePreset: signalMannequinVoicePreset,
               isTalking: signalMannequinTalking,
@@ -149278,6 +150148,7 @@ function HomeContent(): React.JSX.Element {
                 data-signal-surface={avatarState.surface}
                 data-prism-decorative-motion="true"
                 data-zen-live-bot-presence-plate="true"
+                data-avatar-full-scale-identity="canonical"
                 data-body-sized="true"
                 data-source="persona"
                 data-theme={renderTheme}
@@ -149303,7 +150174,13 @@ function HomeContent(): React.JSX.Element {
                   openAppWideBotContextMenu(event);
                 }}
                 style={{
-                  ...botAccentStyle(identityColor, renderTheme),
+                  ...botAvatarFullScaleIdentityStyle(
+                    color,
+                    renderTheme,
+                    {
+                      voicePreset: signalMannequinVoicePreset,
+                    },
+                  ),
                   ["--coffee-plate-emoji-face-scale-y" as string]: faceScaleY,
                   ["--avatar-details-facing-scale-x" as string]:
                     botAvatarDetailsFacingScaleX(faceScaleY),

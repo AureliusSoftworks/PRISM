@@ -50,7 +50,7 @@ describe("Flyting stage authoring", () => {
     assert.match(flytingSource, />\s*Done\s*<\/button>/u);
     assert.match(
       flytingStyles,
-      /\.stageAlignmentModal\s*\{[\s\S]{0,900}position:\s*fixed;[\s\S]{0,120}inset:\s*0/u,
+      /\.stageAlignmentModal\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0/u,
     );
   });
 
@@ -68,7 +68,11 @@ describe("Flyting stage authoring", () => {
     assert.match(flytingSource, /aria-label="Gallery bot size"/u);
     assert.match(
       flytingStyles,
-      /\.stageAlignmentPreviewGallery \.flytingAudienceMillingSlot\s*\{\s*scale:\s*var\(--flyting-preview-gallery-bot-scale/u,
+      /\.flytingAudienceMillingSlot\s*\{[\s\S]{0,520}scale:\s*var\(--flyting-gallery-bot-scale/u,
+    );
+    assert.match(
+      flytingSource,
+      /DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS\.galleryBotScale/u,
     );
     assert.match(
       flytingStyles,
@@ -128,12 +132,67 @@ describe("Flyting stage authoring", () => {
     );
   });
 
+  it("offers independent skew control for Wide contestants and both Jarl helmets", () => {
+    assert.match(
+      flytingSource,
+      /stageLayoutDefinition\.supportsSkew[\s\S]{0,340}Skew X/u,
+    );
+    assert.match(
+      flytingSource,
+      /flytingStageAlignmentItemFor\(alignmentView, role, "helmet"\)/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.keyedVikingHelmet\s*\{[^}]*skewX\(var\(--flyting-align-skew-x/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.moderatorVikingHelmet\s*\{[^}]*skewX\(var\(--flyting-align-skew-x/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.moderatorPixelVikingHelmet\s*\{[^}]*skewX\(var\(--flyting-align-skew-x/u,
+    );
+  });
+
   it("locally previews both venue themes without changing the app theme", () => {
     assert.match(flytingSource, /stagePreviewTheme/u);
     assert.match(flytingSource, /data-flyting-preview-theme-toggle="true"/u);
     assert.match(flytingSource, /Preview dark/u);
     assert.match(flytingSource, /Preview light/u);
     assert.match(flytingSource, /data-theme=\{stagePreviewTheme\}/u);
+    assert.match(
+      flytingSource,
+      /data-flyting-preview-theme=\{stagePreviewTheme\}/u,
+    );
+    assert.match(
+      flytingSource,
+      /className=\{styles\.stageAlignmentPanel\}[\s\S]{0,100}data-theme=\{stagePreviewTheme\}/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.stageAlignmentModal\s*\{[^}]*color-scheme:\s*dark/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.stageAlignmentModal\[data-theme="light"\]\s*\{[^}]*color-scheme:\s*light/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.stageAlignmentTabs button\[data-selected="true"\]\s*\{[\s\S]{0,320}var\(--hall-authoring-selected-surface\)/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.stageAlignmentCopyButton\s*\{[\s\S]{0,420}var\(--hall-authoring-copy-start\)/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.stageAlignmentModal\[data-theme="light"\]\s*\{[^}]*--hall-authoring-gallery-background:\s*#c4a984/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.stageAlignmentPreviewGallery\s*\{[\s\S]{0,700}background-color:\s*var\(--hall-authoring-gallery-background\)/u,
+    );
   });
 
   it("uses a neutral authoring canvas instead of the sepia preview wash", () => {
@@ -158,7 +217,7 @@ describe("Flyting stage authoring", () => {
   it("docks fine tuning beside the complete interactive stage footprint", () => {
     assert.match(
       flytingStyles,
-      /\.stageAlignmentModal\s*\{[\s\S]{0,1100}display:\s*grid;[\s\S]{0,180}grid-template-columns:\s*minmax\(0, 1fr\) minmax\(300px, 340px\)/u,
+      /\.stageAlignmentModal\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(300px, 340px\)/u,
     );
     assert.match(
       flytingStyles,
@@ -239,7 +298,19 @@ describe("Flyting stage authoring", () => {
     );
     assert.match(flytingSource, /"--flyting-rug-glyph-color": color/u);
     assert.match(flytingStyles, /var\(--flyting-rug-glyph-color\)/u);
-    assert.doesNotMatch(flytingSource, /galleryModeratorRugGlyph/u);
+    assert.match(flytingSource, /galleryModeratorRugGlyph/u);
+    assert.match(
+      flytingSource,
+      /\["for", forBot, forColor\],\s*\["moderator", hostBot, hostColor\],\s*\["against", againstBot, againstColor\]/u,
+    );
+    assert.equal(
+      [
+        ...flytingSource.matchAll(
+          /\["moderator", props\.session\.moderator, hostColor\]/gu,
+        ),
+      ].length,
+      2,
+    );
   });
 
   it("aligns Flyting mini eyes and enlarges gallery buckle glyphs", () => {
@@ -286,6 +357,10 @@ describe("Flyting stage authoring", () => {
     assert.match(flytingSource, /moderatorModeratorHeraldry/u);
     assert.match(flytingStyles, /perspective\(170px\) rotateX\(61deg\)/u);
     assert.match(flytingStyles, /left: calc\(17\.25%/u);
+    assert.match(
+      flytingStyles,
+      /\.galleryRugGlyphs > span\[data-role="moderator"\]\s*\{\s*left: calc\(50%/u,
+    );
     assert.match(flytingStyles, /left: calc\(82\.75%/u);
     assert.doesNotMatch(
       flytingStyles,
@@ -305,6 +380,10 @@ describe("Flyting stage authoring", () => {
     assert.match(
       flytingStyles,
       /\.courtBotPosition,[\s\S]{0,160}\.flytingAudiencePortrait\s*\{\s*overflow:\s*visible/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.galleryVikingHelmet\s*\{[^}]*top:\s*-54%;[^}]*width:\s*166%;[^}]*scaleY\(0\.92\)/u,
     );
   });
 
