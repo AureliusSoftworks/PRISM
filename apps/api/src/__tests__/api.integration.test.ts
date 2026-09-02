@@ -2351,6 +2351,73 @@ describe("API request integration", () => {
     assert.equal(resetSettings.settings.preferredOnlineModel, "");
   });
 
+  it("keeps four account identities and model settings isolated across repeated login switches", async () => {
+    const fixtures = Array.from({ length: 4 }, (_, index) => ({
+      username: `four-owner-${index}@example.test`,
+      password: `four-owner-password-${index}`,
+      displayName: `Four Owner ${index}`,
+      preferredProvider: index % 2 === 0 ? "local" : "openai",
+      preferredLocalModel: `owner-${index}-local-model`,
+      preferredOnlineModel: `owner-${index}-online-model`,
+    }));
+
+    for (const fixture of fixtures) {
+      const ownerClient = createClient();
+      const registered = await ownerClient.request(
+        "/api/auth/register",
+        jsonInit({
+          username: fixture.username,
+          password: fixture.password,
+          displayName: fixture.displayName,
+        }),
+      );
+      assert.equal(registered.status, 201, await registered.clone().text());
+      const saved = await ownerClient.request("/api/settings", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          preferredProvider: fixture.preferredProvider,
+          preferredLocalModel: fixture.preferredLocalModel,
+          preferredOnlineModel: fixture.preferredOnlineModel,
+        }),
+      });
+      assert.equal(saved.status, 200, await saved.clone().text());
+    }
+
+    const switchingClient = createClient();
+    for (const fixture of [...fixtures, ...fixtures.toReversed()]) {
+      const login = await switchingClient.request(
+        "/api/auth/login",
+        jsonInit({
+          username: fixture.username.toUpperCase(),
+          password: fixture.password,
+        }),
+      );
+      assert.equal(login.status, 200, await login.clone().text());
+      const current = await json(
+        await switchingClient.request("/api/auth/me"),
+      );
+      assert.equal(current.user.email, fixture.username);
+      assert.equal(current.user.displayName, fixture.displayName);
+
+      const loaded = await json(
+        await switchingClient.request("/api/settings"),
+      );
+      assert.equal(
+        loaded.settings.preferredProvider,
+        fixture.preferredProvider,
+      );
+      assert.equal(
+        loaded.settings.preferredLocalModel,
+        fixture.preferredLocalModel,
+      );
+      assert.equal(
+        loaded.settings.preferredOnlineModel,
+        fixture.preferredOnlineModel,
+      );
+    }
+  });
+
   it("shows ElevenLabs credits only for the signed-in user's saved key while online", async () => {
     const client = createClient();
     const registered = await client.request(

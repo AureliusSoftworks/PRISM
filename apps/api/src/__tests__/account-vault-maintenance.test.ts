@@ -1,5 +1,6 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import type {
   IncomingHttpHeaders,
   IncomingMessage,
@@ -15,6 +16,7 @@ import {
   buildAccountVaultMaintenanceUnavailablePayload,
 } from "../account-vault-maintenance.ts";
 import { createTestDatabase } from "../test-support.ts";
+import { deriveMasterKey, encryptText } from "../security.ts";
 
 const tempDir = mkdtempSync(join(tmpdir(), "prism-vault-maintenance-test-"));
 process.env.PRISM_API_DISABLE_AUTOSTART = "1";
@@ -146,6 +148,17 @@ async function requestHandlerDirectly(
 
 async function exerciseRoutes(accountCount: 2 | 4): Promise<RouteExerciseResult> {
   const db = createTestDatabase();
+  // Exercise the supported legacy-token migration boundary: this fixture is
+  // intentionally populated before the request handler activates Auth Vault.
+  db.exec(`
+    DROP TABLE sessions;
+    CREATE TABLE sessions (
+      token TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `);
   const secretAccountValues: string[] = [];
   const now = new Date().toISOString();
   for (let index = 0; index < accountCount; index += 1) {
@@ -153,13 +166,27 @@ async function exerciseRoutes(accountCount: 2 | 4): Promise<RouteExerciseResult>
     const email = `private-${accountCount}-${index}@example.test`;
     const displayName = `Secret Player ${accountCount}-${index}`;
     secretAccountValues.push(userId, email, displayName);
+    const userDek = randomBytes(32);
+    const masterKey = deriveMasterKey(config.encryptionMasterKey);
+    const wrapped = encryptText(userDek.toString("base64"), masterKey);
+    userDek.fill(0);
+    masterKey.fill(0);
     db.prepare(
       `INSERT INTO users (
          id, email, display_name, password_hash, password_salt,
          wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
          created_at, last_active_at
-       ) VALUES (?, ?, ?, 'hash', 'salt', 'wrapped', 'iv', 'tag', ?, ?)`,
-    ).run(userId, email, displayName, now, now);
+       ) VALUES (?, ?, ?, 'hash', 'salt', ?, ?, ?, ?, ?)`,
+    ).run(
+      userId,
+      email,
+      displayName,
+      wrapped.ciphertext,
+      wrapped.iv,
+      wrapped.tag,
+      now,
+      now,
+    );
   }
   const sessionToken = `private-session-${accountCount}`;
   secretAccountValues.push(sessionToken);

@@ -1246,6 +1246,8 @@
 .botAvatarMannequinStage[data-avatar-performance-glass="false"]
   .zenLiveBotPresenceScreenGlassOverlay,
 .botAvatarMannequinStage[data-avatar-performance-glass="false"]
+  .botFaceScreenLightReflection,
+.botAvatarMannequinStage[data-avatar-performance-glass="false"]
   .botAvatarFoundryBuckleGlass {
   display: none !important;
 }
@@ -1264,7 +1266,8 @@
     .botFaceCrtNoiseLayer,
     .botFaceCrtPixelGridLayer,
     .botFaceCrtGrimeLayer,
-    .botFaceCrtBreathingLayer
+    .botFaceCrtBreathingLayer,
+    .botFaceScreenHardLightTexture
   ) {
   display: none !important;
   filter: none !important;
@@ -30395,7 +30398,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"]
   .botFaceCrtGrimeLayer,
 .zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"]
-  .botFaceCrtBreathingLayer {
+  .botFaceCrtBreathingLayer,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"]
+  .botFaceScreenHardLightTexture,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"]
+  .botFaceScreenLightReflection {
   opacity: 0 !important;
   animation: none !important;
 }
@@ -30637,6 +30644,47 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background-repeat: repeat;
   opacity: var(--crt-pixel-grid-opacity);
   mix-blend-mode: multiply;
+}
+
+/* Authored Full HD screen materials. These sit above the phosphor lattice and
+   live face/Ink, but remain inside the emission group so the separate glass
+   wrapper and its glare always paint in front. */
+.botFaceScreenHardLightTexture,
+.botFaceScreenLightReflection {
+  position: absolute;
+  inset: 0;
+  display: block;
+  pointer-events: none;
+  background-position: center;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+}
+
+.botFaceScreenHardLightTexture {
+  z-index: 9;
+  background-image: url("/bot-frame/bot-frame-screen-mask.png?v=1000");
+  opacity: 1;
+  mix-blend-mode: hard-light;
+}
+
+.botFaceScreenLightReflection {
+  z-index: 10;
+  background-image: url("/bot-frame/bot-frame-light-screen-reflection.png?v=1000");
+  opacity: 0;
+  mix-blend-mode: normal;
+}
+
+.themeLight .botFaceScreenLightReflection,
+.zenLiveBotPresencePlate[data-theme="light"]
+  .botFaceScreenLightReflection {
+  opacity: 0.5;
+}
+
+.zenLiveBotPresencePlate[data-user-screen-power="off"]
+  .botFaceScreenHardLightTexture,
+.zenLiveBotPresencePlate[data-user-screen-power="off"]
+  .botFaceScreenLightReflection {
+  opacity: 0;
 }
 
 /* Screen-local curvature only. Authored wear belongs to the high-resolution
@@ -46124,7 +46172,17 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .botPanelHubShowcase {
   position: fixed;
-  inset: 0 min(479px, calc(100vw - 32px)) 0 0;
+  /* The showcase is interactive (voice samples + backdrop dismissal), so it
+     must physically clear the shared navbar just like the panel and dimmer.
+     Relying on z-index alone lets this full-viewport hit target intercept the
+     navbar in nested applet stacking contexts. */
+  top: var(
+    --app-shell-top-nav-height,
+    calc(60px + env(safe-area-inset-top, 0px))
+  );
+  right: min(479px, calc(100vw - 32px));
+  bottom: 0;
+  left: 0;
   z-index: 100;
   min-width: 0;
   min-height: 0;
@@ -46142,10 +46200,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botPanelHubShowcase[data-panel="bots"][data-bot-view="botHub"] {
-  top: var(
-    --app-shell-top-nav-height,
-    calc(60px + env(safe-area-inset-top, 0px))
-  );
   right: min(58vw, 1080px);
   z-index: 101;
   padding: clamp(78px, 9vh, 116px) 24px 30px;

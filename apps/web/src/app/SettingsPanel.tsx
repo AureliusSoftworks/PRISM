@@ -135,7 +135,7 @@ export function SettingsPanel({
       data-settings-scope={scope}
       data-closing={panelClosing ? "true" : undefined}
       role="dialog"
-      aria-modal="true"
+      aria-modal="false"
       aria-labelledby="settings-panel-title"
       tabIndex={-1}
     >

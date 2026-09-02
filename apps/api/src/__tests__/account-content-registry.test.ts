@@ -26,29 +26,29 @@ describe("account-content registry", () => {
     const db = currentFixture();
     try {
       const registry = buildAccountContentRegistry(db);
-      assert.equal(registry.version, 3);
+      assert.equal(registry.version, 4);
       assert.deepEqual(registry.auditedSchema, {
-        fingerprint: "7738b09a78087b36ed335db68953ff33cc467b2237920e09312e5cc093261731",
-        tableCount: 162,
-        columnCount: 2_001,
-        indexCount: 384,
-        triggerCount: 573,
+        fingerprint: "0f83ec84f5bbdb33b737ad3af46b11adf3d7e16086b5e292f2322f81da998cad",
+        tableCount: 166,
+        columnCount: 2_019,
+        indexCount: 382,
+        triggerCount: 577,
       });
       assert.equal(registry.sqliteColumns.length, registry.auditedSchema.columnCount);
       assert.equal(registry.sqliteIndexes.length, registry.auditedSchema.indexCount);
-      assert.equal(new Set(registry.sqliteColumns.map((entry) => entry.table)).size, 162);
+      assert.equal(new Set(registry.sqliteColumns.map((entry) => entry.table)).size, 166);
       assert.deepEqual(registry.ownerRelationCoverage, {
-        relationCount: 442,
-        ownerAnchorCount: 151,
-        ownerRowGuardCount: 152,
+        relationCount: 444,
+        ownerAnchorCount: 153,
+        ownerRowGuardCount: 154,
         ownerValidatorOnlyCount: 1,
-        nativeCompositeCount: 2,
-        triggerBackedCount: 276,
+      nativeCompositeCount: 3,
+      triggerBackedCount: 275,
         serializedOwnerCount: 8,
         polymorphicOwnerCount: 2,
         derivedOwnerCount: 2,
         validatorOnlyRelationCount: 1,
-        followUpCount: 289,
+      followUpCount: 288,
         idColumnCount: 302,
         relationalIdColumnCount: 263,
         nonParentIdColumnCount: 39,
@@ -176,6 +176,42 @@ describe("account-content registry", () => {
         true,
       );
       assert.equal(
+        registry.sqliteColumns
+          .filter((entry) => entry.table === "users")
+          .every(
+            (entry) =>
+              entry.currentProtection ===
+              "vault-v2-account-auth-ciphertext-and-blind-indexes",
+          ),
+        true,
+      );
+      assert.equal(
+        registry.sqliteColumns
+          .filter(
+            (entry) =>
+              entry.table === "sessions" ||
+              entry.table === "client_access_tokens",
+          )
+          .every((entry) => entry.currentProtection === "keyed-hash-only"),
+        true,
+      );
+      assert.deepEqual(
+        registry.sqliteColumns
+          .filter((entry) => entry.table === "owner_file_vault_roots")
+          .map((entry) => entry.column)
+          .sort(),
+        ["created_at", "encrypted_root_key", "user_id"],
+      );
+      assert.equal(
+        registry.sqliteColumns
+          .filter((entry) => entry.table === "owner_file_vault_roots")
+          .every(
+            (entry) =>
+              entry.currentProtection === "vault-v2-owner-file-root",
+          ),
+        true,
+      );
+      assert.equal(
         AUDITED_STRUCTURAL_METADATA_ALLOWLIST.some(
           (entry) =>
             entry.surfaceId === "sqlite.table.vault-installation-config" &&
@@ -183,6 +219,17 @@ describe("account-content registry", () => {
         ),
         true,
       );
+      for (const surfaceId of [
+        "sqlite.table.account-auth-installation-key",
+        "sqlite.table.account-auth-vault-state",
+      ]) {
+        assert.equal(
+          AUDITED_STRUCTURAL_METADATA_ALLOWLIST.some(
+            (entry) => entry.surfaceId === surfaceId,
+          ),
+          true,
+        );
+      }
       assert.match(ACCOUNT_CONTENT_REGISTRY_BOUNDARY.doesNotProve, /Encryption/u);
       assert.equal(
         AUDITED_STRUCTURAL_METADATA_ALLOWLIST.some((entry) =>

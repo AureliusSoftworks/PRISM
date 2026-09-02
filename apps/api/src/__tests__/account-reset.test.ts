@@ -380,15 +380,17 @@ function seedResetFixture(db: DatabaseSync): void {
   `
   ).run("user-1");
 
-  db.prepare("INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)").run(
-    "session-1",
+  db.prepare(
+    "INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
+  ).run(
+    "pst2_account-reset-fixture",
     "user-1",
     "2030-01-01T00:00:00.000Z"
   );
   db.prepare(
-    "INSERT INTO client_access_tokens (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)"
+    "INSERT INTO client_access_tokens (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)"
   ).run(
-    "client-1",
+    "pct2_account-reset-fixture",
     "user-1",
     "2030-01-01T00:00:00.000Z",
     "2026-01-01T00:00:00.000Z"

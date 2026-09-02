@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
   decideAudioReuseV1,
@@ -13,6 +13,12 @@ import {
   type AudioUsageRefV1,
 } from "@localai/shared";
 import { decryptBytes, encryptBytes } from "./security.ts";
+
+const AUDIO_TENANT_HASH_PREFIX_V2 = "paud2_";
+const AUDIO_TENANT_HASH_DOMAIN_V2 = Buffer.from(
+  "PRISM\0AUDIO-ASSET-CONTENT-HASH\0V2\0",
+  "utf8",
+);
 
 type AudioAssetRowV1 = {
   id: string;
@@ -77,6 +83,22 @@ export function normalizeAudioAssetTagsV1(values: readonly unknown[]): string[] 
         .filter(Boolean),
     ),
   ].slice(0, 32);
+}
+
+export function audioAssetTenantContentHashV2(
+  userKey: Uint8Array,
+  bytes: Uint8Array,
+): string {
+  if (!(userKey instanceof Uint8Array) || userKey.length !== 32) {
+    throw new Error("Audio asset owner key is invalid.");
+  }
+  if (!(bytes instanceof Uint8Array)) {
+    throw new Error("Audio asset bytes are invalid.");
+  }
+  return `${AUDIO_TENANT_HASH_PREFIX_V2}${createHmac("sha256", userKey)
+    .update(AUDIO_TENANT_HASH_DOMAIN_V2)
+    .update(bytes)
+    .digest("hex")}`;
 }
 
 export function ensureAudioAssetCatalogSchema(db: DatabaseSync): void {
@@ -255,7 +277,8 @@ export function registerAudioAssetV1(args: {
   ensureAudioAssetCatalogSchema(args.db);
   if (args.bytes.byteLength < 1) throw new Error("Audio asset bytes are empty.");
   if (!args.mimeType.startsWith("audio/")) throw new Error("Audio asset MIME type is invalid.");
-  const sha256 = createHash("sha256").update(args.bytes).digest("hex");
+  migrateLegacyAudioAssetBlobHashesV2(args.db, args.userKey, args.userId);
+  const sha256 = audioAssetTenantContentHashV2(args.userKey, args.bytes);
   const now = new Date().toISOString();
   const id = randomUUID();
   const encrypted = encryptBytes(args.bytes, args.userKey);
@@ -442,6 +465,7 @@ export function readCanonicalAudioAssetBytesV1(
   assetId: string,
 ): { bytes: Buffer; mimeType: string } | null {
   ensureAudioAssetCatalogSchema(db);
+  migrateLegacyAudioAssetBlobHashesV2(db, userKey, userId);
   const row = db.prepare(
     `SELECT assets.mime_type, blobs.ciphertext, blobs.cipher_iv, blobs.cipher_tag
        FROM audio_assets assets
@@ -463,6 +487,87 @@ export function readCanonicalAudioAssetBytesV1(
     "UPDATE audio_assets SET last_accessed_at = ? WHERE id = ? AND user_id = ?",
   ).run(new Date().toISOString(), assetId, userId);
   return { bytes, mimeType: row.mime_type };
+}
+
+let audioHashMigrationSavepointSequence = 0;
+
+export function migrateLegacyAudioAssetBlobHashesV2(
+  db: DatabaseSync,
+  userKey: Buffer,
+  userId: string,
+): number {
+  ensureAudioAssetCatalogSchema(db);
+  const rows = db
+    .prepare(
+      `SELECT sha256, ciphertext, cipher_iv, cipher_tag, byte_size, created_at
+         FROM audio_asset_blobs
+        WHERE user_id = ? AND sha256 NOT LIKE ?
+        ORDER BY sha256`,
+    )
+    .all(userId, `${AUDIO_TENANT_HASH_PREFIX_V2}%`) as unknown as Array<{
+    sha256: string;
+    ciphertext: Buffer;
+    cipher_iv: Buffer;
+    cipher_tag: Buffer;
+    byte_size: number | bigint;
+    created_at: string;
+  }>;
+  if (rows.length === 0) return 0;
+  const nested = db.isTransaction;
+  const savepoint = `prism_audio_hash_v2_${++audioHashMigrationSavepointSequence}`;
+  if (nested) db.exec(`SAVEPOINT ${savepoint}`);
+  else db.exec("BEGIN IMMEDIATE");
+  try {
+    for (const row of rows) {
+      const plaintext = decryptBytes(
+        {
+          ciphertext: row.ciphertext,
+          iv: row.cipher_iv,
+          tag: row.cipher_tag,
+        },
+        userKey,
+      );
+      try {
+        const tenantHash = audioAssetTenantContentHashV2(userKey, plaintext);
+        db.prepare(
+          `INSERT OR IGNORE INTO audio_asset_blobs
+             (user_id, sha256, ciphertext, cipher_iv, cipher_tag, byte_size, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          userId,
+          tenantHash,
+          row.ciphertext,
+          row.cipher_iv,
+          row.cipher_tag,
+          row.byte_size,
+          row.created_at,
+        );
+        db.prepare(
+          `UPDATE audio_assets SET content_sha256 = ?
+            WHERE user_id = ? AND content_sha256 = ?`,
+        ).run(tenantHash, userId, row.sha256);
+        db.prepare(
+          "DELETE FROM audio_asset_blobs WHERE user_id = ? AND sha256 = ?",
+        ).run(userId, row.sha256);
+      } finally {
+        plaintext.fill(0);
+      }
+    }
+    if (nested) db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+    else db.exec("COMMIT");
+    return rows.length;
+  } catch (error) {
+    if (nested) {
+      try {
+        db.exec(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+      } finally {
+        db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+      }
+    } else if (db.isTransaction) {
+      db.exec("ROLLBACK");
+    }
+    throw error;
+  }
 }
 
 export interface CanonicalAudioAssetStorageV1 {

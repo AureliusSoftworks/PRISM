@@ -719,13 +719,14 @@ export async function exportPortableWhodunnitPackageV1(args: {
         `SELECT refs.line_id, cache.cache_key, cache.clip_path, cache.mime_type,
                 cache.sha256, cache.byte_size, cache.duration_ms
            FROM debate_mystery_audio_refs AS refs
-           JOIN debate_mystery_audio_cache AS cache ON cache.cache_key = refs.cache_key
-          WHERE refs.session_id = ? AND refs.user_id = ? AND cache.user_id = ?
+           JOIN debate_mystery_audio_cache AS cache
+             ON cache.user_id = refs.user_id
+            AND cache.cache_key = refs.cache_key
+          WHERE refs.session_id = ? AND refs.user_id = ?
             AND refs.line_id IN (${exportedLineIds.map(() => "?").join(", ")})
           ORDER BY refs.line_id`,
       ).all(
         args.sessionId,
-        args.userId,
         args.userId,
         ...exportedLineIds,
       ) as unknown as AudioRow[]

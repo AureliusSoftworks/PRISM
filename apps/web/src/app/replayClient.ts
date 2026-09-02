@@ -16,29 +16,9 @@ import {
   retainPendingFaithfulReplayCapture,
 } from "./replayPendingCapture.ts";
 
-const NATIVE_SESSION_STORAGE_KEY = "prism_native_session_token";
-const CLIENT_ACCESS_STORAGE_KEY = "prism_client_access_token";
-
+/** Browser replay requests authenticate only through HttpOnly cookies. */
 export function replayAuthHeaders(): Record<string, string> {
-  if (typeof window === "undefined") return {};
-  try {
-    const nativeSessionToken = window.localStorage.getItem(
-      NATIVE_SESSION_STORAGE_KEY,
-    );
-    const clientAccessToken = window.localStorage.getItem(
-      CLIENT_ACCESS_STORAGE_KEY,
-    );
-    return {
-      ...(nativeSessionToken
-        ? { authorization: `Bearer ${nativeSessionToken}` }
-        : {}),
-      ...(clientAccessToken
-        ? { "x-prism-client-access": clientAccessToken }
-        : {}),
-    };
-  } catch {
-    return {};
-  }
+  return {};
 }
 
 export async function replayFetch(
@@ -49,7 +29,6 @@ export async function replayFetch(
     credentials: "include",
     ...init,
     headers: {
-      ...replayAuthHeaders(),
       ...(init.headers ?? {}),
     },
   });

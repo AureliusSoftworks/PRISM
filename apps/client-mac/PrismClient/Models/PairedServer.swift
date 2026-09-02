@@ -1,6 +1,6 @@
 import Foundation
 
-struct PairedServer: Codable, Equatable {
+struct PairedServer: Equatable {
     private static let defaultAPIPort = 18_787
     private static let defaultWebPort = 18_788
     private static let legacyAPIPort = 8787

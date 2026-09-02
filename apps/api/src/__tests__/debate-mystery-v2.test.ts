@@ -6313,7 +6313,8 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
          FROM debate_mystery_audio_refs AS reference
         WHERE reference.user_id = ? AND reference.session_id = ?
           AND (SELECT COUNT(*) FROM debate_mystery_audio_refs AS other
-                WHERE other.cache_key = reference.cache_key) = 1
+                WHERE other.user_id = reference.user_id
+                  AND other.cache_key = reference.cache_key) = 1
         LIMIT 2`,
     ).all("user-1", session.id) as Array<{ line_id: string; cache_key: string }>;
     assert.equal(uniquelyReferenced.length, 2);
@@ -7570,7 +7571,9 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       const importedAudio = db.prepare(
         `SELECT COUNT(*) AS count, MIN(cache.user_id) AS owner
            FROM debate_mystery_audio_refs AS refs
-           JOIN debate_mystery_audio_cache AS cache ON cache.cache_key = refs.cache_key
+           JOIN debate_mystery_audio_cache AS cache
+             ON cache.user_id = refs.user_id
+            AND cache.cache_key = refs.cache_key
           WHERE refs.session_id = ? AND refs.user_id = ?`,
       ).get(imported.sessionId, "portable-recipient") as { count: number; owner: string };
       assert.ok(importedAudio.count > 0);

@@ -12,6 +12,7 @@ import { describe, it } from "node:test";
 import { exportUserSnapshot } from "../backup.ts";
 import { deleteBot } from "../bots.ts";
 import { processChatMessage } from "../chat.ts";
+import { createEncryptedAccountOwnerV2 } from "../account-auth-vault.ts";
 import {
   CORE_CONTENT_VAULT_CONTRACT_VERSION,
   CORE_CONTENT_VAULT_TABLES,
@@ -233,7 +234,20 @@ describe("core content Vault owner isolation", () => {
     const legacyMasterKey = deriveMasterKey(MASTER_SECRET);
     try {
       db.exec("BEGIN IMMEDIATE");
-      addLegacyOwner(db, "new-owner", userKey, legacyMasterKey);
+      const wrapped = encryptText(userKey.toString("base64"), legacyMasterKey);
+      createEncryptedAccountOwnerV2({
+        db,
+        ownerUserId: "new-owner",
+        loginIdentity: "new-owner@example.com",
+        displayName: "NEW-OWNER",
+        passwordHash: "hash",
+        passwordSalt: "salt",
+        wrappedUserKey: wrapped.ciphertext,
+        wrappedUserKeyIv: wrapped.iv,
+        wrappedUserKeyTag: wrapped.tag,
+        userDek: userKey,
+        createdAt: NOW,
+      });
       initializeCoreContentVaultOwnerV2({
         db,
         ownerUserId: "new-owner",

@@ -9,7 +9,7 @@ import {
   type AccountOwnerRelationCoverage,
 } from "./account-owner-boundaries.ts";
 
-export const ACCOUNT_CONTENT_REGISTRY_VERSION = 3 as const;
+export const ACCOUNT_CONTENT_REGISTRY_VERSION = 4 as const;
 
 /**
  * This is a release guard, not an encryption claim. A matching registry proves
@@ -39,6 +39,9 @@ export type CurrentProtectionState =
   | "plaintext-derived-index"
   | "mixed-binary-and-metadata"
   | "vault-v2-keyring-metadata-and-wrapped-deks"
+  | "vault-v2-account-auth-ciphertext-and-blind-indexes"
+  | "keyed-hash-only"
+  | "vault-v2-owner-file-root"
   | "process-memory-only"
   | "consumer-controlled-after-export"
   | "not-account-content";
@@ -142,11 +145,11 @@ interface ObservedSqliteIndex {
 }
 
 const AUDITED_SQLITE_SCHEMA = Object.freeze({
-  fingerprint: "7738b09a78087b36ed335db68953ff33cc467b2237920e09312e5cc093261731",
-  tableCount: 162,
-  columnCount: 2_001,
-  indexCount: 384,
-  triggerCount: 573,
+  fingerprint: "0f83ec84f5bbdb33b737ad3af46b11adf3d7e16086b5e292f2322f81da998cad",
+  tableCount: 166,
+  columnCount: 2_019,
+  indexCount: 382,
+  triggerCount: 577,
 });
 
 /**
@@ -205,6 +208,39 @@ export const AUDITED_STRUCTURAL_METADATA_ALLOWLIST: readonly AuditedStructuralMe
       cleanupResponsibility:
         "Installation lifecycle and future master-KDF migration own this singleton.",
     }),
+    Object.freeze({
+      surfaceId: "sqlite.table.account-auth-installation-key",
+      fields: Object.freeze([
+        "singleton",
+        "wrapped_key_ciphertext",
+        "wrapped_key_nonce",
+        "wrapped_key_tag",
+        "wrap_version",
+        "created_at",
+      ]),
+      ownerSource: "PRISM installation; no account owner or account payload",
+      contentClass: "structural-non-content-metadata",
+      currentProtection: "not-account-content",
+      plannedVaultGate:
+        "Outside account Vaults only as a wrapped random installation key with authenticated master-key binding.",
+      auditReason:
+        "Wrapped installation cryptographic key material and lifecycle metadata only; never an account value or raw bearer token.",
+      cleanupResponsibility:
+        "Installation master rewrap and installation deletion own this singleton.",
+    }),
+    Object.freeze({
+      surfaceId: "sqlite.table.account-auth-vault-state",
+      fields: Object.freeze(["singleton", "contract_version", "completed_at"]),
+      ownerSource: "PRISM installation; no account owner or account payload",
+      contentClass: "structural-non-content-metadata",
+      currentProtection: "not-account-content",
+      plannedVaultGate:
+        "Outside account Vaults only as bounded migration version/completion metadata.",
+      auditReason:
+        "Installation-wide Auth Vault migration state only; contains no account identity or content.",
+      cleanupResponsibility:
+        "Auth Vault migration and installation deletion own this singleton.",
+    }),
   ]);
 
 const SQLITE_SEQUENCE_COLUMNS = Object.freeze(["name", "seq"] as const);
@@ -215,6 +251,11 @@ const FTS_TABLES = new Set([
   "image_asset_search_data",
   "image_asset_search_docsize",
   "image_asset_search_idx",
+]);
+const INSTALLATION_METADATA_TABLES = new Set([
+  "vault_installation_config",
+  "account_auth_installation_key",
+  "account_auth_vault_state",
 ]);
 
 const INDIRECT_OWNER_SOURCES: Readonly<Record<string, string>> = Object.freeze({
@@ -234,7 +275,7 @@ const ACCOUNT_CLEANUP =
   "Owner-scoped migration, factory reset, account deletion, and failed-migration rollback cleanup.";
 
 function sqliteOwnerSource(table: ObservedSqliteTable): string {
-  if (table.name === "vault_installation_config") {
+  if (INSTALLATION_METADATA_TABLES.has(table.name)) {
     return "PRISM installation; no account owner or account payload";
   }
   if (table.name === "users") return "users.id";
@@ -249,15 +290,15 @@ function sqliteOwnerSource(table: ObservedSqliteTable): string {
 function sqliteColumnRegistryFields(
   table: ObservedSqliteTable,
 ): AccountContentRegistryFields {
-  if (table.name === "vault_installation_config") {
+  if (INSTALLATION_METADATA_TABLES.has(table.name)) {
     return {
       ownerSource: sqliteOwnerSource(table),
       contentClass: "structural-non-content-metadata",
       currentProtection: "not-account-content",
       plannedVaultGate:
-        "Outside account Vaults only while the exact audited singleton KDF-config shape matches.",
+        "Outside account Vaults only while the exact audited installation-cryptography shape matches.",
       cleanupResponsibility:
-        "Installation lifecycle and future master-KDF migration own this singleton.",
+        "Installation lifecycle and authenticated master-key migration own this singleton.",
     };
   }
   if (table.name === "user_vault_keys") {
@@ -271,13 +312,45 @@ function sqliteColumnRegistryFields(
         "Account deletion cascades the keyring; rotation, rewrap, and gated migration own key-state changes.",
     };
   }
+  if (table.name === "users") {
+    return {
+      ownerSource: "users.id",
+      contentClass: "identity-credential-and-settings",
+      currentProtection:
+        "vault-v2-account-auth-ciphertext-and-blind-indexes",
+      plannedVaultGate:
+        "Open identity/settings only through the owner-bound Auth Vault view; login uses the installation-keyed blind index.",
+      cleanupResponsibility:
+        "Account deletion, Auth Vault migration, per-owner DEK rotation, and master rewrap own this row.",
+    };
+  }
+  if (table.name === "sessions" || table.name === "client_access_tokens") {
+    return {
+      ownerSource: sqliteOwnerSource(table),
+      contentClass: "identity-credential-and-settings",
+      currentProtection: "keyed-hash-only",
+      plannedVaultGate:
+        "Only installation-keyed, domain-separated bearer digests may persist; raw tokens remain transient client credentials.",
+      cleanupResponsibility:
+        "Expiry, revocation, logout, account reset/delete, and Auth Vault migration own token rows.",
+    };
+  }
+  if (table.name === "owner_file_vault_roots") {
+    return {
+      ownerSource: "owner_file_vault_roots.user_id -> users.id",
+      contentClass: "persistent-binary-or-serialized-content",
+      currentProtection: "vault-v2-owner-file-root",
+      plannedVaultGate:
+        "Resolve user_id first; open the root only through that owner's active Vault V2 key and owner/table/column/row AAD.",
+      cleanupResponsibility:
+        "Account deletion cascades the root; asset-key rewrap and file-envelope migration own rotation.",
+    };
+  }
   const fts = FTS_TABLES.has(table.name);
   return {
     ownerSource: sqliteOwnerSource(table),
     contentClass:
-      table.name === "users"
-        ? "identity-credential-and-settings"
-        : fts
+      fts
           ? "derived-search-index"
           : "account-record-or-derived-content",
     currentProtection: fts
@@ -708,16 +781,23 @@ export function buildAccountContentRegistry(
         "An index has no audited account-content table.",
       );
     }
+    const tableFields = sqliteColumnRegistryFields(table);
+    const carriesProtectedValueShape = new Set([
+      "user_vault_keys",
+      "users",
+      "sessions",
+      "client_access_tokens",
+      "owner_file_vault_roots",
+    ]).has(index.table);
     return Object.freeze({
       surfaceId: `sqlite.index.${index.name}`,
       index: index.name,
       table: index.table,
       ownerSource: sqliteOwnerSource(table),
       contentClass: "derived-btree-index",
-      currentProtection:
-        index.table === "user_vault_keys"
-          ? "vault-v2-keyring-metadata-and-wrapped-deks"
-          : "plaintext-derived-index",
+      currentProtection: carriesProtectedValueShape
+        ? tableFields.currentProtection
+        : "plaintext-derived-index",
       plannedVaultGate:
         index.table === "user_vault_keys"
           ? "Owner-scoped partial uniqueness enforces one active DEK without indexing wrapped key bytes."

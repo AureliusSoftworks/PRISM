@@ -371,7 +371,9 @@ use url::Url;
 
 const DEFAULT_API_PORT: u16 = 19787;
 const DEFAULT_WEB_PORT: u16 = 19788;
-const STARTUP_TIMEOUT_SECS: u64 = 90;
+const API_STARTUP_TIMEOUT_SECS: u64 = 15 * 60;
+const WEB_STARTUP_TIMEOUT_SECS: u64 = 90;
+const API_STARTUP_PROGRESS_SECS: u64 = 15;
 
 /// Strip the `\\?\` extended-length path prefix that Rust's `canonicalize()`
 /// adds on Windows.  Node.js / Next.js choke on these prefixed paths.
@@ -831,7 +833,10 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
 
 fn wait_for_api(api_port: u16, state: &RuntimeState, app: &AppHandle) -> std::io::Result<()> {
     let start = Instant::now();
-    let timeout_at = start + Duration::from_secs(STARTUP_TIMEOUT_SECS);
+    let timeout_at = start + Duration::from_secs(API_STARTUP_TIMEOUT_SECS);
+    let mut next_progress_at = start + Duration::from_secs(API_STARTUP_PROGRESS_SECS);
+    let status_refresh_at = start + Duration::from_secs(1);
+    let mut status_refreshed = false;
     let target = format!("127.0.0.1:{api_port}");
     emit_log(app, "prism", &format!("Waiting for API on {target}…"));
     while Instant::now() < timeout_at {
@@ -853,17 +858,38 @@ fn wait_for_api(api_port: u16, state: &RuntimeState, app: &AppHandle) -> std::io
                 }
             }
         }
+        let now = Instant::now();
+        if !status_refreshed && now >= status_refresh_at {
+            // The splash event listeners can attach after the runtime children
+            // start. Refresh their current state once the webview is painted.
+            emit_status(app, "qdrant", "running");
+            emit_status(app, "api", "running");
+            emit_status(app, "web", "running");
+            status_refreshed = true;
+        }
+        if now >= next_progress_at {
+            let elapsed = start.elapsed().as_secs();
+            emit_status(app, "api", "preparing");
+            emit_log(
+                app,
+                "prism",
+                &format!(
+                    "API is still preparing local data ({elapsed}s). Secure upgrades can take several minutes for large libraries."
+                ),
+            );
+            next_progress_at = now + Duration::from_secs(API_STARTUP_PROGRESS_SECS);
+        }
         thread::sleep(Duration::from_millis(500));
     }
     emit_status(app, "api", "error");
-    Err(io_error(
-        "Prism API did not start in time (90s timeout). Check api.log in the app data directory.",
-    ))
+    Err(io_error(format!(
+        "Prism API did not start in time ({API_STARTUP_TIMEOUT_SECS}s timeout). Check api.log in the app data directory."
+    )))
 }
 
 fn wait_for_web(web_port: u16, api_port: u16, state: &RuntimeState, app: &AppHandle) -> std::io::Result<()> {
     let start = Instant::now();
-    let timeout_at = start + Duration::from_secs(STARTUP_TIMEOUT_SECS);
+    let timeout_at = start + Duration::from_secs(WEB_STARTUP_TIMEOUT_SECS);
     let target = format!("127.0.0.1:{web_port}");
     emit_log(app, "prism", &format!("Waiting for web on {target}…"));
     while Instant::now() < timeout_at {
@@ -890,9 +916,9 @@ fn wait_for_web(web_port: u16, api_port: u16, state: &RuntimeState, app: &AppHan
     let api_alive = std::net::TcpStream::connect(format!("127.0.0.1:{api_port}")).is_ok();
     emit_log(app, "prism", &format!("Timeout reached. API alive: {api_alive}"));
     emit_status(app, "web", "error");
-    Err(io_error(
-        "Prism web runtime did not start in time (90s timeout). Check web.log in the app data directory.",
-    ))
+    Err(io_error(format!(
+        "Prism web runtime did not start in time ({WEB_STARTUP_TIMEOUT_SECS}s timeout). Check web.log in the app data directory."
+    )))
 }
 
 fn stop_runtime(state: &RuntimeState) {

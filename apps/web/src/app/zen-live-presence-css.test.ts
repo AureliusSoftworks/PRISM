@@ -196,6 +196,7 @@ describe("Zen live presence CSS", () => {
       "bot-frame-chipped-paint-mask.png",
       "bot-frame-led.png",
       "bot-frame-light-base.png",
+      "bot-frame-light-screen-reflection.png",
       "bot-frame-metal-mask.png",
       "bot-frame-metal.png",
       "bot-frame-offset-stripe-mask.png",
@@ -1386,6 +1387,39 @@ describe("Zen live presence CSS", () => {
     assert.match(
       pageSource,
       /className=\{styles\.zenLiveBotPresenceScreenGlassOverlay\}[\s\S]*<BotFaceScreenGlass[\s\S]{0,100}className=\{styles\.zenLiveBotPresenceScreenGlass\}/,
+    );
+    assert.match(
+      pageSource,
+      /className=\{styles\.botFaceCrtPixelGridLayer\}[\s\S]*className=\{styles\.botFaceScreenHardLightTexture\}[\s\S]*className=\{styles\.botFaceScreenLightReflection\}[\s\S]*className=\{styles\.zenLiveBotPresenceScreenGlassOverlay\}/,
+    );
+
+    const hardLightScreenRule = rulesForExactSelector(
+      ".botFaceScreenHardLightTexture",
+    ).join(" ");
+    assert.match(hardLightScreenRule, /z-index:\s*9\s*;/);
+    assert.match(
+      hardLightScreenRule,
+      /background-image:\s*url\("\/bot-frame\/bot-frame-screen-mask\.png\?v=1000"\)\s*;/,
+    );
+    assert.match(hardLightScreenRule, /opacity:\s*1\s*;/);
+    assert.match(hardLightScreenRule, /mix-blend-mode:\s*hard-light\s*;/);
+
+    const lightReflectionRule = rulesForExactSelector(
+      ".botFaceScreenLightReflection",
+    ).join(" ");
+    assert.match(lightReflectionRule, /z-index:\s*10\s*;/);
+    assert.match(
+      lightReflectionRule,
+      /background-image:\s*url\("\/bot-frame\/bot-frame-light-screen-reflection\.png\?v=1000"\)\s*;/,
+    );
+    assert.match(lightReflectionRule, /opacity:\s*0\s*;/);
+    assert.match(lightReflectionRule, /mix-blend-mode:\s*normal\s*;/);
+    assert.match(
+      ruleForSelectorNeedles(
+        ".themeLight .botFaceScreenLightReflection",
+        '.zenLiveBotPresencePlate[data-theme="light"]',
+      ),
+      /opacity:\s*0\.5\s*;/,
     );
 
     assert.doesNotMatch(css, /zenLiveBotPresenceBodyRaster/);

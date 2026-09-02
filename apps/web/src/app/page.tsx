@@ -93,6 +93,7 @@ import {
   type AuthReauthRequiredDetail,
 } from "./authReauth";
 import { decideAuthBootstrapFailure, isAbortLikeError } from "./authBootstrap";
+import { purgeLegacyBrowserBearerCredentials } from "./browserBearerCredentialCleanup";
 import {
   AccountOwnerGenerationBoundary,
   runAccountOwnerWork,
@@ -2282,8 +2283,6 @@ function normalizeZenPersonaTransitionChoice(
     ? (value as ZenPersonaTransitionChoice)
     : fallback;
 }
-const NATIVE_SESSION_STORAGE_KEY = "prism_native_session_token";
-const CLIENT_ACCESS_STORAGE_KEY = "prism_client_access_token";
 const CONVERSATION_GROUP_ORDER_STORAGE_KEY = "prism_conversation_group_order";
 const BOT_LIBRARY_GROUPS_STORAGE_KEY = "prism_bot_library_groups";
 const BOT_MARKETPLACE_UPDATE_REVISIONS_STORAGE_KEY =
@@ -19676,30 +19675,9 @@ function isPrimaryPointerDismissal(event: MouseEvent | PointerEvent): boolean {
   return isContextMenuPointerGesture(event) || event.button === 0;
 }
 
+/** Browser requests authenticate only through HttpOnly cookies. */
 function authHeadersForFetch(): HeadersInit {
-  let nativeSessionToken: string | null = null;
-  let clientAccessToken: string | null = null;
-  if (typeof window !== "undefined") {
-    try {
-      nativeSessionToken = window.localStorage.getItem(
-        NATIVE_SESSION_STORAGE_KEY,
-      );
-      clientAccessToken = window.localStorage.getItem(
-        CLIENT_ACCESS_STORAGE_KEY,
-      );
-    } catch {
-      nativeSessionToken = null;
-      clientAccessToken = null;
-    }
-  }
-  return {
-    ...(nativeSessionToken
-      ? { authorization: `Bearer ${nativeSessionToken}` }
-      : {}),
-    ...(clientAccessToken
-      ? { "x-prism-client-access": clientAccessToken }
-      : {}),
-  };
+  return {};
 }
 
 async function fetchAuthenticated(
@@ -19709,7 +19687,6 @@ async function fetchAuthenticated(
   return fetch(path, {
     credentials: "include",
     headers: {
-      ...authHeadersForFetch(),
       ...(init?.headers ?? {}),
     },
     ...init,
@@ -20376,13 +20353,12 @@ async function writeClipboardText(text: string): Promise<void> {
   }
 }
 
-function clearNativeSessionToken(): void {
+function clearLegacyBrowserBearerCredentials(): void {
   if (typeof window === "undefined") return;
-  try {
-    window.localStorage.removeItem(NATIVE_SESSION_STORAGE_KEY);
-  } catch {
-    // Non-fatal: cookie-backed browser auth can still continue normally.
-  }
+  purgeLegacyBrowserBearerCredentials({
+    localStorage: window.localStorage,
+    sessionStorage: window.sessionStorage,
+  });
 }
 
 // ── Inline SVG glyphs ─────────────────────────────────────────────────
@@ -33441,6 +33417,16 @@ function ZenLiveBotMannequin({
             <span
               className={styles.botFaceCrtPixelGridLayer}
               data-crt-material-layer="pixel-grid"
+              aria-hidden="true"
+            />
+            <span
+              className={styles.botFaceScreenHardLightTexture}
+              data-screen-material-layer="screen-mask-hard-light"
+              aria-hidden="true"
+            />
+            <span
+              className={styles.botFaceScreenLightReflection}
+              data-screen-material-layer="light-reflection"
               aria-hidden="true"
             />
           </>
@@ -50172,6 +50158,7 @@ function HomeContent(): React.JSX.Element {
   const { requestFirstRunPrismIntro, replayPrismIntro } =
     usePrismIntroSequence();
   useEffect(() => registerSpatialUiSfx(), []);
+  useEffect(() => clearLegacyBrowserBearerCredentials(), []);
   const prismSystemPaused = useSyncExternalStore(
     subscribePrismVisualLifecycle,
     getPrismSystemPausedSnapshot,
@@ -82925,7 +82912,7 @@ function HomeContent(): React.JSX.Element {
   const clearAuthenticatedSessionState = useCallback(() => {
     authBootstrapRequestGenerationRef.current += 1;
     transitionAccountOwnerGeneration(null);
-    clearNativeSessionToken();
+    clearLegacyBrowserBearerCredentials();
     botLibraryGroupsCanPruneRef.current = false;
     setBotLibraryGroupsHydratedUserId(null);
     setUser(null);
@@ -83006,7 +82993,7 @@ function HomeContent(): React.JSX.Element {
           body: JSON.stringify({ username: normalizedUsername, password }),
         });
       }
-      clearNativeSessionToken();
+      clearLegacyBrowserBearerCredentials();
       const bootstrappedUser = await bootstrap();
       if (isRegistering && bootstrappedUser?.id) {
         starterPackFreshAccountEligibleUserRef.current = bootstrappedUser.id;
@@ -115991,7 +115978,7 @@ function HomeContent(): React.JSX.Element {
         data-viewport-safe-area="right"
         data-closing={panelClosing ? "true" : undefined}
         role="dialog"
-        aria-modal="true"
+        aria-modal="false"
         aria-labelledby="usage-panel-title"
         tabIndex={-1}
       >
@@ -117152,7 +117139,7 @@ function HomeContent(): React.JSX.Element {
           }
           style={memoryPanelStyle}
           role="dialog"
-          aria-modal="true"
+          aria-modal="false"
           aria-labelledby="memories-panel-title"
           tabIndex={-1}
         >
@@ -118236,7 +118223,7 @@ function HomeContent(): React.JSX.Element {
           data-viewport-safe-area="right"
           data-closing={panelClosing ? "true" : undefined}
           role="dialog"
-          aria-modal="true"
+          aria-modal="false"
           aria-labelledby="command-center-panel-title"
           tabIndex={-1}
         >
@@ -126175,7 +126162,7 @@ function HomeContent(): React.JSX.Element {
               }
               style={editorPanelStyle}
               role="dialog"
-              aria-modal="true"
+              aria-modal="false"
               aria-labelledby="bots-panel-title"
               tabIndex={-1}
             >
@@ -130174,7 +130161,7 @@ function HomeContent(): React.JSX.Element {
                 data-private-mode={appWidePrivateMode ? "true" : undefined}
                 aria-busy={imageGenInflightHere > 0}
                 role="dialog"
-                aria-modal="true"
+                aria-modal="false"
                 aria-labelledby="images-panel-title"
                 tabIndex={-1}
                 style={{

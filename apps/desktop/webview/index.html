@@ -204,9 +204,15 @@
         border-color: color-mix(in srgb, var(--accent) 28%, transparent);
         color: color-mix(in srgb, var(--fg) 72%, var(--accent));
       }
-      .svc[data-state="running"] .svc-dot {
+      .svc[data-state="running"] .svc-dot,
+      .svc[data-state="preparing"] .svc-dot {
         background: var(--accent);
         box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 64%, transparent);
+      }
+
+      .svc[data-state="preparing"] {
+        border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+        color: color-mix(in srgb, var(--fg) 72%, var(--accent));
       }
 
       .svc[data-state="ready"] {
@@ -415,6 +421,7 @@
       }
 
       const LABELS = {
+        "api:preparing": "Securing your local library…",
         "api:ready": "Loading web interface…",
         "web:ready": "Ready",
       };

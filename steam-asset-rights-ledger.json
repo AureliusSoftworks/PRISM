@@ -915,6 +915,12 @@
       "provenanceProfile": "aurelius-production"
     },
     {
+      "path": "bot-frame/bot-frame-light-screen-reflection.png",
+      "kind": "image",
+      "sha256": "64a516d49a6c9da90b5956a3c9c05f5f1468b52ba4f4674cd9b0017a78c99780",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
       "path": "bot-frame/bot-frame-lower-jaw-mask.png",
       "kind": "image",
       "sha256": "f1c58496b2bdaeb1205197b9f7d6e60f4a432aaa45d67cb3fdf501cedf2ea16e",

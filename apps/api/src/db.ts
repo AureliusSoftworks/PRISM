@@ -43,8 +43,10 @@ import {
 } from "./image-asset-library.ts";
 import { ensureItemCapabilityCardSchema } from "./image-asset-capability-cards.ts";
 import { ensureAudioAssetCatalogSchema } from "./audio-asset-catalog.ts";
+import { ensureDebateMysteryAudioOwnerSchemaV2 } from "./debate-mystery-audio-schema.ts";
 import { ensureUserNotesSchema } from "./user-notes.ts";
 import { ensureUserVaultKeyringSchema } from "./user-vault-keyring.ts";
+import { ensureOwnerFileVaultSchemaV1 } from "./owner-file-vault.ts";
 import { ensureAccountOwnerBoundarySchema } from "./account-owner-boundaries.ts";
 import {
   activateCoreContentVaultV2,
@@ -55,6 +57,16 @@ import {
   resumeCoreContentVaultViewsV2,
   suspendCoreContentVaultViewsV2,
 } from "./core-content-vault.ts";
+import {
+  addAccountAuthPrivateUserColumnV2,
+  accountAuthVaultContractIsCompleteV2,
+  accountAuthVaultIsActiveV2,
+  activateAccountAuthVaultV2,
+  ensureAccountAuthVaultStorageSchemaV2,
+  installAccountAuthVaultViewV2,
+  resumeAccountAuthVaultV2,
+  suspendAccountAuthVaultViewV2,
+} from "./account-auth-vault.ts";
 
 export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
 
@@ -191,6 +203,29 @@ export function resolveDbPath(): string {
   return join(srcDir, "..", "data", "localai.db");
 }
 
+function activateOrResumeAccountAuthVaultV2(args: {
+  db: DatabaseSync;
+  masterSecret: string;
+}): void {
+  // Replacing the legacy bearer-token tables makes SQLite reparse every
+  // persistent trigger in main. Core Vault's TEMP views intentionally shadow
+  // those physical tables for ordinary application SQL, but they must not be
+  // visible during that schema rewrite or an AFTER trigger such as the Coffee
+  // replay cleanup trigger is rejected as targeting a view.
+  const coreVaultViewsWereInstalled = suspendCoreContentVaultViewsV2(args.db);
+  try {
+    if (accountAuthVaultContractIsCompleteV2(args.db)) {
+      resumeAccountAuthVaultV2(args);
+    } else {
+      activateAccountAuthVaultV2(args);
+    }
+  } finally {
+    if (coreVaultViewsWereInstalled) {
+      installCoreContentVaultViewsV2(args.db);
+    }
+  }
+}
+
 /**
  * Apply the current production schema and migrations to an existing database.
  *
@@ -209,6 +244,7 @@ export function initializeDatabase(
     PRAGMA journal_mode = WAL;
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
+      login_identity_blind_index TEXT,
       email TEXT NOT NULL UNIQUE,
       display_name TEXT NOT NULL,
       password_hash TEXT NOT NULL,
@@ -577,13 +613,13 @@ export function initializeDatabase(
     CREATE INDEX IF NOT EXISTS idx_slate_handoffs_user_project
       ON slate_handoffs(user_id, target_project_id, created_at DESC);
     CREATE TABLE IF NOT EXISTS sessions (
-      token TEXT PRIMARY KEY,
+      token_hash TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       expires_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
     CREATE TABLE IF NOT EXISTS client_access_tokens (
-      token TEXT PRIMARY KEY,
+      token_hash TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       expires_at TEXT NOT NULL,
       created_at TEXT NOT NULL,
@@ -2572,8 +2608,8 @@ export function initializeDatabase(
     CREATE INDEX IF NOT EXISTS idx_debate_mystery_audio_manifests_user_updated
       ON debate_mystery_audio_manifests(user_id, updated_at DESC);
     CREATE TABLE IF NOT EXISTS debate_mystery_audio_cache (
-      cache_key TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
+      cache_key TEXT NOT NULL,
       clip_path TEXT NOT NULL,
       mime_type TEXT NOT NULL,
       sha256 TEXT NOT NULL,
@@ -2582,9 +2618,10 @@ export function initializeDatabase(
       ref_count INTEGER NOT NULL DEFAULT 0 CHECK(ref_count >= 0),
       created_at TEXT NOT NULL,
       last_used_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, cache_key),
       UNIQUE(user_id, clip_path),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
+    ) WITHOUT ROWID;
     CREATE INDEX IF NOT EXISTS idx_debate_mystery_audio_cache_cleanup
       ON debate_mystery_audio_cache(user_id, ref_count, last_used_at);
     CREATE TABLE IF NOT EXISTS debate_mystery_audio_refs (
@@ -2596,10 +2633,12 @@ export function initializeDatabase(
       PRIMARY KEY(session_id, line_id),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(session_id) REFERENCES debate_sessions(id) ON DELETE CASCADE,
-      FOREIGN KEY(cache_key) REFERENCES debate_mystery_audio_cache(cache_key) ON DELETE RESTRICT
-    );
+      FOREIGN KEY(user_id, cache_key)
+        REFERENCES debate_mystery_audio_cache(user_id, cache_key)
+        ON UPDATE CASCADE ON DELETE RESTRICT
+    ) WITHOUT ROWID;
     CREATE INDEX IF NOT EXISTS idx_debate_mystery_audio_refs_cache
-      ON debate_mystery_audio_refs(cache_key);
+      ON debate_mystery_audio_refs(user_id, cache_key);
     CREATE TRIGGER IF NOT EXISTS debate_mystery_audio_ref_deleted
       AFTER DELETE ON debate_mystery_audio_refs
       BEGIN
@@ -2884,12 +2923,15 @@ export function initializeDatabase(
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
   `);
+  ensureDebateMysteryAudioOwnerSchemaV2(db);
   // A reopened encrypted database must expose owner-bound cleartext views
   // before legacy additive normalizers inspect core content. A legacy or new
   // database remains physical/plain only inside initialization and reaches the
   // explicit resumable migration at the end of this function.
   ensureCoreContentVaultStorageSchemaV2(db);
   ensureUserVaultKeyringSchema(db);
+  ensureOwnerFileVaultSchemaV1(db);
+  ensureAccountAuthVaultStorageSchemaV2(db);
   if (
     coreContentVaultMasterSecret &&
     coreContentVaultContractIsCompleteV2(db)
@@ -2911,6 +2953,15 @@ export function initializeDatabase(
         masterSecret: coreContentVaultMasterSecret,
       });
     }
+  }
+  if (coreContentVaultMasterSecret) {
+    // Account rows are small compared with content tables. Repair an
+    // interrupted/private-column migration before any normalizer can observe
+    // a physical encrypted row or write a new setting in plaintext.
+    activateOrResumeAccountAuthVaultV2({
+      db,
+      masterSecret: coreContentVaultMasterSecret,
+    });
   }
   const botcastImageProxyColumns = new Set(
     (
@@ -3391,13 +3442,20 @@ export function initializeDatabase(
   const userColumns = db.prepare("PRAGMA table_info(users)").all() as Array<{
     name: string;
   }>;
+  const addPrivateUserColumn = (
+    columnName: string,
+    columnDefinition: string,
+  ): boolean =>
+    addAccountAuthPrivateUserColumnV2({
+      db,
+      columnName,
+      columnDefinition,
+    });
   const hasMemoryLearnAboutPlayer = userColumns.some(
     (column) => column.name === "memory_learn_about_player",
   );
   if (!hasMemoryLearnAboutPlayer) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN memory_learn_about_player INTEGER NOT NULL DEFAULT 1;",
-    );
+    addPrivateUserColumn("memory_learn_about_player", "INTEGER NOT NULL DEFAULT 1");
     db.exec(
       "UPDATE users SET memory_learn_about_player = CASE WHEN auto_memory = 0 THEN 0 ELSE 1 END;",
     );
@@ -3406,37 +3464,25 @@ export function initializeDatabase(
     (column) => column.name === "memory_learn_about_bots",
   );
   if (!hasMemoryLearnAboutBots) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN memory_learn_about_bots INTEGER NOT NULL DEFAULT 1;",
-    );
+    addPrivateUserColumn("memory_learn_about_bots", "INTEGER NOT NULL DEFAULT 1");
     db.exec(
       "UPDATE users SET memory_learn_about_bots = CASE WHEN auto_memory = 0 THEN 0 ELSE 1 END;",
     );
   }
   if (!userColumns.some((column) => column.name === "memory_acquisition_sensitivity")) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN memory_acquisition_sensitivity TEXT NOT NULL DEFAULT 'balanced';",
-    );
+    addPrivateUserColumn("memory_acquisition_sensitivity", "TEXT NOT NULL DEFAULT 'balanced'");
   }
   if (!userColumns.some((column) => column.name === "memory_short_term_days")) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN memory_short_term_days INTEGER NOT NULL DEFAULT 30;",
-    );
+    addPrivateUserColumn("memory_short_term_days", "INTEGER NOT NULL DEFAULT 30");
   }
   if (!userColumns.some((column) => column.name === "memory_long_term_threshold")) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN memory_long_term_threshold REAL NOT NULL DEFAULT 0.9;",
-    );
+    addPrivateUserColumn("memory_long_term_threshold", "REAL NOT NULL DEFAULT 0.9");
   }
   if (!userColumns.some((column) => column.name === "memory_inferred_min_evidence")) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN memory_inferred_min_evidence INTEGER NOT NULL DEFAULT 3;",
-    );
+    addPrivateUserColumn("memory_inferred_min_evidence", "INTEGER NOT NULL DEFAULT 3");
   }
   if (!userColumns.some((column) => column.name === "memory_inferred_threshold")) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN memory_inferred_threshold REAL NOT NULL DEFAULT 0.8;",
-    );
+    addPrivateUserColumn("memory_inferred_threshold", "REAL NOT NULL DEFAULT 0.8");
   }
   const zenSessionMemoryColumns = db
     .prepare("PRAGMA table_info(zen_session_memories)")
@@ -3454,163 +3500,131 @@ export function initializeDatabase(
     (column) => column.name === "last_active_at",
   );
   if (!hasLastActiveAt) {
-    db.exec("ALTER TABLE users ADD COLUMN last_active_at TEXT;");
+    addPrivateUserColumn("last_active_at", "TEXT");
   }
   const hasGraphicsQuality = userColumns.some(
     (column) => column.name === "graphics_quality",
   );
   if (!hasGraphicsQuality) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN graphics_quality TEXT NOT NULL DEFAULT 'high';",
-    );
+    addPrivateUserColumn("graphics_quality", "TEXT NOT NULL DEFAULT 'high'");
   }
   const hasCrtFocus = userColumns.some(
     (column) => column.name === "crt_focus",
   );
   if (!hasCrtFocus) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN crt_focus INTEGER NOT NULL DEFAULT 50;",
-    );
+    addPrivateUserColumn("crt_focus", "INTEGER NOT NULL DEFAULT 50");
   }
   const hasTypographyScale = userColumns.some(
     (column) => column.name === "typography_scale",
   );
   if (!hasTypographyScale) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN typography_scale TEXT NOT NULL DEFAULT 'standard';",
-    );
+    addPrivateUserColumn("typography_scale", "TEXT NOT NULL DEFAULT 'standard'");
   }
   const hasAtmosphereStyle = userColumns.some(
     (column) => column.name === "atmosphere_style",
   );
   if (!hasAtmosphereStyle) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN atmosphere_style TEXT NOT NULL DEFAULT 'prismatic';",
-    );
+    addPrivateUserColumn("atmosphere_style", "TEXT NOT NULL DEFAULT 'prismatic'");
   }
   const hasHubAtmosphereEnabled = userColumns.some(
     (column) => column.name === "hub_atmosphere_enabled",
   );
   if (!hasHubAtmosphereEnabled) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN hub_atmosphere_enabled INTEGER NOT NULL DEFAULT 1;",
-    );
+    addPrivateUserColumn("hub_atmosphere_enabled", "INTEGER NOT NULL DEFAULT 1");
   }
   const hasHubAtmosphereImageId = userColumns.some(
     (column) => column.name === "hub_atmosphere_image_id",
   );
   if (!hasHubAtmosphereImageId) {
-    db.exec("ALTER TABLE users ADD COLUMN hub_atmosphere_image_id TEXT;");
+    addPrivateUserColumn("hub_atmosphere_image_id", "TEXT");
   }
   const hasHubAtmosphereImageStyle = userColumns.some(
     (column) => column.name === "hub_atmosphere_image_style",
   );
   if (!hasHubAtmosphereImageStyle) {
-    db.exec("ALTER TABLE users ADD COLUMN hub_atmosphere_image_style TEXT;");
+    addPrivateUserColumn("hub_atmosphere_image_style", "TEXT");
   }
   const hasStartupPreference = userColumns.some(
     (column) => column.name === "startup_preference",
   );
   if (!hasStartupPreference) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN startup_preference TEXT NOT NULL DEFAULT 'home';",
-    );
+    addPrivateUserColumn("startup_preference", "TEXT NOT NULL DEFAULT 'home'");
   }
   const hasVoiceMode = userColumns.some(
     (column) => column.name === "voice_mode",
   );
   if (!hasVoiceMode)
-    db.exec(
-      "ALTER TABLE users ADD COLUMN voice_mode TEXT NOT NULL DEFAULT 'english';",
-    );
+    addPrivateUserColumn("voice_mode", "TEXT NOT NULL DEFAULT 'english'");
   db.exec("UPDATE users SET voice_mode = 'english' WHERE voice_mode = 'mute';");
   const hasVoiceEffectsEnabled = userColumns.some(
     (column) => column.name === "voice_effects_enabled",
   );
   if (!hasVoiceEffectsEnabled)
-    db.exec(
-      "ALTER TABLE users ADD COLUMN voice_effects_enabled INTEGER NOT NULL DEFAULT 1;",
-    );
+    addPrivateUserColumn("voice_effects_enabled", "INTEGER NOT NULL DEFAULT 1");
   const hasVoiceVolume = userColumns.some(
     (column) => column.name === "voice_volume",
   );
   if (!hasVoiceVolume)
-    db.exec(
-      "ALTER TABLE users ADD COLUMN voice_volume REAL NOT NULL DEFAULT 1;",
-    );
+    addPrivateUserColumn("voice_volume", "REAL NOT NULL DEFAULT 1");
   const hasOperatingSystemVoicesEnabled = userColumns.some(
     (column) => column.name === "operating_system_voices_enabled",
   );
   if (!hasOperatingSystemVoicesEnabled)
-    db.exec(
-      "ALTER TABLE users ADD COLUMN operating_system_voices_enabled INTEGER NOT NULL DEFAULT 0;",
-    );
+    addPrivateUserColumn("operating_system_voices_enabled", "INTEGER NOT NULL DEFAULT 0");
   const hasEnglishVoiceEngine = userColumns.some(
     (column) => column.name === "english_voice_engine",
   );
   if (!hasEnglishVoiceEngine)
-    db.exec(
-      "ALTER TABLE users ADD COLUMN english_voice_engine TEXT NOT NULL DEFAULT 'builtin';",
-    );
+    addPrivateUserColumn("english_voice_engine", "TEXT NOT NULL DEFAULT 'builtin'");
   const hasDefaultSystemVoiceName = userColumns.some(
     (column) => column.name === "default_system_voice_name",
   );
   if (!hasDefaultSystemVoiceName)
-    db.exec("ALTER TABLE users ADD COLUMN default_system_voice_name TEXT;");
+    addPrivateUserColumn("default_system_voice_name", "TEXT");
   const hasDefaultElevenLabsVoiceId = userColumns.some(
     (column) => column.name === "default_elevenlabs_voice_id",
   );
   if (!hasDefaultElevenLabsVoiceId)
-    db.exec("ALTER TABLE users ADD COLUMN default_elevenlabs_voice_id TEXT;");
+    addPrivateUserColumn("default_elevenlabs_voice_id", "TEXT");
   const hasElevenLabsVoiceBank = userColumns.some(
     (column) => column.name === "elevenlabs_voice_bank",
   );
   if (!hasElevenLabsVoiceBank)
-    db.exec(
-      "ALTER TABLE users ADD COLUMN elevenlabs_voice_bank TEXT NOT NULL DEFAULT '{}';",
-    );
+    addPrivateUserColumn("elevenlabs_voice_bank", "TEXT NOT NULL DEFAULT '{}'");
   const hasElevenLabsVoiceModel = userColumns.some(
     (column) => column.name === "elevenlabs_voice_model",
   );
   if (!hasElevenLabsVoiceModel)
-    db.exec("ALTER TABLE users ADD COLUMN elevenlabs_voice_model TEXT;");
+    addPrivateUserColumn("elevenlabs_voice_model", "TEXT");
   const hasElevenLabsVoiceCollectionId = userColumns.some(
     (column) => column.name === "elevenlabs_voice_collection_id",
   );
   if (!hasElevenLabsVoiceCollectionId) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN elevenlabs_voice_collection_id TEXT;",
-    );
+    addPrivateUserColumn("elevenlabs_voice_collection_id", "TEXT");
   }
   const hasZenPlayerVoiceEnabled = userColumns.some(
     (column) => column.name === "zen_player_voice_enabled",
   );
   if (!hasZenPlayerVoiceEnabled) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN zen_player_voice_enabled INTEGER NOT NULL DEFAULT 0;",
-    );
+    addPrivateUserColumn("zen_player_voice_enabled", "INTEGER NOT NULL DEFAULT 0");
   }
   const hasPlayerAudioVoiceProfile = userColumns.some(
     (column) => column.name === "player_audio_voice_profile",
   );
   if (!hasPlayerAudioVoiceProfile) {
-    db.exec("ALTER TABLE users ADD COLUMN player_audio_voice_profile TEXT;");
+    addPrivateUserColumn("player_audio_voice_profile", "TEXT");
   }
   const hasPlayerNamePronunciation = userColumns.some(
     (column) => column.name === "player_name_pronunciation",
   );
   if (!hasPlayerNamePronunciation) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN player_name_pronunciation TEXT NOT NULL DEFAULT '';",
-    );
+    addPrivateUserColumn("player_name_pronunciation", "TEXT NOT NULL DEFAULT ''");
   }
   const hasPrismDefaultBotAudioVoiceProfile = userColumns.some(
     (column) => column.name === "prism_default_bot_audio_voice_profile",
   );
   if (!hasPrismDefaultBotAudioVoiceProfile) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN prism_default_bot_audio_voice_profile TEXT;",
-    );
+    addPrivateUserColumn("prism_default_bot_audio_voice_profile", "TEXT");
   }
   const botcastMessageColumns = db
     .prepare("PRAGMA table_info(botcast_messages)")
@@ -3643,161 +3657,127 @@ export function initializeDatabase(
     (column) => column.name === "provider_locked",
   );
   if (!hasProviderLocked) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN provider_locked INTEGER NOT NULL DEFAULT 0;",
-    );
+    addPrivateUserColumn("provider_locked", "INTEGER NOT NULL DEFAULT 0");
   }
   const hasHiddenBotModelIds = userColumns.some(
     (column) => column.name === "hidden_bot_model_ids",
   );
   if (!hasHiddenBotModelIds) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN hidden_bot_model_ids TEXT NOT NULL DEFAULT '[]';",
-    );
+    addPrivateUserColumn("hidden_bot_model_ids", "TEXT NOT NULL DEFAULT '[]'");
   }
   const hasHiddenGlobalPickerModelIds = userColumns.some(
     (column) => column.name === "hidden_global_picker_model_ids",
   );
   if (!hasHiddenGlobalPickerModelIds) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN hidden_global_picker_model_ids TEXT NOT NULL DEFAULT '[]';",
-    );
+    addPrivateUserColumn("hidden_global_picker_model_ids", "TEXT NOT NULL DEFAULT '[]'");
   }
   const hasHiddenComfyUiWorkflowIds = userColumns.some(
     (column) => column.name === "hidden_comfyui_workflow_ids",
   );
   if (!hasHiddenComfyUiWorkflowIds) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN hidden_comfyui_workflow_ids TEXT NOT NULL DEFAULT '[]';",
-    );
+    addPrivateUserColumn("hidden_comfyui_workflow_ids", "TEXT NOT NULL DEFAULT '[]'");
   }
   const hasModelVisibilityDefaultsVersion = userColumns.some(
     (column) => column.name === "model_visibility_defaults_version",
   );
   if (!hasModelVisibilityDefaultsVersion) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN model_visibility_defaults_version INTEGER NOT NULL DEFAULT 0;",
-    );
+    addPrivateUserColumn("model_visibility_defaults_version", "INTEGER NOT NULL DEFAULT 0");
   }
   const hasSecondaryOllamaHost = userColumns.some(
     (column) => column.name === "secondary_ollama_host",
   );
   if (!hasSecondaryOllamaHost) {
-    db.exec("ALTER TABLE users ADD COLUMN secondary_ollama_host TEXT;");
+    addPrivateUserColumn("secondary_ollama_host", "TEXT");
   }
   const hasExperimentalDualOllamaEnabled = userColumns.some(
     (column) => column.name === "experimental_dual_ollama_enabled",
   );
   if (!hasExperimentalDualOllamaEnabled) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN experimental_dual_ollama_enabled INTEGER NOT NULL DEFAULT 0;",
-    );
+    addPrivateUserColumn("experimental_dual_ollama_enabled", "INTEGER NOT NULL DEFAULT 0");
   }
   const hasExperimentalAllModelEffortEnabled = userColumns.some(
     (column) => column.name === "experimental_all_model_effort_enabled",
   );
   if (!hasExperimentalAllModelEffortEnabled) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN experimental_all_model_effort_enabled INTEGER NOT NULL DEFAULT 0;",
-    );
+    addPrivateUserColumn("experimental_all_model_effort_enabled", "INTEGER NOT NULL DEFAULT 0");
   }
   const hasCoffeeExperimentalTableAngleEnabled = userColumns.some(
     (column) => column.name === "coffee_experimental_table_angle_enabled",
   );
   if (!hasCoffeeExperimentalTableAngleEnabled) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN coffee_experimental_table_angle_enabled INTEGER NOT NULL DEFAULT 0;",
-    );
+    addPrivateUserColumn("coffee_experimental_table_angle_enabled", "INTEGER NOT NULL DEFAULT 0");
   }
   const hasDebateWhodunnitReuseSynthesizedExhibits = userColumns.some(
     (column) => column.name === "debate_whodunnit_reuse_synthesized_exhibits",
   );
   if (!hasDebateWhodunnitReuseSynthesizedExhibits) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN debate_whodunnit_reuse_synthesized_exhibits INTEGER NOT NULL DEFAULT 0;",
-    );
+    addPrivateUserColumn("debate_whodunnit_reuse_synthesized_exhibits", "INTEGER NOT NULL DEFAULT 0");
   }
   const hasDebateWhodunnitTextVoiceMode = userColumns.some(
     (column) => column.name === "debate_whodunnit_text_voice_mode",
   );
   if (!hasDebateWhodunnitTextVoiceMode) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN debate_whodunnit_text_voice_mode TEXT NOT NULL DEFAULT 'bottish';",
-    );
+    addPrivateUserColumn("debate_whodunnit_text_voice_mode", "TEXT NOT NULL DEFAULT 'bottish'");
   }
   const hasPsychicModeEnabled = userColumns.some(
     (column) => column.name === "psychic_mode_enabled",
   );
   if (!hasPsychicModeEnabled) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN psychic_mode_enabled INTEGER NOT NULL DEFAULT 0;",
-    );
+    addPrivateUserColumn("psychic_mode_enabled", "INTEGER NOT NULL DEFAULT 0");
   }
   const hasUsageTripEnabled = userColumns.some(
     (column) => column.name === "usage_trip_enabled",
   );
   if (!hasUsageTripEnabled) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN usage_trip_enabled INTEGER NOT NULL DEFAULT 0;",
-    );
+    addPrivateUserColumn("usage_trip_enabled", "INTEGER NOT NULL DEFAULT 0");
   }
   const hasUsageTripStartedAt = userColumns.some(
     (column) => column.name === "usage_trip_started_at",
   );
   if (!hasUsageTripStartedAt) {
-    db.exec("ALTER TABLE users ADD COLUMN usage_trip_started_at TEXT;");
+    addPrivateUserColumn("usage_trip_started_at", "TEXT");
   }
   const hasUsageTripFrozenOnlineTokens = userColumns.some(
     (column) => column.name === "usage_trip_frozen_online_tokens",
   );
   if (!hasUsageTripFrozenOnlineTokens) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN usage_trip_frozen_online_tokens INTEGER NOT NULL DEFAULT 0;",
-    );
+    addPrivateUserColumn("usage_trip_frozen_online_tokens", "INTEGER NOT NULL DEFAULT 0");
   }
   const hasUsageTripFrozenCostMicroUsd = userColumns.some(
     (column) => column.name === "usage_trip_frozen_cost_micro_usd",
   );
   if (!hasUsageTripFrozenCostMicroUsd) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN usage_trip_frozen_cost_micro_usd INTEGER NOT NULL DEFAULT 0;",
-    );
+    addPrivateUserColumn("usage_trip_frozen_cost_micro_usd", "INTEGER NOT NULL DEFAULT 0");
   }
   const hasDevMemoriesEnabled = userColumns.some(
     (column) => column.name === "dev_memories_enabled",
   );
   if (!hasDevMemoriesEnabled) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN dev_memories_enabled INTEGER NOT NULL DEFAULT 0;",
-    );
+    addPrivateUserColumn("dev_memories_enabled", "INTEGER NOT NULL DEFAULT 0");
   }
   const hasDevMemoriesText = userColumns.some(
     (column) => column.name === "dev_memories_text",
   );
   if (!hasDevMemoriesText) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN dev_memories_text TEXT NOT NULL DEFAULT '';",
-    );
+    addPrivateUserColumn("dev_memories_text", "TEXT NOT NULL DEFAULT ''");
   }
   const hasPreferredLocalModel = userColumns.some(
     (column) => column.name === "preferred_local_model",
   );
   if (!hasPreferredLocalModel) {
-    db.exec("ALTER TABLE users ADD COLUMN preferred_local_model TEXT;");
+    addPrivateUserColumn("preferred_local_model", "TEXT");
   }
   const hasPreferredOnlineModel = userColumns.some(
     (column) => column.name === "preferred_online_model",
   );
   if (!hasPreferredOnlineModel) {
-    db.exec("ALTER TABLE users ADD COLUMN preferred_online_model TEXT;");
+    addPrivateUserColumn("preferred_online_model", "TEXT");
   }
   const hasPreferredImageProvider = userColumns.some(
     (column) => column.name === "preferred_image_provider",
   );
   if (!hasPreferredImageProvider) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN preferred_image_provider TEXT NOT NULL DEFAULT 'local';",
-    );
+    addPrivateUserColumn("preferred_image_provider", "TEXT NOT NULL DEFAULT 'local'");
     // Preserve the previously coupled behavior for existing accounts while
     // letting new accounts start with the privacy-safe local image default.
     db.exec(
@@ -3812,237 +3792,187 @@ export function initializeDatabase(
     (column) => column.name === "lenient_local_fallback_model",
   );
   if (!hasLenientLocalFallbackModel) {
-    db.exec("ALTER TABLE users ADD COLUMN lenient_local_fallback_model TEXT;");
+    addPrivateUserColumn("lenient_local_fallback_model", "TEXT");
   }
   const hasAutoFallbackChain = userColumns.some(
     (column) => column.name === "auto_fallback_chain",
   );
   if (!hasAutoFallbackChain) {
-    db.exec("ALTER TABLE users ADD COLUMN auto_fallback_chain TEXT;");
+    addPrivateUserColumn("auto_fallback_chain", "TEXT");
   }
   const hasOnlineAutoProviderBias = userColumns.some(
     (column) => column.name === "online_auto_provider_bias",
   );
   if (!hasOnlineAutoProviderBias) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN online_auto_provider_bias REAL NOT NULL DEFAULT 0;",
-    );
+    addPrivateUserColumn("online_auto_provider_bias", "REAL NOT NULL DEFAULT 0");
   }
   const hasOnlineAutoProviderWeights = userColumns.some(
     (column) => column.name === "online_auto_provider_weights",
   );
   if (!hasOnlineAutoProviderWeights) {
-    db.exec("ALTER TABLE users ADD COLUMN online_auto_provider_weights TEXT;");
+    addPrivateUserColumn("online_auto_provider_weights", "TEXT");
   }
   const hasOnlineAutoQualityPosture = userColumns.some(
     (column) => column.name === "online_auto_quality_posture",
   );
   if (!hasOnlineAutoQualityPosture) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN online_auto_quality_posture TEXT NOT NULL DEFAULT 'quality';",
-    );
+    addPrivateUserColumn("online_auto_quality_posture", "TEXT NOT NULL DEFAULT 'quality'");
   }
   const hasComposerWritingAssist = userColumns.some(
     (column) => column.name === "composer_writing_assist",
   );
   if (!hasComposerWritingAssist) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN composer_writing_assist INTEGER NOT NULL DEFAULT 1;",
-    );
+    addPrivateUserColumn("composer_writing_assist", "INTEGER NOT NULL DEFAULT 1");
   }
   const hasComfyuiHost = userColumns.some(
     (column) => column.name === "comfyui_host",
   );
   if (!hasComfyuiHost) {
-    db.exec("ALTER TABLE users ADD COLUMN comfyui_host TEXT;");
+    addPrivateUserColumn("comfyui_host", "TEXT");
   }
   const hasPreferredLocalImageModel = userColumns.some(
     (column) => column.name === "preferred_local_image_model",
   );
   if (!hasPreferredLocalImageModel) {
-    db.exec("ALTER TABLE users ADD COLUMN preferred_local_image_model TEXT;");
+    addPrivateUserColumn("preferred_local_image_model", "TEXT");
   }
   const hasPreferredOpenAiImageModel = userColumns.some(
     (column) => column.name === "preferred_openai_image_model",
   );
   if (!hasPreferredOpenAiImageModel) {
-    db.exec("ALTER TABLE users ADD COLUMN preferred_openai_image_model TEXT;");
+    addPrivateUserColumn("preferred_openai_image_model", "TEXT");
   }
   const hasPreferredZenWallpaperLocalImageModel = userColumns.some(
     (column) => column.name === "preferred_zen_wallpaper_local_image_model",
   );
   if (!hasPreferredZenWallpaperLocalImageModel) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN preferred_zen_wallpaper_local_image_model TEXT;",
-    );
+    addPrivateUserColumn("preferred_zen_wallpaper_local_image_model", "TEXT");
   }
   const hasPreferredZenWallpaperOpenAiImageModel = userColumns.some(
     (column) => column.name === "preferred_zen_wallpaper_openai_image_model",
   );
   if (!hasPreferredZenWallpaperOpenAiImageModel) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN preferred_zen_wallpaper_openai_image_model TEXT;",
-    );
+    addPrivateUserColumn("preferred_zen_wallpaper_openai_image_model", "TEXT");
   }
   const hasPreferredHomeAtmosphereImageModel = userColumns.some(
     (column) => column.name === "preferred_home_atmosphere_image_model",
   );
   if (!hasPreferredHomeAtmosphereImageModel) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN preferred_home_atmosphere_image_model TEXT;",
-    );
+    addPrivateUserColumn("preferred_home_atmosphere_image_model", "TEXT");
   }
   const hasPreferredHomeAtmosphereImageProvider = userColumns.some(
     (column) => column.name === "preferred_home_atmosphere_image_provider",
   );
   if (!hasPreferredHomeAtmosphereImageProvider) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN preferred_home_atmosphere_image_provider TEXT;",
-    );
+    addPrivateUserColumn("preferred_home_atmosphere_image_provider", "TEXT");
   }
   const hasZenWallpaperOpacity = userColumns.some(
     (column) => column.name === "zen_wallpaper_opacity",
   );
   if (!hasZenWallpaperOpacity) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN zen_wallpaper_opacity REAL NOT NULL DEFAULT 0.28;",
-    );
+    addPrivateUserColumn("zen_wallpaper_opacity", "REAL NOT NULL DEFAULT 0.28");
   }
   const hasZenWallpaperTextMaskEnabled = userColumns.some(
     (column) => column.name === "zen_wallpaper_text_mask_enabled",
   );
   if (!hasZenWallpaperTextMaskEnabled) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN zen_wallpaper_text_mask_enabled INTEGER NOT NULL DEFAULT 1;",
-    );
+    addPrivateUserColumn("zen_wallpaper_text_mask_enabled", "INTEGER NOT NULL DEFAULT 1");
   }
   const hasZenWallpaperGrayscaleEnabled = userColumns.some(
     (column) => column.name === "zen_wallpaper_grayscale_enabled",
   );
   if (!hasZenWallpaperGrayscaleEnabled) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN zen_wallpaper_grayscale_enabled INTEGER NOT NULL DEFAULT 1;",
-    );
+    addPrivateUserColumn("zen_wallpaper_grayscale_enabled", "INTEGER NOT NULL DEFAULT 1");
   }
   const hasZenWallpaperBlurredEdgesEnabled = userColumns.some(
     (column) => column.name === "zen_wallpaper_blurred_edges_enabled",
   );
   if (!hasZenWallpaperBlurredEdgesEnabled) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN zen_wallpaper_blurred_edges_enabled INTEGER NOT NULL DEFAULT 1;",
-    );
+    addPrivateUserColumn("zen_wallpaper_blurred_edges_enabled", "INTEGER NOT NULL DEFAULT 1");
   }
   const hasZenWallpaperStyleNotes = userColumns.some(
     (column) => column.name === "zen_wallpaper_style_notes",
   );
   if (!hasZenWallpaperStyleNotes) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN zen_wallpaper_style_notes TEXT NOT NULL DEFAULT '';",
-    );
+    addPrivateUserColumn("zen_wallpaper_style_notes", "TEXT NOT NULL DEFAULT ''");
   }
   const hasZenSessionIdleGapMs = userColumns.some(
     (column) => column.name === "zen_session_idle_gap_ms",
   );
   if (!hasZenSessionIdleGapMs) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN zen_session_idle_gap_ms INTEGER NOT NULL DEFAULT 43200000;",
-    );
+    addPrivateUserColumn("zen_session_idle_gap_ms", "INTEGER NOT NULL DEFAULT 43200000");
   }
   const hasZenFreshStartGapMs = userColumns.some(
     (column) => column.name === "zen_fresh_start_gap_ms",
   );
   if (!hasZenFreshStartGapMs) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN zen_fresh_start_gap_ms INTEGER NOT NULL DEFAULT 604800000;",
-    );
+    addPrivateUserColumn("zen_fresh_start_gap_ms", "INTEGER NOT NULL DEFAULT 604800000");
   }
   const hasZenRecentContextMessages = userColumns.some(
     (column) => column.name === "zen_recent_context_messages",
   );
   if (!hasZenRecentContextMessages) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN zen_recent_context_messages INTEGER NOT NULL DEFAULT 30;",
-    );
+    addPrivateUserColumn("zen_recent_context_messages", "INTEGER NOT NULL DEFAULT 30");
   }
   const hasZenWallpaperRegenMessageInterval = userColumns.some(
     (column) => column.name === "zen_wallpaper_regen_message_interval",
   );
   if (!hasZenWallpaperRegenMessageInterval) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN zen_wallpaper_regen_message_interval INTEGER NOT NULL DEFAULT 30;",
-    );
+    addPrivateUserColumn("zen_wallpaper_regen_message_interval", "INTEGER NOT NULL DEFAULT 30");
   }
   const hasZenMoodSensitivity = userColumns.some(
     (column) => column.name === "zen_mood_sensitivity",
   );
   if (!hasZenMoodSensitivity) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN zen_mood_sensitivity REAL NOT NULL DEFAULT 0.5;",
-    );
+    addPrivateUserColumn("zen_mood_sensitivity", "REAL NOT NULL DEFAULT 0.5");
   }
   const hasZenCanvasTypingSpeed = userColumns.some(
     (column) => column.name === "zen_canvas_typing_speed",
   );
   if (!hasZenCanvasTypingSpeed) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN zen_canvas_typing_speed REAL NOT NULL DEFAULT 1;",
-    );
+    addPrivateUserColumn("zen_canvas_typing_speed", "REAL NOT NULL DEFAULT 1");
   }
   const hasZenMessageFontMinPx = userColumns.some(
     (column) => column.name === "zen_message_font_min_px",
   );
   if (!hasZenMessageFontMinPx) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN zen_message_font_min_px REAL NOT NULL DEFAULT 15.8;",
-    );
+    addPrivateUserColumn("zen_message_font_min_px", "REAL NOT NULL DEFAULT 15.8");
   }
   const hasZenMessageFontMaxPx = userColumns.some(
     (column) => column.name === "zen_message_font_max_px",
   );
   if (!hasZenMessageFontMaxPx) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN zen_message_font_max_px REAL NOT NULL DEFAULT 32.8;",
-    );
+    addPrivateUserColumn("zen_message_font_max_px", "REAL NOT NULL DEFAULT 32.8");
   }
   const hasZenAskQuestionPatienceEnabled = userColumns.some(
     (column) => column.name === "zen_ask_question_patience_enabled",
   );
   if (!hasZenAskQuestionPatienceEnabled) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN zen_ask_question_patience_enabled INTEGER NOT NULL DEFAULT 0;",
-    );
+    addPrivateUserColumn("zen_ask_question_patience_enabled", "INTEGER NOT NULL DEFAULT 0");
   }
   const hasZenAskQuestionPatienceMs = userColumns.some(
     (column) => column.name === "zen_ask_question_patience_ms",
   );
   if (!hasZenAskQuestionPatienceMs) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN zen_ask_question_patience_ms INTEGER NOT NULL DEFAULT 60000;",
-    );
+    addPrivateUserColumn("zen_ask_question_patience_ms", "INTEGER NOT NULL DEFAULT 60000");
   }
   const hasZenAutonomyEnabled = userColumns.some(
     (column) => column.name === "zen_autonomy_enabled",
   );
   if (!hasZenAutonomyEnabled) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN zen_autonomy_enabled INTEGER NOT NULL DEFAULT 0;",
-    );
+    addPrivateUserColumn("zen_autonomy_enabled", "INTEGER NOT NULL DEFAULT 0");
   }
   const hasZenPersonaTransitionChoice = userColumns.some(
     (column) => column.name === "zen_persona_transition_choice",
   );
   if (!hasZenPersonaTransitionChoice) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN zen_persona_transition_choice TEXT NOT NULL DEFAULT 'random';",
-    );
+    addPrivateUserColumn("zen_persona_transition_choice", "TEXT NOT NULL DEFAULT 'random'");
   }
   const hasEphemeralChatProviderPreferences = userColumns.some(
     (column) => column.name === "ephemeral_chat_provider_preferences",
   );
   if (!hasEphemeralChatProviderPreferences) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN ephemeral_chat_provider_preferences TEXT NOT NULL DEFAULT '{}';",
-    );
+    addPrivateUserColumn("ephemeral_chat_provider_preferences", "TEXT NOT NULL DEFAULT '{}'");
   }
   const defaultBotColumns: Array<[string, string]> = [
     ["prism_default_bot_name", "TEXT"],
@@ -4090,22 +4020,20 @@ export function initializeDatabase(
   for (const [name, type] of defaultBotColumns) {
     const hasColumn = userColumns.some((column) => column.name === name);
     if (!hasColumn) {
-      db.exec(`ALTER TABLE users ADD COLUMN ${name} ${type};`);
+      addPrivateUserColumn(name, type);
     }
   }
   const hasLenientLocalImageFallbackModel = userColumns.some(
     (column) => column.name === "lenient_local_image_fallback_model",
   );
   if (!hasLenientLocalImageFallbackModel) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN lenient_local_image_fallback_model TEXT;",
-    );
+    addPrivateUserColumn("lenient_local_image_fallback_model", "TEXT");
   }
   const hasComfyuiWorkflows = userColumns.some(
     (column) => column.name === "comfyui_workflows",
   );
   if (!hasComfyuiWorkflows) {
-    db.exec("ALTER TABLE users ADD COLUMN comfyui_workflows TEXT;");
+    addPrivateUserColumn("comfyui_workflows", "TEXT");
     db.exec(
       `UPDATE users SET comfyui_workflows = '[]' WHERE comfyui_workflows IS NULL;`,
     );
@@ -4114,13 +4042,13 @@ export function initializeDatabase(
     (column) => column.name === "prism_default_llm_model",
   );
   if (!hasPrismDefaultLlmModel) {
-    db.exec("ALTER TABLE users ADD COLUMN prism_default_llm_model TEXT;");
+    addPrivateUserColumn("prism_default_llm_model", "TEXT");
   }
   const hasPrismCloudLlmModel = userColumns.some(
     (column) => column.name === "prism_cloud_llm_model",
   );
   if (!hasPrismCloudLlmModel) {
-    db.exec("ALTER TABLE users ADD COLUMN prism_cloud_llm_model TEXT;");
+    addPrivateUserColumn("prism_cloud_llm_model", "TEXT");
     db.exec(`
       UPDATE users
       SET prism_cloud_llm_model = prism_default_llm_model,
@@ -4138,7 +4066,7 @@ export function initializeDatabase(
     (column) => column.name === "prism_image_tool_llm_model",
   );
   if (!hasPrismImageToolLlmModel) {
-    db.exec("ALTER TABLE users ADD COLUMN prism_image_tool_llm_model TEXT;");
+    addPrivateUserColumn("prism_image_tool_llm_model", "TEXT");
   }
   const refractModelColumns = [
     "prism_refract_local_model",
@@ -4146,42 +4074,38 @@ export function initializeDatabase(
   ] as const;
   for (const column of refractModelColumns) {
     if (!userColumns.some((candidate) => candidate.name === column)) {
-      db.exec(`ALTER TABLE users ADD COLUMN ${column} TEXT;`);
+      addPrivateUserColumn(column, "TEXT");
     }
   }
   const hasTextModelDisplayNames = userColumns.some(
     (column) => column.name === "text_model_display_names",
   );
   if (!hasTextModelDisplayNames) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN text_model_display_names TEXT NOT NULL DEFAULT '{}';",
-    );
+    addPrivateUserColumn("text_model_display_names", "TEXT NOT NULL DEFAULT '{}'");
   }
   const hasFallbackModelMessageStripe = userColumns.some(
     (column) => column.name === "fallback_model_message_stripe",
   );
   if (!hasFallbackModelMessageStripe) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN fallback_model_message_stripe INTEGER NOT NULL DEFAULT 1;",
-    );
+    addPrivateUserColumn("fallback_model_message_stripe", "INTEGER NOT NULL DEFAULT 1");
   }
   const hasAnthropicKeyCiphertext = userColumns.some(
     (column) => column.name === "anthropic_key_ciphertext",
   );
   if (!hasAnthropicKeyCiphertext) {
-    db.exec("ALTER TABLE users ADD COLUMN anthropic_key_ciphertext TEXT;");
+    addPrivateUserColumn("anthropic_key_ciphertext", "TEXT");
   }
   const hasAnthropicKeyIv = userColumns.some(
     (column) => column.name === "anthropic_key_iv",
   );
   if (!hasAnthropicKeyIv) {
-    db.exec("ALTER TABLE users ADD COLUMN anthropic_key_iv TEXT;");
+    addPrivateUserColumn("anthropic_key_iv", "TEXT");
   }
   const hasAnthropicKeyTag = userColumns.some(
     (column) => column.name === "anthropic_key_tag",
   );
   if (!hasAnthropicKeyTag) {
-    db.exec("ALTER TABLE users ADD COLUMN anthropic_key_tag TEXT;");
+    addPrivateUserColumn("anthropic_key_tag", "TEXT");
   }
   const ollamaCloudKeyColumns = [
     ["ollama_cloud_key_ciphertext", "TEXT"],
@@ -4190,26 +4114,26 @@ export function initializeDatabase(
   ] as const;
   for (const [name, type] of ollamaCloudKeyColumns) {
     if (!userColumns.some((column) => column.name === name)) {
-      db.exec(`ALTER TABLE users ADD COLUMN ${name} ${type};`);
+      addPrivateUserColumn(name, type);
     }
   }
   const hasElevenLabsKeyCiphertext = userColumns.some(
     (column) => column.name === "elevenlabs_key_ciphertext",
   );
   if (!hasElevenLabsKeyCiphertext) {
-    db.exec("ALTER TABLE users ADD COLUMN elevenlabs_key_ciphertext TEXT;");
+    addPrivateUserColumn("elevenlabs_key_ciphertext", "TEXT");
   }
   const hasElevenLabsKeyIv = userColumns.some(
     (column) => column.name === "elevenlabs_key_iv",
   );
   if (!hasElevenLabsKeyIv) {
-    db.exec("ALTER TABLE users ADD COLUMN elevenlabs_key_iv TEXT;");
+    addPrivateUserColumn("elevenlabs_key_iv", "TEXT");
   }
   const hasElevenLabsKeyTag = userColumns.some(
     (column) => column.name === "elevenlabs_key_tag",
   );
   if (!hasElevenLabsKeyTag) {
-    db.exec("ALTER TABLE users ADD COLUMN elevenlabs_key_tag TEXT;");
+    addPrivateUserColumn("elevenlabs_key_tag", "TEXT");
   }
   const braveSearchKeyColumns = [
     ["brave_search_key_ciphertext", "TEXT"],
@@ -4218,7 +4142,7 @@ export function initializeDatabase(
   ] as const;
   for (const [name, type] of braveSearchKeyColumns) {
     if (!userColumns.some((column) => column.name === name)) {
-      db.exec(`ALTER TABLE users ADD COLUMN ${name} ${type};`);
+      addPrivateUserColumn(name, type);
     }
   }
   db.exec(`
@@ -5961,6 +5885,7 @@ export function initializeDatabase(
   );
 
   ensureUserVaultKeyringSchema(db);
+  ensureOwnerFileVaultSchemaV1(db);
   ensureUserNotesSchema(db);
   ensureImageAssetLibrarySchema(db);
   ensureItemCapabilityCardSchema(db);
@@ -6033,7 +5958,25 @@ export function initializeDatabase(
     coreContentVaultMasterSecret &&
     !coreContentVaultIsActiveV2(db)
   ) {
-    activateCoreContentVaultV2({
+    // Core Vault builds indexes against physical main tables. Keep the Account
+    // Auth cleartext compatibility view out of name resolution only for this
+    // bounded activation, then restore it before any request can run.
+    const accountAuthViewWasInstalled = suspendAccountAuthVaultViewV2(db);
+    try {
+      activateCoreContentVaultV2({
+        db,
+        masterSecret: coreContentVaultMasterSecret,
+      });
+    } finally {
+      if (accountAuthViewWasInstalled) installAccountAuthVaultViewV2(db);
+    }
+  }
+
+  if (
+    coreContentVaultMasterSecret &&
+    !accountAuthVaultIsActiveV2(db)
+  ) {
+    activateOrResumeAccountAuthVaultV2({
       db,
       masterSecret: coreContentVaultMasterSecret,
     });

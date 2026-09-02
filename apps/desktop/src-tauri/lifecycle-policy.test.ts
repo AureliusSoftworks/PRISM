@@ -59,4 +59,17 @@ describe("desktop lifecycle policy", () => {
       /RunEvent::ExitRequested[\s\S]{0,300}api\.prevent_exit\(\)/u,
     );
   });
+
+  it("keeps long secure API upgrades visible without weakening the web timeout", () => {
+    assert.match(source, /const API_STARTUP_TIMEOUT_SECS: u64 = 15 \* 60;/u);
+    assert.match(source, /const WEB_STARTUP_TIMEOUT_SECS: u64 = 90;/u);
+    assert.match(
+      source,
+      /emit_status\(app, "api", "preparing"\);[\s\S]{0,320}Secure upgrades can take several minutes for large libraries\./u,
+    );
+    assert.match(
+      source,
+      /emit_status\(app, "qdrant", "running"\);\s*emit_status\(app, "api", "running"\);\s*emit_status\(app, "web", "running"\);/u,
+    );
+  });
 });

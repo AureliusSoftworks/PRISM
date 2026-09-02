@@ -2,6 +2,10 @@ import type { IncomingHttpHeaders } from "node:http";
 import type { DatabaseSync } from "node:sqlite";
 import { parseCookies } from "./utils.http.ts";
 import { randomId } from "./security.ts";
+import {
+  clientAccessTokenHashV2,
+  sessionTokenHashV2,
+} from "./account-auth-vault.ts";
 
 export const CLIENT_ACCESS_COOKIE_NAME = "prism_client_access";
 
@@ -19,6 +23,11 @@ export interface ClientAccessToken {
 export interface ResolvedClientAccess {
   token: string;
   userId: string;
+  expiresAt: string;
+}
+
+export interface SessionToken {
+  token: string;
   expiresAt: string;
 }
 
@@ -65,9 +74,92 @@ export function createClientAccessToken(
     now.getTime() + ttlHours * 60 * 60 * 1000
   ).toISOString();
   db.prepare(
-    "INSERT INTO client_access_tokens (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)"
-  ).run(token, userId, expiresAt, now.toISOString());
+    "INSERT INTO client_access_tokens (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)"
+  ).run(clientAccessTokenHashV2(db, token), userId, expiresAt, now.toISOString());
   return { token, expiresAt };
+}
+
+export function createSessionToken(
+  db: DatabaseSync,
+  userId: string,
+  ttlHours: number,
+  now = new Date(),
+): SessionToken {
+  const token = randomId(24);
+  const expiresAt = new Date(
+    now.getTime() + ttlHours * 60 * 60 * 1000,
+  ).toISOString();
+  db.prepare(
+    "INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
+  ).run(sessionTokenHashV2(db, token), userId, expiresAt);
+  return { token, expiresAt };
+}
+
+export function revokeSessionToken(
+  db: DatabaseSync,
+  presentedToken: string,
+): boolean {
+  const result = db
+    .prepare("DELETE FROM sessions WHERE token_hash = ?")
+    .run(sessionTokenHashV2(db, presentedToken)) as { changes?: number | bigint };
+  return Number(result.changes ?? 0) > 0;
+}
+
+export function revokeClientAccessToken(
+  db: DatabaseSync,
+  presentedToken: string,
+): boolean {
+  const result = db
+    .prepare("DELETE FROM client_access_tokens WHERE token_hash = ?")
+    .run(clientAccessTokenHashV2(db, presentedToken)) as {
+    changes?: number | bigint;
+  };
+  return Number(result.changes ?? 0) > 0;
+}
+
+function rotateStoredToken<T extends SessionToken>(args: {
+  db: DatabaseSync;
+  revoke: () => boolean;
+  create: () => T;
+}): T {
+  args.db.exec("BEGIN IMMEDIATE");
+  try {
+    if (!args.revoke()) throw new Error("Invalid bearer token.");
+    const replacement = args.create();
+    args.db.exec("COMMIT");
+    return replacement;
+  } catch (error) {
+    if (args.db.isTransaction) args.db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function rotateSessionToken(
+  db: DatabaseSync,
+  presentedToken: string,
+  userId: string,
+  ttlHours: number,
+  now = new Date(),
+): SessionToken {
+  return rotateStoredToken({
+    db,
+    revoke: () => revokeSessionToken(db, presentedToken),
+    create: () => createSessionToken(db, userId, ttlHours, now),
+  });
+}
+
+export function rotateClientAccessToken(
+  db: DatabaseSync,
+  presentedToken: string,
+  userId: string,
+  ttlHours: number,
+  now = new Date(),
+): ClientAccessToken {
+  return rotateStoredToken({
+    db,
+    revoke: () => revokeClientAccessToken(db, presentedToken),
+    create: () => createClientAccessToken(db, userId, ttlHours, now),
+  });
 }
 
 export function resolveClientAccessToken(
@@ -93,14 +185,16 @@ export function requireValidClientAccess(
   }
 
   const token = db
-    .prepare("SELECT user_id, expires_at FROM client_access_tokens WHERE token = ?")
-    .get(clientAccessToken) as { user_id?: string; expires_at?: string } | undefined;
+    .prepare("SELECT user_id, expires_at FROM client_access_tokens WHERE token_hash = ?")
+    .get(clientAccessTokenHashV2(db, clientAccessToken)) as
+    | { user_id?: string; expires_at?: string }
+    | undefined;
   if (!token?.user_id || !token.expires_at) {
     throw new Error("Invalid native client access.");
   }
 
   if (new Date(token.expires_at).getTime() < now.getTime()) {
-    db.prepare("DELETE FROM client_access_tokens WHERE token = ?").run(clientAccessToken);
+    revokeClientAccessToken(db, clientAccessToken);
     throw new Error("Native client access expired.");
   }
 
@@ -121,14 +215,16 @@ export function requireValidSession(
   }
 
   const session = db
-    .prepare("SELECT user_id, expires_at FROM sessions WHERE token = ?")
-    .get(sessionToken) as { user_id?: string; expires_at?: string } | undefined;
+    .prepare("SELECT user_id, expires_at FROM sessions WHERE token_hash = ?")
+    .get(sessionTokenHashV2(db, sessionToken)) as
+    | { user_id?: string; expires_at?: string }
+    | undefined;
   if (!session?.user_id || !session.expires_at) {
     throw new Error("Invalid session.");
   }
 
   if (new Date(session.expires_at).getTime() < now.getTime()) {
-    db.prepare("DELETE FROM sessions WHERE token = ?").run(sessionToken);
+    revokeSessionToken(db, sessionToken);
     throw new Error("Session expired.");
   }
 

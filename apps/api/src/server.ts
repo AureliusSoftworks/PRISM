@@ -63,7 +63,12 @@ import {
   runWithUsageSession,
   setUsageTripEnabled,
 } from "./usage.ts";
-import { requireValidSession, resolveSessionToken } from "./auth.ts";
+import {
+  createSessionToken,
+  requireValidSession,
+  resolveSessionToken,
+  revokeSessionToken,
+} from "./auth.ts";
 import {
   classifyAskQuestionTimeoutPenalty,
   resolveAskQuestionTimeoutApplicability,
@@ -78,6 +83,13 @@ import {
   coreContentVaultIsActiveV2,
   initializeCoreContentVaultOwnerV2,
 } from "./core-content-vault.ts";
+import {
+  accountAuthVaultIsActiveV2,
+  activateAccountAuthVaultV2,
+  createEncryptedAccountOwnerV2,
+  findAccountOwnerIdByLoginIdentityV2,
+  normalizeLoginIdentityV2,
+} from "./account-auth-vault.ts";
 import {
   validateApiKeyCredential,
   type ApiKeyValidationProvider,
@@ -3708,12 +3720,13 @@ function scheduleApiWatchRestart(): boolean {
 }
 
 function getOrCreateLocalOwnerUser(): string {
-  const existing = db
-    .prepare("SELECT id FROM users WHERE email = ?")
-    .get(LOCAL_OWNER_USERNAME) as { id?: string } | undefined;
-  if (existing?.id) {
-    touchUserActivity(existing.id);
-    return existing.id;
+  const existingUserId = findAccountOwnerIdByLoginIdentityV2(
+    db,
+    LOCAL_OWNER_USERNAME,
+  );
+  if (existingUserId) {
+    touchUserActivity(existingUserId);
+    return existingUserId;
   }
 
   const userId = randomId(12);
@@ -3725,29 +3738,28 @@ function getOrCreateLocalOwnerUser(): string {
 
   db.exec("BEGIN IMMEDIATE");
   try {
-    db.prepare(
-      `
-      INSERT INTO users (
-        id, email, display_name, password_hash, password_salt,
-        wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
-        theme, preferred_provider, auto_memory,
-        prism_default_bot_face_mouth_coffee_pucker,
-        voice_mode, english_voice_engine, created_at, last_active_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'system', 'local', 1, ?, 'english', 'builtin', ?, ?)
-    `,
-    ).run(
-      userId,
-      LOCAL_OWNER_USERNAME,
-      LOCAL_OWNER_DISPLAY_NAME,
+    createEncryptedAccountOwnerV2({
+      db,
+      ownerUserId: userId,
+      loginIdentity: LOCAL_OWNER_USERNAME,
+      displayName: LOCAL_OWNER_DISPLAY_NAME,
       passwordHash,
-      salt,
-      wrappedUserKey.ciphertext,
-      wrappedUserKey.iv,
-      wrappedUserKey.tag,
-      DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER ? 1 : 0,
+      passwordSalt: salt,
+      wrappedUserKey: wrappedUserKey.ciphertext,
+      wrappedUserKeyIv: wrappedUserKey.iv,
+      wrappedUserKeyTag: wrappedUserKey.tag,
+      userDek: userKey,
       createdAt,
-      createdAt,
-    );
+      initialPrivateValues: {
+        theme: "system",
+        preferred_provider: "local",
+        auto_memory: 1,
+        prism_default_bot_face_mouth_coffee_pucker:
+          DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER ? 1 : 0,
+        voice_mode: "english",
+        english_voice_engine: "builtin",
+      },
+    });
     if (coreContentVaultIsActiveV2(db)) {
       initializeCoreContentVaultOwnerV2({
         db,
@@ -3761,6 +3773,8 @@ function getOrCreateLocalOwnerUser(): string {
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
+  } finally {
+    userKey.fill(0);
   }
 
   return userId;
@@ -8270,14 +8284,7 @@ function parseSourceMessageIds(raw: string | null | undefined): string[] {
 }
 
 function createSession(userId: string): { token: string; expiresAt: string } {
-  const token = randomId(24);
-  const expiresAt = new Date(
-    Date.now() + config.sessionTtlHours * 60 * 60 * 1000,
-  ).toISOString();
-  db.prepare(
-    "INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)",
-  ).run(token, userId, expiresAt);
-  return { token, expiresAt };
+  return createSessionToken(db, userId, config.sessionTtlHours);
 }
 
 function touchUserActivity(userId: string): void {
@@ -12181,7 +12188,9 @@ function buildRoutes(
     }),
     route("POST", "/api/auth/register", async (ctx) => {
       const body = ctx.body as Record<string, unknown>;
-      const username = readString(body.username, "username").toLowerCase();
+      const username = normalizeLoginIdentityV2(
+        readString(body.username, "username"),
+      );
       const password = readString(body.password, "password");
       const displayName = readOptionalString(body.displayName) ?? username;
 
@@ -12204,10 +12213,7 @@ function buildRoutes(
         );
       }
 
-      const existing = db
-        .prepare("SELECT id FROM users WHERE email = ?")
-        .get(username) as { id?: string } | undefined;
-      if (existing?.id) {
+      if (findAccountOwnerIdByLoginIdentityV2(db, username)) {
         throw new Error("Username is already registered.");
       }
 
@@ -12230,30 +12236,28 @@ function buildRoutes(
 
       db.exec("BEGIN IMMEDIATE");
       try {
-        db.prepare(
-          `
-          INSERT INTO users (
-            id, email, display_name, password_hash, password_salt,
-            wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
-            theme, preferred_provider, auto_memory,
-            prism_default_bot_face_mouth_coffee_pucker,
-            voice_mode, english_voice_engine, created_at, last_active_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', 1, ?, 'english', 'builtin', ?, ?)
-        `,
-        ).run(
-          userId,
-          username,
+        createEncryptedAccountOwnerV2({
+          db,
+          ownerUserId: userId,
+          loginIdentity: username,
           displayName,
           passwordHash,
-          salt,
-          wrappedUserKey.ciphertext,
-          wrappedUserKey.iv,
-          wrappedUserKey.tag,
-          requestedTheme,
-          DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER ? 1 : 0,
+          passwordSalt: salt,
+          wrappedUserKey: wrappedUserKey.ciphertext,
+          wrappedUserKeyIv: wrappedUserKey.iv,
+          wrappedUserKeyTag: wrappedUserKey.tag,
+          userDek: userKey,
           createdAt,
-          createdAt,
-        );
+          initialPrivateValues: {
+            theme: requestedTheme,
+            preferred_provider: "local",
+            auto_memory: 1,
+            prism_default_bot_face_mouth_coffee_pucker:
+              DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER ? 1 : 0,
+            voice_mode: "english",
+            english_voice_engine: "builtin",
+          },
+        });
         if (coreContentVaultIsActiveV2(db)) {
           initializeCoreContentVaultOwnerV2({
             db,
@@ -12284,6 +12288,8 @@ function buildRoutes(
       } catch (error) {
         db.exec("ROLLBACK");
         throw error;
+      } finally {
+        userKey.fill(0);
       }
 
       const { token } = createSession(userId);
@@ -12310,15 +12316,20 @@ function buildRoutes(
     }),
     route("POST", "/api/auth/login", async (ctx) => {
       const body = ctx.body as Record<string, unknown>;
-      const username = readString(body.username, "username").toLowerCase();
+      const username = normalizeLoginIdentityV2(
+        readString(body.username, "username"),
+      );
       const password = readString(body.password, "password");
-      const user = db
-        .prepare(
-          "SELECT id, password_hash, password_salt FROM users WHERE email = ?",
-        )
-        .get(username) as
+      const loginOwnerId = findAccountOwnerIdByLoginIdentityV2(db, username);
+      const user = loginOwnerId
+        ? (db
+            .prepare(
+              "SELECT id, password_hash, password_salt FROM users WHERE id = ?",
+            )
+            .get(loginOwnerId) as
         | { id?: string; password_hash?: string; password_salt?: string }
-        | undefined;
+        | undefined)
+        : undefined;
       if (!user?.id || !user.password_hash || !user.password_salt) {
         throw new Error("Invalid credentials.");
       }
@@ -12338,7 +12349,7 @@ function buildRoutes(
     route("POST", "/api/auth/logout", async (ctx) => {
       const token = getSessionToken(ctx);
       if (token) {
-        db.prepare("DELETE FROM sessions WHERE token = ?").run(token);
+        revokeSessionToken(db, token);
       }
       clearCookie(ctx.res, config.sessionCookieName);
       json(ctx.res, 200, { ok: true });
@@ -40155,7 +40166,15 @@ export function createPrismRequestHandler(
   req: IncomingMessage,
   res: ServerResponse<IncomingMessage>,
 ) => Promise<void> {
-  interruptUnfinishedSlateWritingOperations(options.db ?? db);
+  const requestDb = options.db ?? db;
+  const requestConfig = options.config ?? config;
+  if (!accountAuthVaultIsActiveV2(requestDb)) {
+    activateAccountAuthVaultV2({
+      db: requestDb,
+      masterSecret: requestConfig.encryptionMasterKey,
+    });
+  }
+  interruptUnfinishedSlateWritingOperations(requestDb);
   const requestVaultMaintenanceGate =
     options.vaultMaintenanceGate ?? accountVaultMaintenanceGate;
   const requestRoutes = options.vaultMaintenanceGate

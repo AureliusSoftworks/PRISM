@@ -719,28 +719,6 @@ function profileForEngine(
   return profile;
 }
 
-function browserAuthHeaders(): Record<string, string> {
-  if (typeof window === "undefined") return {};
-  try {
-    const nativeSessionToken = window.localStorage.getItem(
-      "prism_native_session_token",
-    );
-    const clientAccessToken = window.localStorage.getItem(
-      "prism_client_access_token",
-    );
-    return {
-      ...(nativeSessionToken
-        ? { authorization: `Bearer ${nativeSessionToken}` }
-        : {}),
-      ...(clientAccessToken
-        ? { "x-prism-client-access": clientAccessToken }
-        : {}),
-    };
-  } catch {
-    return {};
-  }
-}
-
 export interface VoiceSyncLabSynthesisClip {
   utteranceId: string;
   /** Exact seed used for synthesis and every production playback transform. */
@@ -846,7 +824,6 @@ export async function synthesizeVoiceSyncLabClip(
       signal: args.signal,
       headers: {
         "content-type": "application/json",
-        ...browserAuthHeaders(),
       },
       body: JSON.stringify({
         text: sourceText,
@@ -947,7 +924,6 @@ export async function loadVoiceSyncLabCapabilities(args: {
       method: "GET",
       credentials: "include",
       signal: args.signal,
-      headers: browserAuthHeaders(),
     },
   );
   if (!response.ok) throw new Error(await errorMessageForSynthesisResponse(response));

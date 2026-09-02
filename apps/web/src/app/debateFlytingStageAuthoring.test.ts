@@ -76,7 +76,7 @@ describe("Flyting stage authoring", () => {
     );
     assert.match(
       flytingStyles,
-      /\.flytingCourtGallery \.flytingAudienceLayer\[data-depth-row="rear"\]\s*\{\s*bottom:\s*38%/u,
+      /\.flytingCourtGallery \.flytingAudienceLayer\[data-depth-row="rear"\]\s*\{\s*bottom:\s*34%/u,
     );
     assert.match(flytingSource, /data-flyting-preview-vote-controls="true"/u);
     assert.match(flytingSource, /stageAlignmentGalleryControls/u);

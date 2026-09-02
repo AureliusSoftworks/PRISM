@@ -525,6 +525,7 @@ function insertInitialDek(args: {
   ownerUserId: string;
   context: VaultMasterKeyContextV2;
   dek: Uint8Array;
+  keyId?: string;
   createdAt?: string;
 }): UserVaultKeyMetadataV2 {
   if (!(args.dek instanceof Uint8Array) || args.dek.length !== VAULT_DEK_BYTES) {
@@ -539,7 +540,8 @@ function insertInitialDek(args: {
       if (selectOwnerKeyRows(args.db, args.ownerUserId).length > 0) {
         throw new VaultKeyLifecycleError("keyring_already_initialized");
       }
-      const keyId = generateVaultKeyIdV2();
+      const keyId = args.keyId ?? generateVaultKeyIdV2();
+      assertVaultKeyIdV2(keyId);
       const wrapped = wrapDekV1({
         ownerUserId: args.ownerUserId,
         keyId,
@@ -603,6 +605,7 @@ export function importLegacyUserDekIntoVaultKeyringV2(args: {
   ownerUserId: string;
   context: VaultMasterKeyContextV2;
   legacyDek: Uint8Array;
+  keyId?: string;
   createdAt?: string;
 }): UserVaultKeyMetadataV2 {
   return insertInitialDek({
@@ -610,6 +613,7 @@ export function importLegacyUserDekIntoVaultKeyringV2(args: {
     ownerUserId: args.ownerUserId,
     context: args.context,
     dek: args.legacyDek,
+    keyId: args.keyId,
     createdAt: args.createdAt,
   });
 }

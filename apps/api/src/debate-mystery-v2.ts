@@ -9398,6 +9398,15 @@ function audioCacheRelativePath(userId: string, cacheKey: string): string {
   return `${V2_AUDIO_SUBDIR}/${sha256(userId).slice(0, 24)}/cache/${cacheKey}.wav`;
 }
 
+export function debateMysteryOwnerAudioCacheKeyV2(
+  userId: string,
+  synthesisContract: Readonly<Record<string, unknown>>,
+): string {
+  return sha256(
+    `PRISM\0WHODUNNIT-AUDIO-CACHE\0V2\0${userId}\0${JSON.stringify(synthesisContract)}`,
+  );
+}
+
 function reclaimExpiredAudioStagingFiles(userId: string, now = Date.now()): number {
   const directory = resolveAbsoluteUnderDataRoot(
     `${V2_AUDIO_SUBDIR}/${sha256(userId).slice(0, 24)}/cache`,
@@ -10359,7 +10368,7 @@ async function prepareLocalAudioPackV2(args: {
     const synthesisTextHash = sha256(synthesisText);
     const voiceProfileHash = sha256(JSON.stringify(profile));
     const performanceDirectionHash = sha256(JSON.stringify(line.performance));
-    const cacheKey = sha256(JSON.stringify({
+    const cacheKey = debateMysteryOwnerAudioCacheKeyV2(args.userId, {
       textHash,
       synthesisTextHash,
       botId: line.speakerBotId,
@@ -10367,7 +10376,7 @@ async function prepareLocalAudioPackV2(args: {
       voiceProfileHash,
       model: PRISM_INSTANT_VOICE_MODEL_ID,
       performanceDirectionHash,
-    }));
+    });
     const reusable = reusableEntries.get(lineId);
     const reusableCacheKey = reusable
       ? reusableAudioCacheKeyV2(args.db, args.userId, reusable)
@@ -10516,7 +10525,7 @@ async function stageMysteryAudioLineV2(args: {
     throw new Error("The replacement room performance does not match the frozen voice profile.");
   }
   const performanceDirectionHash = sha256(JSON.stringify(args.line.performance));
-  const cacheKey = sha256(JSON.stringify({
+  const cacheKey = debateMysteryOwnerAudioCacheKeyV2(args.userId, {
     textHash,
     synthesisTextHash,
     botId: args.line.speakerBotId,
@@ -10524,7 +10533,7 @@ async function stageMysteryAudioLineV2(args: {
     voiceProfileHash,
     model: PRISM_INSTANT_VOICE_MODEL_ID,
     performanceDirectionHash,
-  }));
+  });
   const cached = args.db.prepare(
     `SELECT clip_path, mime_type, sha256, byte_size, duration_ms, ref_count
        FROM debate_mystery_audio_cache
@@ -12331,12 +12340,6 @@ export function importDebateMysteryV2BackupV1(
       sha256(bytes) !== clip.sha256 || !isPlayablePcmWave(bytes) ||
       !Number.isInteger(clip.durationMs) || clip.durationMs <= 0
     ) throw new Error("Account backup contains a corrupted Whodunnit V2 recording.");
-    const existing = db.prepare(
-      "SELECT user_id FROM debate_mystery_audio_cache WHERE cache_key = ?",
-    ).get(clip.cacheKey) as { user_id: string } | undefined;
-    if (existing && existing.user_id !== userId) {
-      throw new Error("Account backup Whodunnit audio key belongs to another account.");
-    }
     const clipPath = audioCacheRelativePath(userId, clip.cacheKey);
     writeAudioAtomically(clipPath, bytes);
     db.prepare(
@@ -12344,11 +12347,10 @@ export function importDebateMysteryV2BackupV1(
          (cache_key, user_id, clip_path, mime_type, sha256, byte_size,
           duration_ms, ref_count, created_at, last_used_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-       ON CONFLICT(cache_key) DO UPDATE SET
+       ON CONFLICT(user_id, cache_key) DO UPDATE SET
          clip_path = excluded.clip_path, mime_type = excluded.mime_type,
          sha256 = excluded.sha256, byte_size = excluded.byte_size,
-         duration_ms = excluded.duration_ms, last_used_at = excluded.last_used_at
-       WHERE debate_mystery_audio_cache.user_id = excluded.user_id`,
+         duration_ms = excluded.duration_ms, last_used_at = excluded.last_used_at`,
     ).run(
       clip.cacheKey, userId, clipPath, clip.mimeType, clip.sha256,
       clip.byteSize, clip.durationMs, clip.createdAt, clip.lastUsedAt,

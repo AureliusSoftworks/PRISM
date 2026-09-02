@@ -25,7 +25,7 @@ import {
   MANSION_LAYOUT_V2_ROWS,
   type MansionLayoutV2,
   type MysteryVenueProfileV1,
-} from "./mansionLayoutV2.js";
+} from "./mansionLayoutV2.ts";
 import type {
   EvidencePropBindingV1,
   MansionPropThemeV1,

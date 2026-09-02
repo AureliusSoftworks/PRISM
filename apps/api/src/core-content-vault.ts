@@ -626,6 +626,7 @@ const PRISM_ACTION_IDEMPOTENCY_DIGEST = /^pi2_[a-f0-9]{64}$/u;
 const VAULT_OPEN_FUNCTION = "prism_core_vault_open_v2";
 const VAULT_ROW_FUNCTION = "prism_core_vault_row_v2";
 const VAULT_SEAL_FUNCTION = "prism_core_vault_seal_v2";
+const VAULT_MUTATE_FUNCTION = "prism_core_vault_mutate_v2";
 
 type SqliteValue = null | string | number | bigint | Uint8Array;
 
@@ -640,6 +641,11 @@ interface TableColumnInfo {
 interface CoreVaultRuntime {
   context: VaultMasterKeyContextV2;
   functionsRegistered: boolean;
+  physicalPrepare: ((sql: string) => StatementSync) | null;
+  physicalMutations: Map<string, {
+    argumentCount: number;
+    statement: StatementSync;
+  }>;
   prepareWrapped: boolean;
   viewsInstalled: boolean;
 }
@@ -1013,6 +1019,7 @@ function openValue(
 
 function registerVaultFunctions(db: DatabaseSync, runtime: CoreVaultRuntime): void {
   if (runtime.functionsRegistered) return;
+  runtime.physicalPrepare = db.prepare.bind(db);
   db.function(
     VAULT_ROW_FUNCTION,
     { deterministic: true, varargs: true },
@@ -1043,7 +1050,71 @@ function registerVaultFunctions(db: DatabaseSync, runtime: CoreVaultRuntime): vo
       value: SqliteValue,
     ) => openValue(db, runtime, ownerUserId, table, column, stableRowId, value),
   );
+  db.function(
+    VAULT_MUTATE_FUNCTION,
+    { varargs: true },
+    (action: SqliteValue, table: SqliteValue, ...values: SqliteValue[]) => {
+      if (typeof action !== "string" || typeof table !== "string") {
+        throw new VaultKeyLifecycleError("invalid_content_binding");
+      }
+      const mutation = runtime.physicalMutations.get(`${action}:${table}`);
+      if (!mutation || mutation.argumentCount !== values.length) {
+        throw new VaultKeyLifecycleError("invalid_content_binding");
+      }
+      return Number(mutation.statement.run(...values).changes);
+    },
+  );
   runtime.functionsRegistered = true;
+}
+
+function refreshPhysicalMutationStatements(
+  db: DatabaseSync,
+  runtime: CoreVaultRuntime,
+): void {
+  const prepare = runtime.physicalPrepare;
+  if (!prepare) {
+    throw new VaultKeyLifecycleError("transaction_conflict");
+  }
+  const mutations = new Map<string, {
+    argumentCount: number;
+    statement: StatementSync;
+  }>();
+  for (const contract of CORE_CONTENT_VAULT_TABLES) {
+    const columns = tableColumns(db, contract.table);
+    const columnList = columns
+      .map((column) => quoteIdentifier(column.name))
+      .join(", ");
+    const placeholders = columns.map(() => "?").join(", ");
+    mutations.set(`insert:${contract.table}`, {
+      argumentCount: columns.length,
+      statement: prepare(
+        `INSERT INTO main.${quoteIdentifier(contract.table)} (${columnList}) VALUES (${placeholders})`,
+      ),
+    });
+
+    const assignments = columns
+      .map((column) => `${quoteIdentifier(column.name)} = ?`)
+      .join(", ");
+    const ownerAndRowPredicate = [
+      `${quoteIdentifier(contract.ownerColumn)} = ?`,
+      ...contract.stableRowColumns.map(
+        (column) => `${quoteIdentifier(column)} IS ?`,
+      ),
+    ].join(" AND ");
+    mutations.set(`update:${contract.table}`, {
+      argumentCount: columns.length + 1 + contract.stableRowColumns.length,
+      statement: prepare(
+        `UPDATE main.${quoteIdentifier(contract.table)} SET ${assignments} WHERE ${ownerAndRowPredicate}`,
+      ),
+    });
+    mutations.set(`delete:${contract.table}`, {
+      argumentCount: 1 + contract.stableRowColumns.length,
+      statement: prepare(
+        `DELETE FROM main.${quoteIdentifier(contract.table)} WHERE ${ownerAndRowPredicate}`,
+      ),
+    });
+  }
+  runtime.physicalMutations = mutations;
 }
 
 function installChangeCountCompatibility(
@@ -1125,18 +1196,6 @@ function stableRowExpression(
   return `${VAULT_ROW_FUNCTION}(${quoteLiteral(contract.table)}, ${values.join(", ")})`;
 }
 
-function stableRowPredicate(
-  contract: CoreContentVaultTableContract,
-  qualifier: "OLD" | "NEW",
-): string {
-  return contract.stableRowColumns
-    .map(
-      (column) =>
-        `${quoteIdentifier(column)} IS ${qualifier}.${quoteIdentifier(column)}`,
-    )
-    .join(" AND ");
-}
-
 function viewOwnerValidationStatements(
   contract: CoreContentVaultTableContract,
 ): string {
@@ -1200,6 +1259,7 @@ export function installCoreContentVaultViewsV2(db: DatabaseSync): void {
   if (runtime.viewsInstalled) return;
   assertCoreContentVaultContract(db);
   registerVaultFunctions(db, runtime);
+  refreshPhysicalMutationStatements(db, runtime);
   installChangeCountCompatibility(db, runtime);
 
   for (const contract of CORE_CONTENT_VAULT_TABLES) {
@@ -1219,7 +1279,6 @@ export function installCoreContentVaultViewsV2(db: DatabaseSync): void {
       `CREATE TEMP VIEW ${quoteIdentifier(contract.table)} AS SELECT ${rowIdProjection}${projection} FROM main.${quoteIdentifier(contract.table)}`,
     );
 
-    const columnList = columns.map((column) => quoteIdentifier(column.name)).join(", ");
     const insertValues = columns
       .map((column) => insertExpression(contract, column))
       .join(", ");
@@ -1228,17 +1287,17 @@ export function installCoreContentVaultViewsV2(db: DatabaseSync): void {
       INSTEAD OF INSERT ON ${quoteIdentifier(contract.table)}
       BEGIN
         ${viewOwnerValidationStatements(contract)}
-        INSERT INTO main.${quoteIdentifier(contract.table)} (${columnList})
-        VALUES (${insertValues});
+        SELECT ${VAULT_MUTATE_FUNCTION}(
+          'insert',
+          ${quoteLiteral(contract.table)},
+          ${insertValues}
+        );
         UPDATE core_vault_change_counter SET value = value + changes() WHERE singleton = 1;
       END
     `);
 
     const updateValues = columns
-      .map(
-        (column) =>
-          `${quoteIdentifier(column.name)} = ${updateExpression(contract, column)}`,
-      )
+      .map((column) => updateExpression(contract, column))
       .join(", ");
     db.exec(`
       CREATE TEMP TRIGGER ${quoteIdentifier(triggerName(contract.table, "update"))}
@@ -1255,10 +1314,15 @@ export function installCoreContentVaultViewsV2(db: DatabaseSync): void {
               .join(" OR ")}
           THEN RAISE(ABORT, 'Account content not found.')
         END;
-        UPDATE main.${quoteIdentifier(contract.table)}
-           SET ${updateValues}
-         WHERE ${quoteIdentifier(contract.ownerColumn)} = OLD.${quoteIdentifier(contract.ownerColumn)}
-           AND ${stableRowPredicate(contract, "OLD")};
+        SELECT ${VAULT_MUTATE_FUNCTION}(
+          'update',
+          ${quoteLiteral(contract.table)},
+          ${updateValues},
+          OLD.${quoteIdentifier(contract.ownerColumn)},
+          ${contract.stableRowColumns
+            .map((column) => `OLD.${quoteIdentifier(column)}`)
+            .join(", ")}
+        );
         UPDATE core_vault_change_counter SET value = value + changes() WHERE singleton = 1;
       END
     `);
@@ -1267,9 +1331,14 @@ export function installCoreContentVaultViewsV2(db: DatabaseSync): void {
       CREATE TEMP TRIGGER ${quoteIdentifier(triggerName(contract.table, "delete"))}
       INSTEAD OF DELETE ON ${quoteIdentifier(contract.table)}
       BEGIN
-        DELETE FROM main.${quoteIdentifier(contract.table)}
-         WHERE ${quoteIdentifier(contract.ownerColumn)} = OLD.${quoteIdentifier(contract.ownerColumn)}
-           AND ${stableRowPredicate(contract, "OLD")};
+        SELECT ${VAULT_MUTATE_FUNCTION}(
+          'delete',
+          ${quoteLiteral(contract.table)},
+          OLD.${quoteIdentifier(contract.ownerColumn)},
+          ${contract.stableRowColumns
+            .map((column) => `OLD.${quoteIdentifier(column)}`)
+            .join(", ")}
+        );
         UPDATE core_vault_change_counter SET value = value + changes() WHERE singleton = 1;
       END
     `);
@@ -1674,6 +1743,8 @@ export function activateCoreContentVaultV2(args: {
   const runtime: CoreVaultRuntime = {
     context: deriveVaultMasterKeyContextV2(args.db, args.masterSecret),
     functionsRegistered: false,
+    physicalPrepare: null,
+    physicalMutations: new Map(),
     prepareWrapped: false,
     viewsInstalled: false,
   };
@@ -1732,6 +1803,8 @@ export function resumeCoreContentVaultViewsV2(args: {
   const runtime: CoreVaultRuntime = {
     context: deriveVaultMasterKeyContextV2(args.db, args.masterSecret),
     functionsRegistered: false,
+    physicalPrepare: null,
+    physicalMutations: new Map(),
     prepareWrapped: false,
     viewsInstalled: false,
   };

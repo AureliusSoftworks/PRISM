@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import type { AudioNeedV1 } from "@localai/shared";
@@ -8,6 +9,7 @@ import {
   ensureAudioAssetCatalogSchema,
   getCanonicalAudioAssetV1,
   listCanonicalAudioAssetsV1,
+  migrateLegacyAudioAssetBlobHashesV2,
   readCanonicalAudioAssetBytesV1,
   registerAudioAssetV1,
   summarizeCanonicalAudioAssetCategoryBytesV1,
@@ -75,6 +77,7 @@ describe("canonical audio asset catalog", () => {
 
     assert.notEqual(first.id, second.id);
     assert.equal(first.contentSha256, second.contentSha256);
+    assert.match(first.contentSha256 ?? "", /^paud2_[a-f0-9]{64}$/u);
     assert.equal((db.prepare(
       "SELECT COUNT(*) AS count FROM audio_asset_blobs WHERE user_id = 'owner'",
     ).get() as { count: number }).count, 1);
@@ -84,6 +87,66 @@ describe("canonical audio asset catalog", () => {
       Buffer.byteLength("decoded paper fold fixture"),
     );
     assert.deepEqual(readCanonicalAudioAssetBytesV1(db, key, "owner", first.id)?.bytes, Buffer.from("decoded paper fold fixture"));
+  });
+
+  it("uses unrelated tenant hashes for identical bytes and migrates legacy public hashes", () => {
+    const { db, key } = fixture();
+    const ownerAsset = addPaperFold(db, key, "owner");
+    const otherKey = Buffer.alloc(32, 9);
+    const otherAsset = addPaperFold(db, otherKey, "other");
+    assert.notEqual(ownerAsset.contentSha256, otherAsset.contentSha256);
+
+    const stored = db
+      .prepare(
+        `SELECT ciphertext, cipher_iv, cipher_tag, byte_size, created_at
+           FROM audio_asset_blobs WHERE user_id = ? AND sha256 = ?`,
+      )
+      .get("owner", ownerAsset.contentSha256) as {
+      ciphertext: Buffer;
+      cipher_iv: Buffer;
+      cipher_tag: Buffer;
+      byte_size: number;
+      created_at: string;
+    };
+    const legacyHash = createHash("sha256")
+      .update("decoded paper fold fixture")
+      .digest("hex");
+    db.prepare(
+      `INSERT INTO audio_asset_blobs
+         (user_id, sha256, ciphertext, cipher_iv, cipher_tag, byte_size, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "owner",
+      legacyHash,
+      stored.ciphertext,
+      stored.cipher_iv,
+      stored.cipher_tag,
+      stored.byte_size,
+      stored.created_at,
+    );
+    db.prepare(
+      "UPDATE audio_assets SET content_sha256 = ? WHERE id = ? AND user_id = ?",
+    ).run(legacyHash, ownerAsset.id, "owner");
+    db.prepare(
+      "DELETE FROM audio_asset_blobs WHERE user_id = ? AND sha256 = ?",
+    ).run("owner", ownerAsset.contentSha256);
+
+    assert.equal(migrateLegacyAudioAssetBlobHashesV2(db, key, "owner"), 1);
+    const migrated = getCanonicalAudioAssetV1(db, "owner", ownerAsset.id);
+    assert.equal(migrated?.contentSha256, ownerAsset.contentSha256);
+    assert.equal(
+      db
+        .prepare(
+          "SELECT 1 FROM audio_asset_blobs WHERE user_id = ? AND sha256 = ?",
+        )
+        .get("owner", legacyHash),
+      undefined,
+    );
+    assert.deepEqual(
+      readCanonicalAudioAssetBytesV1(db, key, "owner", ownerAsset.id)?.bytes,
+      Buffer.from("decoded paper fold fixture"),
+    );
+    otherKey.fill(0);
   });
 
   it("enforces tenant isolation for metadata, tags, usages, and encrypted bytes", () => {

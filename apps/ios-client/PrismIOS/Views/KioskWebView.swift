@@ -1,6 +1,24 @@
 import SwiftUI
 import WebKit
 
+func prismClientCookie(
+    name: String,
+    value: String,
+    originURL: URL,
+    expiresAt: Date
+) -> HTTPCookie? {
+    HTTPCookie(properties: [
+        .originURL: originURL.absoluteString,
+        .path: "/",
+        .name: name,
+        .value: value,
+        .secure: originURL.scheme == "https",
+        .expires: expiresAt,
+        .sameSitePolicy: HTTPCookieStringPolicy.sameSiteLax.rawValue,
+        HTTPCookiePropertyKey("HttpOnly"): "TRUE"
+    ])
+}
+
 final class PrismWKWebView: WKWebView {
     override var inputAccessoryView: UIView? {
         nil
@@ -12,8 +30,7 @@ struct KioskWebView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        configuration.userContentController.addUserScript(nativeSessionCleanupScript())
-        configuration.userContentController.addUserScript(clientAccessScript())
+        configuration.userContentController.addUserScript(legacyBearerCleanupScript())
         let webView = PrismWKWebView(frame: .zero, configuration: configuration)
         webView.allowsBackForwardNavigationGestures = true
         configureChrome(for: webView)
@@ -45,72 +62,37 @@ struct KioskWebView: UIViewRepresentable {
 
         var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.setValue("prism_client_access=\(session.clientAccessToken)", forHTTPHeaderField: "Cookie")
-        removeNativeSessionCookie(from: webView) {
-            if let cookie = clientAccessCookie(for: url) {
-                webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie) {
-                    DispatchQueue.main.async {
-                        webView.load(request)
-                    }
-                }
-            } else {
-                DispatchQueue.main.async {
-                    webView.load(request)
-                }
+        let cookies = [
+            prismClientCookie(
+                name: "localai_session",
+                value: session.token,
+                originURL: url,
+                expiresAt: session.server.expiresAt
+            ),
+            prismClientCookie(
+                name: "prism_client_access",
+                value: session.clientAccessToken,
+                originURL: url,
+                expiresAt: session.server.expiresAt
+            )
+        ].compactMap { $0 }
+        let group = DispatchGroup()
+        for cookie in cookies {
+            group.enter()
+            webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie) {
+                group.leave()
             }
+        }
+        group.notify(queue: .main) {
+            webView.load(request)
         }
     }
 
-    private func clientAccessCookie(for url: URL) -> HTTPCookie? {
-        return HTTPCookie(properties: [
-            .originURL: url.absoluteString,
-            .path: "/",
-            .name: "prism_client_access",
-            .value: session.clientAccessToken,
-            .secure: url.scheme == "https",
-            .expires: session.server.expiresAt,
-            .sameSitePolicy: HTTPCookieStringPolicy.sameSiteLax.rawValue
-        ])
-    }
-
-    private func clientAccessScript() -> WKUserScript {
-        let escapedToken = session.clientAccessToken
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-        let source = "window.localStorage.setItem('prism_client_access_token', '\(escapedToken)');"
-        return WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
-    }
-
-    private func removeNativeSessionCookie(from webView: WKWebView, completion: @escaping () -> Void) {
-        let store = webView.configuration.websiteDataStore.httpCookieStore
-        store.getAllCookies { cookies in
-            let nativeSessionCookies = cookies.filter {
-                $0.name == "localai_session" && $0.value == session.token
-            }
-            guard !nativeSessionCookies.isEmpty else {
-                completion()
-                return
-            }
-
-            var remaining = nativeSessionCookies.count
-            for cookie in nativeSessionCookies {
-                store.delete(cookie) {
-                    remaining -= 1
-                    if remaining == 0 {
-                        completion()
-                    }
-                }
-            }
-        }
-    }
-
-    private func nativeSessionCleanupScript() -> WKUserScript {
-        let escapedToken = session.token
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
+    private func legacyBearerCleanupScript() -> WKUserScript {
         let source = """
-        if (window.localStorage.getItem('prism_native_session_token') === '\(escapedToken)') {
-          window.localStorage.removeItem('prism_native_session_token');
+        for (const key of ['prism_native_session_token', 'prism_client_access_token']) {
+          window.localStorage.removeItem(key);
+          window.sessionStorage.removeItem(key);
         }
         """
         return WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)

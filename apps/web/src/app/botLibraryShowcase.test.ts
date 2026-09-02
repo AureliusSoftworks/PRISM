@@ -26,7 +26,10 @@ describe("selected bot library showcase", () => {
     }
     assert.match(pageSource, /"--zen-live-bot-avatar-size":[\s\S]*?"min\(520px, 72vmin\)"/);
     assert.match(pageSource, /\{renderBotHubShowcase\(\)\}[\s\S]*?\{renderUsagePanel\(\)\}/);
-    assert.match(cssSource, /\.botPanelHubShowcase\s*\{[\s\S]*?position:\s*fixed;[\s\S]*?inset:\s*0 min\(479px, calc\(100vw - 32px\)\) 0 0;/);
+    assert.match(
+      cssSource,
+      /\.botPanelHubShowcase\s*\{[\s\S]*?position:\s*fixed;[\s\S]*?top:\s*var\(\s*--app-shell-top-nav-height[\s\S]*?right:\s*min\(479px, calc\(100vw - 32px\)\);[\s\S]*?bottom:\s*0;[\s\S]*?left:\s*0;/,
+    );
     assert.match(cssSource, /@keyframes botPanelHubAvatarIdle/);
     assert.doesNotMatch(
       normalizedCssSource,
