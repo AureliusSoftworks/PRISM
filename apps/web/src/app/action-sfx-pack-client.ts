@@ -252,8 +252,12 @@ export async function generateActionSfxPackWithProgress(args: {
   return summary;
 }
 
-/** Test helper — reset anti-repeat + presence caches. */
-export function resetActionSfxPackClientStateForTests(): void {
+/** Clear account-derived availability plus the current anti-repeat cursor. */
+export function clearActionSfxPackClientState(): void {
   variantPickState = { lastVariantByKind: {} };
   packPresenceCache.clear();
 }
+
+/** Test helper kept as a compatibility alias. */
+export const resetActionSfxPackClientStateForTests =
+  clearActionSfxPackClientState;

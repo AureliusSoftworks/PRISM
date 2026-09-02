@@ -41,6 +41,8 @@ export interface DebateFlytingStagePlacementV1 {
   rotation: number;
   /** Degrees added to the authored horizontal skew. */
   skewX: number;
+  /** Degrees added to the authored vertical skew. */
+  skewY: number;
 }
 
 export interface DebateFlytingStageAlignmentV1 {
@@ -57,6 +59,7 @@ export interface DebateFlytingStageAlignmentItemDefinition {
   label: string;
   supportsRotation?: boolean;
   supportsSkew?: boolean;
+  supportsSkewY?: boolean;
 }
 
 export const DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS: readonly DebateFlytingStageAlignmentItemDefinition[] =
@@ -159,6 +162,7 @@ export const DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS: readonly DebateFlytingStageAl
       label: "Challenger rug glyph",
       supportsRotation: true,
       supportsSkew: true,
+      supportsSkewY: true,
     },
     {
       id: "galleryModeratorRugGlyph",
@@ -166,6 +170,7 @@ export const DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS: readonly DebateFlytingStageAl
       label: "Jarl rug glyph",
       supportsRotation: true,
       supportsSkew: true,
+      supportsSkewY: true,
     },
     {
       id: "galleryAgainstRugGlyph",
@@ -173,6 +178,7 @@ export const DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS: readonly DebateFlytingStageAl
       label: "Defender rug glyph",
       supportsRotation: true,
       supportsSkew: true,
+      supportsSkewY: true,
     },
   ];
 
@@ -191,18 +197,107 @@ export function debateFlytingStageRehearsalItems(
 }
 
 function defaultPlacement(): DebateFlytingStagePlacementV1 {
-  return { x: 0, y: 0, scale: 100, rotation: 0, skewX: 0 };
+  return { x: 0, y: 0, scale: 100, rotation: 0, skewX: 0, skewY: 0 };
 }
 
 const DEBATE_FLYTING_STAGE_ALIGNMENT_DEFAULT_OVERRIDES: Partial<
   Record<DebateFlytingStageAlignmentItem, DebateFlytingStagePlacementV1>
 > = {
+  wideForHeraldry: {
+    x: -0.25,
+    y: -14,
+    scale: 90,
+    rotation: 0,
+    skewX: 0,
+    skewY: 0,
+  },
+  wideModeratorBot: {
+    x: 0,
+    y: -4.5,
+    scale: 100,
+    rotation: 0,
+    skewX: 0,
+    skewY: 0,
+  },
+  wideModeratorNameplate: {
+    x: 0,
+    y: -4,
+    scale: 100,
+    rotation: 0,
+    skewX: 0,
+    skewY: 0,
+  },
+  wideModeratorHeraldry: {
+    x: -0.25,
+    y: 3,
+    scale: 80,
+    rotation: 0,
+    skewX: 0,
+    skewY: 0,
+  },
+  wideAgainstNameplate: {
+    x: 0,
+    y: 0.02,
+    scale: 100,
+    rotation: 0,
+    skewX: 0,
+    skewY: 0,
+  },
+  wideAgainstHeraldry: {
+    x: -0.5,
+    y: -14,
+    scale: 90,
+    rotation: 0,
+    skewX: 0,
+    skewY: 0,
+  },
+  moderatorForHeraldry: {
+    x: 0.6,
+    y: -14,
+    scale: 100,
+    rotation: 0,
+    skewX: 0,
+    skewY: 0,
+  },
+  moderatorModeratorBot: {
+    x: 0,
+    y: -1.5,
+    scale: 100,
+    rotation: 0,
+    skewX: 0,
+    skewY: 0,
+  },
+  moderatorModeratorNameplate: {
+    x: 0,
+    y: 7,
+    scale: 100,
+    rotation: 0,
+    skewX: 0,
+    skewY: 0,
+  },
+  moderatorModeratorHeraldry: {
+    x: -0.25,
+    y: -3,
+    scale: 100,
+    rotation: 0,
+    skewX: 0,
+    skewY: 0,
+  },
+  moderatorAgainstHeraldry: {
+    x: -1.4,
+    y: -14,
+    scale: 100,
+    rotation: 0,
+    skewX: 0,
+    skewY: 0,
+  },
   galleryForRugGlyph: {
     x: 0.02,
     y: -8.45,
     scale: 100,
     rotation: 0,
     skewX: -20,
+    skewY: 0,
   },
   galleryAgainstRugGlyph: {
     x: 0.59,
@@ -210,6 +305,7 @@ const DEBATE_FLYTING_STAGE_ALIGNMENT_DEFAULT_OVERRIDES: Partial<
     scale: 100,
     rotation: 0,
     skewX: 20,
+    skewY: 0,
   },
 };
 
@@ -252,6 +348,7 @@ function normalizePlacement(value: unknown): DebateFlytingStagePlacementV1 {
     scale: normalizedNumber(candidate.scale, 25, 250, 100),
     rotation: normalizedNumber(candidate.rotation, -180, 180, 0),
     skewX: normalizedNumber(candidate.skewX, -60, 60, 0),
+    skewY: normalizedNumber(candidate.skewY, -60, 60, 0),
   };
 }
 

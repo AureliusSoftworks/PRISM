@@ -19,8 +19,14 @@ export interface LiveSessionFocusEventV1 {
 }
 
 const pendingWrites = new Map<string, Promise<void>>();
+let accountOwnerGeneration = 0;
 const sessionKey = (surface: LiveSessionFocusSurface, sessionId: string) =>
   `${surface}:${sessionId}`;
+
+export function clearLiveSessionFocusRuntime(): void {
+  accountOwnerGeneration += 1;
+  pendingWrites.clear();
+}
 
 function rememberPendingWrite(key: string, write: Promise<void>): void {
   const settled = write.catch(() => undefined).then(() => undefined);
@@ -58,8 +64,10 @@ function recordFocusTransition(
 ): void {
   const key = sessionKey(surface, sessionId);
   const occurredAt = new Date().toISOString();
-  const write = (pendingWrites.get(key) ?? Promise.resolve()).then(() =>
-    fetch("/api/session-focus-events", {
+  const ownerGeneration = accountOwnerGeneration;
+  const write = (pendingWrites.get(key) ?? Promise.resolve()).then(() => {
+    if (ownerGeneration !== accountOwnerGeneration) return;
+    return fetch("/api/session-focus-events", {
       method: "POST",
       credentials: "same-origin",
       keepalive: true,
@@ -67,8 +75,8 @@ function recordFocusTransition(
       body: JSON.stringify({ surface, sessionId, transition, occurredAt }),
     }).then((response) => {
       if (!response.ok) throw new Error("Could not record PRISM focus transition.");
-    }),
-  );
+    });
+  });
   rememberPendingWrite(key, write);
 }
 

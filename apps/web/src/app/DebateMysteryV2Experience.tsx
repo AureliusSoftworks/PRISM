@@ -87,10 +87,10 @@ import { teardownBottishVoiceImmediately } from "./bottishVoice";
 import { cancelWhodunnitDialogueAudioImmediately } from "./debateMysteryDialogueAudio";
 import { mysteryMapOccupantPosition } from "./debateMysteryRoomWalk";
 import {
-  DEBATE_MYSTERY_V2_MOSAIC_LENS_COLUMNS,
-  DEBATE_MYSTERY_V2_MOSAIC_LENS_ROWS,
+  DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS,
+  DEBATE_MYSTERY_V2_EXAMINE_GRID_ROWS,
   debateMysteryV2ExaminationCompletesRoom,
-  debateMysteryV2LensMosaicCellIndexes,
+  debateMysteryV2ExamineGridCellIndexes,
   debateMysteryV2HotspotFocusPoint,
   debateMysteryV2LensClickTarget,
   debateMysteryV2RoomComplete,
@@ -168,7 +168,7 @@ import {
 } from "./debateMysteryV2ForgeProgress";
 import { debateMysteryForgeVisualState } from "./debateMysteryV2ForgeVisuals";
 import {
-  readWhodunnitRoomUpgradeEnabled,
+  readEncryptedWhodunnitRoomUpgradeEnabled,
   whodunnitBundledRoomArtPathForRoom,
   whodunnitDiscoveredMansionRoomArtV1,
   whodunnitIllustratedRoomSubjectId,
@@ -177,7 +177,7 @@ import {
   whodunnitRoomArtStyleForUpgrade,
   whodunnitSealedRoomArtUrl,
   whodunnitSavedRoomArtUrl,
-  writeWhodunnitRoomUpgradeEnabled,
+  writeEncryptedWhodunnitRoomUpgradeEnabled,
   type WhodunnitInvestigationArtStyle,
 } from "./debateMysteryInvestigationArt";
 import { DebateMysteryRoomCinematographyLayer } from "./debateMysteryRoomCinematographyLayer";
@@ -207,6 +207,7 @@ function WhodunnitChromeErrorNotice(props: {
 }
 
 interface V2SharedProps {
+  ownerId: string;
   bots: MysteryBotSummary[];
   playerName: string;
   playerColor?: string | null;
@@ -1054,7 +1055,7 @@ export function DebateMysteryV2CompilationResume(
 
   return (
     <main className={styles.forge} data-theme={props.theme} data-tutorial-target="mystery-v2-case-forge">
-      <button type="button" className={styles.archiveButton} onClick={props.onExit}>← Continue in background</button>
+      <button type="button" className={styles.archiveButton} data-session-local-back="true" onClick={props.onExit}>← Continue in background</button>
       <section
         className={styles.forgeCard}
         data-exterior-hero="true"
@@ -1193,7 +1194,7 @@ export function DebateMysteryV2CompilationResume(
                     ? "Copy failed — try again"
                     : "Copy error details"}
             </button>
-            <button type="button" onClick={props.onExit}>Return to setup</button>
+            <button type="button" data-session-local-back="true" onClick={props.onExit}>Return to setup</button>
           </div>
         ) : null}
         {needsAttention && errorDetailsCopyState !== "idle" ? (
@@ -1330,7 +1331,7 @@ export function DebateMysteryV2ProductionReadiness(
 
   return (
     <main className={styles.forge} data-theme={props.theme} data-tutorial-target="mystery-v2-production-readiness">
-      <button type="button" className={styles.archiveButton} onClick={props.onExit}>← Return to Production</button>
+      <button type="button" className={styles.archiveButton} data-session-local-back="true" onClick={props.onExit}>← Return to Production</button>
       <section className={`${styles.forgeCard} ${styles.productionReadinessCard}`} aria-live="polite">
         <div className={styles.forgePrism} aria-hidden="true"><i /><i /><i /></div>
         <p className={styles.eyebrow}>Production Readiness</p>
@@ -1361,7 +1362,7 @@ export function DebateMysteryV2ProductionReadiness(
         <div className={styles.forgeActions}>
           <button type="button" disabled={busy || busyCategory !== null} onClick={() => void refresh()}>Refresh counts</button>
           <button type="button" disabled={busy || busyCategory !== null} onClick={() => void continueWithFallbacks()}>Continue with fallbacks</button>
-          <button type="button" disabled={busy} onClick={props.onExit}>Return to Production</button>
+          <button type="button" data-session-local-back="true" disabled={busy} onClick={props.onExit}>Return to Production</button>
         </div>
         <small>Your acknowledgment is saved with the case and appears in Archive. Retrying here changes presentation only.</small>
         {error ? <p className={styles.error}>{error}</p> : null}
@@ -1410,7 +1411,7 @@ export function DebateMysteryV2Readiness(
 
   return (
     <main className={styles.forge} data-theme={props.theme} data-tutorial-target="mystery-v2-readiness">
-      <button type="button" className={styles.archiveButton} onClick={props.onExit}>← Archive</button>
+      <button type="button" className={styles.archiveButton} data-session-local-back="true" onClick={props.onExit}>← Archive</button>
       <section className={styles.forgeCard} aria-live="polite">
         <div className={styles.forgePrism} aria-hidden="true"><i /><i /><i /></div>
         <p className={styles.eyebrow}>Local case check</p>
@@ -1423,7 +1424,7 @@ export function DebateMysteryV2Readiness(
         {state.readiness.status === "failed" || error ? (
           <div className={styles.forgeActions}>
             <button type="button" disabled={busy} onClick={() => setRetryNonce((value) => value + 1)}>Retry local check</button>
-            <button type="button" onClick={props.onExit}>Return to Archive</button>
+            <button type="button" data-session-local-back="true" onClick={props.onExit}>Return to Archive</button>
           </div>
         ) : <small>{busy ? "Checking authored dialogue and local clips…" : "Starting local check…"}</small>}
         {state.localAudioFailure ? <p className={styles.error}>{state.localAudioFailure}</p> : null}
@@ -1537,18 +1538,29 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   }>({ bot: false, key: null });
   const dialogueGestureAdvanceRef = useRef<string | null>(null);
   useEffect(() => {
-    setRoomUpgradeEnabled(readWhodunnitRoomUpgradeEnabled(
-      window.localStorage,
-      props.session.id,
-      state.config.assetSynthesis.illustratedRooms,
-    ));
+    let disposed = false;
+    void readEncryptedWhodunnitRoomUpgradeEnabled({
+      ownerId: props.ownerId,
+      scopeId: props.session.id,
+      legacyStorage: window.localStorage,
+      initialEnabled: state.config.assetSynthesis.illustratedRooms,
+    }).then((enabled) => {
+      if (!disposed) setRoomUpgradeEnabled(enabled);
+    });
     setFailedUpgradeRoomIds(new Set());
     setLoadedUpgradeRoomIds(new Set());
-  }, [props.session.id, state.config.assetSynthesis.illustratedRooms]);
+    return () => {
+      disposed = true;
+    };
+  }, [props.ownerId, props.session.id, state.config.assetSynthesis.illustratedRooms]);
   const selectRoomUpgradeEnabled = useCallback((enabled: boolean): void => {
     setRoomUpgradeEnabled(enabled);
-    writeWhodunnitRoomUpgradeEnabled(window.localStorage, enabled, props.session.id);
-  }, [props.session.id]);
+    void writeEncryptedWhodunnitRoomUpgradeEnabled({
+      ownerId: props.ownerId,
+      scopeId: props.session.id,
+      enabled,
+    });
+  }, [props.ownerId, props.session.id]);
   const playControlSfx = useCallback((cue: DebateMysterySfxCue): void => {
     void playDebateMysterySfx({
       cue,
@@ -3660,13 +3672,12 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       !caseFileOpen &&
       !theoryOpen,
   );
-  const mosaicIlluminatedCells = lensActive &&
-      currentRoomArtStyle === "mosaic" && currentRoom
-    ? new Set(debateMysteryV2LensMosaicCellIndexes(investigationLens, currentRoom.hotspots))
+  const examinationIlluminatedCells = lensActive && currentRoom
+    ? new Set(debateMysteryV2ExamineGridCellIndexes(investigationLens, currentRoom.hotspots))
     : new Set<number>();
-  const mosaicLensGridStyle = {
-    "--mosaic-lens-cell-width": `${100 / DEBATE_MYSTERY_V2_MOSAIC_LENS_COLUMNS}%`,
-    "--mosaic-lens-cell-height": `${100 / DEBATE_MYSTERY_V2_MOSAIC_LENS_ROWS}%`,
+  const examinationGridStyle = {
+    "--examine-grid-cell-width": `${100 / DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS}%`,
+    "--examine-grid-cell-height": `${100 / DEBATE_MYSTERY_V2_EXAMINE_GRID_ROWS}%`,
   } as CSSProperties;
   const handleCurrentRoomArtLoadError = (): void => {
     if (!currentRoom || !currentRoomHasIllustratedUpgrade) return;
@@ -3881,7 +3892,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         />
         {!firstPersonExterior ? (
           <>
-            <button type="button" className={styles.archiveButton} disabled={busy} onClick={props.onExit}>← Archive</button>
+            <button type="button" className={styles.archiveButton} data-session-local-back="true" disabled={busy} onClick={props.onExit}>← Archive</button>
             <div
               className={styles.titleCardContent}
               data-door-threshold={mansionDoorEntry ? "true" : undefined}
@@ -4072,7 +4083,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     return (
       <main className={styles.verdict} data-theme={props.theme}>
         {callout ? <div key={callout.id} className={styles.callout} style={calloutStyle} role="status" aria-live="assertive"><span>{CALLOUT_COPY[callout.callout]}</span></div> : null}
-        <button type="button" className={styles.archiveButton} onClick={props.onExit}>← Archive</button>
+        <button type="button" className={styles.archiveButton} data-session-local-back="true" onClick={props.onExit}>← Archive</button>
         <p className={styles.eyebrow}>The Court finds · {state.caseCharge?.title ?? "Filed charge"}</p>
         <h1 data-result={verdictIsMixed ? "mixed" : state.verdict.legalResult}>{verdictIsMixed ? "MIXED VERDICT" : state.verdict.legalResult === "guilty" ? "GUILTY" : "NOT GUILTY"}</h1>
         {defendantVerdicts.length ? (
@@ -4129,7 +4140,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                   ? "Copy failed — try again"
                   : "Copy verbose transcript"}
           </button>
-          <button type="button" onClick={props.onExit}>Return to Archive</button>
+          <button type="button" data-session-local-back="true" onClick={props.onExit}>Return to Archive</button>
         </div>
         {error ? <p className={styles.error}>{error}</p> : null}
       </main>
@@ -4153,7 +4164,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         {identityPresentationBlackout}
         {callout ? <div key={callout.id} className={styles.callout} style={calloutStyle} role="status" aria-live="assertive"><span>{CALLOUT_COPY[callout.callout]}</span></div> : null}
         <header className={styles.courtHeader}>
-          <button type="button" onClick={props.onExit}>← Archive</button>
+          <button type="button" data-session-local-back="true" onClick={props.onExit}>← Archive</button>
           <div><p className={styles.eyebrow}>{state.caseTitle}</p><strong>{spectator ? `Gallery · ${prosecutorBot?.name ?? "Prosecutor"}` : `${prosecutorBot?.name ?? "Prosecutor"} · Cross-Examination`}</strong></div>
           <button type="button" onClick={() => { setCaseFileOpen(true); setCaseFileUpdate(null); }} data-tutorial-target="mystery-v2-case-file">Case File <span>{caseFileEntryCount}</span></button>
         </header>
@@ -4334,7 +4345,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       />
       {identityPresentationBlackout}
       {!roomIntroductionActive ? <header className={styles.investigationHeader}>
-        <button type="button" disabled={busy} onClick={props.onExit}>← Archive</button>
+        <button type="button" data-session-local-back="true" disabled={busy} onClick={props.onExit}>← Archive</button>
         <div><p className={styles.eyebrow}>{state.caseTitle}</p><strong>{spectatorTheory ? "Prosecutor Findings" : "Investigation"}</strong></div>
         <div className={styles.investigationHeaderActions}>
           <div className={styles.roomArtStyleToggle} role="group" aria-label="Upgraded room art" data-tutorial-target="mystery-v2-room-art-upgrade">
@@ -4698,17 +4709,17 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
             {command === "examine" && !roomComplete ? <div className={styles.hotspots} aria-label="Examination points">{currentRoomUnexaminedHotspots.map((hotspot) => <button key={hotspot.id} type="button" aria-label={`Examine ${hotspot.label}`} disabled={!lensActive} data-examining={examiningHotspotId === hotspot.id ? "true" : undefined} style={hotspotSpotStyle(hotspot.polygon)} onFocus={() => { const point = debateMysteryV2HotspotFocusPoint(hotspot.polygon); setInvestigationLens(resolveDebateMysteryV2Lens(point.x, point.y, currentRoom.hotspots)); }} onClick={(event) => { if (event.detail === 0) { event.stopPropagation(); const hotspotId = debateMysteryV2LensClickTarget(investigationLens); if (hotspotId) void examineHotspot(hotspotId); } }} />)}</div> : null}
           </div>
           <SceneMediaVignette theme={props.theme} style={{ "--scene-vignette-z": 2 } as CSSProperties} />
-          {command === "examine" && !roomComplete && lensActive && currentRoomArtStyle === "mosaic" ? <div className={styles.mosaicLensGrid} style={mosaicLensGridStyle} aria-hidden="true">{[...mosaicIlluminatedCells].map((index) => {
-            const column = index % DEBATE_MYSTERY_V2_MOSAIC_LENS_COLUMNS;
-            const row = Math.floor(index / DEBATE_MYSTERY_V2_MOSAIC_LENS_COLUMNS);
+          {command === "examine" && !roomComplete ? <div className={styles.examinationGrid} data-art-style={currentRoomArtStyle} style={examinationGridStyle} aria-hidden="true">{[...examinationIlluminatedCells].map((index) => {
+            const column = index % DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS;
+            const row = Math.floor(index / DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS);
             return <i key={index} style={{
-              left: `${(column / DEBATE_MYSTERY_V2_MOSAIC_LENS_COLUMNS) * 100}%`,
-              top: `${(row / DEBATE_MYSTERY_V2_MOSAIC_LENS_ROWS) * 100}%`,
-              width: `${100 / DEBATE_MYSTERY_V2_MOSAIC_LENS_COLUMNS}%`,
-              height: `${100 / DEBATE_MYSTERY_V2_MOSAIC_LENS_ROWS}%`,
+              left: `${(column / DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS) * 100}%`,
+              top: `${(row / DEBATE_MYSTERY_V2_EXAMINE_GRID_ROWS) * 100}%`,
+              width: `${100 / DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS}%`,
+              height: `${100 / DEBATE_MYSTERY_V2_EXAMINE_GRID_ROWS}%`,
             }} />;
           })}</div> : null}
-          {command === "examine" && !roomComplete ? <i className={styles.investigationLens} aria-hidden="true" data-visible={lensActive ? "true" : undefined} data-targeted={targetedHotspotId ? "true" : undefined} data-art-style={currentRoomArtStyle} style={{ left: `${investigationLens.x}%`, top: `${investigationLens.y}%`, "--lens-proximity": investigationLens.proximity } as CSSProperties} /> : null}
+          {command === "examine" && !roomComplete ? <i className={styles.investigationLens} aria-hidden="true" data-visible={lensActive ? "true" : undefined} data-targeted={targetedHotspotId ? "true" : undefined} style={{ left: `${investigationLens.x}%`, top: `${investigationLens.y}%`, "--lens-proximity": investigationLens.proximity } as CSSProperties} /> : null}
           {roomIntroductionPhase !== "casekeeper" ? <div className={styles.roomShade} /> : null}
           {!roomIntroductionActive ? <div className={styles.roomTitle}><small>{venueTierLabel(currentRoom.floor)}</small><h1>{currentRoom.name}</h1>{currentRoomMosaicAssetUrl && currentRoom.sealedAsset && currentRoomAssetKey ? <button type="button" className={styles.saveSealedAssetButton} disabled={sealedAssetSaveState[currentRoomAssetKey] === "saving" || sealedAssetSaveState[currentRoomAssetKey] === "saved"} onClick={(event) => { event.stopPropagation(); void saveSealedAsset(currentRoom.sealedAsset!, currentRoom.id, `${currentRoom.name} · Whodunnit room`); }}>{sealedAssetSaveState[currentRoomAssetKey] === "saving" ? "Saving…" : sealedAssetSaveState[currentRoomAssetKey] === "saved" ? "Saved to Images" : sealedAssetSaveState[currentRoomAssetKey] === "failed" ? "Retry save" : "Save room image"}</button> : null}</div> : null}
           {roomActorVisible && currentBot ? <div className={styles.roomActor} data-art-style={currentRoomArtStyle} data-interrogation-phase={interrogationPhase ?? undefined} style={{ "--actor-color": currentBot.color ?? "#a98cff" } as CSSProperties}><div className={styles.roomActorDrift} style={mysteryRoomActorDriftStyle(`${props.session.id}:${currentBot.id}:suspect`)}>{props.renderMysteryBotAvatar(currentBot, investigationAvatarPresentation, { demeanor: "suspect", talking: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId, speechTiming: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId ? speechTiming : null, blinkEnabled: true, facing: "left", speechInkVisible: roomSpeechInkVisible })}<strong>{currentBot.name}</strong>{roomSuspectStageActionText && roomActionPresentation ? <SignalVoiceActionText key={`suspect:${roomDisplayedDialogue?.nodeId ?? ""}:${roomDisplayedDialogue?.occurredAt ?? ""}`} {...roomActionPresentation} accent={currentBot.color} /> : null}</div></div> : null}

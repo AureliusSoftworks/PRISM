@@ -215,7 +215,7 @@ describe("Debate Whodunnit experience", () => {
     assert.match(css, /border-radius: 50%/u);
     assert.match(css, /--lens-proximity/u);
     assert.match(source, /data-targeted=\{lens\.proximity > 0 && lens\.regionId/u);
-    assert.match(css, /\.investigationLens\[data-targeted="true"\]::after[\s\S]*prismGlintSweep/u);
+    assert.doesNotMatch(css, /\.investigationLens::after|prismGlintSweep/u);
     assert.match(css, /\.hotspot[\s\S]*background: transparent/u);
     assert.doesNotMatch(css, /sparkle/iu);
     assert.match(css, /\.hotspot:focus-visible/u);

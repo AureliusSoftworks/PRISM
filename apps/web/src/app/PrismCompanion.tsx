@@ -118,6 +118,10 @@ import {
 } from "./prismSoftSynthesisUi.ts";
 import { publishPrismCompanionVisualSnapshot } from "./prismCompanionVisualSnapshot";
 import {
+  readOrMigrateBrowserOwnerJsonV1,
+  writeBrowserOwnerJsonV1,
+} from "./browserOwnerState";
+import {
   usePrismCompanionViewRequest,
 } from "./prismCompanionViews.ts";
 import {
@@ -460,36 +464,6 @@ function prismConversationReplyProvider(
     : "local";
 }
 
-function readPosition(accountKey: string): PrismCompanionPosition {
-  if (typeof window === "undefined") return { x: 0.92, y: 0.84 };
-  try {
-    const value = JSON.parse(
-      window.localStorage.getItem(
-        prismCompanionPositionStorageKey(accountKey),
-      ) ?? "null",
-    ) as Partial<PrismCompanionPosition> | null;
-    if (typeof value?.x === "number" && typeof value.y === "number") {
-      return clampPrismCompanionPosition({ x: value.x, y: value.y });
-    }
-  } catch {
-    // Device-local placement is disposable.
-  }
-  return { x: 0.92, y: 0.84 };
-}
-
-function readSpeechEnabled(accountKey: string): boolean {
-  if (typeof window === "undefined") return true;
-  try {
-    return parsePrismCompanionSpeechEnabled(
-      window.localStorage.getItem(
-        prismCompanionSpeechStorageKey(accountKey),
-      ),
-    );
-  } catch {
-    return true;
-  }
-}
-
 async function writePrismCompanionClipboard(text: string): Promise<void> {
   if (navigator.clipboard && window.isSecureContext) {
     try {
@@ -654,18 +628,17 @@ export default function PrismCompanion({
   const [actions, setActions] = useState<PrismCompanionActionIntent[]>([]);
   const [cards, setCards] = useState<PrismCompanionCardV1[]>([]);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
-  const [speechEnabled, setSpeechEnabled] = useState(() =>
-    readSpeechEnabled(accountKey),
-  );
+  const [speechEnabled, setSpeechEnabled] = useState(true);
   const [speechReveal, setSpeechReveal] =
     useState<PrismCompanionSpeechReveal | null>(null);
   const [dragging, setDragging] = useState(false);
   const [inertial, setInertial] = useState(false);
   const [idleDimmed, setIdleDimmed] = useState(false);
   const [idleHidden, setIdleHidden] = useState(false);
-  const [position, setPosition] = useState<PrismCompanionPosition>(() =>
-    readPosition(accountKey),
-  );
+  const [position, setPosition] = useState<PrismCompanionPosition>({
+    x: 0.92,
+    y: 0.84,
+  });
   const [chatHomeDockPosition, setChatHomeDockPosition] =
     useState<PrismCompanionPosition | null>(null);
   const [chatHomeDockReturning, setChatHomeDockReturning] = useState(false);
@@ -1030,14 +1003,11 @@ export default function PrismCompanion({
 
   const persistPosition = useCallback(
     (next: PrismCompanionPosition): void => {
-      try {
-        window.localStorage.setItem(
-          prismCompanionPositionStorageKey(accountKey),
-          JSON.stringify(next),
-        );
-      } catch {
-        // Device-local placement is disposable.
-      }
+      void writeBrowserOwnerJsonV1({
+        ownerId: accountKey,
+        logicalKey: "prism-companion-position",
+        value: next,
+      });
     },
     [accountKey],
   );
@@ -1582,10 +1552,6 @@ export default function PrismCompanion({
   }, [persistPosition, resetPrismWield]);
 
   useEffect(() => {
-    setSpeechEnabled(readSpeechEnabled(accountKey));
-  }, [accountKey]);
-
-  useEffect(() => {
     setAppNavbarCompanionOpen(open);
     return () => setAppNavbarCompanionOpen(false);
   }, [open]);
@@ -1677,37 +1643,27 @@ export default function PrismCompanion({
 
   const persistPrivateRecovery = useCallback(
     (next: readonly PrismCompanionMessage[]): PrismCompanionMessage[] => {
-      try {
-        window.sessionStorage.setItem(
-          privateRecoveryKey,
-          JSON.stringify(retainPrismCompanionRecovery(next)),
-        );
-      } catch {
-        // Private chat remains usable when session storage is unavailable.
-      }
+      void writeBrowserOwnerJsonV1({
+        ownerId: accountKey,
+        logicalKey: "prism-companion-private-recovery",
+        value: retainPrismCompanionRecovery(next),
+      });
       return [...next];
     },
-    [privateRecoveryKey],
+    [accountKey],
   );
 
   const persistSessionRecord = useCallback(
     (next: PrismCompanionSessionRecord | null): void => {
       sessionRecordRef.current = next;
       setSessionRecord(next);
-      try {
-        if (next) {
-          window.sessionStorage.setItem(
-            sessionStorageKey,
-            JSON.stringify(next),
-          );
-        } else {
-          window.sessionStorage.removeItem(sessionStorageKey);
-        }
-      } catch {
-        // The saved conversation remains canonical even without a tab hint.
-      }
+      void writeBrowserOwnerJsonV1({
+        ownerId: accountKey,
+        logicalKey: "prism-companion-session",
+        value: next,
+      });
     },
-    [sessionStorageKey],
+    [accountKey],
   );
 
   const notifyPersistentConversationChange = useCallback(
@@ -1867,27 +1823,16 @@ export default function PrismCompanion({
     conversationRequestRef.current?.abort();
     conversationRequestRef.current = null;
     sessionOpenPromiseRef.current = null;
-    let nextSession: PrismCompanionSessionRecord | null = null;
-    let nextPrivateMessages: PrismCompanionMessage[] = [];
-    try {
-      nextSession = parsePrismCompanionSessionRecord(
-        window.sessionStorage.getItem(sessionStorageKey),
-      );
-      nextPrivateMessages = parsePrismCompanionRecovery(
-        window.sessionStorage.getItem(privateRecoveryKey),
-      );
-    } catch {
-      // Start with clean tab-local state when storage is unavailable.
-    }
-    sessionRecordRef.current = nextSession;
-    setSessionRecord(nextSession);
+    let disposed = false;
+    sessionRecordRef.current = null;
+    setSessionRecord(null);
     savedConversationRef.current = null;
     setSavedConversation(null);
     setSavedMessages([]);
     privateConversationRef.current = null;
     privateConversationIdRef.current = null;
     setPrivateConversation(null);
-    setPrivateMessages(nextPrivateMessages);
+    setPrivateMessages([]);
     setPrivateMode(false);
     setConversationLoading(false);
     setActions([]);
@@ -1895,6 +1840,62 @@ export default function PrismCompanion({
     contextTokenIdsRef.current = [];
     setDraft("");
     setOpen(false);
+    void Promise.all([
+      readOrMigrateBrowserOwnerJsonV1<PrismCompanionSessionRecord>({
+        ownerId: accountKey,
+        logicalKey: "prism-companion-session",
+        legacyStorage: window.sessionStorage,
+        legacyKeys: [sessionStorageKey],
+      }),
+      readOrMigrateBrowserOwnerJsonV1<PrismCompanionMessage[]>({
+        ownerId: accountKey,
+        logicalKey: "prism-companion-private-recovery",
+        legacyStorage: window.sessionStorage,
+        legacyKeys: [privateRecoveryKey],
+      }),
+      readOrMigrateBrowserOwnerJsonV1<PrismCompanionPosition>({
+        ownerId: accountKey,
+        logicalKey: "prism-companion-position",
+        legacyStorage: window.localStorage,
+        legacyKeys: [prismCompanionPositionStorageKey(accountKey)],
+      }),
+      readOrMigrateBrowserOwnerJsonV1<boolean | string>({
+        ownerId: accountKey,
+        logicalKey: "prism-companion-speech",
+        legacyStorage: window.localStorage,
+        legacyKeys: [prismCompanionSpeechStorageKey(accountKey)],
+      }),
+    ]).then(([storedSession, storedRecovery, storedPosition, storedSpeech]) => {
+      if (disposed) return;
+      const nextSession = parsePrismCompanionSessionRecord(
+        storedSession ? JSON.stringify(storedSession) : null,
+      );
+      const nextPrivateMessages = parsePrismCompanionRecovery(
+        storedRecovery ? JSON.stringify(storedRecovery) : null,
+      );
+      sessionRecordRef.current = nextSession;
+      setSessionRecord(nextSession);
+      setPrivateMessages(nextPrivateMessages);
+      if (
+        storedPosition &&
+        typeof storedPosition.x === "number" &&
+        typeof storedPosition.y === "number"
+      ) {
+        setPosition(clampPrismCompanionPosition(storedPosition));
+      } else {
+        setPosition({ x: 0.92, y: 0.84 });
+      }
+      setSpeechEnabled(
+        typeof storedSpeech === "boolean"
+          ? storedSpeech
+          : parsePrismCompanionSpeechEnabled(
+              typeof storedSpeech === "string" ? storedSpeech : null,
+            ),
+      );
+    });
+    return () => {
+      disposed = true;
+    };
   }, [
     accountKey,
     cancelSpeech,
@@ -3320,14 +3321,11 @@ export default function PrismCompanion({
   const setSpeechPreference = useCallback(
     (enabled: boolean): void => {
       setSpeechEnabled(enabled);
-      try {
-        window.localStorage.setItem(
-          prismCompanionSpeechStorageKey(accountKey),
-          String(enabled),
-        );
-      } catch {
-        // Device-local voice preference is disposable.
-      }
+      void writeBrowserOwnerJsonV1({
+        ownerId: accountKey,
+        logicalKey: "prism-companion-speech",
+        value: enabled,
+      });
       if (!enabled) cancelSpeech(true);
     },
     [accountKey, cancelSpeech],

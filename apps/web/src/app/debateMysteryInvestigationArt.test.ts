@@ -6,6 +6,7 @@ import {
   DEFAULT_WHODUNNIT_ROOM_UPGRADE_ENABLED,
   WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION,
   WHODUNNIT_ROOM_UPGRADE_STORAGE_KEY,
+  readEncryptedWhodunnitRoomUpgradeEnabled,
   readWhodunnitRoomUpgradeEnabled,
   whodunnitBundledRoomArtPath,
   whodunnitBundledRoomArtPathForRoom,
@@ -16,6 +17,7 @@ import {
   whodunnitSealedRoomArtUrl,
   whodunnitSavedRoomArtUrl,
   writeWhodunnitRoomUpgradeEnabled,
+  writeEncryptedWhodunnitRoomUpgradeEnabled,
   whodunnitDiscoveredMansionRoomArtV1,
 } from "./debateMysteryInvestigationArt.ts";
 
@@ -55,6 +57,44 @@ describe("Whodunnit room-art upgrade state", () => {
     assert.equal(readWhodunnitRoomUpgradeEnabled(storage, "case-1", true), false);
     assert.equal(readWhodunnitRoomUpgradeEnabled(storage, "case-2", false), false);
     assert.equal(readWhodunnitRoomUpgradeEnabled(storage, "legacy-case", false), true);
+  });
+
+  it("encrypts the live preference per account and migrates owner-tagged plaintext once", async () => {
+    const values = new Map<string, string>([
+      [`${WHODUNNIT_ROOM_UPGRADE_STORAGE_KEY}:case-a`, "on"],
+    ]);
+    const legacyStorage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      removeItem: (key: string) => void values.delete(key),
+    };
+    assert.equal(
+      await readEncryptedWhodunnitRoomUpgradeEnabled({
+        ownerId: "room-owner-a",
+        scopeId: "case-a",
+        legacyStorage,
+      }),
+      true,
+    );
+    assert.equal(values.size, 0);
+    assert.equal(
+      await readEncryptedWhodunnitRoomUpgradeEnabled({
+        ownerId: "room-owner-b",
+        scopeId: "case-a",
+      }),
+      false,
+    );
+    await writeEncryptedWhodunnitRoomUpgradeEnabled({
+      ownerId: "room-owner-b",
+      scopeId: "case-a",
+      enabled: false,
+    });
+    assert.equal(
+      await readEncryptedWhodunnitRoomUpgradeEnabled({
+        ownerId: "room-owner-a",
+        scopeId: "case-a",
+      }),
+      true,
+    );
   });
 
   it("resolves bundled, sealed, and avatar variants as one presentation contract", () => {
@@ -141,10 +181,10 @@ describe("Whodunnit room-art upgrade state", () => {
     const css = readFileSync(new URL("./debateMysteryV2.module.css", import.meta.url), "utf8");
     assert.match(experience, /data-tutorial-target="mystery-v2-room-art-upgrade"/u);
     assert.match(experience, /aria-label="Upgraded room art"/u);
-    assert.match(experience, /readWhodunnitRoomUpgradeEnabled\([\s\S]{0,140}window\.localStorage,[\s\S]{0,140}props\.session\.id,[\s\S]{0,140}state\.config\.assetSynthesis\.illustratedRooms/u);
-    assert.match(experience, /writeWhodunnitRoomUpgradeEnabled\(window\.localStorage, enabled, props\.session\.id\)/u);
-    assert.match(legacyExperience, /readWhodunnitRoomUpgradeEnabled\([\s\S]{0,140}window\.localStorage,[\s\S]{0,140}props\.session\.id/u);
-    assert.match(legacyExperience, /writeWhodunnitRoomUpgradeEnabled\(window\.localStorage, enabled, props\.session\.id\)/u);
+    assert.match(experience, /readEncryptedWhodunnitRoomUpgradeEnabled\(\{[\s\S]{0,260}ownerId: props\.ownerId,[\s\S]{0,180}scopeId: props\.session\.id/u);
+    assert.match(experience, /writeEncryptedWhodunnitRoomUpgradeEnabled\(\{[\s\S]{0,180}ownerId: props\.ownerId,[\s\S]{0,140}scopeId: props\.session\.id/u);
+    assert.match(legacyExperience, /readEncryptedWhodunnitRoomUpgradeEnabled\(\{[\s\S]{0,220}ownerId: props\.ownerId,[\s\S]{0,140}scopeId: props\.session\.id/u);
+    assert.match(legacyExperience, /writeEncryptedWhodunnitRoomUpgradeEnabled\(\{[\s\S]{0,180}ownerId: props\.ownerId,[\s\S]{0,140}scopeId: props\.session\.id/u);
     assert.doesNotMatch(experience, />Pixel Art<|>Realistic</u);
     assert.doesNotMatch(legacyExperience, />Pixel Art<|>Realistic</u);
     assert.match(experience, /whodunnitBundledRoomArtPathForRoom/u);

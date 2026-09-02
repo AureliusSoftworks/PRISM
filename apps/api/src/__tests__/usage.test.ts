@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDatabase } from "../db.ts";
 import {
+  developerTranscriptPayloadIsSealedV1,
+  openDeveloperTranscriptPayloadV1,
+} from "../developer-transcript-vault.ts";
+import {
   normalizePrismGenerationWorkContext,
   runWithPrismGenerationWorkContext,
 } from "../generation-work.ts";
@@ -123,6 +127,7 @@ function seedUsageFixtures(db: ReturnType<typeof createDatabase>): void {
 describe("usage accounting", () => {
   it("records ordered provider and tool diagnostics only for persisted sessions", () => {
     withUsageTestDb((db) => {
+      const userKey = Buffer.alloc(32, 0x31);
       runWithUsageSession(
         {
           db,
@@ -134,6 +139,7 @@ describe("usage accounting", () => {
           messageId: "msg-1",
           botId: "bot-1",
           requestId: "developer-request",
+          userKey,
         },
         () => {
           recordTextUsage({
@@ -180,7 +186,25 @@ describe("usage accounting", () => {
       assert.deepEqual(rows.map((row) => row.event_kind), ["llm", "tool"]);
       assert.equal(rows[0]?.provider, "openai");
       assert.equal(rows[0]?.model, "gpt-5");
-      assert.match(rows[0]?.payload_json ?? "", /"parsedOutput":"Hi"/u);
+      assert.equal(
+        developerTranscriptPayloadIsSealedV1(rows[0]?.payload_json ?? ""),
+        true,
+      );
+      const firstPayload = openDeveloperTranscriptPayloadV1({
+        userId: "user-1",
+        eventId: String(
+          (
+            db.prepare(
+              `SELECT id FROM developer_transcript_events
+                WHERE user_id = ? AND conversation_id = ?
+                ORDER BY request_sequence ASC LIMIT 1`,
+            ).get("user-1", "conv-1") as { id: string }
+          ).id,
+        ),
+        payloadJson: rows[0]?.payload_json ?? "",
+        userKey,
+      });
+      assert.match(firstPayload, /"parsedOutput":"Hi"/u);
       assert.equal(rows[1]?.purpose, "coffee_topic_selection");
 
       runWithUsageSession(
@@ -251,6 +275,7 @@ describe("usage accounting", () => {
 
   it("omits request-scoped surface context from durable developer transcripts", () => {
     withUsageTestDb((db) => {
+      const userKey = Buffer.alloc(32, 0x32);
       const surfaceContext = [
         "Request-scoped Prism companion surface context (not chat history or memory):",
         "Slate project: Never Persist This Surface Title (draft)",
@@ -264,6 +289,7 @@ describe("usage accounting", () => {
           surface: "zen",
           conversationId: "conv-1",
           requestId: "surface-context-request",
+          userKey,
         },
         () => {
           registerUsageDiagnosticRedaction(surfaceContext);
@@ -285,15 +311,22 @@ describe("usage accounting", () => {
 
       const row = db
         .prepare(
-          "SELECT payload_json FROM developer_transcript_events WHERE request_id = ?",
+          "SELECT id, payload_json FROM developer_transcript_events WHERE request_id = ?",
         )
-        .get("surface-context-request") as { payload_json: string };
-      assert.match(row.payload_json, /Request-scoped Prism surface context omitted/u);
-      assert.match(row.payload_json, /Before.*After/u);
-      assert.match(row.payload_json, /Visible reply/u);
+        .get("surface-context-request") as { id: string; payload_json: string };
       assert.doesNotMatch(row.payload_json, /Never Persist This Surface Title/u);
+      const payloadJson = openDeveloperTranscriptPayloadV1({
+        userId: "user-1",
+        eventId: row.id,
+        payloadJson: row.payload_json,
+        userKey,
+      });
+      assert.match(payloadJson, /Request-scoped Prism surface context omitted/u);
+      assert.match(payloadJson, /Before.*After/u);
+      assert.match(payloadJson, /Visible reply/u);
+      assert.doesNotMatch(payloadJson, /Never Persist This Surface Title/u);
       assert.doesNotMatch(
-        row.payload_json,
+        payloadJson,
         /Request-scoped Prism companion surface context/u,
       );
     });

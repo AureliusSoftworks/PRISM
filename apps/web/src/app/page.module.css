@@ -3156,6 +3156,19 @@
   height: auto;
 }
 
+.storyShell[data-session-active="true"] {
+  --app-shell-top-nav-height: 50px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.storyShell[data-session-active="true"] .storySidebar {
+  display: none;
+}
+
+.storyShell[data-session-active="true"] .storyMain {
+  grid-column: 1;
+}
+
 .storySidebar {
   grid-column: 1;
   grid-row: 2;
@@ -11121,6 +11134,22 @@
   grid-template-columns: 1fr;
 }
 
+.debateShell[data-session-active="true"] {
+  --app-shell-top-nav-height: 50px;
+}
+
+.debateShell[data-session-active="true"]
+  .debateScrollRegion
+  :global([data-live-session-model-chip="true"]) {
+  display: none;
+}
+
+.debateShell[data-session-active="true"]
+  :global([data-session-local-back="true"]) {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .debateMain {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -13767,6 +13796,86 @@
   );
   opacity: 0.44;
   pointer-events: none;
+}
+
+.liveSessionHeader {
+  min-height: 50px;
+  height: 50px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
+  padding-block: 7px;
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  backdrop-filter: blur(18px) saturate(1.08);
+}
+
+.liveSessionHeader[data-app-shell-header="true"] {
+  padding-block-start: calc(7px + env(safe-area-inset-top, 0px));
+}
+
+.liveSessionBackButton {
+  justify-self: start;
+  min-width: 0;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px;
+  border: 1px solid color-mix(in srgb, var(--fg) 16%, transparent);
+  border-radius: 9px;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  font: 700 0.76rem/1 var(--font-ui-sans), system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.liveSessionBackButton:hover:not(:disabled),
+.liveSessionBackButton:focus-visible {
+  border-color: color-mix(in srgb, var(--accent, #8d6dff) 48%, var(--line));
+  background: color-mix(in srgb, var(--accent, #8d6dff) 10%, transparent);
+}
+
+.liveSessionBackButton:disabled {
+  cursor: wait;
+  opacity: 0.46;
+}
+
+.liveSessionHeaderModelChip {
+  justify-self: center;
+  align-self: center;
+  max-width: min(42vw, 24rem);
+  color: var(--fg-muted);
+}
+
+.liveSessionThemeButton {
+  justify-self: end;
+  align-self: center;
+}
+
+@media (max-width: 560px) {
+  .liveSessionHeader {
+    gap: 8px;
+    padding-inline: 9px;
+  }
+
+  .liveSessionBackButton {
+    width: 34px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .liveSessionBackButton > span:last-child {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .liveSessionHeaderModelChip {
+    max-width: 58vw;
+  }
 }
 
 .chatHeaderComposeToolsRow {
@@ -70894,6 +71003,7 @@ a.settingsCreditItem:focus-visible {
 }
 
 .coffeeShell[data-session-active="true"] {
+  --app-shell-top-nav-height: 50px;
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -71435,7 +71545,7 @@ a.settingsCreditItem:focus-visible {
 
 .coffeeLiveSessionChrome {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px 12px;
   align-items: start;
   min-width: 0;
@@ -71451,12 +71561,6 @@ a.settingsCreditItem:focus-visible {
 
 .coffeeLiveSessionChromeSpacer {
   min-width: 0;
-}
-
-.coffeeLiveSessionChrome .coffeeExitSessionButton {
-  align-self: center;
-  justify-self: end;
-  flex-shrink: 0;
 }
 
 .coffeeSessionTopicFrame {
@@ -77423,6 +77527,25 @@ a.settingsCreditItem:focus-visible {
   [data-coffee-plate-emoji-part="eyes"]
   [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"] {
   --zen-live-bot-glyph-compositor-glow-filter: var(--crt-face-glow-filter);
+}
+
+/* Light Mode keeps the identity color in the glass, not in the authored eye
+   emission. The shared face filter already resolves to white here; composite
+   the completed eye mask with the same additive emission blend as authored Ink
+   so its pale halo remains visible through the lit glass. */
+.zenLiveBotPresencePlate[data-theme="light"][data-avatar-full-scale-identity="canonical"]
+  .zenLiveBotPresenceFaceGlyph[data-face-eye-character]
+  [data-coffee-plate-emoji-part="eyes"]
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"],
+.themeLight
+  .zenLiveBotPresencePlate[data-avatar-full-scale-identity="canonical"]
+  .zenLiveBotPresenceFaceGlyph[data-face-eye-character]
+  [data-coffee-plate-emoji-part="eyes"]
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"] {
+  --zen-live-bot-glyph-compositor-glow-filter: var(
+    --crt-face-glow-filter
+  );
+  mix-blend-mode: var(--bot-avatar-light-ink-glow-blend, plus-lighter);
 }
 
 .zenLiveBotPresencePlate[data-avatar-full-scale-identity="canonical"]

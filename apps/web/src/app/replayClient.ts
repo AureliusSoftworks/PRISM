@@ -54,24 +54,30 @@ async function replayJson<T>(path: string, init: RequestInit = {}): Promise<T> {
 const replayTakePromises = new Map<string, Promise<ReplayVoiceTakeRecordV1>>();
 
 export function captureReplayVoiceTake(args: {
+  ownerId: string;
   surface: "signal" | "coffee";
   sourceId: string;
   snapshot: ReplayVoiceTakeV1;
 }): Promise<ReplayVoiceTakeRecordV1> {
-  const key = `${args.surface}:${args.sourceId}:${args.snapshot.sourceKey}`;
+  const key = `${args.ownerId}:${args.surface}:${args.sourceId}:${args.snapshot.sourceKey}`;
   const existing = replayTakePromises.get(key);
   if (existing) return existing;
+  const requestBody = {
+    surface: args.surface,
+    sourceId: args.sourceId,
+    snapshot: args.snapshot,
+  };
   const pending = replayJson<{ ok: true; take: ReplayVoiceTakeRecordV1 }>(
     "/api/replays/takes",
     {
       method: "POST",
-      body: JSON.stringify(args),
+      body: JSON.stringify(requestBody),
     },
   ).then((result) => result.take);
   replayTakePromises.set(key, pending);
-  void pending.catch(() => {
+  void pending.finally(() => {
     if (replayTakePromises.get(key) === pending) replayTakePromises.delete(key);
-  });
+  }).catch(() => undefined);
   return pending;
 }
 
@@ -224,12 +230,14 @@ export async function finalizeReplayRecording(args: {
 }
 
 export async function saveFaithfulReplaySession(args: {
+  ownerId: string;
   surface: "signal" | "coffee";
   sourceId: string;
   manifest: ReplayManifestV2;
   capture: ReplayAudioMasterCaptureResult | null;
 }): Promise<ReplayRecordingV1> {
   await retainPendingFaithfulReplayCapture({
+    ownerId: args.ownerId,
     surface: args.surface,
     sourceId: args.sourceId,
     recordingId: null,
@@ -243,6 +251,7 @@ export async function saveFaithfulReplaySession(args: {
     sourceId: args.sourceId,
   });
   await retainPendingFaithfulReplayCapture({
+    ownerId: args.ownerId,
     surface: args.surface,
     sourceId: args.sourceId,
     recordingId: draft.id,
@@ -263,12 +272,18 @@ export async function saveFaithfulReplaySession(args: {
     recordingId: draft.id,
     manifest: args.manifest,
   });
-  await discardPendingFaithfulReplayCapture(args.surface, args.sourceId);
+  await discardPendingFaithfulReplayCapture(
+    args.ownerId,
+    args.surface,
+    args.sourceId,
+  );
   return recording;
 }
 
-export async function retryPendingFaithfulReplaySessions(): Promise<number> {
-  const pending = await pendingFaithfulReplayCaptures();
+export async function retryPendingFaithfulReplaySessions(
+  ownerId: string,
+): Promise<number> {
+  const pending = await pendingFaithfulReplayCaptures(ownerId);
   let completed = 0;
   for (const capture of pending) {
     try {
@@ -297,6 +312,7 @@ export async function retryPendingFaithfulReplaySessions(): Promise<number> {
         manifest: capture.manifest,
       });
       await discardPendingFaithfulReplayCapture(
+        ownerId,
         capture.surface,
         capture.sourceId,
       );

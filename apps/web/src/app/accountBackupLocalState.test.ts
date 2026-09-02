@@ -33,7 +33,7 @@ describe("account backup browser-local state", () => {
 
     assert.match(
       exportSource,
-      /loadAvatarDetailInkTemplates\(user\.id, window\.localStorage\)/u,
+      /await loadEncryptedAvatarDetailInkTemplates\(\s*user\.id,[\s\S]{0,100}window\.localStorage/u,
     );
     assert.match(exportSource, /\{ avatarInkTemplates \}/u);
   });
@@ -56,7 +56,10 @@ describe("account backup browser-local state", () => {
     assert.match(restoreSource, /setCommandCenterPreferredModel/u);
     assert.match(restoreSource, /setCommandCenterCommands/u);
     assert.match(restoreSource, /setCommandCenterWildcardDecks/u);
-    assert.match(restoreSource, /commandCenterStateStorageKey\(user\.id\)/u);
+    assert.match(
+      restoreSource,
+      /writeBrowserOwnerJsonV1\(\{\s*ownerId: user\.id,\s*logicalKey: "command-center-state"/u,
+    );
     assert.ok(
       importSource.indexOf("await refreshAll()") <
         importSource.indexOf("restoreAccountCommandCenter(backup.commandCenter)"),
@@ -94,7 +97,7 @@ describe("account backup browser-local state", () => {
     );
     assert.match(
       restoreSource,
-      /saveAvatarDetailInkTemplates\(\s*user\.id,\s*templates,\s*window\.localStorage/u,
+      /saveEncryptedAvatarDetailInkTemplates\(user\.id, templates\)/u,
     );
     assert.ok(
       importSource.indexOf("await refreshAll") <

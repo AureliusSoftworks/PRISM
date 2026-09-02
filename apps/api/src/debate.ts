@@ -1335,8 +1335,7 @@ async function generateJsonOnLane(
     } catch (error) {
       lastError = error;
       console.warn(
-        `[debate] generateJsonOnLane attempt ${attempt + 1}/2 failed (${lane.providerName}/${options.model ?? lane.model}): ${error instanceof Error ? error.message : String(error)}`,
-        `raw response: ${response.slice(0, 2_000)}`,
+        `[debate] structured generation attempt ${attempt + 1}/2 failed.`,
       );
       const wasParseFailure =
         error instanceof Error && error.message === "Model response was not JSON.";
@@ -7662,7 +7661,6 @@ async function generateSpeech(
       "speech",
     );
     endDebatePerfSpan(repairSpan, {
-      botId: snapshot.id,
       repaired: Boolean(repaired),
     });
     didCapabilityRepair = true;
@@ -7794,7 +7792,6 @@ async function generateSpeech(
           })
         : null;
   endDebatePerfSpan(speechSpan, {
-    botId: snapshot.id,
     silent: botPowerResponseIsSilentV1(named),
     repaired: didCapabilityRepair,
   });
@@ -15103,7 +15100,6 @@ export async function prepareDebateAdvance(
       ? await advanceTurnaboutStep(active, runtime)
       : await advanceStep(active, runtime);
   endDebatePerfSpan(stepSpan, {
-    stepKey: session.stepKey,
     eventCount: transitioned.events.length,
   });
   // Overlap atmospheric surprise + jury sidebar so the floor waits once.
@@ -15530,7 +15526,6 @@ export async function advanceDebateSession(
     );
     endDebatePerfSpan(commitSpan, { revision: committed.revision });
     endDebatePerfSpan(advanceSpan, {
-      stepKey: session.stepKey,
       eventCount: preparation.events.length,
       revision: committed.revision,
     });

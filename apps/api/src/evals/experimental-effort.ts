@@ -1584,7 +1584,7 @@ const directEntry = process.argv[1]
   : null;
 if (directEntry === import.meta.url) {
   main().catch((error) => {
-    console.error(error instanceof Error ? error.message : error);
+    console.error("Experimental Effort evaluation failed.");
     process.exitCode = 1;
   });
 }

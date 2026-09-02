@@ -501,11 +501,50 @@ describe("buildModelCatalog", () => {
       });
     }) as typeof fetch;
 
-    const first = await buildModelCatalog(undefined);
-    const second = await buildModelCatalog(undefined);
+    const first = await buildModelCatalog(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "owner-a",
+    );
+    const second = await buildModelCatalog(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "owner-a",
+    );
 
     assert.equal(tagsFetchCount, 1);
     assert.equal(second, first);
+  });
+
+  it("never shares a cached catalog object across owners", async () => {
+    let tagsFetchCount = 0;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      if (String(input).endsWith("/api/tags")) tagsFetchCount += 1;
+      return Response.json({ models: [{ name: "llama3.2" }] });
+    }) as typeof fetch;
+
+    const ownerA = await buildModelCatalog(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "owner-a",
+    );
+    const ownerB = await buildModelCatalog(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "owner-b",
+    );
+
+    assert.equal(tagsFetchCount, 2);
+    assert.notEqual(ownerA, ownerB);
+    assert.notEqual(ownerA.local, ownerB.local);
   });
 
   it("re-discovers models when explicitly refreshed", async () => {
@@ -519,8 +558,20 @@ describe("buildModelCatalog", () => {
       });
     }) as typeof fetch;
 
-    const first = await buildModelCatalog(undefined);
-    const refreshed = await refreshModelCatalog(undefined);
+    const first = await buildModelCatalog(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "owner-a",
+    );
+    const refreshed = await refreshModelCatalog(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "owner-a",
+    );
 
     assert.ok(first.local.some((model) => model.id === "model-1"));
     assert.ok(refreshed.local.some((model) => model.id === "model-2"));
@@ -1445,12 +1496,17 @@ describe("final local Ollama response fallback", () => {
 
   it("recovers an OpenAI failure with one primary-host llama3.2 response", async () => {
     const requests: Array<{ url: string; model: string }> = [];
-    console.error = () => {};
+    const diagnosticLines: string[] = [];
+    console.error = (...values: unknown[]) => {
+      diagnosticLines.push(values.map(String).join(" "));
+    };
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
       requests.push({ url: String(input), model: String(body.model) });
       if (String(input).includes("api.openai.com")) {
-        return new Response(JSON.stringify({ error: { message: "primary unavailable" } }), {
+        return new Response(JSON.stringify({
+          error: { message: "owner-a-provider-detail-canary" },
+        }), {
           status: 503,
           headers: { "content-type": "application/json" },
         });
@@ -1470,6 +1526,8 @@ describe("final local Ollama response fallback", () => {
     assert.deepEqual(requests.map((request) => request.model), ["gpt-4o-mini", "llama3.2"]);
     assert.match(requests[1]?.url ?? "", /\/api\/chat$/);
     assert.doesNotMatch(requests[1]?.url ?? "", /api\.openai\.com/);
+    assert.doesNotMatch(diagnosticLines.join("\n"), /owner-a-provider-detail-canary/u);
+    assert.doesNotMatch(diagnosticLines.join("\n"), /gpt-4o-mini/u);
   });
 
   it("preserves the primary error when the one llama3.2 recovery attempt also fails", async () => {
@@ -1596,6 +1654,8 @@ describe("system-owned local lanes", () => {
     assert.equal(requestedBody.model, "llama3.2");
     assert.equal(requestedBody.keep_alive, -1);
     assert.equal(requestedBody.think, false);
+    assert.equal("context" in requestedBody, false);
+    assert.equal("prompt" in requestedBody, false);
     assert.deepEqual(requestedBody.options, { temperature: 0.2, num_predict: 40 });
   });
 

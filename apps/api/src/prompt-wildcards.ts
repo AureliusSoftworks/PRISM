@@ -832,11 +832,8 @@ export async function resolvePromptWildcardsWithModel(args: {
       new Map([...scriptedValues, ...fallbackValues, ...values]),
       existingReplacements
     );
-  } catch (error) {
-    console.warn(
-      "[prompt-wildcards] filling prompt wildcards with local fallbacks:",
-      error instanceof Error ? error.message : error
-    );
+  } catch {
+    console.warn("[prompt-wildcards] using local wildcard fallbacks.");
     return applyPromptWildcardValues(
       prompt,
       fillMissingPromptWildcardValues(scriptedValues, modelOccurrences),

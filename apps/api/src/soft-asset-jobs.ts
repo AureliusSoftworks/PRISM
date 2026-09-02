@@ -219,8 +219,8 @@ export class SoftAssetJobManager {
       if (acquired && record.start.release) {
         try {
           await record.start.release();
-        } catch (error) {
-          console.error("[soft-asset-jobs] could not release image slot", error);
+        } catch {
+          console.error("[soft-asset-jobs] could not release image slot.");
         }
       }
     }

@@ -721,10 +721,7 @@ export async function runAssistantSentImageGeneration(args: {
                 return deniedResult();
               }
             } else {
-              console.warn(
-                "[assistant-sent-image] local repaired retry failed:",
-                retryError instanceof Error ? retryError.message : retryError
-              );
+              console.warn("[assistant-sent-image] local repaired retry failed.");
               return { status: "failed" };
             }
           }
@@ -750,10 +747,7 @@ export async function runAssistantSentImageGeneration(args: {
             }
           }
           if (!fallbackSucceeded) {
-            console.warn(
-              "[assistant-sent-image] local primary model failed:",
-              primaryError instanceof Error ? primaryError.message : primaryError
-            );
+            console.warn("[assistant-sent-image] local primary model failed.");
             return { status: "failed" };
           }
         }
@@ -844,12 +838,9 @@ export async function runAssistantSentImageGeneration(args: {
       });
       return successPayload(localFallbackPrompt, localOut.modelUsed);
     }
-  } catch (err) {
+  } catch {
     tryUnlinkGeneratedImageFile(localRelPath);
-    console.warn(
-      "[assistant-sent-image] generation failed:",
-      err instanceof Error ? err.message : err
-    );
+    console.warn("[assistant-sent-image] generation failed.");
     return { status: "failed" };
   }
 }

@@ -425,12 +425,11 @@ import {
   type DebateParticipationDifficulty,
 } from "./debateParticipationClient";
 import {
-  clearDebateExhaustedRecessRecoveryMarker,
+  DEBATE_EXHAUSTED_RECESS_RECOVERY_KEY,
   debateExhaustedRecessRecoveryMarker,
   debateParticipantRecoveryMarker,
   debateSessionAtFinalRecessCheckpoint,
   readDebateExhaustedRecessRecoveryMarker,
-  writeDebateExhaustedRecessRecoveryMarker,
 } from "./debateRecessRecovery";
 import { debateStudioExitIntent } from "./debateExitRecess";
 import {
@@ -463,11 +462,10 @@ import {
   debateUtterancePaceBoost,
   debateVisibleContentAtProgress,
   debateVisibleContentAtSpeechTime,
+  debateProceedingsCursorStorageKey,
+  debateWatchElapsedStorageKey,
   formatDebateElapsedDuration,
   formatDebateSpokenDuration,
-  readDebateWatchElapsedMs,
-  writeDebateProceedingsCursor,
-  writeDebateWatchElapsedMs,
 } from "./debatePresentation";
 import {
   DEBATE_INTRO_MIN_CLOSE_BEFORE_ADVANCE_MS,
@@ -581,7 +579,6 @@ import {
   updateDebateStageJuryPlacement,
   updateDebateStageVoiceLevel,
   updateDebateStageWhodunnitCourtPlacement,
-  writeDebateStageAlignment,
   type DebateStageAlignmentItem,
   type DebateStageAlignmentRole,
   type DebateStageAlignmentTarget,
@@ -597,11 +594,17 @@ import {
 } from "./debateStageAlignment";
 import {
   DEFAULT_DEBATE_LIVE_CAPTIONS_ENABLED,
+  DEBATE_LIVE_CAPTIONS_STORAGE_KEY,
+  DEBATE_LIVE_CAPTION_SIZE_STORAGE_KEY,
   readDebateLiveCaptionSize,
   readDebateLiveCaptionsEnabled,
-  writeDebateLiveCaptionSize,
-  writeDebateLiveCaptionsEnabled,
 } from "./debateLiveCaptionsPreference";
+import {
+  deleteBrowserOwnerJsonV1,
+  readBrowserOwnerJsonV1,
+  readOrMigrateBrowserOwnerJsonV1,
+  writeBrowserOwnerJsonV1,
+} from "./browserOwnerState";
 import {
   DEFAULT_LIVE_CAPTION_SIZE,
   liveCaptionSizeDetails,
@@ -866,6 +869,45 @@ interface DebateArchiveReturnReadiness {
   bufferingFailed: boolean;
 }
 
+const DEBATE_RECOVERY_BROWSER_LOGICAL_KEY =
+  "debate-exhausted-recess-recovery";
+
+async function readEncryptedDebateRecoveryMarker(ownerId: string) {
+  const stored = await readBrowserOwnerJsonV1<unknown>({
+    ownerId,
+    logicalKey: DEBATE_RECOVERY_BROWSER_LOGICAL_KEY,
+  });
+  return readDebateExhaustedRecessRecoveryMarker({
+    getItem: () => (stored === null ? null : JSON.stringify(stored)),
+  });
+}
+
+function writeEncryptedDebateRecoveryMarker(
+  ownerId: string,
+  session: DebateSessionV1 | null,
+): void {
+  const marker = debateParticipantRecoveryMarker(session);
+  if (!marker) {
+    void deleteBrowserOwnerJsonV1({
+      ownerId,
+      logicalKey: DEBATE_RECOVERY_BROWSER_LOGICAL_KEY,
+    });
+    return;
+  }
+  void writeBrowserOwnerJsonV1({
+    ownerId,
+    logicalKey: DEBATE_RECOVERY_BROWSER_LOGICAL_KEY,
+    value: marker,
+  });
+}
+
+function clearEncryptedDebateRecoveryMarker(ownerId: string): void {
+  void deleteBrowserOwnerJsonV1({
+    ownerId,
+    logicalKey: DEBATE_RECOVERY_BROWSER_LOGICAL_KEY,
+  });
+}
+
 export interface DebateExperienceProps {
   bots: DebateBotSummary[];
   botGroups?: readonly BotPickerGroup[];
@@ -950,6 +992,10 @@ export interface DebateExperienceProps {
   onLiveSessionActiveChange?: (
     active: boolean,
     sessionId: string | null,
+  ) => void;
+  /** Gives the shared minimal session bar the active surface's Back action. */
+  onLiveSessionBackHandlerChange?: (
+    handler: (() => void) | null,
   ) => void;
   /** Publishes the newest server-observed Auto completion to applet chrome. */
   onActualAutoRouteChange?: (route: ActualAppletRoute | null) => void;
@@ -5787,11 +5833,11 @@ export function DebateExperience(
   }, [activeSession, activeSession?.liveBake?.status]);
   useEffect(() => {
     if (!activeSession || typeof window === "undefined") return;
-    writeDebateExhaustedRecessRecoveryMarker(
-      window.localStorage,
+    writeEncryptedDebateRecoveryMarker(
+      props.storageScopeId,
       activeSession,
     );
-  }, [activeSession]);
+  }, [activeSession, props.storageScopeId]);
   const [liveReveal, setLiveRevealState] = useState<DebateLiveReveal | null>(
     null,
   );
@@ -5901,21 +5947,53 @@ export function DebateExperience(
         setTranscriptVisibleThroughSequence((current) => {
           const next =
             current === null || sequence > current ? sequence : current;
-          writeDebateProceedingsCursor(sessionId, next);
+          void writeBrowserOwnerJsonV1({
+            ownerId: props.storageScopeId,
+            logicalKey: `debate-proceedings-cursor:${sessionId}`,
+            value: next,
+          });
           return next;
         });
       }, DEBATE_PROCEEDINGS_STENOGRAPHER_DELAY_MS);
       proceedingsRevealTimersRef.current.push(timer);
     },
-    [],
+    [props.storageScopeId],
   );
+  useEffect(() => {
+    if (!activeSession || view !== "live") return;
+    const session = activeSession;
+    let disposed = false;
+    void readOrMigrateBrowserOwnerJsonV1<unknown>({
+      ownerId: props.storageScopeId,
+      logicalKey: `debate-proceedings-cursor:${session.id}`,
+      legacyStorage: window.sessionStorage,
+      legacyKeys: [debateProceedingsCursorStorageKey(session.id)],
+    }).then((stored) => {
+      if (disposed || activeSessionIdRef.current !== session.id) return;
+      const numeric = Number(stored);
+      const persistedCursor = Number.isFinite(numeric) ? numeric : null;
+      const safe = debateInitialProceedingsCursor(
+        session,
+        debateSpectatorAwaitingFirstWatch(session),
+        persistedCursor,
+      );
+      if (safe === null) return;
+      setTranscriptVisibleThroughSequence((current) =>
+        current === null ? safe : Math.max(current, safe),
+      );
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [activeSession?.id, props.storageScopeId, view]);
   const [watchElapsedAccumulatedMs, setWatchElapsedAccumulatedMs] = useState(0);
+  const [watchElapsedHydratedSessionId, setWatchElapsedHydratedSessionId] =
+    useState<string | null>(null);
   const [watchElapsedRunningSinceMs, setWatchElapsedRunningSinceMs] = useState<
     number | null
   >(null);
   const [watchElapsedRate, setWatchElapsedRate] = useState(1);
   const watchElapsedRateRef = useRef(1);
-  const watchElapsedSessionIdRef = useRef<string | null>(null);
   const visibleCaseBoard = useMemo(
     () =>
       activeSession
@@ -5999,17 +6077,38 @@ export function DebateExperience(
     );
   }, [activeSession, caseBoardRoundKey, roundSummaryCards]);
   useEffect(() => {
+    setWatchElapsedAccumulatedMs(0);
+    setWatchElapsedRunningSinceMs(null);
+    setWatchElapsedHydratedSessionId(null);
+    watchElapsedRateRef.current = 1;
+    setWatchElapsedRate(1);
+    if (!activeSession || view !== "live") return;
+    const sessionId = activeSession.id;
+    let disposed = false;
+    void readOrMigrateBrowserOwnerJsonV1<unknown>({
+      ownerId: props.storageScopeId,
+      logicalKey: `debate-watch-elapsed:${sessionId}`,
+      legacyStorage: window.sessionStorage,
+      legacyKeys: [debateWatchElapsedStorageKey(sessionId)],
+    }).then((stored) => {
+      if (disposed) return;
+      const numeric = Number(stored);
+      setWatchElapsedAccumulatedMs(
+        Number.isFinite(numeric) && numeric > 0 ? numeric : 0,
+      );
+      setWatchElapsedHydratedSessionId(sessionId);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [activeSession?.id, props.storageScopeId, view]);
+
+  useEffect(() => {
     if (!activeSession || view !== "live") {
       setWatchElapsedRunningSinceMs(null);
       return;
     }
-    if (watchElapsedSessionIdRef.current !== activeSession.id) {
-      watchElapsedSessionIdRef.current = activeSession.id;
-      setWatchElapsedAccumulatedMs(readDebateWatchElapsedMs(activeSession.id));
-      setWatchElapsedRunningSinceMs(null);
-      watchElapsedRateRef.current = 1;
-      setWatchElapsedRate(1);
-    }
+    if (watchElapsedHydratedSessionId !== activeSession.id) return;
     const awaitingFirstWatch = debateSpectatorAwaitingFirstWatch(activeSession);
     const shouldRun =
       !awaitingFirstWatch &&
@@ -6036,7 +6135,11 @@ export function DebateExperience(
               nowMs: now,
               rate: previousRate,
             });
-            writeDebateWatchElapsedMs(activeSession.id, next);
+            void writeBrowserOwnerJsonV1({
+              ownerId: props.storageScopeId,
+              logicalKey: `debate-watch-elapsed:${activeSession.id}`,
+              value: next,
+            });
             return next;
           });
           watchElapsedRateRef.current = nextRate;
@@ -6056,7 +6159,11 @@ export function DebateExperience(
           nowMs: Date.now(),
           rate: watchElapsedRateRef.current,
         });
-        writeDebateWatchElapsedMs(activeSession.id, next);
+        void writeBrowserOwnerJsonV1({
+          ownerId: props.storageScopeId,
+          logicalKey: `debate-watch-elapsed:${activeSession.id}`,
+          value: next,
+        });
         return next;
       });
       return null;
@@ -6070,7 +6177,9 @@ export function DebateExperience(
     activeSession?.playerRole,
     activeSession?.status,
     activeSession?.stepKey,
+    props.storageScopeId,
     view,
+    watchElapsedHydratedSessionId,
   ]);
   const [presenting, setPresenting] = useState(false);
   const [participantFloorBreakDeck, setParticipantFloorBreakDeck] =
@@ -6174,6 +6283,9 @@ export function DebateExperience(
   const exhaustedRecoveryAttemptedRef = useRef(false);
   const [, setExitLiveSessionBusy] = useState(false);
   const [leaveDebateArmed, setLeaveDebateArmed] = useState(false);
+  const liveSessionBackActionRef = useRef<() => void>(() => undefined);
+  const onLiveSessionBackHandlerChange =
+    props.onLiveSessionBackHandlerChange;
   const [leaveDebatePortalTarget, setLeaveDebatePortalTarget] =
     useState<HTMLElement | null>(null);
   const [judgeGavelCeremony, setJudgeGavelCeremony] =
@@ -6360,21 +6472,25 @@ export function DebateExperience(
   const toggleLiveCaptions = useCallback((): void => {
     setLiveCaptionsEnabled((current) => {
       const next = !current;
-      if (typeof window !== "undefined") {
-        writeDebateLiveCaptionsEnabled(window.localStorage, next);
-      }
+      void writeBrowserOwnerJsonV1({
+        ownerId: props.storageScopeId,
+        logicalKey: "debate-live-captions",
+        value: next,
+      });
       return next;
     });
-  }, []);
+  }, [props.storageScopeId]);
   const adjustLiveCaptionSize = useCallback((direction: -1 | 1): void => {
     setLiveCaptionSize((current) => {
       const next = stepLiveCaptionSize(current, direction);
-      if (typeof window !== "undefined") {
-        writeDebateLiveCaptionSize(window.localStorage, next);
-      }
+      void writeBrowserOwnerJsonV1({
+        ownerId: props.storageScopeId,
+        logicalKey: "debate-live-caption-size",
+        value: next,
+      });
       return next;
     });
-  }, []);
+  }, [props.storageScopeId]);
   const debateFloorMutationInFlightRef = useRef(false);
   const participantWindowExpiryKeysRef = useRef<ReadonlySet<string>>(
     new Set(),
@@ -7855,18 +7971,79 @@ export function DebateExperience(
   }, [props.audioEnabled, props.audioVolume, view]);
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const stored = readDebateStageAlignment(
-      window.localStorage,
-      props.storageScopeId,
-    );
-    setStageAlignment(stored);
-    setStageAlignmentDraft(copyDebateStageAlignment(stored));
+    let disposed = false;
+    void readBrowserOwnerJsonV1<unknown>({
+      ownerId: props.storageScopeId,
+      logicalKey: "debate-stage-alignment",
+    }).then(async (encrypted) => {
+      const stored = encrypted
+        ? normalizeDebateStageAlignment(encrypted)
+        : readDebateStageAlignment(window.localStorage, props.storageScopeId);
+      if (encrypted === null) {
+        await writeBrowserOwnerJsonV1({
+          ownerId: props.storageScopeId,
+          logicalKey: "debate-stage-alignment",
+          value: stored,
+        });
+      }
+      try {
+        const suffix = `:${props.storageScopeId}`;
+        for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+          const key = window.localStorage.key(index);
+          if (
+            key?.startsWith("prism_debate_stage_alignment_v") &&
+            key.endsWith(suffix)
+          ) {
+            window.localStorage.removeItem(key);
+          }
+        }
+      } catch {
+        // Owner-bound encrypted state remains authoritative.
+      }
+      if (disposed) return;
+      setStageAlignment(stored);
+      setStageAlignmentDraft(copyDebateStageAlignment(stored));
+    });
+    return () => {
+      disposed = true;
+    };
   }, [props.storageScopeId]);
   useEffect(() => {
     if (typeof window === "undefined") return;
-    setLiveCaptionsEnabled(readDebateLiveCaptionsEnabled(window.localStorage));
-    setLiveCaptionSize(readDebateLiveCaptionSize(window.localStorage));
-  }, []);
+    try {
+      window.localStorage.removeItem(DEBATE_LIVE_CAPTIONS_STORAGE_KEY);
+      window.localStorage.removeItem(DEBATE_LIVE_CAPTION_SIZE_STORAGE_KEY);
+    } catch {
+      // Owner-bound encrypted state remains authoritative.
+    }
+    let disposed = false;
+    void Promise.all([
+      readBrowserOwnerJsonV1<unknown>({
+        ownerId: props.storageScopeId,
+        logicalKey: "debate-live-captions",
+      }),
+      readBrowserOwnerJsonV1<unknown>({
+        ownerId: props.storageScopeId,
+        logicalKey: "debate-live-caption-size",
+      }),
+    ]).then(([storedEnabled, storedSize]) => {
+      if (disposed) return;
+      setLiveCaptionsEnabled(
+        readDebateLiveCaptionsEnabled({
+          getItem: () =>
+            storedEnabled === null ? null : String(storedEnabled),
+        }),
+      );
+      setLiveCaptionSize(
+        readDebateLiveCaptionSize({
+          getItem: () => (storedSize === null ? null : String(storedSize)),
+        }),
+      );
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [props.storageScopeId]);
   useEffect(() => {
     setLeaveDebatePortalTarget(document.body);
   }, []);
@@ -8735,7 +8912,7 @@ export function DebateExperience(
           setSynopsisPreparingSessionId((current) =>
             current === sessionId ? null : current,
           );
-          console.warn("[debate] session synopsis failed", caught);
+          console.warn("[debate] session synopsis failed.");
         }
       }
     })();
@@ -10241,23 +10418,19 @@ export function DebateExperience(
 
   const saveStageAlignment = (): void => {
     const normalized = normalizeDebateStageAlignment(stageAlignmentDraft);
-    try {
-      stopStageAlignmentSoundCheck();
-      writeDebateStageAlignment(
-        window.localStorage,
-        props.storageScopeId,
-        normalized,
-      );
-      setStageAlignment(normalized);
-      setStageAlignmentDraft(copyDebateStageAlignment(normalized));
-      setStageAlignmentGavelCue(null);
-      setStageAlignmentGavelPose("lowered");
-      setStageAlignmentGavelPosesLinked(false);
-      setStageAlignmentGalleryHeat(null);
-      setStageAlignmentOpen(false);
-    } catch {
-      setError("Debate stage alignment could not be saved on this device.");
-    }
+    stopStageAlignmentSoundCheck();
+    void writeBrowserOwnerJsonV1({
+      ownerId: props.storageScopeId,
+      logicalKey: "debate-stage-alignment",
+      value: normalized,
+    });
+    setStageAlignment(normalized);
+    setStageAlignmentDraft(copyDebateStageAlignment(normalized));
+    setStageAlignmentGavelCue(null);
+    setStageAlignmentGavelPose("lowered");
+    setStageAlignmentGavelPosesLinked(false);
+    setStageAlignmentGalleryHeat(null);
+    setStageAlignmentOpen(false);
   };
 
   const copyStageAlignmentData = async (): Promise<void> => {
@@ -14270,7 +14443,6 @@ export function DebateExperience(
             "advance.presenting",
             debateClientPerfNowMs() - presentingStartedAt,
             {
-              sessionId: next.id,
               revision: next.revision,
               eventCount: next.events.length,
               foleyStarts: audienceReactionFoleyStartsRef.current,
@@ -15165,20 +15337,25 @@ export function DebateExperience(
       return;
     }
     exhaustedRecoveryAttemptedRef.current = true;
-    const marker = readDebateExhaustedRecessRecoveryMarker(
-      window.localStorage,
-    );
-    if (!marker) return;
+    try {
+      window.localStorage.removeItem(DEBATE_EXHAUSTED_RECESS_RECOVERY_KEY);
+    } catch {
+      // Owner-bound encrypted state remains authoritative.
+    }
     let cancelled = false;
     void (async () => {
       try {
+        const marker = await readEncryptedDebateRecoveryMarker(
+          props.storageScopeId,
+        );
+        if (!marker || cancelled) return;
         const loaded = await props.request<{ session: DebateSessionV1 }>(
           `/api/debates/${encodeURIComponent(marker.sessionId)}?perspective=live`,
         );
         let session = loaded.session;
         const participantMarker = debateParticipantRecoveryMarker(session);
         if (!participantMarker) {
-          clearDebateExhaustedRecessRecoveryMarker(window.localStorage);
+          clearEncryptedDebateRecoveryMarker(props.storageScopeId);
           return;
         }
         const exhaustedMarker =
@@ -15240,7 +15417,7 @@ export function DebateExperience(
             ? caught.message
             : "The final recess checkpoint could not be restored.";
         if (/not found|already finished/iu.test(message)) {
-          clearDebateExhaustedRecessRecoveryMarker(window.localStorage);
+          clearEncryptedDebateRecoveryMarker(props.storageScopeId);
           return;
         }
         setError(message);
@@ -16252,10 +16429,8 @@ export function DebateExperience(
           "advance.round_trip",
           debateClientPerfNowMs() - advanceStartedAt,
           {
-            sessionId: previous.id,
             revision: result.session.revision,
             skip,
-            provider: previous.provider,
           },
         );
         if (
@@ -18256,7 +18431,7 @@ export function DebateExperience(
       typeof window !== "undefined" &&
       !options.preserveParticipantRecoveryMarker
     ) {
-      clearDebateExhaustedRecessRecoveryMarker(window.localStorage);
+      clearEncryptedDebateRecoveryMarker(props.storageScopeId);
     }
     setView("dashboard");
     setActiveSession(null);
@@ -18371,6 +18546,23 @@ export function DebateExperience(
     exitLiveSessionToStudio();
   };
 
+  liveSessionBackActionRef.current = () => {
+    if (view !== "mystery") {
+      exitLiveSessionToStudio();
+      return;
+    }
+    activeSessionIdRef.current = null;
+    activeSessionRef.current = null;
+    setActiveSession(null);
+    setView("dashboard");
+    setStudioPanel("archive");
+    void loadSessions();
+  };
+  useEffect(() => {
+    onLiveSessionBackHandlerChange?.(() => liveSessionBackActionRef.current());
+    return () => onLiveSessionBackHandlerChange?.(null);
+  }, [onLiveSessionBackHandlerChange]);
+
   const continueExhaustedParticipantDebate = async (): Promise<void> => {
     const previous = activeSessionRef.current;
     if (
@@ -18459,7 +18651,7 @@ export function DebateExperience(
       void stopDebateIdentAudio();
       stopDebateAmbientBotVocalization();
       if (typeof window !== "undefined") {
-        clearDebateExhaustedRecessRecoveryMarker(window.localStorage);
+        clearEncryptedDebateRecoveryMarker(props.storageScopeId);
       }
       setExhaustedExitOpen(false);
       restoreDebateSetupFromSession(
@@ -18520,7 +18712,7 @@ export function DebateExperience(
         result = await forfeit(refreshed.session);
       }
       if (typeof window !== "undefined") {
-        clearDebateExhaustedRecessRecoveryMarker(window.localStorage);
+        clearEncryptedDebateRecoveryMarker(props.storageScopeId);
       }
       setExhaustedExitOpen(false);
       if (mountedRef.current) setBusy(false);
@@ -32818,6 +33010,7 @@ export function DebateExperience(
       )
       : null;
   const mysterySharedProps = {
+    ownerId: props.storageScopeId,
     bots,
     playerName: props.playerName,
     playerColor: props.playerColor,

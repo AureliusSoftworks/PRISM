@@ -211,6 +211,11 @@
   height: var(--startup-halo-size);
   display: grid;
   place-items: center;
+}
+
+.orb {
+  position: absolute;
+  inset: 0;
   isolation: isolate;
   border-radius: 999px;
   background: radial-gradient(
@@ -274,15 +279,17 @@
 }
 
 .glyph {
+  position: relative;
+  z-index: 1;
   width: clamp(42px, 7.2dvh, 56px);
   height: clamp(42px, 7.2dvh, 56px);
+  opacity: 1;
+  transform: none;
   color: color-mix(in srgb, var(--startup-fg) 92%, #5de6ff 8%);
   filter: drop-shadow(
       0 0 16px color-mix(in srgb, currentColor 32%, transparent)
     )
     drop-shadow(0 3px 10px rgba(0, 0, 0, 0.34));
-  animation: glyphPulse 1.55s ease-in-out infinite;
-  animation-delay: var(--prism-startup-glyph-phase, 0ms);
 }
 
 .label {
@@ -535,17 +542,6 @@
     transform: scale(1.06);
   }
 }
-@keyframes glyphPulse {
-  0%,
-  100% {
-    opacity: 0.82;
-    transform: scale(0.96);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.06);
-  }
-}
 @keyframes incomingFlow {
   from {
     background-position: 120% 0;
@@ -569,7 +565,7 @@
   .label,
   .services,
   .consoleLines,
-  .halo,
+  .orb,
   .ring,
   .aura,
   .glyph {

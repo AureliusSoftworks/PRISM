@@ -2767,44 +2767,6 @@
   opacity: 1;
 }
 
-.investigationLens::after {
-  position: absolute;
-  top: 18%;
-  left: 78%;
-  width: 1rem;
-  aspect-ratio: 1;
-  content: "";
-  pointer-events: none;
-  opacity: 0;
-  background: conic-gradient(
-    from 25deg,
-    #fff 0 8%,
-    #78ecff 16%,
-    #aa8cff 32%,
-    #ff72bd 49%,
-    #ffe88a 66%,
-    #76ffd6 82%,
-    #fff 94% 100%
-  );
-  clip-path: polygon(50% 0, 58% 38%, 100% 50%, 58% 62%, 50% 100%, 42% 62%, 0 50%, 42% 38%);
-  filter:
-    drop-shadow(0 0 0.18rem rgba(255, 255, 255, 0.95))
-    drop-shadow(-0.18rem 0 0.3rem rgba(105, 229, 255, 0.78))
-    drop-shadow(0.18rem 0 0.32rem rgba(255, 100, 191, 0.72));
-  transform: translate(-50%, -50%) scale(0.16) rotate(-20deg);
-}
-
-.investigationLens[data-targeted="true"]::after {
-  animation: prismGlintSweep 620ms cubic-bezier(0.16, 0.8, 0.25, 1) both;
-}
-
-@keyframes prismGlintSweep {
-  0% { opacity: 0; transform: translate(-68%, -38%) scale(0.16) rotate(-20deg); }
-  32% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(0deg); }
-  66% { opacity: 0.82; transform: translate(-32%, -64%) scale(0.72) rotate(14deg); }
-  100% { opacity: 0; transform: translate(-18%, -72%) scale(0.28) rotate(22deg); }
-}
-
 .roomLockTarget {
   position: absolute;
   z-index: 13;

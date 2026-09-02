@@ -155,6 +155,25 @@ describe("Flyting stage authoring", () => {
     );
   });
 
+  it("offers independent vertical skew for carpet glyphs in both alignment editors", () => {
+    assert.equal(
+      [...flytingSource.matchAll(/supportsSkewY \? \(/gu)].length,
+      2,
+    );
+    assert.equal(
+      [...flytingSource.matchAll(/<span>Skew Y<\/span>/gu)].length,
+      2,
+    );
+    assert.match(
+      flytingSource,
+      /"--flyting-align-skew-y": `\$\{placement\.skewY\}deg`/u,
+    );
+    assert.match(
+      flytingStyles,
+      /skewY\([\s\S]{0,180}var\(--flyting-align-skew-y, 0deg\)/u,
+    );
+  });
+
   it("locally previews both venue themes without changing the app theme", () => {
     assert.match(flytingSource, /stagePreviewTheme/u);
     assert.match(flytingSource, /data-flyting-preview-theme-toggle="true"/u);

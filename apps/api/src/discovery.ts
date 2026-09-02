@@ -119,9 +119,8 @@ function startNativeMacDiscovery(
       ],
       { stdio: "ignore" },
     );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(`Prism native LAN discovery failed to start: ${message}`);
+  } catch {
+    console.warn("Prism native LAN discovery failed to start.");
     return null;
   }
 
@@ -129,8 +128,8 @@ function startNativeMacDiscovery(
     if (child.exitCode === null) child.kill("SIGTERM");
   };
   process.once("exit", stopOnParentExit);
-  child.once("error", (error) => {
-    console.warn(`Prism native LAN discovery stopped: ${error.message}`);
+  child.once("error", () => {
+    console.warn("Prism native LAN discovery stopped.");
   });
 
   return async () => {
@@ -182,21 +181,16 @@ export function startPrismDiscovery(
       runtime.execFileSyncNative ?? execFileSync,
     );
     if (stop) {
-      console.log(
-        `Prism LAN discovery advertising ${descriptor.serviceType} natively as "${descriptor.options.name}" on port ${config.apiPort}`,
-      );
+      console.log("Prism LAN discovery is advertising natively.");
     }
     return stop;
   }
   try {
     const stop = advertiseService(descriptor.options);
-    console.log(
-      `Prism LAN discovery advertising ${descriptor.serviceType} as "${descriptor.options.name}" on port ${config.apiPort}`
-    );
+    console.log("Prism LAN discovery is advertising.");
     return stop;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(`Prism LAN discovery failed to start: ${message}`);
+  } catch {
+    console.warn("Prism LAN discovery failed to start.");
     return null;
   }
 }

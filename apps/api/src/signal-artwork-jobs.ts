@@ -536,19 +536,14 @@ export class SignalArtworkJobManager {
     } finally {
       record.snapshot.finishedAt = this.now().toISOString();
       this.touch(record);
-      console.info("[signal-artwork] background job finished", {
-        jobId: record.snapshot.id,
-        showId: record.snapshot.showId,
-        status: record.snapshot.status,
-        completedCount: record.snapshot.completedCount,
-        errorCount: record.snapshot.errors.length,
-        timings: record.snapshot.timings,
-      });
+      console.info(
+        `[signal-artwork] background job finished status=${record.snapshot.status} completed=${record.snapshot.completedCount} errors=${record.snapshot.errors.length}.`,
+      );
       if (slotAcquired) {
         try {
           await record.start.releaseSlot();
-        } catch (error) {
-          console.error("[signal-artwork] could not release image slot", error);
+        } catch {
+          console.error("[signal-artwork] could not release image slot.");
         }
       }
     }

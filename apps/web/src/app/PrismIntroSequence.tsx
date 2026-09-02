@@ -18,9 +18,7 @@ import type { PrismIntroResolution } from "@localai/shared";
 import {
   PRISM_INTRO_SCENES,
   clampPrismIntroSceneIndex,
-  markPrismIntroSequenceSeen,
   prismIntroSceneAt,
-  prismIntroSequenceWasSeen,
 } from "./prismIntroSequenceData";
 import {
   createPrismIntroAudioController,
@@ -42,15 +40,6 @@ interface PrismIntroSequenceContextValue {
 
 const PrismIntroSequenceContext =
   createContext<PrismIntroSequenceContextValue | null>(null);
-
-function prismIntroLocalStorage(): Storage | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-}
 
 export function usePrismIntroSequence(): PrismIntroSequenceContextValue {
   const value = useContext(PrismIntroSequenceContext);
@@ -79,11 +68,6 @@ export function PrismIntroSequenceProvider({
   }) => {
     if (firstRunResolvedThisSessionRef.current && !options?.force) return;
     if (options?.force) firstRunResolvedThisSessionRef.current = false;
-    const storage = prismIntroLocalStorage();
-    if (!options?.force && storage && prismIntroSequenceWasSeen(storage)) {
-      firstRunResolvedThisSessionRef.current = true;
-      return;
-    }
     firstRunResolutionRef.current = options?.onResolved ?? null;
     setMode((current) => current ?? "first-run");
   }, []);
@@ -97,10 +81,6 @@ export function PrismIntroSequenceProvider({
   ) => {
     if (mode === "first-run") {
       firstRunResolvedThisSessionRef.current = true;
-      const storage = prismIntroLocalStorage();
-      if (storage) {
-        markPrismIntroSequenceSeen(storage);
-      }
       firstRunResolutionRef.current?.(resolution);
       firstRunResolutionRef.current = null;
     }

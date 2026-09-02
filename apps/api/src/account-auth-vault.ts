@@ -1506,7 +1506,7 @@ export function rewrapAccountAuthInstallationKeyV2(args: {
       installationKey,
       args.newMasterSecret,
     );
-    args.db
+    const updated = args.db
       .prepare(
         `UPDATE main.account_auth_installation_key
             SET wrapped_key_ciphertext = ?, wrapped_key_nonce = ?,
@@ -1518,7 +1518,10 @@ export function rewrapAccountAuthInstallationKeyV2(args: {
         wrapped.nonce,
         wrapped.tag,
         INSTALLATION_KEY_WRAP_VERSION,
-      );
+      ) as { changes?: number | bigint };
+    if (Number(updated.changes ?? 0) !== 1) {
+      throw new VaultKeyLifecycleError("transaction_conflict");
+    }
   } finally {
     installationKey.fill(0);
   }

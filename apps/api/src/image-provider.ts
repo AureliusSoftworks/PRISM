@@ -27,11 +27,7 @@ async function readImageGenerationResponse(
 ): Promise<ImageGenerationResult> {
   if (!response.ok) {
     const detail = await readOpenAiErrorMessage(response);
-    console.error(
-      `[openai] image ${operation} failed status=${response.status} detail=${
-        detail || "<empty body>"
-      }`
-    );
+    console.error(`[openai] image ${operation} failed status=${response.status}.`);
     const suffix = detail ? `: ${detail}` : "";
     throw new Error(
       `OpenAI image ${operation} failed (${response.status})${suffix}`

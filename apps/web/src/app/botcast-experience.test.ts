@@ -2812,7 +2812,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       pageSource,
-      /signalPreferredVoiceClipReady\([\s\S]{0,120}preparedClip\?\.kind === "clip" \? preparedClip\.clip : preparedClip,[\s\S]{0,80}effectiveEngine/u,
+      /signalPreferredVoiceClipReady\([\s\S]{0,240}preparedClip\?\.kind === "clip" \? preparedClip\.clip : preparedClip,[\s\S]{0,80}effectiveEngine/u,
     );
     assert.match(
       pageSource,

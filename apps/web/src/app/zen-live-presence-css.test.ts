@@ -3867,6 +3867,25 @@ describe("Zen live presence CSS", () => {
       /--zen-live-bot-glyph-compositor-glow-filter:\s*var\(--crt-face-glow-filter\)\s*;/,
       "Custom eyes receive the same broad phosphor filter as mouths after their mask is composed.",
     );
+    const canonicalLightCustomEyeLayerRule = ruleForSelectorNeedlesWithBody(
+      [
+        '.zenLiveBotPresencePlate[data-theme="light"][data-avatar-full-scale-identity="canonical"]',
+        ".zenLiveBotPresenceFaceGlyph[data-face-eye-character]",
+        '[data-coffee-plate-emoji-part="eyes"]',
+        '[data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]',
+      ],
+      "mix-blend-mode",
+    );
+    assert.match(
+      canonicalLightCustomEyeLayerRule,
+      /--zen-live-bot-glyph-compositor-glow-filter:\s*var\(\s*--crt-face-glow-filter\s*\)\s*;/,
+      "Light custom eyes must retain the same completed-mask phosphor envelope as the mouth.",
+    );
+    assert.match(
+      canonicalLightCustomEyeLayerRule,
+      /mix-blend-mode:\s*var\(--bot-avatar-light-ink-glow-blend,\s*plus-lighter\)\s*;/,
+      "Light custom-eye bloom must use the additive white emission blend that keeps authored Ink visible through the lit glass.",
+    );
     const canonicalCustomEyeMaskRule = ruleForSelectorNeedlesWithBody(
       [
         '.zenLiveBotPresencePlate[data-avatar-full-scale-identity="canonical"]',

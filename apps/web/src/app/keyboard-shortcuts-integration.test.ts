@@ -31,8 +31,14 @@ const browserGuardSource = readFileSync(
 test("exposes account-scoped device shortcuts in Settings", () => {
   assert.match(settingsPanelSource, /\| "shortcuts"/u);
   assert.match(settingsPanelSource, /scope: "shortcuts", title: "Shortcuts"/u);
-  assert.match(pageSource, /readPrismKeyboardShortcuts\(window\.localStorage/u);
-  assert.match(pageSource, /writePrismKeyboardShortcuts\(window\.localStorage/u);
+  assert.match(
+    pageSource,
+    /readOrMigrateBrowserOwnerJsonV1<unknown>\(\{\s*ownerId: user\.id,\s*logicalKey: "keyboard-shortcuts"/u,
+  );
+  assert.match(
+    pageSource,
+    /writeBrowserOwnerJsonV1\(\{\s*ownerId: user\.id,\s*logicalKey: "keyboard-shortcuts"/u,
+  );
   assert.match(pageSource, /activeSettingsScope === "shortcuts"/u);
   assert.match(settingsSource, /data-keyboard-shortcut-recorder="true"/u);
   assert.match(settingsSource, /Already used by/u);

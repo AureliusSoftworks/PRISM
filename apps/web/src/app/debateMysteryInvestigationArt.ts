@@ -1,4 +1,8 @@
 import { CURRENT_MANSION_ROOM_ART_CONTRACT } from "@localai/shared";
+import {
+  readBrowserOwnerJsonV1,
+  writeBrowserOwnerJsonV1,
+} from "./browserOwnerState";
 
 const LEGACY_WHODUNNIT_INVESTIGATION_ART_STYLE_STORAGE_KEY =
   "prism.whodunnit.investigation-art-style.v1";
@@ -26,6 +30,79 @@ function withPixelArtPresentationVersion(url: string): string {
 function scopedStorageKey(key: string, scopeId?: string): string {
   const scope = scopeId?.trim();
   return scope ? `${key}:${scope}` : key;
+}
+
+function whodunnitRoomUpgradeBrowserLogicalKey(scopeId: string): string {
+  return `whodunnit-room-upgrade:${scopeId}`;
+}
+
+export async function readEncryptedWhodunnitRoomUpgradeEnabled(args: {
+  ownerId: string;
+  scopeId: string;
+  legacyStorage?: Pick<Storage, "getItem" | "removeItem"> | null;
+  initialEnabled?: boolean;
+}): Promise<boolean> {
+  const existing = await readBrowserOwnerJsonV1<boolean>({
+    ownerId: args.ownerId,
+    logicalKey: whodunnitRoomUpgradeBrowserLogicalKey(args.scopeId),
+  });
+  const legacyKeys = [
+    scopedStorageKey(WHODUNNIT_ROOM_UPGRADE_STORAGE_KEY, args.scopeId),
+    scopedStorageKey(
+      LEGACY_WHODUNNIT_INVESTIGATION_ART_STYLE_STORAGE_KEY,
+      args.scopeId,
+    ),
+  ];
+  if (typeof existing === "boolean") {
+    for (const key of legacyKeys) {
+      try {
+        args.legacyStorage?.removeItem(key);
+      } catch {
+        // The encrypted value remains authoritative.
+      }
+    }
+    return existing;
+  }
+
+  let migrated: boolean | null = null;
+  try {
+    const current = args.legacyStorage?.getItem(legacyKeys[0]);
+    const legacy = args.legacyStorage?.getItem(legacyKeys[1]);
+    if (current === "on" || current === "off") migrated = current === "on";
+    else if (legacy === "illustrated" || legacy === "mosaic") {
+      migrated = legacy === "illustrated";
+    }
+  } catch {
+    // Inaccessible plaintext is ignored and never copied across accounts.
+  }
+  for (const key of legacyKeys) {
+    try {
+      args.legacyStorage?.removeItem(key);
+    } catch {
+      // Best effort cleanup only.
+    }
+  }
+  if (migrated !== null) {
+    await writeBrowserOwnerJsonV1({
+      ownerId: args.ownerId,
+      logicalKey: whodunnitRoomUpgradeBrowserLogicalKey(args.scopeId),
+      value: migrated,
+    });
+    return migrated;
+  }
+  return args.initialEnabled ?? DEFAULT_WHODUNNIT_ROOM_UPGRADE_ENABLED;
+}
+
+export function writeEncryptedWhodunnitRoomUpgradeEnabled(args: {
+  ownerId: string;
+  scopeId: string;
+  enabled: boolean;
+}): Promise<boolean> {
+  return writeBrowserOwnerJsonV1({
+    ownerId: args.ownerId,
+    logicalKey: whodunnitRoomUpgradeBrowserLogicalKey(args.scopeId),
+    value: args.enabled,
+  });
 }
 
 export function whodunnitRoomArtStyleForUpgrade(

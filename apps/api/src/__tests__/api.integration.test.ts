@@ -878,7 +878,7 @@ describe("API request integration", () => {
       user.id,
       "Visible answer",
       speakerBotId,
-      '["bot-2"]',
+      JSON.stringify([interrupterBotId]),
       JSON.stringify({
         webSearch: { query: "today's news" },
         coffeeAmbientAction: { action: "*sips*" },
@@ -1084,51 +1084,11 @@ describe("API request integration", () => {
       provider: string | null;
       payload_json: string;
     };
-    const payload = JSON.parse(event.payload_json) as {
-      request: {
-        candidates: string[];
-        selectionMode: string;
-        source: string;
-        generationMetadata: {
-          strategy: string;
-          sourceCoffeeGroupId: string | null;
-          candidateCount: number;
-          selectedCandidateIndex: number;
-          selectedRank: number;
-          candidateScores: Array<{
-            label: string;
-            scores: Record<string, number>;
-          }>;
-        };
-      };
-      parsedOutput: { selectedTopic: string };
-    };
     assert.equal(event.event_kind, "tool");
     assert.equal(event.purpose, "coffee_topic_selection");
     assert.equal(event.provider, "system");
-    assert.deepEqual(payload.request.candidates, candidates);
-    assert.equal(payload.request.selectionMode, "suggestion");
-    assert.equal(payload.request.source, "coffee_topic_picker");
-    assert.equal(
-      payload.request.generationMetadata.strategy,
-      "ranked_participant_topic_pool_v1"
-    );
-    assert.equal(payload.request.generationMetadata.sourceCoffeeGroupId, null);
-    assert.equal(payload.request.generationMetadata.candidateCount, 4);
-    assert.equal(payload.request.generationMetadata.selectedCandidateIndex, 1);
-    assert.equal(payload.request.generationMetadata.selectedRank, 2);
-    assert.deepEqual(
-      payload.request.generationMetadata.candidateScores.map((candidate) => candidate.label),
-      candidates
-    );
-    assert.ok(
-      payload.request.generationMetadata.candidateScores.every(
-        (candidate) =>
-          Object.keys(candidate.scores).sort().join(",") ===
-          "balance,depth,fit,novelty,relevance"
-      )
-    );
-    assert.equal(payload.parsedOutput.selectedTopic, candidates[1]);
+    assert.match(event.payload_json, /prism-owner-encrypted-diagnostic/u);
+    assert.ok(candidates.every((candidate) => !event.payload_json.includes(candidate)));
 
     const generationEvent = db
       .prepare(
@@ -1145,37 +1105,31 @@ describe("API request integration", () => {
       model: string | null;
       payload_json: string;
     };
-    const generationPayload = JSON.parse(generationEvent.payload_json) as {
-      request: {
-        participantBotIds: string[];
-        requestedCandidateCount: number;
-        rankingDimensions: string[];
-      };
-      rawOutput: string;
-      parsedOutput: {
-        rankedTopics: string[];
-        usedFallback: boolean;
-      };
-    };
     assert.equal(generationEvent.event_kind, "tool");
     assert.equal(generationEvent.provider, "local");
     assert.equal(generationEvent.model, "deterministic-test-model");
-    assert.deepEqual(generationPayload.request.participantBotIds, botIds);
-    assert.equal(generationPayload.request.requestedCandidateCount, 8);
-    assert.deepEqual(generationPayload.request.rankingDimensions, [
-      "relevance",
-      "depth",
-      "novelty",
-      "balance",
-      "fit",
-    ]);
-    assert.equal(
-      generationPayload.rawOutput,
-      `${deterministicReply}\n[repair]\n${deterministicReply}`,
-      JSON.stringify(generationPayload)
+    assert.match(
+      generationEvent.payload_json,
+      /prism-owner-encrypted-diagnostic/u,
     );
-    assert.deepEqual(generationPayload.parsedOutput.rankedTopics, candidates);
-    assert.equal(generationPayload.parsedOutput.usedFallback, true);
+    assert.ok(
+      botIds.every((botId) => !generationEvent.payload_json.includes(botId)),
+    );
+
+    const exported = await client.request(
+      `/api/conversations/${conversationId}/export`,
+      jsonInit({ format: "developer" }),
+    );
+    assert.equal(exported.status, 200);
+    const exportPayload = await json(exported);
+    const markdown = String(exportPayload.markdown ?? "");
+    assert.match(markdown, /ranked_participant_topic_pool_v1/u);
+    assert.match(markdown, /coffee_topic_picker/u);
+    assert.match(markdown, /requestedCandidateCount/u);
+    assert.match(markdown, /rankingDimensions/u);
+    assert.match(markdown, /usedFallback/u);
+    for (const candidate of candidates) assert.match(markdown, new RegExp(candidate, "u"));
+    for (const botId of botIds) assert.match(markdown, new RegExp(botId, "u"));
     fetchRecorder.calls.length = 0;
   });
 
@@ -5148,10 +5102,7 @@ describe("API request integration", () => {
           )
           .all(conversationId, userId),
       );
-      assert.match(
-        diagnosticJson,
-        /Request-scoped Prism surface context omitted/u,
-      );
+      assert.match(diagnosticJson, /prism-owner-encrypted-diagnostic/u);
       assert.doesNotMatch(diagnosticJson, new RegExp(surfaceTitle, "u"));
 
       const exported = await client.request(
@@ -5160,6 +5111,10 @@ describe("API request integration", () => {
       );
       assert.equal(exported.status, 200);
       const exportPayload = await json(exported);
+      assert.match(
+        String(exportPayload.markdown ?? ""),
+        /Request-scoped Prism surface context omitted/u,
+      );
       assert.doesNotMatch(
         String(exportPayload.markdown ?? ""),
         new RegExp(surfaceTitle, "u"),

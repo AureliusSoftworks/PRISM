@@ -30,7 +30,7 @@ export function debateClientPerfNowMs(): number {
 export function logDebateClientPerf(
   mark: DebateClientPerfMark,
   durationMs: number,
-  details: Record<string, string | number | boolean | null | undefined> = {},
+  details: Record<string, number | boolean | null | undefined> = {},
 ): void {
   if (!DEBATE_CLIENT_PERF_ENABLED) return;
   const detailText = Object.entries(details)

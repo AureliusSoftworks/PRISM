@@ -16667,10 +16667,9 @@ export async function endBotcastEpisodeOnProducerCut(
       generation,
       { producerCut: true },
     );
-  } catch (error) {
+  } catch {
     console.warn(
-      `[botcast] emergency Signal sign-off failed; completing producer cut episode=${episodeId}`,
-      error,
+      "[botcast] emergency Signal sign-off failed; completing producer cut.",
     );
     const episode = getBotcastEpisode(db, userId, episodeId);
     if (episode.status === "live") {
@@ -19205,10 +19204,10 @@ export async function advanceBotcastEpisode(
       }
       console.warn(
         hostClosingTurn
-          ? `[botcast] Auto host closing validation exhausted; using safe fallback episode=${episode.id} speaker=${speaker.id}`
+          ? "[botcast] Auto host closing validation exhausted; using a safe fallback."
           : firstHostOpening
-            ? `[botcast] opening authoring failed; using safe fallback episode=${episode.id} speaker=${speaker.id}`
-            : `[botcast] Auto turn validation exhausted; using safe fallback episode=${episode.id} speaker=${speaker.id}`,
+            ? "[botcast] opening authoring failed; using a safe fallback."
+            : "[botcast] Auto turn validation exhausted; using a safe fallback.",
       );
       raw = "";
     }
@@ -19356,13 +19355,13 @@ export async function advanceBotcastEpisode(
           throw error;
         }
         console.warn(
-          `[botcast] speaker returned empty ${selected.providerName} response; using safe fallback episode=${episode.id} speaker=${speaker.id}`,
+          "[botcast] speaker returned an empty response; using a safe fallback.",
         );
         raw = "";
       } else {
         if (!firstHostOpening) throw error;
         console.warn(
-          `[botcast] opening authoring failed; using safe fallback episode=${episode.id} speaker=${speaker.id}`,
+          "[botcast] opening authoring failed; using a safe fallback.",
         );
         raw = "";
       }
@@ -19534,8 +19533,8 @@ export async function advanceBotcastEpisode(
       }
       console.warn(
         timedOut
-          ? `[botcast] ${selected.providerName} speaker turn timed out; using safe fallback episode=${episode.id} speaker=${speaker.id}`
-          : `[botcast] speaker returned empty ${selected.providerName} response; using safe fallback episode=${episode.id} speaker=${speaker.id}`,
+          ? "[botcast] speaker turn timed out; using a safe fallback."
+          : "[botcast] speaker returned an empty response; using a safe fallback.",
       );
       raw = "";
     }

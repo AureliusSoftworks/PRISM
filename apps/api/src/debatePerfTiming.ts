@@ -32,7 +32,7 @@ export function startDebatePerfSpan(name: DebatePerfSpanName): DebatePerfSpan {
 
 export function endDebatePerfSpan(
   span: DebatePerfSpan,
-  details: Record<string, string | number | boolean | null | undefined> = {},
+  details: Record<string, number | boolean | null | undefined> = {},
 ): number {
   const durationMs = Math.round(debatePerfNowMs() - span.startedAtMs);
   if (!DEBATE_PERF_TIMING_ENABLED) return durationMs;

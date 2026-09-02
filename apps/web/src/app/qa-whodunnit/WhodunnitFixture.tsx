@@ -165,6 +165,7 @@ export function WhodunnitFixture({
 
   return (
     <DebateMysteryPlay
+      ownerId="qa-whodunnit"
       session={session}
       onSessionChange={setSession}
       onExit={() => undefined}

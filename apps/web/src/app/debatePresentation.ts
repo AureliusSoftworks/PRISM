@@ -190,57 +190,6 @@ export function debateWatchElapsedStorageKey(sessionId: string): string {
   return `prism.debate.watchElapsed.v1:${sessionId}`;
 }
 
-export function readDebateProceedingsCursor(sessionId: string): number | null {
-  try {
-    const raw = sessionStorage.getItem(
-      debateProceedingsCursorStorageKey(sessionId),
-    );
-    if (raw === null || raw === "") return null;
-    const value = Number(raw);
-    return Number.isFinite(value) ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-export function writeDebateProceedingsCursor(
-  sessionId: string,
-  sequence: number | null,
-): void {
-  try {
-    const key = debateProceedingsCursorStorageKey(sessionId);
-    if (sequence === null) sessionStorage.removeItem(key);
-    else sessionStorage.setItem(key, String(sequence));
-  } catch {
-    // Private mode or blocked storage should not break the chamber.
-  }
-}
-
-export function readDebateWatchElapsedMs(sessionId: string): number {
-  try {
-    const raw = sessionStorage.getItem(debateWatchElapsedStorageKey(sessionId));
-    if (raw === null || raw === "") return 0;
-    const value = Number(raw);
-    return Number.isFinite(value) && value > 0 ? value : 0;
-  } catch {
-    return 0;
-  }
-}
-
-export function writeDebateWatchElapsedMs(
-  sessionId: string,
-  elapsedMs: number,
-): void {
-  try {
-    sessionStorage.setItem(
-      debateWatchElapsedStorageKey(sessionId),
-      String(Math.max(0, Math.floor(elapsedMs))),
-    );
-  } catch {
-    // Private mode or blocked storage should not break the chamber.
-  }
-}
-
 /**
  * Count-up Debate time while the chamber is live. Freezes during recess and
  * before Spectator Start so bake/wait time never inflates the readout.
@@ -273,6 +222,7 @@ export function debateInitialProceedingsCursor(
     | "completedAt"
   >,
   awaitingFirstWatch: boolean,
+  persistedCursor: number | null = null,
 ): number | null {
   if (
     session.status === "completed" ||
@@ -292,7 +242,7 @@ export function debateInitialProceedingsCursor(
       return prior?.sequence ?? null;
     }
   }
-  return readDebateProceedingsCursor(session.id);
+  return persistedCursor;
 }
 
 /**

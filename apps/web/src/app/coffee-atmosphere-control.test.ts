@@ -56,9 +56,12 @@ test("Coffee thinking keeps only its authored screen spinner", () => {
 test("Coffee Jazz preference stays outside CoffeeSessionSettings persistence", () => {
   assert.match(
     source,
-    /persistCoffeeJazzAtmosphereToBrowser\(coffeeJazzAtmosphere\)/u,
+    /readBrowserOwnerJsonV1<unknown>\(\{\s*ownerId: user\.id,\s*logicalKey: "coffee-jazz-atmosphere"/u,
   );
-  assert.match(source, /loadCoffeeJazzAtmosphereFromBrowser\(\)/u);
+  assert.match(
+    source,
+    /writeBrowserOwnerJsonV1\(\{\s*ownerId: user\.id,\s*logicalKey: "coffee-jazz-atmosphere"/u,
+  );
   assert.match(
     jazzSource,
     /never part of CoffeeSessionSettings, group snapshots, or faithful/u,

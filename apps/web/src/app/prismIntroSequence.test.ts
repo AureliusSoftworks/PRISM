@@ -166,10 +166,7 @@ describe("PRISM intro sequence", () => {
     assert.match(componentSource, /createPortal\(/u);
     assert.match(componentSource, /role="dialog"/u);
     assert.match(componentSource, /aria-modal="true"/u);
-    assert.match(
-      componentSource,
-      /function prismIntroLocalStorage[\s\S]*try \{[\s\S]*return window\.localStorage;[\s\S]*catch/u,
-    );
+    assert.doesNotMatch(componentSource, /localStorage|sessionStorage/u);
     assert.match(componentSource, /element\.setAttribute\("inert", ""\)/u);
     assert.match(componentSource, /id=\{visualDescriptionId\}/u);
     assert.match(componentSource, /previouslyFocused\.focus/u);

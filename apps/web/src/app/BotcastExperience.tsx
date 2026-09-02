@@ -353,11 +353,15 @@ import {
 } from "./signalResponseCadence";
 import {
   DEFAULT_SIGNAL_LIVE_CAPTIONS_ENABLED,
+  SIGNAL_LIVE_CAPTIONS_STORAGE_KEY,
+  SIGNAL_LIVE_CAPTION_SIZE_STORAGE_KEY,
   readSignalLiveCaptionSize,
   readSignalLiveCaptionsEnabled,
-  writeSignalLiveCaptionSize,
-  writeSignalLiveCaptionsEnabled,
 } from "./signalLiveCaptionsPreference";
+import {
+  readBrowserOwnerJsonV1,
+  writeBrowserOwnerJsonV1,
+} from "./browserOwnerState";
 import {
   DEFAULT_LIVE_CAPTION_SIZE,
   liveCaptionSizeDetails,
@@ -1008,6 +1012,7 @@ type SignalErrorToast = {
 };
 
 export interface BotcastExperienceProps {
+  ownerId: string;
   bots: BotcastBotSummary[];
   botGroups?: readonly BotPickerGroup[];
   initialCastBotIds?: string[];
@@ -1164,6 +1169,12 @@ export interface BotcastExperienceProps {
         showLiveExit: boolean;
         cuttingShow: boolean;
         onCutShow: () => void;
+        liveSessionBack: {
+          disabled: boolean;
+          onClick: () => void;
+          title: string;
+        };
+        lockedRoutingChip: LiveSessionRoutingChipLabels | null;
         episodeModelControl: {
           value: string;
           onChange: (value: string) => void;
@@ -2677,6 +2688,7 @@ function SignalStudioSpotlight(): React.JSX.Element {
 }
 
 export function BotcastExperience({
+  ownerId,
   bots,
   botGroups = [],
   initialCastBotIds = [],
@@ -3412,9 +3424,40 @@ export function BotcastExperience({
   }, [hostChatOpen]);
 
   useEffect(() => {
-    setLiveCaptionsEnabled(readSignalLiveCaptionsEnabled(window.localStorage));
-    setLiveCaptionSize(readSignalLiveCaptionSize(window.localStorage));
-  }, []);
+    try {
+      window.localStorage.removeItem(SIGNAL_LIVE_CAPTIONS_STORAGE_KEY);
+      window.localStorage.removeItem(SIGNAL_LIVE_CAPTION_SIZE_STORAGE_KEY);
+    } catch {
+      // Owner-bound encrypted state remains authoritative.
+    }
+    let disposed = false;
+    void Promise.all([
+      readBrowserOwnerJsonV1<unknown>({
+        ownerId,
+        logicalKey: "signal-live-captions",
+      }),
+      readBrowserOwnerJsonV1<unknown>({
+        ownerId,
+        logicalKey: "signal-live-caption-size",
+      }),
+    ]).then(([storedEnabled, storedSize]) => {
+      if (disposed) return;
+      setLiveCaptionsEnabled(
+        readSignalLiveCaptionsEnabled({
+          getItem: () =>
+            storedEnabled === null ? null : String(storedEnabled),
+        }),
+      );
+      setLiveCaptionSize(
+        readSignalLiveCaptionSize({
+          getItem: () => (storedSize === null ? null : String(storedSize)),
+        }),
+      );
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [ownerId]);
 
   useEffect(() => {
     if (!notice) return;
@@ -3912,6 +3955,7 @@ export function BotcastExperience({
         });
         const recording = await boundedSignalReplayFinalization(
           saveFaithfulReplaySession({
+            ownerId,
             surface: "signal",
             sourceId: completedEpisode.id,
             manifest,
@@ -3934,6 +3978,7 @@ export function BotcastExperience({
       bots,
       introAudioEnabled,
       introAudioVolume,
+      ownerId,
       producerName,
       recordingVoiceSelection,
       theme,
@@ -17476,14 +17521,22 @@ export function BotcastExperience({
   const toggleLiveCaptions = (): void => {
     setLiveCaptionsEnabled((current) => {
       const next = !current;
-      writeSignalLiveCaptionsEnabled(window.localStorage, next);
+      void writeBrowserOwnerJsonV1({
+        ownerId,
+        logicalKey: "signal-live-captions",
+        value: next,
+      });
       return next;
     });
   };
   const adjustLiveCaptionSize = (direction: -1 | 1): void => {
     setLiveCaptionSize((current) => {
       const next = stepLiveCaptionSize(current, direction);
-      writeSignalLiveCaptionSize(window.localStorage, next);
+      void writeBrowserOwnerJsonV1({
+        ownerId,
+        logicalKey: "signal-live-caption-size",
+        value: next,
+      });
       return next;
     });
   };
@@ -18196,6 +18249,28 @@ export function BotcastExperience({
       }
     }
   };
+  const returnFromLiveSession = (): void => {
+    if (watchBakeActive) {
+      cancelWatchBake();
+      return;
+    }
+    if (episodeOutro) {
+      void returnFromEpisodeOutro();
+      return;
+    }
+    if (showLiveExit) {
+      void cutShow();
+      return;
+    }
+    if (episode?.status === "completed") {
+      void returnFromCompletedEpisode();
+      return;
+    }
+    setEpisode(null);
+    if (selectedShowId) {
+      void loadEpisodes(selectedShowId).catch(() => undefined);
+    }
+  };
   useEffect(() => {
     onLiveSessionActiveChange?.(
       liveSessionActive,
@@ -18280,6 +18355,19 @@ export function BotcastExperience({
           onCutShow: () => {
             void cutShow();
           },
+          liveSessionBack: {
+            disabled:
+              cuttingShow ||
+              keepSignalItemSaving ||
+              watchReplayFinalizingEpisodeId !== null,
+            onClick: returnFromLiveSession,
+            title: watchBakeActive
+              ? "Stop preparing and return to the show"
+              : showLiveExit
+                ? "End this episode and return to the show"
+                : "Return to the show",
+          },
+          lockedRoutingChip: resolvedLockedRoutingChip,
           episodeModelControl: {
             value: episodeModelControlValue,
             onChange: setEpisodeModelDraft,

@@ -102,7 +102,7 @@ export function coffeeShellPolicy(args: {
   return {
     liveSessionActive,
     reviewActive,
-    /* End lives on the table chrome; the visible app switcher stays disabled. */
+    /* The shared minimal session bar owns Back; no app-switcher exit is shown. */
     showEndSessionInSwitcher: false,
     disabledNavbarActions: liveChromePolicy?.disabledNavbarActions ?? {},
     disabledNavbarActionTooltips:

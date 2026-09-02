@@ -308,11 +308,18 @@ const livePerformanceAudioPcmCache = new Map<
   string,
   Promise<LiveVoicePcm | null>
 >();
+let livePerformanceAudioOwnerGeneration = 0;
+
+export function clearSessionAtmosphereAccountAudioCache(): void {
+  livePerformanceAudioOwnerGeneration += 1;
+  livePerformanceAudioPcmCache.clear();
+}
 
 function livePerformanceAudioPcm(url: string): Promise<LiveVoicePcm | null> {
   const normalizedUrl = url.trim();
   const cached = livePerformanceAudioPcmCache.get(normalizedUrl);
   if (cached) return cached;
+  const ownerGeneration = livePerformanceAudioOwnerGeneration;
   const pending =
     typeof fetch === "function"
       ? fetch(normalizedUrl, { cache: "force-cache", credentials: "include" })
@@ -320,6 +327,11 @@ function livePerformanceAudioPcm(url: string): Promise<LiveVoicePcm | null> {
             response.ok ? response.arrayBuffer() : Promise.resolve(null),
           )
           .then((bytes) => (bytes ? decodeLiveVoicePcm(bytes) : null))
+          .then((pcm) =>
+            ownerGeneration === livePerformanceAudioOwnerGeneration
+              ? pcm
+              : null,
+          )
           .catch(() => null)
       : Promise.resolve(null);
   livePerformanceAudioPcmCache.set(normalizedUrl, pending);

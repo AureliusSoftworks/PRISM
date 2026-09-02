@@ -96,11 +96,8 @@ export async function tryGenerateThumbAfterPngWrite(localPngRelPath: string): Pr
     if (!existsSync(absolutePngPath)) return;
     const thumbRel = thumbWebpRelativePathFromPngRelativePath(localPngRelPath);
     writeThumbWebpAtomically(resolveAbsoluteUnderDataRoot(thumbRel), webp);
-  } catch (error) {
-    console.warn(
-      "[image-thumb] post-write thumb failed:",
-      error instanceof Error ? error.message : error
-    );
+  } catch {
+    console.warn("[image-thumb] post-write thumbnail failed.");
   }
 }
 

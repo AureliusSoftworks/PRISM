@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
-  DEBATE_MYSTERY_V2_MOSAIC_LENS_COLUMNS,
-  DEBATE_MYSTERY_V2_MOSAIC_LENS_ROWS,
-  debateMysteryV2LensMosaicCellIndexes,
+  DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS,
+  DEBATE_MYSTERY_V2_EXAMINE_GRID_ROWS,
+  debateMysteryV2ExamineGridCellIndexes,
   resolveDebateMysteryV2Lens,
 } from "./debateMysteryV2Lens.ts";
 
@@ -17,16 +17,19 @@ const styles = readFileSync(
   "utf8",
 );
 
-test("matches the investigation lattice one-to-one with the Mosaic tessera contract", () => {
-  assert.equal(DEBATE_MYSTERY_V2_MOSAIC_LENS_COLUMNS, 320);
-  assert.equal(DEBATE_MYSTERY_V2_MOSAIC_LENS_ROWS, 180);
-  assert.match(styles, /--mosaic-lens-cell-width/u);
-  assert.match(styles, /--mosaic-lens-cell-height/u);
-  assert.doesNotMatch(styles, /repeat\(24, 1fr\)/u);
-  assert.doesNotMatch(experience, /length:\s*24 \* 15/u);
+test("uses one coarse, flat examination grid for Mosaic and Upgraded room art", () => {
+  assert.equal(DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS, 24);
+  assert.equal(DEBATE_MYSTERY_V2_EXAMINE_GRID_ROWS, 15);
+  assert.match(styles, /--examine-grid-cell-width/u);
+  assert.match(styles, /--examine-grid-cell-height/u);
+  assert.match(experience, /className=\{styles\.examinationGrid\} data-art-style=\{currentRoomArtStyle\}/u);
+  assert.doesNotMatch(experience, /currentRoomArtStyle === "mosaic" \? <div className=\{styles\.examinationGrid\}/u);
+  assert.match(styles, /\.examinationGrid\s*\{[\s\S]*transform:\s*none/u);
+  assert.match(styles, /\.examinationGrid i\s*\{[\s\S]*filter:\s*none;[\s\S]*transform:\s*none/u);
+  assert.doesNotMatch(styles, /prismGlintSweep|titleDoorPrismGlint/u);
 });
 
-test("renders only bounded illuminated Mosaic cells instead of the complete lattice", () => {
+test("renders only bounded illuminated examination cells instead of the complete lattice", () => {
   const hotspot = [{
     id: "target",
     polygon: [
@@ -38,13 +41,13 @@ test("renders only bounded illuminated Mosaic cells instead of the complete latt
     unlocked: true,
     examined: false,
   }];
-  const cells = debateMysteryV2LensMosaicCellIndexes(
+  const cells = debateMysteryV2ExamineGridCellIndexes(
     resolveDebateMysteryV2Lens(50, 50, hotspot),
     hotspot,
   );
-  assert.ok(cells.length > 100);
-  assert.ok(cells.length < 1_000);
-  assert.match(experience, /\[\.\.\.mosaicIlluminatedCells\]\.map/u);
-  assert.match(experience, /column \/ DEBATE_MYSTERY_V2_MOSAIC_LENS_COLUMNS/u);
-  assert.match(experience, /row \/ DEBATE_MYSTERY_V2_MOSAIC_LENS_ROWS/u);
+  assert.ok(cells.length > 1);
+  assert.ok(cells.length < DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS * DEBATE_MYSTERY_V2_EXAMINE_GRID_ROWS);
+  assert.match(experience, /\[\.\.\.examinationIlluminatedCells\]\.map/u);
+  assert.match(experience, /column \/ DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS/u);
+  assert.match(experience, /row \/ DEBATE_MYSTERY_V2_EXAMINE_GRID_ROWS/u);
 });

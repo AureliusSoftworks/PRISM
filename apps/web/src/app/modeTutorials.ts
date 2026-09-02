@@ -1164,7 +1164,7 @@ WHODUNNIT_TUTORIAL_STEP.body +=
 
 WHODUNNIT_TUTORIAL_STEP.body = WHODUNNIT_TUTORIAL_STEP.body.replace(
   "Examine is a first-person room-art viewing mode: a lens cursor and proximity glow guide you to invisible, spot-sized accessible examination points. When the lens glows, select anywhere in the room scene to inspect that point;",
-  "Examine is a first-person room-art viewing mode: a lens cursor quietly confirms an available inspectable region only while it is inside that region; click there or focus it with the keyboard to inspect. Mosaic adds a 24×15 scene grid and lights only the lens-local cells under an available region; reviewed and locked regions stay quiet;",
+  "Examine is a first-person room-art viewing mode: a lens cursor quietly confirms an available inspectable region only while it is inside that region; click there or focus it with the keyboard to inspect. A flat, screen-aligned 24×15 grid appears over both Mosaic and Upgraded room art, and only the lens-local squares inside an available region glow; reviewed and locked regions stay quiet;",
 );
 
 WHODUNNIT_TUTORIAL_STEP.body = WHODUNNIT_TUTORIAL_STEP.body.replace(
@@ -1277,9 +1277,9 @@ WHODUNNIT_TUTORIAL_STEP.body = WHODUNNIT_TUTORIAL_STEP.body
 WHODUNNIT_TUTORIAL_STEP.body +=
   " Venue Intent freezes the requested archetype, era, physical scale, and exclusions before proposal generation, then validates the returned venue again before acceptance. A modern full-size passenger cruise ship never silently becomes a yacht: a mismatch disables Use Proposal, while a disclosed compatible catalog fallback requires acknowledgment. Investigation length controls only the accessible rooms; the venue still exists beyond the shown area. Suspect count is separately editable from four to eight and must remain lower than the room count, so a Grand investigation can still use six suspects. Passenger-ship maps keep every accessible deck inside a lightly pitched hull with stern left, bow right, port at the top, starboard at the bottom, and aligned lift and stair landings. D1, D2, and D3 controls keep each full semantic deck name visible. Production checks capability before Forge for Exterior, setting-matched clue props, every Mosaic room, Upgraded room derivatives, Music, Ambience, and Performance voices. If every requested asset is newly generated, the case proceeds directly; any reused, fallback, or unavailable category opens Production Readiness with exact counts, category-specific Retry where supported, Return to Production, or an explicit Continue with fallbacks acknowledgment that persists in Archive. These assets stay case-scoped and never overwrite an installed Mystery Venue. Case Forge reports This attempt separately from Total, shows ETA only after two comparable completed passes, and offers text-only continuation immediately when the early local-voice calibration fails. The full-bleed entrance cover uses only top and bottom fades into white in Light mode or black in Dark mode; room scenes retain their theme-aware edge treatment, and every fade stays clear of navigation input. Reduced Motion removes the crossfade.";
 
-// Live applets retain the canonical navbar instrument. The session locks its
-// controls in place while Auto may repaint the real picker with observed route
-// and effort provenance after each completed generation.
+// Active sessions replace the app navbar with one quiet session bar: Back,
+// observed model + Effort provenance, and Theme. Setup and archives retain the
+// canonical navbar instrument.
 BASE_MODE_TUTORIALS.avatar.steps[0]!.body =
   BASE_MODE_TUTORIALS.avatar.steps[0]!.body.replace(
     "The shared navbar hides for the whole foundry so the chamber can fill the screen.",
@@ -1290,30 +1290,38 @@ for (const step of BASE_MODE_TUTORIALS.coffee.steps) {
   step.body = step.body
     .replace(
       "The shared navbar hides as soon as this new-session topic picker opens so the table and composer fill the viewport",
-      "The shared navbar stays visible as the new-session topic picker opens, with its real routing controls locked in place",
+      "The table fills the viewport beneath a minimal session bar as soon as the new-session topic picker opens",
     )
     .replace(
       "hides the shared navbar and locks routing, model, Effort, Voice, and the entire utility strip for the table",
-      "keeps the shared navbar visible while locking routing, model, Effort, Voice, and session navigation for the table; Theme remains available",
+      "replaces the shared navbar with Back, the observed model + Effort, and Theme while locking every other session control for the table",
     )
     .replace(
       "A quiet model · effort chip stays with the topic once chosen and sits in the same chrome before then so you can still see what is locked.",
-      "The real top Model and Effort controls stay visible but disabled: fixed sessions keep their frozen values, while Auto starts as Auto and then shows the observed model in rainbow text with its current effort glyph. A quiet model · effort chip may remain with the topic as additional provenance.",
+      "The minimal session bar shows the frozen model and Effort. Auto begins as Choosing model, then shows the concrete observed route after generation completes.",
+    )
+    .replace(
+      "Only a terminal model failure temporarily unlocks the model picker; End session remains available in the live table chrome.",
+      "Only a terminal model failure can interrupt that routing lock; the session bar's Back remains available.",
+    )
+    .replace(
+      "End session lives in that table chrome from this waiting screen onward.",
+      "Back lives in the minimal session bar from this waiting screen onward.",
     )
     .replace(
       "The live session stays fullscreen with the shared navbar hidden.",
-      "The live session stays fullscreen beneath the visible, locked shared navbar.",
+      "The live session fills the viewport beneath the minimal session bar.",
     )
     .replace(
       "A finished Review restores the navbar and shows Recorded replay instead of live routing controls",
-      "A finished Review keeps the navbar visible and shows Recorded replay instead of live routing controls",
+      "A finished Review restores the normal navbar and shows Recorded replay instead of live routing controls",
     );
 }
 
 for (const step of BASE_MODE_TUTORIALS.debate.steps) {
   step.body = step.body.replace(
     "Once the chamber goes live, the shared navbar fully hides so the Forum fills the viewport; LOCAL/ONLINE, model, and Effort stay locked",
-    "Once the chamber goes live, the shared navbar stays visible as a locked instrument; LOCAL/ONLINE, model, and Effort stay fixed",
+    "Once the chamber goes live, the Forum fills the viewport beneath a minimal bar with Back, the observed model + Effort, and Theme; all other session chrome stays away",
   );
 }
 
@@ -1321,11 +1329,15 @@ for (const step of BASE_MODE_TUTORIALS.botcast.steps) {
   step.body = step.body
     .replace(
       "While Signal is on air, the shared navbar fully hides so stage and control room fill the viewport; the shows rail stays away and Cut on stage ends the sit.",
-      "While Signal is on air, the shared navbar stays visible with its real Model and Effort controls locked; Auto starts as Auto, then shows the observed model in rainbow text and updates the effort glyph as routing changes. The shows rail stays away and Cut on stage ends the sit.",
+      "While Signal is on air, the stage and control room fill the viewport beneath a minimal bar with Back, the observed model + Effort, and Theme. Auto begins as Choosing model, then shows each concrete observed route. The shows rail stays away.",
     )
     .replace(
       "A quiet model · effort chip stays in the live topline so you can still see what is locked.",
-      "The live topline stays focused on on-air state, the current segment, and transport or terminal actions; model provenance remains in the real top picker.",
+      "The live topline stays focused on on-air state, the current segment, and transport or terminal actions; model provenance remains in the minimal session bar.",
+    )
+    .replace(
+      "The compact Light/Dark control remains in the shared navbar",
+      "The compact Light/Dark control remains in the minimal session bar",
     );
 }
 

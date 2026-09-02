@@ -322,11 +322,8 @@ export async function cleanupLegacyAvatarData(
             unlinkSync(staged.stagedPath);
             deletedFiles += 1;
           }
-        } catch (error) {
-          console.warn(
-            `Legacy avatar cleanup left a staged file after commit: ${staged.stagedPath}`,
-            error
-          );
+        } catch {
+          console.warn("Legacy avatar cleanup left a staged file after commit.");
           if (existsSync(staged.stagedPath)) {
             stagedFilesRemaining.push(staged.stagedPath);
           }

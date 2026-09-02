@@ -6548,7 +6548,11 @@ describe("Debate experience", () => {
     );
     assert.match(
       page,
-      /options\.brandAppletId[\s\S]*renderSharedAppletBrand\(options\.brandAppletId\)/u,
+      /renderSharedAppletBrand\(options\.brandAppletId\)/u,
+    );
+    assert.match(
+      page,
+      /data-live-session-minimal-chrome="true"[\s\S]{0,1600}<LiveSessionModelChip/u,
     );
     assert.match(page, /data-response-mode=\{debateNavbarResponseMode\}/u);
     assert.match(page, /responseMode=\{debateResponseMode\}/u);

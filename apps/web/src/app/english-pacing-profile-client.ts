@@ -7,6 +7,10 @@ import {
 
 const profileCache = new Map<string, EnglishPacingProfileV1 | null>();
 
+export function clearEnglishPacingProfileCache(): void {
+  profileCache.clear();
+}
+
 export function englishPacingProfileCacheKey(
   ownerKind: ActionSfxPackOwnerKind,
   ownerId?: string | null,

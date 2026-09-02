@@ -520,12 +520,8 @@ export function queueBotSemanticFacetsRefresh(args: {
         () => refreshBotSemanticFacets(args)
       )
     )
-      .catch((error) => {
-        console.error(
-          `[bot-facets] refresh failed botId=${args.botId}: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        );
+      .catch(() => {
+        console.error("[bot-facets] refresh failed.");
       })
       .finally(() => {
         queuedFacetRefreshes.delete(key);

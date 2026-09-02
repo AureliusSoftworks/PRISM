@@ -95,6 +95,14 @@ import {
 import { decideAuthBootstrapFailure, isAbortLikeError } from "./authBootstrap";
 import { purgeLegacyBrowserBearerCredentials } from "./browserBearerCredentialCleanup";
 import {
+  deleteAllBrowserOwnerStateV1,
+  deleteBrowserOwnerJsonV1,
+  readBrowserOwnerJsonV1,
+  readOrMigrateBrowserOwnerJsonV1,
+  writeBrowserOwnerJsonV1,
+} from "./browserOwnerState";
+import { deleteBrowserOwnerVaultKeyV1 } from "./browserOwnerVault";
+import {
   AccountOwnerGenerationBoundary,
   runAccountOwnerWork,
   type AccountOwnerGenerationTicket,
@@ -222,9 +230,9 @@ import {
   defaultPrismKeyboardShortcuts,
   keyboardShortcutEventIsRecording,
   keyboardShortcutMatchesEvent,
+  prismKeyboardShortcutsStorageKey,
   readPrismKeyboardShortcuts,
   setActivePrismKeyboardShortcuts,
-  writePrismKeyboardShortcuts,
   type PrismKeyboardShortcutPreferencesV1,
 } from "./keyboardShortcuts";
 import { prismCursorMotionStep } from "./prismCursorMotion";
@@ -403,10 +411,11 @@ import {
   COFFEE_JAZZ_STATIONS,
   COFFEE_SHOP_ENVIRONMENT_DUCK_MS,
   COFFEE_SHOP_ENVIRONMENT_URL,
+  DEFAULT_COFFEE_JAZZ_ATMOSPHERE_PREFERENCE,
+  PRISM_COFFEE_JAZZ_ATMOSPHERE_STORAGE_KEY,
   coffeeJazzBackgroundUrl,
   coffeeShopEnvironmentMix,
-  loadCoffeeJazzAtmosphereFromBrowser,
-  persistCoffeeJazzAtmosphereToBrowser,
+  normalizeCoffeeJazzAtmospherePreference,
   randomCoffeeJazzStationId,
   type CoffeeJazzAtmospherePreference,
   type CoffeeJazzStationId,
@@ -428,6 +437,7 @@ import {
 import { SanctumAudioPlayer } from "./SanctumAudioPlayer";
 import { useAmbientBotVocalization } from "./ambient-bot-vocalization";
 import {
+  clearSessionAtmosphereAccountAudioCache,
   sessionAmbientBotVocalizationTargetId,
   type SessionAmbientBotVocalizationCue,
 } from "./session-atmosphere-audio";
@@ -469,9 +479,9 @@ import {
   AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MAX,
   AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MIN,
   avatarDetailInkTemplateStorageKey,
-  loadAvatarDetailInkTemplates,
+  loadEncryptedAvatarDetailInkTemplates,
   normalizeAvatarDetailInkTemplates,
-  saveAvatarDetailInkTemplates,
+  saveEncryptedAvatarDetailInkTemplates,
   type AvatarDetailInkTemplateV1,
 } from "./avatar-detail-ink-templates";
 import { coffeeCenterScrollIsAtBottom } from "./coffee-center-scroll";
@@ -653,6 +663,7 @@ import {
 } from "./appletTranscriptFrameRate";
 import {
   annotateTranscriptWithFocusEvents,
+  clearLiveSessionFocusRuntime,
   loadLiveSessionFocusEvents,
   useLiveSessionFocusEvents,
 } from "./sessionFocusEvents";
@@ -906,7 +917,6 @@ import {
   createBotGroupCoffeeReturnCheckpoint,
   parseBotGroupCoffeeReturnCheckpoint,
   resolveBotGroupCoffeeReturn,
-  serializeBotGroupCoffeeReturnCheckpoint,
   type BotGroupCoffeeReturnCheckpoint,
 } from "./botGroupCoffeeReturnCheckpoint";
 import {
@@ -1757,9 +1767,11 @@ import {
 } from "./listenerReactionVoice";
 import {
   getOrPrepareResponseCueVoiceClip,
+  purgeResponseCueVoiceClipsForOwner,
   readResponseCueVoiceClip,
   responseCueVoiceCacheKey,
 } from "./responseCueVoiceCache";
+import { purgePendingFaithfulReplayCapturesForOwner } from "./replayPendingCapture";
 import {
   VOICE_PLAYBACK_CHOICES,
   PREMIUM_LOCAL_FALLBACK_NOTICE,
@@ -1924,6 +1936,7 @@ import {
   type BotMentionPick,
 } from "./botMention";
 import {
+  clearZenActionPresentationCache,
   resolveCanvasZenActionCue,
   resolveCurrentZenActionCue,
   resolveZenActionPresentationFromMessage,
@@ -2111,7 +2124,12 @@ import {
 } from "./coffee-action-sfx";
 import { ActionSfxPackMagicButton } from "./ActionSfxPackMagicButton";
 import { EnglishPacingCalibrateMagicButton } from "./EnglishPacingCalibrateMagicButton";
-import { peekEnglishPacingProfile } from "./english-pacing-profile-client";
+import {
+  clearEnglishPacingProfileCache,
+  peekEnglishPacingProfile,
+} from "./english-pacing-profile-client";
+import { clearActionSfxPackClientState } from "./action-sfx-pack-client";
+import { clearLiveVoiceDecodeRuntime } from "./liveVoiceDecode";
 import { playPrismHotkeyInaccessibleSfx } from "./prismHotkeySfx";
 import { buildSignalActionSfxDirectionPayload } from "./signalActionSfxDirection";
 import {
@@ -2188,6 +2206,7 @@ import {
 } from "./zenReadableScroll";
 import { zenRenderedMessageWindow } from "./zenMessageWindow";
 import {
+  clearChatRevealTokenCache,
   DEFAULT_CHAT_REVEAL_TIMING,
   formatChatRevealTokenDisplay,
   isChatRevealEllipsisToken,
@@ -3056,14 +3075,14 @@ function isElementVisibleForZenLiveBotBoundary(node: HTMLElement): boolean {
   return rect.width > 0 && rect.height > 0;
 }
 
-function readStoredMemoryBubbleLayouts(): MemoryBubbleLayoutByScope {
-  if (typeof window === "undefined") return {};
+async function readStoredMemoryBubbleLayouts(
+  ownerId: string,
+): Promise<MemoryBubbleLayoutByScope> {
   try {
-    const raw = window.localStorage.getItem(
-      PRISM_MEMORY_BUBBLE_LAYOUT_STORAGE_KEY,
-    );
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as unknown;
+    const parsed = await readBrowserOwnerJsonV1<unknown>({
+      ownerId,
+      logicalKey: "memory-bubble-layouts",
+    });
     if (!parsed || typeof parsed !== "object") return {};
     const byScope: MemoryBubbleLayoutByScope = {};
     for (const [scopeKey, scopeValue] of Object.entries(
@@ -3098,16 +3117,15 @@ function readStoredMemoryBubbleLayouts(): MemoryBubbleLayoutByScope {
   }
 }
 
-function persistMemoryBubbleLayouts(layouts: MemoryBubbleLayoutByScope): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(
-      PRISM_MEMORY_BUBBLE_LAYOUT_STORAGE_KEY,
-      JSON.stringify(layouts),
-    );
-  } catch {
-    // localStorage can throw (privacy mode, quota); non-fatal.
-  }
+function persistMemoryBubbleLayouts(
+  ownerId: string,
+  layouts: MemoryBubbleLayoutByScope,
+): void {
+  void writeBrowserOwnerJsonV1({
+    ownerId,
+    logicalKey: "memory-bubble-layouts",
+    value: layouts,
+  });
 }
 
 const ZEN_LIVE_BOT_AVATAR_VIEWPORT_MARGIN_PX = 14;
@@ -3411,14 +3429,16 @@ async function withBotAvatarSaveTimeout<T>(
   }
 }
 
-function readZenLiveBotAvatarPosition(): ZenLiveBotAvatarPosition | null {
-  if (typeof window === "undefined") return null;
+async function readZenLiveBotAvatarPosition(
+  ownerId: string,
+): Promise<ZenLiveBotAvatarPosition | null> {
   try {
-    const raw = window.localStorage.getItem(
-      PRISM_ZEN_LIVE_BOT_AVATAR_POSITION_STORAGE_KEY,
-    );
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<ZenLiveBotAvatarPosition> | null;
+    const parsed = await readBrowserOwnerJsonV1<
+      Partial<ZenLiveBotAvatarPosition>
+    >({
+      ownerId,
+      logicalKey: "zen-live-avatar-position",
+    });
     if (
       parsed &&
       typeof parsed.x === "number" &&
@@ -3435,17 +3455,14 @@ function readZenLiveBotAvatarPosition(): ZenLiveBotAvatarPosition | null {
 }
 
 function persistZenLiveBotAvatarPosition(
+  ownerId: string,
   position: ZenLiveBotAvatarPosition,
 ): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(
-      PRISM_ZEN_LIVE_BOT_AVATAR_POSITION_STORAGE_KEY,
-      JSON.stringify(position),
-    );
-  } catch {
-    // localStorage can throw (privacy mode, quota); non-fatal.
-  }
+  void writeBrowserOwnerJsonV1({
+    ownerId,
+    logicalKey: "zen-live-avatar-position",
+    value: position,
+  });
 }
 
 function normalizeZenLiveBotAvatarSizePx(value: unknown): number {
@@ -3517,40 +3534,23 @@ function zenLiveBotAvatarRenderMode(
   return "mini";
 }
 
-function readZenLiveBotAvatarSizePx(): number {
-  if (typeof window === "undefined") return ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX;
-  try {
-    const raw = window.localStorage.getItem(
-      PRISM_ZEN_LIVE_BOT_AVATAR_SIZE_STORAGE_KEY,
-    );
-    if (raw !== null) return normalizeZenLiveBotAvatarSizePx(raw);
-    const legacyRaw = window.localStorage.getItem(
-      PRISM_ZEN_LIVE_BOT_AVATAR_LEGACY_SIZE_STORAGE_KEY,
-    );
-    if (legacyRaw !== null) {
-      const migrated = migrateLegacyZenLiveBotAvatarSizePx(legacyRaw);
-      window.localStorage.setItem(
-        PRISM_ZEN_LIVE_BOT_AVATAR_SIZE_STORAGE_KEY,
-        String(migrated),
-      );
-      return migrated;
-    }
-  } catch {
-    // localStorage can throw (privacy mode, quota); non-fatal.
-  }
-  return ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX;
+async function readZenLiveBotAvatarSizePx(ownerId: string): Promise<number> {
+  const stored = await readBrowserOwnerJsonV1<unknown>({
+    ownerId,
+    logicalKey: "zen-live-avatar-size",
+  });
+  return normalizeZenLiveBotAvatarSizePx(stored);
 }
 
-function persistZenLiveBotAvatarSizePx(sizePx: number): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(
-      PRISM_ZEN_LIVE_BOT_AVATAR_SIZE_STORAGE_KEY,
-      String(normalizeZenLiveBotAvatarSizePx(sizePx)),
-    );
-  } catch {
-    // localStorage can throw (privacy mode, quota); non-fatal.
-  }
+function persistZenLiveBotAvatarSizePx(
+  ownerId: string,
+  sizePx: number,
+): void {
+  void writeBrowserOwnerJsonV1({
+    ownerId,
+    logicalKey: "zen-live-avatar-size",
+    value: normalizeZenLiveBotAvatarSizePx(sizePx),
+  });
 }
 
 function resolveZenLiveBotProseWidthPx(avatarSizePx: number): number {
@@ -6993,94 +6993,15 @@ const PRISM_COFFEE_PAUSED_SESSION_IDS_STORAGE_KEY =
 const PRISM_COFFEE_PAUSED_SESSION_REMAINING_MS_STORAGE_KEY =
   "prism_coffee_paused_session_remaining_ms_v1";
 
-function loadCoffeeSettingsFromBrowser(): CoffeeSessionSettings {
-  if (typeof window === "undefined") {
-    return normalizeCoffeeSessionSettings(undefined);
-  }
-  try {
-    const raw = window.localStorage.getItem(
-      PRISM_COFFEE_SESSION_SETTINGS_STORAGE_KEY,
-    );
-    if (!raw) return normalizeCoffeeSessionSettings(undefined);
-    return normalizeCoffeeSessionSettings(JSON.parse(raw) as unknown);
-  } catch {
-    return normalizeCoffeeSessionSettings(undefined);
-  }
-}
-
-function persistCoffeeSettingsToBrowser(settings: CoffeeSessionSettings): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(
-      PRISM_COFFEE_SESSION_SETTINGS_STORAGE_KEY,
-      JSON.stringify(settings),
-    );
-  } catch {
-    // Private mode / quota — ignore; current session state still applies.
-  }
-}
-
 function loadCoffeePausedSessionIdsFromBrowser(): Set<string> {
-  if (typeof window === "undefined") return new Set<string>();
-  try {
-    window.localStorage.removeItem(PRISM_COFFEE_PAUSED_SESSION_IDS_STORAGE_KEY);
-  } catch {
-    // Private mode / quota — ignore; paused sessions are no longer resumed.
-  }
   return new Set<string>();
-}
-
-function persistCoffeePausedSessionIdsToBrowser(sessionIds: Set<string>): void {
-  if (typeof window === "undefined") return;
-  try {
-    if (sessionIds.size === 0) {
-      window.localStorage.removeItem(
-        PRISM_COFFEE_PAUSED_SESSION_IDS_STORAGE_KEY,
-      );
-      return;
-    }
-    window.localStorage.setItem(
-      PRISM_COFFEE_PAUSED_SESSION_IDS_STORAGE_KEY,
-      JSON.stringify(Array.from(sessionIds)),
-    );
-  } catch {
-    // Private mode / quota — ignore; in-memory state still applies.
-  }
 }
 
 function loadCoffeePausedSessionRemainingMsByIdFromBrowser(): Record<
   string,
   number
 > {
-  if (typeof window === "undefined") return {};
-  try {
-    window.localStorage.removeItem(
-      PRISM_COFFEE_PAUSED_SESSION_REMAINING_MS_STORAGE_KEY,
-    );
-  } catch {
-    // Private mode / quota — ignore; paused sessions are no longer resumed.
-  }
   return {};
-}
-
-function persistCoffeePausedSessionRemainingMsByIdToBrowser(
-  remainingById: Record<string, number>,
-): void {
-  if (typeof window === "undefined") return;
-  try {
-    if (Object.keys(remainingById).length === 0) {
-      window.localStorage.removeItem(
-        PRISM_COFFEE_PAUSED_SESSION_REMAINING_MS_STORAGE_KEY,
-      );
-      return;
-    }
-    window.localStorage.setItem(
-      PRISM_COFFEE_PAUSED_SESSION_REMAINING_MS_STORAGE_KEY,
-      JSON.stringify(remainingById),
-    );
-  } catch {
-    // Private mode / quota — ignore; in-memory state still applies.
-  }
 }
 
 /** Treat sessions with a topic or any message as started, so preview can separate Join vs Review states. */
@@ -8329,39 +8250,60 @@ function normalizeZenSessionBreakState(
   };
 }
 
-function readStoredZenSessionBreak(
+async function readStoredZenSessionBreak(
   userId: string | null | undefined,
-): ZenSessionBreakState | null {
-  if (typeof window === "undefined") return null;
+): Promise<ZenSessionBreakState | null> {
+  if (!userId || typeof window === "undefined") return null;
+  const encrypted = normalizeZenSessionBreakState(
+    await readBrowserOwnerJsonV1({
+      ownerId: userId,
+      logicalKey: "zen-session-break",
+    }),
+  );
+  if (encrypted?.userId === userId) return encrypted;
+
+  let legacy: ZenSessionBreakState | null = null;
   try {
-    const parsed = normalizeZenSessionBreakState(
+    legacy = normalizeZenSessionBreakState(
       JSON.parse(
         window.localStorage.getItem(PRISM_ZEN_SESSION_BREAK_STORAGE_KEY) ??
           "null",
       ),
     );
-    if (!parsed) return null;
-    if (parsed.userId && userId && parsed.userId !== userId) return null;
-    return parsed;
   } catch {
-    return null;
+    // Invalid legacy state is discarded below.
   }
+  try {
+    window.localStorage.removeItem(PRISM_ZEN_SESSION_BREAK_STORAGE_KEY);
+  } catch {
+    // Best effort cleanup in restricted browser contexts.
+  }
+  if (legacy?.userId !== userId) return null;
+  await writeBrowserOwnerJsonV1({
+    ownerId: userId,
+    logicalKey: "zen-session-break",
+    value: legacy,
+  });
+  return legacy;
 }
 
-function persistZenSessionBreak(state: ZenSessionBreakState | null): void {
-  if (typeof window === "undefined") return;
-  try {
-    if (!state) {
-      window.localStorage.removeItem(PRISM_ZEN_SESSION_BREAK_STORAGE_KEY);
-      return;
-    }
-    window.localStorage.setItem(
-      PRISM_ZEN_SESSION_BREAK_STORAGE_KEY,
-      JSON.stringify(state),
-    );
-  } catch {
-    // Private mode / quota: the in-memory marker still works for this tab.
+function persistZenSessionBreak(
+  userId: string | null | undefined,
+  state: ZenSessionBreakState | null,
+): void {
+  if (!userId) return;
+  if (!state) {
+    void deleteBrowserOwnerJsonV1({
+      ownerId: userId,
+      logicalKey: "zen-session-break",
+    });
+    return;
   }
+  void writeBrowserOwnerJsonV1({
+    ownerId: userId,
+    logicalKey: "zen-session-break",
+    value: { ...state, userId },
+  });
 }
 
 function latestMessageActivityAt(messages: readonly Message[]): string | null {
@@ -17725,33 +17667,87 @@ function starterPackInstallStorageKey(userId: string): string {
   return `${STARTER_PACK_INSTALL_STORAGE_PREFIX}:${userId}:${BOT_MARKETPLACE_STARTER_THEME_ID}`;
 }
 
-function starterPackInstallMarked(userId: string): boolean {
-  if (typeof window === "undefined") return false;
+async function starterPackInstallMarked(userId: string): Promise<boolean> {
+  const stored = await readBrowserOwnerJsonV1<boolean>({
+    ownerId: userId,
+    logicalKey: "starter-pack-installed",
+  });
+  if (stored === true) return true;
+  let legacyMarked = false;
   try {
-    return (
-      window.localStorage.getItem(starterPackInstallStorageKey(userId)) ===
-      "done"
-    );
+    const legacyKey = starterPackInstallStorageKey(userId);
+    legacyMarked = window.localStorage.getItem(legacyKey) === "done";
+    window.localStorage.removeItem(legacyKey);
   } catch {
-    return false;
+    // Missing legacy state is equivalent to an unmarked account.
   }
+  if (legacyMarked) markStarterPackInstalled(userId);
+  return legacyMarked;
 }
 
 function markStarterPackInstalled(userId: string): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(starterPackInstallStorageKey(userId), "done");
-  } catch {
-    // Non-fatal: export-hash checks still prevent duplicate installs.
-  }
+  void writeBrowserOwnerJsonV1({
+    ownerId: userId,
+    logicalKey: "starter-pack-installed",
+    value: true,
+  });
 }
 
 function clearStarterPackInstalledMarker(userId: string): void {
-  if (typeof window === "undefined") return;
+  void deleteBrowserOwnerJsonV1({
+    ownerId: userId,
+    logicalKey: "starter-pack-installed",
+  });
   try {
     window.localStorage.removeItem(starterPackInstallStorageKey(userId));
   } catch {
-    // Storage cleanup is best effort during factory reset.
+    // Legacy storage cleanup is best effort during factory reset.
+  }
+}
+
+async function readStoredBotGroupCoffeeReturnCheckpoint(
+  ownerId: string,
+  coffeeSessionId: string,
+): Promise<BotGroupCoffeeReturnCheckpoint | null> {
+  const legacyKey = botGroupCoffeeReturnCheckpointStorageKey(coffeeSessionId);
+  const stored = await readOrMigrateBrowserOwnerJsonV1<unknown>({
+    ownerId,
+    logicalKey: `bot-group-coffee-return:${coffeeSessionId}`,
+    legacyStorage:
+      typeof window === "undefined" ? null : window.sessionStorage,
+    legacyKeys: legacyKey ? [legacyKey] : [],
+  });
+  return parseBotGroupCoffeeReturnCheckpoint(
+    stored === null ? null : JSON.stringify(stored),
+    coffeeSessionId,
+  );
+}
+
+function persistBotGroupCoffeeReturnCheckpoint(
+  ownerId: string,
+  checkpoint: BotGroupCoffeeReturnCheckpoint,
+): void {
+  void writeBrowserOwnerJsonV1({
+    ownerId,
+    logicalKey: `bot-group-coffee-return:${checkpoint.coffeeSessionId}`,
+    value: checkpoint,
+  });
+}
+
+function clearStoredBotGroupCoffeeReturnCheckpoint(
+  ownerId: string,
+  coffeeSessionId: string,
+): void {
+  void deleteBrowserOwnerJsonV1({
+    ownerId,
+    logicalKey: `bot-group-coffee-return:${coffeeSessionId}`,
+  });
+  const legacyKey = botGroupCoffeeReturnCheckpointStorageKey(coffeeSessionId);
+  if (!legacyKey || typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(legacyKey);
+  } catch {
+    // Legacy cleanup is best effort.
   }
 }
 
@@ -19353,73 +19349,60 @@ function commandCenterSelectionStorageKey(userId: string): string {
   return `${COMMAND_CENTER_STATE_STORAGE_KEY}:selection:${userId}`;
 }
 
-function loadConversationGroupOrder(userId: string): string[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(
-      conversationGroupOrderStorageKey(userId),
-    );
-    const parsed: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed)
-      ? parsed.filter((key): key is string => typeof key === "string")
-      : [];
-  } catch {
-    return [];
-  }
+async function loadConversationGroupOrder(userId: string): Promise<string[]> {
+  const parsed = await readOrMigrateBrowserOwnerJsonV1<unknown>({
+    ownerId: userId,
+    logicalKey: "conversation-group-order",
+    legacyStorage:
+      typeof window === "undefined" ? null : window.localStorage,
+    legacyKeys: [conversationGroupOrderStorageKey(userId)],
+  });
+  return Array.isArray(parsed)
+    ? parsed.filter((key): key is string => typeof key === "string")
+    : [];
 }
 
-function loadMarketplaceBotUpdateRevisions(
+async function loadMarketplaceBotUpdateRevisions(
   userId: string,
-): Record<string, string> {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = window.localStorage.getItem(
-      botMarketplaceUpdateRevisionsStorageKey(userId),
-    );
-    const parsed: unknown = raw ? JSON.parse(raw) : {};
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-      return {};
-    const revisions: Record<string, string> = {};
-    for (const [entryId, revision] of Object.entries(parsed)) {
-      if (
-        entryId.trim().length > 0 &&
-        typeof revision === "string" &&
-        revision.trim().length > 0
-      ) {
-        revisions[entryId] = revision;
-      }
+): Promise<Record<string, string>> {
+  const parsed = await readOrMigrateBrowserOwnerJsonV1<unknown>({
+    ownerId: userId,
+    logicalKey: "marketplace-bot-update-revisions",
+    legacyStorage:
+      typeof window === "undefined" ? null : window.localStorage,
+    legacyKeys: [botMarketplaceUpdateRevisionsStorageKey(userId)],
+  });
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  const revisions: Record<string, string> = {};
+  for (const [entryId, revision] of Object.entries(parsed)) {
+    if (
+      entryId.trim().length > 0 &&
+      typeof revision === "string" &&
+      revision.trim().length > 0
+    ) {
+      revisions[entryId] = revision;
     }
-    return revisions;
-  } catch {
-    return {};
   }
+  return revisions;
 }
 
 function saveMarketplaceBotUpdateRevisions(
   userId: string,
   revisions: Readonly<Record<string, string>>,
 ): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(
-      botMarketplaceUpdateRevisionsStorageKey(userId),
-      JSON.stringify(revisions),
-    );
-  } catch {
-    // Non-fatal: keep the in-memory update state for this page session.
-  }
+  void writeBrowserOwnerJsonV1({
+    ownerId: userId,
+    logicalKey: "marketplace-bot-update-revisions",
+    value: revisions,
+  });
 }
 
 function persistConversationGroupOrder(userId: string, order: string[]): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(
-      conversationGroupOrderStorageKey(userId),
-      JSON.stringify(order),
-    );
-  } catch {
-    // Non-fatal: drag ordering still works for the current page session.
-  }
+  void writeBrowserOwnerJsonV1({
+    ownerId: userId,
+    logicalKey: "conversation-group-order",
+    value: order,
+  });
 }
 
 function reorderConversationGroupKeys(
@@ -20396,6 +20379,20 @@ function clearLegacyBrowserBearerCredentials(): void {
     localStorage: window.localStorage,
     sessionStorage: window.sessionStorage,
   });
+}
+
+async function purgeBrowserPersistenceForOwner(
+  ownerId: string,
+  options: { deleteVaultKey?: boolean } = {},
+): Promise<void> {
+  await Promise.all([
+    deleteAllBrowserOwnerStateV1(ownerId),
+    purgeResponseCueVoiceClipsForOwner(ownerId),
+    purgePendingFaithfulReplayCapturesForOwner(ownerId),
+  ]);
+  if (options.deleteVaultKey) {
+    await deleteBrowserOwnerVaultKeyV1(ownerId);
+  }
 }
 
 // ── Inline SVG glyphs ─────────────────────────────────────────────────
@@ -33645,6 +33642,7 @@ const BotHubVoicePreviewAvatarPlate = memo(
 
 function ZenLiveBotPresencePlate({
   bot,
+  ownerId,
   avatarSizePx,
   actionState,
   replyActionText,
@@ -33671,6 +33669,7 @@ function ZenLiveBotPresencePlate({
   leadershipGroupCount = 0,
 }: {
   bot: Bot | null;
+  ownerId: string | null;
   avatarSizePx: number;
   actionState: ZenLiveBotActionState | null;
   replyActionText?: string | null;
@@ -33709,9 +33708,7 @@ function ZenLiveBotPresencePlate({
   const avatarLastPointerDownMsRef = useRef(0);
   const avatarMetalRotationRef = useRef(0);
   const [avatarPosition, setAvatarPosition] =
-    useState<ZenLiveBotAvatarPosition | null>(() =>
-      readZenLiveBotAvatarPosition(),
-    );
+    useState<ZenLiveBotAvatarPosition | null>(null);
   const bodySize = normalizeZenLiveBotAvatarSizePx(avatarSizePx);
   const avatarRenderMode = zenLiveBotAvatarRenderMode(bodySize);
   // Powers that shrink the rendered avatar keep the measured-size governor so
@@ -33815,6 +33812,34 @@ function ZenLiveBotPresencePlate({
   useEffect(() => {
     avatarPositionRef.current = avatarPosition;
   }, [avatarPosition]);
+
+  useEffect(() => {
+    avatarPositionUserRelocatedRef.current = false;
+    avatarPositionRef.current = null;
+    setAvatarPosition(null);
+    if (!ownerId) return;
+    try {
+      window.localStorage.removeItem(
+        PRISM_ZEN_LIVE_BOT_AVATAR_POSITION_STORAGE_KEY,
+      );
+    } catch {
+      // Owner-bound encrypted state remains authoritative.
+    }
+    let disposed = false;
+    void readZenLiveBotAvatarPosition(ownerId).then((stored) => {
+      if (disposed || !stored) return;
+      const clamped = {
+        x: Math.max(0, Math.min(window.innerWidth, stored.x)),
+        y: Math.max(0, Math.min(window.innerHeight, stored.y)),
+      };
+      avatarPositionUserRelocatedRef.current = true;
+      avatarPositionRef.current = clamped;
+      setAvatarPosition(clamped);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [ownerId]);
 
   const orientAvatarForHorizontalTravel = useCallback(
     (horizontalDeltaPx: number): void => {
@@ -33929,10 +33954,10 @@ function ZenLiveBotPresencePlate({
 
   const persistAvatarPositionIfUserRelocated = useCallback(
     (position: ZenLiveBotAvatarPosition): void => {
-      if (!avatarPositionUserRelocatedRef.current) return;
-      persistZenLiveBotAvatarPosition(position);
+      if (!ownerId || !avatarPositionUserRelocatedRef.current) return;
+      persistZenLiveBotAvatarPosition(ownerId, position);
     },
-    [],
+    [ownerId],
   );
 
   const setAvatarPositionClamped = useCallback(
@@ -50664,6 +50689,13 @@ function HomeContent(): React.JSX.Element {
     string[]
   >([]);
   const [debateLiveSessionActive, setDebateLiveSessionActive] = useState(false);
+  const debateLiveBackHandlerRef = useRef<(() => void) | null>(null);
+  const handleDebateLiveBackHandlerChange = useCallback(
+    (handler: (() => void) | null): void => {
+      debateLiveBackHandlerRef.current = handler;
+    },
+    [],
+  );
   const [debateLiveSessionId, setDebateLiveSessionId] = useState<string | null>(
     null,
   );
@@ -51040,11 +51072,31 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     const platform = navigator.platform;
     setKeyboardShortcutPlatform(platform);
-    const next = user?.id
-      ? readPrismKeyboardShortcuts(window.localStorage, user.id, platform)
-      : defaultPrismKeyboardShortcuts(platform);
-    setKeyboardShortcuts(next);
-    setActivePrismKeyboardShortcuts(next);
+    if (!user?.id) {
+      const defaults = defaultPrismKeyboardShortcuts(platform);
+      setKeyboardShortcuts(defaults);
+      setActivePrismKeyboardShortcuts(defaults);
+      return;
+    }
+    let disposed = false;
+    void readOrMigrateBrowserOwnerJsonV1<unknown>({
+      ownerId: user.id,
+      logicalKey: "keyboard-shortcuts",
+      legacyStorage: window.localStorage,
+      legacyKeys: [prismKeyboardShortcutsStorageKey(user.id)],
+    }).then((stored) => {
+      if (disposed) return;
+      const next = readPrismKeyboardShortcuts(
+        { getItem: () => (stored === null ? null : JSON.stringify(stored)) },
+        user.id,
+        platform,
+      );
+      setKeyboardShortcuts(next);
+      setActivePrismKeyboardShortcuts(next);
+    });
+    return () => {
+      disposed = true;
+    };
   }, [user?.id]);
   useEffect(() => {
     setActivePrismKeyboardShortcuts(keyboardShortcuts);
@@ -51054,19 +51106,22 @@ function HomeContent(): React.JSX.Element {
       setKeyboardShortcuts(next);
       setActivePrismKeyboardShortcuts(next);
       if (!user?.id) return;
-      try {
-        writePrismKeyboardShortcuts(window.localStorage, user.id, next);
-      } catch {
+      void writeBrowserOwnerJsonV1({
+        ownerId: user.id,
+        logicalKey: "keyboard-shortcuts",
+        value: next,
+      }).then((stored) => {
+        if (stored) return;
         setPanelError(
           "That shortcut works for this session, but could not be saved on this device.",
         );
-      }
+      });
     },
     [user?.id],
   );
   useEffect(() => {
     if (!user?.id) return;
-    void retryPendingFaithfulReplaySessions().then((completed) => {
+    void retryPendingFaithfulReplaySessions(user.id).then((completed) => {
       if (completed > 0) {
         window.dispatchEvent(new Event(REPLAY_RECORDING_CHANGED_EVENT));
       }
@@ -51205,8 +51260,29 @@ function HomeContent(): React.JSX.Element {
   const [zenLiveBotAction, setZenLiveBotAction] =
     useState<ZenLiveBotActionState | null>(null);
   const [zenLiveBotAvatarSizePx, setZenLiveBotAvatarSizePx] = useState<number>(
-    () => readZenLiveBotAvatarSizePx(),
+    ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX,
   );
+  useEffect(() => {
+    setZenLiveBotAvatarSizePx(ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX);
+    if (!user?.id) return;
+    try {
+      window.localStorage.removeItem(
+        PRISM_ZEN_LIVE_BOT_AVATAR_SIZE_STORAGE_KEY,
+      );
+      window.localStorage.removeItem(
+        PRISM_ZEN_LIVE_BOT_AVATAR_LEGACY_SIZE_STORAGE_KEY,
+      );
+    } catch {
+      // Owner-bound encrypted state remains authoritative.
+    }
+    let disposed = false;
+    void readZenLiveBotAvatarSizePx(user.id).then((stored) => {
+      if (!disposed) setZenLiveBotAvatarSizePx(stored);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [user?.id]);
   const zenLiveBotActionRef = useRef<ZenLiveBotActionState | null>(null);
   const zenLiveActionRequestSeqRef = useRef(0);
   const zenLiveActionAbortRef = useRef<AbortController | null>(null);
@@ -51405,7 +51481,7 @@ function HomeContent(): React.JSX.Element {
               ? { ...current, modelEffortPreferences: previousPreferences }
               : current,
           );
-          console.warn("[effort] preference save failed", error);
+          console.warn("[effort] preference save failed.");
         })
         .finally(() => {
           if (modelEffortMutationQueueRef.current.get(key) === mutation) {
@@ -51507,7 +51583,7 @@ function HomeContent(): React.JSX.Element {
               ? { ...current, modelTurboPreferences: previousPreferences }
               : current,
           );
-          console.warn("[turbo] preference save failed", error);
+          console.warn("[turbo] preference save failed.");
         })
         .finally(() => {
           if (modelTurboMutationQueueRef.current.get(key) === mutation) {
@@ -51596,7 +51672,7 @@ function HomeContent(): React.JSX.Element {
               ? { ...current, modelTurboPreferences: previousPreferences }
               : current,
           );
-          console.warn(`[turbo] ${reason} safety reset failed`, error);
+          console.warn("[turbo] safety reset failed.");
         });
       modelTurboResetQueueRef.current = reset;
     },
@@ -51649,7 +51725,7 @@ function HomeContent(): React.JSX.Element {
             ? { ...current, modelEffortPreferences: previousPreferences }
             : current,
         );
-        console.warn("[effort] reset failed", error);
+        console.warn("[effort] reset failed.");
       });
   }, [
     captureAccountOwnerGeneration,
@@ -51657,18 +51733,13 @@ function HomeContent(): React.JSX.Element {
     isCurrentAccountOwnerGeneration,
     runForAccountOwner,
   ]);
+  const simulatedEffortEducationShownOwnerIdsRef = useRef<Set<string>>(
+    new Set(),
+  );
   const notifySimulatedEffortEducation = useCallback(() => {
     if (typeof window === "undefined" || !user?.id) return;
-    const storageKey = `prism:simulated-effort-toast:v1:${encodeURIComponent(
-      user.id,
-    )}`;
-    try {
-      window.sessionStorage.removeItem("prism:simulated-effort-toast:v1");
-      if (window.sessionStorage.getItem(storageKey) === "1") return;
-      window.sessionStorage.setItem(storageKey, "1");
-    } catch {
-      // Still show once this session even if storage is blocked.
-    }
+    if (simulatedEffortEducationShownOwnerIdsRef.current.has(user.id)) return;
+    simulatedEffortEducationShownOwnerIdsRef.current.add(user.id);
     showLocalCommandToast(
       "LOCAL simulated thinking",
       "This local model has no built-in Effort dial. Prism runs private planning passes on your configured Ollama provider before the reply — higher Effort means more passes and a longer wait.",
@@ -51783,41 +51854,45 @@ function HomeContent(): React.JSX.Element {
     // account startup preference — only true applet deep links do.
     if (prismStartupViewParamBlocksPreference(viewParam)) return;
 
-    let lastWorkspaceLocation: string | null = null;
-    try {
-      lastWorkspaceLocation = window.localStorage.getItem(
-        lastWorkspaceStorageKeyForUser(user.id),
-      );
-    } catch {
-      // Storage can be unavailable in locked-down browser contexts.
-    }
-    const preference = settings.startupPreference;
-    const destination = prismStartupLocationFor({
-      explicitViewParam: null,
-      preference,
-      lastWorkspaceLocation,
+    let disposed = false;
+    void readOrMigrateBrowserOwnerJsonV1<string>({
+      ownerId: user.id,
+      logicalKey: "last-workspace-location",
+      legacyStorage: window.localStorage,
+      legacyKeys: [lastWorkspaceStorageKeyForUser(user.id)],
+    }).then((lastWorkspaceLocation) => {
+      if (disposed) return;
+      const preference = settings.startupPreference;
+      const destination = prismStartupLocationFor({
+        explicitViewParam: null,
+        preference,
+        lastWorkspaceLocation,
+      });
+
+      // Home means All Bots overview — suppress continuous Prism-chat auto-open.
+      if (preference === "home") {
+        chatAutoRestoreSuppressedRef.current = true;
+        setChatAutoRestoreSuppressed(true);
+        setForceNewConversationOnNextSend(true);
+        setSelectedId(null);
+        setDetail(null);
+        setSessionOpinion(null);
+        setBotOpinion(null);
+        setSelectedBotId(null);
+        setSandboxGridSelectedBotId(null);
+        setChatBotOverride(undefined);
+        setZenPersonaBotId(null);
+        setConversationStarterPrompts(null);
+        setChatStartupSummary(null);
+      }
+
+      if (!destination) return;
+      const currentLocation = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      if (destination !== currentLocation) router.replace(destination);
     });
-
-    // Home means All Bots overview — suppress continuous Prism-chat auto-open.
-    if (preference === "home") {
-      chatAutoRestoreSuppressedRef.current = true;
-      setChatAutoRestoreSuppressed(true);
-      setForceNewConversationOnNextSend(true);
-      setSelectedId(null);
-      setDetail(null);
-      setSessionOpinion(null);
-      setBotOpinion(null);
-      setSelectedBotId(null);
-      setSandboxGridSelectedBotId(null);
-      setChatBotOverride(undefined);
-      setZenPersonaBotId(null);
-      setConversationStarterPrompts(null);
-      setChatStartupSummary(null);
-    }
-
-    if (!destination) return;
-    const currentLocation = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-    if (destination !== currentLocation) router.replace(destination);
+    return () => {
+      disposed = true;
+    };
   }, [router, settings, user, viewParam]);
   useEffect(() => {
     if (!user || viewParam === null) return;
@@ -51826,14 +51901,11 @@ function HomeContent(): React.JSX.Element {
       `${window.location.pathname}${window.location.search}${window.location.hash}`,
     );
     if (!location) return;
-    try {
-      window.localStorage.setItem(
-        lastWorkspaceStorageKeyForUser(user.id),
-        location,
-      );
-    } catch {
-      // Startup still falls back to Home when per-device recovery cannot save.
-    }
+    void writeBrowserOwnerJsonV1({
+      ownerId: user.id,
+      logicalKey: "last-workspace-location",
+      value: location,
+    });
   }, [user, viewParam]);
   const [
     ephemeralChatPreferenceSavingMode,
@@ -51983,20 +52055,23 @@ function HomeContent(): React.JSX.Element {
     ? `prism_zen_initial_atmosphere_wait:${user.id}`
     : null;
   useEffect(() => {
-    if (!zenInitialAtmosphereWaitStorageKey) {
+    if (!zenInitialAtmosphereWaitStorageKey || !user?.id) {
       setZenInitialAtmosphereWaitPreference(false);
       return;
     }
-    try {
-      setZenInitialAtmosphereWaitPreference(
-        window.localStorage.getItem(zenInitialAtmosphereWaitStorageKey) ===
-          "true",
-      );
-    } catch {
-      // Storage can be unavailable in private browsing; the saved account
-      // preference remains the fallback.
-    }
-  }, [zenInitialAtmosphereWaitStorageKey]);
+    let disposed = false;
+    void readOrMigrateBrowserOwnerJsonV1<boolean>({
+      ownerId: user.id,
+      logicalKey: "zen-initial-atmosphere-wait",
+      legacyStorage: window.localStorage,
+      legacyKeys: [zenInitialAtmosphereWaitStorageKey],
+    }).then((stored) => {
+      if (!disposed) setZenInitialAtmosphereWaitPreference(stored === true);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [user?.id, zenInitialAtmosphereWaitStorageKey]);
   const zenInitialAtmosphereWaitEnabled =
     savedZenInitialAtmosphereWaitEnabled || zenInitialAtmosphereWaitPreference;
   const zenMessageFontBounds = useMemo<ZenMessageFontBounds>(
@@ -53707,6 +53782,37 @@ function HomeContent(): React.JSX.Element {
   const interruptedSpeakerVoiceReadyClipRef = useRef<
     Map<string, EnglishVoiceSynthesisClip | null>
   >(new Map());
+  const voiceCacheOwnerIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const ownerId = user?.id ?? null;
+    if (voiceCacheOwnerIdRef.current === ownerId) return;
+    voiceCacheOwnerIdRef.current = ownerId;
+    responseCuePlaybackAbortRef.current?.abort();
+    responseCuePlaybackAbortRef.current = null;
+    if (responseCueWaitTimerRef.current !== null) {
+      window.clearTimeout(responseCueWaitTimerRef.current);
+      responseCueWaitTimerRef.current = null;
+    }
+    responseCueBarrierRef.current = Promise.resolve();
+    responseCueWarmByKeyRef.current.clear();
+    responseCueRuntimeByBotIdRef.current.clear();
+    responseCueServerIdRef.current = null;
+    responseCueSpeechRef.current = null;
+    setActiveResponseCueSpeech(null);
+    setActiveResponseCueBeat(null);
+    setResponseCueBeatHistory([]);
+    signalVoicePrefetchSchedulerRef.current.clear();
+    signalVoiceClipCacheRef.current.clear();
+    signalVoiceClipEpisodeByMessageIdRef.current.clear();
+    signalVoiceConsumedEpisodeByMessageIdRef.current.clear();
+    signalVoicePrefetchAttemptEpisodeByMessageIdRef.current.clear();
+    signalVoiceEngineByEpisodeParticipantRef.current.clear();
+    listenerReactionVoiceClipCacheRef.current.clear();
+    listenerReactionVoiceReadyClipRef.current.clear();
+    interruptedSpeakerVoiceClipCacheRef.current.clear();
+    interruptedSpeakerVoiceReadyClipRef.current.clear();
+    debateLastVoiceClipRef.current = null;
+  }, [user?.id]);
   const configuredVoicePlaybackSelection: ReplayVoiceSelectionSnapshotV2 = {
     voiceMode: normalizeVoiceMode(settings?.voiceMode),
     englishVoiceEngine: normalizeEnglishVoiceEngine(
@@ -54744,7 +54850,7 @@ function HomeContent(): React.JSX.Element {
           if (!isPrismBackendUnavailableError(err)) {
             setVoicePlaybackNotice(message);
           }
-          console.warn("[voices] playback failed", err);
+          console.warn("[voices] playback failed.");
         }
       } finally {
         if (voiceSynthesisAbortRef.current === controller) {
@@ -54939,6 +55045,8 @@ function HomeContent(): React.JSX.Element {
   const botPanelGroupSuggestionAbortRef = useRef<AbortController | null>(null);
   const [commandCenterPreferredModel, setCommandCenterPreferredModel] =
     useState<string>(AUTO_MODEL_CHOICE);
+  const [commandCenterHydratedUserId, setCommandCenterHydratedUserId] =
+    useState<string | null>(null);
   const [commandCenterCommands, setCommandCenterCommands] = useState<
     CommandCenterCommand[]
   >(() => normalizeCommandCenterState(null).commands);
@@ -55130,13 +55238,26 @@ function HomeContent(): React.JSX.Element {
   const zenHueDirectoryByGroupRef = useRef(
     new Map<string, ZenHueDirectoryState>(),
   );
-  const [zenHueStringCueVisible, setZenHueStringCueVisible] = useState(
-    () =>
-      typeof window === "undefined" ||
-      window.sessionStorage.getItem(
-        ZEN_HUE_STRING_CUE_DISMISSED_SESSION_KEY,
-      ) !== "true",
-  );
+  const [zenHueStringCueVisible, setZenHueStringCueVisible] = useState(true);
+  useEffect(() => {
+    setZenHueStringCueVisible(true);
+    if (!user?.id) return;
+    try {
+      window.sessionStorage.removeItem(ZEN_HUE_STRING_CUE_DISMISSED_SESSION_KEY);
+    } catch {
+      // Owner-bound encrypted state remains authoritative.
+    }
+    let disposed = false;
+    void readBrowserOwnerJsonV1<boolean>({
+      ownerId: user.id,
+      logicalKey: "zen-hue-string-cue-dismissed",
+    }).then((dismissed) => {
+      if (!disposed) setZenHueStringCueVisible(dismissed !== true);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [user?.id]);
   // Floating "keyboard balloon" preview for touch users at high-density
   // picker stages. Tracks the bot under the user's finger plus the touch
   // coordinates so the lifted tile can sit cleanly above the finger and
@@ -57385,40 +57506,11 @@ function HomeContent(): React.JSX.Element {
           !commandCenterSelectedCommandId &&
           !commandCenterSelectedWildcardDeckId
         ) {
-          let savedKind: "prompt" | "deck" | null = null;
-          let savedId: string | null = null;
-          if (user && typeof window !== "undefined") {
-            try {
-              const raw = window.localStorage.getItem(
-                commandCenterSelectionStorageKey(user.id),
-              );
-              const parsed = raw
-                ? (JSON.parse(raw) as { kind?: unknown; id?: unknown })
-                : null;
-              savedKind =
-                parsed?.kind === "prompt" || parsed?.kind === "deck"
-                  ? parsed.kind
-                  : null;
-              savedId = typeof parsed?.id === "string" ? parsed.id : null;
-            } catch {
-              // Fall through to the first available reusable definition.
-            }
-          }
-          const savedPrompt =
-            savedKind === "prompt" && savedId
-              ? commandCenterCommands.find((command) => command.id === savedId)
-              : null;
-          const savedDeck =
-            savedKind === "deck" && savedId
-              ? commandCenterWildcardDecks.find((deck) => deck.id === savedId)
-              : null;
           const fallbackPrompt = commandCenterCommands.find(
             (command) => !command.builtIn && !command.readOnly,
           );
-          const nextPrompt = savedPrompt ?? fallbackPrompt;
-          const nextDeck =
-            savedDeck ??
-            (nextPrompt ? undefined : commandCenterWildcardDecks[0]);
+          const nextPrompt = fallbackPrompt;
+          const nextDeck = nextPrompt ? undefined : commandCenterWildcardDecks[0];
           const fallbackCommand = nextDeck
             ? undefined
             : commandCenterCommands[0];
@@ -57883,10 +57975,7 @@ function HomeContent(): React.JSX.Element {
         setHubAtmosphereGenerationState("idle");
       } catch (error) {
         setHubAtmosphereGenerationState("error");
-        console.warn(
-          "[prism] Prism session atmosphere generation was unavailable:",
-          error,
-        );
+        console.warn("[prism] session atmosphere generation was unavailable.");
       } finally {
         hubAtmosphereGenerationInFlightRef.current = false;
       }
@@ -58637,6 +58726,13 @@ function HomeContent(): React.JSX.Element {
       modelTurboResetVersionRef.current += 1;
       globalModelSelectionMutationVersionRef.current += 1;
       modelCatalogRefreshTokenRef.current += 1;
+      clearEnglishPacingProfileCache();
+      clearActionSfxPackClientState();
+      clearLiveVoiceDecodeRuntime();
+      clearLiveSessionFocusRuntime();
+      clearSessionAtmosphereAccountAudioCache();
+      clearZenActionPresentationCache();
+      clearChatRevealTokenCache();
 
       if (modelEffortHudTimerRef.current !== null) {
         window.clearTimeout(modelEffortHudTimerRef.current);
@@ -59892,7 +59988,7 @@ function HomeContent(): React.JSX.Element {
               }
             : current,
         );
-        console.warn("[model] global selection failed", error);
+        console.warn("[model] account selection failed.");
       });
     },
     [
@@ -60263,6 +60359,7 @@ function HomeContent(): React.JSX.Element {
     ],
   );
   useEffect(() => {
+    setCommandCenterHydratedUserId(null);
     if (!user) {
       setAssetGenerationPreferences({});
       setAssetGenerationPreferencesLoaded(false);
@@ -62371,7 +62468,13 @@ function HomeContent(): React.JSX.Element {
       setConversationGroupOrder([]);
       return;
     }
-    setConversationGroupOrder(loadConversationGroupOrder(user.id));
+    let disposed = false;
+    void loadConversationGroupOrder(user.id).then((order) => {
+      if (!disposed) setConversationGroupOrder(order);
+    });
+    return () => {
+      disposed = true;
+    };
   }, [user]);
 
   useEffect(() => {
@@ -62388,31 +62491,30 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     let disposed = false;
-    let localGroups: BotLibraryGroup[];
-    try {
-      const raw = window.localStorage.getItem(
-        botLibraryGroupsStorageKey(user.id),
-      );
-      const parsed: unknown = raw ? JSON.parse(raw) : [];
-      localGroups = normalizeBotLibraryGroups(parsed);
-    } catch {
-      localGroups = [createFavoritesBotGroup()];
-    }
-    setBotLibraryGroups(localGroups);
-    void api<{ groups?: unknown }>("/api/library/groups/import-legacy", {
-      method: "POST",
-      body: JSON.stringify({ groups: localGroups }),
-    })
-      .then((response) => {
-        if (disposed) return;
-        setBotLibraryGroups(normalizeBotLibraryGroups(response.groups));
-        setBotLibraryGroupsHydratedUserId(user.id);
+    void readOrMigrateBrowserOwnerJsonV1<unknown>({
+      ownerId: user.id,
+      logicalKey: "bot-library-groups",
+      legacyStorage: window.localStorage,
+      legacyKeys: [botLibraryGroupsStorageKey(user.id)],
+    }).then((storedGroups) => {
+      if (disposed) return;
+      const localGroups = normalizeBotLibraryGroups(storedGroups);
+      setBotLibraryGroups(localGroups);
+      void api<{ groups?: unknown }>("/api/library/groups/import-legacy", {
+        method: "POST",
+        body: JSON.stringify({ groups: localGroups }),
       })
-      .catch(() => {
-        if (disposed) return;
-        setBotLibraryGroups(localGroups);
-        setBotLibraryGroupsHydratedUserId(user.id);
-      });
+        .then((response) => {
+          if (disposed) return;
+          setBotLibraryGroups(normalizeBotLibraryGroups(response.groups));
+          setBotLibraryGroupsHydratedUserId(user.id);
+        })
+        .catch(() => {
+          if (disposed) return;
+          setBotLibraryGroups(localGroups);
+          setBotLibraryGroupsHydratedUserId(user.id);
+        });
+    });
     return () => {
       disposed = true;
     };
@@ -62424,10 +62526,15 @@ function HomeContent(): React.JSX.Element {
       setBotMarketplaceUpdateRevisionUserId(null);
       return;
     }
-    setBotMarketplaceUpdateRevisions(
-      loadMarketplaceBotUpdateRevisions(user.id),
-    );
-    setBotMarketplaceUpdateRevisionUserId(user.id);
+    let disposed = false;
+    void loadMarketplaceBotUpdateRevisions(user.id).then((revisions) => {
+      if (disposed) return;
+      setBotMarketplaceUpdateRevisions(revisions);
+      setBotMarketplaceUpdateRevisionUserId(user.id);
+    });
+    return () => {
+      disposed = true;
+    };
   }, [user]);
 
   useEffect(() => {
@@ -62438,14 +62545,11 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     if (!user || typeof window === "undefined") return;
     if (botLibraryGroupsHydratedUserId !== user.id) return;
-    try {
-      window.localStorage.setItem(
-        botLibraryGroupsStorageKey(user.id),
-        JSON.stringify(botLibraryGroups),
-      );
-    } catch {
-      // Non-fatal: groups still work for this page session.
-    }
+    void writeBrowserOwnerJsonV1({
+      ownerId: user.id,
+      logicalKey: "bot-library-groups",
+      value: botLibraryGroups,
+    });
     const syncTimer = window.setTimeout(() => {
       void api<{ groups?: unknown }>("/api/library/groups", {
         method: "PUT",
@@ -62741,21 +62845,26 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     if (typeof window === "undefined") return;
-    try {
-      const raw = window.localStorage.getItem(
-        commandCenterStateStorageKey(user.id),
-      );
-      const parsed: unknown = raw ? JSON.parse(raw) : null;
+    let disposed = false;
+    void Promise.all([
+      readOrMigrateBrowserOwnerJsonV1<unknown>({
+        ownerId: user.id,
+        logicalKey: "command-center-state",
+        legacyStorage: window.localStorage,
+        legacyKeys: [commandCenterStateStorageKey(user.id)],
+      }),
+      readOrMigrateBrowserOwnerJsonV1<{ kind?: unknown; id?: unknown }>({
+        ownerId: user.id,
+        logicalKey: "command-center-selection",
+        legacyStorage: window.localStorage,
+        legacyKeys: [commandCenterSelectionStorageKey(user.id)],
+      }),
+    ]).then(([parsed, savedSelection]) => {
+      if (disposed) return;
       const normalized = normalizeCommandCenterState(parsed);
       setCommandCenterPreferredModel(normalized.preferredModel);
       setCommandCenterCommands(normalized.commands);
       setCommandCenterWildcardDecks(normalized.wildcardDecks);
-      const rawSelection = window.localStorage.getItem(
-        commandCenterSelectionStorageKey(user.id),
-      );
-      const savedSelection = rawSelection
-        ? (JSON.parse(rawSelection) as { kind?: unknown; id?: unknown })
-        : null;
       const savedId =
         typeof savedSelection?.id === "string" ? savedSelection.id : null;
       const savedCommand =
@@ -62780,58 +62889,53 @@ function HomeContent(): React.JSX.Element {
         nextDeck ? null : (nextCommand?.id ?? null),
       );
       setCommandCenterSelectedWildcardDeckId(nextDeck?.id ?? null);
-    } catch {
-      const defaults = normalizeCommandCenterState(null);
-      setCommandCenterPreferredModel(defaults.preferredModel);
-      setCommandCenterCommands(defaults.commands);
-      setCommandCenterWildcardDecks(defaults.wildcardDecks);
-    }
+      setCommandCenterHydratedUserId(user.id);
+    });
+    return () => {
+      disposed = true;
+    };
   }, [user]);
 
   useEffect(() => {
-    if (!user || typeof window === "undefined") return;
+    if (!user || commandCenterHydratedUserId !== user.id) return;
     const selection = commandCenterSelectedCommandId
       ? { kind: "prompt", id: commandCenterSelectedCommandId }
       : commandCenterSelectedWildcardDeckId
         ? { kind: "deck", id: commandCenterSelectedWildcardDeckId }
         : null;
     if (!selection) return;
-    try {
-      window.localStorage.setItem(
-        commandCenterSelectionStorageKey(user.id),
-        JSON.stringify(selection),
-      );
-    } catch {
-      // Non-fatal: the current page session still remembers the selection.
-    }
+    void writeBrowserOwnerJsonV1({
+      ownerId: user.id,
+      logicalKey: "command-center-selection",
+      value: selection,
+    });
   }, [
+    commandCenterHydratedUserId,
     commandCenterSelectedCommandId,
     commandCenterSelectedWildcardDeckId,
     user,
   ]);
 
   useEffect(() => {
-    if (!user || typeof window === "undefined") return;
+    if (!user || commandCenterHydratedUserId !== user.id) return;
     const normalized = normalizeCommandCenterState({
       schema: "prism-command-center-v1",
       preferredModel: commandCenterPreferredModel,
       commands: commandCenterCommands,
       wildcardDecks: commandCenterWildcardDecks,
     });
-    try {
-      window.localStorage.setItem(
-        commandCenterStateStorageKey(user.id),
-        JSON.stringify({
-          schema: "prism-command-center-v1",
-          preferredModel: normalized.preferredModel,
-          commands: normalized.commands,
-          wildcardDecks: normalized.wildcardDecks,
-        }),
-      );
-    } catch {
-      // Non-fatal: command center still works for this page session.
-    }
+    void writeBrowserOwnerJsonV1({
+      ownerId: user.id,
+      logicalKey: "command-center-state",
+      value: {
+        schema: "prism-command-center-v1",
+        preferredModel: normalized.preferredModel,
+        commands: normalized.commands,
+        wildcardDecks: normalized.wildcardDecks,
+      },
+    });
   }, [
+    commandCenterHydratedUserId,
     commandCenterCommands,
     commandCenterPreferredModel,
     commandCenterWildcardDecks,
@@ -66818,7 +66922,9 @@ function HomeContent(): React.JSX.Element {
   }, [viewportWidth]);
   const [coffeeSettingsModalOpen, setCoffeeSettingsModalOpen] = useState(false);
   const [coffeeSettingsDraft, setCoffeeSettingsDraft] =
-    useState<CoffeeSessionSettings>(() => loadCoffeeSettingsFromBrowser());
+    useState<CoffeeSessionSettings>(() =>
+      normalizeCoffeeSessionSettings(undefined),
+    );
   const [coffeeGroupNameDraft, setCoffeeGroupNameDraft] = useState("");
   const [coffeeGroupEthosDraft, setCoffeeGroupEthosDraft] = useState("");
   const [coffeeGroupRosterDraft, setCoffeeGroupRosterDraft] = useState<
@@ -68917,14 +69023,18 @@ function HomeContent(): React.JSX.Element {
     };
   }, [cancelScheduledCoffeePotMove]);
   const [coffeeSessionSettings, setCoffeeSessionSettings] =
-    useState<CoffeeSessionSettings>(() => loadCoffeeSettingsFromBrowser());
-  const coffeeSessionSettingsRef = useRef<CoffeeSessionSettings>(
-    loadCoffeeSettingsFromBrowser(),
-  );
-  const [coffeeJazzAtmosphere, setCoffeeJazzAtmosphere] =
-    useState<CoffeeJazzAtmospherePreference>(() =>
-      loadCoffeeJazzAtmosphereFromBrowser(),
+    useState<CoffeeSessionSettings>(() =>
+      normalizeCoffeeSessionSettings(undefined),
     );
+  const coffeeSessionSettingsRef = useRef<CoffeeSessionSettings>(
+    normalizeCoffeeSessionSettings(undefined),
+  );
+  const [coffeeBrowserStateHydratedUserId, setCoffeeBrowserStateHydratedUserId] =
+    useState<string | null>(null);
+  const [coffeeJazzAtmosphere, setCoffeeJazzAtmosphere] =
+    useState<CoffeeJazzAtmospherePreference>(() => ({
+      ...DEFAULT_COFFEE_JAZZ_ATMOSPHERE_PREFERENCE,
+    }));
   const chooseCoffeeJazzStationForNewGroup = useCallback((groupId: string): void => {
     setCoffeeJazzAtmosphere((previous) => {
       const stationId = randomCoffeeJazzStationId();
@@ -69034,14 +69144,7 @@ function HomeContent(): React.JSX.Element {
     }
     const nextContext = `${user.id}:${view}`;
     const previousContext = turboAppletContextRef.current;
-    let storage: Storage | null = null;
-    try {
-      storage = window.sessionStorage;
-    } catch {
-      // The context helper conservatively disables Turbo on a blocked load.
-    }
     const shouldDisableTurbo = syncTurboAppletSessionContext(
-      storage,
       previousContext,
       nextContext,
       user.id,
@@ -69512,7 +69615,7 @@ function HomeContent(): React.JSX.Element {
       })
       .catch((error) => {
         if (controller.signal.aborted) return;
-        console.warn("[coffee] Context Sparks unavailable", error);
+        console.warn("[coffee] Context Sparks unavailable.");
         setCoffeeContextSparks([]);
         setCoffeeArmedContextSparkId(null);
       })
@@ -69590,6 +69693,12 @@ function HomeContent(): React.JSX.Element {
   );
   const finalizeCoffeeAudioMaster = useCallback(
     (conversation: CoffeeConversationState): Promise<void> => {
+      const ownerId = user?.id;
+      if (!ownerId) {
+        return Promise.reject(
+          new Error("Coffee replay capture requires an authenticated owner."),
+        );
+      }
       const existing = coffeeReplayFinalizeBySessionRef.current.get(
         conversation.id,
       );
@@ -69644,6 +69753,7 @@ function HomeContent(): React.JSX.Element {
           throw new Error("Coffee replay manifest is invalid.");
         }
         const savedRecording = await saveFaithfulReplaySession({
+          ownerId,
           surface: "coffee",
           sourceId: conversation.id,
           manifest,
@@ -69664,7 +69774,7 @@ function HomeContent(): React.JSX.Element {
       coffeeReplayFinalizeBySessionRef.current.set(conversation.id, pending);
       return pending;
     },
-    [buildCoffeeReplayManifest, releaseRecordingVoiceSelection],
+    [buildCoffeeReplayManifest, releaseRecordingVoiceSelection, user?.id],
   );
   useEffect(() => {
     if (!coffeeConversation || coffeeSessionPhase !== "finished" || !settings) {
@@ -69992,19 +70102,70 @@ function HomeContent(): React.JSX.Element {
     );
   };
   useEffect(() => {
-    persistCoffeeSettingsToBrowser(coffeeSessionSettings);
-  }, [coffeeSessionSettings]);
+    setCoffeeBrowserStateHydratedUserId(null);
+    const defaults = normalizeCoffeeSessionSettings(undefined);
+    if (!user) {
+      setCoffeeSessionSettings(defaults);
+      setCoffeeSettingsDraft(defaults);
+      setCoffeeJazzAtmosphere({
+        ...DEFAULT_COFFEE_JAZZ_ATMOSPHERE_PREFERENCE,
+      });
+      return;
+    }
+    try {
+      // These old keys had no owner binding. Never guess which account owns
+      // them during migration; discard them instead.
+      window.localStorage.removeItem(PRISM_COFFEE_SESSION_SETTINGS_STORAGE_KEY);
+      window.localStorage.removeItem(PRISM_COFFEE_JAZZ_ATMOSPHERE_STORAGE_KEY);
+      window.localStorage.removeItem(PRISM_COFFEE_PAUSED_SESSION_IDS_STORAGE_KEY);
+      window.localStorage.removeItem(
+        PRISM_COFFEE_PAUSED_SESSION_REMAINING_MS_STORAGE_KEY,
+      );
+    } catch {
+      // The encrypted store remains authoritative in restricted browsers.
+    }
+    let disposed = false;
+    void Promise.all([
+      readBrowserOwnerJsonV1<unknown>({
+        ownerId: user.id,
+        logicalKey: "coffee-session-settings",
+      }),
+      readBrowserOwnerJsonV1<unknown>({
+        ownerId: user.id,
+        logicalKey: "coffee-jazz-atmosphere",
+      }),
+    ]).then(([storedSettings, storedAtmosphere]) => {
+      if (disposed) return;
+      const nextSettings = normalizeCoffeeSessionSettings(storedSettings);
+      setCoffeeSessionSettings(nextSettings);
+      setCoffeeSettingsDraft(nextSettings);
+      setCoffeeJazzAtmosphere(
+        normalizeCoffeeJazzAtmospherePreference(storedAtmosphere),
+      );
+      setCoffeePausedSessionIds(new Set());
+      setCoffeePausedSessionRemainingMsById({});
+      setCoffeeBrowserStateHydratedUserId(user.id);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [user]);
   useEffect(() => {
-    persistCoffeeJazzAtmosphereToBrowser(coffeeJazzAtmosphere);
-  }, [coffeeJazzAtmosphere]);
+    if (!user || coffeeBrowserStateHydratedUserId !== user.id) return;
+    void writeBrowserOwnerJsonV1({
+      ownerId: user.id,
+      logicalKey: "coffee-session-settings",
+      value: coffeeSessionSettings,
+    });
+  }, [coffeeBrowserStateHydratedUserId, coffeeSessionSettings, user]);
   useEffect(() => {
-    persistCoffeePausedSessionIdsToBrowser(coffeePausedSessionIds);
-  }, [coffeePausedSessionIds]);
-  useEffect(() => {
-    persistCoffeePausedSessionRemainingMsByIdToBrowser(
-      coffeePausedSessionRemainingMsById,
-    );
-  }, [coffeePausedSessionRemainingMsById]);
+    if (!user || coffeeBrowserStateHydratedUserId !== user.id) return;
+    void writeBrowserOwnerJsonV1({
+      ownerId: user.id,
+      logicalKey: "coffee-jazz-atmosphere",
+      value: normalizeCoffeeJazzAtmospherePreference(coffeeJazzAtmosphere),
+    });
+  }, [coffeeBrowserStateHydratedUserId, coffeeJazzAtmosphere, user]);
   const markCoffeeSessionResumed = useCallback(
     (conversationId: string): void => {
       setCoffeePausedSessionIds((current) => {
@@ -72688,7 +72849,7 @@ function HomeContent(): React.JSX.Element {
         return response.groups;
       } catch (err) {
         if (quiet) {
-          console.warn("[coffee] identity synthesis poll failed", err);
+          console.warn("[coffee] identity synthesis poll failed.");
         } else {
           setCoffeeError(
             err instanceof Error
@@ -72713,8 +72874,8 @@ function HomeContent(): React.JSX.Element {
       );
       setCoffeePresets(response.presets);
       return response.presets;
-    } catch (err) {
-      console.warn("[coffee] failed to load Coffee presets", err);
+    } catch {
+      console.warn("[coffee] failed to load Coffee presets.");
       return [];
     } finally {
       setCoffeePresetsLoading(false);
@@ -72849,6 +73010,40 @@ function HomeContent(): React.JSX.Element {
     options: storyModelOptions,
     simulatedEffortEnabled: true,
   });
+  const storyLiveRoutingChip = storyLiveSessionActive
+    ? buildLiveSessionRoutingChip({
+        modelChoice:
+          storySession?.routing?.modelSelectionKind === "auto"
+            ? AUTO_MODEL_CHOICE
+            : (storySession?.model ?? storyEffectiveModelChoice),
+        modelProvider: storySession?.provider ?? storyModelProvider,
+        modelOptions: storyModelOptions,
+        actualAutoRoute:
+          storySession?.routing?.modelSelectionKind === "auto" &&
+          storySession.model
+            ? {
+                provider: storySession.provider,
+                model: storySession.model,
+                effort:
+                  storySession.routing.autoRoute?.reasoningEffort ?? null,
+                ...(storySession.routing.autoRoute
+                  ? { autoRoute: storySession.routing.autoRoute }
+                  : {}),
+              }
+            : null,
+        lockedReasoningEffort:
+          storySession?.routing?.modelSelectionKind === "fixed" &&
+          storyEffortTarget
+            ? effectiveModelReasoningEffortForRequest(
+                settings,
+                storyEffortTarget,
+                maxEffortTargetKey,
+              )
+            : null,
+        choosing: storySession?.status === "generating",
+        settings,
+      })
+    : null;
   const storyCurrentScene = useMemo<StoryScene | null>(() => {
     if (!storySession?.episode || !storySession.progress) return null;
     try {
@@ -73170,7 +73365,7 @@ function HomeContent(): React.JSX.Element {
     responseId: string,
     offlineOnly = false,
   ): WarmResponseCue | null => {
-    if (!settings || settings.voiceVolume <= 0) return null;
+    if (!user?.id || !settings || settings.voiceVolume <= 0) return null;
     const voiceSelection = voicePlaybackSelectionRef.current;
     if (voiceSelection.voiceMode === "mute") return null;
     const profileFields = parseStoredBotPrompt(bot.system_prompt).fields;
@@ -73231,6 +73426,7 @@ function HomeContent(): React.JSX.Element {
         ? "builtin"
         : requestedEngine;
     const key = responseCueVoiceCacheKey({
+      ownerId: user.id,
       botId: bot.id,
       voiceProfile: profile,
       engine,
@@ -73245,7 +73441,7 @@ function HomeContent(): React.JSX.Element {
       ready: false,
     };
     responseCueWarmByKeyRef.current.set(warmKey, warm);
-    void getOrPrepareResponseCueVoiceClip(key, async () => {
+    void getOrPrepareResponseCueVoiceClip(user.id, key, async () => {
       const response = await fetch(
         new URL("/api/voices/synthesize", window.location.origin),
         {
@@ -73290,7 +73486,7 @@ function HomeContent(): React.JSX.Element {
     proceduralAudioActive?: boolean;
     canonicalBridgeActive?: boolean;
   }): Promise<boolean> => {
-    if (!settings || settings.voiceVolume <= 0) return false;
+    if (!user?.id || !settings || settings.voiceVolume <= 0) return false;
     const voiceSelection = voicePlaybackSelectionRef.current;
     const warmKey = responseCueWarmKey(
       args.bot.id,
@@ -73300,7 +73496,7 @@ function HomeContent(): React.JSX.Element {
     const warm = responseCueWarmByKeyRef.current.get(warmKey);
     if (!warm?.ready) return false;
     if (warm.key && !warm.clip) {
-      warm.clip = await readResponseCueVoiceClip(warm.key);
+      warm.clip = await readResponseCueVoiceClip(user.id, warm.key);
       warm.ready = warm.clip !== null;
     }
     const fields = parseStoredBotPrompt(args.bot.system_prompt).fields;
@@ -74757,6 +74953,8 @@ function HomeContent(): React.JSX.Element {
       offlineOnly = false,
       voiceChannel: VoicePlaybackChannel = "primary",
     ): Promise<boolean> => {
+      const ownerId = user?.id;
+      if (!ownerId) return false;
       const voiceSelection = voicePlaybackSelectionRef.current;
       const playerVoice = botSummary.producerGuest === true;
       const frozenVoiceProfile =
@@ -74927,6 +75125,7 @@ function HomeContent(): React.JSX.Element {
         },
       };
       const replayVoiceTakePromise = captureReplayVoiceTake({
+        ownerId,
         surface: "signal",
         sourceId: message.episodeId,
         snapshot: replayVoiceTakeSnapshot,
@@ -75303,6 +75502,7 @@ function HomeContent(): React.JSX.Element {
       settings?.prismDefaultBotAudioVoiceProfile,
       settings?.voiceEffectsEnabled,
       settings?.voiceVolume,
+      user?.id,
     ],
   );
   const storyDiscoveredLocationIds = useMemo(
@@ -77447,7 +77647,7 @@ function HomeContent(): React.JSX.Element {
         void refreshConversations();
       } catch (err) {
         coffeeSynopsisRequestIdsRef.current.delete(sessionId);
-        console.warn("[coffee] session synopsis failed", err);
+        console.warn("[coffee] session synopsis failed.");
         try {
           const response = await api<{
             ok: true;
@@ -77844,22 +78044,21 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     const coffeeSessionId =
       coffeeConversation?.id ?? coffeeSelectedSessionId ?? null;
-    if (view !== "coffee" || !coffeeSessionId) {
+    if (view !== "coffee" || !coffeeSessionId || !user?.id) {
       setBotGroupCoffeeReturnCheckpoint(null);
       return;
     }
-    const storageKey =
-      botGroupCoffeeReturnCheckpointStorageKey(coffeeSessionId);
-    if (!storageKey) {
-      setBotGroupCoffeeReturnCheckpoint(null);
-      return;
-    }
-    const checkpoint = parseBotGroupCoffeeReturnCheckpoint(
-      window.sessionStorage.getItem(storageKey),
+    let disposed = false;
+    void readStoredBotGroupCoffeeReturnCheckpoint(
+      user.id,
       coffeeSessionId,
-    );
-    setBotGroupCoffeeReturnCheckpoint(checkpoint);
-  }, [coffeeConversation?.id, coffeeSelectedSessionId, view]);
+    ).then((checkpoint) => {
+      if (!disposed) setBotGroupCoffeeReturnCheckpoint(checkpoint);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [coffeeConversation?.id, coffeeSelectedSessionId, user?.id, view]);
 
   const clearBotGroupWaitingRoomAmbientTimer = useCallback(
     (preserveRemaining: boolean): void => {
@@ -78875,11 +79074,14 @@ function HomeContent(): React.JSX.Element {
   }, [commitZenHueDirectoryState, startBotPickerReturnToAll]);
   const dismissZenHueStringCue = useCallback(() => {
     setZenHueStringCueVisible(false);
-    window.sessionStorage.setItem(
-      ZEN_HUE_STRING_CUE_DISMISSED_SESSION_KEY,
-      "true",
-    );
-  }, []);
+    if (user?.id) {
+      void writeBrowserOwnerJsonV1({
+        ownerId: user.id,
+        logicalKey: "zen-hue-string-cue-dismissed",
+        value: true,
+      });
+    }
+  }, [user?.id]);
   const renderEmptyStateHueNavigation = useCallback(
     (infoId: string): React.JSX.Element | null => {
       if (!emptyStateLensVisible) return null;
@@ -81171,73 +81373,79 @@ function HomeContent(): React.JSX.Element {
       return;
     }
 
-    const stored = readStoredZenSessionBreak(user.id);
-    if (stored?.conversationId === detail.id) {
-      const storedEffectiveGapMs = effectiveZenSessionBreakGapMs(stored);
-      const storedUsesFreshStart = zenSessionBreakUsesFreshStart(
-        storedEffectiveGapMs,
-        zenFreshStartGapMs,
-      );
-      const hydratedStored = storedUsesFreshStart
-        ? stored.displaySummary || stored.internalSummary
-          ? { ...stored, displaySummary: null, internalSummary: null }
-          : stored
-        : !stored.displaySummary && currentZenDisplaySummary
-          ? {
-              ...stored,
-              displaySummary: clampZenSessionSummary(currentZenDisplaySummary),
-              internalSummary:
-                stored.internalSummary ??
-                clampZenSessionSummary(currentZenInternalSummary),
-            }
-          : stored;
-      if (hydratedStored !== stored) {
-        persistZenSessionBreak(hydratedStored);
+    let disposed = false;
+    void readStoredZenSessionBreak(user.id).then((stored) => {
+      if (disposed) return;
+      if (stored?.conversationId === detail.id) {
+        const storedEffectiveGapMs = effectiveZenSessionBreakGapMs(stored);
+        const storedUsesFreshStart = zenSessionBreakUsesFreshStart(
+          storedEffectiveGapMs,
+          zenFreshStartGapMs,
+        );
+        const hydratedStored = storedUsesFreshStart
+          ? stored.displaySummary || stored.internalSummary
+            ? { ...stored, displaySummary: null, internalSummary: null }
+            : stored
+          : !stored.displaySummary && currentZenDisplaySummary
+            ? {
+                ...stored,
+                displaySummary: clampZenSessionSummary(currentZenDisplaySummary),
+                internalSummary:
+                  stored.internalSummary ??
+                  clampZenSessionSummary(currentZenInternalSummary),
+              }
+            : stored;
+        if (hydratedStored !== stored) {
+          persistZenSessionBreak(user.id, hydratedStored);
+        }
+        setZenSessionBreak((current) =>
+          current &&
+          current.conversationId === hydratedStored.conversationId &&
+          current.createdAt === hydratedStored.createdAt &&
+          current.resumeHintConsumed === hydratedStored.resumeHintConsumed &&
+          current.displaySummary === hydratedStored.displaySummary
+            ? current
+            : hydratedStored,
+        );
+        return;
       }
-      setZenSessionBreak((current) =>
-        current &&
-        current.conversationId === hydratedStored.conversationId &&
-        current.createdAt === hydratedStored.createdAt &&
-        current.resumeHintConsumed === hydratedStored.resumeHintConsumed &&
-        current.displaySummary === hydratedStored.displaySummary
-          ? current
-          : hydratedStored,
-      );
-      return;
-    }
 
-    if (visibleDetailMessages.length === 0) {
-      setZenSessionBreak(null);
-      return;
-    }
+      if (visibleDetailMessages.length === 0) {
+        setZenSessionBreak(null);
+        return;
+      }
 
-    const latestActivityAt = latestMessageActivityAt(visibleDetailMessages);
-    const latestActivityMs = latestActivityAt
-      ? Date.parse(latestActivityAt)
-      : NaN;
-    if (!Number.isFinite(latestActivityMs)) {
-      setZenSessionBreak(null);
-      return;
-    }
-    const idleMs = Date.now() - latestActivityMs;
-    if (idleMs < zenSessionIdleGapMs) {
-      setZenSessionBreak(null);
-      return;
-    }
+      const latestActivityAt = latestMessageActivityAt(visibleDetailMessages);
+      const latestActivityMs = latestActivityAt
+        ? Date.parse(latestActivityAt)
+        : NaN;
+      if (!Number.isFinite(latestActivityMs)) {
+        setZenSessionBreak(null);
+        return;
+      }
+      const idleMs = Date.now() - latestActivityMs;
+      if (idleMs < zenSessionIdleGapMs) {
+        setZenSessionBreak(null);
+        return;
+      }
 
-    const nextBreak = createZenSessionBreakState({
-      userId: user.id,
-      conversationId: detail.id,
-      messages: visibleDetailMessages,
-      displaySummary: currentZenDisplaySummary,
-      internalSummary: currentZenInternalSummary,
-      source: "idle",
-      idleMs,
-      sessionIdleGapMs: zenSessionIdleGapMs,
-      freshStartGapMs: zenFreshStartGapMs,
+      const nextBreak = createZenSessionBreakState({
+        userId: user.id,
+        conversationId: detail.id,
+        messages: visibleDetailMessages,
+        displaySummary: currentZenDisplaySummary,
+        internalSummary: currentZenInternalSummary,
+        source: "idle",
+        idleMs,
+        sessionIdleGapMs: zenSessionIdleGapMs,
+        freshStartGapMs: zenFreshStartGapMs,
+      });
+      persistZenSessionBreak(user.id, nextBreak);
+      setZenSessionBreak(nextBreak);
     });
-    persistZenSessionBreak(nextBreak);
-    setZenSessionBreak(nextBreak);
+    return () => {
+      disposed = true;
+    };
   }, [
     currentZenDisplaySummary,
     currentZenInternalSummary,
@@ -81588,7 +81796,7 @@ function HomeContent(): React.JSX.Element {
           onStartupProgress?.("api", readyMessage(resource)),
         onFailed: (resource, error) => {
           if (isCurrentAccountOwnerGeneration(ownerGeneration)) {
-            console.warn(`[refreshAll:${resource}]`, error);
+            console.warn("[refresh] account resource refresh failed.");
           }
         },
       });
@@ -82755,7 +82963,7 @@ function HomeContent(): React.JSX.Element {
       );
     } catch (err) {
       if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
-      console.warn("[refreshModels]", err);
+      console.warn("[refreshModels] model refresh failed.");
       if (modelCatalogRefreshTokenRef.current !== refreshToken) return;
       setModelCatalogStatus("error");
       if (forceDiscovery) setModelCatalogRefreshFeedback("error");
@@ -83749,7 +83957,7 @@ function HomeContent(): React.JSX.Element {
         event instanceof CustomEvent
           ? (event.detail as AuthReauthRequiredDetail | undefined)
           : undefined;
-      console.warn("[auth] reauthentication required", detail);
+      console.warn("[auth] reauthentication required.");
       clearAuthenticatedSessionState();
     };
     window.addEventListener(
@@ -83910,9 +84118,12 @@ function HomeContent(): React.JSX.Element {
     };
     setTutorialProgress(nextProgress);
     if (mode === "zen") {
-      window.sessionStorage.removeItem(
-        ZEN_HUE_STRING_CUE_DISMISSED_SESSION_KEY,
-      );
+      if (user?.id) {
+        void deleteBrowserOwnerJsonV1({
+          ownerId: user.id,
+          logicalKey: "zen-hue-string-cue-dismissed",
+        });
+      }
       setZenHueStringCueVisible(true);
     }
     const currentMode: TutorialMode | null = botAvatarCustomizerOpen
@@ -83980,10 +84191,14 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  function resetBrowserFactoryDefaultsForUser(userId: string): void {
+  async function resetBrowserFactoryDefaultsForUser(
+    userId: string,
+  ): Promise<void> {
     const commandDefaults = normalizeCommandCenterState(null);
     const modelDefaults = createDefaultChatModelChoiceByProvider();
     const coffeeDefaults = normalizeCoffeeSessionSettings(undefined);
+
+    await purgeBrowserPersistenceForOwner(userId);
 
     try {
       window.localStorage.removeItem(`prism_mode_tutorials_v1:${userId}`);
@@ -84284,7 +84499,7 @@ function HomeContent(): React.JSX.Element {
     try {
       await api("/api/account/factory-reset", { method: "POST", body: "{}" });
       setFactoryResetArmed(false);
-      resetBrowserFactoryDefaultsForUser(user.id);
+      await resetBrowserFactoryDefaultsForUser(user.id);
       navigateToView("chat");
       const starterPackResult = await installPrismStarterPackFromMarketplace();
       await bootstrap();
@@ -84409,6 +84624,9 @@ function HomeContent(): React.JSX.Element {
         api("/api/account", { method: "DELETE" }),
       );
       if (deleteResult.status === "stale") return;
+      await purgeBrowserPersistenceForOwner(ownerGeneration.ownerId, {
+        deleteVaultKey: true,
+      });
       setDeleteAccountArmed(false);
       authBootstrapRequestGenerationRef.current += 1;
       transitionAccountOwnerGeneration(null);
@@ -85184,7 +85402,7 @@ function HomeContent(): React.JSX.Element {
           nextBreak.internalSummary ?? clampZenSessionSummary(internalSummary),
       }),
     );
-    persistZenSessionBreak(null);
+    persistZenSessionBreak(user?.id, null);
     setZenSessionBreak(null);
     setSelectedId(null);
     setDetail(null);
@@ -85283,7 +85501,7 @@ function HomeContent(): React.JSX.Element {
       );
       setZenSessionBreak((current) => {
         if (current?.conversationId !== conversationId) return current;
-        persistZenSessionBreak(null);
+        persistZenSessionBreak(user?.id, null);
         return null;
       });
       setManualCompactionStatus((current) =>
@@ -86601,7 +86819,7 @@ function HomeContent(): React.JSX.Element {
     chatSummaryRefreshMarkerRef.current = null;
     setSummarySnapshot(null);
     setZenSessionBreak(null);
-    persistZenSessionBreak(null);
+    persistZenSessionBreak(user?.id, null);
     setManualCompactionStatus(null);
     setConversationStarterPrompts(null);
     setZenFreshConversationHandoff(null);
@@ -87499,7 +87717,7 @@ function HomeContent(): React.JSX.Element {
       setPendingZenSessionBreak(null);
       setPendingZenSessionResumeContext(null);
       setZenSessionBreak(null);
-      persistZenSessionBreak(null);
+      persistZenSessionBreak(user?.id, null);
       chatSummaryRefreshMarkerRef.current = null;
       prismInterruptionForSend = undefined;
       detailForSend = detailForSend
@@ -88666,13 +88884,13 @@ function HomeContent(): React.JSX.Element {
           setPendingZenSessionBreak(null);
           setPendingZenSessionResumeContext(null);
           setZenSessionBreak(nextSessionBreak);
-          persistZenSessionBreak(nextSessionBreak);
+          persistZenSessionBreak(user?.id, nextSessionBreak);
         } else {
           setZenSessionBreak((current) => {
             if (!current || current.conversationId !== d.conversation.id)
               return current;
             const next = { ...current, resumeHintConsumed: true };
-            persistZenSessionBreak(next);
+            persistZenSessionBreak(user?.id, next);
             return next;
           });
         }
@@ -92426,6 +92644,7 @@ function HomeContent(): React.JSX.Element {
                 <div className={styles.zenLiveActionStatusRail}>
                   <ZenLiveBotPresencePlate
                     bot={zenLivePresenceBot}
+                    ownerId={user?.id ?? null}
                     avatarSizePx={zenLiveBotAvatarSizePx}
                     actionState={zenLiveVisibleBotAction}
                     replyActionText={zenLiveReplyActionText}
@@ -93121,15 +93340,12 @@ function HomeContent(): React.JSX.Element {
       );
       if (saveResult.status === "stale") return;
       setZenInitialAtmosphereWaitPreference(false);
-      try {
-        if (zenInitialAtmosphereWaitStorageKey) {
-          window.localStorage.setItem(
-            zenInitialAtmosphereWaitStorageKey,
-            "false",
-          );
-        }
-      } catch {
-        // The in-memory default still applies for this session.
+      if (user?.id) {
+        void writeBrowserOwnerJsonV1({
+          ownerId: user.id,
+          logicalKey: "zen-initial-atmosphere-wait",
+          value: false,
+        });
       }
       setSettings((previous) =>
         previous ? ({ ...previous, ...payload } as UserSettings) : previous,
@@ -95666,11 +95882,13 @@ function HomeContent(): React.JSX.Element {
     (direction: "grow" | "shrink"): void => {
       setZenLiveBotAvatarSizePx((current) => {
         const next = resizeZenLiveBotAvatarSizePx(current, direction);
-        if (next !== current) persistZenLiveBotAvatarSizePx(next);
+        if (next !== current && user?.id) {
+          persistZenLiveBotAvatarSizePx(user.id, next);
+        }
         return next;
       });
     },
-    [],
+    [user?.id],
   );
 
   useEffect(() => {
@@ -96689,10 +96907,12 @@ function HomeContent(): React.JSX.Element {
       let botGroupRoomAtmosphereAssets = atmosphereAssetCollection.assets;
       let omittedRoomAtmosphereAssetCount =
         atmosphereAssetCollection.omittedCount;
-      const avatarInkTemplates =
-        user?.id && typeof window !== "undefined"
-          ? loadAvatarDetailInkTemplates(user.id, window.localStorage)
-          : [];
+      const avatarInkTemplates = user?.id
+        ? await loadEncryptedAvatarDetailInkTemplates(
+            user.id,
+            typeof window === "undefined" ? null : window.localStorage,
+          )
+        : [];
       const createBundle = (): AccountExportBundleV1 => ({
         schema: "prism-account-backup-v1",
         exportedAt,
@@ -96889,15 +97109,12 @@ function HomeContent(): React.JSX.Element {
       remapBotGroupRoomAtmosphereBackupImageIds(normalized, replacements),
     );
     setBotLibraryGroups(normalized);
-    if (user?.id && typeof window !== "undefined") {
-      try {
-        window.localStorage.setItem(
-          botLibraryGroupsStorageKey(user.id),
-          JSON.stringify(normalized),
-        );
-      } catch {
-        // Non-fatal: the in-memory group state is already restored for this page session.
-      }
+    if (user?.id) {
+      void writeBrowserOwnerJsonV1({
+        ownerId: user.id,
+        logicalKey: "bot-library-groups",
+        value: normalized,
+      });
     }
     return failedAtmosphereAssetCount;
   }
@@ -96914,32 +97131,25 @@ function HomeContent(): React.JSX.Element {
     setCommandCenterWildcardDraft(null);
     setCommandCenterSelectedCommandId(null);
     setCommandCenterSelectedWildcardDeckId(null);
-    if (user?.id && typeof window !== "undefined") {
-      try {
-        window.localStorage.setItem(
-          commandCenterStateStorageKey(user.id),
-          JSON.stringify({
-            schema: "prism-command-center-v1",
-            preferredModel: normalized.preferredModel,
-            commands: normalized.commands,
-            wildcardDecks: normalized.wildcardDecks,
-          }),
-        );
-      } catch {
-        // Non-fatal: the in-memory Prompt Center state is already restored for this page session.
-      }
+    if (user?.id) {
+      void writeBrowserOwnerJsonV1({
+        ownerId: user.id,
+        logicalKey: "command-center-state",
+        value: {
+          schema: "prism-command-center-v1",
+          preferredModel: normalized.preferredModel,
+          commands: normalized.commands,
+          wildcardDecks: normalized.wildcardDecks,
+        },
+      });
     }
   }
 
   function restoreAccountAvatarInkTemplates(
     templates: readonly AvatarDetailInkTemplateV1[] | undefined,
   ): void {
-    if (!templates || !user?.id || typeof window === "undefined") return;
-    try {
-      saveAvatarDetailInkTemplates(user.id, templates, window.localStorage);
-    } catch {
-      // The server snapshot still restores normally when browser storage is unavailable.
-    }
+    if (!templates || !user?.id) return;
+    void saveEncryptedAvatarDetailInkTemplates(user.id, templates);
   }
 
   async function importAccountFromPrismFile(file: File): Promise<void> {
@@ -98527,13 +98737,14 @@ function HomeContent(): React.JSX.Element {
     if (user?.id && typeof window !== "undefined") {
       try {
         markStarterPackInstalled(user.id);
-        window.localStorage.setItem(
-          botLibraryGroupsStorageKey(user.id),
-          JSON.stringify(factoryGroups),
-        );
       } catch {
         // Non-fatal: the in-memory group state is already set for this page session.
       }
+      void writeBrowserOwnerJsonV1({
+        ownerId: user.id,
+        logicalKey: "bot-library-groups",
+        value: factoryGroups,
+      });
     }
     updateBotTransferOverlay((current) => ({
       ...current,
@@ -99029,18 +99240,21 @@ function HomeContent(): React.JSX.Element {
       !hasAnyAccounts ||
       starterPackFreshAccountEligibleUserRef.current === user.id;
     if (!freshAccountEligible) return;
-    if (starterPackInstallMarked(user.id)) return;
     if (starterPackAutoInstallAttemptedUserRef.current === user.id) return;
     let cancelled = false;
     starterPackAutoInstallAttemptedUserRef.current = user.id;
-    if (starterPackFreshAccountEligibleUserRef.current === user.id) {
-      starterPackFreshAccountEligibleUserRef.current = null;
-    }
-    setBotMarketplaceInstallingKey(`theme:${BOT_MARKETPLACE_STARTER_THEME_ID}`);
-    setPanelError(null);
-    setPanelNotice("Installing Prism Originals starter bots...");
     void (async () => {
       try {
+        if (await starterPackInstallMarked(user.id)) return;
+        if (cancelled) return;
+        if (starterPackFreshAccountEligibleUserRef.current === user.id) {
+          starterPackFreshAccountEligibleUserRef.current = null;
+        }
+        setBotMarketplaceInstallingKey(
+          `theme:${BOT_MARKETPLACE_STARTER_THEME_ID}`,
+        );
+        setPanelError(null);
+        setPanelNotice("Installing Prism Originals starter bots...");
         const result = await installPrismStarterPackFromMarketplace();
         if (cancelled) return;
         setPanelNotice(
@@ -106780,7 +106994,7 @@ function HomeContent(): React.JSX.Element {
       setForceNewConversationOnNextSend(true);
       setPendingZenSessionBreak(null);
       setPendingZenSessionResumeContext(null);
-      persistZenSessionBreak(null);
+      persistZenSessionBreak(user?.id, null);
       setZenSessionBreak(null);
       setSummarySnapshot(null);
       setManualCompactionStatus(null);
@@ -107556,12 +107770,27 @@ function HomeContent(): React.JSX.Element {
   );
 
   useEffect(() => {
-    if (memoryBubbleLayoutsHydratedRef.current) return;
-    const stored = readStoredMemoryBubbleLayouts();
-    memoryBubbleLayoutsRef.current = stored;
-    setMemoryBubbleLayoutsByScope(stored);
-    memoryBubbleLayoutsHydratedRef.current = true;
-  }, []);
+    memoryBubbleLayoutsHydratedRef.current = false;
+    memoryBubbleLayoutsPersistReadyRef.current = false;
+    memoryBubbleLayoutsRef.current = {};
+    setMemoryBubbleLayoutsByScope({});
+    if (!user?.id) return;
+    try {
+      window.localStorage.removeItem(PRISM_MEMORY_BUBBLE_LAYOUT_STORAGE_KEY);
+    } catch {
+      // Owner-bound encrypted state remains authoritative.
+    }
+    let disposed = false;
+    void readStoredMemoryBubbleLayouts(user.id).then((stored) => {
+      if (disposed) return;
+      memoryBubbleLayoutsRef.current = stored;
+      setMemoryBubbleLayoutsByScope(stored);
+      memoryBubbleLayoutsHydratedRef.current = true;
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [user?.id]);
 
   useEffect(() => {
     memoryBubbleLayoutsRef.current = memoryBubbleLayoutsByScope;
@@ -107574,10 +107803,10 @@ function HomeContent(): React.JSX.Element {
         [scopeKey]: positions,
       };
       memoryBubbleLayoutsRef.current = nextLayouts;
-      persistMemoryBubbleLayouts(nextLayouts);
+      if (user?.id) persistMemoryBubbleLayouts(user.id, nextLayouts);
       setMemoryBubbleLayoutsByScope(nextLayouts);
     },
-    [],
+    [user?.id],
   );
   const commitMemoryBubbleScopePositionsRef = useRef(
     commitMemoryBubbleScopePositions,
@@ -107594,8 +107823,10 @@ function HomeContent(): React.JSX.Element {
       memoryBubbleLayoutsPersistReadyRef.current = true;
       if (Object.keys(memoryBubbleLayoutsByScope).length === 0) return;
     }
-    persistMemoryBubbleLayouts(memoryBubbleLayoutsByScope);
-  }, [memoryBubbleLayoutsByScope]);
+    if (user?.id) {
+      persistMemoryBubbleLayouts(user.id, memoryBubbleLayoutsByScope);
+    }
+  }, [memoryBubbleLayoutsByScope, user?.id]);
 
   useEffect(() => {
     if (!memoryBubbleScopeKey) return;
@@ -107619,19 +107850,25 @@ function HomeContent(): React.JSX.Element {
   }, [memoryBubbleScopeKey, visibleMemoryBubbles]);
 
   useEffect(() => {
-    if (!memoryBubbleScopeKey) return;
-    const latest = readStoredMemoryBubbleLayouts();
-    const latestScoped = latest[memoryBubbleScopeKey];
-    if (!latestScoped) return;
-    const currentScoped = memoryBubbleLayoutsRef.current[memoryBubbleScopeKey];
-    if (JSON.stringify(currentScoped) === JSON.stringify(latestScoped)) return;
-    const merged = {
-      ...memoryBubbleLayoutsRef.current,
-      [memoryBubbleScopeKey]: latestScoped,
+    if (!memoryBubbleScopeKey || !user?.id) return;
+    let disposed = false;
+    void readStoredMemoryBubbleLayouts(user.id).then((latest) => {
+      if (disposed) return;
+      const latestScoped = latest[memoryBubbleScopeKey];
+      if (!latestScoped) return;
+      const currentScoped = memoryBubbleLayoutsRef.current[memoryBubbleScopeKey];
+      if (JSON.stringify(currentScoped) === JSON.stringify(latestScoped)) return;
+      const merged = {
+        ...memoryBubbleLayoutsRef.current,
+        [memoryBubbleScopeKey]: latestScoped,
+      };
+      memoryBubbleLayoutsRef.current = merged;
+      setMemoryBubbleLayoutsByScope(merged);
+    });
+    return () => {
+      disposed = true;
     };
-    memoryBubbleLayoutsRef.current = merged;
-    setMemoryBubbleLayoutsByScope(merged);
-  }, [memoryBubbleScopeKey]);
+  }, [memoryBubbleScopeKey, user?.id]);
 
   const memoryBubbleLayoutById = useMemo(() => {
     const layoutById = new Map<
@@ -115238,6 +115475,9 @@ function HomeContent(): React.JSX.Element {
         busy?: boolean;
         onClick: () => void;
       };
+      liveSessionRoutingChip?: React.ComponentProps<
+        typeof LiveSessionModelChip
+      > | null;
       modelControls?: React.ReactNode;
       brandAppletId: PrismAppletId;
       voiceLocalPremiumFallback?: boolean;
@@ -115257,15 +115497,64 @@ function HomeContent(): React.JSX.Element {
       tutorialTarget: options.voiceTutorialTarget ?? "botcast-voice-mode",
       localPremiumFallback: options.voiceLocalPremiumFallback === true,
     };
+    if (options.liveSessionActive) {
+      const themeAriaLabel =
+        effectiveThemeMode === "system"
+          ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+          : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`;
+      const themeTooltip =
+        effectiveThemeMode === "system"
+          ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+          : `Theme: ${THEME_LABEL[effectiveThemeMode]}`;
+      return (
+        <header
+          ref={options.headerRef ?? chatHeaderRef}
+          className={`${styles.chatHeader} ${styles.sharedAppletHeader} ${styles.liveSessionHeader}`}
+          data-app-shell-header="true"
+          data-live-session-locked="true"
+          data-live-session-minimal-chrome="true"
+          data-viewport-safe-area="top"
+        >
+          <button
+            type="button"
+            className={styles.liveSessionBackButton}
+            onClick={options.liveSessionExit?.onClick}
+            disabled={
+              !options.liveSessionExit || options.liveSessionExit.busy === true
+            }
+            title={options.liveSessionExit?.title ?? "Return from this session"}
+            aria-label={options.liveSessionExit?.label ?? "Back"}
+          >
+            <span aria-hidden="true">←</span>
+            <span>Back</span>
+          </button>
+          <LiveSessionModelChip
+            {...(options.liveSessionRoutingChip ?? {
+              modelLabel: "Choosing model",
+              effortLabel: "Default",
+              automatic: true,
+            })}
+            className={styles.liveSessionHeaderModelChip}
+          />
+          <button
+            type="button"
+            className={`${styles.themeToggleButton} ${styles.liveSessionThemeButton}`}
+            onClick={() => void cycleThemeMode()}
+            aria-label={themeAriaLabel}
+            data-title={themeTooltip}
+            data-glyph-tooltip={themeTooltip}
+          >
+            <ThemeGlyph mode={effectiveThemeMode} />
+          </button>
+        </header>
+      );
+    }
     return (
       <header
         ref={options.headerRef ?? chatHeaderRef}
         className={`${styles.chatHeader} ${styles.sharedAppletHeader}`}
         data-app-shell-header="true"
         data-shared-app-navbar="true"
-        data-live-session-locked={
-          options.liveSessionActive ? "true" : undefined
-        }
         data-viewport-safe-area="top"
         data-zen-live-bot-drag-exclusion={
           options.zenDragExclusion ? "top-bar" : undefined
@@ -115273,27 +115562,9 @@ function HomeContent(): React.JSX.Element {
       >
         <div className={styles.chatHeaderIdentityGroup}>
           <span className={styles.sharedAppletNavbarBrand}>
-            {renderSharedAppletBrand(
-              options.brandAppletId,
-              options.liveSessionActive === true,
-            )}
+            {renderSharedAppletBrand(options.brandAppletId)}
           </span>
-          {options.liveSessionActive && options.liveSessionExit ? (
-            <button
-              type="button"
-              className={styles.coffeeExitSessionButton}
-              onClick={options.liveSessionExit.onClick}
-              disabled={options.liveSessionExit.busy === true}
-              title={options.liveSessionExit.title}
-            >
-              {options.liveSessionExit.label}
-            </button>
-          ) : (
-            renderAppSwitcher({
-              disabled: options.liveSessionActive,
-              disabledReason: liveChromePolicy?.lockMessage,
-            })
-          )}
+          {renderAppSwitcher()}
         </div>
         {options.controlRail ??
           (options.recordedReplay ? (
@@ -115908,7 +116179,12 @@ function HomeContent(): React.JSX.Element {
         description: `${ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX}px default`,
         onSelect: () => {
           setZenLiveBotAvatarSizePx(ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX);
-          persistZenLiveBotAvatarSizePx(ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX);
+          if (user?.id) {
+            persistZenLiveBotAvatarSizePx(
+              user.id,
+              ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX,
+            );
+          }
         },
       });
     }
@@ -123078,15 +123354,12 @@ function HomeContent(): React.JSX.Element {
                               onChange={(event) => {
                                 const next = event.target.checked;
                                 setZenInitialAtmosphereWaitPreference(next);
-                                try {
-                                  if (zenInitialAtmosphereWaitStorageKey) {
-                                    window.localStorage.setItem(
-                                      zenInitialAtmosphereWaitStorageKey,
-                                      String(next),
-                                    );
-                                  }
-                                } catch {
-                                  // Keep the session preference when browser storage is unavailable.
+                                if (user?.id) {
+                                  void writeBrowserOwnerJsonV1({
+                                    ownerId: user.id,
+                                    logicalKey: "zen-initial-atmosphere-wait",
+                                    value: next,
+                                  });
                                 }
                                 setSettings((previous) =>
                                   previous
@@ -134667,7 +134940,7 @@ function HomeContent(): React.JSX.Element {
             setCoffeeReviewPreparingSessionId((current) =>
               current === sessionId ? null : current,
             );
-            console.warn("[coffee] failed to generate final session synopsis", error);
+            console.warn("[coffee] failed to generate final session synopsis.");
           });
 
         setCoffeeOutroEmptyTable(true);
@@ -134687,7 +134960,7 @@ function HomeContent(): React.JSX.Element {
         try {
           await finalizeCoffeeAudioMaster(lockedConversation);
         } catch (error) {
-          console.warn("[coffee] failed to finalize faithful replay", error);
+          console.warn("[coffee] failed to finalize faithful replay.");
         }
         const completed = await api<{
           ok: true;
@@ -134700,7 +134973,7 @@ function HomeContent(): React.JSX.Element {
           current?.id === sessionId ? completed.conversation : current,
         );
       } catch (error) {
-        console.warn("[coffee] failed to close Coffee session", error);
+        console.warn("[coffee] failed to close Coffee session.");
         if (!canonicalHistoryLocked) {
           setCoffeeError(
             error instanceof Error
@@ -135461,17 +135734,14 @@ function HomeContent(): React.JSX.Element {
           : "join",
       );
       setCoffeeSelectedSessionId(response.conversation.id);
-      const roomReturnStorageKey = botGroupCoffeeReturnCheckpointStorageKey(
-        response.conversation.id,
-      );
-      setBotGroupCoffeeReturnCheckpoint(
-        roomReturnStorageKey
-          ? parseBotGroupCoffeeReturnCheckpoint(
-              window.sessionStorage.getItem(roomReturnStorageKey),
-              response.conversation.id,
-            )
-          : null,
-      );
+      if (user?.id) {
+        void readStoredBotGroupCoffeeReturnCheckpoint(
+          user.id,
+          response.conversation.id,
+        ).then(setBotGroupCoffeeReturnCheckpoint);
+      } else {
+        setBotGroupCoffeeReturnCheckpoint(null);
+      }
       setCoffeeSelectedSeatBotIds(
         response.conversation.coffeeSeatBotIds ??
           coffeeSeatsFromBotIds(
@@ -135820,20 +136090,9 @@ function HomeContent(): React.JSX.Element {
         sourceRoomVisitSeed: launch.sourceRoomVisitSeed,
         createdAtMs: Date.now(),
       });
-      const storageKey = botGroupCoffeeReturnCheckpointStorageKey(
-        conversation.id,
-      );
-      const serialized = serializeBotGroupCoffeeReturnCheckpoint(checkpoint);
-      if (checkpoint && storageKey && serialized) {
-        try {
-          window.sessionStorage.setItem(storageKey, serialized);
-          setBotGroupCoffeeReturnCheckpoint(checkpoint);
-        } catch (storageError) {
-          console.warn(
-            "[coffee] failed to save group-room return checkpoint",
-            storageError,
-          );
-        }
+      if (checkpoint && user?.id) {
+        persistBotGroupCoffeeReturnCheckpoint(user.id, checkpoint);
+        setBotGroupCoffeeReturnCheckpoint(checkpoint);
       }
     } catch (launchError) {
       setCoffeeError(
@@ -135847,22 +136106,8 @@ function HomeContent(): React.JSX.Element {
     }
   };
   const currentBotGroupCoffeeReturnCheckpoint =
-    (): BotGroupCoffeeReturnCheckpoint | null => {
-      if (botGroupCoffeeReturnCheckpoint) {
-        return botGroupCoffeeReturnCheckpoint;
-      }
-      const coffeeSessionId =
-        coffeeConversation?.id ?? coffeeSelectedSessionId ?? null;
-      if (!coffeeSessionId || typeof window === "undefined") return null;
-      const storageKey =
-        botGroupCoffeeReturnCheckpointStorageKey(coffeeSessionId);
-      return storageKey
-        ? parseBotGroupCoffeeReturnCheckpoint(
-            window.sessionStorage.getItem(storageKey),
-            coffeeSessionId,
-          )
-        : null;
-    };
+    (): BotGroupCoffeeReturnCheckpoint | null =>
+      botGroupCoffeeReturnCheckpoint;
   const resolveCurrentBotGroupCoffeeReturn = (
     checkpoint: BotGroupCoffeeReturnCheckpoint,
   ) =>
@@ -135880,18 +136125,11 @@ function HomeContent(): React.JSX.Element {
     const checkpoint = currentBotGroupCoffeeReturnCheckpoint();
     if (!checkpoint) return;
     const outcome = resolveCurrentBotGroupCoffeeReturn(checkpoint);
-    const storageKey = botGroupCoffeeReturnCheckpointStorageKey(
-      checkpoint.coffeeSessionId,
-    );
-    if (storageKey) {
-      try {
-        window.sessionStorage.removeItem(storageKey);
-      } catch (storageError) {
-        console.warn(
-          "[coffee] failed to remove group-room return checkpoint",
-          storageError,
-        );
-      }
+    if (user?.id) {
+      clearStoredBotGroupCoffeeReturnCheckpoint(
+        user.id,
+        checkpoint.coffeeSessionId,
+      );
     }
     setBotGroupCoffeeReturnCheckpoint(null);
     setBotGroupCoffeeStaging(null);
@@ -136525,17 +136763,14 @@ function HomeContent(): React.JSX.Element {
           : "join",
       );
       setCoffeeSelectedSessionId(response.conversation.id);
-      const roomReturnStorageKey = botGroupCoffeeReturnCheckpointStorageKey(
-        response.conversation.id,
-      );
-      setBotGroupCoffeeReturnCheckpoint(
-        roomReturnStorageKey
-          ? parseBotGroupCoffeeReturnCheckpoint(
-              window.sessionStorage.getItem(roomReturnStorageKey),
-              response.conversation.id,
-            )
-          : null,
-      );
+      if (user?.id) {
+        void readStoredBotGroupCoffeeReturnCheckpoint(
+          user.id,
+          response.conversation.id,
+        ).then(setBotGroupCoffeeReturnCheckpoint);
+      } else {
+        setBotGroupCoffeeReturnCheckpoint(null);
+      }
       setCoffeeSelectedSeatBotIds(
         response.conversation.coffeeSeatBotIds ??
           coffeeSeatsFromBotIds(groupIds),
@@ -137689,10 +137924,7 @@ function HomeContent(): React.JSX.Element {
         }
       }
       void refreshConversations().catch((err) => {
-        console.warn(
-          "[coffee] refreshConversations after user action failed",
-          err,
-        );
+        console.warn("[coffee] conversation refresh after user action failed.");
       });
       return true;
     } catch (err) {
@@ -138331,8 +138563,8 @@ function HomeContent(): React.JSX.Element {
       if (pollUpdate.hasPollUpdate) {
         setCoffeeActivePoll(pollUpdate.poll);
       }
-      void refreshConversations().catch((err) => {
-        console.warn("[coffee] refreshConversations after turn failed", err);
+      void refreshConversations().catch(() => {
+        console.warn("[coffee] conversation refresh after turn failed.");
       });
       showCoffeeInterruptionCue(response.interruption);
       coffeeLastSubmittedDraftRef.current = trimmed;
@@ -139075,15 +139307,15 @@ function HomeContent(): React.JSX.Element {
         }),
       },
     ).catch((error) => {
-      console.warn("[coffee] failed to record player departure", error);
+      console.warn("[coffee] failed to record player departure.");
     });
   };
   const discardCoffeeConversation = async (sessionId: string) => {
     markCoffeeSessionResumed(sessionId);
     try {
       await deleteConversation(sessionId);
-    } catch (err) {
-      console.warn("[coffee] failed to discard short session", err);
+    } catch {
+      console.warn("[coffee] failed to discard short session.");
     }
   };
   const endCoffeeSessionFromTable = async (): Promise<void> => {
@@ -139133,7 +139365,7 @@ function HomeContent(): React.JSX.Element {
         coffeeConversationRef.current = pause.conversation;
         setCoffeeConversation(pause.conversation);
       } catch (error) {
-        console.warn("[coffee] failed to preserve manual cutoff", error);
+        console.warn("[coffee] failed to preserve manual cutoff.");
       }
     }
     finishCoffeeSession(activeConversation.id);
@@ -146394,13 +146626,15 @@ function HomeContent(): React.JSX.Element {
           brandAppletId: "coffee",
           liveSessionActive: coffeeChromePolicy.liveSessionActive,
           liveSessionName: "Coffee",
-          liveSessionExit: coffeeChromePolicy.showEndSessionInSwitcher
+          liveSessionExit: coffeeChromePolicy.liveSessionActive
             ? {
-                label: "End session",
+                label: "Back",
                 title: "End Coffee Session and stop autonomous replies",
+                busy: coffeeBusy,
                 onClick: () => void endCoffeeSessionFromTable(),
               }
             : undefined,
+          liveSessionRoutingChip: coffeeLiveRoutingChip,
           recordedReplay: coffeeChromePolicy.reviewActive,
           showVoiceSelector: !coffeeChromePolicy.reviewActive,
           voiceLocalPremiumFallback: coffeeBlocksOnlineCapabilities,
@@ -146513,33 +146747,10 @@ function HomeContent(): React.JSX.Element {
                     >
                       {coffeeSessionTopicTitle}
                     </p>
-                    {coffeeLiveRoutingChip ? (
-                      <LiveSessionModelChip
-                        {...coffeeLiveRoutingChip}
-                        className={styles.coffeeLiveRoutingChip}
-                      />
-                    ) : null}
                   </div>
                 ) : (
-                  <div className={styles.coffeeLiveSessionChromeSpacer}>
-                    {coffeeLiveRoutingChip ? (
-                      <LiveSessionModelChip
-                        {...coffeeLiveRoutingChip}
-                        className={styles.coffeeLiveRoutingChip}
-                      />
-                    ) : null}
-                  </div>
+                  <div className={styles.coffeeLiveSessionChromeSpacer} />
                 )}
-                <button
-                  type="button"
-                  className={styles.coffeeExitSessionButton}
-                  data-tutorial-target="coffee-end-session"
-                  disabled={coffeeBusy}
-                  title="End Coffee Session and stop autonomous replies"
-                  onClick={() => void endCoffeeSessionFromTable()}
-                >
-                  End session
-                </button>
               </div>
             ) : coffeeSessionSurfaceActive &&
               !(coffeeSessionPhase === "finished" && !coffeeReplayActive) &&
@@ -148085,6 +148296,7 @@ function HomeContent(): React.JSX.Element {
     return (
       <main
         className={`${styles.appLayout} ${themeClass} ${styles.storyShell}`}
+        data-session-active={storyLiveSessionActive ? "true" : undefined}
         data-accent-active={appShellStyle ? "true" : undefined}
         style={appShellStyle ?? undefined}
         onContextMenu={handleStoryShellContextMenu}
@@ -148093,6 +148305,15 @@ function HomeContent(): React.JSX.Element {
           brandAppletId: "story",
           liveSessionActive: storyLiveSessionActive,
           liveSessionName: "Story",
+          liveSessionExit: storyLiveSessionActive
+            ? {
+                label: "Back",
+                title: "Return to Story setup",
+                busy: storyBusy,
+                onClick: resetStoryToSetup,
+              }
+            : undefined,
+          liveSessionRoutingChip: storyLiveRoutingChip,
           controlRail: renderStoryGenerationControls(),
         })}
         <aside className={styles.storySidebar} data-viewport-safe-area="left">
@@ -148546,6 +148767,7 @@ function HomeContent(): React.JSX.Element {
         data-chat-sidebar-hidden="true"
         data-chrome-language="studio"
         data-debate-shell="true"
+        data-session-active={debateLiveSessionActive ? "true" : undefined}
         onContextMenu={handleAppContextMenu}
       >
         <section className={styles.debateMain}>
@@ -148554,6 +148776,14 @@ function HomeContent(): React.JSX.Element {
             showVoiceSelector: true,
             liveSessionActive: debateLiveSessionActive,
             liveSessionName: "Debate",
+            liveSessionExit: debateLiveSessionActive
+              ? {
+                  label: "Back",
+                  title: "Return from this session",
+                  onClick: () => debateLiveBackHandlerRef.current?.(),
+                }
+              : undefined,
+            liveSessionRoutingChip: debateLiveRoutingChip,
             voiceTutorialTarget: "debate-voice-mode",
             voiceLocalPremiumFallback:
               blocksOnlineCapabilities(debateResponseMode),
@@ -149410,6 +149640,9 @@ function HomeContent(): React.JSX.Element {
                 setDebateLiveSessionId(active ? sessionId : null);
                 if (!active) setDebateActualAutoRoute(null);
               }}
+              onLiveSessionBackHandlerChange={
+                handleDebateLiveBackHandlerChange
+              }
               onActualAutoRouteChange={setDebateActualAutoRoute}
               onLiveModelSelectionChange={setDebateLiveModelSelection}
               onCompanionContextChange={setDebateCompanionContext}
@@ -149527,6 +149760,7 @@ function HomeContent(): React.JSX.Element {
       <div className={themeClass} onContextMenu={handleAppContextMenu}>
         <BotcastExperience
           key={`signal:${signalOrchestrationEpoch}:${appletHomeRequestTokens.botcast}`}
+          ownerId={user?.id ?? ""}
           bots={signalBots}
           botGroups={botLibraryGroups.map((group) => ({
             id: group.id,
@@ -150240,6 +150474,8 @@ function HomeContent(): React.JSX.Element {
           }}
           navigationHeader={({
             liveSessionActive,
+            liveSessionBack,
+            lockedRoutingChip,
             episodeModelControl,
             activeAutoRoute,
             lockedReasoningEffort,
@@ -150281,6 +150517,15 @@ function HomeContent(): React.JSX.Element {
               brandAppletId: "botcast",
               showVoiceSelector: true,
               liveSessionActive,
+              liveSessionExit: liveSessionActive
+                ? {
+                    label: "Back",
+                    title: liveSessionBack.title,
+                    busy: liveSessionBack.disabled,
+                    onClick: liveSessionBack.onClick,
+                  }
+                : undefined,
+              liveSessionRoutingChip: lockedRoutingChip,
               voiceLocalPremiumFallback: blocksOnlineCapabilities(
                 signalEpisodeResponseMode,
               ),
@@ -150354,6 +150599,7 @@ function HomeContent(): React.JSX.Element {
       <div className={themeClass} data-slate-shell="true">
         <SlateWorkspace
           key={`slate-home:${appletHomeRequestTokens.slate}`}
+          ownerId={user?.id ?? "signed-out"}
           className={themeClass}
           theme={resolvedTheme}
           navigationHeader={renderSharedAppletNavbar("Slate tools", {
@@ -152617,6 +152863,7 @@ function HomeContent(): React.JSX.Element {
                     <div className={styles.zenLiveActionStatusRail}>
                       <ZenLiveBotPresencePlate
                         bot={zenLivePresenceBot}
+                        ownerId={user?.id ?? null}
                         avatarSizePx={zenLiveBotAvatarSizePx}
                         actionState={zenLiveVisibleBotAction}
                         replyActionText={zenLiveReplyActionText}

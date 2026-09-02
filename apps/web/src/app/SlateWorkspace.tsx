@@ -92,6 +92,12 @@ import { shouldSubmitComposerOnEnter } from "./composerKeyPolicy";
 import { PrismOrb } from "./PrismOrb";
 import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
 import { MODEL_CATALOG_REFRESHED_EVENT } from "./modelCatalogRefresh";
+import {
+  deleteBrowserOwnerJsonV1,
+  readBrowserOwnerJsonV1,
+  readOrMigrateBrowserOwnerJsonV1,
+  writeBrowserOwnerJsonV1,
+} from "./browserOwnerState";
 import { SlateDirectionQuestion } from "./SlateDirectionQuestion";
 import { SlateDirectorBar } from "./SlateDirectorBar";
 import { SlateCreativeStudiosDesk } from "./SlateCreativeStudiosDesk";
@@ -129,6 +135,7 @@ import {
 import styles from "./slateWorkspace.module.css";
 
 interface SlateWorkspaceProps {
+  ownerId: string;
   className?: string;
   navigationHeader: ReactNode;
   theme: "light" | "dark";
@@ -360,34 +367,36 @@ function slateCompanionBubbleLifetimeMs(
   return Math.min(42_000, Math.max(14_000, 8_000 + message.content.length * 42));
 }
 
-function readSlateHasVisited(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    return window.localStorage.getItem(SLATE_VISITED_KEY) === "true";
-  } catch {
-    return false;
-  }
+async function readSlateHasVisited(ownerId: string): Promise<boolean> {
+  return (
+    (await readBrowserOwnerJsonV1<boolean>({
+      ownerId,
+      logicalKey: "slate-visited",
+    })) === true
+  );
 }
 
-function slateTitleReviewWasHandled(projectId: string): boolean {
-  try {
-    return window.localStorage.getItem(
-      `prism_slate_title_review_v2:${projectId}`,
-    ) === "reviewed";
-  } catch {
-    return false;
-  }
+async function slateTitleReviewWasHandled(
+  ownerId: string,
+  projectId: string,
+): Promise<boolean> {
+  return (
+    (await readBrowserOwnerJsonV1<boolean>({
+      ownerId,
+      logicalKey: `slate-title-review:${projectId}`,
+    })) === true
+  );
 }
 
-function markSlateTitleReviewHandled(projectId: string): void {
-  try {
-    window.localStorage.setItem(
-      `prism_slate_title_review_v2:${projectId}`,
-      "reviewed",
-    );
-  } catch {
-    // The checkpoint can repeat if device-local storage is unavailable.
-  }
+function markSlateTitleReviewHandled(
+  ownerId: string,
+  projectId: string,
+): void {
+  void writeBrowserOwnerJsonV1({
+    ownerId,
+    logicalKey: `slate-title-review:${projectId}`,
+    value: true,
+  });
 }
 
 function slateProjectBookStyle(seed: string): CSSProperties {
@@ -514,12 +523,16 @@ function slateModelChoiceValue(model: SlateModelCatalogEntry): string {
   return `${model.provider}:${model.id}`;
 }
 
-function readSlateCompanionPosition(): SlateCompanionPosition {
-  if (typeof window === "undefined") return { x: 0.9, y: 0.82 };
+async function readSlateCompanionPosition(
+  ownerId: string,
+): Promise<SlateCompanionPosition> {
   try {
-    const parsed = JSON.parse(
-      window.localStorage.getItem(SLATE_COMPANION_POSITION_KEY) ?? "null",
-    ) as Partial<SlateCompanionPosition> | null;
+    const parsed = await readBrowserOwnerJsonV1<
+      Partial<SlateCompanionPosition>
+    >({
+      ownerId,
+      logicalKey: "slate-companion-position",
+    });
     if (
       parsed &&
       typeof parsed.x === "number" &&
@@ -537,6 +550,7 @@ function readSlateCompanionPosition(): SlateCompanionPosition {
 }
 
 export default function SlateWorkspace({
+  ownerId,
   className = "",
   navigationHeader,
   theme,
@@ -576,7 +590,8 @@ export default function SlateWorkspace({
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [entryMode, setEntryMode] = useState<SlateEntryMode>("desk");
-  const [hadVisitedBeforeThisMount] = useState(readSlateHasVisited);
+  const [hadVisitedBeforeThisMount, setHadVisitedBeforeThisMount] =
+    useState(false);
   const [projectStartStep, setProjectStartStep] =
     useState<SlateProjectStartStep>("source");
   const [projectSourceMode, setProjectSourceMode] =
@@ -663,7 +678,29 @@ export default function SlateWorkspace({
   const [companionDraft, setCompanionDraft] = useState("");
   const [companionBusy, setCompanionBusy] = useState(false);
   const [companionPosition, setCompanionPosition] =
-    useState<SlateCompanionPosition>(readSlateCompanionPosition);
+    useState<SlateCompanionPosition>({ x: 0.9, y: 0.82 });
+  useEffect(() => {
+    setHadVisitedBeforeThisMount(false);
+    setCompanionPosition({ x: 0.9, y: 0.82 });
+    try {
+      window.localStorage.removeItem(SLATE_VISITED_KEY);
+      window.localStorage.removeItem(SLATE_COMPANION_POSITION_KEY);
+    } catch {
+      // Owner-bound encrypted state remains authoritative.
+    }
+    let disposed = false;
+    void Promise.all([
+      readSlateHasVisited(ownerId),
+      readSlateCompanionPosition(ownerId),
+    ]).then(([visited, position]) => {
+      if (disposed) return;
+      setHadVisitedBeforeThisMount(visited);
+      setCompanionPosition(position);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [ownerId]);
   const [titleSuggestionBusy, setTitleSuggestionBusy] = useState(false);
   const [titleSuggestionNotice, setTitleSuggestionNotice] = useState<
     string | null
@@ -795,26 +832,23 @@ export default function SlateWorkspace({
           ? response.clarification
           : null,
       );
-      try {
-        const storageKey = slateWritingOperationStorageKey(
-          response.operation.projectId,
-          response.operation.sectionId,
-        );
-        if (
-          response.operation.status === "applied" ||
-          response.operation.status === "rejected" ||
-          response.operation.status === "cancelled" ||
-          response.operation.status === "failed"
-        ) {
-          window.localStorage.removeItem(storageKey);
-        } else {
-          window.localStorage.setItem(storageKey, response.operation.id);
-        }
-      } catch {
-        // The durable operation remains server-owned when local storage is unavailable.
+      const logicalKey = `slate-writing-operation:${response.operation.projectId}:${response.operation.sectionId}`;
+      if (
+        response.operation.status === "applied" ||
+        response.operation.status === "rejected" ||
+        response.operation.status === "cancelled" ||
+        response.operation.status === "failed"
+      ) {
+        void deleteBrowserOwnerJsonV1({ ownerId, logicalKey });
+      } else {
+        void writeBrowserOwnerJsonV1({
+          ownerId,
+          logicalKey,
+          value: response.operation.id,
+        });
       }
     },
-    [],
+    [ownerId],
   );
 
   const runWritingOperationRequest = useCallback(
@@ -890,20 +924,21 @@ export default function SlateWorkspace({
     setWritingOperation(null);
     setWritingClarification(null);
     if (!projectId || !sectionId) return;
-    let operationId: string | null = null;
-    try {
-      operationId = window.localStorage.getItem(
-        slateWritingOperationStorageKey(projectId, sectionId),
-      );
-    } catch {
-      return;
-    }
-    if (!operationId) return;
     let cancelled = false;
-    void slateApi<SlateWritingOperationResponse>(
-      `/api/slate/projects/${encodeURIComponent(projectId)}/writing-operations/${encodeURIComponent(operationId)}`,
-    )
+    void readOrMigrateBrowserOwnerJsonV1<string>({
+      ownerId,
+      logicalKey: `slate-writing-operation:${projectId}:${sectionId}`,
+      legacyStorage: window.localStorage,
+      legacyKeys: [slateWritingOperationStorageKey(projectId, sectionId)],
+    })
+      .then((operationId) => {
+        if (!operationId || cancelled) return null;
+        return slateApi<SlateWritingOperationResponse>(
+          `/api/slate/projects/${encodeURIComponent(projectId)}/writing-operations/${encodeURIComponent(operationId)}`,
+        );
+      })
       .then((response) => {
+        if (!response) return;
         if (
           !cancelled &&
           response.operation.projectId === projectId &&
@@ -923,13 +958,10 @@ export default function SlateWorkspace({
           cause instanceof SlateApiError &&
           (cause.status === 404 || cause.status === 405)
         ) {
-          try {
-            window.localStorage.removeItem(
-              slateWritingOperationStorageKey(projectId, sectionId),
-            );
-          } catch {
-            // The stale pointer is harmless if local storage is unavailable.
-          }
+          void deleteBrowserOwnerJsonV1({
+            ownerId,
+            logicalKey: `slate-writing-operation:${projectId}:${sectionId}`,
+          });
         }
       });
     return () => {
@@ -938,6 +970,7 @@ export default function SlateWorkspace({
   }, [
     activeSection?.id,
     adoptWritingOperationResponse,
+    ownerId,
     project?.id,
     runWritingOperationRequest,
   ]);
@@ -1011,12 +1044,12 @@ export default function SlateWorkspace({
   );
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(SLATE_VISITED_KEY, "true");
-    } catch {
-      // Slate entry history is a device-local convenience, never project state.
-    }
-  }, []);
+    void writeBrowserOwnerJsonV1({
+      ownerId,
+      logicalKey: "slate-visited",
+      value: true,
+    });
+  }, [ownerId]);
 
   const refreshProjects = useCallback(async (): Promise<SlateProjectSummary[]> => {
     const response = await slateApi<SlateProjectListResponse>("/api/slate/projects");
@@ -2012,7 +2045,7 @@ export default function SlateWorkspace({
       );
       adoptProject(response.project);
       if (titleReviewDue) {
-        markSlateTitleReviewHandled(current.id);
+        markSlateTitleReviewHandled(ownerId, current.id);
         setTitleReviewDue(false);
       }
       setTitleSuggestionNotice(
@@ -2086,10 +2119,11 @@ export default function SlateWorkspace({
     if (!drag || drag.pointerId !== event.pointerId) return;
     companionDragRef.current = null;
     event.currentTarget.releasePointerCapture(event.pointerId);
-    window.localStorage.setItem(
-      SLATE_COMPANION_POSITION_KEY,
-      JSON.stringify(companionPosition),
-    );
+    void writeBrowserOwnerJsonV1({
+      ownerId,
+      logicalKey: "slate-companion-position",
+      value: companionPosition,
+    });
     if (!drag.moved) toggleCompanion();
   };
 
@@ -3224,8 +3258,21 @@ export default function SlateWorkspace({
       setTitleReviewDue(false);
       return;
     }
-    setTitleReviewDue(!slateTitleReviewWasHandled(project.id));
+    let disposed = false;
+    const legacyKey = `prism_slate_title_review_v2:${project.id}`;
+    try {
+      window.localStorage.removeItem(legacyKey);
+    } catch {
+      // Owner-bound encrypted state remains authoritative.
+    }
+    void slateTitleReviewWasHandled(ownerId, project.id).then((handled) => {
+      if (!disposed) setTitleReviewDue(!handled);
+    });
+    return () => {
+      disposed = true;
+    };
   }, [
+    ownerId,
     project,
     totalManuscriptLength,
   ]);

@@ -50,6 +50,12 @@ function failAllPendingDecodes(): void {
   for (const id of [...pendingDecodes.keys()]) settlePendingDecode(id, null);
 }
 
+export function clearLiveVoiceDecodeRuntime(): void {
+  failAllPendingDecodes();
+  decoderWorker?.terminate();
+  decoderWorker = null;
+}
+
 function liveVoiceDecoderWorker(): Worker | null {
   if (decoderWorker) return decoderWorker;
   if (typeof Worker !== "function") return null;

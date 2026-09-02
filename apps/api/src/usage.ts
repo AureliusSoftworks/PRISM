@@ -16,6 +16,7 @@ import type {
   UsageTripMeter,
 } from "@localai/shared";
 import { currentPrismGenerationWorkContext } from "./generation-work.ts";
+import { sealDeveloperTranscriptPayloadV1 } from "./developer-transcript-vault.ts";
 
 type UsageMode = "zen" | "sandbox" | "coffee" | "story" | "system" | string | null;
 
@@ -32,6 +33,8 @@ interface UsageSession {
   developerSequence: number;
   /** Exact request-only prompt blocks omitted from durable developer traces. */
   diagnosticRedactions: string[];
+  /** Request-scoped owner key. Never shared across owners or persisted. */
+  userKey?: Buffer;
 }
 
 export interface UsageSessionInput {
@@ -44,6 +47,7 @@ export interface UsageSessionInput {
   messageId?: string | null;
   botId?: string | null;
   requestId?: string;
+  userKey?: Buffer;
 }
 
 export interface UsageTextEventInput {
@@ -99,6 +103,13 @@ export interface UsageImageEventInput {
 }
 
 const usageStorage = new AsyncLocalStorage<UsageSession>();
+let ownerKeyResolver: ((userId: string) => Buffer) | undefined;
+
+export function setUsageOwnerKeyResolver(
+  resolver: ((userId: string) => Buffer) | undefined,
+): void {
+  ownerKeyResolver = resolver;
+}
 
 const ONLINE_PROVIDERS = new Set<UsageProviderName>(["openai", "anthropic"]);
 
@@ -801,7 +812,29 @@ export function recordDeveloperTranscriptEvent(args: DeveloperTranscriptEventInp
     ...(args.usage ? { usage: args.usage } : {}),
     ...(args.fallback === true ? { fallback: true } : {}),
   };
+  const eventId = randomUUID();
+  const resolvedUserKey = session.userKey ?? ownerKeyResolver?.(session.userId);
+  const ownsResolvedKey = Boolean(
+    resolvedUserKey && resolvedUserKey !== session.userKey,
+  );
   try {
+    const payloadJson = resolvedUserKey
+      ? sealDeveloperTranscriptPayloadV1({
+          userId: session.userId,
+          eventId,
+          payloadJson: safeDiagnosticJson(payload, session.diagnosticRedactions),
+          userKey: resolvedUserKey,
+        })
+      : safeDiagnosticJson({
+          contentOmitted: true,
+          streaming: args.streaming === true,
+          failed: Boolean(args.error),
+          ...(typeof args.durationMs === "number" && Number.isFinite(args.durationMs)
+            ? { durationMs: Math.max(0, args.durationMs) }
+            : {}),
+          ...(args.usage ? { usage: args.usage } : {}),
+          ...(args.fallback === true ? { fallback: true } : {}),
+        });
     session.db
       .prepare(
         `INSERT INTO developer_transcript_events (
@@ -810,7 +843,7 @@ export function recordDeveloperTranscriptEvent(args: DeveloperTranscriptEventInp
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
-        randomUUID(),
+        eventId,
         session.userId,
         sessionLinkedValue(session, session.conversationId),
         sessionLinkedValue(session, session.messageId),
@@ -821,14 +854,15 @@ export function recordDeveloperTranscriptEvent(args: DeveloperTranscriptEventInp
         args.purpose.trim() || "system_unlabeled",
         args.provider?.trim() || null,
         args.model?.trim() || null,
-        safeDiagnosticJson(payload, session.diagnosticRedactions),
+        payloadJson,
         args.createdAt ?? new Date().toISOString()
       );
-  } catch (error) {
-    console.warn(
-      "[developer-transcript] failed to record event:",
-      error instanceof Error ? error.message : error
-    );
+  } catch {
+    console.warn("[developer-transcript] failed to record encrypted event.");
+  } finally {
+    if (resolvedUserKey && ownsResolvedKey) {
+      resolvedUserKey.fill(0);
+    }
   }
 }
 
@@ -933,8 +967,8 @@ function insertUsageEvent(
         contextTokensKeptLocal,
         createdAt
       );
-  } catch (error) {
-    console.warn("[usage] failed to record usage event:", error instanceof Error ? error.message : error);
+  } catch {
+    console.warn("[usage] failed to record content-free usage event.");
   }
 }
 
@@ -950,6 +984,10 @@ export function enterUsageSession(input: UsageSessionInput): void {
 }
 
 function createUsageSession(input: UsageSessionInput): UsageSession {
+  const parent = currentSession();
+  const userKey =
+    input.userKey ??
+    (parent?.userId === input.userId ? parent.userKey : undefined);
   const session: UsageSession = {
     db: input.db,
     userId: input.userId,
@@ -958,6 +996,7 @@ function createUsageSession(input: UsageSessionInput): UsageSession {
     surface: input.surface,
     developerSequence: 0,
     diagnosticRedactions: [],
+    ...(userKey ? { userKey } : {}),
     ...(input.mode !== undefined ? { mode: input.mode } : {}),
     ...(input.conversationId !== undefined ? { conversationId: input.conversationId } : {}),
     ...(input.messageId !== undefined ? { messageId: input.messageId } : {}),
@@ -1019,11 +1058,8 @@ export function patchUsageSession(
          WHERE user_id = ? AND request_id = ?`
       )
       .run(conversationId, messageId, botId, session.userId, session.requestId);
-  } catch (error) {
-    console.warn(
-      "[usage] failed to patch persisted request linkage:",
-      error instanceof Error ? error.message : error
-    );
+  } catch {
+    console.warn("[usage] failed to patch persisted request linkage.");
   }
 }
 
@@ -1073,11 +1109,8 @@ export function attachUsageEventsToMessage(args: {
         session.userId,
         session.requestId
       );
-  } catch (error) {
-    console.warn(
-      "[usage] failed to attach usage events:",
-      error instanceof Error ? error.message : error
-    );
+  } catch {
+    console.warn("[usage] failed to attach usage events.");
   }
 }
 

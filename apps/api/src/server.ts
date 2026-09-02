@@ -61,8 +61,13 @@ import {
   patchUsageSession,
   recordImageUsage,
   runWithUsageSession,
+  setUsageOwnerKeyResolver,
   setUsageTripEnabled,
 } from "./usage.ts";
+import {
+  migrateDeveloperTranscriptPayloadsForOwnerV1,
+  openDeveloperTranscriptPayloadV1,
+} from "./developer-transcript-vault.ts";
 import {
   createSessionToken,
   requireValidSession,
@@ -1691,6 +1696,7 @@ async function rebuildSignalStudioLighting(
     enterUsageSession({
       db,
       userId,
+      userKey,
       privacyScope: "normal",
       mode: "sandbox",
       surface: "images",
@@ -1731,8 +1737,7 @@ async function rebuildSignalStudioLighting(
     } catch (error) {
       if (signal.aborted) throw error;
       console.warn(
-        "[signal-artwork] generated Studio receiver matte unavailable; using deterministic default",
-        error instanceof Error ? error.message : error,
+        "[signal-artwork] generated Studio receiver matte unavailable; using deterministic default.",
       );
     }
   }
@@ -1819,6 +1824,7 @@ async function rebuildSignalStudioLighting(
 }
 
 let masterKey = deriveMasterKey(config.encryptionMasterKey);
+setUsageOwnerKeyResolver(decryptUserKey);
 let providerFactoryOverride: typeof selectProvider = selectProvider;
 
 /**
@@ -1955,6 +1961,7 @@ async function startPrismStorySession(
     user.secondary_ollama_host,
     responseLane === "online" ? anthropicApiKey : undefined,
     responseLane === "online" ? ollamaCloudApiKey : undefined,
+    context.userId,
   );
   const hiddenModelIds = parseHiddenBotModelIds(user.hidden_bot_model_ids);
   const hiddenModels = new Set(hiddenModelIds);
@@ -2142,8 +2149,8 @@ async function startPrismStorySession(
         return generated;
       },
     ),
-  ).catch((error) => {
-    console.warn("[story] generation job failed", error);
+  ).catch(() => {
+    console.warn("[story] generation job failed.");
   });
   return session;
 }
@@ -3712,8 +3719,8 @@ function scheduleApiWatchRestart(): boolean {
       const serverEntryPath = fileURLToPath(import.meta.url);
       const now = new Date();
       utimesSync(serverEntryPath, now, now);
-    } catch (error) {
-      console.error("Failed to trigger Prism API watch restart.", error);
+    } catch {
+      console.error("Failed to trigger Prism API watch restart.");
     }
   }, 150).unref();
   return true;
@@ -4170,6 +4177,7 @@ async function orchestratePrismCompanionRequest(args: {
       args.user.secondary_ollama_host,
       getAnthropicApiKeyForUser(args.userId, userKey) ?? config.anthropicApiKey,
       getOllamaCloudApiKeyForUser(args.userId, userKey) ?? config.ollamaApiKey,
+      args.userId,
     );
     onlineModels = catalog.online;
   }
@@ -4393,8 +4401,8 @@ async function inferBotMemoriesIfNeeded(
       botId,
       userKey,
     );
-  } catch (error) {
-    console.warn("Memory inference skipped:", error);
+  } catch {
+    console.warn("Memory inference skipped.");
   } finally {
     memoryInferenceCheckedAtByScope.set(inferenceScopeKey, latestDirectAt);
   }
@@ -4491,6 +4499,58 @@ function decryptUserKey(userId: string): Buffer {
     masterKey,
   );
   return Buffer.from(userKeyBase64, "base64");
+}
+
+function sealLegacyDeveloperTranscriptsForOwner(userId: string): void {
+  const userKey = decryptUserKey(userId);
+  try {
+    migrateDeveloperTranscriptPayloadsForOwnerV1({ db, userId, userKey });
+  } finally {
+    userKey.fill(0);
+  }
+}
+
+type StoredDeveloperTranscriptEvent = {
+  id: string;
+  request_id: string;
+  request_sequence: number;
+  message_id: string | null;
+  event_kind: "llm" | "search" | "tool";
+  purpose: string;
+  provider: string | null;
+  model: string | null;
+  payload_json: string;
+  created_at: string;
+};
+
+function loadDeveloperTranscriptEventsForOwner(
+  userId: string,
+  conversationId: string,
+): StoredDeveloperTranscriptEvent[] {
+  const userKey = decryptUserKey(userId);
+  try {
+    migrateDeveloperTranscriptPayloadsForOwnerV1({ db, userId, userKey });
+    const rows = db
+      .prepare(
+        `SELECT id, request_id, request_sequence, message_id, event_kind, purpose,
+                provider, model, payload_json, created_at
+           FROM developer_transcript_events
+          WHERE conversation_id = ? AND user_id = ?
+          ORDER BY created_at ASC, request_sequence ASC, rowid ASC`,
+      )
+      .all(conversationId, userId) as StoredDeveloperTranscriptEvent[];
+    return rows.map((row) => ({
+      ...row,
+      payload_json: openDeveloperTranscriptPayloadV1({
+        userId,
+        eventId: row.id,
+        payloadJson: row.payload_json,
+        userKey,
+      }),
+    }));
+  } finally {
+    userKey.fill(0);
+  }
 }
 
 function userNoteForClient(note: UserNoteRecord): Omit<UserNoteRecord, "userId"> {
@@ -6454,11 +6514,8 @@ async function checkDuePrismCreditMonitors(force = false): Promise<void> {
   for (const row of rows) {
     try {
       await checkPrismCreditMonitorForUser(row.user_id, force);
-    } catch (error) {
-      console.warn(
-        "[prism-monitor] ElevenLabs credit check failed",
-        error instanceof Error ? error.message : error,
-      );
+    } catch {
+      console.warn("[prism-monitor] ElevenLabs credit check failed.");
     }
   }
 }
@@ -6687,6 +6744,7 @@ async function debateAiRuntimeForUser(
     user.secondary_ollama_host,
     anthropicApiKey,
     ollamaCloudApiKey,
+    userId,
   );
   const frozenCandidateKeys = new Set(
     (Array.isArray(requestedFrozenCandidates)
@@ -7248,6 +7306,7 @@ async function contextualTextRuntimeForUser<
     args.user.secondary_ollama_host,
     anthropicApiKey,
     ollamaCloudApiKey,
+    args.userId,
   );
   // Auto is resolved from the current eligible catalog for every work item.
   // Historical candidate snapshots remain provenance only and must not freeze
@@ -9564,18 +9623,9 @@ async function generateAndPersistSignalArtworkAsset(args: {
     throw error;
   }
   const localPersistenceMs = Date.now() - persistenceStartedAt;
-  console.info("[signal-artwork] asset persisted", {
-    userId: args.userId,
-    hostBotId: args.hostBotId,
-    kind: args.kind,
-    sourceNightImageId: args.sourceNightImageId,
-    provider,
-    model,
-    size: args.size,
-    quality,
-    downloadMs,
-    localPersistenceMs,
-  });
+  console.info(
+    `[signal-artwork] asset persisted downloadMs=${downloadMs} localPersistenceMs=${localPersistenceMs}.`,
+  );
   return {
     imageId,
     imageUrl: displayUrl,
@@ -10159,12 +10209,8 @@ async function resolveDebateMysteryV2EvidencePropBindings(
           pngBytes: normalized.pngBytes,
           pixels,
         });
-      } catch (error) {
-        console.warn("[debate-mystery-v2] capability-ready personal prop rejected", {
-          sessionId: args.sessionId,
-          assetSetId: source.assetSetId,
-          reason: spoilerSafeMysteryAssetFailure(error),
-        });
+      } catch {
+        console.warn("[debate-mystery-v2] personal prop was rejected.");
       }
     }
   }
@@ -10415,11 +10461,8 @@ function queueItemCapabilityAnalysisForImageV1(
   void analyzeOwnedItemCapabilityCardV1({
     userId,
     assetSetId: asset.id,
-  }).catch((error) => {
-    console.warn("[item-capability] nonblocking analysis unavailable", {
-      assetSetId: asset.id,
-      reason: error instanceof Error ? error.message : "analysis failed",
-    });
+  }).catch(() => {
+    console.warn("[item-capability] nonblocking analysis unavailable.");
   });
 }
 
@@ -10514,12 +10557,7 @@ async function prepareDebateMysteryV2EvidenceAssets(
         });
       } catch (error) {
         failure = spoilerSafeMysteryAssetFailure(error);
-        console.warn("[debate-mystery-v2] frozen mansion prop rejected", {
-          sessionId: args.sessionId,
-          evidenceId: exhibit.id,
-          archetypeId: binding.archetypeId,
-          reason: failure,
-        });
+        console.warn("[debate-mystery-v2] frozen mansion prop rejected.");
       }
     }
     prepared ??= setDebateMysteryAssetFallbackV1(db, {
@@ -10885,13 +10923,9 @@ async function prepareDebateMysteryV2RoomAssets(
           reviewRepairFeedback = failure.startsWith("Vision review rejected")
             ? failure
             : null;
-          console.warn("[debate-mystery-v2] sealed visual attempt failed", {
-            sessionId: args.sessionId,
-            kind: "room",
-            subjectId: room.id,
-            attempt,
-            reason: failure,
-          });
+          console.warn(
+            `[debate-mystery-v2] sealed visual attempt ${attempt} failed.`,
+          );
         }
       }
     }
@@ -11105,11 +11139,7 @@ async function prepareDebateMysteryIllustratedRoomsV1(
         mimeType: "image/png",
         reason: spoilerSafeMysteryAssetFailure(error),
       });
-      console.warn("[debate-mystery-v2] Illustrated room upgrade failed", {
-        sessionId,
-        roomId: room.id,
-        reason: spoilerSafeMysteryAssetFailure(error),
-      });
+      console.warn("[debate-mystery-v2] Illustrated room upgrade failed.");
     }
   }
 }
@@ -11131,11 +11161,8 @@ function queueDebateMysteryIllustratedRoomsV1(userId: string, sessionId: string)
       }
     });
   mysteryRoomArtUpgradeRuns.set(key, run);
-  void run.catch((error) => {
-    console.warn("[debate-mystery-v2] Illustrated mansion upgrade stopped", {
-      sessionId,
-      reason: spoilerSafeMysteryAssetFailure(error),
-    });
+  void run.catch(() => {
+    console.warn("[debate-mystery-v2] Illustrated mansion upgrade stopped.");
   });
 }
 
@@ -11285,12 +11312,9 @@ function queueDebateMysteryMansionPropThemeV1(args: {
     mysteryMansionPropThemeBackgroundRuns.delete(key);
   });
   mysteryMansionPropThemeBackgroundRuns.set(key, { controller, promise });
-  void promise.catch((error) => {
+  void promise.catch(() => {
     if (controller.signal.aborted) return;
-    console.warn("[mansion-prop-theme] background generation stopped", {
-      bundleId: args.bundleId,
-      reason: spoilerSafeMysteryAssetFailure(error),
-    });
+    console.warn("[mansion-prop-theme] background generation stopped.");
   });
 }
 
@@ -11506,10 +11530,7 @@ function queueDebateMysteryV2RoomAssetBackground(
     }
   })().catch((error) => {
     if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) return;
-    console.warn("[debate-mystery-v2] sealed visual background run paused", {
-      sessionId,
-      reason: spoilerSafeMysteryAssetFailure(error),
-    });
+    console.warn("[debate-mystery-v2] sealed visual background run paused.");
     // Pending vault rows are durable; opening the case retries the frontier.
   }).finally(() => {
     if (leaseHeartbeat) clearInterval(leaseHeartbeat);
@@ -11596,12 +11617,8 @@ async function prepareDebateMysteryGeneratedAssets(args: {
           signal: args.signal,
           normalizeImageBytes: normalizeDebateMysteryRoomReskin,
         });
-      } catch (error) {
-        console.warn("[debate-mystery] room reskin fell back to bundled template", {
-          sessionId: args.sessionId,
-          templateId,
-          reason: error instanceof Error ? error.message : "generation failed",
-        });
+      } catch {
+        console.warn("[debate-mystery] room reskin used the bundled template.");
       }
     }
   }
@@ -11623,12 +11640,8 @@ async function prepareDebateMysteryGeneratedAssets(args: {
         normalizeImageBytes: async (imageBytes) =>
           (await normalizeGeneratedDebateExhibitImage(imageBytes)).pngBytes,
       });
-    } catch (error) {
-      console.warn("[debate-mystery] evidence art fell back to emoji", {
-        sessionId: args.sessionId,
-        evidenceId: evidence.id,
-        reason: error instanceof Error ? error.message : "generation failed",
-      });
+    } catch {
+      console.warn("[debate-mystery] evidence art used the emoji fallback.");
     }
   }
   return attachDebateMysteryGeneratedAssets(db, args.userId, args.sessionId, {
@@ -11738,12 +11751,9 @@ async function refreshCoffeeGroupStarterTopicsFromEthos(
     updateCoffeeGroup(db, userId, groupId, {
       starterTopics: generated.topics,
     });
-  } catch (error) {
+  } catch {
     // Topic generation is supportive, not a fourth blocking identity item.
-    console.warn(
-      `[coffee] failed to refresh starter topics for group ${groupId}:`,
-      error,
-    );
+    console.warn("[coffee] failed to refresh starter topics.");
   }
 }
 
@@ -12336,6 +12346,7 @@ function buildRoutes(
       if (!verifyPassword(password, user.password_salt, user.password_hash)) {
         throw new Error("Invalid credentials.");
       }
+      sealLegacyDeveloperTranscriptsForOwner(user.id);
       const { token } = createSession(user.id);
       touchUserActivity(user.id);
       setCookie(
@@ -12415,6 +12426,7 @@ function buildRoutes(
         json(ctx.res, 200, { ok: true, user: null, hasAnyAccounts });
         return;
       }
+      sealLegacyDeveloperTranscriptsForOwner(userId);
       const row = getUserRow(userId);
       json(ctx.res, 200, {
         ok: true,
@@ -17070,8 +17082,7 @@ function buildRoutes(
               } catch (error) {
                 if (abort.signal.aborted) throw error;
                 console.warn(
-                  "[composer-finalize] leaving resolved prompt uncorrected:",
-                  error instanceof Error ? error.message : error,
+                  "[composer-finalize] leaving resolved prompt uncorrected.",
                 );
               }
             }
@@ -17721,6 +17732,7 @@ function buildRoutes(
       enterUsageSession({
         db,
         userId,
+        userKey,
         privacyScope: incognito ? "private" : "normal",
         mode,
         surface: mode === "zen" ? "zen" : mode,
@@ -18201,6 +18213,7 @@ function buildRoutes(
         user.secondary_ollama_host,
         responseLane === "online" ? anthropicApiKey : undefined,
         responseLane === "online" ? ollamaCloudApiKey : undefined,
+        userId,
       );
       const chatHiddenModelIds = parseHiddenBotModelIds(
         user.hidden_bot_model_ids,
@@ -18416,8 +18429,7 @@ function buildRoutes(
             throw error;
           }
           console.warn(
-            "[composer-cleanup] leaving resolved prompt uncorrected:",
-            error instanceof Error ? error.message : error,
+            "[composer-cleanup] leaving resolved prompt uncorrected.",
           );
         }
       }
@@ -22111,10 +22123,9 @@ function buildRoutes(
                 episodeId: result.value.episode.id,
                 userKey: decryptUserKey(userId),
               });
-            } catch (error) {
+            } catch {
               console.warn(
-                `[botcast] prepared Signal pair-history persistence failed episode=${result.value.episode.id}`,
-                error,
+                "[botcast] prepared Signal pair-history persistence failed.",
               );
             }
           }
@@ -23598,13 +23609,9 @@ function buildRoutes(
               imageUrl: refreshedShow.studioLighting.imageUrl!,
             })),
         });
-        console.info("[signal-artwork] background job started", {
-          jobId: job.id,
-          userId,
-          showId: show.id,
-          identityMs,
-          provider: preferredProvider,
-        });
+        console.info(
+          `[signal-artwork] background job started identityMs=${identityMs}.`,
+        );
         json(ctx.res, 202, { ok: true, job });
       } catch (error) {
         await releaseImageSlotIfOwned(userId, acquired.job.id);
@@ -24519,13 +24526,9 @@ function buildRoutes(
               imageUrl: refreshedShow.studioLighting.imageUrl!,
             })),
         });
-        console.info("[signal-artwork] Studio lighting job accepted", {
-          jobId: job.id,
-          userId,
-          showId: show.id,
-          provider: effectiveProvider,
-          queuedForImageSlot: usesSharedImageSlot,
-        });
+        console.info(
+          `[signal-artwork] Studio lighting job accepted queued=${usesSharedImageSlot}.`,
+        );
         json(ctx.res, 202, { ok: true, job });
       },
     ),
@@ -27677,11 +27680,8 @@ function buildRoutes(
                 break;
               }
             }
-          } catch (error) {
-            console.warn(
-              `[coffee] player departure epilogue stopped conversation=${conversationId}`,
-              error,
-            );
+          } catch {
+            console.warn("[coffee] player departure epilogue stopped.");
           }
           try {
             await runWithUsageSession(
@@ -27701,11 +27701,8 @@ function buildRoutes(
                   departureTurnSettings,
                 ),
             );
-          } catch (error) {
-            console.warn(
-              `[coffee] player departure synopsis stopped conversation=${conversationId}`,
-              error,
-            );
+          } catch {
+            console.warn("[coffee] player departure synopsis stopped.");
           }
         })().finally(async () => {
           activeCoffeeDepartureEpilogues.delete(jobKey);
@@ -29929,12 +29926,8 @@ function buildRoutes(
       for (const relPath of result.deletedImageRelPaths) {
         try {
           tryUnlinkGeneratedImageFile(relPath);
-        } catch (error) {
-          console.error(
-            `[undo] orphan file after image rollback path=${relPath}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
+        } catch {
+          console.error("[undo] orphan file remained after image rollback.");
         }
       }
       const conversation = loadPersistedConversationForChatResponse({
@@ -31449,8 +31442,8 @@ function buildRoutes(
           regenerate: body.regenerate === true,
         })
           .then(() => undefined)
-          .catch((error) => {
-            console.error("[studio-cut] voice generation failed:", error);
+          .catch(() => {
+            console.error("[studio-cut] voice generation failed.");
           })
           .finally(() => {
             replayStudioCutJobs.delete(jobKey);
@@ -31492,8 +31485,8 @@ function buildRoutes(
           intent: detail.recording.voiceQuality?.recommendedAction ?? undefined,
         })
           .then(() => undefined)
-          .catch((error) => {
-            console.error("[studio-cut] resume failed:", error);
+          .catch(() => {
+            console.error("[studio-cut] resume failed.");
           })
           .finally(() => replayStudioCutJobs.delete(jobKey));
         replayStudioCutJobs.set(jobKey, job);
@@ -34081,6 +34074,7 @@ function buildRoutes(
         user.secondary_ollama_host,
         anthropicApiKey,
         ollamaCloudApiKey,
+        userId,
       );
       const hiddenBotModelIds = seedModelVisibilityDefaultsIfNeeded(
         user,
@@ -37090,12 +37084,8 @@ function buildRoutes(
         if (!rel) continue;
         try {
           tryUnlinkGeneratedImageFile(rel);
-        } catch (error) {
-          console.error(
-            `[images] orphan file after bulk delete imageId=${row.id}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
+        } catch {
+          console.error("[images] orphan file remained after bulk delete.");
         }
       }
       json(ctx.res, 200, { ok: true, deleted: rows.length });
@@ -37290,6 +37280,7 @@ function buildRoutes(
           user.secondary_ollama_host,
           anthropicApiKey,
           ollamaCloudApiKey,
+          userId,
         );
         const hiddenModelIds = parseHiddenBotModelIds(
           user.hidden_bot_model_ids,
@@ -37453,6 +37444,7 @@ function buildRoutes(
         user.secondary_ollama_host,
         anthropicApiKey,
         ollamaCloudApiKey,
+        userId,
       );
       const requestedModelOverride = readModelOverride(body.modelOverride);
       const explicitModelOverride =
@@ -37615,6 +37607,7 @@ function buildRoutes(
         user.secondary_ollama_host,
         anthropicApiKey,
         ollamaCloudApiKey,
+        userId,
       );
       const requestedModelOverride = readModelOverride(body.modelOverride);
       const explicitModelOverride =
@@ -37836,6 +37829,7 @@ function buildRoutes(
         user.secondary_ollama_host,
         anthropicApiKey,
         ollamaCloudApiKey,
+        userId,
       );
       const resolved = resolveAutoModel({
         provider: primaryProvider,
@@ -39347,26 +39341,10 @@ function buildRoutes(
           tool_payload: string | null;
           created_at: string;
         }>;
-        const diagnosticEvents = db
-          .prepare(
-            `SELECT id, request_id, request_sequence, message_id, event_kind, purpose,
-                  provider, model, payload_json, created_at
-             FROM developer_transcript_events
-            WHERE conversation_id = ? AND user_id = ?
-            ORDER BY created_at ASC, request_sequence ASC, rowid ASC`,
-          )
-          .all(conversationId, userId) as Array<{
-          id: string;
-          request_id: string;
-          request_sequence: number;
-          message_id: string | null;
-          event_kind: "llm" | "search" | "tool";
-          purpose: string;
-          provider: string | null;
-          model: string | null;
-          payload_json: string;
-          created_at: string;
-        }>;
+        const diagnosticEvents = loadDeveloperTranscriptEventsForOwner(
+          userId,
+          conversationId,
+        );
         const usageRows = db
           .prepare(
             `SELECT id, request_id, message_id, event_type, purpose, provider, model,
@@ -40270,11 +40248,8 @@ if (process.env.PRISM_API_DISABLE_AUTOSTART !== "1") {
   }>) {
     try {
       reconcileAssetCleanupRecoveryForUser(db, user.id);
-    } catch (error) {
-      console.error(
-        `Asset Cleanup recovery reconciliation failed for ${user.id}.`,
-        error,
-      );
+    } catch {
+      console.error("Asset Cleanup recovery reconciliation failed.");
     }
     queueActiveDebateMysteryV2Compilation(user.id);
   }
@@ -40282,11 +40257,8 @@ if (process.env.PRISM_API_DISABLE_AUTOSTART !== "1") {
     db,
     rootDirectory: slateRecoveryRootDirectory(),
     mirrorDirectoryForProject: () => slateRecoveryMirrorDirectory(),
-    onFailure(event) {
-      console.error(
-        `Slate recovery ${event.phase} failed for ${event.projectId}.`,
-        event.error,
-      );
+    onFailure() {
+      console.error("Slate recovery failed.");
     },
   });
   slateContinuityWorker = startSlateContinuityWorker({
@@ -40306,8 +40278,8 @@ if (process.env.PRISM_API_DISABLE_AUTOSTART !== "1") {
         });
       },
     },
-    onCycleError(error) {
-      console.error("Slate Continuity worker cycle failed.", error);
+    onCycleError() {
+      console.error("Slate Continuity worker cycle failed.");
     },
   });
   void purgeInactiveAccounts();

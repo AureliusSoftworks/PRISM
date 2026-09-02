@@ -25,6 +25,8 @@ export type PrismGenerationPriority =
 export type PrismGenerationPrivacyMode = "local" | "online" | "auto";
 
 export interface PrismGenerationWorkContext {
+  /** Authenticated account that owns every prompt and result in this work item. */
+  ownerId?: string;
   workflow: string;
   operation: string;
   stage: string;
@@ -98,6 +100,9 @@ export function normalizePrismGenerationWorkContext(
       ? value.priority
       : "background";
   return {
+    ...(boundedLabel(value?.ownerId, "")
+      ? { ownerId: boundedLabel(value?.ownerId, "") }
+      : {}),
     workflow: boundedLabel(value?.workflow, "system"),
     operation: boundedLabel(value?.operation, "generation"),
     stage: boundedLabel(value?.stage, "generation"),
@@ -267,7 +272,13 @@ export function schedulePrismAuxiliaryWork<T>(args: {
 }): Promise<T> {
   const host = normalizedHost(args.host);
   const context = normalizePrismGenerationWorkContext(args.context);
-  const cacheKey = context.cacheKey ? `${host}\u0000${context.cacheKey}` : null;
+  // Ownerless work is never eligible for promise/result coalescing. The
+  // auxiliary Ollama runtime is shared infrastructure, but account prompts and
+  // result objects must remain isolated even when their content hashes match.
+  const cacheKey =
+    context.ownerId && context.cacheKey
+      ? `${host}\u0000${context.ownerId}\u0000${context.cacheKey}`
+      : null;
   if (cacheKey) {
     const existing = auxiliaryInflightByCacheKey.get(cacheKey);
     if (existing) return existing as Promise<T>;

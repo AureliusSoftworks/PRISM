@@ -11,8 +11,10 @@ import {
 function context(
   priority: "interactive" | "compilation" | "background",
   cacheKey?: string,
+  ownerId = "owner-a",
 ) {
   return normalizePrismGenerationWorkContext({
+    ownerId,
     workflow: "test",
     operation: "schedule",
     stage: priority,
@@ -129,6 +131,51 @@ describe("PRISM auxiliary generation scheduler", () => {
     });
     assert.deepEqual(await Promise.all([first, second]), ["shared", "shared"]);
     assert.equal(calls, 1);
+  });
+
+  it("never coalesces four identical in-flight requests across account owners", async () => {
+    let calls = 0;
+    const owners = ["owner-a", "owner-b", "owner-c", "owner-d"] as const;
+    const results = await Promise.all(
+      owners.map((owner) =>
+        schedulePrismAuxiliaryWork({
+          host: "http://primary",
+          context: context("background", "same-work", owner),
+          run: async () => ({ owner, call: ++calls }),
+        }),
+      ),
+    );
+
+    assert.deepEqual(
+      results.map((result) => result.owner),
+      owners,
+    );
+    assert.equal(calls, 4);
+    assert.equal(new Set(results).size, 4);
+  });
+
+  it("disables coalescing when account ownership is missing", async () => {
+    let calls = 0;
+    const run = async () => ({ call: ++calls });
+    const ownerless = normalizePrismGenerationWorkContext({
+      ...context("background", "same-work"),
+      ownerId: undefined,
+    });
+    const [first, second] = await Promise.all([
+      schedulePrismAuxiliaryWork({
+        host: "http://primary",
+        context: ownerless,
+        run,
+      }),
+      schedulePrismAuxiliaryWork({
+        host: "http://primary",
+        context: ownerless,
+        run,
+      }),
+    ]);
+    assert.deepEqual(first, { call: 1 });
+    assert.deepEqual(second, { call: 2 });
+    assert.notEqual(first, second);
   });
 
   it("keeps cache versions independent", async () => {

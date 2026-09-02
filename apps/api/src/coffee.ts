@@ -13209,8 +13209,6 @@ function coffeeSpeakerAllowsAuthoredImperfection(
   return true;
 }
 
-const coffeeRecentInterruptionReactions = new Map<string, string[]>();
-
 const COFFEE_SOCIAL_SILENCE_MIN_CHANCE = 0.02;
 const COFFEE_SOCIAL_SILENCE_MAX_CHANCE = 0.22;
 const COFFEE_SOCIAL_SILENCE_BASE_CHANCE = 0.025;
@@ -13338,8 +13336,10 @@ function coffeeCannedInterruptionReaction(args: {
         ? "yield"
         : "react";
   const style = profile.communicationStyle;
-  const reactionHistoryKey = `${args.conversationId}:${args.speaker.id}`;
-  const recentReactions = coffeeRecentInterruptionReactions.get(reactionHistoryKey) ?? [];
+  const recentReactions = args.history
+    .slice(-8)
+    .map((message) => message.content.trim())
+    .filter(Boolean);
   const text = pickCoffeeInterruptionReaction({
       style,
       tone,
@@ -13347,10 +13347,6 @@ function coffeeCannedInterruptionReaction(args: {
       seed,
       avoid: recentReactions,
     });
-  coffeeRecentInterruptionReactions.set(
-    reactionHistoryKey,
-    [...recentReactions, text].slice(-8)
-  );
   return {
     text,
     outcome,
@@ -20908,7 +20904,7 @@ async function generateCoffeeBotReply(args: {
       finalModel = COFFEE_LOCAL_CONTINUITY_MODEL_ID;
       autoRouteAccepted = true;
       console.warn(
-        `[coffee] Auto exhausted; landed local continuity beat conversation=${row.id} speaker=${speaker.id} attempts=${error.attempts.length}`,
+        `[coffee] Auto exhausted; using a local continuity beat after ${error.attempts.length} attempts.`,
       );
       result = null;
     }
@@ -20959,7 +20955,7 @@ async function generateCoffeeBotReply(args: {
             ) {
               punctuationOnlyRetryAttempted = true;
               console.warn(
-                `[coffee] speaker returned punctuation-only output; retrying once conversation=${row.id} speaker=${speaker.id}`,
+                "[coffee] speaker returned punctuation-only output; retrying once.",
               );
               reply = await speakerProvider.generateResponse(
                 [
@@ -20979,7 +20975,7 @@ async function generateCoffeeBotReply(args: {
       } catch (error) {
         if (coffeeProviderReturnedEmptyResponse(error, effectiveProvider)) {
           console.warn(
-            `[coffee] speaker returned empty ${effectiveProvider} response; falling back to emergency line conversation=${row.id} speaker=${speaker.id}`,
+            "[coffee] speaker returned an empty response; using a safe fallback.",
           );
           speakerReply = "";
         } else {

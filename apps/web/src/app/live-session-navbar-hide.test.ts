@@ -11,18 +11,6 @@ const botcastCss = readFileSync(
   new URL("./botcast.module.css", import.meta.url),
   "utf8",
 );
-const debateCss = readFileSync(
-  new URL("./DebateExperience.module.css", import.meta.url),
-  "utf8",
-);
-const mysteryCss = readFileSync(
-  new URL("./debateMysteryV2.module.css", import.meta.url),
-  "utf8",
-);
-const legacyMysteryCss = readFileSync(
-  new URL("./debateMystery.module.css", import.meta.url),
-  "utf8",
-);
 const coffeeIntroCss = readFileSync(
   new URL("./CoffeeIntroCurtain.module.css", import.meta.url),
   "utf8",
@@ -48,97 +36,111 @@ const coffeeIntro = readFileSync(
   new URL("./CoffeeIntroCurtain.tsx", import.meta.url),
   "utf8",
 );
+const mysterySource = readFileSync(
+  new URL("./DebateMysteryV2Experience.tsx", import.meta.url),
+  "utf8",
+);
+const legacyMysterySource = readFileSync(
+  new URL("./DebateMysteryExperience.tsx", import.meta.url),
+  "utf8",
+);
 
-test("the shared navbar permanently reserves its shell row", () => {
+test("ordinary applet surfaces retain the full shared-navbar height", () => {
   assert.match(globalsCss, /--app-navbar-height:\s*66px/u);
   assert.doesNotMatch(globalsCss, /data-app-navbar-session-hidden/u);
   assert.doesNotMatch(globalsCss, /data-app-navbar-hidden/u);
 });
 
-test("Coffee, Signal, and Debate keep the real shared navbar visible while locked", () => {
+test("active sessions replace the app navbar with exactly Back, route provenance, and Theme", () => {
+  const helperStart = pageSource.indexOf("const renderSharedAppletNavbar");
+  const helperEnd = pageSource.indexOf("/** Conversation tools", helperStart);
+  const helper = pageSource.slice(helperStart, helperEnd);
+  const liveStart = helper.indexOf("if (options.liveSessionActive)");
+  const liveReturn = helper.indexOf("    return (", liveStart);
+  const ordinaryReturn = helper.indexOf("    return (", liveReturn + 1);
+  const liveBranch = helper.slice(liveStart, ordinaryReturn);
+
+  assert.ok(helperStart >= 0 && helperEnd > helperStart);
+  assert.ok(liveStart >= 0 && ordinaryReturn > liveReturn);
   assert.doesNotMatch(pageSource, /setAppNavbarSessionHidden/u);
   assert.doesNotMatch(pageSource, /hideAppNavbarForImmersion/u);
+  assert.match(liveBranch, /data-live-session-minimal-chrome="true"/u);
+  assert.match(liveBranch, /className=\{styles\.liveSessionBackButton\}/u);
+  assert.match(liveBranch, /<span>Back<\/span>/u);
+  assert.match(liveBranch, /<LiveSessionModelChip/u);
+  assert.match(liveBranch, /options\.liveSessionRoutingChip/u);
+  assert.match(liveBranch, /<ThemeGlyph mode=\{effectiveThemeMode\}/u);
+  assert.doesNotMatch(liveBranch, /renderAppSwitcher/u);
+  assert.doesNotMatch(liveBranch, /renderUniversalNavbarButtons/u);
+  assert.doesNotMatch(liveBranch, /renderVoiceModeSelector/u);
+});
+
+test("Coffee, Story, Debate, Whodunnit Court, and Signal use the compact full-viewport session row", () => {
   assert.match(
-    pageSource,
-    /data-live-session-locked=\{[\s\S]{0,80}options\.liveSessionActive/u,
-  );
-  assert.match(
-    pageSource,
-    /liveSessionActive: coffeeChromePolicy\.liveSessionActive[\s\S]{0,700}renderCoffeeHeaderModelPicker\(\)/u,
-  );
-  assert.match(
-    pageSource,
-    /liveSessionActive: debateLiveSessionActive[\s\S]{0,6000}<ComposerModelPicker/u,
-  );
-  assert.match(
-    pageSource,
-    /navigationHeader=\{\(\{[\s\S]{0,800}liveSessionActive[\s\S]{0,6000}<ComposerModelPicker/u,
-  );
-  assert.match(
-    pageSource,
-    /renderSharedAppletNavbar\("Story tools", \{[\s\S]{0,500}liveSessionActive: storyLiveSessionActive/u,
+    pageCss,
+    /\.coffeeShell\[data-session-active="true"\]\s*\{[^}]*--app-shell-top-nav-height:\s*50px;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/u,
   );
   assert.match(
     pageCss,
-    /\.botGeneratorBackdrop\[data-avatar-foundry="true"\][\s\S]{0,180}inset:[\s\S]{0,100}var\(--app-shell-top-nav-height/u,
+    /\.storyShell\[data-session-active="true"\]\s*\{[^}]*--app-shell-top-nav-height:\s*50px;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/u,
   );
-});
-
-test("Coffee, Signal, and Debate shells reserve the measured shared-navbar height", () => {
   assert.match(
     pageCss,
-    /\.coffeeShell\s*\{[^}]*grid-template-rows:[^}]*var\(--app-shell-top-nav-height/u,
+    /\.storyShell\[data-session-active="true"\] \.storySidebar\s*\{\s*display:\s*none/u,
+  );
+  assert.match(
+    pageCss,
+    /\.debateShell\[data-session-active="true"\]\s*\{[^}]*--app-shell-top-nav-height:\s*50px/u,
   );
   assert.match(
     botcastCss,
-    /grid-template-rows:[^}]*var\(--app-shell-top-nav-height[^}]*minmax\(0,\s*1fr\)/u,
-  );
-  assert.match(
-    botcastCss,
-    /inset:\s*var\(--app-shell-top-nav-height[^;]*\s0\s0/u,
-  );
-  assert.match(
-    debateCss,
-    /inset:[^;]*var\(--app-shell-top-nav-height[^;]*\s0\s0/u,
+    /\.shell\[data-live-episode="true"\]\s*\{[^}]*--app-shell-top-nav-height:\s*50px;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/u,
   );
 });
 
-test("bespoke live headers follow the shared three-zone navbar grammar", () => {
+test("each active-session family supplies its real Back action and locked route", () => {
   assert.match(
-    debateCss,
-    /\.persistentLeaveDock\s*\{[\s\S]{0,220}top:\s*calc\([\s\S]{0,120}var\(--app-shell-top-nav-height/u,
-    "Debate's persistent escape must sit below the retained shared navbar",
+    pageSource,
+    /renderSharedAppletNavbar\("Coffee tools", \{[\s\S]{0,420}liveSessionExit: coffeeChromePolicy\.liveSessionActive[\s\S]{0,260}label: "Back"[\s\S]{0,260}liveSessionRoutingChip: coffeeLiveRoutingChip/u,
+  );
+  assert.match(
+    pageSource,
+    /renderSharedAppletNavbar\("Story tools", \{[\s\S]{0,520}liveSessionExit: storyLiveSessionActive[\s\S]{0,260}label: "Back"[\s\S]{0,260}liveSessionRoutingChip: storyLiveRoutingChip/u,
+  );
+  assert.match(
+    pageSource,
+    /renderSharedAppletNavbar\("Debate tools", \{[\s\S]{0,520}liveSessionExit: debateLiveSessionActive[\s\S]{0,260}label: "Back"[\s\S]{0,260}liveSessionRoutingChip: debateLiveRoutingChip/u,
+  );
+  assert.match(
+    pageSource,
+    /navigationHeader=\{\(\{[\s\S]{0,320}liveSessionBack,[\s\S]{0,120}lockedRoutingChip[\s\S]{0,3000}liveSessionExit: liveSessionActive[\s\S]{0,300}label: "Back"[\s\S]{0,300}liveSessionRoutingChip: lockedRoutingChip/u,
   );
   assert.match(
     signalSource,
-    /className=\{styles\.liveToplineStatus\}[\s\S]{0,1600}className=\{styles\.liveToplineIdentity\}[\s\S]{0,800}className=\{styles\.liveToplineActions\}/u,
-  );
-  assert.doesNotMatch(
-    signalSource,
-    /LiveSessionModelChip/u,
-    "Signal provenance belongs in the real top picker instead of a duplicate topline chip",
-  );
-  assert.match(
-    botcastCss,
-    /\.liveTopline\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto minmax\(0,\s*1fr\)/u,
-  );
-  assert.match(
-    mysteryCss,
-    /@media \(max-width:\s*1120px\)[\s\S]{0,260}\.investigationHeaderActions\s*\{[\s\S]{0,120}grid-column:\s*1 \/ -1/u,
-    "Whodunnit presentation controls must drop to a second row before crowding the case identity",
+    /liveSessionBack:\s*\{[\s\S]{0,420}onClick: returnFromLiveSession[\s\S]{0,500}lockedRoutingChip: resolvedLockedRoutingChip/u,
   );
 });
 
-test("session-local actions and blocking transitions start below the measured navbar", () => {
-  assert.match(
-    mysteryCss,
-    /\.archiveButton\s*\{[\s\S]{0,240}top:\s*calc\([\s\S]{0,120}var\(--app-shell-top-nav-height/u,
-    "Whodunnit's Continue, Return, and Archive control must not occupy the global navbar",
+test("Whodunnit investigation and Court suppress duplicate local Back and model chrome", () => {
+  assert.equal(
+    (mysterySource.match(/onClick=\{props\.onExit\}/gu) ?? []).length,
+    (mysterySource.match(/data-session-local-back="true"/gu) ?? []).length,
+  );
+  assert.equal(
+    (legacyMysterySource.match(/onClick=\{props\.onExit\}/gu) ?? []).length,
+    (legacyMysterySource.match(/data-session-local-back="true"/gu) ?? []).length,
   );
   assert.match(
-    legacyMysteryCss,
-    /\.compiler\s*>\s*\.exitButton\s*\{[\s\S]{0,240}top:\s*calc\([\s\S]{0,120}var\(--app-shell-top-nav-height/u,
+    pageCss,
+    /\.debateShell\[data-session-active="true"\][\s\S]{0,180}:global\(\[data-live-session-model-chip="true"\]\)[\s\S]{0,80}display:\s*none/u,
   );
+  assert.match(
+    pageCss,
+    /\.debateShell\[data-session-active="true"\][\s\S]{0,120}:global\(\[data-session-local-back="true"\]\)[\s\S]{0,100}visibility:\s*hidden/u,
+  );
+});
+
+test("blocking transitions continue to honor the compact measured session row", () => {
   for (const css of [coffeeIntroCss, warmupCss]) {
     assert.match(
       css,
@@ -148,14 +150,18 @@ test("session-local actions and blocking transitions start below the measured na
   assert.doesNotMatch(
     warmupSource,
     /document\.body\.children|setAttribute\("inert"/u,
-    "model warmup must leave the permanent navbar and Appearance control interactive",
+    "model warmup must leave the minimal Back and Theme controls interactive",
   );
 });
 
-test("Coffee intro curtain gates arrivals and End lives in table chrome", () => {
+test("Coffee intro gates arrivals and the shared Back replaces duplicate End chrome", () => {
   assert.match(coffeeIntro, /COFFEE_INTRO_CURTAIN_MS/u);
   assert.match(coffeeIntro, /data-coffee-intro-curtain="true"/u);
   assert.match(pageSource, /await playCoffeeIntroCurtain\(\)/u);
   assert.match(pageSource, /coffeeLiveSessionChrome/u);
+  assert.doesNotMatch(
+    pageSource,
+    /data-tutorial-target="coffee-end-session"[\s\S]{0,180}End session/u,
+  );
   assert.match(coffeePolicy, /showEndSessionInSwitcher:\s*false/u);
 });

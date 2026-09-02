@@ -15,6 +15,10 @@ import {
   type AvatarDetailsInkRole,
   type AvatarDetailsV1,
 } from "./avatar-details.ts";
+import {
+  readOrMigrateBrowserOwnerJsonV1,
+  writeBrowserOwnerJsonV1,
+} from "./browserOwnerState";
 
 export const AVATAR_DETAIL_INK_TEMPLATE_VERSION = 1;
 export const AVATAR_DETAIL_INK_TEMPLATE_LIMIT = 24;
@@ -176,6 +180,32 @@ export function saveAvatarDetailInkTemplates(
     avatarDetailInkTemplateStorageKey(ownerId),
     JSON.stringify(normalized),
   );
+  return normalized;
+}
+
+export async function loadEncryptedAvatarDetailInkTemplates(
+  ownerId: string,
+  legacyStorage?: Pick<Storage, "getItem" | "removeItem"> | null,
+): Promise<AvatarDetailInkTemplateV1[]> {
+  const stored = await readOrMigrateBrowserOwnerJsonV1<unknown>({
+    ownerId,
+    logicalKey: "avatar-detail-ink-templates",
+    legacyStorage,
+    legacyKeys: [avatarDetailInkTemplateStorageKey(ownerId)],
+  });
+  return normalizeAvatarDetailInkTemplates(stored);
+}
+
+export async function saveEncryptedAvatarDetailInkTemplates(
+  ownerId: string,
+  templates: readonly AvatarDetailInkTemplateV1[],
+): Promise<AvatarDetailInkTemplateV1[]> {
+  const normalized = normalizeAvatarDetailInkTemplates(templates);
+  await writeBrowserOwnerJsonV1({
+    ownerId,
+    logicalKey: "avatar-detail-ink-templates",
+    value: normalized,
+  });
   return normalized;
 }
 

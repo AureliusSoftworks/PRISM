@@ -366,6 +366,7 @@
 
 /* Live episodes hide the shows rail so the stage is full-bleed. */
 .shell[data-live-episode="true"] {
+  --app-shell-top-nav-height: 50px;
   grid-template-columns: minmax(0, 1fr);
 }
 .shell[data-live-episode="true"] .library {

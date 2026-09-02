@@ -74,7 +74,7 @@ process.on("message", (message: unknown) => {
 // a failing exit status instead of being mistaken for a harmless disconnect.
 process.on("error", (error) => {
   if (isClosedBuiltinTtsIpcError(error)) return;
-  console.error("[builtin-tts] child process error:", error);
+  console.error("[builtin-tts] child process failed.");
   process.exitCode = 1;
 });
 

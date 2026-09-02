@@ -49,7 +49,7 @@ test("every active applet consumes the Debate PRISM navbar contract", () => {
   );
   assert.match(
     navbarHelper,
-    /options\.liveSessionActive && options\.liveSessionExit[\s\S]{0,120}coffeeExitSessionButton[\s\S]{0,400}renderAppSwitcher/u,
+    /if \(options\.liveSessionActive\)[\s\S]{0,1200}liveSessionBackButton[\s\S]{0,600}LiveSessionModelChip[\s\S]{0,900}ThemeGlyph/u,
   );
   assert.match(
     navbarHelper,
@@ -61,11 +61,11 @@ test("every active applet consumes the Debate PRISM navbar contract", () => {
     /renderUniversalNavbarButtons\(\{[\s\S]*disabledActions:[\s\S]*disabledActionTooltips:/,
   );
   assert.match(navbarHelper, /data-shared-app-navbar="true"/);
-  assert.match(navbarHelper, /data-live-session-locked=/);
+  assert.match(navbarHelper, /data-live-session-minimal-chrome="true"/);
   assert.match(navbarHelper, /brandAppletId: PrismAppletId/u);
   assert.match(
     navbarHelper,
-    /renderSharedAppletBrand\([\s\S]{0,80}options\.brandAppletId,[\s\S]{0,80}options\.liveSessionActive === true/u,
+    /renderSharedAppletBrand\(options\.brandAppletId\)/u,
   );
 
   for (const appletId of ["coffee", "story", "debate", "botcast", "slate"]) {

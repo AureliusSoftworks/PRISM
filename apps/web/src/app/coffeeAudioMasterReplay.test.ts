@@ -21,7 +21,7 @@ test("Coffee finalizes one retained V2 audio master through the shared lifecycle
   assert.match(pageSource, /replayManifestV2IsValid\(provisionalManifest\)/u);
   assert.match(
     pageSource,
-    /saveFaithfulReplaySession\(\{\s*surface: "coffee",\s*sourceId: conversation\.id,\s*manifest,\s*capture,/u,
+    /saveFaithfulReplaySession\(\{\s*ownerId,\s*surface: "coffee",\s*sourceId: conversation\.id,\s*manifest,\s*capture,/u,
   );
   assert.match(pageSource, /coffeeReplayCaptureBySessionRef/u);
   assert.match(pageSource, /startReplayRecordingDraft\(\{\s*surface: "coffee"/u);

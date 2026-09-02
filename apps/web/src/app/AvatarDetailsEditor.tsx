@@ -91,10 +91,11 @@ import {
   applyAvatarDetailInkTemplate,
   createAvatarDetailInkTemplate,
   filterAvatarDetailInkTemplates,
-  loadAvatarDetailInkTemplates,
+  loadEncryptedAvatarDetailInkTemplates,
+  normalizeAvatarDetailInkTemplates,
   rasterizeAvatarDetailInkTemplateRgba,
   renameAvatarDetailInkTemplate,
-  saveAvatarDetailInkTemplates,
+  saveEncryptedAvatarDetailInkTemplates,
   type AvatarDetailInkTemplateV1,
 } from "./avatar-detail-ink-templates";
 import {
@@ -447,16 +448,22 @@ const AvatarDetailsEditorSession = forwardRef<
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const loaded = loadAvatarDetailInkTemplates(
+    let disposed = false;
+    void loadEncryptedAvatarDetailInkTemplates(
       templateOwnerId,
       window.localStorage,
-    );
-    setInkTemplates(loaded);
-    setSelectedTemplateId((current) =>
-      current && loaded.some((template) => template.id === current)
-        ? current
-        : null,
-    );
+    ).then((loaded) => {
+      if (disposed) return;
+      setInkTemplates(loaded);
+      setSelectedTemplateId((current) =>
+        current && loaded.some((template) => template.id === current)
+          ? current
+          : null,
+      );
+    });
+    return () => {
+      disposed = true;
+    };
   }, [templateOwnerId]);
 
   useEffect(() => {
@@ -708,20 +715,15 @@ const AvatarDetailsEditorSession = forwardRef<
 
   const persistInkTemplates = useCallback(
     (nextTemplates: readonly AvatarDetailInkTemplateV1[]): boolean => {
-      if (typeof window === "undefined") return false;
-      try {
-        setInkTemplates(
-          saveAvatarDetailInkTemplates(
-            templateOwnerId,
-            nextTemplates,
-            window.localStorage,
-          ),
-        );
-        return true;
-      } catch {
+      const normalized = normalizeAvatarDetailInkTemplates(nextTemplates);
+      setInkTemplates(normalized);
+      void saveEncryptedAvatarDetailInkTemplates(
+        templateOwnerId,
+        normalized,
+      ).catch(() => {
         setTemplateStatus("This device could not save the stamp library.");
-        return false;
-      }
+      });
+      return true;
     },
     [templateOwnerId],
   );

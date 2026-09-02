@@ -407,10 +407,14 @@ function modelCatalogCacheKey(
   secondaryOllamaHost?: string | null,
   anthropicApiKey?: string,
   ollamaCloudApiKey?: string,
-): string {
+  ownerId?: string,
+): string | null {
+  const normalizedOwnerId = ownerId?.trim();
+  if (!normalizedOwnerId) return null;
   const privateSecondaryHost = privateSecondaryOllamaHost(secondaryOllamaHost);
   return createHash("sha256")
     .update(JSON.stringify({
+      ownerId: normalizedOwnerId,
       primaryOllamaHost: config.ollamaHost,
       primaryOllamaModel: config.ollamaModel,
       secondaryOllamaHost: privateSecondaryHost ?? "",
@@ -1759,14 +1763,16 @@ export async function buildModelCatalog(
   secondaryOllamaHost?: string | null,
   anthropicApiKey?: string,
   ollamaCloudApiKey?: string,
+  ownerId?: string,
 ): Promise<ModelCatalog> {
   const cacheKey = modelCatalogCacheKey(
     openAiApiKey,
     secondaryOllamaHost,
     anthropicApiKey,
     ollamaCloudApiKey,
+    ownerId,
   );
-  const cached = modelCatalogCache.get(cacheKey);
+  const cached = cacheKey ? modelCatalogCache.get(cacheKey) : undefined;
   if (cached) return cached;
   const catalog = buildUncachedModelCatalog(
     openAiApiKey,
@@ -1774,11 +1780,11 @@ export async function buildModelCatalog(
     anthropicApiKey,
     ollamaCloudApiKey,
   );
-  modelCatalogCache.set(cacheKey, catalog);
+  if (cacheKey) modelCatalogCache.set(cacheKey, catalog);
   try {
     return await catalog;
   } catch (error) {
-    modelCatalogCache.delete(cacheKey);
+    if (cacheKey) modelCatalogCache.delete(cacheKey);
     throw error;
   }
 }
@@ -1789,20 +1795,22 @@ export async function refreshModelCatalog(
   secondaryOllamaHost?: string | null,
   anthropicApiKey?: string,
   ollamaCloudApiKey?: string,
+  ownerId?: string,
 ): Promise<ModelCatalog> {
-  modelCatalogCache.delete(
-    modelCatalogCacheKey(
-      openAiApiKey,
-      secondaryOllamaHost,
-      anthropicApiKey,
-      ollamaCloudApiKey,
-    ),
+  const cacheKey = modelCatalogCacheKey(
+    openAiApiKey,
+    secondaryOllamaHost,
+    anthropicApiKey,
+    ollamaCloudApiKey,
+    ownerId,
   );
+  if (cacheKey) modelCatalogCache.delete(cacheKey);
   return buildModelCatalog(
     openAiApiKey,
     secondaryOllamaHost,
     anthropicApiKey,
     ollamaCloudApiKey,
+    ownerId,
   );
 }
 
@@ -2599,18 +2607,14 @@ export class OpenAiProvider implements LlmProvider {
           durationMs: Date.now() - startedAt,
         });
         console.error(
-          `[openai] reasoning_effort rejected for model=${modelUsed}; preserving the selected effort detail=${
-            detail || "<empty body>"
-          }`
+          `[openai] reasoning effort rejected status=${response.status}.`,
         );
         throw new Error(
           `OpenAI rejected the selected ${String(requestBody.reasoning_effort)} reasoning effort for ${modelUsed}. Choose a supported effort or retry with another model.`,
         );
       } else {
         console.error(
-          `[openai] chat completion failed status=${response.status} model=${modelUsed} detail=${
-            detail || "<empty body>"
-          }`
+          `[openai] chat completion failed status=${response.status}.`,
         );
         recordDeveloperTranscriptEvent({
           kind: "llm",
@@ -2813,9 +2817,7 @@ export class AnthropicProvider implements LlmProvider {
     if (!response.ok) {
       const detail = await readOpenAiErrorMessage(response);
       console.error(
-        `[anthropic] messages failed status=${response.status} model=${modelId} detail=${
-          detail || "<empty body>"
-        }`
+        `[anthropic] messages failed status=${response.status}.`,
       );
       recordDeveloperTranscriptEvent({
         kind: "llm",

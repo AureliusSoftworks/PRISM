@@ -777,6 +777,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
+  console.error("Effort ladder evaluation failed.");
   process.exitCode = 1;
 });

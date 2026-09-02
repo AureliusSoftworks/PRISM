@@ -1,5 +1,3 @@
-import { CURRENT_MANSION_ROOM_ART_CONTRACT } from "@localai/shared";
-
 interface MysteryLensPoint {
   x: number;
   y: number;
@@ -19,10 +17,8 @@ export interface MysteryLensState {
   hotspotId: string | null;
 }
 
-export const DEBATE_MYSTERY_V2_MOSAIC_LENS_COLUMNS =
-  CURRENT_MANSION_ROOM_ART_CONTRACT.pixelArt.grid.logicalWidth;
-export const DEBATE_MYSTERY_V2_MOSAIC_LENS_ROWS =
-  CURRENT_MANSION_ROOM_ART_CONTRACT.pixelArt.grid.logicalHeight;
+export const DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS = 24;
+export const DEBATE_MYSTERY_V2_EXAMINE_GRID_ROWS = 15;
 
 function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, value));
@@ -131,11 +127,11 @@ export function debateMysteryV2LensClickTarget(
   return lens.hotspotId;
 }
 
-export function debateMysteryV2LensMosaicCellIndexes(
+export function debateMysteryV2ExamineGridCellIndexes(
   lens: Pick<MysteryLensState, "x" | "y" | "hotspotId">,
   hotspots: readonly MysteryLensHotspot[],
-  columns: number = DEBATE_MYSTERY_V2_MOSAIC_LENS_COLUMNS,
-  rows: number = DEBATE_MYSTERY_V2_MOSAIC_LENS_ROWS,
+  columns: number = DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS,
+  rows: number = DEBATE_MYSTERY_V2_EXAMINE_GRID_ROWS,
 ): number[] {
   const target = hotspots.find((hotspot) => hotspot.id === lens.hotspotId);
   if (!target || !target.unlocked || target.examined) return [];

@@ -164,32 +164,3 @@ export function coffeeJazzBackgroundUrl(
   if (!preference.enabled) return null;
   return coffeeJazzStationById(preference.stationId).audioUrl;
 }
-
-export function loadCoffeeJazzAtmosphereFromBrowser(): CoffeeJazzAtmospherePreference {
-  if (typeof window === "undefined") {
-    return { ...DEFAULT_COFFEE_JAZZ_ATMOSPHERE_PREFERENCE };
-  }
-  try {
-    const raw = window.localStorage.getItem(
-      PRISM_COFFEE_JAZZ_ATMOSPHERE_STORAGE_KEY,
-    );
-    if (!raw) return { ...DEFAULT_COFFEE_JAZZ_ATMOSPHERE_PREFERENCE };
-    return normalizeCoffeeJazzAtmospherePreference(JSON.parse(raw) as unknown);
-  } catch {
-    return { ...DEFAULT_COFFEE_JAZZ_ATMOSPHERE_PREFERENCE };
-  }
-}
-
-export function persistCoffeeJazzAtmosphereToBrowser(
-  preference: CoffeeJazzAtmospherePreference,
-): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(
-      PRISM_COFFEE_JAZZ_ATMOSPHERE_STORAGE_KEY,
-      JSON.stringify(normalizeCoffeeJazzAtmospherePreference(preference)),
-    );
-  } catch {
-    // Private mode / quota — ignore; current session state still applies.
-  }
-}

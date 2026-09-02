@@ -74,6 +74,11 @@ describe("Avatar Details Studio integration", () => {
       "completed custom-eye layers must emit the shared HD phosphor bloom after masking",
     );
     assert.match(
+      pageCss,
+      /\.zenLiveBotPresencePlate\[data-theme="light"\]\[data-avatar-full-scale-identity="canonical"\][\s\S]*?\.zenLiveBotPresenceFaceGlyph\[data-face-eye-character\][\s\S]*?\[data-coffee-plate-emoji-part="eyes"\][\s\S]*?\[data-crt-glyph-layer="true"\]\[data-crt-pixel-mask-ready="true"\][\s\S]*?--zen-live-bot-glyph-compositor-glow-filter:\s*var\(\s*--crt-face-glow-filter\s*\)[\s\S]*?mix-blend-mode:\s*var\(--bot-avatar-light-ink-glow-blend,\s*plus-lighter\)/u,
+      "Light custom eyes must keep their authored contour while additively emitting the same white phosphor envelope as authored Ink",
+    );
+    assert.match(
       editorSource,
       /data-avatar-details-face-guide="true"[\s\S]*?<CoffeeSeatPlateEmoji/u,
     );
@@ -126,7 +131,7 @@ describe("Avatar Details Studio integration", () => {
     assert.match(editorSource, /aria-label="Save current ink as a stamp"/);
     assert.match(editorSource, /createAvatarDetailInkTemplate\(/);
     assert.match(editorSource, /applyAvatarDetailInkTemplate\(/);
-    assert.match(editorSource, /saveAvatarDetailInkTemplates\(/);
+    assert.match(editorSource, /saveEncryptedAvatarDetailInkTemplates\(/);
     assert.match(editorSource, /data-avatar-details-stamp-preview="true"/);
     assert.match(editorSource, /data-stamp-equipped="true"/);
     assert.match(editorSource, /aria-label="Make stamp smaller"/);

@@ -4,7 +4,7 @@ import test from "node:test";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
-test("active Coffee centrally locks configuration while preserving End Session", () => {
+test("active Coffee centrally locks configuration while preserving shared Back", () => {
   assert.match(
     pageSource,
     /const coffeeConfigurationLocked =\s*coffeeChromePolicy\.liveSessionActive \|\|\s*coffeeIntroPlaying \|\|\s*coffeeGuestRevealConcealed/u,
@@ -69,9 +69,9 @@ test("active Coffee centrally locks configuration while preserving End Session",
   );
   assert.match(
     pageSource,
-    /liveSessionExit: coffeeChromePolicy\.showEndSessionInSwitcher[\s\S]*label: "End session"/u,
+    /liveSessionExit: coffeeChromePolicy\.liveSessionActive[\s\S]{0,260}label: "Back"[\s\S]{0,260}liveSessionRoutingChip: coffeeLiveRoutingChip/u,
   );
-  assert.match(
+  assert.doesNotMatch(
     pageSource,
     /data-tutorial-target="coffee-end-session"[\s\S]*End session/u,
   );
@@ -80,7 +80,7 @@ test("active Coffee centrally locks configuration while preserving End Session",
   assert.doesNotMatch(pageSource, /setAppNavbarSessionHidden/u);
   assert.match(
     pageSource,
-    /data-live-session-locked=\{[\s\S]*options\.liveSessionActive/u,
+    /data-live-session-minimal-chrome="true"/u,
   );
 });
 

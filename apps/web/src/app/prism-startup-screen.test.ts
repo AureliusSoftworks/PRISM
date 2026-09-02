@@ -34,6 +34,21 @@ describe("continued PRISM startup screen", () => {
     assert.match(component, /\["Qdrant", "API", "Web"\]/u);
   });
 
+  it("fills the triangle only after authentication", () => {
+    assert.match(
+      component,
+      /data-prism-startup-glyph="authenticated"[\s\S]{0,160}fill="currentColor"/u,
+    );
+    assert.doesNotMatch(
+      component,
+      /data-prism-startup-glyph="authenticated"[\s\S]{0,320}stroke="currentColor"/u,
+    );
+    assert.match(
+      nativeSplash,
+      /M28 6L48 43H8L28 6Z" stroke="currentColor"/u,
+    );
+  });
+
   it("keeps the terminal behind the hero while workspace lines continue", () => {
     assert.match(component, /role="log" aria-label="Boot log"/u);
     assert.match(component, /Startup Trace/u);
@@ -102,7 +117,7 @@ describe("continued PRISM startup screen", () => {
     assert.match(nativeSplash, /msg\.textContent = startupTraceText\(text\)/u);
   });
 
-  it("hands off atomically without replaying the full hero entrance", () => {
+  it("hands off atomically without moving the hero", () => {
     const veilStart = css.indexOf(".veil {");
     const veilRule = css.slice(veilStart, css.indexOf("}", veilStart) + 1);
     const centerStart = css.indexOf(".center {");
@@ -114,28 +129,47 @@ describe("continued PRISM startup screen", () => {
     assert.doesNotMatch(veilRule, /animation:/u);
     assert.doesNotMatch(centerRule, /animation:/u);
     assert.match(nativeSplash, /animation: veilIn 420ms ease-out both/u);
-    assert.match(nativeSplash, /animation: floatIn 620ms/u);
+    assert.doesNotMatch(nativeSplash, /floatIn/u);
     assert.match(css, /\.consoleLines \{[\s\S]*handoffDetailIn 240ms/u);
   });
 
-  it("keeps the ambient hero motion in phase across both documents", () => {
+  it("keeps the ambient orb motion in phase across both documents", () => {
     for (const source of [component, nativeSplash]) {
       assert.match(source, /--prism-startup-ring-phase/u);
       assert.match(source, /now % 4800/u);
       assert.match(source, /now % 2600/u);
       assert.match(source, /now % 2800/u);
-      assert.match(source, /now % 1550/u);
       assert.match(source, /now % 7200/u);
+      assert.doesNotMatch(source, /--prism-startup-glyph-phase|now % 1550/u);
     }
     for (const source of [css, nativeSplash]) {
       assert.match(
         source,
         /animation-delay: var\(--prism-startup-ring-phase, 0ms\)/u,
       );
-      assert.match(
-        source,
-        /animation-delay: var\(--prism-startup-glyph-phase, 0ms\)/u,
+      assert.match(source, /\.orb \{[\s\S]*animation: haloDrift 2\.6s/u);
+    }
+  });
+
+  it("keeps the triangle fixed while the surrounding orb moves", () => {
+    assert.match(
+      component,
+      /className=\{styles\.halo\}[\s\S]*className=\{styles\.orb\}[\s\S]*className=\{styles\.glyph\}/u,
+    );
+    assert.match(
+      nativeSplash,
+      /class="halo"[\s\S]*class="orb"[\s\S]*class="glyph"/u,
+    );
+    for (const source of [css, nativeSplash]) {
+      const glyphStart = source.indexOf(".glyph {");
+      const glyphRule = source.slice(
+        glyphStart,
+        source.indexOf("}", glyphStart) + 1,
       );
+      assert.match(glyphRule, /opacity: 1;/u);
+      assert.match(glyphRule, /transform: none;/u);
+      assert.doesNotMatch(glyphRule, /animation:/u);
+      assert.doesNotMatch(source, /glyphPulse/u);
     }
   });
 

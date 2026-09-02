@@ -187,7 +187,7 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Revisits skip the sequence/u);
     assert.match(step.body, /Examine is a first-person room-art viewing mode/u);
     assert.match(step.body, /quietly confirms an available inspectable region only while it is inside that region/u);
-    assert.match(step.body, /Mosaic adds a 24×15 scene grid/u);
+    assert.match(step.body, /flat, screen-aligned 24×15 grid appears over both Mosaic and Upgraded room art/u);
     assert.match(step.body, /authored observation types in with the player character’s Babble/u);
     assert.match(step.body, /Only observations that produce a durable public case consequence/u);
     assert.match(step.body, /enter the Case Kit with an immediate acquisition cue/u);
@@ -1374,7 +1374,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /Auto resolves model and Effort again for each work item/u);
     assert.match(
       copy,
-      /shared navbar stays visible as a locked instrument; LOCAL\/ONLINE, model, and Effort stay fixed for the whole sit/u,
+      /Forum fills the viewport beneath a minimal bar with Back, the observed model \+ Effort, and Theme/u,
     );
     assert.match(
       copy,
@@ -2219,10 +2219,10 @@ describe("mode tutorials", () => {
       /freezes the selected speaking type and engine/u,
     );
     assert.match(routing?.body ?? "", /new session opens at topic selection/u);
-    assert.match(routing?.body ?? "", /keeps the shared navbar visible while locking routing, model, Effort, Voice/u);
+    assert.match(routing?.body ?? "", /replaces the shared navbar with Back, the observed model \+ Effort, and Theme/u);
     assert.match(
       routing?.body ?? "",
-      /real top Model and Effort controls stay visible but disabled/u,
+      /minimal session bar shows the frozen model and Effort/u,
     );
     assert.match(
       routing?.body ?? "",
@@ -2236,12 +2236,12 @@ describe("mode tutorials", () => {
     assert.match(routing?.body ?? "", /unsent player draft remains intact/u);
     assert.match(
       routing?.body ?? "",
-      /session navigation/u,
+      /every other session control/u,
     );
-    assert.match(routing?.body ?? "", /Theme remains available/u);
+    assert.match(routing?.body ?? "", /observed model \+ Effort, and Theme/u);
     assert.match(
       routing?.body ?? "",
-      /Only a terminal model failure temporarily unlocks the model picker/u,
+      /Only a terminal model failure can interrupt that routing lock/u,
     );
     assert.doesNotMatch(
       routing?.body ?? "",
@@ -2347,7 +2347,7 @@ describe("mode tutorials", () => {
     assert.match(topicStep?.body ?? "", /table stays waiting until you choose one/);
     assert.match(
       topicStep?.body ?? "",
-      /shared navbar stays visible as the new-session topic picker opens/,
+      /table fills the viewport beneath a minimal session bar as soon as the new-session topic picker opens/,
     );
     assert.match(topicStep?.body ?? "", /short branded Coffee curtain/);
     assert.match(topicStep?.body ?? "", /short cleaned title for that topic/);
@@ -2356,7 +2356,7 @@ describe("mode tutorials", () => {
     assert.match(topicStep?.body ?? "", /never coached to fake a memory/u);
     assert.match(
       topicStep?.body ?? "",
-      /End session lives in that table chrome from this waiting screen onward/,
+      /Back lives in the minimal session bar from this waiting screen onward/,
     );
     assert.match(
       topicStep?.body ?? "",
@@ -3390,7 +3390,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalControlRoomStep.body,
-      /shared navbar stays visible with its real Model and Effort controls locked[\s\S]*Cut on stage ends the sit[\s\S]*through the closing card until you Return to show[\s\S]*live topline stays focused on on-air state, the current segment, and transport or terminal actions[\s\S]*model provenance remains in the real top picker/u,
+      /stage and control room fill the viewport beneath a minimal bar with Back, the observed model \+ Effort, and Theme[\s\S]*through the closing card until you Return to show[\s\S]*live topline stays focused on on-air state, the current segment, and transport or terminal actions[\s\S]*model provenance remains in the minimal session bar/u,
     );
     assert.match(
       signalControlRoomStep.body,

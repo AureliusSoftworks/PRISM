@@ -900,7 +900,7 @@ export function startChatImageBackgroundJob(args: {
       },
     ),
   ).catch((err) => {
-    console.warn("[image-job-slot] background job crashed:", err);
+    console.warn("[image-job-slot] background job failed.");
     void finishImageJob(job.id, job.userId, {
       status: "failed",
       error: err instanceof Error ? err.message : String(err),

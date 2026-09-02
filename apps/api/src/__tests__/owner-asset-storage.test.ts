@@ -19,7 +19,9 @@ import {
   deleteOwnerAssetV1,
   ownerAssetCiphertextSizeBytesV1,
   readOwnerAssetBytesV1,
+  readOwnerAssetStreamV1,
   writeOwnerAssetBytesV1,
+  writeOwnerAssetStreamV1,
   type OwnerAssetStorageIdentityV1,
 } from "../owner-asset-storage.ts";
 import { deriveMasterKey, encryptText } from "../security.ts";
@@ -191,6 +193,86 @@ describe("owner asset ciphertext storage", () => {
       assert.deepEqual(pendingPlaintextTemps, []);
       plaintext.fill(0);
       replacement.fill(0);
+    } finally {
+      db.close();
+      if (previousDbPath === undefined) delete process.env.DB_PATH;
+      else process.env.DB_PATH = previousDbPath;
+      rmSync(tempDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("streams large assets through ciphertext-only temporary files", async () => {
+    const tempDirectory = mkdtempSync(join(tmpdir(), "prism-owner-stream-"));
+    const previousDbPath = process.env.DB_PATH;
+    process.env.DB_PATH = join(tempDirectory, "localai.db");
+    const db = initializeDatabase(
+      new DatabaseSync(process.env.DB_PATH),
+      MASTER_SECRET,
+    );
+    try {
+      const context = deriveVaultMasterKeyContextV2(db, MASTER_SECRET);
+      const ownerIds = Array.from({ length: 4 }, (_, index) =>
+        createOwner(db, index),
+      );
+      const canary = Buffer.from("streaming-owner-file-plaintext-canary", "utf8");
+      const first = Buffer.concat([canary, randomBytes(300_000)]);
+      const second = Buffer.concat([randomBytes(400_000), canary]);
+      const identity: OwnerAssetStorageIdentityV1 = {
+        db,
+        context,
+        ownerUserId: ownerIds[0]!,
+        assetClass: "large-replay-media",
+        stableAssetId: "streamed-recording",
+      };
+      let inspectedPendingCiphertext = false;
+      async function* plaintextSource() {
+        yield first;
+        const mediaRoot = join(tempDirectory, "account-vault-media-v1");
+        const pending = readdirSync(mediaRoot, { recursive: true })
+          .map(String)
+          .filter((entry) => entry.endsWith(".tmp"));
+        assert.equal(pending.length, 1);
+        const pendingBytes = readFileSync(join(mediaRoot, pending[0]!));
+        assert.equal(pendingBytes.includes(canary), false);
+        inspectedPendingCiphertext = true;
+        yield second;
+      }
+
+      const record = await writeOwnerAssetStreamV1({
+        identity,
+        plaintext: plaintextSource(),
+        exclusive: true,
+      });
+      assert.equal(inspectedPendingCiphertext, true);
+      assert.equal(record.plaintextBytes, first.length + second.length);
+      const stored = readFileSync(join(tempDirectory, record.localRelativePath));
+      assert.equal(stored.includes(canary), false);
+
+      const opened: Buffer[] = [];
+      const openReport = await readOwnerAssetStreamV1({
+        identity,
+        localRelativePath: record.localRelativePath,
+        writePlaintext: (chunk) => opened.push(Buffer.from(chunk)),
+      });
+      assert.equal(openReport.plaintextBytes, first.length + second.length);
+      assert.deepEqual(Buffer.concat(opened), Buffer.concat([first, second]));
+
+      await assert.rejects(
+        readOwnerAssetStreamV1({
+          identity: { ...identity, ownerUserId: ownerIds[1]! },
+          localRelativePath: record.localRelativePath,
+          writePlaintext: () => undefined,
+        }),
+        /unavailable/u,
+      );
+      const remainingTemps = readdirSync(
+        join(tempDirectory, "account-vault-media-v1"),
+        { recursive: true },
+      ).filter((entry) => String(entry).endsWith(".tmp"));
+      assert.deepEqual(remainingTemps, []);
+      first.fill(0);
+      second.fill(0);
+      for (const chunk of opened) chunk.fill(0);
     } finally {
       db.close();
       if (previousDbPath === undefined) delete process.env.DB_PATH;

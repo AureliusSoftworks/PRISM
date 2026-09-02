@@ -44,6 +44,16 @@ describe("Flyting stage alignment", () => {
     ] as const) {
       assert.equal(items.get(id)?.supportsRotation, true);
       assert.equal(items.get(id)?.supportsSkew, true);
+      assert.equal(items.get(id)?.supportsSkewY, undefined);
+    }
+  });
+
+  it("offers independent vertical skew only for the three rug glyphs", () => {
+    for (const item of DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS) {
+      assert.equal(
+        item.supportsSkewY,
+        item.id.endsWith("RugGlyph") || undefined,
+      );
     }
   });
 
@@ -63,7 +73,59 @@ describe("Flyting stage alignment", () => {
     );
   });
 
-  it("installs the approved rug placements and gallery controls", () => {
+  it("installs the approved Wide, Moderator, rug, and gallery defaults", () => {
+    assert.deepEqual(
+      DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements.wideForHeraldry,
+      { x: -0.25, y: -14, scale: 90, rotation: 0, skewX: 0, skewY: 0 },
+    );
+    assert.deepEqual(
+      DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements.wideModeratorBot,
+      { x: 0, y: -4.5, scale: 100, rotation: 0, skewX: 0, skewY: 0 },
+    );
+    assert.deepEqual(
+      DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements.wideModeratorNameplate,
+      { x: 0, y: -4, scale: 100, rotation: 0, skewX: 0, skewY: 0 },
+    );
+    assert.deepEqual(
+      DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements.wideModeratorHeraldry,
+      { x: -0.25, y: 3, scale: 80, rotation: 0, skewX: 0, skewY: 0 },
+    );
+    assert.deepEqual(
+      DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements.wideAgainstNameplate,
+      { x: 0, y: 0.02, scale: 100, rotation: 0, skewX: 0, skewY: 0 },
+    );
+    assert.deepEqual(
+      DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements.wideAgainstHeraldry,
+      { x: -0.5, y: -14, scale: 90, rotation: 0, skewX: 0, skewY: 0 },
+    );
+    assert.deepEqual(
+      DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements.moderatorForHeraldry,
+      { x: 0.6, y: -14, scale: 100, rotation: 0, skewX: 0, skewY: 0 },
+    );
+    assert.deepEqual(
+      DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements.moderatorModeratorBot,
+      { x: 0, y: -1.5, scale: 100, rotation: 0, skewX: 0, skewY: 0 },
+    );
+    assert.deepEqual(
+      DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements
+        .moderatorModeratorHelmet,
+      { x: 0, y: 0, scale: 100, rotation: 0, skewX: 0, skewY: 0 },
+    );
+    assert.deepEqual(
+      DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements
+        .moderatorModeratorNameplate,
+      { x: 0, y: 7, scale: 100, rotation: 0, skewX: 0, skewY: 0 },
+    );
+    assert.deepEqual(
+      DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements
+        .moderatorModeratorHeraldry,
+      { x: -0.25, y: -3, scale: 100, rotation: 0, skewX: 0, skewY: 0 },
+    );
+    assert.deepEqual(
+      DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements
+        .moderatorAgainstHeraldry,
+      { x: -1.4, y: -14, scale: 100, rotation: 0, skewX: 0, skewY: 0 },
+    );
     assert.deepEqual(
       DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements.galleryForRugGlyph,
       {
@@ -72,12 +134,13 @@ describe("Flyting stage alignment", () => {
         scale: 100,
         rotation: 0,
         skewX: -20,
+        skewY: 0,
       },
     );
     assert.deepEqual(
       DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements
         .galleryModeratorRugGlyph,
-      { x: 0, y: 0, scale: 100, rotation: 0, skewX: 0 },
+      { x: 0, y: 0, scale: 100, rotation: 0, skewX: 0, skewY: 0 },
     );
     assert.deepEqual(
       DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements.galleryAgainstRugGlyph,
@@ -87,6 +150,7 @@ describe("Flyting stage alignment", () => {
         scale: 100,
         rotation: 0,
         skewX: 20,
+        skewY: 0,
       },
     );
     assert.deepEqual(DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS, {
@@ -99,7 +163,7 @@ describe("Flyting stage alignment", () => {
     const updated = updateDebateFlytingStagePlacement(
       DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT,
       "galleryAgainstRugGlyph",
-      { x: 8.5, y: -4, scale: 135, rotation: 12, skewX: 18 },
+      { x: 8.5, y: -4, scale: 135, rotation: 12, skewX: 18, skewY: -11 },
     );
     assert.deepEqual(updated.placements.galleryAgainstRugGlyph, {
       x: 8.5,
@@ -107,6 +171,7 @@ describe("Flyting stage alignment", () => {
       scale: 135,
       rotation: 12,
       skewX: 18,
+      skewY: -11,
     });
     assert.deepEqual(
       updated.placements.wideForBot,
@@ -123,6 +188,7 @@ describe("Flyting stage alignment", () => {
           scale: 999,
           rotation: -999,
           skewX: 999,
+          skewY: -999,
         },
       },
     });
@@ -132,6 +198,7 @@ describe("Flyting stage alignment", () => {
       scale: 250,
       rotation: -180,
       skewX: 60,
+      skewY: -60,
     });
     assert.deepEqual(copyDebateFlytingStageAlignment(normalized), normalized);
     const clipboard = formatDebateFlytingStageAlignmentClipboard(normalized, {

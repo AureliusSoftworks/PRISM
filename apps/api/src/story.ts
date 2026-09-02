@@ -2598,7 +2598,6 @@ export async function generateStorySessionEpisode(
           if (signal.aborted) throw error;
           console.warn(
             "Story Quiet context repair pass failed; preserving the deterministic redacted fallback.",
-            error,
           );
         }
         return generatedEpisode;

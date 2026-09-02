@@ -11,7 +11,7 @@ export default function Error({
   reset: () => void;
 }): React.JSX.Element {
   useEffect(() => {
-    console.error("[Prism route error]", error);
+    console.error("[Prism route error] A content-free crash report was recorded.");
   }, [error]);
 
   return (

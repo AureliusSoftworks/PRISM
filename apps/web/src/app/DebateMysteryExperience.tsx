@@ -52,12 +52,12 @@ import {
 } from "./debateMysteryMusic";
 import { mysteryInvestigationTargetAt } from "./debateMysteryRoomArt";
 import {
-  readWhodunnitRoomUpgradeEnabled,
+  readEncryptedWhodunnitRoomUpgradeEnabled,
   whodunnitBundledRoomArtPath,
   whodunnitInvestigationAvatarPresentation,
   whodunnitRoomArtStyleForUpgrade,
   whodunnitSavedRoomArtUrl,
-  writeWhodunnitRoomUpgradeEnabled,
+  writeEncryptedWhodunnitRoomUpgradeEnabled,
 } from "./debateMysteryInvestigationArt";
 import {
   debateMysteryBundledEvidenceAssetPath,
@@ -125,6 +125,7 @@ interface MysteryRoutingProps {
 }
 
 interface MysterySharedProps extends MysteryRoutingProps {
+  ownerId: string;
   bots: MysteryBotSummary[];
   theme: "light" | "dark";
   audioEnabled: boolean;
@@ -547,7 +548,7 @@ export function DebateMysteryCompilationResume(
 
   return (
     <main className={styles.compiler} data-theme={props.theme}>
-      <button type="button" onClick={props.onExit} className={styles.exitButton}>← Archive</button>
+      <button type="button" data-session-local-back="true" onClick={props.onExit} className={styles.exitButton}>← Archive</button>
       <section className={styles.compilerCard} aria-live="polite">
         <div className={styles.casePrism} aria-hidden="true">◇</div>
         <p className={styles.eyebrow}>PRISM / Durable Casekeeper</p>
@@ -641,16 +642,27 @@ export function DebateMysteryPlay(
     occurredAt: string;
   }>>([]);
   useEffect(() => {
-    setRoomUpgradeEnabled(readWhodunnitRoomUpgradeEnabled(
-      window.localStorage,
-      props.session.id,
-    ));
+    let disposed = false;
+    void readEncryptedWhodunnitRoomUpgradeEnabled({
+      ownerId: props.ownerId,
+      scopeId: props.session.id,
+      legacyStorage: window.localStorage,
+    }).then((enabled) => {
+      if (!disposed) setRoomUpgradeEnabled(enabled);
+    });
     setFailedUpgradeRoomIds(new Set());
-  }, [props.session.id]);
+    return () => {
+      disposed = true;
+    };
+  }, [props.ownerId, props.session.id]);
   const selectRoomUpgradeEnabled = useCallback((enabled: boolean): void => {
     setRoomUpgradeEnabled(enabled);
-    writeWhodunnitRoomUpgradeEnabled(window.localStorage, enabled, props.session.id);
-  }, [props.session.id]);
+    void writeEncryptedWhodunnitRoomUpgradeEnabled({
+      ownerId: props.ownerId,
+      scopeId: props.session.id,
+      enabled,
+    });
+  }, [props.ownerId, props.session.id]);
 
   const currentRoom =
     state.rooms.find((room) => room.id === state.currentRoomId) ?? state.rooms[0]!;
@@ -1879,7 +1891,7 @@ export function DebateMysteryPlay(
         ambientFoley={false}
       />
       <header className={styles.playHeader}>
-        <button type="button" className={styles.exitButton} onClick={props.onExit}>← Archive</button>
+        <button type="button" className={styles.exitButton} data-session-local-back="true" onClick={props.onExit}>← Archive</button>
         <div className={styles.caseIdentity}>
           <p className={styles.eyebrow}>Whodunnit? · A Murder Mystery · {state.playPhase}</p>
           <strong>{state.caseTitle}</strong>

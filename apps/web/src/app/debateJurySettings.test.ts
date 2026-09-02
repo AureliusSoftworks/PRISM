@@ -6,11 +6,14 @@ import {
   DEFAULT_DEBATE_JURY_SETTINGS,
   DEBATE_JURY_DECISION_TIMEOUT_MAX_MS,
   DEBATE_JURY_DECISION_TIMEOUT_MIN_MS,
-  debateJurySettingsStorageKey,
   normalizeDebateJurySettings,
 } from "./debateJurySettings.ts";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const jurySettingsSource = readFileSync(
+  new URL("./debateJurySettings.ts", import.meta.url),
+  "utf8",
+);
 const settingsPanelSource = readFileSync(
   new URL("./SettingsPanel.tsx", import.meta.url),
   "utf8",
@@ -45,10 +48,10 @@ describe("Debate Jury settings", () => {
     );
   });
 
-  it("keeps legacy account keys readable but removes the obsolete choice controls", () => {
-    assert.notEqual(
-      debateJurySettingsStorageKey("account-a"),
-      debateJurySettingsStorageKey("account-b"),
+  it("removes obsolete choice controls and every plaintext persistence path", () => {
+    assert.doesNotMatch(
+      jurySettingsSource,
+      /localStorage|sessionStorage|Storage/u,
     );
     assert.match(
       settingsPanelSource,

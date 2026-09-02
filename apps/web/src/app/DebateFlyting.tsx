@@ -498,6 +498,7 @@ function flytingAlignmentStyle(
     "--flyting-align-scale": placement.scale / 100,
     "--flyting-align-rotation": `${placement.rotation}deg`,
     "--flyting-align-skew-x": `${placement.skewX}deg`,
+    "--flyting-align-skew-y": `${placement.skewY}deg`,
   } as CSSProperties;
 }
 
@@ -3188,6 +3189,22 @@ export function DebateFlytingSetup(
                       <em>°</em>
                     </label>
                   ) : null}
+                  {stageLayoutDefinition.supportsSkewY ? (
+                    <label>
+                      <span>Skew Y</span>
+                      <input
+                        type="number"
+                        value={stageLayoutPlacement.skewY}
+                        step={0.25}
+                        onChange={(event) =>
+                          updateStageLayoutPlacement(stageLayoutItem, {
+                            skewY: Number(event.currentTarget.value),
+                          })
+                        }
+                      />
+                      <em>°</em>
+                    </label>
+                  ) : null}
                 </div>
                 <div className={styles.stageAlignmentActions}>
                   <button
@@ -4988,6 +5005,22 @@ export function DebateFlytingLive(
                   onChange={(event) =>
                     updateStageAlignmentPlacement(stageAlignmentItem, {
                       skewX: Number(event.currentTarget.value),
+                    })
+                  }
+                />
+                <em>°</em>
+              </label>
+            ) : null}
+            {stageAlignmentDefinition.supportsSkewY ? (
+              <label>
+                <span>Skew Y</span>
+                <input
+                  type="number"
+                  value={stageAlignmentPlacement.skewY}
+                  step={0.25}
+                  onChange={(event) =>
+                    updateStageAlignmentPlacement(stageAlignmentItem, {
+                      skewY: Number(event.currentTarget.value),
                     })
                   }
                 />

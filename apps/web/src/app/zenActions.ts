@@ -30,6 +30,10 @@ export const ZEN_ACTION_REVEAL_LEAD_DISPLAY_LENGTH = 48;
 export const ZEN_ACTION_TEXT_LAG_MS = 320;
 const zenActionPresentationCache = new Map<string, ZenActionPresentation>();
 
+export function clearZenActionPresentationCache(): void {
+  zenActionPresentationCache.clear();
+}
+
 export function sentenceCaseActionText(action: string): string {
   return action
     .toLocaleLowerCase()

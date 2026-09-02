@@ -4,8 +4,8 @@ import { describe, it } from "node:test";
 import { normalizeDebateMysteryV2ForgeProgressMessage } from "@localai/shared";
 import {
   debateMysteryV2ExaminationCompletesRoom,
+  debateMysteryV2ExamineGridCellIndexes,
   debateMysteryV2LensClickTarget,
-  debateMysteryV2LensMosaicCellIndexes,
   debateMysteryV2RoomComplete,
   resolveDebateMysteryV2Lens,
 } from "./debateMysteryV2Lens.ts";
@@ -238,6 +238,8 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(cssSource, /\.titleDoor\s*\{[^}]*z-index:\s*2/u);
     assert.match(experienceSource, /data-door-threshold=\{mansionDoorEntry/u);
     assert.match(experienceSource, /data-tutorial-target="whodunnit-enter-mansion"/u);
+    assert.match(cssSource, /\.titleCard\[data-exterior-entering="true"\]::after\s*\{[^}]*background:\s*#000[^}]*animation:\s*exteriorThresholdFade 1\.2s ease-in both/u);
+    assert.match(cssSource, /\.titleCard\[data-theme="light"\]\[data-exterior-entering="true"\]::after\s*\{[^}]*background:\s*#fff/u);
     assert.match(experienceSource, /className=\{styles\.titleDoorFocus\}/u);
     assert.match(experienceSource, /className=\{styles\.titleDoorMark\}/u);
     assert.match(experienceSource, /venueProfile\?\.presentation\?\.entryAction\?\.trim\(\)/u);
@@ -245,7 +247,7 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /action: "enter_mansion"/u);
     assert.match(cssSource, /\.titleDoor:focus-visible/u);
     assert.match(cssSource, /\.titleDoor::before\s*\{[\s\S]*titleDoorBeacon/u);
-    assert.match(cssSource, /\.titleDoor::after\s*\{[\s\S]*titleDoorPrismGlint/u);
+    assert.doesNotMatch(cssSource, /titleDoor::after|titleDoorPrismGlint/u);
     assert.match(cssSource, /\.titleDoorMark\s*\{[\s\S]*border:\s*2px solid/u);
     assert.doesNotMatch(experienceSource, /styles\.titlePlayerOrb/u);
     assert.doesNotMatch(experienceSource, /styles\.titleDoorHint/u);
@@ -339,7 +341,7 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(setupSource, /<strong>Upgraded<\/strong>/u);
     assert.match(setupSource, /HD interpretation of each room's Mosaic/u);
     assert.match(setupSource, /illustratedRooms:\s*\n\s*mysteryRoomAssetSynthesis/u);
-    assert.match(experienceSource, /readWhodunnitRoomUpgradeEnabled/u);
+    assert.match(experienceSource, /readEncryptedWhodunnitRoomUpgradeEnabled/u);
     assert.match(experienceSource, /state\.config\.assetSynthesis\.illustratedRooms/u);
     assert.match(experienceSource, /whodunnitRoomArtStyleForUpgrade\(/u);
     assert.doesNotMatch(experienceSource, /forgeIllustratedRoomsRequested && illustratedRoomArtAvailable/u);
@@ -781,7 +783,7 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /const handleRoomInvestigationClick = \(event: React\.MouseEvent<HTMLElement>\): void => \{[\s\S]*if \(roomObservationAwaitingContinue\) \{\s*finishCurrentDialogue\(\);\s*return;\s*\}[\s\S]*if \(!lensActive\) return;/u);
     assert.match(experienceSource, /debateMysteryV2LensClickTarget\(lens\)/u);
     assert.match(experienceSource, /style=\{\{ left: `\$\{investigationLens\.x\}%`, top: `\$\{investigationLens\.y\}%`/u);
-    assert.match(experienceSource, /onFocus=\{\(\) => \{ const center = debateMysteryV2HotspotCenter/u);
+    assert.match(experienceSource, /onFocus=\{\(\) => \{ const point = debateMysteryV2HotspotFocusPoint/u);
     assert.match(experienceSource, /data-examining=\{examiningHotspotId === hotspot\.id/u);
     assert.match(experienceSource, /const roomObservationAwaitingContinue = Boolean\(/u);
     assert.match(experienceSource, /roomPlayerObservationActive[\s\S]*speechTiming[\s\S]*elapsedMs >= speechTiming\.durationMs/u);
@@ -805,12 +807,15 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.doesNotMatch(cssSource, /\.hotspots button::before/u);
     assert.doesNotMatch(experienceSource, /<span>\{hotspot\.label\}<\/span>/u);
     assert.match(cssSource, /\.investigationLens\s*\{[\s\S]*pointer-events:\s*none/u);
-    assert.match(experienceSource, /debateMysteryV2LensMosaicCellIndexes/u);
+    assert.match(experienceSource, /debateMysteryV2ExamineGridCellIndexes/u);
     assert.match(cssSource, /width:\s*3\.4rem/u);
     assert.match(cssSource, /\.investigationLens\s*\{[\s\S]*?box-shadow:\s*0 0 0\.34rem rgba\(102, 229, 234, 0\.2\)/u);
     assert.match(experienceSource, /data-targeted=\{targetedHotspotId \? "true" : undefined\}/u);
     assert.match(cssSource, /\.investigationLens\[data-targeted="true"\][\s\S]*scale\(0\.9\)/u);
-    assert.match(cssSource, /\.investigationLens\[data-targeted="true"\]\[data-art-style="illustrated"\]::after[\s\S]*prismGlintSweep/u);
+    assert.match(experienceSource, /command === "examine" && !roomComplete \? <div className=\{styles\.examinationGrid\} data-art-style=\{currentRoomArtStyle\}/u);
+    assert.match(cssSource, /\.examinationGrid\s*\{[\s\S]*transform:\s*none/u);
+    assert.match(cssSource, /\.examinationGrid i\s*\{[\s\S]*box-shadow:[\s\S]*filter:\s*none;[\s\S]*transform:\s*none/u);
+    assert.doesNotMatch(cssSource, /prismGlintSweep|investigationLens::after/u);
     assert.match(cssSource, /\.roomComplete\s*\{/u);
 
     const hotspots = [
@@ -828,8 +833,8 @@ describe("Whodunnit V2 prosecution experience", () => {
     const overlapLens = resolveDebateMysteryV2Lens(50, 50, overlappingHotspots);
     assert.equal(debateMysteryV2LensClickTarget(overlapLens), "small");
     assert.deepEqual(
-      debateMysteryV2LensMosaicCellIndexes(overlapLens, overlappingHotspots, 24, 15),
-      [155, 156, 179, 180],
+      debateMysteryV2ExamineGridCellIndexes(overlapLens, overlappingHotspots, 24, 15),
+      [179, 180],
     );
     const openLens = resolveDebateMysteryV2Lens(70, 50, hotspots);
     assert.deepEqual(openLens, {
@@ -841,7 +846,7 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.equal(debateMysteryV2LensClickTarget(openLens), "open-far");
     assert.equal(resolveDebateMysteryV2Lens(69, 50, hotspots).hotspotId, "open-far");
     const tinyHotspot = [{ id: "tiny", polygon: [{ x: 49.8, y: 49.8 }, { x: 50.2, y: 49.8 }, { x: 50.2, y: 50.2 }, { x: 49.8, y: 50.2 }], unlocked: true, examined: false }];
-    assert.deepEqual(debateMysteryV2LensMosaicCellIndexes(resolveDebateMysteryV2Lens(50, 50, tinyHotspot), tinyHotspot), [28_960]);
+    assert.deepEqual(debateMysteryV2ExamineGridCellIndexes(resolveDebateMysteryV2Lens(50, 50, tinyHotspot), tinyHotspot), [180]);
     assert.equal(debateMysteryV2LensClickTarget(resolveDebateMysteryV2Lens(2, 2, hotspots)), null);
     assert.equal(
       debateMysteryV2LensClickTarget(resolveDebateMysteryV2Lens(70, 50, hotspots.map((hotspot) => hotspot.id === "open-far" ? { ...hotspot, examined: true } : hotspot))),

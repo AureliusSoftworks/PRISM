@@ -639,9 +639,69 @@ fn emit_status(app: &AppHandle, service: &str, state: &str) {
     let _ = app.emit("prism-status", serde_json::json!({ "service": service, "state": state }));
 }
 
-/// Spawn a background thread that reads lines from `reader`, writes them to
-/// `log_file`, and forwards each line to the splash screen via Tauri events.
-fn spawn_log_tee(
+/// Translate child output into fixed operational messages. Child stdout and
+/// stderr are untrusted: provider failures, framework traces, or future debug
+/// statements may contain account text. No raw child line may reach disk or
+/// the splash terminal.
+fn content_free_runtime_log_line(source: &str, line: &str) -> Option<&'static str> {
+    let normalized = line.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+    if normalized.contains("vault")
+        || normalized.contains("migration")
+        || normalized.contains("upgrade")
+    {
+        return Some("Secure workspace preparation is active.");
+    }
+    if normalized.contains("error")
+        || normalized.contains("failed")
+        || normalized.contains("failure")
+        || normalized.contains("fatal")
+        || normalized.contains("panic")
+        || normalized.contains("warning")
+    {
+        return Some("Runtime reported a content-free diagnostic.");
+    }
+    if normalized.contains("ready")
+        || normalized.contains("listening")
+        || normalized.contains("started")
+        || normalized.contains("compiled")
+    {
+        return Some(match source {
+            "api" => "API runtime is responding.",
+            "web" => "Web interface is responding.",
+            "qdrant" => "Private vector service is responding.",
+            _ => "Runtime service is responding.",
+        });
+    }
+    None
+}
+
+#[cfg(test)]
+mod runtime_log_privacy_tests {
+    use super::content_free_runtime_log_line;
+
+    #[test]
+    fn child_output_never_survives_content_free_classification() {
+        let canary = "owner-a-private-prompt-canary";
+        for source in ["api", "web", "qdrant"] {
+            for line in [
+                canary.to_string(),
+                format!("ready {canary}"),
+                format!("fatal provider error: {canary}"),
+                format!("vault migration: {canary}"),
+            ] {
+                let classified = content_free_runtime_log_line(source, &line);
+                assert!(!classified.unwrap_or_default().contains(canary));
+            }
+        }
+    }
+}
+
+/// Drain a child stream while persisting and displaying only fixed,
+/// content-free classifications.
+fn spawn_content_free_log_drain(
     reader: impl std::io::Read + Send + 'static,
     mut log_file: std::fs::File,
     app: AppHandle,
@@ -652,8 +712,10 @@ fn spawn_log_tee(
         for line in buf.lines() {
             match line {
                 Ok(line) => {
-                    let _ = writeln!(log_file, "{line}");
-                    emit_log(&app, source, &line);
+                    if let Some(safe_line) = content_free_runtime_log_line(source, &line) {
+                        let _ = writeln!(log_file, "{source} {safe_line}");
+                        emit_log(&app, source, safe_line);
+                    }
                 }
                 Err(_) => break,
             }
@@ -690,19 +752,20 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
     let web_log    = logs_dir.join("web.log");
     let qdrant_log = logs_dir.join("qdrant.log");
 
-    // Qdrant: both streams go to file (very verbose, not useful on splash).
+    // All child streams are drained through a fixed content-free classifier.
+    // Never redirect raw stdout/stderr into persistent files.
     let qdrant_stdout_file = OpenOptions::new().create(true).append(true).open(&qdrant_log)
         .map_err(|e| io_error(format!("Failed to open qdrant log: {e}")))?;
     let qdrant_stderr_file = qdrant_stdout_file.try_clone()
         .map_err(|e| io_error(format!("Failed to clone qdrant log handle: {e}")))?;
 
-    // API: stdout piped to splash + file; stderr to file only.
+    // API: both streams are classified before splash/file output.
     let api_stdout_file = OpenOptions::new().create(true).append(true).open(&api_log)
         .map_err(|e| io_error(format!("Failed to open api log: {e}")))?;
     let api_stderr_file = api_stdout_file.try_clone()
         .map_err(|e| io_error(format!("Failed to clone api log handle: {e}")))?;
 
-    // Web: stdout piped to splash + file; stderr to file only.
+    // Web: both streams are classified before splash/file output.
     let web_stdout_file = OpenOptions::new().create(true).append(true).open(&web_log)
         .map_err(|e| io_error(format!("Failed to open web log: {e}")))?;
     let web_stderr_file = web_stdout_file.try_clone()
@@ -742,8 +805,8 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
     fs::create_dir_all(&qdrant_storage_dir)
         .map_err(|error| io_error(format!("Failed to create Qdrant data directory: {error}")))?;
 
-    emit_log(app, "prism", &format!("Runtime root: {}", root.display()));
-    emit_log(app, "prism", &format!("Ports: API={api_port}  Web={web_port}"));
+    emit_log(app, "prism", "Private runtime paths prepared.");
+    emit_log(app, "prism", "Private service ports reserved.");
 
     // ── Qdrant ──
     emit_status(app, "qdrant", "starting");
@@ -752,15 +815,21 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
         .env("QDRANT__STORAGE__STORAGE_PATH", qdrant_storage_dir.to_string_lossy().to_string())
         .env("QDRANT__SERVICE__HOST", "127.0.0.1")
         .stdin(Stdio::null())
-        .stdout(Stdio::from(qdrant_stdout_file))
-        .stderr(Stdio::from(qdrant_stderr_file))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .no_window()
         .own_process_group()
         .spawn()
         .map_err(|e| io_error(format!("Failed to start bundled Qdrant: {e}")))?;
     assign_to_child_job(&qdrant_child);
+    if let Some(stdout) = qdrant_child.stdout.take() {
+        spawn_content_free_log_drain(stdout, qdrant_stdout_file, app.clone(), "qdrant");
+    }
+    if let Some(stderr) = qdrant_child.stderr.take() {
+        spawn_content_free_log_drain(stderr, qdrant_stderr_file, app.clone(), "qdrant");
+    }
     emit_status(app, "qdrant", "running");
-    emit_log(app, "qdrant", &format!("Started (pid {})", qdrant_child.id()));
+    emit_log(app, "qdrant", "Private vector service started.");
 
     // ── API ──
     emit_status(app, "api", "starting");
@@ -776,7 +845,7 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
         .env("PRISM_DESKTOP_MODE", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::from(api_stderr_file))
+        .stderr(Stdio::piped())
         .no_window()
         .own_process_group();
     let playwright_browsers = root.join("playwright-browsers");
@@ -792,7 +861,10 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
 
     assign_to_child_job(&api_child);
     if let Some(stdout) = api_child.stdout.take() {
-        spawn_log_tee(stdout, api_stdout_file, app.clone(), "api");
+        spawn_content_free_log_drain(stdout, api_stdout_file, app.clone(), "api");
+    }
+    if let Some(stderr) = api_child.stderr.take() {
+        spawn_content_free_log_drain(stderr, api_stderr_file, app.clone(), "api");
     }
     emit_status(app, "api", "running");
 
@@ -808,7 +880,7 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
         .env("PRISM_DESKTOP_MODE", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::from(web_stderr_file))
+        .stderr(Stdio::piped())
         .no_window()
         .own_process_group()
         .spawn()
@@ -820,7 +892,10 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
 
     assign_to_child_job(&web_child);
     if let Some(stdout) = web_child.stdout.take() {
-        spawn_log_tee(stdout, web_stdout_file, app.clone(), "web");
+        spawn_content_free_log_drain(stdout, web_stdout_file, app.clone(), "web");
+    }
+    if let Some(stderr) = web_child.stderr.take() {
+        spawn_content_free_log_drain(stderr, web_stderr_file, app.clone(), "web");
     }
     emit_status(app, "web", "running");
 
@@ -838,7 +913,7 @@ fn wait_for_api(api_port: u16, state: &RuntimeState, app: &AppHandle) -> std::io
     let status_refresh_at = start + Duration::from_secs(1);
     let mut status_refreshed = false;
     let target = format!("127.0.0.1:{api_port}");
-    emit_log(app, "prism", &format!("Waiting for API on {target}…"));
+    emit_log(app, "prism", "Waiting for the private API…");
     while Instant::now() < timeout_at {
         if std::net::TcpStream::connect(&target).is_ok() {
             let elapsed = start.elapsed().as_secs_f64();
@@ -891,7 +966,7 @@ fn wait_for_web(web_port: u16, api_port: u16, state: &RuntimeState, app: &AppHan
     let start = Instant::now();
     let timeout_at = start + Duration::from_secs(WEB_STARTUP_TIMEOUT_SECS);
     let target = format!("127.0.0.1:{web_port}");
-    emit_log(app, "prism", &format!("Waiting for web on {target}…"));
+    emit_log(app, "prism", "Waiting for the web interface…");
     while Instant::now() < timeout_at {
         if std::net::TcpStream::connect(&target).is_ok() {
             let elapsed = start.elapsed().as_secs_f64();
@@ -1107,18 +1182,18 @@ fn main() {
 
                 let (api_port, web_port) = match start_runtime(&app_handle, &state) {
                     Ok(ports) => ports,
-                    Err(error) => {
-                        emit_log(&app_handle, "prism", &format!("Startup failed: {error}"));
+                    Err(_) => {
+                        emit_log(&app_handle, "prism", "Startup failed. Check the service log.");
                         return;
                     }
                 };
 
-                if let Err(error) = wait_for_api(api_port, &state, &app_handle) {
-                    emit_log(&app_handle, "prism", &format!("API readiness failed: {error}"));
+                if wait_for_api(api_port, &state, &app_handle).is_err() {
+                    emit_log(&app_handle, "prism", "API readiness failed.");
                     return;
                 }
-                if let Err(error) = wait_for_web(web_port, api_port, &state, &app_handle) {
-                    emit_log(&app_handle, "prism", &format!("Web readiness failed: {error}"));
+                if wait_for_web(web_port, api_port, &state, &app_handle).is_err() {
+                    emit_log(&app_handle, "prism", "Web readiness failed.");
                     return;
                 }
 
@@ -1131,15 +1206,15 @@ fn main() {
 
                 let web_url = match Url::parse(&format!("http://127.0.0.1:{web_port}")) {
                     Ok(url) => url,
-                    Err(error) => {
-                        emit_log(&app_handle, "prism", &format!("Invalid web URL: {error}"));
+                    Err(_) => {
+                        emit_log(&app_handle, "prism", "The local web address was invalid.");
                         return;
                     }
                 };
 
                 if let Some(window) = app_handle.get_webview_window("main") {
                     let _ = window.navigate(web_url.clone());
-                } else if let Err(error) = WebviewWindowBuilder::new(
+                } else if WebviewWindowBuilder::new(
                     &app_handle,
                     "main",
                     WebviewUrl::External(web_url.clone()),
@@ -1157,8 +1232,10 @@ fn main() {
                 .fullscreen(false)
                 .background_throttling(BackgroundThrottlingPolicy::Disabled)
                 .initialization_script_for_all_frames(PRISM_DISABLE_NATIVE_TEXT_CORRECTION_SCRIPT)
-                .build() {
-                    emit_log(&app_handle, "prism", &format!("Window build failed: {error}"));
+                .build()
+                .is_err()
+                {
+                    emit_log(&app_handle, "prism", "The workspace window could not open.");
                 }
                 emit_pending_portable_package_paths(&app_handle);
             });

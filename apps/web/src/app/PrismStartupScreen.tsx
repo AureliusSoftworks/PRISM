@@ -33,7 +33,6 @@ const PRISM_STARTUP_MOTION_PHASE_SCRIPT = `(() => {
   root.style.setProperty("--prism-startup-ring-phase", \`-\${now % 4800}ms\`);
   root.style.setProperty("--prism-startup-halo-phase", \`-\${now % 2600}ms\`);
   root.style.setProperty("--prism-startup-aura-phase", \`-\${now % 2800}ms\`);
-  root.style.setProperty("--prism-startup-glyph-phase", \`-\${now % 1550}ms\`);
   root.style.setProperty("--prism-startup-optics-flow-phase", \`-\${now % 7200}ms\`);
 })();`;
 
@@ -146,22 +145,19 @@ export function PrismStartupScreen({
         </div>
 
         <div className={styles.halo}>
-          <div className={styles.aura} />
-          <div className={styles.ring} />
+          <div className={styles.orb}>
+            <div className={styles.aura} />
+            <div className={styles.ring} />
+          </div>
           <svg
             className={styles.glyph}
+            data-prism-startup-glyph="authenticated"
             viewBox="0 0 56 56"
             xmlns="http://www.w3.org/2000/svg"
-            fill="none"
+            fill="currentColor"
+            aria-hidden="true"
           >
-            <path
-              d="M28 6L48 43H8L28 6Z"
-              stroke="currentColor"
-              strokeLinecap="butt"
-              strokeLinejoin="miter"
-              strokeMiterlimit="10"
-              strokeWidth="7"
-            />
+            <path d="M28 6L48 43H8L28 6Z" />
           </svg>
         </div>
 

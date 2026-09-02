@@ -3,11 +3,6 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
-const turboStorage = readFileSync(
-  new URL("./turboAppletSession.ts", import.meta.url),
-  "utf8",
-);
-
 function sourceBetween(start: string, end: string): string {
   const startIndex = page.indexOf(start);
   const endIndex = page.indexOf(end, startIndex + start.length);
@@ -50,6 +45,13 @@ describe("account-owned Models settings integration", () => {
       "modelTurboResetQueueRef.current = Promise.resolve()",
       "globalModelSelectionMutationVersionRef.current += 1",
       "modelCatalogRefreshTokenRef.current += 1",
+      "clearEnglishPacingProfileCache()",
+      "clearActionSfxPackClientState()",
+      "clearLiveVoiceDecodeRuntime()",
+      "clearLiveSessionFocusRuntime()",
+      "clearSessionAtmosphereAccountAudioCache()",
+      "clearZenActionPresentationCache()",
+      "clearChatRevealTokenCache()",
       "setSettings(null)",
       "setModelCatalog(null)",
       "setProviderKeyStatus(null)",
@@ -116,22 +118,25 @@ describe("account-owned Models settings integration", () => {
     }
   });
 
-  it("namespaces Models session storage by account owner", () => {
+  it("keeps transient Models notices and applet context in owner-aware process memory", () => {
     assert.match(
       page,
-      /prism:simulated-effort-toast:v1:\$\{encodeURIComponent\(\s*user\.id/u,
+      /simulatedEffortEducationShownOwnerIdsRef\.current\.has\(user\.id\)[\s\S]*simulatedEffortEducationShownOwnerIdsRef\.current\.add\(user\.id\)/u,
     );
     assert.match(
       page,
-      /syncTurboAppletSessionContext\(\s*storage,\s*previousContext,\s*nextContext,\s*user\.id/u,
-    );
-    assert.match(
-      turboStorage,
-      /turboAppletSessionContextStorageKey\(ownerId\)[\s\S]*storage\.getItem\(ownerStorageKey\)[\s\S]*storage\.setItem\(ownerStorageKey/u,
+      /const turboAppletContextRef = useRef<string \| null>\(null\)[\s\S]*syncTurboAppletSessionContext\(\s*previousContext,\s*nextContext,\s*user\.id/u,
     );
     assert.doesNotMatch(
-      turboStorage,
-      /previousContext = storage\.getItem\(\s*TURBO_APPLET_SESSION_CONTEXT_STORAGE_KEY/u,
+      sourceBetween(
+        "const simulatedEffortEducationShownOwnerIdsRef",
+        "const effortControlForTarget",
+      ),
+      /(?:localStorage|sessionStorage)/u,
+    );
+    assert.doesNotMatch(
+      sourceBetween("const turboAppletContextRef", "panelPopupCleanupLastPanelRef"),
+      /(?:localStorage|sessionStorage)/u,
     );
   });
 });

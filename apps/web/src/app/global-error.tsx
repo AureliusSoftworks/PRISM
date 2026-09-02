@@ -12,7 +12,7 @@ export default function GlobalError({
   reset: () => void;
 }): React.JSX.Element {
   useEffect(() => {
-    console.error("[Prism global error]", error);
+    console.error("[Prism global error] A content-free crash report was recorded.");
   }, [error]);
 
   return (

@@ -6,6 +6,8 @@ import {
 
 const ANALYSIS_BLOCK_MS = 100;
 const NEAR_SILENCE_DBFS = -42;
+const NEAR_SILENCE_RELATIVE_DB = -12;
+const LOUDNESS_REFERENCE_PERCENTILE = 0.9;
 const AUDIBLE_CONTENT_RMS = 0.02;
 
 export interface MansionMusicPcmV1 {
@@ -54,7 +56,6 @@ export function analyzeMansionMusicPcmV1(
   }
   const blockFrames = Math.max(1, Math.round(pcm.sampleRate * ANALYSIS_BLOCK_MS / 1_000));
   const blockCount = Math.ceil(pcm.length / blockFrames);
-  const threshold = 10 ** (NEAR_SILENCE_DBFS / 20);
   const rms: number[] = [];
   let peak = 0;
   for (let block = 0; block < blockCount; block += 1) {
@@ -73,6 +74,14 @@ export function analyzeMansionMusicPcmV1(
     }
     rms.push(sampleCount > 0 ? Math.sqrt(sumSquares / sampleCount) : 0);
   }
+  const orderedRms = [...rms].sort((left, right) => left - right);
+  const loudnessReference = orderedRms[
+    Math.floor((orderedRms.length - 1) * LOUDNESS_REFERENCE_PERCENTILE)
+  ] ?? 0;
+  const threshold = Math.max(
+    10 ** (NEAR_SILENCE_DBFS / 20),
+    loudnessReference * 10 ** (NEAR_SILENCE_RELATIVE_DB / 20),
+  );
   const quiet = rms.map((value) => value <= threshold);
   const silenceRatio = quiet.filter(Boolean).length / quiet.length;
   const durationMs = pcm.length / pcm.sampleRate * 1_000;
@@ -100,7 +109,13 @@ export function analyzeMansionMusicPcmV1(
       }
     : null;
   errors.push(...validateMansionMusicLoopV1(loop, durationMs, identity));
-  return { loop: errors.length === 0 ? loop : null, errors: [...new Set(errors)] };
+  const playerFacingErrors = errors.map((error) => error === "music loop silence ratio is invalid."
+    ? "The generated music needs a clearer balance of quiet intervals and instrumental phrases. Try synthesizing another version."
+    : error);
+  return {
+    loop: errors.length === 0 ? loop : null,
+    errors: [...new Set(playerFacingErrors)],
+  };
 }
 
 export async function validateMansionMusicCandidateUrlV1(

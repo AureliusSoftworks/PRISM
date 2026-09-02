@@ -4,12 +4,21 @@ import {
   type BotAudioVoiceProfileV1,
 } from "@localai/shared";
 import type { EnglishVoiceSynthesisClip } from "./englishVoice";
+import {
+  browserOwnerVaultCoordinatesV1,
+  openBrowserOwnerPayloadV1,
+  sealBrowserOwnerPayloadV1,
+  type BrowserOwnerVaultRecordV1,
+} from "./browserOwnerVault.ts";
 
 const RESPONSE_CUE_DB_NAME = "prism-response-cues-v1";
 const RESPONSE_CUE_STORE = "clips";
+const RESPONSE_CUE_DB_VERSION = 2;
+const RESPONSE_CUE_VAULT_STORE = "response-cue-clips-v2";
 const RESPONSE_CUE_CACHE_MAX_ENTRIES = 48;
 
 export interface ResponseCueVoiceCacheKeyInput {
+  ownerId: string;
   botId: string;
   voiceProfile: BotAudioVoiceProfileV1;
   engine: string;
@@ -18,9 +27,7 @@ export interface ResponseCueVoiceCacheKeyInput {
   deliverySettings?: Record<string, unknown>;
 }
 
-interface StoredResponseCueClip {
-  key: string;
-  bytes: ArrayBuffer;
+interface SerializedResponseCueClip {
   alignment: EnglishVoiceSynthesisClip["alignment"];
   audioContentType: string;
   engineUsed: string | null;
@@ -29,10 +36,11 @@ interface StoredResponseCueClip {
   notice?: string | null;
   resolvedPronunciation?: EnglishVoiceSynthesisClip["resolvedPronunciation"];
   resolvedSpeechprint?: EnglishVoiceSynthesisClip["resolvedSpeechprint"];
-  lastAccessedAt: number;
 }
 
-const memoryFallback = new Map<string, StoredResponseCueClip>();
+const memoryFallback = new Map<string, BrowserOwnerVaultRecordV1>();
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
@@ -49,7 +57,8 @@ export function responseCueVoiceCacheKey(
   input: ResponseCueVoiceCacheKeyInput,
 ): string {
   return stableJson({
-    v: 1,
+    v: 2,
+    ownerId: input.ownerId,
     botId: input.botId,
     voiceProfile: normalizeBotAudioVoiceProfileV1(input.voiceProfile),
     speechprintRuleset: LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256,
@@ -63,9 +72,15 @@ export function responseCueVoiceCacheKey(
 function openResponseCueDatabase(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === "undefined") return Promise.resolve(null);
   return new Promise((resolve) => {
-    const request = indexedDB.open(RESPONSE_CUE_DB_NAME, 1);
-    request.onupgradeneeded = () => {
+    const request = indexedDB.open(RESPONSE_CUE_DB_NAME, RESPONSE_CUE_DB_VERSION);
+    request.onupgradeneeded = (event) => {
       const database = request.result;
+      if (
+        (event as IDBVersionChangeEvent).oldVersion < RESPONSE_CUE_DB_VERSION &&
+        database.objectStoreNames.contains(RESPONSE_CUE_STORE)
+      ) {
+        database.deleteObjectStore(RESPONSE_CUE_STORE);
+      }
       if (!database.objectStoreNames.contains(RESPONSE_CUE_STORE)) {
         database.createObjectStore(RESPONSE_CUE_STORE, { keyPath: "key" });
       }
@@ -75,59 +90,8 @@ function openResponseCueDatabase(): Promise<IDBDatabase | null> {
   });
 }
 
-function storedClipAsEnglishClip(
-  stored: StoredResponseCueClip,
-): EnglishVoiceSynthesisClip {
-  return {
-    bytes: stored.bytes.slice(0),
-    alignment: stored.alignment,
-    audioContentType: stored.audioContentType,
-    engineUsed: stored.engineUsed,
-    localEngine: stored.localEngine,
-    modelHash: stored.modelHash,
-    notice: stored.notice,
-    resolvedPronunciation: stored.resolvedPronunciation,
-    resolvedSpeechprint: stored.resolvedSpeechprint,
-  };
-}
-
-export async function readResponseCueVoiceClip(
-  key: string,
-): Promise<EnglishVoiceSynthesisClip | null> {
-  const fallback = memoryFallback.get(key);
-  if (fallback) {
-    fallback.lastAccessedAt = Date.now();
-    return storedClipAsEnglishClip(fallback);
-  }
-  const database = await openResponseCueDatabase();
-  if (!database) return null;
-  return new Promise((resolve) => {
-    const transaction = database.transaction(RESPONSE_CUE_STORE, "readwrite");
-    const store = transaction.objectStore(RESPONSE_CUE_STORE);
-    const request = store.get(key);
-    request.onsuccess = () => {
-      const stored = request.result as StoredResponseCueClip | undefined;
-      if (!stored) {
-        resolve(null);
-        return;
-      }
-      stored.lastAccessedAt = Date.now();
-      store.put(stored);
-      memoryFallback.set(key, stored);
-      resolve(storedClipAsEnglishClip(stored));
-    };
-    request.onerror = () => resolve(null);
-    transaction.oncomplete = () => database.close();
-  });
-}
-
-export async function storeResponseCueVoiceClip(
-  key: string,
-  clip: EnglishVoiceSynthesisClip,
-): Promise<void> {
-  const stored: StoredResponseCueClip = {
-    key,
-    bytes: clip.bytes.slice(0),
+function serializeResponseCueClip(clip: EnglishVoiceSynthesisClip): Uint8Array {
+  const metadata: SerializedResponseCueClip = {
     alignment: clip.alignment,
     audioContentType: clip.audioContentType,
     engineUsed: clip.engineUsed,
@@ -136,15 +100,156 @@ export async function storeResponseCueVoiceClip(
     notice: clip.notice,
     resolvedPronunciation: clip.resolvedPronunciation,
     resolvedSpeechprint: clip.resolvedSpeechprint,
+  };
+  const metadataBytes = encoder.encode(JSON.stringify(metadata));
+  const bytes = new Uint8Array(clip.bytes);
+  const serialized = new Uint8Array(4 + metadataBytes.length + bytes.length);
+  new DataView(serialized.buffer).setUint32(0, metadataBytes.length, false);
+  serialized.set(metadataBytes, 4);
+  serialized.set(bytes, 4 + metadataBytes.length);
+  return serialized;
+}
+
+function deserializeResponseCueClip(
+  plaintext: Uint8Array,
+): EnglishVoiceSynthesisClip | null {
+  if (plaintext.byteLength < 4) return null;
+  const metadataLength = new DataView(
+    plaintext.buffer,
+    plaintext.byteOffset,
+    plaintext.byteLength,
+  ).getUint32(0, false);
+  if (metadataLength > plaintext.byteLength - 4) return null;
+  try {
+    const metadata = JSON.parse(
+      decoder.decode(plaintext.subarray(4, 4 + metadataLength)),
+    ) as SerializedResponseCueClip;
+    const bytes = plaintext.subarray(4 + metadataLength);
+    return {
+      bytes: bytes.buffer.slice(
+        bytes.byteOffset,
+        bytes.byteOffset + bytes.byteLength,
+      ) as ArrayBuffer,
+      alignment: metadata.alignment,
+      audioContentType: metadata.audioContentType,
+      engineUsed: metadata.engineUsed,
+      localEngine: metadata.localEngine,
+      modelHash: metadata.modelHash,
+      notice: metadata.notice,
+      resolvedPronunciation: metadata.resolvedPronunciation,
+      resolvedSpeechprint: metadata.resolvedSpeechprint,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function storedClipAsEnglishClip(args: {
+  ownerId: string;
+  key: string;
+  stored: BrowserOwnerVaultRecordV1;
+}): Promise<EnglishVoiceSynthesisClip | null> {
+  const plaintext = await openBrowserOwnerPayloadV1({
+    ownerId: args.ownerId,
+    logicalStore: RESPONSE_CUE_VAULT_STORE,
+    logicalKey: args.key,
+    record: args.stored,
+  });
+  return plaintext ? deserializeResponseCueClip(plaintext) : null;
+}
+
+async function responseCueRecordCoordinates(ownerId: string, key: string) {
+  return browserOwnerVaultCoordinatesV1({
+    ownerId,
+    logicalStore: RESPONSE_CUE_VAULT_STORE,
+    logicalKey: key,
+  });
+}
+
+function memoryKey(record: BrowserOwnerVaultRecordV1): string {
+  return `${record.ownerKeyId}:${record.key}`;
+}
+
+function touchStoredRecord(
+  stored: BrowserOwnerVaultRecordV1,
+): BrowserOwnerVaultRecordV1 {
+  return {
+    ...stored,
     lastAccessedAt: Date.now(),
   };
-  memoryFallback.set(key, stored);
-  while (memoryFallback.size > RESPONSE_CUE_CACHE_MAX_ENTRIES) {
-    const oldest = [...memoryFallback.values()].sort(
+}
+
+export async function readResponseCueVoiceClip(
+  ownerId: string,
+  key: string,
+): Promise<EnglishVoiceSynthesisClip | null> {
+  const coordinates = await responseCueRecordCoordinates(ownerId, key);
+  if (!coordinates) return null;
+  const fallbackKey = `${coordinates.ownerKeyId}:${coordinates.key}`;
+  const fallback = memoryFallback.get(fallbackKey);
+  if (fallback) {
+    const touched = touchStoredRecord(fallback);
+    memoryFallback.set(fallbackKey, touched);
+    return storedClipAsEnglishClip({ ownerId, key, stored: touched });
+  }
+  const database = await openResponseCueDatabase();
+  if (!database) return null;
+  const stored = await new Promise<BrowserOwnerVaultRecordV1 | null>((resolve) => {
+    const transaction = database.transaction(RESPONSE_CUE_STORE, "readonly");
+    const store = transaction.objectStore(RESPONSE_CUE_STORE);
+    const request = store.get(coordinates.key);
+    request.onsuccess = () =>
+      resolve((request.result as BrowserOwnerVaultRecordV1 | undefined) ?? null);
+    request.onerror = () => resolve(null);
+    transaction.oncomplete = () => database.close();
+  });
+  if (!stored) return null;
+  const touched = touchStoredRecord(stored);
+  const clip = await storedClipAsEnglishClip({ ownerId, key, stored: touched });
+  const updateDatabase = await openResponseCueDatabase();
+  if (updateDatabase) {
+    await new Promise<void>((resolve) => {
+      const transaction = updateDatabase.transaction(
+        RESPONSE_CUE_STORE,
+        "readwrite",
+      );
+      const store = transaction.objectStore(RESPONSE_CUE_STORE);
+      if (clip) store.put(touched);
+      else store.delete(coordinates.key);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => resolve();
+      transaction.onabort = () => resolve();
+    });
+    updateDatabase.close();
+  }
+  if (!clip) return null;
+  memoryFallback.set(fallbackKey, touched);
+  return clip;
+}
+
+export async function storeResponseCueVoiceClip(
+  ownerId: string,
+  key: string,
+  clip: EnglishVoiceSynthesisClip,
+): Promise<void> {
+  const stored = await sealBrowserOwnerPayloadV1({
+    ownerId,
+    logicalStore: RESPONSE_CUE_VAULT_STORE,
+    logicalKey: key,
+    plaintext: serializeResponseCueClip(clip),
+  });
+  if (!stored) return;
+  memoryFallback.set(memoryKey(stored), stored);
+  const ownerMemoryRecords = [...memoryFallback.values()]
+    .filter((record) => record.ownerKeyId === stored.ownerKeyId)
+    .sort(
       (left, right) => left.lastAccessedAt - right.lastAccessedAt,
-    )[0];
-    if (!oldest) break;
-    memoryFallback.delete(oldest.key);
+    );
+  for (const oldest of ownerMemoryRecords.slice(
+    0,
+    Math.max(0, ownerMemoryRecords.length - RESPONSE_CUE_CACHE_MAX_ENTRIES),
+  )) {
+    memoryFallback.delete(memoryKey(oldest));
   }
   const database = await openResponseCueDatabase();
   if (!database) return;
@@ -154,9 +259,9 @@ export async function storeResponseCueVoiceClip(
     store.put(stored);
     const all = store.getAll();
     all.onsuccess = () => {
-      const records = (all.result as StoredResponseCueClip[]).sort(
-        (left, right) => right.lastAccessedAt - left.lastAccessedAt,
-      );
+      const records = (all.result as BrowserOwnerVaultRecordV1[])
+        .filter((record) => record.ownerKeyId === stored.ownerKeyId)
+        .sort((left, right) => right.lastAccessedAt - left.lastAccessedAt);
       for (const stale of records.slice(RESPONSE_CUE_CACHE_MAX_ENTRIES)) {
         store.delete(stale.key);
       }
@@ -173,16 +278,43 @@ export async function storeResponseCueVoiceClip(
 }
 
 export async function getOrPrepareResponseCueVoiceClip(
+  ownerId: string,
   key: string,
   synthesize: () => Promise<EnglishVoiceSynthesisClip>,
 ): Promise<EnglishVoiceSynthesisClip | null> {
-  const cached = await readResponseCueVoiceClip(key);
+  const cached = await readResponseCueVoiceClip(ownerId, key);
   if (cached) return cached;
   try {
     const clip = await synthesize();
-    await storeResponseCueVoiceClip(key, clip);
+    await storeResponseCueVoiceClip(ownerId, key, clip);
     return clip;
   } catch {
     return null;
   }
+}
+
+export async function purgeResponseCueVoiceClipsForOwner(
+  ownerId: string,
+): Promise<void> {
+  const coordinates = await responseCueRecordCoordinates(ownerId, "owner-purge");
+  if (!coordinates) return;
+  for (const [key, record] of memoryFallback.entries()) {
+    if (record.ownerKeyId === coordinates.ownerKeyId) memoryFallback.delete(key);
+  }
+  const database = await openResponseCueDatabase();
+  if (!database) return;
+  await new Promise<void>((resolve) => {
+    const transaction = database.transaction(RESPONSE_CUE_STORE, "readwrite");
+    const store = transaction.objectStore(RESPONSE_CUE_STORE);
+    const request = store.getAll();
+    request.onsuccess = () => {
+      for (const record of request.result as BrowserOwnerVaultRecordV1[]) {
+        if (record.ownerKeyId === coordinates.ownerKeyId) store.delete(record.key);
+      }
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => resolve();
+    transaction.onabort = () => resolve();
+  });
+  database.close();
 }
