@@ -7,10 +7,12 @@ import {
   botcastHostHasDepartedAt,
   botcastListenerReactionForMessage,
   botcastMessageIsAudibleToAudienceV1,
+  botcastImageContextForMessageV1,
   botcastReplayTimeline,
   resolveListenerReactionAtMs,
   type BotcastEpisode,
   type BotcastMessage,
+  type BotcastImageContextV1,
   type ReplayManifestV2,
   type ReplaySceneSnapshotV2,
   type ReplayTimelineV1,
@@ -30,6 +32,7 @@ export interface SignalReplayVideoFrameState {
   shot: "left" | "right" | "wide";
   guestDeparted: boolean;
   hostDeparted: boolean;
+  imageContext: BotcastImageContextV1 | null;
 }
 
 export interface SignalFaithfulReplayCameraState {
@@ -900,6 +903,15 @@ export function signalReplayVideoFrameState(args: {
     : -1;
   const activeMessage =
     messageIndex >= 0 ? (args.episode.messages[messageIndex] ?? null) : null;
+  const lastPresentedBeat = args.timeline.beats.reduce<ReplayTimelineV1["beats"][number] | null>((latest, beat) =>
+    beat.kind === "utterance" && beat.startMs <= videoElapsedMs && (!latest || beat.startMs >= latest.startMs) ? beat : latest,
+  null);
+  const bookendVisible = args.timeline.beats.some((beat) =>
+    (beat.kind === "title" || beat.kind === "end") && videoElapsedMs >= beat.startMs && videoElapsedMs < beat.endMs,
+  );
+  const imageContext = bookendVisible ? null : botcastImageContextForMessageV1(
+    args.episode.events, activeMessage?.id ?? lastPresentedBeat?.sourceMessageId,
+  );
   const messageStartMs = primaryBeat?.startMs ?? videoElapsedMs;
   const messageEndMs = primaryBeat?.endMs ?? videoElapsedMs + 1;
   const baseShot = botcastCameraShotAt({
@@ -938,6 +950,7 @@ export function signalReplayVideoFrameState(args: {
     eventElapsedMs,
     messageIndex,
     activeMessageIndexes,
+    imageContext,
     messageStartMs,
     messageEndMs,
     shot,

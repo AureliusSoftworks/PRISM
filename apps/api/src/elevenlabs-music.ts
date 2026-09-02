@@ -4,6 +4,7 @@ import {
   type SignalMusicProfile,
 } from "@localai/shared";
 import { normalizeSignalGenerationKeywords } from "./signal-generation-keywords.ts";
+import { refractionSignal } from "./refraction-cancellation.ts";
 
 export const SIGNAL_ELEVENLABS_MUSIC_MODEL = "music_v2";
 export const COFFEE_ELEVENLABS_MUSIC_MODEL = "music_v2";
@@ -265,7 +266,7 @@ export async function requestSignalElevenLabsMusic(args: {
     "https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192",
     {
       method: "POST",
-      signal: args.signal,
+      signal: refractionSignal(args.signal),
       headers: {
         "content-type": "application/json",
         "xi-api-key": args.apiKey,
@@ -315,7 +316,7 @@ export async function requestCoffeeGroupElevenLabsMusic(args: {
     "https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192",
     {
       method: "POST",
-      signal: args.signal,
+      signal: refractionSignal(args.signal),
       headers: {
         "content-type": "application/json",
         "xi-api-key": args.apiKey,

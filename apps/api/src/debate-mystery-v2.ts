@@ -14,6 +14,7 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { assertRefractionActive, protectRefractionMutation } from "./refraction-cancellation.ts";
 import {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   DEBATE_MYSTERY_PLAY_READINESS_VERSION,
@@ -2094,6 +2095,7 @@ export function attachDebateMysteryMansionExteriorAssetV2(
   sessionId: string,
   asset: DebateMysterySealedAssetRefV1,
 ): DebateSessionV1 {
+  assertRefractionActive();
   const session = getDebateSession(db, userId, sessionId);
   if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
     throw new HttpError(409, "Mansion artwork requires a Whodunnit V2 case.");
@@ -2101,6 +2103,15 @@ export function attachDebateMysteryMansionExteriorAssetV2(
   if (JSON.stringify(session.formatState.mansionExterior ?? null) === JSON.stringify(asset)) {
     return session;
   }
+  const previousExterior = session.formatState.mansionExterior;
+  protectRefractionMutation(db, `exterior-projection:${userId}:${sessionId}`, () => {
+    return () => {
+      const latest = getDebateSession(db, userId, sessionId);
+      if (latest.formatState.format === "whodunnit" && latest.formatState.version === 2) {
+        persistV2Session(db, userId, latest, { ...latest.formatState, mansionExterior: previousExterior });
+      }
+    };
+  });
   return persistV2Session(db, userId, session, {
     ...session.formatState,
     mansionExterior: asset,
@@ -2129,6 +2140,7 @@ export function commitDebateMysterySceneRepairV1(
   sessionId: string,
   repair: DebateMysterySceneRepairCommitV1,
 ): DebateSessionV1 {
+  assertRefractionActive();
   const session = getDebateSession(db, userId, sessionId);
   if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
     throw new HttpError(409, "Scene repair requires a Whodunnit V2 case.");
@@ -2347,6 +2359,7 @@ export function attachDebateMysteryRoomAssetV2(
   roomId: string,
   asset: DebateMysterySealedAssetRefV1,
 ): DebateSessionV1 {
+  assertRefractionActive();
   let lastConflict: unknown = null;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const session = getDebateSession(db, userId, sessionId);
@@ -2361,6 +2374,22 @@ export function attachDebateMysteryRoomAssetV2(
     if (JSON.stringify(room.sealedAsset ?? null) === JSON.stringify(asset)) {
       return session;
     }
+    protectRefractionMutation(db, `room-projection:${userId}:${sessionId}:${roomId}`, () => {
+      const previousAsset = room.sealedAsset;
+      const previousAccess = room.accessState;
+      return () => {
+        const latest = getDebateSession(db, userId, sessionId);
+        if (latest.formatState.format !== "whodunnit" || latest.formatState.version !== 2) return;
+        persistV2Session(db, userId, latest, {
+          ...latest.formatState,
+          rooms: latest.formatState.rooms.map((entry) => entry.id !== roomId ? entry : {
+            ...entry,
+            sealedAsset: previousAsset,
+            accessState: entry.visited ? "visited" : previousAccess,
+          }),
+        });
+      };
+    });
     const state = structuredClone(session.formatState);
     state.rooms = state.rooms.map((entry) =>
       entry.id === roomId
@@ -2393,6 +2422,7 @@ export function attachDebateMysteryEvidenceAssetV2(
   exhibitId: string,
   asset: DebateMysterySealedAssetRefV1,
 ): DebateSessionV1 {
+  assertRefractionActive();
   db.exec("BEGIN IMMEDIATE");
   try {
     const session = getDebateSession(db, userId, sessionId);

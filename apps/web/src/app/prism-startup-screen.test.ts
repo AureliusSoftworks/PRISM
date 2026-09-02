@@ -86,6 +86,19 @@ describe("continued PRISM startup screen", () => {
     assert.match(css, /\.retry:focus-visible/u);
   });
 
+  it("pauses loading motion and presents failure without hiding diagnostics", () => {
+    for (const source of [nativeSplash, css]) {
+      assert.match(source, /data-prism-startup-state="failed"[\s\S]*animation-play-state: paused/u);
+      assert.match(source, /data-prism-startup-state="failed"[\s\S]*transition: none/u);
+    }
+    assert.match(nativeSplash, /id="startup-failure-help" role="alert" hidden/u);
+    assert.match(component, /data-prism-startup-state=\{failed \? "failed" : "loading"\}/u);
+    assert.match(component, /const displayLabel = failed\s*\? "Your private workspace couldn’t open\."/u);
+    const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    assert.match(page, /const flavorEnabled =\s*accountWorkspaceStartup.phase === "checking-session" \|\|\s*accountWorkspaceStartup.phase === "loading-workspace";\s*if \(!flavorEnabled\) return;/u);
+    assert.match(page, /return \(\) => window.clearInterval\(intervalId\);\s*\}, \[accountWorkspaceStartup.phase/u);
+  });
+
   it("distinguishes ambient flavor from authoritative startup status", () => {
     assert.match(component, /data-kind=\{line\.kind \?\? "status"\}/u);
     assert.match(component, /line\.kind === "flavor" \? "true"/u);

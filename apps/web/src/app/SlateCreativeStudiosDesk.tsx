@@ -18,6 +18,7 @@ import type {
 } from "../../../../packages/shared/src/slateCreativeStudios";
 import styles from "./slateCreativeStudiosDesk.module.css";
 import { AssetRail, type AssetGenerationSelection, type AssetRailGenerationControl } from "./AssetLibrary";
+import { prismRefractionRequestInit, waitForRefraction } from "./prismRefractionRun.ts";
 
 type StudioDesk = "sources" | "visuals" | "review";
 
@@ -53,12 +54,12 @@ async function studioRequest(
   path: string,
   init?: RequestInit,
 ): Promise<StudioResponse> {
+  init = prismRefractionRequestInit(init);
+  const headers = new Headers(init.headers);
+  if (init.body && !headers.has("content-type")) headers.set("content-type", "application/json");
   const response = await fetch(path, {
     ...init,
-    headers: {
-      ...(init?.body ? { "content-type": "application/json" } : {}),
-      ...init?.headers,
-    },
+    headers,
   });
   const body = (await response.json().catch(() => ({}))) as StudioResponse & {
     error?: string;
@@ -171,13 +172,15 @@ export function SlateCreativeStudiosDesk({
   }, [reload]);
 
   const act = useCallback(
-    async (operation: () => Promise<void>) => {
+    async (operation: () => Promise<void>, signal?: AbortSignal) => {
       if (busy) return;
+      signal?.throwIfAborted();
       setBusy(true);
       setError("");
       try {
-        await operation();
+        await (signal ? waitForRefraction(signal, operation) : operation());
       } catch (caught) {
+        if (signal?.aborted) return;
         setError(caught instanceof Error ? caught.message : "That action failed.");
       } finally {
         setBusy(false);
@@ -198,11 +201,13 @@ export function SlateCreativeStudiosDesk({
   const createVisualStudy = (
     direction = "",
     selection?: AssetGenerationSelection,
-  ): void => {
-    if (!visualPrompt.trim()) return;
-    void act(async () => {
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    if (!visualPrompt.trim()) return Promise.resolve();
+    return act(async () => {
       const body = await studioRequest(`${base}/visual-references`, {
         method: "POST",
+        signal,
         body: JSON.stringify({
           sectionId: currentSectionId,
           kind: visualKind,
@@ -213,9 +218,10 @@ export function SlateCreativeStudiosDesk({
             : {}),
         }),
       });
+      signal?.throwIfAborted();
       if (body.visual) setVisuals((items) => [body.visual!, ...items]);
       setVisualPrompt("");
-    });
+    }, signal);
   };
 
   const reuseVisualStudy = (assetSetId: string): void => {

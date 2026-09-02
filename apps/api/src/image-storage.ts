@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { resolveDbPath } from "./db.ts";
+import { assertRefractionActive, currentRefractionSignal, onRefractionRollback } from "./refraction-cancellation.ts";
 
 const GENERATED_SUBDIR = "generated-images";
 const ASSET_CLEANUP_TRASH_SUBDIR = "asset-cleanup-trash";
@@ -135,8 +136,19 @@ export function resolveAbsoluteUnderDataRoot(localRelPath: string): string {
 }
 
 export function writeGeneratedImageBytes(localRelPath: string, bytes: Buffer): void {
+  assertRefractionActive();
   const absolute = resolveAbsoluteUnderDataRoot(localRelPath);
   mkdirSync(dirname(absolute), { recursive: true });
+  if (currentRefractionSignal()) {
+    // Atomic no-overwrite, and register cleanup only after this run created the
+    // file. An EEXIST collision must never make rollback delete somebody else's.
+    writeFileSync(absolute, bytes, { flag: "wx" });
+    onRefractionRollback(`new-image-file:${localRelPath}`, () => {
+      invalidateGeneratedImageThumbnail(localRelPath);
+      tryUnlinkGeneratedImageFile(localRelPath);
+    });
+    return;
+  }
   writeFileSync(absolute, bytes);
 }
 

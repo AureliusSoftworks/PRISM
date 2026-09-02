@@ -1694,6 +1694,7 @@ export default function MansionEditorDialog({
       </WhodunnitSetupDialog>
       <PrismBlockingLoader
         open={saving && creationFlow}
+        operation="preparation"
         placement="fullscreen"
         theme={theme}
         eyebrow="PRISM / Venue Editor"

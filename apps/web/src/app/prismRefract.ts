@@ -97,7 +97,10 @@ export interface PrismRefractMagicTarget extends PrismRefractTargetBase {
    * (e.g. New Duel / New Group invent). Companion skips the shared gate.
    */
   ownsPresentation?: boolean;
-  run: (direction: string) => void | Promise<void>;
+  /** Stable operation + effective routing only; omit when comparability is unknown. */
+  timingKey?: string;
+  /** Forward signal through every async stage and check it before applying a result. */
+  run: (direction: string, signal: AbortSignal) => void | Promise<void>;
 }
 
 export interface PrismRefractBotDirectedSetupTarget
@@ -126,6 +129,7 @@ export function createBotDirectedSetupRefractTarget(input: {
     botId: string;
     botName: string;
     direction: string;
+    signal: AbortSignal;
   }) => void | Promise<void>;
 }): PrismRefractBotDirectedSetupTarget {
   const anchor = { botId: input.botId, botName: input.botName };
@@ -138,7 +142,7 @@ export function createBotDirectedSetupRefractTarget(input: {
     disabled: input.disabled,
     ownsPresentation: input.ownsPresentation,
     interaction: input.interaction,
-    run: (direction) => input.run({ ...anchor, direction }),
+    run: (direction, signal) => input.run({ ...anchor, direction, signal }),
   };
 }
 

@@ -330,6 +330,7 @@ function ArchiveExhibitAssetCard(props: {
     () => ({
       id: `debate-archive-exhibit-synth:${props.sessionId}:${exhibit.id}`,
       kind: "magic",
+      ownsPresentation: true,
       label: `${synthesizeVerb} ${exhibit.title}`,
       disabled: () => props.busy || props.synthesizing,
       run: async (direction) => {

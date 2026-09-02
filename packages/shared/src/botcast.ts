@@ -67,6 +67,7 @@ import {
 import {
   normalizeSignalVisualRecognitionV1,
   type SignalVisualRecognitionV1,
+  type SignalVisualPassportBundleV1,
 } from "./signalVisualRecognition.ts";
 
 export type BotcastEpisodeSegment = "opening" | "interview" | "closing";
@@ -2070,6 +2071,10 @@ export function botcastEpisodeImageSpokenReference(
 export interface BotcastImageContextV1 {
   v: 1;
   imageId: string;
+  /** Absent on legacy single-image episodes. */
+  origin?: "setup" | "live";
+  /** Pixel-grounded description, never producer direction or identity proof. */
+  groundedVisualDescription?: string;
   kind: BotcastEpisodeImageKind;
   name: string;
   mimeType: "image/png" | "image/jpeg" | "image/webp";
@@ -2212,6 +2217,10 @@ export function normalizeBotcastImageContextV1(
   return {
     v: 1,
     imageId: row.imageId.trim().slice(0, 160),
+    ...(row.origin === "setup" || row.origin === "live" ? { origin: row.origin } : {}),
+    ...(typeof row.groundedVisualDescription === "string" && row.groundedVisualDescription.trim()
+      ? { groundedVisualDescription: row.groundedVisualDescription.trim().slice(0, 2400) }
+      : {}),
     kind: row.kind,
     name: row.name.trim().slice(0, 120),
     mimeType: row.mimeType,
@@ -2268,17 +2277,70 @@ export function botcastLatestImageContextV1(
   return null;
 }
 
+/** Latest state per identity, in registration order (not last-update order). */
+export function botcastImageHistoryV1(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+): BotcastImageContextV1[] {
+  const history = new Map<string, BotcastImageContextV1>();
+  for (const event of events) {
+    if (event.kind !== "image_context") continue;
+    const context = normalizeBotcastImageContextV1(event.payload);
+    if (context) history.set(context.imageId, context);
+  }
+  return [...history.values()];
+}
+
+export function botcastImageContextByIdV1(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+  imageId: string | null | undefined,
+): BotcastImageContextV1 | null {
+  return botcastImageHistoryV1(events).find((image) => image.imageId === imageId) ?? null;
+}
+
+export function botcastPendingImageContextV1(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+): BotcastImageContextV1 | null {
+  return botcastImageHistoryV1(events).find((image) => image.phase === "queued") ?? null;
+}
+
+export function botcastActiveImageContextV1(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+): BotcastImageContextV1 | null {
+  return [...botcastImageHistoryV1(events)].reverse().find(
+    (image) => image.phase === "presented" || image.phase === "discussing",
+  ) ?? null;
+}
+
+/** Last introduced picture before this one; a pending upload never qualifies. */
+export function botcastPreviousImageContextV1(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+  imageId: string,
+): BotcastImageContextV1 | null {
+  const history = botcastImageHistoryV1(events);
+  const index = history.findIndex((image) => image.imageId === imageId);
+  return history.slice(0, index < 0 ? 0 : index).reverse().find(
+    (image) => image.hostIntroductionMessageId !== null,
+  ) ?? null;
+}
+
+/** Retry restores setup, never a later live prop. Preserve unknown-origin legacy. */
+export function botcastSetupImageContextV1(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+): BotcastImageContextV1 | null {
+  const history = botcastImageHistoryV1(events);
+  return history.find((image) => image.origin === "setup") ??
+    (history.length === 1 && !history[0]!.origin ? history[0]! : null);
+}
+
 /** Associates ephemeral image lifecycle metadata with its live utterance. */
 export function botcastImageContextForMessageV1(
   events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
   messageId: string | null | undefined,
 ): BotcastImageContextV1 | null {
   if (!messageId) return null;
-  const context = botcastLatestImageContextV1(events);
-  if (!context || context.phase === "queued") return null;
-  return botcastImageDiscussionMessageIdsV1(context).includes(messageId)
-    ? context
-    : null;
+  return [...botcastImageHistoryV1(events)].reverse().find((context) =>
+    context.phase !== "queued" && botcastImageDiscussionMessageIdsV1(context).includes(messageId),
+  ) ?? null;
 }
 
 export interface BotcastPerceptionOverlapV1 {
@@ -3446,7 +3508,22 @@ export interface BotcastGuestInterruptionContext {
   interruptedSpeakerCueSpeechEffect?: "speech_obfuscation";
 }
 
+/** Request-only pixels and private direction; never persist this object. */
+export interface BotcastEpisodeImageAttachmentV1 {
+  imageId: string;
+  fileName: string;
+  dataUrl: string;
+  name?: string;
+  reason?: string;
+  replayEmoji?: string;
+  visualIdentity?: SignalVisualPassportBundleV1;
+  /** Explicit terminal-booking retry only, not live-refresh visual recovery. */
+  archivalProxyEpisodeId?: string;
+}
+
 export interface BotcastEpisodeAdvanceRequest {
+  episodeImage?: BotcastEpisodeImageAttachmentV1;
+  previousEpisodeImage?: BotcastEpisodeImageAttachmentV1;
   /** Resolved rendered app theme for theme-conditional Powers this turn. */
   theme?: "light" | "dark";
   /** On-air human answer. Valid only when the Producer is the episode guest. */

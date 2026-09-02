@@ -53,8 +53,11 @@ export function PrismStartupScreen({
     prismStartupProgressFromLogs(logs),
   );
   const progressPercent = Math.round(opticsProgress.total * 100);
-  const displayLabel =
-    opticsProgress.total >= 1 ? "Your private workspace is ready." : label;
+  const displayLabel = failed
+    ? "Your private workspace couldn’t open."
+    : opticsProgress.total >= 1
+      ? "Your private workspace is ready."
+      : label;
   const opticsStyle: PrismStartupOpticsStyle = {
     "--prism-startup-beam-progress": String(opticsProgress.beam),
     "--prism-startup-beam-remainder": `${(1 - opticsProgress.beam) * 100}%`,
@@ -67,6 +70,7 @@ export function PrismStartupScreen({
       className={styles.veil}
       data-prism-startup-screen="true"
       data-prism-startup-stage="workspace"
+      data-prism-startup-state={failed ? "failed" : "loading"}
     >
       <script
         suppressHydrationWarning

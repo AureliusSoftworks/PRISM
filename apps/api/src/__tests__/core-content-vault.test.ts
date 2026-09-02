@@ -678,6 +678,42 @@ describe("core content Vault authenticated bindings", () => {
 });
 
 describe("core content Vault migration boundary", () => {
+  it("rejects keyless initialization before it can normalize encrypted memory metadata", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "prism-vault-keyless-startup-"));
+    const dbPath = join(tempDir, "vault.sqlite");
+    const userKey = Buffer.alloc(32, 29);
+    const legacyMasterKey = deriveMasterKey(MASTER_SECRET);
+    let db: DatabaseSync | null = null;
+    try {
+      db = initializeDatabase(new DatabaseSync(dbPath));
+      addLegacyOwner(db, "keyless-owner", userKey, legacyMasterKey);
+      const inner = encryptText("Private memory remains unchanged", userKey);
+      db.prepare(`INSERT INTO memories (
+        id, user_id, ciphertext, iv, tag, confidence, category, tier, created_at
+      ) VALUES ('keyless-memory', 'keyless-owner', ?, ?, ?, 0.99, 'user', 'long_term', ?)`)
+        .run(inner.ciphertext, inner.iv, inner.tag, NOW);
+      activateCoreContentVaultV2({ db, masterSecret: MASTER_SECRET });
+      const before = db.prepare("SELECT * FROM main.memories").all();
+      db.close();
+      db = new DatabaseSync(dbPath);
+      assert.throws(
+        () => initializeDatabase(db!),
+        { code: "vault_key_lifecycle_misuse", reason: "invalid_master_key_context" },
+      );
+      assert.deepEqual(db.prepare("SELECT * FROM main.memories").all(), before);
+      db.close();
+      db = initializeDatabase(new DatabaseSync(dbPath), MASTER_SECRET);
+      const memory = db.prepare("SELECT category, tier FROM memories WHERE user_id = 'keyless-owner'").get();
+      assert.equal(memory?.category, "user");
+      assert.equal(memory?.tier, "long_term");
+    } finally {
+      db?.close();
+      userKey.fill(0);
+      legacyMasterKey.fill(0);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("migrates legacy plaintext, scrubs SQLite/WAL, resumes, and never falls back on ordinary reads", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "prism-core-vault-"));
     const dbPath = join(tempDir, "core-vault.sqlite");

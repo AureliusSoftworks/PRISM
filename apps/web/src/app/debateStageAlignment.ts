@@ -184,12 +184,23 @@ export interface DebateStageModeratorMicroScalesV1 {
 export type DebateStageWhodunnitCourtItem =
   // `wide*` keys remain serialized for V14 compatibility; both now belong to Main.
   | "wideEvidenceTable"
+  // The Forum Moderator camera owns its table independently from Main.
+  | "moderatorEvidenceTable"
   | "wideWitnessSilhouette"
   | "witness"
   | "prosecutionMini"
   | "defenseMini"
   | "witnessNameplate"
   | "witnessGlyph";
+
+export function debateStageCourtPropForCamera(
+  item: "wideEvidenceTable" | "wideWitnessSilhouette",
+  camera: DebateStageCameraView,
+): DebateStageWhodunnitCourtItem {
+  return item === "wideEvidenceTable" && camera === "moderator"
+    ? "moderatorEvidenceTable"
+    : item;
+}
 
 /** Position is a percentage offset from the authored composition; scale is percent. */
 export interface DebateStageWhodunnitPlacementV1 extends DebateStageOffsetV1 {
@@ -230,7 +241,7 @@ export interface DebateStageAlignmentV14 {
   galleryVolume: number;
   /** Compact Moderator avatar scale for the public Wide, Left, and Right cameras. */
   moderatorMicroScales: DebateStageModeratorMicroScalesV1;
-  /** Main courtroom foregrounds and witness-camera placements used by Whodunnit. */
+  /** Main foregrounds, the Forum Moderator table, and Whodunnit witness placements. */
   whodunnitCourt: DebateStageWhodunnitCourtV1;
   /** Independent Jury chamber member, table, and public vote placements. */
   juryChamber: DebateStageJuryChamberV1;
@@ -376,6 +387,7 @@ export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV14 = {
   moderatorMicroScales: { ...DEFAULT_DEBATE_STAGE_MODERATOR_MICRO_SCALES },
   whodunnitCourt: {
     wideEvidenceTable: { x: 0, y: 0, scale: 100 },
+    moderatorEvidenceTable: { x: 0, y: 0, scale: 100 },
     wideWitnessSilhouette: { x: 0, y: 0, scale: 100 },
     witness: { x: 0, y: 0, scale: 100 },
     prosecutionMini: { x: 0, y: 0, scale: 100 },
@@ -613,10 +625,17 @@ function normalizeWhodunnitCourt(
         >)
       : {};
   const fallback = DEFAULT_DEBATE_STAGE_ALIGNMENT.whodunnitCourt;
+  const wideEvidenceTable = normalizeWhodunnitPlacement(
+    candidate.wideEvidenceTable,
+    fallback.wideEvidenceTable,
+  );
   return {
-    wideEvidenceTable: normalizeWhodunnitPlacement(
-      candidate.wideEvidenceTable,
-      fallback.wideEvidenceTable,
+    wideEvidenceTable,
+    // Older presets used one table for both cameras. Copy its saved pose once;
+    // subsequent edits keep the two normalized placements independent.
+    moderatorEvidenceTable: normalizeWhodunnitPlacement(
+      candidate.moderatorEvidenceTable,
+      wideEvidenceTable,
     ),
     wideWitnessSilhouette: normalizeWhodunnitPlacement(
       candidate.wideWitnessSilhouette,
@@ -1459,6 +1478,9 @@ export function debateStageAlignmentStyle(
     "--whodunnit-wide-evidence-table-offset-x": `${normalized.whodunnitCourt.wideEvidenceTable.x}%`,
     "--whodunnit-wide-evidence-table-offset-y": `${normalized.whodunnitCourt.wideEvidenceTable.y}%`,
     "--whodunnit-wide-evidence-table-scale": `${normalized.whodunnitCourt.wideEvidenceTable.scale / 100}`,
+    "--debate-moderator-table-offset-x": `${normalized.whodunnitCourt.moderatorEvidenceTable.x}%`,
+    "--debate-moderator-table-offset-y": `${normalized.whodunnitCourt.moderatorEvidenceTable.y}%`,
+    "--debate-moderator-table-scale": `${normalized.whodunnitCourt.moderatorEvidenceTable.scale / 100}`,
     "--whodunnit-wide-witness-silhouette-offset-x": `${normalized.whodunnitCourt.wideWitnessSilhouette.x}%`,
     "--whodunnit-wide-witness-silhouette-offset-y": `${normalized.whodunnitCourt.wideWitnessSilhouette.y}%`,
     "--whodunnit-wide-witness-silhouette-scale": `${normalized.whodunnitCourt.wideWitnessSilhouette.scale / 100}`,

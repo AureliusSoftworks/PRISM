@@ -150,17 +150,17 @@ describe("Flyting stage alignment", () => {
     );
     assert.deepEqual(
       DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements.galleryBotsContainer,
-      { x: 0, y: 0, scale: 100, rotation: 0, skewX: 0, skewY: 0 },
+      { x: 0, y: -2.75, scale: 97, rotation: 0, skewX: 0, skewY: 0 },
     );
     assert.deepEqual(
       DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements.galleryHelmets,
-      { x: 0, y: 0, scale: 100, rotation: 0, skewX: 0, skewY: 0 },
+      { x: -21.38, y: -13.02, scale: 73, rotation: 0, skewX: 0, skewY: 0 },
     );
     assert.deepEqual(
       DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements.galleryForRugGlyph,
       {
-        x: 0.02,
-        y: -8.45,
+        x: -0.77,
+        y: -13.87,
         scale: 100,
         rotation: 0,
         skewX: -20,
@@ -170,13 +170,13 @@ describe("Flyting stage alignment", () => {
     assert.deepEqual(
       DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements
         .galleryModeratorRugGlyph,
-      { x: 0, y: 0, scale: 100, rotation: 0, skewX: 0, skewY: 0 },
+      { x: -0.04, y: -14.77, scale: 100, rotation: 0, skewX: 0, skewY: 0 },
     );
     assert.deepEqual(
       DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements.galleryAgainstRugGlyph,
       {
-        x: 0.59,
-        y: -4.84,
+        x: 1.22,
+        y: -11.7,
         scale: 100,
         rotation: 0,
         skewX: 20,
@@ -185,7 +185,7 @@ describe("Flyting stage alignment", () => {
     );
     assert.deepEqual(DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS, {
       galleryBotScale: 60,
-      galleryMaxVerticalRoam: 30,
+      galleryMaxVerticalRoam: 60,
     });
   });
 

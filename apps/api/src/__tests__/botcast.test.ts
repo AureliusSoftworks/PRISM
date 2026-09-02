@@ -1562,7 +1562,7 @@ describe("Botcast persistence and isolation", () => {
             model: "llava",
             replayEmoji: "🕯️",
           }),
-        /one image per episode/u,
+        /one image queued/u,
       );
 
       db.prepare(
@@ -1623,15 +1623,15 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.match(
         serverSource,
-        /route\("POST", "\/api\/botcast\/episodes\/:id\/image"[\s\S]{0,2800}normalizeSignalEpisodeImageForTurn[\s\S]{0,1800}queueBotcastEpisodeImageContext/u,
+        /route\("POST", "\/api\/botcast\/episodes\/:id\/image"[\s\S]{0,2800}normalizeSignalEpisodeImageForTurn[\s\S]{0,1800}registerSignalImage/u,
       );
       assert.match(
         serverSource,
-        /A newly uploaded Signal image replaced the prepared turn\./u,
+        /A newly queued Signal image invalidated speculative preparation\./u,
       );
       assert.match(
         serverSource,
-        /requiresImageInput: true,[\s\S]{0,800}supportsImageInput/u,
+        /requiresImageInput: true[\s\S]{0,800}providerModelSupportsImageInput/u,
       );
       assert.match(
         serverSource,
@@ -1681,23 +1681,23 @@ describe("Botcast persistence and isolation", () => {
       assert.doesNotMatch(retryMetadataRoute, /image_bytes|payload_json/u);
       assert.match(
         serverSource,
-        /presentationReason: signalEpisodeImage\.presentationReason/g,
+        /presentationReason: args\.image\.presentationReason/g,
       );
       assert.match(
         serverSource,
-        /replayEmoji: signalEpisodeImage\.replayEmoji/u,
+        /replayEmoji: args\.image\.replayEmoji/u,
       );
       assert.doesNotMatch(serverSource, /episode-image\/emoji/u);
       assert.match(
         serverSource,
-        /requiresImageInput: cue\?\.kind === "present_image"/u,
+        /requiresImageInput: Boolean\(contextForTurn\)/u,
       );
       assert.match(serverSource, /linkBotcastEpisodeImageAsset/u);
       assert.match(serverSource, /cueKind === "present_image"/u);
-      assert.match(serverSource, /Signal accepts one image per episode/u);
+      assert.match(serverSource, /Signal already has one image queued/u);
       assert.doesNotMatch(serverSource, /signal_episode_context/u);
       assert.match(botcastSource, /generation\.signalEpisodeImage/u);
-      assert.match(botcastSource, /images: \[generation\.signalEpisodeImage!\.input\]/u);
+      assert.match(botcastSource, /images: \[generation\.signalEpisodeImage!\.input,/u);
       assert.match(botcastSource, /imageDiscussionTurn === "host_follow_up"/u);
       assert.match(botcastSource, /semanticDecision === "continue"/u);
       assert.match(botcastSource, /"continued_discussion"/u);
@@ -1998,7 +1998,7 @@ describe("Botcast persistence and isolation", () => {
               height: 48,
             },
           }),
-        /one image per episode/u,
+        /different content/u,
       );
       assert.equal(
         Number(
@@ -3509,7 +3509,7 @@ describe("Botcast persistence and isolation", () => {
     );
     assert.match(
       serverSource,
-      /\/bake\/cancel[\s\S]{0,700}?cancelBotcastEpisode\(db, userId, ctx\.params\.id, \{[\s\S]{0,120}?watch_preparation_stopped/u,
+      /\/bake\/cancel[\s\S]{0,1100}?cancelBotcastEpisode\(db, userId, ctx\.params\.id, \{[\s\S]{0,120}?watch_preparation_stopped/u,
     );
   });
 
@@ -29405,7 +29405,7 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("redirects an audible Host into a newly attached Producer image", async () => {
+  it("refuses to redirect an audible Host into a newly attached Producer image", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
@@ -29445,63 +29445,22 @@ describe("Botcast persistence and isolation", () => {
         replayEmoji: "🖼️",
       });
 
-      const redirected = await advanceBotcastEpisode(
-        db,
-        "user-1",
-        created.id,
-        {
-          cue: {
-            kind: "present_image",
-            imageId: "signal-live-priority-image",
-          },
+      await assert.rejects(
+        advanceBotcastEpisode(db, "user-1", created.id, {
+          cue: { kind: "present_image", imageId: "signal-live-priority-image" },
           cueDelivery: "redirect_host",
-          hostRedirect: {
-            messageId: opening.message!.id,
-            spokenContent,
-            cadence: "between_words",
-          },
-        },
-        {
+          hostRedirect: { messageId: opening.message!.id, spokenContent, cadence: "between_words" },
+        }, {
           ...generation(provider),
-          signalEpisodeImage: {
-            imageId: "signal-live-priority-image",
-            input: { mimeType: "image/png", data: "AA==" },
-          },
-        },
+          signalEpisodeImage: { imageId: "signal-live-priority-image", input: { mimeType: "image/png", data: "AA==" } },
+        }),
+        /normal host turn; they never interrupt/u,
       );
-
-      assert.equal(redirected.episode.messages[0]?.content, `${spokenContent}…`);
-      assert.equal(redirected.message?.speakerRole, "host");
-      assert.match(redirected.message?.content ?? "", /this picture/iu);
-      assert.equal(
-        botcastLatestImageContextV1(redirected.episode.events)?.phase,
-        "presented",
-      );
-      const imageRedirect = redirected.episode.events.findLast(
-        (event) =>
-          event.kind === "producer_cue" &&
-          event.payload.kind === "present_image",
-      );
-      assert.equal(imageRedirect?.payload.delivery, "redirect_host");
-      assert.equal(imageRedirect?.payload.priority, "priority");
-      assert.equal(
-        imageRedirect?.payload.interruptedMessageId,
-        opening.message?.id,
-      );
-      assert.equal(
-        (imageRedirect?.payload.pivotPerformance as Record<string, unknown>)
-          .cadence,
-        "between_words",
-      );
-      assert.equal(
-        botcastProducerCueLifecyclesFromEvents(redirected.episode.events).at(-1)
-          ?.status,
-        "delivered",
-      );
-      assert.match(
-        captures[1]!.map((message) => message.content).join("\n"),
-        /still on mic after breaking off/u,
-      );
+      const unchanged = getBotcastEpisode(db, "user-1", created.id);
+      assert.equal(unchanged.messages[0]?.content, opening.message?.content);
+      assert.equal(unchanged.messages.length, 1);
+      assert.equal(botcastLatestImageContextV1(unchanged.events)?.phase, "queued");
+      assert.equal(captures.length, 1);
     } finally {
       db.close();
     }

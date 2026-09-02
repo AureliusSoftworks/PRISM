@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { refractionSignal } from "./refraction-cancellation.ts";
 import { getAppConfig } from "@localai/config";
 import {
   anthropicReasoningEffortForRequest,
@@ -2065,6 +2066,7 @@ export class LocalOllamaProvider implements LlmProvider {
     messages: ProviderMessage[],
     options?: GenerateOptions
   ): Promise<string> {
+    options = { ...options, signal: refractionSignal(options?.signal) };
     if (!options?.generationWork) {
       const work = providerGenerationWork(this.name, options);
       return await Promise.resolve(
@@ -2491,6 +2493,7 @@ export class OpenAiProvider implements LlmProvider {
     messages: ProviderMessage[],
     options?: GenerateOptions
   ): Promise<string> {
+    options = { ...options, signal: refractionSignal(options?.signal) };
     if (!options?.generationWork) {
       const work = providerGenerationWork("openai", options);
       return await Promise.resolve(
@@ -2708,6 +2711,7 @@ export class AnthropicProvider implements LlmProvider {
     messages: ProviderMessage[],
     options?: GenerateOptions
   ): Promise<string> {
+    options = { ...options, signal: refractionSignal(options?.signal) };
     if (!options?.generationWork) {
       const work = providerGenerationWork("anthropic", options);
       return await Promise.resolve(

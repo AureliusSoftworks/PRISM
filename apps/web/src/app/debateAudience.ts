@@ -5,6 +5,7 @@ import {
   type DebateSessionV1,
   type GraphicsQuality,
 } from "@localai/shared";
+import { DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS } from "./debateFlytingStageAlignment.ts";
 
 export const DEBATE_AUDIENCE_GENERATED_ID_PREFIX =
   "prism:debate-audience:generated:";
@@ -99,7 +100,8 @@ export interface DebateFlytingAudienceMillingPlan {
   layer: number;
 }
 
-export const DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT = 30;
+export const DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT: number =
+  DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS.galleryMaxVerticalRoam;
 export const DEBATE_FLYTING_GALLERY_AUTHORING_MAX_VERTICAL_ROAM_PERCENT = 60;
 
 /**
@@ -118,9 +120,13 @@ export function debateFlytingAudienceMillingPlan(
 
   return {
     offsetXPercent: signed(13),
-    offsetYPercent: signed(12),
+    offsetYPercent: signed(
+      DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT * 0.4,
+    ),
     driftXPercent: signed(10),
-    driftYPercent: signed(18),
+    driftYPercent: signed(
+      DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT * 0.6,
+    ),
     durationMs: 4_200 + Math.round(random() * 2_700),
     delayMs: -Math.round(random() * 6_900),
     depthScale: Math.round((depthMinimum + random() * depthRange) * 100) / 100,

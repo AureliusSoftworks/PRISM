@@ -92,6 +92,7 @@ import {
 } from "./debateAudience";
 import { prismDeveloperAuthoringEnabled } from "./prismDevGating";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
+import { FlytingGalleryMotion } from "./FlytingGalleryMotion";
 import {
   DEBATE_AUDIENCE_CROSSTALK_URL,
   DEBATE_AUDIENCE_MURMUR_URL,
@@ -946,9 +947,12 @@ function FlytingSetupStageAlignmentPreview(props: {
           );
         })}
       </div>
-      <span
+      <FlytingGalleryMotion
         className={styles.flytingAudienceContainer}
         data-flyting-gallery-container="true"
+        layoutKey={previewHallSeats
+          .map((seat) => `${seat.id}:${seat.leaning}`)
+          .join("|")}
         style={flytingAlignmentStyle(
           props.alignment.placements.galleryBotsContainer,
         )}
@@ -996,6 +1000,7 @@ function FlytingSetupStageAlignmentPreview(props: {
                       <span
                         className={styles.flytingAudienceMillingSlot}
                         key={seat.id}
+                        data-flyting-gallery-seat={seat.id}
                         style={
                           {
                             "--flyting-gallery-offset-x": `${milling.offsetXPercent}%`,
@@ -1056,7 +1061,7 @@ function FlytingSetupStageAlignmentPreview(props: {
             })}
           </span>
         ))}
-      </span>
+      </FlytingGalleryMotion>
     </section>
   );
 
@@ -4380,9 +4385,12 @@ export function DebateFlytingLive(
                 );
               })}
             </div>
-            <span
+            <FlytingGalleryMotion
               className={styles.flytingAudienceContainer}
               data-flyting-gallery-container="true"
+              layoutKey={hallAudienceSeats
+                .map((seat) => `${seat.id}:${seat.leaning}`)
+                .join("|")}
               style={flytingAlignmentStyle(
                 stageAlignmentDraft.placements.galleryBotsContainer,
               )}
@@ -4432,6 +4440,7 @@ export function DebateFlytingLive(
                             <span
                               className={styles.flytingAudienceMillingSlot}
                               key={seat.id}
+                              data-flyting-gallery-seat={seat.id}
                               style={
                                 {
                                   "--flyting-gallery-offset-x": `${milling.offsetXPercent}%`,
@@ -4522,7 +4531,7 @@ export function DebateFlytingLive(
                   })}
                 </span>
               ))}
-            </span>
+            </FlytingGalleryMotion>
           </section>
         </div>
 

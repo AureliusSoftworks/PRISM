@@ -218,14 +218,18 @@ describe("Whodunnit room-art upgrade state", () => {
     assert.doesNotMatch(experience, />Pixel Art<|>Realistic</u);
     assert.doesNotMatch(legacyExperience, />Pixel Art<|>Realistic</u);
     assert.match(experience, /whodunnitBundledRoomArtPathForRoom/u);
-    assert.match(experience, /const currentRoomMosaicUrl = currentRoomMosaicAssetUrl/u);
+    assert.match(experience, /const currentRoomMosaicUrl = \[\s*currentRoomMosaicAssetUrl/u);
     assert.match(experience, /const currentRoomImageUrl = currentRoomArtStyle === "illustrated"/u);
+    assert.match(experience, /const image = currentRoomArtStyle === "illustrated"[\s\S]{0,850}image\.decode/u);
+    assert.match(experience, /onError=\{\(\) => setFailedMosaicUrls/u);
+    assert.match(experience, /const roomActorVisible = roomActorEligible && roomActorsReady/u);
+    assert.match(experience, /const roomProsecutorVisible = roomProsecutorActive && roomActorsReady/u);
     assert.match(experience, /const ROOM_ART_CROSSFADE_MS = 180/u);
     assert.match(experience, /const currentRoomMosaicAssetUrl = currentRoom\?\.sealedAsset\?\.revealed[\s\S]{0,320}whodunnitSealedRoomArtUrl\(\{[\s\S]{0,180}subjectId: currentRoom\.id,[\s\S]{0,100}style: "mosaic"/u);
     assert.match(experience, /const currentRoomUpgradeAssetUrl = currentRoom && currentRoomHasIllustratedUpgrade[\s\S]{0,320}subjectId: whodunnitIllustratedRoomSubjectId\(currentRoom\.id\),[\s\S]{0,100}style: "illustrated"/u);
     assert.doesNotMatch(experience, /sealedAssetObjectUrls\[sealedMysteryRoomArtKey/u);
     assert.doesNotMatch(experience, /sealedAssetObjectUrls\[sealedMysteryIllustratedRoomArtKey/u);
-    assert.match(experience, /data-art-style="mosaic"[\s\S]{0,180}src=\{currentRoomMosaicUrl\}/u);
+    assert.match(experience, /data-art-style="mosaic"[\s\S]{0,350}src=\{currentRoomMosaicUrl\}/u);
     assert.match(experience, /data-upgrade-layer="true"[\s\S]{0,220}data-active=\{currentRoomArtStyle === "illustrated" \? "true" : undefined\}[\s\S]{0,300}onLoad=\{handleCurrentRoomUpgradeArtLoad\}[\s\S]{0,120}onError=\{handleCurrentRoomArtLoadError\}/u);
     assert.match(experience, /loadedUpgradeRoomIds\.has\(currentRoom\.id\)/u);
     assert.match(experience, /roomBackdropImage[\s\S]*roomParallaxLayer/u);
@@ -235,11 +239,18 @@ describe("Whodunnit room-art upgrade state", () => {
     assert.match(experience, /data-art-crossfading=\{roomArtCrossfading \? "true" : undefined\}/u);
     assert.match(css, /\.roomScene\[data-art-crossfading="true"\] \.roomParallaxLayer\s*\{\s*transition: none;/u);
     assert.doesNotMatch(css, /roomMosaicReveal/u);
-    assert.match(experience, /data-art-style="mosaic"[\s\S]{0,120}data-blurred=\{roomActorVisible/u);
-    assert.match(experience, /data-art-style="illustrated"[\s\S]{0,120}data-blurred=\{roomActorVisible/u);
+    assert.match(experience, /data-art-style="mosaic"[\s\S]{0,120}data-blurred=\{roomBackdropBlurred/u);
+    assert.match(experience, /data-art-style="illustrated"[\s\S]{0,120}data-blurred=\{roomBackdropBlurred/u);
     assert.doesNotMatch(experience, /className=\{styles\.roomBackdrop\}/u);
     assert.match(css, /\.roomScene\[data-art-style="mosaic"\] \.roomParallaxLayer[\s\S]*transform: none/u);
     assert.match(experience, />Upgraded<\/button>/u);
+    assert.match(experience, /setRoomUpgradeConfirmationRoomId\(currentRoom\.id\)/u);
+    assert.match(experience, /startRoomUpgradeSoftSynthesis\(roomUpgradeConfirmationRoom\)/u);
+    assert.match(experience, /mystery-room-art\/upgrade[\s\S]{0,220}mutationBody\(\{ roomId: room\.id \}\)/u);
+    assert.match(experience, /roomUpgradeSynthesisSourceId[\s\S]{0,220}orbOpensProgress: true/u);
+    assert.match(experience, /props\.session\.responseMode === "local"[\s\S]{0,180}return/u);
+    assert.match(experience, /Keep Mosaic<\/button>/u);
+    assert.match(experience, /The Upgraded image could not load\. This room's Mosaic is unchanged\./u);
     assert.match(experience, /renderMysteryBotAvatar\(currentBot, investigationAvatarPresentation/u);
     assert.match(experience, /renderMysteryBotAvatar\(courtPresentedWitnessBot, "full"/u);
     const roomAvatarMiniRule = css.match(
@@ -248,6 +259,9 @@ describe("Whodunnit room-art upgrade state", () => {
     assert.ok(roomAvatarMiniRule);
     assert.match(roomAvatarMiniRule[0], /--chat-mini-bot-render-size:\s*min\(30rem, 44vw, 56vh\)/u);
     assert.match(roomAvatarMiniRule[0], /transform:\s*scale\(1\.19128713\)/u);
+    const tutorials = readFileSync(new URL("./modeTutorials.ts", import.meta.url), "utf8");
+    assert.match(tutorials, /one-room Soft Refract/u);
+    assert.match(tutorials, /cancel changes nothing/u);
   });
 
   it("resolves ten playable cruise rooms while ambient architecture stays outside art coverage", () => {

@@ -156,6 +156,21 @@ describe("Flyting stage authoring", () => {
     );
   });
 
+  it("keeps large rug glyphs softer in Dark Mode without fading Light Mode ink", () => {
+    assert.match(
+      flytingStyles,
+      /\.galleryRugGlyphs > span\s*\{[^}]*width:\s*clamp\(76px, 9\.2vw, 140px\)/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.galleryRugGlyphs > span\s*\{[^}]*color:\s*color-mix\(in srgb, var\(--flyting-rug-glyph-color\) 16%, #fff3dc\)[^}]*mix-blend-mode:\s*normal;[^}]*opacity:\s*0\.76/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.liveShell\[data-theme="light"\] \.galleryRugGlyphs > span\s*\{[^}]*color:\s*color-mix\(in srgb, var\(--flyting-rug-glyph-color\) 16%, #16120d\)[^}]*filter:\s*none;[^}]*opacity:\s*0\.94/u,
+    );
+  });
+
   it("merges every gallery tuning control into Wide and removes the Gallery tab", () => {
     assert.doesNotMatch(flytingSource, /\["gallery", "Gallery"\]/u);
     assert.match(
@@ -438,7 +453,7 @@ describe("Flyting stage authoring", () => {
     );
     assert.match(flytingSource, /wideModeratorHeraldry/u);
     assert.match(flytingSource, /moderatorModeratorHeraldry/u);
-    assert.match(flytingStyles, /perspective\(170px\) rotateX\(61deg\)/u);
+    assert.match(flytingStyles, /perspective\(340px\) rotateX\(61deg\)/u);
     assert.match(flytingStyles, /left: calc\(17\.25%/u);
     assert.match(
       flytingStyles,

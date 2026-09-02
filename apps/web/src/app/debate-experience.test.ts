@@ -4477,6 +4477,21 @@ describe("Debate experience", () => {
     );
   });
 
+  it("keeps both Forum accent layers aligned to the centered-cover artwork", () => {
+    const accentSvgs = [...forumAccentKeysSource.matchAll(/<svg\b[^>]*>/gu)];
+    assert.equal(accentSvgs.length, 2, "backdrop and foreground accent layers");
+    for (const [svg] of accentSvgs) {
+      assert.match(svg, /viewBox="0 0 1672 941"/u);
+      assert.match(svg, /preserveAspectRatio="xMidYMid slice"/u);
+    }
+    for (const layer of ["receiverMatte", "podiumForeground"]) {
+      const rule = css.match(new RegExp(`\\.${layer}\\s*\\{([^}]*)\\}`, "u"));
+      assert.ok(rule, `${layer} artwork rule exists`);
+      assert.match(rule[1], /background-position:\s*center\s*;/u);
+      assert.match(rule[1], /background-size:\s*cover\s*;/u);
+    }
+  });
+
   it("uses authored receivers and raster-aligned alpha light masks", () => {
     assert.match(css, /forum-dark\.webp/u);
     assert.match(css, /forum-light\.webp/u);
@@ -6041,6 +6056,21 @@ describe("Debate experience", () => {
     );
   });
 
+  it("keeps Forum moderator foreground table controls independent from Main", () => {
+    assert.match(source, /const activeMainCourtItem = debateStageCourtPropForCamera\(\s*stageAlignmentMainCourtProp,\s*stageAlignmentPreviewCamera/u);
+    assert.match(source, /data-court-alignment-item=\{activeMainCourtItem\}/u);
+    assert.equal(
+      [...source.matchAll(/updateDebateStageWhodunnitCourtPlacement\(\s*current,\s*activeMainCourtItem,/gu)].length,
+      2,
+      "both the table sliders and item reset target the active camera",
+    );
+    const moderatorReset = source.slice(source.indexOf(': stageAlignmentPreviewCamera === "moderator"\n                            ? normalizeDebateStageAlignment'));
+    const moderatorResetProps = moderatorReset.slice(0, moderatorReset.indexOf("evidenceTable:"));
+    assert.match(moderatorResetProps, /moderatorEvidenceTable:/u);
+    assert.doesNotMatch(moderatorResetProps, /wideEvidenceTable:/u);
+    assert.match(mysteryV2Css, /:global\(\[data-camera-view="moderator"\]\) \.wideEvidenceTable\s*\{[^}]*--debate-moderator-table-offset-x[^}]*--debate-moderator-table-offset-y[^}]*--debate-moderator-table-scale/u);
+  });
+
   it("restores direct Main stage editing without chamber presets", () => {
     assert.match(
       source,
@@ -6121,7 +6151,7 @@ describe("Debate experience", () => {
       source,
       /data-court-tuner-view=\{stageAlignmentPreviewCamera\}/u,
     );
-    assert.match(source, /shared foreground table from this camera/u);
+    assert.match(source, /this camera's separate foreground table/u);
     assert.match(
       source,
       /const stageAlignmentCourtForegroundVisible\s*=\s*stageAlignmentWhodunnitPreview === null && !stageAlignmentJuryPreview/u,

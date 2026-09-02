@@ -1,6 +1,6 @@
 ---
 name: signal-review
-description: Review PRISM Signal episode transcripts, production logs, producer-cue lifecycles, Audience Pulse artifacts, and faithful replay, then diagnose provenance and make focused systemic fixes. Use when the user invokes /signal-review or $signal-review, pastes a Signal Review export, names a Signal show/topic/model, asks where an episode went wrong, or reports persona, interview, cue routing, thinking, clock/layout, voice, completion, recording, or replay failures.
+description: Review PRISM Signal episode transcripts, production logs, producer-cue lifecycles, Audience Pulse artifacts, and faithful replay, then diagnose provenance and make focused systemic fixes. Use when the user invokes /signal-review or $signal-review, pastes a Signal Review export, names a Signal show/topic/model, asks where an episode went wrong, or reports persona, interview, cue routing, image reveal, recovery, thinking, clock/layout, voice, completion, recording, or replay failures.
 ---
 
 # Signal Review
@@ -21,9 +21,9 @@ consumer; its diagnostic Review export is a different product.
    - confidence: `observed`, `inferred`, or `unknown`.
 4. Trace suspicious output through `provider draft -> validator/retry -> sanitizer/repair -> deterministic fallback -> orchestration -> persistence -> live presentation/audio -> replay`. Never call recorded text raw provider output unless a preserved raw draft proves it.
 5. Audit persona/canon fidelity, show-identity continuity, canned recovery, the final three turns and sign-off, interview depth, host/guest role integrity, listener backchannels, Audience Pulse, segment completion, camera state, voice/transcript divergence, faithful audio, Studio Cut/premium replay, and replay direction.
-6. Audit producer cues chronologically by cue ID across `queued`, `dispatching`, `requeued`, `delivered`, `failed`, `cleared`, and `superseded`. `detail` is private direction; only `directQuote` is authorized audience-facing language. Confirm priority/preemption, recovery cause, exact public delivery, and that private detail never enters captions, voice, replay, review artifacts, or audience history.
+6. Audit producer cues chronologically by cue ID across `queued`, `dispatching`, `requeued`, `delivered`, `failed`, `cleared`, and `superseded`. `detail` is private direction; only `directQuote` is authorized audience-facing language. Confirm priority/preemption, recovery cause, exact public delivery, and that private detail never enters captions, voice, replay, review artifacts, or audience history. For image reveals, comparisons, reattachment, or image replay failures, read [image lifecycle review](references/image-lifecycle.md).
 7. Audit thinking by response-run ownership and actual presentation time. Include silent, interrupted, cancelled, failed, retried, and overlapping intervals; confirm camera/segment state, following-message linkage, seek reconstruction, and that stale runs cannot clear or inherit another run's thinking state. A faithful master must not add thinking SFX.
-8. Audit composition and timekeeping in live, completed, cancelled, and replay states. Timed shows count down; Auto/open-ended shows count up from the pause-aware runtime. The stage/transcript composition must remain stable without page/main scrolling, including completion and cancellation transitions.
+8. Audit composition and timekeeping in live, completed, cancelled, and replay states. Timed shows count down; Auto/open-ended shows count up from the canonical runtime, including its accounting for internal holds. The stage/transcript composition must remain stable without page/main scrolling, including completion and cancellation transitions.
 9. With a complete export and a concrete complaint, create or claim a Bead, establish the focused baseline, and fix PRISM systems. If the user asks for review-only, thoughts, or a recommendation, stop after findings.
 10. Reproduce the exact show, clock, cast, response mode, cue lifecycle, run ownership, Power state, completion path, and replay tier. Add focused regressions for visible output and provenance metadata; sanitizer changes require paired accepted and rejected cases. Run narrow Signal checks first, then typecheck/lint as warranted.
 
@@ -31,6 +31,8 @@ consumer; its diagnostic Review export is a different product.
 
 - Treat each episode as a fictional, non-canonical anthology meeting unless the episode itself establishes history.
 - Keep the host interviewing and the guest answering; private producer briefs and cue cards never become dialogue.
+- Preserve Signal's live production contract: no user-controlled pause/resume or saved-session Resume flow. Internal generation/clock holds and completed-replay transport are separate concerns. Image recovery must not introduce resumable shows.
+- When changing turn-loop controls, audit every path that stops progression. Opening an image draft or deletion confirmation must leave the live show running. Offer failed-turn retry only after an actual failure, clear obsolete failure state when another operation starts, and continue automatically once required image originals are reattached.
 - A Producer cue is not delivered merely because it was persisted or dispatched. Use lifecycle evidence and the public turn/audio path to prove delivery. Recovery may requeue a cue; clearing or superseding it must not create phantom speech.
 - Treat visible `content` as the canonical transcript. `voicePerformanceText` may add supported performance tags without changing claims, speakers, or meaning.
 - Diagnose AUTO from per-utterance metadata, not the episode default. A fallback line is not evidence against the primary model or persona.

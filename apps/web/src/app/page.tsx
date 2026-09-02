@@ -284,6 +284,9 @@ import {
 import { playSpatialUiSfx, registerSpatialUiSfx } from "./spatialUiSfx";
 import PrismHandoffCanvas from "./PrismHandoffCanvas";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
+import { usePrismRefractionRun } from "./usePrismRefractionRun.ts";
+import { createPrismRefractionController, currentPrismRefractionInvocationSignal, invokePrismRefractionAction, prismRefractionRequestInit } from "./prismRefractionRun.ts";
+import { REFRACTION_CANCEL_WARNING } from "./prismBlockingLoaderFormat.ts";
 import {
   PrismStartupScreen,
   type PrismStartupLogLine,
@@ -20138,11 +20141,12 @@ function apiErrorWithDiagnostic(
 }
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
-  const headers: HeadersInit = {
+  options = prismRefractionRequestInit(options);
+  const headers = new Headers({
     "content-type": "application/json",
     ...authHeadersForFetch(),
-    ...(options?.headers ?? {}),
-  };
+  });
+  new Headers(options.headers).forEach((value, key) => headers.set(key, value));
   const requestUrl =
     typeof window !== "undefined" &&
     typeof path === "string" &&
@@ -20154,8 +20158,8 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
   try {
     res = await fetch(requestUrl, {
       credentials: "include",
-      headers,
       ...options,
+      headers,
     });
   } catch (err) {
     if (isAbortLikeError(err)) throw err;
@@ -42847,7 +42851,7 @@ function BotAvatarRefractRandomizer({
   children,
 }: {
   label: string;
-  onRandomize: (direction?: string) => void | Promise<void>;
+  onRandomize: (direction?: string, signal?: AbortSignal) => void | Promise<void>;
   disabled?: boolean;
   children: (binding: PrismRefractBinding) => ReactNode;
 }): ReactNode {
@@ -42867,7 +42871,7 @@ function BotAvatarRefractRandomizer({
         kind: "magic",
         label,
         disabled: () => disabledRef.current,
-        run: (direction) => randomizeRef.current(direction),
+        run: (direction, signal) => invokePrismRefractionAction(signal, () => randomizeRef.current(direction, signal)),
       }}
     >
       {children}
@@ -43762,6 +43766,7 @@ function BotVoicePremiumStage({
   };
   const discoverPremiumVoice = async (direction = ""): Promise<void> => {
     if (auditionState.kind === "busy") return;
+    const signal = currentPrismRefractionInvocationSignal();
     const exclusions = [
       ...(audition ? [audition.sourceVoiceId] : []),
       ...recentAuditionIdsRef.current,
@@ -43774,6 +43779,7 @@ function BotVoicePremiumStage({
         exclusions.slice(0, 24),
         direction,
       );
+      signal?.throwIfAborted();
       recentAuditionIdsRef.current = [
         voice.sourceVoiceId,
         ...recentAuditionIdsRef.current.filter((id) => id !== voice.sourceVoiceId),
@@ -43781,6 +43787,10 @@ function BotVoicePremiumStage({
       setAudition(voice);
       setAuditionState({ kind: "success", message: `${voice.name} is ready to audition. Nothing has been saved.` });
     } catch (error) {
+      if (signal?.aborted) {
+        setAuditionState({ kind: "idle", message: "" });
+        return;
+      }
       setAuditionState({
         kind: "error",
         message: error instanceof Error ? error.message : "Could not discover a Voice Library audition.",
@@ -50686,6 +50696,7 @@ function HomeContent(): React.JSX.Element {
   const [slateHandoffBusy, setSlateHandoffBusy] = useState(false);
   const [slateTranscriptStoryBusyKey, setSlateTranscriptStoryBusyKey] =
     useState<string | null>(null);
+  const [slateTranscriptRun, slateTranscriptRunOwner] = usePrismRefractionRun();
   const [slateHandoffError, setSlateHandoffError] = useState<string | null>(
     null,
   );
@@ -57897,6 +57908,7 @@ function HomeContent(): React.JSX.Element {
         force?: boolean;
         direction?: string;
         selection?: AssetGenerationSelection;
+        signal?: AbortSignal;
       } = {},
     ): Promise<void> => {
       if (
@@ -57936,6 +57948,8 @@ function HomeContent(): React.JSX.Element {
           "/api/images/generate",
           {
             method: "POST",
+            signal: options.signal,
+            ...(options.signal ? { headers: { "x-prism-refraction": "1" } } : {}),
             body: JSON.stringify({
               purpose: HUB_ATMOSPHERE_IMAGE_PURPOSE,
               atmosphereStyle,
@@ -57951,6 +57965,7 @@ function HomeContent(): React.JSX.Element {
             }),
           },
         );
+        options.signal?.throwIfAborted();
         const generatedImageId = generated?.image?.id?.trim();
         if (!generatedImageId) {
           throw new Error(
@@ -57969,6 +57984,7 @@ function HomeContent(): React.JSX.Element {
         );
         setHubAtmosphereGenerationState("idle");
       } catch (error) {
+        if (options.signal?.aborted) return;
         setHubAtmosphereGenerationState("error");
         console.warn("[prism] session atmosphere generation was unavailable.");
       } finally {
@@ -58294,9 +58310,9 @@ function HomeContent(): React.JSX.Element {
     if (hasCurrentStyleImage && isFreshForToday) {
       return;
     }
-    void requestHubAtmosphereGeneration(atmosphereStyle, {
-      force: hasCurrentStyleImage && !isFreshForToday,
-    });
+    // The attempt key already includes today. Automatic refresh must respect
+    // it after a failure; only an explicit player retry may force another run.
+    void requestHubAtmosphereGeneration(atmosphereStyle);
   }, [
     homeAtmosphereDayKey,
     hubAtmosphereGenerationState,
@@ -85821,6 +85837,7 @@ function HomeContent(): React.JSX.Element {
   async function generateAtmosphereFromSlashCommand(
     direction = "",
     selection?: AssetGenerationSelection,
+    signal?: AbortSignal,
   ): Promise<void> {
     if (view !== "chat") {
       setError("$atmosphere is only available in Zen.");
@@ -85859,6 +85876,7 @@ function HomeContent(): React.JSX.Element {
       force: true,
       direction,
       selection,
+      signal,
     });
   }
 
@@ -94657,10 +94675,12 @@ function HomeContent(): React.JSX.Element {
     excludeVoiceIds: readonly string[],
     direction = "",
   ): Promise<ElevenLabsSharedVoiceAudition> {
+    const signal = currentPrismRefractionInvocationSignal();
     const response = await api<{ voice: ElevenLabsSharedVoiceAudition }>(
       "/api/voices/elevenlabs/shared/discover",
       {
         method: "POST",
+        signal,
         body: JSON.stringify({
           excludeVoiceIds,
           ...(direction.trim()
@@ -94669,6 +94689,7 @@ function HomeContent(): React.JSX.Element {
         }),
       },
     );
+    signal?.throwIfAborted();
     const voice = response.voice;
     if (!voice?.sourceVoiceId || !voice.publicOwnerId || !voice.name || !voice.previewUrl) {
       throw new Error("ElevenLabs did not return a playable shared-voice audition.");
@@ -103687,7 +103708,9 @@ function HomeContent(): React.JSX.Element {
   function closeBotGenerator(): void {
     if (botGeneratorBusy) {
       const confirmCancellation = window.confirm(
-        "Cancel this in-flight bot draft and return to the foundry brief screen without saving a bot?",
+        botFoundryCreationMode === "batch"
+          ? "Cancel this in-flight bot draft and return to the foundry brief screen without saving a bot?"
+          : `${REFRACTION_CANCEL_WARNING} Return to the foundry brief?`,
       );
       if (!confirmCancellation) return;
       cancelBotGeneratorGenerationAndReturnToFoundryBrief();
@@ -103755,7 +103778,9 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     const confirmCancellation = window.confirm(
-      "Cancel this in-flight bot draft and return to the foundry brief screen without saving a bot?",
+      botFoundryCreationMode === "batch"
+        ? "Cancel this in-flight bot draft and return to the foundry brief screen without saving a bot?"
+        : `${REFRACTION_CANCEL_WARNING} Return to the foundry brief?`,
     );
     if (!confirmCancellation) return;
     cancelBotGeneratorGenerationAndReturnToFoundryBrief();
@@ -103815,6 +103840,8 @@ function HomeContent(): React.JSX.Element {
     applyValue: (value: unknown) => void,
     contextOverride?: unknown,
   ): Promise<void> {
+    const signal = currentPrismRefractionInvocationSignal();
+    signal?.throwIfAborted();
     const runId = (botFieldGenerationRunRef.current.get(fieldKey) ?? 0) + 1;
     botFieldGenerationRunRef.current.set(fieldKey, runId);
     const responseMode = responseModeForProvider(
@@ -103827,6 +103854,7 @@ function HomeContent(): React.JSX.Element {
         value: string | number | boolean | string[];
       }>("/api/bots/generate-field", {
         method: "POST",
+        signal,
         body: JSON.stringify({
           fieldKey,
           currentValue,
@@ -103876,10 +103904,11 @@ function HomeContent(): React.JSX.Element {
           },
         }),
       });
-      if (botFieldGenerationRunRef.current.get(fieldKey) !== runId) return;
+      if (signal?.aborted || botFieldGenerationRunRef.current.get(fieldKey) !== runId) return;
       pushBotAvatarUndoSnapshot();
       applyValue(result.value);
     } catch (error) {
+      if (signal?.aborted) return;
       if (botFieldGenerationRunRef.current.get(fieldKey) !== runId) return;
       setPanelNotice(
         error instanceof Error ? error.message : "That field stayed unchanged.",
@@ -104311,7 +104340,7 @@ function HomeContent(): React.JSX.Element {
     const runId = botFoundryRunRef.current + 1;
     botFoundryRunRef.current = runId;
     botGeneratorAbortRef.current?.abort();
-    const controller = new AbortController();
+    const controller = createPrismRefractionController();
     botGeneratorAbortRef.current = controller;
     const reducedMotion = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
@@ -104443,10 +104472,10 @@ function HomeContent(): React.JSX.Element {
               result.draft.audioVoiceProfile,
               window.location.origin,
               (input, init) =>
-                fetch(input, {
+                fetch(input, prismRefractionRequestInit({
                   ...init,
                   signal: controller.signal,
-                }),
+                })),
               result.draft.avatarSfxPrompt,
             ),
           };
@@ -109456,6 +109485,7 @@ function HomeContent(): React.JSX.Element {
       promptOverride?: string;
       direction?: string;
       selection?: AssetGenerationSelection;
+      signal?: AbortSignal;
     },
   ): Promise<void> {
     const generationRequested = options.generate !== false;
@@ -109503,11 +109533,15 @@ function HomeContent(): React.JSX.Element {
         `/api/conversations/${encodeURIComponent(conversationId)}/zen-wallpaper`,
         {
           method: "POST",
+          signal: options.signal,
+          ...(options.signal ? { headers: { "x-prism-refraction": "1" } } : {}),
           body: JSON.stringify(body),
         },
       );
+      options.signal?.throwIfAborted();
       applyZenWallpaperMetadata(conversationId, data.zenWallpaper);
     } catch (err) {
+      if (options.signal?.aborted) return;
       setZenWallpaperError(
         err instanceof Error ? err.message : "Zen Atmosphere failed to update.",
       );
@@ -112940,6 +112974,7 @@ function HomeContent(): React.JSX.Element {
             </div>
             <AssetRail
               kind="group_room_atmosphere"
+              ownsPresentation
               generation={assetRailGenerationControl("group_room_atmosphere")}
               label="Group-room Atmospheres"
               context={`${group.name} ${group.description}`}
@@ -113961,32 +113996,37 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     setSlateTranscriptStoryBusyKey(source.key);
+    const run = slateTranscriptRunOwner.begin();
+    let success = false;
     setPanelError(null);
     try {
-      const response = await api<{
+      const response = await run.wait(() => api<{
         project: { id: string; title: string };
       }>("/api/slate/transcript-stories", {
         method: "POST",
+        signal: run.signal,
         body: JSON.stringify({
           sourceApplet: source.sourceApplet,
           sourceTitle: source.sourceTitle,
           transcript,
         }),
-      });
+      }));
       setRequestedSlateProjectId(response.project.id);
       showLocalCommandToast(
         "Created in Slate",
         `“${response.project.title}” is ready to edit.`,
       );
       navigateToView("slate");
+      success = true;
     } catch (cause) {
+      if (!run.isCurrent()) return;
       setPanelError(
         cause instanceof Error
           ? cause.message
           : "Slate could not shape that transcript into a story.",
       );
     } finally {
-      setSlateTranscriptStoryBusyKey(null);
+      if (run.finish(success)) setSlateTranscriptStoryBusyKey(null);
     }
   }
 
@@ -117935,6 +117975,12 @@ function HomeContent(): React.JSX.Element {
     <>
       <PrismBlockingLoader
         open={slateTranscriptStoryBusyKey !== null}
+        operation="refraction"
+        operationId={slateTranscriptRun?.id}
+        startedAt={slateTranscriptRun?.startedAt}
+        estimatedDurationMs={slateTranscriptRun?.estimatedDurationMs}
+        onCancel={() => slateTranscriptRunOwner.cancel()}
+        cancelLabel="Cancel transcript story refraction"
         title="Shaping this exchange in Slate"
         detail="Slate is turning the experienced transcript into a faithful, editable short story."
         stepLabel="Reading the exchange"
@@ -123056,8 +123102,8 @@ function HomeContent(): React.JSX.Element {
                               onUpload={() =>
                                 zenAtmosphereUploadRef.current?.click()
                               }
-                              onSynthesize={(direction, selection) =>
-                                generateAtmosphereFromSlashCommand(direction, selection)
+                              onSynthesize={(direction, selection, signal) =>
+                                generateAtmosphereFromSlashCommand(direction, selection, signal)
                               }
                               onSelect={applyZenAtmosphereAsset}
                             />
@@ -123777,10 +123823,10 @@ function HomeContent(): React.JSX.Element {
                                 onUpload={() =>
                                   homeAtmosphereUploadRef.current?.click()
                                 }
-                                onSynthesize={(direction, selection) =>
+                                onSynthesize={(direction, selection, signal) =>
                                   requestHubAtmosphereGeneration(
                                     settings.atmosphereStyle,
-                                    { force: true, direction, selection },
+                                    { force: true, direction, selection, signal },
                                   )
                                 }
                                 onSelect={applyHomeAtmosphereAsset}
@@ -130062,14 +130108,35 @@ function HomeContent(): React.JSX.Element {
                       data-creating={botGeneratorBusy}
                       data-foundry-phase={botFoundryPhase}
                       role="dialog"
+                      aria-modal="true"
                       aria-labelledby="bot-generator-title"
                       onClick={(event) => event.stopPropagation()}
                       onKeyDown={(event) => {
+                        if (event.key === "Tab" && botGeneratorBusy && botFoundryCreationMode !== "batch") {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          event.currentTarget.querySelector<HTMLButtonElement>("[data-prism-foundry-refraction-cancel]")?.focus();
+                          return;
+                        }
                         if (event.key !== "Escape") return;
                         event.preventDefault();
+                        event.stopPropagation();
                         closeBotGenerator();
                       }}
                     >
+                      {botGeneratorBusy && botGeneratorAbortRef.current && botFoundryCreationMode !== "batch" ? (
+                        <div className={styles.botFoundryRefractionControls}>
+                          <span>Time remaining unknown</span>
+                          <button
+                            type="button"
+                            autoFocus
+                            aria-label="Cancel bot refraction"
+                            title="Cancel bot refraction"
+                            data-prism-foundry-refraction-cancel="true"
+                            onClick={closeBotGenerator}
+                          ><span aria-hidden="true">×</span></button>
+                        </div>
+                      ) : null}
                       {botFoundryCreationMode === "batch" ? (
                         <div
                           className={styles.botFoundryBatchChamber}
@@ -131438,6 +131505,7 @@ function HomeContent(): React.JSX.Element {
                   refreshKey={images.length}
                   onOpenStorageSettings={() => openSettingsPanel("storage")}
                   onSynthesize={synthesizeGeneralImage}
+                  ownsPresentation
                   synthesizeDisabled={
                     !canGenerate ||
                     busy ||
@@ -136462,6 +136530,7 @@ function HomeContent(): React.JSX.Element {
               ? "Regenerate cast-derived Coffee soundtrack"
               : "Create cast-derived Coffee soundtrack",
           run: regenerateCoffeeGroupSoundtrack,
+          ownsPresentation: true,
           disabled: () =>
             coffeeSoundtrackRegenerating ||
             coffeeSelectedGroup.soundtrack?.generating === true ||
@@ -147261,6 +147330,7 @@ function HomeContent(): React.JSX.Element {
         {renderGlobalPrismCompanion()}
         <PrismBlockingLoader
           open={coffeeGroupCreationOperation !== null}
+          operation="preparation"
           title={
             coffeeGroupCreationOperation?.title ?? "Creating your Coffee Group"
           }
@@ -147613,6 +147683,7 @@ function HomeContent(): React.JSX.Element {
                 createBotDirectedSetupRefractTarget({
                   id: `story-setup-anchor-${bot.id}`,
                   label: `Build a Story around ${bot.name}`,
+                  ownsPresentation: true,
                   botId: bot.id,
                   botName: bot.name,
                   disabled: () => storyBusy,

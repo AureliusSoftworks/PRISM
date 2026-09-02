@@ -54,7 +54,8 @@ describe("Prism Refract helpers", () => {
       },
     });
 
-    await target.run("Center the episode on first impressions.");
+    const signal = new AbortController().signal;
+    await target.run("Center the episode on first impressions.", signal);
 
     assert.equal(target.kind, "magic");
     assert.equal(target.purpose, "bot-directed-setup");
@@ -67,6 +68,7 @@ describe("Prism Refract helpers", () => {
         botId: "lizzy",
         botName: "Elizabeth Bennet",
         direction: "Center the episode on first impressions.",
+        signal,
       },
     ]);
   });

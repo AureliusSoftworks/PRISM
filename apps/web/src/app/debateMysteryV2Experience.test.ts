@@ -67,6 +67,10 @@ function contrastRatio(foreground: string, background: string): number {
 }
 
 describe("Whodunnit V2 prosecution experience", () => {
+  it("retains the authored Mosaic separators while examining a room", () => {
+    assert.match(experienceSource, /const currentRoomMosaicGrid = "visible";/u);
+  });
+
   it("presents investigation and court actions as one tactile command-console system", () => {
     assert.match(experienceSource, /data-console-label="Case desk · field commands"/u);
     assert.match(experienceSource, /data-console-label="Prosecution console"/u);
@@ -768,8 +772,11 @@ describe("Whodunnit V2 prosecution experience", () => {
     );
     assert.match(experienceSource, /setHeldDialogue\(queuedDialogue\)/u);
     assert.match(experienceSource, /roomProsecutorActive/u);
-    assert.match(experienceSource, /const roomActorVisible = Boolean\([\s\S]*roomIntroductionPersonaActive/u);
-    assert.match(experienceSource, /className=\{styles\.roomBackdropImage\}[\s\S]{0,140}data-blurred=\{roomActorVisible/u);
+    assert.match(experienceSource, /const roomActorEligible = Boolean\([\s\S]*roomIntroductionPersonaActive/u);
+    assert.match(experienceSource, /const image = currentRoomArtStyle === "illustrated"[\s\S]{0,850}image\.decode/u);
+    assert.match(experienceSource, /const roomActorVisible = roomActorEligible && roomActorsReady/u);
+    assert.match(experienceSource, /const roomProsecutorVisible = roomProsecutorActive && roomActorsReady/u);
+    assert.match(experienceSource, /className=\{styles\.roomBackdropImage\}[\s\S]{0,140}data-blurred=\{roomBackdropBlurred/u);
     assert.doesNotMatch(experienceSource, /className=\{styles\.roomBackdrop\}/u);
     assert.match(experienceSource, /className=\{styles\.roomParallaxLayer\}/u);
     assert.match(experienceSource, /roomParallaxEnabled = Boolean\([\s\S]*command === "examine"/u);
@@ -1242,15 +1249,22 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /if \(!mansionDoorEntry\) \{[\s\S]{0,120}sendAction\(\{ action: "move" \}\);[\s\S]{0,60}return;/u);
   });
 
-  it("disables the Upgraded presentation toggle while the mansion map is open", () => {
+  it("keeps ready Upgraded toggles immediate while confirming a missing current-room derivative", () => {
     assert.match(
       experienceSource,
-      /aria-pressed=\{roomUpgradeEnabled\}[\s\S]{0,100}disabled=\{state\.roomView === "mansion"\}/u,
+      /aria-pressed=\{roomUpgradeEnabled && currentRoomHasIllustratedUpgrade\}[\s\S]{0,180}state\.roomView === "mansion"/u,
     );
     assert.match(
       experienceSource,
-      /onClick=\{\(\) => selectRoomUpgradeEnabled\(!roomUpgradeEnabled\)\}/u,
-      "the room control keeps the same persisted toggle action",
+      /selectRoomUpgradeEnabled\(!roomUpgradeEnabled\)/u,
+    );
+    assert.match(
+      experienceSource,
+      /if \(currentRoom && !currentRoomHasIllustratedUpgrade\) \{[\s\S]{0,100}setRoomUpgradeConfirmationRoomId\(currentRoom.id\)/u,
+    );
+    assert.match(
+      experienceSource,
+      /setRoomUpgradeConfirmationRoomId\(currentRoom\.id\)/u,
     );
   });
 

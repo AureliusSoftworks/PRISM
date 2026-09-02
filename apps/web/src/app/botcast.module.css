@@ -1570,10 +1570,25 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .producerControls label { display: grid; gap: 4px; margin: 0; color: var(--botcast-muted); font-size: .66rem; }
 .producerControls label > div { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .producerCueActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.producerImageAttachWrap { display: inline-flex; }
+.producerImageAttachWrap { display: inline-flex; align-items: center; gap: 4px; }
+.producerControls .producerImageCancel { min-width: 28px; padding: 6px; font-size: 1rem; }
 .producerImageAttach { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; min-width: 0; padding: 6px 10px; font: 720 .66rem/1 system-ui; }
 .producerImageAttach:disabled { opacity: .55; cursor: default; }
 .producerImageAttach svg { width: 14px; height: 14px; }
+.producerImageEditor { position: fixed; inset: 0; margin: auto; width: min(580px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); box-sizing: border-box; overflow: auto; padding: 22px; border: 1px solid var(--botcast-line); border-radius: 18px; color: var(--botcast-ink); background: linear-gradient(var(--botcast-panel), var(--botcast-panel)), var(--botcast-canvas); box-shadow: 0 20px 70px #0005; }
+.producerImageEditor::backdrop { background: #0005; }
+.producerImageEditor h2 { margin: 0 0 16px; font-size: 1rem; }
+.producerImageEditorBody { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1fr); gap: 16px; }
+.producerImageEditorBody > img { width: 100%; height: 180px; object-fit: contain; border-radius: 8px; background: var(--botcast-soft-panel); }
+.producerImageEditorFields, .producerImageEditorFields label, .producerImageRecovery { display: grid; gap: 9px; }
+.producerImageEditorFields label { font-size: .78rem; }
+.producerImageEditorFields small, .producerImageRecovery p { color: var(--botcast-muted); }
+.producerImageEditorFields input, .producerImageEditorFields textarea { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--botcast-line); border-radius: 8px; padding: 8px; color: var(--botcast-ink); background: var(--botcast-soft-panel); font: inherit; resize: none; }
+.producerImageEditor button { border: 1px solid var(--botcast-line); border-radius: 10px; padding: 9px 12px; color: var(--botcast-ink); background: var(--botcast-soft-panel); font: 700 .78rem/1.2 system-ui; cursor: pointer; }
+.producerImageEditor button:disabled { opacity: .5; cursor: default; }
+.producerImageEditor button:hover:not(:disabled) { border-color: var(--botcast-accent); }
+.producerImageEditor :is(button, input, textarea):focus-visible { outline: 2px solid var(--botcast-accent); outline-offset: 3px; }
+@media (max-width: 520px) { .producerImageEditorBody { grid-template-columns: 1fr; } .producerImageEditorBody > img { height: 120px; } }
 .producerControls input, .producerControls textarea { width: 100%; border: 1px solid color-mix(in srgb, var(--botcast-line) 82%, #353746); border-radius: 9px; color: var(--botcast-ink); background: color-mix(in srgb, var(--botcast-field) 94%, #070811); box-shadow: inset 0 2px 7px rgba(0,0,0,.42), 0 1px rgba(255,255,255,.04); caret-color: var(--prism-s); }
 .producerControls input { min-height: 34px; font: 650 .76rem/1.2 system-ui; }
 .producerControls textarea { min-height: 48px; max-height: 76px; resize: vertical; font: 650 .76rem/1.3 system-ui; }

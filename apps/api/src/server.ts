@@ -7,6 +7,7 @@ import {
 import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { createHash, randomInt, randomUUID } from "node:crypto";
+import { SignalImageRegistrationQueue, describeSignalEpisodeImage, readSignalEpisodeImageProxy } from "./signal-episode-images.ts";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -53,6 +54,15 @@ import {
   verifyPassword,
 } from "./security.ts";
 import type { RouteDefinition, RequestContext } from "./types.ts";
+import {
+  assertRefractionActive,
+  currentRefractionSignal,
+  connectRefractionAbort,
+  onRefractionRollback,
+  refractionSignal,
+  FULLSCREEN_REFRACTION_ROUTES,
+  cancellableRefractionRoute,
+} from "./refraction-cancellation.ts";
 import {
   enterUsageSession,
   getUsageReport,
@@ -388,6 +398,7 @@ import {
   buildDebateMysteryIllustratedRoomUpgradePromptV1,
   debateMysteryIllustratedRoomSubjectIdV1,
   renderDebateMysteryRoomArtV1,
+  normalizeDebateMysteryUpgradedRoomArtV1,
   validateDebateMysteryRoomArtSourceAlignmentV1,
 } from "./debate-mystery-room-art.ts";
 import {
@@ -594,6 +605,7 @@ import {
   recordBotcastAudioCue,
   recordBotcastVoicePlaybackRecovery,
   queueBotcastEpisodeImageContext,
+  cancelBotcastPendingImage,
   queueBotcastProducerCue,
   recoverBotcastProducerCueDispatch,
   recordBotcastSessionClockHold,
@@ -1294,6 +1306,12 @@ import {
   botcastEpisodeImageFallbackEmoji,
   botcastEpisodeImageDescriptorFromFileName,
   botcastLatestImageContextV1,
+  botcastImageHistoryV1,
+  botcastImageContextByIdV1,
+  botcastPendingImageContextV1,
+  botcastActiveImageContextV1,
+  botcastPreviousImageContextV1,
+  botcastSetupImageContextV1,
   normalizeBotcastEpisodeImageName,
   normalizeBotcastEpisodeImageReason,
   normalizeBotcastEpisodeImageReplayEmoji,
@@ -3503,7 +3521,12 @@ function route(
         }) +
       "$",
   );
-  return { method, pattern, keys, maintenanceAccess, handler };
+  return {
+    method, pattern, keys, maintenanceAccess,
+    handler: method === "POST" && FULLSCREEN_REFRACTION_ROUTES.has(pathTemplate)
+      ? cancellableRefractionRoute(pathTemplate, handler, requireAuth)
+      : handler,
+  };
 }
 
 function parseParams(
@@ -7562,6 +7585,7 @@ async function contextualSignalRuntimeForEpisode(args: {
   user: UserDbRow;
   episode: ReturnType<typeof getBotcastEpisode>;
   requiresImageInput?: boolean;
+  imageId?: string;
 }) {
   const snapshot = botcastRoutingSnapshot(args.episode);
   const autoSelected = snapshot?.modelSelectionKind === "auto";
@@ -7599,8 +7623,13 @@ async function contextualSignalRuntimeForEpisode(args: {
           reasoningEffort: snapshot.frozenReasoningEffort,
         }
       : runtime;
-  const imageContext = botcastLatestImageContextV1(args.episode.events);
+  const imageContext = args.imageId
+    ? botcastImageContextByIdV1(args.episode.events, args.imageId)
+    : botcastActiveImageContextV1(args.episode.events) ?? botcastPendingImageContextV1(args.episode.events);
   if (!imageContext || imageContext.phase === "dismissed") return frozenRuntime;
+  if ((args.episode.provider === "local" || userBlocksOnlineCapabilities(args.user)) && imageContext.provider !== "local") {
+    throw new HttpError(409, "This Signal image's ONLINE route is unavailable in LOCAL mode.");
+  }
   return {
     ...frozenRuntime,
     responseMode:
@@ -7653,7 +7682,7 @@ async function normalizeSignalEpisodeImageForTurn(
         "Only a completed or cancelled Signal booking can reuse its archival image.",
       );
     }
-    const archivedContext = botcastLatestImageContextV1(archivedEpisode.events);
+    const archivedContext = botcastSetupImageContextV1(archivedEpisode.events);
     if (!archivedContext?.replayProxyId) {
       throw new HttpError(404, "Signal's archived image proxy was not found.");
     }
@@ -7808,6 +7837,74 @@ async function normalizeSignalEpisodeImageForTurn(
     rasterBytes: normalized.pngBytes,
     visualIdentity,
   };
+}
+
+const signalImageRegistrations = new SignalImageRegistrationQueue();
+type NormalizedSignalImage = Awaited<ReturnType<typeof normalizeSignalEpisodeImageForTurn>>;
+
+async function validateSignalImageAttachment(userId: string, episode: BotcastEpisode, image: NormalizedSignalImage): Promise<void> {
+  const context = botcastImageContextByIdV1(episode.events, image.imageId);
+  const stored = db.prepare("SELECT source_sha256, image_bytes, presentation_reason FROM botcast_episode_image_proxies WHERE episode_id = ? AND user_id = ? AND image_id = ?")
+    .get(episode.id, userId, image.imageId) as { source_sha256: string; image_bytes: Uint8Array; presentation_reason: string } | undefined;
+  if (!context || context.name !== image.descriptor.name || context.mimeType !== image.descriptor.mimeType ||
+      (context.kind !== image.descriptor.kind && context.kind !== "item") ||
+      (stored?.presentation_reason ?? "") !== (image.presentationReason ?? "")) {
+    throw new HttpError(409, "The attached Signal image does not match its registered caption or host note. Reattach the original image.");
+  }
+  const hash = createHash("sha256").update(image.rasterBytes).digest("hex");
+  if (stored?.source_sha256 ? stored.source_sha256 !== hash : stored &&
+      !Buffer.from(stored.image_bytes).equals((await encodeSignalReplayImageProxyFromRasterBytes(image.rasterBytes)).bytes)) {
+    throw new HttpError(409, "The attached Signal image has different pixels. Reattach the original image.");
+  }
+}
+
+async function registerSignalImage(args: {
+  userId: string; user: UserDbRow; episodeId: string; image: NormalizedSignalImage;
+  origin: "setup" | "live"; allowWatchBake?: boolean;
+}): Promise<BotcastEpisode> {
+  return signalImageRegistrations.run(`${args.userId}:${args.episodeId}`, async (signal) => {
+    const episode = getBotcastEpisode(db, args.userId, args.episodeId);
+    if (episode.status !== "live" || episode.guestKind !== "bot" ||
+        (episode.playbackMode === "watch" && !args.allowWatchBake)) {
+      throw new HttpError(409, "Signal images can only join a live bot interview.");
+    }
+    const existing = botcastImageContextByIdV1(episode.events, args.image.imageId);
+    if (existing) {
+      if (existing.origin && existing.origin !== args.origin) throw new HttpError(409, "Signal image origin cannot change.");
+      await validateSignalImageAttachment(args.userId, episode, args.image);
+      return episode;
+    }
+    if (botcastPendingImageContextV1(episode.events)) throw new HttpError(409, "Signal already has one image queued for the host.");
+    if (episode.playbackMode === "watch" && botcastImageHistoryV1(episode.events).length) throw new HttpError(409, "Watch accepts one image per episode.");
+    if (args.origin === "setup" && episode.messages.length) throw new HttpError(409, "The setup image must be registered before the opening.");
+    const runtime = await contextualSignalRuntimeForEpisode({ userId: args.userId, user: args.user, episode, requiresImageInput: true });
+    if (!await providerModelSupportsImageInput(runtime.provider, runtime.model, { secondaryOllamaHost: args.user.secondary_ollama_host })) {
+      throw new HttpError(409, "The active Signal model does not support image input. Choose a vision-capable model for a new episode.");
+    }
+    const replayProxy = await encodeSignalReplayImageProxyFromRasterBytes(args.image.rasterBytes);
+    const groundedVisualDescription = await describeSignalEpisodeImage({
+      provider: providerFactoryOverride(runtime.provider, runtime.openAiApiKey, args.user.secondary_ollama_host, runtime.anthropicApiKey, runtime.ollamaCloudApiKey),
+      model: runtime.model, input: args.image.input, signal,
+    });
+    signal.throwIfAborted();
+    const visualIdentity = args.image.visualIdentity;
+    const updated = queueBotcastEpisodeImageContext(db, args.userId, episode.id, {
+      imageId: args.image.imageId, ...args.image.descriptor,
+      provider: runtime.provider, model: runtime.model,
+      origin: args.origin, groundedVisualDescription,
+      sourceSha256: createHash("sha256").update(args.image.rasterBytes).digest("hex"),
+      replayEmoji: args.image.replayEmoji, presentationReason: args.image.presentationReason,
+      allowWatchBake: args.allowWatchBake,
+      visualRecognition: visualIdentity?.status === "ready"
+        ? { v: 1, status: "pending", candidateCount: visualIdentity.candidates.length, pageCount: visualIdentity.pages.length, startedAt: new Date().toISOString() }
+        : visualIdentity?.reason === "deadline"
+          ? { v: 1, status: "timed_out", reason: "deadline", provider: runtime.provider, model: runtime.model, completedAt: new Date().toISOString() }
+          : { v: 1, status: "unavailable", reason: visualIdentity?.reason ?? "not_requested", provider: runtime.provider, model: runtime.model, completedAt: new Date().toISOString() },
+      replayProxy: { id: randomId(12), ...replayProxy },
+    });
+    invalidateTurnPreparation(args.userId, "signal", episode.id, "A newly queued Signal image invalidated speculative preparation.");
+    return updated;
+  });
 }
 
 function readCoffeeTeamCreateInput(value: unknown):
@@ -9672,6 +9769,8 @@ async function generateAndPersistStandaloneImageAsset(args: {
   relatedBotIds?: string[];
   normalizeImageBytes?: (imageBytes: Buffer) => Promise<Buffer>;
 }): Promise<SignalArtworkGeneratedAsset> {
+  args = { ...args, signal: refractionSignal(args.signal)! };
+  args.signal.throwIfAborted();
   const user = getUserRow(args.userId);
   const effectiveProvider = resolveImageProviderName({
     savedProvider: user.preferred_image_provider,
@@ -9846,6 +9945,7 @@ async function generateAndPersistStandaloneImageAsset(args: {
   if (args.normalizeImageBytes) {
     imageBytes = await args.normalizeImageBytes(imageBytes);
   }
+  args.signal.throwIfAborted();
   const persistenceStartedAt = Date.now();
   try {
     writeGeneratedImageBytes(localRelPath, imageBytes);
@@ -9854,8 +9954,13 @@ async function generateAndPersistStandaloneImageAsset(args: {
     throw new Error(`Could not save generated image (${detail}).`);
   }
   await tryGenerateThumbAfterPngWrite(localRelPath);
+  args.signal.throwIfAborted();
+  assertRefractionActive();
   const createdAt = new Date().toISOString();
   try {
+    onRefractionRollback(`new-image-row:${args.userId}:${imageId}`, () => {
+      db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(imageId, args.userId);
+    });
     db.prepare(
       `INSERT INTO images
          (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt,
@@ -10021,6 +10126,8 @@ async function runMysteryAssetAttempt<T>(
   outerSignal: AbortSignal,
   operation: (signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
+  outerSignal = refractionSignal(outerSignal)!;
+  outerSignal.throwIfAborted();
   const controller = new AbortController();
   const onOuterAbort = (): void => controller.abort(outerSignal.reason);
   outerSignal.addEventListener("abort", onOuterAbort, { once: true });
@@ -10397,6 +10504,8 @@ async function generateRawDebateMysteryCandidate(args: {
   background?: "transparent" | "opaque" | "auto";
   signal: AbortSignal;
 }): Promise<{ bytes: Buffer; model: string }> {
+  args = { ...args, signal: refractionSignal(args.signal)! };
+  args.signal.throwIfAborted();
   const requestId = randomId(16);
   const controller = new AbortController();
   const abort = (): void => controller.abort();
@@ -10923,7 +11032,7 @@ async function prepareDebateMysteryV2MansionExteriorAssetDirect(
     ? getOpenAiApiKeyForUser(args.userId, userKey) ?? config.openAiApiKey
     : undefined;
   const controller = new AbortController();
-  const signal = args.signal ?? controller.signal;
+  const signal = refractionSignal(args.signal) ?? controller.signal;
   let prepared: import("@localai/shared").DebateMysterySealedAssetRefV1 | null = null;
   let failure = online && apiKey
     ? "generation failed"
@@ -11074,7 +11183,7 @@ async function prepareDebateMysteryV2RoomAssets(
     { provider: "openai" },
   );
   const fallbackController = new AbortController();
-  const signal = args.signal ?? fallbackController.signal;
+  const signal = refractionSignal(args.signal) ?? fallbackController.signal;
   const results: Record<string, import("@localai/shared").DebateMysterySealedAssetRefV1> = {};
   const orderedRooms = [...args.rooms].sort((left, right) =>
     left.id === args.crimeSceneRoomId
@@ -11083,6 +11192,7 @@ async function prepareDebateMysteryV2RoomAssets(
         ? 1
         : left.id.localeCompare(right.id));
   for (const room of orderedRooms) {
+    signal.throwIfAborted();
     const existing = getDebateMysterySealedAssetRefV1(
       db,
       args.userId,
@@ -11218,6 +11328,7 @@ async function prepareDebateMysteryV2RoomAssets(
                 }`,
               );
             }
+            attemptSignal.throwIfAborted();
             return sealDebateMysteryAssetBytesV1(db, userKey, {
               userId: args.userId,
               sessionId: args.sessionId,
@@ -11355,8 +11466,9 @@ async function prepareDebateMysteryIllustratedRoomsV1(
     debateMysteryRoomArtUpgradeStatusV1(userId, sessionId).requiresUpgradeRoomIds,
   );
   const fallbackController = new AbortController();
-  const preparationSignal = signal ?? fallbackController.signal;
+  const preparationSignal = refractionSignal(signal) ?? fallbackController.signal;
   for (const room of mysteryState.rooms) {
+    preparationSignal.throwIfAborted();
     if (
       !requiredRoomIds.has(room.id) ||
       (requestedRoomIds && !requestedRoomIds.has(room.id))
@@ -11406,20 +11518,14 @@ async function prepareDebateMysteryIllustratedRoomsV1(
           quality: "high",
           signal: attemptSignal,
         });
-        const normalized = await sharp(generated.bytes, { failOn: "error" })
-          .rotate()
-          .flatten({ background: { r: 3, g: 8, b: 14 } })
-          .resize(1600, 900, { fit: "fill" })
-          .removeAlpha()
-          .png({ compressionLevel: 9 })
-          .toBuffer();
+        const normalized = (await normalizeDebateMysteryUpgradedRoomArtV1(generated.bytes)).bytes;
         const alignment = await validateDebateMysteryRoomArtSourceAlignmentV1({
           source: mosaicReference.bytes,
           candidate: normalized,
         });
         if (!alignment.approved) {
           throw new Error(
-            `Source-lock rejected the Upgraded room derivative (coarse structural alignment ${alignment.correlation.toFixed(3)} < ${alignment.minimumCorrelation.toFixed(3)}).`,
+            `Source-lock rejected the Upgraded room derivative (frame matches: ${alignment.frameMatches}; structural alignment coarse ${alignment.correlation.toFixed(3)}, detail ${alignment.detailCorrelation.toFixed(3)}; both must reach ${alignment.minimumCorrelation.toFixed(3)}).`,
           );
         }
         const pixels = await validateDebateMysteryAssetPixelsV1("room", normalized);
@@ -11437,6 +11543,7 @@ async function prepareDebateMysteryIllustratedRoomsV1(
             `Vision review rejected the Upgraded room derivative: ${review.reasons.join("; ") || "no reason supplied"}`,
           );
         }
+        attemptSignal.throwIfAborted();
         const sealed = sealDebateMysteryAssetBytesV1(db, userKey, {
           userId,
           sessionId,
@@ -11476,16 +11583,20 @@ function queueDebateMysteryIllustratedRoomsV1(
 ): Promise<void> {
   const key = `${userId}:${sessionId}`;
   const existing = mysteryRoomArtUpgradeRuns.get(key);
+  if (existing && currentRefractionSignal()) {
+    throw new HttpError(409, "Room artwork is already preparing in a separate background job.");
+  }
   if (existing) return existing;
   const run = prepareDebateMysteryIllustratedRoomsV1(
     userId,
     sessionId,
-    undefined,
+    currentRefractionSignal(),
     requestedRoomIds,
   )
     .finally(() => {
       mysteryRoomArtUpgradeRuns.delete(key);
       try {
+        assertRefractionActive();
         const upgrade = debateMysteryRoomArtUpgradeStatusV1(userId, sessionId);
         refreshDebateMysteryProductionReadinessV1(db, userId, sessionId, {
           illustratedRoomsGenerated: upgrade.status === "ready",
@@ -11524,6 +11635,7 @@ async function repairDebateMysterySceneV1(args: {
   subjectId?: string | null;
   artStyle?: "mosaic" | "upgraded";
 }): Promise<DebateSessionV1> {
+  assertRefractionActive();
   const session = getDebateSession(db, args.userId, args.sessionId);
   if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
     throw new HttpError(409, "Scene repair requires a Whodunnit V2 case.");
@@ -11628,6 +11740,7 @@ async function repairDebateMysterySceneV1(args: {
           if (!review.approved) {
             throw new Error(`Vision review rejected the evidence asset: ${review.reasons.join("; ")}`);
           }
+          signal.throwIfAborted();
           const sealed = sealDebateMysteryAssetBytesV1(db, userKey, {
             userId: args.userId,
             sessionId: args.sessionId,
@@ -11647,6 +11760,7 @@ async function repairDebateMysterySceneV1(args: {
           ) ?? sealed;
         });
       } catch (error) {
+        assertRefractionActive();
         reviewFeedback = spoilerSafeMysteryAssetFailure(error);
       }
     }
@@ -11733,6 +11847,7 @@ async function repairDebateMysterySceneV1(args: {
           responseMode: "online",
           apiKey: elevenLabsKey,
         });
+        assertRefractionActive();
         acceptDebateMysteryMansionThemeFieldRepairV1(db, args.userId, bundleId);
       } else {
         await stageDebateMysteryMansionAtmosphereV1({
@@ -11743,9 +11858,11 @@ async function repairDebateMysterySceneV1(args: {
           responseMode: "online",
           apiKey: elevenLabsKey,
         });
+        assertRefractionActive();
         acceptDebateMysteryMansionAtmosphereV1(db, args.userId, bundleId);
       }
     } catch (error) {
+      assertRefractionActive();
       try {
         if (args.action === "regenerate_music") {
           discardDebateMysteryMansionThemeV1(db, args.userId, bundleId);
@@ -13938,9 +14055,8 @@ function buildRoutes(
             : generated.provider === "comfyui"
               ? "comfyui"
               : "local";
-        json(ctx.res, 201, {
-          ok: true,
-          visual: recordSlateVisualStudy(db, userId, ctx.params.id, {
+        assertRefractionActive();
+        const visual = recordSlateVisualStudy(db, userId, ctx.params.id, {
             imageId: asset.imageId,
             sectionId: body.sectionId,
             kind: body.kind,
@@ -13953,8 +14069,11 @@ function buildRoutes(
             provider,
             model: generated.model,
             seed: body.seed,
-          }),
+          });
+        onRefractionRollback(`new-visual-study:${userId}:${visual.id}`, () => {
+          db.prepare("DELETE FROM slate_visual_references WHERE id = ? AND user_id = ?").run(visual.id, userId);
         });
+        json(ctx.res, 201, { ok: true, visual });
       } finally {
         await releaseImageSlotIfOwned(userId, acquired.job.id);
       }
@@ -14361,14 +14480,22 @@ function buildRoutes(
       }
 
       const revision = project.cover.revision + 1;
-      setSlateProjectCover(db, userId, project.id, {
-        ...project.cover,
-        seed: project.cover.seed || project.id,
-        prompt: canonicalPrompt,
-        revision,
-        status: "generating",
-      });
       try {
+        onRefractionRollback(`slate-cover:${userId}:${project.id}`, () => {
+          // Restore this attempt only. A different tab may have since saved a
+          // newer cover; cancellation must never roll that newer asset back.
+          const latest = getSlateProject(db, userId, project.id);
+          if (latest.cover.revision === revision) {
+            setSlateProjectCover(db, userId, project.id, project.cover);
+          }
+        });
+        setSlateProjectCover(db, userId, project.id, {
+          ...project.cover,
+          seed: project.cover.seed || project.id,
+          prompt: canonicalPrompt,
+          revision,
+          status: "generating",
+        });
         const asset = await generateAndPersistSlateCoverAsset({
           userId,
           prompt,
@@ -14378,6 +14505,7 @@ function buildRoutes(
           offlineOnly,
           signal: acquired.job.abortController.signal,
         });
+        assertRefractionActive();
         const updated = setSlateProjectCover(db, userId, project.id, {
           seed: project.cover.seed || project.id,
           prompt: canonicalPrompt,
@@ -14389,6 +14517,7 @@ function buildRoutes(
         json(ctx.res, 201, { ok: true, project: updated });
       } catch (error) {
         try {
+          assertRefractionActive();
           setSlateProjectCover(db, userId, project.id, {
             ...project.cover,
             seed: project.cover.seed || project.id,
@@ -16856,8 +16985,13 @@ function buildRoutes(
       }
 
       const imageGenAbort = new AbortController();
+      const disconnectRefractionAbort = connectRefractionAbort(imageGenAbort);
       const onImageGenClientClose = () => imageGenAbort.abort();
-      ctx.req.once("close", onImageGenClientClose);
+      ctx.res.once("close", onImageGenClientClose);
+      onRefractionRollback(`zen-wallpaper-status:${userId}:${conversationId}`, () => {
+        db.prepare(`UPDATE conversations SET zen_wallpaper_status = ? WHERE id = ? AND user_id = ? AND zen_wallpaper_status = 'generating' AND zen_wallpaper_image_id IS ?`)
+          .run(conversation.zen_wallpaper_status ?? "idle", conversationId, userId, conversation.zen_wallpaper_image_id);
+      });
       db.prepare(
         `UPDATE conversations
             SET zen_wallpaper_enabled = 1,
@@ -17175,6 +17309,7 @@ function buildRoutes(
         }
         sendGeneratedZenWallpaperResponse(imageId, wallpaperCreatedAt);
       } catch (error) {
+        assertRefractionActive();
         db.prepare(
           `UPDATE conversations
               SET zen_wallpaper_status = 'error'
@@ -17182,8 +17317,9 @@ function buildRoutes(
         ).run(conversationId, userId);
         throw error;
       } finally {
-        ctx.req.off("close", onImageGenClientClose);
-        await releaseImageSlot(userId);
+        disconnectRefractionAbort();
+        ctx.res.off("close", onImageGenClientClose);
+        await releaseImageSlotIfOwned(userId, acqWallpaper.job.id);
       }
     }),
     route("POST", "/api/conversations/:id/title", async (ctx) => {
@@ -26485,6 +26621,7 @@ function buildRoutes(
     }),
     route("DELETE", "/api/botcast/episodes/:id", async (ctx) => {
       const userId = requireAuth(ctx);
+      signalImageRegistrations.cancel(`${userId}:${ctx.params.id}`);
       signalAdvanceOperations.cancel(
         `${userId}:${ctx.params.id}`,
         new DOMException("Signal episode discarded.", "AbortError"),
@@ -26534,6 +26671,7 @@ function buildRoutes(
     }),
     route("POST", "/api/botcast/episodes/:id/end", async (ctx) => {
       const userId = requireAuth(ctx);
+      signalImageRegistrations.cancel(`${userId}:${ctx.params.id}`);
       signalAdvanceOperations.cancel(
         `${userId}:${ctx.params.id}`,
         new DOMException("Signal show cut.", "AbortError"),
@@ -27167,15 +27305,9 @@ function buildRoutes(
     }),
     route("GET", "/api/botcast/episodes/:id/image-proxy", async (ctx) => {
       const userId = requireAuth(ctx);
-      const row = db
-        .prepare(
-          `SELECT content_type, image_bytes
-             FROM botcast_episode_image_proxies
-            WHERE episode_id = ? AND user_id = ?`,
-        )
-        .get(ctx.params.id, userId) as
-        | { content_type: string; image_bytes: Uint8Array }
-        | undefined;
+      const imageId = new URL(ctx.req.url ?? "/", "http://localhost").searchParams.get("imageId");
+      const row = readSignalEpisodeImageProxy(db, userId, ctx.params.id, imageId);
+      if (row === "ambiguous") throw new HttpError(409, "This episode has multiple images. Specify imageId.");
       if (!row || !(row.image_bytes instanceof Uint8Array)) {
         throw new HttpError(404, "Signal replay image proxy not found.");
       }
@@ -27198,7 +27330,7 @@ function buildRoutes(
           "Only a completed or cancelled Signal booking has retry metadata.",
         );
       }
-      const imageContext = botcastLatestImageContextV1(episode.events);
+      const imageContext = botcastSetupImageContextV1(episode.events);
       if (!imageContext?.replayProxyId) {
         json(ctx.res, 200, { ok: true, image: null });
         return;
@@ -27223,6 +27355,15 @@ function buildRoutes(
           : null,
       });
     }),
+    route("GET", "/api/botcast/episodes/:id/image-reattachment/:imageId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const episode = getBotcastEpisode(db, userId, ctx.params.id);
+      const image = botcastImageContextByIdV1(episode.events, ctx.params.imageId);
+      if (!image || episode.status !== "live") throw new HttpError(404, "Live Signal image not found.");
+      const row = db.prepare("SELECT presentation_reason FROM botcast_episode_image_proxies WHERE episode_id = ? AND user_id = ? AND image_id = ?")
+        .get(episode.id, userId, image.imageId) as { presentation_reason: string } | undefined;
+      json(ctx.res, 200, { imageId: image.imageId, reason: row?.presentation_reason ?? "" });
+    }),
     route("POST", "/api/botcast/episodes/:id/image", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
@@ -27237,95 +27378,12 @@ function buildRoutes(
           "Signal image context is available only while producing a live bot interview.",
         );
       }
-      if (botcastLatestImageContextV1(episode.events)) {
-        throw new HttpError(409, "Signal accepts one image per episode.");
-      }
-
-      const signalEpisodeImage = await normalizeSignalEpisodeImageForTurn(
-        body.episodeImage,
-        userId,
-      );
-      const runtime = await contextualSignalRuntimeForEpisode({
-        userId,
-        user,
-        episode,
-        requiresImageInput: true,
+      const signalEpisodeImage = await normalizeSignalEpisodeImageForTurn(body.episodeImage, userId);
+      const updatedEpisode = await registerSignalImage({
+        userId, user, episodeId: episode.id, image: signalEpisodeImage,
+        origin: body.origin === "setup" ? "setup" : "live",
       });
-      const supportsImageInput = await providerModelSupportsImageInput(
-        runtime.provider,
-        runtime.model,
-        { secondaryOllamaHost: user.secondary_ollama_host },
-      );
-      if (!supportsImageInput) {
-        throw new HttpError(
-          409,
-          "The active Signal model does not support image input. Choose a vision-capable model for a new episode.",
-        );
-      }
-
-      let replayProxy: Awaited<
-        ReturnType<typeof encodeSignalReplayImageProxyFromRasterBytes>
-      >;
-      try {
-        replayProxy = await encodeSignalReplayImageProxyFromRasterBytes(
-          signalEpisodeImage.rasterBytes,
-        );
-      } catch {
-        throw new HttpError(
-          400,
-          "Signal could not prepare the low-resolution replay image.",
-        );
-      }
-      invalidateTurnPreparation(
-        userId,
-        "signal",
-        episode.id,
-        "A newly uploaded Signal image replaced the prepared turn.",
-      );
-      const updatedEpisode = queueBotcastEpisodeImageContext(
-        db,
-        userId,
-        episode.id,
-        {
-          imageId: signalEpisodeImage.imageId,
-          ...signalEpisodeImage.descriptor,
-          provider: runtime.provider,
-          model: runtime.model,
-          replayEmoji: signalEpisodeImage.replayEmoji,
-          presentationReason: signalEpisodeImage.presentationReason,
-          visualRecognition:
-            signalEpisodeImage.visualIdentity?.status === "ready"
-              ? {
-                  v: 1,
-                  status: "pending",
-                  candidateCount:
-                    signalEpisodeImage.visualIdentity.candidates.length,
-                  pageCount: signalEpisodeImage.visualIdentity.pages.length,
-                  startedAt: new Date().toISOString(),
-                }
-              : signalEpisodeImage.visualIdentity?.reason === "deadline"
-                ? {
-                    v: 1,
-                    status: "timed_out",
-                    reason: "deadline",
-                    provider: runtime.provider,
-                    model: runtime.model,
-                    completedAt: new Date().toISOString(),
-                  }
-                : {
-                    v: 1,
-                    status: "unavailable",
-                    reason:
-                      signalEpisodeImage.visualIdentity?.reason ??
-                      "not_requested",
-                    provider: runtime.provider,
-                    model: runtime.model,
-                    completedAt: new Date().toISOString(),
-                  },
-          replayProxy: { id: randomId(12), ...replayProxy },
-        },
-      );
-      const imageContext = botcastLatestImageContextV1(updatedEpisode.events);
+      const imageContext = botcastImageContextByIdV1(updatedEpisode.events, signalEpisodeImage.imageId);
       if (!imageContext) {
         throw new Error("Signal image context was not recorded.");
       }
@@ -27334,6 +27392,14 @@ function buildRoutes(
         episode: projectBotcastEpisodeForAudienceV1(updatedEpisode),
         imageContext,
       });
+    }),
+    route("POST", "/api/botcast/episodes/:id/image/:imageId/cancel", async (ctx) => {
+      const userId = requireAuth(ctx);
+      let episode: BotcastEpisode;
+      try { episode = cancelBotcastPendingImage(db, userId, ctx.params.id, ctx.params.imageId); }
+      catch (error) { throw new HttpError(409, error instanceof Error ? error.message : "The queued picture could not be cancelled."); }
+      invalidateTurnPreparation(userId, "signal", episode.id, "The pending picture was cancelled.");
+      json(ctx.res, 200, { episode: projectBotcastEpisodeForAudienceV1(episode) });
     }),
     route("POST", "/api/botcast/episodes/:id/producer-cue", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -27494,6 +27560,9 @@ function buildRoutes(
                 : {}),
             }
           : undefined;
+      if (cue?.kind === "present_image" && cueDelivery && cueDelivery !== "next_host_turn") {
+        throw new HttpError(409, "Signal pictures queue for a normal host turn; they never interrupt.");
+      }
       if (cueDelivery === "redirect_host" && !hostRedirect) {
         throw new HttpError(
           400,
@@ -27555,140 +27624,51 @@ function buildRoutes(
         body.episodeImage === undefined
           ? null
           : await normalizeSignalEpisodeImageForTurn(body.episodeImage, userId);
-      let runtime = await contextualSignalRuntimeForEpisode({
-        userId,
-        user,
-        episode: frozenEpisode,
-        requiresImageInput: cue?.kind === "present_image",
-      });
-      const existingImageContext = botcastLatestImageContextV1(
-        frozenEpisode.events,
-      );
+      const previousEpisodeImage = body.previousEpisodeImage === undefined
+        ? null : await normalizeSignalEpisodeImageForTurn(body.previousEpisodeImage, userId);
+      if (frozenEpisode.status !== "live") throw new HttpError(409, "Signal images and turns are locked after the episode ends.");
+      const existingImageContext = cue?.kind === "present_image"
+        ? botcastImageContextByIdV1(frozenEpisode.events, cue.imageId)
+        : botcastActiveImageContextV1(frozenEpisode.events);
       if (cue?.kind === "present_image") {
-        if (
-          !signalEpisodeImage ||
-          !cue.imageId ||
-          signalEpisodeImage.imageId !== cue.imageId
-        ) {
-          throw new HttpError(
-            400,
-            "Presenting a Signal image requires the active ephemeral upload.",
-          );
+        if (!signalEpisodeImage || signalEpisodeImage.imageId !== cue.imageId) {
+          throw new HttpError(409, "Reattach the original queued Signal image before its introduction.");
         }
-        const retryingSameQueuedImage = Boolean(
-          existingImageContext?.phase === "queued" &&
-            existingImageContext.imageId === signalEpisodeImage.imageId &&
-            existingImageContext.kind === signalEpisodeImage.descriptor.kind &&
-            existingImageContext.name === signalEpisodeImage.descriptor.name &&
-            existingImageContext.mimeType ===
-              signalEpisodeImage.descriptor.mimeType,
-        );
-        if (existingImageContext && !retryingSameQueuedImage) {
-          throw new HttpError(409, "Signal accepts one image per episode.");
+        if (!existingImageContext) {
+          // Older clients may still register and introduce in one request.
+          frozenEpisode = await registerSignalImage({
+            userId, user, episodeId: frozenEpisode.id, image: signalEpisodeImage,
+            origin: frozenEpisode.messages.length === 0 ? "setup" : "live",
+          });
+        } else if (existingImageContext.phase !== "queued") {
+          throw new HttpError(409, "That Signal image has already been introduced.");
         }
-        const supportsImageInput = await providerModelSupportsImageInput(
-          runtime.provider,
-          runtime.model,
-          { secondaryOllamaHost: user.secondary_ollama_host },
-        );
-        if (!supportsImageInput) {
-          throw new HttpError(
-            409,
-            "The active Signal model does not support image input. Choose a vision-capable model for a new episode.",
-          );
+      }
+      const contextForTurn = cue?.kind === "present_image"
+        ? botcastPendingImageContextV1(frozenEpisode.events)
+        : botcastActiveImageContextV1(frozenEpisode.events);
+      if (contextForTurn) {
+        if (!signalEpisodeImage || signalEpisodeImage.imageId !== contextForTurn.imageId) {
+          throw new HttpError(409, "Reattach the original Signal image to continue this discussion.");
         }
-        if (!retryingSameQueuedImage) {
-          let replayProxy: Awaited<
-            ReturnType<typeof encodeSignalReplayImageProxyFromRasterBytes>
-          >;
-          try {
-            replayProxy = await encodeSignalReplayImageProxyFromRasterBytes(
-              signalEpisodeImage.rasterBytes,
-            );
-          } catch {
-            throw new HttpError(
-              400,
-              "Signal could not prepare the low-resolution replay image.",
-            );
+        await validateSignalImageAttachment(userId, frozenEpisode, signalEpisodeImage);
+        const previous = botcastPreviousImageContextV1(frozenEpisode.events, contextForTurn.imageId);
+        if (previous) {
+          if (!previousEpisodeImage || previousEpisodeImage.imageId !== previous.imageId) {
+            throw new HttpError(409, "Reattach the previous original Signal image for comparison.");
           }
-          frozenEpisode = queueBotcastEpisodeImageContext(
-            db,
-            userId,
-            frozenEpisode.id,
-            {
-              imageId: signalEpisodeImage.imageId,
-              ...signalEpisodeImage.descriptor,
-              provider: runtime.provider,
-              model: runtime.model,
-              replayEmoji: signalEpisodeImage.replayEmoji,
-              presentationReason: signalEpisodeImage.presentationReason,
-              visualRecognition:
-                signalEpisodeImage.visualIdentity?.status === "ready"
-                  ? {
-                      v: 1,
-                      status: "pending",
-                      candidateCount:
-                        signalEpisodeImage.visualIdentity.candidates.length,
-                      pageCount: signalEpisodeImage.visualIdentity.pages.length,
-                      startedAt: new Date().toISOString(),
-                    }
-                  : signalEpisodeImage.visualIdentity?.reason === "deadline"
-                    ? {
-                        v: 1,
-                        status: "timed_out",
-                        reason: "deadline",
-                        provider: runtime.provider,
-                        model: runtime.model,
-                        completedAt: new Date().toISOString(),
-                      }
-                    : {
-                      v: 1,
-                      status: "unavailable",
-                      reason:
-                        signalEpisodeImage.visualIdentity?.reason ??
-                        "not_requested",
-                      provider: runtime.provider,
-                      model: runtime.model,
-                      completedAt: new Date().toISOString(),
-                    },
-              replayProxy: {
-                id: randomId(12),
-                ...replayProxy,
-              },
-            },
-          );
+          await validateSignalImageAttachment(userId, frozenEpisode, previousEpisodeImage);
+        } else if (previousEpisodeImage) {
+          throw new HttpError(409, "That previous picture does not belong to this image turn.");
         }
-      } else if (
-        existingImageContext &&
-        existingImageContext.phase !== "dismissed"
-      ) {
-        if (
-          !signalEpisodeImage ||
-          signalEpisodeImage.imageId !== existingImageContext?.imageId ||
-          signalEpisodeImage.descriptor.kind !== existingImageContext.kind ||
-          signalEpisodeImage.descriptor.name !== existingImageContext.name ||
-          signalEpisodeImage.descriptor.mimeType !== existingImageContext.mimeType
-        ) {
-          throw new HttpError(
-            409,
-            "The original ephemeral Signal image must remain attached until the discussion ends.",
-          );
-        }
-      } else if (signalEpisodeImage) {
-        throw new HttpError(
-          409,
-          "That Signal image discussion has already ended.",
-        );
+      } else if (signalEpisodeImage || previousEpisodeImage) {
+        throw new HttpError(409, "No introduced Signal image belongs to this turn.");
       }
-      if (existingImageContext || cue?.kind === "present_image") {
-        // Re-resolve after the queue event so every image turn stays pinned to
-        // the same capable provider/model chosen for the introduction.
-        runtime = await contextualSignalRuntimeForEpisode({
-          userId,
-          user,
-          episode: frozenEpisode,
-        });
-      }
+      const runtime = await contextualSignalRuntimeForEpisode({
+        userId, user, episode: frozenEpisode,
+        requiresImageInput: Boolean(contextForTurn),
+        ...(contextForTurn ? { imageId: contextForTurn.imageId } : {}),
+      });
       if (runtime.provider === "local") {
         await claimLiveLocalModelLane({
           owner: `signal:${userId}:${ctx.params.id}`,
@@ -27787,6 +27767,7 @@ function buildRoutes(
                   ...(powerTheme ? { theme: powerTheme } : {}),
                   providerFactory: providerFactoryOverride,
                   auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
+                  ...(previousEpisodeImage ? { signalPreviousEpisodeImage: { imageId: previousEpisodeImage.imageId, input: previousEpisodeImage.input } } : {}),
                   ...(signalEpisodeImage
                     ? {
                         signalEpisodeImage: {
@@ -27968,80 +27949,10 @@ function buildRoutes(
           }
         }
       } else if (signalEpisodeImage) {
-        const imageRuntime = await contextualSignalRuntimeForEpisode({
-          userId,
-          user,
-          episode: frozenEpisode,
-          requiresImageInput: true,
+        frozenEpisode = await registerSignalImage({
+          userId, user, episodeId: frozenEpisode.id, image: signalEpisodeImage,
+          origin: "setup", allowWatchBake: true,
         });
-        const supportsImageInput = await providerModelSupportsImageInput(
-          imageRuntime.provider,
-          imageRuntime.model,
-          { secondaryOllamaHost: user.secondary_ollama_host },
-        );
-        if (!supportsImageInput) {
-          throw new HttpError(
-            409,
-            "The active Signal model does not support image input. Choose a vision-capable model for a new episode.",
-          );
-        }
-        let replayProxy: Awaited<
-          ReturnType<typeof encodeSignalReplayImageProxyFromRasterBytes>
-        >;
-        try {
-          replayProxy = await encodeSignalReplayImageProxyFromRasterBytes(
-            signalEpisodeImage.rasterBytes,
-          );
-        } catch {
-          throw new HttpError(
-            400,
-            "Signal could not prepare the low-resolution replay image.",
-          );
-        }
-        frozenEpisode = queueBotcastEpisodeImageContext(
-          db,
-          userId,
-          frozenEpisode.id,
-          {
-            imageId: signalEpisodeImage.imageId,
-            ...signalEpisodeImage.descriptor,
-            provider: imageRuntime.provider,
-            model: imageRuntime.model,
-            replayEmoji: signalEpisodeImage.replayEmoji,
-            presentationReason: signalEpisodeImage.presentationReason,
-            visualRecognition:
-              signalEpisodeImage.visualIdentity?.status === "ready"
-                ? {
-                    v: 1,
-                    status: "pending",
-                    candidateCount:
-                      signalEpisodeImage.visualIdentity.candidates.length,
-                    pageCount: signalEpisodeImage.visualIdentity.pages.length,
-                    startedAt: new Date().toISOString(),
-                  }
-                : signalEpisodeImage.visualIdentity?.reason === "deadline"
-                  ? {
-                      v: 1,
-                      status: "timed_out",
-                      reason: "deadline",
-                      provider: imageRuntime.provider,
-                      model: imageRuntime.model,
-                      completedAt: new Date().toISOString(),
-                    }
-                  : {
-                    v: 1,
-                    status: "unavailable",
-                    reason:
-                      signalEpisodeImage.visualIdentity?.reason ??
-                      "not_requested",
-                    provider: imageRuntime.provider,
-                    model: imageRuntime.model,
-                    completedAt: new Date().toISOString(),
-                  },
-            allowWatchBake: true,
-            replayProxy: { id: randomId(12), ...replayProxy },
-          },
-        );
       }
       try {
         const result = await liveBakeJobs.startSignalBake({
@@ -28122,6 +28033,7 @@ function buildRoutes(
         );
       }
       liveBakeJobs.cancelSignalBake(userId, ctx.params.id);
+      signalImageRegistrations.cancel(`${userId}:${ctx.params.id}`);
       signalAdvanceOperations.cancel(
         `${userId}:${ctx.params.id}`,
         new DOMException("Signal bake cancelled.", "AbortError"),
@@ -31253,8 +31165,9 @@ function buildRoutes(
         excludedVoiceIds.add(voice.sourceVoiceId);
       }
       const controller = new AbortController();
+      const disconnectRefractionAbort = connectRefractionAbort(controller);
       const onClose = () => controller.abort();
-      ctx.req.once("close", onClose);
+      ctx.res.once("close", onClose);
       try {
         const [professionalVoices, highQualityVoices] = await Promise.all([
           requestElevenLabsSharedVoiceCandidates({
@@ -31302,7 +31215,8 @@ function buildRoutes(
         }
         throw error;
       } finally {
-        ctx.req.off("close", onClose);
+        disconnectRefractionAbort();
+        ctx.res.off("close", onClose);
       }
     }),
     route("POST", "/api/voices/elevenlabs/shared/use", async (ctx) => {
@@ -31757,7 +31671,9 @@ function buildRoutes(
       }
       const controller = new AbortController();
       const onClose = () => controller.abort();
-      ctx.req.once("close", onClose);
+      const disconnectRefraction = connectRefractionAbort(controller);
+      ctx.req.once("aborted", onClose);
+      ctx.res.once("close", onClose);
       try {
         const sound = await requestAvatarElevenLabsSfx({
           apiKey,
@@ -31791,7 +31707,9 @@ function buildRoutes(
         }
         throw error;
       } finally {
-        ctx.req.off("close", onClose);
+        disconnectRefraction();
+        ctx.req.off("aborted", onClose);
+        ctx.res.off("close", onClose);
       }
     }),
     route("GET", "/api/action-sfx-pack", async (ctx) => {
@@ -36115,9 +36033,10 @@ function buildRoutes(
     route("POST", "/api/images/generate", async (ctx) => {
       const userId = requireAuth(ctx);
       const imageGenAbort = new AbortController();
+      const disconnectRefractionAbort = connectRefractionAbort(imageGenAbort);
       let ownedImageSlotJobId: string | null = null;
       const onImageGenClientClose = () => imageGenAbort.abort();
-      ctx.req.once("close", onImageGenClientClose);
+      ctx.res.once("close", onImageGenClientClose);
       try {
         const body = ctx.body as Record<string, unknown>;
         const refractDirection = normalizePrismRefractDirection(body.direction);
@@ -36847,7 +36766,8 @@ function buildRoutes(
           ...(composedPrompt ? { composedPrompt } : {}),
         });
       } finally {
-        ctx.req.off("close", onImageGenClientClose);
+        disconnectRefractionAbort();
+        ctx.res.off("close", onImageGenClientClose);
         if (ownedImageSlotJobId) {
           await releaseImageSlotIfOwned(userId, ownedImageSlotJobId);
         }

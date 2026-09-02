@@ -13,6 +13,7 @@ import {
 } from "./image-storage.ts";
 import { decryptBytes, encryptBytes } from "./security.ts";
 import { HttpError } from "./utils.http.ts";
+import { assertRefractionActive, currentRefractionSignal, protectRefractionMutation } from "./refraction-cancellation.ts";
 
 interface MysteryAssetVaultRow {
   id: string;
@@ -201,6 +202,27 @@ function compactReviewJson(review: Record<string, unknown>): string {
   });
 }
 
+/** Cancellation restores only rows touched by this request, never another asset. */
+function protectRefractionAsset(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  kind: DebateMysterySealedAssetKindV1,
+  subjectId: string,
+): void {
+  protectRefractionMutation(db, `vault:${userId}:${sessionId}:${kind}:${subjectId}`, () => {
+    const before = assetRow(db, userId, sessionId, kind, subjectId);
+    return () => {
+      db.prepare(`DELETE FROM debate_mystery_asset_vault WHERE user_id = ? AND session_id = ? AND kind = ? AND subject_id = ?`)
+        .run(userId, sessionId, kind, subjectId);
+      if (!before) return;
+      const columns = Object.keys(before);
+      db.prepare(`INSERT INTO debate_mystery_asset_vault (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`)
+        .run(...Object.values(before));
+    };
+  });
+}
+
 function sceneRepairUndoSubjectId(subjectId: string, snapshotId?: string): string {
   return snapshotId
     ? `${SCENE_REPAIR_UNDO_PREFIX}${snapshotId}:${subjectId}`
@@ -296,6 +318,7 @@ export function requeueRetryableDebateMysteryAssetFallbacksV1(
       !RETRYABLE_FALLBACK_REASON_CODES.has(reasonCode)
     ) continue;
     const nextRetryCount = retryCount + 1;
+    protectRefractionAsset(db, userId, sessionId, row.kind, row.subject_id);
     const updated = update.run(
       JSON.stringify({ retryCount: nextRetryCount }),
       new Date().toISOString(),
@@ -346,6 +369,7 @@ export function setDebateMysteryAssetPendingV1(
     mimeType?: "image/png" | "image/webp";
   },
 ): DebateMysterySealedAssetRefV1 {
+  protectRefractionAsset(db, args.userId, args.sessionId, args.kind, args.subjectId);
   const existing = assetRow(
     db,
     args.userId,
@@ -400,6 +424,7 @@ export function replaceDebateMysteryAssetWithPendingV1(
     mimeType?: "image/png" | "image/webp";
   },
 ): DebateMysterySealedAssetRefV1 {
+  protectRefractionAsset(db, args.userId, args.sessionId, args.kind, args.subjectId);
   const existing = assetRow(db, args.userId, args.sessionId, args.kind, args.subjectId);
   const now = new Date().toISOString();
   const id = existing?.id ?? randomUUID();
@@ -445,6 +470,7 @@ export function snapshotDebateMysteryAssetsForSceneRepairV1(
   kind: DebateMysterySealedAssetKindV1,
   subjectIds: readonly string[],
 ): DebateMysterySceneRepairAssetSnapshotV1[] {
+  assertRefractionActive();
   const snapshotId = randomUUID();
   const insert = db.prepare(
     `INSERT INTO debate_mystery_asset_vault
@@ -457,6 +483,7 @@ export function snapshotDebateMysteryAssetsForSceneRepairV1(
   return [...new Set(subjectIds)].map((subjectId) => {
     const row = assetRow(db, userId, sessionId, kind, subjectId);
     if (!row) return { kind, subjectId, existed: false, revealed: false, snapshotId };
+    protectRefractionAsset(db, userId, sessionId, kind, sceneRepairUndoSubjectId(subjectId, snapshotId));
     insert.run(
       randomUUID(),
       userId,
@@ -495,6 +522,7 @@ export function restoreDebateMysteryAssetsFromSceneRepairV1(
   kind: DebateMysterySealedAssetKindV1,
   snapshots: readonly DebateMysterySceneRepairAssetSnapshotV1[],
 ): void {
+  assertRefractionActive();
   const insert = db.prepare(
     `INSERT INTO debate_mystery_asset_vault
        (id, user_id, session_id, kind, subject_id, status, source, mime_type,
@@ -560,6 +588,12 @@ export function clearDebateMysterySceneRepairAssetSnapshotsV1(
   userId: string,
   sessionId: string,
 ): number {
+  assertRefractionActive();
+  if (currentRefractionSignal()) {
+    const rows = db.prepare(`SELECT kind, subject_id FROM debate_mystery_asset_vault WHERE user_id = ? AND session_id = ? AND subject_id LIKE ?`)
+      .all(userId, sessionId, `${SCENE_REPAIR_UNDO_PREFIX}%`) as unknown as Array<{ kind: DebateMysterySealedAssetKindV1; subject_id: string }>;
+    for (const row of rows) protectRefractionAsset(db, userId, sessionId, row.kind, row.subject_id);
+  }
   return Number(db.prepare(
     `DELETE FROM debate_mystery_asset_vault
       WHERE user_id = ? AND session_id = ? AND subject_id LIKE ?`,
@@ -602,6 +636,7 @@ export function deleteDebateMysterySealedAssetV1(
   kind: DebateMysterySealedAssetKindV1,
   subjectId: string,
 ): boolean {
+  protectRefractionAsset(db, userId, sessionId, kind, subjectId);
   return Number(db.prepare(
     `DELETE FROM debate_mystery_asset_vault
       WHERE user_id = ? AND session_id = ? AND kind = ? AND subject_id = ?`,
@@ -616,6 +651,7 @@ export function setDebateMysteryAssetEntryTargetV1(
   subjectId: string,
   entryTarget: { x: number; y: number },
 ): DebateMysterySealedAssetRefV1 {
+  protectRefractionAsset(db, userId, sessionId, kind, subjectId);
   const row = assetRow(db, userId, sessionId, kind, subjectId);
   if (!row) throw new HttpError(404, "That scene visual was not found.");
   let review: Record<string, unknown> = {};
@@ -653,6 +689,7 @@ export function sealDebateMysteryAssetBytesV1(
     review: Record<string, unknown>;
   },
 ): DebateMysterySealedAssetRefV1 {
+  protectRefractionAsset(db, args.userId, args.sessionId, args.kind, args.subjectId);
   if (!args.bytes.length || args.bytes.length > MAX_ASSET_BYTES) {
     throw new Error("Sealed case visual bytes are outside the supported size boundary.");
   }
@@ -707,6 +744,7 @@ export function setDebateMysteryAssetFallbackV1(
     reason: string;
   },
 ): DebateMysterySealedAssetRefV1 {
+  protectRefractionAsset(db, args.userId, args.sessionId, args.kind, args.subjectId);
   const now = new Date().toISOString();
   const existing = assetRow(db, args.userId, args.sessionId, args.kind, args.subjectId);
   const id = existing?.id ?? randomUUID();
@@ -747,6 +785,7 @@ export function revealDebateMysteryAssetV1(
   kind: DebateMysterySealedAssetKindV1,
   subjectId: string,
 ): DebateMysterySealedAssetRefV1 | null {
+  assertRefractionActive();
   const existing = assetRow(db, userId, sessionId, kind, subjectId);
   if (!existing || existing.status === "pending") return existing ? rowRef(existing) : null;
   if (!existing.revealed_at) {

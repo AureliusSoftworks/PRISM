@@ -8,6 +8,7 @@ import {
   buildDebateMysteryIllustratedRoomUpgradePromptV1,
   debateMysteryIllustratedRoomSubjectIdV1,
   DEBATE_MYSTERY_ROOM_ART_CONTRACT_V1,
+  normalizeDebateMysteryUpgradedRoomArtV1,
   renderDebateMysteryRoomArtV1,
   validateDebateMysteryRoomArtSourceAlignmentV1,
 } from "../debate-mystery-room-art.ts";
@@ -37,6 +38,24 @@ async function navigationRoomFixture(): Promise<Buffer> {
       pixels[offset] = 232;
       pixels[offset + 1] = 224;
       pixels[offset + 2] = 208;
+    }
+  }
+  return sharp(pixels, { raw: { width, height, channels: 3 } }).png().toBuffer();
+}
+
+async function detailedNavigationRoomFixture(landmarkOffset = 0): Promise<Buffer> {
+  const width = 320;
+  const height = 180;
+  const pixels = Buffer.alloc(width * height * 3);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      // Unchanged broad wall lighting hides displacement of smaller pillars
+      // in a coarse comparison, just as lamps and doorframes can drift.
+      const wall = 40 + Math.floor(80 * x / width) + Math.floor(40 * y / height);
+      const pillar = [40, 105, 160, 220, 280].some((edge) =>
+        x >= edge + landmarkOffset && x < edge + landmarkOffset + 5)
+        && y > 25 && y < 155;
+      pixels.fill(pillar ? 220 : wall, (y * width + x) * 3, (y * width + x + 1) * 3);
     }
   }
   return sharp(pixels, { raw: { width, height, channels: 3 } }).png().toBuffer();
@@ -180,6 +199,45 @@ describe("debate mystery room Mosaic and Upgraded derivatives", () => {
     assert.ok(Math.abs(brightXs.at(-1)! - 1151) <= 6, `right edge moved to ${brightXs.at(-1)}`);
   });
 
+  it("normalizes Upgraded art in Mosaic-relative coordinates without cropping or non-uniform scaling", async () => {
+    const source = await sharp(await navigationRoomFixture())
+      .resize(1280, 720, { kernel: sharp.kernel.nearest }).png().toBuffer();
+    const result = await normalizeDebateMysteryUpgradedRoomArtV1(source);
+    const { data, info } = await sharp(result.bytes).greyscale().raw().toBuffer({ resolveWithObject: true });
+    assert.deepEqual([info.width, info.height], [
+      CURRENT_MANSION_ROOM_ART_CONTRACT.realistic.outputWidth,
+      CURRENT_MANSION_ROOM_ART_CONTRACT.realistic.outputHeight,
+    ]);
+    const brightXs = Array.from({ length: info.width }, (_, x) => x)
+      .filter((x) => data[450 * info.width + x]! > 180);
+    const brightYs = Array.from({ length: info.height }, (_, y) => y)
+      .filter((y) => data[y * info.width + 800]! > 180);
+    assert.ok(Math.abs(brightXs[0]! - 640) <= 1);
+    assert.ok(Math.abs(brightXs.at(-1)! - 959) <= 1);
+    assert.ok(Math.abs(brightYs[0]! - 180) <= 1);
+    assert.ok(Math.abs(brightYs.at(-1)! - 719) <= 1);
+  });
+
+  it("rejects an unexpected generated aspect ratio before it can be stretched into a passing frame", async () => {
+    const source = await navigationRoomFixture();
+    const wrongFrame = await sharp(source).resize(1536, 1024, { fit: "fill" }).png().toBuffer();
+    await assert.rejects(normalizeDebateMysteryUpgradedRoomArtV1(wrongFrame), /cropping or stretching is not permitted/u);
+    const alignment = await validateDebateMysteryRoomArtSourceAlignmentV1({ source, candidate: wrongFrame });
+    assert.equal(alignment.frameMatches, false);
+    assert.equal(alignment.approved, false);
+  });
+
+  it("checks the oriented frame, preserving a valid rotated 16:9 plate", async () => {
+    const source = await detailedNavigationRoomFixture();
+    const oriented = await sharp(source).rotate(90).withMetadata({ orientation: 8 }).png().toBuffer();
+    const result = await normalizeDebateMysteryUpgradedRoomArtV1(oriented);
+    assert.deepEqual([result.width, result.height], [1600, 900]);
+    const alignment = await validateDebateMysteryRoomArtSourceAlignmentV1({ source, candidate: result.bytes });
+    assert.equal(alignment.frameMatches, true);
+    assert.equal(alignment.approved, true);
+    assert.ok(alignment.detailCorrelation > 0.99);
+  });
+
   it("defines a spoiler-safe HD-derivative performance contract", () => {
     const prompt = buildDebateMysteryIllustratedRoomUpgradePromptV1({
       roomName: "Castle Foyer",
@@ -230,6 +288,41 @@ describe("debate mystery room Mosaic and Upgraded derivatives", () => {
       candidate: blank,
     });
     assert.equal(blankRejected.approved, false);
+    const flatPair = await validateDebateMysteryRoomArtSourceAlignmentV1({ source: blank, candidate: blank });
+    assert.equal(flatPair.approved, false, "two blank frames cannot certify architectural alignment");
+  });
+
+  it("rejects smaller shifted landmarks even when canvas dimensions and broad luminance pass", async () => {
+    const source = await detailedNavigationRoomFixture();
+    const candidate = await detailedNavigationRoomFixture(4);
+    const alignment = await validateDebateMysteryRoomArtSourceAlignmentV1({ source, candidate });
+    assert.equal(alignment.frameMatches, true);
+    assert.ok(alignment.correlation > alignment.minimumCorrelation);
+    assert.ok(alignment.detailCorrelation < alignment.minimumCorrelation);
+    assert.equal(alignment.approved, false);
+  });
+
+  it("permits lighting changes without moving architectural landmarks at either scale", async () => {
+    const source = await detailedNavigationRoomFixture();
+    const candidate = await sharp(source).linear(0.8, 15).png().toBuffer();
+    const alignment = await validateDebateMysteryRoomArtSourceAlignmentV1({ source, candidate });
+    assert.equal(alignment.approved, true);
+    assert.ok(alignment.detailCorrelation > 0.99);
+  });
+
+  it("validates the source-preserving normalized upgrade before review and sealing", () => {
+    const server = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+    const upgrade = server.slice(
+      server.indexOf("async function prepareDebateMysteryIllustratedRoomsV1("),
+      server.indexOf("function queueDebateMysteryIllustratedRoomsV1("),
+    );
+    assert.match(upgrade, /normalizeDebateMysteryUpgradedRoomArtV1\(generated\.bytes\)/u);
+    assert.doesNotMatch(upgrade, /\.resize\(/u);
+    const alignmentIndex = upgrade.indexOf("validateDebateMysteryRoomArtSourceAlignmentV1({");
+    assert.ok(alignmentIndex > upgrade.indexOf("normalizeDebateMysteryUpgradedRoomArtV1(generated.bytes)"));
+    assert.ok(upgrade.indexOf("if (!alignment.approved)") > alignmentIndex);
+    assert.ok(upgrade.indexOf("reviewDebateMysteryAssetWithVision({") > alignmentIndex);
+    assert.ok(upgrade.indexOf("sealDebateMysteryAssetBytesV1(") > alignmentIndex);
   });
 
   it("wires Mosaic synthesis and shared presentation delivery", () => {
@@ -253,7 +346,6 @@ describe("debate mystery room Mosaic and Upgraded derivatives", () => {
     );
     assert.match(server, /mystery-room-art\/upgrade/u);
     assert.match(server, /sourceImageBytes: mosaicReference\.bytes[\s\S]{0,160}size: "1280x720"/u);
-    assert.match(server, /validateDebateMysteryRoomArtSourceAlignmentV1[\s\S]{0,1100}sealDebateMysteryAssetBytesV1/u);
     assert.match(server, /session\.responseMode === "local"[\s\S]{0,220}LOCAL never sends venue art/u);
     assert.match(
       server,
@@ -288,9 +380,13 @@ describe("debate mystery room Mosaic and Upgraded derivatives", () => {
       /roomId \? new Set\(\[roomId\]\) : undefined/u,
       "the room-specific upgrade must not generate every room",
     );
+    const frozenLayoutStart = mansionBundles.indexOf("const frozenLayout = state.config.mansionSnapshot?.layoutV2");
+    const frozenLayoutEnd = mansionBundles.indexOf("const imageIds =", frozenLayoutStart);
+    assert.ok(frozenLayoutStart >= 0 && frozenLayoutEnd > frozenLayoutStart);
+    const frozenLayout = mansionBundles.slice(frozenLayoutStart, frozenLayoutEnd);
     assert.match(
-      mansionBundles,
-      /const frozenLayout = state\.config\.mansionSnapshot\?\.layoutV2[\s\S]{0,500}structuredClone\(frozenLayout\)[\s\S]{0,500}roomArtCandidates: \[\]/u,
+      frozenLayout,
+      /structuredClone\(frozenLayout\)[\s\S]*roomArtCandidates: \[\]/u,
       "saving the venue must retain its frozen authored geometry instead of rebuilding a legacy grid",
     );
     assert.match(

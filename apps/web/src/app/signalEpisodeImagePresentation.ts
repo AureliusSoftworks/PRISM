@@ -1,6 +1,7 @@
 import {
   botcastImageContextForMessageV1,
   botcastLatestImageContextV1,
+  botcastActiveImageContextV1,
   botcastPreSessionImageShouldPresentOnNextTurnV1,
   type BotcastEpisodeImagePlacement,
   type BotcastImageContextV1,
@@ -16,23 +17,29 @@ export function signalPreSessionEpisodeImageCueForNextTurn(args: {
     imageId: string;
     preSessionReveal?: boolean;
   } | null;
-  imageContext: Pick<BotcastImageContextV1, "imageId"> | null;
+  imageContext: Pick<BotcastImageContextV1, "imageId"> & Partial<Pick<BotcastImageContextV1, "phase" | "origin">> | null;
   higherPriorityCuePending: boolean;
 }): BotcastProducerCue | null {
+  // Scheduling is durable metadata, not proof that browser originals survived.
+  // A refresh must reach the normal reattachment gate at the scheduled slot.
+  const pendingImage = args.pendingImage ?? (args.imageContext?.origin === "setup"
+    ? { episodeId: args.episodeId, imageId: args.imageContext.imageId, preSessionReveal: true }
+    : null);
   if (
     args.higherPriorityCuePending ||
-    args.imageContext ||
-    args.pendingImage?.preSessionReveal !== true ||
-    args.pendingImage.episodeId !== args.episodeId ||
+    (args.imageContext && args.imageContext.phase !== "queued") ||
+    pendingImage?.preSessionReveal !== true ||
+    pendingImage.episodeId !== args.episodeId ||
+    (args.imageContext && args.imageContext.imageId !== pendingImage.imageId) ||
     !botcastPreSessionImageShouldPresentOnNextTurnV1({
       episodeId: args.episodeId,
-      imageId: args.pendingImage.imageId,
+      imageId: pendingImage.imageId,
       messages: args.messages,
     })
   ) {
     return null;
   }
-  return { kind: "present_image", imageId: args.pendingImage.imageId };
+  return { kind: "present_image", imageId: pendingImage.imageId };
 }
 
 /**
@@ -96,7 +103,7 @@ export function signalEpisodeStageImageContext(args: {
   events: Parameters<typeof botcastLatestImageContextV1>[0];
   activeMessageId: string | null;
 }): BotcastImageContextV1 | null {
-  const latest = botcastLatestImageContextV1(args.events);
+  const latest = botcastActiveImageContextV1(args.events);
   if (args.activeMessageId) {
     return botcastImageContextForMessageV1(args.events, args.activeMessageId);
   }

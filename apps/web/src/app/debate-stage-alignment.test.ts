@@ -20,6 +20,7 @@ import {
   debateStageAlignmentStyle,
   debateStageAlignmentTarget,
   debateStageEvidenceViewForCamera,
+  debateStageCourtPropForCamera,
   defaultDebateStageEvidenceShadow,
   formatDebateStageAlignmentClipboard,
   formatDebateStageEvidenceTableClipboard,
@@ -59,6 +60,106 @@ function evidencePlacement(
 }
 
 describe("Debate stage alignment", () => {
+  it("selects a separate foreground table only for the Moderator camera", () => {
+    for (const camera of ["wide", "left", "moderator", "right", "jury"] as const) {
+      assert.equal(
+        debateStageCourtPropForCamera("wideEvidenceTable", camera),
+        camera === "moderator" ? "moderatorEvidenceTable" : "wideEvidenceTable",
+      );
+      assert.equal(
+        debateStageCourtPropForCamera("wideWitnessSilhouette", camera),
+        "wideWitnessSilhouette",
+      );
+    }
+  });
+
+  it("migrates a saved shared table without shifting either camera", () => {
+    const oldTable = { x: -13.5, y: 7, scale: 125 };
+    const normalized = normalizeDebateStageAlignment({
+      version: 14,
+      whodunnitCourt: { wideEvidenceTable: oldTable },
+    });
+    assert.deepEqual(normalized.whodunnitCourt.wideEvidenceTable, oldTable);
+    assert.deepEqual(normalized.whodunnitCourt.moderatorEvidenceTable, oldTable);
+    assert.notEqual(
+      normalized.whodunnitCourt.moderatorEvidenceTable,
+      normalized.whodunnitCourt.wideEvidenceTable,
+    );
+    assert.deepEqual(normalizeDebateStageAlignment(normalized), normalized);
+  });
+
+  it("edits and resets the Moderator table without changing Main, evidence, or Jury", () => {
+    const main = updateDebateStageWhodunnitCourtPlacement(
+      DEFAULT_DEBATE_STAGE_ALIGNMENT,
+      "wideEvidenceTable",
+      { x: -13.5, y: 7, scale: 125 },
+    );
+    const moderator = updateDebateStageWhodunnitCourtPlacement(
+      main,
+      debateStageCourtPropForCamera("wideEvidenceTable", "moderator"),
+      { x: 12, y: -16, scale: 80 },
+    );
+    assert.deepEqual(
+      moderator.whodunnitCourt.wideEvidenceTable,
+      main.whodunnitCourt.wideEvidenceTable,
+    );
+    assert.deepEqual(moderator.whodunnitCourt.moderatorEvidenceTable, {
+      x: 12, y: -16, scale: 80,
+    });
+    assert.deepEqual(moderator.evidenceTable, main.evidenceTable);
+    assert.deepEqual(moderator.juryChamber, main.juryChamber);
+    assert.deepEqual(
+      moderator.whodunnitCourt.wideWitnessSilhouette,
+      main.whodunnitCourt.wideWitnessSilhouette,
+    );
+    const reset = updateDebateStageWhodunnitCourtPlacement(
+      moderator,
+      "moderatorEvidenceTable",
+      DEFAULT_DEBATE_STAGE_ALIGNMENT.whodunnitCourt.moderatorEvidenceTable,
+    );
+    assert.deepEqual(reset, main);
+    const mainReset = updateDebateStageWhodunnitCourtPlacement(
+      moderator,
+      "wideEvidenceTable",
+      DEFAULT_DEBATE_STAGE_ALIGNMENT.whodunnitCourt.wideEvidenceTable,
+    );
+    assert.deepEqual(
+      mainReset.whodunnitCourt.moderatorEvidenceTable,
+      moderator.whodunnitCourt.moderatorEvidenceTable,
+    );
+  });
+
+  it("saves, reloads, exports, and renders independent Main and Moderator table values", () => {
+    const normalized = normalizeDebateStageAlignment({
+      whodunnitCourt: {
+        wideEvidenceTable: { x: -8, y: 6, scale: 120 },
+        moderatorEvidenceTable: { x: 15, y: -10, scale: 85 },
+      },
+    });
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        values.set(key, value);
+      },
+    };
+    writeDebateStageAlignment(storage, "forum-table", normalized);
+    const restored = readDebateStageAlignment(storage, "forum-table");
+    assert.deepEqual(restored, normalized);
+    const copied = formatDebateStageAlignmentClipboard(restored);
+    assert.deepEqual(
+      JSON.parse(copied.slice(copied.indexOf("\n") + 1, -1)),
+      normalized,
+    );
+    const style = debateStageAlignmentStyle(restored) as Record<string, string>;
+    assert.equal(style["--whodunnit-wide-evidence-table-offset-x"], "-8%");
+    assert.equal(style["--whodunnit-wide-evidence-table-offset-y"], "6%");
+    assert.equal(style["--whodunnit-wide-evidence-table-scale"], "1.2");
+    assert.equal(style["--debate-moderator-table-offset-x"], "15%");
+    assert.equal(style["--debate-moderator-table-offset-y"], "-10%");
+    assert.equal(style["--debate-moderator-table-scale"], "0.85");
+  });
+
   it("exports complete normalized V14 Main defaults as source-ready TypeScript", () => {
     const copied = formatDebateStageAlignmentClipboard(
       DEFAULT_DEBATE_STAGE_ALIGNMENT,
@@ -231,6 +332,7 @@ describe("Debate stage alignment", () => {
       },
       whodunnitCourt: {
         wideEvidenceTable: { x: 0, y: 0, scale: 100 },
+        moderatorEvidenceTable: { x: 0, y: 0, scale: 100 },
         wideWitnessSilhouette: { x: 0, y: 0, scale: 100 },
         witness: { x: 0, y: 0, scale: 100 },
         prosecutionMini: { x: 0, y: 0, scale: 100 },

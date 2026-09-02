@@ -39,7 +39,7 @@ describe("PrismBlockingLoader", () => {
   });
 
   it("honors the document Light theme when a portaled loader omits a theme", () => {
-    assert.match(source, /startedAt = null,\s*theme,\s*placement = "fullscreen"/u);
+    assert.match(source, /startedAt = null,[\s\S]{0,100}theme,\s*placement = "fullscreen"/u);
     assert.doesNotMatch(source, /theme = "dark"/u);
     assert.match(
       css,
@@ -68,7 +68,7 @@ describe("PrismBlockingLoader", () => {
     assert.match(source, /className=\{styles\.cancelButton\}/u);
     assert.match(source, /event\.key === "Escape"/u);
     assert.match(source, /requestCancel\(\)/u);
-    assert.match(source, /cancelButtonRef\.current \?\? rootRef\.current/u);
+    assert.match(source, /cancelButtonRef\.current \?\? overlay/u);
     assert.match(css, /\.cancelButton\s*\{/u);
   });
 });

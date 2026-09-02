@@ -62,7 +62,7 @@ describe("Signal episode video gate", () => {
   });
 
   it("always opens completed episodes as local replay", () => {
-    assert.equal(signalEpisodeArchiveActionLabel(episode("live"), null), "Resume episode");
+    assert.equal(signalEpisodeArchiveActionLabel(episode("live"), null), "On air");
     assert.equal(
       signalEpisodeArchiveActionLabel(episode("completed"), null),
       "Open local replay",

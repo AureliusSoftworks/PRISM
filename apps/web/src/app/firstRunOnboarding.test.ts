@@ -8,6 +8,7 @@ import {
   FIRST_RUN_BATCH_FOUNDRY_GUIDANCE,
   FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE,
   FIRST_RUN_COFFEE_GROUP_GUIDANCE,
+  FULLSCREEN_REFRACTION_GUIDANCE,
   clampFirstRunSetupStepIndex,
   clearFirstRunSetupCompletion,
   firstRunSetupProgressPercent,
@@ -17,6 +18,13 @@ import {
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
 describe("first-run onboarding", () => {
+  it("explains cancellation without adding a blocking setup step", () => {
+    assert.ok(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE.includes(FULLSCREEN_REFRACTION_GUIDANCE));
+    assert.match(FULLSCREEN_REFRACTION_GUIDANCE, /X or Escape/u);
+    assert.match(FULLSCREEN_REFRACTION_GUIDANCE, /have to regenerate the interrupted asset/u);
+    assert.match(FULLSCREEN_REFRACTION_GUIDANCE, /Keep waiting leaves generation running/u);
+    assert.equal(FIRST_RUN_SETUP_STEPS.some((step) => /cancel|refraction/u.test(step.id)), false);
+  });
   it("presents Premium voice as available through a PRISM-managed connection", () => {
     const voiceStep = FIRST_RUN_SETUP_STEPS.find(
       (step) => step.id === "elevenlabs",

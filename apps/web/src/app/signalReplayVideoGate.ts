@@ -26,7 +26,7 @@ export function signalEpisodeArchiveActionLabel(
   item: BotcastEpisodeSummary,
   recording: ReplayRecordingV1 | null,
 ): string {
-  if (item.status === "live") return "Resume episode";
+  if (item.status === "live") return "On air";
   return signalReplayRecordingHasVideo(recording)
     ? "Open replay · Video ready"
     : "Open local replay";

@@ -2705,18 +2705,14 @@
   top: calc(45% + var(--flyting-align-y, 0%));
   left: calc(50% + var(--flyting-align-x, 0%));
   display: grid;
-  width: clamp(38px, 4.6vw, 70px);
+  width: clamp(76px, 9.2vw, 140px);
   aspect-ratio: 1;
   place-items: center;
-  color: color-mix(in srgb, var(--flyting-rug-glyph-color) 56%, #ead7b6);
-  filter: blur(0.15px)
-    drop-shadow(
-      0 0 4px
-        color-mix(in srgb, var(--flyting-rug-glyph-color) 38%, transparent)
-    );
-  mix-blend-mode: screen;
-  opacity: 0.56;
-  transform: translate(-50%, -50%) perspective(170px) rotateX(61deg)
+  color: color-mix(in srgb, var(--flyting-rug-glyph-color) 16%, #fff3dc);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
+  mix-blend-mode: normal;
+  opacity: 0.76;
+  transform: translate(-50%, -50%) perspective(340px) rotateX(61deg)
     rotateZ(
       calc(
         var(--flyting-rug-glyph-rotate) + var(--flyting-align-rotation, 0deg)
@@ -2730,6 +2726,12 @@
     )
     scaleY(0.78) scale(var(--flyting-align-scale, 1));
   transform-origin: 50% 100%;
+}
+
+.liveShell[data-theme="light"] .galleryRugGlyphs > span {
+  color: color-mix(in srgb, var(--flyting-rug-glyph-color) 16%, #16120d);
+  filter: none;
+  opacity: 0.94;
 }
 
 .galleryRugGlyphs > span > svg {

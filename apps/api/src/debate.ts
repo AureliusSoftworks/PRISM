@@ -1,5 +1,6 @@
 import { createHash, randomInt, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { assertRefractionActive, refractionSignal } from "./refraction-cancellation.ts";
 import { composeBotRuntimePersona } from "./bot-global-mood.ts";
 import { endDebatePerfSpan, startDebatePerfSpan } from "./debatePerfTiming.ts";
 import {
@@ -1268,6 +1269,7 @@ async function generateJsonOnLane(
   } = {},
   signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
+  signal = refractionSignal(signal);
   const requestedReasoningEffort =
     options.reasoningEffort ?? lane.reasoningEffort;
   const simulatedReasoningEffort: ReasoningEffort | undefined =
@@ -1311,6 +1313,7 @@ async function generateJsonOnLane(
   }
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
+    assertRefractionActive();
     let response = "";
     try {
       response = await lane.provider.generateResponse(messages, {

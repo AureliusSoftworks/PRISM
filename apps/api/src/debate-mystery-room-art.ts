@@ -45,11 +45,19 @@ export interface DebateMysteryMosaicPresentationResultV1 {
 export interface DebateMysteryRoomArtSourceAlignmentV1 {
   approved: boolean;
   correlation: number;
+  detailCorrelation: number;
+  frameMatches: boolean;
   minimumCorrelation: number;
 }
 
 const UPGRADED_SOURCE_LOCK_GRID_WIDTH = 32;
 const UPGRADED_SOURCE_LOCK_GRID_HEIGHT = 18;
+// The 32x18 gate alone accepts shifted lamps/doorframes after downsampling.
+// A second 64x36 pass retains those landmarks: the seven preserved cruise-room
+// repair pairs score 0.824–0.978 here; their drifted legacy pairs 0.548–0.695.
+// Keep the existing threshold rather than tightening it against lighting style.
+const UPGRADED_SOURCE_LOCK_DETAIL_GRID_WIDTH = 64;
+const UPGRADED_SOURCE_LOCK_DETAIL_GRID_HEIGHT = 36;
 // Calibrated against the authored Mosaic/HD pairs (lowest known-good: 0.800)
 // and the legacy drifted 3:2 crops (highest known-bad: 0.758). Keep a small
 // margin on both sides so normal lighting/material changes remain acceptable.
@@ -57,11 +65,15 @@ const UPGRADED_SOURCE_LOCK_MINIMUM_CORRELATION = 0.78;
 
 /** Reduces both images to the same coarse 16:9 luminance structure so style
  * and material detail do not overwhelm the camera/geometry comparison. */
-async function sourceLockLuminanceGrid(input: Buffer): Promise<number[]> {
+async function sourceLockLuminanceGrid(
+  input: Buffer,
+  width: number,
+  height: number,
+): Promise<number[]> {
   const { data } = await sharp(input, { failOn: "error" })
     .rotate()
     .flatten({ background: { r: 3, g: 8, b: 14 } })
-    .resize(UPGRADED_SOURCE_LOCK_GRID_WIDTH, UPGRADED_SOURCE_LOCK_GRID_HEIGHT, {
+    .resize(width, height, {
       fit: "fill",
       kernel: sharp.kernel.lanczos3,
     })
@@ -71,17 +83,7 @@ async function sourceLockLuminanceGrid(input: Buffer): Promise<number[]> {
   return [...data];
 }
 
-/** A local, deterministic composition gate. It compares only broad luminance
- * structure, permitting a material/lighting pass while rejecting changed
- * camera framing, architecture, and furniture massing. */
-export async function validateDebateMysteryRoomArtSourceAlignmentV1(args: {
-  source: Buffer;
-  candidate: Buffer;
-}): Promise<DebateMysteryRoomArtSourceAlignmentV1> {
-  const [source, candidate] = await Promise.all([
-    sourceLockLuminanceGrid(args.source),
-    sourceLockLuminanceGrid(args.candidate),
-  ]);
+function sourceLockCorrelation(source: number[], candidate: number[]): number {
   const sourceMean = source.reduce((sum, value) => sum + value, 0) / source.length;
   const candidateMean = candidate.reduce((sum, value) => sum + value, 0) / candidate.length;
   let covariance = 0;
@@ -94,14 +96,50 @@ export async function validateDebateMysteryRoomArtSourceAlignmentV1(args: {
     sourceEnergy += sourceDelta * sourceDelta;
     candidateEnergy += candidateDelta * candidateDelta;
   }
-  const correlation = sourceEnergy === 0 && candidateEnergy === 0
-    ? 1
-    : sourceEnergy > 0 && candidateEnergy > 0
-      ? covariance / Math.sqrt(sourceEnergy * candidateEnergy)
-      : 0;
+  // Two flat plates offer no evidence of matching geometry.
+  return sourceEnergy > 0 && candidateEnergy > 0
+    ? covariance / Math.sqrt(sourceEnergy * candidateEnergy)
+    : 0;
+}
+
+async function hasCanonicalRoomArtFrame(input: Buffer): Promise<boolean> {
+  const { autoOrient } = await sharp(input, { failOn: "error" }).metadata();
+  return autoOrient.width * canonicalRoomArt.pixelArt.outputHeight
+    === autoOrient.height * canonicalRoomArt.pixelArt.outputWidth;
+}
+
+/** Local composition screening, not proof of pixel-exact geometry. The second
+ * scale retains smaller architectural landmarks; vision review still follows.
+ * Reject incompatible frames before either comparison can stretch them. */
+export async function validateDebateMysteryRoomArtSourceAlignmentV1(args: {
+  source: Buffer;
+  candidate: Buffer;
+}): Promise<DebateMysteryRoomArtSourceAlignmentV1> {
+  const frames = await Promise.all([
+    hasCanonicalRoomArtFrame(args.source),
+    hasCanonicalRoomArtFrame(args.candidate),
+  ]);
+  const frameMatches = frames.every(Boolean);
+  const compare = async (width: number, height: number): Promise<number> => {
+    const [source, candidate] = await Promise.all([
+      sourceLockLuminanceGrid(args.source, width, height),
+      sourceLockLuminanceGrid(args.candidate, width, height),
+    ]);
+    return sourceLockCorrelation(source, candidate);
+  };
+  const [correlation, detailCorrelation] = frameMatches
+    ? await Promise.all([
+        compare(UPGRADED_SOURCE_LOCK_GRID_WIDTH, UPGRADED_SOURCE_LOCK_GRID_HEIGHT),
+        compare(UPGRADED_SOURCE_LOCK_DETAIL_GRID_WIDTH, UPGRADED_SOURCE_LOCK_DETAIL_GRID_HEIGHT),
+      ])
+    : [0, 0] as const;
   return {
-    approved: correlation >= UPGRADED_SOURCE_LOCK_MINIMUM_CORRELATION,
+    approved: frameMatches
+      && correlation >= UPGRADED_SOURCE_LOCK_MINIMUM_CORRELATION
+      && detailCorrelation >= UPGRADED_SOURCE_LOCK_MINIMUM_CORRELATION,
     correlation,
+    detailCorrelation,
+    frameMatches,
     minimumCorrelation: UPGRADED_SOURCE_LOCK_MINIMUM_CORRELATION,
   };
 }
@@ -286,6 +324,28 @@ export async function renderDebateMysteryRoomArtV1(
     height: contract.outputHeight,
     variant,
   };
+}
+
+/** Unlike initial room authoring, an upgrade must not acquire a new crop or
+ * non-uniform scale. Reject a generator's unexpected aspect ratio instead of
+ * disguising it with cover/fill. Keep the versioned HD storage resolution;
+ * matching the Mosaic's 16:9 coordinates does not require equal pixel counts. */
+export async function normalizeDebateMysteryUpgradedRoomArtV1(
+  input: Buffer,
+): Promise<{ bytes: Buffer; mimeType: "image/png"; width: 1600; height: 900 }> {
+  if (!await hasCanonicalRoomArtFrame(input)) {
+    throw new Error("Source-lock rejected the Upgraded room derivative: expected the reference's full 16:9 frame; cropping or stretching is not permitted.");
+  }
+  const { outputWidth: width, outputHeight: height } = canonicalRoomArt.realistic;
+  const bytes = await sharp(input, { failOn: "error" })
+    .rotate()
+    .flatten({ background: { r: 3, g: 8, b: 14 } })
+    // A single dimension scales both axes uniformly; no crop or stretch.
+    .resize({ width, kernel: sharp.kernel.lanczos3 })
+    .removeAlpha()
+    .png({ compressionLevel: 9 })
+    .toBuffer();
+  return { bytes, mimeType: "image/png", width, height };
 }
 
 export function buildDebateMysteryIllustratedRoomUpgradePromptV1(args: {

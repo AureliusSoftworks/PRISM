@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 import sharp from "sharp";
+import { assertRefractionActive } from "./refraction-cancellation.ts";
 import {
   readGeneratedImageBytes,
   resolveAbsoluteUnderDataRoot,
@@ -93,12 +94,15 @@ export async function tryGenerateThumbAfterPngWrite(localPngRelPath: string): Pr
     const absolutePngPath = resolveAbsoluteUnderDataRoot(localPngRelPath);
     const pngBytes = readGeneratedImageBytes(localPngRelPath);
     const webp = await encodeWebpThumbFromRasterBytes(pngBytes);
-    if (!existsSync(absolutePngPath)) return;
-    const thumbRel = thumbWebpRelativePathFromPngRelativePath(localPngRelPath);
-    writeThumbWebpAtomically(resolveAbsoluteUnderDataRoot(thumbRel), webp);
+    assertRefractionActive();
+    if (existsSync(absolutePngPath)) {
+      const thumbRel = thumbWebpRelativePathFromPngRelativePath(localPngRelPath);
+      writeThumbWebpAtomically(resolveAbsoluteUnderDataRoot(thumbRel), webp);
+    }
   } catch {
     console.warn("[image-thumb] post-write thumbnail failed.");
   }
+  assertRefractionActive();
 }
 
 /**

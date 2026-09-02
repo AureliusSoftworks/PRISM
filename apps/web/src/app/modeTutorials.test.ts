@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import { MODE_TUTORIALS, modeTutorialStep } from "./modeTutorials.ts";
-import { FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE } from "./firstRunOnboarding.ts";
+import { FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, FULLSCREEN_REFRACTION_GUIDANCE } from "./firstRunOnboarding.ts";
 
 function signalPowersTutorialBody(): string {
   return MODE_TUTORIALS.botcast.steps.find(
@@ -12,6 +12,25 @@ function signalPowersTutorialBody(): string {
 }
 
 describe("mode tutorials", () => {
+  it("keeps every mode's refraction guidance on existing reachable targets", () => {
+    for (const [mode, tutorial] of Object.entries(MODE_TUTORIALS)) {
+      const step = tutorial.steps.find((entry) => entry.body.includes(FULLSCREEN_REFRACTION_GUIDANCE));
+      assert.ok(step, `${mode} needs the shared cancellation and ETA guidance`);
+      assert.ok(step.targetSelector.startsWith("[data-tutorial-target="));
+      assert.doesNotMatch(step.targetSelector, /refraction-cancel|blocking-loader/u);
+    }
+  });
+  it("keeps Mosaic visible during Examine and explains optional soft room upgrades", () => {
+    const body = MODE_TUTORIALS.debate.steps.find(
+      (step) => step.heading === "Investigate a Whodunnit",
+    )?.body ?? "";
+    assert.match(body, /Mosaic’s fine tessera separators remain visible/u);
+    assert.match(body, /24×15 search grid/u);
+    assert.match(body, /one-room Soft Refract/u);
+    assert.match(body, /cancel changes nothing/u);
+    assert.match(body, /LOCAL never sends a room to a remote generator/u);
+  });
+
   it("explains model and effort receipts for every Refract toast", () => {
     const body = MODE_TUTORIALS.debate.steps[0]?.body ?? "";
     assert.match(body, /Every successful Refract toast names the model and Effort/u);
@@ -29,8 +48,9 @@ describe("mode tutorials", () => {
     assert.match(body, /does not forecast a voluntary goodbye/u);
     assert.match(
       body,
-      /private Host note, direct Say this cue, or attached image arrives while the host is audibly speaking/u,
+      /private Host note or direct Say this cue arrives while the host is audibly speaking/u,
     );
+    assert.match(body, /Image uploads never take this redirect path/u);
     assert.match(body, /cut in the pause between words leaves an ellipsis/u);
     assert.match(body, /active-speech cut leaves a sharper dash/u);
     assert.match(body, /breath, or throat clear/u);
@@ -188,12 +208,12 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Revisits skip the sequence/u);
     assert.match(step.body, /Examine is a first-person room-art viewing mode/u);
     assert.match(step.body, /quietly confirms an available inspectable region only while it is inside that region/u);
-    assert.match(step.body, /Mosaic’s fine tessera separators are hidden/u);
-    assert.match(step.body, /flat, screen-aligned 24×15 grid appears over both Mosaic and Upgraded room art/u);
+    assert.match(step.body, /Mosaic’s fine tessera separators remain visible/u);
+    assert.match(step.body, /flat, screen-aligned 24×15 search grid appears over both Mosaic and Upgraded room art/u);
     assert.match(step.body, /exactly the square beneath the lens glows/u);
     assert.match(step.body, /Examine and Move each slide the Case Desk away and remove the room vignette/u);
     assert.match(step.body, /Back to room exits either focused mode/u);
-    assert.match(step.body, /leaving Examine also clears its search grid and restores the Mosaic separators, vignette, and Case Desk/u);
+    assert.match(step.body, /leaving Examine clears its search grid and restores the vignette and Case Desk while preserving the Mosaic separators/u);
     assert.match(step.body, /authored observation types in with the player character’s Babble/u);
     assert.match(step.body, /Only observations that produce a durable public case consequence/u);
     assert.match(step.body, /enter the Case Kit with an immediate acquisition cue/u);
@@ -660,12 +680,12 @@ describe("mode tutorials", () => {
     assert.match(liveStep.body, /live ! chip/u);
     assert.match(liveStep.body, /read the exact memory and dismiss the alert/u);
     assert.match(liveStep.body, /clears any unseen Signal alert/u);
-    assert.match(liveStep.body, /exactly one PNG, JPEG, or WebP image/u);
-    assert.match(liveStep.body, /raw file remains ephemeral/u);
-    assert.match(liveStep.body, /tiny, intentionally soft archival proxy for replay/u);
+    assert.match(liveStep.body, /Watch accepts one PNG, JPEG, or WebP picture before the show/u);
+    assert.match(liveStep.body, /Live Produce with a bot guest can add successive pictures/u);
+    assert.match(liveStep.body, /Originals are session-only/u);
+    assert.match(liveStep.body, /tiny, intentionally soft archival proxy/u);
     assert.match(liveStep.body, /older emoji-only replays retain their recorded fallback/u);
-    assert.match(liveStep.body, /Every upload is treated as a generic image/u);
-    assert.match(liveStep.body, /light or dark Polaroid frame/u);
+    assert.match(liveStep.body, /Every upload is a framed picture, never an Item/u);
     assert.match(liveStep.body, /wide camera places either one at the lower center/u);
     assert.match(liveStep.body, /left and right cameras keep it on their matching side/u);
     assert.match(liveStep.body, /never creates an Item/u);
@@ -956,7 +976,8 @@ describe("mode tutorials", () => {
     assert.match(copy, /Wield Prism onto Stage layout to open the lab with a shuffled preview cast/u);
     assert.match(copy, /Main is also the Whodunnit courtroom establishing view/u);
     assert.match(copy, /Table and Witness switch/u);
-    assert.match(copy, /shared foreground while looking through the Moderator camera/u);
+    assert.match(copy, /Moderator camera has its own table position and scale/u);
+    assert.match(copy, /adjusting or resetting it leaves Main unchanged/u);
     assert.match(copy, /fourth shuffled Library bot/u);
     assert.match(copy, /Jury preview uses those four distinct bodies/u);
     assert.match(copy, /without inventing or erasing history/u);
@@ -3372,7 +3393,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalControlRoomStep.body,
-      /private Host note, direct Say this cue, or attached image arrives while the host is audibly speaking[\s\S]*pivots on mic[\s\S]*pause between words leaves an ellipsis/u,
+      /private Host note or direct Say this cue arrives while the host is audibly speaking[\s\S]*pivots on mic[\s\S]*Image uploads never take this redirect path[\s\S]*pause between words leaves an ellipsis/u,
     );
     assert.match(
       signalControlRoomStep.body,

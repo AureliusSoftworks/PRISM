@@ -6,7 +6,7 @@ import type {
 } from "@localai/shared";
 import {
   botcastEpisodeModelSelectionKind,
-  botcastLatestImageContextV1,
+  botcastSetupImageContextV1,
 } from "@localai/shared";
 
 export type SignalEpisodeRetryImage = {
@@ -73,7 +73,7 @@ export function signalEpisodeRetryDraft(args: {
     args.episode.model !== null &&
     modelAvailable;
   const imageContext = args.episode.events
-    ? botcastLatestImageContextV1(args.episode.events)
+    ? botcastSetupImageContextV1(args.episode.events)
     : null;
   // Legacy records only retain an emoji or a saved asset. Retrying them must
   // remain exactly as before: only a booking-owned archival proxy is reusable.

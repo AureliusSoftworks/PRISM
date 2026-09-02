@@ -38,7 +38,7 @@ describe("PrismBlockingLoader confirm-before-cancel contract", () => {
 
   it("requires in-card confirm before calling onCancel", () => {
     assert.match(source, /role="alertdialog"/u);
-    assert.match(source, /setConfirming\(true\)/u);
+    assert.match(source, /blockingLoaderCancelAction\(confirming, "request"\)/u);
     assert.match(source, /onCancel\?\.\(\)/u);
     assert.doesNotMatch(source, /window\.confirm/u);
   });
@@ -49,7 +49,8 @@ describe("PrismBlockingLoader confirm-before-cancel contract", () => {
   });
 
   it("anchors docked soft waits to the live companion while hard waits retain handoff", () => {
-    assert.match(source, /placement\?: PrismBlockingLoaderPlacement/u);
+    assert.match(source, /placement: "docked"; operation\?: never/u);
+    assert.match(source, /operation: "refraction"; onCancel: \(\) => void/u);
     assert.match(source, /placement === "docked"/u);
     assert.match(source, /data-prism-blocking-placement="docked"/u);
     assert.match(source, /useSyncExternalStore\(/u);

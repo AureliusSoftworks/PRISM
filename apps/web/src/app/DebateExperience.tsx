@@ -192,6 +192,7 @@ import {
   type PrismRefractMagicTarget,
 } from "./prismRefract";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
+import { usePrismRefractionRun } from "./usePrismRefractionRun.ts";
 import {
   PrismChromeNotice,
   PrismChromeNoticeViewport,
@@ -559,6 +560,7 @@ import {
   DEFAULT_DEBATE_STAGE_ALIGNMENT,
   copyDebateStageAlignment,
   debateStageEvidenceViewForCamera,
+  debateStageCourtPropForCamera,
   debateStageAlignmentOffset,
   debateStageAlignmentStyle,
   debateStageAlignmentTarget,
@@ -6422,6 +6424,7 @@ export function DebateExperience(
     useState<string | null>(null);
   const [newDuelGenerateBusy, setNewDuelGenerateBusy] = useState(false);
   const [motionOptionsBusy, setMotionOptionsBusy] = useState(false);
+  const [inventRun, inventRunOwner] = usePrismRefractionRun();
   const [inventWarmup, setInventWarmup] = useState<{
     phase: ModelWarmupIntermissionPhase;
     context: "invent" | "refract";
@@ -10797,28 +10800,31 @@ export function DebateExperience(
 
   const synthesize = useCallback(
     async (direction = "", topicOverride?: string): Promise<void> => {
-      const resolvedTopic = (
-        await expandDebateSeedDraft(topicOverride ?? topic)
-      ).trim();
-      if (!resolvedTopic || busy) return;
+      if (busy) return;
+      const run = inventRunOwner.begin({ timingKey: `debate:motions:${props.modelOverride?.provider ?? preferredProvider}:${props.modelOverride?.model ?? "auto"}:${props.reasoningEffort}:${props.turbo}` });
+      let success = false;
       inventWarmupAbortRef.current?.abort();
       const warmupController = new AbortController();
       inventWarmupAbortRef.current = warmupController;
       setBusy(true);
       setError(null);
       setInventWarmup(null);
-      setMotionOptionsBusy(false);
+      setMotionOptionsBusy(true);
+      setInventLoaderStartedAt(new Date(run.startedAt).toISOString());
       const preferred =
         props.modelOverride?.provider ?? preferredProvider;
       const preparationModel = props.modelOverride?.model ?? null;
       try {
-        const preparation = await waitForModelPreparation({
+        const resolvedTopic = (await run.wait(() => expandDebateSeedDraft(topicOverride ?? topic))).trim();
+        if (!resolvedTopic) return;
+        const preparation = await run.wait(() => waitForModelPreparation({
           request: props.request,
           provider: preferred,
           model: preparationModel,
           experience: "debate",
-          signal: warmupController.signal,
+          signal: run.signal,
           onStatus: (status) => {
+            if (!run.isCurrent()) return;
             if (status.state === "warming") {
               setInventWarmup({
                 phase: "held",
@@ -10837,7 +10843,7 @@ export function DebateExperience(
               });
             }
           },
-        });
+        }));
         if (preparation.state === "unavailable") {
           setError(
             modelPreparationFailureMessage({
@@ -10849,11 +10855,10 @@ export function DebateExperience(
         }
         setInventWarmup(null);
         setMotionOptionsBusy(true);
-        setInventLoaderStartedAt(new Date().toISOString());
         inventRequestAbortRef.current?.abort();
         const requestController = new AbortController();
         inventRequestAbortRef.current = requestController;
-        const result = await request<{
+        const result = await run.wait(() => request<{
           slates: DebateMotionSlateV1[];
           model: string;
           reasoningEffort: ProviderReasoningEffort;
@@ -10871,16 +10876,18 @@ export function DebateExperience(
               turbo: props.turbo,
               direction,
             }),
-            signal: requestController.signal,
+            signal: run.signal,
           },
-        );
+        ));
         setSlates(result.slates);
         setMotion(result.slates[0] ?? emptyDebateSlateForFormat(format));
         setRefractionNotice({
           title: "Refraction complete",
           detail: prismRefractProvenanceDetail(result),
         });
+        success = true;
       } catch (caught) {
+        if (!run.isCurrent()) return;
         if (
           caught instanceof DOMException &&
           caught.name === "AbortError"
@@ -10893,18 +10900,19 @@ export function DebateExperience(
             : "Synthesis was unavailable.",
         );
       } finally {
-        if (inventWarmupAbortRef.current === warmupController) {
+        if (run.finish(success)) {
           inventWarmupAbortRef.current = null;
+          inventRequestAbortRef.current = null;
+          setInventWarmup(null);
+          setMotionOptionsBusy(false);
+          setInventLoaderStartedAt(null);
+          setBusy(false);
         }
-        inventRequestAbortRef.current = null;
-        setInventWarmup(null);
-        setMotionOptionsBusy(false);
-        setInventLoaderStartedAt(null);
-        setBusy(false);
       }
     },
     [
       busy,
+      inventRunOwner,
       expandDebateSeedDraft,
       preferredProvider,
       props.modelOverride?.model,
@@ -10925,6 +10933,7 @@ export function DebateExperience(
       id: "debate:synthesize-motion-options",
       label: "Synthesize debate options",
       kind: "magic",
+      ownsPresentation: true,
       disabled: () =>
         !topic.trim() || busy || motionOptionsBusy || inventWarmup !== null,
       run: (direction) => synthesize(direction),
@@ -10982,12 +10991,14 @@ export function DebateExperience(
         });
         setActiveJurySeatIndex(anchorJurySeatIndex);
       };
-      applyAnchorToCurrentSetup();
+      const run = inventRunOwner.begin({ timingKey: `debate:duel:${props.modelOverride?.provider ?? props.preferredProvider}:${props.modelOverride?.model ?? "auto"}:${props.reasoningEffort}:${props.turbo}:${formatConstraint ?? "auto"}` });
+      let success = false;
       inventWarmupAbortRef.current?.abort();
       const warmupController = new AbortController();
       inventWarmupAbortRef.current = warmupController;
       setBusy(true);
-      setNewDuelGenerateBusy(false);
+      setNewDuelGenerateBusy(true);
+      setInventLoaderStartedAt(new Date(run.startedAt).toISOString());
       setInventWarmup(null);
       setSetupRestoreNotice(null);
       setError(null);
@@ -10999,13 +11010,14 @@ export function DebateExperience(
           ? (props.modelOverride?.model ?? null)
           : (props.modelOverride?.model ?? null);
       try {
-        const preparation = await waitForModelPreparation({
+        const preparation = await run.wait(() => waitForModelPreparation({
           request: props.request,
           provider: preferredProvider,
           model: preparationModel,
           experience: "debate",
-          signal: warmupController.signal,
+          signal: run.signal,
           onStatus: (status) => {
+            if (!run.isCurrent()) return;
             if (status.state === "warming") {
               setInventWarmup({
                 phase: "held",
@@ -11024,7 +11036,7 @@ export function DebateExperience(
               });
             }
           },
-        });
+        }));
         if (preparation.state === "unavailable") {
           setError(
             modelPreparationFailureMessage({
@@ -11035,10 +11047,7 @@ export function DebateExperience(
           return;
         }
         setInventWarmup(null);
-        startNewDebate();
-        applyAnchorToCurrentSetup();
         setNewDuelGenerateBusy(true);
-        setInventLoaderStartedAt(new Date().toISOString());
         inventRequestAbortRef.current?.abort();
         const requestController = new AbortController();
         inventRequestAbortRef.current = requestController;
@@ -11052,7 +11061,7 @@ export function DebateExperience(
               .filter(Boolean)
               .join(" ")
           : direction;
-        const result = await props.request<{
+        const result = await run.wait(() => props.request<{
           suggestion: DebateSetupSuggestionV1;
           provider: string;
           model: string;
@@ -11075,9 +11084,9 @@ export function DebateExperience(
               reasoningEffort: props.reasoningEffort,
               turbo: props.turbo,
             }),
-            signal: requestController.signal,
+            signal: run.signal,
           },
-        );
+        ));
         const applied = applyDebateSetupSuggestion(result.suggestion);
         const resolvedFormat = formatConstraint ?? applied.format;
         const resolvedPlayerRole =
@@ -11108,6 +11117,10 @@ export function DebateExperience(
                 availableBotIds: props.bots.map((bot) => bot.id),
               })
             : applied.cast;
+        const applyDraft = (): void => {
+        run.assertCurrent();
+        startNewDebate();
+        applyAnchorToCurrentSetup();
         setTopic(applied.topic);
         setFormat(resolvedFormat);
         setForumRoundMode(applied.forumRoundMode);
@@ -11176,8 +11189,11 @@ export function DebateExperience(
           }),
         });
         pendingBotDirectedSetupAnchorRef.current = null;
+        };
         if (resolvedFormat === "whodunnit") {
+          applyDraft();
           setRoleChecks([]);
+          success = true;
           return;
         }
         const roleChecksReady =
@@ -11194,14 +11210,16 @@ export function DebateExperience(
                   (resolvedPlayerRole === "judge" || resolvedCast.moderator),
               );
         if (!roleChecksReady) {
+          applyDraft();
           setRoleChecks([]);
+          success = true;
           return;
         }
-        const roleResult = await props.request<{
+        const roleResult = await run.wait(() => props.request<{
           checks: DebateAdvocacyConsent[];
         }>(
           "/api/debates/role-checks",
-          requestBody({
+          { ...requestBody({
             format: resolvedFormat,
             formality: applied.formality,
             motion: applied.motion,
@@ -11225,10 +11243,13 @@ export function DebateExperience(
             responseMode: props.responseMode,
             reasoningEffort: props.reasoningEffort,
             turbo: props.turbo,
-          }),
-        );
+          }), signal: run.signal },
+        ));
+        applyDraft();
         setRoleChecks(roleResult.checks);
+        success = true;
       } catch (caught) {
+        if (!run.isCurrent()) return;
         if (
           caught instanceof Error &&
           (caught.name === "AbortError" || /abort/iu.test(caught.message))
@@ -11241,19 +11262,19 @@ export function DebateExperience(
             : "Prism could not invent a New Duel.",
         );
       } finally {
-        if (inventWarmupAbortRef.current === warmupController) {
+        if (run.finish(success)) {
           inventWarmupAbortRef.current = null;
+          inventRequestAbortRef.current = null;
+          setBusy(false);
+          setNewDuelGenerateBusy(false);
+          setInventLoaderStartedAt(null);
+          setInventWarmup(null);
+          pendingBotDirectedSetupAnchorRef.current = null;
         }
-        inventRequestAbortRef.current = null;
-        setBusy(false);
-        setNewDuelGenerateBusy(false);
-        setInventLoaderStartedAt(null);
-        setInventWarmup((current) =>
-          current?.phase === "failed" ? current : null,
-        );
       }
     },
     [
+      inventRunOwner,
       props.bots,
       props.modelOverride?.model,
       props.modelOverride?.provider,
@@ -11338,7 +11359,8 @@ export function DebateExperience(
   };
 
   const refractEvidenceSection = useCallback(
-    async (direction: string): Promise<void> => {
+    async (direction: string, signal = new AbortController().signal): Promise<void> => {
+      signal.throwIfAborted();
       // Wielding Prism at the record is still a way of seeing it, so the judge
       // is held out here too.
       if (judgeOwnsHiddenEvidence) return;
@@ -11348,7 +11370,6 @@ export function DebateExperience(
         motion.motion.trim() ||
         topic.trim() ||
         "a surprising physical prop for this proceeding";
-      const controller = new AbortController();
       const resolvedProvenance: PrismRefractResponse[] = [];
       let usedDeterministicFallback = false;
       const refractField = async (
@@ -11361,7 +11382,7 @@ export function DebateExperience(
             kind,
             currentValue,
             rejectedValues,
-            controller.signal,
+            signal,
             (response) => {
               resolvedProvenance.push(response);
             },
@@ -11387,6 +11408,7 @@ export function DebateExperience(
         const pair2 = await refractField("debate.setup.exhibitPair", seed, [
           pair1,
         ]);
+        signal.throwIfAborted();
         const drafts: DebateEvidenceObjectDraft[] = [];
         for (const pair of [pair1, pair2]) {
           const parsed = debateEvidenceObjectFromPrismCandidate(pair);
@@ -11535,7 +11557,7 @@ export function DebateExperience(
       label: "Refresh optional evidence",
       kind: "magic",
       disabled: () => busy || evidenceObjectSuggestionBusy,
-      run: (direction) => void refractEvidenceSection(direction),
+      run: (direction, signal) => refractEvidenceSection(direction, signal),
     }),
     [
       busy,
@@ -24008,6 +24030,7 @@ export function DebateExperience(
               disabled={!objectTitle || evidenceObjectUploadBusy}
               onUpload={() => evidenceExhibitUploadRef.current?.click()}
               onSynthesize={synthesizeEvidenceObjectImage}
+              ownsPresentation
               onSelect={(asset) => {
                 const member =
                   asset.members.find((candidate) => candidate.role === "primary") ??
@@ -26985,10 +27008,8 @@ export function DebateExperience(
       stageAlignmentPreviewCamera === "wide" &&
       stageAlignmentWhodunnitPreview === null &&
       !stageAlignmentJuryPreview;
-    // The Main foreground is one shared presentation state, not a Wide-only
-    // decoration. Keep it mounted through every Forum camera so switching to
-    // Moderator does not silently drop the active table (or replace it with a
-    // witness silhouette).
+    // Preserve the active foreground when cameras change. The table's pose is
+    // camera-owned even though the choice of table or witness stays shared.
     const stageAlignmentCourtForegroundVisible =
       stageAlignmentWhodunnitPreview === null && !stageAlignmentJuryPreview;
     const stageAlignmentMainCourtTunerVisible =
@@ -26999,11 +27020,15 @@ export function DebateExperience(
       "wideEvidenceTable",
       "wideWitnessSilhouette",
     ] as const satisfies readonly DebateStageWhodunnitCourtItem[];
+    const activeMainCourtItem = debateStageCourtPropForCamera(
+      stageAlignmentMainCourtProp,
+      stageAlignmentPreviewCamera,
+    );
     const activeMainCourtPlacement =
-      stageAlignmentDraft.whodunnitCourt[stageAlignmentMainCourtProp];
+      stageAlignmentDraft.whodunnitCourt[activeMainCourtItem];
     const defaultActiveMainCourtPlacement =
       DEFAULT_DEBATE_STAGE_ALIGNMENT.whodunnitCourt[
-        stageAlignmentMainCourtProp
+        activeMainCourtItem
       ];
     const whodunnitPreviewItems: readonly DebateStageWhodunnitCourtItem[] =
       stageAlignmentWhodunnitPreview === "witness"
@@ -27018,6 +27043,7 @@ export function DebateExperience(
       string
     > = {
       wideEvidenceTable: "Evidence table",
+      moderatorEvidenceTable: "Moderator evidence table",
       wideWitnessSilhouette: "Witness silhouette",
       witness: "Witness",
       prosecutionMini: "Prosecution mini",
@@ -27030,11 +27056,15 @@ export function DebateExperience(
         JSON.stringify(stageAlignmentDraft.whodunnitCourt[item]) ===
         JSON.stringify(DEFAULT_DEBATE_STAGE_ALIGNMENT.whodunnitCourt[item]),
     );
-    const mainCourtPropsAreDefault = mainCourtPropItems.every(
-      (item) =>
-        JSON.stringify(stageAlignmentDraft.whodunnitCourt[item]) ===
-        JSON.stringify(DEFAULT_DEBATE_STAGE_ALIGNMENT.whodunnitCourt[item]),
-    );
+    const mainCourtPropsAreDefault = mainCourtPropItems
+      .map((item) =>
+        debateStageCourtPropForCamera(item, stageAlignmentPreviewCamera),
+      )
+      .every(
+        (item) =>
+          JSON.stringify(stageAlignmentDraft.whodunnitCourt[item]) ===
+          JSON.stringify(DEFAULT_DEBATE_STAGE_ALIGNMENT.whodunnitCourt[item]),
+      );
     const juryPreviewIsDefault =
       JSON.stringify(stageAlignmentDraft.juryChamber) ===
       JSON.stringify(DEFAULT_DEBATE_STAGE_ALIGNMENT.juryChamber);
@@ -27338,7 +27368,7 @@ export function DebateExperience(
                     : stageAlignmentWhodunnitPreview === "witness"
                       ? "Place the witness, both live counsel minis, and the witness identity plate in the locked testimony camera."
                       : stageAlignmentPreviewCamera === "moderator"
-                        ? "Place the moderator bot, nameplate, and glyph plate independently, then tune the shared foreground table from this camera."
+                        ? "Place the moderator bot, nameplate, and glyph plate independently, then tune this camera's separate foreground table."
                         : stageAlignmentPreviewCamera === "wide"
                           ? "Place every bot, nameplate, and glyph plate in Main, then tune its evidence table and witness silhouette independently."
                           : `Place the source pamphlet and exhibit independently in the ${stageAlignmentPreviewCameraLabel} debater close-up.`}{" "}
@@ -27479,9 +27509,9 @@ export function DebateExperience(
                                 gavel: DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel,
                                 whodunnitCourt: {
                                   ...current.whodunnitCourt,
-                                  wideEvidenceTable:
+                                  moderatorEvidenceTable:
                                     DEFAULT_DEBATE_STAGE_ALIGNMENT
-                                      .whodunnitCourt.wideEvidenceTable,
+                                      .whodunnitCourt.moderatorEvidenceTable,
                                   wideWitnessSilhouette:
                                     DEFAULT_DEBATE_STAGE_ALIGNMENT
                                       .whodunnitCourt.wideWitnessSilhouette,
@@ -27840,7 +27870,7 @@ export function DebateExperience(
                           aria-label={
                             stageAlignmentMainCourtProp ===
                             "wideEvidenceTable"
-                              ? "Main evidence table preview"
+                              ? `${stageAlignmentPreviewCameraLabel} evidence table preview`
                               : "Main witness silhouette preview"
                           }
                         >
@@ -29091,6 +29121,7 @@ export function DebateExperience(
                     aria-label={`${stageAlignmentPreviewCameraLabel} courtroom foreground controls`}
                     data-debate-main-court-prop-tuner="true"
                     data-main-court-prop={stageAlignmentMainCourtProp}
+                    data-court-alignment-item={activeMainCourtItem}
                     data-court-tuner-view={stageAlignmentPreviewCamera}
                   >
                     <header>
@@ -29115,7 +29146,7 @@ export function DebateExperience(
                           setStageAlignmentDraft((current) =>
                             updateDebateStageWhodunnitCourtPlacement(
                               current,
-                              stageAlignmentMainCourtProp,
+                              activeMainCourtItem,
                               defaultActiveMainCourtPlacement,
                             ),
                           )
@@ -29200,7 +29231,7 @@ export function DebateExperience(
                                 setStageAlignmentDraft((current) =>
                                   updateDebateStageWhodunnitCourtPlacement(
                                     current,
-                                    stageAlignmentMainCourtProp,
+                                    activeMainCourtItem,
                                     { [control.key]: nextValue },
                                   ),
                                 );
@@ -29211,9 +29242,9 @@ export function DebateExperience(
                       </div>
                     </div>
                     <small>
-                      Table and witness silhouette retain separate saved
-                      positions. The foreground is shared with Main, live
-                      presentation, and replay.
+                      Main and Moderator save separate table positions and
+                      scales. The witness silhouette stays shared across
+                      cameras.
                     </small>
                   </section>
                 ) : null}
@@ -33419,7 +33450,7 @@ export function DebateExperience(
         />
       ) : null}
       {renderStageAlignmentModal(activeSession)}
-      {inventWarmup ? (
+      {inventWarmup && !newDuelGenerateBusy && !motionOptionsBusy ? (
         <ModelWarmupIntermission
           phase={inventWarmup.phase}
           experience="debate"
@@ -33461,46 +33492,38 @@ export function DebateExperience(
       ) : null}
       <PrismBlockingLoader
         open={newDuelGenerateBusy}
+        operation="refraction"
+        operationId={inventRun?.id}
         title="Inventing a New Duel"
         detail="Prism is casting the motion, advocates, room tone, and evidence packet for a fresh editable workbench."
-        stepLabel="Building the Debate Studio draft"
+        stepLabel={inventWarmup ? `Preparing ${inventWarmup.model ?? "the model"}` : "Building the Debate Studio draft"}
         progress={null}
         startedAt={inventLoaderStartedAt}
+        estimatedDurationMs={inventRun?.estimatedDurationMs}
         theme={props.theme}
         footer="Start stays unpressed until you review the draft."
         cancelLabel="Stop inventing"
         cancelConfirmTitle="Stop inventing this duel?"
-        cancelConfirmDetail="This invent request will stop. Your studio stays as it was."
         onCancel={() => {
-          inventRequestAbortRef.current?.abort();
-          inventRequestAbortRef.current = null;
-          inventWarmupAbortRef.current?.abort();
-          inventWarmupAbortRef.current = null;
-          setNewDuelGenerateBusy(false);
-          setInventLoaderStartedAt(null);
-          setBusy(false);
+          inventRunOwner.cancel();
         }}
       />
       <PrismBlockingLoader
         open={motionOptionsBusy}
+        operation="refraction"
+        operationId={inventRun?.id}
         title="Synthesizing debate options"
         detail="Prism is refracting motion options for this topic into editable slates."
-        stepLabel="Building motion options"
+        stepLabel={inventWarmup ? `Preparing ${inventWarmup.model ?? "the model"}` : "Building motion options"}
         progress={null}
         startedAt={inventLoaderStartedAt}
+        estimatedDurationMs={inventRun?.estimatedDurationMs}
         theme={props.theme}
         footer="Keep this window open while the light takes shape."
         cancelLabel="Stop synthesizing"
         cancelConfirmTitle="Stop synthesizing options?"
-        cancelConfirmDetail="This invent request will stop. You can try again whenever you are ready."
         onCancel={() => {
-          inventRequestAbortRef.current?.abort();
-          inventRequestAbortRef.current = null;
-          inventWarmupAbortRef.current?.abort();
-          inventWarmupAbortRef.current = null;
-          setMotionOptionsBusy(false);
-          setInventLoaderStartedAt(null);
-          setBusy(false);
+          inventRunOwner.cancel();
         }}
       />
       <PrismBlockingLoader

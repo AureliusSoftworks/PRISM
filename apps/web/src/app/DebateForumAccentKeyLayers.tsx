@@ -12,7 +12,7 @@ function ForumArchitectureAccent(props: {
       <svg
         className={styles.forumAccentArchitecture}
         viewBox="0 0 1672 941"
-        preserveAspectRatio="none"
+        preserveAspectRatio="xMidYMid slice"
         aria-hidden="true"
       >
         <g className={styles.forumAccentRoleFor} data-role="for">
@@ -38,7 +38,7 @@ function ForumArchitectureAccent(props: {
     <svg
       className={styles.forumAccentArchitecture}
       viewBox="0 0 1672 941"
-      preserveAspectRatio="none"
+      preserveAspectRatio="xMidYMid slice"
       aria-hidden="true"
     >
       <g className={styles.forumAccentRoleFor} data-role="for">

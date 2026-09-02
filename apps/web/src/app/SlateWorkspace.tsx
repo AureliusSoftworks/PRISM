@@ -102,6 +102,7 @@ import { SlateDirectionQuestion } from "./SlateDirectionQuestion";
 import { SlateDirectorBar } from "./SlateDirectorBar";
 import { SlateCreativeStudiosDesk } from "./SlateCreativeStudiosDesk";
 import { AssetRail, type AssetGenerationSelection, type AssetRailGenerationControl } from "./AssetLibrary";
+import { prismRefractionRequestInit, waitForRefraction } from "./prismRefractionRun.ts";
 import { SlateFullBookReader } from "./SlateFullBookReader";
 import { SlateMirrorDesk } from "./SlateMirrorDesk";
 import {
@@ -430,6 +431,7 @@ let slateForegroundModelProvider: SlateAiProvider | undefined;
 let slateForegroundModelOverride: string | null | undefined;
 
 async function slateApi<T>(path: string, init: RequestInit = {}): Promise<T> {
+  init = prismRefractionRequestInit(init);
   const headers = new Headers(init.headers);
   if (init.body && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
@@ -1063,7 +1065,9 @@ export default function SlateWorkspace({
       quiet = false,
       direction = "",
       selection?: AssetGenerationSelection,
+      signal = new AbortController().signal,
     ): Promise<void> => {
+      signal.throwIfAborted();
       setCoverGeneratingProjectIds((current) => {
         const next = new Set(current);
         next.add(projectId);
@@ -1071,10 +1075,11 @@ export default function SlateWorkspace({
       });
       if (!quiet) setError(null);
       try {
-        const response = await slateApi<SlateProjectResponse>(
+        const response = await waitForRefraction(signal, () => slateApi<SlateProjectResponse>(
           `/api/slate/projects/${encodeURIComponent(projectId)}/cover`,
           {
             method: "POST",
+            signal,
             body: JSON.stringify({
               direction,
               ...(selection
@@ -1082,7 +1087,7 @@ export default function SlateWorkspace({
                 : {}),
             }),
           },
-        );
+        ));
         setProjects((current) =>
           current.map((item) =>
             item.id === projectId ? response.project : item,
@@ -1092,6 +1097,7 @@ export default function SlateWorkspace({
           adoptProject(response.project);
         }
       } catch (cause) {
+        if (signal.aborted) return;
         if (!quiet) {
           setError(
             cause instanceof Error
@@ -4357,8 +4363,8 @@ export default function SlateWorkspace({
                   refreshKey={project.cover.imageId}
                   disabled={coverGeneratingProjectIds.has(project.id)}
                   onUpload={() => coverUploadRef.current?.click()}
-                  onSynthesize={(direction, selection) =>
-                    synthesizeProjectCover(project.id, false, direction, selection)
+                  onSynthesize={(direction, selection, signal) =>
+                    synthesizeProjectCover(project.id, false, direction, selection, signal)
                   }
                   onSelect={(asset) => reuseProjectCover(project.id, asset.id)}
                 />

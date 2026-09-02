@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -24,6 +25,8 @@ import {
   type ModelWarmupIntermissionPhase,
 } from "./ModelWarmupIntermission";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
+import { usePrismRefractionRun } from "./usePrismRefractionRun.ts";
+import { isRefractionAbort, waitForRefraction } from "./prismRefractionRun.ts";
 
 export type PrismRefractionWarmupContext = "session" | "invent" | "refract";
 
@@ -33,6 +36,8 @@ export interface PrismRefractionLoaderCopy {
   stepLabel: string;
   theme?: "light" | "dark";
   footer?: string;
+  /** Include operation and effective provider/model; omit when routing is unknown. */
+  timingKey?: string;
 }
 
 interface WarmupUiState {
@@ -56,7 +61,8 @@ interface PrismRefractionGateValue {
   }) => Promise<ModelPreparationResponse>;
   withRefractionLoader: <T>(args: {
     loader: PrismRefractionLoaderCopy;
-    work: () => Promise<T>;
+    work: (signal: AbortSignal) => Promise<T>;
+    signal?: AbortSignal;
     onCancel?: () => void;
   }) => Promise<T>;
   runLocalRefraction: <T>(args: {
@@ -66,7 +72,7 @@ interface PrismRefractionGateValue {
     context?: PrismRefractionWarmupContext;
     signal?: AbortSignal;
     loader: PrismRefractionLoaderCopy;
-    work: () => Promise<T>;
+    work: (signal: AbortSignal) => Promise<T>;
     onCancel?: () => void;
   }) => Promise<T>;
 }
@@ -106,9 +112,9 @@ export function PrismRefractionGateProvider(props: {
   const request = props.request ?? defaultGateRequest;
   const [warmup, setWarmup] = useState<WarmupUiState | null>(null);
   const [loader, setLoader] = useState<PrismRefractionLoaderCopy | null>(null);
-  const [loaderStartedAt, setLoaderStartedAt] = useState<string | null>(null);
-  const loaderCancelRef = useRef<(() => void) | null>(null);
+  const [activeRun, runOwner] = usePrismRefractionRun();
   const warmupAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => warmupAbortRef.current?.abort(), []);
 
   const clearWarmup = useCallback((): void => {
     setWarmup(null);
@@ -128,16 +134,18 @@ export function PrismRefractionGateProvider(props: {
       warmupAbortRef.current = controller;
       const onAbort = (): void => controller.abort();
       args.signal?.addEventListener("abort", onAbort, { once: true });
+      if (args.signal?.aborted) controller.abort();
       const context = args.context ?? "refract";
       const initial = args.initial ?? true;
       try {
-        const preparation = await waitForModelPreparation({
+        const preparation = await waitForRefraction(controller.signal, () => waitForModelPreparation({
           request,
           provider: args.provider,
           model: args.model ?? null,
           experience: args.experience,
           signal: controller.signal,
           onStatus: (status) => {
+            if (controller.signal.aborted || warmupAbortRef.current !== controller) return;
             if (status.state === "warming") {
               setWarmup({
                 phase: "held",
@@ -160,7 +168,9 @@ export function PrismRefractionGateProvider(props: {
               });
             }
           },
-        });
+        }));
+        controller.signal.throwIfAborted();
+        if (warmupAbortRef.current !== controller) throw new DOMException("Replaced", "AbortError");
         if (preparation.state === "unavailable") {
           setWarmup({
             phase: "failed",
@@ -176,13 +186,11 @@ export function PrismRefractionGateProvider(props: {
         clearWarmup();
         return preparation;
       } catch (error) {
-        if (
-          error instanceof DOMException &&
-          error.name === "AbortError"
-        ) {
-          clearWarmup();
+        if (isRefractionAbort(error) || controller.signal.aborted) {
+          if (warmupAbortRef.current === controller) clearWarmup();
           throw error;
         }
+        if (warmupAbortRef.current !== controller) throw error;
         setWarmup({
           phase: "failed",
           experience: args.experience,
@@ -206,21 +214,28 @@ export function PrismRefractionGateProvider(props: {
   const withRefractionLoader = useCallback(
     async <T,>(args: {
       loader: PrismRefractionLoaderCopy;
-      work: () => Promise<T>;
+      work: (signal: AbortSignal) => Promise<T>;
+      signal?: AbortSignal;
       onCancel?: () => void;
     }): Promise<T> => {
-      setLoader(args.loader);
-      setLoaderStartedAt(new Date().toISOString());
-      loaderCancelRef.current = args.onCancel ?? null;
+      const run = runOwner.begin({ timingKey: args.loader.timingKey, signal: args.signal });
+      if (run.isCurrent()) setLoader(args.loader);
+      const cancelled = (): void => args.onCancel?.();
+      run.signal.addEventListener("abort", cancelled, { once: true });
+      let success = false;
       try {
-        return await args.work();
+        const result = await run.wait(args.work);
+        success = true;
+        return result;
       } finally {
-        setLoader(null);
-        setLoaderStartedAt(null);
-        loaderCancelRef.current = null;
+        run.signal.removeEventListener("abort", cancelled);
+        if (run.finish(success)) {
+          setLoader(null);
+          clearWarmup();
+        }
       }
     },
-    [],
+    [clearWarmup, runOwner],
   );
 
   const runLocalRefraction = useCallback(
@@ -231,24 +246,25 @@ export function PrismRefractionGateProvider(props: {
       context?: PrismRefractionWarmupContext;
       signal?: AbortSignal;
       loader: PrismRefractionLoaderCopy;
-      work: () => Promise<T>;
+      work: (signal: AbortSignal) => Promise<T>;
       onCancel?: () => void;
     }): Promise<T> => {
-      const preparation = await prepareLocalModel({
-        provider: args.provider,
-        model: args.model,
-        experience: args.experience,
-        context: args.context,
-        signal: args.signal,
-      });
-      if (preparation.state === "unavailable") {
-        throw new Error(
-          modelPreparationFailureMessage({ failure: preparation.failure }),
-        );
-      }
       return withRefractionLoader({
-        loader: args.loader,
-        work: args.work,
+        loader: {
+          ...args.loader,
+          timingKey: args.loader.timingKey ?? (args.model?.trim()
+            ? `${args.experience}:${args.loader.title}:${args.provider}:${args.model}`
+            : undefined),
+        },
+        signal: args.signal,
+        work: async (signal) => {
+          const preparation = await prepareLocalModel({ ...args, signal });
+          signal.throwIfAborted();
+          if (preparation.state === "unavailable") {
+            throw new Error(modelPreparationFailureMessage({ failure: preparation.failure }));
+          }
+          return args.work(signal);
+        },
         onCancel: args.onCancel,
       });
     },
@@ -267,7 +283,7 @@ export function PrismRefractionGateProvider(props: {
   return (
     <PrismRefractionGateContext.Provider value={value}>
       {props.children}
-      {warmup ? (
+      {warmup && !loader ? (
         <ModelWarmupIntermission
           phase={warmup.phase}
           experience={warmup.experience}
@@ -285,32 +301,22 @@ export function PrismRefractionGateProvider(props: {
         />
       ) : null}
       <PrismBlockingLoader
-        open={loader !== null}
+        open={activeRun !== null}
+        operation="refraction"
+        operationId={activeRun?.id}
         title={loader?.title ?? "Refracting"}
         detail={loader?.detail ?? "Prism is shaping a fresh reading."}
-        stepLabel={loader?.stepLabel ?? "Working"}
+        stepLabel={warmup ? `Preparing ${warmup.model ?? "the model"}` : loader?.stepLabel ?? "Working"}
         progress={null}
-        startedAt={loaderStartedAt}
+        startedAt={activeRun?.startedAt}
+        estimatedDurationMs={activeRun?.estimatedDurationMs}
         theme={loader?.theme}
         footer={
           loader?.footer ?? "Keep this window open while the light takes shape."
         }
         cancelLabel="Cancel refraction"
         cancelConfirmTitle="Stop refracting?"
-        cancelConfirmDetail="This invent request will stop. You can try again whenever you are ready."
-        onCancel={
-          loader
-            ? () => {
-                loaderCancelRef.current?.();
-                warmupAbortRef.current?.abort();
-                warmupAbortRef.current = null;
-                setLoader(null);
-                setLoaderStartedAt(null);
-                loaderCancelRef.current = null;
-                clearWarmup();
-              }
-            : undefined
-        }
+        onCancel={() => runOwner.cancel()}
       />
     </PrismRefractionGateContext.Provider>
   );

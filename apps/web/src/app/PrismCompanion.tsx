@@ -2715,7 +2715,7 @@ export default function PrismCompanion({
         document.documentElement.removeAttribute(PRISM_REFRACT_CURSOR_ATTRIBUTE);
         setRefractStatus(`Prism is refracting ${target.label}.`);
         window.requestAnimationFrame(() => {
-          void Promise.resolve(target.run("")).catch((error) => {
+          void Promise.resolve(target.run("", new AbortController().signal)).catch((error) => {
             onError?.(
               error instanceof Error
                 ? error.message
@@ -2838,15 +2838,18 @@ export default function PrismCompanion({
                 title: target.label,
                 detail: "Prism is shaping this Wield action with your navbar routing.",
                 stepLabel: "Refracting",
+                timingKey: target.timingKey,
               },
-              work: async () => {
-                await Promise.resolve(target.run(direction));
+              work: async (signal) => {
+                await Promise.resolve(target.run(direction, signal));
+                signal.throwIfAborted();
               },
             });
             return;
           }
-          await Promise.resolve(target.run(direction));
+          await Promise.resolve(target.run(direction, new AbortController().signal));
         } catch (error) {
+          if (error instanceof Error && error.name === "AbortError") return;
           onError?.(
             error instanceof Error
               ? error.message
@@ -2906,7 +2909,7 @@ export default function PrismCompanion({
       if (!choice) return;
       const keepOpen = target.keepOpen === true;
       if (!keepOpen) releasePrismRefract(false);
-      void Promise.resolve(target.run(choice.value))
+      void Promise.resolve(target.run(choice.value, new AbortController().signal))
         .then(() => {
           if (keepOpen) {
             setRefractStatus(

@@ -313,17 +313,41 @@ const DEBATE_FLYTING_STAGE_ALIGNMENT_DEFAULT_OVERRIDES: Partial<
     skewX: 0,
     skewY: 0,
   },
+  galleryBotsContainer: {
+    x: 0,
+    y: -2.75,
+    scale: 97,
+    rotation: 0,
+    skewX: 0,
+    skewY: 0,
+  },
+  galleryHelmets: {
+    x: -21.38,
+    y: -13.02,
+    scale: 73,
+    rotation: 0,
+    skewX: 0,
+    skewY: 0,
+  },
   galleryForRugGlyph: {
-    x: 0.02,
-    y: -8.45,
+    x: -0.77,
+    y: -13.87,
     scale: 100,
     rotation: 0,
     skewX: -20,
     skewY: 0,
   },
+  galleryModeratorRugGlyph: {
+    x: -0.04,
+    y: -14.77,
+    scale: 100,
+    rotation: 0,
+    skewX: 0,
+    skewY: 0,
+  },
   galleryAgainstRugGlyph: {
-    x: 0.59,
-    y: -4.84,
+    x: 1.22,
+    y: -11.7,
     scale: 100,
     rotation: 0,
     skewX: 20,
@@ -345,7 +369,7 @@ export const DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT: DebateFlytingStageAlignment
 
 export const DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS = {
   galleryBotScale: 60,
-  galleryMaxVerticalRoam: 30,
+  galleryMaxVerticalRoam: 60,
 } as const;
 
 function normalizedNumber(

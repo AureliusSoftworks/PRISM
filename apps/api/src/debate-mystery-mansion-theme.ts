@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { assertRefractionActive } from "./refraction-cancellation.ts";
 import {
   MANSION_MUSIC_ACTIVE_LOGICAL_ID_V1,
   MANSION_MUSIC_CANDIDATE_LOGICAL_ID_V1,
@@ -363,6 +364,7 @@ async function generateTheme(args: {
       unavailableMessage: "ElevenLabs Music is unavailable; the current mansion music is unchanged.",
       fetchImpl: args.fetchImpl,
     });
+    assertRefractionActive();
     const title = candidateTitle(bundle.name);
     const assetId = storeTheme({
       ...args,

@@ -7,6 +7,7 @@ import {
   updateSlateProject,
 } from "./slate.ts";
 import { createSlateContinuitySource } from "./slate-continuity.ts";
+import { assertRefractionActive, currentRefractionSignal } from "./refraction-cancellation.ts";
 
 export const SLATE_TRANSCRIPT_STORY_MAX_LENGTH = 120_000;
 
@@ -94,6 +95,7 @@ export async function createSlateTranscriptStory(
   rawInput: SlateTranscriptStoryRequest,
   ai: SlateAiOperationInput,
 ): Promise<SlateProjectDetail> {
+  assertRefractionActive();
   if (!rawInput || typeof rawInput !== "object") {
     throw new Error("Choose a transcript before creating a Slate story.");
   }
@@ -130,6 +132,7 @@ export async function createSlateTranscriptStory(
     ],
     {
       model: ai.model,
+      signal: currentRefractionSignal(),
       ...(ai.reasoningEffort
         ? { reasoningEffort: ai.reasoningEffort }
         : {}),
@@ -142,6 +145,7 @@ export async function createSlateTranscriptStory(
       usagePurpose: "slate_transcript_story",
     },
   );
+  assertRefractionActive();
   const generated = parseGeneratedStory(raw);
 
   let projectId: string | null = null;

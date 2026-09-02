@@ -227,10 +227,23 @@ describe("Debate audience casting", () => {
     );
     assert.ok(new Set(frontPlans.map((plan) => plan.offsetXPercent)).size > 8);
     assert.ok(frontPlans.every((plan) => Math.abs(plan.offsetXPercent) <= 13));
-    assert.equal(DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT, 30);
-    assert.ok(frontPlans.every((plan) => Math.abs(plan.offsetYPercent) <= 12));
+    assert.equal(DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT, 60);
+    assert.ok(frontPlans.every((plan) => Math.abs(plan.offsetYPercent) <= 24));
     assert.ok(frontPlans.every((plan) => Math.abs(plan.driftXPercent) <= 10));
-    assert.ok(frontPlans.every((plan) => Math.abs(plan.driftYPercent) <= 18));
+    assert.ok(frontPlans.every((plan) => Math.abs(plan.driftYPercent) <= 36));
+    assert.ok(
+      frontPlans.every(
+        (plan) =>
+          Math.abs(plan.offsetYPercent) + Math.abs(plan.driftYPercent) <=
+          DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT,
+      ),
+    );
+    assert.ok(
+      frontPlans.some(
+        (plan) =>
+          Math.abs(plan.offsetYPercent) + Math.abs(plan.driftYPercent) > 30,
+      ),
+    );
     assert.ok(
       frontPlans.every(
         (plan) => plan.durationMs >= 4_200 && plan.durationMs <= 6_900,

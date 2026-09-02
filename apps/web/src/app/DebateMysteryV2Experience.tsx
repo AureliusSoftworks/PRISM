@@ -57,6 +57,7 @@ import {
 import IdentityPresentationBlackout from "./IdentityPresentationBlackout";
 import SceneMediaVignette from "./SceneMediaVignette";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
+import { usePrismRefractionRun } from "./usePrismRefractionRun.ts";
 import { registerPrismSoftSynthesisJobs } from "./prismSoftSynthesisUi.ts";
 import { PrismRefractTarget } from "./prismRefract";
 import { debateIdentityAppearanceBotV1 } from "./debateIdentityPresentation";
@@ -1347,6 +1348,15 @@ interface WhodunnitItemSynthesisJob {
   error: string | null;
 }
 
+interface WhodunnitRoomUpgradeSynthesisJob {
+  id: string;
+  roomId: string;
+  title: string;
+  status: "refracting" | "ready" | "failed";
+  startedAt: string;
+  error: string | null;
+}
+
 function whodunnitRoomVisualReadiness(
   room: DebateMysteryRoomV2,
   upgradeStatus: DebateMysteryRoomArtUpgradeStatusV1 | null,
@@ -1618,6 +1628,8 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   >("idle");
   const [roomVisualsMode, setRoomVisualsMode] = useState(false);
   const [roomVisualDialogId, setRoomVisualDialogId] = useState<string | null>(null);
+  const [roomVisualRun, roomVisualRunOwner] = usePrismRefractionRun();
+  const [sceneRepairRun, sceneRepairRunOwner] = usePrismRefractionRun();
   const [roomVisualJob, setRoomVisualJob] = useState<{
     kind: "generate" | "upgrade";
     roomId: string;
@@ -1626,6 +1638,12 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const [roomVisualResult, setRoomVisualResult] = useState<
     "idle" | "generated" | "upgraded" | "failed"
   >("idle");
+  const [roomUpgradeConfirmationRoomId, setRoomUpgradeConfirmationRoomId] =
+    useState<string | null>(null);
+  const [roomUpgradeSynthesisJob, setRoomUpgradeSynthesisJob] = useState<
+    WhodunnitRoomUpgradeSynthesisJob | null
+  >(null);
+  const roomUpgradeSynthesisJobIdRef = useRef<string | null>(null);
   const [sceneRepairOpen, setSceneRepairOpen] = useState<"exterior" | string | null>(null);
   const [sceneRepairJob, setSceneRepairJob] = useState<{
     action: DebateMysterySceneRepairActionV1 | "undo";
@@ -1706,6 +1724,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     });
     setFailedUpgradeRoomIds(new Set());
     setLoadedUpgradeRoomIds(new Set());
+    roomUpgradeSynthesisJobIdRef.current = null;
+    setRoomUpgradeConfirmationRoomId(null);
+    setRoomUpgradeSynthesisJob(null);
     return () => {
       disposed = true;
     };
@@ -2068,7 +2089,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   );
   const roomDialogueBot = presentMysteryBot(botForDialogue(props, state, roomDisplayedDialogue));
   const roomProsecutorActive = roomDisplayedDialogue?.speakerBotId === state.config.prosecutorBotId;
-  const roomActorVisible = Boolean(
+  const roomActorEligible = Boolean(
     currentBot &&
       command !== "examine" &&
       !roomProsecutorActive &&
@@ -2179,6 +2200,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const roomVisualDialogRoom = roomVisualDialogId
     ? state.rooms.find((room) => room.id === roomVisualDialogId) ?? null
     : null;
+  const roomUpgradeConfirmationRoom = roomUpgradeConfirmationRoomId
+    ? state.rooms.find((room) => room.id === roomUpgradeConfirmationRoomId) ?? null
+    : null;
   const roomVisualDialogReadiness = roomVisualDialogRoom
     ? roomVisualResult === "upgraded"
       ? "upgraded"
@@ -2205,6 +2229,8 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   };
   const generateRoomVisual = async (room: DebateMysteryRoomV2): Promise<void> => {
     if (roomVisualJob || props.session.responseMode === "local") return;
+    const run = roomVisualRunOwner.begin();
+    let success = false;
     setRoomVisualJob({
       kind: "generate",
       roomId: room.id,
@@ -2213,37 +2239,42 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     setRoomVisualResult("idle");
     setError(null);
     try {
-      const result = await props.request<{
+      const result = await run.wait(() => props.request<{
         requeued: number;
         session: DebateSessionV1;
       }>(
         `/api/debates/${encodeURIComponent(props.session.id)}/mystery-assets/retry`,
-        mutationBody({ category: "mosaic_rooms", roomId: room.id }),
-      );
-      props.onSessionChange(result.session);
+        { ...mutationBody({ category: "mosaic_rooms", roomId: room.id }), signal: run.signal },
+      ));
       const next = result.session.formatState;
       const prepared = next.format === "whodunnit" && next.version === 2
         ? next.rooms.find((candidate) => candidate.id === room.id)
         : null;
       if (prepared?.sealedAsset?.status === "ready") {
-        setRoomVisualResult("generated");
-        const status = await props.request<DebateMysteryRoomArtUpgradeStatusV1>(
+        const status = await run.wait(() => props.request<DebateMysteryRoomArtUpgradeStatusV1>(
           `/api/debates/${encodeURIComponent(props.session.id)}/mystery-room-art/upgrade`,
-        );
+          { signal: run.signal },
+        ));
         setRoomArtUpgradeStatus(status);
+        setRoomVisualResult("generated");
+        success = true;
       } else {
         setRoomVisualResult("failed");
         setError("This room could not replace its fallback within the bounded visual retry.");
       }
+      props.onSessionChange(result.session);
     } catch (caught) {
+      if (!run.isCurrent()) return;
       setRoomVisualResult("failed");
       setError(caught instanceof Error ? caught.message : "This room could not be generated.");
     } finally {
-      setRoomVisualJob(null);
+      if (run.finish(success)) setRoomVisualJob(null);
     }
   };
   const upgradeRoomVisual = async (room: DebateMysteryRoomV2): Promise<void> => {
     if (roomVisualJob || props.session.responseMode === "local") return;
+    const run = roomVisualRunOwner.begin();
+    let success = false;
     setRoomVisualJob({
       kind: "upgrade",
       roomId: room.id,
@@ -2252,24 +2283,74 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     setRoomVisualResult("idle");
     setError(null);
     try {
-      const status = await props.request<DebateMysteryRoomArtUpgradeStatusV1>(
+      const status = await run.wait(() => props.request<DebateMysteryRoomArtUpgradeStatusV1>(
         `/api/debates/${encodeURIComponent(props.session.id)}/mystery-room-art/upgrade`,
-        mutationBody({ roomId: room.id }),
-      );
+        { ...mutationBody({ roomId: room.id }), signal: run.signal },
+      ));
       setRoomArtUpgradeStatus(status);
       if (status.readyRoomIds.includes(room.id)) {
         setRoomVisualResult("upgraded");
+        success = true;
       } else {
         setRoomVisualResult("failed");
         setError("The Upgraded room could not pass its composition checks. Its default Mosaic is unchanged.");
       }
     } catch (caught) {
+      if (!run.isCurrent()) return;
       setRoomVisualResult("failed");
       setError(caught instanceof Error ? caught.message : "This room could not be upgraded.");
     } finally {
-      setRoomVisualJob(null);
+      if (run.finish(success)) setRoomVisualJob(null);
     }
   };
+  const startRoomUpgradeSoftSynthesis = useCallback((room: DebateMysteryRoomV2): void => {
+    if (
+      props.session.responseMode === "local" ||
+      roomUpgradeSynthesisJob?.status === "refracting"
+    ) return;
+    const jobId = `${props.session.id}:${room.id}:${crypto.randomUUID()}`;
+    roomUpgradeSynthesisJobIdRef.current = jobId;
+    setFailedUpgradeRoomIds((current) => {
+      const next = new Set(current);
+      next.delete(room.id);
+      return next;
+    });
+    setLoadedUpgradeRoomIds((current) => {
+      const next = new Set(current);
+      next.delete(room.id);
+      return next;
+    });
+    setRoomUpgradeConfirmationRoomId(null);
+    setRoomUpgradeSynthesisJob({
+      id: jobId,
+      roomId: room.id,
+      title: room.name,
+      status: "refracting",
+      startedAt: new Date().toISOString(),
+      error: null,
+    });
+    setError(null);
+    void props.request<DebateMysteryRoomArtUpgradeStatusV1>(
+      `/api/debates/${encodeURIComponent(props.session.id)}/mystery-room-art/upgrade`,
+      mutationBody({ roomId: room.id }),
+    ).then((status) => {
+      if (roomUpgradeSynthesisJobIdRef.current !== jobId) return;
+      setRoomArtUpgradeStatus(status);
+    }).catch((caught) => {
+      if (roomUpgradeSynthesisJobIdRef.current !== jobId) return;
+      const message = caught instanceof Error
+        ? caught.message
+        : "This room could not be upgraded. Its Mosaic is unchanged.";
+      setRoomUpgradeSynthesisJob((current) => current?.id === jobId
+        ? { ...current, status: "failed", error: message }
+        : current);
+    });
+  }, [
+    props.request,
+    props.session.id,
+    props.session.responseMode,
+    roomUpgradeSynthesisJob?.status,
+  ]);
   const evictExteriorObjectUrl = (): void => {
     const key = sealedMysteryAssetKey(
       "room",
@@ -2357,6 +2438,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       job.id !== jobId || (job.status !== "ready" && job.status !== "failed")));
   }, []);
   const itemSynthesisSourceId = `whodunnit-items:${props.session.id}`;
+  const roomUpgradeSynthesisSourceId = `whodunnit-room-upgrade:${props.session.id}`;
 
   useEffect(() => {
     registerPrismSoftSynthesisJobs(
@@ -2369,6 +2451,18 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   useEffect(() => () => {
     registerPrismSoftSynthesisJobs(itemSynthesisSourceId, 0);
   }, [itemSynthesisSourceId]);
+
+  useEffect(() => {
+    registerPrismSoftSynthesisJobs(
+      roomUpgradeSynthesisSourceId,
+      roomUpgradeSynthesisJob ? 1 : 0,
+      { orbOpensProgress: true },
+    );
+  }, [roomUpgradeSynthesisJob, roomUpgradeSynthesisSourceId]);
+
+  useEffect(() => () => {
+    registerPrismSoftSynthesisJobs(roomUpgradeSynthesisSourceId, 0);
+  }, [roomUpgradeSynthesisSourceId]);
 
   useEffect(() => {
     if (itemSynthesisRunningRef.current) return;
@@ -2435,6 +2529,8 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       return;
     }
     if (props.session.responseMode === "local" && action !== "reduce_evidence_magenta") return;
+    const run = sceneRepairRunOwner.begin();
+    let success = false;
     setSceneRepairJob({
       action,
       roomId: room?.id ?? null,
@@ -2444,17 +2540,17 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     setSceneRepairOpen(null);
     setError(null);
     try {
-      const result = await props.request<{
+      const result = await run.wait(() => props.request<{
         session: DebateSessionV1;
         roomArtUpgrade: DebateMysteryRoomArtUpgradeStatusV1;
       }>(
         `/api/debates/${encodeURIComponent(props.session.id)}/mystery-scene-repair`,
-        mutationBody({
+        { ...mutationBody({
           action,
           ...(room ? { roomId: room.id, artStyle: currentRoomArtStyle } : {}),
           ...(item?.reference.kind === "evidence" ? { subjectId: item.reference.id } : {}),
-        }),
-      );
+        }), signal: run.signal },
+      ));
       if (action === "regenerate_exterior" || action === "align_exterior_door") {
         evictExteriorObjectUrl();
       }
@@ -2480,10 +2576,12 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       }
       setRoomArtUpgradeStatus(result.roomArtUpgrade);
       props.onSessionChange(result.session);
+      success = true;
     } catch (caught) {
+      if (!run.isCurrent()) return;
       setError(caught instanceof Error ? caught.message : "PRISM could not repair this scene.");
     } finally {
-      setSceneRepairJob(null);
+      if (run.finish(success)) setSceneRepairJob(null);
     }
   };
   const undoSceneRepair = async (): Promise<void> => {
@@ -4037,7 +4135,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     roomUpgradeEnabled,
     currentRoomHasIllustratedUpgrade && currentRoomIllustratedUpgradeLoaded,
   );
-  const currentRoomMosaicGrid = command === "examine" ? "hidden" : "visible";
+  const currentRoomMosaicGrid = "visible";
   const currentRoomMosaicAssetUrl = currentRoom?.sealedAsset?.revealed &&
       currentRoom.sealedAsset.status === "ready"
     ? whodunnitSealedRoomArtUrl({
@@ -4092,15 +4190,106 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         "illustrated",
       )
     : null;
-  const currentRoomMosaicUrl = currentRoomMosaicAssetUrl
-    ?? currentRoomAcceptedMosaicUrl
-    ?? (currentRoom?.imageId
+  const [failedMosaicUrls, setFailedMosaicUrls] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    setFailedMosaicUrls(new Set());
+  }, [props.session.id, sceneAssetRefreshNonce]);
+  const currentRoomMosaicUrl = [
+    currentRoomMosaicAssetUrl,
+    currentRoomAcceptedMosaicUrl,
+    currentRoom?.imageId
       ? whodunnitSavedRoomArtUrl(currentRoom.imageId, "mosaic", currentRoomMosaicGrid)
-      : null)
-    ?? currentRoomBundledMosaicUrl;
+      : null,
+    currentRoomBundledMosaicUrl,
+    currentRoom ? whodunnitBundledRoomArtPathForRoom(
+      { templateId: currentRoom.templateId }, "mosaic", currentRoomMosaicGrid,
+    ) : null,
+  ].find((url): url is string => Boolean(url && !failedMosaicUrls.has(url))) ?? null;
   const currentRoomImageUrl = currentRoomArtStyle === "illustrated"
     ? currentRoomUpgradeAssetUrl ?? currentRoomAcceptedUpgradeUrl ?? currentRoomMosaicUrl
     : currentRoomMosaicUrl;
+  const currentRoomEntryKey = currentRoom && state.roomView === "room" &&
+      (state.playPhase === "investigation" || state.playPhase === "theory") &&
+      !visitingExterior && !spectatorTheory && !courtPresentationActive
+    ? `${props.session.id}:${currentRoom.id}`
+    : null;
+  const currentRoomBackdropKey = currentRoomEntryKey
+    ? `${currentRoomEntryKey}:${currentRoomArtStyle}:${currentRoomImageUrl ?? "fallback"}:${sceneAssetRefreshNonce}`
+    : null;
+  const mosaicBackdropRef = useRef<HTMLImageElement | null>(null);
+  const upgradeBackdropRef = useRef<HTMLImageElement | null>(null);
+  const [readyRoomBackdropKey, setReadyRoomBackdropKey] = useState<string | null>(null);
+  const currentRoomBackdropReady = Boolean(
+    currentRoomBackdropKey && readyRoomBackdropKey === currentRoomBackdropKey,
+  );
+  useEffect(() => {
+    if (!currentRoomBackdropKey || !currentRoomImageUrl) {
+      setReadyRoomBackdropKey(currentRoomBackdropKey);
+      return;
+    }
+    const image = currentRoomArtStyle === "illustrated"
+      ? upgradeBackdropRef.current
+      : mosaicBackdropRef.current;
+    if (!image) return;
+    let cancelled = false;
+    const settle = (): void => {
+      if (!cancelled) setReadyRoomBackdropKey(currentRoomBackdropKey);
+    };
+    const onLoad = (): void => {
+      // Wait for the image actually painted by the room, including cached loads.
+      const decoded = typeof image.decode === "function"
+        ? image.decode().catch(() => undefined)
+        : Promise.resolve();
+      void decoded.then(settle);
+    };
+    image.addEventListener("load", onLoad);
+    if (image.complete && image.naturalWidth > 0) onLoad();
+    return () => {
+      cancelled = true;
+      image.removeEventListener("load", onLoad);
+    };
+  }, [currentRoomBackdropKey, currentRoomImageUrl, currentRoomArtStyle]);
+  // Latch the reveal per visit, rather than per art variant: changing a ready
+  // room's presentation should crossfade without another entrance blackout.
+  const [revealedRoomEntryKey, setRevealedRoomEntryKey] = useState<string | null>(null);
+  const [roomActorEntryKey, setRoomActorEntryKey] = useState<string | null>(null);
+  const roomEntryRevealed = Boolean(
+    currentRoomEntryKey && revealedRoomEntryKey === currentRoomEntryKey,
+  );
+  const roomEntryAwaitingUpgrade = roomUpgradeEnabled &&
+    currentRoomHasIllustratedUpgrade && !currentRoomIllustratedUpgradeLoaded;
+  useEffect(() => {
+    if (!currentRoomEntryKey) {
+      setRevealedRoomEntryKey(null);
+    } else if (currentRoomBackdropReady && !roomEntryAwaitingUpgrade) {
+      setRevealedRoomEntryKey(currentRoomEntryKey);
+    }
+  }, [currentRoomEntryKey, currentRoomBackdropReady, roomEntryAwaitingUpgrade]);
+  useEffect(() => {
+    if (!roomEntryRevealed || exteriorRoomReveal) {
+      setRoomActorEntryKey(null);
+      return;
+    }
+    // Give the decoded room a painted frame of its own, even in Reduced Motion.
+    let frame = window.requestAnimationFrame(() => {
+      frame = window.requestAnimationFrame(() => {
+        timer = window.setTimeout(
+          () => setRoomActorEntryKey(currentRoomEntryKey),
+          reducedMotion ? 0 : 240,
+        );
+      });
+    });
+    let timer: number | undefined;
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [currentRoomEntryKey, roomEntryRevealed, exteriorRoomReveal, reducedMotion]);
+  const roomEntryLoading = currentRoomEntryKey !== null && !roomEntryRevealed;
+  const roomActorsReady = roomEntryRevealed && roomActorEntryKey === currentRoomEntryKey && currentRoomImageUrl !== null;
+  const roomActorVisible = roomActorEligible && roomActorsReady;
+  const roomProsecutorVisible = roomProsecutorActive && roomActorsReady;
+  const roomBackdropBlurred = roomActorVisible || roomProsecutorVisible;
   const currentRoomLights = useMemo<readonly MansionDynamicLightV2[]>(
     () => currentRoom && mansionLayout
       ? mansionLayout.lights.filter((light) => light.roomId === currentRoom.id)
@@ -4151,6 +4340,14 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       if (current.has(currentRoom.id)) return current;
       return new Set([...current, currentRoom.id]);
     });
+    setRoomUpgradeSynthesisJob((current) => current?.roomId === currentRoom.id &&
+        current.status === "ready"
+      ? {
+          ...current,
+          status: "failed",
+          error: "The Upgraded image could not load. This room's Mosaic is unchanged.",
+        }
+      : current);
   };
   const handleCurrentRoomUpgradeArtLoad = (): void => {
     if (!currentRoom || !currentRoomHasIllustratedUpgrade) return;
@@ -4159,6 +4356,56 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       return new Set([...current, currentRoom.id]);
     });
   };
+  useEffect(() => {
+    if (roomUpgradeSynthesisJob?.status !== "refracting" || !roomArtUpgradeStatus) return;
+    const jobId = roomUpgradeSynthesisJob.id;
+    if (roomArtUpgradeStatus.readyRoomIds.includes(roomUpgradeSynthesisJob.roomId)) {
+      setRoomUpgradeSynthesisJob((current) => current?.id === jobId
+        ? { ...current, status: "ready", error: null }
+        : current);
+      selectRoomUpgradeEnabled(true);
+      return;
+    }
+    if (
+      roomArtUpgradeStatus.failedRoomIds.includes(roomUpgradeSynthesisJob.roomId) ||
+      roomArtUpgradeStatus.status === "unavailable"
+    ) {
+      setRoomUpgradeSynthesisJob((current) => current?.id === jobId
+        ? {
+            ...current,
+            status: "failed",
+            error: roomArtUpgradeStatus.reason ??
+              "This room could not be upgraded. Its Mosaic is unchanged.",
+          }
+        : current);
+    }
+  }, [roomArtUpgradeStatus, roomUpgradeSynthesisJob, selectRoomUpgradeEnabled]);
+  useEffect(() => {
+    if (roomUpgradeSynthesisJob?.status !== "refracting") return;
+    const jobId = roomUpgradeSynthesisJob.id;
+    let cancelled = false;
+    const refresh = (): void => {
+      void props.request<DebateMysteryRoomArtUpgradeStatusV1>(
+        `/api/debates/${encodeURIComponent(props.session.id)}/mystery-room-art/upgrade`,
+      ).then((status) => {
+        if (cancelled || roomUpgradeSynthesisJobIdRef.current !== jobId) return;
+        setRoomArtUpgradeStatus(status);
+      }).catch(() => {
+        // The original POST owns failure reporting; polling is progress-only.
+      });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 1_500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    props.request,
+    props.session.id,
+    roomUpgradeSynthesisJob?.id,
+    roomUpgradeSynthesisJob?.status,
+  ]);
   const completionCueVisible = Boolean(
     completionCueRoomId &&
       completionCueRoomId === currentRoom?.id &&
@@ -4331,12 +4578,23 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       <div className={styles.roomArtStyleToggle} role="group" aria-label="Upgraded room art" data-tutorial-target="mystery-v2-room-art-upgrade">
         <button
           type="button"
-          aria-pressed={roomUpgradeEnabled}
-          disabled={state.roomView === "mansion"}
-          title={roomUpgradeEnabled
-            ? `${roomArtUpgradeStatus?.readyRoomIds.length ?? 0} of ${state.rooms.length} room upgrades are ready. Rooms without one show their original Mosaic automatically.`
-            : "Show each room's original Mosaic. Upgraded derivatives remain saved and instantly available."}
-          onClick={() => selectRoomUpgradeEnabled(!roomUpgradeEnabled)}
+          aria-pressed={roomUpgradeEnabled && currentRoomHasIllustratedUpgrade}
+          disabled={
+            state.roomView === "mansion" ||
+            roomUpgradeSynthesisJob?.status === "refracting"
+          }
+          title={!currentRoomHasIllustratedUpgrade
+            ? "Create this room's Upgraded presentation with Soft Refract."
+            : roomUpgradeEnabled
+              ? "Show this room's original Mosaic."
+              : "Show this room's saved Upgraded presentation."}
+          onClick={() => {
+            if (currentRoom && !currentRoomHasIllustratedUpgrade) {
+              setRoomUpgradeConfirmationRoomId(currentRoom.id);
+              return;
+            }
+            selectRoomUpgradeEnabled(!roomUpgradeEnabled);
+          }}
         >Upgraded</button>
       </div>
       <button type="button" onClick={() => { setCaseFileOpen(true); setCaseFileUpdate(null); }} data-tutorial-target="mystery-v2-case-file">Case File <span>{caseFileEntryCount}</span></button>
@@ -4515,6 +4773,12 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     return (
       <PrismBlockingLoader
         open={Boolean(sceneRepairJob)}
+        {...(sceneRepairJob?.action === "undo"
+          ? { operation: "preparation" as const }
+          : { operation: "refraction" as const, onCancel: () => sceneRepairRunOwner.cancel() })}
+        operationId={sceneRepairRun?.id}
+        estimatedDurationMs={sceneRepairRun?.estimatedDurationMs}
+        cancelLabel="Cancel scene refraction"
         placement="fullscreen"
         theme={props.theme}
         eyebrow="PRISM / Field Repair"
@@ -4611,6 +4875,51 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           {renderJobs(queuedJobs, "queued")}
           {renderJobs(failedJobs, "failed")}
           {renderJobs(readyJobs, "ready")}
+        </div>
+      </PrismBlockingLoader>
+    );
+  };
+  const renderRoomUpgradeSynthesisLoader = (): React.JSX.Element | null => {
+    if (!roomUpgradeSynthesisJob) return null;
+    const retryRoom = state.rooms.find((room) => room.id === roomUpgradeSynthesisJob.roomId) ?? null;
+    const status = roomUpgradeSynthesisJob.status;
+    return (
+      <PrismBlockingLoader
+        open
+        placement="docked"
+        theme={props.theme}
+        eyebrow="Whodunnit · Room presentation"
+        title={status === "failed"
+          ? `${roomUpgradeSynthesisJob.title} needs attention`
+          : status === "ready"
+            ? `${roomUpgradeSynthesisJob.title} is ready`
+            : `Refracting ${roomUpgradeSynthesisJob.title}`}
+        detail={status === "failed"
+          ? roomUpgradeSynthesisJob.error ?? "The original Mosaic is still in place."
+          : status === "ready"
+            ? "The room's Mosaic composition is preserved; Upgraded is now ready whenever you return."
+            : "PRISM is preparing this room in the background. Keep investigating; its Mosaic remains in place until the derivative is ready."}
+        stepLabel={status === "refracting"
+          ? "Preserving composition and validating the derivative"
+          : status === "failed"
+            ? "Choose Retry to try this room again"
+            : "Upgraded presentation saved for this room"}
+        progress={status === "ready" ? 1 : null}
+        startedAt={roomUpgradeSynthesisJob.startedAt}
+        footer="Soft Refract — keep investigating. Click Prism whenever you want to check progress."
+      >
+        <div className={styles.itemSynthesisQueue} aria-label="Room upgrade synthesis status">
+          <section className={styles.itemSynthesisGroup} data-status={status}>
+            <strong>{status === "refracting" ? "Refracting" : status === "failed" ? "Needs attention" : "Ready"}</strong>
+            <div className={styles.itemSynthesisActions}>
+              {status === "failed" && retryRoom ? (
+                <button type="button" onClick={() => startRoomUpgradeSoftSynthesis(retryRoom)}>Retry</button>
+              ) : null}
+              {status !== "refracting" ? (
+                <button type="button" onClick={() => setRoomUpgradeSynthesisJob(null)}>Dismiss</button>
+              ) : null}
+            </div>
+          </section>
         </div>
       </PrismBlockingLoader>
     );
@@ -5098,7 +5407,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   }
 
   return (
-    <main className={styles.investigation} data-theme={props.theme} data-view={state.roomView} data-opening-map-reveal={openingMapReveal ? "true" : undefined} data-exterior-room-reveal={exteriorRoomReveal ? "true" : undefined} data-tutorial-target="mystery-v2-investigation" onClickCapture={handleInvestigationDialogueClickCapture}>
+    <main className={styles.investigation} data-theme={props.theme} data-view={state.roomView} data-room-loading={roomEntryLoading ? "true" : undefined} aria-busy={roomEntryLoading} inert={roomEntryLoading ? true : undefined} data-opening-map-reveal={openingMapReveal ? "true" : undefined} data-exterior-room-reveal={exteriorRoomReveal ? "true" : undefined} data-tutorial-target="mystery-v2-investigation" onClickCapture={handleInvestigationDialogueClickCapture}>
       <SessionAtmosphereLayer
         sessionKey={`whodunnit-v2-mansion-ambience:${props.session.id}:${state.config.houseStyle.id}`}
         backgroundUrl={`/api/debates/${encodeURIComponent(props.session.id)}/mystery-mansion/atmosphere?repair=${audioAssetRefreshNonce}`}
@@ -5537,11 +5846,13 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           ) : null}
           {currentRoomMosaicUrl ? (
             <img
+              ref={mosaicBackdropRef}
               className={styles.roomBackdropImage}
               data-art-style="mosaic"
-              data-blurred={roomActorVisible ? "true" : undefined}
+              data-blurred={roomBackdropBlurred ? "true" : undefined}
               key={`${currentRoom.id}:mosaic:${currentRoomMosaicGrid}:${sceneAssetRefreshNonce}`}
               src={currentRoomMosaicUrl}
+              onError={() => setFailedMosaicUrls((current) => new Set([...current, currentRoomMosaicUrl]))}
               alt=""
               aria-hidden="true"
               draggable={false}
@@ -5549,9 +5860,10 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           ) : null}
           {currentRoomUpgradeAssetUrl ? (
             <img
+              ref={upgradeBackdropRef}
               className={styles.roomBackdropImage}
               data-art-style="illustrated"
-              data-blurred={roomActorVisible ? "true" : undefined}
+              data-blurred={roomBackdropBlurred ? "true" : undefined}
               data-upgrade-layer="true"
               data-loaded={currentRoomIllustratedUpgradeLoaded ? "true" : undefined}
               data-active={currentRoomArtStyle === "illustrated" ? "true" : undefined}
@@ -5569,7 +5881,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               room={currentRoom}
               lights={currentRoomLights}
               templateLightingAligned={currentRoomUsesTemplateLightGeometry}
-              blurred={roomActorVisible}
+              blurred={roomBackdropBlurred}
               reducedMotion={reducedMotion}
             />
             {command === "examine" && !roomComplete ? <div className={styles.hotspots} aria-label="Examination points">{currentRoomUnexaminedHotspots.map((hotspot) => <button key={hotspot.id} type="button" aria-label={`Examine ${hotspot.label}`} disabled={!lensActive} data-examining={examiningHotspotId === hotspot.id ? "true" : undefined} style={hotspotSpotStyle(hotspot.polygon)} onFocus={() => { const point = debateMysteryV2HotspotFocusPoint(hotspot.polygon); setInvestigationLens(resolveDebateMysteryV2Lens(point.x, point.y, currentRoom.hotspots)); }} onClick={(event) => { if (event.detail === 0) { event.stopPropagation(); const hotspotId = debateMysteryV2LensClickTarget(investigationLens); if (hotspotId) void examineHotspot(hotspotId); } }} />)}</div> : null}
@@ -5591,7 +5903,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           {roomIntroductionPhase !== "casekeeper" ? <div className={styles.roomShade} /> : null}
           {!roomIntroductionActive ? <div className={styles.roomTitle}><small>{venueTierLabel(currentRoom.floor)}</small><h1>{currentRoom.name}</h1></div> : null}
           {roomActorVisible && currentBot ? <div className={styles.roomActor} data-art-style={currentRoomArtStyle} data-interrogation-phase={interrogationPhase ?? undefined} style={{ "--actor-color": currentBot.color ?? "#a98cff" } as CSSProperties}><div className={styles.roomActorDrift} style={mysteryRoomActorDriftStyle(`${props.session.id}:${currentBot.id}:suspect`)}>{props.renderMysteryBotAvatar(currentBot, investigationAvatarPresentation, { demeanor: "suspect", talking: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId, speechTiming: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId ? speechTiming : null, blinkEnabled: true, facing: "left", speechInkVisible: roomSpeechInkVisible })}<strong>{currentBot.name}</strong>{roomSuspectStageActionText && roomActionPresentation ? <SignalVoiceActionText key={`suspect:${roomDisplayedDialogue?.nodeId ?? ""}:${roomDisplayedDialogue?.occurredAt ?? ""}`} {...roomActionPresentation} accent={currentBot.color} /> : null}</div></div> : null}
-          {roomProsecutorActive && prosecutorBot ? <aside className={`${styles.roomActor} ${styles.roomProsecutorActor}`} data-art-style={currentRoomArtStyle} data-prosecutor-speaking="true" data-interrogation-phase={interrogationPhase ?? undefined} style={{ "--actor-color": prosecutorBot.color ?? "#72d7ff" } as CSSProperties}>
+          {roomProsecutorVisible && prosecutorBot ? <aside className={`${styles.roomActor} ${styles.roomProsecutorActor}`} data-art-style={currentRoomArtStyle} data-prosecutor-speaking="true" data-interrogation-phase={interrogationPhase ?? undefined} style={{ "--actor-color": prosecutorBot.color ?? "#72d7ff" } as CSSProperties}>
             <div className={styles.roomActorDrift} style={mysteryRoomActorDriftStyle(`${props.session.id}:${prosecutorBot.id}:prosecutor`)}>
               {roomProsecutorStageActionText && roomActionPresentation ? <SignalVoiceActionText key={`room-prosecutor:${roomDisplayedDialogue?.nodeId ?? ""}:${roomDisplayedDialogue?.occurredAt ?? ""}`} {...roomActionPresentation} accent={prosecutorBot.color} /> : null}
               {props.renderMysteryBotAvatar(prosecutorBot, investigationAvatarPresentation, { demeanor: "partner", talking: audioMouthActive && !heldDialogue, speechTiming: audioMouthActive && !heldDialogue ? speechTiming : null, blinkEnabled: true, facing: "right", speechInkVisible: roomSpeechInkVisible })}
@@ -5844,8 +6156,56 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           </section>
         </>
       ) : null}
+      {roomUpgradeConfirmationRoom ? (
+        <>
+          <button
+            type="button"
+            className={styles.roomVisualDialogBackdrop}
+            aria-label="Keep the current Mosaic presentation"
+            onClick={() => setRoomUpgradeConfirmationRoomId(null)}
+          />
+          <section
+            className={styles.roomVisualDialog}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mystery-room-upgrade-confirmation-title"
+            data-readiness="default"
+          >
+            <header>
+              <div>
+                <p className={styles.eyebrow}>Upgraded room presentation</p>
+                <h2 id="mystery-room-upgrade-confirmation-title">Upgrade {roomUpgradeConfirmationRoom.name}?</h2>
+              </div>
+              <button type="button" onClick={() => setRoomUpgradeConfirmationRoomId(null)}>Close</button>
+            </header>
+            <p>
+              PRISM will softly prepare an Upgraded derivative for this room only. You can keep investigating while its accepted Mosaic remains on stage.
+            </p>
+            <p className={styles.roomVisualDiscoveryNotice}>
+              Its composition, doors, anchors, evidence geometry, lights, dialogue, and original Mosaic stay unchanged. The presentation switches only after the derivative is ready and loads successfully.
+            </p>
+            {props.session.responseMode === "local" ? (
+              <p className={styles.roomVisualOnlineNotice}>Upgraded room synthesis is ONLINE-only. LOCAL keeps this room's Mosaic and sends nothing to a remote generator.</p>
+            ) : null}
+            <footer>
+              <button type="button" onClick={() => setRoomUpgradeConfirmationRoomId(null)}>Keep Mosaic</button>
+              <button
+                type="button"
+                className={styles.roomVisualPrimaryAction}
+                disabled={props.session.responseMode === "local" || roomUpgradeSynthesisJob?.status === "refracting"}
+                onClick={() => startRoomUpgradeSoftSynthesis(roomUpgradeConfirmationRoom)}
+              >Upgrade this room</button>
+            </footer>
+          </section>
+        </>
+      ) : null}
       <PrismBlockingLoader
         open={Boolean(roomVisualJob)}
+        operation="refraction"
+        operationId={roomVisualRun?.id}
+        estimatedDurationMs={roomVisualRun?.estimatedDurationMs}
+        onCancel={() => roomVisualRunOwner.cancel()}
+        cancelLabel="Cancel room refraction"
         placement="fullscreen"
         theme={props.theme}
         eyebrow="PRISM / Mystery Venue"
@@ -5858,6 +6218,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         footer="No preview is shown here. Discovery still happens inside the mansion."
       />
       {renderItemSynthesisLoader()}
+      {renderRoomUpgradeSynthesisLoader()}
       {renderSceneRepairLoader()}
       {callout ? <div key={callout.id} className={styles.callout} style={calloutStyle} role="status" aria-live="assertive"><span>{CALLOUT_COPY[callout.callout]}</span></div> : null}
       {error ? (

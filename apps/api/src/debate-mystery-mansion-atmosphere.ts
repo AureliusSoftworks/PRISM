@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { assertRefractionActive } from "./refraction-cancellation.ts";
 import {
   MANSION_ATMOSPHERE_ACTIVE_LOGICAL_ID_V1,
   MANSION_ATMOSPHERE_CANDIDATE_LOGICAL_ID_V1,
@@ -213,6 +214,7 @@ export async function stageDebateMysteryMansionAtmosphereV1(args: {
       }),
       fetchImpl: args.fetchImpl,
     });
+    assertRefractionActive();
     const title = `${mansion.name} Atmosphere`.slice(0, 180);
     const assetId = storeCandidate({ ...args, bytes: generated.audioBytes, contentType: generated.contentType, title });
     return { assetId, title };

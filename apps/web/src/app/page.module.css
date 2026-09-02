@@ -383,6 +383,34 @@
   max-width: none;
 }
 
+.botFoundryRefractionControls {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #e9eff9;
+  font-size: 0.78rem;
+}
+
+.botFoundryRefractionControls > button {
+  width: 44px;
+  height: 44px;
+  border: 1px solid #ffffff50;
+  border-radius: 50%;
+  color: inherit;
+  background: #111722;
+  font-size: 1.6rem;
+  cursor: pointer;
+}
+
+.botFoundryRefractionControls > button:focus-visible {
+  outline: 2px solid var(--prism-s);
+  outline-offset: 3px;
+}
+
 /* One shared-edge brief card: header / body / actions stay flush. */
 .botGeneratorDialog[data-foundry-phase] > .botGeneratorBriefCard {
   position: absolute;

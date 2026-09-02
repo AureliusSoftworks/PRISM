@@ -111,9 +111,12 @@ export interface AssetRailProps {
   undoLabel?: string;
   /** General Images owns its existing header picker; typed rails own this compact choice. */
   generation?: AssetRailGenerationControl;
+  /** Durable/soft jobs own their activity; do not wrap their handoff fullscreen. */
+  ownsPresentation?: boolean;
   onSynthesize: (
     direction: string,
     selection?: AssetGenerationSelection,
+    signal?: AbortSignal,
   ) => void | Promise<void>;
   onSelect: (asset: ImageAssetSet) => void | Promise<void>;
 }
@@ -287,6 +290,7 @@ export function AssetRail({
   onUndo,
   undoLabel = "Undo",
   generation,
+  ownsPresentation = false,
   onSynthesize,
   onSelect,
 }: AssetRailProps) {
@@ -304,7 +308,7 @@ export function AssetRail({
     [currentImageIds],
   );
 
-  const loadRecent = useCallback(async (): Promise<void> => {
+  const loadRecent = useCallback(async (signal?: AbortSignal): Promise<void> => {
     setLoading(true);
     setUnavailable(false);
     try {
@@ -312,10 +316,12 @@ export function AssetRail({
       if (context?.trim()) query.set("context", context.trim());
       if (sourceFilter) query.set("source", sourceFilter);
       const result = await readJson<AssetApiResponse>(
-        await fetch(`/api/assets?${query.toString()}`),
+        await fetch(`/api/assets?${query.toString()}`, { signal }),
       );
+      signal?.throwIfAborted();
       setAssets(result.assets);
     } catch {
+      if (signal?.aborted) return;
       setUnavailable(true);
     } finally {
       setLoading(false);
@@ -330,11 +336,16 @@ export function AssetRail({
     () => ({
       id: targetId,
       kind: "magic",
+      ownsPresentation,
+      timingKey: generation?.selection
+        ? `asset:${kind}:${generation.selection.provider}:${generation.selection.model}`
+        : undefined,
       label: `Synthesize ${IMAGE_ASSET_KIND_LABELS[kind].replace(/s$/u, "")}`,
       disabled: () => disabled || synthesizeDisabled || generationUnavailable,
-      run: async (direction) => {
-        await onSynthesize(direction, generation?.selection ?? undefined);
-        await loadRecent();
+      run: async (direction, signal) => {
+        await onSynthesize(direction, generation?.selection ?? undefined, signal);
+        signal.throwIfAborted();
+        await loadRecent(signal);
       },
     }),
     [
@@ -344,6 +355,7 @@ export function AssetRail({
       kind,
       loadRecent,
       onSynthesize,
+      ownsPresentation,
       synthesizeDisabled,
       targetId,
     ],

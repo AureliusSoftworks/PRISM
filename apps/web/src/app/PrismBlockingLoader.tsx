@@ -15,7 +15,13 @@ import { PrismOrb } from "./PrismOrb";
 import { requestPrismCompanionView } from "./prismCompanionViews.ts";
 import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
 import styles from "./prism-blocking-loader.module.css";
-import { formatBlockingLoaderElapsed } from "./prismBlockingLoaderFormat";
+import {
+  formatBlockingLoaderElapsed,
+  refractionEtaLabel,
+  REFRACTION_CANCEL_WARNING,
+  blockingLoaderCancelAction,
+  blockingLoaderFocusIndex,
+} from "./prismBlockingLoaderFormat";
 import { beginPrismFullscreenBlockingAudioMute } from "./prismFullscreenBlockingAudio.ts";
 import {
   animatePrismOrbHandoff,
@@ -41,7 +47,7 @@ export { formatBlockingLoaderElapsed } from "./prismBlockingLoaderFormat";
 
 export type PrismBlockingLoaderPlacement = "fullscreen" | "docked";
 
-export interface PrismBlockingLoaderProps {
+interface PrismBlockingLoaderBaseProps {
   open: boolean;
   title: string;
   detail: string;
@@ -49,15 +55,16 @@ export interface PrismBlockingLoaderProps {
   progress?: number | null;
   /** ISO timestamp or epoch ms when the operation began — drives the elapsed timer. */
   startedAt?: string | number | null;
+  /** Measured comparable successes, never animation progress. */
+  estimatedDurationMs?: number | null;
+  operationId?: string | number;
   theme?: "light" | "dark";
   /**
    * `fullscreen` hard-blocks the app (invent / head-start bake).
    * `docked` is the soft-wait shell — anchored around Prism; starts minimized via soft UI store.
    */
-  placement?: PrismBlockingLoaderPlacement;
   /** Overrides the default “PRISM is working” eyebrow. */
   eyebrow?: string;
-  onCancel?: () => void;
   cancelLabel?: string;
   /** Confirm dialog title when stopping a hard wait. */
   cancelConfirmTitle?: string;
@@ -73,6 +80,13 @@ export interface PrismBlockingLoaderProps {
   /** Optional footer actions under the shared footer copy (docked soft waits). */
   footerActions?: ReactNode;
 }
+
+/** Fullscreen callers must deliberately distinguish refraction from saved preparation. */
+export type PrismBlockingLoaderProps = PrismBlockingLoaderBaseProps & (
+  | { placement: "docked"; operation?: never; onCancel?: () => void }
+  | { placement?: "fullscreen"; operation: "refraction"; onCancel: () => void }
+  | { placement?: "fullscreen"; operation: "preparation"; onCancel?: () => void }
+);
 
 function normalizedProgress(progress: number | null | undefined): number | null {
   if (typeof progress !== "number" || !Number.isFinite(progress)) return null;
@@ -95,13 +109,16 @@ export function PrismBlockingLoader({
   stepLabel,
   progress = null,
   startedAt = null,
+  estimatedDurationMs,
+  operationId,
   theme,
   placement = "fullscreen",
+  operation,
   eyebrow = "PRISM is working",
   onCancel,
   cancelLabel = "Cancel operation",
-  cancelConfirmTitle = "Stop preparing?",
-  cancelConfirmDetail = "Progress so far is kept. You can continue later from where you left off.",
+  cancelConfirmTitle,
+  cancelConfirmDetail,
   footer = "Keep this window open while the light takes shape.",
   children,
   activeChildren,
@@ -111,6 +128,7 @@ export function PrismBlockingLoader({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
   const keepWaitingRef = useRef<HTMLButtonElement | null>(null);
+  const confirmPanelRef = useRef<HTMLDivElement | null>(null);
   const orbSlotRef = useRef<HTMLSpanElement | null>(null);
   const titleId = useId();
   const detailId = useId();
@@ -134,9 +152,16 @@ export function PrismBlockingLoader({
       ? formatBlockingLoaderElapsed(startedAt, nowMs)
       : null;
   const docked = placement === "docked";
+  const refraction = !docked && operation === "refraction";
+  const confirmationTitle = cancelConfirmTitle ?? (refraction ? "Cancel this refraction?" : "Stop preparing?");
+  // The regeneration warning cannot be silently replaced with checkpoint copy.
+  const confirmationDetail = refraction
+    ? [REFRACTION_CANCEL_WARNING, cancelConfirmDetail].filter(Boolean).join(" ")
+    : cancelConfirmDetail ?? "Progress so far is kept. You can continue later from where you left off.";
+  const etaLabel = refraction ? refractionEtaLabel(startedAt, estimatedDurationMs, nowMs) : null;
   const showPortal = open && (!docked || softUi.expanded);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) {
       setConfirming(false);
       setHardCompanionSuppressed(false);
@@ -160,7 +185,7 @@ export function PrismBlockingLoader({
     siblingStates.forEach(({ element }) => element.setAttribute("inert", ""));
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    overlay.focus({ preventScroll: true });
+    (cancelButtonRef.current ?? overlay).focus({ preventScroll: true });
 
     return () => {
       siblingStates.forEach(({ element, wasInert }) => {
@@ -170,6 +195,13 @@ export function PrismBlockingLoader({
       if (previouslyFocused?.isConnected) previouslyFocused.focus({ preventScroll: true });
     };
   }, [docked, open, showPortal]);
+
+  // Capture the opener in the modal lifetime above before moving focus. A
+  // replacement run resets its confirmation without replacing that opener.
+  useLayoutEffect(() => {
+    setConfirming(false);
+    if (open) cancelButtonRef.current?.focus({ preventScroll: true });
+  }, [open, operation, operationId]);
 
   useEffect(() => {
     if (!open || startedAt == null || startedAt === "") return;
@@ -250,12 +282,37 @@ export function PrismBlockingLoader({
 
   const requestCancel = (): void => {
     if (!onCancel) return;
-    setConfirming(true);
+    setConfirming(blockingLoaderCancelAction(confirming, "request").confirming);
   };
 
   const confirmCancel = (): void => {
+    const action = blockingLoaderCancelAction(confirming, "confirm");
     setConfirming(false);
-    onCancel?.();
+    if (action.cancel) onCancel?.();
+  };
+
+  const keepWaiting = (): void => {
+    setConfirming(false);
+    cancelButtonRef.current?.focus({ preventScroll: true });
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent): void => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (confirming) keepWaiting();
+      else if (onCancel) requestCancel();
+      else if (docked) minimizeSoft();
+    } else if (event.key === "Tab" && (!docked || confirming)) {
+      const scope = confirming ? confirmPanelRef.current : rootRef.current;
+      const buttons = Array.from(scope?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]',
+      ) ?? []).filter((element) => element.tabIndex >= 0 && !element.closest("[inert]"));
+      event.preventDefault();
+      event.stopPropagation();
+      const index = blockingLoaderFocusIndex(buttons.indexOf(document.activeElement as HTMLElement), buttons.length, event.shiftKey);
+      (buttons[index] ?? rootRef.current)?.focus({ preventScroll: true });
+    }
   };
 
   const minimizeSoft = (): void => {
@@ -308,6 +365,8 @@ export function PrismBlockingLoader({
           onClick={requestCancel}
           aria-label={cancelLabel}
           title={cancelLabel}
+          data-prism-refraction-cancel={refraction ? "true" : undefined}
+          tabIndex={confirming ? -1 : 0}
         >
           <span aria-hidden="true">×</span>
         </button>
@@ -349,6 +408,11 @@ export function PrismBlockingLoader({
             <strong>{elapsedLabel}</strong>
           </div>
         ) : null}
+        {etaLabel ? (
+          <div className={styles.elapsedRow} data-prism-refraction-eta="true">
+            <span>{etaLabel}</span>
+          </div>
+        ) : null}
       </div>
       {jobSections}
       <small>{footer}</small>
@@ -357,20 +421,21 @@ export function PrismBlockingLoader({
       ) : null}
       {confirming && onCancel ? (
         <div
+          ref={confirmPanelRef}
           className={styles.confirmPanel}
           role="alertdialog"
           aria-modal="true"
           aria-labelledby={confirmTitleId}
           aria-describedby={confirmDetailId}
         >
-          <strong id={confirmTitleId}>{cancelConfirmTitle}</strong>
-          <p id={confirmDetailId}>{cancelConfirmDetail}</p>
+          <strong id={confirmTitleId}>{confirmationTitle}</strong>
+          <p id={confirmDetailId}>{confirmationDetail}</p>
           <div className={styles.confirmActions}>
             <button
               ref={keepWaitingRef}
               type="button"
               className={styles.confirmKeep}
-              onClick={() => setConfirming(false)}
+              onClick={keepWaiting}
             >
               Keep waiting
             </button>
@@ -379,7 +444,7 @@ export function PrismBlockingLoader({
               className={styles.confirmStop}
               onClick={confirmCancel}
             >
-              {docked ? "Cancel" : "Stop"}
+              {refraction ? "Cancel refraction" : docked ? "Cancel" : "Stop"}
             </button>
           </div>
         </div>
@@ -422,14 +487,7 @@ export function PrismBlockingLoader({
               data-viewport-safe-area="bottom"
               aria-busy="true"
               style={softDockPositionStyle(companionVisual.position)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  if (confirming) setConfirming(false);
-                  else if (onCancel) requestCancel();
-                  else minimizeSoft();
-                }
-              }}
+              onKeyDown={handleKeyDown}
             >
               {card}
             </aside>
@@ -440,29 +498,16 @@ export function PrismBlockingLoader({
             className={styles.backdrop}
             data-prism-blocking-loader="true"
             data-prism-blocking-placement="fullscreen"
+            data-prism-blocking-operation={operation}
             data-theme={theme}
             data-confirming={confirming ? "true" : undefined}
             role="dialog"
             aria-modal="true"
-            aria-busy="true"
+            aria-busy={!confirming}
             aria-labelledby={titleId}
             aria-describedby={detailId}
             tabIndex={-1}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault();
-                if (confirming) {
-                  setConfirming(false);
-                } else if (onCancel) {
-                  requestCancel();
-                }
-              } else if (event.key === "Tab" && !confirming) {
-                event.preventDefault();
-                (cancelButtonRef.current ?? rootRef.current)?.focus({
-                  preventScroll: true,
-                });
-              }
-            }}
+            onKeyDown={handleKeyDown}
           >
             {card}
           </div>

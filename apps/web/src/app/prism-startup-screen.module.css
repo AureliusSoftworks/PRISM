@@ -333,6 +333,26 @@
   box-shadow: 0 0 7px color-mix(in srgb, #b7e63a 56%, transparent);
 }
 
+.veil[data-prism-startup-state="failed"] {
+  cursor: default;
+}
+
+.veil[data-prism-startup-state="failed"] :is(
+  .orb, .ring, .aura, .incomingBeam, .spectrumGlint
+) {
+  animation-play-state: paused;
+}
+
+.veil[data-prism-startup-state="failed"] :is(
+  .incomingBeam, .spectrum, .contactFlare
+) {
+  transition: none;
+}
+
+.veil[data-prism-startup-state="failed"] .label {
+  color: #ff6b84;
+}
+
 .retry {
   min-height: 34px;
   border: 1px solid color-mix(in srgb, #ff4d6d 42%, transparent);

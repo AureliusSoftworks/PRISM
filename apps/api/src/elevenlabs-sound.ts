@@ -1,4 +1,5 @@
 import { normalizeSignalGenerationKeywords } from "./signal-generation-keywords.ts";
+import { refractionSignal } from "./refraction-cancellation.ts";
 
 export const SIGNAL_ELEVENLABS_ATMOSPHERE_MODEL = "eleven_text_to_sound_v2";
 export const SIGNAL_ELEVENLABS_ATMOSPHERE_DURATION_MS = 30_000;
@@ -454,7 +455,7 @@ export async function requestSignalElevenLabsAtmosphere(args: {
     "https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128",
     {
       method: "POST",
-      signal: args.signal,
+      signal: refractionSignal(args.signal),
       headers: {
         "content-type": "application/json",
         "xi-api-key": args.apiKey,

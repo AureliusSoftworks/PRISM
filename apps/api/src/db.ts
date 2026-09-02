@@ -48,6 +48,7 @@ import { ensureUserNotesSchema } from "./user-notes.ts";
 import { ensureUserVaultKeyringSchema } from "./user-vault-keyring.ts";
 import { ensureOwnerFileVaultSchemaV1 } from "./owner-file-vault.ts";
 import { ensureAccountOwnerBoundarySchema } from "./account-owner-boundaries.ts";
+import { VaultKeyLifecycleError } from "./vault-envelope-v2.ts";
 import {
   activateCoreContentVaultV2,
   coreContentVaultContractIsCompleteV2,
@@ -238,6 +239,23 @@ export function initializeDatabase(
   db: DatabaseSync,
   coreContentVaultMasterSecret?: string,
 ): DatabaseSync {
+  if (!coreContentVaultMasterSecret) {
+    // Initialization is not a read-only database opener: its legacy normalizers
+    // write cleartext defaults. Never let tooling run them over sealed rows
+    // without first opening the owner-bound Vault compatibility views.
+    const vaultStateTables = db.prepare(`
+      SELECT name FROM main.sqlite_master
+       WHERE type = 'table' AND name IN (
+         'user_vault_keys', 'core_content_vault_migrations',
+         'account_auth_installation_key', 'account_auth_vault_migrations'
+       )
+    `).all() as Array<{ name: string }>;
+    if (vaultStateTables.some(({ name }) =>
+      db.prepare(`SELECT 1 FROM main."${name}" LIMIT 1`).get(),
+    )) {
+      throw new VaultKeyLifecycleError("invalid_master_key_context");
+    }
+  }
   db.exec(`
     PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};
     PRAGMA foreign_keys = ON;
@@ -2319,7 +2337,7 @@ export function initializeDatabase(
       FOREIGN KEY(episode_id) REFERENCES botcast_episodes(id) ON DELETE CASCADE
     );
     CREATE TABLE IF NOT EXISTS botcast_episode_image_proxies (
-      episode_id TEXT PRIMARY KEY,
+      episode_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
       image_id TEXT NOT NULL,
       content_type TEXT NOT NULL DEFAULT 'image/webp'
@@ -2328,7 +2346,9 @@ export function initializeDatabase(
       height INTEGER NOT NULL CHECK (height > 0 AND height <= 128),
       image_bytes BLOB NOT NULL,
       presentation_reason TEXT NOT NULL DEFAULT '',
+      source_sha256 TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL,
+      PRIMARY KEY(episode_id, image_id),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(episode_id) REFERENCES botcast_episodes(id) ON DELETE CASCADE
     );
@@ -2977,6 +2997,51 @@ export function initializeDatabase(
     db.exec(
       "ALTER TABLE botcast_episode_image_proxies ADD COLUMN presentation_reason TEXT NOT NULL DEFAULT '';",
     );
+  }
+  if (!botcastImageProxyColumns.has("source_sha256")) {
+    db.exec("ALTER TABLE botcast_episode_image_proxies ADD COLUMN source_sha256 TEXT NOT NULL DEFAULT '';");
+  }
+  const imageProxyPrimaryKey = db.prepare("PRAGMA table_info(botcast_episode_image_proxies)").all() as Array<{ name: string; pk: number }>;
+  if (!imageProxyPrimaryKey.some((column) => column.name === "image_id" && column.pk > 0)) {
+    // No original pixels are retained. Copy the private note and archival bytes
+    // verbatim, preserving ownership and both deletion cascades.
+    // SQLite reparses persistent triggers during RENAME. Temporarily expose
+    // their physical tables rather than the owner-bound cleartext TEMP views.
+    const imageMigrationCoreViews = suspendCoreContentVaultViewsV2(db);
+    const imageMigrationAuthView = suspendAccountAuthVaultViewV2(db);
+    try {
+      db.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE botcast_episode_image_proxies_sequence (
+        episode_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        image_id TEXT NOT NULL,
+        content_type TEXT NOT NULL DEFAULT 'image/webp' CHECK(content_type = 'image/webp'),
+        width INTEGER NOT NULL CHECK(width > 0 AND width <= 128),
+        height INTEGER NOT NULL CHECK(height > 0 AND height <= 128),
+        image_bytes BLOB NOT NULL,
+        presentation_reason TEXT NOT NULL DEFAULT '',
+        source_sha256 TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(episode_id, image_id),
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY(episode_id) REFERENCES botcast_episodes(id) ON DELETE CASCADE
+      );
+      INSERT INTO botcast_episode_image_proxies_sequence
+        SELECT episode_id, user_id, image_id, content_type, width, height,
+               image_bytes, presentation_reason, source_sha256, created_at
+          FROM botcast_episode_image_proxies;
+      DROP TABLE botcast_episode_image_proxies;
+      ALTER TABLE botcast_episode_image_proxies_sequence RENAME TO botcast_episode_image_proxies;
+      COMMIT;
+    `);
+    } catch (error) {
+      if (db.isTransaction) db.exec("ROLLBACK;");
+      throw error;
+    } finally {
+      if (imageMigrationAuthView) installAccountAuthVaultViewV2(db);
+      if (imageMigrationCoreViews) installCoreContentVaultViewsV2(db);
+    }
   }
   const modelEffortPreferenceTable = db
     .prepare(
@@ -6012,10 +6077,13 @@ export function initializeDatabase(
 export function createDatabase(coreContentVaultMasterSecret?: string): DatabaseSync {
   const dbPath = resolveDbPath();
   mkdirSync(dirname(dbPath), { recursive: true });
-  return initializeDatabase(
-    new DatabaseSync(dbPath),
-    coreContentVaultMasterSecret,
-  );
+  const db = new DatabaseSync(dbPath);
+  try {
+    return initializeDatabase(db, coreContentVaultMasterSecret);
+  } catch (error) {
+    db.close();
+    throw error;
+  }
 }
 
 export function mapUserProfile(row: DbUserRecord): UserProfile {

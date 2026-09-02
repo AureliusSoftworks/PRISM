@@ -934,6 +934,14 @@
   min-height: calc(100dvh - var(--app-shell-top-nav-height, 50px));
 }
 
+.investigation[data-room-loading="true"]::before {
+  position: absolute;
+  z-index: 100;
+  inset: 0;
+  content: "";
+  background: #000;
+}
+
 .investigation[data-opening-map-reveal="true"]::after {
   position: absolute;
   z-index: 30;
@@ -1915,8 +1923,7 @@
   min-height: calc(100dvh - var(--app-shell-top-nav-height, 50px));
   opacity: 1;
   transform: none;
-  background: #090b13;
-  animation: roomDescend 420ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+  background: #000;
 }
 .roomScene[data-room-introduction] {
   min-height: calc(100dvh - var(--app-shell-top-nav-height, 50px));
@@ -1925,10 +1932,6 @@
 .roomSecuring strong { font-size: clamp(1.35rem, 4vw, 2.4rem); }
 .roomSecuring span { color: #b9b1c8; }
 
-@keyframes roomDescend {
-  from { opacity: 0; transform: scale(1.04) translateY(-1.5rem); }
-  to { opacity: 1; transform: none; }
-}
 .roomBackdropImage {
   display: block;
   position: absolute;
@@ -1988,8 +1991,10 @@
   filter: drop-shadow(0 1.5rem 2rem rgba(0, 0, 0, 0.56));
   transform: translateX(-50%);
   pointer-events: none;
+  animation: roomActorReveal 320ms ease-out both;
   transition: transform 420ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 260ms ease;
 }
+@keyframes roomActorReveal { from { opacity: 0; } to { opacity: 1; } }
 .roomActor[data-prosecutor-speaking="true"]:not(.roomProsecutorActor) { opacity: 0.78; transform: translateX(-40%) translateY(0.4rem) scale(0.9); }
 .roomProsecutorActor { z-index: 4; }
 .roomActor[data-interrogation-phase="prosecutor_entrance"], .roomActor[data-interrogation-phase="suspect_entrance"] { animation: interrogationEntrance 420ms cubic-bezier(0.2, 0.85, 0.25, 1) both; }
@@ -2611,6 +2616,9 @@
   filter: drop-shadow(0 1.3rem 1.6rem rgba(0, 0, 0, 0.62));
   transform: translate(calc(-50% + var(--whodunnit-wide-evidence-table-offset-x, 0%)), var(--whodunnit-wide-evidence-table-offset-y, 0%)) scale(var(--whodunnit-wide-evidence-table-scale, 1));
   transform-origin: center bottom;
+}
+:global([data-camera-view="moderator"]) .wideEvidenceTable {
+  transform: translate(calc(-50% + var(--debate-moderator-table-offset-x, 0%)), var(--debate-moderator-table-offset-y, 0%)) scale(var(--debate-moderator-table-scale, 1));
 }
 .wideWitnessSilhouette {
   position: absolute;
@@ -3762,6 +3770,8 @@
   .roomParallaxLayer { transform: none; transition: opacity 180ms ease; }
   .roomBackdrop, .roomBackdrop[data-blurred="true"] { transform: scale(1.025); transition: opacity 180ms ease; }
   .roomActor[data-prosecutor-speaking="true"] { opacity: 1; transform: translateX(-50%); }
+  .roomActor,
+  .roomActor[data-interrogation-phase] { animation: none; }
   .roomActorDrift { animation: none; transform: none; will-change: auto; }
   .dialogueContinueHint { animation: none; }
   .dialogueBox[data-casekeeper-stage="narration"] { animation: none; }
