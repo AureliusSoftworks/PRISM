@@ -1622,6 +1622,7 @@ export function replaceProtectedDebateMysteryMansionAssetsV1(
   userId: string,
   bundleId: string,
   sessionId: string,
+  retainedAssets: readonly Pick<DebateMysteryMansionAssetV1, "id" | "role" | "logicalId">[] = [],
 ): void {
   const rows = db.prepare(
     `SELECT subject_id, kind, mime_type, ciphertext, cipher_iv, cipher_tag,
@@ -1686,6 +1687,21 @@ export function replaceProtectedDebateMysteryMansionAssetsV1(
       : `prop-${String(++propIndex).padStart(3, "0")}`;
     insertRef.run(bundleId, userId, stored.id, role, logicalId, now);
   }
+  // A mid-investigation save may not have a case-vault copy of an unvisited
+  // room yet. Keep its accepted source asset, plus the frozen venue audio.
+  // Case-vault repairs above take precedence over these fallback references.
+  const retainRef = db.prepare(
+    `INSERT INTO debate_mystery_mansion_asset_refs
+       (bundle_id, user_id, asset_id, role, logical_id, created_at)
+     SELECT ?, ?, id, ?, ?, ? FROM debate_mystery_mansion_assets
+      WHERE id = ? AND user_id = ?
+     ON CONFLICT(bundle_id, role, logical_id) DO UPDATE SET
+       asset_id = excluded.asset_id, created_at = excluded.created_at
+     WHERE excluded.role = 'music'`,
+  );
+  for (const asset of retainedAssets) {
+    retainRef.run(bundleId, userId, asset.role, asset.logicalId, now, asset.id, userId);
+  }
   cleanupUnreferencedDebateMysteryMansionAssetsV1(db, userId);
 }
 
@@ -1732,7 +1748,7 @@ export function saveDebateMysteryMansionBundleV2(
   if (!debateMysteryMansionBundleEligibleV2(state)) {
     throw new HttpError(
       409,
-      "Visit every room and review every examination point before saving this mansion.",
+      "A Whodunnit venue with at least one room is required before saving.",
     );
   }
   const rooms = bundleRoomsFromState(state, roomImageIdById);
@@ -1823,7 +1839,16 @@ export function saveDebateMysteryMansionBundleV2(
     for (const room of rooms) {
       if (room.imageId) insertAsset.run(id, userId, room.id, room.imageId, now);
     }
-    replaceProtectedDebateMysteryMansionAssetsV1(db, userId, id, sessionId);
+    const retainedAssets = state.config.mansionSnapshot?.presentation.assets.flatMap((asset) => {
+      const acceptedRooms = asset.role === "room"
+        ? frozenLayout?.entities.filter((entity) =>
+            entity.kind === "room" && entity.acceptedRoomAssetId === asset.id) ?? []
+        : [];
+      return acceptedRooms.length
+        ? acceptedRooms.map((room) => ({ ...asset, logicalId: room.id }))
+        : [asset];
+    }) ?? [];
+    replaceProtectedDebateMysteryMansionAssetsV1(db, userId, id, sessionId, retainedAssets);
     const protectedRoomRefs = db.prepare(
       `SELECT logical_id, asset_id
          FROM debate_mystery_mansion_asset_refs

@@ -22327,14 +22327,11 @@ function buildRoutes(
         session.status === "cancelled" ||
         session.formatState.format !== "whodunnit" ||
         session.formatState.version !== 2 ||
-        session.formatState.rooms.length === 0 ||
-        !session.formatState.rooms.every(
-          (room) => room.unlocked && room.visited && room.hotspots.every((hotspot) => hotspot.examined),
-        )
+        session.formatState.rooms.length === 0
       ) {
         throw new HttpError(
           409,
-          "Visit every room and review every examination point before saving this mansion.",
+          "A Whodunnit venue with at least one room is required before saving.",
         );
       }
       const roomImageIdById: Record<string, string> = {};

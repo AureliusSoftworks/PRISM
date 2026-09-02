@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -194,6 +195,28 @@ import {
   debateMysteryMansionExteriorFallbackV1,
 } from "./debateMysteryMansionExterior";
 import styles from "./debateMysteryV2.module.css";
+
+function WhodunnitRoomLoadingOverlay(): React.JSX.Element {
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    // The browser's top layer covers portalled navigation and the companion too.
+    dialog.showModal();
+    return () => dialog.close();
+  }, []);
+  return (
+    <dialog
+      ref={dialogRef}
+      className={styles.roomLoadingOverlay}
+      aria-label="Loading room"
+      aria-busy="true"
+      onCancel={(event) => event.preventDefault()}
+    >
+      <span className={styles.roomLoadingSpinner} aria-hidden="true" />
+    </dialog>
+  );
+}
 
 function WhodunnitChromeErrorNotice(props: {
   message: string;
@@ -4481,6 +4504,10 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     theoryOpen,
   ]);
   const handleInvestigationDialogueClickCapture = (event: React.MouseEvent<HTMLElement>): void => {
+    if (roomEntryLoading) {
+      event.stopPropagation();
+      return;
+    }
     if (mysteryDialogueGestureOriginIsInteractive(event.target)) return;
     if (!operateVisibleDialogueGesture(event.detail, advanceVisibleRoomDialogue)) return;
     event.preventDefault();
@@ -5408,6 +5435,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
 
   return (
     <main className={styles.investigation} data-theme={props.theme} data-view={state.roomView} data-room-loading={roomEntryLoading ? "true" : undefined} aria-busy={roomEntryLoading} inert={roomEntryLoading ? true : undefined} data-opening-map-reveal={openingMapReveal ? "true" : undefined} data-exterior-room-reveal={exteriorRoomReveal ? "true" : undefined} data-tutorial-target="mystery-v2-investigation" onClickCapture={handleInvestigationDialogueClickCapture}>
+      {roomEntryLoading ? <WhodunnitRoomLoadingOverlay /> : null}
       <SessionAtmosphereLayer
         sessionKey={`whodunnit-v2-mansion-ambience:${props.session.id}:${state.config.houseStyle.id}`}
         backgroundUrl={`/api/debates/${encodeURIComponent(props.session.id)}/mystery-mansion/atmosphere?repair=${audioAssetRefreshNonce}`}
@@ -6124,7 +6152,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                     : "This room is using its default Mosaic. You can add an optional Upgraded presentation while keeping the same composition."}
             </p>
             <p className={styles.roomVisualDiscoveryNotice}>
-              No room art is previewed here. You discover it only by entering the room. After the venue is fully explored, <strong>Save venue level</strong> keeps its generated room pair, exact anchors, and dynamic lights for future <code>.mansion</code> exports.
+              No room art is previewed here. You discover it only by entering the room. On the Move map, <strong>Save venue level</strong> keeps accepted room artwork, exact anchors, and dynamic lights for future <code>.mansion</code> exports. You can save before completing the investigation.
             </p>
             {props.session.responseMode === "local" && roomVisualDialogReadiness !== "upgraded" ? (
               <p className={styles.roomVisualOnlineNotice}>Room generation is ONLINE-only. LOCAL remains fully offline.</p>

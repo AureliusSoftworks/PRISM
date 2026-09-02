@@ -83,6 +83,42 @@ function addVaultAsset(
 }
 
 describe("saved mansion protected asset ownership", () => {
+  it("keeps unvisited room and audio assets while accepted case repairs take precedence", () => {
+    const db = testDb();
+    addVaultAsset(db, "user-1", "source", "room", "library", "original library");
+    addVaultAsset(db, "user-1", "source", "room", "foyer", "unvisited foyer");
+    addVaultAsset(db, "user-1", "source", "room", "music", "original music");
+    replaceProtectedDebateMysteryMansionAssetsV1(db, "user-1", "source-bundle", "source");
+    db.prepare(`UPDATE debate_mystery_mansion_asset_refs
+      SET role = 'music', logical_id = 'investigation-theme-v1'
+      WHERE bundle_id = 'source-bundle' AND logical_id = 'music'`).run();
+    const retained = db.prepare(`SELECT asset_id AS id, role, logical_id AS logicalId
+      FROM debate_mystery_mansion_asset_refs WHERE bundle_id = 'source-bundle'`)
+      .all() as unknown as Array<{ id: string; role: "room" | "music"; logicalId: string }>;
+    const ref = (bundleId: string, logicalId: string): string | undefined =>
+      (db.prepare(`SELECT asset_id FROM debate_mystery_mansion_asset_refs
+        WHERE bundle_id = ? AND logical_id = ?`).get(bundleId, logicalId) as
+          { asset_id: string } | undefined)?.asset_id;
+
+    addVaultAsset(db, "user-1", "unfinished-case", "room", "library", "repaired library");
+    replaceProtectedDebateMysteryMansionAssetsV1(db, "user-1", "saved", "unfinished-case", retained);
+    assert.notEqual(ref("saved", "library"), ref("source-bundle", "library"));
+    assert.equal(ref("saved", "foyer"), ref("source-bundle", "foyer"));
+    assert.equal(ref("saved", "investigation-theme-v1"), ref("source-bundle", "investigation-theme-v1"));
+
+    addVaultAsset(db, "user-1", "new-audio", "room", "music", "repaired music");
+    replaceProtectedDebateMysteryMansionAssetsV1(db, "user-1", "new-audio-bundle", "new-audio");
+    const repairedMusicId = ref("new-audio-bundle", "music")!;
+    replaceProtectedDebateMysteryMansionAssetsV1(db, "user-1", "saved", "unfinished-case",
+      retained.map((asset) => asset.role === "music" ? { ...asset, id: repairedMusicId } : asset));
+    assert.equal(ref("saved", "investigation-theme-v1"), repairedMusicId);
+    assert.equal(ref("saved", "foyer"), ref("source-bundle", "foyer"));
+
+    replaceProtectedDebateMysteryMansionAssetsV1(db, "user-2", "other-tenant", "empty", retained);
+    assert.equal(ref("other-tenant", "foyer"), undefined, "retention must remain tenant-scoped");
+    db.close();
+  });
+
   it("deduplicates by tenant, anonymizes props, and replaces refs without orphaning bytes", () => {
     const db = testDb();
     addVaultAsset(db, "user-1", "session-1", "room", "library", "room bytes");

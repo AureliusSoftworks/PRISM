@@ -934,13 +934,30 @@
   min-height: calc(100dvh - var(--app-shell-top-nav-height, 50px));
 }
 
-.investigation[data-room-loading="true"]::before {
-  position: absolute;
-  z-index: 100;
+.roomLoadingOverlay {
+  position: fixed;
   inset: 0;
-  content: "";
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  padding: 0;
   background: #000;
+  color: #fff;
 }
+.roomLoadingOverlay[open] { display: grid; place-items: center; }
+.roomLoadingOverlay::backdrop { background: #000; }
+.roomLoadingSpinner {
+  width: 2rem;
+  height: 2rem;
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: roomLoadingSpin 800ms linear infinite;
+}
+@keyframes roomLoadingSpin { to { transform: rotate(360deg); } }
 
 .investigation[data-opening-map-reveal="true"]::after {
   position: absolute;
@@ -3731,6 +3748,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .roomLoadingSpinner { animation: none; }
   .progressTrack span { transition: none; }
   .forgeCard[data-exterior-hero="true"]::before { transition: none; }
   .forgeCaseIdentity h1 { animation: none; }

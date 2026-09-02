@@ -558,6 +558,9 @@ import {
   DEBATE_STAGE_WHODUNNIT_SCALE_MIN,
   DEBATE_STAGE_WHODUNNIT_SCALE_STEP,
   DEFAULT_DEBATE_STAGE_ALIGNMENT,
+  DEBATE_STAGE_EVIDENCE_BLUR_RADIUS_MIN,
+  DEBATE_STAGE_EVIDENCE_BLUR_RADIUS_MAX,
+  DEBATE_STAGE_EVIDENCE_BLUR_RADIUS_STEP,
   copyDebateStageAlignment,
   debateStageEvidenceViewForCamera,
   debateStageCourtPropForCamera,
@@ -28842,6 +28845,7 @@ export function DebateExperience(
                     <button
                       type="button"
                       disabled={evidenceTableIsDefault}
+                      aria-label={`Reset ${stageAlignmentPreviewCameraLabel} ${stageAlignmentPreviewEvidenceKind}`}
                       onClick={() =>
                         setStageAlignmentDraft((current) =>
                           normalizeDebateStageAlignment({
@@ -28862,7 +28866,7 @@ export function DebateExperience(
                         )
                       }
                     >
-                      Reset
+                      Reset {stageAlignmentPreviewEvidenceKind === "source" ? "source" : "exhibit"}
                     </button>
                   </header>
                   <div className={styles.alignmentEvidenceEditor}>
@@ -28954,6 +28958,38 @@ export function DebateExperience(
                         );
                       })}
                     </div>
+                    {evidenceAlignmentView === "moderator" ? (
+                      <div
+                        className={styles.alignmentGavelTunerRows}
+                        data-debate-evidence-blur-tuner="true"
+                      >
+                        <label>
+                          <span>
+                            Blur radius
+                            <output>{activeEvidenceTable.blurRadius.toFixed(2)}px</output>
+                          </span>
+                          <input
+                            type="range"
+                            min={DEBATE_STAGE_EVIDENCE_BLUR_RADIUS_MIN}
+                            max={DEBATE_STAGE_EVIDENCE_BLUR_RADIUS_MAX}
+                            step={DEBATE_STAGE_EVIDENCE_BLUR_RADIUS_STEP}
+                            value={activeEvidenceTable.blurRadius}
+                            aria-label={`Moderator ${stageAlignmentPreviewEvidenceKind === "source" ? "source" : "exhibit"} blur radius`}
+                            onChange={(event) => {
+                              const blurRadius = Number(event.currentTarget.value);
+                              setStageAlignmentDraft((current) =>
+                                updateDebateStageEvidenceTable(
+                                  current,
+                                  stageAlignmentPreviewEvidenceKind,
+                                  evidenceAlignmentView,
+                                  { blurRadius },
+                                ),
+                              );
+                            }}
+                          />
+                        </label>
+                      </div>
+                    ) : null}
                     <div
                       className={styles.alignmentGavelTunerRows}
                       data-debate-evidence-shadow-tuner="true"
@@ -29111,7 +29147,8 @@ export function DebateExperience(
                     <small>
                       Exhibit and Source placement and drop shadows are saved
                       independently for Wide, Left, Moderator, and Right
-                      cameras.
+                      cameras. Moderator blur is also saved per asset; none of
+                      these adjustments moves the table.
                     </small>
                   </div>
                 </section>

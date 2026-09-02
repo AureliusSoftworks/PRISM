@@ -71,19 +71,21 @@ export function renderDebateForumAccentPixels(
     const red = source[offset] ?? 0;
     const green = source[offset + 1] ?? 0;
     const blue = source[offset + 2] ?? 0;
-    const role: DebateForumAccentRole | null =
-      red === 255 && green === 0 && blue === 0
-        ? "for"
-        : red === 0 && green === 255 && blue === 0
-          ? "moderator"
-          : red === 0 && green === 0 && blue === 255
-            ? "against"
-            : null;
-    if (!role) continue;
-    const tint = tints[role];
-    output[offset] = tint[0];
-    output[offset + 1] = tint[1];
-    output[offset + 2] = tint[2];
+    // The installed room mask blends neighboring keys at their boundaries.
+    // Remove neutral content, then retain the authored RGB ownership weights.
+    const neutral = Math.min(red, green, blue);
+    const forWeight = red - neutral;
+    const moderatorWeight = green - neutral;
+    const againstWeight = blue - neutral;
+    const total = forWeight + moderatorWeight + againstWeight;
+    if (total === 0) continue;
+    for (let channel = 0; channel < 3; channel += 1) {
+      output[offset + channel] =
+        (tints.for[channel]! * forWeight +
+          tints.moderator[channel]! * moderatorWeight +
+          tints.against[channel]! * againstWeight) /
+        total;
+    }
     output[offset + 3] = alpha;
   }
 

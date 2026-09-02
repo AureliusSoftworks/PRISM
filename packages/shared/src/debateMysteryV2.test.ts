@@ -913,7 +913,11 @@ test("Theme, asset synthesis, and reusable mansion eligibility freeze determinis
   assert.equal(debateMysteryMansionBundleEligibleV2({ rooms: [completeRoom] }), true);
   assert.equal(debateMysteryMansionBundleEligibleV2({
     rooms: [{ ...completeRoom, hotspots: [{ ...completeRoom.hotspots[0]!, examined: false }] }],
-  }), false);
+  }), true);
+  assert.equal(debateMysteryMansionBundleEligibleV2({
+    rooms: [{ ...completeRoom, unlocked: false, visited: false }],
+  }), true);
+  assert.equal(debateMysteryMansionBundleEligibleV2({ rooms: [] }), false);
 });
 
 test("Spectator setup is preserved and its partner record selects only required physical proof", () => {

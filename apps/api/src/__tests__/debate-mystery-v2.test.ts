@@ -4772,35 +4772,19 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     ).all("user-1", session.id) as unknown as Array<{ checkpoint_key: string }>;
     assert.equal(assetCheckpoints.length, preparedIds.length);
 
-    const completedMansionSession: DebateSessionV1 = {
-      ...session,
-      formatState: {
-        ...state,
-        rooms: state.rooms.map((room) => ({
-          ...room,
-          unlocked: true,
-          visited: true,
-          hotspots: room.hotspots.map((hotspot) => ({
-            ...hotspot,
-            unlocked: true,
-            examined: true,
-          })),
-        })),
-      },
-    };
-    db.prepare(
-      "UPDATE debate_sessions SET session_json = ? WHERE id = ? AND user_id = ?",
-    ).run(
-      JSON.stringify({ ...completedMansionSession, events: [] }),
-      session.id,
-      "user-1",
-    );
+    assert.ok(state.rooms.some((room) =>
+      !room.visited || room.hotspots.some((hotspot) => !hotspot.examined)),
+    "the venue must be savable before exploration is complete");
+    const progressBeforeSave = v2State(getDebateSession(db, "user-1", session.id));
     const mansion = saveDebateMysteryMansionBundleV2(
       db,
       "user-1",
       session.id,
     );
     assert.equal(mansion.rooms.length, state.rooms.length);
+    assert.deepEqual(v2State(getDebateSession(db, "user-1", session.id)), progressBeforeSave);
+    assert.equal(saveDebateMysteryMansionBundleV2(db, "user-1", session.id).id, mansion.id,
+      "saving again refreshes the same reusable venue");
     assert.deepEqual(
       listDebateMysteryMansionBundlesV2(db, "user-1").map((entry) => entry.id),
       [mansion.id],

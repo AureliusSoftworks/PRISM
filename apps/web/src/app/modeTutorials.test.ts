@@ -191,6 +191,8 @@ describe("mode tutorials", () => {
     assert.match(step.body, /LOCAL never sends a room to a remote generator/u);
     assert.match(step.body, /original Mosaic remains instantly recoverable/u);
     assert.match(step.body, /Save venue level preserves the layout/u);
+    assert.match(step.body, /You can save before completing the investigation/u);
+    assert.match(step.body, /saving does not unlock rooms, review examination points, or finish the case/u);
     assert.match(step.body, /Continue without voices/u);
     assert.match(step.body, /no Actions or token economy/u);
     assert.match(step.body, /Move returns to PRISM’s shallow-isometric venue/u);
@@ -978,6 +980,9 @@ describe("mode tutorials", () => {
     assert.match(copy, /Table and Witness switch/u);
     assert.match(copy, /Moderator camera has its own table position and scale/u);
     assert.match(copy, /adjusting or resetting it leaves Main unchanged/u);
+    assert.match(copy, /Exhibit and Source each keep their own position, size, and shadow/u);
+    assert.match(copy, /use Blur radius to soften it independently/u);
+    assert.match(copy, /Reset only restores that asset in that camera/u);
     assert.match(copy, /fourth shuffled Library bot/u);
     assert.match(copy, /Jury preview uses those four distinct bodies/u);
     assert.match(copy, /without inventing or erasing history/u);

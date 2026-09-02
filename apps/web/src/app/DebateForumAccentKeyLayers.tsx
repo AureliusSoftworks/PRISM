@@ -1,69 +1,55 @@
 "use client";
 
-import type { CSSProperties } from "react";
-import { normalizedDebateForumAccentColor } from "./debateForumAccentKeys";
+import { useLayoutEffect, useRef, type CSSProperties } from "react";
+import {
+  DEBATE_FORUM_ACCENT_KEY_SOURCE,
+  normalizedDebateForumAccentColor,
+  renderDebateForumAccentPixels,
+} from "./debateForumAccentKeys";
 import styles from "./DebateExperience.module.css";
 
-function ForumArchitectureAccent(props: {
-  depth: "backdrop" | "foreground";
-}): React.JSX.Element {
-  if (props.depth === "foreground") {
-    return (
-      <svg
-        className={styles.forumAccentArchitecture}
-        viewBox="0 0 1672 941"
-        preserveAspectRatio="xMidYMid slice"
-        aria-hidden="true"
-      >
-        <g className={styles.forumAccentRoleFor} data-role="for">
-          <path d="M106 846 L438 746 L438 764 L106 862 Z" />
-          <path d="M142 820 L405 741" />
-          <path d="M132 799 L392 727" className={styles.forumAccentFineLine} />
-        </g>
-        <g className={styles.forumAccentRoleModerator} data-role="moderator">
-          <path d="M645 642 L1027 642" />
-          <path d="M679 617 L993 617" className={styles.forumAccentFineLine} />
-          <path d="M739 492 L933 492" className={styles.forumAccentFineLine} />
-        </g>
-        <g className={styles.forumAccentRoleAgainst} data-role="against">
-          <path d="M1234 746 L1566 846 L1566 862 L1234 764 Z" />
-          <path d="M1267 741 L1530 820" />
-          <path d="M1280 727 L1540 799" className={styles.forumAccentFineLine} />
-        </g>
-      </svg>
-    );
-  }
+const FORUM_MASK_WIDTH = 1672;
+const FORUM_MASK_HEIGHT = 941;
+const sourceCache = new Map<string, Promise<ImageData>>();
 
-  return (
-    <svg
-      className={styles.forumAccentArchitecture}
-      viewBox="0 0 1672 941"
-      preserveAspectRatio="xMidYMid slice"
-      aria-hidden="true"
-    >
-      <g className={styles.forumAccentRoleFor} data-role="for">
-        <path d="M0 58 L267 176 L267 594" />
-        <path d="M266 177 L420 229 L420 590" className={styles.forumAccentFineLine} />
-        <path d="M196 235 L196 614" className={styles.forumAccentFineLine} />
-      </g>
-      <g className={styles.forumAccentRoleModerator} data-role="moderator">
-        <path d="M628 33 L835 0 L1044 33 L1001 154 L835 226 L669 154 Z" />
-        <path d="M669 154 L835 143 L1001 154" className={styles.forumAccentFineLine} />
-        <path d="M704 234 L704 596 M968 234 L968 596" />
-      </g>
-      <g className={styles.forumAccentRoleAgainst} data-role="against">
-        <path d="M1672 58 L1405 176 L1405 594" />
-        <path d="M1406 177 L1252 229 L1252 590" className={styles.forumAccentFineLine} />
-        <path d="M1476 235 L1476 614" className={styles.forumAccentFineLine} />
-      </g>
-    </svg>
-  );
+function loadForumAccentSource(source: string): Promise<ImageData> {
+  const cached = sourceCache.get(source);
+  if (cached) return cached;
+  const pending = new Promise<ImageData>((resolve, reject) => {
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = () => {
+      try {
+        if (
+          image.naturalWidth !== FORUM_MASK_WIDTH ||
+          image.naturalHeight !== FORUM_MASK_HEIGHT
+        ) {
+          throw new Error("Forum accent mask dimensions do not match the room.");
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = FORUM_MASK_WIDTH;
+        canvas.height = FORUM_MASK_HEIGHT;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        if (!context) throw new Error("Forum accent mask canvas is unavailable.");
+        context.drawImage(image, 0, 0);
+        resolve(context.getImageData(0, 0, canvas.width, canvas.height));
+      } catch (error) {
+        reject(error);
+      }
+    };
+    image.onerror = () => reject(new Error("Forum accent mask failed to load."));
+    image.src = source;
+  });
+  sourceCache.set(source, pending);
+  void pending.catch(() => {
+    if (sourceCache.get(source) === pending) sourceCache.delete(source);
+  });
+  return pending;
 }
 
 /**
- * Role-owned architectural light for the Forum. It deliberately uses the
- * parliamentary room's prism seams and podium/step trim rather than repainting
- * each third of the chamber with a broad color wash.
+ * Recolor the installed room/podium masks before displaying them. The decoded
+ * sources are shared across previews and playback, never shown as raw RGB keys.
  */
 export function DebateForumAccentKeys(props: {
   againstColor: unknown;
@@ -83,15 +69,51 @@ export function DebateForumAccentKeys(props: {
     props.againstColor,
     "against",
   );
+  const source = props.source ?? DEBATE_FORUM_ACCENT_KEY_SOURCE[props.depth];
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const stackRef = useRef<HTMLDivElement>(null);
   const foregroundFallbackClass =
     props.depth === "foreground" ? ` ${styles.lightMaskForeground}` : "";
 
+  useLayoutEffect(() => {
+    let cancelled = false;
+    const stack = stackRef.current;
+    const canvas = canvasRef.current;
+    if (!stack || !canvas) return;
+    stack.dataset.ready = "false";
+    stack.dataset.state = "loading";
+    void loadForumAccentSource(source)
+      .then((pixels) => {
+        if (cancelled) return;
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Forum accent canvas is unavailable.");
+        const tinted = context.createImageData(pixels.width, pixels.height);
+        tinted.data.set(
+          renderDebateForumAccentPixels(pixels.data, {
+            for: forColor,
+            moderator: moderatorColor,
+            against: againstColor,
+          }),
+        );
+        context.putImageData(tinted, 0, 0);
+        stack.dataset.ready = "true";
+        stack.dataset.state = "ready";
+      })
+      .catch(() => {
+        if (!cancelled) stack.dataset.state = "error";
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [source, forColor, moderatorColor, againstColor]);
+
   return (
     <div
+      ref={stackRef}
       className={`${styles.forumAccentKeyStack}${props.className ? ` ${props.className}` : ""}`}
       data-depth={props.depth}
-      data-ready="true"
-      data-source={props.source ?? "forum-architecture"}
+      data-ready="false"
+      data-source={source}
       style={
         {
           "--debate-for-color": forColor,
@@ -101,7 +123,12 @@ export function DebateForumAccentKeys(props: {
       }
       aria-hidden="true"
     >
-      <ForumArchitectureAccent depth={props.depth} />
+      <canvas
+        ref={canvasRef}
+        className={styles.forumAccentRaster}
+        width={FORUM_MASK_WIDTH}
+        height={FORUM_MASK_HEIGHT}
+      />
       {props.fallback === false ? null : (
         <span className={styles.forumAccentKeyFallback}>
           <span

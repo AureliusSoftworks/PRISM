@@ -3584,7 +3584,6 @@ export function debateMysteryHouseStyleV2(sparkInput: string): DebateMysteryHous
 export function debateMysteryMansionBundleEligibleV2(
   state: Pick<DebateWhodunnitFormatStateV2, "rooms">,
 ): boolean {
-  return state.rooms.length > 0 && state.rooms.every(
-    (room) => room.unlocked && room.visited && room.hotspots.every((hotspot) => hotspot.examined),
-  );
+  // Saving reusable venue presentation is independent of case progress.
+  return state.rooms.length > 0;
 }

@@ -55,6 +55,7 @@ function evidencePlacement(
     x,
     y,
     size,
+    blurRadius: 0,
     shadow: defaultDebateStageEvidenceShadow(view, kind),
   };
 }
@@ -1069,6 +1070,7 @@ describe("Debate stage alignment", () => {
       x: 18.5,
       y: -22,
       size: DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
+      blurRadius: 0,
       shadow: defaultDebateStageEvidenceShadow("wide", "exhibit"),
     });
     assert.deepEqual(
@@ -1085,6 +1087,7 @@ describe("Debate stage alignment", () => {
       x: -40,
       y: 12,
       size: 150,
+      blurRadius: 0,
       shadow: defaultDebateStageEvidenceShadow("left", "source"),
     });
     const shadowed = updateDebateStageEvidenceTable(

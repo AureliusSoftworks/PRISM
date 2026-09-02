@@ -4478,12 +4478,12 @@ describe("Debate experience", () => {
   });
 
   it("keeps both Forum accent layers aligned to the centered-cover artwork", () => {
-    const accentSvgs = [...forumAccentKeysSource.matchAll(/<svg\b[^>]*>/gu)];
-    assert.equal(accentSvgs.length, 2, "backdrop and foreground accent layers");
-    for (const [svg] of accentSvgs) {
-      assert.match(svg, /viewBox="0 0 1672 941"/u);
-      assert.match(svg, /preserveAspectRatio="xMidYMid slice"/u);
-    }
+    assert.match(forumAccentKeysSource, /FORUM_MASK_WIDTH = 1672/u);
+    assert.match(forumAccentKeysSource, /FORUM_MASK_HEIGHT = 941/u);
+    assert.match(forumAccentKeysSource, /width=\{FORUM_MASK_WIDTH\}/u);
+    assert.match(forumAccentKeysSource, /height=\{FORUM_MASK_HEIGHT\}/u);
+    assert.match(forumAccentKeysSource, /DEBATE_FORUM_ACCENT_KEY_SOURCE\[props\.depth\]/u);
+    assert.match(css, /\.forumAccentRaster\s*\{[^}]*object-fit:\s*cover[^}]*object-position:\s*center/u);
     for (const layer of ["receiverMatte", "podiumForeground"]) {
       const rule = css.match(new RegExp(`\\.${layer}\\s*\\{([^}]*)\\}`, "u"));
       assert.ok(rule, `${layer} artwork rule exists`);
@@ -4544,33 +4544,38 @@ describe("Debate experience", () => {
     assert.match(source, /<DebateForumAccentKeys/u);
     assert.match(
       forumAccentKeysSource,
-      /data-source=\{props\.source \?\? "forum-architecture"\}/u,
+      /data-source=\{source\}/u,
     );
-    assert.match(forumAccentKeysSource, /viewBox="0 0 1672 941"/u);
-    assert.match(forumAccentKeysSource, /data-role="for"/u);
-    assert.match(forumAccentKeysSource, /data-role="moderator"/u);
-    assert.match(forumAccentKeysSource, /data-role="against"/u);
-    assert.doesNotMatch(forumAccentKeysSource, /<canvas/u);
+    assert.match(forumAccentKeysSource, /<canvas/u);
+    assert.match(forumAccentKeysSource, /renderDebateForumAccentPixels\(pixels\.data/u);
+    assert.match(forumAccentKeysSource, /context\.putImageData\(tinted, 0, 0\);\s+stack\.dataset\.ready = "true"/u);
+    assert.match(forumAccentKeysSource, /data-ready="false"/u);
+    assert.match(forumAccentKeysSource, /if \(cancelled\) return/u);
+    assert.doesNotMatch(forumAccentKeysSource, /<svg|ForumArchitectureAccent/u);
+    assert.doesNotMatch(css, /forumAccentArchitecture|forumAccentRole|forumAccentFineLine/u);
     assert.match(
       css,
-      /\.forumAccentArchitecture[\s\S]{0,400}mix-blend-mode:\s*screen/u,
-    );
-    assert.match(css, /\.forumAccentRoleFor[\s\S]{0,100}--debate-for-color/u);
-    assert.match(
-      css,
-      /\.forumCamera\[data-active-role="for"\]\s+\.forumAccentRoleFor/u,
+      /\.forumAccentKeyStack\s*\{[^}]*mix-blend-mode:\s*var\(--debate-light-blend-mode-dark, hard-light\)/u,
     );
     assert.match(
       css,
-      /\.forumCamera\[data-camera-view="moderator"\]\s+\.forumAccentArchitecture\s*\{[^}]*opacity:\s*0/u,
+      /\.live\[data-theme="light"\]\s+\.forumAccentKeyStack\s*\{[^}]*mix-blend-mode:\s*var\(--debate-light-blend-mode-light, color\)/u,
     );
     assert.match(
       css,
-      /data-debate-material-quality="minimal"\][\s\S]{0,180}\.forumAccentArchitecture/u,
+      /\.forumAccentKeyStack:not\(\[data-ready="true"\]\)\s+\.forumAccentRaster\s*\{[^}]*visibility:\s*hidden/u,
     );
     assert.match(
       css,
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]{0,500}\.forumAccentArchitecture/u,
+      /\.forumCamera\[data-camera-view="moderator"\]\s+\.forumAccentRaster\s*\{[^}]*visibility:\s*hidden[^}]*opacity:\s*0/u,
+    );
+    assert.match(
+      css,
+      /data-debate-material-quality="minimal"\]\s+\.forumAccentKeyStack/u,
+    );
+    assert.match(
+      css,
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]{0,500}\.forumAccentRaster/u,
     );
     assert.match(source, /data-active-role=\{activeRole \?\? undefined\}/u);
     assert.doesNotMatch(source, /<DebateForumScene/u);

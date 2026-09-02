@@ -29,6 +29,9 @@ export const DEBATE_STAGE_EVIDENCE_TABLE_POSITION_STEP = 0.5;
 export const DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN = 40;
 export const DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MAX = 220;
 export const DEBATE_STAGE_EVIDENCE_TABLE_SIZE_STEP = 5;
+export const DEBATE_STAGE_EVIDENCE_BLUR_RADIUS_MIN = 0;
+export const DEBATE_STAGE_EVIDENCE_BLUR_RADIUS_MAX = 20;
+export const DEBATE_STAGE_EVIDENCE_BLUR_RADIUS_STEP = 0.25;
 export const DEBATE_STAGE_WHODUNNIT_POSITION_MIN = -100;
 export const DEBATE_STAGE_WHODUNNIT_POSITION_MAX = 100;
 export const DEBATE_STAGE_WHODUNNIT_POSITION_STEP = 0.5;
@@ -148,9 +151,11 @@ export interface DebateStageEvidenceShadowV1 {
   floorWidth: number;
 }
 
-/** Shared place/size/shadow for the exhibit table that uses the Jury coffee-table raster. */
+/** Per-camera evidence asset placement and focus, independent of the table raster. */
 export interface DebateStageEvidenceTableV1 extends DebateStageOffsetV1 {
   size: number;
+  /** Asset blur radius in CSS px, separate from its cast-shadow softness. */
+  blurRadius: number;
   shadow: DebateStageEvidenceShadowV1;
 }
 
@@ -316,6 +321,7 @@ function evidenceTablePlacement(
     x,
     y,
     size,
+    blurRadius: 0,
     shadow: defaultDebateStageEvidenceShadow(view, kind),
   };
 }
@@ -713,6 +719,12 @@ function normalizeEvidenceTable(
     x: normalizedEvidenceTablePosition(candidate.x, fallback.x),
     y: normalizedEvidenceTablePosition(candidate.y, fallback.y),
     size: normalizedEvidenceTableSize(candidate.size, fallback.size),
+    blurRadius: normalizedNumber(
+      candidate.blurRadius,
+      DEBATE_STAGE_EVIDENCE_BLUR_RADIUS_MIN,
+      DEBATE_STAGE_EVIDENCE_BLUR_RADIUS_MAX,
+      fallback.blurRadius,
+    ),
     shadow: normalizeEvidenceShadow(candidate.shadow, fallback.shadow),
   };
 }
@@ -757,6 +769,7 @@ function normalizeEvidenceTables(
       x: legacyCloseup.x,
       y: legacyCloseup.y,
       size: legacyCloseup.size,
+      blurRadius: fallback.left.blurRadius,
       shadow: fallback.left.shadow,
     }),
     moderator,
@@ -764,6 +777,7 @@ function normalizeEvidenceTables(
       x: legacyCloseup.x,
       y: legacyCloseup.y,
       size: legacyCloseup.size,
+      blurRadius: fallback.right.blurRadius,
       shadow: fallback.right.shadow,
     }),
   };
@@ -1419,27 +1433,35 @@ export function debateStageAlignmentStyle(
     "--debate-evidence-offset-x": `${normalized.evidenceTable.exhibit.wide.x}%`,
     "--debate-evidence-offset-y": `${normalized.evidenceTable.exhibit.wide.y}%`,
     "--debate-evidence-scale": `${normalized.evidenceTable.exhibit.wide.size / 100}`,
+    "--debate-evidence-blur-radius": `${normalized.evidenceTable.exhibit.wide.blurRadius}px`,
     "--debate-left-evidence-offset-x": `${normalized.evidenceTable.exhibit.left.x}%`,
     "--debate-left-evidence-offset-y": `${normalized.evidenceTable.exhibit.left.y}%`,
     "--debate-left-evidence-scale": `${normalized.evidenceTable.exhibit.left.size / 100}`,
+    "--debate-left-evidence-blur-radius": `${normalized.evidenceTable.exhibit.left.blurRadius}px`,
     "--debate-moderator-evidence-offset-x": `${normalized.evidenceTable.exhibit.moderator.x}%`,
     "--debate-moderator-evidence-offset-y": `${normalized.evidenceTable.exhibit.moderator.y}%`,
     "--debate-moderator-evidence-scale": `${normalized.evidenceTable.exhibit.moderator.size / 100}`,
+    "--debate-moderator-evidence-blur-radius": `${normalized.evidenceTable.exhibit.moderator.blurRadius}px`,
     "--debate-right-evidence-offset-x": `${normalized.evidenceTable.exhibit.right.x}%`,
     "--debate-right-evidence-offset-y": `${normalized.evidenceTable.exhibit.right.y}%`,
     "--debate-right-evidence-scale": `${normalized.evidenceTable.exhibit.right.size / 100}`,
+    "--debate-right-evidence-blur-radius": `${normalized.evidenceTable.exhibit.right.blurRadius}px`,
     "--debate-source-evidence-offset-x": `${normalized.evidenceTable.source.wide.x}%`,
     "--debate-source-evidence-offset-y": `${normalized.evidenceTable.source.wide.y}%`,
     "--debate-source-evidence-scale": `${normalized.evidenceTable.source.wide.size / 100}`,
+    "--debate-source-evidence-blur-radius": `${normalized.evidenceTable.source.wide.blurRadius}px`,
     "--debate-left-source-evidence-offset-x": `${normalized.evidenceTable.source.left.x}%`,
     "--debate-left-source-evidence-offset-y": `${normalized.evidenceTable.source.left.y}%`,
     "--debate-left-source-evidence-scale": `${normalized.evidenceTable.source.left.size / 100}`,
+    "--debate-left-source-evidence-blur-radius": `${normalized.evidenceTable.source.left.blurRadius}px`,
     "--debate-moderator-source-evidence-offset-x": `${normalized.evidenceTable.source.moderator.x}%`,
     "--debate-moderator-source-evidence-offset-y": `${normalized.evidenceTable.source.moderator.y}%`,
     "--debate-moderator-source-evidence-scale": `${normalized.evidenceTable.source.moderator.size / 100}`,
+    "--debate-moderator-source-evidence-blur-radius": `${normalized.evidenceTable.source.moderator.blurRadius}px`,
     "--debate-right-source-evidence-offset-x": `${normalized.evidenceTable.source.right.x}%`,
     "--debate-right-source-evidence-offset-y": `${normalized.evidenceTable.source.right.y}%`,
     "--debate-right-source-evidence-scale": `${normalized.evidenceTable.source.right.size / 100}`,
+    "--debate-right-source-evidence-blur-radius": `${normalized.evidenceTable.source.right.blurRadius}px`,
     ...evidenceShadowVars("", normalized.evidenceTable.exhibit.wide.shadow),
     ...evidenceShadowVars(
       "left-",

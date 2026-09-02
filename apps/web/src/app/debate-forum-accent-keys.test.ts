@@ -94,3 +94,29 @@ test("normalizes valid bot colors and safely falls back by seat", () => {
   );
   assert.equal(normalizedDebateForumAccentColor(null, "against"), "#ff5f8f");
 });
+
+test("preserves blended role boundaries and authored alpha without changing the source", () => {
+  const source = new Uint8ClampedArray([
+    128, 128, 0, 210,
+    0, 64, 192, 127,
+    220, 120, 20, 64,
+    25, 25, 25, 255,
+    255, 0, 0, 0,
+  ]);
+  const original = source.slice();
+  assert.deepEqual(
+    [...renderDebateForumAccentPixels(source, {
+      for: "#ff00aa",
+      moderator: "#00ffaa",
+      against: "#aa00ff",
+    })],
+    [
+      128, 128, 170, 210,
+      128, 64, 234, 127,
+      170, 85, 170, 64,
+      0, 0, 0, 0,
+      0, 0, 0, 0,
+    ],
+  );
+  assert.deepEqual(source, original);
+});
