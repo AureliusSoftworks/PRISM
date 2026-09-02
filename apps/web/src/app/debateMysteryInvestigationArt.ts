@@ -11,6 +11,7 @@ export const WHODUNNIT_ROOM_UPGRADE_STORAGE_KEY =
 
 /** Internal asset-route variant. Player preference is the Upgraded boolean. */
 export type WhodunnitInvestigationArtStyle = "mosaic" | "illustrated";
+export type WhodunnitMosaicGridVisibility = "visible" | "hidden";
 
 export const DEFAULT_WHODUNNIT_ROOM_UPGRADE_ENABLED = false;
 export const WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION =
@@ -157,15 +158,26 @@ export function writeWhodunnitRoomUpgradeEnabled(
 export function whodunnitBundledRoomArtPath(
   bundledAssetPath: string | null | undefined,
   style: WhodunnitInvestigationArtStyle,
+  mosaicGrid: WhodunnitMosaicGridVisibility = "visible",
 ): string | null {
   if (!bundledAssetPath) return null;
-  if (/-mosaic\.webp(?:\?|$)/iu.test(bundledAssetPath)) {
+  if (/-mosaic-reference\.webp(?:\?|$)/iu.test(bundledAssetPath)) {
     return withPixelArtPresentationVersion(bundledAssetPath);
+  }
+  if (/-mosaic\.webp(?:\?|$)/iu.test(bundledAssetPath)) {
+    return withPixelArtPresentationVersion(
+      mosaicGrid === "hidden"
+        ? bundledAssetPath.replace(/-mosaic\.webp/iu, "-mosaic-reference.webp")
+        : bundledAssetPath,
+    );
   }
   if (style === "illustrated") return bundledAssetPath;
   const match = bundledAssetPath.match(/^(.*?)(\.(?:png|jpe?g|webp))(\?.*)?$/iu);
   if (!match) return bundledAssetPath;
-  return withPixelArtPresentationVersion(`${match[1]}-mosaic.webp${match[3] ?? ""}`);
+  const mosaicSuffix = mosaicGrid === "hidden"
+    ? "-mosaic-reference.webp"
+    : "-mosaic.webp";
+  return withPixelArtPresentationVersion(`${match[1]}${mosaicSuffix}${match[3] ?? ""}`);
 }
 
 const WHODUNNIT_BUNDLED_ROOM_ART_BY_TEMPLATE: Readonly<Record<string, string>> =
@@ -198,6 +210,7 @@ export function whodunnitBundledRoomArtPathForRoom(
     bundledAssetPath?: string | null;
   },
   style: WhodunnitInvestigationArtStyle,
+  mosaicGrid: WhodunnitMosaicGridVisibility = "visible",
 ): string | null {
   const fallbackPath = room.templateId
     ? WHODUNNIT_BUNDLED_ROOM_ART_BY_TEMPLATE[room.templateId] ?? null
@@ -205,6 +218,7 @@ export function whodunnitBundledRoomArtPathForRoom(
   return whodunnitBundledRoomArtPath(
     room.bundledAssetPath ?? fallbackPath,
     style,
+    mosaicGrid,
   );
 }
 
@@ -222,21 +236,23 @@ export function whodunnitSealedRoomArtUrl(args: {
   sessionId: string;
   subjectId: string;
   style: WhodunnitInvestigationArtStyle;
+  mosaicGrid?: WhodunnitMosaicGridVisibility;
 }): string {
   const base = `/api/debates/${encodeURIComponent(args.sessionId)}/mystery-assets/room/${encodeURIComponent(args.subjectId)}/file`;
   return args.style === "mosaic"
-    ? `${base}?style=mosaic&pixelArt=${WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION}`
+    ? `${base}?style=${args.mosaicGrid === "hidden" ? "mosaic-reference" : "mosaic"}&pixelArt=${WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION}`
     : base;
 }
 
 export function whodunnitSavedRoomArtUrl(
   imageId: string | null | undefined,
   style: WhodunnitInvestigationArtStyle,
+  mosaicGrid: WhodunnitMosaicGridVisibility = "visible",
 ): string | null {
   if (!imageId) return null;
   const base = `/api/images/${encodeURIComponent(imageId)}/file`;
   return style === "mosaic"
-    ? `${base}?style=mosaic&pixelArt=${WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION}`
+    ? `${base}?style=${mosaicGrid === "hidden" ? "mosaic-reference" : "mosaic"}&pixelArt=${WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION}`
     : base;
 }
 
@@ -279,9 +295,10 @@ export function whodunnitMansionRoomArtUrl(
   mansionId: string,
   assetId: string,
   style: WhodunnitInvestigationArtStyle,
+  mosaicGrid: WhodunnitMosaicGridVisibility = "visible",
 ): string {
   const base = `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}/assets/${encodeURIComponent(assetId)}/file`;
   return style === "mosaic"
-    ? `${base}?style=mosaic&pixelArt=${WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION}`
+    ? `${base}?style=${mosaicGrid === "hidden" ? "mosaic-reference" : "mosaic"}&pixelArt=${WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION}`
     : base;
 }

@@ -8,6 +8,7 @@ import {
   buildDebateMysteryMansionAtmospherePromptV1,
   discardDebateMysteryMansionAtmosphereV1,
   stageDebateMysteryMansionAtmosphereV1,
+  undoDebateMysteryMansionAtmosphereFieldRepairV1,
   undoDebateMysteryMansionAtmosphereV1,
 } from "../debate-mystery-mansion-atmosphere.ts";
 import { initializeDatabase } from "../db.ts";
@@ -145,5 +146,31 @@ describe("Whodunnit mansion atmosphere generation", () => {
       /LOCAL remains fully offline/u,
     );
     assert.equal(fetchCount, 0);
+  });
+
+  it("undoes a first field repair to the packaged fallback", async () => {
+    const { db, key } = fixture();
+    const audio = readFileSync(new URL(
+      "../../../web/public/audio/coffee/ambience/coffee-shop-foley-forest-loop.mp3",
+      import.meta.url,
+    ));
+    const staged = await stageDebateMysteryMansionAtmosphereV1({
+      db, userKey: key, userId: "owner", bundleId: "mansion",
+      responseMode: "online", apiKey: "configured",
+      fetchImpl: (async () => new Response(audio, {
+        status: 200,
+        headers: { "content-type": "audio/mpeg" },
+      })) as typeof fetch,
+    });
+
+    acceptDebateMysteryMansionAtmosphereV1(db, "owner", "mansion");
+    assert.equal((db.prepare(
+      "SELECT asset_id FROM debate_mystery_mansion_asset_refs WHERE bundle_id = 'mansion' AND logical_id = 'ambience:world-bed-v1'",
+    ).get() as { asset_id: string }).asset_id, staged.assetId);
+
+    undoDebateMysteryMansionAtmosphereFieldRepairV1(db, "owner", "mansion", false);
+    assert.equal((db.prepare(
+      "SELECT COUNT(*) AS count FROM debate_mystery_mansion_asset_refs WHERE bundle_id = 'mansion' AND logical_id = 'ambience:world-bed-v1'",
+    ).get() as { count: number }).count, 0);
   });
 });

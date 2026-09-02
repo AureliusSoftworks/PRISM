@@ -2228,23 +2228,10 @@ import {
 // state doesn't linger and cause accidents on a later sidebar return visit.
 const DELETE_CONFIRM_WINDOW_MS = 3500;
 
-// How long a pointer must be held on any chat-delete button before the
-// "Delete all chats?" armed-all state takes over. Tuned so a normal click
-// can't cross the threshold accidentally, but an intentional press-and-hold
-// resolves without feeling like a ritual. Must stay in sync with the CSS
-// transition duration on `.conversationDelete[data-holding="true"]` so the
-// visual morph completes at the same instant the JS timer fires.
-const DELETE_ALL_HOLD_MS = 900;
-
 // Sentinel for the chat-header delete button, which has no chat id of its own
 // (it always targets the currently open chat).
 const HEADER_DELETE_KEY = "__header__";
 
-// Sentinel for the "delete every chat" armed state, reached by holding any
-// chat × / Delete button past DELETE_ALL_HOLD_MS. Reuses the single
-// `pendingDeleteKey` slot so the existing auto-disarm / outside-click /
-// Escape behaviour applies to it without any extra wiring.
-const DELETE_ALL_KEY = "__delete_all__";
 const DELETE_ALL_COFFEE_SESSIONS_KEY = "__delete_all_coffee_sessions__";
 /** Single Coffee Group delete — opens the same centered confirm modal as bulk deletes. */
 const DELETE_COFFEE_GROUP_KEY_PREFIX = "__delete_coffee_group__:";
@@ -2425,12 +2412,8 @@ function appWideBotContextTargetId(target: EventTarget | null): string | null {
   );
 }
 
-// Bot-list twin of DELETE_ALL_KEY — armed when a press-and-hold crosses the
-// threshold on any bot card ×. Kept separate so the confirmation modal can
-// tailor its copy and the bulk action routes to the bots endpoint instead
-// of conversations. Both all-delete sentinels live in the same
-// `pendingDeleteKey` slot, so outside-click / Escape / auto-disarm still
-// apply uniformly.
+// Bot-library bulk delete has its own sentinel so its confirmation modal stays
+// independent from Coffee and individual delete actions.
 const DELETE_ALL_BOTS_KEY = "__delete_all_bots__";
 const BOT_MARQUEE_DRAG_THRESHOLD_PX = 5;
 const BOT_MARQUEE_SUPPRESS_CLICK_MS = 180;
@@ -7954,6 +7937,23 @@ interface ConversationSummary {
 interface ConversationSweepResponse {
   batchId: string | null;
   undoExpiresAt: string | null;
+  sweptGroups: number;
+  summaries?: ChatDistillationSummary[];
+  failures?: Array<{
+    personaKind: "bot" | "prism" | "orphan";
+    personaKey: string;
+    botId: string | null;
+    botName: string;
+    error: string;
+  }>;
+}
+interface ChatDistillationSummary {
+  personaKind: "bot" | "prism";
+  personaKey: string;
+  botId: string | null;
+  botName: string;
+  summary: string;
+  createdAt: string;
 }
 interface ConversationGroupSummary {
   key: string;
@@ -42692,6 +42692,13 @@ const AVATAR_HD_BENCH_DETAILS: BotAvatarDetailsV1 = {
   },
 };
 
+const AVATAR_HD_BENCH_FACE_STYLE: BotFaceStyle = {
+  ...DEFAULT_BOT_FACE_STYLE,
+  eyeCharacter: "O",
+  eyeCount: 2,
+  mouthCharacter: "⚙",
+};
+
 function AvatarHdBenchSurface(): React.JSX.Element {
   const [previewTheme, setPreviewTheme] = useState<"light" | "dark">("light");
   const [identityColor, setIdentityColor] = useState("#ef1745");
@@ -42786,7 +42793,7 @@ function AvatarHdBenchSurface(): React.JSX.Element {
           avatarSfx={null}
           displayedPreviewMouthShape={previewTalking ? "open-small" : "closed"}
           avatarStyle={avatarStyle}
-          faceStyle={DEFAULT_BOT_FACE_STYLE}
+          faceStyle={AVATAR_HD_BENCH_FACE_STYLE}
           avatarDetails={AVATAR_HD_BENCH_DETAILS}
           avatarDetailsColor={identityColor}
           onPreviewThemeChange={setPreviewTheme}
@@ -51162,6 +51169,9 @@ function HomeContent(): React.JSX.Element {
   const [busy, setBusy] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [sweepBusy, setSweepBusy] = useState(false);
+  const [chatDistillations, setChatDistillations] = useState<
+    ChatDistillationSummary[]
+  >([]);
   const [sweepUndoToast, setSweepUndoToast] = useState<{
     batchId: string;
     expiresAt: number;
@@ -56522,28 +56532,13 @@ function HomeContent(): React.JSX.Element {
     },
     [botProfile, editingBotId, newBotName, newBotSystemPrompt],
   );
-  // Two-stage delete confirmation. `pendingDeleteKey` holds either a
-  // conversation id (sidebar ×), HEADER_DELETE_KEY (header button), or the
-  // DELETE_ALL_KEY sentinel (reached by holding any × past the threshold).
-  // Only one target can be armed at a time, and it auto-disarms after
-  // DELETE_CONFIRM_WINDOW_MS so the ✓ doesn't linger unexpectedly.
+  // Two-stage delete confirmation. `pendingDeleteKey` holds an individual
+  // conversation/header target or one of the independent Bot/Coffee bulk
+  // actions. Only one target can be armed at a time.
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
   const pendingDeleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
-  // Hold-to-delete-all gesture: `holdingKey` tracks which button is currently
-  // being pressed, which the CSS keys off (via `data-holding`) to light up
-  // the held × / header button AND — through the list-level
-  // `data-delete-holding` attribute — every other × so the user can see
-  // the gesture's scope. Released before the threshold → CSS snaps back.
-  // Held past it → the timer arms DELETE_ALL_KEY, which in turn reveals a
-  // centered alertdialog modal and kicks the ×'s into an iOS-style jiggle.
-  // `holdCompletedRef` is the handshake that tells the trailing `onClick`
-  // to stay out of the way after a completed hold (so a hold-then-release
-  // doesn't also arm the single-chat delete on the same button).
-  const [holdingKey, setHoldingKey] = useState<string | null>(null);
-  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const holdCompletedRef = useRef(false);
   // Element that had focus immediately before the armed-all modal opened.
   // Stored so we can restore focus to it when the modal dismisses — a
   // screen-reader / keyboard-user's "where was I?" anchor.
@@ -62411,8 +62406,13 @@ function HomeContent(): React.JSX.Element {
     [conversationGroups],
   );
   const hasSweepEligibleConversations = useMemo(
-    () => conversationGroups.some((group) => group.count > 1),
-    [conversationGroups],
+    () =>
+      conversations.some(
+        (conversation) =>
+          (conversation.mode === "chat" || conversation.mode === "zen") &&
+          !conversation.incognito,
+      ),
+    [conversations],
   );
   const availableConversationGroupKeys = useMemo(
     () => conversationGroups.map((group) => group.key),
@@ -83231,6 +83231,21 @@ function HomeContent(): React.JSX.Element {
     setBots(d.bots);
     return d.bots;
   }
+  async function refreshChatDistillations(): Promise<ChatDistillationSummary[]> {
+    const response = await api<{ summaries: ChatDistillationSummary[] }>(
+      "/api/conversations/distillations",
+    );
+    setChatDistillations(response.summaries);
+    return response.summaries;
+  }
+
+  useEffect(() => {
+    if (!user?.id) {
+      setChatDistillations([]);
+      return;
+    }
+    void refreshChatDistillations().catch(() => undefined);
+  }, [user?.id]);
   async function refreshImages(botFilter?: string | null) {
     const path =
       botFilter === "general"
@@ -83931,6 +83946,7 @@ function HomeContent(): React.JSX.Element {
     setSettings(null);
     setModelCatalog(null);
     setBots([]);
+    setChatDistillations([]);
     botLibraryRefreshRunRef.current += 1;
     setBotLibraryRefreshing(false);
     setImages([]);
@@ -102810,13 +102826,12 @@ function HomeContent(): React.JSX.Element {
       pendingDeleteTimerRef.current = null;
     }
     setPendingDeleteKey(key);
-    // DELETE_ALL_KEY / DELETE_ALL_BOTS_KEY are special: their confirm
+    // Bot/Coffee bulk keys are special: their confirm
     // surface is a centered modal, and the 3.5 s window that makes the
     // inline "Are you sure?" pill feel snappy would instead pull the
     // modal out from under the user mid-read. We skip auto-disarm for
     // them and rely on Cancel / backdrop / Esc to dismiss explicitly.
     if (
-      key === DELETE_ALL_KEY ||
       key === DELETE_ALL_COFFEE_SESSIONS_KEY ||
       key === DELETE_ALL_BOTS_KEY ||
       key.startsWith(DELETE_COFFEE_GROUP_KEY_PREFIX)
@@ -103007,63 +103022,6 @@ function HomeContent(): React.JSX.Element {
     ],
   );
 
-  // ── Hold-to-delete-all gesture ────────────────────────────────────────
-  // `startHoldDelete` / `cancelHoldDelete` are called from pointer events
-  // on every chat-clear affordance (sidebar × rows + header Delete). The
-  // discrete React state change (holdingKey set/cleared) drives the CSS
-  // `[data-holding="true"]` attribute, which owns the actual 900 ms morph
-  // animation — we never re-render on intermediate progress, so even a
-  // long hold doesn't thrash React's reconciler.
-  const cancelHoldDelete = useCallback(() => {
-    if (holdTimerRef.current) {
-      clearTimeout(holdTimerRef.current);
-      holdTimerRef.current = null;
-    }
-    setHoldingKey(null);
-  }, []);
-
-  const startHoldDelete = useCallback(
-    (key: string) => {
-      // Refuse to start a new hold while anything is already armed: the
-      // active confirm pill / modal deserves the user's attention first,
-      // and a second gesture layering on top would be disorienting.
-      if (pendingDeleteKey) return;
-      if (holdTimerRef.current) {
-        clearTimeout(holdTimerRef.current);
-      }
-      holdCompletedRef.current = false;
-      setHoldingKey(key);
-      // Route to the bots sentinel when the holding key is a bot × so the
-      // confirmation modal asks the right question and the bulk action
-      // wipes the right dataset. Any non-bot key (sidebar chat ×, header
-      // Delete) stays on the original DELETE_ALL_KEY path.
-      const allKey = key.startsWith(BOT_DELETE_KEY_PREFIX)
-        ? DELETE_ALL_BOTS_KEY
-        : DELETE_ALL_KEY;
-      holdTimerRef.current = setTimeout(() => {
-        // Threshold crossed — snap out of "holding" visuals and into the
-        // armed-all state. The list-level data attribute flip takes the
-        // ×'s from tilted-and-glowing straight into iOS jiggle, and
-        // `armDelete` renders the confirmation modal.
-        holdCompletedRef.current = true;
-        setHoldingKey(null);
-        holdTimerRef.current = null;
-        armDelete(allKey);
-      }, DELETE_ALL_HOLD_MS);
-    },
-    [armDelete, pendingDeleteKey],
-  );
-
-  // Clean up the hold timer on unmount.
-  useEffect(
-    () => () => {
-      if (holdTimerRef.current) {
-        clearTimeout(holdTimerRef.current);
-      }
-    },
-    [],
-  );
-
   // Armed-all modal a11y: when the modal mounts, capture whatever had
   // focus (usually the × / header Delete the user was holding) so we can
   // restore focus to it on dismiss. While the modal is open, Escape
@@ -103074,7 +103032,6 @@ function HomeContent(): React.JSX.Element {
   const pendingCoffeeGroupDeleteIdForModal =
     parseCoffeeGroupDeleteKey(pendingDeleteKey);
   const isDeleteAllActive =
-    pendingDeleteKey === DELETE_ALL_KEY ||
     pendingDeleteKey === DELETE_ALL_COFFEE_SESSIONS_KEY ||
     pendingDeleteKey === DELETE_ALL_BOTS_KEY ||
     pendingCoffeeGroupDeleteIdForModal !== null;
@@ -103410,38 +103367,6 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  // Bulk-clear every chat, triggered by the hold-to-delete-all gesture.
-  // Optimistically wipes the sidebar + open pane so the UI matches the
-  // user's intent instantly; on failure we roll back to the previous
-  // snapshot and surface the error rather than silently recovering.
-  async function deleteAllConversations() {
-    setError(null);
-    disarmDelete();
-    const previousConversations = conversations;
-    const previousSelectedId = selectedId;
-    const previousDetail = detail;
-    const previousSessionOpinion = sessionOpinion;
-    const previousBotOpinion = botOpinion;
-    // Nothing to clear — short-circuit rather than fire a no-op request.
-    if (previousConversations.length === 0) return;
-    setConversations([]);
-    setSelectedId(null);
-    setDetail(null);
-    setSessionOpinion(null);
-    setBotOpinion(null);
-    try {
-      await api("/api/conversations", { method: "DELETE" });
-      await refreshConversations();
-    } catch (err) {
-      setConversations(previousConversations);
-      setSelectedId(previousSelectedId);
-      setDetail(previousDetail);
-      setSessionOpinion(previousSessionOpinion);
-      setBotOpinion(previousBotOpinion);
-      setError(err instanceof Error ? err.message : "Delete all failed.");
-    }
-  }
-
   async function deleteAllCoffeeSessions() {
     setCoffeeError(null);
     setError(null);
@@ -103510,26 +103435,33 @@ function HomeContent(): React.JSX.Element {
     setSweepBusy(true);
     try {
       const sweepResult = await api<ConversationSweepResponse>(
-        "/api/conversations/sweep",
+        "/api/conversations/distill",
         {
           method: "POST",
           body: JSON.stringify({
-            mode: "sandbox",
+            preferredProvider: effectivePreferredProvider,
+            responseMode: responseModeForProvider(effectivePreferredProvider),
           }),
         },
       );
+      if (!sweepResult.batchId && (sweepResult.failures?.length ?? 0) > 0) {
+        throw new Error(
+          sweepResult.failures?.[0]?.error ?? "No persona could complete the distillation.",
+        );
+      }
       const expiresAtMs = sweepResult.undoExpiresAt
         ? Date.parse(sweepResult.undoExpiresAt)
         : NaN;
       if (sweepResult.batchId && Number.isFinite(expiresAtMs)) {
         setSweepUndoToast({
           batchId: sweepResult.batchId,
-          expiresAt: expiresAtMs,
+          expiresAt: Math.min(expiresAtMs, Date.now() + 15_000),
         });
       } else {
         setSweepUndoToast(null);
       }
       const nextConversations = await refreshConversations();
+      await refreshChatDistillations();
       if (
         detailIdRef.current &&
         !nextConversations.some(
@@ -103542,8 +103474,14 @@ function HomeContent(): React.JSX.Element {
         setBotOpinion(null);
       }
       await refreshOpenMemoryViews();
+      if ((sweepResult.failures?.length ?? 0) > 0) {
+        showLocalCommandToast(
+          "Distillation partly complete",
+          `${sweepResult.sweptGroups} histor${sweepResult.sweptGroups === 1 ? "y was" : "ies were"} safely distilled; ${sweepResult.failures?.length ?? 0} kept their chats untouched.`,
+        );
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Sweep action failed.");
+      setError(err instanceof Error ? err.message : "Distillation failed.");
     } finally {
       setSweepBusy(false);
     }
@@ -103564,6 +103502,7 @@ function HomeContent(): React.JSX.Element {
         current?.batchId === batchId ? null : current,
       );
       const nextConversations = await refreshConversations();
+      await refreshChatDistillations();
       if (
         detailIdRef.current &&
         !nextConversations.some(
@@ -106338,10 +106277,8 @@ function HomeContent(): React.JSX.Element {
   }
 
   // User-facing bulk wipe reached via press-and-hold on any bot card ×.
-  // Mirrors `deleteAllConversations` exactly: optimistic clear, best-effort
-  // server sync, snapshot rollback on failure. This belongs to the normal
-  // panel UX and surfaces errors inside `panelError` so they render beside
-  // the bot list.
+  // It optimistically clears, syncs the server, and restores the prior snapshot
+  // on failure. Errors remain beside the bot list through `panelError`.
   async function deleteAllBots() {
     if (blockCoffeeConfigurationMutation()) return;
     setPanelError(null);
@@ -111569,47 +111506,10 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
-  const renderConversationDeleteAllButton = (): React.JSX.Element => {
-    const isHoldingDeleteAll = holdingKey === DELETE_ALL_KEY;
-    return (
-      <button
-        type="button"
-        className={styles.conversationDeleteAllButton}
-        data-delete-affordance="true"
-        data-holding={isHoldingDeleteAll ? "true" : undefined}
-        onPointerDown={(event) => {
-          if (event.button !== 0) return;
-          try {
-            event.currentTarget.setPointerCapture(event.pointerId);
-          } catch {
-            // Pointer capture is missing in some test environments.
-          }
-          startHoldDelete(DELETE_ALL_KEY);
-        }}
-        onPointerUp={cancelHoldDelete}
-        onPointerCancel={cancelHoldDelete}
-        onClick={(event) => {
-          event.stopPropagation();
-          if (holdCompletedRef.current) {
-            holdCompletedRef.current = false;
-            return;
-          }
-          armDelete(DELETE_ALL_KEY);
-        }}
-        aria-label="Delete all chats"
-        data-glyph-tooltip="Delete all chats"
-      >
-        <span className={styles.conversationDeleteAllButtonGlyph}>
-          <IconTrash />
-        </span>
-      </button>
-    );
-  };
-
   const renderConversationSweepButton = (): React.JSX.Element => {
     const actionLabel = hasSweepEligibleConversations
-      ? "Sweep chats"
-      : "Need at least 2 chats in one bot group";
+      ? "Distill and begin again"
+      : "No direct Chat history is ready to distill";
     return (
       <button
         type="button"
@@ -111625,6 +111525,7 @@ function HomeContent(): React.JSX.Element {
         <span className={styles.conversationSweepButtonGlyph}>
           <IconSparkles />
         </span>
+        <span className={styles.conversationSweepButtonLabel}>Distill</span>
       </button>
     );
   };
@@ -111940,10 +111841,9 @@ function HomeContent(): React.JSX.Element {
     return rows;
   };
 
-  // ── Delete-all confirmation modal ─────────────────────────────────────
-  // Rendered whenever `pendingDeleteKey` points at one of the bulk-delete
-  // sentinels: the sidebar Conversations × for chats, or the existing
-  // hold gesture for bots.
+  // ── Independent Bot/Coffee bulk-delete confirmation modal ─────────────
+  // Chat's bulk trash path was replaced by the recoverable Distill ritual.
+  // These unrelated Bot and Coffee actions retain their existing modal.
   // The modal is the definitive commit surface for the delete-all action
   // — the button under the user's finger never "becomes" the confirm pill
   // in this flow, because at-scale deletion deserves a dedicated
@@ -111963,11 +111863,10 @@ function HomeContent(): React.JSX.Element {
         ? coffeeGroups.find((group) => group.id === pendingCoffeeGroupDeleteId)
         : undefined;
 
-    const isChats = pendingDeleteKey === DELETE_ALL_KEY;
     const isCoffeeSessions =
       pendingDeleteKey === DELETE_ALL_COFFEE_SESSIONS_KEY;
     const isBots = pendingDeleteKey === DELETE_ALL_BOTS_KEY;
-    if (!isChats && !isCoffeeSessions && !isBots && !isCoffeeGroupDelete)
+    if (!isCoffeeSessions && !isBots && !isCoffeeGroupDelete)
       return null;
     if (isCoffeeGroupDelete && !groupForDelete) return null;
 
@@ -111976,56 +111875,41 @@ function HomeContent(): React.JSX.Element {
       : 0;
     const count = isCoffeeGroupDelete
       ? 1
-      : isChats
-        ? conversations.length
-        : isCoffeeSessions
-          ? coffeeSessions.length
-          : Math.max(0, bots.length - protectedBotCount);
+      : isCoffeeSessions
+        ? coffeeSessions.length
+        : Math.max(0, bots.length - protectedBotCount);
     const noun = isCoffeeGroupDelete
       ? "Coffee Group"
-      : isChats
+      : isCoffeeSessions
         ? count === 1
-          ? "conversation"
-          : "conversations"
-        : isCoffeeSessions
-          ? count === 1
-            ? "Coffee Session"
-            : "Coffee Sessions"
-          : count === 1
-            ? "bot"
-            : "bots";
+          ? "Coffee Session"
+          : "Coffee Sessions"
+        : count === 1
+          ? "bot"
+          : "bots";
     const title = isCoffeeGroupDelete
       ? `Delete “${groupForDelete!.name}”?`
-      : isChats
-        ? "Delete all chats?"
-        : isCoffeeSessions
-          ? "Delete all Coffee Sessions?"
-          : "Delete all unprotected bots?";
+      : isCoffeeSessions
+        ? "Delete all Coffee Sessions?"
+        : "Delete all unprotected bots?";
     const body = isCoffeeGroupDelete
       ? "This permanently removes the saved Coffee Group from your sidebar — the named group card, table layout, group shortcuts, and every Coffee Session that belongs to this group."
-      : isChats
+      : isCoffeeSessions
         ? count === 1
-          ? "This will permanently remove your only conversation."
-          : `This will permanently remove all ${count} conversations.`
-        : isCoffeeSessions
-          ? count === 1
-            ? "This will permanently remove your only Coffee Session."
-            : `This will permanently remove all ${count} Coffee Sessions.`
-          : count === 1
-            ? "This will permanently remove your only unprotected bot."
-            : `This will permanently remove all ${count} unprotected ${noun}.`;
+          ? "This will permanently remove your only Coffee Session."
+          : `This will permanently remove all ${count} Coffee Sessions.`
+        : count === 1
+          ? "This will permanently remove your only unprotected bot."
+          : `This will permanently remove all ${count} unprotected ${noun}.`;
     const coda = isCoffeeGroupDelete
       ? " Other Coffee Groups, chats, bots, images, and memories stay."
-      : isChats
-        ? " Images and memories stay."
-        : isCoffeeSessions
-          ? " Coffee Groups and other chats stay; only session transcripts are removed."
-          : `${protectedBotCount > 0 ? " Protected bots will be kept." : ""} Chats using deleted bots stay (they fall back to Default).`;
+      : isCoffeeSessions
+        ? " Coffee Groups and other chats stay; only session transcripts are removed."
+        : `${protectedBotCount > 0 ? " Protected bots will be kept." : ""} Chats using deleted bots stay (they fall back to Default).`;
     const onConfirm = () => {
       if (isCoffeeGroupDelete && pendingCoffeeGroupDeleteId) {
         void deleteCoffeeGroupConfirmed(pendingCoffeeGroupDeleteId);
-      } else if (isChats) void deleteAllConversations();
-      else if (isCoffeeSessions) void deleteAllCoffeeSessions();
+      } else if (isCoffeeSessions) void deleteAllCoffeeSessions();
       else void deleteAllBots();
     };
     const confirmLabel = isCoffeeGroupDelete ? "Delete group" : "Delete all";
@@ -113626,10 +113510,10 @@ function HomeContent(): React.JSX.Element {
 
   const renderSweepConfirmModal = () => {
     if (!sweepConfirmOpen) return null;
-    const title = "Sweep chats?";
+    const title = "Distill and begin again?";
     const body =
-      "This archives current chats into one summary per bot group. You'll get a short-lived Undo toast right after.";
-    const confirmLabel = "Sweep chats";
+      "Prism and each installed persona will carry one private continuity forward. Histories from deleted personas become private archival distillations and are never reused. Only safely distilled chats are archived; immediate Undo lasts 15 seconds, and source chats remain recoverable for 30 days.";
+    const confirmLabel = "Distill chats";
     return (
       <div
         className={styles.deleteAllModalBackdrop}
@@ -113790,17 +113674,20 @@ function HomeContent(): React.JSX.Element {
       <PrismChromeNoticeViewport ariaLabel="PRISM notifications">
         {sweepUndoToast ? (
           <PrismChromeNotice
-            label="Sweep complete"
-            message="Chats were condensed into summaries."
+            label="Continuity distilled"
+            message="Successful chats were safely distilled and archived."
             tone="success"
             action={{
-              label: `Undo · ${remainingSeconds}s`,
+              label:
+                remainingSeconds < 3_600
+                  ? `Undo · ${remainingSeconds}s`
+                  : "Undo",
               disabled: sweepBusy,
               onClick: () =>
                 void undoConversationSweepFromToast(sweepUndoToast.batchId),
             }}
             onDismiss={() => setSweepUndoToast(null)}
-            dismissLabel="Dismiss sweep notification"
+            dismissLabel="Dismiss distillation notification"
           />
         ) : localCommandToast ? (
           <PrismChromeNotice
@@ -115486,6 +115373,7 @@ function HomeContent(): React.JSX.Element {
       recordedReplay?: boolean;
       utilityLead?: React.ReactNode;
       zenDragExclusion?: boolean;
+      showBrand?: boolean;
     },
   ): React.JSX.Element => {
     const liveChromePolicy = options.liveSessionActive
@@ -115536,6 +115424,14 @@ function HomeContent(): React.JSX.Element {
             })}
             className={styles.liveSessionHeaderModelChip}
           />
+          <div
+            className={styles.liveSessionContextTitleSlot}
+            data-live-session-context-title-slot="true"
+          />
+          <div
+            className={styles.liveSessionContextActionsSlot}
+            data-live-session-context-actions-slot="true"
+          />
           <button
             type="button"
             className={`${styles.themeToggleButton} ${styles.liveSessionThemeButton}`}
@@ -115561,9 +115457,11 @@ function HomeContent(): React.JSX.Element {
         }
       >
         <div className={styles.chatHeaderIdentityGroup}>
-          <span className={styles.sharedAppletNavbarBrand}>
-            {renderSharedAppletBrand(options.brandAppletId)}
-          </span>
+          {options.showBrand !== false ? (
+            <span className={styles.sharedAppletNavbarBrand}>
+              {renderSharedAppletBrand(options.brandAppletId)}
+            </span>
+          ) : null}
           {renderAppSwitcher()}
         </div>
         {options.controlRail ??
@@ -151146,7 +151044,6 @@ function HomeContent(): React.JSX.Element {
               <span className={styles.sectionLabel}>Conversations</span>
               <div className={styles.conversationHeaderActions}>
                 {renderConversationSweepButton()}
-                {renderConversationDeleteAllButton()}
               </div>
             </div>
           )}
@@ -151154,12 +151051,6 @@ function HomeContent(): React.JSX.Element {
             className={styles.conversationList}
             data-private-empty={
               showPrivateConversationEmptyState ? "true" : undefined
-            }
-            data-delete-holding={
-              holdingKey === DELETE_ALL_KEY ? "true" : undefined
-            }
-            data-delete-armed-all={
-              pendingDeleteKey === DELETE_ALL_KEY ? "true" : undefined
             }
             onScroll={(event) =>
               setConversationListScrollTop(event.currentTarget.scrollTop)
@@ -151183,6 +151074,7 @@ function HomeContent(): React.JSX.Element {
           </p>
           {renderSharedAppletNavbar("Chat tools", {
             brandAppletId: chatPresentation === "zen" ? "zen" : "chat",
+            showBrand: !sidebarOpen || panel !== null,
             headerRef: chatHeaderRef,
             controlRail: renderHeaderModelPicker({
               disabled: botFoundryGenerationLocked,
@@ -151514,6 +151406,14 @@ function HomeContent(): React.JSX.Element {
                   const isPreviewing = false;
                   const heroBot: Bot | null = zenPersonaBot;
                   const heroBotName = heroBot?.name?.trim() ?? "";
+                  const heroDistillation = !appWidePrivateMode
+                    ? chatDistillations.find((summary) =>
+                        heroBot
+                          ? summary.personaKind === "bot" &&
+                            summary.botId === heroBot.id
+                          : summary.personaKind === "prism",
+                      ) ?? null
+                    : null;
                   const descriptionPreview = heroBot
                     ? botHeroPreview(heroBot.system_prompt)
                     : "";
@@ -151895,6 +151795,15 @@ function HomeContent(): React.JSX.Element {
                             </div>
                             {hint ? (
                               <p className={styles.emptyStateHint}>{hint}</p>
+                            ) : null}
+                            {heroDistillation ? (
+                              <blockquote
+                                className={styles.chatDistillationContinuity}
+                                data-chat-distillation-continuity="true"
+                              >
+                                <span>Carried forward</span>
+                                {heroDistillation.summary}
+                              </blockquote>
                             ) : null}
                             {renderZenSplashControls()}
                           </div>
@@ -153191,7 +153100,6 @@ function HomeContent(): React.JSX.Element {
             <span className={styles.sectionLabel}>Conversations</span>
             <div className={styles.conversationHeaderActions}>
               {renderConversationSweepButton()}
-              {renderConversationDeleteAllButton()}
             </div>
           </div>
         )}
@@ -153199,12 +153107,6 @@ function HomeContent(): React.JSX.Element {
           className={styles.conversationList}
           data-private-empty={
             showPrivateConversationEmptyState ? "true" : undefined
-          }
-          data-delete-holding={
-            holdingKey === DELETE_ALL_KEY ? "true" : undefined
-          }
-          data-delete-armed-all={
-            pendingDeleteKey === DELETE_ALL_KEY ? "true" : undefined
           }
           onScroll={(event) =>
             setConversationListScrollTop(event.currentTarget.scrollTop)
@@ -153529,6 +153431,14 @@ function HomeContent(): React.JSX.Element {
                   !emptyStateSearchActive;
                 const isPreviewing = false;
                 const heroBot = activeBot;
+                const heroDistillation = !pendingIncognito
+                  ? chatDistillations.find((summary) =>
+                      heroBot
+                        ? summary.personaKind === "bot" &&
+                          summary.botId === heroBot.id
+                        : summary.personaKind === "prism",
+                    ) ?? null
+                  : null;
                 const privateBotName = pendingIncognito
                   ? heroBot?.name?.trim()
                   : "";
@@ -153743,6 +153653,15 @@ function HomeContent(): React.JSX.Element {
                               </div>
                               {hint ? (
                                 <p className={styles.emptyStateHint}>{hint}</p>
+                              ) : null}
+                              {heroDistillation ? (
+                                <blockquote
+                                  className={styles.chatDistillationContinuity}
+                                  data-chat-distillation-continuity="true"
+                                >
+                                  <span>Carried forward</span>
+                                  {heroDistillation.summary}
+                                </blockquote>
                               ) : null}
                             </div>
                           </div>

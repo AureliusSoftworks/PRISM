@@ -8,6 +8,8 @@ const DEFAULT_QDRANT_REQUEST_TIMEOUT_MS = 1_000;
 
 export interface QdrantRequestOptions {
   timeoutMs?: number;
+  /** Cancels request work owned by a higher-level interactive deadline. */
+  signal?: AbortSignal;
 }
 
 async function qdrantFetch(
@@ -25,6 +27,9 @@ async function qdrantFetch(
       : DEFAULT_QDRANT_REQUEST_TIMEOUT_MS,
   );
   const controller = new AbortController();
+  const signal = requestOptions.signal
+    ? AbortSignal.any([requestOptions.signal, controller.signal])
+    : controller.signal;
   let timedOut = false;
   let timeout: NodeJS.Timeout | null = null;
   const timeoutFailure = new Promise<never>((_resolve, reject) => {
@@ -45,7 +50,7 @@ async function qdrantFetch(
           "content-type": "application/json",
           ...requestInit.headers,
         },
-        signal: controller.signal,
+        signal,
       }),
       timeoutFailure,
     ]);

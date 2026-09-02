@@ -1955,10 +1955,9 @@ export function normalizeBotcastEpisodeImageReason(
 
 /**
  * Signal accepts the same common still-image formats as the asset library.
- * This filename-only descriptor is refined by the API after pixel inspection:
- * a fully opaque PNG or WebP becomes a picture, while visible transparency
- * makes it an item. Image bytes remain ephemeral unless the producer explicitly
- * saves an item.
+ * Every new attachment is an ordinary picture. Item semantics are explicit
+ * library metadata and must never be inferred from a file format or alpha
+ * channel.
  */
 export function botcastEpisodeImageDescriptorFromFileName(
   fileName: string,
@@ -1969,15 +1968,16 @@ export function botcastEpisodeImageDescriptorFromFileName(
   if (!extensionMatch) return null;
   const extension = extensionMatch[1]!.toLowerCase();
   const normalizedMimeType = mimeType.trim().toLowerCase();
-  const kind: BotcastEpisodeImageKind | null =
-    ((extension === "png" && normalizedMimeType === "image/png") ||
-      (extension === "webp" && normalizedMimeType === "image/webp"))
-      ? "item"
+  const descriptorMimeType: BotcastEpisodeImageDescriptor["mimeType"] | null =
+    extension === "png" && normalizedMimeType === "image/png"
+      ? "image/png"
       : (extension === "jpg" || extension === "jpeg") &&
           normalizedMimeType === "image/jpeg"
-        ? "picture"
-        : null;
-  if (!kind) return null;
+        ? "image/jpeg"
+        : extension === "webp" && normalizedMimeType === "image/webp"
+          ? "image/webp"
+          : null;
+  if (!descriptorMimeType) return null;
   const rawStem = baseName.slice(0, -(extension.length + 1));
   const name = normalizeBotcastEpisodeImageName(
     rawStem
@@ -1986,14 +1986,9 @@ export function botcastEpisodeImageDescriptorFromFileName(
   );
   if (!name) return null;
   return {
-    kind,
+    kind: "picture",
     name,
-    mimeType:
-      normalizedMimeType === "image/webp"
-        ? "image/webp"
-        : kind === "item"
-          ? "image/png"
-          : "image/jpeg",
+    mimeType: descriptorMimeType,
   };
 }
 

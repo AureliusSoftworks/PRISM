@@ -992,12 +992,31 @@ function ensureDirectOwnerTriggers(
     byChild.set(relation.childTable, group);
   }
   for (const [childTable, childRelations] of byChild) {
-    const checks = childRelations
+    const insertChecks = childRelations
       .map(
         (relation) =>
           `/* owner-relation ${relation.key} */
           SELECT CASE WHEN ${triggerPredicate(relation)} THEN RAISE(ABORT, '${OWNER_CONSTRAINT_ERROR}') END;`,
       )
+      .join("\n");
+    const updateChecks = childRelations
+      .map((relation) => {
+        const relationshipColumns = Array.from(
+          new Set([
+            relation.childOwnerColumn!,
+            ...relation.childColumns,
+            ...(relation.when ? [relation.when.column] : []),
+          ]),
+        );
+        const changed = relationshipColumns
+          .map(
+            (column) =>
+              `OLD.${quoteIdentifier(column)} IS NOT NEW.${quoteIdentifier(column)}`,
+          )
+          .join(" OR ");
+        return `/* owner-relation ${relation.key} */
+          SELECT CASE WHEN (${changed}) AND (${triggerPredicate(relation)}) THEN RAISE(ABORT, '${OWNER_CONSTRAINT_ERROR}') END;`;
+      })
       .join("\n");
     const updateColumns = Array.from(
       new Set(
@@ -1014,12 +1033,12 @@ function ensureDirectOwnerTriggers(
       CREATE TRIGGER ${quoteIdentifier(`owner_guard_${childTable}_insert`)}
       BEFORE INSERT ON ${quoteIdentifier(childTable)}
       BEGIN
-        ${checks}
+        ${insertChecks}
       END;
       CREATE TRIGGER ${quoteIdentifier(`owner_guard_${childTable}_update`)}
       BEFORE UPDATE OF ${updateColumns.map(quoteIdentifier).join(", ")} ON ${quoteIdentifier(childTable)}
       BEGIN
-        ${checks}
+        ${updateChecks}
       END;
     `);
   }

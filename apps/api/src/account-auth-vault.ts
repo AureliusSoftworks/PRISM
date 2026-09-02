@@ -64,6 +64,7 @@ const SQLITE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 const ACCOUNT_USER_OPEN_FUNCTION = "prism_account_user_open_v2";
 const ACCOUNT_USER_SEAL_FUNCTION = "prism_account_user_seal_v2";
 const ACCOUNT_LOGIN_INDEX_FUNCTION = "prism_account_login_index_v2";
+const ACCOUNT_USER_MUTATE_FUNCTION = "prism_account_user_mutate_v2";
 const ACCOUNT_USER_UPDATE_TRIGGER = "account_auth_users_update";
 
 type SqliteValue = null | string | number | bigint | Uint8Array;
@@ -80,6 +81,11 @@ interface AccountAuthRuntime {
   context: VaultMasterKeyContextV2;
   installationKey: Buffer;
   functionsRegistered: boolean;
+  physicalPrepare?: (sql: string) => StatementSync;
+  physicalMutations: Map<
+    "update" | "delete",
+    { argumentCount: number; statement: StatementSync }
+  >;
   prepareWrapped: boolean;
   viewInstalled: boolean;
 }
@@ -876,6 +882,7 @@ function registerRuntimeFunctions(
   runtime: AccountAuthRuntime,
 ): void {
   if (runtime.functionsRegistered) return;
+  runtime.physicalPrepare = db.prepare.bind(db);
   db.function(
     ACCOUNT_USER_SEAL_FUNCTION,
     (ownerUserId: SqliteValue, column: SqliteValue, value: SqliteValue) =>
@@ -892,7 +899,50 @@ function registerRuntimeFunctions(
     }
     return loginIdentityBlindIndexV2(db, identity);
   });
+  db.function(
+    ACCOUNT_USER_MUTATE_FUNCTION,
+    { varargs: true },
+    (action: SqliteValue, ...values: SqliteValue[]) => {
+      if (action !== "update" && action !== "delete") {
+        throw new VaultKeyLifecycleError("invalid_content_binding");
+      }
+      const mutation = runtime.physicalMutations.get(action);
+      if (!mutation || mutation.argumentCount !== values.length) {
+        throw new VaultKeyLifecycleError("invalid_content_binding");
+      }
+      return Number(mutation.statement.run(...values).changes);
+    },
+  );
   runtime.functionsRegistered = true;
+}
+
+function refreshPhysicalMutationStatements(
+  runtime: AccountAuthRuntime,
+  columns: readonly UserColumnInfo[],
+): void {
+  const prepare = runtime.physicalPrepare;
+  if (!prepare) {
+    throw new VaultKeyLifecycleError("transaction_conflict");
+  }
+  const assignments = columns
+    .map((column) => `${quoteIdentifier(column.name)} = ?`)
+    .join(", ");
+  runtime.physicalMutations = new Map([
+    [
+      "update",
+      {
+        argumentCount: columns.length + 1,
+        statement: prepare(`UPDATE main.users SET ${assignments} WHERE id = ?`),
+      },
+    ],
+    [
+      "delete",
+      {
+        argumentCount: 1,
+        statement: prepare("DELETE FROM main.users WHERE id = ?"),
+      },
+    ],
+  ]);
 }
 
 function installChangeCountCompatibility(
@@ -974,6 +1024,7 @@ export function installAccountAuthVaultViewV2(db: DatabaseSync): void {
   registerRuntimeFunctions(db, runtime);
   installChangeCountCompatibility(db, runtime);
   const columns = userColumns(db);
+  refreshPhysicalMutationStatements(runtime, columns);
   const selectColumns = columns.map((column) => {
     const quoted = quoteIdentifier(column.name);
     return PUBLIC_USER_COLUMNS.has(column.name)
@@ -984,30 +1035,30 @@ export function installAccountAuthVaultViewV2(db: DatabaseSync): void {
     `CREATE TEMP VIEW ${quoteIdentifier("users")} AS SELECT ${selectColumns.join(", ")} FROM main.users`,
   );
 
-  const updateAssignments = columns
-    .filter(
-      (column) =>
-        column.name !== "id" && column.name !== "login_identity_blind_index",
-    )
-    .map((column) => {
+  const updateValues = columns.map((column) => {
     const quoted = quoteIdentifier(column.name);
+    if (column.name === "id") return `OLD.${quoted}`;
     if (column.name === "email") {
-      return `${quoted} = CASE WHEN NEW.${quoted} IS OLD.${quoted}
+      return `CASE WHEN NEW.${quoted} IS OLD.${quoted}
         THEN (SELECT ${quoted} FROM main.users WHERE id = OLD.id)
         ELSE ${ACCOUNT_USER_SEAL_FUNCTION}(OLD.id, ${quoteLiteral(column.name)}, NEW.${quoted}) END`;
     }
       if (PUBLIC_USER_COLUMNS.has(column.name)) {
-        return `${quoted} = NEW.${quoted}`;
+        return `NEW.${quoted}`;
       }
-      return `${quoted} = CASE WHEN NEW.${quoted} IS OLD.${quoted}
+      return `CASE WHEN NEW.${quoted} IS OLD.${quoted}
         THEN (SELECT ${quoted} FROM main.users WHERE id = OLD.id)
         ELSE ${ACCOUNT_USER_SEAL_FUNCTION}(OLD.id, ${quoteLiteral(column.name)}, NEW.${quoted}) END`;
     });
-  updateAssignments.push(
-    `login_identity_blind_index = CASE WHEN NEW.email IS OLD.email
-      THEN OLD.login_identity_blind_index
-      ELSE ${ACCOUNT_LOGIN_INDEX_FUNCTION}(NEW.email) END`,
+  const loginIndexPosition = columns.findIndex(
+    (column) => column.name === "login_identity_blind_index",
   );
+  if (loginIndexPosition < 0) {
+    throw new VaultKeyLifecycleError("invalid_content_binding");
+  }
+  updateValues[loginIndexPosition] = `CASE WHEN NEW.email IS OLD.email
+      THEN OLD.login_identity_blind_index
+      ELSE ${ACCOUNT_LOGIN_INDEX_FUNCTION}(NEW.email) END`;
   db.exec(`
     CREATE TEMP TRIGGER ${quoteIdentifier(ACCOUNT_USER_UPDATE_TRIGGER)}
     INSTEAD OF UPDATE ON users
@@ -1017,9 +1068,11 @@ export function installAccountAuthVaultViewV2(db: DatabaseSync): void {
       SELECT CASE
         WHEN NEW.login_identity_blind_index IS NOT OLD.login_identity_blind_index
         THEN RAISE(ABORT, 'Account identity metadata is immutable.') END;
-      UPDATE main.users
-         SET ${updateAssignments.join(", ")}
-       WHERE id = OLD.id;
+      SELECT ${ACCOUNT_USER_MUTATE_FUNCTION}(
+        'update',
+        ${updateValues.join(", ")},
+        OLD.id
+      );
       UPDATE account_auth_change_counter
          SET value = value + changes()
        WHERE singleton = 1;
@@ -1030,7 +1083,7 @@ export function installAccountAuthVaultViewV2(db: DatabaseSync): void {
     CREATE TEMP TRIGGER account_auth_users_delete
     INSTEAD OF DELETE ON users
     BEGIN
-      DELETE FROM main.users WHERE id = OLD.id;
+      SELECT ${ACCOUNT_USER_MUTATE_FUNCTION}('delete', OLD.id);
       UPDATE account_auth_change_counter
          SET value = value + changes()
        WHERE singleton = 1;
@@ -1114,6 +1167,7 @@ export function resumeAccountAuthVaultV2(args: {
     context: deriveVaultMasterKeyContextV2(args.db, args.masterSecret),
     installationKey: unwrapInstallationKey(args.db, args.masterSecret),
     functionsRegistered: false,
+    physicalMutations: new Map(),
     prepareWrapped: false,
     viewInstalled: false,
   };
@@ -1159,6 +1213,7 @@ export function activateAccountAuthVaultV2(args: {
     context: deriveVaultMasterKeyContextV2(args.db, args.masterSecret),
     installationKey: loadOrCreateInstallationKey(args.db, args.masterSecret),
     functionsRegistered: false,
+    physicalMutations: new Map(),
     prepareWrapped: false,
     viewInstalled: false,
   };

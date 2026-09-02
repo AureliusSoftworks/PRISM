@@ -40,3 +40,11 @@
 .svgHost[data-phosphor-pixel-ready="true"] .svgSource {
   opacity: 0;
 }
+
+/* Text glyphs opt into this alpha-safe emission pair only on render surfaces
+   that need it. Keeping both nodes inert by default avoids changing compact
+   faces, editor guides, and rapidly changing mouth/thinking glyphs. */
+.textMaskEmission,
+.textMaskEmissionSource {
+  display: none;
+}

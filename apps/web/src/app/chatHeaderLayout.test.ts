@@ -71,6 +71,30 @@ describe("Chat shell header layout", () => {
     assert.match(openHomeSource, /void openZenMode\(\)/);
   });
 
+  it("removes the duplicate Chat navbar wordmark while the conversation panel is open", () => {
+    const navbarHelper = pageSource.slice(
+      pageSource.indexOf("const renderSharedAppletNavbar ="),
+      pageSource.indexOf("/** Conversation tools"),
+    );
+    const chatNavbarCall = pageSource.slice(
+      pageSource.indexOf('renderSharedAppletNavbar("Chat tools"'),
+      pageSource.indexOf(
+        "{renderZenMemoryToasts()}",
+        pageSource.indexOf('renderSharedAppletNavbar("Chat tools"'),
+      ),
+    );
+
+    assert.match(navbarHelper, /showBrand\?: boolean;/u);
+    assert.match(
+      navbarHelper,
+      /options\.showBrand !== false \? \([\s\S]*styles\.sharedAppletNavbarBrand[\s\S]*renderSharedAppletBrand\(options\.brandAppletId\)[\s\S]*\) : null/u,
+    );
+    assert.match(
+      chatNavbarCall,
+      /showBrand:\s*!sidebarOpen \|\| panel !== null/u,
+    );
+  });
+
   it("keeps Chat and Zen routing controls in the navbar before and during a conversation", () => {
     assert.match(
       pageSource,

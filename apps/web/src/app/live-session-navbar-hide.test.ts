@@ -51,7 +51,7 @@ test("ordinary applet surfaces retain the full shared-navbar height", () => {
   assert.doesNotMatch(globalsCss, /data-app-navbar-hidden/u);
 });
 
-test("active sessions replace the app navbar with exactly Back, route provenance, and Theme", () => {
+test("active sessions keep Back, route provenance, and Theme while exposing contextual slots", () => {
   const helperStart = pageSource.indexOf("const renderSharedAppletNavbar");
   const helperEnd = pageSource.indexOf("/** Conversation tools", helperStart);
   const helper = pageSource.slice(helperStart, helperEnd);
@@ -69,6 +69,8 @@ test("active sessions replace the app navbar with exactly Back, route provenance
   assert.match(liveBranch, /<span>Back<\/span>/u);
   assert.match(liveBranch, /<LiveSessionModelChip/u);
   assert.match(liveBranch, /options\.liveSessionRoutingChip/u);
+  assert.match(liveBranch, /data-live-session-context-title-slot="true"/u);
+  assert.match(liveBranch, /data-live-session-context-actions-slot="true"/u);
   assert.match(liveBranch, /<ThemeGlyph mode=\{effectiveThemeMode\}/u);
   assert.doesNotMatch(liveBranch, /renderAppSwitcher/u);
   assert.doesNotMatch(liveBranch, /renderUniversalNavbarButtons/u);
@@ -121,7 +123,7 @@ test("each active-session family supplies its real Back action and locked route"
   );
 });
 
-test("Whodunnit investigation and Court suppress duplicate local Back and model chrome", () => {
+test("Whodunnit investigation combines its context with the shared session row", () => {
   assert.equal(
     (mysterySource.match(/onClick=\{props\.onExit\}/gu) ?? []).length,
     (mysterySource.match(/data-session-local-back="true"/gu) ?? []).length,
@@ -138,6 +140,10 @@ test("Whodunnit investigation and Court suppress duplicate local Back and model 
     pageCss,
     /\.debateShell\[data-session-active="true"\][\s\S]{0,120}:global\(\[data-session-local-back="true"\]\)[\s\S]{0,100}visibility:\s*hidden/u,
   );
+  assert.match(mysterySource, /useLiveSessionHeaderPortalTargets/u);
+  assert.match(mysterySource, /createPortal\([\s\S]*liveSessionHeaderPortalTargets\.title/u);
+  assert.match(mysterySource, /createPortal\([\s\S]*liveSessionHeaderPortalTargets\.actions/u);
+  assert.match(pageCss, /\.liveSessionHeader:has\(\.liveSessionContextTitleSlot:not\(:empty\)\)\s*\{\s*grid-template-columns:\s*auto auto minmax\(0, 1fr\) auto auto/u);
 });
 
 test("blocking transitions continue to honor the compact measured session row", () => {

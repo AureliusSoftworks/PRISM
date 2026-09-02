@@ -21360,7 +21360,7 @@ export function DebateExperience(
                 <input type="checkbox" checked={mysteryVoiceAssetSynthesis && productionAvailable("voices")} disabled={!productionAvailable("voices")} onChange={(event) => { setMysteryVoiceAssetSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
                 <span><strong>Performance voices</strong><small>{productionReason("voices")}</small></span>
               </label>
-              <p>Generated case art stays outside Images unless you save a revealed visual. Saving production work back into a reusable venue is a separate Library action.</p>
+              <p>Generated case art stays attached to its case. Saving production work back into a reusable venue is a separate Library action.</p>
             </fieldset>
             <button type="button" className={mysteryStyles.seedButton} onClick={() => setMysteryNonce(nextMysteryRecipeNonce())}><span>Recipe Seed</span><code>{mysteryRecipeSeed}</code><small>Change the recipe</small></button>
             <div className={mysteryStyles.guidedSecondaryAction}>
@@ -33387,7 +33387,11 @@ export function DebateExperience(
       {mysteryPreludeMusicPhase && activeSession ? (
         <SessionAtmosphereLayer
           sessionKey={`whodunnit-v2-prelude:${activeSession.id}`}
-          backgroundUrl={`/api/debates/${encodeURIComponent(activeSession.id)}/mystery-mansion/theme`}
+          backgroundUrl={`/api/debates/${encodeURIComponent(activeSession.id)}/mystery-mansion/theme?repair=${encodeURIComponent(
+            activeSession.formatState.format === "whodunnit" && activeSession.formatState.version === 2
+              ? activeSession.formatState.sceneRepairUndo?.id ?? "base"
+              : "base",
+          )}`}
           backgroundFallbackUrl={WHODUNNIT_INVESTIGATION_MUSIC_URL}
           active={props.audioEnabled && props.audioVolume > 0}
           volume={props.audioVolume}

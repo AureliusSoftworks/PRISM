@@ -73,6 +73,13 @@ describe("Whodunnit V2 prosecution experience", () => {
     for (const command of ["move", "examine", "talk", "present", "press", "objection", "think"]) {
       assert.match(experienceSource, new RegExp(`data-command="${command}"`, "u"));
     }
+    assert.match(experienceSource, /const investigationCommandsDismissed = state\.roomView !== "room"[\s\S]{0,100}command === "move"[\s\S]{0,100}command === "examine"/u);
+    assert.match(experienceSource, /data-dismissed=\{investigationCommandsDismissed \? "true" : undefined\}/u);
+    assert.match(experienceSource, /inert=\{investigationCommandsDismissed \? true : undefined\}/u);
+    assert.match(cssSource, /\.investigationCommands\[data-dismissed="true"\][\s\S]*translateX\(-50%\) translateY\(calc\(100% \+ 3rem\)\)/u);
+    assert.match(experienceSource, /className=\{styles\.investigationModeBackButton\}[\s\S]{0,420}>← Back to room<\/button>/u);
+    assert.match(experienceSource, /command !== "examine" && command !== "move" \? \([\s\S]{0,140}<SceneMediaVignette/u);
+    assert.match(experienceSource, /action\.action === "move" && action\.roomId\) setCommand\(null\)/u);
     assert.match(experienceSource, /aria-pressed=\{command === "present"\}/u);
     assert.match(cssSource, /button\[data-active="true"\]/u);
     assert.match(cssSource, /translateY\(0\.3rem\)/u);
@@ -203,6 +210,83 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(cssSource, /animation:\s*roomDescend[^;]+backwards/u);
   });
 
+  it("turns room visual repair into a discovery-safe rainbow map workflow", () => {
+    assert.match(experienceSource, /kind: "magic"[\s\S]{0,220}label: roomVisualsMode/u);
+    assert.match(experienceSource, /className=\{styles\.roomVisualsMagicButton\}/u);
+    assert.match(cssSource, /\.roomVisualsMagicButton\s*\{[\s\S]*linear-gradient\(110deg, var\(--prism-p, #ff4d6d\)/u);
+    assert.match(experienceSource, /data-visual-readiness=\{roomVisualsMode \? visualReadiness/u);
+    assert.match(experienceSource, /"Fallback"[\s\S]{0,160}"Upgraded"[\s\S]{0,120}"Default"/u);
+    assert.match(experienceSource, /No room art is previewed here/u);
+    assert.match(experienceSource, /Generate this room/u);
+    assert.match(experienceSource, /Upgrade this room/u);
+    assert.match(experienceSource, /<PrismBlockingLoader[\s\S]{0,900}The room stays hidden until you visit it/u);
+    assert.match(experienceSource, /category: "mosaic_rooms", roomId: room\.id/u);
+    assert.match(experienceSource, /mutationBody\(\{ roomId: room\.id \}\)/u);
+    assert.match(experienceSource, /if \(prepared\?\.sealedAsset\?\.status === "ready"\)/u);
+    assert.match(cssSource, /\.investigation\[data-theme="light"\] \.roomVisualDialogBackdrop/u);
+    assert.match(cssSource, /\.investigation\[data-theme="light"\] \.roomVisualDialog\s*\{/u);
+    assert.match(cssSource, /\.roomVisualDialog footer \.roomVisualPrimaryAction\s*\{[\s\S]{0,180}color: #17131d !important/u);
+    assert.doesNotMatch(
+      experienceSource,
+      /roomVisualDialog[\s\S]{0,2500}<img/u,
+      "the room-management modal must not preview undiscovered art",
+    );
+    assert.match(tutorialSource, /rainbow Visuals tool marks each room/u);
+    assert.match(tutorialSource, /artwork remains undisclosed until the room is visited/u);
+    assert.match(tutorialSource, /accepted Mosaic\/Upgraded room pairs/u);
+  });
+
+  it("offers contextual spoiler-safe field repair, soft item Refract, and one-step undo", () => {
+    assert.match(experienceSource, /data-tutorial-target="mystery-v2-scene-repair"/u);
+    assert.match(experienceSource, /The exterior looks wrong/u);
+    assert.match(experienceSource, /The door is misplaced/u);
+    assert.match(experienceSource, /The room looks wrong/u);
+    assert.match(experienceSource, /The original room looks wrong/u);
+    assert.match(experienceSource, /The Upgraded room looks wrong/u);
+    assert.match(experienceSource, /Refresh anchors without moving the room objects/u);
+    assert.match(experienceSource, /Refresh dynamic light placement/u);
+    assert.match(experienceSource, /I want to generate an asset for this item/u);
+    assert.match(experienceSource, /There is some excess magenta in the asset/u);
+    assert.match(experienceSource, /I don't like the music, or I can't hear it/u);
+    assert.match(experienceSource, /I don't like the ambience, or I can't hear it/u);
+    assert.match(
+      experienceSource,
+      /context === "exterior"[\s\S]{0,220}"regenerate_music", "regenerate_ambience"/u,
+    );
+    assert.match(
+      experienceSource,
+      /context === "item"[\s\S]{0,420}"regenerate_music",[\s\S]{0,80}"regenerate_ambience"/u,
+    );
+    assert.match(experienceSource, /foundEvidenceItems\.map/u);
+    assert.match(experienceSource, /activeFoundEvidence[\s\S]{0,220}renderSceneRepairControl\("item"/u);
+    assert.match(experienceSource, /mystery-scene-repair\/undo/u);
+    assert.match(experienceSource, /placement="fullscreen"[\s\S]{0,520}No undiscovered room, item, or case information/u);
+    assert.match(experienceSource, /action === "regenerate_evidence_asset"[\s\S]{0,120}enqueueItemSynthesis/u);
+    assert.match(experienceSource, /registerPrismSoftSynthesisJobs\([\s\S]{0,180}orbOpensProgress: true/u);
+    assert.match(experienceSource, /placement="docked"[\s\S]{0,240}Whodunnit · Found item/u);
+    assert.match(experienceSource, /Queue regeneration/u);
+    assert.match(experienceSource, /retryItemSynthesis/u);
+    assert.match(experienceSource, /The image remains hidden until it appears through discovery/u);
+    assert.match(experienceSource, /state\.mansionExterior\?\.entryTarget/u);
+    assert.match(cssSource, /\.sceneRepairButton\s*\{[\s\S]{0,160}position: fixed/u);
+    assert.match(cssSource, /\.investigation\[data-theme="light"\] \.sceneRepairDialog/u);
+    assert.match(tutorialSource, /bottom-right question mark opens spoiler-safe Field repair/u);
+    assert.match(tutorialSource, /regenerate the mansion music and ambience/u);
+    assert.match(tutorialSource, /Found-item artwork uses Soft Refract/u);
+    assert.match(tutorialSource, /click the Prism orb to see its hidden progress/u);
+    assert.match(tutorialSource, /Every other repair runs behind the full-screen PRISM loader/u);
+    assert.match(setupSource, /mystery-mansion\/theme\?repair=/u);
+  });
+
+  it("keeps generated Whodunnit visuals case-scoped without Save image controls", () => {
+    assert.doesNotMatch(experienceSource, /Save evidence image|Save room image|Saved to Images/u);
+    assert.doesNotMatch(experienceSource, /mystery-assets\/\$\{asset\.kind\}\/\$\{encodeURIComponent\(subjectId\)\}\/save/u);
+    assert.match(setupSource, /Generated case art stays attached to its case/u);
+    assert.doesNotMatch(setupSource, /unless you save a revealed visual/u);
+    assert.match(tutorialSource, /encrypted case vault and follows its case or saved venue/u);
+    assert.doesNotMatch(tutorialSource, /Save image/u);
+  });
+
   it("renders case-scoped ambient architecture as inert venue massing", () => {
     assert.match(experienceSource, /state\.spatialProjection\?\.ambientSpaces\.filter/u);
     assert.match(experienceSource, /mansionAmbientSpaces\.map\(\(space\) => \(/u);
@@ -217,6 +301,18 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.doesNotMatch(experienceSource, /mansionAmbientSpaces[\s\S]{0,500}onClick/u);
     assert.match(experienceSource, /point\.x \* MANSION_LAYOUT_V2_COLUMNS/u);
     assert.match(experienceSource, /point\.y \* MANSION_LAYOUT_V2_ROWS/u);
+  });
+
+  it("keeps Mosaic and Upgraded room framing identical while the camera rests", () => {
+    assert.match(
+      experienceSource,
+      /"--room-parallax-scale": roomParallax\.x \|\| roomParallax\.y \? "1\.012" : "1"/u,
+    );
+    assert.match(
+      cssSource,
+      /scale\(var\(--room-parallax-scale, 1\)\)/u,
+    );
+    assert.doesNotMatch(cssSource, /scale\(1\.012\)/u);
   });
 
   it("starts on the title card, then clears to a first-person exterior door threshold", () => {
@@ -524,7 +620,10 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /automatic \|\| roomIntroductionPhase === "persona"/u);
     assert.match(experienceSource, /const beatMs = reducedMotion \? 0 : whodunnitInterrogationBeatMs\(interrogationPhase\)/u);
     assert.match(experienceSource, /!roomIntroductionActive \? <nav className=\{styles\.investigationCommands\}/u);
-    assert.match(experienceSource, /!roomIntroductionActive \? <header className=\{styles\.investigationHeader\}/u);
+    assert.match(experienceSource, /!roomIntroductionActive \? liveSessionHeaderPortalTargets \? <>/u);
+    assert.match(experienceSource, /liveSessionHeaderPortalTargets\.title/u);
+    assert.match(experienceSource, /liveSessionHeaderPortalTargets\.actions/u);
+    assert.match(experienceSource, /: <header className=\{styles\.investigationHeader\}>/u);
     assert.match(experienceSource, /!roomIntroductionActive \? <div className=\{styles\.roomTitle\}/u);
     assert.match(experienceSource, /roomIntroductionPhase !== "casekeeper" \? <div className=\{styles\.roomShade\}/u);
     assert.match(experienceSource, /data-blurred=\{roomActorVisible/u);
@@ -670,7 +769,8 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /setHeldDialogue\(queuedDialogue\)/u);
     assert.match(experienceSource, /roomProsecutorActive/u);
     assert.match(experienceSource, /const roomActorVisible = Boolean\([\s\S]*roomIntroductionPersonaActive/u);
-    assert.match(experienceSource, /className=\{styles\.roomBackdrop\} data-blurred=\{roomActorVisible/u);
+    assert.match(experienceSource, /className=\{styles\.roomBackdropImage\}[\s\S]{0,140}data-blurred=\{roomActorVisible/u);
+    assert.doesNotMatch(experienceSource, /className=\{styles\.roomBackdrop\}/u);
     assert.match(experienceSource, /className=\{styles\.roomParallaxLayer\}/u);
     assert.match(experienceSource, /roomParallaxEnabled = Boolean\([\s\S]*command === "examine"/u);
     assert.match(experienceSource, /if \(!roomParallaxEnabled\) setRoomParallax\(\{ x: 0, y: 0 \}\)/u);
@@ -704,7 +804,7 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.doesNotMatch(roomAvatarMiniRule[0], /--chat-mini-bot-lower-screen-/u);
     assert.match(roomAvatarMiniRule[0], /transform:\s*scale\(1\.19128713\)/u);
     assert.doesNotMatch(cssSource, /\.roomActor\s*\{[\s\S]{0,240}right:\s*8%/u);
-    assert.match(cssSource, /\.roomBackdrop\[data-blurred="true"\]\s*\{[\s\S]*filter:\s*blur\(12px\)/u);
+    assert.match(cssSource, /\.roomBackdropImage\[data-blurred="true"\]\s*\{[\s\S]*filter:\s*blur\(12px\)/u);
     assert.match(experienceSource, /roomParallaxEnabled/u);
     assert.match(cssSource, /--room-parallax-x/u);
     assert.match(cssSource, /\.roomParallaxLayer\s*\{[\s\S]*translate3d\(var\(--room-parallax-x/u);
@@ -834,7 +934,7 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.equal(debateMysteryV2LensClickTarget(overlapLens), "small");
     assert.deepEqual(
       debateMysteryV2ExamineGridCellIndexes(overlapLens, overlappingHotspots, 24, 15),
-      [179, 180],
+      [180],
     );
     const openLens = resolveDebateMysteryV2Lens(70, 50, hotspots);
     assert.deepEqual(openLens, {
@@ -1118,7 +1218,8 @@ describe("Whodunnit V2 prosecution experience", () => {
       /\{!selectedMysteryMansionBundle \? <label[^>]+data-tutorial-target="whodunnit-v2-ambience-synthesis"/u,
     );
     assert.match(setupSource, /props\.responseMode !== "local"/u);
-    assert.match(setupSource, /Generated case art stays outside Images unless you save a revealed visual/u);
+    assert.match(setupSource, /Generated case art stays attached to its case/u);
+    assert.doesNotMatch(setupSource, /unless you save a revealed visual/u);
     assert.match(setupSource, /mysteryMansionBundleId/u);
     assert.match(setupSource, /mystery-mansion\/save/u);
     assert.match(experienceSource, /Save mansion level/u);
@@ -1133,13 +1234,24 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(setupSource, /court-only cases exclude room assets/u);
     assert.match(experienceSource, /This room is still being prepared/u);
     assert.match(experienceSource, /sealedMysteryAssetObjectUrl/u);
-    assert.match(experienceSource, /Save evidence image/u);
-    assert.match(experienceSource, /Save room image/u);
+    assert.doesNotMatch(experienceSource, /Save evidence image|Save room image|Saved to Images/u);
     assert.match(experienceSource, /data-command="move"[\s\S]{0,260}disabled=\{busy \|\| dialoguePerformanceActive\}/u);
     assert.doesNotMatch(experienceSource, /data-command="move"[\s\S]{0,260}!state\.openingSweepComplete/u);
     assert.doesNotMatch(experienceSource, /Finish the finite visible sweep before leaving/u);
     assert.match(experienceSource, /data-tutorial-target="whodunnit-start"/u);
     assert.match(experienceSource, /if \(!mansionDoorEntry\) \{[\s\S]{0,120}sendAction\(\{ action: "move" \}\);[\s\S]{0,60}return;/u);
+  });
+
+  it("disables the Upgraded presentation toggle while the mansion map is open", () => {
+    assert.match(
+      experienceSource,
+      /aria-pressed=\{roomUpgradeEnabled\}[\s\S]{0,100}disabled=\{state\.roomView === "mansion"\}/u,
+    );
+    assert.match(
+      experienceSource,
+      /onClick=\{\(\) => selectRoomUpgradeEnabled\(!roomUpgradeEnabled\)\}/u,
+      "the room control keeps the same persisted toggle action",
+    );
   });
 
   it("re-enables failed visual recovery after the soft poll settles", () => {

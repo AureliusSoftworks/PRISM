@@ -14,19 +14,35 @@ import {
   getRevealedDebateMysteryAssetFileV1,
   importDebateMysteryAssetVaultBackupV1,
   normalizeDebateMysteryAssetVisionReviewV1,
+  replaceDebateMysteryAssetWithPendingV1,
   requeueRetryableDebateMysteryAssetFallbacksV1,
+  restoreDebateMysteryAssetsFromSceneRepairV1,
   resetDebateMysteryAssetRevealsV1,
   revealDebateMysteryAssetV1,
   saveRevealedDebateMysteryAssetV1,
   sealDebateMysteryAssetBytesV1,
+  setDebateMysteryAssetEntryTargetV1,
   setDebateMysteryAssetFallbackV1,
   setDebateMysteryAssetPendingV1,
+  snapshotDebateMysteryAssetsForSceneRepairV1,
   validateDebateMysteryAssetPixelsV1,
 } from "../debate-mystery-assets.ts";
 
 const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
 
 describe("sealed mystery asset vision review", () => {
+  it("keeps generated visuals case-scoped without a standalone Save image route", () => {
+    assert.doesNotMatch(
+      serverSource,
+      /route\("POST", "\/api\/debates\/:id\/mystery-assets\/:kind\/:subjectId\/save"/u,
+    );
+    assert.match(
+      serverSource,
+      /route\("POST", "\/api\/debates\/:id\/mystery-mansion\/save"/u,
+      "saving the completed venue remains available",
+    );
+  });
+
   it("treats venue-specific built-ins as architecture rather than evidence", () => {
     assert.match(
       serverSource,
@@ -116,6 +132,17 @@ describe("sealed mystery asset vision review", () => {
       { approved: false, reasons: [], reviewer: "test" },
     );
   });
+
+  it("reconciles regenerated Mosaic geometry before completing field repair", () => {
+    assert.match(
+      serverSource,
+      /action === "regenerate_room_mosaic"[\s\S]{0,4200}observeDebateMysteryRoomGeometryV1\(\{[\s\S]{0,500}anchors: true,[\s\S]{0,80}lights: true/u,
+    );
+    assert.match(
+      serverSource,
+      /Do not propose moving or changing anything in the room; report only where the visible thing already is/u,
+    );
+  });
 });
 
 const NOW = "2026-08-26T12:00:00.000Z";
@@ -187,6 +214,88 @@ async function roomPng(): Promise<Buffer> {
 }
 
 describe("sealed Whodunnit asset vault", () => {
+  it("keeps entry calibration public while restoring the exact encrypted pre-repair row", async () => {
+    const db = vaultDb();
+    const userKey = randomBytes(32);
+    const original = await roomPng();
+    sealDebateMysteryAssetBytesV1(db, userKey, {
+      userId: "user-1",
+      sessionId: "case-1",
+      kind: "room",
+      subjectId: "mansion-exterior-v1",
+      bytes: original,
+      provider: "openai",
+      model: "gpt-image-2",
+      review: { attempt: 1, entryTarget: { x: 0.61, y: 0.7 } },
+    });
+    revealDebateMysteryAssetV1(
+      db,
+      "user-1",
+      "case-1",
+      "room",
+      "mansion-exterior-v1",
+    );
+    const calibrated = setDebateMysteryAssetEntryTargetV1(
+      db,
+      "user-1",
+      "case-1",
+      "room",
+      "mansion-exterior-v1",
+      { x: 0.6, y: 0.71 },
+    );
+    assert.deepEqual(calibrated.entryTarget, { x: 0.6, y: 0.71 });
+
+    const snapshots = snapshotDebateMysteryAssetsForSceneRepairV1(
+      db,
+      "user-1",
+      "case-1",
+      "room",
+      ["mansion-exterior-v1"],
+    );
+    assert.equal(snapshots.length, 1);
+    assert.equal(snapshots[0]?.kind, "room");
+    assert.equal(snapshots[0]?.subjectId, "mansion-exterior-v1");
+    assert.equal(snapshots[0]?.existed, true);
+    assert.equal(snapshots[0]?.revealed, true);
+    assert.ok(snapshots[0]?.snapshotId);
+    replaceDebateMysteryAssetWithPendingV1(db, {
+      userId: "user-1",
+      sessionId: "case-1",
+      kind: "room",
+      subjectId: "mansion-exterior-v1",
+    });
+    const replacement = await sharp(original).negate().png().toBuffer();
+    sealDebateMysteryAssetBytesV1(db, userKey, {
+      userId: "user-1",
+      sessionId: "case-1",
+      kind: "room",
+      subjectId: "mansion-exterior-v1",
+      bytes: replacement,
+      provider: "openai",
+      model: "gpt-image-2",
+      review: { attempt: 1, entryTarget: { x: 0.2, y: 0.3 } },
+    });
+    restoreDebateMysteryAssetsFromSceneRepairV1(
+      db,
+      "user-1",
+      "case-1",
+      "room",
+      snapshots,
+    );
+    assert.deepEqual(
+      getRevealedDebateMysteryAssetFileV1(
+        db,
+        userKey,
+        "user-1",
+        "case-1",
+        "room",
+        "mansion-exterior-v1",
+      ).bytes,
+      original,
+    );
+    db.close();
+  });
+
   it("keeps bytes encrypted and absent from Images until reveal and explicit save", async () => {
     const db = vaultDb();
     const userKey = randomBytes(32);
@@ -490,6 +599,28 @@ describe("sealed Whodunnit asset vault", () => {
       ).length,
       0,
     );
+    db.close();
+  });
+
+  it("requeues a formerly unavailable provider after the player explicitly retries", () => {
+    const db = vaultDb();
+    setDebateMysteryAssetFallbackV1(db, {
+      userId: "user-1",
+      sessionId: "case-1",
+      kind: "room",
+      subjectId: "room-1",
+      reason: "LOCAL generation is unavailable.",
+    });
+    const retried = requeueRetryableDebateMysteryAssetFallbacksV1(
+      db,
+      "user-1",
+      "case-1",
+      3,
+      ["room"],
+      new Set(["room-1"]),
+    );
+    assert.equal(retried.length, 1);
+    assert.equal(retried[0]?.asset.status, "pending");
     db.close();
   });
 

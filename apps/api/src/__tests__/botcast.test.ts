@@ -1615,7 +1615,7 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.match(
         serverSource,
-        /imageHasVisibleTransparency\(normalized\.pngBytes\)/u,
+        /Physical Item semantics are an[\s\S]{0,300}kind: "picture" as const/u,
       );
       assert.match(
         serverSource,

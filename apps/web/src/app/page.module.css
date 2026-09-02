@@ -5148,45 +5148,8 @@
   gap: 6px;
 }
 
-.conversationDeleteAllButton {
-  appearance: none;
-  -webkit-appearance: none;
-  border: 1px solid color-mix(in srgb, var(--danger) 42%, var(--line));
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--bg-elevated) 84%, var(--danger) 16%),
-    color-mix(in srgb, var(--bg) 88%, var(--danger) 12%)
-  );
-  color: color-mix(in srgb, var(--danger) 82%, var(--fg) 18%);
-  min-width: 34px;
-  height: 24px;
-  padding: 0 8px;
-  display: inline-grid;
-  place-items: center;
-  cursor: pointer;
-  border-radius: 9px;
-  font: inherit;
-  line-height: 0;
-  opacity: 0.94;
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 28%, transparent),
-    0 1px 4px color-mix(in srgb, var(--danger) 16%, transparent);
-  transition:
-    color 130ms ease-out,
-    background 130ms ease-out,
-    border-color 130ms ease-out,
-    box-shadow 130ms ease-out,
-    opacity 130ms ease-out,
-    transform 80ms ease-out;
-}
-
-.conversationDeleteAllButtonGlyph :where(svg) {
-  width: 14px;
-  height: 14px;
-  stroke-width: 2.15;
-}
-
 .conversationSweepButton {
+  position: relative;
   appearance: none;
   -webkit-appearance: none;
   border: 1px solid color-mix(in srgb, #ffc85e 46%, var(--line));
@@ -5196,19 +5159,23 @@
     color-mix(in srgb, var(--bg) 88%, #efb535 12%)
   );
   color: color-mix(in srgb, #ffd77f 72%, var(--fg) 28%);
-  min-width: 34px;
-  height: 24px;
-  padding: 0 8px;
-  display: inline-grid;
+  min-width: 94px;
+  height: 32px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   place-items: center;
   cursor: pointer;
-  border-radius: 9px;
+  border-radius: 12px;
   font: inherit;
   line-height: 0;
   opacity: 0.94;
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, #fff 28%, transparent),
-    0 1px 4px color-mix(in srgb, #f0bf45 18%, transparent);
+    0 1px 4px color-mix(in srgb, #f0bf45 18%, transparent),
+    0 0 18px -8px color-mix(in srgb, #d68cff 62%, transparent);
   transition:
     color 130ms ease-out,
     background 130ms ease-out,
@@ -5218,10 +5185,69 @@
     transform 80ms ease-out;
 }
 
+.conversationSweepButton::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  background: conic-gradient(
+    from 210deg,
+    transparent,
+    color-mix(in srgb, #ffd86a 62%, transparent),
+    transparent 34%,
+    color-mix(in srgb, #c98cff 56%, transparent),
+    transparent 72%
+  );
+  opacity: 0.34;
+  filter: blur(4px);
+  animation: chatDistillationAura 5.4s linear infinite;
+}
+
+@keyframes chatDistillationAura {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
 .conversationSweepButtonGlyph :where(svg) {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   stroke-width: 2.15;
+}
+
+.conversationSweepButtonLabel {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 720;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.themeLight .conversationSweepButton {
+  border-color: color-mix(in srgb, #a56a18 46%, var(--line));
+  color: color-mix(in srgb, #71420b 84%, var(--fg) 16%);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, #fff 76%, #ffe7a3 24%),
+    color-mix(in srgb, var(--bg-elevated) 80%, #dcb8ff 20%)
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 5px 14px color-mix(in srgb, #9b62c7 14%, transparent),
+    0 0 18px -8px color-mix(in srgb, #d19a22 46%, transparent);
+}
+
+.conversationSweepButton:disabled {
+  cursor: default;
+  opacity: 0.46;
+  filter: saturate(0.35);
+}
+
+.conversationSweepButton:disabled::before {
+  animation: none;
+  opacity: 0.12;
 }
 
 .conversationSweepButton:hover,
@@ -5243,42 +5269,6 @@
 
 .conversationSweepButton:active {
   transform: translateY(1px);
-}
-
-.conversationDeleteAllButton:hover,
-.conversationDeleteAllButton:focus-visible {
-  color: color-mix(in srgb, var(--danger) 92%, var(--fg) 8%);
-  border-color: color-mix(in srgb, var(--danger) 62%, var(--line));
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--bg-elevated) 78%, var(--danger) 22%),
-    color-mix(in srgb, var(--bg) 82%, var(--danger) 18%)
-  );
-  opacity: 1;
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 34%, transparent),
-    0 0 0 1px color-mix(in srgb, var(--danger) 30%, transparent),
-    0 4px 12px color-mix(in srgb, var(--danger) 22%, transparent);
-  outline: none;
-}
-
-.conversationDeleteAllButton:active {
-  transform: translateY(1px);
-}
-
-.conversationDeleteAllButton[data-holding="true"] {
-  border-color: color-mix(in srgb, var(--danger) 74%, var(--line));
-  color: var(--danger);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--bg-elevated) 70%, var(--danger) 30%),
-    color-mix(in srgb, var(--bg) 74%, var(--danger) 26%)
-  );
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 24%, transparent),
-    0 0 0 1px color-mix(in srgb, var(--danger) 34%, transparent),
-    0 0 18px color-mix(in srgb, var(--danger) 38%, transparent);
-  transform: scale(1.04);
 }
 
 /* ── Auth ── */
@@ -13025,133 +13015,6 @@
   letter-spacing: 0.005em;
 }
 
-/* ── Hold-to-delete-all: immediate glow + static tilt ──────────────────
-   As soon as the user presses-and-holds any × (or the header Delete),
-   React ships two discrete signals:
-     • `[data-holding="true"]` on the button under the finger,
-     • `data-delete-holding="true"` on the parent `<ul>`.
-   Every × in the list immediately lights up red with a subtle glow.
-   The held × scales up slightly more than the crowd (so the user can
-   always find their anchor); the siblings each adopt a small static
-   tilt angle cycled via `:nth-child(4n+x)` so the row reads as a group
-   of "aware but not yet shaking" targets. This happens with a 130 ms
-   transition — essentially immediate by human perception — matching the
-   user's ask for "immediately glow brighter". The 900 ms JS timer runs
-   in parallel; when it fires, the list gets the armed-all attribute
-   and the ×'s snap into the iOS jiggle.                                */
-
-/* Held ×: the one under your finger. Brighter glow, bigger scale, no
-   tilt so it stays the visual anchor of the gesture. */
-.conversationDelete[data-holding="true"],
-.conversationDelete[data-holding="true"]:hover,
-.conversationDelete[data-holding="true"]:focus-visible {
-  opacity: 1;
-  color: var(--danger);
-  text-shadow: 0 0 10px color-mix(in srgb, var(--danger) 60%, transparent);
-  transform: scale(1.18);
-  outline: none;
-}
-
-/* Crowd ×'s: every other × in the list. Glow + individual tilt. */
-.conversationList[data-delete-holding="true"]
-  .conversationDelete:not([data-holding="true"]):not(.conversationDeleteArmed) {
-  opacity: 1;
-  color: var(--danger);
-  text-shadow: 0 0 6px color-mix(in srgb, var(--danger) 40%, transparent);
-  transform: scale(1.08) rotate(var(--delete-tilt, 0deg));
-}
-
-/* Four tilt variants, chosen to feel organic. Each row of the list
-   gets one of these based on its nth-child position; the cycle length
-   of 4 is short enough to cover most sidebars, long enough that
-   neighbouring rows land on different angles. */
-.conversationList[data-delete-holding="true"]
-  .conversationRow:nth-child(4n + 1)
-  .conversationDelete {
-  --delete-tilt: -4deg;
-}
-.conversationList[data-delete-holding="true"]
-  .conversationRow:nth-child(4n + 2)
-  .conversationDelete {
-  --delete-tilt: 3deg;
-}
-.conversationList[data-delete-holding="true"]
-  .conversationRow:nth-child(4n + 3)
-  .conversationDelete {
-  --delete-tilt: -2deg;
-}
-.conversationList[data-delete-holding="true"]
-  .conversationRow:nth-child(4n + 4)
-  .conversationDelete {
-  --delete-tilt: 5deg;
-}
-
-/* ── Armed-all: iOS home-screen jiggle ─────────────────────────────────
-   Once the 900 ms threshold hits, `data-delete-armed-all` lights up
-   the whole list and every × starts to jiggle — same cadence as the
-   classic iOS "edit mode" icon wobble (130 ms period, ±2.4°). Two
-   phase-shifted keyframes (A on odd rows, B on even rows with a
-   negative animation-delay to offset mid-cycle) prevent the crowd from
-   moving in unison, which would read as "everything synchronised by a
-   computer" instead of "each thing has its own little life". */
-
-@keyframes conversationDeleteJiggleA {
-  0%,
-  100% {
-    transform: scale(1.08) rotate(-2.4deg);
-  }
-  50% {
-    transform: scale(1.08) rotate(2.4deg);
-  }
-}
-
-@keyframes conversationDeleteJiggleB {
-  0%,
-  100% {
-    transform: scale(1.08) rotate(2.4deg);
-  }
-  50% {
-    transform: scale(1.08) rotate(-2.4deg);
-  }
-}
-
-.conversationList[data-delete-armed-all="true"] .conversationDelete,
-.conversationList[data-delete-armed-all="true"]
-  .conversationDelete:not([data-holding="true"]):not(.conversationDeleteArmed) {
-  opacity: 1;
-  color: var(--danger);
-  text-shadow: 0 0 8px color-mix(in srgb, var(--danger) 45%, transparent);
-  animation: conversationDeleteJiggleA 130ms linear infinite;
-  /* Wipe any stale --delete-tilt from the pre-threshold phase — the
-     jiggle keyframes own the transform now. */
-  --delete-tilt: 0deg;
-}
-
-.conversationList[data-delete-armed-all="true"]
-  .conversationRow:nth-child(even)
-  .conversationDelete {
-  animation-name: conversationDeleteJiggleB;
-  animation-delay: -45ms;
-}
-
-/* ── Reduced motion ────────────────────────────────────────────────── */
-
-@media (prefers-reduced-motion: reduce) {
-  .conversationList[data-delete-holding="true"]
-    .conversationDelete:not([data-holding="true"]):not(
-      .conversationDeleteArmed
-    ) {
-    transform: none;
-  }
-  .conversationList[data-delete-armed-all="true"] .conversationDelete,
-  .conversationList[data-delete-armed-all="true"]
-    .conversationRow:nth-child(even)
-    .conversationDelete {
-    animation: none;
-    transform: scale(1.08);
-  }
-}
-
 .sidebarFooter {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -13850,6 +13713,41 @@
 .liveSessionThemeButton {
   justify-self: end;
   align-self: center;
+}
+
+.liveSessionContextTitleSlot:empty,
+.liveSessionContextActionsSlot:empty {
+  display: none;
+}
+
+.liveSessionHeader:has(.liveSessionContextTitleSlot:not(:empty)) {
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+}
+
+.liveSessionHeader:has(.liveSessionContextTitleSlot:not(:empty))
+  .liveSessionHeaderModelChip {
+  max-width: min(24vw, 20rem);
+}
+
+.liveSessionContextTitleSlot {
+  min-width: 0;
+  justify-self: stretch;
+}
+
+.liveSessionContextActionsSlot {
+  min-width: 0;
+  justify-self: end;
+}
+
+@media (max-width: 900px) {
+  .liveSessionHeader:has(.liveSessionContextTitleSlot:not(:empty)) {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+  }
+
+  .liveSessionHeader:has(.liveSessionContextTitleSlot:not(:empty))
+    .liveSessionHeaderModelChip {
+    display: none;
+  }
 }
 
 @media (max-width: 560px) {
@@ -14875,45 +14773,6 @@
   background: var(--danger-soft);
   color: var(--danger);
   border-color: var(--danger);
-}
-
-/* Header button hold + armed-all visuals. The hold state glows the
-   pill red immediately (same "energy arrives on pointerdown" feel as
-   the sidebar ×'s). The armed-all state (data-shaking="true", set
-   whenever pendingDeleteKey === DELETE_ALL_KEY regardless of which
-   surface triggered it) joins the sidebar ×'s in the iOS jiggle so
-   every delete affordance moves as a coordinated "edit mode" chorus
-   while the modal owns the decision. */
-.headerDelete[data-holding="true"],
-.headerDelete[data-holding="true"]:hover {
-  background: var(--danger-soft);
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 60%, var(--line));
-  text-shadow: 0 0 6px color-mix(in srgb, var(--danger) 30%, transparent);
-  transform: scale(1.04);
-  transition:
-    background 130ms ease-out,
-    border-color 130ms ease-out,
-    color 130ms ease-out,
-    text-shadow 130ms ease-out,
-    transform 130ms ease-out;
-}
-
-.headerDelete[data-shaking="true"],
-.headerDelete[data-shaking="true"]:hover {
-  background: var(--danger-soft);
-  color: var(--danger);
-  border-color: var(--danger);
-  text-shadow: 0 0 8px color-mix(in srgb, var(--danger) 45%, transparent);
-  animation: conversationDeleteJiggleA 130ms linear infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .headerDelete[data-shaking="true"],
-  .headerDelete[data-shaking="true"]:hover {
-    animation: none;
-    transform: scale(1.04);
-  }
 }
 
 .badge {
@@ -19634,6 +19493,54 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   max-width: 420px;
   line-height: 1.55;
   margin: 0;
+}
+
+.chatDistillationContinuity {
+  position: relative;
+  max-width: 520px;
+  margin: 4px 0 0;
+  padding: 12px 15px 12px 18px;
+  border: 1px solid color-mix(in srgb, #e9be59 34%, var(--line));
+  border-radius: 13px;
+  color: color-mix(in srgb, var(--fg) 88%, #f3d47f 12%);
+  background:
+    radial-gradient(circle at 8% 20%, color-mix(in srgb, #f3cb62 13%, transparent), transparent 38%),
+    linear-gradient(135deg, color-mix(in srgb, var(--bg-elevated) 91%, #6b3f8d 9%), var(--bg));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent),
+    0 10px 28px -20px color-mix(in srgb, #d892ff 56%, transparent);
+  font-family: var(--font-chat-reading, var(--font-chat-serif), Georgia, serif);
+  font-size: 0.92rem;
+  font-style: italic;
+  line-height: 1.52;
+  text-wrap: pretty;
+}
+
+.chatDistillationContinuity span {
+  display: block;
+  margin-bottom: 5px;
+  color: color-mix(in srgb, #f2ca68 76%, var(--fg) 24%);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 720;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.themeLight .chatDistillationContinuity {
+  color: color-mix(in srgb, #2c2034 90%, var(--fg) 10%);
+  border-color: color-mix(in srgb, #a86f19 34%, var(--line));
+  background:
+    radial-gradient(circle at 8% 20%, color-mix(in srgb, #e7b43b 16%, transparent), transparent 38%),
+    linear-gradient(135deg, #fffaf0, color-mix(in srgb, #fff 82%, #e5d1f6 18%));
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 10px 24px -20px color-mix(in srgb, #71428f 38%, transparent);
+}
+
+.themeLight .chatDistillationContinuity span {
+  color: #80500f;
 }
 
 .chatSessionSummaryBubble {
@@ -32339,7 +32246,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .zenLiveBotPresenceFaceEmissionMask
   [data-avatar-details-motion-group][data-avatar-details-ink-motion="spin"] {
   animation: avatarDetailsSpeechInkSpin
-    var(--avatar-details-speech-spin-turn-duration, 480ms) linear infinite;
+    var(--avatar-details-speech-spin-turn-duration, 480ms) steps(4, end) infinite;
 }
 
 @keyframes avatarDetailsSpeechInkSpin {
@@ -51641,7 +51548,7 @@ a.settingsCreditItem:focus-visible {
   box-shadow: none;
 }
 
-/* Panel trash delete — danger chrome aligned with .conversationDeleteAllButton */
+/* Panel trash delete — shared danger chrome for independent Bot actions. */
 .panelHeaderIconButton.panelHeaderDangerTrashButton {
   border: 1px solid color-mix(in srgb, var(--danger) 42%, var(--line));
   background: linear-gradient(
@@ -77519,33 +77426,139 @@ a.settingsCreditItem:focus-visible {
 }
 
 /* Avatar Studio's authored custom-eye contour is the geometry contract. Keep
-   custom eyes on the quantized mask so thin outlines and counters survive.
-   Their broad phosphor bloom is applied to the completed glyph layer below:
-   filters on the masked pseudo can be clipped by packaged compositors. */
+   the ready glyph wrapper neutral and let the nested alpha-safe emission pair
+   below carry the broad bloom. The inner node owns the exact raster mask; its
+   unmasked parent applies the mouth's filter after that mask is composed. */
 .zenLiveBotPresencePlate[data-avatar-full-scale-identity="canonical"]
   .zenLiveBotPresenceFaceGlyph[data-face-eye-character]
   [data-coffee-plate-emoji-part="eyes"]
   [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"] {
-  --zen-live-bot-glyph-compositor-glow-filter: var(--crt-face-glow-filter);
+  --crt-glyph-mask-surface-inset: max(
+    var(--crt-glyph-emission-outset),
+    var(--crt-phosphor-pixel-overscan, 0px)
+  );
+  --zen-live-bot-glyph-compositor-glow-filter: opacity(1);
 }
 
-/* Light Mode keeps the identity color in the glass, not in the authored eye
-   emission. The shared face filter already resolves to white here; composite
-   the completed eye mask with the same additive emission blend as authored Ink
-   so its pale halo remains visible through the lit glass. */
+.zenLiveBotPresencePlate[data-avatar-full-scale-identity="canonical"]
+  .zenLiveBotPresenceFaceGlyph[data-face-eye-character]
+  [data-coffee-plate-emoji-part="eyes"]
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]
+  > [data-crt-pixel-mask-emission="true"] {
+  position: absolute;
+  inset: calc(0px - var(--crt-glyph-mask-surface-inset));
+  /* Keep the halo inside the completed glyph's stacking context. A negative
+     layer can fall behind the CRT screen plane in WebKit, leaving only the
+     sharp masked eye visible in Light Mode. */
+  z-index: 0;
+  display: block;
+  overflow: visible;
+  pointer-events: none;
+  opacity: var(--crt-glyph-emission-opacity, 1);
+  filter: blur(var(--crt-glyph-beam-softness)) var(--crt-face-glow-filter);
+  mix-blend-mode: var(--crt-face-glow-blend-mode, screen);
+}
+
+.zenLiveBotPresencePlate[data-avatar-full-scale-identity="canonical"]
+  .zenLiveBotPresenceFaceGlyph[data-face-eye-character]
+  [data-coffee-plate-emoji-part="eyes"]
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]
+  [data-crt-pixel-mask-emission-source="true"] {
+  position: absolute;
+  inset: 0;
+  display: block;
+  -webkit-mask-image: var(--crt-phosphor-pixel-mask);
+  mask-image: var(--crt-phosphor-pixel-mask);
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: calc(
+      100% -
+        (var(--crt-glyph-mask-surface-inset) -
+            var(--crt-phosphor-pixel-overscan, 0px)) *
+          2
+    )
+    calc(
+      100% -
+        (var(--crt-glyph-mask-surface-inset) -
+            var(--crt-phosphor-pixel-overscan, 0px)) *
+          2
+    );
+  mask-size: calc(
+      100% -
+        (var(--crt-glyph-mask-surface-inset) -
+            var(--crt-phosphor-pixel-overscan, 0px)) *
+          2
+    )
+    calc(
+      100% -
+        (var(--crt-glyph-mask-surface-inset) -
+            var(--crt-phosphor-pixel-overscan, 0px)) *
+          2
+    );
+  -webkit-mask-mode: alpha;
+  mask-mode: alpha;
+  background: var(--crt-face-edge-color, currentColor);
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* Light Mode's face phosphor is neutral white; keep identity color in the
+   surrounding glass while the alpha-safe eye emission inherits that source. */
+.zenLiveBotPresencePlate[data-theme="light"][data-avatar-full-scale-identity="canonical"]
+  .zenLiveBotPresenceFaceGlyph[data-face-eye-character]
+  [data-coffee-plate-emoji-part="eyes"],
+.themeLight
+  .zenLiveBotPresencePlate[data-avatar-full-scale-identity="canonical"]
+  .zenLiveBotPresenceFaceGlyph[data-face-eye-character]
+  [data-coffee-plate-emoji-part="eyes"] {
+  --crt-face-edge-color: var(--bot-avatar-screen-glyph, #ffffff);
+}
+
+/* WebKit clips a filtered CSS-mask source before it can emit exterior pixels
+   on the Light CRT stack. Feed the same real text silhouette used by the mouth
+   into the unmasked filter surface, then keep the exact raster contour and
+   convergence core above it. The broad bloom can differ sub-pixel from the
+   mask because it is fully blurred; the visible eye geometry cannot. */
 .zenLiveBotPresencePlate[data-theme="light"][data-avatar-full-scale-identity="canonical"]
   .zenLiveBotPresenceFaceGlyph[data-face-eye-character]
   [data-coffee-plate-emoji-part="eyes"]
-  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"],
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]
+  > [data-crt-pixel-mask-emission="true"]::before,
 .themeLight
   .zenLiveBotPresencePlate[data-avatar-full-scale-identity="canonical"]
   .zenLiveBotPresenceFaceGlyph[data-face-eye-character]
   [data-coffee-plate-emoji-part="eyes"]
-  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"] {
-  --zen-live-bot-glyph-compositor-glow-filter: var(
-    --crt-face-glow-filter
-  );
-  mix-blend-mode: var(--bot-avatar-light-ink-glow-blend, plus-lighter);
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]
+  > [data-crt-pixel-mask-emission="true"]::before {
+  content: attr(data-crt-pixel-mask-emission-content);
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--crt-face-edge-color, currentColor);
+  font: inherit;
+  font-variation-settings: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  white-space: pre;
+  background: none;
+  -webkit-text-fill-color: currentColor;
+  -webkit-text-stroke: 0;
+  paint-order: fill;
+}
+
+.zenLiveBotPresencePlate[data-theme="light"][data-avatar-full-scale-identity="canonical"]
+  .zenLiveBotPresenceFaceGlyph[data-face-eye-character]
+  [data-coffee-plate-emoji-part="eyes"]
+  [data-crt-pixel-mask-emission-source="true"],
+.themeLight
+  .zenLiveBotPresencePlate[data-avatar-full-scale-identity="canonical"]
+  .zenLiveBotPresenceFaceGlyph[data-face-eye-character]
+  [data-coffee-plate-emoji-part="eyes"]
+  [data-crt-pixel-mask-emission-source="true"] {
+  display: none;
 }
 
 .zenLiveBotPresencePlate[data-avatar-full-scale-identity="canonical"]
@@ -77560,6 +77573,16 @@ a.settingsCreditItem:focus-visible {
   color: currentColor;
   -webkit-text-fill-color: initial;
   filter: blur(var(--crt-glyph-beam-softness));
+  z-index: 1;
+}
+
+.zenLiveBotPresencePlate[data-avatar-full-scale-identity="canonical"]
+  .zenLiveBotPresenceFaceGlyph[data-face-eye-character]
+  [data-coffee-plate-emoji-part="eyes"]
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]::after {
+  /* Repaint the phosphor core above the emission surface so the broad halo
+     cannot wash out the authored pixel contour or its hollow counters. */
+  z-index: 2;
 }
 
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="mouth"],
@@ -77658,10 +77681,9 @@ a.settingsCreditItem:focus-visible {
   )[data-talking="true"]
   [data-coffee-plate-emoji-part="mouth"]
   > [data-crt-glyph-layer="true"] {
-  transition:
-    transform 70ms ease-out,
-    opacity 70ms linear,
-    --zen-live-bot-crt-flicker-opacity-scale 70ms linear;
+  /* The viseme clock already supplies one authored pose every 120ms. Keep the
+     CRT face temporal as well as spatially pixelated by snapping to each pose. */
+  transition: none;
 }
 
 :is(
@@ -77907,7 +77929,7 @@ a.settingsCreditItem:focus-visible {
   [data-coffee-plate-emoji-part="mouth"]
   > [data-crt-glyph-layer="true"] {
   animation: botFaceCustomMouthSpin
-    var(--bot-face-mouth-spin-turn-duration, 480ms) linear infinite;
+    var(--bot-face-mouth-spin-turn-duration, 480ms) steps(4, end) infinite;
 }
 
 @keyframes botFaceCustomMouthSpin {
@@ -78070,8 +78092,9 @@ a.settingsCreditItem:focus-visible {
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="eyes"],
 .messageMoodCoffeeFace [data-coffee-plate-emoji-part="eyes"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="eyes"] {
-  transition: transform var(--bot-face-gaze-transition-ms, 220ms)
-    cubic-bezier(0.22, 0.72, 0.24, 1);
+  /* Gaze choreography already selects discrete fixations. Do not tween the
+     phosphor glyph between them; an old CRT face cuts to the next eye pose. */
+  transition: none;
 }
 
 :is(

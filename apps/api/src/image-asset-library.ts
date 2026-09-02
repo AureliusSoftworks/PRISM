@@ -326,6 +326,12 @@ export function ensureImageAssetLibrarySchema(db: DatabaseSync): void {
       tokenize = 'unicode61 remove_diacritics 2'
     );
   `);
+  db.exec(`
+    CREATE TEMP TABLE IF NOT EXISTS image_asset_catalog_state (
+      user_id TEXT PRIMARY KEY,
+      dirty INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1))
+    );
+  `);
   const addColumnIfMissing = (
     _database: typeof db,
     table: string,
@@ -417,6 +423,100 @@ export function ensureImageAssetLibrarySchema(db: DatabaseSync): void {
         SELECT NEW.user_id, NEW.id, bots.id, 'owner', NEW.created_at
           FROM bots
          WHERE bots.user_id = NEW.user_id AND bots.id = NEW.bot_id;
+      END;
+    `);
+  }
+
+  const installDirtyTriggers = (
+    table: string,
+    updateColumns: readonly string[],
+  ): void => {
+    if (!tableExists(db, table)) return;
+    const targetIsVaultView = Boolean(
+      db
+        .prepare(
+          "SELECT 1 FROM temp.sqlite_temp_schema WHERE type = 'view' AND name = ?",
+        )
+        .get(table),
+    );
+    // Reopened Vault databases expose account tables through TEMP views before
+    // this additive schema pass runs. SQLite permits only INSTEAD OF triggers
+    // on those views; fresh/legacy databases still use AFTER triggers on the
+    // physical tables. Both forms are observational and roll back with a
+    // failed owner-bound mutation.
+    const timing = targetIsVaultView ? "INSTEAD OF" : "AFTER";
+    const triggerPrefix = `image_asset_catalog_dirty_${table}`;
+    db.exec(`
+      CREATE TEMP TRIGGER IF NOT EXISTS ${triggerPrefix}_insert
+      ${timing} INSERT ON ${table}
+      BEGIN
+        INSERT INTO image_asset_catalog_state (user_id, dirty)
+        VALUES (NEW.user_id, 1)
+        ON CONFLICT(user_id) DO UPDATE SET dirty = 1;
+      END;
+      CREATE TEMP TRIGGER IF NOT EXISTS ${triggerPrefix}_update
+      ${timing} UPDATE OF ${updateColumns.join(", ")} ON ${table}
+      BEGIN
+        INSERT INTO image_asset_catalog_state (user_id, dirty)
+        SELECT OLD.user_id, 1
+         WHERE EXISTS (SELECT 1 FROM users WHERE id = OLD.user_id)
+        ON CONFLICT(user_id) DO UPDATE SET dirty = 1;
+        INSERT INTO image_asset_catalog_state (user_id, dirty)
+        VALUES (NEW.user_id, 1)
+        ON CONFLICT(user_id) DO UPDATE SET dirty = 1;
+      END;
+      CREATE TEMP TRIGGER IF NOT EXISTS ${triggerPrefix}_delete
+      ${timing} DELETE ON ${table}
+      BEGIN
+        INSERT INTO image_asset_catalog_state (user_id, dirty)
+        SELECT OLD.user_id, 1
+         WHERE EXISTS (SELECT 1 FROM users WHERE id = OLD.user_id)
+        ON CONFLICT(user_id) DO UPDATE SET dirty = 1;
+      END;
+    `);
+  };
+  for (const [table, updateColumns] of [
+    [
+      "images",
+      [
+        "user_id",
+        "bot_id",
+        "related_bot_ids",
+        "origin",
+        "prompt",
+        "revised_prompt",
+        "provider",
+        "local_rel_path",
+        "purpose",
+        "content_sha256",
+      ],
+    ],
+    ["bots", ["user_id", "name", "chat_atmosphere_image_id"]],
+    ["conversations", ["user_id", "title", "zen_wallpaper_image_id"]],
+    ["botcast_shows", ["user_id", "name", "host_bot_id", "atmosphere_json"]],
+    ["library_groups", ["user_id", "name", "atmosphere_json"]],
+    ["coffee_groups", ["user_id", "name", "atmosphere_json"]],
+    ["slate_projects", ["user_id", "title", "cover_json"]],
+    ["slate_visual_references", ["user_id", "project_id", "image_id"]],
+  ] as const) {
+    installDirtyTriggers(table, updateColumns);
+  }
+
+  if (tableExists(db, "users")) {
+    const usersTriggerTiming = db
+      .prepare(
+        "SELECT 1 FROM temp.sqlite_temp_schema WHERE type = 'view' AND name = 'users'",
+      )
+      .get()
+      ? "INSTEAD OF"
+      : "AFTER";
+    db.exec(`
+      CREATE TEMP TRIGGER IF NOT EXISTS image_asset_catalog_dirty_users_update
+      ${usersTriggerTiming} UPDATE OF display_name, hub_atmosphere_image_id ON users
+      BEGIN
+        INSERT INTO image_asset_catalog_state (user_id, dirty)
+        VALUES (NEW.id, 1)
+        ON CONFLICT(user_id) DO UPDATE SET dirty = 1;
       END;
     `);
   }
@@ -1105,6 +1205,16 @@ export function synchronizeImageAssetCatalog(
   db: DatabaseSync,
   userId: string,
 ): void {
+  let state: { dirty: number | bigint } | undefined;
+  try {
+    state = db
+      .prepare("SELECT dirty FROM image_asset_catalog_state WHERE user_id = ?")
+      .get(userId) as { dirty: number | bigint } | undefined;
+  } catch {
+    // Existing databases create the state table during their first
+    // reconciliation. Clean reads thereafter pay only the indexed lookup.
+  }
+  if (state && Number(state.dirty) === 0) return;
   ensureImageAssetLibrarySchema(db);
   rebuildImageBotAssociations(db, userId);
   db.prepare(
@@ -1289,6 +1399,12 @@ export function synchronizeImageAssetCatalog(
     );
   }
   rebuildSearchIndex(db, userId);
+  db.prepare(
+    `INSERT INTO image_asset_catalog_state (user_id, dirty)
+     VALUES (?, 0)
+     ON CONFLICT(user_id) DO UPDATE SET
+       dirty = 0`,
+  ).run(userId);
 }
 
 function offsetFromCursor(cursor: string | null | undefined): number {

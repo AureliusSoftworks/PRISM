@@ -76,7 +76,7 @@ describe("backend unavailable helpers", () => {
     assert.equal(error.detail, "fetch failed");
   });
 
-  it("dispatches one app-level backend unavailable event", () => {
+  it("requires corroboration before dispatching an app-level backend unavailable event", () => {
     const target = new EventTarget();
     Object.defineProperty(globalThis, "window", {
       configurable: true,
@@ -87,6 +87,14 @@ describe("backend unavailable helpers", () => {
       received.push((event as CustomEvent<BackendUnavailableEventDetail>).detail);
     });
 
+    dispatchBackendUnavailableEvent(
+      new PrismBackendUnavailableError("Prism is waiting for its local API.", {
+        path: "/api/conversations",
+        status: 503,
+        detail: "ECONNREFUSED",
+      })
+    );
+    assert.deepEqual(received, []);
     dispatchBackendUnavailableEvent(
       new PrismBackendUnavailableError("Prism is waiting for its local API.", {
         path: "/api/conversations",
@@ -126,7 +134,7 @@ describe("backend unavailable helpers", () => {
       code: BACKEND_UNAVAILABLE_CODE,
       message: "Reconnecting",
       path: "/api/first",
-    });
+    }, { immediate: true });
     dispatchBackendUnavailableDetail({
       code: BACKEND_UNAVAILABLE_CODE,
       message: "Reconnecting",
@@ -138,7 +146,7 @@ describe("backend unavailable helpers", () => {
       code: BACKEND_UNAVAILABLE_CODE,
       message: "Reconnecting again",
       path: "/api/second",
-    });
+    }, { immediate: true });
 
     assert.deepEqual(received, ["down:/api/first", "up", "down:/api/second"]);
   });
@@ -164,6 +172,23 @@ describe("backend unavailable helpers", () => {
       status: 503,
       detail: "ECONNREFUSED",
     });
+  });
+
+  it("immediately gates startup authentication without waiting for corroboration", () => {
+    const target = new EventTarget();
+    Object.defineProperty(globalThis, "window", { configurable: true, value: target });
+    const received: BackendUnavailableEventDetail[] = [];
+    target.addEventListener(BACKEND_UNAVAILABLE_EVENT, (event) => {
+      received.push((event as CustomEvent<BackendUnavailableEventDetail>).detail);
+    });
+
+    dispatchBackendUnavailableDetail({
+      code: BACKEND_UNAVAILABLE_CODE,
+      message: "Trying to reconnect to Prism...",
+      path: "/api/auth/me",
+    });
+
+    assert.equal(received.length, 1);
   });
 
   it("treats auth bootstrap timeouts as reconnecting instead of signed out", () => {

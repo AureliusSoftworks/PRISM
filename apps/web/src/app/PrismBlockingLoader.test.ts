@@ -99,11 +99,29 @@ describe("prism soft synthesis UI store", () => {
     const snap = getPrismSoftSynthesisUiSnapshot();
     assert.equal(snap.jobCount, 2);
     assert.equal(snap.expanded, false);
-    assert.deepEqual(Object.keys(snap).sort(), ["expanded", "jobCount"]);
+    assert.deepEqual(Object.keys(snap).sort(), [
+      "expanded",
+      "jobCount",
+      "orbOpensProgress",
+    ]);
+    assert.equal(snap.orbOpensProgress, false);
     setPrismSoftSynthesisExpanded(true);
     assert.equal(getPrismSoftSynthesisUiSnapshot().expanded, true);
     registerPrismSoftSynthesisJobs("debate", 0);
     assert.equal(getPrismSoftSynthesisUiSnapshot().jobCount, 0);
     assert.equal(getPrismSoftSynthesisUiSnapshot().expanded, false);
+  });
+
+  it("lets a scoped soft workflow temporarily route the orb to Progress", () => {
+    resetPrismSoftSynthesisUiForTests();
+    registerPrismSoftSynthesisJobs("whodunnit-items", 1, {
+      orbOpensProgress: true,
+    });
+    assert.equal(getPrismSoftSynthesisUiSnapshot().orbOpensProgress, true);
+    registerPrismSoftSynthesisJobs("signal", 2);
+    assert.equal(getPrismSoftSynthesisUiSnapshot().jobCount, 3);
+    assert.equal(getPrismSoftSynthesisUiSnapshot().orbOpensProgress, true);
+    registerPrismSoftSynthesisJobs("whodunnit-items", 0);
+    assert.equal(getPrismSoftSynthesisUiSnapshot().orbOpensProgress, false);
   });
 });

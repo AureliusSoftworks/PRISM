@@ -136,22 +136,9 @@ export function debateMysteryV2ExamineGridCellIndexes(
   const target = hotspots.find((hotspot) => hotspot.id === lens.hotspotId);
   if (!target || !target.unlocked || target.examined) return [];
   if (!debateMysteryV2PointInHotspot({ x: lens.x, y: lens.y }, target.polygon)) return [];
-  const radius = 4.6;
-  const cells = new Set<number>();
-  const lensColumn = Math.min(columns - 1, Math.max(0, Math.floor((lens.x / 100) * columns)));
-  const lensRow = Math.min(rows - 1, Math.max(0, Math.floor((lens.y / 100) * rows)));
-  cells.add(lensRow * columns + lensColumn);
-  const firstColumn = Math.max(0, Math.floor(((lens.x - radius) / 100) * columns));
-  const lastColumn = Math.min(columns - 1, Math.ceil(((lens.x + radius) / 100) * columns));
-  const firstRow = Math.max(0, Math.floor(((lens.y - radius) / 100) * rows));
-  const lastRow = Math.min(rows - 1, Math.ceil(((lens.y + radius) / 100) * rows));
-  for (let row = firstRow; row <= lastRow; row += 1) {
-    for (let column = firstColumn; column <= lastColumn; column += 1) {
-      const point = { x: ((column + 0.5) / columns) * 100, y: ((row + 0.5) / rows) * 100 };
-      if (Math.hypot(point.x - lens.x, point.y - lens.y) <= radius && debateMysteryV2PointInHotspot(point, target.polygon)) cells.add(row * columns + column);
-    }
-  }
-  return [...cells].sort((left, right) => left - right);
+  const column = Math.min(columns - 1, Math.max(0, Math.floor((lens.x / 100) * columns)));
+  const row = Math.min(rows - 1, Math.max(0, Math.floor((lens.y / 100) * rows)));
+  return [row * columns + column];
 }
 
 export function debateMysteryV2RoomComplete(

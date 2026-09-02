@@ -9,6 +9,7 @@ import {
   debateMysteryIllustratedRoomSubjectIdV1,
   DEBATE_MYSTERY_ROOM_ART_CONTRACT_V1,
   renderDebateMysteryRoomArtV1,
+  validateDebateMysteryRoomArtSourceAlignmentV1,
 } from "../debate-mystery-room-art.ts";
 
 async function colorfulRoomFixture(): Promise<Buffer> {
@@ -186,6 +187,7 @@ describe("debate mystery room Mosaic and Upgraded derivatives", () => {
       roomBrief: "A broad staircase rises behind the entry hall.",
     });
     assert.match(prompt, /strict composition and geometry reference/i);
+    assert.match(prompt, /exact same scale across the full 16:9 frame/i);
     assert.match(prompt, /high-definition interpretation/i);
     assert.match(prompt, /high-resolution Mosaic room image/i);
     assert.match(prompt, /photographic depth/i);
@@ -198,8 +200,44 @@ describe("debate mystery room Mosaic and Upgraded derivatives", () => {
     );
   });
 
+  it("locks an Upgraded derivative to the Mosaic camera and rejects composition drift locally", async () => {
+    const source = await navigationRoomFixture();
+    const aligned = await validateDebateMysteryRoomArtSourceAlignmentV1({
+      source,
+      candidate: await sharp(source).resize(1600, 900, { fit: "fill" }).png().toBuffer(),
+    });
+    assert.equal(aligned.approved, true);
+
+    const shifted = await sharp(source)
+      .extract({ left: 160, top: 0, width: 1440, height: 900 })
+      .extend({ right: 160, background: { r: 3, g: 8, b: 14 } })
+      .png()
+      .toBuffer();
+    const rejected = await validateDebateMysteryRoomArtSourceAlignmentV1({ source, candidate: shifted });
+    assert.equal(rejected.approved, false);
+    assert.ok(rejected.correlation < rejected.minimumCorrelation);
+
+    const blank = await sharp({
+      create: {
+        width: 1600,
+        height: 900,
+        channels: 3,
+        background: { r: 3, g: 8, b: 14 },
+      },
+    }).png().toBuffer();
+    const blankRejected = await validateDebateMysteryRoomArtSourceAlignmentV1({
+      source,
+      candidate: blank,
+    });
+    assert.equal(blankRejected.approved, false);
+  });
+
   it("wires Mosaic synthesis and shared presentation delivery", () => {
     const server = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+    const mansionBundles = readFileSync(
+      new URL("../debate-mystery-mansion-bundles.ts", import.meta.url),
+      "utf8",
+    );
     assert.match(server, /size: "1280x720",[\s\S]{0,100}quality: "high"/u);
     assert.match(server, /newly authored Mosaic room plate/u);
     assert.match(
@@ -214,6 +252,51 @@ describe("debate mystery room Mosaic and Upgraded derivatives", () => {
       "sealed, installed-mansion, and saved room delivery should share the Mosaic presentation",
     );
     assert.match(server, /mystery-room-art\/upgrade/u);
+    assert.match(server, /sourceImageBytes: mosaicReference\.bytes[\s\S]{0,160}size: "1280x720"/u);
+    assert.match(server, /validateDebateMysteryRoomArtSourceAlignmentV1[\s\S]{0,1100}sealDebateMysteryAssetBytesV1/u);
     assert.match(server, /session\.responseMode === "local"[\s\S]{0,220}LOCAL never sends venue art/u);
+    assert.match(
+      server,
+      /roomId && category !== "mosaic_rooms"[\s\S]{0,180}room-specific retry must target Mosaic rooms/u,
+    );
+    assert.match(
+      server,
+      /rooms: \[selectedRoom\][\s\S]{0,360}attachDebateMysteryRoomAssetV2/u,
+      "a selected fallback room should finish behind the blocking request instead of joining the general queue",
+    );
+    assert.match(
+      server,
+      /activeBackground\.controller\.abort\(\)[\s\S]{0,120}await activeBackground\.promise/u,
+      "a player-selected room should take ownership from an opportunistic background generation run",
+    );
+    assert.match(
+      server,
+      /!selectedAsset \|\| selectedAsset\.status === "pending"[\s\S]{0,320}setDebateMysteryAssetPendingV1/u,
+      "a room with no synthesis record or an interrupted pending record should be eligible for hidden generation",
+    );
+    assert.match(
+      server,
+      /selectedAsset\.status === "ready"[\s\S]{0,300}attachDebateMysteryRoomAssetV2/u,
+      "a completed vault image should repair a stale session attachment without regeneration",
+    );
+    assert.match(
+      server,
+      /requestedRoomIds\?: ReadonlySet<string>[\s\S]{0,1800}requestedRoomIds && !requestedRoomIds\.has\(room\.id\)/u,
+    );
+    assert.match(
+      server,
+      /roomId \? new Set\(\[roomId\]\) : undefined/u,
+      "the room-specific upgrade must not generate every room",
+    );
+    assert.match(
+      mansionBundles,
+      /const frozenLayout = state\.config\.mansionSnapshot\?\.layoutV2[\s\S]{0,500}structuredClone\(frozenLayout\)[\s\S]{0,500}roomArtCandidates: \[\]/u,
+      "saving the venue must retain its frozen authored geometry instead of rebuilding a legacy grid",
+    );
+    assert.match(
+      mansionBundles,
+      /acceptedRoomAssetId:[\s\S]{0,260}acceptedRoomArtAnchorSha256:[\s\S]{0,180}roomAnchorContractSha256\(layoutV2, entity\.id\)/u,
+      "promoted case room art must retain the exact anchor contract for its next mansion",
+    );
   });
 });

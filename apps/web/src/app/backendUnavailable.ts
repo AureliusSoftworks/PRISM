@@ -18,17 +18,33 @@ export type BackendUnavailableEventDetail = {
   detail?: string;
 };
 
-type BackendConnectionEventState = "available" | "unavailable";
+type BackendConnectionEventState = {
+  availability: "available" | "unavailable";
+  firstFailureAt?: number;
+};
+
+export const BACKEND_UNAVAILABLE_CORROBORATION_WINDOW_MS = 4_000;
 
 const backendConnectionEventState = new WeakMap<
   EventTarget,
   BackendConnectionEventState
 >();
 
+function backendUnavailableRequiresImmediateGate(
+  detail: BackendUnavailableEventDetail,
+): boolean {
+  return detail.path === "/api/auth/me" || detail.path === "/api/client-access/me";
+}
+
 type BackendUnavailableErrorOptions = {
   path?: string;
   status?: number;
   detail?: string;
+};
+
+type BackendUnavailableDispatchOptions = {
+  /** Bootstrap/auth cannot proceed without the API, so it gates immediately. */
+  immediate?: boolean;
 };
 
 export class PrismBackendUnavailableError extends Error {
@@ -107,7 +123,8 @@ export function createBackendUnavailableErrorFromPayload(
 }
 
 export function dispatchBackendUnavailableEvent(
-  error: PrismBackendUnavailableError
+  error: PrismBackendUnavailableError,
+  options?: BackendUnavailableDispatchOptions,
 ): void {
   dispatchBackendUnavailableDetail({
     code: BACKEND_UNAVAILABLE_CODE,
@@ -115,15 +132,32 @@ export function dispatchBackendUnavailableEvent(
     path: error.path,
     status: error.status,
     detail: error.detail,
-  });
+  }, options);
 }
 
 export function dispatchBackendUnavailableDetail(
-  detail: BackendUnavailableEventDetail
+  detail: BackendUnavailableEventDetail,
+  options: BackendUnavailableDispatchOptions = {},
 ): void {
   if (typeof window === "undefined") return;
-  if (backendConnectionEventState.get(window) === "unavailable") return;
-  backendConnectionEventState.set(window, "unavailable");
+  const current = backendConnectionEventState.get(window);
+  if (current?.availability === "unavailable") return;
+  const now = Date.now();
+  const corroborated =
+    current?.firstFailureAt !== undefined &&
+    now - current.firstFailureAt <= BACKEND_UNAVAILABLE_CORROBORATION_WINDOW_MS;
+  if (
+    !options.immediate &&
+    !backendUnavailableRequiresImmediateGate(detail) &&
+    !corroborated
+  ) {
+    backendConnectionEventState.set(window, {
+      availability: "available",
+      firstFailureAt: now,
+    });
+    return;
+  }
+  backendConnectionEventState.set(window, { availability: "unavailable" });
   window.dispatchEvent(
     new CustomEvent<BackendUnavailableEventDetail>(BACKEND_UNAVAILABLE_EVENT, {
       detail,
@@ -133,7 +167,9 @@ export function dispatchBackendUnavailableDetail(
 
 export function dispatchBackendAvailableEvent(): void {
   if (typeof window === "undefined") return;
-  if (backendConnectionEventState.get(window) !== "unavailable") return;
-  backendConnectionEventState.set(window, "available");
+  const wasUnavailable =
+    backendConnectionEventState.get(window)?.availability === "unavailable";
+  backendConnectionEventState.set(window, { availability: "available" });
+  if (!wasUnavailable) return;
   window.dispatchEvent(new CustomEvent(BACKEND_AVAILABLE_EVENT));
 }

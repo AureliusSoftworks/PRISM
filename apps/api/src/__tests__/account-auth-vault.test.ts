@@ -477,6 +477,36 @@ describe("Account Auth Vault V2", () => {
       ) as { display_name: string }).display_name,
       "Legacy 2 Display Canary",
     );
+    assert.equal(
+      Number(
+        db
+          .prepare("UPDATE users SET display_name = ? WHERE id = ?")
+          .run("Legacy 2 Updated Canary", "legacy-owner-2").changes,
+      ),
+      1,
+    );
+    assert.equal(
+      (db.prepare("SELECT display_name FROM users WHERE id = ?").get(
+        "legacy-owner-2",
+      ) as { display_name: string }).display_name,
+      "Legacy 2 Updated Canary",
+    );
+    assert.equal(
+      (db
+        .prepare("SELECT typeof(display_name) AS storage_type FROM main.users WHERE id = ?")
+        .get("legacy-owner-2") as { storage_type: string }).storage_type,
+      "blob",
+    );
+    assert.equal(
+      Number(db.prepare("DELETE FROM users WHERE id = ?").run("legacy-owner-2").changes),
+      1,
+    );
+    assert.equal(
+      (db
+        .prepare("SELECT COUNT(*) AS count FROM main.users WHERE id = ?")
+        .get("legacy-owner-2") as { count: number }).count,
+      0,
+    );
     assert.throws(
       () =>
         resumeAccountAuthVaultV2({

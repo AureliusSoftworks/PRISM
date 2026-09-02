@@ -572,6 +572,64 @@ export function acceptDebateMysteryMansionThemeV1(db: DatabaseSync, userId: stri
   mutateThemeRefs({ db, userId, bundleId, action: "accept" });
 }
 
+/** Field repair deliberately reveals no audio preview. The generated track
+ * still passes the provider, duration, byte-size, and MIME gates above; it is
+ * accepted without browser-only decoded-loop analysis and plays as a normal
+ * whole-file background loop until the venue is edited in the Library. */
+export function acceptDebateMysteryMansionThemeFieldRepairV1(
+  db: DatabaseSync,
+  userId: string,
+  bundleId: string,
+): void {
+  const bundle = readBundle(db, userId, bundleId);
+  const parsed = musicMetadata(bundle.library_metadata_json);
+  if (!themeRef(db, userId, bundleId, MANSION_MUSIC_CANDIDATE_LOGICAL_ID_V1)) {
+    throw new HttpError(409, "Generate replacement music before accepting it.");
+  }
+  parsed.music.candidateValidation = null;
+  parsed.music.candidateLoop = null;
+  writeMusicMetadata(
+    db,
+    userId,
+    bundleId,
+    bundle.library_metadata_json,
+    parsed.music,
+    new Date().toISOString(),
+  );
+  mutateThemeRefs({ db, userId, bundleId, action: "accept" });
+}
+
+export function undoDebateMysteryMansionThemeFieldRepairV1(
+  db: DatabaseSync,
+  userId: string,
+  bundleId: string,
+  hadActiveTheme: boolean,
+): void {
+  if (hadActiveTheme) {
+    mutateThemeRefs({ db, userId, bundleId, action: "undo" });
+    return;
+  }
+  const bundle = readBundle(db, userId, bundleId);
+  const parsed = musicMetadata(bundle.library_metadata_json);
+  db.prepare(
+    `DELETE FROM debate_mystery_mansion_asset_refs
+      WHERE bundle_id = ? AND user_id = ? AND role = 'music' AND logical_id = ?`,
+  ).run(bundleId, userId, MANSION_MUSIC_ACTIVE_LOGICAL_ID_V1);
+  parsed.music.activeTitle = null;
+  parsed.music.activeLoop = null;
+  parsed.music.previousTitle = null;
+  parsed.music.previousLoop = null;
+  writeMusicMetadata(
+    db,
+    userId,
+    bundleId,
+    bundle.library_metadata_json,
+    parsed.music,
+    new Date().toISOString(),
+  );
+  cleanupUnreferencedMusicAssets(db, userId);
+}
+
 export function discardDebateMysteryMansionThemeV1(db: DatabaseSync, userId: string, bundleId: string): void {
   mutateThemeRefs({ db, userId, bundleId, action: "discard" });
 }

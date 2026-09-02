@@ -23,7 +23,9 @@ import type {
 import {
   MANSION_LAYOUT_V2_COLUMNS,
   MANSION_LAYOUT_V2_ROWS,
+  type MansionDynamicLightV2,
   type MansionLayoutV2,
+  type MansionPlacementAnchorV2,
   type MysteryVenueProfileV1,
 } from "./mansionLayoutV2.ts";
 import type {
@@ -315,6 +317,8 @@ export interface DebateMysterySealedAssetRefV1 {
   source: "synthesized" | "bundled" | "mansion" | "asset_library";
   revealed: boolean;
   mimeType: "image/png" | "image/webp";
+  /** Public presentation calibration for the visible venue exterior only. */
+  entryTarget?: DebateMysteryPointV1 | null;
 }
 
 /**
@@ -1169,6 +1173,46 @@ export interface DebateMysteryRoomV2 {
   }>;
 }
 
+export type DebateMysterySceneRepairActionV1 =
+  | "regenerate_exterior"
+  | "align_exterior_door"
+  | "regenerate_room_mosaic"
+  | "regenerate_room_upgrade"
+  | "generate_room_upgrade"
+  | "refresh_room_anchors"
+  | "refresh_room_lights"
+  | "regenerate_evidence_asset"
+  | "reduce_evidence_magenta"
+  | "regenerate_music"
+  | "regenerate_ambience";
+
+export interface DebateMysterySceneRepairAssetUndoV1 {
+  kind: DebateMysterySealedAssetKindV1;
+  subjectId: string;
+  existed: boolean;
+  revealed: boolean;
+  /** Server-private vault generation; opaque and never grants asset access. */
+  snapshotId: string;
+}
+
+/** One exact, spoiler-safe field-repair checkpoint. Asset bytes remain in the
+ * encrypted case vault; this public metadata only describes what can be undone. */
+export interface DebateMysterySceneRepairUndoV1 {
+  version: 1;
+  id: string;
+  action: DebateMysterySceneRepairActionV1;
+  roomId: string | null;
+  subjectId?: string | null;
+  createdAt: string;
+  assetSubjects: DebateMysterySceneRepairAssetUndoV1[];
+  previousMansionExterior?: DebateMysterySealedAssetRefV1 | null;
+  previousMansionPresentation?: DebateMysteryMansionPresentationSnapshotV2;
+  previousRoomAsset?: DebateMysterySealedAssetRefV1 | null;
+  previousHotspots?: DebateMysteryRoomV2["hotspots"];
+  previousPlacementAnchors?: MansionPlacementAnchorV2[];
+  previousLights?: MansionDynamicLightV2[];
+}
+
 /** Persisted room-entry choreography. A reload during `persona` repeats the
  * same frozen local performance; only `complete` restores room controls. */
 export type DebateMysteryRoomIntroductionPhaseV2 =
@@ -1620,6 +1664,8 @@ export interface DebateWhodunnitFormatStateV2 {
   spatialProjection?: DebateMysterySpatialProjectionV1 | null;
   /** Immediate, spoiler-safe exterior establishing shot for the title card. */
   mansionExterior?: DebateMysterySealedAssetRefV1 | null;
+  /** The latest in-field scene repair. Missing means there is nothing to undo. */
+  sceneRepairUndo?: DebateMysterySceneRepairUndoV1 | null;
   /** Public because the opening scene is visible; never derived from a clue. */
   crimeSceneRoomId?: string | null;
   /** Finite first-room sweep required before the mansion map unlocks. */

@@ -53,8 +53,24 @@ for (const sourceName of sourceNames) {
   const source = await readFile(join(sourceDirectory, sourceName));
   const mosaic = await applyDebateMysteryMosaicPresentationV1(source);
   await assertUniformTesserae(sourceName, mosaic.bytes, mosaic.cellSize);
-  const outputName = `${basename(sourceName, extname(sourceName))}-mosaic.webp`;
+  const outputStem = basename(sourceName, extname(sourceName));
+  const outputName = `${outputStem}-mosaic.webp`;
   await writeFile(join(outputDirectory, outputName), mosaic.bytes);
+  const gridlessReference = await sharp(source, { failOn: "error" })
+    .rotate()
+    .flatten({ background: { r: 3, g: 8, b: 14 } })
+    .resize(320, 180, {
+      fit: "cover",
+      position: "centre",
+      kernel: sharp.kernel.nearest,
+    })
+    .removeAlpha()
+    .webp({ lossless: true, effort: 6 })
+    .toBuffer();
+  await writeFile(
+    join(outputDirectory, `${outputStem}-mosaic-reference.webp`),
+    gridlessReference,
+  );
   if (sourceName === "foyer.png") foyerMosaic = mosaic.bytes;
 }
 

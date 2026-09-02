@@ -66,7 +66,9 @@ const DEBATE_MYSTERY_MANSION_DOOR_TARGETS_V1 = {
   },
   "maritime-passenger-v1": {
     compact: { xPercent: 36, yPercent: 64 },
-    standard: { xPercent: 28, yPercent: 61 },
+    // Reviewed against the standard passenger-vessel cover: the usable
+    // gangway is beside the pier stairs, not the decorative bow plating.
+    standard: { xPercent: 60, yPercent: 70 },
     grand: { xPercent: 22, yPercent: 60 },
   },
   "neutral-mansion-v1": {

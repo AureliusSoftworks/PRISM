@@ -42,6 +42,70 @@ export interface DebateMysteryMosaicPresentationResultV1 {
   medianLuminance: number;
 }
 
+export interface DebateMysteryRoomArtSourceAlignmentV1 {
+  approved: boolean;
+  correlation: number;
+  minimumCorrelation: number;
+}
+
+const UPGRADED_SOURCE_LOCK_GRID_WIDTH = 32;
+const UPGRADED_SOURCE_LOCK_GRID_HEIGHT = 18;
+// Calibrated against the authored Mosaic/HD pairs (lowest known-good: 0.800)
+// and the legacy drifted 3:2 crops (highest known-bad: 0.758). Keep a small
+// margin on both sides so normal lighting/material changes remain acceptable.
+const UPGRADED_SOURCE_LOCK_MINIMUM_CORRELATION = 0.78;
+
+/** Reduces both images to the same coarse 16:9 luminance structure so style
+ * and material detail do not overwhelm the camera/geometry comparison. */
+async function sourceLockLuminanceGrid(input: Buffer): Promise<number[]> {
+  const { data } = await sharp(input, { failOn: "error" })
+    .rotate()
+    .flatten({ background: { r: 3, g: 8, b: 14 } })
+    .resize(UPGRADED_SOURCE_LOCK_GRID_WIDTH, UPGRADED_SOURCE_LOCK_GRID_HEIGHT, {
+      fit: "fill",
+      kernel: sharp.kernel.lanczos3,
+    })
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  return [...data];
+}
+
+/** A local, deterministic composition gate. It compares only broad luminance
+ * structure, permitting a material/lighting pass while rejecting changed
+ * camera framing, architecture, and furniture massing. */
+export async function validateDebateMysteryRoomArtSourceAlignmentV1(args: {
+  source: Buffer;
+  candidate: Buffer;
+}): Promise<DebateMysteryRoomArtSourceAlignmentV1> {
+  const [source, candidate] = await Promise.all([
+    sourceLockLuminanceGrid(args.source),
+    sourceLockLuminanceGrid(args.candidate),
+  ]);
+  const sourceMean = source.reduce((sum, value) => sum + value, 0) / source.length;
+  const candidateMean = candidate.reduce((sum, value) => sum + value, 0) / candidate.length;
+  let covariance = 0;
+  let sourceEnergy = 0;
+  let candidateEnergy = 0;
+  for (let index = 0; index < source.length; index += 1) {
+    const sourceDelta = source[index]! - sourceMean;
+    const candidateDelta = candidate[index]! - candidateMean;
+    covariance += sourceDelta * candidateDelta;
+    sourceEnergy += sourceDelta * sourceDelta;
+    candidateEnergy += candidateDelta * candidateDelta;
+  }
+  const correlation = sourceEnergy === 0 && candidateEnergy === 0
+    ? 1
+    : sourceEnergy > 0 && candidateEnergy > 0
+      ? covariance / Math.sqrt(sourceEnergy * candidateEnergy)
+      : 0;
+  return {
+    approved: correlation >= UPGRADED_SOURCE_LOCK_MINIMUM_CORRELATION,
+    correlation,
+    minimumCorrelation: UPGRADED_SOURCE_LOCK_MINIMUM_CORRELATION,
+  };
+}
+
 function encodeRoomArt(
   pipeline: sharp.Sharp,
   format: DebateMysteryRoomArtFormatV1,
@@ -234,6 +298,7 @@ export function buildDebateMysteryIllustratedRoomUpgradePromptV1(args: {
     args.houseStylePrompt.trim(),
     args.roomBrief.trim(),
     "Treat the supplied high-resolution Mosaic room image as the sole strict composition and geometry reference.",
+    "Keep every wall, doorway, floor division, architectural silhouette, camera edge, and furniture anchor in the exact same screen position and at the exact same scale across the full 16:9 frame.",
     "Preserve its camera, walls, floor divisions, stairs, doors, traversal openings, furniture anchors, inspection regions, and evidence-safe sightlines.",
     "Restore believable natural materials, photographic depth, nuanced lighting, and smooth edges without changing navigation, introducing people, or inventing clues, text, symbols, blood, weapons, or case facts.",
     "Return an unoccupied 16:9 room plate. Presentation changes only; the mystery remains immutable.",

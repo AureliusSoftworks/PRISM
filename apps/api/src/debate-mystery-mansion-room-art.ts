@@ -107,7 +107,7 @@ function styleDirection(styleJson: string): string {
   }
 }
 
-function roomAnchorContractSha256(layout: MansionLayoutV2, roomId: string): string {
+export function roomAnchorContractSha256(layout: MansionLayoutV2, roomId: string): string {
   const anchors = layout.placementAnchors
     .filter((anchor) => anchor.roomId === roomId)
     .map((anchor) => ({
@@ -130,6 +130,17 @@ export function buildMansionRoomArtCandidatePromptV2(args: {
     .filter((anchor) => anchor.roomId === args.room.id)
     .map((anchor) => `${anchor.relation} ${anchor.name} at normalized (${anchor.point.x.toFixed(2)}, ${anchor.point.y.toFixed(2)})`)
     .join("; ");
+  const lights = args.layout.lights
+    .filter((light) => light.roomId === args.room.id)
+    .map((light) => {
+      const points = light.kind === "neon"
+        ? light.geometry.points
+        : [{ x: light.geometry.x, y: light.geometry.y }];
+      return `${light.kind} at normalized ${points.map((point) =>
+        `(${point.x.toFixed(2)}, ${point.y.toFixed(2)})`
+      ).join(" to ")} with intensity ${light.intensity.toFixed(2)}`;
+    })
+    .join("; ");
   return [
     `Synthesize an unoccupied 16:9 high-resolution hand-crafted Pixel Art establishing plate for the ${args.room.name} in ${args.mansionName}.`,
     ...(args.layout.venueProfile
@@ -138,6 +149,9 @@ export function buildMansionRoomArtCandidatePromptV2(args: {
     styleDirection(args.styleJson),
     `Room type: ${args.room.templateId}.`,
     anchors ? `Spoiler-free authoring anchors: ${anchors}.` : "Keep the composition spacious and usable for later authoring.",
+    ...(lights
+      ? [`Authored dynamic-light overlays: ${lights}. Keep plausible fixtures or clear illuminated surfaces beneath these positions, but do not bake exaggerated glow; PRISM renders their light dynamically at runtime.`]
+      : []),
     "Use a fixed room-art silhouette with clear walls, doors, circulation openings, furniture masses, foreground, middle ground, and background.",
     "Author the architecture, furnishings, materials, reflections, foliage, and light as deliberate coherent pixel clusters with crisp stepped edges.",
     "Do not create a realistic plate and then downsample, quantize, posterize, pixelate, blur, add a mosaic grid, CRT treatment, scanlines, or any other pixel filter.",

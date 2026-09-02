@@ -2679,7 +2679,8 @@ describe("Zen live presence CSS", () => {
     assert.doesNotMatch(css, /botFaceCustomGlyphSpin/);
     assert.match(
       css,
-      /\[data-talking="true"\][\s\S]*transition:\s*transform 70ms ease-out/,
+      /\[data-talking="true"\][\s\S]*\[data-coffee-plate-emoji-part="mouth"\][\s\S]*transition:\s*none/,
+      "Talking mouth transforms must snap between the existing viseme frames.",
     );
     for (const mouthShape of [
       "closed",
@@ -2767,6 +2768,11 @@ describe("Zen live presence CSS", () => {
     assert.match(
       spinTalkingRule,
       /--bot-face-mouth-spin-turn-duration,\s*480ms/,
+    );
+    assert.match(
+      spinTalkingRule,
+      /steps\(4,\s*end\)/,
+      "Spin must show four discrete CRT orientations per turn.",
     );
     assert.doesNotMatch(spinTalkingRule, /scale[XY]\(/);
     assert.match(spinGeometryRule, /display:\s*inline-grid\s*;/);
@@ -3753,10 +3759,25 @@ describe("Zen live presence CSS", () => {
       phosphorPixelGlyphSource,
       /data-crt-pixel-mask-pending=\{enabled && !maskUrl \? "true" : undefined\}/,
     );
-    assert.doesNotMatch(
+    assert.match(
       phosphorPixelGlyphSource,
-      /data-crt-raster-emission-surface/,
-      "The HD face must not depend on a nested emission-only child.",
+      /maskUrl && alphaSafeMaskEmission[\s\S]*?data-crt-pixel-mask-emission="true"[\s\S]*?data-crt-pixel-mask-emission-source="true"/,
+      "Only explicitly opted-in raster contours may mount the alpha-safe nested emission pair.",
+    );
+    assert.match(
+      phosphorPixelGlyphCss,
+      /\.textMaskEmission,\s*\.textMaskEmissionSource\s*\{\s*display:\s*none\s*;/,
+      "The optional emission pair must remain inert outside an explicitly supported render surface.",
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /data-custom-eye-pair-side="left"[\s\S]*?alphaSafeMaskEmission[\s\S]*?data-custom-eye-pair-side="right"[\s\S]*?alphaSafeMaskEmission/,
+      "Both halves of a paired custom eye must use the alpha-safe emission path.",
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /alphaSafeMaskEmission=\{\s*part === "eyes" && normalizedFaceEyeCharacter !== null\s*\}/,
+      "Single custom eyes must opt into alpha-safe emission without changing stock eyes or mouth glyphs.",
     );
     assert.match(css, /data-crt-pixel-mask-ready="true"/);
     assert.match(css, /data-crt-pixel-mask-pending="true"/);
@@ -3864,27 +3885,110 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       canonicalCustomEyeLayerRule,
-      /--zen-live-bot-glyph-compositor-glow-filter:\s*var\(--crt-face-glow-filter\)\s*;/,
-      "Custom eyes receive the same broad phosphor filter as mouths after their mask is composed.",
+      /--zen-live-bot-glyph-compositor-glow-filter:\s*opacity\(1\)\s*;/,
+      "The transparent custom-eye wrapper must stay neutral while its dedicated alpha-safe surface emits the bloom.",
     );
-    const canonicalLightCustomEyeLayerRule = ruleForSelectorNeedlesWithBody(
+    const canonicalCustomEyeEmissionRule = ruleForSelectorNeedlesWithBody(
+      [
+        '.zenLiveBotPresencePlate[data-avatar-full-scale-identity="canonical"]',
+        ".zenLiveBotPresenceFaceGlyph[data-face-eye-character]",
+        '[data-coffee-plate-emoji-part="eyes"]',
+        '[data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]',
+        '> [data-crt-pixel-mask-emission="true"]',
+      ],
+      "--crt-face-glow-filter",
+    );
+    assert.match(
+      canonicalCustomEyeEmissionRule,
+      /filter:\s*blur\(var\(--crt-glyph-beam-softness\)\)\s*var\(--crt-face-glow-filter\)\s*;/,
+      "Custom eyes must apply the mouth's broad phosphor filter on an unmasked outer surface.",
+    );
+    assert.match(
+      canonicalCustomEyeEmissionRule,
+      /mix-blend-mode:\s*var\(--crt-face-glow-blend-mode,\s*screen\)\s*;/,
+      "Custom eyes must use the same emission blend as the mouth.",
+    );
+    assert.match(
+      canonicalCustomEyeEmissionRule,
+      /z-index:\s*0\s*;/,
+      "The custom-eye halo must stay in front of the CRT screen plane instead of disappearing behind a negative stacking layer.",
+    );
+    assert.doesNotMatch(
+      canonicalCustomEyeEmissionRule,
+      /mask-image:/,
+      "The outer emission surface must remain unmasked so its halo can extend beyond the eye contour.",
+    );
+    const canonicalCustomEyeEmissionSourceRule = ruleForSelectorNeedlesWithBody(
+      [
+        '.zenLiveBotPresencePlate[data-avatar-full-scale-identity="canonical"]',
+        ".zenLiveBotPresenceFaceGlyph[data-face-eye-character]",
+        '[data-coffee-plate-emoji-part="eyes"]',
+        '[data-crt-pixel-mask-emission-source="true"]',
+      ],
+      "mask-image",
+    );
+    assert.match(
+      canonicalCustomEyeEmissionSourceRule,
+      /mask-image:\s*var\(--crt-phosphor-pixel-mask\)\s*;/,
+      "The nested emission source must preserve the exact rasterized custom-eye contour and counters.",
+    );
+    assert.match(
+      phosphorPixelGlyphSource,
+      /data-crt-pixel-mask-emission="true"[\s\S]*data-crt-pixel-mask-emission-content=\{content\}[\s\S]*data-crt-pixel-mask-emission-source="true"/,
+      "Ready raster glyphs must expose a nested mask source whose unmasked parent can emit an unclipped halo.",
+    );
+    const canonicalLightCustomEyeRule = ruleForSelectorNeedlesWithBody(
       [
         '.zenLiveBotPresencePlate[data-theme="light"][data-avatar-full-scale-identity="canonical"]',
         ".zenLiveBotPresenceFaceGlyph[data-face-eye-character]",
         '[data-coffee-plate-emoji-part="eyes"]',
-        '[data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]',
       ],
-      "mix-blend-mode",
+      "--crt-face-edge-color",
     );
     assert.match(
-      canonicalLightCustomEyeLayerRule,
-      /--zen-live-bot-glyph-compositor-glow-filter:\s*var\(\s*--crt-face-glow-filter\s*\)\s*;/,
-      "Light custom eyes must retain the same completed-mask phosphor envelope as the mouth.",
+      canonicalLightCustomEyeRule,
+      /--crt-face-edge-color:\s*var\(--bot-avatar-screen-glyph,\s*#ffffff\)\s*;/,
+      "Light custom-eye sources must emit neutral-white phosphor while the glass retains identity color.",
+    );
+    const canonicalLightCustomEyeTextEmissionRule =
+      ruleForSelectorNeedlesWithBody(
+        [
+          '.zenLiveBotPresencePlate[data-theme="light"][data-avatar-full-scale-identity="canonical"]',
+          ".zenLiveBotPresenceFaceGlyph[data-face-eye-character]",
+          '[data-coffee-plate-emoji-part="eyes"]',
+          '> [data-crt-pixel-mask-emission="true"]::before',
+        ],
+        "data-crt-pixel-mask-emission-content",
+      );
+    assert.match(
+      canonicalLightCustomEyeTextEmissionRule,
+      /content:\s*attr\(data-crt-pixel-mask-emission-content\)\s*;/,
+      "Light custom eyes must feed a real glyph silhouette into the same unmasked filter surface as the mouth.",
     );
     assert.match(
-      canonicalLightCustomEyeLayerRule,
-      /mix-blend-mode:\s*var\(--bot-avatar-light-ink-glow-blend,\s*plus-lighter\)\s*;/,
-      "Light custom-eye bloom must use the additive white emission blend that keeps authored Ink visible through the lit glass.",
+      canonicalLightCustomEyeTextEmissionRule,
+      /display:\s*grid\s*;[\s\S]*place-items:\s*center\s*;/,
+      "The Light halo source must stay registered to the authored eye box.",
+    );
+    assert.match(
+      canonicalLightCustomEyeTextEmissionRule,
+      /color:\s*var\(--crt-face-edge-color,\s*currentColor\)\s*;/,
+      "The real Light halo source must inherit the neutral phosphor token.",
+    );
+    const canonicalLightCustomEyeMaskEmissionRule =
+      ruleForSelectorNeedlesWithBody(
+        [
+          '.zenLiveBotPresencePlate[data-theme="light"][data-avatar-full-scale-identity="canonical"]',
+          ".zenLiveBotPresenceFaceGlyph[data-face-eye-character]",
+          '[data-coffee-plate-emoji-part="eyes"]',
+          '[data-crt-pixel-mask-emission-source="true"]',
+        ],
+        "display: none",
+      );
+    assert.match(
+      canonicalLightCustomEyeMaskEmissionRule,
+      /display:\s*none\s*;/,
+      "Light WebKit must not rely on the clipped CSS-mask source for exterior glow pixels.",
     );
     const canonicalCustomEyeMaskRule = ruleForSelectorNeedlesWithBody(
       [
@@ -3905,6 +4009,25 @@ describe("Zen live presence CSS", () => {
       canonicalCustomEyeMaskRule,
       /filter:\s*blur\(var\(--crt-glyph-beam-softness\)\)\s*;/,
       "The masked eye clone owns beam softness while the completed layer owns the visible halo.",
+    );
+    assert.match(
+      canonicalCustomEyeMaskRule,
+      /z-index:\s*1\s*;/,
+      "The authored eye contour must repaint above its broad emission surface.",
+    );
+    const canonicalCustomEyeCoreRule = ruleForSelectorNeedlesWithBody(
+      [
+        '.zenLiveBotPresencePlate[data-avatar-full-scale-identity="canonical"]',
+        ".zenLiveBotPresenceFaceGlyph[data-face-eye-character]",
+        '[data-coffee-plate-emoji-part="eyes"]',
+        '[data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]::after',
+      ],
+      "z-index: 2",
+    );
+    assert.match(
+      canonicalCustomEyeCoreRule,
+      /z-index:\s*2\s*;/,
+      "The sharp custom-eye phosphor core must remain above both emission layers.",
     );
     assert.doesNotMatch(
       canonicalCustomEyeMaskRule,

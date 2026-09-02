@@ -26,6 +26,8 @@ export type DebateFlytingStageAlignmentItem =
   | "moderatorModeratorNameplate"
   | "moderatorModeratorHeraldry"
   | "moderatorAgainstHeraldry"
+  | "galleryBotsContainer"
+  | "galleryHelmets"
   | "galleryForRugGlyph"
   | "galleryModeratorRugGlyph"
   | "galleryAgainstRugGlyph";
@@ -157,6 +159,18 @@ export const DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS: readonly DebateFlytingStageAl
       supportsRotation: true,
     },
     {
+      id: "galleryBotsContainer",
+      view: "gallery",
+      label: "Gallery bot container",
+    },
+    {
+      id: "galleryHelmets",
+      view: "gallery",
+      label: "Gallery helmets",
+      supportsRotation: true,
+      supportsSkew: true,
+    },
+    {
       id: "galleryForRugGlyph",
       view: "gallery",
       label: "Challenger rug glyph",
@@ -215,6 +229,14 @@ const DEBATE_FLYTING_STAGE_ALIGNMENT_DEFAULT_OVERRIDES: Partial<
     x: 0,
     y: -4.5,
     scale: 100,
+    rotation: 0,
+    skewX: 0,
+    skewY: 0,
+  },
+  wideModeratorHelmet: {
+    x: -11,
+    y: -10.25,
+    scale: 80,
     rotation: 0,
     skewX: 0,
     skewY: 0,

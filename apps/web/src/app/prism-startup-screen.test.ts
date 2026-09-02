@@ -117,6 +117,27 @@ describe("continued PRISM startup screen", () => {
     assert.match(nativeSplash, /msg\.textContent = startupTraceText\(text\)/u);
   });
 
+  it("copies only the displayed startup trace with accessible feedback", () => {
+    assert.match(
+      nativeSplash,
+      /id="copy-log"[^>]*aria-label="Copy displayed startup trace"/u,
+    );
+    assert.match(
+      nativeSplash,
+      /id="copy-log-status" role="status" aria-live="polite"/u,
+    );
+    assert.match(nativeSplash, /function displayedStartupTrace\(\)/u);
+    assert.match(
+      nativeSplash,
+      /querySelectorAll\("\.log-line"\)[\s\S]*\.log-src[\s\S]*\.log-text/u,
+    );
+    assert.doesNotMatch(nativeSplash, /readFile|fetch\(/u);
+    assert.match(nativeSplash, /navigator\.clipboard\?\.writeText/u);
+    assert.match(nativeSplash, /document\.execCommand\("copy"\)/u);
+    assert.match(nativeSplash, /setCopyLogFeedback\("Copied"\)/u);
+    assert.match(nativeSplash, /setCopyLogFeedback\("Unable to copy"\)/u);
+  });
+
   it("hands off atomically without moving the hero", () => {
     const veilStart = css.indexOf(".veil {");
     const veilRule = css.slice(veilStart, css.indexOf("}", veilStart) + 1);

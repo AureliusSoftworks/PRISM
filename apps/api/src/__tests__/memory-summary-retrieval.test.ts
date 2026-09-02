@@ -113,3 +113,78 @@ test("filters orphan and cross-tenant vectors and trusts canonical SQLite text",
   assert.doesNotMatch(JSON.stringify(results), /UNHEARD|ORPHAN|OTHER_TENANT/u);
   db.close();
 });
+
+test("cancels local embedding and Qdrant retrieval when its owning deadline aborts", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`CREATE TABLE memory_summaries (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, summary TEXT NOT NULL);`);
+  const controller = new AbortController();
+  let embeddingAborted = false;
+  let markEmbeddingStarted: (() => void) | null = null;
+  const embeddingStarted = new Promise<void>((resolve) => {
+    markEmbeddingStarted = resolve;
+  });
+  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+    const signal = init?.signal;
+    if (String(input).endsWith("/collections/memories")) {
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    }
+    if (String(input).includes("/api/embeddings")) {
+      markEmbeddingStarted?.();
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => {
+          embeddingAborted = true;
+          reject(new DOMException("Aborted", "AbortError"));
+        }, { once: true });
+      });
+    }
+    throw new Error(`Unexpected fetch: ${String(input)}`);
+  }) as typeof fetch;
+
+  const retrieval = retrieveMemorySummaries(db, "user-1", "late query", 4, {
+    signal: controller.signal,
+  });
+  await embeddingStarted;
+  controller.abort("chat deadline");
+
+  assert.deepEqual(await retrieval, []);
+  assert.equal(embeddingAborted, true);
+  db.close();
+});
+
+test("cancels an in-flight Qdrant search after local embedding completes", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`CREATE TABLE memory_summaries (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, summary TEXT NOT NULL);`);
+  const controller = new AbortController();
+  let qdrantAborted = false;
+  let markQdrantStarted: (() => void) | null = null;
+  const qdrantStarted = new Promise<void>((resolve) => {
+    markQdrantStarted = resolve;
+  });
+  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/collections/memories")) return Promise.resolve(new Response("{}"));
+    if (url.includes("/api/embeddings")) {
+      return Promise.resolve(Response.json({ embedding: fallbackEmbedding("query") }));
+    }
+    if (url.endsWith("/collections/memories/points/search")) {
+      markQdrantStarted?.();
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          qdrantAborted = true;
+          reject(new DOMException("Aborted", "AbortError"));
+        }, { once: true });
+      });
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  }) as typeof fetch;
+
+  const retrieval = retrieveMemorySummaries(db, "user-1", "query", 4, {
+    signal: controller.signal,
+  });
+  await qdrantStarted;
+  controller.abort("chat deadline");
+
+  assert.deepEqual(await retrieval, []);
+  assert.equal(qdrantAborted, true);
+  db.close();
+});

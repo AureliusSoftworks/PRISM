@@ -77,6 +77,8 @@ export interface MysteryVenuePresentationV1 {
   mapStyle: MysteryVenueMapStyleV1;
   physicalScaleClass: MysteryVenuePhysicalScaleClassV1;
   entryAction: string;
+  /** Accepted exterior threshold, normalized against the complete cover. */
+  entryTarget?: { x: number; y: number };
   compatibleExteriorFamilies: string[];
   compatibleAcousticFamilies: string[];
   mapOrientation: {
@@ -1563,6 +1565,10 @@ export function validateMansionLayoutV2(
           .includes(presentation.mapStyle) ||
         !["compact", "standard", "grand"].includes(presentation.physicalScaleClass) ||
         !presentation.entryAction?.trim() || presentation.entryAction.length > 80 ||
+        (presentation.entryTarget !== undefined && (
+          !isFiniteNormalized(presentation.entryTarget?.x) ||
+          !isFiniteNormalized(presentation.entryTarget?.y)
+        )) ||
         !Array.isArray(presentation.compatibleExteriorFamilies) ||
         !Array.isArray(presentation.compatibleAcousticFamilies) ||
         presentation.compatibleExteriorFamilies.length < 1 || presentation.compatibleExteriorFamilies.length > 8 ||

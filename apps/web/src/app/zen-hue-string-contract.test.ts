@@ -199,6 +199,18 @@ describe("Zen hue string integration contract", () => {
     assert.match(control, /const showHandle = hueSliderValue !== null \|\| dragging/u);
   });
 
+  it("places the dismissible instruction badge below the Hue Cable", () => {
+    const cableStyles = readFileSync(
+      new URL("./ZenHueStringControl.module.css", import.meta.url),
+      "utf8",
+    );
+    assert.match(
+      cableStyles,
+      /\.cue\s*\{[\s\S]*?top:\s*calc\(50% \+ 10px\);[\s\S]*?bottom:\s*auto;/u,
+    );
+    assert.doesNotMatch(cableStyles, /\.cue\s*\{[\s\S]*?bottom:\s*72px;/u);
+  });
+
   it("captures the viewport so underlying mouse targets stay inert during drag", () => {
     const cableStyles = readFileSync(
       new URL("./ZenHueStringControl.module.css", import.meta.url),

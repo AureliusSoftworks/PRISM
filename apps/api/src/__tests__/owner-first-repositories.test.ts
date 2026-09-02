@@ -66,6 +66,66 @@ function fourOwnerFixture() {
 }
 
 describe("owner-first repositories", () => {
+  it("allows metadata-only archive of a stale legacy relationship without weakening owner changes", () => {
+    const db = fourOwnerFixture();
+    try {
+      addBot(db, "legacy-bot", "owner-a");
+      addBot(db, "other-owner-bot", "owner-b");
+      db.prepare(
+        `INSERT INTO conversations (
+           id, user_id, title, conversation_mode, bot_id, created_at, updated_at
+         ) VALUES (?, ?, ?, 'chat', ?, ?, ?)`,
+      ).run(
+        "legacy-chat",
+        "owner-a",
+        "Legacy chat",
+        "legacy-bot",
+        NOW,
+        NOW,
+      );
+      db.prepare("DELETE FROM bots WHERE id = ? AND user_id = ?").run(
+        "legacy-bot",
+        "owner-a",
+      );
+
+      assert.equal(
+        Number(
+          db.prepare(
+            "UPDATE conversations SET archived_at = ?, archive_batch_id = ? WHERE id = ? AND user_id = ?",
+          ).run(NOW, "distill:test", "legacy-chat", "owner-a").changes,
+        ),
+        1,
+      );
+      assert.match(
+        sqliteErrorMessage(() =>
+          db.prepare(
+            "UPDATE conversations SET bot_id = ? WHERE id = ? AND user_id = ?",
+          ).run("other-owner-bot", "legacy-chat", "owner-a"),
+        ),
+        new RegExp(OWNER_CONSTRAINT_ERROR, "u"),
+      );
+      assert.match(
+        sqliteErrorMessage(() =>
+          db.prepare(
+            `INSERT INTO conversations (
+               id, user_id, title, conversation_mode, bot_id, created_at, updated_at
+             ) VALUES (?, ?, ?, 'chat', ?, ?, ?)`,
+          ).run(
+            "invalid-new-chat",
+            "owner-a",
+            "Invalid",
+            "other-owner-bot",
+            NOW,
+            NOW,
+          ),
+        ),
+        new RegExp(OWNER_CONSTRAINT_ERROR, "u"),
+      );
+    } finally {
+      closeTestDatabase(db);
+    }
+  });
+
   it("resolves identical row ids inside four independent owners and deletes only one owner", () => {
     const db = fourOwnerFixture();
     try {

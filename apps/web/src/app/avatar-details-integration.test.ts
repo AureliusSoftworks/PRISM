@@ -70,13 +70,23 @@ describe("Avatar Details Studio integration", () => {
     );
     assert.match(
       pageCss,
-      /\.zenLiveBotPresencePlate\[data-avatar-full-scale-identity="canonical"\][\s\S]*?\.zenLiveBotPresenceFaceGlyph\[data-face-eye-character\][\s\S]*?\[data-coffee-plate-emoji-part="eyes"\][\s\S]*?\[data-crt-glyph-layer="true"\]\[data-crt-pixel-mask-ready="true"\]\s*\{[\s\S]*?--zen-live-bot-glyph-compositor-glow-filter:\s*var\(--crt-face-glow-filter\);/u,
-      "completed custom-eye layers must emit the shared HD phosphor bloom after masking",
+      /\.zenLiveBotPresencePlate\[data-avatar-full-scale-identity="canonical"\][\s\S]*?\.zenLiveBotPresenceFaceGlyph\[data-face-eye-character\][\s\S]*?\[data-coffee-plate-emoji-part="eyes"\][\s\S]*?\[data-crt-glyph-layer="true"\]\[data-crt-pixel-mask-ready="true"\]\s*\{[\s\S]*?--zen-live-bot-glyph-compositor-glow-filter:\s*opacity\(1\);/u,
+      "completed custom-eye wrappers must stay neutral instead of filtering their transparent glyph boxes",
     );
     assert.match(
       pageCss,
-      /\.zenLiveBotPresencePlate\[data-theme="light"\]\[data-avatar-full-scale-identity="canonical"\][\s\S]*?\.zenLiveBotPresenceFaceGlyph\[data-face-eye-character\][\s\S]*?\[data-coffee-plate-emoji-part="eyes"\][\s\S]*?\[data-crt-glyph-layer="true"\]\[data-crt-pixel-mask-ready="true"\][\s\S]*?--zen-live-bot-glyph-compositor-glow-filter:\s*var\(\s*--crt-face-glow-filter\s*\)[\s\S]*?mix-blend-mode:\s*var\(--bot-avatar-light-ink-glow-blend,\s*plus-lighter\)/u,
-      "Light custom eyes must keep their authored contour while additively emitting the same white phosphor envelope as authored Ink",
+      /\[data-crt-pixel-mask-emission="true"\][\s\S]*?filter:\s*blur\(var\(--crt-glyph-beam-softness\)\)\s*var\(--crt-face-glow-filter\)[\s\S]*?\[data-crt-pixel-mask-emission-source="true"\][\s\S]*?mask-image:\s*var\(--crt-phosphor-pixel-mask\)/u,
+      "custom eyes must emit from an unmasked outer compositor fed by their exact raster mask",
+    );
+    assert.match(
+      phosphorGlyphSource,
+      /data-crt-pixel-mask-emission="true"[\s\S]*data-crt-pixel-mask-emission-content=\{content\}[\s\S]*data-crt-pixel-mask-emission-source="true"/u,
+      "the shared raster glyph must expose the alpha-safe nested emission surface",
+    );
+    assert.match(
+      pageCss,
+      /data-theme="light"[\s\S]*?data-crt-pixel-mask-emission="true"\]::before[\s\S]*?content:\s*attr\(data-crt-pixel-mask-emission-content\)[\s\S]*?data-crt-pixel-mask-emission-source="true"\][\s\S]*?display:\s*none/u,
+      "Light full avatars must use the mouth-style real glyph halo source while retaining the raster mask for visible eye geometry",
     );
     assert.match(
       editorSource,
@@ -1032,6 +1042,11 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(maskSource, /data-avatar-details-ink-role/);
     assert.match(maskSource, /data-avatar-details-ink-motion/);
+    assert.match(
+      maskCss,
+      /\.speechMotion\s*\{[^}]*transition:\s*none\s*;/,
+      "Animated Speech ink must snap with the live mouth instead of tweening between poses",
+    );
     assert.match(maskCss, /\.speechMotion\[data-avatar-details-ink-motion="pulsate"\]/);
     assert.match(maskCss, /--bot-face-mouth-pulse-scale-x/);
     assert.match(
@@ -1077,7 +1092,8 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.match(maskCss, /--bot-face-mouth-speech-wobble/);
     assert.match(
       pageCss,
-      /\[data-avatar-details-motion-group\]\[data-avatar-details-ink-motion="spin"\][\s\S]*avatarDetailsSpeechInkSpin/,
+      /\[data-avatar-details-motion-group\]\[data-avatar-details-ink-motion="spin"\][\s\S]*avatarDetailsSpeechInkSpin[\s\S]*steps\(4,\s*end\)/,
+      "Speech ink spin must use the same four discrete orientations as the mouth",
     );
     assert.match(
       pageCss,

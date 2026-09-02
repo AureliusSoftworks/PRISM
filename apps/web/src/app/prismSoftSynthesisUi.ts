@@ -5,23 +5,37 @@ import { useSyncExternalStore } from "react";
 export type PrismSoftSynthesisUiSnapshot = {
   jobCount: number;
   expanded: boolean;
+  /** A scoped workflow may temporarily make the orb itself open Progress. */
+  orbOpensProgress: boolean;
 };
 
-const sourceCounts = new Map<string, number>();
+type PrismSoftSynthesisSource = {
+  jobCount: number;
+  orbOpensProgress: boolean;
+};
+
+const sources = new Map<string, PrismSoftSynthesisSource>();
 const listeners = new Set<() => void>();
 
 let expanded = false;
 
 function totalJobCount(): number {
   let total = 0;
-  for (const count of sourceCounts.values()) total += count;
+  for (const source of sources.values()) total += source.jobCount;
   return total;
+}
+
+function orbOpensProgress(): boolean {
+  return Array.from(sources.values()).some(
+    (source) => source.jobCount > 0 && source.orbOpensProgress,
+  );
 }
 
 function snapshot(): PrismSoftSynthesisUiSnapshot {
   return {
     jobCount: totalJobCount(),
     expanded,
+    orbOpensProgress: orbOpensProgress(),
   };
 }
 
@@ -33,6 +47,7 @@ let cachedSnapshot = snapshot();
 const cachedServerSnapshot: PrismSoftSynthesisUiSnapshot = {
   jobCount: 0,
   expanded: false,
+  orbOpensProgress: false,
 };
 
 function publish(): void {
@@ -56,20 +71,27 @@ export function getPrismSoftSynthesisUiServerSnapshot(): PrismSoftSynthesisUiSna
 }
 
 /**
- * Register how many soft jobs a surface currently owns.
+ * Register how many soft jobs a surface currently owns. A focused workflow may
+ * opt into routing direct orb activation to its Progress card while registered.
  * Passing `0` removes the source. Soft work always starts minimized.
  */
 export function registerPrismSoftSynthesisJobs(
   sourceId: string,
   jobCount: number,
+  options: { orbOpensProgress?: boolean } = {},
 ): void {
   const nextCount =
     typeof jobCount === "number" && Number.isFinite(jobCount)
       ? Math.max(0, Math.floor(jobCount))
       : 0;
   const previousTotal = totalJobCount();
-  if (nextCount <= 0) sourceCounts.delete(sourceId);
-  else sourceCounts.set(sourceId, nextCount);
+  if (nextCount <= 0) sources.delete(sourceId);
+  else {
+    sources.set(sourceId, {
+      jobCount: nextCount,
+      orbOpensProgress: options.orbOpensProgress === true,
+    });
+  }
   const nextTotal = totalJobCount();
   if (previousTotal === 0 && nextTotal > 0) {
     expanded = false;
@@ -107,7 +129,7 @@ export function usePrismSoftSynthesisUi(): PrismSoftSynthesisUiSnapshot {
 
 /** Test / teardown helper — clears all soft-synthesis UI state. */
 export function resetPrismSoftSynthesisUiForTests(): void {
-  sourceCounts.clear();
+  sources.clear();
   expanded = false;
   publish();
 }

@@ -2044,6 +2044,11 @@ export default function PrismCompanion({
 
   const activatePrismConversation = useCallback(
     (): void => {
+      if (softSynthesisActive && softSynthesisUi.orbOpensProgress) {
+        if (openRef.current) setOpen(false);
+        setPrismSoftSynthesisExpanded(true);
+        return;
+      }
       if (sessionNoteContext) {
         if (openRef.current) setOpen(false);
         else openSessionNote();
@@ -2052,7 +2057,13 @@ export default function PrismCompanion({
       if (openRef.current) setOpen(false);
       else openAndFocus();
     },
-    [openAndFocus, openSessionNote, sessionNoteContext],
+    [
+      openAndFocus,
+      openSessionNote,
+      sessionNoteContext,
+      softSynthesisActive,
+      softSynthesisUi.orbOpensProgress,
+    ],
   );
 
   useEffect(() => {
@@ -5697,14 +5708,16 @@ export default function PrismCompanion({
                 ? `Prism is refracting ${refractSession.registration.target.label}`
                 : open
                   ? "Move or minimize Prism chat"
-                  : softSynthesisActive
+                  : softSynthesisActive && softSynthesisUi.orbOpensProgress
+                    ? `Open synthesis progress · ${softSynthesisUi.jobCount} item job${softSynthesisUi.jobCount === 1 ? "" : "s"}`
+                    : softSynthesisActive
                     ? `Move or talk with Prism · ${softSynthesisUi.jobCount} active synthesis job${softSynthesisUi.jobCount === 1 ? "" : "s"}`
                     : "Move or talk with Prism"
           }
           aria-expanded={
             chatHomeOrbDocked
               ? homeBaseRadialVisible
-              : open
+              : open || (softSynthesisActive && softSynthesisUi.expanded)
           }
           aria-controls={
             chatHomeOrbDocked

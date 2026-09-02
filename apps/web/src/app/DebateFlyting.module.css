@@ -2692,7 +2692,7 @@
 
 .galleryRugGlyphs {
   position: absolute;
-  z-index: 2;
+  z-index: 0;
   inset: 0;
   pointer-events: none;
 }
@@ -2749,6 +2749,17 @@
   left: calc(82.75% + var(--flyting-align-x, 0%));
 }
 
+.flytingAudienceContainer {
+  position: absolute;
+  z-index: 3;
+  inset: 8px 0 0;
+  display: block;
+  pointer-events: none;
+  scale: var(--flyting-align-scale, 1);
+  translate: var(--flyting-align-x, 0%) var(--flyting-align-y, 0%);
+  transform-origin: 50% 100%;
+}
+
 .flytingAudienceMillingSlot {
   position: relative;
   z-index: var(--flyting-gallery-layer, 1);
@@ -2761,6 +2772,7 @@
   align-items: end;
   animation: flyting-gallery-milling var(--flyting-gallery-mill-duration, 5.4s)
     ease-in-out var(--flyting-gallery-mill-delay, 0ms) infinite alternate;
+  margin-inline: var(--flyting-gallery-slot-margin, 0px);
   scale: var(--flyting-gallery-bot-scale, 1);
   transform-origin: 50% 100%;
 }
@@ -2787,14 +2799,17 @@
 
 .flytingAudienceLayer {
   display: grid;
-  grid-template-columns: minmax(0, 0.65fr) minmax(0, 1.7fr) minmax(0, 0.65fr);
-  gap: clamp(8px, 1.1vw, 20px);
-  padding-inline: clamp(12px, 2.3vw, 42px);
+  z-index: 2;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(3px, 0.45vw, 8px);
+  padding-inline: clamp(10px, 1.4vw, 26px);
+  isolation: isolate;
 }
 
 .flytingAudienceLayer[data-depth-row="rear"] {
-  grid-template-columns: minmax(0, 0.65fr) minmax(0, 1.7fr) minmax(0, 0.65fr);
-  padding-inline: clamp(28px, 4.4vw, 82px);
+  z-index: 1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding-inline: clamp(18px, 2.2vw, 40px);
 }
 
 /* Lift only the Flyting crowd onto the visible gallery floor. The taller
@@ -2818,7 +2833,7 @@
   height: 100%;
   align-items: flex-end;
   justify-content: center;
-  gap: clamp(6px, 0.75vw, 14px);
+  gap: clamp(1px, 0.18vw, 3px);
   flex-wrap: wrap;
   align-content: flex-end;
 }
@@ -2915,8 +2930,8 @@
 .galleryVikingHelmet {
   /* The native pixel crown already contains horns, but its old 134% / 0.86
      fit tucked their sparse outer pixels inside the wider mini chassis. */
-  top: -54%;
-  left: 50%;
+  top: calc(-54% + var(--flyting-align-y, 0%));
+  left: calc(50% + var(--flyting-align-x, 0%));
   z-index: 7;
   width: 166%;
   aspect-ratio: 1;
@@ -2925,8 +2940,10 @@
   filter: drop-shadow(0 4px 5px rgba(0, 0, 0, 0.62));
   image-rendering: pixelated;
   transform: translateX(-50%) scaleX(var(--debate-audience-facing-scale))
-    scaleY(0.92);
+    scaleY(0.92) skewX(var(--flyting-align-skew-x, 0deg));
   transform-origin: 50% 50%;
+  scale: var(--flyting-align-scale, 1);
+  rotate: var(--flyting-align-rotation, 0deg);
 }
 
 .moderatorPixelVikingHelmet {
@@ -3141,6 +3158,14 @@
   outline: 2px solid var(--hall-authoring-selection-outline, #f2c76d);
   box-shadow: 0 0 0 4px
     var(--hall-authoring-selection-glow, rgba(255, 42, 96, 0.22));
+}
+
+.liveShell .flytingAudienceContainer[data-flyting-alignment-handle="true"] {
+  pointer-events: none !important;
+}
+
+.liveShell .flytingAudienceContainer[data-flyting-alignment-selected="true"] {
+  pointer-events: auto !important;
 }
 
 .stageAlignmentModal {

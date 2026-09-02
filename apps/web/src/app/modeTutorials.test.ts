@@ -116,8 +116,8 @@ describe("mode tutorials", () => {
     assert.match(step.body, /keeps Evidence image synthesis optional in ONLINE/u);
     assert.match(step.body, /Personalize local ambience/u);
     assert.match(step.body, /without an online request or new audio file/u);
-    assert.match(step.body, /encrypted case vault—not Images, Generated Images, or the Library/u);
-    assert.match(step.body, /Save image is the explicit action/u);
+    assert.match(step.body, /encrypted case vault and follows its case or saved venue/u);
+    assert.doesNotMatch(step.body, /Save image/u);
     assert.match(step.body, /fullscreen title card waits outside the venue/u);
     assert.match(step.body, /Choose Start to clear the title, all copy, and vignette/u);
     assert.match(step.body, /intro music fall silent/u);
@@ -167,6 +167,7 @@ describe("mode tutorials", () => {
     assert.match(step.body, /ordinary Normal-blend separator grid/u);
     assert.match(step.body, /authored source stays gridless/u);
     assert.match(step.body, /Upgraded is one on\/off presentation state/u);
+    assert.match(step.body, /Move map keeps this presentation switch disabled/u);
     assert.match(step.body, /LOCAL never sends a room to a remote generator/u);
     assert.match(step.body, /original Mosaic remains instantly recoverable/u);
     assert.match(step.body, /Save venue level preserves the layout/u);
@@ -187,7 +188,12 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Revisits skip the sequence/u);
     assert.match(step.body, /Examine is a first-person room-art viewing mode/u);
     assert.match(step.body, /quietly confirms an available inspectable region only while it is inside that region/u);
+    assert.match(step.body, /Mosaic’s fine tessera separators are hidden/u);
     assert.match(step.body, /flat, screen-aligned 24×15 grid appears over both Mosaic and Upgraded room art/u);
+    assert.match(step.body, /exactly the square beneath the lens glows/u);
+    assert.match(step.body, /Examine and Move each slide the Case Desk away and remove the room vignette/u);
+    assert.match(step.body, /Back to room exits either focused mode/u);
+    assert.match(step.body, /leaving Examine also clears its search grid and restores the Mosaic separators, vignette, and Case Desk/u);
     assert.match(step.body, /authored observation types in with the player character’s Babble/u);
     assert.match(step.body, /Only observations that produce a durable public case consequence/u);
     assert.match(step.body, /enter the Case Kit with an immediate acquisition cue/u);
@@ -654,18 +660,18 @@ describe("mode tutorials", () => {
     assert.match(liveStep.body, /live ! chip/u);
     assert.match(liveStep.body, /read the exact memory and dismiss the alert/u);
     assert.match(liveStep.body, /clears any unseen Signal alert/u);
-    assert.match(liveStep.body, /exactly one \.png or \.jpg/u);
+    assert.match(liveStep.body, /exactly one PNG, JPEG, or WebP image/u);
     assert.match(liveStep.body, /raw file remains ephemeral/u);
     assert.match(liveStep.body, /tiny, intentionally soft archival proxy for replay/u);
     assert.match(liveStep.body, /older emoji-only replays retain their recorded fallback/u);
-    assert.match(liveStep.body, /fully opaque PNG is treated as a picture/u);
+    assert.match(liveStep.body, /Every upload is treated as a generic image/u);
     assert.match(liveStep.body, /light or dark Polaroid frame/u);
     assert.match(liveStep.body, /wide camera places either one at the lower center/u);
     assert.match(liveStep.body, /left and right cameras keep it on their matching side/u);
-    assert.match(liveStep.body, /only a genuinely transparent PNG item offers an unchecked Keep in Items option/u);
-    assert.match(liveStep.body, /links it to the bot guest it was presented to/u);
+    assert.match(liveStep.body, /never creates an Item/u);
+    assert.match(liveStep.body, /Add a physical prop through Items separately/u);
     assert.match(liveStep.body, /New replays use the small archival proxy/u);
-    assert.match(liveStep.body, /original item is kept/u);
+    assert.match(liveStep.body, /original upload is never retained/u);
     assert.match(dashboardStep.body, /ordinary authored face and persona glyph/u);
     assert.match(dashboardStep.body, /no Power or status badge attached/u);
     assert.match(
@@ -853,6 +859,14 @@ describe("mode tutorials", () => {
     );
     assert.ok(step);
     assert.match(step.body, /Asset Library opens the searchable general-image collection/u);
+    assert.match(step.body, /Distill is the single magical reset/u);
+    assert.match(step.body, /Prism and each installed persona carry one private continuity/u);
+    assert.match(step.body, /deleted persona's history receives a private archival distillation/u);
+    assert.match(step.body, /never surfaced or carried into Prism or another persona/u);
+    assert.match(step.body, /newest message always takes precedence/u);
+    assert.match(step.body, /its chats stay exactly where they are/u);
+    assert.match(step.body, /Immediate Undo lasts 15 seconds/u);
+    assert.match(step.body, /recoverable for 30 days/u);
   });
 
   it("teaches shared Chat/Zen Atmosphere with gradient fallback", () => {
@@ -3750,8 +3764,8 @@ describe("mode tutorials", () => {
     assert.match(booking, /Auto’s current model pool contains a vision-capable model/u);
     assert.match(booking, /fixed vision-capable model/u);
     assert.match(booking, /routes an Auto image turn through that capable pool/u);
-    assert.match(booking, /transparent PNGs as physical items/u);
-    assert.match(booking, /opaque PNGs or JPGs as pictures/u);
+    assert.match(booking, /every attached PNG, JPEG, or WebP as a generic image/u);
+    assert.match(booking, /never added to Items automatically/u);
     assert.match(booking, /editable spoken Name from the filename/u);
     assert.match(booking, /optional Reason private to the host/u);
     assert.match(
@@ -3986,7 +4000,8 @@ describe("mode tutorials", () => {
       assert.match(body, /Focus continues the exact exchange in full chat/u);
       assert.match(body, /Progress opens the soft-synthesis status card only while work is active/u);
       assert.match(body, /four labeled controls/u);
-      assert.match(body, /orb always opens chat even when a synthesis count is attached/u);
+      assert.match(body, /orb normally opens chat even when a synthesis count is attached/u);
+      assert.match(body, /temporarily route it straight to the relevant progress card/u);
       assert.match(body, /no separate Synthesis, Activity, or Personal Notes destination/u);
       assert.match(body, /private notes captured during live applet sessions remain.*\+ flow/u);
       assert.match(body, /default bot overview.*Home mark/u);

@@ -68,8 +68,10 @@ describe("Flyting stage authoring", () => {
     assert.match(flytingSource, /aria-label="Gallery bot size"/u);
     assert.match(
       flytingStyles,
-      /\.flytingAudienceMillingSlot\s*\{[\s\S]{0,520}scale:\s*var\(--flyting-gallery-bot-scale/u,
+      /\.flytingAudienceMillingSlot\s*\{[\s\S]{0,700}scale:\s*var\(--flyting-gallery-bot-scale/u,
     );
+    assert.match(flytingSource, /flytingGallerySizingStyle/u);
+    assert.match(flytingSource, /--flyting-gallery-slot-margin/u);
     assert.match(
       flytingSource,
       /DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS\.galleryBotScale/u,
@@ -89,6 +91,68 @@ describe("Flyting stage authoring", () => {
     assert.match(
       flytingSource,
       /DEBATE_FLYTING_AUDIENCE_COUNT - current\.for - current\.against/u,
+    );
+  });
+
+  it("aligns the gallery as one bounded container with shared helmet geometry", () => {
+    assert.equal(
+      [...flytingSource.matchAll(/data-flyting-gallery-container="true"/gu)]
+        .length,
+      2,
+    );
+    assert.match(flytingSource, /placements\.galleryBotsContainer/u);
+    assert.match(flytingSource, /placements\.galleryHelmets/u);
+    assert.equal(
+      [...flytingSource.matchAll(/alignmentHandleProps\("galleryHelmets"\)/gu)]
+        .length,
+      1,
+    );
+    assert.equal(
+      [
+        ...flytingSource.matchAll(
+          /stageAlignmentHandleProps\(\s*"galleryHelmets"/gu,
+        ),
+      ].length,
+      1,
+    );
+    assert.match(
+      flytingStyles,
+      /\.galleryVikingHelmet\s*\{[^}]*top:\s*calc\(-54% \+ var\(--flyting-align-y/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.galleryVikingHelmet\s*\{[^}]*scale:\s*var\(--flyting-align-scale/u,
+    );
+  });
+
+  it("keeps rugs below a rear row that remains below the front row", () => {
+    assert.match(flytingStyles, /\.galleryRugGlyphs\s*\{[^}]*z-index:\s*0/u);
+    assert.match(
+      flytingStyles,
+      /\.flytingAudienceContainer\s*\{[^}]*z-index:\s*3/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.flytingAudienceLayer\s*\{[^}]*z-index:\s*2[^}]*isolation:\s*isolate/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.flytingAudienceLayer\[data-depth-row="rear"\]\s*\{[^}]*z-index:\s*1/u,
+    );
+  });
+
+  it("gives each allegiance an equal dense cluster that can hold the full gallery", () => {
+    assert.match(
+      flytingStyles,
+      /\.flytingAudienceLayer\s*\{[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/u,
+    );
+    assert.match(
+      flytingStyles,
+      /\.flytingAudienceCluster\s*\{[^}]*gap:\s*clamp\(1px, 0\.18vw, 3px\)/u,
+    );
+    assert.match(
+      flytingStyles,
+      /margin-inline:\s*var\(--flyting-gallery-slot-margin/u,
     );
   });
 
@@ -402,7 +466,7 @@ describe("Flyting stage authoring", () => {
     );
     assert.match(
       flytingStyles,
-      /\.galleryVikingHelmet\s*\{[^}]*top:\s*-54%;[^}]*width:\s*166%;[^}]*scaleY\(0\.92\)/u,
+      /\.galleryVikingHelmet\s*\{[^}]*top:\s*calc\(-54% \+ var\(--flyting-align-y[^}]*width:\s*166%;[^}]*scaleY\(0\.92\)/u,
     );
   });
 

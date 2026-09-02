@@ -103,6 +103,14 @@ describe("Whodunnit room-art upgrade state", () => {
       "/debate/mystery/rooms/foyer-mosaic.webp?pixelArt=6",
     );
     assert.equal(
+      whodunnitBundledRoomArtPath(
+        "/debate/mystery/rooms/foyer.webp",
+        "mosaic",
+        "hidden",
+      ),
+      "/debate/mystery/rooms/foyer-mosaic-reference.webp?pixelArt=6",
+    );
+    assert.equal(
       whodunnitBundledRoomArtPath("/debate/mystery/rooms/foyer.webp", "illustrated"),
       "/debate/mystery/rooms/foyer.webp",
     );
@@ -145,8 +153,21 @@ describe("Whodunnit room-art upgrade state", () => {
       "/api/debates/case%20%2F%201/mystery-assets/room/room%20%2F%202/file?style=mosaic&pixelArt=6",
     );
     assert.equal(
+      whodunnitSealedRoomArtUrl({
+        sessionId: "case / 1",
+        subjectId: "room / 2",
+        style: "mosaic",
+        mosaicGrid: "hidden",
+      }),
+      "/api/debates/case%20%2F%201/mystery-assets/room/room%20%2F%202/file?style=mosaic-reference&pixelArt=6",
+    );
+    assert.equal(
       whodunnitSavedRoomArtUrl("jungle / room", "mosaic"),
       "/api/images/jungle%20%2F%20room/file?style=mosaic&pixelArt=6",
+    );
+    assert.equal(
+      whodunnitSavedRoomArtUrl("jungle / room", "mosaic", "hidden"),
+      "/api/images/jungle%20%2F%20room/file?style=mosaic-reference&pixelArt=6",
     );
     const illustratedMansionRoom = whodunnitMansionRoomArtUrl(
       "banyan / copy",
@@ -165,6 +186,15 @@ describe("Whodunnit room-art upgrade state", () => {
     assert.equal(
       mosaicMansionRoom,
       `${illustratedMansionRoom}?style=mosaic&pixelArt=${WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION}`,
+    );
+    assert.equal(
+      whodunnitMansionRoomArtUrl(
+        "banyan / copy",
+        "dining / illustrated",
+        "mosaic",
+        "hidden",
+      ),
+      `${illustratedMansionRoom}?style=mosaic-reference&pixelArt=${WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION}`,
     );
     assert.notEqual(mosaicMansionRoom, illustratedMansionRoom);
   });
@@ -190,18 +220,24 @@ describe("Whodunnit room-art upgrade state", () => {
     assert.match(experience, /whodunnitBundledRoomArtPathForRoom/u);
     assert.match(experience, /const currentRoomMosaicUrl = currentRoomMosaicAssetUrl/u);
     assert.match(experience, /const currentRoomImageUrl = currentRoomArtStyle === "illustrated"/u);
+    assert.match(experience, /const ROOM_ART_CROSSFADE_MS = 180/u);
     assert.match(experience, /const currentRoomMosaicAssetUrl = currentRoom\?\.sealedAsset\?\.revealed[\s\S]{0,320}whodunnitSealedRoomArtUrl\(\{[\s\S]{0,180}subjectId: currentRoom\.id,[\s\S]{0,100}style: "mosaic"/u);
     assert.match(experience, /const currentRoomUpgradeAssetUrl = currentRoom && currentRoomHasIllustratedUpgrade[\s\S]{0,320}subjectId: whodunnitIllustratedRoomSubjectId\(currentRoom\.id\),[\s\S]{0,100}style: "illustrated"/u);
     assert.doesNotMatch(experience, /sealedAssetObjectUrls\[sealedMysteryRoomArtKey/u);
     assert.doesNotMatch(experience, /sealedAssetObjectUrls\[sealedMysteryIllustratedRoomArtKey/u);
     assert.match(experience, /data-art-style="mosaic"[\s\S]{0,180}src=\{currentRoomMosaicUrl\}/u);
-    assert.match(experience, /data-upgrade-layer="true"[\s\S]{0,420}onLoad=\{handleCurrentRoomUpgradeArtLoad\}[\s\S]{0,120}onError=\{handleCurrentRoomArtLoadError\}/u);
+    assert.match(experience, /data-upgrade-layer="true"[\s\S]{0,220}data-active=\{currentRoomArtStyle === "illustrated" \? "true" : undefined\}[\s\S]{0,300}onLoad=\{handleCurrentRoomUpgradeArtLoad\}[\s\S]{0,120}onError=\{handleCurrentRoomArtLoadError\}/u);
     assert.match(experience, /loadedUpgradeRoomIds\.has\(currentRoom\.id\)/u);
     assert.match(experience, /roomBackdropImage[\s\S]*roomParallaxLayer/u);
     assert.match(css, /\.roomBackdropImage[\s\S]*z-index: 1;[\s\S]*width: 100vw;[\s\S]*height: 100dvh;/u);
     assert.match(css, /\.roomBackdropImage\[data-art-style="mosaic"\][\s\S]*image-rendering: pixelated/u);
-    assert.match(css, /\.roomBackdropImage\[data-upgrade-layer="true"\][\s\S]*opacity: 0;[\s\S]*data-loaded="true"[\s\S]*opacity: 1;/u);
-    assert.match(css, /\.roomBackdrop\[data-art-style="mosaic"\][\s\S]*display: none/u);
+    assert.match(css, /\.roomBackdropImage\[data-upgrade-layer="true"\][\s\S]*opacity: 0;[\s\S]*data-loaded="true"\]\[data-active="true"\][\s\S]*opacity: 1;/u);
+    assert.match(experience, /data-art-crossfading=\{roomArtCrossfading \? "true" : undefined\}/u);
+    assert.match(css, /\.roomScene\[data-art-crossfading="true"\] \.roomParallaxLayer\s*\{\s*transition: none;/u);
+    assert.doesNotMatch(css, /roomMosaicReveal/u);
+    assert.match(experience, /data-art-style="mosaic"[\s\S]{0,120}data-blurred=\{roomActorVisible/u);
+    assert.match(experience, /data-art-style="illustrated"[\s\S]{0,120}data-blurred=\{roomActorVisible/u);
+    assert.doesNotMatch(experience, /className=\{styles\.roomBackdrop\}/u);
     assert.match(css, /\.roomScene\[data-art-style="mosaic"\] \.roomParallaxLayer[\s\S]*transform: none/u);
     assert.match(experience, />Upgraded<\/button>/u);
     assert.match(experience, /renderMysteryBotAvatar\(currentBot, investigationAvatarPresentation/u);
@@ -240,10 +276,21 @@ describe("Whodunnit room-art upgrade state", () => {
 
   it("ships one Mosaic base for every bundled investigation room", () => {
     const names = readdirSync(new URL("../../public/debate/mystery/rooms", import.meta.url));
-    const originals = names.filter((name) => name.endsWith(".webp") && !name.endsWith("-mosaic.webp"));
+    const originals = names.filter((name) =>
+      name.endsWith(".webp") &&
+      !name.endsWith("-mosaic.webp") &&
+      !name.endsWith("-mosaic-reference.webp"));
     assert.equal(originals.length, 16);
     for (const original of originals) {
       assert.ok(names.includes(original.replace(/\.webp$/u, "-mosaic.webp")), original);
+    }
+    const mosaics = names.filter((name) => name.endsWith("-mosaic.webp"));
+    assert.equal(mosaics.length, 17);
+    for (const mosaic of mosaics) {
+      assert.ok(
+        names.includes(mosaic.replace(/-mosaic\.webp$/u, "-mosaic-reference.webp")),
+        mosaic,
+      );
     }
   });
 

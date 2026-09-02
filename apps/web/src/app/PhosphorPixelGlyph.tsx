@@ -326,6 +326,11 @@ export const CrtPixelTextGlyph = forwardRef<
      * glyph silhouette without necessarily resizing its DOM box.
      */
     rasterKey?: string | number | null;
+    /**
+     * Adds a nested raster-mask source whose unmasked parent can emit a halo.
+     * Reserved for contours that cannot safely use the native-text bloom copy.
+     */
+    alphaSafeMaskEmission?: boolean;
     "data-custom-eye-pair-side"?: "left" | "right";
     /** Keep Avatar Studio's authored family on the exact node rasterized. */
     "data-face-font"?: string;
@@ -336,6 +341,7 @@ export const CrtPixelTextGlyph = forwardRef<
     enabled = false,
     binaryAlpha = false,
     rasterKey,
+    alphaSafeMaskEmission = false,
     "data-custom-eye-pair-side": customEyePairSide,
     "data-face-font": faceFont,
   },
@@ -475,6 +481,19 @@ export const CrtPixelTextGlyph = forwardRef<
       data-face-font={faceFont}
       style={style}
     >
+      {maskUrl && alphaSafeMaskEmission ? (
+        <span
+          className={styles.textMaskEmission}
+          data-crt-pixel-mask-emission="true"
+          data-crt-pixel-mask-emission-content={content}
+          aria-hidden="true"
+        >
+          <span
+            className={styles.textMaskEmissionSource}
+            data-crt-pixel-mask-emission-source="true"
+          />
+        </span>
+      ) : null}
       {content}
     </span>
   );

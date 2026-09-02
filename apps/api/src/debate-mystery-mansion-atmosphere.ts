@@ -333,3 +333,31 @@ export function discardDebateMysteryMansionAtmosphereV1(db: DatabaseSync, userId
 export function undoDebateMysteryMansionAtmosphereV1(db: DatabaseSync, userId: string, bundleId: string): void {
   mutateAtmosphere({ db, userId, bundleId, action: "undo" });
 }
+
+export function undoDebateMysteryMansionAtmosphereFieldRepairV1(
+  db: DatabaseSync,
+  userId: string,
+  bundleId: string,
+  hadActiveAtmosphere: boolean,
+): void {
+  if (hadActiveAtmosphere) {
+    mutateAtmosphere({ db, userId, bundleId, action: "undo" });
+    return;
+  }
+  const row = bundleRow(db, userId, bundleId);
+  const parsed = metadata(row.library_metadata_json);
+  db.prepare(
+    `DELETE FROM debate_mystery_mansion_asset_refs
+      WHERE bundle_id = ? AND user_id = ? AND role = 'music' AND logical_id = ?`,
+  ).run(bundleId, userId, MANSION_ATMOSPHERE_ACTIVE_LOGICAL_ID_V1);
+  parsed.atmosphere.activeTitle = null;
+  parsed.atmosphere.previousTitle = null;
+  writeMetadata(
+    db,
+    userId,
+    bundleId,
+    row.library_metadata_json,
+    parsed.atmosphere,
+    new Date().toISOString(),
+  );
+}

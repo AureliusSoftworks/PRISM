@@ -271,7 +271,7 @@ export interface LlmProvider {
     messages: ProviderMessage[],
     options?: GenerateOptions
   ): Promise<string>;
-  embedText(text: string): Promise<number[]>;
+  embedText(text: string, options?: { signal?: AbortSignal }): Promise<number[]>;
 }
 
 export type LocalModelRequestFailureKind =
@@ -642,7 +642,7 @@ export function fallbackEmbedding(text: string): number[] {
 
 export async function embedTextLocal(
   text: string,
-  options: DualOllamaWorkloadOptions = {}
+  options: DualOllamaWorkloadOptions & { signal?: AbortSignal } = {}
 ): Promise<number[]> {
   const requestedModel = config.ollamaEmbeddingModel || "nomic-embed-text";
   const secondaryModel = await resolveDualOllamaWorkloadModelId(
@@ -659,7 +659,8 @@ export async function embedTextLocal(
       body: JSON.stringify({
         model,
         prompt: text
-      })
+      }),
+      signal: options.signal,
     });
     if (!response.ok) {
       return fallbackEmbedding(text);
@@ -673,7 +674,8 @@ export async function embedTextLocal(
       durationMs: Date.now() - startedAt,
     });
     return payload.embedding ?? fallbackEmbedding(text);
-  } catch {
+  } catch (error) {
+    if (options.signal?.aborted) throw error;
     return fallbackEmbedding(text);
   }
 }
@@ -2410,10 +2412,14 @@ export class LocalOllamaProvider implements LlmProvider {
     return text;
   }
 
-  public async embedText(text: string): Promise<number[]> {
+  public async embedText(
+    text: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<number[]> {
     return embedTextLocal(text, {
       secondaryOllamaHost: this.secondaryOllamaHost,
       experimentalDualOllama: this.experimentalDualOllama,
+      signal: options?.signal,
     });
   }
 }
@@ -2685,8 +2691,8 @@ export class OpenAiProvider implements LlmProvider {
     return content;
   }
 
-  public async embedText(text: string): Promise<number[]> {
-    return embedTextLocal(text);
+  public async embedText(text: string, options?: { signal?: AbortSignal }): Promise<number[]> {
+    return embedTextLocal(text, options);
   }
 }
 
@@ -2913,8 +2919,8 @@ export class AnthropicProvider implements LlmProvider {
     throw new Error("Anthropic returned an empty response.");
   }
 
-  public async embedText(text: string): Promise<number[]> {
-    return embedTextLocal(text);
+  public async embedText(text: string, options?: { signal?: AbortSignal }): Promise<number[]> {
+    return embedTextLocal(text, options);
   }
 }
 
@@ -2985,8 +2991,51 @@ export function getAuxiliaryProvider(
             }),
           ),
         );
+      const generateLocalFallback = async (): Promise<string> => {
+        const localWork = normalizePrismGenerationWorkContext({
+          ...work,
+          executionLane: "auxiliary",
+          privacyMode: "local",
+        });
+        const target = await resolveLocalOllamaTarget(
+          localAuxiliaryModel,
+          providerOptions,
+        );
+        return schedulePrismAuxiliaryWork({
+          host: target.host,
+          context: localWork,
+          signal: options?.signal,
+          run: async (signal) =>
+            await Promise.resolve(
+              runWithPrismGenerationWorkContext(localWork, () =>
+                localInner.generateResponse(messages, {
+                  ...options,
+                  generationWork: localWork,
+                  model: localAuxiliaryModel,
+                  allowFinalLocalFallback: false,
+                  ollamaKeepAlive: -1,
+                  signal,
+                }),
+              ),
+            ),
+        });
+      };
       if (useCloud) {
-        return generate(options?.signal ?? new AbortController().signal);
+        try {
+          return await generate(options?.signal ?? new AbortController().signal);
+        } catch (error) {
+          // Auxiliary jobs have no player-visible provider promise. If a
+          // signed-in Cloud lane cannot authenticate or is misconfigured,
+          // keep their private inference moving through the required local
+          // auxiliary model. Foreground chat routing remains untouched.
+          if (
+            error instanceof LocalModelRequestError &&
+            error.kind === "authentication_or_configuration"
+          ) {
+            return generateLocalFallback();
+          }
+          throw error;
+        }
       }
       return schedulePrismAuxiliaryWork({
         host: target.host,
@@ -2995,8 +3044,8 @@ export function getAuxiliaryProvider(
         run: generate,
       });
     },
-    async embedText(text: string): Promise<number[]> {
-      return localInner.embedText(text);
+    async embedText(text: string, options?: { signal?: AbortSignal }): Promise<number[]> {
+      return localInner.embedText(text, options);
     }
   };
 }

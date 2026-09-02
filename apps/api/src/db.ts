@@ -646,6 +646,9 @@ export function initializeDatabase(
       fork_message_id TEXT,
       archived_at TEXT,
       archive_batch_id TEXT,
+      chat_distillation_kind TEXT,
+      chat_distillation_key TEXT,
+      chat_distillation_persona_name TEXT,
       incognito INTEGER NOT NULL DEFAULT 0,
       coffee_settings TEXT,
       coffee_group_id TEXT,
@@ -4252,6 +4255,27 @@ export function initializeDatabase(
   );
   if (!hasConversationArchiveBatchIdColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN archive_batch_id TEXT;");
+  }
+  const hasConversationChatDistillationKindColumn = conversationColumns.some(
+    (column) => column.name === "chat_distillation_kind",
+  );
+  if (!hasConversationChatDistillationKindColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN chat_distillation_kind TEXT;");
+  }
+  const hasConversationChatDistillationKeyColumn = conversationColumns.some(
+    (column) => column.name === "chat_distillation_key",
+  );
+  if (!hasConversationChatDistillationKeyColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN chat_distillation_key TEXT;");
+  }
+  const hasConversationChatDistillationPersonaNameColumn =
+    conversationColumns.some(
+      (column) => column.name === "chat_distillation_persona_name",
+    );
+  if (!hasConversationChatDistillationPersonaNameColumn) {
+    db.exec(
+      "ALTER TABLE conversations ADD COLUMN chat_distillation_persona_name TEXT;",
+    );
   }
   const hasConversationBotGroupIdsColumn = conversationColumns.some(
     (column) => column.name === "bot_group_ids",

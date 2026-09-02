@@ -17,6 +17,7 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   DEBATE_MYSTERY_PLAY_READINESS_VERSION,
+  DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
   DEBATE_MYSTERY_ROOM_TEMPLATES,
   DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
   DEBATE_MYSTERY_V2_SCHEMA_VERSION,
@@ -63,6 +64,8 @@ import {
   resolveDebateMysteryRoomPresentationV1,
   resolveDebateMysteryConfigV2,
   resolveDebateMysteryMansionExteriorScaleClassV1,
+  canonicalMansionLayoutV2,
+  canonicalPortablePackageJsonV1,
   validateDebateMysteryAudioManifestV1,
   validateDebateMysteryCaseBible,
   validateDebateMysteryDialogueGraphV2,
@@ -85,14 +88,18 @@ import {
   type DebateMysteryPerformanceDirectionV2,
   type DebateMysteryProductionCategoryReadinessV1,
   type DebateMysteryProductionReadinessV1,
+  type PortablePackageJsonValueV1,
   type DebateMysteryPlayAgainRequestV2,
   type DebateMysteryPresentationGateV2,
   type DebateMysteryPresentationUnlockTargetV2,
   type DebateMysteryRecordReferenceV2,
   type DebateMysteryResolvedConfigV1,
   type DebateMysteryResolvedConfigV2,
+  type DebateMysteryMansionSnapshotV2,
   type DebateMysteryMansionExteriorScaleClassV1,
   type DebateMysteryRoomV2,
+  type DebateMysterySceneRepairActionV1,
+  type DebateMysterySceneRepairAssetUndoV1,
   type DebateMysterySealedAssetRefV1,
   type DebateMysterySpokenLineV2,
   type DebateMysteryStageCueV1,
@@ -135,7 +142,10 @@ import {
 import {
   cloneDebateMysterySealedAssetsForReplayV1,
   deleteDebateMysterySealedAssetsV1,
+  getDebateMysterySealedAssetRefV1,
   resetDebateMysteryAssetRevealsV1,
+  restoreDebateMysteryAssetsFromSceneRepairV1,
+  pruneDebateMysterySceneRepairAssetSnapshotsV1,
   revealDebateMysteryAssetV1,
 } from "./debate-mystery-assets.ts";
 import { debateMysteryIllustratedRoomSubjectIdV1 } from "./debate-mystery-room-art.ts";
@@ -2095,6 +2105,235 @@ export function attachDebateMysteryMansionExteriorAssetV2(
     ...session.formatState,
     mansionExterior: asset,
   });
+}
+
+export interface DebateMysterySceneRepairCommitV1 {
+  action: DebateMysterySceneRepairActionV1;
+  roomId?: string | null;
+  subjectId?: string | null;
+  assetSubjects?: DebateMysterySceneRepairAssetUndoV1[];
+  mansionExterior?: DebateMysterySealedAssetRefV1 | null;
+  mansionPresentation?: DebateMysteryMansionSnapshotV2["presentation"];
+  roomAsset?: DebateMysterySealedAssetRefV1 | null;
+  hotspots?: DebateMysteryRoomV2["hotspots"];
+  placementAnchors?: MansionLayoutV2["placementAnchors"];
+  lights?: MansionLayoutV2["lights"];
+}
+
+/** Commits one presentation-only field repair and retains exactly the prior
+ * affected state. Case facts, discovery, doors, and action economy are never
+ * part of this mutation. */
+export function commitDebateMysterySceneRepairV1(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  repair: DebateMysterySceneRepairCommitV1,
+): DebateSessionV1 {
+  const session = getDebateSession(db, userId, sessionId);
+  if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
+    throw new HttpError(409, "Scene repair requires a Whodunnit V2 case.");
+  }
+  if (session.status === "cancelled" || session.formatState.playPhase === "trial" ||
+    session.formatState.playPhase === "verdict") {
+    throw new HttpError(409, "This case is no longer open for scene repair.");
+  }
+  const state = structuredClone(session.formatState);
+  const roomId = repair.roomId?.trim() || null;
+  const roomIndex = roomId ? state.rooms.findIndex((room) => room.id === roomId) : -1;
+  const room = roomIndex >= 0 ? state.rooms[roomIndex]! : null;
+  if (roomId && (!room || !room.visited)) {
+    throw new HttpError(409, "Visit that room before repairing its presentation.");
+  }
+  const layout = state.config.mansionSnapshot?.layoutV2 ?? null;
+  if ((repair.placementAnchors || repair.lights) && !layout) {
+    throw new HttpError(409, "This archived venue has no repairable layout metadata.");
+  }
+  const previousPlacementAnchors = repair.placementAnchors && roomId && layout
+    ? layout.placementAnchors.filter((anchor) => anchor.roomId === roomId)
+    : undefined;
+  const previousLights = repair.lights && roomId && layout
+    ? layout.lights.filter((light) => light.roomId === roomId)
+    : undefined;
+  state.sceneRepairUndo = {
+    version: 1,
+    id: randomUUID(),
+    action: repair.action,
+    roomId,
+    subjectId: repair.subjectId?.trim() || null,
+    createdAt: new Date().toISOString(),
+    assetSubjects: repair.assetSubjects ?? [],
+    ...(repair.mansionExterior !== undefined || repair.action === "align_exterior_door"
+      ? { previousMansionExterior: state.mansionExterior ?? null }
+      : {}),
+    ...(repair.mansionPresentation !== undefined && state.config.mansionSnapshot
+      ? { previousMansionPresentation: state.config.mansionSnapshot.presentation }
+      : {}),
+    ...(repair.roomAsset !== undefined && room
+      ? { previousRoomAsset: room.sealedAsset ?? null }
+      : {}),
+    ...(repair.hotspots && room ? { previousHotspots: room.hotspots } : {}),
+    ...(previousPlacementAnchors ? { previousPlacementAnchors } : {}),
+    ...(previousLights ? { previousLights } : {}),
+  };
+  if (repair.mansionExterior !== undefined) {
+    state.mansionExterior = repair.mansionExterior;
+  }
+  if (repair.mansionPresentation !== undefined && state.config.mansionSnapshot) {
+    state.config.mansionSnapshot.presentation = repair.mansionPresentation;
+    state.config.mansionSnapshot.presentationSha256 = createHash("sha256")
+      .update(canonicalPortablePackageJsonV1(
+        repair.mansionPresentation as unknown as PortablePackageJsonValueV1,
+      ))
+      .digest("hex");
+  }
+  if (repair.roomAsset !== undefined && room) {
+    state.rooms[roomIndex] = { ...room, sealedAsset: repair.roomAsset };
+  }
+  if (repair.hotspots && room) {
+    state.rooms[roomIndex] = { ...state.rooms[roomIndex]!, hotspots: repair.hotspots };
+  }
+  if (layout && roomId && repair.placementAnchors) {
+    layout.placementAnchors = [
+      ...layout.placementAnchors.filter((anchor) => anchor.roomId !== roomId),
+      ...repair.placementAnchors,
+    ];
+  }
+  if (layout && roomId && repair.lights) {
+    layout.lights = [
+      ...layout.lights.filter((light) => light.roomId !== roomId),
+      ...repair.lights,
+    ];
+  }
+  if (layout && (repair.placementAnchors || repair.lights)) {
+    state.config.mansionSnapshot!.layoutSha256 = createHash("sha256")
+      .update(canonicalMansionLayoutV2(layout))
+      .digest("hex");
+  }
+  pruneDebateMysterySceneRepairAssetSnapshotsV1(
+    db,
+    userId,
+    sessionId,
+    (repair.assetSubjects ?? []).map((subject) => subject.snapshotId),
+  );
+  return persistV2Session(db, userId, session, state);
+}
+
+export function undoDebateMysterySceneRepairV1(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+): DebateSessionV1 {
+  const session = getDebateSession(db, userId, sessionId);
+  if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
+    throw new HttpError(409, "Scene repair requires a Whodunnit V2 case.");
+  }
+  const undo = session.formatState.sceneRepairUndo;
+  if (!undo) throw new HttpError(409, "There is no scene repair to undo.");
+  if (undo.assetSubjects.length > 0) {
+    for (const kind of ["room", "evidence"] as const) {
+      const snapshots = undo.assetSubjects.filter((asset) =>
+        (asset.kind === "evidence" ? "evidence" : "room") === kind);
+      if (snapshots.length === 0) continue;
+      restoreDebateMysteryAssetsFromSceneRepairV1(
+        db,
+        userId,
+        sessionId,
+        kind,
+        snapshots,
+      );
+    }
+  }
+  const state = structuredClone(session.formatState);
+  for (const asset of undo.assetSubjects.filter((candidate) => candidate.kind === "evidence")) {
+    const restored = getDebateMysterySealedAssetRefV1(
+      db,
+      userId,
+      sessionId,
+      "evidence",
+      asset.subjectId,
+    );
+    state.record = state.record.map((item) =>
+      item.reference.kind === "evidence" && item.reference.id === asset.subjectId
+        ? {
+            ...item,
+            visualKind: restored?.status === "ready" ? "synthesized" : "emoji",
+            sealedAsset: restored,
+          }
+        : item);
+    const stored = getDebateMysteryCaseV2(db, userId, sessionId);
+    storeCompiledCaseV2(db, userId, sessionId, {
+      ...stored.privateCase,
+      recordItems: stored.privateCase.recordItems.map((item) =>
+        item.reference.kind === "evidence" && item.reference.id === asset.subjectId
+          ? {
+              ...item,
+              visualKind: restored?.status === "ready" ? "synthesized" : "emoji",
+              sealedAsset: restored,
+            }
+          : item),
+    }, stored.graph);
+  }
+  const roomIndex = undo.roomId
+    ? state.rooms.findIndex((room) => room.id === undo.roomId)
+    : -1;
+  if (undo.previousMansionExterior !== undefined) {
+    state.mansionExterior = undo.assetSubjects.some((asset) =>
+      asset.subjectId === DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1)
+      ? getDebateMysterySealedAssetRefV1(
+          db,
+          userId,
+          sessionId,
+          "room",
+          DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
+        )
+      : undo.previousMansionExterior;
+  }
+  if (undo.previousMansionPresentation && state.config.mansionSnapshot) {
+    state.config.mansionSnapshot.presentation = undo.previousMansionPresentation;
+    state.config.mansionSnapshot.presentationSha256 = createHash("sha256")
+      .update(canonicalPortablePackageJsonV1(
+        undo.previousMansionPresentation as unknown as PortablePackageJsonValueV1,
+      ))
+      .digest("hex");
+  }
+  if (roomIndex >= 0 && undo.previousRoomAsset !== undefined && undo.roomId) {
+    state.rooms[roomIndex] = {
+      ...state.rooms[roomIndex]!,
+      sealedAsset: getDebateMysterySealedAssetRefV1(
+        db,
+        userId,
+        sessionId,
+        "room",
+        undo.roomId,
+      ) ?? undo.previousRoomAsset,
+    };
+  }
+  if (roomIndex >= 0 && undo.previousHotspots) {
+    state.rooms[roomIndex] = {
+      ...state.rooms[roomIndex]!,
+      hotspots: undo.previousHotspots,
+    };
+  }
+  const layout = state.config.mansionSnapshot?.layoutV2 ?? null;
+  if (layout && undo.roomId && undo.previousPlacementAnchors) {
+    layout.placementAnchors = [
+      ...layout.placementAnchors.filter((anchor) => anchor.roomId !== undo.roomId),
+      ...undo.previousPlacementAnchors,
+    ];
+  }
+  if (layout && undo.roomId && undo.previousLights) {
+    layout.lights = [
+      ...layout.lights.filter((light) => light.roomId !== undo.roomId),
+      ...undo.previousLights,
+    ];
+  }
+  if (layout && (undo.previousPlacementAnchors || undo.previousLights)) {
+    state.config.mansionSnapshot!.layoutSha256 = createHash("sha256")
+      .update(canonicalMansionLayoutV2(layout))
+      .digest("hex");
+  }
+  state.sceneRepairUndo = null;
+  return persistV2Session(db, userId, session, state);
 }
 
 /**

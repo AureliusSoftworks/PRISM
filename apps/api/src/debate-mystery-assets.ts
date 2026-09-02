@@ -100,8 +100,35 @@ export interface DebateMysteryAssetVaultBackupV1 {
 
 const MAGENTA_DISTANCE = 20;
 const MAX_ASSET_BYTES = 32 * 1024 * 1024;
+const SCENE_REPAIR_UNDO_PREFIX = "__scene-repair-undo__:";
+
+function entryTargetFromReviewJson(
+  reviewJson: string,
+): { x: number; y: number } | null {
+  try {
+    const candidate = (JSON.parse(reviewJson) as {
+      entryTarget?: { x?: unknown; y?: unknown };
+    }).entryTarget;
+    if (
+      typeof candidate?.x === "number" &&
+      Number.isFinite(candidate.x) &&
+      candidate.x >= 0 &&
+      candidate.x <= 1 &&
+      typeof candidate.y === "number" &&
+      Number.isFinite(candidate.y) &&
+      candidate.y >= 0 &&
+      candidate.y <= 1
+    ) {
+      return { x: candidate.x, y: candidate.y };
+    }
+  } catch {
+    // Legacy rows may contain an empty or pre-calibration review payload.
+  }
+  return null;
+}
 
 function rowRef(row: MysteryAssetVaultRow): DebateMysterySealedAssetRefV1 {
+  const entryTarget = entryTargetFromReviewJson(row.review_json);
   return {
     version: 1,
     kind: row.kind,
@@ -109,6 +136,7 @@ function rowRef(row: MysteryAssetVaultRow): DebateMysterySealedAssetRefV1 {
     source: row.source,
     revealed: Boolean(row.revealed_at),
     mimeType: row.mime_type,
+    ...(entryTarget ? { entryTarget } : {}),
   };
 }
 
@@ -138,6 +166,20 @@ function compactReviewJson(review: Record<string, unknown>): string {
   const reasons = Array.isArray(visionSource.reasons)
     ? visionSource.reasons.filter((value): value is string => typeof value === "string")
     : [];
+  const entryTargetSource = review.entryTarget && typeof review.entryTarget === "object"
+    ? review.entryTarget as Record<string, unknown>
+    : {};
+  const entryTarget =
+    typeof entryTargetSource.x === "number" &&
+    Number.isFinite(entryTargetSource.x) &&
+    entryTargetSource.x >= 0 &&
+    entryTargetSource.x <= 1 &&
+    typeof entryTargetSource.y === "number" &&
+    Number.isFinite(entryTargetSource.y) &&
+    entryTargetSource.y >= 0 &&
+    entryTargetSource.y <= 1
+      ? { x: entryTargetSource.x, y: entryTargetSource.y }
+      : null;
   return JSON.stringify({
     attempt,
     pixels: {
@@ -155,7 +197,14 @@ function compactReviewJson(review: Record<string, unknown>): string {
           : null,
       reasonCount: reasons.length,
     },
+    ...(entryTarget ? { entryTarget } : {}),
   });
+}
+
+function sceneRepairUndoSubjectId(subjectId: string, snapshotId?: string): string {
+  return snapshotId
+    ? `${SCENE_REPAIR_UNDO_PREFIX}${snapshotId}:${subjectId}`
+    : `${SCENE_REPAIR_UNDO_PREFIX}${subjectId}`;
 }
 
 function retryCountFromReviewJson(reviewJson: string): number {
@@ -191,6 +240,7 @@ function fallbackReasonCode(reason: string): string {
 
 const RETRYABLE_FALLBACK_REASON_CODES = new Set([
   "generation_failed",
+  "provider_unavailable",
   "review_rejected",
   "timed_out",
   "validation_failed",
@@ -335,6 +385,257 @@ export function setDebateMysteryAssetPendingV1(
     now,
   );
   return rowRef(assetRow(db, args.userId, args.sessionId, args.kind, args.subjectId)!);
+}
+
+/** Explicit player repairs may replace a settled asset. Callers must snapshot
+ * the prior row first; ordinary background preparation continues to use the
+ * non-destructive pending helper above. */
+export function replaceDebateMysteryAssetWithPendingV1(
+  db: DatabaseSync,
+  args: {
+    userId: string;
+    sessionId: string;
+    kind: DebateMysterySealedAssetKindV1;
+    subjectId: string;
+    mimeType?: "image/png" | "image/webp";
+  },
+): DebateMysterySealedAssetRefV1 {
+  const existing = assetRow(db, args.userId, args.sessionId, args.kind, args.subjectId);
+  const now = new Date().toISOString();
+  const id = existing?.id ?? randomUUID();
+  db.prepare(
+    `INSERT INTO debate_mystery_asset_vault
+       (id, user_id, session_id, kind, subject_id, status, source, mime_type,
+        review_json, revealed_at, saved_image_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'pending', 'synthesized', ?, '{}', ?, NULL, ?, ?)
+     ON CONFLICT(user_id, session_id, kind, subject_id) DO UPDATE SET
+       status = 'pending', source = 'synthesized', mime_type = excluded.mime_type,
+       ciphertext = NULL, cipher_iv = NULL, cipher_tag = NULL, sha256 = NULL,
+       byte_size = NULL, provider = NULL, model = NULL,
+       review_json = '{}', saved_image_id = NULL,
+       updated_at = excluded.updated_at`,
+  ).run(
+    id,
+    args.userId,
+    args.sessionId,
+    args.kind,
+    args.subjectId,
+    args.mimeType ?? "image/png",
+    existing?.revealed_at ?? null,
+    existing?.created_at ?? now,
+    now,
+  );
+  return rowRef(assetRow(db, args.userId, args.sessionId, args.kind, args.subjectId)!);
+}
+
+export interface DebateMysterySceneRepairAssetSnapshotV1 {
+  kind: DebateMysterySealedAssetKindV1;
+  subjectId: string;
+  existed: boolean;
+  revealed: boolean;
+  snapshotId: string;
+}
+
+/** Stages one encrypted, server-private undo generation. A prior committed
+ * generation remains intact until the replacement itself is accepted. */
+export function snapshotDebateMysteryAssetsForSceneRepairV1(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  kind: DebateMysterySealedAssetKindV1,
+  subjectIds: readonly string[],
+): DebateMysterySceneRepairAssetSnapshotV1[] {
+  const snapshotId = randomUUID();
+  const insert = db.prepare(
+    `INSERT INTO debate_mystery_asset_vault
+       (id, user_id, session_id, kind, subject_id, status, source, mime_type,
+        ciphertext, cipher_iv, cipher_tag, sha256, byte_size, provider, model,
+        review_json, revealed_at, saved_image_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
+  );
+  const now = new Date().toISOString();
+  return [...new Set(subjectIds)].map((subjectId) => {
+    const row = assetRow(db, userId, sessionId, kind, subjectId);
+    if (!row) return { kind, subjectId, existed: false, revealed: false, snapshotId };
+    insert.run(
+      randomUUID(),
+      userId,
+      sessionId,
+      kind,
+      sceneRepairUndoSubjectId(subjectId, snapshotId),
+      row.status,
+      row.source,
+      row.mime_type,
+      row.ciphertext,
+      row.cipher_iv,
+      row.cipher_tag,
+      row.sha256,
+      row.byte_size,
+      row.provider,
+      row.model,
+      row.review_json,
+      row.saved_image_id,
+      now,
+      now,
+    );
+    return {
+      kind,
+      subjectId,
+      existed: true,
+      revealed: Boolean(row.revealed_at),
+      snapshotId,
+    };
+  });
+}
+
+export function restoreDebateMysteryAssetsFromSceneRepairV1(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  kind: DebateMysterySealedAssetKindV1,
+  snapshots: readonly DebateMysterySceneRepairAssetSnapshotV1[],
+): void {
+  const insert = db.prepare(
+    `INSERT INTO debate_mystery_asset_vault
+       (id, user_id, session_id, kind, subject_id, status, source, mime_type,
+        ciphertext, cipher_iv, cipher_tag, sha256, byte_size, provider, model,
+        review_json, revealed_at, saved_image_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const now = new Date().toISOString();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    for (const snapshot of snapshots) {
+      db.prepare(
+        `DELETE FROM debate_mystery_asset_vault
+          WHERE user_id = ? AND session_id = ? AND kind = ? AND subject_id = ?`,
+      ).run(userId, sessionId, kind, snapshot.subjectId);
+      if (!snapshot.existed) continue;
+      const backup = assetRow(
+        db,
+        userId,
+        sessionId,
+        kind,
+        sceneRepairUndoSubjectId(snapshot.subjectId, snapshot.snapshotId),
+      );
+      if (!backup) throw new Error("The scene repair undo snapshot is no longer available.");
+      insert.run(
+        randomUUID(),
+        userId,
+        sessionId,
+        kind,
+        snapshot.subjectId,
+        backup.status,
+        backup.source,
+        backup.mime_type,
+        backup.ciphertext,
+        backup.cipher_iv,
+        backup.cipher_tag,
+        backup.sha256,
+        backup.byte_size,
+        backup.provider,
+        backup.model,
+        backup.review_json,
+        snapshot.revealed ? now : null,
+        backup.saved_image_id,
+        backup.created_at,
+        now,
+      );
+    }
+    for (const snapshotId of new Set(snapshots.map((snapshot) => snapshot.snapshotId))) {
+      db.prepare(
+        `DELETE FROM debate_mystery_asset_vault
+          WHERE user_id = ? AND session_id = ? AND subject_id LIKE ?`,
+      ).run(userId, sessionId, `${SCENE_REPAIR_UNDO_PREFIX}${snapshotId}:%`);
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    if (db.isTransaction) db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function clearDebateMysterySceneRepairAssetSnapshotsV1(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+): number {
+  return Number(db.prepare(
+    `DELETE FROM debate_mystery_asset_vault
+      WHERE user_id = ? AND session_id = ? AND subject_id LIKE ?`,
+  ).run(userId, sessionId, `${SCENE_REPAIR_UNDO_PREFIX}%`).changes);
+}
+
+/** Retains only the asset generation backing the newly committed one-step undo. */
+export function pruneDebateMysterySceneRepairAssetSnapshotsV1(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  retainedSnapshotIds: readonly string[],
+): number {
+  const retained = new Set(retainedSnapshotIds.filter(Boolean));
+  const rows = db.prepare(
+    `SELECT subject_id
+       FROM debate_mystery_asset_vault
+      WHERE user_id = ? AND session_id = ? AND subject_id LIKE ?`,
+  ).all(userId, sessionId, `${SCENE_REPAIR_UNDO_PREFIX}%`) as unknown as Array<{
+    subject_id: string;
+  }>;
+  let removed = 0;
+  for (const row of rows) {
+    const suffix = row.subject_id.slice(SCENE_REPAIR_UNDO_PREFIX.length);
+    const separator = suffix.indexOf(":");
+    const snapshotId = separator >= 0 ? suffix.slice(0, separator) : "";
+    if (retained.has(snapshotId)) continue;
+    removed += Number(db.prepare(
+      `DELETE FROM debate_mystery_asset_vault
+        WHERE user_id = ? AND session_id = ? AND subject_id = ?`,
+    ).run(userId, sessionId, row.subject_id).changes);
+  }
+  return removed;
+}
+
+export function deleteDebateMysterySealedAssetV1(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  kind: DebateMysterySealedAssetKindV1,
+  subjectId: string,
+): boolean {
+  return Number(db.prepare(
+    `DELETE FROM debate_mystery_asset_vault
+      WHERE user_id = ? AND session_id = ? AND kind = ? AND subject_id = ?`,
+  ).run(userId, sessionId, kind, subjectId).changes) === 1;
+}
+
+export function setDebateMysteryAssetEntryTargetV1(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  kind: DebateMysterySealedAssetKindV1,
+  subjectId: string,
+  entryTarget: { x: number; y: number },
+): DebateMysterySealedAssetRefV1 {
+  const row = assetRow(db, userId, sessionId, kind, subjectId);
+  if (!row) throw new HttpError(404, "That scene visual was not found.");
+  let review: Record<string, unknown> = {};
+  try {
+    review = JSON.parse(row.review_json) as Record<string, unknown>;
+  } catch {
+    // Replace malformed legacy review metadata with the safe calibration only.
+  }
+  db.prepare(
+    `UPDATE debate_mystery_asset_vault
+        SET review_json = ?, updated_at = ?
+      WHERE id = ? AND user_id = ? AND session_id = ?`,
+  ).run(
+    JSON.stringify({ ...review, entryTarget }),
+    new Date().toISOString(),
+    row.id,
+    userId,
+    sessionId,
+  );
+  return rowRef(assetRow(db, userId, sessionId, kind, subjectId)!);
 }
 
 export function sealDebateMysteryAssetBytesV1(

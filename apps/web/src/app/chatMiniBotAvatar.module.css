@@ -34,6 +34,7 @@
   --chat-mini-bot-lower-screen-anchor-y: 75.4%;
   --chat-mini-bot-lower-screen-nudge-x: 0px;
   --chat-mini-bot-lower-screen-nudge-y: 0px;
+  --chat-mini-bot-identity-glyph-scale: 0.92;
   --chat-mini-bot-lower-screen-width: 13.5%;
   --chat-mini-bot-lower-screen-height: 14%;
   /* The 96px chassis raster is square, just like the HD source. Its aperture
@@ -234,7 +235,8 @@
       var(--chat-mini-bot-lower-screen-nudge-x, 0px),
       var(--chat-mini-bot-lower-screen-nudge-y, 0px)
     )
-    scaleX(var(--chat-mini-bot-lower-screen-facing-scale-x, 1));
+    scaleX(var(--chat-mini-bot-lower-screen-facing-scale-x, 1))
+    scale(var(--chat-mini-bot-identity-glyph-scale, 0.92));
   color: var(--chat-mini-bot-lower-screen-ink, var(--chat-mini-bot-screen-ink));
 }
 

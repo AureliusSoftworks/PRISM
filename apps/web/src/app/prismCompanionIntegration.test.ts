@@ -689,6 +689,14 @@ test("soft synthesis keeps the real companion wieldable, draggable, and inertial
   assert.match(tutorials, /data-tutorial-target="prism-companion"/u);
 });
 
+test("a scoped soft workflow can make the Prism orb open synthesis progress", () => {
+  assert.match(
+    component,
+    /if \(softSynthesisActive && softSynthesisUi\.orbOpensProgress\) \{[\s\S]{0,180}setPrismSoftSynthesisExpanded\(true\)/u,
+  );
+  assert.match(component, /Open synthesis progress/u);
+});
+
 test("keeps Prism anchored while an assistant menu is open", () => {
   assert.match(component, /prismWieldCanArm/u);
   assert.match(component, /prismWieldAvailabilityRef/u);

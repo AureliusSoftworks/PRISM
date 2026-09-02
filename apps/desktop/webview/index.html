@@ -461,6 +461,44 @@
         );
       }
 
+      .console-copy {
+        flex: 0 0 auto;
+        min-width: 70px;
+        margin-left: 12px;
+        border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
+        border-radius: 999px;
+        padding: 4px 8px;
+        background: color-mix(in srgb, var(--bg) 74%, var(--accent));
+        color: color-mix(in srgb, var(--fg) 84%, var(--accent));
+        font: inherit;
+        font-size: 9px;
+        letter-spacing: 0.08em;
+        line-height: 1;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+      }
+
+      .console-copy:hover {
+        border-color: color-mix(in srgb, var(--accent) 68%, transparent);
+        background: color-mix(in srgb, var(--bg) 54%, var(--accent));
+        color: var(--fg);
+      }
+
+      .console-copy:focus-visible {
+        outline: 2px solid color-mix(in srgb, var(--accent) 76%, #fff);
+        outline-offset: 2px;
+      }
+
+      .console-copy-status {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+      }
+
       .console-lines {
         flex: 1 1 auto;
         overflow-y: auto;
@@ -619,6 +657,8 @@
           <span class="console-divider">/</span>
           <span class="console-title">Startup Trace</span>
           <span class="console-rule" aria-hidden="true"></span>
+          <button class="console-copy" id="copy-log" type="button" aria-label="Copy displayed startup trace">Copy log</button>
+          <span class="console-copy-status" id="copy-log-status" role="status" aria-live="polite"></span>
         </div>
         <div class="console-lines" id="lines"></div>
       </div>
@@ -626,6 +666,8 @@
 
     <script>
       const linesEl = document.getElementById("lines");
+      const copyLogEl = document.getElementById("copy-log");
+      const copyLogStatusEl = document.getElementById("copy-log-status");
       const labelEl = document.getElementById("label");
       const startupOpticsEl = document.getElementById("startup-optics");
       let autoScroll = true;
@@ -642,6 +684,7 @@
         "web:ready": 0.72,
       };
       let startupProgress = 0;
+      let copyLogFeedbackTimer;
       const STARTUP_FLAVOR_INITIAL_DELAY_MS = 2800;
       const STARTUP_FLAVOR_INTERVAL_MS = 3200;
       const STARTUP_FLAVOR_LINES = [
@@ -735,6 +778,55 @@
         linesEl.appendChild(line);
         if (autoScroll) linesEl.scrollTop = linesEl.scrollHeight;
       }
+
+      function displayedStartupTrace() {
+        return Array.from(linesEl.querySelectorAll(".log-line"))
+          .map((line) => {
+            const source = line.querySelector(".log-src")?.textContent ?? "";
+            const text = line.querySelector(".log-text")?.textContent ?? "";
+            return `${source}: ${text}`;
+          })
+          .join("\n");
+      }
+
+      function setCopyLogFeedback(message) {
+        window.clearTimeout(copyLogFeedbackTimer);
+        copyLogEl.textContent = message;
+        copyLogEl.setAttribute(
+          "aria-label",
+          message === "Copied" ? "Startup trace copied" : "Unable to copy startup trace",
+        );
+        copyLogStatusEl.textContent = copyLogEl.getAttribute("aria-label");
+        copyLogFeedbackTimer = window.setTimeout(() => {
+          copyLogEl.textContent = "Copy log";
+          copyLogEl.setAttribute("aria-label", "Copy displayed startup trace");
+        }, 1600);
+      }
+
+      function copyDisplayedStartupTrace() {
+        const trace = displayedStartupTrace();
+        const fallback = () => {
+          const textarea = document.createElement("textarea");
+          textarea.value = trace;
+          textarea.setAttribute("readonly", "");
+          textarea.style.position = "fixed";
+          textarea.style.opacity = "0";
+          document.body.appendChild(textarea);
+          textarea.select();
+          const copied = document.execCommand("copy");
+          textarea.remove();
+          if (!copied) throw new Error("clipboard_unavailable");
+        };
+        const copied = navigator.clipboard?.writeText
+          ? navigator.clipboard.writeText(trace).catch(fallback)
+          : Promise.resolve().then(fallback);
+        copied.then(
+          () => setCopyLogFeedback("Copied"),
+          () => setCopyLogFeedback("Unable to copy"),
+        );
+      }
+
+      copyLogEl.addEventListener("click", copyDisplayedStartupTrace);
 
       window.setInterval(() => {
         const now = Date.now();

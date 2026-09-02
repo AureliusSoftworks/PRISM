@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import {
+  acceptDebateMysteryMansionThemeFieldRepairV1,
   acceptDebateMysteryMansionThemeV1,
   buildDebateMysteryMansionThemePromptV1,
   discardDebateMysteryMansionThemeV1,
@@ -10,6 +11,7 @@ import {
   resolveDebateMysteryMansionMusicIdentityV1,
   stageDebateMysteryMansionThemeV1,
   undoDebateMysteryMansionThemeV1,
+  undoDebateMysteryMansionThemeFieldRepairV1,
   validateDebateMysteryMansionThemeCandidateV1,
 } from "../debate-mystery-mansion-theme.ts";
 import { initializeDatabase } from "../db.ts";
@@ -298,6 +300,29 @@ describe("Whodunnit mansion theme generation", () => {
       /LOCAL remains fully offline/u,
     );
     assert.equal(fetchCount, 0);
+  });
+
+  it("accepts a no-preview field repair and can undo to the packaged fallback", async () => {
+    const { db, key } = fixture();
+    const audio = twoMinuteMusicFixture();
+    const staged = await stageDebateMysteryMansionThemeV1({
+      db, userKey: key, userId: "owner", bundleId: "mansion",
+      responseMode: "online", apiKey: "configured",
+      fetchImpl: (async () => new Response(audio, {
+        status: 200,
+        headers: { "content-type": "audio/mpeg" },
+      })) as typeof fetch,
+    });
+
+    acceptDebateMysteryMansionThemeFieldRepairV1(db, "owner", "mansion");
+    assert.equal((db.prepare(
+      "SELECT asset_id FROM debate_mystery_mansion_asset_refs WHERE bundle_id = 'mansion' AND logical_id = 'investigation-theme-v1'",
+    ).get() as { asset_id: string }).asset_id, staged.assetId);
+
+    undoDebateMysteryMansionThemeFieldRepairV1(db, "owner", "mansion", false);
+    assert.equal((db.prepare(
+      "SELECT COUNT(*) AS count FROM debate_mystery_mansion_asset_refs WHERE bundle_id = 'mansion' AND logical_id = 'investigation-theme-v1'",
+    ).get() as { count: number }).count, 0);
   });
 
   it("rejects concurrent generation for the same mansion", async () => {

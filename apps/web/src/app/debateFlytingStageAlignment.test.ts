@@ -23,13 +23,24 @@ describe("Flyting stage alignment", () => {
     const ids = new Set(
       DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS.map((item) => item.id),
     );
-    assert.equal(ids.size, 21);
+    assert.equal(ids.size, 23);
     assert.ok(ids.has("wideForHelmet"));
     assert.ok(ids.has("moderatorModeratorHelmet"));
     assert.ok(ids.has("wideAgainstHeraldry"));
     assert.ok(ids.has("wideModeratorHeraldry"));
     assert.ok(ids.has("moderatorModeratorHeraldry"));
+    assert.ok(ids.has("galleryBotsContainer"));
+    assert.ok(ids.has("galleryHelmets"));
     assert.ok(ids.has("galleryModeratorRugGlyph"));
+  });
+
+  it("gives the shared gallery helmets the same geometry controls as stage helmets", () => {
+    const item = DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS.find(
+      (candidate) => candidate.id === "galleryHelmets",
+    );
+    assert.equal(item?.supportsRotation, true);
+    assert.equal(item?.supportsSkew, true);
+    assert.equal(item?.supportsSkewY, undefined);
   });
 
   it("lets each independently authored helmet rotate and skew", () => {
@@ -83,6 +94,17 @@ describe("Flyting stage alignment", () => {
       { x: 0, y: -4.5, scale: 100, rotation: 0, skewX: 0, skewY: 0 },
     );
     assert.deepEqual(
+      DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements.wideModeratorHelmet,
+      {
+        x: -11,
+        y: -10.25,
+        scale: 80,
+        rotation: 0,
+        skewX: 0,
+        skewY: 0,
+      },
+    );
+    assert.deepEqual(
       DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements.wideModeratorNameplate,
       { x: 0, y: -4, scale: 100, rotation: 0, skewX: 0, skewY: 0 },
     );
@@ -125,6 +147,14 @@ describe("Flyting stage alignment", () => {
       DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements
         .moderatorAgainstHeraldry,
       { x: -1.4, y: -14, scale: 100, rotation: 0, skewX: 0, skewY: 0 },
+    );
+    assert.deepEqual(
+      DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements.galleryBotsContainer,
+      { x: 0, y: 0, scale: 100, rotation: 0, skewX: 0, skewY: 0 },
+    );
+    assert.deepEqual(
+      DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements.galleryHelmets,
+      { x: 0, y: 0, scale: 100, rotation: 0, skewX: 0, skewY: 0 },
     );
     assert.deepEqual(
       DEFAULT_DEBATE_FLYTING_STAGE_ALIGNMENT.placements.galleryForRugGlyph,

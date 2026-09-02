@@ -339,6 +339,7 @@ import {
   attachDebateMysteryRoomAssetV2,
   claimDebateMysteryAssetBackgroundLeaseV2,
   cancelDebateMysteryCompilationV2,
+  commitDebateMysterySceneRepairV1,
   continueDebateMysteryProductionWithFallbacksV1,
   continueDebateMysteryV2WithoutVoices,
   createDebateMysterySessionV2,
@@ -356,6 +357,7 @@ import {
   restartDebateMysteryInvestigationV2,
   retryDebateMysteryCompilationV2,
   runDebateMysteryCompilationV2,
+  undoDebateMysterySceneRepairV1,
   type DebateMysteryEvidenceAssetPreparationV2,
   type DebateMysteryEvidencePropResolutionRequestV1,
   type DebateMysteryMansionExteriorAssetPreparationV2,
@@ -367,11 +369,17 @@ import {
   getRevealedDebateMysteryAssetFileV1,
   normalizeDebateMysteryAssetVisionReviewV1,
   requeueRetryableDebateMysteryAssetFallbacksV1,
+  replaceDebateMysteryAssetWithPendingV1,
+  restoreDebateMysteryAssetsFromSceneRepairV1,
   revealDebateMysteryAssetV1,
   saveRevealedDebateMysteryAssetV1,
   sealDebateMysteryAssetBytesV1,
+  setDebateMysteryAssetEntryTargetV1,
   setDebateMysteryAssetFallbackV1,
   setDebateMysteryAssetPendingV1,
+  snapshotDebateMysteryAssetsForSceneRepairV1,
+  clearDebateMysterySceneRepairAssetSnapshotsV1,
+  deleteDebateMysterySealedAssetV1,
   validateDebateMysteryAssetPixelsV1,
   type DebateMysteryAssetVisionReviewV1,
 } from "./debate-mystery-assets.ts";
@@ -380,6 +388,7 @@ import {
   buildDebateMysteryIllustratedRoomUpgradePromptV1,
   debateMysteryIllustratedRoomSubjectIdV1,
   renderDebateMysteryRoomArtV1,
+  validateDebateMysteryRoomArtSourceAlignmentV1,
 } from "./debate-mystery-room-art.ts";
 import {
   cloneDebateMysteryMansionBundleV1,
@@ -389,7 +398,9 @@ import {
   ensureDebateMysteryMansionPortableRoomAssetsV1,
   getDebateMysteryMansionAssetFileV1,
   getDebateMysteryMansionBundleV2,
+  freezeDebateMysteryMansionSnapshotV2,
   listDebateMysteryMansionBundlesV2,
+  retainDebateMysteryMansionSnapshotAssetsV2,
   saveDebateMysteryMansionBundleV2,
   updateDebateMysteryMansionLibraryV1,
   updateDebateMysteryMansionTopologyV1,
@@ -434,10 +445,12 @@ import { PortableMysteryImportSafetyError } from "./debate-mystery-package-safet
 import { DebateMysteryMansionCodecError } from "./debate-mystery-mansion-codec.ts";
 import {
   acceptDebateMysteryMansionThemeV1,
+  acceptDebateMysteryMansionThemeFieldRepairV1,
   discardDebateMysteryMansionThemeV1,
   ensureDebateMysteryMansionThemeV1,
   stageDebateMysteryMansionThemeV1,
   undoDebateMysteryMansionThemeV1,
+  undoDebateMysteryMansionThemeFieldRepairV1,
   validateDebateMysteryMansionThemeCandidateV1,
 } from "./debate-mystery-mansion-theme.ts";
 import {
@@ -445,6 +458,7 @@ import {
   discardDebateMysteryMansionAtmosphereV1,
   stageDebateMysteryMansionAtmosphereV1,
   undoDebateMysteryMansionAtmosphereV1,
+  undoDebateMysteryMansionAtmosphereFieldRepairV1,
 } from "./debate-mystery-mansion-atmosphere.ts";
 import {
   acceptMansionRoomArtCandidateV2,
@@ -473,6 +487,7 @@ import {
   resolveDebateMysteryProductionCapabilitiesV1,
   type MysteryVenueProposalV1,
   type MysteryVenueLengthV1,
+  type DebateSessionV1,
 } from "@localai/shared";
 import {
   buildSignalLiveBakeArtifactFromEpisode,
@@ -750,8 +765,10 @@ import {
   dedupeActiveZenWallpaperGeneration,
   deleteConversation,
   deleteConversationMessage,
+  distillChatConversations,
   getConversationSweepState,
   getLatestRememberedZenWallpaperForBot,
+  listChatBotDistillations,
   listConversationSummaries,
   mapZenWallpaperMetadata,
   normalizeZenWallpaperStatus,
@@ -1480,6 +1497,7 @@ import {
 import {
   applyImageAssetMagentaPass,
   ImageMagentaPassError,
+  reduceMagentaInPng,
   undoImageAssetMagentaPass,
 } from "./image-magenta-pass.ts";
 import {
@@ -7767,12 +7785,14 @@ async function normalizeSignalEpisodeImageForTurn(
       error instanceof Error ? error.message : "Signal could not read that image.",
     );
   });
-  const classifiedDescriptor =
-    fileDescriptor.kind === "item" &&
-    !(await imageHasVisibleTransparency(normalized.pngBytes))
-      ? { ...fileDescriptor, kind: "picture" as const }
-      : fileDescriptor;
-  const descriptor = { ...classifiedDescriptor, name: requestedName };
+  // A Signal attachment is always an image. Physical Item semantics are an
+  // explicit Asset Library choice and are never inferred from transparency.
+  // Force the server-owned value so older clients cannot revive that inference.
+  const descriptor = {
+    ...fileDescriptor,
+    kind: "picture" as const,
+    name: requestedName,
+  };
   return {
     imageId,
     descriptor,
@@ -10031,14 +10051,27 @@ async function reviewDebateMysteryAssetWithVision(args: {
   kind: "evidence" | "room";
   requestedSubject: string;
   houseStyle: string;
+  roomCompositionContract?: string;
   signal: AbortSignal;
 }): Promise<DebateMysteryAssetVisionReviewV1> {
   const provider = new OpenAiProvider({ apiKey: args.apiKey });
   const content = args.kind === "room"
     ? [
-        `Compare image 1, the frozen annotated source template, with image 2, the generated ${args.requestedSubject} room edit.`,
-        "Approve only if image 2 is one coherent, unoccupied furnished interior and preserves image 1's camera, floor line, major architectural divisions, and the broad spatial regions marked by its interaction overlays.",
-        "The source overlays are annotations rather than furniture. Image 2 must remove those overlays while keeping their underlying spatial layout usable.",
+        args.sourceBytes
+          ? `Compare image 1, the frozen annotated source template, with image 2, the generated ${args.requestedSubject} room edit.`
+          : `Review the generated ${args.requestedSubject} as one unoccupied furnished room.`,
+        args.sourceBytes
+          ? "Approve only if image 2 is one coherent, unoccupied furnished interior and preserves image 1's camera, floor line, major architectural divisions, and the broad spatial regions marked by its interaction overlays."
+          : "Approve only if the room uses a grounded player-height camera, legible circulation, and clear usable floor and furnishing regions.",
+        ...(args.sourceBytes
+          ? ["The source overlays are annotations rather than furniture. Image 2 must remove those overlays while keeping their underlying spatial layout usable."]
+          : []),
+        ...(args.roomCompositionContract
+          ? [
+              `Frozen room composition contract: ${args.roomCompositionContract}`,
+              "Reject a clear conflict between the visible room composition and these normalized anchor or dynamic-light positions. Runtime light overlays add the glow, so a plausible source or unobstructed area is enough; do not require a baked glow.",
+            ]
+          : []),
         "Ordinary room-appropriate furniture, plants, tableware, books, art, and decorative objects are welcome. Reject only a visually isolated object that reads as case evidence or a clue, not normal environmental dressing.",
         "Room-defining built-in fixtures named by the requested room are required environmental architecture, not clues. Approve context-appropriate ship bridge navigation consoles, engine-control panels, galley equipment, security desks or cameras, cabin berths, railings, lifebuoys, and promenade safety fixtures unless they contain a separately prohibited element.",
         "Do not speculate that ordinary containers, statues, vessels, books, table settings, tools, luggage, plants, art, or signs of everyday use could become clues. They are environmental dressing unless the image explicitly marks them as forensic evidence with blood, an evidence marker, a weapon, a label, readable text, or conspicuous clue framing.",
@@ -10100,6 +10133,256 @@ async function reviewDebateMysteryAssetWithVision(args: {
     reasons,
     reviewer: "openai:gpt-4o-mini",
   });
+}
+
+const MYSTERY_SCENE_PLACEMENT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["placements"],
+  properties: {
+    placements: {
+      type: "array",
+      maxItems: 40,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "x", "y", "rotation"],
+        properties: {
+          id: { type: "string" },
+          x: { type: "number", minimum: 0, maximum: 1 },
+          y: { type: "number", minimum: 0, maximum: 1 },
+          rotation: { type: ["number", "null"], minimum: -360, maximum: 360 },
+        },
+      },
+    },
+  },
+} as const;
+
+interface MysteryScenePlacementV1 {
+  id: string;
+  x: number;
+  y: number;
+  rotation: number | null;
+}
+
+function parseMysteryScenePlacementsV1(value: string): MysteryScenePlacementV1[] {
+  const parsed = JSON.parse(value) as { placements?: unknown };
+  if (!Array.isArray(parsed.placements)) return [];
+  return parsed.placements.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
+    const record = candidate as Record<string, unknown>;
+    if (
+      typeof record.id !== "string" || !record.id.trim() ||
+      typeof record.x !== "number" || !Number.isFinite(record.x) ||
+      typeof record.y !== "number" || !Number.isFinite(record.y)
+    ) return [];
+    return [{
+      id: record.id.trim().slice(0, 200),
+      x: Math.max(0.02, Math.min(0.98, record.x)),
+      y: Math.max(0.02, Math.min(0.98, record.y)),
+      rotation: typeof record.rotation === "number" && Number.isFinite(record.rotation)
+        ? Math.max(-360, Math.min(360, record.rotation))
+        : null,
+    }];
+  });
+}
+
+async function observeMysteryScenePlacementsV1(args: {
+  apiKey: string;
+  bytes: Buffer;
+  prompt: string;
+  signal?: AbortSignal;
+}): Promise<MysteryScenePlacementV1[]> {
+  const provider = new OpenAiProvider({ apiKey: args.apiKey });
+  const response = await provider.generateResponse(
+    [{
+      role: "user",
+      content: [
+        args.prompt,
+        "Coordinates are normalized against the complete supplied image: x=0 is the far left, x=1 the far right, y=0 the top, and y=1 the bottom.",
+        "Return only the requested IDs. Use the visible center of the real object, fixture, doorway, or light source; never use a decorative lookalike or empty nearby region.",
+      ].join(" "),
+      images: [{ mimeType: "image/png", data: args.bytes.toString("base64") }],
+    }],
+    {
+      model: "gpt-4o-mini",
+      maxTokens: 1_200,
+      jsonSchema: MYSTERY_SCENE_PLACEMENT_SCHEMA,
+      jsonSchemaName: "mystery_scene_placements",
+      usagePurpose: "image_generation",
+      allowFinalLocalFallback: false,
+      signal: args.signal,
+      generationWork: {
+        workflow: "debate_mystery_scene_repair",
+        stage: "observe_scene_geometry",
+        privacyMode: "online",
+        outputClass: "critical",
+      },
+    },
+  );
+  return parseMysteryScenePlacementsV1(response);
+}
+
+async function observeDebateMysteryExteriorDoorTargetV1(args: {
+  apiKey: string;
+  bytes: Buffer;
+  placeNoun: string;
+  entryAction: string;
+  signal?: AbortSignal;
+}): Promise<{ x: number; y: number }> {
+  const placements = await observeMysteryScenePlacementsV1({
+    apiKey: args.apiKey,
+    bytes: args.bytes,
+    signal: args.signal,
+    prompt: [
+      `Inspect this complete exterior establishing image of a ${args.placeNoun}.`,
+      `Locate the single visible physical threshold a person would actually use to ${args.entryAction.toLocaleLowerCase()}.`,
+      "For a vessel, target the doorway at the top of its usable gangway or boarding stairs—not the bow, hull plating, a porthole, railing, or waterline.",
+      "Return one placement with id exterior-entry.",
+    ].join(" "),
+  });
+  const target = placements.find((placement) => placement.id === "exterior-entry");
+  if (!target) throw new Error("PRISM could not identify a reliable visible entrance.");
+  return { x: target.x, y: target.y };
+}
+
+function polygonCenterV1(
+  polygon: readonly { x: number; y: number }[],
+): { x: number; y: number } {
+  const divisor = Math.max(1, polygon.length);
+  return {
+    x: polygon.reduce((sum, point) => sum + point.x, 0) / divisor,
+    y: polygon.reduce((sum, point) => sum + point.y, 0) / divisor,
+  };
+}
+
+function translateMysteryHotspotPolygonV1(
+  polygon: readonly { x: number; y: number }[],
+  target: { x: number; y: number },
+): Array<{ x: number; y: number }> {
+  const center = polygonCenterV1(polygon);
+  const dx = target.x * 100 - center.x;
+  const dy = target.y * 100 - center.y;
+  return polygon.map((point) => ({
+    x: Math.max(0, Math.min(100, point.x + dx)),
+    y: Math.max(0, Math.min(100, point.y + dy)),
+  }));
+}
+
+function mysteryLightCenterV1(
+  light: import("@localai/shared").MansionDynamicLightV2,
+): { x: number; y: number } {
+  if (light.kind !== "neon") return { x: light.geometry.x, y: light.geometry.y };
+  const divisor = Math.max(1, light.geometry.points.length);
+  return {
+    x: light.geometry.points.reduce((sum, point) => sum + point.x, 0) / divisor,
+    y: light.geometry.points.reduce((sum, point) => sum + point.y, 0) / divisor,
+  };
+}
+
+function relocateMysteryLightV1(
+  light: import("@localai/shared").MansionDynamicLightV2,
+  target: MysteryScenePlacementV1,
+): import("@localai/shared").MansionDynamicLightV2 {
+  if (light.kind === "neon") {
+    const center = mysteryLightCenterV1(light);
+    return {
+      ...light,
+      geometry: {
+        ...light.geometry,
+        points: light.geometry.points.map((point) => ({
+          x: Math.max(0, Math.min(1, point.x + target.x - center.x)),
+          y: Math.max(0, Math.min(1, point.y + target.y - center.y)),
+        })),
+      },
+    };
+  }
+  if (light.kind === "directional") {
+    return {
+      ...light,
+      geometry: {
+        ...light.geometry,
+        x: target.x,
+        y: target.y,
+        rotation: target.rotation ?? light.geometry.rotation,
+      },
+    };
+  }
+  if (light.kind === "fire") {
+    return {
+      ...light,
+      geometry: {
+        ...light.geometry,
+        x: target.x,
+        y: target.y,
+        rotation: target.rotation ?? light.geometry.rotation,
+      },
+    };
+  }
+  return {
+    ...light,
+    geometry: { ...light.geometry, x: target.x, y: target.y },
+  };
+}
+
+async function observeDebateMysteryRoomGeometryV1(args: {
+  apiKey: string;
+  bytes: Buffer;
+  room: import("@localai/shared").DebateMysteryRoomV2;
+  layout: import("@localai/shared").MansionLayoutV2;
+  anchors: boolean;
+  lights: boolean;
+}): Promise<{
+  hotspots?: import("@localai/shared").DebateMysteryRoomV2["hotspots"];
+  placementAnchors?: import("@localai/shared").MansionPlacementAnchorV2[];
+  lights?: import("@localai/shared").MansionDynamicLightV2[];
+}> {
+  const anchors = args.anchors
+    ? args.layout.placementAnchors.filter((anchor) => anchor.roomId === args.room.id)
+    : [];
+  const lights = args.lights
+    ? args.layout.lights.filter((light) => light.roomId === args.room.id)
+    : [];
+  const requested = [
+    ...anchors.map((anchor) => `anchor:${anchor.id} = ${anchor.relation} ${anchor.name}`),
+    ...(args.anchors
+      ? args.room.hotspots.map((hotspot) => `hotspot:${hotspot.id} = ${hotspot.label}`)
+      : []),
+    ...lights.map((light) =>
+      `light:${light.id} = ${light.kind} ${light.color} light currently near (${mysteryLightCenterV1(light).x.toFixed(2)}, ${mysteryLightCenterV1(light).y.toFixed(2)})`),
+  ];
+  if (requested.length === 0) return {};
+  const placements = await observeMysteryScenePlacementsV1({
+    apiKey: args.apiKey,
+    bytes: args.bytes,
+    prompt: [
+      `Inspect this accepted ${args.room.name} room image.`,
+      "Locate each listed existing object, interaction region, and practical light source in the image. Do not propose moving or changing anything in the room; report only where the visible thing already is.",
+      "For lights, preserve identity and color and report a rotation only when visibly meaningful.",
+      requested.join("; "),
+    ].join(" "),
+  });
+  const byId = new Map(placements.map((placement) => [placement.id, placement]));
+  const placementAnchors = anchors.map((anchor) => {
+    const target = byId.get(`anchor:${anchor.id}`);
+    return target ? { ...anchor, point: { x: target.x, y: target.y } } : anchor;
+  });
+  const hotspots = args.anchors
+    ? args.room.hotspots.map((hotspot) => {
+        const target = byId.get(`hotspot:${hotspot.id}`);
+        return target
+          ? { ...hotspot, polygon: translateMysteryHotspotPolygonV1(hotspot.polygon, target) }
+          : hotspot;
+      })
+    : undefined;
+  const relocatedLights = lights.map((light) => {
+    const target = byId.get(`light:${light.id}`);
+    return target ? relocateMysteryLightV1(light, target) : light;
+  });
+  return {
+    ...(args.anchors ? { hotspots, placementAnchors } : {}),
+    ...(args.lights ? { lights: relocatedLights } : {}),
+  };
 }
 
 async function generateRawDebateMysteryCandidate(args: {
@@ -10850,6 +11133,29 @@ async function prepareDebateMysteryV2RoomAssets(
             const spatialBrief = spatial
               ? `Architectural placement: ${spatial.longitudinal} along the venue, ${spatial.transverse}, ${spatial.exposure.replaceAll("_", " ")}, on ${spatial.deckBand.replaceAll("_", " ")}.`
               : "Preserve a clear, traversable investigation-room composition with its doorway and interaction areas legible.";
+            const roomAnchors = venueLayout?.placementAnchors.filter(
+              (anchor) => anchor.roomId === room.id,
+            ) ?? [];
+            const roomLights = venueLayout?.lights.filter(
+              (light) => light.roomId === room.id,
+            ) ?? [];
+            const compositionContract = [
+              roomAnchors.length > 0
+                ? `interaction anchors ${roomAnchors.map((anchor) =>
+                    `${anchor.relation} ${anchor.name} at (${anchor.point.x.toFixed(2)}, ${anchor.point.y.toFixed(2)})`
+                  ).join("; ")}`
+                : null,
+              roomLights.length > 0
+                ? `dynamic lights ${roomLights.map((light) => {
+                    const points = light.kind === "neon"
+                      ? light.geometry.points
+                      : [{ x: light.geometry.x, y: light.geometry.y }];
+                    return `${light.kind} at ${points.map((point) =>
+                      `(${point.x.toFixed(2)}, ${point.y.toFixed(2)})`
+                    ).join(" to ")} with intensity ${light.intensity.toFixed(2)}`;
+                  }).join("; ")}`
+                : null,
+            ].filter((entry): entry is string => Boolean(entry)).join(". ");
             const generated = await generateRawDebateMysteryCandidate({
               userId: args.userId,
               title: `${room.name} room`,
@@ -10859,6 +11165,11 @@ async function prepareDebateMysteryV2RoomAssets(
                   : `Create an unoccupied, furnished ${room.name} scene for this ${venueLayout?.venueProfile?.placeNoun ?? "mystery venue"} in genuine polished high-resolution hand-crafted pixel art.`,
                 args.houseStyle.promptContract,
                 spatialBrief,
+                ...(compositionContract
+                  ? [
+                      `Frozen normalized composition: ${compositionContract}. Keep those areas visually usable and place plausible fixtures or illumination sources beneath the authored light overlays. Do not bake exaggerated glow; PRISM renders the dynamic light separately at runtime.`,
+                    ]
+                  : []),
                 templateBytes
                   ? "Preserve the exact 1280×720 dimensions, room geometry, grounded player-height camera, major architectural divisions, and broad interaction anchors."
                   : "Use exact 1280×720 dimensions and a grounded player-height camera. Keep major architectural divisions, the central travel path, and broad interaction anchors visually clear.",
@@ -10897,6 +11208,7 @@ async function prepareDebateMysteryV2RoomAssets(
               kind: "room",
               requestedSubject: room.name,
               houseStyle: args.houseStyle.promptContract,
+              roomCompositionContract: compositionContract || undefined,
               signal: attemptSignal,
             });
             if (!review.approved) {
@@ -11022,6 +11334,7 @@ async function prepareDebateMysteryIllustratedRoomsV1(
   userId: string,
   sessionId: string,
   signal?: AbortSignal,
+  requestedRoomIds?: ReadonlySet<string>,
 ): Promise<void> {
   const session = getDebateSession(db, userId, sessionId);
   if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
@@ -11044,7 +11357,10 @@ async function prepareDebateMysteryIllustratedRoomsV1(
   const fallbackController = new AbortController();
   const preparationSignal = signal ?? fallbackController.signal;
   for (const room of mysteryState.rooms) {
-    if (!requiredRoomIds.has(room.id)) continue;
+    if (
+      !requiredRoomIds.has(room.id) ||
+      (requestedRoomIds && !requestedRoomIds.has(room.id))
+    ) continue;
     const subjectId = debateMysteryIllustratedRoomSubjectIdV1(room.id);
     const existing = getDebateMysterySealedAssetRefV1(
       db,
@@ -11071,10 +11387,10 @@ async function prepareDebateMysteryIllustratedRoomsV1(
           "room",
           room.id,
         );
-            const reference = await renderDebateMysteryRoomArtV1(source.bytes, {
-              variant: "mosaic-reference",
-              format: "png",
-            });
+        const mosaicReference = await renderDebateMysteryRoomArtV1(source.bytes, {
+          variant: "mosaic-reference",
+          format: "png",
+        });
         const generated = await generateRawDebateMysteryCandidate({
           userId,
           title: `${room.name} Upgraded room derivative`,
@@ -11083,25 +11399,34 @@ async function prepareDebateMysteryIllustratedRoomsV1(
             houseStylePrompt: mysteryState.config.houseStyle.promptContract,
             roomBrief: `This room is on floor ${room.floor}. Keep the frozen doorway, staircase, furnishing-anchor, and interaction geometry exactly where the reference establishes it.`,
           }),
-          sourceImageBytes: reference.bytes,
+          sourceImageBytes: mosaicReference.bytes,
           apiKey,
           model: "gpt-image-2",
-          size: "1536x1024",
+          size: "1280x720",
           quality: "high",
           signal: attemptSignal,
         });
         const normalized = await sharp(generated.bytes, { failOn: "error" })
           .rotate()
           .flatten({ background: { r: 3, g: 8, b: 14 } })
-          .resize(1600, 900, { fit: "cover", position: "centre" })
+          .resize(1600, 900, { fit: "fill" })
           .removeAlpha()
           .png({ compressionLevel: 9 })
           .toBuffer();
+        const alignment = await validateDebateMysteryRoomArtSourceAlignmentV1({
+          source: mosaicReference.bytes,
+          candidate: normalized,
+        });
+        if (!alignment.approved) {
+          throw new Error(
+            `Source-lock rejected the Upgraded room derivative (coarse structural alignment ${alignment.correlation.toFixed(3)} < ${alignment.minimumCorrelation.toFixed(3)}).`,
+          );
+        }
         const pixels = await validateDebateMysteryAssetPixelsV1("room", normalized);
         const review = await reviewDebateMysteryAssetWithVision({
           apiKey,
           bytes: normalized,
-          sourceBytes: reference.bytes,
+          sourceBytes: mosaicReference.bytes,
           kind: "room",
           requestedSubject: room.name,
           houseStyle: mysteryState.config.houseStyle.promptContract,
@@ -11120,7 +11445,7 @@ async function prepareDebateMysteryIllustratedRoomsV1(
           bytes: normalized,
           provider: "openai",
           model: generated.model,
-          review: { attempt: 1, pixels, vision: review },
+          review: { attempt: 1, pixels, sourceLock: alignment, vision: review },
         });
         return sealed;
       });
@@ -11144,10 +11469,20 @@ async function prepareDebateMysteryIllustratedRoomsV1(
   }
 }
 
-function queueDebateMysteryIllustratedRoomsV1(userId: string, sessionId: string): void {
+function queueDebateMysteryIllustratedRoomsV1(
+  userId: string,
+  sessionId: string,
+  requestedRoomIds?: ReadonlySet<string>,
+): Promise<void> {
   const key = `${userId}:${sessionId}`;
-  if (mysteryRoomArtUpgradeRuns.has(key)) return;
-  const run = prepareDebateMysteryIllustratedRoomsV1(userId, sessionId)
+  const existing = mysteryRoomArtUpgradeRuns.get(key);
+  if (existing) return existing;
+  const run = prepareDebateMysteryIllustratedRoomsV1(
+    userId,
+    sessionId,
+    undefined,
+    requestedRoomIds,
+  )
     .finally(() => {
       mysteryRoomArtUpgradeRuns.delete(key);
       try {
@@ -11163,6 +11498,594 @@ function queueDebateMysteryIllustratedRoomsV1(userId: string, sessionId: string)
   mysteryRoomArtUpgradeRuns.set(key, run);
   void run.catch(() => {
     console.warn("[debate-mystery-v2] Illustrated mansion upgrade stopped.");
+  });
+  return run;
+}
+
+const DEBATE_MYSTERY_SCENE_REPAIR_ACTIONS_V1 = new Set([
+  "regenerate_exterior",
+  "align_exterior_door",
+  "regenerate_room_mosaic",
+  "regenerate_room_upgrade",
+  "generate_room_upgrade",
+  "refresh_room_anchors",
+  "refresh_room_lights",
+  "regenerate_evidence_asset",
+  "reduce_evidence_magenta",
+  "regenerate_music",
+  "regenerate_ambience",
+] as const);
+
+async function repairDebateMysterySceneV1(args: {
+  userId: string;
+  sessionId: string;
+  action: import("@localai/shared").DebateMysterySceneRepairActionV1;
+  roomId?: string | null;
+  subjectId?: string | null;
+  artStyle?: "mosaic" | "upgraded";
+}): Promise<DebateSessionV1> {
+  const session = getDebateSession(db, args.userId, args.sessionId);
+  if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
+    throw new HttpError(409, "Scene repair requires a Whodunnit V2 case.");
+  }
+  const audioAction = args.action === "regenerate_music" || args.action === "regenerate_ambience";
+  const localPixelRepair = args.action === "reduce_evidence_magenta";
+  if (session.responseMode === "local" && !localPixelRepair) {
+    throw new HttpError(
+      409,
+      "This repair requires ONLINE. LOCAL never sends case art or audio to a remote model.",
+    );
+  }
+  const userKey = decryptUserKey(args.userId);
+  const apiKey = getOpenAiApiKeyForUser(args.userId, userKey) ?? config.openAiApiKey;
+  if (!audioAction && !localPixelRepair && !apiKey) {
+    throw new HttpError(409, "An OpenAI image key is required for this repair.");
+  }
+  const state = session.formatState;
+  const room = args.roomId
+    ? state.rooms.find((candidate) => candidate.id === args.roomId) ?? null
+    : null;
+  if (args.roomId && (!room || !room.visited)) {
+    throw new HttpError(409, "Visit that room before repairing its presentation.");
+  }
+  const evidenceItem = args.subjectId
+    ? state.record.find((item) =>
+        item.admitted && item.reference.kind === "evidence" && item.reference.id === args.subjectId) ?? null
+    : null;
+  const restoreFailedAssetRepair = (
+    snapshots: ReturnType<typeof snapshotDebateMysteryAssetsForSceneRepairV1>,
+    kind: "room" | "evidence" = "room",
+  ): never => {
+    restoreDebateMysteryAssetsFromSceneRepairV1(
+      db,
+      args.userId,
+      args.sessionId,
+      kind,
+      snapshots,
+    );
+    throw new HttpError(409, "The replacement did not pass review. The previous presentation is unchanged.");
+  };
+
+  if (args.action === "regenerate_evidence_asset") {
+    if (!evidenceItem) throw new HttpError(404, "Only a found Case File item can receive artwork.");
+    const snapshots = snapshotDebateMysteryAssetsForSceneRepairV1(
+      db,
+      args.userId,
+      args.sessionId,
+      "evidence",
+      [evidenceItem.reference.id],
+    );
+    replaceDebateMysteryAssetWithPendingV1(db, {
+      userId: args.userId,
+      sessionId: args.sessionId,
+      kind: "evidence",
+      subjectId: evidenceItem.reference.id,
+      mimeType: "image/png",
+    });
+    const selection = resolveTypedAssetGenerationSelection(
+      args.userId,
+      "debate_exhibit",
+      { provider: "openai" },
+    );
+    const controller = new AbortController();
+    let prepared: import("@localai/shared").DebateMysterySealedAssetRefV1 | null = null;
+    let reviewFeedback: string | null = null;
+    for (let attempt = 1; attempt <= 2 && !prepared; attempt += 1) {
+      try {
+        prepared = await runMysteryAssetAttempt(controller.signal, async (signal) => {
+          const generated = await generateRawDebateMysteryCandidate({
+            userId: args.userId,
+            title: evidenceItem.title,
+            prompt: [
+              `Create one evidence exhibit sprite depicting exactly: "${evidenceItem.title}".`,
+              `Visible object description: ${evidenceItem.description}`,
+              "Depict only the physical object and observable details stated above. Do not imply its culprit, use, location, ownership, or story significance.",
+              state.config.houseStyle.promptContract,
+              "Use one tactile premium miniature with grounded materials, crisp silhouette, a consistent three-quarter view, gentle overhead key light, cool neutral fill, and clean catalog readability.",
+              "Center exactly one complete subject on a square canvas. No people, scenery, room, pedestal, plaque, caption, symbols, lettering, logo, watermark, border, UI, duplicate subject, or unrelated object.",
+              "Use exact flat #FF00FF behind the object only and keep that color out of the subject so PRISM can remove it to transparent black.",
+              ...(attempt === 2 && reviewFeedback
+                ? [`Correct these first-pass review findings: ${reviewFeedback}`]
+                : []),
+            ].join("\n"),
+            apiKey: apiKey!,
+            model: selection.model ?? "gpt-image-2",
+            size: "1024x1024",
+            quality: "high",
+            background: "transparent",
+            signal,
+          });
+          const normalized = await normalizeGeneratedDebateExhibitImage(generated.bytes);
+          const pixels = await validateDebateMysteryAssetPixelsV1("evidence", normalized.pngBytes);
+          const review = await reviewDebateMysteryAssetWithVision({
+            apiKey: apiKey!,
+            bytes: normalized.pngBytes,
+            kind: "evidence",
+            requestedSubject: evidenceItem.title,
+            houseStyle: state.config.houseStyle.promptContract,
+            signal,
+          });
+          if (!review.approved) {
+            throw new Error(`Vision review rejected the evidence asset: ${review.reasons.join("; ")}`);
+          }
+          const sealed = sealDebateMysteryAssetBytesV1(db, userKey, {
+            userId: args.userId,
+            sessionId: args.sessionId,
+            kind: "evidence",
+            subjectId: evidenceItem.reference.id,
+            bytes: normalized.pngBytes,
+            provider: "openai",
+            model: generated.model,
+            review: { attempt, pixels, vision: review },
+          });
+          return revealDebateMysteryAssetV1(
+            db,
+            args.userId,
+            args.sessionId,
+            "evidence",
+            evidenceItem.reference.id,
+          ) ?? sealed;
+        });
+      } catch (error) {
+        reviewFeedback = spoilerSafeMysteryAssetFailure(error);
+      }
+    }
+    if (!prepared || prepared.status !== "ready") {
+      return restoreFailedAssetRepair(snapshots, "evidence");
+    }
+    attachDebateMysteryEvidenceAssetV2(
+      db,
+      args.userId,
+      args.sessionId,
+      evidenceItem.reference.id,
+      prepared,
+    );
+    return commitDebateMysterySceneRepairV1(db, args.userId, args.sessionId, {
+      action: args.action,
+      subjectId: evidenceItem.reference.id,
+      assetSubjects: snapshots,
+    });
+  }
+
+  if (args.action === "reduce_evidence_magenta") {
+    if (!evidenceItem?.sealedAsset || evidenceItem.sealedAsset.status !== "ready" ||
+      !evidenceItem.sealedAsset.revealed) {
+      throw new HttpError(409, "Generate this found item's asset before reducing magenta.");
+    }
+    const snapshots = snapshotDebateMysteryAssetsForSceneRepairV1(
+      db,
+      args.userId,
+      args.sessionId,
+      "evidence",
+      [evidenceItem.reference.id],
+    );
+    const current = getDebateMysteryAssetFileForPreparationV1(
+      db,
+      userKey,
+      args.userId,
+      args.sessionId,
+      "evidence",
+      evidenceItem.reference.id,
+    );
+    const reduced = await reduceMagentaInPng(current.bytes);
+    if (reduced.changedPixels === 0) {
+      restoreDebateMysteryAssetsFromSceneRepairV1(
+        db, args.userId, args.sessionId, "evidence", snapshots,
+      );
+      throw new HttpError(409, "PRISM did not find excess magenta in this item.");
+    }
+    const sealed = sealDebateMysteryAssetBytesV1(db, userKey, {
+      userId: args.userId,
+      sessionId: args.sessionId,
+      kind: "evidence",
+      subjectId: evidenceItem.reference.id,
+      bytes: reduced.pngBytes,
+      provider: "local",
+      model: "magenta-pass-v1",
+      review: { changedPixels: reduced.changedPixels },
+    });
+    const revealed = revealDebateMysteryAssetV1(
+      db, args.userId, args.sessionId, "evidence", evidenceItem.reference.id,
+    ) ?? sealed;
+    attachDebateMysteryEvidenceAssetV2(
+      db, args.userId, args.sessionId, evidenceItem.reference.id, revealed,
+    );
+    return commitDebateMysterySceneRepairV1(db, args.userId, args.sessionId, {
+      action: args.action,
+      subjectId: evidenceItem.reference.id,
+      assetSubjects: snapshots,
+    });
+  }
+
+  if (audioAction) {
+    const bundleId = state.config.mansionSnapshot?.sourceBundleId ?? state.config.mansionBundleId;
+    if (!bundleId) throw new HttpError(409, "This case has no repairable mansion soundtrack.");
+    const elevenLabsKey = getElevenLabsApiKeyForUser(args.userId, userKey) ??
+      config.elevenLabsApiKey ?? null;
+    if (!elevenLabsKey) throw new HttpError(409, "Connect ElevenLabs before regenerating mansion audio.");
+    try {
+      if (args.action === "regenerate_music") {
+        await stageDebateMysteryMansionThemeV1({
+          db,
+          userKey,
+          userId: args.userId,
+          bundleId,
+          responseMode: "online",
+          apiKey: elevenLabsKey,
+        });
+        acceptDebateMysteryMansionThemeFieldRepairV1(db, args.userId, bundleId);
+      } else {
+        await stageDebateMysteryMansionAtmosphereV1({
+          db,
+          userKey,
+          userId: args.userId,
+          bundleId,
+          responseMode: "online",
+          apiKey: elevenLabsKey,
+        });
+        acceptDebateMysteryMansionAtmosphereV1(db, args.userId, bundleId);
+      }
+    } catch (error) {
+      try {
+        if (args.action === "regenerate_music") {
+          discardDebateMysteryMansionThemeV1(db, args.userId, bundleId);
+        } else {
+          discardDebateMysteryMansionAtmosphereV1(db, args.userId, bundleId);
+        }
+      } catch {
+        // Preserve the original error; a failed candidate is never active.
+      }
+      throw error;
+    }
+    const freshSnapshot = freezeDebateMysteryMansionSnapshotV2(
+      getDebateMysteryMansionBundleV2(db, args.userId, bundleId),
+    );
+    retainDebateMysteryMansionSnapshotAssetsV2(
+      db, args.userId, args.sessionId, freshSnapshot,
+    );
+    return commitDebateMysterySceneRepairV1(db, args.userId, args.sessionId, {
+      action: args.action,
+      subjectId: args.action === "regenerate_music" ? "music" : "ambience",
+      mansionPresentation: freshSnapshot.presentation,
+    });
+  }
+
+  if (args.action === "align_exterior_door") {
+    const subjectId = DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1;
+    const snapshots = snapshotDebateMysteryAssetsForSceneRepairV1(
+      db,
+      args.userId,
+      args.sessionId,
+      "room",
+      [subjectId],
+    );
+    const exterior = getDebateMysteryAssetFileForPreparationV1(
+      db,
+      userKey,
+      args.userId,
+      args.sessionId,
+      "room",
+      subjectId,
+    );
+    const profile = state.config.mansionSnapshot?.layoutV2?.venueProfile;
+    const target = await observeDebateMysteryExteriorDoorTargetV1({
+      apiKey: apiKey!,
+      bytes: exterior.bytes,
+      placeNoun: profile?.placeNoun ?? "mansion",
+      entryAction: profile?.presentation?.entryAction ?? "enter the venue",
+    });
+    const calibrated = setDebateMysteryAssetEntryTargetV1(
+      db,
+      args.userId,
+      args.sessionId,
+      "room",
+      subjectId,
+      target,
+    );
+    return commitDebateMysterySceneRepairV1(db, args.userId, args.sessionId, {
+      action: args.action,
+      assetSubjects: snapshots,
+      mansionExterior: calibrated,
+    });
+  }
+
+  if (args.action === "regenerate_exterior") {
+    const subjectId = DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1;
+    const snapshots = snapshotDebateMysteryAssetsForSceneRepairV1(
+      db,
+      args.userId,
+      args.sessionId,
+      "room",
+      [subjectId],
+    );
+    replaceDebateMysteryAssetWithPendingV1(db, {
+      userId: args.userId,
+      sessionId: args.sessionId,
+      kind: "room",
+      subjectId,
+      mimeType: "image/png",
+    });
+    const profile = state.config.mansionSnapshot?.layoutV2?.venueProfile;
+    const generated = await prepareDebateMysteryV2MansionExteriorAsset({
+      userId: args.userId,
+      sessionId: args.sessionId,
+      houseStyle: state.config.houseStyle,
+      scaleClass: state.config.scaleClass,
+      venueProfile: profile,
+      synthesize: true,
+    });
+    if (generated.status !== "ready") return restoreFailedAssetRepair(snapshots);
+    let calibrated = generated;
+    try {
+      const exterior = getDebateMysteryAssetFileForPreparationV1(
+        db,
+        userKey,
+        args.userId,
+        args.sessionId,
+        "room",
+        subjectId,
+      );
+      const target = await observeDebateMysteryExteriorDoorTargetV1({
+        apiKey: apiKey!,
+        bytes: exterior.bytes,
+        placeNoun: profile?.placeNoun ?? "mansion",
+        entryAction: profile?.presentation?.entryAction ?? "enter the venue",
+      });
+      calibrated = setDebateMysteryAssetEntryTargetV1(
+        db,
+        args.userId,
+        args.sessionId,
+        "room",
+        subjectId,
+        target,
+      );
+    } catch {
+      // A reviewed exterior remains usable with the authored family fallback.
+    }
+    return commitDebateMysterySceneRepairV1(db, args.userId, args.sessionId, {
+      action: args.action,
+      assetSubjects: snapshots,
+      mansionExterior: calibrated,
+    });
+  }
+
+  if (!room) throw new HttpError(400, "Choose the room to repair.");
+  const upgradeSubjectId = debateMysteryIllustratedRoomSubjectIdV1(room.id);
+  if (args.action === "regenerate_room_mosaic") {
+    const activeBackground = mysteryRoomAssetBackgroundRuns.get(
+      mysteryRoomAssetBackgroundKey(args.userId, args.sessionId),
+    );
+    if (activeBackground) {
+      activeBackground.controller.abort();
+      await activeBackground.promise.catch(() => undefined);
+    }
+    const activeUpgrade = mysteryRoomArtUpgradeRuns.get(`${args.userId}:${args.sessionId}`);
+    if (activeUpgrade) await activeUpgrade.catch(() => undefined);
+    const snapshots = snapshotDebateMysteryAssetsForSceneRepairV1(
+      db,
+      args.userId,
+      args.sessionId,
+      "room",
+      [room.id, upgradeSubjectId],
+    );
+    replaceDebateMysteryAssetWithPendingV1(db, {
+      userId: args.userId,
+      sessionId: args.sessionId,
+      kind: "room",
+      subjectId: room.id,
+      mimeType: "image/png",
+    });
+    deleteDebateMysterySealedAssetV1(
+      db,
+      args.userId,
+      args.sessionId,
+      "room",
+      upgradeSubjectId,
+    );
+    const generated = await prepareDebateMysteryV2RoomAssets({
+      userId: args.userId,
+      sessionId: args.sessionId,
+      rooms: [room],
+      crimeSceneRoomId: state.crimeSceneRoomId ?? room.id,
+      mode: "background",
+      houseStyle: state.config.houseStyle,
+    });
+    const roomAsset = generated[room.id];
+    if (!roomAsset || roomAsset.status !== "ready") return restoreFailedAssetRepair(snapshots);
+    let reconciledGeometry: Awaited<ReturnType<typeof observeDebateMysteryRoomGeometryV1>> = {};
+    const layout = state.config.mansionSnapshot?.layoutV2;
+    if (layout) {
+      try {
+        const generatedImage = getDebateMysteryAssetFileForPreparationV1(
+          db,
+          userKey,
+          args.userId,
+          args.sessionId,
+          "room",
+          room.id,
+        );
+        reconciledGeometry = await observeDebateMysteryRoomGeometryV1({
+          apiKey: apiKey!,
+          bytes: generatedImage.bytes,
+          room,
+          layout,
+          anchors: true,
+          lights: true,
+        });
+      } catch {
+        // The repaired image remains usable; the field tool exposes selective
+        // anchor and light retries without revealing the room.
+      }
+    }
+    return commitDebateMysterySceneRepairV1(db, args.userId, args.sessionId, {
+      action: args.action,
+      roomId: room.id,
+      assetSubjects: snapshots,
+      roomAsset,
+      ...reconciledGeometry,
+    });
+  }
+
+  if (args.action === "regenerate_room_upgrade" || args.action === "generate_room_upgrade") {
+    const activeUpgrade = mysteryRoomArtUpgradeRuns.get(`${args.userId}:${args.sessionId}`);
+    if (activeUpgrade) await activeUpgrade.catch(() => undefined);
+    const snapshots = snapshotDebateMysteryAssetsForSceneRepairV1(
+      db,
+      args.userId,
+      args.sessionId,
+      "room",
+      [upgradeSubjectId],
+    );
+    replaceDebateMysteryAssetWithPendingV1(db, {
+      userId: args.userId,
+      sessionId: args.sessionId,
+      kind: "room",
+      subjectId: upgradeSubjectId,
+      mimeType: "image/png",
+    });
+    await prepareDebateMysteryIllustratedRoomsV1(
+      args.userId,
+      args.sessionId,
+      undefined,
+      new Set([room.id]),
+    );
+    const upgraded = getDebateMysterySealedAssetRefV1(
+      db,
+      args.userId,
+      args.sessionId,
+      "room",
+      upgradeSubjectId,
+    );
+    if (upgraded?.status !== "ready") return restoreFailedAssetRepair(snapshots);
+    return commitDebateMysterySceneRepairV1(db, args.userId, args.sessionId, {
+      action: args.action,
+      roomId: room.id,
+      assetSubjects: snapshots,
+    });
+  }
+
+  clearDebateMysterySceneRepairAssetSnapshotsV1(db, args.userId, args.sessionId);
+  const layout = state.config.mansionSnapshot?.layoutV2;
+  if (!layout) throw new HttpError(409, "This archived room has no repairable layout metadata.");
+  const preferredSubjectId = args.artStyle === "upgraded" ? upgradeSubjectId : room.id;
+  let sourceSubjectId = preferredSubjectId;
+  let source = getDebateMysterySealedAssetRefV1(
+    db,
+    args.userId,
+    args.sessionId,
+    "room",
+    preferredSubjectId,
+  );
+  if (source?.status !== "ready" && preferredSubjectId !== room.id) {
+    sourceSubjectId = room.id;
+    source = getDebateMysterySealedAssetRefV1(
+      db,
+      args.userId,
+      args.sessionId,
+      "room",
+      room.id,
+    );
+  }
+  if (source?.status !== "ready") {
+    throw new HttpError(409, "Generate this room before recalibrating its scene geometry.");
+  }
+  const image = getDebateMysteryAssetFileForPreparationV1(
+    db,
+    userKey,
+    args.userId,
+    args.sessionId,
+    "room",
+    sourceSubjectId,
+  );
+
+  if (args.action === "refresh_room_anchors") {
+    const anchors = layout.placementAnchors.filter((anchor) => anchor.roomId === room.id);
+    const requested = [
+      ...anchors.map((anchor) =>
+        `anchor:${anchor.id} = ${anchor.relation} ${anchor.name}`),
+      ...room.hotspots.map((hotspot) =>
+        `hotspot:${hotspot.id} = ${hotspot.label}`),
+    ];
+    if (requested.length === 0) throw new HttpError(409, "This room has no anchors to refresh.");
+    const placements = await observeMysteryScenePlacementsV1({
+      apiKey: apiKey!,
+      bytes: image.bytes,
+      prompt: [
+        `Inspect this already accepted ${room.name} room image.`,
+        "Re-anchor each listed interaction to the visible object, fixture, or architectural region it names. Do not ask to alter or move anything in the image; only report where each existing thing already is.",
+        requested.join("; "),
+      ].join(" "),
+    });
+    const byId = new Map(placements.map((placement) => [placement.id, placement]));
+    const nextAnchors = anchors.map((anchor) => {
+      const target = byId.get(`anchor:${anchor.id}`);
+      return target ? { ...anchor, point: { x: target.x, y: target.y } } : anchor;
+    });
+    const nextHotspots = room.hotspots.map((hotspot) => {
+      const target = byId.get(`hotspot:${hotspot.id}`);
+      return target
+        ? { ...hotspot, polygon: translateMysteryHotspotPolygonV1(hotspot.polygon, target) }
+        : hotspot;
+    });
+    if (
+      nextAnchors.every((anchor, index) => anchor === anchors[index]) &&
+      nextHotspots.every((hotspot, index) => hotspot === room.hotspots[index])
+    ) {
+      throw new HttpError(409, "PRISM could not match the room's visible anchors reliably.");
+    }
+    return commitDebateMysterySceneRepairV1(db, args.userId, args.sessionId, {
+      action: args.action,
+      roomId: room.id,
+      hotspots: nextHotspots,
+      placementAnchors: nextAnchors,
+    });
+  }
+
+  const lights = layout.lights.filter((light) => light.roomId === room.id);
+  if (lights.length === 0) throw new HttpError(409, "This room has no dynamic lights to refresh.");
+  const placements = await observeMysteryScenePlacementsV1({
+    apiKey: apiKey!,
+    bytes: image.bytes,
+    prompt: [
+      `Inspect this already accepted ${room.name} room image.`,
+      "For each existing PRISM dynamic light, locate the most plausible visible lamp, window, fire, neon strip, or practical source that should own that overlay. Preserve the light's identity and color; report only its aligned center and a rotation when visibly meaningful.",
+      lights.map((light) =>
+        `light:${light.id} = ${light.kind} ${light.color} light currently near (${mysteryLightCenterV1(light).x.toFixed(2)}, ${mysteryLightCenterV1(light).y.toFixed(2)})`
+      ).join("; "),
+    ].join(" "),
+  });
+  const byId = new Map(placements.map((placement) => [placement.id, placement]));
+  const nextLights = lights.map((light) => {
+    const target = byId.get(`light:${light.id}`);
+    return target ? relocateMysteryLightV1(light, target) : light;
+  });
+  if (nextLights.every((light, index) => light === lights[index])) {
+    throw new HttpError(409, "PRISM could not match the room's visible light sources reliably.");
+  }
+  return commitDebateMysterySceneRepairV1(db, args.userId, args.sessionId, {
+    action: args.action,
+    roomId: room.id,
+    lights: nextLights,
   });
 }
 
@@ -14947,6 +15870,76 @@ function buildRoutes(
         ok: true,
         ...result,
         canUndo: state.canUndo,
+      });
+    }),
+    route("GET", "/api/conversations/distillations", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        summaries: listChatBotDistillations(db, userId),
+      });
+    }),
+    route("POST", "/api/conversations/distill", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const runtime = await contextualTextRuntimeForUser({
+        userId,
+        user,
+        requestedProvider: body.preferredProvider,
+        requestedResponseMode: body.responseMode,
+        modelOverride: body.modelOverride,
+        routingContext: {
+          surface: "chat",
+          inputText: "Distill owned direct Chat continuity by persona.",
+          outputTokens: 700,
+          structuredOutput: false,
+        },
+      });
+      const provider = selectProvider(
+        runtime.provider,
+        runtime.openAiApiKey,
+        user.secondary_ollama_host,
+        runtime.anthropicApiKey,
+        runtime.ollamaCloudApiKey,
+      );
+      const localProvider =
+        runtime.provider === "local"
+          ? provider
+          : selectProvider("local", undefined, user.secondary_ollama_host);
+      const result = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "chat",
+          surface: "chat",
+        },
+        () =>
+          distillChatConversations(db, provider, userId, {
+            localProvider,
+            prismPersona: {
+              name: user.prism_default_bot_name?.trim() || "Prism",
+              systemPrompt:
+                composeBotSystemPrompt(
+                  user.prism_default_bot_name,
+                  user.prism_default_bot_system_prompt,
+                  undefined,
+                  null,
+                  {
+                    audioVoiceProfile:
+                      user.prism_default_bot_audio_voice_profile,
+                  },
+                ) ?? "",
+              onlineEnabled: false,
+            },
+          }),
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        provider: runtime.provider,
+        model: runtime.model,
+        ...result,
       });
     }),
     route("POST", "/api/conversations/sweep/undo", async (ctx) => {
@@ -20032,11 +21025,23 @@ function buildRoutes(
         throw new HttpError(409, "Connect OpenAI before retrying synthesized visuals.");
       }
       const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (Object.keys(body).some((key) => key !== "category" && key !== "roomId")) {
+        throw new HttpError(400, "Visual retry accepts only a category and optional room.");
+      }
       const category = body.category === "exterior" ||
           body.category === "clue_props" ||
           body.category === "mosaic_rooms"
         ? body.category
         : null;
+      const roomId = typeof body.roomId === "string" && body.roomId.trim()
+        ? body.roomId.trim()
+        : null;
+      if (roomId && category !== "mosaic_rooms") {
+        throw new HttpError(400, "A room-specific retry must target Mosaic rooms.");
+      }
+      if (roomId && !session.formatState.rooms.some((room) => room.id === roomId)) {
+        throw new HttpError(404, "That mansion room was not found.");
+      }
       const enabledKinds = category === "exterior"
         ? ["room" as const]
         : category === "clue_props"
@@ -20054,7 +21059,9 @@ function buildRoutes(
       if (enabledKinds.length === 0) {
         throw new HttpError(409, "This case did not request synthesized visuals.");
       }
-      const allowedSubjectIds = category === "exterior"
+      const allowedSubjectIds = roomId
+        ? new Set([roomId])
+        : category === "exterior"
         ? new Set([DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1])
         : category === "clue_props"
           ? new Set(session.formatState.record
@@ -20063,6 +21070,18 @@ function buildRoutes(
           : category === "mosaic_rooms"
             ? new Set(session.formatState.rooms.map((room) => room.id))
             : undefined;
+      if (roomId) {
+        // A player-selected room takes priority over the opportunistic
+        // background frontier. This also gives an interrupted run a clean
+        // owner before its durable pending row is reclaimed below.
+        const activeBackground = mysteryRoomAssetBackgroundRuns.get(
+          mysteryRoomAssetBackgroundKey(userId, session.id),
+        );
+        if (activeBackground) {
+          activeBackground.controller.abort();
+          await activeBackground.promise.catch(() => undefined);
+        }
+      }
       const retried = requeueRetryableDebateMysteryAssetFallbacksV1(
         db,
         userId,
@@ -20071,6 +21090,39 @@ function buildRoutes(
         enabledKinds,
         allowedSubjectIds,
       );
+      if (roomId && !retried.some((item) =>
+        item.kind === "room" && item.subjectId === roomId)) {
+        const selectedAsset = getDebateMysterySealedAssetRefV1(
+          db,
+          userId,
+          session.id,
+          "room",
+          roomId,
+        );
+        if (!selectedAsset || selectedAsset.status === "pending") {
+          retried.push({
+            kind: "room",
+            subjectId: roomId,
+            asset: setDebateMysteryAssetPendingV1(db, {
+              userId,
+              sessionId: session.id,
+              kind: "room",
+              subjectId: roomId,
+              mimeType: "image/png",
+            }),
+          });
+        } else if (selectedAsset.status === "ready") {
+          // Repair an interrupted session attachment without regenerating or
+          // disclosing the sealed room plate.
+          attachDebateMysteryRoomAssetV2(
+            db,
+            userId,
+            session.id,
+            roomId,
+            selectedAsset,
+          );
+        }
+      }
       for (const item of retried) {
         if (item.kind === "room") {
           attachDebateMysteryRoomAssetV2(
@@ -20109,8 +21161,28 @@ function buildRoutes(
           exterior,
         );
       }
+      if (roomId && retried.some((item) => item.kind === "room" && item.subjectId === roomId)) {
+        const selectedRoom = session.formatState.rooms.find((room) => room.id === roomId)!;
+        await prepareDebateMysteryV2RoomAssets({
+          userId,
+          sessionId: session.id,
+          rooms: [selectedRoom],
+          crimeSceneRoomId: session.formatState.crimeSceneRoomId ?? selectedRoom.id,
+          mode: "background",
+          houseStyle: session.formatState.config.houseStyle,
+          onPrepared: (preparedRoomId, asset) => {
+            attachDebateMysteryRoomAssetV2(
+              db,
+              userId,
+              session.id,
+              preparedRoomId,
+              asset,
+            );
+          },
+        });
+      }
       if (retried.some((item) =>
-        item.subjectId !== DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1)) {
+        item.subjectId !== DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1) && !roomId) {
         queueDebateMysteryV2RoomAssetBackground(userId, session.id);
       }
       const refreshed = refreshDebateMysteryProductionReadinessV1(
@@ -20122,7 +21194,7 @@ function buildRoutes(
             debateMysteryRoomArtUpgradeStatusV1(userId, session.id).status === "ready",
         },
       );
-      json(ctx.res, 202, {
+      json(ctx.res, roomId ? 200 : 202, {
         ok: true,
         requeued: retried.length,
         session: debateSessionForPlayer(refreshed),
@@ -20170,13 +21242,33 @@ function buildRoutes(
     }),
     route("POST", "/api/debates/:id/mystery-room-art/upgrade", async (ctx) => {
       const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (Object.keys(body).some((key) => key !== "roomId")) {
+        throw new HttpError(400, "Room-art upgrade accepts only an optional room.");
+      }
+      const roomId = typeof body.roomId === "string" && body.roomId.trim()
+        ? body.roomId.trim()
+        : null;
+      if (roomId) {
+        const session = getDebateSession(db, userId, ctx.params.id);
+        if (
+          session.formatState.format !== "whodunnit" ||
+          session.formatState.version !== 2 ||
+          !session.formatState.rooms.some((room) => room.id === roomId)
+        ) {
+          throw new HttpError(404, "That mansion room was not found.");
+        }
+      }
       const before = debateMysteryRoomArtUpgradeStatusV1(userId, ctx.params.id);
-      if (before.status === "ready") {
+      if (before.status === "ready" || (roomId && before.readyRoomIds.includes(roomId))) {
         ctx.res.setHeader("cache-control", "private, no-store");
         json(ctx.res, 200, before);
         return;
       }
-      if (before.status === "preparing") {
+      if (roomId && !before.requiresUpgradeRoomIds.includes(roomId)) {
+        throw new HttpError(409, "Generate this room's Mosaic before upgrading it.");
+      }
+      if (before.status === "preparing" && !roomId) {
         ctx.res.setHeader("cache-control", "private, no-store");
         json(ctx.res, 202, before);
         return;
@@ -20184,30 +21276,89 @@ function buildRoutes(
       if (before.status === "unavailable") {
         throw new HttpError(409, before.reason ?? "Upgraded room derivatives are unavailable.");
       }
-      queueDebateMysteryIllustratedRoomsV1(userId, ctx.params.id);
-      ctx.res.setHeader("cache-control", "private, no-store");
-      json(ctx.res, 202, debateMysteryRoomArtUpgradeStatusV1(userId, ctx.params.id));
-    }),
-    route("POST", "/api/debates/:id/mystery-assets/:kind/:subjectId/save", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const kind = ctx.params.kind === "room"
-        ? "room"
-        : ctx.params.kind === "evidence"
-          ? "evidence"
-          : null;
-      if (!kind) throw new HttpError(404, "That sealed case visual was not found.");
-      const body = (ctx.body ?? {}) as Record<string, unknown>;
-      const saved = saveRevealedDebateMysteryAssetV1(
-        db,
-        decryptUserKey(userId),
+      const run = queueDebateMysteryIllustratedRoomsV1(
         userId,
         ctx.params.id,
-        kind,
-        ctx.params.subjectId,
-        typeof body.title === "string" ? body.title : "Saved Whodunnit visual",
+        roomId ? new Set([roomId]) : undefined,
+      );
+      if (roomId) await run;
+      ctx.res.setHeader("cache-control", "private, no-store");
+      json(
+        ctx.res,
+        roomId ? 200 : 202,
+        debateMysteryRoomArtUpgradeStatusV1(userId, ctx.params.id),
+      );
+    }),
+    route("POST", "/api/debates/:id/mystery-scene-repair", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (Object.keys(body).some((key) => !["action", "roomId", "subjectId", "artStyle"].includes(key))) {
+        throw new HttpError(400, "Scene repair accepts only an action, room, found item, and current art style.");
+      }
+      const action = typeof body.action === "string" &&
+          DEBATE_MYSTERY_SCENE_REPAIR_ACTIONS_V1.has(
+            body.action as import("@localai/shared").DebateMysterySceneRepairActionV1,
+          )
+        ? body.action as import("@localai/shared").DebateMysterySceneRepairActionV1
+        : null;
+      if (!action) throw new HttpError(400, "Choose a supported scene repair.");
+      const session = await repairDebateMysterySceneV1({
+        userId,
+        sessionId: ctx.params.id,
+        action,
+        roomId: typeof body.roomId === "string" && body.roomId.trim()
+          ? body.roomId.trim()
+          : null,
+        subjectId: typeof body.subjectId === "string" && body.subjectId.trim()
+          ? body.subjectId.trim()
+          : null,
+        artStyle: body.artStyle === "upgraded" ? "upgraded" : "mosaic",
+      });
+      ctx.res.setHeader("cache-control", "private, no-store");
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+        roomArtUpgrade: debateMysteryRoomArtUpgradeStatusV1(userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/debates/:id/mystery-scene-repair/undo", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (Object.keys(body).length > 0) {
+        throw new HttpError(400, "Scene repair undo does not accept options.");
+      }
+      const before = getDebateSession(db, userId, ctx.params.id);
+      if (before.formatState.format !== "whodunnit" || before.formatState.version !== 2) {
+        throw new HttpError(409, "Scene repair requires a Whodunnit V2 case.");
+      }
+      const repairUndo = before.formatState.sceneRepairUndo;
+      if (repairUndo?.action === "regenerate_music" || repairUndo?.action === "regenerate_ambience") {
+        const bundleId = before.formatState.config.mansionSnapshot?.sourceBundleId ??
+          before.formatState.config.mansionBundleId;
+        if (!bundleId) throw new HttpError(409, "That mansion soundtrack is no longer available.");
+        if (repairUndo.action === "regenerate_music") {
+          const hadActive = Boolean(repairUndo.previousMansionPresentation?.assets.some(
+            (asset) => asset.role === "music" && asset.logicalId === MANSION_MUSIC_ACTIVE_LOGICAL_ID_V1,
+          ));
+          undoDebateMysteryMansionThemeFieldRepairV1(db, userId, bundleId, hadActive);
+        } else {
+          const hadActive = Boolean(repairUndo.previousMansionPresentation?.assets.some(
+            (asset) => asset.role === "music" && asset.logicalId === MANSION_ATMOSPHERE_ACTIVE_LOGICAL_ID_V1,
+          ));
+          undoDebateMysteryMansionAtmosphereFieldRepairV1(db, userId, bundleId, hadActive);
+        }
+      }
+      const session = undoDebateMysterySceneRepairV1(
+        db,
+        userId,
+        ctx.params.id,
       );
       ctx.res.setHeader("cache-control", "private, no-store");
-      json(ctx.res, 201, { ok: true, image: saved });
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+        roomArtUpgrade: debateMysteryRoomArtUpgradeStatusV1(userId, ctx.params.id),
+      });
     }),
     route("GET", "/api/debates/mystery-cases", async (ctx) => {
       const userId = requireAuth(ctx);

@@ -228,6 +228,8 @@ import {
 } from "./image-job-slot.ts";
 import {
   buildRememberedZenWallpaperHistory,
+  getLatestChatBotDistillation,
+  getLatestPrismChatDistillation,
   getLatestRememberedZenWallpaperForBot,
   mapZenWallpaperMetadata,
   rebaseZenWallpaperMetadataForVisibleWindow,
@@ -7902,6 +7904,7 @@ function buildPromptMessages(args: {
   prismMood?: PrismMoodSnapshot | null;
   moodBoundaryHint?: string | null;
   threadSummary?: string | null;
+  chatDistillationContext?: string | null;
   zenSessionMemoryContext?: ZenSessionMemoryOverview | null;
   zenPersonaContinuityContext?: ZenSessionMemoryOverview | null;
   zenPersonaContinuityLabel?: string | null;
@@ -7998,6 +8001,19 @@ function buildPromptMessages(args: {
     promptMessages.push({
       role: "system",
       content: `Earlier in this thread (compacted context):\n${args.threadSummary.trim()}`,
+    });
+  }
+  if (
+    args.chatDistillationContext &&
+    args.chatDistillationContext.trim().length > 0
+  ) {
+    promptMessages.push({
+      role: "system",
+      content: [
+        "Private continuity carried into this new direct Chat:",
+        args.chatDistillationContext.trim(),
+        "Use this quietly as background continuity. The user's newest message is authoritative and takes precedence wherever its direction differs or moves on. Never mention a distillation, archive, summary, or memory system.",
+      ].join("\n"),
     });
   }
   const zenSessionMemoryHint = buildZenSessionMemoryPromptContext(
@@ -8173,18 +8189,28 @@ async function retrieveMemoriesWithFallback(
   includeThreadSummaries: boolean,
   botScopedOnly = false
 ): Promise<string[]> {
+  const controller = new AbortController();
   const timeoutSentinel = Symbol("memory-timeout");
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
   const timeout = new Promise<typeof timeoutSentinel>((resolve) => {
-    setTimeout(() => resolve(timeoutSentinel), MEMORY_RETRIEVAL_TIMEOUT_MS);
+    timeoutId = setTimeout(() => {
+      controller.abort("memory retrieval deadline");
+      resolve(timeoutSentinel);
+    }, MEMORY_RETRIEVAL_TIMEOUT_MS);
   });
   const retrieval = Promise.allSettled([
-    retrieveRelevantMemories(db, userId, message, userKey, botId),
+    retrieveRelevantMemories(db, userId, message, userKey, botId, 4, {
+      signal: controller.signal,
+    }),
     includeThreadSummaries
-      ? retrieveMemorySummaries(db, userId, message)
+      ? retrieveMemorySummaries(db, userId, message, 4, {
+          signal: controller.signal,
+        })
       : Promise.resolve([]),
   ]);
 
   const result = await Promise.race([retrieval, timeout]);
+  if (timeoutId !== null) clearTimeout(timeoutId);
   if (result === timeoutSentinel) {
     return [];
   }
@@ -10413,6 +10439,20 @@ export async function processChatMessage(
       ? null
       : prismMoodForgivenessSystemHint,
     threadSummary: botPowerEternalIntroductionTurn ? null : threadSummary,
+    chatDistillationContext:
+      createdConversationForTurn &&
+      !incognitoForTurn &&
+      !botPowerEternalIntroductionTurn
+        ? activeMemoryBotId && (mode === "chat" || isZenMode(mode))
+          ? getLatestChatBotDistillation(
+              db,
+              userId,
+              activeMemoryBotId,
+            )?.summary ?? null
+          : !activeMemoryBotId && (mode === "chat" || isZenMode(mode))
+            ? getLatestPrismChatDistillation(db, userId)?.summary ?? null
+            : null
+        : null,
     zenSessionMemoryContext: botPowerEternalIntroductionTurn
       ? null
       : zenSessionMemoryContext,

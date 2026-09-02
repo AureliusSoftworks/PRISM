@@ -9,9 +9,13 @@ import {
   deleteConversation,
   deleteConversationMessage,
   deleteConversationsByBot,
+  distillChatConversations,
   getConversationSweepState,
+  getLatestChatBotDistillation,
+  getLatestPrismChatDistillation,
   getLatestRememberedZenWallpaperForBot,
   listConversationSummaries,
+  listChatBotDistillations,
   mapZenWallpaperMetadata,
   rebaseZenWallpaperMetadataForVisibleWindow,
   recoverStaleZenWallpaperGenerationStatus,
@@ -42,6 +46,9 @@ function createTestDb(): DatabaseSync {
       coffee_absent_bot_ids TEXT NOT NULL DEFAULT '[]',
       archived_at TEXT,
       archive_batch_id TEXT,
+      chat_distillation_kind TEXT,
+      chat_distillation_key TEXT,
+      chat_distillation_persona_name TEXT,
       incognito INTEGER NOT NULL DEFAULT 0,
       zen_wallpaper_enabled INTEGER NOT NULL DEFAULT 0,
       zen_wallpaper_image_id TEXT,
@@ -60,6 +67,8 @@ function createTestDb(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
+      system_prompt TEXT NOT NULL DEFAULT '',
+      online_enabled INTEGER NOT NULL DEFAULT 1,
       color TEXT,
       glyph TEXT,
       delete_protected INTEGER NOT NULL DEFAULT 0,
@@ -1674,6 +1683,485 @@ describe("sweepConversations + undoLatestConversationSweep", () => {
       .prepare("SELECT archived_at FROM conversations WHERE id = ?")
       .get("chat-1") as { archived_at: string | null };
     assert.ok(archived.archived_at, "expired undo should not restore archived chats");
+  });
+});
+
+describe("distillChatConversations", () => {
+  it("persists persona continuity before archiving only owned direct Chat rows", async () => {
+    const db = createTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, system_prompt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(
+      "bot-1",
+      "user-1",
+      "Mara",
+      "You are Mara: precise, warm, and fond of lighthouse metaphors.",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:00.000Z",
+    );
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, system_prompt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(
+      "bot-2",
+      "user-2",
+      "Other",
+      "Other tenant persona.",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:00.000Z",
+    );
+    seedBotChat(db, "user-1", "chat-a", "bot-1");
+    seedBotChat(db, "user-1", "chat-b", "bot-1");
+    seedBotChat(db, "user-2", "other-chat", "bot-2");
+    db.prepare(
+      "UPDATE conversations SET conversation_mode = 'chat' WHERE id IN ('chat-a', 'chat-b', 'other-chat')",
+    ).run();
+    seedBotChat(db, "user-1", "incognito-chat", "bot-1");
+    db.prepare(
+      "UPDATE conversations SET conversation_mode = 'chat', incognito = 1 WHERE id = 'incognito-chat'",
+    ).run();
+    seedBotChat(db, "user-1", "coffee-chat", "bot-1");
+    db.prepare(
+      "UPDATE conversations SET conversation_mode = 'coffee' WHERE id = 'coffee-chat'",
+    ).run();
+
+    const calls: string[] = [];
+    const result = await distillChatConversations(
+      db,
+      {
+        name: "local",
+        async generateResponse(messages) {
+          calls.push(messages.map((message) => message.content).join("\n"));
+          return "I'm keeping the lighthouse plan and the promise to choose a calm launch window.";
+        },
+        async embedText() {
+          return [];
+        },
+      },
+      "user-1",
+    );
+
+    assert.equal(result.sweptGroups, 1);
+    assert.equal(result.archivedConversationCount, 2);
+    assert.equal(calls.length, 1);
+    assert.match(calls[0] ?? "", /lighthouse metaphors/u);
+    assert.equal(
+      (db.prepare("SELECT archived_at FROM conversations WHERE id = 'chat-a'").get() as { archived_at: string | null }).archived_at !== null,
+      true,
+    );
+    assert.equal(
+      (db.prepare("SELECT archived_at FROM conversations WHERE id = 'incognito-chat'").get() as { archived_at: string | null }).archived_at,
+      null,
+    );
+    assert.equal(
+      (db.prepare("SELECT archived_at FROM conversations WHERE id = 'coffee-chat'").get() as { archived_at: string | null }).archived_at,
+      null,
+    );
+    assert.equal(
+      (db.prepare("SELECT archived_at FROM conversations WHERE id = 'other-chat'").get() as { archived_at: string | null }).archived_at,
+      null,
+    );
+    assert.deepEqual(listChatBotDistillations(db, "user-1"), result.summaries);
+
+    const undo = undoLatestConversationSweep(db, "user-1", result.batchId);
+    assert.equal(undo.archivedConversationCount, 2);
+    assert.equal(undo.summaryConversationCount, 1);
+    assert.equal(
+      (db.prepare("SELECT archived_at FROM conversations WHERE id = 'chat-a'").get() as { archived_at: string | null }).archived_at,
+      null,
+    );
+    assert.deepEqual(listChatBotDistillations(db, "user-1"), []);
+  });
+
+  it("persists canonical Prism continuity for default Chat without borrowing a bot scope", async () => {
+    const db = createTestDb();
+    seedBotChat(db, "user-1", "prism-chat", null);
+    db.prepare(
+      "UPDATE conversations SET conversation_mode = 'zen' WHERE id = 'prism-chat'",
+    ).run();
+    let onlineCalls = 0;
+    const localPrompts: string[] = [];
+
+    const result = await distillChatConversations(
+      db,
+      {
+        name: "openai",
+        async generateResponse() {
+          onlineCalls += 1;
+          return "This online response must not be used.";
+        },
+        async embedText() {
+          return [];
+        },
+      },
+      "user-1",
+      {
+        prismPersona: {
+          name: "Prism",
+          systemPrompt:
+            "You are Prism, the ordinary account-level companion with a calm and practical voice.",
+          onlineEnabled: false,
+        },
+        localProvider: {
+          name: "local",
+          async generateResponse(messages) {
+            localPrompts.push(
+              messages.map((message) => message.content).join("\n"),
+            );
+            return "I'm keeping the user's practical next step ready without overriding what they ask next.";
+          },
+          async embedText() {
+            return [];
+          },
+        },
+      },
+    );
+
+    assert.equal(onlineCalls, 0);
+    assert.equal(localPrompts.length, 1);
+    assert.match(localPrompts[0] ?? "", /ordinary account-level companion/u);
+    assert.deepEqual(result.summaries.map((summary) => summary.personaKind), [
+      "prism",
+    ]);
+    assert.equal(result.summaries[0]?.botId, null);
+    assert.deepEqual(getLatestPrismChatDistillation(db, "user-1"), result.summaries[0]);
+    assert.equal(getLatestChatBotDistillation(db, "user-1", "any-bot"), null);
+    const artifact = db
+      .prepare(
+        `SELECT bot_id, chat_distillation_kind, chat_distillation_key
+           FROM conversations
+          WHERE user_id = ? AND chat_distillation_kind = 'prism'`,
+      )
+      .get("user-1") as {
+      bot_id: string | null;
+      chat_distillation_kind: string;
+      chat_distillation_key: string;
+    };
+    assert.equal(artifact.bot_id, null);
+    assert.equal(artifact.chat_distillation_key, "prism");
+  });
+
+  it("archives deleted-bot history into one non-surfaced local artifact keyed by its last assistant", async () => {
+    const db = createTestDb();
+    for (const id of ["orphan-a", "orphan-b"]) {
+      seedBotChat(db, "user-1", id, "deleted-owner-bot");
+      db.prepare(
+        "UPDATE conversations SET conversation_mode = 'chat', title = ? WHERE id = ?",
+      ).run(`Former chat ${id}`, id);
+      db.prepare(
+        `INSERT INTO messages (
+           id, conversation_id, user_id, role, content, bot_id, created_at
+         ) VALUES (?, ?, ?, 'assistant', ?, ?, ?)`,
+      ).run(
+        `assistant-${id}`,
+        id,
+        "user-1",
+        `Former reply ${id}`,
+        "last-deleted-speaker",
+        "2099-01-01T00:00:00.000Z",
+      );
+    }
+    let onlineCalls = 0;
+    const localPrompts: string[] = [];
+
+    const result = await distillChatConversations(
+      db,
+      {
+        name: "openai",
+        async generateResponse() {
+          onlineCalls += 1;
+          return "This online response must not be used.";
+        },
+        async embedText() {
+          return [];
+        },
+      },
+      "user-1",
+      {
+        localProvider: {
+          name: "local",
+          async generateResponse(messages) {
+            localPrompts.push(
+              messages.map((message) => message.content).join("\n"),
+            );
+            return "The user had two former conversations with an unavailable persona and left one practical thread unresolved.";
+          },
+          async embedText() {
+            return [];
+          },
+        },
+      },
+    );
+
+    assert.equal(onlineCalls, 0);
+    assert.equal(localPrompts.length, 1, "same last assistant should share one orphan bucket");
+    assert.match(localPrompts[0] ?? "", /preserve rather than imitate/iu);
+    assert.match(localPrompts[0] ?? "", /Former chat orphan-a/u);
+    assert.match(localPrompts[0] ?? "", /Former chat orphan-b/u);
+    assert.equal(result.sweptGroups, 1);
+    assert.equal(result.archivedConversationCount, 2);
+    assert.deepEqual(result.summaries, []);
+    assert.deepEqual(listChatBotDistillations(db, "user-1"), []);
+    assert.equal(getLatestPrismChatDistillation(db, "user-1"), null);
+    const artifact = db
+      .prepare(
+        `SELECT bot_id, chat_distillation_kind, chat_distillation_key
+           FROM conversations
+          WHERE user_id = ? AND chat_distillation_kind = 'orphan'`,
+      )
+      .get("user-1") as {
+      bot_id: string | null;
+      chat_distillation_kind: string;
+      chat_distillation_key: string;
+    };
+    assert.equal(artifact.bot_id, null);
+    assert.equal(artifact.chat_distillation_key, "last-deleted-speaker");
+  });
+
+  it("clears every eligible direct Chat source after all persona, Prism, and orphan artifacts commit", async () => {
+    const db = createTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, system_prompt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run("bot-1", "user-1", "Mara", "Mara persona", "now", "now");
+    seedBotChat(db, "user-1", "persona-chat", "bot-1");
+    seedBotChat(db, "user-1", "prism-chat", null);
+    seedBotChat(db, "user-1", "orphan-chat", "deleted-bot");
+    db.prepare(
+      `UPDATE conversations
+          SET conversation_mode = CASE WHEN id = 'prism-chat' THEN 'zen' ELSE 'chat' END
+        WHERE user_id = 'user-1'`,
+    ).run();
+
+    const result = await distillChatConversations(
+      db,
+      {
+        name: "local",
+        async generateResponse(messages) {
+          const prompt = messages.map((message) => message.content).join("\n");
+          if (prompt.includes("third person")) {
+            return "The user left one archived former-persona thread.";
+          }
+          return prompt.includes("Persona: Prism")
+            ? "I'm Prism, carrying only Prism's continuity."
+            : "I'm Mara, carrying only Mara's continuity.";
+        },
+        async embedText() {
+          return [];
+        },
+      },
+      "user-1",
+      {
+        prismPersona: {
+          name: "Prism",
+          systemPrompt: "You are ordinary Prism.",
+          onlineEnabled: false,
+        },
+      },
+    );
+
+    assert.equal(result.sweptGroups, 3);
+    assert.equal(result.archivedConversationCount, 3);
+    assert.equal(result.summaryConversationCount, 3);
+    assert.deepEqual(
+      result.summaries.map((summary) => summary.personaKind).sort(),
+      ["bot", "prism"],
+    );
+    assert.match(
+      getLatestChatBotDistillation(db, "user-1", "bot-1")?.summary ?? "",
+      /only Mara's continuity/u,
+    );
+    assert.match(
+      getLatestPrismChatDistillation(db, "user-1")?.summary ?? "",
+      /only Prism's continuity/u,
+    );
+    assert.deepEqual(
+      listConversationSummaries(db, "user-1").filter(
+        (conversation) =>
+          conversation.mode === "chat" || conversation.mode === "zen",
+      ),
+      [],
+      "the sidebar projection must contain no eligible direct Chat source",
+    );
+  });
+
+  it("keeps orphan sources visible when their archival distillation fails", async () => {
+    const db = createTestDb();
+    seedBotChat(db, "user-1", "orphan-chat", "deleted-bot");
+    db.prepare(
+      "UPDATE conversations SET conversation_mode = 'chat' WHERE id = 'orphan-chat'",
+    ).run();
+
+    const result = await distillChatConversations(
+      db,
+      {
+        name: "local",
+        async generateResponse() {
+          throw new Error("Archival model unavailable");
+        },
+        async embedText() {
+          return [];
+        },
+      },
+      "user-1",
+    );
+
+    assert.equal(result.batchId, null);
+    assert.equal(result.failures[0]?.personaKind, "orphan");
+    assert.equal(
+      (
+        db
+          .prepare("SELECT archived_at FROM conversations WHERE id = ?")
+          .get("orphan-chat") as { archived_at: string | null }
+      ).archived_at,
+      null,
+    );
+    assert.deepEqual(listChatBotDistillations(db, "user-1"), []);
+  });
+
+  it("keeps source chats visible when persona generation fails", async () => {
+    const db = createTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, system_prompt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run("bot-1", "user-1", "Mara", "Mara persona", "now", "now");
+    seedBotChat(db, "user-1", "chat-a", "bot-1");
+    db.prepare("UPDATE conversations SET conversation_mode = 'chat' WHERE id = 'chat-a'").run();
+
+    const result = await distillChatConversations(
+      db,
+      {
+        name: "local",
+        async generateResponse() {
+          throw new Error("LOCAL model unavailable");
+        },
+        async embedText() {
+          return [];
+        },
+      },
+      "user-1",
+    );
+
+    assert.equal(result.batchId, null);
+    assert.equal(result.failures.length, 1);
+    assert.equal(
+      (db.prepare("SELECT archived_at FROM conversations WHERE id = 'chat-a'").get() as { archived_at: string | null }).archived_at,
+      null,
+    );
+    assert.deepEqual(listChatBotDistillations(db, "user-1"), []);
+  });
+
+  it("rejects a stale source revision without persisting or archiving", async () => {
+    const db = createTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, system_prompt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run("bot-1", "user-1", "Mara", "Mara persona", "now", "now");
+    seedBotChat(db, "user-1", "chat-a", "bot-1");
+    db.prepare("UPDATE conversations SET conversation_mode = 'chat' WHERE id = 'chat-a'").run();
+
+    const result = await distillChatConversations(
+      db,
+      {
+        name: "local",
+        async generateResponse() {
+          db.prepare(
+            "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, 'user', ?, ?)",
+          ).run("late-message", "chat-a", "user-1", "A newer direction", "later");
+          return "I'm carrying the earlier plan.";
+        },
+        async embedText() {
+          return [];
+        },
+      },
+      "user-1",
+    );
+
+    assert.equal(result.batchId, null);
+    assert.match(result.failures[0]?.error ?? "", /changed while/u);
+    assert.equal(
+      (db.prepare("SELECT archived_at FROM conversations WHERE id = 'chat-a'").get() as { archived_at: string | null }).archived_at,
+      null,
+    );
+    assert.deepEqual(listChatBotDistillations(db, "user-1"), []);
+  });
+
+  it("rolls summary persistence back when source archival cannot commit", async () => {
+    const db = createTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, system_prompt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run("bot-1", "user-1", "Mara", "Mara persona", "now", "now");
+    seedBotChat(db, "user-1", "chat-a", "bot-1");
+    db.prepare("UPDATE conversations SET conversation_mode = 'chat' WHERE id = 'chat-a'").run();
+    db.exec(`
+      CREATE TRIGGER reject_chat_archive
+      BEFORE UPDATE OF archived_at ON conversations
+      WHEN OLD.id = 'chat-a' AND NEW.archived_at IS NOT NULL
+      BEGIN
+        SELECT RAISE(ABORT, 'archive blocked');
+      END;
+    `);
+
+    await assert.rejects(
+      () =>
+        distillChatConversations(
+          db,
+          {
+            name: "local",
+            async generateResponse() {
+              return "I'm carrying the plan safely.";
+            },
+            async embedText() {
+              return [];
+            },
+          },
+          "user-1",
+        ),
+      /archive blocked/u,
+    );
+    assert.equal(
+      (db.prepare("SELECT archived_at FROM conversations WHERE id = 'chat-a'").get() as { archived_at: string | null }).archived_at,
+      null,
+    );
+    assert.deepEqual(listChatBotDistillations(db, "user-1"), []);
+  });
+
+  it("keeps a LOCAL-only persona off an ONLINE distillation provider", async () => {
+    const db = createTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, system_prompt, online_enabled, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)",
+    ).run("bot-1", "user-1", "Mara", "Mara persona", "now", "now");
+    seedBotChat(db, "user-1", "chat-a", "bot-1");
+    db.prepare("UPDATE conversations SET conversation_mode = 'chat' WHERE id = 'chat-a'").run();
+    let onlineCalls = 0;
+    let localCalls = 0;
+
+    const result = await distillChatConversations(
+      db,
+      {
+        name: "openai",
+        async generateResponse() {
+          onlineCalls += 1;
+          return "This must not be used.";
+        },
+        async embedText() {
+          return [];
+        },
+      },
+      "user-1",
+      {
+        localProvider: {
+          name: "local",
+          async generateResponse() {
+            localCalls += 1;
+            return "I'm carrying the plan locally.";
+          },
+          async embedText() {
+            return [];
+          },
+        },
+      },
+    );
+
+    assert.equal(result.sweptGroups, 1);
+    assert.equal(onlineCalls, 0);
+    assert.equal(localCalls, 1);
   });
 });
 

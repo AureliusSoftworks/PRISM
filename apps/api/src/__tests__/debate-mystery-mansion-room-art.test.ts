@@ -68,7 +68,16 @@ function fixtureLayout(): MansionLayoutV2 {
       relation: "beside",
       point: { x: 0.72, y: 0.61 },
     }],
-    lights: [],
+    lights: [{
+      id: "light:desk",
+      roomId: "study",
+      kind: "omni",
+      color: "#e4b56f",
+      intensity: 0.68,
+      animationSeed: "study-desk",
+      cuePermission: { version: 1, mode: "mansion_static", allowedCueIds: [] },
+      geometry: { x: 0.69, y: 0.38, radius: 0.24 },
+    }],
     roomArtCandidates: [],
   };
   for (const id of ["foyer", "parlor", "landing", "bath", "study"]) {
@@ -138,6 +147,8 @@ describe("mansion-owned room-art candidates", () => {
       layout,
     });
     assert.match(prompt, /beside writing desk at normalized \(0\.72, 0\.61\)/u);
+    assert.match(prompt, /omni at normalized \(0\.69, 0\.38\) with intensity 0\.68/u);
+    assert.match(prompt, /PRISM renders their light dynamically at runtime/u);
     assert.match(prompt, /not a hotspot map/u);
     assert.match(prompt, /high-resolution hand-crafted Pixel Art/u);
     assert.match(prompt, /Do not create a realistic plate and then downsample/u);

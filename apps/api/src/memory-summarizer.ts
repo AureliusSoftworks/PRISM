@@ -541,12 +541,15 @@ export async function retrieveMemorySummaries(
   db: DatabaseSync,
   userId: string,
   query: string,
-  limit = 4
+  limit = 4,
+  options: { signal?: AbortSignal } = {},
 ): Promise<Array<{ id: string; text: string; score: number }>> {
   try {
-    await ensureCollection();
-    const queryEmbedding = await embedTextLocal(query);
-    const results = await searchVectors(queryEmbedding, userId, limit);
+    await ensureCollection({ signal: options.signal });
+    const queryEmbedding = await embedTextLocal(query, { signal: options.signal });
+    const results = await searchVectors(queryEmbedding, userId, limit, {
+      signal: options.signal,
+    });
     const resultIds = [
       ...new Set(
         results

@@ -1069,6 +1069,7 @@ export function CoffeeSeatPlateEmoji({
                       content={renderedGlyph}
                       enabled={pixelated}
                       binaryAlpha={hardPixels}
+                      alphaSafeMaskEmission
                       rasterKey={faceGlyphRasterKey(partFaceFont)}
                       data-face-font={partFaceFont ?? undefined}
                     />
@@ -1077,6 +1078,7 @@ export function CoffeeSeatPlateEmoji({
                       content={renderedGlyph}
                       enabled={pixelated}
                       binaryAlpha={hardPixels}
+                      alphaSafeMaskEmission
                       rasterKey={faceGlyphRasterKey(partFaceFont)}
                       data-face-font={partFaceFont ?? undefined}
                     />
@@ -1090,6 +1092,9 @@ export function CoffeeSeatPlateEmoji({
                       !(part === "mouth" && liveMouthGlyphSwapActive)
                     }
                     binaryAlpha={hardPixels}
+                    alphaSafeMaskEmission={
+                      part === "eyes" && normalizedFaceEyeCharacter !== null
+                    }
                     rasterKey={faceGlyphRasterKey(partFaceFont)}
                     data-face-font={partFaceFont ?? undefined}
                   />

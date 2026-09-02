@@ -91,6 +91,26 @@ describe("mansion exterior presentation", () => {
       debateMysteryMansionDoorTargetV1({ label: "PRISM House" }, "standard"),
       { xPercent: 60, yPercent: 44 },
     );
+    assert.deepEqual(
+      debateMysteryMansionDoorTargetV1(
+        { label: "Passenger vessel" },
+        "standard",
+        {
+          kind: "vessel",
+          presentation: {
+            version: 1,
+            familyId: "maritime-passenger-v1",
+            mapStyle: "hull-deck-v1",
+            physicalScaleClass: "standard",
+            entryAction: "Board the ship",
+            compatibleExteriorFamilies: ["maritime-passenger-v1"],
+            compatibleAcousticFamilies: ["maritime-passenger-v1"],
+            mapOrientation: { fore: "right", port: "top", pitchDegrees: -2 },
+          },
+        },
+      ),
+      { xPercent: 60, yPercent: 70 },
+    );
   });
 
   it("presents the accepted exterior as the dominant Case Forge surface", () => {

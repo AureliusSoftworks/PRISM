@@ -248,10 +248,10 @@ describe("Signal public cadence speech", () => {
     assert.equal(lifecycle?.failure, "privacy_validation");
   });
 
-  it("derives initial item and picture semantics for Signal image formats", () => {
+  it("treats every supported Signal attachment as a picture", () => {
     assert.deepEqual(
       botcastEpisodeImageDescriptorFromFileName("wax-candle.png", "image/png"),
-      { kind: "item", name: "wax candle", mimeType: "image/png" },
+      { kind: "picture", name: "wax candle", mimeType: "image/png" },
     );
     const picture = botcastEpisodeImageDescriptorFromFileName(
       "wax_candle.jpg",
@@ -312,7 +312,7 @@ describe("Signal public cadence speech", () => {
     );
     assert.deepEqual(
       botcastEpisodeImageDescriptorFromFileName("wax-candle.webp", "image/webp"),
-      { kind: "item", name: "wax candle", mimeType: "image/webp" },
+      { kind: "picture", name: "wax candle", mimeType: "image/webp" },
     );
     assert.equal(
       botcastEpisodeImageDescriptorFromFileName("wax-candle.png", "image/jpeg"),

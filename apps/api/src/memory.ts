@@ -1914,10 +1914,14 @@ function lexicalMemoryTargetBoost(cueText: string, memoryText: string): number {
   return (overlap / cueTerms.size) * MEMORY_TARGET_TOKEN_BOOST;
 }
 
-async function embedWithFallback(text: string): Promise<number[]> {
+async function embedWithFallback(
+  text: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<number[]> {
   try {
-    return await embedTextLocal(text);
-  } catch {
+    return await embedTextLocal(text, { signal: options.signal });
+  } catch (error) {
+    if (options.signal?.aborted) throw error;
     return fallbackEmbedding(text);
   }
 }
@@ -1985,7 +1989,8 @@ export async function retrieveRelevantMemories(
   query: string,
   userKey: Buffer,
   botId?: string | null,
-  limit = 4
+  limit = 4,
+  options: { signal?: AbortSignal } = {},
 ): Promise<UserMemory[]> {
   materializeShortTermMemoryDecay(db, userId);
   const normalizedBotId = typeof botId === "string" && botId.trim().length > 0
@@ -2002,8 +2007,10 @@ export async function retrieveRelevantMemories(
           "SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at FROM memories WHERE user_id = ? AND (bot_id IS NULL OR source = 'compiled') ORDER BY created_at DESC LIMIT 100"
         )
         .all(userId) as MemoryRow[];
-  const queryEmbedding = await embedWithFallback(query);
+  const queryEmbedding = await embedWithFallback(query, options);
+  options.signal?.throwIfAborted();
   const scored = rows.map((row) => {
+    options.signal?.throwIfAborted();
     const memory = decryptMemoryRow(row, userKey, db);
     return {
       ...memory,

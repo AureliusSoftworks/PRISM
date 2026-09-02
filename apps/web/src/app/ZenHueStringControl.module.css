@@ -149,7 +149,8 @@
 .cue {
   position: absolute;
   left: 50%;
-  bottom: 72px;
+  top: calc(50% + 10px);
+  bottom: auto;
   z-index: 2;
   max-width: min(420px, calc(100vw - 72px));
   transform: translateX(-50%);

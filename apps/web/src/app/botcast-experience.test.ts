@@ -181,7 +181,7 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("gates one ephemeral Producer image and stages items vs pictures", () => {
+  it("gates one ephemeral Producer image without inferring Item semantics", () => {
     assert.match(source, /preSessionReveal:\s*true/u);
     assert.match(
       source,
@@ -212,7 +212,9 @@ describe("Signal experience shell", () => {
       /\/api\/botcast\/episodes\/\$\{encodeURIComponent\(episode\.id\)\}\/image/u,
     );
     assert.match(source, /setEpisode\(attached\.episode\)/u);
-    assert.match(source, /Decoded pixels, rather than the filename, decide whether this is an/u);
+    assert.match(source, /every attachment in the generic picture contract/u);
+    assert.doesNotMatch(source, /\/api\/assets\/signal-item\/inspect/u);
+    assert.match(source, /never turned into an Item automatically/u);
     assert.match(source, /className=\{styles\.producerImageAttachWrap\}[\s\S]{0,100}title=\{producerImageTooltip\}/u);
     assert.match(
       source,
@@ -268,8 +270,8 @@ describe("Signal experience shell", () => {
       /body: JSON\.stringify\(watchBakeRequestBody\)[\s\S]{0,2400}body: JSON\.stringify\(watchBakeRequestBody\)/u,
     );
     assert.match(source, /Transparent PNG item · presented as the physical item/u);
-    assert.match(source, /Opaque PNG photo · presented as a framed picture/u);
-    assert.match(source, /JPG photo · presented as a framed picture/u);
+    assert.match(source, /Image · presented as a framed picture/u);
+    assert.match(source, /never turned into an Item automatically/u);
     assert.match(source, /id="signal-setup-image-name"/u);
     assert.match(source, /id="signal-setup-image-reason"/u);
     assert.match(source, /Reason <span>optional · private to the host<\/span>/u);
@@ -329,7 +331,6 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /const \[keepSignalItem, setKeepSignalItem\] = useState\(false\)/u);
     assert.match(source, /signalEpisodeImage\.descriptor\.kind === "item"/u);
-    assert.match(source, /\/api\/assets\/signal-item\/inspect/u);
     assert.match(source, /assetLibraryInspection\?\.alreadySaved === false/u);
     assert.match(source, /Keep \{signalEpisodeImage\.descriptor\.name\} in Items/u);
     assert.match(source, /`\/api\/assets\/upload`, \{[\s\S]{0,220}kind: "item"/u);
@@ -346,8 +347,8 @@ describe("Signal experience shell", () => {
     assert.match(pageSource, /supportsImageInput: model\.supportsImageInput === true/u);
     assert.match(css, /\.setupEpisodeImage\s*\{[^}]*grid-column:\s*1 \/ -1/u);
     assert.match(css, /\.episodeOutroItemStatus/u);
-    assert.match(tutorials, /exact upload hash is not already in Items/u);
-    assert.match(tutorials, /available to future Whodunnit sessions/u);
+    assert.match(tutorials, /never creates an Item/u);
+    assert.match(tutorials, /Add a physical prop through Items separately/u);
   });
 
   it("keeps the generated studio raster as a stable image source", () => {

@@ -29,7 +29,22 @@ test("uses one coarse, flat examination grid for Mosaic and Upgraded room art", 
   assert.doesNotMatch(styles, /prismGlintSweep|titleDoorPrismGlint/u);
 });
 
-test("renders only bounded illuminated examination cells instead of the complete lattice", () => {
+test("hides the fine Mosaic presentation grid while Examine is active", () => {
+  assert.match(
+    experience,
+    /const currentRoomMosaicGrid = command === "examine" \? "hidden" : "visible";/u,
+  );
+  assert.match(
+    experience,
+    /style: "mosaic",[\s\S]{0,100}mosaicGrid: currentRoomMosaicGrid/u,
+  );
+  assert.match(
+    experience,
+    /whodunnitSavedRoomArtUrl\(currentRoom\.imageId, "mosaic", currentRoomMosaicGrid\)/u,
+  );
+});
+
+test("resolves each eligible lens position to exactly one cell", () => {
   const hotspot = [{
     id: "target",
     polygon: [
@@ -45,9 +60,34 @@ test("renders only bounded illuminated examination cells instead of the complete
     resolveDebateMysteryV2Lens(50, 50, hotspot),
     hotspot,
   );
-  assert.ok(cells.length > 1);
-  assert.ok(cells.length < DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS * DEBATE_MYSTERY_V2_EXAMINE_GRID_ROWS);
+  assert.deepEqual(cells, [180]);
   assert.match(experience, /\[\.\.\.examinationIlluminatedCells\]\.map/u);
   assert.match(experience, /column \/ DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS/u);
   assert.match(experience, /row \/ DEBATE_MYSTERY_V2_EXAMINE_GRID_ROWS/u);
+});
+
+test("keeps the single illuminated cell directly beneath the lens", () => {
+  const broadTarget = [{
+    id: "broad",
+    polygon: [
+      { x: 40, y: 40 },
+      { x: 60, y: 40 },
+      { x: 60, y: 60 },
+      { x: 40, y: 60 },
+    ],
+    unlocked: true,
+    examined: false,
+  }];
+  const upperLeftCell = debateMysteryV2ExamineGridCellIndexes(
+    resolveDebateMysteryV2Lens(42, 42, broadTarget),
+    broadTarget,
+  );
+  const lowerRightCell = debateMysteryV2ExamineGridCellIndexes(
+    resolveDebateMysteryV2Lens(58, 58, broadTarget),
+    broadTarget,
+  );
+  assert.deepEqual(upperLeftCell, [154]);
+  assert.deepEqual(lowerRightCell, [205]);
+  assert.equal(upperLeftCell.length, 1);
+  assert.equal(lowerRightCell.length, 1);
 });

@@ -9,6 +9,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   BOT_IDENTITY_PRESENTATION_TRANSITION_MS,
   DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
@@ -31,9 +32,11 @@ import {
   type DebateMysteryCompilationStatusV2,
   type DebateMysteryProductionCategoryV1,
   type DebateMysteryPublicDialogueEntryV2,
+  type DebateMysteryPublicRecordItemV2,
   type DebateMysteryPublicTopicV2,
   type DebateMysteryRecordReferenceV2,
   type DebateMysteryRoomV2,
+  type DebateMysterySceneRepairActionV1,
   type DebateMysterySealedAssetRefV1,
   type DebateMysteryTheoryV1,
   type DebateBotSnapshotV1,
@@ -53,6 +56,9 @@ import {
 } from "./PrismChromeNotice";
 import IdentityPresentationBlackout from "./IdentityPresentationBlackout";
 import SceneMediaVignette from "./SceneMediaVignette";
+import { PrismBlockingLoader } from "./PrismBlockingLoader";
+import { registerPrismSoftSynthesisJobs } from "./prismSoftSynthesisUi.ts";
+import { PrismRefractTarget } from "./prismRefract";
 import { debateIdentityAppearanceBotV1 } from "./debateIdentityPresentation";
 import {
   debateMysteryIdentityMirrorFaceV1,
@@ -459,6 +465,36 @@ function usePrefersReducedMotion(): boolean {
   return reducedMotion;
 }
 
+interface LiveSessionHeaderPortalTargets {
+  title: HTMLElement;
+  actions: HTMLElement;
+}
+
+function useLiveSessionHeaderPortalTargets(): LiveSessionHeaderPortalTargets | null {
+  const [targets, setTargets] = useState<LiveSessionHeaderPortalTargets | null>(null);
+  useEffect(() => {
+    let observer: MutationObserver | null = null;
+    const resolveTargets = (): boolean => {
+      const title = document.querySelector<HTMLElement>(
+        '[data-live-session-context-title-slot="true"]',
+      );
+      const actions = document.querySelector<HTMLElement>(
+        '[data-live-session-context-actions-slot="true"]',
+      );
+      if (!title || !actions) return false;
+      setTargets({ title, actions });
+      observer?.disconnect();
+      return true;
+    };
+    if (!resolveTargets()) {
+      observer = new MutationObserver(() => resolveTargets());
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
+    return () => observer?.disconnect();
+  }, []);
+  return targets;
+}
+
 async function writeForgeErrorDetailsClipboard(text: string): Promise<void> {
   if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is unavailable.");
   await navigator.clipboard.writeText(text);
@@ -563,6 +599,78 @@ function sealedMysteryAssetObjectUrl(
   if (!asset?.revealed || asset.status !== "ready") return null;
   return objectUrls[sealedMysteryAssetKey(kind, subjectId)] ?? null;
 }
+
+const MYSTERY_SCENE_REPAIR_COPY: Record<
+  DebateMysterySceneRepairActionV1,
+  { issue: string; action: string; loader: string; detail: string }
+> = {
+  regenerate_exterior: {
+    issue: "The exterior looks wrong",
+    action: "Regenerate thumbnail and exterior",
+    loader: "Refracting a new exterior",
+    detail: "PRISM is rebuilding the venue's establishing image from its original frozen direction.",
+  },
+  align_exterior_door: {
+    issue: "The door is misplaced",
+    action: "Observe image and place the entrance",
+    loader: "Finding the real entrance",
+    detail: "PRISM is observing the accepted exterior and aligning the threshold to the visible doorway or gangway.",
+  },
+  regenerate_room_mosaic: {
+    issue: "The room looks wrong",
+    action: "Regenerate room Mosaic",
+    loader: "Refracting the room again",
+    detail: "PRISM is reusing the room's original prompt and frozen geometry. Any old Upgraded derivative is removed.",
+  },
+  regenerate_room_upgrade: {
+    issue: "The Upgraded room looks wrong",
+    action: "Regenerate Upgraded room",
+    loader: "Refracting the Upgraded room again",
+    detail: "PRISM is rebuilding only the high-resolution presentation from the unchanged Mosaic composition.",
+  },
+  generate_room_upgrade: {
+    issue: "I want a high-resolution image",
+    action: "Generate an Upgraded room",
+    loader: "Upgrading this room",
+    detail: "PRISM is creating a high-resolution presentation while preserving the accepted Mosaic composition.",
+  },
+  refresh_room_anchors: {
+    issue: "The items are placed in a weird spot",
+    action: "Refresh anchors without moving the room objects",
+    loader: "Realigning room anchors",
+    detail: "PRISM is observing where the existing objects already are and moving only their interaction anchors.",
+  },
+  refresh_room_lights: {
+    issue: "Lights or FX are not aligned",
+    action: "Refresh dynamic light placement",
+    loader: "Realigning lights and FX",
+    detail: "PRISM is matching the saved dynamic-light overlays to visible practical sources in the current room image.",
+  },
+  regenerate_evidence_asset: {
+    issue: "I want to generate an asset for this item",
+    action: "Generate or regenerate the item's asset",
+    loader: "Refracting the found item",
+    detail: "PRISM is rebuilding only this discovered item's presentation from its frozen public description.",
+  },
+  reduce_evidence_magenta: {
+    issue: "There is some excess magenta in the asset",
+    action: "Run a magenta-removal pass",
+    loader: "Cleaning the item asset",
+    detail: "PRISM is applying one local color-key cleanup pass without changing the item's identity or case facts.",
+  },
+  regenerate_music: {
+    issue: "I don't like the music, or I can't hear it",
+    action: "Regenerate music",
+    loader: "Composing new investigation music",
+    detail: "PRISM is creating a new speech-safe instrumental theme for this mansion without revealing any case content.",
+  },
+  regenerate_ambience: {
+    issue: "I don't like the ambience, or I can't hear it",
+    action: "Regenerate ambience",
+    loader: "Rebuilding the mansion ambience",
+    detail: "PRISM is creating a new environmental room-tone bed for this mansion without changing its rooms or clues.",
+  },
+};
 
 interface MansionRoomPlacement {
   room: DebateMysteryRoomV2;
@@ -1218,6 +1326,35 @@ const PRODUCTION_CATEGORY_LABELS: Record<DebateMysteryProductionCategoryV1, stri
   voices: "Performance voices",
 };
 
+const ROOM_ART_CROSSFADE_MS = 180;
+
+type WhodunnitRoomVisualReadiness = "fallback" | "default" | "upgraded";
+
+type WhodunnitItemSynthesisJobStatus =
+  | "queued"
+  | "generating"
+  | "ready"
+  | "failed";
+
+interface WhodunnitItemSynthesisJob {
+  id: string;
+  subjectId: string;
+  title: string;
+  emoji: string;
+  status: WhodunnitItemSynthesisJobStatus;
+  queuedAt: string;
+  startedAt: string | null;
+  error: string | null;
+}
+
+function whodunnitRoomVisualReadiness(
+  room: DebateMysteryRoomV2,
+  upgradeStatus: DebateMysteryRoomArtUpgradeStatusV1 | null,
+): WhodunnitRoomVisualReadiness {
+  if (room.sealedAsset?.status !== "ready") return "fallback";
+  return upgradeStatus?.readyRoomIds.includes(room.id) ? "upgraded" : "default";
+}
+
 export function DebateMysteryV2ProductionReadiness(
   props: V2ExperienceProps,
 ): React.JSX.Element {
@@ -1436,6 +1573,7 @@ export function DebateMysteryV2Readiness(
 
 export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const state = props.session.formatState as DebateWhodunnitFormatStateV2;
+  const liveSessionHeaderPortalTargets = useLiveSessionHeaderPortalTargets();
   const pendingRoomKey = [
     ...state.rooms
       .filter((room) => room.sealedAsset?.status === "pending")
@@ -1478,17 +1616,36 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const [caseExportState, setCaseExportState] = useState<
     "idle" | "exporting" | "exported" | "failed"
   >("idle");
-  const [visualRetryState, setVisualRetryState] = useState<
-    "idle" | "retrying" | "queued" | "failed"
+  const [roomVisualsMode, setRoomVisualsMode] = useState(false);
+  const [roomVisualDialogId, setRoomVisualDialogId] = useState<string | null>(null);
+  const [roomVisualJob, setRoomVisualJob] = useState<{
+    kind: "generate" | "upgrade";
+    roomId: string;
+    startedAt: string;
+  } | null>(null);
+  const [roomVisualResult, setRoomVisualResult] = useState<
+    "idle" | "generated" | "upgraded" | "failed"
   >("idle");
-  const [sealedAssetSaveState, setSealedAssetSaveState] = useState<
-    Record<string, "saving" | "saved" | "failed">
-  >({});
+  const [sceneRepairOpen, setSceneRepairOpen] = useState<"exterior" | string | null>(null);
+  const [sceneRepairJob, setSceneRepairJob] = useState<{
+    action: DebateMysterySceneRepairActionV1 | "undo";
+    roomId: string | null;
+    subjectId: string | null;
+    startedAt: string;
+  } | null>(null);
+  const [itemSynthesisJobs, setItemSynthesisJobs] = useState<
+    WhodunnitItemSynthesisJob[]
+  >([]);
+  const itemSynthesisRunningRef = useRef(false);
   const [sealedAssetObjectUrls, setSealedAssetObjectUrls] = useState<Record<string, string>>({});
   const sealedAssetObjectUrlRef = useRef(new Map<string, string>());
+  const [sceneAssetRefreshNonce, setSceneAssetRefreshNonce] = useState(0);
+  const [audioAssetRefreshNonce, setAudioAssetRefreshNonce] = useState(0);
   const [roomUpgradeEnabled, setRoomUpgradeEnabled] = useState(
     state.config.assetSynthesis.illustratedRooms,
   );
+  const [roomArtCrossfading, setRoomArtCrossfading] = useState(false);
+  const roomArtCrossfadeTimerRef = useRef<number | null>(null);
   const [failedUpgradeRoomIds, setFailedUpgradeRoomIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -1553,7 +1710,20 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       disposed = true;
     };
   }, [props.ownerId, props.session.id, state.config.assetSynthesis.illustratedRooms]);
+  useEffect(() => () => {
+    if (roomArtCrossfadeTimerRef.current !== null) {
+      window.clearTimeout(roomArtCrossfadeTimerRef.current);
+    }
+  }, []);
   const selectRoomUpgradeEnabled = useCallback((enabled: boolean): void => {
+    if (roomArtCrossfadeTimerRef.current !== null) {
+      window.clearTimeout(roomArtCrossfadeTimerRef.current);
+    }
+    setRoomArtCrossfading(true);
+    roomArtCrossfadeTimerRef.current = window.setTimeout(() => {
+      roomArtCrossfadeTimerRef.current = null;
+      setRoomArtCrossfading(false);
+    }, ROOM_ART_CROSSFADE_MS);
     setRoomUpgradeEnabled(enabled);
     void writeEncryptedWhodunnitRoomUpgradeEnabled({
       ownerId: props.ownerId,
@@ -1738,7 +1908,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     };
     // The compact key prevents re-fetches for unrelated session revisions.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.session.id, revealedAssetRequestKey]);
+  }, [props.session.id, revealedAssetRequestKey, sceneAssetRefreshNonce]);
 
   useEffect(() => () => {
     for (const objectUrl of sealedAssetObjectUrlRef.current.values()) {
@@ -1989,6 +2159,15 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   });
   const roomSpeechInkVisible = !dialoguePerformanceActive || interrogationPhase === "handoff";
   const admittedRecord = state.record.filter((item) => item.admitted);
+  const foundEvidenceItems = admittedRecord.filter(
+    (item): item is DebateMysteryPublicRecordItemV2 & {
+      reference: { kind: "evidence"; id: string };
+    } => item.reference.kind === "evidence",
+  );
+  const activeFoundEvidence = caseFileUpdate?.kind === "record" &&
+      caseFileUpdate.item.reference.kind === "evidence"
+    ? caseFileUpdate.item
+    : null;
   const caseFileEntryCount = admittedRecord.length +
     (state.caseKit?.length ?? 0) +
     debateMysteryCaseFileObservationsV2({
@@ -1997,43 +2176,16 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     }).length;
   const theoryAccusedSeatIds = debateMysteryTheoryAccusedSeatIdsV2(theory);
   const mansionCanBeSaved = debateMysteryMansionBundleEligibleV2(state);
-  const failedVisualCount = state.rooms.filter(
-    (room) => room.sealedAsset?.status === "fallback",
-  ).length + state.record.filter(
-    (item) => item.sealedAsset?.status === "fallback",
-  ).length;
-  useEffect(() => {
-    if (visualRetryState !== "queued" || pendingRoomKey) return;
-    setVisualRetryState(failedVisualCount > 0 ? "failed" : "idle");
-  }, [failedVisualCount, pendingRoomKey, visualRetryState]);
-  const visualRetryAvailable =
-    props.session.responseMode !== "local" && failedVisualCount > 0;
-
-  const saveSealedAsset = async (
-    asset: DebateMysterySealedAssetRefV1,
-    subjectId: string,
-    title: string,
-  ): Promise<void> => {
-    const assetKey = sealedMysteryAssetKey(asset.kind, subjectId);
-    if (
-      !asset.revealed ||
-      asset.status !== "ready" ||
-      sealedAssetSaveState[assetKey] === "saving" ||
-      sealedAssetSaveState[assetKey] === "saved"
-    ) return;
-    setSealedAssetSaveState((current) => ({ ...current, [assetKey]: "saving" }));
-    setError(null);
-    try {
-      await props.request(
-        `/api/debates/${encodeURIComponent(props.session.id)}/mystery-assets/${asset.kind}/${encodeURIComponent(subjectId)}/save`,
-        mutationBody({ title }),
-      );
-      setSealedAssetSaveState((current) => ({ ...current, [assetKey]: "saved" }));
-    } catch (caught) {
-      setSealedAssetSaveState((current) => ({ ...current, [assetKey]: "failed" }));
-      setError(caught instanceof Error ? caught.message : "The revealed visual could not be saved.");
-    }
-  };
+  const roomVisualDialogRoom = roomVisualDialogId
+    ? state.rooms.find((room) => room.id === roomVisualDialogId) ?? null
+    : null;
+  const roomVisualDialogReadiness = roomVisualDialogRoom
+    ? roomVisualResult === "upgraded"
+      ? "upgraded"
+      : roomVisualResult === "generated"
+        ? "default"
+        : whodunnitRoomVisualReadiness(roomVisualDialogRoom, roomArtUpgradeStatus)
+    : null;
 
   const saveMansion = async (): Promise<void> => {
     if (!mansionCanBeSaved || mansionSaveState === "saving") return;
@@ -2051,9 +2203,14 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       );
     }
   };
-  const retryFailedVisuals = async (): Promise<void> => {
-    if (!visualRetryAvailable || visualRetryState === "retrying") return;
-    setVisualRetryState("retrying");
+  const generateRoomVisual = async (room: DebateMysteryRoomV2): Promise<void> => {
+    if (roomVisualJob || props.session.responseMode === "local") return;
+    setRoomVisualJob({
+      kind: "generate",
+      roomId: room.id,
+      startedAt: new Date().toISOString(),
+    });
+    setRoomVisualResult("idle");
     setError(null);
     try {
       const result = await props.request<{
@@ -2061,18 +2218,321 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         session: DebateSessionV1;
       }>(
         `/api/debates/${encodeURIComponent(props.session.id)}/mystery-assets/retry`,
-        mutationBody({}),
+        mutationBody({ category: "mosaic_rooms", roomId: room.id }),
       );
       props.onSessionChange(result.session);
-      if (result.requeued > 0) {
-        setVisualRetryState("queued");
+      const next = result.session.formatState;
+      const prepared = next.format === "whodunnit" && next.version === 2
+        ? next.rooms.find((candidate) => candidate.id === room.id)
+        : null;
+      if (prepared?.sealedAsset?.status === "ready") {
+        setRoomVisualResult("generated");
+        const status = await props.request<DebateMysteryRoomArtUpgradeStatusV1>(
+          `/api/debates/${encodeURIComponent(props.session.id)}/mystery-room-art/upgrade`,
+        );
+        setRoomArtUpgradeStatus(status);
       } else {
-        setVisualRetryState("failed");
-        setError("Those visuals have already used their bounded retry.");
+        setRoomVisualResult("failed");
+        setError("This room could not replace its fallback within the bounded visual retry.");
       }
     } catch (caught) {
-      setVisualRetryState("failed");
-      setError(caught instanceof Error ? caught.message : "The failed visuals could not be retried.");
+      setRoomVisualResult("failed");
+      setError(caught instanceof Error ? caught.message : "This room could not be generated.");
+    } finally {
+      setRoomVisualJob(null);
+    }
+  };
+  const upgradeRoomVisual = async (room: DebateMysteryRoomV2): Promise<void> => {
+    if (roomVisualJob || props.session.responseMode === "local") return;
+    setRoomVisualJob({
+      kind: "upgrade",
+      roomId: room.id,
+      startedAt: new Date().toISOString(),
+    });
+    setRoomVisualResult("idle");
+    setError(null);
+    try {
+      const status = await props.request<DebateMysteryRoomArtUpgradeStatusV1>(
+        `/api/debates/${encodeURIComponent(props.session.id)}/mystery-room-art/upgrade`,
+        mutationBody({ roomId: room.id }),
+      );
+      setRoomArtUpgradeStatus(status);
+      if (status.readyRoomIds.includes(room.id)) {
+        setRoomVisualResult("upgraded");
+      } else {
+        setRoomVisualResult("failed");
+        setError("The Upgraded room could not pass its composition checks. Its default Mosaic is unchanged.");
+      }
+    } catch (caught) {
+      setRoomVisualResult("failed");
+      setError(caught instanceof Error ? caught.message : "This room could not be upgraded.");
+    } finally {
+      setRoomVisualJob(null);
+    }
+  };
+  const evictExteriorObjectUrl = (): void => {
+    const key = sealedMysteryAssetKey(
+      "room",
+      DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
+    );
+    const objectUrl = sealedAssetObjectUrlRef.current.get(key);
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    sealedAssetObjectUrlRef.current.delete(key);
+    setSealedAssetObjectUrls(Object.fromEntries(sealedAssetObjectUrlRef.current));
+    setSceneAssetRefreshNonce((current) => current + 1);
+  };
+  const evictEvidenceObjectUrl = useCallback((subjectId: string): void => {
+    const key = sealedMysteryAssetKey("evidence", subjectId);
+    const objectUrl = sealedAssetObjectUrlRef.current.get(key);
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    sealedAssetObjectUrlRef.current.delete(key);
+    setSealedAssetObjectUrls(Object.fromEntries(sealedAssetObjectUrlRef.current));
+    setSceneAssetRefreshNonce((current) => current + 1);
+  }, []);
+  const queueItemSynthesisRequest = useCallback((input: {
+    subjectId: string;
+    title: string;
+    emoji: string;
+  }): void => {
+    if (props.session.responseMode === "local") return;
+    setItemSynthesisJobs((current) => {
+      if (current.some((job) =>
+        job.subjectId === input.subjectId && job.status === "queued")) {
+        return current;
+      }
+      const withoutEarlierResult = current.filter((job) =>
+        job.subjectId !== input.subjectId ||
+        (job.status !== "ready" && job.status !== "failed"));
+      const queuedAt = new Date().toISOString();
+      return [
+        ...withoutEarlierResult,
+        {
+          id: `${input.subjectId}:${crypto.randomUUID()}`,
+          subjectId: input.subjectId,
+          title: input.title,
+          emoji: input.emoji,
+          status: "queued",
+          queuedAt,
+          startedAt: null,
+          error: null,
+        },
+      ];
+    });
+    setSceneRepairOpen(null);
+    setError(null);
+  }, [props.session.responseMode]);
+  const enqueueItemSynthesis = useCallback((
+    item: DebateMysteryPublicRecordItemV2,
+  ): void => {
+    if (item.reference.kind !== "evidence" || !item.admitted) return;
+    queueItemSynthesisRequest({
+      subjectId: item.reference.id,
+      title: item.title,
+      emoji: item.emoji,
+    });
+  }, [queueItemSynthesisRequest]);
+  const retryItemSynthesis = useCallback((jobId: string): void => {
+    setItemSynthesisJobs((current) => {
+      const failed = current.find((job) =>
+        job.id === jobId && job.status === "failed");
+      if (!failed || current.some((job) =>
+        job.id !== jobId &&
+        job.subjectId === failed.subjectId &&
+        job.status === "queued")) {
+        return current;
+      }
+      return current.map((job) => job.id === jobId
+        ? {
+            ...job,
+            status: "queued",
+            queuedAt: new Date().toISOString(),
+            startedAt: null,
+            error: null,
+          }
+        : job);
+    });
+  }, []);
+  const dismissItemSynthesis = useCallback((jobId: string): void => {
+    setItemSynthesisJobs((current) => current.filter((job) =>
+      job.id !== jobId || (job.status !== "ready" && job.status !== "failed")));
+  }, []);
+  const itemSynthesisSourceId = `whodunnit-items:${props.session.id}`;
+
+  useEffect(() => {
+    registerPrismSoftSynthesisJobs(
+      itemSynthesisSourceId,
+      itemSynthesisJobs.length,
+      { orbOpensProgress: true },
+    );
+  }, [itemSynthesisJobs.length, itemSynthesisSourceId]);
+
+  useEffect(() => () => {
+    registerPrismSoftSynthesisJobs(itemSynthesisSourceId, 0);
+  }, [itemSynthesisSourceId]);
+
+  useEffect(() => {
+    if (itemSynthesisRunningRef.current) return;
+    const queued = itemSynthesisJobs.find((job) => job.status === "queued");
+    if (!queued) return;
+    itemSynthesisRunningRef.current = true;
+    const startedAt = new Date().toISOString();
+    setItemSynthesisJobs((current) => current.map((job) =>
+      job.id === queued.id
+        ? { ...job, status: "generating", startedAt, error: null }
+        : job));
+
+    void (async (): Promise<void> => {
+      try {
+        const result = await props.request<{
+          session: DebateSessionV1;
+          roomArtUpgrade: DebateMysteryRoomArtUpgradeStatusV1;
+        }>(
+          `/api/debates/${encodeURIComponent(props.session.id)}/mystery-scene-repair`,
+          mutationBody({
+            action: "regenerate_evidence_asset",
+            subjectId: queued.subjectId,
+          }),
+        );
+        evictEvidenceObjectUrl(queued.subjectId);
+        setItemSynthesisJobs((current) => current
+          .filter((job) =>
+            job.id === queued.id ||
+            job.subjectId !== queued.subjectId ||
+            (job.status !== "ready" && job.status !== "failed"))
+          .map((job) => job.id === queued.id
+            ? { ...job, status: "ready", error: null }
+            : job));
+        setRoomArtUpgradeStatus(result.roomArtUpgrade);
+        props.onSessionChange(result.session);
+      } catch (caught) {
+        const message = caught instanceof Error
+          ? caught.message
+          : "This found item could not be refracted.";
+        setItemSynthesisJobs((current) => current.map((job) =>
+          job.id === queued.id
+            ? { ...job, status: "failed", error: message }
+            : job));
+      } finally {
+        itemSynthesisRunningRef.current = false;
+      }
+    })();
+  }, [
+    evictEvidenceObjectUrl,
+    itemSynthesisJobs,
+    props.onSessionChange,
+    props.request,
+    props.session.id,
+  ]);
+
+  const repairScene = async (
+    action: DebateMysterySceneRepairActionV1,
+    room: DebateMysteryRoomV2 | null = null,
+    item: DebateMysteryPublicRecordItemV2 | null = null,
+  ): Promise<void> => {
+    if (sceneRepairJob) return;
+    if (action === "regenerate_evidence_asset") {
+      if (item) enqueueItemSynthesis(item);
+      return;
+    }
+    if (props.session.responseMode === "local" && action !== "reduce_evidence_magenta") return;
+    setSceneRepairJob({
+      action,
+      roomId: room?.id ?? null,
+      subjectId: item?.reference.kind === "evidence" ? item.reference.id : null,
+      startedAt: new Date().toISOString(),
+    });
+    setSceneRepairOpen(null);
+    setError(null);
+    try {
+      const result = await props.request<{
+        session: DebateSessionV1;
+        roomArtUpgrade: DebateMysteryRoomArtUpgradeStatusV1;
+      }>(
+        `/api/debates/${encodeURIComponent(props.session.id)}/mystery-scene-repair`,
+        mutationBody({
+          action,
+          ...(room ? { roomId: room.id, artStyle: currentRoomArtStyle } : {}),
+          ...(item?.reference.kind === "evidence" ? { subjectId: item.reference.id } : {}),
+        }),
+      );
+      if (action === "regenerate_exterior" || action === "align_exterior_door") {
+        evictExteriorObjectUrl();
+      }
+      if (room && (action === "regenerate_room_mosaic" ||
+        action === "regenerate_room_upgrade" || action === "generate_room_upgrade")) {
+        setSceneAssetRefreshNonce((current) => current + 1);
+        setLoadedUpgradeRoomIds((current) => {
+          const next = new Set(current);
+          next.delete(room.id);
+          return next;
+        });
+        setFailedUpgradeRoomIds((current) => {
+          const next = new Set(current);
+          next.delete(room.id);
+          return next;
+        });
+      }
+      if (item?.reference.kind === "evidence") {
+        evictEvidenceObjectUrl(item.reference.id);
+      }
+      if (action === "regenerate_music" || action === "regenerate_ambience") {
+        setAudioAssetRefreshNonce((current) => current + 1);
+      }
+      setRoomArtUpgradeStatus(result.roomArtUpgrade);
+      props.onSessionChange(result.session);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "PRISM could not repair this scene.");
+    } finally {
+      setSceneRepairJob(null);
+    }
+  };
+  const undoSceneRepair = async (): Promise<void> => {
+    if (sceneRepairJob || !state.sceneRepairUndo) return;
+    setSceneRepairJob({
+      action: "undo",
+      roomId: state.sceneRepairUndo.roomId,
+      subjectId: state.sceneRepairUndo.subjectId ?? null,
+      startedAt: new Date().toISOString(),
+    });
+    setError(null);
+    try {
+      const previousAction = state.sceneRepairUndo.action;
+      const result = await props.request<{
+        session: DebateSessionV1;
+        roomArtUpgrade: DebateMysteryRoomArtUpgradeStatusV1;
+      }>(
+        `/api/debates/${encodeURIComponent(props.session.id)}/mystery-scene-repair/undo`,
+        mutationBody({}),
+      );
+      if (previousAction === "regenerate_exterior" || previousAction === "align_exterior_door") {
+        evictExteriorObjectUrl();
+      } else if (previousAction === "regenerate_evidence_asset" ||
+        previousAction === "reduce_evidence_magenta") {
+        const subjectId = state.sceneRepairUndo?.subjectId;
+        if (subjectId) {
+          evictEvidenceObjectUrl(subjectId);
+        }
+      } else if (previousAction === "regenerate_music" || previousAction === "regenerate_ambience") {
+        setAudioAssetRefreshNonce((current) => current + 1);
+      } else if (state.sceneRepairUndo.roomId) {
+        setSceneAssetRefreshNonce((current) => current + 1);
+      }
+      setLoadedUpgradeRoomIds((current) => {
+        const next = new Set(current);
+        if (state.sceneRepairUndo?.roomId) next.delete(state.sceneRepairUndo.roomId);
+        return next;
+      });
+      setFailedUpgradeRoomIds((current) => {
+        const next = new Set(current);
+        if (state.sceneRepairUndo?.roomId) next.delete(state.sceneRepairUndo.roomId);
+        return next;
+      });
+      setRoomArtUpgradeStatus(result.roomArtUpgrade);
+      props.onSessionChange(result.session);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "That repair could not be undone.");
+    } finally {
+      setSceneRepairJob(null);
     }
   };
   const activeStatement = state.court?.statements.find(
@@ -2782,6 +3242,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     const { action, session, previousDialogueCount } = deferred;
     const nextState = session.formatState as DebateWhodunnitFormatStateV2;
     if (action.action === "talk" || action.action === "present_to_suspect") setCommand(null);
+    if (action.action === "move" && action.roomId) setCommand(null);
     if (action.action === "retry_witness_checkpoint") {
       setCommand(null);
       setHeldDialogue(null);
@@ -3576,12 +4037,14 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     roomUpgradeEnabled,
     currentRoomHasIllustratedUpgrade && currentRoomIllustratedUpgradeLoaded,
   );
+  const currentRoomMosaicGrid = command === "examine" ? "hidden" : "visible";
   const currentRoomMosaicAssetUrl = currentRoom?.sealedAsset?.revealed &&
       currentRoom.sealedAsset.status === "ready"
     ? whodunnitSealedRoomArtUrl({
         sessionId: props.session.id,
         subjectId: currentRoom.id,
         style: "mosaic",
+        mosaicGrid: currentRoomMosaicGrid,
       })
     : null;
   const currentRoomUpgradeAssetUrl = currentRoom && currentRoomHasIllustratedUpgrade
@@ -3591,13 +4054,11 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         style: "illustrated",
       })
     : null;
-  const currentRoomAssetKey = currentRoom
-    ? sealedMysteryAssetKey("room", currentRoom.id)
-    : null;
   const currentRoomBundledMosaicUrl = currentRoom
     ? whodunnitBundledRoomArtPathForRoom(
         currentRoom,
         "mosaic",
+        currentRoomMosaicGrid,
       )
     : null;
   const currentRoomLayoutEntity = currentRoom && mansionLayout
@@ -3619,6 +4080,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         state.config.mansionSnapshot.sourceBundleId,
         currentRoomMosaicMansionAssetId,
         "mosaic",
+        currentRoomMosaicGrid,
       )
     : null;
   const currentRoomAcceptedUpgradeUrl = currentRoomIllustratedAssetId &&
@@ -3633,7 +4095,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const currentRoomMosaicUrl = currentRoomMosaicAssetUrl
     ?? currentRoomAcceptedMosaicUrl
     ?? (currentRoom?.imageId
-      ? whodunnitSavedRoomArtUrl(currentRoom.imageId, "mosaic")
+      ? whodunnitSavedRoomArtUrl(currentRoom.imageId, "mosaic", currentRoomMosaicGrid)
       : null)
     ?? currentRoomBundledMosaicUrl;
   const currentRoomImageUrl = currentRoomArtStyle === "illustrated"
@@ -3661,6 +4123,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     "--room-image": currentRoomImageUrl ? `url(${currentRoomImageUrl})` : "none",
     "--room-parallax-x": `${roomParallax.x}px`,
     "--room-parallax-y": `${roomParallax.y}px`,
+    "--room-parallax-scale": roomParallax.x || roomParallax.y ? "1.012" : "1",
   } as CSSProperties;
   const lensActive = Boolean(
     command === "examine" &&
@@ -3672,6 +4135,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       !caseFileOpen &&
       !theoryOpen,
   );
+  const investigationCommandsDismissed = state.roomView !== "room" ||
+    command === "move" ||
+    command === "examine";
   const examinationIlluminatedCells = lensActive && currentRoom
     ? new Set(debateMysteryV2ExamineGridCellIndexes(investigationLens, currentRoom.hotspots))
     : new Set<number>();
@@ -3842,6 +4308,313 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       setError(caught instanceof Error ? caught.message : "The reusable case could not be exported.");
     }
   };
+  const renderInvestigationHeaderIdentity = (
+    sharedSessionHeader = false,
+  ): React.JSX.Element => (
+    <div
+      className={styles.investigationHeaderIdentity}
+      data-shared-session-header={sharedSessionHeader ? "true" : undefined}
+      data-theme={props.theme}
+    >
+      <p className={styles.eyebrow}>{state.caseTitle}</p>
+      <strong>{spectatorTheory ? "Prosecutor Findings" : "Investigation"}</strong>
+    </div>
+  );
+  const renderInvestigationHeaderActions = (
+    sharedSessionHeader = false,
+  ): React.JSX.Element => (
+    <div
+      className={styles.investigationHeaderActions}
+      data-shared-session-header={sharedSessionHeader ? "true" : undefined}
+      data-theme={props.theme}
+    >
+      <div className={styles.roomArtStyleToggle} role="group" aria-label="Upgraded room art" data-tutorial-target="mystery-v2-room-art-upgrade">
+        <button
+          type="button"
+          aria-pressed={roomUpgradeEnabled}
+          disabled={state.roomView === "mansion"}
+          title={roomUpgradeEnabled
+            ? `${roomArtUpgradeStatus?.readyRoomIds.length ?? 0} of ${state.rooms.length} room upgrades are ready. Rooms without one show their original Mosaic automatically.`
+            : "Show each room's original Mosaic. Upgraded derivatives remain saved and instantly available."}
+          onClick={() => selectRoomUpgradeEnabled(!roomUpgradeEnabled)}
+        >Upgraded</button>
+      </div>
+      <button type="button" onClick={() => { setCaseFileOpen(true); setCaseFileUpdate(null); }} data-tutorial-target="mystery-v2-case-file">Case File <span>{caseFileEntryCount}</span></button>
+    </div>
+  );
+  const renderSceneRepairControl = (
+    context: "exterior" | "room" | "map" | "item",
+    room: DebateMysteryRoomV2 | null = null,
+    item: DebateMysteryPublicRecordItemV2 | null = null,
+  ): React.JSX.Element | null => {
+    if (context === "room" && !room?.visited) return null;
+    if (context === "item" && (!item || item.reference.kind !== "evidence" || !item.admitted)) return null;
+    const contextKey = context === "exterior" || context === "map"
+      ? context
+      : context === "item"
+        ? `item:${item!.reference.id}`
+        : room!.id;
+    const undoAction = state.sceneRepairUndo?.action;
+    const audioUndo = undoAction === "regenerate_music" || undoAction === "regenerate_ambience";
+    const undoApplies = Boolean(
+      state.sceneRepairUndo &&
+      (context === "exterior"
+        ? audioUndo || (state.sceneRepairUndo.roomId === null && !state.sceneRepairUndo.subjectId)
+        : context === "item"
+          ? audioUndo || state.sceneRepairUndo.subjectId === item!.reference.id
+          : context === "map"
+            ? audioUndo || Boolean(state.sceneRepairUndo.subjectId)
+            : state.sceneRepairUndo.roomId === room!.id || audioUndo),
+    );
+    const hasUpgrade = Boolean(
+      room && roomArtUpgradeStatus?.readyRoomIds.includes(room.id),
+    );
+    const actions: DebateMysterySceneRepairActionV1[] = context === "exterior"
+      ? ["regenerate_exterior", "align_exterior_door", "regenerate_music", "regenerate_ambience"]
+      : context === "item"
+        ? [
+            "regenerate_evidence_asset",
+            ...(item?.sealedAsset?.status === "ready" && item.sealedAsset.revealed
+              ? ["reduce_evidence_magenta" as const]
+              : []),
+            "regenerate_music",
+            "regenerate_ambience",
+          ]
+        : context === "map"
+          ? ["regenerate_music", "regenerate_ambience"]
+          : hasUpgrade
+        ? [
+            "regenerate_room_mosaic",
+            "regenerate_room_upgrade",
+            "refresh_room_anchors",
+            "refresh_room_lights",
+            "regenerate_music",
+            "regenerate_ambience",
+          ]
+        : [
+            "regenerate_room_mosaic",
+            "refresh_room_anchors",
+            "refresh_room_lights",
+            "generate_room_upgrade",
+            "regenerate_music",
+            "regenerate_ambience",
+          ];
+    const contextLabel = context === "exterior"
+      ? "exterior"
+      : context === "item"
+        ? "found item"
+        : context === "map"
+          ? "mansion audio"
+          : "room";
+    return (
+      <>
+        <button
+          type="button"
+          className={styles.sceneRepairButton}
+          data-undo={undoApplies ? "true" : undefined}
+          data-tutorial-target="mystery-v2-scene-repair"
+          disabled={Boolean(sceneRepairJob)}
+          aria-label={undoApplies ? "Undo the last field repair" : `Repair this ${contextLabel}`}
+          title={undoApplies ? "Undo the last field repair" : `Repair this ${contextLabel}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (undoApplies) {
+              void undoSceneRepair();
+              return;
+            }
+            setSceneRepairOpen(contextKey);
+          }}
+        >
+          <span aria-hidden="true">{undoApplies ? "↶" : "?"}</span>
+          {undoApplies ? <strong>Undo</strong> : null}
+        </button>
+        {sceneRepairOpen === contextKey ? (
+          <>
+            <button
+              type="button"
+              className={styles.sceneRepairBackdrop}
+              aria-label="Close scene repair"
+              onClick={(event) => { event.stopPropagation(); setSceneRepairOpen(null); }}
+            />
+            <section
+              className={styles.sceneRepairDialog}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="mystery-scene-repair-title"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <header>
+                <div>
+                  <p className={styles.eyebrow}>Field repair</p>
+                  <h2 id="mystery-scene-repair-title">
+                    Repair this {contextLabel}
+                  </h2>
+                </div>
+                <button type="button" onClick={() => setSceneRepairOpen(null)}>Close</button>
+              </header>
+              <p>
+                Choose what looks wrong. PRISM changes presentation only—case facts,
+                discoveries, doors, and action costs stay frozen.
+              </p>
+              <div className={styles.sceneRepairOptions}>
+                {actions.map((action) => {
+                  const copy = MYSTERY_SCENE_REPAIR_COPY[action];
+                  const issue = action === "regenerate_room_mosaic" && hasUpgrade
+                    ? "The original room looks wrong"
+                    : copy.issue;
+                  const itemGenerationAlreadyQueued = action === "regenerate_evidence_asset" &&
+                    item?.reference.kind === "evidence" &&
+                    itemSynthesisJobs.some((job) =>
+                      job.subjectId === item.reference.id && job.status === "queued");
+                  return (
+                    <button
+                      key={action}
+                      type="button"
+                      disabled={
+                        Boolean(sceneRepairJob) ||
+                        itemGenerationAlreadyQueued ||
+                        (props.session.responseMode === "local" && action !== "reduce_evidence_magenta")
+                      }
+                      onClick={() => void repairScene(action, room, item)}
+                    >
+                      <strong>{issue}</strong>
+                      <span>{copy.action}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {props.session.responseMode === "local" &&
+                actions.some((action) => action !== "reduce_evidence_magenta") ? (
+                <p className={styles.roomVisualOnlineNotice}>
+                  {actions.includes("reduce_evidence_magenta")
+                    ? "Generation and image-aware repair are ONLINE-only. Local magenta cleanup remains available."
+                    : "These generation and image-aware repairs are ONLINE-only."}
+                </p>
+              ) : null}
+              <footer>
+                <small>
+                  No undiscovered room or item is previewed here. After a successful repair,
+                  this question mark becomes Undo. Save venue level keeps accepted mansion changes.
+                </small>
+              </footer>
+            </section>
+          </>
+        ) : null}
+      </>
+    );
+  };
+  const renderSceneRepairLoader = (): React.JSX.Element => {
+    const copy = sceneRepairJob?.action === "undo"
+      ? {
+          loader: "Restoring the previous scene",
+          detail: "PRISM is restoring the exact protected image and calibration from before the last repair.",
+        }
+      : sceneRepairJob
+        ? MYSTERY_SCENE_REPAIR_COPY[sceneRepairJob.action]
+        : null;
+    return (
+      <PrismBlockingLoader
+        open={Boolean(sceneRepairJob)}
+        placement="fullscreen"
+        theme={props.theme}
+        eyebrow="PRISM / Field Repair"
+        title={copy?.loader ?? "Repairing the scene"}
+        detail={copy?.detail ?? "PRISM is restoring the accepted scene presentation."}
+        stepLabel={sceneRepairJob?.action === "undo" ? "Restoring protected snapshot" : "Preparing and validating the replacement"}
+        startedAt={sceneRepairJob?.startedAt ?? null}
+        footer="No undiscovered room, item, or case information is shown during repair."
+      />
+    );
+  };
+  const renderItemSynthesisLoader = (): React.JSX.Element => {
+    const activeJobs = itemSynthesisJobs.filter((job) => job.status === "generating");
+    const queuedJobs = itemSynthesisJobs.filter((job) => job.status === "queued");
+    const failedJobs = itemSynthesisJobs.filter((job) => job.status === "failed");
+    const readyJobs = itemSynthesisJobs.filter((job) => job.status === "ready");
+    const focusJob = activeJobs[0] ?? queuedJobs[0] ?? failedJobs[0] ?? readyJobs[0] ?? null;
+    const queueHasSubject = (subjectId: string): boolean => queuedJobs.some((job) =>
+      job.subjectId === subjectId);
+    const renderJobs = (
+      jobs: WhodunnitItemSynthesisJob[],
+      status: "active" | "queued" | "failed" | "ready",
+    ): React.JSX.Element | null => jobs.length > 0 ? (
+      <section className={styles.itemSynthesisGroup} data-status={status}>
+        <strong>{status === "active"
+          ? "Refracting"
+          : status === "queued"
+            ? "Queued"
+            : status === "failed"
+              ? "Needs attention"
+              : "Ready"}</strong>
+        <ul className={styles.itemSynthesisJobs}>
+          {jobs.map((job) => (
+            <li key={job.id}>
+              <span aria-hidden="true">{job.emoji}</span>
+              <div>
+                <b>{job.title}</b>
+                <small>{status === "active"
+                  ? "Generating without revealing the asset"
+                  : status === "queued"
+                    ? "Waiting for the current item"
+                    : status === "failed"
+                      ? job.error ?? "Generation failed"
+                      : "Saved to this mansion for discovery"}</small>
+              </div>
+              <div className={styles.itemSynthesisActions}>
+                {status === "active" ? (
+                  <button
+                    type="button"
+                    disabled={queueHasSubject(job.subjectId)}
+                    onClick={() => queueItemSynthesisRequest(job)}
+                  >{queueHasSubject(job.subjectId) ? "Queued" : "Queue regeneration"}</button>
+                ) : status === "failed" ? (
+                  <button type="button" onClick={() => retryItemSynthesis(job.id)}>Retry</button>
+                ) : status === "ready" ? (
+                  <button type="button" onClick={() => queueItemSynthesisRequest(job)}>Regenerate</button>
+                ) : null}
+                {(status === "failed" || status === "ready") ? (
+                  <button type="button" onClick={() => dismissItemSynthesis(job.id)}>Dismiss</button>
+                ) : null}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+    ) : null;
+    return (
+      <PrismBlockingLoader
+        open={itemSynthesisJobs.length > 0}
+        placement="docked"
+        theme={props.theme}
+        eyebrow="Whodunnit · Found item"
+        title={focusJob?.status === "failed"
+          ? `${focusJob.title} needs attention`
+          : focusJob?.status === "ready"
+            ? `${focusJob.title} is ready`
+            : focusJob
+              ? `Refracting ${focusJob.title}`
+              : "Refracting a found item"}
+        detail="Item artwork is prepared softly in the background. The image remains hidden until it appears through discovery."
+        stepLabel={activeJobs.length > 0
+          ? "Synthesizing item artwork"
+          : queuedJobs.length > 0
+            ? "Waiting in the Refract queue"
+            : failedJobs.length > 0
+              ? "Choose Retry to queue another attempt"
+              : "Artwork saved to this mansion"}
+        progress={readyJobs.length === itemSynthesisJobs.length ? 1 : null}
+        startedAt={activeJobs[0]?.startedAt ?? focusJob?.queuedAt ?? null}
+        footer="Soft Refract — keep investigating. Click Prism whenever you want to check progress."
+      >
+        <div className={styles.itemSynthesisQueue} aria-label="Found item synthesis queue">
+          {renderJobs(activeJobs, "active")}
+          {renderJobs(queuedJobs, "queued")}
+          {renderJobs(failedJobs, "failed")}
+          {renderJobs(readyJobs, "ready")}
+        </div>
+      </PrismBlockingLoader>
+    );
+  };
 
   if (state.playPhase === "title_card" || visitingExterior) {
     const preparedMansionExteriorUrl = sealedMysteryAssetObjectUrl(
@@ -3856,11 +4629,18 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         state.config.scaleClass,
         venueProfile,
       );
-    const mansionDoorTarget = debateMysteryMansionDoorTargetV1(
-      state.config.houseStyle,
-      state.config.scaleClass,
-      venueProfile,
-    );
+    const acceptedEntryTarget = state.mansionExterior?.entryTarget ??
+      venueProfile?.presentation?.entryTarget;
+    const mansionDoorTarget = acceptedEntryTarget
+      ? {
+          xPercent: acceptedEntryTarget.x * 100,
+          yPercent: acceptedEntryTarget.y * 100,
+        }
+      : debateMysteryMansionDoorTargetV1(
+          state.config.houseStyle,
+          state.config.scaleClass,
+          venueProfile,
+        );
     const mansionDoorEntry = state.config.investigationMode === "full" && !spectator;
     const firstPersonExterior = visitingExterior || props.exteriorIntroStarted;
     const startWhodunnit = (): void => {
@@ -3933,6 +4713,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               <span className={styles.titleEntryAction}>{venueEntryAction}</span>
             </button>
         ) : null}
+        {firstPersonExterior ? renderSceneRepairControl("exterior") : null}
+        {renderItemSynthesisLoader()}
+        {renderSceneRepairLoader()}
       </main>
     );
   }
@@ -4074,6 +4857,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
             onDismiss={() => setError(null)}
           />
         ) : null}
+        {renderItemSynthesisLoader()}
       </main>
     );
   }
@@ -4143,6 +4927,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           <button type="button" data-session-local-back="true" onClick={props.onExit}>Return to Archive</button>
         </div>
         {error ? <p className={styles.error}>{error}</p> : null}
+        {renderItemSynthesisLoader()}
       </main>
     );
   }
@@ -4300,13 +5085,14 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         {!spectator && command === "present" ? <div className={styles.choiceTray}><header><h2>Object with evidence or sworn testimony</h2><button type="button" onClick={() => setCommand(null)}>Close</button></header>{renderRecordButtons((record) => { setCommand(null); setPresentedCourtRecord(record); void sendAction({ action: "object_statement", statementId: activeStatement.statementId, record }); })}</div> : null}
         {!spectator && state.pendingProsecutionChoice ? <div className={styles.prosecutionChoice} role="dialog" aria-modal="true" aria-labelledby="prosecution-choice-title"><p className={styles.eyebrow}>Your response</p><h2 id="prosecution-choice-title">{state.pendingProsecutionChoice.prompt}</h2>{state.pendingProsecutionChoice.options.map((option) => <button key={option.id} type="button" disabled={busy || dialoguePerformanceActive} onClick={() => void sendAction({ action: "choose_prosecution_response", choiceId: state.pendingProsecutionChoice!.id, optionId: option.id })}>{option.text}</button>)}</div> : null}
         {caseFileUpdate ? <CaseFileUpdateNotice update={caseFileUpdate} onView={() => { setCaseFileOpen(true); setCaseFileUpdate(null); }} onDismiss={() => setCaseFileUpdate(null)} /> : null}
-        {caseFileOpen ? <CaseFile state={state} playerName={playerCharacterName} playerBot={prosecutorBot} playerColor={playerCharacterColor} playerGlyph={playerCharacterGlyph ?? null} renderBotGlyph={props.renderBotGlyph} renderMysteryBotAvatar={props.renderMysteryBotAvatar} objectUrls={sealedAssetObjectUrls} saveState={sealedAssetSaveState} onSaveAsset={saveSealedAsset} onClose={() => setCaseFileOpen(false)} /> : null}
+        {caseFileOpen ? <CaseFile state={state} playerName={playerCharacterName} playerBot={prosecutorBot} playerColor={playerCharacterColor} playerGlyph={playerCharacterGlyph ?? null} renderBotGlyph={props.renderBotGlyph} renderMysteryBotAvatar={props.renderMysteryBotAvatar} objectUrls={sealedAssetObjectUrls} onClose={() => setCaseFileOpen(false)} /> : null}
         {error ? (
           <WhodunnitChromeErrorNotice
             message={error}
             onDismiss={() => setError(null)}
           />
         ) : null}
+        {renderItemSynthesisLoader()}
       </main>
     );
   }
@@ -4315,7 +5101,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     <main className={styles.investigation} data-theme={props.theme} data-view={state.roomView} data-opening-map-reveal={openingMapReveal ? "true" : undefined} data-exterior-room-reveal={exteriorRoomReveal ? "true" : undefined} data-tutorial-target="mystery-v2-investigation" onClickCapture={handleInvestigationDialogueClickCapture}>
       <SessionAtmosphereLayer
         sessionKey={`whodunnit-v2-mansion-ambience:${props.session.id}:${state.config.houseStyle.id}`}
-        backgroundUrl={`/api/debates/${encodeURIComponent(props.session.id)}/mystery-mansion/atmosphere`}
+        backgroundUrl={`/api/debates/${encodeURIComponent(props.session.id)}/mystery-mansion/atmosphere?repair=${audioAssetRefreshNonce}`}
         backgroundFallbackUrl={mansionAmbienceAsset?.url ?? null}
         active={props.audioEnabled && mansionAmbienceAsset !== null}
         volume={props.audioVolume}
@@ -4327,7 +5113,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       />
       <SessionAtmosphereLayer
         sessionKey={`whodunnit-v2-investigation:${props.session.id}`}
-        backgroundUrl={`/api/debates/${encodeURIComponent(props.session.id)}/mystery-mansion/theme`}
+        backgroundUrl={`/api/debates/${encodeURIComponent(props.session.id)}/mystery-mansion/theme?repair=${audioAssetRefreshNonce}`}
         backgroundFallbackUrl={WHODUNNIT_INVESTIGATION_MUSIC_URL}
         active={props.audioEnabled}
         volume={props.audioVolume}
@@ -4344,22 +5130,19 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         ambientFoley={false}
       />
       {identityPresentationBlackout}
-      {!roomIntroductionActive ? <header className={styles.investigationHeader}>
+      {!roomIntroductionActive ? liveSessionHeaderPortalTargets ? <>
+        {createPortal(
+          renderInvestigationHeaderIdentity(true),
+          liveSessionHeaderPortalTargets.title,
+        )}
+        {createPortal(
+          renderInvestigationHeaderActions(true),
+          liveSessionHeaderPortalTargets.actions,
+        )}
+      </> : <header className={styles.investigationHeader}>
         <button type="button" data-session-local-back="true" disabled={busy} onClick={props.onExit}>← Archive</button>
-        <div><p className={styles.eyebrow}>{state.caseTitle}</p><strong>{spectatorTheory ? "Prosecutor Findings" : "Investigation"}</strong></div>
-        <div className={styles.investigationHeaderActions}>
-          <div className={styles.roomArtStyleToggle} role="group" aria-label="Upgraded room art" data-tutorial-target="mystery-v2-room-art-upgrade">
-            <button
-              type="button"
-              aria-pressed={roomUpgradeEnabled}
-              title={roomUpgradeEnabled
-                ? `${roomArtUpgradeStatus?.readyRoomIds.length ?? 0} of ${state.rooms.length} room upgrades are ready. Rooms without one show their original Mosaic automatically.`
-                : "Show each room's original Mosaic. Upgraded derivatives remain saved and instantly available."}
-              onClick={() => selectRoomUpgradeEnabled(!roomUpgradeEnabled)}
-            >Upgraded</button>
-          </div>
-          <button type="button" onClick={() => { setCaseFileOpen(true); setCaseFileUpdate(null); }} data-tutorial-target="mystery-v2-case-file">Case File <span>{caseFileEntryCount}</span></button>
-        </div>
+        {renderInvestigationHeaderIdentity()}
+        {renderInvestigationHeaderActions()}
       </header> : null}
       {spectatorTheory ? (
         <section className={styles.partnerFindings} aria-labelledby="prosecutor-findings-title">
@@ -4371,25 +5154,38 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         <section className={styles.mansionBoard} aria-label="Mystery Venue Move map" aria-busy={travelPresentation ? "true" : undefined} data-tutorial-target="mystery-v2-mansion">
           <header className={styles.mansionHeading}>
             <div><p className={styles.eyebrow}>Mystery Venue</p><strong>{mansionFloorDisplayName}</strong></div>
-            {visualRetryAvailable || mansionCanBeSaved ? (
+            {state.rooms.length > 0 || mansionCanBeSaved ? (
               <div className={styles.mansionAssetActions}>
-                {visualRetryAvailable ? (
-                  <button
-                    type="button"
-                    className={styles.retryMansionAssetsButton}
-                    disabled={visualRetryState === "retrying" || visualRetryState === "queued"}
-                    onClick={() => void retryFailedVisuals()}
-                    data-state={visualRetryState}
-                  >
-                    {visualRetryState === "retrying"
-                      ? "Retrying visuals…"
-                      : visualRetryState === "queued"
-                        ? "Visuals queued"
-                        : visualRetryState === "failed"
-                          ? "Retry visuals again"
-                          : `Retry failed visual${failedVisualCount === 1 ? "" : "s"}`}
-                  </button>
-                ) : null}
+                <PrismRefractTarget
+                  target={{
+                    id: `whodunnit-room-visuals-${props.session.id}`,
+                    kind: "magic",
+                    interaction: "immediate",
+                    ownsPresentation: true,
+                    label: roomVisualsMode ? "Close visual tools" : "Visuals",
+                    run: () => setRoomVisualsMode((current) => !current),
+                    disabled: () => Boolean(roomVisualJob),
+                  }}
+                >
+                  {(binding) => (
+                    <button
+                      {...binding}
+                      type="button"
+                      className={styles.roomVisualsMagicButton}
+                      disabled={Boolean(roomVisualJob)}
+                      aria-pressed={roomVisualsMode}
+                      onClick={() => {
+                        setRoomVisualDialogId(null);
+                        setRoomVisualResult("idle");
+                        setRoomVisualsMode((current) => !current);
+                      }}
+                      data-tutorial-target="mystery-v2-room-visuals"
+                    >
+                      <span aria-hidden="true">✦</span>
+                      {roomVisualsMode ? "Done with visuals" : "Visuals"}
+                    </button>
+                  )}
+                </PrismRefractTarget>
                 {mansionCanBeSaved ? (
                   <button
                     type="button"
@@ -4430,6 +5226,55 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               ))}
             </nav>
           </header>
+          {roomVisualsMode && foundEvidenceItems.length > 0 ? (
+            <aside className={styles.foundItemVisualsPanel} aria-label="Found item assets">
+              <header>
+                <div>
+                  <strong>Found item assets</strong>
+                  <small>Generate presentation art without previewing or exposing unfound evidence.</small>
+                </div>
+              </header>
+              <div>
+                {foundEvidenceItems.map((item) => {
+                  const ready = item.sealedAsset?.status === "ready";
+                  const generating = itemSynthesisJobs.some((job) =>
+                    job.subjectId === item.reference.id && job.status === "generating");
+                  const queued = itemSynthesisJobs.some((job) =>
+                    job.subjectId === item.reference.id && job.status === "queued");
+                  return (
+                    <button
+                      key={item.reference.id}
+                      type="button"
+                      disabled={Boolean(sceneRepairJob) || queued || props.session.responseMode === "local"}
+                      onClick={() => void repairScene("regenerate_evidence_asset", null, item)}
+                    >
+                      <span aria-hidden="true">{item.emoji}</span>
+                      <strong>{item.title}</strong>
+                      <small>{generating
+                        ? "Refracting softly"
+                        : queued
+                          ? "Queued"
+                          : ready
+                            ? "Asset ready"
+                            : "Emoji fallback"}</small>
+                      <em>{generating
+                        ? queued
+                          ? "Regeneration queued"
+                          : "Queue regeneration"
+                        : queued
+                          ? "Queued"
+                          : ready
+                            ? "Regenerate"
+                            : "Generate"}</em>
+                    </button>
+                  );
+                })}
+              </div>
+              {props.session.responseMode === "local" ? (
+                <small>Item generation is ONLINE-only. Found-item facts remain local and unchanged.</small>
+              ) : null}
+            </aside>
+          ) : null}
           <div className={styles.mansionViewport}>
             <button
               type="button"
@@ -4503,6 +5348,10 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               ))}
               {mansionPlacements.map((placement) => {
                 const room = placement.room;
+                const visualReadiness = whodunnitRoomVisualReadiness(
+                  room,
+                  roomArtUpgradeStatus,
+                );
                 const sealedRoomArtReady = room.sealedAsset?.revealed === true &&
                   room.sealedAsset.status === "ready";
                 const roomMapArt = whodunnitDiscoveredMansionRoomArtV1({
@@ -4552,9 +5401,18 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                     data-visited={room.visited ? "true" : undefined}
                     data-searched={room.hotspots.length > 0 && examinedHotspots === room.hotspots.length ? "true" : undefined}
                     data-locked={!room.visited ? "true" : undefined}
+                    data-visuals-mode={roomVisualsMode ? "true" : undefined}
+                    data-visual-readiness={roomVisualsMode ? visualReadiness : undefined}
                     aria-pressed={room.id === mansionSelectedRoom?.id}
                     aria-label={`${room.visited ? room.name : "Unknown room"}${room.sealedAsset?.status === "pending" ? ", being secured" : ""}${room.visited ? ", visited" : ""}${roomSuspects.length ? `, ${roomSuspects.map((suspect) => suspect.name).join(" and ")} known to be here` : ""}`}
-                    onClick={() => setSelectedMansionRoomId(room.id)}
+                    onClick={() => {
+                      if (roomVisualsMode) {
+                        setRoomVisualDialogId(room.id);
+                        setRoomVisualResult("idle");
+                        return;
+                      }
+                      setSelectedMansionRoomId(room.id);
+                    }}
                     style={{
                       left: `${mansionX(placement.x)}%`,
                       top: `${mansionY(placement.y)}%`,
@@ -4565,6 +5423,15 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                         : "none",
                     } as CSSProperties}
                   >
+                    {roomVisualsMode ? (
+                      <span className={styles.mansionRoomVisualStatus}>
+                        {visualReadiness === "fallback"
+                          ? "Fallback"
+                          : visualReadiness === "upgraded"
+                            ? "Upgraded"
+                            : "Default"}
+                      </span>
+                    ) : null}
                     {room.visited ? <strong>{room.name}</strong> : null}
                     {roomSuspects.map((suspect) => {
                       const bot = presentMysteryBot(botById.get(suspect.botId) ?? null);
@@ -4654,6 +5521,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           style={roomSceneStyle}
           data-mystery-room-stage="true"
           data-art-style={currentRoomArtStyle}
+          data-art-crossfading={roomArtCrossfading ? "true" : undefined}
           data-parallax-enabled={roomParallaxEnabled ? "true" : undefined}
           data-lens-active={lensActive ? "true" : undefined}
           data-room-introduction={roomIntroductionActive ? roomIntroductionPhase : undefined}
@@ -4671,20 +5539,23 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
             <img
               className={styles.roomBackdropImage}
               data-art-style="mosaic"
-              key={`${currentRoom.id}:mosaic`}
+              data-blurred={roomActorVisible ? "true" : undefined}
+              key={`${currentRoom.id}:mosaic:${currentRoomMosaicGrid}:${sceneAssetRefreshNonce}`}
               src={currentRoomMosaicUrl}
               alt=""
               aria-hidden="true"
               draggable={false}
             />
           ) : null}
-          {roomUpgradeEnabled && currentRoomUpgradeAssetUrl ? (
+          {currentRoomUpgradeAssetUrl ? (
             <img
               className={styles.roomBackdropImage}
               data-art-style="illustrated"
+              data-blurred={roomActorVisible ? "true" : undefined}
               data-upgrade-layer="true"
               data-loaded={currentRoomIllustratedUpgradeLoaded ? "true" : undefined}
-              key={`${currentRoom.id}:upgrade`}
+              data-active={currentRoomArtStyle === "illustrated" ? "true" : undefined}
+              key={`${currentRoom.id}:upgrade:${sceneAssetRefreshNonce}`}
               src={currentRoomUpgradeAssetUrl}
               alt=""
               aria-hidden="true"
@@ -4694,11 +5565,6 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
             />
           ) : null}
           <div className={styles.roomParallaxLayer}>
-            <div
-              className={styles.roomBackdrop}
-              data-art-style={currentRoomArtStyle}
-              data-blurred={roomActorVisible ? "true" : undefined}
-            />
             <DebateMysteryRoomCinematographyLayer
               room={currentRoom}
               lights={currentRoomLights}
@@ -4708,7 +5574,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
             />
             {command === "examine" && !roomComplete ? <div className={styles.hotspots} aria-label="Examination points">{currentRoomUnexaminedHotspots.map((hotspot) => <button key={hotspot.id} type="button" aria-label={`Examine ${hotspot.label}`} disabled={!lensActive} data-examining={examiningHotspotId === hotspot.id ? "true" : undefined} style={hotspotSpotStyle(hotspot.polygon)} onFocus={() => { const point = debateMysteryV2HotspotFocusPoint(hotspot.polygon); setInvestigationLens(resolveDebateMysteryV2Lens(point.x, point.y, currentRoom.hotspots)); }} onClick={(event) => { if (event.detail === 0) { event.stopPropagation(); const hotspotId = debateMysteryV2LensClickTarget(investigationLens); if (hotspotId) void examineHotspot(hotspotId); } }} />)}</div> : null}
           </div>
-          <SceneMediaVignette theme={props.theme} style={{ "--scene-vignette-z": 2 } as CSSProperties} />
+          {command !== "examine" && command !== "move" ? (
+            <SceneMediaVignette theme={props.theme} style={{ "--scene-vignette-z": 2 } as CSSProperties} />
+          ) : null}
           {command === "examine" && !roomComplete ? <div className={styles.examinationGrid} data-art-style={currentRoomArtStyle} style={examinationGridStyle} aria-hidden="true">{[...examinationIlluminatedCells].map((index) => {
             const column = index % DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS;
             const row = Math.floor(index / DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS);
@@ -4721,7 +5589,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           })}</div> : null}
           {command === "examine" && !roomComplete ? <i className={styles.investigationLens} aria-hidden="true" data-visible={lensActive ? "true" : undefined} data-targeted={targetedHotspotId ? "true" : undefined} style={{ left: `${investigationLens.x}%`, top: `${investigationLens.y}%`, "--lens-proximity": investigationLens.proximity } as CSSProperties} /> : null}
           {roomIntroductionPhase !== "casekeeper" ? <div className={styles.roomShade} /> : null}
-          {!roomIntroductionActive ? <div className={styles.roomTitle}><small>{venueTierLabel(currentRoom.floor)}</small><h1>{currentRoom.name}</h1>{currentRoomMosaicAssetUrl && currentRoom.sealedAsset && currentRoomAssetKey ? <button type="button" className={styles.saveSealedAssetButton} disabled={sealedAssetSaveState[currentRoomAssetKey] === "saving" || sealedAssetSaveState[currentRoomAssetKey] === "saved"} onClick={(event) => { event.stopPropagation(); void saveSealedAsset(currentRoom.sealedAsset!, currentRoom.id, `${currentRoom.name} · Whodunnit room`); }}>{sealedAssetSaveState[currentRoomAssetKey] === "saving" ? "Saving…" : sealedAssetSaveState[currentRoomAssetKey] === "saved" ? "Saved to Images" : sealedAssetSaveState[currentRoomAssetKey] === "failed" ? "Retry save" : "Save room image"}</button> : null}</div> : null}
+          {!roomIntroductionActive ? <div className={styles.roomTitle}><small>{venueTierLabel(currentRoom.floor)}</small><h1>{currentRoom.name}</h1></div> : null}
           {roomActorVisible && currentBot ? <div className={styles.roomActor} data-art-style={currentRoomArtStyle} data-interrogation-phase={interrogationPhase ?? undefined} style={{ "--actor-color": currentBot.color ?? "#a98cff" } as CSSProperties}><div className={styles.roomActorDrift} style={mysteryRoomActorDriftStyle(`${props.session.id}:${currentBot.id}:suspect`)}>{props.renderMysteryBotAvatar(currentBot, investigationAvatarPresentation, { demeanor: "suspect", talking: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId, speechTiming: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId ? speechTiming : null, blinkEnabled: true, facing: "left", speechInkVisible: roomSpeechInkVisible })}<strong>{currentBot.name}</strong>{roomSuspectStageActionText && roomActionPresentation ? <SignalVoiceActionText key={`suspect:${roomDisplayedDialogue?.nodeId ?? ""}:${roomDisplayedDialogue?.occurredAt ?? ""}`} {...roomActionPresentation} accent={currentBot.color} /> : null}</div></div> : null}
           {roomProsecutorActive && prosecutorBot ? <aside className={`${styles.roomActor} ${styles.roomProsecutorActor}`} data-art-style={currentRoomArtStyle} data-prosecutor-speaking="true" data-interrogation-phase={interrogationPhase ?? undefined} style={{ "--actor-color": prosecutorBot.color ?? "#72d7ff" } as CSSProperties}>
             <div className={styles.roomActorDrift} style={mysteryRoomActorDriftStyle(`${props.session.id}:${prosecutorBot.id}:prosecutor`)}>
@@ -4810,7 +5678,39 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           {completionCueVisible ? <div className={styles.roomComplete} role="status" aria-live="polite"><p>Every detail has entered the record.</p><strong>{currentRoom.name} complete</strong></div> : null}
         </section>
       ) : null}
-      {!spectatorTheory && !roomIntroductionActive ? <nav className={styles.investigationCommands} aria-label="Investigation commands" data-console-label="Case desk · field commands">
+      {!roomIntroductionActive
+        ? activeFoundEvidence
+          ? renderSceneRepairControl("item", null, activeFoundEvidence)
+          : state.roomView === "room" && currentRoom
+            ? renderSceneRepairControl("room", currentRoom)
+            : state.roomView === "mansion"
+              ? renderSceneRepairControl("map")
+              : null
+        : null}
+      {!spectatorTheory && !roomIntroductionActive && currentRoom && (command === "examine" || command === "move") ? (
+        <button
+          type="button"
+          className={styles.investigationModeBackButton}
+          data-focus-mode={command}
+          disabled={busy || dialoguePerformanceActive || travelPresentation !== null}
+          onClick={() => {
+            playControlSfx("navigate");
+            if (state.roomView === "room") {
+              setCommand(null);
+              return;
+            }
+            void sendAction({ action: "move", roomId: currentRoom.id });
+          }}
+        >← Back to room</button>
+      ) : null}
+      {!spectatorTheory && !roomIntroductionActive ? <nav
+        className={styles.investigationCommands}
+        aria-label="Investigation commands"
+        aria-hidden={investigationCommandsDismissed ? "true" : undefined}
+        data-console-label="Case desk · field commands"
+        data-dismissed={investigationCommandsDismissed ? "true" : undefined}
+        inert={investigationCommandsDismissed ? true : undefined}
+      >
         <button type="button" data-command="move" data-active={state.roomView === "mansion" ? "true" : undefined} aria-pressed={state.roomView === "mansion"} disabled={busy || dialoguePerformanceActive} onClick={() => { playControlSfx("navigate"); setCommand("move"); void sendAction({ action: "move" }); }} data-tutorial-target="mystery-v2-move"><span>⌂</span>Move</button>
         <button type="button" data-command="examine" data-active={command === "examine" ? "true" : undefined} aria-pressed={command === "examine"} disabled={busy || dialoguePerformanceActive || state.roomView !== "room"} onClick={() => { playControlSfx("clip"); setCommand("examine"); }} data-tutorial-target="mystery-v2-examine"><span>⌕</span>Examine</button>
         <button type="button" data-command="talk" data-active={command === "talk" ? "true" : undefined} aria-pressed={command === "talk"} disabled={busy || dialoguePerformanceActive || !currentSuspect} onClick={() => { playControlSfx("enter"); setCommand("talk"); }} data-tutorial-target="mystery-v2-talk"><span>“”</span>Talk</button>
@@ -4820,7 +5720,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       {!spectatorTheory && !roomIntroductionActive && command === "present" && currentSuspect ? <div className={styles.choiceTray}><header><div><p className={styles.eyebrow}>Present</p><h2>Show {currentSuspect.name}</h2></div><button type="button" onClick={() => setCommand(null)}>Close</button></header>{renderRecordButtons((record) => void sendAction({ action: "present_to_suspect", suspectSeatId: currentSuspect.seatId, record }))}</div> : null}
       {!spectatorTheory && !roomIntroductionActive && state.theoryAvailable ? <button type="button" className={styles.fileChargesButton} onClick={() => { playControlSfx("theory"); setTheoryOpen(true); }} data-tutorial-target="mystery-v2-file-theory">File Charges</button> : !spectatorTheory && !roomIntroductionActive ? <small className={styles.theoryHint}>The Theory Board opens after the briefing, one interview, and one admitted record item.</small> : null}
       {caseFileUpdate ? <CaseFileUpdateNotice update={caseFileUpdate} onView={() => { setCaseFileOpen(true); setCaseFileUpdate(null); }} onDismiss={() => setCaseFileUpdate(null)} /> : null}
-      {caseFileOpen ? <CaseFile state={state} playerName={playerCharacterName} playerBot={prosecutorBot} playerColor={playerCharacterColor} playerGlyph={playerCharacterGlyph ?? null} renderBotGlyph={props.renderBotGlyph} renderMysteryBotAvatar={props.renderMysteryBotAvatar} objectUrls={sealedAssetObjectUrls} saveState={sealedAssetSaveState} onSaveAsset={saveSealedAsset} onClose={() => setCaseFileOpen(false)} /> : null}
+      {caseFileOpen ? <CaseFile state={state} playerName={playerCharacterName} playerBot={prosecutorBot} playerColor={playerCharacterColor} playerGlyph={playerCharacterGlyph ?? null} renderBotGlyph={props.renderBotGlyph} renderMysteryBotAvatar={props.renderMysteryBotAvatar} objectUrls={sealedAssetObjectUrls} onClose={() => setCaseFileOpen(false)} /> : null}
       {theoryOpen || spectatorTheory ? (
         <div className={styles.theoryBoard} role="dialog" aria-modal="true" aria-labelledby="theory-v2-title">
           <header>
@@ -4876,6 +5776,89 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           <button type="button" className={styles.primaryAction} disabled={busy || theoryAccusedSeatIds.length === 0} onClick={() => { if (!spectatorTheory) setTheoryOpen(false); void sendAction({ action: "file_theory", theory }); }}>{spectatorTheory ? "File conclusion and watch court" : "File charges and open court"}</button>
         </div>
       ) : null}
+      {roomVisualDialogRoom && roomVisualDialogReadiness ? (
+        <>
+          <button
+            type="button"
+            className={styles.roomVisualDialogBackdrop}
+            aria-label="Close room visuals"
+            onClick={() => setRoomVisualDialogId(null)}
+          />
+          <section
+            className={styles.roomVisualDialog}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mystery-room-visual-title"
+            data-readiness={roomVisualDialogReadiness}
+          >
+            <header>
+              <div>
+                <p className={styles.eyebrow}>Room visuals · {roomVisualDialogReadiness}</p>
+                <h2 id="mystery-room-visual-title">
+                  {roomVisualDialogRoom.visited ? roomVisualDialogRoom.name : "Unopened room"}
+                </h2>
+              </div>
+              <button type="button" onClick={() => setRoomVisualDialogId(null)}>Close</button>
+            </header>
+            <p>
+              {roomVisualDialogReadiness === "fallback"
+                ? roomVisualDialogRoom.sealedAsset?.status === "pending"
+                  ? "This room is already being prepared. Its compatible fallback remains safe until the new Mosaic passes review."
+                  : "This room is using its compatible fallback. You can generate a mansion-specific Mosaic without changing its doors, examination anchors, clues, or lights."
+                : roomVisualDialogReadiness === "upgraded"
+                  ? "This room has both its authored Mosaic and its Upgraded presentation."
+                  : roomVisualResult === "generated"
+                    ? "The mansion-specific Mosaic is ready. Would you like to create its optional Upgraded presentation too?"
+                    : "This room is using its default Mosaic. You can add an optional Upgraded presentation while keeping the same composition."}
+            </p>
+            <p className={styles.roomVisualDiscoveryNotice}>
+              No room art is previewed here. You discover it only by entering the room. After the venue is fully explored, <strong>Save venue level</strong> keeps its generated room pair, exact anchors, and dynamic lights for future <code>.mansion</code> exports.
+            </p>
+            {props.session.responseMode === "local" && roomVisualDialogReadiness !== "upgraded" ? (
+              <p className={styles.roomVisualOnlineNotice}>Room generation is ONLINE-only. LOCAL remains fully offline.</p>
+            ) : null}
+            <footer>
+              <button type="button" onClick={() => setRoomVisualDialogId(null)}>Not now</button>
+              {roomVisualDialogReadiness === "fallback" ? (
+                <button
+                  type="button"
+                  className={styles.roomVisualPrimaryAction}
+                  disabled={
+                    Boolean(roomVisualJob) ||
+                    props.session.responseMode === "local" ||
+                    roomVisualDialogRoom.sealedAsset?.status === "pending"
+                  }
+                  onClick={() => void generateRoomVisual(roomVisualDialogRoom)}
+                >Generate this room</button>
+              ) : roomVisualDialogReadiness === "default" ? (
+                <button
+                  type="button"
+                  className={styles.roomVisualPrimaryAction}
+                  disabled={Boolean(roomVisualJob) || props.session.responseMode === "local"}
+                  onClick={() => void upgradeRoomVisual(roomVisualDialogRoom)}
+                >Upgrade this room</button>
+              ) : (
+                <button type="button" className={styles.roomVisualPrimaryAction} onClick={() => setRoomVisualDialogId(null)}>Ready to discover</button>
+              )}
+            </footer>
+          </section>
+        </>
+      ) : null}
+      <PrismBlockingLoader
+        open={Boolean(roomVisualJob)}
+        placement="fullscreen"
+        theme={props.theme}
+        eyebrow="PRISM / Mystery Venue"
+        title={roomVisualJob?.kind === "upgrade" ? "Upgrading the unopened room" : "Refracting a room for this venue"}
+        detail={roomVisualJob?.kind === "upgrade"
+          ? "PRISM is preserving the accepted Mosaic composition while creating its higher-detail presentation. The room stays hidden until you visit it."
+          : "PRISM is generating against the mansion's frozen geometry, anchors, and lighting contract. The room stays hidden until you visit it."}
+        stepLabel={roomVisualJob?.kind === "upgrade" ? "Checking composition fidelity" : "Preparing the room behind closed doors"}
+        startedAt={roomVisualJob?.startedAt ?? null}
+        footer="No preview is shown here. Discovery still happens inside the mansion."
+      />
+      {renderItemSynthesisLoader()}
+      {renderSceneRepairLoader()}
       {callout ? <div key={callout.id} className={styles.callout} style={calloutStyle} role="status" aria-live="assertive"><span>{CALLOUT_COPY[callout.callout]}</span></div> : null}
       {error ? (
         <WhodunnitChromeErrorNotice
@@ -4922,12 +5905,6 @@ function CaseFile(props: {
   renderBotGlyph: BotPickerGlyphRenderer;
   renderMysteryBotAvatar: V2SharedProps["renderMysteryBotAvatar"];
   objectUrls: Readonly<Record<string, string>>;
-  saveState: Record<string, "saving" | "saved" | "failed">;
-  onSaveAsset: (
-    asset: DebateMysterySealedAssetRefV1,
-    subjectId: string,
-    title: string,
-  ) => Promise<void>;
   onClose: () => void;
 }): React.JSX.Element {
   const observations = debateMysteryCaseFileObservationsV2({
@@ -4976,9 +5953,6 @@ function CaseFile(props: {
             <section>
               <h3>Evidence &amp; sworn testimony</h3>
               {props.state.record.filter((item) => item.admitted).map((item) => {
-          const assetKey = item.reference.kind === "evidence"
-            ? sealedMysteryAssetKey("evidence", item.reference.id)
-            : null;
           const assetUrl = item.reference.kind === "evidence"
             ? sealedMysteryAssetObjectUrl(
                 props.objectUrls,
@@ -4987,9 +5961,6 @@ function CaseFile(props: {
                 item.sealedAsset,
               )
             : null;
-          const assetSaveState = assetKey
-            ? props.saveState[assetKey]
-            : undefined;
                 return (
                   <article key={recordKey(item.reference)}>
                     {assetUrl
@@ -5003,22 +5974,6 @@ function CaseFile(props: {
                       <strong>{item.title}</strong>
                       <small>{item.reference.kind}</small>
                       <p>{item.description}</p>
-                      {assetUrl && item.sealedAsset ? (
-                        <button
-                          type="button"
-                          className={styles.saveSealedAssetButton}
-                          disabled={assetSaveState === "saving" || assetSaveState === "saved"}
-                          onClick={() => void props.onSaveAsset(item.sealedAsset!, item.reference.id, `${item.title} · Whodunnit evidence`)}
-                        >
-                          {assetSaveState === "saving"
-                            ? "Saving…"
-                            : assetSaveState === "saved"
-                              ? "Saved to Images"
-                              : assetSaveState === "failed"
-                                ? "Retry save"
-                                : "Save evidence image"}
-                        </button>
-                      ) : null}
                     </div>
                   </article>
                 );

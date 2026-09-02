@@ -246,6 +246,11 @@ describe("bot eye movement modes", () => {
     assert.match(css, /--bot-face-gaze-y,\s*0px/);
     assert.match(
       css,
+      /\.coffeeSeatPlateEmoji \[data-coffee-plate-emoji-part="eyes"\],[\s\S]*?\.zenLiveBotPresenceFaceGlyph \[data-coffee-plate-emoji-part="eyes"\] \{[\s\S]*?transition:\s*none\s*;/,
+      "Eye fixations must snap instead of tweening across the CRT face",
+    );
+    assert.match(
+      css,
       /data-coffee-plate-emoji-blink-phase="closed"[\s\S]*transition:\s*none/,
     );
     assert.match(

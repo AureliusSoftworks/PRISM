@@ -53,6 +53,7 @@ import {
   getDebateMysteryMansionPropThemeStateV1,
 } from "./debate-mystery-mansion-prop-variants.ts";
 import { applyCuratedImportedMansionDecorationV1 } from "./debate-mystery-mansion-curated-decoration.ts";
+import { roomAnchorContractSha256 } from "./debate-mystery-mansion-room-art.ts";
 
 interface MansionBundleRow {
   id: string;
@@ -1735,9 +1736,34 @@ export function saveDebateMysteryMansionBundleV2(
     );
   }
   const rooms = bundleRoomsFromState(state, roomImageIdById);
-  const layoutV2 = mansionLayoutV2HousePlanFromLegacyRooms(rooms, {
-    seed: `${state.config.houseStyle.id}:${state.config.houseStyle.label}`,
-  });
+  const frozenLayout = state.config.mansionSnapshot?.layoutV2;
+  const roomImageById = new Map(rooms.map((room) => [room.id, room.imageId]));
+  const layoutV2 = frozenLayout
+    ? {
+        ...structuredClone(frozenLayout),
+        ...(state.mansionExterior?.entryTarget && frozenLayout.venueProfile?.presentation
+          ? {
+              venueProfile: {
+                ...structuredClone(frozenLayout.venueProfile),
+                presentation: {
+                  ...structuredClone(frozenLayout.venueProfile.presentation),
+                  entryTarget: { ...state.mansionExterior.entryTarget },
+                },
+              },
+            }
+          : {}),
+        entities: frozenLayout.entities.map((entity) =>
+          entity.kind === "room"
+            ? { ...entity, imageId: roomImageById.get(entity.id) ?? entity.imageId }
+            : entity),
+        // Case play never accepts authoring candidates. Only sealed ready
+        // room refs are promoted below, while the exact authored anchors,
+        // lights, doors, and venue geometry remain intact.
+        roomArtCandidates: [],
+      }
+    : mansionLayoutV2HousePlanFromLegacyRooms(rooms, {
+        seed: `${state.config.houseStyle.id}:${state.config.houseStyle.label}`,
+      });
   const imageIds = [...new Set(rooms.flatMap((room) => room.imageId ? [room.imageId] : []))];
   if (imageIds.length > 0) {
     const owned = db.prepare(
@@ -1798,6 +1824,33 @@ export function saveDebateMysteryMansionBundleV2(
       if (room.imageId) insertAsset.run(id, userId, room.id, room.imageId, now);
     }
     replaceProtectedDebateMysteryMansionAssetsV1(db, userId, id, sessionId);
+    const protectedRoomRefs = db.prepare(
+      `SELECT logical_id, asset_id
+         FROM debate_mystery_mansion_asset_refs
+        WHERE bundle_id = ? AND user_id = ? AND role = 'room'`,
+    ).all(id, userId) as unknown as Array<{ logical_id: string; asset_id: string }>;
+    const protectedRoomAssetIdByLogicalId = new Map(
+      protectedRoomRefs.map((ref) => [ref.logical_id, ref.asset_id]),
+    );
+    const acceptedLayoutV2: MansionLayoutV2 = {
+      ...layoutV2,
+      entities: layoutV2.entities.map((entity) => entity.kind === "room"
+        ? {
+            ...entity,
+            acceptedRoomAssetId:
+              protectedRoomAssetIdByLogicalId.get(entity.id) ??
+              entity.acceptedRoomAssetId,
+            acceptedRoomArtAnchorSha256: protectedRoomAssetIdByLogicalId.has(entity.id)
+              ? roomAnchorContractSha256(layoutV2, entity.id)
+              : entity.acceptedRoomArtAnchorSha256,
+          }
+        : entity),
+    };
+    db.prepare(
+      `UPDATE debate_mystery_mansion_bundles
+          SET layout_json = ?, updated_at = ?
+        WHERE id = ? AND user_id = ?`,
+    ).run(canonicalMansionLayoutV2(acceptedLayoutV2), now, id, userId);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");

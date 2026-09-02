@@ -75,3 +75,22 @@ test("promotes case-scoped ambient massing without mutating the venue source", (
   }]);
   assert.equal(JSON.stringify(proposal.layout), sourceBefore);
 });
+
+test("projects visible inert massing on every occupied venue tier without adding rooms", () => {
+  const proposal = createMysteryVenueProposalV1({
+    id: "proposal:ship:ambient-grand",
+    description: "A large passenger cruise ship with lower service, embarkation, and promenade decks.",
+    length: { id: "grand", rooms: 15, suspects: 8 },
+  });
+  const activeRoomIds = proposal.layout.entities.flatMap((entity) =>
+    entity.kind === "room" ? [entity.id] : []
+  );
+  const projection = projectDebateMysteryVenueSpatialV1({ layout: proposal.layout, activeRoomIds });
+  assert.ok(projection);
+  assert.deepEqual(projection.activeRoomIds, activeRoomIds);
+  assert.deepEqual(
+    [...new Set(projection.ambientSpaces.map((space) => space.floor))],
+    [1, 2, 3],
+  );
+  assert.ok(projection.ambientSpaces.every((space) => !projection.activeRoomIds.includes(space.id)));
+});

@@ -68,7 +68,7 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(
       cssSource,
-      /\.lowerScreenContent\s*\{[\s\S]*?transform:\s*translate\([\s\S]*?\)\s*scaleX\(var\(--chat-mini-bot-lower-screen-facing-scale-x, 1\)\)/,
+      /\.lowerScreenContent\s*\{[\s\S]*?transform:\s*translate\([\s\S]*?\)\s*scaleX\(var\(--chat-mini-bot-lower-screen-facing-scale-x, 1\)\)\s*scale\(var\(--chat-mini-bot-identity-glyph-scale, 0\.92\)\)/,
     );
     assert.match(
       componentSource,
@@ -140,7 +140,12 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(
       cssSource,
-      /\.lowerScreenContent\s*\{[^}]*transform:\s*translate\([^}]*--chat-mini-bot-lower-screen-nudge-x[^}]*--chat-mini-bot-lower-screen-nudge-y[^}]*\)\s*scaleX\(var\(--chat-mini-bot-lower-screen-facing-scale-x, 1\)\)/,
+      /\.lowerScreenContent\s*\{[^}]*transform:\s*translate\([^}]*--chat-mini-bot-lower-screen-nudge-x[^}]*--chat-mini-bot-lower-screen-nudge-y[^}]*\)\s*scaleX\(var\(--chat-mini-bot-lower-screen-facing-scale-x, 1\)\)\s*scale\(var\(--chat-mini-bot-identity-glyph-scale, 0\.92\)\)/,
+    );
+    assert.match(
+      cssSource,
+      /\.root\s*\{[^}]*--chat-mini-bot-identity-glyph-scale:\s*0\.92/,
+      "every Mini consumer must inherit the slightly reduced identity-glyph scale",
     );
   });
 

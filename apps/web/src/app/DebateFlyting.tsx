@@ -502,6 +502,15 @@ function flytingAlignmentStyle(
   } as CSSProperties;
 }
 
+function flytingGallerySizingStyle(scalePercent: number): CSSProperties {
+  const scale = Math.max(60, Math.min(160, scalePercent)) / 100;
+  const inlineCompression = Math.max(0, (1 - scale) * 24);
+  return {
+    "--flyting-gallery-bot-scale": scale,
+    "--flyting-gallery-slot-margin": `${-Math.round(inlineCompression * 100) / 100}px`,
+  } as CSSProperties;
+}
+
 async function writeFlytingAlignmentClipboard(text: string): Promise<void> {
   if (navigator.clipboard && window.isSecureContext) {
     try {
@@ -894,11 +903,7 @@ function FlytingSetupStageAlignmentPreview(props: {
       data-audience-placement="below-screen"
       data-flyting-preview-gallery="true"
       aria-label={`${DEBATE_FLYTING_AUDIENCE_COUNT} generic PRISM spectators and ${DEBATE_FLYTING_JARL_GUARD_COUNT} Jarl guards`}
-      style={
-        {
-          "--flyting-gallery-bot-scale": props.galleryBotScale / 100,
-        } as CSSProperties
-      }
+      style={flytingGallerySizingStyle(props.galleryBotScale)}
     >
       <FlytingRgbKeyedBackdrop
         scene="gallery"
@@ -941,103 +946,117 @@ function FlytingSetupStageAlignmentPreview(props: {
           );
         })}
       </div>
-      {(["rear", "front"] as const).map((depthRow) => (
-        <span
-          className={`${studioStyles.debateAudienceLayer} ${styles.flytingAudienceLayer}`}
-          data-depth-row={depthRow}
-          key={depthRow}
-          aria-hidden="true"
-        >
-          {(["for", "neutral", "against"] as const).map((leaning) => {
-            const clusterSeats = previewHallSeats.filter(
-              (seat) =>
-                seat.leaning === leaning &&
-                debateAudienceSeatLayout(seat.index, previewHallSeats.length)
-                  .depthRow === depthRow,
-            );
-            return (
-              <span
-                className={styles.flytingAudienceCluster}
-                data-flyting-leaning={leaning}
-                key={`${depthRow}:${leaning}`}
-              >
-                {clusterSeats.map((seat, clusterIndex) => {
-                  const facing = debateAudienceConversationFacing(
-                    clusterIndex,
-                    clusterSeats.length,
-                  );
-                  const seatColor =
-                    seat.leaning === "for"
-                      ? forColor
-                      : seat.leaning === "against"
-                        ? againstColor
-                        : hostColor;
-                  const milling = previewHallMilling[seat.index]!;
-                  const verticalMotion = flytingPreviewGalleryVerticalMotion(
-                    milling.offsetYPercent,
-                    milling.driftYPercent,
-                    props.galleryMaxVerticalRoam,
-                  );
-                  return (
-                    <span
-                      className={styles.flytingAudienceMillingSlot}
-                      key={seat.id}
-                      style={
-                        {
-                          "--flyting-gallery-offset-x": `${milling.offsetXPercent}%`,
-                          "--flyting-gallery-offset-y": `${verticalMotion.offsetYPercent}%`,
-                          "--flyting-gallery-drift-x": `${milling.driftXPercent}%`,
-                          "--flyting-gallery-drift-y": `${verticalMotion.driftYPercent}%`,
-                          "--flyting-gallery-mill-duration": `${milling.durationMs}ms`,
-                          "--flyting-gallery-mill-delay": `${milling.delayMs}ms`,
-                          "--flyting-gallery-layer": milling.layer,
-                        } as CSSProperties
-                      }
-                    >
+      <span
+        className={styles.flytingAudienceContainer}
+        data-flyting-gallery-container="true"
+        style={flytingAlignmentStyle(
+          props.alignment.placements.galleryBotsContainer,
+        )}
+        aria-hidden="true"
+        {...alignmentHandleProps("galleryBotsContainer")}
+      >
+        {(["rear", "front"] as const).map((depthRow) => (
+          <span
+            className={`${studioStyles.debateAudienceLayer} ${styles.flytingAudienceLayer}`}
+            data-depth-row={depthRow}
+            key={depthRow}
+            aria-hidden="true"
+          >
+            {(["for", "neutral", "against"] as const).map((leaning) => {
+              const clusterSeats = previewHallSeats.filter(
+                (seat) =>
+                  seat.leaning === leaning &&
+                  debateAudienceSeatLayout(seat.index, previewHallSeats.length)
+                    .depthRow === depthRow,
+              );
+              return (
+                <span
+                  className={styles.flytingAudienceCluster}
+                  data-flyting-leaning={leaning}
+                  key={`${depthRow}:${leaning}`}
+                >
+                  {clusterSeats.map((seat, clusterIndex) => {
+                    const facing = debateAudienceConversationFacing(
+                      clusterIndex,
+                      clusterSeats.length,
+                    );
+                    const seatColor =
+                      seat.leaning === "for"
+                        ? forColor
+                        : seat.leaning === "against"
+                          ? againstColor
+                          : hostColor;
+                    const milling = previewHallMilling[seat.index]!;
+                    const verticalMotion = flytingPreviewGalleryVerticalMotion(
+                      milling.offsetYPercent,
+                      milling.driftYPercent,
+                      props.galleryMaxVerticalRoam,
+                    );
+                    return (
                       <span
-                        className={`${studioStyles.debateAudienceBotPortrait} ${styles.flytingAudiencePortrait}`}
-                        data-conversation-facing={facing}
-                        data-gallery-arrived="true"
-                        data-flyting-leaning={seat.leaning}
-                        data-flyting-guard={seat.guard ? "true" : undefined}
+                        className={styles.flytingAudienceMillingSlot}
+                        key={seat.id}
                         style={
                           {
-                            "--flyting-bot-color": seatColor,
-                            "--debate-audience-depth": milling.depthScale,
-                            "--debate-audience-index": seat.index,
-                            "--debate-gallery-enter-x": "0%",
-                            "--debate-gallery-exit-x": "0%",
+                            "--flyting-gallery-offset-x": `${milling.offsetXPercent}%`,
+                            "--flyting-gallery-offset-y": `${verticalMotion.offsetYPercent}%`,
+                            "--flyting-gallery-drift-x": `${milling.driftXPercent}%`,
+                            "--flyting-gallery-drift-y": `${verticalMotion.driftYPercent}%`,
+                            "--flyting-gallery-mill-duration": `${milling.durationMs}ms`,
+                            "--flyting-gallery-mill-delay": `${milling.delayMs}ms`,
+                            "--flyting-gallery-layer": milling.layer,
                           } as CSSProperties
                         }
                       >
                         <span
-                          className={styles.galleryVikingHelmet}
-                          data-flyting-hall-asset="mini-pixel-crown"
-                          aria-hidden="true"
-                        />
-                        {renderPreviewAvatar(
-                          seat.bot,
-                          "audience",
-                          "mini",
-                          facing,
-                        )}
-                        {seat.guard ? (
+                          className={`${studioStyles.debateAudienceBotPortrait} ${styles.flytingAudiencePortrait}`}
+                          data-conversation-facing={facing}
+                          data-gallery-arrived="true"
+                          data-flyting-leaning={seat.leaning}
+                          data-flyting-guard={seat.guard ? "true" : undefined}
+                          style={
+                            {
+                              "--flyting-bot-color": seatColor,
+                              "--debate-audience-depth": milling.depthScale,
+                              "--debate-audience-index": seat.index,
+                              "--debate-gallery-enter-x": "0%",
+                              "--debate-gallery-exit-x": "0%",
+                            } as CSSProperties
+                          }
+                        >
                           <span
-                            className={styles.jarlGuardMark}
+                            className={styles.galleryVikingHelmet}
+                            data-flyting-hall-asset="mini-pixel-crown"
                             aria-hidden="true"
-                          >
-                            III
-                          </span>
-                        ) : null}
+                            style={flytingAlignmentStyle(
+                              props.alignment.placements.galleryHelmets,
+                            )}
+                            {...alignmentHandleProps("galleryHelmets")}
+                          />
+                          {renderPreviewAvatar(
+                            seat.bot,
+                            "audience",
+                            "mini",
+                            facing,
+                          )}
+                          {seat.guard ? (
+                            <span
+                              className={styles.jarlGuardMark}
+                              aria-hidden="true"
+                            >
+                              III
+                            </span>
+                          ) : null}
+                        </span>
                       </span>
-                    </span>
-                  );
-                })}
-              </span>
-            );
-          })}
-        </span>
-      ))}
+                    );
+                  })}
+                </span>
+              );
+            })}
+          </span>
+        ))}
+      </span>
     </section>
   );
 
@@ -4285,13 +4304,9 @@ export function DebateFlytingLive(
             data-audience-pressure={galleryIsSubdued ? "settled" : "restless"}
             data-audience-count={hallAudienceSeats.length}
             aria-label={`${DEBATE_FLYTING_AUDIENCE_COUNT} Hall spectators and ${DEBATE_FLYTING_JARL_GUARD_COUNT} Jarl guards`}
-            style={
-              {
-                "--flyting-gallery-bot-scale":
-                  DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS.galleryBotScale /
-                  100,
-              } as CSSProperties
-            }
+            style={flytingGallerySizingStyle(
+              DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS.galleryBotScale,
+            )}
           >
             <div className={studioStyles.debateAudienceStatus}>
               <div
@@ -4365,131 +4380,149 @@ export function DebateFlytingLive(
                 );
               })}
             </div>
-            {(["rear", "front"] as const).map((depthRow) => (
-              <span
-                className={`${studioStyles.debateAudienceLayer} ${styles.flytingAudienceLayer}`}
-                data-depth-row={depthRow}
-                key={depthRow}
-                aria-hidden="true"
-              >
-                {(["for", "neutral", "against"] as const).map((leaning) => {
-                  const clusterSeats = hallAudienceSeats.filter(
-                    (seat) =>
-                      seat.leaning === leaning &&
-                      debateAudienceSeatLayout(
-                        seat.index,
-                        hallAudienceSeats.length,
-                      ).depthRow === depthRow,
-                  );
-                  return (
-                    <span
-                      className={styles.flytingAudienceCluster}
-                      data-flyting-leaning={leaning}
-                      key={`${depthRow}:${leaning}`}
-                    >
-                      {clusterSeats.map((seat, clusterIndex) => {
-                        const talking = galleryIsSubdued
-                          ? (seat.index + galleryMouthPhase) % 9 === 0
-                          : (seat.index + galleryMouthPhase) % 4 !== 0;
-                        const hopping =
-                          (seat.index * 5 + galleryHopWave) % 13 === 0;
-                        const facing = debateAudienceConversationFacing(
-                          clusterIndex,
-                          clusterSeats.length,
-                        );
-                        const seatColor =
-                          seat.leaning === "for"
-                            ? forColor
-                            : seat.leaning === "against"
-                              ? againstColor
-                              : hostColor;
-                        const milling = hallAudienceMilling[seat.index]!;
-                        return (
-                          <span
-                            className={styles.flytingAudienceMillingSlot}
-                            key={seat.id}
-                            style={
-                              {
-                                "--flyting-gallery-offset-x": `${milling.offsetXPercent}%`,
-                                "--flyting-gallery-offset-y": `${milling.offsetYPercent}%`,
-                                "--flyting-gallery-drift-x": `${milling.driftXPercent}%`,
-                                "--flyting-gallery-drift-y": `${milling.driftYPercent}%`,
-                                "--flyting-gallery-mill-duration": `${milling.durationMs}ms`,
-                                "--flyting-gallery-mill-delay": `${milling.delayMs}ms`,
-                                "--flyting-gallery-layer": milling.layer,
-                              } as CSSProperties
-                            }
-                          >
+            <span
+              className={styles.flytingAudienceContainer}
+              data-flyting-gallery-container="true"
+              style={flytingAlignmentStyle(
+                stageAlignmentDraft.placements.galleryBotsContainer,
+              )}
+              aria-hidden="true"
+              {...stageAlignmentHandleProps("galleryBotsContainer")}
+            >
+              {(["rear", "front"] as const).map((depthRow) => (
+                <span
+                  className={`${studioStyles.debateAudienceLayer} ${styles.flytingAudienceLayer}`}
+                  data-depth-row={depthRow}
+                  key={depthRow}
+                  aria-hidden="true"
+                >
+                  {(["for", "neutral", "against"] as const).map((leaning) => {
+                    const clusterSeats = hallAudienceSeats.filter(
+                      (seat) =>
+                        seat.leaning === leaning &&
+                        debateAudienceSeatLayout(
+                          seat.index,
+                          hallAudienceSeats.length,
+                        ).depthRow === depthRow,
+                    );
+                    return (
+                      <span
+                        className={styles.flytingAudienceCluster}
+                        data-flyting-leaning={leaning}
+                        key={`${depthRow}:${leaning}`}
+                      >
+                        {clusterSeats.map((seat, clusterIndex) => {
+                          const talking = galleryIsSubdued
+                            ? (seat.index + galleryMouthPhase) % 9 === 0
+                            : (seat.index + galleryMouthPhase) % 4 !== 0;
+                          const hopping =
+                            (seat.index * 5 + galleryHopWave) % 13 === 0;
+                          const facing = debateAudienceConversationFacing(
+                            clusterIndex,
+                            clusterSeats.length,
+                          );
+                          const seatColor =
+                            seat.leaning === "for"
+                              ? forColor
+                              : seat.leaning === "against"
+                                ? againstColor
+                                : hostColor;
+                          const milling = hallAudienceMilling[seat.index]!;
+                          return (
                             <span
-                              className={`${studioStyles.debateAudienceBotPortrait} ${styles.flytingAudiencePortrait}`}
-                              data-talking={talking ? "true" : undefined}
-                              data-audience-bounce={
-                                hopping ? "true" : undefined
-                              }
-                              data-conversation-facing={facing}
-                              data-gallery-arrived="true"
-                              data-flyting-leaning={seat.leaning}
-                              data-flyting-guard={
-                                seat.guard ? "true" : undefined
-                              }
+                              className={styles.flytingAudienceMillingSlot}
+                              key={seat.id}
                               style={
                                 {
-                                  "--flyting-bot-color": seatColor,
-                                  "--debate-audience-depth": milling.depthScale,
-                                  "--debate-audience-index": seat.index,
-                                  "--debate-gallery-enter-x": "0%",
-                                  "--debate-gallery-exit-x": "0%",
+                                  "--flyting-gallery-offset-x": `${milling.offsetXPercent}%`,
+                                  "--flyting-gallery-offset-y": `${milling.offsetYPercent}%`,
+                                  "--flyting-gallery-drift-x": `${milling.driftXPercent}%`,
+                                  "--flyting-gallery-drift-y": `${milling.driftYPercent}%`,
+                                  "--flyting-gallery-mill-duration": `${milling.durationMs}ms`,
+                                  "--flyting-gallery-mill-delay": `${milling.delayMs}ms`,
+                                  "--flyting-gallery-layer": milling.layer,
                                 } as CSSProperties
-                              }
-                              title={
-                                seat.guard ? "Jarl guard" : "Hall spectator"
                               }
                             >
                               <span
-                                className={styles.galleryVikingHelmet}
-                                data-flyting-hall-asset="mini-pixel-crown"
-                                aria-hidden="true"
-                              />
-                              {renderHallAvatar(seat.bot, "audience", {
-                                presentation: "mini",
-                                talking: false,
-                                foleyMouthShape: talking
-                                  ? (seat.index + galleryMouthPhase) % 2 === 0
-                                    ? "open-small"
-                                    : "speech-closed"
-                                  : null,
-                                facing,
-                                listenerReaction: hopping
-                                  ? "divided"
-                                  : "attentive",
-                              })}
-                              {seat.guard ? (
+                                className={`${studioStyles.debateAudienceBotPortrait} ${styles.flytingAudiencePortrait}`}
+                                data-talking={talking ? "true" : undefined}
+                                data-audience-bounce={
+                                  hopping ? "true" : undefined
+                                }
+                                data-conversation-facing={facing}
+                                data-gallery-arrived="true"
+                                data-flyting-leaning={seat.leaning}
+                                data-flyting-guard={
+                                  seat.guard ? "true" : undefined
+                                }
+                                style={
+                                  {
+                                    "--flyting-bot-color": seatColor,
+                                    "--debate-audience-depth":
+                                      milling.depthScale,
+                                    "--debate-audience-index": seat.index,
+                                    "--debate-gallery-enter-x": "0%",
+                                    "--debate-gallery-exit-x": "0%",
+                                  } as CSSProperties
+                                }
+                                title={
+                                  seat.guard ? "Jarl guard" : "Hall spectator"
+                                }
+                              >
                                 <span
-                                  className={styles.jarlGuardMark}
+                                  className={styles.galleryVikingHelmet}
+                                  data-flyting-hall-asset="mini-pixel-crown"
                                   aria-hidden="true"
-                                >
-                                  III
-                                </span>
-                              ) : null}
-                              {talking ? (
-                                <span
-                                  className={`${studioStyles.debateAudienceChatterChip} ${
-                                    styles.flytingAudienceChatterChip
-                                  }`}
-                                  aria-hidden="true"
-                                >
-                                  ...
-                                </span>
-                              ) : null}
+                                  style={flytingAlignmentStyle(
+                                    stageAlignmentDraft.placements
+                                      .galleryHelmets,
+                                  )}
+                                  {...stageAlignmentHandleProps(
+                                    "galleryHelmets",
+                                  )}
+                                />
+                                {renderHallAvatar(seat.bot, "audience", {
+                                  presentation: "mini",
+                                  talking: false,
+                                  foleyMouthShape: talking
+                                    ? (seat.index + galleryMouthPhase) % 2 === 0
+                                      ? "open-small"
+                                      : "speech-closed"
+                                    : null,
+                                  facing,
+                                  listenerReaction: hopping
+                                    ? "divided"
+                                    : "attentive",
+                                })}
+                                {seat.guard ? (
+                                  <span
+                                    className={styles.jarlGuardMark}
+                                    aria-hidden="true"
+                                  >
+                                    III
+                                  </span>
+                                ) : null}
+                                {talking ? (
+                                  <span
+                                    className={`${studioStyles.debateAudienceChatterChip} ${
+                                      styles.flytingAudienceChatterChip
+                                    }`}
+                                    aria-hidden="true"
+                                  >
+                                    ...
+                                  </span>
+                                ) : null}
+                              </span>
                             </span>
-                          </span>
-                        );
-                      })}
-                    </span>
-                  );
-                })}
-              </span>
-            ))}
+                          );
+                        })}
+                      </span>
+                    );
+                  })}
+                </span>
+              ))}
+            </span>
           </section>
         </div>
 

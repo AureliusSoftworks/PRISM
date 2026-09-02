@@ -1989,8 +1989,8 @@ async function readSignalEpisodeImageFile(
   // Do not decode or scan the full raster on Electron's UI thread. A modest
   // compressed PNG can expand to millions of pixels and leave Signal unable
   // to repaint while the file picker has already closed. The API already
-  // normalizes the source with an input-pixel limit and authoritatively
-  // classifies opaque sources as pictures before the image enters an episode.
+  // normalizes the source with an input-pixel limit and authoritatively keeps
+  // every attachment in the generic picture contract.
   return { fileName: file.name, dataUrl, descriptor };
 }
 
@@ -15632,19 +15632,6 @@ export function BotcastExperience({
       setError(null);
       try {
         const fileInput = await readSignalEpisodeImageFile(file);
-        const assetLibraryInspection =
-          fileInput.descriptor.kind === "item"
-            ? await request<SignalItemLibraryInspection>(
-                "/api/assets/signal-item/inspect",
-                {
-                  method: "POST",
-                  body: JSON.stringify({
-                    title: fileInput.descriptor.name,
-                    dataUrl: fileInput.dataUrl,
-                  }),
-                },
-              )
-            : undefined;
         const imageId = crypto.randomUUID();
         const replayMetadata = await acquireSignalEpisodeImageReplayMetadata(
           fileInput,
@@ -15658,7 +15645,6 @@ export function BotcastExperience({
           replayEmoji: replayMetadata.replayEmoji,
           reason: "",
           visualIdentity,
-          ...(assetLibraryInspection ? { assetLibraryInspection } : {}),
         });
         setNotice(
           `${replayMetadata.descriptor.name} is attached to tonight's setup. Signal will place it automatically during the interview.`,
@@ -16342,7 +16328,7 @@ export function BotcastExperience({
                 >
                   <ImagePlus aria-hidden="true" />
                   {imageUploadBusy
-                    ? "Inspecting…"
+                    ? "Attaching…"
                     : setupEpisodeImage
                       ? "Replace file"
                       : "Choose file"}
@@ -16368,9 +16354,7 @@ export function BotcastExperience({
                         : setupEpisodeImage.assetLibraryInspection
                           ? "Transparent PNG item · presented as the physical item; you can optionally keep it in Items after the episode."
                           : "Archived item reference · presented from its replay proxy; attach the original again to save it in Items."
-                      : setupEpisodeImage.descriptor.mimeType === "image/png"
-                        ? "Opaque PNG photo · presented as a framed picture and never saved automatically."
-                        : "JPG photo · presented as a framed picture and never saved automatically."}
+                      : "Image · presented as a framed picture and never turned into an Item automatically."}
                   </small>
                   <label htmlFor="signal-setup-image-name">
                     Name <span>spoken title</span>
@@ -18035,31 +18019,6 @@ export function BotcastExperience({
       setKeepSignalItem(false);
       setNotice(`${descriptor.name} is on the Signal table.`);
       sendCue({ kind: "present_image", imageId: upload.imageId });
-      // Decoded pixels, rather than the filename, decide whether this is an
-      // Item. The optional Library inspection runs only after the on-air cue,
-      // so save affordances can never delay the live discussion.
-      if (descriptor.kind === "item") {
-        const assetLibraryInspection = await request<SignalItemLibraryInspection>(
-          "/api/assets/signal-item/inspect",
-          {
-            method: "POST",
-            body: JSON.stringify({
-              title: descriptor.name,
-              dataUrl: fileInput.dataUrl,
-            }),
-          },
-        ).catch(() => undefined);
-        if (assetLibraryInspection) {
-          const inspectedUpload = { ...upload, assetLibraryInspection };
-          signalEpisodeImageRef.current = inspectedUpload;
-          setSignalEpisodeImage((current) =>
-            current?.episodeId === inspectedUpload.episodeId &&
-            current.imageId === inspectedUpload.imageId
-              ? inspectedUpload
-              : current,
-          );
-        }
-      }
     } catch (caught) {
       setError(signalErrorToast("Add image to Signal", caught));
     } finally {

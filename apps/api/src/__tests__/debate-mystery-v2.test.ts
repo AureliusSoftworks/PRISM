@@ -7985,7 +7985,11 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.match(sealedRoutes, /getRevealedDebateMysteryAssetFileV1/u);
     assert.match(sealedRoutes, /private, no-store, max-age=0/u);
     assert.match(sealedRoutes, /x-content-type-options/u);
-    assert.match(sealedRoutes, /saveRevealedDebateMysteryAssetV1/u);
+    assert.doesNotMatch(
+      sealedRoutes,
+      /mystery-assets\/:kind\/:subjectId\/save/u,
+      "revealed case visuals have no standalone copy-to-Images endpoint",
+    );
     assert.match(serverSource, /mystery-assets\/retry/u);
     assert.match(serverSource, /requeueRetryableDebateMysteryAssetFallbacksV1/u);
     assert.match(serverSource, /session\.id,\s*3,\s*enabledKinds/u);

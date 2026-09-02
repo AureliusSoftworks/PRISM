@@ -945,6 +945,53 @@ describe("persistMemoryCandidates", () => {
     assert.equal(row?.confidence, 0.98);
   });
 
+  it("aborts encrypted-memory embedding work at the owning deadline", async () => {
+    const db = createMemoryTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    await restoreMemory(db, "user-1", userKey, {
+      conversationId: "conversation-1",
+      botId: "bot-1",
+      text: "You prefer quick memory recall.",
+      confidence: 0.9,
+      certainty: 0.9,
+      category: "user",
+      tier: "long_term",
+      durability: 1,
+      source: "direct",
+    });
+    const controller = new AbortController();
+    let markEmbeddingStarted: (() => void) | null = null;
+    const embeddingStarted = new Promise<void>((resolve) => {
+      markEmbeddingStarted = resolve;
+    });
+    let embeddingAborted = false;
+    globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => {
+      markEmbeddingStarted?.();
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          embeddingAborted = true;
+          reject(new DOMException("Aborted", "AbortError"));
+        }, { once: true });
+      });
+    }) as typeof fetch;
+
+    const retrieval = retrieveRelevantMemories(
+      db,
+      "user-1",
+      "What do you remember?",
+      userKey,
+      "bot-1",
+      4,
+      { signal: controller.signal },
+    );
+    await embeddingStarted;
+    controller.abort("chat deadline");
+
+    await assert.rejects(retrieval, { name: "AbortError" });
+    assert.equal(embeddingAborted, true);
+    db.close();
+  });
+
   it("retrieves global memories plus the active bot and excludes other bots", async () => {
     const db = createMemoryTestDb();
     const userKey = Buffer.alloc(32, 7);

@@ -1711,6 +1711,28 @@ describe("system-owned local lanes", () => {
     assert.equal(requests.at(-1)?.keep_alive, -1);
   });
 
+  it("falls back to the local auxiliary model when Cloud auxiliary auth fails", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      requests.push(body);
+      if (requests.length === 1) {
+        return Response.json({ error: "unauthorized" }, { status: 401 });
+      }
+      return Response.json({ message: { content: "local recovery" } });
+    }) as typeof fetch;
+
+    const provider = getAuxiliaryProvider("minimax-m2.5:cloud", {
+      onlineEnabled: true,
+    });
+    const response = await provider.generateResponse([{ role: "user", content: "infer" }]);
+
+    assert.equal(response, "local recovery");
+    assert.equal(requests[0]?.model, "minimax-m2.5:cloud");
+    assert.equal(requests[1]?.model, "llama3.2");
+    assert.equal(requests[1]?.keep_alive, -1);
+  });
+
   it("blocks a Cloud id from the LOCAL provider before any request", async () => {
     let fetchCount = 0;
     globalThis.fetch = (async () => {

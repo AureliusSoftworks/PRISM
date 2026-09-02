@@ -79,6 +79,9 @@ function seedImage(
     `generated-images/${args.userId}/${args.id}.png`,
     args.createdAt ?? NOW,
   );
+  // Production writes mark the account catalog dirty; the next read/startup
+  // reconciles it once. Fixtures make that boundary explicit.
+  synchronizeImageAssetCatalog(db, args.userId);
 }
 
 function makeDb(): DatabaseSync {
@@ -86,6 +89,67 @@ function makeDb(): DatabaseSync {
 }
 
 describe("local image asset catalog", () => {
+  it("does not rebuild a clean catalog during ordinary reads", () => {
+    const db = makeDb();
+    try {
+      seedUser(db, "user-1");
+      seedImage(db, {
+        id: "cataloged",
+        userId: "user-1",
+        origin: "images_panel",
+        purpose: "gallery",
+        prompt: "Already cataloged image",
+      });
+      db.prepare(
+        `INSERT INTO image_asset_search
+           (set_id, user_id, kind, title, tags, context, prompts)
+         VALUES ('read-sentinel', 'user-1', 'general_image', 'Read sentinel', '', '', '')`,
+      ).run();
+
+      const page = listImageAssetCatalog(db, "user-1", { kind: "general_image" });
+      assert.deepEqual(page.assets.map((asset) => asset.members[0]?.imageId), ["cataloged"]);
+      assert.equal(
+        Number(
+          (
+            db.prepare(
+              "SELECT COUNT(*) AS count FROM image_asset_search WHERE user_id = ? AND set_id = ?",
+            ).get("user-1", "read-sentinel") as { count: number | bigint }
+          ).count,
+        ),
+        1,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reconciles a newly written image once before serving it", () => {
+    const db = makeDb();
+    try {
+      seedUser(db, "user-1");
+      db.prepare(
+        `INSERT INTO images
+           (id, user_id, origin, prompt, url, provider, model, purpose, local_rel_path, created_at)
+         VALUES ('late-image', 'user-1', 'images_panel', 'Newly written image', '', 'local', 'test', 'gallery', 'generated-images/user-1/late.png', ?)`,
+      ).run(NOW);
+
+      const page = listImageAssetCatalog(db, "user-1", { kind: "general_image" });
+      assert.deepEqual(page.assets.map((asset) => asset.members[0]?.imageId), ["late-image"]);
+      assert.equal(
+        Number(
+          (
+            db.prepare(
+              "SELECT dirty FROM image_asset_catalog_state WHERE user_id = ?",
+            ).get("user-1") as { dirty: number | bigint }
+          ).dirty,
+        ),
+        0,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("exposes ready Item metadata for Case Forge's relevance-gated reuse", () => {
     const db = makeDb();
     try {
@@ -911,6 +975,7 @@ describe("local image asset catalog", () => {
       db.prepare(
         "UPDATE users SET display_name = 'Leia', hub_atmosphere_image_id = 'home-later' WHERE id = 'user-1'",
       ).run();
+      synchronizeImageAssetCatalog(db, "user-1");
       const after = listImageAssetCatalog(db, "user-1", {
         kind: "home_atmosphere",
         query: "Leia",
