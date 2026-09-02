@@ -70,8 +70,8 @@ describe("Avatar Details Studio integration", () => {
     );
     assert.match(
       pageCss,
-      /\.zenLiveBotPresencePlate\[data-avatar-full-scale-identity="canonical"\][\s\S]*?\.zenLiveBotPresenceFaceGlyph\[data-face-eye-character\][\s\S]*?\[data-coffee-plate-emoji-part="eyes"\][\s\S]*?\[data-crt-glyph-layer="true"\]\[data-crt-pixel-mask-ready="true"\]::before\s*\{[\s\S]*?filter:\s*blur\(var\(--crt-glyph-beam-softness\)\)\s*var\(--crt-face-glow-filter\);/u,
-      "masked custom eyes must emit the shared HD phosphor bloom",
+      /\.zenLiveBotPresencePlate\[data-avatar-full-scale-identity="canonical"\][\s\S]*?\.zenLiveBotPresenceFaceGlyph\[data-face-eye-character\][\s\S]*?\[data-coffee-plate-emoji-part="eyes"\][\s\S]*?\[data-crt-glyph-layer="true"\]\[data-crt-pixel-mask-ready="true"\]\s*\{[\s\S]*?--zen-live-bot-glyph-compositor-glow-filter:\s*var\(--crt-face-glow-filter\);/u,
+      "completed custom-eye layers must emit the shared HD phosphor bloom after masking",
     );
     assert.match(
       editorSource,

@@ -77415,9 +77415,16 @@ a.settingsCreditItem:focus-visible {
 }
 
 /* Avatar Studio's authored custom-eye contour is the geometry contract. Keep
-   custom eyes on the quantized mask so thin outlines and counters survive,
-   then emit the same shared phosphor bloom from that masked clone. This avoids
-   the contour-closing native-text repaint without leaving custom eyes dark. */
+   custom eyes on the quantized mask so thin outlines and counters survive.
+   Their broad phosphor bloom is applied to the completed glyph layer below:
+   filters on the masked pseudo can be clipped by packaged compositors. */
+.zenLiveBotPresencePlate[data-avatar-full-scale-identity="canonical"]
+  .zenLiveBotPresenceFaceGlyph[data-face-eye-character]
+  [data-coffee-plate-emoji-part="eyes"]
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"] {
+  --zen-live-bot-glyph-compositor-glow-filter: var(--crt-face-glow-filter);
+}
+
 .zenLiveBotPresencePlate[data-avatar-full-scale-identity="canonical"]
   .zenLiveBotPresenceFaceGlyph[data-face-eye-character]
   [data-coffee-plate-emoji-part="eyes"]
@@ -77429,7 +77436,7 @@ a.settingsCreditItem:focus-visible {
   background: var(--crt-face-edge-color, currentColor);
   color: currentColor;
   -webkit-text-fill-color: initial;
-  filter: blur(var(--crt-glyph-beam-softness)) var(--crt-face-glow-filter);
+  filter: blur(var(--crt-glyph-beam-softness));
 }
 
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="mouth"],

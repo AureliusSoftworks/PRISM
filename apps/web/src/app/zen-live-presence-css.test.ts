@@ -3853,7 +3853,21 @@ describe("Zen live presence CSS", () => {
       /data-crt-pixel-mask-ready="true"\]::before\s*\{[\s\S]*?content:\s*attr\(data-crt-glyph-content\);[\s\S]*?mask-image:\s*none;[\s\S]*?filter:\s*blur\(var\(--crt-glyph-beam-softness\)\)\s*var\(--crt-face-glow-filter\);/,
       "Expanded previews repaint the authored glyph silhouette for a rich box-free halo.",
     );
-    const canonicalCustomEyeBloomRule = ruleForSelectorNeedlesWithBody(
+    const canonicalCustomEyeLayerRule = ruleForSelectorNeedlesWithBody(
+      [
+        '.zenLiveBotPresencePlate[data-avatar-full-scale-identity="canonical"]',
+        ".zenLiveBotPresenceFaceGlyph[data-face-eye-character]",
+        '[data-coffee-plate-emoji-part="eyes"]',
+        '[data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]',
+      ],
+      "--zen-live-bot-glyph-compositor-glow-filter",
+    );
+    assert.match(
+      canonicalCustomEyeLayerRule,
+      /--zen-live-bot-glyph-compositor-glow-filter:\s*var\(--crt-face-glow-filter\)\s*;/,
+      "Custom eyes receive the same broad phosphor filter as mouths after their mask is composed.",
+    );
+    const canonicalCustomEyeMaskRule = ruleForSelectorNeedlesWithBody(
       [
         '.zenLiveBotPresencePlate[data-avatar-full-scale-identity="canonical"]',
         ".zenLiveBotPresenceFaceGlyph[data-face-eye-character]",
@@ -3862,20 +3876,20 @@ describe("Zen live presence CSS", () => {
       ],
       "content: \"\"",
     );
-    assert.match(canonicalCustomEyeBloomRule, /content:\s*""\s*;/);
+    assert.match(canonicalCustomEyeMaskRule, /content:\s*""\s*;/);
     assert.match(
-      canonicalCustomEyeBloomRule,
+      canonicalCustomEyeMaskRule,
       /mask-image:\s*var\(--crt-phosphor-pixel-mask\)\s*;/,
       "Canonical full avatars must preserve Avatar Studio's authored custom-eye contour.",
     );
     assert.match(
-      canonicalCustomEyeBloomRule,
-      /filter:\s*blur\(var\(--crt-glyph-beam-softness\)\)\s*var\(--crt-face-glow-filter\)\s*;/,
-      "Custom eyes keep their masked CRT contour while receiving the shared phosphor halo.",
+      canonicalCustomEyeMaskRule,
+      /filter:\s*blur\(var\(--crt-glyph-beam-softness\)\)\s*;/,
+      "The masked eye clone owns beam softness while the completed layer owns the visible halo.",
     );
     assert.doesNotMatch(
-      canonicalCustomEyeBloomRule,
-      /content:\s*attr\(data-crt-glyph-content\)|mask-image:\s*none/,
+      canonicalCustomEyeMaskRule,
+      /content:\s*attr\(data-crt-glyph-content\)|mask-image:\s*none|var\(--crt-face-glow-filter\)/,
     );
     assert.doesNotMatch(readyFaceBloomRule, /content:\s*none\s*;/);
     const readyFaceCoreRule = ruleForNormalizedSelector(
