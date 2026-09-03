@@ -6,7 +6,7 @@ import {
   botcastImageHistoryV1, botcastPendingImageContextV1,
 } from "@localai/shared";
 import { initializeDatabase } from "../db.ts";
-import { advanceBotcastEpisode, botcastEpisodeCanPrepareAdvance, cancelBotcastEpisode, cancelBotcastPendingImage, createBotcastEpisode, createBotcastShow, getBotcastEpisode, queueBotcastEpisodeImageContext } from "../botcast.ts";
+import { advanceBotcastEpisode, botcastEpisodeCanPrepareAdvance, cancelBotcastEpisode, cancelBotcastPendingImage, createBotcastEpisode, createBotcastShow, getBotcastEpisode, queueBotcastEpisodeImageContext, runSignalOnlineTurn } from "../botcast.ts";
 import type { LlmProvider, ProviderMessage } from "../providers.ts";
 import { describeSignalEpisodeImage, readSignalEpisodeImageProxy, SignalImageRegistrationQueue, signalEpisodeOlderPictureMemory } from "../signal-episode-images.ts";
 
@@ -223,6 +223,98 @@ describe("successive Signal picture API contracts", () => {
       assert.deepEqual(captures[1]!.flatMap((message) => message.images?.map((image) => image.data) ?? []), ["original-b", "original-a"]);
       assert.equal(botcastActiveImageContextV1(result.episode.events)?.imageId, "b");
     } finally { db.close(); }
+  });
+
+  it("recovers an empty ONLINE picture introduction on the same model with both originals and reasoning headroom", async () => {
+    const { db, episode } = fixture();
+    const captures: ProviderMessage[][] = [];
+    const tokenLimits: Array<number | undefined> = [];
+    const models: Array<string | undefined> = [];
+    const provider: LlmProvider = { name: "anthropic", embedText: async () => [], generateResponse: async (messages, options) => {
+      captures.push(messages);
+      tokenLimits.push(options?.maxTokens);
+      models.push(options?.model);
+      assert.equal(options?.allowFinalLocalFallback, false);
+      if (captures.length === 1) throw new Error("Anthropic returned an empty response.");
+      return "This second painting puts the red wheel beneath a gold horizon, Ivo. Does that change your view of its danger? [[signal_image_context:continue]]";
+    } };
+    try {
+      db.prepare("UPDATE botcast_episodes SET provider = 'anthropic', model = 'claude-sonnet-5', response_mode = 'online', segment = 'interview' WHERE id = ?").run(episode.id);
+      queueBotcastEpisodeImageContext(db, "producer", episode.id, input("a", "setup"));
+      recordPhase(db, episode.id, "a", "discussing");
+      queueBotcastEpisodeImageContext(db, "producer", episode.id, input("b"));
+      const result = await advanceBotcastEpisode(db, "producer", episode.id, { cue: { kind: "present_image", imageId: "b" } }, {
+        preferredProvider: "anthropic", providerFactory: () => provider, signalSocialSilenceChanceOverride: 0,
+        signalEpisodeImage: attachment("b"), signalPreviousEpisodeImage: attachment("a"),
+      });
+      assert.equal(captures.length, 2);
+      assert.deepEqual(models, ["claude-sonnet-5", "claude-sonnet-5"]);
+      assert.equal(tokenLimits[0], 384);
+      assert.ok(tokenLimits[1]! > tokenLimits[0]!, "empty reasoning output gets a larger completion allowance on its bounded retry");
+      assert.ok(tokenLimits[1]! <= 2048, "retry headroom remains bounded");
+      for (const messages of captures) {
+        assert.deepEqual(messages.flatMap((message) => message.images?.map((image) => image.data) ?? []), ["original-b", "original-a"]);
+      }
+      assert.match(captures[1]!.map((message) => message.content).join("\n"), /new introduction to the CURRENT attached picture/u);
+      assert.match(result.message?.content ?? "", /red wheel beneath a gold horizon/u);
+      assert.doesNotMatch(result.message?.content ?? "", /signal_image_context|PRIVATE-/u);
+      assert.equal(botcastActiveImageContextV1(result.episode.events)?.imageId, "b");
+      assert.equal(botcastPendingImageContextV1(result.episode.events), null);
+      const event = result.episode.events.find((entry) => entry.kind === "provider_generation");
+      assert.equal(event?.payload.outcome, "succeeded");
+      const attempts = event?.payload.attempts as Array<{ outcome: string; reason?: string }>;
+      assert.deepEqual(attempts.map(({ outcome, reason }) => ({ outcome, reason })), [
+        { outcome: "rejected", reason: "empty" }, { outcome: "succeeded", reason: undefined },
+      ]);
+      assert.doesNotMatch(JSON.stringify(result.episode.events), /original-|PRIVATE-/u);
+    } finally { db.close(); }
+  });
+
+  it("bounds empty ONLINE retries and keeps a failed replacement queued without airing a fallback", async () => {
+    const { db, episode } = fixture();
+    let calls = 0;
+    const provider: LlmProvider = { name: "anthropic", embedText: async () => [], generateResponse: async () => {
+      calls += 1;
+      throw new Error("Anthropic returned an empty response.");
+    } };
+    try {
+      db.prepare("UPDATE botcast_episodes SET provider = 'anthropic', model = 'claude-sonnet-5', response_mode = 'online', segment = 'interview' WHERE id = ?").run(episode.id);
+      queueBotcastEpisodeImageContext(db, "producer", episode.id, input("a", "setup"));
+      recordPhase(db, episode.id, "a", "discussing");
+      queueBotcastEpisodeImageContext(db, "producer", episode.id, input("b"));
+      await assert.rejects(advanceBotcastEpisode(db, "producer", episode.id, { cue: { kind: "present_image", imageId: "b" } }, {
+        preferredProvider: "anthropic", providerFactory: () => provider, signalSocialSilenceChanceOverride: 0,
+        signalEpisodeImage: attachment("b"), signalPreviousEpisodeImage: attachment("a"),
+      }), /could not introduce this picture.*still queued/u);
+      assert.equal(calls, 2);
+      const saved = getBotcastEpisode(db, "producer", episode.id);
+      assert.equal(saved.messages.length, 0);
+      assert.equal(botcastPendingImageContextV1(saved.events)?.imageId, "b");
+      assert.equal(botcastActiveImageContextV1(saved.events)?.imageId, "a");
+      const event = saved.events.find((entry) => entry.kind === "provider_generation");
+      assert.equal(event?.payload.outcome, "rejected");
+      assert.deepEqual((event?.payload.attempts as Array<{ reason: string }>).map((attempt) => attempt.reason), ["empty", "empty"]);
+    } finally { db.close(); }
+  });
+
+  it("treats thrown and returned empty ONLINE responses alike without a custom validator", async () => {
+    for (const name of ["openai", "anthropic"] as const) {
+      for (const thrown of [false, true]) {
+        let calls = 0;
+        const provider: LlmProvider = { name, embedText: async () => [], generateResponse: async () => {
+          calls += 1;
+          if (calls === 1) {
+            if (thrown) throw new Error(`${name === "openai" ? "OpenAI" : "Anthropic"} returned an empty response.`);
+            return "   ";
+          }
+          return "Look at the red wheel below the gold horizon.";
+        } };
+        const result = await runSignalOnlineTurn({ provider, providerName: name, model: "test-model", messages: [], options: {}, retryDelayMs: 0 });
+        assert.equal(calls, 2);
+        assert.match(result.value, /red wheel/u);
+        assert.equal(result.attempts[0]?.reason, "empty");
+      }
+    }
   });
 
   it("keeps Watch single-image and rolls back proxy, note and description on event failure", () => {

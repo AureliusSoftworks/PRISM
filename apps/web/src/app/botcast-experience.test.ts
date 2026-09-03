@@ -1782,11 +1782,11 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /replaySceneAtV2\([\s\S]{0,120}replayCapturedPresentationElapsedMs/u,
+      /replaySceneSampler\?\.\(replayCapturedPresentationElapsedMs\)/u,
     );
     assert.match(
       source,
-      /const replayCameraDirectedScene = useMemo\([\s\S]{0,240}replaySceneAtV2\([\s\S]{0,120}replayCapturedPresentationElapsedMs/u,
+      /const replayCameraDirectedScene = replayDirectedScene/u,
     );
     assert.match(
       source,
@@ -2039,6 +2039,31 @@ describe("Signal experience shell", () => {
     assert.match(
       source,
       /signalReviewCopyLabel\(reviewCopyState, replayEpisode\.id\)/u,
+    );
+  });
+
+  it("copies a completed archive card without opening its replay", () => {
+    assert.match(
+      source,
+      /const copyArchivedEpisodeForReview = async \([\s\S]{0,180}targetEpisode: BotcastEpisodeSummary[\s\S]{0,520}loadEpisode\(targetEpisode\.id\)/u,
+    );
+    const archiveSource = source.slice(
+      source.indexOf("const renderArchive ="),
+      source.indexOf("// The audible lifecycle owns"),
+    );
+    assert.match(
+      archiveSource,
+      /copyArchivedEpisodeForReview\(item\)[\s\S]{0,420}data-signal-archive-copy="true"/u,
+    );
+    assert.match(
+      archiveSource,
+      /signalReviewCopyLabel\(reviewCopyState, item\.id\)/u,
+    );
+    assert.match(css, /\.episodeCardActions\s*\{[^}]*display:\s*flex/u);
+    assert.match(css, /\.episodeReviewCopyButton/u);
+    assert.match(
+      tutorials,
+      /Copy for Signal Review button copies the complete review paste without opening replay/u,
     );
   });
 

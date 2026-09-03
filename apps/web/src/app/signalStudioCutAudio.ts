@@ -14,6 +14,7 @@ import {
   normalizeCorporality,
 } from "@localai/shared";
 import { replayFetch } from "./replayClient";
+import { mapReplayWorkInOrder } from "./replayBackgroundWork";
 import {
   resolveBodilyActionSfxPlayback,
   resolveLegacyBodilyActionSfxPlayback,
@@ -107,11 +108,13 @@ export async function prepareSignalStudioCut(
   if (sortedSegments.length === 0) {
     throw new Error("Premium replacement voice segments are missing.");
   }
-  const decodedSegments = await Promise.all(
-    sortedSegments.map(async (segment) => ({
+  const decodedSegments = await mapReplayWorkInOrder(
+    sortedSegments,
+    2,
+    async (segment) => ({
       segment,
       buffer: await decodeAudio(segment.audioUrl),
-    })),
+    }),
   );
   const metadata = sourceManifest.visual.metadata ?? {};
   const signalAudioMix =

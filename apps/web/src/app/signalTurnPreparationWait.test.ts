@@ -77,4 +77,27 @@ describe("Signal turn preparation wait", () => {
     assert.equal(result.timedOut, false);
     assert.equal(result.preparation, ready);
   });
+
+  it("cancels an in-flight speculative wait without committing its buffer", async () => {
+    const controller = new AbortController();
+    let receivedSignal: AbortSignal | undefined;
+    const waiting = waitForSignalTurnPreparation({
+      initial: preparing(),
+      signal: controller.signal,
+      request: async (_path, options) => {
+        receivedSignal = options?.signal ?? undefined;
+        return new Promise<{ preparation: PreparedTurnV1 }>((_resolve, reject) => {
+          options?.signal?.addEventListener(
+            "abort",
+            () => reject(new Error("preparation cancelled")),
+            { once: true },
+          );
+        });
+      },
+    });
+
+    controller.abort();
+    await assert.rejects(waiting, /preparation cancelled/u);
+    assert.equal(receivedSignal, controller.signal);
+  });
 });

@@ -112,7 +112,7 @@ import {
   botcastStrongestNegativeSocialInfluenceAt,
   botcastSnapshotPowersForRoleV1,
   botcastVoiceLevelForBot,
-  buildReplaySceneCheckpointsV2,
+  createReplaySceneSamplerV2,
   signalEpisodeModelPickerValue,
   botIdentityMirrorTransitionActiveV1,
   botIdentityShapeshiftTransitionActiveV1,
@@ -147,7 +147,6 @@ import {
   replayMouthShapeAtV2,
   replayVoiceLightLevelAtV2,
   replaySpeechActivityAtV2,
-  replaySceneAtV2,
   type BotcastCameraShot,
   type BotcastEpisode,
   type BotcastEpisodeImageDescriptor,
@@ -5161,24 +5160,44 @@ export function BotcastExperience({
       ),
     };
   };
+  const copyLoadedEpisodeForReview = async (
+    targetEpisode: BotcastEpisode,
+  ): Promise<void> => {
+    const review = await reviewTranscriptForEpisode(targetEpisode);
+    if (!review) throw new Error("Signal show unavailable.");
+    const transcript = review.transcript;
+    await writeSignalReviewClipboard(transcript);
+  };
+  const clearReviewCopyState = (episodeId: string): void => {
+    window.setTimeout(() => {
+      setReviewCopyState((current) =>
+        current?.episodeId === episodeId ? null : current,
+      );
+    }, 2_400);
+  };
   const copyEpisodeForReview = async (
     targetEpisode: BotcastEpisode,
   ): Promise<void> => {
     setReviewCopyState({ episodeId: targetEpisode.id, phase: "copying" });
     try {
-      const review = await reviewTranscriptForEpisode(targetEpisode);
-      if (!review) throw new Error("Signal show unavailable.");
-      const transcript = review.transcript;
-      await writeSignalReviewClipboard(transcript);
+      await copyLoadedEpisodeForReview(targetEpisode);
       setReviewCopyState({ episodeId: targetEpisode.id, phase: "copied" });
     } catch {
       setReviewCopyState({ episodeId: targetEpisode.id, phase: "failed" });
     }
-    window.setTimeout(() => {
-      setReviewCopyState((current) =>
-        current?.episodeId === targetEpisode.id ? null : current,
-      );
-    }, 2_400);
+    clearReviewCopyState(targetEpisode.id);
+  };
+  const copyArchivedEpisodeForReview = async (
+    targetEpisode: BotcastEpisodeSummary,
+  ): Promise<void> => {
+    setReviewCopyState({ episodeId: targetEpisode.id, phase: "copying" });
+    try {
+      await copyLoadedEpisodeForReview(await loadEpisode(targetEpisode.id));
+      setReviewCopyState({ episodeId: targetEpisode.id, phase: "copied" });
+    } catch {
+      setReviewCopyState({ episodeId: targetEpisode.id, phase: "failed" });
+    }
+    clearReviewCopyState(targetEpisode.id);
   };
   const createEpisodeStoryInSlate = async (
     targetEpisode: BotcastEpisode,
@@ -8036,7 +8055,24 @@ export function BotcastExperience({
       void loadEpisodes(launchShow.id).catch(() => undefined);
       setEpisode(opening.episode);
       prepareEpisodeMessage(opening.message, opening.episode);
+      // Releasing the persisted hold invalidates speculative turns server-side.
       await releaseSignalModelWarmup(opening.episode.id);
+      if (!episodeOperationIsCurrent(controller, runId)) return;
+      // Producer playback keeps the opening behind the ident, so use that
+      // otherwise-idle interval for exactly one eligible follow-up turn. The
+      // regular playback-start handoff reuses this same preparation below.
+      // Watch owns its full bake, Producer guests need native input, LOCAL
+      // must not contend with voice playback, and active images need the
+      // canonical foreground context before their next turn is synthesized.
+      if (
+        opening.episode.playbackMode === "live" &&
+        opening.episode.guestKind === "bot" &&
+        opening.episode.provider !== "local" &&
+        !botcastActiveImageContextV1(opening.episode.events) &&
+        !botcastPendingImageContextV1(opening.episode.events)
+      ) {
+        prepareGuestResponse(opening.episode, opening.message);
+      }
       await Promise.all([introPlayback.finished, visualMinimum]);
       if (!episodeOperationIsCurrent(controller, runId)) return;
       await revealOpeningStudio();
@@ -8055,6 +8091,7 @@ export function BotcastExperience({
       setAutoRun(true);
     } catch (startError) {
       if (episodeOperationIsCurrent(controller, runId)) {
+        discardPreparedAdvance("Signal startup failed before handoff.");
         preRollGateResolveRef.current?.();
         preRollGateResolveRef.current = null;
         releaseSignalIntroAudio();
@@ -9464,6 +9501,16 @@ export function BotcastExperience({
 
   const prepareGuestResponse = useCallback(
     (currentEpisode: BotcastEpisode, currentMessage: BotcastMessage): void => {
+      const existingPrepared = preparedAdvanceRef.current;
+      if (
+        existingPrepared?.episodeId === currentEpisode.id &&
+        existingPrepared.afterMessageId === currentMessage.id &&
+        !existingPrepared.controller.signal.aborted
+      ) {
+        // The Producer ident may have already started this exact next turn.
+        // Keep its model/voice work alive when opening playback begins.
+        return;
+      }
       discardPreparedAdvance("A newer Signal preparation superseded this one.");
       // A speculative local turn can make Ollama compete with voice playback,
       // mouth animation, and native producer input for the same machine. Local
@@ -9504,6 +9551,15 @@ export function BotcastExperience({
         )
         .then(async ({ preparation }) => {
           prepared.preparationId = preparation.id;
+          if (controller.signal.aborted || preparedAdvanceRef.current !== prepared) {
+            // Cancellation can win after the POST resolves but before its
+            // handle reaches this callback. Release that late handle too.
+            void request(
+              `/api/turn-preparations/${encodeURIComponent(preparation.id)}`,
+              { method: "DELETE" },
+            ).catch(() => undefined);
+            throw new DOMException("Signal preparation cancelled", "AbortError");
+          }
           return waitForSignalTurnPreparation({
             request,
             initial: preparation,
@@ -9512,6 +9568,12 @@ export function BotcastExperience({
         })
         .then(
           ({ preparation, timedOut }) => {
+            if (controller.signal.aborted || preparedAdvanceRef.current !== prepared) {
+              return {
+                ok: false as const,
+                error: new DOMException("Signal preparation cancelled", "AbortError"),
+              };
+            }
             const utterance = preparation.provisionalUtterances[0];
             if (preparation.phase === "ready" && utterance) {
               const preparedMessage: BotcastMessage = {
@@ -11206,43 +11268,22 @@ export function BotcastExperience({
     replayTransportBoundaryTimesMs,
   ]);
 
-  const replaySceneCheckpoints = useMemo(
+  const replaySceneSampler = useMemo(
     () =>
       replayPresentationManifestV2
-        ? buildReplaySceneCheckpointsV2(replayPresentationManifestV2)
-        : [],
+        ? createReplaySceneSamplerV2(replayPresentationManifestV2)
+        : null,
     [replayPresentationManifestV2],
   );
   const replayDirectedScene = useMemo(
     () =>
-      replayPresentationManifestV2
-        ? replaySceneAtV2(
-            replayPresentationManifestV2,
-            replayCapturedPresentationElapsedMs,
-            replaySceneCheckpoints,
-          )
-        : null,
+      replaySceneSampler?.(replayCapturedPresentationElapsedMs) ?? null,
     [
-      replayPresentationManifestV2,
       replayCapturedPresentationElapsedMs,
-      replaySceneCheckpoints,
+      replaySceneSampler,
     ],
   );
-  const replayCameraDirectedScene = useMemo(
-    () =>
-      replayPresentationManifestV2
-        ? replaySceneAtV2(
-            replayPresentationManifestV2,
-            replayCapturedPresentationElapsedMs,
-            replaySceneCheckpoints,
-          )
-        : null,
-    [
-      replayPresentationManifestV2,
-      replayCapturedPresentationElapsedMs,
-      replaySceneCheckpoints,
-    ],
-  );
+  const replayCameraDirectedScene = replayDirectedScene;
   const replayHasCapturedCameraDirection = useMemo(
     () =>
       replayPresentationManifestV2?.direction.some(
@@ -16737,23 +16778,39 @@ export function BotcastExperience({
                 · {episodeOutcomeLabel(item)}
               </small>
             </button>
+            <div className={styles.episodeCardActions}>
+              <button
+                type="button"
+                className={styles.episodeReviewCopyButton}
+                onClick={() => void copyArchivedEpisodeForReview(item)}
+                disabled={
+                  reviewCopyState?.episodeId === item.id &&
+                  reviewCopyState.phase === "copying"
+                }
+                aria-live="polite"
+                title="Copy complete Signal Review transcript"
+                data-signal-archive-copy="true"
+              >
+                {signalReviewCopyLabel(reviewCopyState, item.id)}
+              </button>
+              <button
+                type="button"
+                className={styles.episodeDeleteButton}
+                onClick={(event) =>
+                  openEpisodeDeletion(item, event.currentTarget)
+                }
+                disabled={busy}
+                aria-label={`Delete episode ${item.title}`}
+              >
+                Delete
+              </button>
+            </div>
             <div
               className={styles.episodeGuest}
               aria-label={`Guest in ${item.title}`}
             >
               {renderArchiveGuest(item)}
             </div>
-            <button
-              type="button"
-              className={styles.episodeDeleteButton}
-              onClick={(event) =>
-                openEpisodeDeletion(item, event.currentTarget)
-              }
-              disabled={busy}
-              aria-label={`Delete episode ${item.title}`}
-            >
-              Delete
-            </button>
           </article>
         ))}
       </div>

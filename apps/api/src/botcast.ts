@@ -495,6 +495,7 @@ export const SIGNAL_AUTO_DEGRADED_MAX_ATTEMPTS = 2;
 export const SIGNAL_AUTO_DEGRADED_TOTAL_BUDGET_MS = 8_000;
 export const SIGNAL_AUTO_DEGRADED_ATTEMPT_MAX_MS = 4_000;
 const BOTCAST_REASONING_MIN_COMPLETION_TOKENS = 384;
+const BOTCAST_REASONING_EMPTY_RETRY_COMPLETION_TOKENS = 1_536;
 const BOTCAST_REASONING_BOOKING_COMPLETION_TOKENS = 768;
 const BOTCAST_SHOW_IDENTITY_COMPLETION_TOKENS = 2_400;
 const BOTCAST_SHOW_HOST_CHAT_HISTORY_LIMIT = 3;
@@ -808,6 +809,7 @@ export async function runSignalOnlineTurn(args: {
   const attempts: SignalOnlineTurnAttemptV1[] = [];
   let lastError: unknown = new Error("Signal ONLINE turn did not start.");
   let attemptMessages = args.messages;
+  let attemptMaxTokens = args.options.maxTokens;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     if (args.options.signal?.aborted) throw args.options.signal.reason;
@@ -834,12 +836,20 @@ export async function runSignalOnlineTurn(args: {
       const value = await Promise.race([
         args.provider.generateResponse(attemptMessages, {
           ...args.options,
+          ...(attemptMaxTokens !== undefined ? { maxTokens: attemptMaxTokens } : {}),
           signal,
+        }).catch((error: unknown) => {
+          // Providers can throw instead of returning an empty draft. Give both
+          // forms the same validation retry, with the original image inputs.
+          if (botcastProviderReturnedEmptyResponse(error, args.providerName)) return "";
+          throw error;
         }),
         timeout,
         abortFailure.promise,
       ]);
-      const validation = args.validate?.(value);
+      const validation = value.trim()
+        ? args.validate?.(value)
+        : { ok: false as const, reason: "empty" as const };
       if (validation && !validation.ok) {
         attempts.push({
           provider: args.providerName,
@@ -868,6 +878,19 @@ export async function runSignalOnlineTurn(args: {
               content: args.validationRetryInstruction,
             },
           ];
+        }
+        if (
+          validation.reason === "empty" &&
+          attemptMaxTokens !== undefined &&
+          botcastModelUsesNativeReasoning(args.providerName, args.model)
+        ) {
+          // The reasoning pass may have consumed the small completion cap
+          // before speech began. Increase headroom once; keep the same turn
+          // deadline, attempt limit, and spoken-output validation.
+          attemptMaxTokens = Math.max(
+            attemptMaxTokens,
+            BOTCAST_REASONING_EMPTY_RETRY_COMPLETION_TOKENS,
+          );
         }
         continue;
       }
