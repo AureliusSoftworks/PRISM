@@ -27,13 +27,14 @@
     calc(var(--chat-mini-bot-render-size) * 0.006),
     1.5px
   );
+  --chat-mini-bot-mouth-nudge-y: -1px;
   /* Anchor the bare buckle glyph to the chassis coordinate plane. Percentage
      registration stays invariant while Avatar Studio scales 1-299px Minis;
      capped pixel nudges drift relative to the body. */
   --chat-mini-bot-lower-screen-anchor-x: 50%;
   --chat-mini-bot-lower-screen-anchor-y: 75.4%;
-  --chat-mini-bot-lower-screen-nudge-x: 0px;
-  --chat-mini-bot-lower-screen-nudge-y: 0px;
+  --chat-mini-bot-lower-screen-nudge-x: 1px;
+  --chat-mini-bot-lower-screen-nudge-y: 1px;
   --chat-mini-bot-identity-glyph-scale: 0.92;
   --chat-mini-bot-lower-screen-width: 13.5%;
   --chat-mini-bot-lower-screen-height: 14%;
@@ -232,7 +233,7 @@
 
 .lowerScreenContent {
   transform: translate(
-      var(--chat-mini-bot-lower-screen-nudge-x, 0px),
+      calc(var(--chat-mini-bot-lower-screen-nudge-x, 0px) * var(--chat-mini-bot-lower-screen-facing-scale-x, 1)),
       var(--chat-mini-bot-lower-screen-nudge-y, 0px)
     )
     scaleX(var(--chat-mini-bot-lower-screen-facing-scale-x, 1))

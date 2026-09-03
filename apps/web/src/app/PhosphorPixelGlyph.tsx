@@ -28,6 +28,7 @@ import {
   thresholdPhosphorPixelAlpha,
 } from "./phosphorPixelRaster";
 import { PhosphorRasterSchedule } from "./phosphorRasterSchedule";
+import { requestPhosphorFontProbe } from "./phosphorFontProbe";
 
 /**
  * Every canvas in this module exists only to be read back — as `getImageData`,
@@ -393,29 +394,33 @@ export const CrtPixelTextGlyph = forwardRef<
       // load replaces it through a distinct cache revision below.
       const computed = window.getComputedStyle(node);
       const primaryFontFamily = phosphorPrimaryFontFamily(computed.fontFamily);
+      // CSSStyleDeclaration exposes metrics through prototype getters;
+      // spreading it loses them and produces an invalid NaNpx font probe.
       const fontProbe = phosphorCanvasFontShorthand(
-        { ...computed, fontFamily: primaryFontFamily },
+        computed,
         1,
+        primaryFontFamily,
       );
+      const sharedFontProbe = document.fonts && !unavailableFontProbes.has(fontProbe)
+        ? requestPhosphorFontProbe(document.fonts, fontProbe, content)
+        : null;
+      if (sharedFontProbe?.status === "loaded") loadedFontProbes.add(fontProbe);
+      if (sharedFontProbe?.status === "unavailable") unavailableFontProbes.add(fontProbe);
       if (
-        document.fonts &&
+        sharedFontProbe &&
         !loadedFontProbes.has(fontProbe) &&
         !unavailableFontProbes.has(fontProbe) &&
         !requestedFontProbes.has(fontProbe)
       ) {
         requestedFontProbes.add(fontProbe);
-        void document.fonts
-          .load(fontProbe, content)
-          .then(
-            () => {
-              loadedFontProbes.add(fontProbe);
-              handleFontsLoaded();
-            },
-            () => {
-              unavailableFontProbes.add(fontProbe);
-              handleFontsLoaded();
-            },
-          );
+        void sharedFontProbe.settled.then(() => {
+          if (sharedFontProbe.status === "loaded") {
+            loadedFontProbes.add(fontProbe);
+          } else {
+            unavailableFontProbes.add(fontProbe);
+          }
+          handleFontsLoaded();
+        });
       }
       const fontLoadState = !document.fonts
         ? "font-set-unavailable"
@@ -448,7 +453,11 @@ export const CrtPixelTextGlyph = forwardRef<
     // for the next animation frame briefly exposes the browser's raw font and
     // makes every spinner step appear to change resolution.
     renderMask();
-    void document.fonts?.ready.then(handleFontsLoaded);
+    // A settled FontFaceSet.ready promise used to schedule a second geometry
+    // pass on every mouth/spinner step, even when the authored font was warm.
+    if (document.fonts?.status !== "loaded") {
+      void document.fonts?.ready.then(handleFontsLoaded);
+    }
     document.fonts?.addEventListener("loadingdone", handleFontsLoaded);
     const observer = new ResizeObserver(render);
     observer.observe(node);
@@ -458,7 +467,7 @@ export const CrtPixelTextGlyph = forwardRef<
       document.fonts?.removeEventListener("loadingdone", handleFontsLoaded);
       if (frameId !== null) cancelAnimationFrame(frameId);
     };
-  }, [binaryAlpha, content, enabled, rasterKey]);
+  }, [binaryAlpha, content, enabled, faceFont, rasterKey]);
 
   const maskUrl =
     enabled && renderedMask?.content === content ? renderedMask.url : null;

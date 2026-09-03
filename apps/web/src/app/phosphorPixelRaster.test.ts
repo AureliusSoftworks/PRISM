@@ -95,6 +95,25 @@ describe("phosphor pixel raster", () => {
     assert.equal(phosphorPrimaryFontFamily("system-ui"), "system-ui");
   });
 
+  it("keeps prototype-backed computed metrics in authored-font load probes", () => {
+    // Like CSSStyleDeclaration, none of these properties is an own key.
+    const computed = Object.create({
+      fontFamily: '"Macondo", "Macondo Fallback", monospace',
+      fontSize: "19.9156px",
+      fontStyle: "normal",
+      fontWeight: "700",
+    });
+    assert.equal(Object.keys(computed).length, 0);
+    assert.equal(
+      phosphorCanvasFontShorthand(
+        computed,
+        1,
+        phosphorPrimaryFontFamily(computed.fontFamily),
+      ),
+      'normal 700 19.9156px "Macondo"',
+    );
+  });
+
   it("keeps compact mouths and tall eyes on the browser font baseline", () => {
     const compactMouthBaseline = phosphorTextAlphabeticBaseline(80, {
       fontBoundingBoxAscent: 72,

@@ -81,6 +81,7 @@ export function phosphorCanvasFontShorthand(
     fontWeight: string;
   },
   scale: number,
+  fontFamily = font.fontFamily,
 ): string {
   const fontSize = Math.max(1, Number.parseFloat(font.fontSize)) * scale;
   // Do not include fontVariant. Canvas rejects otherwise-valid CSS values such
@@ -89,7 +90,7 @@ export function phosphorCanvasFontShorthand(
     font.fontStyle,
     font.fontWeight,
     `${fontSize}px`,
-    font.fontFamily,
+    fontFamily,
   ]
     .filter(Boolean)
     .join(" ");

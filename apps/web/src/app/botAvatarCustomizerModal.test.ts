@@ -287,8 +287,8 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
   const miniViewportRule = cssRuleBody(
     ".botAvatarStudioMiniPreviewViewport",
   );
-  assert.match(miniViewportRule, /width:\s*220px;/);
-  assert.match(miniViewportRule, /height:\s*220px;/);
+  assert.match(miniViewportRule, /width:\s*max\(160px, var\(--avatar-studio-scale-preview-size, 122px\)\);/);
+  assert.match(miniViewportRule, /height:\s*max\(110px, var\(--avatar-studio-scale-preview-size, 122px\)\);/);
   assert.match(miniSource, /data-tutorial-target="avatar-studio-scale-lab"/);
   assert.match(miniSource, /aria-label="Compact avatar render size"/);
   assert.match(
@@ -319,7 +319,7 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
   );
   assert.match(
     cssSource,
-    /\.botAvatarStudioMiniPreviewCluster\s*\{[^}]*grid-template-columns:\s*minmax\(0, 220px\);/u,
+    /\.botAvatarStudioMiniPreviewCluster\s*\{[^}]*grid-template-columns:\s*minmax\(0, max\(160px, var\(--avatar-studio-scale-preview-size, 122px\)\)\);/u,
   );
   assert.match(microAvatarSource, /data-bot-avatar-micro-screen="true"/);
   assert.match(microAvatarSource, /botAvatarMicroPresentationForSize\(props\.renderSizePx\)/u);
@@ -348,7 +348,7 @@ test("Avatar Studio gates named voice casting only while an Accent pin is missin
   assert.match(pageSource, /const avatarVoiceAccentReady = Boolean/);
   assert.match(pageSource, /avatarPronunciationSelection\.point/);
   assert.match(pageSource, /label: "1 Accent"/);
-  assert.match(pageSource, /label: "2 Local"/);
+  assert.match(pageSource, /label: "2 TTS"/);
   assert.match(pageSource, /label: "3 Premium"/);
   assert.match(pageSource, /Place the accent pin first/);
   assert.match(pageSource, /aria-label="Choose a named voice"/);
@@ -1469,7 +1469,7 @@ test("avatar customization uses the full viewport as a foundry", () => {
   );
   assert.match(
     foundryBackdropRule,
-    /inset:\s*0;/,
+    /inset:\s*var\(--app-shell-top-nav-height, var\(--app-navbar-height, 66px\)\) 0 0;/,
   );
   assert.match(foundryBackdropRule, /z-index:\s*170;/);
   assert.match(foundryBackdropRule, /backdrop-filter:\s*none;/);
@@ -2408,7 +2408,7 @@ test("avatar foundry marks populated modules and shares the breathing voice mete
   );
 });
 
-test("avatar foundry keeps a reusable color-linked adjustment console visible", () => {
+test("avatar foundry keeps useful adjustment consoles in the inspector scroll flow", () => {
   assert.match(pageSource, /botAvatarGlobalAdjustmentConsole/);
   assert.match(pageSource, /activeAdjustmentOptions/);
   assert.match(pageSource, /<AdjustmentPad/);
@@ -2424,8 +2424,10 @@ test("avatar foundry keeps a reusable color-linked adjustment console visible", 
   );
   assert.match(
     cssSource,
-    /\.botAvatarGlobalAdjustmentConsole\s*\{[\s\S]*position:\s*sticky;/,
+    /\.botAvatarGlobalAdjustmentConsole\s*\{[\s\S]*position:\s*relative;/,
   );
+  assert.match(pageSource, /activeAdjustmentControl \|\| activeFoundryIdentitySurface === "shell" \? \(/);
+  assert.doesNotMatch(pageSource, /position unavailable|This module has no positional offset/);
   assert.match(
     adjustmentPadCssSource,
     /@media \(prefers-reduced-motion: reduce\)/,

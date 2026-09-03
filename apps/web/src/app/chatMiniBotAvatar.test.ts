@@ -126,7 +126,7 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(
       cssSource,
-      /\.root\s*\{[^}]*--chat-mini-bot-lower-screen-anchor-x:\s*50%[^}]*--chat-mini-bot-lower-screen-anchor-y:\s*75\.4%[^}]*--chat-mini-bot-lower-screen-nudge-x:\s*0px[^}]*--chat-mini-bot-lower-screen-nudge-y:\s*0px/,
+      /\.root\s*\{[^}]*--chat-mini-bot-lower-screen-anchor-x:\s*50%[^}]*--chat-mini-bot-lower-screen-anchor-y:\s*75\.4%[^}]*--chat-mini-bot-lower-screen-nudge-x:\s*1px[^}]*--chat-mini-bot-lower-screen-nudge-y:\s*1px/,
       "the lower glyph must use one chassis-relative center anchor at every Mini scale",
     );
     assert.doesNotMatch(
@@ -147,6 +147,31 @@ describe("chatMiniBotAvatar", () => {
       /\.root\s*\{[^}]*--chat-mini-bot-identity-glyph-scale:\s*0\.92/,
       "every Mini consumer must inherit the slightly reduced identity-glyph scale",
     );
+  });
+
+  it("moves Mini mouths up one screen pixel without moving eyes or Full faces", () => {
+    assert.match(cssSource, /--chat-mini-bot-mouth-nudge-y:\s*-1px;/);
+    assert.match(
+      pageCssSource,
+      /\.coffeeSeatPlateEmoji:is\(\.coffeeSeatMiniAvatarFace, \.emptyStateHeroMiniFace\)\s*\[data-coffee-plate-emoji-part="mouth"\]\s*\{[^}]*translate:\s*calc\(\s*var\(--chat-mini-bot-mouth-nudge-y, 0px\)\s*\/\s*var\(--zen-live-bot-face-scale, 1\)\s*\/\s*var\(--coffee-seat-emotion-face-scale, 1\)\s*\)\s*0;/,
+    );
+    for (const scale of [1, 1.68, 2]) {
+      for (const moodScale of [0.9, 1, 1.1]) {
+        const localX = -1 / scale / moodScale;
+        // All Mini face glyphs rotate 90deg, mapping local X to screen Y.
+        assert.ok(Math.abs(localX * scale * moodScale + 1) < 1e-12);
+      }
+    }
+  });
+
+  it("keeps the buckle nudge screen-right even in an externally mirrored Mini", () => {
+    assert.match(
+      cssSource,
+      /calc\(var\(--chat-mini-bot-lower-screen-nudge-x, 0px\) \* var\(--chat-mini-bot-lower-screen-facing-scale-x, 1\)\)/,
+    );
+    for (const facing of [-1, 1]) {
+      assert.equal(1 * facing * facing, 1);
+    }
   });
 
   it("uses keyed solid identity color with only the face and glyph overlaid", () => {

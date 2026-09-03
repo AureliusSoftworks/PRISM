@@ -11,10 +11,10 @@ import type { BotAvatarDetailsSpeechInkAnimation } from "@localai/shared";
 
 import {
   AVATAR_DETAILS_CANVAS_SIZE,
-  avatarDetailsHasVisuals,
   avatarDetailsPhosphorCoreRgba,
   normalizeAvatarDetails,
   normalizeAvatarDetailsColor,
+  normalizeAvatarDetailsFaceGeometry,
   rasterizeAvatarDetailsRgba,
   rasterizeVisibleAvatarDetailsRgba,
   type AvatarDetailsFaceDepth,
@@ -61,6 +61,31 @@ type AvatarDetailsSpeechMotion = Exclude<
   BotAvatarDetailsSpeechInkAnimation,
   "none"
 >;
+
+// This is only the no-ink sentinel. It lets the component retain a stable hook
+// order while avoiding a 128 x 128 RGBA allocation for the common no-details
+// case. It is never rendered because `hasVisuals` returns before the planes.
+const EMPTY_AVATAR_DETAILS_RGBA = new Uint8ClampedArray(0);
+
+function avatarDetailsMaskFaceGeometry(
+  eyeScale: number | undefined,
+  eyeOffsetX: number | undefined,
+  eyeOffsetY: number | undefined,
+  mouthScale: number | undefined,
+  mouthOffsetX: number | undefined,
+  mouthOffsetY: number | undefined,
+  mouthRotationDeg: number | undefined,
+): AvatarDetailsFaceGeometry {
+  return normalizeAvatarDetailsFaceGeometry({
+    eyeScale,
+    eyeOffsetX,
+    eyeOffsetY,
+    mouthScale,
+    mouthOffsetX,
+    mouthOffsetY,
+    mouthRotationDeg,
+  });
+}
 
 interface AvatarDetailsEmissionPlanesProps {
   pixels: Uint8ClampedArray;
@@ -373,9 +398,41 @@ export function AvatarDetailsMask({
     () => normalizeAvatarDetails(details),
     [details],
   );
-  const hasVisuals = useMemo(
-    () => avatarDetailsHasVisuals(normalizedDetails),
-    [normalizedDetails],
+  const hasVisuals =
+    normalizedDetails.screen.stamps.length > 0 ||
+    normalizedDetails.screen.paintMaskBase64 !== null ||
+    Boolean(normalizedDetails.screen.paintColorMapBase64);
+  // Live seats can reconstruct their complete face style on pose changes.
+  // Memoize from only the normalized geometry primitives that ink uses, not
+  // the containing style object's identity. Reading the raw values on every
+  // render keeps mutable Studio authoring responsive without a stale cache.
+  const faceGeometryEyeScale = faceGeometry?.eyeScale;
+  const faceGeometryEyeOffsetX = faceGeometry?.eyeOffsetX;
+  const faceGeometryEyeOffsetY = faceGeometry?.eyeOffsetY;
+  const faceGeometryMouthScale = faceGeometry?.mouthScale;
+  const faceGeometryMouthOffsetX = faceGeometry?.mouthOffsetX;
+  const faceGeometryMouthOffsetY = faceGeometry?.mouthOffsetY;
+  const faceGeometryMouthRotationDeg = faceGeometry?.mouthRotationDeg;
+  const normalizedFaceGeometry = useMemo(
+    () =>
+      avatarDetailsMaskFaceGeometry(
+        faceGeometryEyeScale,
+        faceGeometryEyeOffsetX,
+        faceGeometryEyeOffsetY,
+        faceGeometryMouthScale,
+        faceGeometryMouthOffsetX,
+        faceGeometryMouthOffsetY,
+        faceGeometryMouthRotationDeg,
+      ),
+    [
+      faceGeometryEyeScale,
+      faceGeometryEyeOffsetX,
+      faceGeometryEyeOffsetY,
+      faceGeometryMouthScale,
+      faceGeometryMouthOffsetX,
+      faceGeometryMouthOffsetY,
+      faceGeometryMouthRotationDeg,
+    ],
   );
   const normalizedColor = useMemo(
     () => normalizeAvatarDetailsColor(color),
@@ -393,26 +450,29 @@ export function AvatarDetailsMask({
       : null;
   const visiblePixels = useMemo(
     () =>
-      rasterizeVisibleAvatarDetailsRgba(
-        normalizedDetails,
-        normalizedColor,
-        faceGeometry,
-        {
-          blinking: blinkPhase === "closed",
-          talking,
-          // Animated Speech ink renders in its own emission plane. An
-          // explicit surface override can also keep the authored idle-rest
-          // layer hidden until a performance has fully completed.
-          speechInkVisible: speechMotion ? false : speechInkVisible,
-        },
-        depth,
-      ),
+      hasVisuals
+        ? rasterizeVisibleAvatarDetailsRgba(
+            normalizedDetails,
+            normalizedColor,
+            normalizedFaceGeometry,
+            {
+              blinking: blinkPhase === "closed",
+              talking,
+              // Animated Speech ink renders in its own emission plane. An
+              // explicit surface override can also keep the authored idle-rest
+              // layer hidden until a performance has fully completed.
+              speechInkVisible: speechMotion ? false : speechInkVisible,
+            },
+            depth,
+          )
+        : EMPTY_AVATAR_DETAILS_RGBA,
     [
       blinkPhase,
       depth,
-      faceGeometry,
+      hasVisuals,
       normalizedColor,
       normalizedDetails,
+      normalizedFaceGeometry,
       speechInkVisible,
       speechMotion,
       talking,
@@ -420,39 +480,41 @@ export function AvatarDetailsMask({
   );
   const speechPixels = useMemo(
     () =>
-      speechMotion
+      hasVisuals && speechMotion
         ? rasterizeAvatarDetailsRgba(
             normalizedDetails,
             normalizedColor,
-            faceGeometry,
+            normalizedFaceGeometry,
             "talking",
             depth,
           )
         : null,
     [
       depth,
-      faceGeometry,
+      hasVisuals,
       normalizedColor,
       normalizedDetails,
+      normalizedFaceGeometry,
       speechMotion,
     ],
   );
   const speechMotionOrigin = useMemo(() => {
-    if (!speechMotion) return null;
+    if (!hasVisuals || !speechMotion) return null;
     // Use the complete authored Speech item for both depth slices so ink that
     // crosses the mouth seam cannot tear into two independently moving parts.
     const completeSpeechPixels = rasterizeAvatarDetailsRgba(
       normalizedDetails,
       normalizedColor,
-      faceGeometry,
+      normalizedFaceGeometry,
       "talking",
       "all",
     );
     return avatarDetailsSpeechMotionOrigin(completeSpeechPixels);
   }, [
-    faceGeometry,
+    hasVisuals,
     normalizedColor,
     normalizedDetails,
+    normalizedFaceGeometry,
     speechMotion,
   ]);
   if (!hasVisuals) return null;
