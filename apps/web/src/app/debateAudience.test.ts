@@ -11,7 +11,6 @@ import {
   debateAudienceDepartureXPercent,
   debateAudienceFrontRowCenterIndex,
   debateFlytingHallNpcBots,
-  debateFlytingAudienceMillingPlan,
   debateAudienceRandom,
   debateAudienceSeatLayout,
   debateAudienceSeatIsTalker,
@@ -211,53 +210,7 @@ describe("Debate audience casting", () => {
     );
   });
 
-  it("gives Flyting spectators stable, varied motion within their crowd row", () => {
-    const frontPlans = Array.from({ length: 18 }, (_, index) =>
-      debateFlytingAudienceMillingPlan(`hall:seat-${index}`, "front"),
-    );
-    const rearPlans = Array.from({ length: 18 }, (_, index) =>
-      debateFlytingAudienceMillingPlan(`hall:seat-${index}`, "rear"),
-    );
-
-    assert.deepEqual(
-      frontPlans,
-      Array.from({ length: 18 }, (_, index) =>
-        debateFlytingAudienceMillingPlan(`hall:seat-${index}`, "front"),
-      ),
-    );
-    assert.ok(new Set(frontPlans.map((plan) => plan.offsetXPercent)).size > 8);
-    assert.ok(frontPlans.every((plan) => Math.abs(plan.offsetXPercent) <= 13));
+  it("preserves the authored Flyting roam default", () => {
     assert.equal(DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT, 60);
-    assert.ok(frontPlans.every((plan) => Math.abs(plan.offsetYPercent) <= 24));
-    assert.ok(frontPlans.every((plan) => Math.abs(plan.driftXPercent) <= 10));
-    assert.ok(frontPlans.every((plan) => Math.abs(plan.driftYPercent) <= 36));
-    assert.ok(
-      frontPlans.every(
-        (plan) =>
-          Math.abs(plan.offsetYPercent) + Math.abs(plan.driftYPercent) <=
-          DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT,
-      ),
-    );
-    assert.ok(
-      frontPlans.some(
-        (plan) =>
-          Math.abs(plan.offsetYPercent) + Math.abs(plan.driftYPercent) > 30,
-      ),
-    );
-    assert.ok(
-      frontPlans.every(
-        (plan) => plan.durationMs >= 4_200 && plan.durationMs <= 6_900,
-      ),
-    );
-    assert.ok(
-      frontPlans.every(
-        (plan) => plan.depthScale >= 0.92 && plan.depthScale <= 1.04,
-      ),
-    );
-    assert.ok(
-      rearPlans.every(
-        (plan) => plan.depthScale >= 0.78 && plan.depthScale <= 0.91,
-      ),
-    );
   });
 });

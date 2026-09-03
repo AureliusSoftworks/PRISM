@@ -579,6 +579,7 @@ import {
   updateDebateStageGavelPose,
   updateDebateStageLightBlendMode,
   updateDebateStageLightMaskOpacity,
+  updateDebateStageModeratorEvidenceTable,
   updateDebateStageModeratorMicroScale,
   updateDebateStageJuryMemberPlacement,
   updateDebateStageJuryPlacement,
@@ -772,7 +773,7 @@ import {
   DebateFlytingLive,
   DebateFlytingSetup,
 } from "./DebateFlyting";
-import { formatDebateMysteryV2PublicReview } from "./debateMysteryV2Review";
+import { formatDebateMysteryV2PublicReview, type WhodunnitDiagnosticActionSummary } from "./debateMysteryV2Review";
 import { debateMysteryCourtEvidenceAssetUrls } from "./debateMysteryAssetLifecycle";
 import {
   debateIdentityAppearanceBotV1,
@@ -814,6 +815,7 @@ export interface DebateUtterance {
   voiceLevel?: number;
   /** Independent channel so an Objection can overlap a cut-off advocate. */
   voiceChannel?: "primary" | "crosstalk";
+  roomAcoustics?: RoomAcousticsSend;
   lifecycle?: {
     onStart?: (
       durationMs: number | null,
@@ -914,6 +916,7 @@ function clearEncryptedDebateRecoveryMarker(ownerId: string): void {
 }
 
 export interface DebateExperienceProps {
+  playMysteryPremiumVoice?: (args: import("./debateMysteryPremiumVoice").WhodunnitPremiumVoiceRequest) => Promise<boolean>;
   bots: DebateBotSummary[];
   botGroups?: readonly BotPickerGroup[];
   initialBotIds?: string[];
@@ -1004,8 +1007,9 @@ export interface DebateExperienceProps {
   ) => void;
   /** Publishes the newest server-observed Auto completion to applet chrome. */
   onActualAutoRouteChange?: (route: ActualAppletRoute | null) => void;
-  /** Publishes the session-frozen picker selection to the shared navbar. */
+  /** Publishes provenance and whether this session permits live routing changes. */
   onLiveModelSelectionChange?: (selection: {
+    liveWhodunnit: boolean;
     responseMode: "local" | "online";
     provider: ActualAppletRoute["provider"];
     modelChoice: string;
@@ -3882,15 +3886,16 @@ export function formatDebateVerboseTranscript(
   session: DebateSessionV1,
   playerName = "You",
   presenceBeats: readonly BotPresenceBeatV1[] = [],
+  mysteryActions: readonly WhodunnitDiagnosticActionSummary[] = [],
 ): string {
-  const mysteryV2PublicReview =
-    session.formatState.format === "whodunnit" &&
-    session.formatState.version === 2
-      ? formatDebateMysteryV2PublicReview(
-          session.formatState,
-          (botId) => debateBotSnapshot(session, botId)?.name ?? null,
-        )
-      : null;
+  if (session.formatState.format === "whodunnit" && session.formatState.version === 2) {
+    return formatDebateMysteryV2PublicReview(
+      session.formatState,
+      (botId) => debateBotSnapshot(session, botId)?.name ?? null,
+      session,
+      mysteryActions,
+    );
+  }
   const participation = debateParticipationState(session);
   const participantSession = session.playerRole === "participant";
   const participantPredispositions = session.voterPredispositions ?? [];
@@ -4106,7 +4111,6 @@ export function formatDebateVerboseTranscript(
           "",
         ];
       }),
-    ...(mysteryV2PublicReview ? [mysteryV2PublicReview, ""] : []),
     ...formatDebateFlytingVerboseReview(session),
     ...(session.formatState.format === "forum"
       ? [
@@ -8122,6 +8126,8 @@ export function DebateExperience(
     props.onLiveModelSelectionChange?.(
       liveSessionActive && activeSession
         ? {
+            liveWhodunnit: activeSession.formatState.format === "whodunnit" &&
+              !(activeSession.formatState.version === 2 && activeSession.formatState.playPhase === "case_forge"),
             responseMode:
               activeSession.responseMode === "local" ? "local" : "online",
             provider: activeSession.provider,
@@ -8582,7 +8588,7 @@ export function DebateExperience(
 
   const verboseTranscriptForSession = useCallback(
     async (session: DebateSessionV1): Promise<string> => {
-      const [presenceBeats, sessionMetadata, focusEvents] = await Promise.all([
+      const [presenceBeats, sessionMetadata, focusEvents, mysteryActions] = await Promise.all([
         request<{ beats: BotPresenceBeatV1[] }>(
           `/api/presence-beats?surface=debate&sessionId=${encodeURIComponent(session.id)}`,
         )
@@ -8596,10 +8602,14 @@ export function DebateExperience(
         )
           .catch(() => ({ ok: true as const, note: null, frameSamples: [] })),
         loadLiveSessionFocusEvents("debate", session.id).catch(() => []),
+        session.formatState.format === "whodunnit" && session.formatState.version === 2
+          ? request<{ actions: WhodunnitDiagnosticActionSummary[] }>(`/api/debates/${encodeURIComponent(session.id)}/mystery-actions`)
+              .then((response) => response.actions).catch(() => [])
+          : Promise.resolve([]),
       ]);
       return annotateAppletTranscriptFrameRates(
         annotateTranscriptWithFocusEvents(appendAppletSessionNoteToTranscript(
-          formatDebateVerboseTranscript(session, playerName, presenceBeats),
+          formatDebateVerboseTranscript(session, playerName, presenceBeats, mysteryActions),
           sessionMetadata.note,
         ), focusEvents),
         sessionMetadata.frameSamples,
@@ -14126,6 +14136,7 @@ export function DebateExperience(
       showFirstSpeaker = false,
       requireFirstReady = false,
     ): Promise<string | null> => {
+      if (session.format === "whodunnit" && session.formatState.version === 2) return null;
       if (!onPrepareUtterance) return null;
       const utterances = events.flatMap((event) => {
         const utterance = debateUtteranceForEvent(session, event);
@@ -20404,7 +20415,7 @@ export function DebateExperience(
           </div>
           <p>{mysteryInspiration.trim() || "A case PRISM will author around the frozen ensemble."}</p>
           <small className={styles.formatReadout}>{mysteryTargetSuspects} suspects · {formalityDescriptor.title} · {mysteryDifficulty} · {juryEnabled ? "Jury Trial" : "Bench Trial"}</small>
-          <small className={styles.formatReadout}>Local English performance · Premium unavailable for Whodunnit V2</small>
+          <small className={styles.formatReadout}>Local voices in Case Forge · Premium available during ONLINE play</small>
         </section>
       );
     }
@@ -26488,6 +26499,7 @@ export function DebateExperience(
         aria-busy={silentDeliberationPreparing}
         data-theme={props.theme}
         data-tutorial-target="debate-jury-chamber"
+        style={debateStageAlignmentStyle(stageAlignment)}
       >
         <div className={styles.juryChamberAura} aria-hidden="true" />
         <div className={styles.juryChamberBots}>
@@ -27125,9 +27137,14 @@ export function DebateExperience(
             ),
         }),
       ),
-      ...(["evidenceTable", "votes"] as const).map((item) => ({
+      ...(["evidenceTable", "tableVotes", "votes"] as const).map((item) => ({
         key: item,
-        label: item === "evidenceTable" ? "Evidence table" : "Vote display",
+        label:
+          item === "evidenceTable"
+            ? "Evidence table"
+            : item === "tableVotes"
+              ? "Table votes"
+              : "Vote display",
         placement: stageAlignmentDraft.juryChamber[item],
         defaultPlacement: DEFAULT_DEBATE_STAGE_ALIGNMENT.juryChamber[item],
         update: (
@@ -27708,6 +27725,25 @@ export function DebateExperience(
                           src={`/coffee-table/table_${stageAlignmentPreviewTheme}.png`}
                           alt="Evidence table"
                         />
+                        <div
+                          className={styles.juryBallotPile}
+                          data-alignment-preview="true"
+                          role="img"
+                          aria-label={`${alignmentJuryMemberCount} settled sample ballots on the table`}
+                        >
+                          {alignmentJuryVotes.map((side, index) => (
+                            <span
+                              className={styles.juryBallotSlip}
+                              data-side={side}
+                              data-seat={index}
+                              data-ballot={index}
+                              key={`alignment-jury-ballot:${index}`}
+                              aria-hidden="true"
+                            >
+                              <i>{side === "for" ? "F" : "A"}</i>
+                            </span>
+                          ))}
+                        </div>
                         <div className={styles.jurySeal} aria-hidden="true">
                           <span>◇</span>
                           <strong>Jury Chamber</strong>
@@ -28148,7 +28184,7 @@ export function DebateExperience(
                     <header>
                       <div>
                         <span className={styles.eyebrow}>Jury camera</span>
-                        <strong>Members, evidence table, and votes</strong>
+                        <strong>Members, table, ballots, and tally</strong>
                         <small>
                           Each juror has an independent X, Y, and scale.
                         </small>
@@ -29181,11 +29217,18 @@ export function DebateExperience(
                         }
                         onClick={() =>
                           setStageAlignmentDraft((current) =>
-                            updateDebateStageWhodunnitCourtPlacement(
-                              current,
-                              activeMainCourtItem,
-                              defaultActiveMainCourtPlacement,
-                            ),
+                            stageAlignmentPreviewCamera === "moderator" &&
+                            stageAlignmentMainCourtProp === "wideEvidenceTable"
+                              ? updateDebateStageModeratorEvidenceTable(
+                                  current,
+                                  DEFAULT_DEBATE_STAGE_ALIGNMENT.whodunnitCourt
+                                    .moderatorEvidenceTable,
+                                )
+                              : updateDebateStageWhodunnitCourtPlacement(
+                                  current,
+                                  activeMainCourtItem,
+                                  defaultActiveMainCourtPlacement,
+                                ),
                           )
                         }
                       >
@@ -29280,8 +29323,7 @@ export function DebateExperience(
                     </div>
                     <small>
                       Main and Moderator save separate table positions and
-                      scales. The witness silhouette stays shared across
-                      cameras.
+                      scales. The witness silhouette stays shared across cameras.
                     </small>
                   </section>
                 ) : null}
@@ -33305,6 +33347,7 @@ export function DebateExperience(
         }}
       /> : <DebateMysteryV2Play
         {...mysterySharedProps}
+        playMysteryPremiumVoice={props.playMysteryPremiumVoice}
         exteriorIntroStarted={mysteryExteriorIntroStartedSessionId === activeSession.id}
         stageAlignmentStyle={debateStageAlignmentStyle(stageAlignment)}
         session={activeSession}

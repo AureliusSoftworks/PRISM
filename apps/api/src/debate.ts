@@ -1,5 +1,6 @@
 import { createHash, randomInt, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { projectMysteryMeaningfulInvestigationTargetsV2 } from "./debate-mystery-investigation-targets.ts";
 import { assertRefractionActive, refractionSignal } from "./refraction-cancellation.ts";
 import { composeBotRuntimePersona } from "./bot-global-mood.ts";
 import { endDebatePerfSpan, startDebatePerfSpan } from "./debatePerfTiming.ts";
@@ -4083,7 +4084,20 @@ export function getDebateSession(
 ): DebateSessionV1 {
   const row = sessionRow(db, userId, sessionId);
   if (!row) throw new HttpError(404, "Debate not found.");
-  return parseSessionRow(db, userId, row);
+  const session = parseSessionRow(db, userId, row);
+  if (session.formatState.format === "whodunnit" && session.formatState.version === 2) {
+    const compiled = db.prepare(
+      "SELECT private_case_json, dialogue_graph_json FROM debate_mystery_v2_cases WHERE session_id = ? AND user_id = ?",
+    ).get(sessionId, userId) as { private_case_json: string; dialogue_graph_json: string } | undefined;
+    if (compiled) {
+      session.formatState = projectMysteryMeaningfulInvestigationTargetsV2({
+        state: session.formatState,
+        graph: JSON.parse(compiled.dialogue_graph_json),
+        privateCase: JSON.parse(compiled.private_case_json),
+      });
+    }
+  }
+  return session;
 }
 
 export function debateSessionForPlayer(

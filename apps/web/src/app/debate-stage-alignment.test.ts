@@ -32,6 +32,7 @@ import {
   updateDebateStageGavelPose,
   updateDebateStageLightBlendMode,
   updateDebateStageLightMaskOpacity,
+  updateDebateStageModeratorEvidenceTable,
   updateDebateStageModeratorMicroScale,
   updateDebateStageJuryMemberPlacement,
   updateDebateStageJuryPlacement,
@@ -95,9 +96,8 @@ describe("Debate stage alignment", () => {
       "wideEvidenceTable",
       { x: -13.5, y: 7, scale: 125 },
     );
-    const moderator = updateDebateStageWhodunnitCourtPlacement(
+    const moderator = updateDebateStageModeratorEvidenceTable(
       main,
-      debateStageCourtPropForCamera("wideEvidenceTable", "moderator"),
       { x: 12, y: -16, scale: 80 },
     );
     assert.deepEqual(
@@ -113,9 +113,8 @@ describe("Debate stage alignment", () => {
       moderator.whodunnitCourt.wideWitnessSilhouette,
       main.whodunnitCourt.wideWitnessSilhouette,
     );
-    const reset = updateDebateStageWhodunnitCourtPlacement(
+    const reset = updateDebateStageModeratorEvidenceTable(
       moderator,
-      "moderatorEvidenceTable",
       DEFAULT_DEBATE_STAGE_ALIGNMENT.whodunnitCourt.moderatorEvidenceTable,
     );
     assert.deepEqual(reset, main);
@@ -134,7 +133,7 @@ describe("Debate stage alignment", () => {
     const normalized = normalizeDebateStageAlignment({
       whodunnitCourt: {
         wideEvidenceTable: { x: -8, y: 6, scale: 120 },
-        moderatorEvidenceTable: { x: 15, y: -10, scale: 85 },
+        moderatorEvidenceTable: { x: 15, y: -10, scale: 85, blurRadius: 2.25 },
       },
     });
     const values = new Map<string, string>();
@@ -159,6 +158,39 @@ describe("Debate stage alignment", () => {
     assert.equal(style["--debate-moderator-table-offset-x"], "15%");
     assert.equal(style["--debate-moderator-table-offset-y"], "-10%");
     assert.equal(style["--debate-moderator-table-scale"], "0.85");
+    assert.equal(style["--debate-moderator-table-blur-radius"], undefined);
+  });
+
+  it("discards retired Moderator table blur and preserves legacy V14 table poses", () => {
+    const legacy = normalizeDebateStageAlignment({
+      version: 14,
+      whodunnitCourt: {
+        wideEvidenceTable: { x: -8, y: 6, scale: 120 },
+        moderatorEvidenceTable: { x: 15, y: -10, scale: 85 },
+      },
+    });
+    assert.deepEqual(legacy.whodunnitCourt.moderatorEvidenceTable, {
+      x: 15, y: -10, scale: 85,
+    });
+    for (const blurRadius of [
+      2.25,
+      -1,
+      99,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+    ] as const) {
+      const normalized = normalizeDebateStageAlignment({
+        ...legacy,
+        whodunnitCourt: {
+          ...legacy.whodunnitCourt,
+          moderatorEvidenceTable: {
+            ...legacy.whodunnitCourt.moderatorEvidenceTable,
+            blurRadius,
+          },
+        },
+      });
+      assert.deepEqual(normalized, legacy);
+    }
   });
 
   it("exports complete normalized V14 Main defaults as source-ready TypeScript", () => {
@@ -214,10 +246,15 @@ describe("Debate stage alignment", () => {
     );
     const adjusted = updateDebateStageJuryPlacement(
       jurorAdjusted,
+      "tableVotes",
+      { x: -12, y: 9.5, scale: 118 },
+    );
+    const tallyAdjusted = updateDebateStageJuryPlacement(
+      adjusted,
       "votes",
       { x: 4, y: 8, scale: 90 },
     );
-    const style = debateStageAlignmentStyle(adjusted) as Record<string, string>;
+    const style = debateStageAlignmentStyle(tallyAdjusted) as Record<string, string>;
 
     assert.deepEqual(adjusted.whodunnitCourt.prosecutionMini, {
       x: -18,
@@ -234,12 +271,17 @@ describe("Debate stage alignment", () => {
       y: -4,
       scale: 108,
     });
-    assert.deepEqual(adjusted.juryChamber.members[3], {
+    assert.deepEqual(tallyAdjusted.juryChamber.members[3], {
       x: 12.5,
       y: -6,
       scale: 115,
     });
-    assert.deepEqual(adjusted.juryChamber.votes, {
+    assert.deepEqual(tallyAdjusted.juryChamber.tableVotes, {
+      x: -12,
+      y: 9.5,
+      scale: 118,
+    });
+    assert.deepEqual(tallyAdjusted.juryChamber.votes, {
       x: 4,
       y: 8,
       scale: 90,
@@ -253,6 +295,9 @@ describe("Debate stage alignment", () => {
     );
     assert.equal(style["--debate-jury-member-3-offset-y"], "-6%");
     assert.equal(style["--debate-jury-member-3-scale"], "1.15");
+    assert.equal(style["--debate-jury-table-votes-offset-x"], "-12%");
+    assert.equal(style["--debate-jury-table-votes-offset-y"], "9.5%");
+    assert.equal(style["--debate-jury-table-votes-scale"], "1.18");
     assert.equal(style["--debate-jury-votes-offset-x"], "4%");
     assert.equal(style["--debate-jury-votes-scale"], "0.9");
   });
@@ -262,6 +307,65 @@ describe("Debate stage alignment", () => {
       assert.equal(debateStageEvidenceViewForCamera(camera), camera);
     }
     assert.equal(debateStageEvidenceViewForCamera("jury"), "wide");
+  });
+
+  it("adds table ballots to legacy V14 Jury layouts without moving saved jurors, table, or tally", () => {
+    const legacy = normalizeDebateStageAlignment({
+      version: 14,
+      juryChamber: {
+        members: [{ x: 8, y: -4, scale: 112 }],
+        evidenceTable: { x: -11, y: 7, scale: 91 },
+        votes: { x: 13, y: -9, scale: 106 },
+      },
+    });
+    assert.deepEqual(legacy.juryChamber.members[0], {
+      x: 8,
+      y: -4,
+      scale: 112,
+    });
+    assert.deepEqual(legacy.juryChamber.evidenceTable, {
+      x: -11,
+      y: 7,
+      scale: 91,
+    });
+    assert.deepEqual(legacy.juryChamber.votes, {
+      x: 13,
+      y: -9,
+      scale: 106,
+    });
+    assert.deepEqual(legacy.juryChamber.tableVotes, { x: 0, y: 0, scale: 100 });
+
+    const bounded = updateDebateStageJuryPlacement(legacy, "tableVotes", {
+      x: Number.POSITIVE_INFINITY,
+      y: -999,
+      scale: 999,
+    });
+    assert.deepEqual(bounded.juryChamber.tableVotes, { x: 0, y: -100, scale: 220 });
+    assert.deepEqual(bounded.juryChamber.evidenceTable, legacy.juryChamber.evidenceTable);
+    assert.deepEqual(bounded.juryChamber.votes, legacy.juryChamber.votes);
+    assert.deepEqual(bounded.juryChamber.members, legacy.juryChamber.members);
+
+    const stored = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => stored.set(key, value),
+    };
+    writeDebateStageAlignment(storage, "jury-table-votes", bounded);
+    const restored = readDebateStageAlignment(storage, "jury-table-votes");
+    assert.deepEqual(restored.juryChamber.tableVotes, bounded.juryChamber.tableVotes);
+    const exported = JSON.parse(
+      formatDebateStageAlignmentClipboard(restored).slice(
+        formatDebateStageAlignmentClipboard(restored).indexOf("\n") + 1,
+        -1,
+      ),
+    );
+    assert.deepEqual(exported.juryChamber.tableVotes, bounded.juryChamber.tableVotes);
+    const reset = updateDebateStageJuryPlacement(
+      restored,
+      "tableVotes",
+      DEFAULT_DEBATE_STAGE_ALIGNMENT.juryChamber.tableVotes,
+    );
+    assert.deepEqual(reset, legacy);
   });
 
   it("gives both gavel pose axes a generous six-hundred-percent span", () => {
@@ -348,6 +452,7 @@ describe("Debate stage alignment", () => {
           scale: 100,
         })),
         evidenceTable: { x: 0, y: 0, scale: 100 },
+        tableVotes: { x: 0, y: 0, scale: 100 },
         votes: { x: 0, y: 0, scale: 100 },
       },
     };

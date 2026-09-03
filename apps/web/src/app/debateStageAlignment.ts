@@ -213,10 +213,16 @@ export interface DebateStageWhodunnitPlacementV1 extends DebateStageOffsetV1 {
 }
 
 /** Whodunnit Court cameras share the account's durable Stage Alignment preset. */
-export type DebateStageWhodunnitCourtV1 = Record<
-  DebateStageWhodunnitCourtItem,
-  DebateStageWhodunnitPlacementV1
->;
+export interface DebateStageWhodunnitCourtV1 {
+  wideEvidenceTable: DebateStageWhodunnitPlacementV1;
+  moderatorEvidenceTable: DebateStageWhodunnitPlacementV1;
+  wideWitnessSilhouette: DebateStageWhodunnitPlacementV1;
+  witness: DebateStageWhodunnitPlacementV1;
+  prosecutionMini: DebateStageWhodunnitPlacementV1;
+  defenseMini: DebateStageWhodunnitPlacementV1;
+  witnessNameplate: DebateStageWhodunnitPlacementV1;
+  witnessGlyph: DebateStageWhodunnitPlacementV1;
+}
 
 export type DebateStageJuryMemberIndex = 0 | 1 | 2 | 3 | 4;
 
@@ -229,6 +235,8 @@ export interface DebateStageJuryChamberV1 {
     DebateStageWhodunnitPlacementV1,
   ];
   evidenceTable: DebateStageWhodunnitPlacementV1;
+  /** Physical cast-ballot pile on the Jury table; separate from the tally display. */
+  tableVotes: DebateStageWhodunnitPlacementV1;
   votes: DebateStageWhodunnitPlacementV1;
 }
 
@@ -410,6 +418,7 @@ export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV14 = {
       { x: 0, y: 0, scale: 100 },
     ],
     evidenceTable: { x: 0, y: 0, scale: 100 },
+    tableVotes: { x: 0, y: 0, scale: 100 },
     votes: { x: 0, y: 0, scale: 100 },
   },
 };
@@ -686,6 +695,10 @@ function normalizeJuryChamber(value: unknown): DebateStageJuryChamberV1 {
     evidenceTable: normalizeWhodunnitPlacement(
       candidate.evidenceTable,
       fallback.evidenceTable,
+    ),
+    tableVotes: normalizeWhodunnitPlacement(
+      candidate.tableVotes,
+      fallback.tableVotes,
     ),
     votes: normalizeWhodunnitPlacement(candidate.votes, fallback.votes),
   };
@@ -1172,6 +1185,24 @@ export function updateDebateStageWhodunnitCourtPlacement(
   });
 }
 
+/** Updates the Moderator camera's physical foreground table position and scale. */
+export function updateDebateStageModeratorEvidenceTable(
+  alignment: DebateStageAlignmentV6,
+  update: Partial<DebateStageWhodunnitPlacementV1>,
+): DebateStageAlignmentV6 {
+  const normalized = normalizeDebateStageAlignment(alignment);
+  return normalizeDebateStageAlignment({
+    ...normalized,
+    whodunnitCourt: {
+      ...normalized.whodunnitCourt,
+      moderatorEvidenceTable: {
+        ...normalized.whodunnitCourt.moderatorEvidenceTable,
+        ...update,
+      },
+    },
+  });
+}
+
 export function updateDebateStageJuryMemberPlacement(
   alignment: DebateStageAlignmentV6,
   memberIndex: DebateStageJuryMemberIndex,
@@ -1194,7 +1225,7 @@ export function updateDebateStageJuryMemberPlacement(
 
 export function updateDebateStageJuryPlacement(
   alignment: DebateStageAlignmentV6,
-  item: "evidenceTable" | "votes",
+  item: "evidenceTable" | "tableVotes" | "votes",
   update: Partial<DebateStageWhodunnitPlacementV1>,
 ): DebateStageAlignmentV6 {
   const normalized = normalizeDebateStageAlignment(alignment);
@@ -1530,6 +1561,9 @@ export function debateStageAlignmentStyle(
     "--debate-jury-evidence-table-offset-x": `${normalized.juryChamber.evidenceTable.x}%`,
     "--debate-jury-evidence-table-offset-y": `${normalized.juryChamber.evidenceTable.y}%`,
     "--debate-jury-evidence-table-scale": `${normalized.juryChamber.evidenceTable.scale / 100}`,
+    "--debate-jury-table-votes-offset-x": `${normalized.juryChamber.tableVotes.x}%`,
+    "--debate-jury-table-votes-offset-y": `${normalized.juryChamber.tableVotes.y}%`,
+    "--debate-jury-table-votes-scale": `${normalized.juryChamber.tableVotes.scale / 100}`,
     "--debate-jury-votes-offset-x": `${normalized.juryChamber.votes.x}%`,
     "--debate-jury-votes-offset-y": `${normalized.juryChamber.votes.y}%`,
     "--debate-jury-votes-scale": `${normalized.juryChamber.votes.scale / 100}`,

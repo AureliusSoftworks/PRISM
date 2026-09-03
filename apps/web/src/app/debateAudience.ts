@@ -89,50 +89,9 @@ export function debateAudienceDepartureXPercent(seed: string): number {
   return direction * distance;
 }
 
-export interface DebateFlytingAudienceMillingPlan {
-  offsetXPercent: number;
-  offsetYPercent: number;
-  driftXPercent: number;
-  driftYPercent: number;
-  durationMs: number;
-  delayMs: number;
-  depthScale: number;
-  layer: number;
-}
-
 export const DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT: number =
   DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS.galleryMaxVerticalRoam;
 export const DEBATE_FLYTING_GALLERY_AUTHORING_MAX_VERTICAL_ROAM_PERCENT = 60;
-
-/**
- * Stable, low-cost crowd motion for the Mead Hall. Each body keeps its place
- * across renders while gently milling inside its current allegiance cluster.
- */
-export function debateFlytingAudienceMillingPlan(
-  seed: string,
-  depthRow: DebateAudienceDepthRow,
-): DebateFlytingAudienceMillingPlan {
-  const random = debateAudienceRandom(`${seed}:flyting-milling-v1`);
-  const signed = (magnitude: number): number =>
-    Math.round((random() * 2 - 1) * magnitude * 10) / 10;
-  const depthMinimum = depthRow === "rear" ? 0.78 : 0.92;
-  const depthRange = depthRow === "rear" ? 0.13 : 0.12;
-
-  return {
-    offsetXPercent: signed(13),
-    offsetYPercent: signed(
-      DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT * 0.4,
-    ),
-    driftXPercent: signed(10),
-    driftYPercent: signed(
-      DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT * 0.6,
-    ),
-    durationMs: 4_200 + Math.round(random() * 2_700),
-    delayMs: -Math.round(random() * 6_900),
-    depthScale: Math.round((depthMinimum + random() * depthRange) * 100) / 100,
-    layer: 1 + Math.floor(random() * 4),
-  };
-}
 
 export function debateAudienceBotCount(
   graphicsQuality: GraphicsQuality,

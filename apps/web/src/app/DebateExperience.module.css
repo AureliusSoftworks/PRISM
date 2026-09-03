@@ -10135,12 +10135,19 @@
 
 .juryBallotPile {
   position: absolute;
-  top: 88%;
-  left: 50%;
+  top: calc(88% + var(--debate-jury-table-votes-offset-y, 0%));
+  left: calc(50% + var(--debate-jury-table-votes-offset-x, 0%));
   z-index: 5;
   width: 1px;
   height: 1px;
+  transform: scale(var(--debate-jury-table-votes-scale, 1));
+  transform-origin: center;
   pointer-events: none;
+}
+
+/* The layout instrument shows the final pile without replaying its cast. */
+.juryBallotPile[data-alignment-preview="true"] .juryBallotSlip {
+  animation: none;
 }
 
 .juryBallotSlip {

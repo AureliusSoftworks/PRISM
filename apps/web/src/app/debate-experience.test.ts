@@ -264,12 +264,13 @@ it("opens executable Flyting beside the available Debate formats", () => {
   assert.match(flytingSource, /studioStyles\.forumCamera/u);
   assert.match(flytingSource, /studioStyles\.botPosition/u);
   assert.match(flytingSource, /studioStyles\.debateAudienceRow/u);
-  assert.match(flytingSource, /studioStyles\.debateAudienceLayer/u);
+  assert.match(flytingSource, /<FlytingGalleryMotion/u);
+  assert.doesNotMatch(flytingSource, /studioStyles\.debateAudienceLayer/u);
   assert.match(flytingSource, /studioStyles\.debateAudienceBotPortrait/u);
   assert.match(flytingSource, /studioStyles\.debateAudienceStatus/u);
-  assert.match(flytingSource, /debateAudienceSeatLayout/u);
+  assert.match(flytingSource, /members=\{hallAudienceSeats\}/u);
   assert.match(flytingSource, /debateAudienceConversationFacing/u);
-  assert.match(flytingSource, /debateFlytingAudienceMillingPlan/u);
+  assert.match(flytingSource, /data-flyting-gallery-seat=\{seat.id\}/u);
   assert.match(
     flytingSource,
     /DEBATE_FLYTING_AUDIENCE_COUNT \+ DEBATE_FLYTING_JARL_GUARD_COUNT/u,
@@ -322,14 +323,8 @@ it("opens executable Flyting beside the available Debate formats", () => {
     flytingCss,
     /\.moderatorVikingHelmet\s*\{[^}]*viking-participant-helmet-base\.png[^}]*\}/u,
   );
-  assert.match(
-    flytingCss,
-    /data-camera-view="wide"[\s\S]{0,220}--debate-moderator-face-only-offset-y:\s*clamp\(12px, 1vw, 17px\)/u,
-  );
-  assert.match(
-    flytingCss,
-    /data-camera-view="moderator"[\s\S]{0,220}--debate-moderator-face-only-offset-y:\s*clamp\(4px, 0\.42vw, 7px\)/u,
-  );
+  assert.doesNotMatch(flytingCss, /--debate-moderator-face-only-offset-y/u);
+  assert.match(flytingSource, /debateFlytingStageFacing\(role, state.floorSideId\)/u);
   assert.match(flytingCss, /image-rendering:\s*pixelated/u);
   assert.match(flytingCss, /\.hallFixtureLight/u);
   assert.match(flytingCss, /@keyframes flyting-candle-flicker/u);
@@ -342,7 +337,7 @@ it("opens executable Flyting beside the available Debate formats", () => {
   assert.match(flytingCss, /aspect-ratio:\s*2\.35 \/ 1/u);
   assert.match(
     flytingCss,
-    /\.courtIdentityPosition\[data-role="for"\],[\s\S]{0,100}\.courtIdentityPosition\[data-role="against"\][\s\S]{0,100}top:\s*calc\(90% \+ var\(--flyting-align-y, 0%\)\)/u,
+    /\.courtIdentityPosition\[data-role="for"\],[\s\S]{0,100}\.courtIdentityPosition\[data-role="against"\][\s\S]{0,100}top:\s*calc\(83\.5% \+ var\(--flyting-align-y, 0%\)\)/u,
   );
   assert.match(
     flytingCss,
@@ -351,23 +346,17 @@ it("opens executable Flyting beside the available Debate formats", () => {
   assert.match(flytingCss, /\.hostShield/u);
   assert.match(flytingCss, /\.flytingCourtGallery/u);
   assert.match(flytingCss, /\.flytingAudienceMillingSlot/u);
-  assert.match(flytingCss, /@keyframes flyting-gallery-milling/u);
+  assert.doesNotMatch(flytingCss, /@keyframes flyting-gallery-milling/u);
   assert.match(flytingSource, /className=\{styles\.hallHeraldryGlyphs\}/u);
   assert.match(flytingSource, /className=\{styles\.galleryRugGlyphs\}/u);
-  assert.match(flytingCss, /perspective\(180px\) rotateX\(61deg\)/u);
+  assert.match(flytingCss, /perspective\(340px\) rotateX\(61deg\)/u);
   assert.match(flytingCss, /\.galleryVikingHelmet/u);
   assert.match(
     flytingCss,
     /\.flytingAudiencePortrait::before,[\s\S]{0,80}\.flytingAudiencePortrait::after[\s\S]{0,60}display: none/u,
   );
-  assert.match(
-    flytingCss,
-    /\.flytingAudienceCluster\[data-flyting-leaning="for"\]/u,
-  );
-  assert.match(
-    flytingCss,
-    /\.flytingAudienceCluster\[data-flyting-leaning="against"\]/u,
-  );
+  assert.doesNotMatch(flytingCss, /\.flytingAudienceCluster/u);
+  assert.match(flytingCss, /\.flytingAudienceContainer/u);
   assert.doesNotMatch(flytingSource, /data-flyting-hall-asset="banner"/u);
   assert.doesNotMatch(flytingSource, /className=\{styles\.hallBanner/u);
   assert.doesNotMatch(flytingSource, /data-flyting-hall-asset="shield"/u);
@@ -4051,6 +4040,22 @@ describe("Debate experience", () => {
     );
   });
 
+  it("previews settled tabletop ballots with independent Jury placement controls", () => {
+    assert.match(
+      source,
+      /\["evidenceTable", "tableVotes", "votes"\] as const/u,
+    );
+    assert.match(source, /item === "tableVotes"\s*\? "Table votes"/u);
+    assert.match(source, /placement: stageAlignmentDraft\.juryChamber\[item\]/u);
+    assert.match(source, /defaultPlacement: DEFAULT_DEBATE_STAGE_ALIGNMENT\.juryChamber\[item\]/u);
+    assert.match(source, /updateDebateStageJuryPlacement\(current, item, value\)/u);
+    assert.match(
+      source,
+      /className=\{styles\.juryBallotPile\}\s*data-alignment-preview="true"[\s\S]{0,250}alignmentJuryVotes\.map/u,
+    );
+    assert.match(source, /\$\{alignmentJuryMemberCount\} settled sample ballots on the table/u);
+  });
+
   it("uses a persistent four-seat Jury camera with a moderator final ballot", () => {
     assert.match(source, /session\.jury\.jurors\.map/u);
     assert.match(
@@ -4066,6 +4071,10 @@ describe("Debate experience", () => {
     assert.match(source, /className=\{styles\.juryCenterTranscript\}/u);
     assert.match(source, /className=\{styles\.juryBallotPile\}/u);
     assert.match(source, /className=\{styles\.juryBallotSlip\}/u);
+    assert.match(
+      source,
+      /data-tutorial-target="debate-jury-chamber"\s*style=\{debateStageAlignmentStyle\(stageAlignment\)\}/u,
+    );
     assert.match(source, /className=\{styles\.juryVoteBoard\}/u);
     assert.match(source, /className=\{styles\.juryChamberIdentity\}/u);
     assert.match(source, /finalBallotsByJurorId/u);
@@ -4192,8 +4201,19 @@ describe("Debate experience", () => {
       css,
       /\.juryTableRaster\s*\{[^}]*bottom:\s*-6%[^}]*z-index:\s*3[^}]*width:\s*min\(72%,\s*880px\)/u,
     );
-    assert.match(css, /\.juryBallotPile\s*\{[^}]*top:\s*88%[^}]*z-index:\s*5/u);
+    assert.match(
+      css,
+      /\.juryBallotPile\s*\{[^}]*top:\s*calc\(88%\s*\+\s*var\(--debate-jury-table-votes-offset-y[^}]*left:\s*calc\(50%\s*\+\s*var\(--debate-jury-table-votes-offset-x[^}]*z-index:\s*5[^}]*transform:\s*scale\(var\(--debate-jury-table-votes-scale/u,
+    );
+    assert.match(
+      css,
+      /\.juryBallotPile\[data-alignment-preview="true"\]\s+\.juryBallotSlip\s*\{[^}]*animation:\s*none/u,
+    );
     assert.match(css, /@keyframes jury-ballot-cast/u);
+    assert.match(
+      css,
+      /\.juryBallotSlip\s*\{[^}]*animation:\s*jury-ballot-cast/u,
+    );
     assert.match(css, /@keyframes jury-vote-reveal/u);
     assert.match(
       css,
@@ -6067,13 +6087,15 @@ describe("Debate experience", () => {
     assert.equal(
       [...source.matchAll(/updateDebateStageWhodunnitCourtPlacement\(\s*current,\s*activeMainCourtItem,/gu)].length,
       2,
-      "both the table sliders and item reset target the active camera",
+      "the pose sliders and non-Moderator reset target the active camera",
     );
+    assert.doesNotMatch(source, /data-debate-moderator-table-blur-tuner|Moderator evidence table blur radius/u);
     const moderatorReset = source.slice(source.indexOf(': stageAlignmentPreviewCamera === "moderator"\n                            ? normalizeDebateStageAlignment'));
     const moderatorResetProps = moderatorReset.slice(0, moderatorReset.indexOf("evidenceTable:"));
     assert.match(moderatorResetProps, /moderatorEvidenceTable:/u);
     assert.doesNotMatch(moderatorResetProps, /wideEvidenceTable:/u);
     assert.match(mysteryV2Css, /:global\(\[data-camera-view="moderator"\]\) \.wideEvidenceTable\s*\{[^}]*--debate-moderator-table-offset-x[^}]*--debate-moderator-table-offset-y[^}]*--debate-moderator-table-scale/u);
+    assert.doesNotMatch(mysteryV2Css, /--debate-moderator-table-blur-radius/u);
   });
 
   it("restores direct Main stage editing without chamber presets", () => {
