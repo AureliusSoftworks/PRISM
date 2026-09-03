@@ -189,6 +189,72 @@ describe("Zen live presence CSS", () => {
     );
   });
 
+  it("routes Whodunnit HD portraits through the canonical full-avatar material boundary", () => {
+    const compactStart = pageSource.indexOf("if (staticAudiencePortrait)");
+    const fullRoleAttribute = pageSource.indexOf(
+      "data-debate-role={avatarState.role}",
+    );
+    const fullStart = pageSource.lastIndexOf("<span", fullRoleAttribute);
+    assert.ok(compactStart >= 0, "Debate compact-avatar branch is present");
+    assert.ok(fullRoleAttribute >= 0, "Debate HD avatar branch is present");
+    assert.ok(fullStart > compactStart, "Debate HD branch follows compact branch");
+
+    const compactBranch = pageSource.slice(compactStart, fullStart);
+    const fullBranch = pageSource.slice(
+      fullStart,
+      pageSource.indexOf('aria-hidden="true"', fullStart),
+    );
+
+    assert.match(compactBranch, /<ChatMiniBotAvatar/u);
+    assert.doesNotMatch(
+      compactBranch,
+      /data-avatar-full-scale-identity="canonical"/u,
+      "Mini remains its independent compact renderer.",
+    );
+    assert.match(
+      fullBranch,
+      /data-avatar-full-scale-identity="canonical"/u,
+    );
+    assert.match(
+      fullBranch,
+      /botAvatarFullScaleIdentityStyle\(\s*debateIdentityBot\.color\s*\?\?\s*debateAvatarAccentColor,\s*resolvedTheme,\s*\{\s*prismPersona:\s*playerJudgePrism,[\s\S]*?voicePreset:/u,
+      "Whodunnit HD must share Avatar Studio's screen palette and chassis alloy contract.",
+    );
+    assert.doesNotMatch(
+      fullBranch,
+      /botFrameMetalAlloyStyle\(/u,
+      "The full renderer must not bypass the shared identity material helper.",
+    );
+    assert.match(
+      ruleForNormalizedSelector(
+        '.zenLiveBotPresencePlate[data-avatar-full-scale-identity="canonical"] .zenLiveBotPresenceBody',
+      ),
+      /--zen-live-bot-body-glyph-size:\s*calc\(\s*var\(--zen-live-bot-body-frame-size\)\s*\*\s*0\.145\s*\)\s*;/u,
+      "The full-size badge must preserve Avatar Studio's proportions without a compact size cap.",
+    );
+
+    const benchStart = pageSource.indexOf("function AvatarHdBenchDebatePresence");
+    const benchSource = pageSource.slice(
+      benchStart,
+      pageSource.indexOf("function AvatarHdBenchSurface", benchStart),
+    );
+    assert.ok(benchStart >= 0, "The HD comparison bench has a Whodunnit target");
+    assert.match(benchSource, /data-avatar-hd-bench-target="whodunnit"/u);
+    assert.match(benchSource, /data-debate-avatar-quality="hd"/u);
+    assert.match(benchSource, /<ZenLiveBotMannequin/u);
+    assert.match(benchSource, /minimumRenderedSizeTier="full"/u);
+    assert.doesNotMatch(
+      benchSource,
+      /styles\.botAvatarMannequinStage|"--zen-live-bot-avatar-body-size"/u,
+      "Whodunnit QA must exercise production geometry without inheriting editor-only badge rules.",
+    );
+    assert.doesNotMatch(
+      benchSource,
+      /<ChatMiniBotAvatar/u,
+      "The comparison bench must use the real HD renderer rather than a compact stand-in.",
+    );
+  });
+
   it("keeps bot frame assets normalized to the 1000px canvas", () => {
     for (const assetName of [
       "bot-frame-base.png",

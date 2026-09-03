@@ -7,6 +7,12 @@
 
 .pad {
   width: 100%;
+  aspect-ratio: 2 / 1;
+}
+
+/* The origin guide is not a second accent pin. Keep it subordinate. */
+.pad::before {
+  opacity: 0.2;
 }
 
 .heading {
@@ -69,11 +75,7 @@
 
 .heading output {
   max-width: 62%;
-  color: color-mix(
-    in srgb,
-    var(--pronunciation-atlas-color) 64%,
-    var(--fg, #f5f7fb)
-  );
+  color: var(--fg, #f5f7fb);
   font-size: 10px;
   font-weight: 730;
   line-height: 1.3;
@@ -105,7 +107,7 @@
   display: block;
   background: color-mix(
     in srgb,
-    var(--pronunciation-atlas-color) 46%,
+    var(--fg-muted, #8e9bab) 58%,
     transparent
   );
   -webkit-mask-image: url("/voice/pronunciation-atlas-earth-equirectangular-v2.svg");
@@ -123,7 +125,7 @@
     mask-position 420ms ease,
     -webkit-mask-size 420ms ease,
     -webkit-mask-position 420ms ease;
-  opacity: 0.54;
+  opacity: 0.82;
   filter: drop-shadow(
     0 0 5px
       color-mix(in srgb, var(--pronunciation-atlas-color) 28%, transparent)
@@ -448,6 +450,20 @@
   outline-offset: 2px;
 }
 
+.strength button:hover:not(:disabled),
+.previewBar button:hover:not(:disabled),
+.listFallback summary:hover {
+  color: var(--fg);
+  border-color: var(--fg-muted);
+}
+
+.previewBar button:disabled {
+  color: var(--fg-muted);
+  background: transparent;
+  border-color: var(--line);
+  cursor: not-allowed;
+}
+
 .listFallback {
   position: relative;
   margin-left: auto;
@@ -463,10 +479,9 @@
 }
 
 .listFallback > div {
-  position: absolute;
-  right: 0;
+  position: relative;
   z-index: 8;
-  width: min(330px, 78vw);
+  min-width: 0;
   margin-top: 5px;
   padding: 10px;
   display: grid;
@@ -481,6 +496,19 @@
   background: color-mix(in srgb, var(--surface, #11161e) 94%, transparent);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.38);
   backdrop-filter: blur(16px);
+}
+
+.controls:has(.listFallback[open]) {
+  flex-wrap: wrap;
+}
+
+.listFallback[open] {
+  flex-basis: 100%;
+}
+
+.listFallback[open] summary {
+  width: fit-content;
+  margin-left: auto;
 }
 
 .listFallback label {

@@ -67,8 +67,8 @@ export const FIRST_RUN_SETUP_STEPS: readonly FirstRunSetupStep[] = [
   },
   {
     id: "ollama-cloud",
-    title: "Connect Ollama Cloud for background helpers",
-    shortTitle: "Cloud helpers",
+    title: "Connect Ollama Cloud",
+    shortTitle: "Ollama Cloud",
     optional: true,
   },
   { id: "openai", title: "Connect OpenAI", shortTitle: "OpenAI", optional: true },

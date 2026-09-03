@@ -1,8 +1,10 @@
 import { DISABLED_MODEL_CHOICE, isDisabledModelChoice } from "@localai/shared";
 
 export type Provider = "local" | "ollama_cloud" | "openai" | "anthropic";
-/** Global foreground ONLINE controls are deliberately OpenAI/Anthropic-only. */
-export type OnlineProvider = "openai" | "anthropic";
+/** Every remote provider that can appear in a manual ONLINE picker. */
+export type OnlineProvider = Exclude<Provider, "local">;
+/** Contextual Auto and recovery remain deliberately OpenAI/Anthropic-only. */
+type AutoOnlineProvider = Exclude<OnlineProvider, "ollama_cloud">;
 export type ResponseMode = "local" | "online";
 export type AutoResponseMode = ResponseMode | "auto";
 
@@ -54,10 +56,10 @@ export function blocksOnlineCapabilities(mode: AutoResponseMode): boolean {
 }
 
 export function isOnlineProvider(provider: Provider): provider is OnlineProvider {
-  return provider === "openai" || provider === "anthropic";
+  return provider !== "local";
 }
 
-export function onlineProviderFallback(provider: Provider): OnlineProvider {
+export function onlineProviderFallback(provider: Provider): AutoOnlineProvider {
   return provider === "anthropic" ? "anthropic" : "openai";
 }
 
@@ -65,7 +67,7 @@ export function fallbackOnlineModelIdsForProvider(
   provider: OnlineProvider,
   preferredOnlineModel?: string | null
 ): string[] {
-  if (!isOnlineProvider(provider)) return [];
+  if (provider === "ollama_cloud") return [];
   const ids: string[] = [];
   const preferred = normalizeProviderModeModelChoice(preferredOnlineModel);
   if (preferred !== AUTO_MODEL_CHOICE && preferred !== DISABLED_MODEL_CHOICE) {
@@ -166,7 +168,10 @@ export function inferOnlineProviderForModelChoice(
   }
 
   const firstAvailable = onlineOptions.find(
-    (model) => isOnlineProvider(model.provider) && !model.disabledReason
+    (model) =>
+      model.provider !== "ollama_cloud" &&
+      isOnlineProvider(model.provider) &&
+      !model.disabledReason
   );
   if (firstAvailable && isOnlineProvider(firstAvailable.provider)) {
     return firstAvailable.provider;
@@ -187,9 +192,10 @@ export function resolveModelChoiceForResponseMode(args: {
     };
   }
 
-  const preferredProvider = onlineProviderFallback(args.providerPreference);
-  const otherProvider: OnlineProvider =
-    preferredProvider === "openai" ? "anthropic" : "openai";
+  const preferredProvider: OnlineProvider =
+    args.providerPreference === "local"
+      ? onlineProviderFallback(args.providerPreference)
+      : args.providerPreference;
   const preferredChoice = normalizeProviderModeModelChoice(
     args.choices[preferredProvider]
   );
@@ -210,19 +216,19 @@ export function resolveModelChoiceForResponseMode(args: {
     };
   }
 
-  const otherChoice = normalizeProviderModeModelChoice(args.choices[otherProvider]);
-  if (
-    otherChoice !== AUTO_MODEL_CHOICE &&
-    otherChoice !== DISABLED_MODEL_CHOICE
-  ) {
-    return {
-      provider: inferOnlineProviderForModelChoice(
-        otherChoice,
-        args.onlineOptions,
-        otherProvider
-      ),
-      modelChoice: otherChoice,
-    };
+  for (const provider of ["ollama_cloud", "openai", "anthropic"] as const) {
+    if (provider === preferredProvider) continue;
+    const choice = normalizeProviderModeModelChoice(args.choices[provider]);
+    if (choice !== AUTO_MODEL_CHOICE && choice !== DISABLED_MODEL_CHOICE) {
+      return {
+        provider: inferOnlineProviderForModelChoice(
+          choice,
+          args.onlineOptions,
+          provider,
+        ),
+        modelChoice: choice,
+      };
+    }
   }
 
   return {
@@ -251,9 +257,7 @@ export function applyOnlineModelChoice(args: {
     provider,
     choices: {
       local: normalizeProviderModeModelChoice(args.currentChoices.local),
-      // A stale global Cloud model is never carried forward into foreground
-      // state. Cloud remains selectable only in its dedicated background lane.
-      ollama_cloud: AUTO_MODEL_CHOICE,
+      ollama_cloud: provider === "ollama_cloud" ? normalized : AUTO_MODEL_CHOICE,
       openai: provider === "openai" ? normalized : AUTO_MODEL_CHOICE,
       anthropic: provider === "anthropic" ? normalized : AUTO_MODEL_CHOICE,
     },

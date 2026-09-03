@@ -341,6 +341,13 @@ export const ABOUT_CREDIT_GROUPS: readonly AboutCreditGroup[] = [
         license: "PRISM production asset",
       },
       {
+        id: "debate-living-chamber-ident",
+        name: "Living Chamber Piano Ident",
+        description:
+          "Original PRISM felt-piano chamber miniature generated with ElevenLabs Music, curated for the pre-case opening and Whodunnit room completion, and bundled for offline playback.",
+        license: "PRISM production asset",
+      },
+      {
         id: "troll-rickroll",
         name: "Never Gonna Give You Up — Rick Astley",
         description:

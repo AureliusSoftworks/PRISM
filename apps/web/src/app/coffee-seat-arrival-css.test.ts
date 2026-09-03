@@ -898,7 +898,7 @@ describe("Coffee seat arrival CSS", () => {
       "useLayoutEffect(() =>",
     );
     const layoutEffectEnd = phosphorPixelGlyphSource.indexOf(
-      "}, [binaryAlpha, content, enabled, rasterKey]);",
+      "}, [binaryAlpha, content, enabled, faceFont, rasterKey]);",
       layoutEffectStart,
     );
 
@@ -942,11 +942,11 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(phosphorPixelGlyphSource, /font-revision-\$\{fontRevision\}/);
     assert.match(
       phosphorPixelGlyphSource,
-      /const fontProbe = phosphorCanvasFontShorthand\([\s\S]{0,120}fontFamily: primaryFontFamily/,
+      /const fontProbe = phosphorCanvasFontShorthand\(\s*computed,\s*1,\s*primaryFontFamily,/,
     );
     assert.match(
       phosphorPixelGlyphSource,
-      /document\.fonts[\s\S]{0,260}\.load\(fontProbe, content\)[\s\S]{0,220}loadedFontProbes\.add\(fontProbe\)[\s\S]{0,80}handleFontsLoaded\(\)[\s\S]{0,180}unavailableFontProbes\.add\(fontProbe\)[\s\S]{0,80}handleFontsLoaded\(\)/,
+      /requestPhosphorFontProbe\(document\.fonts, fontProbe, content\)[\s\S]*sharedFontProbe\.settled\.then[\s\S]*loadedFontProbes\.add\(fontProbe\)[\s\S]*unavailableFontProbes\.add\(fontProbe\)[\s\S]*handleFontsLoaded\(\)/,
     );
     assert.doesNotMatch(
       phosphorPixelGlyphSource,
@@ -980,7 +980,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       phosphorPixelGlyphSource,
-      /\[binaryAlpha, content, enabled, rasterKey\]/,
+      /\[binaryAlpha, content, enabled, faceFont, rasterKey\]/,
     );
     assert.match(
       coffeeSeatPlateEmojiSource,

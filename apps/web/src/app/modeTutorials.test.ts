@@ -91,7 +91,9 @@ describe("mode tutorials", () => {
     assert.match(step.body, /play the prosecution/u);
     assert.match(step.body, /four explicitly seated jurors/u);
     assert.match(step.body, /Bench Trial/u);
-    assert.match(step.body, /Premium voices are unavailable/u);
+    assert.match(step.body, /Select Premium in the global voice picker/u);
+    assert.match(step.body, /Case Forge prepares only local voices and never prewarms Premium/u);
+    assert.match(step.body, /current visible spoken line/u);
     assert.match(step.body, /LOCAL makes no outbound voice request/u);
     assert.match(step.body, /only when they enter the playthrough transcript/u);
     assert.match(step.body, /unused branches are not pre-rendered/u);
@@ -220,6 +222,7 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Only observations that produce a durable public case consequence/u);
     assert.match(step.body, /enter the Case Kit with an immediate acquisition cue/u);
     assert.match(step.body, /Ordinary spoken Investigation dialogue closes itself/u);
+    assert.match(step.body, /witness's final answer always remains/u);
     assert.match(step.body, /Written observations never auto-close/u);
     assert.match(step.body, /remain until you click, press Space, or press Return/u);
     assert.match(step.body, /Choices, evidence selection, and other prompts that need your decision also remain open/u);
@@ -937,6 +940,14 @@ describe("mode tutorials", () => {
     assert.doesNotMatch(step.body, /forces Voice to Mute|resumes automatically/u);
   });
 
+  it("distinguishes Jury tabletop vote placement from the tally display", () => {
+    const step = MODE_TUTORIALS.debate.steps.find(
+      (entry) => entry.targetSelector === '[data-tutorial-target="debate-jury-chamber"]',
+    );
+    assert.ok(step);
+    assert.match(step.body, /place and size that physical ballot pile separately from the Vote display/u);
+  });
+
   it("teaches the complete Debate contract with stable targets", () => {
     const tutorial = MODE_TUTORIALS.debate;
     assert.deepEqual(
@@ -1373,8 +1384,9 @@ describe("mode tutorials", () => {
     assert.match(copy, /moves only to a better model/u);
     assert.match(copy, /Saved fallback chains apply only/u);
     assert.match(copy, /LOCAL evaluates only local Ollama models/u);
-    assert.match(copy, /ONLINE evaluates available OpenAI and Anthropic models/u);
-    assert.match(copy, /Ollama Cloud stays in the separate ONLINE Background model picker/u);
+    assert.match(copy, /ONLINE Auto evaluates available OpenAI and Anthropic models/u);
+    assert.match(copy, /Ollama Cloud models can appear in manual ONLINE model lists/u);
+    assert.match(copy, /Cloud never enters foreground Auto or recovery/u);
     assert.match(copy, /Refresh models re-runs discovery at runtime/u);
     assert.match(copy, /ONLINE Auto provider lean slider/u);
     assert.doesNotMatch(copy, /ONLINE Auto provider triangle/u);

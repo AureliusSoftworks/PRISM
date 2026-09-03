@@ -242,7 +242,9 @@ describe("audio voice normalization", () => {
     assert.equal(normalizeWhodunnitTextVoiceMode("off"), "off");
     assert.equal(normalizeWhodunnitTextVoiceMode("babble"), "babble");
     assert.equal(normalizeWhodunnitTextVoiceMode("bottish"), "bottish");
-    assert.equal(normalizeWhodunnitTextVoiceMode("robot"), "bottish");
+    assert.equal(normalizeWhodunnitTextVoiceMode("robot"), "babble");
+    assert.equal(normalizeWhodunnitTextVoiceMode(undefined), "babble");
+    assert.equal(normalizeWhodunnitTextVoiceMode(undefined, "bottish"), "bottish");
     assert.equal(normalizeEnglishVoiceEngine("elevenlabs"), "elevenlabs");
     assert.equal(normalizeEnglishVoiceEngine("remote"), "builtin");
   });

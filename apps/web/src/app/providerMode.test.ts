@@ -61,7 +61,7 @@ describe("provider mode helpers", () => {
     assert.equal(blocksOnlineCapabilities("online"), false);
   });
 
-  it("combines OpenAI and Anthropic model lists without hiding provider identity", () => {
+  it("combines manual ONLINE model lists without hiding provider identity", () => {
     const combined = combinedOnlineModelOptions(openAiModels, anthropicModels);
     assert.deepEqual(
       combined.map((model) => `${model.provider}:${model.id}`),
@@ -74,13 +74,14 @@ describe("provider mode helpers", () => {
     );
   });
 
-  it("rejects a stale Cloud choice from the global foreground picker", () => {
+  it("keeps explicit Cloud choices in the global foreground picker while Auto skips Cloud", () => {
     const combined = combinedOnlineModelOptions(
       ollamaCloudModels,
       openAiModels,
       anthropicModels,
     );
-    assert.equal(inferOnlineProviderForModelChoice("minimax-m2.5:cloud", combined), "openai");
+    assert.equal(inferOnlineProviderForModelChoice("minimax-m2.5:cloud", combined), "ollama_cloud");
+    assert.equal(inferOnlineProviderForModelChoice("auto", combined), "openai");
     assert.equal(
       inferOnlineProviderForModelChoice("claude-sonnet-4-6", combined),
       "anthropic"
@@ -238,6 +239,40 @@ describe("provider mode helpers", () => {
           anthropic: "claude-sonnet-4-6",
         },
       }
+    );
+  });
+
+  it("persists an explicit Cloud selection without making it an Auto candidate", () => {
+    const combined = combinedOnlineModelOptions(
+      ollamaCloudModels,
+      openAiModels,
+      anthropicModels,
+    );
+    assert.deepEqual(
+      applyOnlineModelChoice({
+        currentChoices: { local: "llama3.2", openai: "gpt-4o" },
+        nextChoice: "minimax-m2.5:cloud",
+        onlineOptions: combined,
+        providerPreference: "openai",
+      }),
+      {
+        provider: "ollama_cloud",
+        choices: {
+          local: "llama3.2",
+          ollama_cloud: "minimax-m2.5:cloud",
+          openai: "auto",
+          anthropic: "auto",
+        },
+      },
+    );
+    assert.deepEqual(
+      resolveModelChoiceForResponseMode({
+        responseMode: "online",
+        providerPreference: "ollama_cloud",
+        choices: { ollama_cloud: "minimax-m2.5:cloud" },
+        onlineOptions: combined,
+      }),
+      { provider: "ollama_cloud", modelChoice: "minimax-m2.5:cloud" },
     );
   });
 

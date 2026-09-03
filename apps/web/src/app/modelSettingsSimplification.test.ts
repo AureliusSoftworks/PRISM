@@ -60,12 +60,12 @@ test("keeps Models focused on background work, recovery, and advanced visibility
   assert.doesNotMatch(page, /image panel defaults/u);
 });
 
-test("keeps Ollama Cloud out of normal ONLINE pickers", () => {
+test("shows enabled visible Ollama Cloud models in normal ONLINE pickers", () => {
   const pickerOptions = page.slice(
     page.indexOf("function onlineModelOptionsForPicker"),
     page.indexOf("function withOnlineProviderHostLabels"),
   );
-  assert.doesNotMatch(
+  assert.match(
     pickerOptions,
     /chatModelOptionsForProvider\(catalog, settings, "ollama_cloud"\)/u,
   );
@@ -73,7 +73,7 @@ test("keeps Ollama Cloud out of normal ONLINE pickers", () => {
   assert.match(page, /model\.provider === provider/u);
 });
 
-test("keeps enabled Cloud models in the separate background picker", () => {
+test("keeps enabled Cloud models in the separate background picker independently", () => {
   const backgroundOptions = page.slice(
     page.indexOf("const prismCloudLlmCallOptions"),
     page.indexOf("function renderZenAtmosphereModelRow"),
@@ -81,8 +81,8 @@ test("keeps enabled Cloud models in the separate background picker", () => {
   assert.match(backgroundOptions, /textModelOptionsForProvider\(modelCatalog, settings, "ollama_cloud"\)/u);
   assert.match(backgroundOptions, /!model\.disabledReason/u);
   assert.doesNotMatch(backgroundOptions, /hiddenManualModelIds/u);
-  assert.match(page, /ONLINE background/u);
-  assert.match(page, /enabled for background/u);
+  assert.match(page, /ONLINE Cloud/u);
+  assert.match(page, /separate ONLINE Background picker remains independently available/u);
 });
 
 test("exposes an account-scoped Ollama Cloud key without returning plaintext", () => {
@@ -118,6 +118,7 @@ test("keeps model enablement and manual picker visibility independent", () => {
     page.indexOf("const isTextModel", page.indexOf('group.id === "ollama_cloud"')),
   );
   assert.match(cloudVisibility, /canShowInGlobalPicker/u);
+  assert.match(cloudVisibility, /const canShowInGlobalPicker = true/u);
   const pickerVisibilitySetter = page.slice(
     page.indexOf("function setGlobalPickerModelVisible"),
     page.indexOf("async function saveTextModelDisplayName"),

@@ -917,7 +917,9 @@ export function resolveAutoModel(input: ResolveAutoModelInput): ResolvedAutoMode
           input.provider,
           input.catalog,
         );
-    if (fixed && !(lane === "online" && fixed.provider === "ollama_cloud")) {
+    // A Cloud model is valid only when the player selected it explicitly.
+    // Contextual Auto and every recovery plan filter Cloud above.
+    if (fixed) {
       return {
         provider: fixed.provider,
         model: fixed.model,

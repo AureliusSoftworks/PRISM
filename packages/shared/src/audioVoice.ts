@@ -18,7 +18,7 @@ export type EnglishVoiceEngine = "builtin" | "elevenlabs";
  * and the Casekeeper's text accompaniment can coexist. */
 export type WhodunnitTextVoiceMode = "off" | "babble" | "bottish";
 export const DEFAULT_WHODUNNIT_TEXT_VOICE_MODE: WhodunnitTextVoiceMode =
-  "bottish";
+  "babble";
 
 export const VOICE_EFFECTS = [
   "clean",

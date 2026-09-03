@@ -226,7 +226,7 @@ describe("resolveAutoModel", () => {
     );
   });
 
-  it("migrates stale Ollama Cloud foreground choices to an eligible flagship route", () => {
+  it("allows an explicit Ollama Cloud foreground choice without adding it to Auto", () => {
     const cloudCatalog = {
       local: [{ id: REQUIRED_PRIMARY_LOCAL_MODEL_ID }],
       online: [
@@ -245,8 +245,17 @@ describe("resolveAutoModel", () => {
       hiddenModelIds: [],
       catalog: cloudCatalog,
     });
-    assert.equal(foreground.provider, "openai");
-    assert.equal(foreground.model, "gpt-4o-mini");
+    assert.equal(foreground.provider, "ollama_cloud");
+    assert.equal(foreground.model, "minimax-m2.5:cloud");
+
+    const automatic = resolveAutoModel({
+      provider: "ollama_cloud",
+      lane: "online",
+      hiddenModelIds: [],
+      catalog: cloudCatalog,
+    });
+    assert.equal(automatic.provider, "openai");
+    assert.equal(automatic.model, "gpt-4o-mini");
 
     const structured = resolveAutoModel({
       provider: "ollama_cloud",

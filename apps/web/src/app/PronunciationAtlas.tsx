@@ -418,7 +418,7 @@ export function PronunciationAtlas({
             data-primary="true"
             onClick={onContinue}
           >
-            Continue to Local
+            Continue to TTS
           </button>
         </div>
       ) : null}

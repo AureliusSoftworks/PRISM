@@ -23,6 +23,7 @@ test("shares one input-transparent Light and Dark top-and-bottom veil across sce
   assert.match(styles, /\.vignette\[data-theme="light"\]::after/u);
   assert.match(styles, /\.vignette::before \{ color: #000; \}/u);
   assert.match(styles, /\.vignette::after \{ color: #fff; \}/u);
+  assert.match(styles, /--scene-vignette-opacity:\s*0\.82/u);
   assert.match(styles, /currentColor 0%[\s\S]*?currentColor 100%/u);
   assert.match(styles, /linear-gradient\([\s\S]*?to bottom/u);
   assert.doesNotMatch(styles, /to right/u);

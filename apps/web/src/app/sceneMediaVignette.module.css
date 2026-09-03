@@ -1,6 +1,7 @@
 .vignette {
   --scene-vignette-top-clear: 17%;
   --scene-vignette-bottom-clear: 76%;
+  --scene-vignette-opacity: 0.82;
   position: absolute;
   z-index: var(--scene-vignette-z, 6);
   inset: 0;
@@ -33,7 +34,7 @@
 
 .vignette[data-theme="dark"]::before,
 .vignette[data-theme="light"]::after {
-  opacity: var(--scene-vignette-opacity, 1);
+  opacity: var(--scene-vignette-opacity);
 }
 
 @media (prefers-reduced-motion: reduce) {

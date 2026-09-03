@@ -1,4 +1,5 @@
 "use client";
+import { playWhodunnitPremiumVoice } from "./debateMysteryPremiumVoice";
 
 import {
   Fragment,
@@ -164,7 +165,10 @@ import {
 } from "./composerAction";
 import { PrismVisualLifecycleBridge } from "./PrismVisualLifecycleBridge";
 import { PrismAdaptiveDomQualityGovernor } from "./PrismAdaptiveDomQualityGovernor";
-import { subscribePrismFrameRate } from "./prismFrameRate";
+import {
+  subscribePrismFrameRate,
+  type PrismFrameRateSnapshot,
+} from "./prismFrameRate";
 import {
   formatPrismMainThreadCensus,
   installPrismMainThreadCensus,
@@ -1079,7 +1083,7 @@ import {
   type ReplayAudioMasterCaptureResult,
 } from "./replayAudioMasterCapture";
 import { ReplayMouthPresentationCapture } from "./ReplayMouthPresentationCapture";
-import { coffeeReplayVideoFrameState } from "./coffeeReplayVideoFrame";
+import { createCoffeeReplayVideoFrameSampler } from "./coffeeReplayVideoFrame";
 import { signalStageSoundcheckMessageIsEphemeral } from "./signalStageSoundcheck";
 import {
   ModelWarmupIntermission,
@@ -1582,10 +1586,9 @@ import {
   modelSupportsTurboMode,
   resolveModelReasoningEffortCapability,
   prismTutorialShouldRun,
-  buildReplaySceneCheckpointsV2,
+  createReplaySceneSamplerV2,
   replayMouthShapeAtV2,
   replayVoiceLightLevelAtV2,
-  replaySceneAtV2,
   replayManifestV2IsValid,
   type BotAudioVoiceProfileV1,
   type BotFoundryBatchGroupIdentityV1,
@@ -1627,6 +1630,7 @@ import {
   type CrosstalkReclaimPlanV1,
   type DirectionalIrritationDeliveryPlanV1,
   DEBATE_PLAYER_JUDGE_BOT_ID,
+  DEBATE_SCHEMA_VERSION,
   type DebateFormatId,
   type ListenerReactionPlanV1,
   type ModelPreparationFailure,
@@ -1641,7 +1645,6 @@ import {
   type ReplayVoiceLightTrackV1,
   type ReplayParticipantSnapshotV1,
   type ReplayRecordingV1,
-  type ReplaySceneCheckpointV2,
   type ReplayVoiceSelectionSnapshotV2,
   type ReplayVoiceTakeV1,
   type ReplayTimelineV1,
@@ -7517,7 +7520,9 @@ interface CoffeeAudioMasterReplayRuntime {
   audio: HTMLAudioElement;
   timeline: ReplayTimelineV1;
   manifest: ReplayManifestV2 | null;
-  checkpoints: ReplaySceneCheckpointV2[];
+  sampleScene: ReturnType<typeof createReplaySceneSamplerV2> | null;
+  frameSource?: readonly CoffeeConversationMessage[];
+  sampleFrame?: ReturnType<typeof createCoffeeReplayVideoFrameSampler>;
   offsetMs: number;
   animationFrame: number | null;
 }
@@ -10744,6 +10749,10 @@ function FpsCounter(): React.JSX.Element | null {
   const [enabled, setEnabled] = useState(false);
   const [fps, setFps] = useState<number | null>(null);
   const [mainThreadBusyMs, setMainThreadBusyMs] = useState<number | null>(null);
+  const [frameStats, setFrameStats] = useState<
+    PrismFrameRateSnapshot["frameStats"] | null
+  >(null);
+  const [slowFrames, setSlowFrames] = useState<PrismFrameRateSnapshot["slowFrames"]>();
   const [census, setCensus] = useState<PrismMainThreadCensus | null>(null);
 
   useEffect(() => {
@@ -10759,11 +10768,15 @@ function FpsCounter(): React.JSX.Element | null {
     if (!enabled) {
       setFps(null);
       setMainThreadBusyMs(null);
+      setFrameStats(null);
+      setSlowFrames(undefined);
       return;
     }
     return subscribePrismFrameRate((snapshot) => {
       setFps(snapshot?.fps ?? null);
       setMainThreadBusyMs(snapshot?.longTaskMsPerSecond ?? null);
+      setFrameStats(snapshot?.frameStats ?? null);
+      setSlowFrames(snapshot?.slowFrames);
     });
   }, [enabled]);
 
@@ -10783,17 +10796,34 @@ function FpsCounter(): React.JSX.Element | null {
   }, [enabled]);
 
   if (!enabled || fps === null) return null;
-  // Busy ms/s says WHY frames are missing: ~1000 means the main thread is
-  // saturated (renders/scripts), while LOW busy at LOW fps is the smoking gun
-  // for compositor/GPU cost — so zero is a meaningful reading and always shows.
+  // Busy ms/s counts only long tasks. A low value can still hide many shorter
+  // script tasks, rendering work, or presentation stalls; it is not a GPU
+  // diagnosis. Keep zero visible and use frame-gap/LoAF evidence alongside it.
   const busySuffix =
     mainThreadBusyMs !== null ? ` · busy ${mainThreadBusyMs}ms/s` : "";
   // And the census says WHAT is piling up, which neither of the other two can:
   // Coffee decays monotonically and does not recover through a silent table, so
   // the question is which of these counts climbs alongside it.
   const censusSuffix = census ? ` · ${formatPrismMainThreadCensus(census)}` : "";
+  const frameStatsAttribute = frameStats
+    ? JSON.stringify({
+        p50: frameStats.p50Ms,
+        p95: frameStats.p95Ms,
+        p99: frameStats.p99Ms,
+        max: frameStats.maxMs,
+        over33: frameStats.over33Ms,
+        over50: frameStats.over50Ms,
+        n: frameStats.sampledFrameCount,
+        span: frameStats.sampledSpanMs,
+      })
+    : undefined;
   return (
-    <output className={styles.fpsCounter} aria-label={`Frames per second: ${fps}${busySuffix}${censusSuffix}`}>
+    <output
+      className={styles.fpsCounter}
+      aria-label={`Frames per second: ${fps}${busySuffix}${censusSuffix}`}
+      data-prism-frame-stats={frameStatsAttribute}
+      data-prism-slow-frames={slowFrames ? JSON.stringify(slowFrames) : undefined}
+    >
       {fps} FPS
       {busySuffix}
       {censusSuffix}
@@ -15010,7 +15040,7 @@ function globalModelChoicesFromSettings(
   choices.local = normalizeModelChoice(settings.preferredLocalModel);
   const onlineChoice = normalizeModelChoice(settings.preferredOnlineModel);
   const provider = inferOnlineProviderForModelId(onlineChoice);
-  if (onlineChoice !== AUTO_MODEL_CHOICE && provider !== "ollama_cloud") {
+  if (onlineChoice !== AUTO_MODEL_CHOICE) {
     choices[provider] = onlineChoice;
   }
   return choices;
@@ -16730,9 +16760,6 @@ function visibleConcreteOnlineModelChoice(
   }
   const options = onlineModelOptionsForPicker(catalog, settings);
   const provider = inferOnlineProviderForModelId(visibleChoice);
-  if (provider === "ollama_cloud") {
-    return defaultOnlineModelChoice(catalog, settings);
-  }
   return options.some((model) => model.id === visibleChoice) ||
     onlineProviderCanPreserveModelChoice(catalog, settings, provider)
     ? visibleChoice
@@ -16746,7 +16773,6 @@ function visibleModelChoiceForProvider(
   choice: string | null | undefined,
 ): string {
   const visibleChoice = normalizeModelChoice(choice);
-  if (provider === "ollama_cloud") return AUTO_MODEL_CHOICE;
   if (visibleChoice === DISABLED_MODEL_CHOICE) return DISABLED_MODEL_CHOICE;
   if (visibleChoice === AUTO_MODEL_CHOICE) {
     return visibleChoice;
@@ -16843,6 +16869,7 @@ function onlineModelOptionsForPicker(
 ): ModelCatalogEntry[] {
   return withOnlineProviderHostLabels(
     combinedOnlineModelOptions(
+      chatModelOptionsForProvider(catalog, settings, "ollama_cloud"),
       chatModelOptionsForProvider(catalog, settings, "openai"),
       chatModelOptionsForProvider(catalog, settings, "anthropic"),
     ),
@@ -17121,7 +17148,7 @@ function settingsModelToggleMeta(
   if (groupId === "ollama") {
     return `Offline${model.hostLabel ? ` - ${model.hostLabel}` : ""}`;
   }
-  if (groupId === "ollama_cloud") return "ONLINE background";
+  if (groupId === "ollama_cloud") return "ONLINE Cloud";
   if (groupId === "anthropic") return "Chat";
   if (groupId === "elevenlabs") return "Image & Video";
   const id = model.id.toLowerCase();
@@ -32961,7 +32988,7 @@ function ZenLiveBotMannequin({
       <CoffeeSeatPlateEmoji
         enabled
         motionMode={
-          !runtimeEffectsEnabled || renderDetailLevel === "audience"
+          !resolvedSemanticFaceMotionEnabled || renderDetailLevel === "audience"
             ? "static"
             : "full"
         }
@@ -42459,6 +42486,9 @@ function BotAvatarPreviewPanel({
           <div
             className={styles.botAvatarStudioMiniPreview}
             data-avatar-studio-mini-preview="true"
+            style={{
+              "--avatar-studio-scale-preview-size": `${compactPreviewRenderSize}px`,
+            } as CSSProperties}
             data-avatar-studio-mini-eye-state={
               previewBlink ? "blink" : "open"
             }
@@ -42703,10 +42733,105 @@ const AVATAR_HD_BENCH_FACE_STYLE: BotFaceStyle = {
   mouthCharacter: "⚙",
 };
 
+/**
+ * A dev-only comparison target for the same full renderer that Whodunnit
+ * receives. It deliberately does not recreate a compact portrait: the bench
+ * must exercise the full chassis, CRT, Avatar Details Ink, and lower badge
+ * boundary used by room, Court, and Case File portraits.
+ */
+function AvatarHdBenchDebatePresence({
+  identityColor,
+  previewMode,
+  previewTheme,
+}: {
+  identityColor: string;
+  previewMode: BotAvatarPreviewMode;
+  previewTheme: "light" | "dark";
+}): React.JSX.Element {
+  const previewTalking = previewMode === "talking";
+  const previewThinking = previewMode === "thinking";
+  const previewBlink = previewMode === "blink";
+  const avatarStyle = {
+    ...botAvatarFullScaleIdentityStyle(identityColor, previewTheme, {
+      voicePreset: "neutral",
+    }),
+    "--coffee-plate-emoji-face-scale-y": BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
+    "--avatar-details-facing-scale-x": "1",
+    width: `${BOT_AVATAR_CUSTOMIZER_AVATAR_SIZE_PX}px`,
+  } as CSSProperties;
+
+  return (
+    <div
+      className={styles.avatarHdBenchDebateBody}
+      data-avatar-foundry-height-owner="true"
+      data-active-control-tab="face"
+      data-camera-mode="overview"
+      data-foundry-module="screen"
+      style={AVATAR_STUDIO_VIEWPORT_CSS_PROPERTIES as CSSProperties}
+    >
+      <div
+        className={styles.avatarHdBenchDebateStage}
+        data-app-cursor-theme={previewTheme}
+        data-preview-theme={previewTheme}
+      >
+        <span
+          className={`${styles.zenLiveBotPresencePlate} ${styles.debateBotPresencePlate}`}
+          data-avatar-hd-bench-target="whodunnit"
+          data-avatar-full-scale-identity="canonical"
+          data-debate-avatar-quality="hd"
+          data-debate-bot-avatar="true"
+          data-debate-role="audience"
+          data-theme={previewTheme}
+          data-mood="attentive"
+          data-talking={previewTalking ? "true" : undefined}
+          data-thinking={previewThinking ? "true" : undefined}
+          style={avatarStyle}
+          role="img"
+          aria-label="Whodunnit HD avatar preview"
+        >
+          <BotAmbientPresenceRig
+            theme={previewTheme}
+            isTalking={previewTalking}
+            motionActive={!previewTalking && !previewThinking}
+          >
+            <ZenLiveBotMannequin
+              glyph={DEFAULT_BOT_GLYPH}
+              faceStyle={AVATAR_HD_BENCH_FACE_STYLE}
+              theme={previewTheme}
+              faceScaleY={BOT_AVATAR_CANONICAL_FACE_SCALE_Y}
+              voicePreset="neutral"
+              isTalking={previewTalking}
+              blinkEnabled={previewBlink}
+              blinkWhileTalking
+              mouthShape={previewTalking ? "open-small" : "closed"}
+              moodHint="attentive"
+              scheduleKey={`qa-avatar-hd-whodunnit-${previewMode}`}
+              thinkingScheduleKey={`qa-avatar-hd-whodunnit-thinking-${previewMode}`}
+              showThinkingSpinner={previewThinking}
+              screenMaterialSeed="qa-avatar-hd-screen"
+              frameMaterialSeed="qa-avatar-hd-frame"
+              avatarDetails={AVATAR_HD_BENCH_DETAILS}
+              avatarDetailsColor={identityColor}
+              avatarDetailsCoreColor="phosphor"
+              metalAlloyEnabled
+              runtimeEffectsEnabled
+              detailLevel="full"
+              minimumRenderedSizeTier="full"
+            />
+          </BotAmbientPresenceRig>
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function AvatarHdBenchSurface(): React.JSX.Element {
   const [previewTheme, setPreviewTheme] = useState<"light" | "dark">("light");
   const [identityColor, setIdentityColor] = useState("#ef1745");
   const [previewMode, setPreviewMode] = useState<BotAvatarPreviewMode>("idle");
+  const [renderTarget, setRenderTarget] = useState<"studio" | "whodunnit">(
+    "studio",
+  );
   const [performanceEffects, setPerformanceEffects] = useState<
     Readonly<Record<AvatarStudioPerformanceEffect, boolean>>
   >(AVATAR_STUDIO_PERFORMANCE_EFFECTS_ENABLED);
@@ -42740,6 +42865,51 @@ function AvatarHdBenchSurface(): React.JSX.Element {
           </div>
         </div>
         <div className={styles.avatarHdBenchHeaderControls}>
+          <div
+            className={styles.avatarHdBenchTargetToggle}
+            role="group"
+            aria-label="HD avatar render target"
+          >
+            <button
+              type="button"
+              data-active={renderTarget === "studio" ? "true" : undefined}
+              aria-pressed={renderTarget === "studio"}
+              onClick={() => setRenderTarget("studio")}
+            >
+              Studio
+            </button>
+            <button
+              type="button"
+              data-active={
+                renderTarget === "whodunnit" ? "true" : undefined
+              }
+              aria-pressed={renderTarget === "whodunnit"}
+              onClick={() => setRenderTarget("whodunnit")}
+            >
+              Whodunnit HD
+            </button>
+          </div>
+          <div
+            className={styles.avatarHdBenchMotionToggle}
+            role="group"
+            aria-label="HD avatar preview state"
+          >
+            {BOT_AVATAR_PREVIEW_ACTIONS.map((action) => (
+              <button
+                key={action.value}
+                type="button"
+                data-active={
+                  previewMode === action.value ? "true" : undefined
+                }
+                aria-label={action.label}
+                aria-pressed={previewMode === action.value}
+                title={action.tooltip}
+                onClick={() => setPreviewMode(action.value)}
+              >
+                <BotAvatarPreviewModeIcon mode={action.value} />
+              </button>
+            ))}
+          </div>
           <label className={styles.avatarHdBenchColorControl}>
             <span>Identity hue</span>
             <input
@@ -42748,6 +42918,16 @@ function AvatarHdBenchSurface(): React.JSX.Element {
               onChange={(event) => setIdentityColor(event.currentTarget.value)}
             />
           </label>
+          <select
+            aria-label="Reference hue"
+            value={identityColor}
+            onChange={(event) => setIdentityColor(event.currentTarget.value)}
+          >
+            <option value="#006bff">Blue</option>
+            <option value="#8b35ed">Violet</option>
+            <option value="#18a969">Green</option>
+            <option value="#ef1745">Red</option>
+          </select>
           <div
             className={styles.botAvatarPreviewThemeToggle}
             role="group"
@@ -42774,15 +42954,16 @@ function AvatarHdBenchSurface(): React.JSX.Element {
           </div>
         </div>
       </header>
-      <div
-        className={`${styles.botAvatarCustomizerBody} ${styles.avatarHdBenchBody}`}
-        data-avatar-foundry-height-owner="true"
-        data-active-control-tab="face"
-        data-camera-mode="overview"
-        data-foundry-module="screen"
-        style={AVATAR_STUDIO_VIEWPORT_CSS_PROPERTIES as CSSProperties}
-      >
-        <BotAvatarPreviewPanel
+      {renderTarget === "studio" ? (
+        <div
+          className={`${styles.botAvatarCustomizerBody} ${styles.avatarHdBenchBody}`}
+          data-avatar-foundry-height-owner="true"
+          data-active-control-tab="face"
+          data-camera-mode="overview"
+          data-foundry-module="screen"
+          style={AVATAR_STUDIO_VIEWPORT_CSS_PROPERTIES as CSSProperties}
+        >
+          <BotAvatarPreviewPanel
           titleName="HD Avatar"
           glyph={DEFAULT_BOT_GLYPH}
           scheduleKey="qa-avatar-hd-production-renderer"
@@ -42811,8 +42992,15 @@ function AvatarHdBenchSurface(): React.JSX.Element {
             }))
           }
           opticalBenchEnabled
+          />
+        </div>
+      ) : (
+        <AvatarHdBenchDebatePresence
+          identityColor={identityColor}
+          previewMode={previewMode}
+          previewTheme={previewTheme}
         />
-      </div>
+      )}
     </section>
   );
 }
@@ -47088,8 +47276,12 @@ function BotAvatarCustomizerModal({
 
   useEffect(() => {
     if (!open) return;
-    avatarVoicePreviewRunRef.current += 1;
     setPreviewTheme(resolvedTheme);
+  }, [open, resolvedTheme]);
+
+  useEffect(() => {
+    if (!open) return;
+    avatarVoicePreviewRunRef.current += 1;
     setPreviewMode("idle");
     setInkLivePreview(false);
     setPerformanceEffects(AVATAR_STUDIO_PERFORMANCE_EFFECTS_ENABLED);
@@ -47109,7 +47301,7 @@ function BotAvatarCustomizerModal({
     setNameSampleState("idle");
     setDetailsEditorDirty(false);
     setEquippedInkStamp(null);
-  }, [identityControlsVisible, initialTab, open, resolvedTheme]);
+  }, [identityControlsVisible, initialTab, open]);
 
   useEffect(() => {
     if (!open) blinkGeometryLinkOverrideRef.current = null;
@@ -48260,7 +48452,10 @@ function BotAvatarCustomizerModal({
                     key={tab.value}
                     type="button"
                     role="tab"
+                    id={`avatar-studio-tab-${tab.value}`}
+                    aria-controls="avatar-studio-active-panel"
                     aria-selected={activeControlTab === tab.value}
+                    tabIndex={activeControlTab === tab.value ? 0 : -1}
                     data-active={
                       activeControlTab === tab.value ? "true" : undefined
                     }
@@ -48272,6 +48467,30 @@ function BotAvatarCustomizerModal({
                         : "false"
                     }
                     onClick={() => requestControlTab(tab.value)}
+                    onKeyDown={(event) => {
+                      const index = visibleAvatarTabs.findIndex(
+                        (candidate) => candidate.value === tab.value,
+                      );
+                      const nextIndex = event.key === "Home"
+                        ? 0
+                        : event.key === "End"
+                          ? visibleAvatarTabs.length - 1
+                          : event.key === "ArrowRight"
+                            ? (index + 1) % visibleAvatarTabs.length
+                            : event.key === "ArrowLeft"
+                              ? (index - 1 + visibleAvatarTabs.length) % visibleAvatarTabs.length
+                              : null;
+                      if (nextIndex === null) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const nextTab = visibleAvatarTabs[nextIndex];
+                      if (!nextTab) return;
+                      requestControlTab(nextTab.value);
+                      event.currentTarget.parentElement
+                        ?.querySelector<HTMLButtonElement>(
+                          `[data-avatar-control="${nextTab.value}"]`,
+                        )?.focus();
+                    }}
                     data-avatar-control={tab.value}
                     data-tutorial-target={
                       tab.value === "eyes"
@@ -48294,151 +48513,135 @@ function BotAvatarCustomizerModal({
             <div
               ref={controlStackRef}
               className={styles.botAvatarControlStack}
+              id="avatar-studio-active-panel"
+              role="tabpanel"
+              aria-labelledby={`avatar-studio-tab-${activeControlTab}`}
+              tabIndex={0}
               data-avatar-control-stack="true"
               data-avatar-foundry-region="inspector-scrollport"
               data-tutorial-target="avatar-foundry-controls"
             >
-              <section
-                className={styles.botAvatarGlobalAdjustmentConsole}
-                data-foundry-module={activeFoundryModule.id}
-                data-populated={activeFoundryModulePopulated ? "true" : "false"}
-                data-adjustment-target={
-                  activeAdjustmentControl ? activeAdjustmentTarget : undefined
-                }
-                data-adjustment-enabled={
-                  activeAdjustmentControl ? "true" : undefined
-                }
-                style={
-                  {
-                    "--foundry-module-color":
-                      "var(--editor-bot-color, var(--accent))",
-                  } as CSSProperties
-                }
-                aria-label={`${activeFoundryModule.label} adjustment console, ${
-                  activeFoundryModulePopulated ? "ready" : "unconfigured"
-                }`}
-              >
-                <header>
-                  <span
-                    className={styles.botAvatarGlobalAdjustmentLight}
-                    aria-hidden="true"
-                  />
-                  <span>
-                    <small>
-                      {activeFoundryModule.module} ·{" "}
-                      {activeFoundryModulePopulated ? "Ready" : "Unconfigured"}
-                    </small>
-                    <strong>{activeFoundryModule.label}</strong>
-                  </span>
-                  {activeAdjustmentOptions.length > 0 ? (
+              {activeAdjustmentControl || activeFoundryIdentitySurface === "shell" ? (
+                <section
+                  className={styles.botAvatarGlobalAdjustmentConsole}
+                  data-foundry-module={activeFoundryModule.id}
+                  data-populated={activeFoundryModulePopulated ? "true" : "false"}
+                  data-adjustment-target={
+                    activeAdjustmentControl ? activeAdjustmentTarget : undefined
+                  }
+                  data-adjustment-enabled={
+                    activeAdjustmentControl ? "true" : undefined
+                  }
+                  style={
+                    {
+                      "--foundry-module-color":
+                        "var(--editor-bot-color, var(--accent))",
+                    } as CSSProperties
+                  }
+                  aria-label={`${activeFoundryModule.label} adjustment console, ${
+                    activeFoundryModulePopulated ? "ready" : "unconfigured"
+                  }`}
+                >
+                  <header>
                     <span
-                      className={styles.botAvatarGlobalAdjustmentTargets}
-                      role="group"
-                      aria-label="Adjustment target"
-                    >
-                      {activeAdjustmentOptions.map((option) => (
-                        <button
-                          key={option.value}
-                          type="button"
-                          data-active={
-                            activeAdjustmentTarget === option.value
-                              ? "true"
-                              : undefined
-                          }
-                          aria-pressed={activeAdjustmentTarget === option.value}
-                          disabled={
-                            activeControlTab === "voice" &&
-                            option.value !== "pronunciation" &&
-                            !avatarVoiceAccentReady
-                          }
-                          title={
-                            activeControlTab === "voice" &&
-                            option.value !== "pronunciation" &&
-                            !avatarVoiceAccentReady
-                              ? "Place the Accent pin first"
-                              : undefined
-                          }
-                          onClick={() => {
-                            if (
+                      className={styles.botAvatarGlobalAdjustmentLight}
+                      aria-hidden="true"
+                    />
+                    <span>
+                      <small>
+                        {activeFoundryModule.module} ·{" "}
+                        {activeFoundryModulePopulated ? "Ready" : "Unconfigured"}
+                      </small>
+                      <strong>{activeFoundryModule.label}</strong>
+                    </span>
+                    {activeAdjustmentOptions.length > 0 ? (
+                      <span
+                        className={styles.botAvatarGlobalAdjustmentTargets}
+                        role="group"
+                        aria-label="Adjustment target"
+                      >
+                        {activeAdjustmentOptions.map((option) => (
+                          <button
+                            key={option.value}
+                            type="button"
+                            data-active={
+                              activeAdjustmentTarget === option.value
+                                ? "true"
+                                : undefined
+                            }
+                            aria-pressed={activeAdjustmentTarget === option.value}
+                            disabled={
                               activeControlTab === "voice" &&
                               option.value !== "pronunciation" &&
                               !avatarVoiceAccentReady
-                            ) {
-                              setActiveAdjustmentTarget("pronunciation");
-                              return;
                             }
-                            setActiveAdjustmentTarget(option.value);
-                          }}
-                        >
-                          {option.label}
-                        </button>
-                      ))}
-                      {activeControlTab === "eyes" &&
-                      faceBlinkBar !== "none" ? (
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-label="Link blink geometry to eyes"
-                          aria-checked={blinkGeometryLinked}
-                          data-blink-eye-link="true"
-                          data-active={
-                            blinkGeometryLinked ? "true" : undefined
-                          }
-                          title={
-                            blinkGeometryLinked
-                              ? "Blink follows eye size, position, and rotation"
-                              : "Blink can be adjusted independently"
-                          }
-                          onClick={toggleBlinkGeometryLink}
-                        >
-                          {blinkGeometryLinked ? "Linked" : "Independent"}
-                        </button>
-                      ) : null}
-                    </span>
-                  ) : activeFoundryIdentitySurface === "shell" ? (
-                    <small>Surface controls</small>
-                  ) : (
-                    <small>Module selected</small>
-                  )}
-                </header>
-                {activeAdjustmentControl ??
-                  (activeFoundryIdentitySurface === "shell" ? (
-                    <div className={styles.botAvatarShellAdjustmentSummary}>
-                      <strong>
-                        {identityControlsVisible
-                          ? "Color + identity badge"
-                          : "Factory finish"}
-                      </strong>
-                      <p>
-                        {identityControlsVisible
-                          ? "Use the Shell controls below to tune the frame color and lower identity badge."
-                          : "Default Prism keeps its chrome frame, refraction badge, and identity color fixed."}
-                      </p>
-                    </div>
-                  ) : (
-                    <div className={styles.botAvatarGlobalAdjustmentIdle}>
-                      <AdjustmentPad
-                        label={`${activeFoundryModule.label} position unavailable`}
-                        value={{ x: 0, y: 0 }}
-                        restoreValue={{ x: 0, y: 0 }}
-                        adapter={createAdjustmentPadCoordinateAdapter({
-                          x: { min: -1, max: 1, step: 0.1 },
-                          y: { min: -1, max: 1, step: 0.1 },
-                          valueText: () => "Fixed position",
-                        })}
-                        color={activeFoundryModule.color}
-                        disabled
-                        onPreview={() => undefined}
-                        onCommit={() => undefined}
-                      />
-                      <p>
-                        {activeControlTab === "details"
-                          ? "Equip a stamp below to position it with this grid pad."
-                          : "This module has no positional offset. Select Identity, Eyes, or Mouth to move a visible element."}
-                      </p>
-                    </div>
-                  ))}
-              </section>
+                            title={
+                              activeControlTab === "voice" &&
+                              option.value !== "pronunciation" &&
+                              !avatarVoiceAccentReady
+                                ? "Place the Accent pin first"
+                                : undefined
+                            }
+                            onClick={() => {
+                              if (
+                                activeControlTab === "voice" &&
+                                option.value !== "pronunciation" &&
+                                !avatarVoiceAccentReady
+                              ) {
+                                setActiveAdjustmentTarget("pronunciation");
+                                return;
+                              }
+                              setActiveAdjustmentTarget(option.value);
+                            }}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                        {activeControlTab === "eyes" &&
+                        faceBlinkBar !== "none" ? (
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-label="Link blink geometry to eyes"
+                            aria-checked={blinkGeometryLinked}
+                            data-blink-eye-link="true"
+                            data-active={
+                              blinkGeometryLinked ? "true" : undefined
+                            }
+                            title={
+                              blinkGeometryLinked
+                                ? "Blink follows eye size, position, and rotation"
+                                : "Blink can be adjusted independently"
+                            }
+                            onClick={toggleBlinkGeometryLink}
+                          >
+                            {blinkGeometryLinked ? "Linked" : "Independent"}
+                          </button>
+                        ) : null}
+                      </span>
+                    ) : activeFoundryIdentitySurface === "shell" ? (
+                      <small>Surface controls</small>
+                    ) : (
+                      <small>Module selected</small>
+                    )}
+                  </header>
+                  {activeAdjustmentControl ??
+                    (activeFoundryIdentitySurface === "shell" ? (
+                      <div className={styles.botAvatarShellAdjustmentSummary}>
+                        <strong>
+                          {identityControlsVisible
+                            ? "Color + identity badge"
+                            : "Factory finish"}
+                        </strong>
+                        <p>
+                          {identityControlsVisible
+                            ? "Use the Shell controls below to tune the frame color and lower identity badge."
+                            : "Default Prism keeps its chrome frame, refraction badge, and identity color fixed."}
+                        </p>
+                      </div>
+                    ) : null)}
+                </section>
+              ) : null}
               {activeControlTab === "profile" && identityControlsVisible ? (
                 <section
                   className={styles.botAvatarProfilePanel}
@@ -50640,7 +50843,6 @@ function HomeContent(): React.JSX.Element {
   notePrismRender("home");
   const searchParams = useSearchParams();
   const router = useRouter();
-  const avatarHdBenchRequested = searchParams.get("qaAvatarHd") === "1";
   const { openMenu } = usePrismMenu();
   const { requestFirstRunPrismIntro, replayPrismIntro } =
     usePrismIntroSequence();
@@ -50720,6 +50922,7 @@ function HomeContent(): React.JSX.Element {
   const [debateActualAutoRoute, setDebateActualAutoRoute] =
     useState<ActualAppletRoute | null>(null);
   const [debateLiveModelSelection, setDebateLiveModelSelection] = useState<{
+    liveWhodunnit: boolean;
     responseMode: ResponseMode;
     provider: Provider;
     modelChoice: string;
@@ -51394,6 +51597,7 @@ function HomeContent(): React.JSX.Element {
     setGlobalModelChoiceByProvider((current) =>
       current.local === next.local &&
       current.openai === next.openai &&
+      current.ollama_cloud === next.ollama_cloud &&
       current.anthropic === next.anthropic
         ? current
         : next,
@@ -59934,17 +60138,12 @@ function HomeContent(): React.JSX.Element {
           ? normalizeModelChoice(settings.preferredOnlineModel)
           : normalizeModelChoice(nextChoices[nextProvider]);
       const preferredOnlineModel =
-        requestedOnlineChoice === AUTO_MODEL_CHOICE ||
-        inferOnlineProviderForModelId(requestedOnlineChoice) === "ollama_cloud"
-          ? ""
-          : requestedOnlineChoice;
+        requestedOnlineChoice === AUTO_MODEL_CHOICE ? "" : requestedOnlineChoice;
       const canonicalChoices = createDefaultChatModelChoiceByProvider();
       canonicalChoices.local = normalizeModelChoice(preferredLocalModel);
       if (preferredOnlineModel) {
         const provider = inferOnlineProviderForModelId(preferredOnlineModel);
-        if (provider !== "ollama_cloud") {
-          canonicalChoices[provider] = preferredOnlineModel;
-        }
+        canonicalChoices[provider] = preferredOnlineModel;
       }
       const previousModelChoice = normalizeModelChoice(
         previousChoices[settings.preferredProvider],
@@ -74968,6 +75167,7 @@ function HomeContent(): React.JSX.Element {
       debateFormat: DebateFormatId | null = null,
       offlineOnly = false,
       voiceChannel: VoicePlaybackChannel = "primary",
+      roomAcousticsOverride?: RoomAcousticsSend,
     ): Promise<boolean> => {
       const ownerId = user?.id;
       if (!ownerId) return false;
@@ -75079,12 +75279,12 @@ function HomeContent(): React.JSX.Element {
         playbackSurface === "signal"
           ? `botcast:${message.episodeId}:${message.id}`
           : `debate:${message.episodeId}:${message.id}`;
-      const voiceRoomAcoustics =
+      const voiceRoomAcoustics = roomAcousticsOverride ?? (
         playbackSurface === "debate"
           ? debateFormat === "turnabout"
             ? DEBATE_TURNABOUT_VOICE_ROOM_SEND
             : DEBATE_FORUM_VOICE_ROOM_SEND
-          : SIGNAL_STUDIO_VOICE_ROOM_SEND;
+          : SIGNAL_STUDIO_VOICE_ROOM_SEND);
       const requestedEngine: EnglishVoiceEngine | null =
         voiceSelection.voiceMode === "english"
           ? !offlineOnly && botSummary.online_enabled !== 0
@@ -75372,9 +75572,27 @@ function HomeContent(): React.JSX.Element {
         );
         signalVoiceClipCacheRef.current.delete(message.id);
         signalVoiceClipEpisodeByMessageIdRef.current.delete(message.id);
-        const preparedClip = preparedClipPromise
+        let preparedClip = preparedClipPromise
           ? await preparedClipPromise
           : null;
+        // Whodunnit asks for a take only when its line becomes visible. Reuse
+        // the canonical captured take without scheduling a Premium runway.
+        if (!preparedClip && playbackSurface === "debate" && debateFormat === "whodunnit") {
+          const saved = await loadCapturedReplayVoiceAudio({
+            surface: "signal",
+            sourceId: message.episodeId,
+            sourceKey: `primary:${message.id}`,
+          }).catch(() => null);
+          if (saved) preparedClip = {
+            kind: "clip",
+            clip: {
+              bytes: saved.bytes,
+              alignment: saved.alignment,
+              audioContentType: saved.contentType,
+              engineUsed: saved.resolvedEngine,
+            },
+          };
+        }
         const effectiveEngine: EnglishVoiceEngine = offlineOnly
           ? "builtin"
           : voiceSelection.englishVoiceEngine;
@@ -110226,10 +110444,6 @@ function HomeContent(): React.JSX.Element {
   const shouldShowAuthForm =
     !user && (hasAnyAccounts || preAuthChecklistComplete);
 
-  if (avatarHdBenchRequested) {
-    return <AvatarHdBenchSurface />;
-  }
-
   if (!user && backendUnavailable) {
     return (
       <main className={`${styles.authLayout} ${themeClass}`}>
@@ -110628,7 +110842,7 @@ function HomeContent(): React.JSX.Element {
                     : activeKeyProvider === "elevenlabs"
                       ? "Prism verifies and encrypts this key. It unlocks ElevenLabs image models, Premium voice, and your voice catalog. English remains local and uses no ElevenLabs credits. In Avatar Studio, one Accent Map pin shapes both Local and Premium voice while keeping the spoken language English. Prism assigns stable Premium defaults from the collection you choose in Voice Settings."
                       : activeKeyProvider === "ollama_cloud"
-                        ? "Prism verifies and encrypts this key. Ollama Cloud is reserved for the ONLINE Background model, where it can handle quiet helper work; it never enters foreground Auto, recovery, or manual model pickers."
+                        ? "Prism verifies and encrypts this key. Ollama Cloud can handle quiet ONLINE Background work and explicit manual ONLINE selections. It never enters foreground Auto or recovery."
                       : "Prism verifies this before saving it encrypted to your account."}
                 </p>
               </div>
@@ -115396,6 +115610,7 @@ function HomeContent(): React.JSX.Element {
       controlRail?: React.ReactNode;
       showVoiceSelector?: boolean;
       liveSessionActive?: boolean;
+      liveWhodunnitRouting?: boolean;
       liveSessionExit?: {
         label: string;
         title: string;
@@ -115456,14 +115671,18 @@ function HomeContent(): React.JSX.Element {
             <span aria-hidden="true">←</span>
             <span>Back</span>
           </button>
-          <LiveSessionModelChip
+          {options.liveWhodunnitRouting ? (
+            <div className={styles.chatHeaderModelPicker} data-whodunnit-live-routing="true">
+              {options.modelControls}
+            </div>
+          ) : <LiveSessionModelChip
             {...(options.liveSessionRoutingChip ?? {
               modelLabel: "Choosing model",
               effortLabel: "Default",
               automatic: true,
             })}
             className={styles.liveSessionHeaderModelChip}
-          />
+          />}
           <div
             className={styles.liveSessionContextTitleSlot}
             data-live-session-context-title-slot="true"
@@ -123519,8 +123738,8 @@ function HomeContent(): React.JSX.Element {
                             }
                           >
                             <option value="off">Off</option>
-                            <option value="babble">Babble</option>
-                            <option value="bottish">Bottish · Default</option>
+                            <option value="babble">Babble · Default</option>
+                            <option value="bottish">Bottish</option>
                           </select>
                         </label>
                       </section>
@@ -124870,7 +125089,6 @@ function HomeContent(): React.JSX.Element {
                                   group.models.length - disabledInGroup;
                                 const visibleInPicker = group.models.filter(
                                   (model) =>
-                                    group.id !== "ollama_cloud" &&
                                     (isRequiredPrimaryLocalModel(model) ||
                                       !settings.hiddenBotModelIds.includes(
                                         model.id,
@@ -124881,9 +125099,7 @@ function HomeContent(): React.JSX.Element {
                                 ).length;
                                 const providerVisibilityMeta =
                                   group.models.length > 0
-                                    ? group.id === "ollama_cloud"
-                                      ? `${group.meta} - ${enabledInGroup}/${group.models.length} enabled for background`
-                                      : `${group.meta} - ${enabledInGroup}/${group.models.length} enabled - ${visibleInPicker} in picker`
+                                    ? `${group.meta} - ${enabledInGroup}/${group.models.length} enabled - ${visibleInPicker} in picker`
                                     : group.meta;
                                 return (
                                   <details
@@ -124919,7 +125135,7 @@ function HomeContent(): React.JSX.Element {
                                           variant="control"
                                         >
                                           {group.id === "ollama_cloud"
-                                            ? "Enabled Ollama Cloud models are available only to the separate ONLINE Background model picker."
+                                            ? "Enabled Cloud models can appear in manual ONLINE pickers. They never enter Auto or recovery; the separate ONLINE Background picker remains independently available."
                                             : "Enabled controls availability and Auto eligibility. Show in picker only controls manual model pickers."}
                                         </PanelSectionInfo>
                                       </span>
@@ -124958,8 +125174,7 @@ function HomeContent(): React.JSX.Element {
                                           !settings.hiddenGlobalPickerModelIds.includes(
                                             model.id,
                                           );
-                                        const canShowInGlobalPicker =
-                                          group.id !== "ollama_cloud";
+                                        const canShowInGlobalPicker = true;
                                         const isTextModel =
                                           group.id !== "elevenlabs" &&
                                           !(group.id === "openai" &&
@@ -138860,12 +139075,15 @@ function HomeContent(): React.JSX.Element {
       setCoffeeReplayAudioMasterElapsedMs(0);
       return;
     }
-    const frame = coffeeReplayVideoFrameState({
-      messages: conversation.messages,
-      timeline: runtime.timeline,
-      videoElapsedMs: elapsedMs,
-      displayLengthForMessage: coffeeReplayDisplayLengthForMessage,
-    });
+    if (!runtime.sampleFrame || runtime.frameSource !== conversation.messages) {
+      runtime.frameSource = conversation.messages;
+      runtime.sampleFrame = createCoffeeReplayVideoFrameSampler({
+        messages: conversation.messages,
+        timeline: runtime.timeline,
+        displayLengthForMessage: coffeeReplayDisplayLengthForMessage,
+      });
+    }
+    const frame = runtime.sampleFrame(elapsedMs);
     const message = conversation.messages[frame.messageIndex];
     if (message) {
       coffeeReplayTypewriterMessageKeyRef.current = coffeeReplayMessageKey(
@@ -138876,9 +139094,7 @@ function HomeContent(): React.JSX.Element {
     coffeeReplayTypewriterLengthRef.current = frame.visibleLength;
     setCoffeeReplayMessageIndex(frame.messageIndex);
     setCoffeeReplayTypewriterLength(frame.visibleLength);
-    const directedScene = runtime.manifest
-      ? replaySceneAtV2(runtime.manifest, elapsedMs, runtime.checkpoints)
-      : null;
+    const directedScene = runtime.sampleScene?.(elapsedMs) ?? null;
     const speakingBotId = directedScene
       ? (coffeeActiveSeatBotIds.find((botId): botId is string => {
           if (typeof botId !== "string" || botId === "coffee-player") {
@@ -138975,7 +139191,7 @@ function HomeContent(): React.JSX.Element {
       audio,
       timeline,
       manifest,
-      checkpoints: manifest ? buildReplaySceneCheckpointsV2(manifest) : [],
+      sampleScene: manifest ? createReplaySceneSamplerV2(manifest) : null,
       offsetMs: 0,
       animationFrame: null,
     };
@@ -148420,10 +148636,12 @@ function HomeContent(): React.JSX.Element {
     });
     const debateModelProvider = debateResolvedChoice.provider;
     const debateModelChoice = debateResolvedChoice.modelChoice;
+    const debateLiveWhodunnit = debateLiveSessionActive && debateLiveModelSelection?.liveWhodunnit === true;
+    const debateFrozenModelSelection = debateLiveWhodunnit ? null : debateLiveModelSelection;
     const debateNavbarModelProvider =
-      debateLiveModelSelection?.provider ?? debateModelProvider;
+      debateFrozenModelSelection?.provider ?? debateModelProvider;
     const debateNavbarModelChoice =
-      debateLiveModelSelection?.modelChoice ?? debateModelChoice;
+      debateFrozenModelSelection?.modelChoice ?? debateModelChoice;
     const debatePrimaryForAuto = resolvedAutoPrimaryForComposer(
       modelCatalog,
       settings,
@@ -148432,7 +148650,7 @@ function HomeContent(): React.JSX.Element {
     );
     const debateResponseMode = debateBinaryResponseMode;
     const debateNavbarResponseMode =
-      debateLiveModelSelection?.responseMode ?? debateBinaryResponseMode;
+      debateFrozenModelSelection?.responseMode ?? debateBinaryResponseMode;
     const debateEffectiveProvider = debateModelProvider;
     const debateModelOptions = markStructuredOutputModelsUnavailable(
       includeSelectedResponseModeModelOption(
@@ -148481,7 +148699,7 @@ function HomeContent(): React.JSX.Element {
               : ("fixed" as const),
         }
       : null;
-    const debateLiveChromePolicy = debateLiveSessionActive
+    const debateLiveChromePolicy = debateLiveSessionActive && !debateLiveWhodunnit
       ? liveSessionChromePolicy("Debate")
       : null;
     const debateLiveRoutingChip = debateLiveSessionActive
@@ -148726,6 +148944,7 @@ function HomeContent(): React.JSX.Element {
         utterance.format,
         debateResponseMode === "local",
         utterance.voiceChannel ?? "primary",
+        utterance.roomAcoustics,
       );
       if (!played) queuePlayerActionSfx(Number.POSITIVE_INFINITY);
       return played;
@@ -148753,6 +148972,7 @@ function HomeContent(): React.JSX.Element {
                 }
               : undefined,
             liveSessionRoutingChip: debateLiveRoutingChip,
+            liveWhodunnitRouting: debateLiveWhodunnit,
             voiceTutorialTarget: "debate-voice-mode",
             voiceLocalPremiumFallback:
               blocksOnlineCapabilities(debateResponseMode),
@@ -148827,10 +149047,12 @@ function HomeContent(): React.JSX.Element {
                   renderTheme={resolvedTheme}
                   selectedProvider={debateNavbarModelProvider}
                   loading={modelCatalogLoading}
-                  disabled={!settings || debateLiveSessionActive}
+                  disabled={!settings || (debateLiveSessionActive && !debateLiveWhodunnit)}
                   title={
                     debateLiveChromePolicy?.lockMessage ??
-                    "Auto chooses when the Debate is created; its model, effort, and Turbo stay sealed with the archive."
+                    (debateLiveWhodunnit
+                      ? "Changes apply to the next generated Whodunnit response or text repair."
+                      : "Auto chooses when the Debate is created; its model, effort, and Turbo stay sealed with the archive.")
                   }
                   ariaLabel="Debate model"
                   placement="down"
@@ -148843,7 +149065,7 @@ function HomeContent(): React.JSX.Element {
                       : undefined
                   }
                   sessionEffort={
-                    debateLiveSessionActive
+                    debateLiveSessionActive && !debateLiveWhodunnit
                       ? debateNavbarModelChoice === AUTO_MODEL_CHOICE
                         ? debateActualAutoRoute?.effort ?? null
                         : debateLiveModelSelection?.reasoningEffort ??
@@ -148937,8 +149159,11 @@ function HomeContent(): React.JSX.Element {
                     signal,
                     effectsEnabled: settings?.voiceEffectsEnabled !== false,
                     globalVolume: volume,
-                    allowBabbleFallback: true,
-                    preferProceduralBabble: instant === true,
+                    // A Whodunnit player observation marked as instant must
+                    // still use the selected Babble lane. Falling through to
+                    // the procedural carrier here silently makes Babble sound
+                    // like Bottish.
+                    allowBabbleFallback: false,
                     roomAcoustics,
                   });
                   return signal?.aborted !== true;
@@ -149246,6 +149471,7 @@ function HomeContent(): React.JSX.Element {
                 return (
                   <span
                     className={`${styles.zenLiveBotPresencePlate} ${styles.debateBotPresencePlate}`}
+                    data-avatar-full-scale-identity="canonical"
                     data-debate-bot-avatar="true"
                     data-debate-role={avatarState.role}
                     data-source={playerJudgePrism ? "prism" : undefined}
@@ -149264,14 +149490,15 @@ function HomeContent(): React.JSX.Element {
                       avatarState.colorCycle ? "spectrum" : undefined
                     }
                     style={{
-                      ...(playerJudgePrism
-                        ? prismDefaultAccentStyle(resolvedTheme)
-                        : botAccentStyle(botSnapshot.color, resolvedTheme)),
-                      ...botFrameMetalAlloyStyle(
-                        playerJudgePrism
-                          ? "warm"
-                          : coffeeSeatVoicePreset(debateIdentityBot),
-                        { enabled: !playerJudgePrism },
+                      ...botAvatarFullScaleIdentityStyle(
+                        debateIdentityBot.color ?? debateAvatarAccentColor,
+                        resolvedTheme,
+                        {
+                          prismPersona: playerJudgePrism,
+                          voicePreset: playerJudgePrism
+                            ? "warm"
+                            : coffeeSeatVoicePreset(debateIdentityBot),
+                        },
                       ),
                       ["--coffee-plate-emoji-face-scale-y" as string]:
                         faceScaleY,
@@ -149601,6 +149828,58 @@ function HomeContent(): React.JSX.Element {
               presenceBeat={activeResponseCueBeat}
               presenceBeats={responseCueBeatHistory}
               onUtterance={playDebateUtterance}
+              playMysteryPremiumVoice={(voiceRequest) => playWhodunnitPremiumVoice({
+                ...voiceRequest,
+                selection: () => ({
+                  ...voicePlaybackSelectionRef.current,
+                  audioEnabled: debateVoiceSurfaceActiveRef.current && !prismPresentationSuspendedRef.current,
+                  volume: settings?.voiceVolume ?? 0,
+                  localOnly: debateResponseMode === "local" ||
+                    blocksOnlineCapabilities(responseModeForProvider(effectivePreferredProvider)),
+                  hasKey: Boolean(settings && settings.elevenLabsApiKeySource !== "none"),
+                }),
+                read: (path, options) => api(path, options),
+                stop: stopBotcastUtterance,
+                play: (performance) => {
+                  const actor = debateBots.find((bot) => bot.id === performance.speakerBotId);
+                  if (actor?.hardMuted) return Promise.resolve(false);
+                  const messageId = `whodunnit:${voiceRequest.sessionId}:${performance.cacheKey}`;
+                  return playDebateUtterance({
+                    event: {
+                      version: DEBATE_SCHEMA_VERSION,
+                      id: messageId,
+                      sequence: 0,
+                      phase: "opening",
+                      stepKey: "mystery_spoken_performance",
+                      kind: "speech",
+                      speakerKind: "advocate",
+                      speakerBotId: performance.speakerBotId,
+                      sideId: null,
+                      content: performance.spokenText,
+                      sourceIds: [],
+                      createdAt: new Date().toISOString(),
+                    },
+                    format: "whodunnit",
+                    sessionId: voiceRequest.sessionId,
+                    voiceCacheKey: messageId,
+                    speaker: {
+                      ...actor,
+                      id: performance.speakerBotId,
+                      name: actor?.name ?? "Witness",
+                      color: actor?.color ?? PRISM_COLORS.i,
+                      glyph: actor?.glyph ?? "◇",
+                      hardMuted: actor?.hardMuted ?? false,
+                      voiceProfile: performance.voiceProfile,
+                    },
+                    player: false,
+                    playerVoice: false,
+                    spokenText: performance.spokenText,
+                    voiceSourceBotId: performance.speakerBotId,
+                    lifecycle: voiceRequest.lifecycle,
+                    roomAcoustics: voiceRequest.roomAcoustics,
+                  });
+                },
+              })}
               onStopUtterance={stopBotcastUtterance}
               onReleaseUtterance={releaseBotcastPrimaryUtterance}
               onParticipationSlowTimeChange={suspendDebateParticipationAudio}
@@ -155119,6 +155398,17 @@ function HomeContent(): React.JSX.Element {
   );
 }
 
+function HomeRouteContent(): React.JSX.Element {
+  const searchParams = useSearchParams();
+  // Keep the renderer bench independent of session bootstrap and app routing.
+  // Mounting HomeContent here would let its effects redirect the QA surface.
+  return searchParams.get("qaAvatarHd") === "1" ? (
+    <AvatarHdBenchSurface />
+  ) : (
+    <HomeContent />
+  );
+}
+
 export default function Home(): React.JSX.Element {
   return (
     <>
@@ -155126,7 +155416,7 @@ export default function Home(): React.JSX.Element {
       <PrismAdaptiveDomQualityGovernor />
       <PrismVisualLifecycleBridge />
       <Suspense fallback={null}>
-        <HomeContent />
+        <HomeRouteContent />
       </Suspense>
       {PRISM_APP_CUSTOM_CURSOR_ENABLED ? <PrismAppCursor /> : null}
     </>
