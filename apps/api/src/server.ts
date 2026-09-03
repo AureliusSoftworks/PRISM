@@ -374,6 +374,9 @@ import {
   type DebateMysteryEvidencePropResolutionRequestV1,
   type DebateMysteryMansionExteriorAssetPreparationV2,
   replaceDebateMysteryRoomLightsV1,
+  cleanDebateMysteryCaseFileV1,
+  rerollDebateMysteryItemDescriptionV1,
+  setDebateMysteryEvidenceEmojiV1,
   type DebateMysteryRoomAssetPreparationV2,
 } from "./debate-mystery-v2.ts";
 import { saveDebateMysteryRoomLightingV1, validateRoomLightingEditV1 } from "./debate-mystery-room-lighting.ts";
@@ -11786,6 +11789,9 @@ const DEBATE_MYSTERY_SCENE_REPAIR_ACTIONS_V1 = new Set([
   "regenerate_evidence_asset",
   "repair_evidence_name",
   "repair_evidence_description",
+  "set_evidence_emoji",
+  "reroll_evidence_description",
+  "clean_case_file",
   "reduce_evidence_magenta",
   "regenerate_music",
   "regenerate_ambience",
@@ -11801,11 +11807,33 @@ async function repairDebateMysterySceneV1(args: {
   previewLights?: import("@localai/shared").MansionDynamicLightV2[];
   liveSelection?: Record<string, unknown>;
   expectedRevision?: number;
+  /** For set_evidence_emoji: the player's chosen symbol. */
+  emoji?: unknown;
 }): Promise<DebateSessionV1> {
   assertRefractionActive();
   const session = getDebateSession(db, args.userId, args.sessionId);
   if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
     throw new HttpError(409, "Scene repair requires a Whodunnit V2 case.");
+  }
+  if (args.action === "set_evidence_emoji") {
+    if (!args.subjectId) throw new HttpError(404, "Only a found Case File item can receive a new emoji.");
+    return setDebateMysteryEvidenceEmojiV1(db, args.userId, args.sessionId, {
+      subjectId: args.subjectId, emoji: args.emoji, expectedRevision: args.expectedRevision,
+    });
+  }
+  if (args.action === "reroll_evidence_description" || args.action === "clean_case_file") {
+    // Text-only rewrites run on the session's selected lane and stay LOCAL in LOCAL.
+    const runtime = await debateAiRuntimeForUser(
+      args.userId, session.provider, frozenDebateModelOverride(session), session.responseMode,
+      undefined, undefined, debateAutoRoutingContext(session, args.liveSelection),
+    );
+    if (args.action === "clean_case_file") {
+      return cleanDebateMysteryCaseFileV1(db, args.userId, args.sessionId, { expectedRevision: args.expectedRevision }, runtime);
+    }
+    if (!args.subjectId) throw new HttpError(404, "Only a found Case File item can receive a text repair.");
+    return rerollDebateMysteryItemDescriptionV1(db, args.userId, args.sessionId, {
+      subjectId: args.subjectId, expectedRevision: args.expectedRevision,
+    }, runtime);
   }
   if (args.action === "repair_evidence_name" || args.action === "repair_evidence_description") {
     if (!args.subjectId || !session.formatState.record.some((item) => item.admitted &&
@@ -21651,8 +21679,8 @@ function buildRoutes(
     route("POST", "/api/debates/:id/mystery-scene-repair", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
-      if (Object.keys(body).some((key) => !["action", "roomId", "subjectId", "artStyle", "expectedRevision", "preferredProvider", "modelOverride", "responseMode", "reasoningEffort", "turbo"].includes(key))) {
-        throw new HttpError(400, "Scene repair accepts only an action, room, found item, and current art style.");
+      if (Object.keys(body).some((key) => !["action", "roomId", "subjectId", "artStyle", "emoji", "expectedRevision", "preferredProvider", "modelOverride", "responseMode", "reasoningEffort", "turbo"].includes(key))) {
+        throw new HttpError(400, "Scene repair accepts only an action, room, found item, emoji, and current art style.");
       }
       const action = typeof body.action === "string" &&
           DEBATE_MYSTERY_SCENE_REPAIR_ACTIONS_V1.has(
@@ -21674,6 +21702,7 @@ function buildRoutes(
           ? body.subjectId.trim()
           : null,
         artStyle: body.artStyle === "upgraded" ? "upgraded" : "mosaic",
+        emoji: body.emoji,
       });
       ctx.res.setHeader("cache-control", "private, no-store");
       json(ctx.res, 200, {

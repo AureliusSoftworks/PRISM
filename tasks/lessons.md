@@ -1015,3 +1015,8 @@
 **Trigger**: After aligning Signal’s producer-comments caret, the agent asked Jared to report back.
 **Lesson**: One-shot product fixes ship and stop. No verification AskQuestion unless we are already iterating.
 **Applies to**: Agent communication after PRISM bugfixes
+
+### 2026-09-03 · [UX]
+**Trigger**: Whodunnit light-color sampling chose a broad neutral ceiling instead of the smaller warm fixture the player clicked.
+**Lesson**: Local raster sampling must rank a bounded set of each color cluster’s strongest nearby pixels rather than requiring a fixed percentage of the full search area. Large neutral surfaces must not outvote a compact luminous source, and existing lights need an explicit resample action.
+**Applies to**: Whodunnit room-light placement, raster color sampling, and contextual editor defaults

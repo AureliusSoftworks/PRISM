@@ -2060,12 +2060,14 @@ export function mansionDynamicLightCenterV2(light: MansionDynamicLightV2): Mansi
 }
 
 /** Deterministic overlay sample. Reduced Motion freezes the seeded frame; it
- * does not remove the authored light or change its saved intensity. */
+ * does not remove the authored light or change its saved intensity.
+ * `blendMix` is how far an electric lamp has drifted toward its second blend
+ * character this frame (0 = primary, 1 = secondary); other kinds stay at 0. */
 export function mansionDynamicLightFrameV2(
   light: MansionDynamicLightV2,
   elapsedMs: number,
   reducedMotion: boolean,
-): { intensity: number; phase: number } {
+): { intensity: number; phase: number; blendMix: number } {
   const seed = `${light.id}:${light.animationSeed}`;
   const maximumIntensity = Math.min(1, Math.max(0, light.intensity));
   const basePhase = seededUnit(`${seed}:phase`) * Math.PI * 2;
@@ -2090,8 +2092,19 @@ export function mansionDynamicLightFrameV2(
   } else {
     modulation = 0.82 + 0.18 * wave(0.42);
   }
+  // A lamp's mains hum: a slow drift between two blend characters with a faint
+  // fast ripple on top. Bounded well inside 0..1 so it never fully switches off
+  // either character, which keeps the crossfade from reading as a strobe.
+  const blendMix = light.kind === "omni"
+    ? Math.min(0.92, Math.max(0.08,
+        0.5 + 0.3 * Math.sin(basePhase + time * 0.85 * tempo * Math.PI * 2) +
+        0.09 * Math.sin(detailPhase + time * 6.8 * Math.PI * 2) +
+        0.08 * (seededUnit(`${seed}:mix`) - 0.5),
+      ))
+    : 0;
   return {
     intensity: Math.min(maximumIntensity, Math.max(0, maximumIntensity * modulation)),
     phase: basePhase,
+    blendMix,
   };
 }

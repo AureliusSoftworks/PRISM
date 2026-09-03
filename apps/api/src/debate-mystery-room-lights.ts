@@ -177,9 +177,12 @@ function inventoryKindToLightKind(kind: SourceKind): MansionDynamicLightV2["kind
  * then straightens it so every ray leaves the window at one shared angle. */
 function godrayPoints(placement: LightPlacementV1): MansionLightPointV2[] | null {
   const window = (placement.window ?? []).filter(isPoint).map(clampPoint);
-  if (window.length < 2 || distance(window[0]!, window[1]!) < 0.01) return null;
+  if (window.length < 2) return null;
   const floor = (placement.floor ?? []).filter(isPoint).map(clampPoint);
-  const [w0, w1] = [window[0]!, window[1]!];
+  // Window corners share an x so the edge stands upright; the parallel landing then does too.
+  const windowX = (window[0]!.x + window[1]!.x) / 2;
+  const [w0, w1] = [{ x: windowX, y: window[0]!.y }, { x: windowX, y: window[1]!.y }];
+  if (Math.abs(w0.y - w1.y) < 0.01) return null;
   let [f0, f1] = floor.length >= 2 ? [floor[0]!, floor[1]!] : floor.length === 1 ? [floor[0]!, floor[0]!] : [null, null];
   if (!f0 || !f1 || (f0.y + f1.y) / 2 <= (w0.y + w1.y) / 2 + 0.02) {
     // No usable landing: fall from the window toward the room's center.

@@ -2,10 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
   canonicalMansionLayoutV2,
+  mansionDynamicLightCenterV2,
   validateMansionLayoutV2,
   type MansionLayoutRoomV2,
   type MansionLayoutV2,
   type MansionRoomArtCandidateV2,
+  type MansionDynamicLightV2,
 } from "@localai/shared";
 import sharp from "sharp";
 import { editImage, generateImage } from "./image-provider.ts";
@@ -135,7 +137,7 @@ export function buildMansionRoomArtCandidatePromptV2(args: {
     .map((light) => {
       const points = light.kind === "neon"
         ? light.geometry.points
-        : [{ x: light.geometry.x, y: light.geometry.y }];
+        : [mansionDynamicLightCenterV2(light)];
       return `${light.kind} at normalized ${points.map((point) =>
         `(${point.x.toFixed(2)}, ${point.y.toFixed(2)})`
       ).join(" to ")} with intensity ${light.intensity.toFixed(2)}`;
@@ -418,6 +420,8 @@ export function acceptMansionRoomArtCandidateV2(
   userId: string,
   bundleId: string,
   roomId: string,
+  /** Lights detected on the accepted plate replace the room's set in the same write. */
+  options: { lights?: readonly MansionDynamicLightV2[] } = {},
 ): void {
   const row = readBundle(db, userId, bundleId);
   const layout = parseLayout(row);
@@ -442,6 +446,12 @@ export function acceptMansionRoomArtCandidateV2(
           acceptedRoomArtAnchorSha256: roomAnchorContractSha256(layout, roomId),
         }
       : entity),
+    ...(options.lights
+      ? { lights: [
+          ...layout.lights.filter((light) => light.roomId !== roomId),
+          ...options.lights.map((light) => ({ ...light, roomId })),
+        ] }
+      : {}),
   };
   const now = new Date().toISOString();
   db.exec("BEGIN IMMEDIATE");

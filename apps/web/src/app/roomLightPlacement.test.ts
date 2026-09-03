@@ -47,6 +47,25 @@ describe("Whodunnit room light placement", () => {
     }), "#f5aa50");
   });
 
+  it("keeps a compact warm fixture from being outvoted by a broad neutral surface", () => {
+    const width = 33;
+    const height = 33;
+    const data = raster(width, height, [122, 128, 138, 255]);
+    for (let y = 14; y <= 18; y += 1) {
+      for (let x = 14; x <= 18; x += 1) setPixel(data, width, x, y, [238, 165, 82, 255]);
+    }
+
+    assert.equal(sampleNaturalRoomLightColor({
+      data,
+      width,
+      height,
+      centerX: 16.5,
+      centerY: 16.5,
+      radiusX: 16.5,
+      radiusY: 16.5,
+    }), "#eea552");
+  });
+
   it("keeps sampled color independent from light type", () => {
     const color = "#c8e9ff";
     const lamp = createRoomLight("room-library", "omni", { x: 0.4, y: 0.5 }, "light:lamp", color);
@@ -114,12 +133,16 @@ describe("Whodunnit room light placement", () => {
     assert.match(editor, /lights\.length >= MANSION_LAYOUT_V2_MAX_LIGHTS/u);
     assert.match(editor, /sampleRoomLightColorFromImage\(roomImageRef\.current, picker\)/u);
     assert.match(editor, /sampledColor \?\? ROOM_LIGHT_DEFAULT_COLOR/u);
+    assert.match(editor, /Resample color/u);
+    assert.match(editor, /sampleRoomLightColorFromImage\(roomImageRef\.current, roomLightCenter\(source\)\)/u);
+    assert.match(editor, /updateLight\(id, \(light\) => \(\{ \.\.\.light, color: sampledColor \}\)\)/u);
   });
 
   it("documents that placement samples color locally and independently from type", () => {
     const tutorial = readFileSync(new URL("./modeTutorials.ts", import.meta.url), "utf8");
 
     assert.match(tutorial, /PRISM locally samples the brightest coherent color near that point/u);
-    assert.match(tutorial, /light type controls shape and motion while color remains independently editable/u);
+    assert.match(tutorial, /right-click an existing light to resample from its current position/u);
+    assert.match(tutorial, /Light type controls shape and motion while color remains independently editable/u);
   });
 });

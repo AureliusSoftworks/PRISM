@@ -39,6 +39,7 @@ import {
   type DebateMysteryPublicTopicV2,
   type DebateMysteryRecordReferenceV2,
   type DebateMysteryRoomV2,
+  type DebateMysteryCaseFilePresentationOverridesV1,
   type DebateMysterySceneRepairActionV1,
   type DebateMysterySealedAssetRefV1,
   type DebateMysteryTheoryV1,
@@ -172,7 +173,8 @@ import {
   type MysteryMansionTravelFoleyHandleV1,
 } from "./debateMysteryMansionTravel";
 import type { MysteryBotSummary } from "./DebateMysteryExperience";
-import type { BotPickerGlyphRenderer } from "./BotPicker";
+import { BotPickerTile, type BotPickerGlyphRenderer } from "./BotPicker";
+import { normalizeDebateEvidenceEmojiChoice, searchDebateEvidenceEmojis } from "./debateEvidenceExhibits";
 import { formatDebateMysteryV2ForgeErrorDetails } from "./debateMysteryV2ForgeFailureDetails";
 import {
   debateMysteryForgeAuthoritativePercent,
@@ -769,7 +771,30 @@ const MYSTERY_SCENE_REPAIR_COPY: Record<
     loader: "Rebuilding the mansion ambience",
     detail: "PRISM is creating a new environmental room-tone bed for this mansion without changing its rooms or clues.",
   },
+  set_evidence_emoji: {
+    issue: "An item's emoji isn't accurate",
+    action: "Pick a new emoji for a found item",
+    loader: "Updating the item's emoji",
+    detail: "PRISM is swapping only the symbol shown for this item. Its name, description, and case facts stay frozen.",
+  },
+  reroll_evidence_description: {
+    issue: "An item's description isn't accurate",
+    action: "Rewrite a found item's description",
+    loader: "Rewriting the item description",
+    detail: "PRISM is rewriting the description from the item's own authored text: repeated wording goes, every distinct observation stays, nothing new is added.",
+  },
+  clean_case_file: {
+    issue: "The Case File is hard to read",
+    action: "Clean up and organize the whole Case File",
+    loader: "Cleaning up the Case File",
+    detail: "PRISM is tidying every found item, Case Kit item, and observation into concise, scannable entries. Facts stay frozen and Undo keeps the previous file.",
+  },
 };
+
+const CASE_FILE_REPAIR_ACTIONS: readonly DebateMysterySceneRepairActionV1[] = ["set_evidence_emoji", "reroll_evidence_description", "clean_case_file"];
+const LOCAL_TEXT_REPAIR_ACTIONS: readonly DebateMysterySceneRepairActionV1[] = [
+  "repair_evidence_name", "repair_evidence_description", "set_evidence_emoji", "reroll_evidence_description", "clean_case_file",
+];
 
 interface MansionRoomPlacement {
   room: DebateMysteryRoomV2;
@@ -1765,6 +1790,8 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   >(null);
   const roomUpgradeSynthesisJobIdRef = useRef<string | null>(null);
   const [sceneRepairOpen, setSceneRepairOpen] = useState<"exterior" | string | null>(null);
+  const [sceneRepairItemPick, setSceneRepairItemPick] = useState<{ action: "set_evidence_emoji" | "reroll_evidence_description"; subjectId: string | null } | null>(null);
+  const [sceneRepairEmojiQuery, setSceneRepairEmojiQuery] = useState("");
   const [lightEditorRoomId, setLightEditorRoomId] = useState<string | null>(null);
   const [dismissedSceneRepairUndoId, setDismissedSceneRepairUndoId] = useState<string | null>(null);
   const sceneRepairDismissalRevisionRef = useRef(0);
@@ -2676,13 +2703,14 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     action: DebateMysterySceneRepairActionV1,
     room: DebateMysteryRoomV2 | null = null,
     item: DebateMysteryPublicRecordItemV2 | null = null,
+    extra: { emoji?: string } = {},
   ): Promise<void> => {
     if (sceneRepairJob) return;
     if (action === "regenerate_evidence_asset") {
       if (item) enqueueItemSynthesis(item);
       return;
     }
-    const textRepair = action === "repair_evidence_name" || action === "repair_evidence_description";
+    const textRepair = LOCAL_TEXT_REPAIR_ACTIONS.includes(action);
     if (liveResponseMode === "local" && !textRepair && action !== "reduce_evidence_magenta") return;
     const run = sceneRepairRunOwner.begin();
     let success = false;
@@ -2706,6 +2734,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           expectedRevision: props.session.revision,
           ...(room ? { roomId: room.id, artStyle: currentRoomArtStyle } : {}),
           ...(item?.reference.kind === "evidence" ? { subjectId: item.reference.id } : {}),
+          ...(extra.emoji ? { emoji: extra.emoji } : {}),
         }), signal: run.signal },
       ));
       if (action === "regenerate_exterior" || action === "align_exterior_door") {
@@ -4899,17 +4928,18 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     </div>
   );
   const renderSceneRepairControl = (
-    context: "exterior" | "room" | "map" | "item",
+    context: "exterior" | "room" | "map" | "item" | "casefile",
     room: DebateMysteryRoomV2 | null = null,
     item: DebateMysteryPublicRecordItemV2 | null = null,
   ): React.JSX.Element | null => {
     if (context === "room" && !room?.visited) return null;
     if (context === "item" && (!item || item.reference.kind !== "evidence" || !item.admitted)) return null;
-    const contextKey = context === "exterior" || context === "map"
+    const contextKey = context === "exterior" || context === "map" || context === "casefile"
       ? context
       : context === "item"
         ? `item:${item!.reference.id}`
         : room!.id;
+    const foundItems = context === "casefile" ? state.record.filter((entry) => entry.admitted && entry.reference.kind === "evidence") : [];
     const undoAction = state.sceneRepairUndo?.action;
     const audioUndo = undoAction === "regenerate_music" || undoAction === "regenerate_ambience";
     const undoApplies = Boolean(
@@ -4918,6 +4948,8 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         ? audioUndo || (state.sceneRepairUndo.roomId === null && !state.sceneRepairUndo.subjectId)
         : context === "item"
           ? audioUndo || state.sceneRepairUndo.subjectId === item!.reference.id
+          : context === "casefile"
+            ? CASE_FILE_REPAIR_ACTIONS.includes(state.sceneRepairUndo.action)
           : context === "map"
             ? audioUndo || Boolean(state.sceneRepairUndo.subjectId)
             : state.sceneRepairUndo.roomId === room!.id || audioUndo),
@@ -4930,6 +4962,8 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     );
     const actions: DebateMysterySceneRepairActionV1[] = context === "exterior"
       ? ["regenerate_exterior", "align_exterior_door", "regenerate_music", "regenerate_ambience"]
+      : context === "casefile"
+        ? [...CASE_FILE_REPAIR_ACTIONS]
       : context === "item"
         ? [
             "repair_evidence_name",
@@ -4964,9 +4998,17 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       ? "exterior"
       : context === "item"
         ? "found item"
+        : context === "casefile"
+          ? "Case File"
         : context === "map"
           ? "mansion audio"
           : "room";
+    const pickedItem = sceneRepairItemPick?.subjectId
+      ? foundItems.find((entry) => entry.reference.id === sceneRepairItemPick.subjectId) ?? null
+      : null;
+    const emojiResults = pickedItem && sceneRepairItemPick?.action === "set_evidence_emoji"
+      ? searchDebateEvidenceEmojis(sceneRepairEmojiQuery || pickedItem.title, 12)
+      : [];
     return (
       <>
         <div className={styles.sceneRepairControl} data-undo={undoApplies ? "true" : undefined}>
@@ -4983,6 +5025,8 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                 void undoSceneRepair();
                 return;
               }
+              setSceneRepairItemPick(null);
+              setSceneRepairEmojiQuery("");
               setSceneRepairOpen(contextKey);
             }}
           >
@@ -5038,7 +5082,51 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                 Choose what looks wrong. PRISM changes presentation only—case facts,
                 discoveries, doors, and action costs stay frozen.
               </p>
-              <div className={styles.sceneRepairOptions}>
+              {sceneRepairItemPick && !pickedItem ? (
+                <div className={styles.sceneRepairItemList} role="group" aria-label="Choose a found item">
+                  <small>{MYSTERY_SCENE_REPAIR_COPY[sceneRepairItemPick.action].action}. Which item?</small>
+                  {foundItems.map((entry) => (
+                    <button key={entry.reference.id} type="button" disabled={Boolean(sceneRepairJob)} onClick={() => {
+                      if (sceneRepairItemPick.action === "reroll_evidence_description") {
+                        setSceneRepairItemPick(null);
+                        void repairScene("reroll_evidence_description", null, entry);
+                      } else {
+                        setSceneRepairEmojiQuery("");
+                        setSceneRepairItemPick({ ...sceneRepairItemPick, subjectId: entry.reference.id });
+                      }
+                    }}>
+                      <span aria-hidden="true">{entry.emoji}</span><strong>{entry.title}</strong>
+                    </button>
+                  ))}
+                  <button type="button" onClick={() => setSceneRepairItemPick(null)}>Back</button>
+                </div>
+              ) : pickedItem && sceneRepairItemPick?.action === "set_evidence_emoji" ? (
+                <div className={styles.sceneRepairEmojiPicker} role="group" aria-label={`Choose an emoji for ${pickedItem.title}`}>
+                  <small>Current: <span aria-hidden="true">{pickedItem.emoji}</span> {pickedItem.title}</small>
+                  <label>Search<input autoFocus type="search" value={sceneRepairEmojiQuery} placeholder={pickedItem.title}
+                    onChange={(event) => setSceneRepairEmojiQuery(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      // Typing or pasting an emoji directly also works: the last symbol wins.
+                      if (event.key !== "Enter") return;
+                      const custom = normalizeDebateEvidenceEmojiChoice(event.currentTarget.value, "");
+                      if (custom && !/[\p{L}\p{N}]/u.test(custom)) {
+                        event.preventDefault();
+                        setSceneRepairItemPick(null);
+                        void repairScene("set_evidence_emoji", null, pickedItem, { emoji: custom });
+                      }
+                    }} /></label>
+                  <div className={styles.sceneRepairEmojiResults} aria-live="polite">
+                    {emojiResults.map((result) => (
+                      <button key={result.emoji} type="button" disabled={Boolean(sceneRepairJob)} aria-label={`Use ${result.label} emoji ${result.emoji}`}
+                        onClick={() => { setSceneRepairItemPick(null); void repairScene("set_evidence_emoji", null, pickedItem, { emoji: result.emoji }); }}>
+                        <span aria-hidden="true">{result.emoji}</span><small>{result.label}</small>
+                      </button>
+                    ))}
+                  </div>
+                  <button type="button" onClick={() => setSceneRepairItemPick({ action: "set_evidence_emoji", subjectId: null })}>Back</button>
+                </div>
+              ) : null}
+              <div className={styles.sceneRepairOptions} data-hidden={sceneRepairItemPick ? "true" : undefined}>
                 {actions.map((action) => {
                   const copy = MYSTERY_SCENE_REPAIR_COPY[action];
                   const issue = action === "regenerate_room_mosaic" && hasUpgrade
@@ -5055,12 +5143,15 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                       disabled={
                         Boolean(sceneRepairJob) ||
                         itemGenerationAlreadyQueued ||
-                        (liveResponseMode === "local" && action !== "repair_evidence_name" && action !== "repair_evidence_description" && action !== "reduce_evidence_magenta" && action !== "refresh_room_lights")
+                        (context === "casefile" && action !== "clean_case_file" && foundItems.length === 0) ||
+                        (liveResponseMode === "local" && !LOCAL_TEXT_REPAIR_ACTIONS.includes(action) && action !== "reduce_evidence_magenta" && action !== "refresh_room_lights")
                       }
                       onClick={() => {
                         if (action === "refresh_room_lights" && room) {
                           setSceneRepairOpen(null);
                           setLightEditorRoomId(room.id);
+                        } else if (context === "casefile" && (action === "set_evidence_emoji" || action === "reroll_evidence_description")) {
+                          setSceneRepairItemPick({ action, subjectId: null });
                         } else void repairScene(action, room, item);
                       }}
                     >
@@ -5777,7 +5868,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         {!spectator && command === "present" ? <div className={styles.choiceTray}><header><h2>Object with evidence or sworn testimony</h2><button type="button" onClick={() => setCommand(null)}>Close</button></header>{renderRecordButtons((record) => { setCommand(null); setPresentedCourtRecord(record); void sendAction({ action: "object_statement", statementId: activeStatement.statementId, record }); })}</div> : null}
         {!spectator && state.pendingProsecutionChoice ? <div className={styles.prosecutionChoice} role="dialog" aria-modal="true" aria-labelledby="prosecution-choice-title"><p className={styles.eyebrow}>Your response</p><h2 id="prosecution-choice-title">{state.pendingProsecutionChoice.prompt}</h2>{state.pendingProsecutionChoice.options.map((option) => <button key={option.id} type="button" disabled={busy || dialoguePerformanceActive} onClick={() => void sendAction({ action: "choose_prosecution_response", choiceId: state.pendingProsecutionChoice!.id, optionId: option.id })}>{option.text}</button>)}</div> : null}
         {caseFileUpdate ? <CaseFileUpdateNotice update={caseFileUpdate} onView={() => { setCaseFileOpen(true); setCaseFileUpdate(null); }} onDismiss={() => setCaseFileUpdate(null)} /> : null}
-        {caseFileOpen ? <CaseFile state={state} playerName={playerCharacterName} playerBot={prosecutorBot} playerColor={playerCharacterColor} playerGlyph={playerCharacterGlyph ?? null} renderBotGlyph={props.renderBotGlyph} renderMysteryBotAvatar={props.renderMysteryBotAvatar} objectUrls={sealedAssetObjectUrls} onClose={() => setCaseFileOpen(false)} transcriptCopyState={props.transcriptCopyState} onCopyVerboseTranscript={props.onCopyVerboseTranscript} /> : null}
+        {caseFileOpen ? <CaseFile state={state} playerName={playerCharacterName} playerBot={prosecutorBot} playerColor={playerCharacterColor} playerGlyph={playerCharacterGlyph ?? null} renderBotGlyph={props.renderBotGlyph} renderMysteryBotAvatar={props.renderMysteryBotAvatar} objectUrls={sealedAssetObjectUrls} onClose={() => setCaseFileOpen(false)} transcriptCopyState={props.transcriptCopyState} onCopyVerboseTranscript={props.onCopyVerboseTranscript} caseFileOverrides={state.caseFilePresentationOverrides ?? null} cleanBusy={Boolean(sceneRepairJob)} canUndoClean={state.sceneRepairUndo?.action === "clean_case_file" && !whodunnitSceneRepairUndoIsDismissed(dismissedSceneRepairUndoId, state.sceneRepairUndo.id)} onClean={() => void repairScene("clean_case_file")} onUndoClean={() => void undoSceneRepair()} /> : null}
         {error ? (
           <WhodunnitChromeErrorNotice
             message={error}
@@ -6404,7 +6495,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         </section>
       ) : null}
       {!roomIntroductionActive
-        ? activeFoundEvidence
+        ? caseFileOpen
+          ? renderSceneRepairControl("casefile")
+          : activeFoundEvidence
           ? renderSceneRepairControl("item", null, activeFoundEvidence)
           : state.roomView === "room" && currentRoom
             ? renderSceneRepairControl("room", currentRoom)
@@ -6445,7 +6538,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       {!spectatorTheory && !roomIntroductionActive && command === "present" && currentSuspect ? <div className={styles.choiceTray}><header><div><p className={styles.eyebrow}>Present</p><h2>Show {currentSuspect.name}</h2></div><button type="button" onClick={() => setCommand(null)}>Close</button></header>{renderRecordButtons((record) => void sendAction({ action: "present_to_suspect", suspectSeatId: currentSuspect.seatId, record }))}</div> : null}
       {!spectatorTheory && !roomIntroductionActive && state.theoryAvailable ? <button type="button" className={styles.fileChargesButton} onClick={() => { playControlSfx("theory"); setTheoryOpen(true); }} data-tutorial-target="mystery-v2-file-theory">File Charges</button> : !spectatorTheory && !roomIntroductionActive ? <small className={styles.theoryHint}>The Theory Board opens after the briefing, one interview, and one admitted record item.</small> : null}
       {caseFileUpdate ? <CaseFileUpdateNotice update={caseFileUpdate} onView={() => { setCaseFileOpen(true); setCaseFileUpdate(null); }} onDismiss={() => setCaseFileUpdate(null)} /> : null}
-      {caseFileOpen ? <CaseFile state={state} playerName={playerCharacterName} playerBot={prosecutorBot} playerColor={playerCharacterColor} playerGlyph={playerCharacterGlyph ?? null} renderBotGlyph={props.renderBotGlyph} renderMysteryBotAvatar={props.renderMysteryBotAvatar} objectUrls={sealedAssetObjectUrls} onClose={() => setCaseFileOpen(false)} transcriptCopyState={props.transcriptCopyState} onCopyVerboseTranscript={props.onCopyVerboseTranscript} /> : null}
+      {caseFileOpen ? <CaseFile state={state} playerName={playerCharacterName} playerBot={prosecutorBot} playerColor={playerCharacterColor} playerGlyph={playerCharacterGlyph ?? null} renderBotGlyph={props.renderBotGlyph} renderMysteryBotAvatar={props.renderMysteryBotAvatar} objectUrls={sealedAssetObjectUrls} onClose={() => setCaseFileOpen(false)} transcriptCopyState={props.transcriptCopyState} onCopyVerboseTranscript={props.onCopyVerboseTranscript} caseFileOverrides={state.caseFilePresentationOverrides ?? null} cleanBusy={Boolean(sceneRepairJob)} canUndoClean={state.sceneRepairUndo?.action === "clean_case_file" && !whodunnitSceneRepairUndoIsDismissed(dismissedSceneRepairUndoId, state.sceneRepairUndo.id)} onClean={() => void repairScene("clean_case_file")} onUndoClean={() => void undoSceneRepair()} /> : null}
       {theoryOpen || spectatorTheory ? (
         <div className={styles.theoryBoard} role="dialog" aria-modal="true" aria-labelledby="theory-v2-title">
           <header>
@@ -6710,6 +6803,12 @@ function CaseFile(props: {
   onClose: () => void;
   transcriptCopyState: V2ReviewCopyState;
   onCopyVerboseTranscript: () => Promise<void>;
+  /** Presentation-only text from the last Case File clean-up. */
+  caseFileOverrides: DebateMysteryCaseFilePresentationOverridesV1 | null;
+  cleanBusy: boolean;
+  canUndoClean: boolean;
+  onClean: () => void;
+  onUndoClean: () => void;
 }): React.JSX.Element {
   const observations = debateMysteryCaseFileObservationsV2({
     dialogueHistory: props.state.dialogueHistory,
@@ -6717,27 +6816,48 @@ function CaseFile(props: {
   });
   const metWitnesses = props.state.suspects.filter((suspect) =>
     props.state.metSuspectSeatIds.includes(suspect.seatId));
+  const { canUndoClean, cleanBusy, onUndoClean } = props;
+  useEffect(() => {
+    // Standard undo while the file is open; text fields keep their own undo.
+    const onKeyDown = (event: globalThis.KeyboardEvent): void => {
+      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== "z") return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, [contenteditable=\"true\"]")) return;
+      if (!canUndoClean || cleanBusy) return;
+      event.preventDefault();
+      onUndoClean();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [canUndoClean, cleanBusy, onUndoClean]);
   return (
     <>
       <div className={styles.caseFileBackdrop} aria-hidden="true" />
+      {/* The investigator stands in the blurred room outside the file, drawn as a selected bot tile. */}
+      <div className={styles.caseFileInvestigatorStage} aria-label={`${props.playerName}, Investigator`} role="img">
+        <BotPickerTile
+          item={{ id: props.playerBot?.id ?? "investigator", name: props.playerName, color: props.playerColor, glyph: props.playerBot?.glyph ?? props.playerGlyph }}
+          selected
+          forceName
+          forceGlyph
+          accentColor={props.playerColor}
+          geometry={{ tileSize: 192, glyphSize: 96, glyphStroke: 1.6 }}
+          renderGlyph={props.renderBotGlyph}
+          style={{ "--tile-size": "192px" } as CSSProperties}
+          buttonProps={{ tabIndex: -1, "aria-hidden": "true" }}
+        />
+        <small>Investigator</small>
+      </div>
       <aside className={styles.caseFile} role="dialog" aria-modal="true" aria-labelledby="mystery-v2-case-file-title">
-        <header><div><p className={styles.eyebrow}>Prosecution record</p><h2 id="mystery-v2-case-file-title">Case File</h2></div><div className={styles.caseFileHeaderActions}><WhodunnitTranscriptCopyButton state={props.transcriptCopyState} onCopy={props.onCopyVerboseTranscript} /><button type="button" onClick={props.onClose}>Close</button></div></header>
+        <header><div><p className={styles.eyebrow}>Prosecution record</p><h2 id="mystery-v2-case-file-title">Case File</h2></div><div className={styles.caseFileHeaderActions}><WhodunnitTranscriptCopyButton state={props.transcriptCopyState} onCopy={props.onCopyVerboseTranscript} /><button type="button" disabled={props.cleanBusy} title="Rewrite every entry to be concise and organized. Undo keeps the previous file." onClick={props.onClean}>Clean up</button><button type="button" disabled={!props.canUndoClean || props.cleanBusy} title="Undo the last clean-up (⌘Z)" onClick={props.onUndoClean}>Undo</button><button type="button" onClick={props.onClose}>Close</button></div></header>
         <div className={styles.caseFileLayout}>
-          <section className={styles.caseFileInvestigator} aria-label={`${props.playerName}, Investigator`} style={{ "--case-file-investigator-color": props.playerColor } as CSSProperties}>
-            <div className={styles.caseFileInvestigatorAvatar} aria-hidden="true">
-              {props.playerBot
-                ? props.renderMysteryBotAvatar(props.playerBot, "full", { demeanor: "partner", blinkEnabled: true, facing: "right" })
-                : props.renderBotGlyph(props.playerGlyph, { size: 48, strokeWidth: 1.5 })}
-            </div>
-            <div><small>Investigator</small><strong>{props.playerName}</strong></div>
-          </section>
           <div className={styles.caseFileContents}>
             <section>
               <h3>Case Kit</h3>
               {(props.state.caseKit ?? []).map((item) => (
                 <article key={item.id}>
                   <span aria-hidden="true">{item.emoji}</span>
-                  <div><strong>{item.title}</strong><small>{item.kind} · acquired by {props.playerName}</small><p>{item.description}</p></div>
+                  <div><strong>{item.title}</strong><small>{item.kind} · acquired by {props.playerName}</small><p>{props.caseFileOverrides?.caseKit?.[item.id]?.description ?? item.description}</p></div>
                 </article>
               ))}
               {(props.state.caseKit ?? []).length === 0 ? <p className={styles.caseFileEmpty}>No access items recovered yet.</p> : null}
@@ -6748,7 +6868,7 @@ function CaseFile(props: {
                 {observations.map((observation) => (
                   <article key={observation.id}>
                     <span aria-hidden="true">✦</span>
-                    <div><strong>{observation.roomName}</strong><small>{props.playerName} · personal observation</small><p>{observation.text}</p></div>
+                    <div><strong>{observation.roomName}</strong><small>{props.playerName} · personal observation</small><p>{props.caseFileOverrides?.observations?.[observation.id]?.text ?? observation.text}</p></div>
                   </article>
                 ))}
                 {observations.length === 0 ? <p className={styles.caseFileEmpty}>No case-relevant room observations recorded yet.</p> : null}

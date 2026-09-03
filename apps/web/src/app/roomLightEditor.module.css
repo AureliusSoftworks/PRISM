@@ -21,6 +21,17 @@
 .dialog .marker[data-selected="true"] { outline: 2px solid white; outline-offset: 3px; }
 .marker small { position: absolute; right: -.3rem; top: -.5rem; border-radius: 1rem; padding: .05rem .3rem; background: #fff; color: #111; font-size: .65rem; }
 .dialog .endpoint { position: absolute; z-index: 6; width: .85rem; height: .85rem; padding: 0; background: white; border: 2px solid #161126; border-radius: 2px; transform: translate(-50%,-50%); touch-action: none; cursor: move; }
+.dialog .endpoint[data-godray-corner] { width: 1rem; height: 1rem; border-color: #fff; box-shadow: 0 0 0 2px #0009, 0 2px 8px #000a; }
+.dialog .endpoint[data-godray-corner="window"] { background: var(--accent); }
+.dialog .endpoint[data-godray-corner="floor"] { background: #7ee0ff; }
+/* Guide for the selected godray: dashed at rest, solid and filled while a corner drags. */
+.godrayGuide { position: absolute; z-index: 4; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; filter: drop-shadow(0 0 2px #000c); }
+.godrayGuide polygon { fill: #ffffff2e; stroke: #fff; stroke-width: 1.5; stroke-dasharray: 5 4; }
+.godrayGuide[data-dragging="true"] polygon { fill: #ffffff59; stroke-width: 2; stroke-dasharray: none; }
+.godrayGuideRay { stroke: #fffc; stroke-width: 1; stroke-dasharray: 2 3; }
+.godrayGuide[data-dragging="true"] .godrayGuideRay { stroke-dasharray: none; }
+.godrayGuideWindow { stroke: var(--accent); stroke-width: 3; stroke-linecap: round; }
+.godrayGuideFloor { stroke: #7ee0ff; stroke-width: 3; stroke-linecap: round; }
 .inspector { width: 15rem; padding: 1rem; display: flex; flex-direction: column; gap: .85rem; overflow-y: auto; border-left: 1px solid var(--edge); }
 .inspector small { line-height: 1.5; }
 .lightList { display: flex; gap: .35rem; flex-wrap: wrap; }
@@ -28,7 +39,9 @@
 .properties { display: flex; flex-direction: column; gap: .9rem; }
 .properties label { display: flex; justify-content: space-between; align-items: center; gap: .5rem; font-size: .85rem; }
 .properties input[type="range"] { width: 8rem; }
-.contextMenu { position: fixed; z-index: 15; padding: .4rem; background: var(--panel); border: 1px solid var(--edge); border-radius: .75rem; box-shadow: 0 .8rem 2rem #0008; }
+.contextMenu { position: fixed; z-index: 15; display: grid; gap: .35rem; min-width: 12rem; padding: .4rem; background: var(--panel); border: 1px solid var(--edge); border-radius: .75rem; box-shadow: 0 .8rem 2rem #0008; }
+.contextMenu button { width: 100%; text-align: left; }
+.contextMenu button small { float: right; margin-left: .75rem; color: var(--muted); font-size: .72rem; }
 .pickerScrim { position: absolute; inset: 0; z-index: 20; display: grid; place-items: center; background: #02040bc4; }
 .picker { border: 1px solid var(--edge); border-radius: 1rem; background: var(--panel); padding: 1.25rem; width: min(28rem,90%); display: grid; gap: .7rem; }
 .picker header { display: flex; align-items: center; justify-content: space-between; }

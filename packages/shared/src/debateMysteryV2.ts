@@ -1219,9 +1219,26 @@ export type DebateMysterySceneRepairActionV1 =
   | "regenerate_evidence_asset"
   | "repair_evidence_name"
   | "repair_evidence_description"
+  | "set_evidence_emoji"
+  | "reroll_evidence_description"
+  | "clean_case_file"
   | "reduce_evidence_magenta"
   | "regenerate_music"
   | "regenerate_ambience";
+
+/** Presentation-only overrides for one admitted evidence item. */
+export interface DebateMysteryEvidencePresentationOverrideV1 {
+  title?: string;
+  description?: string;
+  emoji?: string;
+}
+
+/** Presentation-only overrides for Case File entries that are not evidence.
+ * Observation keys are `${nodeId}:${occurredAt}` of the Examine dialogue entry. */
+export interface DebateMysteryCaseFilePresentationOverridesV1 {
+  caseKit?: Record<string, { description?: string }>;
+  observations?: Record<string, { text?: string }>;
+}
 
 export interface DebateMysterySceneRepairAssetUndoV1 {
   kind: DebateMysterySealedAssetKindV1;
@@ -1245,7 +1262,15 @@ export interface DebateMysterySceneRepairUndoV1 {
   previousEvidencePresentation?: {
     title: string;
     description: string;
-    override: { title?: string; description?: string } | null;
+    /** Missing on records written before emoji became a presentation field. */
+    emoji?: string;
+    override: DebateMysteryEvidencePresentationOverrideV1 | null;
+  };
+  /** Whole-file clean-up: every override map and admitted display field as it stood before. */
+  previousCaseFilePresentation?: {
+    evidenceOverrides: Record<string, DebateMysteryEvidencePresentationOverrideV1> | null;
+    caseFileOverrides: DebateMysteryCaseFilePresentationOverridesV1 | null;
+    record: Array<{ id: string; title: string; description: string; emoji: string }>;
   };
   previousMansionExterior?: DebateMysterySealedAssetRefV1 | null;
   previousMansionPresentation?: DebateMysteryMansionPresentationSnapshotV2;
@@ -1710,7 +1735,9 @@ export interface DebateWhodunnitFormatStateV2 {
   /** The latest in-field scene repair. Missing means there is nothing to undo. */
   sceneRepairUndo?: DebateMysterySceneRepairUndoV1 | null;
   /** Presentation only; keys must identify already admitted evidence. */
-  evidencePresentationOverrides?: Record<string, { title?: string; description?: string }>;
+  evidencePresentationOverrides?: Record<string, DebateMysteryEvidencePresentationOverrideV1>;
+  /** Presentation only; Case Kit descriptions and Observation Log text after a clean-up. */
+  caseFilePresentationOverrides?: DebateMysteryCaseFilePresentationOverridesV1;
   /** Public because the opening scene is visible; never derived from a clue. */
   crimeSceneRoomId?: string | null;
   /** Finite first-room sweep required before the mansion map unlocks. */

@@ -2140,7 +2140,13 @@ export function attachDebateMysteryMansionExteriorAssetV2(
 
 export interface DebateMysterySceneRepairCommitV1 {
   expectedRevision?: number;
-  evidencePresentation?: { title?: string; description?: string };
+  evidencePresentation?: { title?: string; description?: string; emoji?: string };
+  /** A whole Case File clean-up. Maps merge into the existing overrides. */
+  caseFilePresentation?: {
+    evidence: Record<string, { title?: string; description?: string; emoji?: string }>;
+    caseKit: Record<string, { description?: string }>;
+    observations: Record<string, { text?: string }>;
+  };
   action: DebateMysterySceneRepairActionV1;
   roomId?: string | null;
   subjectId?: string | null;
@@ -2238,6 +2244,270 @@ export async function repairDebateMysteryItemTextV1(
   });
 }
 
+const EVIDENCE_EMOJI_MAX_GRAPHEMES = 2;
+
+/** One or two graphemes of symbol, never letters or digits. */
+export function normalizeMysteryEvidenceEmojiV1(value: unknown): string {
+  const text = typeof value === "string" ? value.trim() : "";
+  const Segmenter = (Intl as unknown as { Segmenter?: new (locale?: string, options?: { granularity: "grapheme" }) => { segment(input: string): Iterable<{ segment: string }> } }).Segmenter;
+  const graphemes = Segmenter
+    ? Array.from(new Segmenter(undefined, { granularity: "grapheme" }).segment(text), (part) => part.segment)
+    : Array.from(text);
+  if (graphemes.length === 0 || graphemes.length > EVIDENCE_EMOJI_MAX_GRAPHEMES || text.length > 24 ||
+    /[\p{L}\p{N}<>{}"'\\]/u.test(text)) {
+    throw new HttpError(400, "Choose one emoji for the item.");
+  }
+  return text;
+}
+
+/** Swaps only the admitted item's symbol. No model runs; the write is local and undoable. */
+export function setDebateMysteryEvidenceEmojiV1(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  args: { subjectId: string; emoji: unknown; expectedRevision?: number },
+): DebateSessionV1 {
+  const emoji = normalizeMysteryEvidenceEmojiV1(args.emoji);
+  const session = getDebateSession(db, userId, sessionId);
+  if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2 ||
+    !session.formatState.record.some((item) => item.admitted && item.reference.kind === "evidence" && item.reference.id === args.subjectId)) {
+    throw new HttpError(404, "Only a found Case File item can receive a new emoji.");
+  }
+  return commitDebateMysterySceneRepairV1(db, userId, sessionId, {
+    action: "set_evidence_emoji", subjectId: args.subjectId, expectedRevision: args.expectedRevision,
+    evidencePresentation: { emoji },
+  });
+}
+
+interface MysteryPresentationRewriteEntryV1 { id: string; kind: "evidence" | "case_kit" | "observation"; label: string; text: string }
+
+/** Words with a capital letter that the rewrite is allowed to use: everything already
+ * visible in the Case File. Any other capitalised word is treated as an invented fact. */
+function mysteryRewriteAllowedNamesV1(sources: readonly string[]): Set<string> {
+  const allowed = new Set<string>();
+  for (const source of sources) {
+    for (const match of source.matchAll(/\p{Lu}[\p{L}\p{N}'’.-]*/gu)) allowed.add(match[0].toLocaleLowerCase());
+  }
+  return allowed;
+}
+
+function mysteryRewriteIntroducesNamesV1(text: string, allowed: ReadonlySet<string>): boolean {
+  return [...text.matchAll(/\p{Lu}[\p{L}\p{N}'’.-]*/gu)].some((match) => {
+    const word = match[0].replace(/[.,;:!?]+$/u, "");
+    const sentenceStart = match.index === 0 || /[.!?]\s+$/u.test(text.slice(0, match.index));
+    return word.length > 1 && !allowed.has(word.toLocaleLowerCase()) && !(sentenceStart && allowed.has(word.toLocaleLowerCase()));
+  });
+}
+
+const MYSTERY_REWRITE_FORBIDDEN = /\b(?:guilty|culprit|murderer|killer|the accused|confess(?:ed|ion)?|motive)\b/iu;
+
+/** Runs one presentation rewrite on the session's selected lane, LOCAL-safe,
+ * and returns the parsed JSON. The prompt payload is data, never instructions. */
+async function runMysteryPresentationRewriteV1(
+  db: DatabaseSync,
+  userId: string,
+  runtime: DebateAiRuntime,
+  args: { operation: string; system: string; payload: Record<string, unknown>; maxTokens: number; validate: (raw: string) => unknown },
+): Promise<unknown> {
+  const accountIsLocal = (): boolean => (db.prepare("SELECT preferred_provider FROM users WHERE id = ?")
+    .get(userId) as { preferred_provider: string } | undefined)?.preferred_provider === "local";
+  const localOnly = accountIsLocal() || runtime.responseMode === "local" || runtime.preferredProvider === "local";
+  const lanes = localOnly ? [runtime.local] : runtime.lanes?.length ? runtime.lanes : [mysteryV2Lane(runtime)];
+  const result = await prismGenerationBroker.runStructured({
+    work: {
+      workflow: "whodunnit_v2", operation: args.operation, stage: "field_repair",
+      executionLane: "selected", role: "repair", outputClass: "connective",
+      priority: "interactive", privacyMode: localOnly ? "local" : "online",
+      timeoutMs: 60_000,
+    },
+    lanes,
+    modelSelectionKind: runtime.modelSelectionKind ?? "fixed",
+    maxAttempts: 2,
+    totalTimeoutMs: 90_000,
+    perAttemptTimeoutMs: () => 60_000,
+    run: ({ lane, signal, work }) => {
+      assertRefractionActive();
+      if ((localOnly || accountIsLocal()) && lane.providerName !== "local") {
+        throw new HttpError(409, "LOCAL Case File repair requires a local model.");
+      }
+      return lane.provider.generateResponse([
+        { role: "system", content: args.system },
+        { role: "user", content: JSON.stringify(args.payload) },
+      ], {
+        model: lane.model, reasoningEffort: lane.reasoningEffort, turbo: lane.turbo,
+        maxTokens: args.maxTokens, temperature: 0.2, jsonMode: true,
+        usagePurpose: "debate_generation", generationWork: work, signal,
+      });
+    },
+    validate: args.validate,
+  });
+  return result.value;
+}
+
+function parseRewriteJson(raw: string): Record<string, unknown> {
+  let value: unknown;
+  try { value = JSON.parse(raw); } catch { throw new Error("The rewrite did not return valid JSON."); }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("The rewrite did not return an object.");
+  return value as Record<string, unknown>;
+}
+
+function cleanRewriteText(value: unknown, maxLength: number): string | null {
+  if (typeof value !== "string") return null;
+  const text = value.replace(/\s+/gu, " ").trim();
+  if (!text || text.length > maxLength || /[<>{}]/u.test(text)) return null;
+  return text;
+}
+
+/** Rewrites one found item's description from scratch: the canonical authored
+ * text and the current text are the only sources, so nothing new can enter. */
+export async function rerollDebateMysteryItemDescriptionV1(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  args: { subjectId: string; expectedRevision?: number },
+  runtime: DebateAiRuntime,
+): Promise<DebateSessionV1> {
+  assertRefractionActive();
+  const session = getDebateSession(db, userId, sessionId);
+  if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2 ||
+    session.status === "cancelled" || ["case_forge", "trial", "verdict"].includes(session.formatState.playPhase)) {
+    throw new HttpError(409, "This case is not open for item repair.");
+  }
+  if (args.expectedRevision !== undefined && args.expectedRevision !== session.revision) {
+    throw new HttpError(409, "This case changed. Refresh before repairing the item.");
+  }
+  const item = session.formatState.record.find((entry) => entry.admitted &&
+    entry.reference.kind === "evidence" && entry.reference.id === args.subjectId);
+  if (!item) throw new HttpError(404, "Only a found Case File item can receive a text repair.");
+  const { privateCase } = getDebateMysteryCaseV2(db, userId, sessionId);
+  const canonical = privateCase.recordItems.find((entry) =>
+    entry.reference.kind === "evidence" && entry.reference.id === args.subjectId);
+  const sources = [item.title, item.description, canonical?.description ?? ""];
+  const allowed = mysteryRewriteAllowedNamesV1([...sources, ...session.formatState.rooms.map((room) => room.name),
+    ...session.formatState.suspects.map((suspect) => suspect.name), session.formatState.victim?.name ?? ""]);
+  const maxLength = Math.min(600, Math.max(160, Math.round(Math.max(item.description.length, canonical?.description.length ?? 0) * 1.1)));
+  let description: string;
+  try {
+    description = await runMysteryPresentationRewriteV1(db, userId, runtime, {
+      operation: "reroll_evidence_description",
+      system: "Rewrite the description of one found item for a detective's Case File. Use only facts present in the supplied texts. Remove repetition, filler, and any sentence about PRISM, fallbacks, or artwork. Keep every distinct observation once, in plain past-tense prose, two to four sentences. Never add ownership, use, location, significance, or any person. Return only JSON: {\"description\": string}.",
+      payload: { item: { title: item.title, currentDescription: item.description, authoredDescription: canonical?.description ?? item.description }, maxCharacters: maxLength },
+      maxTokens: 700,
+      validate: (raw) => {
+        const text = cleanRewriteText(parseRewriteJson(raw).description, maxLength);
+        if (!text || text.length < 24) throw new Error("The rewritten description was empty or too long.");
+        if (mysteryRewriteIntroducesNamesV1(text, allowed) || MYSTERY_REWRITE_FORBIDDEN.test(text) || /\bPRISM\b/u.test(text)) {
+          throw new Error("The rewritten description added something not in the record.");
+        }
+        return text;
+      },
+    }) as string;
+  } catch {
+    throw new HttpError(409, "The rewrite did not pass review. The previous description is unchanged.");
+  }
+  if (description === item.description) throw new HttpError(409, "The description is already as clean as PRISM can make it.");
+  return commitDebateMysterySceneRepairV1(db, userId, sessionId, {
+    action: "reroll_evidence_description", subjectId: args.subjectId, expectedRevision: session.revision,
+    evidencePresentation: { description },
+  });
+}
+
+/** Cleans the whole Case File in one pass: found items, Case Kit items, and
+ * Observation Log entries come back organised and concise. Every entry must
+ * return, nothing may be added, and the previous file is kept for Undo. */
+export async function cleanDebateMysteryCaseFileV1(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  args: { expectedRevision?: number },
+  runtime: DebateAiRuntime,
+): Promise<DebateSessionV1> {
+  assertRefractionActive();
+  const session = getDebateSession(db, userId, sessionId);
+  if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2 ||
+    session.status === "cancelled" || ["case_forge", "trial", "verdict"].includes(session.formatState.playPhase)) {
+    throw new HttpError(409, "This case is not open for a Case File clean-up.");
+  }
+  if (args.expectedRevision !== undefined && args.expectedRevision !== session.revision) {
+    throw new HttpError(409, "This case changed. Refresh before cleaning the Case File.");
+  }
+  const state = session.formatState;
+  const roomsByLongestId = [...state.rooms].sort((left, right) => right.id.length - left.id.length);
+  const observationOverrides = state.caseFilePresentationOverrides?.observations ?? {};
+  const kitOverrides = state.caseFilePresentationOverrides?.caseKit ?? {};
+  const entries: MysteryPresentationRewriteEntryV1[] = [
+    ...state.record.filter((item) => item.admitted && item.reference.kind === "evidence").map((item) => ({
+      id: item.reference.id, kind: "evidence" as const, label: item.title, text: item.description,
+    })),
+    ...(state.caseKit ?? []).map((item) => ({
+      id: item.id, kind: "case_kit" as const, label: item.title, text: kitOverrides[item.id]?.description ?? item.description,
+    })),
+    ...state.dialogueHistory.flatMap((entry) => {
+      if (!entry.nodeId.startsWith("examine-") || !entry.caseFileRelevant) return [];
+      const room = roomsByLongestId.find((candidate) => entry.nodeId.startsWith(`examine-${candidate.id}-`));
+      const id = `${entry.nodeId}:${entry.occurredAt}`;
+      const text = (observationOverrides[id]?.text ?? entry.visibleText).replace(/\s+/gu, " ").trim();
+      return room && text ? [{ id, kind: "observation" as const, label: room.name, text }] : [];
+    }),
+  ];
+  if (entries.length === 0) throw new HttpError(409, "The Case File has nothing to clean up yet.");
+  const allowed = mysteryRewriteAllowedNamesV1([
+    ...entries.flatMap((entry) => [entry.label, entry.text]),
+    ...state.rooms.map((room) => room.name), ...state.suspects.map((suspect) => suspect.name), state.victim?.name ?? "",
+  ]);
+  const limitFor = (entry: MysteryPresentationRewriteEntryV1): number =>
+    Math.min(entry.kind === "case_kit" ? 260 : 520, Math.max(80, Math.round(entry.text.length * 1.05)));
+  let rewritten: Record<string, string>;
+  try {
+    rewritten = await runMysteryPresentationRewriteV1(db, userId, runtime, {
+      operation: "clean_case_file",
+      system: "Tidy a detective's Case File. For every entry return a cleaner version of its text: remove repeated sentences, filler, and any sentence about PRISM, fallbacks, or artwork; keep every distinct fact once; write plain past-tense prose that is easy to scan. Observations open with where the thing was seen. Never merge entries, add ownership, use, location, significance, or any person, and never mention a suspect that the entry does not already name. Return only JSON: {\"entries\": [{\"id\": string, \"text\": string}]} with exactly the supplied ids.",
+      payload: {
+        entries: entries.map((entry) => ({ id: entry.id, kind: entry.kind, label: entry.label, text: entry.text, maxCharacters: limitFor(entry) })),
+      },
+      maxTokens: Math.min(6_000, 220 + entries.reduce((sum, entry) => sum + Math.ceil(limitFor(entry) / 3), 0)),
+      validate: (raw) => {
+        const parsed = parseRewriteJson(raw);
+        const list = Array.isArray(parsed.entries) ? parsed.entries as Array<Record<string, unknown>> : null;
+        if (!list) throw new Error("The clean-up did not return entries.");
+        const byId = new Map<string, string>();
+        for (const row of list) {
+          if (!row || typeof row !== "object" || typeof row.id !== "string") continue;
+          const entry = entries.find((candidate) => candidate.id === row.id);
+          if (!entry) continue;
+          const text = cleanRewriteText(row.text, limitFor(entry));
+          if (!text || text.length < 12) throw new Error(`Entry ${entry.label} came back empty or too long.`);
+          if (mysteryRewriteIntroducesNamesV1(text, allowed) || MYSTERY_REWRITE_FORBIDDEN.test(text) || /\bPRISM\b/u.test(text)) {
+            throw new Error(`Entry ${entry.label} added something not in the record.`);
+          }
+          byId.set(entry.id, text);
+        }
+        if (byId.size !== entries.length) throw new Error("The clean-up dropped an entry.");
+        return Object.fromEntries(byId);
+      },
+    }) as Record<string, string>;
+  } catch {
+    throw new HttpError(409, "The clean-up did not pass review. The Case File is unchanged.");
+  }
+  const evidence: Record<string, { description?: string }> = {};
+  const caseKit: Record<string, { description?: string }> = {};
+  const observations: Record<string, { text?: string }> = {};
+  let changed = 0;
+  for (const entry of entries) {
+    const text = rewritten[entry.id];
+    if (!text || text === entry.text) continue;
+    changed += 1;
+    if (entry.kind === "evidence") evidence[entry.id] = { description: text };
+    else if (entry.kind === "case_kit") caseKit[entry.id] = { description: text };
+    else observations[entry.id] = { text };
+  }
+  if (changed === 0) throw new HttpError(409, "The Case File is already as clean as PRISM can make it.");
+  return commitDebateMysterySceneRepairV1(db, userId, sessionId, {
+    action: "clean_case_file", expectedRevision: session.revision,
+    caseFilePresentation: { evidence, caseKit, observations },
+  });
+}
+
 /** Commits one presentation-only field repair and retains exactly the prior
  * affected state. Case facts, discovery, doors, and action economy are never
  * part of this mutation. */
@@ -2293,7 +2563,15 @@ export function commitDebateMysterySceneRepairV1(
     ...(evidenceItem ? { previousEvidencePresentation: {
       title: evidenceItem.title,
       description: evidenceItem.description,
+      emoji: evidenceItem.emoji,
       override: state.evidencePresentationOverrides?.[evidenceItem.reference.id] ?? null,
+    } } : {}),
+    ...(repair.caseFilePresentation ? { previousCaseFilePresentation: {
+      evidenceOverrides: state.evidencePresentationOverrides ? structuredClone(state.evidencePresentationOverrides) : null,
+      caseFileOverrides: state.caseFilePresentationOverrides ? structuredClone(state.caseFilePresentationOverrides) : null,
+      record: state.record.filter((item) => item.admitted && item.reference.kind === "evidence").map((item) => ({
+        id: item.reference.id, title: item.title, description: item.description, emoji: item.emoji,
+      })),
     } } : {}),
     ...(repair.mansionExterior !== undefined || repair.action === "align_exterior_door"
       ? { previousMansionExterior: state.mansionExterior ?? null }
@@ -2319,6 +2597,22 @@ export function commitDebateMysterySceneRepairV1(
       },
     };
     Object.assign(evidenceItem, repair.evidencePresentation);
+  }
+  if (repair.caseFilePresentation) {
+    const clean = repair.caseFilePresentation;
+    const evidenceOverrides = { ...state.evidencePresentationOverrides };
+    for (const item of state.record) {
+      if (!item.admitted || item.reference.kind !== "evidence") continue;
+      const next = clean.evidence[item.reference.id];
+      if (!next) continue;
+      evidenceOverrides[item.reference.id] = { ...evidenceOverrides[item.reference.id], ...next };
+      Object.assign(item, next);
+    }
+    state.evidencePresentationOverrides = evidenceOverrides;
+    state.caseFilePresentationOverrides = {
+      caseKit: { ...state.caseFilePresentationOverrides?.caseKit, ...clean.caseKit },
+      observations: { ...state.caseFilePresentationOverrides?.observations, ...clean.observations },
+    };
   }
   if (repair.mansionExterior !== undefined) {
     state.mansionExterior = repair.mansionExterior;
@@ -2399,7 +2693,19 @@ export function undoDebateMysterySceneRepairV1(
     else delete overrides[undo.subjectId];
     state.evidencePresentationOverrides = overrides;
     state.record = state.record.map((item) => item.reference.kind === "evidence" && item.reference.id === undo.subjectId
-      ? { ...item, title: previous.title, description: previous.description } : item);
+      ? { ...item, title: previous.title, description: previous.description, ...(previous.emoji ? { emoji: previous.emoji } : {}) } : item);
+  }
+  if (undo.previousCaseFilePresentation) {
+    const previous = undo.previousCaseFilePresentation;
+    if (previous.evidenceOverrides) state.evidencePresentationOverrides = previous.evidenceOverrides;
+    else delete state.evidencePresentationOverrides;
+    if (previous.caseFileOverrides) state.caseFilePresentationOverrides = previous.caseFileOverrides;
+    else delete state.caseFilePresentationOverrides;
+    const byId = new Map(previous.record.map((entry) => [entry.id, entry]));
+    state.record = state.record.map((item) => {
+      const before = item.reference.kind === "evidence" ? byId.get(item.reference.id) : undefined;
+      return before ? { ...item, title: before.title, description: before.description, emoji: before.emoji } : item;
+    });
   }
   for (const asset of undo.assetSubjects.filter((candidate) => candidate.kind === "evidence")) {
     const restored = getDebateMysterySealedAssetRefV1(

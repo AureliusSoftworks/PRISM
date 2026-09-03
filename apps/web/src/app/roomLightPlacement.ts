@@ -48,12 +48,40 @@ export function directionalRoomLightPoints(light: MansionDirectionalLightV2, asp
   return mansionDirectionalLightPolygonV2(light, aspect);
 }
 
-/** Dragging any corner converts a legacy rectangle into an editable polygon. */
+/** The other corner on the same edge: window corners 0 and 1, floor corners 2 and 3. */
+function godrayCornerPartner(index: number, count: number): number {
+  const partner = index === 0 ? 1 : index === 1 ? 0 : index === 2 ? 3 : index === 3 ? 2 : -1;
+  return partner < count ? partner : -1;
+}
+
+/** Corners on one edge share an x so the window edge and its floor landing stay
+ * upright; only their heights move independently. */
+function syncGodrayCornerColumns(points: LightPoint[], anchorIndex: number | null): LightPoint[] {
+  const next = points.map((point) => ({ ...point }));
+  for (const [first, second] of [[0, 1], [2, 3]] as const) {
+    if (!next[first] || !next[second]) continue;
+    const x = anchorIndex === first ? next[first].x
+      : anchorIndex === second ? next[second].x
+      : (next[first].x + next[second].x) / 2;
+    next[first] = { x, y: next[first].y };
+    next[second] = { x, y: next[second].y };
+  }
+  return next;
+}
+
+/** Dragging any corner converts a legacy rectangle into an editable polygon.
+ * A horizontal drag carries the corner's edge partner along; vertical drags are free. */
 export function setDirectionalRoomLightPoint(
   light: MansionDirectionalLightV2, index: number, point: LightPoint, aspect: number,
 ): MansionDirectionalLightV2 {
-  const points = directionalRoomLightPoints(light, aspect)
+  const wasPolygon = mansionDirectionalGeometryIsPolygonV2(light.geometry);
+  const moved = directionalRoomLightPoints(light, aspect)
     .map((old, position) => position === index ? { x: clamp(point.x), y: clamp(point.y) } : old);
+  const partner = godrayCornerPartner(index, moved.length);
+  // A converted rectangle squares up both edges at once; an existing polygon only follows the dragged corner.
+  const points = wasPolygon
+    ? moved.map((corner, position) => position === partner ? { x: moved[index]!.x, y: corner.y } : corner)
+    : syncGodrayCornerColumns(moved, index);
   return { ...light, geometry: { points } };
 }
 
@@ -86,6 +114,14 @@ export function roomLightBlend(mode: MansionLightBlendModeV1 | undefined, artSty
   return !mode || mode === "auto" ? artStyle === "mosaic" ? "hard-light" : "overlay" : mode;
 }
 
+/** The second blend character an electric lamp crossfades toward: a lifting
+ * wash when the room blend sculpts contrast, and a contrast blend when the room
+ * blend already lifts. */
+export function roomLightAltBlend(mode: MansionLightBlendModeV1 | undefined, artStyle: "mosaic" | "illustrated"): string {
+  const base = roomLightBlend(mode, artStyle);
+  return base === "screen" || base === "plus-lighter" ? "overlay" : "screen";
+}
+
 /** A copy with its own identity and seed, offset so both markers stay grabbable.
  * The offset turns inward on any axis where the shape already touches the edge. */
 export function cloneRoomLight(source: MansionDynamicLightV2, id: string): MansionDynamicLightV2 {
@@ -104,9 +140,71 @@ export function cloneRoomLight(source: MansionDynamicLightV2, id: string): Mansi
 /** Sampling radius around a placed light, in the room art's natural pixels. */
 export const ROOM_LIGHT_SAMPLE_RADIUS_PX = 64;
 
-/** The brightest coherent color inside an ellipse of RGBA pixels. Colors are
- * binned coarsely; a bin must hold a few percent of the samples so one stray
- * specular pixel cannot outvote the lamp shade or window glow around it. */
+const ROOM_LIGHT_HUE_BIN_COUNT = 12;
+const ROOM_LIGHT_NEUTRAL_SATURATION = 0.12;
+const ROOM_LIGHT_STRONGEST_CLUSTER_SIZE = 32;
+const ROOM_LIGHT_MIN_COHERENT_PIXELS = 3;
+const ROOM_LIGHT_MIN_ALPHA = 8;
+const ROOM_LIGHT_EDGE_DISTANCE_WEIGHT = 0.25;
+const ROOM_LIGHT_CENTER_DISTANCE_WEIGHT = 0.75;
+const ROOM_LIGHT_BASE_SELECTION_WEIGHT = 0.5;
+const ROOM_LIGHT_SATURATION_SELECTION_WEIGHT = 0.5;
+const COLOR_CHANNEL_MAX = 255;
+const HUE_CIRCLE_DEGREES = 360;
+const HUE_SECTOR_DEGREES = 60;
+
+interface RoomLightColorCandidate {
+  red: number;
+  green: number;
+  blue: number;
+  selectionScore: number;
+  colorWeight: number;
+}
+
+function roomLightPixelLuminance(red: number, green: number, blue: number): number {
+  return (0.2126 * red + 0.7152 * green + 0.0722 * blue) / COLOR_CHANNEL_MAX;
+}
+
+function roomLightPixelSaturation(red: number, green: number, blue: number): number {
+  const maximum = Math.max(red, green, blue);
+  return maximum === 0 ? 0 : (maximum - Math.min(red, green, blue)) / maximum;
+}
+
+function roomLightPixelHue(red: number, green: number, blue: number): number {
+  const maximum = Math.max(red, green, blue);
+  const minimum = Math.min(red, green, blue);
+  const chroma = maximum - minimum;
+  if (chroma === 0) return 0;
+  if (maximum === red) return (((green - blue) / chroma + 6) % 6) * HUE_SECTOR_DEGREES;
+  if (maximum === green) return ((blue - red) / chroma + 2) * HUE_SECTOR_DEGREES;
+  return ((red - green) / chroma + 4) * HUE_SECTOR_DEGREES;
+}
+
+function roomLightColorClusterKey(red: number, green: number, blue: number, saturation: number): number {
+  if (saturation < ROOM_LIGHT_NEUTRAL_SATURATION) return ROOM_LIGHT_HUE_BIN_COUNT;
+  const binSize = HUE_CIRCLE_DEGREES / ROOM_LIGHT_HUE_BIN_COUNT;
+  return Math.floor(((roomLightPixelHue(red, green, blue) + binSize / 2) % HUE_CIRCLE_DEGREES) / binSize);
+}
+
+function retainStrongestRoomLightColor(
+  candidates: RoomLightColorCandidate[],
+  candidate: RoomLightColorCandidate,
+): void {
+  candidates.push(candidate);
+  candidates.sort((left, right) => right.selectionScore - left.selectionScore);
+  if (candidates.length > ROOM_LIGHT_STRONGEST_CLUSTER_SIZE) candidates.pop();
+}
+
+function roomLightColorClusterScore(candidates: readonly RoomLightColorCandidate[]): number {
+  if (!candidates.length) return 0;
+  const average = candidates.reduce((sum, candidate) => sum + candidate.selectionScore, 0) / candidates.length;
+  const coherence = Math.min(1, candidates.length / ROOM_LIGHT_MIN_COHERENT_PIXELS);
+  return average * coherence;
+}
+
+/** The brightest coherent color inside an ellipse of RGBA pixels. Each hue
+ * competes using only its strongest nearby pixels, so a broad neutral wall
+ * cannot outvote a compact lamp while isolated specular noise stays weak. */
 export function sampleNaturalRoomLightColor(args: {
   data: Uint8ClampedArray;
   width: number;
@@ -116,8 +214,7 @@ export function sampleNaturalRoomLightColor(args: {
   radiusX: number;
   radiusY: number;
 }): string | null {
-  const bins = new Map<number, { red: number; green: number; blue: number; count: number }>();
-  let total = 0;
+  const clusters = new Map<number, RoomLightColorCandidate[]>();
   const minX = Math.max(0, Math.floor(args.centerX - args.radiusX));
   const maxX = Math.min(args.width - 1, Math.ceil(args.centerX + args.radiusX));
   const minY = Math.max(0, Math.floor(args.centerY - args.radiusY));
@@ -126,25 +223,35 @@ export function sampleNaturalRoomLightColor(args: {
     for (let x = minX; x <= maxX; x += 1) {
       const dx = (x + 0.5 - args.centerX) / Math.max(1e-6, args.radiusX);
       const dy = (y + 0.5 - args.centerY) / Math.max(1e-6, args.radiusY);
-      if (dx * dx + dy * dy > 1) continue;
+      const distanceSquared = dx * dx + dy * dy;
+      if (distanceSquared > 1) continue;
       const offset = (y * args.width + x) * 4;
-      if ((args.data[offset + 3] ?? 0) < 8) continue;
+      const alpha = args.data[offset + 3] ?? 0;
+      if (alpha < ROOM_LIGHT_MIN_ALPHA) continue;
       const red = args.data[offset]!; const green = args.data[offset + 1]!; const blue = args.data[offset + 2]!;
-      const key = (red >> 3) << 10 | (green >> 3) << 5 | (blue >> 3);
-      const bin = bins.get(key) ?? { red: 0, green: 0, blue: 0, count: 0 };
-      bin.red += red; bin.green += green; bin.blue += blue; bin.count += 1;
-      bins.set(key, bin);
-      total += 1;
+      const luminance = roomLightPixelLuminance(red, green, blue);
+      const saturation = roomLightPixelSaturation(red, green, blue);
+      const distanceWeight = ROOM_LIGHT_EDGE_DISTANCE_WEIGHT +
+        (1 - distanceSquared) * ROOM_LIGHT_CENTER_DISTANCE_WEIGHT;
+      const colorWeight = luminance * distanceWeight * (alpha / COLOR_CHANNEL_MAX);
+      const selectionScore = colorWeight *
+        (ROOM_LIGHT_BASE_SELECTION_WEIGHT + saturation * ROOM_LIGHT_SATURATION_SELECTION_WEIGHT);
+      const key = roomLightColorClusterKey(red, green, blue, saturation);
+      const candidates = clusters.get(key) ?? [];
+      retainStrongestRoomLightColor(candidates, { red, green, blue, selectionScore, colorWeight });
+      clusters.set(key, candidates);
     }
   }
-  if (total === 0) return null;
-  const luminance = (bin: { red: number; green: number; blue: number; count: number }) =>
-    (0.2126 * bin.red + 0.7152 * bin.green + 0.0722 * bin.blue) / bin.count;
-  const coherent = [...bins.values()].filter((bin) => bin.count >= Math.max(3, total * 0.04));
-  const candidates = coherent.length ? coherent : [...bins.values()];
-  const best = candidates.reduce((winner, bin) => luminance(bin) > luminance(winner) ? bin : winner);
-  const hex = (sum: number) => Math.round(sum / best.count).toString(16).padStart(2, "0");
-  return `#${hex(best.red)}${hex(best.green)}${hex(best.blue)}`;
+  if (!clusters.size) return null;
+  const winner = [...clusters.values()].reduce((best, candidates) =>
+    roomLightColorClusterScore(candidates) > roomLightColorClusterScore(best) ? candidates : best,
+  );
+  const totalWeight = winner.reduce((sum, candidate) => sum + candidate.colorWeight, 0);
+  if (totalWeight === 0) return null;
+  const channel = (select: (candidate: RoomLightColorCandidate) => number) =>
+    Math.round(winner.reduce((sum, candidate) => sum + select(candidate) * candidate.colorWeight, 0) / totalWeight)
+      .toString(16).padStart(2, "0");
+  return `#${channel((candidate) => candidate.red)}${channel((candidate) => candidate.green)}${channel((candidate) => candidate.blue)}`;
 }
 
 /** Samples the room art around a normalized point. Returns null when the image

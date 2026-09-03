@@ -192,6 +192,13 @@ export function mysteryRoomUsesTemplateLightGeometryV1(room: {
     !(room.sealedAsset?.revealed && room.sealedAsset.status === "ready");
 }
 
+/** Lights render smooth at one resolution for every art style: they sit on top
+ * of a Mosaic plate's tesserae rather than snapping to them. Grain keeps the
+ * art-style grid via mysteryRoomCinematographyCanvasSize. */
+export function mysteryRoomLightCanvasSizeV1(): Readonly<{ width: number; height: number }> {
+  return { width: 800, height: 450 };
+}
+
 export function mysteryRoomCinematographyCanvasSize(
   artStyle: MysteryRoomCinematographyArtStyle,
 ): Readonly<{ width: number; height: number }> {

@@ -19,11 +19,12 @@ import {
   mysteryRoomCinematographyLightSourceV1,
   mysteryRoomCinematographyProfileV1,
   mysteryRoomCinematographySeed,
+  mysteryRoomLightCanvasSizeV1,
   mysteryRoomLightIntensityV1,
   type MysteryRoomLightEmitterV1,
 } from "./debateMysteryRoomCinematography";
 import styles from "./debateMysteryRoomCinematography.module.css";
-import { roomLightBlend } from "./roomLightPlacement";
+import { roomLightAltBlend, roomLightBlend } from "./roomLightPlacement";
 
 interface DebateMysteryRoomCinematographyLayerProps {
   room: {
@@ -261,7 +262,11 @@ export function DebateMysteryRoomCinematographyLayer(
   const profile = lightSource === "authored" ? AUTHORED_LIGHT_PROFILE_V1 : templateProfile;
   const rootRef = useRef<HTMLDivElement>(null);
   const lightCanvasRef = useRef<HTMLCanvasElement>(null);
+  const lampCanvasRef = useRef<HTMLCanvasElement>(null);
   const grainCanvasRef = useRef<HTMLCanvasElement>(null);
+  // Electric lamps paint onto a sibling canvas with a second blend character and
+  // crossfade between the two; the canvas exists only when a lamp needs it.
+  const hasLamps = lightSource === "authored" && props.lights.some((light) => light.kind === "omni");
 
   useEffect(() => {
     if (!profile) return;
@@ -271,12 +276,15 @@ export function DebateMysteryRoomCinematographyLayer(
     const lightContext = lightCanvas?.getContext("2d");
     const grainContext = grainCanvas?.getContext("2d");
     if (!root || !lightCanvas || !grainCanvas || !lightContext || !grainContext) return;
+    const lampCanvas = hasLamps ? lampCanvasRef.current : null;
+    const lampContext = lampCanvas?.getContext("2d") ?? null;
 
     const roomStage = root.closest<HTMLElement>('[data-mystery-room-stage="true"]');
     let artStyle = props.artStyle ?? mysteryRoomCinematographyArtStyleV1(
       roomStage?.style.getPropertyValue("--room-image"),
     );
-    let { width, height } = mysteryRoomCinematographyCanvasSize(artStyle);
+    let { width, height } = mysteryRoomLightCanvasSizeV1();
+    let { width: grainWidth, height: grainHeight } = mysteryRoomCinematographyCanvasSize(artStyle);
 
     let animationFrame = 0;
     let lastLightAt = Number.NEGATIVE_INFINITY;
@@ -299,7 +307,16 @@ export function DebateMysteryRoomCinematographyLayer(
           );
         }
       } else if (lightSource === "authored") {
+        lampContext?.clearRect(0, 0, width, height);
         for (const light of props.lights) {
+          if (light.kind === "omni" && lampContext) {
+            // Split the lamp's energy between the two blend characters by this
+            // frame's mix, so the hum shows as a shift in quality, not brightness.
+            const frame = mansionDynamicLightFrameV2(light, elapsedMs, props.reducedMotion);
+            drawRadialAuthoredLight(lightContext, light, width, height, frame.intensity * (1 - frame.blendMix));
+            drawRadialAuthoredLight(lampContext, light, width, height, frame.intensity * frame.blendMix);
+            continue;
+          }
           drawAuthoredLight(
             lightContext,
             light,
@@ -316,7 +333,7 @@ export function DebateMysteryRoomCinematographyLayer(
       const random = seededRandom(
         mysteryRoomCinematographySeed(props.room.id) + frame * 73 + (artStyle === "mosaic" ? 11 : 29),
       );
-      const image = grainContext.createImageData(width, height);
+      const image = grainContext.createImageData(grainWidth, grainHeight);
       const density = artStyle === "mosaic" ? 0.12 : 0.18;
       const alpha = artStyle === "mosaic" ? 42 : 27;
       for (let index = 0; index < image.data.length; index += 4) {
@@ -334,15 +351,29 @@ export function DebateMysteryRoomCinematographyLayer(
       artStyle = props.artStyle ?? mysteryRoomCinematographyArtStyleV1(
         roomStage?.style.getPropertyValue("--room-image"),
       );
-      ({ width, height } = mysteryRoomCinematographyCanvasSize(artStyle));
-      if (props.sourceAspectRatio) height = Math.max(1, Math.round(width / props.sourceAspectRatio));
+      ({ width, height } = mysteryRoomLightCanvasSizeV1());
+      ({ width: grainWidth, height: grainHeight } = mysteryRoomCinematographyCanvasSize(artStyle));
+      if (props.sourceAspectRatio) {
+        height = Math.max(1, Math.round(width / props.sourceAspectRatio));
+        grainHeight = Math.max(1, Math.round(grainWidth / props.sourceAspectRatio));
+      }
       root.dataset.artStyle = artStyle;
       root.style.setProperty("--room-light-blend", roomLightBlend(props.blendMode, artStyle));
+      if (lampCanvas) {
+        lampCanvas.dataset.artStyle = artStyle;
+        lampCanvas.style.mixBlendMode = roomLightAltBlend(props.blendMode, artStyle);
+        if (lampCanvas.width !== width || lampCanvas.height !== height) {
+          lampCanvas.width = width;
+          lampCanvas.height = height;
+        }
+      }
       if (lightCanvas.width !== width || lightCanvas.height !== height) {
         lightCanvas.width = width;
         lightCanvas.height = height;
-        grainCanvas.width = width;
-        grainCanvas.height = height;
+      }
+      if (grainCanvas.width !== grainWidth || grainCanvas.height !== grainHeight) {
+        grainCanvas.width = grainWidth;
+        grainCanvas.height = grainHeight;
       }
       lastLightAt = Number.NEGATIVE_INFINITY;
       lastGrainFrame = -1;
@@ -373,7 +404,7 @@ export function DebateMysteryRoomCinematographyLayer(
       stageObserver?.disconnect();
       window.cancelAnimationFrame(animationFrame);
     };
-  }, [lightSource, profile, props.lights, props.reducedMotion, props.room.id, props.artStyle, props.blendMode, props.sourceAspectRatio]);
+  }, [lightSource, profile, props.lights, props.reducedMotion, props.room.id, props.artStyle, props.blendMode, props.sourceAspectRatio, hasLamps]);
 
   if (!profile) return null;
   const style = {
@@ -384,22 +415,35 @@ export function DebateMysteryRoomCinematographyLayer(
   } as CSSProperties;
 
   return (
-    <div
-      ref={rootRef}
-      className={styles.root}
-      data-art-style="illustrated"
-      data-blurred={props.blurred ? "true" : undefined}
-      data-cinematography-profile={profile.id}
-      data-light-source={lightSource}
-      data-viewport={props.viewport ? "true" : undefined}
-      data-light-motion={props.reducedMotion ? "frozen" : "live"}
-      style={style}
-      aria-hidden="true"
-    >
-      <div className={styles.grade} />
-      <canvas ref={lightCanvasRef} className={styles.lighting} />
-      <canvas ref={grainCanvasRef} className={styles.grain} />
-      <div className={styles.vignette} />
-    </div>
+    <>
+      <div
+        ref={rootRef}
+        className={styles.root}
+        data-art-style="illustrated"
+        data-blurred={props.blurred ? "true" : undefined}
+        data-cinematography-profile={profile.id}
+        data-light-source={lightSource}
+        data-viewport={props.viewport ? "true" : undefined}
+        data-light-motion={props.reducedMotion ? "frozen" : "live"}
+        style={style}
+        aria-hidden="true"
+      >
+        <div className={styles.grade} />
+        <canvas ref={lightCanvasRef} className={styles.lighting} />
+        <canvas ref={grainCanvasRef} className={styles.grain} />
+        <div className={styles.vignette} />
+      </div>
+      {hasLamps ? (
+        // A sibling, not a child: the root isolates its own stacking context, so a
+        // second blend against the room plate has to live beside it.
+        <canvas
+          ref={lampCanvasRef}
+          className={styles.lampLighting}
+          data-blurred={props.blurred ? "true" : undefined}
+          data-viewport={props.viewport ? "true" : undefined}
+          aria-hidden="true"
+        />
+      ) : null}
+    </>
   );
 }
