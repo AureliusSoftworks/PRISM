@@ -58,8 +58,22 @@ export function whodunnitInvestigationDialogueGraceMs(args: {
   );
 }
 
+/**
+ * The last witness answer is a player-owned beat, regardless of whether it
+ * arrived as prepared speech or a text-only fallback. It must not be folded
+ * into the ordinary caption grace timer.
+ */
+export function whodunnitInterrogationTerminalWitnessShouldHold(args: {
+  hasQueuedResponse: boolean;
+  phase: WhodunnitInterrogationPhase | null;
+}): boolean {
+  return !args.hasQueuedResponse &&
+    (args.phase === "suspect_entrance" || args.phase === "suspect_speaking");
+}
+
 /** Only presentation-complete ordinary Investigation dialogue closes itself.
- * Player-authored observations always wait for an explicit gesture. */
+ * Player-authored observations and a terminal witness answer wait for an
+ * explicit gesture. */
 export function whodunnitInvestigationDialogueShouldAutoAdvance(args: {
   busy: boolean;
   hasActiveAudio: boolean;
@@ -69,11 +83,13 @@ export function whodunnitInvestigationDialogueShouldAutoAdvance(args: {
   requiresPlayerInput: boolean;
   roomView: string;
   streaming: boolean;
+  terminalWitnessHold: boolean;
 }): boolean {
   return args.playPhase === "investigation" &&
     args.roomView === "room" &&
     args.hasDialogue &&
     !args.isPlayerObservation &&
+    !args.terminalWitnessHold &&
     !args.busy &&
     !args.hasActiveAudio &&
     !args.requiresPlayerInput &&
@@ -307,9 +323,11 @@ export function whodunnitDialogueGestureDecision(args: {
   botFillArmed: boolean;
   clickCount: number;
   filledByGesture: boolean;
+  immediateAdvance?: boolean;
   streaming: boolean;
 }): WhodunnitDialogueGestureDecision {
   if (args.clickCount > 1 && (args.advanceArmed || args.botFillArmed)) return "ignore";
+  if (args.immediateAdvance) return "advance";
   if (args.filledByGesture) return "advance";
   if (args.streaming || args.automatedBotPlayback) return "fill";
   return "advance";

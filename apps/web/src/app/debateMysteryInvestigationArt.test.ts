@@ -6,8 +6,11 @@ import {
   DEFAULT_WHODUNNIT_ROOM_UPGRADE_ENABLED,
   WHODUNNIT_PIXEL_ART_PRESENTATION_VERSION,
   WHODUNNIT_ROOM_UPGRADE_STORAGE_KEY,
+  WHODUNNIT_SCENE_REPAIR_DISMISSAL_STORAGE_KEY,
+  readEncryptedWhodunnitSceneRepairDismissal,
   readEncryptedWhodunnitRoomUpgradeEnabled,
   readWhodunnitRoomUpgradeEnabled,
+  whodunnitSceneRepairUndoIsDismissed,
   whodunnitBundledRoomArtPath,
   whodunnitBundledRoomArtPathForRoom,
   whodunnitInvestigationAvatarPresentation,
@@ -17,6 +20,7 @@ import {
   whodunnitSealedRoomArtUrl,
   whodunnitSavedRoomArtUrl,
   writeWhodunnitRoomUpgradeEnabled,
+  writeEncryptedWhodunnitSceneRepairDismissal,
   writeEncryptedWhodunnitRoomUpgradeEnabled,
   whodunnitDiscoveredMansionRoomArtV1,
 } from "./debateMysteryInvestigationArt.ts";
@@ -95,6 +99,31 @@ describe("Whodunnit room-art upgrade state", () => {
       }),
       true,
     );
+  });
+
+  it("dismisses one completed field repair per account and case without hiding a later repair", async () => {
+    assert.match(WHODUNNIT_SCENE_REPAIR_DISMISSAL_STORAGE_KEY, /scene-repair-dismissal/u);
+    await writeEncryptedWhodunnitSceneRepairDismissal({
+      ownerId: "repair-owner-a",
+      scopeId: "case-a",
+      repairId: "repair-1",
+    });
+    assert.equal(
+      await readEncryptedWhodunnitSceneRepairDismissal({
+        ownerId: "repair-owner-a",
+        scopeId: "case-a",
+      }),
+      "repair-1",
+    );
+    assert.equal(
+      await readEncryptedWhodunnitSceneRepairDismissal({
+        ownerId: "repair-owner-b",
+        scopeId: "case-a",
+      }),
+      null,
+    );
+    assert.equal(whodunnitSceneRepairUndoIsDismissed("repair-1", "repair-1"), true);
+    assert.equal(whodunnitSceneRepairUndoIsDismissed("repair-1", "repair-2"), false);
   });
 
   it("resolves bundled, sealed, and avatar variants as one presentation contract", () => {

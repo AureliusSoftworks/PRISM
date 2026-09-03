@@ -7,6 +7,8 @@ import {
   compileDeterministicDebateMystery,
   debateMysteryAccompliceChance,
   debateMysteryRoomFloorRuleV1,
+  debateMysteryRegionHasMeaningfulSubjectV1,
+  debateMysteryRoomPresentationRegionsV1,
   debateMysteryRoomTypeIsAllowedOnFloorV1,
   debateMysteryRoomsShareEdge,
   debateMysteryNotebookCharacterCount,
@@ -68,6 +70,17 @@ test("reserves accomplices for Mastermind mysteries", () => {
     ).accompliceChance,
     0,
   );
+});
+
+test("meaningful subject eligibility keeps ordinary objects and visible floor detail, not generic portions", () => {
+  for (const label of ["center surface", "foreground · upper", "dance floor", "left wall · lower", "floor"]) {
+    assert.equal(debateMysteryRegionHasMeaningfulSubjectV1({ id: `test:${label}`, label }), false, label);
+  }
+  for (const label of ["mantel clock", "chart table", "ordinary vase", "floor drain", "foyer runner"]) {
+    assert.equal(debateMysteryRegionHasMeaningfulSubjectV1({ id: `test:${label}`, label }), true, label);
+  }
+  assert.equal(debateMysteryRegionHasMeaningfulSubjectV1({ id: "terrace", label: "terrace floor", physicalAnchor: "the wet marks on the terrace" }), true);
+  assert.equal(debateMysteryRegionHasMeaningfulSubjectV1({ id: "custom", label: "foreground", physicalAnchor: "a sculpture in the foreground" }), true);
 });
 
 test("bundles at least fifteen original semantic room templates with accessible regions", () => {
@@ -503,18 +516,22 @@ test("three hundred seeded preset cases stay connected, solvable, and exactly th
       : config.difficulty === "mastermind"
         ? 20
         : 16;
-    assert.equal(bible.activeRegions.length, bible.rooms.length * expectedRegionsPerRoom);
+    assert.ok(bible.activeRegions.length <= bible.rooms.length * expectedRegionsPerRoom);
     const suspectRoomIds = new Set(bible.suspects.map((suspect) => suspect.roomId));
     if (bible.evidence.some((item) => suspectRoomIds.has(item.roomId))) {
       sawEvidenceInSuspectRoom = true;
     }
     for (const room of bible.rooms) {
       const regionCount = bible.activeRegions.filter((outcome) => outcome.roomId === room.id).length;
-      assert.equal(
-        regionCount,
-        expectedRegionsPerRoom,
-        `seed ${index}: ${room.id} must expose the difficulty-scaled inspectable regions`,
-      );
+      assert.ok(regionCount > 0 && regionCount <= expectedRegionsPerRoom,
+        `seed ${index}: ${room.id} exposes meaningful targets, not a fixed quota of blank tiles`);
+      for (const outcome of bible.activeRegions.filter((entry) => entry.roomId === room.id)) {
+        const region = debateMysteryRoomPresentationRegionsV1(room).find((entry) => entry.id === outcome.regionId)!;
+        if (debateMysteryRegionHasMeaningfulSubjectV1(region)) continue;
+        assert.ok(outcome.kind !== "empty" || outcome.evidenceId || outcome.inventoryItemId ||
+          bible.actionTokens.some((token) => token.roomId === room.id && token.regionId === outcome.regionId) ||
+          bible.accessLocks.some((lock) => lock.targetKind === "region" && lock.targetId === `${room.id}:${outcome.regionId}`));
+      }
     }
     for (let floor = 1; floor <= config.floors; floor += 1) {
       const floorRooms = bible.rooms.filter((room) => room.floor === floor);
@@ -599,7 +616,7 @@ test("MansionLayoutV2 semantic projections may use corridor links and colon room
   );
 });
 
-test("accepted mansion plates use neutral examination regions instead of PRISM template props", () => {
+test("accepted mansion plates keep only consequential fallback regions instead of blank-space searches", () => {
   const config = resolveDebateMysteryConfig(createConfig("standard", "classic", "accepted-room-regions"));
   const bundled = compileDeterministicDebateMystery({ config, suspects: suspects(6) });
   const blueprint = bundled.rooms.map((room) => ({
@@ -617,7 +634,7 @@ test("accepted mansion plates use neutral examination regions instead of PRISM t
     .filter((region) => region.roomId === foyer.id)
     .map((region) => region.regionId);
 
-  assert.ok(foyerRegionIds.length >= 12);
+  assert.ok(foyerRegionIds.length < 12);
   assert.ok(foyerRegionIds.every((id) => id.startsWith("foyer:scene-")));
   assert.ok(!foyerRegionIds.some((id) => id.includes("umbrella")));
   assert.deepEqual(
@@ -635,7 +652,7 @@ test("accepted mansion plates use neutral examination regions instead of PRISM t
   );
 });
 
-test("sparse venue anchors keep fixture hotspots and gain a dense neutral examination grid", () => {
+test("sparse venue anchors keep concrete fixtures without requiring a dense neutral grid", () => {
   const config = resolveDebateMysteryConfig(createConfig("standard", "classic", "venue-anchor-regions"));
   const bundled = compileDeterministicDebateMystery({ config, suspects: suspects(6) });
   const anchoredRoom = bundled.rooms[0]!;
@@ -670,10 +687,14 @@ test("sparse venue anchors keep fixture hotspots and gain a dense neutral examin
     .filter((region) => region.roomId === anchoredRoom.id)
     .map((region) => region.regionId);
 
-  assert.ok(roomRegionIds.length >= 12);
+  assert.ok(roomRegionIds.length >= 2 && roomRegionIds.length < 12);
   assert.ok(roomRegionIds.includes("venue-anchor:helm"));
   assert.ok(roomRegionIds.includes("venue-anchor:chart-table"));
-  assert.ok(roomRegionIds.some((id) => id.includes(":scene-") && id.includes(":detail-")));
+  for (const outcome of bible.activeRegions.filter((entry) => entry.roomId === anchoredRoom.id && entry.regionId.includes(":scene-"))) {
+    assert.ok(outcome.evidenceId || outcome.inventoryItemId ||
+      bible.actionTokens.some((token) => token.roomId === outcome.roomId && token.regionId === outcome.regionId) ||
+      bible.accessLocks.some((lock) => lock.targetId === `${outcome.roomId}:${outcome.regionId}`));
+  }
   assert.deepEqual(
     validateDebateMysteryCaseBible(bible, config.actionBudget).errors,
     [],

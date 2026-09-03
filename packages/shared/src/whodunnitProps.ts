@@ -23,6 +23,19 @@ export const WHODUNNIT_PROP_ARCHETYPE_IDS_V1 = [
 export type WhodunnitPropArchetypeIdV1 =
   typeof WHODUNNIT_PROP_ARCHETYPE_IDS_V1[number];
 
+const WHODUNNIT_PROP_PRESENTATION_EMOJI_V1: Readonly<Record<WhodunnitPropArchetypeIdV1, string>> = {
+  key: "🗝️", code: "🔢", remote: "🎛️", container: "📦", valuables: "💎",
+  ledger: "📓", receipt: "🧾", letter: "✉️", timepiece: "⌚", fiber: "🧵",
+  fragment: "🪟", toxin: "🧪", firearm: "🔫", blade: "🔪", blunt_object: "⚖️",
+  long_implement: "🪝",
+};
+
+export function whodunnitPropPresentationEmojiV1(
+  archetypeId: WhodunnitPropArchetypeIdV1,
+): string {
+  return WHODUNNIT_PROP_PRESENTATION_EMOJI_V1[archetypeId];
+}
+
 export interface WhodunnitPropArchetypeDefinitionV1 {
   id: WhodunnitPropArchetypeIdV1;
   label: string;
@@ -360,4 +373,6 @@ export interface EvidencePropBindingV1 {
   };
   visualSource: EvidencePropVisualSourceV1;
   contentSha256: string;
+  /** Stable player-facing glyph for the frozen physical archetype. */
+  presentationEmoji?: string;
 }

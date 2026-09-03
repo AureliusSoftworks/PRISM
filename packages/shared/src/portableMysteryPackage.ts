@@ -691,7 +691,9 @@ export interface WhodunnitPackageCompletedPlaythroughV1 {
   record: PortablePackageJsonValueV1[];
   theory: { [key: string]: PortablePackageJsonValueV1 } | null;
   court: { [key: string]: PortablePackageJsonValueV1 } | null;
-  verdict: { [key: string]: PortablePackageJsonValueV1 };
+  /** Null only for the additive case-check ending; legacy Court records retain a verdict. */
+  verdict: { [key: string]: PortablePackageJsonValueV1 } | null;
+  caseCheck?: { [key: string]: PortablePackageJsonValueV1 } | null;
   calloutHistory: PortablePackageJsonValueV1[];
 }
 
@@ -1713,7 +1715,13 @@ export function validateWhodunnitPackageManifestV1(value: unknown): string[] {
           !Array.isArray(playthrough.record) ||
           playthrough.theory !== null && !isRecord(playthrough.theory) ||
           playthrough.court !== null && !isRecord(playthrough.court) ||
-          !isRecord(playthrough.verdict) ||
+          !(isRecord(playthrough.verdict) || (playthrough.verdict === null &&
+            isRecord(playthrough.caseCheck) && playthrough.caseCheck.version === 1 &&
+            playthrough.caseCheck.completionKind === "case_check" &&
+            playthrough.caseCheck.courtSkipped === true &&
+            playthrough.caseCheck.assessed === "accused_set_only" &&
+            typeof playthrough.caseCheck.accusationCorrect === "boolean" &&
+            isNonEmptyString(playthrough.caseCheck.concludedAt))) ||
           !Array.isArray(playthrough.calloutHistory)) {
         errors.push("manifest.runtime.completedPlaythrough is invalid.");
       }

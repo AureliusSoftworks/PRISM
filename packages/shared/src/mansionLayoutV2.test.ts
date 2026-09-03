@@ -432,20 +432,46 @@ describe("MansionLayoutV2 room presentation", () => {
     assert.doesNotMatch(validateMansionLayoutV2(eightPerRoom).join("\n"), /at most 8 dynamic lights/u);
   });
 
-  it("animates deterministically and freezes the seeded frame for Reduced Motion", () => {
-    assert.deepEqual(mansionDynamicLightFrameV2(fire, 1_250, true),
-      mansionDynamicLightFrameV2(fire, 99_000, true));
-    assert.deepEqual(mansionDynamicLightFrameV2(fire, 1_250, false),
-      mansionDynamicLightFrameV2(fire, 1_250, false));
+  it("samples every light kind deterministically with bounded, seeded motion", () => {
+    const lights: readonly MansionDynamicLightV2[] = [
+      fire,
+      { ...fire, id: "light:steady-fire", animation: "steady" },
+      { ...fire, id: "light:omni", kind: "omni", geometry: { x: 0.5, y: 0.5, radius: 0.2 } },
+      { ...fire, id: "light:directional", kind: "directional", dust: false, geometry: { x: 0.5, y: 0.5, width: 0.3, height: 0.2, rotation: 0 } },
+      { ...fire, id: "light:neon", kind: "neon", geometry: { points: [{ x: 0.2, y: 0.5 }, { x: 0.8, y: 0.5 }], width: 0.02 } },
+    ];
+    for (const light of lights) {
+      const original = JSON.parse(JSON.stringify(light));
+      const first = mansionDynamicLightFrameV2(light, 1_250, false);
+      assert.deepEqual(first, mansionDynamicLightFrameV2(light, 1_250, false));
+      const samples = Array.from({ length: 301 }, (_, index) =>
+        mansionDynamicLightFrameV2(light, index * 100, false).intensity);
+      assert.ok(samples.every((value) => value >= 0 && value <= light.intensity));
+      assert.ok(Math.max(...samples) - Math.min(...samples) > light.intensity * 0.1,
+        `${light.kind} should have appreciable variation, not a near-static glow`);
+      assert.notDeepEqual(samples, Array.from({ length: 301 }, (_, index) =>
+        mansionDynamicLightFrameV2({ ...light, animationSeed: "independent-source" }, index * 100, false).intensity));
+      assert.equal(mansionDynamicLightFrameV2({ ...light, intensity: 0 }, 1_250, false).intensity, 0);
+      assert.deepEqual(mansionDynamicLightFrameV2(light, -500, false),
+        mansionDynamicLightFrameV2(light, 0, false));
+      assert.deepEqual(mansionDynamicLightFrameV2(light, 1_250, true),
+        mansionDynamicLightFrameV2(light, 99_000, true));
+      assert.deepEqual(light, original);
+    }
     assert.notEqual(
-      mansionDynamicLightFrameV2(fire, 0, false).intensity,
-      mansionDynamicLightFrameV2(fire, 1_000, false).intensity,
+      mansionDynamicLightFrameV2(fire, 1_250, false).phase,
+      mansionDynamicLightFrameV2({ ...fire, animationSeed: "hearth-2" }, 1_250, false).phase,
     );
+    assert.equal(mansionDynamicLightFrameV2({ ...fire, intensity: 0 }, 1_250, false).intensity, 0);
+
     const steady = { ...fire, animation: "steady" as const };
-    assert.equal(
-      mansionDynamicLightFrameV2(steady, 0, false).intensity,
-      mansionDynamicLightFrameV2(steady, 10_000, false).intensity,
-    );
+    const steadySamples = [0, 10_000, 20_000].map((time) => mansionDynamicLightFrameV2(steady, time, false).intensity);
+    assert.ok(new Set(steadySamples).size > 1, "steady fire should retain calm motion");
+    assert.ok(Math.max(...steadySamples) - Math.min(...steadySamples) < steady.intensity * 0.16);
+    const calmFrameDeltas = Array.from({ length: 300 }, (_, index) => Math.abs(
+      mansionDynamicLightFrameV2(steady, (index + 1) * 100, false).intensity -
+      mansionDynamicLightFrameV2(steady, index * 100, false).intensity));
+    assert.ok(Math.max(...calmFrameDeltas) < steady.intensity * 0.01, "calm fire changes smoothly, without a flicker");
   });
 });
 

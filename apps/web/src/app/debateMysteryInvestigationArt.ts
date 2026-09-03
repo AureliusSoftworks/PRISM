@@ -8,6 +8,8 @@ const LEGACY_WHODUNNIT_INVESTIGATION_ART_STYLE_STORAGE_KEY =
   "prism.whodunnit.investigation-art-style.v1";
 export const WHODUNNIT_ROOM_UPGRADE_STORAGE_KEY =
   "prism.whodunnit.room-upgrade-enabled.v1";
+export const WHODUNNIT_SCENE_REPAIR_DISMISSAL_STORAGE_KEY =
+  "prism.whodunnit.scene-repair-dismissal.v1";
 
 /** Internal asset-route variant. Player preference is the Upgraded boolean. */
 export type WhodunnitInvestigationArtStyle = "mosaic" | "illustrated";
@@ -35,6 +37,49 @@ function scopedStorageKey(key: string, scopeId?: string): string {
 
 function whodunnitRoomUpgradeBrowserLogicalKey(scopeId: string): string {
   return `whodunnit-room-upgrade:${scopeId}`;
+}
+
+function whodunnitSceneRepairDismissalBrowserLogicalKey(scopeId: string): string {
+  return `${WHODUNNIT_SCENE_REPAIR_DISMISSAL_STORAGE_KEY}:${scopeId}`;
+}
+
+/** A dismissal applies only to the exact completed repair, never the next one. */
+export function whodunnitSceneRepairUndoIsDismissed(
+  dismissedRepairId: string | null | undefined,
+  repairId: string | null | undefined,
+): boolean {
+  return Boolean(dismissedRepairId && repairId && dismissedRepairId === repairId);
+}
+
+export async function readEncryptedWhodunnitSceneRepairDismissal(args: {
+  ownerId: string;
+  scopeId: string;
+}): Promise<string | null> {
+  try {
+    const saved = await readBrowserOwnerJsonV1<unknown>({
+      ownerId: args.ownerId,
+      logicalKey: whodunnitSceneRepairDismissalBrowserLogicalKey(args.scopeId),
+    });
+    return typeof saved === "string" && saved.trim() ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function writeEncryptedWhodunnitSceneRepairDismissal(args: {
+  ownerId: string;
+  scopeId: string;
+  repairId: string;
+}): Promise<boolean> {
+  try {
+    return await writeBrowserOwnerJsonV1({
+      ownerId: args.ownerId,
+      logicalKey: whodunnitSceneRepairDismissalBrowserLogicalKey(args.scopeId),
+      value: args.repairId,
+    });
+  } catch {
+    return false;
+  }
 }
 
 export async function readEncryptedWhodunnitRoomUpgradeEnabled(args: {

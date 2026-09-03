@@ -47,6 +47,7 @@ import {
   type MansionLayoutV2,
   type MansionPlacementRelationV2,
 } from "@localai/shared";
+import { mansionDirectionalGeometryIsPolygonV2, mansionDirectionalLightPolygonV2, mansionGodrayEdgesV2, mansionGodrayParallelPointsV2 } from "@localai/shared";
 import {
   installedMansionExteriorPreviewV1,
   resolveInstalledMansionPresentationV1,
@@ -294,10 +295,14 @@ function visualSeed(id: string): number {
 }
 
 function lightStyle(light: MansionDynamicLightV2): CSSProperties {
+  const animationSeed = visualSeed(`${light.id}:${light.animationSeed}`);
+  const cycleSeconds = light.kind === "fire" ? (light.animation === "flicker" ? 0.7 : 3.1)
+    : light.kind === "omni" ? 4.2 : light.kind === "directional" ? 2.6 : 1.2;
   const base = {
     "--mansion-light-color": light.color,
     "--mansion-light-intensity": String(light.intensity),
-    "--mansion-light-delay": `${-(visualSeed(`${light.id}:${light.animationSeed}`) / 100)}s`,
+    "--mansion-light-delay": `${-(animationSeed / 100)}s`,
+    "--mansion-light-duration": `${cycleSeconds * (0.82 + animationSeed / 1_000 * 0.36)}s`,
   } as CSSProperties;
   if (light.kind === "fire") {
     const geometry = light.geometry;
@@ -324,6 +329,7 @@ function lightStyle(light: MansionDynamicLightV2): CSSProperties {
   }
   if (light.kind === "directional") {
     const geometry = light.geometry;
+    if (mansionDirectionalGeometryIsPolygonV2(geometry)) return base;
     return {
       ...base,
       left: `${geometry.x * 100}%`,
@@ -355,11 +361,19 @@ function defaultLight(
       : { ...common, kind, geometry: { ...point, radius: 0.18 } };
   }
   if (kind === "directional") {
+    // A window edge at the click with the ray falling toward the room's center.
+    const top = { x: point.x, y: clampNormalized(point.y - 0.1) };
+    const bottom = { x: point.x, y: clampNormalized(point.y + 0.06) };
+    const ray = { x: point.x > 0.5 ? -0.26 : 0.26, y: 0.3 };
     return {
       ...common,
       kind,
       dust: true,
-      geometry: { ...point, width: 0.32, height: 0.16, rotation: 0 },
+      geometry: {
+        points: mansionGodrayParallelPointsV2([
+          top, bottom, { x: bottom.x + ray.x, y: bottom.y + ray.y }, { x: top.x + ray.x, y: top.y + ray.y },
+        ]),
+      },
     };
   }
   return {
@@ -377,9 +391,17 @@ function lightResizeHandleStyle(light: MansionDynamicLightV2): CSSProperties {
     };
   }
   if (light.kind === "directional") {
+    const geometry = light.geometry;
+    if (mansionDirectionalGeometryIsPolygonV2(geometry)) {
+      const { landing } = mansionGodrayEdgesV2(geometry.points);
+      return {
+        left: `${((landing.start.x + landing.end.x) / 2) * 100}%`,
+        top: `${((landing.start.y + landing.end.y) / 2) * 100}%`,
+      };
+    }
     return {
-      left: `${clampNormalized(light.geometry.x + light.geometry.width / 2) * 100}%`,
-      top: `${clampNormalized(light.geometry.y + light.geometry.height / 2) * 100}%`,
+      left: `${clampNormalized(geometry.x + geometry.width / 2) * 100}%`,
+      top: `${clampNormalized(geometry.y + geometry.height / 2) * 100}%`,
     };
   }
   const point = light.geometry.points.at(-1) ?? { x: 0.5, y: 0.5 };
@@ -421,12 +443,25 @@ function moveLight(
       y: clampNormalized(light.geometry.y + delta.y),
     },
   };
+  const geometry = light.geometry;
+  if (mansionDirectionalGeometryIsPolygonV2(geometry)) {
+    const minX = Math.min(...geometry.points.map((point) => point.x));
+    const maxX = Math.max(...geometry.points.map((point) => point.x));
+    const minY = Math.min(...geometry.points.map((point) => point.y));
+    const maxY = Math.max(...geometry.points.map((point) => point.y));
+    const dx = Math.min(1 - maxX, Math.max(-minX, delta.x));
+    const dy = Math.min(1 - maxY, Math.max(-minY, delta.y));
+    return {
+      ...light,
+      geometry: { points: geometry.points.map((point) => ({ x: point.x + dx, y: point.y + dy })) },
+    };
+  }
   return {
     ...light,
     geometry: {
-      ...light.geometry,
-      x: clampNormalized(light.geometry.x + delta.x),
-      y: clampNormalized(light.geometry.y + delta.y),
+      ...geometry,
+      x: clampNormalized(geometry.x + delta.x),
+      y: clampNormalized(geometry.y + delta.y),
     },
   };
 }
@@ -444,12 +479,24 @@ function resizeLight(
     return { ...light, geometry: { ...light.geometry, radius } };
   }
   if (light.kind === "directional") {
+    const geometry = light.geometry;
+    if (mansionDirectionalGeometryIsPolygonV2(geometry)) {
+      return {
+        ...light,
+        geometry: {
+          points: geometry.points.map((point, index) => index < 2 ? point : {
+            x: clampNormalized(point.x + delta.x),
+            y: clampNormalized(point.y + delta.y),
+          }),
+        },
+      };
+    }
     return {
       ...light,
       geometry: {
-        ...light.geometry,
-        width: Math.min(1, Math.max(0.04, light.geometry.width + delta.x * 2)),
-        height: Math.min(1, Math.max(0.04, light.geometry.height + delta.y * 2)),
+        ...geometry,
+        width: Math.min(1, Math.max(0.04, geometry.width + delta.x * 2)),
+        height: Math.min(1, Math.max(0.04, geometry.height + delta.y * 2)),
       },
     };
   }
@@ -476,23 +523,22 @@ function setLightPoint(
     ...light,
     geometry: { ...light.geometry, [axis]: value },
   };
+  const geometry = light.geometry;
+  if (mansionDirectionalGeometryIsPolygonV2(geometry)) return light;
   return {
     ...light,
-    geometry: { ...light.geometry, [axis]: value },
+    geometry: { ...geometry, [axis]: value },
   };
 }
 
-function omniHasNeonBulb(
-  light: MansionDynamicLightV2,
-  roomLights: readonly MansionDynamicLightV2[],
-): boolean {
-  if (light.kind !== "omni") return false;
-  return roomLights.some((candidate) => {
-    if (candidate.kind !== "neon" || candidate.geometry.points.length > 3) return false;
-    const point = candidate.geometry.points[0];
-    if (!point) return false;
-    return Math.hypot(point.x - light.geometry.x, point.y - light.geometry.y) <= light.geometry.radius;
-  });
+/** The single draggable anchor of a light, or null for point-set shapes. */
+function lightAnchorPoint(light: MansionDynamicLightV2): { x: number; y: number } | null {
+  if (light.kind === "neon") return null;
+  if (light.kind === "directional") {
+    const geometry = light.geometry;
+    return mansionDirectionalGeometryIsPolygonV2(geometry) ? null : { x: geometry.x, y: geometry.y };
+  }
+  return { x: light.geometry.x, y: light.geometry.y };
 }
 
 export default function MansionEditorDialog({
@@ -1481,8 +1527,12 @@ export default function MansionEditorDialog({
               <svg key={light.id} className={styles.mansionDynamicLight} data-light-kind="neon" data-selected={light.id === selectedLightId ? "true" : undefined} viewBox="0 0 100 100" preserveAspectRatio="none" style={lightStyle(light)} aria-label="Neon vector light" onPointerDown={(event) => beginLightGesture(event, light, "move")}>
                 <polyline points={light.geometry.points.map((point) => `${point.x * 100},${point.y * 100}`).join(" ")} fill="none" stroke="currentColor" strokeWidth={Math.max(0.5, light.geometry.width * 100)} />
               </svg>
+            ) : light.kind === "directional" && mansionDirectionalGeometryIsPolygonV2(light.geometry) ? (
+              <svg key={light.id} className={styles.mansionDynamicLight} data-light-kind="directional" data-light-shape="polygon" data-selected={light.id === selectedLightId ? "true" : undefined} data-directional-dust={light.dust ? "true" : undefined} viewBox="0 0 100 100" preserveAspectRatio="none" style={lightStyle(light)} aria-label="Godray light" onPointerDown={(event) => beginLightGesture(event, light, "move")}>
+                <polygon points={mansionDirectionalLightPolygonV2(light).map((point) => `${point.x * 100},${point.y * 100}`).join(" ")} fill="currentColor" fillOpacity={0.38} stroke="currentColor" strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
+              </svg>
             ) : (
-              <button key={light.id} type="button" className={styles.mansionDynamicLight} data-light-kind={light.kind} data-selected={light.id === selectedLightId ? "true" : undefined} data-fire-animation={light.kind === "fire" ? light.animation : undefined} data-directional-dust={light.kind === "directional" && light.dust ? "true" : undefined} data-bulb-flicker={omniHasNeonBulb(light, roomEditorLights) ? "true" : undefined} style={lightStyle(light)} aria-label={`${light.kind} dynamic light`} onPointerDown={(event) => beginLightGesture(event, light, "move")} />
+              <button key={light.id} type="button" className={styles.mansionDynamicLight} data-light-kind={light.kind} data-selected={light.id === selectedLightId ? "true" : undefined} data-fire-animation={light.kind === "fire" ? light.animation : undefined} data-directional-dust={light.kind === "directional" && light.dust ? "true" : undefined} style={lightStyle(light)} aria-label={`${light.kind} dynamic light`} onPointerDown={(event) => beginLightGesture(event, light, "move")} />
             ))}
             {selectedLight ? (
               <button
@@ -1602,13 +1652,13 @@ export default function MansionEditorDialog({
                   setLayout((current) => ({ ...current, lights: current.lights.filter((entry) => entry.id !== light.id) }));
                   setSelectedLightId((current) => current === light.id ? null : current);
                 }}>Remove</button>
-                {light.kind !== "neon" ? (
+                {lightAnchorPoint(light) ? (
                   <>
-                    <label>X<input type="range" min="0" max="1" step="0.01" value={light.geometry.x} onChange={(event) => {
+                    <label>X<input type="range" min="0" max="1" step="0.01" value={lightAnchorPoint(light)!.x} onChange={(event) => {
                       const x = Number(event.currentTarget.value);
                       updateLight(light.id, (entry) => setLightPoint(entry, "x", x));
                     }} /></label>
-                    <label>Y<input type="range" min="0" max="1" step="0.01" value={light.geometry.y} onChange={(event) => {
+                    <label>Y<input type="range" min="0" max="1" step="0.01" value={lightAnchorPoint(light)!.y} onChange={(event) => {
                       const y = Number(event.currentTarget.value);
                       updateLight(light.id, (entry) => setLightPoint(entry, "y", y));
                     }} /></label>
@@ -1636,18 +1686,29 @@ export default function MansionEditorDialog({
                   }} /></label>
                 ) : light.kind === "directional" ? (
                   <>
-                    <label>Width<input type="range" min="0.04" max="1" step="0.01" value={light.geometry.width} onChange={(event) => {
-                      const width = Number(event.currentTarget.value);
-                      updateLight(light.id, (entry) => entry.kind === "directional" ? { ...entry, geometry: { ...entry.geometry, width } } : entry);
-                    }} /></label>
-                    <label>Depth<input type="range" min="0.04" max="1" step="0.01" value={light.geometry.height} onChange={(event) => {
-                      const height = Number(event.currentTarget.value);
-                      updateLight(light.id, (entry) => entry.kind === "directional" ? { ...entry, geometry: { ...entry.geometry, height } } : entry);
-                    }} /></label>
-                    <label>Rotation<input type="range" min="-180" max="180" step="1" value={light.geometry.rotation} onChange={(event) => {
-                      const rotation = Number(event.currentTarget.value);
-                      updateLight(light.id, (entry) => entry.kind === "directional" ? { ...entry, geometry: { ...entry.geometry, rotation } } : entry);
-                    }} /></label>
+                    {mansionDirectionalGeometryIsPolygonV2(light.geometry) ? (
+                      <>
+                        <span>Godray: drag its corners on the canvas. The first edge sits on the window; the resize handle extends the floor edge.</span>
+                        <button type="button" onClick={() => updateLight(light.id, (entry) => entry.kind === "directional"
+                          ? { ...entry, geometry: { points: mansionGodrayParallelPointsV2(mansionDirectionalLightPolygonV2(entry)) } }
+                          : entry)}>Make rays parallel</button>
+                      </>
+                    ) : (
+                      <>
+                        <label>Width<input type="range" min="0.04" max="1" step="0.01" value={light.geometry.width} onChange={(event) => {
+                          const width = Number(event.currentTarget.value);
+                          updateLight(light.id, (entry) => entry.kind === "directional" && !mansionDirectionalGeometryIsPolygonV2(entry.geometry) ? { ...entry, geometry: { ...entry.geometry, width } } : entry);
+                        }} /></label>
+                        <label>Depth<input type="range" min="0.04" max="1" step="0.01" value={light.geometry.height} onChange={(event) => {
+                          const height = Number(event.currentTarget.value);
+                          updateLight(light.id, (entry) => entry.kind === "directional" && !mansionDirectionalGeometryIsPolygonV2(entry.geometry) ? { ...entry, geometry: { ...entry.geometry, height } } : entry);
+                        }} /></label>
+                        <label>Rotation<input type="range" min="-180" max="180" step="1" value={light.geometry.rotation} onChange={(event) => {
+                          const rotation = Number(event.currentTarget.value);
+                          updateLight(light.id, (entry) => entry.kind === "directional" && !mansionDirectionalGeometryIsPolygonV2(entry.geometry) ? { ...entry, geometry: { ...entry.geometry, rotation } } : entry);
+                        }} /></label>
+                      </>
+                    )}
                     <label>Dust<input type="checkbox" checked={light.dust} onChange={(event) => {
                       const dust = event.currentTarget.checked;
                       updateLight(light.id, (entry) => entry.kind === "directional" ? { ...entry, dust } : entry);
@@ -1662,7 +1723,7 @@ export default function MansionEditorDialog({
               </div>
             ))}
           </div>
-          <p>Fire uses a triangle, omni a circle, directional a rectangle, and neon a vector stroke. Stable IDs seed animation; Reduced Motion freezes it. Cue permission metadata remains venue-static in this release.</p>
+          <p>Fire uses a triangle, omni a circle, directional a window-to-floor godray polygon of up to four corners, and neon a vector stroke. Stable IDs seed animation; Reduced Motion freezes it. Cue permission metadata remains venue-static in this release.</p>
         </section>
       </aside>
 

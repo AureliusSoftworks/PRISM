@@ -1,6 +1,7 @@
 import {
   WHODUNNIT_PROP_ARCHETYPES_V1,
   inferWhodunnitPropArchetypeV1,
+  whodunnitPropPresentationEmojiV1,
   type EvidencePropBindingV1,
   type MansionPropVariantV1,
   type WhodunnitPropArchetypeIdV1,
@@ -171,7 +172,8 @@ function prismBinding(
     archetypeId,
     chosenIdentity: {
       displayName: definition.prismFallback.displayName,
-      appearanceDescription: `PRISM's setting-neutral ${definition.label.toLocaleLowerCase()} fallback.`,
+      appearanceDescription:
+        `A plain ${definition.prismFallback.displayName.toLocaleLowerCase()} recovered for examination.`,
     },
     capabilitySnapshot: {
       whatItDoes: definition.purpose,
@@ -180,6 +182,7 @@ function prismBinding(
     },
     visualSource: "prism",
     contentSha256: definition.prismFallback.contentSha256,
+    presentationEmoji: whodunnitPropPresentationEmojiV1(archetypeId),
   };
 }
 
@@ -229,6 +232,7 @@ export function selectWhodunnitEvidencePropBindingsV1(args: {
           },
           visualSource: "asset_library",
           contentSha256: personal.contentSha256,
+          presentationEmoji: whodunnitPropPresentationEmojiV1(archetypeId),
         };
         privatePersonalSourceByEvidenceId[need.evidenceId] = {
           assetSetId: personal.assetSetId,
@@ -256,6 +260,7 @@ export function selectWhodunnitEvidencePropBindingsV1(args: {
         },
         visualSource: "mansion",
         contentSha256: mansion.contentSha256,
+        presentationEmoji: whodunnitPropPresentationEmojiV1(archetypeId),
       };
       continue;
     }
@@ -271,6 +276,7 @@ function replaceObjectIdentity(
   previousObject: string,
   displayName: string,
 ): string {
+  if (previousObject.trim().toLocaleLowerCase() === displayName.trim().toLocaleLowerCase()) return value;
   const escaped = previousObject.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   return value.replace(new RegExp(`\\b${escaped}\\b`, "giu"), displayName);
 }
@@ -296,6 +302,7 @@ export function applyWhodunnitPropBindingsToScaffoldV1<
       observation: string;
       keywords: string[];
       isCanonicalWeapon: boolean;
+      emoji?: string;
     }>;
   },
 >(scaffold: T, bindingsByEvidenceId: Readonly<Record<string, EvidencePropBindingV1>>): T {
@@ -317,15 +324,22 @@ export function applyWhodunnitPropBindingsToScaffoldV1<
       item.object,
       displayName,
     );
+    const appearance = binding.chosenIdentity.appearanceDescription.trim();
     const capability = propCapabilitySentence(
       binding.capabilitySnapshot.whatItDoes,
     );
+    const physicalObservation = rewrittenObservation.toLocaleLowerCase().includes(appearance.toLocaleLowerCase())
+      ? rewrittenObservation
+      : `${appearance} ${rewrittenObservation}`.trim();
     return {
       ...item,
       adjective: "recovered",
       object: displayName,
       title: displayName,
-      observation: `${rewrittenObservation} ${capability}`.trim(),
+      observation: capability && !physicalObservation.includes(capability)
+        ? `${physicalObservation} ${capability}`.trim()
+        : physicalObservation,
+      emoji: binding.presentationEmoji ?? whodunnitPropPresentationEmojiV1(binding.archetypeId),
       keywords: Array.from(new Set([
         ...item.keywords,
         ...normalizedTokens(displayName),
@@ -333,5 +347,13 @@ export function applyWhodunnitPropBindingsToScaffoldV1<
       ])),
     };
   });
-  return { ...scaffold, method, publicOpening, weapon, evidence };
+  // Other exhibits can refer to the complete physical method. Keep that
+  // reference aligned when the instrument itself receives a frozen identity.
+  const methodBoundEvidence = method === scaffold.method
+    ? evidence
+    : evidence.map((item) => ({
+        ...item,
+        observation: item.observation.replaceAll(scaffold.method, method),
+      }));
+  return { ...scaffold, method, publicOpening, weapon, evidence: methodBoundEvidence };
 }

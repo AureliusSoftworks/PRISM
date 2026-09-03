@@ -14,6 +14,7 @@ import {
 import { decryptBytes, encryptBytes } from "./security.ts";
 import { HttpError } from "./utils.http.ts";
 import { assertRefractionActive, currentRefractionSignal, protectRefractionMutation } from "./refraction-cancellation.ts";
+import { normalizeDebateMysteryRoomSourceLockV1 } from "./debate-mystery-room-art-source-lock.ts";
 
 interface MysteryAssetVaultRow {
   id: string;
@@ -154,7 +155,7 @@ function assetRow(
   ).get(userId, sessionId, kind, subjectId) as MysteryAssetVaultRow | undefined) ?? null;
 }
 
-function compactReviewJson(review: Record<string, unknown>): string {
+export function compactReviewJson(review: Record<string, unknown>): string {
   const attempt = Number.isInteger(review.attempt) ? Number(review.attempt) : null;
   const pixelsSource = review.pixels && typeof review.pixels === "object"
     ? review.pixels as Record<string, unknown>
@@ -199,6 +200,9 @@ function compactReviewJson(review: Record<string, unknown>): string {
       reasonCount: reasons.length,
     },
     ...(entryTarget ? { entryTarget } : {}),
+    ...(review.sourceLock !== undefined
+      ? { sourceLock: normalizeDebateMysteryRoomSourceLockV1(review.sourceLock) }
+      : {}),
   });
 }
 

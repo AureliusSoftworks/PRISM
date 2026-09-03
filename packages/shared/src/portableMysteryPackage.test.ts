@@ -435,6 +435,16 @@ test("portable package migration keeps additive minor fields but enforces capaci
     futureCameraContract: { version: 2 },
   };
   assert.deepEqual(validateWhodunnitPackageManifestV1(whodunnit), []);
+  const checked = structuredClone(whodunnit) as unknown as Record<string, any>;
+  checked.runtime.completedPlaythrough = {
+    schema: "prism-whodunnit-playthrough-v1", completedAt: "2026-09-03T00:00:00Z",
+    transcript: [], discoveryIds: [], prosecutionChoiceIds: [], record: [], theory: null, court: null,
+    verdict: null, calloutHistory: [],
+    caseCheck: { version: 1, completionKind: "case_check", courtSkipped: true, assessed: "accused_set_only", accusationCorrect: false, concludedAt: "2026-09-03T00:00:00Z" },
+  };
+  assert.deepEqual(validateWhodunnitPackageManifestV1(checked), []);
+  delete checked.runtime.completedPlaythrough.caseCheck;
+  assert.ok(validateWhodunnitPackageManifestV1(checked).some((error) => error.includes("completedPlaythrough")));
   whodunnit.cast = Array.from({ length: 65 }, (_, index) => ({
     id: `cast-${index}`,
     name: `Cast ${index}`,

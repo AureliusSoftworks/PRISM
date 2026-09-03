@@ -4,6 +4,7 @@ import {
   type WhodunnitTextVoiceMode,
 } from "@localai/shared";
 import { enqueueBottishVoice } from "./bottishVoice.ts";
+import { DEBATE_IDENT_AUDIO } from "./debateIdentAudio.ts";
 import { routeAudioElementToPrismOutput } from "./replayAudioMasterCapture.ts";
 import type { RoomAcousticsSend } from "./roomAcoustics.ts";
 import {
@@ -25,7 +26,8 @@ export type DebateMysterySfxCue =
   | "paper-place"
   | "folder"
   | "clip"
-  | "pencil";
+  | "pencil"
+  | "room-complete";
 
 export interface DebateMysterySfxVoice {
   delayMs: number;
@@ -150,7 +152,7 @@ export function debateMysteryTextVoiceShouldStop(args: {
       args.mode === "off" ||
       args.startedMode !== args.mode ||
       args.delivery !== "text_only" ||
-      (!args.streaming && !args.playerObservation) ||
+      !args.streaming ||
       args.audible
     ),
   );
@@ -320,6 +322,7 @@ const SINGLE_VOICE_CUES = {
   folder: { delayMs: 0, gain: 0.18, playbackRate: 0.68, url: "/audio/ui-asmr/panel-close-02.mp3" },
   clip: { delayMs: 0, gain: 0.14, playbackRate: 1.16, url: "/audio/prism-companion/glass-tap-03.mp3" },
   pencil: { delayMs: 0, gain: 0.09, playbackRate: 1.34, url: "/audio/ui-asmr/bot-hover-02.mp3" },
+  "room-complete": { delayMs: 0, gain: 0.35, playbackRate: 1, url: DEBATE_IDENT_AUDIO.intro.url },
 } as const satisfies Record<
   Exclude<DebateMysterySfxCue, "evidence">,
   DebateMysterySfxVoice
@@ -367,6 +370,7 @@ export const DEBATE_MYSTERY_SFX_COOLDOWN_MS = {
   folder: 110,
   clip: 90,
   pencil: 70,
+  "room-complete": 500,
 } as const satisfies Record<DebateMysterySfxCue, number>;
 
 const lastPlaybackAt = new Map<DebateMysterySfxCue, number>();
@@ -397,6 +401,23 @@ export function debateMysterySfxCueForAction(args: {
   }
   if (args.action === "file_theory") return "theory";
   return null;
+}
+
+/** A room ident belongs only to the new, dialogue-free completion presentation. */
+export function debateMysteryRoomCompletionCueShouldStart(args: {
+  completionCueRoomId: string | null;
+  currentRoomId: string | null;
+  presentationVisible: boolean;
+  roomDialogueVisible: boolean;
+  startedRoomId: string | null;
+}): boolean {
+  return Boolean(
+    args.completionCueRoomId &&
+      args.completionCueRoomId === args.currentRoomId &&
+      args.presentationVisible &&
+      !args.roomDialogueVisible &&
+      args.startedRoomId !== args.completionCueRoomId,
+  );
 }
 
 function playVoice(

@@ -13,6 +13,9 @@ export const MANSION_LAYOUT_V2_MAX_FLOORS = 3 as const;
 export const MANSION_LAYOUT_V2_MAX_ANCHORS_PER_ROOM = 24 as const;
 export const MANSION_LAYOUT_V2_MAX_LIGHTS = 8 as const;
 export const MANSION_LAYOUT_V2_MAX_NEON_POINTS = 32 as const;
+/** A godray is a window-to-floor polygon of three or four corners. */
+export const MANSION_LAYOUT_V2_MIN_GODRAY_POINTS = 3 as const;
+export const MANSION_LAYOUT_V2_MAX_GODRAY_POINTS = 4 as const;
 export const MANSION_LAYOUT_V2_ROOFTOP_TEMPLATE_IDS = ["rooftop-lounge"] as const;
 
 export type MansionLayoutRotationV2 = 0 | 90;
@@ -139,6 +142,11 @@ export interface MansionLayoutEnvelopeV2 {
 
 /** A semantic room has one authored module footprint. Width and height are
  * derived from templateId + rotation and are deliberately not editable. */
+export const MANSION_LIGHT_BLEND_MODES_V1 = [
+  "auto", "screen", "plus-lighter", "overlay", "soft-light", "hard-light", "normal", "multiply",
+] as const;
+export type MansionLightBlendModeV1 = typeof MANSION_LIGHT_BLEND_MODES_V1[number];
+
 export interface MansionLayoutRoomV2 {
   kind: "room";
   id: string;
@@ -155,6 +163,8 @@ export interface MansionLayoutRoomV2 {
   bundledAssetPath: string | null;
   /** Content-addressed aggregate asset. A candidate never replaces this. */
   acceptedRoomAssetId: string | null;
+  /** Missing preserves legacy art-dependent blending and template lighting. */
+  lightBlendMode?: MansionLightBlendModeV1;
   venueContract?: MysteryVenueRoomContractV1;
   /** Accepted art may use authored hotspots only while this still matches. */
   acceptedRoomArtAnchorSha256?: string | null;
@@ -246,16 +256,32 @@ export interface MansionOmniLightV2 extends MansionDynamicLightBaseV2 {
   geometry: { x: number; y: number; radius: number };
 }
 
+export interface MansionLightPointV2 {
+  x: number;
+  y: number;
+}
+
+/** Legacy rotated-rectangle beam. Still valid and rendered as its four corners
+ * so saved venues, sessions, and packages need no migration. */
+export interface MansionDirectionalRectGeometryV2 {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+}
+
+/** Window-to-floor godray. Points 0 and 1 lie on the window edge the light
+ * enters through; the remaining one or two points are where the ray lands on
+ * the floor. Editing or placing a beam always writes this form. */
+export interface MansionDirectionalPolygonGeometryV2 {
+  points: MansionLightPointV2[];
+}
+
 export interface MansionDirectionalLightV2 extends MansionDynamicLightBaseV2 {
   kind: "directional";
   dust: boolean;
-  geometry: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    rotation: number;
-  };
+  geometry: MansionDirectionalRectGeometryV2 | MansionDirectionalPolygonGeometryV2;
 }
 
 export interface MansionNeonLightV2 extends MansionDynamicLightBaseV2 {
@@ -1489,12 +1515,22 @@ function lightGeometryIsValid(light: MansionDynamicLightV2): boolean {
       Number.isFinite(light.geometry.rotation) && Math.abs(light.geometry.rotation) <= 360;
   }
   if (light.kind === "directional") {
-    return isFiniteNormalized(light.geometry.x) &&
-      isFiniteNormalized(light.geometry.y) &&
-      Number.isFinite(light.geometry.width) && light.geometry.width > 0 && light.geometry.width <= 1 &&
-      Number.isFinite(light.geometry.height) && light.geometry.height > 0 && light.geometry.height <= 1 &&
-      Number.isFinite(light.geometry.rotation) && Math.abs(light.geometry.rotation) <= 360 &&
-      typeof light.dust === "boolean";
+    if (typeof light.dust !== "boolean") return false;
+    const geometry = light.geometry;
+    if (mansionDirectionalGeometryIsPolygonV2(geometry)) {
+      const points = geometry.points;
+      return Array.isArray(points) &&
+        points.length >= MANSION_LAYOUT_V2_MIN_GODRAY_POINTS &&
+        points.length <= MANSION_LAYOUT_V2_MAX_GODRAY_POINTS &&
+        points.every((point) => isFiniteNormalized(point?.x) && isFiniteNormalized(point?.y)) &&
+        // The window edge must have length; a collapsed edge has no ray direction.
+        Math.hypot(points[1]!.x - points[0]!.x, points[1]!.y - points[0]!.y) > 1e-4;
+    }
+    return isFiniteNormalized(geometry.x) &&
+      isFiniteNormalized(geometry.y) &&
+      Number.isFinite(geometry.width) && geometry.width > 0 && geometry.width <= 1 &&
+      Number.isFinite(geometry.height) && geometry.height > 0 && geometry.height <= 1 &&
+      Number.isFinite(geometry.rotation) && Math.abs(geometry.rotation) <= 360;
   }
   return light.geometry.points.length >= 2 &&
     light.geometry.points.length <= MANSION_LAYOUT_V2_MAX_NEON_POINTS &&
@@ -1620,6 +1656,9 @@ export function validateMansionLayoutV2(
     }
     if (entity.kind === "room") {
       rooms.push(entity);
+      if (entity.lightBlendMode !== undefined && !MANSION_LIGHT_BLEND_MODES_V1.includes(entity.lightBlendMode)) {
+        errors.push(`${entity.id} has an unsupported light blend mode.`);
+      }
       if (!entity.templateId?.trim() || !entity.name?.trim()) {
         errors.push(`${entity.id} needs a room type and name.`);
       }
@@ -1931,6 +1970,95 @@ function seededUnit(seed: string): number {
   return (hash >>> 0) / 0xffffffff;
 }
 
+export function mansionDirectionalGeometryIsPolygonV2(
+  geometry: MansionDirectionalLightV2["geometry"],
+): geometry is MansionDirectionalPolygonGeometryV2 {
+  return Array.isArray((geometry as MansionDirectionalPolygonGeometryV2).points);
+}
+
+const clampUnit = (value: number): number => Math.max(0, Math.min(1, value));
+
+/** The godray polygon in normalized room coordinates. A legacy rectangle is
+ * expanded to its corners in the room's aspect so its rotation reads the way
+ * the canvas has always drawn it: the bright edge first (window side), then the
+ * far edge (floor side) in bilinear order [p0, p1, p2, p3]. */
+export function mansionDirectionalLightPolygonV2(
+  light: MansionDirectionalLightV2,
+  aspectRatio = 16 / 9,
+): MansionLightPointV2[] {
+  const geometry = light.geometry;
+  if (mansionDirectionalGeometryIsPolygonV2(geometry)) {
+    return geometry.points.map((point) => ({ x: point.x, y: point.y }));
+  }
+  const aspect = Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : 16 / 9;
+  const halfWidth = (geometry.width / 2) * aspect;
+  const halfHeight = geometry.height / 2;
+  const angle = geometry.rotation * Math.PI / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const corner = (dx: number, dy: number): MansionLightPointV2 => ({
+    x: clampUnit(geometry.x + (dx * cos - dy * sin) / aspect),
+    y: clampUnit(geometry.y + (dx * sin + dy * cos)),
+  });
+  return [
+    corner(-halfWidth, -halfHeight),
+    corner(-halfWidth, halfHeight),
+    corner(halfWidth, halfHeight),
+    corner(halfWidth, -halfHeight),
+  ];
+}
+
+/** The window edge and the floor landing of a godray, paired so that
+ * origin.start travels to landing.start. A three-point ray lands on one point. */
+export function mansionGodrayEdgesV2(points: readonly MansionLightPointV2[]): {
+  origin: { start: MansionLightPointV2; end: MansionLightPointV2 };
+  landing: { start: MansionLightPointV2; end: MansionLightPointV2 };
+} {
+  const [p0, p1, p2, p3] = points;
+  const fallback = p0 ?? { x: 0.5, y: 0.5 };
+  return {
+    origin: { start: p0 ?? fallback, end: p1 ?? fallback },
+    landing: { start: p3 ?? p2 ?? fallback, end: p2 ?? fallback },
+  };
+}
+
+/** Rebuilds the floor landing so every ray leaves the window at one shared
+ * angle: the landing edge becomes the window edge translated by the current
+ * mean ray. This is what "parallel to the window" means for a sun beam. */
+export function mansionGodrayParallelPointsV2(
+  points: readonly MansionLightPointV2[],
+): MansionLightPointV2[] {
+  const { origin, landing } = mansionGodrayEdgesV2(points);
+  const ray = {
+    x: ((landing.start.x - origin.start.x) + (landing.end.x - origin.end.x)) / 2,
+    y: ((landing.start.y - origin.start.y) + (landing.end.y - origin.end.y)) / 2,
+  };
+  return [
+    origin.start,
+    origin.end,
+    { x: clampUnit(origin.end.x + ray.x), y: clampUnit(origin.end.y + ray.y) },
+    { x: clampUnit(origin.start.x + ray.x), y: clampUnit(origin.start.y + ray.y) },
+  ];
+}
+
+/** Visual center of any dynamic light; polygon lights use their centroid. */
+export function mansionDynamicLightCenterV2(light: MansionDynamicLightV2): MansionLightPointV2 {
+  const points = light.kind === "neon"
+    ? light.geometry.points
+    : light.kind === "directional" && mansionDirectionalGeometryIsPolygonV2(light.geometry)
+      ? light.geometry.points
+      : null;
+  if (!points) {
+    const geometry = light.geometry as { x: number; y: number };
+    return { x: geometry.x, y: geometry.y };
+  }
+  const divisor = Math.max(1, points.length);
+  return {
+    x: points.reduce((sum, point) => sum + point.x, 0) / divisor,
+    y: points.reduce((sum, point) => sum + point.y, 0) / divisor,
+  };
+}
+
 /** Deterministic overlay sample. Reduced Motion freezes the seeded frame; it
  * does not remove the authored light or change its saved intensity. */
 export function mansionDynamicLightFrameV2(
@@ -1938,20 +2066,32 @@ export function mansionDynamicLightFrameV2(
   elapsedMs: number,
   reducedMotion: boolean,
 ): { intensity: number; phase: number } {
-  const basePhase = seededUnit(`${light.id}:${light.animationSeed}`) * Math.PI * 2;
-  const animatesIntensity = (light.kind === "fire" && light.animation === "flicker") ||
-    light.kind === "neon";
-  const time = reducedMotion || !animatesIntensity ? 0 : Math.max(0, elapsedMs) / 1_000;
-  const frequency = light.kind === "fire" ? 2.4 : light.kind === "neon" ? 0.7 : 0.25;
-  const amplitude = light.kind === "fire" && light.animation === "flicker"
-    ? 0.16
-    : light.kind === "neon"
-      ? 0.5
-      : 0;
-  const phase = basePhase + time * frequency * Math.PI * 2;
-  const modulation = 1 - amplitude + amplitude * (0.5 + 0.5 * Math.sin(phase));
+  const seed = `${light.id}:${light.animationSeed}`;
+  const maximumIntensity = Math.min(1, Math.max(0, light.intensity));
+  const basePhase = seededUnit(`${seed}:phase`) * Math.PI * 2;
+  const tempo = 0.82 + seededUnit(`${seed}:tempo`) * 0.36;
+  const detailPhase = seededUnit(`${seed}:detail-phase`) * Math.PI * 2;
+  const time = reducedMotion ? 0 : Math.max(0, elapsedMs) / 1_000;
+  const wave = (frequency: number, phase = basePhase): number =>
+    0.5 + 0.5 * Math.sin(phase + time * frequency * tempo * Math.PI * 2);
+  let modulation: number;
+  if (light.kind === "fire") {
+    if (light.animation === "flicker") {
+      // Layered, independently seeded pulses prevent a visible metronome.
+      modulation = 0.68 + 0.22 * wave(1.7) + 0.10 * wave(4.9, detailPhase);
+    } else {
+      // Legacy steady fire remains alive, but never reads as a flicker.
+      modulation = 0.84 + 0.16 * wave(0.16);
+    }
+  } else if (light.kind === "omni") {
+    modulation = 0.82 + 0.18 * wave(0.12);
+  } else if (light.kind === "directional") {
+    modulation = 0.84 + 0.16 * wave(0.19);
+  } else {
+    modulation = 0.82 + 0.18 * wave(0.42);
+  }
   return {
-    intensity: Math.min(1, Math.max(0, light.intensity * modulation)),
+    intensity: Math.min(maximumIntensity, Math.max(0, maximumIntensity * modulation)),
     phase: basePhase,
   };
 }

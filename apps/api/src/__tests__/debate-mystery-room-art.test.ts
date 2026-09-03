@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import sharp from "sharp";
 import { CURRENT_MANSION_ROOM_ART_CONTRACT } from "@localai/shared";
@@ -12,6 +13,12 @@ import {
   renderDebateMysteryRoomArtV1,
   validateDebateMysteryRoomArtSourceAlignmentV1,
 } from "../debate-mystery-room-art.ts";
+import {
+  DEBATE_MYSTERY_ROOM_ALIGNMENT_CONTRACT_V1,
+  isDebateMysteryRoomArtPairReadyV1,
+  locallyValidateLegacyDebateMysteryRoomPairV1,
+  normalizeDebateMysteryRoomSourceLockV1,
+} from "../debate-mystery-room-art-source-lock.ts";
 
 async function colorfulRoomFixture(): Promise<Buffer> {
   const width = 96;
@@ -58,6 +65,36 @@ async function detailedNavigationRoomFixture(landmarkOffset = 0): Promise<Buffer
       pixels.fill(pillar ? 220 : wall, (y * width + x) * 3, (y * width + x + 1) * 3);
     }
   }
+  return sharp(pixels, { raw: { width, height, channels: 3 } }).png().toBuffer();
+}
+
+async function separatedLandmarksFixture(moved?: "lamps" | "desk" | "door"): Promise<Buffer> {
+  const width = 320;
+  const height = 180;
+  const pixels = Buffer.alloc(width * height * 3);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const wall = 40 + Math.floor(70 * x / width) + Math.floor(30 * y / height) + (y > 145 ? 40 : 0);
+      pixels.fill(wall, (y * width + x) * 3, (y * width + x + 1) * 3);
+    }
+  }
+  const rectangle = (left: number, top: number, w: number, h: number, shade: number) => {
+    for (let y = top; y < top + h; y += 1) {
+      for (let x = left; x < left + w; x += 1) {
+        pixels.fill(shade, (y * width + x) * 3, (y * width + x + 1) * 3);
+      }
+    }
+  };
+  const lampShift = moved === "lamps" ? 14 : 0;
+  rectangle(38 + lampShift, 28, 9, 12, 230);
+  rectangle(267 - lampShift, 28, 9, 12, 230);
+  const deskShift = moved === "desk" ? 14 : 0;
+  rectangle(130 + deskShift, 108, 62, 5, 220);
+  rectangle(134 + deskShift, 113, 4, 28, 40);
+  rectangle(184 + deskShift, 113, 4, 28, 40);
+  const doorShift = moved === "door" ? 14 : 0;
+  rectangle(224 + doorShift, 61, 24, 44, 200);
+  rectangle(228 + doorShift, 65, 16, 40, 45);
   return sharp(pixels, { raw: { width, height, channels: 3 } }).png().toBuffer();
 }
 
@@ -310,6 +347,52 @@ describe("debate mystery room Mosaic and Upgraded derivatives", () => {
     assert.ok(alignment.detailCorrelation > 0.99);
   });
 
+  it("rejects separate lamp, desk and doorway shifts which pass both whole-frame luminance gates", async () => {
+    const source = await separatedLandmarksFixture();
+    for (const moved of ["lamps", "desk", "door"] as const) {
+      const alignment = await validateDebateMysteryRoomArtSourceAlignmentV1({
+        source, candidate: await separatedLandmarksFixture(moved),
+      });
+      assert.ok(alignment.correlation >= alignment.minimumCorrelation, `${moved}: coarse ${alignment.correlation}`);
+      assert.ok(alignment.detailCorrelation >= alignment.minimumCorrelation, `${moved}: detail ${alignment.detailCorrelation}`);
+      assert.ok(alignment.landmarkCorrelation < alignment.minimumLandmarkCorrelation, `${moved}: landmarks ${alignment.landmarkCorrelation}`);
+      assert.equal(alignment.approved, false);
+    }
+    const relit = await sharp(source).linear(0.75, 18).png().toBuffer();
+    const positive = await validateDebateMysteryRoomArtSourceAlignmentV1({ source, candidate: relit });
+    assert.equal(positive.approved, true);
+    assert.ok(positive.landmarkCorrelation >= positive.minimumLandmarkCorrelation);
+  });
+
+  const calibrationRoot = new URL("../../../../.codex/output/imagegen/existing-room-repair-2026-09-02/", import.meta.url);
+  it("retains seven reviewed local pairs and rejects the seven legacy alternatives", {
+    skip: !existsSync(calibrationRoot) && "local calibration art is not part of the repository",
+  }, async () => {
+    const hash = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+    for (const room of ["crew-quarters", "engine-control-room", "passenger-cabin", "navigation-bridge", "observation-lounge", "main-galley", "security-office"]) {
+      const source = readFileSync(new URL(`${room}-mosaic.png`, calibrationRoot));
+      for (const suffix of ["upgraded-repair-final", "upgraded-legacy"]) {
+        const candidate = readFileSync(new URL(`${room}-${suffix}.png`, calibrationRoot));
+        const expected = suffix === "upgraded-repair-final";
+        const alignment = await validateDebateMysteryRoomArtSourceAlignmentV1({ source, candidate });
+        assert.equal(alignment.approved, expected, `${room}/${suffix}: ${JSON.stringify(alignment)}`);
+        const base = { status: "ready" as const, sha256: hash(source), review_json: "{}" };
+        const derivative = { status: "ready" as const, sha256: hash(candidate), review_json: JSON.stringify({ vision: { approved: true } }) };
+        const reference = await renderDebateMysteryRoomArtV1(source, { variant: "mosaic-reference", format: "png" });
+        const checked = await locallyValidateLegacyDebateMysteryRoomPairV1({
+          base, derivative,
+          validate: async () => normalizeDebateMysteryRoomSourceLockV1({
+            ...alignment,
+            version: DEBATE_MYSTERY_ROOM_ALIGNMENT_CONTRACT_V1.version,
+            referenceVersion: DEBATE_MYSTERY_ROOM_ALIGNMENT_CONTRACT_V1.referenceVersion,
+            baseSha256: hash(source), referenceSha256: hash(reference.bytes), candidateSha256: hash(candidate),
+          }),
+        });
+        assert.equal(isDebateMysteryRoomArtPairReadyV1(base, checked), expected, `local comparison: ${room}/${suffix}`);
+      }
+    }
+  });
+
   it("validates the source-preserving normalized upgrade before review and sealing", () => {
     const server = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
     const upgrade = server.slice(
@@ -377,7 +460,7 @@ describe("debate mystery room Mosaic and Upgraded derivatives", () => {
     );
     assert.match(
       server,
-      /roomId \? new Set\(\[roomId\]\) : undefined/u,
+      /roomId \? new Set\(\[roomId\]\) : new Set\(before\.requiresUpgradeRoomIds\)/u,
       "the room-specific upgrade must not generate every room",
     );
     const frozenLayoutStart = mansionBundles.indexOf("const frozenLayout = state.config.mansionSnapshot?.layoutV2");

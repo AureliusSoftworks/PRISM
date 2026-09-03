@@ -63,12 +63,13 @@ describe("Whodunnit investigation music", () => {
     );
   });
 
-  it("loops throughout investigation except the four explicit silence states", () => {
+  it("keeps the investigation bed with an occupant, even after their room is cleared", () => {
     const ordinaryInvestigation = {
       caseFileOpen: false,
       outside: false,
       roomComplete: false,
       roomIntroductionActive: false,
+      suspectPresent: false,
       roomView: "room" as const,
     };
     assert.equal(
@@ -107,6 +108,15 @@ describe("Whodunnit investigation music", () => {
       mysteryInvestigationMusicMix({
         ...ordinaryInvestigation,
         roomComplete: true,
+        suspectPresent: true,
+      }),
+      WHODUNNIT_INVESTIGATION_MUSIC_MIX,
+      "a cleared room remains scored while its visible occupant is present",
+    );
+    assert.equal(
+      mysteryInvestigationMusicMix({
+        ...ordinaryInvestigation,
+        roomComplete: true,
         roomIntroductionActive: true,
         roomView: "mansion",
       }),
@@ -131,7 +141,7 @@ describe("Whodunnit investigation music", () => {
   it("uses the shared local-only music layer and the global audio controls", () => {
     assert.match(source, /<SessionAtmosphereLayer/u);
     assert.match(source, /active=\{props\.audioEnabled\}/u);
-    assert.match(source, /caseFileOpen,\s*outside: visitingExterior,\s*roomIntroductionActive,\s*roomComplete,\s*roomView: state\.roomView/u);
+    assert.match(source, /caseFileOpen,\s*outside: visitingExterior,\s*roomIntroductionActive,\s*roomComplete,\s*suspectPresent: currentSuspect !== null,\s*roomView: state\.roomView/u);
     assert.match(source, /state\.playPhase === "title_card" \|\| visitingExterior/u);
     assert.doesNotMatch(source, /mysteryInvestigationMusicProgramV1|data-music-program/u);
     assert.match(source, /backgroundRecordable=\{false\}/u);

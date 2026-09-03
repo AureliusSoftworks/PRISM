@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,6 +27,11 @@ import {
   snapshotDebateMysteryAssetsForSceneRepairV1,
   validateDebateMysteryAssetPixelsV1,
 } from "../debate-mystery-assets.ts";
+import {
+  DEBATE_MYSTERY_ROOM_ALIGNMENT_CONTRACT_V1,
+  isDebateMysteryRoomArtPairReadyV1,
+  type DebateMysteryRoomPairRowV1,
+} from "../debate-mystery-room-art-source-lock.ts";
 
 const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
 
@@ -214,6 +219,47 @@ async function roomPng(): Promise<Buffer> {
 }
 
 describe("sealed Whodunnit asset vault", () => {
+  it("retains private room pairing through sealing, backup import and failed-repair rollback", async () => {
+    const db = vaultDb();
+    const restored = vaultDb();
+    const userKey = randomBytes(32);
+    const source = await sharp(await roomPng()).resize(1920, 1080).png().toBuffer();
+    const candidate = await sharp(source).linear(0.8, 15).png().toBuffer();
+    const hash = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+    const sourceLock = {
+      version: DEBATE_MYSTERY_ROOM_ALIGNMENT_CONTRACT_V1.version,
+      referenceVersion: DEBATE_MYSTERY_ROOM_ALIGNMENT_CONTRACT_V1.referenceVersion,
+      baseSha256: hash(source), referenceSha256: hash(source), candidateSha256: hash(candidate),
+      approved: true, frameMatches: true, correlation: 0.99, detailCorrelation: 0.99, landmarkCorrelation: 0.98,
+    };
+    const baseArgs = { userId: "user-1", sessionId: "case-1", kind: "room" as const, provider: "test", model: "test" };
+    sealDebateMysteryAssetBytesV1(db, userKey, { ...baseArgs, subjectId: "room-1", bytes: source, review: {} });
+    const publicRef = sealDebateMysteryAssetBytesV1(db, userKey, {
+      ...baseArgs, subjectId: "room-1:illustrated-v1", bytes: candidate,
+      review: { sourceLock, vision: { approved: true } },
+    });
+    assert.doesNotMatch(JSON.stringify(publicRef), /sourceLock|baseSha256|referenceSha256/u);
+    const row = (database: DatabaseSync, subjectId: string) => database.prepare(
+      "SELECT status, sha256, review_json FROM debate_mystery_asset_vault WHERE subject_id = ?",
+    ).get(subjectId) as unknown as DebateMysteryRoomPairRowV1;
+    assert.deepEqual(JSON.parse(row(db, "room-1:illustrated-v1").review_json).sourceLock, sourceLock);
+    const backup = exportDebateMysteryAssetVaultBackupV1(db, "user-1", userKey);
+    importDebateMysteryAssetVaultBackupV1(restored, "user-1", randomBytes(32), backup, new Set(["case-1"]));
+    assert.equal(isDebateMysteryRoomArtPairReadyV1(row(restored, "room-1"), row(restored, "room-1:illustrated-v1")), true);
+
+    const baseBefore = db.prepare("SELECT * FROM debate_mystery_asset_vault WHERE subject_id = 'room-1'").get();
+    const derivativeBefore = row(db, "room-1:illustrated-v1");
+    const snapshots = snapshotDebateMysteryAssetsForSceneRepairV1(db, "user-1", "case-1", "room", ["room-1:illustrated-v1"]);
+    replaceDebateMysteryAssetWithPendingV1(db, { ...baseArgs, subjectId: "room-1:illustrated-v1" });
+    setDebateMysteryAssetFallbackV1(db, { ...baseArgs, subjectId: "room-1:illustrated-v1", reason: "Source-lock rejected" });
+    restoreDebateMysteryAssetsFromSceneRepairV1(db, "user-1", "case-1", "room", snapshots);
+    assert.deepEqual(row(db, "room-1:illustrated-v1"), derivativeBefore);
+    assert.deepEqual(db.prepare("SELECT * FROM debate_mystery_asset_vault WHERE subject_id = 'room-1'").get(), baseBefore);
+    assert.equal(isDebateMysteryRoomArtPairReadyV1(row(db, "room-1"), row(db, "room-1:illustrated-v1")), true);
+    db.close();
+    restored.close();
+  });
+
   it("keeps entry calibration public while restoring the exact encrypted pre-repair row", async () => {
     const db = vaultDb();
     const userKey = randomBytes(32);

@@ -782,7 +782,9 @@ test("difficulty, eyewitness, Premium, and verdict contracts are deterministic",
   assert.equal(debateMysteryEyewitnessChanceV2("casual", "compact"), 0.05);
   assert.equal(debateMysteryEyewitnessChanceV2("classic", "grand"), 0.35);
   assert.equal(debateMysteryEyewitnessChanceV2("mastermind", "grand"), 0.5);
-  assert.equal(debateMysteryPremiumAvailableV2(), false);
+  assert.equal(debateMysteryPremiumAvailableV2(), true);
+  assert.equal(debateMysteryPremiumAvailableV2("play"), true);
+  assert.equal(debateMysteryPremiumAvailableV2("case_forge"), false);
   assert.equal(debateMysteryClassifyVerdictV2({ legalResult: "guilty", accusedIsCulprit: false, proofEstablished: true, proofSafe: true }), "wrongful_conviction");
   assert.equal(debateMysteryClassifyVerdictV2({ legalResult: "not_guilty", accusedIsCulprit: true, proofEstablished: true, proofSafe: true }), "acquittal_despite_proof");
 });

@@ -1076,6 +1076,11 @@ export function DebateMysteryPlay(
         `/api/debates/${encodeURIComponent(sessionId)}/mystery-action`,
         mysteryRequestBody({
           ...action,
+          preferredProvider: props.modelOverride?.provider ?? props.preferredProvider,
+          modelOverride: props.modelOverride?.model ?? null,
+          responseMode: props.responseMode,
+          reasoningEffort: props.reasoningEffort,
+          turbo: props.turbo,
           expectedRevision: props.session.revision,
           idempotencyKey: mysteryId(`mystery-${action.action}`),
         }),
@@ -1465,6 +1470,7 @@ export function DebateMysteryPlay(
     outside: false,
     roomComplete: false,
     roomIntroductionActive: false,
+    suspectPresent: false,
     roomView: "mansion",
   });
   const theoryChecklist = [

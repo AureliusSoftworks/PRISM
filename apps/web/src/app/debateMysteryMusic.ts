@@ -56,12 +56,13 @@ export function mysteryInvestigationMusicMix(args: {
   outside: boolean;
   roomComplete: boolean;
   roomIntroductionActive: boolean;
+  suspectPresent: boolean;
   roomView: "mansion" | "room";
 }): SessionAtmosphereMix {
   return args.outside ||
     args.caseFileOpen ||
     (args.roomView === "room" &&
-      (args.roomIntroductionActive || args.roomComplete))
+      (args.roomIntroductionActive || (args.roomComplete && !args.suspectPresent)))
     ? WHODUNNIT_INVESTIGATION_MUSIC_SILENT_MIX
     : WHODUNNIT_INVESTIGATION_MUSIC_MIX;
 }

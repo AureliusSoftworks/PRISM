@@ -120,8 +120,18 @@ describe("Mansion Editor V2 experience", () => {
     assert.match(mysteryCss, /mansionRoomAnchorMarker \{[^}]*pointer-events: auto;/u);
     assert.match(mysteryCss, /mansionLightResizeHandle \{[^}]*pointer-events: auto;/u);
     assert.match(mysteryCss, /mix-blend-mode: overlay/u);
+    assert.match(mysteryCss, /mansionDynamicLightFireSteady/u);
+    assert.match(mysteryCss, /mansionDynamicLightOmni/u);
+    assert.match(mysteryCss, /mansionDynamicLightDirectional/u);
     assert.match(mysteryCss, /mansionDynamicLightNeon/u);
     assert.match(mysteryCss, /mansionDirectionalDust/u);
+    assert.doesNotMatch(mysteryCss, /mansionDynamicLightBulb/u);
+    assert.match(mysteryCss, /\.mansionDynamicLight\[data-light-kind\] \{ animation-delay: var\(--mansion-light-delay\); \}/u);
+    for (const name of ["Fire", "FireSteady", "Omni", "Directional", "Neon"]) {
+      const keyframes = mysteryCss.split(`@keyframes mansionDynamicLight${name} {`)[1]?.split("\n")[0];
+      assert.ok(keyframes, `${name} retains an intensity animation`);
+      assert.doesNotMatch(keyframes, /transform:/u, `${name} must not move the source`);
+    }
     assert.match(mysteryCss, /prefers-reduced-motion: reduce[\s\S]*animation: none !important/u);
   });
 });

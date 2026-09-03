@@ -1,8 +1,12 @@
 "use client";
 
 import {
+  mansionDirectionalGeometryIsPolygonV2,
   mansionDynamicLightFrameV2,
+  mansionGodrayEdgesV2,
   type MansionDynamicLightV2,
+  type MansionLightBlendModeV1,
+  type MansionLightPointV2,
 } from "@localai/shared";
 import {
   useEffect,
@@ -19,6 +23,7 @@ import {
   type MysteryRoomLightEmitterV1,
 } from "./debateMysteryRoomCinematography";
 import styles from "./debateMysteryRoomCinematography.module.css";
+import { roomLightBlend } from "./roomLightPlacement";
 
 interface DebateMysteryRoomCinematographyLayerProps {
   room: {
@@ -30,6 +35,10 @@ interface DebateMysteryRoomCinematographyLayerProps {
   templateLightingAligned: boolean;
   blurred: boolean;
   reducedMotion: boolean;
+  artStyle?: "mosaic" | "illustrated";
+  blendMode?: MansionLightBlendModeV1;
+  sourceAspectRatio?: number;
+  viewport?: boolean;
 }
 
 const AUTHORED_LIGHT_PROFILE_V1 = Object.freeze({
@@ -86,25 +95,105 @@ function drawRadialAuthoredLight(
   context.restore();
 }
 
+const lerpPoint = (
+  from: MansionLightPointV2,
+  to: MansionLightPointV2,
+  amount: number,
+): MansionLightPointV2 => ({
+  x: from.x + (to.x - from.x) * amount,
+  y: from.y + (to.y - from.y) * amount,
+});
+
+/** A godray polygon: the same falloff as the legacy beam, now running from the
+ * window edge to the floor landing, with dust drifting down the ray. */
+function drawGodrayAuthoredLight(
+  context: CanvasRenderingContext2D,
+  light: Extract<MansionDynamicLightV2, { kind: "directional" }> & {
+    geometry: { points: MansionLightPointV2[] };
+  },
+  width: number,
+  height: number,
+  intensity: number,
+  elapsedMs: number,
+): void {
+  const points = light.geometry.points.map((point) => ({ x: point.x * width, y: point.y * height }));
+  const [first, ...rest] = points;
+  if (!first || rest.length < 2) return;
+  const { origin, landing } = mansionGodrayEdgesV2(points);
+  const from = lerpPoint(origin.start, origin.end, 0.5);
+  const to = lerpPoint(landing.start, landing.end, 0.5);
+  context.save();
+  context.globalAlpha = intensity;
+  const gradient = context.createLinearGradient(from.x, from.y, to.x, to.y);
+  gradient.addColorStop(0, light.color);
+  gradient.addColorStop(0.28, light.color);
+  gradient.addColorStop(1, "transparent");
+  context.beginPath();
+  context.moveTo(first.x, first.y);
+  for (const point of rest) context.lineTo(point.x, point.y);
+  context.closePath();
+  context.fillStyle = gradient;
+  context.fill();
+  if (light.dust) {
+    const random = seededRandom(mysteryRoomCinematographySeed(light.animationSeed));
+    for (let index = 0; index < 36; index += 1) {
+      // Bilinear sampling keeps every mote inside the polygon; `along` is the
+      // seeded drift down the ray so dust falls from the window toward the floor.
+      const across = random();
+      const along = (random() + elapsedMs / 45_000) % 1;
+      const mote = lerpPoint(
+        lerpPoint(origin.start, origin.end, across),
+        lerpPoint(landing.start, landing.end, across),
+        along,
+      );
+      context.globalAlpha = intensity * (0.2 + random() * 0.45) * (1 - along * 0.5);
+      context.fillStyle = light.color;
+      context.beginPath();
+      context.arc(mote.x, mote.y, Math.max(0.6, width / 900), 0, Math.PI * 2);
+      context.fill();
+    }
+  }
+  context.restore();
+}
+
 function drawDirectionalAuthoredLight(
   context: CanvasRenderingContext2D,
   light: Extract<MansionDynamicLightV2, { kind: "directional" }>,
   width: number,
   height: number,
   intensity: number,
+  elapsedMs: number,
 ): void {
-  const lightWidth = width * light.geometry.width;
-  const lightHeight = height * light.geometry.height;
+  const geometry = light.geometry;
+  if (mansionDirectionalGeometryIsPolygonV2(geometry)) {
+    drawGodrayAuthoredLight(context, { ...light, geometry }, width, height, intensity, elapsedMs);
+    return;
+  }
+  // Legacy rotated rectangle: unchanged so saved venues render exactly as before.
+  const lightWidth = width * geometry.width;
+  const lightHeight = height * geometry.height;
   context.save();
   context.globalAlpha = intensity;
-  context.translate(width * light.geometry.x, height * light.geometry.y);
-  context.rotate(light.geometry.rotation * Math.PI / 180);
+  context.translate(width * geometry.x, height * geometry.y);
+  context.rotate(geometry.rotation * Math.PI / 180);
   const gradient = context.createLinearGradient(-lightWidth / 2, 0, lightWidth / 2, 0);
   gradient.addColorStop(0, light.color);
   gradient.addColorStop(0.28, light.color);
   gradient.addColorStop(1, "transparent");
   context.fillStyle = gradient;
   context.fillRect(-lightWidth / 2, -lightHeight / 2, lightWidth, lightHeight);
+  if (light.dust) {
+    const random = seededRandom(mysteryRoomCinematographySeed(light.animationSeed));
+    for (let index = 0; index < 36; index += 1) {
+      const x = ((random() + elapsedMs / 45_000) % 1 - 0.5) * lightWidth;
+      const y = (random() - 0.5) * lightHeight;
+      context.globalAlpha = intensity * (0.2 + random() * 0.45);
+      context.fillStyle = light.color;
+      context.beginPath();
+      context.arc(x, y, Math.max(0.6, width / 900), 0, Math.PI * 2);
+      context.fill();
+    }
+  }
   context.restore();
 }
 
@@ -144,7 +233,7 @@ function drawAuthoredLight(
   if (light.kind === "fire" || light.kind === "omni") {
     drawRadialAuthoredLight(context, light, width, height, intensity);
   } else if (light.kind === "directional") {
-    drawDirectionalAuthoredLight(context, light, width, height, intensity);
+    drawDirectionalAuthoredLight(context, light, width, height, intensity, reducedMotion ? 0 : elapsedMs);
   } else {
     drawNeonAuthoredLight(context, light, width, height, intensity);
   }
@@ -169,7 +258,7 @@ export function DebateMysteryRoomCinematographyLayer(
     templateLightingAligned: props.templateLightingAligned,
     hasTemplateProfile: Boolean(templateProfile),
   });
-  const profile = templateProfile ?? (lightSource === "authored" ? AUTHORED_LIGHT_PROFILE_V1 : null);
+  const profile = lightSource === "authored" ? AUTHORED_LIGHT_PROFILE_V1 : templateProfile;
   const rootRef = useRef<HTMLDivElement>(null);
   const lightCanvasRef = useRef<HTMLCanvasElement>(null);
   const grainCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -184,7 +273,7 @@ export function DebateMysteryRoomCinematographyLayer(
     if (!root || !lightCanvas || !grainCanvas || !lightContext || !grainContext) return;
 
     const roomStage = root.closest<HTMLElement>('[data-mystery-room-stage="true"]');
-    let artStyle = mysteryRoomCinematographyArtStyleV1(
+    let artStyle = props.artStyle ?? mysteryRoomCinematographyArtStyleV1(
       roomStage?.style.getPropertyValue("--room-image"),
     );
     let { width, height } = mysteryRoomCinematographyCanvasSize(artStyle);
@@ -242,11 +331,13 @@ export function DebateMysteryRoomCinematographyLayer(
     };
 
     const configureArtStyle = (): void => {
-      artStyle = mysteryRoomCinematographyArtStyleV1(
+      artStyle = props.artStyle ?? mysteryRoomCinematographyArtStyleV1(
         roomStage?.style.getPropertyValue("--room-image"),
       );
       ({ width, height } = mysteryRoomCinematographyCanvasSize(artStyle));
+      if (props.sourceAspectRatio) height = Math.max(1, Math.round(width / props.sourceAspectRatio));
       root.dataset.artStyle = artStyle;
+      root.style.setProperty("--room-light-blend", roomLightBlend(props.blendMode, artStyle));
       if (lightCanvas.width !== width || lightCanvas.height !== height) {
         lightCanvas.width = width;
         lightCanvas.height = height;
@@ -282,7 +373,7 @@ export function DebateMysteryRoomCinematographyLayer(
       stageObserver?.disconnect();
       window.cancelAnimationFrame(animationFrame);
     };
-  }, [lightSource, profile, props.lights, props.reducedMotion, props.room.id]);
+  }, [lightSource, profile, props.lights, props.reducedMotion, props.room.id, props.artStyle, props.blendMode, props.sourceAspectRatio]);
 
   if (!profile) return null;
   const style = {
@@ -300,6 +391,7 @@ export function DebateMysteryRoomCinematographyLayer(
       data-blurred={props.blurred ? "true" : undefined}
       data-cinematography-profile={profile.id}
       data-light-source={lightSource}
+      data-viewport={props.viewport ? "true" : undefined}
       data-light-motion={props.reducedMotion ? "frozen" : "live"}
       style={style}
       aria-hidden="true"

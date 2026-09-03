@@ -12,7 +12,7 @@ import { normalizeDebateParticipantDifficulty } from "./debateParticipation.ts";
  */
 
 export const DEBATE_MYSTERY_SCHEMA_VERSION = 1 as const;
-export const DEBATE_MYSTERY_GENERATOR_VERSION = 3 as const;
+export const DEBATE_MYSTERY_GENERATOR_VERSION = 4 as const;
 /** The page/block notebook remains readable for old backups only. */
 export const DEBATE_MYSTERY_NOTEBOOK_VERSION = 2 as const;
 export const DEBATE_MYSTERY_NOTEBOOK_CHARACTER_LIMIT = 20_000;
@@ -527,8 +527,9 @@ export const DEBATE_MYSTERY_ROOM_TEMPLATES: readonly DebateMysteryRoomTemplateV1
     };
   });
 
-/** Custom/accepted plates cannot honestly reuse object-level PRISM template
- * regions. These neutral scene regions preserve the same dense Examine grid. */
+/** Placement-only fallback geometry for custom plates without object anchors.
+ * These areas are not invitations to inspect empty space. Frozen consequential
+ * targets may still use them; never remove their geometry from old cases. */
 const GENERIC_PRESENTATION_ROOM_REGIONS: ReadonlyArray<{
   id: string;
   label: string;
@@ -540,6 +541,28 @@ const GENERIC_PRESENTATION_ROOM_REGIONS: ReadonlyArray<{
   { id: "scene-right-wall", label: "right wall", physicalAnchor: "the right wall of the room", polygon: [{ x: 72, y: 15 }, { x: 100, y: 14 }, { x: 100, y: 87 }, { x: 71, y: 88 }] },
   { id: "scene-foreground", label: "foreground", physicalAnchor: "the foreground of the room", polygon: [{ x: 12, y: 72 }, { x: 88, y: 71 }, { x: 91, y: 100 }, { x: 9, y: 100 }] },
 ];
+
+/** Outcome-neutral eligibility: concrete scenery remains inspectable even
+ * without a clue. Only known empty spatial padding is excluded by default. */
+export function debateMysteryRegionHasMeaningfulSubjectV1(region: {
+  id: string;
+  label: string;
+  physicalAnchor?: string;
+}): boolean {
+  const label = region.label.toLowerCase().replace(/\s*·\s*(upper|center|lower)$/u, "").trim();
+  if (/^(?:left wall|right wall|center surface|foreground|(?:empty |open )?floor|dance floor|stone floor|floor tile|terrace floor|pool deck)$/u.test(label)) {
+    const anchor = (region.physicalAnchor ?? "").toLowerCase()
+      .replace(/^the (?:upper|center|lower) portion of /u, "").replace(/^the /u, "").trim();
+    // Recognize only the known padding vocabulary. A custom anchor describing
+    // a sculpture, crack, wet mark or other concrete detail remains authored.
+    return Boolean(anchor) && !new Set([
+      label, `${label} and the immediately surrounding surface`,
+      "left wall of the room", "right wall of the room", "center of the room", "foreground of the room",
+      "open polished floor at the center", "pale stone deck around the water",
+    ]).has(anchor);
+  }
+  return true;
+}
 
 /** One frozen decision drives art-aware click regions, authored observation
  * subjects, and deterministic placement fallbacks. */
@@ -2082,10 +2105,12 @@ export function compileDeterministicDebateMystery(args: {
     const detailRegions = presentationRegions.filter((region) =>
       region.id.includes(":detail-") || authoredRegionIds.has(region.id)
     );
-    const shuffledRegions = shuffled(detailRegions.length ? detailRegions : presentationRegions, random);
+    const candidates = detailRegions.length ? detailRegions : presentationRegions;
+    const shuffledRegions = shuffled(candidates, random).sort((a, b) =>
+      Number(debateMysteryRegionHasMeaningfulSubjectV1(b)) - Number(debateMysteryRegionHasMeaningfulSubjectV1(a)));
     const region = shuffledRegions[0]!;
     const mustBeClue = index < Math.min(4, searchableRooms.length);
-    const kind: DebateMysteryRegionOutcomeKind = mustBeClue ? "clue" : random() < 0.34 ? "subplot" : "empty";
+    const kind: DebateMysteryRegionOutcomeKind = mustBeClue ? "clue" : random() < 0.34 && debateMysteryRegionHasMeaningfulSubjectV1(region) ? "subplot" : "empty";
     const hidingMechanism = choose(HIDING_PATTERNS, random).replace("{anchor}", region.label.toLowerCase());
     const object = OBJECTS[index % OBJECTS.length]!;
     const evidenceId = kind === "clue" ? `evidence-${index + 1}` : null;
@@ -2154,7 +2179,7 @@ export function compileDeterministicDebateMystery(args: {
     const contextualRegions = shuffledRegions.slice(1, Math.min(desiredRegionCount, shuffledRegions.length));
     for (const [contextIndex, contextualRegion] of contextualRegions.entries()) {
       const contextualKind: DebateMysteryRegionOutcomeKind =
-        contextIndex === 0 && random() < 0.42 ? "subplot" : "empty";
+        contextIndex === 0 && random() < 0.42 && debateMysteryRegionHasMeaningfulSubjectV1(contextualRegion) ? "subplot" : "empty";
       const contextualMechanism = choose(HIDING_PATTERNS, random).replace(
         "{anchor}",
         contextualRegion.label.toLowerCase(),
@@ -2434,6 +2459,17 @@ export function compileDeterministicDebateMystery(args: {
         amount: 1 as const,
       };
     });
+  // Assign frozen access objects/tokens first. Then retire empty padding only;
+  // no evidence, subplot, lock, item or action-token route can be discarded.
+  for (let index = activeRegions.length - 1; index >= 0; index -= 1) {
+    const outcome = activeRegions[index]!;
+    const room = rooms.find((entry) => entry.id === outcome.roomId)!;
+    const region = debateMysteryRoomPresentationRegionsV1(room).find((entry) => entry.id === outcome.regionId);
+    const protectedTarget = outcome.kind !== "empty" || outcome.evidenceId || outcome.inventoryItemId ||
+      actionTokens.some((token) => token.roomId === outcome.roomId && token.regionId === outcome.regionId) ||
+      accessLocks.some((lock) => lock.targetKind === "region" && lock.targetId === `${outcome.roomId}:${outcome.regionId}`);
+    if (region && !debateMysteryRegionHasMeaningfulSubjectV1(region) && !protectedTarget) activeRegions.splice(index, 1);
+  }
   const testimony: DebateMysteryTestimonyExcerptV1[] = suspects.map((suspect, index) => ({
     id: `testimony-${index + 1}`,
     speakerSeatId: suspect.seatId,
@@ -2674,9 +2710,9 @@ export function validateDebateMysteryCaseBible(
   }
   if (bible.rooms.some((room) => {
     const count = bible.activeRegions.filter((outcome) => outcome.roomId === room.id).length;
-    const expectedMinimum = bible.generatorVersion >= 2 ? 12 : 2;
+    const expectedMinimum = bible.generatorVersion >= 4 ? 0 : bible.generatorVersion >= 2 ? 12 : 2;
     return count < expectedMinimum || count > 24;
-  })) errors.push("Every room must expose a dense but bounded set of active regions.");
+  })) errors.push("Every room must expose a bounded set of active regions appropriate to its generator version.");
   if (bible.rooms.some((room) => {
     const regionIds = bible.activeRegions.filter((outcome) => outcome.roomId === room.id).map((outcome) => outcome.regionId);
     return new Set(regionIds).size !== regionIds.length;

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { statSync } from "node:fs";
 import test from "node:test";
+import { DEBATE_IDENT_AUDIO } from "./debateIdentAudio.ts";
 import {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   type BotAudioVoiceProfileV1,
@@ -15,6 +16,7 @@ import {
   debateMysteryDialoguePresentationDismissed,
   debateMysteryDeskItemSfxPlan,
   debateMysteryPreparedAudioShouldStart,
+  debateMysteryRoomCompletionCueShouldStart,
   debateMysteryRestoredAudioPerformanceKeyV2,
   debateMysterySfxCueForAction,
   debateMysterySfxVoices,
@@ -222,8 +224,8 @@ test("stops the active text voice on completion, replacement, or mode change wit
       startedMode: "babble",
       streaming: false,
     }),
-    false,
-    "a player observation keeps Babble alive until its explicit dismissal",
+    true,
+    "a player observation stops its accompaniment at the final visible character",
   );
   assert.equal(
     debateMysteryTextVoiceShouldStop({ ...activeTextBeat, key: "observation:2" }),
@@ -344,6 +346,22 @@ test("dismisses every completed dialogue presentation without treating its first
   assert.equal(debateMysteryDialoguePresentationDismissed("observation", null), true);
   assert.equal(DEBATE_MYSTERY_SFX_COOLDOWN_MS["dialogue-dismiss"], 0);
   assert.equal("dialogue-blip" in DEBATE_MYSTERY_SFX_COOLDOWN_MS, false);
+});
+
+test("starts the room-complete piano ident only for a new, dialogue-free completion presentation", () => {
+  const transition = { completionCueRoomId: "library", currentRoomId: "library", presentationVisible: true, roomDialogueVisible: false, startedRoomId: null };
+  assert.equal(debateMysteryRoomCompletionCueShouldStart(transition), true);
+  assert.equal(debateMysteryRoomCompletionCueShouldStart({ ...transition, roomDialogueVisible: true }), false, "the final observation must be dismissed before the ident");
+  assert.equal(debateMysteryRoomCompletionCueShouldStart({ ...transition, startedRoomId: "library" }), false, "rerenders and audio setting changes cannot replay a completed transition");
+  assert.equal(debateMysteryRoomCompletionCueShouldStart({ ...transition, completionCueRoomId: null }), false, "a restored completed room has no new completion transition");
+  assert.equal(debateMysteryRoomCompletionCueShouldStart({ ...transition, currentRoomId: "foyer" }), false, "navigation clears a stale completion action");
+});
+
+test("reuses the pre-case piano ident for room completion and respects mute or zero volume", async () => {
+  assert.deepEqual(debateMysterySfxVoices("room-complete"), [{ delayMs: 0, gain: 0.35, playbackRate: 1, url: DEBATE_IDENT_AUDIO.intro.url }]);
+  assert.ok(statSync(new URL(`../../public${DEBATE_IDENT_AUDIO.intro.url}`, import.meta.url)).size > 1_000);
+  assert.equal(await playDebateMysterySfx({ cue: "room-complete", enabled: false, volume: 0.7 }), false);
+  assert.equal(await playDebateMysterySfx({ cue: "room-complete", enabled: true, volume: 0 }), false);
 });
 
 test("builds the evidence discovery cue as a restrained descending chime", () => {

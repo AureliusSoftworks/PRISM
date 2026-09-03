@@ -3449,10 +3449,10 @@ export function listDebateMysteryActions(
   db: DatabaseSync,
   userId: string,
   sessionId: string,
-): Array<{ sequence: number; action: string; payload: Record<string, unknown>; occurredAt: string }> {
+): Array<{ id: string; sequence: number; action: string; payload: Record<string, unknown>; occurredAt: string }> {
   getDebateSession(db, userId, sessionId);
   return (db.prepare(
-    `SELECT sequence, action_kind, public_payload_json, occurred_at
+    `SELECT id, sequence, action_kind, public_payload_json, occurred_at
        FROM debate_mystery_actions WHERE user_id = ? AND session_id = ? ORDER BY sequence`,
-  ).all(userId, sessionId) as unknown as Array<{ sequence: number; action_kind: string; public_payload_json: string; occurred_at: string }>).map((row) => ({ sequence: row.sequence, action: row.action_kind, payload: JSON.parse(row.public_payload_json) as Record<string, unknown>, occurredAt: row.occurred_at }));
+  ).all(userId, sessionId) as unknown as Array<{ id: string; sequence: number; action_kind: string; public_payload_json: string; occurred_at: string }>).map((row) => ({ id: row.id, sequence: row.sequence, action: row.action_kind, payload: JSON.parse(row.public_payload_json) as Record<string, unknown>, occurredAt: row.occurred_at }));
 }

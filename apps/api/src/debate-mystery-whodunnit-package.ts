@@ -505,6 +505,9 @@ export async function exportPortableWhodunnitPackageV1(args: {
     theoryFiledAt: null,
     court: null,
     verdict: null,
+    caseCheck: null,
+    publicActions: [],
+    publicActionHistoryComplete: true,
     calloutHistory: [],
     pendingCallout: null,
     pendingProsecutionChoice: null,
@@ -661,7 +664,8 @@ export async function exportPortableWhodunnitPackageV1(args: {
       !Array.isArray(completedState.theory) ? completedState.theory : null,
     court: completedState.court && typeof completedState.court === "object" &&
       !Array.isArray(completedState.court) ? completedState.court : null,
-    verdict: asRecord(completedState.verdict, "Portable completed verdict"),
+    verdict: completedState.caseCheck ? null : asRecord(completedState.verdict, "Portable completed verdict"),
+    ...(completedState.caseCheck ? { caseCheck: asRecord(completedState.caseCheck, "Portable completed case check") } : {}),
     calloutHistory: Array.isArray(completedState.calloutHistory) ? completedState.calloutHistory : [],
   };
 

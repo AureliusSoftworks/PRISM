@@ -115,16 +115,69 @@ describe("Whodunnit prop binding selection", () => {
       method: "a fatal blow from a hunting knife",
       publicOpening: "The first report names a hunting knife as the weapon.",
       weapon: { descriptor: "hunting knife" },
-      evidence: [{ id: "weapon", adjective: "recovered", object: "hunting knife", title: "Recovered hunting knife", observation: "The hunting knife was hidden beneath the desk.", keywords: ["knife"], isCanonicalWeapon: true }],
+      evidence: [
+        { id: "weapon", adjective: "recovered", object: "hunting knife", title: "Recovered hunting knife", observation: "The hunting knife was hidden beneath the desk.", keywords: ["knife"], isCanonicalWeapon: true },
+        { id: "trace", adjective: "silvered", object: "key", title: "Silvered key", observation: "The silvered key carries a physical trace consistent with a fatal blow from a hunting knife.", keywords: ["key"], isCanonicalWeapon: false },
+      ],
     }, selected.bindingsByEvidenceId);
     assert.equal(rebound.evidence[0]?.title, "Red Lightsaber");
     assert.match(rebound.evidence[0]?.observation ?? "", /It cuts and pierces/u);
     assert.equal(rebound.method, "a fatal blow from a Red Lightsaber");
     assert.equal(rebound.publicOpening, "The first report names a Red Lightsaber as the weapon.");
     assert.equal(rebound.weapon.descriptor, "Red Lightsaber");
+    assert.equal(rebound.evidence[1]?.observation, "The silvered key carries a physical trace consistent with a fatal blow from a Red Lightsaber.");
     assert.equal(
       rebound.evidence.find((item) => item.isCanonicalWeapon)?.object,
       rebound.weapon.descriptor,
     );
+    assert.equal(rebound.evidence[0]?.emoji, "🔪");
+  });
+
+  it("supplies a physical presentation contract before foundation authoring", () => {
+    const selected = selectWhodunnitEvidencePropBindingsV1({
+      needs: [keyNeed],
+      setting: "A grounded manor.",
+      personalEnabled: false,
+      personalCandidates: [],
+      mansionVariants: [],
+    });
+    const binding = selected.bindingsByEvidenceId[keyNeed.evidenceId]!;
+    const rebound = applyWhodunnitPropBindingsToScaffoldV1({
+      method: "the key opened a desk",
+      publicOpening: "The key was recovered.",
+      weapon: { descriptor: "none" },
+      evidence: [{ ...keyNeed, id: keyNeed.evidenceId, adjective: "silvered", keywords: ["key"], emoji: "📋" }],
+    }, selected.bindingsByEvidenceId);
+    assert.equal(binding.chosenIdentity.displayName, "Silver Key");
+    assert.doesNotMatch(binding.chosenIdentity.appearanceDescription, /PRISM|fallback/iu);
+    assert.match(rebound.evidence[0]!.observation, /plain silver key/i);
+    assert.equal(rebound.evidence[0]!.emoji, "🗝️");
+    assert.deepEqual(
+      applyWhodunnitPropBindingsToScaffoldV1(rebound, selected.bindingsByEvidenceId),
+      rebound,
+      "resume must not prepend the appearance or append the capability a second time",
+    );
+  });
+
+  it("uses the same frozen glyph for legacy resumable bindings without presentationEmoji", () => {
+    const selected = selectWhodunnitEvidencePropBindingsV1({
+      needs: [keyNeed],
+      setting: "A grounded manor.",
+      personalEnabled: false,
+      personalCandidates: [],
+      mansionVariants: [],
+    });
+    const { presentationEmoji: _emoji, ...legacyBinding } =
+      selected.bindingsByEvidenceId[keyNeed.evidenceId]!;
+    const bindings = { [keyNeed.evidenceId]: legacyBinding };
+    const rebound = applyWhodunnitPropBindingsToScaffoldV1({
+      method: "the key opened a desk",
+      publicOpening: "The key was recovered.",
+      weapon: { descriptor: "none" },
+      evidence: [{ ...keyNeed, id: keyNeed.evidenceId, adjective: "silvered", keywords: ["key"], emoji: "📋" }],
+    }, bindings);
+    assert.equal(rebound.evidence[0]!.emoji, "🗝️");
+    assert.deepEqual(applyWhodunnitPropBindingsToScaffoldV1(rebound, bindings), rebound);
+    assert.equal("presentationEmoji" in legacyBinding, false, "do not mutate the frozen binding");
   });
 });

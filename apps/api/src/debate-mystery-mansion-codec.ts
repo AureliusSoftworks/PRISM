@@ -99,7 +99,9 @@ export function encodeInternalMansionPackageV1(
   for (const path of [...input.assets.keys()].sort()) {
     entries[path] = Uint8Array.from(input.assets.get(path)!);
   }
-  const archive = zipSync(entries, { level: 9 });
+  // ZIP stores local DOS time. A fixed local date keeps payload identity stable
+  // across exports, wall clocks, and time zones (the outer seal remains random).
+  const archive = zipSync(entries, { level: 9, mtime: new Date(1980, 0, 1) });
   if (archive.byteLength > MAX_INTERNAL_ARCHIVE_BYTES) {
     throw new DebateMysteryMansionCodecError("Mansion archive is too large.");
   }

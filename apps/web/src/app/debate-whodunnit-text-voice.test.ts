@@ -16,7 +16,7 @@ const tutorialSource = readFileSync(
   "utf8",
 );
 
-test("offers and persists Off, Babble, and default Bottish in Debate settings", () => {
+test("offers and persists Off, default Babble, and Bottish in Debate settings", () => {
   const settingsControl = pageSource.slice(
     pageSource.indexOf('id="debate-whodunnit-text-voice-settings-title"'),
     pageSource.indexOf('aria-labelledby="debate-jury-settings-title"'),
@@ -24,12 +24,19 @@ test("offers and persists Off, Babble, and default Bottish in Debate settings", 
   assert.match(settingsControl, /data-tutorial-target="whodunnit-text-voice-setting"/u);
   assert.match(settingsControl, /aria-label="Whodunnit text voice"/u);
   assert.match(settingsControl, /<option value="off">Off<\/option>/u);
-  assert.match(settingsControl, /<option value="babble">Babble<\/option>/u);
-  assert.match(settingsControl, /<option value="bottish">Bottish · Default<\/option>/u);
+  assert.match(settingsControl, /<option value="babble">Babble · Default<\/option>/u);
+  assert.match(settingsControl, /<option value="bottish">Bottish<\/option>/u);
   assert.match(
     pageSource,
     /JSON\.stringify\(\{ debateWhodunnitTextVoiceMode \}\)/u,
   );
+});
+
+test("new accounts on old database schemas receive Babble without migrating deliberate preferences", () => {
+  const server = readFileSync(new URL("../../../api/src/server.ts", import.meta.url), "utf8");
+  assert.equal((server.match(/debate_whodunnit_text_voice_mode: "babble"/gu) ?? []).length, 2);
+  assert.match(mysterySource, /configuredMode: props\.whodunnitTextVoiceMode \?\? "babble"/u);
+  assert.match(tutorialSource, /defaults written dialogue accompaniment to Babble; saved Off or Bottish choices remain yours/u);
 });
 
 test("routes only written text through the selected bounded voice lifecycle", () => {
@@ -54,7 +61,8 @@ test("routes only written text through the selected bounded voice lifecycle", ()
     /playDebateMysteryTextVoice\(\{[\s\S]{0,420}signal: controller\.signal,[\s\S]{0,320}play: props\.playMysteryTextVoice/u,
   );
   assert.match(mysterySource, /instant: roomPlayerObservationActive/u);
-  assert.match(pageSource, /preferProceduralBabble: instant === true/u);
+  assert.match(pageSource, /allowBabbleFallback: false/u);
+  assert.doesNotMatch(pageSource, /preferProceduralBabble: instant === true/u);
 });
 
 test("keeps embodied player Babble and spoken character TTS distinct", () => {

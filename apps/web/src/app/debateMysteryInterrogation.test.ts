@@ -23,6 +23,7 @@ import {
   whodunnitInterrogationBeatMs,
   whodunnitInterrogationCompletionIsCurrent,
   whodunnitInterrogationFinishDecision,
+  whodunnitInterrogationTerminalWitnessShouldHold,
   whodunnitInterrogationMayStartAudio,
 } from "./debateMysteryInterrogation.ts";
 
@@ -77,6 +78,7 @@ test("auto-advances only settled non-interactive Investigation dialogue", () => 
     requiresPlayerInput: false,
     roomView: "room",
     streaming: false,
+    terminalWitnessHold: false,
   };
   assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance(settled), true);
   assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance({ ...settled, hasActiveAudio: true }), false);
@@ -85,6 +87,26 @@ test("auto-advances only settled non-interactive Investigation dialogue", () => 
   assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance({ ...settled, requiresPlayerInput: true }), false);
   assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance({ ...settled, playPhase: "trial" }), false);
   assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance({ ...settled, roomView: "mansion" }), false);
+  assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance({ ...settled, terminalWitnessHold: true }), false);
+});
+
+test("holds the terminal witness answer in every playback mode", () => {
+  assert.equal(whodunnitInterrogationTerminalWitnessShouldHold({
+    phase: "suspect_speaking",
+    hasQueuedResponse: false,
+  }), true);
+  assert.equal(whodunnitInterrogationTerminalWitnessShouldHold({
+    phase: "suspect_entrance",
+    hasQueuedResponse: false,
+  }), true);
+  assert.equal(whodunnitInterrogationTerminalWitnessShouldHold({
+    phase: "suspect_speaking",
+    hasQueuedResponse: true,
+  }), false);
+  assert.equal(whodunnitInterrogationTerminalWitnessShouldHold({
+    phase: "prosecutor_speaking",
+    hasQueuedResponse: false,
+  }), false);
 });
 
 test("fills streaming dialogue before a later gesture advances it", () => {
@@ -103,6 +125,18 @@ test("fills streaming dialogue before a later gesture advances it", () => {
     clickCount: 2,
     filledByGesture: true,
     streaming: false,
+  }), "advance");
+});
+
+test("advances player observations on their first gesture even while streaming", () => {
+  assert.equal(whodunnitDialogueGestureDecision({
+    advanceArmed: false,
+    automatedBotPlayback: false,
+    botFillArmed: false,
+    clickCount: 1,
+    filledByGesture: false,
+    immediateAdvance: true,
+    streaming: true,
   }), "advance");
 });
 

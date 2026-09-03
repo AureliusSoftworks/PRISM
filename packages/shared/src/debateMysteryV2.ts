@@ -24,6 +24,7 @@ import {
   MANSION_LAYOUT_V2_COLUMNS,
   MANSION_LAYOUT_V2_ROWS,
   type MansionDynamicLightV2,
+  type MansionLightBlendModeV1,
   type MansionLayoutV2,
   type MansionPlacementAnchorV2,
   type MysteryVenueProfileV1,
@@ -1143,6 +1144,40 @@ export interface DebateMysteryVerdictV2 {
   deliveredAt: string;
 }
 
+/** A factual accusation check, not a legal verdict or a grade of written reasoning. */
+export interface DebateMysteryCaseCheckV1 {
+  version: 1;
+  completionKind: "case_check";
+  courtSkipped: true;
+  accusationCorrect: boolean;
+  assessed: "accused_set_only";
+  concludedAt: string;
+}
+
+/** Accepted public actions only. Never attach request bodies or private graph mutations. */
+export interface DebateMysteryPublicActionV1 {
+  version: 1;
+  id: string;
+  sequence: number;
+  occurredAt: string;
+  action: DebateMysteryActionRequestV2["action"];
+  revisionBefore: number;
+  revisionAfter: number;
+  phaseBefore: DebateMysteryPlayPhaseV2;
+  phaseAfter: DebateMysteryPlayPhaseV2;
+  roomViewAfter: "mansion" | "room";
+  roomId?: string;
+  hotspotId?: string;
+  suspectSeatId?: string;
+  topicNodeId?: string;
+  statementId?: string;
+  record?: DebateMysteryRecordReferenceV2;
+  admittedRecords: DebateMysteryRecordReferenceV2[];
+  acquiredItemIds: string[];
+  /** Indexes into the persisted public dialogueHistory, not sealed line IDs. */
+  dialogueIndexes: number[];
+}
+
 export interface DebateMysteryRoomV2 {
   id: string;
   /** Frozen room module identity; optional only for legacy V2 cases. */
@@ -1182,6 +1217,8 @@ export type DebateMysterySceneRepairActionV1 =
   | "refresh_room_anchors"
   | "refresh_room_lights"
   | "regenerate_evidence_asset"
+  | "repair_evidence_name"
+  | "repair_evidence_description"
   | "reduce_evidence_magenta"
   | "regenerate_music"
   | "regenerate_ambience";
@@ -1205,12 +1242,18 @@ export interface DebateMysterySceneRepairUndoV1 {
   subjectId?: string | null;
   createdAt: string;
   assetSubjects: DebateMysterySceneRepairAssetUndoV1[];
+  previousEvidencePresentation?: {
+    title: string;
+    description: string;
+    override: { title?: string; description?: string } | null;
+  };
   previousMansionExterior?: DebateMysterySealedAssetRefV1 | null;
   previousMansionPresentation?: DebateMysteryMansionPresentationSnapshotV2;
   previousRoomAsset?: DebateMysterySealedAssetRefV1 | null;
   previousHotspots?: DebateMysteryRoomV2["hotspots"];
   previousPlacementAnchors?: MansionPlacementAnchorV2[];
   previousLights?: MansionDynamicLightV2[];
+  previousLightBlendMode?: MansionLightBlendModeV1 | null;
 }
 
 /** Persisted room-entry choreography. A reload during `persona` repeats the
@@ -1666,6 +1709,8 @@ export interface DebateWhodunnitFormatStateV2 {
   mansionExterior?: DebateMysterySealedAssetRefV1 | null;
   /** The latest in-field scene repair. Missing means there is nothing to undo. */
   sceneRepairUndo?: DebateMysterySceneRepairUndoV1 | null;
+  /** Presentation only; keys must identify already admitted evidence. */
+  evidencePresentationOverrides?: Record<string, { title?: string; description?: string }>;
   /** Public because the opening scene is visible; never derived from a clue. */
   crimeSceneRoomId?: string | null;
   /** Finite first-room sweep required before the mansion map unlocks. */
@@ -1692,6 +1737,11 @@ export interface DebateWhodunnitFormatStateV2 {
   theoryFiledAt: string | null;
   court: DebateMysteryCourtStateV2 | null;
   verdict: DebateMysteryVerdictV2 | null;
+  /** Missing on older Runs and on Court endings. */
+  caseCheck?: DebateMysteryCaseCheckV1 | null;
+  /** Additive diagnostic ledger. Absence denotes unavailable legacy action history. */
+  publicActions?: DebateMysteryPublicActionV1[];
+  publicActionHistoryComplete?: boolean;
   readiness: DebateMysteryPlayReadinessV1;
   /** Presentation-only generation ledger. Missing on legacy and imported cases. */
   productionReadiness?: DebateMysteryProductionReadinessV1 | null;
@@ -1728,6 +1778,7 @@ export type DebateMysteryActionRequestV2 =
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "talk"; suspectSeatId: string; topicNodeId: string }
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "present_to_suspect"; suspectSeatId: string; record: DebateMysteryRecordReferenceV2 }
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "file_theory"; theory: DebateMysteryTheoryV1 }
+  | { version: 2; expectedRevision: number; idempotencyKey: string; action: "check_case"; theory: DebateMysteryTheoryV1 }
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "focus_statement"; statementId: string }
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "press_statement"; statementId: string }
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "present_record"; statementId: string; record: DebateMysteryRecordReferenceV2 }
@@ -2633,8 +2684,9 @@ export function debateMysteryEyewitnessChanceV2(
   return Math.min(0.5, Math.max(0, base + modifier));
 }
 
-export function debateMysteryPremiumAvailableV2(): false {
-  return false;
+/** Premium is an on-demand playback choice, never a Case Forge asset. */
+export function debateMysteryPremiumAvailableV2(scope: "play" | "case_forge" = "play"): boolean {
+  return scope === "play";
 }
 
 /** Production assets are case-scoped even when their venue came from the
@@ -2909,6 +2961,42 @@ export function debateMysteryAccusationMatchesV2(
   const responsible = new Set(responsibleSeatIds);
   return accused.size === responsible.size &&
     [...accused].every((seatId) => responsible.has(seatId));
+}
+
+/** Shared filing boundary for Court and case-check endings. Unknown properties,
+ * unadmitted references, and client-supplied incident identities never persist. */
+export function normalizeDebateMysteryFiledTheoryV2(
+  value: unknown,
+  state: Pick<DebateWhodunnitFormatStateV2, "suspects" | "record" | "caseCharge" | "config">,
+): DebateMysteryTheoryV1 {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("A theory is required before filing the case.");
+  }
+  const input = value as DebateMysteryTheoryV1;
+  const accused = debateMysteryTheoryAccusedSeatIdsV2(input);
+  const suspects = new Set(state.suspects.map((suspect) => suspect.seatId));
+  if (!accused.length || accused.length > 2 || accused.some((id) => !suspects.has(id))) {
+    throw new Error("Accuse one or two people from this case before filing the charge.");
+  }
+  const text = (entry: unknown, maximum: number): string =>
+    typeof entry === "string" ? entry.trim().slice(0, maximum) : "";
+  const references = (kind: "evidence" | "testimony", entries: unknown): string[] => {
+    const admitted = new Set(state.record.filter((item) => item.admitted && item.reference.kind === kind)
+      .map((item) => item.reference.id));
+    return [...new Set(Array.isArray(entries) ? entries.filter((id): id is string =>
+      typeof id === "string" && admitted.has(id)) : [])];
+  };
+  return debateMysteryTheoryWithAccusedSeatIdsV2({
+    culpritSeatId: null,
+    accompliceSeatId: null,
+    incidentId: state.caseCharge?.incidentId,
+    claim: text(input.claim, 500) || state.caseCharge?.accusationPrompt,
+    method: text(input.method, 2_000),
+    motive: text(input.motive, 2_000),
+    opportunity: text(input.opportunity, 2_000),
+    evidenceIds: references("evidence", input.evidenceIds),
+    testimonyIds: state.config.playerRole === "spectator" ? [] : references("testimony", input.testimonyIds),
+  }, accused);
 }
 
 export function emptyDebateMysteryRequirementsV2(): DebateMysteryDialogueRequirementV2 {

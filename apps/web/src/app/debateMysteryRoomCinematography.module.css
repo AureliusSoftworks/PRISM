@@ -1,14 +1,22 @@
 .root {
   position: absolute;
   z-index: 2;
-  inset: -1.25rem;
+  inset: 0;
   overflow: hidden;
-  transform: scale(1.025);
+  transform: none;
   transition: transform 220ms ease;
   pointer-events: none;
   isolation: isolate;
 }
 
+/* The whole authored layer blends against the room plate, outside its own stacking context. */
+.root[data-light-source="authored"] { mix-blend-mode: var(--room-light-blend, overlay); }
+.root[data-light-source="authored"] .lighting { mix-blend-mode: normal; }
+.root[data-light-source="authored"] .grade { display: none; }
+.root[data-viewport="true"] { width: 100vw; height: 100dvh; }
+
+/* Both art styles scale with the blurred room plate (.roomBackdropImage[data-blurred])
+ * so authored lights stay on their practical sources while actors are on stage. */
 .root[data-blurred="true"] {
   transform: scale(1.04);
 }
@@ -66,15 +74,6 @@
 .root[data-art-style="mosaic"] .lighting,
 .root[data-art-style="mosaic"] .grain {
   image-rendering: pixelated;
-}
-
-.root[data-art-style="mosaic"] {
-  inset: 0;
-  transform: none;
-}
-
-.root[data-art-style="mosaic"][data-blurred="true"] {
-  transform: none;
 }
 
 .root[data-art-style="mosaic"] .grade,
