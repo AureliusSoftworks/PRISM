@@ -913,7 +913,7 @@ describe("createDatabase bot export hash migration", () => {
       const debateWhodunnitTextVoiceModeColumn = userColumns.find(
         (column) => column.name === "debate_whodunnit_text_voice_mode"
       );
-      assert.equal(debateWhodunnitTextVoiceModeColumn?.dflt_value, "'bottish'");
+      assert.equal(debateWhodunnitTextVoiceModeColumn?.dflt_value, "'babble'");
       const psychicModeColumn = userColumns.find(
         (column) => column.name === "psychic_mode_enabled"
       );

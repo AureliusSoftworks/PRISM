@@ -373,20 +373,6 @@ function isProvider(value: unknown): value is Provider {
   );
 }
 
-/** Ollama Cloud is reserved for the separate ONLINE background helper lane. */
-function normalizeForegroundProvider(value: Provider): Provider {
-  return value === "ollama_cloud" ? "openai" : value;
-}
-
-function normalizeForegroundOnlineModel(value: string | null): string | null {
-  const normalized = value?.trim() ?? "";
-  return normalized.endsWith(":cloud") ||
-      normalized.endsWith("-cloud") ||
-      normalized.startsWith("ollama-cloud-direct:")
-    ? null
-    : value;
-}
-
 function isZenPersonaTransitionChoice(
   value: unknown
 ): value is ZenPersonaTransitionChoice {
@@ -1020,11 +1006,9 @@ export function resolveNextSettings(
     body.startupPreference,
     normalizePrismStartupPreference(current.startupPreference),
   );
-  const preferredProvider = normalizeForegroundProvider(
-    isProvider(body.preferredProvider)
-      ? body.preferredProvider
-      : current.preferredProvider,
-  );
+  const preferredProvider = isProvider(body.preferredProvider)
+    ? body.preferredProvider
+    : current.preferredProvider;
   const ephemeralChatProviderPreferences =
     body.ephemeralChatProviderPreferences === undefined
       ? normalizeEphemeralChatProviderPreferences(
@@ -1132,8 +1116,9 @@ export function resolveNextSettings(
     body.preferredLocalModel,
     current.preferredLocalModel
   );
-  const preferredOnlineModel = normalizeForegroundOnlineModel(
-    readPreferredTextModel(body.preferredOnlineModel, current.preferredOnlineModel),
+  const preferredOnlineModel = readPreferredTextModel(
+    body.preferredOnlineModel,
+    current.preferredOnlineModel,
   );
   const lenientLocalImageFallbackModel = readPreferredModel(
     body.lenientLocalImageFallbackModel,

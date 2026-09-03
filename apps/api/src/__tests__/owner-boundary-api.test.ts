@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { after, describe, it } from "node:test";
 import type { AppConfig } from "@localai/config";
+import sharp from "sharp";
+import { writeGeneratedImageBytes } from "../image-storage.ts";
 import {
   closeTestDatabase,
   createDeterministicProvider,
@@ -44,6 +46,7 @@ interface CapturedResponse {
   status: number;
   headers: ReadonlyMap<string, string | number | readonly string[]>;
   body: string;
+  bytes: Buffer;
 }
 
 async function requestDirectly(args: {
@@ -72,7 +75,7 @@ async function requestDirectly(args: {
   });
 
   const capturedHeaders = new Map<string, string | number | readonly string[]>();
-  let responseBody = "";
+  const responseChunks: Buffer[] = [];
   const response = Object.assign(new EventEmitter(), {
     statusCode: 200,
     writableEnded: false,
@@ -86,14 +89,12 @@ async function requestDirectly(args: {
     },
     flushHeaders() {},
     write(value: string | Uint8Array) {
-      responseBody +=
-        typeof value === "string" ? value : Buffer.from(value).toString("utf8");
+      responseChunks.push(Buffer.from(value));
       return true;
     },
     end(value?: string | Uint8Array) {
       if (value) {
-        responseBody +=
-          typeof value === "string" ? value : Buffer.from(value).toString("utf8");
+        responseChunks.push(Buffer.from(value));
       }
       this.writableEnded = true;
       return this;
@@ -101,10 +102,12 @@ async function requestDirectly(args: {
   }) as unknown as ServerResponse<IncomingMessage>;
 
   await args.handler(request, response);
+  const bytes = Buffer.concat(responseChunks);
   return {
     status: response.statusCode,
     headers: capturedHeaders,
-    body: responseBody,
+    body: bytes.toString("utf8"),
+    bytes,
   };
 }
 
@@ -339,5 +342,94 @@ describe("owner-bound API bot boundary", () => {
     } finally {
       closeTestDatabase(db);
     }
+  });
+});
+
+describe("owner-bound media HTTP boundary", () => {
+  it("requires authentication without caching originals or thumbnails across four accounts", async () => {
+    const db = createTestDatabase();
+    const provider = createDeterministicProvider();
+    const handler = createPrismRequestHandler({
+      db,
+      config,
+      providerFactory: () => provider,
+      auxiliaryProviderFactory: () => provider,
+      fetchImpl: async () => new Response("{}", { status: 200 }),
+    });
+    const owners: Array<{ userId: string; cookie: string; imageId: string; bytes: Buffer }> = [];
+    try {
+      for (let index = 0; index < 4; index += 1) {
+        const registered = await requestDirectly({
+          handler,
+          method: "POST",
+          path: "/api/auth/register",
+          body: withTestRegistrationBody("/api/auth/register", {
+            username: `media-boundary-${index}@example.test`,
+            password: "media-boundary-fixture-password",
+          }),
+        });
+        assert.equal(registered.status, 201, registered.body);
+        const userId = String((responseJson(registered).user as { id: string }).id);
+        const cookie = String(registered.headers.get("set-cookie")).split(";")[0]!;
+        const imageId = `media-boundary-image-${index}`;
+        const bytes = await sharp({
+          create: { width: 8, height: 8, channels: 4, background: { r: 40 * index, g: 100, b: 210, alpha: 1 } },
+        }).png().toBuffer();
+        const relativePath = `generated-images/${userId}/${imageId}.png`;
+        writeGeneratedImageBytes(relativePath, bytes);
+        db.prepare(
+          `INSERT INTO images
+             (id, user_id, origin, purpose, prompt, url, provider, model, local_rel_path, created_at)
+           VALUES (?, ?, 'images_panel', 'gallery', 'private fixture', '', 'local', 'fixture', ?, ?)`,
+        ).run(imageId, userId, relativePath, "2026-09-02T00:00:00.000Z");
+        owners.push({ userId, cookie, imageId, bytes });
+      }
+
+      for (const owner of owners) {
+        for (const variant of ["file", "thumb"]) {
+          const path = `/api/images/${owner.imageId}/${variant}`;
+          const owned = await requestDirectly({ handler, method: "GET", path, headers: { cookie: owner.cookie } });
+          assert.equal(owned.status, 200, owned.body);
+          assert.equal(owned.headers.get("cache-control"), "private, no-store");
+          if (variant === "file") assert.deepEqual(owned.bytes, owner.bytes);
+          else assert.equal((await sharp(owned.bytes).metadata()).format, "webp");
+
+          const unauthenticated = await requestDirectly({ handler, method: "GET", path });
+          // The existing API maps missing-session errors to 400. Pin denial
+          // and its content-free body without changing the auth error contract.
+          assert.equal(unauthenticated.status, 400, unauthenticated.body);
+          assert.deepEqual(responseJson(unauthenticated), { ok: false, error: "Authentication required." });
+          for (const stranger of owners.filter((candidate) => candidate !== owner)) {
+            const denied = await requestDirectly({ handler, method: "GET", path, headers: { cookie: stranger.cookie } });
+            const missing = await requestDirectly({
+              handler, method: "GET", path: `/api/images/missing-media/${variant}`, headers: { cookie: stranger.cookie },
+            });
+            assert.equal(denied.status, 404, denied.body);
+            assert.deepEqual(responseJson(denied), responseJson(missing));
+          }
+        }
+      }
+
+      const removed = owners[0]!;
+      db.prepare("DELETE FROM images WHERE user_id = ? AND id = ?").run(removed.userId, removed.imageId);
+      for (const owner of owners) {
+        const response = await requestDirectly({
+          handler, method: "GET", path: `/api/images/${owner.imageId}/file`, headers: { cookie: owner.cookie },
+        });
+        assert.equal(response.status, owner === removed ? 404 : 200);
+      }
+      assert.equal(provider.calls.length, 0);
+    } finally {
+      closeTestDatabase(db);
+    }
+  });
+
+  it("does not opt any private media response back into persistent HTTP caching", () => {
+    const source = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+    const policies = Array.from(source.matchAll(/setHeader\(\s*["']cache-control["'],\s*["']([^"']+)["']/giu))
+      .map((match) => match[1]!)
+      .filter((policy) => policy.includes("private"));
+    assert.ok(policies.length >= 7);
+    for (const policy of policies) assert.match(policy, /\bno-store\b/u);
   });
 });

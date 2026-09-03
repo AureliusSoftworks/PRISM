@@ -9,7 +9,7 @@ import {
   type AccountOwnerRelationCoverage,
 } from "./account-owner-boundaries.ts";
 
-export const ACCOUNT_CONTENT_REGISTRY_VERSION = 4 as const;
+export const ACCOUNT_CONTENT_REGISTRY_VERSION = 5 as const;
 
 /**
  * This is a release guard, not an encryption claim. A matching registry proves
@@ -145,9 +145,11 @@ interface ObservedSqliteIndex {
 }
 
 const AUDITED_SQLITE_SCHEMA = Object.freeze({
-  fingerprint: "0f83ec84f5bbdb33b737ad3af46b11adf3d7e16086b5e292f2322f81da998cad",
+  // V5: three Chat distillation columns, Signal's source digest/composite proxy
+  // key, and changed-reference-only owner update guards. No new metadata bypass.
+  fingerprint: "715c5260aa0e4c36deb03a625352cb60ba4731dea9860a81c7b23e3aad577f02",
   tableCount: 166,
-  columnCount: 2_019,
+  columnCount: 2_023,
   indexCount: 382,
   triggerCount: 577,
 });

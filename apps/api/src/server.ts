@@ -350,12 +350,14 @@ import {
   claimDebateMysteryAssetBackgroundLeaseV2,
   cancelDebateMysteryCompilationV2,
   commitDebateMysterySceneRepairV1,
+  repairDebateMysteryItemTextV1,
   continueDebateMysteryProductionWithFallbacksV1,
   continueDebateMysteryV2WithoutVoices,
   createDebateMysterySessionV2,
   cleanupUnreferencedDebateMysteryAudioV2,
   ensureDebateMysteryPlayReadyV2,
   getDebateMysteryAudioClipV2,
+  getDebateMysterySpokenPerformanceV2,
   getDebateMysteryAudioStorageSummaryV2,
   getDebateMysteryCompilationStatusV2,
   getDebateMysteryCaseV2,
@@ -371,8 +373,12 @@ import {
   type DebateMysteryEvidenceAssetPreparationV2,
   type DebateMysteryEvidencePropResolutionRequestV1,
   type DebateMysteryMansionExteriorAssetPreparationV2,
+  replaceDebateMysteryRoomLightsV1,
   type DebateMysteryRoomAssetPreparationV2,
 } from "./debate-mystery-v2.ts";
+import { saveDebateMysteryRoomLightingV1, validateRoomLightingEditV1 } from "./debate-mystery-room-lighting.ts";
+import { detectDebateMysteryRoomLightsV1 } from "./debate-mystery-room-lights.ts";
+import { mansionDirectionalGeometryIsPolygonV2, mansionDynamicLightCenterV2 } from "@localai/shared";
 import {
   getDebateMysteryAssetFileForPreparationV1,
   getDebateMysterySealedAssetRefV1,
@@ -401,6 +407,16 @@ import {
   normalizeDebateMysteryUpgradedRoomArtV1,
   validateDebateMysteryRoomArtSourceAlignmentV1,
 } from "./debate-mystery-room-art.ts";
+import {
+  assertDebateMysteryRoomSourceUnchangedV1,
+  DEBATE_MYSTERY_ROOM_ALIGNMENT_CONTRACT_V1,
+  isDebateMysteryRoomArtPairReadyV1,
+  locallyValidateLegacyDebateMysteryRoomPairV1,
+  normalizeDebateMysteryRoomSourceLockV1,
+  shouldPrepareDebateMysteryRoomUpgradeV1,
+  type DebateMysteryRoomPairRowV1,
+  type DebateMysteryRoomSourceLockV1,
+} from "./debate-mystery-room-art-source-lock.ts";
 import {
   cloneDebateMysteryMansionBundleV1,
   createBlankDebateMysteryMansionBundleV1,
@@ -1498,6 +1514,7 @@ import {
   selectWhodunnitEvidencePropBindingsV1,
   type WhodunnitPersonalPropCandidateV1,
 } from "./debate-mystery-prop-selection.ts";
+import { readBundledWhodunnitPrismPropAssetV1 } from "./debate-mystery-prism-prop-assets.ts";
 import {
   applySmartTidyWithDeleter,
   compressImageAssetSet,
@@ -3800,6 +3817,7 @@ function getOrCreateLocalOwnerUser(): string {
       createdAt,
       initialPrivateValues: {
         theme: "system",
+        debate_whodunnit_text_voice_mode: "babble",
         preferred_provider: "local",
         auto_memory: 1,
         prism_default_bot_face_mouth_coffee_pucker:
@@ -6668,7 +6686,9 @@ function debateAutoRoutingContext(
     | "modelSelectionKind"
     | "formatState"
   >,
+  liveSelection?: Record<string, unknown>,
 ): AutoRoutingContextV1 & {
+  liveWhodunnit?: Record<string, unknown>;
   frozenReasoningEffort?: ProviderReasoningEffort;
   frozenTurbo?: boolean;
   frozenModelSelectionKind?: "auto" | "fixed";
@@ -6711,6 +6731,9 @@ function debateAutoRoutingContext(
     outputTokens: shortTurn ? 900 : 2_400,
     structuredOutput: true,
     highStakes: true,
+    ...(session.formatState.format === "whodunnit" &&
+      !(session.formatState.version === 2 && session.formatState.playPhase === "case_forge")
+      ? { liveWhodunnit: liveSelection ?? {} } : {}),
     frozenModelSelectionKind: session.modelSelectionKind ?? "fixed",
     ...(session.modelSelectionKind !== "auto" && session.lastReasoningEffort
       ? { frozenReasoningEffort: session.lastReasoningEffort }
@@ -6730,12 +6753,34 @@ async function debateAiRuntimeForUser(
   requestedFrozenChain?: unknown,
   requestedFrozenCandidates?: unknown,
   requestedRoutingContext?: AutoRoutingContextV1 & {
+    liveWhodunnit?: Record<string, unknown>;
     frozenReasoningEffort?: ProviderReasoningEffort;
     frozenTurbo?: boolean;
     frozenModelSelectionKind?: "auto" | "fixed";
   },
 ): Promise<DebateAiRuntime> {
   const user = getUserRow(userId);
+  if (requestedRoutingContext?.liveWhodunnit) {
+    const selection = requestedRoutingContext.liveWhodunnit;
+    const local = userBlocksOnlineCapabilities(user) || selection.responseMode === "local";
+    requestedProvider = local ? "local" : readProvider(selection.preferredProvider) ?? user.preferred_provider;
+    requestedResponseMode = local ? "local" : "online";
+    // A request may carry an optimistic picker change; older clients use the
+    // current account selection. Never reuse a frozen model from another lane.
+    requestedModelOverride = local && selection.responseMode !== "local"
+      ? user.preferred_local_model
+      : Object.hasOwn(selection, "modelOverride")
+        ? selection.modelOverride
+        : local ? user.preferred_local_model : user.preferred_online_model;
+    requestedFrozenChain = undefined;
+    requestedFrozenCandidates = undefined;
+    requestedRoutingContext = {
+      ...requestedRoutingContext,
+      frozenModelSelectionKind: readModelOverride(requestedModelOverride) ? "fixed" : "auto",
+      frozenReasoningEffort: normalizeProviderReasoningEffort(selection.reasoningEffort),
+      frozenTurbo: typeof selection.turbo === "boolean" ? selection.turbo : undefined,
+    };
+  }
   const requestedProviderName = readProvider(requestedProvider);
   const accountRequiresLocal = userBlocksOnlineCapabilities(user);
   const legacyDefaultLane =
@@ -6966,7 +7011,7 @@ async function debateAiRuntimeForUser(
           primaryEffort,
         );
   const hasFrozenChain = !autoSelected && Array.isArray(requestedFrozenChain);
-  const frozenChain = hasFrozenChain
+  const frozenChain = hasFrozenChain && Array.isArray(requestedFrozenChain)
     ? requestedFrozenChain
         .map(normalizeAutoFallbackModelRef)
         .filter((entry): entry is AutoFallbackModelRef => entry !== null)
@@ -10379,57 +10424,39 @@ function translateMysteryHotspotPolygonV1(
 function mysteryLightCenterV1(
   light: import("@localai/shared").MansionDynamicLightV2,
 ): { x: number; y: number } {
-  if (light.kind !== "neon") return { x: light.geometry.x, y: light.geometry.y };
-  const divisor = Math.max(1, light.geometry.points.length);
-  return {
-    x: light.geometry.points.reduce((sum, point) => sum + point.x, 0) / divisor,
-    y: light.geometry.points.reduce((sum, point) => sum + point.y, 0) / divisor,
-  };
+  return mansionDynamicLightCenterV2(light);
 }
 
 function relocateMysteryLightV1(
   light: import("@localai/shared").MansionDynamicLightV2,
   target: MysteryScenePlacementV1,
 ): import("@localai/shared").MansionDynamicLightV2 {
+  const center = mysteryLightCenterV1(light);
+  const shift = (point: { x: number; y: number }): { x: number; y: number } => ({
+    x: Math.max(0, Math.min(1, point.x + target.x - center.x)),
+    y: Math.max(0, Math.min(1, point.y + target.y - center.y)),
+  });
   if (light.kind === "neon") {
-    const center = mysteryLightCenterV1(light);
-    return {
-      ...light,
-      geometry: {
-        ...light.geometry,
-        points: light.geometry.points.map((point) => ({
-          x: Math.max(0, Math.min(1, point.x + target.x - center.x)),
-          y: Math.max(0, Math.min(1, point.y + target.y - center.y)),
-        })),
-      },
-    };
+    return { ...light, geometry: { ...light.geometry, points: light.geometry.points.map(shift) } };
   }
   if (light.kind === "directional") {
+    const geometry = light.geometry;
+    if (mansionDirectionalGeometryIsPolygonV2(geometry)) {
+      // A godray keeps its shape and ray angle; only its anchor moves.
+      return { ...light, geometry: { points: geometry.points.map(shift) } };
+    }
     return {
       ...light,
-      geometry: {
-        ...light.geometry,
-        x: target.x,
-        y: target.y,
-        rotation: target.rotation ?? light.geometry.rotation,
-      },
+      geometry: { ...geometry, x: target.x, y: target.y, rotation: target.rotation ?? geometry.rotation },
     };
   }
   if (light.kind === "fire") {
     return {
       ...light,
-      geometry: {
-        ...light.geometry,
-        x: target.x,
-        y: target.y,
-        rotation: target.rotation ?? light.geometry.rotation,
-      },
+      geometry: { ...light.geometry, x: target.x, y: target.y, rotation: target.rotation ?? light.geometry.rotation },
     };
   }
-  return {
-    ...light,
-    geometry: { ...light.geometry, x: target.x, y: target.y },
-  };
+  return { ...light, geometry: { ...light.geometry, x: target.x, y: target.y } };
 }
 
 async function observeDebateMysteryRoomGeometryV1(args: {
@@ -10952,6 +10979,39 @@ async function prepareDebateMysteryV2EvidenceAssets(
         console.warn("[debate-mystery-v2] frozen mansion prop rejected.");
       }
     }
+    if (binding?.visualSource === "prism") {
+      try {
+        const source = readBundledWhodunnitPrismPropAssetV1(binding);
+        if (!source) throw new Error("The registered PRISM prop fallback is missing or changed.");
+        const normalized = await normalizeGeneratedDebateExhibitImage(source.bytes);
+        const pixels = await validateDebateMysteryAssetPixelsV1(
+          "evidence",
+          normalized.pngBytes,
+        );
+        const sealedContentSha256 = createHash("sha256")
+          .update(normalized.pngBytes)
+          .digest("hex");
+        prepared = sealDebateMysteryAssetBytesV1(db, userKey, {
+          userId: args.userId,
+          sessionId: args.sessionId,
+          kind: "evidence",
+          subjectId: exhibit.id,
+          bytes: normalized.pngBytes,
+          provider: "prism-bundled",
+          model: `prop-registry-v1:${binding.archetypeId}`,
+          review: {
+            archetypeId: binding.archetypeId,
+            publicPath: source.publicPath,
+            sourceContentSha256: source.sourceContentSha256,
+            sealedContentSha256,
+            pixels,
+          },
+        });
+      } catch (error) {
+        failure = spoilerSafeMysteryAssetFailure(error);
+        console.warn("[debate-mystery-v2] registered PRISM prop rejected.");
+      }
+    }
     prepared ??= setDebateMysteryAssetFallbackV1(db, {
       userId: args.userId,
       sessionId: args.sessionId,
@@ -11259,7 +11319,7 @@ async function prepareDebateMysteryV2RoomAssets(
                 ? `dynamic lights ${roomLights.map((light) => {
                     const points = light.kind === "neon"
                       ? light.geometry.points
-                      : [{ x: light.geometry.x, y: light.geometry.y }];
+                      : [mansionDynamicLightCenterV2(light)];
                     return `${light.kind} at ${points.map((point) =>
                       `(${point.x.toFixed(2)}, ${point.y.toFixed(2)})`
                     ).join(" to ")} with intensity ${light.intensity.toFixed(2)}`;
@@ -11352,6 +11412,31 @@ async function prepareDebateMysteryV2RoomAssets(
         }
       }
     }
+    if (prepared?.status === "ready" && args.freshLights !== "skip" && online && apiKey) {
+      // A new plate invalidates every earlier light position in this room, so
+      // PRISM reads the plate and writes a fresh set. A miss never blocks the room.
+      try {
+        const layout = mysteryState.config.mansionSnapshot?.layoutV2;
+        if (layout) {
+          const plate = getDebateMysteryAssetFileForPreparationV1(
+            db, userKey, args.userId, args.sessionId, "room", room.id,
+          );
+          const lights = await detectDebateMysteryRoomLightsV1({
+            apiKey,
+            bytes: plate.bytes,
+            roomId: room.id,
+            roomName: room.name,
+            layout,
+            existingLights: layout.lights.filter((light) => light.roomId === room.id),
+            signal,
+          });
+          replaceDebateMysteryRoomLightsV1(db, args.userId, args.sessionId, room.id, lights);
+        }
+      } catch (error) {
+        if (signal.aborted) throw error;
+        console.warn("[debate-mystery-v2] fresh room lights were not placed for a new plate.");
+      }
+    }
     prepared ??= setDebateMysteryAssetFallbackV1(db, {
       userId: args.userId,
       sessionId: args.sessionId,
@@ -11377,26 +11462,76 @@ interface DebateMysteryRoomArtUpgradeStatusV1 extends Record<string, unknown> {
 }
 
 const mysteryRoomArtUpgradeRuns = new Map<string, Promise<void>>();
+const mysteryLegacyRoomPairChecks = new Map<string, Promise<DebateMysteryRoomSourceLockV1 | null>>();
 
-function debateMysteryRoomArtUpgradeStatusV1(
+async function validateStoredMysteryRoomPairV1(
   userId: string,
   sessionId: string,
-): DebateMysteryRoomArtUpgradeStatusV1 {
+  roomId: string,
+  base: DebateMysteryRoomPairRowV1 | undefined,
+  derivative: DebateMysteryRoomPairRowV1 | undefined,
+): Promise<DebateMysteryRoomPairRowV1 | undefined> {
+  return locallyValidateLegacyDebateMysteryRoomPairV1({
+    base, derivative,
+    validate: () => {
+      const key = JSON.stringify([userId, sessionId, roomId, base!.sha256, derivative!.sha256]);
+      const cached = mysteryLegacyRoomPairChecks.get(key);
+      if (cached) return cached;
+      const check = (async () => {
+        try {
+          const userKey = decryptUserKey(userId);
+          const source = getDebateMysteryAssetFileForPreparationV1(db, userKey, userId, sessionId, "room", roomId);
+          const candidate = getDebateMysteryAssetFileForPreparationV1(db, userKey, userId, sessionId, "room", debateMysteryIllustratedRoomSubjectIdV1(roomId));
+          if (source.sha256 !== base!.sha256 || candidate.sha256 !== derivative!.sha256) return null;
+          const reference = await renderDebateMysteryRoomArtV1(source.bytes, { variant: "mosaic-reference", format: "png" });
+          const alignment = await validateDebateMysteryRoomArtSourceAlignmentV1({ source: reference.bytes, candidate: candidate.bytes });
+          return normalizeDebateMysteryRoomSourceLockV1({
+            ...alignment,
+            version: DEBATE_MYSTERY_ROOM_ALIGNMENT_CONTRACT_V1.version,
+            referenceVersion: DEBATE_MYSTERY_ROOM_ALIGNMENT_CONTRACT_V1.referenceVersion,
+            baseSha256: source.sha256,
+            referenceSha256: createHash("sha256").update(reference.bytes).digest("hex"),
+            candidateSha256: candidate.sha256,
+          });
+        } catch { return null; }
+      })();
+      if (mysteryLegacyRoomPairChecks.size >= 128) {
+        mysteryLegacyRoomPairChecks.delete(mysteryLegacyRoomPairChecks.keys().next().value!);
+      }
+      mysteryLegacyRoomPairChecks.set(key, check);
+      return check;
+    },
+  });
+}
+
+async function debateMysteryRoomArtUpgradeStatusV1(
+  userId: string,
+  sessionId: string,
+): Promise<DebateMysteryRoomArtUpgradeStatusV1> {
   const session = getDebateSession(db, userId, sessionId);
   if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
     throw new HttpError(404, "That mansion artwork was not found.");
   }
   const mysteryState = session.formatState;
   const rows = db.prepare(
-    `SELECT subject_id, status, review_json
+    `SELECT subject_id, status, sha256, review_json
        FROM debate_mystery_asset_vault
       WHERE user_id = ? AND session_id = ? AND kind = 'room'`,
   ).all(userId, sessionId) as unknown as Array<{
     subject_id: string;
     status: "pending" | "ready" | "fallback";
+    sha256: string | null;
     review_json: string;
   }>;
   const rowBySubjectId = new Map(rows.map((row) => [row.subject_id, row]));
+  // Legacy rows lost their source report on save. Validate their actual bytes
+  // locally once per pair; keep the result private and leave the vault intact.
+  for (const room of mysteryState.rooms) {
+    const subjectId = debateMysteryIllustratedRoomSubjectIdV1(room.id);
+    const checked = await validateStoredMysteryRoomPairV1(userId, sessionId, room.id,
+      rowBySubjectId.get(room.id), rowBySubjectId.get(subjectId));
+    if (checked) rowBySubjectId.set(subjectId, { ...checked, subject_id: subjectId });
+  }
   const pendingBaseRoomIds = mysteryState.rooms
     .filter((room) => rowBySubjectId.get(room.id)?.status === "pending")
     .map((room) => room.id);
@@ -11404,12 +11539,18 @@ function debateMysteryRoomArtUpgradeStatusV1(
     .filter((room) => rowBySubjectId.get(room.id)?.status === "ready")
     .map((room) => room.id);
   const readyRoomIds = requiresUpgradeRoomIds.filter((roomId) =>
-    rowBySubjectId.get(debateMysteryIllustratedRoomSubjectIdV1(roomId))?.status === "ready");
-  const failedRoomIds = requiresUpgradeRoomIds.filter((roomId) =>
-    rowBySubjectId.get(debateMysteryIllustratedRoomSubjectIdV1(roomId))?.status === "fallback");
+    isDebateMysteryRoomArtPairReadyV1(
+      rowBySubjectId.get(roomId),
+      rowBySubjectId.get(debateMysteryIllustratedRoomSubjectIdV1(roomId)),
+    ));
+  const failedRoomIds = requiresUpgradeRoomIds.filter((roomId) => {
+    const derivative = rowBySubjectId.get(debateMysteryIllustratedRoomSubjectIdV1(roomId));
+    return derivative?.status === "fallback"
+      || (derivative?.status === "ready" && !readyRoomIds.includes(roomId));
+  });
   const upgradeRunning = mysteryRoomArtUpgradeRuns.has(`${userId}:${sessionId}`);
   const running = upgradeRunning || pendingBaseRoomIds.length > 0;
-  const online = session.responseMode !== "local";
+  const online = !userBlocksOnlineCapabilities(getUserRow(userId));
   const sourcesReady = pendingBaseRoomIds.length === 0;
   const complete = sourcesReady && (
     requiresUpgradeRoomIds.length === 0 ||
@@ -11453,7 +11594,7 @@ async function prepareDebateMysteryIllustratedRoomsV1(
   }
   const mysteryState = session.formatState;
   const user = getUserRow(userId);
-  if (session.responseMode === "local") {
+  if (userBlocksOnlineCapabilities(user)) {
     throw new HttpError(
       409,
       "Upgraded room derivatives require ONLINE. LOCAL never sends venue art to a remote generator.",
@@ -11463,7 +11604,7 @@ async function prepareDebateMysteryIllustratedRoomsV1(
   const apiKey = getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
   if (!apiKey) throw new HttpError(409, "An OpenAI image key is required to upgrade room artwork.");
   const requiredRoomIds = new Set(
-    debateMysteryRoomArtUpgradeStatusV1(userId, sessionId).requiresUpgradeRoomIds,
+    (await debateMysteryRoomArtUpgradeStatusV1(userId, sessionId)).requiresUpgradeRoomIds,
   );
   const fallbackController = new AbortController();
   const preparationSignal = refractionSignal(signal) ?? fallbackController.signal;
@@ -11474,14 +11615,17 @@ async function prepareDebateMysteryIllustratedRoomsV1(
       (requestedRoomIds && !requestedRoomIds.has(room.id))
     ) continue;
     const subjectId = debateMysteryIllustratedRoomSubjectIdV1(room.id);
-    const existing = getDebateMysterySealedAssetRefV1(
-      db,
-      userId,
-      sessionId,
-      "room",
-      subjectId,
-    );
-    if (existing?.status === "ready") continue;
+    const readRoomPairRow = (id: string): DebateMysteryRoomPairRowV1 | undefined => db.prepare(
+      `SELECT status, sha256, review_json FROM debate_mystery_asset_vault
+        WHERE user_id = ? AND session_id = ? AND kind = 'room' AND subject_id = ?`,
+    ).get(userId, sessionId, id) as DebateMysteryRoomPairRowV1 | undefined;
+    const existing = await validateStoredMysteryRoomPairV1(userId, sessionId, room.id,
+      readRoomPairRow(room.id), readRoomPairRow(subjectId));
+    if (!shouldPrepareDebateMysteryRoomUpgradeV1({
+      base: readRoomPairRow(room.id),
+      derivative: existing,
+      explicitlyRequested: requestedRoomIds?.has(room.id) === true,
+    })) continue;
     setDebateMysteryAssetPendingV1(db, {
       userId,
       sessionId,
@@ -11525,7 +11669,7 @@ async function prepareDebateMysteryIllustratedRoomsV1(
         });
         if (!alignment.approved) {
           throw new Error(
-            `Source-lock rejected the Upgraded room derivative (frame matches: ${alignment.frameMatches}; structural alignment coarse ${alignment.correlation.toFixed(3)}, detail ${alignment.detailCorrelation.toFixed(3)}; both must reach ${alignment.minimumCorrelation.toFixed(3)}).`,
+            `Source-lock rejected the Upgraded room derivative (frame matches: ${alignment.frameMatches}; structural alignment coarse ${alignment.correlation.toFixed(3)}, detail ${alignment.detailCorrelation.toFixed(3)}; both must reach ${alignment.minimumCorrelation.toFixed(3)}; landmarks ${alignment.landmarkCorrelation.toFixed(3)} must reach ${alignment.minimumLandmarkCorrelation.toFixed(3)}).`,
           );
         }
         const pixels = await validateDebateMysteryAssetPixelsV1("room", normalized);
@@ -11544,6 +11688,9 @@ async function prepareDebateMysteryIllustratedRoomsV1(
           );
         }
         attemptSignal.throwIfAborted();
+        // No await between the current-source check and sealing: an upgrade
+        // completing after a Mosaic replacement cannot certify the new base.
+        assertDebateMysteryRoomSourceUnchangedV1(readRoomPairRow(room.id), source.sha256);
         const sealed = sealDebateMysteryAssetBytesV1(db, userKey, {
           userId,
           sessionId,
@@ -11552,7 +11699,19 @@ async function prepareDebateMysteryIllustratedRoomsV1(
           bytes: normalized,
           provider: "openai",
           model: generated.model,
-          review: { attempt: 1, pixels, sourceLock: alignment, vision: review },
+          review: {
+            attempt: 1,
+            pixels,
+            sourceLock: {
+              ...alignment,
+              version: DEBATE_MYSTERY_ROOM_ALIGNMENT_CONTRACT_V1.version,
+              referenceVersion: DEBATE_MYSTERY_ROOM_ALIGNMENT_CONTRACT_V1.referenceVersion,
+              baseSha256: source.sha256,
+              referenceSha256: createHash("sha256").update(mosaicReference.bytes).digest("hex"),
+              candidateSha256: createHash("sha256").update(normalized).digest("hex"),
+            },
+            vision: review,
+          },
         });
         return sealed;
       });
@@ -11563,6 +11722,9 @@ async function prepareDebateMysteryIllustratedRoomsV1(
       ) {
         throw error;
       }
+      // A rejected replacement must retain the previous sealed bytes. Its
+      // unproven pairing remains withheld; scene repair owns its own rollback.
+      if (existing?.status === "ready") continue;
       setDebateMysteryAssetFallbackV1(db, {
         userId,
         sessionId,
@@ -11593,11 +11755,11 @@ function queueDebateMysteryIllustratedRoomsV1(
     currentRefractionSignal(),
     requestedRoomIds,
   )
-    .finally(() => {
+    .finally(async () => {
       mysteryRoomArtUpgradeRuns.delete(key);
       try {
         assertRefractionActive();
-        const upgrade = debateMysteryRoomArtUpgradeStatusV1(userId, sessionId);
+        const upgrade = await debateMysteryRoomArtUpgradeStatusV1(userId, sessionId);
         refreshDebateMysteryProductionReadinessV1(db, userId, sessionId, {
           illustratedRoomsGenerated: upgrade.status === "ready",
         });
@@ -11622,6 +11784,8 @@ const DEBATE_MYSTERY_SCENE_REPAIR_ACTIONS_V1 = new Set([
   "refresh_room_anchors",
   "refresh_room_lights",
   "regenerate_evidence_asset",
+  "repair_evidence_name",
+  "repair_evidence_description",
   "reduce_evidence_magenta",
   "regenerate_music",
   "regenerate_ambience",
@@ -11634,15 +11798,31 @@ async function repairDebateMysterySceneV1(args: {
   roomId?: string | null;
   subjectId?: string | null;
   artStyle?: "mosaic" | "upgraded";
+  previewLights?: import("@localai/shared").MansionDynamicLightV2[];
+  liveSelection?: Record<string, unknown>;
+  expectedRevision?: number;
 }): Promise<DebateSessionV1> {
   assertRefractionActive();
   const session = getDebateSession(db, args.userId, args.sessionId);
   if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
     throw new HttpError(409, "Scene repair requires a Whodunnit V2 case.");
   }
+  if (args.action === "repair_evidence_name" || args.action === "repair_evidence_description") {
+    if (!args.subjectId || !session.formatState.record.some((item) => item.admitted &&
+      item.reference.kind === "evidence" && item.reference.id === args.subjectId)) {
+      throw new HttpError(404, "Only a found Case File item can receive a text repair.");
+    }
+    const runtime = await debateAiRuntimeForUser(
+      args.userId, session.provider, frozenDebateModelOverride(session), session.responseMode,
+      undefined, undefined, debateAutoRoutingContext(session, args.liveSelection),
+    );
+    return repairDebateMysteryItemTextV1(db, args.userId, args.sessionId, {
+      action: args.action, subjectId: args.subjectId, expectedRevision: args.expectedRevision,
+    }, runtime);
+  }
   const audioAction = args.action === "regenerate_music" || args.action === "regenerate_ambience";
   const localPixelRepair = args.action === "reduce_evidence_magenta";
-  if (session.responseMode === "local" && !localPixelRepair) {
+  if ((userBlocksOnlineCapabilities(getUserRow(args.userId)) || args.liveSelection?.responseMode === "local") && !localPixelRepair) {
     throw new HttpError(
       409,
       "This repair requires ONLINE. LOCAL never sends case art or audio to a remote model.",
@@ -12026,6 +12206,7 @@ async function repairDebateMysterySceneV1(args: {
       crimeSceneRoomId: state.crimeSceneRoomId ?? room.id,
       mode: "background",
       houseStyle: state.config.houseStyle,
+      freshLights: "skip",
     });
     const roomAsset = generated[room.id];
     if (!roomAsset || roomAsset.status !== "ready") return restoreFailedAssetRepair(snapshots);
@@ -12047,11 +12228,28 @@ async function repairDebateMysterySceneV1(args: {
           room,
           layout,
           anchors: true,
-          lights: true,
+          lights: false,
         });
       } catch {
         // The repaired image remains usable; the field tool exposes selective
         // anchor and light retries without revealing the room.
+      }
+      try {
+        // Fresh lights for the fresh plate; committing them here records the
+        // previous set for Undo.
+        const generatedImage = getDebateMysteryAssetFileForPreparationV1(
+          db, userKey, args.userId, args.sessionId, "room", room.id,
+        );
+        reconciledGeometry.lights = await detectDebateMysteryRoomLightsV1({
+          apiKey: apiKey!,
+          bytes: generatedImage.bytes,
+          roomId: room.id,
+          roomName: room.name,
+          layout,
+          existingLights: layout.lights.filter((light) => light.roomId === room.id),
+        });
+      } catch {
+        // Lights & FX still offers Auto-place for this room.
       }
     }
     return commitDebateMysterySceneRepairV1(db, args.userId, args.sessionId, {
@@ -12101,7 +12299,7 @@ async function repairDebateMysterySceneV1(args: {
     });
   }
 
-  clearDebateMysterySceneRepairAssetSnapshotsV1(db, args.userId, args.sessionId);
+  if (!args.previewLights) clearDebateMysterySceneRepairAssetSnapshotsV1(db, args.userId, args.sessionId);
   const layout = state.config.mansionSnapshot?.layoutV2;
   if (!layout) throw new HttpError(409, "This archived room has no repairable layout metadata.");
   const preferredSubjectId = args.artStyle === "upgraded" ? upgradeSubjectId : room.id;
@@ -12178,26 +12376,28 @@ async function repairDebateMysterySceneV1(args: {
     });
   }
 
-  const lights = layout.lights.filter((light) => light.roomId === room.id);
-  if (lights.length === 0) throw new HttpError(409, "This room has no dynamic lights to refresh.");
-  const placements = await observeMysteryScenePlacementsV1({
+  // Fresh detection: the current lights are identity hints so matched lights
+  // keep their ids, colors, and intensities while sources gain or lose lights.
+  const hints = args.previewLights ?? layout.lights.filter((light) => light.roomId === room.id);
+  const nextLights = await detectDebateMysteryRoomLightsV1({
     apiKey: apiKey!,
     bytes: image.bytes,
-    prompt: [
-      `Inspect this already accepted ${room.name} room image.`,
-      "For each existing PRISM dynamic light, locate the most plausible visible lamp, window, fire, neon strip, or practical source that should own that overlay. Preserve the light's identity and color; report only its aligned center and a rotation when visibly meaningful.",
-      lights.map((light) =>
-        `light:${light.id} = ${light.kind} ${light.color} light currently near (${mysteryLightCenterV1(light).x.toFixed(2)}, ${mysteryLightCenterV1(light).y.toFixed(2)})`
-      ).join("; "),
-    ].join(" "),
+    roomId: room.id,
+    roomName: room.name,
+    layout,
+    existingLights: hints,
   });
-  const byId = new Map(placements.map((placement) => [placement.id, placement]));
-  const nextLights = lights.map((light) => {
-    const target = byId.get(`light:${light.id}`);
-    return target ? relocateMysteryLightV1(light, target) : light;
-  });
-  if (nextLights.every((light, index) => light === lights[index])) {
-    throw new HttpError(409, "PRISM could not match the room's visible light sources reliably.");
+  if (nextLights.length === 0 && hints.length === 0) {
+    throw new HttpError(409, "PRISM found no lit fireplace, lamp, window, or neon in this room's image.");
+  }
+  if (args.previewLights) {
+    const preview = structuredClone(session);
+    if (preview.formatState.format === "whodunnit" && preview.formatState.version === 2) {
+      preview.formatState.config.mansionSnapshot!.layoutV2!.lights = [
+        ...layout.lights.filter((light) => light.roomId !== room.id), ...nextLights,
+      ];
+    }
+    return preview;
   }
   return commitDebateMysterySceneRepairV1(db, args.userId, args.sessionId, {
     action: args.action,
@@ -12572,7 +12772,7 @@ function queueDebateMysteryV2RoomAssetBackground(
     if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) return;
     console.warn("[debate-mystery-v2] sealed visual background run paused.");
     // Pending vault rows are durable; opening the case retries the frontier.
-  }).finally(() => {
+  }).finally(async () => {
     if (leaseHeartbeat) clearInterval(leaseHeartbeat);
     releaseDebateMysteryAssetBackgroundLeaseV2(
       db,
@@ -12593,7 +12793,7 @@ function queueDebateMysteryV2RoomAssetBackground(
       queueDebateMysteryIllustratedRoomsV1(userId, sessionId);
     }
     try {
-      const upgrade = debateMysteryRoomArtUpgradeStatusV1(userId, sessionId);
+      const upgrade = await debateMysteryRoomArtUpgradeStatusV1(userId, sessionId);
       refreshDebateMysteryProductionReadinessV1(db, userId, sessionId, {
         illustratedRoomsGenerated: upgrade.status === "ready",
       });
@@ -13300,6 +13500,7 @@ function buildRoutes(
           createdAt,
           initialPrivateValues: {
             theme: requestedTheme,
+            debate_whodunnit_text_voice_mode: "babble",
             preferred_provider: "local",
             auto_memory: 1,
             prism_default_bot_face_mouth_coffee_pucker:
@@ -17390,7 +17591,7 @@ function buildRoutes(
       if (!clip) throw new HttpError(404, "Avatar sound loop not found.");
       ctx.res.statusCode = 200;
       ctx.res.setHeader("content-type", clip.contentType);
-      ctx.res.setHeader("cache-control", "private, max-age=3600");
+      ctx.res.setHeader("cache-control", "private, no-store");
       ctx.res.end(clip.bytes);
     }),
     route("GET", "/api/audio-library", async (ctx) => {
@@ -21153,8 +21354,8 @@ function buildRoutes(
         throw new HttpError(409, "Failed visuals can be retried after Case Forge completes.");
       }
       const user = getUserRow(userId);
-      if (session.responseMode === "local") {
-        throw new HttpError(409, "Visual retries require an ONLINE Whodunnit case.");
+      if (userBlocksOnlineCapabilities(user)) {
+        throw new HttpError(409, "Visual retries require ONLINE.");
       }
       const userKey = decryptUserKey(userId);
       if (!(getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey)) {
@@ -21327,7 +21528,7 @@ function buildRoutes(
         session.id,
         {
           illustratedRoomsGenerated:
-            debateMysteryRoomArtUpgradeStatusV1(userId, session.id).status === "ready",
+            (await debateMysteryRoomArtUpgradeStatusV1(userId, session.id)).status === "ready",
         },
       );
       json(ctx.res, roomId ? 200 : 202, {
@@ -21374,7 +21575,7 @@ function buildRoutes(
     route("GET", "/api/debates/:id/mystery-room-art/upgrade", async (ctx) => {
       const userId = requireAuth(ctx);
       ctx.res.setHeader("cache-control", "private, no-store");
-      json(ctx.res, 200, debateMysteryRoomArtUpgradeStatusV1(userId, ctx.params.id));
+      json(ctx.res, 200, await debateMysteryRoomArtUpgradeStatusV1(userId, ctx.params.id));
     }),
     route("POST", "/api/debates/:id/mystery-room-art/upgrade", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -21395,7 +21596,7 @@ function buildRoutes(
           throw new HttpError(404, "That mansion room was not found.");
         }
       }
-      const before = debateMysteryRoomArtUpgradeStatusV1(userId, ctx.params.id);
+      const before = await debateMysteryRoomArtUpgradeStatusV1(userId, ctx.params.id);
       if (before.status === "ready" || (roomId && before.readyRoomIds.includes(roomId))) {
         ctx.res.setHeader("cache-control", "private, no-store");
         json(ctx.res, 200, before);
@@ -21415,20 +21616,42 @@ function buildRoutes(
       const run = queueDebateMysteryIllustratedRoomsV1(
         userId,
         ctx.params.id,
-        roomId ? new Set([roomId]) : undefined,
+        roomId ? new Set([roomId]) : new Set(before.requiresUpgradeRoomIds),
       );
       if (roomId) await run;
       ctx.res.setHeader("cache-control", "private, no-store");
       json(
         ctx.res,
         roomId ? 200 : 202,
-        debateMysteryRoomArtUpgradeStatusV1(userId, ctx.params.id),
+        await debateMysteryRoomArtUpgradeStatusV1(userId, ctx.params.id),
       );
+    }),
+    route("POST", "/api/debates/:id/mystery-room-lighting", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const session = saveDebateMysteryRoomLightingV1(db, userId, ctx.params.id, (ctx.body ?? {}) as Record<string, unknown>);
+      ctx.res.setHeader("cache-control", "private, no-store");
+      json(ctx.res, 200, { ok: true, session: debateSessionForPlayer(session) });
+    }),
+    route("POST", "/api/debates/:id/mystery-room-lighting/detect", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const { artStyle, ...body } = (ctx.body ?? {}) as Record<string, unknown>;
+      const session = getDebateSession(db, userId, ctx.params.id);
+      if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2 || !session.formatState.config.mansionSnapshot?.layoutV2) {
+        throw new HttpError(409, "Open a Whodunnit room with editable lighting first.");
+      }
+      const roomId = typeof body.roomId === "string" ? body.roomId : "";
+      const draft = validateRoomLightingEditV1(session.formatState.config.mansionSnapshot.layoutV2, roomId, body);
+      const preview = await repairDebateMysterySceneV1({ userId, sessionId: ctx.params.id,
+        action: "refresh_room_lights", roomId, artStyle: artStyle === "upgraded" ? "upgraded" : "mosaic", previewLights: draft.lights });
+      const lights = preview.formatState.format === "whodunnit" && preview.formatState.version === 2
+        ? preview.formatState.config.mansionSnapshot?.layoutV2?.lights.filter((light) => light.roomId === roomId) ?? [] : [];
+      ctx.res.setHeader("cache-control", "private, no-store");
+      json(ctx.res, 200, { ok: true, lights });
     }),
     route("POST", "/api/debates/:id/mystery-scene-repair", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
-      if (Object.keys(body).some((key) => !["action", "roomId", "subjectId", "artStyle"].includes(key))) {
+      if (Object.keys(body).some((key) => !["action", "roomId", "subjectId", "artStyle", "expectedRevision", "preferredProvider", "modelOverride", "responseMode", "reasoningEffort", "turbo"].includes(key))) {
         throw new HttpError(400, "Scene repair accepts only an action, room, found item, and current art style.");
       }
       const action = typeof body.action === "string" &&
@@ -21442,6 +21665,8 @@ function buildRoutes(
         userId,
         sessionId: ctx.params.id,
         action,
+        liveSelection: body,
+        expectedRevision: typeof body.expectedRevision === "number" ? body.expectedRevision : undefined,
         roomId: typeof body.roomId === "string" && body.roomId.trim()
           ? body.roomId.trim()
           : null,
@@ -21454,7 +21679,7 @@ function buildRoutes(
       json(ctx.res, 200, {
         ok: true,
         session: debateSessionForPlayer(session),
-        roomArtUpgrade: debateMysteryRoomArtUpgradeStatusV1(userId, ctx.params.id),
+        roomArtUpgrade: await debateMysteryRoomArtUpgradeStatusV1(userId, ctx.params.id),
       });
     }),
     route("POST", "/api/debates/:id/mystery-scene-repair/undo", async (ctx) => {
@@ -21493,7 +21718,7 @@ function buildRoutes(
       json(ctx.res, 200, {
         ok: true,
         session: debateSessionForPlayer(session),
-        roomArtUpgrade: debateMysteryRoomArtUpgradeStatusV1(userId, ctx.params.id),
+        roomArtUpgrade: await debateMysteryRoomArtUpgradeStatusV1(userId, ctx.params.id),
       });
     }),
     route("GET", "/api/debates/mystery-cases", async (ctx) => {
@@ -22057,7 +22282,36 @@ function buildRoutes(
       if (Object.keys(body).length > 0) {
         throw new HttpError(400, "Accepting room art does not take client-authored fields.");
       }
-      acceptMansionRoomArtCandidateV2(db, userId, ctx.params.id, ctx.params.roomId);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const apiKey = getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      let lights: import("@localai/shared").MansionDynamicLightV2[] | undefined;
+      if (!userBlocksOnlineCapabilities(user) && apiKey) {
+        // Accepted art is a new plate: read it for lit sources so the room's
+        // lights match it. Detection never blocks acceptance; the author can
+        // still auto-place or hand-place afterwards.
+        try {
+          const layout = getDebateMysteryMansionBundleV2(db, userId, ctx.params.id).layoutV2;
+          const candidate = layout?.roomArtCandidates.find((entry) =>
+            entry.roomId === ctx.params.roomId && entry.status === "ready" && entry.assetId);
+          const room = layout?.entities.find((entity) =>
+            entity.kind === "room" && entity.id === ctx.params.roomId);
+          if (layout && candidate?.assetId && room?.kind === "room") {
+            const plate = getDebateMysteryMansionAssetFileV1(db, userKey, userId, ctx.params.id, candidate.assetId);
+            lights = await detectDebateMysteryRoomLightsV1({
+              apiKey,
+              bytes: plate.bytes,
+              roomId: room.id,
+              roomName: room.name,
+              layout,
+              existingLights: layout.lights.filter((light) => light.roomId === room.id),
+            });
+          }
+        } catch {
+          lights = undefined;
+        }
+      }
+      acceptMansionRoomArtCandidateV2(db, userId, ctx.params.id, ctx.params.roomId, lights ? { lights } : {});
       json(ctx.res, 200, {
         ok: true,
         mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id),
@@ -22457,7 +22711,7 @@ function buildRoutes(
               frozen.responseMode,
               frozen.generationChain,
               frozen.autoCandidateAllowlist,
-              debateAutoRoutingContext(frozen),
+              debateAutoRoutingContext(frozen, body),
             );
           } catch {
             // The first room line is optional polish. Provider configuration
@@ -22480,7 +22734,7 @@ function buildRoutes(
             runtime,
           ),
         );
-        queueDebateMysteryV2RoomAssetBackground(userId, session.id);
+        if (body.action !== "check_case") queueDebateMysteryV2RoomAssetBackground(userId, session.id);
         json(ctx.res, 200, {
           ok: true,
           session: debateSessionForPlayer(session),
@@ -22494,7 +22748,7 @@ function buildRoutes(
         frozen.responseMode,
         frozen.generationChain,
         frozen.autoCandidateAllowlist,
-        debateAutoRoutingContext(frozen),
+        debateAutoRoutingContext(frozen, body),
       );
       const session = await runWithUsageSession(
         {
@@ -22709,7 +22963,7 @@ function buildRoutes(
     }),
     route("POST", "/api/debates/:id/mystery-production/refresh", async (ctx) => {
       const userId = requireAuth(ctx);
-      const upgrade = debateMysteryRoomArtUpgradeStatusV1(userId, ctx.params.id);
+      const upgrade = await debateMysteryRoomArtUpgradeStatusV1(userId, ctx.params.id);
       const session = refreshDebateMysteryProductionReadinessV1(
         db,
         userId,
@@ -22717,6 +22971,13 @@ function buildRoutes(
         { illustratedRoomsGenerated: upgrade.status === "ready" },
       );
       json(ctx.res, 200, { ok: true, session: debateSessionForPlayer(session) });
+    }),
+    route("GET", "/api/debates/:id/mystery-spoken-performance/:lineId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const performance = getDebateMysterySpokenPerformanceV2(
+        db, userId, ctx.params.id, ctx.params.lineId,
+      );
+      json(ctx.res, 200, { ok: true, performance });
     }),
     route("GET", "/api/debates/:id/mystery-audio/:lineId", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -27310,7 +27571,7 @@ function buildRoutes(
       }
       ctx.res.statusCode = 200;
       ctx.res.setHeader("content-type", row.content_type);
-      ctx.res.setHeader("cache-control", "private, max-age=3600");
+      ctx.res.setHeader("cache-control", "private, no-store");
       ctx.res.end(Buffer.from(row.image_bytes));
     }),
     route("GET", "/api/botcast/episodes/:id/retry-metadata", async (ctx) => {
@@ -28331,7 +28592,7 @@ function buildRoutes(
       ctx.res.statusCode = 200;
       ctx.res.setHeader("content-type", audio.contentType);
       ctx.res.setHeader("content-length", String(audio.audioBytes.byteLength));
-      ctx.res.setHeader("cache-control", "private, max-age=3600");
+      ctx.res.setHeader("cache-control", "private, no-store");
       ctx.res.setHeader("etag", `\"coffee-${ctx.params.id}-${audio.revision}\"`);
       ctx.res.end(audio.audioBytes);
     }),
@@ -31776,7 +32037,7 @@ function buildRoutes(
       if (!clip) throw new HttpError(404, "Action pack clip not found.");
       ctx.res.statusCode = 200;
       ctx.res.setHeader("content-type", clip.contentType);
-      ctx.res.setHeader("cache-control", "private, max-age=3600");
+      ctx.res.setHeader("cache-control", "private, no-store");
       ctx.res.setHeader("x-prism-action-sfx-pack-kind", clip.kind);
       ctx.res.setHeader(
         "x-prism-action-sfx-pack-variant",
@@ -32182,7 +32443,7 @@ function buildRoutes(
         if (controller.signal.aborted) return;
         ctx.res.statusCode = 200;
         ctx.res.setHeader("content-type", sound.contentType);
-        ctx.res.setHeader("cache-control", "private, max-age=3600");
+        ctx.res.setHeader("cache-control", "private, no-store");
         ctx.res.setHeader(
           "x-prism-action-sfx-model",
           COFFEE_ELEVENLABS_ACTION_SFX_MODEL,
@@ -34706,6 +34967,7 @@ function buildRoutes(
           ),
           ...livingShellProgress,
           preferredProvider:
+            user.preferred_provider === "ollama_cloud" ||
             user.preferred_provider === "anthropic" ||
             user.preferred_provider === "openai"
               ? user.preferred_provider
@@ -34759,12 +35021,7 @@ function buildRoutes(
             user.hidden_comfyui_workflow_ids,
           ),
           preferredLocalModel: user.preferred_local_model ?? "",
-          preferredOnlineModel:
-            user.preferred_online_model?.endsWith(":cloud") ||
-            user.preferred_online_model?.endsWith("-cloud") ||
-            user.preferred_online_model?.startsWith("ollama-cloud-direct:")
-              ? ""
-              : user.preferred_online_model ?? "",
+          preferredOnlineModel: user.preferred_online_model ?? "",
           legacyAutoFallbackModelSuggestion:
             !parseStoredAutoFallbackChain(user.auto_fallback_chain) &&
             user.lenient_local_fallback_model
@@ -38042,7 +38299,7 @@ function buildRoutes(
       }
       ctx.res.statusCode = 200;
       ctx.res.setHeader("content-type", "image/webp");
-      ctx.res.setHeader("cache-control", "private, max-age=3600");
+      ctx.res.setHeader("cache-control", "private, no-store");
       ctx.res.end(bytes);
     }),
     route("GET", "/api/images/:id/file", async (ctx) => {
@@ -38075,7 +38332,7 @@ function buildRoutes(
       const responseBytes = mosaic?.bytes ?? bytes;
       ctx.res.statusCode = 200;
       ctx.res.setHeader("content-type", mosaic?.mimeType ?? sourceMimeType);
-      ctx.res.setHeader("cache-control", "private, max-age=3600");
+      ctx.res.setHeader("cache-control", "private, no-store");
       ctx.res.end(responseBytes);
     }),
     route("DELETE", "/api/images", async (ctx) => {

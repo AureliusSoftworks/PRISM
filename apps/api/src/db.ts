@@ -308,7 +308,7 @@ export function initializeDatabase(
       experimental_all_model_effort_enabled INTEGER NOT NULL DEFAULT 0,
       coffee_experimental_table_angle_enabled INTEGER NOT NULL DEFAULT 0,
       debate_whodunnit_reuse_synthesized_exhibits INTEGER NOT NULL DEFAULT 0,
-      debate_whodunnit_text_voice_mode TEXT NOT NULL DEFAULT 'bottish',
+      debate_whodunnit_text_voice_mode TEXT NOT NULL DEFAULT 'babble',
       psychic_mode_enabled INTEGER NOT NULL DEFAULT 0,
       comfyui_host TEXT,
       comfyui_workflows TEXT NOT NULL DEFAULT '[]',
@@ -3785,7 +3785,7 @@ export function initializeDatabase(
     (column) => column.name === "debate_whodunnit_text_voice_mode",
   );
   if (!hasDebateWhodunnitTextVoiceMode) {
-    addPrivateUserColumn("debate_whodunnit_text_voice_mode", "TEXT NOT NULL DEFAULT 'bottish'");
+    addPrivateUserColumn("debate_whodunnit_text_voice_mode", "TEXT NOT NULL DEFAULT 'babble'");
   }
   const hasPsychicModeEnabled = userColumns.some(
     (column) => column.name === "psychic_mode_enabled",

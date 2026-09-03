@@ -525,7 +525,7 @@ describe("resolveNextSettings — playerNamePronunciation", () => {
 });
 
 describe("resolveNextSettings — preferredProvider", () => {
-  it("keeps global foreground provider selection local, OpenAI, or Anthropic", () => {
+  it("keeps global foreground provider selection", () => {
     assert.equal(
       resolveNextSettings({ preferredProvider: "local" }, baseline()).preferredProvider,
       "local"
@@ -533,7 +533,7 @@ describe("resolveNextSettings — preferredProvider", () => {
     assert.equal(
       resolveNextSettings({ preferredProvider: "ollama_cloud" }, baseline())
         .preferredProvider,
-      "openai",
+      "ollama_cloud",
     );
     assert.equal(
       resolveNextSettings({ preferredProvider: "openai" }, baseline()).preferredProvider,
@@ -551,7 +551,7 @@ describe("resolveNextSettings — preferredProvider", () => {
     assert.equal(
       resolveNextSettings({}, baseline({ preferredProvider: "ollama_cloud" }))
         .preferredProvider,
-      "openai",
+      "ollama_cloud",
     );
     assert.equal(
       resolveNextSettings({ preferredProvider: "azure" }, current).preferredProvider,
@@ -787,7 +787,7 @@ describe("resolveNextSettings — debateWhodunnitReuseSynthesizedExhibits", () =
 });
 
 describe("resolveNextSettings — debateWhodunnitTextVoiceMode", () => {
-  it("persists Off, Babble, and Bottish while defaulting legacy values to Bottish", () => {
+  it("persists Off, Babble, and Bottish while defaulting absent values to Babble", () => {
     assert.equal(
       resolveNextSettings(
         { debateWhodunnitTextVoiceMode: "off" },
@@ -814,11 +814,14 @@ describe("resolveNextSettings — debateWhodunnitTextVoiceMode", () => {
         { debateWhodunnitTextVoiceMode: "english" },
         baseline({ debateWhodunnitTextVoiceMode: null }),
       ).debateWhodunnitTextVoiceMode,
-      "bottish",
+      "babble",
     );
   });
 
   it("preserves a valid saved value when the patch omits or rejects the field", () => {
+    for (const mode of ["off", "bottish", "babble"] as const) {
+      assert.equal(resolveNextSettings({}, baseline({ debateWhodunnitTextVoiceMode: mode })).debateWhodunnitTextVoiceMode, mode);
+    }
     const current = baseline({ debateWhodunnitTextVoiceMode: "babble" });
     assert.equal(
       resolveNextSettings({}, current).debateWhodunnitTextVoiceMode,
@@ -1220,13 +1223,13 @@ describe("resolveNextSettings — global account text models", () => {
     assert.equal(next.preferredOnlineModel, null);
   });
 
-  it("migrates a stale Ollama Cloud foreground selection back to Auto", () => {
+  it("persists an explicit Ollama Cloud foreground selection", () => {
     assert.equal(
       resolveNextSettings(
         { preferredOnlineModel: "minimax-m2.5:cloud" },
         baseline(),
       ).preferredOnlineModel,
-      null,
+      "minimax-m2.5:cloud",
     );
   });
 

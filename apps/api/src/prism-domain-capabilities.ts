@@ -1886,7 +1886,7 @@ function imageDeleteCapability(): PrismCapabilityDefinition {
         ),
         consequences: [
           ...(image.localFile
-            ? ["The local image file moves into encrypted account-scoped recovery."]
+            ? ["The local image file moves into account-scoped recovery."]
             : []),
           ...(image.profileReferenceCount > 0
             ? [

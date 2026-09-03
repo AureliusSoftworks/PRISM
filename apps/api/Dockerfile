@@ -21,6 +21,8 @@ RUN node scripts/fetch-builtin-tts-model.mjs --output-dir /app/models
 COPY packages/shared/ packages/shared/
 COPY packages/config/ packages/config/
 COPY apps/api/ apps/api/
+# Canonical offline evidence art is also consumed by the API's sealed vault.
+COPY apps/web/public/debate/mystery/evidence/ apps/web/public/debate/mystery/evidence/
 
 EXPOSE 18787
 

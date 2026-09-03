@@ -2295,6 +2295,22 @@ describe("API request integration", () => {
     assert.equal(loaded.settings.preferredLocalModel, "qwen3:8b");
     assert.equal(loaded.settings.preferredOnlineModel, "gpt-5.6-terra");
 
+    const savedCloud = await client.request("/api/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        preferredProvider: "ollama_cloud",
+        preferredOnlineModel: "minimax-m2.5:cloud",
+      }),
+    });
+    assert.equal(savedCloud.status, 200, await savedCloud.clone().text());
+    const loadedCloud = await json(await client.request("/api/settings"));
+    assert.equal(loadedCloud.settings.preferredProvider, "ollama_cloud");
+    assert.equal(
+      loadedCloud.settings.preferredOnlineModel,
+      "minimax-m2.5:cloud",
+    );
+
     const resetToAuto = await client.request("/api/settings", {
       method: "PATCH",
       headers: { "content-type": "application/json" },

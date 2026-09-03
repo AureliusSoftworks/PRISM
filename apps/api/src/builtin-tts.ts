@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -45,6 +45,7 @@ try {
 
 const WINDOWS_SYNTHESIZE_SCRIPT = `
 Add-Type -AssemblyName System.Speech
+[Console]::InputEncoding = New-Object System.Text.UTF8Encoding($false)
 $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
 try {
   $voices = @($synth.GetInstalledVoices() | Where-Object { $_.Enabled })
@@ -58,7 +59,7 @@ try {
   }
   $synth.Rate = [Math]::Max(-10, [Math]::Min(10, [int]$env:PRISM_TTS_RATE))
   $synth.SetOutputToWaveFile($env:PRISM_TTS_OUTPUT)
-  $synth.Speak([IO.File]::ReadAllText($env:PRISM_TTS_INPUT))
+  $synth.Speak([Console]::In.ReadToEnd())
 } finally {
   $synth.Dispose()
 }
@@ -83,9 +84,11 @@ function encodedPowerShell(script: string): string {
   return Buffer.from(script, "utf16le").toString("base64");
 }
 
-async function runCommand(args: {
+/** Private speech input travels only through this invocation's process pipe. */
+export async function runSystemSpeechCommand(args: {
   command: string;
   parameters: readonly string[];
+  input?: string;
   signal?: AbortSignal;
   env?: NodeJS.ProcessEnv;
 }): Promise<string> {
@@ -94,36 +97,51 @@ async function runCommand(args: {
     const child = spawn(args.command, [...args.parameters], {
       env: args.env,
       windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [args.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
     let stdout = "";
-    let stderr = "";
     let settled = false;
+    let terminalError: Error | undefined;
+    let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
+      if (forceKillTimer !== undefined) clearTimeout(forceKillTimer);
       args.signal?.removeEventListener("abort", onAbort);
       if (error) reject(error);
       else resolve(stdout);
     };
-    const onAbort = () => {
+    const stop = (error: Error) => {
+      if (settled || terminalError) return;
+      terminalError = error;
       child.kill();
-      finish(new DOMException("Aborted", "AbortError"));
+      forceKillTimer = setTimeout(() => child.kill("SIGKILL"), 1_000);
+      forceKillTimer.unref();
+      // Wait for close before the caller removes scratch audio; a live child
+      // must not recreate files after its owner's cancelled request is gone.
     };
+    const onAbort = () => stop(new DOMException("Aborted", "AbortError"));
     args.signal?.addEventListener("abort", onAbort, { once: true });
-    child.stdout?.on("data", (chunk: Buffer) => {
-      if (stdout.length < 64_000) stdout += chunk.toString("utf8");
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      if (stdout.length < 64_000) stdout += chunk.slice(0, 64_000 - stdout.length);
     });
-    child.stderr?.on("data", (chunk: Buffer) => {
-      if (stderr.length < 8_000) stderr += chunk.toString("utf8");
+    // A host speech engine can echo its input in diagnostics. Drain stderr but
+    // never retain or forward private speech into errors, logs, or fallbacks.
+    child.stderr?.resume();
+    child.stdin?.once("error", () => {
+      stop(new Error("System speech input could not be delivered."));
     });
-    child.once("error", (error) => finish(error));
-    child.once("exit", (code) => {
-      if (code === 0) finish();
-      else finish(new Error(
-        stderr.trim() || `System speech command stopped (${code ?? "unknown"}).`
-      ));
+    child.once("error", () =>
+      finish(terminalError ?? new Error("System speech command could not start.")),
+    );
+    child.once("close", (code) => {
+      if (terminalError) finish(terminalError);
+      else if (code === 0) finish();
+      else finish(new Error(`System speech command stopped (${code ?? "unknown"}).`));
     });
+    if (args.signal?.aborted) onAbort();
+    else if (args.input !== undefined) child.stdin?.end(args.input, "utf8");
   });
 }
 
@@ -195,7 +213,7 @@ async function listInstalledSystemVoiceOptions(
   signal?: AbortSignal
 ): Promise<SystemVoiceOption[]> {
   if (platform === "darwin") {
-    macVoiceListPromise ??= runCommand({
+    macVoiceListPromise ??= runSystemSpeechCommand({
       command: "/usr/bin/say",
       parameters: ["-v", "?"],
       signal,
@@ -207,7 +225,7 @@ async function listInstalledSystemVoiceOptions(
   }
   const powershell = windowsPowerShellPath();
   if (!powershell) return [];
-  windowsVoiceListPromise ??= runCommand({
+  windowsVoiceListPromise ??= runSystemSpeechCommand({
     command: powershell,
     parameters: [
       "-NoLogo",
@@ -437,14 +455,12 @@ async function generateSystemEnglishWave(args: {
   }
 
   const directory = await mkdtemp(join(tmpdir(), "prism-system-tts-"));
-  const inputPath = join(directory, "speech.txt");
   const outputPath = join(directory, "speech.wav");
   try {
-    await writeFile(inputPath, args.text, "utf8");
     if (platform === "darwin") {
       const intermediatePath = join(directory, "speech.caf");
       const voiceParameters = settings.voiceName ? ["-v", settings.voiceName] : [];
-      await runCommand({
+      await runSystemSpeechCommand({
         command: "/usr/bin/say",
         parameters: [
           ...voiceParameters,
@@ -454,11 +470,12 @@ async function generateSystemEnglishWave(args: {
           "-o",
           intermediatePath,
           "-f",
-          inputPath,
+          "-",
         ],
+        input: args.text,
         signal: args.signal,
       });
-      await runCommand({
+      await runSystemSpeechCommand({
         command: "/usr/bin/afconvert",
         parameters: [intermediatePath, outputPath, "-f", "WAVE", "-d", "LEI16"],
         signal: args.signal,
@@ -466,7 +483,7 @@ async function generateSystemEnglishWave(args: {
     } else {
       const powershell = windowsPowerShellPath();
       if (!powershell) throw new Error("Windows speech synthesis is unavailable.");
-      await runCommand({
+      await runSystemSpeechCommand({
         command: powershell,
         parameters: [
           "-NoLogo",
@@ -475,10 +492,10 @@ async function generateSystemEnglishWave(args: {
           "-EncodedCommand",
           encodedPowerShell(WINDOWS_SYNTHESIZE_SCRIPT),
         ],
+        input: args.text,
         signal: args.signal,
         env: {
           ...process.env,
-          PRISM_TTS_INPUT: inputPath,
           PRISM_TTS_OUTPUT: outputPath,
           PRISM_TTS_VOICE: settings.voiceName ?? "",
           PRISM_TTS_RATE: String(settings.rate),

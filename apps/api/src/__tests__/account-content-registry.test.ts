@@ -16,6 +16,7 @@ import {
   type PlaintextCanaryFixture,
 } from "../account-content-canary.ts";
 import { initializeDatabase } from "../db.ts";
+import { CORE_CONTENT_VAULT_TABLES } from "../core-content-vault.ts";
 
 function currentFixture(): DatabaseSync {
   return initializeDatabase(new DatabaseSync(":memory:"));
@@ -26,11 +27,11 @@ describe("account-content registry", () => {
     const db = currentFixture();
     try {
       const registry = buildAccountContentRegistry(db);
-      assert.equal(registry.version, 4);
+      assert.equal(registry.version, 5);
       assert.deepEqual(registry.auditedSchema, {
-        fingerprint: "0f83ec84f5bbdb33b737ad3af46b11adf3d7e16086b5e292f2322f81da998cad",
+        fingerprint: "715c5260aa0e4c36deb03a625352cb60ba4731dea9860a81c7b23e3aad577f02",
         tableCount: 166,
-        columnCount: 2_019,
+        columnCount: 2_023,
         indexCount: 382,
         triggerCount: 577,
       });
@@ -237,6 +238,52 @@ describe("account-content registry", () => {
         ),
         false,
         "No application column may silently bypass the Vault as structural metadata.",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps newly audited distillation and Signal proxy metadata account-owned", () => {
+    const db = currentFixture();
+    try {
+      const registry = buildAccountContentRegistry(db);
+      for (const [table, column] of [
+        ["conversations", "chat_distillation_kind"],
+        ["conversations", "chat_distillation_key"],
+        ["conversations", "chat_distillation_persona_name"],
+        ["botcast_episode_image_proxies", "source_sha256"],
+      ]) {
+        const entry = registry.sqliteColumns.find(
+          (item) => item.table === table && item.column === column,
+        );
+        assert.ok(entry);
+        assert.equal(entry.ownerSource, `${table}.user_id`);
+        assert.equal(entry.contentClass, "account-record-or-derived-content");
+        assert.notEqual(entry.currentProtection, "not-account-content");
+      }
+      const conversations = CORE_CONTENT_VAULT_TABLES.find(
+        (table) => table.table === "conversations",
+      )!;
+      assert.equal(
+        conversations.columns.chat_distillation_persona_name?.disposition,
+        "encrypted",
+      );
+      // A source digest is a content derivative, not evidence that archival
+      // pixels or private presentation notes have already been encrypted.
+      const proxy = registry.sqliteColumns.find(
+        (entry) => entry.table === "botcast_episode_image_proxies" &&
+          entry.column === "source_sha256",
+      )!;
+      assert.equal(proxy.currentProtection, "legacy-plaintext-or-mixed");
+      const primaryKey = db.prepare(
+        "PRAGMA table_info(botcast_episode_image_proxies)",
+      ).all() as Array<{ name: string; pk: number }>;
+      assert.deepEqual(
+        primaryKey.filter((column) => column.pk > 0)
+          .sort((left, right) => left.pk - right.pk)
+          .map((column) => column.name),
+        ["episode_id", "image_id"],
       );
     } finally {
       db.close();

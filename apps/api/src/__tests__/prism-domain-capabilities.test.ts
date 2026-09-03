@@ -1206,6 +1206,10 @@ describe("Prism Image Library capability", () => {
         input: { imageId: "image-1" },
       });
       assert.equal(proposal.confirmation, "explicit-confirmation");
+      assert.ok(proposal.preview.consequences.includes(
+        "The local image file moves into account-scoped recovery.",
+      ));
+      assert.doesNotMatch(proposal.preview.consequences.join(" "), /encrypted/iu);
       const run = await registry.executeProposal({
         context: capabilityContext,
         proposalId: proposal.id,
