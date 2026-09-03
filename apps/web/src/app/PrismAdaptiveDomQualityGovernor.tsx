@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 
 import { PrismDomAdaptiveQualityController } from "./prismDomAdaptiveQuality";
-import { publishPrismFrameRate } from "./prismFrameRate";
+import { PrismFrameGapSampler, prismSlowFrameBreakdown, publishPrismFrameRate, type PrismSlowFrame } from "./prismFrameRate";
 import { nudgePrismRenderThrottleRecovery } from "./replayAudioMasterCapture";
 
 /** Gaps beyond this are machine suspensions (sleep, debugger, tab thaw), not
@@ -22,6 +22,27 @@ export function PrismAdaptiveDomQualityGovernor(): null {
     let previousFrameTime = performance.now();
     let fpsWindowStartedAt = previousFrameTime;
     let fpsWindowFrameCount = 0;
+    const frameGapSampler = new PrismFrameGapSampler();
+    let visibleSinceMs = previousFrameTime;
+    const slowFrames: { atMs: number; frame: PrismSlowFrame }[] = [];
+    let slowFrameObserver: PerformanceObserver | null = null;
+    if (typeof PerformanceObserver !== "undefined" &&
+      (PerformanceObserver.supportedEntryTypes ?? []).includes("long-animation-frame")) {
+      try {
+        slowFrameObserver = new PerformanceObserver((list) => {
+          if (document.visibilityState !== "visible") return;
+          for (const entry of list.getEntries()) {
+            if (entry.startTime < visibleSinceMs || entry.duration > PRISM_FRAME_RATE_SUSPENSION_GAP_MS) continue;
+            slowFrames.push({ atMs: entry.startTime + entry.duration, frame: prismSlowFrameBreakdown(entry) });
+          }
+          slowFrames.splice(0, Math.max(0, slowFrames.length - 8));
+        });
+        slowFrameObserver.observe({ type: "long-animation-frame", buffered: false });
+      } catch {
+        slowFrameObserver?.disconnect();
+        slowFrameObserver = null;
+      }
+    }
     // Long-task accounting rides along with each published FPS window so a
     // degraded session records WHY frames are missing (main-thread busy time),
     // not just that they are. Sessions 09fc81db/6d6f1239 hit 1 FPS with no
@@ -97,6 +118,30 @@ export function PrismAdaptiveDomQualityGovernor(): null {
     window.addEventListener("keydown", noteUserInput, true);
     window.addEventListener("beforeinput", noteUserInput, true);
 
+    // rAF can stop entirely while hidden. Reset on the transition itself,
+    // otherwise a short background interval looks like a visible stall.
+    const resetVisibleClock = (): void => {
+      const nowMs = performance.now();
+      visibleSinceMs = nowMs;
+      controller.noteDiscontinuity(nowMs);
+      previousFrameTime = nowMs;
+      fpsWindowStartedAt = nowMs;
+      fpsWindowFrameCount = 0;
+      longTaskMsInWindow = 0;
+      loopLagMsInWindow = 0;
+      lastLagProbeAtMs = nowMs;
+      frameGapSampler.reset();
+      slowFrames.length = 0;
+      slowFrameObserver?.takeRecords();
+      longTaskObserver?.takeRecords();
+      earliestPendingInputAtMs = null;
+      if (inputPaintFrameId !== 0) {
+        window.cancelAnimationFrame(inputPaintFrameId);
+        inputPaintFrameId = 0;
+      }
+    };
+    document.addEventListener("visibilitychange", resetVisibleClock);
+
     const tick = (nowMs: number): void => {
       const deltaMs = Math.max(0, nowMs - previousFrameTime);
       const foreground = document.visibilityState === "visible";
@@ -114,8 +159,10 @@ export function PrismAdaptiveDomQualityGovernor(): null {
       // which also kept the FPS-gated load sheds from ever engaging.
       if (foreground && deltaMs > 0 && deltaMs <= PRISM_FRAME_RATE_SUSPENSION_GAP_MS) {
         fpsWindowFrameCount += 1;
+        frameGapSampler.record(nowMs, deltaMs);
         const elapsedMs = nowMs - fpsWindowStartedAt;
         if (elapsedMs >= 200) {
+          while (slowFrames[0] && slowFrames[0].atMs < nowMs - 5_000) slowFrames.shift();
           const windowFps = (fpsWindowFrameCount * 1_000) / elapsedMs;
           const busyMsPerSecond = longTaskObserver
             ? (longTaskMsInWindow * 1_000) / elapsedMs
@@ -124,6 +171,8 @@ export function PrismAdaptiveDomQualityGovernor(): null {
             windowFps,
             new Date().toISOString(),
             busyMsPerSecond,
+            frameGapSampler.snapshot(nowMs),
+            slowFrameObserver ? slowFrames.map(({ frame }) => frame) : undefined,
           );
           // Visible + starved frames + idle main thread = WebKit render
           // throttling that failed to lift (App Nap / occlusion). Audio is
@@ -141,6 +190,8 @@ export function PrismAdaptiveDomQualityGovernor(): null {
         fpsWindowFrameCount = 0;
         longTaskMsInWindow = 0;
         loopLagMsInWindow = 0;
+        frameGapSampler.reset();
+        slowFrames.length = 0;
       }
       frameId = window.requestAnimationFrame(tick);
     };
@@ -152,10 +203,12 @@ export function PrismAdaptiveDomQualityGovernor(): null {
         window.cancelAnimationFrame(inputPaintFrameId);
       }
       longTaskObserver?.disconnect();
+      slowFrameObserver?.disconnect();
       window.clearInterval(lagProbeId);
       window.removeEventListener("pointerdown", noteUserInput, true);
       window.removeEventListener("keydown", noteUserInput, true);
       window.removeEventListener("beforeinput", noteUserInput, true);
+      document.removeEventListener("visibilitychange", resetVisibleClock);
       delete qualityTarget.dataset.prismRuntimeQuality;
     };
   }, []);

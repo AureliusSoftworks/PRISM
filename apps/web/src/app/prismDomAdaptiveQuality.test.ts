@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  PRISM_DOM_BALANCED_FRAME_INTERVAL_MS,
+  PRISM_DOM_FRAME_FLOOR_FPS,
   PRISM_DOM_MINIMAL_FRAME_INTERVAL_MS,
   PRISM_DOM_RECOVERY_WINDOWS_PER_STEP,
   PRISM_DOM_SAMPLE_WARMUP_MS,
@@ -12,16 +14,43 @@ import {
 } from "./prismDomAdaptiveQuality.ts";
 
 describe("adaptive DOM rendering quality", () => {
-  it("recognizes sub-30 cadence and meaningful recovery headroom", () => {
-    const slow = prismDomFrameWindow(Array(12).fill(1_000 / 24));
-    assert.ok(slow.observedFps < 30);
-    assert.equal(slow.belowFloor, true);
-    assert.equal(slow.recoveryHeadroom, false);
+  it("targets 60 FPS instead of accepting sustained 30–55 FPS", () => {
+    assert.equal(PRISM_DOM_FRAME_FLOOR_FPS, 60);
+    for (const fps of [24, 30, 45, 50, 55]) {
+      const slow = prismDomFrameWindow(Array(12).fill(1_000 / fps));
+      assert.equal(slow.belowFloor, true, `${fps} FPS must shed`);
+      assert.equal(slow.recoveryHeadroom, false, `${fps} FPS must not recover`);
+    }
+    for (const fps of [59.94, 60, 90, 120]) {
+      const fast = prismDomFrameWindow(Array(12).fill(1_000 / fps));
+      assert.equal(fast.belowFloor, false, `${fps} FPS must not shed`);
+      assert.equal(fast.recoveryHeadroom, true, `${fps} FPS can recover`);
+    }
+  });
 
-    const fast = prismDomFrameWindow(Array(12).fill(1_000 / 60));
-    assert.ok(fast.observedFps >= 50);
-    assert.equal(fast.belowFloor, false);
-    assert.equal(fast.recoveryHeadroom, true);
+  it("tolerates normal 60 Hz jitter but catches a slow p90 behind a fast mean", () => {
+    const jitter = [16.5, 16.9, 16.6, 16.8, 16.4, 16.9];
+    const stable = prismDomFrameWindow([...jitter, ...jitter]);
+    assert.equal(stable.belowFloor, false);
+    assert.equal(stable.recoveryHeadroom, true);
+    const uneven = prismDomFrameWindow([...Array(10).fill(8), 24, 24]);
+    assert.ok(uneven.observedFps > 60);
+    assert.equal(uneven.belowFloor, true);
+    assert.equal(uneven.recoveryHeadroom, false);
+    const marginal = prismDomFrameWindow(Array(12).fill(17.3));
+    assert.equal(marginal.belowFloor, false);
+    assert.equal(marginal.recoveryHeadroom, false);
+  });
+
+  it("uses the same jitter-tolerant budget for frames and input-to-paint", () => {
+    const controller = new PrismDomAdaptiveQualityController(0);
+    assert.equal(controller.recordInteractionDelay(PRISM_DOM_BALANCED_FRAME_INTERVAL_MS).quality, "full");
+    assert.equal(controller.recordFrame({ nowMs: 100, deltaMs: 18, foreground: true }).quality, "balanced");
+    assert.equal(controller.recordInteractionDelay(PRISM_DOM_MINIMAL_FRAME_INTERVAL_MS).quality, "minimal");
+    const inputController = new PrismDomAdaptiveQualityController(0);
+    assert.equal(inputController.recordInteractionDelay(18).quality, "balanced");
+    const frameController = new PrismDomAdaptiveQualityController(0);
+    assert.equal(frameController.recordFrame({ nowMs: 100, deltaMs: PRISM_DOM_MINIMAL_FRAME_INTERVAL_MS, foreground: true }).quality, "minimal");
   });
 
   it("drops quality on the first over-budget frame and reaches minimal under sustained pressure", () => {
@@ -29,13 +58,14 @@ describe("adaptive DOM rendering quality", () => {
     let nowMs = PRISM_DOM_SAMPLE_WARMUP_MS;
     let finalQuality = controller.currentQuality();
     for (let index = 0; index < PRISM_DOM_SAMPLE_WINDOW_SIZE; index += 1) {
-      nowMs += 1_000 / 24;
+      nowMs += 1_000 / 55;
       const result = controller.recordFrame({
         nowMs,
-        deltaMs: 1_000 / 24,
+        deltaMs: 1_000 / 55,
         foreground: true,
       });
       finalQuality = result.quality;
+      if (index === 0) assert.equal(finalQuality, "balanced");
     }
     assert.equal(finalQuality, "minimal");
   });
@@ -91,5 +121,28 @@ describe("adaptive DOM rendering quality", () => {
       }
     }
     assert.equal(controller.currentQuality(), "balanced");
+  });
+
+  it("requires consecutive healthy windows, then recovers fully on a jittery 60 Hz display", () => {
+    const controller = new PrismDomAdaptiveQualityController(0);
+    controller.recordInteractionDelay(100);
+    let nowMs = PRISM_DOM_SAMPLE_WARMUP_MS + 1;
+    const recordWindow = (intervals: number[]) => {
+      for (const deltaMs of intervals) {
+        nowMs += deltaMs;
+        controller.recordFrame({ nowMs, deltaMs, foreground: true });
+      }
+    };
+    const healthy = Array.from({ length: PRISM_DOM_SAMPLE_WINDOW_SIZE }, (_, index) => index % 2 === 0 ? 16.5 : 16.9);
+    for (let i = 0; i < PRISM_DOM_RECOVERY_WINDOWS_PER_STEP - 1; i += 1) recordWindow(healthy);
+    assert.equal(controller.currentQuality(), "minimal");
+    // Within the shedding tolerance, but not enough headroom to recover.
+    recordWindow(Array(PRISM_DOM_SAMPLE_WINDOW_SIZE).fill(17.3));
+    for (let i = 0; i < PRISM_DOM_RECOVERY_WINDOWS_PER_STEP - 1; i += 1) recordWindow(healthy);
+    assert.equal(controller.currentQuality(), "minimal");
+    recordWindow(healthy);
+    assert.equal(controller.currentQuality(), "balanced");
+    for (let i = 0; i < PRISM_DOM_RECOVERY_WINDOWS_PER_STEP; i += 1) recordWindow(healthy);
+    assert.equal(controller.currentQuality(), "full");
   });
 });

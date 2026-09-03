@@ -1,9 +1,13 @@
-export const PRISM_DOM_FRAME_FLOOR_FPS = 30;
+export const PRISM_DOM_FRAME_FLOOR_FPS = 60;
 export const PRISM_DOM_SAMPLE_WINDOW_SIZE = 12;
 export const PRISM_DOM_SAMPLE_WARMUP_MS = 500;
 export const PRISM_DOM_SUSPENSION_DELTA_MS = 10_000;
-export const PRISM_DOM_BALANCED_FRAME_INTERVAL_MS = 1_000 / 30;
-export const PRISM_DOM_MINIMAL_FRAME_INTERVAL_MS = 50;
+const PRISM_DOM_FRAME_BUDGET_MS = 1_000 / PRISM_DOM_FRAME_FLOOR_FPS;
+// A nominal 60 Hz display (including 59.94 Hz) has timestamp jitter. Do not
+// shed effects for rounding noise or require a faster display to recover.
+export const PRISM_DOM_BALANCED_FRAME_INTERVAL_MS = PRISM_DOM_FRAME_BUDGET_MS + 1;
+export const PRISM_DOM_MINIMAL_FRAME_INTERVAL_MS = PRISM_DOM_FRAME_BUDGET_MS * 2;
+const PRISM_DOM_RECOVERY_MEAN_INTERVAL_MS = PRISM_DOM_FRAME_BUDGET_MS + 0.25;
 export const PRISM_DOM_RECOVERY_WINDOWS_PER_STEP = 20;
 
 export type PrismDomRuntimeQuality = "full" | "balanced" | "minimal";
@@ -57,6 +61,7 @@ export function prismDomFrameWindow(
   const totalMs = frameIntervalsMs.reduce((sum, value) => sum + value, 0);
   const observedFps =
     totalMs > 0 ? (frameIntervalsMs.length * 1_000) / totalMs : 0;
+  const meanFrameIntervalMs = totalMs / frameIntervalsMs.length;
   const p90FrameIntervalMs = percentile(
     [...frameIntervalsMs].sort((a, b) => a - b),
     0.9,
@@ -65,15 +70,18 @@ export function prismDomFrameWindow(
     observedFps,
     p90FrameIntervalMs,
     belowFloor:
-      observedFps < PRISM_DOM_FRAME_FLOOR_FPS ||
-      p90FrameIntervalMs > 1_000 / 25,
-    recoveryHeadroom: observedFps >= 50 && p90FrameIntervalMs <= 24,
+      meanFrameIntervalMs > PRISM_DOM_BALANCED_FRAME_INTERVAL_MS ||
+      p90FrameIntervalMs > PRISM_DOM_BALANCED_FRAME_INTERVAL_MS,
+    recoveryHeadroom:
+      observedFps > 0 &&
+      meanFrameIntervalMs <= PRISM_DOM_RECOVERY_MEAN_INTERVAL_MS &&
+      p90FrameIntervalMs <= PRISM_DOM_BALANCED_FRAME_INTERVAL_MS,
   };
 }
 
 /** Performance-first quality governor. Player graphics settings remain the
  * authored ceiling; this runtime floor only sheds optional presentation work
- * when a frame or interaction misses the 30 FPS budget. */
+ * when a frame or interaction misses the jitter-tolerant 60 FPS budget. */
 export class PrismDomAdaptiveQualityController {
   private ignoredUntilMs: number;
   private samples: number[] = [];
