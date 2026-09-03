@@ -2476,32 +2476,80 @@
   );
 }
 
-/* The Hall's compact Jarl and gallery bodies share one explicit screen-space
-   face correction. Keeping it on the rendered eye layer avoids authored
-   local-axis rotation changing the direction of the nudge. */
-.liveShell
-  [data-chat-mini-bot-avatar="true"]
-  [data-coffee-plate-emoji-part="eyes"] {
-  translate: 0 3px;
+/* Room/camera offsets must not separate the generated face from its Ink.
+   Both full contestants and both Jarl presentations use Studio registration.
+   The old eye translate ran inside a rotated face, so it moved sideways. */
+.hallCamera .courtBotPosition [data-debate-bot-avatar="true"]
+  [data-zen-live-bot-face-rig="true"],
+.hallCamera .courtBotPosition [data-chat-mini-bot-avatar="true"]
+  [data-zen-live-bot-face-rig="true"] {
+  transform: translate(-50%, -50%) scale(var(--zen-live-bot-face-scale, 1));
 }
 
-.flytingAudiencePortrait > [data-chat-mini-bot-avatar="true"] {
-  --chat-mini-bot-glyph-size: max(
-    10px,
-    calc(var(--chat-mini-bot-render-size) * 0.16)
-  ) !important;
+.hallCamera .courtBotPosition [data-chat-mini-bot-avatar="true"]
+  [data-zen-live-bot-face-rig="true"][data-avatar-direction-independent-screen="thinking"] {
+  /* Thinking marks stay readable when the complete mini screen turns. */
+  transform: translate(-50%, -50%) scale(var(--zen-live-bot-face-scale, 1))
+    scaleX(var(--chat-mini-bot-upper-screen-facing-scale-x, 1));
 }
 
-.hallCamera[data-camera-view="wide"]
-  .courtBotPosition[data-role="moderator"]
-  [data-debate-bot-avatar="true"] {
-  --debate-moderator-face-only-offset-y: clamp(12px, 1vw, 17px);
+.hallCamera .courtBotPosition [data-chat-mini-bot-avatar="true"],
+.flytingAudienceContainer .flytingAudiencePortrait > [data-chat-mini-bot-avatar="true"] {
+  --chat-mini-bot-eye-nudge-y: 0px;
+  --chat-mini-bot-mouth-nudge-y: 0px;
 }
 
-.hallCamera[data-camera-view="moderator"]
-  .courtBotPosition[data-role="moderator"]
-  [data-debate-bot-avatar="true"] {
-  --debate-moderator-face-only-offset-y: clamp(4px, 0.42vw, 7px);
+/* The face and Ink are authored on a 128px plane. Legacy pixel baselines
+   otherwise become proportionally huge on the distant Jarl and drift from
+   Ink on full contestants. Convert those same 2/10/18px baselines to the
+   containing screen's units, retaining every authored offset and gaze pose.
+   The shared mini bezel's complete-screen optical registration stays intact. */
+.hallCamera .courtBotPosition [data-prism-mouth-sync-target="true"],
+.flytingAudienceContainer .flytingAudiencePortrait [data-prism-mouth-sync-target="true"] {
+  --coffee-plate-emoji-nudge-y: -1.5625cqw;
+}
+
+.hallCamera .courtBotPosition [data-coffee-plate-emoji-part="eyes"],
+.flytingAudienceContainer .flytingAudiencePortrait [data-coffee-plate-emoji-part="eyes"] {
+  --bot-face-eye-shift-x: calc(
+    (var(--zen-live-bot-eye-local-x, 0) * 7.8125cqw) +
+      var(--bot-face-eye-offset-x, 0em) +
+      var(--bot-face-optical-offset-x, 0em) + var(--bot-face-gaze-x, 0px)
+  );
+  --bot-face-eye-shift-y: calc(
+    (var(--zen-live-bot-eye-local-y, 0) * 14.0625cqw) +
+      var(--bot-face-eye-offset-y, 0em) +
+      var(--bot-face-mood-eye-shift-y, 0em) +
+      var(--bot-face-optical-offset-y, 0em) + var(--bot-face-gaze-y, 0px)
+  );
+}
+
+.courtBotPosition [data-debate-stage-compact="true"] {
+  container-type: inline-size;
+}
+
+.hallCamera .courtBotPosition [data-chat-mini-bot-avatar="true"] {
+  /* The mini is sized by the stage, not the shared room-size viewport clamp. */
+  --chat-mini-bot-render-size: 100cqw;
+  --chat-mini-bot-glyph-size: max(7px, 12cqw);
+}
+
+.flytingAudienceContainer .flytingAudiencePortrait > [data-chat-mini-bot-avatar="true"] {
+  --chat-mini-bot-render-size: 132cqw;
+  --chat-mini-bot-glyph-size: max(7px, 15.84cqw);
+  /* The mini already turns its complete face/Ink plane. Do not mirror it a
+     second time through the inherited Forum portrait transform. */
+  --bot-avatar-external-facing-scale-x: 1;
+  transform: translateX(-50%);
+}
+
+.courtIdentityPosition .flytingNameplate > strong {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+  line-height: 1.3;
 }
 
 .courtIdentityPosition {
@@ -2763,30 +2811,47 @@
 }
 
 .flytingAudienceMillingSlot {
-  position: relative;
-  z-index: var(--flyting-gallery-layer, 1);
+  position: absolute;
+  left: 0;
+  top: 0;
   display: grid;
   width: clamp(48px, 5.1vw, 76px);
   min-width: 0;
-  /* Audience avatars retain their authored mini scale. Reflow the expanded
-     gallery instead of shrinking a bot to make a side fit. */
-  flex: 0 0 clamp(48px, 5.1vw, 76px);
   align-items: end;
-  animation: flyting-gallery-milling var(--flyting-gallery-mill-duration, 5.4s)
-    ease-in-out var(--flyting-gallery-mill-delay, 0ms) infinite alternate;
-  margin-inline: var(--flyting-gallery-slot-margin, 0px);
   scale: var(--flyting-gallery-bot-scale, 1);
+  translate: -50% -100%;
   transform-origin: 50% 100%;
+  will-change: translate, transform;
+  /* All bodies share one stacking context; the motion controller sorts by Y. */
 }
 
-.flytingAudiencePortrait {
-  flex: 0 0 clamp(48px, 5.1vw, 76px);
+.flytingAudienceMillingSlot::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  left: 11%;
+  bottom: -2%;
+  width: 78%;
+  height: 17%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(14, 9, 7, 0.5), transparent 72%);
+  pointer-events: none;
+}
+
+/* Override Forum chatter hops: body motion and its grounded shadow have one
+   owner. Talking still animates the face, without floating chatter elements. */
+.flytingAudienceContainer .flytingAudienceMillingSlot > .flytingAudiencePortrait {
+  flex: none;
   width: 100%;
   margin-inline: 0;
   overflow: visible;
   border-radius: 0;
   background: transparent;
   contain: layout style;
+  container-type: inline-size;
+  animation: none;
+  transition: none;
+  will-change: transform;
 }
 
 .flytingAudiencePortrait > [data-debate-bot-avatar="true"],
@@ -2799,113 +2864,19 @@
   display: none;
 }
 
-.flytingAudienceLayer {
-  display: grid;
-  z-index: 2;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: clamp(3px, 0.45vw, 8px);
-  padding-inline: clamp(10px, 1.4vw, 26px);
-  isolation: isolate;
-}
-
-.flytingAudienceLayer[data-depth-row="rear"] {
-  z-index: 1;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  padding-inline: clamp(18px, 2.2vw, 40px);
-}
-
-/* Lift only the Flyting crowd onto the visible gallery floor. The taller
-   milling arc now has clear space above both perspective rows. */
-.flytingCourtGallery .flytingAudienceLayer[data-depth-row="front"] {
-  bottom: 16%;
-}
-
-.flytingCourtGallery .flytingAudienceLayer[data-depth-row="rear"] {
-  bottom: 34%;
-}
-
-.flytingAudienceLayer[data-depth-row="rear"] .flytingAudienceMillingSlot {
-  width: clamp(42px, 4.6vw, 68px);
-  flex: 0 0 clamp(42px, 4.6vw, 68px);
-}
-
-.flytingAudienceCluster {
-  display: flex;
-  min-width: 0;
-  height: 100%;
-  align-items: flex-end;
-  justify-content: center;
-  gap: clamp(1px, 0.18vw, 3px);
-  flex-wrap: wrap;
-  align-content: flex-end;
-}
-
-.flytingAudienceCluster[data-flyting-leaning="neutral"] {
-  justify-content: space-evenly;
-}
-
-.flytingAudienceCluster[data-flyting-leaning="for"] {
-  justify-content: flex-start;
-}
-
-.flytingAudienceCluster[data-flyting-leaning="against"] {
-  justify-content: flex-end;
-}
-
-@keyframes flyting-gallery-milling {
-  0% {
-    transform: translate(
-      var(--flyting-gallery-offset-x, 0%),
-      var(--flyting-gallery-offset-y, 0%)
-    );
-  }
-
-  46% {
-    transform: translate(
-      calc(
-        var(--flyting-gallery-offset-x, 0%) + var(--flyting-gallery-drift-x, 0%)
-      ),
-      calc(
-        var(--flyting-gallery-offset-y, 0%) - var(--flyting-gallery-drift-y, 0%)
-      )
-    );
-  }
-
-  100% {
-    transform: translate(
-      calc(
-        var(--flyting-gallery-offset-x, 0%) - var(--flyting-gallery-drift-x, 0%)
-      ),
-      calc(
-        var(--flyting-gallery-offset-y, 0%) + var(--flyting-gallery-drift-y, 0%)
-      )
-    );
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .flytingAudienceMillingSlot {
-    animation: none;
-    transform: translate(
-      var(--flyting-gallery-offset-x, 0%),
-      var(--flyting-gallery-offset-y, 0%)
-    );
-  }
-}
-
-.flytingAudiencePortrait[data-flyting-leaning="for"],
-.flytingAudiencePortrait[data-flyting-leaning="against"] {
-  filter: brightness(1.08)
-    drop-shadow(
-      0 0 7px color-mix(in srgb, var(--flyting-bot-color) 44%, transparent)
-    );
-}
-
-.flytingAudiencePortrait[data-flyting-guard="true"] {
-  filter: brightness(1.16)
-    drop-shadow(
-      0 0 9px color-mix(in srgb, var(--flyting-bot-color) 58%, transparent)
-    );
+/* Gallery-only no-glow contract, including nested chassis/Ink/helmet layers
+   and their pseudos. Keep colors, masks, face motion and the floor shadow;
+   no applet-wide or stage-wide material switch is involved. */
+.flytingAudienceContainer .flytingAudiencePortrait,
+.flytingAudienceContainer .flytingAudiencePortrait *,
+.flytingAudienceContainer .flytingAudiencePortrait::before,
+.flytingAudienceContainer .flytingAudiencePortrait::after,
+.flytingAudienceContainer .flytingAudiencePortrait *::before,
+.flytingAudienceContainer .flytingAudiencePortrait *::after {
+  filter: none !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  backdrop-filter: none !important;
 }
 
 .jarlGuardMark {
@@ -2963,27 +2934,6 @@
   transform-origin: 50% 50%;
   scale: var(--flyting-align-scale, 1);
   rotate: var(--flyting-align-rotation, 0deg);
-}
-
-.flytingAudienceMillingSlot:has(.flytingAudiencePortrait[data-talking="true"]) {
-  z-index: 18;
-}
-
-.courtWorkspace .flytingAudiencePortrait .flytingAudienceChatterChip {
-  z-index: 14;
-  top: -52%;
-}
-
-.courtWorkspace
-  .flytingAudiencePortrait[data-conversation-facing="right"]
-  .flytingAudienceChatterChip {
-  right: -12%;
-}
-
-.courtWorkspace
-  .flytingAudiencePortrait[data-conversation-facing="left"]
-  .flytingAudienceChatterChip {
-  left: -12%;
 }
 
 .galleryVikingHelmet::after,

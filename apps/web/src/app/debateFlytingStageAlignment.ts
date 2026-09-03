@@ -1,5 +1,28 @@
 export const DEBATE_FLYTING_STAGE_ALIGNMENT_VERSION = 1 as const;
 
+/** Forge epithets may already contain the name; never print it twice. */
+export function debateFlytingNameplate(name: string, epithet?: string | null): string {
+  const title = epithet?.trim();
+  const identity = name.trim();
+  if (!title) return identity;
+  const words = (value: string) => value.normalize("NFKC").toLowerCase().match(/[\p{L}\p{N}]+/gu)?.join(" ") ?? value;
+  const normalizedTitle = ` ${words(title)} `;
+  const normalizedName = ` ${words(identity)} `;
+  return !identity || normalizedTitle.includes(normalizedName)
+    ? title
+    : `${identity}, ${title}`;
+}
+
+/** Both camera renderers turn the complete face/Ink plane, never one feature. */
+export function debateFlytingStageFacing(
+  role: "for" | "against" | "moderator",
+  floorSide: "for" | "against" | null = null,
+): "left" | "right" {
+  return role === "against" || (role === "moderator" && floorSide === "for")
+    ? "left"
+    : "right";
+}
+
 export type DebateFlytingStageAlignmentView = "wide" | "moderator" | "gallery";
 
 export type DebateFlytingStageRehearsalView = Exclude<

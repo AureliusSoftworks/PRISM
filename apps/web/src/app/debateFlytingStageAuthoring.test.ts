@@ -71,18 +71,17 @@ describe("Flyting stage authoring", () => {
       /\.flytingAudienceMillingSlot\s*\{[\s\S]{0,700}scale:\s*var\(--flyting-gallery-bot-scale/u,
     );
     assert.match(flytingSource, /flytingGallerySizingStyle/u);
-    assert.match(flytingSource, /--flyting-gallery-slot-margin/u);
     assert.match(
       flytingSource,
       /DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS\.galleryBotScale/u,
     );
     assert.match(
-      flytingStyles,
-      /\.flytingCourtGallery \.flytingAudienceLayer\[data-depth-row="front"\]\s*\{\s*bottom:\s*16%/u,
+      flytingSource,
+      /maxVerticalRoam=\{props.galleryMaxVerticalRoam\}/u,
     );
     assert.match(
       flytingStyles,
-      /\.flytingCourtGallery \.flytingAudienceLayer\[data-depth-row="rear"\]\s*\{\s*bottom:\s*34%/u,
+      /\.flytingAudienceMillingSlot\s*\{[^}]*position:\s*absolute/u,
     );
     assert.match(flytingSource, /data-flyting-preview-vote-controls="true"/u);
     assert.match(flytingSource, /stageAlignmentGalleryControls/u);
@@ -125,35 +124,26 @@ describe("Flyting stage authoring", () => {
     );
   });
 
-  it("keeps rugs below a rear row that remains below the front row", () => {
+  it("keeps rugs below a single floor-space crowd stacking context", () => {
     assert.match(flytingStyles, /\.galleryRugGlyphs\s*\{[^}]*z-index:\s*0/u);
     assert.match(
       flytingStyles,
       /\.flytingAudienceContainer\s*\{[^}]*z-index:\s*3/u,
     );
-    assert.match(
-      flytingStyles,
-      /\.flytingAudienceLayer\s*\{[^}]*z-index:\s*2[^}]*isolation:\s*isolate/u,
-    );
-    assert.match(
-      flytingStyles,
-      /\.flytingAudienceLayer\[data-depth-row="rear"\]\s*\{[^}]*z-index:\s*1/u,
-    );
+    assert.doesNotMatch(flytingStyles, /\.flytingAudienceLayer/u);
+    assert.doesNotMatch(flytingStyles, /flytingAudienceMillingSlot:has/u);
   });
 
-  it("gives each allegiance an equal dense cluster that can hold the full gallery", () => {
+  it("lets the floor controller place every body without flex rows or looping slot motion", () => {
     assert.match(
-      flytingStyles,
-      /\.flytingAudienceLayer\s*\{[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/u,
+      flytingSource,
+      /members=\{hallAudienceSeats\}/u,
     );
     assert.match(
       flytingStyles,
-      /\.flytingAudienceCluster\s*\{[^}]*gap:\s*clamp\(1px, 0\.18vw, 3px\)/u,
+      /will-change:\s*translate, transform/u,
     );
-    assert.match(
-      flytingStyles,
-      /margin-inline:\s*var\(--flyting-gallery-slot-margin/u,
-    );
+    assert.doesNotMatch(flytingStyles, /flyting-gallery-milling|\.flytingAudienceCluster/u);
   });
 
   it("keeps large rug glyphs softer in Dark Mode without fading Light Mode ink", () => {
@@ -411,29 +401,56 @@ describe("Flyting stage authoring", () => {
     );
   });
 
-  it("aligns Flyting mini eyes and enlarges gallery buckle glyphs", () => {
+  it("keeps camera face and Ink registration canonical instead of nudging rotated eyes", () => {
     assert.match(
       flytingStyles,
-      /\.liveShell[\s\S]{0,160}\[data-chat-mini-bot-avatar="true"\][\s\S]{0,120}\[data-coffee-plate-emoji-part="eyes"\][\s\S]{0,80}translate:\s*0 3px/u,
+      /\.hallCamera \.courtBotPosition \[data-debate-bot-avatar="true"\][\s\S]{0,280}transform:\s*translate\(-50%, -50%\) scale\(var\(--zen-live-bot-face-scale, 1\)\)/u,
     );
+    assert.doesNotMatch(flytingStyles, /debate-moderator-face-only-offset-y|translate:\s*0 3px/u);
+    assert.match(flytingStyles, /\[data-avatar-direction-independent-screen="thinking"\][\s\S]{0,260}scaleX\(var\(--chat-mini-bot-upper-screen-facing-scale-x, 1\)\)/u);
+    assert.match(flytingStyles, /--chat-mini-bot-eye-nudge-y:\s*0px/u);
+    assert.match(flytingStyles, /--chat-mini-bot-mouth-nudge-y:\s*0px/u);
+    // Preserve the 128px authoring baseline, not fixed offsets at every size.
+    for (const [pixels, cqw] of [[-2, -1.5625], [10, 7.8125], [18, 14.0625]]) {
+      assert.equal(cqw! * 128 / 100, pixels);
+      assert.ok(flytingStyles.includes(`${cqw}cqw`));
+    }
+    assert.match(flytingStyles, /--bot-face-eye-shift-x:[\s\S]{0,240}var\(--bot-face-eye-offset-x, 0em\)[\s\S]{0,120}var\(--bot-face-gaze-x, 0px\)/u);
+    assert.doesNotMatch(flytingStyles, /--chat-mini-bot-upper-screen-nudge-y/u);
     assert.match(
       flytingStyles,
-      /\.flytingAudiencePortrait > \[data-chat-mini-bot-avatar="true"\][\s\S]{0,180}--chat-mini-bot-glyph-size:\s*max\(\s*10px,\s*calc\(var\(--chat-mini-bot-render-size\) \* 0\.16\)\s*\) !important/u,
+      /--chat-mini-bot-render-size:\s*100cqw;[\s\S]{0,80}--chat-mini-bot-glyph-size:\s*max\(7px, 12cqw\)/u,
     );
+    assert.match(flytingStyles, /--chat-mini-bot-render-size:\s*132cqw/u);
+    assert.match(flytingStyles, /--bot-avatar-external-facing-scale-x:\s*1;\s*transform:\s*translateX\(-50%\)/u);
+    assert.match(flytingSource, /facing: facing \?\? \(role === "audience" \? undefined : debateFlytingStageFacing\(role\)\)/u);
+    assert.match(flytingSource, /facing: options.facing \?\? \(role === "audience" \? undefined : debateFlytingStageFacing\(role, state.floorSideId\)\)/u);
   });
 
-  it("enlarges and reflows the gallery without shrinking authored avatars", () => {
+  it("shows complete stage titles and removes all gallery chatter and glow without touching stage materials", () => {
+    assert.match(flytingSource, /debateFlytingNameplate\(bot.name, flyter\?\.epithet\)/u);
+    assert.equal([...flytingSource.matchAll(/styles\.flytingNameplate/gu)].length, 2);
+    assert.match(flytingStyles, /\.courtIdentityPosition \.flytingNameplate > strong\s*\{[^}]*overflow:\s*visible;[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere/u);
+    assert.doesNotMatch(flytingSource, /debateAudienceChatterChip|flytingAudienceChatterChip/u);
+    assert.doesNotMatch(flytingStyles, /flytingAudienceChatterChip/u);
+    assert.match(flytingStyles, /\.flytingAudienceContainer \.flytingAudiencePortrait \*::after\s*\{[^}]*filter:\s*none !important;[^}]*box-shadow:\s*none !important;[^}]*text-shadow:\s*none !important/u);
+    assert.match(flytingStyles, /\.courtBotPosition\[data-role="for"\] \[data-debate-bot-avatar="true"\]\s*\{[^}]*drop-shadow/u);
+    assert.match(flytingSource, /foleyMouthShape: talking/u);
+    assert.match(flytingSource, /data-flyting-hall-asset="mini-pixel-crown"/u);
+  });
+
+  it("preserves the gallery height and authored avatar size with grounded movement", () => {
     assert.match(
       flytingStyles,
       /\.flytingCourtGallery\s*\{[\s\S]{0,620}height:\s*clamp\(188px, 14vw, 244px\)/u,
     );
     assert.match(
       flytingStyles,
-      /\.flytingAudienceMillingSlot\s*\{[\s\S]{0,420}flex:\s*0 0 clamp\(48px, 5\.1vw, 76px\)/u,
+      /\.flytingAudienceMillingSlot\s*\{[\s\S]{0,420}width:\s*clamp\(48px, 5\.1vw, 76px\)/u,
     );
     assert.match(
       flytingStyles,
-      /\.flytingAudienceCluster\s*\{[\s\S]{0,420}flex-wrap:\s*wrap/u,
+      /\.flytingAudienceMillingSlot::before\s*\{[^}]*radial-gradient/u,
     );
     assert.doesNotMatch(
       flytingStyles,

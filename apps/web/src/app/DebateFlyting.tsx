@@ -66,6 +66,8 @@ import {
   DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS,
   DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS,
   copyDebateFlytingStageAlignment,
+  debateFlytingNameplate,
+  debateFlytingStageFacing,
   debateFlytingStageRehearsalItems,
   debateFlytingStageRehearsalViewForItem,
   formatDebateFlytingStageAlignmentClipboard,
@@ -86,8 +88,6 @@ import {
   DEBATE_FLYTING_GALLERY_AUTHORING_MAX_VERTICAL_ROAM_PERCENT,
   DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT,
   debateAudienceConversationFacing,
-  debateFlytingAudienceMillingPlan,
-  debateAudienceSeatLayout,
   debateFlytingHallNpcBots,
 } from "./debateAudience";
 import { prismDeveloperAuthoringEnabled } from "./prismDevGating";
@@ -505,10 +505,8 @@ function flytingAlignmentStyle(
 
 function flytingGallerySizingStyle(scalePercent: number): CSSProperties {
   const scale = Math.max(60, Math.min(160, scalePercent)) / 100;
-  const inlineCompression = Math.max(0, (1 - scale) * 24);
   return {
     "--flyting-gallery-bot-scale": scale,
-    "--flyting-gallery-slot-margin": `${-Math.round(inlineCompression * 100) / 100}px`,
   } as CSSProperties;
 }
 
@@ -654,26 +652,6 @@ function flytingPreviewGalleryVoteCounts(votes: Record<DebateSideId, number>): {
   };
 }
 
-function flytingPreviewGalleryVerticalMotion(
-  offsetYPercent: number,
-  driftYPercent: number,
-  maximumPercent: number,
-): { offsetYPercent: number; driftYPercent: number } {
-  const maximum = Math.max(
-    0,
-    Math.min(
-      DEBATE_FLYTING_GALLERY_AUTHORING_MAX_VERTICAL_ROAM_PERCENT,
-      maximumPercent,
-    ),
-  );
-  const scale =
-    maximum / DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT;
-  return {
-    offsetYPercent: Math.round(offsetYPercent * scale * 10) / 10,
-    driftYPercent: Math.round(driftYPercent * scale * 10) / 10,
-  };
-}
-
 function FlytingSetupStageAlignmentPreview(props: {
   againstBot: FlytingBotSummary | undefined;
   alignment: DebateFlytingStageAlignmentV1;
@@ -750,24 +728,6 @@ function FlytingSetupStageAlignmentPreview(props: {
       debateFlytingHallNpcBots(
         "flyting-stage-authoring-preview",
         DEBATE_FLYTING_AUDIENCE_COUNT + DEBATE_FLYTING_JARL_GUARD_COUNT,
-      ),
-    [],
-  );
-  const previewHallMilling = useMemo(
-    () =>
-      Array.from(
-        {
-          length:
-            DEBATE_FLYTING_AUDIENCE_COUNT + DEBATE_FLYTING_JARL_GUARD_COUNT,
-        },
-        (_, index) =>
-          debateFlytingAudienceMillingPlan(
-            `flyting-stage-authoring-preview:hall-seat-${index}`,
-            debateAudienceSeatLayout(
-              index,
-              DEBATE_FLYTING_AUDIENCE_COUNT + DEBATE_FLYTING_JARL_GUARD_COUNT,
-            ).depthRow,
-          ),
       ),
     [],
   );
@@ -889,7 +849,7 @@ function FlytingSetupStageAlignmentPreview(props: {
       foleyMouthShape: null,
       listenerReaction: null,
       blinkEnabled: false,
-      facing,
+      facing: facing ?? (role === "audience" ? undefined : debateFlytingStageFacing(role)),
       speechInkVisible: false,
     }) ??
     props.renderBotGlyph(bot.glyph, {
@@ -950,117 +910,75 @@ function FlytingSetupStageAlignmentPreview(props: {
       <FlytingGalleryMotion
         className={styles.flytingAudienceContainer}
         data-flyting-gallery-container="true"
-        layoutKey={previewHallSeats
-          .map((seat) => `${seat.id}:${seat.leaning}`)
-          .join("|")}
+        members={previewHallSeats}
+        botScale={props.galleryBotScale}
+        maxVerticalRoam={props.galleryMaxVerticalRoam}
         style={flytingAlignmentStyle(
           props.alignment.placements.galleryBotsContainer,
         )}
         aria-hidden="true"
         {...alignmentHandleProps("galleryBotsContainer")}
       >
-        {(["rear", "front"] as const).map((depthRow) => (
-          <span
-            className={`${studioStyles.debateAudienceLayer} ${styles.flytingAudienceLayer}`}
-            data-depth-row={depthRow}
-            key={depthRow}
-            aria-hidden="true"
-          >
-            {(["for", "neutral", "against"] as const).map((leaning) => {
-              const clusterSeats = previewHallSeats.filter(
-                (seat) =>
-                  seat.leaning === leaning &&
-                  debateAudienceSeatLayout(seat.index, previewHallSeats.length)
-                    .depthRow === depthRow,
-              );
-              return (
+        {previewHallSeats.map((seat) => {
+          const facing = debateAudienceConversationFacing(
+            seat.index,
+            previewHallSeats.length,
+          );
+          const seatColor =
+            seat.leaning === "for"
+              ? forColor
+              : seat.leaning === "against"
+                ? againstColor
+                : hostColor;
+          return (
+            <span
+              className={styles.flytingAudienceMillingSlot}
+              key={seat.id}
+              data-flyting-gallery-seat={seat.id}
+            >
+              <span
+                className={`${studioStyles.debateAudienceBotPortrait} ${styles.flytingAudiencePortrait}`}
+                data-flyting-gallery-portrait="true"
+                data-conversation-facing={facing}
+                data-gallery-arrived="true"
+                data-flyting-leaning={seat.leaning}
+                data-flyting-guard={seat.guard ? "true" : undefined}
+                style={
+                  {
+                    "--flyting-bot-color": seatColor,
+                    "--debate-audience-index": seat.index,
+                    "--debate-gallery-enter-x": "0%",
+                    "--debate-gallery-exit-x": "0%",
+                  } as CSSProperties
+                }
+              >
                 <span
-                  className={styles.flytingAudienceCluster}
-                  data-flyting-leaning={leaning}
-                  key={`${depthRow}:${leaning}`}
-                >
-                  {clusterSeats.map((seat, clusterIndex) => {
-                    const facing = debateAudienceConversationFacing(
-                      clusterIndex,
-                      clusterSeats.length,
-                    );
-                    const seatColor =
-                      seat.leaning === "for"
-                        ? forColor
-                        : seat.leaning === "against"
-                          ? againstColor
-                          : hostColor;
-                    const milling = previewHallMilling[seat.index]!;
-                    const verticalMotion = flytingPreviewGalleryVerticalMotion(
-                      milling.offsetYPercent,
-                      milling.driftYPercent,
-                      props.galleryMaxVerticalRoam,
-                    );
-                    return (
-                      <span
-                        className={styles.flytingAudienceMillingSlot}
-                        key={seat.id}
-                        data-flyting-gallery-seat={seat.id}
-                        style={
-                          {
-                            "--flyting-gallery-offset-x": `${milling.offsetXPercent}%`,
-                            "--flyting-gallery-offset-y": `${verticalMotion.offsetYPercent}%`,
-                            "--flyting-gallery-drift-x": `${milling.driftXPercent}%`,
-                            "--flyting-gallery-drift-y": `${verticalMotion.driftYPercent}%`,
-                            "--flyting-gallery-mill-duration": `${milling.durationMs}ms`,
-                            "--flyting-gallery-mill-delay": `${milling.delayMs}ms`,
-                            "--flyting-gallery-layer": milling.layer,
-                          } as CSSProperties
-                        }
-                      >
-                        <span
-                          className={`${studioStyles.debateAudienceBotPortrait} ${styles.flytingAudiencePortrait}`}
-                          data-conversation-facing={facing}
-                          data-gallery-arrived="true"
-                          data-flyting-leaning={seat.leaning}
-                          data-flyting-guard={seat.guard ? "true" : undefined}
-                          style={
-                            {
-                              "--flyting-bot-color": seatColor,
-                              "--debate-audience-depth": milling.depthScale,
-                              "--debate-audience-index": seat.index,
-                              "--debate-gallery-enter-x": "0%",
-                              "--debate-gallery-exit-x": "0%",
-                            } as CSSProperties
-                          }
-                        >
-                          <span
-                            className={styles.galleryVikingHelmet}
-                            data-flyting-hall-asset="mini-pixel-crown"
-                            aria-hidden="true"
-                            style={flytingAlignmentStyle(
-                              props.alignment.placements.galleryHelmets,
-                            )}
-                            {...alignmentHandleProps("galleryHelmets")}
-                          />
-                          {renderPreviewAvatar(
-                            seat.bot,
-                            "audience",
-                            "mini",
-                            facing,
-                          )}
-                          {seat.guard ? (
-                            <span
-                              className={styles.jarlGuardMark}
-                              aria-hidden="true"
-                            >
-                              III
-                            </span>
-                          ) : null}
-                        </span>
-                      </span>
-                    );
-                  })}
-                </span>
-              );
-            })}
-          </span>
-        ))}
+                  className={styles.galleryVikingHelmet}
+                  data-flyting-hall-asset="mini-pixel-crown"
+                  aria-hidden="true"
+                  style={flytingAlignmentStyle(
+                    props.alignment.placements.galleryHelmets,
+                  )}
+                  {...alignmentHandleProps("galleryHelmets")}
+                />
+                {renderPreviewAvatar(
+                  seat.bot,
+                  "audience",
+                  "mini",
+                  facing,
+                )}
+                {seat.guard ? (
+                  <span
+                    className={styles.jarlGuardMark}
+                    aria-hidden="true"
+                  >
+                    III
+                  </span>
+                ) : null}
+              </span>
+            </span>
+          );
+        })}
       </FlytingGalleryMotion>
     </section>
   );
@@ -1249,7 +1167,7 @@ function FlytingSetupStageAlignmentPreview(props: {
                     style={flytingAlignmentStyle(nameplatePlacement)}
                     {...alignmentHandleProps(nameplateItem)}
                   >
-                    <div className={studioStyles.botIdentityPlate}>
+                    <div className={`${studioStyles.botIdentityPlate} ${styles.flytingNameplate}`}>
                       <strong>{snapshot.name}</strong>
                       <small>{roleLabel}</small>
                     </div>
@@ -3307,6 +3225,130 @@ function resolutionLabel(value: string | null): string {
     : "Awaiting answer";
 }
 
+interface FlytingGalleryLiveSeat {
+  id: string;
+  bot: DebateBotSnapshotV1;
+  index: number;
+  leaning: DebateFlytingHallLeaningV1;
+  guard: boolean;
+}
+
+function FlytingGalleryLiveAmbience(props: {
+  againstColor: string;
+  containerHandleProps: React.HTMLAttributes<HTMLSpanElement>;
+  containerStyle: CSSProperties;
+  forColor: string;
+  galleryIsSubdued: boolean;
+  helmetHandleProps: React.HTMLAttributes<HTMLSpanElement>;
+  helmetStyle: CSSProperties;
+  hostColor: string;
+  members: readonly FlytingGalleryLiveSeat[];
+  renderAvatar: (
+    bot: DebateBotSnapshotV1,
+    options: {
+      facing: DebateBotAvatarState["facing"];
+      foleyMouthShape: DebateBotAvatarState["foleyMouthShape"];
+      listenerReaction: DebateBotAvatarState["listenerReaction"];
+    },
+  ) => ReactNode;
+}): React.JSX.Element {
+  // These cadence ticks intentionally repaint only the audience subtree. The
+  // live Hall's transcript, stage avatars, and controls stay outside this loop.
+  const [mouthPhase, setMouthPhase] = useState(0);
+  const [hopWave, setHopWave] = useState(0);
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setMouthPhase((current) => (current + 1) % 4);
+    }, 170);
+    return () => window.clearInterval(intervalId);
+  }, []);
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setHopWave((current) => (current + 1) % 198);
+    }, 1_450);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  return (
+    <FlytingGalleryMotion
+      className={styles.flytingAudienceContainer}
+      data-flyting-gallery-container="true"
+      members={props.members}
+      botScale={DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS.galleryBotScale}
+      maxVerticalRoam={DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT}
+      style={props.containerStyle}
+      aria-hidden="true"
+      {...props.containerHandleProps}
+    >
+      {props.members.map((seat) => {
+        const talking = props.galleryIsSubdued
+          ? (seat.index + mouthPhase) % 9 === 0
+          : (seat.index + mouthPhase) % 4 !== 0;
+        const hopping = (seat.index * 5 + hopWave) % 13 === 0;
+        const facing = debateAudienceConversationFacing(
+          seat.index,
+          props.members.length,
+        );
+        const seatColor =
+          seat.leaning === "for"
+            ? props.forColor
+            : seat.leaning === "against"
+              ? props.againstColor
+              : props.hostColor;
+        return (
+          <span
+            className={styles.flytingAudienceMillingSlot}
+            key={seat.id}
+            data-flyting-gallery-seat={seat.id}
+          >
+            <span
+              className={`${studioStyles.debateAudienceBotPortrait} ${styles.flytingAudiencePortrait}`}
+              data-flyting-gallery-portrait="true"
+              data-talking={talking ? "true" : undefined}
+              data-audience-bounce={hopping ? "true" : undefined}
+              data-conversation-facing={facing}
+              data-gallery-arrived="true"
+              data-flyting-leaning={seat.leaning}
+              data-flyting-guard={seat.guard ? "true" : undefined}
+              style={
+                {
+                  "--flyting-bot-color": seatColor,
+                  "--debate-audience-index": seat.index,
+                  "--debate-gallery-enter-x": "0%",
+                  "--debate-gallery-exit-x": "0%",
+                } as CSSProperties
+              }
+              title={seat.guard ? "Jarl guard" : "Hall spectator"}
+            >
+              <span
+                className={styles.galleryVikingHelmet}
+                data-flyting-hall-asset="mini-pixel-crown"
+                aria-hidden="true"
+                style={props.helmetStyle}
+                {...props.helmetHandleProps}
+              />
+              {props.renderAvatar(seat.bot, {
+                facing,
+                foleyMouthShape: talking
+                  ? (seat.index + mouthPhase) % 2 === 0
+                    ? "open-small"
+                    : "speech-closed"
+                  : null,
+                listenerReaction: hopping ? "divided" : "attentive",
+              })}
+              {seat.guard ? (
+                <span className={styles.jarlGuardMark} aria-hidden="true">
+                  III
+                </span>
+              ) : null}
+            </span>
+          </span>
+        );
+      })}
+    </FlytingGalleryMotion>
+  );
+}
+
 export function DebateFlytingLive(
   props: DebateFlytingLiveProps,
 ): React.JSX.Element {
@@ -3325,8 +3367,6 @@ export function DebateFlytingLive(
     Set<string>
   >(() => new Set());
   const [fallbackMouthPhase, setFallbackMouthPhase] = useState(0);
-  const [galleryMouthPhase, setGalleryMouthPhase] = useState(0);
-  const [galleryHopWave, setGalleryHopWave] = useState(0);
   const [cameraMode, setCameraMode] = useState<FlytingCameraMode>("auto");
   const [stageAlignmentOpen, setStageAlignmentOpen] = useState(false);
   const [stageAlignmentView, setStageAlignmentView] =
@@ -3799,24 +3839,6 @@ export function DebateFlytingLive(
       ),
     [props.session.id],
   );
-  const hallAudienceMilling = useMemo(
-    () =>
-      Array.from(
-        {
-          length:
-            DEBATE_FLYTING_AUDIENCE_COUNT + DEBATE_FLYTING_JARL_GUARD_COUNT,
-        },
-        (_, index) =>
-          debateFlytingAudienceMillingPlan(
-            `${props.session.id}:hall-seat-${index}`,
-            debateAudienceSeatLayout(
-              index,
-              DEBATE_FLYTING_AUDIENCE_COUNT + DEBATE_FLYTING_JARL_GUARD_COUNT,
-            ).depthRow,
-          ),
-      ),
-    [props.session.id],
-  );
   const hallAudienceSeats = useMemo(
     () => [
       ...state.hallMembers.map((member, index) => ({
@@ -3855,18 +3877,6 @@ export function DebateFlytingLive(
       : hallPresentation.fireSeatId === "for"
         ? forColor
         : againstColor;
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      setGalleryMouthPhase((current) => (current + 1) % 4);
-    }, 170);
-    return () => window.clearInterval(intervalId);
-  }, []);
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      setGalleryHopWave((current) => (current + 1) % 198);
-    }, 1_450);
-    return () => window.clearInterval(intervalId);
-  }, []);
   const exchangeProgress =
     state.phase === "final_acclamation" ||
     state.phase === "verdict" ||
@@ -3935,7 +3945,7 @@ export function DebateFlytingLive(
         (options.talking ? fallbackMouthShape : null),
       listenerReaction: options.listenerReaction ?? null,
       blinkEnabled: true,
-      facing: options.facing,
+      facing: options.facing ?? (role === "audience" ? undefined : debateFlytingStageFacing(role, state.floorSideId)),
       speechInkVisible: options.talking === true,
     }) ??
     props.renderBotGlyph(bot.glyph, {
@@ -4186,12 +4196,12 @@ export function DebateFlytingLive(
                       style={flytingAlignmentStyle(nameplatePlacement)}
                       {...stageAlignmentHandleProps(nameplateItem)}
                     >
-                      <div className={studioStyles.botIdentityPlate}>
+                      <div className={`${studioStyles.botIdentityPlate} ${styles.flytingNameplate}`}>
                         <strong>
                           {role === "moderator" &&
                           props.session.playerRole === "judge"
                             ? "You hold the Hall"
-                            : `${bot.name}${flyter?.epithet ? `, ${flyter.epithet}` : ""}`}
+                            : debateFlytingNameplate(bot.name, flyter?.epithet)}
                         </strong>
                         <small>{roleLabel}</small>
                       </div>
@@ -4385,153 +4395,30 @@ export function DebateFlytingLive(
                 );
               })}
             </div>
-            <FlytingGalleryMotion
-              className={styles.flytingAudienceContainer}
-              data-flyting-gallery-container="true"
-              layoutKey={hallAudienceSeats
-                .map((seat) => `${seat.id}:${seat.leaning}`)
-                .join("|")}
-              style={flytingAlignmentStyle(
+            <FlytingGalleryLiveAmbience
+              members={hallAudienceSeats}
+              galleryIsSubdued={galleryIsSubdued}
+              forColor={forColor}
+              hostColor={hostColor}
+              againstColor={againstColor}
+              containerStyle={flytingAlignmentStyle(
                 stageAlignmentDraft.placements.galleryBotsContainer,
               )}
-              aria-hidden="true"
-              {...stageAlignmentHandleProps("galleryBotsContainer")}
-            >
-              {(["rear", "front"] as const).map((depthRow) => (
-                <span
-                  className={`${studioStyles.debateAudienceLayer} ${styles.flytingAudienceLayer}`}
-                  data-depth-row={depthRow}
-                  key={depthRow}
-                  aria-hidden="true"
-                >
-                  {(["for", "neutral", "against"] as const).map((leaning) => {
-                    const clusterSeats = hallAudienceSeats.filter(
-                      (seat) =>
-                        seat.leaning === leaning &&
-                        debateAudienceSeatLayout(
-                          seat.index,
-                          hallAudienceSeats.length,
-                        ).depthRow === depthRow,
-                    );
-                    return (
-                      <span
-                        className={styles.flytingAudienceCluster}
-                        data-flyting-leaning={leaning}
-                        key={`${depthRow}:${leaning}`}
-                      >
-                        {clusterSeats.map((seat, clusterIndex) => {
-                          const talking = galleryIsSubdued
-                            ? (seat.index + galleryMouthPhase) % 9 === 0
-                            : (seat.index + galleryMouthPhase) % 4 !== 0;
-                          const hopping =
-                            (seat.index * 5 + galleryHopWave) % 13 === 0;
-                          const facing = debateAudienceConversationFacing(
-                            clusterIndex,
-                            clusterSeats.length,
-                          );
-                          const seatColor =
-                            seat.leaning === "for"
-                              ? forColor
-                              : seat.leaning === "against"
-                                ? againstColor
-                                : hostColor;
-                          const milling = hallAudienceMilling[seat.index]!;
-                          return (
-                            <span
-                              className={styles.flytingAudienceMillingSlot}
-                              key={seat.id}
-                              data-flyting-gallery-seat={seat.id}
-                              style={
-                                {
-                                  "--flyting-gallery-offset-x": `${milling.offsetXPercent}%`,
-                                  "--flyting-gallery-offset-y": `${milling.offsetYPercent}%`,
-                                  "--flyting-gallery-drift-x": `${milling.driftXPercent}%`,
-                                  "--flyting-gallery-drift-y": `${milling.driftYPercent}%`,
-                                  "--flyting-gallery-mill-duration": `${milling.durationMs}ms`,
-                                  "--flyting-gallery-mill-delay": `${milling.delayMs}ms`,
-                                  "--flyting-gallery-layer": milling.layer,
-                                } as CSSProperties
-                              }
-                            >
-                              <span
-                                className={`${studioStyles.debateAudienceBotPortrait} ${styles.flytingAudiencePortrait}`}
-                                data-talking={talking ? "true" : undefined}
-                                data-audience-bounce={
-                                  hopping ? "true" : undefined
-                                }
-                                data-conversation-facing={facing}
-                                data-gallery-arrived="true"
-                                data-flyting-leaning={seat.leaning}
-                                data-flyting-guard={
-                                  seat.guard ? "true" : undefined
-                                }
-                                style={
-                                  {
-                                    "--flyting-bot-color": seatColor,
-                                    "--debate-audience-depth":
-                                      milling.depthScale,
-                                    "--debate-audience-index": seat.index,
-                                    "--debate-gallery-enter-x": "0%",
-                                    "--debate-gallery-exit-x": "0%",
-                                  } as CSSProperties
-                                }
-                                title={
-                                  seat.guard ? "Jarl guard" : "Hall spectator"
-                                }
-                              >
-                                <span
-                                  className={styles.galleryVikingHelmet}
-                                  data-flyting-hall-asset="mini-pixel-crown"
-                                  aria-hidden="true"
-                                  style={flytingAlignmentStyle(
-                                    stageAlignmentDraft.placements
-                                      .galleryHelmets,
-                                  )}
-                                  {...stageAlignmentHandleProps(
-                                    "galleryHelmets",
-                                  )}
-                                />
-                                {renderHallAvatar(seat.bot, "audience", {
-                                  presentation: "mini",
-                                  talking: false,
-                                  foleyMouthShape: talking
-                                    ? (seat.index + galleryMouthPhase) % 2 === 0
-                                      ? "open-small"
-                                      : "speech-closed"
-                                    : null,
-                                  facing,
-                                  listenerReaction: hopping
-                                    ? "divided"
-                                    : "attentive",
-                                })}
-                                {seat.guard ? (
-                                  <span
-                                    className={styles.jarlGuardMark}
-                                    aria-hidden="true"
-                                  >
-                                    III
-                                  </span>
-                                ) : null}
-                                {talking ? (
-                                  <span
-                                    className={`${studioStyles.debateAudienceChatterChip} ${
-                                      styles.flytingAudienceChatterChip
-                                    }`}
-                                    aria-hidden="true"
-                                  >
-                                    ...
-                                  </span>
-                                ) : null}
-                              </span>
-                            </span>
-                          );
-                        })}
-                      </span>
-                    );
-                  })}
-                </span>
-              ))}
-            </FlytingGalleryMotion>
+              containerHandleProps={stageAlignmentHandleProps(
+                "galleryBotsContainer",
+              )}
+              helmetStyle={flytingAlignmentStyle(
+                stageAlignmentDraft.placements.galleryHelmets,
+              )}
+              helmetHandleProps={stageAlignmentHandleProps("galleryHelmets")}
+              renderAvatar={(bot, options) =>
+                renderHallAvatar(bot, "audience", {
+                  presentation: "mini",
+                  talking: false,
+                  ...options,
+                })
+              }
+            />
           </section>
         </div>
 

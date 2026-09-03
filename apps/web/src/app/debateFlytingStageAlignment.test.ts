@@ -5,6 +5,8 @@ import {
   DEFAULT_DEBATE_FLYTING_STAGE_REHEARSAL_CONTROLS,
   DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS,
   copyDebateFlytingStageAlignment,
+  debateFlytingNameplate,
+  debateFlytingStageFacing,
   debateFlytingStageRehearsalItems,
   formatDebateFlytingStageAlignmentClipboard,
   normalizeDebateFlytingStageAlignment,
@@ -12,6 +14,25 @@ import {
 } from "./debateFlytingStageAlignment.ts";
 
 describe("Flyting stage alignment", () => {
+  it("shows the complete mythical title without duplicating an included name", () => {
+    assert.equal(debateFlytingNameplate("Peter Griffin", "Peter Griffin, Ale-Thunder of the Endless Feast"), "Peter Griffin, Ale-Thunder of the Endless Feast");
+    assert.equal(debateFlytingNameplate("Marcus Aurelius", "The Stoic Shield of Marcus Aurelius"), "The Stoic Shield of Marcus Aurelius");
+    assert.equal(debateFlytingNameplate("Peter Griffin", " PETER GRIFFIN — Mead King "), "PETER GRIFFIN — Mead King");
+    assert.equal(debateFlytingNameplate("Marcus Aurelius", "Keeper of the Last Ember"), "Marcus Aurelius, Keeper of the Last Ember");
+    assert.equal(debateFlytingNameplate("Ann", "Banner Breaker"), "Ann, Banner Breaker");
+    assert.equal(debateFlytingNameplate("Brash Brian", "  "), "Brash Brian");
+    const longTitle = `Peter Griffin, ${"Lord of the Everlasting Feast ".repeat(12)}`.trim();
+    assert.equal(debateFlytingNameplate("Peter Griffin", longTitle), longTitle);
+  });
+
+  it("keeps full and mini stage facing independent of the camera", () => {
+    for (const floor of ["for", "against", null] as const) {
+      assert.equal(debateFlytingStageFacing("for", floor), "right");
+      assert.equal(debateFlytingStageFacing("against", floor), "left");
+      assert.equal(debateFlytingStageFacing("moderator", floor), floor === "for" ? "left" : "right");
+    }
+  });
+
   it("presents the two Flyting sides as Challenger and Defender", () => {
     for (const item of DEBATE_FLYTING_STAGE_ALIGNMENT_ITEMS) {
       if (item.id.includes("For")) assert.match(item.label, /^Challenger/u);
