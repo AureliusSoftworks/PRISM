@@ -1002,6 +1002,28 @@
 }
 @keyframes roomLoadingSpin { to { transform: rotate(360deg); } }
 
+/* Resume cover: the case's title card over the loading scene. Start fades the whole
+ * dialog out through the theme color, so the scene beneath crossfades in. */
+.arrivalCard { position: fixed; inset: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; border: 0; padding: 0; overflow: hidden; color: #f3eefc; background: #05070d; opacity: 1; transition: opacity 760ms ease; }
+.arrivalCard[open] { display: grid; place-items: center; }
+.arrivalCard::backdrop { background: #05070d; opacity: 1; transition: opacity 760ms ease; }
+.arrivalCard .titleCoverMedia { opacity: 0.55; }
+.arrivalCard[data-theme="light"] { color: #171326; background: #f6f3fc; }
+.arrivalCard[data-theme="light"]::backdrop { background: #f6f3fc; }
+.arrivalCard[data-theme="light"] .titleCoverMedia { opacity: 0.35; }
+.arrivalCard[data-leaving="true"], .arrivalCard[data-leaving="true"]::backdrop { opacity: 0; pointer-events: none; }
+.arrivalCardContent { position: relative; z-index: 1; display: grid; justify-items: center; width: min(38rem, calc(100vw - 2.5rem)); box-sizing: border-box; padding: clamp(1.4rem, 3vw, 2.5rem); border: 1px solid rgba(208, 194, 255, 0.2); border-radius: 1.2rem; text-align: center; background: rgba(5, 7, 15, 0.58); box-shadow: 0 2rem 6rem rgba(0, 0, 0, 0.48); backdrop-filter: blur(12px); animation: titleCardSettle 720ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.arrivalCard[data-theme="light"] .arrivalCardContent { border-color: rgba(103, 65, 170, 0.22); background: rgba(255, 255, 255, 0.72); }
+.arrivalCard h1 { margin: 0.2rem 0 0.6rem; font-size: clamp(1.9rem, 4.5vw, 3.4rem); letter-spacing: -0.03em; }
+.arrivalCardDescription { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; max-width: 34rem; margin: 0; color: #cfc8dd; font-size: 0.95rem; line-height: 1.55; }
+.arrivalCard[data-theme="light"] .arrivalCardDescription { color: #4a4460; }
+.arrivalCard[data-theme="light"] .titleMetadata span { border-color: rgba(103, 65, 170, 0.3); color: #3d3554; }
+.arrivalCardResume { margin: 0 0 1rem; color: var(--v2-accent, #a98cff); font-size: 0.78rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+@media (prefers-reduced-motion: reduce) {
+  .arrivalCard, .arrivalCard::backdrop { transition: none; }
+  .arrivalCardContent { animation: none; }
+}
+
 .investigation[data-opening-map-reveal="true"]::after {
   position: absolute;
   z-index: 30;

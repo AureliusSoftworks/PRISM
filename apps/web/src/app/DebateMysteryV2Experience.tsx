@@ -274,6 +274,69 @@ function WhodunnitRoomLoadingOverlay(props: {
   );
 }
 
+/** The case's cover shown while a resumed scene loads underneath. It replaces the
+ * bare spinner: the player reads the case, and Start crossfades the cover away
+ * through the theme's own color into the room or map they left. */
+function WhodunnitArrivalCard(props: {
+  theme: "light" | "dark";
+  coverUrl: string;
+  title: string;
+  fictionLabel: string;
+  chargeTitle: string | null;
+  description: string;
+  resumeLabel: string;
+  witnessCount: number;
+  ready: boolean;
+  leaving: boolean;
+  onStart: () => void;
+}): React.JSX.Element {
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+  const startRef = useRef<HTMLButtonElement | null>(null);
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    // Top layer, like the room loading overlay: it must cover portalled navigation too.
+    dialog.showModal();
+    return () => dialog.close();
+  }, []);
+  useEffect(() => {
+    if (props.ready && !props.leaving) startRef.current?.focus();
+  }, [props.ready, props.leaving]);
+  return (
+    <dialog
+      ref={dialogRef}
+      className={styles.arrivalCard}
+      data-theme={props.theme}
+      data-leaving={props.leaving ? "true" : undefined}
+      aria-labelledby="whodunnit-arrival-title"
+      aria-busy={!props.ready}
+      onCancel={(event) => event.preventDefault()}
+      style={{ "--mansion-exterior-image": `url("${props.coverUrl}")` } as CSSProperties}
+    >
+      <span className={styles.titleCoverMedia} aria-hidden="true" />
+      <div className={styles.arrivalCardContent}>
+        <div className={styles.titlePrism} aria-hidden="true">◇</div>
+        <p className={styles.eyebrow}>PRISM presents</p>
+        <h1 id="whodunnit-arrival-title">{props.title}</h1>
+        <p className={styles.arrivalCardDescription}>{props.description}</p>
+        <div className={styles.titleMetadata}>
+          {props.chargeTitle ? <span>{props.chargeTitle}</span> : null}
+          <span>{props.witnessCount} witnesses</span>
+          <span>{props.fictionLabel}</span>
+        </div>
+        <p className={styles.arrivalCardResume}>{props.resumeLabel}</p>
+        <button
+          ref={startRef}
+          type="button"
+          className={styles.primaryAction}
+          disabled={!props.ready || props.leaving}
+          onClick={props.onStart}
+        >{props.ready ? "Start" : "Preparing the scene…"}</button>
+      </div>
+    </dialog>
+  );
+}
+
 function WhodunnitChromeErrorNotice(props: {
   message: string;
   onDismiss: () => void;
@@ -1831,6 +1894,15 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     useState<MysteryMansionTravelPresentationV1 | null>(null);
   const [visitingExterior, setVisitingExterior] = useState(false);
   const [exteriorRoomReveal, setExteriorRoomReveal] = useState(false);
+  // Resuming a case shows its cover while the scene loads underneath; Start
+  // fades the cover away, and the fade's end unmounts it.
+  const [arrivalGate, setArrivalGate] = useState<"card" | "leaving" | "done">(() =>
+    state.playPhase === "investigation" || state.playPhase === "theory" ? "card" : "done");
+  useEffect(() => {
+    if (arrivalGate !== "leaving") return;
+    const timer = window.setTimeout(() => setArrivalGate("done"), reducedMotion ? 0 : 760);
+    return () => window.clearTimeout(timer);
+  }, [arrivalGate, reducedMotion]);
   const [exteriorThoughtKey, setExteriorThoughtKey] = useState(0);
   const [exteriorOpeningAcknowledged, setExteriorOpeningAcknowledged] = useState(false);
   const [travelProgress, setTravelProgress] = useState(0);
@@ -5880,9 +5952,40 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     );
   }
 
+  const arrivalCardVisible = arrivalGate !== "done" && !spectator &&
+    (state.playPhase === "investigation" || state.playPhase === "theory");
+  // The map needs no plate; a room is ready once its backdrop has painted.
+  const arrivalReady = state.roomView === "mansion" || !roomEntryLoading;
+  const arrivalCoverUrl = props.mansionExteriorUrl ??
+    sealedMysteryAssetObjectUrl(sealedAssetObjectUrls, "room", DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1, state.mansionExterior) ??
+    debateMysteryMansionExteriorFallbackV1(state.config.houseStyle, state.config.scaleClass, venueProfile);
+  const arrivalOpening = state.dialogueHistory.find((entry) => entry.nodeId === "briefing-opening")
+    ?.visibleText.replace(/\s+/gu, " ").trim() ?? "";
+  const arrivalDescription = arrivalOpening ||
+    (state.caseCharge ? `${state.caseCharge.title}. ${state.caseCharge.subject}` : state.fictionLabel);
+  const arrivalResumeLabel = state.playPhase === "theory"
+    ? "Resume at the Theory Board"
+    : state.roomView === "room" && currentRoom
+      ? `Resume in ${currentRoom.name}`
+      : "Resume on the venue map";
   return (
     <main className={styles.investigation} data-theme={props.theme} data-view={state.roomView} data-room-loading={roomEntryLoading ? "true" : undefined} aria-busy={roomEntryLoading} inert={roomEntryLoading ? true : undefined} data-opening-map-reveal={openingMapReveal ? "true" : undefined} data-exterior-room-reveal={exteriorRoomReveal ? "true" : undefined} data-tutorial-target="mystery-v2-investigation" onClickCapture={handleInvestigationDialogueClickCapture}>
-      {roomEntryLoading ? <WhodunnitRoomLoadingOverlay theme={props.theme} /> : null}
+      {roomEntryLoading && !arrivalCardVisible ? <WhodunnitRoomLoadingOverlay theme={props.theme} /> : null}
+      {arrivalCardVisible ? (
+        <WhodunnitArrivalCard
+          theme={props.theme}
+          coverUrl={arrivalCoverUrl}
+          title={state.caseTitle ?? "Whodunnit"}
+          fictionLabel={state.fictionLabel}
+          chargeTitle={state.caseCharge?.title ?? null}
+          description={arrivalDescription}
+          resumeLabel={arrivalResumeLabel}
+          witnessCount={state.suspects.length}
+          ready={arrivalReady}
+          leaving={arrivalGate === "leaving"}
+          onStart={() => setArrivalGate("leaving")}
+        />
+      ) : null}
       <SessionAtmosphereLayer
         sessionKey={`whodunnit-v2-mansion-ambience:${props.session.id}:${state.config.houseStyle.id}`}
         backgroundUrl={`/api/debates/${encodeURIComponent(props.session.id)}/mystery-mansion/atmosphere?repair=${audioAssetRefreshNonce}`}

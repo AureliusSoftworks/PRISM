@@ -24,7 +24,7 @@ import {
   type MysteryRoomLightEmitterV1,
 } from "./debateMysteryRoomCinematography";
 import styles from "./debateMysteryRoomCinematography.module.css";
-import { roomLightAltBlend, roomLightBlend } from "./roomLightPlacement";
+import { roomLightBlend } from "./roomLightPlacement";
 
 interface DebateMysteryRoomCinematographyLayerProps {
   room: {
@@ -78,8 +78,9 @@ function drawRadialAuthoredLight(
   width: number,
   height: number,
   intensity: number,
+  radiusScale = 1,
 ): void {
-  const radius = width * light.geometry.radius;
+  const radius = width * light.geometry.radius * radiusScale;
   context.save();
   context.globalAlpha = intensity;
   context.translate(width * light.geometry.x, height * light.geometry.y);
@@ -230,9 +231,10 @@ function drawAuthoredLight(
   elapsedMs: number,
   reducedMotion: boolean,
 ): void {
-  const intensity = mansionDynamicLightFrameV2(light, elapsedMs, reducedMotion).intensity;
+  const frame = mansionDynamicLightFrameV2(light, elapsedMs, reducedMotion);
+  const intensity = frame.intensity;
   if (light.kind === "fire" || light.kind === "omni") {
-    drawRadialAuthoredLight(context, light, width, height, intensity);
+    drawRadialAuthoredLight(context, light, width, height, intensity, frame.radiusScale);
   } else if (light.kind === "directional") {
     drawDirectionalAuthoredLight(context, light, width, height, intensity, reducedMotion ? 0 : elapsedMs);
   } else {
@@ -262,11 +264,7 @@ export function DebateMysteryRoomCinematographyLayer(
   const profile = lightSource === "authored" ? AUTHORED_LIGHT_PROFILE_V1 : templateProfile;
   const rootRef = useRef<HTMLDivElement>(null);
   const lightCanvasRef = useRef<HTMLCanvasElement>(null);
-  const lampCanvasRef = useRef<HTMLCanvasElement>(null);
   const grainCanvasRef = useRef<HTMLCanvasElement>(null);
-  // Electric lamps paint onto a sibling canvas with a second blend character and
-  // crossfade between the two; the canvas exists only when a lamp needs it.
-  const hasLamps = lightSource === "authored" && props.lights.some((light) => light.kind === "omni");
 
   useEffect(() => {
     if (!profile) return;
@@ -276,8 +274,6 @@ export function DebateMysteryRoomCinematographyLayer(
     const lightContext = lightCanvas?.getContext("2d");
     const grainContext = grainCanvas?.getContext("2d");
     if (!root || !lightCanvas || !grainCanvas || !lightContext || !grainContext) return;
-    const lampCanvas = hasLamps ? lampCanvasRef.current : null;
-    const lampContext = lampCanvas?.getContext("2d") ?? null;
 
     const roomStage = root.closest<HTMLElement>('[data-mystery-room-stage="true"]');
     let artStyle = props.artStyle ?? mysteryRoomCinematographyArtStyleV1(
@@ -307,16 +303,7 @@ export function DebateMysteryRoomCinematographyLayer(
           );
         }
       } else if (lightSource === "authored") {
-        lampContext?.clearRect(0, 0, width, height);
         for (const light of props.lights) {
-          if (light.kind === "omni" && lampContext) {
-            // Split the lamp's energy between the two blend characters by this
-            // frame's mix, so the hum shows as a shift in quality, not brightness.
-            const frame = mansionDynamicLightFrameV2(light, elapsedMs, props.reducedMotion);
-            drawRadialAuthoredLight(lightContext, light, width, height, frame.intensity * (1 - frame.blendMix));
-            drawRadialAuthoredLight(lampContext, light, width, height, frame.intensity * frame.blendMix);
-            continue;
-          }
           drawAuthoredLight(
             lightContext,
             light,
@@ -359,14 +346,6 @@ export function DebateMysteryRoomCinematographyLayer(
       }
       root.dataset.artStyle = artStyle;
       root.style.setProperty("--room-light-blend", roomLightBlend(props.blendMode, artStyle));
-      if (lampCanvas) {
-        lampCanvas.dataset.artStyle = artStyle;
-        lampCanvas.style.mixBlendMode = roomLightAltBlend(props.blendMode, artStyle);
-        if (lampCanvas.width !== width || lampCanvas.height !== height) {
-          lampCanvas.width = width;
-          lampCanvas.height = height;
-        }
-      }
       if (lightCanvas.width !== width || lightCanvas.height !== height) {
         lightCanvas.width = width;
         lightCanvas.height = height;
@@ -404,7 +383,7 @@ export function DebateMysteryRoomCinematographyLayer(
       stageObserver?.disconnect();
       window.cancelAnimationFrame(animationFrame);
     };
-  }, [lightSource, profile, props.lights, props.reducedMotion, props.room.id, props.artStyle, props.blendMode, props.sourceAspectRatio, hasLamps]);
+  }, [lightSource, profile, props.lights, props.reducedMotion, props.room.id, props.artStyle, props.blendMode, props.sourceAspectRatio]);
 
   if (!profile) return null;
   const style = {
@@ -415,35 +394,22 @@ export function DebateMysteryRoomCinematographyLayer(
   } as CSSProperties;
 
   return (
-    <>
-      <div
-        ref={rootRef}
-        className={styles.root}
-        data-art-style="illustrated"
-        data-blurred={props.blurred ? "true" : undefined}
-        data-cinematography-profile={profile.id}
-        data-light-source={lightSource}
-        data-viewport={props.viewport ? "true" : undefined}
-        data-light-motion={props.reducedMotion ? "frozen" : "live"}
-        style={style}
-        aria-hidden="true"
-      >
-        <div className={styles.grade} />
-        <canvas ref={lightCanvasRef} className={styles.lighting} />
-        <canvas ref={grainCanvasRef} className={styles.grain} />
-        <div className={styles.vignette} />
-      </div>
-      {hasLamps ? (
-        // A sibling, not a child: the root isolates its own stacking context, so a
-        // second blend against the room plate has to live beside it.
-        <canvas
-          ref={lampCanvasRef}
-          className={styles.lampLighting}
-          data-blurred={props.blurred ? "true" : undefined}
-          data-viewport={props.viewport ? "true" : undefined}
-          aria-hidden="true"
-        />
-      ) : null}
-    </>
+    <div
+      ref={rootRef}
+      className={styles.root}
+      data-art-style="illustrated"
+      data-blurred={props.blurred ? "true" : undefined}
+      data-cinematography-profile={profile.id}
+      data-light-source={lightSource}
+      data-viewport={props.viewport ? "true" : undefined}
+      data-light-motion={props.reducedMotion ? "frozen" : "live"}
+      style={style}
+      aria-hidden="true"
+    >
+      <div className={styles.grade} />
+      <canvas ref={lightCanvasRef} className={styles.lighting} />
+      <canvas ref={grainCanvasRef} className={styles.grain} />
+      <div className={styles.vignette} />
+    </div>
   );
 }

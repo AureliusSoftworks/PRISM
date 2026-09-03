@@ -2,7 +2,9 @@ import {
   mansionDirectionalGeometryIsPolygonV2,
   mansionDirectionalLightPolygonV2,
   mansionDynamicLightCenterV2,
-  mansionGodrayParallelPointsV2,
+  mansionGodrayAimV2,
+  mansionGodrayDescribeV2,
+  mansionGodrayFromApertureV2,
   type MansionDirectionalLightV2,
   type MansionDynamicLightV2,
   type MansionLightBlendModeV1,
@@ -48,41 +50,49 @@ export function directionalRoomLightPoints(light: MansionDirectionalLightV2, asp
   return mansionDirectionalLightPolygonV2(light, aspect);
 }
 
-/** The other corner on the same edge: window corners 0 and 1, floor corners 2 and 3. */
-function godrayCornerPartner(index: number, count: number): number {
-  const partner = index === 0 ? 1 : index === 1 ? 0 : index === 2 ? 3 : index === 3 ? 2 : -1;
-  return partner < count ? partner : -1;
+/** A godray as the editor places it: aperture, landing, spread, direction, length. */
+export function godrayRoomLightDescription(light: MansionDirectionalLightV2, aspect: number) {
+  return mansionGodrayDescribeV2(directionalRoomLightPoints(light, aspect));
 }
 
-/** Corners on one edge share an x so the window edge and its floor landing stay
- * upright; only their heights move independently. */
-function syncGodrayCornerColumns(points: LightPoint[], anchorIndex: number | null): LightPoint[] {
-  const next = points.map((point) => ({ ...point }));
-  for (const [first, second] of [[0, 1], [2, 3]] as const) {
-    if (!next[first] || !next[second]) continue;
-    const x = anchorIndex === first ? next[first].x
-      : anchorIndex === second ? next[second].x
-      : (next[first].x + next[second].x) / 2;
-    next[first] = { x, y: next[first].y };
-    next[second] = { x, y: next[second].y };
-  }
-  return next;
-}
-
-/** Dragging any corner converts a legacy rectangle into an editable polygon.
- * A horizontal drag carries the corner's edge partner along; vertical drags are free. */
-export function setDirectionalRoomLightPoint(
-  light: MansionDirectionalLightV2, index: number, point: LightPoint, aspect: number,
+/** Moves one aperture corner; direction, length, and spread carry over so the far edge follows. */
+export function setGodrayAperturePoint(
+  light: MansionDirectionalLightV2, index: 0 | 1, point: LightPoint, aspect: number,
 ): MansionDirectionalLightV2 {
-  const wasPolygon = mansionDirectionalGeometryIsPolygonV2(light.geometry);
-  const moved = directionalRoomLightPoints(light, aspect)
-    .map((old, position) => position === index ? { x: clamp(point.x), y: clamp(point.y) } : old);
-  const partner = godrayCornerPartner(index, moved.length);
-  // A converted rectangle squares up both edges at once; an existing polygon only follows the dragged corner.
-  const points = wasPolygon
-    ? moved.map((corner, position) => position === partner ? { x: moved[index]!.x, y: corner.y } : corner)
-    : syncGodrayCornerColumns(moved, index);
-  return { ...light, geometry: { points } };
+  const described = godrayRoomLightDescription(light, aspect);
+  const corner = { x: clamp(point.x), y: clamp(point.y) };
+  const aperture: [LightPoint, LightPoint] = index === 0 ? [corner, described.aperture[1]] : [described.aperture[0], corner];
+  const mid = { x: (aperture[0].x + aperture[1].x) / 2, y: (aperture[0].y + aperture[1].y) / 2 };
+  const landing = { x: mid.x + described.direction.x * described.length, y: mid.y + described.direction.y * described.length };
+  return { ...light, geometry: { points: mansionGodrayFromApertureV2(aperture, landing, described.spread) } };
+}
+
+/** Drags where the ray lands: angle and length in one gesture. */
+export function setGodrayLanding(light: MansionDirectionalLightV2, point: LightPoint, aspect: number): MansionDirectionalLightV2 {
+  const described = godrayRoomLightDescription(light, aspect);
+  return { ...light, geometry: { points: mansionGodrayFromApertureV2(described.aperture, { x: clamp(point.x), y: clamp(point.y) }, described.spread) } };
+}
+
+export function setGodraySpread(light: MansionDirectionalLightV2, spread: number, aspect: number): MansionDirectionalLightV2 {
+  const described = godrayRoomLightDescription(light, aspect);
+  return { ...light, geometry: { points: mansionGodrayFromApertureV2(described.aperture, described.landing, spread) } };
+}
+
+/** Re-aims a beam along a shared unit direction, keeping its own length and spread. */
+export function aimGodray(light: MansionDirectionalLightV2, direction: LightPoint, aspect: number): MansionDirectionalLightV2 {
+  return { ...light, geometry: { points: mansionGodrayAimV2(directionalRoomLightPoints(light, aspect), direction) } };
+}
+
+/** The room's sun: the mean direction of its beams that follow the shared sun, or null. */
+export function roomSunDirection(lights: readonly MansionDynamicLightV2[], aspect: number, exceptId?: string): LightPoint | null {
+  let x = 0; let y = 0; let count = 0;
+  for (const light of lights) {
+    if (light.kind !== "directional" || light.freeDirection || light.id === exceptId) continue;
+    const { direction } = godrayRoomLightDescription(light, aspect);
+    x += direction.x; y += direction.y; count += 1;
+  }
+  const length = Math.hypot(x, y);
+  return count > 0 && length > 1e-6 ? { x: x / length, y: y / length } : null;
 }
 
 /** Neutral warm white for a light whose room color could not be sampled. */
@@ -96,13 +106,12 @@ export function createRoomLight(
   if (kind === "fire") return { ...base, kind, animation: "flicker", geometry: { ...point, radius: 0.18, rotation: 0 } };
   if (kind === "omni") return { ...base, kind, geometry: { ...point, radius: 0.18 } };
   if (kind === "directional") {
-    // A window edge at the click with the ray falling toward the room's center.
+    // A window edge at the click with the ray falling toward the room's center and a little scatter.
     const top = { x: point.x, y: clamp(point.y - 0.1) };
     const bottom = { x: point.x, y: clamp(point.y + 0.06) };
     const ray = { x: point.x > 0.5 ? -0.26 : 0.26, y: 0.3 };
-    const points = mansionGodrayParallelPointsV2([
-      top, bottom, { x: bottom.x + ray.x, y: bottom.y + ray.y }, { x: top.x + ray.x, y: top.y + ray.y },
-    ]);
+    const mid = { x: point.x, y: (top.y + bottom.y) / 2 };
+    const points = mansionGodrayFromApertureV2([top, bottom], { x: mid.x + ray.x, y: mid.y + ray.y }, 0.12);
     return { ...base, kind, dust: true, geometry: { points } };
   }
   // A visible segment, including when placed at the edge; never a zero-length stroke.
@@ -112,14 +121,6 @@ export function createRoomLight(
 
 export function roomLightBlend(mode: MansionLightBlendModeV1 | undefined, artStyle: "mosaic" | "illustrated"): string {
   return !mode || mode === "auto" ? artStyle === "mosaic" ? "hard-light" : "overlay" : mode;
-}
-
-/** The second blend character an electric lamp crossfades toward: a lifting
- * wash when the room blend sculpts contrast, and a contrast blend when the room
- * blend already lifts. */
-export function roomLightAltBlend(mode: MansionLightBlendModeV1 | undefined, artStyle: "mosaic" | "illustrated"): string {
-  const base = roomLightBlend(mode, artStyle);
-  return base === "screen" || base === "plus-lighter" ? "overlay" : "screen";
 }
 
 /** A copy with its own identity and seed, offset so both markers stay grabbable.

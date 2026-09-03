@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
-import { MANSION_LAYOUT_V2_MAX_LIGHTS, MANSION_LIGHT_BLEND_MODES_V1, mansionGodrayEdgesV2, mansionGodrayParallelPointsV2, type MansionDynamicLightV2, type MansionLightBlendModeV1 } from "@localai/shared";
+import { MANSION_LAYOUT_V2_MAX_LIGHTS, MANSION_LIGHT_BLEND_MODES_V1, mansionGodrayEdgesV2, type MansionDynamicLightV2, type MansionLightBlendModeV1 } from "@localai/shared";
 import { DebateMysteryRoomCinematographyLayer } from "./debateMysteryRoomCinematographyLayer";
 import {
   ROOM_LIGHT_DEFAULT_COLOR,
@@ -13,7 +13,12 @@ import {
   roomLightCenter,
   roomLightPoint,
   sampleRoomLightColorFromImage,
-  setDirectionalRoomLightPoint,
+  aimGodray,
+  godrayRoomLightDescription,
+  roomSunDirection,
+  setGodrayAperturePoint,
+  setGodrayLanding,
+  setGodraySpread,
   type LightPoint,
 } from "./roomLightPlacement";
 import styles from "./roomLightEditor.module.css";
@@ -191,13 +196,16 @@ export default function RoomLightEditorDialog(props: Props): React.JSX.Element |
     const sampledColor = roomImageRef.current
       ? sampleRoomLightColorFromImage(roomImageRef.current, picker)
       : null;
-    const light = createRoomLight(
+    const created = createRoomLight(
       props.room.id,
       kind,
       picker,
       `light:${crypto.randomUUID()}`,
       sampledColor ?? ROOM_LIGHT_DEFAULT_COLOR,
     );
+    // A new beam inherits the room's sun so every window throws light the same way.
+    const sun = created.kind === "directional" ? roomSunDirection(lights, aspect) : null;
+    const light = sun && created.kind === "directional" ? aimGodray(created, sun, aspect) : created;
     record("place");
     setLights((current) => [...current, light]);
     setSelectedId(light.id);
@@ -229,7 +237,16 @@ export default function RoomLightEditorDialog(props: Props): React.JSX.Element |
       updateLight(light.id, () => ({ ...light, geometry: { ...light.geometry,
         points: light.geometry.points.map((old, index) => index === active.endpoint ? point : old) } }), null);
     } else if (light.kind === "directional" && active.endpoint !== undefined) {
-      updateLight(light.id, () => setDirectionalRoomLightPoint(light, active.endpoint!, point, aspect), null);
+      if (active.endpoint === 2) {
+        // Aiming one beam turns every beam that follows the room's sun with it.
+        const aimed = setGodrayLanding(light, point, aspect);
+        const sun = light.freeDirection ? null : godrayRoomLightDescription(aimed, aspect).direction;
+        setLights((current) => current.map((entry) => entry.id === light.id
+          ? aimed
+          : sun && entry.kind === "directional" && !entry.freeDirection ? aimGodray(entry, sun, aspect) : entry));
+      } else {
+        updateLight(light.id, () => setGodrayAperturePoint(light, active.endpoint === 0 ? 0 : 1, point, aspect), null);
+      }
     } else updateLight(light.id, () => moveRoomLight(light, { x: point.x - active.start.x, y: point.y - active.start.y }), null);
   };
   const run = async (operation: () => Promise<void> | void) => {
@@ -317,13 +334,22 @@ export default function RoomLightEditorDialog(props: Props): React.JSX.Element |
                   <line className={styles.godrayGuideFloor} x1={l0.x} y1={l0.y} x2={l1.x} y2={l1.y} vectorEffect="non-scaling-stroke" />
                 </svg>;
               })() : null}
-              {!preview && selected?.kind === "directional" ? directionalRoomLightPoints(selected, aspect).map((point, index) => (
-                <button key={`corner-${index}`} type="button" className={styles.endpoint} data-godray-corner={index < 2 ? "window" : "floor"}
-                  aria-label={index < 2 ? `Move window corner ${index + 1}` : `Move floor corner ${index - 1}`}
-                  data-light-id={selected.id} style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }}
-                  onPointerDown={(event) => beginDrag(event, selected, index)} onPointerMove={drag}
-                  onPointerUp={endDrag} onPointerCancel={endDrag} />
-              )) : null}
+              {!preview && selected?.kind === "directional" ? (() => {
+                // Three handles: two on the window edge, one where the ray lands. The far
+                // edge is derived, so the beam's sides always leave the window in parallel.
+                const described = godrayRoomLightDescription(selected, aspect);
+                const handles = [
+                  { key: "window-0", role: "window", label: "Move the window edge start", point: described.aperture[0], index: 0 },
+                  { key: "window-1", role: "window", label: "Move the window edge end", point: described.aperture[1], index: 1 },
+                  { key: "landing", role: "landing", label: "Aim where the ray lands", point: described.landing, index: 2 },
+                ] as const;
+                return handles.map((handle) => (
+                  <button key={handle.key} type="button" className={styles.endpoint} data-godray-corner={handle.role} aria-label={handle.label}
+                    data-light-id={selected.id} style={{ left: `${handle.point.x * 100}%`, top: `${handle.point.y * 100}%` }}
+                    onPointerDown={(event) => beginDrag(event, selected, handle.index)} onPointerMove={drag}
+                    onPointerUp={endDrag} onPointerCancel={endDrag} />
+                ));
+              })() : null}
             </div>
           </div>
           {!preview ? <aside className={styles.inspector}>
@@ -340,9 +366,18 @@ export default function RoomLightEditorDialog(props: Props): React.JSX.Element |
               }, "radius")) : null}
               {selected.kind === "fire" ? range("Rotation", selected.geometry.rotation, -360, 360, 1, (rotation) => updateLight(selected.id, (light) => light.kind === "fire" ? { ...light, geometry: { ...light.geometry, rotation } } : light, "rotation")) : null}
               {selected.kind === "directional" ? <>
-                <small>Drag the corners on the room: purple corners sit on the window, blue corners are where the ray lands on the floor. Corners on one edge share a column.</small>
-                <button type="button" onClick={() => updateLight(selected.id, (light) => light.kind === "directional"
-                  ? { ...light, geometry: { points: mansionGodrayParallelPointsV2(directionalRoomLightPoints(light, aspect)) } } : light, "parallel")}>Make rays parallel</button>
+                <small>Purple handles sit on the window edge, at whatever angle the frame shows. Drag the blue handle to aim where the ray lands. Beams that follow the room's sun turn together.</small>
+                {range("Spread", Math.max(0, godrayRoomLightDescription(selected, aspect).spread), 0, 1, 0.01, (spread) => updateLight(selected.id, (light) => light.kind === "directional" ? setGodraySpread(light, spread, aspect) : light, "spread"))}
+                <label>Follows room sun<input type="checkbox" checked={!selected.freeDirection} onChange={(event) => {
+                  const follows = event.currentTarget.checked;
+                  updateLight(selected.id, (light) => {
+                    if (light.kind !== "directional") return light;
+                    const { freeDirection: _dropped, ...rest } = light;
+                    const next = follows ? rest : { ...rest, freeDirection: true };
+                    const sun = follows ? roomSunDirection(lights, aspect, light.id) : null;
+                    return sun ? aimGodray(next, sun, aspect) : next;
+                  }, "sun");
+                }} /></label>
                 <label>Dust<input type="checkbox" checked={selected.dust} onChange={(event) => { const dust = event.currentTarget.checked; updateLight(selected.id, (light) => light.kind === "directional" ? { ...light, dust } : light, "dust"); }} /></label>
               </> : null}
               {selected.kind === "fire" ? <label>Flicker<input type="checkbox" checked={selected.animation === "flicker"} onChange={(event) => { const animation = event.currentTarget.checked ? "flicker" : "steady"; updateLight(selected.id, (light) => light.kind === "fire" ? { ...light, animation } : light, "flicker"); }} /></label> : null}

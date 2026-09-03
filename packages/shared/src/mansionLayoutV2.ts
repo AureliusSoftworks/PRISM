@@ -281,6 +281,8 @@ export interface MansionDirectionalPolygonGeometryV2 {
 export interface MansionDirectionalLightV2 extends MansionDynamicLightBaseV2 {
   kind: "directional";
   dust: boolean;
+  /** Opts this beam out of the room's shared sun direction. */
+  freeDirection?: boolean;
   geometry: MansionDirectionalRectGeometryV2 | MansionDirectionalPolygonGeometryV2;
 }
 
@@ -1516,6 +1518,7 @@ function lightGeometryIsValid(light: MansionDynamicLightV2): boolean {
   }
   if (light.kind === "directional") {
     if (typeof light.dust !== "boolean") return false;
+    if (light.freeDirection !== undefined && typeof light.freeDirection !== "boolean") return false;
     const geometry = light.geometry;
     if (mansionDirectionalGeometryIsPolygonV2(geometry)) {
       const points = geometry.points;
@@ -2041,6 +2044,70 @@ export function mansionGodrayParallelPointsV2(
   ];
 }
 
+const midpoint = (a: MansionLightPointV2, b: MansionLightPointV2): MansionLightPointV2 =>
+  ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+const clampPoint = (point: MansionLightPointV2): MansionLightPointV2 =>
+  ({ x: clampUnit(point.x), y: clampUnit(point.y) });
+
+/** A godray described the way it is placed: the window aperture, where the ray
+ * lands, and how much wider the landing is than the aperture. */
+export interface MansionGodrayDescriptionV2 {
+  aperture: [MansionLightPointV2, MansionLightPointV2];
+  landing: MansionLightPointV2;
+  /** Landing edge length over aperture length, minus one; 0 is a strict parallelogram. */
+  spread: number;
+  /** Unit ray direction in normalized room space and the ray's length. */
+  direction: MansionLightPointV2;
+  length: number;
+}
+
+export const MANSION_GODRAY_MIN_SPREAD = -0.5;
+export const MANSION_GODRAY_MAX_SPREAD = 1.5;
+
+export function mansionGodrayDescribeV2(points: readonly MansionLightPointV2[]): MansionGodrayDescriptionV2 {
+  const { origin, landing } = mansionGodrayEdgesV2(points);
+  const apertureMid = midpoint(origin.start, origin.end);
+  const landingMid = midpoint(landing.start, landing.end);
+  const ray = { x: landingMid.x - apertureMid.x, y: landingMid.y - apertureMid.y };
+  const length = Math.hypot(ray.x, ray.y);
+  const direction = length > 1e-6 ? { x: ray.x / length, y: ray.y / length } : { x: 0, y: 1 };
+  const apertureLength = Math.hypot(origin.end.x - origin.start.x, origin.end.y - origin.start.y);
+  const landingLength = Math.hypot(landing.end.x - landing.start.x, landing.end.y - landing.start.y);
+  const spread = apertureLength > 1e-6
+    ? Math.max(MANSION_GODRAY_MIN_SPREAD, Math.min(MANSION_GODRAY_MAX_SPREAD, landingLength / apertureLength - 1))
+    : 0;
+  return { aperture: [origin.start, origin.end], landing: landingMid, spread, direction, length };
+}
+
+/** Builds the polygon from its placement. Both sides leave the aperture along
+ * one shared direction, as sunlight does, and the landing edge widens about its
+ * middle by `spread` to allow for scatter. Points stay inside the room. */
+export function mansionGodrayFromApertureV2(
+  aperture: readonly [MansionLightPointV2, MansionLightPointV2],
+  landing: MansionLightPointV2,
+  spread: number,
+): MansionLightPointV2[] {
+  const [a0, a1] = aperture;
+  const scale = 1 + Math.max(MANSION_GODRAY_MIN_SPREAD, Math.min(MANSION_GODRAY_MAX_SPREAD, spread));
+  const half = { x: ((a1.x - a0.x) / 2) * scale, y: ((a1.y - a0.y) / 2) * scale };
+  return [
+    clampPoint(a0),
+    clampPoint(a1),
+    clampPoint({ x: landing.x + half.x, y: landing.y + half.y }),
+    clampPoint({ x: landing.x - half.x, y: landing.y - half.y }),
+  ];
+}
+
+/** Re-aims a beam along a shared unit direction, keeping its aperture, length, and spread. */
+export function mansionGodrayAimV2(points: readonly MansionLightPointV2[], direction: MansionLightPointV2): MansionLightPointV2[] {
+  const described = mansionGodrayDescribeV2(points);
+  const apertureMid = midpoint(described.aperture[0], described.aperture[1]);
+  return mansionGodrayFromApertureV2(described.aperture, {
+    x: apertureMid.x + direction.x * described.length,
+    y: apertureMid.y + direction.y * described.length,
+  }, described.spread);
+}
+
 /** Visual center of any dynamic light; polygon lights use their centroid. */
 export function mansionDynamicLightCenterV2(light: MansionDynamicLightV2): MansionLightPointV2 {
   const points = light.kind === "neon"
@@ -2061,13 +2128,12 @@ export function mansionDynamicLightCenterV2(light: MansionDynamicLightV2): Mansi
 
 /** Deterministic overlay sample. Reduced Motion freezes the seeded frame; it
  * does not remove the authored light or change its saved intensity.
- * `blendMix` is how far an electric lamp has drifted toward its second blend
- * character this frame (0 = primary, 1 = secondary); other kinds stay at 0. */
+ * `radiusScale` breathes a lamp's reach; other kinds stay at 1. */
 export function mansionDynamicLightFrameV2(
   light: MansionDynamicLightV2,
   elapsedMs: number,
   reducedMotion: boolean,
-): { intensity: number; phase: number; blendMix: number } {
+): { intensity: number; phase: number; radiusScale: number } {
   const seed = `${light.id}:${light.animationSeed}`;
   const maximumIntensity = Math.min(1, Math.max(0, light.intensity));
   const basePhase = seededUnit(`${seed}:phase`) * Math.PI * 2;
@@ -2092,19 +2158,25 @@ export function mansionDynamicLightFrameV2(
   } else {
     modulation = 0.82 + 0.18 * wave(0.42);
   }
-  // A lamp's mains hum: a slow drift between two blend characters with a faint
-  // fast ripple on top. Bounded well inside 0..1 so it never fully switches off
-  // either character, which keeps the crossfade from reading as a strobe.
-  const blendMix = light.kind === "omni"
-    ? Math.min(0.92, Math.max(0.08,
-        0.5 + 0.3 * Math.sin(basePhase + time * 0.85 * tempo * Math.PI * 2) +
-        0.09 * Math.sin(detailPhase + time * 6.8 * Math.PI * 2) +
-        0.08 * (seededUnit(`${seed}:mix`) - 0.5),
-      ))
-    : 0;
+  // Lamps: the glow's reach breathes slowly, and a seeded filament dip lands
+  // once inside every 4–10 s window for about a third of a second, so an
+  // overlaid lamp is never mistaken for paint yet never reads as a strobe.
+  let radiusScale = 1;
+  if (light.kind === "omni") {
+    radiusScale = 1 + 0.05 * Math.sin(basePhase + time * 0.55 * tempo * Math.PI * 2);
+    const dipWindow = 4 + seededUnit(`${seed}:dip-window`) * 6;
+    const bucket = Math.floor(time / dipWindow);
+    const dipStart = (bucket + seededUnit(`${seed}:dip:${bucket}`) * 0.9) * dipWindow;
+    const dipProgress = (time - dipStart) / 0.36;
+    if (dipProgress >= 0 && dipProgress < 1) {
+      const dip = Math.sin(dipProgress * Math.PI);
+      modulation *= 1 - 0.3 * dip;
+      radiusScale *= 1 - 0.06 * dip;
+    }
+  }
   return {
     intensity: Math.min(maximumIntensity, Math.max(0, maximumIntensity * modulation)),
     phase: basePhase,
-    blendMix,
+    radiusScale,
   };
 }
