@@ -67,3 +67,24 @@ fields prove what was reviewed and by whom; they do not prove live delivery.
 - Report findings, root cause, fixes or recommendations, verification, and
   remaining evidence gaps. Never overstate source-only or fixture-only proof as
   a player-surface pass.
+
+## Closing retrospective
+
+Before the final handoff, once findings, verification results, and remaining
+gaps are established, read and follow
+[Skill Retrospective](/Users/jared/.codex/skills/skill-retrospective/SKILL.md).
+Run one bounded closing pass per user review, including review-only requests;
+the final owning reviewer runs it after any format routing.
+
+- Retain only demonstrated, reusable lessons. No skill change is a valid
+  outcome; do not turn uncertain diagnoses or one-off case details into rules.
+- For review-only, thoughts, or recommendation requests, keep the retrospective
+  read-only and propose any skill improvements without applying them unless
+  the user separately authorizes skill edits.
+- Otherwise, make only directly relevant skill improvements: applet-specific
+  lessons belong in the owning reviewer; genuinely shared lessons belong in
+  this core. Follow Skill Retrospective's scope and privacy boundaries.
+- Use `skill-creator` for any skill edits and validation. Do not start another
+  applet review or retrospective merely because this pass changed a skill.
+- Briefly report the skill changes and validation, or that no reusable update
+  was warranted, alongside the review's final handoff.

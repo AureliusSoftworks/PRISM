@@ -37,3 +37,25 @@ When adding another review:
 4. Define a versioned rubric and typed parser.
 5. Call `runPrismReviewV1`; never pass raw applet state to the reviewer.
 6. Persist the result and its provenance through the owning applet's storage.
+
+## Whodunnit diagnostic transcript
+
+Whodunnit's **Copy verbose transcript** is a separate, versioned diagnostic
+export, not a `PrismReviewArtifactV1` or a claim about experienced delivery.
+`formatDebateMysteryV2PublicReview` whitelists public session provenance, recorded
+dialogue and observations, accepted actions, admitted records, the filed theory,
+and the terminal result. It is shared by Case File, Theory Board, result, and
+Archive copies. Legacy action summaries may supplement the chronology; missing
+history, per-line runtime attribution, and observed playback remain explicit
+unknowns. Sealed solutions, private prompts, voice-carrier identity, unadmitted
+evidence, and undiscovered branches never enter the copy. Diagnostic review must
+keep recorded facts separate from inference and from independently observed UI
+or audio; never submit this transcript as an experienced-artifact snapshot.
+
+An eligible Theory Board may conclude a Run via `check_case`, without Court or
+generation. Its persisted `caseCheck` v1 result assesses the exact accused set
+only, not the written method, motive, opportunity, or proof. It records no legal
+verdict or jury ballot and does not reveal the sealed responsible identities.
+Confirmation is terminal for that Run; the normal Court route remains available
+before confirmation. Fresh Runs and reusable case packages clear the prior
+result and public action history.

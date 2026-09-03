@@ -64,6 +64,13 @@ This is a deliberately slight baseline bias: a 2x slowdown costs 0.10 points, 4x
 - Docs: `docs/experimental-effort-eval-runbook.md`, `docs/experimental-effort-research-log.md`
 - Artifacts: `artifacts/experimental-effort-evals/`, `artifacts/effort-ladder-evals/`
 
+## Closing retrospective
+
+Follow the shared [closing retrospective](../references/prism-review-core.md#closing-retrospective)
+before the final handoff, including its evidence gate, review-only boundary,
+and one-pass limit. This imports only the closeout step; Effort's eval workflow
+and rules above remain authoritative for the review.
+
 ## Output
 
 - `Findings`: evidence-led failures with layer and confidence, including raw quality, latency ratio, latency penalty, adjusted score, and baseline-biased verdict when eligible.

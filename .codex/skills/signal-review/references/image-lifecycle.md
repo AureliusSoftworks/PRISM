@@ -12,6 +12,9 @@ without adding Item creation or retention to live picture uploads.
   image event cannot stand in for all of them. Record setup provenance before
   its reveal so episode retry cannot select a later live upload.
 - Distinguish registration, introduction generation, and actual playback.
+  A persisted `queued` context is not a reveal acknowledgment; check that
+  reconciliation does not consume the pending host reveal merely because an
+  image context now exists.
   Add image queues the next eligible normal host turn; it must bypass the
   host-interruption path. Preserve speech underway and keep the current picture
   visible until the replacement's introduction starts playing. A failed

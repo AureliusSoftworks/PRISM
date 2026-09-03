@@ -25,6 +25,12 @@ applet-specific work.
 8. With a complete export and a concrete complaint, create or claim a Bead, establish the focused baseline, and fix PRISM systems. If the user asks for review-only, thoughts, or a recommendation, stop after findings.
 9. Reproduce the exact reported session shape, including cast size, arrival state, speed/crosstalk settings, Power projections, voice/replay path, and reported performance envelope. Add focused regressions for visible output and provenance metadata; sanitizer changes require paired accepted and rejected cases. Run narrow Coffee checks first, then typecheck/lint as warranted.
 
+## Focused handoff checks
+
+- For a bot stuck thinking until the player takes and releases the floor, separate reply generation/persistence from voice preparation, playback start, reveal, and playback end. A persisted reply without speech direction points toward a pre-playback gate, but does not by itself prove a synthesis deadlock. Check the live gate or reproduce the wait before assigning root cause.
+- A voice-start recovery must cover synthesis that neither rejects nor calls `onStart`, cancellation, and a late callback after recovery. Verify that the saved line can still reveal, expired audio cannot reclaim the floor, and normally started speech retains natural `onEnd` ownership. Prefer behavioral lifecycle tests over only matching a timeout constant or source text.
+- For second-person follow-ups, inspect the preceding speaker and saved addressee/selection provenance, not only the latest message's names or mention chips. Pair conversational follow-up cases with generic scenario and table-wide counterexamples; a bare “you” must not become a universal forced-speaker rule.
+
 ## Coffee Rules
 
 - Preserve 2–5 seated bots, a live off-camera player carrying the pot, player-only top-offs, and no active barista, waiter, or player mug. Faithful replay may seat Default Prism at the table with the pot docked to that seat.
