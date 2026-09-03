@@ -279,17 +279,46 @@
 }
 
 .glyph {
+  /**
+   * The triangle charges with the refraction it is producing: at contact the
+   * glow is exactly the resting bloom, and it swells as the spectrum reaches
+   * the viewport edge. Charge 0 renders identically to the uncharged design,
+   * so the pre-contact splash tier is untouched.
+   */
+  --startup-glyph-charge: var(--prism-startup-spectrum-progress, 0);
+  --startup-glyph-base: color-mix(in srgb, var(--startup-fg) 92%, #5de6ff 8%);
   position: relative;
   z-index: 1;
   width: clamp(42px, 7.2dvh, 56px);
   height: clamp(42px, 7.2dvh, 56px);
   opacity: 1;
   transform: none;
-  color: color-mix(in srgb, var(--startup-fg) 92%, #5de6ff 8%);
+  color: color-mix(
+    in srgb,
+    #fff calc(var(--startup-glyph-charge) * 24%),
+    var(--startup-glyph-base)
+  );
   filter: drop-shadow(
-      0 0 16px color-mix(in srgb, currentColor 32%, transparent)
+      0 0 calc(16px + var(--startup-glyph-charge) * 22px)
+        color-mix(
+          in srgb,
+          var(--startup-glyph-base)
+            calc(32% + var(--startup-glyph-charge) * 42%),
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 calc(6px + var(--startup-glyph-charge) * 18px)
+        color-mix(
+          in srgb,
+          #5de6ff calc(var(--startup-glyph-charge) * 40%),
+          transparent
+        )
     )
     drop-shadow(0 3px 10px rgba(0, 0, 0, 0.34));
+  transition:
+    color 1800ms linear,
+    filter 1800ms linear;
 }
 
 .label {
@@ -595,7 +624,8 @@
   .incomingBeam,
   .spectrumGlint,
   .contactFlare,
-  .spectrum {
+  .spectrum,
+  .glyph {
     animation: none !important;
     transition: none !important;
   }

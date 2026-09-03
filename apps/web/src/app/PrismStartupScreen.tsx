@@ -58,6 +58,8 @@ export function PrismStartupScreen({
     : opticsProgress.total >= 1
       ? "Your private workspace is ready."
       : label;
+  // Published on the veil, not the optics box: the hero triangle sits in a
+  // sibling subtree and charges its glow from the same spectrum progress.
   const opticsStyle: PrismStartupOpticsStyle = {
     "--prism-startup-beam-progress": String(opticsProgress.beam),
     "--prism-startup-beam-remainder": `${(1 - opticsProgress.beam) * 100}%`,
@@ -71,6 +73,7 @@ export function PrismStartupScreen({
       data-prism-startup-screen="true"
       data-prism-startup-stage="workspace"
       data-prism-startup-state={failed ? "failed" : "loading"}
+      style={opticsStyle}
     >
       <script
         suppressHydrationWarning
@@ -89,7 +92,6 @@ export function PrismStartupScreen({
           aria-valuemax={100}
           aria-valuenow={progressPercent}
           aria-valuetext={displayLabel}
-          style={opticsStyle}
         >
           <span className={styles.incomingTrack} aria-hidden="true" />
           <span className={styles.incomingBeam} aria-hidden="true" />

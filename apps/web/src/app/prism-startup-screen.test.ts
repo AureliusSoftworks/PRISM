@@ -207,6 +207,30 @@ describe("continued PRISM startup screen", () => {
     }
   });
 
+  it("charges the hero triangle as the spectrum reaches the viewport edge", () => {
+    assert.match(
+      component,
+      /data-prism-startup-state=\{failed \? "failed" : "loading"\}\s*style=\{opticsStyle\}/u,
+    );
+    for (const source of [css, nativeSplash]) {
+      const glyphStart = source.indexOf(".glyph {");
+      const glyphRule = source.slice(
+        glyphStart,
+        source.indexOf("}", glyphStart) + 1,
+      );
+      assert.match(
+        glyphRule,
+        /--startup-glyph-charge: var\(--prism-startup-spectrum-progress, 0\)/u,
+      );
+      assert.match(glyphRule, /transition:[\s\S]*filter 1800ms linear/u);
+      assert.doesNotMatch(glyphRule, /animation:/u);
+      assert.match(
+        source,
+        /prefers-reduced-motion: reduce[\s\S]*\.glyph[\s\S]*transition: none !important/u,
+      );
+    }
+  });
+
   it("keeps the optical axis independent while light flows continuously", () => {
     assert.match(
       component,
