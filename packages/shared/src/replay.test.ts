@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   REPLAY_VIDEO_FPS,
   buildReplaySceneCheckpointsV2,
+  createReplaySceneSamplerV2,
   compileReplayTimelineV1,
   compileReplayTimelineV2,
   defaultReplaySceneV2,
@@ -20,6 +21,65 @@ import {
   type ReplayManifestV2,
   type ReplayVoiceTakeRecordV1,
 } from "./replay.ts";
+
+test("prepared replay scenes match one-shot reconstruction across seeks and duplicate times", () => {
+  for (const surface of ["coffee", "signal"] as const) {
+    const saved = structuredClone({ ...manifestV2, surface });
+    const original = structuredClone(saved);
+    const sample = createReplaySceneSamplerV2(saved, 1_000);
+    const checkpoints = buildReplaySceneCheckpointsV2(saved, 1_000);
+    const boundaries = saved.direction.flatMap((event) =>
+      [event.atMs, event.endMs].flatMap((at) =>
+        at === undefined ? [] : [at - 1, at, at, at + 1],
+      ),
+    );
+    for (const at of [0, 50_000, ...boundaries.reverse(), -1, NaN, Infinity]) {
+      assert.deepEqual(sample(at), replaySceneAtV2(saved, at, checkpoints));
+    }
+    const changedResult = sample(3_000);
+    changedResult.participants.host!.effects.push("caller-owned");
+    changedResult.studioMix.master = 0;
+    assert.deepEqual(sample(3_000), replaySceneAtV2(saved, 3_000, checkpoints));
+    assert.deepEqual(saved, original, "preparation/sampling must not rewrite the recording");
+  }
+});
+
+test("prepared playback never traverses the source direction array on a frame", () => {
+  let reads = 0;
+  const saved = structuredClone(manifestV2);
+  saved.direction = new Proxy(saved.direction, {
+    get(target, property, receiver) {
+      if (typeof property === "string" && /^\d+$/u.test(property)) reads++;
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  const sample = createReplaySceneSamplerV2(saved);
+  assert.ok(reads > 0);
+  reads = 0;
+  for (let frame = 0; frame < 600; frame++) sample(frame * 16.67);
+  assert.equal(reads, 0, "no full-history sort/expansion during playback");
+});
+
+test("speech activity seeks use logarithmic cue reads and preserve ties", () => {
+  const saved = structuredClone(manifestV2);
+  let reads = 0;
+  const cues = Array.from({ length: 65_536 }, (_, index) => ({
+    atMs: Math.floor(index / 2) * 10,
+    active: index % 2 === 1,
+  }));
+  saved.presentation = {
+    ...saved.presentation!,
+    speechActivityTracks: [{ participantId: "host", cues: new Proxy(cues, {
+      get(target, property, receiver) {
+        if (typeof property === "string" && /^\d+$/u.test(property)) reads++;
+        return Reflect.get(target, property, receiver);
+      },
+    }) }],
+  };
+  assert.equal(replaySpeechActivityAtV2(saved, "host", 327_670), true);
+  assert.ok(reads <= 17, `read ${reads} cues`);
+  assert.equal(replaySpeechActivityAtV2(saved, "missing", 0), null);
+});
 
 const manifest: ReplayManifestV1 = {
   v: 1,

@@ -1,4 +1,5 @@
 import { replayAuthHeaders } from "./replayClient";
+import { copyReplayAudioChannels } from "./replayAudioPcm";
 
 type WorkerResponse =
   | { type: "ready" }
@@ -86,20 +87,8 @@ export async function encodeReplayAudioWindows(args: {
     let sequence = 0;
     let timestampFrames = 0;
     for await (const audioBuffer of args.windows) {
-      if (audioBuffer.sampleRate !== 48_000 || audioBuffer.numberOfChannels !== 2) {
-        throw new Error("Studio Cut windows must be 48 kHz stereo audio.");
-      }
-      const channels = [audioBuffer.getChannelData(0), audioBuffer.getChannelData(1)];
+      const channels = copyReplayAudioChannels(audioBuffer);
       const frameCount = audioBuffer.length;
-      const interleaved = new Float32Array(
-        frameCount * 2,
-      );
-      for (let frame = 0; frame < frameCount; frame += 1) {
-        for (let channel = 0; channel < channels.length; channel += 1) {
-          interleaved[frame * channels.length + channel] =
-            channels[channel]?.[frame] ?? 0;
-        }
-      }
       const currentSequence = sequence++;
       await postAndWait(
         worker,
@@ -107,12 +96,12 @@ export async function encodeReplayAudioWindows(args: {
           type: "audio",
           sequence: currentSequence,
           timestamp: timestampFrames / 48_000,
-          data: interleaved.buffer,
+          channels,
         },
         (response) =>
           response.type === "audio-added" &&
           response.sequence === currentSequence,
-        [interleaved.buffer],
+        channels,
       );
       timestampFrames += frameCount;
     }

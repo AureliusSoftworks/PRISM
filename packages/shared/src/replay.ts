@@ -1053,16 +1053,27 @@ export function buildReplaySceneCheckpointsV2(
   manifest: ReplayManifestV2,
   intervalMs = 10_000,
 ): ReplaySceneCheckpointV2[] {
+  return buildReplaySceneCheckpointsFromTransitionsV2(
+    manifest.initialScene,
+    replayDirectionTransitionsV2(manifest),
+    intervalMs,
+  );
+}
+
+function buildReplaySceneCheckpointsFromTransitionsV2(
+  initialScene: ReplaySceneSnapshotV2,
+  transitions: readonly ReplayDirectionEventV2[],
+  intervalMs: number,
+): ReplaySceneCheckpointV2[] {
   const checkpoints: ReplaySceneCheckpointV2[] = [
     {
       atMs: 0,
       nextEventIndex: 0,
-      state: cloneReplaySceneV2(manifest.initialScene),
+      state: cloneReplaySceneV2(initialScene),
     },
   ];
-  let state = cloneReplaySceneV2(manifest.initialScene);
+  let state = cloneReplaySceneV2(initialScene);
   let nextAtMs = Math.max(1_000, intervalMs);
-  const transitions = replayDirectionTransitionsV2(manifest);
   transitions.forEach((event, index) => {
     state = reduceReplaySceneV2(state, event);
     if (event.atMs < nextAtMs) return;
@@ -1082,18 +1093,61 @@ export function replaySceneAtV2(
   checkpoints: readonly ReplaySceneCheckpointV2[] =
     buildReplaySceneCheckpointsV2(manifest),
 ): ReplaySceneSnapshotV2 {
+  return replaySceneFromTransitionsAtV2(
+    manifest.initialScene,
+    replayDirectionTransitionsV2(manifest),
+    atMs,
+    checkpoints,
+  );
+}
+
+/**
+ * Prepare once when a saved recording is loaded, not on its audio-clock ticks.
+ * Rebuild when the manifest changes; no global cache retains account data or
+ * assumes that mutable manifests never change. Returned scenes remain owned
+ * by the caller, and arbitrary forward/backward seeks use the same reducer.
+ */
+export function createReplaySceneSamplerV2(
+  manifest: ReplayManifestV2,
+  intervalMs = 10_000,
+): (atMs: number) => ReplaySceneSnapshotV2 {
+  const initialScene = cloneReplaySceneV2(manifest.initialScene);
+  const transitions = replayDirectionTransitionsV2(manifest);
+  const checkpoints = buildReplaySceneCheckpointsFromTransitionsV2(
+    initialScene,
+    transitions,
+    intervalMs,
+  );
+  return (atMs) => replaySceneFromTransitionsAtV2(
+    initialScene, transitions, atMs, checkpoints,
+  );
+}
+
+function replaySceneFromTransitionsAtV2(
+  initialScene: ReplaySceneSnapshotV2,
+  transitions: readonly ReplayDirectionEventV2[],
+  atMs: number,
+  checkpoints: readonly ReplaySceneCheckpointV2[],
+): ReplaySceneSnapshotV2 {
   const targetMs = Math.max(0, Number.isFinite(atMs) ? atMs : 0);
   let checkpoint = checkpoints[0] ?? {
     atMs: 0,
     nextEventIndex: 0,
-    state: manifest.initialScene,
+    state: initialScene,
   };
-  for (const candidate of checkpoints) {
-    if (candidate.atMs > targetMs) break;
-    checkpoint = candidate;
+  let low = 0;
+  let high = checkpoints.length - 1;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const candidate = checkpoints[middle]!;
+    if (candidate.atMs <= targetMs) {
+      checkpoint = candidate;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
   }
   let state = cloneReplaySceneV2(checkpoint.state);
-  const transitions = replayDirectionTransitionsV2(manifest);
   for (
     let index = checkpoint.nextEventIndex;
     index < transitions.length;
@@ -1194,10 +1248,18 @@ export function replaySpeechActivityAtV2(
   );
   if (!track || track.cues.length === 0) return null;
   const targetMs = Math.max(0, Number.isFinite(atMs) ? atMs : 0);
+  let low = 0;
+  let high = track.cues.length - 1;
   let active = false;
-  for (const cue of track.cues) {
-    if (cue.atMs > targetMs) break;
-    active = cue.active;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const cue = track.cues[middle]!;
+    if (cue.atMs <= targetMs) {
+      active = cue.active;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
   }
   return active;
 }

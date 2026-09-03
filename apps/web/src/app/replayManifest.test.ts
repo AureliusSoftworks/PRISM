@@ -1155,7 +1155,7 @@ describe("replay implementation contracts", () => {
     assert.doesNotMatch(coffee, /coffeeBackgroundReplayRender/u);
     assert.doesNotMatch(coffee, /__PRISM_COFFEE_BACKGROUND_RENDER__/u);
     assert.doesNotMatch(coffee, /data-coffee-background-render/u);
-    assert.match(coffee, /coffeeReplayVideoFrameState/u);
+    assert.match(coffee, /createCoffeeReplayVideoFrameSampler/u);
     assert.match(coffee, /startReplayAudioMasterCapture/u);
     assert.match(coffee, /saveFaithfulReplaySession/u);
     assert.match(signal, /saveFaithfulReplaySession/u);

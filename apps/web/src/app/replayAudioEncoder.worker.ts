@@ -7,6 +7,7 @@ import {
   getFirstEncodableAudioCodec,
   type StreamTargetChunk,
 } from "mediabunny";
+import { interleaveReplayAudioChannels } from "./replayAudioPcm";
 
 type InitMessage = {
   type: "init";
@@ -23,7 +24,7 @@ type AudioMessage = {
   type: "audio";
   sequence: number;
   timestamp: number;
-  data: ArrayBuffer;
+  channels: ArrayBuffer[];
 };
 
 type FinishMessage = { type: "finish" };
@@ -114,7 +115,7 @@ async function initialize(message: InitMessage): Promise<void> {
 async function addAudio(message: AudioMessage): Promise<void> {
   if (!audioSource) throw new Error("Replay audio encoder is not initialized.");
   const sample = new AudioSample({
-    data: new Float32Array(message.data),
+    data: interleaveReplayAudioChannels(message.channels),
     format: "f32",
     numberOfChannels,
     sampleRate,

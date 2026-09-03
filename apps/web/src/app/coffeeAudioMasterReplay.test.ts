@@ -53,7 +53,7 @@ test("Coffee uses authenticated master currentTime as the sole procedural replay
   );
   assert.match(
     pageSource,
-    /replaySceneAtV2\(runtime\.manifest, elapsedMs, runtime\.checkpoints\)/u,
+    /runtime\.sampleScene\?\.\(elapsedMs\)/u,
   );
   assert.match(
     pageSource,

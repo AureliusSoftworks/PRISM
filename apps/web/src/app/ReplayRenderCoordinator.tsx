@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import type {
   ReplayRecordingV1,
   ReplaySurfaceV1,
@@ -18,6 +18,9 @@ import {
 } from "./replayRenderCoordinatorSession.ts";
 import { encodeReplayAudioWindows } from "./replayRenderAudio";
 import { prepareSignalStudioCut } from "./signalStudioCutAudio";
+import { ReplayBackgroundWork } from "./replayBackgroundWork";
+
+const backgroundMaster = new ReplayBackgroundWork();
 
 export const REPLAY_RECORDING_CHANGED_EVENT = "prism:replay-recording-changed";
 
@@ -95,7 +98,6 @@ export function ReplayRenderCoordinator(
     frameRenderer?: ReplayFrameRenderer;
   } = {},
 ): null {
-  const activeRef = useRef(new Set<string>());
   useEffect(() => {
     if (props.surface && props.surface !== "signal") return;
     let cancelled = false;
@@ -148,11 +150,9 @@ export function ReplayRenderCoordinator(
         ) {
           continue;
         }
-        if (cancelled || activeRef.current.has(recording.id)) continue;
-        activeRef.current.add(recording.id);
-        void mixStudioCut(recording.id).finally(() => {
-          activeRef.current.delete(recording.id);
-        });
+        if (cancelled) break;
+        void backgroundMaster.run(() => mixStudioCut(recording.id))
+          .catch(() => undefined);
       }
       if (!cancelled) {
         timer = window.setTimeout(
