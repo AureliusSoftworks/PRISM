@@ -98,9 +98,11 @@ mid-session from other tools, including Claude's own edits.
   explicit paths, never `git add -A`, and never stash or revert changes you did
   not make.
 - Before editing any file, especially an untracked one, re-read it or compare
-  its mtime against your read. Use exact-match edits that assert one hit; never
-  rewrite an existing file wholesale. If a clobber happens, rebuild from the
-  other session's sibling test file.
+  its mtime against your read. Anchor edits on exact content, never on line
+  numbers: in this tree they move by dozens of lines within minutes. Use
+  exact-match edits that assert one hit; never rewrite an existing file
+  wholesale. If a clobber happens, rebuild from the other session's sibling
+  test file.
 - Re-check `git status` before reasoning about tree state; it goes stale within
   a session. Prove a test failure predates you before treating it as yours, and
   confirm your diff contains only your hunks before reporting.
