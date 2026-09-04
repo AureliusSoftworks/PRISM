@@ -323,7 +323,7 @@ test("dispatches Babble, Bottish, and Off through one bounded presentation contr
       seed: "casekeeper",
       signal: undefined,
       text: "The corridor answers.",
-      volume: 0.14,
+      volume: 0.3,
       roomAcoustics: undefined,
     },
     {

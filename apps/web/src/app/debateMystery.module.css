@@ -1282,6 +1282,11 @@
 .mansionEditorCanvas > button > small { color: var(--mystery-muted); font-size: 0.54rem; }
 .mansionEditorCanvas > .mansionEditorRoomBlock { background-position: center; background-size: cover; }
 .mansionEditorCanvas > .mansionEditorCorridorBlock { color: var(--mystery-cyan); border-style: dashed; background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--mystery-cyan) 15%, var(--mystery-panel-strong)) 0 0.42rem, var(--mystery-panel-strong) 0.42rem 0.84rem); }
+/* Ambient spaces read as quiet rooms: solid stone walls, no route hatching, no cyan. */
+.mansionEditorCanvas > .mansionEditorAmbientBlock { color: color-mix(in srgb, var(--mystery-muted) 82%, var(--mystery-text)); border-style: solid; border-color: color-mix(in srgb, var(--mystery-muted) 34%, var(--mystery-line)); background: linear-gradient(150deg, color-mix(in srgb, var(--mystery-muted) 16%, var(--mystery-panel-strong)), color-mix(in srgb, var(--mystery-muted) 6%, var(--mystery-panel)) 68%); box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 9%, transparent), inset 0 0 0.9rem rgb(0 0 0 / 22%), 0 0.32rem 0.75rem rgb(0 0 0 / 22%); }
+.mansionEditorCanvas > .mansionEditorAmbientBlock > span { opacity: 0.62; }
+.mansionEditorCanvas > .mansionEditorAmbientBlock > strong { color: color-mix(in srgb, var(--mystery-muted) 70%, var(--mystery-text)); font-weight: 600; letter-spacing: 0.01em; }
+.mansionEditorCanvas > .mansionEditorAmbientBlock[data-selected="true"] { border-color: var(--mystery-cyan); }
 .mansionEditorCanvas > button > .mansionEditorCorridorResizeHandle { position: absolute; z-index: 5; display: block; background: transparent; }
 .mansionEditorCorridorResizeHandle[data-edge="north"],
 .mansionEditorCorridorResizeHandle[data-edge="south"] { right: 0.35rem; left: 0.35rem; height: 0.55rem; cursor: ns-resize; }
@@ -1313,9 +1318,21 @@
 .mansionEditorInspector input:focus-visible,
 .mansionEditorInspector select:focus-visible { border-color: var(--mystery-violet); outline: 2px solid color-mix(in srgb, var(--mystery-cyan) 38%, transparent); }
 .mansionEditorGeometry,
-.mansionEditorConnections { display: grid; gap: 0.42rem; margin: 0; padding: 0.75rem; border: 1px solid var(--mystery-line); border-radius: 0.65rem; }
+.mansionEditorConnections,
+.mansionEditorBlockRole { display: grid; gap: 0.42rem; margin: 0; padding: 0.75rem; border: 1px solid var(--mystery-line); border-radius: 0.65rem; }
 .mansionEditorGeometry legend,
-.mansionEditorConnections legend { padding: 0 0.3rem; color: var(--mystery-text); font-size: 0.72rem; font-weight: 800; }
+.mansionEditorConnections legend,
+.mansionEditorBlockRole legend { padding: 0 0.3rem; color: var(--mystery-text); font-size: 0.72rem; font-weight: 800; }
+.mansionEditorBlockRole { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.mansionEditorBlockRole legend { grid-column: 1 / -1; }
+.mansionEditorBlockRole > button { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0.15rem 0.45rem; min-height: 3rem; padding: 0.45rem 0.55rem; color: var(--mystery-text); text-align: left; border: 1px solid var(--mystery-line); border-radius: 0.5rem; background: var(--mystery-panel-strong); cursor: pointer; }
+.mansionEditorBlockRole > button > span { grid-row: span 2; font-size: 1rem; color: var(--mystery-cyan); }
+.mansionEditorBlockRole > button > strong { font-size: 0.66rem; }
+.mansionEditorBlockRole > button > small { grid-column: 2; color: var(--mystery-muted); font-size: 0.54rem; line-height: 1.25; }
+.mansionEditorBlockRole > button:hover,
+.mansionEditorBlockRole > button:focus-visible { border-color: var(--mystery-violet); outline: 2px solid color-mix(in srgb, var(--mystery-cyan) 42%, transparent); }
+.mansionEditorBlockRole > button[aria-pressed="true"] { border-color: var(--mystery-violet); background: color-mix(in srgb, var(--mystery-violet) 19%, var(--mystery-panel-strong)); cursor: default; }
+.mansionEditorBlockRole > button[aria-pressed="true"] > span { color: var(--mystery-violet); }
 .mansionEditorGeometry > div { display: grid; grid-template-columns: minmax(0, 1fr) 2rem 2rem 2rem; align-items: center; gap: 0.3rem; }
 .mansionEditorGeometry > div > span { color: var(--mystery-muted); font-size: 0.68rem; }
 .mansionEditorGeometry button { min-height: 2rem; padding: 0.25rem; }

@@ -945,6 +945,8 @@ export interface DebateExperienceProps {
   audioEnabled: boolean;
   audioVolume: number;
   whodunnitTextVoiceMode?: WhodunnitTextVoiceMode;
+  /** Prism's default voice, the player's audible stand-in for written observations. */
+  playerVoiceProfile?: BotAudioVoiceProfileV1 | null;
   playMysteryTextVoice?: (args: {
     instant?: boolean;
     mode: Exclude<WhodunnitTextVoiceMode, "off">;
@@ -33135,6 +33137,7 @@ export function DebateExperience(
     mansionExteriorUrl: activeMysteryMansionExteriorUrl,
     whodunnitTextVoiceMode: props.whodunnitTextVoiceMode,
     playMysteryTextVoice: props.playMysteryTextVoice,
+    playerVoiceProfile: props.playerVoiceProfile ?? null,
     request,
     renderBotGlyph: props.renderBotGlyph,
     renderMysteryBotAvatar: (

@@ -149139,6 +149139,9 @@ function HomeContent(): React.JSX.Element {
               whodunnitTextVoiceMode={normalizeWhodunnitTextVoiceMode(
                 settings?.debateWhodunnitTextVoiceMode,
               )}
+              playerVoiceProfile={
+                settings?.prismDefaultBotAudioVoiceProfile ?? null
+              }
               playMysteryTextVoice={async ({
                 instant,
                 mode,

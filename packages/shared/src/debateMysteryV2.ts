@@ -493,6 +493,8 @@ export type DebateMysteryMansionAssetRoleV1 =
   | "room"
   | "prop"
   | "music"
+  /** Overhead deck plan illustration; logical id `deck:<floor>`. */
+  | "map"
   | "presentation";
 
 /** Protected aggregate-owned bytes. `logicalId` is presentation-only: prop
@@ -1223,6 +1225,8 @@ export type DebateMysterySceneRepairActionV1 =
   | "reroll_evidence_description"
   | "clean_case_file"
   | "reduce_evidence_magenta"
+  | "generate_map_plan"
+  | "place_map_plan"
   | "regenerate_music"
   | "regenerate_ambience";
 
@@ -1278,7 +1282,10 @@ export interface DebateMysterySceneRepairUndoV1 {
   previousHotspots?: DebateMysteryRoomV2["hotspots"];
   previousPlacementAnchors?: MansionPlacementAnchorV2[];
   previousLights?: MansionDynamicLightV2[];
+  previousEffects?: import("./mansionLayoutV2.ts").MansionRoomEffectV1[];
   previousLightBlendMode?: MansionLightBlendModeV1 | null;
+  /** Overhead framing as it stood before a place_map_plan; null when the plate had none. */
+  previousOverheadPlacement?: import("./mansionLayoutV2.ts").MansionOverheadPlacementV1 | null;
 }
 
 /** Persisted room-entry choreography. A reload during `persona` repeats the

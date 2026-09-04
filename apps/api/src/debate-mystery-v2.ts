@@ -2157,7 +2157,10 @@ export interface DebateMysterySceneRepairCommitV1 {
   hotspots?: DebateMysteryRoomV2["hotspots"];
   placementAnchors?: MansionLayoutV2["placementAnchors"];
   lights?: MansionLayoutV2["lights"];
+  effects?: NonNullable<MansionLayoutV2["effects"]>;
   lightBlendMode?: import("@localai/shared").MansionLightBlendModeV1;
+  /** For place_map_plan: the player's framing of the overhead plate; null clears it. */
+  overheadPlacement?: import("@localai/shared").MansionOverheadPlacementV1 | null;
 }
 
 /** Repairs only an admitted record's display fields; the sealed case and proof
@@ -2281,25 +2284,61 @@ export function setDebateMysteryEvidenceEmojiV1(
 
 interface MysteryPresentationRewriteEntryV1 { id: string; kind: "evidence" | "case_kit" | "observation"; label: string; text: string }
 
-/** Words with a capital letter that the rewrite is allowed to use: everything already
- * visible in the Case File. Any other capitalised word is treated as an invented fact. */
+/** Lowercase comparison key for one word. Trailing punctuation and a possessive
+ * suffix are dropped so "Jr.", "Purser's", and "purser" all compare equal. */
+function mysteryRewriteWordKeyV1(word: string): string {
+  return word.replace(/[.,;:!?]+$/u, "").replace(/['’]s?$/u, "").toLocaleLowerCase();
+}
+
+/** Ordinary words a sentence may open with even when the Case File never used
+ * them. A sentence that opens on any other unknown capitalised word is still
+ * treated as introducing a name. */
+const MYSTERY_REWRITE_SENTENCE_OPENERS: ReadonlySet<string> = new Set([
+  "a", "an", "the", "this", "that", "these", "those", "it", "its", "there", "here", "then", "later", "earlier",
+  "before", "after", "during", "while", "when", "where", "what", "which", "who", "how", "why", "in", "on", "at",
+  "by", "near", "inside", "outside", "above", "below", "under", "beside", "behind", "between", "beneath", "along",
+  "across", "around", "beyond", "over", "through", "from", "with", "without", "within", "upon", "toward", "towards",
+  "both", "each", "all", "some", "several", "one", "two", "three", "no", "not", "nothing", "also", "still",
+  "however", "meanwhile", "once", "first", "second", "third", "last", "next", "finally", "only", "just", "yet",
+  "and", "but", "so", "if", "unless", "although", "though", "because", "since", "until", "as", "for", "of", "or",
+  "found", "seen", "noted", "nearby", "against", "among", "to",
+]);
+
+/** Clock suffixes are formatting, never a new name. */
+const MYSTERY_REWRITE_TIME_MARKERS: ReadonlySet<string> = new Set(["am", "pm"]);
+
+/** Every word already visible in the Case File, keyed for comparison. A rewrite may
+ * capitalise any of them; any other capitalised word is treated as an invented fact. */
 function mysteryRewriteAllowedNamesV1(sources: readonly string[]): Set<string> {
   const allowed = new Set<string>();
   for (const source of sources) {
-    for (const match of source.matchAll(/\p{Lu}[\p{L}\p{N}'’.-]*/gu)) allowed.add(match[0].toLocaleLowerCase());
+    for (const match of source.matchAll(/\p{L}[\p{L}\p{N}'’.-]*/gu)) allowed.add(mysteryRewriteWordKeyV1(match[0]));
   }
   return allowed;
 }
 
 function mysteryRewriteIntroducesNamesV1(text: string, allowed: ReadonlySet<string>): boolean {
   return [...text.matchAll(/\p{Lu}[\p{L}\p{N}'’.-]*/gu)].some((match) => {
-    const word = match[0].replace(/[.,;:!?]+$/u, "");
+    const key = mysteryRewriteWordKeyV1(match[0]);
+    if (key.length <= 1 || allowed.has(key) || MYSTERY_REWRITE_TIME_MARKERS.has(key)) return false;
     const sentenceStart = match.index === 0 || /[.!?]\s+$/u.test(text.slice(0, match.index));
-    return word.length > 1 && !allowed.has(word.toLocaleLowerCase()) && !(sentenceStart && allowed.has(word.toLocaleLowerCase()));
+    return !(sentenceStart && MYSTERY_REWRITE_SENTENCE_OPENERS.has(key));
   });
 }
 
-const MYSTERY_REWRITE_FORBIDDEN = /\b(?:guilty|culprit|murderer|killer|the accused|confess(?:ed|ion)?|motive)\b/iu;
+const MYSTERY_REWRITE_FORBIDDEN = /\b(?:guilty|culprit|murderer|killer|the accused|confess(?:ed|ion)?|motive)\b/giu;
+
+/** A verdict word is only an invention when the supplied Case File text did not already use it. */
+function mysteryRewriteAddsForbiddenV1(text: string, sources: readonly string[]): boolean {
+  const present = new Set(Array.from(sources.join(" ").matchAll(MYSTERY_REWRITE_FORBIDDEN), (match) => match[0].toLocaleLowerCase()));
+  return Array.from(text.matchAll(MYSTERY_REWRITE_FORBIDDEN), (match) => match[0].toLocaleLowerCase()).some((word) => !present.has(word));
+}
+
+/** A rewrite that fails review is retried this many times before the player
+ * sees an error, so one click on Clean up or Rewrite is enough. Each retry
+ * receives the previous rejection as data so it is not a blind repeat. */
+const MYSTERY_REWRITE_REVIEW_ATTEMPTS = 5;
+const MYSTERY_REWRITE_ATTEMPT_TIMEOUT_MS = 60_000;
 
 /** Runs one presentation rewrite on the session's selected lane, LOCAL-safe,
  * and returns the parsed JSON. The prompt payload is data, never instructions. */
@@ -2318,21 +2357,24 @@ async function runMysteryPresentationRewriteV1(
       workflow: "whodunnit_v2", operation: args.operation, stage: "field_repair",
       executionLane: "selected", role: "repair", outputClass: "connective",
       priority: "interactive", privacyMode: localOnly ? "local" : "online",
-      timeoutMs: 60_000,
+      timeoutMs: MYSTERY_REWRITE_ATTEMPT_TIMEOUT_MS,
     },
     lanes,
     modelSelectionKind: runtime.modelSelectionKind ?? "fixed",
-    maxAttempts: 2,
-    totalTimeoutMs: 90_000,
-    perAttemptTimeoutMs: () => 60_000,
-    run: ({ lane, signal, work }) => {
+    maxAttempts: MYSTERY_REWRITE_REVIEW_ATTEMPTS,
+    totalTimeoutMs: MYSTERY_REWRITE_REVIEW_ATTEMPTS * MYSTERY_REWRITE_ATTEMPT_TIMEOUT_MS,
+    perAttemptTimeoutMs: () => MYSTERY_REWRITE_ATTEMPT_TIMEOUT_MS,
+    run: ({ lane, signal, work, priorError }) => {
       assertRefractionActive();
       if ((localOnly || accountIsLocal()) && lane.providerName !== "local") {
         throw new HttpError(409, "LOCAL Case File repair requires a local model.");
       }
+      const payload = priorError
+        ? { ...args.payload, previousAttemptRejected: priorError }
+        : args.payload;
       return lane.provider.generateResponse([
         { role: "system", content: args.system },
-        { role: "user", content: JSON.stringify(args.payload) },
+        { role: "user", content: JSON.stringify(payload) },
       ], {
         model: lane.model, reasoningEffort: lane.reasoningEffort, turbo: lane.turbo,
         maxTokens: args.maxTokens, temperature: 0.2, jsonMode: true,
@@ -2396,7 +2438,7 @@ export async function rerollDebateMysteryItemDescriptionV1(
       validate: (raw) => {
         const text = cleanRewriteText(parseRewriteJson(raw).description, maxLength);
         if (!text || text.length < 24) throw new Error("The rewritten description was empty or too long.");
-        if (mysteryRewriteIntroducesNamesV1(text, allowed) || MYSTERY_REWRITE_FORBIDDEN.test(text) || /\bPRISM\b/u.test(text)) {
+        if (mysteryRewriteIntroducesNamesV1(text, allowed) || mysteryRewriteAddsForbiddenV1(text, sources) || /\bPRISM\b/u.test(text)) {
           throw new Error("The rewritten description added something not in the record.");
         }
         return text;
@@ -2457,13 +2499,17 @@ export async function cleanDebateMysteryCaseFileV1(
   ]);
   const limitFor = (entry: MysteryPresentationRewriteEntryV1): number =>
     Math.min(entry.kind === "case_kit" ? 260 : 520, Math.max(80, Math.round(entry.text.length * 1.05)));
+  // Short surrogate ids keep observation node ids and timestamps out of the
+  // prompt and give a small model nothing to mangle when it echoes them back.
+  const promptEntries = entries.map((entry, index) => ({ promptId: String(index + 1), entry }));
+  const entriesByPromptId = new Map(promptEntries.map(({ promptId, entry }) => [promptId, entry]));
   let rewritten: Record<string, string>;
   try {
     rewritten = await runMysteryPresentationRewriteV1(db, userId, runtime, {
       operation: "clean_case_file",
       system: "Tidy a detective's Case File. For every entry return a cleaner version of its text: remove repeated sentences, filler, and any sentence about PRISM, fallbacks, or artwork; keep every distinct fact once; write plain past-tense prose that is easy to scan. Observations open with where the thing was seen. Never merge entries, add ownership, use, location, significance, or any person, and never mention a suspect that the entry does not already name. Return only JSON: {\"entries\": [{\"id\": string, \"text\": string}]} with exactly the supplied ids.",
       payload: {
-        entries: entries.map((entry) => ({ id: entry.id, kind: entry.kind, label: entry.label, text: entry.text, maxCharacters: limitFor(entry) })),
+        entries: promptEntries.map(({ promptId, entry }) => ({ id: promptId, kind: entry.kind, label: entry.label, text: entry.text, maxCharacters: limitFor(entry) })),
       },
       maxTokens: Math.min(6_000, 220 + entries.reduce((sum, entry) => sum + Math.ceil(limitFor(entry) / 3), 0)),
       validate: (raw) => {
@@ -2472,12 +2518,13 @@ export async function cleanDebateMysteryCaseFileV1(
         if (!list) throw new Error("The clean-up did not return entries.");
         const byId = new Map<string, string>();
         for (const row of list) {
-          if (!row || typeof row !== "object" || typeof row.id !== "string") continue;
-          const entry = entries.find((candidate) => candidate.id === row.id);
+          if (!row || typeof row !== "object") continue;
+          const rowId = typeof row.id === "string" ? row.id.trim() : typeof row.id === "number" ? String(row.id) : "";
+          const entry = entriesByPromptId.get(rowId);
           if (!entry) continue;
           const text = cleanRewriteText(row.text, limitFor(entry));
           if (!text || text.length < 12) throw new Error(`Entry ${entry.label} came back empty or too long.`);
-          if (mysteryRewriteIntroducesNamesV1(text, allowed) || MYSTERY_REWRITE_FORBIDDEN.test(text) || /\bPRISM\b/u.test(text)) {
+          if (mysteryRewriteIntroducesNamesV1(text, allowed) || mysteryRewriteAddsForbiddenV1(text, [entry.label, entry.text]) || /\bPRISM\b/u.test(text)) {
             throw new Error(`Entry ${entry.label} added something not in the record.`);
           }
           byId.set(entry.id, text);
@@ -2542,7 +2589,7 @@ export function commitDebateMysterySceneRepairV1(
     throw new HttpError(409, "Visit that room before repairing its presentation.");
   }
   const layout = state.config.mansionSnapshot?.layoutV2 ?? null;
-  if ((repair.placementAnchors || repair.lights) && !layout) {
+  if ((repair.placementAnchors || repair.lights || repair.overheadPlacement !== undefined) && !layout) {
     throw new HttpError(409, "This archived venue has no repairable layout metadata.");
   }
   const previousPlacementAnchors = repair.placementAnchors && roomId && layout
@@ -2550,6 +2597,9 @@ export function commitDebateMysterySceneRepairV1(
     : undefined;
   const previousLights = repair.lights && roomId && layout
     ? layout.lights.filter((light) => light.roomId === roomId)
+    : undefined;
+  const previousEffects = repair.effects && roomId && layout
+    ? (layout.effects ?? []).filter((effect) => effect.roomId === roomId)
     : undefined;
   const lightingRoom = layout?.entities.find((entity) => entity.kind === "room" && entity.id === roomId);
   state.sceneRepairUndo = {
@@ -2585,8 +2635,11 @@ export function commitDebateMysterySceneRepairV1(
     ...(repair.hotspots && room ? { previousHotspots: room.hotspots } : {}),
     ...(previousPlacementAnchors ? { previousPlacementAnchors } : {}),
     ...(previousLights ? { previousLights } : {}),
+    ...(previousEffects ? { previousEffects } : {}),
     ...(repair.lightBlendMode !== undefined && lightingRoom?.kind === "room"
       ? { previousLightBlendMode: lightingRoom.lightBlendMode ?? null } : {}),
+    ...(repair.overheadPlacement !== undefined && layout
+      ? { previousOverheadPlacement: layout.overheadPlacement ?? null } : {}),
   };
   if (evidenceItem && repair.evidencePresentation) {
     state.evidencePresentationOverrides = {
@@ -2643,10 +2696,21 @@ export function commitDebateMysterySceneRepairV1(
       ...repair.lights,
     ];
   }
+  if (layout && roomId && repair.effects) {
+    layout.effects = [
+      ...(layout.effects ?? []).filter((effect) => effect.roomId !== roomId),
+      ...repair.effects,
+    ];
+  }
   if (lightingRoom?.kind === "room" && repair.lightBlendMode !== undefined) {
     lightingRoom.lightBlendMode = repair.lightBlendMode;
   }
-  if (layout && (repair.placementAnchors || repair.lights || repair.lightBlendMode !== undefined)) {
+  if (layout && repair.overheadPlacement !== undefined) {
+    if (repair.overheadPlacement === null) delete layout.overheadPlacement;
+    else layout.overheadPlacement = repair.overheadPlacement;
+  }
+  if (layout && (repair.placementAnchors || repair.lights || repair.effects || repair.lightBlendMode !== undefined ||
+    repair.overheadPlacement !== undefined)) {
     state.config.mansionSnapshot!.layoutSha256 = createHash("sha256")
       .update(canonicalMansionLayoutV2(layout))
       .digest("hex");
@@ -2790,6 +2854,12 @@ export function undoDebateMysterySceneRepairV1(
       ...undo.previousLights,
     ];
   }
+  if (layout && undo.roomId && undo.previousEffects) {
+    layout.effects = [
+      ...(layout.effects ?? []).filter((effect) => effect.roomId !== undo.roomId),
+      ...undo.previousEffects,
+    ];
+  }
   if (layout && undo.previousLightBlendMode !== undefined) {
     const lightingRoom = layout.entities.find((entity) => entity.kind === "room" && entity.id === undo.roomId);
     if (lightingRoom?.kind === "room") {
@@ -2797,7 +2867,12 @@ export function undoDebateMysterySceneRepairV1(
       else lightingRoom.lightBlendMode = undo.previousLightBlendMode;
     }
   }
-  if (layout && (undo.previousPlacementAnchors || undo.previousLights || undo.previousLightBlendMode !== undefined)) {
+  if (layout && undo.previousOverheadPlacement !== undefined) {
+    if (undo.previousOverheadPlacement === null) delete layout.overheadPlacement;
+    else layout.overheadPlacement = undo.previousOverheadPlacement;
+  }
+  if (layout && (undo.previousPlacementAnchors || undo.previousLights || undo.previousEffects || undo.previousLightBlendMode !== undefined ||
+    undo.previousOverheadPlacement !== undefined)) {
     state.config.mansionSnapshot!.layoutSha256 = createHash("sha256")
       .update(canonicalMansionLayoutV2(layout))
       .digest("hex");

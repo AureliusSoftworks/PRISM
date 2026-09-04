@@ -33,7 +33,7 @@ ship as `0.5.2` while Coffee is `v0.7`.
 | Zen     | v1.52   | Active             | Calm one-to-one continuity with bounded player-facing Troll pestering, timed unaware Mute delivery, Accent Map-keyed Mumbling dialects, draggable six-tier embodiment, direct human access, session-sticky Shapeshifter persona/visual embodiment with holder-owned voice and target Accent Map overlay and quoted borrowed name, Surname Drift last names, phosphor-hue prejudice, and masked Cursed Tongue delivery.                                                                                                        |
 | Coffee  | v2.76   | Active             | Two-to-five-bot tables with participant-scoped Context Spark continuity, mood-gated rare ordinary cut-ins, bounded Troll interruptions and public bait, cast-aware avatar effects, Power-projected reaction speech, masked Cursed Tongue delivery, timed Mute dead air, reactions, and floor breaks with a terse six-dot public mark, replay-safe Identity Crisis presentation as The real target with name/eye/mouth/Ink/glyph overlays that keep persona/voice while copying eligible public Powers, Shapeshifter persona/visual copying with holder-owned voice and target Accent Map overlay but no Power transfer, quoted borrowed names, occasional observer voice-mismatch notice, session last names, replay-safe form changes, phosphor-hue prejudice among seated bots, local-only café Jazz beds, and faithful replay that seats Default Prism for the player.                   |
 | Signal  | v1.98   | Active             | Interview studio with a faded, breathing studio entrance, guest-introduction cutaways and optional greetings, quiet bot-only visual identity status, bounded Troll interruptions and public bait, masked Cursed Tongue delivery with an electronic censor beep, ready-but-paused spectator buffering, audible-clock mouth animation, a paint-contained live stage, premium host-and-premise show identities with cohesive character, concept, and broadcast cues, performance-colored audience ratings, quiet replay-provenanced listener backchannels, private-safe Mumbling interruptions and reaction speech, timed Mute dead air with a terse six-dot public mark, guaranteed awkward-duration reactions, and hard cuts, replay-safe Identity Crisis presentation as The real target with name/eye/mouth/Ink/glyph overlays that keep persona/voice while copying eligible public Powers, and Confusion Collin's one-time booked-guest impostor curtain reveal as The real guest with soft episode tension plus a protected substantive interview exchange when Copycat echoes it, Shapeshifter persona/visual copying with holder-owned voice and target Accent Map overlay but no Power transfer, quoted borrowed names and occasional observer voice-mismatch notice, session last names, replay-safe form changes, exact on-air producer quotes, Power-permissive encounters, and phosphor-hue prejudice between host and guest. |
-| Debate  | v0.59   | Preview            | Forum, Turnabout, Whodunnit, and Flyting proceedings share frozen routing, consent, Powers, durability, Archive, and terse six-dot timed Mute presentation. Identity Crisis presents the holder as The real target while retaining persona/voice and copying eligible public Powers; Shapeshifter retains holder voice identity and never copies target Powers. LOCAL remains a hard offline boundary. |
+| Debate  | v0.60   | Preview            | Forum, Turnabout, Whodunnit, and Flyting proceedings share frozen routing, consent, Powers, durability, Archive, and terse six-dot timed Mute presentation. Identity Crisis presents the holder as The real target while retaining persona/voice and copying eligible public Powers; Shapeshifter retains holder voice identity and never copies target Powers. LOCAL remains a hard offline boundary. |
 | Polling | v0.0    | Planned            | AI-powered polling across bot groups.                                                                                                                                                                                                                                                                       |
 | Feed    | v0.0    | Planned            | BotBook-style social feed.                                                                                                                                                                                                                                                                                  |
 | Games   | v0.0    | Planned            | Boardgame-like bot matches.                                                                                                                                                                                                                                                                                 |
@@ -290,6 +290,21 @@ stages do not block the standalone preview.
   activates.
 
 ## Changelog
+
+### 2026-09-03
+
+- Advanced `Debate` to `v0.60`. Whodunnit dialogue follows one gesture
+  contract for every speaker: a click on streaming text fills it, the next
+  click dismisses it, and a Talk or Present exchange never moves to the next
+  speaker until the current line is dismissed. Player observations are one
+  typed box that holds a set size from its first frame and is heard: Babble
+  falls back to the account's Prism default voice as the investigator's
+  stand-in, plays at broadcast volume, and ducks the room bed like spoken
+  lines. Talk and Present stage a two-shot (suspect right,
+  investigator sliding in left) with the investigator thinking while a
+  question is prepared and the suspect thinking on the handoff beat. Present
+  is a drawer of physical items: click one for its blurb, drag it onto the
+  suspect or use Ask to present it.
 
 ### 2026-08-30
 

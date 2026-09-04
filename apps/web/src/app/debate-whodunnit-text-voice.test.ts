@@ -77,6 +77,6 @@ test("keeps embodied player Babble and spoken character TTS distinct", () => {
   );
   assert.match(
     mysterySource,
-    /voiceProfile: roomPlayerObservationActive\s*\? prosecutorBot\?\.voiceProfile \?\? null\s*: null/u,
+    /voiceProfile: roomPlayerObservationActive\s*\? prosecutorBot\?\.voiceProfile \?\? props\.playerVoiceProfile \?\? null\s*: null/u,
   );
 });

@@ -802,6 +802,25 @@ export function revealDebateMysteryAssetV1(
   return rowRef(assetRow(db, userId, sessionId, kind, subjectId)!);
 }
 
+/** A derivative prepared after its base was already revealed inherits that
+ * reveal, so the file route can serve it without another room entry. A base
+ * that is still sealed keeps the derivative sealed too. */
+export function inheritDebateMysteryAssetRevealV1(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  kind: DebateMysterySealedAssetKindV1,
+  baseSubjectId: string,
+  derivativeSubjectId: string,
+): DebateMysterySealedAssetRefV1 | null {
+  const base = assetRow(db, userId, sessionId, kind, baseSubjectId);
+  if (!base?.revealed_at) {
+    const derivative = assetRow(db, userId, sessionId, kind, derivativeSubjectId);
+    return derivative ? rowRef(derivative) : null;
+  }
+  return revealDebateMysteryAssetV1(db, userId, sessionId, kind, derivativeSubjectId);
+}
+
 export function resetDebateMysteryAssetRevealsV1(
   db: DatabaseSync,
   userId: string,

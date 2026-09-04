@@ -1,11 +1,14 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
+  MANSION_LAYOUT_V2_MAX_EFFECTS,
   MANSION_LAYOUT_V2_MAX_LIGHTS,
   MANSION_LIGHT_BLEND_MODES_V1,
+  MANSION_ROOM_EFFECT_KINDS_V1,
   validateMansionLayoutV2,
   type MansionDynamicLightV2,
   type MansionLayoutV2,
   type MansionLightBlendModeV1,
+  type MansionRoomEffectV1,
 } from "@localai/shared";
 import { getDebateSession } from "./debate.ts";
 import { commitDebateMysterySceneRepairV1 } from "./debate-mystery-v2.ts";
@@ -13,8 +16,8 @@ import { HttpError } from "./utils.http.ts";
 
 /** Validate only the submitted room's presentation; never accept a replacement case/layout. */
 export function validateRoomLightingEditV1(layout: MansionLayoutV2, roomId: string, input: Record<string, unknown>) {
-  if (Object.keys(input).some((key) => !["roomId", "lights", "blendMode"].includes(key))) {
-    throw new HttpError(400, "Light placement accepts only a room, lights, and blend mode.");
+  if (Object.keys(input).some((key) => !["roomId", "lights", "effects", "blendMode"].includes(key))) {
+    throw new HttpError(400, "Light placement accepts only a room, lights, effects, and blend mode.");
   }
   if (!layout.entities.some((entity) => entity.kind === "room" && entity.id === roomId)) {
     throw new HttpError(409, "This room has no editable lighting layout.");
@@ -31,16 +34,31 @@ export function validateRoomLightingEditV1(layout: MansionLayoutV2, roomId: stri
     }
   }
   const lights = structuredClone(input.lights) as MansionDynamicLightV2[];
-  // Use the canonical layout validator, isolating these lights from unrelated legacy metadata.
+  // Effects are additive: an older client that omits them leaves the room's effects untouched.
+  let effects: MansionRoomEffectV1[] | undefined;
+  if (input.effects !== undefined) {
+    if (!Array.isArray(input.effects) || input.effects.length > MANSION_LAYOUT_V2_MAX_EFFECTS) {
+      throw new HttpError(400, `Choose at most ${MANSION_LAYOUT_V2_MAX_EFFECTS} room effects.`);
+    }
+    const otherEffectIds = new Set((layout.effects ?? []).filter((effect) => effect.roomId !== roomId).map((effect) => effect.id));
+    for (const effect of input.effects) {
+      if (!effect || typeof effect !== "object" || effect.roomId !== roomId || otherEffectIds.has(effect.id) ||
+        !(MANSION_ROOM_EFFECT_KINDS_V1 as readonly string[]).includes(effect.kind) || !effect.geometry) {
+        throw new HttpError(400, "Every effect must belong to this room and have valid geometry.");
+      }
+    }
+    effects = structuredClone(input.effects) as MansionRoomEffectV1[];
+  }
+  // Use the canonical layout validator, isolating this room's lights and effects from unrelated legacy metadata.
   let errors: string[];
   try {
-    const baseline = new Set(validateMansionLayoutV2({ ...layout, lights: [] }));
-    errors = validateMansionLayoutV2({ ...layout, lights }).filter((error) => !baseline.has(error));
+    const baseline = new Set(validateMansionLayoutV2({ ...layout, lights: [], effects: [] }));
+    errors = validateMansionLayoutV2({ ...layout, lights, effects: effects ?? [] }).filter((error) => !baseline.has(error));
   } catch {
-    throw new HttpError(400, "A light has malformed presentation settings.");
+    throw new HttpError(400, "A light or effect has malformed presentation settings.");
   }
   if (errors.length) throw new HttpError(400, errors[0]!);
-  return { lights, blendMode: input.blendMode as MansionLightBlendModeV1 };
+  return { lights, effects, blendMode: input.blendMode as MansionLightBlendModeV1 };
 }
 
 /** A purely local edit: same player and visited-room gates as other field repairs. */
@@ -55,5 +73,6 @@ export function saveDebateMysteryRoomLightingV1(db: DatabaseSync, userId: string
   const edit = validateRoomLightingEditV1(layout, roomId, input);
   return commitDebateMysterySceneRepairV1(db, userId, sessionId, {
     action: "refresh_room_lights", roomId, lights: edit.lights, lightBlendMode: edit.blendMode,
+    ...(edit.effects ? { effects: edit.effects } : {}),
   });
 }

@@ -13,6 +13,7 @@ import {
   exportDebateMysteryAssetVaultBackupV1,
   getRevealedDebateMysteryAssetFileV1,
   importDebateMysteryAssetVaultBackupV1,
+  inheritDebateMysteryAssetRevealV1,
   normalizeDebateMysteryAssetVisionReviewV1,
   replaceDebateMysteryAssetWithPendingV1,
   requeueRetryableDebateMysteryAssetFallbacksV1,
@@ -668,6 +669,50 @@ describe("sealed Whodunnit asset vault", () => {
     assert.equal(retried.length, 1);
     assert.equal(retried[0]?.asset.status, "pending");
     db.close();
+  });
+
+  it("lets a derivative prepared after its base was revealed inherit that reveal", async () => {
+    const db = vaultDb();
+    const userKey = randomBytes(32);
+    const bytes = await roomPng();
+    const seal = (subjectId: string) => sealDebateMysteryAssetBytesV1(db, userKey, {
+      userId: "user-1",
+      sessionId: "case-1",
+      kind: "room",
+      subjectId,
+      bytes,
+      provider: "openai",
+      model: "gpt-image-1",
+      review: { attempt: 1, vision: { approved: true } },
+    });
+    seal("room-1");
+    seal("illustrated:room-1");
+
+    // A sealed base keeps its derivative sealed: discovery still happens by entering the room.
+    assert.equal(
+      inheritDebateMysteryAssetRevealV1(db, "user-1", "case-1", "room", "room-1", "illustrated:room-1")?.revealed,
+      false,
+    );
+    assert.throws(
+      () => getRevealedDebateMysteryAssetFileV1(db, userKey, "user-1", "case-1", "room", "illustrated:room-1"),
+      /not been revealed/u,
+    );
+
+    // Once the base is revealed, a derivative prepared afterwards serves without another room entry.
+    revealDebateMysteryAssetV1(db, "user-1", "case-1", "room", "room-1");
+    assert.equal(
+      inheritDebateMysteryAssetRevealV1(db, "user-1", "case-1", "room", "room-1", "illustrated:room-1")?.revealed,
+      true,
+    );
+    assert.equal(
+      getRevealedDebateMysteryAssetFileV1(db, userKey, "user-1", "case-1", "room", "illustrated:room-1").sha256,
+      createHash("sha256").update(bytes).digest("hex"),
+    );
+    // The upgrade pipeline applies it right after sealing an illustrated derivative.
+    assert.match(
+      serverSource,
+      /sealDebateMysteryAssetBytesV1\(db, userKey, \{[\s\S]{0,1200}?inheritDebateMysteryAssetRevealV1\(db, userId, sessionId, "room", room\.id, subjectId\)/u,
+    );
   });
 
   it("reuses ciphertext for Play Again while resetting semantic authorization", async () => {

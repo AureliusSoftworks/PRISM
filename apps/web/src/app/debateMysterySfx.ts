@@ -37,6 +37,9 @@ export interface DebateMysterySfxVoice {
 }
 
 export const DEBATE_MYSTERY_TEXT_VOICE_VOLUME_RATIO = 0.28;
+/** A player observation is the investigator speaking, so it carries at closer
+ * to full voice volume than the quiet accompaniment under other written lines. */
+export const DEBATE_MYSTERY_PLAYER_OBSERVATION_VOICE_VOLUME_RATIO = 0.6;
 /** @deprecated Prefer the mode-neutral text voice ratio. */
 export const DEBATE_MYSTERY_TEXT_BOTTISH_VOLUME_RATIO =
   DEBATE_MYSTERY_TEXT_VOICE_VOLUME_RATIO;
@@ -188,7 +191,11 @@ export async function playDebateMysteryTextVoice(args: {
     !args.text.trim()
   ) return false;
   try {
-    const playbackVolume = volume * DEBATE_MYSTERY_TEXT_VOICE_VOLUME_RATIO;
+    const playbackVolume = volume * (
+      args.instant
+        ? DEBATE_MYSTERY_PLAYER_OBSERVATION_VOICE_VOLUME_RATIO
+        : DEBATE_MYSTERY_TEXT_VOICE_VOLUME_RATIO
+    );
     if (args.play) {
       return args.play({
         instant: args.instant,

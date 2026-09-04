@@ -2576,7 +2576,7 @@ export function initializeDatabase(
       bundle_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
       asset_id TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('room', 'prop', 'music', 'presentation')),
+      role TEXT NOT NULL CHECK(role IN ('room', 'prop', 'music', 'presentation', 'map')),
       logical_id TEXT NOT NULL,
       created_at TEXT NOT NULL,
       PRIMARY KEY(bundle_id, role, logical_id),
@@ -3075,6 +3075,55 @@ export function initializeDatabase(
         ON model_reasoning_effort_preferences(user_id, updated_at DESC);
       COMMIT;
     `);
+  }
+  // Deck plans introduced the 'map' asset role. SQLite cannot widen a CHECK in
+  // place, so an older refs table is rebuilt once with every row carried over.
+  const mansionAssetRefsTable = db
+    .prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'debate_mystery_mansion_asset_refs'",
+    )
+    .get() as { sql?: string } | undefined;
+  if (mansionAssetRefsTable?.sql && !mansionAssetRefsTable.sql.includes("'map'")) {
+    // RENAME makes SQLite reparse every persistent trigger in main, which fails
+    // while Core Vault's TEMP views shadow their physical tables. Suspend the
+    // views for the rebuild exactly as the image proxy migration does.
+    const refsMigrationCoreViews = suspendCoreContentVaultViewsV2(db);
+    const refsMigrationAuthView = suspendAccountAuthVaultViewV2(db);
+    try {
+    db.exec(`
+      BEGIN IMMEDIATE;
+      ALTER TABLE debate_mystery_mansion_asset_refs
+        RENAME TO debate_mystery_mansion_asset_refs_legacy;
+      DROP INDEX IF EXISTS idx_debate_mystery_mansion_asset_refs_asset;
+      CREATE TABLE debate_mystery_mansion_asset_refs (
+        bundle_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        asset_id TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('room', 'prop', 'music', 'presentation', 'map')),
+        logical_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(bundle_id, role, logical_id),
+        FOREIGN KEY(bundle_id) REFERENCES debate_mystery_mansion_bundles(id) ON DELETE CASCADE,
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY(asset_id) REFERENCES debate_mystery_mansion_assets(id) ON DELETE RESTRICT
+      );
+      INSERT INTO debate_mystery_mansion_asset_refs (
+        bundle_id, user_id, asset_id, role, logical_id, created_at
+      )
+      SELECT bundle_id, user_id, asset_id, role, logical_id, created_at
+        FROM debate_mystery_mansion_asset_refs_legacy;
+      DROP TABLE debate_mystery_mansion_asset_refs_legacy;
+      CREATE INDEX idx_debate_mystery_mansion_asset_refs_asset
+        ON debate_mystery_mansion_asset_refs(user_id, asset_id);
+      COMMIT;
+    `);
+    } catch (error) {
+      if (db.isTransaction) db.exec("ROLLBACK;");
+      throw error;
+    } finally {
+      if (refsMigrationAuthView) installAccountAuthVaultViewV2(db);
+      if (refsMigrationCoreViews) installCoreContentVaultViewsV2(db);
+    }
   }
   const mysteryV2CaseColumns = new Set(
     (db.prepare("PRAGMA table_info(debate_mystery_v2_cases)").all() as Array<{

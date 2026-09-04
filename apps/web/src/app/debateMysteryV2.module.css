@@ -760,12 +760,15 @@
   font-size: 1.4rem;
   font-weight: 500;
 }
+/* Same 2:1 board as the map, so its cells stay square here too. */
 .caseOpeningMansionCanvas {
   position: relative;
   inset: auto;
   align-self: center;
   width: 100%;
-  height: calc(100% - 3rem);
+  height: auto;
+  max-height: calc(100% - 3rem);
+  aspect-ratio: 2 / 1;
   margin-top: 2rem;
 }
 .caseOpeningJourneyRoom {
@@ -1239,6 +1242,47 @@
   mix-blend-mode: screen;
 }
 
+/* Visuals mode: the whole board wears the prism ring that the Visuals button
+ * already carries, movement controls read as paused, and the hint switches to
+ * the mode's own instructions, so asset editing cannot be mistaken for play. */
+.mansionBoard[data-visuals-mode="true"] {
+  border-color: transparent;
+  box-shadow:
+    0 2.4rem 7rem rgba(0, 0, 0, 0.46),
+    0 0 3.5rem color-mix(in srgb, var(--prism-m, #7b5cff) 26%, transparent),
+    inset 0 0 5rem rgba(99, 77, 155, 0.07);
+}
+.mansionBoard[data-visuals-mode="true"]::after {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  content: "";
+  pointer-events: none;
+  padding: 2px;
+  border-radius: inherit;
+  background: linear-gradient(110deg, var(--prism-p, #ff4d6d), var(--prism-r, #ff9f1c) 29%, var(--prism-i, #b7e63a) 60%, var(--prism-s, #2fd3e3) 82%, var(--prism-m, #7b5cff));
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  opacity: 0.92;
+}
+.mansionBoard[data-visuals-mode="true"] .mansionHeading .eyebrow {
+  color: transparent;
+  background: linear-gradient(110deg, var(--prism-p, #ff4d6d), var(--prism-r, #ff9f1c) 29%, var(--prism-i, #b7e63a) 60%, var(--prism-s, #2fd3e3) 82%, var(--prism-m, #7b5cff));
+  -webkit-background-clip: text;
+  background-clip: text;
+  font-weight: 800;
+}
+.mansionRoomDetails[data-visuals-mode="true"] { opacity: 0.72; }
+.mansionRoomDetails[data-visuals-mode="true"] > button:disabled { border-style: dashed; }
+.mansionHint[data-visuals-mode="true"] { color: var(--mystery-cyan); opacity: 0.92; font-weight: 700; }
+.investigationModeBackButton:disabled { opacity: 0.55; cursor: not-allowed; }
+
 .mansionHeading {
   position: relative;
   z-index: 4;
@@ -1246,7 +1290,7 @@
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: end;
   gap: 1rem;
-  width: min(68rem, 100%);
+  width: min(102rem, 100%);
   margin: 0 auto 0.85rem;
 }
 .mansionHeading > div:first-child > strong { display: block; margin-top: 0.15rem; font-family: Georgia, "Times New Roman", serif; font-size: clamp(1.55rem, 2vw, 2.15rem); font-weight: 500; }
@@ -1309,8 +1353,8 @@
 .mansionViewport {
   position: relative;
   align-self: center;
-  height: min(100cqh, 75cqw, 51rem);
-  aspect-ratio: 4 / 3;
+  height: min(100cqh, 50cqw, 51rem);
+  aspect-ratio: 2 / 1;
   min-height: 0;
   max-width: 100%;
   margin: auto;
@@ -1379,6 +1423,37 @@
   transform: rotateX(3deg) rotateZ(-1.8deg) scale(0.955);
 }
 
+/* Overhead exterior: the venue seen from above, laid under the tiles inside the map's
+ * rounded widescreen frame. The layer clips and fades only the outer edges, wide enough
+ * that a hull running the length of the board keeps its bow and stern; the plane mirrors
+ * the canvas tilt so the structure stays registered with the rooms. */
+.mansionOverheadLayer { position: absolute; z-index: 0; inset: 0; overflow: hidden; border-radius: 1.25rem; pointer-events: none; -webkit-mask-image: radial-gradient(ellipse 92% 88% at 50% 50%, #000 58%, transparent 100%); mask-image: radial-gradient(ellipse 92% 88% at 50% 50%, #000 58%, transparent 100%); }
+/* With a real exterior under the tiles the chart's slant comes off: deck and tiles sit
+ * level, and the plane keeps the canvas transform so they stay registered. */
+.mansionOverheadPlane { position: absolute; inset: 3%; width: 94%; height: 94%; transform: rotateX(3deg) scale(0.965); transform-style: preserve-3d; }
+.mansionCanvas[data-deck-plan="true"] { transform: rotateX(3deg) scale(0.965); }
+/* Dark theme: the plate recedes a little and needs no scrim. Light theme: it brightens
+ * and takes a soft paper wash so ship and water sit in the board like a faded chart. */
+.mansionDeckPlan { position: absolute; display: block; object-fit: fill; pointer-events: none; user-select: none; filter: saturate(0.8) brightness(0.9); animation: mansionArrival 360ms cubic-bezier(.2, .78, .2, 1) both; transition: opacity 180ms ease; }
+.mansionOverheadScrim { position: absolute; inset: -20%; pointer-events: none; display: none; }
+.investigation[data-theme="light"] .mansionDeckPlan { filter: saturate(0.65) brightness(1.08) contrast(0.92); }
+.investigation[data-theme="light"] .mansionOverheadScrim { display: block; background: rgba(246, 243, 252, 0.3); }
+.investigation[data-theme="light"] .mansionOverheadLayer { -webkit-mask-image: radial-gradient(ellipse 96% 92% at 50% 50%, #000 66%, transparent 100%); mask-image: radial-gradient(ellipse 96% 92% at 50% 50%, #000 66%, transparent 100%); }
+/* The player's placement: pan in board units, then turn and zoom about the board center. */
+.mansionOverheadPlacement { position: absolute; inset: 0; transform-origin: 50% 50%; will-change: transform; }
+/* With an exterior under them the tiles turn to glass, and the ambient blocks that only
+ * dressed the structure outside the room cluster go; blocks between rooms stay. */
+.mansionCanvas[data-deck-plan="true"] .mansionRoom { background: linear-gradient(150deg, rgba(47, 49, 59, 0.62), rgba(20, 24, 31, 0.7)); }
+.mansionCanvas[data-deck-plan="true"] .mansionCorridor { background: repeating-linear-gradient(90deg, rgba(229, 199, 137, 0.05) 0 0.35rem, transparent 0.35rem 0.7rem), linear-gradient(145deg, rgba(33, 35, 44, 0.5), rgba(13, 16, 22, 0.58)); }
+.mansionCanvas[data-deck-plan="true"] .mansionAmbientSpace { --ambient-floor-top: rgba(41, 43, 52, 0.5); --ambient-floor-bottom: rgba(18, 21, 28, 0.58); }
+.mansionCanvas[data-deck-plan="true"] .mansionAmbientSpace[data-exterior="true"] { display: none; }
+.mansionPlanAdjust { margin-left: 0.4rem; padding: 0.3rem 0.65rem; border: 1px solid rgba(102, 229, 234, 0.38); border-radius: 999px; background: rgba(8, 10, 17, 0.7); color: var(--mystery-cyan); font-size: 0.66rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; }
+.mansionPlanAdjust:disabled { opacity: 0.5; cursor: default; }
+.investigation[data-theme="light"] .mansionPlanAdjust { background: var(--v2-field, #fff); }
+.mansionCanvas[data-deck-plan="true"] .mansionRoom > strong, .mansionCanvas[data-deck-plan="true"] .mansionRoom > small { text-shadow: 0 1px 2px #000, 0 0 0.6rem #000, 0 0 1.1rem rgba(0, 0, 0, 0.85); }
+.investigation[data-theme="light"] .mansionCanvas[data-deck-plan="true"] .mansionRoom > strong, .investigation[data-theme="light"] .mansionCanvas[data-deck-plan="true"] .mansionRoom > small { text-shadow: 0 1px 2px rgba(255, 255, 255, 0.9), 0 0 0.6rem #fff, 0 0 1rem rgba(255, 255, 255, 0.85); }
+.mansionPlanToggle { display: inline-flex; align-items: center; gap: 0.4rem; margin-left: 0.6rem; color: var(--v2-muted, #b9b3c6); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.mansionPlanToggle input[type="range"] { width: 5rem; }
 .venueHullOutline {
   position: absolute;
   z-index: -1;
@@ -1475,30 +1550,58 @@
   box-shadow: inset 0 0 1rem rgba(255, 225, 170, 0.035), 0.25rem 0.3rem 0 rgba(4, 5, 9, 0.62);
   pointer-events: none;
 }
+/* Ambient spaces wear the same room silhouette as a semantic room (wall, lit
+ * top edge, side face, drop) but stay quieter and inert: no label, no hover,
+ * no route. A player reads them as rooms that cannot be entered. */
 .mansionAmbientSpace {
-  --ambient-floor-top: #303139;
-  --ambient-floor-bottom: #20242b;
-  --ambient-wall: #61636a;
+  --ambient-floor-top: rgba(41, 43, 52, 0.96);
+  --ambient-floor-bottom: rgba(18, 21, 28, 0.98);
+  --ambient-wall: rgba(216, 197, 166, 0.2);
+  --ambient-bevel: rgba(238, 217, 179, 0.2);
+  --ambient-face-top: #1c1720;
+  --ambient-face-bottom: #08090e;
   position: absolute;
   z-index: 0;
   display: block;
   box-sizing: border-box;
-  overflow: hidden;
-  border: 2px solid var(--ambient-wall);
-  border-top-width: 4px;
-  border-left-width: 3px;
-  border-radius: 0.13rem;
-  background: linear-gradient(145deg, var(--ambient-floor-top), var(--ambient-floor-bottom));
-  box-shadow: inset 2px 3px 5px #0004, 2px 3px 0 #05070b80;
-  opacity: 0.76;
+  overflow: visible;
+  border: 1px solid var(--ambient-wall);
+  border-radius: 0.34rem;
+  background: linear-gradient(150deg, var(--ambient-floor-top), var(--ambient-floor-bottom));
+  box-shadow:
+    inset 0 0 1.7rem rgba(255, 232, 183, 0.02),
+    0.35rem 0.42rem 0 rgba(4, 5, 9, 0.62),
+    0.6rem 0.8rem 1.25rem rgba(0, 0, 0, 0.26);
+  opacity: 0.9;
   pointer-events: none;
   user-select: none;
 }
+.mansionAmbientSpace::before {
+  position: absolute;
+  inset: -1px;
+  content: "";
+  pointer-events: none;
+  border-top: 4px solid var(--ambient-bevel);
+  border-left: 4px solid color-mix(in srgb, var(--ambient-bevel) 55%, transparent);
+  border-radius: inherit;
+}
+.mansionAmbientSpace::after {
+  position: absolute;
+  right: -0.42rem;
+  bottom: -0.42rem;
+  width: 0.42rem;
+  height: calc(100% - 0.2rem);
+  content: "";
+  pointer-events: none;
+  opacity: 0.6;
+  background: linear-gradient(180deg, var(--ambient-face-top), var(--ambient-face-bottom));
+  clip-path: polygon(0 0, 100% 8%, 100% 100%, 0 94%);
+}
 .mansionAmbientSpace[data-pattern="inboard-compartment"] {
-  --ambient-floor-top: #343337;
+  --ambient-floor-top: rgba(45, 44, 50, 0.96);
 }
 .mansionAmbientSpace[data-pattern="closed-volume"] {
-  --ambient-floor-top: #30363c;
+  --ambient-floor-top: rgba(40, 46, 54, 0.96);
 }
 
 .mansionRoom::before {
@@ -1646,7 +1749,7 @@
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 0.55rem 1.2rem;
-  width: min(68rem, 100%);
+  width: min(102rem, 100%);
   box-sizing: border-box;
   margin: 0.85rem auto 0;
   padding: 0.7rem 0.85rem;
@@ -1744,7 +1847,7 @@
   cursor: pointer;
 }
 .saveMansionButton[data-state="saved"] { border-color: rgba(107, 231, 201, 0.72); background: rgba(32, 111, 94, 0.48); }
-.mansionHint { position: absolute; left: max(1.55rem, calc((100% - 68rem) / 2)); bottom: 5.45rem; margin: 0; color: var(--mystery-muted); font-size: 0.7rem; opacity: 0.66; }
+.mansionHint { position: absolute; left: max(1.55rem, calc((100% - 102rem) / 2)); bottom: 5.45rem; margin: 0; color: var(--mystery-muted); font-size: 0.7rem; opacity: 0.66; }
 
 .roomVisualDialogBackdrop {
   position: fixed;
@@ -2118,11 +2221,22 @@
   transform: translateX(-50%);
   pointer-events: none;
   animation: roomActorReveal 320ms ease-out both;
-  transition: transform 420ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 260ms ease;
+  transition: left 420ms cubic-bezier(0.2, 0.8, 0.2, 1), transform 420ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 260ms ease, filter 220ms ease;
 }
 @keyframes roomActorReveal { from { opacity: 0; } to { opacity: 1; } }
 .roomActor[data-prosecutor-speaking="true"]:not(.roomProsecutorActor) { opacity: 0.78; transform: translateX(-40%) translateY(0.4rem) scale(0.9); }
 .roomProsecutorActor { z-index: 4; }
+/* Talk / Present two-shot: the suspect steps right, the investigator slides in
+   from the left, and whoever is not speaking sits back a touch. */
+.roomActor[data-staging="two-shot"]:not(.roomProsecutorActor) { left: 60%; transform: translateX(-50%) scale(0.94); }
+.roomProsecutorActor[data-staging="two-shot"] { left: 25%; transform: translateX(-50%) scale(0.9); animation: prosecutorSlideIn 420ms cubic-bezier(0.2, 0.85, 0.25, 1) both; }
+.roomActor[data-staging="two-shot"][data-interrogation-phase="prosecutor_entrance"],
+.roomActor[data-staging="two-shot"][data-interrogation-phase="suspect_entrance"] { animation-name: roomActorReveal; }
+.roomActor[data-staging="two-shot"][data-thinking="true"] { filter: drop-shadow(0 1.5rem 2rem rgba(0, 0, 0, 0.56)) drop-shadow(0 0 1.1rem color-mix(in srgb, var(--actor-color), transparent 55%)); }
+@keyframes prosecutorSlideIn { from { opacity: 0; transform: translateX(-130%) scale(0.9); } to { opacity: 1; transform: translateX(-50%) scale(0.9); } }
+/* Present drag: the suspect lights up as a drop target. */
+.roomActor[data-drop-target="armed"] { filter: drop-shadow(0 1.5rem 2rem rgba(0, 0, 0, 0.56)) drop-shadow(0 0 1.2rem rgba(192, 165, 255, 0.5)); }
+.roomActor[data-drop-target="hover"] { filter: drop-shadow(0 1.5rem 2rem rgba(0, 0, 0, 0.56)) drop-shadow(0 0 2rem rgba(192, 165, 255, 0.95)) brightness(1.08); }
 .roomActor[data-interrogation-phase="prosecutor_entrance"], .roomActor[data-interrogation-phase="suspect_entrance"] { animation: interrogationEntrance 420ms cubic-bezier(0.2, 0.85, 0.25, 1) both; }
 @keyframes interrogationEntrance { from { opacity: 0; transform: translateX(-50%) translateY(1.4rem) scale(0.94); } to { opacity: 1; transform: translateX(-50%) scale(1); } }
 
@@ -2223,6 +2337,18 @@
     100% var(--examine-grid-cell-height);
   pointer-events: none;
   transform: none;
+  /* The grid crossfades to alpha radially on both axes: full strength across
+     the middle of the room, fading out toward every edge and clear in the
+     corners, so it never sits under the floating title, commands, and buttons. */
+  --examine-grid-mask: radial-gradient(
+    ellipse 62% 62% at 50% 50%,
+    #000 40%,
+    rgba(0, 0, 0, 0.85) 60%,
+    rgba(0, 0, 0, 0.25) 82%,
+    transparent 100%
+  );
+  -webkit-mask-image: var(--examine-grid-mask);
+  mask-image: var(--examine-grid-mask);
 }
 .examinationGrid i {
   position: absolute;
@@ -2287,6 +2413,13 @@
 
 .dialogueBox small, .courtReaction strong { color: color-mix(in srgb, var(--dialogue-accent), white 28%); font-weight: 800; }
 .dialogueBox p, .courtReaction p { margin: 0.35rem 0 0; line-height: 1.45; }
+/* A set width and height from the moment the box appears: the full line
+   reserves the paragraph invisibly while the typewriter paints over it, and a
+   floor keeps short observations from shrinking the box. */
+.dialogueBox { min-height: 7.6rem; }
+.dialogueText { position: relative; }
+.dialogueTextReserve { visibility: hidden; }
+.dialogueTextRevealed { position: absolute; inset: 0; }
 .dialogueBox[data-speaker="persona"] {
   border-color: color-mix(in srgb, var(--dialogue-accent, #a98cff), transparent 48%);
   background:
@@ -2343,6 +2476,10 @@
   text-transform: uppercase;
   animation: observationContinuePulse 1.6s ease-in-out infinite;
 }
+.dialogueContinueHint[data-pending="true"] { visibility: hidden; animation: none; }
+/* Between speakers the box is dismissed while the suspect thinks; the modal
+   stays mounted so a stray click lands nowhere. */
+.dialogueBox[data-handoff="true"] { visibility: hidden; }
 @keyframes observationContinuePulse { 50% { opacity: 0.55; } }
 @keyframes casekeeperThinkingDots {
   0%, 32% { width: 1ch; }
@@ -2579,6 +2716,31 @@
 .recordGrid button > span { font-size: 1.5rem; }
 .recordGrid button small { color: #aaa5b6; line-height: 1.3; }
 .recordAssetImage { width: 3.5rem; height: 3.5rem; object-fit: contain; }
+/* Present as a drawer of physical items: click for a blurb, drag onto the suspect to ask. */
+.itemDrawer { animation: drawerIn 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes drawerIn { from { opacity: 0; transform: translateX(2.4rem); } }
+.itemDrawerHelp { margin: -0.2rem 0 0.9rem; color: #aaa5b6; font-size: 0.78rem; line-height: 1.45; }
+.itemShelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(6.4rem, 1fr)); gap: 0.5rem; }
+.itemShelf > p { grid-column: 1 / -1; margin: 0; color: #aaa5b6; }
+.itemTile { display: grid; justify-items: center; gap: 0.3rem; padding: 0.7rem 0.45rem 0.6rem; text-align: center; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 0.8rem; background: rgba(255, 255, 255, 0.035); color: inherit; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+.itemTile:hover, .itemTile:focus-visible { border-color: #a98cff; }
+.itemTile[data-selected="true"] { border-color: #c0a5ff; background: rgba(169, 140, 255, 0.14); }
+.itemTile[data-dragging="true"] { opacity: 0.35; cursor: grabbing; }
+.itemTile:disabled { cursor: not-allowed; opacity: 0.55; }
+.itemTile > span[aria-hidden] { font-size: 2.2rem; line-height: 3.5rem; }
+.itemTile strong { font-size: 0.78rem; line-height: 1.25; }
+.itemTile small { color: #817b8b; font-size: 0.62rem; font-weight: 750; letter-spacing: 0.06em; text-transform: uppercase; }
+.itemBlurb { display: grid; gap: 0.55rem; margin-top: 0.8rem; padding: 0.85rem; border: 1px solid rgba(192, 165, 255, 0.34); border-radius: 0.8rem; background: rgba(169, 140, 255, 0.08); }
+.itemBlurb h3 { margin: 0; font-size: 1rem; }
+.itemBlurb p { margin: 0; color: #cfc9dc; font-size: 0.86rem; line-height: 1.45; }
+.itemBlurb small { color: #aaa5b6; font-size: 0.72rem; }
+.itemBlurb button { justify-self: start; padding: 0.55rem 0.85rem; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 0.6rem; background: rgba(255, 255, 255, 0.06); color: inherit; cursor: pointer; }
+.itemBlurb button:hover { border-color: #a98cff; }
+.itemBlurb button:disabled { cursor: not-allowed; opacity: 0.55; }
+.itemDragGhost { position: fixed; z-index: 60; display: grid; justify-items: center; gap: 0.25rem; width: 6.4rem; padding: 0.55rem; border: 1px solid rgba(192, 165, 255, 0.6); border-radius: 0.8rem; background: rgba(10, 12, 23, 0.94); box-shadow: 0 1rem 2.5rem rgba(0, 0, 0, 0.55); transform: translate(-50%, -50%) rotate(-3deg); pointer-events: none; }
+.itemDragGhost img { width: 3.2rem; height: 3.2rem; object-fit: contain; }
+.itemDragGhost > span[aria-hidden] { font-size: 2rem; line-height: 3.2rem; }
+.itemDragGhost strong { font-size: 0.72rem; text-align: center; }
 
 .fileChargesButton {
   position: fixed;
@@ -3446,6 +3608,13 @@
   mix-blend-mode: multiply;
 }
 
+.investigation[data-theme="light"] .mansionBoard[data-visuals-mode="true"] {
+  box-shadow:
+    0 2rem 5.5rem rgba(49, 70, 91, 0.16),
+    0 0 3rem rgba(106, 75, 192, 0.22),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.72);
+}
+
 .investigation[data-theme="light"] .mansionFloorPicker button,
 .investigation[data-theme="light"] .mansionRoomDetails,
 .investigation[data-theme="light"] .mansionTravelSkip span {
@@ -3504,19 +3673,25 @@
 }
 
 .investigation[data-theme="light"] .mansionAmbientSpace {
-  --ambient-floor-top: #d6d2c8;
-  --ambient-floor-bottom: #bcc6c7;
-  --ambient-wall: #8b999d;
-  box-shadow: inset 2px 3px 5px #56677325, 2px 3px 0 #62768145;
-  opacity: 0.78;
+  --ambient-floor-top: #dcd8cf;
+  --ambient-floor-bottom: #c3cccd;
+  --ambient-wall: rgba(75, 96, 116, 0.34);
+  --ambient-bevel: rgba(255, 255, 255, 0.62);
+  --ambient-face-top: #9aa7b0;
+  --ambient-face-bottom: #6f7f8b;
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.4),
+    0.35rem 0.42rem 0 rgba(60, 82, 97, 0.16),
+    0.6rem 0.8rem 1.25rem rgba(49, 70, 91, 0.1);
+  opacity: 0.92;
 }
 
 .investigation[data-theme="light"] .mansionAmbientSpace[data-pattern="inboard-compartment"] {
-  --ambient-floor-top: #dad0bf;
+  --ambient-floor-top: #e0d6c6;
 }
 
 .investigation[data-theme="light"] .mansionAmbientSpace[data-pattern="closed-volume"] {
-  --ambient-floor-top: #cad4d5;
+  --ambient-floor-top: #d0dadb;
 }
 
 .investigation[data-theme="light"] .mansionCorridor {
@@ -3932,6 +4107,8 @@
   .roomActor[data-prosecutor-speaking="true"] { opacity: 1; transform: translateX(-50%); }
   .roomActor,
   .roomActor[data-interrogation-phase] { animation: none; }
+  .roomProsecutorActor[data-staging="two-shot"] { animation: none; }
+  .itemDrawer { animation: none; }
   .roomActorDrift { animation: none; transform: none; will-change: auto; }
   .dialogueContinueHint { animation: none; }
   .dialogueBox[data-casekeeper-stage="narration"] { animation: none; }

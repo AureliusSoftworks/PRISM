@@ -1,6 +1,7 @@
 export const WHODUNNIT_INTERROGATION_BEAT_MS = {
   prosecutorEntrance: 420,
-  handoff: 360,
+  /** The suspect visibly thinks here before answering; shorter reads as a flicker. */
+  handoff: 820,
   suspectEntrance: 420,
 } as const;
 
@@ -71,13 +72,14 @@ export function whodunnitInterrogationTerminalWitnessShouldHold(args: {
     (args.phase === "suspect_entrance" || args.phase === "suspect_speaking");
 }
 
-/** Only presentation-complete ordinary Investigation dialogue closes itself.
- * Player-authored observations and a terminal witness answer wait for an
- * explicit gesture. */
+/** Only a standalone, presentation-complete Investigation line closes itself.
+ * A queued exchange never moves to its next speaker on its own, and player
+ * observations and a terminal witness answer wait for an explicit gesture. */
 export function whodunnitInvestigationDialogueShouldAutoAdvance(args: {
   busy: boolean;
   hasActiveAudio: boolean;
   hasDialogue: boolean;
+  hasQueuedDialogue: boolean;
   isPlayerObservation: boolean;
   playPhase: string;
   requiresPlayerInput: boolean;
@@ -88,6 +90,7 @@ export function whodunnitInvestigationDialogueShouldAutoAdvance(args: {
   return args.playPhase === "investigation" &&
     args.roomView === "room" &&
     args.hasDialogue &&
+    !args.hasQueuedDialogue &&
     !args.isPlayerObservation &&
     !args.terminalWitnessHold &&
     !args.busy &&
@@ -314,8 +317,9 @@ export function whodunnitInterrogationAudioOwnsMouth(args: {
 
 /**
  * Resolves one pointer/keyboard gesture without changing the authoritative
- * dialogue queue. A repeated click may advance a line filled by its first
- * click, except when that first click interrupted an automated bot beat.
+ * dialogue queue. Streaming text fills on the first gesture and advances on
+ * the next, for every speaker. A repeated click may advance a line filled by
+ * its first click, except when that first click cut a running line short.
  */
 export function whodunnitDialogueGestureDecision(args: {
   advanceArmed: boolean;
@@ -323,11 +327,9 @@ export function whodunnitDialogueGestureDecision(args: {
   botFillArmed: boolean;
   clickCount: number;
   filledByGesture: boolean;
-  immediateAdvance?: boolean;
   streaming: boolean;
 }): WhodunnitDialogueGestureDecision {
   if (args.clickCount > 1 && (args.advanceArmed || args.botFillArmed)) return "ignore";
-  if (args.immediateAdvance) return "advance";
   if (args.filledByGesture) return "advance";
   if (args.streaming || args.automatedBotPlayback) return "fill";
   return "advance";

@@ -79,6 +79,12 @@ interface PrismBlockingLoaderBaseProps {
   queuedChildren?: ReactNode;
   /** Optional footer actions under the shared footer copy (docked soft waits). */
   footerActions?: ReactNode;
+  /**
+   * Render inside this element instead of `document.body`. A modal `<dialog>`
+   * lives in the top layer, so a body-level overlay would sit beneath it; the
+   * loader must be hosted inside that dialog to cover the viewport above it.
+   */
+  portalTarget?: Element | null;
 }
 
 /** Fullscreen callers must deliberately distinguish refraction from saved preparation. */
@@ -124,6 +130,7 @@ export function PrismBlockingLoader({
   activeChildren,
   queuedChildren,
   footerActions,
+  portalTarget = null,
 }: PrismBlockingLoaderProps): React.JSX.Element | null {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -175,8 +182,10 @@ export function PrismBlockingLoader({
     const previouslyFocused =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const siblingStates = Array.from(document.body.children)
+      // A host that contains the overlay (a top-layer dialog) must stay live,
+      // or the loader inside it would inherit `inert` and lose its cancel focus.
       .filter((element): element is HTMLElement =>
-        element instanceof HTMLElement && element !== overlay,
+        element instanceof HTMLElement && element !== overlay && !element.contains(overlay),
       )
       .map((element) => ({
         element,
@@ -512,7 +521,7 @@ export function PrismBlockingLoader({
             {card}
           </div>
         ),
-        document.body,
+        portalTarget ?? document.body,
       )}
     </>
   );

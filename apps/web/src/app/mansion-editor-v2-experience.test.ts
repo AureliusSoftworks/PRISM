@@ -37,6 +37,19 @@ describe("Mansion Editor V2 experience", () => {
     assert.match(editorSource, /lowerTopFloorRoom/u);
   });
 
+  it("keeps ambient spaces as inaccessible room-like blocks instead of corridors", () => {
+    // Loading must not promote decorative infill into a traversable corridor.
+    assert.doesNotMatch(editorSource, /kind === "infill"\s*\?\s*\{ \.\.\.entity, kind: "corridor"/u);
+    assert.match(editorSource, /\+ Ambient/u);
+    assert.match(editorSource, /kind: "infill",\s*id: stableId\("ambient"\)/u);
+    assert.match(editorSource, /styles\.mansionEditorAmbientBlock/u);
+    assert.match(editorSource, /Ambient spaces never carry doors/u);
+    assert.match(editorSource, /convertBlockKind\(selectedBlock\.id, "infill"\)/u);
+    assert.match(editorSource, /mansionLayoutV2SemanticRoomsAreConnected\(next\)/u);
+    assert.match(mysteryCss, /\.mansionEditorCanvas > \.mansionEditorAmbientBlock \{[^}]*border-style: solid/u);
+    assert.match(mysteryCss, /\.mansionEditorBlockRole/u);
+  });
+
   it("drills into a room for click placement, direct lighting, and source-preserving Pixel Art", () => {
     assert.match(editorSource, /data-tutorial-target="whodunnit-room-editor"/u);
     assert.match(editorSource, /Mosaic is the sole playable room-art base/u);
@@ -87,7 +100,7 @@ describe("Mansion Editor V2 experience", () => {
     assert.match(editorSource, /Floor 1 only/u);
     assert.match(editorSource, /Top floor only/u);
     assert.match(editorSource, /mansionEditorInspector[\s\S]{0,420}mansionEditorRoomPalette/u);
-    assert.match(editorSource, /Remove \{selectedRoom \? "room" : "block"\}/u);
+    assert.match(editorSource, /Remove \{selectedRoom \? "room" : blockLabel\(selectedEntity\)\.toLowerCase\(\)\}/u);
     assert.match(editorSource, /disabled=\{!selectedEntityCanBeRemoved\}/u);
     assert.match(editorSource, /Continue to prepare Mosaic rooms before entering them/u);
     assert.match(editorSource, /title="Validating the venue plan"/u);

@@ -73,6 +73,7 @@ test("auto-advances only settled non-interactive Investigation dialogue", () => 
     busy: false,
     hasActiveAudio: false,
     hasDialogue: true,
+    hasQueuedDialogue: false,
     isPlayerObservation: false,
     playPhase: "investigation",
     requiresPlayerInput: false,
@@ -88,6 +89,11 @@ test("auto-advances only settled non-interactive Investigation dialogue", () => 
   assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance({ ...settled, playPhase: "trial" }), false);
   assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance({ ...settled, roomView: "mansion" }), false);
   assert.equal(whodunnitInvestigationDialogueShouldAutoAdvance({ ...settled, terminalWitnessHold: true }), false);
+  assert.equal(
+    whodunnitInvestigationDialogueShouldAutoAdvance({ ...settled, hasQueuedDialogue: true }),
+    false,
+    "an exchange waits for the player to dismiss each speaker before the next one",
+  );
 });
 
 test("holds the terminal witness answer in every playback mode", () => {
@@ -128,16 +134,15 @@ test("fills streaming dialogue before a later gesture advances it", () => {
   }), "advance");
 });
 
-test("advances player observations on their first gesture even while streaming", () => {
+test("fills a streaming player observation before a later gesture dismisses it", () => {
   assert.equal(whodunnitDialogueGestureDecision({
     advanceArmed: false,
     automatedBotPlayback: false,
     botFillArmed: false,
     clickCount: 1,
     filledByGesture: false,
-    immediateAdvance: true,
     streaming: true,
-  }), "advance");
+  }), "fill");
 });
 
 test("keeps the second half of a bot double-click on the filled line", () => {

@@ -108,6 +108,9 @@ describe("Whodunnit investigation room cinematography", () => {
     assert.match(experience, /const currentRoomImageUrl = currentRoomArtStyle === "illustrated"[\s\S]*currentRoomUpgradeAssetUrl \?\? currentRoomAcceptedUpgradeUrl \?\? currentRoomMosaicUrl/u);
     assert.match(component, /mansionDynamicLightFrameV2\(light, elapsedMs, reducedMotion\)/u);
     assert.match(component, /data-light-source=\{lightSource\}/u);
+    // Lights composite with the room pick; rain and caustics with the FX default on their own root.
+    assert.match(component, /roomLightBlend\(props\.blendMode\)/u);
+    assert.match(component, /data-effect-layer="true"[\s\S]{0,400}"--room-light-blend": MANSION_EFFECT_DEFAULT_BLEND_MODE_V1/u);
     assert.match(component, /window\.cancelAnimationFrame\(animationFrame\)/u);
     assert.match(component, /stageObserver\?\.disconnect\(\)/u);
     assert.match(component, /data-light-motion=\{props\.reducedMotion \? "frozen" : "live"\}/u);

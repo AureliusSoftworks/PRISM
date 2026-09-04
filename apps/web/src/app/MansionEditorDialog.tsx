@@ -106,7 +106,7 @@ interface CorridorResizeV2 {
   edge: "north" | "east" | "south" | "west";
   startX: number;
   startY: number;
-  original: MansionLayoutBlockV2 & { kind: "corridor" };
+  original: MansionLayoutBlockV2;
   baseLayout: MansionLayoutV2;
 }
 
@@ -131,13 +131,10 @@ function cloneLayout(layout: MansionLayoutV2): MansionLayoutV2 {
   return JSON.parse(JSON.stringify(layout)) as MansionLayoutV2;
 }
 
+/** Ambient infill stays infill: it dresses the map like a room and never
+ * carries traversal, so it must not be promoted into a corridor on load. */
 function normalizeEditorLayout(layout: MansionLayoutV2): MansionLayoutV2 {
-  let next: MansionLayoutV2 = {
-    ...cloneLayout(layout),
-    entities: layout.entities.map((entity) => entity.kind === "infill"
-      ? { ...entity, kind: "corridor" as const }
-      : entity),
-  };
+  let next: MansionLayoutV2 = cloneLayout(layout);
   next = reconcileMansionLayoutV2Doors(next);
   for (const entity of next.entities) next = addAutoCenteredMansionLayoutV2Doors(next, entity.id);
   return next;
@@ -154,6 +151,13 @@ function initialLayout(mansion: DebateMysteryMansionBundleSummaryV1): MansionLay
 
 function stableId(prefix: string): string {
   return `${prefix}:${crypto.randomUUID()}`;
+}
+
+/** Player-facing name for a non-room block. Ambient spaces are inaccessible
+ * dressing; corridors carry traversal. */
+function blockLabel(entity: MansionLayoutEntityV2): string {
+  if (entity.kind === "room") return entity.name;
+  return entity.kind === "infill" ? "Ambient space" : "Corridor";
 }
 
 function clampNormalized(value: number): number {
@@ -936,6 +940,51 @@ export default function MansionEditorDialog({
     setNotice(null);
   };
 
+  const addAmbientSpace = (): void => {
+    if (!layout.entities.some((candidate) => candidate.floor === selectedFloor)) {
+      setNotice("Place a room or corridor first. Ambient spaces attach to the floor plan.");
+      return;
+    }
+    const entity: MansionLayoutEntityV2 = {
+      kind: "infill",
+      id: stableId("ambient"),
+      floor: selectedFloor,
+      x: 0,
+      y: 0,
+      width: 2,
+      height: 2,
+    };
+    const next = addEntityToLayout(layout, entity, selectedFloor);
+    if (!next) {
+      setNotice("No legal shared-edge position is available for an ambient space.");
+      return;
+    }
+    commitLayout(next);
+    setSelectedEntityId(entity.id);
+    setNotice(null);
+  };
+
+  /** Swaps a block between corridor and ambient space. Doors follow the kind:
+   * an ambient space sheds them, a corridor gains centered ones. A swap that
+   * would strand a semantic room is refused rather than saved broken. */
+  const convertBlockKind = (entityId: string, kind: "corridor" | "infill"): void => {
+    const entity = layout.entities.find((candidate) => candidate.id === entityId);
+    if (!entity || entity.kind === "room" || entity.kind === kind) return;
+    let next: MansionLayoutV2 = {
+      ...layout,
+      entities: layout.entities.map((candidate): MansionLayoutEntityV2 =>
+        candidate.id === entityId && candidate.kind !== "room" ? { ...candidate, kind } : candidate),
+    };
+    next = reconcileMansionLayoutV2Doors(next);
+    if (kind === "corridor") next = addAutoCenteredMansionLayoutV2Doors(next, entityId);
+    if (!mansionLayoutV2SemanticRoomsAreConnected(next)) {
+      setNotice("That corridor is the only route to a room, so it stayed a corridor.");
+      return;
+    }
+    commitLayout(next);
+    setNotice(null);
+  };
+
   const removeSelectedEntity = (): void => {
     if (!selectedEntity) return;
     if (!selectedEntityCanBeRemoved) {
@@ -1070,7 +1119,7 @@ export default function MansionEditorDialog({
 
   const beginCorridorResize = (
     event: ReactPointerEvent<HTMLSpanElement>,
-    entity: MansionLayoutBlockV2 & { kind: "corridor" },
+    entity: MansionLayoutBlockV2,
     edge: CorridorResizeV2["edge"],
   ): void => {
     if (venueArchitectureLocked) return;
@@ -1141,7 +1190,7 @@ export default function MansionEditorDialog({
   ): void => {
     if (entity.kind === "room") {
       commitLayout(rotateMansionLayoutV2Room(layout, entity.id));
-    } else if (entity.kind === "corridor") {
+    } else {
       commitLayout(placeMansionLayoutV2Entity(layout, entity.id, {
         ...entity,
         width: entity.height,
@@ -1192,7 +1241,7 @@ export default function MansionEditorDialog({
         )}
         <p><strong>Planner contract</strong>{venueArchitectureLocked
           ? `${venueProfile?.kindLabel ?? "Venue"} architecture is frozen to the accepted intent. Rename and dress rooms without replacing its topology.`
-          : "Rooms keep fixed silhouettes. Corridors shape the estate and carry traversal without counting as rooms."}</p>
+          : "Rooms keep fixed silhouettes. Corridors shape the estate and carry traversal without counting as rooms. Ambient spaces dress the map like rooms but stay inaccessible."}</p>
       </aside>
 
       <div className={styles.mansionEditorWorkspace}>
@@ -1216,6 +1265,7 @@ export default function MansionEditorDialog({
             : <div>
                 <button type="button" onClick={() => addRoom()}>+ Room</button>
                 <button type="button" onClick={addCorridor}>+ Corridor</button>
+                <button type="button" onClick={addAmbientSpace} title="Inaccessible dressing that reads as a room on the map">+ Ambient</button>
               </div>}
         </header>
 
@@ -1247,7 +1297,9 @@ export default function MansionEditorDialog({
                   type="button"
                   className={entity.kind === "room"
                     ? styles.mansionEditorRoomBlock
-                    : styles.mansionEditorCorridorBlock}
+                    : entity.kind === "infill"
+                      ? styles.mansionEditorAmbientBlock
+                      : styles.mansionEditorCorridorBlock}
                   data-entity-id={entity.id}
                   data-entity-kind={entity.kind}
                   data-selected={entity.id === selectedEntityId ? "true" : undefined}
@@ -1263,19 +1315,19 @@ export default function MansionEditorDialog({
                   onPointerUp={finishDrag}
                   onPointerCancel={() => setDrag(null)}
                 >
-                  <span aria-hidden="true">{entity.kind === "room" ? entity.emoji : "⇄"}</span>
-                  <strong>{entity.kind === "room" ? entity.name : "Corridor"}</strong>
+                  <span aria-hidden="true">{entity.kind === "room" ? entity.emoji : entity.kind === "infill" ? "◌" : "⇄"}</span>
+                  <strong>{blockLabel(entity)}</strong>
                   <small>{entity.kind === "room" ? `${rect.width}×${rect.height} · ${entity.rotation}°` : `${rect.width}×${rect.height}`}</small>
-                  {entity.kind === "corridor" && !venueArchitectureLocked ? (["north", "east", "south", "west"] as const).map((edge) => (
+                  {entity.kind !== "room" && !venueArchitectureLocked ? (["north", "east", "south", "west"] as const).map((edge) => (
                     <span
                       key={edge}
                       className={styles.mansionEditorCorridorResizeHandle}
                       data-edge={edge}
-                      aria-label={`Resize corridor from ${edge} edge`}
+                      aria-label={`Resize ${blockLabel(entity).toLowerCase()} from ${edge} edge`}
                       role="separator"
                       onPointerDown={(event) => beginCorridorResize(
                         event,
-                        entity as MansionLayoutBlockV2 & { kind: "corridor" },
+                        entity as MansionLayoutBlockV2,
                         edge,
                       )}
                       onPointerMove={continueCorridorResize}
@@ -1365,14 +1417,17 @@ export default function MansionEditorDialog({
         {selectedEntity ? (
           <>
             <header>
-              <span aria-hidden="true">{selectedRoom?.emoji ?? "⇄"}</span>
-              <div><small>{selectedRoom ? "Selected room" : selectedEntity.kind}</small><strong>{selectedRoom?.name ?? selectedEntity.id}</strong></div>
+              <span aria-hidden="true">{selectedRoom?.emoji ?? (selectedEntity.kind === "infill" ? "◌" : "⇄")}</span>
+              <div>
+                <small>{selectedRoom ? "Selected room" : selectedEntity.kind === "infill" ? "Selected ambient space" : "Selected corridor"}</small>
+                <strong>{selectedRoom?.name ?? `${blockLabel(selectedEntity)} · ${selectedBlock?.width ?? 0}×${selectedBlock?.height ?? 0}`}</strong>
+              </div>
             </header>
             <div className={styles.mansionEditorTransformActions}>
               <button
                 type="button"
                 disabled={venueArchitectureLocked}
-                aria-label={`Rotate ${selectedRoom ? "room" : "corridor"} counterclockwise`}
+                aria-label={`Rotate ${blockLabel(selectedEntity).toLowerCase()} counterclockwise`}
                 title="Rotate counterclockwise"
                 onClick={() => rotateEntity(selectedEntity, "counterclockwise")}
               >↶</button>
@@ -1380,7 +1435,7 @@ export default function MansionEditorDialog({
               <button
                 type="button"
                 disabled={venueArchitectureLocked}
-                aria-label={`Rotate ${selectedRoom ? "room" : "corridor"} clockwise`}
+                aria-label={`Rotate ${blockLabel(selectedEntity).toLowerCase()} clockwise`}
                 title="Rotate clockwise"
                 onClick={() => rotateEntity(selectedEntity, "clockwise")}
               >↷</button>
@@ -1417,17 +1472,40 @@ export default function MansionEditorDialog({
               <legend>{selectedRoom ? "Fixed silhouette" : "Block geometry"}</legend>
               <div><span>Horizontal</span><button type="button" disabled={venueArchitectureLocked} onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x - 1, y: selectedEntity.y }))}>←</button><output>{selectedEntity.x + 1}</output><button type="button" disabled={venueArchitectureLocked} onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x + 1, y: selectedEntity.y }))}>→</button></div>
               <div><span>Vertical</span><button type="button" disabled={venueArchitectureLocked} onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x, y: selectedEntity.y - 1 }))}>↑</button><output>{selectedEntity.y + 1}</output><button type="button" disabled={venueArchitectureLocked} onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x, y: selectedEntity.y + 1 }))}>↓</button></div>
-              <p>{venueArchitectureLocked ? "Position frozen by the accepted venue architecture" : selectedRoom ? "Fixed room silhouette" : `${selectedBlock?.width ?? 0}×${selectedBlock?.height ?? 0} corridor · drag an edge to resize`}</p>
+              <p>{venueArchitectureLocked
+                ? "Position frozen by the accepted venue architecture"
+                : selectedRoom
+                  ? "Fixed room silhouette"
+                  : selectedEntity.kind === "infill"
+                    ? `${selectedBlock?.width ?? 0}×${selectedBlock?.height ?? 0} ambient space · drag an edge to resize`
+                    : `${selectedBlock?.width ?? 0}×${selectedBlock?.height ?? 0} corridor · drag an edge to resize`}</p>
             </fieldset>
 
-            <fieldset className={styles.mansionEditorConnections}>
+            {selectedBlock && !venueArchitectureLocked ? (
+              <fieldset className={styles.mansionEditorBlockRole}>
+                <legend>Block role</legend>
+                <button type="button" aria-pressed={selectedBlock.kind === "corridor"} onClick={() => convertBlockKind(selectedBlock.id, "corridor")}>
+                  <span aria-hidden="true">⇄</span><strong>Corridor</strong><small>Carries traversal between rooms</small>
+                </button>
+                <button type="button" aria-pressed={selectedBlock.kind === "infill"} onClick={() => convertBlockKind(selectedBlock.id, "infill")}>
+                  <span aria-hidden="true">◌</span><strong>Ambient space</strong><small>Reads as a room, stays inaccessible</small>
+                </button>
+              </fieldset>
+            ) : null}
+
+            {selectedEntity.kind === "infill" ? (
+              <fieldset className={styles.mansionEditorConnections}>
+                <legend>Doors</legend>
+                <p>Ambient spaces never carry doors. They dress the map like rooms and stay out of every route.</p>
+              </fieldset>
+            ) : <fieldset className={styles.mansionEditorConnections}>
               <legend>Geometry-derived doors</legend>
               {layout.doors.filter((door) => door.aEntityId === selectedEntity.id || door.bEntityId === selectedEntity.id).map((door) => {
                 const otherId = door.aEntityId === selectedEntity.id ? door.bEntityId : door.aEntityId;
                 const other = layout.entities.find((entity) => entity.id === otherId);
                 return (
                   <div key={door.id} className={styles.mansionEditorDoorControl}>
-                    <span><strong>{other?.kind === "room" ? other.name : other?.kind ?? "Route"}</strong><small>Shared-wall door</small></span>
+                    <span><strong>{other ? blockLabel(other) : "Route"}</strong><small>Shared-wall door</small></span>
                     <input disabled={venueArchitectureLocked} aria-label={`Door position toward ${otherId}`} type="range" min="0" max="1" step="0.01" value={door.position} onChange={(event) => commitLayout(slideMansionLayoutV2Door(layout, door.id, Number(event.currentTarget.value)))} />
                     <button type="button" disabled={venueArchitectureLocked} onClick={() => commitLayout(removeMansionLayoutV2Door(layout, door.id))}>Remove</button>
                   </div>
@@ -1447,16 +1525,16 @@ export default function MansionEditorDialog({
                   Add centered door to {other.kind === "room" ? other.name : "corridor"}
                 </button>
               )) : null}
-            </fieldset>
+            </fieldset>}
 
             {layout.verticalConnectors.filter((connector) => connector.lowerEntityId === selectedEntity.id || connector.upperEntityId === selectedEntity.id).map((connector) => (
               <div key={connector.id} className={styles.mansionEditorVerticalConnector}>
                 <span aria-hidden="true">↕</span><span><strong>{connector.kind}</strong><small>Vertical connector preserved</small></span>
               </div>
             ))}
-            <button type="button" className={styles.mansionEditorRemoveRoom} disabled={!selectedEntityCanBeRemoved} title={selectedRemovalBlockedReason ?? "Remove selected block"} onClick={removeSelectedEntity}>Remove {selectedRoom ? "room" : "block"}</button>
+            <button type="button" className={styles.mansionEditorRemoveRoom} disabled={!selectedEntityCanBeRemoved} title={selectedRemovalBlockedReason ?? "Remove selected block"} onClick={removeSelectedEntity}>Remove {selectedRoom ? "room" : blockLabel(selectedEntity).toLowerCase()}</button>
           </>
-        ) : <p>Select a room or corridor from the plan.</p>}
+        ) : <p>Select a room, corridor, or ambient space from the plan.</p>}
       </aside>
 
       <footer className={styles.mansionEditorFooter}>

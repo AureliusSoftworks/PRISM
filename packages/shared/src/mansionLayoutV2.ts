@@ -146,6 +146,20 @@ export const MANSION_LIGHT_BLEND_MODES_V1 = [
   "auto", "screen", "plus-lighter", "overlay", "soft-light", "hard-light", "normal", "multiply",
 ] as const;
 export type MansionLightBlendModeV1 = typeof MANSION_LIGHT_BLEND_MODES_V1[number];
+/** A room's blend is one pick for all of its lights. New rooms start on Hard Light,
+ * which reads well for most sources once their intensity is brought down. */
+export const MANSION_LIGHT_DEFAULT_BLEND_MODE_V1: MansionLightBlendModeV1 = "hard-light";
+/** Light-like effects (rain, caustics) composite on their own layer with this
+ * blend; occluders (steam, fog, snow) stay normal so they can veil the plate. */
+export const MANSION_EFFECT_DEFAULT_BLEND_MODE_V1: MansionLightBlendModeV1 = "overlay";
+/** Intensity a freshly spawned light gets, by kind. Lamps start at half so Hard
+ * Light does not blow them out; the author then tunes each light individually. */
+export const MANSION_LIGHT_DEFAULT_INTENSITY_V1 = Object.freeze({
+  omni: 0.5,
+  fire: 0.72,
+  directional: 0.72,
+  neon: 0.72,
+}) as Readonly<Record<"omni" | "fire" | "directional" | "neon", number>>;
 
 export interface MansionLayoutRoomV2 {
   kind: "room";
@@ -300,6 +314,49 @@ export type MansionDynamicLightV2 =
   | MansionDirectionalLightV2
   | MansionNeonLightV2;
 
+export const MANSION_LAYOUT_V2_MAX_EFFECTS = 8 as const;
+/** The venue map is a 2:1 widescreen board. The room cluster is fitted into it with
+ * this padding and centered; units are percent of the board width. The web map draws
+ * with these numbers and the overhead warp mirrors them, so both agree on which cells
+ * the board shows. */
+export const MANSION_MAP_BOARD_V1 = { width: 100, height: 50, padding: 4 } as const;
+/** The overhead exterior image covers this many envelope cells, starting above and
+ * left of the 16 by 12 envelope, so a long hull and its surroundings can run well past
+ * the room tiles. Same 2:1 aspect as the board. */
+export const MANSION_OVERHEAD_FRAME_V1 = { left: -8, top: -2, columns: 32, rows: 16 } as const;
+/** How the overhead plate sits on the board once the player has placed it by hand:
+ * degrees clockwise, a scale multiplier, and a pan in envelope cells. Absent means
+ * the plate sits where the warp put it. */
+export interface MansionOverheadPlacementV1 { rotation: number; scale: number; x: number; y: number }
+export const MANSION_OVERHEAD_PLACEMENT_IDENTITY_V1: MansionOverheadPlacementV1 = Object.freeze({ rotation: 0, scale: 1, x: 0, y: 0 });
+export const MANSION_OVERHEAD_PLACEMENT_LIMITS_V1 = Object.freeze({ rotation: 180, minScale: 0.25, maxScale: 6, pan: 64 });
+export function mansionOverheadPlacementIsValidV1(value: unknown): value is MansionOverheadPlacementV1 {
+  if (!value || typeof value !== "object") return false;
+  const placement = value as Record<string, unknown>;
+  const finite = (entry: unknown): entry is number => typeof entry === "number" && Number.isFinite(entry);
+  const limits = MANSION_OVERHEAD_PLACEMENT_LIMITS_V1;
+  return finite(placement.rotation) && Math.abs(placement.rotation) <= limits.rotation
+    && finite(placement.scale) && placement.scale >= limits.minScale && placement.scale <= limits.maxScale
+    && finite(placement.x) && Math.abs(placement.x) <= limits.pan
+    && finite(placement.y) && Math.abs(placement.y) <= limits.pan;
+}
+export const MANSION_ROOM_EFFECT_KINDS_V1 = ["steam", "fog", "rain", "snow", "caustics"] as const;
+export type MansionRoomEffectKindV1 = typeof MANSION_ROOM_EFFECT_KINDS_V1[number];
+
+/** An atmospheric effect placed like a godray: points 0 and 1 are its source
+ * edge (a spout or vent, the top of a pane, the near edge of a region) and the
+ * remaining points are where it ends. Steam, fog, and snow occlude the plate;
+ * rain and caustics are light and share the room blend. */
+export interface MansionRoomEffectV1 {
+  id: string;
+  roomId: string;
+  kind: MansionRoomEffectKindV1;
+  color: string;
+  intensity: number;
+  animationSeed: string;
+  geometry: MansionDirectionalPolygonGeometryV2;
+}
+
 export type MansionRoomArtCandidateStatusV2 = "pending" | "ready" | "failed";
 
 /** Durable candidate metadata. Candidate bytes use their own protected asset
@@ -322,9 +379,13 @@ export interface MansionLayoutV2 {
   verticalConnectors: MansionVerticalConnectorV2[];
   placementAnchors: MansionPlacementAnchorV2[];
   lights: MansionDynamicLightV2[];
+  /** Additive for layouts authored before room effects existed. */
+  effects?: MansionRoomEffectV1[];
   roomArtCandidates: MansionRoomArtCandidateV2[];
   venueProfile?: MysteryVenueProfileV1;
   venuePresentation?: MysteryVenueLayoutPresentationV1;
+  /** The player's hand placement of the overhead plate; additive. */
+  overheadPlacement?: MansionOverheadPlacementV1;
 }
 
 export interface MansionLayoutLegacyRoomV1 {
@@ -1171,6 +1232,9 @@ export function remapMansionLayoutV2Ids(
       ...light,
       roomId: mappedEntityId(light.roomId),
     })),
+    ...(layout.effects
+      ? { effects: layout.effects.map((effect) => ({ ...effect, roomId: mappedEntityId(effect.roomId) })) }
+      : {}),
     roomArtCandidates: layout.roomArtCandidates.map((candidate) => ({
       ...candidate,
       roomId: mappedEntityId(candidate.roomId),
@@ -1637,6 +1701,9 @@ export function validateMansionLayoutV2(
       errors.push("Mystery venue tier outlines are invalid.");
     }
   }
+  if (layout.overheadPlacement !== undefined && !mansionOverheadPlacementIsValidV1(layout.overheadPlacement)) {
+    errors.push("Mystery venue overhead placement is invalid.");
+  }
   if (layout.entities.length > MANSION_LAYOUT_V2_COLUMNS * MANSION_LAYOUT_V2_ROWS * MANSION_LAYOUT_V2_MAX_FLOORS) {
     errors.push("Mansion layout V2 contains more physical blocks than its envelope can hold.");
   }
@@ -1908,6 +1975,37 @@ export function validateMansionLayoutV2(
     errors.push(`Each room supports at most ${MANSION_LAYOUT_V2_MAX_LIGHTS} dynamic lights.`);
   }
 
+  if (layout.effects !== undefined) {
+    if (!Array.isArray(layout.effects)) {
+      errors.push("Mansion layout V2 effects is invalid.");
+    } else {
+      const effectIds = new Set<string>();
+      const effectCountByRoom = new Map<string, number>();
+      for (const effect of layout.effects) {
+        if (!effect?.id?.trim() || effect.id.length > 200 || !ID_PATTERN.test(effect.id) || effectIds.has(effect.id) || lightIds.has(effect.id)) {
+          errors.push("Every room effect needs a unique stable ID.");
+        }
+        effectIds.add(effect.id);
+        effectCountByRoom.set(effect.roomId, (effectCountByRoom.get(effect.roomId) ?? 0) + 1);
+        if (entityById.get(effect.roomId)?.kind !== "room") errors.push(`${effect.id || "An effect"} references an invalid room.`);
+        if (!MANSION_ROOM_EFFECT_KINDS_V1.includes(effect.kind)) errors.push(`${effect.id || "An effect"} has an unsupported kind.`);
+        if (!COLOR_PATTERN.test(effect.color ?? "") || !Number.isFinite(effect.intensity) ||
+          effect.intensity < 0 || effect.intensity > 1 || !effect.animationSeed?.trim()) {
+          errors.push(`${effect.id || "An effect"} has invalid presentation settings.`);
+        }
+        const points = effect.geometry?.points;
+        if (!Array.isArray(points) || points.length < MANSION_LAYOUT_V2_MIN_GODRAY_POINTS ||
+          points.length > MANSION_LAYOUT_V2_MAX_GODRAY_POINTS ||
+          !points.every((point) => isFiniteNormalized(point?.x) && isFiniteNormalized(point?.y))) {
+          errors.push(`${effect.id || "An effect"} has invalid normalized geometry.`);
+        }
+      }
+      if ([...effectCountByRoom.values()].some((count) => count > MANSION_LAYOUT_V2_MAX_EFFECTS)) {
+        errors.push(`Each room supports at most ${MANSION_LAYOUT_V2_MAX_EFFECTS} effects.`);
+      }
+    }
+  }
+
   const candidateIds = new Set<string>();
   const candidateRooms = new Set<string>();
   for (const candidate of layout.roomArtCandidates) {
@@ -1959,6 +2057,9 @@ export function canonicalMansionLayoutV2(layout: MansionLayoutV2): string {
         allowedCueIds: [...light.cuePermission.allowedCueIds].sort(),
       },
     })).sort((left, right) => left.id.localeCompare(right.id)),
+    ...(layout.effects
+      ? { effects: [...layout.effects].sort((left, right) => left.id.localeCompare(right.id)) }
+      : {}),
     roomArtCandidates: [...layout.roomArtCandidates].sort((left, right) => left.id.localeCompare(right.id)),
   };
   return canonicalJson(normalized);
@@ -2012,17 +2113,21 @@ export function mansionDirectionalLightPolygonV2(
 }
 
 /** The window edge and the floor landing of a godray, paired so that
- * origin.start travels to landing.start. A three-point ray lands on one point. */
+ * origin.start travels to landing.start. A three-point ray lands on one point.
+ * A landing edge stored in the opposite order to the window edge would make the
+ * side rays cross; it is read back untwisted so every consumer sees a clean quad. */
 export function mansionGodrayEdgesV2(points: readonly MansionLightPointV2[]): {
   origin: { start: MansionLightPointV2; end: MansionLightPointV2 };
   landing: { start: MansionLightPointV2; end: MansionLightPointV2 };
 } {
   const [p0, p1, p2, p3] = points;
   const fallback = p0 ?? { x: 0.5, y: 0.5 };
-  return {
-    origin: { start: p0 ?? fallback, end: p1 ?? fallback },
-    landing: { start: p3 ?? p2 ?? fallback, end: p2 ?? fallback },
-  };
+  const origin = { start: p0 ?? fallback, end: p1 ?? fallback };
+  let landing = { start: p3 ?? p2 ?? fallback, end: p2 ?? fallback };
+  const twisted = (origin.end.x - origin.start.x) * (landing.end.x - landing.start.x) +
+    (origin.end.y - origin.start.y) * (landing.end.y - landing.start.y) < 0;
+  if (twisted) landing = { start: landing.end, end: landing.start };
+  return { origin, landing };
 }
 
 /** Rebuilds the floor landing so every ray leaves the window at one shared
@@ -2108,6 +2213,18 @@ export function mansionGodrayAimV2(points: readonly MansionLightPointV2[], direc
   }, described.spread);
 }
 
+/** Daylight through a window is white before anything else; the plate only
+ * lends it a cast. Mixes white into a sampled or suggested hex color. */
+export function mansionNaturalLightTintV2(hex: string, whiteShare = 0.9): string {
+  const match = /^#([0-9a-f]{6})$/iu.exec(hex.trim());
+  if (!match) return "#ffffff";
+  const share = Math.max(0, Math.min(1, whiteShare));
+  const channel = (offset: number): string => Math.round(
+    parseInt(match[1]!.slice(offset, offset + 2), 16) * (1 - share) + 255 * share,
+  ).toString(16).padStart(2, "0");
+  return `#${channel(0)}${channel(2)}${channel(4)}`;
+}
+
 /** Visual center of any dynamic light; polygon lights use their centroid. */
 export function mansionDynamicLightCenterV2(light: MansionDynamicLightV2): MansionLightPointV2 {
   const points = light.kind === "neon"
@@ -2128,12 +2245,13 @@ export function mansionDynamicLightCenterV2(light: MansionDynamicLightV2): Mansi
 
 /** Deterministic overlay sample. Reduced Motion freezes the seeded frame; it
  * does not remove the authored light or change its saved intensity.
- * `radiusScale` breathes a lamp's reach; other kinds stay at 1. */
+ * `radiusScale` breathes a lamp's reach; `softness` is a beam's current cloud
+ * cover (0 clear sky, 1 fully veiled); other kinds stay at 1 and 0. */
 export function mansionDynamicLightFrameV2(
   light: MansionDynamicLightV2,
   elapsedMs: number,
   reducedMotion: boolean,
-): { intensity: number; phase: number; radiusScale: number } {
+): { intensity: number; phase: number; radiusScale: number; softness: number } {
   const seed = `${light.id}:${light.animationSeed}`;
   const maximumIntensity = Math.min(1, Math.max(0, light.intensity));
   const basePhase = seededUnit(`${seed}:phase`) * Math.PI * 2;
@@ -2154,7 +2272,7 @@ export function mansionDynamicLightFrameV2(
   } else if (light.kind === "omni") {
     modulation = 0.82 + 0.18 * wave(0.12);
   } else if (light.kind === "directional") {
-    modulation = 0.84 + 0.16 * wave(0.19);
+    modulation = 1;
   } else {
     modulation = 0.82 + 0.18 * wave(0.42);
   }
@@ -2174,9 +2292,27 @@ export function mansionDynamicLightFrameV2(
       radiusScale *= 1 - 0.06 * dip;
     }
   }
+  // Beams: weather, not flicker. Two slow incommensurate drifts stand in for
+  // thin cloud, cubed so the sky reads clear most of the time, and one seeded
+  // cloud passage crosses the sun inside every 14–22 s window for 4–8 s. The
+  // beam never drops below 88% of its authored intensity.
+  let softness = 0;
+  if (light.kind === "directional") {
+    const haze = 0.5 + 0.35 * Math.sin(basePhase + time * 0.045 * tempo * Math.PI * 2) +
+      0.15 * Math.sin(detailPhase + time * 0.017 * Math.PI * 2);
+    const passageWindow = 14 + seededUnit(`${seed}:cloud-window`) * 8;
+    const passageLength = 4 + seededUnit(`${seed}:cloud-length`) * 4;
+    const bucket = Math.floor(time / passageWindow);
+    const passageStart = bucket * passageWindow + seededUnit(`${seed}:cloud:${bucket}`) * (passageWindow - passageLength);
+    const passageProgress = (time - passageStart) / passageLength;
+    const passage = passageProgress >= 0 && passageProgress < 1 ? Math.sin(passageProgress * Math.PI) : 0;
+    softness = Math.min(1, Math.max(0, Math.max(haze * haze * haze, passage)));
+    modulation = 1 - 0.12 * softness;
+  }
   return {
     intensity: Math.min(maximumIntensity, Math.max(0, maximumIntensity * modulation)),
     phase: basePhase,
     radiusScale,
+    softness,
   };
 }

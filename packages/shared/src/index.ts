@@ -3919,6 +3919,7 @@ export * from "./portableMysteryPackage.js";
 export * from "./portableMysteryCase.js";
 export * from "./whodunnitProps.js";
 export * from "./mansionLayoutV2.js";
+export * from "./roomLightTune.js";
 export * from "./mysteryVenue.js";
 export * from "./mansionAutoDecorationV2.js";
 export * from "./mansionMusic.js";

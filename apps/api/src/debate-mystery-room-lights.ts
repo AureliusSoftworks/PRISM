@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 import {
   MANSION_LAYOUT_V2_MAX_LIGHTS,
+  MANSION_LIGHT_DEFAULT_INTENSITY_V1,
   mansionDirectionalGeometryIsPolygonV2,
   mansionDynamicLightCenterV2,
   mansionGodrayAimV2,
   mansionGodrayDescribeV2,
   mansionGodrayFromApertureV2,
+  mansionNaturalLightTintV2,
   validateMansionLayoutV2,
   type MansionDynamicLightV2,
   type MansionLayoutV2,
@@ -46,6 +48,21 @@ interface LightPlacementV1 {
   path: MansionLightPointV2[] | null;
 }
 interface Region { x0: number; y0: number; x1: number; y1: number }
+
+/** What each pass saw and decided. Filled progressively so a caller can show
+ * it next to the result, or next to a screenshot when the result is wrong. */
+export interface RoomLightDetectionTraceV1 {
+  model: string;
+  inventory?: LightSourceInventoryV1[];
+  litSourceIds?: string[];
+  geometry?: LightPlacementV1[];
+  refinements?: Array<{ id: string; region: Region; accepted: boolean; center?: MansionLightPointV2 | null; radius?: number | null; reason?: string }>;
+  verification?: Array<{ id: string; ok: boolean; center: MansionLightPointV2 | null; window: MansionLightPointV2[] | null; landing: MansionLightPointV2 | null; applied: boolean }>;
+  sunSnapped?: string[];
+  built?: Array<{ placementId: string; lightId: string; matchedExistingId: string | null }>;
+  dropped?: string[];
+  errors?: string[];
+}
 
 const POINT_SCHEMA = {
   type: "object", additionalProperties: false, required: ["x", "y"],
@@ -169,12 +186,15 @@ export async function renderRoomLightDetectionReferenceV1(
     <style>text{font:bold 15px sans-serif;fill:#fff;stroke:#000;stroke-width:3px;paint-order:stroke;}.m{font:bold 18px sans-serif;fill:#ff5cf0;}</style>
     ${lines.join("")}${labels.join("")}${markers.join("")}
   </svg>`;
+  // Round the edges together so a zoom crop never overruns the plate by a pixel.
+  const left = Math.min(sourceWidth - 1, Math.max(0, Math.round(region.x0 * sourceWidth)));
+  const top = Math.min(sourceHeight - 1, Math.max(0, Math.round(region.y0 * sourceHeight)));
   const png = await source
     .extract({
-      left: Math.round(region.x0 * sourceWidth),
-      top: Math.round(region.y0 * sourceHeight),
-      width: Math.max(1, Math.round(spanX * sourceWidth)),
-      height: Math.max(1, Math.round(spanY * sourceHeight)),
+      left,
+      top,
+      width: Math.max(1, Math.min(sourceWidth - left, Math.round(spanX * sourceWidth))),
+      height: Math.max(1, Math.min(sourceHeight - top, Math.round(spanY * sourceHeight))),
     })
     .resize(width, height, { fit: "fill", kernel: sharp.kernel.lanczos3 })
     .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
@@ -205,7 +225,7 @@ function markerSvg(lights: readonly MansionDynamicLightV2[], labels: ReadonlyMap
   });
 }
 
-async function askVision<T>(args: {
+export async function askVision<T>(args: {
   apiKey: string; png: Buffer; prompt: string[]; schema: Record<string, unknown>; schemaName: string; signal?: AbortSignal;
 }): Promise<T> {
   const provider = new OpenAiProvider({ apiKey: args.apiKey });
@@ -258,10 +278,16 @@ function placementToLight(
   existing: MansionDynamicLightV2 | undefined,
 ): MansionDynamicLightV2 | null {
   const id = existing?.id ?? `light:${randomUUID()}`;
-  const color = /^#[0-9a-f]{6}$/i.test(placement.color ?? "")
+  const suggested = /^#[0-9a-f]{6}$/i.test(placement.color ?? "")
     ? placement.color!.toLowerCase()
     : existing?.color ?? DEFAULT_COLOR[placement.kind];
-  const intensity = existing?.intensity ?? clampUnit(Number.isFinite(placement.intensity) ? placement.intensity : 0.72);
+  // Daylight through a window is white first; the model's color only says warm or cool.
+  const color = placement.kind === "directional" ? mansionNaturalLightTintV2(suggested) : suggested;
+  // A matched light keeps its tuned intensity. A new lamp spawns at the shared
+  // default (half) so Hard Light does not blow it out; other kinds follow the model.
+  const intensity = existing?.intensity ?? (placement.kind === "omni"
+    ? MANSION_LIGHT_DEFAULT_INTENSITY_V1.omni
+    : clampUnit(Number.isFinite(placement.intensity) ? placement.intensity : MANSION_LIGHT_DEFAULT_INTENSITY_V1[placement.kind]));
   const base = {
     id, roomId, color, intensity, animationSeed: existing?.animationSeed ?? id,
     cuePermission: existing?.cuePermission ?? { version: 1 as const, mode: "mansion_static" as const, allowedCueIds: [] },
@@ -304,7 +330,7 @@ function relocate(light: MansionDynamicLightV2, target: MansionLightPointV2): Ma
 /** One sun per room: beams whose ray is within SUN_SNAP_DEGREES of the median
  * ray are re-aimed to that median. Skylights and side windows that genuinely
  * differ are left alone. */
-function snapBeamsToRoomSun(lights: MansionDynamicLightV2[]): MansionDynamicLightV2[] {
+function snapBeamsToRoomSun(lights: MansionDynamicLightV2[], trace?: RoomLightDetectionTraceV1): MansionDynamicLightV2[] {
   const beams = lights.filter((light): light is Extract<MansionDynamicLightV2, { kind: "directional" }> =>
     light.kind === "directional" && mansionDirectionalGeometryIsPolygonV2(light.geometry) && !light.freeDirection);
   if (beams.length < 2) return lights;
@@ -318,9 +344,9 @@ function snapBeamsToRoomSun(lights: MansionDynamicLightV2[]): MansionDynamicLigh
     if (light.kind !== "directional" || !mansionDirectionalGeometryIsPolygonV2(light.geometry) || light.freeDirection) return light;
     const { direction } = mansionGodrayDescribeV2(light.geometry.points);
     const delta = Math.abs(((Math.atan2(direction.y, direction.x) - median + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
-    return delta <= (SUN_SNAP_DEGREES * Math.PI) / 180
-      ? { ...light, geometry: { points: mansionGodrayAimV2(light.geometry.points, sun) } }
-      : light;
+    if (delta > (SUN_SNAP_DEGREES * Math.PI) / 180) return light;
+    if (trace) (trace.sunSnapped ??= []).push(light.id);
+    return { ...light, geometry: { points: mansionGodrayAimV2(light.geometry.points, sun) } };
   });
 }
 
@@ -340,7 +366,11 @@ export async function detectDebateMysteryRoomLightsV1(args: {
   layout: MansionLayoutV2;
   existingLights?: readonly MansionDynamicLightV2[];
   signal?: AbortSignal;
+  /** Optional collector; the caller keeps it even when the result is poor. */
+  trace?: RoomLightDetectionTraceV1;
 }): Promise<MansionDynamicLightV2[]> {
+  const trace = args.trace;
+  if (trace) trace.model = MYSTERY_ROOM_LIGHT_VISION_MODEL_V1;
   const { png, aspectRatio } = await renderRoomLightDetectionReferenceV1(args.bytes);
   const inventory = await askVision<{ sources?: LightSourceInventoryV1[] }>({
     apiKey: args.apiKey, png, schema: INVENTORY_SCHEMA, schemaName: "room_light_sources", signal: args.signal,
@@ -352,6 +382,7 @@ export async function detectDebateMysteryRoomLightsV1(args: {
     ],
   });
   const litSources = (inventory.sources ?? []).filter((source) => source.lit && typeof source.id === "string").slice(0, 12);
+  if (trace) { trace.inventory = inventory.sources ?? []; trace.litSourceIds = litSources.map((source) => source.id); }
   if (litSources.length === 0) return [];
 
   const geometry = await askVision<{ placements?: LightPlacementV1[] }>({
@@ -372,6 +403,7 @@ export async function detectDebateMysteryRoomLightsV1(args: {
       placements.set(placement.id, placement);
     }
   }
+  if (trace) trace.geometry = [...placements.values()];
   if (placements.size === 0) return [];
 
   // Pass 3: small sources get a zoomed second look with a finer ruler.
@@ -388,7 +420,10 @@ export async function detectDebateMysteryRoomLightsV1(args: {
         x0: clampUnit(center.x - halfX), x1: clampUnit(center.x + halfX),
         y0: clampUnit(center.y - halfY), y1: clampUnit(center.y + halfY),
       };
-      if (region.x1 - region.x0 < 0.05 || region.y1 - region.y0 < 0.05) continue;
+      if (region.x1 - region.x0 < 0.05 || region.y1 - region.y0 < 0.05) {
+        if (trace) (trace.refinements ??= []).push({ id: placement.id, region, accepted: false, reason: "crop too small" });
+        continue;
+      }
       const crop = await renderRoomLightDetectionReferenceV1(args.bytes, region);
       const refined = await askVision<{ placements?: LightPlacementV1[] }>({
         apiKey: args.apiKey, png: crop.png, schema: GEOMETRY_SCHEMA, schemaName: "room_light_geometry_zoom", signal: args.signal,
@@ -398,9 +433,16 @@ export async function detectDebateMysteryRoomLightsV1(args: {
         ],
       });
       const better = (refined.placements ?? []).find((entry) => entry?.id === placement.id && isPoint(entry.center));
-      if (!better) continue;
+      if (!better) {
+        if (trace) (trace.refinements ??= []).push({ id: placement.id, region, accepted: false, reason: "no matching id in crop answer" });
+        continue;
+      }
       const point = clampPoint(better.center);
-      if (point.x < region.x0 || point.x > region.x1 || point.y < region.y0 || point.y > region.y1) continue;
+      if (point.x < region.x0 || point.x > region.x1 || point.y < region.y0 || point.y > region.y1) {
+        if (trace) (trace.refinements ??= []).push({ id: placement.id, region, accepted: false, center: point, radius: better.radius, reason: "answer outside crop" });
+        continue;
+      }
+      if (trace) (trace.refinements ??= []).push({ id: placement.id, region, accepted: true, center: point, radius: better.radius });
       placements.set(placement.id, {
         ...placement,
         center: point,
@@ -408,8 +450,9 @@ export async function detectDebateMysteryRoomLightsV1(args: {
         rotation: Number.isFinite(better.rotation) ? better.rotation : placement.rotation,
         path: placement.kind === "neon" && Array.isArray(better.path) && better.path.length >= 2 ? better.path : placement.path,
       });
-    } catch {
+    } catch (error) {
       // Keep the coarse placement; the check pass can still move it.
+      if (trace) (trace.errors ??= []).push(`refine ${placement.id}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -421,15 +464,18 @@ export async function detectDebateMysteryRoomLightsV1(args: {
   const labelById = new Map<string, string>();
   for (const placement of placements.values()) {
     const probe = placementToLight(placement, args.roomId, undefined);
-    if (!probe) continue;
+    if (!probe) { if (trace) (trace.dropped ??= []).push(`${placement.id}: could not build a ${placement.kind} light from its geometry`); continue; }
     const center = mansionDynamicLightCenterV2(probe);
     const matchIndex = unmatched.findIndex((light) =>
       light.kind === probe.kind && distance(mansionDynamicLightCenterV2(light), center) <= MATCH_DISTANCE);
     const matched = matchIndex >= 0 ? unmatched.splice(matchIndex, 1)[0] : undefined;
     const light = placementToLight(placement, args.roomId, matched);
-    if (light) { lights.push(light); labelById.set(light.id, placement.id); }
+    if (light) {
+      lights.push(light); labelById.set(light.id, placement.id);
+      if (trace) (trace.built ??= []).push({ placementId: placement.id, lightId: light.id, matchedExistingId: matched?.id ?? null });
+    }
   }
-  lights = snapBeamsToRoomSun(lights);
+  lights = snapBeamsToRoomSun(lights, trace);
 
   // Pass 4: draw the proposal back onto the plate and ask for corrections.
   if (lights.length > 0) {
@@ -448,23 +494,33 @@ export async function detectDebateMysteryRoomLightsV1(args: {
       const fixes = new Map((verify.checks ?? []).filter((check) => check && typeof check.id === "string").map((check) => [byLabel.get(check.id) ?? check.id, check]));
       lights = lights.map((light) => {
         const fix = fixes.get(light.id);
-        if (!fix || fix.ok) return light;
+        const note = (applied: boolean) => {
+          if (trace && fix) (trace.verification ??= []).push({ id: labelById.get(light.id) ?? light.id, ok: fix.ok, center: fix.center ?? null, window: fix.window ?? null, landing: fix.landing ?? null, applied });
+        };
+        if (!fix || fix.ok) { note(false); return light; }
         if (light.kind === "directional" && Array.isArray(fix.window) && fix.window.length >= 2) {
           const described = mansionDirectionalGeometryIsPolygonV2(light.geometry) ? mansionGodrayDescribeV2(light.geometry.points) : null;
           const points = godrayPoints(fix.window, fix.landing ?? described?.landing ?? null, described?.spread ?? null);
+          note(Boolean(points));
           return points ? { ...light, geometry: { points } } : light;
         }
-        if (fix.center && isPoint(fix.center) && distance(mansionDynamicLightCenterV2(light), fix.center) <= 0.2) return relocate(light, clampPoint(fix.center));
+        if (fix.center && isPoint(fix.center) && distance(mansionDynamicLightCenterV2(light), fix.center) <= 0.2) { note(true); return relocate(light, clampPoint(fix.center)); }
+        note(false);
         return light;
       });
-      lights = snapBeamsToRoomSun(lights);
-    } catch {
+      lights = snapBeamsToRoomSun(lights, trace);
+    } catch (error) {
       // The unchecked proposal is still better than none.
+      if (trace) (trace.errors ??= []).push(`verify: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  return lights
-    .filter((light) => validateMansionLayoutV2({ ...args.layout, lights: [light] }).every((error) => baseline.has(error)))
+  const valid = lights.filter((light) => {
+    const errors = validateMansionLayoutV2({ ...args.layout, lights: [light] }).filter((error) => !baseline.has(error));
+    if (errors.length && trace) (trace.dropped ??= []).push(`${labelById.get(light.id) ?? light.id}: ${errors[0]}`);
+    return errors.length === 0;
+  });
+  return valid
     .sort((left, right) => KIND_PRIORITY[left.kind] - KIND_PRIORITY[right.kind] || right.intensity - left.intensity)
     .slice(0, MANSION_LAYOUT_V2_MAX_LIGHTS);
 }

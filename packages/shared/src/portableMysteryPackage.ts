@@ -32,6 +32,8 @@ export type PortableMysteryAssetRoleV1 =
   | "music"
   | "preview"
   | "presentation"
+  /** Overhead deck plan drawn onto a floor's footprint. */
+  | "map"
   | "voice";
 export type PortableMysteryAssetMimeTypeV1 =
   | "image/png"
@@ -841,7 +843,7 @@ function validateAsset(value: unknown, path: string): string[] {
   if (!isRecord(value)) return [`${path} is invalid.`];
   const errors: string[] = [];
   if (!isNonEmptyString(value.id)) errors.push(`${path}.id is missing.`);
-  if (!["room", "prop", "ambience", "music", "preview", "presentation", "voice"].includes(String(value.role))) {
+  if (!["room", "prop", "ambience", "music", "preview", "presentation", "map", "voice"].includes(String(value.role))) {
     errors.push(`${path}.role is unsupported.`);
   }
   if (typeof value.archivePath !== "string" || !SAFE_ARCHIVE_PATH.test(value.archivePath)) {

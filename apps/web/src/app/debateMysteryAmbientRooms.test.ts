@@ -72,4 +72,8 @@ test("the real V2 map wires authored blocks only for legacy estates and keeps th
   assert.doesNotMatch(render, /onClick|onPointer|onKey|tabIndex|title=|aria-label|<button/u);
   const css = readFileSync(new URL("./debateMysteryV2.module.css", import.meta.url), "utf8");
   assert.match(css, /\.mansionAmbientSpace\s*\{[^}]*pointer-events:\s*none/u);
+  // Ambient spaces wear the room silhouette (lit top bevel and side face) without any route hatching.
+  assert.match(css, /\.mansionAmbientSpace::before\s*\{[^}]*border-top: 4px solid/u);
+  assert.match(css, /\.mansionAmbientSpace::after\s*\{[^}]*clip-path: polygon/u);
+  assert.doesNotMatch(css, /\.mansionAmbientSpace\s*\{[^}]*repeating-linear-gradient/u);
 });

@@ -102,7 +102,7 @@ describe("Whodunnit V2 prosecution experience", () => {
   it("routes player-observation Babble through the selected Prosecutor voice", () => {
     assert.match(
       experienceSource,
-      /voiceProfile: roomPlayerObservationActive\s*\? prosecutorBot\?\.voiceProfile \?\? null\s*: null/u,
+      /voiceProfile: roomPlayerObservationActive\s*\? prosecutorBot\?\.voiceProfile \?\? props\.playerVoiceProfile \?\? null\s*: null/u,
     );
     assert.match(
       experienceSource,
@@ -224,6 +224,15 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /No room art is previewed here/u);
     assert.match(experienceSource, /Generate this room/u);
     assert.match(experienceSource, /Upgrade this room/u);
+    // Visuals mode pauses movement and marks the whole board, not just one button.
+    assert.match(experienceSource, /className=\{styles\.mansionBoard\}[^>]*data-visuals-mode=\{roomVisualsMode \? "true" : undefined\}/u);
+    assert.match(experienceSource, /Room visuals · editing/u);
+    assert.match(experienceSource, /const backToRoomDisabled = busy \|\| dialoguePerformanceActive \|\| travelPresentation !== null \|\| roomVisualsMode;/u);
+    assert.match(experienceSource, /mansionSelectedRoomPending \|\| !mansionSelectedRoomReachable \|\| roomVisualsMode\}/u);
+    assert.match(experienceSource, /travelPresentation !== null \|\| roomVisualsMode\}[\s\S]{0,200}?>\{roomVisualsMode \? "Finish visuals first" : "Go outside"\}/u);
+    assert.match(experienceSource, /Movement resumes when you are done with visuals/u);
+    assert.match(cssSource, /\.mansionBoard\[data-visuals-mode="true"\]::after\s*\{[\s\S]*?mask-composite: exclude/u);
+    assert.match(cssSource, /\.mansionHint\[data-visuals-mode="true"\]/u);
     assert.match(experienceSource, /<PrismBlockingLoader[\s\S]{0,900}The room stays hidden until you visit it/u);
     assert.match(experienceSource, /category: "mosaic_rooms", roomId: room\.id/u);
     assert.match(experienceSource, /mutationBody\(\{ roomId: room\.id \}\)/u);
@@ -792,7 +801,7 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /const roomActorEligible = Boolean\([\s\S]*roomIntroductionPersonaActive/u);
     assert.match(experienceSource, /const image = currentRoomArtStyle === "illustrated"[\s\S]{0,850}image\.decode/u);
     assert.match(experienceSource, /const roomActorVisible = roomActorEligible && roomActorsReady/u);
-    assert.match(experienceSource, /const roomProsecutorVisible = roomProsecutorActive && roomActorsReady/u);
+    assert.match(experienceSource, /const roomProsecutorVisible = \(roomProsecutorActive \|\| interrogationStagingActive\) && roomActorsReady/u);
     assert.match(experienceSource, /className=\{styles\.roomBackdropImage\}[\s\S]{0,140}data-blurred=\{roomBackdropBlurred/u);
     assert.doesNotMatch(experienceSource, /className=\{styles\.roomBackdrop\}/u);
     assert.match(experienceSource, /className=\{styles\.roomParallaxLayer\}/u);
@@ -913,7 +922,10 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /const roomObservationAwaitingContinue = Boolean\(/u);
     assert.match(experienceSource, /roomPlayerObservationActive[\s\S]*speechTiming[\s\S]*elapsedMs >= speechTiming\.durationMs/u);
     assert.match(experienceSource, /isPlayerObservation: roomPlayerObservationActive/u);
-    assert.match(experienceSource, /immediateAdvance: roomPlayerObservationActive/u);
+    assert.doesNotMatch(experienceSource, /immediateAdvance:/u, "streaming text fills first for every speaker");
+    assert.match(experienceSource, /bot: automatedBotPlayback \|\| presentation\.streaming/u);
+    assert.match(experienceSource, /hasQueuedDialogue: queuedDialogue !== null/u);
+    assert.match(experienceSource, /data-handoff=\{interrogationPhase === "handoff" \? "true" : undefined\}/u);
     assert.match(experienceSource, /if \(!queuedDialogue\) \{[\s\S]*if \(roomDisplayedDialogue\) \{[\s\S]*setRoomDialogueBaseline\(\{/u);
     assert.match(experienceSource, /data-awaiting-continue=\{roomObservationAwaitingContinue \|\| roomIntroductionActive \? "true" : undefined\}/u);
     assert.match(experienceSource, /roomObservationAwaitingContinue \|\| roomIntroductionActive[\s\S]*styles\.dialogueContinueHint[\s\S]*Click to continue/u);
