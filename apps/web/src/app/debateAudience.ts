@@ -1,4 +1,6 @@
 import {
+  DEBATE_FLYTING_AUDIENCE_COUNT,
+  DEBATE_FLYTING_JARL_GUARD_COUNT,
   DEBATE_PLAYER_JUDGE_BOT_ID,
   DEBATE_SCHEMA_VERSION,
   type DebateBotSnapshotV1,
@@ -281,6 +283,35 @@ export function debateFlytingHallNpcBots(
       debateAudienceRandom(`${sessionId}:flyting-hall:${index}`),
     ),
   );
+}
+
+/**
+ * Flyting's fifteen swayable spectators are cast from the Library outside the
+ * three stage seats in a stable per-session shuffle. When the Library runs
+ * short, the empty places receive appearance-only generic spectators whose
+ * ids never collide with the Jarl guards' generated bodies.
+ */
+export function debateFlytingHallSpectatorBots(args: {
+  sessionId: string;
+  bots: readonly DebateAudienceLibraryBot[];
+  excludedBotIds?: readonly string[];
+}): DebateBotSnapshotV1[] {
+  return debateAudienceBotsForSession({
+    sessionId: `${args.sessionId}:flyting-hall-spectators`,
+    count: DEBATE_FLYTING_AUDIENCE_COUNT,
+    bots: args.bots,
+    excludedBotIds: args.excludedBotIds,
+  });
+}
+
+/** The Jarl's three guards keep the same generic, session-stable PRISM bodies. */
+export function debateFlytingJarlGuardBots(
+  sessionId: string,
+): DebateBotSnapshotV1[] {
+  return debateFlytingHallNpcBots(
+    sessionId,
+    DEBATE_FLYTING_AUDIENCE_COUNT + DEBATE_FLYTING_JARL_GUARD_COUNT,
+  ).slice(DEBATE_FLYTING_AUDIENCE_COUNT);
 }
 
 export function debateAudienceBotsForSession(args: {

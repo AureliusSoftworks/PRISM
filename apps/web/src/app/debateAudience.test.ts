@@ -11,6 +11,8 @@ import {
   debateAudienceDepartureXPercent,
   debateAudienceFrontRowCenterIndex,
   debateFlytingHallNpcBots,
+  debateFlytingHallSpectatorBots,
+  debateFlytingJarlGuardBots,
   debateAudienceRandom,
   debateAudienceSeatLayout,
   debateAudienceSeatIsTalker,
@@ -56,6 +58,38 @@ describe("Debate audience casting", () => {
     assert.equal(new Set(first.map((bot) => bot.id)).size, 18);
     assert.ok(first.every(debateAudienceBotIsGenerated));
     assert.ok(first.every((bot) => bot.systemPrompt === ""));
+  });
+
+  it("casts Flyting's spectators from the Library outside the stage seats and pads the rest", () => {
+    const args = {
+      sessionId: "flyting-session",
+      bots: libraryBots,
+      excludedBotIds: ["bot-b"],
+    } as const;
+    const first = debateFlytingHallSpectatorBots(args);
+    const second = debateFlytingHallSpectatorBots(args);
+    const guards = debateFlytingJarlGuardBots("flyting-session");
+
+    assert.deepEqual(first, second);
+    assert.equal(first.length, 15);
+    assert.deepEqual(
+      first
+        .filter((bot) => !debateAudienceBotIsGenerated(bot))
+        .map((bot) => bot.id)
+        .sort(),
+      ["bot-a", "bot-c"],
+    );
+    assert.equal(first.filter(debateAudienceBotIsGenerated).length, 13);
+    // Guards keep the exact generic bodies earlier Hall Records rendered.
+    assert.deepEqual(
+      guards,
+      debateFlytingHallNpcBots("flyting-session", 18).slice(15),
+    );
+    assert.ok(guards.every(debateAudienceBotIsGenerated));
+    assert.equal(
+      new Set([...first, ...guards].map((bot) => bot.id)).size,
+      18,
+    );
   });
 
   it("interleaves a slightly smaller rear row behind the foreground audience", () => {

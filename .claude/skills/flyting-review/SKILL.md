@@ -45,6 +45,8 @@ applet-specific work.
 - The Hall Record is authoritative. It preserves the frozen bout, exact public lines, targets, maneuvers, resolutions, Jarl-authored between-rune acclamations, crowd-sway history, guard placement, final weighted tally, and decisive ruling. Replay performs that frozen record; it does not regenerate Forge material, reevaluate an answer, reroll the Hall, or select a new winner.
 - A persisted acclamation or verdict is not proof it was heard. Review exports must distinguish event persistence, presentation eligibility, voice start, interruption/cutoff, and completed delivery. Jarl-authored between-rune acclamations belong in the existing voice path.
 - A valid consent decline cannot be overridden or reused from another format. The coached bot remains the public body and voice in Participant play, and role, side, seat, floor, and verdict authorship remain bound to stable bot IDs through Powers.
+- The Mead Hall runs under the shared Forum live view. `DebateExperience` keeps its live-view effects (app-away recess, automatic advance, pause and resume ceremonies) active while a Flyting session is open, so a bout that holds, pauses, or errors without a player action needs those Forum effects checked before blaming the Flyting engine. A Hall waiting for the player has no clock and must not recess because the app lost focus.
+- The Jarl's vote is the side the guards go to. A human Jarl who sends the guards with a blank ruling records the default ceremonial ruling as a player verdict with `authoredMode: custom`; that is the contract, not a provenance fault.
 - Prefer typed validation, target and floor guards, orchestration, Power projection, serialization, crowd sway, Jarl verdict, and replay fixes over bot-specific prompt edits, manual database repair, or rewriting a saved Hall Record.
 
 ## Key Surfaces
@@ -54,6 +56,7 @@ applet-specific work.
 - Forge, Wield, and action routes: `apps/api/src/server.ts`
 - Focused API regressions: `apps/api/src/__tests__/debate.test.ts` under `Flyting V1`
 - Setup, Mead Hall, Hall Record, and verdict UI: `apps/web/src/app/DebateFlyting.tsx`
+- Forum live-view effects that also govern the open Mead Hall (app-away recess, auto-advance, lifecycle ceremonies): `apps/web/src/app/DebateExperience.tsx`, with source-shape regressions in `apps/web/src/app/debate-experience.test.ts`
 - Ritual audio: `apps/web/src/app/debateFlytingAudio.ts`
 - Rules and tutorial contract: `docs/debate-formats-turnabout-v1.md` and `apps/web/src/app/modeTutorials.ts`
 

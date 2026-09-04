@@ -87,8 +87,11 @@ import {
 import {
   DEBATE_FLYTING_GALLERY_AUTHORING_MAX_VERTICAL_ROAM_PERCENT,
   DEBATE_FLYTING_GALLERY_DEFAULT_MAX_VERTICAL_ROAM_PERCENT,
+  debateAudienceBotIsGenerated,
   debateAudienceConversationFacing,
   debateFlytingHallNpcBots,
+  debateFlytingHallSpectatorBots,
+  debateFlytingJarlGuardBots,
 } from "./debateAudience";
 import { prismDeveloperAuthoringEnabled } from "./prismDevGating";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
@@ -2300,9 +2303,10 @@ export function DebateFlytingSetup(
                     <div>
                       <strong>PRISM fills the gallery.</strong>
                       <small>
-                        Fifteen generic Hall spectators and the Jarl's three
-                        guards arrive with the proceeding. No Library casting is
-                        required.
+                        Fifteen Library spectators and the Jarl's three guards
+                        arrive with the proceeding. Bots outside the three stage
+                        seats are cast automatically, and generic Hall
+                        spectators fill any empty places.
                       </small>
                     </div>
                   </div>
@@ -3318,7 +3322,13 @@ function FlytingGalleryLiveAmbience(props: {
                   "--debate-gallery-exit-x": "0%",
                 } as CSSProperties
               }
-              title={seat.guard ? "Jarl guard" : "Hall spectator"}
+              title={
+                seat.guard
+                  ? "Jarl guard"
+                  : debateAudienceBotIsGenerated(seat.bot)
+                    ? "Hall spectator"
+                    : `${seat.bot.name} · Library spectator`
+              }
             >
               <span
                 className={styles.galleryVikingHelmet}
@@ -3831,32 +3841,46 @@ export function DebateFlytingLive(
   );
   const galleryIsSubdued =
     hallPresentation.galleryIsQuiet || voiceActiveEventId !== null;
-  const hallNpcBots = useMemo(
+  // Spectators are cast from the Library outside the three stage seats and
+  // padded with generic PRISM bodies when the Library runs short. The Jarl's
+  // guards keep their generic bodies. Seat order stays index-aligned with the
+  // saved hall members so leanings and replay never re-seat anyone.
+  const hallStageCastKey = [
+    props.session.moderator.id,
+    props.session.forAdvocate.id,
+    props.session.againstAdvocate.id,
+  ].join("\0");
+  const hallSpectatorBots = useMemo(
     () =>
-      debateFlytingHallNpcBots(
-        props.session.id,
-        DEBATE_FLYTING_AUDIENCE_COUNT + DEBATE_FLYTING_JARL_GUARD_COUNT,
-      ),
+      debateFlytingHallSpectatorBots({
+        sessionId: props.session.id,
+        bots: props.bots,
+        excludedBotIds: hallStageCastKey.split("\0"),
+      }),
+    [hallStageCastKey, props.bots, props.session.id],
+  );
+  const hallGuardBots = useMemo(
+    () => debateFlytingJarlGuardBots(props.session.id),
     [props.session.id],
   );
   const hallAudienceSeats = useMemo(
     () => [
       ...state.hallMembers.map((member, index) => ({
         id: member.id,
-        bot: hallNpcBots[index]!,
+        bot: hallSpectatorBots[index]!,
         index,
         leaning: member.leaning,
         guard: false,
       })),
       ...state.jarlGuards.map((guard, guardIndex) => ({
         id: guard.id,
-        bot: hallNpcBots[DEBATE_FLYTING_AUDIENCE_COUNT + guardIndex]!,
+        bot: hallGuardBots[guardIndex]!,
         index: DEBATE_FLYTING_AUDIENCE_COUNT + guardIndex,
         leaning: (guard.sideId ?? "neutral") as DebateFlytingHallLeaningV1,
         guard: true,
       })),
     ],
-    [hallNpcBots, state.hallMembers, state.jarlGuards],
+    [hallGuardBots, hallSpectatorBots, state.hallMembers, state.jarlGuards],
   );
   const hallLeaningCounts = useMemo(
     () => ({
@@ -4595,7 +4619,7 @@ export function DebateFlytingLive(
                       : state.expectedAction === "rejoinder"
                         ? "Meet the charge—or Yield and let it stand."
                         : state.expectedAction === "host_verdict"
-                          ? "The fifteen Hall members have leaned. Send your three guards to the flyter you judge best; their vote carries weight three."
+                          ? "The fifteen Hall members have leaned. Send your three guards to the flyter you judge best; their vote carries weight three. A ruling line is optional."
                           : "Choose an unused Legend facet, then give it voice."}
                   </p>
                 </header>
@@ -4758,7 +4782,9 @@ export function DebateFlytingLive(
                     className={styles.primaryAction}
                     disabled={
                       busy ||
-                      !draft.trim() ||
+                      // The Jarl's vote is the side; the ruling line is optional.
+                      (state.expectedAction !== "host_verdict" &&
+                        !draft.trim()) ||
                       (state.expectedAction === "boast" && !facetId) ||
                       (state.expectedAction === "challenge" &&
                         !targetClaimId) ||

@@ -27,7 +27,10 @@ describe("Flyting cast picker", () => {
 
   it("draws the Hall gallery automatically and freezes only the three stage seats", () => {
     assert.match(flyting, /PRISM fills the gallery automatically/u);
-    assert.match(flyting, /Fifteen generic Hall spectators/u);
+    assert.match(flyting, /Fifteen Library spectators/u);
+    assert.match(flyting, /generic Hall\s+spectators fill any empty places/u);
+    assert.match(flyting, /debateFlytingHallSpectatorBots\(\{/u);
+    assert.match(flyting, /debateFlytingJarlGuardBots\(props\.session\.id\)/u);
     assert.match(flyting, /Jarl's three guards/u);
     assert.match(flyting, /Already seated in the contest/u);
     assert.match(flyting, /"aria-disabled": unavailableReason/u);
@@ -115,7 +118,8 @@ describe("Flyting cast picker", () => {
     );
     assert.match(flytingTutorial, /select Pro on the left/u);
     assert.match(flytingTutorial, /Con on the right/u);
-    assert.match(flytingTutorial, /fifteen generic PRISM spectators/u);
+    assert.match(flytingTutorial, /fifteen Library spectators/u);
+    assert.match(flytingTutorial, /generic PRISM spectators/u);
     assert.match(flytingTutorial, /three Jarl guards/u);
     assert.match(flytingTutorial, /shared Library grid/u);
     assert.match(flytingTutorial, /filter by saved group/u);
