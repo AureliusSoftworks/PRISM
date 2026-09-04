@@ -852,7 +852,6 @@ export function signalActiveAutoRoute(
   );
   const plannedModel = plannedAutoRoute?.model.trim() ?? "";
   if (!plannedAutoRoute || !plannedModel) return null;
-  const plannedEffort = plannedAutoRoute.reasoningEffort;
   return {
     provider: plannedAutoRoute.provider,
     model: plannedModel,
@@ -860,16 +859,7 @@ export function signalActiveAutoRoute(
     // Auto's own effort, not the saved setting the picker would show. The
     // opening turn runs at this effort, so the chip would otherwise flip the
     // moment that turn lands.
-    ...(plannedEffort === "auto" ||
-    plannedEffort === "none" ||
-    plannedEffort === "minimal" ||
-    plannedEffort === "low" ||
-    plannedEffort === "medium" ||
-    plannedEffort === "high" ||
-    plannedEffort === "xhigh" ||
-    plannedEffort === "max"
-      ? { effort: plannedEffort }
-      : {}),
+    effort: plannedAutoRoute.reasoningEffort,
   };
 }
 
@@ -3199,6 +3189,7 @@ export function BotcastExperience({
   const handledArtworkJobIdsRef = useRef(new Set<string>());
   const artworkJobCompletedCountRef = useRef(new Map<string, number>());
   const advanceInFlightRef = useRef(false);
+  const resumeAutoRunAfterImageRegistrationRef = useRef(false);
   const queuedProducerCueRef = useRef<BotcastProducerCue | null>(null);
   const queuedCueStatusRef = useRef<BotcastProducerCueLifecycleStatus | null>(null);
   const signalEpisodeImagesRef = useRef<Map<string, SignalEpisodeImageUpload>>(new Map());
@@ -4243,6 +4234,7 @@ export function BotcastExperience({
     episodeOperationAbortRef.current = null;
     discardPreparedAdvance("Signal state changed before handoff.");
     advanceInFlightRef.current = false;
+    resumeAutoRunAfterImageRegistrationRef.current = false;
     setAutoRun(false);
     setBusy(false);
     setEpisodePreRoll(null);
@@ -10334,12 +10326,22 @@ export function BotcastExperience({
           episodeOperationAbortRef.current = null;
           advanceInFlightRef.current = false;
         }
+        const resumeAfterImageRegistration =
+          operationWasCurrent &&
+          resumeAutoRunAfterImageRegistrationRef.current;
+        if (resumeAfterImageRegistration) {
+          resumeAutoRunAfterImageRegistrationRef.current = false;
+        }
         startTransition(() => {
           setSignalGenerationThinking((current) =>
             current?.runId === runId ? null : current,
           );
           if (operationWasCurrent) {
             setBusy(false);
+            if (resumeAfterImageRegistration) {
+              setFailedAdvanceEpisodeId(null);
+              setAutoRun(true);
+            }
           }
         });
       }
@@ -18201,6 +18203,7 @@ export function BotcastExperience({
       // picture was preparing. Merge only its image events into live state.
       setEpisode((current) => current?.id === attached.episode.id ? mergeSignalEpisodeImageEvents(current, attached.episode) : current);
       rememberSignalEpisodeImage(upload);
+      const advanceWasInFlight = advanceInFlightRef.current;
       discardPreparedAdvance("A newly queued picture invalidated speculative preparation.");
       setProducerImageDraft(null);
       setReattachImageId(null);
@@ -18209,10 +18212,15 @@ export function BotcastExperience({
       const originalsStillMissing = signalEpisodeOriginalIds(liveEpisodeRef.current)
         .some((imageId) => !signalEpisodeImagesRef.current.has(imageId));
       setProducerImageEditorOpen(reattaching && originalsStillMissing);
-      if (reattaching && !originalsStillMissing) {
+      const canResumeEpisode = !reattaching || !originalsStillMissing;
+      resumeAutoRunAfterImageRegistrationRef.current =
+        canResumeEpisode && advanceWasInFlight;
+      if (canResumeEpisode) {
         setFailedAdvanceEpisodeId(null);
-        onPrepareUtterance?.();
         setAutoRun(true);
+        if (!advanceWasInFlight && !busy && speakingMessageId === null) {
+          onPrepareUtterance?.();
+        }
       }
       setNotice(reattaching ? "Original picture reattached." : "Image queued for the next host turn.");
       // Deliberately do not call sendCue: that path can redirect audible host speech.

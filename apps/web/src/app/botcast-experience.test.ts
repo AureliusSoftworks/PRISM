@@ -232,7 +232,10 @@ describe("Signal experience shell", () => {
       source,
       /descriptor:\s*\{[\s\S]{0,100}kind: resolvedImageContext\.kind[\s\S]{0,100}mimeType: resolvedImageContext\.mimeType/u,
     );
-    assert.match(source, /sendCue\(\{ kind: "present_image", imageId: upload\.imageId \}\)/u);
+    assert.doesNotMatch(
+      source,
+      /sendCue\(\{ kind: "present_image", imageId: upload\.imageId \}\)/u,
+    );
     const cueOwnershipStart = source.indexOf("const queuedCueIsServerOwned");
     const cueOwnershipEnd = source.indexOf(
       "const requestForegroundAdvance",
@@ -349,6 +352,30 @@ describe("Signal experience shell", () => {
     assert.match(css, /\.episodeOutroItemStatus/u);
     assert.match(tutorials, /never creates an Item/u);
     assert.match(tutorials, /Add a physical prop through Items separately/u);
+  });
+
+  it("resumes the live turn loop after registering a Producer image", () => {
+    const liveUploadStart = source.indexOf("const uploadProducerImage");
+    const liveUploadEnd = source.indexOf(
+      "const cancelPendingProducerImage",
+      liveUploadStart,
+    );
+    const liveUploadSource = source.slice(liveUploadStart, liveUploadEnd);
+    assert.ok(liveUploadStart >= 0 && liveUploadEnd > liveUploadStart);
+    assert.match(
+      liveUploadSource,
+      /const advanceWasInFlight = advanceInFlightRef\.current/u,
+    );
+    assert.match(
+      liveUploadSource,
+      /resumeAutoRunAfterImageRegistrationRef\.current =\s*canResumeEpisode && advanceWasInFlight/u,
+    );
+    assert.match(liveUploadSource, /setAutoRun\(true\)/u);
+    assert.doesNotMatch(liveUploadSource, /sendCue\(/u);
+    assert.match(
+      source,
+      /const resumeAfterImageRegistration =[\s\S]{0,650}setAutoRun\(true\)/u,
+    );
   });
 
   it("keeps the generated studio raster as a stable image source", () => {
@@ -1641,7 +1668,7 @@ describe("Signal experience shell", () => {
     // Auto's own effort, so the chip does not flip when the opening turn lands.
     assert.match(
       source,
-      /const plannedEffort = plannedAutoRoute\.reasoningEffort;[\s\S]{0,900}\? \{ effort: plannedEffort \}/u,
+      /effort: plannedAutoRoute\.reasoningEffort,/u,
     );
     assert.match(
       source,
