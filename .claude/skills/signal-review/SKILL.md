@@ -68,6 +68,20 @@ Checks that have paid off in past reviews, and why they work:
   flakiness. It is a validator bug, and the clause slug names the predicate.
   Read that predicate and run candidate drafts through it in a scratchpad probe
   before theorizing.
+- **Voice recovery stamps vs. clause boundaries.** Each
+  `voice_playback_recovery` carries `elapsedMs` and `durationMs`. Before
+  blaming the engine, the network, or the machine, line the elapsed value up
+  against the spoken text: the API streams builtin speech one Kokoro clause at
+  a time, so stalls that land exactly where each line's first sentence or
+  clause ends mean the completion watchdog fired during the wait for the next
+  chunk, not during audio. A `durationMs` equal to `words × 400` means the
+  engine never reported a real clip length. The one line that did not stall is
+  the control case: ask what it did not need to synthesize.
+- **Voice take fingerprints across turns.** Recording evidence prints a profile
+  fingerprint per take. A speaker whose fingerprint differs on exactly one
+  turn was voiced with a different resolved identity there; check which side
+  of that speaker's `power_effect` event the turn's utterance sits on before
+  suspecting the engine.
 - **Validator vs. persona conflicts.** The most expensive bugs in this lane
   come from a contract written in standard English applied to a bot whose
   vernacular or accent pin makes it speak otherwise. When a predicate matches
@@ -184,7 +198,10 @@ Architecture facts that repeatedly explain bugs:
 - **Segment seams are where bugs live.** opening → interview → closing, plus
   producer-cue interruptions and departures. When a symptom involves a
   truncated line, a missing sign-off, a wrong camera, or a dropped reaction,
-  look at the handoff before suspecting either side of it.
+  look at the handoff before suspecting either side of it. A producer cue
+  whose `dispatching` event follows a `cut_away` reached the closing turn,
+  where the sign-off contract and the cue contract cannot both hold; expect a
+  rejected draft and a fallback that asks instead of closing.
 
 ## Working rules
 

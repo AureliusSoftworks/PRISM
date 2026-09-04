@@ -549,6 +549,7 @@ describe("English voice post processing", () => {
     });
     let startCount = 0;
     let endCount = 0;
+    const streamWaits: Array<{ elapsedMs: number; durationMs: number }> = [];
     try {
       await enqueueChunkedEnglishVoice(
         response,
@@ -566,6 +567,9 @@ describe("English voice post processing", () => {
           onSegmentTiming: (timing) => {
             segmentTimings.push(timing);
           },
+          onStreamWait: (elapsedMs, durationMs) => {
+            streamWaits.push({ elapsedMs, durationMs });
+          },
         },
         "builtin",
         "neutral",
@@ -574,6 +578,14 @@ describe("English voice post processing", () => {
       assert.equal(playCount, 2);
       assert.equal(startCount, 1);
       assert.equal(endCount, 1);
+      // Every finished clause parks the audible clock while the next chunk is
+      // still on the network; mode watchdogs get an explicit buffering signal
+      // instead of reading that silence as a stall and cutting the line.
+      assert.equal(streamWaits.length, 2);
+      assert.ok((streamWaits[1]?.elapsedMs ?? -1) >= (streamWaits[0]?.elapsedMs ?? 0));
+      assert.ok(
+        (streamWaits[0]?.durationMs ?? 0) >= (streamWaits[0]?.elapsedMs ?? 0),
+      );
       // Untagged streams (including system voice) still abut with speech only.
       assert.equal(segmentTimings.length, 2);
       assert.equal(segmentTimings[0]?.heard, true);

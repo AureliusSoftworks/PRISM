@@ -8896,7 +8896,7 @@ export function recordBotcastVoicePlaybackRecovery(
   episodeId: string,
   input: {
     messageId: string;
-    reason: "progress_stalled";
+    reason: "progress_stalled" | "stream_stalled";
     elapsedMs: number;
     durationMs: number;
   },
@@ -8908,7 +8908,10 @@ export function recordBotcastVoicePlaybackRecovery(
   if (!episode.messages.some((message) => message.id === input.messageId)) {
     throw new Error("Signal voice recovery requires an episode message.");
   }
-  if (input.reason !== "progress_stalled") {
+  if (
+    input.reason !== "progress_stalled" &&
+    input.reason !== "stream_stalled"
+  ) {
     throw new Error("Choose a valid Signal voice recovery reason.");
   }
   const elapsedMs = Number.isFinite(input.elapsedMs)
@@ -16300,6 +16303,26 @@ function beginBotcastProducerCut(
   const atMs = previousCamera
     ? previousCamera.atMs + previousCamera.minimumHoldMs
     : 0;
+  // The cut is the Producer's last word. A queued ask_about would otherwise
+  // ride the closing sign-off, where the closing contract forbids the very
+  // question the cue demands (review 5acc4ecc36592d5f9148cdc0 aired "let's
+  // focus on hermione" as the sign-off and ended unanswered). A cue already
+  // dispatching belongs to its running turn and keeps its own lifecycle.
+  const activeCue = botcastActiveProducerCueFromEvents(episode.events);
+  if (activeCue && activeCue.status !== "dispatching") {
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "producer_cue",
+      {
+        cueId: activeCue.cueId,
+        lifecycle: "superseded",
+        reason: "producer_cut",
+      },
+      now,
+    );
+  }
   recordEvent(
     db,
     userId,
@@ -17185,8 +17208,14 @@ export async function advanceBotcastEpisode(
   // empty there is nobody left to answer. That case keeps the old behaviour —
   // discard the stale direction and continue the saved closing beat instead
   // of stranding the live show on an error banner.
-  if (!context.producerCut && requestedCue && episode.segment === "closing") {
+  //
+  // A producer cut cannot reopen: the cut is the Producer's last word, and a
+  // cue that still reaches the closing host turn would force the sign-off to
+  // ask the question the closing contract forbids. Fail it here so the closing
+  // beat stays a closing beat.
+  if (requestedCue && episode.segment === "closing") {
     const guestCanStillAnswer =
+      !context.producerCut &&
       episode.guestPresenceMode !== "audience_only" &&
       botcastEpisodeDepartureOutcome(episode.events) !== "guest_departed";
     if (guestCanStillAnswer) {
@@ -19942,8 +19971,10 @@ export async function advanceBotcastEpisode(
               guestObservation: savedGuestImageObservation,
             })
           : null;
+  // A closing turn never asks: the deterministic sign-off must win over the
+  // ask_about recovery question even if a stale cue reaches this point.
   const producerCueRecoveryFallback =
-    speakerRole === "host"
+    speakerRole === "host" && episode.segment !== "closing"
       ? botcastProducerCueRecoveryFallbackV1({
           cue: requestedCue,
           guestName: hostNamesGuest,

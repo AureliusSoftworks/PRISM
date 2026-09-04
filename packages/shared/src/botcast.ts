@@ -2546,15 +2546,26 @@ export function botcastIdentityShapeshiftStateBeforeMessageV1(
   let state: BotIdentityShapeshiftStateV1 | null = null;
   if (targetUtteranceSequence !== undefined) {
     for (const event of episode.events) {
-      if (event.sequence >= targetUtteranceSequence) break;
       if (event.kind !== "power_effect") continue;
       const candidate = normalizeBotIdentityShapeshiftStateV1(event.payload.state);
       if (
-        candidate?.surface === "signal" &&
-        candidate.holderBotId === holderBotId
+        candidate?.surface !== "signal" ||
+        candidate.holderBotId !== holderBotId
       ) {
-        state = candidate;
+        continue;
       }
+      // The reveal line is generated, faced, and voiced in the borrowed form,
+      // and its power_effect is recorded right after its own utterance event.
+      // Carry the state this line announces; stop at any later reshape.
+      // Review 5acc4ecc36592d5f9148cdc0 voiced the reveal without the borrowed
+      // accent while the face had already switched.
+      if (
+        event.sequence >= targetUtteranceSequence &&
+        candidate.sourceMessageId !== messageId
+      ) {
+        break;
+      }
+      state = candidate;
     }
     return state;
   }

@@ -6256,6 +6256,35 @@ describe("Botcast persistence and isolation", () => {
           outcome: "advanced_after_bounded_stop",
         },
       );
+      // A chunked builtin line parked between clauses reports its own reason
+      // so exports can tell buffering that ran out from a real audio stall.
+      const streamStalled = recordBotcastVoicePlaybackRecovery(
+        db,
+        "user-1",
+        episode.id,
+        {
+          messageId: opening.message.id,
+          reason: "stream_stalled",
+          elapsedMs: 2_181,
+          durationMs: 26_508,
+        },
+      );
+      assert.equal(
+        streamStalled.events.findLast(
+          (event) => event.kind === "voice_playback_recovery",
+        )?.payload.reason,
+        "stream_stalled",
+      );
+      assert.throws(
+        () =>
+          recordBotcastVoicePlaybackRecovery(db, "user-1", episode.id, {
+            messageId: opening.message!.id,
+            reason: "audio_skipped" as "progress_stalled",
+            elapsedMs: 0,
+            durationMs: 1,
+          }),
+        /valid Signal voice recovery reason/u,
+      );
       assert.equal(
         botcastPreparedTurnCursor(db, "user-1", episode.id).promptStateHash,
         cursorBefore.promptStateHash,
@@ -21820,6 +21849,79 @@ describe("Botcast persistence and isolation", () => {
     assert.equal(botcastHostTurnAddressesProducerCue(fallback, cue), true);
     assert.match(fallback, /notebook/iu);
     assert.doesNotMatch(fallback, /what is written in the notebook|producer/iu);
+  });
+
+  it("supersedes a queued ask_about cue on a producer cut so the sign-off never asks the cue", async () => {
+    // Review 5acc4ecc36592d5f9148cdc0: a cue queued before the cut rode the
+    // closing host turn, the closing contract rejected the sign-off draft for
+    // missing the cue subject, and the deterministic fallback aired the
+    // cue-recovery question as the last line of the show.
+    const db = fixture();
+    const provider = recordingProvider(
+      [
+        "Welcome to the show. Ivo Stone, what first made mercy harder than fear?",
+        "The first crack was the budget: we spent the reserve before the prototype held pressure, and I said so in writing.",
+        "Mercy costs more than fear, and you paid it anyway. Ivo Stone, thank you for joining me, and thank you for watching.",
+        "Mercy costs more than fear, and you paid it anyway. Ivo Stone, thank you for joining me, and thank you for watching.",
+      ],
+      [],
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Mercy for the misunderstood",
+        preferredProvider: "local",
+        responseMode: "local",
+      });
+      await advanceBotcastEpisode(db, "user-1", episode.id, {}, generation(provider));
+      await advanceBotcastEpisode(db, "user-1", episode.id, {}, generation(provider));
+      const queued = queueBotcastProducerCue(db, "user-1", episode.id, {
+        kind: "ask_about",
+        detail: "Ask about Hermione",
+      });
+      const cueId = botcastActiveProducerCueFromEvents(queued.events)?.cueId;
+      assert.ok(cueId);
+
+      const closing = await endBotcastEpisodeOnProducerCut(
+        db,
+        "user-1",
+        episode.id,
+        generation(provider),
+      );
+
+      const lifecycle = botcastProducerCueLifecyclesFromEvents(
+        closing.episode.events,
+      ).find((entry) => entry.cueId === cueId);
+      assert.equal(lifecycle?.status, "superseded");
+      const cutSequence = closing.episode.events.find(
+        (event) =>
+          event.kind === "cut_away" && event.payload.reason === "producer_cut",
+      )?.sequence;
+      assert.ok(cutSequence);
+      assert.equal(
+        closing.episode.events.some(
+          (event) =>
+            event.kind === "producer_cue" &&
+            event.payload.cueId === cueId &&
+            event.sequence > cutSequence! &&
+            (event.payload.lifecycle === "dispatching" ||
+              event.payload.lifecycle === "delivered"),
+        ),
+        false,
+        "a superseded cue must not be dispatched into the closing turn",
+      );
+      assert.equal(closing.episode.segment, "closing");
+      assert.ok(closing.message);
+      assert.equal(closing.message.speakerRole, "host");
+      assert.doesNotMatch(
+        closing.message.content,
+        /let's focus on|concrete detail changes|hermione/iu,
+      );
+      assert.equal(closing.episode.status, "completed");
+    } finally {
+      db.close();
+    }
   });
 
   it("marks a Mumbling host cue delivered from private intent without exposing it on air", async () => {

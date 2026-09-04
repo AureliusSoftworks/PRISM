@@ -335,6 +335,12 @@ export interface VoicePlaybackLifecycle {
     heard: boolean;
     action?: string | null;
   }) => void;
+  /**
+   * A chunked engine finished an audible clause and is waiting for the next
+   * network chunk. The audible clock is intentionally parked, so mode
+   * watchdogs must treat this as bounded buffering rather than a stall.
+   */
+  onStreamWait?: (elapsedMs: number, durationMs: number) => void;
   onEnd?: () => void;
   /** Clears presentation state when playback is superseded before completion. */
   onCancel?: () => void;

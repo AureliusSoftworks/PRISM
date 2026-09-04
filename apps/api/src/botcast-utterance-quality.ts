@@ -193,12 +193,28 @@ function expandCueTokens(source: string): Set<string> {
  * The full private direction stays off air; the final meaningful word is
  * usually the noun the Producer intended the host to pursue.
  */
+function caseSensitiveCueWords(value: string): string[] {
+  return words(
+    value
+      .replace(/\[[^\]]{1,64}\]/gu, " ")
+      .replace(/\*[^*\n]{1,160}\*/gu, " ")
+      .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+      .replace(/\s+/gu, " ")
+      .trim(),
+  );
+}
+
 export function botcastProducerCueRecoveryAnchor(
   cueDetail: string,
 ): string | null {
   let anchor: string | null = null;
-  for (const word of words(normalizeForDuplicate(cueDetail))) {
-    if (word.length < 4 || BOTCAST_CUE_STOPWORDS.has(word)) continue;
+  // The anchor is aired verbatim, so it keeps the Producer's own casing: a
+  // lowercased proper noun ("let's focus on hermione") reads as a typo.
+  for (const word of caseSensitiveCueWords(cueDetail)) {
+    const normalized = word.toLowerCase();
+    if (normalized.length < 4 || BOTCAST_CUE_STOPWORDS.has(normalized)) {
+      continue;
+    }
     anchor = word.slice(0, 40);
   }
   return anchor;

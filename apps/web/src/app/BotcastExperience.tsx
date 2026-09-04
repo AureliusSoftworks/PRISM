@@ -775,7 +775,7 @@ export function signalFrozenReasoningEffort(
 
 /** Latest concrete route Auto actually used, including an active image pin. */
 export function signalActiveAutoRoute(
-  episode: Pick<BotcastEpisode, "provider" | "model" | "events">,
+  episode: Pick<BotcastEpisode, "provider" | "model" | "events" | "status">,
 ): SignalActiveAutoRoute | null {
   const imageContext = botcastActiveImageContextV1(episode.events) ?? botcastPendingImageContextV1(episode.events);
   if (imageContext && imageContext.phase !== "dismissed") {
@@ -828,10 +828,49 @@ export function signalActiveAutoRoute(
       };
     }
   }
-  // The configured episode model is a request preference, not proof that a
-  // turn completed. Auto must remain Awaiting first turn until persisted event
-  // provenance arrives from the server.
-  return null;
+  // Two tiers of persisted provenance, in this order.
+  //
+  // A completed turn's own route wins above, including a recovery final. Below
+  // it, the routing event carries the decision Auto actually made: the server
+  // resolves and freezes it while the episode is being created, and the
+  // opening turn then uses it verbatim. That happens inside the opening
+  // ident's window, so withholding it until the first line lands left the chip
+  // saying "Auto" through the whole ident and past its end, which reads as the
+  // routing work starting after the ident rather than under it. Covering that
+  // wait is what the ident is for.
+  //
+  // The configured episode model stays out at both tiers: it is a request
+  // preference, not proof of anything the server decided.
+  // Auto must remain Awaiting first turn until persisted event provenance
+  // arrives from the server, and only a live episode may read the planned
+  // tier — an archive that never aired a turn keeps the stricter reading so
+  // it can never be labelled with a model that never ran.
+  if (episode.status !== "live") return null;
+  const plannedAutoRoute = normalizeAutoRouteDecisionV1(
+    episode.events.find((event) => event.kind === "routing")?.payload
+      .initialAutoRoute,
+  );
+  const plannedModel = plannedAutoRoute?.model.trim() ?? "";
+  if (!plannedAutoRoute || !plannedModel) return null;
+  const plannedEffort = plannedAutoRoute.reasoningEffort;
+  return {
+    provider: plannedAutoRoute.provider,
+    model: plannedModel,
+    autoRoute: plannedAutoRoute,
+    // Auto's own effort, not the saved setting the picker would show. The
+    // opening turn runs at this effort, so the chip would otherwise flip the
+    // moment that turn lands.
+    ...(plannedEffort === "auto" ||
+    plannedEffort === "none" ||
+    plannedEffort === "minimal" ||
+    plannedEffort === "low" ||
+    plannedEffort === "medium" ||
+    plannedEffort === "high" ||
+    plannedEffort === "xhigh" ||
+    plannedEffort === "max"
+      ? { effort: plannedEffort }
+      : {}),
+  };
 }
 
 export interface BotcastApiRequest {
@@ -865,6 +904,15 @@ const SIGNAL_ATMOSPHERE_BUSES = [
 // Once playback starts, a missing provider completion signal must not strand
 // the episode in a busy state and block the next on-air turn indefinitely.
 const SIGNAL_VOICE_COMPLETION_GRACE_MS = 4_000;
+/**
+ * Chunked builtin speech parks its audible clock between clauses while the
+ * next chunk is still on the network or still synthesizing. Review
+ * 5acc4ecc36592d5f9148cdc0 cut five of six lines after their first clause
+ * because that wait was judged by the 4 s heartbeat grace. A parked clock is
+ * bounded buffering, not a stall; the engine's own stream error paths settle
+ * playback long before this ceiling is reached.
+ */
+const SIGNAL_VOICE_STREAM_WAIT_GRACE_MS = 30_000;
 
 /** Discrete mouths and captions stay fluid without rerendering Signal at 60 fps. */
 const SIGNAL_LIVE_SPEECH_RENDER_INTERVAL_MS = 50;
@@ -9042,22 +9090,32 @@ export function BotcastExperience({
         );
       };
       let armedVoiceCompletionDurationMs = 0;
+      let voiceStallReason: "progress_stalled" | "stream_stalled" =
+        "progress_stalled";
       const armVoiceCompletionWatchdog = (
         durationMs: number,
         elapsedMs = 0,
-        options?: { heartbeat?: boolean },
+        options?: { heartbeat?: boolean; streamWait?: boolean },
       ): void => {
         // Heartbeat mode: progress keeps pushing a stall deadline so long
         // monologues (clause pauses, slow TTS) are never cut on the initial
-        // text estimate. Estimate mode is only used at onStart.
+        // text estimate. Estimate mode is only used at onStart. Stream-wait
+        // mode covers a chunked engine parked between clauses: no progress
+        // frame can advance until the next chunk arrives, so the deadline is
+        // the bounded buffering ceiling rather than the heartbeat grace.
         if (voiceCompletionTimer !== null) {
           window.clearTimeout(voiceCompletionTimer);
         }
-        const delayMs = options?.heartbeat
-          ? SIGNAL_VOICE_COMPLETION_GRACE_MS
-          : Math.max(0, Math.round(durationMs) - Math.round(elapsedMs)) +
-            SIGNAL_VOICE_COMPLETION_GRACE_MS;
-        if (!options?.heartbeat) {
+        voiceStallReason = options?.streamWait
+          ? "stream_stalled"
+          : "progress_stalled";
+        const delayMs = options?.streamWait
+          ? SIGNAL_VOICE_STREAM_WAIT_GRACE_MS
+          : options?.heartbeat
+            ? SIGNAL_VOICE_COMPLETION_GRACE_MS
+            : Math.max(0, Math.round(durationMs) - Math.round(elapsedMs)) +
+              SIGNAL_VOICE_COMPLETION_GRACE_MS;
+        if (!options?.heartbeat && !options?.streamWait) {
           armedVoiceCompletionDurationMs = Math.max(
             armedVoiceCompletionDurationMs,
             Math.max(1, Math.round(durationMs)),
@@ -9073,7 +9131,7 @@ export function BotcastExperience({
                   method: "POST",
                   body: JSON.stringify({
                     messageId: message.id,
-                    reason: "progress_stalled",
+                    reason: voiceStallReason,
                     elapsedMs: lastVoiceProgressElapsedMs,
                     durationMs: armedVoiceCompletionDurationMs,
                   }),
@@ -9272,6 +9330,24 @@ export function BotcastExperience({
           // The stage-local visual clock projects captions and mouth shapes
           // from this ref. Do not reconcile the full Signal experience for
           // every playback heartbeat.
+        },
+        onStreamWait: (elapsedMs, durationMs) => {
+          if (
+            !voiceAttemptActive ||
+            activeSpeechMessageIdRef.current !== message.id ||
+            !playbackStillOwned()
+          )
+            return;
+          // The chunked engine finished a clause and is waiting for the next
+          // chunk. Captions and the mouth already hold on the segment clock;
+          // only the completion watchdog needs to know this is buffering.
+          lastVoiceProgressElapsedMs = Math.max(
+            lastVoiceProgressElapsedMs,
+            Math.max(0, elapsedMs),
+          );
+          armVoiceCompletionWatchdog(durationMs, elapsedMs, {
+            streamWait: true,
+          });
         },
         onPlaybackClock: (readElapsedMs, durationMs) => {
           if (!readElapsedMs || !playbackStillOwned()) return;

@@ -1420,6 +1420,20 @@ async function playChunkedEnglishResponse(
       }),
     );
   };
+  // The next clause may still be synthesizing on the API's serialized worker.
+  // No progress frame can advance until it arrives, so tell mode watchdogs the
+  // audible clock is parked rather than letting the silence read as a stall
+  // (Signal review 5acc4ecc cut five lines after their first clause that way).
+  const reportStreamWait = (): void => {
+    lifecycle?.onStreamWait?.(
+      Math.max(0, Math.round(audibleSegmentCursorMs)),
+      reportedChunkedVoiceDurationMs({
+        estimatedDurationMs: safeEstimatedDurationMs,
+        audibleElapsedMs: audibleSegmentCursorMs,
+        remainingEstimateMs: remainingEstimateAfterCharacters(consumedCharacters),
+      }),
+    );
+  };
 
   for await (const chunk of readEnglishVoiceWaveStream(response)) {
     if (expectedGeneration !== generation) return;
@@ -1504,6 +1518,7 @@ async function playChunkedEnglishResponse(
         audibleSegmentCursorMs,
         remainingEstimateAfterCharacters(consumedCharacters),
       );
+      reportStreamWait();
       playedChunks += 1;
       continue;
     }
@@ -1655,6 +1670,7 @@ async function playChunkedEnglishResponse(
       audibleSegmentCursorMs,
       remainingEstimateAfterCharacters(consumedCharacters),
     );
+    reportStreamWait();
   }
 
   if (expectedGeneration !== generation) return;

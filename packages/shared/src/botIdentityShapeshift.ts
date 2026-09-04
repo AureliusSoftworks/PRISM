@@ -357,7 +357,9 @@ function stripRepeatedShapeshiftDeclarationV1(
   targetName: string,
 ): string {
   const target = shapeshiftEscapeRegExpV1(targetName);
-  const selfClaim = `(?:i am|i['’]m|my name is|call me)\\s+${target}(?=$|[\\s,.;:!?—–-])`;
+  // The holder prompt names the borrowed form in quotes, so faithful drafts
+  // arrive as `I am "Mara Vale"`; a bare claim is accepted too.
+  const selfClaim = `(?:i am|i['’]m|my name is|call me)\\s+["“]?${target}["”]?(?=$|[\\s,.;:!?—–-])`;
   const transformClaim =
     `(?:i(?:['’]ve| have)?\\s+(?:just\\s+)?(?:shapeshifted|shape-?shifted|transformed|become)|this(?:\\s+new)?\\s+form)`;
   const sentenceBoundary = `(^|[.!?]\\s+)`;
@@ -427,7 +429,7 @@ export function applyBotIdentityShapeshiftResponseV1(
   const targetName = shapeshiftEscapeRegExpV1(state.targetBotName);
   const rewritten = source.replace(
     new RegExp(
-      `\\b(?:i am|i['’]m|my name is|call me)\\s+${holderName}(?=$|[\\s,.;:!?—])`,
+      `\\b(?:i am|i['’]m|my name is|call me)\\s+["“]?${holderName}["”]?(?=$|[\\s,.;:!?—])`,
       "giu",
     ),
     `I am ${quotedTargetName}`,
@@ -440,8 +442,11 @@ export function applyBotIdentityShapeshiftResponseV1(
     );
   }
 
+  // Review 5acc4ecc36592d5f9148cdc0: the prompt asks the bot to state it is
+  // "Hermione Granger" in quotes, and a claim written that way was not
+  // recognized, so a second "I am ..." announcement was prepended.
   const claimsTarget = new RegExp(
-    `\\b(?:i am|i['’]m|my name is|call me)\\s+${targetName}(?=$|[\\s,.;:!?—])`,
+    `\\b(?:i am|i['’]m|my name is|call me)\\s+["“]?${targetName}["”]?(?=$|[\\s,.;:!?—])`,
     "iu",
   );
   const firstClaim = claimsTarget.exec(rewritten);
@@ -452,12 +457,19 @@ export function applyBotIdentityShapeshiftResponseV1(
   }
 
   const firstClaimEnd = firstClaim.index + firstClaim[0].length;
-  const afterFirstClaim = stripRepeatedShapeshiftDeclarationV1(
-    rewritten.slice(firstClaimEnd),
+  // Protect the first claim in place while repeats are stripped. Stripping the
+  // remainder on its own removed the punctuation that followed a mid-sentence
+  // claim and glued it to the next word ("Hermione GrangerHagrid").
+  const claimToken = "\u0000shapeshift-first-claim\u0000";
+  const cleaned = stripRepeatedShapeshiftDeclarationV1(
+    `${rewritten.slice(0, firstClaim.index)}${claimToken}${rewritten.slice(firstClaimEnd)}`,
     state.targetBotName,
   );
+  const restored = cleaned.includes(claimToken)
+    ? cleaned.replace(claimToken, firstClaim[0])
+    : `${firstClaim[0]} ${cleaned}`;
   return quoteShapeshiftTargetDeclarationsV1(
-    `${rewritten.slice(0, firstClaimEnd)}${afterFirstClaim}`.trim(),
+    restored.trim(),
     state.targetBotName,
   );
 }

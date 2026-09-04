@@ -26,6 +26,12 @@ describe("botcast utterance quality", () => {
       "notebook",
     );
     assert.equal(botcastProducerCueRecoveryAnchor("what about this"), null);
+    // The anchor airs verbatim, so a proper noun keeps the Producer's casing.
+    assert.equal(botcastProducerCueRecoveryAnchor("Ask about Hermione"), "Hermione");
+    assert.equal(
+      botcastProducerCueRecoveryAnchor("press him on the Forbidden Forest"),
+      "Forest",
+    );
   });
 
   it("rejects labeled Action / Spoken Line screenplay scaffolding", () => {

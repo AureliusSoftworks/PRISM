@@ -20,6 +20,10 @@ import {
   botPowerSourceHashV1,
   normalizeBotPowerEffectV1,
 } from "./botPower.ts";
+import {
+  botcastIdentityShapeshiftStateBeforeMessageV1,
+  type BotcastEpisode,
+} from "./botcast.ts";
 
 const occurredAt = "2026-07-25T20:00:00.000Z";
 
@@ -227,6 +231,89 @@ test("identity shapeshift response rewrite claims the borrowed form once", () =>
     false,
   );
   assert.match(rewritten, /I am "Mara Vale"/u);
+});
+
+test("identity shapeshift response rewrite recognizes an already quoted reveal", () => {
+  const state = shapeshiftState();
+  // The holder prompt names the borrowed form in quotes, so a faithful reveal
+  // arrives already quoted. Review 5acc4ecc36592d5f9148cdc0 aired it twice.
+  assert.equal(
+    applyBotIdentityShapeshiftResponseV1(
+      'This is Veil of Voices, and I am "Mara Vale"; Forrest, you have spent your life looking past teeth.',
+      state,
+      true,
+    ),
+    'This is Veil of Voices, and I am "Mara Vale"; Forrest, you have spent your life looking past teeth.',
+  );
+  assert.equal(
+    applyBotIdentityShapeshiftResponseV1(
+      "I'm “Mara Vale”, and this is Veil of Voices. Forrest, welcome.",
+      state,
+      true,
+    ),
+    "I'm “Mara Vale”, and this is Veil of Voices. Forrest, welcome.",
+  );
+  // A bare mid-sentence claim keeps the punctuation that follows it.
+  assert.equal(
+    applyBotIdentityShapeshiftResponseV1(
+      "This is Veil of Voices, and I am Mara Vale; Forrest, you have spent your life looking past teeth.",
+      state,
+      true,
+    ),
+    'This is Veil of Voices, and I am "Mara Vale"; Forrest, you have spent your life looking past teeth.',
+  );
+  // Later turns strip a quoted restatement exactly like a bare one.
+  assert.equal(
+    applyBotIdentityShapeshiftResponseV1(
+      'I am "Mara Vale". Bearing north looks clear.',
+      state,
+      false,
+    ),
+    "Bearing north looks clear.",
+  );
+});
+
+test("signal shapeshift reveal line carries the state it announces", () => {
+  const state = { ...shapeshiftState(), surface: "signal" as const };
+  const reshaped = {
+    ...state,
+    targetBotId: "terry",
+    targetBotName: "Terry Vale",
+    sourceMessageId: "message-3",
+  };
+  const episode = {
+    messages: [{ id: "message-1" }, { id: "message-2" }, { id: "message-3" }],
+    events: [
+      { sequence: 1, kind: "utterance", payload: { messageId: "message-1" }, occurredAt },
+      // Recorded right after its own utterance, exactly as the engine does.
+      { sequence: 2, kind: "power_effect", payload: { v: 1, effect: "identity_shapeshift", state }, occurredAt },
+      { sequence: 3, kind: "listener_reaction", payload: {}, occurredAt },
+      { sequence: 4, kind: "utterance", payload: { messageId: "message-2" }, occurredAt },
+      { sequence: 5, kind: "utterance", payload: { messageId: "message-3" }, occurredAt },
+      { sequence: 6, kind: "power_effect", payload: { v: 1, effect: "identity_shapeshift", state: reshaped }, occurredAt },
+    ],
+  } as unknown as BotcastEpisode;
+  assert.equal(
+    botcastIdentityShapeshiftStateBeforeMessageV1(episode, "sam", "message-1")
+      ?.targetBotId,
+    "mara",
+    "the line that announces the form is voiced and faced in that form",
+  );
+  assert.equal(
+    botcastIdentityShapeshiftStateBeforeMessageV1(episode, "sam", "message-2")
+      ?.targetBotId,
+    "mara",
+    "a later reshape never leaks back onto an earlier line",
+  );
+  assert.equal(
+    botcastIdentityShapeshiftStateBeforeMessageV1(episode, "sam", "message-3")
+      ?.targetBotId,
+    "terry",
+  );
+  assert.equal(
+    botcastIdentityShapeshiftStateBeforeMessageV1(episode, "other", "message-1"),
+    null,
+  );
 });
 
 test("identity shapeshift transition window and deterministic pick stay bounded", () => {

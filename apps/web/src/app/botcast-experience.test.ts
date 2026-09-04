@@ -1621,6 +1621,32 @@ describe("Signal experience shell", () => {
       source,
       /Auto must remain Awaiting first turn until persisted event/u,
     );
+    // Second tier: before any turn lands, the chip reads the Auto decision the
+    // server froze into the routing event at creation. That resolves inside the
+    // opening ident, so the ident actually covers the routing wait instead of
+    // ending with the chip still saying "Auto". A completed turn still wins,
+    // episode.model still never qualifies, and only a live episode may read it.
+    assert.match(
+      source,
+      /if \(episode\.status !== "live"\) return null;\s*const plannedAutoRoute = normalizeAutoRouteDecisionV1\(/u,
+    );
+    assert.match(
+      source,
+      /episode\.events\.find\(\(event\) => event\.kind === "routing"\)\?\.payload\s*\.initialAutoRoute,/u,
+    );
+    assert.match(
+      source,
+      /if \(!plannedAutoRoute \|\| !plannedModel\) return null;/u,
+    );
+    // Auto's own effort, so the chip does not flip when the opening turn lands.
+    assert.match(
+      source,
+      /const plannedEffort = plannedAutoRoute\.reasoningEffort;[\s\S]{0,900}\? \{ effort: plannedEffort \}/u,
+    );
+    assert.match(
+      source,
+      /signalActiveAutoRoute\(\s*episode: Pick<BotcastEpisode, "provider" \| "model" \| "events" \| "status">,/u,
+    );
     assert.match(
       source,
       /resolveLockedRoutingChip\?\.\(\{[\s\S]{0,220}activeAutoRoute,/u,
@@ -2802,6 +2828,20 @@ describe("Signal experience shell", () => {
     assert.match(source, /speechReveal\?\.phase === "playing"/u);
     assert.match(source, /const SIGNAL_NATURAL_HANDOFF_MS = 40/u);
     assert.match(source, /const SIGNAL_VOICE_COMPLETION_GRACE_MS = 4_000/u);
+    // A chunked engine parked between clauses is buffering, not stalled
+    // (review 5acc4ecc cut five lines after their first clause on the 4 s
+    // heartbeat grace). The parked clock gets its own bounded ceiling and its
+    // own recovery reason so exports can tell the two apart.
+    assert.match(source, /const SIGNAL_VOICE_STREAM_WAIT_GRACE_MS = 30_000/u);
+    assert.match(
+      source,
+      /options\?\.streamWait\s*\?\s*SIGNAL_VOICE_STREAM_WAIT_GRACE_MS/u,
+    );
+    assert.match(
+      source,
+      /onStreamWait: \(elapsedMs, durationMs\) => \{[\s\S]{0,900}armVoiceCompletionWatchdog\(durationMs, elapsedMs, \{\s*streamWait: true,/u,
+    );
+    assert.match(source, /reason: voiceStallReason,/u);
     assert.match(
       source,
       /options\?\.heartbeat[\s\S]{0,120}SIGNAL_VOICE_COMPLETION_GRACE_MS/u,
